@@ -12,7 +12,7 @@ import { countryOf, deviceOf } from "@/lib/source-rules";
 import { channelOfRequest } from "@/lib/visit-channel";
 import { requestHost } from "@/lib/request-origin";
 import { maybeBusyAlert } from "@/lib/stats-report";
-import { readTeam } from "@/lib/team";
+import { readTeamMembers } from "@/lib/team";
 import { NO_COUNT_COOKIE, isMarkedDevice } from "@/lib/no-count";
 
 export function clientIp(request: NextRequest): string {
@@ -26,9 +26,22 @@ export function clientIp(request: NextRequest): string {
 /** What is read off a request to know who is asking: a route's request, or a page's cookies and headers. */
 type Asker = { cookies: { get(name: string): { value: string } | undefined }; headers: { get(name: string): string | null } };
 
-/** Whether this is the store's own people (isOwner, below), for a page that counts something itself. Never throws. */
+/**
+ * Whether this is the store's own people (isOwner, below), for a page that
+ * counts something itself. Never throws: a sign-in or team that cannot be read
+ * is not known, so it answers yes and that one count is skipped, never taken
+ * for a buyer's (rule 24).
+ */
 export async function isStorePeople(request: Asker, store: Store): Promise<boolean> {
-  return isOwner(request, store).catch(() => false);
+  return isOwner(request, store).catch((error) => {
+    console.error("whether a visit is the store's own people is unknown; not counted", error);
+    return true;
+  });
+}
+
+/** The same, for a gate (lib/agreements: the store's own people can't sign): an unknown reading throws, never "not them". */
+export async function isStorePeopleExact(request: Asker, store: Store): Promise<boolean> {
+  return isOwner(request, store);
 }
 
 /**
@@ -38,18 +51,20 @@ export async function isStorePeople(request: Asker, store: Store): Promise<boole
  * signed in, or a device the creator marked in the studio as not to be
  * counted (lib/no-count.ts). Each of them inflated the visitors and made the
  * share that buys look worse than it is. A buyer carries none of these, so
- * their visit costs nothing more to read.
+ * their visit costs nothing more to read. A sign-in or a team that cannot be
+ * read throws (rule 24): unknown is never "not the store's people", so the
+ * count is skipped, never taken for a buyer's.
  */
 async function isOwner(request: Asker, store: Store): Promise<boolean> {
   if (isMarkedDevice(request.cookies.get(NO_COUNT_COOKIE)?.value, store.sid)) return true;
   const session = request.cookies.get(SESSION_COOKIE)?.value;
   if (!session) return false;
-  const email = (await emailForSession(session).catch(() => null))?.toLowerCase();
+  const email = (await emailForSession(session))?.toLowerCase();
   if (!email) return false;
   if (email === store.email.toLowerCase()) return true;
   if (!store.sid) return false;
-  const team = await readTeam(store.sid).catch(() => null);
-  return Boolean(team?.members.some((m) => m.email.toLowerCase() === email));
+  const members = await readTeamMembers(store.sid);
+  return members.some((m) => m.email.toLowerCase() === email);
 }
 
 /**

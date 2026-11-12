@@ -1,5 +1,6 @@
 "use client";
 
+import { StudioEmptyState } from "@/components/empty-state";
 import { useLeaveGuard } from "@/components/leave-guard";
 import { PIPELINE_ACCESS_REFUSAL } from "@/lib/pipeline-access-rules";
 import { dealActionFilter, filterDeals, type DealActionFilter } from "@/lib/crm-deal-filter";
@@ -665,9 +666,7 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
 
         {/* An empty board says what it is for and how to start (487 [IT4], pattern 5). */}
         {pipelineDeals.length === 0 && draft === null ? (
-          <p className="mt-6 rounded-[var(--r-md)] bg-sand p-4 text-sm text-ink-soft">
-            {canChange ? <>No deals yet. When someone asks about something you sell outside a checkout, press &ldquo;New deal&rdquo; and move it across the stages as the talk goes on.</> : "No deals in this pipeline yet."}
-          </p>
+          <StudioEmptyState title={canChange ? "No deals yet" : "No deals in this pipeline yet"} body={canChange ? "When someone asks about something you sell outside a checkout, press \u201cNew deal\u201d and move it across the stages as the talk goes on." : "Deals show here once someone who can change them adds one."} className="mt-6 rounded-[var(--r-md)] bg-sand p-4" />
         ) : null}
         {view === "agenda" ? <DealAgenda deals={visibleDeals} stages={stages} currency={currency} today={today} disabled={paused} whyId={WHY_ID} onEdit={canChange ? deal => openDraft(deal, `deal-agenda-edit-${deal.id}`) : undefined} /> : (
         <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">

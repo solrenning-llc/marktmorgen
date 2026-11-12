@@ -187,6 +187,8 @@ export const de: BuyerWords = {
     `Sobald sie live ist, wird die Zahlung von Stripe auf dem eigenen Konto von ${store} eingezogen: Marktmorgen hält das Geld nie und behält nichts davon.`,
   paidBy: (takers, store) =>
     `Die Zahlung wird von ${takers} auf dem eigenen Konto von ${store} eingezogen. Marktmorgen hält das Geld nie und behält nichts davon.`,
+  whoAnswers: (store) =>
+    `${store} ist der Verkäufer und verantwortlich für das, was Sie kaufen, für Erstattungen und für ein etwaiges Widerrufsrecht. Marktmorgen stellt die Seiten des Shops bereit und ist nicht Partei des Kaufvertrags.`,
   noPaymentsTitle: "Dieser Shop kann noch keine Zahlungen annehmen.",
   noPaymentsBody: (store) => `Die Preise oben sind echt, aber hier kann noch keine Karte belastet werden. Um zu kaufen, schreiben Sie direkt an ${store}.`,
   noPaymentsBodyOne: (store) => `Der Preis oben ist echt, aber hier kann noch keine Karte belastet werden. Um zu kaufen, schreiben Sie direkt an ${store}.`,
@@ -196,6 +198,7 @@ export const de: BuyerWords = {
     busy: { title: "Jemand anderes kauft das gerade", body: "Es wurde nichts berechnet. Klicken Sie gleich noch einmal auf Kaufen." },
     slow: { title: "Viele Versuche in wenigen Minuten", body: "Es wurde nichts berechnet. Warten Sie ein paar Minuten und klicken Sie dann erneut auf Kaufen." },
     error: { title: "Die Zahlungsseite konnte nicht geöffnet werden", body: "Es wurde nichts berechnet. Versuchen Sie es gleich noch einmal." },
+    nocharges: { title: "Dieser Shop kann gerade keine Kartenzahlungen annehmen", body: "Es wurde nichts berechnet. Ein neuer Versuch klappt erst, wenn der Shop das behoben hat." },
     paused: { title: "Dieser Shop nimmt gerade keine neuen Bestellungen an", body: "Es wurde nichts berechnet. Neue Bestellungen sind ab Anfang nächsten Monats wieder möglich, oder früher." },
     "paypal-declined": {
       title: "PayPal hat die Zahlung nicht angenommen",
@@ -305,9 +308,12 @@ export const de: BuyerWords = {
   askTermsCut: () => "Die vollständigen Bedingungen liegen mir hier nicht vor. Fragen Sie vor dem Kauf beim Ersteller nach.",
 
   noLongerOnSale: "Dieses Produkt ist nicht mehr im Verkauf.",
+  cardUnread: "Dieses Produkt konnte gerade nicht geladen werden. Versuchen Sie es gleich noch einmal.",
+  cardBuyUnread: "Kaufen ist gerade nicht möglich. Versuchen Sie es gleich noch einmal.",
   seeStore: (store) => `${store} ansehen`,
   cardTestMode: "Testmodus: Es wird keine echte Karte belastet.",
   cardCheckout: "Sichere Zahlung über Stripe, in einem neuen Tab.",
+  cardSoldBy: (store) => `${store} ist der Verkäufer und dafür verantwortlich.`,
   cardOpens: (store) => `Öffnet sich im Shop von ${store}, in einem neuen Tab.`,
 
   // ---- Email cards (lib/mail-product-price.ts)

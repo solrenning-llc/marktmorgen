@@ -19,7 +19,7 @@ process.env.NIMBUS_DATA_KEY = "a-local-key-for-tests-only-0123456789abcdef";
 
 const OWNER = "push.owner@example.com";
 const DAY = 86_400_000;
-let refuseEmails = true;
+const refuseEmails = true;
 globalThis.fetch = (async (input: string | URL | Request) => {
   const url = new URL(String(input));
   if (url.hostname === "api.resend.com") {
@@ -32,7 +32,7 @@ async function main(): Promise<void> {
   redis.clear();
   await claimHandle(OWNER, "pushlow", "Push Goods", "");
   const store0 = (await ensureStatsId(OWNER))!;
-  await setStripeAccount(OWNER, "acct_1TestPushLow0001", true);
+  await setStripeAccount(OWNER, "acct_1TestPushLow001", true);
   await setSubscription(OWNER, { customerId: "cus_pushlow", subscriptionId: "sub_pushlow", active: true, period: paidPeriod() });
   const added = await addDevice(store0, OWNER, "owner", { endpoint: "https://fcm.googleapis.com/fcm/send/synthetic", keys: { p256dh: "test", auth: "test" } }, [], "Test", Date.now() - 1000);
   if (!added.ok) throw new Error("synthetic device");

@@ -38,7 +38,7 @@ async function main(): Promise<void> {
   redis.clear();
   await claimHandle(OWNER, "kilnlow", "Kiln Goods", "");
   await ensureStatsId(OWNER);
-  await setStripeAccount(OWNER, "acct_1TestKilnLow0001", true);
+  await setStripeAccount(OWNER, "acct_1TestKilnLow001", true);
   await setSubscription(OWNER, { customerId: "cus_kilnlow", subscriptionId: "sub_kilnlow", active: true, period: paidPeriod() });
   const made = await addProduct(OWNER, "Glazed Mug", "", "30", null);
   if (!made.ok) throw new Error("no product");

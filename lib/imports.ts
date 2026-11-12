@@ -988,6 +988,12 @@ function classifyProducts(store: Store, rows: string[][]): { valid: ProductRow[]
       }
       priceCents = amount;
     }
+    // readBatch keeps a description to its cap plus one: one longer than the cap arrived cut, often inside a tag,
+    // and is refused as it is, never brought in short (docs/cross-product-handoff.md).
+    if (rawDescription.length > MAX_ABOUT_LENGTH * 2) {
+      problems.push({ line, column: "description", problem: `Longer than ${(MAX_ABOUT_LENGTH * 2).toLocaleString("en-US")} characters with its formatting, so it cannot be brought in whole. Shorten it, or remove its formatting`, value: rawDescription.slice(0, 80) });
+      continue;
+    }
     const description = cleanAbout(plainText(rawDescription).slice(0, MAX_ABOUT_LENGTH * 2));
     if (plainText(rawDescription).trim().length > MAX_ABOUT_LENGTH) {
       problems.push({ line, column: "description", problem: `Longer than ${MAX_ABOUT_LENGTH.toLocaleString("en-US")} characters`, value: rawDescription.slice(0, 80) });

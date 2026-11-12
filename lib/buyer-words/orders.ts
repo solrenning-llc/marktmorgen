@@ -14,8 +14,13 @@
  * (lib/buyer-words/index.ts, speech): a sentence here only places them.
  */
 import { type LanguageCode, parseLanguage } from "@/lib/store-language";
+import { membershipWords } from "@/lib/buyer-words/membership";
 
 type Interval = "day" | "week" | "month" | "year";
+
+/** Charged every few weeks or months (609 [WP8]): the membership words' own "every 3 months"; once an interval keeps `once`. */
+const often = (code: LanguageCode, interval: Interval, count: number, once: string): string =>
+  count > 1 ? membershipWords(code).every(interval, count) : once;
 
 const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);
 /** French takes the singular for 0 and 1. */
@@ -238,9 +243,12 @@ const en = {
     `Nothing was charged today. Your first payment here of ${price}${hasTax ? " plus any sales tax" : ""} is taken on ${date}, from the card you gave. Cancel before then and you are not charged at all.`,
   trialCharge: (price: string, hasTax: boolean, days: number, date: string) =>
     `Nothing was charged today. Your first payment of ${price}${hasTax ? " plus any sales tax" : ""} is taken when the ${days}-day trial ends, on ${date}, from the card you gave. Cancel before then and you are not charged at all.`,
-  /** How a membership renews: for a set number of payments, or until cancelled (payments 0). */
-  renews: (interval: Interval, payments: number) => {
-    const every = { day: "a day", week: "a week", month: "a month", year: "a year" }[interval];
+  /**
+   * How a membership renews: for a set number of payments, or until cancelled (payments 0); `count` of the interval
+   * between charges, "every 3 months" for more than one (609 [WP8]).
+   */
+  renews: (interval: Interval, payments: number, count: number) => {
+    const every = often("en", interval, count, { day: "a day", week: "a week", month: "a month", year: "a year" }[interval]);
     return payments > 0
       ? `This renews once ${every} for ${payments} payments in all and then ends by itself.`
       : `This renews once ${every} until you cancel it.`;
@@ -503,10 +511,10 @@ const es: OrdersWords = {
     `Hoy no se cobró nada. Tu primer pago aquí de ${price}${hasTax ? " más los impuestos sobre las ventas que correspondan" : ""} se cobra el ${date}, a la tarjeta que indicaste. Cancela antes y no se te cobrará nada.`,
   trialCharge: (price, hasTax, days, date) =>
     `Hoy no se cobró nada. Tu primer pago de ${price}${hasTax ? " más los impuestos sobre las ventas que correspondan" : ""} se cobra cuando termine la prueba de ${days} ${plural(days, "día", "días")}, el ${date}, a la tarjeta que indicaste. Cancela antes y no se te cobrará nada.`,
-  renews: (interval, payments) =>
+  renews: (interval, payments, count) =>
     payments > 0
-      ? `Esta membresía se renueva ${esOnce(interval)} durante ${payments} ${plural(payments, "pago", "pagos")} en total y luego termina sola.`
-      : `Esta membresía se renueva ${esOnce(interval)} hasta que la canceles.`,
+      ? `Esta membresía se renueva ${often("es", interval, count, esOnce(interval))} durante ${payments} ${plural(payments, "pago", "pagos")} en total y luego termina sola.`
+      : `Esta membresía se renueva ${often("es", interval, count, esOnce(interval))} hasta que la canceles.`,
   manageAt: (hasEnd, url, email) =>
     `Para gestionarla o cancelarla por tu cuenta${hasEnd ? " antes de que termine" : ""}, en cualquier momento y sin escribir a nadie, abre ${url} y escribe ${email}.`,
   cancelByReply: (hasEnd, store) => `Para cancelarla${hasEnd ? " antes de que termine" : ""}, responde a este email y le llegará a ${store}.`,
@@ -750,10 +758,10 @@ const fr: OrdersWords = {
     `Rien n'a été débité aujourd'hui. Votre premier paiement ici, de ${price}${hasTax ? ", plus les éventuelles taxes de vente," : ""} est prélevé le ${date}, sur la carte que vous avez indiquée. Annulez avant cette date et rien ne vous sera débité.`,
   trialCharge: (price, hasTax, days, date) =>
     `Rien n'a été débité aujourd'hui. Votre premier paiement de ${price}${hasTax ? ", plus les éventuelles taxes de vente," : ""} est prélevé à la fin de l'essai de ${days}${S}${pluralFr(days, "jour", "jours")}, le ${date}, sur la carte que vous avez indiquée. Annulez avant cette date et rien ne vous sera débité.`,
-  renews: (interval, payments) =>
+  renews: (interval, payments, count) =>
     payments > 0
-      ? `Cet abonnement se renouvelle ${frOnce(interval)} pendant ${payments}${S}${pluralFr(payments, "paiement", "paiements")} au total, puis prend fin de lui-même.`
-      : `Cet abonnement se renouvelle ${frOnce(interval)} jusqu'à ce que vous l'annuliez.`,
+      ? `Cet abonnement se renouvelle ${often("fr", interval, count, frOnce(interval))} pendant ${payments}${S}${pluralFr(payments, "paiement", "paiements")} au total, puis prend fin de lui-même.`
+      : `Cet abonnement se renouvelle ${often("fr", interval, count, frOnce(interval))} jusqu'à ce que vous l'annuliez.`,
   manageAt: (hasEnd, url, email) =>
     `Pour le gérer ou l'annuler vous-même${hasEnd ? " d'ici là" : ""}, à tout moment et sans écrire à personne, ouvrez ${url} et saisissez ${email}.`,
   cancelByReply: (hasEnd, store) => `Pour l'annuler${hasEnd ? " d'ici là" : ""}, répondez à cet e-mail et votre message parviendra à ${store}.`,
@@ -998,10 +1006,10 @@ const de: OrdersWords = {
     `Heute wurde nichts berechnet. Ihre erste Zahlung hier von ${price}${hasTax ? " zuzüglich eventuell anfallender Umsatzsteuer" : ""} wird am ${date} von der angegebenen Karte abgebucht. Kündigen Sie vorher, wird Ihnen gar nichts berechnet.`,
   trialCharge: (price, hasTax, days, date) =>
     `Heute wurde nichts berechnet. Ihre erste Zahlung von ${price}${hasTax ? " zuzüglich eventuell anfallender Umsatzsteuer" : ""} wird am Ende des ${days}-tägigen Testzeitraums, am ${date}, von der angegebenen Karte abgebucht. Kündigen Sie vorher, wird Ihnen gar nichts berechnet.`,
-  renews: (interval, payments) =>
+  renews: (interval, payments, count) =>
     payments > 0
-      ? `Die Mitgliedschaft verlängert sich ${deOnce(interval)} für insgesamt ${payments} ${plural(payments, "Zahlung", "Zahlungen")} und endet dann von selbst.`
-      : `Die Mitgliedschaft verlängert sich ${deOnce(interval)}, bis Sie sie kündigen.`,
+      ? `Die Mitgliedschaft verlängert sich ${often("de", interval, count, deOnce(interval))} für insgesamt ${payments} ${plural(payments, "Zahlung", "Zahlungen")} und endet dann von selbst.`
+      : `Die Mitgliedschaft verlängert sich ${often("de", interval, count, deOnce(interval))}, bis Sie sie kündigen.`,
   manageAt: (hasEnd, url, email) =>
     `Um sie${hasEnd ? " vorher" : ""} selbst zu verwalten oder zu kündigen, jederzeit und ohne jemandem zu schreiben, öffnen Sie ${url} und geben Sie ${email} ein.`,
   cancelByReply: (hasEnd, store) => `Um sie${hasEnd ? " vorher" : ""} zu kündigen, antworten Sie auf diese E-Mail, dann erreicht Ihre Nachricht ${store}.`,
@@ -1250,10 +1258,10 @@ const it: OrdersWords = {
     `Oggi non ti è stato addebitato nulla. Il tuo primo pagamento qui di ${price}${hasTax ? " più le eventuali imposte sulle vendite" : ""} viene addebitato ${itOn(date)}, sulla carta che hai indicato. Se annulli prima, non ti viene addebitato nulla.`,
   trialCharge: (price, hasTax, days, date) =>
     `Oggi non ti è stato addebitato nulla. Il tuo primo pagamento di ${price}${hasTax ? " più le eventuali imposte sulle vendite" : ""} viene addebitato alla fine della prova di ${days} ${plural(days, "giorno", "giorni")}, ${itOn(date)}, sulla carta che hai indicato. Se annulli prima, non ti viene addebitato nulla.`,
-  renews: (interval, payments) =>
+  renews: (interval, payments, count) =>
     payments > 0
-      ? `L'abbonamento si rinnova ${itOnce(interval)} per ${payments} ${plural(payments, "pagamento", "pagamenti")} in tutto e poi termina da solo.`
-      : `L'abbonamento si rinnova ${itOnce(interval)} finché non lo annulli.`,
+      ? `L'abbonamento si rinnova ${often("it", interval, count, itOnce(interval))} per ${payments} ${plural(payments, "pagamento", "pagamenti")} in tutto e poi termina da solo.`
+      : `L'abbonamento si rinnova ${often("it", interval, count, itOnce(interval))} finché non lo annulli.`,
   manageAt: (hasEnd, url, email) =>
     `Per gestirlo o annullarlo in autonomia${hasEnd ? " prima che termini" : ""}, in qualsiasi momento e senza scrivere a nessuno, apri ${url} e inserisci ${email}.`,
   cancelByReply: (hasEnd, store) => `Per annullarlo${hasEnd ? " prima che termini" : ""}, rispondi a questa email e il messaggio arriverà a ${store}.`,
@@ -1497,10 +1505,10 @@ const nl: OrdersWords = {
     `Vandaag is er niets afgeschreven. Je eerste betaling hier van ${price}${hasTax ? " plus eventuele omzetbelasting" : ""} wordt op ${date} afgeschreven van de kaart die je hebt opgegeven. Zeg je daarvoor op, dan betaal je helemaal niets.`,
   trialCharge: (price, hasTax, days, date) =>
     `Vandaag is er niets afgeschreven. Je eerste betaling van ${price}${hasTax ? " plus eventuele omzetbelasting" : ""} wordt afgeschreven als de proefperiode van ${days} ${plural(days, "dag", "dagen")} afloopt, op ${date}, van de kaart die je hebt opgegeven. Zeg je daarvoor op, dan betaal je helemaal niets.`,
-  renews: (interval, payments) =>
+  renews: (interval, payments, count) =>
     payments > 0
-      ? `Het lidmaatschap wordt ${nlOnce(interval)} verlengd, voor in totaal ${payments} ${plural(payments, "betaling", "betalingen")}, en stopt daarna vanzelf.`
-      : `Het lidmaatschap wordt ${nlOnce(interval)} verlengd tot je het opzegt.`,
+      ? `Het lidmaatschap wordt ${often("nl", interval, count, nlOnce(interval))} verlengd, voor in totaal ${payments} ${plural(payments, "betaling", "betalingen")}, en stopt daarna vanzelf.`
+      : `Het lidmaatschap wordt ${often("nl", interval, count, nlOnce(interval))} verlengd tot je het opzegt.`,
   manageAt: (hasEnd, url, email) =>
     `Om het zelf te beheren of op te zeggen${hasEnd ? " voor die tijd" : ""}, op elk moment en zonder iemand te schrijven, open je ${url} en vul je ${email} in.`,
   cancelByReply: (hasEnd, store) => `Om het op te zeggen${hasEnd ? " voor die tijd" : ""}, beantwoord je deze e-mail; dan komt je bericht bij ${store} aan.`,
@@ -1745,10 +1753,10 @@ const pt: OrdersWords = {
     `Hoje não foi cobrado nada. O seu primeiro pagamento aqui, de ${price}${hasTax ? " mais os impostos sobre vendas aplicáveis" : ""}, é cobrado a ${date}, no cartão que indicou. Se cancelar antes disso, não paga nada.`,
   trialCharge: (price, hasTax, days, date) =>
     `Hoje não foi cobrado nada. O seu primeiro pagamento de ${price}${hasTax ? " mais os impostos sobre vendas aplicáveis" : ""} é cobrado quando terminar o período de teste de ${days} ${plural(days, "dia", "dias")}, a ${date}, no cartão que indicou. Se cancelar antes disso, não paga nada.`,
-  renews: (interval, payments) =>
+  renews: (interval, payments, count) =>
     payments > 0
-      ? `Esta subscrição renova-se ${ptOnce(interval)} durante ${payments} ${plural(payments, "pagamento", "pagamentos")} no total e depois termina automaticamente.`
-      : `Esta subscrição renova-se ${ptOnce(interval)} até a cancelar.`,
+      ? `Esta subscrição renova-se ${often("pt", interval, count, ptOnce(interval))} durante ${payments} ${plural(payments, "pagamento", "pagamentos")} no total e depois termina automaticamente.`
+      : `Esta subscrição renova-se ${often("pt", interval, count, ptOnce(interval))} até a cancelar.`,
   manageAt: (hasEnd, url, email) =>
     `Para a gerir ou cancelar por si${hasEnd ? " antes disso" : ""}, a qualquer momento e sem escrever a ninguém, abra ${url} e introduza ${email}.`,
   cancelByReply: (hasEnd, store) => `Para a cancelar${hasEnd ? " antes disso" : ""}, responda a este email e a mensagem chega a ${store}.`,

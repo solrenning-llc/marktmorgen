@@ -8,7 +8,7 @@
  * page is this file.
  */
 import { everyOf } from "@/lib/product-recurring";
-import { stripeEveryFields } from "@/lib/recurring-every-rules";
+import { PAID_EVERY_KEY, paidEveryValue, stripeEveryFields } from "@/lib/recurring-every-rules";
 import { randomBytes } from "node:crypto";
 import { prepareOrderConfirmationPreintent } from "@/lib/orders";
 import { CURRENT_SHIPMENT_MAIL_LIFECYCLE } from "@/lib/shipment-record";
@@ -602,6 +602,9 @@ export async function createCheckout(
       body.set("metadata[every]", "year");
       body.set("subscription_data[metadata][every]", "year");
     }
+    // Kept on the order for the words after paying, which say it as charged even if the product changes meanwhile.
+    const paidEvery = yearlyNow ? null : paidEveryValue(membership.interval, everyOf(membership));
+    if (paidEvery) body.set(`metadata[${PAID_EVERY_KEY}]`, paidEvery);
     body.set("subscription_data[metadata][store]", store.handle);
     body.set("subscription_data[metadata][product]", product.id);
     if (chosen) body.set("subscription_data[metadata][option]", chosen.id);

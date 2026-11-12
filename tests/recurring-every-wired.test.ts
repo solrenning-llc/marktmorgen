@@ -121,9 +121,10 @@ async function main(): Promise<void> {
   const box = renderToStaticMarkup(createElement(BuyBox, { store, product: listing, related: [], remaining: null, writes: false, selling: true }));
   is("the buy box says every 3 months and never a month", [box.includes("every 3 months"), box.includes("a month")], [true, false]);
   const thanks = read("app/[handle]/thanks/page.tsx");
-  is("the page after paying says it as charged", thanks.includes("everyPhrase(store, paidEvery, order.product.recurring.every)") && !thanks.includes("speech(store).w.every(paidEvery))"), true);
+  // As the order was charged, not as the product reads now: tests/recurring-every-paid.test.ts.
+  is("the page after paying says it as charged", thanks.includes("everyPhrase(store, paidAs.interval, paidAs.count)") && !thanks.includes("speech(store).w.every(paidEvery))"), true);
   const email = read("lib/purchase-email.ts");
-  is("and the confirmation email", email.includes('every === "year" ? w.every("year") : everyPhrase({ language: store.language, currency }, every, product.recurring.every)'), true);
+  is("and the confirmation email", email.includes('every === "year" ? w.every("year") : everyPhrase({ language: store.language, currency }, every, everyCount)'), true);
   const api = read("lib/api-read.ts");
   is("the API names the count beside the interval", api.includes("interval_count: p.recurring ? everyOf(p.recurring) : null"), true);
   const affiliates = read("components/affiliate-directory.tsx");

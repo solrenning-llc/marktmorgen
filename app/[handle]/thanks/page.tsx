@@ -76,6 +76,7 @@ import { activeShipping } from "@/lib/shipping";
 import { ordersWords } from "@/lib/buyer-words/orders";
 import { givingWords, groupLinkBoxWords, licenceKeyBoxWords } from "@/lib/buyer-words/giving";
 import { everyPhrase, speech } from "@/lib/buyer-words";
+import { paidEveryOf } from "@/lib/recurring-every-rules";
 import { LANGUAGES } from "@/lib/store-language";
 import { HeardAsk } from "@/components/heard-ask";
 import { heardOff } from "@/lib/heard";
@@ -628,11 +629,11 @@ export default async function ThanksPage({ params, searchParams }: Params) {
   const ended = order.state === "paid" && order.membership === "ended";
   // The creator's own note after paying, read only for a product that has one (lib/thanks-note.ts).
   const thanksNote = order.state === "paid" && order.product.note ? await readThanksNote(store.statsId, order.product.id).catch(() => null) : null;
-  // How often a membership charges as it was bought: a monthly one may have been paid yearly (lib/yearly-price.ts).
-  const paidEvery = order.state === "paid" && order.product.recurring ? (((order.record.metadata ?? {}) as Record<string, string>).every === "year" ? "year" : order.product.recurring.interval) : "month";
-  // And said as it is charged: "every 3 months" for one charged every few months (609 [WP8]).
-  const paidPhrase =
-    order.state === "paid" && order.product.recurring && paidEvery !== "year" ? everyPhrase(store, paidEvery, order.product.recurring.every) : speech(store).w.every(paidEvery);
+  // How often a membership charges as it was bought, read from the order: a monthly one may have been paid yearly
+  // (lib/yearly-price.ts), and one charged every few months is said so, "every 3 months" (609 [WP8]), even if the
+  // product changed while the checkout was open.
+  const paidAs = order.state === "paid" && order.product.recurring ? paidEveryOf((order.record.metadata ?? {}) as Record<string, string>, order.product.recurring) : null;
+  const paidPhrase = paidAs ? everyPhrase(store, paidAs.interval, paidAs.count) : speech(store).w.every("month");
   // A membership's introductory price, as its checkout carried it (lib/intro-price.ts).
   const introPaid = order.state === "paid" && order.product.recurring ? introOf((order.record.metadata ?? {}) as Record<string, string>) : null;
 

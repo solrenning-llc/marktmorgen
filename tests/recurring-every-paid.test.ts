@@ -23,6 +23,7 @@ import { addProduct, claimHandle, ensureStatsId, setProductLink, setStripeAccoun
 import { readListing, readProduct } from "@/lib/catalog";
 import { createCheckout } from "@/lib/store-checkout";
 import { confirmationFor } from "@/lib/purchase-email";
+import { paidEveryOf, paidEveryValue } from "@/lib/recurring-every-rules";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -98,6 +99,20 @@ async function main(): Promise<void> {
   is("charged monthly, product now every 3 months: a month", [line(before, "Paid:"), renews(before)], ["Paid: $90 a month", "This renews once a month until you cancel it"]);
   const weeks = text(store, session("week:2"), nowMonthly);
   is("charged every 2 weeks, product now monthly: every 2 weeks", line(weeks, "Paid:"), "Paid: $90 every 2 weeks");
+
+  part("The record, read back");
+  is("written only above one, and only for a choice", [paidEveryValue("month", 3), paidEveryValue("week", 2), paidEveryValue("month", 1), paidEveryValue("month", 4)], ["month:3", "week:2", null, null]);
+  is("read back exactly; a yearly payment is a year; none is once the interval", [
+    paidEveryOf({ every_n: "month:6" }, monthly),
+    paidEveryOf({ every: "year" }, monthly),
+    paidEveryOf({}, quarterly),
+    paidEveryOf(null, { interval: "week" }),
+  ], [{ interval: "month", count: 6 }, { interval: "year", count: 1 }, { interval: "month", count: 1 }, { interval: "week", count: 1 }]);
+  is("one that does not read as a choice falls back to the product, never a guess of its own", [
+    paidEveryOf({ every_n: "month:4" }, quarterly),
+    paidEveryOf({ every_n: "month:1" }, monthly),
+    paidEveryOf({ every_n: "3" }, quarterly),
+  ], [{ interval: "month", count: 3 }, { interval: "month", count: 1 }, { interval: "month", count: 3 }]);
 
   part("The page after paying reads the same record");
   const thanks = readFileSync(join(process.cwd(), "app/[handle]/thanks/page.tsx"), "utf8");

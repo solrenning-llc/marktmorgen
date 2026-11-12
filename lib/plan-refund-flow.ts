@@ -40,7 +40,7 @@
  * One at a time per store (FLOW_LOCK_SECONDS, lib/redis-lock.ts); the daily
  * job skips a store whose lock is held.
  */
-import { BillingError, isBillingConfigured, onPlatform, setCancelAtPeriodEnd } from "@/lib/billing";
+import { BillingError, isBillingConfigured, onPlatform } from "@/lib/billing";
 import { LOCK_SECONDS, type PlanRefundMade, refundPlanPayment } from "@/lib/plan-refund-write";
 import { dropPause } from "@/lib/plan-pause";
 import { syncAssistant } from "@/lib/assistant-billing";
@@ -198,14 +198,41 @@ const planState = (sub: Row | null): "stops" | "renews" | "ended" | "unknown" =>
   return stopSet(sub) ? "stops" : "renews";
 };
 
-/** Takes back the stop we set, when it is still there. True when nothing of ours is left. */
+/**
+ * Whose stop it is, kept on the subscription itself (Codex G on #3740): set in the same Stripe call as our stop, and
+ * unset in the same call that takes it back. A note in Redis can be stale (its m: 0 write may never land); Stripe's own
+ * record cannot, so a stop the creator set after ours was taken back carries no mark and is never touched.
+ */
+export const OUR_STOP_MARK = "plan_refund_stop";
+
+/** Sets our stop with its mark, in one call. Only an answer naming this subscription, stopped and marked, confirms it. */
+async function setOurStop(id: string, mark: string): Promise<void> {
+  const sub = await onPlatform("POST", `/subscriptions/${encodeURIComponent(id)}`, new URLSearchParams({ cancel_at_period_end: "true", [`metadata[${OUR_STOP_MARK}]`]: mark }));
+  const row = sub as Row & { metadata?: unknown };
+  const metadata = row && typeof row === "object" && row.metadata && typeof row.metadata === "object" ? (row.metadata as Record<string, unknown>) : null;
+  if (!row || row.id !== id || row.cancel_at_period_end !== true || metadata?.[OUR_STOP_MARK] !== mark) {
+    throw new Error("The stop's answer does not show this subscription stopped with our mark");
+  }
+}
+
+/**
+ * Takes back the stop we set, when it is still there and still ours (its mark on the subscription). True when nothing
+ * of ours is left. A stop without our mark is the creator's own, or one taken back already: never touched.
+ */
 async function takeBackStop(id: string): Promise<boolean> {
   try {
     const sub = await subscriptionOf(id);
     if (!sub) return false;
-    if (!LIVE.includes(String(sub.status)) || sub.cancel_at_period_end !== true) return true;
-    await setCancelAtPeriodEnd(id, false);
-    return true;
+    const metadata = (sub as Row & { metadata?: unknown }).metadata;
+    const mark = metadata && typeof metadata === "object" && !Array.isArray(metadata) ? (metadata as Record<string, unknown>)[OUR_STOP_MARK] : undefined;
+    if (!LIVE.includes(String(sub.status))) return true;
+    if (mark === undefined || mark === null || mark === "") return true;
+    if (typeof mark !== "string") return false;
+    // Taken back and unmarked in one call: a later run, on a stale note, finds no mark and leaves any stop alone.
+    const after = await onPlatform("POST", `/subscriptions/${encodeURIComponent(id)}`, new URLSearchParams({ cancel_at_period_end: "false", [`metadata[${OUR_STOP_MARK}]`]: "" }));
+    const row = after as Row & { metadata?: unknown };
+    const left = row && typeof row === "object" && row.metadata && typeof row.metadata === "object" ? (row.metadata as Record<string, unknown>)[OUR_STOP_MARK] : undefined;
+    return Boolean(row) && row.id === id && row.cancel_at_period_end === false && (left === undefined || left === "");
   } catch (error) {
     console.error("taking back a plan's stop after a refund that was not made failed", error);
     return false;
@@ -491,7 +518,7 @@ export async function refundAndEndPlan(store: Store, nowSeconds = Math.floor(Dat
 
     if (weStop) {
       try {
-        await setCancelAtPeriodEnd(id, true);
+        await setOurStop(id, String(note.at));
       } catch (error) {
         console.error("setting a plan to stop before its refund failed", error);
         return notMade("stop_failed", Boolean(kept));

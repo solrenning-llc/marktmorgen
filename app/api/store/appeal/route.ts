@@ -33,8 +33,12 @@ export async function POST(request: NextRequest) {
     return Response.json({ ok: true, number: done.kept.appeal.number, state: done.kept.appeal.state, told: done.kept.told }, { headers: noStore });
   } catch (error) {
     console.error("appeal failed", error);
-    // "file" may not have kept anything; "again" works on a request that is kept, so it is never said to be lost.
-    const message = action === "file" ? "We could not keep your request just now, so nothing was sent. Try again in a moment." : "We could not check your request just now. It is still kept. Try again in a moment.";
+    // Every throw comes before the inbox email. "file" may or may not have kept the request (its record is written
+    // before the try is counted, and that reply can be lost), so it says neither and points to the page that reads it;
+    // "again" works on a request that is kept, so it is never said to be lost.
+    const message = action === "file"
+      ? "We could not finish your request just now, and nothing was passed on to our team. Reload this page: it shows whether your request was kept, and if it was, lets you send it from there."
+      : "We could not check your request just now. It is still kept. Try again in a moment.";
     return Response.json({ ok: false, error: "server_error", message }, { status: 503, headers: noStore });
   }
 }

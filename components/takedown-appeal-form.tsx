@@ -3,6 +3,9 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { MAX_APPEAL_TEXT } from "@/lib/takedown-appeal-rules";
 
+/** Said when no answer of ours came back: the request may have been kept, and even passed on, before the reply was lost. */
+const UNSURE = "We could not finish your request just now. Reload this page: it shows whether your request was kept, and if it was, lets you send it from there.";
+
 /**
  * The form of one request to look again (646 [WG6], unit 2), in two steps so nothing is sent by mistake (WCAG 3.3.6):
  * write why, check the words, then send. A problem stays next to the field (role="alert"), with the words kept so
@@ -53,10 +56,11 @@ export function TakedownAppealForm({ decision, what }: { decision: string; what:
         go("done");
         return;
       }
-      setProblem(typeof d.message === "string" ? d.message : "We could not send your request just now. Nothing was sent. Try again in a moment.");
+      // Without our own answer, the request may have been kept (and passed on) before the reply was lost: the page knows.
+      setProblem(typeof d.message === "string" ? d.message : UNSURE);
       go("write");
     } catch {
-      setProblem("We could not reach Marktmorgen just now. Nothing was sent. Try again in a moment.");
+      setProblem(UNSURE);
       go("write");
     }
   }

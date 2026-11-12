@@ -177,3 +177,18 @@ test("review: an error from the server marks its field, as the browser's own che
   const reason = unescape(await render({ token, ref, problem: "reason" }));
   assert.ok(/<fieldset[^>]*aria-describedby="problem-reason-error"/.test(reason) && reason.includes('id="problem-reason-error"'), "the reasons are described by their error");
 });
+
+test("an outcome not known is never 'nothing was sent', shows no form to send it twice, and a store's used allowance is said (review of #3838, MÉDIO)", async () => {
+  const { product, token } = await shop();
+  sessions = [paid("notknown", product, Math.floor(Date.now() / 1000) - DAY)];
+  const ref = sessions[0].id as string;
+  const languages = ["en", "es", "fr", "de", "it", "nl", "pt"].map((code) => orderProblemWords(code) as unknown as Record<string, unknown>);
+  assert.ok(languages.every((one) => typeof one.notConfirmed === "string" && (one.notConfirmed as string).length > 20), "every language says an outcome not known");
+  const notKnown = unescape(await render({ token, ref, problem: "unknown" }));
+  assert.ok(new RegExp(`role="(status|alert)"[^>]*>[\\s\\S]*${String((en as unknown as Record<string, unknown>).notConfirmed).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`).test(notKnown), "said in the status region");
+  assert.ok(!/Nothing was sent/i.test(notKnown), "never 'nothing was sent' when it is not known");
+  assert.ok(!notKnown.includes('action="/api/store/order-problem"'), "no form, so the same report is not sent twice while it may be in the inbox");
+  const used = unescape(await render({ token, ref, problem: "used" }));
+  assert.ok(used.includes(en.storeFull), "the store's used allowance is said as the store not taking messages");
+  assert.ok(/Nothing was sent/.test(en.errorUnavailable), "'error' is now only a filing confirmed not made, so it keeps 'nothing was sent'");
+});

@@ -301,13 +301,20 @@ async function main(): Promise<void> {
   {
     const email = "lost@example.com";
     const store = await makeStore(email, "lostrelease");
+    // A key the walk would erase by the store's id (review of #3643, Claude 1 cloud): it stays while the record does.
+    redis.run(["SET", `nl:zz:${store.statsId}:data`, "x"]);
     releaseLost = true;
     const T = Date.now();
     await markDue(email, T - 1000);
-    await erase(T);
+    const first = await erase(T);
     const score = redis.run(["ZSCORE", DUE_KEY, email]);
     is("the hold was answered with nothing", releaseLost, false);
     is("the record is not deleted while its release is unknown", (await storeForEmail(email))?.sid ?? null, store.sid);
+    // The entry was confirmed (rewritten without `pending`) right before the release that failed: it is taken out of the
+    // batch, so no walk starts over a store whose record is still there, and nothing of it is erased or finished.
+    is("no walk starts over a store whose record is still there", [first.started, first.finished], [false, 0]);
+    is("its data is not erased while its record is still there", redis.run(["GET", `nl:zz:${store.statsId}:data`]), "x");
+    is("no confirmed entry is left in the batch for it", redis.run(["HGET", BATCH_KEY, email]), null);
     is("the store is still in line, moved back a walk", score !== null && Number(score) >= T + WALK_GAP_MS, true);
     const next = await erase(T + WALK_GAP_MS + 1);
     is("the next walk prepares it and finishes", [next.stores, next.finished], [1, 1]);
@@ -315,6 +322,26 @@ async function main(): Promise<void> {
     const held = redis.run(["GET", "nl:store:handle:lostrelease"]);
     const ttl = Number(redis.run(["PTTL", "nl:store:handle:lostrelease"]));
     is("its address is held back with an expiry, never left naming its owner", [String(held).startsWith("released:"), ttl > 0], [true, true]);
+  }
+
+  part("Review of #3643: a confirmed entry not confirmed taken out after its record stayed starts no walk, and the store is prepared again first");
+  redis.clear();
+  {
+    const email = "lostwithdraw@example.com";
+    const store = await makeStore(email, "lostwithdraw");
+    redis.run(["SET", `nl:zz:${store.statsId}:data`, "y"]);
+    releaseLost = true;
+    withdrawUnknown = 2;
+    const T = Date.now();
+    await markDue(email, T - 1000);
+    const first = await erase(T);
+    is("no walk starts, and the run is not said done", [first.started, first.finished, first.done], [false, 0, false]);
+    is("the record is still there, and its data", [(await storeForEmail(email))?.sid ?? null, redis.run(["GET", `nl:zz:${store.statsId}:data`])], [store.sid, "y"]);
+    const score = redis.run(["ZSCORE", DUE_KEY, email]);
+    is("it stays in line where it was, never moved back", score !== null && Number(score) < T, true);
+    const next = await erase(T + WALK_GAP_MS + 1);
+    is("the next run prepares it again and then walks and finishes it", [next.stores, next.finished], [1, 1]);
+    is("the record is gone then", await storeForEmail(email), null);
   }
 
   part("Claude 6's P4 on #3643: an account moved while an extra store's erasure runs keeps the erased store's id at neither address");

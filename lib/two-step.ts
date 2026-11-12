@@ -668,7 +668,7 @@ async function endLocked(email: string, now = Date.now()): Promise<boolean> {
  * until they end (endLocked); whoever says so to the owner never says they
  * were logged out (review of #2556).
  */
-export async function cancelReset(email: string, why: "login" | "studio"): Promise<boolean | "kept-locked"> {
+export async function cancelReset(email: string, why: "login" | "studio" | "recovery"): Promise<boolean | "kept-locked"> {
   const called = await withTwoStep(email, async (held) => {
     const record = await read(email);
     if (!record || record.reset === 0) return false;
@@ -680,7 +680,9 @@ export async function cancelReset(email: string, why: "login" | "studio"): Promi
   const canceled =
     why === "login"
       ? "Your account was just logged in with a code or a passkey, so the request to turn off two-step login was canceled"
-      : "The request to turn off two-step login was canceled from your studio";
+      : why === "recovery"
+        ? "The recovery address was changed from your studio, so the request to turn off two-step login was canceled"
+        : "The request to turn off two-step login was canceled from your studio";
   await tell(
     email,
     "Two-step login stays on for your Marktmorgen account",

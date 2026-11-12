@@ -17,13 +17,15 @@ import { is, part, done } from "./check";
 const MATRICES = ["buyer-actions", "product-actions", "public-matrix", "signup-actions", "studio-matrix"];
 const read = (path: string) => readFileSync(path, "utf8");
 
-/** The scripts a workflow's browser leg runs, in order, from its `run: node tests/e2e/….mjs` lines. */
+/** Every e2e script a workflow runs, in order, wherever `node tests/e2e/….mjs` appears (`run:`, `- run:` or a `run: |` block). */
 function scripts(workflow: string): string[] {
-  return [...workflow.matchAll(/^ {8}run: node (tests\/e2e\/[a-z0-9-]+\.mjs)(?: [^\n]*)?$/gm)].map((m) => m[1]);
+  return [...workflow.matchAll(/\bnode (tests\/e2e\/[a-z0-9-]+\.mjs)\b/g)].map((m) => m[1]);
 }
 /** The script starts `next start` from the checkout (root), so it serves the workflow's build. */
 const servesCheckout = (text: string) =>
-  /join\(root,\s*"node_modules\/next\/dist\/bin\/next"\),\s*"start"/.test(text);
+  /join\(root,\s*["'`]node_modules\/next\/dist\/bin\/next["'`]\),\s*["'`]start["'`]/.test(text);
+/** Any other way a script could start a server: `next start` in any quoting, or an npm start script. */
+const startsSomething = (text: string) => /["'`]start["'`]|npm (run )?start|next start/.test(text);
 /** The script builds a disposable copy itself and starts `next start` only from that copy. */
 const servesOwnBuild = (text: string) =>
   /reviewedApp=await prepareReviewedMailApp\(root,env\);/.test(text) &&
@@ -44,17 +46,17 @@ for (const name of MATRICES) {
   const workflow = read(`.github/workflows/accessibility-${name}.yml`);
   const run = scripts(workflow);
   const texts = run.map(read);
-  const builds = (workflow.match(/^ {6}- run: node scripts\/ci-build\.mjs$/gm) ?? []).length;
+  const builds = (workflow.match(/\bnode scripts\/ci-build\.mjs\b/g) ?? []).length;
   const needsCheckoutBuild = texts.some(servesCheckout);
   is(`${name}: runs its browser script`, run.includes(`tests/e2e/accessibility-${name}.mjs`), true);
   is(`${name}: every script either serves the checkout's build or builds and serves its own copy`,
-    texts.map((text) => servesCheckout(text) || servesOwnBuild(text) || !/"start"/.test(text)), texts.map(() => true));
+    texts.map((text) => servesCheckout(text) || servesOwnBuild(text) || !startsSomething(text)), texts.map(() => true));
   is(`${name}: one workflow build when a script serves the checkout's build, none otherwise`, builds, needsCheckoutBuild ? 1 : 0);
   if (needsCheckoutBuild) {
-    const buildAt = workflow.indexOf("- run: node scripts/ci-build.mjs");
+    const buildAt = workflow.indexOf("node scripts/ci-build.mjs");
     const firstServing = run.findIndex((script, i) => servesCheckout(texts[i]));
     is(`${name}: the build comes before the first script that serves it`,
-      buildAt >= 0 && buildAt < workflow.indexOf(`run: node ${run[firstServing]}`), true);
+      buildAt >= 0 && buildAt < workflow.indexOf(`node ${run[firstServing]}`), true);
   }
 }
 

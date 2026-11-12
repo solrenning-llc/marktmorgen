@@ -175,6 +175,21 @@ const nextConfig: NextConfig = {
         headers: common,
       },
       /*
+       * Every other address under /embed/ (one part, or three and more) is
+       * not the card: proxy.ts gives it no policy, so without these two rules
+       * it went out with neither a policy nor X-Frame-Options and any site
+       * could frame it. It is a page like the rest; its not-found page is
+       * built ahead of time, so it gets the static policy, never a nonce one
+       * (tests/security-headers-config.test.ts).
+       */
+      ...["/embed/:one", "/embed/:one/:two/:rest+"].map((source) => ({
+        source,
+        headers: [
+          { key: "Content-Security-Policy", value: staticPolicy() },
+          { key: "X-Frame-Options", value: "SAMEORIGIN" },
+        ],
+      })),
+      /*
        * Nothing the API answers is a page. A picture, a file, a calendar or a
        * piece of JSON may not run, fetch or be framed, even if a browser were
        * talked into opening one as a document.

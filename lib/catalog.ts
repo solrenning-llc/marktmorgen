@@ -802,19 +802,24 @@ export async function readProducts(store: Store, ids?: Iterable<string>): Promis
 }
 
 /**
- * The extras record exactly as productWrites writes it: a JSON record whose own keys are only "fields" (a list) and
- * "funnel" (null or one that reads). Anything else, a key of the listing (a title, a price, an id, "__proto__") among
- * them, is null: spread over the listing it would replace the listing's own value, and the next edit would write it
- * into the listing for good (Codex P on #3888). Only the two validated values are returned.
+ * The extras record exactly as productWrites writes it: a JSON record whose own keys are "fields" (a list), "funnel"
+ * (null or one that reads) and, on a product the creator ships, "legal" (#3004). Anything else, a key of the listing (a
+ * title, a price, an id, "__proto__") among them, is null: spread over the listing it would replace the listing's own
+ * value, and the next edit would write it into the listing for good (Codex P on #3888). Only the validated values are
+ * returned, with "legal" as written (parseProduct reads it).
  */
-function exactExtras(parsed: unknown): { fields: unknown[]; funnel: unknown } | null {
+function exactExtras(parsed: unknown): { fields: unknown[]; funnel: unknown; legal?: unknown } | null {
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
   const keys = Object.keys(parsed);
-  if (keys.length !== 2 || !keys.includes("fields") || !keys.includes("funnel")) return null;
-  const { fields, funnel } = parsed as { fields: unknown; funnel: unknown };
+  if (!keys.includes("fields") || !keys.includes("funnel") || keys.some((key) => !EXTRAS_KEYS.has(key))) return null;
+  const { fields, funnel, legal } = parsed as { fields: unknown; funnel: unknown; legal?: unknown };
   if (!Array.isArray(fields) || (funnel !== null && !parseFunnel(funnel))) return null;
-  return { fields, funnel };
+  // The legal information (#3004, 618 [SZ2]) is the full record's own, never a listing key; parseProduct reads it.
+  return keys.includes("legal") ? { fields, funnel, legal } : { fields, funnel };
 }
+
+/** The keys productWrites puts in a product's extras record: fields and funnel always, legal when filled (#3004). */
+const EXTRAS_KEYS = new Set(["fields", "funnel", "legal"]);
 
 /**
  * One product as its two GETs answered (CX-123 rule 24): null only when Redis answered nil for its listing (no

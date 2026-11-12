@@ -55,6 +55,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { NIMBUS_FROM, RESEND_BASE, headerText, oneAddress, sendEmail } from "@/lib/email";
 import { creatorDomain } from "@/lib/mail-from";
+import { claimMark } from "@/lib/claim-mark";
 import { withinLimit } from "@/lib/request-guard";
 import { HANDLE_PATTERN, storeForHandle } from "@/lib/store";
 import { RESEND_TIMEOUT_MS, timed } from "@/lib/fetch-timeout";
@@ -306,7 +307,13 @@ export async function forwardInbound(id: string): Promise<"sent" | "skipped" | "
     // Listed before the allowance is taken: a list that cannot be read now is a retry that spends nothing.
     listed = await listFiles(id);
     if (!listed) return "retry";
-    if (!(await withinLimit("creator-inbound", handle, CREATOR_HOURLY, 3_600))) return "skipped";
+    // Counted once a message (mail-queue hunt): a send Resend refused is a retry, and Resend makes the announcement
+    // again; counted on each try, one message refused a few times spent the hour's allowance and the store's next
+    // messages that hour were skipped for good. The message's mark is kept the allowance's hour; a mark that cannot
+    // be read is a retry that spends nothing.
+    const counted = await claimMark(`nl:inbound:counted:${id}`, 3_600);
+    if (counted === "unknown") return "retry";
+    if (counted === "ours" && !(await withinLimit("creator-inbound", handle, CREATOR_HOURLY, 3_600))) return "skipped";
     creator = { name: headerText(found.name, 60).replace(/["\\<>]/g, "") || handle, email, address: `${handle}@${creators}` };
     store = found;
   }

@@ -794,8 +794,9 @@ export function BuyBox({
         */
         <div className="mb-4">
           <label htmlFor={`os-${product.id}`} className="st-label">{w.chooseOptionFor(product.title)}</label>
-          {linked ? <p className="st-muted mt-1 text-sm" data-option-from-link="">{w.optionFromLink(linked.label)}</p> : null}
-          <select id={`os-${product.id}`} name="option" required defaultValue={linked ? linked.id : ""} className="st-field mt-2">
+          {linked ? <p id={`ol-${product.id}`} className="st-muted mt-1 text-sm" data-option-from-link="">{w.optionFromLink(linked.label)}</p> : null}
+          {/* The reason a linked option is chosen is read with the list, not only seen above it. */}
+          <select id={`os-${product.id}`} name="option" required defaultValue={linked ? linked.id : ""} aria-describedby={linked ? `ol-${product.id}` : undefined} className="st-field mt-2">
             <option value="" disabled>
               {w.chooseOne}
             </option>
@@ -807,9 +808,9 @@ export function BuyBox({
           </select>
         </div>
       ) : options.length > 0 ? (
-        <fieldset className="mb-4">
+        <fieldset className="mb-4" aria-describedby={linked ? `ol-${product.id}` : undefined}>
           <legend className="sr-only">{w.chooseOptionFor(product.title)}</legend>
-          {linked ? <p className="st-muted mb-2 text-sm" data-option-from-link="">{w.optionFromLink(linked.label)}</p> : null}
+          {linked ? <p id={`ol-${product.id}`} className="st-muted mb-2 text-sm" data-option-from-link="">{w.optionFromLink(linked.label)}</p> : null}
           {/*
             With what each includes written down, the cards stand side by side
             on a wide screen so the buyer can compare them; on a phone they

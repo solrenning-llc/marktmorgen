@@ -7,7 +7,7 @@ import { toast } from "@/components/toast";
 import { MAX_SITE_PAGES, MAX_SITE_TITLE, MAX_SLUG, SITE_STARTERS, type SitePage, slugFrom } from "@/lib/site-page-rules";
 import { pageFileName } from "@/lib/site-page-file";
 
-const MESSAGES: Record<string, string> = {
+export const MESSAGES: Record<string, string> = {
   too_many: `A store has up to ${MAX_SITE_PAGES} pages of its own. Remove one first.`,
   title: "Give the page a title.",
   slug: "An address is lowercase letters and numbers, with a dash between words.",
@@ -24,6 +24,7 @@ const MESSAGES: Record<string, string> = {
   too_big: "That page is bigger than a page may be. Nothing was added.",
   kind: "That file holds a kind of block a store's own page cannot have. Nothing was added.",
   forms_unread: "Your forms could not be read just now, so the page was not brought in. Try again in a moment.",
+  copy_empty: "This page has no blocks yet, so there is nothing to copy. Add a new page instead.",
   server_error: "Something went wrong on our side. Try again in a moment.",
 };
 

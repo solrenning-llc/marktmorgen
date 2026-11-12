@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 /** What the inbox route answers (app/api/store/inbox): the same shape the studio's other calls get. */
 type Post = (body: Record<string, unknown>) => Promise<Record<string, unknown> & { ok?: boolean; error?: string }>;
@@ -39,6 +39,19 @@ export function InboxBlock({ id, post }: { id: string; post: Post }) {
         ? { phase: "open" }
         : { phase: "unknown" };
   const [asked, setAsked] = useState(0);
+  // Each action removes the control that had the focus, so the focus moves to the one that replaced it (2.4.3, review
+  // of #3840): set by the action, taken once that control is drawn.
+  const moveFocus = useRef(false);
+  const summary = useRef<HTMLElement>(null);
+  const undo = useRef<HTMLButtonElement>(null);
+  const retry = useRef<HTMLButtonElement>(null);
+  const checking = useRef<HTMLParagraphElement>(null);
+  useEffect(() => {
+    if (!moveFocus.current) return;
+    const target = state.phase === "open" ? summary.current : state.phase === "blocked" ? undo.current : state.phase === "unknown" ? retry.current : checking.current;
+    target?.focus();
+    if (state.phase !== "checking") moveFocus.current = false;
+  }, [state]);
 
   useEffect(() => {
     let current = true;
@@ -56,13 +69,18 @@ export function InboxBlock({ id, post }: { id: string; post: Post }) {
     setBusy(true);
     const reason = note.trim();
     const answer = await post({ action: "block", id, reason });
-    setBusy(false);
     if (answer.ok === true && answer.blocked === true) {
-      setState({ phase: "blocked", reason });
+      // The note shown is the one kept: a teammate may have blocked first with their own (review of #3840). Read back;
+      // when that cannot be read, it is said as blocked with no note, never with the one typed here.
+      const kept = await post({ action: "blocked", id });
+      const read = stateOf(kept);
+      setState(read.phase === "blocked" ? read : { phase: "blocked", reason: "" });
+      moveFocus.current = true;
       setSaid("Blocked. They can no longer write to you from your store.");
     } else {
       setSaid(REFUSED[String(answer.error)] ?? "That did not work, so nothing changed. Check your connection and try again.");
     }
+    setBusy(false);
   }
 
   async function unblock() {
@@ -72,6 +90,7 @@ export function InboxBlock({ id, post }: { id: string; post: Post }) {
     setBusy(false);
     if (answer.ok === true && answer.blocked === false) {
       setState({ phase: "open" });
+      moveFocus.current = true;
       setNote("");
       setSaid("They can write to you again.");
     } else {
@@ -83,15 +102,21 @@ export function InboxBlock({ id, post }: { id: string; post: Post }) {
 
   return (
     <div className="mt-4 rounded-2xl p-4 ring-1 ring-line" data-inbox-block>
-      {state.phase === "checking" ? <p className="text-sm text-ink-soft">Checking whether you blocked this person…</p> : null}
+      {state.phase === "checking" ? (
+        <p ref={checking} tabIndex={-1} className="text-sm text-ink-soft">
+          Checking whether you blocked this person…
+        </p>
+      ) : null}
       {state.phase === "unknown" ? (
         <>
           <p className="text-sm">We could not check whether you blocked this person, so nothing is shown as blocked or not.</p>
           <button
+            ref={retry}
             type="button"
             className={`${control} mt-2`}
             onClick={() => {
               setState({ phase: "checking" });
+              moveFocus.current = true;
               setAsked((n) => n + 1);
             }}
           >
@@ -101,7 +126,7 @@ export function InboxBlock({ id, post }: { id: string; post: Post }) {
       ) : null}
       {state.phase === "open" ? (
         <details>
-          <summary className="flex min-h-11 cursor-pointer items-center text-sm font-semibold">Block this person</summary>
+          <summary ref={summary} className="flex min-h-11 cursor-pointer items-center text-sm font-semibold">Block this person</summary>
           <form onSubmit={block} className="mt-3 space-y-3">
             <p className="text-sm">
               They can no longer write to you in your store&apos;s chat or contact form. A report about an order they paid for, and a withdrawal from an order, still reach you.
@@ -120,7 +145,7 @@ export function InboxBlock({ id, post }: { id: string; post: Post }) {
         <>
           <p className="text-sm font-semibold">You blocked this person. They cannot write to you from your store.</p>
           {state.reason ? <p className="mt-1 text-sm text-ink-soft">Your note: {state.reason}</p> : null}
-          <button type="button" className={`${control} mt-2`} disabled={busy} aria-busy={busy} onClick={() => void unblock()}>
+          <button ref={undo} type="button" className={`${control} mt-2`} disabled={busy} aria-busy={busy} onClick={() => void unblock()}>
             Let them write again
           </button>
         </>

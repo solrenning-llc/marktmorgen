@@ -273,36 +273,77 @@ export type Settled = {
 };
 
 /**
+ * One person's outcome of a claimed attempt, written in one step only while the run still holds an open attempt
+ * (KEYS: the run's record, its history, the store's held index, the workflow's run index). A person erased while
+ * the step was in flight (forgetPersonCommands deletes the record, and the open attempt with it) gets nothing
+ * written back: not their address, their history nor a place in either index, and on the "uncertain" branch no
+ * record with no expiry (Codex L's HIGH, Defect 4083). Answers 1 when written, 0 when the run was gone. ARGV:
+ * the mode ("uncertain", "deferred" or "settle"), the event (pushed, or for "deferred" the attempt's event taken
+ * back out), the address, the status, the step, the note, the time, the held index's member, the person, and the
+ * seconds the record and history are kept for ("" to leave their expiry as it is). Lua returns are one script, one
+ * command, as QUEUE_IF_LEASED in lib/flows.ts is counted (lib/flow-limits.ts). Modelled by lib/redis-memory.ts.
+ */
+export const SETTLE_IF_OPEN = `-- marktmorgen:flow-settle:v1
+if redis.call("HEXISTS", KEYS[1], "open") == 0 then return 0 end
+if ARGV[1] == "uncertain" then
+  redis.call("RPUSH", KEYS[2], ARGV[2])
+  redis.call("HSET", KEYS[1], "email", ARGV[3], "status", ARGV[4], "step", ARGV[5], "note", ARGV[6], "updatedAt", ARGV[7])
+  redis.call("ZADD", KEYS[3], ARGV[7], ARGV[8])
+  redis.call("ZADD", KEYS[4], ARGV[7], ARGV[9])
+  return 1
+end
+redis.call("HDEL", KEYS[1], "open")
+if ARGV[1] == "deferred" then
+  redis.call("LREM", KEYS[2], -1, ARGV[2])
+else
+  redis.call("RPUSH", KEYS[2], ARGV[2])
+end
+redis.call("HSET", KEYS[1], "email", ARGV[3], "status", ARGV[4], "step", ARGV[5], "note", ARGV[6], "updatedAt", ARGV[7])
+redis.call("ZADD", KEYS[4], ARGV[7], ARGV[9])
+if ARGV[10] ~= "" then
+  redis.call("EXPIRE", KEYS[1], ARGV[10])
+  redis.call("EXPIRE", KEYS[2], ARGV[10])
+end
+return 1`;
+
+/**
  * Writes the outcome of each claimed attempt. Confirmed, failed and deferred
  * clear the attempt; uncertain leaves it open and holds the run, so it is
- * never repeated by itself.
+ * never repeated by itself. Each is written only while its run still holds an
+ * open attempt (SETTLE_IF_OPEN): a person erased meanwhile stays erased.
  */
 export async function settleAttempts(listId: string, flowId: string, index: number, stepId: string, kind: string, outcomes: Settled[], nowSeconds = Math.floor(Date.now() / 1000)): Promise<void> {
   if (!outcomes.length) return;
   const commands: (string | number)[][] = [];
   for (const o of outcomes) {
     const person = personOf(o.email);
-    const run = runKey(flowId, person);
-    const log = logKey(flowId, person);
+    const keys = [runKey(flowId, person), logKey(flowId, person), heldKey(listId), indexKey(flowId)];
+    const member = `${flowId}|${person}`;
     if (o.state === "uncertain") {
-      commands.push(
-        ["RPUSH", log, event({ at: nowSeconds, step: index, stepId, kind, state: "uncertain", note: o.note })],
-        ["HSET", run, "email", normaliseEmail(o.email), "status", "held", "step", index, "note", o.note.slice(0, 300), "updatedAt", nowSeconds],
-        ["ZADD", heldKey(listId), nowSeconds, `${flowId}|${person}`],
-        ["ZADD", indexKey(flowId), nowSeconds, person],
-      );
+      const pushed = event({ at: nowSeconds, step: index, stepId, kind, state: "uncertain", note: o.note });
+      commands.push(["EVAL", SETTLE_IF_OPEN, keys.length, ...keys, "uncertain", pushed, normaliseEmail(o.email), "held", index, o.note.slice(0, 300), nowSeconds, member, person, ""]);
       continue;
     }
     const status: RunStatus = o.status ?? (o.state === "deferred" ? "waiting" : o.to < 0 ? (o.state === "failed" ? "failed" : "done") : "running");
-    commands.push(["HDEL", run, "open"]);
     // A wait is a status, not an event: a month that runs out is not written down forty times,
     // and the attempt claimAttempts wrote for this try is taken back out (the same event, word for word).
-    if (o.state !== "deferred") commands.push(["RPUSH", log, event({ at: nowSeconds, step: index, stepId, kind, state: o.state, note: o.note })]);
-    else commands.push(["LREM", log, -1, event({ at: nowSeconds, step: index, stepId, kind, state: "attempted", note: "" })]);
-    commands.push(["HSET", run, "email", normaliseEmail(o.email), "status", status, "step", o.state === "deferred" ? index : o.to, "note", o.state === "deferred" ? o.note.slice(0, 300) : "", "updatedAt", nowSeconds]);
+    const logged = o.state !== "deferred"
+      ? event({ at: nowSeconds, step: index, stepId, kind, state: o.state, note: o.note })
+      : event({ at: nowSeconds, step: index, stepId, kind, state: "attempted", note: "" });
     // In the index at every write, so a run started before history existed can be found and erased too.
-    commands.push(["ZADD", indexKey(flowId), nowSeconds, person]);
-    if (TERMINAL.has(status)) commands.push(["EXPIRE", run, RUN_KEEP_SECONDS], ["EXPIRE", log, RUN_KEEP_SECONDS]);
+    commands.push([
+      "EVAL", SETTLE_IF_OPEN, keys.length, ...keys,
+      o.state === "deferred" ? "deferred" : "settle",
+      logged,
+      normaliseEmail(o.email),
+      status,
+      o.state === "deferred" ? index : o.to,
+      o.state === "deferred" ? o.note.slice(0, 300) : "",
+      nowSeconds,
+      member,
+      person,
+      TERMINAL.has(status) ? RUN_KEEP_SECONDS : "",
+    ]);
   }
   await redisPipeline(commands);
 }

@@ -93,7 +93,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
 const realNow = Date.now.bind(Date), realSetTimeout = globalThis.setTimeout;
 let skipped = 0;
 Date.now = () => realNow() + skipped;
-async function waitsSkipped<T>(work: () => Promise<T>): Promise<T> {
+async function waitsSkipped<T>(work: () => T): Promise<Awaited<T>> {
   globalThis.setTimeout = ((fn: (...args: unknown[]) => void, ms?: number, ...args: unknown[]) => {
     if (typeof ms === "number" && ms > 0 && /\bat takeLock\d* \(/.test(new Error().stack ?? "")) {
       skipped += ms;

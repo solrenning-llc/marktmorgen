@@ -13,7 +13,7 @@ import {addCompany,changeCompanies,dropCompany,forgetCompanyPerson,linkPerson,re
 import {claimHandle,ensureStatsId,ensureStoreId,setSubscription,storeForEmail} from '@/lib/store';
 import {erasePerson} from '@/lib/person-erasure';
 import {personKey} from '@/lib/person-key';
-import {upsertContact} from '@/lib/contacts';
+import {orderRoom,upsertContact} from '@/lib/contacts';
 import {restoredSentence} from '@/lib/crm-companies-rules';
 import {isSuppressed} from '@/lib/suppression';
 import {store as redis} from './redis-stub';
@@ -141,6 +141,38 @@ test('coming back without their own yes (a purchase without the box) keeps the d
   const refused = await post({action: 'link', id, person: s.person});
   assert.notEqual(refused.status, 200);
   assert.equal((await readCompanies(s.statsId)).some((c) => c.people.includes(s.person)), false);
+});
+
+// Claude 2 cloud C's and Claude 1 cloud's LOW on #4026: on an order's write the mark's lift went in a call of its
+// own after the write. When that call failed, the sign-up (already written) was reported as failed, and the lift was
+// never sent again, since the next yes no longer finds them deleted. It now goes in the same write as the suppression.
+test("an order's yes lifts the mark in the same write as the suppression, never in a call of its own", async () => {
+  const s = await seed();
+  await erase(who);
+  const store = await storeForEmail(owner);
+  assert.ok(store?.listId);
+  const original = redis.pipeline.bind(redis);
+  let alone = 0;
+  redis.pipeline = (async (commands: unknown[][]) => {
+    if (commands.length === 1 && commands[0][0] === 'DEL' && String(commands[0][1]).startsWith('nl:crm:co:gone:')) {
+      alone++;
+      throw new Error('synthetic: the lift sent on its own failed');
+    }
+    return original(commands as never);
+  }) as never;
+  let threw: unknown = null;
+  try {
+    await upsertContact(store.listId, who, {agreed: true, explicit: true, source: 'free', at: new Date().toISOString()}, orderRoom(store));
+  } catch (error) {
+    threw = error;
+  } finally {
+    redis.pipeline = original;
+  }
+  assert.equal(threw, null, 'a sign-up that was written is never reported as failed by a lift sent after it');
+  assert.equal(alone, 0, 'the lift is never sent in a call of its own');
+  assert.equal(await isSuppressed(store.listId, who), false);
+  const linked = await post({action: 'link', id, person: s.person});
+  assert.equal(linked.status, 200, JSON.stringify(await linked.clone().json()));
 });
 
 // Claude 7's MÉDIO 2 on #4026: an undo that left out a deleted person never says they moved to another company.

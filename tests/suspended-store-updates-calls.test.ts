@@ -16,7 +16,7 @@ import { advanceUpdate, startUpdate } from "@/lib/product-updates";
 import { sendCallReminders } from "@/lib/call-reminders";
 import { REMINDER_QUEUE, reminderMember } from "@/lib/call-records";
 import { type CallListing, holdAndCheckout } from "@/lib/calls";
-import { type CallSetup, zonedToUtc } from "@/lib/call-setup";
+import { type CallSetup } from "@/lib/call-setup";
 import {
   type Product,
   type Store,
@@ -38,9 +38,7 @@ import { usedThisMonth } from "@/lib/mail";
 import { windowId } from "@/lib/allowance-window";
 import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
-
-const NY = "America/New_York";
-const DAY = 86_400_000;
+import { NY, weekdayAt } from "./weekday";
 
 /** What the stand-in email service was asked to send: one entry an email, single or in a batch. */
 const mailed: { to: string; subject: string; text: string }[] = [];
@@ -257,17 +255,6 @@ const weekly = {
   seats: 1,
   sessions: [],
 } as unknown as CallSetup;
-
-function weekdayAt(days: number, minute: number): number {
-  for (let d = days; d < days + 8; d += 1) {
-    const day = new Date(Date.now() + d * DAY);
-    const p = new Intl.DateTimeFormat("en-US", { timeZone: NY, year: "numeric", month: "2-digit", day: "2-digit", weekday: "short" }).formatToParts(day);
-    const get = (t: string) => p.find((x) => x.type === t)?.value ?? "";
-    if (get("weekday") === "Sat" || get("weekday") === "Sun") continue;
-    return zonedToUtc(Number(get("year")), Number(get("month")), Number(get("day")), minute, NY) as number;
-  }
-  throw new Error("no weekday");
-}
 
 test("call reminder: a switched-off store still reminds the buyer of a paid call, with only the booking's own details", async () => {
   reset();

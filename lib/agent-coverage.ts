@@ -158,6 +158,7 @@ export const AGENT_COVERAGE: Readonly<Record<string, AgentAction>> = {
   "POST store/fields": row("products", draft),
   "POST store/file": row("files", draft),
   "POST store/file/attach": row("files", draft),
+  "POST store/first-product/pdf": row("products", never("A PDF made from what the creator wrote, downloaded to their own computer (490 [PP1]): nothing is saved for an agent to read or change, and a file cannot pass through an assistant's conversation.")),
   "GET store/file/download": row("files", read),
   "POST store/form-opportunity": row("buyers", draft),
   "POST store/forms": row("pages", draft),

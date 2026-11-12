@@ -1061,6 +1061,12 @@
       "parameters": []
     },
     {
+      "source": "app/studio/first-product/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/studio/first-product",
+      "parameters": []
+    },
+    {
       "source": "app/studio/forms/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/studio/forms",
@@ -1398,6 +1404,7 @@
     "components/feature-catalogue.tsx",
     "components/feature-demos.tsx",
     "components/feature-visuals.tsx",
+    "components/first-product-maker.tsx",
     "components/forget-inbox-drafts.tsx",
     "components/forget-lesson-positions.tsx",
     "components/form-answers.tsx",
@@ -1835,6 +1842,7 @@
     "app/api/store/file/attach/route.ts",
     "app/api/store/file/download/route.ts",
     "app/api/store/file/route.ts",
+    "app/api/store/first-product/pdf/route.ts",
     "app/api/store/form-opportunity/route.ts",
     "app/api/store/form/route.ts",
     "app/api/store/forms/export/route.ts",
@@ -2090,6 +2098,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 143
+    "pageTemplates": 144
   }
 }

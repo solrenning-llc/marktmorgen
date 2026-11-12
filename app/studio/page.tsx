@@ -1767,6 +1767,10 @@ export default async function StudioPage({
 
             {may("products") ? (
               <div id="products" className="scroll-mt-32">
+                {/* Write a first product from an outline and download it as a PDF to add here (490 [PP1], app/studio/first-product). */}
+                <p className="mb-4 text-sm">
+                  <Link href={studioPath(store, "", "first-product")} prefetch={false} className="inline-flex min-h-11 items-center font-semibold text-ink underline underline-offset-4">Write a guide, checklist, workbook or template here, and download it as a PDF to sell</Link>
+                </p>
                 {(async () => {
                   const newComments = early(newCommentsFor(shelf?.products ?? []));
                   const waitlists = waitlistViews(store, (shelf?.products ?? []).map((p) => p.id)).catch(() => ({}));

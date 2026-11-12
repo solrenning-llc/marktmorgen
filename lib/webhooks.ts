@@ -814,11 +814,15 @@ export type DeliveryView = Pick<Delivery, "id" | "eventId" | "type" | "state" | 
 };
 export type WebhooksView = { endpoints: EndpointView[]; log: DeliveryView[] };
 
-export async function webhooksView(store: Store): Promise<WebhooksView> {
+/**
+ * `log: false` reads only the endpoints, never the delivery log: what the public API's hooks routes answer, inside
+ * one API request (UNIT_COST.api), which the log's LOG_SIZE deliveries at up to DELIVERY_MAX_BYTES each are not.
+ */
+export async function webhooksView(store: Store, { log = true }: { log?: boolean } = {}): Promise<WebhooksView> {
   if (!store.statsId || !isRedisConfigured()) return { endpoints: [], log: [] };
   const [rawConfig, rawLog] = await redisPipeline([
     ["GET", cfgKey(store.statsId)],
-    ["LRANGE", logKey(store.statsId), 0, LOG_SIZE - 1],
+    ...(log ? [["LRANGE", logKey(store.statsId), 0, LOG_SIZE - 1]] : []),
   ]);
   const config = parseConfig(rawConfig);
   const ids = Array.isArray(rawLog) ? (rawLog as unknown[]).map(String).filter((id) => DELIVERY_ID_PATTERN.test(id)) : [];
@@ -1004,7 +1008,7 @@ export type AddEndpointResult =
  * studio never shows it again. The address is checked now (https, a public
  * host) and again at every send, since what a name points to can change.
  */
-export async function addEndpoint(store: Store, rawUrl: string, events: unknown, now = Date.now(), byKey = ""): Promise<AddEndpointResult> {
+export async function addEndpoint(store: Store, rawUrl: string, events: unknown, now = Date.now(), byKey = "", withLog = true): Promise<AddEndpointResult> {
   if (!store.statsId) return { ok: false, reason: "invalid", message: "Open the studio once more and try again." };
   // 232 [CA1] 4b4b2: a new endpoint is new delivery work; it waits while the plan's costs are paused.
   const paused = integrationPauseWord(store, now / 1000);
@@ -1054,7 +1058,7 @@ export async function addEndpoint(store: Store, rawUrl: string, events: unknown,
     ["SADD", STORES_KEY, store.statsId],
     ...(written.before?.endpoints.length ? [] : [["DEL", anchorKey(store.statsId)], ["DEL", waitKey(store.statsId)]]),
   ]);
-  return { ok: true, secret, view: await webhooksView(store) };
+  return { ok: true, secret, view: await webhooksView(store, { log: withLog }) };
 }
 
 /** Changes which events an endpoint hears. */
@@ -1106,8 +1110,8 @@ export async function endpointsOfKeys(store: Store, keyIds: string[]): Promise<{
   return (config?.endpoints ?? []).filter((e) => e.key && keyIds.includes(e.key)).map((e) => ({ id: e.id, key: e.key as string, where: shortAddress(e.url) }));
 }
 
-/** Removes an endpoint. Anything still waiting to be sent to it is dropped at its next try. */
-export async function removeEndpoint(store: Store, id: string): Promise<WebhooksView> {
+/** Removes an endpoint. Anything still waiting to be sent to it is dropped at its next try. `withLog: false`: the view answered without the delivery log (webhooksView). */
+export async function removeEndpoint(store: Store, id: string, withLog = true): Promise<WebhooksView> {
   if (!store.statsId) return { endpoints: [], log: [] };
   const written = await changeConfig(store.statsId, (fresh) =>
     fresh && fresh.endpoints.some((e) => e.id === id) ? { ...fresh, handle: store.handle, endpoints: fresh.endpoints.filter((e) => e.id !== id) } : null,
@@ -1120,7 +1124,7 @@ export async function removeEndpoint(store: Store, id: string): Promise<Webhooks
     await redisPipeline([["DEL", givenUpDayKey(store.statsId, today, id)], ["DEL", givenUpDayKey(store.statsId, today - 1, id)]])
       .catch((error) => console.error("deleting a removed endpoint's sets of passed-over events failed; they expire by themselves", store.handle, id, error));
   }
-  return webhooksView(store);
+  return webhooksView(store, { log: withLog });
 }
 
 export type ResendResult =

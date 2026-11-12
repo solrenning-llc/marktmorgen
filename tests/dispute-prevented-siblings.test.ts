@@ -39,6 +39,7 @@
  */
 import { disputeLost, lostDisputesSince, refundedInFull, rowGivesBack } from "@/lib/refunds";
 import { DISPUTE_APPEAL_STAGES, DISPUTE_STATUSES, disputeMoney, disputeMoneyFields, disputeMoneyGone } from "@/lib/dispute-statuses";
+import { disputeMoneyGone as moneyGoneOfRevenue } from "@/lib/retained-revenue";
 import { done, is, part } from "./check";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_c5_prevented_siblings";
@@ -214,7 +215,14 @@ async function doors() {
   is("lostDisputesSince: a blocked one needs no charge: it takes nothing back", (await lostDisputesSince("acct_C5Prevented", 0)).complete, true);
 }
 
+/** One rule for where a prevented dispute's money went (Claude 1 cloud, MEDIUM on #3323): the doors and the money readers share it. */
+function oneRule() {
+  part("One copy of the money rule: the doors read the same function as the money readers");
+  is("lib/dispute-statuses.ts gives lib/retained-revenue.ts's disputeMoneyGone, not a copy of it", disputeMoneyGone === moneyGoneOfRevenue, true);
+}
+
 async function main() {
+  oneRule();
   table();
   await doors();
 }

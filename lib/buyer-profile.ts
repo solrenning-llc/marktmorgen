@@ -40,7 +40,7 @@ import { readPaid } from "@/lib/paypal-sales";
 import { randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { type DataStore, giveData, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { onAccount } from "@/lib/stripe-account";
@@ -188,17 +188,31 @@ export async function addPersonNote(statsId: string, person: string, by: string,
   const json = JSON.stringify({ at: Math.floor(now / 1000), by: normaliseEmail(by), text });
   // Its room in the store's data room first (DataRoomError when it does not fit), its person's place with it.
   await needData(room, [{ slot: NOTES_SLOT, bytes: dataBytes([id, json], 1) + dataBytes([person], 1) }]);
-  await redisPipeline([
-    ["HSET", notesKey(statsId, person), id, json],
-    ["EXPIRE", notesKey(statsId, person), NOTES_SECONDS],
-    ["SADD", whoKey(statsId), person],
-    ["EXPIRE", whoKey(statsId), NOTES_SECONDS],
-  ]);
+  // Each reply read exactly (rule 24; Codex X5 on #3159): HSET answers 1 for a new field, the two EXPIREs 1, SADD 0 or 1.
+  // Anything else is unknown: the note may or may not be kept, so its room stays taken and the save is not answered
+  // as done.
+  const wrote = repliesFor(
+    await redisPipeline([
+      ["HSET", notesKey(statsId, person), id, json],
+      ["EXPIRE", notesKey(statsId, person), NOTES_SECONDS],
+      ["SADD", whoKey(statsId), person],
+      ["EXPIRE", whoKey(statsId), NOTES_SECONDS],
+    ]),
+    4,
+  );
+  const [set, kept, listed, keptList] = (wrote ?? []).map(countOf);
+  if (!wrote || set !== 1 || kept !== 1 || (listed !== 0 && listed !== 1) || keptList !== 1) throw new UnknownReplyError("saving a buyer's note");
   const notes = await readPersonNotes(statsId, person);
   if (notes.length > MAX_PERSON_NOTES) {
     const dropped = notes.slice(MAX_PERSON_NOTES);
-    await redisPipeline([["HDEL", notesKey(statsId, person), ...dropped.map((n) => n.id)]]);
-    await giveData(room, [{ slot: NOTES_SLOT, bytes: dropped.reduce((sum, n) => sum + noteBytes(n), 0) }]);
+    // One HDEL a note, so each one's room goes back only when its own delete answered 1; one that answered 0 was
+    // already gone (its room went with it), and any other reply keeps its room (never given back on a guess).
+    const removed = repliesFor(await redisPipeline(dropped.map((n) => ["HDEL", notesKey(statsId, person), n.id])), dropped.length);
+    const gone = removed ? dropped.filter((_, i) => countOf(removed[i]) === 1) : [];
+    if (gone.length) await giveData(room, [{ slot: NOTES_SLOT, bytes: gone.reduce((sum, n) => sum + noteBytes(n), 0) }]);
+    if (!removed || gone.length + removed.filter((r) => countOf(r) === 0).length !== dropped.length) {
+      console.error("pruning a buyer's oldest notes was not confirmed; their room stays counted", dropped.length);
+    }
     return notes.slice(0, MAX_PERSON_NOTES);
   }
   return notes;
@@ -208,8 +222,8 @@ export async function addPersonNote(statsId: string, person: string, by: string,
 export async function removePersonNote(statsId: string, person: string, id: unknown, room: DataStore): Promise<PersonNote[]> {
   if (typeof id === "string" && NOTE_ID.test(id) && PERSON_KEY.test(person) && isRedisConfigured()) {
     const gone = (await readPersonNotes(statsId, person)).find((n) => n.id === id);
-    const [removed] = await redisPipeline([["HDEL", notesKey(statsId, person), id]]);
-    if (gone && Number(removed) === 1) await giveData(room, [{ slot: NOTES_SLOT, bytes: noteBytes(gone) }]);
+    const [removed] = repliesFor(await redisPipeline([["HDEL", notesKey(statsId, person), id]]), 1) ?? [null];
+    if (gone && countOf(removed) === 1) await giveData(room, [{ slot: NOTES_SLOT, bytes: noteBytes(gone) }]);
   }
   return readPersonNotes(statsId, person);
 }

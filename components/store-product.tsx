@@ -1,7 +1,7 @@
 import { EmailField } from "@/components/email-field";
 import { servedImageUrl, servedSrcSet } from "@/lib/picture-served";
 import { packageSaving } from "@/lib/call-package-rules";
-import { fromPrice, lengthList, listedLengths } from "@/lib/call-lengths";
+import { lengthList, listedLengths } from "@/lib/call-lengths";
 import { saleClock, saleOff, salePrice } from "@/lib/store-sale";
 import { activeIntro } from "@/lib/intro-price";
 import { activeYearly, yearlySaving } from "@/lib/yearly-price";
@@ -25,6 +25,7 @@ import { comparable, optionsInPickOrder } from "@/lib/product-option";
 import { DEFAULT_PEOPLE, MAX_PEOPLE, MIN_PEOPLE } from "@/lib/group-rules";
 import { givableOptions } from "@/lib/gift-rules";
 import { productSegment } from "@/lib/product-slug";
+import { pricePill } from "@/lib/product-pill";
 import { membershipWords } from "@/lib/buyer-words/membership";
 import { preorderWords } from "@/lib/buyer-words/preorder";
 import { pickWords } from "@/lib/buyer-words/pick";
@@ -58,20 +59,8 @@ export function productPath(store: Store, product: Listing): string {
   return `/@${store.handle}/p/${productSegment(product)}`;
 }
 
-/** The figure on the price pill: "$27", "from €9 a month", "¥500+", "Free", in the store's currency and language. */
-export function pricePill(store: Store, product: Listing): string {
-  const { w, money } = speech(store);
-  if (isFree(product)) return w.free;
-  if (activePwyw(product)) return `${money(product.priceCents)}+`;
-  const options = sellableOptions(product);
-  const every = product.recurring ? ` ${w.every(product.recurring.interval)}` : "";
-  // A call with several lengths (lib/call-lengths.ts): from the lowest of their prices.
-  const lengths = product.call ? listedLengths(product.call, product.priceCents) : [];
-  if (lengths.length) return w.fromPrice(money(fromPrice(lengths) as number));
-  const price = `${money(fromPriceCents(product))}${every}`;
-  return options.length > 1 ? w.fromPrice(price) : price;
-}
-
+/* The figure on the price pill lives in lib/product-pill.ts, so a server module can use it without this file's client components. */
+export { pricePill };
 
 /** "Subscribe — $5 the first month", for a membership with an introductory price (lib/intro-price.ts); null without one. */
 export function introButton(store: Store, product: Listing): string | null {

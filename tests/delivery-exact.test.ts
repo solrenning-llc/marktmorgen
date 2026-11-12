@@ -18,7 +18,7 @@
  *
  * Synthetic data only; the healthy and confirmed-absence answers work as before.
  */
-import { DELIVERY_ALLOWANCE_BYTES, ownersOf, recordDelivery, rememberFolderOwner, storeKeysOf } from "@/lib/delivery";
+import { DELIVERY_ALLOWANCE_BYTES, monthKey, ownersOf, recordDelivery, rememberFolderOwner, storeKeysOf } from "@/lib/delivery";
 import { GET as usage } from "@/app/api/cron/usage/route";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -77,7 +77,7 @@ async function watch(): Promise<void> {
   const folder = "c0c0c0c0c0c0c0c0";
   await rememberFolderOwner(folder, "heavy@example.com");
   await recordDelivery(`stores/${folder}/prod01/file.zip`, DELIVERY_ALLOWANCE_BYTES + 1024);
-  const TOLD = "nl:usage-watch:told";
+  const TOLD = `nl:usage-watch:told:${monthKey()}`;
   const run = async () => {
     // Each run starts from a month where nobody was told yet.
     await pipeline([["DEL", TOLD]]);

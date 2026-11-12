@@ -179,10 +179,10 @@ async function main(): Promise<void> {
   part("Card pages read after the deadline still leave due members for the next run");
   reset();
   {
-    const product = await makeStore("cards-page-time@example.com", "cardpagetime", "acct_1TestCardPageTime01", true);
+    const product = await makeStore("cards-page-time@example.com", "cardpagetime", "acct_1CardPageTime", true);
     const expiring = Array.from({ length: 49 }, (_, i) => (i + 1) * 10);
-    active.set("acct_1TestCardPageTime01", running("cardpagetime", product, 600, expiring));
-    slowActive.set("acct_1TestCardPageTime01", "sub_cardpagetimeRun0399");
+    active.set("acct_1CardPageTime", running("cardpagetime", product, 600, expiring));
+    slowActive.set("acct_1CardPageTime", "sub_cardpagetimeRun0399");
     await run();
     is("the fifth page finishes after the deadline, so no late email is sent", mails.length, 0);
     await run();

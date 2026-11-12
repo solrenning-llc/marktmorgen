@@ -843,8 +843,8 @@ function figureKind(folded: string, start: number, end: number): string {
 const isPlain = (kind: string) => kind === "plain" || kind.startsWith("plain:");
 /**
  * Whether a fact of one kind holds a reply's figure of another: a bare
- * reply figure only a count of its value, a plain reply figure that names
- * what it counts any fact of its value; otherwise the same kind, a price of
+ * reply figure, or a plain one that names what it counts, only a count of
+ * its value; otherwise the same kind, a price of
  * no known currency ("money:?") any price, a figure with no rate the same
  * figure with one ("$9" for "$9 a month"), never a rate the fact does not
  * have ("$49 per lesson" for "$49").
@@ -854,7 +854,10 @@ function kindHolds(reply: string, fact: string): boolean {
   // a fact that is a count: never by a day, a price or a percent, whatever word of paying the sentence used (Claude 1's
   // review 6799181835 of #3484: a word list cannot be complete, and the 14-day refund window let each of them through).
   if (reply === "plain") return isPlain(fact) || fact.startsWith("count:");
-  if (isPlain(reply)) return true;
+  // A figure that names what it counts ("49 students", "14 lessons") is held only by a fact that counts too, never by a
+  // price, a day or a percent of the same value (Claude 1 cloud's review of #3484 at 9288beabe7, MÉDIO: an invented count
+  // of buyers or lessons was shown whenever a price or a refund window had its value).
+  if (isPlain(reply)) return isPlain(fact) || fact.startsWith("count:");
   // A count in a sentence about a price: only a fact that is a count too, never a price, a time or a percent.
   if (reply.startsWith("count:")) return isPlain(fact) || fact.startsWith("count:");
   const [replyBase, replyRate] = reply.split("/");

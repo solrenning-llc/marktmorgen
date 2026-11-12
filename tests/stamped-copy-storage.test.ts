@@ -234,6 +234,27 @@ async function main() {
   is("control: with room, the preview is made and kept", [Boolean(preview), preview ? world.files.has(preview.pathname) : false], [true, true]);
   is("and nothing stays reserved", [null, "[]"].includes(await pending() as string | null), true);
 
+  part("A file that cannot be stamped for what it is (Codex X5's MEDIUM): handed over as uploaded, the store full or not");
+  // A PDF that cannot be read (password-protected, damaged): stampBytes refuses it for what it is, not for now.
+  const unstampable = async () => {
+    n += 1;
+    const pathname = `stores/${FOLDER}/${String(n).padStart(10, "0")}/Locked.pdf`;
+    const bytes = new TextEncoder().encode("%PDF-1.7\nnot a document pdf-lib can open\n%%EOF");
+    world.files.set(pathname, bytes);
+    return { pathname, name: "Locked.pdf", bytes: bytes.byteLength, contentType: "application/pdf", addedAt: `2026-11-11T12:30:0${n % 10}.000Z` } as ProductFile;
+  };
+  const problemOf = async (file: ProductFile) => (await redis.pipeline([["GET", stamp.problemKey(file.pathname)]]))[0];
+  await forgetNoRoom();
+  const lockedRoomy = await unstampable();
+  is("control, a store with room: the original, and the problem noted", [(await stamp.stampedDelivery(lockedRoomy, sale(20), shop, meter().m)).kind, await problemOf(lockedRoomy)], ["original", "unreadable"]);
+  await redis.pipeline([["SET", NO_ROOM, "1", "EX", NO_ROOM_NOTE_SECONDS]]);
+  const lockedFull = await unstampable();
+  const lockedMeter = meter();
+  is("a store noted without room: the original too, never 'try again'", (await stamp.stampedDelivery(lockedFull, sale(21), shop, lockedMeter.m)).kind, "original");
+  is("and the problem noted for the creator, the same as with room", await problemOf(lockedFull), "unreadable");
+  is("and only the work done is paid for, never more than it held", lockedMeter.state.taken <= flyHoldUnits(lockedFull.bytes), true);
+  await forgetNoRoom();
+
   console.error = quiet;
   done();
 }

@@ -60,7 +60,9 @@ is("for those who see the people's pages", page.includes('"orders");'), true);
 is("the people found among the buyers, never stored by address", readFileSync("lib/companies-read.ts", "utf8").includes("personAddresses(store, people, ledger.count)"), true);
 is("said when Stripe or the companies cannot be read", page.includes("Stripe could not be read just now, so who works at each company is not shown.") && page.includes("Your companies could not be read just now. Nothing was changed."), true);
 is("the editor told when Stripe could not be read, or read only in part", page.includes("addressesRead={data.addressesRead}") && page.includes("addressesPartial={data.partial}") && readFileSync("lib/companies-read.ts", "utf8").includes("addressesRead: !people.size || Boolean(known)"), true);
-is("where it is said by a breadcrumb back to the buyers (2.4.8)", page.includes('<nav aria-label="Breadcrumb"') && page.includes('<li aria-current="page">Companies</li>') && page.includes('<Link href={studioPath(store, "", "people")} className="inline-flex min-h-11') && !page.includes('<p className="eyebrow">Buyers</p>'), true);
+// The studio's own trail (components/breadcrumb.tsx StudioTrail: a "Breadcrumb" nav, the page as aria-current), with
+// the buyers between the studio and this page.
+is("where it is said by a breadcrumb back to the buyers (2.4.8)", page.includes('<StudioTrail store={store} path={[{ label: "Buyers", href: studioPath(store, "", "people") }]} here="Companies" />') && !page.includes('<p className="eyebrow">Buyers</p>'), true);
 is("reached from the buyers page", readFileSync("app/studio/people/page.tsx", "utf8").includes('studioPath(store, "", "companies")') && readFileSync("app/studio/people/page.tsx", "utf8").includes("Companies you sell to"), true);
 
 done();

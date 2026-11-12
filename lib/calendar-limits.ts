@@ -43,3 +43,15 @@ export const CALENDAR_POLLS_PER_HOUR = 4;
  * answered from its token's one read like any other.
  */
 export const CALENDAR_REFUSED_PER_HOUR = 7;
+/**
+ * Calendars one store may try to add in ten minutes (R27): each try reads the
+ * calendar's address once (lib/calendar-sync.ts addFeed), so a store, even
+ * one with no plan, cannot ask for that read again and again. Ten covers
+ * setting up all MAX_FEEDS with a few corrected addresses.
+ */
+export const CALENDAR_ADDS_PER_TEN_MINUTES = 10;
+/**
+ * The same from one connection, whatever store it is signed in to: a
+ * machine holding several stores cannot multiply the reads.
+ */
+export const CALENDAR_ADDS_PER_CONNECTION_TEN_MINUTES = 20;

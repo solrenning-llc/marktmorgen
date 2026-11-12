@@ -220,21 +220,17 @@ export async function flowsBytes(listId: string | null): Promise<number | null> 
   return reply ? exactReply.countOf(reply[0]) : null;
 }
 
+/**
+ * The store's workflows, read exactly (CX-123 rule 24): none only when Redis says nil. A reply missing, extra, of
+ * another type or not a list of workflows throws UnknownReplyError, never "no workflows": a closed store's erasure
+ * (lib/closed-store-data.ts marksOf) and a person's copy (lib/person-copy.ts) must not go on without them. Callers
+ * that can do without (data-recount, buyer-profile, checkout-sweep) catch it themselves.
+ */
 export async function readFlows(listId: string | null): Promise<Flow[]> {
   if (!listId || !isRedisConfigured()) return [];
-  const [raw] = await redisPipeline([["GET", flowsKey(listId)]]);
-  return parseFlows(raw);
+  return readFlowsExact(listId);
 }
 
-function parseFlows(raw: unknown): Flow[] {
-  if (typeof raw !== "string") return [];
-  try {
-    const list = JSON.parse(raw) as Flow[];
-    return Array.isArray(list) ? list : [];
-  } catch {
-    return [];
-  }
-}
 
 /**
  * The store's workflows for the sender (sendDueSteps): none only when Redis says exactly nil; a reply that is missing

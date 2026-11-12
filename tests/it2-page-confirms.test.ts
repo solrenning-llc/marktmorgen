@@ -15,6 +15,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { PathOnboarding, FORGET_PATH_QUESTION } from "@/components/path-onboarding";
+import * as recoveryModule from "@/components/recovery-address-manager";
 import { RecoveryAddressManager, REMOVE_RECOVERY_QUESTION } from "@/components/recovery-address-manager";
 import { PasskeyManager } from "@/components/passkey-manager";
 import { done, is, part } from "./check";
@@ -53,6 +54,15 @@ is(
   ],
   [true, true, true, true, true],
 );
+// Review of 830a99c (LOW): when the removal answers "log in again", the whole form (question and Remove) gives way to
+// the "Log in again" panel, so Remove is gone and focusing it dropped the focus to the page. The heading takes it then.
+const landing = (recoveryModule as Record<string, unknown>).afterRemoveFocus as (<T>(removed: boolean, remove: T | null, heading: T | null) => T | null) | undefined;
+is(
+  "after the request the focus lands on what is still there: the heading once removed, Remove if it is still drawn, else the heading",
+  landing ? [landing(true, "remove", "heading"), landing(false, "remove", "heading"), landing(false, null, "heading")] : null,
+  ["heading", "remove", "heading"],
+);
+is("and the button uses it", recovery.includes("requestAnimationFrame(() => afterRemoveFocus(removed, removeButton.current, heading.current)?.focus());"), true);
 const withAddress = renderToStaticMarkup(createElement(RecoveryAddressManager, { shown: "m•••@e•••.com" }));
 is("first, only its Remove, as before; the question is not shown yet", [/>\s*Remove\s*<\/button>/.test(withAddress), withAddress.includes(REMOVE_RECOVERY_QUESTION)], [true, false]);
 is("and without an address, no Remove", /Remove\s*<\/button>/.test(renderToStaticMarkup(createElement(RecoveryAddressManager, { shown: "" }))), false);

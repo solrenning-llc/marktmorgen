@@ -172,6 +172,25 @@ export class MemoryRedis {
           }
           return this.run(["HDEL", handles, handle]);
         }
+        // lib/community-push.ts STILL_IN: one mark per member key, "y" in, "r" taken out, "n" no record, "?" any other shape.
+        if (key.startsWith("-- marktmorgen:community-still-in:v1\n") && args[0] === "1" && args.length >= 3) {
+          const [, members, ...keys] = args;
+          const rows = this.run(["HMGET", members, ...keys]) as (string | null)[];
+          return keys.map((who, i) => {
+            const raw = rows[i];
+            if (raw === null) return "n";
+            let record: unknown;
+            try {
+              record = JSON.parse(raw);
+            } catch {
+              return "?";
+            }
+            if (!record || typeof record !== "object") return "?";
+            const fields = record as { k?: unknown; removed?: unknown; muted?: unknown };
+            if (fields.k !== who || typeof fields.removed !== "boolean" || typeof fields.muted !== "boolean") return "?";
+            return fields.removed ? "r" : "y";
+          }).join("");
+        }
         // lib/group-buy.ts PLACE_RELEASE: a place's opening hold deleted only while its token is still the open's own.
         if (key.startsWith("-- marktmorgen:group-place-release:v1\n") && args[0] === "1" && args.length === 3) {
           const [, hold, token] = args;
@@ -214,6 +233,13 @@ export class MemoryRedis {
             out.push(seen === args[i + 1] ? 1 : 0);
           }
           return out;
+        }
+        // lib/certificate.ts CERT_SLOT_SWAP: a student's slot moved to a new certificate only while it still names the one read.
+        if (key.startsWith("-- marktmorgen:cert-slot-swap:v1\n") && args[0] === "1" && args.length === 5) {
+          const [, slots, who, expected, id] = args;
+          if (this.run(["HGET", slots, who]) !== expected) return 0;
+          this.run(["HSET", slots, who, id]);
+          return 1;
         }
         // lib/assignment.ts HAND_IN_WRITE_IF: a student's work written only over the one it was read as.
         if (key.startsWith("-- marktmorgen:hand-in-write-if:v1\n") && args[0] === "4" && args.length === 12) {
@@ -720,6 +746,22 @@ export class MemoryRedis {
           if (gone.length) this.run(["DEL", copy]);
           else this.run(["SET", copy, value, "EX", seconds]);
           return gone;
+        }
+        // lib/paypal-delivery.ts, KEEP_RECEIPT: a receipt kept and noted for the person's deletion, unless their print
+        // says they were deleted at or after the payment (0, nothing written); else [1 when this SET kept it or 0, the
+        // receipt kept], the second dropped when nothing is kept, as Redis ends a Lua table at its first nil.
+        if (key.startsWith("-- marktmorgen:paypal-receipt-keep:v1\n") && args[0] === "3" && args.length === 11) {
+          const [, receipt, erased, notes, value, seconds, print, paidAt, score, oldest, notesSeconds] = args;
+          this.scriptCalls += 1;
+          const at = this.run(["HGET", erased, print]);
+          if (at !== null && !(String(at).trim() !== "" && Number.isFinite(Number(at)) && Number(at) < Number(paidAt))) return 0;
+          this.scriptCalls += 5;
+          this.run(["ZADD", notes, score, receipt]);
+          this.run(["ZREMRANGEBYSCORE", notes, "-inf", oldest]);
+          this.run(["EXPIRE", notes, notesSeconds]);
+          const written = this.run(["SET", receipt, value, "NX", "EX", seconds]);
+          const kept = this.run(["GET", receipt]);
+          return kept === null ? [written === "OK" ? 1 : 0] : [written === "OK" ? 1 : 0, kept];
         }
         // lib/imported-purchases.ts GRANT_UNLESS_ERASED: each grant written only when its print is not among the
         // store's deleted people (-1, nothing written); its address noted once among the buyers brought, its product HSETNX.

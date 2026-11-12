@@ -1,8 +1,9 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/icons";
+import { StepCount } from "@/components/step-count";
 import { toast } from "@/components/toast";
 import { useLeaveGuard } from "@/components/leave-guard";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
@@ -43,6 +44,16 @@ const MESSAGES: Record<string, string> = {
 };
 
 /**
+ * Where the setup is, in its three real steps (766 [STN13], unit 2): the
+ * kinds, the products for the chosen kind, then the review before the
+ * funnel is made. Closed, it is at no step.
+ */
+export function funnelPickerStep({ open, chosen, reviewing }: { open: boolean; chosen: boolean; reviewing: boolean }): { current: number; total: number; label: string } | null {
+  if (chosen) return reviewing ? { current: 3, total: 3, label: "Review" } : { current: 2, total: 3, label: "Products" };
+  return open ? { current: 1, total: 3, label: "Pick a kind" } : null;
+}
+
+/**
  * Funnels to start from (lib/funnel-types.ts): pick a kind, choose the
  * store's own products for its steps, and the funnel is made with the pages
  * it needs, with optional starting copy and kept from visitors until ready.
@@ -77,6 +88,21 @@ export function FunnelTypePicker({ products, pagesLeft, canMakePages, funnelsLef
   const [blockCopy, setBlockCopy] = useState<Record<string, FunnelBlockCopy>>({});
   const [aiDraft, setAiDraft] = useState<Pick<FunnelAiDraft, "offers" | "sequence" | "missing" | "diagnostics"> | null>(null);
   const [saveSequence, setSaveSequence] = useState(false);
+  const step = funnelPickerStep({ open, chosen: type !== null, reviewing });
+  const stepLine = useRef<HTMLParagraphElement>(null);
+  const lastStep = useRef<number | null>(null);
+  // The button pressed to change step is often gone after it ("Choose a kind",
+  // "Use this", "Back to products", "Cancel setup"): the focus goes to the
+  // step's own line, which reads where the setup now is (AX274 2.4.3). Not
+  // when a funnel has just been made: the success notice says that.
+  const stepNow = step?.current ?? null;
+  useEffect(() => {
+    const before = lastStep.current;
+    lastStep.current = stepNow;
+    if (stepNow === null || before === stepNow) return;
+    if (made) return;
+    stepLine.current?.focus();
+  }, [stepNow, made]);
   useLeaveGuard(type !== null);
   const formDraftsValid = !type || readFunnelFormDrafts(formDrafts, type) !== null;
   const slots = type ? choicesOf(type) : [];
@@ -228,8 +254,10 @@ export function FunnelTypePicker({ products, pagesLeft, canMakePages, funnelsLef
         </div>
       ) : null}
 
-      {open && !type ? (
-        <ul className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      {open && !type && step ? (
+        <div className="mt-6">
+        <StepCount ref={stepLine} current={step.current} total={step.total} label={step.label} />
+        <ul className="mt-3 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {FUNNEL_TYPES.map((kind) => {
             const pages = pagesOf(kind).length;
             const tooMany = pages > pagesLeft;
@@ -257,12 +285,13 @@ export function FunnelTypePicker({ products, pagesLeft, canMakePages, funnelsLef
             );
           })}
         </ul>
+        </div>
       ) : null}
 
       {type ? (
         <fieldset disabled={busy} className="mt-6 min-w-0 rounded-2xl border border-line bg-white p-4 sm:p-6">
           <legend className="sr-only">Funnel setup</legend>
-          <p className="text-xs font-semibold text-ink-soft">{reviewing ? "Step 3 of 3 · Review" : "Step 2 of 3 · Products"}</p>
+          {step ? <StepCount ref={stepLine} current={step.current} total={step.total} label={step.label} /> : null}
           <p className="mt-1 font-semibold text-ink">{type.label}</p>
           <div hidden={reviewing}>
           <label className="mt-4 block">

@@ -46,6 +46,8 @@ const MESSAGES: Record<string, string> = {
   bundle_forms_sensitive: "One of the file's forms asks for a password, a card number, a card's security code or an identity number, which a form never may. Nothing was imported.",
   bundle_products: "The file's products do not match where it uses them.",
   server_error: "We could not confirm the result. Reload and review your funnels before trying again.",
+  funnel_unread: "Part of this funnel could not be read just now, so nothing was made from it. Reload, then try again.",
+  funnel_unread_counted: "Part of this funnel could not be read just now, so nothing was made from it. This try still counts toward this month's figure. Reload, then try again.",
   owner_only: "Only the account's owner can copy a funnel into another of its stores.",
   not_yours: "That store is not another store of this account. Reload the page.",
   target_used: "That store has used its studio requests for this billing month.",

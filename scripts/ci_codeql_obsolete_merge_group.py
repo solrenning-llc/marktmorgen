@@ -34,12 +34,13 @@ def is_retired_group_upload_failure(event_name, ref, sarif_ready, probe_status):
 
 
 def main():
+    event_name = os.environ.get("CI_EVENT", "")
     ref = os.environ.get("CI_REF", "")
     sarif_output = os.environ.get("CODEQL_SARIF_OUTPUT", "")
     if not has_nonempty_sarif(sarif_output):
         print("::error::CodeQL produced no non-empty SARIF result; preserving the analysis failure.")
         return 1
-    if not ref.startswith(QUEUE_REF_PREFIX):
+    if event_name != "merge_group" or not ref.startswith(QUEUE_REF_PREFIX):
         print("::error::The failed run does not identify a merge-queue ref; preserving the failure.")
         return 1
 
@@ -54,7 +55,7 @@ def main():
         print(f"::error::Could not verify the merge-group ref; preserving the failure: {exc}")
         return 1
 
-    if is_retired_group_upload_failure("merge_group", ref, True, probe.returncode):
+    if is_retired_group_upload_failure(event_name, ref, True, probe.returncode):
         print(
             "::notice::CodeQL produced SARIF, but this merge-group ref was retired before upload. "
             "The merge group is no longer active; CodeQL remains enabled on push to main."

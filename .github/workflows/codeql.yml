@@ -45,6 +45,7 @@ jobs:
         id: scope
         env:
           CI_EVENT: ${{ github.event_name }}
+          CI_EVENT: ${{ github.event_name }}
           CI_REF: ${{ github.ref }}
           CI_REPOSITORY: ${{ github.repository }}
           CI_TOKEN: ${{ github.token }}

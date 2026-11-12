@@ -19,21 +19,10 @@ import { isProxy } from "node:util/types";
 import { del, get, head } from "@/lib/blob";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
-import type { ImageStore } from "@/lib/community-image";
+import { COMMUNITY_HEAD_BYTES, type ImageStore } from "@/lib/community-image";
+import { imageSize } from "@/lib/image-size";
 
-async function firstBytes(path: string): Promise<Uint8Array | null> {
-  const found = await get(path, { access: "private" });
-  if (!found || found.statusCode !== 200 || !found.stream) return null;
-  const reader = found.stream.getReader();
-  const chunks: Uint8Array[] = [];
-  let length = 0;
-  while (length < 16) {
-    const { done, value } = await reader.read();
-    if (done || !value) break;
-    chunks.push(value);
-    length += value.length;
-  }
-  await reader.cancel().catch(() => {});
+function joined(chunks: Uint8Array[], length: number): Uint8Array {
   const bytes = new Uint8Array(length);
   let at = 0;
   for (const chunk of chunks) {
@@ -41,6 +30,27 @@ async function firstBytes(path: string): Promise<Uint8Array | null> {
     at += chunk.length;
   }
   return bytes;
+}
+
+/**
+ * The first bytes of a picture, read until its shape can be told (lib/image-size.ts), the file ends, or
+ * COMMUNITY_HEAD_BYTES are in: what checkCommunityImage needs, and never more of the file than that.
+ */
+async function firstBytes(path: string): Promise<Uint8Array | null> {
+  const found = await get(path, { access: "private" });
+  if (!found || found.statusCode !== 200 || !found.stream) return null;
+  const reader = found.stream.getReader();
+  const chunks: Uint8Array[] = [];
+  let length = 0;
+  while (length < COMMUNITY_HEAD_BYTES) {
+    const { done, value } = await reader.read();
+    if (done || !value) break;
+    chunks.push(value);
+    length += value.length;
+    if (length >= 30 && imageSize(joined(chunks, length))) break;
+  }
+  await reader.cancel().catch(() => {});
+  return joined(chunks, length).subarray(0, COMMUNITY_HEAD_BYTES);
 }
 
 export const blobImages: ImageStore = {

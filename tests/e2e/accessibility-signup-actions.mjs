@@ -89,9 +89,10 @@ try{
    await context.route("**/*",async route=>{
     const request=route.request(),url=new URL(request.url());
     if(url.origin!==origin){foreign++;return route.abort();}
-    // withBotId rewrites this same-origin script to Vercel. Supply the
-    // disposable provider locally before that rewrite can contact a service.
-    // This is no production BotID verdict: the server already uses VERCEL=0.
+    // withBotId rewrites this same-origin script to Vercel. Off that host the
+    // client never starts the check (NEXT_PUBLIC_BROWSER_CHECK, TODOS-100), so
+    // this build must not fetch it at all; it is still answered locally, and
+    // counted, so a fetch fails the proof below instead of reaching a service.
     if(url.pathname==="/149e9513-01fa-4fb0-aad4-566afd725d1b/2d206a39-8ed7-437e-a3be-862e0f06eea3/a-4-a/c.js"){
      if(request.method()!=="GET"){mutations.push({method:request.method(),path:"unexpected-local-challenge"});return route.abort();}
      localChallenges++;
@@ -195,7 +196,7 @@ try{
    const unchosenDemo=network.filter(entry=>entry.event==="request"&&entry.method==="GET"&&entry.path==="/demo");
    console.log("SIGNUP_UNCHOSEN_DEMO_REQUESTS:"+JSON.stringify({engine,width,mode,requests:unchosenDemo}));
    if(unchosenDemo.length)throw Error("Signup and initial setup must not fetch the demo before it is chosen");
-   if(localChallenges<1||foreign||errors.length||mutations.length!==3||mutations[0].path!=="/api/auth/request"||mutations[1].path!=="/api/auth/callback"||mutations[2].path!=="/api/store/claim")throw Error("Unexpected operation or page error "+JSON.stringify({foreign,errors,mutations}));
+   if(localChallenges!==0||foreign||errors.length||mutations.length!==3||mutations[0].path!=="/api/auth/request"||mutations[1].path!=="/api/auth/callback"||mutations[2].path!=="/api/store/claim")throw Error("Unexpected operation or page error "+JSON.stringify({foreign,errors,mutations}));
    gaps.push({width,mode,reason:"Synthetic disposable local inbox/session/store claim only; no real email/account/store, physical device, assistive user or actual browser400% zoom. Production BotID behavior and manual sticky-scroll review remain open."});
    console.log("SIGNUP_ACTION_PROOF:"+JSON.stringify({engine,width,mode,actualLocalRequest:true,capturedEmails:mail.length,confirmationGetDidNotSignIn:true,explicitConfirmation:true,authenticatedFirstSetup:true,actualFirstStoreClaim:true,anonymousPublicStoreAfterReload:true,interceptedVisits,localChallenges,foreign,mutations}));
   }catch(error){failed++;const diagnostic=page?await page.evaluate(()=>({path:location.pathname,headings:[...document.querySelectorAll("h1,h2")].map(n=>n.textContent),body:document.body.innerText.slice(0,4000)})).catch(()=>null):null;console.error("SIGNUP_MATRIX_FAILURE:"+JSON.stringify({engine,width,mode,phase,diagnostic,errors,network:network.slice(-80),proxyTrace:proxyTrace.slice(-80),capturedLocalEmails:services.emails().length-before,error:String(error).replace(/token=[^&\s"']+/g,"token=redacted")}));console.error("SIGNUP_SERVER_DIAGNOSTIC:"+output.replace(/token=[^&\s"']+/g,"token=redacted"));}

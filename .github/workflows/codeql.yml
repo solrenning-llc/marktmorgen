@@ -73,6 +73,9 @@ jobs:
           languages: ${{ matrix.language }}
           build-mode: none
           queries: security-extended
+          # The gate (pull request, merge queue) leaves out tests/**, which is never shipped and was
+          # over half of the analyzed files; main, the daily run and a manual run analyze every file.
+          config-file: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group') && './.github/codeql/gate.yml' || './.github/codeql/full.yml' }}
       - uses: github/codeql-action/analyze@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
         with:
           category: /language:${{ matrix.language }}

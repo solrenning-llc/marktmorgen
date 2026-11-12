@@ -1,0 +1,8 @@
+# CodeQL configuration for the pull request and merge queue gate (.github/workflows/codeql.yml).
+# The application, library, script, tooling and workflow code is analyzed exactly as before. Only
+# tests/** is left out here: it is about 55% of the extracted files (2,516 of ~4,600 on
+# 12 Nov 2026) and is never shipped. The push to main, the daily run and a manual run use
+# full.yml, which analyzes tests/** too, so every file is still scanned on main and every day.
+name: Marktmorgen gate
+paths-ignore:
+  - tests/**

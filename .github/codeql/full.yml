@@ -1,0 +1,3 @@
+# CodeQL configuration for the push to main, the daily run and a manual run
+# (.github/workflows/codeql.yml): every file, tests/** included, with no path left out.
+name: Marktmorgen full

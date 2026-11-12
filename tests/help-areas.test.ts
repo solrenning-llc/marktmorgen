@@ -21,6 +21,7 @@ import { join } from "node:path";
 import { AREAS_WITHOUT_HELP, HELP_AREAS, NOT_AREAS, answerLinks } from "@/lib/help-areas";
 import { FEATURE_PAGES } from "@/lib/feature-pages";
 import { webhookBeginnerQuestions } from "@/lib/webhook-faq";
+import { workflowLimitWords } from "@/lib/flow-limits";
 import { HELP_SECTIONS, answerId } from "@/lib/help-content";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -112,6 +113,7 @@ part("Names quoted in the answers written for HC1 are on the screens");
     "how-do-i-choose-a-growth-goal-and-see-what-to-do-next": ["app/studio/page.tsx", "components/studio-tools.tsx", "app/studio/growth/page.tsx", "lib/growth-plan.ts", "components/template-library.tsx"],
     "how-do-i-approve-changes-my-ai-assistant-prepared": ["app/studio/agent/page.tsx", "components/agent-proposals.tsx", "app/developers/page.tsx"],
     "how-do-i-tell-zapier-make-or-my-own-server-when-something-happens-in-my-store": ["components/webhook-editor.tsx"],
+    "how-do-i-make-an-email-sequence-and-switch-it-on": ["components/email-studio.tsx", "components/workflow-tools.tsx", "app/studio/page.tsx"],
     "how-do-i-keep-my-busy-times-out-of-the-team-calls-i-host": ["app/studio/page.tsx", "components/studio-tools.tsx", "components/team-event-editor.tsx", "app/studio/calendar/page.tsx", "components/host-calendar.tsx"],
   };
   const plain = (text: string) => text.replace(/&apos;|\u2019/g, "'");
@@ -160,6 +162,14 @@ part("The webhook answer says what the feature page says");
   const kept = Number(/export const LOG_SIZE = (\d+);/.exec(readFileSync("lib/webhooks.ts", "utf8"))?.[1]);
   is("the deliveries it says the studio lists are the ones it keeps", item?.a[3].includes(`up to ${kept}, each kept for a week`), true);
   is("and the studio says a week too", readFileSync("components/webhook-editor.tsx", "utf8").includes("Deliveries are kept for a week, the last 50 at most."), kept === 50);
+}
+
+part("The sequence answer gives the limits in lib/flow-limits.ts's own sentence");
+{
+  const item = HELP_SECTIONS.flatMap((section) => section.items).find((i) => answerId(i.q) === "how-do-i-make-an-email-sequence-and-switch-it-on");
+  is("the limits, word for word", item?.a.at(-1)?.includes(workflowLimitWords()), true);
+  is("a new sequence starts as it says: named Welcome, started by a join, its first email at 0 hours", /name: "Welcome",\s*trigger: "joined",[\s\S]{0,200}steps: \[blankStep\("0", "hours", first\)\]/.test(readFileSync("components/email-studio.tsx", "utf8")), true);
+  is("and it is saved paused", readFileSync("components/email-studio.tsx", "utf8").includes("active: draft.id ? draft.active : false"), true);
 }
 
 done();

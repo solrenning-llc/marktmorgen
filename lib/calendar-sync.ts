@@ -110,7 +110,7 @@ const FEED_ID_PATTERN = /^[0-9a-f]{16}$/;
 type Feed = { id: string; url: string; addedAt: string };
 /** `callsId`: the store's id for its calls (lib/store.ts), which its bookings' changed mark is kept by; written with the handle. */
 type Config = { handle: string; feeds: Feed[]; token: string | null; tokenAt: string; callsId?: string | null; stoppedAt?: string };
-export type Reading = { at: number; busy: [number, number][]; events: number; unsupported: number; truncated: boolean };
+export type Reading = { at: number; busy: [number, number][]; events: number; unsupported: number; truncated: boolean; /** Kept for two minutes after a refresh failed: a failure, never a fresh reading. */ failed?: true };
 
 const cfgKey = (statsId: string) => `nl:cal:cfg:${statsId}`;
 const tokenKey = (token: string) => `nl:cal:tok:${createHash("sha256").update(`nimbus-cal:${token}`).digest("hex").slice(0, 40)}`;
@@ -280,12 +280,17 @@ export async function calendarBusy(
   const lists = await Promise.all(
     config.feeds.map(async (feed, i): Promise<[number, number][]> => {
       const fresh = cached ? parseReading(cached[i * 2]) : null;
+      // A failure kept for two minutes, so a broken calendar is not hammered, is still a failure: never a fresh reading.
+      if (fresh?.failed === true) failing += 1;
       if (fresh) return fresh.busy;
       const good = cached ? parseReading(cached[i * 2 + 1]) : null;
-      // Somebody else is reading it right now: the last good reading will do.
+      // Somebody else is reading it right now: the last good reading will do; with none, the calendar is unknown.
       // Read exactly (lib/claim-mark.ts, CX-123 rule 24): only a lock known to be this read's own reads the calendar.
       const lock = claimValue();
-      if ((await claimMark(lockKey(feed.id), 20, lock)) !== "ours") return good?.busy ?? [];
+      if ((await claimMark(lockKey(feed.id), 20, lock)) !== "ours") {
+        if (!good) failing += 1;
+        return good?.busy ?? [];
+      }
       try {
         const reading = await readFeed(feed.url, fallbackTz, now, hooks);
         const text = JSON.stringify(reading);
@@ -302,7 +307,7 @@ export async function calendarBusy(
         // asked again for two minutes, so a broken one is not hammered.
         await redisPipeline([
           ["SET", errKey(feed.id), JSON.stringify({ at: now, message: message.slice(0, 300) }), "EX", STALE_SECONDS],
-          ["SET", busyKey(feed.id), JSON.stringify({ at: now, busy: good?.busy ?? [], events: 0, unsupported: 0, truncated: false }), "EX", 120],
+          ["SET", busyKey(feed.id), JSON.stringify({ at: now, busy: good?.busy ?? [], events: 0, unsupported: 0, truncated: false, failed: true }), "EX", 120],
         ]).catch(() => {});
         return good?.busy ?? [];
       } finally {

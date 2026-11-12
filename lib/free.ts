@@ -43,12 +43,13 @@ import {
   LIST_PAGE_READ_BYTES,
   type ListRead,
   MAX_LEADS,
+  agreedKey,
   leadsKey,
-  listCounts,
   mailable,
   parseContact,
   upsertContact,
   orderRoom,
+  unsubKey,
   plainRead,
 } from "@/lib/contacts";
 import { noteForErasure } from "@/lib/erasure-index";
@@ -308,14 +309,23 @@ export type UseResult =
   | { ok: true; claim: Claim }
   | { ok: false; reason: "expired" | "spent" };
 
-/** Counts one use of an emailed link, and says whether it is still good. */
+/**
+ * Counts one use of an emailed link, and says whether it is still good.
+ *
+ * Each reply is read only in its exact shape (CX-123 rule 24): a claim that is
+ * not a string or nothing, or a use count that is not a whole number, throws
+ * UnknownReplyError. A count nobody read is never a good link: `Number(x) >
+ * MAX_CLAIM_USES` was false for NaN, so a used-up link answered good again
+ * (sweep A2). The download route says it as a temporary error.
+ */
 export async function spendClaim(token: string): Promise<UseResult> {
   if (!TOKEN_PATTERN.test(token) || !isRedisConfigured()) {
     return { ok: false, reason: "expired" };
   }
   const key = await claimKey(token);
-  const [raw] = await redisPipeline([["GET", key]]);
-  const claim = parseClaim(raw);
+  const read = repliesFor(await redisPipeline([["GET", key]]), 1);
+  if (!read || (read[0] !== null && typeof read[0] !== "string")) throw new UnknownReplyError("a free copy's claim");
+  const claim = parseClaim(read[0]);
   if (!claim) return { ok: false, reason: "expired" };
 
   const uses = await usesKey(token);
@@ -373,15 +383,39 @@ export async function recordLead(
 
 export type ListSize = { total: number; agreed: number; full: boolean };
 
-/** How many addresses the list holds, and how many may be written to. */
+/** A counter kept with GET/INCR: nothing yet is 0; a whole number as Redis sends it; anything else unknown (null). */
+function counterOf(reply: unknown): number | null {
+  if (reply === null) return 0;
+  if (typeof reply === "number") return Number.isSafeInteger(reply) ? reply : null;
+  if (typeof reply !== "string" || !/^-?\d{1,15}$/.test(reply)) return null;
+  return Number(reply);
+}
+
+/**
+ * How many addresses the list holds, and how many may be written to.
+ *
+ * The same counts as lib/contacts.ts listCounts, read only in their exact
+ * shape: an unknown read throws (UnknownReplyError, or the read's own error),
+ * never a list of 0, because the store export is priced from this total
+ * (lib/store-export.ts exportShape) and the studio shows it (sweep A2).
+ */
 export async function listSize(store: Store): Promise<ListSize> {
-  try {
-    const counts = await listCounts(store.listId);
-    return { total: counts.total, agreed: counts.mailable, full: counts.full };
-  } catch (error) {
-    console.error("could not read a list's size", error);
-    return { total: 0, agreed: 0, full: false };
-  }
+  if (!store.listId || !isRedisConfigured()) return { total: 0, agreed: 0, full: false };
+  const replies = repliesFor(
+    await redisPipeline([
+      ["HLEN", leadsKey(store.listId)],
+      ["GET", agreedKey(store.listId)],
+      ["GET", unsubKey(store.listId)],
+    ]),
+    3,
+  );
+  const total = replies ? countOf(replies[0]) : null;
+  const agreed = replies ? counterOf(replies[1]) : null;
+  const left = replies ? counterOf(replies[2]) : null;
+  if (total === null || agreed === null || left === null) throw new UnknownReplyError("a list's size");
+  const a = Math.min(total, agreed);
+  const l = Math.min(a, Math.max(0, left));
+  return { total, agreed: a - l, full: total >= MAX_LEADS };
 }
 
 /**

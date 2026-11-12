@@ -467,7 +467,7 @@ def main():
             131072, json.dumps(expired_policy), "") == ["unknown"]
         assert db.command("EXISTS", *option_keys) == 0
         first_option, profiles["option_enqueue"] = measured(option_enqueue)
-        assert first_option[0] == "queued" and profiles["option_enqueue"] <= 27
+        assert first_option[0] == "queued" and profiles["option_enqueue"] <= 28
         def option_race(_):
             conn = LocalRedis()
             try: return option_enqueue(client=conn)
@@ -479,7 +479,7 @@ def main():
         assert db.command("HGET", option_keys[5], "items") == "1"
         assert db.command("HGET", option_keys[5], "bytes") == str(option_row["bytes"])
         assert db.command("TTL", option_keys[0]) == -1 and db.command("TTL", option_keys[1]) == -1
-        assert db.command("ZSCORE", option_keys[2], option_row["id"]) is None
+        assert int(db.command("ZSCORE", option_keys[2], option_row["id"])) == now + 48 * 3_600_000
         assert option_enqueue(dict(option_row, sealed="s1.substituted")) == ["existing", raw_option, source_option]
         for op in ["claim", "dispatch", "accepted", "defer"]:
             assert db.command("EVAL", shared, 10, *option_keys, op, raw_option, "", now,
@@ -534,7 +534,8 @@ def main():
         aged = json.dumps(dict(json.loads(live), created=now - release_ms - 1, authorizedAt=now - release_ms - 1))
         db.command("SET", abandoned_keys[0], aged)
         assert release(live) == ["changed"] and counters() == taken
-        assert release(aged) == ["released"]
+        released, profiles["option_release"] = measured(lambda: release(aged))
+        assert released == ["released"] and profiles["option_release"] <= 32
         assert counters() == before
         assert db.command("GET", abandoned_keys[0]) is None
         assert db.command("ZSCORE", abandoned_keys[2], abandoned["id"]) is None

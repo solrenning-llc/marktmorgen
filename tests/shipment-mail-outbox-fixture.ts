@@ -3,7 +3,7 @@
  * real Redis in scripts/test_shipment_mail_outbox_redis.py.
  */
 import { store } from "./redis-stub";
-import { SHIPMENT_MAIL_SCRIPT, SHIPMENT_MAIL_REFUSED_SCRIPT, type ShipmentMailPolicy, type ShipmentMailPipeline } from "@/lib/shipment-mail-outbox";
+import { SHIPMENT_MAIL_SCRIPT, SHIPMENT_MAIL_REFUSED_SCRIPT, DIGITAL_OPTION_RESERVATION_RELEASE_MS, type ShipmentMailPolicy, type ShipmentMailPipeline } from "@/lib/shipment-mail-outbox";
 
 export const shipmentPolicy = (now = Date.now()): ShipmentMailPolicy => ({
   reviewId: "SYNTHETIC_SHIPMENT_ONLY", evidence: "SYNTHETIC; no live funding or account",
@@ -70,7 +70,8 @@ export function shipmentOutboxFixture() {
             store.run(["SET",k[10],value.id]);store.run(["SADD",k[11],value.id]);
           }
           store.run(["SET", k[0], supplied]); store.run(["SET", k[1], value.sourceValue]);
-          if(value.originKind!=="course"&&value.originKind!=="digital_option")store.run(["ZADD", k[2], now, value.id]);
+          if(value.originKind==="digital_option")store.run(["ZADD", k[2], value.created+DIGITAL_OPTION_RESERVATION_RELEASE_MS, value.id]);
+          else if(value.originKind!=="course")store.run(["ZADD", k[2], now, value.id]);
           for (const index of [3, 4, 7]) store.run(["SADD", k[index], value.id]);
           answer = ["queued", supplied];
         }
@@ -84,7 +85,10 @@ export function shipmentOutboxFixture() {
       })())) answer = ["changed"];
       else {
         const value = JSON.parse(raw);
-        if (op === "accepted" || op === "cancel" || op === "refused" && (value.kind !== "confirmation" || value.originKind === "single_digital_renewal")) {
+        const reserved = value.originKind === "digital_option" && value.phase === "digital_option_reserved" && value.state === "queued" && value.session === "" && value.owner === "" && value.next === 0;
+        if (op === "release-reservation" && !reserved) answer = ["unknown"];
+        else if (op === "release-reservation" && now < value.created + DIGITAL_OPTION_RESERVATION_RELEASE_MS) answer = ["held", raw];
+        else if (op === "release-reservation" || op === "accepted" || op === "cancel" || op === "refused" && (value.kind !== "confirmation" || value.originKind === "single_digital_renewal")) {
           if (op === "refused" && value.kind !== "confirmation") {
             const summary = JSON.stringify({ state: "refused", at: now, session: value.session });
             store.run(["HSET", k[5], `refused:${value.id}`, summary]);
@@ -94,7 +98,7 @@ export function shipmentOutboxFixture() {
           store.run(["DEL", k[0]]); store.run(["ZREM", k[2], value.id]);
           for (const index of [3, 4, 7]) store.run(["SREM", k[index], value.id]);
           store.run(["EXPIRE", k[1], 400 * 86_400]);
-          answer = [op === "accepted" ? "accepted" : op === "refused" ? "refused" : "canceled"];
+          answer = [op === "accepted" ? "accepted" : op === "refused" ? "refused" : op === "release-reservation" ? "released" : "canceled"];
         } else if (op === "claim" && value.state !== "queued" && !(value.state === "preparing" && value.leaseUntil <= now)) answer = ["held", raw];
         else if (op === "claim") {
           value.state = "preparing"; value.owner = owner; value.leaseUntil = now + 60_000;

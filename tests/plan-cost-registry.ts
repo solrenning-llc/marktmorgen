@@ -267,6 +267,19 @@ export function closingBuyersCost(tier: Tier, paid = true): number {
  * and execution-time TIME, plus TS TIME/readback. The complete indefinite
  * storage/copy/cleanup/trigger cost remains unknown/rejected, never zero.
  * No production caller, new family, provider permission or real review.
+ * Abandonment release (PR #3604 MEDIUM): the reservation now adds one due
+ * member at created+DIGITAL_OPTION_RESERVATION_RELEASE_MS (48h), so first
+ * enqueue is 28 commands on Redis7.0.15 (one ZADD more; the same one
+ * due member every polled origin carries, inside the row's existing
+ * 131072+2*keyBytes+16384 allocation); the existing cron sweep reads that
+ * member (ZRANGEBYSCORE), the row (TYPE/GETRANGE/GET + seal check) and sends
+ * one release EVAL, measured at 27 commands including EVAL and TIME, which
+ * returns exactly the reserved item/bytes once. The pending lifetime is
+ * therefore bounded at 48h plus sweep delay, and the released source then
+ * keeps the existing 400-day terminal receipt TTL, as cancel already does.
+ * These counts are construction measurements, not supplier invoices: the
+ * total per-reservation cost stays unknown/rejected, never zero, and no
+ * coefficient, limit or price changes here.
  */
 export const LEGACY_ORDER_ACCOUNTING = 23 * COMMAND + 8_192 * DB_BYTE;
 export const ORDER_COST = 2 * PER_EMAIL + ORDER_COMPUTE + ORDER_LIBRARY + ORDER_RENEWAL_STOP + LEGACY_ORDER_ACCOUNTING;

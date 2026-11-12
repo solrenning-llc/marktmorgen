@@ -20,7 +20,7 @@ import { redisPipeline } from "@/lib/redis";
 import { canSeal, seal, unseal } from "@/lib/secret-box";
 import {
   CURRENT_SHIPMENT_MAIL_LIFECYCLE, CURRENT_SHIPMENT_MAIL_POLICY,
-  SHIPMENT_MAIL_SCRIPT, SHIPMENT_MAIL_MAX_ROW_BYTES, SHIPMENT_MAIL_MAX_INDEX_ITEMS,
+  SHIPMENT_MAIL_SCRIPT, SHIPMENT_MAIL_MAX_ROW_BYTES, SHIPMENT_MAIL_MAX_INDEX_ITEMS, DIGITAL_OPTION_RESERVATION_RELEASE_MS,
   shipmentMailPolicy, recoverPendingMail, type ShipmentMailDispatch,
   type ShipmentMailPipeline, type ShipmentMailPolicy, type ShipmentMailRuntime,
 } from "@/lib/shipment-mail-outbox";
@@ -231,6 +231,29 @@ export async function reserveDigitalOptionRetention(receipt: unknown, runtime: S
         JSON.stringify(saved.payload.snapshot) !== JSON.stringify(snapshot)) return { ok: false };
     return { ...result, admitted: false, permitsCheckout: false, grantsAccess: false };
   } catch { return { ok: false }; }
+}
+
+/** Abandonment rule for the reserve-only option phase: at its bounded
+ * deadline the exact persisted row returns the item and bytes it took, once.
+ * No payload is opened; a moved, changed or unknown row is never released. */
+async function releaseOption(found: { row: ConfirmationOrigin; raw: string }, runtime: ShipmentMailRuntime): Promise<"released" | "held" | "missing" | "unknown"> {
+  const { row } = found, now = (runtime.now ?? Date.now)();
+  if (row.originKind !== "digital_option" || row.phase !== "digital_option_reserved" || row.session !== "" || row.state !== "queued") return "unknown";
+  if (!Number.isSafeInteger(now)) return "unknown";
+  if (now < row.created + DIGITAL_OPTION_RESERVATION_RELEASE_MS) return "held";
+  const reply = await confirmationMutation("release-reservation", found, null, runtime);
+  return reply?.[0] === "released" || reply?.[0] === "held" || reply?.[0] === "missing" ? reply[0] : "unknown";
+}
+export async function releaseDigitalOptionReservation(id: string, runtime: ShipmentMailRuntime = {}): Promise<"released" | "held" | "missing" | "unknown"> {
+  if ((runtime.lifecycle ?? CURRENT_SHIPMENT_MAIL_LIFECYCLE) === "never_activated" || !HASH.test(id)) return "unknown";
+  try {
+    const reply = array(await (runtime.pipeline ?? redisPipeline)([["TYPE", confirmationOriginRowKey(id)], ["GETRANGE", confirmationOriginRowKey(id), 0, SHIPMENT_MAIL_MAX_ROW_BYTES], ["GET", sourceKey(id)]]));
+    if (reply?.length !== 3 || typeof reply[1] !== "string") return "unknown";
+    if (reply[0] === "none" && reply[1] === "") return "missing";
+    const row = reply[0] === "string" ? parse(reply[1]) : null;
+    if (!row || row.id !== id || reply[2] !== row.sourceValue) return "unknown";
+    return await releaseOption({ row, raw: reply[1] }, runtime);
+  } catch { return "unknown"; }
 }
 
 type PersistedCourseBinding = OpenedCourseOriginBinding & { token: string; fingerprint: string };
@@ -834,7 +857,13 @@ export async function runOrderConfirmationMail(deadline: number, dispatch: Shipm
       catch { counts.unknown++; } // retain source/lease and allow other paid work to proceed
       continue;
     }
-    if (found?.row.originKind === "course" || found?.row.originKind === "digital_option") { counts.unknown++; continue; }
+    if (found?.row.originKind === "digital_option") {
+      // Its only due member is the abandonment deadline; never a send stage.
+      const released = await releaseOption(found, runtime);
+      if (released === "held") counts.waiting++; else if (released !== "released") counts.unknown++;
+      continue;
+    }
+    if (found?.row.originKind === "course") { counts.unknown++; continue; }
     if (!found || found.row.accountId === DEMO_CONNECTED_ACCOUNT) { counts.unknown++; continue; }
     if (!physicalOriginCovered(found, p, now())) { counts.unknown++; continue; }
     if (found.row.originKind === "single_digital" && (!p.coveredOrigins?.includes("single-digital-confirmation") || now() >= found.row.expiresAt)) { counts.unknown++; continue; }

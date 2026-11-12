@@ -40,7 +40,7 @@ export async function physicalPaidFixture() {
         allCommands.push(c);
         if (c[0] === "TIME") { answers.push([String(Math.floor(now() / 1000)), String(now() % 1000 * 1000)]); continue; }
         if (c[0] === "EVAL" && c[1] === COMMIT_ORDER_CONFIRMATION) { answers.push(accounting === "committed" ? 1 : -1); continue; }
-        if (c[0] === "EVAL" && c[1] === SHIPMENT_MAIL_SCRIPT && c[3+Number(c[2])] !== "enqueue" && c[3+Number(c[2])] !== "cancel") {
+        if (c[0] === "EVAL" && c[1] === SHIPMENT_MAIL_SCRIPT && c[3+Number(c[2])] !== "enqueue" && c[3+Number(c[2])] !== "cancel" && c[3+Number(c[2])] !== "release-reservation") {
           const k = c.slice(3,13).map(String), raw = redis.run(["GET", k[0]]);
           const r = raw ? JSON.parse(String(raw)) : null;
           if ([k[8], k[9]].some(key => redis.run(["EXISTS", key])) || c[3+Number(c[2])] === "claim" && r && (r.next > now() || r.checks >= runtime.policy!.maximumChecks)) { answers.push(["held"]); continue; }

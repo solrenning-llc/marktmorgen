@@ -61,6 +61,14 @@ export const SHIPMENT_MAIL_SOURCE_SECONDS = 400 * 86_400;
 export const SHIPMENT_MAIL_PRODUCER_MS = 300_000;
 export const SHIPMENT_MAIL_ERASURE_FENCE_MS = 600_000;
 export const SHIPMENT_MAIL_DUE = "nl:ship:mail:due";
+/** A selected digital-option reservation that never left its reserve-only
+ * phase is abandoned once no checkout created under it can still be paid:
+ * the 23h creation replay window, plus Stripe's 24h maximum Checkout Session
+ * lifetime, plus one hour of margin. The row's due-index score is this
+ * deadline; the shared Lua re-checks it with Redis TIME and releases exactly
+ * the item and bytes the reservation took, once. It is written as a literal in
+ * SHIPMENT_MAIL_SCRIPT (no interpolation), and a test holds the two equal. */
+export const DIGITAL_OPTION_RESERVATION_RELEASE_MS = 48 * 3_600_000;
 const ALL = "nl:ship:mail:all";
 const POOL = "nl:ship:mail:pool";
 const SESSION = /^cs_(?:test|live)_[A-Za-z0-9]{10,200}$/;
@@ -289,7 +297,7 @@ if op == 'enqueue' then
    local clock=redis.call('TIME')
    local executed=tonumber(clock[1])*1000+math.floor(tonumber(clock[2])/1000)
    if math.abs(executed-now)>60000 or n.authorizedAt>executed or executed-n.authorizedAt>300000 or executed>p.admissionsUntil or
-      n.kind~='confirmation' or n.phase~='digital_option_reserved' or n.state~='queued' or n.next~=0 or n.session~='' or n.bindingFingerprint~='' or n.owner~='' or n.leaseUntil~=0 or n.createAttempts~=0 or n.checks~=0 or type(n.expiresAt)~='number' or n.expiresAt<=executed or not covered['digital-option-retention'] or type(p.digitalOptionRetentionEvidence)~='string' or not string.find(p.digitalOptionRetentionEvidence,'%S') or #p.digitalOptionRetentionEvidence>2000 or p.ongoingStorageFunded~=true then return {'unknown'} end
+      n.kind~='confirmation' or n.phase~='digital_option_reserved' or n.state~='queued' or n.next~=0 or n.session~='' or n.bindingFingerprint~='' or n.owner~='' or n.leaseUntil~=0 or n.createAttempts~=0 or n.checks~=0 or type(n.created)~='number' or n.created~=n.authorizedAt or type(n.expiresAt)~='number' or n.expiresAt<=executed or not covered['digital-option-retention'] or type(p.digitalOptionRetentionEvidence)~='string' or not string.find(p.digitalOptionRetentionEvidence,'%S') or #p.digitalOptionRetentionEvidence>2000 or p.ongoingStorageFunded~=true then return {'unknown'} end
   elseif n.originKind=='single_digital' then
    if n.kind~='confirmation' or n.phase~='awaiting_creation' or n.state~='queued' or not covered['single-digital-confirmation'] then return {'unknown'} end
   elseif n.originKind=='single_digital_renewal' then
@@ -338,7 +346,10 @@ if op == 'enqueue' then
  redis.call('SET',KEYS[2],n.sourceValue)
  -- Reserve-only courses have no worker stage. Keep their protected source
  -- in the existing ownership indices, without an unbounded polling member.
- if n.originKind~='course' and n.originKind~='digital_option' then redis.call('ZADD',KEYS[3],now,n.id) end
+ -- A digital-option reservation gets one member: its abandonment deadline
+ -- (DIGITAL_OPTION_RESERVATION_RELEASE_MS after its bounded creation time).
+ if n.originKind=='digital_option' then redis.call('ZADD',KEYS[3],n.created+172800000,n.id)
+ elseif n.originKind~='course' then redis.call('ZADD',KEYS[3],now,n.id) end
  redis.call('SADD',KEYS[4],n.id); redis.call('SADD',KEYS[5],n.id); redis.call('SADD',KEYS[8],n.id)
  if n.originKind=='single_digital_renewal' then
   redis.call('SET',KEYS[11],n.id,'NX'); redis.call('SADD',KEYS[12],n.id)
@@ -360,6 +371,16 @@ if op=='not-posted' and r.state=='dispatching' and r.owner==ARGV[7] and #expecte
 end
 if raw ~= expected and not samePreparation then return {'changed'} end
 if op == 'cancel' then drop(); return {'canceled'} end
+-- Abandoned reserve-only option: release its own slot once, by Redis TIME,
+-- only while the exact row (CAS above) is still the unbound reservation.
+-- Any later phase is not this rule's to release; a released row is missing.
+if op == 'release-reservation' then
+ if r.originKind~='digital_option' or r.phase~='digital_option_reserved' or r.state~='queued' or r.session~='' or r.bindingFingerprint~='' or r.owner~='' or r.leaseUntil~=0 or r.next~=0 or r.checks~=0 or type(r.created)~='number' or type(r.bytes)~='number' then return {'unknown'} end
+ local clock=redis.call('TIME')
+ local executed=tonumber(clock[1])*1000+math.floor(tonumber(clock[2])/1000)
+ if executed<r.created+172800000 then return {'held',raw} end
+ drop(); return {'released'}
+end
 -- This construction has no claim, dispatch or acceptance protocol for courses.
 if r.originKind~=nil and r.originKind~='single_digital' and r.originKind~='single_digital_renewal' then return {'unknown'} end
 -- Retention-only digital origins have no proved access/dispatch stage.

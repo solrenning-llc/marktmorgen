@@ -139,6 +139,7 @@ test("retained option sources follow the existing erasure protocol",async()=>{
 test("an abandoned option reservation is released exactly once at its bounded deadline; a live one is kept",async()=>{
  const f=await fixture(),result=await reserve(f.receipt,f.runtime);assert.ok(result.ok);
  assert.equal((shipment as Record<string,unknown>).DIGITAL_OPTION_RESERVATION_RELEASE_MS,RELEASE_MS);
+ assert.equal(SHIPMENT_MAIL_SCRIPT.match(/\+172800000\b/g)?.length,2,"the Lua literal is the exported deadline");
  assert.ok(RELEASE_MS>=origin.CONFIRMATION_CREATE_REPLAY_MS+24*3_600_000,"no checkout created within the replay window can still be paid");
  const saved=await origin.readDigitalOptionRetention(result.id,f.runtime);assert.ok(saved);
  const deadline=saved.row.created+RELEASE_MS,store=`nl:order-confirmation:store:${saved.row.statsId}`;
@@ -216,7 +217,7 @@ test("actual shared Lua retains one immutable option winner and charges it once"
   const result=results[0];assert.ok(result.ok);
   const enqueue=commands.find(c=>c[0]==="EVAL"&&c[1]===SHIPMENT_MAIL_SCRIPT);assert.ok(enqueue);keys=enqueue.slice(3,13).map(String);
   const saved=await origin.readDigitalOptionRetention(result.id,f.runtime);assert.ok(saved);
-  assert.deepEqual(await confirmationLocalPipeline([["HGET",keys[5],"items"],["HGET",keys[6],"items"],["TTL",keys[0]],["TTL",keys[1]],["ZSCORE",keys[2],result.id]]),["1","1",-1,-1,null]);
+  assert.deepEqual(await confirmationLocalPipeline([["HGET",keys[5],"items"],["HGET",keys[6],"items"],["TTL",keys[0]],["TTL",keys[1]],["ZSCORE",keys[2],result.id]]),["1","1",-1,-1,String(saved.row.created+RELEASE_MS)]);
   for(const op of ["claim","dispatch","accepted","defer"]){
    assert.deepEqual(await confirmationLocalPipeline([["EVAL",SHIPMENT_MAIL_SCRIPT,10,...keys,op,saved.raw,"",Date.now(),131072,JSON.stringify(f.runtime.policy),"a".repeat(48)]]),[["unknown"]]);
   }

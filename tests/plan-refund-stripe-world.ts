@@ -37,6 +37,8 @@ export const world = {
   chargeListDown: false,
   /** New refunds come back with this status. */
   refundStatus: "succeeded",
+  /** Run once, awaited, right after the next GET of a subscription is answered by Stripe and before it is returned. */
+  afterSubscriptionGet: null as null | ((id: string) => Promise<void>),
   /** Subscriptions whose updates answer 500. */
   postDownFor: new Set<string>(),
   slow: 0,
@@ -88,6 +90,14 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
       if (row.status === "canceled") return json({ error: { message: "canceled", type: "invalid_request_error" } }, 400);
       row.status = "canceled";
       row.cancel_at_period_end = false;
+    }
+    if (method === "GET" && world.afterSubscriptionGet) {
+      const hook = world.afterSubscriptionGet;
+      world.afterSubscriptionGet = null;
+      const snapshot = JSON.parse(JSON.stringify(row)) as Row;
+      await hook(sub[1]);
+      const customer = String(snapshot.customer);
+      return json({ ...snapshot, customer: q.getAll("expand[]").includes("customer") ? { id: customer, email: world.customers.get(customer), balance: 0 } : customer });
     }
     const customer = String(row.customer);
     return json({ ...row, customer: q.getAll("expand[]").includes("customer") ? { id: customer, email: world.customers.get(customer), balance: 0 } : customer });

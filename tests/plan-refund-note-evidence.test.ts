@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { ENDING_KEY, GIVE_UP_DAYS, finishPlanRefunds, refundAndEndPlan } from "@/lib/plan-refund-flow";
 import { redisPipeline } from "@/lib/redis";
+import { setCancelAtPeriodEnd } from "@/lib/billing";
 import { store as redis } from "./redis-stub";
 import { DAY, NOW, paidShop, world } from "./plan-refund-stripe-world";
 
@@ -395,4 +396,46 @@ await t.test(`a stale m: 1 note never takes back a stop the creator set after ou
   assert.equal(shop.sub().cancel_at_period_end, true, "a stop the creator set is never taken back on a stale note");
 });
 }
+// Claude 1 on #3740: while our stop stands (a refund that may still turn up), the creator takes it back and cancels
+// themselves from the studio (lib/billing.ts setCancelAtPeriodEnd). That cancellation is theirs: no run takes it back.
+await t.test("the creator's own resume and cancel, made while our stop stood, is never taken back", async () => {
+  await reset();
+  const shop = await paidShop();
+  world.refundsDown = true;
+  await refundAndEndPlan(await shop.store(), NOW);
+  world.refundsDown = false;
+  const id = String(shop.sub().id);
+  await setCancelAtPeriodEnd(id, false);
+  await setCancelAtPeriodEnd(id, true);
+  const quiet = console.error;
+  console.error = () => {};
+  try { await finishPlanRefunds(Date.now() + 10_000, NOW + 601); } finally { console.error = quiet; }
+  assert.equal(shop.sub().cancel_at_period_end, true, "the creator's own cancellation stands");
+});
+
+// Codex U on #3740: the creator cancels between our read of the subscription and our take-back. Either the creator's
+// change waits and is refused (said to try again), or it lands and is never taken back: never told "done" and undone.
+await t.test("a creator's cancel between our read and our take-back is never told done and then undone", async () => {
+  await reset();
+  const shop = await paidShop();
+  world.refundsDown = true;
+  await refundAndEndPlan(await shop.store(), NOW);
+  world.refundsDown = false;
+  const id = String(shop.sub().id);
+  // The creator first takes our stop back, so the next GET reads no stop; then cancels in the gap.
+  let creator: "done" | "refused" = "refused";
+  world.afterSubscriptionGet = async () => {
+    try {
+      await setCancelAtPeriodEnd(id, true);
+      creator = "done";
+    } catch {
+      creator = "refused";
+    }
+  };
+  const quiet = console.error;
+  console.error = () => {};
+  try { await finishPlanRefunds(Date.now() + 10_000, NOW + 601); } finally { console.error = quiet; world.afterSubscriptionGet = null; }
+  if (creator === "done") assert.equal(shop.sub().cancel_at_period_end, true, "a cancel the creator was told is done stands");
+  else assert.equal(shop.sub().cancel_at_period_end, false, "refused: our stop is taken back, and the creator was told to try again");
+});
 });

@@ -51,7 +51,7 @@ import { CALL_ORDER_UNITS } from "@/lib/order-rules";
 import { countOrder } from "@/lib/orders";
 import { saleHandles } from "@/lib/store";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { releaseLock } from "@/lib/redis-lock";
 import { claimValue } from "@/lib/claim-mark";
 import { StripeListUnreadable, plainObject, ownField, readStripePage } from "@/lib/stripe-list";
@@ -1757,6 +1757,12 @@ export async function confirmBooking(input: {
 }): Promise<void> {
   const { store, product, session, start, end, buyerEmail, origin } = input;
   if (!isRedisConfigured() || !store.callsId) return;
+  // Already confirmed: nothing is prepared again (a reload of the thanks page, the daily catch-up), not the meeting
+  // nor the room, which run before the once-only mark below (Claude 1 on #2514). Read exactly: 1 is confirmed, 0 goes
+  // on, and anything else is unknown and throws, so the caller tries again later (rule 24).
+  const confirmed = countOf(repliesFor(await redisPipeline([["EXISTS", confirmedKey(session)]]), 1)?.[0]);
+  if (confirmed === null || confirmed > 1) throw new UnknownReplyError("whether a booking is confirmed");
+  if (confirmed === 1) return;
   // A deposit and a code are only ever in person: what is left is read from the sale when the caller did not
   // hand it, before the once-only mark, so a failed read leaves the booking for the next confirmation
   // (catchUpBookings, the daily job), which carries it, instead of sending both emails without it.

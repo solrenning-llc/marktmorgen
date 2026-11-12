@@ -39,7 +39,7 @@ async function main(): Promise<void> {
   process.env.RESEND_API_KEY = "re_test_a_stand_in_key_for_tests_only";
   await claimHandle(OWNER, "edges", STORE_NAME, "");
   await ensureStatsId(OWNER);
-  await setStripeAccount(OWNER, "acct_1TestEdges000001", true);
+  await setStripeAccount(OWNER, "acct_1TestEdges00001", true);
   await setSubscription(OWNER, { customerId: "cus_Edges000001", subscriptionId: "sub_Edges000001", active: true, period: paidPeriod() });
   const one = await addProduct(OWNER, TITLE, "", "49", null);
   const club = await addProduct(OWNER, "Club", "", "20", { interval: "month", trialDays: 7, payments: 3 });

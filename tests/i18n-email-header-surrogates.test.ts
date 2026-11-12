@@ -52,7 +52,7 @@ async function main(): Promise<void> {
   // A store name of 59 letters and an emoji: the From name is cut at 60, between the emoji's two halves.
   await claimHandle(OWNER, "breadloft", `${"B".repeat(59)}🍞`, "");
   await ensureStatsId(OWNER);
-  await setStripeAccount(OWNER, "acct_1TestBreadLoft01", true);
+  await setStripeAccount(OWNER, "acct_1TestBreadLoft1", true);
   await setSubscription(OWNER, { customerId: "cus_Surrogate0001", subscriptionId: "sub_Surrogate0001", active: true, period: paidPeriod() });
   // Two titles of emoji, one letter apart, so the subject's cut at 200 falls inside an emoji in one of them.
   const titles = ["🍞".repeat(120), `a${"🍞".repeat(120)}`];

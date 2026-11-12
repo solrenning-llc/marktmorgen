@@ -110,6 +110,17 @@ export const LABEL_WORDS: ReadonlySet<string> = new Set(
   ).split(" "),
 );
 
+/**
+ * Small words that join labels ("Date of purchase", "Signed up at", "Fecha de compra", "Nom de famille") and the
+ * qualifiers headers put on them ("Nombre completo"): they make no cell a label alone, and they never stop one.
+ */
+export const JOINING_WORDS: ReadonlySet<string> = new Set(
+  (
+    "a an the of in on at by to for and or per up e y et und u de do da dos das del des du la le les el los las em no na ao en von " +
+    "complete completo completa complet vollstandiger primary main famille familia"
+  ).split(" "),
+);
+
 const words = (name: string) =>
   name
     .normalize("NFD")
@@ -119,13 +130,18 @@ const words = (name: string) =>
     .split(/[^a-z]+/)
     .filter(Boolean);
 
-/** Whether one header name reads plainly as a column's label: not data, and a label word or an identifier. */
+/**
+ * Whether one header name reads plainly as a column's label: not data, and an identifier, or words that are every one
+ * a label word or a joining word, with at least one label word. One label word among others ("Grace Price") is not
+ * enough: a person's name or a title is data, and is never sent.
+ */
 export function labelLike(name: string): boolean {
   const clean = name.trim();
   if (!clean) return true;
   if (looksLikeData(clean)) return false;
   if (/^[a-z][a-z0-9]*([_-][a-z0-9]+)+$/i.test(clean) || /^[a-z]+([A-Z][a-z0-9]*)+$/.test(clean)) return true;
-  return words(clean).some((w) => LABEL_WORDS.has(w));
+  const all = words(clean);
+  return all.some((w) => LABEL_WORDS.has(w)) && all.every((w) => LABEL_WORDS.has(w) || JOINING_WORDS.has(w));
 }
 
 /**

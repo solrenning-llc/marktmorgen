@@ -337,9 +337,9 @@ export async function paidCourses(store: Store, email: string): Promise<Map<stri
  * The same answer, with the memberships that ended kept apart, and the courses left shut only because Stripe's answer
  * could not be had whole (`undecided`): said to the student as "could not check", never as not bought.
  */
-async function courseLedger(store: Store, email: string): Promise<Ledger & { undecided: Set<string> }> {
+async function courseLedger(store: Store, email: string): Promise<Ledger & { undecided: Set<string>; unknown: boolean }> {
   const result = new Map<string, number>();
-  if (!isRedisConfigured()) return { paid: result, ended: new Set(), refunded: new Set(), undecided: new Set() };
+  if (!isRedisConfigured()) return { paid: result, ended: new Set(), refunded: new Set(), undecided: new Set(), unknown: false };
   // A store that brought buyers over from another platform reads theirs in
   // the same round trip (lib/imported-purchases.ts); any other asks nothing more.
   const imported = importedRead(store, email);
@@ -439,7 +439,7 @@ async function courseLedger(store: Store, email: string): Promise<Ledger & { und
       if (taken[i] === 1) result.delete(p.id);
     });
   }
-  return { paid: result, ended: asked.ended, refunded: asked.refunded, undecided };
+  return { paid: result, ended: asked.ended, refunded: asked.refunded, undecided, unknown };
 }
 
 export type CourseAccess =
@@ -935,7 +935,11 @@ export async function requestCourseLink(input: {
   // False is unknown; the original rights and final sender checks still apply.
   if (serviceMailKnownUnavailable()) return "error";
 
-  const paid = await paidCourses(store, raw);
+  const { paid, unknown } = await courseLedger(store, raw);
+  // Stripe's answer could not be had whole (courseLedger): whether this address bought the course is unknown, so the
+  // request is said as not sent, never "sent" with no link sent, which would leave a buyer who paid waiting for an
+  // email that never comes. "error" for every address, whatever it bought, so it says nothing about who bought what.
+  if (unknown) return "error";
   if (!paid.has(product.id)) return "sent";
   return (await sendCourseLink(store, product, raw, origin)) ? "sent" : "error";
 }

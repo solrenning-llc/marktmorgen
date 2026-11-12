@@ -274,13 +274,34 @@ async function main(): Promise<void> {
   unknownFor = (c) => c[0] === "SET" && String(c[1]).startsWith("nl:ai:stop:");
   is("an unknown reply to the mark is not a stop", await ai.markAiStop(store, "runsetunknown001"), false);
   unknownFor = null;
-  is("a confirmed mark is", await ai.markAiStop(store, "runsetknown00001"), true);
+  // A stop is written only over a live run's own mark (cloud I on #3435): the run is live here, as one being drafted.
+  redis.run(["SET", stopKey("runsetknown00001"), "0", "EX", 300]);
+  is("a confirmed mark is, on a live run", await ai.markAiStop(store, "runsetknown00001"), true);
+  is("and the mark says stop", redis.run(["GET", stopKey("runsetknown00001")]), "1");
+
+  part("A stop for a run that is not running writes nothing (MEDIUM 1 of cloud I's review of #3435)");
+  fresh();
+  is("a stop for a run never started is not taken", await ai.markAiStop(store, "runneverstart001"), false);
+  is("and leaves no mark", redis.run(["GET", stopKey("runneverstart001")]), null);
+  for (let i = 0; i < 20; i += 1) await ai.markAiStop(store, `runfresh${String(i).padStart(8, "0")}`);
+  is("twenty stops for made-up runs leave no mark at all", Array.from({ length: 20 }, (_, i) => redis.run(["GET", stopKey(`runfresh${String(i).padStart(8, "0")}`)])).filter((v) => v !== null).length, 0);
 
   part("A run that is not one takes nothing");
   fresh();
   before = await ai.aiLeft(store);
   const bad = await writePage(store, input, Date.now(), stepsOf("not a run!", []));
   is("refused before anything is taken or asked", [bad.ok, calls, before - (await ai.aiLeft(store))], [false, 0, 0]);
+
+  part("A stepped request the month's allowance refuses writes no live mark (cloud O's LOW on #3435)");
+  fresh();
+  // The month is already used up: the reservation is refused, so nothing of the run may be written before it.
+  redis.run(["SET", monthKey, String(1_000_000)]);
+  const usedUp = await writePage(store, input, Date.now(), stepsOf("runrefused000001", []));
+  is("refused for the month's allowance, with no model call", [usedUp.ok ? "ok" : usedUp.reason, calls], ["used", 0]);
+  is("and no live mark is written before the reservation", [sent.filter((c) => c[0] === "SET" && String(c[1]).startsWith("nl:ai:stop:")).length, redis.run(["GET", stopKey("runrefused000001")])], [0, null]);
+  fresh();
+  const reserved = await writePage(store, input, Date.now(), stepsOf("runreserved00001", []));
+  is("a reserved run still marks itself live before its first step, so a stop finds it", [reserved.ok, sent.findIndex((c) => c[0] === "SET" && String(c[1]).startsWith("nl:ai:stop:")) > sent.findIndex((c) => c[0] === "INCRBY" && c[1] === monthKey)], [true, true]);
 
   part("Every command and byte a stepped generation adds is priced");
   const line = COST_LINES.find((l) => l.id === "ai")!;

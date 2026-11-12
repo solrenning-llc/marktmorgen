@@ -6,6 +6,8 @@ import { Icon } from "@/components/icons";
 import { readAiAnswer } from "@/lib/ai-response";
 import { MAX_AI_NOTES } from "@/lib/ai-rules";
 import { IDEAS_COPY, type ProductIdea, ideasReadyWords, readIdeas } from "@/lib/product-ideas-rules";
+import { AiDraftReview } from "@/components/ai-draft-review";
+import { freshChecks } from "@/lib/ai-draft-review";
 
 /** What the box says for each answer the route refuses with (its own words; components/ai-assist.tsx keeps its own). */
 const REFUSALS: Record<string, string> = {
@@ -30,6 +32,7 @@ export function ProductIdeas({
   summary,
   titleFieldId,
   onUse,
+  onReviewChange,
 }: {
   /** What the form's name and short description hold now, put back by the undo. */
   title: string;
@@ -37,6 +40,12 @@ export function ProductIdeas({
   /** The name field, where the focus goes once an idea fills it. */
   titleFieldId: string;
   onUse: (next: { title: string; summary: string }) => void;
+  /**
+   * The checks of the AI-draft review drawn under an idea used (756 [STN3]; cloud I on #3441): afresh at each idea, as
+   * the creator checks them, and null when "Put back what you had" takes the idea out, so the form holds its save
+   * while an idea's words are not checked and puts back its own checks after an undo.
+   */
+  onReviewChange?: (checks: boolean[] | null) => void;
 }) {
   const ai = useContext(AiOn);
   const { on } = ai;
@@ -48,6 +57,8 @@ export function ProductIdeas({
   const [status, setStatus] = useState("");
   const [ideas, setIdeas] = useState<ProductIdea[]>([]);
   const [before, setBefore] = useState<{ title: string; summary: string } | null>(null);
+  // The review of the idea in the form: null while none is.
+  const [checks, setChecks] = useState<boolean[] | null>(null);
   const notesId = useId();
   const allowanceId = useId();
   const listId = useId();
@@ -92,6 +103,9 @@ export function ProductIdeas({
     // The undo puts back what the boxes had before the first idea used, not an idea used before this one.
     setBefore((kept) => kept ?? { title, summary });
     onUse({ title: idea.title, summary: idea.who });
+    const fresh = freshChecks();
+    setChecks(fresh);
+    onReviewChange?.(fresh);
     setStatus(IDEAS_COPY.used);
     // The creator asked for it: the focus goes to the name it filled, to read and change.
     document.getElementById(titleFieldId)?.focus();
@@ -101,6 +115,8 @@ export function ProductIdeas({
     if (!before) return;
     onUse(before);
     setBefore(null);
+    setChecks(null);
+    onReviewChange?.(null);
     setStatus(IDEAS_COPY.undone);
   }
 
@@ -177,6 +193,16 @@ export function ProductIdeas({
               ))}
             </ol>
           </section>
+        ) : null}
+        {checks ? (
+          <AiDraftReview
+            checks={checks}
+            onToggle={(index, ticked) => {
+              const next = checks.map((was, at) => (at === index ? ticked : was));
+              setChecks(next);
+              onReviewChange?.(next);
+            }}
+          />
         ) : null}
       </div>
     </details>

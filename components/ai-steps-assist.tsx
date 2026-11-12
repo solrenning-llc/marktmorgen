@@ -6,6 +6,8 @@ import { Icon } from "@/components/icons";
 import { MAX_AI_NOTES } from "@/lib/ai-rules";
 import { readAiAnswer } from "@/lib/ai-response";
 import { type AiStep, type AiStepId, type AiStepLine, readStepLine } from "@/lib/ai-steps";
+import { AiDraftReview } from "@/components/ai-draft-review";
+import { freshChecks } from "@/lib/ai-draft-review";
 
 /**
  * The writing help's box for a job told in named steps (758 [STN5] unit 1,
@@ -166,6 +168,10 @@ export function AiStepsAssist<T>({
   const [stopping, setStopping] = useState(false);
   // A draft that came back after Stop was pressed: kept here until the creator says whether to use it.
   const [late, setLate] = useState<{ value: T } | null>(null);
+  // A draft put into the page is drawn with the AI-draft review, as AiAssist does on main (756 [STN3]; cloud I on #3435,
+  // MEDIUM 2). Only a new draft used sets it, each time with its checks afresh.
+  const [drafted, setDrafted] = useState(false);
+  const [checks, setChecks] = useState<boolean[]>(freshChecks);
   const runRef = useRef("");
   // Whether a run is going on now, read after an await, when `busy` is a stale copy.
   const busyRef = useRef(false);
@@ -235,6 +241,8 @@ export function AiStepsAssist<T>({
         return;
       }
       onResult(line.value as T);
+      setChecks(freshChecks());
+      setDrafted(true);
       finish({ said: `${done}${given}` });
       return;
     }
@@ -285,7 +293,11 @@ export function AiStepsAssist<T>({
   function choose(use: boolean) {
     if (!late) return;
     focusResult.current = true;
-    if (use) onResult(late.value);
+    if (use) {
+      onResult(late.value);
+      setChecks(freshChecks());
+      setDrafted(true);
+    }
     setLate(null);
     setError(null);
     setSaid(use ? done : "Your page is as it was. The draft was not used; it still counts toward this month.");
@@ -431,6 +443,9 @@ export function AiStepsAssist<T>({
               Keep my page
             </button>
           </div>
+        ) : null}
+        {drafted && !late ? (
+          <AiDraftReview checks={checks} onToggle={(index, ticked) => setChecks((was) => was.map((one, at) => (at === index ? ticked : one)))} />
         ) : null}
         <p className="text-xs text-ink-soft">
           It uses only your own words, here and in your store, never invents reviews, numbers, results or deadlines, and saves nothing until you

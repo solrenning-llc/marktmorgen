@@ -48,6 +48,8 @@ const DRAFT = {
 };
 const FACTS = { parts: [{ title: "Week 1: Pantry basics", detail: "Ten dinners" }], format: "A printable PDF", for: "Busy parents" };
 let calls = 0;
+/** Run once while the model is asked to read the PDF: the page's Stop, pressed while a run is live (cloud I on #3435). */
+let duringRead: (() => Promise<unknown>) | null = null;
 /** The product's PDF, as the synthetic file store hands it over. */
 let book: Uint8Array = new Uint8Array();
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -55,6 +57,11 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (host.endsWith(".r2.cloudflarestorage.com")) return new Response(new Blob([book.slice()]), { status: 200, headers: { "content-length": String(book.length) } });
   if (host !== "api.anthropic.com") return new Response("{}", { status: 404 });
   calls += 1;
+  if (String(init?.body ?? "").includes('"type":"document"') && duringRead) {
+    const press = duringRead;
+    duringRead = null;
+    await press();
+  }
   // The reading is the call that carries the PDF; any other is the writing.
   const text = String(init?.body ?? "").includes('"type":"document"') ? JSON.stringify(FACTS) : JSON.stringify(DRAFT);
   return new Response(JSON.stringify({ content: [{ type: "text", text }] }));
@@ -88,17 +95,22 @@ async function main(): Promise<void> {
     );
   const json = async (response: Response) => [response.status, ((await response.json().catch(() => ({}))) as { ok?: boolean; error?: string })];
 
-  part("A stop leaves one short-lived mark under the store's own name");
+  part("A stop for a live run leaves one short-lived mark under the store's own name; one for no run writes nothing");
   const run = "routerun00000001";
-  is("the stop is taken", await json(await ask({ kind: "stop", run })), [200, { ok: true }]);
   const key = `nl:ai:stop:${store.statsId}:${run}`;
+  // Cloud I on #3435, MEDIUM 1: a stop is written only over the run's own live mark, which the run writes as it starts.
+  is("a stop for a run that is not running is not taken", await json(await ask({ kind: "stop", run })), [503, { ok: false, error: "unconfirmed" }]);
+  is("and writes nothing", redis.run(["GET", key]), null);
+  redis.run(["SET", key, "0", "EX", 300]);
+  is("the stop for a live run is taken", await json(await ask({ kind: "stop", run })), [200, { ok: true }]);
   const ttl = Number(redis.run(["TTL", key]));
   is("the mark is there and lasts at most five minutes", [redis.run(["GET", key]), ttl > 0 && ttl <= 300], ["1", true]);
   is("a run id that is not one is refused and nothing is kept", await json(await ask({ kind: "stop", run: "no good" })), [400, { ok: false, error: "invalid" }]);
   is("no mark for it", redis.run(["GET", `nl:ai:stop:${store.statsId}:no good`]), null);
   const many = [];
   for (let i = 0; i < AI_PER_MINUTE + 2; i += 1) many.push((await ask({ kind: "stop", run: `routerunmany${String(i).padStart(4, "0")}` })).status);
-  is("stopping is never held back by the per-minute limit on writing", many.every((status) => status === 200), true);
+  is("stops for made-up runs are never held back by the per-minute limit, and are not taken", many.every((status) => status === 503), true);
+  is("and none of them writes a mark", Array.from({ length: AI_PER_MINUTE + 2 }, (_, i) => redis.run(["GET", `nl:ai:stop:${store.statsId}:routerunmany${String(i).padStart(4, "0")}`])).filter((v) => v !== null).length, 0);
   is("and it asks the model nothing", calls, 0);
 
   part("A page asked for with steps comes back step by step");
@@ -138,7 +150,11 @@ async function main(): Promise<void> {
   const filed = await setProductFile(OWNER, made.product.id, { pathname: `vault/${"a".repeat(32)}/${made.product.id}/token0001/book.pdf`, name: "book.pdf", bytes: book.length, contentType: "application/pdf", addedAt: "2026-11-09" });
   if (!filed.ok) throw new Error("no file");
   const pdfRun = "routerunpdfstop1";
-  is("the stop is taken before the run", (await ask({ kind: "stop", run: pdfRun })).status, 200);
+  // The page's Stop is pressed while the run is live, as the page offers it (after a step was said).
+  let stopStatus = 0;
+  duringRead = async () => {
+    stopStatus = (await ask({ kind: "stop", run: pdfRun })).status;
+  };
   calls = 0;
   const leftBefore = await aiLeft((await storeForEmail(OWNER))!);
   const pdfStepped = await ask({ kind: "page", product: made.product.id, steps: true, run: pdfRun, readFile: true, notes: "" });
@@ -149,6 +165,7 @@ async function main(): Promise<void> {
   ]);
   is("the result says the stop, the one job given back and what is left", pdfLines[pdfLines.length - 1], { done: true, ok: false, error: "stopped", returned: 1, left: leftBefore - READ_PDF_JOBS });
   is("one model call: the reading", calls, 1);
+  is("the stop pressed during the reading was taken", stopStatus, 200);
 
   part("A job that reads the PDF first is refused before the file is read when it could not be admitted");
   let fileReads = 0;

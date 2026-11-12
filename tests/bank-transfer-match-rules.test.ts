@@ -38,6 +38,11 @@ is("over", matchReceipt(receipt("r5", "MM-7K4QX9TP2W", 7000), open, new Set()), 
 part("Anything in doubt goes to review and starts nothing");
 is("no reference", matchReceipt(receipt("r6", "", 6900), open, new Set()), { kind: "review", reason: "no_reference" });
 is("a reference that is not an open invoice", matchReceipt(receipt("r7", "MM-ZZZZZZZZZZ", 6900), open, new Set()), { kind: "review", reason: "unknown_reference" });
+// Claude 3 (nuvem N) on #3811, LEVE: a reference is a whole word on both sides, and a memo the bank printed in lower case still finds it.
+is("glued to a word on the left: not a reference", matchReceipt(receipt("r20", "ZMM-7K4QX9TP2W", 6900), open, new Set()), { kind: "review", reason: "no_reference" });
+is("glued to a letter outside the alphabet on the right: not a reference", matchReceipt(receipt("r21", "MM-7K4QX9TP2WO", 6900), open, new Set()), { kind: "review", reason: "no_reference" });
+is("in lower case: found", matchReceipt(receipt("r22", "payment mm-7k4qx9tp2w", 6900), open, new Set()).kind, "paid");
+is("without its hyphen: left to a person", matchReceipt(receipt("r23", "MM7K4QX9TP2W", 6900), open, new Set()), { kind: "review", reason: "no_reference" });
 is("two references in one memo", matchReceipt(receipt("r8", "MM-7K4QX9TP2W MM-3HDN8RZ5BV", 6900), open, new Set()), { kind: "review", reason: "two_references" });
 is("another currency", matchReceipt(receipt("r9", "MM-7K4QX9TP2W", 6900, "eur"), open, new Set()), { kind: "review", reason: "currency" });
 for (const bad of [0, -100, 69.5, "6900", null]) is(`an amount that is not one: ${JSON.stringify(bad)}`, matchReceipt(receipt("r10", "MM-7K4QX9TP2W", bad), open, new Set()), { kind: "review", reason: "amount" });

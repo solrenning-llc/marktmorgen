@@ -2,6 +2,8 @@
  * The words and bounds of "Send this to support" (lib/help-support.ts), shared by the server and the studio's form:
  * nothing here sends, reads or keeps anything.
  */
+import { SUPPORT_EMAIL } from "@/lib/creator-research";
+
 /** The most a creator sends in one request, after editing it. */
 export const MAX_SUPPORT_TEXT = 4_000;
 /** The least that is a request at all. */
@@ -11,6 +13,16 @@ export const SUPPORT_PER_DAY = 5;
 export const SUPPORT_WINDOW_SECONDS = 86_400;
 /** Emails one request sends: the support inbox and the copy to the creator. */
 export const SUPPORT_EMAILS_PER_REQUEST = 2;
+
+/**
+ * The inbox's email did not confirm, said by the server and by the form alike. A false from sendEmail, or no answer
+ * read in the browser, may be a refusal or an email taken whose answer was lost, so it is never said "nothing was
+ * sent" (rule 24). A try sent again keeps the number but is counted toward SUPPORT_PER_DAY like any other (the cap is
+ * taken before any email), so the words point to the support address first and say that each try counts.
+ */
+export function unconfirmedWords(number: string): string {
+  return `We could not confirm that your request reached support, so it may or may not have been sent. Its number is ${number}. To be sure, write to ${SUPPORT_EMAIL} and give that number. Or send it again: it keeps the same number, so support sees one request, but each try counts toward your store's ${SUPPORT_PER_DAY} requests a day.`;
+}
 
 /** A request's number: "SR-" and two groups of four symbols, without I, L, O or U. */
 export const SUPPORT_NUMBER = /^SR-[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$/;

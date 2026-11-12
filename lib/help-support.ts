@@ -33,6 +33,7 @@ import {
   cleanSupportText,
   supportNumberOf,
   supportScreen,
+  unconfirmedWords,
 } from "@/lib/help-support-rules";
 
 export * from "@/lib/help-support-rules";
@@ -47,17 +48,9 @@ export type SupportProblem = "short" | "long" | "busy" | "unknown" | "unconfirme
 export const SUPPORT_PROBLEMS: Record<Exclude<SupportProblem, "unconfirmed">, string> = {
   short: "Write a few words about what you need first.",
   long: `That is too long to send. Keep it under ${MAX_SUPPORT_TEXT.toLocaleString("en-US")} characters.`,
-  busy: `Your store has sent ${SUPPORT_PER_DAY} requests to support in the last 24 hours, the most a day. Try again tomorrow, or write to ${SUPPORT_EMAIL}.`,
+  busy: `Your store has reached the most requests to support for one day: ${SUPPORT_PER_DAY} in 24 hours, and each try counts, a request sent again too. Try again tomorrow, or write to ${SUPPORT_EMAIL}.`,
   unknown: `We could not check how many requests your store sent today, so nothing was sent. Try again in a moment, or write to ${SUPPORT_EMAIL}.`,
 };
-
-/**
- * The inbox's email did not confirm. A false from sendEmail may be a refusal or an email taken whose answer was lost,
- * so it is never said "nothing was sent" (rule 24): it is said unconfirmed, with the number a try again keeps.
- */
-export function unconfirmedWords(number: string): string {
-  return `We could not confirm that your request reached support, so it may or may not have been sent. Sending it again keeps the same request number, ${number}, so support can tell it is one request. Or write to ${SUPPORT_EMAIL} and give that number.`;
-}
 
 export type SupportResult = { ok: true; number: string; copied: boolean } | { ok: false; problem: SupportProblem; words: string; number?: string };
 

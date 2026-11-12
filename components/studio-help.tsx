@@ -6,7 +6,7 @@ import Link from "next/link";
 import { Icon } from "@/components/icons";
 import { MAX_HELP_QUESTION } from "@/lib/ai-rules";
 import { NewTab } from "@/components/new-tab";
-import { MAX_SUPPORT_TEXT, MIN_SUPPORT_TEXT, SUPPORT_EMAILS_PER_REQUEST, supportDraft, supportNumberOf } from "@/lib/help-support-rules";
+import { MAX_SUPPORT_TEXT, MIN_SUPPORT_TEXT, SUPPORT_EMAILS_PER_REQUEST, supportDraft, supportNumberOf, unconfirmedWords } from "@/lib/help-support-rules";
 
 type Answer = { answer: string; sources: { id: string; q: string }[]; asked?: string };
 
@@ -95,16 +95,13 @@ export function StudioHelp({ left: startLeft }: { left: number | null }) {
       ) : null}
       {answer ? <SupportHandoff key={`${answer.asked}
 ${answer.answer}`} question={answer.asked ?? ""} answer={answer.answer} /> : null}
-      {note ? <p role="status" className="mt-3 text-sm font-semibold text-ink">{note}</p> : null}
+      {/* Always there, so a note is announced when its words go in (WCAG 4.1.3): a region inserted with its words may be silent. */}
+      <p role="status" className={note ? "mt-3 text-sm font-semibold text-ink" : undefined}>{note}</p>
     </section>
   );
 }
 
 type Sent = { number: string; copied: boolean };
-
-/** No answer could be read from the server: the request may have gone, so the words never say it did not. */
-const unconfirmed = (number: string) =>
-  `We could not confirm that your request reached support, so it may or may not have been sent. Sending it again keeps the same request number, ${number}, so support can tell it is one request.`;
 
 /**
  * "Send this to support" (lib/help-support.ts): after an answer, the question and the answer go to a person in
@@ -151,10 +148,10 @@ export function SupportHandoff({ question, answer, startOpen = false }: { questi
         focusNext.current = "result";
         return;
       }
-      setNote(data.words || unconfirmed(number));
+      setNote(data.words || unconfirmedWords(number));
     } catch {
-      // No answer read: the request may have reached support, so it is never said unsent.
-      setNote(unconfirmed(number));
+      // No answer read: the request may have reached support, so it is never said unsent (the server's own words).
+      setNote(unconfirmedWords(number));
     } finally {
       setBusy(false);
     }
@@ -201,7 +198,8 @@ export function SupportHandoff({ question, answer, startOpen = false }: { questi
         </button>
         <button type="button" onClick={() => { focusNext.current = "opener"; setOpen(false); setNote(""); }} className="btn btn-secondary">Cancel</button>
       </div>
-      {note ? <p role="status" className="mt-3 text-sm font-semibold text-ink">{note}</p> : null}
+      {/* Always there, so a refusal is announced when its words go in (WCAG 4.1.3); send() empties it first, so the same words again are a change too. */}
+      <p role="status" className={note ? "mt-3 text-sm font-semibold text-ink" : undefined}>{note}</p>
     </form>
   );
 }

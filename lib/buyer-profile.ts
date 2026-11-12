@@ -184,8 +184,12 @@ export async function addPersonNote(statsId: string, person: string, by: string,
   const notes = await readPersonNotes(statsId, person);
   if (notes.length > MAX_PERSON_NOTES) {
     const dropped = notes.slice(MAX_PERSON_NOTES);
-    await redisPipeline([["HDEL", notesKey(statsId, person), ...dropped.map((n) => n.id)]]);
-    await giveData(room, [{ slot: NOTES_SLOT, bytes: dropped.reduce((sum, n) => sum + noteBytes(n), 0) }]);
+    // One HDEL a note, so each answers whether it was this call that removed it: two notes added at once read the
+    // same notes past the cap and drop the same ones, and only the call whose HDEL removed a note gives back its room,
+    // never both (Claude 7, Redis race hunt; removePersonNote reads its HDEL the same way).
+    const removed = await redisPipeline(dropped.map((n) => ["HDEL", notesKey(statsId, person), n.id]));
+    const freed = dropped.filter((_, i) => Number(removed[i]) === 1);
+    if (freed.length) await giveData(room, [{ slot: NOTES_SLOT, bytes: freed.reduce((sum, n) => sum + noteBytes(n), 0) }]);
     return notes.slice(0, MAX_PERSON_NOTES);
   }
   return notes;

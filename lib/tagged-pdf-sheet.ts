@@ -14,27 +14,38 @@ const H = 792;
 const MARGIN = 72;
 const WIDTH = W - 2 * MARGIN;
 
-/** The lines a paragraph takes at this size and width: words kept whole, a word longer than the width cut where it must be. */
+/**
+ * The lines a paragraph takes at this size and width: words kept whole, a word longer than the width cut where it
+ * must be. Each word is measured once and the line's width is the sum of its words and spaces, so the work grows
+ * with the text, never with the text times the line (independent review of 490 [PP1], 12 November 2026).
+ */
 export function wrap(font: Pick<PDFFont, "widthOfTextAtSize">, text: string, size: number, width: number): string[] {
   const out: string[] = [];
+  const space = font.widthOfTextAtSize(" ", size);
   for (const paragraph of text.split("\n")) {
     let line = "";
+    let lineWidth = 0;
     for (const word of paragraph.split(/\s+/).filter(Boolean)) {
-      const tried = line ? `${line} ${word}` : word;
-      if (font.widthOfTextAtSize(tried, size) <= width) {
-        line = tried;
+      const wordWidth = font.widthOfTextAtSize(word, size);
+      const tried = line ? lineWidth + space + wordWidth : wordWidth;
+      if (tried <= width) {
+        line = line ? `${line} ${word}` : word;
+        lineWidth = tried;
         continue;
       }
       if (line) out.push(line);
       // A word wider than the line is cut into pieces that fit.
       let rest = word;
-      while (font.widthOfTextAtSize(rest, size) > width) {
+      let restWidth = wordWidth;
+      while (restWidth > width) {
         let cut = Array.from(rest).length - 1;
         while (cut > 1 && font.widthOfTextAtSize(Array.from(rest).slice(0, cut).join(""), size) > width) cut -= 1;
         out.push(Array.from(rest).slice(0, cut).join(""));
         rest = Array.from(rest).slice(cut).join("");
+        restWidth = font.widthOfTextAtSize(rest, size);
       }
       line = rest;
+      lineWidth = restWidth;
     }
     out.push(line);
   }

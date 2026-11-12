@@ -54,7 +54,7 @@ try {
   const open = async () => {
     await page.goto("https://studio.test/");
     await page.addScriptTag({ content: bundle.outputFiles[0].text });
-    await page.getByRole("heading", { name: "4. Download it" }).waitFor();
+    await page.getByRole("heading", { name: "3. Download it" }).waitFor();
   };
   await open();
 
@@ -69,7 +69,9 @@ try {
   await page.getByLabel("Title").focus();
   await page.keyboard.type("Bread at home");
   await page.getByLabel("What goes under “Step 1”").fill("Mix flour and water.");
-  is("the count of parts written follows the writing", (await page.getByText(/parts written\./).textContent())?.startsWith("1 of "), true);
+  await page.getByLabel("Heading of part 3").fill("");
+  is("a heading cleared stays empty, and says what it is called then", [await page.getByLabel("Heading of part 3").inputValue(), await page.getByText("Left empty, it is called “Step 2”.").isVisible()], ["", true]);
+  is("the count of parts written follows the writing", (await page.getByText(/parts written;/).textContent())?.startsWith("1 of "), true);
   await page.getByRole("button", { name: "Download the PDF" }).focus();
   const downloading = page.waitForEvent("download");
   await page.keyboard.press("Enter");

@@ -15,3 +15,9 @@ export const FIRST_PRODUCT_MAX_HEADING = 120;
  * breaks would otherwise be hundreds of pages from a few thousand characters. Runs of empty lines count as one.
  */
 export const FIRST_PRODUCT_MAX_BREAKS = 600;
+/**
+ * The formats whose PDF holds everything their outline describes today: a guide is headings and paragraphs. A
+ * checklist's boxes to tick, a workbook's room for answers and a template's fields to fill are not drawn yet, so
+ * those formats are not offered or made until they are (independent review, 12 November 2026).
+ */
+export const FIRST_PRODUCT_MADE_FORMATS = ["guide"] as const;

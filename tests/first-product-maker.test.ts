@@ -2,9 +2,10 @@
  * The studio's "Make your first product" screen (490 [PP1], unit 2; components/first-product-maker.tsx,
  * app/studio/first-product/page.tsx; added 12 November 2026), as first drawn. Checked:
  *
- *   - four steps, each a section named by its heading, in order: what to make, a few choices, write it, download;
- *   - the format and each question are radio buttons inside a fieldset with a legend, the first choice marked, and
- *     only the questions that change the outline (no AI drafts in this unit);
+ *   - three steps, each a section named by its heading, in order: the guide's choices, write it, download; only the
+ *     guide is offered (its PDF holds everything its outline describes);
+ *   - each question is radio buttons inside a fieldset with a legend, the first choice marked, and only the
+ *     questions that change the outline (no AI drafts in this unit);
  *   - the title, the notes and every part of the outline are fields with a visible label and a hint tied to them,
  *     with the same limits the server keeps;
  *   - it says what is kept where (this device only, sent only to make the PDF), and promises nothing the file does
@@ -24,13 +25,13 @@ import { done, is, part } from "./check";
 const html = renderToStaticMarkup(createElement(FirstProductMaker, { storeKey: "abc", productsHref: "/studio#products" }));
 const count = (re: RegExp) => (html.match(re) ?? []).length;
 
-part("Four steps, in order");
-const steps = ["1. What will you make?", "2. A few choices", "3. Write it", "4. Download it"];
+part("Three steps, in order");
+const steps = ["1. Your guide", "2. Write it", "3. Download it"];
 is("each a heading, in order", steps.map((s) => html.indexOf(`>${s}</h2>`)).every((at, i, all) => at > 0 && (i === 0 || at > all[i - 1])), true);
-is("each section named by its heading", ["fp-format", "fp-choices", "fp-write", "fp-download"].every((id) => html.includes(`aria-labelledby="${id}"`) && html.includes(`id="${id}"`)), true);
+is("each section named by its heading", ["fp-choices", "fp-write", "fp-download"].every((id) => html.includes(`aria-labelledby="${id}"`) && html.includes(`id="${id}"`)), true);
 
 part("Choices by buttons");
-is("the four formats as radio buttons, the guide marked", [count(/name="fp-format"/g), /<input type="radio" class="[^"]*" name="fp-format" checked=""\/>/.test(html)], [4, true]);
+is("only the guide is offered: no choice of format", count(/name="fp-format"/g), 0);
 const asked = questionsFor("guide", false);
 is("only the questions that change the outline", [asked.map((q) => q.id), asked.every((q) => html.includes(`<legend class="field-label">${q.ask}</legend>`))], [["length", "ending"], true]);
 is("every question with its first choice marked", asked.every((q) => new RegExp(`name="fp-${q.id}" checked=""`).test(html)), true);
@@ -38,6 +39,8 @@ is("every question with its first choice marked", asked.every((q) => new RegExp(
 part("Writing");
 const parts = outlineFor("guide", {}, "").parts;
 is("a field for every part of the outline, labeled, with its hint", [count(/<textarea/g), parts.every((_, i) => html.includes(`aria-describedby="fp-ask-${i}"`) && html.includes(`id="fp-ask-${i}"`))], [parts.length + 1, true]);
+is("each heading says what it is called when left empty", parts.every((p, i) => html.includes(`id="fp-heading-${i}"`) && html.includes(`Left empty, it is called “${p.heading}”.`)), true);
+is("it says exactly what the PDF holds, and the characters used of the limit", [html.includes("It holds your title, “By” and your store&#x27;s name, then each part you wrote."), /0 of 60,000 characters/.test(html)], [true, true]);
 is("the same limits the server keeps", [html.includes(`maxLength="${FIRST_PRODUCT_MAX_PART}"`), html.includes(`maxLength="${FIRST_PRODUCT_MAX_HEADING}"`)], [true, true]);
 is("the notes field asks in the format's own words, its example beside it, never in it", [html.includes(FORMAT_INFO.guide.know), html.includes(`For example: ${FORMAT_INFO.guide.example}`), html.includes(`value="${FORMAT_INFO.guide.example}"`)], [true, true, false]);
 is("it says the notes are not put in the PDF", html.includes("They are not put in the PDF."), true);

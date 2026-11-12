@@ -35,7 +35,7 @@ export default async function StudioFirstProductPage({ searchParams }: Params) {
           <StudioTrail store={store} here="Make your first product" />
           <h1 className="t-h2 mt-3">Make your first product</h1>
           <p className="mt-3 max-w-2xl text-ink-soft">
-            Choose what to make, answer a few questions, and write each part of the outline in your own words. Then download it as a PDF and add it to a product as the file buyers get.
+            Answer a few questions, write each part of a guide in your own words, then download it as a PDF and add it to a product as the file buyers get.
           </p>
           <FirstProductMaker storeKey={store.sid || store.handle} productsHref={`${studioPath(store)}#products`} />
         </main>

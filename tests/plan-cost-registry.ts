@@ -375,10 +375,11 @@ export const CERTIFICATE_PDF_READ = CALL + 1 * CPU_SECOND + 4 * MEMORY_SECOND + 
 /**
  * The first product a creator wrote in the studio, drawn as a tagged PDF (app/api/store/first-product/pdf/route.ts,
  * 490 [PP1] unit 2): the guard's session, store and role (twenty commands, as a studio request), its count, the
- * outline worked out again, the fonts embedded and every page drawn at two seconds of CPU (0.81 s measured cold for
- * the longest file, a 40-item checklist at FIRST_PRODUCT_MAX_TEXT of the widest letters or at FIRST_PRODUCT_MAX_BREAKS
- * short lines) held four seconds at 2 GB,
- * and the file sent (100 KB; 63 KB measured). Taken as FIRST_PRODUCT_PDF_UNITS studio requests, the rest of them
+ * outline worked out again, the fonts embedded and every page drawn at two seconds of CPU (0.58 s measured cold for
+ * the longest guide: one-letter words, letters with combining marks, the widest letters or the most line breaks, at
+ * FIRST_PRODUCT_MAX_PART a part; the line layout measures each word once since the independent review of 12 November
+ * 2026, which had measured 2.1 s when it measured the whole line again for each word) held four seconds at 2 GB,
+ * and the file sent (100 KB; 35 KB measured). Taken as FIRST_PRODUCT_PDF_UNITS studio requests, the rest of them
  * before it is drawn, held above it in tests/first-product-pdf.test.ts. Kept nowhere: no database bytes.
  */
 export const FIRST_PRODUCT_PDF_READ = CALL + 2 * CPU_SECOND + 4 * MEMORY_SECOND + (20 + 2 * TAKE_COMMANDS) * COMMAND + 100_000 * ORIGIN_PER_BYTE;

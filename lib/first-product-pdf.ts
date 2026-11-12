@@ -16,7 +16,7 @@
 import { FIRST_FORMATS, type FirstFormat, outlineFor, placeholderTitle } from "@/lib/first-product";
 import { canDraw } from "@/lib/certificate-pdf";
 import { type SheetText, taggedSheetPdf } from "@/lib/tagged-pdf-sheet";
-import { FIRST_PRODUCT_MAX_BREAKS, FIRST_PRODUCT_MAX_HEADING, FIRST_PRODUCT_MAX_PART, FIRST_PRODUCT_MAX_TEXT } from "@/lib/first-product-limits";
+import { FIRST_PRODUCT_MADE_FORMATS, FIRST_PRODUCT_MAX_BREAKS, FIRST_PRODUCT_MAX_HEADING, FIRST_PRODUCT_MAX_PART, FIRST_PRODUCT_MAX_TEXT } from "@/lib/first-product-limits";
 
 export { FIRST_PRODUCT_MAX_BREAKS, FIRST_PRODUCT_MAX_HEADING, FIRST_PRODUCT_MAX_PART, FIRST_PRODUCT_MAX_TEXT };
 /** A run of letters with no space longer than this is broken into pieces of this length. */
@@ -79,7 +79,8 @@ export function breakLongWords(text: string): string {
 export function readFirstProduct(raw: unknown): FirstProductRead {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { ok: false, reason: "parts" };
   const value = raw as Record<string, unknown>;
-  const format = FIRST_FORMATS.find((f) => f === value.format);
+  // Only a format whose PDF holds everything its outline describes (FIRST_PRODUCT_MADE_FORMATS).
+  const format = FIRST_FORMATS.find((f) => f === value.format && (FIRST_PRODUCT_MADE_FORMATS as readonly string[]).includes(f));
   if (!format) return { ok: false, reason: "format" };
   const answers = value.answers && typeof value.answers === "object" && !Array.isArray(value.answers) ? (value.answers as Record<string, string>) : {};
   const title = clean(value.title);
@@ -108,23 +109,9 @@ export function readFirstProduct(raw: unknown): FirstProductRead {
   return { ok: true, sheet: { format, title, groups, parts } };
 }
 
-/**
- * What the file says, in order: the title, who made it, then each part the creator wrote. A part left empty is
- * left out. A checklist is its groups' names as headings, each with its items numbered under it; the other
- * formats are each part's heading with what was written under it.
- */
+/** What the file says, in order: the title, who made it, then each part the creator wrote. A part left empty is left out. */
 export function firstProductTexts(sheet: FirstProductSheet, by: string): SheetText[] {
   const out: SheetText[] = [{ role: "H1", text: breakLongWords(sheet.title) }, { role: "P", text: breakLongWords(`By ${by}`) }];
-  if (sheet.format === "checklist") {
-    const groupsOf = sheet.groups.length ? sheet.groups.map((_, g) => g) : [undefined];
-    for (const g of groupsOf) {
-      const items = sheet.parts.filter((part) => part.group === g && part.body);
-      if (!items.length) continue;
-      if (g !== undefined) out.push({ role: "H2", text: breakLongWords(sheet.groups[g]) });
-      items.forEach((item, n) => out.push({ role: "P", text: breakLongWords(`${n + 1}. ${item.body}`) }));
-    }
-    return out;
-  }
   for (const part of sheet.parts) {
     if (!part.body) continue;
     out.push({ role: "H2", text: breakLongWords(part.heading) }, { role: "P", text: breakLongWords(part.body) });

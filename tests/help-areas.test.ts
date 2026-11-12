@@ -20,6 +20,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { AREAS_WITHOUT_HELP, HELP_AREAS, NOT_AREAS, answerLinks } from "@/lib/help-areas";
 import { FEATURE_PAGES } from "@/lib/feature-pages";
+import { webhookBeginnerQuestions } from "@/lib/webhook-faq";
 import { HELP_SECTIONS, answerId } from "@/lib/help-content";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -110,6 +111,7 @@ part("Names quoted in the answers written for HC1 are on the screens");
     "what-is-your-path-and-how-do-i-start-it": ["components/studio-header.tsx", "components/path-studio-reminder.tsx", "app/studio/path/page.tsx", "components/path-onboarding.tsx", "lib/path-checkout.ts"],
     "how-do-i-choose-a-growth-goal-and-see-what-to-do-next": ["app/studio/page.tsx", "components/studio-tools.tsx", "app/studio/growth/page.tsx", "lib/growth-plan.ts", "components/template-library.tsx"],
     "how-do-i-approve-changes-my-ai-assistant-prepared": ["app/studio/agent/page.tsx", "components/agent-proposals.tsx", "app/developers/page.tsx"],
+    "how-do-i-tell-zapier-make-or-my-own-server-when-something-happens-in-my-store": ["components/webhook-editor.tsx"],
     "how-do-i-keep-my-busy-times-out-of-the-team-calls-i-host": ["app/studio/page.tsx", "components/studio-tools.tsx", "components/team-event-editor.tsx", "app/studio/calendar/page.tsx", "components/host-calendar.tsx"],
   };
   const plain = (text: string) => text.replace(/&apos;|\u2019/g, "'");
@@ -145,6 +147,19 @@ part("Each area's answer links to its studio screen and its feature page");
   is("an answer that is no area's main one", answerLinks(elsewhere), { studio: [], features: [] });
   const everyLink = HELP_AREAS.flatMap((area) => { const l = answerLinks(area.answer); return [...l.studio, ...l.features]; });
   is("every studio link opens a real screen", everyLink.filter((l) => l.href.startsWith("/studio/") && !existsSync(join("app", l.href, "page.tsx"))), []);
+}
+
+part("The webhook answer says what the feature page says");
+{
+  const id = "how-do-i-tell-zapier-make-or-my-own-server-when-something-happens-in-my-store";
+  const item = HELP_SECTIONS.flatMap((section) => section.items).find((i) => answerId(i.q) === id);
+  const faq = webhookBeginnerQuestions().map((q) => q.a);
+  is("it opens with what a webhook is, in the feature page's words", item?.a[0], `With a webhook: an${faq[0].slice(2)}`);
+  is("then how to add one, word for word", item?.a[1], faq[1]);
+  is("then Zapier, word for word after its first words", [item?.a[2].startsWith("Zapier works through "), item?.a[2].slice("Zapier works through ".length)], [true, faq[3].slice("Yes, through ".length)]);
+  const kept = Number(/export const LOG_SIZE = (\d+);/.exec(readFileSync("lib/webhooks.ts", "utf8"))?.[1]);
+  is("the deliveries it says the studio lists are the ones it keeps", item?.a[3].includes(`up to ${kept}, each kept for a week`), true);
+  is("and the studio says a week too", readFileSync("components/webhook-editor.tsx", "utf8").includes("Deliveries are kept for a week, the last 50 at most."), kept === 50);
 }
 
 done();

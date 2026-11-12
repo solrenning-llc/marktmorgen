@@ -51,6 +51,7 @@ import { KEEP_DAYS as AGREEMENT_KEEP_DAYS, MAX_VERSIONS, SIGN_DAYS } from "@/lib
 import { KEEP_DAYS, MAX_AUTO_REMINDERS, MAX_LINES, MAX_PER_PERSON, MAX_SENDS, OPEN_DAYS, REMIND_EVERY_DAYS, REQUEST_LIMITS } from "@/lib/payment-request-rules";
 import { LEAVING_ANSWER, LEAVING_QUESTION, STAN_QUESTION, stanComparison } from "@/lib/home-faq";
 import { MAX_SEQUENCE_FILE_BYTES, SEQUENCE_TEMPLATE } from "@/lib/sequence-template";
+import { webhookBeginnerQuestions } from "@/lib/webhook-faq";
 import { MAX_BULK_ADDRESSES } from "@/lib/bulk-label-rules";
 import { MAX_CONTACT_TAGS, MAX_TAG_LENGTH } from "@/lib/contact-rules";
 import { MAX_FUNNEL_PAGES, MAX_PAGE_FUNNELS } from "@/lib/page-funnel";
@@ -797,6 +798,17 @@ export const HELP_SECTIONS: HelpSection[] = [
         a: [
           "Yes, on every plan. Paste an API key from your account on the platform, pick the audience, form, publication or group, and choose who is sent: free sign-ups once they confirm, buyers of every product or of some, with up to three tags per product. Only people who agreed to hear from you are ever sent, and someone who unsubscribed on Mailchimp or beehiiv is never subscribed again.",
           "The key is checked, encrypted and kept; your studio shows only its last four characters, and disconnecting deletes it. What is sent is an email address, a first name when there is one, and the tags. One platform per store; it only adds people, reads nothing back, and does not send those who joined before you connected it, so download your list and import it for them. Stan's help center, read on September 28, 2026, connects Mailchimp, Flodesk and AWeber through Zapier; here Mailchimp, Kit, beehiiv and MailerLite are built in, with no Zapier.",
+        ],
+      },
+      {
+        // 564 [HC1] item 2: the studio's "Webhooks and Zapier" card (components/webhook-editor.tsx), in the words the
+        // webhooks feature page already uses (lib/webhook-faq.ts), so the two never say different things.
+        q: "How do I tell Zapier, Make or my own server when something happens in my store?",
+        a: [
+          `With a webhook: ${webhookBeginnerQuestions()[0].a.replace(/^An /, "an ")}`,
+          webhookBeginnerQuestions()[1].a,
+          webhookBeginnerQuestions()[3].a.replace(/^Yes, through /, "Zapier works through "),
+          `The same card lists the last deliveries, up to 50, each kept for a week, with what the address answered. If one failed after all its tries, press \u201cSend again\u201d beside it to send the same message once more, with the same event id, while the month\u2019s deliveries last.`,
         ],
       },
       {

@@ -3260,6 +3260,9 @@ async function recurringReferrals(store: Store, everyone: Affiliate[], since: nu
     const tax = (invoice.total_taxes ?? []).reduce((sum, t) => sum + (typeof t?.amount === "number" ? t.amount : 0), 0);
     const pi = invoice.payments?.data?.map((p) => p.payment?.payment_intent).find((x): x is string => typeof x === "string") ?? "";
     const affiliate = byId.get(meta.via);
+    // A removed affiliate's link no longer earns: a renewal or an instalment paid after the removal is not theirs, as
+    // tierLines holds a removed recruiter to the payments made before it. Declined or pending never earn.
+    if (affiliate && affiliate.status !== "approved" && (affiliate.status !== "removed" || paidAt * 1000 > affiliate.decidedAt)) continue;
     const buyer = typeof invoice.customer_email === "string" ? invoice.customer_email : "";
     lines.push({
       ref: invoice.id,

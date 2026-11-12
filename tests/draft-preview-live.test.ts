@@ -9,7 +9,7 @@ import { readFileSync } from "node:fs";
 import { addProduct, claimHandle, ensureStatsId, ensureStoreId, setProductHidden, setSubscription, storeForEmail } from "@/lib/store";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { makeDraftPreview, revokeDraftPreview } from "@/lib/draft-preview";
-import { POST as previewRoute } from "@/app/api/store/draft-preview/route";
+import { GET as previewStatusRoute, POST as previewRoute } from "@/app/api/store/draft-preview/route";
 import { store as redis } from "./redis-stub";
 import { done, is } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -53,8 +53,26 @@ async function main(): Promise<void> {
   }
   is("a reply that cannot be read is server_error, never 'no link'", [unread.status, unread.body.error], [503, "server_error"]);
 
+  // The editor reads the status as a GET (C7-132 on #3440): opening a draft's panel is a read, never a write, so the
+  // studio's product-action matrix (tests/e2e/accessibility-product-actions.mjs, which aborts every non-GET) passes.
+  const read = async (id: string) => {
+    const response = await previewStatusRoute(new NextRequest(`https://marktmorgen.com/api/store/draft-preview?id=${encodeURIComponent(id)}`, { method: "GET", headers: { cookie: `${SESSION_COOKIE}=${session}` } }));
+    return { status: response.status, body: (await response.json()) as Record<string, unknown> };
+  };
+  await revokeDraftPreview(store, draft.product.id);
+  const readNone = await read(draft.product.id);
+  is("GET: no link yet answers none", [readNone.status, readNone.body.ok, readNone.body.live], [200, true, null]);
+  const readMade = await makeDraftPreview(store, draft.product.id);
+  const readOpen = await read(draft.product.id);
+  is("GET: a link made says until when, never the code", [readOpen.status, readOpen.body.ok, (readOpen.body.live as { expiresAt?: number } | null)?.expiresAt, JSON.stringify(readOpen.body).includes(readMade.code)], [200, true, readMade.expiresAt, false]);
+  await revokeDraftPreview(store, draft.product.id);
+  is("GET: stopped answers none", (await read(draft.product.id)).body.live, null);
+  is("GET without an id is refused", (await read("")).status, 400);
+  const signedOut = await previewStatusRoute(new NextRequest(`https://marktmorgen.com/api/store/draft-preview?id=${draft.product.id}`, { method: "GET" }));
+  is("GET signed out is refused", signedOut.status, 401);
+
   const component = readFileSync("components/draft-preview-link.tsx", "utf8");
-  is("the editor asks for the status when it opens", /action: "status"/.test(component) && /useEffect/.test(component), true);
+  is("the editor asks for the status when it opens, with a GET and no write", /draft-preview\?id=/.test(component) && !/action: "status"/.test(component) && /useEffect/.test(component), true);
   is("it says a link is open, until when, and offers to stop it", /A preview link is open until/.test(component) && /Stop this link/.test(component), true);
 
   done();

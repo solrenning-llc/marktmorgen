@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
 import { guardStoreWrite, text } from "@/lib/store-request";
+import { jsonAccess } from "@/lib/studio-route";
 import { readListingExactly } from "@/lib/catalog";
 import { isTakenDown, liveDraftPreview, makeDraftPreview, revokeDraftPreview } from "@/lib/draft-preview";
 
@@ -15,6 +16,25 @@ import { isTakenDown, liveDraftPreview, makeDraftPreview, revokeDraftPreview } f
  * until it is published again, and every product of a store switched off.
  * Nothing here reads or writes anything else.
  */
+/**
+ * `GET ?id=` answers whether a draft's link is open and until when, never its code: the editor's read when its panel
+ * opens, so opening a draft is a read and never a write (C7-132 on #3440). Whoever can edit the store's products may ask.
+ */
+export async function GET(request: NextRequest) {
+  const access = await jsonAccess(request, "products");
+  if (access instanceof Response) return access;
+  const id = text(request.nextUrl.searchParams.get("id"), 40);
+  if (!id) return Response.json({ ok: false, error: "invalid" }, { status: 400 });
+  const noStore = { "Cache-Control": "private, no-store" };
+  try {
+    const live = await liveDraftPreview(access.store, id);
+    return Response.json({ ok: true, live }, { headers: noStore });
+  } catch (error) {
+    console.error("reading a draft preview link failed", error);
+    return Response.json({ ok: false, error: "server_error" }, { status: 503, headers: noStore });
+  }
+}
+
 export async function POST(request: NextRequest) {
   const guarded = await guardStoreWrite(request, "products", 1_000);
   if (!guarded.ok) return guarded.response;

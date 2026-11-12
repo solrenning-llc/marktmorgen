@@ -26,11 +26,8 @@ export function DraftPreviewLink({ productId, handle }: { productId: string; han
     let current = true;
     void (async () => {
       try {
-        const response = await fetch("/api/store/draft-preview", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "status", id: productId }),
-        });
+        // A read, so a GET: opening a draft's panel writes nothing.
+        const response = await fetch(`/api/store/draft-preview?id=${encodeURIComponent(productId)}`, { cache: "no-store" });
         const data = (await response.json().catch(() => null)) as { ok?: boolean; live?: { expiresAt?: unknown } | null } | null;
         if (!current) return;
         if (!response.ok || !data?.ok || (data.live !== null && typeof data.live?.expiresAt !== "number")) {

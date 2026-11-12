@@ -52,7 +52,7 @@ const sessionsByPayment: Record<string, Record<string, unknown>[]> = {};
 const oneSession: Record<string, Record<string, unknown>> = {};
 const intents: Record<string, Record<string, unknown>[]> = {};
 const paymentIntents: Record<string, Record<string, unknown>> = {};
-const disputes: Record<string, { status: string; amount?: number }[]> = {};
+const disputes: Record<string, { charge: string; status: string; amount?: number }[]> = {};
 const charges: Record<string, Record<string, unknown>> = {};
 let closings: Record<string, unknown>[] = [];
 let refunds: Record<string, unknown>[] = [];
@@ -105,7 +105,7 @@ globalThis.fetch = (async (input: string | URL | Request) => {
 }) as typeof fetch;
 
 const charge = (id: string, status: string | null, amount = 4900, lost = amount) => {
-  if (status) disputes[id] = [{ status, amount: lost }];
+  if (status) disputes[id] = [{ charge: id, status, amount: lost }];
   return { object: "charge", id, amount, amount_refunded: 0, refunded: false, disputed: status !== null };
 };
 const paid = (id: string, product: string, status: string | null, over: Record<string, unknown> = {}, lost = 4900) => ({

@@ -45,7 +45,9 @@ export function MailAccessReview({
   const [decoration, setDecoration] = useState<string[]>([]);
   const [words, setWords] = useState<Record<string, string>>({});
   const [refused, setRefused] = useState<Record<string, string>>({});
-  const [said, setSaid] = useState("");
+  const [said, setSaidText] = useState("");
+  // The same sentence twice is still a change to the live region, so it is said again (as in the page editor).
+  const setSaid = (text: string) => setSaidText((was) => (was === text ? `${text}\u00a0` : text));
   const [undo, setUndo] = useState<{ before: string; after: string; what: string } | null>(null);
 
   const all = mailAccessNotes(body);

@@ -137,6 +137,18 @@ try {
     is(at + "axe AAA: no violation once clear", await audit(), []);
     is(at + "every control at least 44 × 44 px once clear", await small(), []);
 
+    // The same sentence twice in a row is said again: the same words, a different text in the live region.
+    const TWO = [`![](${PIC})`, `![](${PIC.replace("1".repeat(32), "2".repeat(32))})`].join("\n\n");
+    await page.evaluate((body) => window.harness.mount(body), TWO);
+    const heard = [];
+    for (let n = 0; n < 2; n++) {
+      await page.getByRole("button", { name: "It is only decoration" }).first().click();
+      await settled();
+      heard.push(await page.locator('section p[role="status"]').textContent());
+    }
+    is(at + "a repeated sentence is said again", [heard[0].trim() === heard[1].trim(), heard[0] !== heard[1], heard[0].trim()], [true, true, "Marked as decoration: screen readers skip it."]);
+    is(at + "both pictures marked, text unchanged", [await page.locator("section ol > li").count(), await text()], [0, TWO]);
+
     // The studio's own editor, left in Design: asked to show a place, it opens Write and selects it there.
     const from = START.indexOf("[Click here]"), to = from + "[Click here](https://example.com/guide)".length;
     await page.evaluate(([body, at]) => window.harness.editor(body, at), [START, [from, to]]);

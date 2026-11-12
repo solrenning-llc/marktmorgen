@@ -51,7 +51,7 @@ is("the draft is named, then explained step by step in an ordered list", [
 ], [true, true, true, true, true]);
 is("every email can be read whole before saving, its subject naming it", [/<details[^>]*><summary[^>]*>Read the email “Still thinking\?”<\/summary>/.test(review), review.includes("It is here when you are ready.\n\nAda")], [true, true]);
 const buttons = review.match(/<button[^>]*>[^<]*<\/button>/g) ?? [];
-is("two plain buttons: save paused, or discard", buttons.map((b) => b.replace(/<[^>]+>/g, "")), ["Save it, paused", "Discard this draft"]);
+is("two plain buttons: save paused, or discard", buttons.map((b) => /^<button[^>]*>([^<]*)<\/button>$/.exec(b)?.[1]), ["Save it, paused", "Discard this draft"]);
 is("each a real button of at least 44 pixels", buttons.every((b) => b.includes('type="button"') && b.includes("min-h-11")), true);
 const busy = renderToStaticMarkup(createElement(DraftReview, { value, busy: true, onSave: () => {}, onDiscard: () => {} }));
 is("while it saves, saving says so and cannot be pressed twice", [busy.includes("Saving…"), /<button[^>]*disabled=""[^>]*aria-busy="true"/.test(busy)], [true, true]);

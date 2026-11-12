@@ -225,6 +225,21 @@ async function main() {
   const jKept = (await readAppeals(j.store)).get(j.decision.key)!;
   is("between two decisions too: the later final answer is kept, the slower one's email is not written over it", [jReview.status, jFinal, jKept.appeal.state, jKept.creator?.state], [200, 200, "upheld", "upheld"]);
 
+  part("Every email says only what happens (Claude 4's LOW 1; Claude 1's LOW on fa17d629)");
+  duringSend = null;
+  const k = await takenDown("decideshopk");
+  sent.length = 0;
+  const kFiled = await fileAppeal(k.store, k.decision.key, { explanation: "The guide is mine." }, new Date(), ORIGIN);
+  if (!kFiled.ok) throw new Error("appeal k");
+  const inboxText = sent.find((m) => m.body.subject.startsWith("Request to look again"))?.body.text ?? "";
+  is("the inbox email's link says how long it works from that email, not 'as long as the request is kept' (a later move keeps the request longer)", [/400 days from this email/.test(inboxText), /as long as the request is kept/.test(inboxText)], [true, false]);
+  sent.length = 0;
+  const kReversed = await answer({ token: k.token, decision: k.decision.key, to: "reversed", reason: "The guide is the creator's own." });
+  const reversedText = toCreator(k.owner)[0]?.body.text ?? "";
+  is("a product reversed: the creator is emailed", [kReversed.status, kReversed.data.emailed], [200, true]);
+  is("the email never points at 'this page', nor promises to say when it is back, since nothing here puts it back or says so", [/this page/i.test(reversedText), /will say when it is back/.test(reversedText)], [false, false]);
+  is("it says putting it back is a separate step, and how to reach a person", [/separate step/.test(reversedText), /reply to/i.test(reversedText)], [true, true]);
+
   done();
 }
 

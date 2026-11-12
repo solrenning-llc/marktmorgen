@@ -42,6 +42,7 @@ import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-
 import { twoStepOn } from "@/lib/two-step";
 import { listPasskeys, pendingRemoval } from "@/lib/passkeys";
 import { type Store, STORE_ID_PATTERN, storeForId } from "@/lib/store";
+import { storeForIdExactly } from "@/lib/store-exact";
 import { type Role, type TeamRole, INVITE_DAYS, ROLE_NAMES, ROLE_SUMMARIES, parseTeamRole } from "@/lib/team-roles";
 
 /** People on one store's team, invitations still waiting included. */
@@ -743,13 +744,21 @@ export async function dropTeam(store: Store): Promise<void> {
 export async function moveMemberships(from: string, to: string): Promise<void> {
   const before = normaliseEmail(from);
   const after = normaliseEmail(to);
-  const [ids] = await redisPipeline([["SMEMBERS", indexKey(before)]]);
-  const list = Array.isArray(ids) ? ids.filter((id): id is string => typeof id === "string" && STORE_ID_PATTERN.test(id)) : [];
+  // Their stores, read whole (rule 24; Codex G's 4223): an answer that is not a list of store ids is unknown and
+  // stops the move of their teams with nothing deleted, never "on no team", which deleted the old address's index.
+  const list = stringList(repliesFor(await redisPipeline([["SMEMBERS", indexKey(before)]]), 1)?.[0]);
+  if (!list || !list.every((id) => STORE_ID_PATTERN.test(id))) throw new UnknownReplyError("a teammate's stores");
   // Stores whose membership stayed on the old address: their index entry is kept.
   const stayed: string[] = [];
   for (const sid of list) {
-    const store = await storeForId(sid);
-    if (!store || normaliseEmail(store.email) === after) continue;
+    // Read exactly (Codex G's 4224): a store that does not read stays on the old index; only one confirmed gone
+    // leaves it, as one the person now owns does.
+    const store = await storeForIdExactly(sid);
+    if (store === "unknown") {
+      stayed.push(sid);
+      continue;
+    }
+    if (store === "none" || normaliseEmail(store.email) === after) continue;
     const role = await withTeam(sid, async () => {
       const team = await readTeam(sid);
       if (!team.members.some((m) => m.email === before) || team.members.some((m) => m.email === after)) return null;

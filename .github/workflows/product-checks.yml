@@ -82,6 +82,31 @@ jobs:
       # on the build above, against the stand-in database and email sender of tests/e2e/services.mjs.
       - name: Agreements signed with a link, in a browser
         run: node tests/e2e/agreements.mjs --no-build
+      # The Chromium store-copy run (about 13 minutes) is in its own job, store-copy-chromium, beside this
+      # one, so the critical path no longer waits for it after npm test; "All checks" reads both.
+
+  store-copy-chromium:
+    # The same Chromium regressions verify ran after its build, unchanged: the same runner image and its own
+    # Chrome (no Playwright container, unlike cross-browser), the same env, the same build and command.
+    needs: documentation-scope
+    if: ${{ !cancelled() && needs.documentation-scope.outputs.full != 'false' }}
+    name: Copying a whole store (chromium)
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+      AX2_KEYBOARD_PUBLIC_STANDARD: ${{ (github.repository_id == '1334793724' || github.repository == 'viniciussucupira/marktmorgen') && github.event.repository.private == false && github.event.repository.visibility == 'public' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci
+      - name: Production build and route types
+        run: node scripts/ci-build.mjs
       - name: Copying a whole store, in a browser
         run: node tests/e2e/store-copy.mjs --no-build
 
@@ -305,7 +330,7 @@ jobs:
     # The one check GitHub requires before main (scripts/ci_all_checks.py): it always runs and
     # passes only when every job above passed, or was skipped for a documentation-only change.
     name: All checks (product-checks)
-    needs: [cross-browser, documentation-scope, form-opportunity-redis, mobile-render, verify]
+    needs: [cross-browser, documentation-scope, form-opportunity-redis, mobile-render, store-copy-chromium, verify]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5

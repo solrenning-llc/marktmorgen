@@ -247,5 +247,35 @@ class WorkflowSourceAndOrderTests(unittest.TestCase):
         self.assertNotIn("\n        if:", steps[order[0]])
         self.assertNotIn("continue-on-error", steps[order[0]])
 
+    def test_chromium_store_copy_runs_once_beside_verify_and_is_required(self):
+        # Moved out of verify's critical path (claude7/verify-critical-path), never dropped or weakened:
+        # exactly one Chromium run on the runner's own Chrome, after a build of the same source, and both
+        # "All checks" (its needs) and the main reuse proof (WORKFLOWS) require the job.
+        text = (Path(__file__).resolve().parents[1] / ".github/workflows/product-checks.yml").read_text(encoding="utf-8")
+        command = "run: node tests/e2e/store-copy.mjs --no-build"
+        self.assertEqual(text.count(command), 2)  # this job (Chromium) and cross-browser (firefox, webkit)
+        body = "\n".join(self.jobs["store-copy-chromium"])
+        self.assertIn("    name: Copying a whole store (chromium)\n", body + "\n")
+        self.assertIn("Copying a whole store (chromium)", WORKFLOWS["product-checks"])
+        self.assertIn("    runs-on: ubuntu-latest\n", body + "\n")
+        for forbidden in ("container:", "E2E_BROWSER", "CHROMIUM", "matrix", "continue-on-error", "|| true"):
+            self.assertNotIn(forbidden, body)
+        self.assertIn("AX2_KEYBOARD_PUBLIC_STANDARD: " + self.verify_env("AX2_KEYBOARD_PUBLIC_STANDARD"), body)
+        self.assertIn('NEXT_TELEMETRY_DISABLED: "1"', body)
+        steps = re.split(r"(?m)^      - ", body)[1:]
+        names = [next((i for i, st in enumerate(steps) if needle in st), -1)
+                 for needle in ("uses: actions/checkout@", "uses: actions/setup-node@", "run: npm ci\n",
+                                "run: node scripts/ci-build.mjs\n", command)]
+        self.assertNotIn(-1, names)
+        self.assertEqual(names, sorted(names))
+        self.assertNotIn("\n        if:", "\n".join(steps))
+        self.assertNotIn("store-copy.mjs", "\n".join(self.jobs["verify"]))
+        self.assertIn("run: node tests/e2e/agreements.mjs --no-build", "\n".join(self.jobs["verify"]))
+        self.assertIn("store-copy-chromium", "\n".join(self.jobs["all-checks"]))
+
+    def verify_env(self, name):
+        line = next(l for l in self.jobs["verify"] if l.strip().startswith(name + ": "))
+        return line.strip()[len(name) + 2:]
+
 if __name__=="__main__":
     unittest.main()

@@ -216,6 +216,25 @@ async function main(): Promise<void> {
   is("a store that cannot be read: nothing done", [unread === "threw" || unread.failed > 0, (await current()).heldLinks?.some((h) => h.link.id === fourth.id), kept.has(fourthHeld?.picture ?? "")], [true, true, true]);
   is("a later healthy run puts it back", [(await settleHeld(due + DAY)).restored, (await fetchPicture(fourth.path))[0]], [1, 200]);
 
+  part("A store unread on the day a link is due is looked at again at the next run, inside the window (review of #3539)");
+  const eighth = await pictured("Sticker sheet", 8);
+  await takeDown(report, await current(), { type: "link", id: eighth.id }, ORIGIN, token);
+  await actOnHeld(report, await current(), eighth.id, "counter", ORIGIN, Date.now());
+  const eighthDue = restoreFrom(Date.now());
+  let oddReads = 1;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (oddReads > 0 && commands.length === 1 && commands[0][0] === "GET" && String(commands[0][1]).startsWith("nl:store:owner:")) {
+      oddReads -= 1;
+      return [{ odd: true }];
+    }
+    return realPipeline(commands);
+  }) as typeof redis.pipeline;
+  const missed = await settleHeld(eighthDue);
+  redis.pipeline = realPipeline;
+  is("the control: the store read answered in another shape on the due day, so nothing was put back", [oddReads, missed.restored, missed.failed > 0, (await current()).links.some((l) => l.id === eighth.id)], [0, 0, true, false]);
+  const nextDay = await settleHeld(eighthDue + DAY);
+  is("the next day's run puts it back, still before the end of the 14th weekday", [nextDay.restored, (await current()).links.some((l) => l.id === eighth.id), eighthDue + DAY < restoreFrom(Date.now()) + 2 * DAY], [1, true, true]);
+
   part("A store that is gone leaves the daily job's index; one that cannot be read stays in it (review of #3539)");
   const HELD = "nl:report:held";
   const inIndex = async (ref: string) => (await redis.pipeline([["ZSCORE", HELD, ref]]))[0] !== null;

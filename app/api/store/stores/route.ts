@@ -17,6 +17,7 @@ import { forgetPath } from "@/lib/path";
 import { queueStoreForget } from "@/lib/store-forget-retry";
 import { forgetStoreCalendar } from "@/lib/calendar-sync";
 import { forgetMemory } from "@/lib/assistant-memory-store";
+import { syncAssistant } from "@/lib/assistant-billing";
 
 /**
  * The studio's switcher, and the door out for a store.
@@ -60,6 +61,12 @@ export async function POST(request: NextRequest) {
       // a store with a plan in good standing there is not deleted either.
       const found = isBillingConfigured() ? await findStoreSubscriptions(store) : null;
       if (found?.live) return away(origin, studio("stores=paying"));
+      // Its Store assistant add-on, brought in line with Stripe first: one
+      // whose plan is no longer paid is set to stop at the end of the month
+      // paid (lib/assistant-billing.ts syncAssistant), and one that still
+      // renews keeps the store (deleteStore, issue #4080). When Stripe cannot
+      // be asked the snapshot stands, and a renewing add-on still refuses.
+      if (isBillingConfigured() && store.assistantPlan) await syncAssistant(store);
       const result = await deleteStore(ref);
       if (!result.ok) return away(origin, studio(`stores=${result.reason}`));
       // One that is not paying but could still be charged ends with the store.

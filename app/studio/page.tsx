@@ -728,6 +728,10 @@ const STORES_NOTICES: Record<string, { title: string; body: string }> = {
     title: "This store still has a plan running",
     body: "Cancel its plan below, and delete it once the plan has ended. Nothing was deleted.",
   },
+  assistant: {
+    title: "This store still has its Store assistant running",
+    body: "Its assistant renews each month on its own. Press \u201cStop at the end of this month\u201d in its section below, then delete the store. Nothing was deleted.",
+  },
   domain: {
     title: "This store still has its own domain",
     body: "Remove the domain first. Nothing was deleted.",

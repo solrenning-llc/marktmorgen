@@ -1836,14 +1836,14 @@ export async function createStore(
 
 export type DeleteResult =
   | { ok: true; store: Store }
-  | { ok: false; reason: "none" | "first" | "products" | "paying" | "domain" };
+  | { ok: false; reason: "none" | "first" | "products" | "paying" | "assistant" | "domain" };
 
 /**
  * Deletes one of an account's other stores, while there is nothing in it to
  * lose.
  *
- * Only a store with no products, no subscription in good standing and no
- * domain of its own can go: a store that has sold something has buyers who
+ * Only a store with no products, no subscription in good standing, no Store
+ * assistant add-on that still renews and no domain of its own can go: a store that has sold something has buyers who
  * will come back to it, and a store that is paying would be deleted with
  * money still running. Its addresses are let go the way a released address
  * is — dark for a month before anyone else may take them — so a link
@@ -1857,6 +1857,10 @@ export async function deleteStore(email: string): Promise<DeleteResult> {
     if (!store.extra) return { ok: false, reason: "first" };
     if (productCount(store) > 0) return { ok: false, reason: "products" };
     if (store.subscriptionActive) return { ok: false, reason: "paying" };
+    // Its Store assistant add-on bills on its own subscription, found by the
+    // store's address; once that address is let go nothing could stop it
+    // (issue #4080). One that still renews keeps the store.
+    if (store.assistantPlan?.active && !store.assistantPlan.cancelsAtEnd) return { ok: false, reason: "assistant" };
     if (store.domain) return { ok: false, reason: "domain" };
 
     const released = `${RELEASED_PREFIX}${new Date().toISOString()}`;

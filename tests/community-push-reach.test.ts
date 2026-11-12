@@ -162,6 +162,9 @@ async function main(): Promise<void> {
     ["a row that is not a record", "{bad"],
     ["somebody else's record", JSON.stringify({ k: "x".repeat(32), e: "x@pushreach.example", removed: false, muted: false })],
     ["a record without its removal", JSON.stringify({ ...JSON.parse(String(kept)), removed: undefined })],
+    // readMember (lib/community.ts parseMember) takes no record without its address as a member, so neither does the script.
+    ["a record without its address", JSON.stringify({ ...JSON.parse(String(kept)), e: undefined })],
+    ["a record whose address is not text", JSON.stringify({ ...JSON.parse(String(kept)), e: 7 })],
   ] as [string, string][]) {
     await redis.pipeline([["HSET", members, anaKey, record]]);
     try {

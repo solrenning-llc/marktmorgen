@@ -181,11 +181,14 @@ function parseModule(raw: unknown): CourseModule | null {
   if (!raw || typeof raw !== "object") return null;
   const value = raw as Record<string, unknown>;
   if (typeof value.id !== "string" || !ITEM_ID_PATTERN.test(value.id)) return null;
-  const drip = Number(value.dripDays);
+  const drip = typeof value.dripDays === "number" || typeof value.dripDays === "string" ? Number(value.dripDays) : Number.NaN;
   return {
     id: value.id,
     title: cleanTitle(value.title, "Untitled module"),
-    dripDays: Number.isInteger(drip) && drip >= 0 && drip <= MAX_DRIP_DAYS ? drip : 0,
+    // A wait that does not read is unknown, never "no wait" (CX-123 rule 24): it keeps the module closed for the
+    // longest wait a creator can set rather than open it to every student at once. Every writer saves a whole
+    // number (emptyCourse, editCourse), so only a damaged record lands here; the studio then shows the held wait.
+    dripDays: Number.isInteger(drip) && drip >= 0 && drip <= MAX_DRIP_DAYS ? drip : MAX_DRIP_DAYS,
     lessons: Array.isArray(value.lessons)
       ? value.lessons.map(parseLesson).filter((l): l is Lesson => l !== null)
       : [],

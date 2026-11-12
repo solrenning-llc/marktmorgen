@@ -39,6 +39,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { countOf, repliesFor } from "@/lib/redis-reply";
 import type { AttributionRule } from "@/lib/affiliate-setting";
 import { orderWrite } from "@/lib/order-data";
+import { suppressedCommand } from "@/lib/suppression";
 import type { Store } from "@/lib/store";
 
 /**
@@ -95,6 +96,14 @@ export async function bondFor(store: Store, email: string): Promise<string> {
  */
 export async function rememberBuyer(store: Store, email: string, affiliateId: string, rule: AttributionRule): Promise<void> {
   if (!bondsBuyers(store) || !email || !/^[0-9a-f]{12}$/.test(affiliateId)) return;
+  // A buyer deleted from this store is never tied to an affiliate again: the thank-you page re-runs this on every
+  // load, so the page of an order paid before the deletion would write back the bond the deletion removed. Read
+  // exactly (CX-123 rule 24): only 0 is "not deleted"; any other answer writes nothing (a bond is never what makes a
+  // sale). A store with no list has deleted nobody.
+  if (store.listId) {
+    const deleted = countOf(repliesFor(await redisPipeline([suppressedCommand(store.listId, email)]), 1)?.[0]);
+    if (deleted !== 0) return;
+  }
   const key = bondKey(store.statsId as string);
   const field = buyerHash(store.statsId as string, email);
   if (rule === "first") {

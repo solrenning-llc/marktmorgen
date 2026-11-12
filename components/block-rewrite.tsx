@@ -1,8 +1,8 @@
 "use client";
 
-import { useContext, useState } from "react";
+import { useContext, useId, useState } from "react";
 import { Icon } from "@/components/icons";
-import { AiOn } from "@/components/ai-assist";
+import { AI_ALLOWANCE_UNKNOWN, AiOn, allowanceOf } from "@/components/ai-assist";
 import { FILLABLE, REWRITABLE, REWRITE_STYLES, type RewriteStyle, blockText } from "@/lib/block-rewrite-rules";
 import type { PageBlock, SalesPage } from "@/lib/sales-page";
 
@@ -37,7 +37,10 @@ export function BlockRewrite({
   const [busy, setBusy] = useState<RewriteStyle | "fill" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [before, setBefore] = useState<PageBlock | null>(null);
-  const [left, setLeft] = useState(ai.left);
+  const [left, setLeft] = useState(allowanceOf(ai));
+  const allowanceId = useId();
+  // An allowance that could not be read (null) keeps the buttons off and is said in words, never "0 left".
+  const spent = left === null || left <= 0;
   if (!ai.on || !REWRITABLE.includes(block.kind)) return null;
   const empty = !blockText(block).trim();
 
@@ -75,7 +78,7 @@ export function BlockRewrite({
           Improve with AI
         </span>
         {empty && fillable ? (
-          <button type="button" className="btn btn-secondary btn-sm" disabled={busy !== null || left <= 0} aria-busy={busy === "fill"} onClick={() => void run("fill")}>
+          <button type="button" className="btn btn-secondary btn-sm" disabled={busy !== null || spent} aria-busy={busy === "fill"} aria-describedby={allowanceId} onClick={() => void run("fill")}>
             {busy === "fill" ? "Writing…" : "Write it with AI"}
           </button>
         ) : null}
@@ -84,8 +87,9 @@ export function BlockRewrite({
             key={style.id}
             type="button"
             className="btn btn-ghost btn-sm"
-            disabled={busy !== null || empty || left <= 0}
+            disabled={busy !== null || empty || spent}
             aria-busy={busy === style.id}
+            aria-describedby={allowanceId}
             onClick={() => void run(style.id)}
           >
             {busy === style.id ? "Rewriting…" : style.label}
@@ -104,7 +108,7 @@ export function BlockRewrite({
             Undo
           </button>
         ) : null}
-        <span className="ml-auto text-xs text-ink-soft">{`${left} left this month`}</span>
+        <span id={allowanceId} className="ml-auto text-xs text-ink-soft">{left === null ? AI_ALLOWANCE_UNKNOWN : `${left} left this month`}</span>
       </div>
       {error ? (
         <p className="notice notice-error mt-2 text-sm" role="alert">

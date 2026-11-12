@@ -15,6 +15,7 @@
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { readShelf } from "@/lib/course-shelf-rules";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { indexBytes } from "@/lib/community-search";
 import { type DataStore, giveData, needData, noteData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
@@ -580,6 +581,37 @@ export async function readCourses(ids: string[]): Promise<Map<string, Course>> {
 }
 
 /**
+ * readCourses, read exactly (rule 24), for a person's deletion
+ * (lib/person-erasure.ts erasureScope) and a store's whole export
+ * (lib/store-export.ts): a course is left out only when Redis answers the
+ * exact null for it. A reply that is not a whole list of the ids asked, or an
+ * outline kept but unreadable, throws UnknownReply, so the deletion never
+ * takes an unknown read for "no such course" and answers done while the
+ * person's records in that course are still kept, and an export never hands
+ * over a file without a course as if the store had none. `what` names the
+ * reading in the error.
+ */
+export async function readCoursesExact(ids: string[], what = "the course outlines a person's deletion goes through"): Promise<Map<string, Course>> {
+  const found = new Map<string, Course>();
+  const valid = [...new Set(ids.filter((id) => COURSE_ID_PATTERN.test(id)))];
+  if (valid.length === 0) return found;
+  if (!isRedisConfigured()) throw new UnknownReply(what);
+  // A hundred at a command, as readCourses: the same commands, so the deletion's counted cost does not move.
+  for (let i = 0; i < valid.length; i += 100) {
+    const some = valid.slice(i, i + 100);
+    const [rows] = exactReplies(await redisPipeline([["MGET", ...some.map(courseKey)]]), 1, what);
+    const each = exactReplies(rows, some.length, what);
+    some.forEach((id, n) => {
+      if (each[n] === null) return;
+      const course = parseCourse(each[n]);
+      if (!course || course.id !== id) throw new UnknownReply(what);
+      found.set(id, course);
+    });
+  }
+  return found;
+}
+
+/**
  * Where a course is counted in the store's data room (lib/store-data.ts):
  * its outline in one slot, its lessons' text in another, each lesson's words
  * as the community's search may index them (lib/community-index.ts) included.
@@ -607,24 +639,61 @@ export async function readBody(courseId: string, lessonId: string): Promise<stri
   return typeof raw === "string" ? raw : "";
 }
 
+/**
+ * A lesson's text read in its exact shape, for a caller that writes from it
+ * (lib/community-index.ts): "" only when there is none (an absent key), the
+ * text when it is one, and UnknownReplyError for any other reply, so an odd
+ * or partial answer is never taken as a lesson with no text (CX-123 rule 24).
+ */
+export async function readBodyKnown(courseId: string, lessonId: string): Promise<string> {
+  if (!isRedisConfigured() || !COURSE_ID_PATTERN.test(courseId) || !ITEM_ID_PATTERN.test(lessonId)) return "";
+  const replies = repliesFor(await redisPipeline([["GET", bodyKey(courseId, lessonId)]]), 1);
+  const raw = replies?.[0];
+  if (raw === null) return "";
+  if (typeof raw === "string") return raw;
+  throw new UnknownReplyError("a lesson's text");
+}
+
+/**
+ * A lesson's text read exactly, for the studio's editor (rule 24): the text, ""
+ * when none is kept, and null when the reply is neither, so an unknown read is
+ * never opened as an empty lesson whose Save would write over the real text.
+ */
+export async function readBodyExact(courseId: string, lessonId: string): Promise<string | null> {
+  if (!isRedisConfigured() || !COURSE_ID_PATTERN.test(courseId) || !ITEM_ID_PATTERN.test(lessonId)) return null;
+  const replies = await redisPipeline([["GET", bodyKey(courseId, lessonId)]]);
+  if (!Array.isArray(replies) || replies.length !== 1) return null;
+  const [raw] = replies;
+  return typeof raw === "string" ? raw : raw === null ? "" : null;
+}
+
 /** Many lessons' text at once, a hundred to a command: for a store's whole export (lib/store-export.ts). */
 /** Lesson bodies read together, across courses: how many a command. Each is at most MAX_BODY_LENGTH, so one command carries a few megabytes at the most. */
 export const BODIES_PER_READ = 500;
 
-/** The text of every lesson of these courses, by course and lesson, BODIES_PER_READ at a command whatever course each is of (lib/store-export.ts). */
+/**
+ * The text of every lesson of these courses, by course and lesson, BODIES_PER_READ at a command whatever course each is of (lib/store-export.ts).
+ * Read exactly (rule 24): "" only for Redis's own null; a reply that is not one list of exactly the keys asked, or a
+ * value that is not text, throws UnknownReply, so the export says the part could not be read instead of writing the
+ * lesson out empty in the file a creator takes before the store closes.
+ */
 export async function readAllBodies(courses: { id: string; lessons: string[] }[]): Promise<Map<string, Record<string, string>>> {
+  const what = "the lessons' text a store's export reads";
   const out = new Map<string, Record<string, string>>();
   const wanted = courses.filter((c) => COURSE_ID_PATTERN.test(c.id)).flatMap((c) => {
     out.set(c.id, {});
     return c.lessons.filter((id) => ITEM_ID_PATTERN.test(id)).map((lesson) => ({ course: c.id, lesson }));
   });
-  if (!isRedisConfigured()) return out;
+  if (wanted.length === 0) return out;
+  if (!isRedisConfigured()) throw new UnknownReply(what);
   for (let i = 0; i < wanted.length; i += BODIES_PER_READ) {
     const some = wanted.slice(i, i + BODIES_PER_READ);
-    const [raw] = await redisPipeline([["MGET", ...some.map((w) => bodyKey(w.course, w.lesson))]]);
+    const [raw] = exactReplies(await redisPipeline([["MGET", ...some.map((w) => bodyKey(w.course, w.lesson))]]), 1, what);
+    const values = exactReplies(raw, some.length, what);
     some.forEach((w, n) => {
-      const value = Array.isArray(raw) ? raw[n] : null;
-      out.get(w.course)![w.lesson] = typeof value === "string" ? value : "";
+      const value = values[n];
+      if (value !== null && typeof value !== "string") throw new UnknownReply(what);
+      out.get(w.course)![w.lesson] = value ?? "";
     });
   }
   return out;

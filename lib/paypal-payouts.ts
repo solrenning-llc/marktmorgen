@@ -482,11 +482,24 @@ export async function settlePayPal(store: Store): Promise<Settled> {
       continue;
     }
     const still: Sent[] = [];
+    // The payouts already in the book, read once for the batch and only when a line is paid (MR, Claude 3 cloud O on
+    // #3842): not known, every paid line of the batch stays on its way.
+    let known: Set<string> | null | undefined;
     for (const line of sent.lines) {
       const got = statusOf.get(line.a);
       const status = batchStatus === "DENIED" || batchStatus === "CANCELED" ? "FAILED" : got?.status ?? "PENDING";
       if (status === PAID && got?.item) {
-        const settled = await settlePaidItem(store, got.item, line, sent.currency, day);
+        if (known === undefined) {
+          known = await payoutReferences(store).catch((error: unknown) => {
+            console.error("the book of payments could not be read; the paid lines stay on their way", error);
+            return null;
+          });
+        }
+        if (known === null) {
+          still.push(line);
+          continue;
+        }
+        const settled = await settlePaidItem(store, got.item, line, sent.currency, day, known);
         if (settled === "waiting") still.push(line);
         else if (settled === "written") out.paid += 1;
       } else if (NOT_PAID.has(status)) {
@@ -508,30 +521,35 @@ export async function settlePayPal(store: Store): Promise<Settled> {
 
 /** How long a run may hold a PayPal item's mark before another run takes it over: settling one store takes seconds. */
 const ITEM_MARK_STALE_MS = 60 * 60 * 1000;
+/** What a run whose write failed leaves in the item's mark: a time of 0, so the next run takes it over at once. */
+const ITEM_MARK_GIVEN_UP = "0000000000000.000000000";
 
 /**
  * One line PayPal reports paid, written in the affiliate book once per PayPal item (rule 24); never throws.
  *
- * - "found": a payout under this item's reference ("PayPal <item>") is already in the book, read exactly from Redis
- *   (payoutReferences), so nothing is written and the line leaves the batch;
- * - "written": this run took the item's mark (claimMark: only "OK", or this run's own value read back), read the book
- *   again under it, and wrote the payout;
+ * - "found": a payout under this item's reference ("PayPal <item>") is already in the book, `known` (read exactly from
+ *   Redis once for the batch, payoutReferences), so nothing is written and the line leaves the batch;
+ * - "written": this run took the item's mark (claimMark: only "OK", or this run's own value read back) and wrote the
+ *   payout;
  * - "waiting": anything not known (a mark held by another run, a mark or a book that does not read, a write that
  *   failed): the line stays on its way, so the affiliate is never paid again by a later batch while the book still
  *   says "owed", and the other lines of the store are settled all the same.
  *
- * A failed write lets its mark go, so a later run writes the payout or finds it written by its reference. A mark held
- * longer than any run (ITEM_MARK_STALE_MS; or one written before marks carried their time) with no payout in the book
- * is a run that stopped between the two: it is taken over with an exact compare-and-delete (releaseMark), so of two
- * runs taking it over only one gets it.
+ * Every write of a payout is made under the item's mark, and the mark is never let go after a write: a write that
+ * failed (it may have landed with its answer lost) leaves the mark set to time 0 (ITEM_MARK_GIVEN_UP). So a mark that
+ * is ours at once means no run wrote this item since `known` was read, and the book is not read again for it (MR). A
+ * mark held longer than any run (ITEM_MARK_STALE_MS; given up; or one written before marks carried their time) is
+ * taken over with an exact compare-and-delete (releaseMark), so of two runs taking it over only one gets it, and only
+ * then is the book read again, to find a payout that landed.
  */
-async function settlePaidItem(store: Store, item: string, line: Sent, currency: string, day: string): Promise<"found" | "written" | "waiting"> {
+async function settlePaidItem(store: Store, item: string, line: Sent, currency: string, day: string, known: Set<string>): Promise<"found" | "written" | "waiting"> {
   const reference = `PayPal ${item}`;
   const key = itemKey(item);
   try {
-    if ((await payoutReferences(store)).has(reference)) return "found";
+    if (known.has(reference)) return "found";
     let value = claimValue();
     let claimed = await claimMark(key, 400 * 86_400, value);
+    let takenOver = false;
     if (claimed === "taken") {
       const held = repliesFor(await redisPipeline([["GET", key]]), 1)?.[0];
       if (typeof held !== "string") return "waiting";
@@ -540,15 +558,22 @@ async function settlePaidItem(store: Store, item: string, line: Sent, currency: 
       await releaseMark(key, held);
       value = claimValue();
       claimed = await claimMark(key, 400 * 86_400, value);
+      takenOver = true;
     }
     if (claimed !== "ours") return "waiting";
     try {
-      // Read again under the mark: a run that wrote it, though its write answered badly, let the mark go after.
-      if ((await payoutReferences(store)).has(reference)) return "found";
+      // Taken over: the run before may have written the payout with its answer lost, so the book is read again, here
+      // only. Found, the mark stays as it is.
+      if (takenOver && (await payoutReferences(store)).has(reference)) {
+        known.add(reference);
+        return "found";
+      }
       await addPayout(store, { aff: line.a, cents: line.c, currency, date: day, reference });
+      known.add(reference);
       return "written";
     } catch (error) {
-      await releaseMark(key, value);
+      // Given up, never let go: the next run takes the mark over at once and reads the book again before writing.
+      await redisPipeline([["SET", key, ITEM_MARK_GIVEN_UP, "XX", "KEEPTTL"]]).catch(() => null);
       throw error;
     }
   } catch (error) {

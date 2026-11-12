@@ -6,4 +6,4 @@ Only Claude 2 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
-| Claude 2 | 513 [PF1], the cart with physical products and stock (stacked; #1730 and #1732) | claude2/pf1-cart-stock, claude2/pf1-stock-hold-lock | `app/[handle]/p/[product]/page.tsx`, `app/[handle]/page.tsx`, `components/store-cart.tsx`, `lib/buyer-words/cart.ts`, `lib/cart-rules.ts`, `lib/checkout-recovery.ts`, `lib/shipping.ts`, `lib/stock.ts`, `tests/cart-physical.test.ts`, `tests/cart-stock.test.ts`, `tests/cart.test.ts`, `tests/stock-hold-write-confirmation.test.ts`, `tests/stock-reading.test.ts`, the cart rows of `tests/plan-cost-registry.ts` and of `tests/test-config.mjs`, and the cart answer in `lib/help-content.ts` | 31/10/2026 |
+| Claude 2 | 655 [WG15], unit 2 (the studio's tax setting links to /studio/tax; stacked on #2735) | claude2/wg15-tax-link | `components/tax-editor.tsx`, `tests/wg15-tax-link.test.ts`, its row of `tests/test-config.mjs` | 07/11/2026 10h35 |

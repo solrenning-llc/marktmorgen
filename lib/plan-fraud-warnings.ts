@@ -22,15 +22,26 @@
  *     avoids the fee, the lost dispute and a mark on the account's dispute
  *     rate, which keeps the platform account (and every creator on it) safe.
  *
- * The owner's decision recorded in item 312 is followed as written: every
- * actionable warning on a plan or add-on payment is refunded in full.
- * Stripe's advice to refund only small charges is about merchants whose
- * customers are often misflagged; ours are creators paying for their own
- * store, and a payment flagged by the issuer is not revenue we may keep.
+ * Item 312 asks for every actionable warning on a plan or add-on payment to
+ * be refunded in full; the note of 01/11/2026 left open whether to limit it
+ * to charges near the dispute fee, as Stripe advises. Decided by Claude 1
+ * under ALL-160 (agents decide, 12/11/2026): the item's text is followed.
+ * Stripe's advice is about merchants whose customers are often misflagged;
+ * ours are creators paying for their own store, a payment flagged by the
+ * issuer is not revenue we may keep, and every dispute marks the platform
+ * account all creators depend on. The job stays off (FRAUD_REFUNDS_ON) until
+ * the Terms and refund policy say so.
  *
- * Only `actionable` warnings are acted on, so a charge already disputed or
+ * Not in this unit: one-off platform charges with no subscription (chargeNow,
+ * e.g. paid AI captions) are counted as unmatched and left alone; a sibling
+ * plan or add-on paid with the same card is not ended (Radar's block list,
+ * from reason "fraudulent", refuses its next charge).
+ *
+ * Only `actionable` warnings are refunded, so a charge already disputed or
  * fully refunded is never refunded twice; the refund carries an idempotency
- * key per warning, and what each warning came to is remembered (SEEN_KEY),
+ * key per warning, and what each warning came to is remembered (SEEN_KEY,
+ * written before the refund is asked for, so a refund made at Stripe whose
+ * answer is lost still ends its subscription on a later run),
  * so a warning listed again costs no other Stripe call. A payment that is not
  * a plan or an add-on invoice is left alone and counted as unmatched.
  *
@@ -38,7 +49,8 @@
  * hundred, at most MAX_REFUNDS refunds a run (a misread list can never
  * refund more than that in a day; the rest wait for the next run, still
  * actionable) and at most MAX_RETRIES subscriptions whose ending is tried
- * again. Stripe charges nothing per API call; what this job costs is the
+ * again. The deadline is checked before every Stripe call, not inside one: a
+ * call can still take up to Stripe's own timeout. Stripe charges nothing per API call; what this job costs is the
  * company's daily cron time (inside its 45 seconds) and one small Redis hash,
  * priced in tests/store-data-registry.ts.
  *
@@ -55,6 +67,14 @@ import { type StripePage, readStripePage } from "@/lib/stripe-list";
 const WARNING_VERSION = "2024-06-20";
 /** Disputes can be opened for 120 days; so far back a warning is still worth acting on. */
 export const LOOKBACK_DAYS = 120;
+/**
+ * Off until the Terms and the refund policy say that a payment its card's
+ * issuer warns was fraudulent may be refunded and its plan ended
+ * automatically (item 312, point 4): the unit that publishes those words turns
+ * this on in the same change. While off, the job reads nothing and acts on
+ * nothing.
+ */
+export const FRAUD_REFUNDS_ON = false;
 export const MAX_PAGES = 3;
 /** The most payments refunded in one run. */
 export const MAX_REFUNDS = 25;
@@ -63,7 +83,9 @@ export const MAX_RETRIES = 25;
 /**
  * What each warning already read came to, by id: "final" (refunded and its
  * subscription ended, or nothing to do), "unmatched" (not a plan or add-on
- * payment) or "end:<sub id>" (refunded; its subscription still to end).
+ * payment) or "act:<sub id>" (decided: written before the refund is asked
+ * for; what is left of the charge is refunded and the subscription ended on
+ * this or a later run).
  */
 export const SEEN_KEY = "nl:plan-fraud:seen";
 const SEEN_SECONDS = 400 * 24 * 60 * 60;
@@ -82,6 +104,8 @@ export type FraudWarningCounts = {
   skipped: number;
   failed: number;
   complete: boolean;
+  /** The job is switched off (FRAUD_REFUNDS_ON): nothing was read or done. */
+  off?: true;
 };
 
 const objectOf = (value: unknown): Record<string, unknown> | null =>
@@ -116,8 +140,10 @@ async function endSubscription(subscriptionId: string): Promise<boolean> {
 }
 
 /**
- * Refunds what is left of a charge, for one warning. True only for a receipt
- * of this charge, of exactly that amount, succeeded or on its way.
+ * Refunds what is left of a charge, for one warning. True only for a
+ * succeeded receipt of this charge, of exactly that amount: a pending one is
+ * not proof that money went back (as refundCharge in lib/billing.ts), so the
+ * warning is come back to on the next run.
  */
 async function refund(warningId: string, chargeId: string, cents: number): Promise<boolean> {
   const body = new URLSearchParams({ charge: chargeId, amount: String(cents), reason: "fraudulent" });
@@ -128,60 +154,95 @@ async function refund(warningId: string, chargeId: string, cents: number): Promi
     && REFUND_ID.test(idOf(receipt!.id))
     && idOf(receipt!.charge) === chargeId
     && receipt!.amount === cents
-    && (receipt!.status === "succeeded" || receipt!.status === "pending");
+    && receipt!.status === "succeeded";
 }
 
 /** "refunded-held": refunded, its subscription still to end (tried again next run). */
 type Outcome = "refunded" | "refunded-held" | "ended" | "unmatched" | "skipped" | "held";
 
+/** The charge a listed warning is about, read from its expanded row; null when it cannot be read. */
+function chargeOf(warning: Record<string, unknown>): { id: string; left: number; subscriptionId: string } | null {
+  const charge = objectOf(warning.charge);
+  const id = idOf(charge);
+  const amount = count(charge?.amount);
+  const refunded = count(charge?.amount_refunded);
+  if (!charge || !CHARGE_ID.test(id) || amount === null || refunded === null || refunded > amount) return null;
+  return { id, left: amount - refunded, subscriptionId: idOf(objectOf(charge.invoice)?.subscription) };
+}
+
+/**
+ * Refunds what is left of a warning's charge (while the warning is still
+ * actionable), then ends the subscription. `act:<sub>` is already written, so
+ * whatever happens from here (a refund made at Stripe whose answer is lost, a
+ * run cut off, an ending that fails) the next run comes back to this
+ * subscription, even once Stripe stops calling the warning actionable.
+ */
+async function settle(
+  id: string,
+  warning: Record<string, unknown>,
+  subscriptionId: string,
+  budget: { refunds: number },
+  deadline: number,
+): Promise<Outcome> {
+  let refunded = false;
+  if (warning.actionable === true) {
+    const charge = chargeOf(warning);
+    if (!charge) throw new Error("the warning's charge could not be read");
+    if (charge.left > 0) {
+      if (budget.refunds <= 0 || Date.now() > deadline) return "held";
+      budget.refunds -= 1;
+      // Same key on every try: Stripe answers a retry within a day with the first refund, and after that the charge's
+      // own refunded amount (left above) keeps a second one from being made.
+      if (!(await refund(id, charge.id, charge.left))) throw new Error("the refund was not confirmed");
+      refunded = true;
+    }
+  }
+  if (Date.now() > deadline) return refunded ? "refunded-held" : "held";
+  let ended = false;
+  try {
+    ended = await endSubscription(subscriptionId);
+  } catch (error) {
+    console.error(`ending subscription ${subscriptionId} after early fraud warning ${id} failed`, error);
+  }
+  if (!ended) return refunded ? "refunded-held" : "held";
+  await remember(id, "final");
+  return refunded ? "refunded" : "ended";
+}
+
 /** Acts on one listed warning. */
-async function applyWarning(warning: Record<string, unknown>, known: string | undefined, budget: { refunds: number }): Promise<Outcome> {
+async function applyWarning(
+  warning: Record<string, unknown>,
+  known: string | undefined,
+  budget: { refunds: number },
+  deadline: number,
+): Promise<Outcome> {
   const id = idOf(warning.id);
   if (known === "final" || known === "unmatched") return "skipped";
-  if (known?.startsWith("end:")) return (await endSubscription(known.slice(4))) ? (await remember(id, "final"), "ended") : "held";
-  // Disputed or fully refunded already: nothing to do, and never a second refund.
+  // Already decided: refund what may still be left and end the subscription, whatever the warning says now.
+  if (known?.startsWith("act:")) return settle(id, warning, known.slice(4), budget, deadline);
+  // Disputed or fully refunded before we ever acted: nothing to do, and never a second refund.
   if (warning.actionable !== true) {
     await remember(id, "final");
     return "skipped";
   }
-  const charge = objectOf(warning.charge);
-  const chargeId = idOf(charge);
-  const amount = count(charge?.amount);
-  const refunded = count(charge?.amount_refunded);
+  const charge = chargeOf(warning);
   // A charge not expanded or not readable: not acted on, read again next run.
-  if (!charge || !CHARGE_ID.test(chargeId) || amount === null || refunded === null) throw new Error("the warning's charge could not be read");
-  const subscriptionId = idOf(objectOf(charge.invoice)?.subscription);
-  if (!SUBSCRIPTION_ID.test(subscriptionId)) {
+  if (!charge) throw new Error("the warning's charge could not be read");
+  if (!SUBSCRIPTION_ID.test(charge.subscriptionId)) {
     await remember(id, "unmatched");
     return "unmatched";
   }
-  const subscription = objectOf(await onPlatformAt(WARNING_VERSION, "GET", `/subscriptions/${encodeURIComponent(subscriptionId)}`));
+  if (Date.now() > deadline) return "held";
+  const subscription = objectOf(await onPlatformAt(WARNING_VERSION, "GET", `/subscriptions/${encodeURIComponent(charge.subscriptionId)}`));
   // Another subscription's reply decides nothing; read again next run.
-  if (!subscription || idOf(subscription.id) !== subscriptionId) throw new Error("Stripe answered for another subscription");
+  if (!subscription || idOf(subscription.id) !== charge.subscriptionId) throw new Error("Stripe answered for another subscription");
   if (!ours(subscription)) {
     await remember(id, "unmatched");
     return "unmatched";
   }
-  const left = amount - refunded;
-  if (left > 0) {
-    if (budget.refunds <= 0) return "held";
-    budget.refunds -= 1;
-    if (!(await refund(id, chargeId, left))) throw new Error("the refund was not confirmed");
-  }
-  // Refunded (or nothing left to refund): the card is never charged again. Written down before the ending is
-  // tried, so a refunded warning (no longer actionable) whose ending fails is still ended on a later run.
-  if (!ENDED.has(String(subscription.status))) {
-    await remember(id, `end:${subscriptionId}`);
-    let ended = false;
-    try {
-      ended = await endSubscription(subscriptionId);
-    } catch (error) {
-      console.error(`ending subscription ${subscriptionId} after early fraud warning ${id} failed`, error);
-    }
-    if (!ended) return left > 0 ? "refunded-held" : "held";
-  }
-  await remember(id, "final");
-  return left > 0 ? "refunded" : "ended";
+  // Written before any refund is asked for (ALTO 1 of the review of #4168).
+  await remember(id, `act:${charge.subscriptionId}`);
+  return settle(id, warning, charge.subscriptionId, budget, deadline);
 }
 
 /**
@@ -189,8 +250,13 @@ async function applyWarning(warning: Record<string, unknown>, known: string | un
  * (milliseconds since the epoch), newest first, then tries again to end the
  * subscriptions of payments already refunded that the list no longer shows.
  */
-export async function syncPlanFraudWarnings(deadline: number, nowSeconds = Math.floor(Date.now() / 1000)): Promise<FraudWarningCounts> {
+export async function syncPlanFraudWarnings(
+  deadline: number,
+  nowSeconds = Math.floor(Date.now() / 1000),
+  on: boolean = FRAUD_REFUNDS_ON,
+): Promise<FraudWarningCounts> {
   const counts: FraudWarningCounts = { seen: 0, refunded: 0, ended: 0, unmatched: 0, skipped: 0, failed: 0, complete: false };
+  if (!on) return { ...counts, off: true };
   if (!isRedisConfigured() || !isBillingConfigured()) return counts;
   const [raw] = await redisPipeline([["HGETALL", SEEN_KEY]]);
   const seen = new Map<string, string>();
@@ -229,7 +295,7 @@ export async function syncPlanFraudWarnings(deadline: number, nowSeconds = Math.
       listed.add(id);
       after = id;
       try {
-        const outcome = await applyWarning(warning, seen.get(id), budget);
+        const outcome = await applyWarning(warning, seen.get(id), budget, deadline);
         if (outcome === "refunded" || outcome === "refunded-held") counts.refunded += 1;
         if (outcome === "refunded") continue;
         if (outcome === "ended") counts.ended += 1;
@@ -248,8 +314,14 @@ export async function syncPlanFraudWarnings(deadline: number, nowSeconds = Math.
     }
   }
   if (!listDone) console.error("early fraud warnings: more than one run's pages; the oldest wait for the next run");
-  // Refunded, and no longer listed: their subscriptions are tried again by id.
-  const stale = [...seen].filter(([id, what]) => what.startsWith("end:") && !listed.has(id)).slice(0, MAX_RETRIES);
+  // Decided, and no longer listed: their subscriptions are ended by id. Taken in a random order, so the same
+  // MAX_RETRIES that keep failing never stand in front of the others on every run.
+  const due = [...seen].filter(([id, what]) => what.startsWith("act:") && !listed.has(id));
+  for (let i = due.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [due[i], due[j]] = [due[j], due[i]];
+  }
+  const stale = due.slice(0, MAX_RETRIES);
   for (const [id, what] of stale) {
     if (Date.now() > deadline) return counts;
     try {
@@ -262,6 +334,6 @@ export async function syncPlanFraudWarnings(deadline: number, nowSeconds = Math.
       console.error(`ending the subscription of early fraud warning ${id} failed`, error);
     }
   }
-  counts.complete = listDone && readable && held === 0 && counts.failed === 0 && stale.length < MAX_RETRIES;
+  counts.complete = listDone && readable && held === 0 && counts.failed === 0 && due.length <= MAX_RETRIES;
   return counts;
 }

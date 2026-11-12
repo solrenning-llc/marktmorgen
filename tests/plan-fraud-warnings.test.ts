@@ -14,7 +14,7 @@
  *   - the daily plans job runs it before the subscriptions are read.
  */
 import { readFileSync } from "node:fs";
-import { MAX_PAGES, MAX_REFUNDS, SEEN_KEY, refundKeyOf, syncPlanFraudWarnings } from "@/lib/plan-fraud-warnings";
+import { FRAUD_REFUNDS_ON, MAX_PAGES, MAX_REFUNDS, SEEN_KEY, refundKeyOf, syncPlanFraudWarnings } from "@/lib/plan-fraud-warnings";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -33,6 +33,10 @@ let subscriptions: Record<string, Record<string, unknown>> = {};
 let receipts: Record<string, Record<string, unknown>> = {};
 let deleteFails: Set<string> = new Set();
 let receiptAmountOff = 0;
+/** The refund is made at Stripe, but the answer is a 500 (lost). */
+let refundAnswerLost = false;
+/** The receipt says pending. */
+let refundPending = false;
 let listBroken = false;
 const asked: string[] = [];
 const refundBodies: { key: string | null; body: string }[] = [];
@@ -81,8 +85,9 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     const amount = Number(body.get("amount"));
     if (!charge || charge.amount_refunded + amount > charge.amount) return Response.json({ error: { code: "charge_already_refunded" } }, { status: 400 });
     charge.amount_refunded += amount;
-    const receipt = { id: `re_${Object.keys(receipts).length + 1}x`, object: "refund", charge: charge.id, amount: amount - receiptAmountOff, status: "succeeded", reason: body.get("reason") };
+    const receipt = { id: `re_${Object.keys(receipts).length + 1}x`, object: "refund", charge: charge.id, amount: amount - receiptAmountOff, status: refundPending ? "pending" : "succeeded", reason: body.get("reason") };
     if (key) receipts[key] = receipt;
+    if (refundAnswerLost) return Response.json({ error: { message: "lost" } }, { status: 500 });
     return Response.json(receipt);
   }
   return new Response("{}", { status: 404 });
@@ -96,6 +101,8 @@ function reset(): void {
   receipts = {};
   deleteFails = new Set();
   receiptAmountOff = 0;
+  refundAnswerLost = false;
+  refundPending = false;
   listBroken = false;
   asked.length = 0;
   refundBodies.length = 0;
@@ -115,7 +122,7 @@ const addOn = (n: number) => ({ id: `sub_A${n}`, status: "active", metadata: { a
 const foreign = (n: number) => ({ id: `sub_F${n}`, status: "active", metadata: {}, customer: `cus_${n}` });
 const posts = () => asked.filter((line) => line.startsWith("POST "));
 const deletes = () => asked.filter((line) => line.startsWith("DELETE "));
-const run = (now = NOW) => syncPlanFraudWarnings(Date.now() + 10_000, now);
+const run = (now = NOW) => syncPlanFraudWarnings(Date.now() + 10_000, now, true);
 
 async function main(): Promise<void> {
   part("The daily plans job runs it, before the subscriptions are read");
@@ -175,7 +182,7 @@ async function main(): Promise<void> {
     deleteFails.add("sub_P7");
     const first = await run();
     is("refunded, not complete", [first.refunded, first.complete], [1, false]);
-    is("written down as still to end", await redis.pipeline([["HGET", SEEN_KEY, id]]), ["end:sub_P7"]);
+    is("written down as still to end", await redis.pipeline([["HGET", SEEN_KEY, id]]), ["act:sub_P7"]);
     is("still active", subscriptions.sub_P7.status, "active");
     deleteFails.clear();
     asked.length = 0;
@@ -198,7 +205,7 @@ async function main(): Promise<void> {
     is("then final", await redis.pipeline([["HGET", SEEN_KEY, id]]), ["final"]);
   }
 
-  part("A refund receipt that does not match ends nothing and is asked again, with the same key");
+  part("A refund receipt that does not match ends nothing that run");
   {
     reset();
     const id = warn(9, plan(9));
@@ -206,7 +213,10 @@ async function main(): Promise<void> {
     const first = await run();
     is("failed, not refunded, not complete", [first.failed, first.refunded, first.complete], [1, 0, false]);
     is("the subscription is not ended on an unconfirmed refund", subscriptions.sub_P9.status, "active");
-    is("nothing written down", await redis.pipeline([["HGET", SEEN_KEY, id]]), [null]);
+    is("the decision is kept, to be finished next run", await redis.pipeline([["HGET", SEEN_KEY, id]]), ["act:sub_P9"]);
+    receiptAmountOff = 0;
+    await run();
+    is("next run: the money is back at Stripe, so the subscription ends without a second refund", [subscriptions.sub_P9.status, refundBodies.length], ["canceled", 1]);
   }
 
   part("A run refunds at most MAX_REFUNDS payments; the rest wait, still actionable");
@@ -232,7 +242,7 @@ async function main(): Promise<void> {
     is("unreadable list", [broken.failed, broken.complete], [1, false]);
     reset();
     warn(2_000, plan(2_000));
-    const late = await syncPlanFraudWarnings(Date.now() - 1, NOW);
+    const late = await syncPlanFraudWarnings(Date.now() - 1, NOW, true);
     is("nothing asked after the deadline", [asked.length, late.complete], [0, false]);
   }
 
@@ -242,6 +252,54 @@ async function main(): Promise<void> {
     warn(3_000, plan(3_000), 6_900, { ageDays: 121 });
     await run();
     is("no refund", refundBodies.length, 0);
+  }
+
+  part("Off by default: until the Terms say it, the job reads and does nothing");
+  {
+    reset();
+    warn(50, plan(50));
+    const off = await syncPlanFraudWarnings(Date.now() + 10_000, NOW);
+    is("switched off", [FRAUD_REFUNDS_ON, off.off, asked.length, subscriptions.sub_P50.status], [false, true, 0, "active"]);
+  }
+
+  part("A refund made at Stripe whose answer is lost still ends the subscription on the next run (review of #4168, ALTO 1)");
+  {
+    reset();
+    const id = warn(51, plan(51));
+    refundAnswerLost = true;
+    const first = await run();
+    is("not counted as refunded, not complete", [first.refunded, first.failed, first.complete], [0, 1, false]);
+    is("the decision is written before the refund was asked for", await redis.pipeline([["HGET", SEEN_KEY, id]]), ["act:sub_P51"]);
+    is("the money did go back at Stripe", charges.ch_C51.amount_refunded, 6_900);
+    refundAnswerLost = false;
+    const second = await run();
+    is("the next run ends the subscription, though the warning is no longer actionable", subscriptions.sub_P51.status, "canceled");
+    is("without a second refund", refundBodies.length, 1);
+    is("then final and complete", [await redis.pipeline([["HGET", SEEN_KEY, id]]), second.complete], [["final"], true]);
+  }
+
+  part("A pending refund is not proof: the subscription is ended only once the next run sees the money back");
+  {
+    reset();
+    const id = warn(52, plan(52));
+    refundPending = true;
+    const first = await run();
+    is("not confirmed this run", [first.refunded, first.failed, subscriptions.sub_P52.status], [0, 1, "active"]);
+    is("still decided", await redis.pipeline([["HGET", SEEN_KEY, id]]), ["act:sub_P52"]);
+    refundPending = false;
+    await run();
+    is("ended on the next run, no second refund", [subscriptions.sub_P52.status, charges.ch_C52.amount_refunded], ["canceled", 6_900]);
+  }
+
+  part("A charge disputed after the decision is never refunded too: only the subscription ends");
+  {
+    reset();
+    const id = warn(53, plan(53));
+    await redis.pipeline([["HSET", SEEN_KEY, id, "act:sub_P53"]]);
+    charges.ch_C53.disputed = true;
+    await run();
+    is("no refund on a disputed charge", refundBodies.length, 0);
+    is("its subscription ended", subscriptions.sub_P53.status, "canceled");
   }
 
   done();

@@ -5,11 +5,11 @@
  *   (a) a payment PayPal completes after the disconnection is still handed over, and one refunded after it still
  *       takes the purchase back and is marked refunded, which is what takes the affiliate's commission back
  *       (lib/affiliates.ts reads the mark through readPayPalRefundsWithCoverage);
- *   (b) a payment PayPal has not confirmed PENDING_GIVE_UP_SECONDS after its order was opened is cancelled: nothing
+ *   (b) a payment PayPal has not confirmed PENDING_GIVE_UP_SECONDS after its order was opened is canceled: nothing
  *       is handed over, the order's record is let go, and the buyer and the creator are each told, in an email with
  *       a text and an HTML part, that Marktmorgen holds no money and what happens if PayPal completes it later;
  *   (c) an answer from PayPal that cannot be read, or that fails, is never taken for "paid" nor for "not paid":
- *       nothing is handed over and nothing is cancelled, and the order is asked about again.
+ *       nothing is handed over and nothing is canceled, and the order is asked about again.
  *
  * Everything runs through the real five-minute job (lib/checkout-sweep.ts, sweepCheckouts) and the real disconnect
  * (lib/store.ts, disconnectPayPalSeller, which app/api/store/paypal/disconnect calls). Synthetic only: a stand-in for
@@ -121,7 +121,7 @@ async function main(): Promise<void> {
   };
 
   // Before the disconnection: one payment PayPal holds as pending (late), one paid and handed over (refunded later),
-  // and three pending ones that PayPal never confirms (cancelled, read failing, read unreadable).
+  // and three pending ones that PayPal never confirms (canceled, read failing, read unreadable).
   const late = await open();
   const refunded = await open();
   const never = await open();
@@ -162,12 +162,12 @@ async function main(): Promise<void> {
   is("taken back from the buyer", (await importedFor(store, "buyer@example.com")).length, 0);
   is("marked refunded, which the affiliate book and the numbers read", await refundSeen(store.statsId!, refunded), true);
 
-  part("(c) Before the deadline nothing is cancelled");
+  part("(c) Before the deadline nothing is canceled");
   await sweepCheckouts(Date.now() + 20_000);
   is("still waited on", await Promise.all([never, unreadable, unanswered].map((o) => stillPending(store, o))), [true, true, true]);
-  is("nobody told anything", [to("never@example.com").length, to("owner@example.com").filter((e) => e.subject.includes("cancelled")).length], [0, 0]);
+  is("nobody told anything", [to("never@example.com").length, to("owner@example.com").filter((e) => e.subject.includes("canceled")).length], [0, 0]);
 
-  part("(b) Past the deadline, still not confirmed by PayPal: cancelled, buyer and creator told");
+  part("(b) Past the deadline, still not confirmed by PayPal: canceled, buyer and creator told");
   for (const order of [never, unreadable, unanswered]) await openedDaysAgo(order, 30);
   orders.set(unreadable, withCapture(unreadable, undefined, "unreadable@example.com"));
   failing.add(unanswered);
@@ -178,7 +178,7 @@ async function main(): Promise<void> {
   is("the order's record is let go, so a late return cannot capture it", [record, (await captureOrder(store, never)).ok], [null, false]);
   const buyer = to("never@example.com");
   is("the buyer is told once", buyer.length, 1);
-  is("in plain words, with a text and an HTML part", [buyer[0]?.subject.includes("cancelled"), typeof buyer[0]?.html === "string" && buyer[0].html.includes("<h1"), buyer[0]?.text.includes("Sourdough Guide")], [true, true, true]);
+  is("in plain words, with a text and an HTML part", [buyer[0]?.subject.includes("canceled"), typeof buyer[0]?.html === "string" && buyer[0].html.includes("<h1"), buyer[0]?.text.includes("Sourdough Guide")], [true, true, true]);
   is("saying Marktmorgen holds no money and what happens if PayPal completes it", [buyer[0]?.text.includes("Marktmorgen never holds"), buyer[0]?.text.includes("refund")], [true, true]);
   const creator = to("owner@example.com").filter((e) => e.text.includes(never));
   is("the creator is told once, with the order's PayPal id", creator.length, 1);
@@ -189,7 +189,7 @@ async function main(): Promise<void> {
   is("neither handed over", [await readPaid(unreadable), await readPaid(unanswered)], [null, null]);
   is("neither buyer told anything", [to("unreadable@example.com").length, to("unanswered@example.com").length], [0, 0]);
 
-  part("A cancelled order is told once, however many runs follow");
+  part("A canceled order is told once, however many runs follow");
   const after = emails.length;
   await sweepCheckouts(Date.now() + 20_000);
   is("no second notice", emails.filter((e, i) => i >= after && (e.to.includes("never@example.com") || e.text.includes(never))).length, 0);

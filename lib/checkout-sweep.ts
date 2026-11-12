@@ -47,7 +47,7 @@ import { noteTestSales } from "@/lib/headline-test";
 import { revokeRefundedGifts } from "@/lib/gifts";
 import { revokeRefundedPreorders } from "@/lib/preorders";
 import { revokeRefundedGroups } from "@/lib/group-buy";
-import { sweepPayPal } from "@/lib/paypal-delivery";
+import { retryPayPalCancelNotices, sweepPayPal } from "@/lib/paypal-delivery";
 import { dropEnrollment } from "@/lib/learn";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
@@ -738,6 +738,9 @@ export async function sweepCheckouts(deadline: number, taxPolicyValue: unknown =
   const [savedCursor, savedDone] = typeof saved === "string" ? saved.split("|") : ["0", "0"];
   let cursor = /^\d+$/.test(savedCursor ?? "") ? savedCursor : "0";
   let skip = Number(savedDone) || 0;
+  // The buyers' notices of canceled PayPal orders the sender refused, tried again once a run, for every store
+  // (lib/paypal-sales.ts, retryCancelNotices): one ZRANGEBYSCORE, and a batch at most.
+  await retryPayPalCancelNotices(deadline).catch((error) => console.error("trying canceled PayPal orders' notices again failed", error));
   // The stores with open payment requests, read once a run.
   const requesting = await storesWithRequests().catch(() => new Set<string>());
   // Redis's SCAN may hand back the same key on more than one page (and a store

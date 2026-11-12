@@ -10,12 +10,12 @@ import { createHmac } from "node:crypto";
 import { ordersLinkWithToken } from "@/lib/buyer-orders";
 import { type Listing, readListing, readListings } from "@/lib/catalog";
 import { dropEnrollment, recordEnrollment } from "@/lib/learn";
-import { type Paid, type PayPalReceipt, deliverPayPal, handOverKey, paypalOrdersLeft, paypalPastWatched, readPaidExact, refundSeen, watchPayPal } from "@/lib/paypal-sales";
-import { tellCancelled } from "@/lib/paypal-cancel";
+import { type Paid, type PayPalReceipt, deliverPayPal, handOverKey, paypalOrdersLeft, paypalPastWatched, readPaidExact, refundSeen, retryCancelNotices, watchPayPal } from "@/lib/paypal-sales";
+import { tellCanceled } from "@/lib/paypal-cancel";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { fromStore, storeBase } from "@/lib/purchase-email";
-import { type Store, ensureListId, forgetPayPalPast, storeRef } from "@/lib/store";
+import { type Store, ensureListId, forgetPayPalPast, storeForHandle, storeRef } from "@/lib/store";
 import { creditPayPalSale } from "@/lib/affiliates";
 import { emitEvent } from "@/lib/webhooks";
 import { deriveKey } from "@/lib/secret-box";
@@ -382,8 +382,8 @@ export async function sweepPayPal(store: Store, deadline: number): Promise<{ cle
     }
   }
   const done = await watchPayPal(store, deadline, {
-    // An order PayPal never confirmed: the buyer and the creator are told it is cancelled (lib/paypal-cancel.ts).
-    cancelled: (order) => tellCancelled(store, order),
+    // An order PayPal never confirmed: the buyer and the creator are told it is canceled (lib/paypal-cancel.ts).
+    canceled: (order, who) => tellCanceled(store, order, who),
     handOver: async (paid) => {
       await handOverPayPal(store, paid);
     },
@@ -412,4 +412,19 @@ export async function sweepPayPal(store: Store, deadline: number): Promise<{ cle
   });
   done.cleared += await handOverAgain(store, deadline);
   return done;
+}
+
+/**
+ * Tries again, once a run of the five-minute job, the notices of canceled PayPal orders the sender refused, to their
+ * buyers and their creators (lib/paypal-sales.ts, retryCancelNotices): each told from its store as it is now, found by the handle kept with the
+ * order and checked by its stats id. A store that cannot be read is tried again next time; a store that is gone, or is
+ * another store now, leaves nobody to send from, and the page the buyer comes back to still says the order was
+ * canceled.
+ */
+export async function retryPayPalCancelNotices(deadline: number): Promise<number> {
+  return retryCancelNotices(deadline, async (canceled, who) => {
+    const store = await storeForHandle(canceled.handle);
+    if (!store || store.statsId !== canceled.store) return { buyer: "none", creator: "none" };
+    return tellCanceled(store, canceled, who);
+  });
 }

@@ -50,7 +50,8 @@ import { orderRoom, upsertContact } from "@/lib/contacts";
 import { listOrder } from "@/lib/buyer-list";
 import { rememberBuyers } from "@/lib/buyer-library";
 import { canRecover, ordersLinkFor } from "@/lib/buyer-orders";
-import { readPaid, stillPending } from "@/lib/paypal-sales";
+import { PENDING_GIVE_UP_SECONDS, canceledFor, readPaid, stillPending } from "@/lib/paypal-sales";
+import { paypalCancelWords } from "@/lib/buyer-words/paypal-cancel";
 import { paypalHandedOver } from "@/lib/paypal-handed";
 import { saleClock } from "@/lib/store-sale";
 import { readListing } from "@/lib/catalog";
@@ -1467,6 +1468,15 @@ async function PayPalThanks({ store, order }: { store: Store; order: string }) {
           return false;
         })
       : false;
+  // Canceled because PayPal never confirmed the payment (lib/paypal-sales.ts, cancelOrder): said so, also to a buyer
+  // PayPal gave no address for. A mark that cannot be read is unknown, never "not found".
+  const canceled =
+    !ours && allowed && !unread && !waiting
+      ? await canceledFor(store, order).catch(() => {
+          unread = true;
+          return null;
+        })
+      : null;
   const fresh = ours ? saleClock() - ours.at < DOWNLOAD_WINDOW_SECONDS : false;
   const link = ours && delivered && fresh ? await ordersLinkFor(store, ours.email, storeBase(store)).catch(() => null) : null;
   const t = thanksWords(store.language);
@@ -1534,6 +1544,12 @@ async function PayPalThanks({ store, order }: { store: Store; order: string }) {
             <>
               <h1 className="font-display text-3xl font-semibold leading-tight sm:text-4xl">{t.ppCouldNotCheck}</h1>
               <p className="st-muted mt-4">{t.ppCouldNotCheckBody}</p>
+            </>
+          ) : canceled ? (
+            <>
+              <h1 className="font-display text-3xl font-semibold leading-tight sm:text-4xl">{paypalCancelWords(store.language).heading}</h1>
+              <p className="st-muted mt-4">{paypalCancelWords(store.language).pageBody(Math.round(PENDING_GIVE_UP_SECONDS / 86_400))}</p>
+              <p className="st-muted mt-3">{canceled.charged === "none" ? paypalCancelWords(store.language).notCharged : paypalCancelWords(store.language).pagePending(store.name)}</p>
             </>
           ) : waiting ? (
             <>

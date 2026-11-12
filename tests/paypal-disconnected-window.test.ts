@@ -129,7 +129,7 @@ async function main(): Promise<void> {
   const three = renderToStaticMarkup(createElement(PayPalWaitingNotice, { count: 3 }));
   is("a polite live region named by its own heading", [one.includes('role="status"'), one.includes('aria-labelledby="paypal-waiting-title"'), /<h3 id="paypal-waiting-title"[^>]*>Reconnect PayPal: 1 PayPal order is still waiting<\/h3>/.test(one)], [true, true, true]);
   is("the count in words", three.includes("Reconnect PayPal: 3 PayPal orders are still waiting"), true);
-  is("what happens, with the code's deadline", [one.includes("as soon as PayPal confirms it"), one.includes(`within ${PENDING_GIVE_UP_SECONDS / 86_400} days is cancelled`), one.includes("Connect your PayPal account again")], [true, true, true]);
+  is("what happens, with the code's deadline", [one.includes("as soon as PayPal confirms it"), one.includes(`within ${PENDING_GIVE_UP_SECONDS / 86_400} days is canceled`), one.includes("Connect your PayPal account again")], [true, true, true]);
   done();
 }
 

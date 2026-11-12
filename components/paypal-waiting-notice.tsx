@@ -26,7 +26,7 @@ export function PayPalWaitingNotice({ count }: { count: number }) {
         below so these orders can be finished.
       </p>
       <p className="mt-2">
-        {`An order PayPal does not confirm within ${DAYS} days is cancelled. We email you and the buyer when that happens.`}
+        {`An order PayPal does not confirm within ${DAYS} days is canceled. We email you and the buyer when that happens.`}
       </p>
     </section>
   );

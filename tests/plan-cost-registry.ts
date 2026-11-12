@@ -125,6 +125,7 @@ import { MAX_EMAIL_LENGTH } from "@/lib/auth";
 import { MAX_PER_PERSON as REQUESTS_PER_PERSON } from "@/lib/payment-request-rules";
 import { WAITING_SHOWN } from "@/lib/buyer-waiting";
 import { MAX_PRODUCT_BYTES } from "@/lib/catalog";
+import { MAX_COMPANIES_BYTES, MAX_COMPANY_RECORD_BYTES, STUDIO_UNIT_SENT_BYTES } from "@/lib/crm-companies-rules";
 import { type ReadShape, CALENDAR_BUILD_SHAPE, CALENDAR_FILE_BYTES, CALENDAR_POLL_SHAPE, CALENDAR_REFUSED_PRICED_PER_HOUR, CALENDAR_REFUSED_SHAPE, KEPT_READINGS_SHAPE, LIFE_FILL_SHAPE, LIST_MADE_SHAPE, MEMBERS_READ_SHAPE, SALES_READ_SHAPE, STATS_READ_SHAPE } from "@/lib/read-ceilings";
 import { CALENDAR_BUILDS_PER_DAY, CALENDAR_COPY_SECONDS, CALENDAR_CREDITS_PER_DAY, CALENDAR_POLLS_PER_HOUR } from "@/lib/calendar-sync";
 import { HEAVY_READINGS_PER_DAY, READING_COPY_MAX_BYTES, READING_KEEP_SECONDS, READING_KINDS, STORE_READINGS_PER_DAY } from "@/lib/store-readings";
@@ -689,6 +690,24 @@ export const PATH_STUDIO_PAGE = request("heavy", 81, 404_096);
 export const PATH_PAGE = request("heavy", 54, 120_000);
 export const PATH_BOARD_JOIN = request("heavy",70,30_000);
 /**
+ * One companies request at the most (app/api/store/companies, lib/crm-companies.ts;
+ * 639 [GL7](4)): every company read (MAX_COMPANIES_BYTES, about a megabyte), the
+ * two records a link moves written back, the lock taken and let go, the room
+ * taken and given back, its studio requests counted, and every company sent on
+ * to the browser. Counted as COMPANIES_REQUEST_UNITS studio requests, taken
+ * before it reads (tests/plan-cost-registry.test.ts).
+ */
+export const COMPANIES_REQUEST = request("heavy", 12 + 2 * TAKE_COMMANDS, MAX_COMPANIES_BYTES + 2 * MAX_COMPANY_RECORD_BYTES + 4_096) + MAX_COMPANIES_BYTES * ORIGIN_PER_BYTE;
+/**
+ * A page's reading of every company at the most (the companies page, a person's page; 639 [GL7](4)): about a
+ * megabyte from the database and its studio requests counted. Counted as COMPANIES_READ_UNITS studio requests
+ * before it reads. What the page sends on is counted apart by its size (companiesSentUnits, STUDIO_UNIT_SENT_BYTES),
+ * and its reading of the buyers from Stripe as BUYER_LEDGER.
+ */
+export const COMPANIES_PAGE_READ = request("heavy", 4 + 2 * TAKE_COMMANDS, MAX_COMPANIES_BYTES);
+/** What sending STUDIO_UNIT_SENT_BYTES on to the browser costs: within one studio request. */
+export const STUDIO_UNIT_SENT = STUDIO_UNIT_SENT_BYTES * ORIGIN_PER_BYTE;
+/**
  * One reading of a store's buyers from the creator's Stripe account at the
  * most (lib/segments.ts, buyerLedger), when its ten-minute copy ran out: its
  * pages of sales, renewals, refunds, disputes and invoice payments read side
@@ -1188,6 +1207,13 @@ export const COST_LINES: CostLine[] = [
       { file: "app/embed/[handle]/join/page.tsx", names: ["StoreBeacon"] },
     ],
     basis: "Page views load nothing from us; an open of a card counts as a visit, sent by the card's own beacon like any page of the store (app/api/store/hit, through the host's browser check), and rests with the public pages, so it is inside the visits line, and a checkout from it is an order.",
+  },
+  {
+    id: "certificate-page",
+    feature: "A certificate's page and its tab's title (R20 finding 3; the anonymous-traffic audit, 9 November 2026)",
+    monthlyUsd: ALL_TIERS_SAME(0),
+    sources: [{ file: "app/[handle]/certificate/[id]/page.tsx", names: ["const load = cache(", "if (await isResting(store)) return { store, resting: true as const };", "if (found.resting) return <StoreResting store={found.store} />;"] }],
+    basis: "A public page of the store: the page and its title share one load, which takes one of the store's public requests before the certificate, or the sample's listing and course, is read, and rests with the public pages. It reads no more than a product's page (the store, a listing, a course), 5 commands measured against COMMANDS.laterPage + COMMANDS.laterCount, so it is inside the visits and public-requests lines (tests/certificate-page-admission.test.ts).",
   },
   {
     id: "public-requests",
@@ -1783,6 +1809,7 @@ export const NOT_A_COST: Record<string, string> = {
   CALENDAR_ADDS_PER_TEN_MINUTES: "A burst limit per store on calendar adds, each one of the store's studio requests (line studio) that reads one remote calendar (R27): it only refuses, before the read.",
   CALENDAR_ADDS_PER_CONNECTION_TEN_MINUTES: "The same per connection, whatever store it is signed in to (R27): it only refuses, before the read.",
   TRIAL_MONTHLY_EMAILS: "The free trial's emails: in nonPayingWorst (line free-share).",
+  SUPPORT_PER_DAY: "The daily cap on \"Send this to support\" requests (lib/help-support.ts): two company emails each, nothing kept, held in SCOPES (help-support) as a company cost, not a plan allowance.",
   DAILY_CAPS: "The choices of a host's own daily booking cap: how many calls a host takes, not a cost.",
   KIT_PER_DAY: "A daily burst limit under the writing jobs an affiliate kit takes (line ai).",
   PITCHES_PER_DAY: "Outreach pitches are drafts the creator sends from their own mailbox: nothing is sent from here, and reading a business's site is a call out (line integrations).",
@@ -1834,6 +1861,7 @@ export const SCOPES: Record<string, ScopeClass> = {
   "plan-refund": guard("The plan refund route (app/api/billing/refund, 305 [SY1]): at most PER_DAY (10) a store a day, each a bounded Stripe reading (MAX_CALLS) and one write; the money is the reviewed refund exposure (docs/funded-exposure-review.md), a company cost."),
   "plan-withdraw": guard("The plan withdrawal route (app/api/billing/withdraw, 588 [KB9] unit 3): at most PER_DAY (10) a store a day, each a bounded Stripe reading (MAX_CALLS) and, once per withdrawal, the plan refund flow; the money is the reviewed refund exposure under the money-back guarantee (docs/funded-exposure-review.md), a company cost."),
   "plan-refund-review": guard("The plan refund's review page (app/studio/refund, 305 [SY1]): drawn at most SHOWN_PER_DAY (20) a store a day, each a bounded Stripe reading (MAX_CALLS) and one short key: a company cost."),
+  "help-support": guard("\"Send this to support\" from the studio's help (lib/help-support.ts, 491 [PP2] complement): at most SUPPORT_PER_DAY (5) requests a store in 24 hours, counted before sending and refused when the count cannot be read; each is SUPPORT_EMAILS_PER_REQUEST (2) emails on the company meter and nothing kept: a company cost."),
   "metaads-deauth": guard("Meta's own notices: a company cost."), "outreach-stop": guard("A recipient's stop link: a company cost."),
   // Public requests: counted in the store's window as well (lib/metered-limits.ts, withinStore).
   "ads-event": PUBLIC, "aff-join": PUBLIC, "aff-open": PUBLIC, "book-move": PUBLIC, "cart-read": PUBLIC, "come-back": PUBLIC, "course-start": PUBLIC,
@@ -1885,7 +1913,7 @@ export const EMAIL_SITES: Record<string, string[]> = {
   // The acknowledgement of a buyer's withdrawal (EU art. 11a, 588 [KB9]): the store's transactional email, tried at most WITHDRAWAL_ACK_SENDS (3) times per order.
   "lib/withdrawal.ts": ["store"],
   // The receipt of a creator's withdrawal from their plan (EU art. 11a, 588 [KB9] unit 3), tried at most PLAN_WITHDRAW_ACK_SENDS (3) times, and a note to support tried at most PLAN_WITHDRAW_SUPPORT_TRIES (3) times, each counted before it is made: the company's.
-  "lib/plan-withdrawal.ts": COMPANY,
+  "lib/plan-withdrawal.ts": COMPANY, "lib/help-support.ts": COMPANY,
   "app/api/cron/mail-check/route.ts": COMPANY, "app/api/cron/monthly/route.ts": COMPANY, "app/api/cron/stripe-check/route.ts": COMPANY,
   "app/api/cron/usage/route.ts": COMPANY, "app/api/cron/weekly/route.ts": COMPANY, "lib/account-notice.ts": COMPANY, "lib/auth.ts": COMPANY,
   "lib/billing-reminders.ts": COMPANY, "lib/passkeys.ts": COMPANY, "lib/plan-closing.ts": COMPANY, "lib/closing-buyers.ts": COMPANY, "lib/closing-plan-guard.ts": COMPANY, "lib/plan-refund-flow.ts": COMPANY, "lib/plan-pause.ts": COMPANY,

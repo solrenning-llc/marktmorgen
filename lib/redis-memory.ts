@@ -177,6 +177,19 @@ export class MemoryRedis {
           const [, hold, token] = args;
           return this.run(["GET", hold]) === token ? this.run(["DEL", hold]) : 0;
         }
+        // lib/upsell.ts NAME_CUSTOMER: an offer's claim written again naming the customer only while it is still exactly
+        // the press's own claim, with its expiry; 1 written, 0 not (the claim let go or replaced since).
+        if (key.startsWith("-- marktmorgen:upsell-name-customer:v1\n") && args[0] === "1" && args.length === 5) {
+          const [, record, claim, named, seconds] = args;
+          if (this.run(["GET", record]) !== claim) return 0;
+          this.run(["SET", record, named, "EX", seconds]);
+          return 1;
+        }
+        // lib/upsell.ts ORPHAN_RELEASE: an offer's orphan claim deleted only while it is still exactly the record read.
+        if (key.startsWith("-- marktmorgen:upsell-orphan-release:v1\n") && args[0] === "1" && args.length === 3) {
+          const [, record, read] = args;
+          return this.run(["GET", record]) === read ? this.run(["DEL", record]) : 0;
+        }
         // lib/group-buy.ts PLACE_DONE: a place marked done once, and said so only to the open that did it.
         if (key.startsWith("-- marktmorgen:group-place-done:v1\n") && args[0] === "1" && args.length === 4) {
           const [, members, field, json] = args;

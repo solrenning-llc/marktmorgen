@@ -115,7 +115,8 @@ async function main(): Promise<void> {
   couponAnswer = "other";
   sent.length = 0;
   made = await makeReturningCode(OWNER, await store(), asked("ODDONE"));
-  is("another coupon in the answer: not kept, and the coupon deleted", [made.ok ? "" : made.reason, (await store()).returningCodes.some((c) => c.code === "ODDONE")], ["stripe", false]);
+  // madeCoupon cannot trust the answer's id, so nothing is deleted on it: at most an orphan coupon that nothing points at.
+  is("another coupon in the answer: not kept", [made.ok ? "" : made.reason, (await store()).returningCodes.some((c) => c.code === "ODDONE")], ["stripe", false]);
   couponAnswer = "error";
   made = await makeReturningCode(OWNER, await store(), asked("ODDTWO"));
   is("an error: not kept", [made.ok ? "" : made.reason, (await store()).returningCodes.some((c) => c.code === "ODDTWO")], ["stripe", false]);
@@ -151,6 +152,35 @@ async function main(): Promise<void> {
     restore();
   }
   is("never written: refused, and its coupon deleted", [made.ok ? "" : made.reason, (await store()).returningCodes.some((c) => c.code === "NEVERKEPT"), sent.some((s) => s.method === "DELETE")], ["stripe", false, true]);
+  // Written, answer lost, and the read again fails too: unknown either way, so the coupon the store may point at stays
+  // (Claude 3 focal on db795a88, LEVE 1: this branch had no test).
+  sent.length = 0;
+  let rereads = 0;
+  (redis as unknown as { pipeline: typeof pipeline }).pipeline = async (commands: (string | number)[][]) => {
+    const hit = commands.some((c) => c.some((a) => String(a).includes('"UNREAD"')));
+    // Only the store's read again (one GET) fails, once; the lock's release still goes through.
+    if (!hit && rereads === 1 && commands.length === 1 && commands[0][0] === "GET") {
+      rereads += 1;
+      throw new Error("connection reset on the read again (synthetic)");
+    }
+    const replies = await pipeline(commands);
+    if (hit) {
+      rereads = 1;
+      throw new Error("connection reset after the write (synthetic)");
+    }
+    return replies;
+  };
+  try {
+    made = await makeReturningCode(OWNER, await store(), asked("UNREAD"));
+  } finally {
+    restore();
+  }
+  is(
+    "written, answer lost, read again failing: refused as unknown, and its coupon not deleted",
+    [made.ok ? "" : made.reason, rereads > 1, (await store()).returningCodes.some((c) => c.code === "UNREAD"), sent.some((s) => s.method === "DELETE")],
+    ["stripe", true, true, false],
+  );
+  is("and it can still be stopped", await stopReturningCode(OWNER, await store(), "UNREAD"), true);
   await stopReturningCode(OWNER, await store(), "LOSTWORD");
 
   part("Twenty at most");

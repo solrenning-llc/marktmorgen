@@ -1206,7 +1206,20 @@ export async function paypalKept(statsId: string | null, refunds: boolean): Prom
  * their records read in one MGET.
  */
 export async function readPayPalRefundsWithCoverage(statsId: string | null, since: number): Promise<{ rows: { order: string; capture: string; cents: number; currency: string; at: number }[]; partial: boolean }> {
-  if (!statsId || !isRedisConfigured()) return { rows: [], partial: false };
+  const { rows, partial } = await readPayPalRefundsDetail(statsId, since);
+  return { rows, partial };
+}
+
+/**
+ * readPayPalRefundsWithCoverage with why a reading is not whole, for a reader that can tell the two apart
+ * (lib/path-facts.ts, cloud I's MEDIUM 1 on #3443): `gone`, the orders whose record Redis answered as missing (a paid
+ * record expires 400 days after its sale), and `cut`, every other reason. `partial` is either.
+ */
+export async function readPayPalRefundsDetail(
+  statsId: string | null,
+  since: number,
+): Promise<{ rows: { order: string; capture: string; cents: number; currency: string; at: number }[]; partial: boolean; gone: string[]; cut: boolean }> {
+  if (!statsId || !isRedisConfigured()) return { rows: [], partial: false, gone: [], cut: false };
   const from = Math.max(0, since);
   // The refunds, member and score, as a list of text no longer than the LIMIT asked ([] is none); each score whole
   // seconds, as the sweep writes it (REDIS_SCORE), and within the range asked. Anything else is unknown and throws,
@@ -1219,6 +1232,9 @@ export async function readPayPalRefundsWithCoverage(statsId: string | null, sinc
   }
   for (let i = 0; i + 1 < Math.min(flat.length, 2 * PAYPAL_REFUNDS_READ); i += 2) listed.push({ order: flat[i], at: Number(flat[i + 1]) });
   const out: { order: string; capture: string; cents: number; currency: string; at: number }[] = [];
+  // Why the reading may not be whole, kept apart for a reader that can tell them (lib/path-facts.ts): `gone`, the orders
+  // whose record Redis answered as missing (expired 400 days after the sale), and `cut`, everything else.
+  const gone: string[] = [];
   let missing = listed.some((entry) => !ORDER_ID.test(entry.order));
   const readable = listed.filter((entry) => ORDER_ID.test(entry.order));
   // The records, read exactly (Codex Z on #2964; CX-123 rule 24): one reply to the one MGET, holding exactly one
@@ -1231,7 +1247,7 @@ export async function readPayPalRefundsWithCoverage(statsId: string | null, sinc
   readable.forEach((entry, i) => {
     const raw = records[i];
     if (raw === null) {
-      missing = true;
+      gone.push(entry.order);
       return;
     }
     if (typeof raw !== "string") throw new UnknownReplyError(what);
@@ -1259,7 +1275,8 @@ export async function readPayPalRefundsWithCoverage(statsId: string | null, sinc
     if (r.store === statsId) out.push({ order: entry.order, capture: r.capture, cents: r.cents as number, currency: r.currency, at: entry.at });
     else missing = true;
   });
-  return { rows: out, partial: flat.length > 2 * PAYPAL_REFUNDS_READ || missing };
+  const cut = flat.length > 2 * PAYPAL_REFUNDS_READ || missing;
+  return { rows: out, partial: cut || gone.length > 0, gone, cut };
 }
 
 /**

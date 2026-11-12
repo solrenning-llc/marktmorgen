@@ -335,6 +335,28 @@ async function main(): Promise<void> {
     is("Stripe and live PayPal sales, less refunds, toward the first sale and the levels", notice.includes("Path counts your Stripe sales and your live PayPal sales, less refunds, toward your first sale and levels."), true);
   }
 
+
+  part("Cloud I's MEDIUM 1: a refund whose sale's record has expired, of a sale the path does not count, leaves the money known");
+  {
+    const { store, statsId } = await setup();
+    // An old sale, refunded after the oldest sale still kept: its refund is in the range read, its record is gone (400 days).
+    redis.run(["ZADD", `nl:ppsell:refunded:${statsId}`, String(now - 150), order(7)]);
+    is("the two real sales are still counted, 4400 kept", await money(store), [2, 4400]);
+    // Control: a reading cut short for any other reason (here a listed order that is not an order id) is still unknown.
+    redis.run(["ZADD", `nl:ppsell:refunded:${statsId}`, String(now - 40), "not an order"]);
+    const read = await readPathMoney(store, now * 1000);
+    is("control: a refunds reading cut short leaves the money unknown, no sale kept", [read?.cents, read?.real], [null, 0]);
+  }
+
+  part("Cloud I's MEDIUM 2: PayPal's sales read off their shape leave the money unknown, never Stripe's alone");
+  {
+    const { store } = await setup();
+    bend = bendFirst("nl:ppsell:sales:", "ZREVRANGEBYSCORE", () => ["x"]);
+    const read = await readPathMoney(store, now * 1000);
+    bend = null;
+    is("money unknown, no sale counted as kept", [read?.cents, read?.real], [null, 0]);
+  }
+
   done();
 }
 

@@ -49,6 +49,8 @@ export type OrderProblemWords = {
   busyNow: string;
   /** The store has no room to take it. */
   storeFull: string;
+  /** The filing threw on its way and whether it reached the inbox could not be read (review of #3838): never "nothing was sent". */
+  notConfirmed: string;
 };
 
 /** The sentences each language must have (the reasons and the sent line are checked on their own). */
@@ -75,6 +77,7 @@ export const ORDER_PROBLEM_KEYS = [
   "alreadyOpen",
   "busyNow",
   "storeFull",
+  "notConfirmed",
 ] as const satisfies readonly (keyof OrderProblemWords)[];
 
 const D = ORDER_PROBLEM_REPLY_DAYS;
@@ -105,6 +108,7 @@ const WORDS: Record<LanguageCode, OrderProblemWords> = {
     alreadyOpen: `This order already has an open report. The creator has ${D} days to answer it.`,
     busyNow: "This is busy right now. Nothing was sent. Try again in a minute.",
     storeFull: "The store cannot take messages right now. Nothing was sent. Try again later or use the store's contact page.",
+    notConfirmed: "We could not confirm that your report reached the creator. It may have. Wait 10 minutes before you send it again.",
   },
   es: {
     button: "Informar de un problema con este pedido",
@@ -131,6 +135,7 @@ const WORDS: Record<LanguageCode, OrderProblemWords> = {
     alreadyOpen: `Este pedido ya tiene un aviso abierto. El creador tiene ${D} días para responderlo.`,
     busyNow: "Ahora mismo está ocupado. No se envió nada. Inténtalo de nuevo en un minuto.",
     storeFull: "La tienda no puede recibir mensajes ahora. No se envió nada. Inténtalo más tarde o usa la página de contacto de la tienda.",
+    notConfirmed: "No pudimos confirmar que tu aviso llegó al creador. Puede que sí. Espera 10 minutos antes de enviarlo de nuevo.",
   },
   fr: {
     button: "Signaler un problème avec cette commande",
@@ -157,6 +162,7 @@ const WORDS: Record<LanguageCode, OrderProblemWords> = {
     alreadyOpen: `Cette commande a déjà un signalement ouvert. Le créateur a ${D} jours pour y répondre.`,
     busyNow: "C'est occupé pour le moment. Rien n'a été envoyé. Réessayez dans une minute.",
     storeFull: "La boutique ne peut pas recevoir de messages pour le moment. Rien n'a été envoyé. Réessayez plus tard ou utilisez la page de contact de la boutique.",
+    notConfirmed: "Nous n'avons pas pu confirmer que votre signalement est arrivé au créateur. Il est peut-être arrivé. Attendez 10 minutes avant de l'envoyer à nouveau.",
   },
   de: {
     button: "Ein Problem mit dieser Bestellung melden",
@@ -183,6 +189,7 @@ const WORDS: Record<LanguageCode, OrderProblemWords> = {
     alreadyOpen: `Für diese Bestellung gibt es schon eine offene Meldung. Der Creator hat ${D} Tage Zeit, darauf zu antworten.`,
     busyNow: "Gerade ist es belegt. Es wurde nichts gesendet. Versuchen Sie es in einer Minute noch einmal.",
     storeFull: "Der Shop kann gerade keine Nachrichten annehmen. Es wurde nichts gesendet. Versuchen Sie es später noch einmal oder nutzen Sie die Kontaktseite des Shops.",
+    notConfirmed: "Wir konnten nicht bestätigen, dass Ihre Meldung beim Ersteller angekommen ist. Vielleicht ist sie angekommen. Warten Sie 10 Minuten, bevor Sie sie erneut senden.",
   },
   it: {
     button: "Segnala un problema con questo ordine",
@@ -209,6 +216,7 @@ const WORDS: Record<LanguageCode, OrderProblemWords> = {
     alreadyOpen: `Questo ordine ha già una segnalazione aperta. Il creatore ha ${D} giorni per rispondere.`,
     busyNow: "Al momento è occupato. Non è stato inviato nulla. Riprova tra un minuto.",
     storeFull: "Il negozio non può ricevere messaggi in questo momento. Non è stato inviato nulla. Riprova più tardi o usa la pagina dei contatti del negozio.",
+    notConfirmed: "Non abbiamo potuto confermare che la tua segnalazione sia arrivata al creatore. Potrebbe essere arrivata. Aspetta 10 minuti prima di inviarla di nuovo.",
   },
   nl: {
     button: "Een probleem met deze bestelling melden",
@@ -235,6 +243,7 @@ const WORDS: Record<LanguageCode, OrderProblemWords> = {
     alreadyOpen: `Voor deze bestelling is al een melding open. De maker heeft ${D} dagen om die te beantwoorden.`,
     busyNow: "Het is nu even druk. Er is niets verstuurd. Probeer het over een minuut opnieuw.",
     storeFull: "De winkel kan nu geen berichten ontvangen. Er is niets verstuurd. Probeer het later opnieuw of gebruik de contactpagina van de winkel.",
+    notConfirmed: "We konden niet bevestigen dat je melding bij de maker is aangekomen. Misschien wel. Wacht 10 minuten voordat je hem opnieuw stuurt.",
   },
   pt: {
     button: "Informar um problema com este pedido",
@@ -261,6 +270,7 @@ const WORDS: Record<LanguageCode, OrderProblemWords> = {
     alreadyOpen: `Este pedido já tem um aviso aberto. O criador tem ${D} dias para responder.`,
     busyNow: "Está ocupado agora. Nada foi enviado. Tente de novo em um minuto.",
     storeFull: "A loja não pode receber mensagens agora. Nada foi enviado. Tente mais tarde ou use a página de contato da loja.",
+    notConfirmed: "Não conseguimos confirmar que seu aviso chegou ao criador. Pode ter chegado. Espere 10 minutos antes de enviá-lo de novo.",
   },
 };
 

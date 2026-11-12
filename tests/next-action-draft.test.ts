@@ -11,12 +11,18 @@
  *   - the model gets no count, no amount and no person;
  *   - a draft with a made-up number, a percentage, a price, a link, "free", an offer, a promise or pressure is never
  *     shown;
- *   - nothing is saved or sent, and the screen says so.
+ *   - nothing is saved or sent, and the screen says so;
+ *   - the draft is shown under the "AI draft" badge and the three checks (lib/ai-draft-review.ts, 756 [STN3]), and
+ *     "Copy the draft" waits until all three are ticked;
+ *   - the screen never says more than the server knows about the month's uses ("off" may follow a reservation that
+ *     could not be confirmed; "failed" gives the use back when no call reached the provider), and never "Uses NaN";
+ *   - the real route, called as the studio calls it: signed out, an action with no draft, nothing to write about and
+ *     a number not read now, each refused before anything is counted or asked.
  */
 import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { NextActionDraft } from "@/components/next-action-draft";
+import * as DraftScreen from "@/components/next-action-draft";
 import { NextActionsPanel } from "@/components/next-actions-panel";
 import { DRAFTABLE, MAX_DRAFT_BODY, NEXT_DRAFT_CALL, NEXT_DRAFT_JOBS, draftRequest, fitsDraftCall, isDraftable, readDraft } from "@/lib/next-action-draft-rules";
 import { type DraftDeps, writeNextActionDraft } from "@/lib/next-action-draft";
@@ -64,8 +70,22 @@ const refused: [string, Record<string, string>, string][] = [
   ["an offer", { subject: "Your payment", body: "Here is a coupon for you. Ana" }, "offer"],
   ["a promise", { subject: "Your payment", body: "Stay for the results. Ana" }, "promise"],
   ["pressure", { subject: "Your payment", body: "Please act now or lose access. Ana" }, "pressure"],
+  // Numbers written as words are numbers too (review @3cec49fe, LOW 3), and a deadline or a threat in words is pressure.
+  ["a number in words", { subject: "Your payment", body: "Please update your card within three days. Ana" }, "number"],
+  ["a number in words, capitalised", { subject: "Twenty members", body: "Hi. Ana" }, "number"],
+  ["a threat to end the membership", { subject: "Your payment", body: "Please update your card or your membership will end. Ana" }, "pressure"],
+  ["a cancellation threat", { subject: "Your payment", body: "Otherwise your membership will be cancelled. Ana" }, "pressure"],
+  ["a deadline by a day", { subject: "Your payment", body: "Please update your card by Friday. Ana" }, "pressure"],
+  ["a deadline in words", { subject: "Your payment", body: "Please update your card within the week. Ana" }, "pressure"],
+  ["soon", { subject: "Your payment", body: "Please update your card as soon as possible. Ana" }, "pressure"],
+  ["a promise of earnings", { subject: "Your payment", body: "Stay and you will earn more. Ana" }, "promise"],
+  ["guaranteed results", { subject: "Your payment", body: "Results guaranteed. Ana" }, "promise"],
 ];
 for (const [what, draft, why] of refused) is(`${what}: refused`, readDraft(draft, names), { ok: false, why });
+// An innocent "results" is not a promise (review @cf3a6c1b, LOW): refusing it would cost a use and show nothing.
+is("\"the results of your last payment\" is not a promise", readDraft({ subject: "Your payment", body: "I wanted to check on the results of your last payment. Reply with any question. Ana" }, names).ok, true);
+is("\"no one\" is not a number", readDraft({ subject: "Your payment", body: "No one else needs to do anything. Reply with any question. Ana" }, names).ok, true);
+is("a kind note with \"one\" passes", readDraft({ subject: "Your payment", body: "Just one note from me: your card on file may need a look. Ana" }, names).ok, true);
 is("a store named with a refused word is not refused for its name", readDraft({ subject: "From Free Spirit Yoga", body: "Hi from Free Spirit Yoga. Ana" }, { storeName: "Free Spirit Yoga", creatorName: "Ana" }).ok, true);
 is("no subject: refused", readDraft({ subject: " ", body: "Hi" }, names), { ok: false, why: "shape" });
 is("too long: refused, never cut", readDraft({ subject: "Hi", body: "a".repeat(MAX_DRAFT_BODY + 1) }, names), { ok: false, why: "shape" });
@@ -112,7 +132,11 @@ async function main(): Promise<void> {
   is("paced with the rest of the writing help", /withinEssentialLimit\("ai", store\.sid \|\| store\.handle, AI_PER_MINUTE, 60\)/.test(route), true);
   is("it saves and sends nothing", /saveDraft|sendBroadcast|sendEmail|redisPipeline/.test(route + source), false);
 
+  part("The real route, as the studio calls it");
+  await routeChecks();
+
   part("The screen");
+  const { NextActionDraft } = DraftScreen;
   const button = renderToStaticMarkup(createElement(NextActionDraft, { action: "failed_payments", jobs: NEXT_DRAFT_JOBS }));
   is("a button that says what it does", />Write a draft with AI</.test(button), true);
   is("its cost and that nothing is sent, said beside it", button.includes("Uses one of your store&#x27;s AI uses this month. Nothing is sent: you read it, change it and send it yourself."), true);
@@ -123,7 +147,72 @@ async function main(): Promise<void> {
   is("only the failed payments get the button", (withDraft.match(/Write a draft with AI/g) ?? []).length, 1);
   is("not where the studio does not allow it", /Write a draft with AI/.test(renderToStaticMarkup(createElement(NextActionsPanel, { view }))), false);
   is("no free, no percentage on the screen", /\bfree\b|%/i.test(withDraft), false);
+  for (const bad of [Number.NaN, 0, -1, 1.5]) {
+    const html = renderToStaticMarkup(createElement(NextActionDraft, { action: "failed_payments", jobs: bad }));
+    is(`a cost that is not a whole number of uses (${bad}): no button, never "Uses NaN"`, [/Write a draft with AI/.test(html), /NaN/.test(html)], [false, false]);
+  }
+
+  part("The draft as shown: the AI draft badge and the three checks before it is copied (756 [STN3])");
+  const Ready = (DraftScreen as Record<string, unknown>).NextActionDraftReady as ((props: Record<string, unknown>) => ReturnType<typeof NextActionDraft>) | undefined;
+  const ready = (checks: boolean[]) =>
+    typeof Ready === "function"
+      ? renderToStaticMarkup(createElement(Ready, { id: "d", draft: good, checks, subjectRef: { current: null }, onEdit: () => {}, onToggle: () => {}, onCopy: () => {}, onClose: () => {} }))
+      : "";
+  const fresh = ready([false, false, false]);
+  is("the badge, drawn by the page", fresh.includes(">AI draft<"), true);
+  is("the three checks, as checkboxes", (fresh.match(/type="checkbox"/g) ?? []).length, 3);
+  is("they ask before copying, not saving", [fresh.includes("Before you copy it, check:"), fresh.includes("save it")], [true, false]);
+  is("Copy waits until all three are ticked", /<button[^>]*aria-disabled="true"[^>]*>Copy the draft<\/button>/.test(fresh), true);
+  is("and says why, beside it", fresh.includes("Check the three boxes under the draft, then copy it."), true);
+  const ticked = ready([true, true, true]);
+  is("all three ticked: Copy is available", [/<button[^>]*aria-disabled="true"[^>]*>Copy the draft<\/button>/.test(ticked), />Copy the draft<\/button>/.test(ticked)], [false, true]);
+  is("the draft says nothing was sent or saved", ticked.includes("A draft for you to change. Nothing was sent or saved."), true);
+
+  part("What the screen says about the month's uses");
+  const said = (DraftScreen as Record<string, unknown>).NEXT_DRAFT_SAID as Record<string, string> | undefined;
+  is("off: never \"Nothing was counted\" (a reservation may have been applied unconfirmed)", [typeof said?.off, said?.off?.includes("Nothing was counted")], ["string", false]);
+  is("failed: never \"It used one\" for certain (a job with no provider call is given back)", [typeof said?.failed, /It used one/.test(said?.failed ?? "It used one")], ["string", false]);
+  is("failed: says a try that reached the AI stays counted", said?.failed?.includes("A try that reached the AI stays counted"), true);
   done();
+}
+
+/** The route itself, with a synthetic store: nothing reaches a supplier and the writing help is not set up here. */
+async function routeChecks(): Promise<void> {
+  const { NextRequest } = await import("next/server");
+  const { SESSION_COOKIE, openSession } = await import("@/lib/auth");
+  const { addProduct, claimHandle, ensureStatsId, ensureStoreId, storeForEmail } = await import("@/lib/store");
+  const { POST } = await import("@/app/api/store/next-actions/draft/route");
+  const { store: redis } = await import("./redis-stub");
+  let fetched = 0;
+  globalThis.fetch = (async () => {
+    fetched += 1;
+    return new Response("{}", { status: 404 });
+  }) as typeof fetch;
+  const owner = "ana-draft@example.com";
+  await claimHandle(owner, "anadraft", "Calm Yoga", "");
+  await ensureStatsId(owner);
+  await ensureStoreId(owner);
+  await addProduct(owner, "Monthly Class", "", "15", { interval: "month" } as Parameters<typeof addProduct>[4]);
+  const statsId = (await storeForEmail(owner))!.statsId as string;
+  const cookie = `${SESSION_COOKIE}=${await openSession(owner)}`;
+  const ask = async (body: unknown, signedIn = true) => {
+    const response = await POST(
+      new NextRequest("https://marktmorgen.com/api/store/next-actions/draft", { method: "POST", headers: { "content-type": "application/json", ...(signedIn ? { cookie } : {}) }, body: JSON.stringify(body) }),
+    );
+    return [response.status, ((await response.json()) as { error?: string }).error];
+  };
+  const { aiMonthKey } = await import("@/lib/ai");
+  const monthUses = async () => (await redis.pipeline([["GET", aiMonthKey((await storeForEmail(owner))!, new Date()) ?? "none"]]))[0];
+  is("signed out: refused", await ask({ action: "failed_payments" }, false), [401, "signed_out"]);
+  is("an action with no draft", await ask({ action: "winback" }), [400, "action"]);
+  is("no reading kept: nothing to write about", await ask({ action: "failed_payments" }), [409, "gone"]);
+  await redis.pipeline([["SET", `nl:reading:members:${statsId}`, "{not json"]]);
+  is("a reading that cannot be read: no draft on a guess", await ask({ action: "failed_payments" }), [503, "unknown"]);
+  const numbers = { currency: "usd", mrr: 4_500, paying: 3, trialing: 0, atRisk: 3, atRiskMrr: 4_500, ended30: 0, endedMrr30: 0, churn30: null, trialsEnded: 0, trialsConverted: 0, elsewhere: 0, byProduct: [], complete: true, at: AT };
+  await redis.pipeline([["SET", `nl:reading:members:${statsId}`, JSON.stringify({ at: AT, value: numbers })]]);
+  is("on the list, the writing help not set up: off, before anything is counted", await ask({ action: "failed_payments" }), [400, "off"]);
+  is("no month's use was taken on any of these", await monthUses(), null);
+  is("and nothing reached a supplier", fetched, 0);
 }
 
 void main();

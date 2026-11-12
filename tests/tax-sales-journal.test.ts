@@ -155,7 +155,10 @@ test("the sweep continues handing a paid purchase to its list when observation I
   globalThis.fetch = (async input => {
     const url = new URL(String(input));
     assert.equal(url.hostname, "api.stripe.com");
-    if (url.pathname === "/v1/checkout/sessions") providerPages++;
+    // The pages of completed checkouts, which carry the paid ones the journal observes; the sweep's second walk, of
+    // expired checkouts for reminders and workflows, is counted apart (Claude 5, audit A2: before it, one walk of every
+    // status, so this counted every page; tests/checkout-sweep-complete.test.ts holds both walks' cost).
+    if (url.pathname === "/v1/checkout/sessions" && url.searchParams.get("status") === "complete") providerPages++;
     return Response.json({ data: url.pathname === "/v1/checkout/sessions" ? [{
       ...row(), status: "complete", mode: "payment", created: Math.floor(actualNow / 1000),
       metadata: { store: store.handle, product: product.product.id, news: "yes" },

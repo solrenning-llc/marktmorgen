@@ -6,8 +6,8 @@
  * buyer who closes the tab while Stripe is sending them there never lands,
  * and a checkout that closes unpaid has no page at all. So the five-minute
  * job walks the stores a slice at a time and, for each one that sells, asks
- * the creator's own Stripe account for the checkouts of the last day — one
- * request per hundred — and hands each on:
+ * the creator's own Stripe account for the completed and the expired
+ * checkouts of the last day — one request per hundred — and hands each on:
  *
  *   - a settled one that has not been confirmed gets its confirmation
  *     (lib/purchase-email.ts);
@@ -33,9 +33,12 @@
  * stars out of the average (lib/reviews.ts).
  *
  * Bounded three ways, so it can never run away with the job: a time budget
- * the caller sets, at most three pages of a hundred checkouts per store, and
+ * the caller sets, at most three pages of a hundred checkouts per store in
+ * each of its two walks (the completed checkouts, and the expired ones), and
  * a place in the list of stores kept in Redis, so each run carries on where
- * the last one stopped and every store is reached in turn. Both emails are
+ * the last one stopped and every store is reached in turn. Each walk keeps
+ * its own place too, so a store with more checkouts in a day than one run
+ * reads has them all read in turn (walkDay). Both emails are
  * guarded by their own marks, so a store seen twice is only work, never a
  * second email.
  */
@@ -314,8 +317,108 @@ export async function observeCheckoutTaxPage(store: Store, rows: unknown, value:
     return taxResult("recorded", taxOwn(result, "0") === 2 ? "duplicate" : "confirmed", taxOwn(result, "1") as number);
   } catch { return taxResult("unknown", "storage"); }
 }
-/** At most this many pages of a hundred checkouts are read per store per pass. */
+/**
+ * At most this many pages of a hundred checkouts are read per store per pass in each of its two walks (walkDay):
+ * the completed ones, and the expired ones on a store with reminders or a list. So at most 2 x 3 = 6 list calls each
+ * time a store is swept, 288 runs a UTC day (tests/plan-cost-registry.ts, NOT_A_COST.MAX_PAGES_PER_STORE).
+ */
 export const MAX_PAGES_PER_STORE = 3;
+
+/** The two walks of a store's checkouts: Stripe's own `status` of a Checkout Session, which the list filters on. */
+type WalkKind = "complete" | "expired";
+
+/**
+ * Where a walk of one store's checkouts of the last day left off: the run the walk began (seconds) and the last
+ * session it handled. One key a walk, kept a day (past it, nothing behind the place is in the day any more); keyed by
+ * the Stripe account and the store, so a store that changed accounts, or two stores on one account, never follow
+ * each other's place.
+ */
+const walkKey = (kind: WalkKind, account: string, store: Store) => `nl:sweep:walk:${kind}:${account}:${store.sid || store.handle}`;
+const WALK_SESSION = /^cs_(?:test|live)_[A-Za-z0-9]{10,200}$/;
+/**
+ * A walk that has taken longer than this to reach the end of the day's checkouts is said in the log, every run it
+ * goes on: an order paid in the last part of its checkout's day may then be read late, or leave the day before the
+ * walk reaches it (an hour is twelve runs, at most 3,600 sessions of one kind, when the store is reached every run).
+ */
+const WALK_LATE_SECONDS = 60 * 60;
+
+/**
+ * Walks one store's checkouts of the last day of one `kind`, newest first, at most MAX_PAGES_PER_STORE pages a run,
+ * and carries on next run from where this one stopped, so that every session of the day is read in turn, however
+ * many came after it (audit A2, 9 November 2026: read from the top every run, a paid order behind 300 newer
+ * sessions was never read, so its buyer who closed the tab was never confirmed). At the end of the day's sessions
+ * the place is let go and the next run starts again from the newest. A page is passed over only once it was handled
+ * before the deadline: one cut short by the deadline is read again next run. An order that failed is read again on
+ * the walk's next round, not the next run (it never holds the walk up). Throws, as before, when Stripe cannot be
+ * asked or answers a page that is not a list; a place Stripe no longer knows is let go then, so the next run starts
+ * from the newest instead of failing the same way.
+ */
+async function walkDay(store: Store, kind: WalkKind, since: number, deadline: number, counts: SweepCounts, handle: (rows: SessionRecord[]) => Promise<void>): Promise<void> {
+  const account = store.stripeAccountId as string;
+  const key = walkKey(kind, account, store);
+  const now = Math.floor(Date.now() / 1000);
+  const [saved] = repliesFor(await redisPipeline([["GET", key]]), 1) ?? [undefined];
+  let began = now;
+  let after = "";
+  if (typeof saved === "string") {
+    const [at, id] = saved.split("|");
+    const start = Number(at);
+    // A place in another shape is no place: the walk starts from the newest and writes its own.
+    if (Number.isSafeInteger(start) && start > 0 && start <= now && WALK_SESSION.test(id ?? "")) {
+      began = start;
+      after = id as string;
+    }
+  } else if (saved !== null) {
+    // Not known where the walk was (CX-123 rule 24): it starts from the newest this run, and the run says it failed,
+    // since the older sessions behind the place are not read this run.
+    counts.failed += 1;
+    console.error("the checkout sweep's place in a store's checkouts did not read; this run starts from the newest", store.handle, kind);
+  }
+  const resumed = after !== "";
+  const kept = after;
+  if (resumed && now - began > WALK_LATE_SECONDS) {
+    console.error(
+      "the checkout sweep has not reached the end of a store's checkouts of the day for over an hour: an order paid near the end of its checkout's day may be handled late, or not at all",
+      store.handle, kind, { walkingSeconds: now - began },
+    );
+  }
+  let place = after;
+  let ended = false;
+  try {
+    for (let page = 0; page < MAX_PAGES_PER_STORE && Date.now() < deadline; page += 1) {
+      const query = `/checkout/sessions?limit=100&status=${kind}&created[gte]=${since}${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`;
+      let listed: Record<string, unknown>;
+      try {
+        listed = await onAccount("GET", account, query);
+      } catch (error) {
+        // The place may be a session Stripe no longer lists: let it go, so the next run is not stuck on it.
+        if (page === 0 && resumed) place = "";
+        throw error;
+      }
+      // A page that is not a list is not "no checkouts" (CX-123 rule 24, L6): it stops this store's sweep, said as failed.
+      if (!Array.isArray(listed.data) || (listed.has_more !== true && listed.has_more !== false)) throw new UnknownReplyError("a page of checkouts");
+      const rows = listed.data as SessionRecord[];
+      await handle(rows);
+      // Each step of a page checks the deadline before its next order: a page that ends past it may not be whole,
+      // so the walk does not go past it (time only moves on, so before the deadline here means no step stopped early).
+      if (Date.now() >= deadline) break;
+      const last = rows[rows.length - 1];
+      if (listed.has_more !== true || !last || typeof last.id !== "string" || !WALK_SESSION.test(last.id)) {
+        ended = true;
+        break;
+      }
+      after = last.id;
+      place = last.id;
+    }
+  } finally {
+    // The end of the day's sessions, or a place let go: the next run starts from the newest. Otherwise the place is
+    // kept, with the run the walk began; nothing is written when the walk did not move.
+    const write = ended || place === ""
+      ? (typeof saved === "string" ? ["DEL", key] : null)
+      : place !== kept ? ["SET", key, `${began}|${place}`, "EX", CONFIRM_WITHIN_SECONDS] : null;
+    if (write) await redisPipeline([write]).catch((error) => console.error("keeping the checkout sweep's place failed", store.handle, kind, describe(error)));
+  }
+}
 
 export type SweepCounts = {
   stores: number;
@@ -418,17 +521,9 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
     failedOrders.add(id);
     counts.failed += 1;
   };
-  let after = "";
-  for (let page = 0; page < MAX_PAGES_PER_STORE && Date.now() < deadline; page += 1) {
-    const listed = await onAccount(
-      "GET",
-      store.stripeAccountId as string,
-      `/checkout/sessions?limit=100&created[gte]=${since}${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`,
-    );
-    // A page that is not a list is not "no checkouts" (CX-123 rule 24, L6): it stops this store's sweep, said as failed.
-    if (!Array.isArray(listed.data) || (listed.has_more !== true && listed.has_more !== false)) throw new UnknownReplyError("a page of checkouts");
-    const rows = listed.data as SessionRecord[];
-
+  // The day's completed checkouts, walked page by page across runs (walkDay): every paid order of the day is read,
+  // however many sessions of other kinds came after it (audit A2, 9 November 2026).
+  await walkDay(store, "complete", since, deadline, counts, async (rows) => {
     // Asked in one round trip: which of the paid ones were already confirmed.
     const paid = rows.filter((row) => isSettled(row) && typeof row.id === "string");
     // This is independent of the email's sent mark and cannot hold up an
@@ -592,7 +687,11 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
         }
       }
     }
+  });
 
+  // The day's expired checkouts, walked the same way, for what an abandoned checkout starts: a reminder and the
+  // workflows. Only on a store that has either; open checkouts are never read, there is nothing to do with them yet.
+  if (reminding || store.listId) await walkDay(store, "expired", since, deadline, counts, async (rows) => {
     if (reminding) {
       for (const row of rows) {
         if (Date.now() >= deadline) break;
@@ -616,12 +715,8 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
     if (store.listId && rows.some((row) => row.status === "expired" && row.consent?.promotions === "opt_in") && Date.now() < deadline) {
       await startAbandonedWorkflows(store, rows).catch((error) => console.error("starting abandoned-checkout workflows failed", store.handle, error));
     }
-
-    const last = rows[rows.length - 1];
-    if (listed.has_more !== true || !last || typeof last.id !== "string") break;
-    after = last.id;
-  }
-  // A store with no open payment request left comes off their list, once this pass has confirmed the day's.
+  });
+  // A store with no open payment request left comes off their list (settleStoreList counts the open ones itself).
   if (requesting) await settleStoreList(store.sid).catch(() => undefined);
 }
 

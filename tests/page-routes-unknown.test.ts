@@ -28,6 +28,12 @@ import { POST as sitePage } from "@/app/api/store/site-page/route";
 import { GET as sectionsGet, POST as sectionsPost } from "@/app/api/store/saved-blocks/route";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import { withinOneUtcDay } from "./one-utc-day";
+
+// The checks name the month's count by the month they read; the code reads its own at each call, so a real month
+// end passing mid-file read the new month's 0. The clock stays inside one UTC day
+// (tests/one-utc-day.ts).
+withinOneUtcDay();
 
 const OWNER = "page-reads@example.com";
 const ORIGIN = "https://marktmorgen.com";

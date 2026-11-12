@@ -4,7 +4,7 @@
  * 1. Typed while a rewrite runs: the rewrite that comes back must not overwrite those words.
  * 2. Typed after a rewrite: Undo must not throw those words away by putting back the copy from before the rewrite.
  *
- * The real component runs under a small hook dispatcher (useState, useId, useContext, useRef), re-rendered with the
+ * The real component runs under a small hook dispatcher (useState, useId, useContext, useRef, useEffect), re-rendered with the
  * block its editor holds now, as the page editor re-renders it on every keystroke.
  */
 import * as React from "react";
@@ -33,7 +33,17 @@ function harness(initial: PageBlock) {
     },
     useId() { index++; return "id"; },
     useContext() { return { on: true, left: 10 }; },
+    // As React does: an effect runs after the render that asked for it, again whenever one of its deps changed.
+    useEffect(effect: () => void, deps?: unknown[]) {
+      const i = index++;
+      const prev = slots[i] as unknown[] | undefined;
+      if (!deps || !prev || deps.some((d, n) => !Object.is(d, prev[n]))) {
+        slots[i] = deps;
+        effects.push(effect);
+      }
+    },
   };
+  const effects: (() => void)[] = [];
   function render(): void {
     index = 0;
     const before = internals.H;
@@ -43,6 +53,7 @@ function harness(initial: PageBlock) {
     } finally {
       internals.H = before;
     }
+    for (const effect of effects.splice(0)) effect();
   }
   render();
   const buttons = (): Node[] => {

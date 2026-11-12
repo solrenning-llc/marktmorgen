@@ -1,6 +1,6 @@
 "use client";
 
-import { useContext, useId, useRef, useState } from "react";
+import { useContext, useEffect, useId, useRef, useState } from "react";
 import { Icon } from "@/components/icons";
 import { AI_ALLOWANCE_UNKNOWN, AiOn, allowanceOf } from "@/components/ai-assist";
 import { FILLABLE, REWRITABLE, REWRITE_STYLES, type RewriteStyle, blockText } from "@/lib/block-rewrite-rules";
@@ -43,7 +43,10 @@ export function BlockRewrite({
   const [applied, setApplied] = useState<string | null>(null);
   // The block as the editor holds it now, read when a rewrite comes back.
   const latest = useRef(block);
-  latest.current = block;
+  // Kept current after each render (a ref is never written during render); a rewrite answers long after that.
+  useEffect(() => {
+    latest.current = block;
+  }, [block]);
   const [left, setLeft] = useState(allowanceOf(ai));
   const allowanceId = useId();
   // An allowance that could not be read (null) keeps the buttons off and is said in words, never "0 left".

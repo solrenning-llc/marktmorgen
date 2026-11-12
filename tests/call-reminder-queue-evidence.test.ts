@@ -146,3 +146,22 @@ test("a permanent 404 on a single-session read gives up once the reminder is hou
   assert.deepEqual(counts, { reminded: 0, confirmed: 0, dropped: 1 });
   assert.deepEqual(zrems(), [[late]], "only the hours-late reminder leaves the queue");
 });
+
+// Codex G and Claude 1 on #2508 (LOW): a slot read through an accessor is not data, even when a "value" is found up the
+// prototype chain. The pollution is synthetic, non-enumerable and removed before anything else runs.
+test("an accessor slot is unknown even when the prototype chain has a value", async () => {
+  let getterRuns = 0;
+  const envelope: unknown[] = [];
+  Object.defineProperty(envelope, "0", { get() { getterRuns += 1; return []; }, enumerable: true, configurable: true });
+  reply = envelope;
+  Object.defineProperty(Object.prototype, "value", { value: [], configurable: true, writable: true });
+  let outcome: unknown;
+  try {
+    outcome = await run().then((counts) => counts, (error: unknown) => error);
+  } finally {
+    delete (Object.prototype as { value?: unknown }).value;
+  }
+  assert.ok(outcome instanceof Error && /reminder queue could not be read/.test(outcome.message), "an accessor slot is not a confirmed empty queue");
+  assert.equal(getterRuns, 0);
+  assert.equal(mutations, 0);
+});

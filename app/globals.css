@@ -2688,6 +2688,9 @@ form:has(input[name="pay"][value="plan"]:checked):has(input[data-bump="0"]:check
 .st-title-link {
   color: inherit;
   text-decoration: none;
+  /* A creator's title or name with one long word (a German compound, a run-together name) wraps inside its
+     card instead of running past it and being cut off on a phone (WCAG 1.4.10). */
+  overflow-wrap: anywhere;
   background-image: linear-gradient(currentColor, currentColor);
   background-size: 0% 2px;
   background-position: 0 100%;

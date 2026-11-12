@@ -412,6 +412,24 @@ export class MemoryRedis {
           this.run(["SET", target, value]);
           return 1;
         }
+        // lib/redis-lock.ts FENCED_DEL_MARKED: deleted only while the lock is ours and the record at KEYS[2] is still the
+        // move's (its token, or with none its exact text); nothing otherwise.
+        if (key.startsWith("-- marktmorgen:fenced-del-marked:v1\n") && Number(args[0]) >= 3 && args.length === Number(args[0]) + 4) {
+          const count = Number(args[0]);
+          const [lock, mark] = args.slice(1, 3);
+          const targets = args.slice(3, count + 1);
+          const [token, op, text] = args.slice(count + 1);
+          if (this.run(["GET", lock]) !== token) return 0;
+          const held = this.run(["GET", mark]);
+          if (typeof held !== "string") return 0;
+          let record: unknown = null;
+          try { record = JSON.parse(held); } catch { record = null; }
+          if (!record || typeof record !== "object") return 0;
+          const recordOp = (record as { op?: unknown }).op;
+          if (!(op !== "" ? recordOp === op : recordOp === undefined && text !== "" && held === text)) return 0;
+          for (const target of targets) this.run(["DEL", target]);
+          return 1;
+        }
         if (key.startsWith("-- marktmorgen:fenced-del:v1\n") && Number(args[0]) >= 2 && args.length === Number(args[0]) + 2) {
           const count = Number(args[0]);
           const lock = args[1];
@@ -912,18 +930,26 @@ export class MemoryRedis {
           this.run(["ZADD", open, at, op]);
           return 1;
         }
-        // lib/auth.ts CLEAR_BROKEN_MOVE: each record's place given back, then the records deleted.
-        if (key.startsWith("-- marktmorgen:move-broken-clear:v1\n") && args[0] === "3") {
-          const [, open, ...records] = args;
-          for (const target of records) {
+        // lib/auth.ts CLEAR_BROKEN_MOVE: each record still the move's (its token, or with none its exact text) deleted,
+        // then that move's place given back; another move's record is left with its place (Codex X5 on #2271).
+        if (key.startsWith("-- marktmorgen:move-broken-clear:v2\n") && args[0] === "3" && args.length === 6) {
+          const [, open, first, second, op, text] = args;
+          let gone = 0;
+          for (const target of [first, second]) {
             const held = this.run(["GET", target]);
             if (typeof held !== "string") continue;
             let record: unknown = null;
             try { record = JSON.parse(held); } catch { record = null; }
-            const op = record && typeof record === "object" ? (record as { op?: unknown }).op : undefined;
-            if (typeof op === "string") this.run(["ZREM", open, op]);
+            if (!record || typeof record !== "object") continue;
+            const recordOp = (record as { op?: unknown }).op;
+            const mine = op !== "" ? recordOp === op : recordOp === undefined && text !== "" && held === text;
+            if (mine) {
+              this.run(["DEL", target]);
+              gone += 1;
+            }
           }
-          return this.run(["DEL", ...records]);
+          if (op !== "") this.run(["ZREM", open, op]);
+          return gone;
         }
         // lib/auth.ts NOTE_MOVE_COPY: a move's record written over only where it still carries that move's token.
         if (key.startsWith("-- marktmorgen:move-copy-note:v1\n")) {

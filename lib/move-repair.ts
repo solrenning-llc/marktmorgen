@@ -14,7 +14,7 @@
  * when a move of either is running, or when both addresses hold ways in of
  * the same kind: it never merges two addresses' ways in.
  */
-import { clearBrokenMove, endAllSessions, moveRunning, readBrokenMove } from "@/lib/auth";
+import { type BrokenMoveHeld, brokenMoveFence, clearBrokenMove, endAllSessions, moveRunning, readBrokenMove, readBrokenMoveHeld } from "@/lib/auth";
 import { listPasskeys, movePasskeys, pendingNow, repointPasskeys } from "@/lib/passkeys";
 import { moveTwoStep, twoStepOn } from "@/lib/two-step";
 import { settleDoubledStore, storeForEmail } from "@/lib/store";
@@ -22,16 +22,21 @@ import { settleDoubledStore, storeForEmail } from "@/lib/store";
 /** True when this address holds no broken move any more (repaired now, or there was none). */
 export async function repairMove(email: string): Promise<boolean> {
   // A record that cannot be read exactly is not "no broken move": it is not repaired, and the callers refuse.
-  const broken = await readBrokenMove(email).catch((error: unknown) => (console.error("reading a broken move failed", error), undefined));
+  const broken = await readBrokenMoveHeld(email).catch((error: unknown) => (console.error("reading a broken move failed", error), undefined));
   if (broken === undefined) return false;
   if (!broken) return true;
-  const { from, to, copy } = broken;
+  const { from, to, copy, held } = broken;
   try {
     if ((await moveRunning(from)) || (await moveRunning(to))) return false;
     const [atFrom, atTo] = await Promise.all([storeForEmail(from), storeForEmail(to)]);
     if (!atFrom && !atTo) return false;
-    const home = atFrom && atTo ? await settleDoubledStore(from, to, copy) : atFrom ? from : to;
+    // Every delete of the repair is fenced by the move it read (Codex X5 on #2271): the copy, in settleDoubledStore's
+    // own script; the record, in CLEAR_BROKEN_MOVE's. A repair that runs late, after another repaired this move and a
+    // later one of the same addresses took its place, deletes neither that move's record nor the copy it left.
+    const home = atFrom && atTo ? await settleDoubledStore(from, to, copy, await brokenMoveFence(email, held)) : atFrom ? from : to;
     if (!home) return false;
+    // Nor moves its ways in, nor logs an address out, for a move no longer there.
+    if (!(await stillThisMove(email, held))) return false;
     const away = home === from ? to : from;
     const holdsKeys = async (address: string) => (await listPasskeys(address)).length > 0 || (await pendingNow(address)) !== null;
     if (await holdsKeys(away)) {
@@ -45,12 +50,19 @@ export async function repairMove(email: string): Promise<boolean> {
     // An index a lost answer left on the other address is pointed back at the list's (C3-117).
     await repointPasskeys(home);
     await endAllSessions(away);
-    await clearBrokenMove(from, to);
+    await clearBrokenMove(from, to, held);
     return true;
   } catch (error) {
     console.error("repairing a broken move failed", error);
     return false;
   }
+}
+
+/** Whether the record at `email` is still the move `held` (its token, or its exact text). */
+async function stillThisMove(email: string, held: BrokenMoveHeld): Promise<boolean> {
+  const now = await readBrokenMoveHeld(email);
+  if (!now) return false;
+  return "op" in held ? "op" in now.held && now.held.op === held.op : "text" in now.held && now.held.text === held.text;
 }
 
 /** What a person looking at a broken move needs to see (scripts/move-repair.mjs). */
@@ -78,7 +90,7 @@ export async function describeMove(email: string): Promise<Record<string, unknow
  * with no second step again. Its two addresses are logged out.
  */
 export async function clearBrokenMoveByHand(email: string, confirm: string): Promise<"cleared" | "none" | "confirm" | "split" | "running"> {
-  const broken = await readBrokenMove(email);
+  const broken = await readBrokenMoveHeld(email);
   if (!broken) return "none";
   if (confirm.trim().toLowerCase() !== email.trim().toLowerCase()) return "confirm";
   // Never while a move of either address is running: its own record is this one (app/api/auth/move).
@@ -89,7 +101,8 @@ export async function clearBrokenMoveByHand(email: string, confirm: string): Pro
   });
   const [a, b] = await Promise.all([holds(broken.from), holds(broken.to)]);
   if ((a.store && !a.ways && b.ways) || (b.store && !b.ways && a.ways)) return "split";
-  await clearBrokenMove(broken.from, broken.to);
+  // Only the record looked at: one of a later move is never cleared by a person who looked at another (Codex X5 on #2271).
+  await clearBrokenMove(broken.from, broken.to, broken.held);
   await endAllSessions(broken.from);
   await endAllSessions(broken.to);
   return "cleared";

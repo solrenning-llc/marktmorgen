@@ -49,7 +49,7 @@ import { pointDomain } from "@/lib/domains";
 import { rememberListing } from "@/lib/directory-index";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
-import { type Held, LockBusyError, deleteIfHeldOnly, holdLock, releaseLock, releaseLockStrict, setIfHeld, takeLock } from "@/lib/redis-lock";
+import { type Held, LockBusyError, deleteIfHeldAndMarked, deleteIfHeldOnly, holdLock, releaseLock, releaseLockStrict, setIfHeld, takeLock } from "@/lib/redis-lock";
 import {CONTRACT_ADMISSION_COVERAGE,canonicalFinancialSnapshot} from "@/lib/contract-funding-rules";
 import { type ProductFile } from "@/lib/product-file";
 import {
@@ -2194,6 +2194,23 @@ export type MoveResult =
   | { ok: true; store: Store }
   | { ok: false; reason: "none" | "same" | "taken" };
 
+/** Whether a broken move's record is still the one move's (see deleteIfHeldAndMarked); a reply of any other shape is "no". */
+async function moveStillMarked(fence: { key: string; op: string; text: string }): Promise<boolean> {
+  if (!fence.op && !fence.text) return false;
+  const replies = repliesFor(await redisPipeline([["GET", fence.key]]), 1);
+  const held = replies?.[0];
+  if (typeof held !== "string") return false;
+  let record: unknown;
+  try {
+    record = JSON.parse(held);
+  } catch {
+    return false;
+  }
+  if (!record || typeof record !== "object") return false;
+  const op = (record as { op?: unknown }).op;
+  return fence.op ? op === fence.op : op === undefined && held === fence.text;
+}
+
 /**
  * Moves a store from one sign-in address to another.
  *
@@ -2228,12 +2245,23 @@ export type MoveResult =
  * stays for a person (scripts/move-repair.mjs). Answers the address that
  * keeps it, or null when that cannot be told.
  */
-export async function settleDoubledStore(fromEmail: string, toEmail: string, copy?: string): Promise<string | null> {
+export async function settleDoubledStore(
+  fromEmail: string,
+  toEmail: string,
+  copy?: string,
+  /**
+   * The broken move's record the repair read (lib/auth.ts brokenMoveFence): nothing is written unless it is still
+   * that move's, and the copy is deleted in the same script that checks it again, so a repair that runs late never
+   * settles, nor deletes, what a later move left (Codex X5 on #2271).
+   */
+  fence?: { key: string; op: string; text: string },
+): Promise<string | null> {
   const from = fromEmail.toLowerCase();
   const to = toEmail.toLowerCase();
   const settled = await withStore(from, (a, _saveA, heldA) =>
     withStore(to, async (b, _saveB, heldB): Promise<string | null> => {
       if (!a.handle || a.handle !== b.handle) return null;
+      if (fence && !(await moveStillMarked(fence))) return null;
       const [points] = await redisPipeline([["GET", handleKey(a.handle)]]);
       const home = typeof points === "string" ? points.toLowerCase() : "";
       if (home !== from && home !== to) return null;
@@ -2259,7 +2287,12 @@ export async function settleDoubledStore(fromEmail: string, toEmail: string, cop
         if (back === false) throw new StoreBusyError();
       }
       if (home === to && extras.length) await redisPipeline([["SADD", await accountKey(to), ...extras], ["DEL", await accountKey(from)]]);
-      if (!(await deleteIfHeldOnly(home === from ? heldB : heldA, [await ownerKey(home === from ? to : from)]))) throw new StoreBusyError();
+      const leftHeld = home === from ? heldB : heldA;
+      const leftKey = await ownerKey(home === from ? to : from);
+      if (fence) {
+        // Refused when the lock ran out, or when the record is another move's by now: the copy stays (Codex X5 on #2271).
+        if (!(await deleteIfHeldAndMarked(leftHeld, fence, [leftKey]))) return null;
+      } else if (!(await deleteIfHeldOnly(leftHeld, [leftKey]))) throw new StoreBusyError();
       return home;
     }),
   );

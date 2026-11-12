@@ -135,6 +135,29 @@ export async function deleteIfHeldOnly(held: Held, keys: string[]): Promise<bool
   return strictScript(FENCED_DEL_ONLY, [held.key, ...keys], [held.token]);
 }
 
+/**
+ * Deletes `keys` only while the lock is still ours and the record at `mark.key` is still the one move's (its JSON
+ * `op` is `mark.op`, or, with `mark.op` empty, it carries none and is exactly `mark.text`), in one script; false
+ * otherwise, never a fallback. A repair of a broken move deletes the copy it settles with it, so a late repair never
+ * deletes what a later move left (lib/store.ts settleDoubledStore; Codex X5 on #2271).
+ */
+export async function deleteIfHeldAndMarked(held: Held, mark: { key: string; op: string; text: string }, keys: string[]): Promise<boolean> {
+  if (!keys.length || (!mark.op && !mark.text)) return false;
+  return strictScript(FENCED_DEL_MARKED, [held.key, mark.key, ...keys], [held.token, mark.op, mark.text]);
+}
+
+const FENCED_DEL_MARKED = `-- marktmorgen:fenced-del-marked:v1
+if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end
+local held = redis.call('GET', KEYS[2])
+if not held then return 0 end
+local ok, record = pcall(cjson.decode, held)
+if not ok or type(record) ~= 'table' then return 0 end
+local mine
+if ARGV[2] ~= '' then mine = record.op == ARGV[2] else mine = record.op == nil and ARGV[3] ~= '' and held == ARGV[3] end
+if not mine then return 0 end
+for i = 3, #KEYS do redis.call('DEL', KEYS[i]) end
+return 1`;
+
 /** Runs `work` with the lock at `key` held, and lets go of it after, whatever happens, unless `keepHeld` says to keep it for that result. */
 export async function withLock<T>(
   key: string,

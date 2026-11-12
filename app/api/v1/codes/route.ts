@@ -46,6 +46,8 @@ export async function POST(request: Request) {
   const read = readCodeAsked(body, store.currency);
   if (!read.ok) return apiError(400, read.reason, refusalWords(read, store.currency));
   const { code, off, maxRedemptions, minimum } = read.asked;
+  // One word, one code: never a word the store's codes for returning buyers already have (554 [DS1], unit 2).
+  if (store.returningCodes.some((entry) => entry.code === code)) return apiError(409, "taken", "Your store already has a code for returning buyers with these letters. Choose another.");
   // Two calls to the creator's Stripe account, taken before either is made (lib/api-read-rules.ts, codeMakeWork).
   const refused = await takeMoreApi(store, apiReadUnits(codeMakeWork()));
   if (refused) return refused;

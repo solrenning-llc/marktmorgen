@@ -9,6 +9,9 @@
  *   - a copy that cannot be read, is not in its shape or did not read every membership: each count unknown, never 0;
  *   - no copy kept: nothing read here, nothing shown, nothing said to be missing;
  *   - the members who left are asked only while the come-back email is off;
+ *   - money is said only when the reading's sums hold all of it: the failed payments' money only when no live
+ *     membership is in another currency (those add 0 to the sums), and never for the memberships that ended (they
+ *     include trials that never paid, at their list price);
  *   - the block: a titled section, a list, each action a named link to its screen, the missing numbers said, and
  *     nothing drawn when nothing was read for this person.
  */
@@ -71,7 +74,7 @@ async function main(): Promise<void> {
     is("never a supplier", supplierCalls, 0);
     is("the facts from the copy", read.value, {
       failedPayments: { count: 3, monthly: { amount: 4_500, currency: "usd" }, at: AT },
-      formerMembers: { count: 2, monthly: { amount: 3_000, currency: "usd" }, at: AT },
+      formerMembers: { count: 2, at: AT },
     });
   }
 
@@ -100,8 +103,20 @@ async function main(): Promise<void> {
   await keep("s-odd", { at: AT, value: numbers({ atRisk: -2, endedMrr30: 12.5 }) });
   is("a count that is not whole: that count unknown, the rest kept", await nextFactsOf(shop("s-odd"), { copy: keptMembersCopy, sells }), {
     failedPayments: { count: null, monthly: { amount: 4_500, currency: "usd" }, at: AT },
-    formerMembers: { count: 2, monthly: null, at: AT },
+    formerMembers: { count: 2, at: AT },
   });
+
+  part("Money only when the sums hold all of it");
+  // A USD store with three past-due members at $20, $20 and €50: the sums add 0 for the euro one, so $40 is not
+  // what they pay together. The money is not known; the count stands.
+  await keep("s-eur", { at: AT, value: numbers({ atRisk: 3, atRiskMrr: 4_000, elsewhere: 1 }) });
+  is("a live membership in another currency: the failed payments' money is not known", await nextFactsOf(shop("s-eur"), { copy: keptMembersCopy, sells }), {
+    failedPayments: { count: 3, monthly: null, at: AT },
+    formerMembers: { count: 2, at: AT },
+  });
+  await keep("s-eur-bent", { at: AT, value: numbers({ elsewhere: -1 }) });
+  is("another-currency count unreadable: the money is not known either", (await nextFactsOf(shop("s-eur-bent"), { copy: keptMembersCopy, sells })).failedPayments, { count: 3, monthly: null, at: AT });
+  is("the memberships that ended carry no money (trials that never paid are among them)", "monthly" in ((await nextFactsOf(shop("s-read"), { copy: keptMembersCopy, sells })).formerMembers ?? {}), false);
   is("selling unknowable: nothing asked", await nextFactsOf(shop("s-read"), { copy: keptMembersCopy, sells: () => { throw new Error("bent"); } }), {});
 
   part("The come-back email decides whether the members who left are asked");
@@ -115,7 +130,7 @@ async function main(): Promise<void> {
   const html = renderToStaticMarkup(createElement(NextActionsPanel, { view }));
   is("a section named by its heading", /<section aria-labelledby="next-actions-title"[^>]*><h2 id="next-actions-title"[^>]*>Do this next<\/h2>/.test(html), true);
   is("an ordered list, money at risk first", [...html.matchAll(/data-next-action="([a-z_]+)"/g)].map((m) => m[1]), ["failed_payments", "winback"]);
-  is("the count in words", html.includes("3 members&#x27; latest payment failed, and Stripe is trying again."), true);
+  is("the count in words", html.includes("The latest payment of 3 members failed, and Stripe is trying again."), true);
   is("each a link named by where it goes, to its screen", [...html.matchAll(/<a[^>]*href="([^"]+)"[^>]*>([^<]+)<\/a>/g)].map((m) => [m[1], m[2]]), [["/studio/memberships", "See your membership numbers"], ["#winback-title", "Set up the come-back email"]]);
   is("each link the size of a button (44 px, lib: .btn-sm)", (html.match(/class="btn btn-secondary btn-sm mt-3"/g) ?? []).length, 2);
   is("where each number comes from and when", html.includes("From your membership numbers, read from your Stripe account. Counted November 10, 2026 (UTC)."), true);

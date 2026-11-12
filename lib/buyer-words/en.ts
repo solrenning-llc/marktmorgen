@@ -218,8 +218,10 @@ export const en = {
   whoAnswers: (store: string) =>
     `${store} is the seller and is responsible for what you buy, for refunds and for any right you have to cancel. Marktmorgen hosts the store's pages and is not a party to the sale.`,
   noPaymentsTitle: "This store cannot take payments yet.",
-  noPaymentsBody: (store: string) => `The prices above are real, but nothing here can charge a card. To buy, write to ${store} directly.`,
-  noPaymentsBodyOne: (store: string) => `The price above is real, but nothing here can charge a card. To buy, write to ${store} directly.`,
+  noPaymentsBody: "The prices above are real, but nothing here can charge a card.",
+  noPaymentsBodyOne: "The price above is real, but nothing here can charge a card.",
+  /** The way to the contact form on the store page, shown beside "cannot take payments" only while that form is open. */
+  noPaymentsWrite: (store: string) => `Write to ${store}`,
 
   // ---- The store page ----------------------------------------------------------------
   notices: {

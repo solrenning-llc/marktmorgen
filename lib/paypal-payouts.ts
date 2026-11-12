@@ -235,8 +235,25 @@ export function payableLines(book: Book, away: Set<string>): BatchLine[] {
   return owedLines(book).filter((line) => !away.has(line.affiliate.id));
 }
 
-/** The address a line is paid to, as the body sends it. */
-const receiverOf = (line: BatchLine) => payAddress(line.affiliate).slice(0, 127);
+/**
+ * Of those, who a PayPal batch can pay: an affiliate whose PayPal address is longer than PayPal's receiver field
+ * holds (PAYPAL_RECEIVER_MAX) is left out of every batch, never sent under a cut address. They stay owed, never on
+ * their way, and the payout file (lib/affiliate-payouts.ts), which carries the address whole, can pay them.
+ */
+export function paypalPayableLines(book: Book, away: Set<string>): BatchLine[] {
+  return payableLines(book, away).filter(paypalCanReceive);
+}
+
+/** The most characters PayPal's receiver field holds (payments_payouts_batch_v1, payout_item receiver: maxLength 127). */
+export const PAYPAL_RECEIVER_MAX = 127;
+/**
+ * The address a line is paid to, as the body sends it: whole, never cut. An address cut to PayPal's length is
+ * another inbox (".store.com.br" cut to ".store.com" is another domain's), so the money would go to somebody else
+ * and the book would say "paid" once PayPal reported it.
+ */
+const receiverOf = (line: BatchLine) => payAddress(line.affiliate);
+/** Whether PayPal can take this line's address as a receiver at all: one longer than it holds is never sent. */
+const paypalCanReceive = (line: BatchLine) => receiverOf(line).length <= PAYPAL_RECEIVER_MAX;
 /**
  * Its fingerprint, kept with a batch on its way instead of the address (review of Codex H2 on #2681): an HMAC
  * under a key derived from the server's own secret, so it cannot be turned back by guessing addresses (Revisor 2's
@@ -378,7 +395,7 @@ export async function payWithPayPal(store: Store): Promise<PayResult> {
       const book = await readBook(store);
       // What is owed is not known while refunds could not be read from Stripe.
       if (!book.refundsChecked) return { ok: false, reason: "refunds" };
-      const lines = payableLines(book, await onTheirWay(store));
+      const lines = paypalPayableLines(book, await onTheirWay(store));
       if (!lines.length) return { ok: false, reason: "nothing" };
       const auth = await bearer(store);
       if (!auth) return { ok: false, reason: "reconnect" };

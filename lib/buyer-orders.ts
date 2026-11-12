@@ -516,10 +516,15 @@ function deliveryOf(product: Listing, optionId: string | undefined): { delivery:
 }
 
 type Row = Record<string, unknown>;
-type Listed = { data?: unknown };
 
-function rows(listed: Listed): Row[] {
-  return Array.isArray(listed.data) ? (listed.data as Row[]) : [];
+/**
+ * The rows of one page of a Stripe list, read in its exact shape (readStripePage): a page that is not one throws
+ * StripeListUnreadable, as a failed request does, so the list says it could not load, never that the address bought
+ * nothing (rule 24; Claude 5, round 30). A row with no id it can read is left out, as it always was: nothing can be
+ * handed over under it.
+ */
+function rows(listed: unknown): Row[] {
+  return readStripePage(listed).rows;
 }
 
 /** Whether Stripe says this charge was given back in full: the shared rule (lib/refunds.ts). */
@@ -903,7 +908,7 @@ async function purchaseFromImported(store: Store, statsId: string, email: string
 async function oneClickList(account: string, customer: string): Promise<Row[]> {
   const query = new URLSearchParams({ customer, limit: "50" });
   query.append("expand[]", "data.latest_charge");
-  const listed = (await onAccount("GET", account, `/payment_intents?${query}`)) as Listed;
+  const listed: unknown = await onAccount("GET", account, `/payment_intents?${query}`);
   const created = (row: Row) => (typeof row.created === "number" ? row.created : 0);
   // One order for every reading, so a batch that resumes a customer's list after its first n resumes at the same one.
   return rows(listed).sort((a, b) => created(b) - created(a) || String(a.id).localeCompare(String(b.id)));

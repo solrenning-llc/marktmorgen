@@ -97,6 +97,35 @@ export class MemoryRedis {
     return made;
   }
 
+  /**
+   * EXPIRE, PEXPIRE and EXPIREAT as Redis 7 answers them (redis.io/docs/latest/commands/expire): NX sets an expiry only
+   * on a key that has none, XX only on one that has one, GT only when the new one is later (no expiry counts as never,
+   * so never later) and LT only when it is earlier (so always, on a key with none); 0 and nothing changed otherwise. A
+   * time already past deletes the key and answers 1. Before, every option was ignored and the expiry always moved, so a
+   * fixed window kept with EXPIRE NX (lib/podcast-access.ts, lib/store-readings.ts, lib/calendar-sync.ts,
+   * lib/plan-withdrawal.ts) slid forward on every use here, never on Redis (Claude 7, Redis race hunt).
+   */
+  private expireAt(key: string, ends: number, options: string[]): number {
+    const flags = options.map((o) => o.toUpperCase());
+    if (flags.some((f) => !["NX", "XX", "GT", "LT"].includes(f))) throw new Error("ERR Unsupported option " + options.join(" "));
+    if (flags.includes("NX") && flags.length > 1) throw new Error("ERR NX and XX, GT or LT options at the same time are not compatible");
+    if (flags.includes("GT") && flags.includes("LT")) throw new Error("ERR GT and LT options at the same time are not compatible");
+    if (!Number.isFinite(ends)) throw new Error("ERR value is not an integer or out of range");
+    if (!this.data.has(key)) return 0;
+    const current = this.until.get(key);
+    if (flags.includes("NX") && current !== undefined) return 0;
+    if (flags.includes("XX") && current === undefined) return 0;
+    if (flags.includes("GT") && (current === undefined || ends <= current)) return 0;
+    if (flags.includes("LT") && current !== undefined && ends >= current) return 0;
+    if (ends <= this.now()) {
+      this.data.delete(key);
+      this.until.delete(key);
+      return 1;
+    }
+    this.until.set(key, ends);
+    return 1;
+  }
+
   /** Runs one command, the way redisPipeline runs each of its own. */
   run(command: (string | number)[]): unknown {
     const [rawName, ...rest] = command;
@@ -1564,9 +1593,7 @@ export class MemoryRedis {
         return "OK";
       }
       case "EXPIRE":
-        if (!this.data.has(key)) return 0;
-        this.until.set(key, this.now() + Number(args[0]) * 1000);
-        return 1;
+        return this.expireAt(key, this.now() + Number(args[0]) * 1000, args.slice(1));
       case "TTL": {
         if (!this.data.has(key)) return -2;
         const ends = this.until.get(key);
@@ -1574,13 +1601,9 @@ export class MemoryRedis {
         return Math.max(0, Math.ceil((ends - this.now()) / 1000));
       }
       case "PEXPIRE":
-        if (!this.data.has(key)) return 0;
-        this.until.set(key, this.now() + Number(args[0]));
-        return 1;
+        return this.expireAt(key, this.now() + Number(args[0]), args.slice(1));
       case "EXPIREAT":
-        if (!this.data.has(key)) return 0;
-        this.until.set(key, Number(args[0]) * 1000);
-        return 1;
+        return this.expireAt(key, Number(args[0]) * 1000, args.slice(1));
       case "PEXPIRETIME": {
         // When the key ends, in ms since the epoch: -1 for none, -2 for a key that is not there (lib/backup-export.ts).
         if (!this.data.has(key)) return -2;

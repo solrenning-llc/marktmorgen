@@ -10,8 +10,11 @@
  * - a two-step login that was read is drawn whole, so the reset notice's
  *   "press Cancel under Two-step login" always has its Cancel button, and it
  *   never says "There is no recovery address" when the address was unread.
- * The page still renders; with an address and nothing kept, they read as off
- * and none as before.
+ * Nor does the rest of the page: the "Keep a way back in" step is marked done only
+ * when its tick is known, and is otherwise listed as could not be checked (LOW 3,
+ * tests/studio-passkeys-unread.test.ts), and the app's code is not offered while
+ * two-step login is unread. The page still renders; with an address and nothing kept,
+ * they read as off and none as before.
  */
 import { readFileSync } from "node:fs";
 import { createElement } from "react";
@@ -49,7 +52,7 @@ is("two places show the managers", [...page.matchAll(/<RecoveryAddressManager /g
 is("each recovery manager gives way only to its own unread read", page.split("{recoveryRead === null ? <RecoveryAddressUnread /> : <RecoveryAddressManager shown={recoveryShown} />}").length - 1, 2);
 is(
   "each two-step manager is unread only on its own read, and is told when the address was unread",
-  page.split("<TwoStepManager on={twoStep.on} codesLeft={twoStep.codesLeft} reset={lockedTill > 0 ? 0 : twoStep.reset} backup={twoStep.backup || recoveryShown} recoveryUnknown={recoveryRead === null} fresh={freshLogin} locked={lockedTill > 0} unread={twoStepRead === null} />").length - 1,
+  page.split("<TwoStepManager on={twoStep.on} codesLeft={twoStep.codesLeft} reset={lockedNow ? 0 : twoStep.reset} backup={twoStep.backup || recoveryShown} recoveryUnknown={recoveryRead === null} fresh={freshLogin} locked={lockedNow} lockUnknown={lockUnread} unread={twoStepRead === null} />").length - 1,
   2,
 );
 is("one way only to say two-step login is unread (main's `unread`, no second component)", [page.includes("TwoStepUnread"), "TwoStepUnread" in parts, "TWO_STEP_UNREAD" in parts], [false, false, false]);
@@ -73,6 +76,11 @@ is("off, address unread: no turn-on that asks for an address that may exist", [o
 const onKnown = render(createElement(Manager, { ...base, on: true, reset: 0, recoveryUnknown: false }));
 const offKnown = render(createElement(Manager, { ...base, on: false, reset: 0, recoveryUnknown: false }));
 is("control, address read as none: said, and the turn-on asks for one", [onKnown.includes("There is no recovery address"), offKnown.includes("Turn on two-step login"), offKnown.includes('id="two-step-backup"')], [true, true, true]);
+
+part("nor anywhere else on the page");
+is("'Keep a way back in' is known only from a way back that was read, or both read as none", page.includes("const recoveryKnown = Boolean(recoveryRead) || passkeys.length > 0 || (recoveryRead !== null && passkeysRead !== null);"), true);
+is("it is marked done only when known, and otherwise marked unknown", page.includes('done: recoveryKnown && (Boolean(recoveryShown) || passkeys.length > 0), unknown: !recoveryKnown,'), true);
+is("the app's code is offered only when two-step login and this browser's lock were read", /\{store && twoStepRead !== null && !lockUnread && showAppCodeInvite\(/.test(page), true);
 
 part("with no email, they still read as off and none");
 is("no email still reads as off and none", [page.includes('Promise.resolve({ on: false, since: 0, codesLeft: 0, reset: 0, backup: "" })'), page.includes(': Promise.resolve(""),')], [true, true]);

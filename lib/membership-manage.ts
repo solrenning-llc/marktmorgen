@@ -146,8 +146,6 @@ export function sellsMemberships(store: Store): boolean {
   return sellsAny(store, "recurring");
 }
 
-type Listed = { data?: unknown };
-
 /**
  * Every one of the creator's customers behind an address that has a membership of this store still running, the
  * newest membership's first; empty when there is none. Every checkout makes a new customer, so a member who bought
@@ -535,15 +533,31 @@ export function endsAtOf(sub: SubRow): number | null {
   return typeof sub.current_period_end === "number" ? sub.current_period_end : 0;
 }
 
-/** The live memberships of this store held by one of the creator's customers. */
+/**
+ * The live memberships of this store held by one of the creator's customers.
+ *
+ * Read whole or not at all (rule 24; Claude 5, round 30): a page that is not a
+ * Stripe list in its exact shape (readStripePage), a membership it cannot read
+ * (its id, status or metadata), or more after this page throws, as a failed
+ * request does. Every caller looks a membership up in this list, and a list
+ * that is not whole cannot say one is not there: the page then shows Stripe's
+ * own page to manage them, and an action ends in its error, never in "gone".
+ */
 export async function subsOf(store: Store, grant: Grant): Promise<SubRow[]> {
   const handles = saleHandles(store);
-  const listed = (await onAccount(
+  const listed: unknown = await onAccount(
     "GET",
     grant.a,
     `/subscriptions?customer=${encodeURIComponent(grant.c)}&status=all&limit=20`,
-  )) as Listed;
-  const rows = Array.isArray(listed.data) ? (listed.data as SubRow[]) : [];
+  );
+  const page = readStripePage(
+    listed,
+    (row) => typeof ownField(row, "status") === "string" && plainObject(ownField(row, "metadata")),
+    SUB_PATTERN,
+  );
+  if (page.unreadable > 0) throw new StripeListUnreadable("a member's memberships, a row");
+  if (page.hasMore) throw new StripeListUnreadable("a member's memberships, more than one page");
+  const rows = page.rows as SubRow[];
   return rows.filter(
     (sub) =>
       typeof sub.id === "string" &&

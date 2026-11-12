@@ -157,6 +157,7 @@ export const fr: BuyerWords = {
   unitSaving: (percent) => `soit ${percent}\u00a0% d’économie`,
   chooseOptionFor: (title) => `Choisissez une option pour ${title}`,
   chooseOne: "Choisissez-en une",
+  optionFromLink: (label) => `Vous venez pour ${label}, cette option est donc choisie ci-dessous. Vous pouvez en choisir une autre.`,
   recommended: "Recommandé",
   recommendedAfter: " (recommandé)",
   howToPayFor: (title) => `Comment payer ${title}`,
@@ -204,6 +205,7 @@ export const fr: BuyerWords = {
     busy: { title: "Quelqu'un est en train de l'acheter", body: "Rien n'a été débité. Cliquez de nouveau sur acheter dans un instant." },
     slow: { title: "Beaucoup de tentatives en quelques minutes", body: "Rien n'a été débité. Patientez quelques minutes, puis cliquez de nouveau sur acheter." },
     error: { title: "La page de paiement n'a pas pu s'ouvrir", body: "Rien n'a été débité. Réessayez dans un instant." },
+    nocharges: { title: "Cette boutique ne peut pas accepter de paiements par carte pour le moment", body: "Rien n'a été débité. Réessayer ne fonctionnera pas tant que la boutique n'aura pas réglé le problème." },
     paused: { title: "Cette boutique ne prend pas de nouvelles commandes pour le moment", body: "Rien n'a été débité. Les nouvelles commandes rouvrent au début du mois prochain, ou avant." },
     "paypal-declined": {
       title: "PayPal n'a pas accepté le paiement",

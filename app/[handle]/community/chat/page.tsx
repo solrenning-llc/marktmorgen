@@ -74,7 +74,7 @@ export default async function CommunityChatPage({ params }: Params) {
         <p className="mb-4">
           <Link href={home} className="cm-quiet-link text-sm font-semibold underline underline-offset-4">{w.backToFeed}</Link>
         </p>
-        <h1 className="font-display text-2xl font-semibold tracking-[-0.02em]">{w.theRoom}</h1>
+        <h1 id="room-title" className="font-display text-2xl font-semibold tracking-[-0.02em]">{w.theRoom}</h1>
         <p className="st-muted mt-1 text-sm">
           {w.roomIntro}
         </p>

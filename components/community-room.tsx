@@ -373,9 +373,19 @@ export function CommunityRoom({
 
   return (
     <div className="mt-5">
+      {/*
+        A polite log: what arrives while the room is open is read out after
+        whatever the reader is doing, one message at a time (additions only,
+        never the whole history, and never on the first drawing). Focus stays
+        where it is. Its name is the page's own heading, id "room-title" on the chat page.
+      */}
       <ul
         ref={list}
         className="cm-room"
+        role="log"
+        aria-live="polite"
+        aria-relevant="additions"
+        aria-labelledby="room-title"
         onScroll={(e) => {
           const box = e.currentTarget;
           atBottom.current = box.scrollHeight - box.scrollTop - box.clientHeight < 60;

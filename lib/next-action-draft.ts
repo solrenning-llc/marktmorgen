@@ -45,6 +45,8 @@ export async function writeNextActionDraft(store: Store, id: unknown, now = Date
   if (count === null) return { ok: false, reason: "unknown" };
   if (!count) return { ok: false, reason: "gone" };
   const names = { storeName: store.name, creatorName: store.mail?.fromName || store.name };
+  // English on purpose, whatever the store's language: readDraft's check reads English words (offers, promises,
+  // pressure, numbers in words), and a draft in another language would pass it unread. The creator changes the words.
   const request = draftRequest(id, { ...names, rules: writingRules("English") });
   if (!request || !fitsDraftCall(request)) return { ok: false, reason: "notes" };
   return deps.count(

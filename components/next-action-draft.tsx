@@ -1,20 +1,27 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
+import { type RefObject, useEffect, useId, useRef, useState } from "react";
+import { AiDraftReview } from "@/components/ai-draft-review";
 import { toast } from "@/components/toast";
+import { firstUnchecked, freshChecks, reviewDone } from "@/lib/ai-draft-review";
 import type { NextActionId } from "@/lib/next-actions-rules";
 
 /**
  * "Write a draft with AI" under one "Do this next" action (484 [IT1] complement WG, unit 3): only when pressed, the
  * writing help drafts the email (app/api/store/next-actions/draft) and it comes back into two fields the creator can
- * change, with a button to copy it. Nothing is saved and nothing is sent from here, and the screen says so. Focus
- * goes to the subject once the draft is there, and back to the button if it is closed (2.4.3); the outcome is said
- * in a polite live region; a button in use is aria-disabled, never disabled, so focus stays on it.
+ * change, with a button to copy it. Nothing is saved and nothing is sent from here, and the screen says so. The draft
+ * is shown under the "AI draft" badge and the three checks every draft the writing help fills in gets
+ * (lib/ai-draft-review.ts, 756 [STN3]); "Copy the draft" waits until all three are ticked, because a copied draft
+ * leaves the studio and its save hold. Focus goes to the subject once the draft is there, and back to the button if
+ * it is closed (2.4.3); the outcome is said in a polite live region; a button in use or waiting is aria-disabled,
+ * never disabled, so focus stays on it. The screen never says more than the server knows about the month's uses.
  */
-const SAID: Record<string, string> = {
-  off: "The writing help is not available for your store right now. Nothing was counted.",
+export const NEXT_DRAFT_SAID: Record<string, string> = {
+  // "off" also follows a month's use whose reservation could not be confirmed (lib/ai.ts, counted): say nothing about it.
+  off: "The writing help is not available for your store right now, so no draft was written.",
   used: "Your store has used this month's AI uses. They start again with your next month.",
-  failed: "The draft could not be written just now. It used one of this month's AI uses. Try again in a moment.",
+  // A try that reached the provider stays counted; one that did not is given back (lib/ai.ts, counted).
+  failed: "The draft could not be written just now. A try that reached the AI stays counted in this month's AI uses; one that did not is given back. Try again in a moment.",
   notes: "This draft could not be prepared. Nothing was counted.",
   unknown: "The numbers behind this could not be read just now, so no draft was written. Reload the page in a moment.",
   gone: "This no longer needs you: the numbers changed since the page opened. Reload the page.",
@@ -23,12 +30,70 @@ const SAID: Record<string, string> = {
   action: "This action has no draft.",
 };
 
+/** Why "Copy the draft" waits. */
+export const NEXT_DRAFT_COPY_HOLD = "Check the three boxes under the draft, then copy it.";
+
+type Draft = { subject: string; body: string };
+
+/** The draft as shown: its two fields, the AI draft badge and checks, and Copy waiting until they are ticked. */
+export function NextActionDraftReady({
+  id,
+  draft,
+  checks,
+  subjectRef,
+  onEdit,
+  onToggle,
+  onCopy,
+  onClose,
+}: {
+  id: string;
+  draft: Draft;
+  checks: readonly boolean[];
+  subjectRef: RefObject<HTMLInputElement | null>;
+  onEdit: (draft: Draft) => void;
+  onToggle: (index: number, ticked: boolean) => void;
+  onCopy: () => void;
+  onClose: () => void;
+}) {
+  const checked = reviewDone(checks);
+  return (
+    <div className="mt-2 space-y-3">
+      <p className="text-sm font-semibold text-ink">A draft for you to change. Nothing was sent or saved.</p>
+      <div>
+        <label htmlFor={`${id}-subject`} className="field-label">Subject</label>
+        <input ref={subjectRef} id={`${id}-subject`} className="field mt-1" value={draft.subject} onChange={(e) => onEdit({ ...draft, subject: e.target.value })} />
+      </div>
+      <div>
+        <label htmlFor={`${id}-body`} className="field-label">Email</label>
+        <textarea id={`${id}-body`} className="field mt-1" rows={8} value={draft.body} onChange={(e) => onEdit({ ...draft, body: e.target.value })} />
+      </div>
+      <AiDraftReview checks={checks} onToggle={onToggle} act="copy" />
+      <p className="text-sm text-ink-soft">Send it to each member yourself, from your own email. Check the words first: they were written by AI.</p>
+      <div className="flex flex-wrap gap-3">
+        <button type="button" className="btn btn-secondary btn-sm" aria-disabled={!checked} aria-describedby={checked ? undefined : `${id}-hold`} onClick={onCopy}>
+          Copy the draft
+        </button>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>
+          Close the draft
+        </button>
+      </div>
+      {checked ? null : (
+        <p id={`${id}-hold`} className="text-sm text-ink-soft">
+          {NEXT_DRAFT_COPY_HOLD}
+        </p>
+      )}
+    </div>
+  );
+}
+
 export function NextActionDraft({ action, jobs }: { action: NextActionId; jobs: number }) {
   const id = useId();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [live, setLive] = useState("");
-  const [draft, setDraft] = useState<{ subject: string; body: string } | null>(null);
+  const [draft, setDraft] = useState<Draft | null>(null);
+  const [checks, setChecks] = useState<boolean[]>(freshChecks);
+  const box = useRef<HTMLDivElement>(null);
   const subject = useRef<HTMLInputElement>(null);
   const opener = useRef<HTMLButtonElement>(null);
   const focusNext = useRef<"subject" | "opener" | null>(null);
@@ -39,6 +104,9 @@ export function NextActionDraft({ action, jobs }: { action: NextActionId; jobs: 
     if (next === "subject") subject.current?.focus();
     if (next === "opener") opener.current?.focus();
   }, [draft]);
+
+  // A cost that is not a whole number of uses is not known: the server refuses it ("notes"), so no button is offered.
+  if (!Number.isSafeInteger(jobs) || jobs <= 0) return null;
 
   async function write() {
     if (busy) return;
@@ -51,11 +119,12 @@ export function NextActionDraft({ action, jobs }: { action: NextActionId; jobs: 
       const value = answer.value;
       if (answer.ok === true && value && typeof value.subject === "string" && typeof value.body === "string") {
         focusNext.current = "subject";
+        setChecks(freshChecks());
         setDraft({ subject: value.subject, body: value.body });
         setLive("The draft is ready below. Nothing was sent.");
       } else {
         setLive("");
-        setError(SAID[answer.error ?? ""] ?? SAID.failed);
+        setError(NEXT_DRAFT_SAID[answer.error ?? ""] ?? NEXT_DRAFT_SAID.failed);
       }
     } catch {
       setLive("");
@@ -67,6 +136,13 @@ export function NextActionDraft({ action, jobs }: { action: NextActionId; jobs: 
 
   async function copy() {
     if (!draft) return;
+    if (!reviewDone(checks)) {
+      setError(NEXT_DRAFT_COPY_HOLD);
+      const left = firstUnchecked(checks);
+      box.current?.querySelectorAll<HTMLInputElement>("[data-ai-review] input[type=checkbox]")[left]?.focus();
+      return;
+    }
+    setError("");
     try {
       await navigator.clipboard.writeText(`${draft.subject}\n\n${draft.body}`);
       toast("Draft copied.");
@@ -76,7 +152,7 @@ export function NextActionDraft({ action, jobs }: { action: NextActionId; jobs: 
   }
 
   return (
-    <div className="mt-3">
+    <div ref={box} className="mt-3">
       {draft ? null : (
         <>
           <button ref={opener} type="button" className="btn btn-ghost btn-sm" aria-disabled={busy} aria-describedby={`${id}-cost`} onClick={() => void write()}>
@@ -88,33 +164,23 @@ export function NextActionDraft({ action, jobs }: { action: NextActionId; jobs: 
         </>
       )}
       {draft ? (
-        <div className="mt-2 space-y-3">
-          <p className="text-sm font-semibold text-ink">A draft for you to change. Nothing was sent or saved.</p>
-          <div>
-            <label htmlFor={`${id}-subject`} className="field-label">Subject</label>
-            <input ref={subject} id={`${id}-subject`} className="field mt-1" value={draft.subject} onChange={(e) => setDraft({ ...draft, subject: e.target.value })} />
-          </div>
-          <div>
-            <label htmlFor={`${id}-body`} className="field-label">Email</label>
-            <textarea id={`${id}-body`} className="field mt-1" rows={8} value={draft.body} onChange={(e) => setDraft({ ...draft, body: e.target.value })} />
-          </div>
-          <p className="text-sm text-ink-soft">Send it to each member yourself, from your own email. Check the words first: they were written by AI.</p>
-          <div className="flex flex-wrap gap-3">
-            <button type="button" className="btn btn-secondary btn-sm" onClick={() => void copy()}>
-              Copy the draft
-            </button>
-            <button
-              type="button"
-              className="btn btn-ghost btn-sm"
-              onClick={() => {
-                focusNext.current = "opener";
-                setDraft(null);
-              }}
-            >
-              Close the draft
-            </button>
-          </div>
-        </div>
+        <NextActionDraftReady
+          id={id}
+          draft={draft}
+          checks={checks}
+          subjectRef={subject}
+          onEdit={setDraft}
+          onToggle={(index, ticked) => {
+            setChecks((was) => was.map((value, at) => (at === index ? ticked : value)));
+            if (error === NEXT_DRAFT_COPY_HOLD) setError("");
+          }}
+          onCopy={() => void copy()}
+          onClose={() => {
+            focusNext.current = "opener";
+            setError("");
+            setDraft(null);
+          }}
+        />
       ) : null}
       <p className="sr-only" role="status" aria-live="polite">{live}</p>
       {error ? <p className="notice notice-error mt-2" role="alert">{error}</p> : null}

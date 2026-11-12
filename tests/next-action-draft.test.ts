@@ -68,10 +68,11 @@ const refused: [string, Record<string, string>, string][] = [
   ["a link", { subject: "Your payment", body: "Go to www.example.com now. Ana" }, "link"],
   ["free", { subject: "A free month", body: "Hi. Ana" }, "free"],
   ["an offer", { subject: "Your payment", body: "Here is a coupon for you. Ana" }, "offer"],
-  ["a promise", { subject: "Your payment", body: "Stay for the results. Ana" }, "promise"],
+  ["a promise", { subject: "Your payment", body: "Stay and you will see results. Ana" }, "promise"],
   ["pressure", { subject: "Your payment", body: "Please act now or lose access. Ana" }, "pressure"],
   // Numbers written as words are numbers too (review @3cec49fe, LOW 3), and a deadline or a threat in words is pressure.
-  ["a number in words", { subject: "Your payment", body: "Please update your card within three days. Ana" }, "number"],
+  ["a number in words", { subject: "Your payment", body: "Thank you for three good years with us. Ana" }, "number"],
+  ["a deadline with a number in words", { subject: "Your payment", body: "Please update your card within three days. Ana" }, "pressure"],
   ["a number in words, capitalised", { subject: "Twenty members", body: "Hi. Ana" }, "number"],
   ["a threat to end the membership", { subject: "Your payment", body: "Please update your card or your membership will end. Ana" }, "pressure"],
   ["a cancellation threat", { subject: "Your payment", body: "Otherwise your membership will be cancelled. Ana" }, "pressure"],

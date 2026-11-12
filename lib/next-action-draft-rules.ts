@@ -12,8 +12,10 @@
  *     ceiling reserved before the fetch by lib/ai.ts (askModel, lib/ai-spend.ts). A request longer than its bound is
  *     refused before anything is counted; a price not known refuses (never zero).
  *   - Honest: the model gets the store's name and the creator's name, never a count, an amount or a person. The
- *     draft is refused when it holds a number that is not in those names, a percentage, a price, a link, "free",
- *     an offer, a promise of a result, or pressure.
+ *     draft is refused when it holds a number that is not in those names (in digits, or in words from "two" up), a
+ *     percentage, a price, a link, "free", an offer, a promise of a result, or pressure (a deadline, a day to act by,
+ *     or a threat that the membership will end). The checks read English words, which is why the draft is asked in
+ *     English (lib/next-action-draft.ts).
  *   - Nothing is saved and nothing is sent: the draft comes back to the screen for the creator to change and send.
  */
 import { type AiCallBound, jobsForCall } from "@/lib/funnel-ai-rules";
@@ -66,6 +68,13 @@ function oneLine(raw: unknown, max: number): string {
   return typeof raw === "string" ? raw.replace(/\s+/g, " ").trim().slice(0, max) : "";
 }
 
+/**
+ * Numbers written as words. "One" is left out: "no one", "the one on file" and "one note" are not counts, and the
+ * instructions already ask for no number.
+ */
+const NUMBER_WORDS =
+  /\b(two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundreds?|thousands?|millions?|dozens?|half|twice|once again)\b/i;
+
 /** What a draft may not say. */
 const REFUSED: readonly [RegExp, string][] = [
   [/%|\bper ?cent\b/i, "percentage"],
@@ -73,8 +82,12 @@ const REFUSED: readonly [RegExp, string][] = [
   [/https?:\/\/|www\.|\b[a-z0-9-]+\.(com|net|org|io|co)\b/i, "link"],
   [/\bfree\b/i, "free"],
   [/\b(discount|coupon|deal|offer|sale|bonus|gift)\b/i, "offer"],
-  [/\b(guarantee[sd]?|results?|earn|profit|double|triple)\b/i, "promise"],
-  [/\b(urgent|hurry|act now|last chance|deadline|today only|right away|immediately|before it'?s too late|expires?)\b/i, "pressure"],
+  // A promise of a result, not the word "results": "the results of your last payment" promises nothing.
+  [/\b(guarantee[sd]?|guaranteed results?|results? guaranteed|you('ll| will) (earn|make|see|get)|earn(ings|ed)?|profits?|double your|triple your)\b/i, "promise"],
+  [
+    /\b(urgent|hurry|act now|last chance|deadline|today only|right away|immediately|before it'?s too late|expires?|soon|asap|within (a|an|the|one|\w+) (hours?|days?|weeks?|months?)|by (monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow|tonight|the end of)|(will|would|is going to|are going to) (end|stop|be (cancell?ed|closed|ended|stopped|suspended|paused|lost|removed))|(lose|losing) (access|your (membership|place|spot|access))|or (else|you('ll| will) lose))\b/i,
+    "pressure",
+  ],
 ];
 
 /**
@@ -90,9 +103,10 @@ export function readDraft(raw: unknown, names: { storeName: string; creatorName:
   const text = `${subject}\n${body}`;
   const allowed = new Set((`${names.storeName} ${names.creatorName}`.match(/\d+/g) ?? []));
   if ((text.match(/\d+/g) ?? []).some((n) => !allowed.has(n))) return { ok: false, why: "number" };
-  // A name may hold a refused word ("Free Spirit Yoga"): it is taken out before the words are checked.
+  // A name may hold a refused word ("Free Spirit Yoga", "Two Rivers Yoga"): it is taken out before the words are checked.
   let words = text;
   for (const name of [names.storeName, names.creatorName]) if (name.trim()) words = words.split(name.trim()).join(" ");
   for (const [pattern, why] of REFUSED) if (pattern.test(words)) return { ok: false, why };
+  if (NUMBER_WORDS.test(words)) return { ok: false, why: "number" };
   return { ok: true, subject, body };
 }

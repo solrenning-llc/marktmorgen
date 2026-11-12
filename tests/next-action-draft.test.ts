@@ -13,7 +13,7 @@
  *     shown;
  *   - nothing is saved or sent, and the screen says so;
  *   - the draft is shown under the "AI draft" badge and the three checks (lib/ai-draft-review.ts, 756 [STN3]), and
- *     "Copy the draft" waits until all three are ticked;
+ *     "Copy the draft" waits until all three are checked;
  *   - the screen never says more than the server knows about the month's uses ("off" may follow a reservation that
  *     could not be confirmed; "failed" gives the use back when no call reached the provider), and never "Uses NaN";
  *   - the real route, called as the studio calls it: signed out, an action with no draft, nothing to write about and
@@ -73,9 +73,9 @@ const refused: [string, Record<string, string>, string][] = [
   // Numbers written as words are numbers too (review @3cec49fe, LOW 3), and a deadline or a threat in words is pressure.
   ["a number in words", { subject: "Your payment", body: "Thank you for three good years with us. Ana" }, "number"],
   ["a deadline with a number in words", { subject: "Your payment", body: "Please update your card within three days. Ana" }, "pressure"],
-  ["a number in words, capitalised", { subject: "Twenty members", body: "Hi. Ana" }, "number"],
+  ["a number in words, capitalized", { subject: "Twenty members", body: "Hi. Ana" }, "number"],
   ["a threat to end the membership", { subject: "Your payment", body: "Please update your card or your membership will end. Ana" }, "pressure"],
-  ["a cancellation threat", { subject: "Your payment", body: "Otherwise your membership will be cancelled. Ana" }, "pressure"],
+  ["a cancellation threat", { subject: "Your payment", body: "Otherwise your membership will be canceled. Ana" }, "pressure"],
   ["a deadline by a day", { subject: "Your payment", body: "Please update your card by Friday. Ana" }, "pressure"],
   ["a deadline in words", { subject: "Your payment", body: "Please update your card within the week. Ana" }, "pressure"],
   ["soon", { subject: "Your payment", body: "Please update your card as soon as possible. Ana" }, "pressure"],
@@ -163,10 +163,10 @@ async function main(): Promise<void> {
   is("the badge, drawn by the page", fresh.includes(">AI draft<"), true);
   is("the three checks, as checkboxes", (fresh.match(/type="checkbox"/g) ?? []).length, 3);
   is("they ask before copying, not saving", [fresh.includes("Before you copy it, check:"), fresh.includes("save it")], [true, false]);
-  is("Copy waits until all three are ticked", /<button[^>]*aria-disabled="true"[^>]*>Copy the draft<\/button>/.test(fresh), true);
+  is("Copy waits until all three are checked", /<button[^>]*aria-disabled="true"[^>]*>Copy the draft<\/button>/.test(fresh), true);
   is("and says why, beside it", fresh.includes("Check the three boxes under the draft, then copy it."), true);
   const ticked = ready([true, true, true]);
-  is("all three ticked: Copy is available", [/<button[^>]*aria-disabled="true"[^>]*>Copy the draft<\/button>/.test(ticked), />Copy the draft<\/button>/.test(ticked)], [false, true]);
+  is("all three checked: Copy is available", [/<button[^>]*aria-disabled="true"[^>]*>Copy the draft<\/button>/.test(ticked), />Copy the draft<\/button>/.test(ticked)], [false, true]);
   is("the draft says nothing was sent or saved", ticked.includes("A draft for you to change. Nothing was sent or saved."), true);
 
   part("What the screen says about the month's uses");

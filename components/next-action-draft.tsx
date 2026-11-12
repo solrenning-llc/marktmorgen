@@ -11,7 +11,7 @@ import type { NextActionId } from "@/lib/next-actions-rules";
  * writing help drafts the email (app/api/store/next-actions/draft) and it comes back into two fields the creator can
  * change, with a button to copy it. Nothing is saved and nothing is sent from here, and the screen says so. The draft
  * is shown under the "AI draft" badge and the three checks every draft the writing help fills in gets
- * (lib/ai-draft-review.ts, 756 [STN3]); "Copy the draft" waits until all three are ticked, because a copied draft
+ * (lib/ai-draft-review.ts, 756 [STN3]); "Copy the draft" waits until all three are checked, because a copied draft
  * leaves the studio and its save hold. Focus goes to the subject once the draft is there, and back to the button if
  * it is closed (2.4.3); the outcome is said in a polite live region; a button in use or waiting is aria-disabled,
  * never disabled, so focus stays on it. The screen never says more than the server knows about the month's uses.
@@ -35,7 +35,7 @@ export const NEXT_DRAFT_COPY_HOLD = "Check the three boxes under the draft, then
 
 type Draft = { subject: string; body: string };
 
-/** The draft as shown: its two fields, the AI draft badge and checks, and Copy waiting until they are ticked. */
+/** The draft as shown: its two fields, the AI draft badge and checks, and Copy waiting until they are checked. */
 export function NextActionDraftReady({
   id,
   draft,

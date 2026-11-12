@@ -1224,8 +1224,10 @@ export async function storeForHandle(handle: string): Promise<Store | null> {
  * not be read rather than that there is no such store.
  */
 export async function storeForHandleExact(handle: string): Promise<Store | null> {
-  if (!isRedisConfigured()) return null;
   if (handleProblem(handle)) return null;
+  // Redis not there is not knowing the store, never "no such store" (Codex X5 on #2970): the deletion page would
+  // otherwise fall silently to every store.
+  if (!isRedisConfigured()) unknownHandleReply();
   const [email] = repliesFor(await redisPipeline([["GET", handleKey(handle)]]), 1) ?? unknownHandleReply();
   if (email === null) return null;
   if (typeof email !== "string" || !email) unknownHandleReply();

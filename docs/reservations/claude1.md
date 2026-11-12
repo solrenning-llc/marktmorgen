@@ -6,3 +6,4 @@ Only Claude 1 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
+| Claude 1 cloud | Fixes #4050: the store's AI answers and guide reasons are held to the facts | claude/blissful-carson-2v8k2m-answers-held-to-facts | `components/store-guide-box.tsx`, `lib/answers.ts`, `lib/store-guide.ts`, `tests/answers-held-to-facts.test.ts` | 12/11/2026 17h50 |

@@ -26,7 +26,7 @@ import { aiAvailableFor, answerModel, askModel, jsonIn } from "@/lib/ai";
 import { inTrial } from "@/lib/mail";
 import { formatMoney } from "@/lib/money";
 import { speech } from "@/lib/buyer-words";
-import { speaksOfTerms } from "@/lib/store-assistant-rules";
+import { heldToFacts, speaksOfTerms } from "@/lib/store-assistant-rules";
 import { type Listing, type Store, isFree } from "@/lib/store";
 import { membershipPrice } from "@/lib/product-recurring";
 import { activeIntro, introLineEnglish } from "@/lib/intro-price";
@@ -362,7 +362,9 @@ export async function answerQuestion(input: {
   if (typeof kept === "string") {
     try {
       const value = JSON.parse(kept) as { answer?: unknown; known?: unknown };
-      if (typeof value.answer === "string" && value.answer) return { ok: true, answer: value.answer, known: value.known === true };
+      // An answer kept before it was held to the page (#4050) is never served: the model is asked anew.
+      const held = value.known !== true || (typeof value.answer === "string" && heldToFacts(value.answer, facts));
+      if (typeof value.answer === "string" && value.answer && held) return { ok: true, answer: value.answer, known: value.known === true };
     } catch {}
   }
 
@@ -387,9 +389,15 @@ export async function answerQuestion(input: {
   const said = shaped && typeof json.answer === "string" ? json.answer.replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/\s+/g, " ").trim().slice(0, MAX_ANSWER) : "";
   // Never shown, whatever the model was told: an answer about terms on a page cut short (see above).
   const termsCut = cut && said !== "" && speaksOfTerms(said);
-  const known = shaped && json.known === true && said !== "" && !termsCut;
+  // Never shown, and never kept: a code, a discount, a deadline, a number, a link or an address the page does not
+  // state (#4050), held exactly as the store assistant's chat is (heldToFacts). The visitor reads the plain
+  // "not known" sentence; the question is not filed, since the model said the page answers it.
+  const invented = shaped && json.known === true && said !== "" && !termsCut && !heldToFacts(said, facts);
+  const known = shaped && json.known === true && said !== "" && !termsCut && !invented;
   // Said in the store's language (lib/buyer-words), like the rest of its page.
   const answer = known ? said : termsCut ? speech(store).w.askTermsCut() : speech(store).w.askUnknown(store.name);
+  // Not kept either, so the same question is put to the model again rather than answered "not known" for a day.
+  if (invented) return { ok: true, answer, known };
 
   const commands: (string | number)[][] = [["SET", answerKey(hash), JSON.stringify({ answer, known }), "EX", ANSWER_KEPT_SECONDS]];
   // The page does say it, so it is not on the creator's list of what pages are missing.

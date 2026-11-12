@@ -665,6 +665,9 @@ export async function autoWriting(pathnames: string[]): Promise<Record<string, s
   return out;
 }
 
+/** The most owed refunds one studio read takes; more are said to be unknown, never cut to the first ones. */
+const OWED_READ_MAX = 100;
+
 /** Refunds for AI captions not yet confirmed by Stripe in one store folder, deleted videos included: cents owed and whether automatic looks have stopped. */
 /**
  * Rule 24: a set or a record that does not read is unknown, never "nothing owed". A member whose record is gone
@@ -676,7 +679,10 @@ export async function autoRefundsOwed(folder: string): Promise<{ id: string; cen
   const read = repliesFor(await redisPipeline([["SMEMBERS", owedKey(folder)]]), 1);
   const members = read ? stringList(read[0]) : null;
   if (!members) throw new UnknownReplyError("the owed captions refunds");
-  const ids = members.filter((m) => STREAM_ID_PATTERN.test(m)).sort().slice(0, 100);
+  // A member this version does not read, or more members than one read takes, is unknown, never "not owed":
+  // dropping or cutting them would hide a refund the creator may need to write to support about.
+  if (members.length > OWED_READ_MAX || members.some((m) => !STREAM_ID_PATTERN.test(m))) throw new UnknownReplyError("the owed captions refunds");
+  const ids = [...members].sort();
   if (!ids.length) return [];
   const rows = repliesFor(await redisPipeline(ids.map((id) => ["GET", pendingKey(id)])), ids.length);
   if (!rows) throw new UnknownReplyError("the owed captions refunds");

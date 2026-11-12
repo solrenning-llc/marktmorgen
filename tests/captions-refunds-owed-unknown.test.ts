@@ -40,6 +40,15 @@ async function main(): Promise<void> {
   is("nor a record of another shape", await thrown(() => autoRefundsOwed(FOLDER)), "unknown");
   redis.run(["DEL", `nl:stream:auto:${BAD}`]);
   is("control: a member whose record is gone is not owed", await autoRefundsOwed(FOLDER), [{ id: GOOD, cents: 3500, stuck: false }]);
+  redis.run(["SADD", `nl:stream:autoowed:${FOLDER}`, "not-a-stream-id"]);
+  is("a member of the owed set this version cannot read is unknown, never dropped", await thrown(() => autoRefundsOwed(FOLDER)), "unknown");
+  redis.run(["SREM", `nl:stream:autoowed:${FOLDER}`, "not-a-stream-id"]);
+  is("control: without it the owed refund reads again", await autoRefundsOwed(FOLDER), [{ id: GOOD, cents: 3500, stuck: false }]);
+  const many = Array.from({ length: 100 }, (_, i) => `${i.toString(16).padStart(8, "0")}-3f40-4a5b-8c6d-7e8f9a0b1c2d`);
+  redis.run(["SADD", `nl:stream:autoowed:${FOLDER}`, ...many]);
+  is("more owed members than one read takes is unknown, never cut to the first ones", await thrown(() => autoRefundsOwed(FOLDER)), "unknown");
+  redis.run(["SREM", `nl:stream:autoowed:${FOLDER}`, ...many]);
+  is("control: back within one read the owed refund is listed", await autoRefundsOwed(FOLDER), [{ id: GOOD, cents: 3500, stuck: false }]);
 
   part("the section on the page");
   const render = (rows: { id: string; cents: number; stuck: boolean }[] | null) => renderToStaticMarkup(createElement(CaptionsRefundsOwed, { rows }));

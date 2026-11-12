@@ -145,9 +145,12 @@ export async function readPathMoney(store: Store, now = Date.now()): Promise<Pat
   const livePayPal = liveSales.filter((s) => s.row.object === "paypal.order");
   // PayPal's sales not all read while PayPal is watched: the money leaves them out, so it is not known, and no level
   // moves on it (cloud I's MEDIUM 2 on #3443; rule 24). Never Stripe's money alone said as the store's.
-  let refunds: { cents: number; currency: string; paymentIntent: string }[] | null = gaps.includes("paypal") && watched ? null : [];
+  const payPalGap = gaps.includes("paypal") && Boolean(watched);
+  let refunds: { cents: number; currency: string; paymentIntent: string }[] | null = payPalGap ? null : [];
   const since = (list: typeof sales) => Math.floor(Math.min(...list.map((s) => s.created)) / 1000);
-  if (liveStripe.length && store.stripeAccountId) {
+  // The gap stays unknown: a complete Stripe refunds reading never makes a ledger missing PayPal's sales known again
+  // (Codex G's MEDIUM on #3443).
+  if (!payPalGap && liveStripe.length && store.stripeAccountId) {
     try {
       const read = await readStoreRefunds(store, since(liveStripe), PATH_REFUND_PAGES);
       // Refunds not all read: the money is not known, and no level moves on it.

@@ -43,7 +43,7 @@ import { dataBytes, contentRoomFor } from "@/lib/store-data-rules";
 import { dataKey, monthOf } from "@/lib/store-data";
 import { type PathAnswers, AUDIENCES, LEVELS, MINUTES, cleanLine, MAX_SKILLS, MAX_SUBJECT, localDay, validTimeZone, hasPathReturnGap, withCheckin, levelKept, type PathFacts } from "@/lib/path-rules";
 import { MAX_PAID_BYTES, PAYPAL_REFUNDS_READ } from "@/lib/paypal-sales";
-import { type PathCounts, type PathMoney, PATH_REFUND_PAGES, PATH_SALE_PAGES, countsFresh, factsFrom, moneyFresh, readPathCounts, readPathMoney } from "@/lib/path-facts";
+import { type PathCounts, type PathMoney, PATH_MONEY_SECONDS, PATH_REFUND_PAGES, PATH_SALE_PAGES, countsFresh, factsFrom, moneyFresh, readPathCounts, readPathMoney } from "@/lib/path-facts";
 import { countStudio } from "@/lib/studio-route";
 import { readGoal } from "@/lib/sales-goal-rules";
 import { isCurrency } from "@/lib/money";
@@ -67,6 +67,12 @@ export type PathRecord = {
   bestAt: number;
   money: PathMoney | null;
   counts: PathCounts | null;
+  /**
+   * When a reading of the money last came back with its refunds unknown and so did not replace the kept money, in
+   * milliseconds; the money is not read (nor charged) again before PATH_MONEY_SECONDS have passed since then (Claude 7's
+   * MEDIUM on #3443). Absent once a reading replaces the kept money.
+   */
+  moneyTriedAt?: number;
 };
 
 /**
@@ -148,6 +154,7 @@ export function parsePath(raw: unknown): PathRecord | null {
     bestAt: Number(value.bAt) > 0 ? Number(value.bAt) : 0,
     money: parseMoney(value.m),
     counts: parseCounts(value.n),
+    ...(Number.isFinite(Number(value.mt)) && Number(value.mt) > 0 ? { moneyTriedAt: Number(value.mt) } : {}),
   };
 }
 
@@ -160,7 +167,7 @@ export function returnMissionFor(store:Pick<Store,"name"|"bio">,record:PathRecor
 
 /** The record as it is written. Pure. */
 export function pathJson(record: PathRecord): string {
-  return JSON.stringify({ v: 1, r: record.revision ?? "", a: record.answers, at: record.startedAt, c: record.checkins, b: record.best, bAt: record.bestAt, m: record.money, n: record.counts, g: record.board ?? null,...(record.returnStep?{w:record.returnStep}:{}) });
+  return JSON.stringify({ v: 1, r: record.revision ?? "", a: record.answers, at: record.startedAt, c: record.checkins, b: record.best, bAt: record.bestAt, m: record.money, n: record.counts, g: record.board ?? null,...(record.returnStep?{w:record.returnStep}:{}),...(record.moneyTriedAt?{mt:record.moneyTriedAt}:{}) });
 }
 
 /**
@@ -222,12 +229,20 @@ export const chargeStudio = (store: Store): Charge => async (units) => (await co
 export async function visitPath(store: Store, record: PathRecord, now = Date.now(), charge: Charge = chargeStudio(store)): Promise<{ record: PathRecord; facts: PathFacts }> {
   let { money, counts } = record;
   let changed = false;
-  if (!moneyFresh(money, store, now) || !countsFresh(counts, now)) {
+  let moneyTriedAt = record.moneyTriedAt;
+  const triedRecently = moneyTriedAt !== undefined && now - moneyTriedAt >= 0 && now - moneyTriedAt < PATH_MONEY_SECONDS * 1000;
+  if ((!moneyFresh(money, store, now) && !triedRecently) || !countsFresh(counts, now)) {
     if (await charge(PATH_READ_UNITS)) {
       const [readMoney, readCounts] = await Promise.all([readPathMoney(store, now).catch(() => null), readPathCounts(store, now)]);
       // A reading whose refunds are unknown (money null, no sale counted as kept) never replaces a kept one, as a reading
       // that could not be made at all does not: it would show a store with kept sales as having none (Claude 4's LOW on #3443).
-      if (readMoney && (readMoney.cents !== null || !money)) money = readMoney;
+      if (readMoney && (readMoney.cents !== null || !money)) {
+        money = readMoney;
+        moneyTriedAt = undefined;
+      } else if (readMoney) {
+        // Kept, but the attempt is written down, so the next visits wait PATH_MONEY_SECONDS before reading and charging again.
+        moneyTriedAt = now;
+      }
       if (readCounts) counts = readCounts;
       changed = Boolean(readMoney || readCounts);
     }
@@ -240,6 +255,8 @@ export async function visitPath(store: Store, record: PathRecord, now = Date.now
   if (checkins.length !== record.checkins.length || checkins[checkins.length - 1] !== record.checkins[record.checkins.length - 1]) changed = true;
   const best = levelKept(record.best, read);
   const next: PathRecord = { ...record,returnStep, checkins, money, counts, best, bestAt: best > record.best ? now : record.bestAt };
+  if (moneyTriedAt) next.moneyTriedAt = moneyTriedAt;
+  else delete next.moneyTriedAt;
   if (best !== record.best) changed = true;
   if(record.board && moneyFresh(money,store,now) && countsFresh(counts,now)) {
     const score=pathBoardScore(read,record.answers);

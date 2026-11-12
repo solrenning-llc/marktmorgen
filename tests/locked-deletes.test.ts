@@ -555,7 +555,7 @@ async function main(): Promise<void> {
       edit: "open:edits", enable: "open:adds", "lesson-add": "open:adds", "lesson-edit": "open:edits", "lesson-move": "open:edits",
       "lesson-remove": "act:products", media: "lockedFor", "media-remove": "act:products", "module-add": "open:adds", "module-edit": "open:edits",
       "module-move": "open:edits", "module-remove": "act:products", outline: "open:adds", quiz: "act:products:quiz-remove",
-      retries: "open:gives a student their quiz tries back", review: "open:edits", start: "open:edits", task: "act:products:task-remove",
+      retries: "open:gives a student their quiz tries back", review: "open:edits", shelf: "open:edits", start: "open:edits", task: "act:products:task-remove",
       template: "open:adds", withdraw: "act:products",
     },
     "course/comment": { delete: "lockedFor", hide: "open:reversible", show: "open:reversible" },

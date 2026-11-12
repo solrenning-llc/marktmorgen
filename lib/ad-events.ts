@@ -422,7 +422,10 @@ export function googleBody(c: Conversion, buyer: BuyerRequest, nowSeconds: numbe
     ...(recent ? { timestamp_micros: c.at * 1_000_000 } : {}),
     ...(c.email ? { user_data: { sha256_email_address: [sha256(googleEmail(c.email))] } } : {}),
     ...(buyer.ip ? { ip_override: buyer.ip } : {}),
-    consent: { ad_user_data: "GRANTED", ad_personalization: "GRANTED" },
+    // The yes the buyer gave covers measuring which ads bring people here
+    // (lib/buyer-words/tracking-consent.ts), never personalized advertising or
+    // remarketing, and outside the countries that ask first no yes was given at all.
+    consent: { ad_user_data: "GRANTED", ad_personalization: "DENIED" },
     events: [
       {
         name: "purchase",

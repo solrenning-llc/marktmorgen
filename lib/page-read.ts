@@ -281,10 +281,12 @@ export async function spendReadToken(nonce: string, issued: number, now = Date.n
   if (spentHere(nonce, now)) return false;
   const until = issued + READ_TOKEN_SECONDS + CLOCK_SLACK_SECONDS;
   const seconds = Math.max(1, until - Math.floor(now / 1000));
+  // Noted as spent on this server BEFORE its mark is asked (Claude 1 cloud's review of #2571 at dc928d74ee, MEDIUM 2):
+  // the same token sent many times at once then costs what one send costs here, the mark and at most one of the
+  // window's readings, never one each. Whatever the mark answers, or if it never does, the token is spent from now on.
+  noteSpent(nonce, until);
   try {
     const [reply] = await redisPipeline([["SET", onceKey(nonce), "1", "NX", "EX", seconds]]);
-    // Answered either way, the token is spent from now on: this server remembers it.
-    if (reply === "OK" || reply === null) noteSpent(nonce, until);
     return reply === "OK";
   } catch {
     return false;

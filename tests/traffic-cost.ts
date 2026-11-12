@@ -142,8 +142,12 @@ export const COMMANDS = {
    * longer one of the window's public requests and have a ceiling of their
    * own, so every one the ceiling allows is priced on its own line
    * (tests/plan-cost-registry.ts, page-readings), and not inside visitCost.
+   * 11 since 12 November 2026 (the decision recorded under ALL-160 on #2571):
+   * a server that has not seen the window full still counts one reading past
+   * the ceiling another server saw, one command more priced on every reading,
+   * never lowered to keep a margin test passing.
    */
-  readBeacon: 10,
+  readBeacon: 11,
   /**
    * Handing a member's page ten minutes' leave to ask the room, at the
    * route that knows who is asking: the store, the community's settings,

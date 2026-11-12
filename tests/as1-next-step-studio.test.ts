@@ -248,6 +248,17 @@ test("No thanks keeps keyboard focus while its answer is sent: never natively di
   assert.match(src, /event\.preventDefault\(\);\s*if \(busy\) return;/, "a press while sending sends nothing more");
 });
 
+test("the studio promises the card after the last lesson only when the lesson page draws it (each PR of the stack true on its own)", () => {
+  const lessonDraws = readFileSync("app/[handle]/course/[product]/[lesson]/page.tsx", "utf8").includes("CourseNextStepCard");
+  const studio = readFileSync("app/studio/course/[product]/page.tsx", "utf8");
+  const section = studio.slice(studio.indexOf('aria-labelledby="next-step-title"'), studio.indexOf("<CourseNextStep "));
+  const toast = readFileSync("components/course-next-step.tsx", "utf8");
+  const says = (text: string) => /last\s+lesson/.test(text);
+  assert.ok(section.length > 0, "the studio's Next step section is there");
+  assert.equal(says(section), lessonDraws, "the studio's sentence says where students see the card, no more");
+  assert.equal(says(toast), lessonDraws, "the save message says where students see the card, no more");
+});
+
 test("every store language says the card in its own words", () => {
   const en = coursesWords("en");
   for (const language of LANGUAGE_CODES) {

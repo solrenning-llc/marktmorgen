@@ -16,7 +16,7 @@
 import { bodyHtml, bodyText } from "@/lib/mail-body";
 import { emailTheme } from "@/lib/email-theme";
 import { NIMBUS_FROM, type BatchMessage, hasResend, sendListBatch, sendEmail, sentThisMonth } from "@/lib/email";
-import { isSesConfigured, sesBulkRoom, sesReady } from "@/lib/ses";
+import { isSesConfigured, notYetTaken, sesBulkRoom, sesReady } from "@/lib/ses";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { TRIAL_MONTHLY_EMAILS, canUse, monthlyEmails } from "@/lib/plan";
@@ -593,9 +593,28 @@ export async function sendTo(
     const portion = await rampRoom(watched, Math.min(BATCH_SIZE, room, emails.length - i));
     if (portion <= 0) return { done, rest: emails.slice(i), stopped: "portion" };
     const chunk = emails.slice(i, i + portion);
-    const reserved = await reserve(store, chunk.length, true);
+    const batchKey = `${keyBase}:${i}:${chunk.length}`;
+    // A batch tried again after its outcome was lost: whoever Amazon already took under this key is not written to
+    // again (lib/ses.ts notYetTaken, inside sendListBatch), so they are not paid for again either, nor counted as sent
+    // a second time against the store's health (Claude 2 (nuvem D) bug hunt). The batch still goes to the sender whole,
+    // under its own key, so the sender's own choice between Amazon and Resend is unchanged. Unreadable marks: nothing is
+    // taken and nothing is sent, as the sender would refuse it too.
+    let owed = chunk.length;
+    let taken = new Set<string>();
+    if (isSesConfigured()) {
+      const pending = await notYetTaken(batchKey, chunk.map((to) => ({ to })));
+      if (pending === null) {
+        await rampBack(watched, chunk.length);
+        return { done, rest: emails.slice(i), stopped: "retry" };
+      }
+      const left = new Set(pending.map((m) => m.to));
+      taken = new Set(chunk.filter((email) => !left.has(email)));
+      owed = chunk.length - taken.size;
+      if (taken.size) await rampBack(watched, taken.size);
+    }
+    const reserved = owed ? await reserve(store, owed, true) : "ok";
     if (reserved !== "ok") {
-      await rampBack(watched, chunk.length);
+      await rampBack(watched, owed);
       return { done, rest: emails.slice(i), stopped: reserved === "month" ? "allowance" : reserved === "unavailable" ? "retry" : reserved };
     }
     // In a sequence, those who allowed their link use to be seen get links that say so (lib/mail-clicks.ts).
@@ -607,8 +626,8 @@ export async function sendTo(
     try {
       tokens = await tokensFor(store.listId as string, chunk, store.handle, counting);
     } catch {
-      await release(store, chunk.length);
-      await rampBack(watched, chunk.length);
+      await release(store, owed);
+      await rampBack(watched, owed);
       return { done, rest: emails.slice(i), stopped: "retry" };
     }
     const keys = counting?.size ? await rememberLinkKeys([...counting].map((email) => tokens.get(email) ?? "")) : new Map<string, string>();
@@ -620,12 +639,12 @@ export async function sendTo(
         return { from: fromLine(store), to: email, subject: r.subject, text: r.text, html: r.html, replyTo: store.email, headers: r.headers, tags };
       });
     if (messages.length) await paced();
-    const outcome = await sendListBatch(messages, `${keyBase}:${i}:${chunk.length}`, { by: "monthly" });
+    const outcome = await sendListBatch(messages, batchKey, { by: "monthly" });
     if (outcome === "waiting") {
       // This invocation made no provider send. Existing allowance/portion
       // reservations may be returned; unknown acceptance never uses this path.
-      await release(store, chunk.length);
-      await rampBack(watched, chunk.length);
+      await release(store, owed);
+      await rampBack(watched, owed);
       return { done, rest: emails.slice(i), stopped: "sender" };
     }
     if (outcome !== "sent") {
@@ -633,9 +652,11 @@ export async function sendTo(
       // Keep attempted capacity reserved; retries consume new capacity.
       return { done, rest: emails.slice(i), stopped: outcome, ...(outcome === "retry" ? { uncertain: messages.map((m) => m.to) } : {}) };
     }
-    if (messages.length < chunk.length) await release(store, chunk.length - messages.length);
+    // Paid for only those this attempt wrote to: not the ones who left the list, nor the ones Amazon had already taken.
+    const wrote = messages.filter((m) => !taken.has(m.to)).length;
+    if (wrote < owed) await release(store, owed - wrote);
     // What a bounce or a complaint is later measured against.
-    await noteSent(watched, messages.length);
+    await noteSent(watched, wrote);
     for (const m of messages) done.push(m.to);
     i += chunk.length;
   }

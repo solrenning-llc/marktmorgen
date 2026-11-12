@@ -56,7 +56,7 @@ export async function POST(request: NextRequest) {
       return Response.json({ ok: false, error: result.reason, ...said }, { status: result.reason === "email" ? 400 : 503 });
     }
 
-    const store = guarded.store.statsId ? guarded.store : await ensureStatsId(guarded.store.email);
+    const store = guarded.store.statsId ? guarded.store : await ensureStatsId(guarded.ref);
     if (!store?.statsId) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
     const person = typeof body.person === "string" ? body.person : "";
     if (body.action === "note") {

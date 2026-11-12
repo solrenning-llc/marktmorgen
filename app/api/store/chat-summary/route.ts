@@ -27,7 +27,7 @@ export async function POST(request: NextRequest) {
   // Each save posts a first message, so saving is kept to a few an hour.
   if (!(await withinLimit("chat-summary", store.handle, 10, 3600))) return Response.json({ ok: false, error: "rate_limited" }, { status: 429 });
   try {
-    const withStats = store.statsId ? store : await ensureStatsId(store.email);
+    const withStats = store.statsId ? store : await ensureStatsId(guarded.ref);
     if (!withStats?.statsId) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
     const result = await setChatAddress(withStats.statsId, store.name, body.url);
     if (result === "invalid" || result === "refused") return Response.json({ ok: false, error: result }, { status: 400 });

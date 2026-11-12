@@ -5,9 +5,9 @@ import { ACCENTS, THEMES, contrast, lookColours, lookStyle } from "../lib/store-
 
 /*
  * WCAG 2.2 1.4.11 Non-text Contrast, AA (274 [AX1]): the edge that shows where
- * a text field is keeps 3:1 against the colours next to it.
+ * a text field is keeps 3:1 against the colors next to it.
  *
- * Found by a browser audit (11 November 2026, Chromium, colours computed on
+ * Found by a browser audit (11 November 2026, Chromium, colors computed on
  * the page): a text field's 1 px border is its only outline, and it measured
  * 1.74:1 on a store (the list's email field, a gift's fields, the number of
  * people, the purchases and waitlist pages) and 1.72:1 on the site's own
@@ -15,8 +15,8 @@ import { ACCENTS, THEMES, contrast, lookColours, lookStyle } from "../lib/store-
  *
  * A store's field edge is worked out per theme and is held here against the
  * field's own fill and each surface a field sits on (the page, a card, an
- * item), for every theme and any colour a creator picks (the edge does not
- * follow the colour, so it cannot be moved by it). The site's field takes the
+ * item), for every theme and any color a creator picks (the edge does not
+ * follow the color, so it cannot be moved by it). The site's field takes the
  * existing control-edge token, --line-off (#857f70), whose 3:1 on the light
  * surfaces is held by the numbers below.
  */
@@ -50,7 +50,7 @@ const body = (selector: string): string => {
   return css.slice(open + 1, css.indexOf("}", open));
 };
 
-test("a store field draws its border in that edge colour", () => {
+test("a store field draws its border in that edge color", () => {
   assert.match(body(".st-field"), /border:\s*1px solid var\(--st-field-edge\);/);
 });
 

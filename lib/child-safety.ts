@@ -37,7 +37,7 @@ import { redisPipeline } from "@/lib/redis";
 import { repliesFor } from "@/lib/redis-reply";
 import { NIMBUS_FROM, sendEmail } from "@/lib/email";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
-import { type Store, setProductHidden, storeRef } from "@/lib/store";
+import { type Store, ensureStatsId, setProductHidden, storeRef } from "@/lib/store";
 import { productIdFromAddress, readListingExactly } from "@/lib/catalog";
 import { handleIn, type ReportKind } from "@/lib/takedown-rules";
 import { type Listing, productIdFor, readListings } from "@/lib/catalog";
@@ -160,8 +160,12 @@ export async function holdReported(report: { kind: ReportKind; url: string }, st
       if (added === 1) await redisPipeline([["SREM", key, product.id]]).catch(() => console.error("a capped child-safety hold could not be taken out of the day's count"));
       return "capped";
     }
+    // The hold is keyed by the store's list id (lib/child-safety-holds.ts): an old store without one gets it first,
+    // so the key never moves to another one later (Claude 3's LEVE 3 on #3471). No list id given is unknown.
+    const keyed = store.statsId ? store : await ensureStatsId(storeRef(store));
+    if (!keyed?.statsId) return "unknown";
     // Kept before it is taken off: a creator who acts in between can still not remove or change it.
-    const kept = repliesFor(await redisPipeline([["SET", keepKey(store, product.id), "1", "EX", KEEP_SECONDS]]), 1);
+    const kept = repliesFor(await redisPipeline([["SET", keepKey(keyed, product.id), "1", "EX", KEEP_SECONDS]]), 1);
     if (kept?.[0] !== "OK") return "unknown";
     const done = await setProductHidden(storeRef(store), product.id, true);
     return done.ok ? "held" : done.reason === "unknown" ? "unknown" : "failed";
@@ -172,7 +176,7 @@ export async function holdReported(report: { kind: ReportKind; url: string }, st
 }
 
 const WHAT_HAPPENED: Record<HoldOutcome, string> = {
-  held: "The product it points at was taken off the store at once (unpublished), so visitors can no longer see or buy it. Nothing was deleted: its files and records are kept as they are. For 400 days the creator cannot remove it, change it or publish it again, nor replace or delete its files, price options, picture, page, podcast episodes, course lessons, lesson captions, license keys, bundle list, waitlist or buyers' reviews, from the studio, and it goes into no bundle. A bundle that already held it is not sold, and a checkout box that offered it, or such a bundle, is not shown or charged. People who bought it before may still reach its files: switching that off is not automatic yet.",
+  held: "The product it points at was taken off the store at once (unpublished), so visitors can no longer see or buy it. Nothing was deleted: its files and records are kept as they are. For 400 days the creator cannot remove it, change it or publish it again, nor replace or delete its files, price options, picture, page, podcast episodes, course lessons, lesson captions, license keys, bundle list, waitlist, pre-orders, call setup or package, offer after paying, description or buyers' reviews, from the studio or the AI agent, and it goes into no bundle. A bundle that already held it is not sold, and a checkout box that offered it, or such a bundle, is not shown or charged. People who bought it before may still reach its files: switching that off is not automatic yet. Closing the store, or its plan ending, still deletes it, and so does erasing the creator's data: to keep it, suspend the store instead of closing it.",
   no_product: "The address does not name a product of a store, so nothing was taken off automatically. Act on it by hand, as docs/incident-response.md section 8 says.",
   not_held: "Nothing was taken off automatically. Act on it by hand, as docs/incident-response.md section 8 says.",
   capped: `This store already had ${CHILD_SAFETY_HOLDS_PER_DAY} products taken off automatically today, so nothing more was. Act on it by hand, as docs/incident-response.md section 8 says.`,

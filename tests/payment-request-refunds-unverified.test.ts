@@ -54,7 +54,7 @@ const INTENT = "pi_RefundsUnverified01";
 const PAID = 48_000;
 /** A succeeded refund of some other payment on the same Stripe account. */
 const other = (n: number) => ({ id: `re_other_${n}`, object: "refund", payment_intent: `pi_SomethingElse${String(n).padStart(6, "0")}`, status: "succeeded", amount: 500 });
-const ours = (id: string, amount: number) => ({ id, object: "refund", payment_intent: INTENT, status: "succeeded", amount });
+const ours = (id: string, amount: number) => ({ id, object: "refund", payment_intent: INTENT, status: "succeeded", amount, currency: "usd" });
 const list = (data: unknown, more: unknown) => ({ body: { object: "list", data, has_more: more } });
 const hundred = (from: number) => Array.from({ length: 100 }, (_, i) => other(from + i));
 
@@ -123,13 +123,28 @@ async function main(): Promise<void> {
 
   part("A refund of ours still under way, or in a status Stripe does not list, is not checked (rule 24)");
   for (const status of ["pending", "requires_action", "some_new_status"]) {
-    r = await reading([list([{ id: `re_${status}`, object: "refund", payment_intent: INTENT, status, amount: PAID }], false)]);
+    r = await reading([list([{ id: `re_${status}`, object: "refund", payment_intent: INTENT, status, amount: PAID, currency: "usd" }], false)]);
     is(`a full refund with status ${status}: never a checked Paid with nothing refunded`, [r.shown.state, r.shown.refunded, r.shown.refundsChecked, r.kept.refunded], ["paid", 0, false, 0]);
   }
   r = await reading([list([{ id: "re_noint", object: "refund", payment_intent: "", status: "succeeded", amount: PAID }], false)]);
   is("a refund whose payment_intent is an empty string (off-shape): not checked", [r.shown.state, r.shown.refundsChecked], ["paid", false]);
   r = await reading([list([{ id: "re_pending_other", object: "refund", payment_intent: "pi_SomethingElse000777", status: "pending", amount: 500 }, { ...ours("re_failed", PAID), status: "failed" }, { ...ours("re_canceled", PAID), status: "canceled" }], false)]);
   is("control: another payment's pending refund, and a failed or canceled one of ours, leave ours checked and not refunded", [r.shown.state, r.shown.refunded, r.shown.refundsChecked], ["paid", 0, true]);
+
+  part("A reply that is not Stripe's list, a refund of nothing, or a refund in another currency is not checked (R1 review)");
+  r = await reading([{ body: { data: [], has_more: false } }]);
+  is("an empty data and has_more false without object \"list\": not checked, never a checked Paid", [r.shown.state, r.shown.refunded, r.shown.refundsChecked], ["paid", 0, false]);
+  r = await reading([{ body: { object: "refund", data: [other(1)], has_more: false } }]);
+  is("a page whose object is not \"list\": not checked", [r.shown.state, r.shown.refundsChecked], ["paid", false]);
+  r = await reading([list([ours("re_zero", 0)], false)]);
+  is("a succeeded refund of ours for 0 (Stripe never refunds nothing): not checked, nothing written", [r.shown.state, r.shown.refunded, r.shown.refundsChecked, r.kept.refunded], ["paid", 0, false, 0]);
+  r = await reading([list([{ ...ours("re_eur", PAID), currency: "eur" }], false)]);
+  is("a refund of ours in another currency: never added as dollars, never \"refunded\", not checked", [r.shown.state, r.shown.refunded, r.shown.refundsChecked, r.kept.state, r.kept.refunded], ["paid", 0, false, "paid", 0]);
+  is("and a reload reads the same list, so none is promised", r.shown.refundsRetry, false);
+  r = await reading([list([{ ...ours("re_nocur", 10_000), currency: undefined }], false)]);
+  is("a refund of ours with no currency: not counted, not checked", [r.shown.state, r.shown.refunded, r.shown.refundsChecked, r.kept.refunded], ["paid", 0, false, 0]);
+  r = await reading([list([{ ...other(1), amount: 500, currency: "eur" }], false)]);
+  is("control: another payment's refund in another currency leaves ours checked", [r.shown.state, r.shown.refunded, r.shown.refundsChecked], ["paid", 0, true]);
 
   part("A failed read is not checked");
   r = await reading([{ status: 500, body: { error: { message: "Stripe is having trouble" } } }]);
@@ -138,11 +153,11 @@ async function main(): Promise<void> {
   part("A reload is promised only where reading again can change the answer (Claude 3's LOW A, Claude 6's LOW 2)");
   r = await reading([{ status: 500, body: {} }]);
   is("Stripe not answering: not checked, and reading again may help", [r.shown.refundsChecked, r.shown.refundsRetry], [false, true]);
-  r = await reading([list([{ id: "re_pending_retry", object: "refund", payment_intent: INTENT, status: "pending", amount: PAID }], false)]);
+  r = await reading([list([{ id: "re_pending_retry", object: "refund", payment_intent: INTENT, status: "pending", amount: PAID, currency: "usd" }], false)]);
   is("a refund of ours still pending: not checked, and reading again once it ends may help", [r.shown.refundsChecked, r.shown.refundsRetry], [false, true]);
   r = await reading([list(hundred(0), true), list(hundred(100), true), list(hundred(200), true)]);
   is("more refunds on the account than the pages read: not checked, and a reload reads the same pages, so none is promised", [r.shown.refundsChecked, r.shown.refundsRetry], [false, false]);
-  r = await reading([list([{ id: "re_odd_retry", object: "refund", payment_intent: INTENT, status: "some_new_status", amount: PAID }], false)]);
+  r = await reading([list([{ id: "re_odd_retry", object: "refund", payment_intent: INTENT, status: "some_new_status", amount: PAID, currency: "usd" }], false)]);
   is("a refund in a status Stripe does not list: not checked, and no reload promised", [r.shown.refundsChecked, r.shown.refundsRetry], [false, false]);
   r = await reading([list([other(1)], false)]);
   is("control: a checked request has nothing to retry", [r.shown.refundsChecked, r.shown.refundsRetry], [true, false]);

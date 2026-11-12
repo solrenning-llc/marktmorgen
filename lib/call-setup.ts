@@ -534,9 +534,12 @@ function offsetAt(ms: number, tz: string): number {
  *
  * Returns null for a wall-clock time that does not exist there — the hour
  * skipped when the clocks go forward — so no slot is ever offered at a time
- * nobody's clock will show.
+ * nobody's clock will show. So does a date on no calendar (31 February,
+ * month 13), which Date.UTC would roll over into another day. A minute past
+ * the day's end is read on the next day's clock.
  */
 export function zonedToUtc(year: number, month: number, day: number, minuteOfDay: number, tz: string): number | null {
+  if (!Number.isInteger(month) || month < 1 || month > 12 || !Number.isInteger(day) || day < 1 || day > new Date(Date.UTC(year, month, 0)).getUTCDate()) return null;
   const naive = Date.UTC(year, month - 1, day, 0, minuteOfDay);
   let guess = naive - offsetAt(naive, tz) * 60000;
   guess = naive - offsetAt(guess, tz) * 60000;

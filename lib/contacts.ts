@@ -351,7 +351,8 @@ export async function importContacts(
     const [rows, prints] = await redisPipeline([["HMGET", key, ...chunk], suppressedAmongCommand(listId, chunk)]);
     const found = Array.isArray(rows) ? rows : [];
     const deleted = Array.isArray(prints) ? prints : [];
-    const pairs: string[] = [];
+    // Each write, with the fingerprint of what its address held when read (CAS_HSET, as importContactRows writes).
+    const writes: { email: string; value: string; was: string }[] = [];
     const sizes: { before: Contact | null; next: Contact }[] = [];
     let newlyAgreed = 0;
     chunk.forEach((email, j) => {
@@ -381,11 +382,12 @@ export async function importContacts(
         tags: before?.tags ?? [],
         importedAt: now,
       };
-      pairs.push(email, JSON.stringify(next));
+      const raw = found[j];
+      writes.push({ email, value: JSON.stringify(next), was: typeof raw === "string" ? sha1(raw) : "" });
       sizes.push({ before, next });
       newlyAgreed += 1;
     });
-    if (pairs.length) {
+    if (writes.length) {
       try {
         await needContacts(data, sizes);
       } catch (error) {
@@ -395,10 +397,11 @@ export async function importContacts(
         const left = emails.length - i;
         return { added, already: i - added, full, roomFull: { left, message: error.message } };
       }
-      await redisPipeline([
-        ["HSET", key, ...pairs],
-        ["INCRBY", agreedKey(listId), newlyAgreed],
-      ]);
+      // Written only where the address still holds what was read: somebody who unsubscribed, bounced or complained in
+      // the moment between is never written back as agreed (Codex G, #3116); whatever it is now stands.
+      const written = await casWrite(key, writes);
+      newlyAgreed = written.filter(Boolean).length;
+      if (newlyAgreed > 0) await redisPipeline([["INCRBY", agreedKey(listId), newlyAgreed]]);
       added += newlyAgreed;
     }
   }

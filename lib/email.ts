@@ -444,7 +444,9 @@ export function queuedShipmentMailSender(runtime: ResendTransportRuntime = {}): 
       if (result.kind === "blocked") return "waiting";
       if (result.kind !== "response") return "unknown";
       if (result.response.ok) { await countSent(1); return "accepted"; }
-      return result.response.status === 429 ? "not_accepted" : "refused";
+      // A key that may not send from this domain (401/403, lib/mail-from.ts) is the account's answer, not the email's
+      // own fault, as SES's "account" is below: kept queued for a later try, never refused for good (mail-queue hunt).
+      return result.response.status === 429 || notThisDomain(result.response.status) ? "not_accepted" : "refused";
     }
     if (!(await beforePost())) return "unknown";
     const result = await sesSend(config, {

@@ -287,6 +287,8 @@ export const it: BuyerWords = {
   openFullSize: "Apri questa immagine a grandezza intera",
   countdownUnits: { days: "giorni", hours: "ore", min: "min", sec: "sec" },
   until: (when) => `Fino a ${when}`,
+  countdownPause: "Metti in pausa il conto alla rovescia",
+  countdownResume: "Riprendi il conto alla rovescia",
 
   restingTitle: "Questa pagina è in pausa per ora",
   restingBody: (store) =>

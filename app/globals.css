@@ -3393,6 +3393,24 @@ a.sp-product:focus-visible {
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
+/* Stops and starts the numbers (WCAG 2.2.2): a target of at least 44 × 44 px (2.5.5), its edge a border so it stays
+   drawn in forced colors, where a box-shadow is dropped. */
+.sp-countdown-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  margin-top: 1rem;
+  padding: 0.5rem 1rem;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+}
 /* A picture beside words: stacked on a phone, side by side once there is room, the picture on either side. */
 .sp-feature {
   display: grid;

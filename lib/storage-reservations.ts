@@ -85,15 +85,21 @@ export async function releaseStorage(folder: string, id: string): Promise<void> 
   });
 }
 
-/** Retires at most one expired session. Failure retains every reserved byte. */
+/** Retires at most one expired session. Failure retains every reserved byte.
+ * A session the provider refuses to retire moves to the end of the ledger (bytes kept),
+ * so it cannot keep every other expired session from being tried on later attempts.
+ */
 export async function retireStorage(folder: string, before: number, retire: (entry: Readonly<StorageReservation>) => Promise<boolean>): Promise<boolean> {
   if (!Number.isSafeInteger(before) || before < 0) throw new Error("storage_invalid");
   return change(folder, async rows => {
     const index = rows.findIndex(row => row.at <= before);
     if (index < 0) return false;
     const entry = rows[index];
-    if (entry.pathname !== undefined && !(await retire(Object.freeze({ ...entry })))) return false;
     rows.splice(index, 1);
+    if (entry.pathname !== undefined && !(await retire(Object.freeze({ ...entry })))) {
+      rows.push(entry);
+      return false;
+    }
     return true;
   });
 }

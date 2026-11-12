@@ -239,6 +239,21 @@ const clockAt = (ms: number) => {
   const shift = ms - realNow();
   Date.now = () => realNow() + shift;
 };
+/**
+ * lib/email.ts makes a sender asked to slow down (a 429) wait before it tries again: Resend 1 s then 2 s, Amazon 400 ms
+ * then 800 ms (its `pause`). Those two pauses, and no other timer (a request's cutoff stays on the real clock), are
+ * skipped here, with the test clock moved on by each, as if it had passed: the same tries, the same order and the same
+ * deadlines, without sitting through them.
+ */
+const realSetTimeout = globalThis.setTimeout;
+globalThis.setTimeout = ((fn: (...args: unknown[]) => void, ms?: number, ...args: unknown[]) => {
+  const stack = typeof ms === "number" && ms > 0 ? new Error().stack ?? "" : "";
+  if (/\bat pause\d* \(/.test(stack) && /\bat (?:async )?(?:resendOutcome|viaAmazon)\d* \(/.test(stack)) {
+    clockAt(Date.now() + ms!);
+    return realSetTimeout(fn, 0, ...args);
+  }
+  return realSetTimeout(fn, ms, ...args);
+}) as typeof setTimeout;
 
 async function main(): Promise<void> {
   // A synthetic company address, so the buyers' notice of a plan that ends from 31 October 2026 can go (lib/company-postal.ts).

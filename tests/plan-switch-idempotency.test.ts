@@ -82,6 +82,32 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   throw new Error(`Missing synthetic response ${method} ${path}`);
 }) as typeof fetch;
 
+/**
+ * A busy answer is the lock wait in lib/redis-lock.ts takeLock running to its end (5 s here, six times). Inside
+ * `waitsSkipped` each of takeLock's own pauses is skipped and the clock (Date.now, which also drives the Redis stub's
+ * clock while it is not frozen by advance) moves on by that pause instead, as if it had passed: the same loop, the
+ * same tries and the same give-up time, without sitting through them. Any other timer (a request's cutoff) is left on
+ * the real clock, and the clock never moves back, as real time would not. Only a wait for a lock that nothing will
+ * let go of in the meantime (an unconfirmed switch's kept lock) is run this way.
+ */
+const realNow = Date.now.bind(Date), realSetTimeout = globalThis.setTimeout;
+let skipped = 0;
+Date.now = () => realNow() + skipped;
+async function waitsSkipped<T>(work: () => Promise<T>): Promise<T> {
+  globalThis.setTimeout = ((fn: (...args: unknown[]) => void, ms?: number, ...args: unknown[]) => {
+    if (typeof ms === "number" && ms > 0 && /\bat takeLock\d* \(/.test(new Error().stack ?? "")) {
+      skipped += ms;
+      return realSetTimeout(fn, 0, ...args);
+    }
+    return realSetTimeout(fn, ms, ...args);
+  }) as typeof setTimeout;
+  try {
+    return await work();
+  } finally {
+    globalThis.setTimeout = realSetTimeout;
+  }
+}
+
 /** The 60-second lock running out (its own expiry), as when the first attempt outlived it. */
 const lockRunsOut = () => redis.pipeline([["DEL", `nl:tier:${subscription}:lock`]]);
 
@@ -175,7 +201,7 @@ async function main() {
     await reset("in flight");
     await attempt(now, now);
     mode = "applied";
-    const fresh = await attempt(now + 30, now + 30);
+    const fresh = await waitsSkipped(() => attempt(now + 30, now + 30));
     is(`${flow}: new preview right after an unconfirmed switch — busy, nothing sent`, [reasonOf(fresh), executions, keysSent.length], ["busy", 1, 1]);
     // 5. Slow reads before the charge (Claude 2 on #3287): the kept lock's term starts again at the unconfirmed answer,
     //    so it covers a full term after the client gave up however long the reads before it took.
@@ -192,7 +218,7 @@ async function main() {
       is(`${flow}: slow reads, ${label} — unconfirmed, and held a full term from that answer`, [reasonOf(slow), typeof left === "number" && left > 59_000], ["unconfirmed", true]);
       redis.advance(30_000);
       // Another preview of the same switch (its own second, so its own key).
-      const later = await attempt(now - 1, now + 1);
+      const later = await waitsSkipped(() => attempt(now - 1, now + 1));
       is(`${flow}: slow reads, ${label} — a new preview 30 s on is busy, nothing sent again`, [reasonOf(later), executions], ["busy", 1]);
     }
     is(`${flow}: busy is said honestly`, membershipWords("en").manageNotices.busy.body.includes("look at your membership"), true);

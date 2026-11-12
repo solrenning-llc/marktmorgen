@@ -26,6 +26,10 @@ is("review uses actual visit entitlements", CURRENT_COMMERCIAL_TERMS.traffic.inc
 is("review uses actual order entitlements", CURRENT_COMMERCIAL_TERMS.orders.included, ORDERS_INCLUDED);
 is("review captures actual per-tier playback thresholds", CURRENT_COMMERCIAL_TERMS.video.paidHoursByTier, PAID_VIDEO_HOURS);
 is("review captures reduced trial playback", CURRENT_COMMERCIAL_TERMS.video.trialSeconds, TRIAL_VIDEO_SECONDS);
+// One review for every leaf below: commercialMarginReady captures its own detached copy before reading (lib/commercial-margin.ts,
+// commercialOwnReviewData) and never writes to it, and each leaf replaces only the top-level snapshot string, so building the
+// same synthetic fixture again for each of the leaves only repeated its cost.
+const leafReview = review();
 function checkLeaves(value: unknown, path: string[] = []) {
  if (value !== null && typeof value === "object") {
   for (const [key, child] of Object.entries(value)) checkLeaves(child, [...path, key]);
@@ -35,11 +39,12 @@ function checkLeaves(value: unknown, path: string[] = []) {
  let parent = changed;
  for (const key of path.slice(0, -1)) parent = parent[key];
  parent[path[path.length - 1]] = typeof value === "number" ? value + 1 : typeof value === "boolean" ? !value : String(value) + " changed";
- is("old review rejected after " + path.join(".") + " changes", commercialMarginReady({ ...review(), priceAndRightsSnapshot: JSON.stringify(changed) }), false);
+ is("old review rejected after " + path.join(".") + " changes", commercialMarginReady({ ...leafReview, priceAndRightsSnapshot: JSON.stringify(changed) }), false);
 }
 is("review captures enforced AI request limits", CURRENT_COMMERCIAL_TERMS.ai.requestLimits, AI_REQUEST_LIMITS);
 is("review captures allowed provider models", CURRENT_COMMERCIAL_TERMS.ai.supportedModels, SUPPORTED_AI_MODELS);
 checkLeaves(CURRENT_COMMERCIAL_TERMS);
+is("the review shared by the leaves still passes with its own snapshot", commercialMarginReady(leafReview), true);
 const legacy = JSON.stringify({ prices: CURRENT_COMMERCIAL_TERMS.prices, commission: CURRENT_COMMERCIAL_TERMS.commission, trialDays: CURRENT_COMMERCIAL_TERMS.trialDays });
 is("partial legacy contract cannot approve current rights", commercialMarginReady({ ...review(), priceAndRightsSnapshot: legacy }), false);
 

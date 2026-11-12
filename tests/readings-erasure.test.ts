@@ -302,6 +302,31 @@ async function main(): Promise<void> {
   const listTry = `nl:list:try:${store.statsId}:${day}`;
   // The parts above may have taken today's try; this store is read here as on a new day.
   redis.run(["DEL", listTry]);
+  /**
+   * While the store's lock is held by a write that never lets go (above, until it is deleted below), every read that
+   * wants it waits lib/redis-lock.ts takeLock's whole LOCK_WAIT_MS before it gives up. Inside `waitsSkipped` each of
+   * takeLock's own pauses is skipped and the clock (Date.now, and with it the Redis stub's) moves on by that pause
+   * instead, as if it had passed: the same loop, the same tries and the same give-up time, without sitting through
+   * them. Any other timer (a request's cutoff) stays on the real clock, and the clock never moves back, as real time
+   * would not.
+   */
+  const realNow = Date.now.bind(Date), realSetTimeout = globalThis.setTimeout;
+  let skipped = 0;
+  Date.now = () => realNow() + skipped;
+  const waitsSkipped = async <T>(work: () => Promise<T>): Promise<T> => {
+    globalThis.setTimeout = ((fn: (...args: unknown[]) => void, ms?: number, ...args: unknown[]) => {
+      if (typeof ms === "number" && ms > 0 && /\bat takeLock\d* \(/.test(new Error().stack ?? "")) {
+        skipped += ms;
+        return realSetTimeout(fn, 0, ...args);
+      }
+      return realSetTimeout(fn, ms, ...args);
+    }) as typeof setTimeout;
+    try {
+      return await work();
+    } finally {
+      globalThis.setTimeout = realSetTimeout;
+    }
+  };
   /** How many of `work`'s commands tried the store's lock. */
   const lockTries = async <T>(work: () => Promise<T>): Promise<{ value: T | Error; tries: number }> => {
     const real = redis.pipeline;
@@ -311,7 +336,7 @@ async function main(): Promise<void> {
       return real(batch);
     };
     try {
-      return { value: await work(), tries };
+      return { value: await waitsSkipped(work), tries };
     } catch (error) {
       return { value: error as Error, tries };
     } finally {
@@ -339,7 +364,7 @@ async function main(): Promise<void> {
   is(`the numbers still shown on every call, from the copy kept once the day's readings are used (${JSON.stringify(salesStates)})`, salesStates.includes("ReadingsUsed"), false);
   is("a copy is kept, with its totals, naming nobody", [salesKept !== "", /"cents":\d/.test(salesKept), salesKept.includes(shy), salesKept.includes(bold)], [true, true, false, false]);
   is("and nothing shown names them either", [salesShown.includes(shy), salesShown.includes(bold)], [false, false]);
-  const flagged = await keptSales(busyStore, Date.now() + 5, true).catch(() => null);
+  const flagged = await waitsSkipped(() => keptSales(busyStore, Date.now() + 5, true)).catch(() => null);
   is("and the studio is told the biggest buyers were left out for lack of a list, from the copy kept too (not from an empty list)", [flagged?.stale, flagged?.unnamed], [true, true]);
 
   redis.run(["DEL", listTry]);

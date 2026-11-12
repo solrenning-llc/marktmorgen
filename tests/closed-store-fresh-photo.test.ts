@@ -37,6 +37,12 @@ let ownerOf = "";
 let releaseLost = false;
 // How many takings-out of a walk entry (WITHDRAW_ENTRY) answer what EVAL never says, from now.
 let withdrawUnknown = 0;
+// The record's fenced delete refused, with nothing deleted: the store's lock ran out (Claude 1 cloud on #3643).
+let deleteRefused = false;
+// The record's fenced delete ran, but its answer was lost (strictScript reads that as false).
+let deleteAnswerLost = false;
+// The read of the record after a failed going answers what Redis never says for a GET, once the release is lost.
+let rereadUnknownAfterLost = false;
 const realPipeline = redis.pipeline.bind(redis);
 redis.pipeline = async (commands: (string | number)[][]) => {
   if (withdrawUnknown > 0 && commands.length === 1 && commands[0][0] === "EVAL" && String(commands[0][1]).startsWith("-- marktmorgen:closing-withdraw-entry:v1")) {
@@ -53,7 +59,20 @@ redis.pipeline = async (commands: (string | number)[][]) => {
   }
   if (releaseLost && commands.some((c) => c[0] === "SET" && String(c[1]).startsWith("nl:store:handle:") && String(c[2]).startsWith("released:"))) {
     releaseLost = false;
+    if (rereadUnknownAfterLost) {
+      rereadUnknownAfterLost = false;
+      rereadUnknown = true;
+    }
     return [];
+  }
+  if ((deleteRefused || deleteAnswerLost) && commands.length === 1 && commands[0][0] === "EVAL" && String(commands[0][1]).startsWith("-- marktmorgen:fenced-del:v1") && commands.some((c) => c.includes(ownerOf))) {
+    if (deleteRefused) {
+      deleteRefused = false;
+      return [0];
+    }
+    deleteAnswerLost = false;
+    await realPipeline(commands);
+    return [null];
   }
   if (rereadUnknown && commands.length === 1 && commands[0][0] === "GET" && commands[0][1] === ownerOf) {
     rereadUnknown = false;
@@ -338,6 +357,102 @@ async function main(): Promise<void> {
     is("the extra store is prepared and its walk finishes", [report.stores, report.finished], [1, 1]);
     is("its record is gone", await storeForEmail(ref), null);
     is("its id is in no account's list of stores", lists.filter((key) => (redis.run(["SMEMBERS", key]) as string[]).includes(made.store.sid)), []);
+  }
+
+  part("Claude 1 cloud on #3643 (MEDIUM): a record whose going failed after its entry was confirmed is never walked while it is still there");
+  for (const [what, arm] of [
+    ["its holds and releases answered nothing", () => { releaseLost = true; }],
+    ["its fenced delete refused (the lock ran out)", () => { deleteRefused = true; }],
+  ] as const) {
+    redis.clear();
+    const email = `kept${what.length}@example.com`;
+    const store = await makeStore(email, `keptrecord${what.length}`);
+    ownerOf = String(redis.keys().find((key) => key.startsWith("nl:store:owner:") && String(redis.run(["GET", key])).includes(email)));
+    const data = `nl:zz:${store.statsId}:data`;
+    redis.run(["SET", data, "x"]);
+    const finished: string[] = [];
+    const run = (now: number) => eraseClosed(Date.now() + 30_000, async (entry) => {
+      finished.push(entry.ref);
+    }, now);
+    arm();
+    const T = Date.now();
+    await markDue(email, T - 1000);
+    const report = await run(T);
+    is(`${what}: the record is still there`, (await storeForEmail(email))?.sid ?? null, store.sid);
+    is(`${what}: no walk starts over a store whose record is still there`, report.started, false);
+    is(`${what}: its data is not erased while its record is still there`, redis.run(["GET", data]), "x");
+    is(`${what}: nothing is finished, and no confirmed entry is left in the batch`, [finished, redis.run(["HGET", BATCH_KEY, email]) === null || String(redis.run(["HGET", BATCH_KEY, email])).includes('"pending":true')], [[], true]);
+    const score = redis.run(["ZSCORE", DUE_KEY, email]);
+    is(`${what}: the store is still in line, moved back a walk`, score !== null && Number(score) >= T + WALK_GAP_MS, true);
+    const next = await run(T + WALK_GAP_MS + 1);
+    is(`${what}: the next walk prepares it and finishes it once`, [next.stores, next.finished, finished], [1, 1, [email]]);
+    is(`${what}: its record and its data are gone then`, [await storeForEmail(email), redis.run(["GET", data])], [null, null]);
+  }
+
+  part("Claude 1 cloud on #3643: a fenced delete that ran but whose answer was lost still walks the store, never leaving its data unnamed");
+  redis.clear();
+  {
+    const email = "deletedlost@example.com";
+    const store = await makeStore(email, "deletedlost");
+    ownerOf = String(redis.keys().find((key) => key.startsWith("nl:store:owner:") && String(redis.run(["GET", key])).includes(email)));
+    const data = `nl:zz:${store.statsId}:data`;
+    redis.run(["SET", data, "x"]);
+    deleteAnswerLost = true;
+    const T = Date.now();
+    await markDue(email, T - 1000);
+    const first = await erase(T);
+    is("the delete ran", [deleteAnswerLost, await storeForEmail(email)], [false, null]);
+    const next = await erase(T + WALK_GAP_MS + 1);
+    is("its store is walked and finished", first.finished + next.finished, 1);
+    is("its data is erased", redis.run(["GET", data]), null);
+    is("nothing named by its ids is left, nor its entry, nor its place in line", [leftNamedBy([store.sid, store.statsId ?? "-"]), redis.run(["HGET", BATCH_KEY, email]), redis.run(["ZSCORE", DUE_KEY, email])], [[], null, null]);
+  }
+
+  part("Rule 24 (Claude 1 cloud on #3643): a failed going whose record then does not read starts no walk, and the store is prepared first on the next run");
+  redis.clear();
+  {
+    const email = "unsettled@example.com";
+    const store = await makeStore(email, "unsettled");
+    ownerOf = String(redis.keys().find((key) => key.startsWith("nl:store:owner:") && String(redis.run(["GET", key])).includes(email)));
+    const data = `nl:zz:${store.statsId}:data`;
+    redis.run(["SET", data, "x"]);
+    releaseLost = true;
+    rereadUnknownAfterLost = true;
+    const T = Date.now();
+    await markDue(email, T - 1000);
+    const report = await erase(T);
+    is("the read after the failure did not read", rereadUnknown, false);
+    is("no walk starts and the run is not said to be done", [report.started, report.done], [false, false]);
+    is("its record and its data are kept", [(await storeForEmail(email))?.sid ?? null, redis.run(["GET", data])], [store.sid, "x"]);
+    const score = redis.run(["ZSCORE", DUE_KEY, email]);
+    is("the store stays due, never moved back past a walk that could start from its entry", score !== null && Number(score) <= T, true);
+    const next = await erase(T + WALK_GAP_MS + 1);
+    is("the next walk prepares it and finishes", [next.stores, next.finished], [1, 1]);
+    is("its record and its data are gone then", [await storeForEmail(email), redis.run(["GET", data])], [null, null]);
+  }
+
+  part("Claude 7 on #3643 (LEVE): a store with no id, given one while its erasure runs, is the same store and its record goes");
+  redis.clear();
+  {
+    const email = "legacy@example.com";
+    await claimHandle(email, "legacystore", "legacystore", "");
+    await ensureStatsId(email);
+    const key = String(redis.keys().find((k) => k.startsWith("nl:store:owner:") && String(redis.run(["GET", k])).includes(email)));
+    const record = JSON.parse(String(redis.run(["GET", key])));
+    if (record.sid) redis.run(["DEL", `nl:store:id:${record.sid}`]);
+    redis.run(["SET", key, JSON.stringify({ ...record, sid: "" })]);
+    is("setup: a store from before ids", (await storeForEmail(email))?.sid ?? null, "");
+    let given = "";
+    inWindow = async () => {
+      given = (await ensureStoreId(email))?.sid ?? "";
+    };
+    const T = Date.now();
+    await markDue(email, T - 1000);
+    const report = await erase(T);
+    is("it was given an id in the window", given.length >= 6, true);
+    is("it is prepared and its walk finishes", [report.stores, report.finished], [1, 1]);
+    is("its record is gone", await storeForEmail(email), null);
+    is("nothing named by its new id is left, nor its place in line", [leftNamedBy([given]), redis.run(["ZSCORE", DUE_KEY, email])], [[], null]);
   }
 
   done();

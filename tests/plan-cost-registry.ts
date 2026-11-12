@@ -1503,9 +1503,13 @@ export const KEY_NAME_BYTES = 128;
  * its id taken out of its account's list at the address the record read again
  * names too (one more SREM: an account moved since), the record deleted only
  * while the lock is still held (EVAL, GET, DEL) and the lock let go (EVAL,
- * GET, DEL).
+ * GET, DEL). When the going fails after the entry was written again, the
+ * record is read once more (GET) and the entry taken out while the record is
+ * still there, at most WITHDRAW_TRIES (2) scripts (EVAL, HGET, HDEL each):
+ * CLOSE_RECORD_RECOVERY_COMMANDS (Claude 1 cloud on #3643).
  */
-export const CLOSE_RECORD_COMMANDS = STORE_LOCK_TRIES + 1 + 1 + 1 + 3 + 3;
+export const CLOSE_RECORD_RECOVERY_COMMANDS = 1 + 2 * 3;
+export const CLOSE_RECORD_COMMANDS = STORE_LOCK_TRIES + 1 + 1 + 1 + 3 + 3 + CLOSE_RECORD_RECOVERY_COMMANDS;
 export const PREPARE_COMMANDS = (1 + MAX_TEAM) * (2 * 50 + 5) + 100 + CLOSE_RECORD_COMMANDS;
 
 /** What the whole export reads at the most, for a store of `bytes`: every product, course, lesson, post and form there can be, each read together, and its contacts a thousand at a command (lib/store-export.ts). */

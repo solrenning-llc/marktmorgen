@@ -39,7 +39,7 @@ import { COMMAND, DB_BYTE, DB_BYTE_MONTH, ORDER_COST, ORDER_LIBRARY, PER_PAYMENT
 import { FAMILIES, lifetimeByteMonths, partAverage } from "./store-data-registry";
 import { MAX_TEAM } from "@/lib/team";
 import { STORE_LOCK_TRIES } from "@/lib/read-ceilings";
-import { PREPARE_COMMANDS } from "./plan-cost-registry";
+import { CLOSE_RECORD_COMMANDS, CLOSE_RECORD_RECOVERY_COMMANDS, PREPARE_COMMANDS } from "./plan-cost-registry";
 
 test("a closing's worst cost, part by part, for each plan and for a free trial", () => {
   for (const tier of TIERS) {
@@ -112,11 +112,13 @@ test("a closing's last steps pay for the record's going under the store's lock, 
   // The lock is the store's own, tried again for LOCK_WAIT_MS (8 seconds): at most STORE_LOCK_TRIES, as ensureListId's.
   assert.match(close, /takeLock\(lockKeyOf\(owner\), LOCK_SECONDS, LOCK_WAIT_MS\)/);
   assert.match(source, /const LOCK_WAIT_MS = 8_000;/);
-  assert.match(close, /\["GET", owner\]/);
+  // The read again is one GET, in closingRecordAt.
+  assert.match(close, /await closingRecordAt\(owner\)/);
+  assert.match(source.slice(source.indexOf("async function closingRecordAt"), source.indexOf("function sameClosingStore")), /redisPipeline\(\[\["GET", owner\]\]\)/);
   assert.match(close, /deleteIfHeldOnly\(held,/);
   assert.match(close, /releaseLock\(held\)/);
   // Its id leaves the account's list at both addresses read: one more SREM than the first read's (Claude 6 on #3643).
-  assert.match(close, /\["SREM", account, store\.sid\]/);
+  assert.match(close, /\["SREM", account, sid\]/);
   const hosts = (1 + MAX_TEAM) * (2 * 50 + 5);
   // The lock's tries, the GET, the entry's HSET again, the second account's SREM, the fenced delete's script (EVAL, GET,
   // DEL) and the release's (EVAL, GET, DEL).
@@ -146,4 +148,20 @@ test("a pending entry is taken out by the idle pass at one script a run, inside 
   // the commands of the record's going that do not run (as in the test above).
   const replaced = 1 + 1 + 2 + 1 + 1 + 1 + 3;
   assert.ok((tries + 1) * 3 <= replaced, `${tries} tries and one idle script (${(tries + 1) * 3} commands) priced inside the ${replaced} they replace`);
+});
+
+test("a going that failed after the entry was confirmed: the record read again and the entry taken out are priced (Claude 1 cloud on #3643)", () => {
+  const source = readFileSync(join(process.cwd(), "lib/closed-store-data.ts"), "utf8");
+  const tries = Number(source.match(/const WITHDRAW_TRIES = (\d+);/)?.[1]);
+  const recover = source.slice(source.indexOf("async function withdrawIfKept"), source.indexOf("/** Takes a store out of line"));
+  // One strict read of the record (GET), then at most WITHDRAW_TRIES scripts (EVAL, HGET, HDEL) taking the entry out.
+  assert.match(recover, /await closingRecordKept\(store\)/);
+  assert.match(recover, /for \(let tries = 0; tries < WITHDRAW_TRIES; tries \+= 1\)/);
+  assert.match(recover, /\["EVAL", WITHDRAW_ENTRY, 1, BATCH_KEY, ref, bytes\]/);
+  const store = readFileSync(join(process.cwd(), "lib/store.ts"), "utf8");
+  const kept = store.slice(store.indexOf("export async function closingRecordKept"), store.indexOf("export async function closeStoreRecord"));
+  assert.match(kept, /closingRecordAt\(/);
+  assert.match(store.slice(store.indexOf("async function closingRecordAt"), store.indexOf("function sameClosingStore")), /redisPipeline\(\[\["GET", owner\]\]\)/);
+  assert.ok(CLOSE_RECORD_RECOVERY_COMMANDS >= 1 + tries * 3, `the recovery priced at ${CLOSE_RECORD_RECOVERY_COMMANDS} commands for ${tries} tries`);
+  assert.ok(CLOSE_RECORD_COMMANDS >= STORE_LOCK_TRIES + 1 + 1 + 1 + 3 + 3 + 1 + tries * 3, `the record's going priced at ${CLOSE_RECORD_COMMANDS} commands`);
 });

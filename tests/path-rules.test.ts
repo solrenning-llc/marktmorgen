@@ -162,8 +162,7 @@ part("The lead missions say what Path counts today (Revisor 2's LOW on #3591)");
   const texts = [lead.why, lead.closesOn, ...lead.steps, ...traffic.flatMap((d) => [d.why, d.closesOn])];
   is("no text says that leaving an address is what counts", texts.some((t) => /leaves? their address|left their address|left an address/i.test(t)), false);
   is("the lead mission says confirming from the email is what counts", lead.closesOn.includes("confirms their address from the email"), true);
-  is("and that earlier unconfirmed sign-ups no longer count", lead.closesOn.includes("never confirmed no longer count"), true);
-  is("the list missions say the same", traffic.filter((d) => d.closesOn.includes("people have")).every((d) => d.closesOn.includes("confirmed their address") && d.closesOn.includes("never confirmed no longer count")), true);
+  is("the list missions say confirming is what counts", traffic.filter((d) => d.closesOn.includes("people have")).every((d) => d.closesOn.includes("confirmed their address")), true);
 }
 
 part("The lead missions name what changed in plain words, never an unexplained \"this\" (Claude 1 and Claude 4 cloud B on #3741)");
@@ -172,8 +171,13 @@ part("The lead missions name what changed in plain words, never an unexplained \
   const traffic = pathProgress(facts({ titlePublished: true }), answers, START, START + 8 * DAY).traffic.filter((m) => m.closesOn.includes("people have"));
   const texts = [lead.why, lead.closesOn, ...lead.steps, ...traffic.flatMap((d) => [d.why, d.closesOn])];
   is("no text leans on \"this changed\"", texts.some((t) => /this changed/i.test(t)), false);
-  is("the lead mission says older unconfirmed sign-ups no longer count", lead.closesOn.includes("Older sign-ups that were never confirmed no longer count either"), true);
-  is("each list mission says the same", traffic.length === 2 && traffic.every((d) => d.closesOn.includes("older sign-ups that were never confirmed no longer count either")), true);
+  // Codex X5 on #3741: Path's count starts with its own record of confirmations (lib/path-facts.ts, no backfill), so
+  // sign-ups from before it are missing even when they were confirmed. The text says so, and never puts the whole drop
+  // on addresses that were never confirmed.
+  const RESTART = "Path counts only confirmations made since it started counting them, so earlier sign-ups are not in this count, even confirmed ones";
+  is("no text puts the drop only on never-confirmed sign-ups", texts.some((t) => /never confirmed no longer count/i.test(t)), false);
+  is("the lead mission says the count restarts, confirmed sign-ups included", lead.closesOn.includes(RESTART), true);
+  is("each list mission says the same", traffic.length === 2 && traffic.every((d) => d.closesOn.includes(RESTART)), true);
 }
 
 done();

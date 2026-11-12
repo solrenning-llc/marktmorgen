@@ -19,6 +19,7 @@ export const MESSAGES: Record<string, string> = {
   copy_failed: "The page could not be saved just now. Reload to check your pages before trying again.",
   copy_unknown: "We could not tell whether the copy was made. Reload to see your pages before trying again.",
   copy_full: "Your store has no room left for this page's blocks, so none was added. Remove something you no longer need first.",
+  copy_empty: "This page has no blocks yet, so there is nothing to copy. Add a new page instead.",
   server_error: "Something went wrong on our side. Try again in a moment.",
 };
 

@@ -49,24 +49,34 @@ async function listedAgain(ref: string, id: string): Promise<{ state: "listed"; 
  * with nothing added; only then is its place appended to the list under the store's lock. When the list refuses (a
  * newer list, the most pages, an address taken since), the blocks just written are taken back, so a refusal leaves the
  * store as it was. The page holds no picture (left out by copyOfPage), so there is none to claim or release.
+ *
+ * A page with no blocks is refused before anything is written (Claude 1's LOW on #3531): writePage keeps no record
+ * for an empty page, so nothing would hold it back from visitors, and its first save from the editor would put it out.
+ * A take-back that fails is tried once more (dropPage only deletes and sets the room to zero, so a second try is safe),
+ * so a passing failure leaves no blocks under a key that no list names.
  */
 async function placeNewPage(ref: string, store: Store, entry: SitePage, page: SalesPage): Promise<{ ok: true; store: Store } | { ok: false; error: string; status: number }> {
   const statsId = store.statsId;
-  const blocks = page.blocks.length > 0;
-  if (blocks) {
-    if (!statsId) return { ok: false, error: "copy_failed", status: 500 };
-    try {
-      await writePage(statsId, siteKey(entry.id), page, store);
-    } catch (error) {
-      if (error instanceof StoreFullError) return { ok: false, error: "copy_full", status: 409 };
-      console.error("writing a new store page's blocks failed", error);
-      await dropPage(statsId, siteKey(entry.id), store).catch((dropped: unknown) => console.error("taking back a new page's blocks failed", dropped));
-      return { ok: false, error: "copy_failed", status: 500 };
-    }
-  }
+  if (page.blocks.length === 0) return { ok: false, error: "copy_empty", status: 400 };
+  if (!statsId) return { ok: false, error: "copy_failed", status: 500 };
   const takeBack = async () => {
-    if (blocks && statsId) await dropPage(statsId, siteKey(entry.id), store).catch((error: unknown) => console.error("taking back a new page's blocks failed", error));
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      try {
+        await dropPage(statsId, siteKey(entry.id), store);
+        return;
+      } catch (error) {
+        console.error(`taking back a new page's blocks failed (try ${attempt} of 2)`, error);
+      }
+    }
   };
+  try {
+    await writePage(statsId, siteKey(entry.id), page, store);
+  } catch (error) {
+    if (error instanceof StoreFullError) return { ok: false, error: "copy_full", status: 409 };
+    console.error("writing a new store page's blocks failed", error);
+    await takeBack();
+    return { ok: false, error: "copy_failed", status: 500 };
+  }
   let saved: Awaited<ReturnType<typeof appendSitePages>>;
   try {
     saved = await appendSitePages(ref, [entry]);

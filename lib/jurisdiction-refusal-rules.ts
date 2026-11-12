@@ -11,11 +11,14 @@
  *
  * It fails closed, everywhere:
  *   - without one complete, valid record per jurisdiction, nobody can buy;
- *   - location needs MIN_LOCATION_EVIDENCE pieces (the visitor's IP country
- *     and the billing country the buyer gives, as planned in
- *     docs/eu-vat-article-9a.md, "The code that would be needed", step 1),
- *     each an assigned ISO 3166-1 alpha-2 country code (ASSIGNED_COUNTRY_CODES);
- *     anything else is unknown and refused, never guessed;
+ *   - location needs one piece from each of LOCATION_EVIDENCE_SOURCES, by
+ *     name: the visitor's IP country and the billing country the buyer
+ *     gives, as planned in docs/eu-vat-article-9a.md, "The code that would
+ *     be needed", step 1. A bare list is refused, because it cannot say the
+ *     two pieces came from two sources, and the same IP country given twice
+ *     would pass as two. Each piece is an assigned ISO 3166-1 alpha-2
+ *     country code (ASSIGNED_COUNTRY_CODES); a missing, extra or unreadable
+ *     source, or anything else, is unknown and refused, never guessed;
  *   - every piece counts: if any piece points to a jurisdiction that refuses,
  *     the sale is refused, whatever the other pieces say;
  *   - "refuse-consumers" refuses every product: the record type says that
@@ -40,8 +43,14 @@ export const EU_MEMBER_STATES = Object.freeze([
   "IT", "LV", "LT", "LU", "MT", "NL", "PL", "PT", "RO", "SK", "SI", "ES", "SE",
 ] as const);
 
-/** Location pieces needed before a sale: two, and every one is read. */
-export const MIN_LOCATION_EVIDENCE = 2;
+/** The independent sources a location piece comes from, by name: one piece each, and every one is read. */
+export const LOCATION_EVIDENCE_SOURCES = Object.freeze(["ipCountry", "billingCountry"] as const);
+export type LocationEvidenceSource = (typeof LOCATION_EVIDENCE_SOURCES)[number];
+/** The buyer's location, one piece per named source; null or undefined when that source gave nothing. */
+export type LocationEvidence = Readonly<Record<LocationEvidenceSource, string | null | undefined>>;
+
+/** Location pieces needed before a sale: one per source, two. */
+export const MIN_LOCATION_EVIDENCE = LOCATION_EVIDENCE_SOURCES.length;
 
 /** Territories that may belong to more than one jurisdiction for tax, each with all of them. */
 const MAY_BELONG: Readonly<Record<string, readonly DeemedSupplierJurisdiction[]>> = Object.freeze({
@@ -146,14 +155,39 @@ function detachedRecords(value: unknown): DeemedSupplierRecord[] | null {
   }
 }
 
+/**
+ * One piece per named source, read once from own data fields of a plain
+ * object with exactly those fields; null for anything else (a list, a
+ * missing, extra, inherited or getter source), so a source is never counted
+ * twice or guessed.
+ */
+function evidencePieces(value: unknown): unknown[] | null {
+  try {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+    const proto: unknown = Object.getPrototypeOf(value);
+    if (proto !== Object.prototype && proto !== null) return null;
+    if (Reflect.ownKeys(value).length !== LOCATION_EVIDENCE_SOURCES.length) return null;
+    const pieces: unknown[] = [];
+    for (const source of LOCATION_EVIDENCE_SOURCES) {
+      const field = Object.getOwnPropertyDescriptor(value, source);
+      if (!field || !Object.hasOwn(field, "value")) return null;
+      pieces.push(field.value);
+    }
+    return pieces;
+  } catch {
+    return null;
+  }
+}
+
 const refuse = (reason: RefusalReason, jurisdictions: readonly DeemedSupplierJurisdiction[]): CheckoutLocationDecision =>
   Object.freeze({ allowed: false, reason, jurisdictions: Object.freeze([...jurisdictions]), buyerMessage: REFUSAL_WORDS[reason] });
 
 /**
- * Sell or refuse, from the buyer's location pieces and the deemed-supplier
- * records (the real ones by default). Pure: reads nothing else, writes nothing.
+ * Sell or refuse, from the buyer's location, one piece per named source, and
+ * the deemed-supplier records (the real ones by default). Pure: reads nothing
+ * else, writes nothing.
  */
-export function checkoutLocationDecision(countries: readonly (string | null | undefined)[], records: unknown = DEEMED_SUPPLIER_RECORDS): CheckoutLocationDecision {
+export function checkoutLocationDecision(evidence: LocationEvidence, records: unknown = DEEMED_SUPPLIER_RECORDS): CheckoutLocationDecision {
   // The original value is held to the gate's own reading first (Claude 3 on #3681): what deemedSupplierReady refuses is refused here too.
   let original: string[];
   try {
@@ -168,9 +202,11 @@ export function checkoutLocationDecision(countries: readonly (string | null | un
   for (const row of own) treatment.set(row.jurisdiction, row.treatment);
   if (DEEMED_SUPPLIER_JURISDICTIONS.some((j) => !treatment.has(j))) return refuse("not-recorded", []);
 
-  if (!Array.isArray(countries) || countries.length < MIN_LOCATION_EVIDENCE) return refuse("location-unknown", []);
+  // Named sources, not a list (LEVE on #3681, 11/11 18:18): a list's length cannot prove two independent pieces.
+  const pieces = evidencePieces(evidence);
+  if (!pieces || pieces.length < MIN_LOCATION_EVIDENCE) return refuse("location-unknown", []);
   const found: DeemedSupplierJurisdiction[] = [];
-  for (const piece of countries) {
+  for (const piece of pieces) {
     const candidates = candidateJurisdictions(piece);
     if (candidates === null) return refuse("location-unknown", []);
     for (const j of candidates) if (!found.includes(j)) found.push(j);

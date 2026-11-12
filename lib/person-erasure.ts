@@ -41,6 +41,7 @@
  */
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { countOf, repliesFor } from "@/lib/redis-reply";
 import { type Store, ensureListId, ensureStatsId, storeRef } from "@/lib/store";
 import { readKindExact } from "@/lib/catalog";
 import { readCoursesExact } from "@/lib/course";
@@ -305,7 +306,11 @@ export async function erasePerson(
   }
 
   // First, and on its own: whatever happens next, they are never written to again. Its second is Redis's (ERASED_PRINT).
-  await redisPipeline([suppressCommand(scope.listId as string, email)]);
+  // Confirmed before anything is deleted (Codex L, #4269; rule 24): one reply, HSET's 0 or 1. Anything else is not a
+  // mark written, so nothing is deleted and the erasure is said as not done, to try again; deleted without the mark,
+  // a later import, checkout or sign-up would write the address back with nothing to stop it.
+  const printed = countOf(repliesFor(await redisPipeline([suppressCommand(scope.listId as string, email)]), 1)?.[0]);
+  if (printed === null || printed > 1) return { ok: false, reason: "unavailable" };
 
   const parts: ErasedPart[] = [];
   const failed: string[] = [];

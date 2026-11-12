@@ -38,7 +38,6 @@ import { plainAmount } from "@/lib/money";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { LockBusyError, withLock } from "@/lib/redis-lock";
 import { readPendingPayoutBatches, type PendingPayoutBatch } from "@/lib/pending-payouts";
-import { repliesFor } from "@/lib/redis-reply";
 import { type Store, storeForId, storeIdGone } from "@/lib/store";
 
 /** Local tests may point this at a stand-in on 127.0.0.1; nothing else is taken. */

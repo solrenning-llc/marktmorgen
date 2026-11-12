@@ -28,6 +28,13 @@ import { type WebhookEvent, emitEvent, eventIdFor } from "@/lib/webhooks";
 export const OUTBOX_KEEP_SECONDS = 7 * 86_400;
 /** The most one kept event's record may hold; a bigger one is not kept (and said). */
 export const OUTBOX_RECORD_MAX_BYTES = 4_096;
+/**
+ * The most kept events the whole site holds at once, a company ceiling (Codex X5 on #4319): at most
+ * OUTBOX_MAX_KEPT x OUTBOX_RECORD_MAX_BYTES (4 MB) of records and as many members in line, whatever the traffic.
+ * Counted in the same write that keeps an event: past it, what that write added is taken back and the event is
+ * lost (said in the log), never kept beyond the ceiling.
+ */
+export const OUTBOX_MAX_KEPT = 1_000;
 /** Kept events one run of the job tries, at the most. */
 export const OUTBOX_PER_RUN = 50;
 /** The first wait before a kept event is tried again; each later try waits twice as long, never past a day. */
@@ -87,11 +94,21 @@ export async function emitOrKeep(store: Store, type: WebhookEvent, seed: string,
       await redisPipeline([
         ["SET", recordKey(eventId), record, "NX", "EX", OUTBOX_KEEP_SECONDS],
         ["ZADD", DUE, Math.floor(now / 1000) + OUTBOX_FIRST_WAIT_SECONDS, eventId],
+        ["ZCARD", DUE],
       ]),
-      2,
+      3,
     );
-    // Kept when the record is written (or already was, by an earlier try of the same event) and the date is in.
-    if (replies && (replies[0] === "OK" || replies[0] === null) && (countOf(replies[1]) === 0 || countOf(replies[1]) === 1)) return "kept";
+    const added = replies ? countOf(replies[1]) : null;
+    const inLine = replies ? countOf(replies[2]) : null;
+    // Kept when the record is written (or already was, by an earlier try of the same event), the date is in and the
+    // line, counted after it, is within the ceiling. Every write that finds the line past it takes back what it
+    // added, so the events kept never pass OUTBOX_MAX_KEPT.
+    if (replies && (replies[0] === "OK" || replies[0] === null) && (added === 0 || added === 1) && typeof inLine === "number") {
+      if (inLine <= OUTBOX_MAX_KEPT || added === 0) return "kept";
+      await redisPipeline([["ZREM", DUE, eventId], ...(replies[0] === "OK" ? [["DEL", recordKey(eventId)] as (string | number)[]] : [])]);
+      console.error(`a ${type} webhook could not be queued and the outbox is full (${OUTBOX_MAX_KEPT}); it is not sent`);
+      return "lost";
+    }
   } catch (error) {
     console.error(`keeping a ${type} webhook to try again failed`, error);
     return "lost";

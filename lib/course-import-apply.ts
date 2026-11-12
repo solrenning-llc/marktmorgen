@@ -5,11 +5,12 @@
  * Pure, with no caller yet: nothing is read, written, uploaded or spent, and
  * nothing here is permission to do so. It goes through the course's own
  * edits (lib/course.ts), the way ready structures do (lib/course-templates.ts,
- * applyTemplate): the "outline" edit for the modules and lessons, then
- * "module-remove" for the new course's own empty module and "lesson-edit"
- * for each lesson that has text. So it meets every limit those edits
- * enforce and makes nothing a creator could not make by hand. Whole or not
- * at all: any edit refused gives nothing back.
+ * applyTemplate): "module-remove" for the new course's own empty module
+ * first, so an outline at the module limit fits; then the "outline" edit for
+ * the modules and lessons and "lesson-edit" for each lesson that has text.
+ * So it meets every limit those edits enforce and makes nothing a creator
+ * could not make by hand. Whole or not at all: any edit refused gives
+ * nothing back.
  *
  * Only a course exactly as it is made (templateFits): one the creator
  * touched is never written over.
@@ -40,9 +41,10 @@ export function planCourseImport(course: Course, draft: CourseImportDraft): Cour
   if (!templateFits(course).ok) return { ok: false, why: "not-new" };
   const original = course.modules[0].id;
   const outline: CourseEdit = { op: "outline", modules: draft.modules.map((m) => ({ title: m.title, lessons: m.lessons.map((l) => l.title) })) };
-  let step = editCourse(course, outline);
+  // The new course's own empty module goes first, so an outline at the module limit fits (Claude 3 on #3816).
+  let step = editCourse(course, { op: "module-remove", moduleId: original });
   if (!step.ok) return { ok: false, why: "refused" };
-  step = editCourse(step.course, { op: "module-remove", moduleId: original });
+  step = editCourse(step.course, outline);
   if (!step.ok) return { ok: false, why: "refused" };
 
   const made = step.course.modules;

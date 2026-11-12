@@ -47,7 +47,7 @@ import { onAccount } from "@/lib/stripe-account";
 import { StripeListUnreadable } from "@/lib/stripe-list";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { signedOf } from "@/lib/redis-count";
-import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { type Store, saleHandles, storeFolder, storeForEmail, storeRef } from "@/lib/store";
 import { standingOf } from "@/lib/plan-standing";
 import { normaliseEmail } from "@/lib/auth";
@@ -321,6 +321,17 @@ async function holdOne(account: string, folder: string, sub: Row, endedAt: numbe
 /** What a member with no address on Stripe is marked with: it cannot be told, and is counted. */
 const NO_ADDRESS = "-";
 
+/**
+ * A closing hash's fields and values, from one HGETALL pipeline, read exactly (CX-123 rule 24): Redis's own list of
+ * strings, in pairs. Anything else (no reply, null, text, an object, a member that is not a string, an odd count) is
+ * UnknownReplyError, never an empty hash: no member's payment or address is ever taken as not there.
+ */
+function hashPairs(replies: unknown, what: string): string[] {
+  const flat = stringList(repliesFor(replies, 1)?.[0]);
+  if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError(what);
+  return flat;
+}
+
 /** The addresses of every member of this ending (held, past the budget or not held yet), payment plans included. */
 export async function memberAddresses(folder: string): Promise<string[]> {
   return (await membersOf(folder)).emails;
@@ -329,8 +340,7 @@ export async function memberAddresses(folder: string): Promise<string[]> {
 /** Every member of this ending: the addresses, and the members with none (by subscription). */
 export async function membersOf(folder: string): Promise<{ emails: string[]; missing: string[]; unpaused: string[] }> {
   if (!isRedisConfigured()) return { emails: [], missing: [], unpaused: [] };
-  const [raw] = await redisPipeline([["HGETALL", workKey(folder)]]);
-  const flat = Array.isArray(raw) ? (raw as unknown[]).map(String) : [];
+  const flat = hashPairs(await redisPipeline([["HGETALL", workKey(folder)]]), "a closing's members");
   const fields = new Map<string, string>();
   for (let i = 0; i + 1 < flat.length; i += 2) fields.set(flat[i], flat[i + 1]);
   const out = { emails: [] as string[], missing: [] as string[], unpaused: [] as string[] };
@@ -492,8 +502,7 @@ export async function releaseHolds(store: Store, until: number, nowSeconds = Mat
 export async function paidPeriods(store: Store): Promise<Map<string, PaidPeriod>> {
   const out = new Map<string, PaidPeriod>();
   if (!isRedisConfigured()) return out;
-  const [raw] = await redisPipeline([["HGETALL", paidKey(await storeFolder(storeRef(store)))]]);
-  const flat = Array.isArray(raw) ? (raw as unknown[]).map(String) : [];
+  const flat = hashPairs(await redisPipeline([["HGETALL", paidKey(await storeFolder(storeRef(store)))]]), "a closing's kept payments");
   for (let i = 0; i + 1 < flat.length; i += 2) {
     try {
       const row = JSON.parse(flat[i + 1]) as PaidPeriod;
@@ -575,8 +584,8 @@ export async function heldPaymentsOf(store: Store, email: string): Promise<(Paid
   if (!isRedisConfigured()) return [];
   const address = email.trim().toLowerCase();
   const folder = await storeFolder(storeRef(store));
-  const [raw] = await redisPipeline([["HGETALL", paidKey(folder)]]);
-  const flat = Array.isArray(raw) ? raw.map(String) : [];
+  // Unknown is never "nothing kept": it fails the whole copy (lib/person-copy.ts), as any read that fails does.
+  const flat = hashPairs(await redisPipeline([["HGETALL", paidKey(folder)]]), "a closing's kept payments");
   const out: (PaidPeriod & { subscription: string })[] = [];
   for (let i = 0; i + 1 < flat.length; i += 2) {
     try {

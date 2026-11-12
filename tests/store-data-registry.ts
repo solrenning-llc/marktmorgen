@@ -849,6 +849,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:rev:stop:@lib/review-requests.ts": { what: "A review ask's stop link: one for each address, the same in every email", parts: [kept(LINK_BYTES, "Review asks go to buyers: one a buyer, kept while they are asked.")] },
   "nl:rev:@lib/reviews.ts": { what: "Reviews and their lists", room: ["lib/reviews.ts", "lib/store.ts"], parts: [kept(MARK, "A payment's reviews, for refunds.")] },
   "nl:rev:all:@lib/reviews.ts": { what: "Every review, for the studio", room: ["lib/reviews.ts"] },
+  "nl:rev:hid:@lib/reviews.ts": { what: "A hide left by a review its buyer deleted", room: ["lib/reviews.ts"] },
   "nl:rev:lock:@lib/reviews.ts": short("A product's reviews being written", "buyer", 1, 128),
   "nl:rev:new:@lib/reviews.ts": { what: "Reviews not seen yet", room: ["lib/reviews.ts"] },
   "nl:rev:pay:@lib/reviews.ts": { what: "The reviews a payment paid for", parts: [kept(MARK, "One a payment.")] },

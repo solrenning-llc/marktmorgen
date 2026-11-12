@@ -6,7 +6,8 @@
  * Synthetic data only (tests/community-mail-read-world.ts).
  */
 import { advanceAnnouncement, type AnnouncementJob } from "@/lib/community-mail";
-import { db, members, released, reserved, reset, setBatchAnswer, store } from "./community-mail-read-world";
+import { batchKeptKey } from "@/lib/batch-count";
+import { db, members, released, reserved, reset, sent, setBatchAnswer, store } from "./community-mail-read-world";
 import { done, is, part } from "./check";
 
 const id = "e".repeat(24);
@@ -40,6 +41,41 @@ async function main(): Promise<void> {
   setBatchAnswer("sent");
   const sentJob = await advanceAnnouncement(id, async () => store, Date.now() + 10_000);
   is("sent: counted once", [held(), sentJob?.status], [2, "sent"]);
+
+  /*
+   * The same batch tried again after an answer not known is the same request to the email service, under the same
+   * key and to the same people: the service drops it if it took the first, so it writes to them once. Counting it
+   * again took the creator's monthly emails twice (five times, after five unknown answers) for emails that went once
+   * (reviews of #4073). The count kept for the batch is used for its retry, never reserved again.
+   */
+  part("A batch tried again after an answer not known is counted once");
+  seed();
+  setBatchAnswer("uncertain");
+  await advanceAnnouncement(id, async () => store, Date.now() + 10_000);
+  setBatchAnswer("sent");
+  const retried = await advanceAnnouncement(id, async () => store, Date.now() + 10_000);
+  is("unknown, then sent under the same key: two emails, counted two, not four", [held(), retried?.status, retried?.sent], [2, "sent", 2]);
+  is("the batch was handed to the service twice, under one count", sent.length, 2);
+
+  seed();
+  setBatchAnswer("uncertain");
+  let last: AnnouncementJob | null = null;
+  for (let i = 0; i < 5; i += 1) last = await advanceAnnouncement(id, async () => store, Date.now() + 10_000);
+  is("five unknown answers: the batch is counted once, not five times", [held(), last?.status], [2, "failed"]);
+
+  // A later answer that says nothing went cannot prove the first did not: the count stays, never given back.
+  seed();
+  setBatchAnswer("uncertain");
+  await advanceAnnouncement(id, async () => store, Date.now() + 10_000);
+  setBatchAnswer("retry");
+  await advanceAnnouncement(id, async () => store, Date.now() + 10_000);
+  is("unknown, then not taken: still counted once, never given back", held(), 2);
+  setBatchAnswer("sent");
+  const after = await advanceAnnouncement(id, async () => store, Date.now() + 10_000);
+  is("and sent after that: still counted once", [held(), after?.status], [2, "sent"]);
+
+  // Once sent, the batch's mark goes: nothing is left to excuse a later batch from its count.
+  is("no mark is left once the batch was sent", db.run(["EXISTS", batchKeptKey(`cm:${id}:0:${keys.length}`, members.map((m) => m.e))]), 0);
 
   done();
 }

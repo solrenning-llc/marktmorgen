@@ -34,6 +34,7 @@
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import { deriveKey } from "@/lib/secret-box";
 import { normaliseEmail } from "@/lib/auth";
+import { batchCountKept, batchCountSettled, keepBatchCount } from "@/lib/batch-count";
 import { type BatchMessage, sendBatchOutcome } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { countOf, repliesFor } from "@/lib/redis-reply";
@@ -402,18 +403,24 @@ export async function sendReviewRequests(
       if (at !== null) for (const item of firsts) await later(item.member, at);
       counts.waiting += at === null ? 0 : agains.length;
     };
-    const reserved = await reserve(store, ready.length);
+    const batchKey = `review-ask:${sha(ready.map((item) => item.entry.reference).join(","))}`;
+    const to = ready.map((item) => item.message.to);
+    // A retry of a batch whose answer was not known sends under the count kept for it (lib/batch-count.ts).
+    const kept = await batchCountKept(batchKey, to);
+    const reserved = kept ? "ok" : await reserve(store, ready.length);
     if (reserved !== "ok") {
       await unclaim(nowSeconds + RETRY_SECONDS.plan);
       continue;
     }
-    const outcome = await sendBatchOutcome(
-      ready.map((item) => item.message),
-      `review-ask:${sha(ready.map((item) => item.entry.reference).join(","))}`, { by: "monthly" },
-    );
+    const outcome = await sendBatchOutcome(ready.map((item) => item.message), batchKey, { by: "monthly" });
+    if (outcome === "sent") await batchCountSettled(batchKey, to);
     if (outcome !== "sent") {
-      // An answer not known (lib/email.ts, sendBatchOutcome) may have sent them: their count is kept, never given back.
-      if (outcome !== "uncertain") await release(store, ready.length);
+      // An answer not known (lib/email.ts, sendBatchOutcome) may have sent them: their count is kept, never given
+      // back, and marked so that the same batch tried again is not counted again. A count kept by an earlier
+      // unknown answer stays whatever this one says.
+      if (outcome === "uncertain") {
+        if (!kept) await keepBatchCount(batchKey, to);
+      } else if (!kept) await release(store, ready.length);
       if (outcome === "refused") {
         await unclaim(null);
         for (const item of ready) await drop(item.member);

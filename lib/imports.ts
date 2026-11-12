@@ -84,6 +84,7 @@ import { csvLine, readConsent } from "@/lib/csv";
 import { suppressedAmong, suppressedKey, suppressionPrint } from "@/lib/suppression";
 import { grantUnlessErased, importedFor } from "@/lib/imported-purchases";
 import { deliverableItems } from "@/lib/bundle-rules";
+import { batchCountKept, batchCountSettled, keepBatchCount } from "@/lib/batch-count";
 import { NIMBUS_FROM, isSenderConfigured, sendBatchOutcome } from "@/lib/email";
 import { GIVE_BACK_FLOOR, GIVE_BACK_FLOOR_EXTRA_COMMANDS, giveBackToMonth, monthlyAllowance, releaseDay, reserveDay, takeFromMonth, takeFromMonthExact } from "@/lib/mail";
 import { IMPORT_MIN_ROWS_PER_UPLOAD, IMPORT_ROW_BYTES, importAllowanceFor, importRowsFor } from "@/lib/import-limits";
@@ -1565,8 +1566,12 @@ async function mailStep(job: ImportJob, store: Store): Promise<"more" | "done" |
     await unsent(portion);
     return "more";
   }
+  const batchKey = `nimbus-import:${job.id}:${emails.slice().sort()[0]}:${emails.length}`;
+  // A retry of a batch whose answer was not known sends under the count kept for it (lib/batch-count.ts): neither
+  // the company's day nor the store's month is taken again for the same people under the same key.
+  const kept = await batchCountKept(batchKey, messages.map((m) => m.to));
   // The company's day first: over it, the same buyers wait for tomorrow.
-  if (!(await reserveDay(messages.length))) {
+  if (!kept && !(await reserveDay(messages.length))) {
     await redisPipeline([["SADD", mailKey(job.id), ...emails]]);
     await unsent(portion);
     return "retry";
@@ -1575,9 +1580,9 @@ async function mailStep(job: ImportJob, store: Store): Promise<"more" | "done" |
   // import sends from what it took for the whole file when it started (ImportJob.held), saved as taken before the
   // send, so an email that may have gone is never given back; one started before that takes from the month here.
   const held = job.held;
-  const room = held ? Math.min(messages.length, Math.max(0, held.n)) : await reserveMoved(store, messages.length);
+  const room = kept ? messages.length : held ? Math.min(messages.length, Math.max(0, held.n)) : await reserveMoved(store, messages.length);
   const sending = messages.slice(0, room);
-  if (held && room > 0) {
+  if (!kept && held && room > 0) {
     held.n -= room;
     // That save confirmed in its exact shape before anything is sent (CX-123 rule 24; second review on #3384, LOW 1):
     // on any other reply nothing is sent, the addresses wait again, and nothing is given back on it, since the
@@ -1597,11 +1602,15 @@ async function mailStep(job: ImportJob, store: Store): Promise<"more" | "done" |
     await unsent(portion);
     return "more";
   }
-  const sent = await sendBatchOutcome(sending, `nimbus-import:${job.id}:${emails.slice().sort()[0]}:${emails.length}`, { by: "monthly" });
+  const sent = await sendBatchOutcome(sending, batchKey, { by: "monthly" });
+  if (sent === "sent") await batchCountSettled(batchKey, sending.map((m) => m.to));
   if (sent === "retry" || sent === "uncertain") {
     await redisPipeline([["SADD", mailKey(job.id), ...emails]]);
-    // An answer not known (lib/email.ts, sendBatchOutcome) may have sent them: their count is kept, never given back.
-    if (sent === "retry") {
+    // An answer not known (lib/email.ts, sendBatchOutcome) may have sent them: their count is kept, never given back,
+    // and marked so that the same batch tried again is not counted again. A count kept by an earlier unknown answer
+    // stays whatever this one says.
+    if (sent === "uncertain" && !kept) await keepBatchCount(batchKey, sending.map((m) => m.to));
+    if (sent === "retry" && !kept) {
       if (held) held.n += sending.length;
       else await releaseMoved(store, sending.length);
       await releaseDay(sending.length);
@@ -1871,11 +1880,14 @@ export async function sendMoveReminders(deadline: number, now = Date.now()): Pro
       }
       const letter = await reminderEmail(store, field, now);
       if (!letter) continue;
-      if (!(await reserveDay(1))) {
+      const remindKey = `nimbus-move-remind:${store.statsId}:${field}`;
+      // A retry of a reminder whose answer was not known sends under the count kept for it (lib/batch-count.ts).
+      const kept = await batchCountKept(remindKey, [letter.to]);
+      if (!kept && !(await reserveDay(1))) {
         await remindLater(sid, field, now);
         continue;
       }
-      if ((await reserveMoved(store, 1)) < 1) {
+      if (!kept && (await reserveMoved(store, 1)) < 1) {
         await releaseDay(1);
         // The month's emails are spent: tried once more when they open again, while that is still before the renewal
         // date (after it, reminderEmail has nothing to send). Due REMIND_DAYS_BEFORE days before it, and every window
@@ -1897,14 +1909,17 @@ export async function sendMoveReminders(deadline: number, now = Date.now()): Pro
             tags: healthTags(store, false),
           },
         ],
-        `nimbus-move-remind:${store.statsId}:${field}`, { by: "monthly" },
+        remindKey, { by: "monthly" },
       );
       if (sent === "sent") {
+        await batchCountSettled(remindKey, [letter.to]);
         await noteSent(sid, 1);
         counts.sent += 1;
       } else if (sent === "retry" || sent === "uncertain") {
-        // An answer not known (lib/email.ts, sendBatchOutcome) may have sent it: its count is kept, never given back.
-        if (sent === "retry") {
+        // An answer not known (lib/email.ts, sendBatchOutcome) may have sent it: its count is kept, never given back,
+        // and marked so that the same reminder tried again is not counted again.
+        if (sent === "uncertain" && !kept) await keepBatchCount(remindKey, [letter.to]);
+        if (sent === "retry" && !kept) {
           await releaseMoved(store, 1);
           await releaseDay(1);
         }

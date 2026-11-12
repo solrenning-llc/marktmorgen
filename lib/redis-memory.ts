@@ -2356,7 +2356,8 @@ export class MemoryRedis {
     const amount = (value: string | undefined) => (value !== undefined && /^(0|[1-9]\d*)$/.test(value) && Number(value) <= 1e12 ? Number(value) : null);
     const hold = amount(rawHold);
     if (hold === null || hold <= 0) return -1;
-    const existing = held0 instanceof Map ? held0 : null;
+    // An empty hash is no key in Redis (TYPE answers "none"); one left empty by a read here is the same.
+    const existing = held0 instanceof Map && held0.size > 0 ? held0 : null;
     const held = amount(existing?.get("held") ?? "0"), spent = amount(existing?.get("spent") ?? "0");
     if (held === null || spent === null) return -1;
     if (op === "reserve") {

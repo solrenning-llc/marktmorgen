@@ -145,8 +145,10 @@ export function assistantShown(store: Store, now = Date.now()): boolean {
 export async function assistantLeft(store: Store, now = Date.now()): Promise<{ left: number; answered: number; capMicroUsd: number; spentMicroUsd: number; heldMicroUsd: number } | null> {
   const window = assistantWindow(store.assistantPlan, now / 1000);
   if (!window || !store.statsId || !isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["HGETALL", poolKey(store.statsId, window.id)]]);
+  const [raw, opened] = await redisPipeline([["HGETALL", poolKey(store.statsId, window.id)], ["EXISTS", poolOpenedKey(store.statsId, window.id)]]);
   const flat = Array.isArray(raw) ? raw.map(String) : [];
+  // A month opened whose pool is gone refuses every reply (ASSISTANT_POOL): none is left, not a fresh month.
+  if (flat.length === 0 && opened !== 0) return { left: 0, answered: 0, capMicroUsd: assistantPoolMicroUsd(), spentMicroUsd: 0, heldMicroUsd: 0 };
   const fields = new Map<string, number>();
   for (let i = 0; i + 1 < flat.length; i += 2) fields.set(flat[i], Number(flat[i + 1]) || 0);
   const cap = Math.min(fields.get("cap") ?? assistantPoolMicroUsd(), assistantPoolMicroUsd());

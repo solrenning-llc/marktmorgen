@@ -18,6 +18,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { takeData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
+import { batchCountKept, batchCountSettled, keepBatchCount } from "@/lib/batch-count";
 import { NIMBUS_FROM, sendBatchOutcome, sendEmail } from "@/lib/email";
 import { withinLimit } from "@/lib/request-guard";
 import { fromLine, releaseDay, render, reserveDay } from "@/lib/mail";
@@ -389,7 +390,11 @@ export async function runLaunches(load: (handle: string) => Promise<Store | null
         console.error("sending a waitlist launch: its places were read in an unknown shape, so the batch waits", new UnknownReplyError("a launch batch's waitlist places"));
         break;
       }
-      if (!(await reserveDay(chunk.length))) break;
+      const batchKey = `waitlist:${sid}:${pid}:${job.started}:${job.cursor}`;
+      const to = chunk.map(([email]) => email);
+      // A retry of a batch whose answer was not known sends under the day's count kept for it (lib/batch-count.ts).
+      const kept = await batchCountKept(batchKey, to);
+      if (!kept && !(await reserveDay(chunk.length))) break;
       const messages = chunk.map(([email, entry]) => {
         const page = `${SITE_URL}/@${store.handle}/waitlist?leave=${entry.t}`;
         const door = {
@@ -405,13 +410,16 @@ export async function runLaunches(load: (handle: string) => Promise<Store | null
         const r = render(sender, words.subject, words.body, null, door);
         return { from: fromLine(sender), to: email, subject: r.subject, text: r.text, html: r.html, replyTo: store.email, headers: r.headers };
       });
-      const outcome = await sendBatchOutcome(messages, `waitlist:${sid}:${pid}:${job.started}:${job.cursor}`, { by: "store", store, kind: "email" });
+      const outcome = await sendBatchOutcome(messages, batchKey, { by: "store", store, kind: "email" });
+      if (outcome === "sent") await batchCountSettled(batchKey, to);
       if (outcome === "retry" || outcome === "uncertain") {
-        // An answer not known (lib/email.ts, sendBatchOutcome) may have sent them: their count is kept, never given back.
-        if (outcome === "retry") await releaseDay(chunk.length);
+        // An answer not known (lib/email.ts, sendBatchOutcome) may have sent them: their count is kept, never given
+        // back, and marked so that the same batch tried again is not counted again.
+        if (outcome === "uncertain" && !kept) await keepBatchCount(batchKey, to);
+        if (outcome === "retry" && !kept) await releaseDay(chunk.length);
         break;
       }
-      if (outcome === "refused") await releaseDay(chunk.length);
+      if (outcome === "refused" && !kept) await releaseDay(chunk.length);
       else {
         job.sent += chunk.length;
         sent += chunk.length;

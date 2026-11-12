@@ -35,6 +35,7 @@
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import { deriveKey } from "@/lib/secret-box";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
+import { batchCountKept, batchCountSettled, keepBatchCount } from "@/lib/batch-count";
 import { type BatchMessage, sendBatchOutcome } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
@@ -416,7 +417,10 @@ export async function advanceUpdate(id: string, load: (handle: string) => Promis
         break;
       }
       if (recipients.length) {
-        const reserved = await reserve(store, recipients.length);
+        const batchKey = `upd:${id}:${job.done}:${emails.length}`;
+        // A retry of a batch whose answer was not known sends under the count kept for it (lib/batch-count.ts).
+        const kept = await batchCountKept(batchKey, recipients);
+        const reserved = kept ? "ok" : await reserve(store, recipients.length);
         if (reserved !== "ok") {
           job = {
             ...job,
@@ -446,10 +450,15 @@ export async function advanceUpdate(id: string, load: (handle: string) => Promis
           });
           messages.push({ from: fromLine(store), to: email, subject: r.subject, text: r.text, html: r.html, replyTo: store.email, headers: r.headers });
         }
-        const outcome = await sendBatchOutcome(messages, `upd:${id}:${job.done}:${emails.length}`, { by: "monthly" });
+        const outcome = await sendBatchOutcome(messages, batchKey, { by: "monthly" });
+        if (outcome === "sent") await batchCountSettled(batchKey, recipients);
         if (outcome !== "sent") {
-          // An answer not known (lib/email.ts, sendBatchOutcome) may have sent them: their count is kept, never given back.
-          if (outcome !== "uncertain") await release(store, recipients.length);
+          // An answer not known (lib/email.ts, sendBatchOutcome) may have sent them: their count is kept, never given
+          // back, and marked so that the same batch tried again is not counted again. A count kept by an earlier
+          // unknown answer stays whatever this one says.
+          if (outcome === "uncertain") {
+            if (!kept) await keepBatchCount(batchKey, recipients);
+          } else if (!kept) await release(store, recipients.length);
           const failures = job.failures + 1;
           job =
             failures >= 5 || outcome === "refused"

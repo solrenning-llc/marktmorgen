@@ -48,7 +48,7 @@ is(
   [
     recovery.includes("const keepAsking = () => { setAsking(false); requestAnimationFrame(() => removeButton.current?.focus()); };"),
     recovery.includes('onKeyDown={(e) => { if (e.key === "Escape") keepAsking(); }}'),
-    recovery.includes("requestAnimationFrame(() => (removed ? heading.current : removeButton.current)?.focus());"),
+    recovery.includes("requestAnimationFrame(() => afterRemoveFocus(removed, removeButton.current, heading.current)?.focus());"),
     recovery.includes('<h3 ref={heading} tabIndex={-1} id="account-recovery-title"'),
     recovery.includes("<button ref={removeButton} type=\"button\""),
   ],
@@ -56,7 +56,7 @@ is(
 );
 // Review of 830a99c (LOW): when the removal answers "log in again", the whole form (question and Remove) gives way to
 // the "Log in again" panel, so Remove is gone and focusing it dropped the focus to the page. The heading takes it then.
-const landing = (recoveryModule as Record<string, unknown>).afterRemoveFocus as (<T>(removed: boolean, remove: T | null, heading: T | null) => T | null) | undefined;
+const landing = (recoveryModule as Record<string, unknown>).afterRemoveFocus as (<R, H>(removed: boolean, remove: R | null, heading: H | null) => R | H | null) | undefined;
 is(
   "after the request the focus lands on what is still there: the heading once removed, Remove if it is still drawn, else the heading",
   landing ? [landing(true, "remove", "heading"), landing(false, "remove", "heading"), landing(false, null, "heading")] : null,

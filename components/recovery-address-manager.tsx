@@ -58,6 +58,15 @@ export function RecoveryAddressUnread() {
  * Account part: the way back in when they can no longer open the inbox they
  * log in with, or lose their phone with two-step login on.
  */
+/**
+ * Where the focus lands after the removal request (2.4.3): the heading once the address is gone; Remove when it is still
+ * drawn; otherwise the heading too, as when the answer asks to log in again and the "Log in again" panel replaces the
+ * form, Remove with it. Never nothing while the heading is there.
+ */
+export function afterRemoveFocus<R, H>(removed: boolean, remove: R | null, heading: H | null): R | H | null {
+  return removed ? heading : (remove ?? heading);
+}
+
 export function RecoveryAddressManager({ shown: initial }: { shown: string }) {
   const [shown, setShown] = useState(initial);
   /** Whether removing it is being asked about, on the page itself (485 [IT2]: no browser dialog). */
@@ -171,7 +180,7 @@ export function RecoveryAddressManager({ shown: initial }: { shown: string }) {
                     toast("Recovery address removed.");
                   }).then(() => {
                     setAsking(false);
-                    requestAnimationFrame(() => (removed ? heading.current : removeButton.current)?.focus());
+                    requestAnimationFrame(() => afterRemoveFocus(removed, removeButton.current, heading.current)?.focus());
                   });
                 }}
               >

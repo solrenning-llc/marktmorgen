@@ -27,7 +27,7 @@ part("Every studio area is accounted for");
   is("no folder of app/studio is missing (put a new one in HELP_AREAS or AREAS_WITHOUT_HELP, lib/help-areas.ts)", folders.filter((f) => !placed.includes(f)), []);
   is("no area names a folder that is not there", placed.filter((f) => !folders.includes(f)), []);
   is("each folder is in exactly one list", placed.filter((f, i) => placed.indexOf(f) !== i), []);
-  is("each area without help says what its answer is to explain", Object.values({ ...AREAS_WITHOUT_HELP, ...NOT_AREAS }).every((why) => why.length > 20), true);
+  is("each area without help, and each screen that is not an area, says why", Object.values({ ...AREAS_WITHOUT_HELP, ...NOT_AREAS }).every((why) => why.length > 20), true);
 }
 
 part("Every answer named exists and speaks of its area");
@@ -81,6 +81,13 @@ part("Names quoted in the answers written for HC1 are on the screens");
   const SCREENS: Record<string, string[]> = {
     "where-do-i-find-my-plans-invoices": ["app/studio/page.tsx", "app/studio/invoices/page.tsx"],
     "can-i-put-a-label-on-many-contacts-at-once": ["app/studio/import/page.tsx", "components/bulk-labels.tsx"],
+    "how-do-i-build-a-funnel": ["app/studio/page.tsx", "components/studio-tools.tsx", "app/studio/funnels/page.tsx", "components/funnel-type-picker.tsx", "components/page-funnel-editor.tsx", "components/funnel-editor.tsx"],
+    "how-do-i-refund-members-for-unused-time-when-my-store-closes": ["app/studio/page.tsx", "app/studio/closing-refunds/page.tsx", "components/closing-refunds-confirm.tsx"],
+    "how-do-i-make-a-business-card-to-share": ["app/studio/page.tsx", "app/studio/site/page.tsx", "app/studio/card/page.tsx", "components/creator-card-editor.tsx"],
+    "what-is-your-path-and-how-do-i-start-it": ["components/studio-header.tsx", "components/path-studio-reminder.tsx", "app/studio/path/page.tsx", "components/path-onboarding.tsx", "lib/path-checkout.ts"],
+    "how-do-i-choose-a-growth-goal-and-see-what-to-do-next": ["app/studio/page.tsx", "components/studio-tools.tsx", "app/studio/growth/page.tsx", "lib/growth-plan.ts", "components/template-library.tsx"],
+    "how-do-i-approve-changes-my-ai-assistant-prepared": ["app/studio/agent/page.tsx", "components/agent-proposals.tsx", "app/developers/page.tsx"],
+    "how-do-i-keep-my-busy-times-out-of-the-team-calls-i-host": ["app/studio/page.tsx", "components/studio-tools.tsx", "components/team-event-editor.tsx", "app/studio/calendar/page.tsx", "components/host-calendar.tsx"],
   };
   const plain = (text: string) => text.replace(/&apos;|\u2019/g, "'");
   for (const [id, files] of Object.entries(SCREENS)) {

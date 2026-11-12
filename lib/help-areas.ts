@@ -23,9 +23,13 @@ export type HelpArea = { folder: string; name: string; answer: string; mentions:
 export const HELP_AREAS: readonly HelpArea[] = [
   { folder: "add", name: "Products", answer: "can-i-put-my-own-products-on-my-store", mentions: "product" },
   { folder: "affiliates", name: "Affiliates", answer: "can-i-run-an-affiliate-program", mentions: "affiliate" },
+  { folder: "agent", name: "What the AI proposes", answer: "how-do-i-approve-changes-my-ai-assistant-prepared", mentions: "What the AI proposes" },
   { folder: "agreements", name: "Proposals and agreements", answer: "how-do-i-send-a-proposal-or-an-agreement-to-sign", mentions: "agreement" },
   { folder: "blog", name: "Blog", answer: "can-my-store-have-a-blog", mentions: "blog" },
   { folder: "bundles", name: "Bundles", answer: "can-i-sell-a-bundle-of-products", mentions: "bundle" },
+  { folder: "calendar", name: "Your calendar", answer: "how-do-i-keep-my-busy-times-out-of-the-team-calls-i-host", mentions: "calendar" },
+  { folder: "card", name: "Business card", answer: "how-do-i-make-a-business-card-to-share", mentions: "card" },
+  { folder: "closing-refunds", name: "Refund unused time", answer: "how-do-i-refund-members-for-unused-time-when-my-store-closes", mentions: "unused time" },
   { folder: "community", name: "Community", answer: "can-i-run-a-community-or-a-webinar", mentions: "community" },
   { folder: "companies", name: "Companies", answer: "can-a-company-buy-one-of-my-products-for-its-whole-team", mentions: "company" },
   { folder: "copy", name: "Copy a store", answer: "can-i-copy-a-whole-store-into-another-of-my-stores", mentions: "copy" },
@@ -35,17 +39,20 @@ export const HELP_AREAS: readonly HelpArea[] = [
   { folder: "disputes", name: "Disputed purchases", answer: "who-handles-refunds-and-disputes", mentions: "dispute" },
   { folder: "email", name: "Email", answer: "can-i-email-the-people-on-my-list", mentions: "email" },
   { folder: "forms", name: "Forms, surveys and quizzes", answer: "can-i-add-a-form-a-survey-or-a-quiz", mentions: "form" },
+  { folder: "funnels", name: "Funnels", answer: "how-do-i-build-a-funnel", mentions: "funnel" },
+  { folder: "growth", name: "Growth", answer: "how-do-i-choose-a-growth-goal-and-see-what-to-do-next", mentions: "goal" },
   { folder: "import", name: "Moving from another platform", answer: "can-i-move-my-store-from-stan-gumroad-or-another-platform", mentions: "Moving from another platform" },
-  { folder: "invoices", name: "Your plan's invoices", answer: "where-do-i-find-my-plans-invoices", mentions: "invoices" },
   { folder: "inbox", name: "Inbox", answer: "can-visitors-chat-with-me-and-where-do-i-answer-them", mentions: "inbox" },
   { folder: "integrations", name: "Email platforms", answer: "can-i-send-my-list-to-mailchimp-kit-beehiiv-or-mailerlite", mentions: "Mailchimp" },
   { folder: "invite", name: "Invite creators", answer: "are-creator-invitations-available", mentions: "invit" },
+  { folder: "invoices", name: "Your plan's invoices", answer: "where-do-i-find-my-plans-invoices", mentions: "invoices" },
   { folder: "labels", name: "Labels on contacts", answer: "can-i-put-a-label-on-many-contacts-at-once", mentions: "label" },
   { folder: "meetings", name: "Video calls", answer: "can-i-sell-paid-calls", mentions: "Video calls" },
   { folder: "memberships", name: "Memberships", answer: "can-i-sell-a-membership", mentions: "membership" },
   { folder: "new", name: "A new store", answer: "can-i-run-more-than-one-store-or-have-someone-help-me", mentions: "store" },
   { folder: "outreach", name: "Outreach", answer: "can-my-store-help-me-find-sponsors-and-partners", mentions: "Outreach" },
   { folder: "pages", name: "Sales pages", answer: "can-i-build-a-sales-page-or-a-landing-page", mentions: "page" },
+  { folder: "path", name: "Your Path", answer: "what-is-your-path-and-how-do-i-start-it", mentions: "Path" },
   { folder: "people", name: "Buyers", answer: "can-i-see-everything-one-buyer-has-bought-from-me", mentions: "buyer" },
   { folder: "phone", name: "Phone notifications", answer: "does-it-work-on-a-phone", mentions: "notifications" },
   { folder: "podcast", name: "Private podcasts", answer: "can-i-sell-a-private-podcast", mentions: "podcast" },
@@ -59,15 +66,7 @@ export const HELP_AREAS: readonly HelpArea[] = [
 ];
 
 /** Studio areas the help center has no answer for yet, by folder, each with what that answer is to explain. */
-export const AREAS_WITHOUT_HELP: Readonly<Record<string, string>> = {
-  agent: "What the AI proposes for the store, and how to accept or turn down each proposal.",
-  calendar: "Keeping busy times out of team calls.",
-  card: "The business card page.",
-  "closing-refunds": "Refunding members the time they paid for after a store closes.",
-  funnels: "Building a funnel from its steps, and what each step's numbers mean.",
-  growth: "Choosing the next business goal.",
-  path: "The Path and what each level asks.",
-};
+export const AREAS_WITHOUT_HELP: Readonly<Record<string, string>> = {};
 
 /** Studio screens that are not an area of their own. */
 export const NOT_AREAS: Readonly<Record<string, string>> = {

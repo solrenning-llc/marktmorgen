@@ -43,6 +43,19 @@ type Answer = { status: number; data: Record<string, unknown> };
 const str = (v: unknown) => (typeof v === "string" ? v : "");
 const num = (v: unknown) => (typeof v === "number" ? v : NaN);
 const err = (a: Answer) => str((a.data.error as { message?: unknown } | undefined)?.message);
+/**
+ * A subscription read back proves a switch only when the reply is that very subscription (rule 30): its own id, equal
+ * to the one asked for. Another subscription's reply, or one with no id, fails the check; it never passes it. A body
+ * that is not an object (JSON `null`) fails it the same way, without throwing.
+ */
+const isOwnReply = (a: Answer, id: string): boolean =>
+  a.status === 200 && a.data !== null && typeof a.data === "object" && Object.hasOwn(a.data, "id") && a.data.id === id;
+const notOwn = (a: Answer, id: string) => (isOwnReply(a, id) ? "" : `Stripe's reply was not ${id}; `);
+/** The price on a subscription's first line, as Stripe answers it (an object, or its id). */
+const linePrice = (a: Answer) => {
+  const price = (a.data.items as { data?: { price?: unknown }[] } | undefined)?.data?.[0]?.price;
+  return typeof price === "string" ? price : str((price as { id?: unknown } | undefined)?.id);
+};
 
 function tier(id: string, title: string, cents: number, interval: "month" | "year"): Listing {
   return { id, title, priceCents: cents, recurring: { interval, trialDays: 0, payments: 0 } } as unknown as Listing;
@@ -95,19 +108,26 @@ export async function verifyTiers(): Promise<Check[]> {
       const shown = dueNow(preview.data as Parameters<typeof dueNow>[0], at);
       const updated = await onDemoAccount("POST", `/subscriptions/${m.sub}`, switchBody(m.item, prices[to.id], at));
       if (updated.status !== 200) return note(`${label}: switch`, false, err(updated));
+      // The switch's own reply proves its charge only when it is that subscription with the price just written on it
+      // (rule 30): another subscription's reply, one with no id, or one still on the old price fails the check.
+      const written = isOwnReply(updated, m.sub) && linePrice(updated) === prices[to.id];
       const inv = (updated.data.latest_invoice ?? {}) as Record<string, unknown>;
       // What the member's card paid for a charge (after any credit they held);
       // the invoice's total for a credit, which is what goes on their balance.
       const charged = num(inv.total) > 0 ? num(inv.amount_paid) : num(inv.total);
       note(
         `${label}: the amount the member page shows is what Stripe charges`,
-        shown === charged && !updated.data.pending_update,
-        `shown ${shown}; Stripe's invoice ${num(inv.total)} (${str(inv.status)}), card paid ${num(inv.amount_paid)}; the whole next invoice in the preview was ${num(preview.data.total)}`,
+        written && shown === charged && !updated.data.pending_update,
+        `${notOwn(updated, m.sub)}${isOwnReply(updated, m.sub) && !written ? `the reply is not on the price written; ` : ""}shown ${shown}; Stripe's invoice ${num(inv.total)} (${str(inv.status)}), card paid ${num(inv.amount_paid)}; the whole next invoice in the preview was ${num(preview.data.total)}`,
       );
       const after = await onDemoAccount("GET", `/subscriptions/${m.sub}`);
       const now = productOfSub(after.data);
       const meta = currentMeta({ store: s.handle, product: A.id }, { mode: "subscription", subscription: after.data });
-      note(`${label}: every door now reads the new tier`, now === to.id && meta.product === to.id, `subscription reads ${now}; a checkout bought as ${A.id} now hands over ${meta.product}`);
+      note(
+        `${label}: every door now reads the new tier`,
+        isOwnReply(after, m.sub) && now === to.id && meta.product === to.id,
+        `${notOwn(after, m.sub)}subscription reads ${now}; a checkout bought as ${A.id} now hands over ${meta.product}`,
+      );
     };
 
     const m = await subscribe("verify+tiers@example.com");
@@ -124,15 +144,21 @@ export async function verifyTiers(): Promise<Check[]> {
     await onDemoAccount("POST", `/customers/${d.customer}`, new URLSearchParams({ "invoice_settings[default_payment_method]": str(failing.data.id) }));
     const at = Math.floor(Date.now() / 1000);
     const refused = await onDemoAccount("POST", `/subscriptions/${d.sub}`, switchBody(d.item, prices[B.id], at));
-    const pending = Boolean(refused.data.pending_update);
+    // Rule 30: only the declined subscription's own reply names its pending update and its invoice; on any other reply
+    // nothing is voided (it could be another's invoice) and the check fails.
+    const pending = isOwnReply(refused, d.sub) && Boolean(refused.data.pending_update);
     const inv = (refused.data.latest_invoice ?? {}) as Record<string, unknown>;
     let voided = "";
-    if (pending && str(inv.id)) voided = str((await onDemoAccount("POST", `/invoices/${str(inv.id)}/void`, new URLSearchParams())).data.status);
+    if (pending && str(inv.id)) {
+      const reply = await onDemoAccount("POST", `/invoices/${str(inv.id)}/void`, new URLSearchParams());
+      // A void answered for another invoice, or with no id, never proves this one voided.
+      voided = isOwnReply(reply, str(inv.id)) ? str(reply.data.status) : "";
+    }
     const still = await onDemoAccount("GET", `/subscriptions/${d.sub}`);
     note(
       "a declined card changes nothing, and its invoice is voided",
-      pending && voided === "void" && productOfSub(still.data) === A.id,
-      `answer ${refused.status}${err(refused) ? ` (${err(refused)})` : ""}, pending update ${pending}, invoice ${voided || str(inv.status)}, still on ${productOfSub(still.data)}`,
+      pending && voided === "void" && isOwnReply(still, d.sub) && productOfSub(still.data) === A.id,
+      `${notOwn(refused, d.sub)}${notOwn(still, d.sub)}answer ${refused.status}${err(refused) ? ` (${err(refused)})` : ""}, pending update ${pending}, invoice ${voided || str(inv.status)}, still on ${productOfSub(still.data)}`,
     );
   } finally {
     for (const id of made) await onDemoAccount("DELETE", `/subscriptions/${id}`).catch(() => null);

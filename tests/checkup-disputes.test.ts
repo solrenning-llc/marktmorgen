@@ -46,7 +46,7 @@ async function main(): Promise<void> {
   const read = await readDisputes(ACCOUNT, NOW);
   const call = asked.find((a) => a.url.includes("/v1/disputes"))!;
   is("a GET on the creator's own account, from the last 180 days", [call.method, call.account, call.url.includes(`created[gte]=${Math.floor(NOW / 1000) - DISPUTE_DAYS * 86_400}`), call.url.includes("limit=100")], ["GET", ACCOUNT, true, true]);
-  const problem = disputesCheck(read);
+  const problem = disputesCheck(read, NOW);
   is("two waiting: a problem, with the next due date", [problem.state, problem.found], ["problem", "2 disputes are waiting for your answer on your Stripe account. The next is due on November 8 (UTC)."]);
   is("in Stripe's own words for an unanswered one", problem.ifLeft, "A dispute not answered by its due date is lost, and the disputed money cannot be won back.");
   is("where to answer, and the studio's page to look first", problem.fix?.kind === "outside" && problem.fix.where.includes("Disputes page of your Stripe Dashboard") && problem.fix.where.includes('the "Review one disputed purchase" page in your studio'), true);

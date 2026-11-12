@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import { connection } from "next/server";
 import { cache } from "react";
-import { type Store, normaliseHandle, storeForPage } from "@/lib/store";
+import { type Store, normaliseHandle } from "@/lib/store";
+import { storeForHandleExactly } from "@/lib/store-exact";
 import { lookStyle } from "@/lib/store-look";
 import { joinOpen } from "@/lib/store-join";
 import { joinWords } from "@/lib/buyer-words/join";
@@ -11,6 +12,7 @@ import { ClicksBox } from "@/components/store-product";
 import { scriptMode, withTags } from "@/lib/embed-sites";
 import { readScriptOpen } from "@/lib/embed-open";
 import { EmbedMessenger } from "@/components/embed-messenger";
+import { StoreBeacon } from "@/components/store-beacon";
 
 type Params = {
   params: Promise<{ handle: string }>;
@@ -23,20 +25,29 @@ const STATUSES = ["sent", "email", "limited", "closed", "error"] as const;
 /** Its height in a frame: the form, its box and its line, or the answer. */
 const FRAME_HEIGHT = 420;
 
-const load = cache(async (raw: string): Promise<Store | null> => {
+/**
+ * The store, null for one that is not there, or "unread" for a read that failed or answered out of shape: never "not
+ * there" (CX-123 rule 24). The store is read exactly (lib/store-exact.ts; Codex J on #2910).
+ */
+const load = cache(async (raw: string): Promise<Store | null | "unread"> => {
   let decoded = "";
   try {
     decoded = decodeURIComponent(raw);
   } catch {
     return null;
   }
-  const store = await storeForPage(normaliseHandle(decoded.replace(/^@/, ""))).catch(() => null);
-  return store && !store.suspended ? store : null;
+  try {
+    const store = await storeForHandleExactly(normaliseHandle(decoded.replace(/^@/, "")));
+    if (store === "unknown") return "unread";
+    return store !== "none" && !store.suspended ? store : null;
+  } catch {
+    return "unread";
+  }
 });
 
 export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const store = await load((await params).handle);
-  return { title: store ? `${joinWords(store.language).pageTitle} — ${store.name}` : "Email list", robots: { index: false, follow: false } };
+  return { title: store && store !== "unread" ? `${joinWords(store.language).pageTitle} — ${store.name}` : "Email list", robots: { index: false, follow: false } };
 }
 
 /**
@@ -58,7 +69,7 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
  */
 export default async function EmbedJoin({ params, searchParams }: Params) {
   await connection();
-  const store = await load((await params).handle);
+  const found = await load((await params).handle);
   const query = await searchParams;
   const mode = scriptMode(query.mm) ?? "page";
   const framed = mode === "overlay";
@@ -80,11 +91,19 @@ export default async function EmbedJoin({ params, searchParams }: Params) {
       </div>
     );
 
-  if (!store) {
+  if (found === "unread") {
+    // The store could not be read, so neither could its language: in English, as for a store that is not there.
+    return shell(<p className="st-muted text-sm">This form could not be loaded just now. Try again in a moment.</p>, "en", {}, "light");
+  }
+  if (!found) {
     return shell(<p className="st-muted text-sm">{joinWords("en").notices.closed.title}</p>, "en", {}, "light");
   }
+  const store = found;
 
   const open = await readScriptOpen(store, mode, query);
+  // Opened by the checkout script: the visit is counted by the page itself, through the host's browser check
+  // (lib/embed-open.ts, components/store-beacon.tsx), whatever the form then shows.
+  const counted = (...shown: Parameters<typeof shell>) => shell(<><StoreBeacon handle={store.handle} front={false} />{shown[0]}</>, shown[1], shown[2], shown[3]);
   const w = joinWords(store.language);
   const said = speech(store);
   const look = lookStyle(store.look) as React.CSSProperties;
@@ -101,7 +120,7 @@ export default async function EmbedJoin({ params, searchParams }: Params) {
 
   if (status) {
     const notice = status === "sent" ? { title: w.sentTitle, body: w.sentBody(store.name) } : w.notices[status] ?? w.notices.error;
-    return shell(
+    return counted(
       <>
         {status === "sent" ? <p className="st-price text-sm">{w.almost}</p> : null}
         <h1 className="font-display mt-3 text-2xl font-semibold leading-tight">{notice.title}</h1>
@@ -117,7 +136,7 @@ export default async function EmbedJoin({ params, searchParams }: Params) {
   }
 
   if (!open.live || !joinOpen(store)) {
-    return shell(
+    return counted(
       <>
         <h1 className="font-display text-xl font-semibold leading-snug">{store.join.heading || w.heading}</h1>
         {joinOpen(store) ? (framed ? <p className="st-muted mt-2">{said.w.cardOpens(store.name)}</p> : null) : <p className="st-muted mt-2">{w.notices.closed.title}</p>}
@@ -131,7 +150,7 @@ export default async function EmbedJoin({ params, searchParams }: Params) {
     );
   }
 
-  return shell(
+  return counted(
     <>
       <h1 className="font-display text-xl font-semibold leading-snug">{store.join.heading || w.heading}</h1>
       <p className="st-muted mt-2">{store.join.line || w.line(store.name)}</p>

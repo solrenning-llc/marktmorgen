@@ -122,7 +122,10 @@ const outcome = async <T,>(run: () => Promise<T>): Promise<string> => {
     return JSON.stringify(await run());
   } catch (error) {
     if (error instanceof NotConnected) return `not connected: ${error.message}`;
-    return (error as Error).name === "UnknownReplyError" ? "unknown" : `other: ${(error as Error).message}`;
+    // main's forgetUser carries an unknown reply inside IncompleteForget, so the
+    // owners of the stores already forgotten are still told (#2869): unwrap it.
+    const seen = (error as Error).name === "IncompleteForget" ? ((error as Error).cause as Error | undefined) : (error as Error);
+    return seen?.name === "UnknownReplyError" ? "unknown" : `other: ${(error as Error).message}`;
   }
 };
 const kept = async (key: string) => (await redisPipeline([["GET", key]]))[0];

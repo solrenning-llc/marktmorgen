@@ -297,6 +297,8 @@ const en = {
   nameToShow: "Name to show (optional)",
   updateReview: "Update my review",
   postReview: "Post my review",
+  /** A review of theirs that could not be read: never a blank form that would post over it. */
+  reviewUnread: (title: string) => `Your review of ${title} could not be loaded just now. Refresh this page in a moment to see or change it.`,
   reviewPublic: (store: string) =>
     `Your review is public on ${store}'s page, marked as a verified purchase. Your email address is never shown. ${store} can reply and can hide it, but cannot change it.`,
   deleteReview: "Delete my review",
@@ -634,6 +636,7 @@ const es: GivingWords = {
   nameToShow: "Nombre que se mostrará (opcional)",
   updateReview: "Actualizar mi reseña",
   postReview: "Publicar mi reseña",
+  reviewUnread: (title) => `No pudimos cargar tu reseña de ${title} en este momento. Actualiza esta página en un momento para verla o cambiarla.`,
   reviewPublic: (store) =>
     `Tu reseña es pública en la página de ${store}, marcada como compra verificada. Tu dirección de email nunca se muestra. ${store} puede responder y ocultarla, pero no puede cambiarla.`,
   deleteReview: "Eliminar mi reseña",
@@ -958,6 +961,7 @@ const fr: GivingWords = {
   nameToShow: "Nom affiché (facultatif)",
   updateReview: "Mettre à jour mon avis",
   postReview: "Publier mon avis",
+  reviewUnread: (title) => `Votre avis sur ${title} n'a pas pu être chargé pour l'instant. Actualisez cette page dans un instant pour le voir ou le modifier.`,
   reviewPublic: (store) =>
     `Votre avis est public sur la page de ${store}, marqué comme achat vérifié. Votre adresse e-mail n'est jamais affichée. ${store} peut y répondre et le masquer, mais pas le modifier.`,
   deleteReview: "Supprimer mon avis",
@@ -1282,6 +1286,7 @@ const de: GivingWords = {
   nameToShow: "Angezeigter Name (optional)",
   updateReview: "Meine Bewertung aktualisieren",
   postReview: "Meine Bewertung veröffentlichen",
+  reviewUnread: (title) => `Ihre Bewertung von ${title} konnte gerade nicht geladen werden. Laden Sie diese Seite gleich neu, um sie zu sehen oder zu ändern.`,
   reviewPublic: (store) =>
     `Ihre Bewertung ist auf der Seite von ${store} öffentlich sichtbar und als verifizierter Kauf gekennzeichnet. Ihre E-Mail-Adresse wird nie angezeigt. ${store} kann antworten und sie ausblenden, aber nicht ändern.`,
   deleteReview: "Meine Bewertung löschen",
@@ -1610,6 +1615,7 @@ const it: GivingWords = {
   nameToShow: "Nome da mostrare (facoltativo)",
   updateReview: "Aggiorna la mia recensione",
   postReview: "Pubblica la mia recensione",
+  reviewUnread: (title) => `Al momento non è stato possibile caricare la tua recensione di ${title}. Aggiorna questa pagina tra un momento per vederla o modificarla.`,
   reviewPublic: (store) =>
     `La tua recensione è pubblica sulla pagina di ${store}, segnata come acquisto verificato. Il tuo indirizzo email non viene mai mostrato. ${store} può rispondere e nasconderla, ma non può modificarla.`,
   deleteReview: "Elimina la mia recensione",
@@ -1931,6 +1937,7 @@ const nl: GivingWords = {
   nameToShow: "Naam die wordt getoond (optioneel)",
   updateReview: "Mijn beoordeling bijwerken",
   postReview: "Mijn beoordeling plaatsen",
+  reviewUnread: (title) => `Je beoordeling van ${title} kon nu niet worden geladen. Vernieuw deze pagina zo meteen om hem te zien of te wijzigen.`,
   reviewPublic: (store) =>
     `Je beoordeling is openbaar op de pagina van ${store}, gemarkeerd als geverifieerde aankoop. Je e-mailadres wordt nooit getoond. ${store} kan erop reageren en haar verbergen, maar niet wijzigen.`,
   deleteReview: "Mijn beoordeling verwijderen",
@@ -2259,6 +2266,7 @@ const pt: GivingWords = {
   nameToShow: "Nome a mostrar (opcional)",
   updateReview: "Atualizar a minha avaliação",
   postReview: "Publicar a minha avaliação",
+  reviewUnread: (title) => `Não foi possível carregar a sua avaliação de ${title} neste momento. Atualize esta página daqui a pouco para a ver ou alterar.`,
   reviewPublic: (store) =>
     `A sua avaliação é pública na página de ${store}, marcada como compra verificada. O seu endereço de email nunca é mostrado. ${store} pode responder e ocultá-la, mas não a pode alterar.`,
   deleteReview: "Eliminar a minha avaliação",

@@ -26,7 +26,7 @@ import { addProduct, claimHandle, ensureStatsId, setProductCall, setStripeAccoun
 import type { Product, Store } from "@/lib/store";
 import { readListing, readProduct } from "@/lib/catalog";
 import { type CallListing, confirmBooking, holdAndCheckout, moveBooking, releaseOwnHold, slotsForMove, slotsForProduct } from "@/lib/calls";
-import { type CallSetup, zonedToUtc } from "@/lib/call-setup";
+import type { CallSetup } from "@/lib/call-setup";
 import { putMember } from "@/lib/team";
 import {
   type HostState,
@@ -52,6 +52,7 @@ import { callRefunded } from "@/lib/meet-links";
 import { readRecord, callScope } from "@/lib/meet-records";
 import { redisPipeline, store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import { weekdayAt } from "./weekday";
 import { paidPeriod } from "./billing-period-fixture";
 
 const HOUR = 3_600_000;
@@ -146,17 +147,6 @@ function host(email: string, patch: Partial<TeamHost> = {}): TeamHost {
 }
 
 /** A weekday at least `days` from now, at `minute` past midnight in New York. */
-function weekdayAt(days: number, minute: number): number {
-  for (let d = days; d < days + 8; d += 1) {
-    const day = new Date(Date.now() + d * DAY);
-    const p = new Intl.DateTimeFormat("en-US", { timeZone: NY, year: "numeric", month: "2-digit", day: "2-digit", weekday: "short" }).formatToParts(day);
-    const get = (t: string) => p.find((x) => x.type === t)?.value ?? "";
-    if (get("weekday") === "Sat" || get("weekday") === "Sun") continue;
-    return zonedToUtc(Number(get("year")), Number(get("month")), Number(get("day")), minute, NY) as number;
-  }
-  throw new Error("no weekday");
-}
-
 function state(email: string, patch: Partial<HostState> = {}): HostState {
   return { email, busy: [], booked: [], blocked: false, ...patch };
 }

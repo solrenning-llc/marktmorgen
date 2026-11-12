@@ -78,7 +78,7 @@ import {
 } from "@/lib/product-recurring";
 import { MAX_INTRO_COUNT, activeIntro, introLineEnglish } from "@/lib/intro-price";
 import { activeYearly } from "@/lib/yearly-price";
-import { MAX_ABOUT_LENGTH, aboutBlocks } from "@/lib/product-about";
+import { MAX_ABOUT_LENGTH, aboutBlocks } from "@/lib/product-about-text";
 import { ProductAbout } from "@/components/product-about-view";
 import { type StoreLook, lookStyle } from "@/lib/store-look";
 import { imageUrl } from "@/lib/product-image";

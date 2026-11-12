@@ -6,7 +6,8 @@ import { readKind } from "@/lib/catalog";
 import { ITEM_ID_PATTERN, findLesson, readCourses } from "@/lib/course";
 import { rememberFolderOwner } from "@/lib/delivery";
 import { ALLOWED_CONTENT_TYPES, MAX_FILE_BYTES, safeFileName } from "@/lib/product-file";
-import { costPauseCode, storageRefusal, standingOf } from "@/lib/plan-standing";
+import { costPauseCode, standingOf } from "@/lib/plan-standing";
+import { storageRefusalWord } from "@/lib/storage-refusal";
 import { storageBrakeFor } from "@/lib/storage-quota";
 import { ownsDeliveryId, storeFolder, storeForEmail } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
@@ -71,7 +72,7 @@ export async function POST(request: NextRequest) {
       if (refused) return serviceRefusedJson(refused, "slow_down");
       // What a store may keep goes by where it stands with its plan (lib/plan-standing.ts).
       const standing = standingOf(store);
-      quotaRefusal = storageRefusal(standing);
+      quotaRefusal = storageRefusalWord(standing);
       if (body.multipart !== true) return fail("upload_refresh", 409);
       // Nothing new is stored while a renewal is unpaid (232 [CA1] unit 4).
       { const paused = costPauseCode(store); if (paused) return fail(paused, 409); }

@@ -18,6 +18,7 @@ import { PLANS_ON_SALE } from "@/lib/opening";
 import { SETUP_STORAGE_BYTES, SETUP_VIDEO_HOURS, SETUP_VIDEO_SECONDS, TRIAL_STORAGE_BYTES, standingOf, storageRefusal, videoLimitFor } from "@/lib/plan-standing";
 import { STORAGE_BRAKE_BYTES, fits, storageBrakeFor, storageUsed, storageWords } from "@/lib/storage-quota";
 import { claimHandle, setSubscription, storeForEmail } from "@/lib/store";
+import { storageRefusalWord } from "@/lib/storage-refusal";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 import { canBeCharged } from "@/lib/watch-rules";
 import { paidVideoSeconds, TRIAL_VIDEO_SECONDS } from "@/lib/video-admission-rules";
@@ -72,14 +73,16 @@ async function main(): Promise<void> {
   is("each standing has its own word", [storageRefusal("paid"), storageRefusal("trial"), storageRefusal("none"), storageRefusal("ended")], ["storage_full", "storage_trial", "storage_setup", "storage_setup"]);
   is("and the studio has a sentence for each", ["storage_full", "storage_trial", "storage_setup"].map((word) => typeof STUDIO_MESSAGES[word] === "string" && STUDIO_MESSAGES[word].length > 40), [true, true, true]);
   is("trial refusal points to the tier-specific limit", [STUDIO_MESSAGES.storage_trial.includes("trial storage"), STUDIO_MESSAGES.storage_setup.includes("up to 5 GB"), storageWords(STORAGE_BRAKE_BYTES)], [true, true, "5 GB"]);
-  is("a store is not told to start a plan while none can be started", STUDIO_MESSAGES.storage_setup.includes("Start your plan"), PLANS_ON_SALE);
+  is("a store is not told to start a plan while none can be started", STUDIO_MESSAGES[storageRefusalWord("none")].includes("Start your plan"), PLANS_ON_SALE);
+  is("the server picks the sentence, by whether plans are on sale", [storageRefusalWord("none", false), storageRefusalWord("ended", true), storageRefusalWord("paid", true), storageRefusalWord("trial", true)], ["storage_setup", "storage_setup_open", "storage_full", "storage_trial"]);
+  is("and only the sentence for plans on sale tells a store to start one", [STUDIO_MESSAGES.storage_setup.includes("Start your plan"), STUDIO_MESSAGES.storage_setup_open.includes("Start your plan"), STUDIO_MESSAGES.storage_setup_open.includes("up to 5 GB")], [false, true, true]);
   for (const [name, path] of [["files", "app/api/store/vault/route.ts"], ["lesson videos", "app/api/store/stream/route.ts"]] as const) {
     const door = read(path);
     if (name === "files") {
       const reserved = read("lib/vault-storage.ts");
       is("R2 admission measures confirmed usage under its shared reservation", [/openReservedVault/.test(door), /storageBrakeFor\(standing, store\.tier\)/.test(door), /storageUsed\(input.folder, limit\)/.test(reserved), /held.available !== true/.test(reserved), /reserveStorage/.test(reserved)], [true, true, true, true, true]);
     } else {
-      is(`the door for ${name} measures a store against its own figure and holds a file to what is left`, [/storageUsed\(folder, storageBrakeFor\(standing, store\.tier\)\)/.test(door), /!fits\(held, bytes\)/.test(door), /storageRefusal\(standing\)/.test(door)], [true, true, true]);
+      is(`the door for ${name} measures a store against its own figure and holds a file to what is left`, [/storageUsed\(folder, storageBrakeFor\(standing, store\.tier\)\)/.test(door), /!fits\(held, bytes\)/.test(door), /storageRefusalWord\(standing\)/.test(door)], [true, true, true]);
     }
   }
 

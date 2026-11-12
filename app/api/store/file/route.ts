@@ -14,7 +14,8 @@ import {
   ownsPath,
 } from "@/lib/product-file";
 import { ITEM_ID_PATTERN, findLesson, readCourses } from "@/lib/course";
-import { costPauseCode, storageRefusal, standingOf } from "@/lib/plan-standing";
+import { costPauseCode, standingOf } from "@/lib/plan-standing";
+import { storageRefusalWord } from "@/lib/storage-refusal";
 import { maximumUploadBytes, storageBrakeFor, storageUsed } from "@/lib/storage-quota";
 import { rememberFolderOwner } from "@/lib/delivery";
 import { isVaultConfigured } from "@/lib/vault";
@@ -116,7 +117,7 @@ export async function POST(request: NextRequest) {
         const held = await storageUsed(folder, storageBrakeFor(standing, store.tier));
         if (held.available === false) throw new Error("files_unavailable");
         const maximumSizeInBytes = maximumUploadBytes(held, MAX_FILE_BYTES);
-        if (maximumSizeInBytes <= 0) throw new Error(storageRefusal(standing));
+        if (maximumSizeInBytes <= 0) throw new Error(storageRefusalWord(standing));
 
         // The one moment this store's folder and its owner are both in hand.
         // Kept so the allowance notice can reach them without anybody
@@ -150,7 +151,7 @@ export async function POST(request: NextRequest) {
     return Response.json(answer);
   } catch (error) {
     const reason = error instanceof Error ? error.message : "server_error";
-    const known = ["signed_out", "none", "unknown", "invalid", "forbidden", "gone", "storage_full", "storage_trial", "storage_setup", "files_unavailable", "upload_budget_unavailable", "renewal_unpaid", "plan_disputed"].includes(reason);
+    const known = ["signed_out", "none", "unknown", "invalid", "forbidden", "gone", "storage_full", "storage_trial", "storage_setup", "storage_setup_open", "files_unavailable", "upload_budget_unavailable", "renewal_unpaid", "plan_disputed"].includes(reason);
     if (!known) console.error("signing an upload failed", error);
     return Response.json(
       { ok: false, error: known ? reason : "server_error" },

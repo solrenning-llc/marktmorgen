@@ -23,14 +23,15 @@
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type DataStore, giveData, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
-import { type Block, aboutBlocks, aboutExcerpt, cleanAbout } from "@/lib/product-about";
+import { aboutExcerpt, cleanAbout } from "@/lib/product-about";
+import { MAX_POST_BODY } from "@/lib/store-blog-text";
 import { slugOf } from "@/lib/product-slug";
 import { blogReadArray, blogReadBody } from "@/lib/blog-read-replies";
 import { UnknownReplyError } from "@/lib/redis-reply";
 
 export const MAX_POSTS = 200;
 export const MAX_POST_TITLE = 120;
-export const MAX_POST_BODY = 20_000;
+export { MAX_POST_BODY };
 export const POSTS_PER_PAGE = 12;
 
 const metaKey = (statsId: string) => `nl:blog:meta:${statsId}`;
@@ -75,28 +76,8 @@ export function postIdFrom(segment: string): string | null {
   return POST_ID.test(tail) && (segment.length === 10 || segment[segment.length - 11] === "-") ? tail : null;
 }
 
-/** A post cut into what the page draws: headings, paragraphs and lists. */
-export type PostBlock = Block | { kind: "heading"; text: string };
-
-export function postBlocks(body: string): PostBlock[] {
-  const out: PostBlock[] = [];
-  let run: string[] = [];
-  const flush = () => {
-    if (run.length) out.push(...aboutBlocks(run.join("\n"), MAX_POST_BODY));
-    run = [];
-  };
-  for (const line of cleanAbout(body, MAX_POST_BODY).split("\n")) {
-    const heading = /^##\s+(.+)$/.exec(line.trim());
-    if (heading) {
-      flush();
-      out.push({ kind: "heading", text: heading[1].trim().slice(0, 140) });
-    } else {
-      run.push(line);
-    }
-  }
-  flush();
-  return out;
-}
+// The page's cut of a post lives in lib/store-blog-text.ts, which the browser can carry alone.
+export { postBlocks, type PostBlock } from "@/lib/store-blog-text";
 
 function metaOf(id: string, input: { title: string; body: string; draft: boolean }, publishedAt: number, updatedAt: number): PostMeta {
   const plain = input.body.replace(/^##\s+/gm, "");

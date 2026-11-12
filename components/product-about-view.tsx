@@ -1,5 +1,5 @@
 import { NewTab } from "@/components/new-tab";
-import type { Block, Piece } from "@/lib/product-about";
+import type { Block, Piece } from "@/lib/product-about-text";
 
 /**
  * A product's full description as its page draws it: paragraphs, lists and

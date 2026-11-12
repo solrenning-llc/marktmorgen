@@ -6,7 +6,8 @@ import { readKind } from "@/lib/catalog";
 import { ITEM_ID_PATTERN, VIDEO_TYPES, findLesson, readCourses } from "@/lib/course";
 import { rememberFolderOwner } from "@/lib/delivery";
 import { MAX_FILE_BYTES, safeFileName } from "@/lib/product-file";
-import { costPauseCode, storageRefusal, standingOf } from "@/lib/plan-standing";
+import { costPauseCode, standingOf } from "@/lib/plan-standing";
+import { storageRefusalWord } from "@/lib/storage-refusal";
 import { fits, storageBrakeFor, storageUsed } from "@/lib/storage-quota";
 import { storeFolder, storeForEmail } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
@@ -69,7 +70,7 @@ export async function POST(request: NextRequest) {
     const standing = standingOf(store);
     const held = await storageUsed(folder, storageBrakeFor(standing, store.tier));
     if (held.available === false) return Response.json({ ok: false, error: "video_unavailable" }, { status: 503 });
-    if (!fits(held, bytes)) return Response.json({ ok: false, error: storageRefusal(standing) }, { status: 400 });
+    if (!fits(held, bytes)) return Response.json({ ok: false, error: storageRefusalWord(standing) }, { status: 400 });
     await rememberFolderOwner(folder, ref);
     // The video's records (what the service says of it, its captions' languages) take room in the store's data room first.
     if (!(await takeData(store, [{ slot: "sv", bytes: VIDEO_RECORD_BYTES }])).ok) return Response.json({ ok: false, error: "store_full" }, { status: 409 });

@@ -8,7 +8,7 @@ import { toast } from "@/components/toast";
 import { useStudioHref } from "@/components/studio-store-pin";
 import { type Currency, fieldPrefix, formatMoney, priceExample, readMoney } from "@/lib/money";
 import { MAX_BUNDLE_ITEMS, MIN_BUNDLE_ITEMS, MIN_PICK } from "@/lib/bundle-rules";
-import { MAX_SUMMARY_LENGTH, MAX_TITLE_LENGTH } from "@/lib/catalog";
+import { MAX_SUMMARY_LENGTH, MAX_TITLE_LENGTH } from "@/lib/catalog-rules";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 
 /** A product as the picker shows it. */

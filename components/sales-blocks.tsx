@@ -6,7 +6,7 @@ import { Countdown } from "@/components/countdown";
 import { wordsIn } from "@/lib/buyer-words";
 import { DEFAULT_LANGUAGE, LANGUAGES, type LanguageCode } from "@/lib/store-language";
 import { imageUrl } from "@/lib/product-image";
-import { type Piece, aboutBlocks } from "@/lib/product-about";
+import { type Piece, aboutBlocks } from "@/lib/product-about-text";
 import { CELL_NO, CELL_YES, type CtaBlock, type HeroBlock, type PageBlock, type PageStyle, type RowBlock, type RowElement, bandsOf, quoteHost } from "@/lib/sales-page";
 import { blockWords } from "@/lib/buyer-words/blocks";
 import type { PageFacts } from "@/lib/page-facts";

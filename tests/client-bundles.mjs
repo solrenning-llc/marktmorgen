@@ -40,6 +40,7 @@ export async function checkClientBundles(root) {
   }
  }));
  failures.push(...await checkKeptOut(root));
+ failures.push(...await checkStudioKeptOut(root,entries));
  failures.push(...await checkServerReach(root));
  return {total:entries.length,failed:failures.length,failures};
 }
@@ -53,6 +54,37 @@ export async function checkKeptOut(root) {
   const bytes=Object.values(result.metafile.outputs).reduce((sum,output)=>sum+(output.inputs[module]?.bytesInOutput??0),0);
   if(bytes)failures.push({file:entry,errors:[`carries ${bytes} bytes of ${module}`]});
  }
+ return failures;
+}
+/**
+ * The studio's editors read their refusal sentences from lib/studio-messages.ts. It once chose the sentence for a
+ * store without a plan from PLANS_ON_SALE, so every one of them shipped lib/opening.ts and the gates, margin and tax
+ * rules behind it (about 80 KB minified) to the creator's browser; the server now picks the refusal word instead.
+ */
+const STUDIO_RULES=['lib/opening.ts','lib/commercial-margin.ts','lib/tax-gate.ts','lib/deemed-supplier.ts','lib/stripe-platform-eligibility.ts','lib/store-assistant-rules.ts','lib/receiving-costs.ts'];
+/*
+ * Still carried, by another road: the course and quiz editors read their limits from lib/course.ts and lib/quiz.ts,
+ * which also keep the course records (lib/store-data.ts, then lib/larger-plan.ts and lib/opening.ts); six modules of
+ * the course editor import lib/course.ts. A ratchet: an entry here that no longer carries the rules fails, so it is
+ * taken off the list, and nothing new may join it.
+ */
+const STUDIO_STILL_CARRIES=['components/course-editor.tsx','components/quiz-editor.tsx'];
+const READS_STUDIO_MESSAGES=/from\s+["']@\/lib\/studio-messages["']/;
+export async function checkStudioKeptOut(root,entries) {
+ const failures=[],studio=[];
+ for(const file of entries)if(READS_STUDIO_MESSAGES.test(await readFile(file,'utf8')))studio.push(file);
+ if(!studio.length)failures.push({file:'lib/studio-messages.ts',errors:['no client component reads it: this check would pass on nothing']});
+ let next=0;
+ await Promise.all(Array.from({length:4},async()=>{
+  while(next<studio.length){const file=studio[next++];
+   const result=await build({entryPoints:[file],absWorkingDir:root,bundle:true,write:false,metafile:true,platform:'browser',format:'esm',nodePaths:[join(root,'node_modules')],external:['react','react/*','next/*'],tsconfig:join(root,'tsconfig.json'),logLevel:'silent'}).catch(()=>null);
+   if(!result){failures.push({file:relative(root,file),errors:['could not be bundled to check the rule modules']});continue;}
+   const carried=STUDIO_RULES.filter(module=>Object.values(result.metafile.outputs).some(output=>output.inputs[module]?.bytesInOutput));
+   const name=relative(root,file),known=STUDIO_STILL_CARRIES.includes(name);
+   if(carried.length&&!known)failures.push({file:name,errors:[`carries studio-forbidden rule modules ${JSON.stringify(carried)}`]});
+   if(!carried.length&&known)failures.push({file:name,errors:['no longer carries the rule modules: take it off STUDIO_STILL_CARRIES']});
+  }
+ }));
  return failures;
 }
 /**

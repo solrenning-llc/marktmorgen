@@ -2,7 +2,13 @@
  * What every studio form says when the store's own checks turn a change
  * away (lib/studio-route.ts): each form's own words for these come first.
  */
-import { PLANS_ON_SALE } from "@/lib/opening";
+/*
+ * Every studio editor reads this file in the creator's browser, so it holds fixed
+ * sentences only: it must never import lib/opening.ts, whose gates and margin and
+ * tax rules would ship with each editor (tests/client-bundles.mjs). Whether plans
+ * are on sale is decided on the server, which sends `storage_setup` or
+ * `storage_setup_open` (lib/storage-refusal.ts).
+ */
 import { SETUP_STORAGE_BYTES } from "@/lib/plan-standing";
 
 const GB = 1024 * 1024 * 1024;
@@ -17,9 +23,10 @@ export const STUDIO_MESSAGES: Record<string, string> = {
   storage_full: "This file is larger than your remaining storage. Review the files you no longer need before removing anything.",
   // The same, for a store that is not on a paid plan yet (lib/plan-standing.ts).
   storage_trial: "This file is larger than your remaining trial storage. Check the allowance and remaining space in your studio, then review files you no longer need.",
-  storage_setup: PLANS_ON_SALE
-    ? `A store without a plan holds up to ${SETUP_GB} GB, and this file does not fit in what is left. Start your plan to add more; trial storage is capped by the plan you choose.`
-    : `A store holds up to ${SETUP_GB} GB until its plan starts, and this file does not fit in what is left. Plans are not on sale yet; until they are, delete a file you do not need to make room.`,
+  // While no plan can be started.
+  storage_setup: `A store holds up to ${SETUP_GB} GB until its plan starts, and this file does not fit in what is left. Plans are not on sale yet; until they are, delete a file you do not need to make room.`,
+  // Once plans are on sale (lib/opening.ts PLANS_ON_SALE, read on the server).
+  storage_setup_open: `A store without a plan holds up to ${SETUP_GB} GB, and this file does not fit in what is left. Start your plan to add more; trial storage is capped by the plan you choose.`,
   upload_refresh: "Reload this page, then choose your file again.",
   // What the store keeps in the database is past its data room (lib/store-data-rules.ts).
   store_full: "Your store's record space is full. Review old posts, drafts, pages or contacts. Remove only what you no longer need, then try the change again.",

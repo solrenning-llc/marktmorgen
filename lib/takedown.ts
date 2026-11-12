@@ -593,9 +593,6 @@ const HELD_LOCK_SECONDS = 120;
 const HELD_LOCK_WAIT_MS = 10_000;
 /** The most stores one run of the daily job looks at; the rest wait for the next run. */
 const HELD_PER_RUN = 100;
-/** A store that could not be read is looked at again a week later, never forgotten. */
-const UNREAD_AGAIN_MS = 7 * 86_400_000;
-
 /**
  * Takes a store off the daily job's index; throws unless Redis confirms it. One member is named, so only 0 or 1 is a
  * receipt: any other count is unknown (review of #3539), never a removal.
@@ -768,13 +765,14 @@ async function settleStore(ref: string, now: number, counts: HeldCounts): Promis
     const store = await storeForEmail(ref);
     if (!store) {
       // A store that is gone has nothing held left to settle: its entry leaves the index, so no address stays in it.
-      // One that could not be read is never taken for gone (rule 24): looked at again later.
+      // One that could not be read is never taken for gone (rule 24): looked at again at the next run, as a failed
+      // put-back is, so one unread day never pushes a due put-back past RESTORE_BY_WEEKDAYS (review of #3539).
       if ((await storeRecordKept(ref)) === false) {
         await dropFromIndex(ref);
         return;
       }
       counts.failed += 1;
-      await lookAgain(ref, now + UNREAD_AGAIN_MS);
+      await lookAgain(ref, now);
       return;
     }
     if (store.heldUnread?.length) console.error("a store keeps held links that could not be read; they are left as they are", { count: store.heldUnread.length });

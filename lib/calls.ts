@@ -1789,6 +1789,28 @@ export async function confirmBooking(input: {
   } catch (error) {
     throw new Error("reading a team booking's hosts failed; confirmed later", { cause: error });
   }
+  // The creator's webhooks are told before the once-only mark, for the same reason (issue #3937): emitEvent throws so
+  // its caller tries again when it could not record the event (its own once-only mark unknown, or its deliveries not
+  // written), and once the mark is down nothing confirms the booking again, so the event would be lost. Thrown here,
+  // the booking stays unconfirmed and the mail job, catchUpBookings and the thanks page confirm it later; the event's
+  // id is made from the checkout, so it is recorded once whatever the tries. A booking already confirmed (or moved
+  // before it was) is not told again: one EXISTS, read exactly (rule 24), before the event.
+  const confirmed = repliesFor(await redisPipeline([["EXISTS", confirmedKey(session)]]), 1)?.[0];
+  if (confirmed !== 0 && confirmed !== 1) throw new UnknownReplyError("a booking's confirmation mark");
+  if (confirmed === 1) return;
+  try {
+    await emitEvent(store, "call.booked", session, {
+      checkout_session: session,
+      product: { id: product.id, title: product.title },
+      start: new Date(start).toISOString(),
+      end: new Date(end).toISOString(),
+      kind: product.call.kind === "live" ? "live_session" : product.call.seats > 1 ? "group_call" : "call",
+      buyer: { email: buyerEmail, name: input.buyerName ?? null, timezone: input.buyerTz },
+      answers: (input.answers ?? []).map((answer) => ({ question: answer.label, answer: answer.value })),
+    });
+  } catch (error) {
+    throw new Error("queueing the call.booked webhook failed; confirmed later", { cause: error });
+  }
   const [fresh] = await orderWrite(store, [["SET", confirmedKey(session), "1", "NX", "EX", CONFIRMED_SECONDS]]);
   if (fresh === null) return;
   // Booked: the orders it was admitted as are the window's (lib/orders.ts), once, by the checkout.
@@ -1817,15 +1839,6 @@ export async function confirmBooking(input: {
       console.error("planning call reminders failed", error),
     );
   }
-  await emitEvent(store, "call.booked", session, {
-    checkout_session: session,
-    product: { id: product.id, title: product.title },
-    start: new Date(start).toISOString(),
-    end: new Date(end).toISOString(),
-    kind: product.call.kind === "live" ? "live_session" : product.call.seats > 1 ? "group_call" : "call",
-    buyer: { email: buyerEmail, name: input.buyerName ?? null, timezone: input.buyerTz },
-    answers: (input.answers ?? []).map((answer) => ({ question: answer.label, answer: answer.value })),
-  }).catch((error) => console.error("queueing the call.booked webhook failed", error));
   // The creator's phone, when a device of theirs asked for bookings
   // (lib/phone-alerts.ts): what, when in their own time zone, and what was paid.
   // In the currency it was paid in: the store's own, unless the store changed its currency since.

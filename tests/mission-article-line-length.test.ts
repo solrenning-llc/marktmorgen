@@ -12,6 +12,10 @@ import { readFileSync } from "node:fs";
  * ("Sell a digital file from your bio") 26 (its body in .prose-nb, its lead,
  * its answers and its closing note). Each is now at most 46ch: none over 80 at
  * 320, 768 or 1280 px, nor with 1.4.12 text spacing.
+ *
+ * Review of this change (Claude 3, 12 November 2026) measured one block the
+ * audit missed: the mission's "A note on how we write" quote, outside
+ * .prose-nb, at 84 characters a line at 768 and 1280 px. It is capped too.
  */
 const css = readFileSync("app/globals.css", "utf8");
 const mission = readFileSync("app/mission/page.tsx", "utf8");
@@ -32,6 +36,7 @@ test("/mission: its lead, list items, note and timeline items are at most 46ch",
   assert.ok(capped(/<p className="(t-lead mt-6[^"]*)">\s*What you pay us/.exec(mission)?.[1] ?? ""));
   assert.ok(capped(/<p className="([^"]*border-t border-line pt-5[^"]*)"/.exec(mission)?.[1] ?? ""));
   assert.ok(capped(/<p className="([^"]*)">\{r\.items\}/.exec(mission)?.[1] ?? ""));
+  assert.ok(capped(/<blockquote className="([^"]*)">\s*We do not publish invented reviews/.exec(mission)?.[1] ?? ""));
 });
 
 test("a blog article: its lead, answers and closing note are at most 46ch", () => {

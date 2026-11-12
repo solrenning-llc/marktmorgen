@@ -334,7 +334,7 @@ export default function MissionPage() {
 
           <figure className="mt-12 rounded-[var(--r-lg)] border border-line bg-white p-7 sm:p-8">
             <p className="font-semibold text-ink">A note on how we write</p>
-            <blockquote className="mt-3 text-ink-soft">
+            <blockquote className="mt-3 max-w-[46ch] text-ink-soft">
               We do not publish invented reviews, invented customers or screenshots of money we never made. If a page shows
               a person, the photograph is licensed stock, and the page says so. When we compare ourselves with anyone, we name the
               page on their own site that each line comes from, and the date we read it, so you can check it. It is a slower way to sell, and it is the only one we are willing to use.

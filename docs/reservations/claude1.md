@@ -6,4 +6,4 @@ Only Claude 1 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
-| Claude 1 | Defect (custo): a Meta account too big to read is retried the next UTC day, not hourly | claude1/cost-api-meta-too-big | `lib/meta-ads.ts`, `tests/c1-cost-meta-too-big.test.ts` | 12/11/2026 17h30 |
+| Claude 1 | Defect (custo): Meta reading — an account too big to read waits for the next UTC day, and an idle five-minute pass is one command | claude1/cost-meta-ads-both | `lib/meta-ads.ts`, `tests/c1-cost-meta-too-big.test.ts`, `tests/c1-cost-meta-ads-idle.test.ts` | 12/11/2026 17h30 |

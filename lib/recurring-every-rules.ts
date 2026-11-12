@@ -125,6 +125,39 @@ export function stripeEveryFields(prefix: string, interval: Interval, count: num
   return fields;
 }
 
+/** The order's own record of how often a membership is charged, kept by the checkout beside what Stripe is sent. */
+export const PAID_EVERY_KEY = "every_n";
+
+/**
+ * What the checkout keeps under PAID_EVERY_KEY: "month:3" for a membership charged every 3 months. Nothing for a
+ * count of one, so a weekly or monthly checkout carries exactly what it carries today.
+ */
+export function paidEveryValue(interval: Interval, count: number): string | null {
+  return count > 1 && isEvery(interval, count) ? `${interval}:${count}` : null;
+}
+
+/**
+ * How often a membership is charged, as its checkout sent it to Stripe, for the words after paying: from the order,
+ * never from the product as it reads now, which the creator may have changed while the checkout was open. A yearly
+ * payment (`every` "year") is once a year. No record is once the interval: the checkout keeps one for every count
+ * above one. A record that does not read as a choice falls back to the product, as the words read before it existed.
+ */
+export function paidEveryOf(
+  meta: Record<string, string | undefined> | null | undefined,
+  recurring: { interval: Interval; every?: number },
+): { interval: Interval; count: number } {
+  if (meta?.every === "year") return { interval: "year", count: 1 };
+  const kept = meta?.[PAID_EVERY_KEY];
+  if (kept === undefined) return { interval: recurring.interval, count: 1 };
+  const read = /^(day|week|month|year):(\d{1,3})$/.exec(kept);
+  if (read) {
+    const interval = read[1] as Interval;
+    const count = Number(read[2]);
+    if (count > 1 && isEvery(interval, count)) return { interval, count };
+  }
+  return { interval: recurring.interval, count: parseEvery(recurring.interval, recurring.every) };
+}
+
 /** What a membership billed every N cannot go with yet, each said to the creator by its reason. */
 export type EveryProblem = "intro" | "yearly" | "pause" | "tiers" | "payments";
 

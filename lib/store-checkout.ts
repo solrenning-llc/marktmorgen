@@ -7,6 +7,8 @@
  * and leaves Marktmorgen with nothing to hold, skim or lose. The 0% on the home
  * page is this file.
  */
+import { everyOf } from "@/lib/product-recurring";
+import { PAID_EVERY_KEY, paidEveryValue, stripeEveryFields } from "@/lib/recurring-every-rules";
 import { randomBytes } from "node:crypto";
 import { prepareOrderConfirmationPreintent } from "@/lib/orders";
 import { CURRENT_SHIPMENT_MAIL_LIFECYCLE } from "@/lib/shipment-record";
@@ -589,15 +591,20 @@ export async function createCheckout(
   if (membership) {
     // The subscription is created on the creator's own account, like every
     // other charge here, so the member is their customer and not ours.
-    body.set("line_items[0][price_data][recurring][interval]", membership.interval);
+    // How often, as the page says it (609 [WP8]): the interval, and its count only when it is more than one.
+    for (const [key, value] of stripeEveryFields("line_items[0][price_data][recurring]", membership.interval, everyOf(membership))) body.set(key, value);
     // Paid yearly, where the creator offers it: the year's price, once a year (lib/yearly-price.ts).
     const yearlyNow = extras.yearly ? activeYearly(product, store.tiers) : null;
     if (yearlyNow) {
       body.set("line_items[0][price_data][unit_amount]", String(yearlyNow.cents));
       body.set("line_items[0][price_data][recurring][interval]", "year");
+      body.delete("line_items[0][price_data][recurring][interval_count]");
       body.set("metadata[every]", "year");
       body.set("subscription_data[metadata][every]", "year");
     }
+    // Kept on the order for the words after paying, which say it as charged even if the product changes meanwhile.
+    const paidEvery = yearlyNow ? null : paidEveryValue(membership.interval, everyOf(membership));
+    if (paidEvery) body.set(`metadata[${PAID_EVERY_KEY}]`, paidEvery);
     body.set("subscription_data[metadata][store]", store.handle);
     body.set("subscription_data[metadata][product]", product.id);
     if (chosen) body.set("subscription_data[metadata][option]", chosen.id);

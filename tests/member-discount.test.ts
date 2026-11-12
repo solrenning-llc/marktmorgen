@@ -9,6 +9,7 @@
 import { readFileSync } from "node:fs";
 import { claimHandle, setStripeAccount, storeForEmail } from "@/lib/store";
 import { applyMemberDiscount, hasDiscount, memberSubs, readMemberSub } from "@/lib/member-discount";
+import { everyWords } from "@/components/member-discount";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -62,6 +63,10 @@ async function main(): Promise<void> {
   const found = await memberSubs(store, "member@example.com");
   is("only this store's running memberships of that address", found?.map((s) => [s.id, s.discounted]), [["sub_live000001", false], ["sub_disc000001", true]]);
   is("with what each renewal costs", found?.[0] ? [found[0].amount, found[0].currency, found[0].interval, found[0].product] : null, [2900, "usd", "month", "prod000001"]);
+  // Charged every few months (609 [WP8]): the studio's line says it as Stripe bills it, never "a month" (review of b149c0a).
+  const every = (interval_count: unknown) => readMemberSub({ ...subs[0], items: { data: [{ price: { unit_amount: 9000, currency: "usd", recurring: { interval: "month", interval_count } } }] } }, new Set(["memberstore"]))?.every;
+  is("how many intervals a renewal covers, read exactly", [every(undefined), every(1), every(3), every(0), every("3"), every(2.5)], [1, 1, 3, null, null, null]);
+  is("and said that way in the studio", [everyWords({ interval: "month", every: 3 }), everyWords({ interval: "month", every: 1 }), everyWords({ interval: "month", every: null }), everyWords({ interval: "", every: 1 })], [" every 3 months", " a month", "", ""]);
   is("nobody under that address: none", (await memberSubs(store, "nobody@example.com"))?.length, 0);
 
   part("Putting a code on");

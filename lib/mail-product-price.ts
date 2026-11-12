@@ -28,7 +28,7 @@
  * Never the price for a visitor's country (lib/fair-price.ts): an email has
  * no visitor, and its readers live anywhere.
  */
-import { speech } from "@/lib/buyer-words";
+import { everyPhrase, speech } from "@/lib/buyer-words";
 import { salePrice } from "@/lib/store-sale";
 
 /** A sale is shown in an email only while it has more than this left to run: a day. */
@@ -49,6 +49,8 @@ export type PriceFacts = {
   lengthCount?: number;
   /** A membership's interval, or null for something bought once. */
   interval: PriceInterval | null;
+  /** How many intervals one charge covers, when more than one (609 [WP8]). */
+  every?: number;
   /** Whether the buyer chooses the amount, from priceCents up. */
   pwyw: boolean;
   /** A store sale running on this product now (saleOff), with when it ends, in seconds. */
@@ -66,7 +68,8 @@ export function mailPriceLabel(store: { language?: unknown; currency: string }, 
   // A call with several lengths: from the lowest of their prices, as the store's card says it (pricePill).
   if ((f.lengthCount ?? 0) > 1) return `${w.fromPrice(money(f.fromCents))}${tax}`;
   if (f.interval) {
-    const every = `${money(f.fromCents)} ${w.every(f.interval)}`;
+    // How often, as charged (609 [WP8]): "every 3 months" for one charged every few months.
+    const every = `${money(f.fromCents)} ${everyPhrase(store, f.interval, f.every)}`;
     return `${f.optionCount > 1 ? w.fromPrice(every) : every}${tax}`;
   }
   if (f.optionCount > 1) return `${w.fromPrice(money(f.fromCents))}${tax}`;

@@ -15,6 +15,7 @@
  * seconds for members and students, milliseconds for bookings and
  * affiliates, text already for contacts — so no tool has to guess the unit.
  */
+import { everyOf } from "@/lib/product-recurring";
 import { apiError } from "@/lib/api-guard";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
@@ -58,7 +59,7 @@ export type Charge = (more: number, taken?: number) => Promise<Response | null>;
 export type Hold = (most: number) => Promise<Response | ((actual: number) => Promise<Response | null>)>;
 
 /** Every field each list's rows go out with, so a field asked for is checked before anything is taken or read (lib/api-fields.ts, badFields). */
-export const PRODUCT_FIELDS = ["id", "title", "price", "currency", "kind", "interval", "hidden", "url"] as const;
+export const PRODUCT_FIELDS = ["id", "title", "price", "currency", "kind", "interval", "interval_count", "hidden", "url"] as const;
 export const LEAD_FIELDS = ["email", "name", "agreed", "agreed_at", "unsubscribed", "unsubscribed_at", "first_at", "last_at", "products", "product_ids", "tags", "source"] as const;
 export const MEMBER_FIELDS = ["email", "name", "handle", "listed", "announcements", "muted", "removed", "joined_at", "last_seen_at"] as const;
 export const STUDENT_FIELDS = ["email", "lessons_done", "lessons_total", "started_at", "last_seen_at", "blocked"] as const;
@@ -103,6 +104,8 @@ export async function products(store: Store, cursor: string | null, charge: Char
       currency: store.currency,
       kind: p.call ? "call" : p.course ? "course" : p.recurring ? "membership" : p.priceCents === 0 ? "free" : "one_time",
       interval: p.recurring?.interval ?? null,
+      // How many intervals one charge covers (609 [WP8]): 3 with "month" is every 3 months; null for something bought once.
+      interval_count: p.recurring ? everyOf(p.recurring) : null,
       hidden: p.hidden === true,
       url: productLink(store, p.id),
     })),

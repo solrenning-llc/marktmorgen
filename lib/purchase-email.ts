@@ -63,7 +63,8 @@ import type { Listing, Store } from "@/lib/store";
 import { listingsNamed, readListing, recordListings } from "@/lib/catalog";
 import { recordEnrollment } from "@/lib/learn";
 import { type HandOverDeps, confirmPreorder, resendPreorder } from "@/lib/preorders";
-import { speechFor } from "@/lib/buyer-words";
+import { everyPhrase, speechFor } from "@/lib/buyer-words";
+import { paidEveryOf } from "@/lib/recurring-every-rules";
 import { ordersWords } from "@/lib/buyer-words/orders";
 import { firstCharge } from "@/lib/move-rules";
 import { type SaleKey, activeKeys, keyForSale } from "@/lib/licence-keys";
@@ -319,8 +320,11 @@ function renderConfirmation(store: Store, session: SessionRecord, nowSeconds: nu
   const endsAfter = product.recurring ? wholeNumber(meta.ends_after) : 0;
   // And its introductory price, when it had one (lib/intro-price.ts): what the first payments cost, and the price after.
   const intro = product.recurring ? introOf(meta) : null;
-  // A monthly membership may have been paid yearly (lib/yearly-price.ts): said as it was bought.
-  const every = product.recurring ? (meta.every === "year" ? "year" : product.recurring.interval) : "month";
+  // How often it is charged, as it was bought, from the order (609 [WP8]): a monthly membership may have been paid
+  // yearly (lib/yearly-price.ts), and one charged every few months is said so even if the product changed meanwhile.
+  const paidAs = product.recurring ? paidEveryOf(meta, product.recurring) : null;
+  const every = paidAs ? paidAs.interval : "month";
+  const everyCount = paidAs ? paidAs.count : 1;
 
   const words = ordersWords(store.language);
   const said = speaking(store, currency);
@@ -330,7 +334,7 @@ function renderConfirmation(store: Store, session: SessionRecord, nowSeconds: nu
   const paid =
     firstChargeAt && amount === 0
       ? words.movedToday(speaking(store, currency).money(0))
-      : paidLine(store, product, amount, currency, plan, trialDays, endsAfter, intro, every, discount, regularOf(session, meta));
+      : paidLine(store, product, amount, currency, plan, trialDays, endsAfter, intro, every, discount, regularOf(session, meta), everyCount);
   const lines: string[] = [
     words.confirmIntro(name),
     "",
@@ -384,7 +388,7 @@ function renderConfirmation(store: Store, session: SessionRecord, nowSeconds: nu
       const firstOn = said.date((created + trialDays * 86400) * 1000);
       lines.push("", words.trialCharge(said.money(firstCents), tax, trialDays, firstOn));
     }
-    const schedule = words.renews(every, endsAfter);
+    const schedule = words.renews(every, endsAfter, everyCount);
     lines.push(
       "",
       canManage(store)
@@ -476,6 +480,8 @@ function paidLine(
   every: "day" | "week" | "month" | "year" = product.recurring?.interval ?? "month",
   discount: ReturnType<typeof firstChargeDiscount> = "none",
   regular: number | null = null,
+  /** How many of `every` between charges, as the order was charged (lib/recurring-every-rules.ts, paidEveryOf). */
+  everyCount = 1,
 ): string {
   const words = ordersWords(store.language);
   const { w, money } = speaking(store, currency);
@@ -485,7 +491,7 @@ function paidLine(
   // before the discount, saying the discount may go on when how long it lasts does not read. Never today's amount as
   // the price of every charge.
   if (product.recurring && !plan && !intro && (discount === "once" || discount === "unsure")) {
-    const then = regular === null ? null : `${money(regular)} ${w.every(every)}`;
+    const then = regular === null ? null : `${money(regular)} ${everyCount > 1 ? everyPhrase({ language: store.language, currency }, every, everyCount) : w.every(every)}`;
     return words.discountToday(money(amount), then && endsAfter > 0 ? words.paymentsInAll(then, endsAfter) : then, taxOnTop, discount === "unsure");
   }
   if (amount === 0) return words.discountCovered(money(0));
@@ -496,7 +502,8 @@ function paidLine(
     return taxOnTop ? words.introTaxed(money(amount), schedule) : schedule;
   }
   if (product.recurring) {
-    const line = `${money(amount)} ${w.every(every)}`;
+    // Charged every few weeks or months (609 [WP8]): said as charged, never as a single one; a yearly payment is a year.
+    const line = `${money(amount)} ${every === "year" ? w.every("year") : everyPhrase({ language: store.language, currency }, every, everyCount)}`;
     return endsAfter > 0 ? words.paymentsInAll(line, endsAfter) : line;
   }
   return money(amount);

@@ -34,7 +34,7 @@ export function parseTiers(raw: unknown): string[] {
 
 type TierLike = {
   priceCents: number;
-  recurring: { interval: string; payments: number } | null;
+  recurring: { interval: string; payments: number; every?: number } | null;
   options: unknown[];
   pwyw?: unknown;
   intro?: unknown;
@@ -57,7 +57,9 @@ export function canTier(product: TierLike): boolean {
     // A fixed amount off its first payments could follow a member to a cheaper plan (lib/intro-price.ts).
     !product.intro &&
     // Nor a yearly price beside the monthly one: a switch moves a member to one price (lib/yearly-price.ts).
-    !product.yearly
+    !product.yearly &&
+    // Nor one charged every 2 weeks or every few months: a switch prices a single week or month (609 [WP8]).
+    (product.recurring.every ?? 1) === 1
   );
 }
 

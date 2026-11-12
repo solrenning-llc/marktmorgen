@@ -110,6 +110,7 @@ export function mailPriceFacts(store: Store, product: Listing, nowSeconds: numbe
     lengthCount: lengths.length,
     optionCount: sellableOptions(product).length,
     interval: product.recurring?.interval ?? null,
+    every: product.recurring?.every,
     pwyw: activePwyw(product) !== null,
     sale: percent > 0 ? { percent, ends: store.sale.ends } : null,
     taxOnTop: store.tax.enabled && !store.tax.included,

@@ -88,7 +88,21 @@ async function main(): Promise<void> {
       const got = await sendWith(reply, id, "cara", "dan", `hello (${what})`);
       is(`count read as ${what}: unknown, no conversation past the cap`, [got, await seen(id, "dan")], ["unknown", 0]);
     }
-    is("a confirmed full inbox still refuses a new conversation", await sendWith([0, 0, MAX_CONVERSATIONS, null, null], id, "cara", "dan", "hello"), { ok: false, reason: "full" });
+    is("a confirmed full inbox still refuses a new conversation", await sendWith([0, 0, MAX_CONVERSATIONS, null, null, null], id, "cara", "dan", "hello"), { ok: false, reason: "full" });
+    is("nothing reached dan", await seen(id, "dan"), 0);
+  }
+
+  part("The recipient's declines with their time (ZSCORE) in another shape");
+  {
+    for (const [what, reply] of [
+      ["a hole", [0, 0, 0, null, null, undefined]],
+      ["a number", [0, 0, 0, null, null, 1]],
+      ["cut short of it", [0, 0, 0, null, null]],
+    ] as [string, unknown][]) {
+      const got = await sendWith(reply, id, "cara", "dan", `hello (${what})`);
+      is(`timed decline read as ${what}: unknown, never delivered`, [got, await seen(id, "dan")], ["unknown", 0]);
+    }
+    is("a confirmed timed decline refuses", await sendWith([0, 0, 0, null, null, "1700000000000"], id, "cara", "dan", "hello"), { ok: false, reason: "declined" });
     is("nothing reached dan", await seen(id, "dan"), 0);
   }
 

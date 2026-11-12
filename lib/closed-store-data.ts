@@ -205,6 +205,13 @@ return redis.call("HDEL", KEYS[1], ARGV[1])`;
  */
 export class EntryNotWithdrawnError extends UnknownReplyError {}
 
+/**
+ * A closing store's walk entry was confirmed and then its record stayed (a step before it went failed), and the entry
+ * could not be confirmed taken out of the batch (rule 24). The caller starts no walk in this run and leaves the store in
+ * line where it is, so the next run prepares it again (its entry rewritten as pending) before any walk can start.
+ */
+export class ConfirmedEntryLeftError extends UnknownReplyError {}
+
 /** How many times prepareStore tries to take such an entry out before it throws EntryNotWithdrawnError. */
 const WITHDRAW_TRIES = 2;
 
@@ -317,16 +324,35 @@ export async function prepareStore(store: Store, now = Date.now()): Promise<Batc
   // record still there, and the store waits a walk.
   // The entry is always written again here, without `pending`, under the lock and before the record goes: only an entry
   // so confirmed is walked (Codex on #3643).
-  const closed = await closeStoreRecord(store, [], async (fresh) => {
-    if (fresh) {
-      const never = new Set([store, fresh].flatMap((s) => [s.stripeCustomerId, s.subscriptionId, s.stripeAccountId, s.email]));
-      const added = (await recordIds(fresh)).filter((id) => !own.has(id) && !never.has(id));
-      const moved = [...saleHandles(fresh)].filter((handle) => !entry.handles.includes(handle));
-      entry.marks = [...new Set([...marks, ...added])].sort();
-      entry.handles = [...entry.handles, ...moved];
+  let confirmed = false;
+  let closed: boolean;
+  try {
+    closed = await closeStoreRecord(store, [], async (fresh) => {
+      if (fresh) {
+        const never = new Set([store, fresh].flatMap((s) => [s.stripeCustomerId, s.subscriptionId, s.stripeAccountId, s.email]));
+        const added = (await recordIds(fresh)).filter((id) => !own.has(id) && !never.has(id));
+        const moved = [...saleHandles(fresh)].filter((handle) => !entry.handles.includes(handle));
+        entry.marks = [...new Set([...marks, ...added])].sort();
+        entry.handles = [...entry.handles, ...moved];
+      }
+      await write(entry);
+      confirmed = true;
+    });
+  } catch (error) {
+    // The entry was confirmed (rewritten without `pending`) and then a step before the record went failed: the addresses'
+    // hold, the id's release or the fenced delete (review of #3643, Claude 1 cloud). The record is still there, so the
+    // confirmed entry must not be walked: it is taken out, only while it still holds the bytes written here, and the
+    // store is prepared again on a later walk. Taken out not confirmed: no walk starts in this run (ConfirmedEntryLeftError).
+    if (confirmed) {
+      let out = false;
+      for (let tries = 0; tries < WITHDRAW_TRIES && !out; tries += 1) {
+        const taken = repliesFor(await redisPipeline([["EVAL", WITHDRAW_ENTRY, 1, BATCH_KEY, ref, wrote]]).catch(() => null), 1)?.[0];
+        out = taken === 0 || taken === 1;
+      }
+      if (!out) throw new ConfirmedEntryLeftError("a closing store's confirmed walk entry, taken out after its record stayed (EVAL)");
     }
-    await write(entry);
-  });
+    throw error;
+  }
   if (closed) return entry;
   // Another store (another sid) is kept at this one's key: this one's record is already gone, and its ref and its
   // owner's folder are the other store's now. Its entry, left in the batch, made the walk erase the other store's keys
@@ -840,6 +866,15 @@ export async function eraseClosed(deadline: number, finish: Finisher, now = Date
             entryLeft = true;
             unsure = true;
             await redisPipeline([["ZREM", DUE_KEY, ref]]);
+            continue;
+          }
+          if (error instanceof ConfirmedEntryLeftError) {
+            // Its record stayed and its confirmed entry may still be in the batch: no walk starts in this run, and it stays
+            // in line where it is (never moved back), so the next run prepares it again, rewriting its entry as pending,
+            // before any walk can start (review of #3643).
+            console.error("a closing store's confirmed walk entry was not confirmed taken out; no walk starts in this run", error);
+            entryLeft = true;
+            unsure = true;
             continue;
           }
           // Something it needs could not be read (rule 24), such as whether a host still serves another store:

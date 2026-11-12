@@ -6,3 +6,4 @@ Only Claude 1 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
+| Claude 1 | Defect (custo) #4144: the store search pays for the listings it reads | claude1/cost-redis-store-search | `app/[handle]/page.tsx`, `tests/c1-cost-store-search.test.ts`, `tests/aliases/c1-cost-store-search.test.ts.json` | 12/11/2026 17h10 |

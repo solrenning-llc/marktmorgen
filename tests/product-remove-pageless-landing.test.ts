@@ -14,6 +14,7 @@ import { dataKey } from "@/lib/store-data";
 import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
 import { done, is, part } from "./check";
+import { answerNoRunningSubscriptions } from "./stripe-no-running";
 
 let outside = 0;
 globalThis.fetch = (async () => {
@@ -56,6 +57,7 @@ async function fixture(handle: string) {
 }
 
 async function main(): Promise<void> {
+  answerNoRunningSubscriptions();
   const pipe = redis.pipeline.bind(redis);
 
   part("A: the page was emptied (as the page route does), then the product removed");

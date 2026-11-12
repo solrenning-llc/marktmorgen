@@ -255,8 +255,10 @@ const SUBSCRIPTION_ID = /^sub_[A-Za-z0-9]{6,128}$/;
  * Stripe: each one charges again, in the currency it began in, whatever the
  * store says afterward. Null when Stripe could not be asked, or had more than
  * could be read — which is treated as "some", never as "none".
+ * With `product`, only those sold for that product (subscription metadata.product, lib/store-checkout.ts), so a
+ * product is never removed while its members or payment plans are still charged for it.
  */
-export async function runningSubscriptions(store: Store): Promise<number | null> {
+export async function runningSubscriptions(store: Store, product?: string): Promise<number | null> {
   const account = store.stripeAccountId;
   if (!account) return 0;
   const handles = saleHandles(store);
@@ -282,14 +284,19 @@ export async function runningSubscriptions(store: Store): Promise<number | null>
             const meta = ownField(row, "metadata");
             if (!plainObject(meta)) return false;
             const soldBy = ownField(meta, "store");
+            if (product !== undefined) {
+              const soldFor = ownField(meta, "product");
+              if (soldFor !== undefined && typeof soldFor !== "string") return false;
+            }
             return soldBy === undefined || typeof soldBy === "string";
           },
           SUBSCRIPTION_ID,
         );
         unreadable += read.unreadable;
         for (const row of read.rows) {
-          const soldBy = ownField(ownField(row, "metadata") as Record<string, unknown>, "store");
-          if (typeof soldBy === "string" && handles.has(soldBy)) count += 1;
+          const meta = ownField(row, "metadata") as Record<string, unknown>;
+          const soldBy = ownField(meta, "store");
+          if (typeof soldBy === "string" && handles.has(soldBy) && (product === undefined || ownField(meta, "product") === product)) count += 1;
         }
         if (!read.hasMore) {
           done = true;

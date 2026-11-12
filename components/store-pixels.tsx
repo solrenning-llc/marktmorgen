@@ -125,13 +125,16 @@ function sentBefore(keys: string[]): boolean {
  * new-time link (move), the gift of support's checkout (session_id on /tip),
  * an order handed to the affiliate page (order) and the emailed one-time link
  * for a returning buyer's code (rtoken, which opens the checkout with the
- * code for that address: lib/returning-code.ts). Every ad script reads
+ * code for that address: lib/returning-code.ts), with the code a refusal
+ * sends back to the field (rc: the creator's word only for people who
+ * bought here before, not a key alone, but never handed to an ad network
+ * either). Every ad script reads
  * the page's own address with each event it sends (Meta's `dl`, Google's
  * page_location, TikTok's, Pinterest's, X's and Reddit's page URL) and the
  * page it came from (Meta's `rl`, Google's `dr`), so none of them may be on
  * either when one starts.
  */
-export const KEY_PARAMS = ["session_id", "paypal", "token", "pkg", "move", "order", "rtoken"] as const;
+export const KEY_PARAMS = ["session_id", "paypal", "token", "pkg", "move", "order", "rtoken", "rc"] as const;
 
 /** The address without its keys, and the keys taken out, in order. */
 export function withoutKeys(href: string): { href: string; keys: [string, string][] } {
@@ -156,7 +159,7 @@ let takenKeys: { path: string; keys: [string, string][] } = { path: "", keys: []
 /**
  * A key this page's own code still needs after the pixels took it out of the
  * address (the code field sends the emailed link's rtoken with the buy
- * button): its value, only on the page it was taken from; null otherwise.
+ * button, and fills a refused code, rc, in again): its value, only on the page it was taken from; null otherwise.
  */
 export function keyTakenOut(name: string): string | null {
   try {

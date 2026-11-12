@@ -24,8 +24,12 @@ import { type ReturningStatus, readLinkToken, readRefusal, readTypedCode } from 
 const stays = () => () => {};
 const query = () => new URLSearchParams(window.location.search);
 const statusHere = () => readRefusal(query().get("returning"));
-/** The typed code sent back with a refusal (rc), read from the address. */
-export const typedCodeHere = () => readTypedCode(query().get("rc"));
+/**
+ * The typed code sent back with a refusal (rc): from the address, or, once
+ * the store's pixels have taken it out so no ad script reads it, from what
+ * they took out (as the link's token below).
+ */
+export const typedCodeHere = () => readTypedCode(query().get("rc") ?? keyTakenOut("rc"));
 /**
  * The emailed link's token for this page: from its address, or, once the
  * store's pixels have taken it out of the address so no ad script reads it

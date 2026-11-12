@@ -71,7 +71,8 @@ async function main(): Promise<void> {
   is("this call's write taken back", await readBody(course.id, e), "");
   is("its room given back", (await dataUsed(ROOM))!.used, usedBefore);
 
-  part("A write that comes back unknown is taken back too");
+  // An unknown reply is never taken as this call's own: the text may be another writer's, equal to it (Codex L on #3821).
+  part("A write that comes back unknown is never deleted, and its room stays counted");
   const g = newItemId();
   const original = redis.pipeline.bind(redis);
   redis.pipeline = (async (commands: (string | number)[][]) => {
@@ -86,8 +87,40 @@ async function main(): Promise<void> {
     redis.pipeline = original;
   }
   is("refused", unknown instanceof Error, true);
-  is("nothing left", await readBody(course.id, g), "");
-  is("room given back", (await dataUsed(ROOM))!.used, usedBefore);
+  is("not deleted on a guess", await readBody(course.id, g), "maybe");
+  is("its room still counted", (await dataUsed(ROOM))!.used > usedBefore, true);
+
+  part("An unknown reply over another writer's equal text deletes nothing (Codex L on #3821)");
+  const q = newItemId();
+  redis.run(["SET", `nl:course:${course.id}:body:${q}`, "same words"]);
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (commands.some((command) => command[0] === "SET")) return (await original(commands)).map(() => "QUEUED?");
+    return original(commands);
+  }) as typeof redis.pipeline;
+  try {
+    await thrown(() => saveNewBodies(course.id, [{ lessonId: q, text: "same words" }], ROOM));
+  } finally {
+    redis.pipeline = original;
+  }
+  is("the other writer's text stays", await readBody(course.id, q), "same words");
+
+  part("A confirmed write replaced before the take-back is left alone (Codex L on #3821)");
+  const [r1, r2] = [newItemId(), newItemId()];
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (commands.some((command) => command[0] === "SET")) {
+      const replies = await original(commands);
+      // Someone replaces the first text before the take-back; the second reply is lost.
+      redis.run(["SET", `nl:course:${course.id}:body:${r1}`, "their newer text"]);
+      return [replies[0], "QUEUED?"];
+    }
+    return original(commands);
+  }) as typeof redis.pipeline;
+  try {
+    await thrown(() => saveNewBodies(course.id, [{ lessonId: r1, text: "mine" }, { lessonId: r2, text: "mine too" }], ROOM));
+  } finally {
+    redis.pipeline = original;
+  }
+  is("the replacement stays", await readBody(course.id, r1), "their newer text");
   part("A text whose fate cannot be read keeps its room counted (Revisor 1 on e-kj5-u3a)");
   const [h, k] = [newItemId(), newItemId()];
   const roomBefore = (await dataUsed(ROOM))!.used;

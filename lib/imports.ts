@@ -82,7 +82,7 @@ import { MAX_ABOUT_LENGTH, cleanAbout, writeAbout } from "@/lib/product-about";
 import { type ContactOutcome, type ImportedContact, MAX_CONTACT_NAME, importContactRows, previewContactRows, readTags } from "@/lib/contacts";
 import { csvLine, readConsent } from "@/lib/csv";
 import { suppressedAmong, suppressedKey, suppressionPrint } from "@/lib/suppression";
-import { grantUnlessErased, importedFor } from "@/lib/imported-purchases";
+import { grantUnlessErased, importedFor, importedKey } from "@/lib/imported-purchases";
 import { deliverableItems } from "@/lib/bundle-rules";
 import { NIMBUS_FROM, isSenderConfigured, sendBatch } from "@/lib/email";
 import { GIVE_BACK_FLOOR, GIVE_BACK_FLOOR_EXTRA_COMMANDS, giveBackToMonth, monthlyAllowance, releaseDay, reserveDay, takeFromMonth, takeFromMonthExact } from "@/lib/mail";
@@ -1150,6 +1150,29 @@ function classifyPurchases(listings: Awaited<ReturnType<typeof readListings>>, r
   return { valid, problems, skipped };
 }
 
+/**
+ * Of the grants found already there, those this same import wrote, by their place in the rows: one HGET each, in one
+ * round trip. A reply in an unknown shape (not one entry each, an entry neither text nor nothing) throws
+ * UnknownReplyError (CX-123 rule 24), so the step is done again rather than an own grant taken as an earlier one; a
+ * grant gone since, or one that does not read, is not this import's to email.
+ */
+async function grantedBy(statsId: string, jobId: string, found: { i: number; email: string; productId: string }[]): Promise<Set<number>> {
+  const own = new Set<number>();
+  if (!found.length || !isRedisConfigured()) return own;
+  const replies = repliesFor(await redisPipeline(found.map(({ email, productId }) => ["HGET", importedKey(statsId, email), productId])), found.length);
+  if (!replies || !replies.every((r) => r === null || typeof r === "string")) throw new UnknownReplyError("the grants already there");
+  found.forEach(({ i }, k) => {
+    const raw = replies[k];
+    if (typeof raw !== "string") return;
+    try {
+      if ((JSON.parse(raw) as { job?: unknown }).job === jobId) own.add(i);
+    } catch {
+      // A grant that does not read is not this import's.
+    }
+  });
+  return own;
+}
+
 async function purchasesStep(job: ImportJob, store: Store, rows: string[][]): Promise<void> {
   const statsId = store.statsId;
   if (!statsId) throw new Error("the store has no statsId");
@@ -1175,6 +1198,10 @@ async function purchasesStep(job: ImportJob, store: Store, rows: string[][]): Pr
   // Checked again where each is written, in the same step (GRANT_UNLESS_ERASED): somebody deleted since is left out
   // the same way, nothing written for them, and let go from the rows the import saw.
   const given = await grantUnlessErased(statsId, job.id, fresh.map((v) => ({ email: v.email, productId: v.productId, items: v.bundle })), erasedCheck(listId), store).catch(writeUnknown);
+  // A grant found already there that this same import wrote is its own earlier write, from a step that failed after
+  // it and before its email was queued, being done again (issue #3957): it counts as added and is emailed.
+  const own = await grantedBy(statsId, job.id, fresh.flatMap((v, i) => (given[i] === "already" ? [{ i, email: v.email, productId: v.productId }] : [])));
+  for (const i of own) given[i] = "new";
   // A repeated row is said once that step has answered: of an address it found deleted, as deleted, by its row only.
   const goneNow = new Set(fresh.filter((_, i) => given[i] === "erased").map((v) => v.email));
   for (const { v, earlier } of repeats) {

@@ -132,21 +132,52 @@ export async function inviteMembers(
     { until: now + longest * 1000, bytes: made.reduce((sum, m) => sum + m.link, 0) },
   ], now);
   const answers = erased ? await invitedUnlessErased(statsId, made, erased) : await redisPipeline(made.map(({ field, value }) => ["HSETNX", invitesKey(statsId), field, value]));
-  const fresh = made.filter((_, i) => Number(answers[i]) === 1);
-  // An address already invited to that membership, or deleted from the store, was not written: its room goes back.
+  // An address already invited to that membership by this same import, not kept yet, is the import's own earlier
+  // write: a step that failed after it (before its link, reminder or email was queued) and is being done again
+  // (issue #3957). It is answered as new, with its link and reminder written again from its record, so the member
+  // is emailed a link that works; one invited by another import or by nobody here stays "already".
+  const own = job ? await ownEarlier(statsId, job, made.flatMap(({ field }, i) => (Number(answers[i]) === 0 ? [{ i, field }] : []))) : new Map<number, Invite>();
+  const fresh = made.flatMap(({ row, field, token }, i) => {
+    if (Number(answers[i]) === 1) return [{ field, token, renews: row.renews }];
+    const earlier = own.get(i);
+    return earlier ? [{ field, token: earlier.t, renews: earlier.r }] : [];
+  });
+  // An address already invited to that membership, or deleted from the store, was not written: its room goes back
+  // (an own earlier write's room was taken when it was written).
   const already = made.filter((_, i) => Number(answers[i]) !== 1).reduce((sum, m) => sum + m.bytes, 0);
   if (already > 0) await giveData(store, [{ slot: INVITES_SLOT, bytes: already }], now);
   if (fresh.length) {
-    const reminders = fresh.flatMap(({ row, field }) => {
-      const when = reminderAt(row.renews, now);
+    const reminders = fresh.flatMap(({ renews, field }) => {
+      const when = reminderAt(renews, now);
       return when ? [when, `${store.sid}|${field}`] : [];
     });
     await redisPipeline([
-      ...fresh.map(({ row, field, token }) => ["SET", linkKey(token), JSON.stringify({ s: statsId, f: field }), "EX", linkSeconds(row.renews, now)]),
+      ...fresh.map(({ renews, field, token }) => ["SET", linkKey(token), JSON.stringify({ s: statsId, f: field }), "EX", linkSeconds(renews, now)]),
       ...(reminders.length ? [["ZADD", DUE_KEY, ...reminders]] : []),
     ]);
   }
-  return made.map(({ field }, i) => (Number(answers[i]) === 1 ? field : Number(answers[i]) === -1 ? false : null));
+  return made.map(({ field }, i) => (Number(answers[i]) === 1 || own.has(i) ? field : Number(answers[i]) === -1 ? false : null));
+}
+
+/**
+ * Of the invitations found already kept, those this same import wrote and nobody has kept yet, by their place in
+ * the rows: one HMGET. A reply in an unknown shape (not a list of one entry each, an entry neither text nor
+ * nothing) throws (CX-123 rule 24), so the step is done again rather than an own write taken as somebody else's.
+ * A record gone since, or one that does not read, is not this import's to email.
+ */
+async function ownEarlier(statsId: string, job: string, found: { i: number; field: string }[]): Promise<Map<number, Invite>> {
+  const own = new Map<number, Invite>();
+  if (!found.length) return own;
+  const replies: unknown = await redisPipeline([["HMGET", invitesKey(statsId), ...found.map(({ field }) => field)]]);
+  const raw: unknown = Array.isArray(replies) && replies.length === 1 ? replies[0] : null;
+  if (!Array.isArray(raw) || raw.length !== found.length || !raw.every((r) => r === null || typeof r === "string")) {
+    throw new Error("the invitations already kept could not be read");
+  }
+  found.forEach(({ i }, k) => {
+    const invite = parseInvite(raw[k]);
+    if (invite && invite.job === job && !invite.kept && TOKEN_PATTERN.test(invite.t)) own.set(i, invite);
+  });
+  return own;
 }
 
 /**

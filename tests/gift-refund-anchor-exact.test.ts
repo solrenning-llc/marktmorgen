@@ -19,7 +19,7 @@ globalThis.fetch = (async () => {
 }) as typeof fetch;
 
 const SID = "0123456789abcdef0123456789abcd07";
-const store = { statsId: SID, stripeAccountId: "acct_1GiftRefundAnchor", handle: "giftshop", previousHandles: [], releasedHandles: [] } as unknown as Store;
+const store = { statsId: SID, stripeAccountId: "acct_1GiftRefund01", handle: "giftshop", previousHandles: [], releasedHandles: [] } as unknown as Store;
 
 for (const [label, value] of [["text that is not a time", "soon"], ["a time with letters", "17x"]] as [string, string][]) {
   test(`the place read as ${label}: kept, and Stripe not asked`, async () => {

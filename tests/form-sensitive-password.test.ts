@@ -99,6 +99,18 @@ for (const label of [
   "Do you remember your password? Great, enter it here",
   "Do you have your password handy, please type it here",
   "Do you know your password? If yes type it in the box",
+  // Claude 1 cloud, review @d05ed05d16 (MEDIUM): a direct ask for a named service's password, phrased with
+  // "your", a trailing courtesy word, "the password you use" or "of".
+  "What is your password for Instagram?",
+  "What's your password for Gmail?",
+  "What's your Instagram password, please?",
+  "What is the password you use for Gmail?",
+  "What's the password of your Instagram?",
+  "What is your password to your bank?",
+  "Which password do you use on Gmail, please?",
+  // the two gaps also present on main, named in the same review.
+  "Instagram password so we can post for you",
+  "Instagram account password, needed to set up your page",
 ] as const) {
   is(`refused: ${label}`, sensitiveKindOf(label), "password");
   const field = { id: "field1", type: "short" as const, label, required: true, options: [] };
@@ -149,6 +161,13 @@ for (const label of [
   "Why do you reuse your password?",
   // A survey question that follows one about the visitor's passwords is still a question, not a request.
   "How do you remember your passwords? Do you write them down?",
+  // Controls for the fix of the review @d05ed05d16: questions about the password, not asking for it.
+  "What is the password policy for your team?",
+  "What is your opinion of password managers?",
+  "What is the password you use most often based on?",
+  "What is the best password for Gmail?",
+  "What is a good password for Instagram?",
+  "Password managers so we can plan the course",
 ]) is(`kept: ${label}`, sensitiveKindOf(label), null);
 
 part("Generated forms use the same refusal for labels and accessible input names");
@@ -165,6 +184,8 @@ for (const html of [
   '<label>Email, password<input type="text"></label>',
   '<input type="text" aria-label="Gmail — password">',
   '<input type="text" placeholder="What\'s the password for your Instagram?">',
+  '<input type="text" aria-label="What is your password for Instagram?">',
+  '<label>What\'s your Instagram password, please?<input type="text"></label>',
 ]) {
   const result = checkGeneratedCode({ html, css: "", js: "" });
   is("a direct password request cannot pass the generated-code check", result.staticPass, false);

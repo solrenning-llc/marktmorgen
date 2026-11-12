@@ -108,13 +108,13 @@ function StopForms({ token, who, store }: { token: string; who: string; store: b
         <form action="/api/outreach/stop" method="post" className="mt-6">
           <input type="hidden" name="p" value={token} />
           <input type="hidden" name="scope" value="store" />
-          <button type="submit" className="btn btn-primary btn-block">{`Stop emails from ${who}`}</button>
+          <button type="submit" className="btn btn-primary btn-block btn-wrap">{`Stop emails from ${who}`}</button>
         </form>
       ) : null}
       <form action="/api/outreach/stop" method="post" className="mt-3">
         <input type="hidden" name="p" value={token} />
         <input type="hidden" name="scope" value="all" />
-        <button type="submit" className="btn btn-secondary btn-block">Stop emails from every Marktmorgen store</button>
+        <button type="submit" className="btn btn-secondary btn-block btn-wrap">Stop emails from every Marktmorgen store</button>
       </form>
     </>
   );

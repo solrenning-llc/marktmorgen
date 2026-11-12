@@ -6,3 +6,4 @@ Only Claude 1 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
+| Claude 1 | 274 [AX1] audit 12/11: code blocks reachable by keyboard, stop buttons wrap, leaderboard rule under 80 characters (WCAG 1.4.10, 2.1.1, 1.4.8) | claude/tender-curie-w4hw92-reflow | `app/developers/checkout-script/page.tsx`, `app/outreach/stop/[token]/page.tsx`, `app/[handle]/community/leaderboard/page.tsx`, `tests/reflow-scroll-regions.test.ts` | 12/11/2026 10h10 |

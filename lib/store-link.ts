@@ -85,6 +85,14 @@ export type StoreLink = {
   header?: boolean;
   /** Its own small picture, in place of the icon (LinkImage, above). Never on a heading. */
   image?: LinkImage;
+  /**
+   * Kept back from the page by the creator without being removed (423 [LT1];
+   * added 10 November 2026): its title, address, times, picture and clicks
+   * stay, and "Show again" brings it back in one press. Showing it again
+   * never clears its times, so a link whose time has passed stays hidden
+   * until the creator changes them. Absent: not archived.
+   */
+  archived?: true;
 };
 
 /** Whether an entry is a heading over links, not a link. */
@@ -103,6 +111,7 @@ export function linkMoment(raw: unknown): string {
 
 /** Whether a link is on the page at this moment: inside its window, when it has one. */
 export function linkShowing(link: StoreLink, now = Date.now()): boolean {
+  if (link.archived) return false;
   if (link.from && Date.parse(link.from) > now) return false;
   if (link.until && Date.parse(link.until) <= now) return false;
   return true;
@@ -121,8 +130,9 @@ export function showingLinks(links: StoreLink[], now = Date.now()): StoreLink[] 
   });
 }
 
-/** Where a link stands in time, for the studio: "live", "soon" (not yet) or "ended". */
-export function linkWhen(link: StoreLink, now = Date.now()): "live" | "soon" | "ended" {
+/** Where a link stands, for the studio: "archived" (kept back by the creator), "live", "soon" (not yet) or "ended". */
+export function linkWhen(link: StoreLink, now = Date.now()): "archived" | "live" | "soon" | "ended" {
+  if (link.archived) return "archived";
   if (link.until && Date.parse(link.until) <= now) return "ended";
   if (link.from && Date.parse(link.from) > now) return "soon";
   return "live";
@@ -155,7 +165,7 @@ export function parseStoreLinks(raw: unknown): StoreLink[] {
     if (typeof value.url !== "string" || (!header && !value.url)) continue;
     if (header) {
       const { from, until } = linkExtras(value as Record<string, unknown>, false);
-      links.push({ id: value.id, title: value.title.slice(0, MAX_LINK_TITLE_LENGTH), url: "", addedAt: typeof value.addedAt === "string" ? value.addedAt : "", header: true, ...(from ? { from } : {}), ...(until ? { until } : {}) });
+      links.push({ id: value.id, title: value.title.slice(0, MAX_LINK_TITLE_LENGTH), url: "", addedAt: typeof value.addedAt === "string" ? value.addedAt : "", header: true, ...(from ? { from } : {}), ...(until ? { until } : {}), ...(value.archived === true ? { archived: true as const } : {}) });
     } else {
       const image = parseLinkImage(value.image);
       links.push({
@@ -165,6 +175,7 @@ export function parseStoreLinks(raw: unknown): StoreLink[] {
         addedAt: typeof value.addedAt === "string" ? value.addedAt : "",
         ...linkExtras(value as Record<string, unknown>, playsOnPage(value.url)),
         ...(image ? { image } : {}),
+        ...(value.archived === true ? { archived: true as const } : {}),
       });
     }
     if (links.length >= MAX_STORE_LINKS) break;

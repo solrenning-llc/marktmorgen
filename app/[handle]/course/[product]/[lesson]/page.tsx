@@ -431,6 +431,7 @@ export default async function LessonPage({ params, searchParams }: Params) {
                 handle={store.handle}
                 courseId={course.id}
                 productId={product.id}
+                lessonId={lesson.id}
                 href={productPath(store, nextProduct)}
                 title={nextProduct.title}
                 price={pricePill(store, nextProduct)}

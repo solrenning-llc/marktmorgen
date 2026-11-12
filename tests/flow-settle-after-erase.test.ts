@@ -10,7 +10,7 @@
  * run it belongs to still holds its open attempt; erased, nothing is written.
  * Synthetic in-memory Redis only.
  */
-import { claimAttempts, forgetPersonCommands, openRuns, personOf, settleAttempts, type Settled } from "@/lib/flow-runs";
+import { claimAttempts, countRetry, countWaits, forgetPersonCommands, noteRuns, openRuns, personOf, settleAttempts, type Settled } from "@/lib/flow-runs";
 import { RUN_KEEP_SECONDS } from "@/lib/flow-limits";
 import { redisPipeline } from "@/lib/redis";
 import { store as redis } from "./redis-stub";
@@ -63,6 +63,33 @@ async function main(): Promise<void> {
     is(`${outcome} (to ${to}): no record, address, history or index comes back`, await state(email), gone);
   }
 
+  part("A step taken from the queue just before the erasure claims nothing after it");
+  const late = "late-claim@example.com";
+  await openRuns(FLOW, [late], now);
+  await redisPipeline(forgetPersonCommands(LIST, FLOW, personOf(late)));
+  const lateClaim = await claimAttempts(FLOW, [late], 0, "s1", "email", now);
+  is("neither claimed nor open: gone", [lateClaim.claimed, lateClaim.open, lateClaim.gone], [[], [], [late]]);
+  is("and no record or history is made for them", await state(late), gone);
+
+  part("History noted after the erasure writes nothing back");
+  for (const noted of ["ended", "skipped", "goal"] as const) {
+    const email = `noted-${noted}@example.com`;
+    await openRuns(FLOW, [email], now);
+    await redisPipeline(forgetPersonCommands(LIST, FLOW, personOf(email)));
+    await noteRuns(FLOW, [{ email, index: 0, stepId: "s1", kind: "run", state: noted, note: "A note.", to: noted === "ended" ? -1 : 1, status: noted === "ended" ? "ended" : "running" }], now);
+    is(`${noted}: nothing comes back`, await state(email), gone);
+  }
+
+  part("A wait or a \"try it again\" counted after the erasure makes nothing again");
+  const waited = "waited@example.com";
+  await claimThenErase(waited);
+  is("the wait cannot be counted: unknown, never room for one more", (await countWaits(FLOW, [waited], 0, now)).get(waited), null);
+  is("and no record is made for it", await state(waited), gone);
+  const retried = "retried@example.com";
+  await claimThenErase(retried);
+  is("the retry is refused", await countRetry(FLOW, personOf(retried), 1), false);
+  is("and no record is made for it either", await state(retried), gone);
+
   part("A person still there is settled as before");
   const kept = "kept@example.com";
   await openRuns(FLOW, [kept], now);
@@ -87,6 +114,19 @@ async function main(): Promise<void> {
   const wait = await state(deferred);
   const [deferredOpen, deferredStatus] = (await redisPipeline([["HGET", run(deferred), "open"], ["HGET", run(deferred), "status"]])) as [unknown, unknown];
   is("deferred: waiting, the attempt taken back out of the history", [deferredOpen, deferredStatus, wait.history], [null, "waiting", 1]);
+
+  const claimedNow = await claimAttempts(FLOW, [deferred], 0, "s1", "email", now);
+  is("a run that is there is claimed as before", [claimedNow.claimed, claimedNow.open, claimedNow.gone], [[deferred], [], []]);
+  is("and a second claim finds it open", (await claimAttempts(FLOW, [deferred], 0, "s1", "email", now)).open, [deferred]);
+  await noteRuns(FLOW, [{ email: kept, index: -1, stepId: "", kind: "run", state: "ended", note: "Ended.", to: -1, status: "ended" }], now);
+  const [endedStatus] = (await redisPipeline([["HGET", run(kept), "status"]])) as [unknown];
+  const counted = await countWaits(FLOW, [deferred], 0, now);
+  const again = await countWaits(FLOW, [deferred], 0, now + 60);
+  is("waits on a run that is there are counted as before, the step's clock kept", [counted.get(deferred), again.get(deferred)], [{ waits: 1, since: now }, { waits: 2, since: now }]);
+  is("and a retry within its limit is allowed, one past it refused", [await countRetry(FLOW, personOf(deferred), 1), await countRetry(FLOW, personOf(deferred), 1)], [true, false]);
+  const [retries] = (await redisPipeline([["HGET", run(deferred), "retries"]])) as [unknown];
+  is("the refused one taken back", retries, "1");
+  is("history noted on a run that is there is written as before", [endedStatus, (await state(kept)).history], ["ended", 4]);
 
   done();
 }

@@ -58,7 +58,9 @@ import { readPage } from "@/lib/sales-page-store";
 import { type Summary, REVIEWS_ON_PAGE, average, showsRating, summaryOf, visibleReviews } from "@/lib/reviews";
 import { BuyBox, GiftBox, GroupBox, PriceTag, ProductFacts, RemindBox, pageAction, productPath, saleNow } from "@/components/store-product";
 import { askable } from "@/lib/checkout-ask";
-import { type BlockContext, HeroView, PageSections } from "@/components/sales-blocks";
+import { type BlockContext, HeroView, type PageAction, PageSections } from "@/components/sales-blocks";
+import { MemberPriceBack, MemberPriceNote, MemberPriceTag, memberPriceCanShow, memberShown, readMemberBack } from "@/components/member-price";
+import { type MemberCheck, memberPriceFor } from "@/lib/member-price";
 import { pageFacts } from "@/lib/page-facts";
 import { LANGUAGES } from "@/lib/store-language";
 import { RatingLine, ReviewsSection } from "@/components/review-list";
@@ -388,6 +390,17 @@ export default async function ProductPage({ params, searchParams }: Params) {
   const groupable = selling && !soon && bundleReady && canSellProduct(store, product) && canGroup(product);
   const plan = activePlan(product);
   const pwyw = activePwyw(product);
+  // A member price (620 [SZ4], components/member-price.tsx): the server is asked only where the checkout would take
+  // it, and it is shown only to a visitor whose address it proves now (lib/member-price.ts). Unknown, or a check that
+  // fails, is the normal price. This page reads the visitor's cookies, so it is drawn for each request, never cached
+  // for everybody.
+  const memberCheck: MemberCheck = memberPriceCanShow(store, product, { selling, soon, remaining, ready: bundleReady, related })
+    ? await memberPriceFor(store, product, await cookies()).catch((): MemberCheck => ({ state: "unknown" }))
+    : { state: "none" };
+  const member = memberShown(store, product, memberCheck);
+  // What the checkout sent back about a member price (app/api/store/checkout/route.ts): said beside the buy box.
+  const memberBack = readMemberBack(query.member);
+  const priceTag = member ? <MemberPriceTag store={store} product={product} percent={member} /> : <PriceTag store={store} product={product} />;
   const description = page.seoDescription || product.summary || aboutExcerpt(about) || product.title;
   const free = isFree(product);
   const built = page.blocks.length > 0;
@@ -431,6 +444,8 @@ export default async function ProductPage({ params, searchParams }: Params) {
 
   const buyTerms = (
     <>
+      {memberBack ? <MemberPriceBack store={store} back={memberBack} /> : null}
+      {member ? <MemberPriceNote store={store} product={product} percent={member} paypal={byPayPal} /> : null}
       {plan && canSellProduct(store, product) ? (
         <p className="st-muted text-sm font-semibold">{w.payInFullOr(planLine(store, plan))}</p>
       ) : null}
@@ -450,8 +465,8 @@ export default async function ProductPage({ params, searchParams }: Params) {
           </a>
         </p>
       ) : null}
-      <BuyBox store={store} product={product} related={related} remaining={remaining} writes={canWrite(store)} selling={selling} ready={bundleReady} soon={soon} preorder={preorder} bundleItems={inside} pickAgain={query.pick === "count"} consentAgain={consentAgain && !giftProblem && !groupProblem} embed={embedSite || embedReturn ? { site: embedSite, back: embedReturn } : null} />
-      {cartOn && !soon && cartable(product) && remaining !== 0 ? <AddToCart handle={store.handle} productId={product.id} lang={store.language} deal={store.cartDeal.on ? store.cartDeal : null} /> : null}
+      <BuyBox store={store} product={product} related={related} remaining={remaining} writes={canWrite(store)} selling={selling} ready={bundleReady} soon={soon} preorder={preorder} bundleItems={inside} pickAgain={query.pick === "count"} consentAgain={consentAgain && !giftProblem && !groupProblem} embed={embedSite || embedReturn ? { site: embedSite, back: embedReturn } : null} member={member} />
+      {cartOn && !soon && !member && cartable(product) && remaining !== 0 ? <AddToCart handle={store.handle} productId={product.id} lang={store.language} deal={store.cartDeal.on ? store.cartDeal : null} /> : null}
       {/* A question before buying, answered from this page (lib/answers.ts): only where the creator switched it on. */}
       {selling && answersOn(store) ? (
         <AskBox
@@ -544,10 +559,13 @@ export default async function ProductPage({ params, searchParams }: Params) {
 
   // Where the buy box is and what its button says, for the page's own blocks
   // and for the bar held at the bottom of a phone's screen (components/sticky-buy.tsx).
-  const { action, label } = pageAction(store, product, remaining, selling, related, soon, preorder);
+  // A member's buttons lead to the buy box, the one form that carries the member price, and say its amount.
+  const { action, label } = member
+    ? { action: { kind: "link", href: "#buy" } satisfies PageAction, label: w.buyFor(money(salePrice(product.priceCents, member))) }
+    : pageAction(store, product, remaining, selling, related, soon, preorder);
   const sticky =
     action.kind === "none" ? null : (
-      <StickyBuy target={free ? "get" : "buy"} label={label} price={<PriceTag store={store} product={product} />} />
+      <StickyBuy target={free ? "get" : "buy"} label={label} price={priceTag} />
     );
 
   // The store's latest real purchases, where the creator shows them (lib/recent-sales.ts).
@@ -598,7 +616,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
               <h1 className="font-display min-w-0 text-2xl font-semibold leading-tight tracking-[-0.02em] sm:text-3xl">
                 {product.title}
               </h1>
-              <p className="st-price text-base"><PriceTag store={store} product={product} /></p>
+              <p className="st-price text-base">{priceTag}</p>
             </div>
             {summary ? <RatingLine summary={summary} href="#reviews" className="mt-2" lang={store.language} /> : null}
             {soldLine}
@@ -658,7 +676,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
   const hero = first?.kind === "hero" ? first : null;
   const rest = hero ? others : page.blocks;
   const placed = page.blocks.find((block) => block.kind === "reviews");
-  const pill = <p className="st-price text-sm"><PriceTag store={store} product={product} /></p>;
+  const pill = <p className="st-price text-sm">{priceTag}</p>;
   const rating = summary ? <RatingLine summary={summary} href="#reviews" lang={store.language} /> : null;
 
   const buySection = (
@@ -667,7 +685,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
         <h2 id="buy-title" className="font-display min-w-0 text-xl font-semibold leading-snug tracking-[-0.01em] sm:text-2xl">
           {free ? w.getTitle(product.title) : product.title}
         </h2>
-        <p className="st-price text-base"><PriceTag store={store} product={product} /></p>
+        <p className="st-price text-base">{priceTag}</p>
       </div>
       {soldLine}
       <ProductFacts store={store} product={product} linkCourse={false} bundleItems={inside} videoLine={videoLine} />

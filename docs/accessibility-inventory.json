@@ -1453,6 +1453,7 @@
     "components/mark-shipped.tsx",
     "components/meeting-connections.tsx",
     "components/member-discount.tsx",
+    "components/member-price.tsx",
     "components/more-from.tsx",
     "components/morning-header.tsx",
     "components/mrr-chart.tsx",

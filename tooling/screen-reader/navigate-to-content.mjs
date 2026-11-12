@@ -103,14 +103,20 @@ export async function navigateToContent(reader,page,kind,foreground){
    marker.style.cssText="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap";
    document.body.prepend(marker);
   });
-  let opened=false;
+  let opened=false,empty=false;
   for(let attempt=0;attempt<3;attempt++){
    await cancel();await pause();
    await reader.perform({keyCode:MacOSKeyCodes.Escape},{capture:false});await pause();
    await reader.perform(voiceOverKeyCodeCommands.openItemChooser,{capture:true});
-   if((await reader.lastSpokenPhrase()).toLowerCase().includes("item chooser")){opened=true;break;}
+   const announced=(await reader.lastSpokenPhrase()).toLowerCase();
+   // The chooser lists what VoiceOver knew when it opened. One announced with
+   // no items can never match a typed filter (job 129906932167 typed into
+   // "Item Chooser menu 0 items" until it failed), so close and reopen it
+   // within the same three attempts.
+   empty=/\b0 items\b/.test(announced);
+   if(announced.includes("item chooser")&&!empty){opened=true;break;}
   }
-  if(!opened)throw Error("VoiceOver item chooser was not announced");
+  if(!opened)throw Error(empty?"VoiceOver item chooser listed no items":"VoiceOver item chooser was not announced");
   let selected=false;
   for(let attempt=0;attempt<3&&!selected;attempt++){
    for(const character of "web content"){

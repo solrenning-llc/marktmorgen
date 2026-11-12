@@ -261,6 +261,40 @@ test("VoiceOver resets from H2 to area start after marker removal, before the fi
  assert.equal(state.resets,1);
 });
 
+// Job 129906932167: the chooser opened as "Item Chooser menu 0 items" and every
+// typed filter answered "No items in Item Chooser menu" until the step failed.
+function emptyChooser(f,emptyOpens){
+ const counts={opens:0,typed:0};let items=0;const perform=f.reader.perform;
+ f.reader.perform=async(command,options)=>{
+  await perform(command,options);
+  if(command===voiceOverKeyCodeCommands.openItemChooser){
+   items=++counts.opens>emptyOpens?77:0;
+   f.state.last=items?"Playwright window. Item Chooser menu 77 items":
+    "Playwright window web content has keyboard focus. Item Chooser menu 0 items";
+  }
+ };
+ f.reader.type=async()=>{counts.typed++;f.state.last=items?"5 items Start your store — Marktmorgen web content":"No items in Item Chooser menu";};
+ return counts;
+}
+test("a VoiceOver item chooser opened with no items is reopened, not typed into (50 runs)",async(t)=>{
+ t.mock.timers.enable({apis:["setTimeout"]});
+ for(let run=0;run<50;run++){
+  const f=voiceOverFixture(),counts=emptyChooser(f,1);
+  await settle(t,async()=>{await navigateToContent(f.reader,f.page,"voiceover");await f.reader.nextHeading();});
+  assert.equal(counts.opens,2,"the empty chooser is reopened once");
+  assert.equal(counts.typed,1,"nothing is typed into the empty chooser");
+  assert.match(await f.reader.lastSpokenPhrase(),/Start your store heading level 1/);
+  assert.deepEqual(f.state.events,["insert","remove","reset","heading"]);
+ }
+});
+test("a VoiceOver item chooser that stays empty fails within the same three attempts",async(t)=>{
+ t.mock.timers.enable({apis:["setTimeout"]});
+ const f=voiceOverFixture(),counts=emptyChooser(f,Infinity);
+ await assert.rejects(settle(t,async()=>{await navigateToContent(f.reader,f.page,"voiceover");await f.reader.nextHeading();}),/item chooser listed no items/);
+ assert.equal(counts.opens,3);assert.equal(counts.typed,0);
+ assert.equal(f.state.marker,false);assert.deepEqual(f.state.events,["insert","remove"]);
+});
+
 for(const failAt of ["next","reset"]){
  test(`VoiceOver ${failAt} failure propagates without heading assertions and removes marker`,async()=>{
   const {state,reader,page,failure}=voiceOverFixture({failAt});

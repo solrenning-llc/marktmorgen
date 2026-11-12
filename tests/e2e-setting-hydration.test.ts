@@ -29,6 +29,7 @@ const cases = [
   ["leave-acknowledgment.mjs", "onField", "await onField.check()"],
   ["nudge-acknowledgment.mjs", "toggle", "await toggle.setChecked(true)"],
   ["numbers-acknowledgment.mjs", "label", "await label.fill(draft)"],
+  ["pairs-acknowledgment.mjs", "first", "await first.selectOption(target)"],
   ["recovery-acknowledgment.mjs", "toggle", "await toggle.setChecked(true)"],
   ["signup-setting-acknowledgment.mjs", "toggle", "const original=await toggle.isChecked()"],
   ["support-setting-acknowledgment.mjs", "toggle", "const original=await toggle.isChecked()"],

@@ -1,3 +1,5 @@
+import {waitForReactChangeHandler} from "./react-hydration.mjs";
+
 /** Every creator-pick save/removal is intercepted, with no buyer or public data writes. */
 export async function checkPairsAcknowledgment({browser,LOCAL,fixture,is}){
  const cases=[
@@ -36,6 +38,9 @@ export async function checkPairsAcknowledgment({browser,LOCAL,fixture,is}){
      window.__pairsSelectionEvents.push({type,trusted:event.isTrusted,value:select?.value,selectedIndex:select?.selectedIndex,buttonDisabled:root.querySelector("button")?.disabled});
     },true);
    });
+   // The selects are server-rendered and enabled: a choice made before React attaches
+   // onChange is reset to "" on hydration, and "Save picks" never enables (WebKit, CI).
+   await waitForReactChangeHandler(page,first);
    await first.selectOption(target);
    console.log("PAIRS_INITIAL_SELECTION",JSON.stringify(await section.evaluate((root,target)=>({
     target,events:window.__pairsSelectionEvents,

@@ -61,6 +61,8 @@ import { type Store, ensureStoreId, saleHandles, storeRef, storesAfter } from "@
 import { listingsNamed, sellsThings } from "@/lib/catalog";
 import { AFFILIATE_ID_PATTERN, affiliatesOn, listPartners, noteSession } from "@/lib/affiliates";
 import { affiliateForCodes, codeOwners, promoCodesOn } from "@/lib/affiliate-codes";
+import { bondsBuyers } from "@/lib/affiliate-bond";
+import { creditsContacts } from "@/lib/affiliate-setting";
 import { revokeRefunded, storeHasKeys } from "@/lib/licence-keys";
 import { markRefundedReviews, storeHasReviews } from "@/lib/review-proof";
 import { listensToSales, noteSales } from "@/lib/sale-events";
@@ -569,7 +571,12 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
           continue;
         }
         const code = owners?.size ? affiliateForCodes(row as { discounts?: unknown }, owners) : "";
-        if (row.metadata?.via || code || partners.length) {
+        // A buyer kept with the affiliate who first brought them, or brought as a confirmed lead, is credited by
+        // noteSession from the address alone, with no link or code on the order: passed on too, or a buyer who
+        // never came back to the thanks page would earn that affiliate nothing.
+        const email = (row as { customer_details?: { email?: unknown } | null }).customer_details?.email;
+        const byBuyer = typeof email === "string" && email !== "" && (bondsBuyers(store) || creditsContacts(store.affiliates));
+        if (row.metadata?.via || code || partners.length || byBuyer) {
           try {
             await noteSession(store, row as Parameters<typeof noteSession>[1], owners ?? undefined, partners);
           } catch (error) {

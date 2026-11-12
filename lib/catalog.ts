@@ -802,6 +802,21 @@ export async function readProducts(store: Store, ids?: Iterable<string>): Promis
 }
 
 /**
+ * The extras record exactly as productWrites writes it: a JSON record whose own keys are only "fields" (a list) and
+ * "funnel" (null or one that reads). Anything else, a key of the listing (a title, a price, an id, "__proto__") among
+ * them, is null: spread over the listing it would replace the listing's own value, and the next edit would write it
+ * into the listing for good (Codex P on #3888). Only the two validated values are returned.
+ */
+function exactExtras(parsed: unknown): { fields: unknown[]; funnel: unknown } | null {
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+  const keys = Object.keys(parsed);
+  if (keys.length !== 2 || !keys.includes("fields") || !keys.includes("funnel")) return null;
+  const { fields, funnel } = parsed as { fields: unknown; funnel: unknown };
+  if (!Array.isArray(fields) || (funnel !== null && !parseFunnel(funnel))) return null;
+  return { fields, funnel };
+}
+
+/**
  * One product as its two GETs answered (CX-123 rule 24): null only when Redis answered nil for its listing (no
  * record); an extras nil is a product with no checkout questions and no funnel. Any other reply (not text, text that
  * is not a JSON record, extras without their list of questions or with a funnel that does not read, a record that is
@@ -813,15 +828,11 @@ function productRead(rawListing: unknown, rawExtras: unknown, id: string): Produ
   if (rawListing === null) return null;
   const listing = typeof rawListing === "string" ? parseJson(rawListing) : null;
   if (!listing || typeof listing !== "object" || Array.isArray(listing)) throw new UnknownReplyError("a product's listing");
-  let extras: Record<string, unknown> = {};
+  let extras: { fields: unknown[]; funnel: unknown } | Record<string, never> = {};
   if (rawExtras !== null) {
-    const parsed = typeof rawExtras === "string" ? parseJson(rawExtras) : null;
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new UnknownReplyError("a product's checkout questions and funnel");
-    extras = parsed as Record<string, unknown>;
-    // productWrites writes both: the questions as a list, the funnel as null or one that reads (as readProductsStrict checks).
-    if (!Array.isArray(extras.fields) || (extras.funnel !== null && !parseFunnel(extras.funnel))) {
-      throw new UnknownReplyError("a product's checkout questions and funnel");
-    }
+    const parsed = typeof rawExtras === "string" ? exactExtras(parseJson(rawExtras)) : null;
+    if (!parsed) throw new UnknownReplyError("a product's checkout questions and funnel");
+    extras = parsed;
   }
   const product = parseProduct({ ...(listing as object), ...extras });
   if (!product || product.id !== id) throw new UnknownReplyError("a product's records");
@@ -1361,12 +1372,11 @@ export async function readProductsStrict(store:Store,ids:readonly string[]):Prom
  return asked.map((id,index)=>{
   const listing=parseJson(raws[index*2]);
   const rawExtras=raws[index*2+1];
-  const extras=rawExtras===null?null:parseJson(rawExtras);
-  if(!listing||typeof listing!=="object"||Array.isArray(listing)||rawExtras!==null&&(!extras||typeof extras!=="object"||Array.isArray(extras)))throw new Error("Product records are invalid");
-  const x=extras as {funnel?:unknown;fields?:unknown}|null;
-  if(x&&(!Array.isArray(x.fields)||x.funnel!==null&&!parseFunnel(x.funnel)))throw new Error("Product offer record is invalid");
+  const extras=rawExtras===null?null:exactExtras(parseJson(rawExtras));
+  if(!listing||typeof listing!=="object"||Array.isArray(listing))throw new Error("Product records are invalid");
+  if(rawExtras!==null&&!extras)throw new Error("Product offer record is invalid");
   if(typeof raws[index*2]!=="string"||rawExtras!==null&&typeof rawExtras!=="string"||new TextEncoder().encode(String(raws[index*2])+(rawExtras??"")).length>MAX_PRODUCT_BYTES)throw new Error("Product record exceeds its bound");
-  const product=parseProduct({...listing,...((extras as Record<string,unknown>|null)??{})});
+  const product=parseProduct({...listing,...(extras??{})});
   if(!product||product.id!==id)throw new Error("Product association is invalid");
   return product;
  });

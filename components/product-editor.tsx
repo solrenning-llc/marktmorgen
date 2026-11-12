@@ -207,7 +207,7 @@ type Draft = {
   about: string;
 };
 
-const EMPTY: Draft = {
+export const EMPTY: Draft = {
   title: "",
   summary: "",
   price: "",
@@ -299,8 +299,8 @@ async function send(
   }
 }
 
-/** The form used both for adding something and for changing it. */
-function ProductForm({
+/** The form used both for adding something and for changing it (exported for tests/product-form-ai-holds.test.ts). */
+export function ProductForm({
   draft,
   setDraft,
   busy,

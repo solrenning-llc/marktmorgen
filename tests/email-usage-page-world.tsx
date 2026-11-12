@@ -74,8 +74,10 @@ export function isBillingConfigured() { return false; }
 export function trialOffered() { return false; }
 export function planDisputed() { return false; }
 export async function listSegments() { return []; }
-// The real constant: this proof does not swap it, and the page prints it.
-export { MAX_WAITS_PER_RUN } from "../lib/flow-limits";
+// The real constants: this proof does not swap them, and the page prints them. A star re-export keeps the stub
+// compiling when the page imports another flow-limits constant (MAX_WAIT_DAYS_PER_STEP, #3416); the two limits
+// declared below shadow the star export, so the proof still sets them.
+export * from "../lib/flow-limits";
 export function activeFlowLimit() { return 1; }
 export function dailyRunLimit() { return 1; }
 export async function listHeld() { return []; }

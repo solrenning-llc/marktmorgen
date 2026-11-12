@@ -26,7 +26,7 @@ const REASONS: Record<string, string> = {
   assign: "That person cannot answer buyers. Give it to someone whose role can.",
   used: "This month's writing jobs are used up. They come back with your next billing month.",
   off: "The writing help is not on for this store.",
-  failed: "No suggestion came back. Try again. This try counted as one of this month's writing jobs.",
+  failed: "No suggestion came back. Try again. If the request reached the AI, it counted as one of this month's writing jobs.",
   notes: "That conversation is no longer kept.",
 };
 

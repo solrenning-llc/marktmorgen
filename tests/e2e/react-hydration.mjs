@@ -23,6 +23,29 @@ export async function waitForReactClickHandler(page,link){
 }
 
 /**
+ * Waits until React has committed the hydration of the page holding `control` and has no
+ * rendering left to do. A control can carry React's props while the root is still hydrating
+ * (they are attached during the render, before the commit); an input event then makes React
+ * finish hydrating at once, and that commit puts the server's value back into a controlled
+ * select, so the choice is lost (PAIRS_INITIAL_SELECTION in WebKit; reproduced in Chromium at
+ * 4x CPU slowdown, where the studio root was still dehydrated after "networkidle").
+ * @param {import("playwright-core").Page} page @param {import("playwright-core").Locator} control
+ */
+export async function waitForReactHydrated(page,control){
+ const handle=await control.elementHandle();
+ if(!handle)throw Error("The control is not attached");
+ await page.waitForFunction(node=>{
+  const element=/** @type {Record<string,any>} */(/** @type {unknown} */(node));
+  const key=Object.keys(element).find(name=>name.startsWith("__reactFiber$"));
+  /** @type {any} */
+  let fiber=key?element[key]:null;
+  while(fiber&&fiber.tag!==3)fiber=fiber.return; // 3: the HostRoot fiber
+  const root=fiber?.stateNode;
+  return Boolean(root&&root.current&&root.current.memoizedState?.isDehydrated===false&&root.pendingLanes===0);
+ },handle);
+}
+
+/**
  * The document's vertical scroll position over the next animation frames. A route change that
  * lands still reads one number in every frame; an animated scroll moves the links under the pointer.
  * @param {import("playwright-core").Page} page

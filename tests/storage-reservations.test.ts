@@ -128,7 +128,7 @@ test("the upload budget is taken only after storage has room, and a refused budg
   const saved = globalThis.fetch;
   let openedSessions = 0;
   globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
-    if (!String(_url).includes("r2.cloudflarestorage.com")) throw new Error("Unexpected provider request");
+    if (!new URL(String(_url)).hostname.endsWith(".r2.cloudflarestorage.com")) throw new Error("Unexpected provider request");
     if (init?.method === "POST") { openedSessions++; return new Response("<UploadId>test-session</UploadId>"); }
     throw new Error("Unexpected provider request");
   }) as typeof fetch;

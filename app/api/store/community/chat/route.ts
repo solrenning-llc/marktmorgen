@@ -30,6 +30,17 @@ const unconfirmed = () => Response.json({ ok: false, error: "unknown" }, { statu
  * courtesy; this is the door.
  */
 export async function GET(request: NextRequest) {
+  try {
+    return await read(request);
+  } catch (error) {
+    // Redis did not answer, or answered the room in a shape nobody knows
+    // (rule 24): it is not an empty room, so the page says it could not read.
+    console.error("reading a community room failed", error);
+    return unconfirmed();
+  }
+}
+
+async function read(request: NextRequest) {
   const url = new URL(request.url);
   const handle = normaliseHandle((url.searchParams.get("handle") ?? "").trim().slice(0, 60));
   const store = handle ? await storeForHandle(handle) : null;

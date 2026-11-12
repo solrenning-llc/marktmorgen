@@ -263,12 +263,15 @@ export type ChatPage = {
  * needs, and is why this is cheap enough to ask for every few seconds.
  */
 export async function room(id: string, since = 0): Promise<ChatPage> {
-  const [raw] = await redisPipeline(
+  const replies = await redisPipeline(
     since > 0
       ? [["ZRANGEBYSCORE", roomKey(id), `(${since}`, "+inf", "LIMIT", 0, CHAT_PAGE]]
       : [["ZREVRANGE", roomKey(id), 0, CHAT_PAGE - 1]],
   );
-  const rows = (Array.isArray(raw) ? raw : []).map(parse).filter((m): m is ChatMessage => m !== null);
+  // Read exactly (rule 24): an unknown reply is not an empty room, so it throws and the page or route says it could not read.
+  const list = stringList(repliesFor(replies, 1)?.[0]);
+  if (list === null) throw new UnknownReplyError("the room's messages");
+  const rows = list.map(parse).filter((m): m is ChatMessage => m !== null);
   const messages = since > 0 ? rows : rows.reverse();
   return { messages, cursor: messages.length ? messages[messages.length - 1].i : since };
 }
@@ -283,8 +286,10 @@ export function quietFor(at: number): number {
  * read: what handing out a leave to ask needs to know (lib/chat-grant.ts).
  */
 export async function lastSaid(id: string): Promise<number> {
-  const [raw] = await redisPipeline([["ZREVRANGE", roomKey(id), 0, 0]]);
-  return parse(Array.isArray(raw) ? raw[0] : null)?.at ?? 0;
+  // Read exactly (rule 24): an unknown reply is not "nobody spoke", so it throws.
+  const list = stringList(repliesFor(await redisPipeline([["ZREVRANGE", roomKey(id), 0, 0]]), 1)?.[0]);
+  if (list === null || list.length > 1) throw new UnknownReplyError("the room's newest message");
+  return list.length ? parse(list[0])?.at ?? 0 : 0;
 }
 
 /** Takes one message out of the room: the creator's, on anything in it. */

@@ -1,0 +1,8 @@
+{
+  "project": "u-stn10",
+  "label": "stn10-current-green",
+  "status": 0,
+  "bytes": 834,
+  "sha256": "640dbcb1490b1c07ce95895dc813f6c625610317336a9140199e77eaf2350917",
+  "content": "✔ the real exit retains the cancel form without requiring a reason (6.4487ms)\n✔ the supplied end date is visible in both paid and trial exits (1.017982ms)\n✔ the existing export keeps its permission guard and scope explanation (1.053003ms)\n✔ an authorized creator can reach the existing export from inside the exit (0.515195ms)\n✔ the fragment target exists and accepts keyboard focus (0.489547ms)\n✔ the exit never offers the export fragment to a role without export permission (0.42986ms)\n✔ every existing export visibility restriction also hides the exit link (1.192288ms)\n✔ the exit reuses the existing export and adds no download request or cancel step (0.776839ms)\nℹ tests 8\nℹ suites 0\nℹ pass 8\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 26.527175\nU_COUNTERS {\"redis\":0,\"httpMock\":0}\n"
+}

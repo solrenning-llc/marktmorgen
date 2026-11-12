@@ -23,7 +23,7 @@ const html = renderToStaticMarkup(
 );
 
 /** The class of the element that holds the page's cards (the grid). */
-const gridClass = (/<div class="([^"]*\bgrid\b[^"]*)"><section class="card/.exec(html)?.[1] ?? "").replace(/&amp;/g, "&").replace(/&gt;/g, ">");
+const gridClass = (/<div class="([^"]*\bgrid\b[^"]*)"><section class="card/.exec(html)?.[1] ?? "").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
 
 part("The outreach studio's cards fit a 320 px screen (WCAG 1.4.10)");
 is("the page draws its cards in a grid, with the store's address in the empty list's sentence", [gridClass !== "", html.includes(storeUrl)], [true, true]);

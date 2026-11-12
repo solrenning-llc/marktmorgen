@@ -13,7 +13,9 @@
  *     stop link and the creator's address, and the one-click unsubscribe header;
  *   - after "stop", nothing from that store to that address again, about any
  *     product; nothing to an address that left the list or bounced;
- *   - an email the sender refused is not counted as sent: the next run tries.
+ *   - an email the sender refused is not counted as sent: the next run tries;
+ *     one whose answer is not known (a 503) may have gone, so it is not sent
+ *     again (rule 30; tests/uncertain-send-checkout-recovery.test.ts).
  */
 import { addProduct, claimHandle, ensureListId, ensureStatsId, setProductLink, setRecovery, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { readStopToken, remindAbandoned, stopReminders } from "@/lib/checkout-recovery";
@@ -29,7 +31,8 @@ process.env.RESEND_API_KEY = "re_test_recovery_journey_only";
 const OWNER = "potter@example.com";
 type Mail = { to: string; subject: string; text: string; headers?: Record<string, string> };
 const emails: Mail[] = [];
-let senderWorks = true;
+/** What the sender answers instead of a plain yes: a certain refusal (422) or an answer not known (503). */
+let senderSays: 200 | 422 | 503 = 200;
 let paidSessions: Record<string, unknown>[] = [];
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -37,7 +40,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const method = init?.method ?? "GET";
   const answer = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
   if (url.hostname === "api.resend.com") {
-    if (!senderWorks) return answer({ message: "unavailable" }, 503);
+    if (senderSays !== 200) return answer({ message: senderSays === 503 ? "unavailable" : "invalid recipient" }, senderSays);
     const body = JSON.parse(String(init?.body)) as { to: string | string[]; subject: string; text: string; headers?: Record<string, string> };
     emails.push({ to: [body.to].flat()[0], subject: body.subject, text: body.text, headers: body.headers });
     return answer({ id: `email_${emails.length}` });
@@ -128,11 +131,20 @@ async function main(): Promise<void> {
   is("bounced for good: no reminder", await remindAbandoned(await load(), left("cs_test_left0000000006", "dee@example.com")), "skip");
 
   part("Refused by the sender: not counted, tried again");
-  senderWorks = false;
+  // Rule 23 (uncertain-send-crons, 9 November 2026): this part used a 503, which sendEmailOutcome reads as an answer
+  // not known, not a refusal; the retry it asserted is the duplicate the change removes. The certain refusal is now a
+  // 422 (same assertions), and the 503 is asserted below to keep its marks.
+  senderSays = 422;
   const before = emails.length;
   is("the sender refuses", await remindAbandoned(await load(), left("cs_test_left0000000007", "eve@example.com")), "failed");
-  senderWorks = true;
+  senderSays = 200;
   is("the next run sends it, once", [await remindAbandoned(await load(), left("cs_test_left0000000007", "eve@example.com")), emails.length - before], ["sent", 1]);
+
+  part("An answer not known: not counted as sent, and never sent again");
+  senderSays = 503;
+  is("the sender's answer is not known", await remindAbandoned(await load(), left("cs_test_left0000000008", "fay@example.com")), "failed");
+  senderSays = 200;
+  is("the next run leaves it, so it is never sent twice", [await remindAbandoned(await load(), left("cs_test_left0000000008", "fay@example.com")), emails.filter((m) => m.to === "fay@example.com").length], ["skip", 0]);
 
   done();
 }

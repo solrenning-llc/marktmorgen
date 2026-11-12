@@ -56,7 +56,7 @@ try {
 
  // Not blocked, then blocked with a note, then let write again.
  {
-  const page=await open([{ok:true,blocked:false},{ok:true,blocked:true},{ok:true,blocked:false}]);
+  const page=await open([{ok:true,blocked:false},{ok:true,blocked:true},{ok:true,blocked:true,reason:'Insults in every message',at:1},{ok:true,blocked:false}]);
   await until(page,()=>Boolean(document.querySelector('summary')));
   out.openText=await text(page);
   out.noteLabel=await page.evaluate(()=>document.querySelector('[data-inbox-block] label')?.textContent??'');
@@ -85,6 +85,45 @@ try {
   out.secondCalls=await page.evaluate(()=>window.__calls);
   await page.close();
  }
+ // Review of #3840 (MEDIUM, 2.4.3): by keyboard, the focus follows each action to the control that replaced it.
+ {
+  const page=await open([{ok:true,blocked:false},{ok:true,blocked:true},{ok:true,blocked:true,reason:'Kept note',at:1},{ok:true,blocked:false},{ok:false,error:'unknown'},{ok:true,blocked:false}]);
+  await until(page,()=>Boolean(document.querySelector('summary')));
+  const active=()=>page.evaluate(()=>{const a=document.activeElement;return a?(a.tagName+':'+(a.textContent??'').trim()):'';});
+  await page.focus('summary');
+  await page.keyboard.press('Enter');
+  await page.focus('[data-inbox-block] button[type=submit]');
+  await page.keyboard.press('Enter');
+  await until(page,()=>document.querySelector('[data-inbox-block]')?.textContent.includes('You blocked this person'));
+  await until(page,()=>(document.activeElement?.textContent??'').includes('Let them write again'));
+  out.focusAfterBlock=await active();
+  await page.keyboard.press('Enter');
+  await until(page,()=>Boolean(document.querySelector('summary')));
+  await until(page,()=>document.activeElement?.tagName==='SUMMARY');
+  out.focusAfterUnblock=await active();
+  await page.close();
+ }
+ {
+  const page=await open([{ok:false,error:'unknown'},{ok:true,blocked:false}]);
+  await until(page,()=>document.querySelector('[data-inbox-block]')?.textContent.includes('could not check'));
+  await page.focus('text=Check again');
+  await page.keyboard.press('Enter');
+  await until(page,()=>Boolean(document.querySelector('summary')));
+  await until(page,()=>document.activeElement?.tagName==='SUMMARY');
+  out.focusAfterCheck=await page.evaluate(()=>{const a=document.activeElement;return a?(a.tagName+':'+(a.textContent??'').trim()):'';});
+  await page.close();
+ }
+ // Review of #3840 (LOW): a teammate blocked first; the note shown is the one kept, never the one typed here.
+ {
+  const page=await open([{ok:true,blocked:false},{ok:true,blocked:true},{ok:true,blocked:true,reason:'Spam, from a teammate',at:1}]);
+  await until(page,()=>Boolean(document.querySelector('summary')));
+  await press(page,'summary');
+  await page.fill('[data-inbox-block] input','Typed here',{timeout:5000}).catch(()=>null);
+  await press(page,'[data-inbox-block] button[type=submit]');
+  await until(page,()=>document.querySelector('[data-inbox-block]')?.textContent.includes('Spam, from a teammate'));
+  out.keptNoteText=await text(page);
+  await page.close();
+ }
  // A refused block is said, and the person stays as they were.
  {
   const page=await open([{ok:true,blocked:false},{ok:false,error:'many'}]);
@@ -101,7 +140,7 @@ try {
 console.log(JSON.stringify(out));
 `;
 
-const result = JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e", browserScript], { encoding: "utf8", timeout: 90_000, maxBuffer: 2_000_000 })) as {
+const result = JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e", browserScript], { encoding: "utf8", timeout: 150_000, maxBuffer: 2_000_000 })) as {
   errors: string[];
   outside: number;
   openText: string;
@@ -118,6 +157,10 @@ const result = JSON.parse(execFileSync(process.execPath, ["--input-type=module",
   refusedSeen: boolean;
   noteLabel: string;
   refusedText: string;
+  focusAfterBlock: string;
+  focusAfterUnblock: string;
+  focusAfterCheck: string;
+  keptNoteText: string;
 };
 
 is("no page error and nothing reached outside", [result.errors, result.outside], [[], 0]);
@@ -131,6 +174,7 @@ is("undone: offered again", result.afterText.includes("Block this person"), true
 is("the route was asked: check, block with the note, unblock", result.calls, [
   { action: "blocked", id: "abcdefabcdef" },
   { action: "block", id: "abcdefabcdef", reason: "Insults in every message" },
+  { action: "blocked", id: "abcdefabcdef" },
   { action: "unblock", id: "abcdefabcdef" },
 ]);
 is("not known: said so, never as not blocked", [result.unknownText.includes("could not check"), result.unknownText.includes("Block this person")], [true, false]);
@@ -138,6 +182,10 @@ is("checked again on request", [result.secondText.includes("Spam"), result.secon
 is("a refused block is said", result.refused.length > 0, true);
 is("review: a refusal is seen on the screen, not only heard", result.refusedSeen, true);
 is("review: the note's label says the team sees it too", /only you and your team see it/.test(result.noteLabel), true);
+is("review of #3840: after Block, the focus is on Let them write again", result.focusAfterBlock, "BUTTON:Let them write again");
+is("after Let them write again, the focus is on the summary", result.focusAfterUnblock, "SUMMARY:Block this person");
+is("after Check again, the focus is on what replaced it", result.focusAfterCheck, "SUMMARY:Block this person");
+is("review of #3840: the note shown is the one kept, never the one typed here", [result.keptNoteText.includes("Spam, from a teammate"), result.keptNoteText.includes("Typed here")], [true, false]);
 is("and the person stays not blocked", [result.refusedText.includes("You blocked this person"), result.refusedText.includes("Block this person")], [false, true]);
 
 done();

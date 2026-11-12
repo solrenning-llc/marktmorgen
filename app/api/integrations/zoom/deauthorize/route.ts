@@ -21,7 +21,9 @@ const PER_MINUTE = 120;
  * is acted on once: its signature is kept for ten minutes, longer than the
  * five it is accepted for, and the same one again is acknowledged and
  * ignored — so a notice captured and sent again cannot, say, disconnect an
- * account the creator connected again a minute after removing the app.
+ * account the creator connected again a minute after removing the app. A
+ * notice Zoom sends again after a first try failed is signed anew, so its
+ * removal time (deauthorization_time) is what keeps a connection made since.
  *
  *   endpoint.url_validation   Zoom checking the address: answered with the
  *                             plain token and its HMAC, as Zoom asks.
@@ -88,7 +90,10 @@ export async function POST(request: NextRequest) {
       }
     };
     try {
-      tell(await forgetUser("zoom", user));
+      // When the person removed the app, as Zoom says: a notice sent again after a failed first try never takes away a
+      // connection made since (a new grant). A time that does not read forgets every connection, as before.
+      const removedAt = typeof payload.deauthorization_time === "string" ? Date.parse(payload.deauthorization_time) : NaN;
+      tell(await forgetUser("zoom", user, Number.isFinite(removedAt) ? removedAt : undefined));
       return Response.json({ ok: true });
     } catch (error) {
       console.error("forgetting a Zoom user failed", error);

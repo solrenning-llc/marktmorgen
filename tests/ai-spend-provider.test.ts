@@ -1,3 +1,4 @@
+import './frozen-clock'; // first: the month this file names at load is the month the code reads on every call
 import { withAiCallBudget } from '@/lib/ai-call-budget';
 import test from 'node:test';
 import assert from 'node:assert/strict';

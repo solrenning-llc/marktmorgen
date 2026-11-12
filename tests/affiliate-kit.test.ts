@@ -128,9 +128,11 @@ async function main(): Promise<void> {
   const fundedKitStore = (await storeForEmail(OWNER))!;
   const beforeFundedKitJobs = await aiLeft(fundedKitStore);
   const beforeFundedKitCalls = asked.length;
-  const kitCounterKeys = [`nl:affkit:${fundedKitStore.statsId}:dddddddddddd:${new Date().toISOString().slice(0, 10)}`, `nl:affkit:${fundedKitStore.statsId}:${windowId(fundedKitStore)}`];
+  // The keys and the draft read one moment, so a run across 00:00 UTC cannot read yesterday's counter while the draft writes today's.
+  const kitNow = new Date();
+  const kitCounterKeys = [`nl:affkit:${fundedKitStore.statsId}:dddddddddddd:${kitNow.toISOString().slice(0, 10)}`, `nl:affkit:${fundedKitStore.statsId}:${windowId(fundedKitStore, kitNow.getTime())}`];
   const beforeKitCounters = await redis.pipeline(kitCounterKeys.map((key) => ["GET", key]));
-  const deniedKit = await draftKit(fundedKitStore, affiliate({ id: "dddddddddddd", code: "funded" }), plan.product.id, "Synthetic note only");
+  const deniedKit = await draftKit(fundedKitStore, affiliate({ id: "dddddddddddd", code: "funded" }), plan.product.id, "Synthetic note only", kitNow);
   is("missing resource funding refuses before model calls or kit and writing counters",
     [deniedKit.ok ? "" : deniedKit.reason, asked.length, await aiLeft(fundedKitStore), await redis.pipeline(kitCounterKeys.map((key) => ["GET", key]))],
     ["unavailable", beforeFundedKitCalls, beforeFundedKitJobs, beforeKitCounters]);

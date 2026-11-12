@@ -19,6 +19,7 @@ const EVENTS: { key: PhoneEvent; label: string; hint: string }[] = [
   { key: "affiliate", label: "Affiliate applications", hint: "Someone applied to promote your store" },
   { key: "live", label: "Live events", hint: "A community live event starts in 15 minutes" },
   { key: "comment", label: "Course comments", hint: "A student commented under a lesson" },
+  { key: "message", label: "Buyer messages", hint: "A buyer wrote in your inbox: once until you read it, never what they wrote" },
   { key: "alert", label: "Alerts", hint: "Visits or sales from them fell, refunds piled up, or the month's goal is off pace or reached" },
 ];
 
@@ -387,10 +388,14 @@ export function PhoneAlertsPanel({ view: initial }: { view: PhoneView }) {
               <span className="font-semibold text-ink">New comment on a lesson</span> — which lesson, and the start of what the
               student wrote, as they wrote it.
             </li>
+            <li>
+              <span className="font-semibold text-ink">New message from a buyer</span> — that your inbox has one, never what it
+              says. Tap it to open the conversation. Once until you read it.
+            </li>
             <li>We never add a buyer&apos;s or an applicant&apos;s name or email address; a comment&apos;s start shows only what the student typed.</li>
             <li>
-              Sales from a buyer who closed the page before coming back from Stripe arrive within about five minutes. Reports and
-              applications are held to twenty of each an hour.
+              Sales from a buyer who closed the page before coming back from Stripe arrive within about five minutes. Reports,
+              applications, comments and messages are held to twenty of each an hour.
             </li>
           </ul>
         </details>

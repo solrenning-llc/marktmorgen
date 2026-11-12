@@ -1021,6 +1021,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:watch:opened:@lib/watch.ts": { what: "When a lesson video last opened", parts: [capped(KEY, "One a store, seven days.")] },
   "nl:watch:sec:@lib/watch.ts": { what: "Seconds watched in the window", parts: [capped(14 * KEY, "One a window, 400 days.")] },
   "nl:hooks:anchor:@lib/webhooks.ts": { what: "The last Stripe event read", parts: [capped(KEY, "One a store.")] },
+  "nl:hooks:backlog:@lib/webhooks.ts": { what: "Where a capped first read of Stripe events stopped, to read the older ones later", parts: [capped(KEY, "One a store.")] },
   "nl:hooks:cfg:@lib/webhooks.ts": { what: "The store's endpoints", parts: [capped(MAX_ENDPOINTS * 2 * KB, "MAX_ENDPOINTS endpoints.", src("lib/webhooks.ts", "MAX_ENDPOINTS"))] },
   "nl:hooks:d:@lib/webhooks.ts": { what: "One delivery and how it went, a week", parts: [
     // Bounded where it is made (lib/webhooks.ts, emitEvent: every text cleaned and cut at MESSAGE_TEXT_MAX, a message past

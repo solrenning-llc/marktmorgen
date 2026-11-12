@@ -327,6 +327,11 @@ const deliveryKey = (id: string) => `nl:hooks:d:${id}`;
 const logKey = (statsId: string) => `nl:hooks:log:${statsId}`;
 export const QUEUE_KEY = "nl:hooks:q";
 const anchorKey = (statsId: string) => `nl:hooks:anchor:${statsId}`;
+/**
+ * "<evt>|<created gte>": where a read without an anchor stopped at FIRST_RUN_PAGES with older events still to read
+ * (Codex P, #4285), so later runs read them, MAX_EVENT_PAGES at a time, instead of skipping them for good.
+ */
+const backlogKey = (statsId: string) => `nl:hooks:backlog:${statsId}`;
 /** The event a store's Stripe reading is waiting on, and for how many runs: "<evt>|<runs>". */
 const waitKey = (statsId: string) => `nl:hooks:wait:${statsId}`;
 /** The passed-over events said to one endpoint of a store on one UTC day, a sorted set by when each was first passed over; gone at the end of the next day. */
@@ -1052,7 +1057,7 @@ export async function addEndpoint(store: Store, rawUrl: string, events: unknown,
   if (!written) return refused ?? { ok: false, reason: "unavailable", message: "The endpoint could not be added just now. Try again in a moment." };
   await redisPipeline([
     ["SADD", STORES_KEY, store.statsId],
-    ...(written.before?.endpoints.length ? [] : [["DEL", anchorKey(store.statsId)], ["DEL", waitKey(store.statsId)]]),
+    ...(written.before?.endpoints.length ? [] : [["DEL", anchorKey(store.statsId)], ["DEL", waitKey(store.statsId)], ["DEL", backlogKey(store.statsId)]]),
   ]);
   return { ok: true, secret, view: await webhooksView(store) };
 }
@@ -1919,7 +1924,7 @@ async function markGivenUp(store: Store, statsId: string, config: Config, event:
 async function watchStore(store: Store, statsId: string, config: Config, now = Date.now()): Promise<number> {
   const account = store.stripeAccountId as string;
   const types = STRIPE_TYPES.map((t, i) => `types[${i}]=${encodeURIComponent(t)}`).join("&");
-  const [anchorRaw, waitRaw] = await redisPipeline([["GET", anchorKey(statsId)], ["GET", waitKey(statsId)]]);
+  const [anchorRaw, waitRaw, backlogRaw] = await redisPipeline([["GET", anchorKey(statsId)], ["GET", waitKey(statsId)], ["GET", backlogKey(statsId)]]);
   const anchor = typeof anchorRaw === "string" && /^evt_[A-Za-z0-9]+$/.test(anchorRaw) ? anchorRaw : "";
   const nowSeconds = Math.floor(now / 1000);
   // "<evt>|<visits>|<since>": the event waited on, the visits it failed and
@@ -2008,24 +2013,32 @@ async function watchStore(store: Store, statsId: string, config: Config, now = D
     // going back in time, then send them oldest first. History beyond the
     // first-run page cap still needs a separate durable continuation.
     const pages: StripeEvent[][] = [];
+    const gte = Math.max(config.since - 60, 0);
     let older = "";
+    // Older events past the page cap: where to read them from on the next runs (#4285).
+    let left = "";
     for (let page = 0; page < FIRST_RUN_PAGES; page += 1) {
       const list = await onAccount(
         "GET",
         account,
-        `/events?limit=100&${types}&created[gte]=${Math.max(config.since - 60, 0)}${older ? `&starting_after=${encodeURIComponent(older)}` : ""}`,
+        `/events?limit=100&${types}&created[gte]=${gte}${older ? `&starting_after=${encodeURIComponent(older)}` : ""}`,
       );
       const rows = stripeEventPage(list);
       if (!rows.length) break;
       pages.push(rows);
-      const last = str(rows[rows.length - 1].id);
-      if (list.has_more !== true || !last) break;
-      older = last;
-      if (page === FIRST_RUN_PAGES - 1) console.error("a store has more Stripe events than one first run reads; the oldest are left", store.handle);
+      const oldest = str(rows[rows.length - 1].id);
+      if (list.has_more !== true || !oldest) break;
+      older = oldest;
+      if (page === FIRST_RUN_PAGES - 1) {
+        console.error("a store has more Stripe events than one first run reads; the older ones are read on the next runs", store.handle);
+        left = oldest;
+      }
     }
     if (!pages.length) return 0;
     for (const rows of [...pages].reverse()) if (!(await send(rows, true))) break;
     if (last) await redisPipeline([["SET", anchorKey(statsId), last, "EX", ANCHOR_SECONDS]]);
+    // A new read from scratch replaces any older backlog: it starts again from its own start.
+    await redisPipeline([left ? ["SET", backlogKey(statsId), `${left}|${gte}`, "EX", ANCHOR_SECONDS] : ["DEL", backlogKey(statsId)]]);
     await settle();
     return handled;
   }
@@ -2056,6 +2069,37 @@ async function watchStore(store: Store, statsId: string, config: Config, now = D
       await redisPipeline([["SET", anchorKey(statsId), after, "EX", ANCHOR_SECONDS]]);
     }
     if (!whole || list.has_more !== true) break;
+  }
+  // Then, while nothing new waits, the older events a capped read left (#4285): read past where it stopped, sent
+  // oldest first, the place moved only once the whole lot was handled (emitEvent's marks keep a resend from going out
+  // twice). The anchor stays where the new events put it.
+  if (!stuck) {
+    const at = typeof backlogRaw === "string" ? /^(evt_[A-Za-z0-9]+)\|(\d{1,12})$/.exec(backlogRaw) : null;
+    if (at) {
+      const forward = last;
+      const pages: StripeEvent[][] = [];
+      let from = at[1];
+      let more = false;
+      for (let page = 0; page < MAX_EVENT_PAGES; page += 1) {
+        const list = await onAccount("GET", account, `/events?limit=100&${types}&created[gte]=${at[2]}&starting_after=${encodeURIComponent(from)}`);
+        const rows = stripeEventPage(list);
+        more = rows.length > 0 && list.has_more === true;
+        if (!rows.length) break;
+        pages.push(rows);
+        const oldest = str(rows[rows.length - 1].id);
+        if (!more || !oldest) break;
+        from = oldest;
+      }
+      let whole = true;
+      for (const rows of [...pages].reverse()) {
+        if (!(await send(rows, true))) {
+          whole = false;
+          break;
+        }
+      }
+      last = forward;
+      if (whole) await redisPipeline([more ? ["SET", backlogKey(statsId), `${from}|${at[2]}`, "EX", ANCHOR_SECONDS] : ["DEL", backlogKey(statsId)]]);
+    }
   }
   await settle();
   return handled;
@@ -2142,6 +2186,7 @@ export async function forgetStoreWebhooks(statsId: string | null): Promise<void>
     ["SREM", STORES_KEY, statsId],
     ["DEL", anchorKey(statsId)],
     ["DEL", waitKey(statsId)],
+    ["DEL", backlogKey(statsId)],
     // Each endpoint's sets of passed-over events, today's and the two days before (an endpoint removed since: gone within two days by itself).
     ...[...told].flatMap((endpoint) => [0, 1, 2].map((back) => ["DEL", givenUpDayKey(statsId, today - back, endpoint)])),
     ...[0, 1, 2].map((back) => ["DEL", givenUpEndpointsKey(statsId, today - back)]),

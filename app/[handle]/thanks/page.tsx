@@ -979,7 +979,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
                 </>
               ) : order.items ? (
                 <>
-                  {contents(order.items, "main", downloadAt({ item: "bundle" }))}
+                  {contents(order.items, "main", downloadAt({ item: "bundle" }), o.whatIsInside)}
                   <p className="st-muted mt-5 text-sm">
                     {t.bundleDownloads(hours, store.name)}
                   </p>

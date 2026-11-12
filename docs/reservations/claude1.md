@@ -6,3 +6,4 @@ Only Claude 1 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
+| Claude 1 | 296 [SQ7] unit 1, the rules of a lesson's quick rating (no storage, no page yet) | claude1/sq7-lesson-rating-rules | `lib/lesson-rating-rules.ts` (new), `tests/lesson-rating-rules.test.ts` (new) | 12/11/2026 20h01 |

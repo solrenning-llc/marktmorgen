@@ -141,7 +141,10 @@ async function main(): Promise<void> {
     const email = `vic.${status}@example.com`;
     customerEmail.set(id, email);
     subsBody.set(id, sub(`sub_Vic${id.slice(7)}`, status));
-    is(`a membership "${status}" has not ended: refused`, await open(email), ["member", 0]);
+    // A status Stripe has no name for is not read at all since main's SUB_STATUSES (rule 24): unknown, still refused,
+    // with nothing opened, only under the words of a reading that could not be made.
+    const known = status !== "a_status_not_known_here";
+    is(`a membership "${status}" ${known ? "has not ended" : "cannot be read"}: refused`, await open(email), [known ? "member" : "refused", 0]);
   }
 
   part("A reading that cannot be made whole: refused, nothing opened (CX-123 rule 24)");

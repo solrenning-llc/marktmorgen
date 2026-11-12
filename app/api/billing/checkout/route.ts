@@ -76,7 +76,12 @@ export async function POST(request: NextRequest) {
   try {
     const found = await findStoreSubscriptions(store);
     if (found.live) {
-      await setSubscription(ref, found.live);
+      // Not written down, the store stays locked while Stripe charges it: an
+      // error to retry, never "already".
+      if (!(await setSubscription(ref, found.live))) {
+        console.error("writing down this store's live subscription was not done");
+        return away(origin, studio("billing=error"));
+      }
       return away(origin, studio("billing=already"));
     }
     customerId = customerId ?? found.customerId;
@@ -98,8 +103,16 @@ export async function POST(request: NextRequest) {
   }
   // Another store of the same account pays as the customer its owner already
   // is, so one person is one customer at Stripe however many stores they run.
+  // A list that cannot be read does not show the owner is no customer yet:
+  // nothing is reserved and no checkout opens, so no second customer is made.
   if (!customerId && store.extra) {
-    const owned = await accountStores(store.email).catch(() => []);
+    let owned: Awaited<ReturnType<typeof accountStores>>;
+    try {
+      owned = await accountStores(store.email);
+    } catch (error) {
+      console.error("reading this account's stores failed", error);
+      return away(origin, studio("billing=error"));
+    }
     customerId = owned.find((other) => other.stripeCustomerId)?.stripeCustomerId ?? null;
   }
 

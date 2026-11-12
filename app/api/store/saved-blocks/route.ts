@@ -15,6 +15,21 @@ import type { Store } from "@/lib/store";
 
 const refuse = (error: string, status = 400, extra: Record<string, unknown> = {}) => Response.json({ ok: false, error, ...extra }, { status });
 
+/**
+ * A page read whose answer was not known (lib/sales-page-store.ts readPage throws): the whole request is refused
+ * before anything is written or counted, never answered from an empty page that was not (lib/studio-messages.ts).
+ */
+class PageUnread extends Error {}
+const unread = () => refuse("page_unread", 503);
+async function heldPage(statsId: string, key: string) {
+  try {
+    return await readPage(statsId, key);
+  } catch (error) {
+    console.error("reading a page for a saved section failed", error);
+    throw new PageUnread();
+  }
+}
+
 /** The kinds a page may hold: a store's own page its own, a product's page anything but a form. */
 const kindsFor = (key: string): readonly BlockKind[] => (isSiteKey(key) ? SITE_KINDS : BLOCK_KINDS.map((k) => k.kind).filter((kind) => kind !== "form"));
 
@@ -42,7 +57,7 @@ async function usesOf(store: Store, section: SavedSection, except = ""): Promise
   for (const key of keys) {
     const page = pageOf(store, key, titles);
     if (!page) continue;
-    const held = await readPage(statsId, key);
+    const held = await heldPage(statsId, key);
     const problem = updateProblem(held, section.id);
     if (problem === "gone") continue;
     const fits = problem === null && withSection(held, section, kindsFor(key)) !== null;
@@ -74,6 +89,7 @@ export async function GET(request: NextRequest) {
     const sections = await readSections(store.statsId);
     return Response.json({ ok: true, sections, limit: limits.savedBlocks }, { headers });
   } catch (error) {
+    if (error instanceof PageUnread) return unread();
     console.error("reading saved sections failed", error);
     return refuse("server_error", 500);
   }
@@ -105,11 +121,12 @@ export async function POST(request: NextRequest) {
       const read = readSectionInput(body.name ?? existing?.name, body.blocks);
       if (!read.ok) return refuse(read.error);
       const section: SavedSection = { id: existing?.id ?? newSectionId(), name: read.name, blocks: read.blocks, updatedAt: now };
+      // The pages that use it are read before the section is written, so an unknown page read changes nothing.
+      const uses = existing ? await usesOf(store, section, text(body.except, 40)) : [];
       const written = await writeSection(statsId, section, !existing, limits.savedBlocks);
       if (written === "full") return refuse("sections_full", 400, { limit: limits.savedBlocks });
       if (written === "gone") return refuse("unknown", 404);
-      const except = text(body.except, 40);
-      return Response.json({ ok: true, section, picturesLeft: read.picturesLeft, uses: existing ? await usesOf(store, section, except) : [] });
+      return Response.json({ ok: true, section, picturesLeft: read.picturesLeft, uses });
     }
 
     if (action === "apply") {
@@ -123,22 +140,35 @@ export async function POST(request: NextRequest) {
       if (asked.some((key) => !mayChange(role, key))) return refuse("forbidden", 403);
       const month = monthOfUse(store);
       if (!month) return refuse("unavailable", 503);
+      // The month's count is taken first, as before, so a request past the figure reads no page at all (Codex Z on
+      // #2830: those reads would be beyond what the request's studio unit covers). Then every page is read before any
+      // is written, so an unknown read writes nothing; the try it counted is said in the answer (page_unread_counted).
       if (!(await countUse(storeMonthKey(statsId, "apply", month), limits.appliesPerMonth, MONTH_USE_SECONDS))) return refuse("applies_full", 429, { limit: limits.appliesPerMonth });
       const titles = new Map([...(await readCards(store)).values()].map((card) => [card.id, card.title]));
-      const done: string[] = [];
+      const planned: { key: string; next: NonNullable<ReturnType<typeof withSection>> }[] = [];
       const skipped: { key: string; why: string }[] = [];
       for (const key of asked) {
         if (!pageOf(store, key, titles)) {
           skipped.push({ key, why: "This page is gone." });
           continue;
         }
-        const held = await readPage(statsId, key);
+        let held;
+        try {
+          held = await heldPage(statsId, key);
+        } catch (error) {
+          if (error instanceof PageUnread) return refuse("page_unread_counted", 503);
+          throw error;
+        }
         const problem = updateProblem(held, id);
         const next = problem ? null : withSection(held, section, kindsFor(key));
         if (!next) {
           skipped.push({ key, why: problem ? SECTION_WHY[problem] : "The section no longer fits on this page." });
           continue;
         }
+        planned.push({ key, next });
+      }
+      const done: string[] = [];
+      for (const { key, next } of planned) {
         // Kept like any save: the page as it was is the newest of its earlier versions, to bring back.
         await writePage(statsId, key, next, store);
         done.push(key);
@@ -153,6 +183,7 @@ export async function POST(request: NextRequest) {
 
     return refuse("invalid");
   } catch (error) {
+    if (error instanceof PageUnread) return unread();
     console.error("changing saved sections failed", error);
     return refuse("server_error", 500);
   }

@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { canSell } from "@/lib/store-checkout";
-import { clientAddress, fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
+import { clientAddress, fromAnotherSite, limited, essentialLimitState } from "@/lib/request-guard";
 import { readListing } from "@/lib/catalog";
 import { readAbout } from "@/lib/product-about";
 import { readPage } from "@/lib/sales-page-store";
@@ -43,12 +43,14 @@ export async function POST(request: NextRequest) {
   if (!answersOn(store) || !canSell(store)) return Response.json({ ok: false, error: "off" }, { status: 400 });
 
   const who = `${clientAddress(request)}|${store.handle}`;
-  if (
-    !(await withinLimit("ask", who, ASKS_PER_TEN_MINUTES, 600)) ||
-    !(await withinLimit("ask-day", who, ASKS_PER_DAY, 86_400)) ||
-    !(await withinLimit("ask-store", store.handle, STORE_ASKS_PER_MINUTE, 60))
-  ) {
-    return Response.json({ ok: false, error: "slow" }, { status: 429 });
+  for (const check of [
+    () => essentialLimitState("ask", who, ASKS_PER_TEN_MINUTES, 600),
+    () => essentialLimitState("ask-day", who, ASKS_PER_DAY, 86_400),
+    () => essentialLimitState("ask-store", store.handle, STORE_ASKS_PER_MINUTE, 60),
+  ]) {
+    const state = await check();
+    if (state === "unknown") return Response.json({ ok: false, error: "try again in a moment" }, { status: 503 });
+    if (state === "exceeded") return Response.json({ ok: false, error: "slow" }, { status: 429 });
   }
 
   try {

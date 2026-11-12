@@ -15,6 +15,7 @@ import {
   type TeamMode,
   type TeamSetup,
   HOST_LABEL_MAX,
+  HOST_STALE_MINUTES,
   hostFromCall,
   teamLimitWords,
 } from "@/lib/team-scheduling-rules";
@@ -401,7 +402,7 @@ export function TeamEventEditor({ product }: { product: Product }) {
       ))}
 
       <p className="rounded-[10px] bg-paper px-3 py-2 text-sm text-ink-soft">
-        {`${mode === "collective" ? "Only times every host is free are offered." : "Each booking goes to a free host, sharing them out evenly."} A host whose own calendar cannot be read, or was last read more than 20 minutes ago, is left out until it can be, and nobody is ever booked twice for the same time, on this store or another. Each host sets their calendar under Your calendar${view.googleSync ? ", with Google Calendar two-way sync" : " (Google Calendar two-way sync is not switched on yet: they can add a private iCal address)"}.`}
+        {`${mode === "collective" ? "Only times every host is free are offered." : "Each booking goes to a free host, sharing them out evenly."} A host whose own calendar cannot be read, or was last read more than ${HOST_STALE_MINUTES} minutes ago, is left out until it can be, and nobody is ever booked twice for the same time, on this store or another. Each host sets their calendar under Your calendar${view.googleSync ? ", with Google Calendar two-way sync" : " (Google Calendar two-way sync is not switched on yet: they can add a private iCal address)"}.`}
       </p>
 
       {error ? <p className="notice notice-error" role="alert">{error}</p> : null}

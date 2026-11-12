@@ -28,7 +28,7 @@ import { POST as handInRoute } from "@/app/api/store/course/task/route";
 import { addProduct, claimHandle, ensureStatsId, setProductCourse, setStripeAccount, setSubscription, storeFolder, storeForEmail, storeRef, type Store } from "@/lib/store";
 import { editCourse, emptyCourse, saveCourse } from "@/lib/course";
 import { emailKey, mintPass, passCookieName, recordEnrollment, storeKey } from "@/lib/learn";
-import { DOOR_SECONDS, noteTaskUpload, saveTask, staleTaskUploads, submissionOf } from "@/lib/assignment";
+import { DOOR_SECONDS, noteTaskUpload, saveTask, submissionOf, sweepTaskUploads } from "@/lib/assignment";
 import { taskFolder } from "@/lib/assignment-rules";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
@@ -185,7 +185,8 @@ async function main(): Promise<void> {
     const orphan = await work("headfirstsweep", "c");
     blobs.set(orphan.path, "drop");
     await handIn(orphan);
-    const swept = await staleTaskUploads(Date.now() + (DOOR_SECONDS + 60) * 1000);
+    // The base's sweep (sweepTaskUploads, b2d12e3a2) deletes only the doors it won and answers the paths it deleted.
+    const swept = await sweepTaskUploads(async () => {}, Date.now() + (DOOR_SECONDS + 60) * 1000);
     is("the sweep still finds the unused upload", swept.includes(orphan.path), true);
 
     part("The store answered that the file is not there: still missing");
@@ -202,8 +203,14 @@ async function main(): Promise<void> {
     blobs.set(raced.path, "answer");
     const both = await Promise.all([handIn(raced), handIn(raced)]);
     const statuses = both.map((one) => one.status).sort();
-    is("exactly one of two racing hand-ins goes through the door", statuses, [200, 400]);
-    is("the other is refused as a door already used", both.find((one) => one.status === 400)?.error, "invalid");
+    // Under the base's lock (oneHandInAtATime, codex/n-email-essential-limit) the two no longer meet at the door:
+    // the second waits for the first and then finds the same file already in the work, so it keeps that file
+    // (before.file) and takes nothing again (200), or is refused as busy (409) when the lock is still held; without
+    // the lock it is refused at the door (400 "invalid"). Whichever way, exactly one takes the door and counts
+    // the file, which the checks below hold.
+    is("exactly one of two racing hand-ins goes through the door", [statuses[0], [200, 400, 409].includes(statuses[1])], [200, true]);
+    is("the other is never a second hand-in of a new file", both.filter((one) => one.status === 400).every((one) => one.error === "invalid") && both.filter((one) => one.status === 409).every((one) => one.error === "busy"), true);
+    is("the door is spent", await door(raced.path), false);
     is("the file's bytes are counted once", await roomUsed(raced), 1000);
     is("the submission keeps the file once", await handedFile(raced), raced.path);
   } finally {

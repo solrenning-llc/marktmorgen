@@ -24,6 +24,7 @@
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { applyListedAssistant } from "@/lib/assistant-billing";
 import {
+  BillingError,
   type SubscriptionState,
   isAddOn,
   hasContractFunding,
@@ -185,6 +186,7 @@ async function syncListed(deadline: number, seen: Set<string>, counts: SyncCount
   // so the oldest subscriptions are reached too.
   const [saved] = await redisPipeline([["GET", LIST_CURSOR_KEY]]);
   let after: string | undefined = typeof saved === "string" && SUBSCRIPTION_ID.test(saved) ? saved : undefined;
+  let restarted = false;
   const stop = async () => {
     if (after) await redisPipeline([["SET", LIST_CURSOR_KEY, after, "EX", CURSOR_SECONDS]]);
     return false;
@@ -201,6 +203,17 @@ async function syncListed(deadline: number, seen: Set<string>, counts: SyncCount
     } catch (error) {
       counts.failed += 1;
       console.error("reading the list of subscriptions failed", error);
+      // A place Stripe says it does not know (the key moved to another
+      // account or mode, or the subscription went with its customer) is
+      // refused on every run: kept, it would stop step 1 for good. It is
+      // dropped and the list is read from its start, once in this run. Any
+      // other refusal keeps the place, so the next run reads it again.
+      if (after && !restarted && error instanceof BillingError && error.code === "resource_missing") {
+        restarted = true;
+        after = undefined;
+        await redisPipeline([["DEL", LIST_CURSOR_KEY]]);
+        continue;
+      }
       return stop();
     }
     const { data, hasMore } = listedPage;

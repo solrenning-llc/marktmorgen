@@ -71,14 +71,14 @@ export default function PlatformIndex() {
             <p className="mt-5 max-w-3xl text-ink-soft">Choose the tools your work needs, with the limits and conditions shown before you commit. {PLANS_ON_SALE ? "The live demo shows the buyer experience." : "Paid selling remains closed; the live demo shows the buyer experience."}</p>
             <ul className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {HOME_MODULES.map(capability=><li key={capability.name} className="rounded-2xl border border-line bg-white p-6">
-                <h3 className="text-xl font-semibold"><Link href={capability.href} prefetch={false} className="inline-flex min-h-11 items-center underline decoration-line underline-offset-4">{capability.name}</Link></h3>
+                <h3 className="text-xl font-semibold"><Link href={capability.href} prefetch={false} className="inline-flex min-h-11 min-w-11 items-center underline decoration-line underline-offset-4">{capability.name}</Link></h3>
                 <p className="mt-3 text-ink-soft">{capability.body}</p>
               </li>)}
             </ul>
             <div className="mt-8 rounded-2xl bg-lilac p-6">
               <h3 className="text-xl font-semibold">Compare your current tools and their costs</h3>
               <p className="mt-3 text-ink-soft">Use published subscription prices, your sales volume and your applicable fee quotes. Unknown costs stay unconfirmed; the calculator makes no promise of earnings or identical features.</p>
-              <Link href="/pricing#calculator-heading" prefetch={false} className="link mt-4 inline-flex min-h-11 items-center">Open the browser-only cost calculator</Link>
+              <Link href="/pricing#calculator-heading" prefetch={false} className="link mt-4 inline-flex min-h-11 min-w-11 items-center">Open the browser-only cost calculator</Link>
             </div>
           </div>
         </section>
@@ -86,14 +86,14 @@ export default function PlatformIndex() {
           <section aria-labelledby="creator-journey-title" data-creator-journey>
             <div className="flex flex-wrap items-end justify-between gap-4">
               <div><h2 id="creator-journey-title" className="t-h2 balance">Your creator journey</h2><p className="mt-4 max-w-2xl text-ink-soft">Start with the stage you need. Add the rest when it serves your work; every tool keeps its existing limits and permissions.</p></div>
-              <a href="#catalogue-title" className="link inline-flex min-h-11 items-center">Browse every feature</a>
+              <a href="#catalogue-title" className="link inline-flex min-h-11 min-w-11 items-center">Browse every feature</a>
             </div>
             <ol className="mt-8 grid gap-5 md:grid-cols-2">
               {CREATOR_JOURNEY.map((stage,index)=><li key={stage.id} id={`journey-${stage.id}`} className="rounded-2xl border border-line bg-white p-6 sm:p-8">
                 <p className="text-sm font-semibold text-violet-deep">{`Step ${index+1}`}</p>
                 <h3 className="mt-2 text-2xl font-semibold tracking-tight">{stage.title}</h3>
                 <p className="mt-4 text-ink-soft">{stage.body}</p>
-                <ul className="mt-5 space-y-3">{stage.features.map(feature=><li key={feature.slug}><Link href={`/platform/${feature.slug}`} prefetch={false} className="inline-flex min-h-11 scroll-mt-32 items-center gap-2 font-semibold text-violet-deep underline underline-offset-4">{feature.label}<Icon name="arrow-right" size={16}/></Link></li>)}</ul>
+                <ul className="mt-5 space-y-3">{stage.features.map(feature=><li key={feature.slug}><Link href={`/platform/${feature.slug}`} prefetch={false} className="inline-flex min-h-11 min-w-11 scroll-mt-32 items-center gap-2 font-semibold text-violet-deep underline underline-offset-4">{feature.label}<Icon name="arrow-right" size={16}/></Link></li>)}</ul>
               </li>)}
             </ol>
           </section>

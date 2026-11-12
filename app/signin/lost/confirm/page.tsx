@@ -22,7 +22,7 @@ export default async function LostConfirmPage({ searchParams }: { searchParams: 
   return (
     <div className="relative min-h-screen overflow-hidden bg-paper text-ink">
       <main id="content" className="relative mx-auto max-w-xl px-4 py-16">
-        <Link href="/" className="inline-flex min-h-11 w-fit items-center rounded-[10px]" aria-label="Marktmorgen, home">
+        <Link href="/" className="inline-flex min-h-11 min-w-11 w-fit items-center rounded-[10px]" aria-label="Marktmorgen, home">
           <Logo />
         </Link>
         <h1 className="t-h1 mt-6">One tap and you are in</h1>

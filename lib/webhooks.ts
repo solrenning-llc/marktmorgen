@@ -57,7 +57,7 @@
  *
  *   nl:hooks:cfg:<statsId>      { handle, endpoints, since }
  *   nl:hooks:stores             the stores that have any endpoint
- *   nl:hooks:evt:<event>        an event already sent, for thirty days
+ *   nl:hooks:evt:<event>        an event already sent, for thirty days ("pending:..." for a day while its deliveries are written)
  *   nl:hooks:d:<delivery>       one delivery and how it went, for a week
  *   nl:hooks:log:<statsId>      the store's last deliveries, newest first
  *   nl:hooks:q                  deliveries waiting for a try, by when
@@ -160,6 +160,10 @@ const ANCHOR_SECONDS = 30 * 86400;
 
 const EVENT_SECONDS = 30 * 86400;
 const DELIVERY_SECONDS = 7 * 86400;
+/** What a pending once-only mark starts with: taken, its deliveries not yet known to be written (emitEvent). */
+const PENDING_EVENT = "pending:";
+/** How long a pending mark is kept: a day, well inside DELIVERY_SECONDS, so what it wrote is still found by NX. */
+const PENDING_EVENT_SECONDS = 86400;
 
 /** What the studio's log says of a message past the bound: written down, not sent. */
 export const TOO_LARGE_WORDS = `Not sent: this message would take more than ${DELIVERY_WRITE_MAX_BYTES / 1024} KB to keep, the most a webhook message may take. Nothing was counted.`;
@@ -680,13 +684,43 @@ export async function emitEvent(store: Store, type: WebhookEvent, seed: string, 
   // Made and sent only on a mark that is ours (lib/claim-mark.ts, CX-123 rule 24): "taken" is an event already sent;
   // "unknown" makes and sends nothing, lets go of the mark if it holds our own value (it may have landed; nothing was
   // made on it), and throws, so the caller's retry is not told it went (Claude 2 on #3276).
+  //
+  // The mark is taken as pending and made final only once the deliveries (or the skipped lines) are written
+  // (mail-queue hunt): a run whose cutoff (lib/fetch-timeout.ts) or Redis failed between the mark and the writes
+  // could not take the mark back either, and the event, noticed again, was answered "already sent" for
+  // EVENT_SECONDS and never delivered. A pending mark found is resumed: the deliveries' ids are the event's and the
+  // endpoint's, written SET NX / ZADD NX, so writing them again (or by two runs at once) never sends twice. A pending
+  // mark lasts PENDING_EVENT_SECONDS, well inside DELIVERY_SECONDS, so a delivery it may have written is still there
+  // to be found by its NX.
   const value = claimValue();
-  const fresh = await claimMark(eventKey(eventId), EVENT_SECONDS, value);
-  if (fresh === "taken") return 0;
+  const fresh = await claimMark(eventKey(eventId), PENDING_EVENT_SECONDS, `${PENDING_EVENT}${value}`);
   if (fresh === "unknown") {
-    await releaseMark(eventKey(eventId), value);
+    await releaseMark(eventKey(eventId), `${PENDING_EVENT}${value}`);
     throw new UnknownReplyError("a webhook event's once-only mark");
   }
+  if (fresh === "taken") {
+    let held: unknown[] | null = null;
+    try {
+      held = repliesFor(await redisPipeline([["GET", eventKey(eventId)]]), 1);
+    } catch {
+      held = null;
+    }
+    if (!held || (held[0] !== null && typeof held[0] !== "string")) throw new UnknownReplyError("a webhook event's once-only mark");
+    // Gone since (it ran out): noticed again later, as an event that is not marked.
+    if (held[0] === null) throw new UnknownReplyError("a webhook event's once-only mark");
+    if (!(held[0] as string).startsWith(PENDING_EVENT)) return 0;
+  }
+  // Our own pending mark is let go after a failure, so nothing is left behind; when that fails too, the pending mark
+  // is resumed the next time the event is noticed (never read as "already sent"), so the event is not lost.
+  const letPendingGo = async (): Promise<void> => {
+    await releaseMark(eventKey(eventId), `${PENDING_EVENT}${value}`).catch((kept) =>
+      console.error("webhook event kept pending: its deliveries are written again the next time it is noticed", statsId, type, eventId, kept));
+  };
+  // Made final over a pending mark (ours or one left by a run that stopped): the event is sent.
+  const markSent = async (): Promise<void> => {
+    const reply = repliesFor(await redisPipeline([["SET", eventKey(eventId), value, "EX", EVENT_SECONDS]]), 1);
+    if (!reply || reply[0] !== "OK") throw new UnknownReplyError("a webhook event's sent mark");
+  };
 
   // Every text cleaned and bounded where the message is made (cleanText), so what a delivery keeps is bounded.
   const body = JSON.stringify(cleanData({
@@ -731,29 +765,29 @@ export async function emitEvent(store: Store, type: WebhookEvent, seed: string, 
   const tooLarge = !used && kept.some(tooLargeToKeep);
   if (used || tooLarge) {
     if (tooLarge) console.error("WEBHOOK MESSAGE TOO LARGE: its lines say so, nothing is sent", statsId, type, eventId, Buffer.byteLength(body));
+    // As below: without its lines written the event would leave no trace; its mark stays pending, so it is
+    // written again the next time it is noticed.
     try {
       await skippedLines(statsId, deliveries, used ? "used" : "large", used ? `Not sent. ${allowanceUsedWords(store, "webhook", now)}` : TOO_LARGE_WORDS, now);
     } catch (error) {
-      // As below: without its lines written the event would leave no trace; the mark goes, so it is noticed again.
-      await redisPipeline([["DEL", eventKey(eventId)]]).catch((lost) =>
-        console.error("WEBHOOK EVENT LOST: its lines could not be written and its sent mark could not be taken back", statsId, type, eventId, lost));
+      await letPendingGo();
       throw error;
     }
+    await markSent();
     return 0;
   }
   const writes = ids.map((id, at) => ["SET", deliveryKey(id), kept[at], "NX", "EX", DELIVERY_SECONDS]);
+  // Without its deliveries written the event would never be sent: its mark stays pending (not "already sent"), so
+  // the next time it is noticed it is written again, to the same deliveries, even when nothing could be done now.
   try {
     const written = await redisPipeline(writes);
     await redisPipeline(ids.map((id) => ["ZADD", QUEUE_KEY, "NX", now, `${statsId}|${id}`]));
     await pushMissing(statsId, ids.filter((_, at) => written[at] !== "OK"), ids.filter((_, at) => written[at] === "OK"));
   } catch (error) {
-    // The event is marked sent above; without its deliveries written it
-    // would never be: the mark goes, so the next time it is noticed it is
-    // written again, to the same deliveries.
-    await redisPipeline([["DEL", eventKey(eventId)]]).catch((lost) =>
-      console.error("WEBHOOK EVENT LOST: its deliveries could not be written and its sent mark could not be taken back", statsId, type, eventId, lost));
+    await letPendingGo();
     throw error;
   }
+  await markSent();
   // Each delivery on its own: one whose first try throws stays on the queue for deliverDue (its lease, or its
   // place, brings it back), and the endpoints after it are still sent now (Claude 2 on #3096).
   await soon(async () => {
@@ -1832,7 +1866,8 @@ async function markGivenUp(store: Store, statsId: string, config: Config, event:
   const as = waitedAs(event, saleHandles(store), confirmed);
   const [marked, ...sent] = await redisPipeline([["GET", mark], ...as.parts.map((part) => ["GET", eventKey(eventIdFor(statsId, part.type, part.seed))])]);
   if (marked !== null && marked !== undefined) return;
-  const unsent = as.parts.filter((_, at) => sent[at] === null || sent[at] === undefined);
+  // A pending mark (emitEvent) is not known to be sent: the creator is told of it as of one not sent.
+  const unsent = as.parts.filter((_, at) => sent[at] === null || sent[at] === undefined || (typeof sent[at] === "string" && (sent[at] as string).startsWith(PENDING_EVENT)));
   const hearing = config.endpoints.flatMap((endpoint) => {
     const part = unsent.find((p) => endpoint.events.includes(p.type));
     return part ? [{ endpoint, type: part.type }] : [];

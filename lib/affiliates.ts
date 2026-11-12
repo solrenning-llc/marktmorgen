@@ -2533,6 +2533,14 @@ function bumpCents(value: unknown): number {
 }
 
 /**
+ * The record of `id` for noteSession's code, bond and contact steps, or null for no id. One whose status is not
+ * approved leaves the sale to the next step, as a removed first click does (attributedAffiliate).
+ */
+async function approvedOf(store: Store, id: string): Promise<Affiliate | null> {
+  return id ? await readAffiliate(store, id) : null;
+}
+
+/**
  * Writes down a settled checkout that came through an affiliate's link.
  * Anything else is left alone, so it is safe to call on every checkout.
  *
@@ -2587,37 +2595,38 @@ export async function noteSession(
   // affiliate's own page both say out loud.
   let how: Credit = "click";
   if (!AFFILIATE_ID_PATTERN.test(aff)) {
-    // Program off: no code, bond or contact credits (as the sweep and PayPal).
-    if (!affiliatesOn(store)) return;
+    if (!affiliatesOn(store)) return; // off, as in the sweep
     // Then the code the buyer typed, which is the only trace a sale made on a
     // podcast or from a stage leaves at all (lib/affiliate-codes.ts). Read only
     // for a sale that carries a code: a sale with none never waits on that read.
     const given = promoCodesOn(session).length ? (owners ?? (await codeOwners(store))) : new Map<string, string>();
     let found = affiliateForCodes(session, given);
+    let who = await approvedOf(store, found);
     how = "code";
     // And last, the buyer themselves: somebody who was credited to an
     // affiliate once and whose creator asked for them to stay credited
     // (lib/affiliate-bond.ts). No cookie, no window, any device.
-    if (!found && buyer) {
+    if (who?.status !== "approved" && buyer) {
       found = await bondFor(store, buyer);
+      who = await approvedOf(store, found);
       how = "buyer";
     }
     // Then the affiliate who brought this buyer as a confirmed lead, where the
     // creator asked for that (lib/affiliate-leads.ts contactFor). Read lazily:
     // that file reads this one.
-    if (!found && buyer && creditsContacts(store.affiliates)) {
+    if (who?.status !== "approved" && buyer && creditsContacts(store.affiliates)) {
       const { contactFor } = await import("@/lib/affiliate-leads");
       // Only a lead confirmed before this checkout was opened, and never the
       // lead this very checkout made (a paid booking is one): a sale written
       // down again later must not reach back to a lead that came after it.
       found = await contactFor(store, buyer, at, session.id);
+      who = await approvedOf(store, found);
       how = "contact";
     }
-    if (!found) return;
     // A code, a bond or a contact only ever credits somebody the creator approves today.
     // An affiliate they declined or removed keeps their record — it is
     // history — and earns nothing more through either.
-    const who = await readAffiliate(store, found);
+    if (!found) return;
     if (who?.status !== "approved") return;
     aff = found;
     own = who.rate;

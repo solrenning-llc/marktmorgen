@@ -414,13 +414,17 @@ export async function giveBackToMonth(store: Store, n: number): Promise<void> {
   if (store.listId && window && Number.isSafeInteger(n) && n > 0) await redisPipeline([["EVAL", GIVE_BACK_FLOOR, 1, usedKey(store.listId, window), n]]);
 }
 
-/** Gives back what was taken for a batch that was not sent. */
+/**
+ * Gives back what was taken for a batch that was not sent, never below zero on the month or the day (GIVE_BACK_FLOOR):
+ * a give-back that lands on a window or day holding less than it (the window turned between the reserve and this,
+ * or it came twice) once left the count negative, and later batches could send past the plan by that much.
+ */
 export async function release(store: Store, n: number): Promise<void> {
   const window = windowOf(store);
-  if (store.listId && window && n > 0) {
+  if (store.listId && window && Number.isSafeInteger(n) && n > 0) {
     await redisPipeline([
-      ["DECRBY", usedKey(store.listId, window), n],
-      ["DECRBY", dayKey(), n],
+      ["EVAL", GIVE_BACK_FLOOR, 1, usedKey(store.listId, window), n],
+      ["EVAL", GIVE_BACK_FLOOR, 1, dayKey(), n],
     ]);
   }
 }

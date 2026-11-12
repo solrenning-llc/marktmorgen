@@ -155,7 +155,7 @@ async function main(): Promise<void> {
   await quietly(drainAfter);
   is("the buyer still gets the link", pressed.status, 303);
   is("nothing more in line", Number((await original([["ZCARD", "nl:hookout:due"]]))[0]), CAP);
-  is("and no record written past it", (await original([["KEYS", "nl:hookout:evt_*"]]))[0], []);
+  is("and no record written past it", (await original([["SCAN", 0, "MATCH", "nl:hookout:evt_*", "COUNT", 1000]]))[0], ["0", []]);
   failDeliveryWrites = 1;
   is("said as lost, never as kept", await quietly(() => emitOrKeep(store, "lead.captured", "ceiling-seed", { email: "jo@example.com" })), "lost");
   is("still at the ceiling", Number((await original([["ZCARD", "nl:hookout:due"]]))[0]), CAP);

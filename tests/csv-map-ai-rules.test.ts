@@ -62,6 +62,18 @@ is(
   ["Date of purchase", "Signed up at", "E-mail address", "Phone number", "Fecha de compra", "Data da compra", "Nom de famille"].map(labelLike),
   [true, true, true, true, true, true, true],
 );
+// An identifier is a label only when its parts are label words too (Claude 1 review of #3555 at 882156dca, LOW): a
+// hyphenated name ("Anne-Marie"), a surname pair or a username ("jane_doe", "janeDoe") is a person's data, never sent.
+is(
+  "a hyphenated name or a username in identifier form is not a header: nothing sent",
+  [["Anne-Marie", "Smith-Jones"], ["Anne-Marie"], ["jane_doe"], ["janeDoe"], ["Email", "Jean-Luc"]].map((row) => [clearHeader(row), mapRequest("contacts", row)]),
+  [[false, null], [false, null], [false, null], [false, null], [false, null]],
+);
+is(
+  "identifiers made of label words still read as labels",
+  ["e_mail", "firstName", "opt_in", "customer_id", "created_at", "zip-code", "E-Mail-Adresse", "lastName"].map(labelLike),
+  [true, true, true, true, true, true, true, true],
+);
 is("nothing named at all: not a header", [clearHeader([]), clearHeader(["", " "])], [false, false]);
 is("label-like, one by one", ["Subscriber", "Opt-in status", "Order date", "Ana", "Fortaleza", "Column 2", "Address 2"].map(labelLike), [true, true, true, false, false, true, true]);
 is("what looks like data", ["a@b", "www.x.test", "12345678", "Order 123456", "Email", "Phone", "Zip 60"].map(looksLikeData), [true, true, true, true, false, false, false]);

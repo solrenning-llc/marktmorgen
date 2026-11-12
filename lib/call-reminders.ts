@@ -72,15 +72,15 @@ function dueQueue(reply: unknown, now: number): string[] {
   const unreadable = () => new Error("The call reminder queue could not be read.");
   if (!Array.isArray(reply) || reply.length !== 1) throw unreadable();
   const entry = Object.getOwnPropertyDescriptor(reply, "0");
-  if (!entry || !("value" in entry)) throw unreadable();
+  if (!entry || !Object.hasOwn(entry, "value")) throw unreadable();
   const raw: unknown = entry.value;
   if (!Array.isArray(raw) || raw.length % 2 !== 0 || raw.length > BATCH * 2) throw unreadable();
   const flat: string[] = [];
   for (let i = 0; i < raw.length; i += 2) {
     const member = Object.getOwnPropertyDescriptor(raw, String(i));
     const score = Object.getOwnPropertyDescriptor(raw, String(i + 1));
-    if (!member || !("value" in member) || typeof member.value !== "string" ||
-      !score || !("value" in score)) throw unreadable();
+    if (!member || !Object.hasOwn(member, "value") || typeof member.value !== "string" ||
+      !score || !Object.hasOwn(score, "value")) throw unreadable();
     const value: unknown = score.value;
     if (typeof value !== "number" && (typeof value !== "string" || !/^-?\d+(?:\.\d+)?(?:e[+-]?\d+)?$/i.test(value))) throw unreadable();
     const at = Number(value);

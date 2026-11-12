@@ -29,10 +29,12 @@ function Frame({ bar, children }: { bar: string; children: React.ReactNode }) {
 /**
  * What pressing a demo's button says. Before this, the button did nothing at all (VR site sweep, 12/11/2026):
  * a button that looks like it pays and answers nothing is make-believe (AGENTS.md, VR Part A, item 2). It now says
- * plainly what would happen on a real store, and that nothing happens here.
+ * plainly what would happen on a real store, and that nothing happens here. It says "a store that is selling", never
+ * "your store": while paid selling is closed (PLANS_ON_SALE) no store can open a checkout, and the words must be true
+ * either way. `when` is what the button itself says about the amount ("today" on a payment plan).
  */
-export function demoPressedWords(price: number): string {
-  return `This is a preview, so nothing happens here. On your store, this button opens a secure checkout for $${price}.`;
+export function demoPressedWords(price: number, when?: "today"): string {
+  return `This is a preview, so nothing happens here. On a store that is selling, this button opens a secure checkout for $${price}${when ? ` ${when}` : ""}.`;
 }
 
 const OPTIONS = [
@@ -67,7 +69,7 @@ export function OptionsDemo() {
                     name={name}
                     value={o.id}
                     checked={chosen === o.id}
-                    onChange={() => setChosen(o.id)}
+                    onChange={() => { setChosen(o.id); setPressed(false); }}
                     className="h-4 w-4 accent-[var(--violet)]"
                   />
                   <span>
@@ -135,7 +137,7 @@ export function BumpDemo() {
                     type="radio"
                     name={`${id}-pay`}
                     checked={plan === o.v}
-                    onChange={() => setPlan(o.v)}
+                    onChange={() => { setPlan(o.v); setPressed(false); }}
                     className="h-4 w-4 accent-[var(--violet)]"
                   />
                   <span className="text-[13.5px] font-semibold text-ink">{o.t}</span>
@@ -149,7 +151,7 @@ export function BumpDemo() {
           <input
             type="checkbox"
             checked={bump}
-            onChange={(e) => setBump(e.target.checked)}
+            onChange={(e) => { setBump(e.target.checked); setPressed(false); }}
             className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--violet)]"
           />
           <span>
@@ -164,7 +166,7 @@ export function BumpDemo() {
           A preview to try: nothing is charged here. The box is never checked for the buyer.
         </p>
         <p role="status" className="mt-2 text-center text-[13px] font-semibold text-ink">
-          {pressed ? demoPressedWords((plan ? 13 : base) + (bump ? extra : 0)) : ""}
+          {pressed ? demoPressedWords((plan ? 13 : base) + (bump ? extra : 0), plan ? "today" : undefined) : ""}
         </p>
       </form>
     </Frame>

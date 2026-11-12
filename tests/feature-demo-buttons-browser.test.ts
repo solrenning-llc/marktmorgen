@@ -50,6 +50,12 @@ try{
  await page.locator('#bump input[type=checkbox]').check();
  await page.locator('#bump button[type=submit]').click();
  out.after={options:await status('#options'),bump:await status('#bump')};
+ // A later choice clears the answer, so a screen reader hears it only on a press.
+ await page.locator('#bump input[type=radio]').nth(1).check();
+ out.changed={bump:await status('#bump')};
+ // The payment plan: $13 today, plus the $4 extra, and the answer says "today".
+ await page.locator('#bump button[type=submit]').click();
+ out.plan={bump:await status('#bump')};
  out.moved=page.url()!==url;
  console.log(JSON.stringify(out));
 }finally{if(browser)await browser.close();}
@@ -58,6 +64,8 @@ try{
 const result = JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e", browserScript], { encoding: "utf8", timeout: 90_000, maxBuffer: 2_000_000 })) as {
   before: Record<"options" | "bump", string[]>;
   after: Record<"options" | "bump", string[]>;
+  changed: Record<"bump", string[]>;
+  plan: Record<"bump", string[]>;
   moved: boolean;
   requests: number;
   errors: string[];
@@ -66,6 +74,12 @@ is("each preview has one status line, empty before its button is pressed", resul
 is("pressing the options preview's button says what it would do, at the price picked", result.after.options, [demoPressedWords(69)]);
 is("pressing the bump preview's button says what it would do, with the extra added", result.after.bump, [demoPressedWords(43)]);
 is("the words say plainly it is a preview and nothing happens here", demoPressedWords(43).startsWith("This is a preview, so nothing happens here."), true);
+is("a later choice clears the answer until the button is pressed again", result.changed.bump, [""]);
+is("on the payment plan the answer gives what is charged today, as the button does", result.plan.bump, [demoPressedWords(17, "today")]);
+is("the plan's answer says $17 today", /\$17 today\.$/.test(demoPressedWords(17, "today")), true);
+// No store can sell while PLANS_ON_SALE is false (VR Part A, item 2): the words make no promise about the reader's store.
+is("the words never promise the reader's own store a checkout", /\bon your store\b/i.test(demoPressedWords(43)), false);
+is("the words are true whether or not paid selling is open", demoPressedWords(43), "This is a preview, so nothing happens here. On a store that is selling, this button opens a secure checkout for $43.");
 is("nothing is sent and the page does not move", [result.requests, result.moved], [0, false]);
 is("no error in the browser", result.errors, []);
 done();

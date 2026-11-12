@@ -492,15 +492,26 @@ export async function releaseHolds(store: Store, until: number, nowSeconds = Mat
 export async function paidPeriods(store: Store): Promise<Map<string, PaidPeriod>> {
   const out = new Map<string, PaidPeriod>();
   if (!isRedisConfigured()) return out;
-  const [raw] = await redisPipeline([["HGETALL", paidKey(await storeFolder(storeRef(store)))]]);
-  const flat = Array.isArray(raw) ? (raw as unknown[]).map(String) : [];
+  // Read exactly (rule 24; issue #4310): the members' list is what the closing day gives back from. A reply in another
+  // shape, or a row that does not read, is unknown and throws, never "no members" or a member left out: otherwise the
+  // closing day settles nobody to give back to, marks its refunds done and deletes this list (lib/plan-closing.ts).
+  const read = repliesFor(await redisPipeline([["HGETALL", paidKey(await storeFolder(storeRef(store)))]]), 1);
+  const raw = read?.[0];
+  if (!Array.isArray(raw) || raw.length % 2 !== 0 || raw.some((part) => typeof part !== "string")) {
+    throw new UnknownReplyError("a closing store's members' paid periods");
+  }
+  const flat = raw as string[];
   for (let i = 0; i + 1 < flat.length; i += 2) {
+    let row: PaidPeriod;
     try {
-      const row = JSON.parse(flat[i + 1]) as PaidPeriod;
-      if (SUB_ID.test(flat[i]) && typeof row.amt === "number" && typeof row.inv === "string") out.set(flat[i], row);
+      row = JSON.parse(flat[i + 1]) as PaidPeriod;
     } catch {
-      // A row that cannot be read is left out, never guessed at.
+      throw new UnknownReplyError("a closing store's member's paid period");
     }
+    if (!SUB_ID.test(flat[i]) || !row || typeof row !== "object" || typeof row.amt !== "number" || !Number.isFinite(row.amt) || typeof row.inv !== "string") {
+      throw new UnknownReplyError("a closing store's member's paid period");
+    }
+    out.set(flat[i], row);
   }
   return out;
 }

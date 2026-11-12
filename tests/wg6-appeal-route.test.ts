@@ -215,7 +215,8 @@ async function main() {
   let lostCount = false;
   redis.pipeline = (async (commands: (string | number)[][]) => {
     const replies = await realPipeline(commands);
-    if (!lostCount && commands[0]?.[0] === "SET" && commands[0].includes("XX")) {
+    // Since #3612 the try is counted by the fenced write (APPEAL_WRITE, an EVAL), no longer by a SET XX.
+    if (!lostCount && commands[0]?.[0] === "EVAL" && String(commands[0][1]).startsWith("-- marktmorgen:appeal-write:")) {
       lostCount = true;
       throw new Error("reply lost");
     }

@@ -263,7 +263,7 @@ async function tell(store: Store, decision: StoreDecision, kept: KeptAppeal, ori
   if (kept.tries >= MAX_TELL_TRIES) return { ok: false, problem: "unsent", words: TRIES_SPENT_WORDS };
   const rk = recordKey(store.sid, decision);
   // The notice's own link works for 60 days; the request may come, or be answered, later (Claude 4 on #3612). The
-  // inbox gets a link to the same notice for as long as the request is kept (none when the notice is no longer kept).
+  // inbox gets a link to the same notice for KEEP_SECONDS from this email (none when the notice is no longer kept).
   const link = await noticeLinkFor(decision.report, KEEP_SECONDS);
   // The try is counted before the email, so a lost count never lets a fourth one go. A hold lost already: nothing sent.
   const counted: KeptAppeal = { ...kept, tries: kept.tries + 1 };
@@ -283,7 +283,7 @@ async function tell(store: Store, decision: StoreDecision, kept: KeptAppeal, ori
       appeal.explanation.slice(0, MAX_APPEAL_TEXT),
       "",
       link
-        ? `Open the notice to act on it (this link works for as long as the request is kept, 400 days): ${origin}/takedown/${link}`
+        ? `Open the notice to act on it (this link works for 400 days from this email; a later Send it again sends a new one): ${origin}/takedown/${link}`
         : `The notice ${decision.report} is no longer kept, so there is no link to it: answer the creator by replying to this email.`,
       `The store is ${origin}/@${store.handle}.`,
       "A person decides, and the answer gives its reason. Reply to this email to answer the creator.",

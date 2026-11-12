@@ -312,6 +312,13 @@ export function decisionNotice(decision: Decision, now: Date, can: StillPossible
 }
 
 /**
+ * A reversal not yet confirmed as put back. Said the same on the studio page and in the creator's email, so it names
+ * neither "this page" nor a later message: putting it back is a person's separate step, and nothing tells the creator
+ * when it is done yet (VR 2; Claude 4's LOW 1 on #3612).
+ */
+export const REVERSED_NOT_BACK = "We decided it can come back. Putting it back is a separate step, done by a person at Marktmorgen. If you do not see it back on your store, reply to our email about this request, and a person will read it.";
+
+/**
  * The words of a request's state for the creator, with its number, and the reason of a final answer. `restored` is
  * whether the caller confirmed that what was taken down is back: a reversal is a decision, and putting the content
  * back is a separate step that can fail or lag, so "back as it was" is said only once it is confirmed.
@@ -323,7 +330,7 @@ export function appealStateWords(appeal: Pick<Appeal, "number" | "state" | "move
   if (isFinal(appeal.state) && last?.reason) lines.push(`Why: ${last.reason}`);
   if (appeal.state === "reversed") {
     lines.push(kind && restorable(kind)
-      ? restored ? "What was taken down is back as it was." : "We are putting back what was taken down. This page will say when it is back."
+      ? restored ? "What was taken down is back as it was." : REVERSED_NOT_BACK
       : kind === "link" ? "The link and its file were deleted, so they cannot be put back. You can add the link again."
       : "The reason above says what changes.");
   }

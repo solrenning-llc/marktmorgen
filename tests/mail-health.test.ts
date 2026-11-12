@@ -61,7 +61,42 @@ function announce(type: string, data: Record<string, unknown>, opts: { id?: stri
   });
 }
 
+/**
+ * The file's clock, kept inside one UTC day: it runs at its real pace from noon of the day the file started. The
+ * company's day counter is named by the date at each call (lib/mail.ts dayKey); a run that crossed 00:00 UTC between a
+ * send's reservation and its release gave the day back to the new day's counter, which read -1, so the next list
+ * reservation was refused as an unknown count and the broadcast below never finished. Restored at the end.
+ */
+function withinOneDay(): () => void {
+  const RealDate = Date;
+  const started = RealDate.now();
+  const noon = Math.floor(started / 86_400_000) * 86_400_000 + 43_200_000;
+  const now = () => noon + (RealDate.now() - started);
+  class OneDay extends RealDate {
+    constructor(...args: unknown[]) {
+      if (args.length) super(...(args as [number]));
+      else super(now());
+    }
+    static now(): number {
+      return now();
+    }
+  }
+  globalThis.Date = OneDay as DateConstructor;
+  return () => {
+    globalThis.Date = RealDate;
+  };
+}
+
 async function main(): Promise<void> {
+  const realClock = withinOneDay();
+  try {
+    await checks();
+  } finally {
+    realClock();
+  }
+}
+
+async function checks(): Promise<void> {
   redis.clear();
   mail.configure();
   await mail.setReady(true, { max24: 50_000, rate: 100 });

@@ -103,6 +103,10 @@ const en = {
     "This membership is no longer running, so what it gave you access to is closed now. Renew it and everything opens again right away.",
   renew: "Renew your membership",
   openCourse: "Open the course",
+  /** How far the buyer is in a course on the list (560 [AS1]): lessons done of the lessons it has now. */
+  lessonsDone: (done: number, total: number) => `${done} of ${total} ${plural(total, "lesson", "lessons")} done`,
+  /** Said when that could not be read just now: never as 0 done. */
+  progressUnread: "We could not check your progress in this course just now. Open the course to see where you are.",
   bookSession: (left: number) => `Book a session (${left} left)`,
   packageExpired: "The time to book this package's sessions has passed.",
   packageAllBooked: "Every session of this package is booked.",
@@ -254,6 +258,15 @@ const en = {
   discountCovered: (zero: string) => `${zero}. A discount code covered the whole price.`,
   /** "$9 a month, 12 payments in all". */
   paymentsInAll: (every: string, payments: number) => `${every}, ${payments} payments in all`,
+  /**
+   * A membership whose discount came off the first charge: what was paid today and what each charge after it is,
+   * from the checkout (lib/purchase-email.ts). `then` is null when that price does not read; `isOpenEnded` when how long
+   * the discount keeps coming off could not be read, so it is never said to end or to go on.
+   */
+  discountToday: (now: string, then: string | null, hasTax: boolean, isOpenEnded: boolean) =>
+    `${now} today, with your discount. ${then ? `Each charge after this one: ${then}` : "Each charge after this one is at the membership's regular price"}${hasTax ? " plus any sales tax" : ""}${isOpenEnded ? ", less your discount for as long as it lasts" : ""}.`,
+  /** An introductory price with sales tax added on top: what was charged today, then the schedule. */
+  introTaxed: (now: string, schedule: string) => `${now} today. The price: ${schedule}, plus any sales tax.`,
 
   // ---- The confirmation of an offer taken after paying -------------------------------------
   offerSubject: (store: string, title: string) => `Added to your order from ${store}: ${title}`,
@@ -372,6 +385,8 @@ const es: OrdersWords = {
   endedNote: "Esta membresía ya no está activa, así que lo que te daba acceso está cerrado ahora. Renuévala y todo se abre de nuevo al instante.",
   renew: "Renueva tu membresía",
   openCourse: "Abrir el curso",
+  lessonsDone: (done, total) => `${done} de ${total} ${plural(total, "lección completada", "lecciones completadas")}`,
+  progressUnread: "No pudimos comprobar tu progreso en este curso en este momento. Abre el curso para ver por dónde vas.",
   bookSession: (left) => `Reservar una sesión (${left === 1 ? "queda 1" : `quedan ${left}`})`,
   packageExpired: "Ya pasó el plazo para reservar las sesiones de este paquete.",
   packageAllBooked: "Todas las sesiones de este paquete están reservadas.",
@@ -503,6 +518,9 @@ const es: OrdersWords = {
   trialStarted: (zero, days) => `${zero} hoy. Tu prueba gratuita de ${days} ${plural(days, "día", "días")} ha empezado.`,
   discountCovered: (zero) => `${zero}. Un código de descuento cubrió el precio completo.`,
   paymentsInAll: (every, payments) => `${every}, ${payments} ${plural(payments, "pago", "pagos")} en total`,
+  discountToday: (now, then, hasTax, isOpenEnded) =>
+    `${now} hoy, con tu descuento. ${then ? `Cada cobro después de este: ${then}` : "Cada cobro después de este es al precio habitual de la membresía"}${hasTax ? " más los impuestos sobre las ventas que correspondan" : ""}${isOpenEnded ? ", menos tu descuento mientras dure" : ""}.`,
+  introTaxed: (now, schedule) => `${now} hoy. El precio: ${schedule}, más los impuestos sobre las ventas que correspondan.`,
 
   offerSubject: (store, title) => `Añadido a tu pedido de ${store}: ${title}`,
   offerIntro: (store) => `Añadiste algo a tu pedido de ${store}. Esta es tu confirmación.`,
@@ -616,6 +634,8 @@ const fr: OrdersWords = {
   endedNote: "Cet abonnement n'est plus actif, l'accès qu'il vous donnait est donc fermé. Renouvelez-le et tout s'ouvre de nouveau immédiatement.",
   renew: "Renouveler votre abonnement",
   openCourse: "Ouvrir la formation",
+  lessonsDone: (done, total) => `${done} ${pluralFr(done, "leçon terminée", "leçons terminées")} sur ${total}`,
+  progressUnread: "Nous n'avons pas pu vérifier votre progression dans cette formation pour le moment. Ouvrez la formation pour voir où vous en êtes.",
   bookSession: (left) => `Réserver une séance (${left}${S}${pluralFr(left, "restante", "restantes")})`,
   packageExpired: "Le délai pour réserver les séances de ce forfait est dépassé.",
   packageAllBooked: "Toutes les séances de ce forfait sont réservées.",
@@ -745,6 +765,9 @@ const fr: OrdersWords = {
   trialStarted: (zero, days) => `${zero} aujourd'hui. Votre essai gratuit de ${days}${S}${pluralFr(days, "jour", "jours")} a commencé.`,
   discountCovered: (zero) => `${zero}. Un code de réduction a couvert la totalité du prix.`,
   paymentsInAll: (every, payments) => `${every}, ${payments}${S}${pluralFr(payments, "paiement", "paiements")} au total`,
+  discountToday: (now, then, hasTax, isOpenEnded) =>
+    `${now} aujourd'hui, avec votre réduction. ${then ? `Chaque paiement suivant${S}: ${then}` : "Chaque paiement suivant est au prix habituel de l'abonnement"}${hasTax ? ", plus les éventuelles taxes de vente" : ""}${isOpenEnded ? ", moins votre réduction tant qu'elle s'applique" : ""}.`,
+  introTaxed: (now, schedule) => `${now} aujourd'hui. Le prix${S}: ${schedule}, plus les éventuelles taxes de vente.`,
 
   offerSubject: (store, title) => `Ajouté à votre commande chez ${store}${S}: ${title}`,
   offerIntro: (store) => `Vous avez ajouté quelque chose à votre commande chez ${store}. Voici votre confirmation.`,
@@ -858,6 +881,8 @@ const de: OrdersWords = {
   endedNote: "Diese Mitgliedschaft läuft nicht mehr, daher ist der Zugang, den sie Ihnen gab, jetzt geschlossen. Verlängern Sie sie, und alles ist sofort wieder offen.",
   renew: "Mitgliedschaft verlängern",
   openCourse: "Kurs öffnen",
+  lessonsDone: (done, total) => `${done} von ${total} ${plural(total, "Lektion", "Lektionen")} erledigt`,
+  progressUnread: "Wir konnten Ihren Fortschritt in diesem Kurs gerade nicht prüfen. Öffnen Sie den Kurs, um zu sehen, wo Sie stehen.",
   bookSession: (left) => `Termin buchen (noch ${left} übrig)`,
   packageExpired: "Die Frist, um die Termine dieses Pakets zu buchen, ist abgelaufen.",
   packageAllBooked: "Alle Termine dieses Pakets sind gebucht.",
@@ -988,6 +1013,9 @@ const de: OrdersWords = {
   trialStarted: (zero, days) => `${zero} heute. Ihr ${days}-tägiger kostenloser Testzeitraum hat begonnen.`,
   discountCovered: (zero) => `${zero}. Ein Rabattcode hat den gesamten Preis abgedeckt.`,
   paymentsInAll: (every, payments) => `${every}, insgesamt ${payments} ${plural(payments, "Zahlung", "Zahlungen")}`,
+  discountToday: (now, then, hasTax, isOpenEnded) =>
+    `${now} heute, mit Ihrem Rabatt. ${then ? `Jede weitere Zahlung: ${then}` : "Jede weitere Zahlung erfolgt zum regulären Preis der Mitgliedschaft"}${hasTax ? " zuzüglich eventuell anfallender Umsatzsteuer" : ""}${isOpenEnded ? ", abzüglich Ihres Rabatts, solange er gilt" : ""}.`,
+  introTaxed: (now, schedule) => `${now} heute. Der Preis: ${schedule}, zuzüglich eventuell anfallender Umsatzsteuer.`,
 
   offerSubject: (store, title) => `Zu Ihrer Bestellung bei ${store} hinzugefügt: ${title}`,
   offerIntro: (store) => `Sie haben Ihrer Bestellung bei ${store} etwas hinzugefügt. Dies ist Ihre Bestätigung.`,
@@ -1105,6 +1133,8 @@ const it: OrdersWords = {
   endedNote: "Questo abbonamento non è più attivo, quindi ciò a cui ti dava accesso ora è chiuso. Rinnovalo e tutto si riapre subito.",
   renew: "Rinnova il tuo abbonamento",
   openCourse: "Apri il corso",
+  lessonsDone: (done, total) => `${done} di ${total} ${plural(total, "lezione completata", "lezioni completate")}`,
+  progressUnread: "Non siamo riusciti a controllare i tuoi progressi in questo corso in questo momento. Apri il corso per vedere a che punto sei.",
   bookSession: (left) => `Prenota una sessione (${left === 1 ? "ne resta 1" : `ne restano ${left}`})`,
   packageExpired: "Il tempo per prenotare le sessioni di questo pacchetto è scaduto.",
   packageAllBooked: "Tutte le sessioni di questo pacchetto sono prenotate.",
@@ -1235,6 +1265,9 @@ const it: OrdersWords = {
   trialStarted: (zero, days) => `${zero} oggi. La tua prova gratuita di ${days} ${plural(days, "giorno", "giorni")} è iniziata.`,
   discountCovered: (zero) => `${zero}. Un codice sconto ha coperto l'intero prezzo.`,
   paymentsInAll: (every, payments) => `${every}, ${payments} ${plural(payments, "pagamento", "pagamenti")} in tutto`,
+  discountToday: (now, then, hasTax, isOpenEnded) =>
+    `${now} oggi, con il tuo sconto. ${then ? `Ogni addebito successivo: ${then}` : "Ogni addebito successivo è al prezzo normale dell'abbonamento"}${hasTax ? " più le eventuali imposte sulle vendite" : ""}${isOpenEnded ? ", meno il tuo sconto finché vale" : ""}.`,
+  introTaxed: (now, schedule) => `${now} oggi. Il prezzo: ${schedule}, più le eventuali imposte sulle vendite.`,
 
   offerSubject: (store, title) => `Aggiunto al tuo ordine da ${store}: ${title}`,
   offerIntro: (store) => `Hai aggiunto qualcosa al tuo ordine da ${store}. Questa è la tua conferma.`,
@@ -1348,6 +1381,8 @@ const nl: OrdersWords = {
   endedNote: "Dit lidmaatschap loopt niet meer, dus waar het je toegang toe gaf, is nu gesloten. Verleng het en alles gaat meteen weer open.",
   renew: "Verleng je lidmaatschap",
   openCourse: "Open de cursus",
+  lessonsDone: (done, total) => `${done} van ${total} ${plural(total, "les", "lessen")} afgerond`,
+  progressUnread: "We konden je voortgang in deze cursus op dit moment niet controleren. Open de cursus om te zien waar je bent.",
   bookSession: (left) => `Boek een sessie (nog ${left} over)`,
   packageExpired: "De tijd om de sessies van dit pakket te boeken is verstreken.",
   packageAllBooked: "Alle sessies van dit pakket zijn geboekt.",
@@ -1477,6 +1512,9 @@ const nl: OrdersWords = {
   trialStarted: (zero, days) => `${zero} vandaag. Je gratis proefperiode van ${days} ${plural(days, "dag", "dagen")} is begonnen.`,
   discountCovered: (zero) => `${zero}. Een kortingscode dekte de volledige prijs.`,
   paymentsInAll: (every, payments) => `${every}, ${payments} ${plural(payments, "betaling", "betalingen")} in totaal`,
+  discountToday: (now, then, hasTax, isOpenEnded) =>
+    `${now} vandaag, met je korting. ${then ? `Elke volgende betaling: ${then}` : "Elke volgende betaling is tegen de normale prijs van het lidmaatschap"}${hasTax ? " plus eventuele omzetbelasting" : ""}${isOpenEnded ? ", min je korting zolang die geldt" : ""}.`,
+  introTaxed: (now, schedule) => `${now} vandaag. De prijs: ${schedule}, plus eventuele omzetbelasting.`,
 
   offerSubject: (store, title) => `Toegevoegd aan je bestelling bij ${store}: ${title}`,
   offerIntro: (store) => `Je hebt iets toegevoegd aan je bestelling bij ${store}. Dit is je bevestiging.`,
@@ -1590,6 +1628,8 @@ const pt: OrdersWords = {
   endedNote: "Esta subscrição já não está ativa, por isso aquilo a que lhe dava acesso está agora fechado. Renove-a e tudo volta a abrir de imediato.",
   renew: "Renovar a sua subscrição",
   openCourse: "Abrir o curso",
+  lessonsDone: (done, total) => `${done} de ${total} ${plural(total, "aula concluída", "aulas concluídas")}`,
+  progressUnread: "Não foi possível verificar o seu progresso neste curso agora. Abra o curso para ver onde está.",
   bookSession: (left) => `Marcar uma sessão (${left === 1 ? "resta 1" : `restam ${left}`})`,
   packageExpired: "O prazo para marcar as sessões deste pacote já terminou.",
   packageAllBooked: "Todas as sessões deste pacote estão marcadas.",
@@ -1720,6 +1760,9 @@ const pt: OrdersWords = {
   trialStarted: (zero, days) => `${zero} hoje. O seu período de teste grátis de ${days} ${plural(days, "dia", "dias")} começou.`,
   discountCovered: (zero) => `${zero}. Um código de desconto cobriu o preço total.`,
   paymentsInAll: (every, payments) => `${every}, ${payments} ${plural(payments, "pagamento", "pagamentos")} no total`,
+  discountToday: (now, then, hasTax, isOpenEnded) =>
+    `${now} hoje, com o seu desconto. ${then ? `Cada pagamento seguinte: ${then}` : "Cada pagamento seguinte é ao preço normal da subscrição"}${hasTax ? " mais os impostos sobre vendas aplicáveis" : ""}${isOpenEnded ? ", menos o seu desconto enquanto se aplicar" : ""}.`,
+  introTaxed: (now, schedule) => `${now} hoje. O preço: ${schedule}, mais os impostos sobre vendas aplicáveis.`,
 
   offerSubject: (store, title) => `Adicionado à sua encomenda de ${store}: ${title}`,
   offerIntro: (store) => `Adicionou algo à sua encomenda de ${store}. Esta é a sua confirmação.`,

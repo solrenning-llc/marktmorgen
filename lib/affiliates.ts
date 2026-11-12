@@ -3030,9 +3030,9 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
   // "partner" (lib/partner-share.ts). Keeping the shape means the payouts, the
   // batches, the spreadsheet and the partner's own page all work unchanged,
   // and one sale can produce several of these alongside a commission.
-  const partnerLines: Referral[] = pairs(shares)
+  const shareLines: Referral[] = pairs(shares)
     .map(([, raw]) => parsePartnerEarning(raw))
-    .filter((e): e is PartnerEarning => e !== null && (!only || e.aff === only))
+    .filter((e): e is PartnerEarning => e !== null)
     .map((e) => ({
       ref: `${e.ref}:${e.aff}`,
       pi: e.pi,
@@ -3047,6 +3047,10 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
       self: e.self,
       how: "partner" as const,
     }));
+  const partnerLines = shareLines.filter((e) => !only || e.aff === only);
+  // The other partners' shares are not shown on one affiliate's page, but they still count toward the cap their
+  // second tier is held under (tierLines), so the page owes what the creator's book does.
+  const otherShares = only ? shareLines.filter((e) => e.aff !== only).map((r) => settleLine(r, 0)) : [];
   const paid = pairs(payouts)
     .map(([, raw]) => parsePayout(raw))
     .filter((p): p is Payout => p !== null && (!only || p.aff === only))
@@ -3140,7 +3144,7 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
   // A goal reached in a month adds its bonus, and a sale by somebody an
   // affiliate brought adds their second tier, both worked out from the sales
   // as they stand after refunds. Then only the one affiliate's, when it is one.
-  const lines = [...settled, ...bonusLines(store, settled), ...tierLines(everyone, settled, flagsOf), ...leadLines]
+  const lines = [...settled, ...bonusLines(store, settled), ...tierLines(everyone, [...settled, ...otherShares], flagsOf), ...leadLines]
     .filter((l) => !only || l.aff === only)
     .sort((a, b) => b.at - a.at);
 

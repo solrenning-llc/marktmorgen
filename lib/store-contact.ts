@@ -21,6 +21,7 @@ import { withinLimit } from "@/lib/request-guard";
 import { isHouseStore } from "@/lib/house-store";
 import type { Store } from "@/lib/store";
 import { fileContact } from "@/lib/inbox";
+import { mayWrite } from "@/lib/buyer-block";
 
 import { MAX_MESSAGE, MAX_NAME, MIN_MESSAGE } from "@/lib/store-contact-rules";
 /** Messages one store receives in a day, at most. */
@@ -53,6 +54,8 @@ export async function sendContact(input: { store: Store; name: string; email: st
   const who = store.statsId ?? store.handle;
   if (!(await withinLimit("contact-ip", `${who}:${input.ip}`, 3, 3_600))) return "limited";
   if (!(await withinLimit("contact-store", who, MAX_PER_DAY, 86_400))) return "limited";
+  // Someone the creator blocked (lib/buyer-block.ts), or whose standing cannot be read, reaches nobody.
+  if (!(await mayWrite(store, email))) return "closed";
   const from = name || email;
   const sent = await sendEmail({ meter: { by: "store", store: store, kind: "email" },
     from: NIMBUS_FROM,

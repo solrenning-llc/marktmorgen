@@ -39,6 +39,7 @@
  * once the courses are read and a few counts taken (lib/erasure-rules.ts,
  * erasureUnits), sized in tests/person-erasure.test.ts to cover what it sends.
  */
+import { forgetBlockedPerson } from "@/lib/buyer-block";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type Store, ensureListId, ensureStatsId, storeRef } from "@/lib/store";
@@ -170,6 +171,7 @@ export const ERASERS: Eraser[] = [
   { module: "lib/assistant-reminder.ts", run: (s) => forgetAssistReminderPerson(s.statsId, s.email) },
   { module: "lib/move-members.ts", run: (s) => forgetInvitesPerson(s.store, s.productIds, s.email) },
   { module: "lib/inbox.ts", run: (s) => forgetInboxPerson(s.statsId, s.email) },
+  { module: "lib/buyer-block.ts", run: (s) => forgetBlockedPerson(s.store, s.email) },
   {
     module: "lib/discord-access.ts",
     run: async (s, _files, notes) => {

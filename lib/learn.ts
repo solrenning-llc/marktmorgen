@@ -1018,25 +1018,32 @@ const againKey = (courseId: string) => `nl:course:${courseId}:again`;
 
 /**
  * Notes, when a paid checkout is confirmed, that a student whose row holds an earlier day bought one of these courses
- * again, for the drip job to read their start. A student never seen has no row and nothing to move. Never throws: a
- * reply it cannot read writes nothing, and the page re-dates the row the next time it is opened.
+ * again, for the drip job to read their start. A student never seen has no row and nothing to move. Never throws.
+ * True when it is known: written, or nothing to write. False when a reply does not read exactly (CX-123 rule 24):
+ * the write may not have landed, so the caller (lib/purchase-email.ts, confirmOnce) keeps nothing as done and its
+ * next pass notes it again; SADD and DEL repeat harmlessly (Codex G and Codex L on #3369).
  */
-export async function noteBoughtAgain(store: Store, courseIds: string[], email: string, paidSeconds: number): Promise<void> {
-  if (!isRedisConfigured() || !courseIds.length || !Number.isFinite(paidSeconds)) return;
+export async function noteBoughtAgain(store: Store, courseIds: string[], email: string, paidSeconds: number): Promise<boolean> {
+  if (!isRedisConfigured() || !courseIds.length) return true;
+  if (!Number.isFinite(paidSeconds)) return false;
   const field = emailKey(email);
   try {
     const rows = repliesFor(await redisPipeline(courseIds.map((id) => ["HGET", studentsKey(id), field])), courseIds.length);
-    if (!rows) return;
+    if (!rows || rows.some((raw) => raw !== null && typeof raw !== "string")) return false;
     const again = courseIds.filter((_, i) => {
       const raw = rows[i];
       if (typeof raw !== "string") return false;
       const row = studentTimes(raw);
       return row !== null && row.s < Math.floor(paidSeconds);
     });
+    if (!again.length) return true;
     // The buyer's kept answer is let go with it, so the drip job's read asks Stripe and sees this purchase.
-    if (again.length) await redisPipeline([...again.map((id) => ["SADD", againKey(id), field]), ["DEL", paidCacheKey(store, email)]]);
+    const commands = [...again.map((id) => ["SADD", againKey(id), field]), ["DEL", paidCacheKey(store, email)]];
+    const written = repliesFor(await redisPipeline(commands), commands.length);
+    return written !== null && written.every((reply) => reply === 0 || reply === 1);
   } catch (error) {
     console.error("noting a course bought again failed", error);
+    return false;
   }
 }
 

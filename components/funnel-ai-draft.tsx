@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import { Icon } from "@/components/icons";
 import { readAiAnswer } from "@/lib/ai-response";
+import { AI_ALLOWANCE_UNKNOWN } from "@/components/ai-assist";
 import { MAX_AI_NOTES } from "@/lib/ai-rules";
 import type { FunnelType } from "@/lib/funnel-types";
 import {
@@ -47,12 +48,14 @@ export function FunnelAiDraftPanel({ type, picked, sid, ai, emailsPossible, onDr
   type: FunnelType;
   picked: Record<string, string>;
   sid: string;
-  /** `known: false` when the month's allowance could not be read (lib/ai-on-value.ts): said so, never "0 left". */
-  ai: { on: boolean; left: number; known?: false };
+  /** null when the month's AI uses could not be read (VR2): said in words, with the buttons off. */
+  ai: { on: boolean; left: number | null };
   /** Whether a follow-up sequence fits this funnel's journey at all (lib/funnel-ai-rules.ts, followUpMoment). */
   emailsPossible: boolean;
   onDraft: (draft: FunnelAiDraft) => void;
 }) {
+  // The sentence under the two buttons says what they use, or why they are off: each button names it (AX274).
+  const statusId = useId();
   const [audience, setAudience] = useState("");
   const [offer, setOffer] = useState("");
   const [proof, setProof] = useState("");
@@ -60,10 +63,8 @@ export function FunnelAiDraftPanel({ type, picked, sid, ai, emailsPossible, onDr
   const [emails, setEmails] = useState(emailsPossible);
   const [busy, setBusy] = useState<"draft" | "research" | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [left, setLeft] = useState(ai.left);
-  // An allowance the page could not read is unknown until an answer from the server says otherwise (rule 24).
-  const [unread, setUnread] = useState(ai.known === false);
-  const [known, setKnown] = useState(ai.known !== false);
+  const [left, setLeft] = useState(ai.left ?? 0);
+  const [known, setKnown] = useState(ai.left !== null);
   const [research, setResearch] = useState<FunnelResearch | null>(null);
   const [drafted, setDrafted] = useState(false);
   if (!ai.on) return null;
@@ -89,7 +90,6 @@ export function FunnelAiDraftPanel({ type, picked, sid, ai, emailsPossible, onDr
       if (data.ok) {
         setLeft(data.left);
         setKnown(true);
-        setUnread(false);
         if (kind === "funnel") {
           if (!isFunnelAiDraft(data.value, type)) return setError(MESSAGES.unconfirmed);
           onDraft(data.value);
@@ -147,19 +147,17 @@ export function FunnelAiDraftPanel({ type, picked, sid, ai, emailsPossible, onDr
         </label>
       ) : null}
       <div className="mt-3 flex flex-wrap items-center gap-3">
-        <button type="button" className="btn btn-primary btn-sm" onClick={() => void run("funnel")} disabled={busy !== null || !known || left < draftJobs} aria-busy={busy === "draft"}>
+        <button type="button" className="btn btn-primary btn-sm" onClick={() => void run("funnel")} disabled={busy !== null || !known || left < draftJobs} aria-busy={busy === "draft"} aria-describedby={statusId}>
           {busy === "draft" ? "Drafting…" : drafted ? "Draft again" : "Draft the funnel"}
         </button>
-        <button type="button" className="btn btn-secondary btn-sm" onClick={() => void run("funnel-research")} disabled={busy !== null || !known || left < FUNNEL_RESEARCH_JOBS} aria-busy={busy === "research"}>
+        <button type="button" className="btn btn-secondary btn-sm" onClick={() => void run("funnel-research")} disabled={busy !== null || !known || left < FUNNEL_RESEARCH_JOBS} aria-busy={busy === "research"} aria-describedby={statusId}>
           {busy === "research" ? "Reading…" : "Summarize who it is for"}
         </button>
       </div>
-      <p className="mt-2 text-xs text-ink-soft" role="status">
-        {unread
-          ? "We could not check your AI allowance just now. Reload the page in a minute to try again."
-          : known
+      <p id={statusId} className="mt-2 text-xs text-ink-soft" role="status">
+        {known
           ? `The draft uses ${draftJobs} of your monthly AI uses; the summary uses ${FUNNEL_RESEARCH_JOBS}. ${left} left this month. Each request also sets aside the most it could cost from your plan's monthly AI budget, which can run out before the uses do. Started attempts count, even if they fail.`
-          : "Reload to check your AI uses before trying again."}
+          : AI_ALLOWANCE_UNKNOWN}
         {drafted ? " Drafting again replaces the words below." : ""}
       </p>
       {error ? (

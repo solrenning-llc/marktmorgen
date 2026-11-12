@@ -136,9 +136,11 @@ export async function forceAllowance(store: AllowanceStore, kind: AllowanceKind,
 export async function giveAllowance(store: AllowanceStore, kind: AllowanceKind, n: number, now = Date.now()): Promise<void> {
   if (!Number.isSafeInteger(n) || n < 1) return;
   const window = allowanceWindow(store, now);
-  const id = idOf(store);
-  if (!window || !id || !isRedisConfigured()) return;
-  await redisPipeline([["DECRBY", key(kind, id, window.id), n]]).catch(() => {});
+  if (!window) return;
+  // Through giveAllowanceIn: a counter gone between the take and this (its expiry, the store erased) is never made
+  // again below zero with no expiry, which gave the window n more uses than the plan has and kept the key for ever
+  // (Claude 7, Redis race hunt). The same single DECRBY when the counter is there and stays at zero or more.
+  await giveAllowanceIn(store, kind, n, window.id, now);
 }
 
 /** What holding for a later moment answered: the window it is held in, or why nothing was held. */

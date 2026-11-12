@@ -61,7 +61,7 @@ import { readAllListings } from "@/lib/catalog";
 import { readCourses } from "@/lib/course";
 import { readFlows } from "@/lib/flows";
 import { FINAL_INDEX } from "@/lib/closing-holds";
-import { type Store, accountStores, closeStoreRecord, saleHandles, storeFolder, storeForEmail, storeRef } from "@/lib/store";
+import { type Store, accountStores, closeStoreRecord, closingRecordKept, saleHandles, storeFolder, storeForEmail, storeRef } from "@/lib/store";
 import { domainKey } from "@/lib/domains";
 import { dropTeam, memberStores, readTeam } from "@/lib/team";
 import { hostCalendarKeys } from "@/lib/host-calendar";
@@ -205,8 +205,38 @@ return redis.call("HDEL", KEYS[1], ARGV[1])`;
  */
 export class EntryNotWithdrawnError extends UnknownReplyError {}
 
+/**
+ * A closing store's going failed after its entry was confirmed, and whether its record is still there, or its entry
+ * taken out, is not known (rule 24, Claude 1 cloud on #3643). The caller starts no walk in this run and leaves the
+ * store due where it is (neither out of line nor moved back), so the next run prepares it first and writes its entry
+ * pending again before any walk can start.
+ */
+export class EntryNotSettledError extends UnknownReplyError {}
+
 /** How many times prepareStore tries to take such an entry out before it throws EntryNotWithdrawnError. */
 const WITHDRAW_TRIES = 2;
+
+/**
+ * A closing store's going failed after its confirmed entry was sent: the record still being that store is read
+ * strictly (closingRecordKept), and then its entry is taken out (WITHDRAW_ENTRY, only while it holds `bytes`), at most
+ * WITHDRAW_TRIES scripts. When either is not known (rule 24), throws EntryNotSettledError: the caller starts no walk
+ * in that run and leaves the store due, so the next run prepares it again (writing its entry pending) first.
+ */
+async function withdrawIfKept(store: Store, ref: string, bytes: string): Promise<void> {
+  let kept: boolean;
+  try {
+    kept = await closingRecordKept(store);
+  } catch (error) {
+    console.error("a closing store's record, read after its going failed, did not read", error);
+    throw new EntryNotSettledError("a closing store's record, read after its going failed");
+  }
+  if (!kept) return;
+  for (let tries = 0; tries < WITHDRAW_TRIES; tries += 1) {
+    const taken = repliesFor(await redisPipeline([["EVAL", WITHDRAW_ENTRY, 1, BATCH_KEY, ref, bytes]]).catch(() => null), 1)?.[0];
+    if (taken === 0 || taken === 1) return;
+  }
+  throw new EntryNotSettledError("a closing store's confirmed walk entry, taken out with its record still there (EVAL)");
+}
 
 /** Takes a store out of line: its plan was started again before its walk began. */
 export async function unmarkDue(ref: string): Promise<void> {
@@ -300,8 +330,11 @@ export async function prepareStore(store: Store, now = Date.now()): Promise<Batc
   // Only HSET's own count (0 for an entry rewritten, 1 for a new one) is a write; any other answer is not known to
   // have landed and throws before the record goes (Codex T on #3181).
   let wrote = "";
+  // The confirmed entry's bytes once their write was sent, landed or not (an HSET whose answer is unknown may have).
+  let confirming = "";
   const write = async (batched: Batched) => {
     const bytes = JSON.stringify(batched);
+    if (!batched.pending) confirming = bytes;
     const written = repliesFor(await redisPipeline([["HSET", BATCH_KEY, ref, bytes]]), 1)?.[0];
     if (written !== 0 && written !== 1) throw new Error("the closing store's walk entry was not confirmed written");
     wrote = bytes;
@@ -317,16 +350,28 @@ export async function prepareStore(store: Store, now = Date.now()): Promise<Batc
   // record still there, and the store waits a walk.
   // The entry is always written again here, without `pending`, under the lock and before the record goes: only an entry
   // so confirmed is walked (Codex on #3643).
-  const closed = await closeStoreRecord(store, [], async (fresh) => {
-    if (fresh) {
-      const never = new Set([store, fresh].flatMap((s) => [s.stripeCustomerId, s.subscriptionId, s.stripeAccountId, s.email]));
-      const added = (await recordIds(fresh)).filter((id) => !own.has(id) && !never.has(id));
-      const moved = [...saleHandles(fresh)].filter((handle) => !entry.handles.includes(handle));
-      entry.marks = [...new Set([...marks, ...added])].sort();
-      entry.handles = [...entry.handles, ...moved];
-    }
-    await write(entry);
-  });
+  let closed: boolean;
+  try {
+    closed = await closeStoreRecord(store, [], async (fresh) => {
+      if (fresh) {
+        const never = new Set([store, fresh].flatMap((s) => [s.stripeCustomerId, s.subscriptionId, s.stripeAccountId, s.email]));
+        const added = (await recordIds(fresh)).filter((id) => !own.has(id) && !never.has(id));
+        const moved = [...saleHandles(fresh)].filter((handle) => !entry.handles.includes(handle));
+        entry.marks = [...new Set([...marks, ...added])].sort();
+        entry.handles = [...entry.handles, ...moved];
+      }
+      await write(entry);
+    });
+  } catch (error) {
+    // The entry may be confirmed (written without `pending`) while the record's going then failed: its holds and
+    // releases not confirmed, its fenced delete refused or not answered, or the rewrite's own answer unknown. A
+    // confirmed entry is walked and finished, so it must not stay while the record is still there (Claude 1 cloud on
+    // #3643). The record is read again: still this store, the entry is taken out (only while it holds the bytes sent)
+    // and the store is prepared again on a later walk, as it is still due; gone or another store's (the delete ran
+    // and only its answer was lost), the entry stays and is walked, so nothing the store named is left unnamed.
+    if (confirming) await withdrawIfKept(store, ref, confirming);
+    throw error;
+  }
   if (closed) return entry;
   // Another store (another sid) is kept at this one's key: this one's record is already gone, and its ref and its
   // owner's folder are the other store's now. Its entry, left in the batch, made the walk erase the other store's keys
@@ -840,6 +885,13 @@ export async function eraseClosed(deadline: number, finish: Finisher, now = Date
             entryLeft = true;
             unsure = true;
             await redisPipeline([["ZREM", DUE_KEY, ref]]);
+            continue;
+          }
+          if (error instanceof EntryNotSettledError) {
+            // Never moved back: still due, it is prepared first on the next run, before any walk can start from its entry.
+            console.error("a closing store's going failed and its confirmed walk entry was not settled; no walk starts in this run", error);
+            entryLeft = true;
+            unsure = true;
             continue;
           }
           // Something it needs could not be read (rule 24), such as whether a host still serves another store:

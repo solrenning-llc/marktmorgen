@@ -144,9 +144,9 @@ export function wantsStamp(stamp: boolean, file: ProductFile): boolean {
   return stamp && isStampable(file);
 }
 
-async function noteProblem(pathname: string, problem: StampProblem, seconds = PROBLEM_SECONDS): Promise<void> {
+async function noteProblem(pathname: string, problem: StampProblem): Promise<void> {
   if (!isRedisConfigured()) return;
-  await redisPipeline([["SET", problemKey(pathname), problem, "EX", seconds]]).catch(() => {});
+  await redisPipeline([["SET", problemKey(pathname), problem, "EX", PROBLEM_SECONDS]]).catch(() => {});
 }
 
 /** What writeWithinStorage did: kept the copy, found no room, could not pay for the measurement, or failed to write. */
@@ -344,6 +344,7 @@ export async function stampedDelivery(
   }
   const key = copyKey(sale.reference, file);
   let stamped: { bytes: Uint8Array; contentType: string } | null = null;
+  let storageNoted = false;
   try {
     const epub = isEpub(file);
     if (isRedisConfigured()) {
@@ -359,6 +360,7 @@ export async function stampedDelivery(
       // new file is a new path. A size note is not trusted this way, since a
       // failed read is noted as one too.
       if (epub && (noted === "signed" || noted === "encrypted" || noted === "unreadable")) return ORIGINAL;
+      storageNoted = noted === "storage";
     }
     // A store found without room a moment ago is not listed again on every download: the copy is stamped on the
     // fly, below, outside this block, so nothing that goes wrong there can hand over the original.
@@ -391,7 +393,8 @@ export async function stampedDelivery(
     if (kept !== "kept") {
       // The studio is told only what is true: no room was confirmed. A write that failed, or a measurement the store's
       // requests could not pay for, is not the storage running out.
-      if (kept === "no_room") await noteProblem(file.pathname, "storage", NO_ROOM_NOTE_SECONDS);
+      // Kept as long as the studio's other notes, so the creator sees it, until a copy of this file is kept again.
+      if (kept === "no_room") await noteProblem(file.pathname, "storage");
       return await sendUnkept(file, stamped, meter);
     }
     const copy: ProductFile = {
@@ -411,6 +414,8 @@ export async function stampedDelivery(
     } catch (error) {
       console.error("a stamped copy's record could not be kept; the next download stamps another", error);
     }
+    // The storage has room again: the studio no longer says it ran out for this file.
+    if (storageNoted) await redisPipeline([["DEL", problemKey(file.pathname)]]).catch(() => {});
     // Copies left over by a removal the file store failed are tried again here too, a few at a time; the buyer's
     // copy is already made, and a failure leaves them on the list for the next try. This file's own folder is kept
     // for a later try: emptying it now would delete the copy handed over below.

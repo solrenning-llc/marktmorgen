@@ -119,7 +119,7 @@ export default async function LibraryPage({ searchParams }: Params) {
           {email ? (
             <>
               <p className="text-ink-soft">{`For ${email}. This page works for 24 hours from the email.`}</p>
-              <p className="mt-2 text-sm text-ink-soft">
+              <p className="mt-2 max-w-[56ch] text-sm text-ink-soft">
                 What you bought from a store is here while that store is open on Marktmorgen. A store whose creator closes it takes what was bought from it along, so download the files you want to keep. <Link href="/terms#closing" className="underline underline-offset-4">How a store closes</Link>.
               </p>
               {continuePerson ? <LibraryContinue person={continuePerson} open={openHandles} /> : null}

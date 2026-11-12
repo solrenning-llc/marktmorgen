@@ -218,6 +218,12 @@
   /* The largest radius utilities are calmer than Tailwind's defaults. */
   --radius-2xl: 1rem;
   --radius-3xl: 1.25rem;
+
+  /* Small text keeps a line height of at least 1.5 (WCAG 1.4.8 AAA, 274 [AX1]). Tailwind's defaults are 1.43 for
+     text-sm and 1.33 for text-xs, so every paragraph set in those sizes was under it. An explicit leading-* still
+     wins. Held by tests/e2e/accessibility-buyer-actions.mjs (blocksOff148). */
+  --text-xs--line-height: 1.5;
+  --text-sm--line-height: 1.5;
 }
 
 /* ---------------------------------------------------------------- base */

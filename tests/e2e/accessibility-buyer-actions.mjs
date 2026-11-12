@@ -62,6 +62,27 @@ const targetsUnder44=(page,scope="body")=>page.evaluate(scope=>{
  }
  return out;
 },scope);
+// 1.4.8 Visual Presentation (AAA) on the buyer's own pages: a paragraph's lines are at least 1.5 apart, never justified,
+// and a block of more than 80 characters is no wider than 80 of its own "0" glyphs (the platform caps its words below
+// that, docs/accessibility-programme.md). Only blocks a buyer reads in main; a box drawn as a row (p.flex, p.grid) keeps
+// its width, as in app/globals.css.
+const blocksOff148=page=>page.evaluate(()=>{
+ const out=[];
+ for(const n of document.querySelectorAll("main :is(p,li,dd,blockquote,figcaption)")){
+  const text=(n.textContent||"").trim();
+  if(!n.getClientRects().length||n.closest(".sr-only,[hidden],[inert]")||text.length<41)continue;
+  const s=getComputedStyle(n),size=parseFloat(s.fontSize),line=s.lineHeight==="normal"?size*1.2:parseFloat(s.lineHeight);
+  const name=n.tagName+":"+text.slice(0,50);
+  if(line/size<1.49)out.push({name,lineHeight:Math.round(line/size*100)/100});
+  if(s.textAlign==="justify")out.push({name,justified:true});
+  if(n.matches("li,p.flex,p.grid")||text.length<=80)continue;
+  const probe=document.createElement("span");probe.textContent="0".repeat(80);probe.style.cssText="position:absolute;visibility:hidden;white-space:nowrap;font:inherit;letter-spacing:inherit;word-spacing:inherit";
+  n.appendChild(probe);const eighty=probe.getBoundingClientRect().width;probe.remove();
+  const width=n.getBoundingClientRect().width-parseFloat(s.paddingLeft)-parseFloat(s.paddingRight);
+  if(width>eighty*1.02)out.push({name,characters:Math.round(width/(eighty/80))});
+ }
+ return out;
+});
 const localLink=value=>String(value).replace("https://marktmorgen.com",origin);
 try{
  reviewedApp=await prepareReviewedMailApp(root,env);
@@ -118,6 +139,7 @@ try{
     audits++;console.log("BUYER_MATRIX_AUDIT:"+JSON.stringify({engine,width,mode,state,...result}));
     if(result.scroll>result.client||result.violations.length)throw Error("Accessibility/overflow failure at "+state);
     if(["product-checkout-form","simulated-paid-receipt"].includes(state)){const small=await targetsUnder44(page);if(small.length)throw Error("Target under 44 by 44 px at "+state+" "+JSON.stringify(small));}
+    if(mode!=="text-spacing"){const off=await blocksOff148(page);if(off.length)throw Error("1.4.8 line spacing/justification/width at "+state+" "+JSON.stringify(off));}
     if(result.incomplete.length)gaps.push({width,mode,state,manualReview:result.incomplete});
    }
    // Sent back without the box (app/api/store/checkout, consent=needed): the reason is written beside it and tied to it, the box is

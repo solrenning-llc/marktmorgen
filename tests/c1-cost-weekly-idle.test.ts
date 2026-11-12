@@ -65,6 +65,42 @@ async function main(): Promise<void> {
     is("and so does every later run in the period", commands - before <= 10, true);
   }
 
+  // Review of #4169: a claim whose answer is unknown (SET NX lost, read-back finds nothing) and a stop whose answer is
+  // unknown, with no chat channel, decide nothing: a later run in the same period reaches the store and claims it.
+  for (const [name, route, path, prefix] of [
+    ["Weekly", weekly, "/api/cron/weekly", `nl:weekly:sent:`],
+    ["Monthly", monthly, "/api/cron/monthly", `nl:monthly:sent:`],
+  ] as const) {
+    for (const lost of ["claim", "stop"] as const) {
+      part(`${name}: a ${lost} whose answer is unknown is not kept as decided`);
+      redis.clear();
+      control.folders = ["store9000", "store9001"];
+      let failOnce = true;
+      redis.pipeline = async (batch) => {
+        commands += batch.length;
+        const [verb, key] = batch[0] ?? [];
+        if (failOnce && lost === "claim" && verb === "SET" && String(key).startsWith(prefix) && String(key).endsWith(":store9000")) {
+          failOnce = false;
+          throw new Error("synthetic lost SET NX");
+        }
+        if (failOnce && lost === "stop" && verb === "SISMEMBER" && String(batch[0]?.[2]) === "store9000") {
+          failOnce = false;
+          return ["not a count"];
+        }
+        return real(batch);
+      };
+      const first = await (await route(request(path))).json();
+      is("run 1 counts it failed", first.failed >= 1, true);
+      is("run 1 claims only the other store", redis.keys().filter((k: string) => k.startsWith(prefix)).map((k: string) => k.split(":").pop()), ["store9001"]);
+      await (await route(request(path))).json();
+      is("a later run in the same period claims it", redis.keys().filter((k: string) => k.startsWith(prefix)).map((k: string) => k.split(":").pop()).sort(), ["store9000", "store9001"]);
+    }
+  }
+  redis.pipeline = async (batch) => {
+    commands += batch.length;
+    return real(batch);
+  };
+
   done();
 }
 

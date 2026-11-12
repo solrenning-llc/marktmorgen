@@ -8,7 +8,7 @@ import { monthKey } from "@/lib/delivery";
 import { storeOf } from "@/lib/usage-billing";
 import { standingOf } from "@/lib/plan-standing";
 import { SITE_URL } from "@/lib/site-url";
-import { claimWeek, noteSeen, readNumbers, readSeen, releaseWeek, weekOf, weeklyMessage, weeklyOff, weeklyToken } from "@/lib/stats-report";
+import { noteSeen, readNumbers, readSeen, releaseWeek, weekClaim, weekOf, weeklyMessage, weeklyOffState, weeklyToken } from "@/lib/stats-report";
 import { weeklySummary } from "@/lib/numbers-ask";
 import { aiAvailableFor } from "@/lib/ai";
 import { readSpends } from "@/lib/ad-spend";
@@ -80,7 +80,9 @@ export async function GET(request: NextRequest) {
         decided.push(folder);
         continue;
       }
-      const emailOff = await weeklyOff(store.handle);
+      // Stopped, not stopped, or unknown (null): unknown sends no email, as before, but is never kept as decided.
+      const offState = await weeklyOffState(store.handle);
+      const emailOff = offState !== false;
       // An address that could not be read is not "no channel" (rule 24): nothing is claimed, so a later run sends the email and the post together.
       const chat = await chatAddress(store.statsId).catch(() => undefined);
       if (chat === undefined) {
@@ -88,15 +90,22 @@ export async function GET(request: NextRequest) {
         continue;
       }
       if (emailOff && !chat) {
+        if (offState === null) {
+          out.failed += 1;
+          continue;
+        }
         out.stopped += 1;
         decided.push(folder);
         continue;
       }
       // The week is read once, so the claim and its release name the same week even across Monday's midnight.
       const at = Date.now();
-      if (!(await claimWeek(store.handle, at))) {
-        // Claimed already (or not known to be this run's, which no later run would take either).
-        decided.push(folder);
+      const claim = await weekClaim(store.handle, at);
+      if (claim !== "ours") {
+        // Claimed already: decided. A claim whose answer is unknown is not (review of #4169): the next run claims
+        // again and reads "taken" if this write did land, so the store is never skipped for the rest of the week.
+        if (claim === "taken") decided.push(folder);
+        else out.failed += 1;
         continue;
       }
       out.looked += 1;

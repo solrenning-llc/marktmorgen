@@ -445,9 +445,17 @@ export async function runLaunches(load: (handle: string) => Promise<Store | null
 export async function forgetWaitlistPerson(sid: string | null, productIds: string[], email: string): Promise<number> {
   if (!sid || !isRedisConfigured()) return 0;
   const address = normaliseEmail(email);
-  const replies = productIds.length ? await redisPipeline(productIds.map((p) => ["HDEL", listKey(sid, p), address])) : [];
+  // Each deletion is read exactly (rule 24): an answer in another shape throws, so the erasure is
+  // said as not done and tried again (lib/person-erasure.ts), never as "nothing there to delete".
+  let deleted = 0;
+  if (productIds.length) {
+    const replies = repliesFor(await redisPipeline(productIds.map((p) => ["HDEL", listKey(sid, p), address])), productIds.length);
+    const counts = replies?.map(countOf);
+    if (!counts || counts.some((n) => n === null || n > 1)) throw new UnknownReplyError("the deletion of a person's waitlist places");
+    deleted = (counts as number[]).reduce((sum, n) => sum + n, 0);
+  }
   const blanked = await blankInLists(productIds.map((p) => sendKey(sid, p)), address);
-  return replies.reduce<number>((sum, n) => sum + (Number(n) || 0), 0) + blanked;
+  return deleted + blanked;
 }
 
 /**

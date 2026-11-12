@@ -192,6 +192,8 @@ export function callAddOnPauseWords(pause: CallAddOnPause, offer: string | null)
       return "The product this add-on offers is no longer in your store. Pick another one, or remove the add-on.";
     case "itself":
       return "An add-on cannot offer the call itself. Pick another product.";
+    case "targetDraft":
+      return `${name} is a draft, so buyers cannot see it. Publish it, or pick another product.`;
     case "targetFree":
       return `${name} is free now, so there is no price to offer it at. Give it a price, or remove the add-on.`;
     case "targetRecurring":

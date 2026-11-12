@@ -671,14 +671,25 @@ export async function spendInvite(token: string): Promise<JoinResult> {
   if (!TOKEN_PATTERN.test(token) || !isRedisConfigured()) return { ok: false, reason: "expired" };
   const key = inviteKey(token);
   let raw: unknown;
+  // Its time left, read with it, so a join that does not finish can give the link back as it was.
+  let left: unknown = null;
   try {
-    [raw] = await redisPipeline([["GETDEL", key]]);
+    [left, raw] = await redisPipeline([["TTL", key], ["GETDEL", key]]);
   } catch {
     const [read] = await redisPipeline([["GET", key]]);
     const [removed] = await redisPipeline([["DEL", key]]);
     raw = Number(removed) === 1 ? read : null;
   }
   if (typeof raw !== "string" || !raw) return { ok: false, reason: "expired" };
+  const link = raw;
+  // A join that failed before the team was saved puts the link back (Codex G, #4265): the person is on neither the
+  // team nor their own index, so the same link joins them on the next tap. Only while it had time left; NX, so a
+  // link given back never overwrites anything.
+  const giveBack = async () => {
+    const seconds = Number(left);
+    if (!Number.isInteger(seconds) || seconds < 1) return;
+    await redisPipeline([["SET", key, link, "EX", seconds, "NX"]]).catch((error: unknown) => console.error("giving back an invitation link failed", error));
+  };
 
   let claim: { sid?: unknown; id?: unknown; email?: unknown; role?: unknown };
   try {
@@ -695,22 +706,35 @@ export async function spendInvite(token: string): Promise<JoinResult> {
   if (email === normaliseEmail(store.email)) return { ok: false, reason: "owner" };
   const inviteId = claim.id;
 
-  const joined = await withTeam(store.sid, async (): Promise<{ ok: true; member: Member } | { ok: false; reason: "expired" | "full" }> => {
-    const team = await readTeam(store.sid);
-    const invite = team.invites.find((i) => i.id === inviteId && i.email === email);
-    if (!invite) return { ok: false, reason: "expired" };
-    const already = team.members.find((m) => m.email === email);
-    if (!already && team.members.length >= MAX_TEAM) return { ok: false, reason: "full" };
+  // Set once the team's write was sent: from then on the invitation may be spent on the team, and the link stays used.
+  let sent = false;
+  let joined: { ok: true; member: Member } | { ok: false; reason: "expired" | "full" };
+  try {
+    joined = await withTeam(store.sid, async (): Promise<{ ok: true; member: Member } | { ok: false; reason: "expired" | "full" }> => {
+      const team = await readTeam(store.sid);
+      const invite = team.invites.find((i) => i.id === inviteId && i.email === email);
+      if (!invite) return { ok: false, reason: "expired" };
+      const already = team.members.find((m) => m.email === email);
+      if (!already && team.members.length >= MAX_TEAM) return { ok: false, reason: "full" };
 
-    const member: Member = already ?? { email, role: invite.role, joinedAt: new Date().toISOString() };
-    await saveTeam(store.sid, {
-      members: already ? team.members : [...team.members, member],
-      invites: team.invites.filter((i) => i.id !== invite.id),
+      const member: Member = already ?? { email, role: invite.role, joinedAt: new Date().toISOString() };
+      // Their own index first, read exactly (Codex G, #4265): the team never names someone whose index lacks the store.
+      // Saved and the team then not written, memberStores drops the entry on the team's confirmed absence of them.
+      const [added] = repliesFor(await redisPipeline([["SADD", indexKey(email), store.sid]]), 1) ?? [undefined];
+      const count = countOf(added);
+      if (count === null || count > 1) throw new UnknownReplyError("a teammate's index of stores");
+      sent = true;
+      await saveTeam(store.sid, {
+        members: already ? team.members : [...team.members, member],
+        invites: team.invites.filter((i) => i.id !== invite.id),
+      });
+      return { ok: true, member };
     });
-    return { ok: true, member };
-  });
+  } catch (error) {
+    if (!sent) await giveBack();
+    throw error;
+  }
   if (!joined.ok) return joined;
-  await redisPipeline([["SADD", indexKey(email), store.sid]]);
   return { ok: true, store, member: joined.member };
 }
 

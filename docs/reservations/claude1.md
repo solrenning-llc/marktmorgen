@@ -6,3 +6,4 @@ Only Claude 1 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
+| Claude 1 | 398 [SL2] unit 1, where members are, roughly: the list's rules (pure; no profile field, tab, map or geocoding) | claude1/sl2-member-places | `lib/member-places.ts` (new), `tests/member-places.test.ts` (new) | 12/11/2026 15h00 |

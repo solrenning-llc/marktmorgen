@@ -39,6 +39,10 @@ let garble: { session: string; reply: unknown[] } | null = null;
 let failCustomerWrite: string | null = null;
 /** For this session, the write that names the customer is answered [] and does not land (Claude 1 on #3834). */
 let dropCustomerWrite: string | null = null;
+/** For this session, the write naming the customer lands but its reply is lost ([]) (Codex focal review on #3834). */
+let loseCustomerReply: string | null = null;
+/** For this session, the read-back of that write is lost too ([]): unknown, so the press stays refused. */
+let loseReadBack: string | null = null;
 const real = redis.pipeline.bind(redis);
 redis.pipeline = (async (batch: Command[]) => {
   const one = batch.length === 1 && batch[0][0] === "SET" ? batch[0] : null;
@@ -53,6 +57,14 @@ redis.pipeline = (async (batch: Command[]) => {
   const dropped =
     dropCustomerWrite && one && String(one[1]).startsWith(`nl:upsell:${dropCustomerWrite}`) && !one.includes("NX") && String(one[2]).includes('"pending"') && String(one[2]).includes('"customer"');
   if (dropped) return [];
+  const landed =
+    loseCustomerReply && one && String(one[1]).startsWith(`nl:upsell:${loseCustomerReply}`) && !one.includes("NX") && String(one[2]).includes('"pending"') && String(one[2]).includes('"customer"');
+  if (landed) {
+    await real(batch);
+    return [];
+  }
+  const readBack = loseReadBack && batch.length === 1 && batch[0][0] === "GET" && String(batch[0][1]).startsWith(`nl:upsell:${loseReadBack}`);
+  if (readBack) return [];
   return real(batch);
 }) as typeof redis.pipeline;
 
@@ -204,6 +216,27 @@ async function main(): Promise<void> {
   is("released once old: nothing read, nothing charged", await settle(dropping), { reads: 0, charges: 0 });
   is("answered again: charged once in all", await press(dropping), { upsell: "done", charges: 1 });
   is("one POST for this order's offer in all", charges.filter((c) => c.get("metadata[parent]") === dropping).length, 1);
+
+  part("The write naming the customer landed but its reply was lost ([]): read back exactly, the press goes on (Codex on #3834)");
+  const landing = "cs_test_orphanclaim00005";
+  later = 0;
+  loseCustomerReply = landing;
+  is("the press is not blocked: charged once, done", await press(landing), { upsell: "done", charges: 1 });
+  loseCustomerReply = null;
+  is("written as paid, naming the customer", (await shape(landing))?.state, "paid");
+  is("pressed again: nothing charged again", await press(landing), { upsell: "done", charges: 0 });
+  is("one POST for this order's offer in all", charges.filter((c) => c.get("metadata[parent]") === landing).length, 1);
+
+  part("The write naming the customer landed, its reply and its read-back both lost: refused, never charged twice");
+  const blind = "cs_test_orphanclaim00006";
+  later = 0;
+  loseCustomerReply = blind;
+  loseReadBack = blind;
+  is("the press is refused and charges nothing", await press(blind), { upsell: "refused", charges: 0 });
+  loseCustomerReply = null;
+  loseReadBack = null;
+  is("pressed again: nothing charged, the claim is held", (await press(blind)).charges, 0);
+  is("no POST for this order's offer", charges.filter((c) => c.get("metadata[parent]") === blind).length, 0);
 
   part("An offer that named the customer and whose Stripe state cannot be read stays unknown");
   const unknown = "cs_test_orphanclaim00003";

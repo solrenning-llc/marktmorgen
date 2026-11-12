@@ -181,6 +181,22 @@ async function writeUpsell(session: string, slot: string, record: UpsellRecord):
   return reply?.[0] === "OK";
 }
 
+/**
+ * Writes the record naming the customer before Stripe is asked: true on Redis's exact "OK", or, when that reply is
+ * unclear, only when a read-back finds exactly this write's own payload (Codex's focal review on #3834: the SET may
+ * have landed and only its reply been lost; refusing then would hold a claim that was never sent to Stripe). The
+ * payload carries this press's own time and the claim is this press's alone (SET NX), so no other write matches it.
+ * A read-back that is lost, garbled or different is unknown: false, and the press is refused, nothing is sent.
+ */
+async function writeUpsellConfirmed(session: string, slot: string, record: UpsellRecord): Promise<boolean> {
+  const key = recordKey(session, slot);
+  const payload = JSON.stringify(record);
+  const reply = repliesFor(await redisPipeline([["SET", key, payload, "EX", RECORD_SECONDS]]), 1);
+  if (reply?.[0] === "OK") return true;
+  const back = repliesFor(await redisPipeline([["GET", key]]), 1);
+  return back !== null && back[0] === payload;
+}
+
 export type TakeResult =
   | { kind: "done" }
   | { kind: "declined" }
@@ -400,7 +416,8 @@ export async function takeUpsell(input: {
   // Only on an exact "OK" is Stripe asked (Claude 1 on #3834): a write that did not land would leave a bare claim,
   // which the orphan release lets go once old, so a charge posted after it could be asked again. Unconfirmed, the
   // press is refused here, nothing is sent, and the bare claim is released as an orphan (settleUpsells).
-  if (!(await writeUpsell(session, slot, { state: "pending", product: target.id, ...extra, customer, at: Date.now() }))) {
+  // An unclear reply is read back: the exact payload of this write found means it landed, and the press goes on.
+  if (!(await writeUpsellConfirmed(session, slot, { state: "pending", product: target.id, ...extra, customer, at: Date.now() }))) {
     throw new UnknownReplyError("an offer's record naming the customer before its charge");
   }
   await watchPending(store, session, slot);

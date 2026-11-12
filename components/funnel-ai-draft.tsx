@@ -47,7 +47,8 @@ export function FunnelAiDraftPanel({ type, picked, sid, ai, emailsPossible, onDr
   type: FunnelType;
   picked: Record<string, string>;
   sid: string;
-  ai: { on: boolean; left: number };
+  /** `known: false` when the month's allowance could not be read (lib/ai-on-value.ts): said so, never "0 left". */
+  ai: { on: boolean; left: number; known?: false };
   /** Whether a follow-up sequence fits this funnel's journey at all (lib/funnel-ai-rules.ts, followUpMoment). */
   emailsPossible: boolean;
   onDraft: (draft: FunnelAiDraft) => void;
@@ -60,7 +61,9 @@ export function FunnelAiDraftPanel({ type, picked, sid, ai, emailsPossible, onDr
   const [busy, setBusy] = useState<"draft" | "research" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [left, setLeft] = useState(ai.left);
-  const [known, setKnown] = useState(true);
+  // An allowance the page could not read is unknown until an answer from the server says otherwise (rule 24).
+  const [unread, setUnread] = useState(ai.known === false);
+  const [known, setKnown] = useState(ai.known !== false);
   const [research, setResearch] = useState<FunnelResearch | null>(null);
   const [drafted, setDrafted] = useState(false);
   if (!ai.on) return null;
@@ -86,6 +89,7 @@ export function FunnelAiDraftPanel({ type, picked, sid, ai, emailsPossible, onDr
       if (data.ok) {
         setLeft(data.left);
         setKnown(true);
+        setUnread(false);
         if (kind === "funnel") {
           if (!isFunnelAiDraft(data.value, type)) return setError(MESSAGES.unconfirmed);
           onDraft(data.value);
@@ -151,7 +155,9 @@ export function FunnelAiDraftPanel({ type, picked, sid, ai, emailsPossible, onDr
         </button>
       </div>
       <p className="mt-2 text-xs text-ink-soft" role="status">
-        {known
+        {unread
+          ? "We could not check your AI allowance just now. Reload the page in a minute to try again."
+          : known
           ? `The draft uses ${draftJobs} of your monthly AI uses; the summary uses ${FUNNEL_RESEARCH_JOBS}. ${left} left this month. Each request also sets aside the most it could cost from your plan's monthly AI budget, which can run out before the uses do. Started attempts count, even if they fail.`
           : "Reload to check your AI uses before trying again."}
         {drafted ? " Drafting again replaces the words below." : ""}

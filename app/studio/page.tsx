@@ -134,6 +134,7 @@ import { WinBackEditor } from "@/components/winback-editor";
 import { WelcomeOfferEditor } from "@/components/welcome-offer-editor";
 import { welcomesOffered } from "@/lib/welcome-offer-send";
 import { aiAvailableFor, aiLeft } from "@/lib/ai";
+import { aiOnValue } from "@/lib/ai-on-value";
 import { AiOn } from "@/components/ai-assist";
 import { AiPosts } from "@/components/ai-posts";
 import { winbacksSent } from "@/lib/winback-send";
@@ -857,7 +858,8 @@ export default async function StudioPage({
   const firstReads = {
     folder: early(store ? storeFolder(ref) : Promise.resolve("")),
     pictures: early(store ? imageFolder(ref) : Promise.resolve("")),
-    aiLeft: store && aiAvailableFor(store) ? early(aiLeft(store).catch(() => 0)) : null,
+    // An unread allowance is null, said as unknown by every writing help, never as 0 left (rule 24).
+    aiLeft: store && aiAvailableFor(store) ? early(aiLeft(store).catch(() => null)) : null,
     live: store?.subscriptionId && isBillingConfigured() ? early(readSubscription(store.subscriptionId)) : null,
     pause: store && isBillingConfigured() ? early(pauseView(store)) : null,
     list: store && may("export") ? early(listSize(store)) : null,
@@ -888,7 +890,7 @@ export default async function StudioPage({
   /** Carried on the forms below that post to the studio's routes, so each acts on this store. */
   const pin = store?.sid ? `?store=${store.sid}` : "";
   // The writing help, and what is left of it this month: read once for the whole studio page.
-  const ai = store && aiAvailableFor(store) ? { on: true, left: firstReads.aiLeft ? await firstReads.aiLeft : 0 } : { on: false, left: 0 };
+  const ai = store && aiAvailableFor(store) ? aiOnValue(true, firstReads.aiLeft ? await firstReads.aiLeft : null) : aiOnValue(false, null);
   const notice =
     ADDRESS_NOTICES[typeof params.address === "string" ? params.address : ""] ??
     STRIPE_NOTICES[typeof params.stripe === "string" ? params.stripe : ""] ??
@@ -1438,13 +1440,13 @@ export default async function StudioPage({
             ) : null}
             {/* A store with nothing on it yet: its first draft, written with AI from a few sentences (lib/ai.ts, writeStoreSetup). */}
             {ai.on && may("page") && may("products") && productCount(store) === 0 ? (
-              <StoreSetupAi currency={store.currency} left={ai.left} hasFaq={store.faq.length > 0} storeName={store.name} />
+              <StoreSetupAi currency={store.currency} left={ai.known === false ? null : ai.left} hasFaq={store.faq.length > 0} storeName={store.name} />
             ) : null}
             {role === "owner" ? <StudioStart steps={startSteps} activation={activationTiming(store)} launchChecklist={funnelLaunchChecklist(store.name, visibleCount(store) > 0, startSteps.map(step => ({title: step.title, open: step.done, product: step.key === "product" || step.key === "publish", free: false})), startSteps.filter(step => !step.done).map(step => ({title: step.title, detail: step.unknown ? START_STEP_UNKNOWN : step.hint})), "store")} /> : null}
             {todayScreen ? <TodayPanel view={todayScreen} hrefs={todayHrefs} at={today} /> : null}
             {role === "owner" && !store.suspended ? <PathStudioReminder store={store} role={role} /> : null}
             {/* "How do I…?": answered from the help center's own answers (lib/help-ask.ts). */}
-            {ai.on ? <StudioHelp left={ai.left} /> : null}
+            {ai.on ? <StudioHelp left={ai.known === false ? null : ai.left} /> : null}
             {/* Once there is something on the store: what else it does to sell, with a score (lib/store-coach.ts). */}
             {may("page") ? (
               <StoreCoach checks={storeChecks(store, { path: (page) => studioPath(store, "", page) })} />

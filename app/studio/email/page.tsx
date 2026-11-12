@@ -9,6 +9,7 @@ import { WHO, type Who } from "@/lib/contacts";
 import { lookColours } from "@/lib/store-look";
 import type { Metadata } from "next";
 import { aiAvailableFor, aiLeft } from "@/lib/ai";
+import { aiOnValue } from "@/lib/ai-on-value";
 import { productLink } from "@/lib/checkout-recovery";
 import { idsOfKind, readTitles } from "@/lib/catalog";
 import { cookies } from "next/headers";
@@ -301,7 +302,7 @@ export default async function StudioEmailPage({ searchParams }: Params) {
             draftsReadFailed={loadedDrafts === null}
             flows={flows.map((f) => ({ ...f, statsAvailable: stats?.has(f.id) ?? false, stats: stats?.get(f.id) ?? { started: 0, sent: 0, reached: 0, skipped: 0, acted: 0 }, money: flowMoney(revenue, f.id) }))}
             links={Object.fromEntries([...listings].map(([id]) => [id, productLink(store, id)]))}
-            ai={aiAvailableFor(store) && can(role, "draft") ? { on: true, left: await aiLeft(store).catch(() => 0) } : { on: false, left: 0 }}
+            ai={aiAvailableFor(store) && can(role, "draft") ? aiOnValue(true, await aiLeft(store).catch(() => null)) : aiOnValue(false, null)}
             segments={await listSegments(store.listId).catch(() => [])}
             preset={typeof query.who === "string" && (WHO as readonly string[]).includes(query.who) ? { who: query.who as Who } : undefined}
             courses={idsOfKind(store, "course")}

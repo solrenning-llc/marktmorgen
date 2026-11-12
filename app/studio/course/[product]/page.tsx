@@ -3,6 +3,7 @@ import { commentsOn, markSeen, recentComments } from "@/lib/lesson-comments";
 import { CREATOR_AUTHOR, commentClock } from "@/lib/lesson-comments-rules";
 import type { Metadata } from "next";
 import { aiAvailableFor, aiLeft } from "@/lib/ai";
+import { aiOnValue } from "@/lib/ai-on-value";
 import Link from "next/link";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
@@ -102,7 +103,8 @@ export default async function StudioCoursePage({
   const [talking, recent] = await Promise.all([commentsOn(course.id), recentComments(course.id, 50)]);
   await markSeen(course.id);
   const titles = new Map(lessonsInOrder(course).map(({ lesson }) => [lesson.id, lesson.title]));
-  const aiState = aiAvailableFor(store) ? { on: true, left: await aiLeft(store).catch(() => 0) } : { on: false, left: 0 };
+  // An unread allowance is said as unknown by every AiOn reader, never as 0 left (rule 24; lib/ai-on-value.ts).
+  const aiState = aiAvailableFor(store) ? aiOnValue(true, await aiLeft(store).catch(() => null)) : aiOnValue(false, null);
   // Work handed in for the course's assignments (lib/assignment.ts): what is waiting, or everything.
   const hasTasks = lessonsInOrder(course).some(({ lesson }) => lesson.task);
   const showingWork = query.work === "all" ? "all" : "waiting";

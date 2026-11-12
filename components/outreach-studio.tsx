@@ -223,7 +223,14 @@ const OFF_WORDS: Record<AiOff, string> = {
   setup: "Writing help is not switched on for this store yet, so a pitch cannot be written here.",
 };
 
-export function OutreachStudio({ sender: saved, pitches: first, left, on, off = "setup", storeUrl }: { sender: Sender; pitches: Pitch[]; left: number; on: boolean; off?: AiOff | null; storeUrl: string }) {
+/** The line under "Write the email": this month's writing jobs left, or, when they could not be read, that (rule 24). */
+export function outreachWriteHint(jobs: number | null): string {
+  if (jobs === null) return "We could not check your AI allowance just now. Reload the page in a minute to try again.";
+  return `Uses one of this month's writing jobs (${jobs} left). At most ${PITCHES_PER_DAY} pitches a day.`;
+}
+
+/** `left` is null when the month's writing jobs could not be read: said so, never as 0 left. */
+export function OutreachStudio({ sender: saved, pitches: first, left, on, off = "setup", storeUrl }: { sender: Sender; pitches: Pitch[]; left: number | null; on: boolean; off?: AiOff | null; storeUrl: string }) {
   const [sender, setSender] = useState(saved);
   const [name, setName] = useState(saved.name);
   const [address, setAddress] = useState(saved.address);
@@ -237,7 +244,7 @@ export function OutreachStudio({ sender: saved, pitches: first, left, on, off = 
   const [chosen, setChosen] = useState("");
   const [busy, setBusy] = useState<"sender" | "find" | "draft" | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [jobs, setJobs] = useState(left);
+  const [jobs, setJobs] = useState<number | null>(left);
 
   const rule = countryRule(country);
   const senderReady = sender.name !== "" && sender.address !== "";
@@ -425,10 +432,10 @@ export function OutreachStudio({ sender: saved, pitches: first, left, on, off = 
                     );
                   })}
                 </div>
-                <button type="button" onClick={write} aria-busy={busy === "draft"} disabled={busy !== null || chosen === ""} className="btn btn-primary mt-5">
+                <button type="button" onClick={write} aria-busy={busy === "draft"} disabled={busy !== null || chosen === "" || jobs === null} className="btn btn-primary mt-5">
                   {busy === "draft" ? "Writing…" : "Write the email"}
                 </button>
-                <p className="field-hint mt-2">{`Uses one of this month's writing jobs (${jobs} left). At most ${PITCHES_PER_DAY} pitches a day.`}</p>
+                <p className="field-hint mt-2">{outreachWriteHint(jobs)}</p>
               </fieldset>
             )}
           </div>

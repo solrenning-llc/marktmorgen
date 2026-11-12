@@ -6,3 +6,4 @@ Only Claude 1 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
+| Claude 1 cloud | Fixes #3960: a storage refusal spends no upload budget | claude/blissful-carson-2v8k2m-upload-budget-refund | `app/api/store/vault/route.ts`, `lib/upload-budget.ts`, `lib/vault-storage.ts`, `scripts/test_upload_budget_redis.py`, `tests/automatic-upload-budget.test.ts`, `tests/storage-reservations.test.ts`, `tests/upload-budget-redis.ts`, `tests/upload-budget-routes.test.ts`, `tests/upload-route-world.ts` | 12/11/2026 14h00 |

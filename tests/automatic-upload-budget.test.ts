@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { reserveStoreUpload, reserveUploadControl, OPEN_UPLOAD_BUDGET, RESERVE_UPLOAD_BUDGET, type UploadStore } from '../lib/upload-budget';
+import { reserveStoreUpload, reserveUploadControl, uploadBudgetCouldOpen, CHECK_UPLOAD_BUDGET, OPEN_UPLOAD_BUDGET, RESERVE_UPLOAD_BUDGET, type UploadStore } from '../lib/upload-budget';
 import { AUTOMATIC_UPLOAD_CAPS, AUTOMATIC_UPLOAD_REVIEW_ID, PAID_UPLOAD_ALLOCATIONS_PER_TIER, automaticUploadBudgetPolicy, currentUploadBudgetPolicy, isUploadBudgetConfigured, minimumControlRequests, uploadAllowanceWords, uploadBudgetSnapshot, uploadLedgerKey, uploadOpenedKey } from '../lib/upload-budget-policy';
 import { PAID_STORAGE_BYTES } from '../lib/storage-rules';
 import { hashes, opened, calls, reset } from './upload-budget-redis';
@@ -81,6 +81,34 @@ test('a changed automatic allowance carries the counters it finds', async () => 
 test('the scripts never expire, delete or refund', () => {
   for (const script of [OPEN_UPLOAD_BUDGET, RESERVE_UPLOAD_BUDGET]) assert.doesNotMatch(script, /EXPIRE|DECRBY|DEL\b|HDEL/);
   assert.doesNotMatch(OPEN_UPLOAD_BUDGET, /HINCRBY|'store:/);
+  const used = new Set([...CHECK_UPLOAD_BUDGET.matchAll(/redis\.call\('([A-Z]+)'/g)].map(match => match[1]));
+  assert.deepEqual([...used].sort(), ['EXISTS', 'HGET', 'TTL', 'TYPE'], 'the check only reads');
+});
+
+test('the read-only check answers as the take would, and creates or changes nothing', async () => {
+  reset();
+  const month = uploadOpenedKey(now.toISOString().slice(0, 7));
+  assert.equal(await uploadBudgetCouldOpen(store(), 5_000_000, 'r2'), true, 'a new month');
+  assert.equal(hashes.size, 0);
+  assert.equal(opened.size, 0);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].length, 1);
+  const opens = AUTOMATIC_UPLOAD_CAPS.creator.opens;
+  for (let n = 0; n < opens; n++) assert.equal(await reserveStoreUpload(store(3, 'creator'), 1, 'r2'), true);
+  const row = JSON.stringify([...hashes.get(key)!]);
+  assert.equal(await uploadBudgetCouldOpen(store(3, 'creator'), 1, 'r2'), false, 'starts spent');
+  assert.equal(await uploadBudgetCouldOpen(store(4, 'creator'), 1, 'r2'), true, 'another store still has room');
+  assert.equal(JSON.stringify([...hashes.get(key)!]), row);
+  hashes.delete(key);
+  assert.equal(opened.has(month), true);
+  assert.equal(await uploadBudgetCouldOpen(store(4, 'creator'), 1, 'r2'), false, 'a lost ledger');
+  assert.equal(hashes.has(key), false);
+  reset();
+  const soon = Date.now() / 1000 + 3600;
+  assert.equal(await uploadBudgetCouldOpen(store(2, 'pro', { trialEnds: soon }), 1, 'r2'), false);
+  assert.equal(await uploadBudgetCouldOpen(store(), 1, 'stream'), false);
+  assert.equal(await uploadBudgetCouldOpen(store(), 0, 'r2'), false);
+  assert.equal(calls.length, 0, 'refused before Redis');
 });
 
 test('public wording shows the automatic numbers instead of a pause', () => {

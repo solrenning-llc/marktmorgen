@@ -119,3 +119,34 @@ test("R2 opens reserve capacity and failed provider cancellation cannot free it"
     assert.equal(openedSessions, openedBefore);
   } finally { globalThis.fetch = saved; }
 });
+
+test("the upload budget is taken only after storage has room, and a refused budget frees the room", async () => {
+  process.env.R2_ACCOUNT_ID = "0123456789abcdef0123456789abcdef";
+  process.env.R2_ACCESS_KEY_ID = "1234567890123456";
+  process.env.R2_SECRET_ACCESS_KEY = "x".repeat(32);
+  process.env.R2_BUCKET = "test-files";
+  const saved = globalThis.fetch;
+  let openedSessions = 0;
+  globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
+    if (!String(_url).includes("r2.cloudflarestorage.com")) throw new Error("Unexpected provider request");
+    if (init?.method === "POST") { openedSessions++; return new Response("<UploadId>test-session</UploadId>"); }
+    throw new Error("Unexpected provider request");
+  }) as typeof fetch;
+  const input = {folder: folder(12), ownerId: "product", name: "file.pdf", bytes: 10, type: "application/pdf"};
+  const measure = (bytes: number) => async () => ({ bytes, brake: 10, left: 10 - bytes, full: bytes >= 10, available: true });
+  let admissions = 0;
+  const admit = (answer: boolean) => async () => { admissions++; return answer; };
+  try {
+    await assert.rejects(openReservedVault(input, 10, measure(5), admit(true)), /storage_limit/);
+    assert.equal(admissions, 0, "a storage refusal never reaches the budget");
+    assert.deepEqual(await openReservedVault(input, 10, measure(0), admit(false)), { ok: false, reason: "budget" });
+    assert.equal(admissions, 1);
+    assert.equal(openedSessions, 0, "no session is opened without the budget");
+    await releaseStorage(input.folder, (await reserveStorage(input.folder, 10, 10, async () => 0)).id);
+    const opened = await openReservedVault(input, 10, measure(0), admit(true));
+    assert.equal(opened.ok, true);
+    assert.equal(openedSessions, 1);
+    await assert.rejects(openReservedVault(input, 10, measure(0), admit(true)), /storage_pending/);
+    assert.equal(admissions, 2, "a pending refusal never reaches the budget either");
+  } finally { globalThis.fetch = saved; }
+});

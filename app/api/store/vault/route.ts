@@ -1,5 +1,5 @@
 import { serviceRefusedJson, withinServiceWhy } from "@/lib/metered-limits";
-import { reserveStoreUpload, reserveUploadControl } from "@/lib/upload-budget";
+import { reserveStoreUpload, reserveUploadControl, uploadBudgetCouldOpen } from "@/lib/upload-budget";
 import { openReservedVault, closeReservedVault, abortReservedVault } from "@/lib/vault-storage";
 import type { NextRequest } from "next/server";
 import { readKind } from "@/lib/catalog";
@@ -75,10 +75,19 @@ export async function POST(request: NextRequest) {
       if (body.multipart !== true) return fail("upload_refresh", 409);
       // Nothing new is stored while a renewal is unpaid (232 [CA1] unit 4).
       { const paused = costPauseCode(store); if (paused) return fail(paused, 409); }
-      if (!(await reserveStoreUpload(store, bytes, "r2"))) return fail("upload_budget_unavailable", 503);
-      await rememberFolderOwner(folder, ref);
-
-      const opened = await openReservedVault({ folder, ownerId, name: safeFileName(text(body.name, 200)), bytes, type, multipart: true }, storageBrakeFor(standing, store.tier));
+      // The monthly upload budget is never given back (lib/upload-budget.ts),
+      // so it is taken only once storage has room for the file: a refusal for
+      // storage costs the store none of it. No upload session is opened at the
+      // provider before the budget is taken. A spent budget is read first, with
+      // no write, so it is refused before storage is measured or cleaned up.
+      if (!(await uploadBudgetCouldOpen(store, bytes, "r2"))) return fail("upload_budget_unavailable", 503);
+      const admit = async () => {
+        if (!(await reserveStoreUpload(store, bytes, "r2"))) return false;
+        await rememberFolderOwner(folder, ref);
+        return true;
+      };
+      const opened = await openReservedVault({ folder, ownerId, name: safeFileName(text(body.name, 200)), bytes, type, multipart: true }, storageBrakeFor(standing, store.tier), undefined, admit);
+      if (!opened.ok && opened.reason === "budget") return fail("upload_budget_unavailable", 503);
       if (!opened.ok) return fail(opened.reason === "off" ? "off" : opened.reason === "invalid" ? "invalid" : "files_unavailable", opened.reason === "off" ? 404 : opened.reason === "invalid" ? 400 : 503);
       return Response.json({ ok: true, upload: opened.upload }, { headers: { "Cache-Control": "no-store" } });
     }

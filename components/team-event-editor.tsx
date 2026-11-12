@@ -373,7 +373,7 @@ export function TeamEventEditor({ product }: { product: Product }) {
                             weekly[day] = weekly[day].slice(0, 1);
                             change(host.email, { weekly });
                           }}
-                          className="inline-flex h-8 w-8 items-center justify-center rounded-full text-lg leading-none text-ink-mute transition hover:bg-white hover:text-danger"
+                          className="inline-flex h-11 w-11 items-center justify-center rounded-full text-lg leading-none text-ink-mute transition hover:bg-white hover:text-danger"
                         >
                           &times;
                         </button>
@@ -389,7 +389,7 @@ export function TeamEventEditor({ product }: { product: Product }) {
                         weekly[day].push([Math.min(end + 60, 1380), Math.min(end + 180, 1440)]);
                         change(host.email, { weekly });
                       }}
-                      className="text-sm font-semibold text-violet-deep underline underline-offset-4"
+                      className="inline-flex min-h-11 items-center text-sm font-semibold text-violet-deep underline underline-offset-4"
                     >
                       Add a second stretch
                     </button>

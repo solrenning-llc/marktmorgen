@@ -155,7 +155,7 @@ export function StoreChat({ handle, storeName, language }: { handle: string; sto
         <div role="dialog" aria-label={w.title(storeName)} className="st-card st-chat-panel flex max-h-[min(36rem,75vh)] w-[min(22rem,calc(100vw-2rem))] flex-col p-4 shadow-lg">
           <div className="flex items-start justify-between gap-3">
             <h2 className="font-display text-lg font-semibold leading-snug">{w.title(storeName)}</h2>
-            <button type="button" onClick={() => setOpen(false)} className="st-muted text-sm underline" aria-label={w.close}>
+            <button type="button" onClick={() => setOpen(false)} className="st-muted inline-flex min-h-11 items-center text-sm underline" aria-label={w.close}>
               {w.close}
             </button>
           </div>
@@ -211,7 +211,7 @@ export function StoreChat({ handle, storeName, language }: { handle: string; sto
                 {w.send}
               </button>
               {token ? (
-                <button type="button" onClick={startOver} className="st-muted text-xs underline">
+                <button type="button" onClick={startOver} className="st-muted inline-flex min-h-11 items-center text-xs underline">
                   {w.newChat}
                 </button>
               ) : (

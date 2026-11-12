@@ -6,3 +6,4 @@ Only Claude 1 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
+| Claude 1 | 274 [AX1] audit 12/11 (Claude 4 out of quota): stand-alone text controls get a 44 px floor (WCAG 2.5.5) | claude/tender-curie-w4hw92 | `components/store-assistant.tsx`, `components/store-chat.tsx`, `components/tools-calculator.tsx`, `components/team-event-editor.tsx`, `components/workflow-tools.tsx`, `components/task-editor.tsx`, `components/link-editor.tsx`, `components/old-addresses.tsx`, `tests/standalone-text-controls-target-size.test.ts` | 12/11/2026 10h03 |

@@ -1008,6 +1008,12 @@ export async function openCourseLink(token: string): Promise<LinkGrant | null> {
 const DRIP_SET = "nl:courses:drip";
 const dripMailKey = (courseId: string, email: string, moduleId: string) =>
   `nl:course:${courseId}:dripmail:${emailKey(email)}:${moduleId}`;
+/**
+ * The mark of a student's start looked at again with no module due under the day their row holds (Codex G on #3369):
+ * one of the drip marks, under a name no module id takes (those are 12 letters), so it is counted, kept and deleted
+ * with them.
+ */
+const RESTART_LOOK = "restart-look";
 
 /** Remembers that this course opens modules over time, for the daily job. */
 export async function registerDrip(store: Store, product: Listing, course: Course): Promise<void> {
@@ -1051,6 +1057,25 @@ export async function sendDripEmails(
     counts.courses += 1;
     const { students } = read;
     const within = (at: number) => at <= nowSeconds && at >= nowSeconds - 3 * 86_400;
+    // The soonest a module opens after a purchase, less the three days a module is announced in: a student with no
+    // module due under the day their row holds, and none due sooner than this under it, has their start looked at
+    // again at most once in this time (RESTART_LOOK), so a course bought again after a full refund and not opened
+    // since is found before its first module opens again (Codex G on #3369). Taken from the same monthly figure as
+    // every start read (lib/drip-start.ts), before the read.
+    const soonest = Math.min(...dripping.map((m) => m.dripDays));
+    const lookEvery = Math.max(1, soonest - 3) * 86_400;
+    // One student's start, read from the store's monthly figure: what the page opens the course from, undefined
+    // when it does not open it, null when it cannot be counted or read (nothing is sent, the next run asks again).
+    const startOf = async (email: string): Promise<number | null | undefined> => {
+      const units = dripStartUnits(idsOfKind(store, "course").length);
+      const taken = await takeDripStartUnits(store, units, nowSeconds * 1000);
+      if (taken === "unknown") console.error("a drip run's start read could not be counted; not read this run", course.id);
+      if (taken !== "taken") return null;
+      return courseLedger(store, email, true).then(
+        (ledger) => ledger.paid.get(product.id),
+        (error: unknown) => (console.error("reading a student's course start for its drip emails failed", error), null),
+      );
+    };
     for (const student of students) {
       if (student.blocked) continue;
       // The day the course page opens this course from (courseLedger), read once for a student with a module to
@@ -1058,6 +1083,29 @@ export async function sendDripEmails(
       let stands: number | null | undefined;
       let read = false;
       let since = student.since;
+      const opens = dripping.map((unit) => opensAt(course, unit, since));
+      const nextOpen = Math.min(...opens.filter((at) => at > nowSeconds));
+      if (!opens.some(within) && !(nextOpen - nowSeconds <= lookEvery)) {
+        // Nothing due under the row's day and nothing due soon: the start is looked at again, at most once a while.
+        const look = dripMailKey(course.id, student.email, RESTART_LOOK);
+        const lookValue = claimValue();
+        const claimed = await claimMark(look, lookEvery, lookValue);
+        if (claimed === "unknown") await releaseMark(look, lookValue);
+        if (claimed === "ours") {
+          read = true;
+          stands = await startOf(student.email);
+          // Not counted or not read: the mark is let go, so a later run looks again.
+          if (stands === null) await releaseMark(look, lookValue);
+          else if (stands !== undefined && stands !== since) {
+            const moved = await redateStudent(course, student.email, stands, nowSeconds).then(() => true, (error: unknown) => (console.error("moving a student's course start failed", error), false));
+            if (moved) since = stands;
+            else {
+              stands = null;
+              await releaseMark(look, lookValue);
+            }
+          }
+        }
+      }
       for (let i = 0; i < dripping.length; i += 1) {
         const unit = dripping[i];
         if (!within(opensAt(course, unit, since))) continue;
@@ -1077,15 +1125,7 @@ export async function sendDripEmails(
           // Taken from the store's monthly figure for these reads (lib/drip-start.ts, dripMonthUnits in its allowance
           // window), before the read, never from its public requests: past it, or uncounted, nothing is read and
           // nothing is sent, and the mark is let go for a later run.
-          const units = dripStartUnits(idsOfKind(store, "course").length);
-          const taken = await takeDripStartUnits(store, units, nowSeconds * 1000);
-          if (taken === "unknown") console.error("a drip run's start read could not be counted; not read this run", course.id);
-          stands = taken === "taken"
-            ? await courseLedger(store, student.email, true).then(
-                (ledger) => ledger.paid.get(product.id),
-                (error: unknown) => (console.error("reading a student's course start for its drip emails failed", error), null),
-              )
-            : null;
+          stands = await startOf(student.email);
         }
         // Not open to them, or unknown: nothing is sent, and the next run asks again.
         if (stands === undefined || stands === null) {
@@ -1165,7 +1205,7 @@ export async function forgetLearnerPerson(
     paidCacheKey(store, email),
     passesKey(store, email),
     ...passes.map((hash) => `nl:learn:pass:${hash}`),
-    ...courses.flatMap((c) => [doneKey(c.courseId, email), ...c.moduleIds.map((m) => dripMailKey(c.courseId, email, m))]),
+    ...courses.flatMap((c) => [doneKey(c.courseId, email), ...[...c.moduleIds, RESTART_LOOK].map((m) => dripMailKey(c.courseId, email, m))]),
   ];
   const commands: (string | number)[][] = [["DEL", ...keys], ...courses.map((c) => ["HDEL", studentsKey(c.courseId), emailKey(email)])];
   const replies = repliesFor(await redisPipeline(commands), commands.length);

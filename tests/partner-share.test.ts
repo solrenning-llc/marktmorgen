@@ -202,7 +202,8 @@ test("a partner never earns on their own purchase", () => {
   const at = aff.indexOf("export async function notePartners");
   assert.ok(at > 0, "notePartners should exist");
   const body = aff.slice(at, aff.indexOf("async function isSelf"));
-  assert.match(body, /self: Boolean\(buyer\) && normaliseEmail\(partner\.email\) === buyer/);
+  assert.match(body, /self: Boolean\(buyer\) && canonicalEmail\(partner\.email\) === buyer/);
+  assert.match(body, /const buyer = sale\.buyer \? canonicalEmail\(sale\.buyer\) : "";/, "one inbox however it is written, as isSelf");
 });
 
 test("a share is written for every sale, not only the referred ones", () => {

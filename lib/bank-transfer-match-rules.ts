@@ -24,7 +24,8 @@
 
 const ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 const REFERENCE = new RegExp(`^MM-[${ALPHABET}]{10}$`);
-const IN_MEMO = new RegExp(`MM-[${ALPHABET}]{10}(?![${ALPHABET}])`, "g");
+// A whole word on both sides: no letter or digit just before or after it (Claude 3 on #3811).
+const IN_MEMO = new RegExp(`(?<![A-Z0-9])MM-[${ALPHABET}]{10}(?![A-Z0-9])`, "g");
 
 /**
  * A new reference for an invoice: MM- and ten characters drawn from the
@@ -67,7 +68,8 @@ export function matchReceipt(receipt: Receipt, open: ReadonlyMap<string, OpenInv
   if (typeof receipt.id !== "string" || !receipt.id || receipt.id.length > 128) return { kind: "review", reason: "receipt" };
   if (seen.has(receipt.id)) return { kind: "duplicate" };
   const memo = typeof receipt.reference === "string" ? receipt.reference : "";
-  const found = [...new Set(memo.match(IN_MEMO) ?? [])];
+  // A bank may print the memo in lower case; the references are upper case, so the memo is read as such.
+  const found = [...new Set(memo.toUpperCase().match(IN_MEMO) ?? [])];
   if (found.length === 0) return { kind: "review", reason: "no_reference" };
   if (found.length > 1) return { kind: "review", reason: "two_references" };
   const invoice = open.get(found[0]);

@@ -70,3 +70,25 @@ export function helpTopics(): HelpTopic[] {
       return section ? [{ name: area.name, href: helpAnswerPath(section, area.answer) }] : [];
     });
 }
+
+/** A day kept as YYYY-MM-DD (UTC), in US English: "Nov 12, 2026". */
+export const helpDay = (day: string) => new Date(`${day}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+
+export type DatedAnswer = { section: string; id: string; q: string; created: string; updated: string };
+
+/** Every answer with its dates (lib/help-dates.ts); an answer without them is left out, never dated by guess. */
+export function datedAnswers(dates: Readonly<Record<string, { created: string; updated: string }>>): DatedAnswer[] {
+  return HELP_SECTIONS.flatMap((s) => s.items.flatMap((item) => {
+    const id = answerId(item.q);
+    const d = dates[id];
+    return d ? [{ section: s.id, id, q: item.q, created: d.created, updated: d.updated }] : [];
+  }));
+}
+
+/** The newest answers, by the day they were first written, at most `most`. */
+export const newestAnswers = (answers: readonly DatedAnswer[], most = 5) =>
+  [...answers].sort((a, b) => b.created.localeCompare(a.created) || a.q.localeCompare(b.q, "en-US")).slice(0, most);
+
+/** The answers whose words changed after they were first written, most recent first, at most `most`. */
+export const recentlyUpdated = (answers: readonly DatedAnswer[], most = 5) =>
+  answers.filter((a) => a.updated > a.created).sort((a, b) => b.updated.localeCompare(a.updated) || a.q.localeCompare(b.q, "en-US")).slice(0, most);

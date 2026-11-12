@@ -1826,6 +1826,8 @@ export class MemoryRedis {
         const set = this.set(key);
         let gone = 0;
         for (const one of args) if (set.delete(one)) gone += 1;
+        // As Redis does: a set left empty is no key at all (EXISTS 0).
+        if (set.size === 0) this.data.delete(key);
         return gone;
       }
       case "SISMEMBER":

@@ -855,10 +855,18 @@ export async function endAllSessions(email: string): Promise<number | null> {
     // The set is the only way to the sessions (audit SG2, rule 30): unread, it is kept and nothing is deleted.
     const keys = stringList(members);
     if (!keys) throw new SessionsUnknownError("an account's sessions");
+    if (!keys.length) return 0;
     const marks = await Promise.all(keys.map((key) => secondKeyOf(key)));
-    const commands: (string | number)[][] = [...keys.map((key) => ["DEL", key]), ...marks.map((mark) => ["DEL", mark]), ["DEL", owned]];
-    // Each delete answers 0 or 1: an answer missing or in another shape is not a session closed (CX-123 rule 24).
-    if (!removedEach(await redisPipeline(commands), commands.length)) throw new SessionsUnknownError("the logging out of an account's sessions");
+    const commands: (string | number)[][] = [...keys.map((key) => ["DEL", key]), ...marks.map((mark) => ["DEL", mark])];
+    // Only the sessions read leave the set, never the whole set (Codex G, #4263): one opened by a login since the read
+    // stays in it, so the next "Log out of all devices" reaches it, instead of living out its 30 days unreachable.
+    const replies = repliesFor(await redisPipeline([...commands, ["SREM", owned, ...keys]]), commands.length + 1);
+    // Each delete answers 0 or 1, the SREM how many it took off: an answer missing or in another shape is not a session
+    // closed (CX-123 rule 24).
+    const taken = countOf(replies?.[commands.length]);
+    if (!replies || !removedEach(replies.slice(0, commands.length), commands.length) || taken === null || taken > keys.length) {
+      throw new SessionsUnknownError("the logging out of an account's sessions");
+    }
     return keys.length;
   } catch (error) {
     console.error("sign-out everywhere failed", error);

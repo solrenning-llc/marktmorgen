@@ -29,8 +29,45 @@ import { del } from "@/lib/blob";
 import { withLock } from "@/lib/redis-lock";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { type Listing, productIdFromAddress, readListing } from "@/lib/catalog";
-import { type ReportInput, handleIn } from "@/lib/takedown-rules";
+import { NOTICE_TITLE, type ReportInput, type ReportKind, handleIn } from "@/lib/takedown-rules";
 import { type PictureNames, withdrawProductPicture } from "@/lib/picture-withdraw";
+
+/** How the support inbox is told what came in, and what the sender stated (lib/takedown-rules.ts says what each must give). */
+const INBOX_NAME: Record<ReportKind, string> = {
+  copyright: "copyright notice (DMCA, 17 U.S.C. § 512(c)(3))",
+  other: "notice of illegal content (EU Digital Services Act, Art. 16)",
+  impersonation: "notice of impersonation",
+};
+const INBOX_WORK: Record<ReportKind, string> = {
+  copyright: "The work, as they describe it:",
+  other: "Why it is illegal, as they say:",
+  impersonation: "Who the page pretends to be, and how, as they say:",
+};
+const INBOX_STATED: Record<ReportKind, string> = {
+  copyright: "They stated, in good faith, that the use is not authorized, and that the notice is accurate and, under penalty of perjury, that they are authorized to act.",
+  other: "They stated, in good faith, that the use is not authorized, and that the notice is accurate and, under penalty of perjury, that they are authorized to act.",
+  impersonation: "They stated, in good faith, that the page pretends to be them, their business or someone they are authorized to act for, and that the notice is accurate.",
+};
+/**
+ * The statement of reasons to the creator (EU DSA Art. 17(3)): what came in, what it was relied on as, and the
+ * ground. An impersonation notice (568 [GD2] (j)) is relied on as what it is, never as a copyright notice or a
+ * notice of illegal content, and its ground is the one the Terms already give (rights of others, misleading buyers).
+ */
+const CREATOR_NAME: Record<ReportKind, string> = {
+  copyright: "copyright notice",
+  other: "notice that content on your store is illegal",
+  impersonation: "notice that your store pretends to be someone else",
+};
+const RELIED_ON: Record<ReportKind, string> = {
+  copyright: "a copyright notice under the US Digital Millennium Copyright Act (17 U.S.C. § 512(c)(3))",
+  other: "a notice of illegal content under Article 16 of the EU Digital Services Act",
+  impersonation: "a notice of impersonation",
+};
+const GROUND: Record<ReportKind, string> = {
+  copyright: "Legal ground: copyright law. The notice says the content infringes the copyright in the work it names, and we took it down for that reason.",
+  other: "Legal ground: the law the notice says the content breaks, for the reason it gives above. We took it down for that reason.",
+  impersonation: "Ground: the notice says the content pretends to be the person or business it names, which misleads buyers and infringes that person's rights. We took it down for that reason.",
+};
 
 const REPORT_SECONDS = 400 * 86_400;
 const TOKEN_SECONDS = 60 * 86_400;
@@ -59,21 +96,21 @@ export async function fileReport(input: ReportInput, ip: string, origin: string)
     from: NIMBUS_FROM,
     to: SUPPORT_EMAIL,
     replyTo: report.email,
-    subject: `${report.kind === "copyright" ? "Copyright notice" : "Notice of illegal content"}${report.handle ? ` about @${report.handle}` : ""}`.slice(0, 200),
+    subject: `${NOTICE_TITLE[report.kind]}${report.handle ? ` about @${report.handle}` : ""}`.slice(0, 200),
     text: [
-      `A ${report.kind === "copyright" ? "copyright notice (DMCA, 17 U.S.C. § 512(c)(3))" : "notice of illegal content (EU Digital Services Act, Art. 16)"} was sent from ${origin}/report.`,
+      `A ${INBOX_NAME[report.kind]} was sent from ${origin}/report.`,
       "",
       `Where: ${report.url}`,
       report.handle ? `Store: @${report.handle}` : "Store: not named in the address; check it by hand.",
       "",
-      report.kind === "copyright" ? "The work, as they describe it:" : "Why it is illegal, as they say:",
+      INBOX_WORK[report.kind],
       report.work,
       report.original ? `\nWhere the original is: ${report.original}` : "",
       "",
       `From: ${report.name} <${report.email}>`,
       report.contact ? `Address or telephone: ${report.contact}` : "",
       `Signed: ${report.signature}`,
-      "They stated, in good faith, that the use is not authorized, and that the notice is accurate and, under penalty of perjury, that they are authorized to act.",
+      INBOX_STATED[report.kind],
       "",
       "Open it to act on it (the link works for 60 days):",
       `${origin}/takedown/${token}`,
@@ -465,7 +502,7 @@ async function complete(report: Report, store: Store, action: Exclude<TakedownAc
     replyTo: SUPPORT_EMAIL,
     subject: `Content taken down from your store @${store.handle}`,
     text: [
-      `We received a ${report.kind === "copyright" ? "copyright notice" : "notice that content on your store is illegal"} about ${report.url} and took this down:`,
+      `We received a ${CREATOR_NAME[report.kind]} about ${report.url} and took this down:`,
       "",
       what,
       "",
@@ -474,11 +511,9 @@ async function complete(report: Report, store: Store, action: Exclude<TakedownAc
       "",
       report.kind === "copyright" ? `The notice was sent by ${report.name}, who says it uses: ${report.work.slice(0, 600)}` : `The notice says: ${report.work.slice(0, 600)}`,
       "",
-      `What we relied on: that notice, sent through our form at ${origin}/report as ${report.kind === "copyright" ? "a copyright notice under the US Digital Millennium Copyright Act (17 U.S.C. § 512(c)(3))" : "a notice of illegal content under Article 16 of the EU Digital Services Act"}.`,
+      `What we relied on: that notice, sent through our form at ${origin}/report as ${RELIED_ON[report.kind]}.`,
       "We used no automated means to find this content or to decide: a person at Marktmorgen read the notice and made this decision.",
-      report.kind === "copyright"
-        ? "Legal ground: copyright law. The notice says the content infringes the copyright in the work it names, and we took it down for that reason."
-        : "Legal ground: the law the notice says the content breaks, for the reason it gives above. We took it down for that reason.",
+      GROUND[report.kind],
       `Our Terms do not allow content that is unlawful or that infringes someone else's rights: section 3, "Selling through a Marktmorgen store" (${origin}/terms#selling-through-a-marktmorgen-store), and section 4, "Acceptable use" (${origin}/terms#acceptable-use).`,
       "",
       report.kind === "copyright"

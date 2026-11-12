@@ -32,7 +32,7 @@ export default async function TransparencyPage() {
   return (
     <LegalPage title="Notices about content" eyebrow="Transparency" effective={null} legalNav={false}>
       <p>
-        Anybody can tell us that something on a Marktmorgen store infringes their copyright or is otherwise illegal, with the
+        Anybody can tell us that something on a Marktmorgen store infringes their copyright, is otherwise illegal, or pretends to be them or their business, with the
         form at <Link href="/report" className="text-black underline underline-offset-2 hover:no-underline">Report content</Link>. These are the notices we received and the ones we acted on, counted as they happen. Nothing here says who sent a notice or which store it was about.
       </p>
       {!read ? (
@@ -71,6 +71,11 @@ export default async function TransparencyPage() {
                     <th scope="row">Other illegal content</th>
                     <td>{n(y.notices.other)}</td>
                     <td>{n(y.acted.other)}</td>
+                  </tr>
+                  <tr>
+                    <th scope="row">Impersonation</th>
+                    <td>{n(y.notices.impersonation)}</td>
+                    <td>{n(y.acted.impersonation)}</td>
                   </tr>
                 </tbody>
               </table>

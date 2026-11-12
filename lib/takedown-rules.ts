@@ -4,11 +4,21 @@
  * what a notice of other illegal content has to say, as the EU's Digital
  * Services Act (Art. 16) lists it — read from the form at /report, which is
  * open to anybody, so every field is held to a length and checked here.
+ * Since 568 [GD2] (j), a third kind: a notice that a store or page pretends
+ * to be someone else (impersonation), which asks for what a notice of other
+ * content asks, and goes through the same takedown, strike and count.
  * Browser-safe; lib/takedown.ts keeps them and acts on them.
  */
 
-export const REPORT_KINDS = ["copyright", "other"] as const;
+export const REPORT_KINDS = ["copyright", "other", "impersonation"] as const;
 export type ReportKind = (typeof REPORT_KINDS)[number];
+
+/** What a notice of each kind is called, on its page and in the support inbox's subject. */
+export const NOTICE_TITLE: Record<ReportKind, string> = {
+  copyright: "Copyright notice",
+  other: "Notice of illegal content",
+  impersonation: "Notice of impersonation",
+};
 
 export const MAX_REPORT_URL = 500;
 export const MAX_REPORT_TEXT = 3_000;
@@ -19,7 +29,7 @@ export type ReportInput = {
   kind: ReportKind;
   /** Where on this site the content is. */
   url: string;
-  /** The work that was copied, or why the content is illegal. */
+  /** The work that was copied, why the content is illegal, or who the page pretends to be and how. */
   work: string;
   /** For a copyright notice, where the original can be seen, when it can. */
   original: string;
@@ -82,7 +92,7 @@ export function readReport(raw: Record<string, unknown>): { ok: true; report: Re
 export const REPORT_PROBLEMS: Record<ReportProblem, string> = {
   kind: "Choose what the notice is about.",
   url: "Paste the full address of the page on Marktmorgen, starting with https://.",
-  work: "Describe the work, or what is illegal about the content, in at least a sentence.",
+  work: "Describe the work, what is illegal about the content, or who the page pretends to be, in at least a sentence.",
   name: "Give your full name.",
   email: "Give an email address we can reply to.",
   contact: "A copyright notice needs a postal address or a telephone number as well.",

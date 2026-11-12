@@ -79,7 +79,7 @@ export function ReportForm({ url: given }: { url: string }) {
       <fieldset>
         <legend className="field-label">What is the notice about?</legend>
         <div className="mt-2 grid gap-2 sm:grid-cols-2">
-          {([["copyright", "Copyright infringement"], ["other", "Other illegal content"]] as const).map(([value, label]) => (
+          {([["copyright", "Copyright infringement"], ["other", "Other illegal content"], ["impersonation", "Someone pretending to be me or my business"]] as const).map(([value, label]) => (
             <label key={value} className="flex items-center gap-3 rounded-2xl border border-line bg-paper px-4 py-3 text-ink">
               <input type="radio" name="kind" value={value} checked={kind === value} onChange={() => setKind(value)} className="size-5 accent-violet-brand" />
               <span className="font-semibold">{label}</span>
@@ -93,7 +93,7 @@ export function ReportForm({ url: given }: { url: string }) {
         <p id="report-url-help" className="mt-1 text-sm text-ink-soft">The store page or the product page, and in what you write below, which part of it.</p>
       </div>
       <div>
-        <label htmlFor="report-work" className="field-label">{copyright ? "The work that was copied, and what on the page copies it" : "What the content is, and why it is illegal"}</label>
+        <label htmlFor="report-work" className="field-label">{copyright ? "The work that was copied, and what on the page copies it" : kind === "impersonation" ? "Who the page pretends to be, and how it does it" : "What the content is, and why it is illegal"}</label>
         <textarea id="report-work" required rows={5} maxLength={MAX_REPORT_TEXT} value={fields.work} onChange={set("work")} className={field} />
       </div>
       {copyright ? (
@@ -123,7 +123,9 @@ export function ReportForm({ url: given }: { url: string }) {
           <span>
             {copyright
               ? "I believe in good faith that the use described above is not authorized by the copyright owner, its agent or the law."
-              : "I believe in good faith that the content described above is illegal, for the reasons I gave."}
+              : kind === "impersonation"
+                ? "I believe in good faith that the page pretends to be me, my business, or someone I am authorized to act for."
+                : "I believe in good faith that the content described above is illegal, for the reasons I gave."}
           </span>
         </label>
         <label className="flex items-start gap-3 text-sm text-ink">

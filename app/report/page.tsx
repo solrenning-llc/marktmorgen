@@ -5,7 +5,7 @@ import { ReportForm } from "@/components/report-form";
 
 export const metadata: Metadata = {
   title: "Report content — Marktmorgen",
-  description: "Tell us about content on a Marktmorgen store that infringes your copyright or is illegal.",
+  description: "Tell us about content on a Marktmorgen store that infringes your copyright, is illegal, or pretends to be you or your business.",
   robots: { index: false, follow: true },
 };
 
@@ -16,9 +16,10 @@ export default async function ReportPage({ searchParams }: Params) {
   const query = await searchParams;
   const url = typeof query.url === "string" && /^https?:\/\//.test(query.url) ? query.url.slice(0, 500) : "";
   return (
-    <LegalPage title="Report content" eyebrow="Copyright and illegal content" effective={null} legalNav={false}>
+    <LegalPage title="Report content" eyebrow="Copyright, illegal content and impersonation" effective={null} legalNav={false}>
       <p>
-        Use this form to tell us that something on a Marktmorgen store infringes your copyright or is otherwise illegal.
+        Use this form to tell us that something on a Marktmorgen store infringes your copyright, is otherwise illegal, or
+        pretends to be you or your business.
         What happens next, and how a creator can answer, is in our{" "}
         <Link href="/copyright" className="text-black underline underline-offset-2 hover:no-underline">
           Copyright and Takedown Policy

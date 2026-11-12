@@ -6,7 +6,7 @@ import { StudioTrail } from "@/components/breadcrumb";
 import { StudioHeader } from "@/components/studio-header";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { TakedownAppealForm, TakedownAppealSendAgain } from "@/components/takedown-appeal-form";
-import { type KeptAppeal, decisionsOf, readAppeals } from "@/lib/takedown-appeals";
+import { type KeptAppeal, MAX_TELL_TRIES, TRIES_SPENT_WORDS, decisionsOf, readAppeals } from "@/lib/takedown-appeals";
 import { appealDate, appealStateWords, decisionNotice } from "@/lib/takedown-appeal-rules";
 
 export const metadata: Metadata = {
@@ -64,7 +64,12 @@ export default async function StudioAppealsPage({ searchParams }: Params) {
                     {request ? (
                       <div className="mt-4" data-appeal-state={request.appeal.state}>
                         {appealStateWords(request.appeal).map((line) => <p key={line} className="mt-1 max-w-[80ch]">{line}</p>)}
-                        {!request.told ? <TakedownAppealSendAgain decision={decision.key} number={request.appeal.number} /> : null}
+                        {request.told ? null : request.tries >= MAX_TELL_TRIES ? (
+                          // Every try is spent: a button could only refuse, so the page says how to reach a person.
+                          <p className="mt-3 max-w-[80ch]" data-appeal-tries-spent="">{TRIES_SPENT_WORDS}</p>
+                        ) : (
+                          <TakedownAppealSendAgain decision={decision.key} number={request.appeal.number} />
+                        )}
                       </div>
                     ) : (
                       <>

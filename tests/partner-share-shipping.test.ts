@@ -21,7 +21,7 @@ import { paidPeriod } from "./billing-period-fixture";
 const OWNER = "owner-partner-shipping@example.com";
 const ACCOUNT = "acct_1TestPtShip001";
 const checkouts: URLSearchParams[] = [];
-const refunds: { id: string; object: "refund"; status: string; payment_intent: string; amount: number; created: number }[] = [];
+const refunds: { id: string; object: "refund"; status: string; payment_intent: string; amount: number; currency: string; created: number }[] = [];
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   const path = url.pathname.replace(/^\/v1/, "");
@@ -144,7 +144,7 @@ async function main(): Promise<void> {
   const commission = async (ref: string, aff: string) => (await readBook(store)).lines.find((l) => l.ref === `${ref}:${aff}`)?.commission ?? null;
   is("before any refund, the Workbook partner earns half of $29", await commission(order.id, onWorkbook.id), 1450);
   is("before any refund, the Course partner earns half of $49", await commission(order.id, onCourse.id), 2450);
-  refunds.push({ id: "re_partnership1", object: "refund", status: "succeeded", payment_intent: order.payment_intent, amount: 2900, created: Math.floor(Date.now() / 1000) });
+  refunds.push({ id: "re_partnership1", object: "refund", status: "succeeded", payment_intent: order.payment_intent, amount: 2900, currency: "usd", created: Math.floor(Date.now() / 1000) });
   is("the Workbook partner is not paid on what may be the refunded line", await commission(order.id, onWorkbook.id), 0);
   is("the Course partner keeps half of what no reading of the refund can take ($49 - $29)", await commission(order.id, onCourse.id), 1000);
   done();

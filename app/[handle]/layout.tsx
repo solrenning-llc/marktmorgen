@@ -17,6 +17,8 @@ import { skipWords } from "@/lib/buyer-words/skip";
 import { chatOpen } from "@/lib/inbox";
 import { assistantShown } from "@/lib/store-assistant";
 import { lookStyle } from "@/lib/store-look";
+import { BackdropPause } from "@/components/backdrop-pause";
+import { backdropPauseWords } from "@/lib/buyer-words/backdrop-pause";
 
 /**
  * Around every page of a creator's store: the store's own manifest, icon and
@@ -89,6 +91,12 @@ export default async function StoreLayout({ children, params }: LayoutProps<"/[h
       {store && !store.suspended ? <SkipLink {...skip} /> : null}
       {store && isHouseStore(store) ? <DemoStrip /> : null}
       {children}
+      {/* The Aurora drifts for as long as the page is open: a way to stop it, in the store's words (WCAG 2.2.2). */}
+      {store && !store.suspended && store.look.backdrop === "aurora" ? (
+        <div lang={skip?.lang} className={`st-theme-${store.look.theme} st-backdrop-pause-bar`} style={lookStyle(store.look) as React.CSSProperties}>
+          <BackdropPause {...backdropPauseWords(store.language)} />
+        </div>
+      ) : null}
       <StoreApp />
       {/* A link from a sequence's email, used by somebody who allowed it to be seen (lib/mail-clicks.ts). */}
       {store ? <MailClick /> : null}

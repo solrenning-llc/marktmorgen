@@ -2021,9 +2021,25 @@ a.chip {
   from { background-position: 0% 0%; }
   to { background-position: 100% 100%; }
 }
+/* The Aurora's pause button (components/backdrop-pause.tsx), pressed: every store page stands still (WCAG 2.2.2). */
+:root[data-backdrop-still] .st-page {
+  animation-play-state: paused;
+}
+.st-backdrop-pause-bar {
+  display: flex;
+  justify-content: center;
+  padding: 1rem;
+  background: var(--st-bg);
+  color: var(--st-text);
+}
 @media (prefers-reduced-motion: reduce) {
   .st-page {
     animation: none;
+  }
+  /* Nothing moves here, so there is nothing to pause. */
+  .st-backdrop-pause-bar,
+  [data-backdrop-pause] {
+    display: none;
   }
 }
 /* The letters the creator picked for headings (lib/store-look.ts, FONTS). */

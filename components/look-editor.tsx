@@ -404,11 +404,11 @@ export function LookEditor({
                   className="flex cursor-pointer items-start gap-3 rounded-[var(--r-sm)] border border-line-strong bg-white p-3 transition hover:border-violet-brand has-[:checked]:border-violet-brand has-[:checked]:bg-lilac has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-violet-brand"
                 >
                   <input type="radio" name="backdrop" value={option.id} checked={backdrop === option.id} onChange={() => setBackdrop(option.id)} className="sr-only" />
-                  {/* The backdrop drawn in the page's own colors, as the page would show it. */}
+                  {/* The backdrop drawn in the page's own colors, as the page would show it, standing still: a picture of it, never a second thing moving beside the form (WCAG 2.2.2). */}
                   <span
                     aria-hidden="true"
                     className={`st-page st-theme-${theme} mt-0.5 h-12 w-12 shrink-0 rounded-[8px] ring-1 ring-line`}
-                    style={{ ...(lookStyle({ theme, accent }) as React.CSSProperties), ...(backdropStyle(option.id) as React.CSSProperties) }}
+                    style={{ ...(lookStyle({ theme, accent }) as React.CSSProperties), ...(backdropStyle(option.id) as React.CSSProperties), ...({ "--st-backdrop-play": "paused" } as React.CSSProperties) }}
                   />
                   <span className="min-w-0">
                     <span className="block font-semibold text-ink">{option.label}</span>

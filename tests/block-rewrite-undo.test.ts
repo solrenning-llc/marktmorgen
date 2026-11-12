@@ -4,8 +4,10 @@
  * 1. Typed while a rewrite runs: the rewrite that comes back must not overwrite those words.
  * 2. Typed after a rewrite: Undo must not throw those words away by putting back the copy from before the rewrite.
  *
- * The real component runs under a small hook dispatcher (useState, useId, useContext, useRef, useEffect), re-rendered with the
- * block its editor holds now, as the page editor re-renders it on every keystroke.
+ * The real component runs under a small hook dispatcher (useState, useId, useContext, useRef, useEffect, useLayoutEffect),
+ * re-rendered with the block its editor holds now, as the page editor re-renders it on every keystroke. As in React, a
+ * layout effect runs inside the commit, before anything else can happen; a passive effect (useEffect) may run later,
+ * after the browser has already settled a fetch, so the harness can hold passive effects back to reproduce that.
  */
 import * as React from "react";
 import { BlockRewrite } from "@/components/block-rewrite";
@@ -15,7 +17,7 @@ import { done, is, part } from "./check";
 type Node = { type?: unknown; props?: Record<string, unknown> & { children?: unknown } };
 const internals = (React as unknown as Record<string, { H: unknown }>).__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
 
-function harness(initial: PageBlock) {
+function harness(initial: PageBlock, { holdPassive = false }: { holdPassive?: boolean } = {}) {
   const slots: unknown[] = [];
   let index = 0;
   let block = initial;
@@ -42,8 +44,18 @@ function harness(initial: PageBlock) {
         effects.push(effect);
       }
     },
+    // Runs inside the commit itself: nothing (no settled fetch) can come between the render and it.
+    useLayoutEffect(effect: () => void, deps?: unknown[]) {
+      const i = index++;
+      const prev = slots[i] as unknown[] | undefined;
+      if (!deps || !prev || deps.some((d, n) => !Object.is(d, prev[n]))) {
+        slots[i] = deps;
+        layoutEffects.push(effect);
+      }
+    },
   };
   const effects: (() => void)[] = [];
+  const layoutEffects: (() => void)[] = [];
   function render(): void {
     index = 0;
     const before = internals.H;
@@ -53,7 +65,8 @@ function harness(initial: PageBlock) {
     } finally {
       internals.H = before;
     }
-    for (const effect of effects.splice(0)) effect();
+    for (const effect of layoutEffects.splice(0)) effect();
+    if (!holdPassive) for (const effect of effects.splice(0)) effect();
   }
   render();
   const buttons = (): Node[] => {
@@ -97,6 +110,17 @@ async function main(): Promise<void> {
   part("Words typed while a rewrite runs are kept");
   {
     const h = harness(original);
+    is("a rewrite button is there", h.press(/Shorter|Clearer|Warmer|Simpler|Punchier/), true);
+    h.type(typed);
+    answer!();
+    await settle(); await settle();
+    is("the block still holds what was typed", h.block, typed);
+  }
+
+  part("Words typed while a rewrite runs are kept even when the answer lands before passive effects run");
+  {
+    // The fetch settles after the editor committed the typed block but before React flushed passive effects.
+    const h = harness(original, { holdPassive: true });
     is("a rewrite button is there", h.press(/Shorter|Clearer|Warmer|Simpler|Punchier/), true);
     h.type(typed);
     answer!();

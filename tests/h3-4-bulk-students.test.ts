@@ -39,7 +39,7 @@ import {
   studentsCsv,
   type StudentLine,
 } from "@/lib/student-bulk-rules";
-import { accessStates, applyAccess, readAccessAsk, reviewAccess, studentList } from "@/lib/student-bulk";
+import { accessStates, applyAccess, pageUnits, readAccessAsk, reviewAccess, studentList } from "@/lib/student-bulk";
 import { emailKey, markLesson, setBlocked, studentsOf, touchStudent } from "@/lib/learn";
 import { editCourse, emptyCourse, saveCourse } from "@/lib/course";
 import { leadsKey, upsertContact } from "@/lib/contacts";
@@ -205,7 +205,8 @@ async function main(): Promise<void> {
   const byEmail = new Map((read?.lines ?? []).map((l) => [l.email, l]));
   is("every student, with progress and access", [read?.total, [...byEmail.keys()].sort(), byEmail.get("ana@example.com")?.done, byEmail.get("dee@example.com")?.removed], [4, ["ana@example.com", "ben@example.com", "cy@example.com", "dee@example.com"], 1, true]);
   is("labels: a contact's own, none for one not on the list, unknown for one that cannot be read", [byEmail.get("ana@example.com")?.labels, byEmail.get("cy@example.com")?.labels, byEmail.get("ben@example.com")?.labels], [["VIP"], [], null]);
-  is("the reading is paid for first, by how many rows and labels it reads", charged, [listUnits(4) + labelUnits(4)]);
+  // One student (dee) is taken off: the page's charge covers each done list and the blocked list's read (MEDIUM on #3035).
+  is("the reading is paid for first, by how many rows, blocked and labels it reads, never less than a request a 20 rows", [charged, pageUnits(4, 1) >= listUnits(4)], [[pageUnits(4, 1) + labelUnits(4)], true]);
   const pipeline = redis.pipeline.bind(redis);
   let commandsSeen = 0;
   redis.pipeline = async (commands: (string | number)[][]) => ((commandsSeen += commands.length), pipeline(commands));

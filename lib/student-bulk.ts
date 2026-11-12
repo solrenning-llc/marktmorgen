@@ -17,6 +17,7 @@
 import { readAddresses, leadsKey, parseContact } from "@/lib/contacts";
 import { type Course } from "@/lib/course";
 import { emailKey, isStudentRowOf, setBlocked, studentPage } from "@/lib/learn";
+import { studentsPageWork } from "@/lib/api-read-rules";
 import { redisPipeline } from "@/lib/redis";
 import { repliesFor } from "@/lib/redis-reply";
 import type { Store } from "@/lib/store";
@@ -29,6 +30,7 @@ import {
   type AccessReview,
   MAX_STUDENT_ACTION,
   STUDENTS_PER_PAGE,
+  STUDIO_REQUEST_COMMANDS,
   type StudentLine,
   accessReadUnits,
   accessUnits,
@@ -45,6 +47,23 @@ import {
 const studentsKey = (courseId: string) => `nl:course:${courseId}:students`;
 const blockedKey = (courseId: string) => `nl:course:${courseId}:blocked`;
 
+/** Bytes a studio request is priced at reading (tests/plan-cost-registry.ts, the studio request's 50,000 bytes). */
+const STUDIO_REQUEST_BYTES = 50_000;
+
+/**
+ * Studio requests taken before a page's rows are read: what studentPage sends
+ * once it knows the rows and the blocked count (lib/learn.ts), priced as the
+ * API's reader of the same page prices it (lib/api-read-rules.ts,
+ * studentsPageWork): one done list a row, at its longest, and the blocked
+ * list whole or one SISMEMBER a row past BLOCKED_READ_MAX; twenty commands or
+ * fifty kilobytes to a request, whichever is more, and never fewer than
+ * listUnits (Claude 1 cloud, MEDIUM on #3035).
+ */
+export function pageUnits(rows: number, blocked: number): number {
+  const work = studentsPageWork(rows, blocked);
+  return Math.max(listUnits(rows), Math.ceil(work.commands / STUDIO_REQUEST_COMMANDS), Math.ceil(work.bytes / STUDIO_REQUEST_BYTES));
+}
+
 /**
  * One page of a course's students, with each one's labels when `withLabels`:
  * what the page shows (lib/learn.ts, studentPage, read in its exact shape).
@@ -60,7 +79,7 @@ export async function studentList(
   withLabels: boolean,
 ): Promise<{ lines: StudentLine[]; total: number; next: string } | null> {
   const labelled = withLabels && Boolean(store.listId);
-  const page = await studentPage(course, cursor, STUDENTS_PER_PAGE, async (rows) => charge(listUnits(rows) + (labelled ? labelUnits(rows) : 0)));
+  const page = await studentPage(course, cursor, STUDENTS_PER_PAGE, async (rows, blocked) => charge(pageUnits(rows, blocked) + (labelled ? labelUnits(rows) : 0)));
   if (!page) return null;
   // HSCAN may give one student twice across pages, never on one page twice; kept once all the same.
   const seen = new Set<string>();

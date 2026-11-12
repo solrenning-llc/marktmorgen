@@ -41,10 +41,6 @@ export default function HelpPage() {
               Every answer here is about the product as it is today. Where the answer is &ldquo;not yet,&rdquo; it says
               not yet.
             </p>
-            <p className="mt-3 flex items-center gap-2 text-sm text-ink-mute">
-              <Icon name="check" size={15} className="text-mint-deep" />
-              Checked against the product on September 28, 2026.
-            </p>
             <p className="mt-3">
               Bought something from a creator here?{" "}
               <Link href="/help/buyers" className="link font-medium">Help for buyers</Link>
@@ -61,7 +57,10 @@ export default function HelpPage() {
         <nav aria-labelledby="help-areas-title" className="container-page pt-14 sm:pt-18" data-help-areas>
           <h2 id="help-areas-title" className="t-section">Help for each part of your studio</h2>
           <ul className="mt-5 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-            {[...HELP_AREAS].sort((a, b) => a.name.localeCompare(b.name, "en-US")).map((area) => (
+            {[...HELP_AREAS]
+              .filter((area) => questionOf.has(area.answer))
+              .sort((a, b) => a.name.localeCompare(b.name, "en-US"))
+              .map((area) => (
               <li key={area.folder} className="min-w-0">
                 <a
                   href={`#${area.answer}`}

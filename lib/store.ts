@@ -1920,7 +1920,10 @@ export async function closeStoreRecord(
     // (Codex G on #3643) means this one's record is already gone. Nothing of the other is read, released or deleted,
     // and this returns as for a record that is gone, so the walk takes this ref out of line and never prepares the
     // other store under it a walk later (Claude 6 on #3643); this store's entry still walks only its own marks.
-    if (fresh && fresh.sid !== store.sid) return false;
+    // A store from before ids (sid "") given one since the walk's read (ensureStoreId) is still this store: its stats id,
+    // made once and never changed, says so (Claude 7's LEVE on #3643). Only then is a different sid read as the same store.
+    const sameLegacy = store.sid === "" && Boolean(store.statsId) && fresh?.statsId === store.statsId;
+    if (fresh && fresh.sid !== store.sid && !sameLegacy) return false;
     await beforeDelete?.(fresh);
     // As before, its addresses are held back (those it has now too: one moved to since is its own) and its id and places
     // go first, and the record last. Its id leaves its account's list at both addresses read, as one moved since is the
@@ -1930,8 +1933,10 @@ export async function closeStoreRecord(
     const handles = new Set([store.handle, ...store.previousHandles, ...(fresh ? [fresh.handle, ...fresh.previousHandles] : [])]);
     const accounts = new Set(await Promise.all([store.email, ...(fresh ? [fresh.email] : [])].map((email) => accountKey(email))));
     const holds = [...handles].map((handle) => ["SET", handleKey(handle), released, "EX", RELEASE_QUARANTINE_DAYS * 24 * 60 * 60]);
+    // The id this record holds now: a store from before ids given one since (sameLegacy) releases that one.
+    const sid = sameLegacy && fresh ? fresh.sid : store.sid;
     const removals = [
-      ...(STORE_ID_PATTERN.test(store.sid) ? [["DEL", storeIdKey(store.sid)], ...[...accounts].map((account) => ["SREM", account, store.sid])] : []),
+      ...(STORE_ID_PATTERN.test(sid) ? [["DEL", storeIdKey(sid)], ...[...accounts].map((account) => ["SREM", account, sid])] : []),
       ["ZREM", ENDED_INDEX, storeRef(store)],
       ["SREM", SHARING_INDEX, storeRef(store)],
     ];

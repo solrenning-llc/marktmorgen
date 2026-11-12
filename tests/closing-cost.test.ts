@@ -116,7 +116,9 @@ test("a closing's last steps pay for the record's going under the store's lock, 
   assert.match(close, /deleteIfHeldOnly\(held,/);
   assert.match(close, /releaseLock\(held\)/);
   // Its id leaves the account's list at both addresses read: one more SREM than the first read's (Claude 6 on #3643).
-  assert.match(close, /\["SREM", account, store\.sid\]/);
+  // The id is the record's own: a store from before ids given one while it closes releases that one (Claude 7 on #3643).
+  assert.match(close, /const sid = sameLegacy && fresh \? fresh\.sid : store\.sid;/);
+  assert.match(close, /\["SREM", account, sid\]/);
   const hosts = (1 + MAX_TEAM) * (2 * 50 + 5);
   // The lock's tries, the GET, the entry's HSET again, the second account's SREM, the fenced delete's script (EVAL, GET,
   // DEL) and the release's (EVAL, GET, DEL).

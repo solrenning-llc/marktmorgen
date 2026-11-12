@@ -39,6 +39,8 @@ export const AFFILIATE_FIELDS_PER_UNIT = 150;
 export const AFFILIATE_ROWS_PER_UNIT = 16;
 /** Listings read (products with their own rate, a partner's products, products named by invoices), per request. */
 export const PUBLIC_LISTINGS_PER_UNIT = 32;
+/** Listings the store's policy page reads, one GET each past the catalog head, per request (lib/store-policy-input.ts). */
+export const POLICY_LISTINGS_PER_UNIT = 16;
 /** The most PayPal refunds and moved bookings the book reads one by one (lib/paypal-sales.ts, lib/affiliates.ts readBook). */
 export const AFFILIATE_ROW_CAP = 500 + 200;
 

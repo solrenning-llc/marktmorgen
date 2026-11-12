@@ -15,7 +15,7 @@ import { readListingsAll, visibleIds } from "@/lib/catalog";
 import { deliversDigitally } from "@/lib/digital-consent";
 import { sellsThroughPayPal } from "@/lib/paypal-sales";
 import { PIXEL_INFO, PIXEL_KINDS } from "@/lib/pixels";
-import { listingUnits } from "@/lib/public-read-rules";
+import { POLICY_LISTINGS_PER_UNIT } from "@/lib/public-read-rules";
 import { takePublicRequest } from "@/lib/traffic";
 import type { PolicyFactsInput } from "@/lib/store-policy-facts";
 
@@ -37,6 +37,16 @@ export function policyInputFrom(store: Pick<Store, "name" | "pixels" | "mail">, 
   };
 }
 
+/**
+ * The public requests the policy page takes for its listings: POLICY_LISTINGS_PER_UNIT each, fewer than the
+ * PUBLIC_LISTINGS_PER_UNIT other pages take, because past the catalog head each listing is its own GET, and the
+ * page's requests are priced as any public request (laterPageCost) while covering those commands
+ * (tests/k-policy-page-units.test.ts; Claude 1's review of #3696 at 1cd1f8a1).
+ */
+export function policyListingUnits(listings: number): number {
+  return Number.isFinite(listings) && listings > 0 ? Math.ceil(listings / POLICY_LISTINGS_PER_UNIT) : 0;
+}
+
 /** The input for a store's policy page, read now. */
 export async function policyInput(store: Store): Promise<PolicyFactsInput> {
   // No catch, and every listed product read exactly (readListingsAll): a page that could not read one
@@ -48,12 +58,12 @@ export async function policyInput(store: Store): Promise<PolicyFactsInput> {
 /**
  * The input for the public page, its listings paid for first (Claude 1's review of #1824): the page is public and
  * reads every visible product's listing, so those reads are taken as the store's own public requests
- * (listingUnits, PUBLIC_LISTINGS_PER_UNIT listings each, held against the reads in tests/plan-cost-registry.test.ts)
+ * (policyListingUnits, POLICY_LISTINGS_PER_UNIT listings each, held against the reads in tests/k-policy-page-units.test.ts)
  * before any is made, as the collection page and the store's map do. Null when the window refuses them: nothing
  * of the catalog is read, and the page rests.
  */
 export async function paidPolicyInput(store: Store): Promise<PolicyFactsInput | null> {
-  const units = listingUnits(visibleIds(store).length);
+  const units = policyListingUnits(visibleIds(store).length);
   if (units > 0 && !(await takePublicRequest(store, "public", undefined, units))) return null;
   return policyInput(store);
 }

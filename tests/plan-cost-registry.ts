@@ -93,7 +93,7 @@ import { STRIPE_TIMEOUT_MS } from "@/lib/fetch-timeout";
 import { MAX_LESSONS } from "@/lib/course";
 import { MAX_POSTS, POSTS_PER_PAGE } from "@/lib/store-blog";
 import { MAX_BUMPS } from "@/lib/product-extras";
-import { AFFILIATE_ROW_CAP, PUBLIC_LISTINGS_PER_UNIT, type AffiliateLoadSize, type AffiliatePageSize, type SitemapSize } from "@/lib/public-read-rules";
+import { AFFILIATE_ROW_CAP, type AffiliateLoadSize, type AffiliatePageSize, type SitemapSize } from "@/lib/public-read-rules";
 import { BOOK_SNAPSHOT_MAX_BYTES } from "@/lib/affiliate-book-snapshot";
 import { SEARCH_PAGE } from "@/lib/community-search";
 import { MAX_CHAT_KEPT } from "@/lib/community-chat-rules";
@@ -1133,7 +1133,7 @@ export const COST_LINES: CostLine[] = [
     feature: "Requests beyond the counted visit: pages drawn again, the cart, searches, downloads, the page after paying, reviews, members' pages to manage, forms (17 October 2026)",
     monthlyUsd: (tier) => {
       const limit = REQUESTS_PER_VISIT * VISITS_INCLUDED[tier] + EXTRA_REQUESTS[tier];
-      return EXTRA_REQUESTS[tier] * laterPageCost() + limit * (REQUEST_COMMANDS + PUBLIC_LISTINGS_PER_UNIT) * COMMAND;
+      return EXTRA_REQUESTS[tier] * laterPageCost() + limit * REQUEST_COMMANDS * COMMAND;
     },
     sources: [
       { file: "lib/traffic-rules.ts", names: ["REQUESTS_PER_VISIT", "EXTRA_REQUESTS", "requestLimitFor"] },
@@ -1198,8 +1198,8 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/store-sitemap.ts", names: ["sitemapSize(store)", "takePublicRequest(store, \"public\", now, sitemapUnits(size))"] },
       { file: "app/[handle]/store-sitemap/route.ts", names: ["paidStoreSitemap(store)"] },
       // The store's policy page reads every visible product's listing: the drawing is counted (isResting) and its listings
-      // are taken as listingUnits before any is read; refused, it rests and reads none (Claude 1 on #1824, 11 November 2026).
-      { file: "lib/store-policy-input.ts", names: ["listingUnits(visibleIds(store).length)", "takePublicRequest(store, \"public\", undefined, units)"] },
+      // are taken as policyListingUnits (POLICY_LISTINGS_PER_UNIT each, one GET a listing) before any is read; refused, it rests and reads none (Claude 1 on #1824, 11 November 2026).
+      { file: "lib/store-policy-input.ts", names: ["policyListingUnits(visibleIds(store).length)", "takePublicRequest(store, \"public\", undefined, units)"] },
       { file: "app/[handle]/policies/page.tsx", names: ["if (await isResting(store)) return <StoreResting store={store} />;", "await paidPolicyInput(store)"] },
       // The open cart counts what is left of each limited product in it, as a product's page does (513 [PF1], unit 3, 2 November 2026): one read each, at most MAX_CART.
       { file: "app/api/store/cart/route.ts", names: ["withinStore(\"cart-read\"", "stockLeft(store, p)"] },
@@ -1559,7 +1559,7 @@ export function perPaymentCost(tier: Tier): number {
 export function nonPayingWorst(): number {
   const creator = (id: string) => COST_LINES.find((line) => line.id === id)!.monthlyUsd("creator");
   const allowances = NON_PAYING_ALLOWANCES.trial;
-  const requests = (REQUESTS_PER_VISIT * TRIAL_VISITS + TRIAL_EXTRA_REQUESTS) * (REQUEST_COMMANDS + 1 + PUBLIC_LISTINGS_PER_UNIT) * COMMAND + TRIAL_EXTRA_REQUESTS * laterPageCost();
+  const requests = (REQUESTS_PER_VISIT * TRIAL_VISITS + TRIAL_EXTRA_REQUESTS) * (REQUEST_COMMANDS + 1) * COMMAND + TRIAL_EXTRA_REQUESTS * laterPageCost();
   return TRIAL_VISITS * visitCost()
     + requests
     + TRIAL_ORDERS * ORDER_COST

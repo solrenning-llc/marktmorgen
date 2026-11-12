@@ -146,13 +146,16 @@ async function main(): Promise<void> {
     return from < 0 ? [] : sent.slice(from);
   };
   /** The retry's own commands for one order: the paid record's GET, the refund mark's ZSCORE and the list's writes. */
-  const own = (sent: Commands, order: string) =>
-    sent.filter((c, i) => (c[1] === handOverKey(statsId) && c[0] !== "ZRANGEBYSCORE" && c[c.length - 1] === order)
+  const own = (sent: Commands, order: string) => {
+    // The person's deletion print is read before an order is handed over again and once more after its hand-over
+    // (#4140; Codex G on #4163): those HGETs inside this order's try, from its paid record's GET to its last list write.
+    const from = sent.findIndex((c) => c[0] === "GET" && c[1] === paidKey(order));
+    const to = sent.findLastIndex((c) => c[1] === handOverKey(statsId) && c[c.length - 1] === order);
+    return sent.filter((c, i) => (c[1] === handOverKey(statsId) && c[0] !== "ZRANGEBYSCORE" && c[c.length - 1] === order)
       || (c[0] === "GET" && c[1] === paidKey(order))
       || (c[0] === "ZSCORE" && c[1] === refundedKey(statsId) && c[2] === order)
-      // The person's deletion print, read right after this order's refund mark, before its hand-over is tried again
-      // (#4140): the order's own retry command (another order's print is that order's).
-      || (c[0] === "HGET" && String(c[1]).startsWith("nl:erased:") && sent[i - 1]?.[0] === "ZSCORE" && sent[i - 1]?.[2] === order)).map((c) => String(c[0]));
+      || (c[0] === "HGET" && String(c[1]).startsWith("nl:erased:") && from >= 0 && i > from && i < to)).map((c) => String(c[0]));
+  };
   const queued = async () => (await redis.pipeline([["ZRANGEBYSCORE", handOverKey(statsId), "-inf", "+inf"]]))[0] as string[];
 
   part("The registry states the hand-over list's commands");
@@ -201,7 +204,7 @@ async function main(): Promise<void> {
   is("product unreadable: GET, ZSCORE, the deletion print's HGET and two ZADDs", counted.unreadable, ["GET", "ZSCORE", "HGET", "ZADD", "ZADD"]);
   // Handed over: GET, ZSCORE, then the hand-over's ZREM (its other work is the order's own).
   counted.handed = own(await retry(), slow.order);
-  is("handed over: GET, ZSCORE, HGET and ZREM", counted.handed, ["GET", "ZSCORE", "HGET", "ZREM"]);
+  is("handed over: GET, ZSCORE, the deletion print's HGET before and after the hand-over, and ZREM", counted.handed, ["GET", "ZSCORE", "HGET", "HGET", "ZREM"]);
   is("and it left the list", (await queued()).includes(slow.order), false);
   const most = Math.max(...Object.values(counted).map((c) => c.length));
   is("the most on any path is five", most, 5);

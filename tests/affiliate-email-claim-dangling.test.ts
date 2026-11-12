@@ -31,7 +31,18 @@ let codesKey = "";
 let crookClaim = 0;
 let peopleKey = "";
 let emailsKey = "";
+/**
+ * The address's claim script (AFFILIATE_CLAIM) answered off its shape, either never applied or applied with its reply
+ * lost (Claude 7's LEVE on #3809): `apply` says which.
+ */
+let claimAnswer: { apply: boolean; reply: unknown[] } | null = null;
 redis.pipeline = (async (batch: Command[]) => {
+  if (claimAnswer && batch.length === 1 && batch[0][0] === "EVAL" && String(batch[0][1]).startsWith("-- marktmorgen:affiliate-claim:v1\n")) {
+    const answer = claimAnswer;
+    claimAnswer = null;
+    if (answer.apply) await real(batch);
+    return answer.reply;
+  }
   if (failCodeClaim > 0 && batch.some((c) => c[0] === "HSETNX" && c[1] === codesKey)) {
     failCodeClaim -= 1;
     throw new Error("connection dropped");
@@ -93,6 +104,39 @@ async function main(): Promise<void> {
   is("the open is refused or unknown, never a record without its address", first === "pending" || first.startsWith("threw") || first === "expired", true);
   is("the same person opening again gets in", await open("cy@example.com"), "pending");
   is("their address points at their record", await pointsAtRecord("cy@example.com"), true);
+
+  // Codes that name an id with no record: each is held for nobody, and a retry claims another one.
+  const danglingCodes = async () => {
+    const flat = ((await real([["HGETALL", codesKey]]))[0] ?? []) as string[];
+    let left = 0;
+    for (let i = 0; i + 1 < flat.length; i += 2) {
+      const [rec] = await real([["HGET", peopleKey, flat[i + 1]]]);
+      if (rec === null) left += 1;
+    }
+    return left;
+  };
+
+  part("The claim script answered off its shape and never applied: no code is left held for nobody (Claude 7's LEVE on #3809)");
+  {
+    claimAnswer = { apply: false, reply: [] };
+    const first = await open("orphancode@example.com");
+    is("the open does not say the person was made an affiliate", first === "approved" || first === "pending", false);
+    is("no code is left naming an id with no record", await danglingCodes(), 0);
+    is("opened again, the person gets one record", await open("orphancode@example.com") !== "", true);
+    is("still no code held for nobody", await danglingCodes(), 0);
+  }
+
+  part("The claim script applied but its reply lost: the new affiliate keeps their code");
+  {
+    claimAnswer = { apply: true, reply: [] };
+    await open("keptcode@example.com");
+    is("the address points at a record", await pointsAtRecord("keptcode@example.com"), true);
+    const [id] = await real([["HGET", emailsKey, "keptcode@example.com"]]);
+    const [rec] = await real([["HGET", peopleKey, String(id)]]);
+    const code = (JSON.parse(String(rec)) as { code?: string }).code ?? "";
+    const [holder] = await real([["HGET", codesKey, code]]);
+    is("that record's code still names it", holder, id);
+  }
 
   part("A double press still makes one record");
   const [a, b] = await Promise.all([open("dee@example.com"), open("dee@example.com")]);

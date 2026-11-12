@@ -59,7 +59,7 @@ export const AD_NOT_CHECKED: readonly string[] = [
   "Words in a language other than English: the honesty rules here read English words only",
 ];
 
-const REFUSED: ReadonlySet<TermsWarningKind> = new Set<TermsWarningKind>(["fast_money", "earnings_claim", "false_urgency", "price_mismatch"]);
+const REFUSED: ReadonlySet<TermsWarningKind> = new Set<TermsWarningKind>(["fast_money", "prohibited_goods", "earnings_claim", "false_urgency", "price_mismatch"]);
 
 // Quoted words followed by who said them ("…" — Ana; "…", said Ben): bounded, with no nested repetition.
 const QUOTE = /["“]([^"”]{8,400})["”],? ?(?:[-–—] ?|said |says )[A-Z]/gu;

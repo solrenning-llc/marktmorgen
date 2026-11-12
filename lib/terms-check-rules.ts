@@ -41,14 +41,15 @@ export const MAX_WARNINGS = 30;
 /** Characters shown on each side of a passage. */
 const AROUND = 40;
 
-export type TermsWarningKind = "other_company" | "price_mismatch" | "no_refunds" | "earnings_claim" | "fast_money" | "false_urgency" | "resale_rights";
+export type TermsWarningKind = "other_company" | "price_mismatch" | "no_refunds" | "earnings_claim" | "fast_money" | "prohibited_goods" | "restricted_goods" | "false_urgency" | "resale_rights";
 
 /**
  * The kinds that stop a product from being published, not only warn (567 [GD1] (d)): what the Terms already forbid.
  * "What you may not sell" (app/terms/page.tsx) includes "anything that promises fast or easy money, or income for
- * little effort". Every other kind is a warning the creator may act on or not.
+ * little effort" and, since 568 [GD2] (b), the goods it forbids outright (prohibited_goods: unlawful, infringing or
+ * sexual). Every other kind is a warning the creator may act on or not, restricted_goods included.
  */
-export const BLOCKING_KINDS: ReadonlySet<TermsWarningKind> = new Set<TermsWarningKind>(["fast_money"]);
+export const BLOCKING_KINDS: ReadonlySet<TermsWarningKind> = new Set<TermsWarningKind>(["fast_money", "prohibited_goods"]);
 
 /**
  * `at` and `length` place the words in the text read (the first MAX_TEXT characters), for the studio to offer the
@@ -156,6 +157,59 @@ function fastMoneyExcused(text: string, index: number, length: number): boolean 
   return WARNS_AGAINST.test(clause);
 }
 
+
+/**
+ * 568 [GD2] (b): goods the Terms forbid outright. "What you may not sell" (app/terms/page.tsx) names "anything
+ * unlawful; anything that infringes someone else's rights; sexual content". Each phrase here can only mean the
+ * forbidden thing itself offered (a forged passport, stolen card data, a cracked app, a counterfeit bag, a porn pack,
+ * a machine-gun conversion device, hacking for hire, a hard drug for sale), so it blocks publication like fast or
+ * easy money. A lesson about the subject is excused the same way (PROHIBITED_EXCUSED): "how bartenders spot fake
+ * IDs", "protect your shop from stolen credit cards", "ghost gun laws". Code rules, no model: a phrase not listed
+ * passes, and anything only doubtful is RESTRICTED, a warning.
+ */
+type Forbidden = "unlawful" | "infringing" | "sexual";
+const PROHIBITED: readonly { pattern: RegExp; reason: Forbidden }[] = [
+  { reason: "unlawful", pattern: /\b(?:fake|forged|counterfeit|novelty|scannable)\s+(?:ids?|id\s+cards?|passports?|driver'?s\s+licen[cs]es?|driving\s+licen[cs]es?|social\s+security\s+cards?|birth\s+certificates?|diplomas?|degrees?)\b/gi },
+  { reason: "unlawful", pattern: /\b(?:stolen\s+(?:credit\s+|debit\s+)?cards?|stolen\s+card\s+(?:data|details|numbers)|(?:cc|card)\s+dumps|fullz|cvv\s+(?:shops?|dumps|lists?)|carding\s+(?:methods?|tutorials?|guides?|courses?))\b/gi },
+  { reason: "unlawful", pattern: /\b(?:counterfeit\s+(?:goods|products|handbags?|bags|watches|sneakers|shoes|clothing|perfumes?|money|bills|currency|cash))\b/gi },
+  { reason: "unlawful", pattern: /\b(?:glock\s+switch(?:es)?|auto\s+sears?|(?:full[- ]auto|machine[- ]gun)\s+conversion\s+kits?)\b/gi },
+  { reason: "unlawful", pattern: /\b(?:hacked\s+(?:accounts?|instagram|facebook|netflix|spotify|disney\+?|hbo)(?:\s+accounts?)?|account\s+hacking\s+services?|ddos(?:-for-hire|\s+for\s+hire|\s+services?)|booter\s+services?|hack\s+(?:into\s+)?(?:someone'?s|anyone'?s|any)\s+(?:instagram|facebook|whatsapp|snapchat|tiktok|phone|accounts?|email))\b/gi },
+  { reason: "unlawful", pattern: /\b(?:(?:buy|order|selling|sell)\s+(?:cocaine|heroin|fentanyl|meth(?:amphetamine)?|mdma|ecstasy|lsd)|(?:cocaine|heroin|fentanyl|methamphetamine|mdma)\s+for\s+sale)\b/gi },
+  { reason: "infringing", pattern: /\b(?:pirated\s+(?:software|copies|movies|films|games|music|e?books|courses)|cracked\s+(?:software|apps?|apks?|versions?|games?|plugins?|themes?)|keygens?|nulled\s+(?:[a-z]+\s+)?(?:themes?|plugins?|scripts?)|warez|leaked\s+(?:courses?|onlyfans|content|e?books)|(?:onlyfans|patreon|fansly)\s+leaks?|replica\s+(?:designer|luxury|rolex|gucci|chanel|louis\s+vuitton|handbags?|watches))\b/gi },
+  { reason: "sexual", pattern: /\b(?:porn(?:ography)?\s+(?:videos?|clips?|packs?|bundles?|collections?|content)|pornographic\s+(?:videos?|content|photos?|images?)|xxx\s+(?:videos?|content|clips?|packs?)|nudes\s+(?:packs?|bundles?|sets?)|nude\s+(?:photo|pic|video)\s+(?:packs?|bundles?|sets?)|explicit\s+sex(?:ual)?\s+(?:videos?|content|clips?|photos?|images?)|sex\s+tapes?)\b/gi },
+];
+const PROHIBITED_WHY: Record<Forbidden, string> = {
+  unlawful: "This offers something unlawful to sell. The Terms do not allow selling anything unlawful, so the product cannot be published with it.",
+  infringing: "This offers something that infringes someone else's rights. The Terms do not allow selling it, so the product cannot be published with it.",
+  sexual: "This offers sexual content. The Terms do not allow selling sexual content, so the product cannot be published with it.",
+};
+const PROHIBITED_FIX =
+  "Remove these words. If the product teaches about this subject without selling it, say so in the same sentence, for example “how to spot fake IDs”.";
+/** Words after the phrase that make it a subject: detection, laws, prevention, awareness, a scam. */
+const NOT_GOODS_AFTER = /^[\s"'”’-]*(?:detection|detecting|checks?|checking|scanners?|scanning|awareness|training|prevention|laws?|legislation|rules?|penalties|statistics|scams?|addiction|recovery|myths?)\b/i;
+/** Words before it, in its clause, that make it a lesson or a warning: spot, avoid, protect from, recover, laws on. */
+const WARNS_AGAINST_GOODS = /\b(?:avoid|avoiding|spot|spotting|detect|detecting|identify|identifying|recogni[sz]e|recogni[sz]ing|prevent|preventing|protect|protecting|recover|recovering|report|reporting|beware|against|stop|stopping|fight|fighting|combat|combating|tell|history|law|laws|legal|legally|lawyer|why|scams?|scammers?|fraud)\b/i;
+
+function prohibitedExcused(text: string, index: number, length: number): boolean {
+  const before = text.slice(Math.max(0, index - 80), index);
+  const after = text.slice(index + length, index + length + 40);
+  if (/["“‘']\s*$/.test(before) && /^\s*["”’']/.test(after)) return true;
+  if (NOT_GOODS_AFTER.test(after)) return true;
+  if (/^[^.!\n]{0,60}\?/.test(after) && /(?:^|[.!?\n]\s*)(?:is|are|can|may|do|does)\b[^.!?\n]*$/i.test(before)) return true;
+  const clause = before.split(/[.!?;\n]/).pop() ?? "";
+  return WARNS_AGAINST_GOODS.test(clause);
+}
+
+/**
+ * Subjects that are lawful in many places but that payment providers restrict or refuse (568 [GD2] (b), the
+ * doubtful): a warning, never a block. The Terms forbid "anything that falls under the list of restricted businesses
+ * published by Stripe"; the warning sends the creator to that list and does not say what is on it, because no dated
+ * copy of it was read for this rule (the official page could not be reached from where it was written).
+ */
+const RESTRICTED = /\b(?:firearms?|guns?|ammunition|ammo|cbd|thc|cannabis|marijuana|kratom|psilocybin|magic\s+mushrooms|steroids|sarms|gambling|betting|casino|sportsbook|nudity|nude|erotic|erotica|nsfw|onlyfans|e-?cigarettes?|vapes?|tobacco|prescription\s+(?:drugs?|medications?))\b/gi;
+const RESTRICTED_WHY =
+  "This may be a kind of business that Stripe restricts or does not support. Your payments run through Stripe, and the Terms do not allow selling what falls under Stripe's list of restricted businesses.";
+const RESTRICTED_FIX = "Check Stripe's list at stripe.com/legal/restricted-businesses before you publish. If it is on the list, do not sell it here.";
 
 /** Between the words of a phrase: spaces or a hyphen ("last-chance", "limited  time"). */
 const W = String.raw`[\s-]+`;
@@ -339,6 +393,22 @@ export function checkCreatorTerms(input: TermsCheckInput): TermsWarning[] {
     add("earnings_claim", at, m[0].length,
       "This mentions fast or easy money. If it promises the buyer fast or easy money, the Terms do not allow it; if it only names the subject, it is fine.",
       "Reread it: say what the product contains and teaches, without promising money for little effort.");
+  }
+
+  const forbidden: [number, number][] = [];
+  for (const { pattern, reason } of PROHIBITED) {
+    for (const m of text.matchAll(pattern)) {
+      const at = m.index ?? 0;
+      if (negated(text, at, m[0].length) || prohibitedExcused(text, at, m[0].length)) continue;
+      forbidden.push([at, at + m[0].length]);
+      add("prohibited_goods", at, m[0].length, PROHIBITED_WHY[reason], PROHIBITED_FIX);
+    }
+  }
+  for (const m of text.matchAll(RESTRICTED)) {
+    const at = m.index ?? 0;
+    if (forbidden.some(([from, to]) => at < to && at + m[0].length > from)) continue;
+    if (negated(text, at, m[0].length)) continue;
+    add("restricted_goods", at, m[0].length, RESTRICTED_WHY, RESTRICTED_FIX);
   }
 
   if (!input.realDeadline) {

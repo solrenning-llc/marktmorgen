@@ -10,6 +10,8 @@ const TITLES: Record<TermsWarningKind, string> = {
   no_refunds: "No refunds",
   earnings_claim: "A promise of earnings or results",
   fast_money: "Fast or easy money: not allowed by the Terms",
+  prohibited_goods: "Something the Terms do not allow selling",
+  restricted_goods: "May be restricted by Stripe: check before you publish",
   false_urgency: "Urgency with nothing real behind it",
   resale_rights: "Resale rights",
 };

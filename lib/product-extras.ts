@@ -23,7 +23,7 @@
  */
 import type { Listing } from "@/lib/store";
 import { formatMoney } from "@/lib/money";
-import { MIN_BUNDLE_ITEMS } from "@/lib/bundle-rules";
+import { MIN_BUNDLE_ITEMS, heldByABundle } from "@/lib/bundle-rules";
 import { MAX_OPTIONS, OPTION_ID, type ProductOption, optionDelivers } from "@/lib/product-option";
 
 export type Bump = {
@@ -158,7 +158,9 @@ export type BumpPause =
   /** That product is a bundle its buyers choose the contents of. */
   | "targetPick"
   /** The box charges more for it than buying it on its own does. */
-  | "dearer";
+  | "dearer"
+  /** One of the two is a bundle that already hands over the other, so the buyer would pay twice for one copy. */
+  | "inBundle";
 
 /**
  * Why this product cannot be the thing offered, or null when it can.
@@ -199,6 +201,8 @@ export function bumpState(products: Listing[], product: Listing, bump: Bump): { 
   if (target.id === product.id) return { paused: "itself", bump };
   const wrong = bumpTargetPause(target);
   if (wrong) return { paused: wrong, bump };
+  // A bundle and a product it already hands over, either way round, would charge the buyer twice for one copy.
+  if (heldByABundle([product, target]).length > 0) return { paused: "inBundle", bump };
   // Never dearer than buying it on its own.
   if (bump.priceCents > target.priceCents) return { paused: "dearer", bump };
   return { bump, target };
@@ -263,6 +267,8 @@ export function bumpPauseWords(why: BumpPause, offer: string, where: OfferPlace 
       return `Buyers choose which products ${it} holds, on its own page, and ${here} cannot ask them to choose. Offer something else.`;
     case "dearer":
       return `${Here} charges more for ${it} than buying it on its own does. Lower ${its} price, or raise the price of ${it}.`;
+    case "inBundle":
+      return `${it} and this product are a bundle and a product it already holds, so a buyer would pay twice for one copy. Offer something else.`;
   }
 }
 

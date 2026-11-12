@@ -51,7 +51,7 @@ export type CallAddOnPause =
   | "series"
   /** A booking that moves charges nothing. */
   | "move"
-  | Exclude<BumpPause, "kind" | "pwyw">;
+  | Exclude<BumpPause, "kind" | "pwyw" | "inBundle">;
 
 /** How a booking is being made: what decides whether add-ons are offered on it at all. */
 export type CallAddOnContext = {
@@ -96,8 +96,8 @@ export function callAddOnState(products: readonly Listing[], product: Listing, b
   const target = products.find((p) => p.id === bump.productId);
   if (!target) return { paused: "gone", bump };
   if (target.id === product.id) return { paused: "itself", bump };
-  // A target's reasons only (bumpTargetPause never answers "kind" or "pwyw", which are about the host).
-  const wrong = bumpTargetPause(target) as Exclude<BumpPause, "kind" | "pwyw"> | null;
+  // A target's reasons only (bumpTargetPause never answers "kind", "pwyw" or "inBundle", which are about the host and the pair).
+  const wrong = bumpTargetPause(target) as Exclude<BumpPause, "kind" | "pwyw" | "inBundle"> | null;
   if (wrong) return { paused: wrong, bump };
   // Never dearer than buying it on its own.
   if (bump.priceCents > target.priceCents) return { paused: "dearer", bump };

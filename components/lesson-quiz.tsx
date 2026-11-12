@@ -2,6 +2,7 @@ import type { Attempt, Quiz } from "@/lib/quiz";
 import { questionsPerTry, triesLeft } from "@/lib/quiz";
 import { coursesWords } from "@/lib/buyer-words/courses";
 import type { LanguageCode } from "@/lib/store-language";
+import { QuizAnswerCheck } from "@/components/quiz-answer-check";
 
 /**
  * A lesson's quiz, as a student meets it: the questions to answer, and after
@@ -29,6 +30,7 @@ export function LessonQuiz({
   justMarked,
   waitSeconds = 0,
   stale = false,
+  blank = [],
   language = "en",
 }: {
   quiz: Quiz;
@@ -44,6 +46,8 @@ export function LessonQuiz({
   waitSeconds?: number;
   /** Came back because the questions sent were no longer this try's: nothing was counted. */
   stale?: boolean;
+  /** Came back because these questions were left blank: nothing was counted (lib/quiz-answer-check.ts). */
+  blank?: string[];
   language?: LanguageCode;
 }) {
   const w = coursesWords(language);
@@ -129,6 +133,15 @@ export function LessonQuiz({
           <input key={name} type="hidden" name={name} value={value} />
         ))}
         {canAnswer ? <input type="hidden" name="shown" value={quiz.questions.map((q) => q.id).join(",")} /> : null}
+        {canAnswer ? (
+          <>
+            {/* WCAG 3.3.4/3.3.6: a blank question holds the try, in the page first and on the server without scripts. */}
+            <p id="quiz-blank" role="alert" className="st-note mb-5 text-sm font-semibold" hidden={!blank.length}>
+              {w.blankTry}
+            </p>
+            <QuizAnswerCheck alertId="quiz-blank" />
+          </>
+        ) : null}
         <ol className="space-y-6">
           {quiz.questions.map((question, qi) => {
             const picked = last?.answers[question.id] ?? [];
@@ -136,12 +149,17 @@ export function LessonQuiz({
             const showWhy = reveal || mark === true;
             return (
               <li key={question.id}>
-                <fieldset>
+                <fieldset data-quiz-question="" aria-describedby={canAnswer ? `quiz-${question.id}-blank` : undefined}>
                   <legend className="font-semibold leading-snug" style={{ color: "var(--st-text)" }}>
                     <span className="st-muted mr-1 tabular-nums">{`${qi + 1}.`}</span>
                     <span className="whitespace-pre-line">{question.text}</span>
                     {question.kind === "multiple" ? <span className="st-muted mt-1 block text-sm font-normal">{w.chooseEvery}</span> : null}
                   </legend>
+                  {canAnswer ? (
+                    <p id={`quiz-${question.id}-blank`} className="mt-2 text-sm font-semibold" style={{ color: "var(--st-text)" }} hidden={!blank.includes(question.id)}>
+                      {w.blankQuestion}
+                    </p>
+                  ) : null}
                   <div className="mt-3 space-y-2">
                     {question.choices.map((choice, ci) => {
                       const right = question.correct.includes(ci);

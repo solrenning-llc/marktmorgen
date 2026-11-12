@@ -27,6 +27,7 @@ import { markPassed } from "@/lib/quiz";
 import { handIn, takeRoom } from "@/lib/assignment";
 import { issueCertificate } from "@/lib/certificate";
 import { addComment } from "@/lib/lesson-comments";
+import { saveNote } from "@/lib/lesson-notes";
 import { CREATOR_AUTHOR } from "@/lib/lesson-comments-rules";
 import { freshConfig, saveConfig, touchMember } from "@/lib/community";
 import { indexMember } from "@/lib/community-index";
@@ -40,7 +41,7 @@ import { rememberBuyers } from "@/lib/buyer-library";
 import { noteForErasure } from "@/lib/erasure-index";
 import { normaliseEmail } from "@/lib/auth";
 import { storeKey } from "@/lib/learn";
-import { createRequest, saveRequest } from "@/lib/payment-request-store";
+import { changeRequest, createRequest } from "@/lib/payment-request-store";
 import { ROOM } from "./data-room";
 
 export const OWNER = "keeper@example.com";
@@ -151,7 +152,7 @@ export async function seedPerson(w: World, rawEmail: string, other: string | nul
   // A payment request sent them, with its reminder waiting (lib/payment-request-store.ts).
   const billed = await createRequest(store, { email, name: "Tess", lines: [{ text: "Coaching, October", quantity: 1, cents: 48_000 }], note: `For ${email}`, dueDate: "", autoReminders: 1, total: 48_000 }, Date.now());
   if (!billed.ok) throw new Error(`a payment request was not kept: ${billed.message}`);
-  await saveRequest({ ...billed.request, sent: [Date.now()] });
+  await changeRequest(store, billed.request.id, (current) => ({ next: { ...current, sent: [Date.now()] }, answer: null }));
   // A form answer (lib/form-store.ts).
   await addResponse(statsId, w.formId, { id: hex(16), at: now, page: "/@erase-shop/form/intake", answers: { fmail1: email, fgoal1: "Learn fast" }, outcome: "", joined: false }, ROOM);
 
@@ -186,6 +187,9 @@ export async function seedPerson(w: World, rawEmail: string, other: string | nul
   const asked = await addComment({ room: ROOM, courseId: w.courseId, lessonId: w.lessons[0], by: learner, text: "How long does this take?", name: "Tess" });
   if (!asked.ok) throw new Error("no comment");
   await addComment({ room: ROOM, courseId: w.courseId, lessonId: w.lessons[0], by: CREATOR_AUTHOR, text: "About an hour.", parent: asked.comment.id });
+  // Their private note on a lesson (lib/lesson-notes.ts, 290 [SQ1]).
+  const noted = await saveNote({ statsId, learner, courseId: w.courseId, lessonId: w.lessons[0], text: `My own note, ${email}`, was: "", room: store });
+  if (!noted.ok) throw new Error(`a lesson note was not kept: ${noted.reason}`);
 
   // The community (lib/community*.ts, lib/chat-grant.ts).
   const id = w.communityId;

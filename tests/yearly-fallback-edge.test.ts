@@ -53,6 +53,23 @@ let invoiceReadCount = 0;
 let monthVoidFails = false;
 let yearVoidFails = false;
 let yearPaidOnVoid = false; // the year gets paid by the member right as we void
+/**
+ * Rule 30: undefined answers with the object's own id; a string answers with another object's id; null with no id;
+ * NULL_BODY with an HTTP 200 whose JSON body is `null` itself.
+ */
+const NULL_BODY = "null body";
+let subReplyId: string | null | undefined;
+let yearReplyAt = -1; // 1-based count of GET /invoices/YEAR answered with yearReplyId
+let yearReplyId: string | null | undefined;
+let yearReplyStatus: string | undefined; // the status that reply carries, when not the year's own
+const replyAs = (row: Record<string, unknown>, id: string | null | undefined, status?: string) => {
+  if (id === undefined) return row;
+  if (id === NULL_BODY) return null;
+  const copy: Record<string, unknown> = status === undefined ? { ...row } : { ...row, status };
+  if (id === null) delete copy.id;
+  else copy.id = id;
+  return copy;
+};
 
 const subJson = () => ({
   id: SUB,
@@ -87,11 +104,11 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const body = new URLSearchParams(init?.body ? String(init.body) : "");
   const headers = new Headers(init?.headers);
   calls.push({ method, path, body, key: headers.get("Idempotency-Key"), version: headers.get("Stripe-Version") });
-  if (method === "GET" && path === `/subscriptions/${SUB}`) return json(subJson());
+  if (method === "GET" && path === `/subscriptions/${SUB}`) return json(replyAs(subJson(), subReplyId));
   if (method === "GET" && path === `/invoices/${YEAR}`) {
     invoiceReadCount += 1;
     if (invoiceReadCount === failInvoiceReadAt) return err(500, "api_error");
-    return json(yearJson());
+    return json(invoiceReadCount === yearReplyAt ? replyAs(yearJson(), yearReplyId, yearReplyStatus) : yearJson());
   }
   if (method === "POST" && path === "/prices") return json({ id: "price_Month00001" });
   if (method === "POST" && path === `/invoices/${YEAR}`) {
@@ -186,6 +203,10 @@ async function reset(): Promise<void> {
   monthVoidFails = false;
   yearVoidFails = false;
   yearPaidOnVoid = false;
+  subReplyId = undefined;
+  yearReplyAt = -1;
+  yearReplyId = undefined;
+  yearReplyStatus = undefined;
   await redisPipeline([["DEL", FALLBACK_VOID_KEY, FALLBACK_CHECK_KEY, FALLBACK_BOTH_KEY, `nl:yearly:fallback:try:${YEAR}`]]);
 }
 /** The year is safe when it is either retried (auto_advance true and open) or recorded for the daily job. */
@@ -417,6 +438,45 @@ async function main(): Promise<void> {
   await reset();
   st.method = "sepa_debit";
   is("K. a membership paid by bank debit (no pending updates) is never offered, nothing sent", [reason(await move()), posts()], ["fallback", []]);
+
+  // L. Rule 30 (from #2517): a Stripe reply decides only when it is the object asked for.
+  for (const [label, other] of [["another object's id", "other"], ["no id", null], ["a null body", NULL_BODY]] as const) {
+    const otherSub = other === "other" ? "sub_Somebody0001" : other;
+    const otherInvoice = other === "other" ? "in_Somebody00001" : other;
+    part(`L. replies with ${label}`);
+    await reset();
+    subReplyId = otherSub;
+    is(`L1. the membership read with ${label}: nothing is decided and nothing sent`, [reason(await move()), posts(), st.year.auto_advance], ["error", [], true]);
+
+    await reset();
+    yearReplyAt = 1;
+    yearReplyId = otherInvoice;
+    is(`L2. the failed invoice read with ${label}: nothing is decided and nothing sent`, [reason(await move()), posts(), st.year.auto_advance], ["error", [], true]);
+
+    await reset();
+    yearReplyAt = 2;
+    yearReplyId = otherInvoice;
+    is(
+      `L3. the year read again with ${label} after its retries stopped: never moved on it, and retried as before`,
+      [reason(await move()), moves().length, st.year.status, st.year.auto_advance],
+      ["error", 0, "open", true],
+    );
+
+    // A null body carries no status at all: one case for it (Claude 6 on #3098, the month already charged).
+    for (const said of other === NULL_BODY ? ["void"] : ["void", "paid"]) {
+      await reset();
+      yearVoidFails = true;
+      yearReplyAt = 3;
+      yearReplyId = otherInvoice;
+      yearReplyStatus = said;
+      const l4 = await move();
+      is(
+        `L4. moved and paid, the void failed, and the year read back ${other === NULL_BODY ? "" : `${said} `}with ${label}: left to void again for the daily job, never taken as ${said === "void" ? "voided" : "paid twice"}`,
+        [reason(l4), st.year.status, await members(FALLBACK_VOID_KEY), await members(FALLBACK_BOTH_KEY)],
+        ["moved-paid", "open", [`${ACCOUNT}|${YEAR}|${MONTH}`], []],
+      );
+    }
+  }
 }
 
 void main().then(() => done(), (error) => {

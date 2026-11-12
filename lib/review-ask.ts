@@ -16,6 +16,7 @@
  *                      scored by when the email is due, in seconds
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { type ReviewElsewhere, parseReviewElsewhere } from "@/lib/review-elsewhere";
 
 export type ReviewAsk = {
@@ -105,6 +106,9 @@ export async function scheduleReviewAsk(
   if (!store.reviewAsk.days || !store.statsId || !isRedisConfigured()) return false;
   if (!REFERENCE.test(reference) || !Number.isInteger(paidAt) || paidAt <= 0) return false;
   const member = askMember({ statsId: store.statsId, handle: store.handle, reference, paidAt });
-  const [added] = await redisPipeline([["ZADD", ASK_DUE_KEY, "NX", dueAt(paidAt, store.reviewAsk.days), member]]);
-  return Number(added) === 1;
+  const replies = repliesFor(await redisPipeline([["ZADD", ASK_DUE_KEY, "NX", dueAt(paidAt, store.reviewAsk.days), member]]), 1);
+  // ZADD's own count, exactly (CX-123 rule 24); the caller only logs what it cannot confirm.
+  const added = replies ? countOf(replies[0]) : null;
+  if (added === null) throw new UnknownReplyError("an order put on the review list");
+  return added === 1;
 }

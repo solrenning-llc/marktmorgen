@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { toast } from "@/components/toast";
 import { formatMoney, parseCurrency, plainAmount, readMoney } from "@/lib/money";
-import { goalProgress, monthTitle } from "@/lib/sales-goal-rules";
+import { GOAL_UNAVAILABLE_LINE, UNKNOWN_SALES_GOAL_CENTS, goalProgress, monthTitle } from "@/lib/sales-goal-rules";
 
 /**
  * The month's goal (lib/sales-goal-rules.ts): how far along it is, what a day
@@ -22,11 +22,12 @@ export function SalesGoalCard({
   currency: string;
 }) {
   const [goal, setGoal] = useState(given);
+  const unavailable = goal === UNKNOWN_SALES_GOAL_CENTS;
   const [editing, setEditing] = useState(false);
-  const [text, setText] = useState(given ? plainAmount(given, currency) : "");
+  const [text, setText] = useState(given > 0 ? plainAmount(given, currency) : "");
   const [busy, setBusy] = useState(false);
   const money = (cents: number) => formatMoney(cents, currency);
-  const progress = byDay === null ? null : goalProgress(goal, byDay, today);
+  const progress = unavailable || byDay === null ? null : goalProgress(goal, byDay, today);
   const month = monthTitle(today.slice(0, 7)).split(" ")[0];
 
   async function save(cents: number) {
@@ -54,11 +55,12 @@ export function SalesGoalCard({
         <p className="text-sm font-bold text-ink">{`${month} goal`}</p>
         {!editing ? (
           <button type="button" className="text-sm font-semibold text-violet-deep underline underline-offset-4" onClick={() => setEditing(true)}>
-            {goal ? "Change" : "Set a goal for the month"}
+            {goal > 0 ? "Change" : unavailable ? "Set a new goal" : "Set a goal for the month"}
           </button>
         ) : null}
       </div>
-      {byDay === null && !editing ? <>
+      {unavailable && !editing ? <p className="mt-2 text-sm text-ink-soft" role="status">{GOAL_UNAVAILABLE_LINE}</p> : null}
+      {!unavailable && byDay === null && !editing ? <>
         {goal > 0 ? <p className="mt-1 text-sm text-ink">Your target: {money(goal)}.</p> : null}
         <p className="mt-2 text-sm text-ink-soft" role="status">Complete payment figures are not available. Goal progress, pace and achievement wait for a complete purchase and renewal reading.</p>
       </> : null}
@@ -88,7 +90,7 @@ export function SalesGoalCard({
           </p>
         </>
       ) : null}
-      {!goal && !editing ? (
+      {!unavailable && !goal && !editing ? (
         <p className="mt-1 text-xs text-ink-soft">A figure for the month&apos;s money, and how much a day it takes to get there. It is in your Monday email too.</p>
       ) : null}
       {editing ? (

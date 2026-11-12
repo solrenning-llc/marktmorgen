@@ -51,8 +51,13 @@ console.log(`\nBrowser bundles: ${clientBundles.total - clientBundles.failed}/${
 for (const failure of clientBundles.failures) console.error(failure);
 failed += clientBundles.failed;
 
+// Ends by its exit code, like tests/check.ts done(): Node 24 can deadlock inside process.exit() (nodejs/node#64274).
+// The unref'd timer only fires if something (an esbuild service, a stray handle) still holds the process.
 if (failed) {
   console.log(`\n${failed} test file(s) failed.`);
-  process.exit(1);
+  process.exitCode = 1;
+} else {
+  console.log("\nEverything passing.");
+  process.exitCode = 0;
 }
-console.log("\nEverything passing.");
+setTimeout(() => process.exit(process.exitCode), 5_000).unref();

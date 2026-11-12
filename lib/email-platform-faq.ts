@@ -23,7 +23,7 @@ export function emailPlatformBeginnerQuestions(onSale = PLANS_ON_SALE, trialDays
   return [
     {
       q: "How do I connect my email tool?",
-      a: `The owner or an ${ROLE_NAMES.admin} does it. In your studio, open “${w.tool}”, pick one under “${w.platform}”, paste its API key and press “${w.connect}”; under the key's box, the studio says where that platform keeps it. Once it is connected, choose under “${w.target} …” and “${w.who}”, then press “${w.save}”. If the page says keys cannot be stored safely yet, no platform can be connected for now.`,
+      a: `The owner or an ${ROLE_NAMES.admin} does it. In your studio, open “${w.tool}”, pick one under “${w.platform}”, paste its API key and press “${w.connect}”; under the key's box, the studio says where that platform keeps it. We can connect only when all destinations fit on one page. If the account needs more pages, use an account with fewer destinations; an existing connection stays unchanged. Once it is connected, choose under “${w.target} …” and “${w.who}”, then press “${w.save}”. If the page says keys cannot be stored safely yet, no platform can be connected for now.`,
     },
     {
       q: "How do I know it works?",

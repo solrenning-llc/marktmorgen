@@ -18,7 +18,14 @@ export function broadcastAnswer(responseOk: boolean, raw: unknown, input: Record
   const subject = typeof input.subject === "string" ? input.subject.replace(/\s+/g, " ").trim().slice(0, 150) : "";
   const body = typeof input.body === "string" ? input.body.replace(/\r\n?/g, "\n").trim().slice(0, 20_000) : "";
   if (!subject || !body || b.subject !== subject || b.body !== body || b.productId !== association(input.productId) || b.notProductId !== association(input.notProductId) || b.who !== input.who) return unknown;
-  if (input.sendAt !== undefined && (typeof input.sendAt !== "number" || !Number.isFinite(input.sendAt) || b.sendAt !== Math.floor(input.sendAt / 1000))) return unknown;
+  if (input.sendAt !== undefined) {
+    if (typeof input.sendAt !== "number" || !Number.isFinite(input.sendAt)) return unknown;
+    // createBroadcast takes a time up to a minute past and moves it up to the moment it saves (sendAt = max(at, now),
+    // createdAt = now): that campaign was saved, and saying otherwise invites creating it twice.
+    const asked = Math.floor(input.sendAt / 1000);
+    const movedUp = asked < b.createdAt && asked >= b.createdAt - 60 && b.sendAt === b.createdAt;
+    if (b.sendAt !== asked && !movedUp) return unknown;
+  }
   const narrow = readNarrow(input.narrow);
   if (narrow.minSpent || narrow.channel || narrow.quietDays || narrow.group || narrow.activeDays) {
     if (!b.narrow || typeof b.narrow !== "object" || Array.isArray(b.narrow)) return unknown;

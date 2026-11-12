@@ -234,8 +234,11 @@ export function CourseEditor({
   openFirst = null,
   look = null,
   language = "en",
+  draft = false,
 }: {
   productId: string;
+  /** Whether the course's product is hidden from the store (a draft): each lesson then says so (754 [STN1]). */
+  draft?: boolean;
   /** The store's look, so a lesson's text is previewed as students see it. */
   look?: StoreLook | null;
   /** The store's language, so the preview is marked as the lesson page is. */
@@ -356,6 +359,7 @@ export function CourseEditor({
           openLesson={openLesson}
           setOpenLesson={setOpenLesson}
           room={MAX_LESSONS - lessons}
+          draft={draft}
           run={run}
           onCourse={setCourse}
           onError={setError}
@@ -476,11 +480,14 @@ function ModuleCard({
   openLesson,
   setOpenLesson,
   room,
+  draft,
   run,
   onCourse,
   onError,
 }: {
   unit: CourseModule;
+  /** The course is a draft: each lesson says it is hidden. */
+  draft: boolean;
   index: number;
   last: boolean;
   busy: boolean;
@@ -589,6 +596,8 @@ function ModuleCard({
                   .join(" · ") || "empty"}
               </p>
             </div>
+            {/* Said in words on each lesson, not by colour, so a free preview is never taken for one buyers see (754 [STN1]). */}
+            {draft ? <p className="mt-1 text-sm text-ink-soft">Off your store: new buyers cannot see it, but people who already bought the course still do.</p> : null}
             <div className="mt-2 flex flex-wrap gap-x-4 gap-y-2 text-sm font-bold">
               <button type="button" className={small} onClick={() => setOpenLesson(openLesson === lesson.id ? null : lesson.id)} aria-expanded={openLesson === lesson.id}>
                 {openLesson === lesson.id ? "Close" : "Edit lesson"}

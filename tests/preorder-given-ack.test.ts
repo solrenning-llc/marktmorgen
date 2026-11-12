@@ -12,6 +12,10 @@ import { UnknownReplyError } from "@/lib/redis-reply";
 import type { Listing, Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is } from "./check";
+import { paidIntentReply } from "./paid-intent-standin";
+
+// The payment a pre-order of a product on sale is read by before it is handed over (paid-intent-standin) needs a key.
+process.env.STRIPE_SECRET_KEY ||= "sk_test_preorder_paid_read_only";
 
 const STATS = "r".repeat(32);
 const NOW = Date.parse("2026-11-07T12:00:00Z");
@@ -19,6 +23,8 @@ const pipeline = redis.pipeline.bind(redis);
 
 const emails: { to: string; subject: string; once: string | null }[] = [];
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+  const paid = paidIntentReply(input, init?.method ?? "GET");
+  if (paid) return paid;
   const url = new URL(String(input));
   if (url.hostname === "api.resend.com") {
     const body = JSON.parse(String(init?.body));

@@ -10,6 +10,10 @@ import { LANGUAGE_CODES, type LanguageCode } from "@/lib/store-language";
 import type { Listing, Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import { paidIntentReply } from "./paid-intent-standin";
+
+// The payment a pre-order of a product on sale is read by before it is handed over (paid-intent-standin) needs a key.
+process.env.STRIPE_SECRET_KEY ||= "sk_test_preorder_paid_read_only";
 
 const STATS = "p".repeat(32);
 const SESSION = "cs_test_preordercopy0001";
@@ -115,6 +119,8 @@ const product = {
 
 let senderRequests = 0;
 globalThis.fetch = (async (input: string | URL | Request) => {
+  const paid = paidIntentReply(input);
+  if (paid) return paid;
   const url = new URL(String(input));
   if (url.hostname === "api.resend.com") {
     senderRequests += 1;

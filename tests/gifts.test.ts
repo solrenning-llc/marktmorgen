@@ -28,12 +28,15 @@ import { createCheckout } from "@/lib/store-checkout";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
+import { paidIntentReply } from "./paid-intent-standin";
 
 type Sent = { to: string[]; subject: string; text: string };
 const emails: Sent[] = [];
 const checkouts: URLSearchParams[] = [];
 let refunds: Record<string, unknown>[] = [];
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+  const paid = paidIntentReply(input, init?.method ?? "GET");
+  if (paid) return paid;
   const url = new URL(String(input));
   if (url.hostname === "api.resend.com") {
     emails.push(JSON.parse(String(init?.body)) as Sent);

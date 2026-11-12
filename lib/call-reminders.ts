@@ -24,6 +24,8 @@ import { placeLine } from "@/lib/call-place";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type SendOutcome, isSenderConfigured, sendEmailOutcome } from "@/lib/email";
 import type { Listing, Store } from "@/lib/store";
+import { storeForHandleExactly } from "@/lib/store-exact";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { listingFinder } from "@/lib/catalog";
 import { readableTime, seatsAt, zoneName, isTimeZone } from "@/lib/call-setup";
 import { VIDEO_ROOM_NOTE, isVideoRoom, roomKind, roomOf } from "@/lib/call-rooms";
@@ -183,6 +185,18 @@ async function remindCreator(store: Store, product: Listing, paid: PaidCall[], c
       "Everyone booked is also in your studio, under Upcoming calls.",
     ].join("\n"),
   };
+}
+
+/**
+ * The store reader the mail cron gives sendCallReminders: null only when the
+ * store is confirmed gone (the address is free or was let go), since that
+ * takes its due reminders off the queue; a reply out of shape, or a record
+ * that cannot be read, throws instead, so they are kept for the next run.
+ */
+export async function storeForReminders(handle: string): Promise<Store | null> {
+  const found = await storeForHandleExactly(handle);
+  if (found === "unknown") throw new UnknownReplyError("the store for call reminders");
+  return found === "none" ? null : found;
 }
 
 /**

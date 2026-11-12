@@ -23,7 +23,7 @@ globalThis.fetch = (async () => {
 }) as typeof fetch;
 
 const label = (n: Node) => texts(n.props?.children).join("");
-const askButton = (tree: unknown) => find(tree, (n: Node) => n.type === "button" && [IDEAS_COPY.ask, IDEAS_COPY.asking].includes(label(n)))[0] as Node | undefined;
+const askButton = (tree: unknown) => find(tree, (n: Node) => n.type === "button" && ([IDEAS_COPY.ask, IDEAS_COPY.asking] as string[]).includes(label(n)))[0] as Node | undefined;
 const shown = (tree: unknown) => texts(tree).join(" ");
 const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
 

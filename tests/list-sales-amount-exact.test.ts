@@ -26,8 +26,9 @@ async function main(): Promise<void> {
     if (url.origin !== BASE || (init?.method ?? "GET") !== "GET") {
       throw new Error("Only synthetic order reads are allowed");
     }
-    const body = url.pathname === "/v1/checkout/sessions" ? { data: rows }
-      : url.pathname === "/v1/payment_intents" ? { data: [] }
+    // A whole Stripe list page: main's readStripePage (#3381) reads a list without has_more as unreadable.
+    const body = url.pathname === "/v1/checkout/sessions" ? { data: rows, has_more: false }
+      : url.pathname === "/v1/payment_intents" ? { data: [], has_more: false }
       : null;
     if (body === null) throw new Error("Unexpected synthetic endpoint");
     const response = new Response("{}", { status: 200 });

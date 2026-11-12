@@ -15,8 +15,8 @@
  */
 import { NextRequest } from "next/server";
 import { openSession } from "@/lib/auth";
-import { RESET_DAYS, enterLocked, finishSetup, holdSignIn, lockedUntil, resetIfDue, startSetup, twoStepOn, twoStepStatus } from "@/lib/two-step";
-import { recoveryAddress } from "@/lib/recovery-address";
+import { RESET_DAYS, enterLocked, finishSetup, holdSignIn, lockedUntil, resetIfDue, sendRescue, spendRescue, startSetup, twoStepOn, twoStepStatus } from "@/lib/two-step";
+import { recoveryAddress, sendLostEmailLink, spendLostEmailLink } from "@/lib/recovery-address";
 import { base32Decode, codeAt, STEP_SECONDS } from "@/lib/totp";
 import { POST as recoveryRoute } from "@/app/api/auth/recovery-address/route";
 import { store as redis } from "./redis-stub";
@@ -39,6 +39,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
 const ORIGIN = "https://marktmorgen.com";
 const SETUP = "c".repeat(64);
 const nowCode = (secret: string) => codeAt(base32Decode(secret)!, Math.floor(Date.now() / 1000 / STEP_SECONDS));
+const linkTo = (to: string, path: string) => new RegExp(`${path}\\?token=([0-9a-f]{64})`).exec([...mails].reverse().find((m) => m.to === to)?.text ?? "")?.[1] ?? "";
 const codeTo = (to: string) => /Your code: (\d{6})/.exec([...mails].reverse().find((m) => m.to === to)?.text ?? "")?.[1] ?? "";
 let browsers = 0;
 const recovery = async (session: string, body: Record<string, unknown>) => {
@@ -96,6 +97,39 @@ async function main(): Promise<void> {
   const cy = await attacked(CY, "cy-backup@example.org");
   is("refused as locked", await recovery(cy.locked, { action: "remove" }), "locked");
   is("the day stays", (await twoStepStatus(CY)).reset > 0, true);
+
+  part("A link mailed to the old recovery address before it was taken away no longer works");
+  // A login link mailed to the recovery address, then that address taken away.
+  const DEE = "dee-old-link@example.com";
+  const dee = await attacked(DEE, "dee-backup@example.org");
+  await sendLostEmailLink(DEE, "203.0.113.7", ORIGIN);
+  const lost = linkTo("dee-backup@example.org", "signin/lost/confirm");
+  is("a login link went to the recovery address", lost.length, 64);
+  is("the owner takes the address away", await recovery(dee.owner, { action: "remove" }), "ok");
+  is("the link mailed there before opens nothing", await spendLostEmailLink(lost), null);
+
+  const EVE = "eve-old-link@example.com";
+  const eve = await attacked(EVE, "eve-backup@example.org");
+  await sendLostEmailLink(EVE, "203.0.113.8", ORIGIN);
+  const lostEve = linkTo("eve-backup@example.org", "signin/lost/confirm");
+  await recovery(eve.owner, { action: "start", address: "eve-new@example.org" });
+  is("replaced by a new address", await recovery(eve.owner, { action: "confirm", code: codeTo("eve-new@example.org") }), "ok");
+  is("the link mailed to the old one opens nothing", await spendLostEmailLink(lostEve), null);
+
+  const FAY = "fay-rescue@example.com";
+  const fay = await attacked(FAY, "fay-backup@example.org");
+  is("a rescue link goes to the recovery address", await sendRescue(await holdSignIn(FAY), ORIGIN), "sent");
+  const rescue = linkTo("fay-backup@example.org", "signin/rescue");
+  is("the owner takes the address away", await recovery(fay.owner, { action: "remove" }), "ok");
+  is("the rescue link mailed there before turns nothing off", [await spendRescue(rescue), await twoStepOn(FAY)], [null, true]);
+
+  part("A link to the address still kept works as before");
+  const GUS = "gus-kept@example.com";
+  await attacked(GUS, "gus-backup@example.org");
+  await sendLostEmailLink(GUS, "203.0.113.9", ORIGIN);
+  is("the login link opens the account", await spendLostEmailLink(linkTo("gus-backup@example.org", "signin/lost/confirm")), GUS);
+  is("a rescue link turns two-step login off", await sendRescue(await holdSignIn(GUS), ORIGIN), "sent");
+  is("and logs in", [await spendRescue(linkTo("gus-backup@example.org", "signin/rescue")), await twoStepOn(GUS)], [GUS, false]);
 
   done();
 }

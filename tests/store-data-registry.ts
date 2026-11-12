@@ -837,6 +837,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:recent:feed:@lib/recent-sales.ts": { what: "The recent sales feed, cached", parts: [capped(64 * KB, "One cached view.")] },
   "nl:auth:rec:@lib/recovery-address.ts": company("An account's recovery address", "An account's."),
   "nl:auth:rec:link:@lib/recovery-address.ts": company("A recovery link", "An account's, minutes."),
+  "nl:auth:rec:bound:@lib/recovery-address.ts": company("The address a recovery or rescue link was mailed to, as a one-way tag", "An account's, minutes."),
   "nl:auth:rec:set:@lib/recovery-address.ts": company("A recovery address being set", "An account's, minutes."),
   "nl:auth:rec:until:@lib/recovery-address.ts": company("Until when a recovery holds", "An account's."),
   "nl:rl:@lib/request-guard.ts": short("Per connection, person or store counts, by their scope", "request", 1),

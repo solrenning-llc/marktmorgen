@@ -10,6 +10,10 @@
  *     or Scale plan whose AI budget is funded), else nothing is asked;
  *   - the file's first row must be clearly a header (clearHeader): a file
  *     with none has a person in that row, and then nothing is sent;
+ *   - each ask is one of the month's writing jobs, taken before the model is
+ *     asked (counted, lib/ai.ts), as every other writing job is: a month whose
+ *     jobs are used up asks nothing, and a started ask stays counted (review
+ *     of #3559 at c720cc496a, MEDIUM 1);
  *   - the request is the rules' own (mapRequest), and askModel (lib/ai.ts)
  *     reserves its most possible cost in the store's monthly AI budget
  *     (reserveAiSpend, from lib/spend-cost-table.ts) before the provider is
@@ -23,12 +27,12 @@
  * nor the answer.
  */
 import { MAX_COLUMNS, type Guess, type MapKind, MAP_FIELDS, mapHoldMicroUsd, mapRequest, needsModel, readMapAnswer, suggestedMapping } from "@/lib/csv-map-ai-rules";
-import { aiAvailableFor, askModel } from "@/lib/ai";
+import { type AiResult, aiAvailableFor, askModel, counted } from "@/lib/ai";
 import type { Store } from "@/lib/store";
 
 export type SuggestOutcome =
   | { ok: true; columns: ReturnType<typeof suggestedMapping>["columns"] }
-  | { ok: false; why: "off" | "not_needed" | "no_header" | "cost_unknown" | "failed" | "unreadable" };
+  | { ok: false; why: "off" | "not_needed" | "no_header" | "cost_unknown" | "used" | "failed" | "unreadable" };
 
 /** The kinds a suggestion is for. */
 export const isMapKind = (value: unknown): value is MapKind => typeof value === "string" && Object.hasOwn(MAP_FIELDS, value);
@@ -36,9 +40,15 @@ export const isMapKind = (value: unknown): value is MapKind => typeof value === 
 /** The model call, as askModel makes it: reserved first, the answer's text or null. Replaced in tests. */
 export type Ask = (store: Store, system: string, prompt: string, maxTokens: number, model: string) => Promise<string | null>;
 
-/** What a suggestion needs from the rest of the app: the model call (askModel, which reserves first) and whether the writing help is on. Replaced in tests. */
-export type SuggestDeps = { ask: Ask; available: (store: Store, now: number) => boolean };
-const LIVE: SuggestDeps = { ask: askModel, available: aiAvailableFor };
+/** One of the month's writing jobs, taken before `run` asks the model (counted): refused before it runs, or its text. Replaced in tests. */
+export type Count = (store: Store, now: number, run: () => Promise<string | null>) => Promise<AiResult<string>>;
+
+/**
+ * What a suggestion needs from the rest of the app: the model call (askModel, which reserves first), whether the
+ * writing help is on, and the month's writing job it is counted in (counted). Replaced in tests.
+ */
+export type SuggestDeps = { ask: Ask; available: (store: Store, now: number) => boolean; count: Count };
+const LIVE: SuggestDeps = { ask: askModel, available: aiAvailableFor, count: counted };
 
 /** Suggests columns for the fields the guess left open; never applies one. */
 export async function suggestColumns(store: Store, kind: MapKind, header: readonly string[], guess: Guess, deps: SuggestDeps = LIVE, now = Date.now()): Promise<SuggestOutcome> {
@@ -49,15 +59,16 @@ export async function suggestColumns(store: Store, kind: MapKind, header: readon
   // A first row that is not clearly a header may be a person: nothing of it is sent (review of #3555).
   const request = mapRequest(kind, header);
   if (!request) return { ok: false, why: "no_header" };
-  let text: string | null;
+  // One of the month's writing jobs is taken before the model is asked; a started ask stays counted (counted, lib/ai.ts).
+  let taken: AiResult<string>;
   try {
-    text = await deps.ask(store, request.system, request.prompt, request.maxTokens, request.model);
+    taken = await deps.count(store, now, async () => (await deps.ask(store, request.system, request.prompt, request.maxTokens, request.model)) || null);
   } catch (error) {
     console.error("suggesting import columns failed", error);
     return { ok: false, why: "failed" };
   }
-  if (!text) return { ok: false, why: "failed" };
-  const answer = readMapAnswer(kind, columns, text);
+  if (!taken.ok) return { ok: false, why: taken.reason === "used" ? "used" : taken.reason === "off" ? "off" : "failed" };
+  const answer = readMapAnswer(kind, columns, taken.value);
   if (!answer) return { ok: false, why: "unreadable" };
   return { ok: true, columns: suggestedMapping(kind, guess, answer).columns };
 }

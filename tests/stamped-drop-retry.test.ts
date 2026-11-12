@@ -13,11 +13,22 @@
  */
 import { PDFDocument } from "pdf-lib";
 import * as stamp from "@/lib/pdf-stamp";
+import { stampedDelivery } from "@/lib/pdf-stamp";
 import { listFiles } from "@/lib/file-store";
 import type { ProductFile } from "@/lib/product-file";
 import * as world from "./stamped-drop-retry-world";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+
+/**
+ * The kept copy of a sale (lib/pdf-stamp.ts stampedDelivery, with a store whose public requests always have room),
+ * null where the file is handed over as uploaded; a copy made on the fly or a request to try again fails the test.
+ */
+async function stampedCopy(file: Parameters<typeof stampedDelivery>[0], sale: Parameters<typeof stampedDelivery>[1], store: Parameters<typeof stampedDelivery>[2]) {
+  const answer = await stampedDelivery(file, sale, store, { take: async () => true, give: async () => {} });
+  if (answer.kind === "fly" || answer.kind === "retry") throw new Error(`a copy was expected to be kept, not "${answer.kind}"`);
+  return answer.kind === "kept" ? answer.copy : null;
+}
 
 const FOLDER = "0123456789abcdef0123456789abcdef";
 const QUEUE = "nl:stamp:drop";
@@ -173,10 +184,10 @@ async function main() {
   const file: ProductFile = { ...book, bytes: pdf.byteLength };
   const shop = { sid: "stamped-drop-retry", tier: "creator" as const, subscriptionActive: true, subscriptionId: "sub_1", trialEnds: 0, planEndedAt: "" };
   const sale = { reference: "cs_test_r9S7t5A3m1P0", email: "maya@example.com", paidAt: Date.UTC(2026, 10, 8) / 1000 };
-  const copy = await stamp.stampedCopy(file, sale, shop);
+  const copy = await stampedCopy(file, sale, shop);
   is("control: the buyer still gets the copy", [Boolean(copy), copy ? world.files.has(copy.pathname) : false], [true, true]);
   is("and the folder left over is deleted and taken off the list", [left(seventh), await queued()], [0, []]);
-  is("control: the second download of the sale is the same copy", (await stamp.stampedCopy(file, sale, shop))?.pathname, copy?.pathname);
+  is("control: the second download of the sale is the same copy", (await stampedCopy(file, sale, shop))?.pathname, copy?.pathname);
 
   // Codex M on #3312 (review 5820239497): a removal that failed queued this file's own folder while a download was
   // stamping it; the retry after the write must never delete the copy it is about to hand over.
@@ -189,7 +200,7 @@ async function main() {
   const ownFile: ProductFile = { ...own, bytes: ownPdf.byteLength };
   await redis.pipeline([["SADD", QUEUE, stamp.copyFolder(ownFile)]]);
   const ownSale = { reference: "cs_test_r9S7t5A3m1P1", email: "ana@example.com", paidAt: Date.UTC(2026, 10, 8) / 1000 };
-  const ownCopy = await stamp.stampedCopy(ownFile, ownSale, shop);
+  const ownCopy = await stampedCopy(ownFile, ownSale, shop);
   is("the copy handed over still exists", [Boolean(ownCopy), ownCopy ? world.files.has(ownCopy.pathname) : false], [true, true]);
   is("and its folder stays on the list for a later try", await queued(), [stamp.copyFolder(ownFile)]);
   await redis.pipeline([["DEL", QUEUE]]);

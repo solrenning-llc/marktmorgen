@@ -25,11 +25,21 @@ import { crc32 } from "node:zlib";
 import { PDFDocument, StandardFonts } from "pdf-lib";
 import { announcementText, eventIcs, eventTime, eventTimeIn, lengthIn, type CommunityEvent } from "@/lib/community-events";
 import { stampLine } from "@/lib/pdf-stamp-line";
-import { stampedCopy } from "@/lib/pdf-stamp";
+import { stampedDelivery } from "@/lib/pdf-stamp";
 import { stampEpub } from "@/lib/epub-stamp";
 import type { ProductFile } from "@/lib/product-file";
 import { LANGUAGE_CODES, LANGUAGES, type LanguageCode } from "@/lib/store-language";
 import { done, is, part } from "./check";
+
+/**
+ * The kept copy of a sale (lib/pdf-stamp.ts stampedDelivery, with a store whose public requests always have room),
+ * null where the file is handed over as uploaded; a copy made on the fly or a request to try again fails the test.
+ */
+async function stampedCopy(file: Parameters<typeof stampedDelivery>[0], sale: Parameters<typeof stampedDelivery>[1], store: Parameters<typeof stampedDelivery>[2]) {
+  const answer = await stampedDelivery(file, sale, store, { take: async () => true, give: async () => {} });
+  if (answer.kind === "fly" || answer.kind === "retry") throw new Error(`a copy was expected to be kept, not "${answer.kind}"`);
+  return answer.kind === "kept" ? answer.copy : null;
+}
 
 const ACCOUNT = "0123456789abcdef0123456789abcdef";
 const BUCKET = "sold-files";

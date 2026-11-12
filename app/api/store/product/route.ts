@@ -429,8 +429,23 @@ export async function POST(request: NextRequest) {
           }
         }
       }
-      const done = await setProductHidden(ref, id, body.hidden);
-      result = done.ok ? { ok: true, product: done.product } : done;
+      // The sales page read again under the lock its saves are written under, so a part saved since the read above
+      // is never published with it (754 [STN1], Codex P on #3693). A page that cannot be read publishes nothing.
+      let heldBy: { fast: ReturnType<typeof fastMoneyOnPage>; left: ReturnType<typeof templateLeft>; title: string } | null = null;
+      const done = await setProductHidden(ref, id, body.hidden, async (store, now) => {
+        if (!now.page || !store.statsId) return true;
+        const page = await readPage(store.statsId, now.id);
+        const fast = fastMoneyOnPage(pageWords(page));
+        const left = templateLeft(page);
+        heldBy = { fast, left, title: now.title };
+        return !fast && !left;
+      });
+      if (!done.ok && done.reason === "held" && heldBy) {
+        const { fast, left, title } = heldBy as { fast: ReturnType<typeof fastMoneyOnPage>; left: ReturnType<typeof templateLeft>; title: string };
+        if (fast) return Response.json({ ok: false, error: "fast_money", passage: { ...fast, product: title } }, { status: 409 });
+        if (left) return Response.json({ ok: false, error: "placeholder", ...left, product: title }, { status: 409 });
+      }
+      result = done.ok ? { ok: true, product: done.product } : { ok: false, reason: done.reason === "held" ? "unknown" : done.reason };
     } else if (action === "unlink") {
       const cleared = await setProductLink(ref, id, null);
       result = cleared.ok ? { ok: true, product: null } : { ok: false, reason: asProductReason(cleared.reason) };

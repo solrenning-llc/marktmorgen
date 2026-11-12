@@ -38,7 +38,7 @@ async function main(): Promise<void> {
   process.env.RESEND_API_KEY = "re_test_gift_other_grant";
   await claimHandle("owner@gift-other.example", "gift-other", "Gift Other", "");
   await ensureStatsId("owner@gift-other.example");
-  await setStripeAccount("owner@gift-other.example", "acct_1TestGiftOther01", true);
+  await setStripeAccount("owner@gift-other.example", "acct_1TestGiftOther1", true);
   await setSubscription("owner@gift-other.example", { customerId: "cus_GiftOther01", subscriptionId: "sub_GiftOther01", active: true, period: paidPeriod() });
   const made = await addProduct("owner@gift-other.example", "Sourdough Course", "", "49", null);
   if (!made.ok) throw new Error("no product");

@@ -1,3 +1,4 @@
+import "./mid-month-clock";
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {prepareRestartActivation,type RestartContractActivation} from '@/lib/contract-restart-activation';

@@ -1,3 +1,4 @@
+import "./mid-month-clock";
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {RESERVE_PAID_RESOURCE_WINDOW,reservePaidResourceWindow} from '@/lib/contract-resource-window';

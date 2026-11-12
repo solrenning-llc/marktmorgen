@@ -1,3 +1,4 @@
+import "./mid-month-clock";
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {canonicalFinancialSnapshot,contractCoverageDays,contractFundingConfiguration,CONTRACT_ADMISSION_COVERAGE,CONTRACT_KEYS,CONTRACT_FUNDING_RULES} from '@/lib/contract-funding-rules';

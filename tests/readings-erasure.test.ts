@@ -10,6 +10,7 @@
  * What fails here: the copy still holding the address after the erasure, or
  * the erasure not listing the readings among what it forgot.
  */
+import "./mid-month-clock";
 import { normaliseEmail } from "@/lib/auth";
 import { type Store, storeForEmail } from "@/lib/store";
 import { erasePerson } from "@/lib/person-erasure";

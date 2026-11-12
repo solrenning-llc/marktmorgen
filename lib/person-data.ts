@@ -166,6 +166,7 @@ export const PERSON_DATA: PersonData[] = [
   { file: "lib/checkout-recovery.ts", how: "expires", days: 7, what: "The mark that they heard about a cart of several products, a one-way hash, for a week" },
   { file: "lib/erasure-request.ts", how: "expires", days: 1, what: "The emailed link with which a person deletes themselves works for an hour, then is deleted" },
   { file: "lib/webhooks.ts", how: "expires", days: 7, what: "Events your webhooks already sent, kept for seven days, as your endpoint received them" },
+  { file: "lib/webhook-outbox.ts", how: "expires", days: 7, what: "An event for your webhooks that could not be queued at once (a free copy's confirmed address, a list sign-up), kept up to seven days to be sent, and never sent about someone deleted from your store" },
 
   // ---------------------------------------------------------------- not a store's people
   { file: "app/api/creators/route.ts", how: "account", what: "Answers creators send to Marktmorgen's own research, with their own retention" },

@@ -38,6 +38,8 @@ export type RefundHistory =
       more: boolean;
       /** Subscriptions, and payments not made yet (a bank payment waiting): not checked. */
       unchecked: number;
+      /** The address it was read under, normalised as the conversation keeps it: other spellings are not checked (review of #3841). */
+      under: string;
     }
   | { state: "none" }
   | { state: "unknown" };
@@ -104,7 +106,7 @@ export function historyFrom(handles: Set<string>, listings: unknown[], email: st
   if (listings.length === 0) return UNKNOWN;
   const address = normaliseEmail(email);
   const seen = new Set<string>();
-  const out = { state: "known" as const, checked: 0, refunded: 0, partly: 0, disputed: 0, more: false, unchecked: 0 };
+  const out = { state: "known" as const, checked: 0, refunded: 0, partly: 0, disputed: 0, more: false, unchecked: 0, under: address };
   try {
     for (const listing of listings) {
       if (!isObject(listing) || !Array.isArray(listing.data) || typeof listing.has_more !== "boolean") return UNKNOWN;

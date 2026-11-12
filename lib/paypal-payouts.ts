@@ -32,9 +32,10 @@ import { createHmac } from "node:crypto";
 import { types } from "node:util";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { canSeal, deriveKey, seal, unseal } from "@/lib/secret-box";
-import { type Book, addPayout, payAddress, readBook } from "@/lib/affiliates";
+import { type Book, addPayoutOnce, payAddress, payoutIdForItem, payoutReference, payoutReferences, readBook } from "@/lib/affiliates";
 import { type BatchLine, batchTotal, owedLines, payoutNote } from "@/lib/affiliate-payouts";
 import { plainAmount } from "@/lib/money";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { LockBusyError, withLock } from "@/lib/redis-lock";
 import { readPendingPayoutBatches, type PendingPayoutBatch } from "@/lib/pending-payouts";
 import { type Store, storeForId, storeIdGone } from "@/lib/store";
@@ -435,6 +436,18 @@ export async function payWithPayPal(store: Store): Promise<PayResult> {
 export type Settled = { paid: number; released: number; waiting: number };
 
 /**
+ * Whether a run before the book write became the once-only record (Claude 2 on #3272) left its mark on a payout
+ * item (SET NX, its batch id as the value, kept 400 days): nil is none, text is one; anything else throws, so the line
+ * stays on its way. No mark is written any more; the book's own HSETNX is the record (addPayoutOnce).
+ */
+async function earlierItemMark(item: string): Promise<boolean> {
+  const reply = repliesFor(await redisPipeline([["GET", itemKey(item)]]), 1);
+  if (reply && reply[0] === null) return false;
+  if (reply && typeof reply[0] === "string" && reply[0] !== "") return true;
+  throw new UnknownReplyError("a PayPal payout item's mark");
+}
+
+/**
  * Reads every open batch from PayPal and writes into the book what PayPal
  * says was paid — once per item, whoever asks first. Items PayPal could not
  * pay go back to owed; the rest stay on their way.
@@ -480,14 +493,27 @@ export async function settlePayPal(store: Store): Promise<Settled> {
       continue;
     }
     const still: Sent[] = [];
+    let references: Set<string> | undefined;
     for (const line of sent.lines) {
       const got = statusOf.get(line.a);
       const status = batchStatus === "DENIED" || batchStatus === "CANCELED" ? "FAILED" : got?.status ?? "PENDING";
       if (status === PAID && got?.item) {
-        const [fresh] = await redisPipeline([["SET", itemKey(got.item), batch, "NX", "EX", 400 * 86_400]]);
-        if (fresh !== null) {
-          await addPayout(store, { aff: line.a, cents: line.c, currency: sent.currency, date: day, reference: `PayPal ${got.item}` });
-          out.paid += 1;
+        // The line leaves the open batch only when the book is confirmed to hold its payout (Claude 2 on #3272,
+        // finding 1): a line dropped with nothing in the book is owed again, and the next payday pays it twice.
+        // Anything not known (a reply of another shape, an outage, a full data room) keeps it on its way: never sent
+        // again, read again next time. Caught per line, so one line never stops the others (finding 2).
+        try {
+          const reference = `PayPal ${got.item}`;
+          // A mark left by a run before this change: in the book under a random id when its write landed.
+          if (await earlierItemMark(got.item)) {
+            references ??= await payoutReferences(store);
+            if (references.has(payoutReference(reference))) continue;
+          }
+          const wrote = await addPayoutOnce(store, { aff: line.a, cents: line.c, currency: sent.currency, date: day, reference, id: payoutIdForItem(got.item) });
+          if (wrote !== "held") out.paid += 1;
+        } catch (error) {
+          console.error("writing a PayPal payout into the book failed; it stays on its way", error);
+          still.push(line);
         }
       } else if (NOT_PAID.has(status)) {
         out.released += 1;

@@ -764,11 +764,14 @@ export async function dropReviews(statsId: string | null, productId: string, tri
   }
 }
 
-/** A product's reviews, their index entries and their AI summary, deleted in one request. */
+/** A product's reviews, their index entries, their hide marks and their AI summary, deleted in one request. */
 async function dropReviewRecords(statsId: string, productId: string, members: string[]): Promise<void> {
   await redisPipeline([
     ["DEL", productKey(statsId, productId)],
     ["DEL", visibleKey(statsId, productId)],
+    // Its reviews' hide marks too: nothing else reaches them once the product is gone (person erasure lists only
+    // the products that still exist).
+    ["DEL", hiddenKey(statsId, productId)],
     ["HDEL", summaryKey(statsId), productId],
     ...summaryGone(statsId, productId, "all"),
     ...(members.length ? [["ZREM", allKey(statsId), ...members], ["ZREM", newKey(statsId), ...members]] : []),

@@ -57,7 +57,7 @@ async function main(): Promise<void> {
   await claimHandle(OWNER, "stopexact", "Stop Exact Studio", "");
   await ensureStatsId(OWNER);
   await ensureListId(OWNER);
-  await setStripeAccount(OWNER, "acct_1TestStopExact01", true);
+  await setStripeAccount(OWNER, "acct_1TestStopEx01", true);
   await setSubscription(OWNER, { customerId: "cus_StopExact01", subscriptionId: "sub_StopExact01", active: true, tier: "pro", period: paidPeriod() });
   await setMailSettings(OWNER, { fromName: "Stop Exact Studio", address: "1 Main St, Portland, OR 97201" });
   const store = (await storeForEmail(OWNER))!;

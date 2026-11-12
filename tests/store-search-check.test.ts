@@ -59,7 +59,9 @@ async function main(): Promise<void> {
     /free \? canGiveProduct\(store, product\) : canSellProduct\(store, product\) \|\| byPayPal/.test(productPage),
     /faqData\(store\.faq\)/.test(storePage),
     readFileSync("app/[handle]/blog/[post]/page.tsx", "utf8").includes('"BlogPosting"'),
-    /alternates: \{ canonical: ownDomain \}/.test(storePage),
+    // The front page names storeAddress(store): the live domain's address when there is one
+    // (held in tests/store-structured-data-address.test.ts), and the store's here otherwise.
+    /alternates: \{ canonical: storeAddress\(store\) \}/.test(storePage) && /export function storeAddress[\s\S]*?storeRoot\(store\)/.test(readFileSync("lib/store-sitemap.ts", "utf8")),
   ], [true, true, true, true, true]);
   is("four lines, plain words", SEARCH_DONE_FOR_YOU.length, 4);
 

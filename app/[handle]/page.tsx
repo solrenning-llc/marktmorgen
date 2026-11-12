@@ -72,6 +72,7 @@ import { outOfKeys } from "@/lib/licence-keys";
 import { ProductCard } from "@/components/store-product";
 import { canWrite } from "@/lib/mail";
 import { canUseDomain } from "@/lib/domains";
+import { storeAddress } from "@/lib/store-sitemap";
 import { SITE_URL } from "@/lib/site-url";
 import { summaries } from "@/lib/reviews";
 import { SHOWN_FROM, readSoldCounts, refreshSoldCounts, stale } from "@/lib/sold-count";
@@ -113,13 +114,13 @@ export async function generateMetadata({ params, searchParams }: Params): Promis
   if (!found) return { title: "Not found — Marktmorgen" };
   const { store } = found;
 
-  // A store on its own live domain names that as its address for search engines.
-  const ownDomain = store.domain?.liveAt && canUseDomain(store) ? `https://${store.domain.name}/` : null;
-
   return {
     title: `${store.name} — Marktmorgen`,
     description: store.bio || speech(store).w.storeDescription(store.name),
-    ...(ownDomain ? { alternates: { canonical: ownDomain } } : {}),
+    // The one address the store names as its own, as its map lists it: its live domain's, or
+    // marktmorgen.com/@handle however the handle was written in the address bar (/@LocalShop
+    // draws the same page, and must not be a second address of it).
+    alternates: { canonical: storeAddress(store) },
     // An empty store has nothing to offer a search engine yet. One with
     // something on it does, so it stops hiding the moment it has. A page of
     // links alone counts: it is a page somebody may be looking for.

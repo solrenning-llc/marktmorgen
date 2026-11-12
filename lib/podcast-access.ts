@@ -264,18 +264,18 @@ export async function forgetPodcastPerson(store: Store, current: string[], email
   // the address, so on an unknown read both stay, the step throws and the erasure says it is not finished.
   const indexed = await indexedTokens(sid, productIds, email);
   const held = indexed.filter((t): t is string => t !== null);
-  // And off each product's list of listeners (audit A1): an address is listed only beside a feed of that product.
-  const listed = productIds.filter((_, i) => indexed[i] !== null).map((p): (string | number)[] => ["SREM", listenersKey(sid, p), addressKey(email)]);
+  // Off every product's list of listeners first (audit A1; Claude 1 cloud on #3473): before the index goes, so an
+  // erasure stopped on an unknown answer here, or after it, still reaches the list when it is tried again, and from
+  // every list, not only where an index was read (a grant written while its index was deleted keeps its list entry).
+  const lists = productIds.map((p): (string | number)[] => ["SREM", listenersKey(sid, p), addressKey(email)]);
+  const taken = repliesFor(await redisPipeline(lists), lists.length);
+  if (!taken || !taken.every((r) => r === 0 || r === 1)) throw new UnknownReplyError("a person's place on a podcast's list of listeners");
   const reply = repliesFor(
     await redisPipeline([["DEL", ...productIds.flatMap((p) => [byKey(sid, p, email), okKey(sid, p, email)]), ...held.map(tokenKey)]]),
     1,
   );
   const gone = reply ? countOf(reply[0]) : null;
   if (gone === null) throw new UnknownReplyError("the deletion of a person's podcast feeds");
-  if (listed.length) {
-    const taken = repliesFor(await redisPipeline(listed), listed.length);
-    if (!taken || !taken.every((r) => r === 0 || r === 1)) throw new UnknownReplyError("a person's place on a podcast's list of listeners");
-  }
   return gone;
 }
 

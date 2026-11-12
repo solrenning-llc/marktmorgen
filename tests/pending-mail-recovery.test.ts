@@ -510,9 +510,10 @@ test('small funded successor grants compose both normal workers through an unsup
   try{
    Date.now=()=>started-73*3600000;
    f=await physicalPaidFixture();
+   const statsId=f.store.statsId;assert.ok(statsId,'the fixture store has its list id');
    let nonce='';
    for(let k=0;!nonce;k++){const candidate=createHash('sha256').update('pending-mail-recovery-nonce-'+k).digest('hex');
-    if(confirmationOriginId(f.store.statsId,candidate)>firstId)nonce=candidate;}
+    if(confirmationOriginId(statsId,candidate)>firstId)nonce=candidate;}
    const randomBytes=nodeCrypto.randomBytes;
    nodeCrypto.randomBytes=((size:number,...rest:unknown[])=>size===32&&rest.length===0?Buffer.from(nonce,'hex'):(randomBytes as (...a:unknown[])=>Buffer)(size,...rest)) as typeof randomBytes;
    let checkout!:Awaited<ReturnType<typeof createCheckout>>;
@@ -523,7 +524,7 @@ test('small funded successor grants compose both normal workers through an unsup
     payment_intent:{object:'payment_intent',status:'succeeded',amount_received:4000,currency:'usd',latest_charge:{object:'charge',paid:true,amount:4000,amount_refunded:0,currency:'usd',refunded:false,disputed:false}},
     shipping_details:{name:'Original Buyer',address:{line1:'1 Original Street',city:'Test City',country:'US'}}});
    id=originId();
-   assert.equal(id,confirmationOriginId(f.store.statsId,nonce),'the checkout reserved the original under the chosen nonce');
+   assert.equal(id,confirmationOriginId(statsId,nonce),'the checkout reserved the original under the chosen nonce');
   }finally{Object.defineProperty(Date,'now',descriptor);assert.deepEqual(Object.getOwnPropertyDescriptor(Date,'now'),descriptor);}
   const found=await readConfirmationOrigin(id,f.runtime);assert.ok(found);
   const row=found.row,keys=[confirmationOriginRowKey(id),`nl:order-confirmation:source:${id}`,'nl:order-confirmation:due',

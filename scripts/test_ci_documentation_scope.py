@@ -85,15 +85,27 @@ class DocumentationScopeTests(unittest.TestCase):
             # The final check is the last job; its own rules (always runs, reads every job)
             # are held by scripts/test_ci_all_checks.py. Every job between keeps the rules below.
             self.assertEqual(named[-1][0], "all-checks", str(path))
-            chunks = [body for _, body in named[1:-1]]
+            chunks = [(name, body) for name, body in named[1:-1]]
             self.assertTrue(chunks, str(path))
-            for chunk in chunks:
-                self.assertEqual(chunk.count("    needs: documentation-scope\n"), 1)
+            ids = [name for name, _ in chunks]
+            for name, chunk in chunks:
+                needs = [line for line in chunk.splitlines() if line.startswith("    needs:")]
+                self.assertEqual(len(needs), 1, str(path))
                 conditions = [line for line in chunk.splitlines() if line.startswith("    if:")]
                 self.assertEqual(len(conditions), 1, str(path))
                 self.assertIn("${{ !cancelled() && needs.documentation-scope.outputs.full != 'false'", conditions[0])
                 self.assertTrue(conditions[0].endswith(" }}"), str(path))
                 self.assertNotIn("always()", conditions[0], str(path))
+                if needs[0] == "    needs: documentation-scope":
+                    continue
+                # A job that starts the run's one production build waits for the build job, which is
+                # itself gated by the scope, and runs only when that build succeeded (never on a
+                # failed or skipped build; the final check then fails on the build's own result).
+                self.assertEqual(needs[0], "    needs: [build, documentation-scope]", str(path))
+                self.assertNotEqual(name, "build", str(path))
+                self.assertIn("build", ids, str(path))
+                self.assertEqual(conditions[0], "    if: ${{ !cancelled() && needs.documentation-scope.outputs.full != 'false'"
+                                 " && needs.build.result == 'success' }}", str(path))
 
     def test_daily_and_manual_events_are_explicit_and_isolated(self):
         for path in ci_workflows():

@@ -30,7 +30,7 @@ import { NextRequest } from "next/server";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { claimHandle, ensureStatsId, ensureStoreId, setSubscription, storeForEmail } from "@/lib/store";
 import { storeKey } from "@/lib/learn";
-import { keepMember, membersOf, productRoles, readServer, saveServer, setProductRoles, startTrip } from "@/lib/discord-store";
+import { accountOf, keepMember, membersOf, productRoles, readServer, saveServer, setProductRoles, startTrip } from "@/lib/discord-store";
 import { GET as returnDiscord } from "@/app/api/discord/callback/route";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -56,7 +56,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
 }) as typeof fetch;
 
 type Commands = (string | number)[][];
-type Read = "healthy" | "none" | "shape" | "thrown" | "forget" | "forget-lost" | "forget-lost-unread";
+type Read = "healthy" | "none" | "shape" | "thrown" | "forget" | "forget-lost" | "forget-lost-unread" | "partial";
+const BEN = "300000000000000012";
 
 async function scenario(read: Read) {
   redis.clear();
@@ -75,6 +76,7 @@ async function scenario(read: Read) {
     await saveServer(room, { id: OLD, name: "Old server", at: 1, kick: false });
     await setProductRoles(room, "prod1", [ROLE]);
     await keepMember(room, store.sid, ANA, { e: "ana@example.com", n: "Ana", p: ["prod1"], r: [ROLE], at: 1, checked: 1 });
+    if (read === "partial") await keepMember(room, store.sid, BEN, { e: "ben@example.com", n: "Ben", p: ["prod1"], r: [ROLE], at: 1, checked: 1 });
   }
   const session = await openSession(OWNER);
   const redirect = "https://marktmorgen.com/api/discord/callback";
@@ -116,6 +118,17 @@ async function scenario(read: Read) {
       return real(commands);
     }) as typeof redis.pipeline;
   }
+  if (read === "partial") {
+    // The check rewrites Ben's row (same address, a new checked time) after the forget's HVALS, before its delete.
+    redis.pipeline = (async (commands: Commands) => {
+      const answers = await real(commands);
+      if (!used && commands.length === 1 && commands[0][0] === "HVALS") {
+        used = true;
+        await keepMember(room, store.sid, BEN, { e: "ben@example.com", n: "Ben", p: ["prod1"], r: [ROLE], at: 1, checked: 2 });
+      }
+      return answers;
+    }) as typeof redis.pipeline;
+  }
   let status = "";
   let thrown = "";
   try {
@@ -134,6 +147,7 @@ async function scenario(read: Read) {
     left: discord.includes(`DELETE /users/@me/guilds/${OLD}`),
     roles: [...(await productRoles(room)).entries()],
     members: (await membersOf(room)).map((m) => m.id),
+    benLink: read === "partial" ? await accountOf(room, "ben@example.com") : null,
   };
 }
 
@@ -177,6 +191,12 @@ async function main() {
   is("forget-lost-unread: the creator is told the outcome is unknown, never \"Nothing was changed\" or \"connected\"", unread.status, "unconfirmed");
   is("forget-lost-unread: the new server was not saved", unread.server, null);
 
+  part("6b. The forget let some people go, not all (one rewritten by the check meanwhile): never \"Nothing was changed\" (Claude 7, MEDIUM on #3017)");
+  const partial = await scenario("partial");
+  is("partial: the creator is told the old server was only partly disconnected, never \"unchecked\"", partial.status, "unfinished");
+  is("partial: the old server is still connected and the bot stays in it", [partial.server, partial.left], [OLD, false]);
+  is("partial: the person rewritten meanwhile is kept with their row and their address link, for the next try", [partial.members, partial.benLink], [[BEN], BEN]);
+
   part("7. The studio says so plainly, as an error");
   const page = readFileSync(join(process.cwd(), "app/studio/discord/page.tsx"), "utf8");
   const line = page.split("\n").find((l) => /^\s*unchecked:/.test(l)) ?? "";
@@ -184,6 +204,8 @@ async function main() {
   is("the notice says nothing was changed and to try again", /could not check[^"]*Nothing was changed; try again/.test(line), true);
   const unsure = page.split("\n").find((l) => /^\s*unconfirmed:/.test(l)) ?? "";
   is("the notice for unconfirmed is an error", /tone: "error"/.test(unsure), true);
+  const partly = page.split("\n").find((l) => /^\s*unfinished:/.test(l)) ?? "";
+  is("the notice for unfinished is an error that never says nothing was changed, and says what to do", /tone: "error"/.test(partly) && !/Nothing was changed/.test(partly) && /again/.test(partly), true);
   is("the notice for unconfirmed never says nothing was changed, and says what to do", /could not tell/.test(unsure) && /Reload this page/.test(unsure) && !/Nothing was changed/.test(unsure), true);
 
   done();

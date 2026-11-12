@@ -26,6 +26,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       full: ${{ steps.scope.outputs.full }}
+      docs: ${{ steps.scope.outputs.docs }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -35,7 +36,14 @@ jobs:
         run: |
           python3 scripts/test_ci_documentation_scope.py
           python3 scripts/test_ci_full_tree_proof.py
-      - name: Compare actual PR trees; uncertainty keeps full coverage
+      # Documentation-only allowlist (scripts/ci_documentation_scope.py documentation_path): regular,
+      # non-executable *.md files at the top level or under docs/, never AGENTS.md or SKILL.md, never in
+      # a hidden, tests/, scripts/, tooling/ or node_modules/ folder. Anything else (code, tests,
+      # configuration, workflows, package files, JSON, images, a rename, a symlink, an executable bit,
+      # an empty or unreadable diff) runs every job exactly as before. pull_request: the PR's diff;
+      # merge_group: the queue entry against its first parent, only under ALLGREEN; push to main: the
+      # previous head, only when that head is green for this workflow (never for CodeQL).
+      - name: Compare the actual change; uncertainty keeps full coverage
         id: scope
         env:
           CI_EVENT: ${{ github.event_name }}
@@ -44,6 +52,9 @@ jobs:
           CI_TOKEN: ${{ github.token }}
           CI_BASE: ${{ github.event.pull_request.base.sha }}
           CI_HEAD: ${{ github.event.pull_request.head.sha }}
+          CI_GROUP_HEAD: ${{ github.event.merge_group.head_sha }}
+          CI_BEFORE: ${{ github.event.before }}
+          CI_SHA: ${{ github.sha }}
         run: python3 scripts/ci_documentation_scope.py
   product-actions:
     needs: documentation-scope
@@ -91,7 +102,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - name: Read every job's result; a skip counts only for a documentation-only change
+      - name: Read every job's result; a skip counts only when the scope proved it unneeded
         env:
           NEEDS: ${{ toJSON(needs) }}
         run: |

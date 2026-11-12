@@ -26,6 +26,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       full: ${{ steps.scope.outputs.full }}
+      docs: ${{ steps.scope.outputs.docs }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -39,7 +40,14 @@ jobs:
         run: |
           python3 scripts/test_ci_documentation_scope.py
           python3 scripts/test_ci_full_tree_proof.py
-      - name: Compare actual PR trees; uncertainty keeps full coverage
+      # Documentation-only allowlist (scripts/ci_documentation_scope.py documentation_path): regular,
+      # non-executable *.md files at the top level or under docs/, never AGENTS.md or SKILL.md, never in
+      # a hidden, tests/, scripts/, tooling/ or node_modules/ folder. Anything else (code, tests,
+      # configuration, workflows, package files, JSON, images, a rename, a symlink, an executable bit,
+      # an empty or unreadable diff) runs every job exactly as before. pull_request: the PR's diff;
+      # merge_group: the queue entry against its first parent, only under ALLGREEN; push to main: the
+      # previous head, only when that head is green for this workflow (never for CodeQL).
+      - name: Compare the actual change; uncertainty keeps full coverage
         id: scope
         env:
           CI_EVENT: ${{ github.event_name }}
@@ -48,6 +56,9 @@ jobs:
           CI_TOKEN: ${{ github.token }}
           CI_BASE: ${{ github.event.pull_request.base.sha }}
           CI_HEAD: ${{ github.event.pull_request.head.sha }}
+          CI_GROUP_HEAD: ${{ github.event.merge_group.head_sha }}
+          CI_BEFORE: ${{ github.event.before }}
+          CI_SHA: ${{ github.sha }}
         run: python3 scripts/ci_documentation_scope.py
   verify:
     needs: documentation-scope
@@ -297,11 +308,35 @@ jobs:
       - name: Existing complete studio and public-page browser regressions with synthetic services
         run: node tests/e2e/store-copy.mjs --no-build
 
+  documentation-tests:
+    # Only for a documentation-only change (docs=true): unit tests read Markdown (tests/tax-gate.test.ts
+    # walks docs/), so every test that can read a file runs (tests/documentation-readers.mjs); builds,
+    # browsers and Redis read none and stay skipped. Skipped in every other run, where verify runs them all.
+    needs: documentation-scope
+    if: ${{ !cancelled() && needs.documentation-scope.outputs.docs == 'true' }}
+    name: Documentation tests (product-checks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+      AX2_KEYBOARD_PUBLIC_STANDARD: ${{ (github.repository_id == '1334793724' || github.repository == 'viniciussucupira/marktmorgen') && github.event.repository.private == false && github.event.repository.visibility == 'public' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci
+      - name: Every unit test that can read a file
+        run: node tests/run.mjs --documentation-readers
+
   all-checks:
     # The one check GitHub requires before main (scripts/ci_all_checks.py): it always runs and
     # passes only when every job above passed, or was skipped for a documentation-only change.
     name: All checks (product-checks)
-    needs: [cross-browser, documentation-scope, form-opportunity-redis, mobile-render, verify]
+    needs: [cross-browser, documentation-scope, documentation-tests, form-opportunity-redis, mobile-render, verify]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -309,7 +344,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - name: Read every job's result; a skip counts only for a documentation-only change
+      - name: Read every job's result; a skip counts only when the scope proved it unneeded
         env:
           NEEDS: ${{ toJSON(needs) }}
         run: |

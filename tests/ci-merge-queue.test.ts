@@ -3,9 +3,11 @@
  * every one, the "All checks (…)" final check names unchanged, the active merge-group run
  * never canceled by its concurrency group (a newer delivery of the same merge group may
  * replace a pending one, which is the same check), a merge group never sharing a group
- * with a pull request run or another merge group, and the scope always full under
- * merge_group, so turning the queue on for main can never leave a required check pending
- * or skipped.
+ * with a pull request run or another merge group, and the scope full under merge_group
+ * unless the queue entry's own change is documentation only and main's queue makes every
+ * entry pass its own checks (ALLGREEN: scripts/ci_documentation_scope.py), so turning the
+ * queue on for main can never leave a required check pending, and a code change in the
+ * queue never skips a suite.
  */
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -62,6 +64,11 @@ for (const name of WORKFLOWS) {
   for (const [id, body] of Object.entries(all)) {
     if (id === "all-checks" || id === "documentation-scope") continue;
     const condition = /^ {4}if: (.*)$/m.exec(body)?.[1] ?? "";
+    if (id === "documentation-tests") {
+      is(`${name}/${id}: runs only in documentation mode, never by event, ref or branch`,
+        [name, condition], ["product-checks", "${{ !cancelled() && needs.documentation-scope.outputs.docs == 'true' }}"]);
+      continue;
+    }
     is(`${name}/${id}: gated only by the scope result, never by event, ref or branch`, [
       condition.startsWith("${{ !cancelled() && needs.documentation-scope.outputs.full != 'false'"),
       /github\.(event_name|ref|head_ref|base_ref)|merge_group|pull_request/.test(condition),
@@ -87,7 +94,7 @@ for (const name of WORKFLOWS) {
   is(`${name}: no claim that a queued change is never canceled`, /never has its checks cancel/.test(on), false);
 }
 
-part("under merge_group the scope always asks for every suite (no skip, no reuse)");
+part("under merge_group the scope asks for every suite unless the entry is proven documentation only, and never reuses");
 const scope = spawnSync("python3", ["-c", [
   "import sys; sys.path.insert(0, 'scripts')",
   "import os",
@@ -96,7 +103,22 @@ const scope = spawnSync("python3", ["-c", [
   "os.environ.update(CI_EVENT='merge_group', CI_REF='refs/heads/gh-readonly-queue/main/pr-1-' + 'a' * 40)",
   "print(requires_full('merge_group', '', '', lambda *a: b''), can_reuse_main())",
 ].join("\n")], { encoding: "utf8" });
-is("merge_group: full coverage, and no reuse of an earlier run", scope.stdout.trim(), "True False");
+is("merge_group without a proven entry: full coverage, and no reuse of an earlier run", scope.stdout.trim(), "True False");
+const queue = spawnSync("python3", ["-c", [
+  "import sys, subprocess; sys.path.insert(0, 'scripts')",
+  "from ci_documentation_scope import decide",
+  "from ci_full_tree_proof import REPO",
+  "H, P, Q = 'c' * 40, 'd' * 40, 'e' * 40",
+  "row = lambda path: (':100644 100644 ' + 'a' * 40 + ' ' + 'b' * 40 + ' M\\0' + path + '\\0').encode()",
+  "def git(*a): return H if a == ('rev-parse', 'HEAD') else ' '.join((H, P, Q))",
+  "env = dict(CI_EVENT='merge_group', CI_REPOSITORY=REPO, CI_REF='refs/heads/gh-readonly-queue/main/pr-1-' + P, CI_GROUP_HEAD=H)",
+  "rules = lambda s: (lambda path: [{'type': 'merge_queue', 'parameters': {'grouping_strategy': s}}])",
+  "print(*[decide(env, git, lambda b, h: d, rules(s), lambda: True) for d, s in [",
+  "  (row('docs/codex-queue.md'), 'ALLGREEN'), (row('docs/codex-queue.md') + row('lib/plan.ts'), 'ALLGREEN'),",
+  "  (row('.github/workflows/codeql.yml'), 'ALLGREEN'), (b'', 'ALLGREEN'), (row('docs/codex-queue.md'), 'HEADGREEN')]])",
+].join("\n")], { encoding: "utf8" });
+is("merge_group: documentation-only entry under ALLGREEN skips; mixed, workflow, empty or HEADGREEN run everything",
+  queue.stdout.trim(), "documentation full full full full");
 
 part("a push to main reuses the merge queue's green on the same commit, never for CodeQL (C1-0305-C4-28)");
 const reuse = spawnSync("python3", ["-c", [

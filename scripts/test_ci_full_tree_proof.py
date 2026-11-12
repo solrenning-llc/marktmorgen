@@ -5,7 +5,7 @@ import re
 from pathlib import Path
 from unittest.mock import patch
 import ci_full_tree_proof
-from ci_full_tree_proof import WORKFLOWS, REPO, REPO_ID, ORIGINAL_REPO, current_repo, prove_full_tree, can_reuse_main
+from ci_full_tree_proof import SKIPPED_IN_FULL, WORKFLOWS, REPO, REPO_ID, ORIGINAL_REPO, current_repo, prove_full_tree, can_reuse_main
 from test_ci_all_checks import jobs_of
 A, T, M = "a"*40, "b"*40, "c"*40
 H, P = "e"*40, "f"*40
@@ -21,6 +21,8 @@ def fixture():
                      "display_title":"PV8 source "+M})
         jobs = [{"name":n,"status":"completed","conclusion":"success","started_at":"2026-10-25T00:00:00Z",
                  "completed_at":"2026-10-25T00:01:00Z"} for n in names | {"Documentation scope ("+workflow+")"}]
+        jobs += [{"name":n,"status":"completed","conclusion":"skipped","started_at":"2026-10-25T00:01:00Z",
+                  "completed_at":"2026-10-25T00:01:00Z"} for n in SKIPPED_IN_FULL.get(workflow, set())]
         replies["actions/runs/"+str(index)+"/jobs?filter=latest&per_page=100"] = {"total_count":len(jobs),"jobs":jobs}
     replies["actions/runs?head_sha="+A+"&event=pull_request&per_page=100"] = {"total_count":len(runs),"workflow_runs":runs}
     return replies
@@ -54,6 +56,23 @@ class FullTreeProofTests(unittest.TestCase):
             elif mutation=="duplicate": reply["jobs"][0]=copy.deepcopy(reply["jobs"][1])
             else: reply["jobs"][0]["started_at"]=None
             self.assertFalse(prove_full_tree(A,T,data.__getitem__))
+
+    def test_documentation_tests_job_must_be_present_and_skipped_in_a_complete_run(self):
+        index = 1 + list(WORKFLOWS).index("product-checks")
+        key = "actions/runs/"+str(index)+"/jobs?filter=latest&per_page=100"
+        for mutation in ["ran", "failed", "missing", "cancelled"]:
+            with self.subTest(mutation=mutation):
+                data = fixture(); reply = data[key]
+                job = next(j for j in reply["jobs"] if j["name"] == "Documentation tests (product-checks)")
+                if mutation == "missing":
+                    reply["jobs"].remove(job); reply["total_count"] -= 1
+                else:
+                    job["conclusion"] = {"ran":"success","failed":"failure","cancelled":"cancelled"}[mutation]
+                self.assertFalse(prove_full_tree(A,T,data.__getitem__))
+        # A skip anywhere else still refuses: only the documentation-only job may be skipped.
+        data = fixture()
+        next(j for j in data[key]["jobs"] if j["name"] == "verify")["conclusion"] = "skipped"
+        self.assertFalse(prove_full_tree(A,T,data.__getitem__))
 
     def test_wrong_source_event_repository_or_head_refuses(self):
         for field,value in [("event","push"),("head_sha","e"*40),("display_title","owner supplied title"),
@@ -92,6 +111,8 @@ def queue_fixture(head=H):
                      "display_title":"PV8 source "+head})
         jobs = [{"name":n,"status":"completed","conclusion":"success","started_at":"2026-11-08T00:00:00Z",
                  "completed_at":"2026-11-08T00:01:00Z"} for n in names | {"Documentation scope ("+workflow+")"}]
+        jobs += [{"name":n,"status":"completed","conclusion":"skipped","started_at":"2026-11-08T00:01:00Z",
+                  "completed_at":"2026-11-08T00:01:00Z"} for n in SKIPPED_IN_FULL.get(workflow, set())]
         replies["actions/runs/"+str(500+index)+"/jobs?filter=latest&per_page=100"] = {"total_count":len(jobs),"jobs":jobs}
     replies["actions/runs?head_sha="+head+"&event=merge_group&per_page=100"] = {"total_count":len(runs),"workflow_runs":runs}
     return replies

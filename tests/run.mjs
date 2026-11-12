@@ -14,14 +14,21 @@ import { build } from "esbuild";
 import { checkClientBundles } from "./client-bundles.mjs";
 import {testAliases,testEnvironment} from "./test-config.mjs";
 import {runTestFiles,runBundle,TEST_FILE_TIMEOUT_MS} from "./test-runner.mjs";
+import {documentationReaderNames} from "./documentation-readers.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, "..");
 const out = mkdtempSync(join(tmpdir(), "nimbus-tests-"));
 let failed = 0;
+// A documentation-only change (scripts/ci_documentation_scope.py, docs=true) runs only the tests that can
+// read a file (tests/documentation-readers.mjs); the browser bundles read none.
+const documentationOnly = process.argv.includes("--documentation-readers");
 
 try {
-  const files = readdirSync(here).filter((f) => f.endsWith(".test.ts")).sort();
+  const all = readdirSync(here).filter((f) => f.endsWith(".test.ts")).sort();
+  const readers = documentationOnly ? new Set(documentationReaderNames(root)) : null;
+  const files = readers ? all.filter((f) => readers.has(f)) : all;
+  if (readers) console.log(`Documentation-only change: ${files.length} of ${all.length} test files can read a file.`);
   if (!files.length) {
     console.log("No tests found.");
     process.exit(0);
@@ -46,10 +53,12 @@ try {
   rmSync(out, { recursive: true, force: true });
 }
 
-const clientBundles = await checkClientBundles(root);
-console.log(`\nBrowser bundles: ${clientBundles.total - clientBundles.failed}/${clientBundles.total} passed.`);
-for (const failure of clientBundles.failures) console.error(failure);
-failed += clientBundles.failed;
+if (!documentationOnly) {
+  const clientBundles = await checkClientBundles(root);
+  console.log(`\nBrowser bundles: ${clientBundles.total - clientBundles.failed}/${clientBundles.total} passed.`);
+  for (const failure of clientBundles.failures) console.error(failure);
+  failed += clientBundles.failed;
+}
 
 // Ends by its exit code, like tests/check.ts done(): Node 24 can deadlock inside process.exit() (nodejs/node#64274).
 // The unref'd timer only fires if something (an esbuild service, a stray handle) still holds the process.

@@ -37,6 +37,9 @@ for key, label in [("buyer-actions", "Buyer action"), ("product-actions", "Produ
                    ("public-matrix", "Public"), ("signup-actions", "Signup action"),
                    ("studio-matrix", "Studio")]:
     WORKFLOWS["accessibility-" + key] = {label + " AAA (" + browser + ")" for browser in ("chromium", "firefox", "webkit")}
+# A complete run lists this job as skipped: it runs only for a documentation-only change
+# (scripts/ci_documentation_scope.py, docs=true), whose run is never a complete one.
+SKIPPED_IN_FULL = {"product-checks": {"Documentation tests (product-checks)"}}
 # CodeQL is deliberately absent: no proof covers it and its own push run is never skipped.
 NEVER_REUSED = {"codeql"}
 # Every workflow ends with its final check (scripts/ci_all_checks.py), which must have passed too.
@@ -78,18 +81,25 @@ def prove_full_tree(candidate, tree, api):
     return True
 
 def all_jobs_passed(run, workflow, expected, api):
-    """Every expected job of the run's latest attempt, and nothing else, completed with success."""
+    """Every expected job of the run's latest attempt, and nothing else, completed with success;
+    the documentation-only job (SKIPPED_IN_FULL) is present and skipped, as in every complete run."""
     run_id = run.get("id")
     if type(run_id) is not int or run_id <= 0:
         return False
     jobs_reply = api("actions/runs/" + str(run_id) + "/jobs?filter=latest&per_page=100")
     jobs = jobs_reply.get("jobs", [])
-    names = expected | {"Documentation scope (" + workflow + ")"}
+    skipped = SKIPPED_IN_FULL.get(workflow, set())
+    names = expected | {"Documentation scope (" + workflow + ")"} | skipped
+    def done(j):
+        if j.get("name") in skipped:
+            return j.get("status") == "completed" and j.get("conclusion") == "skipped"
+        return (j.get("status") == "completed" and j.get("conclusion") == "success"
+                and bool(j.get("started_at")) and bool(j.get("completed_at")))
     return not (type(jobs_reply.get("total_count")) is not int or jobs_reply.get("total_count") != len(jobs)
                 or not isinstance(jobs, list) or len(jobs) != len(names)
+                or any(not isinstance(j, dict) for j in jobs)
                 or {j.get("name") for j in jobs} != names
-                or any(j.get("status") != "completed" or j.get("conclusion") != "success"
-                       or not j.get("started_at") or not j.get("completed_at") for j in jobs))
+                or not all(done(j) for j in jobs))
 
 def prove_merge_group(head, api):
     """Every expected workflow's newest merge_group run on HEAD itself, in main's merge queue, passed."""

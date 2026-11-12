@@ -8,7 +8,7 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from ci_all_checks import decide, SCOPE  # noqa: E402
+from ci_all_checks import decide, SCOPE, DOCUMENTATION_TESTS  # noqa: E402
 from ci_full_tree_proof import NEVER_REUSED, WORKFLOWS  # noqa: E402
 
 ROOT = os.path.dirname(HERE)
@@ -19,8 +19,11 @@ CHECKOUT = "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7"
 NOT_CI = {"main-red-alarm.yml", "stale-pr-report.yml"}
 
 
-def scope(result="success", full="true"):
-    return {"result": result, "outputs": {"full": full} if full is not None else {}}
+def scope(result="success", full="true", docs=None):
+    outputs = {"full": full} if full is not None else {}
+    if docs is not None:
+        outputs["docs"] = docs
+    return {"result": result, "outputs": outputs}
 
 
 class DecisionRules(unittest.TestCase):
@@ -51,6 +54,36 @@ class DecisionRules(unittest.TestCase):
                                          "verify": {"result": "skipped"}})[0])
                 self.assertFalse(decide({SCOPE: scope(result=result, full="true"),
                                          "verify": {"result": "success"}})[0])
+
+    def test_documentation_tests_must_pass_in_documentation_mode(self):
+        heavy = {"verify": {"result": "skipped"}, "cross-browser": {"result": "skipped"}}
+        self.assertTrue(decide({SCOPE: scope(full="false", docs="true"),
+                                DOCUMENTATION_TESTS: {"result": "success"}, **heavy})[0])
+        for result in ("skipped", "failure", "cancelled", None, "timed_out"):
+            with self.subTest(result=result):
+                self.assertFalse(decide({SCOPE: scope(full="false", docs="true"),
+                                         DOCUMENTATION_TESTS: {"result": result}, **heavy})[0])
+
+    def test_documentation_tests_may_skip_only_outside_documentation_mode(self):
+        ran = {"verify": {"result": "success"}, "cross-browser": {"result": "success"}}
+        for docs in (None, "false"):
+            with self.subTest(docs=docs):
+                # Full run: every unit test ran in verify.
+                self.assertTrue(decide({SCOPE: scope(full="true", docs=docs),
+                                        DOCUMENTATION_TESTS: {"result": "skipped"}, **ran})[0])
+                # Reused run on main: the identical code passed in full.
+                self.assertTrue(decide({SCOPE: scope(full="false", docs=docs),
+                                        DOCUMENTATION_TESTS: {"result": "skipped"},
+                                        "verify": {"result": "skipped"}})[0])
+        # A failed scope never lets it skip, and docs=true without full=false is refused.
+        self.assertFalse(decide({SCOPE: scope(result="failure", full="true"),
+                                 DOCUMENTATION_TESTS: {"result": "skipped"}, **ran})[0])
+        self.assertFalse(decide({SCOPE: scope(full="true", docs="true"),
+                                 DOCUMENTATION_TESTS: {"result": "success"}, **ran})[0])
+        # Documentation mode never excuses a heavy job that ran and failed.
+        self.assertFalse(decide({SCOPE: scope(full="false", docs="true"),
+                                 DOCUMENTATION_TESTS: {"result": "success"},
+                                 "verify": {"result": "failure"}})[0])
 
     def test_missing_or_malformed_context_fails(self):
         for needs in (None, [], "", {}, {SCOPE: scope()}, {"verify": {"result": "success"}},

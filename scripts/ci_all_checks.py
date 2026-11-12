@@ -7,10 +7,14 @@ workflow therefore ends with this one job, which always runs and reads the resul
 every other job of the same workflow:
 
 - every job succeeded: pass;
-- documentation-scope succeeded and said the change is documentation only
-  (outputs.full == "false"), and every other job succeeded or was skipped: pass;
+- documentation-scope succeeded and said full coverage is not needed
+  (outputs.full == "false": a documentation-only change, or a push to main whose identical
+  code already passed in full), and every other job succeeded or was skipped: pass;
+- documentation-tests (product-checks) is the exception: when the scope said documentation
+  only (outputs.docs == "true") it must have succeeded, never skipped; it may be skipped only
+  outside that mode, where the full suite (or the reused full run) holds every unit test;
 - anything else (a failure, a cancellation, a skip without that proof, a missing
-  result or a failed documentation-scope): fail.
+  result, docs == "true" without full == "false", or a failed documentation-scope): fail.
 
 A pass here never replaces a test; it only repeats the results of the jobs it reads.
 scripts/test_ci_all_checks.py holds the rules and checks that every workflow has
@@ -21,6 +25,7 @@ import os
 import sys
 
 SCOPE = "documentation-scope"
+DOCUMENTATION_TESTS = "documentation-tests"
 
 
 def decide(needs):
@@ -34,6 +39,9 @@ def decide(needs):
         problems.append(SCOPE + ": " + str(scope_result))
     outputs = scope.get("outputs") or {}
     documentation_only = scope_result == "success" and outputs.get("full") == "false"
+    documentation_tests = outputs.get("docs") == "true"
+    if documentation_tests and outputs.get("full") != "false":
+        problems.append(SCOPE + ": docs=true without full=false")
     for name in sorted(needs):
         if name == SCOPE:
             continue
@@ -41,7 +49,10 @@ def decide(needs):
         result = job.get("result") if isinstance(job, dict) else None
         if result == "success":
             continue
-        if result == "skipped" and documentation_only:
+        if name == DOCUMENTATION_TESTS:
+            if result == "skipped" and scope_result == "success" and not documentation_tests:
+                continue
+        elif result == "skipped" and documentation_only:
             continue
         problems.append(name + ": " + str(result))
     return not problems, problems

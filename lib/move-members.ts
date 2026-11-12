@@ -80,6 +80,22 @@ export async function readInvite(statsId: string, field: string): Promise<Invite
 }
 
 /**
+ * One invitation as kept, for the person's data copy (619 [SZ3]): null is none
+ * kept; "unknown" is a reply in an unknown shape (a missing reply, anything but
+ * text or null) or a record that does not read, never taken as none, so the
+ * copy fails and is made again rather than leaving it out (CX-123 rule 24).
+ */
+export async function inviteForCopy(statsId: string, field: string): Promise<Invite | null | "unknown"> {
+  if (!FIELD_PATTERN.test(field) || !isRedisConfigured()) return null;
+  const replies: unknown = await redisPipeline([["HGET", invitesKey(statsId), field]]);
+  // The one reply, from the list's own data slot: a missing reply, a hole or a getter is unknown.
+  const slot = Array.isArray(replies) && replies.length === 1 ? Object.getOwnPropertyDescriptor(replies, "0") : undefined;
+  if (!slot || !Object.hasOwn(slot, "value")) return "unknown";
+  if (slot.value === null) return null;
+  return parseInvite(slot.value) ?? "unknown";
+}
+
+/**
  * Invites many members in one round trip: each one's record, link and
  * reminder. Returns, for each, the field it is kept under when it is new, or
  * null when that address was already invited to that membership.

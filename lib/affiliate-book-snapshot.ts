@@ -63,6 +63,7 @@
 import { type Book, readBook } from "@/lib/affiliates";
 import { maskEmail } from "@/lib/affiliate-lead-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { type Held, LockBusyError, releaseLock, takeLock } from "@/lib/redis-lock";
 import type { Store } from "@/lib/store";
 
@@ -119,6 +120,16 @@ const triedKey = (statsId: string) => `nl:aff:${statsId}:book:tried`;
 /** Bytes as Redis counts them: a masked "•" or a title in another script is more than one. */
 const utf8 = (text: string) => Buffer.byteLength(text, "utf8");
 
+/** A GET or HMGET field: text, or null when it is not there; undefined for any other shape (CX-123 rule 24). */
+const textOrNull = (reply: unknown): string | null | undefined => (reply === null || typeof reply === "string" ? reply : undefined);
+/** A whole number from zero kept as text (a time, a count of tries): 0 when not there, null for any other shape. */
+const wholeText = (reply: unknown): number | null => {
+  if (reply === null) return 0;
+  if (typeof reply !== "string" || !/^(0|[1-9][0-9]*)$/.test(reply)) return null;
+  const value = Number(reply);
+  return Number.isSafeInteger(value) ? value : null;
+};
+
 /** One affiliate's part of the whole program's book: their row, their lines and their payouts. */
 export function bookSlice(book: Book, id: string): Book {
   const rows = book.rows.filter((row) => row.affiliate.id === id);
@@ -166,16 +177,20 @@ export type SnapshotState = {
 export async function snapshotState(store: Store, id: string): Promise<SnapshotState | null> {
   if (!store.statsId || !isRedisConfigured()) return null;
   try {
-    const [meta, length, tried, tries] = await redisPipeline([
+    // Read only in its exact shape: a short pipeline, a field list or a count in another shape is unknown, never 0,
+    // so a fresh book never looks out of date and is not bought again (CX-123 rule 24).
+    const replies = repliesFor(await redisPipeline([
       ["HMGET", snapshotKey(store.statsId), AT, KEPT, SHORT],
       ["HSTRLEN", snapshotKey(store.statsId), id],
       ["GET", triedKey(store.statsId)],
       ["GET", triesKey(store.statsId)],
-    ]);
-    const [at, kept, short] = Array.isArray(meta) ? meta : [];
-    const counts = [Number(at ?? 0), Number(length ?? 0), Number(tried ?? 0), Number(tries ?? 0)];
-    if (!counts.every((n) => Number.isSafeInteger(n) && n >= 0)) return null;
-    const [when, bytes, triedAt, count] = counts;
+    ]), 4);
+    const meta = replies && repliesFor(replies[0], 3);
+    if (!replies || !meta) return null;
+    const [kept, short] = [textOrNull(meta[1]), textOrNull(meta[2])];
+    const counts = [wholeText(meta[0]), countOf(replies[1]), wholeText(replies[2]), wholeText(replies[3])];
+    if (kept === undefined || short === undefined || counts.some((n) => n === null)) return null;
+    const [when, bytes, triedAt, count] = counts as number[];
     return { at: when, kept: kept === "1", freshFor: short === "1" ? BOOK_SHORT_SECONDS : BOOK_FRESH_SECONDS, sliceBytes: bytes, triedAt, tries: count };
   } catch {
     return null;
@@ -289,11 +304,14 @@ redis.call("INCR", KEYS[3])
 redis.call("EXPIRE", KEYS[3], ARGV[2])
 return 1`;
 
-/** Runs one of the scripts; throws, with nothing written, when the Redis cannot run it or gives no number. */
+/**
+ * Runs one of the scripts; throws, with nothing written, when the Redis cannot run it or answers anything but one
+ * whole number (the text "1", [1] or true is unknown, never coerced into done: CX-123 rule 24).
+ */
 async function script(source: string, keys: string[], args: (string | number)[]): Promise<number> {
-  const reply = await redisPipeline([["EVAL", source, keys.length, ...keys, ...args]]);
-  const value = Array.isArray(reply) && reply.length === 1 ? Number(reply[0]) : Number.NaN;
-  if (!Number.isSafeInteger(value)) throw new Error("an affiliate book script gave no answer");
+  const replies = repliesFor(await redisPipeline([["EVAL", source, keys.length, ...keys, ...args]]), 1);
+  const value = replies && countOf(replies[0]);
+  if (value === null) throw new UnknownReplyError("an affiliate book script");
   return value;
 }
 
@@ -331,10 +349,20 @@ export async function forgetBookSnapshot(statsId: string): Promise<void> {
   const book = snapshotKey(statsId);
   const version = versionKey(statsId);
   for (let attempt = 0; attempt < 3; attempt += 1) {
+    // Read only in its exact shape: the version's start, its raise, an EXISTS or a pointer in another shape is unknown,
+    // never "no book", so the erasure is tried again rather than ending as done with the book kept (CX-123 rule 24).
     const now = Date.now();
-    const [, , , seen, exists] = await redisPipeline([...raiseVersion(version, now), ["GET", pointerKey(statsId)], ["EXISTS", book]]);
-    const token = typeof seen === "string" ? seen : "";
-    if (!token && Number(exists) === 0) return;
+    const replies = repliesFor(await redisPipeline([...raiseVersion(version, now), ["GET", pointerKey(statsId)], ["EXISTS", book]]), 5);
+    const started = replies ? replies[0] : undefined;
+    const raised = replies && countOf(replies[1]);
+    const expiry = replies && countOf(replies[2]);
+    const seen = replies ? textOrNull(replies[3]) : undefined;
+    const exists = replies && countOf(replies[4]);
+    if ((started !== "OK" && started !== null) || !raised || expiry === null || expiry > 1 || seen === undefined || exists === null || exists > 1) {
+      throw new UnknownReplyError("an affiliate book's erasure read");
+    }
+    const token = seen ?? "";
+    if (!token && exists === 0) return;
     const draft = token ? draftKey(statsId, token) : book;
     let done: number;
     try {

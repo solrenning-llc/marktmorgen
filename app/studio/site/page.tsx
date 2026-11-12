@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { imageFolder } from "@/lib/store";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
+import { StudioTrail } from "@/components/breadcrumb";
 import { StudioEmptyState } from "@/components/empty-state";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { photoUrl } from "@/lib/photo-limits";
@@ -67,7 +68,7 @@ export default async function StudioSitePage({ searchParams }: Params) {
       />
       <StudioStorePin sid={store.sid}>
         <main id="content" className="container-page pb-20 pt-10 sm:pt-14 xl:!max-w-[92rem]">
-          <p className="eyebrow">Your pages</p>
+          <StudioTrail store={store} here="Your pages" />
           <h1 className="t-h2 mt-3">Pages of your own, beside your products</h1>
           <p className="mt-3 max-w-2xl text-ink-soft">
             {`About you, where to start, how to work with you, the questions people ask: each page is built from up to ${MAX_BLOCKS} blocks, follows your store's look, lives at your store's address and on your own domain, and can sit in the menu at the top of your store.`}

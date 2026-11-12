@@ -1,0 +1,5 @@
+{
+  "@/lib/blob": "c1-cost-product-card-world.ts",
+  "next/og": "certificate-card-world.ts",
+  "next/headers": "security/next-headers.ts"
+}

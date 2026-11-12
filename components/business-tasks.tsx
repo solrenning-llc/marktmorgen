@@ -10,21 +10,54 @@ import { dayIn } from "@/lib/person-tasks";
  * (and whether it is overdue, said in words, never only by color), and Edit and Remove buttons named with the task.
  * Removing asks once more on the same button. After each change the focus goes somewhere that still exists (2.4.3):
  * the new-task field after adding, the task's Edit button after saving, the list's heading after removing. What
- * happened is said in a polite live region; a refusal or a failure in an alert, with nothing changed.
+ * happened is said in a polite live region; a confirmed refusal says nothing changed, while an unknown write asks for a reload.
  */
 type Listed = { ok: true; tasks: BusinessTask[]; progress: { done: number; total: number; words: string } };
 type Answer = Listed | { ok: false; error?: string; message?: string };
 
-async function ask(init?: RequestInit): Promise<Answer> {
-  try {
-    const response = await fetch("/api/store/business-tasks", { cache: "no-store", ...init, headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) } });
-    return (await response.json().catch(() => ({ ok: false }))) as Answer;
-  } catch {
-    return { ok: false, message: "Your tasks could not be reached. Check your connection and try again." };
+const READ_FAILED = "Your tasks could not be reached. Check your connection and try again.";
+const UNCONFIRMED = "We could not confirm this change. Reload the page to see your tasks.";
+const FAILED = "That did not work. Nothing was changed. Try again in a moment.";
+const REFUSED_BEFORE_WRITE = new Set([
+  "invalid", "unknown", "full", "store_full", "busy", "forbidden", "signed_out", "unavailable",
+  "role", "none", "store_gone", "locked", "two_step_required", "studio_used", "unreadable",
+]);
+
+const record = (value: unknown): Record<string, unknown> | null =>
+  value !== null && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+
+const taskShape = (value: unknown): value is BusinessTask => {
+  const task = record(value);
+  return !!task && typeof task.id === "string" && typeof task.title === "string" && typeof task.due === "string" &&
+    typeof task.done === "boolean" && typeof task.createdAt === "number" && Number.isSafeInteger(task.createdAt) &&
+    typeof task.doneAt === "number" && Number.isSafeInteger(task.doneAt);
+};
+
+export function decodeBusinessTasksAnswer(value: unknown, writing: boolean): Answer {
+  const answer = record(value);
+  const progress = record(answer?.progress);
+  if (answer?.ok === true && Array.isArray(answer.tasks) && answer.tasks.every(taskShape) && progress &&
+      typeof progress.done === "number" && Number.isSafeInteger(progress.done) && progress.done >= 0 &&
+      typeof progress.total === "number" && Number.isSafeInteger(progress.total) && progress.total === answer.tasks.length &&
+      typeof progress.words === "string") {
+    return answer as Listed;
   }
+  if (answer?.ok === false && typeof answer.error === "string" &&
+      (answer.message === undefined || typeof answer.message === "string")) {
+    return { ok: false, error: answer.error, ...(typeof answer.message === "string" ? { message: answer.message } : {}) };
+  }
+  return writing ? { ok: false, error: "unconfirmed", message: UNCONFIRMED } : { ok: false, error: "unreadable", message: READ_FAILED };
 }
 
-const FAILED = "That did not work. Nothing was changed. Try again in a moment.";
+async function ask(init?: RequestInit): Promise<Answer> {
+  const writing = init?.method === "POST";
+  try {
+    const response = await fetch("/api/store/business-tasks", { cache: "no-store", ...init, headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) } });
+    return decodeBusinessTasksAnswer(await response.json().catch(() => null), writing);
+  } catch {
+    return writing ? { ok: false, error: "unconfirmed", message: UNCONFIRMED } : { ok: false, error: "unreadable", message: READ_FAILED };
+  }
+}
 
 function dueWords(task: BusinessTask, today: string): string {
   if (!task.due) return task.done ? "Done." : "No due date.";
@@ -44,7 +77,7 @@ export function BusinessTasks() {
   const [due, setDue] = useState("");
   const [editing, setEditing] = useState<{ id: string; title: string; due: string } | null>(null);
   const [confirming, setConfirming] = useState<string | null>(null);
-  const today = dayIn(Date.now(), Intl.DateTimeFormat().resolvedOptions().timeZone);
+  const [today, setToday] = useState("");
   const newField = useRef<HTMLInputElement>(null);
   const heading = useRef<HTMLHeadingElement>(null);
   const focusNext = useRef<string | null>(null);
@@ -53,8 +86,10 @@ export function BusinessTasks() {
     let live = true;
     void ask().then((answer) => {
       if (!live) return;
-      if (answer.ok) setList(answer);
-      else setLoadError(answer.message ?? "Your tasks could not be read just now. Try again in a minute.");
+      if (answer.ok) {
+        setToday(dayIn(Date.now(), Intl.DateTimeFormat().resolvedOptions().timeZone));
+        setList(answer);
+      } else setLoadError(answer.message ?? "Your tasks could not be read just now. Try again in a minute.");
     });
     return () => {
       live = false;
@@ -75,12 +110,24 @@ export function BusinessTasks() {
     setBusy(true);
     setError("");
     const answer = await ask({ method: "POST", body: JSON.stringify(body) });
-    setBusy(false);
     if (!answer.ok) {
-      setError(answer.message ?? FAILED);
+      if (REFUSED_BEFORE_WRITE.has(answer.error ?? "")) {
+        setBusy(false);
+        setError(answer.message ?? FAILED);
+        return false;
+      }
+      const refreshed = await ask();
+      if (refreshed.ok) {
+        setToday(dayIn(Date.now(), Intl.DateTimeFormat().resolvedOptions().timeZone));
+        setList(refreshed);
+      }
+      setBusy(false);
+      setError(UNCONFIRMED);
       return false;
     }
+    setBusy(false);
     focusNext.current = focus;
+    setToday(dayIn(Date.now(), Intl.DateTimeFormat().resolvedOptions().timeZone));
     setList(answer);
     setSaid(`${done} ${answer.progress.words}`);
     return true;
@@ -101,7 +148,7 @@ export function BusinessTasks() {
       <h2 id={`${id}-title`} ref={heading} tabIndex={-1} className="text-lg font-semibold tracking-[-0.02em] text-ink">
         Tasks
       </h2>
-      <p className="mt-1 max-w-2xl text-sm text-ink-soft">Your own list of things to do for your store. Only you and your team see it.</p>
+      <p className="mt-1 max-w-2xl text-sm text-ink-soft">Your own list of things to do for your store. People on your team who can change store settings see it.</p>
 
       {loadError ? (
         <p className="notice notice-error mt-4" role="alert">{loadError}</p>
@@ -195,7 +242,11 @@ export function BusinessTasks() {
                           aria-label={confirming === task.id ? `Press again to remove "${task.title}"` : `Remove "${task.title}"`}
                           aria-disabled={busy}
                           onClick={async () => {
-                            if (confirming !== task.id) return setConfirming(task.id);
+                            if (confirming !== task.id) {
+                              setConfirming(task.id);
+                              setSaid(`Press again to remove "${task.title}".`);
+                              return;
+                            }
                             setConfirming(null);
                             await change({ action: "remove", id: task.id }, `"${task.title}" removed.`, "heading");
                           }}

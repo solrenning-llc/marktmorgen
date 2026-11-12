@@ -153,9 +153,29 @@ async function readKept(statsId: string, id: string): Promise<Kept | null> {
   return parseKept(raw);
 }
 
+/** A conversation's messages, read exactly (CX-123 rule 24): a list out of shape throws, never an empty conversation. */
+function messagesOf(raw: unknown): Message[] {
+  const list = stringList(raw);
+  if (!list) throw new UnknownReplyError("a conversation's messages");
+  return list.map(parseMessage).filter((m): m is Message => Boolean(m));
+}
+
+/**
+ * The messages read back after one was written and sent: never thrown, so a sender is never told it failed and sends
+ * again; a read-back that does not read still shows the message just written, never an empty conversation, and the
+ * next read says the rest.
+ */
+async function readMessagesAfter(statsId: string, id: string, written: Message): Promise<Message[]> {
+  return readMessages(statsId, id).catch((error: unknown) => {
+    console.error("a conversation's messages could not be read back after a message was written", error);
+    return [written];
+  });
+}
+
 async function readMessages(statsId: string, id: string): Promise<Message[]> {
-  const [raw] = await redisPipeline([["LRANGE", msgKey(statsId, id), 0, -1]]);
-  return (Array.isArray(raw) ? raw : []).map(parseMessage).filter((m): m is Message => Boolean(m));
+  const replies = repliesFor(await redisPipeline([["LRANGE", msgKey(statsId, id), 0, -1]]), 1);
+  if (!replies) throw new UnknownReplyError("a conversation's messages");
+  return messagesOf(replies[0]);
 }
 
 /** Keeps the newest MAX_CONVERSATIONS: the older ones' records go with them. */
@@ -282,8 +302,7 @@ export async function visitorThread(token: unknown): Promise<VisitorThread | nul
   ]);
   const conversation = parseKept(rawConversation);
   if (!conversation || conversation.token !== token) return null;
-  const messages = (Array.isArray(rawMessages) ? rawMessages : []).map(parseMessage).filter((m): m is Message => Boolean(m));
-  return forVisitor(conversation, messages);
+  return forVisitor(conversation, messagesOf(rawMessages));
 }
 
 /** A visitor writes again in their conversation; a closed one opens again. */
@@ -314,7 +333,7 @@ export async function visitorSend(
     throw error;
   }
   await tellTeam(store, next, text).catch((error) => console.error("telling a store of a chat failed", error));
-  return { ok: true, thread: forVisitor(next, await readMessages(found.statsId, found.id)) };
+  return { ok: true, thread: forVisitor(next, await readMessagesAfter(found.statsId, found.id, message)) };
 }
 
 /**
@@ -479,7 +498,7 @@ export async function replyTo(store: Store, id: string, by: string, textRaw: unk
         idempotencyKey: `inbox-reply-${statsId}-${id}-${now}`,
       }).catch(() => false)
     : false;
-  return { ok: true, thread: { conversation: shown(next), messages: await readMessages(statsId, id) }, emailed };
+  return { ok: true, thread: { conversation: shown(next), messages: await readMessagesAfter(statsId, id, message) }, emailed };
 }
 
 /**

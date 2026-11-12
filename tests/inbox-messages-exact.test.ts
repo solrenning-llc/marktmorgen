@@ -58,3 +58,12 @@ test("the studio's conversation: a list out of shape is unknown, never an empty 
   const seen = await withOddList(() => openConversation(store.statsId!, id));
   assert.ok(seen instanceof Error, `shown as ${JSON.stringify(seen)}`);
 });
+
+test("after a message is written and sent, a read-back out of shape still answers sent, with that message", async () => {
+  const { store, id } = await fixture();
+  const { replyTo } = await import("@/lib/inbox");
+  const seen = await withOddList(() => replyTo(store, id, OWNER, "Twelve lessons, and they are yours for good."));
+  assert.ok(!(seen instanceof Error), "the creator is not told it failed, so the reply is not sent twice");
+  assert.equal(seen.ok, true);
+  assert.deepEqual(seen.ok ? seen.thread.messages.map((m) => m.text) : [], ["Twelve lessons, and they are yours for good."]);
+});

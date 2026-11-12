@@ -45,6 +45,31 @@ jobs:
           CI_BASE: ${{ github.event.pull_request.base.sha }}
           CI_HEAD: ${{ github.event.pull_request.head.sha }}
         run: python3 scripts/ci_documentation_scope.py
+  build:
+    needs: documentation-scope
+    if: ${{ !cancelled() && needs.documentation-scope.outputs.full != 'false' }}
+    # The production build, once per run instead of once in every browser job. The browser jobs
+    # serve their own disposable build (tests/e2e/reviewed-mail-app.mjs), never this .next, so
+    # they run beside it; the final check still fails when this build fails or is skipped.
+    name: Next build (accessibility-signup-actions)
+    runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v1.56.1-noble
+      options: --init --ipc=host --user pwuser
+    timeout-minutes: 20
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci
+      - run: node scripts/ci-build.mjs
+
   signup-actions:
     needs: documentation-scope
     if: ${{ !cancelled() && needs.documentation-scope.outputs.full != 'false' }}
@@ -75,7 +100,6 @@ jobs:
       - run: npm ci
       - name: Verify the package matches the preinstalled browser image
         run: node -e "if (require('playwright-core/package.json').version !== '1.56.1') process.exit(1)"
-      - run: node scripts/ci-build.mjs
       - name: Generate disposable certificate for local HTTPS only
         run: |
           openssl req -x509 -newkey rsa:2048 -nodes -days 1 -keyout "$RUNNER_TEMP/signup-key.pem" -out "$RUNNER_TEMP/signup-cert.pem" -subj "/CN=localhost" -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
@@ -89,7 +113,7 @@ jobs:
     # The one check GitHub requires before main (scripts/ci_all_checks.py): it always runs and
     # passes only when every job above passed, or was skipped for a documentation-only change.
     name: All checks (accessibility-signup-actions)
-    needs: [documentation-scope, signup-actions]
+    needs: [build, documentation-scope, signup-actions]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5

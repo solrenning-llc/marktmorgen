@@ -231,7 +231,18 @@ class WorkflowSourceAndOrderTests(unittest.TestCase):
         self.assertNotRegex(checkouts[1], r"(?m)^\s+ref:")
         self.assertIn("          ref: ${{ matrix.ref }}\n          path: measured-app", checkouts[2])
         self.assertIn("MOBILE_RENDER_SHA: ${{ matrix.ref }}", body)
-        self.assertIn("run: node scripts/ci-build.mjs\n        working-directory: measured-app", body)
+        # The measured app runs the run's one production build, made by the build job from its own
+        # default checkout (github.sha, no ref) and unpacked in measured-app only when the build's
+        # tree is measured-app's tree (scripts/ci-next-artifact.mjs refuses any other).
+        self.assertIn("    needs: [build, documentation-scope]\n", body + "\n")
+        self.assertIn("        working-directory: measured-app\n        run: node scripts/ci-next-artifact.mjs unpack ", body)
+        self.assertNotIn("ci-build.mjs", body)
+        build = "\n".join(self.jobs["build"])
+        self.assertEqual(build.count("      - uses: actions/checkout@"), 1)
+        checkout = build.split("      - uses: actions/checkout@", 1)[1].split("\n      - ", 1)[0]
+        self.assertNotRegex(checkout, r"(?m)^\s+(ref|path|repository):")
+        self.assertIn("      - run: node scripts/ci-build.mjs\n      - name: Pack the build with the tree it was made from\n"
+                      "        run: node scripts/ci-next-artifact.mjs pack\n", build)
         self.assertIn("run: node tests/e2e/mobile-render.mjs measured-app", body)
 
     def test_actual_order_admission_waits_for_its_node_dependencies(self):

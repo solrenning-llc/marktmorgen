@@ -37,6 +37,10 @@ for key, label in [("buyer-actions", "Buyer action"), ("product-actions", "Produ
                    ("public-matrix", "Public"), ("signup-actions", "Signup action"),
                    ("studio-matrix", "Studio")]:
     WORKFLOWS["accessibility-" + key] = {label + " AAA (" + browser + ")" for browser in ("chromium", "firefox", "webkit")}
+# The production build runs once per run, in its own job, in each workflow that serves it to browsers.
+for workflow in ["product-checks"] + ["accessibility-" + key for key in ("buyer-actions", "product-actions", "public-matrix",
+                                                                        "signup-actions", "studio-matrix")]:
+    WORKFLOWS[workflow] = WORKFLOWS[workflow] | {"Next build (" + workflow + ")"}
 # CodeQL is deliberately absent: no proof covers it and its own push run is never skipped.
 NEVER_REUSED = {"codeql"}
 # Every workflow ends with its final check (scripts/ci_all_checks.py), which must have passed too.

@@ -15,6 +15,10 @@
 
 # next.js
 /.next/
+# one CI build shared by a workflow run's jobs (scripts/ci-next-artifact.mjs)
+/next-build.tar.gz
+/next-build-source.json
+/.next-unpack-*/
 /out/
 
 # production

@@ -45,9 +45,45 @@ jobs:
           CI_BASE: ${{ github.event.pull_request.base.sha }}
           CI_HEAD: ${{ github.event.pull_request.head.sha }}
         run: python3 scripts/ci_documentation_scope.py
-  product-actions:
+  build:
     needs: documentation-scope
     if: ${{ !cancelled() && needs.documentation-scope.outputs.full != 'false' }}
+    # The production build, once per run instead of once in every browser job. The jobs that
+    # start it download this one; scripts/ci-next-artifact.mjs refuses a build of another tree,
+    # Node major, platform or architecture. Same image, user and Node as those jobs.
+    name: Next build (accessibility-product-actions)
+    runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v1.56.1-noble
+      options: --init --ipc=host --user pwuser
+    timeout-minutes: 20
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci
+      - run: node scripts/ci-build.mjs
+      - name: Pack the build with the tree it was made from
+        run: node scripts/ci-next-artifact.mjs pack
+      - name: Share the build with this run's browser jobs
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: next-build
+          path: next-build.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+          overwrite: true
+
+  product-actions:
+    needs: [build, documentation-scope]
+    if: ${{ !cancelled() && needs.documentation-scope.outputs.full != 'false' && needs.build.result == 'success' }}
     name: Product action AAA (${{ matrix.browser }})
     runs-on: ubuntu-latest
     # Match the exact playwright-core package; browsers and OS libraries are preinstalled.
@@ -75,7 +111,13 @@ jobs:
       - run: npm ci
       - name: Verify the package matches the preinstalled browser image
         run: node -e "if (require('playwright-core/package.json').version !== '1.56.1') process.exit(1)"
-      - run: node scripts/ci-build.mjs
+      - name: Download this run's production build
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: next-build
+          path: ${{ runner.temp }}/next-build
+      - name: Use the production build only if it was made from this exact tree
+        run: node scripts/ci-next-artifact.mjs unpack "$RUNNER_TEMP/next-build/next-build.tar.gz"
       - name: Synthetic local creation and publication at five widths and access modes
         run: node tests/e2e/accessibility-product-actions.mjs
 
@@ -83,7 +125,7 @@ jobs:
     # The one check GitHub requires before main (scripts/ci_all_checks.py): it always runs and
     # passes only when every job above passed, or was skipped for a documentation-only change.
     name: All checks (accessibility-product-actions)
-    needs: [documentation-scope, product-actions]
+    needs: [build, documentation-scope, product-actions]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5

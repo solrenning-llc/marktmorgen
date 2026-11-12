@@ -204,6 +204,8 @@ class MergeGroupOnlyTests(unittest.TestCase):
         self.assertIn("tests/e2e/accessibility-public-matrix.mjs", todo)
         while todo:
             path = todo.pop()
+            if Path(path).is_dir():
+                path += "/x"  # A folder a file reads: anything in it is harness.
             if path in found:
                 continue
             found.add(path)

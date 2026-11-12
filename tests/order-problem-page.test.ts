@@ -4,6 +4,7 @@
  * the real pages, an in-memory Redis and a stand-in Stripe; nothing real is
  * reached.
  */
+import { readFileSync } from "node:fs";
 import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -191,4 +192,25 @@ test("an outcome not known is never 'nothing was sent', shows no form to send it
   const used = unescape(await render({ token, ref, problem: "used" }));
   assert.ok(used.includes(en.storeFull), "the store's used allowance is said as the store not taking messages");
   assert.ok(/Nothing was sent/.test(en.errorUnavailable), "'error' is now only a filing confirmed not made, so it keeps 'nothing was sent'");
+});
+
+test("a field the server refused is said once, at the field, which takes the focus (review of #3838, LEVE)", async () => {
+  const { product, token } = await shop();
+  sessions = [paid("fieldonce", product, Math.floor(Date.now() / 1000) - DAY)];
+  const ref = sessions[0].id as string;
+  for (const [state, words] of [["reason", en.errorReason], ["note", en.errorNote]] as const) {
+    const html = unescape(await render({ token, ref, problem: state }));
+    assert.equal(html.split(words).length - 1, 1, `${state}: said once`);
+  }
+  const form = readFileSync("components/order-problem-form.tsx", "utf8");
+  assert.ok(/useEffect\(\(\) => \{\s*if \(fromServer\)/.test(form), "the refused field takes the focus on arrival");
+});
+
+test("purchases this page does not list are said as such, never 'no orders' (review of #3838, LEVE)", async () => {
+  const languages = ["en", "es", "fr", "de", "it", "nl", "pt"].map((code) => orderProblemWords(code) as unknown as Record<string, unknown>);
+  assert.ok(languages.every((one) => typeof one.olderNotListed === "string" && (one.olderNotListed as string).length > 20), "every language says it");
+  const page = readFileSync("app/[handle]/orders/problem/page.tsx", "utf8");
+  assert.ok(page.includes("olderOf(opened.meter).count"), "the page reads how many older purchases the opening left");
+  assert.ok(/older > 0 \? <p[^>]*>\{w\.olderNotListed\}/.test(page), "and says them when there are any");
+  assert.ok(/choices\.length === 0 && older === 0/.test(page) || /!choices\.length && !older/.test(page), "'no orders' only when nothing waits either");
 });

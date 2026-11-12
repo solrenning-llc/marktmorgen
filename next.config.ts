@@ -4,6 +4,12 @@ import { staticPolicy } from "./lib/csp";
 
 const nextConfig: NextConfig = {
   /**
+   * No "X-Powered-By: Next.js" on any answer: it tells every scanner which
+   * framework (and so which advisories) to try, and helps no visitor
+   * (tests/security-headers-config.test.ts).
+   */
+  poweredByHeader: false,
+  /**
    * Whether this build runs on the host whose browser check the server reads
    * (lib/bot-check.ts, browserProof: only when VERCEL is "1"). The client
    * starts the check only then (lib/browser-check-client.ts): anywhere else

@@ -9,7 +9,10 @@ import { type QuizFacts, type QuizQuestion, quizQuestions, quizResult } from "@/
  * browser: nothing is sent or kept. Native radio groups with a legend, so they are reached and changed by keyboard;
  * the answer appears below once all three are answered and is announced, without moving focus or the page.
  */
-export function StartQuiz({ facts }: { facts: QuizFacts }) {
+export function StartQuiz({ facts, level = 2, id = "start" }: { facts: QuizFacts; level?: 2 | 3; id?: string }) {
+  // The answer's heading sits one below the section around it: h2 on /start-here, h3 inside a blog section.
+  const Heading = level === 2 ? "h2" : "h3";
+  const Legend = level === 2 ? "t-h3" : "font-semibold text-lg";
   const questions = quizQuestions(facts.guides);
   const [answers, setAnswers] = useState<Partial<Record<QuizQuestion["id"], string>>>({});
   const result = quizResult(facts, answers);
@@ -19,13 +22,13 @@ export function StartQuiz({ facts }: { facts: QuizFacts }) {
       <form onSubmit={(e) => e.preventDefault()} className="space-y-8">
         {questions.map((question, n) => (
           <fieldset key={question.id} className="hm-faq-card p-5 sm:p-6">
-            <legend className="t-h3 px-1">{`${n + 1}. ${question.ask}`}</legend>
+            <legend className={`${Legend} px-1`}>{`${n + 1}. ${question.ask}`}</legend>
             <div className="mt-3 space-y-1">
               {question.choices.map((choice) => (
                 <label key={choice.id} className="flex min-h-[44px] cursor-pointer items-center gap-3 text-lg">
                   <input
                     type="radio"
-                    name={`start-${question.id}`}
+                    name={`${id}-${question.id}`}
                     value={choice.id}
                     className="h-5 w-5 shrink-0"
                     checked={answers[question.id] === choice.id}
@@ -38,8 +41,8 @@ export function StartQuiz({ facts }: { facts: QuizFacts }) {
           </fieldset>
         ))}
       </form>
-      <section aria-labelledby="start-result-title" className="mt-12">
-        <h2 id="start-result-title" className="t-h2">Where to start</h2>
+      <section aria-labelledby={`${id}-result-title`} className="mt-12">
+        <Heading id={`${id}-result-title`} className={level === 2 ? "t-h2" : "t-h3"}>Where to start</Heading>
         <div role="status" aria-live="polite" className="mt-4">
           {result ? (
             <div className="space-y-6">

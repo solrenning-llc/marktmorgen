@@ -5,26 +5,13 @@ import { MorningHeader } from "@/components/morning-header";
 import { MORNING_FONTS } from "@/components/morning-fonts";
 import { SiteFooter } from "@/components/site-footer";
 import { StartQuiz } from "@/components/start-quiz";
-import { FUNNEL_STARTERS } from "@/lib/funnel-starters";
-import { MIGRATION_GUIDES } from "@/lib/migration-guides";
-import { PLANS_ON_SALE } from "@/lib/opening";
-import { PLAN_TITLES, publishedPriceWords } from "@/lib/plan";
-import type { QuizFacts } from "@/lib/start-quiz";
+import { quizFacts } from "@/lib/start-quiz-facts";
 
 export const metadata: Metadata = {
   title: "Where should I start? — Marktmorgen",
   description: "Three short questions about what you sell, and the pages, the template and the plan to start with. Nothing you choose is sent or kept.",
   alternates: { canonical: "/start-here" },
 };
-
-/** What the quiz may name, read from the code that makes it real: the templates, the importer's guides and the plan. */
-function quizFacts(): QuizFacts {
-  return {
-    starters: Object.fromEntries(FUNNEL_STARTERS.map((s) => [s.id, { label: s.label, hint: s.hint }])),
-    guides: MIGRATION_GUIDES.map((g) => ({ slug: g.slug, platform: g.platform })),
-    plan: { tier: "creator", name: PLAN_TITLES.creator, monthly: publishedPriceWords("creator", "month"), yearly: publishedPriceWords("creator", "year"), onSale: PLANS_ON_SALE },
-  };
-}
 
 /**
  * "Where should I start?" (562 [QZ1], unit 1): three questions answered in the browser (components/start-quiz.tsx,

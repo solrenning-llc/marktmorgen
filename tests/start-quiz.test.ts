@@ -10,7 +10,8 @@
  *     page's cards do; while plans are not on sale, the answer says so;
  *   - the page asks for no email, sends nothing (no form action, no fetch in the quiz) and says the answers stay in
  *     the browser; the questions are radio groups with legends; the answer is announced in a status region;
- *   - no promise of sales or income, no urgency, no scarcity; the page is in the sitemap.
+ *   - no promise of sales or income, no urgency, no scarcity; the page is in the sitemap;
+ *   - the blog's index and every article show it in a section of their own, with the answer's heading one level down.
  */
 import { readFileSync } from "node:fs";
 import { createElement } from "react";
@@ -73,5 +74,17 @@ const words = [closed, source, route, JSON.stringify(SELL_PATHS), JSON.stringify
 is("no promise of sales or income, no urgency or scarcity", /guarantee|income|earn |make money|six figures|limited time|only \d+ left|hurry|today only|act now/i.test(words), false);
 is("it says it is not a promise of sales", source.includes("This is where to start, not a promise of sales."), true);
 is("in the sitemap", readFileSync("app/sitemap.ts", "utf8").includes('{ path: "/start-here", priority: 0.6 }'), true);
+
+part("On the blog (unit 2)");
+const blogIndex = readFileSync("app/blog/page.tsx", "utf8");
+const article = readFileSync("app/blog/[slug]/page.tsx", "utf8");
+is("the blog's index and every article show it, in a section of its own with its heading", [blogIndex, article].map((src, i) => {
+  const id = i === 0 ? "blog-start" : "article-start";
+  return src.includes(`aria-labelledby="${id}-title"`) && src.includes(`<h2 id="${id}-title" className="t-h2">Where should I start?</h2>`) && src.includes(`<StartQuiz facts={quizFacts()} level={3} id="${id}" />`);
+}), [true, true]);
+is("on an article it comes after the article and before what to read next", article.indexOf("</article>") < article.indexOf('id="article-start"') && article.indexOf('id="article-start"') < article.indexOf("Read next"), true);
+const inside = renderToStaticMarkup(createElement(StartQuiz, { facts: facts(true), level: 3, id: "blog-start" }));
+is("inside a section, the answer's heading is one level down, and its names and ids are its own", [inside.includes('<h3 id="blog-start-result-title"'), inside.includes('name="blog-start-sell"'), inside.includes("start-result-title\"") && !inside.includes("blog-start-result-title")], [true, true, false]);
+is("the same facts everywhere, read from the code", [readFileSync("app/start-here/page.tsx", "utf8"), blogIndex, article].every((src) => src.includes('import { quizFacts } from "@/lib/start-quiz-facts";')), true);
 
 done();

@@ -6,6 +6,8 @@ import Link from "next/link";
 import { BlogBrowser } from "@/components/blog-browser";
 import { RevealOnScroll } from "@/components/home-parts";
 import { SiteFooter } from "@/components/site-footer";
+import { StartQuiz } from "@/components/start-quiz";
+import { quizFacts } from "@/lib/start-quiz-facts";
 import { SiteNav } from "@/components/site-nav";
 import {
   BLOG_CATEGORIES,
@@ -110,6 +112,13 @@ export default function BlogIndexPage() {
           <div className="mt-8">
             <BlogBrowser posts={posts} categories={[...BLOG_CATEGORIES]} />
           </div>
+        </section>
+
+        {/* "Where should I start?" (562 [QZ1], unit 2): the same three questions as /start-here, answered in the browser. */}
+        <section className="container-page py-14 sm:py-16" aria-labelledby="blog-start-title" data-start-quiz>
+          <h2 id="blog-start-title" className="t-h2">Where should I start?</h2>
+          <p className="mt-3 max-w-2xl text-ink-soft">Three short questions about what you sell. The answer shows the pages to read, the template to start from and the plan that has it. No email needed; your answers stay in this browser.</p>
+          <StartQuiz facts={quizFacts()} level={3} id="blog-start" />
         </section>
 
         <section className="surface-sand">

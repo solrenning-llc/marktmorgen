@@ -740,7 +740,12 @@ export const PAYPAL_LEDGER = request("heavy", 6, PAYPAL_LEDGER_BYTES);
  *   refund mark's ZSCORE (refundSeen), the person's deletion print's HGET (erasedSincePaid, #4140; read once more
  *   after a hand-over, before its credit and webhook, Codex G on #4163) and at most two writes to the list (ZREM when
  *   handed over, its product gone, its paid record gone or refunded, its person deleted since paying; ZADD when kept,
- *   twice when its product does not read): five at most on any path (handed over: GET, ZSCORE, HGET, HGET, ZREM). What a hand-over itself
+ *   twice when its product does not read): five at most on any path (handed over: GET, ZSCORE, HGET, HGET, ZREM;
+ *   its person deleted since paying: GET, ZSCORE, HGET of the print, HGET of the order's grant, ZREM). A deletion the
+ *   retry redoes (its hand-over raced the person's deletion, or a grant of theirs is still written: Claude 7 on #4163)
+ *   is the erasure's own work (lib/person-erasure.ts, erasureUnits), run off the creator's studio allowance, so the
+ *   company's: at most once per such order that finishes, at most HAND_OVER_BATCH a store a run, and only for an order
+ *   whose person was deleted while it waited for its receipt (RECEIPT_RETRY_SECONDS). What a hand-over itself
  *   reads and writes is the order's (line orders); one that fails is tried again at the next sweep, at most once a run.
  * - receiptTriesPerOrder: a receipt the sender did not accept is tried again (#3387) at receiptDue, the first try
  *   included at most RECEIPT_TRIES_AT_MOST times (lib/paypal-delivery.ts), never past RECEIPT_RETRY_SECONDS after its

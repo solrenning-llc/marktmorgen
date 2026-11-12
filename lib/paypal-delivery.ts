@@ -22,6 +22,7 @@ import { createHash } from "node:crypto";
 import { noteForErasure } from "@/lib/erasure-index";
 import { suppressedKey, suppressionPrint } from "@/lib/suppression";
 import { erasePerson } from "@/lib/person-erasure";
+import { importedKey } from "@/lib/imported-purchases";
 
 /**
  * Where lib/email.ts keeps the sender of a key's email (its pinKey), written just before the first request made under
@@ -291,7 +292,7 @@ async function handOver(store: Store, paid: Paid, retry = false): Promise<"hande
   // and the retry keeps the order (rule 24). The receipt itself is refused by KEEP_RECEIPT in the same step it is kept.
   if (retry && (await erasedSincePaid(store, paid))) {
     console.error("a PayPal purchase's person was deleted from the store while it was handed over again; deleted again, nothing told", store.handle, paid.order);
-    const again = await erasePerson(store, paid.email, { kind: "person" });
+    const again = await erasePerson(store, paid.email, { kind: "person" }, { allowance: false });
     if (!again.ok) throw new Error("deleting a PayPal purchase's person again after a hand-over raced their deletion did not finish");
     if (store.statsId) await handedOver(store.statsId, paid.order);
     return "gone";
@@ -345,6 +346,18 @@ async function erasedSincePaid(store: Store, paid: Paid): Promise<boolean> {
 }
 
 /**
+ * Whether this order's own grant is still written for its buyer (lib/imported-purchases.ts, the product's field), read
+ * exactly: absent or a string. Anything else throws UnknownReplyError (rule 24), and the order is kept.
+ */
+async function grantLeft(store: Store, paid: Paid): Promise<boolean> {
+  if (!store.statsId) return false;
+  const read = repliesFor(await redisPipeline([["HGET", importedKey(store.statsId, paid.email), paid.product]]), 1);
+  const value = read?.[0];
+  if (!read || (value !== null && typeof value !== "string")) throw new UnknownReplyError("a PayPal order's grant");
+  return value !== null;
+}
+
+/**
  * Tries again the orders still owed their hand-over, oldest try first, a few a sweep, once their grace is over. One
  * handed over, whose product Redis answers is gone, or that PayPal refunded in full meanwhile, leaves the list; one
  * whose paid record Redis answers is not there any more (erased, or past its time) leaves it too, with nothing to hand
@@ -382,6 +395,12 @@ async function handOverAgain(store: Store, deadline: number): Promise<number> {
       // exact shape; unknown throws below and it is kept. One HGET an order tried. A person deleted before paying again
       // is handed what they paid for, as the receipt's own check (KEEP_RECEIPT) reads it.
       if (await erasedSincePaid(store, paid)) {
+        // A grant still there for them was written by a retry whose deletion again did not finish (Claude 7 on #4163): the
+        // deletion is redone first, off the creator's allowance, and the order stays until it is done.
+        if (await grantLeft(store, paid)) {
+          const again = await erasePerson(store, paid.email, { kind: "person" }, { allowance: false });
+          if (!again.ok) throw new Error("deleting a PayPal order's person again did not finish; the order is kept");
+        }
         console.error("a PayPal order waiting to be handed over belongs to a person deleted from the store since; nothing handed over", store.handle, order);
         await redisPipeline([["ZREM", key, order]]);
         continue;

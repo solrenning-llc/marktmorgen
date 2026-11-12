@@ -82,15 +82,6 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
 const realNow = Date.now.bind(Date);
 let ahead = 0;
 Date.now = () => realNow() + ahead;
-/**
- * Moves the clock to `minutes` before the next UTC midnight. The real Resend ledger (lib/resend-fallback-budget.ts) keys
- * an attempt by its account and its path, body and idempotency key, with no day in it; a part that crosses midnight
- * proves the synthetic account (tests/resend-fallback-fixture.ts) keeps that ledger across days too.
- */
-const beforeMidnight = (minutes: number) => {
-  const now = Date.now();
-  ahead += Math.ceil(now / 86_400_000) * 86_400_000 - minutes * 60_000 - now;
-};
 const handOverKey = (statsId: string) => `nl:ppsell:handover:${statsId}`;
 
 async function main(): Promise<void> {

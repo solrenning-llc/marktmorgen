@@ -285,13 +285,19 @@ export async function erasePerson(
   store: Store,
   rawEmail: string,
   by: { kind: Extract<ErasureBy, "team">; who: string; role: Role } | { kind: Extract<ErasureBy, "person"> },
+  /**
+   * `allowance: false`: a deletion the code itself redoes, which neither the creator nor the person asked for again
+   * (a PayPal hand-over that raced the person's deletion, lib/paypal-delivery.ts; Claude 7 on #4163), is never refused
+   * for, nor taken from, the creator's studio allowance.
+   */
+  options: { allowance?: false } = {},
 ): Promise<ErasureResult> {
   const email = normaliseEmail(typeof rawEmail === "string" ? rawEmail : "");
   if (!email || email.length > MAX_EMAIL_LENGTH || !EMAIL_PATTERN.test(email)) return { ok: false, reason: "email" };
   if (!isRedisConfigured()) return { ok: false, reason: "unavailable" };
   // What the store's record says, before anything is read.
   const first = erasureUnits({ products: store.catalog.items.length, courses: idsOfKind(store, "course").length });
-  const taken = await takeAllowance(store, "studio", first);
+  const taken = options.allowance === false ? { ok: true as const } : await takeAllowance(store, "studio", first);
   if (!taken.ok) return { ok: false, reason: taken.reason === "used" ? "limit" : "unavailable", message: taken.message };
   const scope = await erasureScope(store, email).catch(() => null);
   if (!scope) return { ok: false, reason: "unavailable" };
@@ -299,7 +305,7 @@ export async function erasePerson(
   const size = await erasureSize(scope).catch(() => null);
   if (!size) return { ok: false, reason: "unavailable" };
   const rest = erasureUnits(size) - first;
-  if (rest > 0) {
+  if (rest > 0 && options.allowance !== false) {
     const more = await takeAllowance(store, "studio", rest);
     if (!more.ok) return { ok: false, reason: more.reason === "used" ? "limit" : "unavailable", message: more.message };
   }

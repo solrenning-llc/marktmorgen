@@ -27,7 +27,8 @@ import {
   StudentAccess,
   WithdrawCertificate,
 } from "@/components/course-editor";
-import { readListing } from "@/lib/catalog";
+import { readListing, readTitles, visibleIds } from "@/lib/catalog";
+import { CourseShelfStudio } from "@/components/course-shelf-studio";
 import { templateById } from "@/lib/course-templates";
 import { isStreamConfigured, streamCaptions, streamStates } from "@/lib/stream";
 import { autoRefundsOwed, autoWriting } from "@/lib/auto-captions";
@@ -117,6 +118,11 @@ export default async function StudioCoursePage({
   });
   // Work that is there but whose record does not read is said in the list, never left out of it (CX-123 rule 24).
   const unreadWork = work.rows.filter((row, i) => isUnreadSubmission(handed[i]) && titles.has(row.lessonId)).length;
+  // The "More from" shelf (628 [HN4](b)): the store's listed products to pick from, the course left out, by name.
+  // Null when the names could not be read: the section says so instead of an empty list (rule 24).
+  const shelfTitles = await readTitles(store).catch(() => null);
+  const shelfOptions = shelfTitles ? visibleIds(store).filter((pid) => pid !== product.id && shelfTitles.has(pid)).map((pid) => ({ id: pid, title: shelfTitles.get(pid)! })) : [];
+  const shelfSaved = shelfTitles ? (course.shelf ?? []).filter((pid) => shelfTitles.has(pid)).map((pid) => ({ id: pid, title: shelfTitles.get(pid)! })) : [];
   const byId = new Map(recent.comments.map((c) => [c.id, c]));
   const shownComments: StudioComment[] = recent.comments
     .filter((c) => titles.has(c.lesson))
@@ -234,6 +240,25 @@ export default async function StudioCoursePage({
           lessonHref={view.role === "owner" ? `/@${store.handle}/course/${product.id}` : null}
           now={commentClock()}
         />
+
+        <section className="card mt-8 p-6 sm:p-8" aria-labelledby="shelf-title">
+          <h2 id="shelf-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">More from your store</h2>
+          <p className="mt-2 max-w-2xl text-ink-soft">
+            Pick up to six of your other products to show your students on this course&apos;s front page, under the
+            lessons. Each one shows its name, its short description and the price on its card, and links to its page.
+            A student never sees what they already have from you, and sees nothing at all when that cannot be checked.
+            Nothing shows inside a lesson.
+          </p>
+          {shelfTitles === null ? (
+            <p role="status" className="notice mt-3">
+              Your products could not be read just now. Reload this page in a moment; your shelf is unchanged.
+            </p>
+          ) : shelfOptions.length === 0 && shelfSaved.length === 0 ? (
+            <p className="mt-3 text-sm text-ink-soft">Publish another product first; then you can add it here.</p>
+          ) : (
+            <CourseShelfStudio productId={product.id} saved={shelfSaved} options={shelfOptions} />
+          )}
+        </section>
 
         <section className="card mt-8 p-6 sm:p-8" aria-labelledby="certificate-title">
           <div className="flex flex-wrap items-center justify-between gap-2">

@@ -28,8 +28,11 @@ import { handOverPreorder, readPreorder } from "@/lib/preorders";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
+import { paidIntentReply } from "./paid-intent-standin";
 
 globalThis.fetch = (async (input: string | URL | Request) => {
+  const paid = paidIntentReply(input);
+  if (paid) return paid;
   const url = new URL(String(input));
   if (url.hostname === "api.resend.com") return new Response(JSON.stringify({ id: "email_1" }));
   return new Response(JSON.stringify({ error: { message: "no stand-in" } }), { status: 404 });

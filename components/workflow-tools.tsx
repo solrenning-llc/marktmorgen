@@ -82,8 +82,31 @@ export const stepText = (step: MapStep, conditionText: (when: StepCondition) => 
 /** A step's box: its number, then stepText. */
 export const stepLine = (step: MapStep, i: number, conditionText: (when: StepCondition) => string) => `${i + 1}. ${stepText(step, conditionText)}`;
 
-/** The id of the "Edit step" button of a step in a workflow's map, so the editor can give the focus back to it. */
-export const mapEditId = (flowId: string, index: number) => `flow-map-edit-${flowId}-${index}`;
+/**
+ * The id of the "Edit step" button of a step in a workflow's map, so the editor can give the focus back to it. By the
+ * step's own id, never its place: a step moved or removed in the editor leaves every other step's button where the
+ * focus expects it (review of #4124).
+ */
+export const mapEditId = (flowId: string, stepId: string) => `flow-map-edit-${flowId}-${stepId}`;
+
+/** What focusBack needs of a page: its elements by id, and which one has the focus. */
+export type FocusDoc = { getElementById: (id: string) => { focus: () => void; disabled?: boolean } | null; activeElement: unknown };
+
+/**
+ * Gives the focus to the first of `ids` that can take it: present, not disabled, and really focused afterwards (one
+ * inside a closed details, or hidden, is not). Returns that id, or null when none could; a later id is the fallback,
+ * such as the sequence's own Edit button when the step that was open is gone.
+ */
+export function focusBack(doc: FocusDoc, ids: readonly (string | null | undefined)[]): string | null {
+  for (const id of ids) {
+    if (!id) continue;
+    const el = doc.getElementById(id);
+    if (!el || el.disabled) continue;
+    el.focus();
+    if (doc.activeElement === el) return id;
+  }
+  return null;
+}
 
 /**
  * The map of a workflow: its picture (391 [CX2]), then every step with what it
@@ -119,7 +142,7 @@ export function WorkflowMap({
           {onEdit && flowId ? (
             <button
               type="button"
-              id={mapEditId(flowId, i)}
+              id={mapEditId(flowId, step.id)}
               className="inline-flex min-h-11 min-w-11 items-center font-semibold text-ink underline underline-offset-4 hover:text-violet-deep"
               disabled={editDisabled}
               onClick={() => onEdit(i)}

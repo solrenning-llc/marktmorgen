@@ -19,7 +19,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { readFileSync } from "node:fs";
-import { WorkflowMap, mapEditId } from "@/components/workflow-tools";
+import { type FocusDoc, WorkflowMap, focusBack, mapEditId } from "@/components/workflow-tools";
 import { WorkflowDiagram } from "@/components/workflow-diagram";
 import { flowMapLayout } from "@/lib/flow-map";
 import type { StepCondition } from "@/lib/flow-rules";
@@ -41,11 +41,11 @@ async function main(): Promise<void> {
     const tree = WorkflowMap({ steps, conditionText, flowId: "f1", onEdit: (i) => asked.push(i) });
     const buttons = find(tree, (n) => n.type === "button");
     is("one button per step, each named for its step", buttons.map((b) => texts(b).join("")), ["Edit step 1", "Edit step 2", "Edit step 3"]);
-    is("each has its own id, for the focus to come back to", buttons.map((b) => b.props?.id), [mapEditId("f1", 0), mapEditId("f1", 1), mapEditId("f1", 2)]);
+    is("each has its own id, for the focus to come back to", buttons.map((b) => b.props?.id), [mapEditId("f1", "a"), mapEditId("f1", "b"), mapEditId("f1", "c")]);
     (buttons[1].props?.onClick as () => void)();
     is("pressing one asks for its step", asked, [1]);
     const html = renderToStaticMarkup(createElement(WorkflowMap, { steps, conditionText, flowId: "f1", onEdit: () => {} }));
-    is("rendered as real buttons, 44 px tall at least", (html.match(/<button type="button" id="flow-map-edit-f1-\d" class="[^"]*min-h-11 min-w-11/g) ?? []).length, 3);
+    is("rendered as real buttons, 44 px tall at least", (html.match(/<button type="button" id="flow-map-edit-f1-[abc]" class="[^"]*min-h-11 min-w-11/g) ?? []).length, 3);
   }
 
   part("The picture's boxes");
@@ -83,12 +83,38 @@ async function main(): Promise<void> {
     const studio = readFileSync("components/email-studio.tsx", "utf8");
     const wiring = studio.slice(studio.indexOf("<WorkflowMap"), studio.indexOf("/>", studio.indexOf("<WorkflowMap")));
     is("the map gets the sequence, its lock and a way to open it", [/flowId=\{f\.id\}/.test(wiring), /editDisabled=\{locked \|\| draft !== null\}/.test(wiring), /openAtStep\.current = index;\s*openDraft\(f\);/.test(wiring)], [true, true, true]);
-    is("closing gives the focus back to the step's button", /opener\.current = mapEditId\(f\.id, index\)/.test(wiring), true);
+    is("closing gives the focus back to the step's button, by the step's id, with the sequence's Edit button behind it", /opener\.current = mapEditId\(f\.id, f\.steps\[index\]\.id\);\s*openerFallback\.current = openerId\(f\);/.test(wiring), true);
+    is("and the editor's closing uses both", /const back = opener\.current;\s*const fallback = openerFallback\.current;[\s\S]{0,120}if \(back\) focusBack\(document, \[back, fallback\]\);/.test(studio), true);
     is("opening focuses that step, and only once", /const step = openAtStep\.current;\s*openAtStep\.current = null;\s*if \(step !== null && document\.getElementById\(`flow-step-\$\{step\}`\)\) document\.getElementById\(`flow-step-\$\{step\}`\)\?\.focus\(\);\s*else if \(opener\.current\) document\.getElementById\("flow-name"\)\?\.focus\(\);/.test(studio), true);
     const item = studio.match(/<li key=\{s\.editorKey\}[^>]*>/)?.[0] ?? "";
     is("each step of the editor can take the focus, is named by its title, and shows a ring", [/id=\{`flow-step-\$\{i\}`\}/.test(item), /tabIndex=\{-1\}/.test(item), /aria-labelledby=\{`flow-step-\$\{i\}-title`\}/.test(item), /focus:\[outline:3px_solid_var\(--focus\)\]/.test(item)], [true, true, true, true]);
     is("the title it is named by exists", /<p id=\{`flow-step-\$\{i\}-title`\}/.test(studio), true);
   }
+  part("The focus comes back to the same step, whatever the editor did (review of #4124)");
+  {
+    const ids = (list: typeof steps) => find(WorkflowMap({ steps: list, conditionText, flowId: "f1", onEdit: () => {} }), (n) => n.type === "button").map((b) => [texts(b).join(""), b.props?.id]);
+    const before = ids(steps);
+    const after = ids(steps.slice(1));
+    is("step c's button keeps its id when an earlier step is removed, though its number changes", [before[2], after[1]], [["Edit step 3", mapEditId("f1", "c")], ["Edit step 2", mapEditId("f1", "c")]]);
+    is("and no other step takes c's old place's id", after.some(([, id]) => id === mapEditId("f1", "a")), false);
+    // A page with buttons: some present, some hidden (focus does not land), some disabled.
+    const page = (els: Record<string, { hidden?: boolean; disabled?: boolean }>) => {
+      const doc: FocusDoc & { activeElement: unknown } = { activeElement: null, getElementById: (id) => {
+        const spec = els[id];
+        if (!spec) return null;
+        const el = { disabled: spec.disabled, focus: () => { if (!spec.hidden) doc.activeElement = el; } };
+        return el;
+      } };
+      return doc;
+    };
+    const editC = mapEditId("f1", "c"), sequence = "flow-edit-f1";
+    is("step c still there: its own button", focusBack(page({ [editC]: {}, [sequence]: {} }), [editC, sequence]), editC);
+    is("step c deleted in the editor: the sequence's Edit button", focusBack(page({ [sequence]: {} }), [editC, sequence]), sequence);
+    is("its map folded (the button cannot take the focus): the sequence's Edit button", focusBack(page({ [editC]: { hidden: true }, [sequence]: {} }), [editC, sequence]), sequence);
+    is("a disabled button is passed over", focusBack(page({ [editC]: { disabled: true }, [sequence]: {} }), [editC, sequence]), sequence);
+    is("nothing to take it: nothing claimed", focusBack(page({}), [editC, sequence]), null);
+  }
+
   done();
 }
 

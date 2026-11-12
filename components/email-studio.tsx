@@ -24,7 +24,7 @@ import { flowConfigurationIssues } from "@/lib/flow-review";
 import type { Flow, FlowCounts, FlowStep } from "@/lib/flows";
 import { flowWaitHours, type FlowAction, type FlowGoal, type FlowTrigger, MAX_CONDITION_TAG, type StepCondition, type StepIf, isCourseIf } from "@/lib/flow-rules";
 import { MAX_FLOWS, MAX_STEPS } from "@/lib/flow-limits";
-import { type MapStep, WorkflowMap, WorkflowPreview, WorkflowRuns, mapEditId } from "@/components/workflow-tools";
+import { type MapStep, WorkflowMap, WorkflowPreview, WorkflowRuns, focusBack, mapEditId } from "@/components/workflow-tools";
 import type { MailSettings } from "@/lib/store";
 import { StoreField } from "@/components/studio-store-pin";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
@@ -2104,6 +2104,9 @@ function Flows({
   // button that opened it, which the editor had removed or disabled (WCAG 2.4.3). A file brought in focuses its report instead.
   const openerId = (flow: FlowRow | null) => (flow ? `flow-edit-${flow.id}` : "flow-new-sequence");
   const opener = useRef<string | null>(null);
+  // Where the focus goes when the opener is gone (a step deleted in the editor) or hidden (its map folded): the
+  // sequence's own Edit button (review of #4124).
+  const openerFallback = useRef<string | null>(null);
   // Opened from a step of the map (391 [CX2], unit 2): the editor takes the focus at that step, not at the name.
   const openAtStep = useRef<number | null>(null);
   const editing = draft !== null;
@@ -2116,8 +2119,10 @@ function Flows({
       return;
     }
     const back = opener.current;
+    const fallback = openerFallback.current;
     opener.current = null;
-    if (back) document.getElementById(back)?.focus();
+    openerFallback.current = null;
+    if (back) focusBack(document, [back, fallback]);
   }, [editing]);
   useLeaveGuard(aiBusy || (draft !== null && JSON.stringify(draft) !== draftBaseline));
   const [draftCount, setDraftCount] = useState<number>(DEFAULT_SEQUENCE_DRAFT);
@@ -2403,8 +2408,10 @@ function Flows({
                       if (locked || draft !== null) return;
                       openAtStep.current = index;
                       openDraft(f);
-                      // Closing the editor gives the focus back to this step's button.
-                      opener.current = mapEditId(f.id, index);
+                      // Closing the editor gives the focus back to this step's button, found by the step's id, or, when that
+                      // step was removed or its map is folded, to the sequence's Edit button.
+                      opener.current = mapEditId(f.id, f.steps[index].id);
+                      openerFallback.current = openerId(f);
                     }}
                   />
                 </details>

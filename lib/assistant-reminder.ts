@@ -189,12 +189,16 @@ export async function remindersOf(statsId: string | null, email: string): Promis
     // Gone by itself (Redis's null): not listed. Anything but a string is not known, never left out of the copy.
     if (raw === null) return [];
     if (typeof raw !== "string") throw new UnknownReplyError("a person's checkout reminder");
+    // A yes this code never writes (not JSON, or no address in it) is unknown too, never "no reminder" in the copy
+    // (Claude 1's LEVE on #3823; as lib/person-copy.ts reads call packages).
+    let v: Partial<Consent> | null = null;
     try {
-      const v = JSON.parse(String(raw)) as Partial<Consent>;
-      return typeof v.e === "string" ? [{ address: v.e, sentence: String(v.t ?? ""), version: String(v.v ?? ""), at: Number(v.at) || 0 }] : [];
+      v = JSON.parse(raw) as Partial<Consent>;
     } catch {
-      return [];
+      v = null;
     }
+    if (!v || typeof v !== "object" || typeof v.e !== "string") throw new UnknownReplyError("a person's checkout reminder");
+    return [{ address: v.e, sentence: String(v.t ?? ""), version: String(v.v ?? ""), at: Number(v.at) || 0 }];
   });
 }
 

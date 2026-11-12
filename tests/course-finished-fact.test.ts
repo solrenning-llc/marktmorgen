@@ -21,10 +21,14 @@ import { FINISHED_WORDS } from "@/lib/buyer-words/finished";
 import { LANGUAGE_CODES } from "@/lib/store-language";
 import { UnknownReply } from "@/lib/redis-exact";
 import type { Listing, Store } from "@/lib/store";
+import { emptyCourse, saveCourse } from "@/lib/course";
 import { store as redis } from "./redis-stub";
+import { ROOM } from "./data-room";
 import { done, is, part } from "./check";
 
-const COURSE = "crs_finished_1";
+// A real course, saved, that gives a certificate (lib/course.ts); its id is made when it is made.
+const certCourse = { ...emptyCourse(), certificate: true };
+const COURSE = certCourse.id;
 const index = `nl:course:${COURSE}:certs`;
 
 let commands = 0;
@@ -38,6 +42,7 @@ let broken = false;
 
 async function main(): Promise<void> {
   redis.clear();
+  await saveCourse(certCourse, ROOM);
 
   part("The count");
   is("a course nobody finished: zero", await earnedCount(COURSE), 0);
@@ -73,6 +78,7 @@ async function main(): Promise<void> {
   is("the threshold is ten", FINISHED_SHOWN_FROM, 10);
   is("below ten, unread or not a course: nothing", [facts(9).finished, facts(null).finished, facts(40, {}).finished], [undefined, undefined, undefined]);
   is("in the store's language and its own way of writing numbers", pageFacts({ language: "de", locale: "de-DE", product: course, bundleItems: null, sold: null, reviews: null, finished: 1200 }).finished, { key: "finished", value: "1.200", label: "Teilnehmende haben das Zertifikat erhalten" });
+  is("French says participants, as for adults", pageFacts({ language: "fr", locale: "fr-FR", product: course, bundleItems: null, sold: null, reviews: null, finished: 12 }).finished?.label, "participants ont obtenu le certificat");
 
   part("The creator's choice");
   is("it is one of the numbers a block may show", FACT_KEYS.some((f) => f.key === "finished"), true);
@@ -98,13 +104,23 @@ async function main(): Promise<void> {
   const withoutCourse = commands;
   commands = 0;
   await readPageFacts(store, product);
-  is("not a course: no read for it (one command fewer)", commands - withoutCourse, 1);
+  is("not a course: no read for it (the course and the count fewer)", commands - withoutCourse >= 2, true);
+  await saveCourse({ ...certCourse, certificate: false }, ROOM);
+  const off = await readPageFacts(store, product);
+  is(
+    "a course that no longer gives a certificate: not shown, and not said to be unread (it would seem to promise one)",
+    [off.facts.finished, off.factsUnread.includes("finished")],
+    [undefined, false],
+  );
+  await saveCourse(certCourse, ROOM);
 
   part("The product page");
   const page = readFileSync("app/[handle]/p/[product]/page.tsx", "utf8");
   is(
-    "it reads the count only when a block of the page asks for it",
-    page.includes('page.blocks.some((block) => block.kind === "facts" && block.show.includes("finished"))') && page.includes("await earnedCount(product.course.id).catch(() => null)"),
+    "it reads the count only when a block of the page asks for it and the course gives a certificate now",
+    page.includes('product.course && certificateOn && page.blocks.some((block) => block.kind === "facts" && block.show.includes("finished"))') &&
+      page.includes("certificateOn = course?.certificate === true;") &&
+      page.includes("await earnedCount(product.course.id).catch(() => null)"),
     true,
   );
   is("and hands it to the same pageFacts the preview asks", /reviews: summary,\s*finished,\s*\}\)/.test(page), true);

@@ -279,7 +279,7 @@ export const FACT_KEYS: { key: FactKey; label: string; hint: string }[] = [
    * hold it (withdrawn ones are not counted), from ten up (lib/certificate.ts, earnedCount). Not in a new block's
    * default choice (FACTS_ON_BY_DEFAULT): it is a different claim from "bought", so the creator checks it.
    */
-  { key: "finished", label: "Certificates earned", hint: "How many students finished the course and earned its certificate, withdrawn ones left out. Shown from 10 up." },
+  { key: "finished", label: "Certificates earned", hint: "How many students finished the course and earned its certificate, withdrawn ones left out. Shown from 10 up, and only while the course gives a certificate." },
 ];
 /** The numbers a new "By the numbers" block starts with: all but the certificates earned, which the creator chooses. */
 export const FACTS_ON_BY_DEFAULT: FactKey[] = FACT_KEYS.map((f) => f.key).filter((key) => key !== "finished");

@@ -19,8 +19,8 @@ Under the one receiving model (the dearer of Stripe 6.6% + 30¢ and Paddle 5% + 
 
 | Plan | Lowest price with nothing per-use included, monthly | The same, yearly | Today's price |
 | --- | --- | --- | --- |
-| Store | $117.70 | $1,205.73 | $69 / $690 |
-| Studio | $172.35 | $1,841.65 | $449 / $4,490 |
+| Store | $117.70 | $1,205.95 | $69 / $690 |
+| Studio | $172.35 | $1,841.70 | $449 / $4,490 |
 | Scale | $267.63 | $2,959.80 | $999 / $9,990 |
 
 Store cannot be sold at Stan Creator's $29 without cutting those unprinted ceilings too, which this proposal does not do.
@@ -94,7 +94,7 @@ At the competitor's own price instead (Store $35, the lowest that keeps 60% at a
 | Net at full included use, yearly (sizing reading) | 60.05% | 60.02% | 60.02% |
 | Net at full use, monthly, under the most-tax reading (the gate) | 12.09% | 12.12% | 12.15% |
 | Net a customer, a month, at full included use | $77.74 | $150.29 | $241.13 |
-| The same at #553's price | $38.45 | $267.90 | $600.63 |
+| The same at #553's price | $38.45 | $267.89 | $600.63 |
 
 Every limit that costs nothing per use is **kept** as in #553 and on every plan: 2,000 products, 200 lessons a course, 20 forms, a team of 5, 0% of a sale, and every feature of the plan. One could be **raised** at no modelled cost: deal pipelines (Store 2, Studio 5, Scale 10), which tests/plan-cost-registry.ts lists under NOT_A_COST as a setting in a record the data room already prices; the proposal is 10 on every plan. No other visible figure is raised, because every other one is read by a priced line of the registry.
 

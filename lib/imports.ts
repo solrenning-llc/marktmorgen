@@ -79,6 +79,7 @@ import { readAllListings, readListings, readTitles } from "@/lib/catalog";
 import { priceInRange, rangeWords, readMoney } from "@/lib/money";
 import { LINK_PROBLEMS, type LinkProblem, readLink } from "@/lib/product-link";
 import { MAX_ABOUT_LENGTH, cleanAbout, writeAbout } from "@/lib/product-about";
+import { BATCH_BYTES, BATCH_ROWS } from "@/lib/import-batches";
 import { type ContactOutcome, type ImportedContact, MAX_CONTACT_NAME, importContactRows, previewContactRows, readTags } from "@/lib/contacts";
 import { csvLine, readConsent } from "@/lib/csv";
 import { suppressedAmong, suppressedKey, suppressionPrint } from "@/lib/suppression";
@@ -104,10 +105,8 @@ export type ImportSource = "csv" | "clickfunnels";
 
 /** The most rows one import may bring, by kind. */
 export const IMPORT_LIMITS: Record<ImportKind, number> = { contacts: 50_000, products: 500, purchases: 20_000, members: MAX_MOVED_MEMBERS };
-/** Rows one upload request may carry. */
-export const BATCH_ROWS = 1_000;
-/** The most an upload request may weigh. */
-export const BATCH_BYTES = 1_000_000;
+/** Rows one upload request may carry, and the most it may weigh (lib/import-batches.ts, shared with the page). */
+export { BATCH_BYTES, BATCH_ROWS };
 /** Rows kept for the report of what was not brought in; the count goes on past it. */
 export const MAX_REPORT_ROWS = 5_000;
 

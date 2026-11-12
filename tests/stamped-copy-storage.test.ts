@@ -180,6 +180,12 @@ async function main() {
   await redis.pipeline([["DEL", PENDING]]);
   await forgetNoRoom();
 
+  part("The studio's note stays until the storage has room again, and a copy of the file is kept");
+  is("the file found without room is still noted for the studio after the hour's note on the store is gone", (await stamp.stampProblems([full])).get(full.pathname), "storage");
+  const again = await stamp.stampedDelivery(full, sale(12), shop, meter().m);
+  is("with room, the next sale's copy is kept", [again.kind, again.kind === "kept" ? world.files.has(again.copy.pathname) : false], ["kept", true]);
+  is("and the studio no longer says the storage ran out for it", (await stamp.stampProblems([full])).get(full.pathname), undefined);
+
   part("A copy made on the fly goes out from here, whole, as a download");
   const flown = await serveStamped({ kind: "fly", bytes: flyBytes, name: "Ledger.pdf", contentType: "application/pdf" }, full, "x");
   is("the stamped bytes, as an attachment, with their length", [flown.status, same(await body(flown), flyBytes), flown.headers.get("Content-Disposition")?.includes("attachment"), flown.headers.get("Content-Length")], [200, true, true, String(flyBytes.byteLength)]);

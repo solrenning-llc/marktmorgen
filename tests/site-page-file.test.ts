@@ -18,7 +18,7 @@ import { writeForm } from "@/lib/form-store";
 import { parseForm } from "@/lib/forms";
 import { MAX_SITE_PAGES, type SitePage, siteKey } from "@/lib/site-page-rules";
 import { PAGE_FILE_FORMAT, PAGE_FILE_VERSION, importedEntry, pageFileName, readPageFile } from "@/lib/site-page-file";
-import { EXPORT_HELP, IMPORT_HELP, exportDoneWords, importDoneWords } from "@/components/site-pages-editor";
+import { EXPORT_HELP, IMPORT_HELP, MESSAGES, exportDoneWords, importDoneWords } from "@/components/site-pages-editor";
 import { POST as sitePage } from "@/app/api/store/site-page/route";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -109,6 +109,11 @@ async function main(): Promise<void> {
     redis.pipeline = pipeline;
   }
   is("no room for the blocks: nothing listed, nothing kept", [full.status, full.data.error, JSON.stringify((await storeForEmail(OWNER))!.sitePages) === listBefore], [409, "copy_full", true]);
+  // A file with no blocks (#3531's LOW, the same for an import): a page with no blocks keeps no record, so it could not
+  // be kept back from visitors, and its first save from the editor would put it out. Refused, with the import's words.
+  const emptyFile = await post({ action: "import", file: { ...file, blocks: [] } });
+  is("a file with no blocks brings in nothing: refused, nothing listed", [emptyFile.status, emptyFile.data.error, JSON.stringify((await storeForEmail(OWNER))!.sitePages) === listBefore], [400, "import_empty", true]);
+  is("and the creator is told why, in the import's own words", MESSAGES.import_empty, "That file has no blocks to bring in, so nothing was added. Add a new page instead.");
   const now = (await storeForEmail(OWNER))!.sitePages;
   await setSitePages(OWNER, [...now, ...Array.from({ length: MAX_SITE_PAGES - now.length }, (_, n) => ({ id: `f${String(n).padStart(9, "0")}`, slug: `filler-${n}`, title: `Filler ${n}`, nav: false, target: "", from: -1 }))]);
   is("a store with its most pages takes none", [(await post({ action: "import", file })).data.error, await count()], ["too_many", MAX_SITE_PAGES]);

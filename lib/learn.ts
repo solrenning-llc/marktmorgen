@@ -530,12 +530,14 @@ export async function paidCourses(store: Store, email: string): Promise<Map<stri
 type CourseLedger = Ledger & {
   /** Courses Stripe alone decides for this address and could not be read for: neither open nor shut. */
   unknown: Set<string>;
+  /** Whether Stripe was read whole for this address. When it was not, an answer that differs by what the address bought would say it. */
+  whole: boolean;
 };
 
 /** The same answer, with the memberships that ended kept apart. */
 async function courseLedger(store: Store, email: string): Promise<CourseLedger> {
   const result = new Map<string, number>();
-  if (!isRedisConfigured()) return { paid: result, ended: new Set(), refunded: new Set(), unknown: new Set() };
+  if (!isRedisConfigured()) return { paid: result, ended: new Set(), refunded: new Set(), unknown: new Set(), whole: true };
   // A store that brought buyers over from another platform reads theirs in
   // the same round trip (lib/imported-purchases.ts); any other asks nothing more.
   const imported = importedRead(store, email);
@@ -627,7 +629,8 @@ async function courseLedger(store: Store, email: string): Promise<CourseLedger> 
         await takeOffLedger(store, email, product.id, held.get(product.id)!);
         recorded.delete(product.id);
       } catch (error) {
-        // Still written down: this whole reading shuts it all the same, and the next one tries again.
+        // Still written down, so this reading keeps it open (owner decision 18: a sale written down stands until its
+        // refund is taken off the ledger); the next reading confirms the refund and tries again.
         console.error("taking a refunded course off the ledger failed", error);
       }
     }
@@ -689,7 +692,7 @@ async function courseLedger(store: Store, email: string): Promise<CourseLedger> 
       unknown.delete(p.id);
     });
   }
-  return { paid: result, ended: asked.ended, refunded: asked.refunded, unknown };
+  return { paid: result, ended: asked.ended, refunded: asked.refunded, unknown, whole };
 }
 
 export type CourseAccess =
@@ -1154,7 +1157,11 @@ export async function requestCourseLink(input: {
   if (serviceMailKnownUnavailable()) return "error";
 
   const ledger = await courseLedger(store, raw);
-  if (ledger.paid.has(product.id)) return (await sendCourseLink(store, product, raw, origin)) ? "sent" : "error";
+  const sent = ledger.paid.has(product.id) ? await sendCourseLink(store, product, raw, origin) : null;
+  // Stripe not read whole: one answer for every address, "try again", so the form never says who bought
+  // (a recorded buyer is still emailed the link above). Claude 7's MEDIUM on #3376.
+  if (!ledger.whole) return "error";
+  if (sent !== null) return sent ? "sent" : "error";
   // Not confirmed either way: "try again", never a quiet "sent" with nothing sent to a buyer who paid.
   return ledger.unknown.has(product.id) ? "error" : "sent";
 }

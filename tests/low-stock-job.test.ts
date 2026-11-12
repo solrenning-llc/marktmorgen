@@ -13,7 +13,8 @@ import { setProductExtras } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
 import { storeForIdExactly } from "@/lib/store-exact";
 import { stockLeft } from "@/lib/stock";
-import { LOW_STOCK_DUE, lowStockOf, setLowStock } from "@/lib/low-stock";
+import { LOW_STOCK_DUE, lowStockOf, lowStockTouched, setLowStock } from "@/lib/low-stock";
+import { readFileSync } from "node:fs";
 import { LOW_STOCK_RUN_PRODUCTS, LOW_STOCK_WAIT_MS, type LowStockDeps, runLowStockChecks } from "@/lib/low-stock-alert";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -85,6 +86,18 @@ async function main(): Promise<void> {
   await runLowStockChecks(Date.now() + 30_000, real);
   is("off the set", redis.run(["ZSCORE", LOW_STOCK_DUE, `${store.sid}|gone000001`]), null);
   is("its number gone", redis.run(["HEXISTS", `nl:ls:${sid}`, "gone000001"]), 0);
+
+  part("A sale makes its product due at once; a product with no number is never added (Revisor 1 on #3814)");
+  redis.run(["ZADD", LOW_STOCK_DUE, Date.now() + LOW_STOCK_WAIT_MS, member]);
+  await lowStockTouched(store, [pid, "nonumber0001"]);
+  is("due now", Number(redis.run(["ZSCORE", LOW_STOCK_DUE, member])) <= Date.now(), true);
+  is("a product without a number stays off the set", redis.run(["ZSCORE", LOW_STOCK_DUE, `${store.sid}|nonumber0001`]), null);
+  const stock = readFileSync("lib/stock.ts", "utf8");
+  const bound = stock.indexOf("if (bound === 1)");
+  is("the cart's hold, once bound, makes its products due", bound > 0 && stock.slice(bound, bound + 300).includes("lowStockTouched(store, limited.map((product) => product.id))"), true);
+  is("the platform's pace is enough for changed products only: a product is checked again a day later at most", LOW_STOCK_WAIT_MS, 86_400_000);
+  is(`and ${LOW_STOCK_RUN_PRODUCTS} products a run`, LOW_STOCK_RUN_PRODUCTS, 50);
+  is("no name in the job reads as a person", /\bmembers?\b/.test(readFileSync("lib/low-stock-alert.ts", "utf8")), false);
 
   part("Off takes it off the set");
   store = (await storeForEmail(OWNER)) as Store;

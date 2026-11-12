@@ -1,10 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import nodeCrypto, { createHash } from 'node:crypto';
 import { enqueueShipmentMail, runShipmentMail, shipmentMailPolicy, shipmentMailId, recoverPendingMail } from '@/lib/shipment-mail-outbox';
 import { shipmentPolicy } from './shipment-mail-outbox-fixture';
 import { physicalPaidFixture, originId, confirmationLocalPipeline } from './order-confirmation-paid-fixture';
 import { createCheckout } from '@/lib/store-checkout';
-import { readConfirmationOrigin, runOrderConfirmationMail, confirmationOriginRowKey } from '@/lib/order-confirmation-outbox';
+import { readConfirmationOrigin, runOrderConfirmationMail, confirmationOriginRowKey, confirmationOriginId } from '@/lib/order-confirmation-outbox';
 import { COMMIT_ORDER_CONFIRMATION } from '@/lib/orders';
 import {createLocalRedisPool} from './redis-connection-pool';
 
@@ -498,15 +499,31 @@ test('small funded successor grants compose both normal workers through an unsup
  await isolatedRecoveryProof(async(pipeline,pool,all)=>{
   const clock=Date.now,started=clock(),descriptor=Object.getOwnPropertyDescriptor(Date,'now')!;
   let f!:Awaited<ReturnType<typeof physicalPaidFixture>>,id!:string;
+  // The original's id hashes the store's random list id with the checkout's random
+  // nonce; one draw in about 1,400 fell below every candidate session, and the proof
+  // failed with no change to its code (CI, 11 Nov 2026). The order the proof needs is
+  // built instead of drawn: the unsupported session first, then a nonce above it.
+  let session='';
+  for(let i=0;i<1000;i++){const candidate='cs_test_uncoveredPrefix00000'+i;
+   if(!session||shipmentMailId('continuation_uncovered',candidate)<shipmentMailId('continuation_uncovered',session))session=candidate;}
+  const firstId=shipmentMailId('continuation_uncovered',session);
   try{
    Date.now=()=>started-73*3600000;
    f=await physicalPaidFixture();
-   const checkout=await createCheckout(f.store,f.product,'https://example.test',undefined,{},f.runtime);
+   let nonce='';
+   for(let k=0;!nonce;k++){const candidate=createHash('sha256').update('pending-mail-recovery-nonce-'+k).digest('hex');
+    if(confirmationOriginId(f.store.statsId,candidate)>firstId)nonce=candidate;}
+   const randomBytes=nodeCrypto.randomBytes;
+   nodeCrypto.randomBytes=((size:number,...rest:unknown[])=>size===32&&rest.length===0?Buffer.from(nonce,'hex'):(randomBytes as (...a:unknown[])=>Buffer)(size,...rest)) as typeof randomBytes;
+   let checkout!:Awaited<ReturnType<typeof createCheckout>>;
+   try{checkout=await createCheckout(f.store,f.product,'https://example.test',undefined,{},f.runtime);}finally{nodeCrypto.randomBytes=randomBytes;}
+   assert.equal(nodeCrypto.randomBytes,randomBytes);
    const session=f.sessions.get(checkout.id)!;
    Object.assign(session,{status:'complete',payment_status:'paid',amount_total:4000,customer_details:{email:'buyer@example.test'},
     payment_intent:{object:'payment_intent',status:'succeeded',amount_received:4000,currency:'usd',latest_charge:{object:'charge',paid:true,amount:4000,amount_refunded:0,currency:'usd',refunded:false,disputed:false}},
     shipping_details:{name:'Original Buyer',address:{line1:'1 Original Street',city:'Test City',country:'US'}}});
    id=originId();
+   assert.equal(id,confirmationOriginId(f.store.statsId,nonce),'the checkout reserved the original under the chosen nonce');
   }finally{Object.defineProperty(Date,'now',descriptor);assert.deepEqual(Object.getOwnPropertyDescriptor(Date,'now'),descriptor);}
   const found=await readConfirmationOrigin(id,f.runtime);assert.ok(found);
   const row=found.row,keys=[confirmationOriginRowKey(id),`nl:order-confirmation:source:${id}`,'nl:order-confirmation:due',
@@ -523,14 +540,12 @@ test('small funded successor grants compose both normal workers through an unsup
   assert.equal((await runOrderConfirmationMail(clock()+30000,async()=> 'waiting',physical,id)).waiting,1);
   const original=await readConfirmationOrigin(id,physical);assert.ok(original?.payload.message);assert.equal(original.row.checks,1);
   const unsupported={...shipmentPolicy(),reviewId:'SYNTHETIC_UNCOVERED_STAYS',maximumChecks:1};
-  let session='';
-  for(let i=0;i<1000;i++){const candidate='cs_test_uncoveredPrefix00000'+i;if(shipmentMailId('continuation_uncovered',candidate)<id){session=candidate;break;}}
-  assert.notEqual(session,'','the deterministic unsupported source must precede the original confirmation');
+  assert.ok(firstId<id,'the deterministic unsupported source must precede the original confirmation');
   const input={statsId:'continuation_uncovered',session,authorizedAt:clock(),shipped:{at:Math.floor(clock()/1000),tracking:'https://example.test/track'},
    message:{from:'Store <mail@example.test>',to:'other@example.test',subject:'Uncovered original',text:'Do not send under another review',replyTo:'owner@example.test'}};
   const unsupportedRuntime={lifecycle:'active' as const,policy:unsupported,pipeline,now:clock};
   assert.equal((await enqueueShipmentMail(input,unsupportedRuntime)).ok,true);
-  const firstId=shipmentMailId(input.statsId,input.session);
+  assert.equal(shipmentMailId(input.statsId,input.session),firstId);
   assert.equal((await runShipmentMail(clock()+30000,async()=> 'waiting',unsupportedRuntime,firstId)).waiting,1);
   const [firstRaw]=await pipeline([['GET','nl:ship:mail:row:'+firstId]]);
   let accepted=0,passes=0;const observed:{ids:string[];index:number;family:string;phase:string;attempts:number;units:number;readBytes:number}[]=[];

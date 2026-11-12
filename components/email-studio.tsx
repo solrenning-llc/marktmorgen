@@ -531,8 +531,8 @@ export function EmailStudio(props: {
             <p className="mt-2 text-sm text-ink-soft" data-email-equivalence>{emailEquivalence(props.allowance)}</p>
           ) : null}
           {/* From 80% used: how many are left and when the count starts again (357 [ES3], lib/mail-left.ts). */}
-          {props.monthKnown && mailLeftWords(props.used, props.allowance, props.renews ?? null) ? (
-            <p className="mt-3 rounded-[var(--r-md)] bg-sand p-3 text-sm font-medium text-ink" data-mail-left="">{mailLeftWords(props.used, props.allowance, props.renews ?? null)}</p>
+          {props.monthKnown && mailLeftWords(props.used, props.allowance, props.renews ?? null, props.trial) ? (
+            <p className="mt-3 rounded-[var(--r-md)] bg-sand p-3 text-sm font-medium text-ink" data-mail-left="">{mailLeftWords(props.used, props.allowance, props.renews ?? null, props.trial)}</p>
           ) : null}
           {props.moveUp ? (
             <details className="mt-4">

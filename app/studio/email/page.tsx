@@ -256,8 +256,9 @@ export default async function StudioEmailPage({ searchParams }: Params) {
             used={used}
             allowance={allowance}
             monthKnown={windowId(store) !== null}
-            // When the month's count starts again, for the words from 80% used (357 [ES3]); null when not known.
-            renews={(() => { const window = allowanceWindow(store); return window ? opensAgainWords(window) : null; })()}
+            // The day the month's count starts again, for the words from 80% used (357 [ES3]): only for a paid plan that
+            // renews, on its billing month. A plan set to end, a funded last period or a trial has no such day.
+            renews={!trial && store.period?.renews === true && store.period.funded !== true ? (() => { const window = allowanceWindow(store); return window?.billing ? opensAgainWords(window) : null; })() : null}
             trial={trial}
             // The way up for a list that has outgrown Pro, offered beside the
             // month's count to whoever may change the plan (lib/plan.ts).

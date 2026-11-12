@@ -9,11 +9,11 @@ import { readSetup, type CallSetup } from "@/lib/call-setup";
 import { confirmBooking, moveBooking, holdAndCheckout, type CallListing } from "@/lib/calls";
 import { addProduct, claimHandle, ensureStatsId, setProductCall, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { readListing, readProduct } from "@/lib/catalog";
-import { zonedToUtc } from "@/lib/call-setup";
 import type { Product, Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
+import { NY, weekdayAt } from "./weekday";
 
 const emails: { to: string; text: string; ics: string }[] = [];
 let opened = 0;
@@ -36,21 +36,9 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   return answer({ object: "list", data: [], has_more: false });
 }) as typeof fetch;
 
-const NY = "America/New_York";
 const WEEKDAYS: [number, number][][] = [[], [[540, 1020]], [[540, 1020]], [[540, 1020]], [[540, 1020]], [[540, 1020]], []];
 const ADDRESS = ["Bela Studio", "12 Harbor Street", "Portland, ME 04101"];
 const weekly = { kind: "weekly", minutes: 60, tz: NY, weekly: WEEKDAYS, noticeHours: 1, horizonDays: 30, bufferMinutes: 0, room: "https://example.com/room", video: true, meet: "zoom", seats: 1, sessions: [] };
-
-function weekdayAt(days: number, minute: number): number {
-  for (let d = days; d < days + 8; d += 1) {
-    const day = new Date(Date.now() + d * 86_400_000);
-    const p = new Intl.DateTimeFormat("en-US", { timeZone: NY, year: "numeric", month: "2-digit", day: "2-digit", weekday: "short" }).formatToParts(day);
-    const get = (t: string) => p.find((x) => x.type === t)?.value ?? "";
-    if (get("weekday") === "Sat" || get("weekday") === "Sun") continue;
-    return zonedToUtc(Number(get("year")), Number(get("month")), Number(get("day")), minute, NY) as number;
-  }
-  throw new Error("no weekday");
-}
 
 async function main(): Promise<void> {
   redis.clear();

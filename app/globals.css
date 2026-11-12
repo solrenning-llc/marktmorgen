@@ -2483,7 +2483,8 @@ a.chip {
 .st-page .btn-secondary:focus-visible,
 .st-page .btn-primary:focus-visible,
 .st-page .st-footer-link:focus-visible,
-.st-social:focus-visible {
+.st-social:focus-visible,
+.sp-countdown-toggle:focus-visible {
   outline: 3px solid #000;
   outline-offset: 3px;
   box-shadow: 0 0 0 3px #fff !important;
@@ -2494,7 +2495,8 @@ a.chip {
   .st-page .btn-secondary:focus-visible,
   .st-page .btn-primary:focus-visible,
   .st-page .st-footer-link:focus-visible,
-  .st-social:focus-visible {
+  .st-social:focus-visible,
+  .sp-countdown-toggle:focus-visible {
     outline: 3px solid CanvasText;
     box-shadow: none !important;
     forced-color-adjust: auto;

@@ -77,11 +77,22 @@ export function Countdown({
     // Read once even when stopped, so a moment that has passed is no longer shown.
     const first = window.setTimeout(tick, 0);
     const timer = stopped ? undefined : window.setInterval(tick, 1000);
+    // Stopped, read once more when the moment comes, so an ended countdown leaves the page as a counting one does,
+    // without ticking until then; a timer holds at most 2^31 - 1 ms (about 24.8 days), so a later moment is waited
+    // for again from there.
+    let end: number | undefined;
+    const wake = () => {
+      const ms = until * 1000 - Date.now();
+      if (ms < 0) tick();
+      else end = window.setTimeout(wake, Math.min(ms + 50, 2_147_483_647));
+    };
+    if (stopped) wake();
     return () => {
       window.clearTimeout(first);
       window.clearInterval(timer);
+      window.clearTimeout(end);
     };
-  }, [stopped]);
+  }, [stopped, until]);
 
   const left = clock === null ? null : until - clock;
   if (left !== null && left <= 0) return null;

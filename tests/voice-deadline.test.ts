@@ -61,7 +61,7 @@ async function main(): Promise<void> {
   if (saved.state !== "created") throw new Error(`no review: ${saved.state}`);
   for (const words of ["printable", "pdf", "print version", "large print"]) await countSearchMiss(statsId, [words]);
   store = (await storeForEmail(OWNER))!;
-  is(`enough to read (at least ${MIN_TEXTS})`, (await gatherVoice(store, now)).length >= MIN_TEXTS, true);
+  is(`enough to read (at least ${MIN_TEXTS})`, (await gatherVoice(store, now)).items.length >= MIN_TEXTS, true);
 
   const key = aiMonthKey(store, new Date(now));
   const jobs = async () => Number((await redis.pipeline([["GET", key ?? ""]]))[0] ?? 0);

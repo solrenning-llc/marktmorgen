@@ -288,13 +288,18 @@ function Profile({ store, profile, fields, values, eraseToken, tasks, assignees 
   const net = profile.paid - profile.refunded;
   const others = Object.entries(profile.otherCurrencies).filter(([, cents]) => cents !== 0);
   const bought = profile.orders.length > 0;
-  // Purchases that could not all be read are never said as none bought (rule 24; Claude 6 on #3159).
-  const purchasesUnread = profile.stripeError || profile.unread.includes("imported") || profile.unread.includes("paypal");
-  const tiles = [
+  // Nothing read while the reading was partial or Stripe could not be read: unknown, never "$0" or "nothing bought yet".
+  const unread = !bought && (profile.partial || profile.stripeError);
+  const tiles = unread ? [
+    { label: "Spent with you", value: "—", note: "could not be read just now" },
+    { label: "Purchases", value: "—", note: "could not be read just now" },
+    { label: "First purchase", value: "—", note: "could not be read just now" },
+    { label: "Latest purchase", value: "—", note: "could not be read just now" },
+  ] : [
     { label: "Spent with you", value: money(net), note: profile.refunded ? `${money(profile.paid)} paid, ${money(profile.refunded)} given back` : "after any refund" },
     { label: "Purchases", value: String(profile.purchases), note: profile.renewals ? `and ${profile.renewals} later ${profile.renewals === 1 ? "payment" : "payments"}` : "no later payments" },
-    { label: "First purchase", value: profile.firstAt ? day(profile.firstAt) : "—", note: !profile.channelKnown ? (profile.firstAt ? "channel not recorded" : purchasesUnread ? "purchases could not all be loaded" : "nothing bought yet") : profile.firstChannel ? `found you through ${channelName(profile.firstChannel)}` : "came direct, or from somewhere unnamed" },
-    { label: "Latest purchase", value: profile.lastAt ? day(profile.lastAt) : "—", note: !profile.channelKnown ? (profile.lastAt ? "channel not recorded" : purchasesUnread ? "purchases could not all be loaded" : "nothing bought yet") : profile.lastChannel ? `came through ${channelName(profile.lastChannel)}` : "came direct, or from somewhere unnamed" },
+    { label: "First purchase", value: profile.firstAt ? day(profile.firstAt) : "—", note: !profile.channelKnown ? (profile.firstAt ? "channel not recorded" : "nothing bought yet") : profile.firstChannel ? `found you through ${channelName(profile.firstChannel)}` : "came direct, or from somewhere unnamed" },
+    { label: "Latest purchase", value: profile.lastAt ? day(profile.lastAt) : "—", note: !profile.channelKnown ? (profile.lastAt ? "channel not recorded" : "nothing bought yet") : profile.lastChannel ? `came through ${channelName(profile.lastChannel)}` : "came direct, or from somewhere unnamed" },
   ];
   const contact = profile.contact;
   const listWords = !contact
@@ -350,10 +355,8 @@ function Profile({ store, profile, fields, values, eraseToken, tasks, assignees 
         <h2 id="orders-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">What they bought and paid</h2>
         {!bought ? (
           <p className="mt-2 text-sm text-ink-soft">
-            {profile.stripeError
-              ? "Their purchases could not be loaded just now, because Stripe could not be read. Open this page again in a moment."
-              : profile.unread.includes("imported")
-              ? "No Stripe purchase from this store under this address. Purchases brought from another platform, given, bought for others or paid with PayPal could not be loaded just now."
+            {profile.partial || profile.stripeError
+              ? "Their purchases could not all be read just now, so this list may be missing some. Try again in a moment."
               : "Nothing bought from this store under this address."}
           </p>
         ) : (
@@ -374,7 +377,7 @@ function Profile({ store, profile, fields, values, eraseToken, tasks, assignees 
                     <td className="py-2.5 pr-4 align-top">
                       <span className="font-semibold text-ink">{o.title}</span>
                       <span className="block text-xs text-ink-soft">
-                        {[KIND_WORDS[o.kind], NOTE_WORDS[o.note]].filter(Boolean).join(" · ")}
+                        {[o.kind === "brought" && o.note === "paypal" ? "" : KIND_WORDS[o.kind], NOTE_WORDS[o.note]].filter(Boolean).join(" · ")}
                         {o.refunded > 0 ? ` · ${o.refunded >= o.cents ? "Refunded" : `${money(o.refunded, o.currency)} refunded`}` : ""}
                       </span>
                     </td>
@@ -393,7 +396,7 @@ function Profile({ store, profile, fields, values, eraseToken, tasks, assignees 
         )}
         <p className="mt-3 text-xs text-ink-soft">
           Amounts are what they paid, after any discount code and before Stripe&apos;s fee.
-          {profile.partial ? " Stripe holds more of their payments than one reading takes, so the oldest are not shown or counted." : ""}
+          {profile.partial ? " Not all of their payments could be read, so some amounts are not shown or counted." : ""}
           {bought && !profile.channelKnown ? " Sales from before October 11, 2026 have no channel written on them." : ""}
         </p>
       </section>

@@ -105,7 +105,7 @@ async function main(): Promise<void> {
   }
   await countSearchMiss(statsId, ["printable"]);
   await countSearchMiss(statsId, ["printable"]);
-  const gathered = await gatherVoice(store, now);
+  const { items: gathered } = await gatherVoice(store, now);
   is("questions, reviews and searches, never the old question", gathered.map((g) => `${g.source}|${g.text}|${g.n}`).sort(), [
     "question|Can I print the planner?|1",
     "question|Does it work in metric?|1",

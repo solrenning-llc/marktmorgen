@@ -1,10 +1,12 @@
 /**
  * A buyer's page in the studio says which of its parts could not be read
- * (rule 24, inventory item 8): purchases handed over without a Stripe payment
- * (imported, given, bought for others, paid with PayPal), the amount of a
- * PayPal sale, the calls coming up and the sequences they were started on.
- * Before, each of those reads ended in `.catch(() => [])`, so a failed read
- * looked exactly like "none", and the page looked complete.
+ * (rule 24, inventory item 8): the calls coming up and the sequences they were
+ * started on. Before, each of those reads ended in `.catch(() => [])`, so a
+ * failed read looked exactly like "none", and the page looked complete.
+ * Purchases handed over without a Stripe payment (imported, given, bought for
+ * others, paid with PayPal) and the amount of a PayPal sale make the reading
+ * `partial` instead, the model main took with #2908 (merged into this branch):
+ * the page says so in the tiles and the orders box, and names no part for them.
  *
  * Checked: a healthy read names no part; a confirmed absence (nothing
  * imported, no sequences, no calls) names no part either; each failed read
@@ -151,12 +153,12 @@ async function main(): Promise<void> {
   part("Purchases handed over could not be read");
   await seed();
   const noImports = await failing([["HGETALL", "nl:imp:buy:"]], () => buyerProfile(store, EMAIL));
-  is("the imported part is named, and only it", unreadOf(noImports), ["imported"]);
+  is("the reading is partial, and no part is named for it", [noImports.partial, unreadOf(noImports)], [true, []]);
   is("the rest is still there", noImports.sequences, ["Welcome"]);
 
   part("A PayPal sale's amount could not be read");
   const noPaypal = await failing([["GET", "nl:ppsell:paid:"]], () => buyerProfile(store, EMAIL));
-  is("the PayPal part is named, and only it", unreadOf(noPaypal), ["paypal"]);
+  is("the reading is partial, and no part is named for it", [noPaypal.partial, unreadOf(noPaypal)], [true, []]);
   is(
     "the purchase is still listed, without an amount it cannot stand behind",
     noPaypal.orders.map((o) => [o.kind, o.title, o.cents, o.note]),
@@ -184,9 +186,9 @@ async function main(): Promise<void> {
     await redis.pipeline([["SET", `nl:ppsell:paid:${PAYPAL_ORDER}`, raw]]);
     const odd = await buyerProfile(store, EMAIL);
     is(
-      `${label}: the PayPal part is named, the sale listed without an amount, and nothing counted`,
-      [unreadOf(odd), odd.orders.find((o) => o.title === "Starter Kit")?.cents, odd.paid, typeof odd.paid],
-      [["paypal"], 0, 0, "number"],
+      `${label}: the reading is partial, the sale listed without an amount, and nothing counted`,
+      [odd.partial, unreadOf(odd), odd.orders.find((o) => o.title === "Starter Kit")?.cents, odd.paid, typeof odd.paid],
+      [true, [], 0, 0, "number"],
     );
   }
 
@@ -216,7 +218,7 @@ async function main(): Promise<void> {
   callsDown = true;
   const many = await failing([["HGETALL", "nl:imp:buy:"], ["GET", "nl:mail:flows:"]], () => buyerProfile(store, EMAIL));
   callsDown = false;
-  is("each named once", unreadOf(many), ["imported", "calls", "sequences"]);
+  is("each named once, and the handed-over purchases make the reading partial", [unreadOf(many), many.partial], [["calls", "sequences"], true]);
 
   part("The team's notes about them");
   const person = personKey(STATS, EMAIL);
@@ -267,7 +269,7 @@ async function main(): Promise<void> {
   const notesDown = await failing([["HGETALL", "nl:person:"]], () => buyerProfile(store, EMAIL));
   is("Redis not reached for the notes: they are named, the rest is there", [unreadOf(notesDown), notesDown.notes, notesDown.sequences], [["notes"], [], ["Welcome"]]);
   const notesAndCalls = await failing([["HGETALL", "nl:person:"], ["HGETALL", "nl:imp:buy:"]], () => buyerProfile(store, EMAIL));
-  is("named last, in the page's order", unreadOf(notesAndCalls), ["imported", "notes"]);
+  is("named, and the handed-over purchases make the reading partial", [unreadOf(notesAndCalls), notesAndCalls.partial], [["notes"], true]);
 
   part("Adding or removing a note when the notes cannot be read");
   const added = await notesAnswer([["notes"]], () => addPersonNote(STATS, person, "owner@example.com", "Prefers email.", ROOM, (NOW + 5) * 1000).then(() => "read", (error) => (error instanceof UnknownReplyError ? "unknown" : String(error))));
@@ -288,9 +290,9 @@ async function main(): Promise<void> {
       "Some parts of this page could not be loaded just now, so they are missing below: their calls coming up. Nothing was changed. Open this page again in a moment.",
     );
     is(
-      "several, and the totals warned about when money may be missing",
-      words(["imported", "paypal", "sequences"]),
-      "Some parts of this page could not be loaded just now, so they are missing below: purchases brought from another platform, given, bought for others or paid with PayPal; the amounts of their PayPal sales; and the sequences they were started on. What they paid may be more than the totals show. Nothing was changed. Open this page again in a moment.",
+      "several, in the page's order",
+      words(["sequences", "calls"]),
+      "Some parts of this page could not be loaded just now, so they are missing below: their calls coming up; and the sequences they were started on. Nothing was changed. Open this page again in a moment.",
     );
     is(
       "the notes",
@@ -300,19 +302,17 @@ async function main(): Promise<void> {
   }
   const page = readFileSync("app/studio/people/page.tsx", "utf8");
   is("the studio page shows the sentence as a status", /profile\.unread\.length[\s\S]{0,200}role="status"[\s\S]{0,200}profileUnreadWords\(profile\.unread\)/.test(page), true);
-  const tilesBlock = page.slice(page.indexOf("const tiles = ["), page.indexOf("];", page.indexOf("const tiles = [")));
   is(
-    "the purchase tiles never say \"nothing bought yet\" while purchases could not all be read",
-    (tilesBlock.match(/"nothing bought yet"/g) ?? []).length === 2 && (tilesBlock.match(/purchasesUnread \? "purchases could not all be loaded" : "nothing bought yet"/g) ?? []).length === 2,
+    "the purchase tiles show \"—\", never \"nothing bought yet\", while purchases could not all be read (main's model, #2908)",
+    /const unread = !bought && \(profile\.partial \|\| profile\.stripeError\);\s*const tiles = unread \? \[/.test(page),
     true,
   );
-  is("and purchasesUnread covers Stripe, the handed-over purchases and the PayPal amounts", /const purchasesUnread = profile\.stripeError \|\| profile\.unread\.includes\("imported"\) \|\| profile\.unread\.includes\("paypal"\);/.test(page), true);
   // WCAG 1.3.3 (AX274): the orders box is read on its own (a screen reader can jump to its heading), so its words
   // say what happened and what to do, never only "see the note above".
   const ordersSection = page.slice(page.indexOf('aria-labelledby="orders-title"'), page.indexOf("</section>", page.indexOf('aria-labelledby="orders-title"')));
   is(
-    "Stripe not read: the orders box says why and what to do in its own words, without pointing above",
-    [/\b(above|below)\b/i.test(ordersSection), ordersSection.includes('"Their purchases could not be loaded just now, because Stripe could not be read. Open this page again in a moment."')],
+    "purchases not all read (Stripe, handed over or PayPal): the orders box says so and what to do in its own words, without pointing above",
+    [/\b(above|below)\b/i.test(ordersSection), ordersSection.includes('"Their purchases could not all be read just now, so this list may be missing some. Try again in a moment."')],
     [false, true],
   );
   const notesSection = page.slice(page.indexOf('aria-labelledby="notes-title"'), page.indexOf("</section>", page.indexOf('aria-labelledby="notes-title"')));

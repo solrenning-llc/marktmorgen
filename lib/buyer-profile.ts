@@ -36,7 +36,7 @@
  *   nl:person:find:<token>             JSON { s: store id, e: address }, an hour
  */
 import { personKey } from "@/lib/person-key";
-import { readPaidExact } from "@/lib/paypal-sales";
+import { readPaid } from "@/lib/paypal-sales";
 import { randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
@@ -268,17 +268,16 @@ export type ProfileMembership = {
 export type ProfileCourse = { title: string; done: number; lessons: number; since: number; lastSeen: number };
 
 /**
- * A part of the page read apart from Stripe, which may fail on its own
- * (rule 24): purchases handed over without a Stripe payment, the amount of a
- * PayPal sale, the calls coming up, the sequences they were started on, the
+ * A part of the page read apart from the payments, which may fail on its own
+ * (rule 24): the calls coming up, the sequences they were started on, the
  * team's notes about them. A part that could not be read is named, never
- * shown as "none".
+ * shown as "none". Purchases handed over without a Stripe payment and the
+ * amount of a PayPal sale are not named here: an unread one makes the reading
+ * `partial`, which the page already says in the tiles and the orders box (#2908).
  */
-export type ProfilePart = "imported" | "paypal" | "calls" | "sequences" | "notes";
-const PROFILE_PARTS: ProfilePart[] = ["imported", "paypal", "calls", "sequences", "notes"];
+export type ProfilePart = "calls" | "sequences" | "notes";
+const PROFILE_PARTS: ProfilePart[] = ["calls", "sequences", "notes"];
 const PART_WORDS: Record<ProfilePart, string> = {
-  imported: "purchases brought from another platform, given, bought for others or paid with PayPal",
-  paypal: "the amounts of their PayPal sales",
   calls: "their calls coming up",
   sequences: "the sequences they were started on",
   notes: "your team's notes about them",
@@ -289,8 +288,7 @@ export function profileUnreadWords(parts: readonly ProfilePart[]): string {
   const named = PROFILE_PARTS.filter((p) => parts.includes(p)).map((p) => PART_WORDS[p]);
   if (!named.length) return "";
   const list = named.length === 1 ? named[0] : `${named.slice(0, -1).join("; ")}; and ${named[named.length - 1]}`;
-  const money = parts.includes("imported") || parts.includes("paypal") ? " What they paid may be more than the totals show." : "";
-  return `Some parts of this page could not be loaded just now, so they are missing below: ${list}.${money} Nothing was changed. Open this page again in a moment.`;
+  return `Some parts of this page could not be loaded just now, so they are missing below: ${list}. Nothing was changed. Open this page again in a moment.`;
 }
 
 export type BuyerProfile = {
@@ -325,7 +323,7 @@ export type BuyerProfile = {
   sequences: string[];
   person: string;
   notes: PersonNote[];
-  /** Stripe held more of their payments than one reading takes. */
+  /** Not every payment was read: Stripe held more than one reading takes, a PayPal sale's paid record was unread, or the handed-over purchases could not be read. */
   partial: boolean;
   /** Stripe could not be read: the payments are not on the page. */
   stripeError: boolean;
@@ -338,6 +336,9 @@ type Row = Record<string, unknown>;
 const rowsOf = (listed: { data?: unknown }): Row[] => (Array.isArray(listed.data) ? (listed.data as Row[]) : []);
 const num = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? value : 0);
 const str = (value: unknown) => (typeof value === "string" ? value : "");
+/** A PayPal paid record's money fields in their own format: a whole amount of cents (0 or more), a lowercase three-letter currency, a whole positive time. */
+const paidRecordReadable = (paid: { cents?: unknown; currency?: unknown; at?: unknown }): boolean =>
+  Number.isSafeInteger(paid.cents) && (paid.cents as number) >= 0 && typeof paid.currency === "string" && /^[a-z]{3}$/.test(paid.currency) && Number.isSafeInteger(paid.at) && (paid.at as number) > 0;
 const currencyOf = (row: { currency?: unknown }) => (typeof row.currency === "string" && row.currency ? row.currency.toLowerCase() : "usd");
 const idOf = (value: unknown) => (typeof value === "string" ? value : value && typeof value === "object" ? str((value as Row).id) : "");
 
@@ -567,27 +568,22 @@ export async function buyerProfile(store: Store, rawEmail: string): Promise<Buye
   // Handed over without a payment here: brought from another platform, a
   // gift, a place someone bought for several, or a sale paid with PayPal.
   if (store.pastBuyers && store.statsId) {
-    const handed = await importedFor(store, email).catch((error) => {
-      console.error("reading a buyer's imported purchases failed", error);
-      unread.add("imported");
-      return [];
-    });
-    for (const given of handed) {
+    // A failed read is not "nothing handed over": the page says the reading is partial.
+    const handed = await importedFor(store, email).catch(() => null);
+    if (!handed) partial = true;
+    for (const given of handed ?? []) {
       const listing = await find(given.productId);
       productIds.push(given.productId, ...(given.items ?? []));
       // A sale paid with PayPal is a sale (lib/paypal-sales.ts): its amount, its channel, counted in what they paid.
-      // When its record cannot be read, the purchase is still listed, without an amount, and the page says so.
-      // Read exactly (rule 24): a record in another shape (not JSON, cents not a whole number, another order's) is
-      // unread, never counted as it stands nor taken for no record (Claude 6 on #3159).
-      const read = given.job.startsWith("paypal:")
-        ? await readPaidExact(given.job.slice(7)).catch((error) => {
-            console.error("reading a buyer's PayPal sale failed", error);
-            return "unknown" as const;
-          })
-        : null;
-      if (read === "unknown") unread.add("paypal");
-      const paypal = read === "unknown" ? null : read;
-      if (paypal && paypal.store === store.statsId) {
+      const order = given.job.startsWith("paypal:") ? given.job.slice(7) : "";
+      const read = order ? await readPaid(order).catch(() => null) : null;
+      // Only this store's record of this very order, with a whole amount of cents, a lowercase currency code and a whole
+      // time, is money (Claude 4 and Claude 6 on #2908): the order keys the payment summed into what they paid, so a
+      // record without it, or naming another order, would fold two sales into one.
+      const paypal = read && read.store === store.statsId && read.order === order && paidRecordReadable(read) ? read : null;
+      // Its paid record unread (gone, another shape, another store's, a field in another format, or the read failed): the amount is unknown, never $0, and the page says so.
+      if (given.job.startsWith("paypal:") && !paypal) partial = true;
+      if (paypal) {
         const channel = saleChannel(paypal.meta ?? {});
         const recorded = Boolean(paypal.meta && "channel" in paypal.meta);
         orders.push({
@@ -604,7 +600,7 @@ export async function buyerProfile(store: Store, rawEmail: string): Promise<Buye
           note: "paypal",
         });
         sales.push({ at: paypal.at, source: channel.source, first: channel.first, recorded });
-        charges.set(`paypal:${paypal.order}`, { id: `paypal:${paypal.order}`, cents: paypal.cents, refunded: 0, currency: paypal.currency, at: paypal.at });
+        charges.set(`paypal:${order}`, { id: `paypal:${order}`, cents: paypal.cents, refunded: 0, currency: paypal.currency, at: paypal.at });
         continue;
       }
       orders.push({

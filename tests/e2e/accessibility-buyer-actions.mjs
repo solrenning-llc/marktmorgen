@@ -228,6 +228,11 @@ try{
    for(const n of [0,1]){await adds.nth(n).focus();await page.keyboard.press("Enter");}
    const opener=page.locator("#cart .st-cart-open"),panel=page.locator("#cart .st-cart-panel"),lines=panel.locator("li");
    const openByKeyboard=async()=>{await opener.focus();await page.keyboard.press("Enter");await panel.waitFor();};
+   // At the top of the page nothing scrolls a control out from under the cart's button: no part of any control there may
+   // lie under it (2.4.12; the store's line of news did on a phone, found walking the buyer path, tests/store-fixed-focus-room.test.ts).
+   await opener.waitFor();await page.evaluate(()=>scrollTo(0,0));
+   const underCart=await page.evaluate(()=>{const c=document.querySelector("#cart .st-cart-open").getBoundingClientRect();return [...document.querySelectorAll("a[href],button,input,select,textarea,summary,[tabindex]:not([tabindex='-1'])")].filter(n=>!n.closest("#cart")&&!n.matches(".sr-only")&&[...n.getClientRects()].some(r=>r.width&&r.height&&r.left<c.right&&r.right>c.left&&r.top<c.bottom&&r.bottom>c.top)).map(n=>(n.getAttribute("aria-label")||n.textContent||n.tagName).trim().slice(0,60));});
+   if(underCart.length)throw Error("Part of a control at the top of the page lies under the cart's button at "+width+" px: "+JSON.stringify(underCart));
    const focus=()=>page.evaluate(()=>{const a=document.activeElement;return {inCart:Boolean(a?.closest("#cart")),inPanel:Boolean(a?.closest(".st-cart-panel")),opener:Boolean(a?.matches(".st-cart-open")),tag:a?.tagName??"",name:(a?.getAttribute("aria-label")||a?.textContent||"").trim().slice(0,60)};});
    await openByKeyboard();await lines.nth(1).waitFor({timeout:15_000});await panel.locator("form[data-checkout]").waitFor({timeout:15_000});
    const small=await targetsUnder44(page,"#cart .st-cart-panel");

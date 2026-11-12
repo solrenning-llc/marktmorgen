@@ -6,3 +6,4 @@ Only Claude 1 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
+| Claude 1 | Buyer path walk (12/11/2026): the cart's button never covers focus at the top of a phone's page (2.4.12) | claude1/fix-comprador-foco-encoberto | `app/globals.css` (the .st-cart block only), `tests/store-fixed-focus-room.test.ts`, `tests/e2e/accessibility-buyer-actions.mjs` (the cart part only) | 12/11/2026 19h25 |

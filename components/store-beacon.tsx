@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { startBrowserCheck } from "@/lib/browser-check-client";
+import { startBrowserCheck, warmBrowserCheckWhenIdle } from "@/lib/browser-check-client";
 import { countsAtPause } from "@/lib/quiet-moment";
 import { sourceTag } from "@/lib/source-rules";
 
@@ -61,6 +61,9 @@ export function StoreBeacon({ handle, front = true, product = "" }: { handle: st
     // The count goes through the host's check, whose script is one long block of work: it waits for a pause in what
     // the buyer is doing (lib/quiet-moment.ts), so it never lands on a tap. Leaving this page for another of the
     // store's (a next/link card, the pager) does not drop it: it goes at the next pause, with the source read here.
+    // The check's challenge runs at the first idle moment after load, so a count asked as the page is left goes at
+    // once (Claude 7 on #3642); the count itself still waits for the pause.
+    warmBrowserCheckWhenIdle();
     countOnce(key, () => beacon(payload));
     // Which links are followed is counted on the front page, where they are.
     if (!front) return;
@@ -89,7 +92,8 @@ export function StoreBeacon({ handle, front = true, product = "" }: { handle: st
 export function FunnelBeacon({ handle, funnel, kind, id }: { handle: string; funnel: string; kind: "page" | "product"; id: string }) {
   useEffect(() => {
     // Checked like a visit, so it waits for the same pause (lib/quiet-moment.ts), and a move to the funnel's next
-    // step before it does not drop it.
+    // step before it does not drop it; its challenge warmed at idle the same way.
+    warmBrowserCheckWhenIdle();
     countOnce(`${handle}|${location.href}|funnel`, () =>
       beacon({ h: handle, k: "f", f: funnel, t: kind === "page" ? "g" : "p", id }),
     );

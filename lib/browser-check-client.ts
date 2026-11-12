@@ -43,3 +43,35 @@ export function startBrowserCheck(init: Init = initBotId as unknown as Init): ty
   }
   return plain;
 }
+
+/** How long after the page's load event the challenge waits for an idle moment, at most. */
+export const WARM_IDLE_TIMEOUT_MS = 1_000;
+
+let warming = false;
+
+/**
+ * Runs the host's challenge ahead of the first count, at the first idle moment
+ * after the page loaded (Claude 7's MEDIUM on #3642): the check-signed fetch
+ * awaits the challenge before it makes its request, so a count first asked
+ * while the page is being left (the tab closed before the buyer's first pause)
+ * never left the page. Warm, it goes at once, with keepalive.
+ *
+ * The challenge is started by a protected fetch whose signal is already
+ * aborted: the wrapper awaits the challenge first, then the request itself is
+ * refused by the browser before anything is sent, so nothing reaches the
+ * server and nothing is counted. Once per window; nothing outside production.
+ */
+export function warmBrowserCheckWhenIdle(win: Window & typeof globalThis = window): void {
+  if (warming || typeof win === "undefined" || process.env.NODE_ENV !== "production") return;
+  warming = true;
+  const warm = () => {
+    if (!startBrowserCheck()) return;
+    win.fetch(BROWSER_CHECK_ROUTES[1].path, { method: "POST", signal: AbortSignal.abort(), keepalive: true }).catch(() => {});
+  };
+  const whenIdle = () => {
+    if (typeof win.requestIdleCallback === "function") win.requestIdleCallback(warm, { timeout: WARM_IDLE_TIMEOUT_MS });
+    else win.setTimeout(warm, 0);
+  };
+  if (win.document.readyState === "complete") whenIdle();
+  else win.addEventListener("load", whenIdle, { once: true });
+}

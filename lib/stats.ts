@@ -207,7 +207,7 @@ export async function recordHit(
     // the expiry is sent then as well, never left off (rule 24). Nothing is thrown at the store's page, as before.
     let opened: number | null = null;
     try {
-      opened = knownCounts(await redisPipeline([cappedCountCommand([{ key: counts, most: DAY_FIELDS_MAX }], [{ hash: 0, field: `pv:${hit.id}`, by: 1 }])]), 1)?.[0] ?? null;
+      opened = knownCounts(await redisPipeline([cappedCountCommand([{ key: counts, most: DAY_FIELDS_MAX, ttl: TTL_SECONDS }], [{ hash: 0, field: `pv:${hit.id}`, by: 1 }])]), 1)?.[0] ?? null;
     } catch (error) {
       console.error("counting a product page's view failed", error);
     }
@@ -224,7 +224,7 @@ export async function recordHit(
   ];
   let replies: unknown[];
   try {
-    replies = await redisPipeline([cappedCountCommand([{ key: counts, most: DAY_FIELDS_MAX }, { key: life, most: LIFE_WRITE_MAX }], tally), ...commands]);
+    replies = await redisPipeline([cappedCountCommand([{ key: counts, most: DAY_FIELDS_MAX, ttl: TTL_SECONDS }, { key: life, most: LIFE_WRITE_MAX }], tally), ...commands]);
   } catch (error) {
     // The answer may have been lost after Redis wrote it: the expiries go anyway, and the caller is still told.
     await redisPipeline(unknownExpiries()).catch(() => null);
@@ -264,13 +264,14 @@ export async function recordHit(
 
 /**
  * One measured visit of the store's own page (lib/page-read.ts): the furthest
- * item seen and the one clicked, on the day's record, which the day's first
- * view has already given its expiry. One command, and only for the visitors
- * the page chose to measure.
+ * item seen and the one clicked, on the day's record. The request needs only
+ * the page's signed token, not a counted view that day (a page left open past
+ * midnight), so it may create the record: the script gives it its expiry then.
+ * One command, and only for the visitors the page chose to measure.
  */
 export async function countReach(statsId: string, field: string, now = Date.now()): Promise<void> {
   if (!isRedisConfigured() || !field.startsWith("sr:")) return;
-  await cappedCount(countsKey(statsId, dayKey(now)), DAY_FIELDS_MAX, [{ field, by: 1 }]);
+  await cappedCount(countsKey(statsId, dayKey(now)), DAY_FIELDS_MAX, [{ field, by: 1 }], TTL_SECONDS);
 }
 
 /** One answer's counts: its buyers and their money, and of those, the ones whose sale had no channel. */
@@ -285,7 +286,7 @@ export async function countHeard(statsId: string, answer: string, cents: number,
   if (!isRedisConfigured()) return;
   const counts = countsKey(statsId, dayKey(now));
   await redisPipeline([
-    cappedCountCommand([{ key: counts, most: DAY_FIELDS_MAX }], [
+    cappedCountCommand([{ key: counts, most: DAY_FIELDS_MAX, ttl: TTL_SECONDS }], [
       { hash: 0, field: `h:${answer}`, by: 1 },
       ...(cents > 0 ? [{ hash: 0, field: `hc:${answer}`, by: Math.round(cents) }] : []),
       // A sale no link credited to any channel: what its buyer said is the only
@@ -314,7 +315,7 @@ export async function countSearchMiss(statsId: string, words: string[], now = Da
   const counts = countsKey(statsId, dayKey(now));
   try {
     await redisPipeline([
-      cappedCountCommand([{ key: counts, most: DAY_FIELDS_MAX }], [{ hash: 0, field: `q:${term}`, by: 1 }]),
+      cappedCountCommand([{ key: counts, most: DAY_FIELDS_MAX, ttl: TTL_SECONDS }], [{ hash: 0, field: `q:${term}`, by: 1 }]),
       ["EXPIRE", counts, TTL_SECONDS],
     ]);
   } catch (error) {

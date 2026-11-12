@@ -110,7 +110,10 @@ export const COMMANDS = {
    * each hundredth after, writes five more (lib/traffic.ts, markMonth):
    * a twentieth of a command to the visit, inside what is rounded up here.
    * Since October 11, 2026 also the expiry of the day's visitors, written
-   * with the visitor new to the day rather than with every view.
+   * with the visitor new to the day rather than with every view. Since
+   * November 11, 2026 the count that creates the day's record also gives it
+   * its expiry inside the script (lib/capped-count.ts, version 3): one
+   * command, once a store a day, not once a visit, inside the room here.
    */
   firstOfDay: 4,
   /**

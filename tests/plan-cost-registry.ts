@@ -80,6 +80,7 @@ import { CLOSING_DAYS, DEL_BATCH, ENDED_STORE_EXPORTS, FOLLOW_BATCH, RENEWALS_AT
 import { BUYER_SEND_DAYS, EMAILS_PER_BUYER_PER_ENDING, STRIPE_CALLS_PER_MEMBER, buyerNoticeCap } from "@/lib/closing-buyers-rules";
 import { MAX_NAME_LENGTH as STORE_NAME_MOST, MAX_STORE_BYTES } from "@/lib/store";
 import { BODIES_PER_READ } from "@/lib/course";
+import { COURSE_BYTES } from "@/lib/api-read-rules";
 import { MAX_LEADS } from "@/lib/contact-rules";
 import { DATA_ROOM_BYTES, ENTRY_BYTES, NON_PAYING_DATA_ROOM_BYTES } from "@/lib/store-data-rules";
 import { ORDER_KEY_BYTES } from "@/lib/order-data";
@@ -114,6 +115,7 @@ import { PAGES_PER_VISIT, laterPageCost, visitCost } from "./traffic-cost";
 import { assistantMonthWorst } from "@/lib/store-assistant-rules";
 import { ASSISTANT_ON_SALE } from "@/lib/opening";
 import { NEXT_OFFER_CHOICES, NEXT_OFFER_COMMANDS, NEXT_OFFER_PRODUCTS } from "@/lib/next-offer-rules";
+import { MAX_SHELF } from "@/lib/course-shelf-rules";
 import { ASSIST_REMIND_COMMANDS, ASSIST_REMIND_PRODUCTS } from "@/lib/assistant-reminder-rules";
 import type { ReadWork } from "@/lib/api-read-rules";
 import { DOWNLOAD_LOOKUP_COMMANDS, DOWNLOAD_LOOKUP_MS, ORDERS_BUNDLE_BYTES, ORDERS_OLDER_BYTES, ORDERS_OLDER_COMMANDS, ORDERS_OPEN_COMMANDS, ORDERS_OPEN_SECONDS, ORDERS_PAGE_BYTES } from "@/lib/buyer-orders-rules";
@@ -377,6 +379,13 @@ export const CERTIFICATE_PDF_READ = CALL + 1 * CPU_SECOND + 4 * MEMORY_SECOND + 
  */
 export const NEXT_OFFER_READ = request("wait", NEXT_OFFER_COMMANDS + TAKE_COMMANDS, (NEXT_OFFER_PRODUCTS + NEXT_OFFER_CHOICES) * 16_384 + MAX_PRODUCT_BYTES + 4_096);
 /**
+ * One reading of a course's "More from" shelf for a student (lib/course-shelf.ts, 628 [HN4](b)), at the most: what the
+ * buyer owns read as the next product after a purchase reads it (ownedHere: the same commands and up to five Stripe
+ * calls waited on at 2 GB), at most MAX_SHELF listings (fewer than that one's NEXT_OFFER_PRODUCTS + NEXT_OFFER_CHOICES)
+ * and one pipeline of MAX_SHELF PayPal counts on top. Taken as SHELF_REQUEST_UNITS public requests before it reads.
+ */
+export const SHELF_READ = request("wait", NEXT_OFFER_COMMANDS + TAKE_COMMANDS + MAX_SHELF, (NEXT_OFFER_PRODUCTS + NEXT_OFFER_CHOICES) * 16_384 + MAX_PRODUCT_BYTES + 4_096);
+/**
  * What one Store assistant checkout reminder costs besides the model and its
  * email (lib/assistant-reminder.ts), at the most: its commands and its
  * counting, the store record read by the job (1 MB at the most), a cart's
@@ -563,6 +572,12 @@ export const ORDERS_OLDER_READ =
 export const ORDERS_METERED_COMMAND = COMMAND + 1_024 * DB_BYTE;
 /** One listing it reads, at the most: the command and a product's whole record (lib/catalog.ts, MAX_PRODUCT_BYTES). */
 export const ORDERS_METERED_LISTING = COMMAND + MAX_PRODUCT_BYTES * DB_BYTE;
+/**
+ * One course's progress on the list, at the most (lib/purchase-cards.ts, progressOf; 560 [AS1]): its outline read whole
+ * at COURSE_BYTES, as a command of its own, and one SMISMEMBER with its key and MAX_LESSONS lesson ids of 12 letters
+ * sent, a 0 or 1 back for each (lib/learn.ts, lessonsDoneIn), taken as 4 KB.
+ */
+export const ORDERS_METERED_PROGRESS = 2 * COMMAND + (COURSE_BYTES + Math.max(4_096, 128 + MAX_LESSONS * 16)) * DB_BYTE;
 /**
  * One read of a hundred bookings' moves, at the most (lib/call-records.ts, readMoves): one MGET, its keys sent and its
  * moves read back through the database (lib/call-moves-read.ts).
@@ -884,6 +899,8 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/studio-allowance-rules.ts", names: ["ESSENTIAL_NEEDS", "ESSENTIAL_PER_DAY"] },
       { file: "app/api/billing/checkout/route.ts", names: ["creatorFrom(request, \"billing\")", "findStoreSubscriptions(store)"] },
       { file: "app/api/store/stores/route.ts", names: ["creatorFrom(request, \"delete\")", "findStoreSubscriptions(store)"] },
+      // 601 [KB22] U5: the plan's invoices are one invoice List inside one billing request of the day (PLAN_INVOICES_READ).
+      { file: "lib/plan-invoices.ts", names: ["takeInvoicesRead", "onPlatformAt(STRIPE_LIST_VERSION, \"GET\", `/invoices?${query}`)"] },
       { file: "lib/plan-closing.ts", names: ["observeStoreSubscriptions(store)", "refuseLatePlans"] },
       { file: "vercel.json", names: ["/api/cron/closing", "30 9 * * *"] },
     ],
@@ -1149,12 +1166,15 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/affiliate-leads.ts", names: ["takePublicRequest(store)", "count?: boolean"] },
       // The offers after a cart read what the buyer already has from the creator's Stripe account, counted before (556 [CT1], 1 November 2026).
       { file: "lib/cart-offers.ts", names: ["takeBuyerRead(store, CART_OFFER_REQUEST_UNITS)", "CART_OFFER_REQUEST_UNITS = NEXT_OFFER_REQUEST_UNITS"] },
+      // A course's "More from" shelf reads what a student owns the same way, counted before (628 [HN4](b), 10 November 2026).
+      { file: "lib/course-shelf.ts", names: ["takeBuyerRead(store, SHELF_REQUEST_UNITS)", "SHELF_REQUEST_UNITS = NEXT_OFFER_REQUEST_UNITS", "ownedHere(store, email)"] },
+      { file: "app/[handle]/course/[product]/page.tsx", names: ["shelfShown(store, course.shelf, product.id, access.learner.email)"] },
       // A signed proposal or agreement takes one more before the workflows that start on signing are checked (635 [GL3], 2 November 2026).
       { file: "lib/agreement-flow-trigger.ts", names: ["SIGNED_TRIGGER_UNITS", "takePublicRequest(store, \"buyer\", Date.now(), SIGNED_TRIGGER_UNITS)"] },
       // An opening of a buyer's orders page takes ORDERS_OPEN_UNITS before anything is read, and its meter more before each read
       // that grows with what the buyer has (C3-77, MR, 4 November 2026; ORDERS_OPEN_READ in tests/plan-cost-registry.test.ts).
       { file: "lib/buyer-orders.ts", names: ["takePublicRequest(store, \"buyer\", Date.now(), ORDERS_OPEN_UNITS)", "takePublicRequest(this.store, \"buyer\", Date.now(), units)", "callsFor(store: Store, email: string, meter?: OrdersMeter)", "meter.takeFor(ORDERS_CALL_MOVES, () => paidCalls(store), (calls) => ordersMovesCommands(calls.length))", "else this.left += most - n", "withinOpening", "purchasesFor(store: Store, email: string, meter?: OrdersMeter)"] },
-      { file: "lib/buyer-orders-rules.ts", names: ["ORDERS_OPEN_UNITS", "ORDERS_OPEN_SECONDS", "ORDERS_OPEN_COMMANDS", "ORDERS_UNIT_COMMANDS", "ORDERS_READ_MS", "ORDERS_IMPORTED_ENTRY_COMMANDS", "ORDERS_CALL_MOVES", "ORDERS_MOVES_READ_COMMANDS", "ordersMovesCommands", "ORDERS_LISTING_COMMANDS", "ORDERS_KEY_COMMANDS", "ORDERS_FEED_COMMANDS", "ORDERS_ROOM_COMMANDS"] },
+      { file: "lib/buyer-orders-rules.ts", names: ["ORDERS_OPEN_UNITS", "ORDERS_OPEN_SECONDS", "ORDERS_OPEN_COMMANDS", "ORDERS_UNIT_COMMANDS", "ORDERS_READ_MS", "ORDERS_IMPORTED_ENTRY_COMMANDS", "ORDERS_CALL_MOVES", "ORDERS_MOVES_READ_COMMANDS", "ordersMovesCommands", "ORDERS_LISTING_COMMANDS", "ORDERS_KEY_COMMANDS", "ORDERS_FEED_COMMANDS", "ORDERS_ROOM_COMMANDS", "ORDERS_PROGRESS_COMMANDS"] },
       // The bookings' moves are read a hundred at an MGET, all in one trip (C3-82, MR, 4 November 2026).
       { file: "lib/call-moves-read.ts", names: ["MOVES_PER_MGET", "MOVE_BYTES", "MOVE_KEY_BYTES", "moveReads"] },
       { file: "lib/call-records.ts", names: ["const perRead = 100;", '["MGET", ...lot.map(movedKey)]'] },
@@ -1167,7 +1187,9 @@ export const COST_LINES: CostLine[] = [
       { file: "app/api/store/orders/route.ts", names: ["export const maxDuration = 30", "requestOrdersLink", "if (result === \"busy\") return tooMany();"] },
       { file: "app/api/store/download/route.ts", names: ["findPurchase(store, token", "if (error instanceof OrdersBusy) return tooOften();", "const item = await listing(line.productId);", "const owner = await listing(bumped ? bumped.id : purchase.productId);"] },
       { file: "app/[handle]/orders/page.tsx", names: ["export const maxDuration = 30", "openOrders(store, token)", "withinOpening(reading, meter)", "purchasesFor(store, email, meter)", "callsFor(store, email, meter)", "extrasFor(store, email, listed, meter)", "<PurchaseCard", "<OlderPurchases"] },
-      { file: "lib/purchase-cards.ts", names: ["meter.take(keyed.length * ORDERS_KEY_COMMANDS)", "meter.take(podcasts.length * ORDERS_FEED_COMMANDS)", "meter.take(ids.length * ORDERS_LISTING_COMMANDS)"] },
+      { file: "lib/purchase-cards.ts", names: ["meter.take(keyed.length * ORDERS_KEY_COMMANDS)", "meter.take(podcasts.length * ORDERS_FEED_COMMANDS)", "meter.take(ids.length * ORDERS_LISTING_COMMANDS)", "meter.take(new Set(courses.map(({ courseId }) => courseId)).size * ORDERS_PROGRESS_COMMANDS)", "readCoursesExact(courses.map(({ courseId }) => courseId))"] },
+      // A course's progress asks only about its own lessons, one 0 or 1 each (560 [AS1]).
+      { file: "lib/learn.ts", names: ["export async function lessonsDoneIn", "[\"SMISMEMBER\", doneKey(course.id, email), ...ids]"] },
       { file: "components/purchase-card.tsx", names: ["<OrdersBundle"] },
       // An opening asks the creator's Stripe account ORDERS_STRIPE_CALLS times at the most, a payment plan's refund check taken
       // before it is made; a bundle's products are read only when the buyer asks, by their own request: ORDERS_BUNDLE_UNITS
@@ -1185,6 +1207,10 @@ export const COST_LINES: CostLine[] = [
       // is kept by the CDN five minutes (C3, 4 November 2026; CERTIFICATE_PDF_READ in tests/plan-cost-registry.test.ts).
       { file: "app/[handle]/certificate/[id]/pdf/route.ts", names: ["takePublicRequest(store, \"public\", now, 1)", "takePublicRequest(store, \"public\", now, CERTIFICATE_PDF_UNITS - 1)", "public, max-age=0, s-maxage=300"] },
       { file: "lib/certificate-pdf.ts", names: ["CERTIFICATE_PDF_UNITS = 2", "CERTIFICATE_PDF_MAX_BYTES = 256_000"] },
+      // The picture its shared link unfolds into is paid for the same way, CERTIFICATE_CARD_UNITS as many as the PDF and lighter than it
+      // (153 KB, 0.59 s of CPU cold, measured; audit R41, item 3), so CERTIFICATE_PDF_READ prices it too (tests/certificate-card-standing.test.ts).
+      { file: "app/[handle]/certificate/[id]/opengraph-image.tsx", names: ["takePublicRequest(store, \"public\", now, 1)", "takePublicRequest(store, \"public\", now, CERTIFICATE_CARD_UNITS - 1)"] },
+      { file: "lib/certificate.ts", names: ["CERTIFICATE_CARD_UNITS = 2"] },
       // A payment request first written down as paid takes one more before the workflow that starts on it is checked (635 [GL3], 2 November 2026).
       { file: "lib/payment-flow-trigger.ts", names: ["PAID_TRIGGER_UNITS", "takePublicRequest(store, \"buyer\", Date.now(), PAID_TRIGGER_UNITS)"] },
       // An affiliate's own page and the store's map read in proportion to the store: counted first, paid before they read (4 November 2026).
@@ -1220,6 +1246,9 @@ export const COST_LINES: CostLine[] = [
       { file: "app/api/store/person-tasks/route.ts", names: ["countStudio(store, null, units)", "TasksRecountRefused", "countStudio(store, null, tasksRecountUnits(people))", "taskPeople(store.statsId)"] },
       // Marktmorgen Path reading its store's money and counts again takes PATH_READ_UNITS studio requests first, at most once every PATH_MONEY_SECONDS (18 October 2026).
       { file: "lib/path.ts", names: ["PATH_READ_UNITS", "countStudio(store, null, units)"] },
+      // The invoices of a store's own plan take one billing request of the day (the essential counter) before Stripe is asked, none without a plan subscription (601 [KB22] U5).
+      { file: "lib/plan-invoices.ts", names: ["PLAN_INVOICES_PER_DAY", "PLAN_INVOICES_SHOWN", "takeEssentialBelow(store, PLAN_INVOICES_PER_DAY)", "await take()"] },
+      { file: "lib/studio-route.ts", names: ["takeEssential", "takeEssentialBelow", 'essentialTakeBelow("studio-essential", store.sid || store.handle, Math.min(below, ESSENTIAL_PER_DAY), 86_400)'] },
       { file: "lib/path-atomic.ts", names: ["WRITE_PATH", "FORGET_PATH", "PATH_DATA_CHANGE"] },
       { file: "lib/path-growth-facts.ts", names: ["PATH_GROWTH_READ_UNITS", "PATH_GROWTH_PRODUCTS", "PATH_GROWTH_CAMPAIGNS", "PATH_GROWTH_REVIEWS", "await charge(PATH_GROWTH_READ_UNITS)"] },
       { file: "lib/path-board-rules.ts", names: ["PATH_BOARD_ROOM_BYTES", "PATH_BOARD_ROWS", "PATH_BOARD_JOIN_UNITS"] },
@@ -1669,6 +1698,7 @@ export const NOT_A_COST: Record<string, string> = {
   REFUND_CALLS_PER_MEMBER: "The part of STRIPE_CALLS_PER_MEMBER set aside for a member's refund (lib/closing-holds.ts): inside the same budget, not added to it.",
   PICTURES_PER_MINUTE: "A pace on the pictures a function answers (lib/picture-pace.ts, MM-SA-04), held in memory with no store command: it only refuses, and what it lets through is the CDN's picture of line visits.",
   PICTURE_READS_PER_MINUTE: "A pace on how often one picture is read by a function (lib/picture-pace.ts, MM-SA-04), held in memory with no store command: it only refuses.",
+  PICTURE_DOORS_PER_HOUR: "A pace on the studio's picture doors a store opens in an hour (lib/picture-door.ts, pictureDoorHour; rule 24 inventory A1), counted before the file store is asked or anything is signed: it only refuses, and each door it lets through has already taken a studio request (line studio). What a door writes is not priced by it: a picture never put on anything stays in the file store, at most PICTURE_DOOR_MAX fresh ones a store at a time, each at most MAX_IMAGE_BYTES (lib/product-image.ts), and is not deleted once its note is a day old. That retained storage and the file store's per-write charge have no line yet, so they are not certified, never zero.",
   CENTS_PER_MINUTE: "AI captions are bought at their own price, charged before the work (lib/auto-captions-rules.ts).",
   MAX_PAGES_PER_STORE: "Pages of Stripe Checkout Sessions (GET /checkout/sessions, up to 100 each) the five-minute job reads per store per run in each of its two walks of the last day (lib/checkout-sweep.ts, walkDay; audit A2, 9 November 2026): the completed checkouts on every store it sweeps, and the expired ones on a store with reminders or a list, never the open ones. So at most 2 x 3 = 6 list calls each time a store is swept; a run sweeps a store once, unless Redis's SCAN hands its key back on another page (#3064 makes that once a run too), so with one sweep a run 2 x 3 x 288 = 1,728 a UTC day, 55,296 a billing month of 32 UTC days; Stripe bills no API call, and each run stops at its deadline. Each walk keeps its place for the next run (nl:sweep:walk:, tests/store-data-registry.ts): one GET a walk and at most one SET or DEL, so at most 4 store commands each time a store is swept, with one sweep a run 1,152 a UTC day, 36,864 a billing month, and only 2 a sweep (the GETs) for a store whose day of checkouts fits in one run; each value at most 220 bytes, kept a day. Held by tests/checkout-sweep-complete.test.ts. Past 3 pages a run, a walk carries on next run instead of reading the same newest pages again, so every session of the day is read in turn; a walk that takes more than an hour to reach the end of the day is said in the log every run it goes on. A scheduled job, bounded by its schedule (a company fixed cost), not a plan's allowance; like the job's other per-store work, its dollar figure is not yet a line of lib/llc-fixed-costs.ts, so it is not certified, never zero.",
   HAND_OVER_BATCH: "PayPal orders still owed their hand-over that the five-minute job's sweep of a store tries again in one run (lib/paypal-delivery.ts, handOverAgain; #2909): one ZRANGEBYSCORE of the list a store with PayPal a run, then for each order tried at most four commands of its own (GET of the paid record, ZSCORE of the refund mark, at most two ZREM or ZADD of the list) besides the hand-over's own work, which is the order's (line orders): at most 1 + HAND_OVER_BATCH x 4 commands of its own a store a run, and at most HAND_OVER_BATCH hand-overs tried, each order at most once a run (PAYPAL_HAND_OVER_RETRY, held by tests/paypal-handover-cost.test.ts). A scheduled job, bounded by its schedule and the batch, a company fixed cost like MAX_PAGES_PER_STORE, not a plan's allowance; like the job's other per-store work, its dollar figure is not yet a line of lib/llc-fixed-costs.ts, so it is not certified, never zero.",
@@ -1771,6 +1801,7 @@ export const SCOPES: Record<string, ScopeClass> = {
   "lesson-comment": BURST("buyer-actions"), "lesson-comment-day": BURST("buyer-actions"), "task-hand-in": BURST("buyer-actions"), "lesson-note": BURST("buyer-actions"), "task-upload": BURST("buyer-actions"),
   // Per store, under a figure of the window.
   "api-add": BURST("rest-api"), "api-give": BURST("rest-api"),
+  "picture-door": BURST("studio"),
   "inbox-new": BURST("inbox"), "chat-send": BURST("inbox"), "chat-start": BURST("inbox"),
   // Calls to other services: counted in the store's window as well (lib/metered-limits.ts, withinService).
   "meet-host": SERVICE, "meet-manage": SERVICE, "meet-start": SERVICE, "metaads-start": SERVICE, "discord-connect": SERVICE, esync: SERVICE,
@@ -1863,3 +1894,17 @@ export const API_SALES_READ = CALL + 1 * CPU_SECOND + (STRIPE_TIMEOUT_MS / 1000 
 
 /** Additional Path growth reading: at most eight 256 KB products, three 80 KB campaigns, three bounded reviews and their indexes. Fifty commands and 3 MB include admission overhead; reserved separately before reading. No provider call. */
 export const PATH_GROWTH_READ = request("write", 50, 3_000_000);
+
+/**
+ * One reading of a store's own plan invoices (601 [KB22] U5, lib/plan-invoices.ts), past the page's own
+ * STUDIO_PAGE_UNITS: one GET of Stripe's invoice list waited on for its whole ceiling (STRIPE_TIMEOUT_MS) at 2 GB,
+ * a CPU second and four megabytes of reading (PLAN_INVOICES_SHOWN invoices with their lines; the body is not capped
+ * in bytes, but its download and parse run inside the same STRIPE_TIMEOUT_MS, lib/billing.ts onPlatform), and 64 KB
+ * more sent on to the browser. Taken as one of the store's ESSENTIAL_PER_DAY requests of the day, only while fewer
+ * than PLAN_INVOICES_PER_DAY were taken, before Stripe is asked (the counter countStudio keeps for "billing"), each priced in the studio line as a
+ * heavy request and in platform-subscription-search as two Stripe GETs; tests/plan-cost-registry.test.ts holds this
+ * under that, with room, so it adds nothing to either line. The wait is priced at the dearer of the model's
+ * memory second and PLATFORM_SUBSCRIPTION_SEARCH's highest regional
+ * rate; Stripe's tariff for the GET stays unknown, as there: not certified zero.
+ */
+export const PLAN_INVOICES_READ = CALL + 1 * CPU_SECOND + Math.max((STRIPE_TIMEOUT_MS / 1000) * MEMORY_SECOND, PLATFORM_SUBSCRIPTION_SEARCH.memoryUsdPerGet) + perMegabyte(4_000_000) + 65_536 * ORIGIN_PER_BYTE;

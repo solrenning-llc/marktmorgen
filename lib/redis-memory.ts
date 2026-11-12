@@ -129,6 +129,16 @@ export class MemoryRedis {
         return to < from ? "" : new TextDecoder().decode(bytes.slice(from, to + 1));
       }
       case "EVAL": {
+        // lib/request-guard.ts ESSENTIAL_BELOW: one more on an essential counter only while fewer than ARGV[1] were taken.
+        if (key.startsWith("-- marktmorgen:essential-below:v1\n") && args[0] === "1" && args.length === 4) {
+          const [, counter, below, window] = args;
+          this.run(["SET", counter, "0", "EX", window, "NX"]);
+          const held = this.run(["GET", counter]);
+          const n = held === null || held === undefined ? Number.NaN : Number(held);
+          if (!Number.isFinite(n)) return -2;
+          if (n >= Number(below)) return -1;
+          return this.run(["INCR", counter]);
+        }
         // lib/form-store.ts FIND_FORM_RESPONSE: the first kept response written with this id, as its text, or nil.
         if (key.startsWith("-- marktmorgen:form-find:v1\n") && args[0] === "1" && args.length === 4) {
           const [, listKey, id, kept] = args;
@@ -204,6 +214,13 @@ export class MemoryRedis {
             out.push(seen === args[i + 1] ? 1 : 0);
           }
           return out;
+        }
+        // lib/certificate.ts CERT_SLOT_SWAP: a student's slot moved to a new certificate only while it still names the one read.
+        if (key.startsWith("-- marktmorgen:cert-slot-swap:v1\n") && args[0] === "1" && args.length === 5) {
+          const [, slots, who, expected, id] = args;
+          if (this.run(["HGET", slots, who]) !== expected) return 0;
+          this.run(["HSET", slots, who, id]);
+          return 1;
         }
         // lib/assignment.ts HAND_IN_WRITE_IF: a student's work written only over the one it was read as.
         if (key.startsWith("-- marktmorgen:hand-in-write-if:v1\n") && args[0] === "4" && args.length === 12) {

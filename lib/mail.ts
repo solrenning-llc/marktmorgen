@@ -610,8 +610,8 @@ export async function sendTo(
         let removed = false;
         if (r.address) {
           try {
-            await stopWriting(store.listId as string, r.to, "refused");
-            removed = true;
+            // Only what this took off counts as taken off: false when the list no longer holds the address, or it had already left.
+            removed = await stopWriting(store.listId as string, r.to, "refused");
           } catch (error) {
             console.error("taking a refused address off the list failed", error);
           }

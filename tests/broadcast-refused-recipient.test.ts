@@ -38,6 +38,8 @@ let amazon: "address" | "content" | "lost" = "address";
 let says: "plain" | "address" | "domain" = "plain";
 /** When set, Amazon refuses every email with this text, as it does for a sender's own header it will not take. */
 let refuseAll: string | null = null;
+/** When set, this address leaves the list (its row deleted) just as Amazon is asked, so taking it off finds nothing to take. */
+let goneFirst: { listId: string; email: string } | null = null;
 const refusal = (message: string) => new Response(JSON.stringify({ message }), { status: 400, headers: { "content-type": "application/json", "x-amzn-errortype": "BadRequestException" } });
 const contactOf = (listId: string, email: string) => parseContact(redis.run(["HGET", leadsKey(listId), email]));
 
@@ -56,7 +58,7 @@ async function main(): Promise<void> {
   process.env.RESEND_API_KEY = "re_test_send_time_suppression_only";
   const mail = installSesMailFixture({
     // Amazon refuses these addresses (BAD and, in G, one more at the same domain) for good, as it does an address it will not take; every other goes.
-    onSes: (message) => refuseAll !== null ? refusal(refuseAll) : amazon === "content"
+    onSes: (message) => (goneFirst && message.to.includes(goneFirst.email) && redis.run(["HDEL", leadsKey(goneFirst.listId), goneFirst.email]), refuseAll !== null) ? refusal(refuseAll) : amazon === "content"
       ? new Response(JSON.stringify({ message: "Email content rejected" }), { status: 400, headers: { "content-type": "application/json", "x-amzn-errortype": "MessageRejected" } })
       : amazon === "lost" && message.to.includes("bo@example.com")
         ? new Response("", { status: 500 })
@@ -263,6 +265,22 @@ async function main(): Promise<void> {
   for (let r = 0; r < 2; r += 1) await sendDueSteps((handle) => storeForHandle(handle), Date.now() + 20_000);
   is("nobody in the sequence is taken off the list", onList(cafeList, followers), kept(followers));
   refuseAll = null;
+
+  part("K: the refused address left the list just as it was sent, so nothing is taken off and nothing says it was");
+  mail.clearCaptured();
+  const LEFT = "left@exämple.com";
+  await upsertContact(listId, LEFT, { agreed: true, explicit: true, source: "import" }, ROOM);
+  goneFirst = { listId, email: LEFT };
+  const idK = "abababababababababababab";
+  const keyK = `nl:mail:bc:${idK}`;
+  const ks = ["ana@example.com", LEFT];
+  await redis.pipeline([["SET", keyK, JSON.stringify({ ...broadcast, id: idK, total: ks.length })], ["RPUSH", `${keyK}:to`, ...ks], ["SADD", "nl:mail:queue", idK]]);
+  const k = await advanceBroadcast(idK, storeForHandle, Date.now() + 10_000);
+  goneFirst = null;
+  is("the good address got it", mail.ses.flatMap((m) => m.to), ["ana@example.com"]);
+  is("the address that had already left is not on the list", contactOf(listId, LEFT), null);
+  is("the broadcast does not count it as taken off", k?.removed ?? 0, 0);
+  is("the note does not say it was taken off the list", /taken off your list/.test(k?.note ?? ""), false);
 
   mail.restore();
   done();

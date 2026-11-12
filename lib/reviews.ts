@@ -383,7 +383,9 @@ export async function saveReview(statsId: string, input: SaveInput, room: DataSt
       editedAt: before ? now : 0,
       hidden: before ? before.hidden : mark !== null,
       hiddenReason: before ? before.hiddenReason : mark !== null && isHideReason(mark) ? mark : null,
-      refunded: false,
+      // A full refund of an order is final: a review written again from that same order stays refunded (the sweep
+      // marks each refund once, and never again). Written from another order, it rests on that one.
+      refunded: Boolean(before?.refunded && before.reference === input.reference),
       reply: before?.reply ?? null,
       // A photo stays through an edit; it is added or taken off by setReviewPhoto.
       photo: before?.photo ?? null,

@@ -22,9 +22,11 @@ process.env.NIMBUS_DATA_KEY = "a-local-key-for-tests-only-0123456789abcdef";
 const OWNER = "kiln.owner@example.com";
 const DAY = 86_400_000;
 const emails: { to: string; subject: string; text: string }[] = [];
+let refuseEmails = false;
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   if (url.hostname === "api.resend.com") {
+    if (refuseEmails) return new Response(JSON.stringify({ message: "synthetic refusal" }), { status: 422 });
     const body = JSON.parse(String(init?.body)) as { to: string | string[]; subject: string; text: string };
     emails.push({ to: [body.to].flat()[0], subject: body.subject, text: body.text });
     return new Response(JSON.stringify({ id: `email_${emails.length}` }), { status: 200 });
@@ -107,6 +109,17 @@ async function main(): Promise<void> {
   is("a store count that cannot be read: nothing sent", await tellLowStock(store, another.product, 4, now + 6 * DAY), "unknown");
   redis.pipeline = pipe;
   is("and nothing of it was spent: told the next day", await tellLowStock(store, another.product, 4, now + 7 * DAY), "told");
+
+  part("Nothing delivered, nothing spent (Revisor 1 and Claude 3 on #3725)");
+  const quiet = await addProduct(OWNER, "Plate", "", "30", null);
+  if (!quiet.ok) throw new Error("no product");
+  await setLowStock(store, quiet.product.id, 5, 10);
+  const sentBefore = emails.length;
+  refuseEmails = true;
+  is("the email refused and no phone to tell: unknown, never told", await tellLowStock(store, quiet.product, 4, now + 8 * DAY), "unknown");
+  refuseEmails = false;
+  is("so the same day, the email back: told then", await tellLowStock(store, quiet.product, 4, now + 8 * DAY), "told");
+  is("one email in all", emails.length - sentBefore, 1);
   done();
 }
 

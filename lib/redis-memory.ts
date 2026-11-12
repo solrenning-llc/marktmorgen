@@ -26,10 +26,30 @@ const NOTES_TOTAL_FIELD = "ln#";
 
 type Entry = string | string[] | Map<string, string> | Set<string> | { score: number; member: string }[];
 
+/**
+ * The keys, whose removal also takes their expiry away, as on Redis: a key deleted (DEL, GETDEL, an emptied hash, a
+ * script's own delete) and made again later has no expiry until one is set. Before, the expiry outlived the key, so a
+ * counter made again by INCR or DECRBY after a DEL inherited the old one here and had none on Redis: a test could not
+ * see a key left with no expiry (Claude 7, Redis race hunt; lib/store-allowance.ts giveAllowance).
+ */
+class Keyspace extends Map<string, Entry> {
+  constructor(private readonly ends: Map<string, number>) {
+    super();
+  }
+  override delete(key: string): boolean {
+    this.ends.delete(key);
+    return super.delete(key);
+  }
+  override clear(): void {
+    this.ends.clear();
+    super.clear();
+  }
+}
+
 export class MemoryRedis {
-  private data = new Map<string, Entry>();
   /** When a key stops existing, in ms since the epoch. */
   private until = new Map<string, number>();
+  private data: Map<string, Entry> = new Keyspace(this.until);
   /**
    * The clock, so a test can move time rather than wait for it. A cooldown
    * measured in minutes is not a thing to sit through.

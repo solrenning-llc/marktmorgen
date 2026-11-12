@@ -60,7 +60,7 @@ import {
   keyRecords,
   makerPrint,
   makerPrints,
-  revokeKey,
+  revokeKeyOutcome,
   type PauseWhy,
   pauseWhy,
   rewriteMakers,
@@ -516,7 +516,9 @@ export async function revokeChecked(store: Store, role: Role, id: string): Promi
   const key = keys.find((k) => k.id === id);
   if (!key) return "unknown";
   if (pauseWhy(store.sid, key.maker, key.hold, team.members, key.write, team.rule) === "left" && role !== "owner") return "owner_only";
-  return (await revokeKey(store.sid, id)) ? "ok" : "revoke_unconfirmed";
+  // Already gone (another tab revoked it) is said as such; only an unconfirmed deletion is "unconfirmed".
+  const outcome = await revokeKeyOutcome(store.sid, id);
+  return outcome === "revoked" ? "ok" : outcome === "gone" ? "unknown" : "revoke_unconfirmed";
 }
 
 /**

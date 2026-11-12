@@ -19,13 +19,24 @@
  * is complete and paid, in live mode for a real sale and test mode for the
  * test purchase, never a page that said "thanks". A refund in full takes a
  * sale off; refunds are taken off the money; what Stripe could not be asked
- * about leaves the money unknown (null), so no level moves on it. PayPal's
- * sales carry no test mode and are not counted here (docs/marktmorgen-path.md).
+ * about leaves the money unknown (null), so no level moves on it.
+ *
+ * PayPal's sales (lib/paypal-sales.ts) are the store's own server's record of
+ * an order it captured: real only when that record says it was taken through
+ * PayPal's live API, never a test purchase (PayPal's sandbox has no
+ * store-level test mode here), and judged by the refunds PayPal confirmed,
+ * matched by the capture (12 [D9]). One counts only while its refunds can be
+ * seen: the refund watch runs for the PayPal account that took it, and read
+ * PayPal's word on it at its last look (a seller who took the permission back
+ * inside PayPal gets a 403 there, and the sale leaves the count until PayPal
+ * answers again). One PayPal refunded in part or reversed is taken off whole,
+ * the amount kept not being read (the money reviews on #3443).
  */
 import { KIND } from "@/lib/catalog";
 import {saleHandles,type Store} from "@/lib/store";
 import {pathGrowthMoney,type PathGrowthMoney} from "@/lib/path-growth-money";
-import { readLifeRecord, readPaidSales, readStoreRefunds } from "@/lib/stats";
+import { readLifeRecord, readPaidSales, readStoreRefunds, readsSales } from "@/lib/stats";
+import { paypalPaymentId, paypalRefundWatch, readPayPalRefundsDetail } from "@/lib/paypal-sales";
 import { countLinks } from "@/lib/short-links";
 import { sellsInTestMode } from "@/lib/stripe-connect";
 import { type PathFacts, SOCIAL_SOURCES } from "@/lib/path-rules";
@@ -53,6 +64,25 @@ export type PathMoney = {
 };
 
 type Sold = { cents: number; currency: string; intent: string; live: boolean | null };
+
+/**
+ * A sale read, as the path counts it. A Stripe sale carries its own livemode. A
+ * PayPal order is real only when its own record says it was taken through
+ * PayPal's live API, by the PayPal account whose refunds are watched now
+ * (`watched`, paypalRefundWatch; null when none is), the watch read PayPal's
+ * word on it at its last look (Claude 5's N1b: not refused, 403 or 401, nor
+ * left unanswered), and PayPal never said it was refunded in part or
+ * reversed; otherwise it is neither real nor a test purchase (null). Pure, for
+ * the tests.
+ */
+export function soldOf(sale: { cents: number; currency: string; paymentIntent: string; row: Record<string, unknown> }, watched: string | null): Sold {
+  if (sale.row.object === "paypal.order") {
+    const own = sale.row.paypal && typeof sale.row.paypal === "object" ? (sale.row.paypal as Record<string, unknown>) : {};
+    const counted = own.live === true && own.taken_off === null && own.blind === false && typeof own.merchant === "string" && watched !== null && own.merchant === watched;
+    return { cents: sale.cents, currency: sale.currency, intent: sale.paymentIntent, live: counted ? true : null };
+  }
+  return { cents: sale.cents, currency: sale.currency, intent: sale.paymentIntent, live: typeof sale.row.livemode === "boolean" ? sale.row.livemode : null };
+}
 
 /** What the path counts from the sales and refunds read. Pure, for the tests. */
 export function moneyFrom(sold: Sold[], refunds: { cents: number; currency: string; paymentIntent: string }[] | null, currency: string, at: number): PathMoney {
@@ -83,7 +113,9 @@ export function moneyFrom(sold: Sold[], refunds: { cents: number; currency: stri
     const fromUnnamed = Math.max(0, own(unnamed).reduce((n, s) => n + s.cents, 0) - unmatched);
     cents = fromNamed + fromUnnamed;
   }
-  return { at, test, real: keptNamed + keptUnnamed, cents, currency };
+  // Refunds not known: any sale may have been refunded in full, so none is counted as kept. The first level is reached
+  // on the count alone and a level reached is never lowered, so an unknown here must not move it (Claude 1's MEDIUM on #3443).
+  return { at, test, real: refunds === null ? 0 : keptNamed + keptUnnamed, cents, currency };
 }
 
 /**
@@ -92,31 +124,58 @@ export function moneyFrom(sold: Sold[], refunds: { cents: number; currency: stri
  * kept, never a guess.
  */
 export async function readPathMoney(store: Store, now = Date.now()): Promise<PathMoney | null> {
-  if (!store.stripeAccountId) return { at: now, test: false, real: 0, cents: 0, currency: store.currency };
-  let sales;let partial=false;
+  // Neither Stripe nor PayPal connected: nothing can have been sold. A store that sells through PayPal alone is read.
+  if (!readsSales(store)) return { at: now, test: false, real: 0, cents: 0, currency: store.currency };
+  const watched = paypalRefundWatch(store);
+  let sales;let partial=false;let gaps: string[] = [];
   try {
-    ({ sales,partial } = await readPaidSales(store, 0, PATH_SALE_PAGES));
+    ({ sales,partial,gaps } = await readPaidSales(store, 0, PATH_SALE_PAGES));
   } catch (error) {
     console.error("reading a store's sales for its path failed", store.handle, error);
     return null;
   }
-  const sold: Sold[] = sales
-    .filter((s) => {
-      const meta = (s.row.metadata ?? {}) as Record<string, unknown>;
-      // A gift through "Support my work" sold nothing, and a payment request is a bill, not an order from the store.
-      return s.cents > 0 && meta.kind !== "tip" && meta.kind !== "request";
-    })
-    .map((s) => ({ cents: s.cents, currency: s.currency, intent: s.paymentIntent, live: typeof s.row.livemode === "boolean" ? s.row.livemode : null }));
-  const realOnes = sold.filter((s) => s.live === true);
-  let refunds: { cents: number; currency: string; paymentIntent: string }[] | null = [];
-  if (realOnes.length) {
-    const since = Math.floor(Math.min(...sales.filter((s) => s.row.livemode === true).map((s) => s.created)) / 1000);
+  const orders = sales.filter((s) => {
+    const meta = (s.row.metadata ?? {}) as Record<string, unknown>;
+    // A gift through "Support my work" sold nothing, and a payment request is a bill, not an order from the store.
+    return s.cents > 0 && meta.kind !== "tip" && meta.kind !== "request";
+  });
+  const sold: Sold[] = orders.map((s) => soldOf(s, watched));
+  const liveSales = orders.filter((s) => soldOf(s, watched).live === true);
+  const liveStripe = liveSales.filter((s) => s.row.object !== "paypal.order");
+  const livePayPal = liveSales.filter((s) => s.row.object === "paypal.order");
+  // PayPal's sales not all read while PayPal is watched: the money leaves them out, so it is not known, and no level
+  // moves on it (cloud I's MEDIUM 2 on #3443; rule 24). Never Stripe's money alone said as the store's.
+  const payPalGap = gaps.includes("paypal") && Boolean(watched);
+  let refunds: { cents: number; currency: string; paymentIntent: string }[] | null = payPalGap ? null : [];
+  const since = (list: typeof sales) => Math.floor(Math.min(...list.map((s) => s.created)) / 1000);
+  // The gap stays unknown: a complete Stripe refunds reading never makes a ledger missing PayPal's sales known again
+  // (Codex G's MEDIUM on #3443).
+  if (!payPalGap && liveStripe.length && store.stripeAccountId) {
     try {
-      const read = await readStoreRefunds(store, since, PATH_REFUND_PAGES);
+      const read = await readStoreRefunds(store, since(liveStripe), PATH_REFUND_PAGES);
       // Refunds not all read: the money is not known, and no level moves on it.
       refunds = read.partial ? null : read.rows;
     } catch (error) {
       console.error("reading a store's refunds for its path failed", store.handle, error);
+      refunds = null;
+    }
+  }
+  if (refunds !== null && livePayPal.length) {
+    try {
+      // PayPal's refunds in full, as its refund watch wrote them down; any it could not all read leaves the money unknown.
+      const read = await readPayPalRefundsDetail(store.statsId, since(livePayPal));
+      // A PayPal refund names its own payment, so one whose sale the path did not count gives nothing back of a sale it
+      // did: it is left out, never taken off a Stripe sale that names no payment (Claude 6's L2 on #3443).
+      const counted = new Set(livePayPal.map((s) => s.paymentIntent));
+      const own = read.rows.map((r) => ({ cents: r.cents, currency: r.currency, paymentIntent: paypalPaymentId(r.capture) })).filter((r) => counted.has(r.paymentIntent));
+      // A refund whose sale's record has expired (400 days after the sale) is of a sale the path does not count: it
+      // leaves the money known. One of a sale it counts, or a reading cut short, leaves it unknown (cloud I's
+      // MEDIUM 1 on #3443).
+      const countedOrders = new Set(livePayPal.map((s) => String(s.row.id ?? "").replace(/^paypal:/, "")));
+      const unknown = read.cut || read.gone.some((order) => countedOrders.has(order));
+      refunds = unknown ? null : [...refunds, ...own];
+    } catch (error) {
+      console.error("reading a store's PayPal refunds for its path failed", store.handle, error);
       refunds = null;
     }
   }

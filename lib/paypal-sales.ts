@@ -46,7 +46,7 @@ import { fairOff } from "@/lib/fair-price";
 import { admitOrders } from "@/lib/order-admission";
 import { countOrder } from "@/lib/orders";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, listSlots, repliesFor, stringList } from "@/lib/redis-reply";
 import { EMAIL_PATTERN } from "@/lib/auth";
 import { addressHash, grantImported, importedKey } from "@/lib/imported-purchases";
 import { plainAmount, formatMoney } from "@/lib/money";
@@ -63,6 +63,12 @@ const API = /^http:\/\/127\.0\.0\.1:\d+$/.test(process.env.PAYPAL_API_BASE ?? ""
   : process.env.PAYPAL_ENV === "sandbox"
     ? "https://api-m.sandbox.paypal.com"
     : "https://api-m.paypal.com";
+
+/**
+ * Whether orders are taken through PayPal's live API, so a captured order is a real sale (12 [D9]): never in
+ * PayPal's sandbox or against a local stand-in, whose orders are neither real sales nor test purchases.
+ */
+export const paypalLiveApi = (): boolean => API === "https://api-m.paypal.com";
 const TIMEOUT_MS = 20_000;
 const ORDER_ID = /^[A-Z0-9]{10,36}$/;
 /** The refunded mark's score as this file writes it (ZADD with String(now)): whole seconds, nothing else. */
@@ -488,7 +494,40 @@ export type Paid = {
   via?: { aff: string; rate: number };
   off?: number;
   sale?: number;
+  /**
+   * Added 9 November 2026 (12 [D9]; Claude 6's M3 on #3443): whether this order was captured through PayPal's live
+   * API (paypalLiveApi at settle), so whether it is a real sale is the order's own, never the reading deployment's;
+   * and the PayPal account that took it, whose refunds the watch can ask about (Claude 5's N1). Absent on orders paid
+   * before: such an order is not counted by the Path.
+   */
+  live?: boolean;
+  merchant?: string;
+  /**
+   * What PayPal last said of the capture when it was neither completed whole nor refunded in full (Claude 6's M2 and
+   * L3 on #3443): refunded in part, or reversed. Written by the refund watch; the amount kept is not read, so the
+   * Path takes such a sale off whole.
+   */
+  takenOff?: TakenOff;
+  /**
+   * When the refund watch last failed to read PayPal's word on this capture, in seconds (Claude 5's N1b on #3443):
+   * PayPal refused it (403 or 401: the seller took the permission back inside PayPal), did not answer, or answered
+   * without a status. Present in any form, the Path does not count the sale; it is taken off once the watch writes
+   * PayPal's answer down again.
+   */
+  blind?: number;
 };
+/** Capture statuses that leave less than the whole sale kept without a refund in full (payments_payment_v2, capture). */
+export type TakenOff = "PARTIALLY_REFUNDED" | "REVERSED";
+const TAKEN_OFF: ReadonlySet<string> = new Set<TakenOff>(["PARTIALLY_REFUNDED", "REVERSED"]);
+
+/**
+ * The PayPal account whose captures the refund watch asks about for this store (watchPayPal), or null when it asks
+ * about none: the platform is not a PayPal partner, or the store has no PayPal connected. A sale taken by another
+ * account than this one is not watched either (Claude 5's N1 on #3443).
+ */
+export function paypalRefundWatch(store: Pick<Store, "statsId" | "paypalSeller">): string | null {
+  return paypalSalesConfigured() && store.statsId && store.paypalSeller ? store.paypalSeller.merchant : null;
+}
 export type CaptureResult = { ok: true; paid: Paid; fresh: boolean } | { ok: false; reason: "unknown" | "pending" | "declined" | "mismatch" | "error" };
 
 /** Whether PayPal is still being waited on for an order this store opened. */
@@ -633,6 +672,8 @@ async function settle(order: string, opened: Opened, captureId: string, email: s
     currency: opened.cur,
     at: Math.floor(Date.now() / 1000),
     handle: opened.h,
+    live: paypalLiveApi(),
+    merchant: opened.m,
     ...(opened.meta ? { meta: opened.meta } : {}),
     ...(opened.via ? { via: opened.via } : {}),
     ...(opened.off ? { off: opened.off, sale: opened.sale } : {}),
@@ -802,6 +843,24 @@ export function nextLook(paidAt: number, now: number): number | null {
 }
 
 /**
+ * Marks a paid order as not seen by the refund watch at its last look (Claude 5's N1b on #3443), so the Path stops
+ * counting it: once, keeping the first time, for the record's time left (SET XX: a record already gone is not
+ * written again). The write is read exactly; one that cannot be confirmed is logged, never thrown, and the order is
+ * looked at again in an hour like every look that failed.
+ */
+async function markBlind(paid: Paid, now: number): Promise<void> {
+  if (paid.blind !== undefined) return;
+  const left = paid.at + PAID_KEPT_SECONDS - now;
+  if (left <= 0) return;
+  try {
+    const wrote = repliesFor(await redisPipeline([["SET", paidKey(paid.order), JSON.stringify({ ...paid, blind: now }), "XX", "EX", left]]), 1);
+    if (!wrote || (wrote[0] !== "OK" && wrote[0] !== null)) console.error("a PayPal sale the refund watch could not read could not be marked", paid.order);
+  } catch (error) {
+    console.error("a PayPal sale the refund watch could not read could not be marked", paid.order, error);
+  }
+}
+
+/**
  * The orders one sweep of a store reads from each of its two lists (pending payments, orders due a refund look): one
  * ZRANGEBYSCORE of each list a run, never more orders than this (NOT_A_COST.PAYPAL_WATCH_BATCH and PAYPAL_WATCH_RANGES
  * in tests/plan-cost-registry.ts, held by tests/paypal-watch-cost.test.ts). The rest wait for the next run.
@@ -890,16 +949,43 @@ export async function watchPayPal(
     try {
       const capture = await call("GET", `/v2/payments/captures/${encodeURIComponent(paid.capture)}`, { merchant: store.paypalSeller.merchant });
       // Without PayPal's own status it is not known whether it was refunded: asked again in an hour, never taken for
-      // "not refunded", and moved back so it cannot hold the place of the orders behind it.
+      // "not refunded", and moved back so it cannot hold the place of the orders behind it. Until PayPal answers, the
+      // Path does not count the sale (Claude 5's N1b on #3443).
       if (typeof capture.status !== "string" || !capture.status) {
+        await markBlind(paid, now);
         await redisPipeline([["ZADD", watchKey(statsId), String(now + 3600), order]]);
         continue;
       }
       status = capture.status;
     } catch (error) {
+      // PayPal refused the capture (403 or 401: the seller took Marktmorgen's permission back inside PayPal, while the
+      // store still shows it connected), did not answer, or answered off its shape: whether it was refunded is not
+      // known, so the Path stops counting the sale until the watch reads it again (Claude 5's N1b on #3443).
       console.error("reading a PayPal capture failed", error);
+      await markBlind(paid, now);
       await redisPipeline([["ZADD", watchKey(statsId), String(now + 3600), order]]).catch(() => undefined);
       continue;
+    }
+    // Refunded in part, or reversed: written on the paid record once, for its time left, so the Path takes the sale off
+    // whole (Claude 6's M2 and L3 on #3443); it stays watched for a refund in full. A sale the watch could not read at
+    // its last look is seen again, its mark taken off in the same write (Claude 5's N1b), except when PayPal says it
+    // was refunded in full: then it leaves the count either way, and the mark is kept. The write is read exactly: "OK",
+    // or null when the record is already gone (XX); anything else is unknown and the order is looked at again in an
+    // hour, the sale still not counted while it was not seen.
+    const takeOff = TAKEN_OFF.has(status) && paid.takenOff !== status;
+    const seenAgain = status !== "REFUNDED" && paid.blind !== undefined;
+    if (takeOff || seenAgain) {
+      const left = paid.at + PAID_KEPT_SECONDS - now;
+      if (left > 0) {
+        const { blind: _blind, ...seen } = paid;
+        const record: Paid = { ...(seenAgain ? seen : paid), ...(takeOff ? { takenOff: status as TakenOff } : {}) };
+        const wrote = repliesFor(await redisPipeline([["SET", paidKey(order), JSON.stringify(record), "XX", "EX", left]]), 1);
+        if (!wrote || (wrote[0] !== "OK" && wrote[0] !== null)) {
+          console.error("PayPal's word on a sale could not be written on its record; looked at again in an hour", order);
+          await redisPipeline([["ZADD", watchKey(statsId), String(now + 3600), order]]);
+          continue;
+        }
+      }
     }
     if (status !== "REFUNDED") {
       const next = nextLook(paid.at, now);
@@ -920,6 +1006,8 @@ export async function watchPayPal(
     );
     if (!marked || !marked.every((reply) => reply === 0 || reply === 1)) {
       console.error("a PayPal refund could not be marked; looked at again in an hour", order);
+      // Refunded in full but not yet written down: the Path does not count the sale meanwhile (Claude 5's N1b).
+      await markBlind(paid, now);
       await redisPipeline([["ZADD", watchKey(statsId), String(now + 3600), order]]);
       continue;
     }
@@ -1086,20 +1174,30 @@ export async function paypalCounts(statsId: string | null): Promise<{ sales: num
  */
 export async function readPayPalSales(statsId: string | null, since: number, limit: number): Promise<{ sales: Paid[]; partial: boolean }> {
   if (!statsId || !isRedisConfigured()) return { sales: [], partial: false };
-  const [orders] = await redisPipeline([["ZREVRANGEBYSCORE", salesKey(statsId), "+inf", String(Math.max(0, since)), "LIMIT", "0", String(limit + 1)]]);
-  const list = (Array.isArray(orders) ? (orders as string[]) : []).filter((o) => ORDER_ID.test(o));
-  if (!list.length) return { sales: [], partial: false };
-  const partial = list.length > limit;
-  const read = await redisPipeline([["MGET", ...list.slice(0, limit).map(paidKey)]]);
-  const rows = Array.isArray(read[0]) ? (read[0] as unknown[]) : [];
+  // Each reply read in its exact shape (CX-123 rule 24; Claude 6's L1 on #3443): a range that is not a list of text,
+  // or an MGET without one slot an order, is unknown, and the reading is partial, never "no sales".
+  const range = repliesFor(await redisPipeline([["ZREVRANGEBYSCORE", salesKey(statsId), "+inf", String(Math.max(0, since)), "LIMIT", "0", String(limit + 1)]]), 1);
+  const listed = range ? stringList(range[0]) : null;
+  if (!listed) return { sales: [], partial: true };
+  const list = listed.filter((o) => ORDER_ID.test(o));
+  if (!list.length) return { sales: [], partial: list.length !== listed.length };
+  let partial = list.length > limit || list.length !== listed.length;
+  const wanted = list.slice(0, limit);
+  const read = repliesFor(await redisPipeline([["MGET", ...wanted.map(paidKey)]]), 1);
+  const rows = read ? listSlots(read[0]) : null;
+  if (!rows || rows.length !== wanted.length) return { sales: [], partial: true };
   const sales: Paid[] = [];
   for (const raw of rows) {
+    let paid: Paid | null = null;
     try {
-      const paid = typeof raw === "string" ? (JSON.parse(raw) as Paid) : null;
-      if (paid && paid.store === statsId && typeof paid.order === "string") sales.push(paid);
+      paid = typeof raw === "string" ? (JSON.parse(raw) as Paid) : null;
     } catch {
-      // An order that cannot be read is left out, not guessed at.
+      paid = null;
     }
+    // An order that cannot be read is left out, not guessed at, and the reading says it is partial. One whose record
+    // has gone (null) or belongs to another store is not this store's sale.
+    if (paid && typeof paid === "object" && paid.store === statsId && typeof paid.order === "string") sales.push(paid);
+    else if (raw !== null && !(paid && typeof paid === "object" && typeof paid.store === "string" && paid.store !== statsId)) partial = true;
   }
   return { sales, partial };
 }
@@ -1136,7 +1234,20 @@ export async function paypalKept(statsId: string | null, refunds: boolean): Prom
  * their records read in one MGET.
  */
 export async function readPayPalRefundsWithCoverage(statsId: string | null, since: number): Promise<{ rows: { order: string; capture: string; cents: number; currency: string; at: number }[]; partial: boolean }> {
-  if (!statsId || !isRedisConfigured()) return { rows: [], partial: false };
+  const { rows, partial } = await readPayPalRefundsDetail(statsId, since);
+  return { rows, partial };
+}
+
+/**
+ * readPayPalRefundsWithCoverage with why a reading is not whole, for a reader that can tell the two apart
+ * (lib/path-facts.ts, cloud I's MEDIUM 1 on #3443): `gone`, the orders whose record Redis answered as missing (a paid
+ * record expires 400 days after its sale), and `cut`, every other reason. `partial` is either.
+ */
+export async function readPayPalRefundsDetail(
+  statsId: string | null,
+  since: number,
+): Promise<{ rows: { order: string; capture: string; cents: number; currency: string; at: number }[]; partial: boolean; gone: string[]; cut: boolean }> {
+  if (!statsId || !isRedisConfigured()) return { rows: [], partial: false, gone: [], cut: false };
   const from = Math.max(0, since);
   // The refunds, member and score, as a list of text no longer than the LIMIT asked ([] is none); each score whole
   // seconds, as the sweep writes it (REDIS_SCORE), and within the range asked. Anything else is unknown and throws,
@@ -1149,6 +1260,9 @@ export async function readPayPalRefundsWithCoverage(statsId: string | null, sinc
   }
   for (let i = 0; i + 1 < Math.min(flat.length, 2 * PAYPAL_REFUNDS_READ); i += 2) listed.push({ order: flat[i], at: Number(flat[i + 1]) });
   const out: { order: string; capture: string; cents: number; currency: string; at: number }[] = [];
+  // Why the reading may not be whole, kept apart for a reader that can tell them (lib/path-facts.ts): `gone`, the orders
+  // whose record Redis answered as missing (expired 400 days after the sale), and `cut`, everything else.
+  const gone: string[] = [];
   let missing = listed.some((entry) => !ORDER_ID.test(entry.order));
   const readable = listed.filter((entry) => ORDER_ID.test(entry.order));
   // The records, read exactly (Codex Z on #2964; CX-123 rule 24): one reply to the one MGET, holding exactly one
@@ -1161,7 +1275,7 @@ export async function readPayPalRefundsWithCoverage(statsId: string | null, sinc
   readable.forEach((entry, i) => {
     const raw = records[i];
     if (raw === null) {
-      missing = true;
+      gone.push(entry.order);
       return;
     }
     if (typeof raw !== "string") throw new UnknownReplyError(what);
@@ -1189,7 +1303,8 @@ export async function readPayPalRefundsWithCoverage(statsId: string | null, sinc
     if (r.store === statsId) out.push({ order: entry.order, capture: r.capture, cents: r.cents as number, currency: r.currency, at: entry.at });
     else missing = true;
   });
-  return { rows: out, partial: flat.length > 2 * PAYPAL_REFUNDS_READ || missing };
+  const cut = flat.length > 2 * PAYPAL_REFUNDS_READ || missing;
+  return { rows: out, partial: cut || gone.length > 0, gone, cut };
 }
 
 /**

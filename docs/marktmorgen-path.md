@@ -151,8 +151,24 @@ policy says so (`/privacy#path`).
    store sends its confirmation email (`fs:`), so an import never counts. The
    stricter reading, an address that used its confirmation link, would need
    either a walk of the list or a new counter on the confirmation; not built.
-2. **PayPal sales** carry no test mode and are not counted toward Day 7 or a
-   level yet.
+2. **PayPal sales** count toward Day 7 and the levels only when the store's own
+   server captured them through PayPal's live API, less the refunds PayPal
+   confirmed in full (12 [D9] unit 1). Whether an order was taken on the live API
+   is written on its own paid record when it is captured, never read from the
+   deployment that reads it later; a sandbox order, or one paid before that field
+   existed, is neither a real sale nor a test purchase. A PayPal sale counts only
+   while its refunds can be seen: the platform is a PayPal partner and the store
+   is still connected to the PayPal account that took it, and the refund watch
+   read PayPal's word on it at its last look; otherwise it is left out. A seller
+   who takes Marktmorgen's permission back inside PayPal still shows as
+   connected, but the watch gets a 403 (or 401) there: that sale, like one PayPal
+   did not answer about, leaves the count until the watch reads it again, and
+   Stripe sales stay counted (Claude 5's N1b on #3443). A sale PayPal reports as refunded in part or reversed is taken off whole,
+   since the amount kept is not read. Refunds that cannot all be read, or a reply
+   off its shape, leave the money unknown. A PayPal refund of a sale the Path did
+   not count is never taken off another sale. A reading takes PATH_READ_UNITS
+   studio requests, which cover the PayPal records it can move (the money reviews
+   on #3443).
 
 ## 7. What it will not do
 
@@ -234,7 +250,9 @@ The second mission is named "Prepare your first digital product" because its
 completion fact is a listed deliverable, not a paid order. The sale mission is
 explicitly a real Stripe sale. Its promotion step waits for live checkout;
 writing to a list is conditional on marketing consent. The studio also says
-that PayPal sales are not counted by Path yet, matching section 6.
+that Path counts Stripe sales and live PayPal sales, less refunds, toward the
+first sale and the levels (the growth missions stay on live Stripe checkouts),
+matching section 6.
 
 No additional provider read, data record, quota or price is introduced.
 The notice is checked with the Path page's existing mobile/desktop accessibility
@@ -294,7 +312,7 @@ inline error and focus correction; existing parser and bounds are unchanged.
 6. **Private, accessible level certificates with money opt-in — implementation and verification below.**
 7. **Imported products/pages recognised without imported leads/sales — pending.**
 8. **Creator-local weekly factual studio summary — pending.**
-9. **Server-confirmed live PayPal sales with refunds — pending.**
+9. **Server-confirmed live PayPal sales with refunds — counted (12 [D9] unit 1).**
 10. **Leads counted after confirmation-link use — pending.**
 11. **Creator-controlled store badge, off by default — pending.**
 12. **Private aggregate activation/time-to-first-sale owner panel — pending.**

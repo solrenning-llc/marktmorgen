@@ -268,7 +268,7 @@ export function bumpPauseWords(why: BumpPause, offer: string, where: OfferPlace 
     case "dearer":
       return `${Here} charges more for ${it} than buying it on its own does. Lower ${its} price, or raise the price of ${it}.`;
     case "inBundle":
-      return `${it} and this product are a bundle and a product it already holds, so a buyer would pay twice for one copy. Offer something else.`;
+      return `This product and ${it} are a bundle and a product it already holds, so a buyer would pay twice for one copy. Offer something else.`;
   }
 }
 

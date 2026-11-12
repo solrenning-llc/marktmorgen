@@ -6,7 +6,7 @@
  * over a bundle's products (lib/upsell.ts, deliveredIds), the box does not.
  * Pure rule check on synthetic listings.
  */
-import { activeBumps, bumpStates } from "@/lib/product-extras";
+import { activeBumps, bumpPauseWords, bumpStates } from "@/lib/product-extras";
 import type { Listing, Product } from "@/lib/store";
 import { done, is, part } from "./check";
 
@@ -56,4 +56,8 @@ part("A box on a bundle offering a product it does not hold");
 const jam = item("jam", 700);
 const set3 = item("set", 2500, { file: null, bundle: ["bread", "starter"], bumps: [{ productId: "jam", priceCents: 500, pitch: "" }] });
 is("still shown", activeBumps([bread, starter, jam, set3] as Listing[], set3 as Listing).map((offer) => offer.target.id), ["jam"]);
+
+part("The studio's sentence for it reads as a sentence, named or not");
+const words = [bumpPauseWords("inBundle", "Bread"), bumpPauseWords("inBundle", "")];
+is("it starts with a capital letter and names the offer when it has a name", words.map((w) => [/^[A-Z]/.test(w), w.includes("Bread")]), [[true, true], [true, false]]);
 done();

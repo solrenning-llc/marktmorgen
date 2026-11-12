@@ -15,7 +15,7 @@
  * copy reading a batch with readProducts silently dropped a product whose
  * listing read out of shape and moved its cursor past it. Synthetic store.
  */
-import { readProducts } from "@/lib/catalog";
+import { readProducts, readProductsStrict } from "@/lib/catalog";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { addProduct, claimHandle, setProductFields, setProductNote, storeForEmail } from "@/lib/store";
 import { store as redis } from "./redis-stub";
@@ -54,7 +54,8 @@ async function main(): Promise<void> {
   const catalog = store.catalog.id!;
   const listingKey = `nl:catalog:${catalog}:l:${id}`;
   const extrasKey = `nl:catalog:${catalog}:x:${id}`;
-  const [savedExtras] = (await real([["GET", extrasKey]])) as [string];
+  const [savedExtras, savedListing] = (await real([["GET", extrasKey], ["GET", listingKey]])) as [string, string];
+  const withKey = (key: string, value: unknown) => JSON.stringify({ ...JSON.parse(savedExtras), [key]: value });
 
   part("Confirmed readings");
   const both = await readProducts(store, [id, other.product.id]);
@@ -73,11 +74,19 @@ async function main(): Promise<void> {
     ["the listing answered with a number", listingKey, 3],
     ["the listing answered with text that is not JSON", listingKey, "{\"id\":"],
     ["the listing answered with another product's", listingKey, JSON.stringify({ ...both[1], id: other.product.id })],
+    // Codex P on #3888: fields and funnel well formed, plus a key of the listing; spread over the listing it would replace it.
+    ["extras with readable questions and funnel plus a title", extrasKey, withKey("title", "Replacement")],
+    ["extras with readable questions and funnel plus a price", extrasKey, withKey("price", 1)],
+    ["extras with readable questions and funnel plus another id", extrasKey, withKey("id", other.product.id)],
+    ["extras with readable questions and funnel plus a __proto__ key", extrasKey, savedExtras.replace(/}$/, ',"__proto__":{"title":"Replacement"}}')],
+    ["extras without a funnel key", extrasKey, JSON.stringify({ fields: JSON.parse(savedExtras).fields })],
   ];
   for (const [name, key, reply] of cases) {
     part(`Unknown: ${name}`);
     rewrite = { key, reply };
     is("readProducts throws UnknownReplyError, never a product without it", await outcome(() => readProducts(store, [id, other.product.id])), "unknown");
+    // Rule 30: the strict reader used by the growth path refuses the same reply.
+    is("readProductsStrict refuses it too", (await outcome(() => readProductsStrict(store, [id, other.product.id]))) !== "answered", true);
     // The edit that reads the product under the lock and writes it back whole must not run on that reading.
     let wrote = false;
     const edited = await outcome(async () => {
@@ -87,10 +96,12 @@ async function main(): Promise<void> {
     rewrite = null;
     const [extrasNow] = (await real([["GET", extrasKey]])) as [unknown];
     is("the creator's checkout questions are still stored", extrasNow, savedExtras);
+    const [listingNow] = (await real([["GET", listingKey]])) as [unknown];
+    is("the product's listing is still the one saved", listingNow, savedListing);
     const after = (await readProducts((await storeForEmail(OWNER))!, [id]))[0];
     is("once read whole again, the product still has its question", after?.fields.map((f) => f.label), ["Your company"]);
     // Each case starts from the creator's records as saved, whatever the one before did.
-    await real([["SET", extrasKey, savedExtras]]);
+    await real([["SET", extrasKey, savedExtras], ["SET", listingKey, savedListing]]);
   }
 }
 

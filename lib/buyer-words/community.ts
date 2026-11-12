@@ -374,6 +374,10 @@ const en = {
   removeFailed: "That message could not be removed.",
   emptyFailed: "The room could not be emptied.",
   nothingSaid: "Nothing said yet.",
+  roomLabel: "Messages in this room",
+  newOne: "1 new message.",
+  newMany: (n: number) => `${n} new messages.`,
+  announceNew: "Announce new messages as they arrive",
   sayLabel: "Say something",
   sayPlaceholder: "Say something…",
   send: "Send",
@@ -932,6 +936,10 @@ const es: CommunityWords = {
   removeFailed: "No se pudo quitar ese mensaje.",
   emptyFailed: "No se pudo vaciar la sala.",
   nothingSaid: "Todavía no se ha dicho nada.",
+  roomLabel: "Mensajes de esta sala",
+  newOne: "1 mensaje nuevo.",
+  newMany: (n: number) => `${n} mensajes nuevos.`,
+  announceNew: "Anunciar los mensajes nuevos cuando lleguen",
   sayLabel: "Di algo",
   sayPlaceholder: "Di algo…",
   send: "Enviar",
@@ -1482,6 +1490,10 @@ const fr: CommunityWords = {
   removeFailed: "Ce message n'a pas pu être retiré.",
   emptyFailed: "Le salon n'a pas pu être vidé.",
   nothingSaid: "Rien n'a encore été dit.",
+  roomLabel: "Messages de ce salon",
+  newOne: "1 nouveau message.",
+  newMany: (n: number) => `${n} nouveaux messages.`,
+  announceNew: "Annoncer les nouveaux messages à leur arrivée",
   sayLabel: "Dites quelque chose",
   sayPlaceholder: "Dites quelque chose…",
   send: "Envoyer",
@@ -2032,6 +2044,10 @@ const de: CommunityWords = {
   removeFailed: "Diese Nachricht konnte nicht entfernt werden.",
   emptyFailed: "Der Raum konnte nicht geleert werden.",
   nothingSaid: "Noch nichts gesagt.",
+  roomLabel: "Nachrichten in diesem Raum",
+  newOne: "1 neue Nachricht.",
+  newMany: (n: number) => `${n} neue Nachrichten.`,
+  announceNew: "Neue Nachrichten beim Eintreffen ansagen",
   sayLabel: "Etwas sagen",
   sayPlaceholder: "Etwas sagen…",
   send: "Senden",
@@ -2582,6 +2598,10 @@ const it: CommunityWords = {
   removeFailed: "Non è stato possibile rimuovere quel messaggio.",
   emptyFailed: "Non è stato possibile svuotare la stanza.",
   nothingSaid: "Ancora niente.",
+  roomLabel: "Messaggi in questa stanza",
+  newOne: "1 nuovo messaggio.",
+  newMany: (n: number) => `${n} nuovi messaggi.`,
+  announceNew: "Annuncia i nuovi messaggi quando arrivano",
   sayLabel: "Scrivi qualcosa",
   sayPlaceholder: "Scrivi qualcosa…",
   send: "Invia",
@@ -3132,6 +3152,10 @@ const nl: CommunityWords = {
   removeFailed: "Dat bericht kon niet worden verwijderd.",
   emptyFailed: "De ruimte kon niet worden leeggemaakt.",
   nothingSaid: "Nog niets gezegd.",
+  roomLabel: "Berichten in deze ruimte",
+  newOne: "1 nieuw bericht.",
+  newMany: (n: number) => `${n} nieuwe berichten.`,
+  announceNew: "Nieuwe berichten aankondigen zodra ze binnenkomen",
   sayLabel: "Zeg iets",
   sayPlaceholder: "Zeg iets…",
   send: "Versturen",
@@ -3682,6 +3706,10 @@ const pt: CommunityWords = {
   removeFailed: "Não foi possível retirar essa mensagem.",
   emptyFailed: "Não foi possível esvaziar a sala.",
   nothingSaid: "Ainda nada foi dito.",
+  roomLabel: "Mensagens desta sala",
+  newOne: "1 mensagem nova.",
+  newMany: (n: number) => `${n} mensagens novas.`,
+  announceNew: "Anunciar as mensagens novas quando chegarem",
   sayLabel: "Diga algo",
   sayPlaceholder: "Diga algo…",
   send: "Enviar",
@@ -4028,6 +4056,14 @@ export type RoomWords = {
   removeFailed: string;
   emptyFailed: string;
   nothingSaid: string;
+  /** The scrolling list's name. */
+  roomLabel: string;
+  /** Said to a screen reader when one message from someone else arrives. */
+  newOne: string;
+  /** "{n} new messages." */
+  newMany: string;
+  /** The switch that turns those announcements off and on (WCAG 2.2.4). */
+  announceNew: string;
   aMember: string;
   remove: string;
   sayLabel: string;
@@ -4059,6 +4095,10 @@ export function roomWords(language: unknown, locale: string, pace: { live: numbe
     removeFailed: w.removeFailed,
     emptyFailed: w.emptyFailed,
     nothingSaid: w.nothingSaid,
+    roomLabel: w.roomLabel,
+    newOne: w.newOne,
+    newMany: w.newMany(91).replace("91", "{n}"),
+    announceNew: w.announceNew,
     aMember: w.aMember,
     remove: w.remove,
     sayLabel: w.sayLabel,

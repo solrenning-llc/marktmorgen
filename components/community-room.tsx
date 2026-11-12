@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { type ChatRefusal, MAX_CHAT_TEXT } from "@/lib/community-chat-rules";
 import { AWAY_AFTER_MS, IDLE_MS, LIVE_MS, type Pace, askEvery, paceFor } from "@/lib/chat-pace";
 import type { RoomWords } from "@/lib/buyer-words/community";
+import { newFromOthers, roomNews } from "@/lib/community-room-news";
 
 type Message = { i: number; a: string; text: string; at: number; n?: string };
 /** Leave to ask the shared route, as the server hands it (lib/chat-grant.ts). */
@@ -96,6 +97,12 @@ export function CommunityRoom({
   // dialog stops everything on the page until it is answered, and this is a
   // thing done in a hurry.
   const [emptying, setEmptying] = useState(false);
+  // What a screen reader hears when others' messages arrive (WCAG 4.1.3): a count per batch, in a polite status;
+  // the reader can turn it off and on again (2.2.4). The ids already shown, so a message is counted once.
+  const [announced, setAnnounced] = useState("");
+  const [announce, setAnnounce] = useState(true);
+  const announceRef = useRef(true);
+  const shownIds = useRef(new Set(first.map((m) => m.i)));
   const cursor = useRef(firstCursor);
   const list = useRef<HTMLUListElement>(null);
   const atBottom = useRef(true);
@@ -125,13 +132,21 @@ export function CommunityRoom({
         else if (m.n) named[m.a] = m.n;
       }
       setNames((kept) => ({ ...kept, ...named }));
+      const fresh = found.filter((m) => !shownIds.current.has(m.i));
+      for (const m of fresh) shownIds.current.add(m.i);
+      const count = announceRef.current ? newFromOthers(fresh, me) : 0;
+      if (count) {
+        // Emptied first, so the same sentence twice in a row is still read.
+        setAnnounced("");
+        window.requestAnimationFrame(() => setAnnounced(roomNews(count, t)));
+      }
       setMessages((kept) => {
         const known = new Set(kept.map((m) => m.i));
         const added = found.filter((m) => !known.has(m.i));
         return added.length ? [...kept, ...added].slice(-500) : kept;
       });
     },
-    [creator, creatorName],
+    [creator, creatorName, me, t],
   );
 
   /**
@@ -314,6 +329,7 @@ export function CommunityRoom({
       touched.current = Date.now();
       refusedAt.current = -1;
       kick.current();
+      shownIds.current.add(data.message.i);
       if (data.name) setNames((kept) => ({ ...kept, [data.message!.a]: data.name! }));
       setMessages((kept) => (kept.some((m) => m.i === data.message!.i) ? kept : [...kept, data.message!]));
       atBottom.current = true;
@@ -373,9 +389,12 @@ export function CommunityRoom({
 
   return (
     <div className="mt-5">
+      {/* A box that scrolls on its own: it takes focus so a keyboard can scroll it (WCAG 2.1.1), and has a name. */}
       <ul
         ref={list}
         className="cm-room"
+        tabIndex={0}
+        aria-label={t.roomLabel}
         onScroll={(e) => {
           const box = e.currentTarget;
           atBottom.current = box.scrollHeight - box.scrollTop - box.clientHeight < 60;
@@ -435,6 +454,21 @@ export function CommunityRoom({
       )}
 
       {error ? <p className="cm-flash cm-flash-warn mt-3" role="status">{error}</p> : null}
+
+      <p className="sr-only" role="status" aria-live="polite" data-room-news="">{announced}</p>
+      <label className="mt-3 flex min-h-[44px] items-center gap-3 text-sm">
+        <input
+          type="checkbox"
+          className="h-5 w-5 shrink-0"
+          checked={announce}
+          onChange={(e) => {
+            announceRef.current = e.target.checked;
+            setAnnounce(e.target.checked);
+            if (!e.target.checked) setAnnounced("");
+          }}
+        />
+        <span>{t.announceNew}</span>
+      </label>
 
       {owner && messages.length ? (
         <p className="mt-3">

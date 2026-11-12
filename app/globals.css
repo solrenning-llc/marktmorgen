@@ -4046,6 +4046,7 @@ a.rv-line:hover {
 .cm-pill:focus-visible,
 .cm-menu-item:focus-visible,
 .cm-quiet-link:focus-visible,
+.cm-room:focus-visible,
 .cm-row:focus-visible {
   outline: 3px solid var(--st-accent-text);
   outline-offset: 2px;

@@ -35,7 +35,12 @@ export async function POST(request: NextRequest) {
     return plain(400, "Bad request");
   }
 
-  const used = await spendClaim(token);
+  // A use count that could not be read hands nothing over, and says so (CX-123 rule 24).
+  const used = await spendClaim(token).catch((error: unknown) => {
+    console.error("counting a free copy's link failed", error);
+    return null;
+  });
+  if (!used) return plain(503, "This link could not be checked just now. Try again in a moment.");
   if (!used.ok) {
     return used.reason === "spent"
       ? plain(429, "This link has been used as many times as it can be. Ask the store for a new copy.")

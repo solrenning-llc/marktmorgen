@@ -9,12 +9,16 @@ import { StudioStorePin } from "@/components/studio-store-pin";
 import { PersonFind } from "@/components/person-find";
 import { PersonNotes } from "@/components/person-notes";
 import { PersonTasks } from "@/components/person-tasks";
+import { PersonCompany } from "@/components/person-company";
+import { personCompanies } from "@/lib/companies-read";
+import type { Company } from "@/lib/crm-companies-rules";
 import { PersonFields } from "@/components/person-fields";
 import { PersonErase } from "@/components/person-erase";
 import { can } from "@/lib/team-roles";
 import { readFields, readPersonTasks, readValues } from "@/lib/crm";
 import { PERSON_KEY, addressForPerson } from "@/lib/person-agenda";
 import { agendaData, countLedger } from "@/lib/person-agenda-read";
+import { IncludedBytes } from "@/lib/sent-bytes";
 import { type PersonTask, taskAssignees } from "@/lib/person-tasks";
 import { TasksAgendaList } from "@/components/tasks-agenda";
 import { readTeam } from "@/lib/team";
@@ -95,6 +99,9 @@ export default async function StudioPeoplePage({ searchParams }: Params) {
   let lookupFailed = false;
   // When the reading of the buyers was not counted (the studio's requests are used up), that is what is said (round 4, L1).
   const lookupLedger = countLedger(store);
+  // The fifty kilobytes this request's own price moves, spent once by every part of the page that reads or sends
+  // by size: the lookup below and the tasks agenda (lib/sent-bytes.ts, IncludedBytes; C3-112 (2)).
+  const included = new IncludedBytes();
   if (token) email = await addressForToken(store, token);
   else if (sale) {
     email = await addressForSale(store, sale).catch((error) => {
@@ -103,7 +110,7 @@ export default async function StudioPeoplePage({ searchParams }: Params) {
       return null;
     });
   } else if (who) {
-    email = await addressForPerson(store, who, lookupLedger.count).catch((error) => {
+    email = await addressForPerson(store, who, lookupLedger.count, included).catch((error) => {
       console.error("reading a task's buyer failed", error);
       lookupFailed = true;
       return null;
@@ -115,7 +122,10 @@ export default async function StudioPeoplePage({ searchParams }: Params) {
   const fields = profile ? await readFields(store.statsId) : [];
   const values = profile?.person ? await readValues(store.statsId, profile.person, fields) : {};
   // Tasks about this person (639 [GL7](6)), and who may be made responsible: the owner and teammates who can see orders.
-  const [tasks, team] = profile?.person ? await Promise.all([readPersonTasks(store.statsId, profile.person).catch(() => null), readTeam(store.sid).catch(() => null)]) : [null, null];
+  const [tasks, team, companyRead] = profile?.person
+    ? await Promise.all([readPersonTasks(store.statsId, profile.person).catch(() => null), readTeam(store.sid).catch(() => null), personCompanies(store, profile.person).catch(() => ({ state: "failed" as const }))])
+    : [null, null, null];
+  const companies = companyRead?.state === "ok" ? companyRead.companies : null;
   // Null when the team could not be read: the screen then says so, and leaves a teammate to the server to decide.
   const assignees = team ? taskAssignees(store.email, team.members) : null;
   // Deleting the person needs the page's token, never the address in a link (lib/person-erasure.ts).
@@ -136,7 +146,7 @@ export default async function StudioPeoplePage({ searchParams }: Params) {
         <main id="content" className="container-page pb-20 pt-10 sm:pt-14">
           <p className="eyebrow">Buyers</p>
           {profile ? (
-            <Profile store={store} profile={profile} fields={fields} values={values} eraseToken={eraseToken} tasks={tasks} assignees={assignees} />
+            <Profile store={store} profile={profile} fields={fields} values={values} eraseToken={eraseToken} tasks={tasks} assignees={assignees} companies={companies} companiesRefusal={companyRead?.state === "refused" ? companyRead.message : ""} />
           ) : (
             <>
               {erased ? (
@@ -146,6 +156,11 @@ export default async function StudioPeoplePage({ searchParams }: Params) {
                 </p>
               ) : null}
               <h1 className="t-h2 mt-3">Everything one buyer has done with your store</h1>
+              <p className="mt-2">
+                <Link href={studioPath(store, "", "companies")} className="inline-flex min-h-11 items-center font-semibold text-violet-deep underline underline-offset-4">
+                  Companies you sell to
+                </Link>
+              </p>
               <p className="mt-3 max-w-2xl text-ink-soft">
                 What they paid and when, what was given back, where they found you, their memberships, how far they are in
                 your courses, the calls coming up, your emails to them, and your team&apos;s notes. Read from your own
@@ -154,7 +169,7 @@ export default async function StudioPeoplePage({ searchParams }: Params) {
               {asked ? (
                 <p className="notice notice-warn mt-6" role="status">
                   {lookupFailed
-                    ? lookupLedger.said.message || "Stripe could not be read just now. Nothing was changed. Try again in a moment."
+                    ? lookupLedger.said.message || "Your sales records could not be read just now. Nothing was changed. Try again in a moment."
                     : token
                       ? "That search has run out: it works for an hour. Look the address up again below."
                       : who
@@ -170,7 +185,7 @@ export default async function StudioPeoplePage({ searchParams }: Params) {
                 </div>
               </section>
               <Suspense fallback={<TasksAgendaWaiting />}>
-                <TasksAgenda store={store} />
+                <TasksAgenda store={store} included={included} />
               </Suspense>
               <LatestBuyers store={store} />
             </>
@@ -197,9 +212,9 @@ function TasksAgendaWaiting() {
  * server knows only its own (UTC) day, so the groups are made for each day
  * the creator's may be and the browser shows its own (components/tasks-agenda.tsx).
  */
-async function TasksAgenda({ store }: { store: Store }) {
+async function TasksAgenda({ store, included }: { store: Store; included: IncludedBytes }) {
   const today = new Date().toISOString().slice(0, 10);
-  const data = await agendaData(store, today);
+  const data = await agendaData(store, today, included);
   const title = <h2 id="agenda-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">Tasks to do</h2>;
   if (data.state !== "ok") {
     return (
@@ -219,10 +234,10 @@ async function TasksAgenda({ store }: { store: Store }) {
       {title}
       <p className="mt-2 text-sm text-ink-soft">
         {open
-          ? `${open} open ${open === 1 ? "task" : "tasks"} across your buyers. Open a person to mark one done or remove it.`
+          ? `${open} open ${open === 1 ? "task" : "tasks"} across the people in your store. Open a person to mark one done or remove it.`
           : "No open tasks. Add one on a person's page, under Tasks."}
       </p>
-      {!found && open ? <p className="notice notice-warn mt-4">{data.ledgerMessage ? `${data.ledgerMessage} Who each task is about is not shown until then.` : "Stripe could not be read just now, so who each task is about is not shown. Try again in a moment."}</p> : null}
+      {!found && open ? <p className="notice notice-warn mt-4">{data.ledgerMessage ? `${data.ledgerMessage} Who each task is about is not shown until then.` : "Your sales records could not be read just now, so who each task is about is not shown. Try again in a moment."}</p> : null}
       <TasksAgendaList rows={data.rows} days={data.days} serverDay={today} found={found} />
     </section>
   );
@@ -279,12 +294,19 @@ async function LatestBuyers({ store }: { store: Store }) {
   );
 }
 
-function Profile({ store, profile, fields, values, eraseToken, tasks, assignees }: { store: Store; profile: BuyerProfile; fields: CrmField[]; values: Record<string, string>; eraseToken: string; tasks: PersonTask[] | null; assignees: string[] | null }) {
+function Profile({ store, profile, fields, values, eraseToken, tasks, assignees, companies, companiesRefusal }: { store: Store; profile: BuyerProfile; fields: CrmField[]; values: Record<string, string>; eraseToken: string; tasks: PersonTask[] | null; assignees: string[] | null; companies: Company[] | null; /** The studio's own sentence when its requests are used up (round 4, L1). */ companiesRefusal: string }) {
   const money = (cents: number, currency = profile.currency) => formatMoney(cents, currency);
   const net = profile.paid - profile.refunded;
   const others = Object.entries(profile.otherCurrencies).filter(([, cents]) => cents !== 0);
   const bought = profile.orders.length > 0;
-  const tiles = [
+  // Nothing read while the reading was partial or Stripe could not be read: unknown, never "$0" or "nothing bought yet".
+  const unread = !bought && (profile.partial || profile.stripeError);
+  const tiles = unread ? [
+    { label: "Spent with you", value: "—", note: "could not be read just now" },
+    { label: "Purchases", value: "—", note: "could not be read just now" },
+    { label: "First purchase", value: "—", note: "could not be read just now" },
+    { label: "Latest purchase", value: "—", note: "could not be read just now" },
+  ] : [
     { label: "Spent with you", value: money(net), note: profile.refunded ? `${money(profile.paid)} paid, ${money(profile.refunded)} given back` : "after any refund" },
     { label: "Purchases", value: String(profile.purchases), note: profile.renewals ? `and ${profile.renewals} later ${profile.renewals === 1 ? "payment" : "payments"}` : "no later payments" },
     { label: "First purchase", value: profile.firstAt ? day(profile.firstAt) : "—", note: !profile.channelKnown ? (profile.firstAt ? "channel not recorded" : "nothing bought yet") : profile.firstChannel ? `found you through ${channelName(profile.firstChannel)}` : "came direct, or from somewhere unnamed" },
@@ -338,7 +360,11 @@ function Profile({ store, profile, fields, values, eraseToken, tasks, assignees 
       <section aria-labelledby="orders-title" className="card mt-8 p-6 sm:p-8">
         <h2 id="orders-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">What they bought and paid</h2>
         {!bought ? (
-          <p className="mt-2 text-sm text-ink-soft">Nothing bought from this store under this address.</p>
+          <p className="mt-2 text-sm text-ink-soft">
+            {profile.partial || profile.stripeError
+              ? "Their purchases could not all be read just now, so this list may be missing some. Try again in a moment."
+              : "Nothing bought from this store under this address."}
+          </p>
         ) : (
           <div className="mt-4 overflow-x-auto" tabIndex={0} role="region" aria-labelledby="orders-title">
             <table className="w-full text-left text-sm">
@@ -357,7 +383,7 @@ function Profile({ store, profile, fields, values, eraseToken, tasks, assignees 
                     <td className="py-2.5 pr-4 align-top">
                       <span className="font-semibold text-ink">{o.title}</span>
                       <span className="block text-xs text-ink-soft">
-                        {[KIND_WORDS[o.kind], NOTE_WORDS[o.note]].filter(Boolean).join(" · ")}
+                        {[o.kind === "brought" && o.note === "paypal" ? "" : KIND_WORDS[o.kind], NOTE_WORDS[o.note]].filter(Boolean).join(" · ")}
                         {o.refunded > 0 ? ` · ${o.refunded >= o.cents ? "Refunded" : `${money(o.refunded, o.currency)} refunded`}` : ""}
                       </span>
                     </td>
@@ -376,7 +402,7 @@ function Profile({ store, profile, fields, values, eraseToken, tasks, assignees 
         )}
         <p className="mt-3 text-xs text-ink-soft">
           Amounts are what they paid, after any discount code and before Stripe&apos;s fee.
-          {profile.partial ? " Stripe holds more of their payments than one reading takes, so the oldest are not shown or counted." : ""}
+          {profile.partial ? " Not all of their payments could be read, so some amounts are not shown or counted." : ""}
           {bought && !profile.channelKnown ? " Sales from before October 11, 2026 have no channel written on them." : ""}
         </p>
       </section>
@@ -458,6 +484,15 @@ function Profile({ store, profile, fields, values, eraseToken, tasks, assignees 
           </Link>
         </p>
         {profile.person && fields.length ? <PersonFields key={profile.person} person={profile.person} fields={fields} initial={values} /> : null}
+      </section>
+
+      <section aria-labelledby="company-title" className="card mt-8 p-6 sm:p-8">
+        <h2 id="company-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">Company</h2>
+        {profile.person && companies ? (
+          <PersonCompany key={profile.person} person={profile.person} initial={companies} />
+        ) : profile.person ? (
+          <p className="mt-2 text-sm text-ink-soft" role="status">{companiesRefusal || "This person's company could not be read just now. Open this page again in a moment."}</p>
+        ) : null}
       </section>
 
       <section aria-labelledby="tasks-title" className="card mt-8 p-6 sm:p-8">

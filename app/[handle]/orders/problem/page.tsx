@@ -5,7 +5,7 @@ import { normaliseHandle, storeForPage } from "@/lib/store";
 import { lookStyle } from "@/lib/store-look";
 import { speech } from "@/lib/buyer-words";
 import { orderProblemWords } from "@/lib/buyer-words/order-problem";
-import { type Purchase, OrdersBusy, OrdersLate, findPurchase, openOrders, purchasesFor, withinOpening } from "@/lib/buyer-orders";
+import { type Purchase, OrdersBusy, OrdersLate, findPurchase, olderOf, openOrders, purchasesFor, withinOpening } from "@/lib/buyer-orders";
 import { OrderProblemForm } from "@/components/order-problem-form";
 import { ProblemNotice } from "@/components/problem-notice";
 
@@ -54,6 +54,8 @@ export default async function ProblemPage({ params, searchParams }: Params) {
   let found: Awaited<ReturnType<typeof findPurchase>> = null;
   let trouble: "busy" | "error" | "" = "";
   let choices: Purchase[] | null = null;
+  // Checkouts one opening left for the orders page's older batches: not listed here, and said so (review of #3838).
+  let older = 0;
   if (!reference) {
     try {
       const opened = await openOrders(store, token);
@@ -61,7 +63,10 @@ export default async function ProblemPage({ params, searchParams }: Params) {
       else if (opened.email) {
         const read = await withinOpening(purchasesFor(store, opened.email, opened.meter), opened.meter);
         if (read === "late") trouble = "busy";
-        else choices = read;
+        else {
+          choices = read;
+          older = olderOf(opened.meter).count;
+        }
       }
     } catch (error) {
       trouble = error instanceof OrdersBusy || error instanceof OrdersLate ? "busy" : "error";
@@ -89,7 +94,10 @@ export default async function ProblemPage({ params, searchParams }: Params) {
     note: w.errorNote,
     order: w.errorOrder,
   };
-  const notice = state
+  // A refused field is said at the field itself (components/order-problem-form.tsx), which takes the focus: not again here.
+  const notice = state === "reason" || state === "note"
+    ? ""
+    : state
     ? sentences[state]
     : trouble === "busy"
       ? w.busyNow
@@ -109,24 +117,22 @@ export default async function ProblemPage({ params, searchParams }: Params) {
         <div className="st-card mt-6 p-6 sm:p-9">
           <h1 className="font-display text-3xl font-semibold leading-tight tracking-[-0.02em]">{w.title}</h1>
           {notice ? <ProblemNotice text={notice} /> : <div role="status" />}
-          {choices ? (
-            choices.length ? (
-              <>
-                <p className="st-muted mt-4 leading-relaxed">{w.chooseLead}</p>
-                <ul className="mt-3 space-y-2">
-                  {choices.map((purchase) => (
-                    <li key={purchase.reference} className="[overflow-wrap:anywhere]">
-                      <Link href={`/@${store.handle}/orders/problem?${new URLSearchParams({ token, ref: purchase.reference })}`} className="inline-flex min-h-11 items-center font-semibold underline underline-offset-4">
-                        {purchase.title}
-                      </Link>
-                    </li>
-                  ))}
-                </ul>
-              </>
-            ) : (
-              <p className="st-muted mt-4">{w.none}</p>
-            )
+          {choices && choices.length === 0 && older === 0 ? <p className="st-muted mt-4">{w.none}</p> : null}
+          {choices && choices.length ? (
+            <>
+              <p className="st-muted mt-4 leading-relaxed">{w.chooseLead}</p>
+              <ul className="mt-3 space-y-2">
+                {choices.map((purchase) => (
+                  <li key={purchase.reference} className="[overflow-wrap:anywhere]">
+                    <Link href={`/@${store.handle}/orders/problem?${new URLSearchParams({ token, ref: purchase.reference })}`} className="inline-flex min-h-11 items-center font-semibold underline underline-offset-4">
+                      {purchase.title}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </>
           ) : null}
+          {choices ? (older > 0 ? <p className="st-muted mt-4 leading-relaxed">{w.olderNotListed}</p> : null) : null}
           {found ? (
             <>
               <p className="st-muted mt-4 leading-relaxed">{w.intro}</p>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { orderProblemWords } from "@/lib/buyer-words/order-problem";
 import { ORDER_PROBLEM_NOTE_MAX, ORDER_PROBLEM_REASONS, readOrderProblem } from "@/lib/order-problem-rules";
 
@@ -31,6 +31,11 @@ export function OrderProblemForm({
   const [problem, setProblem] = useState<"" | "reason" | "note">(fromServer);
   const note = useRef<HTMLTextAreaElement>(null);
   const first = useRef<HTMLInputElement>(null);
+  // A field the server refused takes the focus on arrival, so its own error line (aria-describedby) is what is read,
+  // said once at the field and not again over the page (review of #3838).
+  useEffect(() => {
+    if (fromServer) (fromServer === "note" ? note.current : first.current)?.focus();
+  }, [fromServer]);
 
   const check = (event: React.FormEvent<HTMLFormElement>) => {
     const form = new FormData(event.currentTarget);

@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { originFrom } from "@/lib/request-origin";
+import { linkOrigin, originFrom } from "@/lib/request-origin";
 import { clientAddress, fromAnotherSite, limited } from "@/lib/request-guard";
 import { askErasureLink, confirmErasure } from "@/lib/erasure-request";
 import { makeErasureReceipt } from "@/lib/erasure-receipt";
@@ -34,7 +34,7 @@ export async function POST(request: NextRequest) {
       const asked = await askErasureLink({
         email: String(form.get("email") ?? "").slice(0, 300),
         ip: clientAddress(request),
-        origin,
+        origin: linkOrigin(request),
         handle: scope === "store" && back ? handle : undefined,
       });
       // Asked from one store that has no room: the first whole day (UTC) it can be asked for again.

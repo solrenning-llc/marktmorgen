@@ -41,7 +41,7 @@ import { consentEmailLines } from "@/lib/digital-consent-email";
 import { countOrder } from "@/lib/orders";
 import { ADMITTED_FIELD, OPEN_HOURS, admitOrders, settleAdmitted } from "@/lib/order-admission";
 import { allowanceFor } from "@/lib/store-allowance-rules";
-import { allowanceUsed } from "@/lib/store-allowance";
+import { allowanceUsedExact } from "@/lib/store-allowance";
 import { randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
@@ -437,8 +437,11 @@ export async function askPlace(input: {
   if (sentCount === null) return "unavailable";
   if (sentCount > group.people * 3 + 10) return "slow";
   // The email is one of the store's access emails, taken as it is sent
-  // (lib/email.ts); when the month's are used, the person is told so here.
-  if ((await allowanceUsed(store, "transactional")) >= allowanceFor(store, "transactional")) return "resting";
+  // (lib/email.ts); when the month's are used, the person is told so here. A count that cannot be read is not room
+  // (rule 24): nothing is sent, and the person is asked to try again.
+  const accessUsed = await allowanceUsedExact(store, "transactional");
+  if (accessUsed === null) return "unavailable";
+  if (accessUsed >= allowanceFor(store, "transactional")) return "resting";
 
   if (has) {
     const link = (await input.ordersLink(email)) ?? `${base}/orders`;
@@ -642,8 +645,10 @@ async function takeOpened(input: Parameters<typeof takePlace>[0], group: Group, 
   const finish = async (mark: Mark) => {
     if (!store.pastBuyers) await setPastBuyers(storeRef(store));
     for (const id of [group.p, ...(group.items ?? [])]) await input.recordStart(email, id, mark.at);
-    // The purchase was paid, so it is covered wherever its sale paid a share.
-    await countOrder(store, `place:${group.id}:${who}`, group.paid ? 1 : 0);
+    // The purchase was paid, so it is covered wherever its sale paid a share. A count not confirmed leaves the mark
+    // short of done and the room held: an open of the link within the week does what follows the gift again, and
+    // counts the place once (lib/orders.ts).
+    if ((await countOrder(store, `place:${group.id}:${who}`, group.paid ? 1 : 0)) === "unknown") return;
     // Only the open that turns the mark to done gives the room back (Claude 5's review of #2654): an open that
     // outlived its hold and one that came after it may both get here, and the hour's room is shared by every
     // checkout of the store, so a second give-back would take another order's room.

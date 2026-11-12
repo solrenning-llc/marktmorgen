@@ -9,7 +9,7 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from ci_all_checks import decide, SCOPE  # noqa: E402
-from ci_full_tree_proof import WORKFLOWS  # noqa: E402
+from ci_full_tree_proof import NEVER_REUSED, WORKFLOWS  # noqa: E402
 
 ROOT = os.path.dirname(HERE)
 WORKFLOW_DIR = os.path.join(ROOT, ".github", "workflows")
@@ -96,7 +96,9 @@ class EveryWorkflowEndsWithTheFinalCheck(unittest.TestCase):
         # Each non-CI workflow may land on its own PR; whichever exists is left out.
         files = [f for f in files if f not in NOT_CI]
         self.assertTrue(files)
-        self.assertEqual({f[:-4] for f in files}, set(WORKFLOWS))
+        # Every CI workflow is a reusable one, except CodeQL, which always runs (C1-0305-C4-28).
+        self.assertEqual({f[:-4] for f in files}, set(WORKFLOWS) | NEVER_REUSED)
+        self.assertFalse(set(WORKFLOWS) & NEVER_REUSED)
         for name in files:
             stem = name[:-4]
             with self.subTest(workflow=stem):

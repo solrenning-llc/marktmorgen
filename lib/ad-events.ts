@@ -57,6 +57,7 @@ import { keepFor } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { repliesFor } from "@/lib/redis-reply";
 import { canSeal, deriveKey, seal, unseal } from "@/lib/secret-box";
 import { onAccount } from "@/lib/stripe-account";
 import { type Store, saleHandles } from "@/lib/store";
@@ -629,10 +630,16 @@ export async function customerType(store: Store, email: string | null, sessionId
   if (!email || !store.stripeAccountId) return null;
   try {
     const query = new URLSearchParams({ limit: "10", "customer_details[email]": email });
-    const listed = (await onAccount("GET", store.stripeAccountId, `/checkout/sessions?${query}`)) as { data?: unknown };
-    const rows = (Array.isArray(listed.data) ? listed.data : []) as AdsSession[];
+    const listed = (await onAccount("GET", store.stripeAccountId, `/checkout/sessions?${query}`)) as { data?: unknown; has_more?: unknown };
+    // A page in an unknown shape is a reading not made (CX-123 rule 24): unknown (null), as a failed read is.
+    if (!Array.isArray(listed.data)) throw new Error("Stripe gave a page of checkouts that is not a list");
+    if (typeof listed.has_more !== "boolean") throw new Error("Stripe gave whether there are more checkouts in a shape that cannot be read");
+    const rows = listed.data as AdsSession[];
     const before = rows.some((row) => row.id !== sessionId && row.payment_status === "paid" && typeof row.created === "number" && row.created < created);
-    return before ? "returning" : "new";
+    if (before) return "returning";
+    // None earlier on this page while Stripe has more: an earlier paid checkout may be on the next one.
+    if (listed.has_more) throw new Error("Stripe has more checkouts for this address than one page");
+    return "new";
   } catch {
     return null;
   }
@@ -664,7 +671,23 @@ async function keepForRenewals(session: AdsSession, buyer: BuyerRequest): Promis
   await redisPipeline([["SET", subKey(sub), JSON.stringify(kept), "EX", SUB_SECONDS]]);
 }
 
-export type SendResult = "sent" | "already" | "off" | "invalid";
+export type SendResult = "sent" | "already" | "off" | "invalid" | "unknown";
+
+/**
+ * A sent mark taken with SET NX, read exactly (CX-123 rule 24): only the
+ * exact "OK" is this run's. nil is another run's; anything else (no reply,
+ * QUEUED, a list, a number) is not known, and nothing is sent on it, so a
+ * platform never gets one purchase twice on a guess. The mark is not let go
+ * either: it may be this run's, and it ends with its own time.
+ */
+export function markIsOurs(reply: unknown): boolean {
+  return reply === "OK";
+}
+
+/** An EXISTS of a sent mark, read exactly: 1 seen, 0 not seen, anything else unknown (null). */
+export function markSeen(reply: unknown): boolean | null {
+  return reply === 1 ? true : reply === 0 ? false : null;
+}
 
 /**
  * The thanks page's faster way: the buyer's own browser, after its pixels
@@ -686,11 +709,17 @@ export async function sendServerPurchase(store: Store, sessionId: unknown, buyer
   }
   const created = typeof session.created === "number" ? session.created : 0;
   if (!ordinary(store, session) || created < now / 1000 - 86400) return "invalid";
-  const [claimed, keptRaw] = await redisPipeline([
-    ["SET", sentKey(sessionId), "1", "NX", "EX", SENT_SECONDS],
-    ["GET", ctxKey(CTX_TOKEN.test(session.metadata?.ads ?? "") ? (session.metadata?.ads as string) : "none")],
-  ]);
+  const replies = repliesFor(
+    await redisPipeline([
+      ["SET", sentKey(sessionId), "1", "NX", "EX", SENT_SECONDS],
+      ["GET", ctxKey(CTX_TOKEN.test(session.metadata?.ads ?? "") ? (session.metadata?.ads as string) : "none")],
+    ]),
+    2,
+  );
+  if (!replies) return "unknown";
+  const [claimed, keptRaw] = replies;
   if (claimed === null) return "already";
+  if (!markIsOurs(claimed)) return "unknown";
   const kept = parse<BuyerRequest | null>(keptRaw, null);
   const used: BuyerRequest = kept ? { ...kept, cookies: { ...kept.cookies, ...buyer.cookies } } : buyer;
   const c = conversionOf(store, session, await customerType(store, emailOf(session), sessionId, created));
@@ -708,8 +737,10 @@ export async function sendPaidOrders(store: Store, rows: AdsSession[], now = Dat
   if (!store.statsId || !sendsFromServer(store) || !isRedisConfigured()) return 0;
   const due = rows.filter((row) => typeof row.id === "string" && SESSION.test(row.id) && CTX_TOKEN.test(row.metadata?.ads ?? "") && ordinary(store, row));
   if (!due.length) return 0;
-  const sent = await redisPipeline(due.map((row) => ["EXISTS", sentKey(row.id as string)]));
-  const left = due.filter((_, i) => Number(sent[i]) !== 1);
+  // Read exactly: an order whose mark cannot be read waits for the next pass.
+  const sent = repliesFor(await redisPipeline(due.map((row) => ["EXISTS", sentKey(row.id as string)])), due.length);
+  if (!sent) return 0;
+  const left = due.filter((_, i) => markSeen(sent[i]) === false);
   if (!left.length) return 0;
   const stored = await readStored(store.statsId);
   if (!SERVER_PLATFORMS.some((p) => stored[p] && store.pixels[p])) return 0;
@@ -720,8 +751,8 @@ export async function sendPaidOrders(store: Store, rows: AdsSession[], now = Dat
     const buyer = parse<BuyerRequest | null>(kept[i], null);
     // What the checkout kept is gone after four days, and an order that old is no longer worth an ad platform's while.
     if (!buyer) continue;
-    const [claimed] = await redisPipeline([["SET", sentKey(row.id as string), "1", "NX", "EX", SENT_SECONDS]]);
-    if (claimed === null) continue;
+    const claimed = repliesFor(await redisPipeline([["SET", sentKey(row.id as string), "1", "NX", "EX", SENT_SECONDS]]), 1);
+    if (!claimed || !markIsOurs(claimed[0])) continue;
     const created = typeof row.created === "number" ? row.created : 0;
     const c = conversionOf(store, row, await customerType(store, emailOf(row), row.id as string, created));
     if (await deliver(store, stored, c, buyer, now)) count += 1;
@@ -746,16 +777,56 @@ type InvoiceRow = {
 };
 
 /**
+ * The most pages of the day's paid invoices one renewals pass reads (100 each), as the member scores read
+ * memberships. A cap of its own, not lib/api-read-rules.ts's RENEWAL_PAGES (the numbers' renewals read).
+ */
+const AD_RENEWAL_PAGES = 10;
+
+/**
  * Each membership renewal paid in the last day, as a purchase of its own, for
- * a membership whose first checkout carried the buyer's yes: one read of the
- * creator's invoices per pass, only on a store that sends from the server.
+ * a membership whose first checkout carried the buyer's yes: the creator's
+ * invoices of the day, every page of them up to AD_RENEWAL_PAGES, read once per
+ * pass, only on a store that sends from the server. A day with more pages than
+ * the cap sends the renewals read and then fails for the unread rest.
  */
 export async function sendRenewals(store: Store, now = Date.now(), deadline = Infinity): Promise<number> {
   if (!store.statsId || !store.stripeAccountId || !sendsFromServer(store) || !isRedisConfigured()) return 0;
   const since = Math.floor(now / 1000) - 86400;
-  const listed = (await onAccount("GET", store.stripeAccountId, `/invoices?limit=100&status=paid&created[gte]=${since}`)) as { data?: unknown };
+  // A page in an unknown shape, more pages than the cap, or a pass out of time, is a reading not made
+  // (CX-123 rule 24): it fails as Stripe not answering does (the sweep logs it and tries again next pass),
+  // never as "no renewals".
+  const listedRows: InvoiceRow[] = [];
+  let whole = false;
+  let after = "";
+  for (let page = 0; page < AD_RENEWAL_PAGES; page += 1) {
+    // A pass past its deadline asks no page after the first: it fails as a page not read does, and the
+    // sweep tries again next pass, never "no renewals" (Claude 2, review 6707563715 on #3054).
+    if (page > 0 && Date.now() >= deadline) throw new Error("Stripe's paid invoices of the day not read: the pass ran out of time");
+    const listed = await onAccount("GET", store.stripeAccountId, `/invoices?limit=100&status=paid&created[gte]=${since}${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`);
+    if (!Array.isArray(listed.data)) throw new Error("Stripe gave a page of invoices that is not a list");
+    if (typeof listed.has_more !== "boolean") throw new Error("Stripe gave whether there are more invoices in a shape that cannot be read");
+    const pageRows = listed.data as InvoiceRow[];
+    listedRows.push(...pageRows);
+    if (!listed.has_more) {
+      whole = true;
+      break;
+    }
+    const last = pageRows[pageRows.length - 1];
+    if (!last || typeof last.id !== "string") throw new Error("Stripe gave a page of invoices with no last one to go on from");
+    after = last.id;
+  }
+  const count = await sendRenewalRows(store, store.statsId, listedRows, now, deadline);
+  // More pages than the cap: the renewals read in their exact shape are sent above, each a purchase of its
+  // own with its own mark, so nothing unread is taken as absent; the pass still fails for the unread rest,
+  // never "no renewals" (Claude 1, independent review on #3054 at 31b99d82: main sent the newest 100).
+  if (!whole) throw new Error(`Stripe has more paid invoices of the day than ${AD_RENEWAL_PAGES} pages; ${count} renewal(s) of the pages read sent`);
+  return count;
+}
+
+/** Sends the renewals among invoice rows read in their exact shape, each once (its own SET NX mark); answers how many went. */
+async function sendRenewalRows(store: Store, statsId: string, listedRows: InvoiceRow[], now: number, deadline: number): Promise<number> {
   const handles = saleHandles(store);
-  const rows = ((Array.isArray(listed.data) ? listed.data : []) as InvoiceRow[]).filter((row) => {
+  const rows = listedRows.filter((row) => {
     if (typeof row.id !== "string" || row.billing_reason !== "subscription_cycle" || row.status !== "paid") return false;
     const meta = row.parent?.subscription_details?.metadata ?? row.subscription_details?.metadata ?? {};
     return Boolean(meta.ads) && handles.has(meta.store ?? "") && typeof row.amount_paid === "number" && row.amount_paid > 0;
@@ -765,10 +836,12 @@ export async function sendRenewals(store: Store, now = Date.now(), deadline = In
     const raw = row.parent?.subscription_details?.subscription ?? row.subscription;
     return typeof raw === "string" ? raw : raw && typeof raw === "object" && typeof (raw as { id?: unknown }).id === "string" ? (raw as { id: string }).id : "";
   };
-  const marks = await redisPipeline(rows.map((row) => ["EXISTS", sentKey(row.id as string)]));
-  const left = rows.filter((_, i) => Number(marks[i]) !== 1);
+  // Read exactly: a renewal whose mark cannot be read waits for the next pass.
+  const marks = repliesFor(await redisPipeline(rows.map((row) => ["EXISTS", sentKey(row.id as string)])), rows.length);
+  if (!marks) return 0;
+  const left = rows.filter((_, i) => markSeen(marks[i]) === false);
   if (!left.length) return 0;
-  const stored = await readStored(store.statsId);
+  const stored = await readStored(statsId);
   if (!SERVER_PLATFORMS.some((p) => stored[p] && store.pixels[p])) return 0;
   const kept = await redisPipeline(left.map((row) => ["GET", subKey(SUB.test(subOf(row)) ? subOf(row) : "none")]));
   let count = 0;
@@ -780,8 +853,8 @@ export async function sendRenewals(store: Store, now = Date.now(), deadline = In
     // A renewal's mark is kept forty days: only while the store's data room
     // has space for it (lib/store-data.ts), else renewals wait for room.
     if (!(await keepFor(store, RENEWAL_MARK_BYTES, 40 * 86400, now))) break;
-    const [claimed] = await redisPipeline([["SET", sentKey(row.id as string), "1", "NX", "EX", 40 * 86400]]);
-    if (claimed === null) continue;
+    const claimed = repliesFor(await redisPipeline([["SET", sentKey(row.id as string), "1", "NX", "EX", 40 * 86400]]), 1);
+    if (!claimed || !markIsOurs(claimed[0])) continue;
     const meta = row.parent?.subscription_details?.metadata ?? row.subscription_details?.metadata ?? {};
     const paidAt = Number(row.status_transitions?.paid_at) || Number(row.created) || Math.floor(now / 1000);
     const c: Conversion = {
@@ -823,8 +896,8 @@ export async function sendServerLead(store: Store, request: Requested, lead: { i
     customer: null,
   };
   if (!targets(store, stored, c).length) return false;
-  const [claimed] = await redisPipeline([["SET", sentKey(lead.id), "1", "NX", "EX", SENT_SECONDS]]);
-  if (claimed === null) return false;
+  const claimed = repliesFor(await redisPipeline([["SET", sentKey(lead.id), "1", "NX", "EX", SENT_SECONDS]]), 1);
+  if (!claimed || !markIsOurs(claimed[0])) return false;
   const buyer: BuyerRequest = {
     ip: addressOf(request),
     userAgent: (request.headers.get("user-agent") ?? "").slice(0, 500),

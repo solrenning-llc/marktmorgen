@@ -198,6 +198,7 @@ export const de: BuyerWords = {
     busy: { title: "Jemand anderes kauft das gerade", body: "Es wurde nichts berechnet. Klicken Sie gleich noch einmal auf Kaufen." },
     slow: { title: "Viele Versuche in wenigen Minuten", body: "Es wurde nichts berechnet. Warten Sie ein paar Minuten und klicken Sie dann erneut auf Kaufen." },
     error: { title: "Die Zahlungsseite konnte nicht geöffnet werden", body: "Es wurde nichts berechnet. Versuchen Sie es gleich noch einmal." },
+    nocharges: { title: "Dieser Shop kann gerade keine Kartenzahlungen annehmen", body: "Es wurde nichts berechnet. Ein neuer Versuch klappt erst, wenn der Shop das behoben hat." },
     paused: { title: "Dieser Shop nimmt gerade keine neuen Bestellungen an", body: "Es wurde nichts berechnet. Neue Bestellungen sind ab Anfang nächsten Monats wieder möglich, oder früher." },
     "paypal-declined": {
       title: "PayPal hat die Zahlung nicht angenommen",
@@ -307,6 +308,8 @@ export const de: BuyerWords = {
   askTermsCut: () => "Die vollständigen Bedingungen liegen mir hier nicht vor. Fragen Sie vor dem Kauf beim Ersteller nach.",
 
   noLongerOnSale: "Dieses Produkt ist nicht mehr im Verkauf.",
+  cardUnread: "Dieses Produkt konnte gerade nicht geladen werden. Versuchen Sie es gleich noch einmal.",
+  cardBuyUnread: "Kaufen ist gerade nicht möglich. Versuchen Sie es gleich noch einmal.",
   seeStore: (store) => `${store} ansehen`,
   cardTestMode: "Testmodus: Es wird keine echte Karte belastet.",
   cardCheckout: "Sichere Zahlung über Stripe, in einem neuen Tab.",

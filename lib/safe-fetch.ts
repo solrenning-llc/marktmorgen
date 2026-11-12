@@ -27,8 +27,9 @@
  *     host or port) leaves the caller's credentials behind (sensitiveHeader),
  *     as browsers do with Authorization, and they stay behind for every hop
  *     after it;
- *   - the whole exchange has a deadline, and the answer a size cap, counted
- *     as it arrives rather than trusted from the header.
+ *   - the whole exchange has a deadline, every name lookup included, and
+ *     the answer a size cap, counted as it arrives rather than trusted from
+ *     the header.
  *
  * Nothing here is a dependency: Node's own https, with the connection pinned
  * to the address that was checked.
@@ -208,16 +209,43 @@ export function checkUrl(raw: string): URL {
   return url;
 }
 
+/** The refusal for an exchange that ran out of time, wherever it was. */
+function tooLong(): SafeFetchError {
+  return new SafeFetchError("timeout", "The address took too long to answer.");
+}
+
+/**
+ * The lookup, given only the time left until the deadline: a nameserver that
+ * stays silent is refused as a timeout, like an address that does, and an
+ * answer arriving later is dropped (Claude 6 audit R27, finding 2;
+ * tests/safe-fetch-dns-deadline.test.ts). lib/domain-proof.ts races its own
+ * lookup the same way. The timer is cleared whichever side wins.
+ */
+async function lookupBefore(host: string, resolve: Resolver, deadline: number): Promise<{ address: string; family: number }[]> {
+  const left = deadline - Date.now();
+  if (left <= 0) throw tooLong();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expired = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(tooLong()), left);
+  });
+  try {
+    return await Promise.race([resolve(host), expired]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** Every address the name has, all of them public, the first one to connect to. */
-async function publicAddressFor(host: string, resolve: Resolver): Promise<{ address: string; family: number }> {
+async function publicAddressFor(host: string, resolve: Resolver, deadline: number): Promise<{ address: string; family: number }> {
   if (isIP(host)) {
     if (!isPublicAddress(host)) throw new SafeFetchError("private", "That address is on a private or local network.");
     return { address: host, family: isIP(host) };
   }
   let answers: { address: string; family: number }[];
   try {
-    answers = await resolve(host);
-  } catch {
+    answers = await lookupBefore(host, resolve, deadline);
+  } catch (error) {
+    if (error instanceof SafeFetchError && error.problem === "timeout") throw error;
     throw new SafeFetchError("dns", "That name could not be found.");
   }
   if (!answers.length) throw new SafeFetchError("dns", "That name could not be found.");
@@ -347,7 +375,9 @@ export async function safeFetch(raw: string, options: SafeFetchOptions): Promise
   let url = checkUrl(raw);
   let headers = options.headers;
   for (let hop = 0; ; hop += 1) {
-    const pinned = await publicAddressFor(url.hostname.replace(/^\[|\]$/g, ""), resolve);
+    // The deadline runs from the start, so the lookup of each hop, redirects
+    // included, gets only the time that is left.
+    const pinned = await publicAddressFor(url.hostname.replace(/^\[|\]$/g, ""), resolve, deadline);
     const answer = await once(url, pinned, { ...options, headers }, deadline);
     if (answer.status >= 300 && answer.status < 400 && answer.headers.location) {
       if (hop >= hops) throw new SafeFetchError("redirect", options.method === "POST" ? "The address answered with a redirect, which is not followed." : "The address redirected too many times.");

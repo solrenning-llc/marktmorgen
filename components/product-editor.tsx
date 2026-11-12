@@ -13,6 +13,7 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useLeaveGuard } from "@/components/leave-guard";
 import { UrlField } from "@/components/url-field";
 import { useRouter } from "next/navigation";
+import { flushSync } from "react-dom";
 import { TeamEventEditor } from "@/components/team-event-editor";
 import { CallEditor, type MeetAccount } from "@/components/call-editor";
 import { CourseToggle } from "@/components/course-toggle";
@@ -238,6 +239,74 @@ function payloadOf(draft: Draft): Record<string, unknown> {
   };
 }
 
+/**
+ * What is saved now, as the product route answers a save from a form opened before another tab saved
+ * (app/api/store/product/route.ts, "stale"): the product as listed, with its long description's words.
+ */
+type StaleCurrent = Omit<Listing, "about"> & { about: string; hasAbout: boolean };
+
+/** Said when nothing could be shown beside the creator's words. */
+const STALE_MESSAGE =
+  "This product was changed in another tab or window after you opened it, so nothing was saved. Your changes are still in the form. Reload the page to see what is saved now.";
+
+/** The form as a product opens in it, with its long description when it has been read. */
+function draftOf(product: Pick<Listing, "title" | "summary" | "priceCents" | "recurring" | "intro" | "yearly" | "pwyw">, currency: Currency, about = ""): Draft {
+  return {
+    title: product.title,
+    summary: product.summary,
+    price: moneyField(product.priceCents, currency),
+    every: product.recurring ? product.recurring.interval : "",
+    trial: product.recurring?.trialDays ? String(product.recurring.trialDays) : "",
+    payments: product.recurring?.payments ? String(product.recurring.payments) : "",
+    introPrice: product.intro ? moneyField(product.intro.cents, currency) : "",
+    introCount: String(product.intro?.count ?? 1),
+    yearlyPrice: product.yearly ? moneyField(product.yearly.cents, currency) : "",
+    pwyw: product.pwyw !== null,
+    suggested: product.pwyw ? moneyField(product.pwyw.suggestedCents, currency) : "",
+    about,
+  };
+}
+
+/** The fields of the form, by the name a creator knows them by, in the order the form shows them. */
+const DRAFT_LABELS: [keyof Draft, string][] = [
+  ["title", "Name"],
+  ["summary", "What the buyer gets, in short"],
+  ["about", "Full description"],
+  ["price", "Price"],
+  ["every", "How often it charges"],
+  ["trial", "Free trial, in days"],
+  ["payments", "Ends after, in payments"],
+  ["introPrice", "Introductory price"],
+  ["introCount", "Payments at the introductory price"],
+  ["yearlyPrice", "Yearly price"],
+  ["pwyw", "Buyers choose the price"],
+  ["suggested", "Suggested price"],
+];
+
+/** One field's value as words, so an empty one is said rather than shown as nothing. */
+function draftWords(key: keyof Draft, value: Draft[keyof Draft]): string {
+  if (key === "pwyw") return value ? "Yes" : "No";
+  if (key === "every") return value ? intervalName(value as Interval) : "Once (not a membership)";
+  return String(value).trim() ? String(value) : "Empty";
+}
+
+/**
+ * The fields where what is saved now differs from what the creator typed: the ones the save would have changed back.
+ * The description is left out when it could not be read when the form opened, since the form does not send it then.
+ */
+function staleRows(mine: Draft, saved: Draft, aboutUnread: boolean): { key: keyof Draft; label: string; saved: string; mine: string }[] {
+  const rows: { key: keyof Draft; label: string; saved: string; mine: string }[] = [];
+  for (const [key, label] of DRAFT_LABELS) {
+    if (key === "about" && aboutUnread) continue;
+    // The introductory count only means something beside an introductory price.
+    if (key === "introCount" && !mine.introPrice.trim() && !saved.introPrice.trim()) continue;
+    if (key === "suggested" && !mine.pwyw && !saved.pwyw) continue;
+    if (String(mine[key]) === String(saved[key])) continue;
+    rows.push({ key, label, saved: draftWords(key, saved[key]), mine: draftWords(key, mine[key]) });
+  }
+  return rows;
+}
+
 /** Whether what was typed in the price field means free. */
 function typedFree(price: string): boolean {
   return /^0+(\.0{1,2})?$/.test(price.trim());
@@ -256,7 +325,7 @@ function typedFree(price: string): boolean {
 async function send(
   payload: Record<string, unknown>,
   currency: Currency,
-): Promise<{ problem: string | null; quiet: string[]; pending?: boolean }> {
+): Promise<{ problem: string | null; quiet: string[]; pending?: boolean; stale?: StaleCurrent }> {
   const wrong = (message: string) => ({ problem: message, quiet: [] });
   try {
     const response = await fetch("/api/store/product", {
@@ -273,6 +342,13 @@ async function send(
       cleanupPending?: boolean;
     };
     if (data.ok) return { problem: null, quiet: Array.isArray(data.quiet) ? data.quiet : [], pending: data.cleanupPending === true };
+    // Saved in another tab or window since this form was opened (app/api/store/product/route.ts): nothing was written,
+    // and what is saved now comes back so it can be shown beside the creator's own words.
+    if (data.error === "stale") {
+      const current = (data as { current?: StaleCurrent }).current;
+      if (current && typeof current.title === "string") return { problem: STALE_MESSAGE, quiet: [], stale: current };
+      return wrong(STALE_MESSAGE);
+    }
     if (data.error === "link") {
       // The server says which way the link was wrong; the creator gets that
       // sentence rather than a generic failure they cannot act on.
@@ -1886,6 +1962,10 @@ export function ProductEditor({
   const [opened, setOpened] = useState<Draft>(EMPTY);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The revision the open form was read at (lib/catalog.ts Product.rev), sent with its save.
+  const [openedRev, setOpenedRev] = useState(0);
+  // A save refused because the product was saved elsewhere since: which product, and what is saved now.
+  const [stale, setStale] = useState<{ id: string; current: StaleCurrent } | null>(null);
   useLeaveGuard((adding || editingId !== null) && JSON.stringify(draft) !== JSON.stringify(opened) && !busy);
   // A new price on a product buyers can see is shown, old and new, before it is saved (487 [IT4], pattern 8): the id under review.
   const [priceReview, setPriceReview] = useState<string | null>(null);
@@ -2032,8 +2112,19 @@ export function ProductEditor({
   async function run(payload: Record<string, unknown>, done: () => void, confirmation?: string) {
     setBusy(true);
     setError(null);
-    const { problem, quiet, pending } = await send(payload, currency);
+    setStale(null);
+    const { problem, quiet, pending, stale: current } = await send(payload, currency);
     setBusy(false);
+    if (current && typeof payload.id === "string") {
+      // The creator's draft is left exactly as it is; what is saved now is shown beside it, and the focus goes there.
+      const productId = payload.id;
+      setStale({ id: productId, current });
+      setPriceReview(null);
+      // The rest of the page, and the price check, are brought up to what is saved now; the form keeps its words.
+      router.refresh();
+      requestAnimationFrame(() => document.getElementById(`product-${productId}-stale-title`)?.focus());
+      return;
+    }
     if (problem) {
       setError(problem);
       return;
@@ -2055,29 +2146,19 @@ export function ProductEditor({
     setDraft(EMPTY);
     setOpened(EMPTY);
     setError(null);
+    setStale(null);
     setEditingId(null);
     setAdding(true);
   }
 
   async function startEditing(product: Product) {
-    const form: Draft = {
-      title: product.title,
-      summary: product.summary,
-      price: moneyField(product.priceCents, currency),
-      every: product.recurring ? product.recurring.interval : "",
-      trial: product.recurring?.trialDays ? String(product.recurring.trialDays) : "",
-      payments: product.recurring?.payments ? String(product.recurring.payments) : "",
-      introPrice: product.intro ? moneyField(product.intro.cents, currency) : "",
-      introCount: String(product.intro?.count ?? 1),
-      yearlyPrice: product.yearly ? moneyField(product.yearly.cents, currency) : "",
-      pwyw: product.pwyw !== null,
-      suggested: product.pwyw ? moneyField(product.pwyw.suggestedCents, currency) : "",
-      about: "",
-    };
+    const form = draftOf(product, currency);
+    setOpenedRev(product.rev ?? 0);
     setDraft(form);
     setOpened(form);
     setPriceReview(null);
     setError(null);
+    setStale(null);
     setAdding(false);
     setEditingId(product.id);
     toggle(product.id, true);
@@ -2256,7 +2337,7 @@ export function ProductEditor({
                 const payload = payloadOf(draft);
                 if (aboutUnread && !draft.about) delete payload.about;
                 run(
-                  { action: "edit", id: product.id, ...payload },
+                  { action: "edit", id: product.id, ...payload, rev: openedRev },
                   () => {
                     setEditingId(null);
                     setPriceReview(null);
@@ -2292,8 +2373,76 @@ export function ProductEditor({
                   setEditingId(null);
                   setPriceReview(null);
                   setError(null);
+                  setStale(null);
                 }}
               />
+              {stale?.id === product.id ? (() => {
+                const current = stale.current;
+                const saved = draftOf(current, currency, current.about);
+                const rows = staleRows(draft, saved, aboutUnread);
+                return (
+                  <div data-stale-notice="" className="mt-3 rounded-[var(--r-md)] border-2 border-ink bg-sand p-4 text-sm text-ink">
+                    <h3 id={`product-${product.id}-stale-title`} tabIndex={-1} className="font-semibold">
+                      Changed in another tab or window
+                    </h3>
+                    <p role="alert" className="mt-1">
+                      This product was saved somewhere else after you opened it, so nothing was saved here. Your changes are still in the form.
+                    </p>
+                    {rows.length ? (
+                      <>
+                        <p className="mt-2">Here is what is saved now, beside what you typed:</p>
+                        <dl className="mt-2 divide-y divide-line">
+                          {rows.map((row) => (
+                            <div key={row.key} className="py-2">
+                              <dt className="font-semibold">{row.label}</dt>
+                              <dd className="min-w-0 whitespace-pre-wrap break-words">{`Saved now: ${row.saved}`}</dd>
+                              <dd className="min-w-0 whitespace-pre-wrap break-words font-semibold">{`Yours: ${row.mine}`}</dd>
+                            </div>
+                          ))}
+                        </dl>
+                      </>
+                    ) : (
+                      <p className="mt-2">The fields in this form are the same as what is saved now. Something else about the product was changed.</p>
+                    )}
+                    <p className="mt-2">Choose which to keep. Keeping yours replaces what is saved now with what is in the form.</p>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        className="btn btn-primary btn-sm"
+                        disabled={busy}
+                        onClick={() => {
+                          // A choice the creator made, seeing both: the save goes over the revision they were shown.
+                          // Committed at once, so the form's own submit (the AI draft check, the price check) saves over it.
+                          flushSync(() => {
+                            setOpenedRev(current.rev ?? 0);
+                            setStale(null);
+                          });
+                          (document.getElementById(`product-form-${product.id}`) as HTMLFormElement | null)?.requestSubmit();
+                        }}
+                      >
+                        Keep my changes and save
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        disabled={busy}
+                        onClick={() => {
+                          // What is saved now goes into the form; the creator's typed words are let go only on this press.
+                          setOpenedRev(current.rev ?? 0);
+                          setDraft(saved);
+                          setOpened(saved);
+                          setAboutUnread(false);
+                          setStale(null);
+                          setError(null);
+                          requestAnimationFrame(() => document.getElementById(`product-title-${product.id}`)?.focus());
+                        }}
+                      >
+                        Use the saved version
+                      </button>
+                    </div>
+                  </div>
+                );
+              })() : null}
               {priceReview === product.id && review ? (
                 <div className="mt-3 rounded-[var(--r-md)] bg-sand p-4 text-sm text-ink">
                   <h3 id={`product-${product.id}-price-review-title`} tabIndex={-1} className="font-semibold">Check what buyers pay</h3>

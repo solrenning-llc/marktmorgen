@@ -3156,16 +3156,20 @@ export async function editProduct(
   rawPrice: string,
   recurring: Recurring | null = null,
   rawSuggested: string | null = null,
-): Promise<ProductResult> {
+  baseRev?: number,
+): Promise<ProductResult | { ok: false; reason: "stale" }> {
   let pwywWhy: PwywProblem | undefined;
   let refusal: "title" | "price" | null = null;
   // Written only when the product is changed, so the store's own list id is
   // what a free product gets (below) whatever the price turned out to be.
   let freeNow = false;
-  const result = await onProduct<"free" | "call" | "course" | "pwyw" | "title" | "price" | "bundle" | "shipped">(
+  const result = await onProduct<"free" | "call" | "course" | "pwyw" | "title" | "price" | "bundle" | "shipped" | "stale">(
     email,
     id,
     (product, store) => {
+      // A form opened before another save of this product would put the older words back over the newer ones: refused,
+      // here under the store's lock, so two saves from the same revision can never both be taken.
+      if (baseRev !== undefined && (product.rev ?? 0) !== baseRev) return { ok: false, reason: "stale" };
       // Read in the store's own currency, as the store is under the lock.
       const fields = readFields(rawTitle, rawPrice, store.currency);
       if (typeof fields === "string") {
@@ -3199,6 +3203,7 @@ export async function editProduct(
         priceCents: fields.priceCents,
         recurring,
         pwyw: null,
+        rev: (product.rev ?? 0) + 1,
       };
       if (pwywCents !== null) {
         const problem = pwywProblem(next, pwywCents, store.currency);

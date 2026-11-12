@@ -78,6 +78,9 @@ jobs:
       - run: node scripts/ci-build.mjs
       - name: Synthetic local creation and publication at five widths and access modes
         run: node tests/e2e/accessibility-product-actions.mjs
+      - name: Two tabs saving the same product, the stale save refused and the creator choosing (Chromium)
+        if: ${{ matrix.browser == 'chromium' }}
+        run: node tests/e2e/product-stale-save.mjs
 
   all-checks:
     # The one check GitHub requires before main (scripts/ci_all_checks.py): it always runs and

@@ -16,6 +16,10 @@ export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 export const alt = "An article from The Marktmorgen Journal";
 
+/** Only the listed pages exist: any other address is a plain 404, never rendered and stored in the ISR cache for that
+ * address (tests/c1-cost-unknown-slugs.test.ts). */
+export const dynamicParams = false;
+
 export function generateStaticParams() {
   return BLOG_POSTS.map((post) => ({ slug: post.slug }));
 }

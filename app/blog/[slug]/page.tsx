@@ -19,6 +19,10 @@ import {
   postsSorted,
 } from "@/lib/blog";
 
+/** Only the listed pages exist: any other address is a plain 404, never rendered and stored in the ISR cache for that
+ * address (tests/c1-cost-unknown-slugs.test.ts). */
+export const dynamicParams = false;
+
 export function generateStaticParams() {
   return BLOG_POSTS.map((post) => ({ slug: post.slug }));
 }

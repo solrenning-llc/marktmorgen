@@ -25,7 +25,7 @@ export const TYPES_CHECKED_IN_VERIFY_VARIABLE = "MARKTMORGEN_CI_TYPES_CHECKED_IN
  * gates "All checks (product-checks)". Every workflow below has the same triggers as
  * product-checks.yml and the same documentation-scope decision, so whenever one of these legs
  * builds, verify type-checks that commit too. Each leg spent a median of about 68 seconds
- * repeating the identical check (23 legs measured on 12 November 2026). Their build is otherwise
+ * repeating the identical check (21 leg logs read on 12 November 2026; 20 legs build per full run). Their build is otherwise
  * the same: compile, page data, static pages and the served output do not change.
  *
  * Anything not named here type-checks as before: verify, any new job, a job renamed, and every

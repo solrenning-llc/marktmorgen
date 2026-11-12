@@ -32,11 +32,22 @@ function jobs(text: string): Record<string, string> {
 }
 const triggers = (text: string) => text.split("\npermissions:\n")[0].split("\non:\n")[1] ?? "";
 const gate = (job: string) => /^ {4}if: (.+)$/m.exec(job)?.[1] ?? "";
-/** Whether a job's `if:` is verify's, or verify's with more conditions joined by && after it. */
+/** Whether `text` has an || outside every parenthesis (it would widen what it is joined to). */
+function orAtTopLevel(text: string): boolean {
+  let depth = 0;
+  for (let i = 0; i < text.length; i += 1) {
+    if (text[i] === "(") depth += 1;
+    else if (text[i] === ")") depth -= 1;
+    else if (depth === 0 && text.startsWith("||", i)) return true;
+  }
+  return false;
+}
+/** Whether a job's `if:` is verify's, or verify's with more conditions joined by && after it (never a top-level ||). */
 function narrowedFrom(leg: string, base: string): boolean {
   const inner = (text: string) => /^\$\{\{ (.+) \}\}$/.exec(text)?.[1];
   const [a, b] = [inner(leg), inner(base)];
-  return a !== undefined && b !== undefined && (a === b || a.startsWith(`${b} && `));
+  if (a === undefined || b === undefined || orAtTopLevel(b)) return false;
+  return a === b || (a.startsWith(`${b} && `) && !orAtTopLevel(a.slice(b.length)));
 }
 const builds = (job: string) => /^\s*(?:- )?run: node scripts\/ci-build\.mjs\s*$/m.test(job);
 const env = (file: string, job: string, extra: Record<string, string> = {}) => ({
@@ -86,6 +97,12 @@ for (const name of TYPES_CHECKED_IN_VERIFY) {
 }
 is("verify's gate is the documentation-scope decision, needed first", gate(verify),
   "${{ !cancelled() && needs.documentation-scope.outputs.full != 'false' }}");
+is("a gate with a top-level || is never taken as narrower", [
+  narrowedFrom("${{ x && y || z }}", "${{ x }}"), narrowedFrom("${{ x && (y || z) }}", "${{ x }}"),
+], [false, true]);
+is("mobile render builds only the commit under test (every matrix ref is github.sha)",
+  [...(jobs(productChecks)["mobile-render"] ?? "").matchAll(/^ {12}ref: (.+)$/gm)].map((m) => m[1]),
+  ["${{ github.sha }}"]);
 is("verify needs the documentation scope", /^ {4}needs: documentation-scope$/m.test(verify), true);
 
 part("every build reads the decision, and only GitHub Actions can skip the check");

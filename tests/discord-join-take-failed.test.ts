@@ -15,10 +15,11 @@
  *   - switching with every take answered: the earlier account is forgotten, the new one given the role (control);
  *   - switching with a failed take: the join fails, nothing is put in for the new account, the earlier account and
  *     its link are kept with its role so a later try takes it back;
+ *   - already in, a role no longer held whose take fails: the record keeps that role, and the next check takes it back.
  */
 import { addProduct, claimHandle, ensureStatsId, ensureStoreId, storeForEmail } from "@/lib/store";
 import { emailKey, storeKey } from "@/lib/learn";
-import { joinServer } from "@/lib/discord-access";
+import { checkMember, joinServer } from "@/lib/discord-access";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -97,6 +98,19 @@ async function main(): Promise<void> {
   const switched = await joinServer({ store, email: EMAIL, accessToken: "t", user: { id: SECOND, name: "second" } });
   is("the join fails and the new account is not put in", [switched, puts()], [{ ok: false, reason: "failed" }, []]);
   is("the earlier account stays in the register with its role, still linked", [await record(FIRST), await link()], [[ROLE_A], FIRST]);
+
+  part("Already in the server: a role no longer held whose take fails stays on the record");
+  await redis.pipeline([["HDEL", memberKey, FIRST], ["DEL", addrKey]]);
+  await seed([ROLE_A, ROLE_B], false);
+  failing = `DELETE /guilds/${SERVER}/members/${FIRST}/roles/${ROLE_B}`;
+  // putMember answers 204: already in the server, so the roles are given and taken one by one.
+  const rejoined = await joinServer({ store, email: EMAIL, accessToken: "t", user: { id: FIRST, name: "buyer" } });
+  is("the join itself goes through", rejoined.ok, true);
+  is("the record keeps the role it could not take back", (await record(FIRST))?.sort(), [ROLE_A, ROLE_B].sort());
+  failing = null;
+  calls.length = 0;
+  const checked = await checkMember(store.sid, FIRST);
+  is("the next check takes it back", [checked, deletes(), await record(FIRST)], ["changed", [`DELETE /guilds/${SERVER}/members/${FIRST}/roles/${ROLE_B}`], [ROLE_A]]);
 
   done();
 }

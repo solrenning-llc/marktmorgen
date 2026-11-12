@@ -110,7 +110,8 @@ export async function joinServer(input: { store: Store; email: string; accessTok
     }
   }
   const at = Math.floor((input.now ?? Date.now()) / 1000);
-  await keepMember(room, store.sid, user.id, { e: email, n: user.name, p: held, r: given.filter((r) => wanted.includes(r)), at: mine?.at || at, checked: at }, input.now);
+  // A role no longer held whose take failed stays in `r`, as checkMember keeps it, so the next check takes it back.
+  await keepMember(room, store.sid, user.id, { e: email, n: user.name, p: held, r: given, at: mine?.at || at, checked: at }, input.now);
   return { ok: true, serverId: server.id, added: placed === "added", roles: wanted.length };
 }
 

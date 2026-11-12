@@ -54,7 +54,7 @@ async function main(): Promise<void> {
   const owner = "operatoronly@example.com";
   await claimHandle(owner, "operatoronly", "Operator Only", "");
   await ensureStatsId(owner);
-  await setStripeAccount(owner, "acct_1TestOperatorOnly1", true);
+  await setStripeAccount(owner, "acct_1TestOperOnly1", true);
   await setSubscription(owner, { customerId: "cus_OperatorOnly1", subscriptionId: "sub_OperatorOnly1", active: true, period: paidPeriod() });
   const link = await addStoreLink(owner, "A link", "https://example.com/a-link");
   if (!link.ok) throw new Error("setup: link");

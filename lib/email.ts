@@ -664,6 +664,9 @@ async function dispatchBatch(
     }
     if (listOnly && toResend && going.length) return "retry"; // A prior provider handoff needs reconciliation, not another sender.
     const state = going.length && !toResend ? await sesReady() : null;
+    // Whether SES was asked and definitively took nobody for a reason that is
+    // not an account refusal (it was only asked to slow down).
+    let throttledNoneTaken = false;
     // Many at a time use Amazon's day only up to a share of it; past that
     // they go through Resend, and the rest of the day is kept for the
     // emails that go one at a time (lib/ses.ts).
@@ -704,9 +707,12 @@ async function dispatchBatch(
         return result.taken.length > 0 ? "retry" : "refused";
       }
       going = result.left.map((m) => m.original);
+      throttledNoneTaken = result.taken.length === 0 && !result.down && going.length === all;
     }
     if (going.length === 0) return "sent";
-    if (only === "amazon") return "retry";
+    // List mail that SES throttled before taking anyone is known not sent: it
+    // waits in the queue for SES. An account refusal stays held as "retry".
+    if (only === "amazon") return listOnly && throttledNoneTaken ? "waiting" : "retry";
     if (!toResend) {
       try {
         const reply: unknown = await redisPipeline([["SET", handed, "1", "EX", 2 * 86_400]]);

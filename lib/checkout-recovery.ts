@@ -103,6 +103,8 @@ const onceKey = (statsId: string, email: string, product: string) =>
 /** The carts ("cart:<ids>") one address was reminded of this week: what forgetRecoveryPerson cannot work out from the store's products alone. */
 const cartsKey = (statsId: string, email: string) =>
   `nl:recover:carts:${statsId}:${sha(`nimbus-recover-carts:${normaliseEmail(email)}`).slice(0, 32)}`;
+/** How long the carts note lives: an hour past ONCE_PER_SECONDS, because its expiry is set just before the mark it names is taken. */
+const CARTS_NOTE_SECONDS = ONCE_PER_SECONDS + 3600;
 const offKey = (statsId: string, email: string) => `nl:recover:off:${statsId}:${who(email)}`;
 /** What a reminder's stop mark can keep for good, counted in the store's data room before it is sent. */
 export const RECOVER_TRACE_BYTES = 192;
@@ -512,12 +514,14 @@ async function deliver(
   }
 
   // A cart's mark is noted under the address before it is taken, so deleting the person finds it (forgetRecoveryPerson);
-  // the note outlives every mark it names. A note that cannot be written stops the reminder before anything is claimed.
+  // the note outlives every mark it names (CARTS_NOTE_SECONDS). A note whose write is not answered exactly (SADD 0 or 1,
+  // EXPIRE 1) is unknown and stops the reminder before anything is claimed, so no cart mark is ever taken unnoted.
   if (about.kind === "cart") {
-    await redisPipeline([
+    const noted = repliesFor(await redisPipeline([
       ["SADD", cartsKey(statsId, email), onceFor],
-      ["EXPIRE", cartsKey(statsId, email), ONCE_PER_SECONDS],
-    ]);
+      ["EXPIRE", cartsKey(statsId, email), CARTS_NOTE_SECONDS],
+    ]), 2);
+    if (!noted || (noted[0] !== 0 && noted[0] !== 1) || noted[1] !== 1) throw new UnknownReplyError("the note of the carts an address was reminded of");
   }
 
   // Taken before sending: whichever pass gets here first is the only one.

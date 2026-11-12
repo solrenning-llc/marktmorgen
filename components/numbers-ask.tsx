@@ -8,6 +8,7 @@ const MESSAGES: Record<string, string> = {
   ...STUDIO_MESSAGES,
   notes: "Ask a question of a few words or more.",
   used: "This month's AI jobs are used up. They come back with your next billing month.",
+  unavailable: "We could not check this month's AI jobs just now. Nothing was counted. Try again in a moment.",
   off: "Asking your numbers is not available right now.",
   numbers: "Your numbers could not be read just now. Try again in a moment.",
   slow: "A few questions a minute at most. Try again in a moment.",

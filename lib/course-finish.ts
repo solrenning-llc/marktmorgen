@@ -15,6 +15,13 @@
  * sequences that start "when someone opens" it, in the same way and once,
  * which is the welcome into a course that Kajabi and Teachable send.
  *
+ * Reaching a share of it (287 [H4-1], added 12 November 2026): each lesson
+ * marked done also starts the sequences that start "when someone has done N%
+ * of" the course, for every N at or below the whole percent of its lessons
+ * now done. No mark of its own is kept: each sequence starts a person once
+ * (lib/flows.ts, startFlows), so marking a lesson undone and done again
+ * starts nothing twice.
+ *
  *   nl:course:<courseId>:fin:<student>   "1", 400 days
  *   nl:course:<courseId>:open:<student>  "1", 400 days
  */
@@ -22,6 +29,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { doneLessons, emailKey } from "@/lib/learn";
 import { lessonsInOrder, readCourse } from "@/lib/course";
 import { enroll } from "@/lib/flows";
+import { reachedShare } from "@/lib/flow-rules";
 import { exactReplies, UnknownReply } from "@/lib/redis-exact";
 import type { Store } from "@/lib/store";
 
@@ -65,10 +73,16 @@ export async function noteIfFinished(store: Store, productId: string, courseId: 
     const lessons = course ? lessonsInOrder(course).map(({ lesson }) => lesson.id) : [];
     if (!lessons.length) return false;
     const done = await doneLessons(courseId, email);
-    if (!lessons.every((id) => done.has(id))) return false;
+    const share = reachedShare(lessons.filter((id) => done.has(id)).length, lessons.length);
+    if (!lessons.every((id) => done.has(id))) {
+      // Partway through: what starts at the share now reached (287 [H4-1]), with nothing kept.
+      if (share > 0) await enroll(store, email, { joined: false, reached: { productId, share } });
+      return false;
+    }
     const claim = await redisPipeline([["SET", finishedKey(courseId, email), "1", "NX", "EX", 400 * 86_400]]);
     if (!confirmedClaim(claim)) return false;
-    await enroll(store, email, { joined: false, finished: productId });
+    // Finishing is also every share reached, for a student who got here without one starting (one read of the sequences for both).
+    await enroll(store, email, { joined: false, finished: productId, reached: { productId, share } });
     return true;
   } catch (error) {
     console.error("noting a finished course failed", error);

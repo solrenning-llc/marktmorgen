@@ -87,8 +87,29 @@ export type Otherwise = "skip" | "end" | "jump";
 export type FlowGoal = { productId: string } | { any: true } | { tag: string };
 
 /** What starts a workflow (lib/flows.ts, Flow.trigger). */
-export type FlowTrigger = "joined" | "product" | "bought" | "tagged" | "finished" | "form" | "started" | "abandoned" | "stage" | "signed" | "paid_request";
-export const FLOW_TRIGGERS: readonly FlowTrigger[] = ["joined", "product", "bought", "tagged", "finished", "form", "started", "abandoned", "stage", "signed", "paid_request"];
+export type FlowTrigger = "joined" | "product" | "bought" | "tagged" | "finished" | "form" | "started" | "abandoned" | "stage" | "signed" | "paid_request" | "reached";
+export const FLOW_TRIGGERS: readonly FlowTrigger[] = ["joined", "product", "bought", "tagged", "finished", "form", "started", "abandoned", "stage", "signed", "paid_request", "reached"];
+
+/**
+ * "reached" (287 [H4-1], added 12 November 2026): a student has marked done at least `share` percent of the
+ * lessons of one course (lib/course-finish.ts), counted on the server from lessons marked done, quizzes passed and
+ * work approved. The creator picks the share, a whole multiple of REACHED_SHARE_STEP from MIN_REACHED_SHARE to
+ * MAX_REACHED_SHARE: finishing every lesson is the "finished" trigger.
+ */
+export const MIN_REACHED_SHARE = 5;
+export const MAX_REACHED_SHARE = 95;
+export const REACHED_SHARE_STEP = 5;
+
+/** Whether this is a share a "reached" workflow may start at. */
+export function isReachedShare(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= MIN_REACHED_SHARE && value <= MAX_REACHED_SHARE && value % REACHED_SHARE_STEP === 0;
+}
+
+/** The whole percent of a course's lessons done, rounded down, so a share is said only once it is truly reached. */
+export function reachedShare(done: number, lessons: number): number {
+  if (!Number.isSafeInteger(done) || !Number.isSafeInteger(lessons) || lessons <= 0 || done <= 0) return 0;
+  return Math.floor((Math.min(done, lessons) * 100) / lessons);
+}
 
 /** The longest label a condition can name; the same as an imported label's (lib/contacts.ts). */
 export const MAX_CONDITION_TAG = 40;
@@ -225,9 +246,9 @@ export function goalClash(trigger: FlowTrigger, productId: string | null, goal: 
   if (!goal) return false;
   // A workflow that starts with a label cannot end at that same label.
   if ("tag" in goal) return trigger === "tagged" && Boolean(tag) && sameTag(goal.tag, tag ?? "");
-  // Somebody who finishes, or opens, a course already has it: "finished" and "started" end where "product" would.
+  // Somebody who finishes, opens or is partway through a course already has it: "finished", "started" and "reached" end where "product" would.
   // An abandoned checkout is about a product they do not have yet, so ending when they get it is its whole point.
-  const aboutProduct = trigger === "product" || trigger === "finished" || trigger === "started";
+  const aboutProduct = trigger === "product" || trigger === "finished" || trigger === "started" || trigger === "reached";
   if ("any" in goal) return trigger === "bought" || (aboutProduct && startsPaid);
   return aboutProduct && goal.productId === productId;
 }

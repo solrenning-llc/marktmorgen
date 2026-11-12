@@ -195,9 +195,19 @@ function exactOwnArray(value: unknown, length?: number): unknown[] | null {
   return out;
 }
 
+/**
+ * The store's email platform settings, read exactly (CX-123 rule 24): null only when none are kept. A reply in
+ * another shape, or kept settings that do not read, throws UnknownReplyError: never "disconnected", which would fail
+ * a consented buyer's job for good (Claude 2 (nuvem D) bug hunt).
+ */
 async function readConfig(statsId: string): Promise<Config | null> {
-  const [raw] = await redisPipeline([["GET", cfgKey(statsId)]]);
-  return parseConfig(raw);
+  const replies = repliesFor(await redisPipeline([["GET", cfgKey(statsId)]]), 1);
+  if (!replies) throw new UnknownReplyError("a store's email platform settings");
+  const [raw] = replies;
+  if (raw === null) return null;
+  const config = typeof raw === "string" ? parseConfig(raw) : null;
+  if (!config) throw new UnknownReplyError("a store's email platform settings");
+  return config;
 }
 
 /** A tag as it is kept and sent: one line, no commas, at most MAX_TAG_LENGTH characters. */
@@ -441,9 +451,17 @@ async function runClaimed(statsId: string, id: string, budget: number, now = Dat
     return job;
   }
   const done = await attempt(job, now, budget);
-  const record: (string | number)[] = ["SET", jobKey(id), JSON.stringify(done), "EX", JOB_SECONDS];
-  if (done.state === "retrying") await redisPipeline([record, ["ZADD", QUEUE_KEY, done.next, `${statsId}|${id}`]]);
-  else await retire(statsId, id, now, [record]);
+  // Written back only over the record still there (XX): a person's erasure that deleted it while this try was out
+  // (forgetSyncPerson) is never undone by the write-back, and the job is not queued again for them (Claude 2 (nuvem D)
+  // bug hunt). A queue entry left by an erasure landing between the two steps finds no record and is retired untried.
+  const record: (string | number)[] = ["SET", jobKey(id), JSON.stringify(done), "EX", JOB_SECONDS, "XX"];
+  if (done.state === "retrying") {
+    const written = repliesFor(await redisPipeline([record]), 1);
+    if (!written) throw new UnknownReplyError("the record of an email platform job, written back after a try");
+    if (written[0] === null) return null;
+    if (written[0] !== "OK") throw new UnknownReplyError("the record of an email platform job, written back after a try");
+    await redisPipeline([["ZADD", QUEUE_KEY, done.next, `${statsId}|${id}`]]);
+  } else await retire(statsId, id, now, [record]);
   return done;
 }
 

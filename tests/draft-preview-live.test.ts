@@ -42,7 +42,9 @@ async function main(): Promise<void> {
 
   await makeDraftPreview(store, draft.product.id);
   const real = redis.pipeline.bind(redis);
-  redis.pipeline = (async () => [{ not: "a reply" }]) as typeof redis.pipeline;
+  // Only the read of this draft's link pointer answers in another shape; the session and the store still read.
+  redis.pipeline = (async (commands: (string | number)[][]) =>
+    commands.length === 1 && commands[0][0] === "GET" && String(commands[0][1]).startsWith("nl:dpv:p:") ? [{ not: "a reply" }] : real(commands)) as typeof redis.pipeline;
   let unread: { status: number; body: Record<string, unknown> };
   try {
     unread = await send({ action: "status", id: draft.product.id });

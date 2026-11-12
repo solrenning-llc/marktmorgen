@@ -44,16 +44,16 @@
  * (CX-123 rule 24): never read as "not returned" and never passed over; the
  * reader throws or stops incomplete.
  *
- * Junctions to come: disputeMoneyGone below is a copy, same name and same
- * body, of the one in lib/retained-revenue.ts on #3321 (@31890b10c4). Once
- * #3321 is merged, the copy goes and this module imports it from there (a
- * pure module too, so this one still runs nothing). #3318's MONEY_RETURNED in
+ * disputeMoneyGone is lib/retained-revenue.ts's own (#3321, merged), imported
+ * from there: a pure module too, so this one still runs nothing. #3318's MONEY_RETURNED in
  * lib/plan-dispute-rules.ts and lib/plan-refund-rules.ts RETURNED (which
  * still reads every `prevented` as returned) can read disputeMoney from here,
  * given the dispute and not only its status. lib/retained-revenue.ts
  * DISPUTE_TAKES stays its own set: charge_refunded is left out there, its
  * refund already being counted.
  */
+
+import { disputeMoneyGone } from "@/lib/retained-revenue";
 
 /** Every status Stripe gives a dispute. */
 export const DISPUTE_STATUSES: ReadonlySet<string> = new Set([
@@ -95,44 +95,12 @@ function record(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * Whether a dispute's own balance transactions took money from the creator
- * and did not put it back. Stripe's `prevented` is either a `resolution`,
- * "resolved (refunded) before it could become a chargeback", or a `block`,
- * stopped by the card network while the merchant keeps the money (API
- * reference, Dispute payment_method_details.card.case_type; changelog basil
- * 2025-08-27). case_type does not exist at the versions read here, so the
- * money is read instead: `balance_transactions` is "zero, one, or two balance
- * transactions that show funds withdrawn and reinstated to your Stripe
- * account as a result of this dispute", and a negative `amount` is funds sent
- * to another party (stripe-node v12.18.0 types/Disputes.d.ts, v22.6.0
- * src/resources/Disputes.ts and BalanceTransactions.ts). `amount`, not `net`:
- * the fee on a withdrawal is Stripe's dispute fee, not money given back.
- *
- * True when more was withdrawn than reinstated; false when nothing was
- * withdrawn or all of it was reinstated; null when the list or any amount is
- * not in that shape (CX-123 rule 24), never read as either. A Refund's money
- * is the Refund's own balance transaction, never one of these, so a
- * resolution that also made a Refund is counted once, by the refund reading.
- *
- * Copied, same name and same body, from lib/retained-revenue.ts on #3321
- * (Claude 6, @31890b10c4); at the junction this copy goes and the import
- * comes from there.
+ * Where a prevented dispute's money went, by the balance transactions it
+ * moved: lib/retained-revenue.ts's one rule (#3321), shared with the money
+ * readers (lib/share-settle.ts, lib/stats.ts), never a copy of it (Claude 1
+ * cloud, MEDIUM on #3323). Re-exported for the readers of this module.
  */
-export function disputeMoneyGone(dispute: unknown): boolean | null {
-  if (!dispute || typeof dispute !== "object" || Array.isArray(dispute)) return null;
-  const moves = (dispute as { balance_transactions?: unknown }).balance_transactions;
-  if (!Array.isArray(moves) || moves.length > 2) return null;
-  let total = 0;
-  for (const move of moves) {
-    if (!move || typeof move !== "object" || Array.isArray(move)) return null;
-    const { object, amount } = move as { object?: unknown; amount?: unknown };
-    if (object !== "balance_transaction" || typeof amount !== "number" || !Number.isSafeInteger(amount)) return null;
-    total += amount;
-  }
-  // A dispute that put back more than it took is not a shape Stripe documents.
-  if (total > 0) return null;
-  return total < 0;
-}
+export { disputeMoneyGone };
 
 /** Where this dispute's money went, read from its status and, when prevented, the money it moved (the header says why). */
 export function disputeMoney(dispute: unknown): DisputeMoney {

@@ -88,7 +88,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const path = url.pathname.replace(/^\/v1/, "");
   if (path === "/customers" && method === "GET") return json({ data: [{ id: "cus_Member000001" }] });
   if (path === "/customers/cus_Member000001") return json({ id: "cus_Member000001", email: "member@example.com" });
-  if (path === "/subscriptions" && method === "GET") return json({ data: [sub] });
+  // Altered 2026-11-09 (rule 23): a Stripe list carries has_more, and subsOf now reads the page in its exact shape (readStripePage).
+  if (path === "/subscriptions" && method === "GET") return json({ data: [sub], has_more: false });
   if (path === "/subscriptions/sub_Member0000001" && method === "POST") {
     const body = new URLSearchParams(String(init?.body));
     posts.push(body);

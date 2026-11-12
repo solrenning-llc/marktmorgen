@@ -10,6 +10,7 @@
  *   nl:ppsell:own:<stats>:<address hash>:<product>  the paid orders behind one address's product
  *   nl:ppsell:sales:<stats>     every paid order, scored by when it was paid (400 days): the store's numbers read it
  *   nl:ppsell:refunded:<stats>  paid orders PayPal says were refunded in full, scored by when that was seen
+ *   nl:ppsell:tell:<order>    when telling the store's webhooks of an order's refund first failed (REFUND_TELL_MARK_SECONDS)
  *
  * How it fits together. Marktmorgen is a PayPal partner; a creator connects their
  * PayPal Business account through PayPal's own onboarding (Partner Referrals
@@ -51,7 +52,7 @@ import { EMAIL_PATTERN } from "@/lib/auth";
 import { addressHash, grantImported, importedKey } from "@/lib/imported-purchases";
 import { plainAmount, formatMoney } from "@/lib/money";
 import { saleOff, salePrice } from "@/lib/store-sale";
-import { sendEmail } from "@/lib/email";
+import { sendEmailPinned } from "@/lib/email";
 import { isPaidUp } from "@/lib/billing";
 import { type Listing, type Store, setPastBuyers, storeRef } from "@/lib/store";
 import { speech } from "@/lib/buyer-words";
@@ -141,6 +142,31 @@ const salesKey = (statsId: string) => `nl:ppsell:sales:${statsId}`;
 /** Exported for the affiliate book's count of what it will read (lib/affiliates.ts, bookSizes). */
 export const refundedKey = (statsId: string) => `nl:ppsell:refunded:${statsId}`;
 const SALES_KEPT_SECONDS = 400 * 86_400;
+/**
+ * How long the refund watch keeps trying to tell the store's webhooks of a refund in full (refund.issued) after the
+ * first try that failed (Claude 5's L4 on #3491): the order stays watched and is looked at again every hour, the
+ * purchase taken back with the telling; past this the store's webhook log says "Not sent" (on.notTold) and the refund
+ * goes on without it. A whole number of hours.
+ */
+export const REFUND_TELL_RETRY_SECONDS = 6 * 3600;
+/** The most tries of one refund's telling: one an hour inside REFUND_TELL_RETRY_SECONDS, the first and the last included. */
+export const REFUND_TELL_TRIES_AT_MOST = REFUND_TELL_RETRY_SECONDS / 3600 + 1;
+/** How long the time of the first failed try is kept: longer than the tries, so a late look never starts them again. */
+const REFUND_TELL_MARK_SECONDS = 30 * 86_400;
+/** When telling of this order's refund first failed (whole seconds), set by the first failure and read by every later one. */
+const tellKey = (order: string) => `nl:ppsell:tell:${order}`;
+
+/**
+ * The time telling of this order's refund first failed: `at` is kept when none is (SET NX), then read back exactly
+ * (CX-123 rule 24): "OK" or null, then whole seconds not ahead of `now`. Anything else, an error included, is null:
+ * not known, never "inside the bound" nor "past it" (Codex C2's M1 on #3499).
+ */
+async function tellFirst(order: string, at: number, now: number): Promise<number | null> {
+  const mark = repliesFor(await redisPipeline([["SET", tellKey(order), String(at), "NX", "EX", REFUND_TELL_MARK_SECONDS], ["GET", tellKey(order)]]).catch(() => null), 2);
+  if (!mark || (mark[0] !== "OK" && mark[0] !== null) || typeof mark[1] !== "string" || !REDIS_SCORE.test(mark[1])) return null;
+  const first = Number(mark[1]);
+  return first <= now ? first : null;
+}
 
 type Partner = { client: string; secret: string; merchant: string; bn: string };
 
@@ -714,9 +740,21 @@ export async function captureOrder(store: Store, order: string): Promise<Capture
 }
 
 /**
+ * A PayPal receipt as deliverPayPal makes it: every field that decides the bytes a sender is given for it (the
+ * meter is the same for every one). lib/paypal-delivery.ts keeps the first one made, so every try sends it again.
+ */
+export type PayPalReceipt = { from: string; to: string; subject: string; text: string; replyTo?: string; idempotencyKey: string };
+
+/**
  * Hands a paid PayPal purchase over, once: written down under the buyer's
  * PayPal address, a course dated from today, and the receipt emailed with
- * the link to the list of purchases.
+ * the link to the list of purchases. True only when the sender accepted the
+ * receipt; false when it refused it, its answer is unknown or it threw, so
+ * the caller keeps the order to send it again (lib/paypal-delivery.ts), under
+ * the same idempotency key, through the same sender (sendEmailPinned) and
+ * with the same bytes (keep); false too when mayEmail said no or keep gave
+ * none, with no receipt sent.
+ * Every other step is written once (HSETNX, SET NX).
  */
 export async function deliverPayPal(input: {
   store: Store;
@@ -726,16 +764,24 @@ export async function deliverPayPal(input: {
   from: string;
   recordStart: (email: string, productId: string, startSeconds: number) => Promise<void>;
   ordersLink: (email: string) => Promise<string | null>;
-}): Promise<void> {
+  /** Asked just before the receipt, before its link: no sends no receipt this time (an unknown throws first). */
+  mayEmail?: () => Promise<boolean>;
+  /**
+   * Given the receipt just made, before anything is sent: the receipt to send (the one kept from its first try, so
+   * every try is the same bytes), or null for none this time. A throw sends nothing, as a sender's refusal.
+   */
+  keep?: (receipt: PayPalReceipt) => Promise<PayPalReceipt | null>;
+}): Promise<boolean> {
   const { store, paid, product, base } = input;
-  if (!store.statsId) return;
+  if (!store.statsId) return false;
   const items = product.bundle?.length ? product.bundle : null;
   await grantImported(store.statsId, `paypal:${paid.order}`, [{ email: paid.email, productId: product.id, items }], paid.at, store.sid);
   if (!store.pastBuyers) await setPastBuyers(storeRef(store));
   for (const id of [product.id, ...(items ?? [])]) await input.recordStart(paid.email, id, paid.at);
-  const link = (await input.ordersLink(paid.email)) ?? `${base}/orders`;
+  const go = !input.mayEmail || (await input.mayEmail());
+  const link = go ? ((await input.ordersLink(paid.email)) ?? `${base}/orders`) : "";
   const g = givingWords(store.language);
-  await sendEmail({ meter: { by: "order" },
+  const made = (): PayPalReceipt => ({
     from: input.from,
     to: paid.email,
     subject: g.ppSubject(product.title).slice(0, 200),
@@ -756,10 +802,18 @@ export async function deliverPayPal(input: {
     ].join("\n"),
     replyTo: store.email,
     idempotencyKey: `nimbus-paypal:${paid.order}`,
-  }).catch((error) => console.error("a PayPal purchase email failed", error));
+  });
+  const receipted = go && await (async () => {
+    const receipt = input.keep ? await input.keep(made()) : made();
+    return receipt !== null && (await sendEmailPinned({ meter: { by: "order" }, ...receipt }));
+  })().catch((error) => {
+    console.error("a PayPal purchase email failed", error);
+    return false;
+  });
   // One of the month's orders, like a card checkout's (lib/orders.ts). Not counted until
   // 17 October 2026, so a store's PayPal sales were in no plan's figure.
   await countOrder(store, `paypal:${paid.order}`, paid.cents);
+  return receipted === true;
 }
 
 /**
@@ -795,6 +849,8 @@ export async function watchPayPal(
     handOver: (paid: Paid) => Promise<void>;
     dropStart: (email: string, productId: string) => Promise<void>;
     refunded?: (paid: Paid) => Promise<void>;
+    /** Says in the store's webhook log that the refund was not sent, once `refunded` failed for REFUND_TELL_RETRY_SECONDS. */
+    notTold?: (paid: Paid) => Promise<void>;
     /** Puts a course back for a payment that keeps the purchase (an HSETNX: nothing for one still there, no email). */
     restoreStart?: (email: string, productId: string, startSeconds: number) => Promise<void>;
   },
@@ -895,7 +951,44 @@ export async function watchPayPal(
       await redisPipeline([["ZADD", watchKey(statsId), String(now + 3600), order]]);
       continue;
     }
-    if (on.refunded) await on.refunded(paid).catch((error) => console.error("telling of a PayPal refund failed", error));
+    // Told before anything is taken back (Claude 5's L4 on #3491): a telling that fails keeps the order watched, looked
+    // at again in an hour, for at most REFUND_TELL_RETRY_SECONDS after the first failure; the event's own id makes a
+    // later try find one already told (emitEvent). Past that, the store's webhook log says it was not sent, and the
+    // refund goes on. The tries stay inside REFUND_TELL_TRIES_AT_MOST whatever the store answers (Codex C2's M1 on
+    // #3499): only the first look at a refund (its refund mark newly added, a ZADD answering 1) tells without the first
+    // failure's time; every later look tells only once that time is known, read back exactly, not ahead of the clock
+    // and inside the bound. A time that is not known is never "inside the bound" nor "past it" (CX-123 rule 24): the
+    // order is looked at again in an hour and nothing is told, said not sent or taken back.
+    if (on.refunded) {
+      let first: number | null = null;
+      if (marked[0] === 0) {
+        // A later look. When no failure's time was kept (its write got no answer), the try that failed is taken to
+        // have been an hour ago, the earliest a look comes back, so the tries in all still fit the bound.
+        first = await tellFirst(order, now - 3600, now);
+        if (first === null) {
+          console.error("when telling of a PayPal refund first failed is unknown; looked at again in an hour", order);
+          await redisPipeline([["ZADD", watchKey(statsId), String(now + 3600), order]]).catch(() => undefined);
+          continue;
+        }
+      }
+      let told = false;
+      if (first === null || now - first <= REFUND_TELL_RETRY_SECONDS) {
+        try {
+          await on.refunded(paid);
+          told = true;
+        } catch (error) {
+          console.error("telling of a PayPal refund failed", order, error);
+        }
+      }
+      if (!told) {
+        if (first === null) first = await tellFirst(order, now, now);
+        if (first === null || now - first < REFUND_TELL_RETRY_SECONDS) {
+          await redisPipeline([["ZADD", watchKey(statsId), String(now + 3600), order]]).catch(() => undefined);
+          continue;
+        }
+        if (on.notTold) await on.notTold(paid).catch((lost) => console.error("WEBHOOK EVENT LOST: a PayPal refund could not be told nor said not sent", order, lost));
+      }
+    }
     // The record read in its exact envelope (Codex G on #2791; CX-123 rule 24): one reply, null or text. Anything else
     // is unknown, looked at again in an hour, never "no record".
     const read = repliesFor(await redisPipeline([["HGET", importedKey(statsId, paid.email), paid.product]]), 1);

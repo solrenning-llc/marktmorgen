@@ -54,6 +54,7 @@ import { planRefundLetter, planRefundNotMadeLetter, planRefundPartLetter, planRe
 import { randomBytes } from "node:crypto";
 import { types } from "node:util";
 import { UnknownReplyError } from "@/lib/redis-reply";
+import { readStripePage } from "@/lib/stripe-list";
 
 const AT = "2024-06-20";
 /** The notes of plan refunds not finished yet: field a store's id, value a Note. */
@@ -109,7 +110,6 @@ export type PlanRefundFlow =
   | { ok: false; reason: Exclude<PlanRefundMade, { ok: true }>["reason"] | "no_plan" | "stop_failed" | "partial"; stopLeft: boolean };
 
 type Row = Record<string, unknown>;
-const rows = (page: Row): Row[] => (Array.isArray(page.data) ? (page.data as unknown[]).filter((r): r is Row => Boolean(r) && typeof r === "object") : []);
 
 function readNote(raw: unknown): Note | DamagedNote | null {
   if (typeof raw !== "string") return null;
@@ -365,10 +365,13 @@ export async function endPlanNow(store: Store, id: string): Promise<boolean> {
     if (!sub || !ENDED.includes(String(sub.status))) return false;
     for (const status of ["open", "draft"] as const) {
       const listed = await onPlatform("GET", `/invoices?${new URLSearchParams({ subscription: id, status, limit: "10" })}`, undefined, { version: AT });
-      if (listed.has_more !== false) return false;
-      for (const invoice of rows(listed)) {
-        const invoiceId = typeof invoice.id === "string" ? invoice.id : "";
-        if (!OBJECT_ID.test(invoiceId) || invoice.status !== status) continue;
+      // Read exactly (rule 24): a page that is not a list, a row with no id of its own or of another status than the one
+      // asked for proves nothing about what is still payable, so the plan is not taken as ended (false; the daily job
+      // tries again). readStripePage throws on a page that does not read, caught below as false too.
+      const page = readStripePage(listed, (row) => row.status === status, OBJECT_ID);
+      if (page.hasMore || page.unreadable > 0) return false;
+      for (const invoice of page.rows) {
+        const invoiceId = invoice.id as string;
         if (status === "open") await onPlatform("POST", `/invoices/${encodeURIComponent(invoiceId)}/void`, new URLSearchParams(), { version: AT, idempotencyKey: `plan-refund-void:${invoiceId}` });
         else await onPlatform("DELETE", `/invoices/${encodeURIComponent(invoiceId)}`, undefined, { version: AT });
       }

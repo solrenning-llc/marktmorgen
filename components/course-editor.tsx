@@ -49,6 +49,7 @@ const MESSAGES: Record<string, string> = {
   ...STUDIO_MESSAGES,
   too_many: "That is as many as a course holds: 30 modules and 200 lessons.",
   not_empty: "Take its lessons out first, one by one, so no work is lost by accident.",
+  last_delivery: "This course is on your store, and this is its only lesson. Add another lesson first, or unpublish the course.",
   drip: `Type a number of days from 0 to ${MAX_DRIP_DAYS}.`,
   files: `A lesson holds up to ${MAX_LESSON_FILES} downloads.`,
   video_type: "That video type does not play in every browser. Upload an MP4, a MOV or a WebM.",

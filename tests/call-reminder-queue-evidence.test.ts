@@ -100,6 +100,23 @@ test("an unknown single-session payment read preserves due reminders", async () 
   assert.equal(mutations, 0, "an unknown payment read must not ZREM the due reminder");
 });
 
+// Claude 3 (nuvem A) on #2508, MEDIUM 2: an unknown single-session read keeps the reminder only while it can still be
+// of use, as a failed list read does (GIVE_UP_MS, six hours); past it the reminder leaves the queue and is counted
+// dropped, so one session Stripe never answers for cannot hold the head of the queue for good.
+test("a single-session payment read that keeps failing gives up once the reminder is hours late", async () => {
+  reply = [[member, String(now - 7 * 3600_000)]];
+  process.env.STRIPE_SECRET_KEY = "sk_test_call_reminder_only";
+  globalThis.fetch = (async (input: string | URL | Request) => {
+    const url = new URL(String(input));
+    if (url.pathname === "/v1/checkout/sessions") return new Response(JSON.stringify({ object: "list", data: [], has_more: false }), { status: 200 });
+    return new Response(JSON.stringify({ error: { message: "synthetic timeout", type: "api_error" } }), { status: 503 });
+  }) as typeof fetch;
+  const store = { callsId: "calls-evidence", handle: "harbor", email: "owner@example.invalid", stripeAccountId: "acct_test_reminders", previousHandles: [] } as unknown as import("@/lib/store").Store;
+  const counts = await run(async () => store);
+  assert.equal(counts.dropped, 1, "a reminder seven hours late is given up on");
+  assert.ok(mutations > 0, "and taken out of the queue");
+});
+
 test("a complete due pair is processed, with string and numeric scores", async () => {
   for (const score of [String(now - 1), now - 1]) {
     reply = [[member, score]];

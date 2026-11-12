@@ -37,6 +37,15 @@ export const MIN_CERT_NAME = 2;
 export const MAX_CERT_NAME = 80;
 /** The most certificates the studio lists for one course. */
 export const MAX_LISTED_CERTS = 500;
+/**
+ * The store's public requests the picture a certificate's shared link unfolds
+ * into takes (app/[handle]/certificate/[id]/opengraph-image.tsx): one before
+ * the record is read and the rest before anything is drawn, as many as its
+ * PDF (CERTIFICATE_PDF_UNITS, lib/certificate-pdf.ts), which weighs more: the
+ * heaviest picture measured 153 KB and 0.59 s of CPU cold, inside what
+ * CERTIFICATE_PDF_READ prices (tests/plan-cost-registry.ts).
+ */
+export const CERTIFICATE_CARD_UNITS = 2;
 
 export type Certificate = {
   id: string;
@@ -205,14 +214,45 @@ export async function readCertificate(id: string): Promise<Certificate | null> {
   return parseCertificate(raw);
 }
 
-/** The standing certificate this student holds for this course, if any. */
+/**
+ * The id the student's slot names and the certificate it names when that one
+ * still stands, both read exactly (CX-123 rule 24): null only for a slot
+ * Redis confirms empty (nil); a record confirmed gone (nil), malformed or
+ * withdrawn is no standing certificate; any other reply throws UnknownReply.
+ */
+async function slotHolder(courseId: string, who: string, what: string): Promise<{ id: string; standing: Certificate | null } | null> {
+  const [id] = exactReplies(await redisPipeline([["HGET", indexKey(courseId), who]]), 1, what);
+  if (id === null) return null;
+  if (typeof id !== "string") throw new UnknownReply(what);
+  if (!CERT_ID_PATTERN.test(id)) return { id, standing: null };
+  const [raw] = exactReplies(await redisPipeline([["GET", certKey(id)]]), 1, what);
+  if (raw !== null && typeof raw !== "string") throw new UnknownReply(what);
+  const found = parseCertificate(raw);
+  return { id, standing: found && !found.withdrawnAt ? found : null };
+}
+
+/**
+ * The standing certificate this student holds for this course, if any; a
+ * reply that is not exactly what was asked for throws UnknownReply, never
+ * read as "none".
+ */
 export async function certificateOf(courseId: string, who: string): Promise<Certificate | null> {
   if (!isRedisConfigured()) return null;
-  const [id] = await redisPipeline([["HGET", indexKey(courseId), who]]);
-  if (typeof id !== "string") return null;
-  const found = await readCertificate(id);
-  return found && !found.withdrawnAt ? found : null;
+  return (await slotHolder(courseId, who, "a student's certificate"))?.standing ?? null;
 }
+
+/**
+ * The student's slot moved from the certificate it names to a new one, only
+ * while it still names that one, in one step: 1 when moved, 0 when it names
+ * another meanwhile and nothing was written. Modelled by lib/redis-memory.ts.
+ */
+export const CERT_SLOT_SWAP = `-- marktmorgen:cert-slot-swap:v1
+if redis.call('HGET', KEYS[1], ARGV[1]) ~= ARGV[2] then return 0 end
+redis.call('HSET', KEYS[1], ARGV[1], ARGV[3])
+return 1`;
+
+/** How many times one press looks at the slot again when it changed between two reads. */
+const CLAIM_TRIES = 3;
 
 export type IssueResult = { ok: true; certificate: Certificate; fresh: boolean } | { ok: false; reason: "name" };
 
@@ -261,20 +301,51 @@ export async function issueCertificate(input: {
   const bytes = dataBytes([JSON.stringify(certificate)], 3);
   await needData(input.room, [{ slot: CERTS_SLOT(input.course.id), bytes }]);
   await redisPipeline([["SET", certKey(id), JSON.stringify(certificate)]]);
-  const [claimed] = await redisPipeline([["HSETNX", indexKey(input.course.id), input.who, id]]);
-  if (Number(claimed) !== 1) {
-    const existing = await certificateOf(input.course.id, input.who);
-    if (existing) {
-      // This press made nothing that stands: its record goes, the standing one is the answer.
-      await redisPipeline([["DEL", certKey(id)]]);
-      await giveData(input.room, [{ slot: CERTS_SLOT(input.course.id), bytes }]);
-      return { ok: true, certificate: existing, fresh: false };
-    }
-    // The slot pointed at a certificate that was withdrawn: take it.
-    await redisPipeline([["HSET", indexKey(input.course.id), input.who, id]]);
+  let existing: Certificate | null;
+  try {
+    existing = await claimSlot(input.course.id, input.who, id);
+  } catch (error) {
+    // Unknown whether the slot names this press's record (CX-123 rule 24): the
+    // record goes and its room comes back once its deletion is confirmed, and
+    // the press is refused; a slot left naming it reads as gone and is taken
+    // by the next press.
+    const [gone] = await redisPipeline([["DEL", certKey(id)]]).catch(() => [null]);
+    if (gone === 1) await giveData(input.room, [{ slot: CERTS_SLOT(input.course.id), bytes }]).catch(() => {});
+    throw error;
+  }
+  if (existing) {
+    // This press made nothing that stands: its record goes, the standing one is the answer.
+    await redisPipeline([["DEL", certKey(id)]]);
+    await giveData(input.room, [{ slot: CERTS_SLOT(input.course.id), bytes }]);
+    return { ok: true, certificate: existing, fresh: false };
   }
   await redisPipeline([["SADD", allKey(input.course.id), id], ["SADD", byKey(input.course.id, input.who), id]]);
   return { ok: true, certificate, fresh: true };
+}
+
+/**
+ * Takes the student's slot for the certificate `id`, already written: null
+ * when this press holds it, or the standing certificate another press holds,
+ * which is the answer. A slot that names a certificate no longer standing is
+ * taken only while it still names that one (CERT_SLOT_SWAP), so a press never
+ * writes over one made meanwhile. Every reply is read exactly: one that is not
+ * what was asked for throws UnknownReply (CX-123 rule 24).
+ */
+async function claimSlot(courseId: string, who: string, id: string): Promise<Certificate | null> {
+  const what = "a certificate's issue";
+  for (let i = 0; i < CLAIM_TRIES; i += 1) {
+    const [claimed] = exactReplies(await redisPipeline([["HSETNX", indexKey(courseId), who, id]]), 1, what);
+    if (claimed === 1) return null;
+    if (claimed !== 0) throw new UnknownReply(what);
+    const holder = await slotHolder(courseId, who, what);
+    // Emptied since (a withdrawal): claim it again.
+    if (!holder) continue;
+    if (holder.standing) return holder.standing;
+    const [swapped] = exactReplies(await redisPipeline([["EVAL", CERT_SLOT_SWAP, 1, indexKey(courseId), who, holder.id, id]]), 1, what);
+    if (swapped === 1) return null;
+    if (swapped !== 0) throw new UnknownReply(what);
+  }
+  throw new Error("The student's certificate slot kept changing; nothing was issued");
 }
 
 /**
@@ -311,11 +382,13 @@ export async function withdrawCertificate(courseId: string, id: string): Promise
   if (!found || found.courseId !== courseId) return false;
   if (!found.withdrawnAt) {
     // XX: only while it is still there, so a withdrawal racing the person's deletion never writes it back.
-    const [written] = await redisPipeline([["SET", certKey(id), JSON.stringify({ ...found, withdrawnAt: Math.floor(Date.now() / 1000) }), "XX"]]);
+    const [written] = exactReplies(await redisPipeline([["SET", certKey(id), JSON.stringify({ ...found, withdrawnAt: Math.floor(Date.now() / 1000) }), "XX"]]), 1, "a certificate's withdrawal");
     if (written === null) return false;
+    // Unknown whether it was marked withdrawn: the slot is not freed for a second one (CX-123 rule 24).
+    if (written !== "OK") throw new UnknownReply("a certificate's withdrawal");
   }
   const who = emailKey(found.email);
-  const [current] = await redisPipeline([["HGET", indexKey(courseId), who]]);
+  const [current] = exactReplies(await redisPipeline([["HGET", indexKey(courseId), who]]), 1, "a certificate's withdrawal");
   if (current === id) await redisPipeline([["HDEL", indexKey(courseId), who]]);
   return true;
 }

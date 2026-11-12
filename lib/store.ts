@@ -3485,9 +3485,9 @@ export async function editStoreLink(
     const at = store.links.findIndex((link) => link.id === id);
     if (at < 0) return { ok: false, reason: "unknown" };
     const links = [...store.links];
-    // Its picture stays through an edit; a link turned into a heading gives it up.
+    // Its picture stays through an edit; a link turned into a heading gives it up. An archived one stays archived (423 [LT1]).
     const image = extras.header ? undefined : links[at].image;
-    links[at] = { id: links[at].id, addedAt: links[at].addedAt, title, url, ...extras, ...(image ? { image } : {}) };
+    links[at] = { id: links[at].id, addedAt: links[at].addedAt, title, url, ...extras, ...(image ? { image } : {}), ...(links[at].archived ? { archived: true as const } : {}) };
     return { ok: true, store: await save({ ...store, links }), removed: extras.header ? (store.links[at].image ?? null) : null };
   });
   return result ?? { ok: false, reason: "none" };
@@ -3521,6 +3521,26 @@ export async function setLinkImage(email: string, id: string, image: LinkImage |
     const { image: was, ...rest } = links[at];
     links[at] = image ? { ...rest, image } : rest;
     return { ok: true, store: await save({ ...store, links }), removed: was ?? null };
+  });
+  return result ?? { ok: false, reason: "none" };
+}
+
+/**
+ * Keeps a link (or a heading) back from the page, or shows it again (423
+ * [LT1]): nothing else about it changes, its times included, so showing it
+ * again never shows it outside them.
+ */
+export async function setLinkArchived(email: string, id: string, archived: boolean): Promise<LinkResult> {
+  const result = await withStore<LinkResult>(email, async (store, save) => {
+    const at = store.links.findIndex((link) => link.id === id);
+    if (at < 0) return { ok: false, reason: "unknown" };
+    if (Boolean(store.links[at].archived) === archived) return { ok: true, store };
+    const links = [...store.links];
+    const next: StoreLink = { ...links[at] };
+    if (archived) next.archived = true;
+    else delete next.archived;
+    links[at] = next;
+    return { ok: true, store: await save({ ...store, links }) };
   });
   return result ?? { ok: false, reason: "none" };
 }

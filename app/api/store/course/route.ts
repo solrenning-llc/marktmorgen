@@ -37,7 +37,7 @@ import { tellStudentOfReview } from "@/lib/assignment-notify";
 import { EMAIL_PATTERN } from "@/lib/auth";
 import { dropQuiz, readQuiz, readQuizFor, resetTries, saveQuiz, setupOf } from "@/lib/quiz";
 import { CERT_ID_PATTERN, withdrawCertificate } from "@/lib/certificate";
-import { readListing } from "@/lib/catalog";
+import { hasProduct, readListing } from "@/lib/catalog";
 import { heldRefusal, holdState } from "@/lib/child-safety";
 import { communityOf, courseChanged, unindexCourse } from "@/lib/community-index";
 import { LockBusyError, withLock } from "@/lib/redis-lock";
@@ -110,7 +110,9 @@ export async function GET(request: NextRequest) {
  * verdict, feedback }` approves a student's work or asks for another try;
  * `{ action: "template", id, template }` gives a new course one of the ready
  * structures (lib/course-templates.ts) by its id, applied here to the course
- * as it is kept, in one write.
+ * as it is kept, in one write; `{ action: "shelf", id, products }` sets the
+ * course's "More from" shelf (628 [HN4](b)) to up to six of the store's own
+ * products, in that order, and `products: []` takes it off.
  *
  * `id` is always the product's, and the course is found through the
  * creator's own store, so nothing here can reach anyone else's course.
@@ -375,6 +377,17 @@ export async function POST(request: NextRequest) {
       // How long certificates issued from now on stay valid (639 [GL7](32)): 1 to 120 months, or for good.
       if (action === "cert-months") {
         const result = editCourse(course, { op: "certificate-months", months: body.months ?? null });
+        if (!result.ok) return Response.json({ ok: false, error: result.reason }, { status: 400 });
+        await save(result.course);
+        return Response.json({ ok: true, course: result.course });
+      }
+
+      // The "More from" shelf (628 [HN4](b)): up to six of the store's own products, in the creator's order; anything the
+      // store does not have, and the course itself, are left out here, so the course keeps only ids the store holds.
+      if (action === "shelf") {
+        const asked = Array.isArray(body.products) ? body.products.filter((p: unknown) => typeof p === "string" && hasProduct(store, p)) : null;
+        if (!asked) return Response.json({ ok: false, error: "invalid" }, { status: 400 });
+        const result = editCourse(course, { op: "shelf", products: asked, courseProductId: product.id });
         if (!result.ok) return Response.json({ ok: false, error: result.reason }, { status: 400 });
         await save(result.course);
         return Response.json({ ok: true, course: result.course });

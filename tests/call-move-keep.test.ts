@@ -33,6 +33,15 @@ part("a move to a time soon keeps the flat 200 days");
   is("not kept past 200 days after the call's end", Number(ttl) * 1000 <= start + H - Date.now() + 200 * DAY + 5_000, true);
 }
 
+part("a move is kept at most two years, as the privacy policy says");
+{
+  const start = Math.floor((Date.now() + 3 * 365 * DAY) / 60_000) * 60_000;
+  await writeMove("cs_test_years", { s: start, e: start + H, n: 1 });
+  const [ttl] = await redis.pipeline([["TTL", "nl:call:moved:cs_test_years"]]);
+  is("a session years ahead: kept at most two years", Number(ttl) <= 730 * 86_400, true);
+  is("still kept", Number(ttl) > 0, true);
+}
+
 done();
 }
 

@@ -44,6 +44,12 @@ export const REMINDER_QUEUE = "nl:call:remindq";
  */
 const MOVE_SECONDS = 200 * 86_400;
 
+/**
+ * And never longer than this, whatever the call's date: the privacy policy
+ * (app/privacy/page.tsx), lib/data-families.ts and the cost registry state it.
+ */
+const MOVE_MAX_SECONDS = 730 * 86_400;
+
 /** Reminders due sooner than this after the booking is made are not sent. */
 export const REMINDER_MIN_LEAD_MS = 60 * 60_000;
 
@@ -111,7 +117,7 @@ export async function readMoves(sessions: string[]): Promise<Map<string, Move>> 
  */
 export async function writeMove(session: string, move: Move): Promise<void> {
   const value = JSON.stringify(move);
-  const keep = Math.max(0, Math.ceil((move.e - Date.now()) / 1000)) + MOVE_SECONDS;
+  const keep = Math.min(MOVE_MAX_SECONDS, Math.max(0, Math.ceil((move.e - Date.now()) / 1000)) + MOVE_SECONDS);
   const replies = repliesFor(await redisPipeline([["SET", movedKey(session), value, "EX", keep]]), 1);
   if (replies?.[0] === "OK") return;
   const kept = repliesFor(await redisPipeline([["GET", movedKey(session)]]), 1);

@@ -396,8 +396,9 @@ export default function PrivacyPage() {
           that names the booking and its time, and we keep a mark that each
           reminder was sent for 14 days. If the buyer moves the booking
           to another time from the link in their email, we keep the new time
-          and how many times it was moved, tied to that checkout, for 200
-          days. The line in the creator&apos;s diary that keeps the time taken
+          and how many times it was moved, tied to that checkout, until 200
+          days after the call it was moved to, and never longer than two
+          years. The line in the creator&apos;s diary that keeps the time taken
           is let go {PAST_CALL_DAYS} days after the call ends; the booking
           itself stays on the creator&apos;s Stripe account. The same kind of cookie, for
           the same 32 minutes, is set when someone starts to buy a product sold

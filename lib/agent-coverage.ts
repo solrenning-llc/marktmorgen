@@ -170,6 +170,7 @@ export const AGENT_COVERAGE: Readonly<Record<string, AgentAction>> = {
   "POST store/goal": row("numbers", draft),
   "POST store/heard-ask": row("settings", draft),
   "POST store/help": row("settings", read, "The studio's help assistant: a question, an answer."),
+  "POST store/help/support": row("settings", execute, "\"Send this to support\": the creator's own words to the support inbox, with a copy to them."),
   "POST store/host-calendar": row("connections", never(CONNECT)),
   "POST store/image": row("products", draft),
   "POST store/image/upload": row("files", draft),

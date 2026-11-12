@@ -10,7 +10,8 @@
  *     already stopped, and the email says so rather than promising a grace
  *     the store does not have;
  *   - never twice for the same invoice, and tried again on the next run when
- *     the email could not be sent;
+ *     the sender refused the email (an unknown answer keeps the mark:
+ *     tests/c1-cost-billing-reminder-uncertain.test.ts);
  *   - nothing is sent for an invoice that is not open, has nothing on it,
  *     has no page to pay on, or has no address to write to.
  */
@@ -72,7 +73,9 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     }
   }
   if (url.hostname === "api.resend.com") {
-    if (!emailWorks) return new Response(JSON.stringify({ message: "down" }), { status: 500 });
+    // A known refusal (nothing taken). A 5xx may follow acceptance, so it keeps
+    // the mark instead (tests/c1-cost-billing-reminder-uncertain.test.ts).
+    if (!emailWorks) return new Response(JSON.stringify({ message: "refused" }), { status: 422 });
     const body = JSON.parse(String(init?.body ?? "{}"));
     const to = Array.isArray(body.to) ? body.to[0] : body.to;
     emails.push({ to, subject: body.subject, text: body.text });

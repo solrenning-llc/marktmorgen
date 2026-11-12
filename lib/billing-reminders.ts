@@ -11,7 +11,7 @@
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { isAddOn, keepCardThatPays, listSubscriptions, pastDueInGrace, periodEnd, planOf } from "@/lib/billing";
-import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
+import { NIMBUS_FROM, isSenderConfigured, sendEmailOutcome } from "@/lib/email";
 import { SITE_URL } from "@/lib/site-url";
 import { recordUnpaidRenewal } from "@/lib/billing-sync";
 import { RENEWAL_KEPT_WORDS, RENEWAL_PAUSED_WORDS, RENEWAL_RESUME_WORDS } from "@/lib/renewal-unpaid-words";
@@ -244,6 +244,8 @@ export async function sendFailedPlanNotices(): Promise<{ sent: number; failed: n
       const key = `nl:remind:failed:${due.invoice}`;
       const [claimed] = await redisPipeline([["SET", key, "1", "NX", "EX", 90 * DAY]]);
       if (claimed === null) continue;
+      // Set once the sender is asked: from then on a failure may follow acceptance.
+      let asked = false;
       try {
         // A renewal's email says what has stopped, so it is written down
         // first (lib/billing-sync.ts); a failure waits for the next run.
@@ -251,14 +253,20 @@ export async function sendFailedPlanNotices(): Promise<{ sent: number; failed: n
         // First, so the card that pays is the one the next renewal uses.
         await keepCardThatPays(due.subscription);
         const { subject, text } = failedPlanEmail(due);
-        const ok = await sendEmail({ meter: { by: "company" }, from: NIMBUS_FROM, to: due.email, subject, text, replyTo: SUPPORT_EMAIL });
-        if (!ok) throw new Error("the email was not sent");
+        asked = true;
+        const outcome = await sendEmailOutcome({ meter: { by: "company" }, from: NIMBUS_FROM, to: due.email, subject, text, replyTo: SUPPORT_EMAIL });
+        if (outcome === "refused") asked = false;
+        if (outcome !== "sent") throw new Error(`the email was not sent (${outcome})`);
         counts.sent += 1;
       } catch (error) {
         counts.failed += 1;
         console.error("telling a creator their payment failed did not work", error);
-        // Tried again on the next run rather than never.
-        await redisPipeline([["DEL", key]]).catch(() => {});
+        // Tried again on the next run rather than never, unless the sender may
+        // have taken it (an unknown answer, or a throw from inside the send):
+        // this email carries no idempotency key, so a second run would be a
+        // second email. That mark is kept, and said, never in silence.
+        if (asked) console.error("a failed-payment email may have gone; kept as sent", due.invoice);
+        else await redisPipeline([["DEL", key]]).catch(() => {});
       }
     }
     const last = data[data.length - 1];
@@ -292,12 +300,16 @@ export async function sendReminders(nowSeconds = Math.floor(Date.now() / 1000)):
         const [claimed] = await redisPipeline([["SET", key, "1", "NX", "EX", 60 * DAY]]);
         if (claimed === null) continue;
         const { subject, text } = reminderEmail(reminder);
-        const ok = await sendEmail({ meter: { by: "company" }, from: NIMBUS_FROM, to: reminder.email, subject, text, replyTo: SUPPORT_EMAIL });
-        if (ok) counts.sent += 1;
+        const outcome = await sendEmailOutcome({ meter: { by: "company" }, from: NIMBUS_FROM, to: reminder.email, subject, text, replyTo: SUPPORT_EMAIL })
+          .catch(() => "uncertain" as const);
+        if (outcome === "sent") counts.sent += 1;
         else {
           counts.failed += 1;
-          // Tried again on the next run rather than never.
-          await redisPipeline([["DEL", key]]).catch(() => {});
+          // A known refusal is tried again on the next run rather than never.
+          // An unknown answer may follow acceptance, and with no idempotency
+          // key a second run would be a second email: that mark is kept.
+          if (outcome === "refused") await redisPipeline([["DEL", key]]).catch(() => {});
+          else console.error("a billing reminder may have gone; kept as sent", key);
         }
       }
       const last = data[data.length - 1];

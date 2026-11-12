@@ -6,7 +6,7 @@
  * refunds (giveBackUnused) are not settled on a guess: the closing stays held and tries again. Synthetic only.
  */
 import { claimHandle, setStripeAccount, storeForEmail, storeFolder, storeRef } from "@/lib/store";
-import { paidKey, paidPeriods } from "@/lib/closing-holds";
+import { heldPaymentsOf, paidKey, paidPeriods } from "@/lib/closing-holds";
 import { giveBackUnused } from "@/lib/closing-refunds";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -52,6 +52,18 @@ async function main(): Promise<void> {
       setPipe(real);
     }
   }
+
+  part("The person's copy of their data (lib/person-copy.ts) is never handed over with their payments silently missing");
+  is("control: the member's own row is in their copy", await outcome(async () => new Map((await heldPaymentsOf(store, "member@example.com")).map((p) => [p.subscription, p]))), "read 1");
+  setPipe(answering("garbled"));
+  try {
+    is("the list in another shape: unknown, so the copy fails rather than leave the payments out", await outcome(() => heldPaymentsOf(store, "member@example.com")), "unknown");
+  } finally {
+    setPipe(real);
+  }
+  await redis.pipeline([["HSET", key, "sub_ClosingPaid0003", "{not json"]]);
+  is("a row that does not read: unknown (it could be theirs)", await outcome(() => heldPaymentsOf(store, "member@example.com")), "unknown");
+  await redis.pipeline([["HDEL", key, "sub_ClosingPaid0003"]]);
 
   part("A member's row that does not read is unknown, never left out");
   for (const [what, value] of [["not JSON", "{not json"], ["no amount", JSON.stringify({ ...row, amt: "3000" })], ["no invoice", JSON.stringify({ ...row, inv: 7 })]] as [string, string][]) {

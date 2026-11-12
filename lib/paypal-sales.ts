@@ -1086,22 +1086,39 @@ export async function paypalCounts(statsId: string | null): Promise<{ sales: num
  */
 export async function readPayPalSales(statsId: string | null, since: number, limit: number): Promise<{ sales: Paid[]; partial: boolean }> {
   if (!statsId || !isRedisConfigured()) return { sales: [], partial: false };
-  const [orders] = await redisPipeline([["ZREVRANGEBYSCORE", salesKey(statsId), "+inf", String(Math.max(0, since)), "LIMIT", "0", String(limit + 1)]]);
-  const list = (Array.isArray(orders) ? (orders as string[]) : []).filter((o) => ORDER_ID.test(o));
-  if (!list.length) return { sales: [], partial: false };
-  const partial = list.length > limit;
-  const read = await redisPipeline([["MGET", ...list.slice(0, limit).map(paidKey)]]);
-  const rows = Array.isArray(read[0]) ? (read[0] as unknown[]) : [];
+  // Read exactly, as the refunds beside it are (readPayPalRefundsWithCoverage; rule 24): the list as a list of text no
+  // longer than asked, else unknown and thrown, never "no PayPal sales".
+  const orders = stringList(repliesFor(await redisPipeline([["ZREVRANGEBYSCORE", salesKey(statsId), "+inf", String(Math.max(0, since)), "LIMIT", "0", String(limit + 1)]]), 1)?.[0]);
+  if (!orders || orders.length > limit + 1) throw new UnknownReplyError("the PayPal sales");
+  const listed = orders.slice(0, limit);
+  // An order that is not an order id, a record Redis answered as missing or one written for another store is a sale
+  // this reading could not count: the reading is partial, never whole without it.
+  let missing = listed.some((o) => !ORDER_ID.test(o));
+  const list = listed.filter((o) => ORDER_ID.test(o));
+  const partial = orders.length > limit;
+  if (!list.length) return { sales: [], partial: partial || missing };
+  const what = "a PayPal sale's record";
+  const rows = repliesFor(repliesFor(await redisPipeline([["MGET", ...list.map(paidKey)]]), 1)?.[0], list.length);
+  if (!rows) throw new UnknownReplyError(what);
   const sales: Paid[] = [];
-  for (const raw of rows) {
-    try {
-      const paid = typeof raw === "string" ? (JSON.parse(raw) as Paid) : null;
-      if (paid && paid.store === statsId && typeof paid.order === "string") sales.push(paid);
-    } catch {
-      // An order that cannot be read is left out, not guessed at.
+  list.forEach((order, i) => {
+    const raw = rows[i];
+    if (raw === null) {
+      missing = true;
+      return;
     }
-  }
-  return { sales, partial };
+    if (typeof raw !== "string") throw new UnknownReplyError(what);
+    let paid: unknown;
+    try {
+      paid = JSON.parse(raw);
+    } catch {
+      throw new UnknownReplyError(what);
+    }
+    if (!paid || typeof paid !== "object" || Array.isArray(paid) || (paid as Paid).order !== order || typeof (paid as Paid).store !== "string") throw new UnknownReplyError(what);
+    if ((paid as Paid).store === statsId) sales.push(paid as Paid);
+    else missing = true;
+  });
+  return { sales, partial: partial || missing };
 }
 
 /** The keys a PayPal order kept, by the order: for a closed store's deletion (lib/closed-store-data.ts). */

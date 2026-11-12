@@ -5,7 +5,8 @@ import { studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { readBook } from "@/lib/agent-book";
-import { readListings } from "@/lib/catalog";
+import { readListingsExact } from "@/lib/catalog";
+import { proposalLabel } from "@/lib/agent-proposal-label";
 import { AgentProposals, type DoneRow, type ProposalRow } from "@/components/agent-proposals";
 import type { Json } from "@/lib/agent-proposal-rules";
 
@@ -35,8 +36,10 @@ export default async function StudioAgentPage({ searchParams }: Params) {
   const { store } = view;
   const book = store.statsId ? await readBook(store.statsId).catch(() => null) : { waiting: [], history: [] };
   const targets = book ? [...new Set([...book.waiting, ...book.history].map((p) => p.target).filter(Boolean))] : [];
-  const titles = new Map((targets.length ? await readListings(store, targets).catch(() => []) : []).map((p) => [p.id, p.title]));
-  const label = (kind: string, target: string) => (kind === "product.description" ? `Description of ${titles.get(target) ?? "a product you have since removed"}` : kind);
+  // Null when the titles could not be read (rule 24): the labels say so, never that the product was removed.
+  const listed = targets.length ? await readListingsExact(store, targets).catch(() => null) : [];
+  const titles = listed ? new Map(listed.map((p) => [p.id, p.title])) : null;
+  const label = (kind: string, target: string) => proposalLabel(kind, target, titles);
   const asked = (by: string) => (by === "mcp" ? "your AI assistant, with an API key" : by === "cli" ? "the command line" : "the assistant in your studio");
   const waiting: ProposalRow[] = (book?.waiting ?? []).map((p) => ({ id: p.id, label: label(p.kind, p.target), asked: asked(p.asked.by), at: day(p.at), before: text(p.before), after: text(p.after) }));
   const history: DoneRow[] = (book?.history ?? []).map((d) => ({ id: d.id, label: label(d.kind, d.target), confirmed: `confirmed ${day(d.confirmed.at)}`, undo: d.undo, undone: d.undone ? day(d.undone.at) : null }));

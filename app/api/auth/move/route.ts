@@ -90,13 +90,17 @@ export async function POST(request: NextRequest) {
   }
 }
 
-/** Runs one step of an undo; false, logged, when it failed. */
-async function step(what: string, work: () => Promise<unknown>): Promise<boolean> {
+/**
+ * Runs one step of an undo; false, logged, when it failed. The caller writes
+ * the log line itself, one fixed string, so nothing but that label reaches
+ * the server log (tests/auth-log-redaction.test.ts).
+ */
+async function step(work: () => Promise<unknown>, logFailure: () => void): Promise<boolean> {
   try {
     await work();
     return true;
   } catch {
-    console.error(`${what} failed`);
+    logFailure();
     return false;
   }
 }
@@ -118,19 +122,19 @@ async function finishMove(from: string, to: string, away: (path: string) => Resp
   const undo = async () => {
     let ok = true;
     if (keysMoved) {
-      ok = (await step("forgetting passkeys added midway", () => discardPasskeys(from))) && ok;
-      ok = (await step("moving passkeys back", () => movePasskeys(to, from))) && ok;
+      ok = (await step(() => discardPasskeys(from), () => console.error("forgetting passkeys added midway failed"))) && ok;
+      ok = (await step(() => movePasskeys(to, from), () => console.error("moving passkeys back failed"))) && ok;
     }
     if (appMoved) {
-      ok = (await step("forgetting two-step login added midway", () => discardTwoStep(from))) && ok;
-      ok = (await step("moving two-step login back", () => moveTwoStep(to, from))) && ok;
+      ok = (await step(() => discardTwoStep(from), () => console.error("forgetting two-step login added midway failed"))) && ok;
+      ok = (await step(() => moveTwoStep(to, from), () => console.error("moving two-step login back failed"))) && ok;
     } else if (appCopy) {
-      ok = (await step("forgetting a copy of two-step login", () => discardTwoStep(to))) && ok;
+      ok = (await step(() => discardTwoStep(to), () => console.error("forgetting a copy of two-step login failed"))) && ok;
     }
     // Sessions that could not be read are not logged out (audit SG2): the move is then left marked to repair.
-    ok = (await step("logging out after an undone move", async () => {
+    ok = (await step(async () => {
       if ((await endAllSessions(from)) === null) throw new Error("the sessions could not be read");
-    })) && ok;
+    }, () => console.error("logging out after an undone move failed"))) && ok;
     if (!ok) broke();
     return ok;
   };

@@ -71,7 +71,7 @@ async function main(): Promise<void> {
   is("this call's write taken back", await readBody(course.id, e), "");
   is("its room given back", (await dataUsed(ROOM))!.used, usedBefore);
 
-  part("A write that comes back unknown is taken back too");
+  part("A write that comes back unknown, the same text now kept, stays with its room counted (Codex L on #3821)");
   const g = newItemId();
   const original = redis.pipeline.bind(redis);
   redis.pipeline = (async (commands: (string | number)[][]) => {
@@ -86,8 +86,43 @@ async function main(): Promise<void> {
     redis.pipeline = original;
   }
   is("refused", unknown instanceof Error, true);
-  is("nothing left", await readBody(course.id, g), "");
-  is("room given back", (await dataUsed(ROOM))!.used, usedBefore);
+  is("who wrote it cannot be told: it stays", await readBody(course.id, g), "maybe");
+  is("and its room stays counted", (await dataUsed(ROOM))!.used > usedBefore, true);
+
+  part("Another writer's identical text, after an unknown reply, is never deleted (Codex L on #3821)");
+  const theirs = newItemId();
+  redis.run(["SET", `nl:course:${course.id}:body:${theirs}`, "Same words."]);
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    // NX refuses it for real (the text is already there), then a reply in no known shape.
+    if (commands.some((command) => command[0] === "SET")) return (await original(commands)).map(() => "QUEUED?");
+    return original(commands);
+  }) as typeof redis.pipeline;
+  try {
+    is("refused", (await thrown(() => saveNewBodies(course.id, [{ lessonId: theirs, text: "Same words." }], ROOM))) instanceof Error, true);
+  } finally {
+    redis.pipeline = original;
+  }
+  is("their text stays", await readBody(course.id, theirs), "Same words.");
+
+  part("A confirmed write replaced before the taking back stays as the other writer left it (Codex L on #3821)");
+  const [mineId, keptId] = [newItemId(), newItemId()];
+  redis.run(["SET", `nl:course:${course.id}:body:${keptId}`, "the creator's own"]);
+  const usedReplaced = (await dataUsed(ROOM))!.used;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (!commands.some((command) => command[0] === "SET" && command[3] === "NX")) return original(commands);
+    const replies = await original(commands);
+    // Between this call's write and its taking back, another writer puts its own text there.
+    redis.run(["SET", `nl:course:${course.id}:body:${mineId}`, "another writer's text"]);
+    return replies;
+  }) as typeof redis.pipeline;
+  try {
+    is("refused", (await thrown(() => saveNewBodies(course.id, [{ lessonId: mineId, text: "new one" }, { lessonId: keptId, text: "new two" }], ROOM))) instanceof Error, true);
+  } finally {
+    redis.pipeline = original;
+  }
+  is("the other writer's text stays", await readBody(course.id, mineId), "another writer's text");
+  is("the creator's text stays", await readBody(course.id, keptId), "the creator's own");
+  is("the room of what this call no longer holds comes back", (await dataUsed(ROOM))!.used, usedReplaced);
   part("A text whose fate cannot be read keeps its room counted (Revisor 1 on e-kj5-u3a)");
   const [h, k] = [newItemId(), newItemId()];
   const roomBefore = (await dataUsed(ROOM))!.used;
@@ -108,15 +143,17 @@ async function main(): Promise<void> {
   is("what may still be there keeps its room: never counted less than is kept", left === 0 || (await dataUsed(ROOM))!.used > roomBefore, true);
 
   part("A delete whose reply cannot be read keeps its room counted");
-  const m = newItemId();
+  const [m, held] = [newItemId(), newItemId()];
+  redis.run(["SET", `nl:course:${course.id}:body:${held}`, "the creator's own"]);
   const before2 = (await dataUsed(ROOM))!.used;
+  // This call's write confirmed ("OK"), the other refused (a text is kept there): taken back, and that reply unread.
+  const takingBack = (command: (string | number)[]) => command[0] === "EVAL" && String(command[1]).startsWith("-- marktmorgen:release:v1\n");
   redis.pipeline = (async (commands: (string | number)[][]) => {
-    if (commands.some((command) => command[0] === "SET")) return (await original(commands)).map(() => "QUEUED?");
-    if (commands.some((command) => command[0] === "DEL")) return commands.map(() => ({ shape: "other" }));
+    if (commands.some(takingBack)) return commands.map(() => ({ shape: "other" }));
     return original(commands);
   }) as typeof redis.pipeline;
   try {
-    await thrown(() => saveNewBodies(course.id, [{ lessonId: m, text: "still here" }], ROOM));
+    await thrown(() => saveNewBodies(course.id, [{ lessonId: m, text: "still here" }, { lessonId: held, text: "new two" }], ROOM));
   } finally {
     redis.pipeline = original;
   }

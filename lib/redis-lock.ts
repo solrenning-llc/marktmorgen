@@ -35,6 +35,8 @@ import { redisPipeline } from "@/lib/redis";
 import { repliesFor } from "@/lib/redis-reply";
 
 const RELEASE = '-- marktmorgen:release:v1\nif redis.call("GET", KEYS[1]) == ARGV[1] then return redis.call("DEL", KEYS[1]) else return 0 end';
+/** RELEASE for any text one writer put under a key: deleted only while the key still holds exactly that text (1), else 0. */
+export const DELETE_IF_SAME = RELEASE;
 const EXTEND = '-- marktmorgen:extend:v1\nif redis.call("GET", KEYS[1]) == ARGV[1] then return redis.call("EXPIRE", KEYS[1], ARGV[2]) else return 0 end';
 
 export type Held = { key: string; token: string; ttlSeconds: number };

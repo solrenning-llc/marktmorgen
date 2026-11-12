@@ -18,6 +18,7 @@ import { readShelf } from "@/lib/course-shelf-rules";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { indexBytes } from "@/lib/community-search";
 import { type DataStore, giveData, needData, noteData } from "@/lib/store-data";
+import { DELETE_IF_SAME } from "@/lib/redis-lock";
 import { dataBytes } from "@/lib/store-data-rules";
 import { type ProductFile, parseProductFile } from "@/lib/product-file";
 import { type QuizSetup, parseSetup as parseQuizSetup } from "@/lib/quiz";
@@ -731,8 +732,10 @@ export async function saveBody(courseId: string, lessonId: string, text: string,
  * a lesson id given once. The room for all of them is taken in one step
  * before anything is written (DataRoomError when it does not fit, and then
  * nothing is); each is written only where no text is kept yet; anything
- * that comes back otherwise takes away what this call wrote, gives its room
- * back and throws. Never a partial import left behind.
+ * that comes back otherwise takes away what this call is known to have
+ * written (only while the key still holds exactly that text), gives back the
+ * room of what is known gone and throws. A text whose writer cannot be told
+ * stays, with its room counted: never another writer's text deleted.
  */
 export async function saveNewBodies(courseId: string, bodies: { lessonId: string; text: string }[], room: DataStore): Promise<void> {
   if (!COURSE_ID_PATTERN.test(courseId)) throw new Error("not a course id");
@@ -774,14 +777,16 @@ export async function saveNewBodies(courseId: string, bodies: { lessonId: string
     }
     unsure.forEach((body, i) => {
       const value = held?.[i];
-      if (value === body.text) mine.push(body);
-      else if (held && (value === null || typeof value === "string")) gone.push(body); // nothing, or someone else's text: not written by this call.
+      // Nothing there, or another text: not this call's. The same text says nothing about who wrote it (NX refuses a
+      // writer's identical text the same way), so it is never deleted and keeps its room counted (Codex L on #3821).
+      if (held && (value === null || (typeof value === "string" && value !== body.text))) gone.push(body);
     });
   }
   if (mine.length) {
     let deleted: unknown[] | null = null;
     try {
-      deleted = repliesFor(await redisPipeline(mine.map((body) => ["DEL", bodyKey(courseId, body.lessonId)])), mine.length);
+      // Deleted in one step only while the key still holds this call's text: one put there since by another writer stays.
+      deleted = repliesFor(await redisPipeline(mine.map((body) => ["EVAL", DELETE_IF_SAME, 1, bodyKey(courseId, body.lessonId), body.text])), mine.length);
     } catch {
       deleted = null;
     }

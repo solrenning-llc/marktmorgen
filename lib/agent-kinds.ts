@@ -11,9 +11,10 @@
 import type { Json, ProposalKind } from "@/lib/agent-proposal-rules";
 import { MAX_ABOUT_LENGTH, cleanAbout, readAbout, readAboutExact, writeAboutIf } from "@/lib/product-about";
 import { setProductAbout, type Store } from "@/lib/store";
-import { readListing } from "@/lib/catalog";
+import { productIdFor, readListing } from "@/lib/catalog";
 import { fastMoneyRefusal } from "@/lib/terms-check-rules";
 import { productPromptsLeft } from "@/lib/product-outline";
+import { isHeldForReport } from "@/lib/child-safety-holds";
 
 export type AgentKind = ProposalKind & {
   /** What the store holds now for this target, as the proposal's "before" is compared with. */
@@ -47,9 +48,18 @@ export type AgentKind = ProposalKind & {
  * promise of fast or easy money (567 [GD1] (d), lib/terms-check-rules.ts) and
  * no prompt of the ready outline left in (lib/product-outline.ts). A hidden
  * product (a draft) may hold either; it is checked again when published.
+ * A product kept for a child-safety report is never changed, by a proposal or
+ * by its undo (lib/child-safety.ts heldRefusal); a hold that cannot be read
+ * refuses as well.
  */
 export async function descriptionRefusal(store: Store, target: string, value: Json): Promise<string | null> {
   if (typeof value !== "string") return null;
+  const productId = productIdFor(store, target);
+  if (productId) {
+    const held = await isHeldForReport(store, productId).catch(() => null);
+    if (held === null) return "This product's state could not be read just now, so nothing was changed. Try again in a few minutes.";
+    if (held) return "This product is on hold, so its description cannot be changed for now. To ask about it, write to support@marktmorgen.com.";
+  }
   // A product that cannot be read is taken as published: a failed read never lets words through.
   const listing = await readListing(store, target).catch(() => null);
   if (listing?.hidden === true) return null;

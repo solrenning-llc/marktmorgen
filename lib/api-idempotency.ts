@@ -42,8 +42,6 @@ const personKey = (sid: string, email: string) => `nl:api:idem:p:${sid}:${create
 const ERASED_MARK = "erased";
 /** How long past its end a line is still listed: a clock between the server and the database that runs apart by less than this never drops a line of an answer still kept. */
 const LINE_SLACK_MS = 60_000;
-/** The most records one person's index lists: every keyed write about them in 24 hours is one API request, and a month's figure is at most 10,000. */
-const MAX_PERSON_RECORDS = 10_000;
 /** Records deleted, and lines taken out of the index, per pipeline: no pipeline nears the database's request size. */
 export const ERASE_BATCH = 500;
 const isHash = (m: unknown): m is string => typeof m === "string" && /^[0-9a-f]{64}$/.test(m);
@@ -137,8 +135,9 @@ export async function forgetIdempotentPerson(sid: string, email: string, now = D
   if (!members) throw new Error("the kept API answers of a person could not be read");
   // Only lines that name a record of this store: the index is the store's own, and a line is a key's hash.
   const ours = [...new Set(members.filter(isHash))];
-  // More than the most a plan allows would mean a figure grew: refused out loud, never cut short in silence.
-  if (ours.length > MAX_PERSON_RECORDS) throw new Error("a person has more kept API answers than any plan allows");
+  // However many there are, all go, in batches: the erasure's size counted these lines (idempotentLines) and was paid
+  // for before it ran. No cap that could leave an erasure unfinished: across a month's turn a person can have two
+  // months' API figures of answers live at once (Claude 3 cloud J's LOW on #3542).
   let gone = 0;
   for (let i = 0; i < ours.length; i += ERASE_BATCH) {
     const batch = ours.slice(i, i + ERASE_BATCH);

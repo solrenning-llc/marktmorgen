@@ -30,7 +30,6 @@ import { readCourse } from "@/lib/course";
 import { missedQuestions } from "@/lib/answers";
 import { AiOn } from "@/components/ai-assist";
 import { aiAvailableFor, aiLeft } from "@/lib/ai";
-import { aiOnValue } from "@/lib/ai-on-value";
 import { storeBase } from "@/lib/purchase-email";
 import { productSegment } from "@/lib/product-slug";
 import { featuredCards } from "@/lib/featured-cards";
@@ -217,7 +216,7 @@ export default async function StudioPagesPage({ searchParams }: Params) {
                 <p role="status" className="text-lg font-semibold tracking-[-0.02em] text-ink">{STUDIO_MESSAGES.page_unread}</p>
               </div>
             ) : (
-            <AiOn value={aiAvailableFor(store) ? aiOnValue(true, await aiLeft(store).catch(() => null)) : aiOnValue(false, null)}>
+            <AiOn value={aiAvailableFor(store) ? { on: true, left: await aiLeft(store).catch(() => 0) } : { on: false, left: 0 }}>
             <PageEditor
               // One editor per product: a save keeps the editor as it is, with the
               // page as the server kept it (components/page-editor.tsx, send),

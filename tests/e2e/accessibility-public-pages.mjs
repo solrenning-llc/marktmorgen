@@ -1,6 +1,7 @@
 /**
- * The public pages the Public AAA matrix (accessibility-public-matrix.mjs) does
- * not open: the help center, the legal pages, the trust pages and the error page
+ * The public pages beside the Public AAA matrix (accessibility-public-matrix.mjs): the home, platform,
+ * products and blog pages that bring customers, for the 44 px targets the matrix does not measure, and
+ * the pages it does not open: the help center, the legal pages, the trust pages and the error page
  * (AX274 Part A, item 5). Each is opened at 320 px (what 400% zoom of a
  * 1280 px window leaves, WCAG 1.4.10) and at 1280 px, in light, dark and
  * forced colors, and audited with axe-core's WCAG 2.2 A/AA/AAA rules
@@ -8,7 +9,8 @@
  *  - no horizontal scroll (1.4.10);
  *  - a document language, a title, one h1 and headings that never skip a level (3.1.1, 2.4.2, 2.4.10);
  *  - a skip link to the content (2.4.1);
- *  - every link and button inside main at least 44 by 44 px, a link inside a sentence excepted (2.5.5);
+ *  - every link and button inside main at least 44 by 44 px, a link inside a sentence excepted and a link stretched
+ *    over its card measured by the card (2.5.5);
  *  - no link whose whole text is a vague "here", "more" or "click here" (2.4.9).
  * Real assistive technology is not used: that stays a gap.
  */
@@ -23,7 +25,7 @@ if(!["chromium","firefox","webkit"].includes(engine))throw Error("Unsupported en
 const driver=require("playwright-core")[engine];
 const axe=readFileSync(require.resolve("axe-core/axe.min.js"),"utf8");
 const port=3194,origin="http://127.0.0.1:"+port;
-export const PUBLIC_PAGES=["/help","/terms","/privacy","/refunds","/accessibility","/copyright","/transparency","/mission","/status","/no-such-page-here"];
+export const PUBLIC_PAGES=["/","/platform","/products","/blog","/help","/terms","/privacy","/refunds","/accessibility","/copyright","/transparency","/mission","/status","/no-such-page-here"];
 const VAGUE=/^(here|click here|more|read more|learn more|this|link|details)$/i;
 const app=spawn(process.execPath,[join(root,"node_modules/next/dist/bin/next"),"start","-p",String(port)],{env:{...process.env,NEXT_TELEMETRY_DISABLED:"1"},stdio:["ignore","pipe","pipe"]});
 let output="";for(const stream of [app.stdout,app.stderr])stream.on("data",chunk=>{output=(output+chunk).slice(-6000);});
@@ -58,7 +60,9 @@ try{
     for(const n of document.querySelectorAll("main a[href],main button,main summary,main [role=button],main input:not([type=hidden]),main select")){
      const r=n.getBoundingClientRect(),s=getComputedStyle(n);if(!r.width||!r.height||s.visibility==="hidden"||n.closest(".sr-only,[hidden],[inert]"))continue;
      if(n.tagName==="A"&&s.display==="inline"){const p=n.parentElement;if(p&&(p.textContent||"").trim().length>(n.textContent||"").trim().length+3)continue;}
-     const label=n.matches("input")?(n.labels?.[0]??n.closest("label")):null,l=label?label.getBoundingClientRect():r;
+     // A link stretched over its card by an absolute ::after (the card is the target) is measured by that card.
+     const after=getComputedStyle(n,"::after"),stretched=after.content!=="none"&&after.position==="absolute"?n.offsetParent:null;
+     const label=n.matches("input")?(n.labels?.[0]??n.closest("label")):stretched,l=label?label.getBoundingClientRect():r;
      if(Math.max(r.width,l.width)<43.5||Math.max(r.height,l.height)<43.5)out.push({check:"2.5.5 target under 44px",tag:n.tagName,name:(n.getAttribute("aria-label")||n.textContent||"").trim().slice(0,50),width:Math.round(r.width),height:Math.round(r.height)});
     }
     for(const a of document.querySelectorAll("a[href]")){const name=(a.getAttribute("aria-label")||a.textContent||"").trim();if(vague.test(name))out.push({check:"2.4.9 vague link",name});}

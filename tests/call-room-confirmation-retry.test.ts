@@ -93,8 +93,14 @@ async function main() {
       is(mode + ": unknown room throws before confirmed mark and any email", [rejected, await isConfirmed(session), emails.length], [true, false, 0]);
       await confirmBooking(input);
       is(mode + ": healthy retry confirms and sends both emails", [await isConfirmed(session), [...emails].sort()], [true, [buyer, owner].sort()]);
-      await confirmBooking(input);
+      const seenCommands: (string | number)[][] = [];
+      const counting = redis.pipeline;
+      redis.pipeline = async commands => { seenCommands.push(...commands); return counting(commands); };
+      try { await confirmBooking(input); } finally { redis.pipeline = counting; }
       is(mode + ": a repeated confirmation sends neither again", emails.length, 2);
+      // Claude 1 (C3) on #2514: a reload of the thanks page for a booking already confirmed reads the mark and stops,
+      // never preparing the meeting or the room again (a meeting record, the meet queue, a studio problem).
+      is(mode + ": a repeated confirmation only reads the confirmed mark", seenCommands.map(c => String(c[0])), ["EXISTS"]);
 
       clock = start - 24 * HOUR + 60_000;
       const member = reminderMember(store.callsId!, handle, session, "24", start);

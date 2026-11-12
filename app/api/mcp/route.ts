@@ -77,8 +77,11 @@ export async function POST(request: Request) {
   if (Array.isArray(message)) return failure(null, -32600, "One message per request.");
   if (!message || message.jsonrpc !== "2.0" || typeof message.method !== "string") return failure(message?.id, -32600, "Invalid request");
   const { id, method } = message;
-  // A notification has no id and wants no answer.
-  if (id === undefined || id === null) return new Response(null, { status: 202 });
+  // A notification has no id member and wants no answer.
+  if (id === undefined) return new Response(null, { status: 202 });
+  // A request's id is a string or a number (JSON-RPC 2.0 §4; MCP: never null): any other is an Invalid Request,
+  // answered before anything runs or is counted.
+  if (typeof id !== "string" && !(typeof id === "number" && Number.isFinite(id))) return failure(null, -32600, "Invalid request");
 
   if (method === "initialize") {
     return result(id, {

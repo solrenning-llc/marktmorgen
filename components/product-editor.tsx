@@ -332,11 +332,14 @@ export function ProductForm({
   const id = product?.id ?? "new";
   // A ready outline for the description of a new product (487 [IT4], item 5), decided when the form opens: it never comes and goes while typing.
   const [offerOutline, setOfferOutline] = useState(() => !product && !draft.about.trim());
-  // The checks under an AI draft of the descriptions (756 [STN3]): null while no draft is waiting.
-  const [aiChecks, setAiChecks] = useState<boolean[] | null>(null);
-  // The checks the form had before an idea filled it (cloud I on #3441), put back when the idea is taken out; undefined
-  // while no idea is in the form.
-  const checksBeforeIdea = useRef<boolean[] | null | undefined>(undefined);
+  // The checks under each AI draft (756 [STN3]), one set per source, null while that source has no draft waiting: the
+  // description assist's (short and long description) and the ideas box's (name and short description). Kept apart, so
+  // neither source's checks release the other's draft, and putting an idea back clears only the idea's own (Claude 1's
+  // MEDIUM on #3441).
+  const [describeChecks, setDescribeChecks] = useState<boolean[] | null>(null);
+  const [ideaChecks, setIdeaChecks] = useState<boolean[] | null>(null);
+  // The save waits while any drawn review is incomplete.
+  const aiHold = aiDraftHold(ideaChecks) ?? aiDraftHold(describeChecks);
   const [aiHeld, setAiHeld] = useState<string | null>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const aboutField = useRef<HTMLTextAreaElement>(null);
@@ -402,7 +405,7 @@ export function ProductForm({
         event.preventDefault();
         if (busy) return;
         // An AI draft is saved only once the creator has checked it; the focus goes to the first check left.
-        const held = aiDraftHold(aiChecks);
+        const held = aiHold;
         setAiHeld(held);
         if (held) {
           const first = formRef.current?.querySelector<HTMLInputElement>("[data-ai-review] input:not(:checked)");
@@ -444,15 +447,7 @@ export function ProductForm({
           summary={draft.summary}
           titleFieldId={`product-title-${id}`}
           onUse={(next) => setDraft({ ...draft, title: next.title, summary: next.summary })}
-          onReviewChange={(checks) => {
-            if (checks === null) {
-              if (checksBeforeIdea.current !== undefined) setAiChecks(checksBeforeIdea.current);
-              checksBeforeIdea.current = undefined;
-              return;
-            }
-            if (checksBeforeIdea.current === undefined) checksBeforeIdea.current = aiChecks;
-            setAiChecks(checks);
-          }}
+          onReviewChange={setIdeaChecks}
         />
       ) : null}
 
@@ -477,7 +472,7 @@ export function ProductForm({
                     : "download",
         })}
         onResult={(value) => setDraft({ ...draft, summary: value.summary, about: value.about })}
-        onReviewChange={(checked) => setAiChecks(checked ? [true, true, true] : freshChecks())}
+        onReviewChange={(checked) => setDescribeChecks(checked ? [true, true, true] : freshChecks())}
         done="Both descriptions below are filled in. Read them, change anything, then save."
       />
 
@@ -871,7 +866,7 @@ export function ProductForm({
           {error}
         </p>
       ) : null}
-      {aiHeld && aiDraftHold(aiChecks) ? (
+      {aiHeld && aiHold ? (
         <p className="notice notice-error" role="alert">
           {aiHeld}
         </p>

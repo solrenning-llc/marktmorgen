@@ -21,7 +21,7 @@
  * show (a draft), and stays a draft until the creator publishes it themselves.
  */
 import { randomBytes } from "node:crypto";
-import { type AiDraftedGiven, type AiResult, type AiStepsRun, type AiStopped, type Unrun, askModel, counted, countedRun, jsonIn, stopAsked, writingModel, writingRules } from "@/lib/ai";
+import { type AiDraftedGiven, type AiResult, type AiStepsRun, type AiStopped, type Unrun, askModel, counted, countedRun, jsonIn, markAiRunLive, stopAsked, writingModel, writingRules } from "@/lib/ai";
 import { aiDispatchCount } from "@/lib/ai-call-budget";
 import {
   AI_FILE_KEEP_SECONDS,
@@ -179,6 +179,8 @@ export async function writeFileSections(
     store,
     now,
     async () => {
+      // Live before its first batch, once its jobs are reserved, as writePage's run (#3435): a stop is written only over it.
+      await markAiRunLive(store, steps.run);
       const written: (FileSection | null)[] = parts.map(() => null);
       for (let start = 0; start < parts.length; start += FILE_BATCH) {
         if (start > 0) {

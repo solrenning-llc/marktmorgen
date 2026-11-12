@@ -466,7 +466,7 @@ const stopKey = (statsId: string, run: string) => `nl:ai:stop:${statsId}:${run}`
  * AI_STOP_KEEP_SECONDS. Written only where there is none (NX), so a stop already written is kept. Best effort: a
  * mark not written only means a stop for this run is not taken, which the page says.
  */
-async function markAiRunLive(store: Store, run: string): Promise<void> {
+export async function markAiRunLive(store: Store, run: string): Promise<void> {
   if (!store.statsId) return;
   await redisPipeline([["SET", stopKey(store.statsId, run), "0", "EX", AI_STOP_KEEP_SECONDS, "NX"]]).catch((error: unknown) => console.error("a run's live mark could not be written", error));
 }

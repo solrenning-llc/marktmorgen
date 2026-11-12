@@ -147,15 +147,16 @@ async function main() {
   is("the mark's reply odd but our own value read back: sent", await run(first + 30 * DAY), [subject("Month 1")]);
   is("and once", await run(first + 31 * DAY), []);
 
-  part("Stripe does not answer: the start is unknown, never the thanks page's alone");
+  // Changed on #3369 (Claude 7's MEDIUM 2, Codex L): main's job sends from the row, and the course page opens a one-off
+  // course from its thanks-page record when Stripe does not answer, so the email goes from the row's day too.
+  part("Stripe does not answer: the module is announced from the row's day, as the page opens it");
   await fresh([session("cs_test_once", first, false)]);
   await recordEnrollment(store, buyer, product.id, first);
   await openedOn(first);
   stripe.fail = true;
-  is("Stripe unknown: nothing is sent", await run(first + 30 * DAY), []);
+  is("Stripe not answering: Month 1 goes on its day, from the row", await run(first + 30 * DAY), [subject("Month 1")]);
   stripe.fail = false;
-  is("the next run sends it, never skipped", await run(first + 31 * DAY), [subject("Month 1")]);
-  is("once", await run(first + 32 * DAY), []);
+  is("once", await run(first + 31 * DAY), []);
 
   part("The job's reads are its own, never the store's public requests");
   await fresh([session("cs_test_once", first, false)]);
@@ -166,7 +167,9 @@ async function main() {
   is("and none of them is asked for", counted.asked, []);
   is("a run with nothing to announce reads nothing at Stripe", (stripe.asked = [], await run(first + 45 * DAY), stripe.asked), []);
 
-  part("One window reads at most the store's monthly figure for these reads, and the rest go in its next window");
+  // Changed on #3369 (Claude 1's MEDIUM 1, Codex L): past the figure nothing more is read, and the rest are announced
+  // from their rows' day in the same run, as main's job does, instead of waiting for a window that may come too late.
+  part("One window reads at most the store's monthly figure for these reads; the rest are announced from their rows");
   await fresh([session("cs_test_once", first, false)]);
   // A one-course store's window reads as many students as the store may email in it (its "email" figure); this store
   // pays nothing, so its window is the calendar month: January 31, then February 1.
@@ -178,10 +181,9 @@ async function main() {
   }
   stripe.asked = [];
   const day30 = await run(first + 30 * DAY);
-  is(`the first run announces Month 1 to ${reads} students`, day30.length, reads);
-  is("and reads no more students at Stripe", stripe.asked.filter((p) => p.startsWith("/checkout/sessions?")).length, reads);
-  is("the next run, in the store's next window, announces it to the last one", await run(first + 31 * DAY), [subject("Month 1")]);
-  is("and then to nobody again", await run(first + 32 * DAY), []);
+  is(`the first run announces Month 1 to all ${reads + 1} students`, day30.length, reads + 1);
+  is("and reads no more students at Stripe than the figure", stripe.asked.filter((p) => p.startsWith("/checkout/sessions?")).length, reads);
+  is("and then to nobody again", await run(first + 31 * DAY), []);
 
   part("A short course bought again after a full refund, not opened since: its restarted Month 1 still goes (Codex G on #3369)");
   current = short;

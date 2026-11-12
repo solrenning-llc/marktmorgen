@@ -92,7 +92,9 @@ async function main() {
   part("One window reads at most the store's monthly figure; a second run in it reads nobody more");
   await fresh(students);
   const first = await run(opens);
-  is(`the first run announces Month 1 to ${reads} students`, first.length, reads);
+  // Changed on #3369 (Claude 1's MEDIUM 1, Codex L): past the figure nothing more is read, and the last student is
+  // announced from the row's day, as main's job does; the reads stay at the figure.
+  is(`the first run announces Month 1 to all ${reads + 1} students`, first.length, reads + 1);
   is("and reads that many students at Stripe", sessionsAsked(), reads);
   stripe.asked = [];
   is("the next day, in the same month, nothing more is announced", await run(opens + DAY), []);
@@ -101,7 +103,8 @@ async function main() {
   part("A store that pays nothing reads only with one of the month's places");
   await fresh([students[0]]);
   await redis.pipeline([["SET", `nl:free:n:${calendarWindow(opens * 1000).id}`, String(1_000_000), "EX", 40 * DAY]]);
-  is("no place this month: nothing is announced", await run(opens), []);
+  // Changed on #3369 (as above): no place, so nothing is read; the module is announced from the row's day.
+  is("no place this month: announced from the row, without a read", await run(opens), ["Now open in Month course: Month 1"]);
   is("and nobody is read at Stripe", sessionsAsked(), 0);
 
   part("The month's count read in another shape: nothing is read or sent that run, and the next run sends it");

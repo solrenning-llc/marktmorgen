@@ -1014,6 +1014,14 @@ const dripMailKey = (courseId: string, email: string, moduleId: string) =>
  * course bought again after a full refund and not opened since is found the run after the purchase, and nobody else
  * is read for it (Claude 7 on #3369). Kept until that read answers; deleted with the person.
  */
+/**
+ * What one drip read says of a student's start: the day the course page opens it from; "shut" when it does not open
+ * it (refunded in full, taken off, ended); "row" when it was not read (the store's monthly figure spent, or Stripe
+ * not answering) and the row's day is used, as the page and main's job do; "unknown" when the read could not even be
+ * counted, and nothing is sent this run.
+ */
+type DripStart = { open: number } | "shut" | "row" | "unknown";
+
 const againKey = (courseId: string) => `nl:course:${courseId}:again`;
 
 /**
@@ -1096,35 +1104,49 @@ export async function sendDripEmails(
     if (againRead !== undefined && !Array.isArray(againRead)) console.error("reading a course's students who bought it again failed", course.id);
     // One student's start, read from the store's monthly figure: what the page opens the course from, undefined
     // when it does not open it, null when it cannot be counted or read (nothing is sent, the next run asks again).
-    const startOf = async (email: string): Promise<number | null | undefined> => {
+    const startOf = async (email: string): Promise<DripStart> => {
       const units = dripStartUnits(idsOfKind(store, "course").length);
       const taken = await takeDripStartUnits(store, units, nowSeconds * 1000);
-      if (taken === "unknown") console.error("a drip run's start read could not be counted; not read this run", course.id);
-      if (taken !== "taken") return null;
+      if (taken === "unknown") {
+        console.error("a drip run's start read could not be counted; not read this run", course.id);
+        return "unknown";
+      }
+      // Past the store's monthly figure for these reads: the row's day, as main's job sends from it, never a read
+      // more (Claude 1 and Codex L on #3369).
+      if (taken !== "taken") return "row";
       return courseLedger(store, email, true).then(
-        (ledger) => ledger.paid.get(product.id),
-        (error: unknown) => (console.error("reading a student's course start for its drip emails failed", error), null),
+        (ledger) => {
+          const at = ledger.paid.get(product.id);
+          return at === undefined ? "shut" : { open: at };
+        },
+        // Stripe did not answer: the row's day, as the course page opens a one-off course from its record when
+        // Stripe does not answer (Claude 7 on #3369).
+        // A database reply of another shape (UnknownReplyError, CX-123 rule 24) stays unknown: nothing is sent this run.
+        (error: unknown): DripStart => {
+          console.error("reading a student's course start for its drip emails failed", error);
+          return error instanceof UnknownReplyError ? "unknown" : "row";
+        },
       );
     };
     for (const student of students) {
       if (student.blocked) continue;
-      // The day the course page opens this course from (courseLedger), read once for a student with a module to
-      // announce: undefined when it does not open the course (refunded in full, taken off, ended), null unknown.
-      let stands: number | null | undefined;
-      let read = false;
+      // What the course page opens this course from (courseLedger), read once for a student with a module to announce.
+      let start: DripStart | null = null;
       let since = student.since;
       const field = emailKey(student.email);
       if (boughtAgain.has(field)) {
         // Bought again after the row's day: the start is read now, whatever is due under the row's day.
-        read = true;
-        stands = await startOf(student.email);
-        if (stands !== null && stands !== undefined && stands !== since) {
-          const moved = await redateStudent(course, student.email, stands, nowSeconds).then(() => true, (error: unknown) => (console.error("moving a student's course start failed", error), false));
-          if (moved) since = stands;
-          else stands = null;
-        }
-        // Answered (open from a day, or not open at all): forgotten. Unknown: kept, and the next run reads it again.
-        if (stands !== null) await redisPipeline([["SREM", againKey(course.id), field]]);
+        start = await startOf(student.email);
+        let settled = start === "shut";
+        if (typeof start === "object" && start.open !== since) {
+          const at = start.open;
+          const moved = await redateStudent(course, student.email, at, nowSeconds).then(() => true, (error: unknown) => (console.error("moving a student's course start failed", error), false));
+          if (moved) since = at;
+          else start = "unknown";
+          settled = moved;
+        } else if (typeof start === "object") settled = true;
+        // Answered (open from a day, or not open at all): forgotten. Not read: kept, and the next run reads it again.
+        if (settled) await redisPipeline([["SREM", againKey(course.id), field]]);
       }
       for (let i = 0; i < dripping.length; i += 1) {
         const unit = dripping[i];
@@ -1140,29 +1162,27 @@ export async function sendDripEmails(
           await releaseMark(mark, value);
         }
         if (claimed !== "ours") continue;
-        if (!read) {
-          read = true;
-          // Taken from the store's monthly figure for these reads (lib/drip-start.ts, dripMonthUnits in its allowance
-          // window), before the read, never from its public requests: past it, or uncounted, nothing is read and
-          // nothing is sent, and the mark is let go for a later run.
-          stands = await startOf(student.email);
-        }
-        // Not open to them, or unknown: nothing is sent, and the next run asks again.
-        if (stands === undefined || stands === null) {
+        // Taken from the store's monthly figure for these reads (lib/drip-start.ts, dripMonthUnits in its allowance
+        // window), before the read, never from its public requests.
+        if (start === null) start = await startOf(student.email);
+        if (start === "unknown") {
           await releaseMark(mark, value);
           continue;
         }
+        // Not open to them: nothing is sent, and the mark is kept, so this module is never read for them again (it is
+        // forgotten with the row's day if they buy the course again: forgetEarlyDripMails).
+        if (start === "shut") continue;
+        const stands = start === "row" ? since : start.open;
         if (stands !== since) {
           // The row held another day than the page's (a course bought again after a full refund): it takes the
           // page's, forgetting what went early, and this student's modules are looked at again from it.
           const moved = await redateStudent(course, student.email, stands, nowSeconds).then(() => true, (error: unknown) => (console.error("moving a student's course start failed", error), false));
+          await releaseMark(mark, value);
           if (!moved) {
-            stands = null;
-            await releaseMark(mark, value);
+            start = "unknown";
             continue;
           }
           since = stands;
-          await releaseMark(mark, value);
           i = -1;
           continue;
         }

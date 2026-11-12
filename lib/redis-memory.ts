@@ -819,6 +819,29 @@ export class MemoryRedis {
           this.data.set(record, next);
           return 1;
         }
+        // lib/inbox.ts INBOX_WRITE: a conversation's record, index entry, message, expiries, chat token and unread
+        // episode written in one step, only over exactly the record read ("" for a new one, which must not exist).
+        if (key.startsWith("-- marktmorgen:inbox-write:v1\n") && (args[0] === "4" || args[0] === "5") && args.length === 1 + Number(args[0]) + 9) {
+          const n = Number(args[0]);
+          const [record, index, list, episode, token] = args.slice(1, 1 + n);
+          const [expected, next, keep, score, id, message, max, tokenValue, endEpisode] = args.slice(1 + n);
+          const call = (command: (string | number)[]) => {
+            this.scriptCalls += 1;
+            return this.run(command);
+          };
+          const current = call(["GET", record]);
+          if (expected === "" ? current !== null : current !== expected) return 0;
+          call(["SET", record, next, "EX", keep]);
+          call(["ZADD", index, score, id]);
+          if (message !== "") {
+            call(["RPUSH", list, message]);
+            call(["LTRIM", list, -Number(max), -1]);
+          }
+          call(["EXPIRE", list, keep]);
+          if (n === 5) call(["SET", token, tokenValue, "EX", keep]);
+          if (endEpisode === "1") call(["DEL", episode]);
+          return 1;
+        }
         // lib/affiliates.ts AFFILIATE_SWAP: one affiliate's record written only over exactly the text read.
         if (key.startsWith("-- marktmorgen:affiliate-swap:v1\n") && args[0] === "1" && args.length === 5) {
           const [, people, field, expected, next] = args;

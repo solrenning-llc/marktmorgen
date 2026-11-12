@@ -36,7 +36,16 @@ export async function checkPairsAcknowledgment({browser,LOCAL,fixture,is}){
      window.__pairsSelectionEvents.push({type,trusted:event.isTrusted,value:select?.value,selectedIndex:select?.selectedIndex,buttonDisabled:root.querySelector("button")?.disabled});
     },true);
    });
-   await first.selectOption(target);
+   // The editor taken over by React first (onclick set on its button), then the pick made until the editor holds it: a
+   // pick made while a busy browser (lanes, tests/e2e/check-lanes.mjs) is still drawing the panel can be lost, which
+   // left the button disabled for good. Only the first pick is waited for; every save below is checked as before.
+   const saveButton=section.getByRole("button",{name:"Save picks",exact:true});
+   await page.waitForFunction(el=>typeof el.onclick==="function",await saveButton.elementHandle(),{timeout:60000});
+   for(let attempt=0;attempt<10;attempt++){
+    await first.selectOption(target);
+    if(await first.inputValue()===target&&!(await saveButton.isDisabled()))break;
+    await page.waitForTimeout(300);
+   }
    console.log("PAIRS_INITIAL_SELECTION",JSON.stringify(await section.evaluate((root,target)=>({
     target,events:window.__pairsSelectionEvents,
     selects:Array.from(root.querySelectorAll("select"),s=>({value:s.value,selectedIndex:s.selectedIndex,disabled:s.disabled})),

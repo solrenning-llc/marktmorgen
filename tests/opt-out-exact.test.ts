@@ -72,7 +72,11 @@ async function payday(): Promise<void> {
   await claimHandle(OWNER, "crumb", "Crumb Bakery", "");
   await ensureStatsId(OWNER);
   await setStripeAccount(OWNER, "acct_1TestOptOut0001", true);
-  const today = new Date().getUTCDate();
+  // One clock for the whole check, injected into sendPaydayEmails: a payday is 1..28 (MAX_PAYDAY), so the real
+  // day failed this on the 29th-31st, and a run that crossed midnight UTC read another day or month than the setup.
+  const real = new Date();
+  const NOW = new Date(Date.UTC(real.getUTCFullYear(), real.getUTCMonth(), 15, 12));
+  const today = NOW.getUTCDate();
   await setAffiliateSetting(OWNER, parseAffiliateSetting({ ...NO_AFFILIATES, enabled: true, payday: today }));
   const store = (await storeForEmail(OWNER))!;
   const statsId = store.statsId!;
@@ -81,7 +85,7 @@ async function payday(): Promise<void> {
     ["HSET", `nl:aff:${statsId}:people`, aff, JSON.stringify({ id: aff, email: `${aff}@example.com`, code: "a1a1a", status: "approved", appliedAt: T0 * 1000, decidedAt: T0 * 1000, note: "" })],
     ["HSET", `nl:aff:${statsId}:sales`, "cs_1", JSON.stringify({ ref: "cs_1", pi: "pi_cs_1", aff, at: T0 + 10 * DAY, product: "prod01", title: "Bread course", base: 1000, total: 1000, currency: "usd", rate: 20, self: false, how: "click" })],
   ]);
-  const month = `${new Date().getUTCFullYear()}-${String(new Date().getUTCMonth() + 1).padStart(2, "0")}`;
+  const month = `${NOW.getUTCFullYear()}-${String(NOW.getUTCMonth() + 1).padStart(2, "0")}`;
   const claim = `nl:aff:payday:${statsId}:${month}`;
   const isClaim = (c: (string | number)[]) => c[0] === "SET" && c[1] === claim;
   // What a run did for the store: the emails it counts as sent, and whether it went past the claim (the next
@@ -94,7 +98,7 @@ async function payday(): Promise<void> {
       return watch(commands);
     }) as typeof redis.pipeline;
     try {
-      const counts = await sendPaydayEmails(Date.now() + 20_000);
+      const counts = await sendPaydayEmails(Date.now() + 20_000, NOW);
       return { sent: counts.sent, pastTheClaim: seen.includes(`GET nl:pp:${statsId}`) };
     } finally {
       redis.pipeline = watch;

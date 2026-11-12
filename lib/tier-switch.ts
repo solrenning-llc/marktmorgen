@@ -81,6 +81,9 @@ export function tierWords(store: Store, product: Listing, language: unknown = DE
 /** The tiers one membership can switch to; none when it cannot switch at all. */
 export function choicesFor(store: Store, membership: Membership, tiers: Listing[]): TierChoice[] {
   if (membership.endsAt !== null || membership.fixedEnd || !SWITCHABLE.has(membership.status)) return [];
+  // A pause asked for, started or still to start: Stripe holds its charges, so a switch's prorated invoice would be
+  // voided (a move up for nothing, a move down promised a credit never given). None is offered, as for a yearly switch.
+  if (membership.pause !== null) return [];
   // Paid in another currency than the store's now (it changed its currency since): every tier is
   // priced in the store's, so a switch would change the subscription's currency. None is offered.
   if (membership.currency.toLowerCase() !== store.currency) return [];
@@ -299,6 +302,8 @@ async function find(store: Store, token: string, subscription: string, target: s
   const sub = (await subsOf(store, grant)).find((s) => s.id === subscription);
   // Not this member's, not this store's, or no longer running: one answer for all.
   if (!sub || endsAtOf(sub) !== null || sub.metadata?.ends_after || !SWITCHABLE.has(String(sub.status))) return { reason: "gone" };
+  // Its charges held by a pause (choicesFor): refused, whatever the page was sent.
+  if (sub.pause_collection && typeof sub.pause_collection === "object") return { reason: "gone" };
   const itemId = typeof sub.items?.data?.[0]?.id === "string" ? (sub.items.data[0].id as string) : "";
   if (!itemId || (sub.items?.data?.length ?? 0) !== 1) return { reason: "gone" };
   // The new tier's Price is made in the store's currency (tierPrice); a subscription

@@ -39,6 +39,8 @@ let tierA = "";
 let priceMeta: Record<string, string> = {};
 // The currency the member pays in: the store's, unless it changed its currency since (22 [E5], unit 2b).
 let paidIn = "usd";
+// A pause the member chose: Stripe holds the charges (void) while the subscription stays "active" (lib/membership-pause.ts).
+let pausedSub = false;
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   if (url.hostname === "api.resend.com") {
@@ -60,7 +62,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
           status: "active",
           customer: "cus_Member0001",
           created: 1,
-          metadata: { store: "harbor", product: tierA },
+          metadata: pausedSub ? { store: "harbor", product: tierA, pause_from: String(Math.floor(Date.now() / 1000) + 86_400) } : { store: "harbor", product: tierA },
+          ...(pausedSub ? { pause_collection: { behavior: "void", resumes_at: Math.floor(Date.now() / 1000) + 31 * 86_400 } } : {}),
           items: { data: [{ id: "si_Member0001", price: { unit_amount: 1000, currency: paidIn, metadata: priceMeta, recurring: { interval: "month", interval_count: 1 } } }] },
         },
       ],
@@ -200,6 +203,19 @@ async function main(): Promise<void> {
   is("no price made, no preview asked, no subscription touched", calls.slice(before).filter((c) => c.method === "POST").map((c) => c.path), []);
   is("the member is told so in every language", (["en", "es", "fr", "de", "it", "nl", "pt"] as const).every((l) => membershipWords(l).switchProblems.currency?.body.length > 40 && membershipWords(l).manageNotices.currency?.title.length > 10), true);
   paidIn = "usd";
+
+  part("A membership with a pause asked for, started or still to start");
+  // Stripe holds its charges while it stays "active": a switch's prorated invoice would be voided, a move up given
+  // for nothing or a card called declined that was never tried, a move down promised a credit never given.
+  pausedSub = true;
+  const beforePause = calls.length;
+  const pausedList = (await membershipsFor(store, token))!;
+  is("no tier offered to it", [pausedList[0].pause !== null, choicesFor(store, pausedList[0], tiers)], [true, []]);
+  const pausedPreview = await previewSwitch(store, token, "sub_Member0001", b.product.id);
+  const pausedSwitch = await switchTier(store, token, "sub_Member0001", b.product.id, Math.floor(Date.now() / 1000), TEST_CONSENT);
+  is("a switch sent anyway changes nothing", [pausedPreview.ok ? "shown" : pausedPreview.reason, pausedSwitch.ok ? "switched" : pausedSwitch.reason], ["gone", "gone"]);
+  is("no price made, no preview asked, no subscription touched while paused", calls.slice(beforePause).filter((c) => c.method === "POST").map((c) => c.path), []);
+  pausedSub = false;
 
   part("The box is asked again before a switch charges (91 [D2-EU-WITHDRAWAL]; owner, C1-20261106-0100-TODOS-1)");
   is("the preview says the tier is delivered at once, so the page shows the box", preview.preview.digital, true);

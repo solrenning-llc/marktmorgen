@@ -1,6 +1,6 @@
 import {OfferPlanning} from "@/components/offer-planning";
 import { isBillingConfigured } from "@/lib/billing";
-import { cachedOfferListings, savedOfferIssues } from "@/lib/funnel-offer-review";
+import { funnelPageIssues, funnelPaymentsAvailable } from "@/lib/funnel-review-issues";
 import type { Metadata } from "next";
 import { BUMP_CHOICES, idsOfKind, readCards, readListings, readProduct } from "@/lib/catalog";
 import Link from "next/link";
@@ -24,7 +24,6 @@ import { MAX_PAGE_FUNNELS } from "@/lib/page-funnel";
 import { funnelStepEditorLink } from "@/lib/funnel-editor-links";
 import { readFunnelFormReviews } from "@/lib/funnel-form-review";
 import { canSell } from "@/lib/store-checkout";
-import { sellsThroughPayPal } from "@/lib/paypal-sales";
 import { can } from "@/lib/team-roles";
 import { canUseDomain } from "@/lib/domains";
 import { SITE_URL } from "@/lib/site-url";
@@ -136,10 +135,10 @@ export default async function StudioFunnelsPage({ searchParams }: Params) {
   const savedFunnels: SavedFunnel[] = await Promise.all(
     (inventory ?? []).map(async (funnel) => {
       const [states, counts, pageReviews] = await Promise.all([stepStates(store, funnel, { strictProducts: true, includeReviewProduct: true }).catch(() => null), readFunnelCountsStrict(store.statsId, funnel).catch(() => null), formReviews]);
-      const offerRecords = cachedOfferListings(store, (states ?? []).flatMap(state => state.reviewProduct ? [state.reviewProduct] : []));
       return {
         funnel,
-        pageIssues: [...(pageReviews.get(funnel.id) ?? []), ...(states ?? []).flatMap((state,stepIndex) => (state.reviewProduct ? savedOfferIssues(store,state.reviewProduct,offerRecords) : []).map(detail => ({ code: "step" as const, title: `Step ${stepIndex + 1}: ${state.title}`, detail, stepIndex })))],
+        // The same checks the AI explanation finds again (lib/funnel-review-issues.ts).
+        pageIssues: funnelPageIssues(store, pageReviews.get(funnel.id) ?? [], states),
         steps: (states ?? funnel.steps.map(step => ({
           step,
           title: choices.find(choice => choice.kind === step.kind && choice.id === step.id)?.title ?? "Saved step",
@@ -174,7 +173,7 @@ export default async function StudioFunnelsPage({ searchParams }: Params) {
       : [];
   const shares = canShare ? await listShares(store.statsId).then((list) => list.map((entry) => ({ id: entry.id, name: entry.name, funnelId: entry.funnelId, createdAt: entry.createdAt, expiresAt: entry.expiresAt, hint: entry.hint }))).catch(() => null) : null;
   // Writing with AI where this store's plan has it (lib/ai.ts, aiAvailableFor), and whether a drafted follow-up can be saved as a switched-off sequence.
-  const aiOn = aiAvailableFor(store) && can(view.role, "page") ? { on: true, left: await aiLeft(store).catch(() => 0) } : { on: false, left: 0 };
+  const aiOn = aiAvailableFor(store) && can(view.role, "page") ? { on: true, left: await aiLeft(store).catch(() => null) } : { on: false, left: 0 };
   const sequences = !can(view.role, "send")
     ? { canSave: false, note: "Your role cannot save sequences. Copy these emails for someone who can, or into a broadcast draft." }
     : !store.listId || !store.mail
@@ -229,8 +228,9 @@ export default async function StudioFunnelsPage({ searchParams }: Params) {
             choices={choices}
             base={funnelBase}
             formsHref={can(view.role, "page") ? studioPath(store, "", "forms") : null}
+            ai={aiOn}
             paymentReview={{
-              available: canSell(store) || sellsThroughPayPal(store),
+              available: funnelPaymentsAvailable(store),
               paymentsHref: can(view.role, "payments") ? `${studioPath(store)}#stripe` : null,
               // #billing is drawn only where billing is set up (app/studio/page.tsx).
               billingHref: can(view.role, "billing") && isBillingConfigured() ? `${studioPath(store)}#billing` : null,

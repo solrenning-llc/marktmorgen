@@ -77,8 +77,10 @@ export async function answersUsed(store: Store, now = Date.now()): Promise<numbe
   if (!reply) throw new UnknownReplyError("the answers used this month");
   if (reply[0] === null) return 0;
   const used = reply[0];
-  const n = typeof used === "string" && /^(0|[1-9][0-9]{0,15})$/.test(used) ? Number(used) : typeof used === "number" && Number.isSafeInteger(used) && used >= 0 ? used : null;
-  if (n === null) throw new UnknownReplyError("the answers used this month");
+  // Either representation is checked after it is converted: a decimal string past Number.MAX_SAFE_INTEGER would
+  // otherwise round to a count that was never stored and be shown as exact.
+  const n = typeof used === "string" && /^(0|[1-9][0-9]{0,15})$/.test(used) ? Number(used) : typeof used === "number" ? used : NaN;
+  if (!Number.isSafeInteger(n) || n < 0) throw new UnknownReplyError("the answers used this month");
   return n;
 }
 

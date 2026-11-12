@@ -35,6 +35,13 @@ async function main(): Promise<void> {
   is("a negative count is unknown", await outcome(), "UnknownReplyError");
   answer = [];
   is("a missing reply is unknown", await outcome(), "UnknownReplyError");
+  // Integral in shape, but past what a JavaScript number holds exactly: rounded, it would be shown as an exact count.
+  answer = ["9007199254740993"];
+  is("a decimal string just above the safe-integer range is unknown", await outcome(), "UnknownReplyError");
+  answer = [9007199254740992];
+  is("a number past the safe-integer range is unknown", await outcome(), "UnknownReplyError");
+  answer = [String(Number.MAX_SAFE_INTEGER)];
+  is("control: the largest safe count reads as itself", await outcome(), Number.MAX_SAFE_INTEGER);
   redis.pipeline = plain;
 
   part("The editor: an unread count is said in words, never as 0");

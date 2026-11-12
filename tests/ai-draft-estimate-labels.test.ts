@@ -19,6 +19,16 @@ is("control: a figure beside a label is still listed", unsourcedNumbers(["Week 1
 is("control: a figure with no label is still listed", unsourcedNumbers(["Join 5,000 bakers"], "", "en"), ["5,000"]);
 is("control: a number before the word is a figure ('3 weeks')", unsourcedNumbers(["Done in 3 weeks"], "", "en"), ["3"]);
 
+// Review of #3437 at 3bf5cddbaa (Claude 3 cloud O, Codex X5): a plural before digits is a count followed by a
+// claim, never a part label, so the figure after it stays listed for the creator to check.
+is("a plural word before digits is a count, so the figure after it is still listed",
+  [
+    unsourcedNumbers(["12 lessons 40 minutes each"], "", "en"),
+    unsourcedNumbers(["Over 30 days 500 students joined"], "", "en"),
+    unsourcedNumbers(["Results in 4 weeks 10 pounds lighter"], "", "en"),
+  ],
+  [["12", "40"], ["30", "500"], ["4", "10"]]);
+
 const source = readFileSync("components/ai-draft-review.tsx", "utf8");
 is("the estimates list is never keyed by the written figure alone", /key=\{figure\}/.test(source), false);
 const twice = renderToStaticMarkup(createElement(AiDraftReview, { checks: [false], onToggle: () => {}, estimates: ["10m", "10m"] }));

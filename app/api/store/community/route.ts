@@ -146,7 +146,9 @@ export async function POST(request: NextRequest) {
       return back(`${home}/you`, "saved");
     }
 
-    if (!viewer.canWrite) return back(fromPage, viewer.member?.muted ? "muted" : "full");
+    // A muted member writes nothing, but may still report: muting is no reason
+    // to leave somebody unable to flag what is said to or about them.
+    if (!viewer.canWrite && !(action === "report" && viewer.member)) return back(fromPage, viewer.member?.muted ? "muted" : "full");
 
     // Who may hear about something said in a space: the creator, and members
     // still in the community who can see that space. A removed member, or one
@@ -154,7 +156,7 @@ export async function POST(request: NextRequest) {
     // gets its first words in their notifications nor a push. A read that
     // fails leaves the person out: a notice missed is the smaller loss.
     const mayHear = async (people: string[], spaceOf: { id: string; only: string[] } | undefined): Promise<string[]> => {
-      const wanted = [...new Set(people)].filter(Boolean); 
+      const wanted = [...new Set(people)].filter(Boolean);
       if (!wanted.length) return [];
       const members = await readMembers(id, wanted).catch(() => new Map<string, never>());
       const out: string[] = [];

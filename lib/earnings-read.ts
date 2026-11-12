@@ -128,7 +128,7 @@ function takers(store: Store): Record<keyof typeof EARNINGS_STRIPE_PAGES, (row: 
       return money(row, "amount", created);
     },
     // Every paid invoice of the store's memberships and payment plans but the first, whose payment the checkout
-    // already counted (renewals, a switch charged at once, any other reason), dated by when it was paid.
+    // already counted (renewals, a switch charged at once, any other reason), dated by when the invoice was made.
     invoices: (row, created) => {
       const status = text(row, "status");
       const reason = text(row, "billing_reason");
@@ -286,14 +286,18 @@ export async function readEarningsLists(store: Store, since: number): Promise<Pr
  * copy, stale, or ReadingsUsed with none (lib/store-readings.ts). A copy kept
  * in another zone is not this zone's months, fresh or stale: it is taken as
  * none (review of #3022). A store with
- * neither Stripe nor PayPal reads nothing and spends nothing. null for an
+ * neither Stripe, a PayPal seller nor a place where PayPal sales are kept
+ * reads nothing and spends nothing; one that turned PayPal off still reads
+ * the PayPal sales it made. null for an
  * unknown time zone or a store with no counts. Entries typed by the creator
  * are not built (unit 3): none are given.
  */
 export async function readEarningsYear(store: Store, timeZone: string, now = Date.now(), fresh = false): Promise<Kept<Earnings | null> | null> {
   const since = readingSince(now, timeZone);
   if (!Number.isFinite(since)) return null;
-  if (!readsSales(store)) return { value: earningsByMonth({ at: now, timeZone, providers: [], manual: [] }), at: now, stale: false };
+  // Nothing to read only with neither Stripe nor a place where PayPal sales are kept: a store that turned PayPal off
+  // still has the sales it made through it here, read as a heavy reading like any other (Claude 1's MEDIUM on #3022).
+  if (!readsSales(store) && !store.statsId) return { value: earningsByMonth({ at: now, timeZone, providers: [], manual: [] }), at: now, stale: false };
   return keptReading(store, "earnings", async () => {
     // Selling not configured on our side: nothing is called, so the reading's unit is given back (inbox C4-53).
     if (store.stripeAccountId && !keyFor(store.stripeAccountId)) throw new NotRead("selling is not configured");

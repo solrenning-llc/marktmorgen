@@ -148,7 +148,7 @@ export function turnHoldMicroUsd(model: string = STUDIO_AGENT_MODEL): number | n
   return Number.isSafeInteger(total) ? total : null;
 }
 
-export type TurnRefusal = "too_long" | "cost_unknown" | "budget_unknown" | "no_budget";
+export type TurnRefusal = "empty" | "too_long" | "cost_unknown" | "budget_unknown" | "no_budget";
 
 /**
  * Whether a turn may start, and what it reserves first. `askBytes` is the
@@ -157,6 +157,7 @@ export type TurnRefusal = "too_long" | "cost_unknown" | "budget_unknown" | "no_b
  * when its whole most fits in what is left; otherwise nothing is asked.
  */
 export function planTurn(askBytes: number, budgetLeftMicroUsd: number | null, model: string = STUDIO_AGENT_MODEL): { ok: true; model: string; calls: number; holdMicroUsd: number } | { ok: false; why: TurnRefusal } {
+  if (askBytes === 0) return { ok: false, why: "empty" };
   if (!Number.isSafeInteger(askBytes) || askBytes < 1 || askBytes > TURN_LIMITS.askBytes) return { ok: false, why: "too_long" };
   const hold = turnHoldMicroUsd(model);
   if (hold === null) return { ok: false, why: "cost_unknown" };
@@ -201,9 +202,13 @@ export function carriedAnswer(text: string): { text: string; cut: boolean } {
   return { text: kept + mark, cut: true };
 }
 
-/** The creator's words for a refused turn, in plain US English. */
+/**
+ * The creator's words for a refused turn, in plain US English. The message's bound is UTF-8 bytes, so the words give
+ * the size in plain English letters and say other alphabets take more room, never a count of characters it does not keep.
+ */
 export const TURN_REFUSALS: Readonly<Record<TurnRefusal, string>> = {
-  too_long: `Your message is too long for the assistant. Keep it under ${TURN_LIMITS.askBytes.toLocaleString("en-US")} characters.`,
+  empty: "Write a message for the assistant first. Nothing was used.",
+  too_long: `Your message is too long for the assistant. Make it shorter: it can hold up to ${TURN_LIMITS.askBytes.toLocaleString("en-US")} plain English letters, and fewer in other alphabets or with accents or emoji. Nothing was used.`,
   cost_unknown: "The assistant could not work out the most this would cost, so it did not start. Nothing was used.",
   budget_unknown: "The assistant could not read how much of this month's AI budget is left, so it did not start. Nothing was used.",
   no_budget: "This month's AI budget does not have enough left for the assistant. Nothing was used.",

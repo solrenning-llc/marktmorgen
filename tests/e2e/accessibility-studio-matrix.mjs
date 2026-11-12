@@ -46,7 +46,14 @@ let browser,failed=0,cases=0;const gaps=[];
 try{
  let up=false;for(let n=0;n<120;n++){if(app.exitCode!==null)throw Error(output);try{up=(await fetch(origin)).ok;}catch{}if(up)break;await new Promise(resolve=>setTimeout(resolve,500));}if(!up)throw Error("Local app unavailable "+output);
  browser=await driver.launch();console.log("STUDIO_MATRIX_ENGINE:"+JSON.stringify({requested:engine,actual:driver.name(),version:browser.version()}));
- for(const path of ["/studio?store="+fixture.sid,"/studio/pages?store="+fixture.sid+"&product="+fixture.product])for(const width of [320,390,768,1280,1920])for(const mode of ["baseline","text-spacing","reduced-motion","forced-colors","reflow-320",...(process.env.AX2_PUBLIC_STANDARD==="true"?["dark"]:[])]){
+ // The dashboard and page editor at every width; the other studio screens a creator works in (pages, people, emails,
+ // numbers, adding, forms, funnels, deals, reviews, checkup, team) at the narrowest and a desktop width (AX274 Part A item 5).
+ const MODES=["baseline","text-spacing","reduced-motion","forced-colors","reflow-320",...(process.env.AX2_PUBLIC_STANDARD==="true"?["dark"]:[])];
+ const plan=[
+  ...["/studio?store="+fixture.sid,"/studio/pages?store="+fixture.sid+"&product="+fixture.product].flatMap(path=>[320,390,768,1280,1920].map(width=>[path,width])),
+  ...["site","people","email","totals","add","forms","funnels","deals","reviews","checkup","team"].flatMap(screen=>[320,1280].map(width=>["/studio/"+screen+"?store="+fixture.sid,width])),
+ ];
+ for(const [path,width] of plan)for(const mode of MODES){
   const viewportWidth=mode==="reflow-320"?320:width;
   const context=await browser.newContext({...(mode==="dark"?{colorScheme:"dark"}:{}),viewport:{width:viewportWidth,height:900},serviceWorkers:"block",reducedMotion:mode==="reduced-motion"?"reduce":"no-preference",forcedColors:mode==="forced-colors"?"active":"none"});
   await context.addCookies([{name:"nl_session",value:fixture.session,url:origin}]);
@@ -94,6 +101,10 @@ try{
     const selected=window.axe.getRules().filter(rule=>rule.tags.some(tag=>tags.includes(tag)));
     if(!selected.some(rule=>rule.ruleId==="color-contrast-enhanced"))throw Error("AAA enhanced-contrast rule missing");
     const result=await window.axe.run(document,{runOnly:{type:"tag",values:tags}});
+    // Heading order (2.4.10 support), one level-one heading and landmarks a screen reader can tell apart: rules axe files
+    // as best practice, run by name so its other advisory rules stay out of this gate.
+    const named=await window.axe.run(document,{runOnly:{type:"rule",values:["heading-order","page-has-heading-one","landmark-unique","landmark-one-main","landmark-no-duplicate-main"]}});
+    result.violations.push(...named.violations);result.incomplete.push(...named.incomplete);
     return {rules:selected.map(rule=>rule.ruleId),violations:result.violations.map(rule=>({id:rule.id,targets:rule.nodes.map(node=>node.target),nodes:rule.nodes.map(node=>({target:node.target,html:node.html.slice(0,600),summary:node.failureSummary}))})),incomplete:result.incomplete.map(rule=>({id:rule.id,targets:rule.nodes.map(node=>node.target)}))};
    });
    if(report.incomplete.length)gaps.push({path,width,mode,manualReview:report.incomplete});
@@ -104,6 +115,6 @@ try{
   finally{cases++;await context.close();}
  }
  console.log("STUDIO_MATRIX_OPEN_GAPS:"+JSON.stringify(gaps));
- console.log("STUDIO_MATRIX_SUMMARY:"+JSON.stringify({engine,cases,failed,gaps:gaps.length,scope:"Two authenticated read-only studio/editor surfaces only; no creation/save/publication action proof. Synthetic emulation; reflow320 is not real browser400% zoom. No real-device, assistive-user or whole-product AAA certification."}));
+ console.log("STUDIO_MATRIX_SUMMARY:"+JSON.stringify({engine,cases,failed,gaps:gaps.length,scope:"Thirteen authenticated read-only studio screens (dashboard and page editor at five widths, eleven more at 320 and 1280); no creation/save/publication action proof. Synthetic emulation; reflow320 is not real browser400% zoom. No real-device, assistive-user or whole-product AAA certification."}));
 }finally{if(browser)await browser.close();app.kill("SIGTERM");await services.close();}
 process.exitCode=failed?1:0;

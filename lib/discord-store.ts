@@ -28,6 +28,13 @@ const productsKey = (room: string) => `nl:dc:prod:${room}`;
 const membersKey = (room: string) => `nl:dc:mem:${room}`;
 const addressKey = (room: string, email: string) => `nl:dc:addr:${room}:${emailKey(email)}`;
 const DUE_KEY = "nl:dc:due";
+
+/**
+ * How long a run holds the people it took from the line (dueMembers) before they come due again on their own: longer
+ * than one run (lib/discord-access.ts sweepDiscord, a 45 s budget; the run's lock lasts 120 s), shorter than the gap
+ * between runs (every 30 minutes, vercel.json).
+ */
+export const DUE_LEASE_SECONDS = 15 * 60;
 const STATE_SECONDS = 10 * 60;
 const stateKey = (token: string) => `nl:dc:state:${createHash("sha256").update(`nimbus-discord:${token}`).digest("hex").slice(0, 40)}`;
 
@@ -238,17 +245,29 @@ export async function forgetMember(room: string, sid: string, userId: string, em
   }
 }
 
+/** Takes a person off the line when there is nobody left to check: their store, server or member record is gone. */
+export async function dropDue(sid: string, userId: string): Promise<void> {
+  await redisPipeline([["ZREM", DUE_KEY, `${sid}|${userId}`]]);
+}
+
 /** Puts a person first in line to be checked: a refund made in the studio, say. */
 export async function checkSoon(sid: string, userId: string): Promise<void> {
   await redisPipeline([["ZADD", DUE_KEY, 0, `${sid}|${userId}`]]);
 }
 
-/** Who is due to be checked, taken off the line; they are put back when kept. */
+/**
+ * Who is due to be checked, leased rather than taken off the line (webhooks/cron audit, Claude 1, 12/11/2026): each
+ * is moved DUE_LEASE_SECONDS ahead, only while still in line (XX, so somebody forgotten in between is never added
+ * back). A check that finishes sets their next time (keepMember) or takes them off (forgetMember, dropDue); one the
+ * run never finishes (the function stopped, Redis failing for the put-back too) comes due again when the lease runs
+ * out, instead of being dropped for good with the creator's paid roles still given.
+ */
 export async function dueMembers(now = Date.now(), limit = 200): Promise<{ sid: string; userId: string }[]> {
   if (!isRedisConfigured()) return [];
   const [due] = await redisPipeline([["ZRANGEBYSCORE", DUE_KEY, 0, Math.floor(now / 1000), "LIMIT", 0, limit]]);
   const entries = (Array.isArray(due) ? due : []).filter((m): m is string => typeof m === "string");
-  if (entries.length) await redisPipeline([["ZREM", DUE_KEY, ...entries]]);
+  const until = Math.floor(now / 1000) + DUE_LEASE_SECONDS;
+  if (entries.length) await redisPipeline([["ZADD", DUE_KEY, "XX", ...entries.flatMap((entry) => [until, entry])]]);
   return entries.flatMap((entry) => {
     const [sid, userId] = entry.split("|");
     return sid && userId && SNOWFLAKE.test(userId) ? [{ sid, userId }] : [];

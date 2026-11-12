@@ -9,6 +9,8 @@ import { affiliateLink, readBook } from "@/lib/affiliates";
 import { isSenderConfigured } from "@/lib/email";
 import { canSell } from "@/lib/store-checkout";
 import { AffiliateStudio } from "@/components/affiliate-studio";
+import { AffiliateSummary } from "@/components/affiliate-summary";
+import { SUMMARY_PERIODS, programSummary } from "@/lib/affiliate-summary";
 import { PayPalPayouts } from "@/components/paypal-payouts";
 import { onTheirWay, payableLines, paypalChecks, readPayPal, settlePayPal } from "@/lib/paypal-payouts";
 import { batchTotal } from "@/lib/affiliate-payouts";
@@ -130,6 +132,14 @@ export default async function StudioAffiliatesPage({ searchParams }: Params) {
           <p className="notice notice-error mt-6" role="alert">
             We could not read your affiliates just now. Nothing was changed. Try again in a moment.
           </p>
+        ) : null}
+
+        {book && book.rows.length ? (
+          // 532 [AF1]: the program's three numbers, worked out from the book read above; nothing is read again.
+          <AffiliateSummary
+            currency={store.currency}
+            summaries={Object.fromEntries(SUMMARY_PERIODS.map((period) => [period, programSummary(book, period)!])) as Parameters<typeof AffiliateSummary>[0]["summaries"]}
+          />
         ) : null}
 
         {offers === null ? (

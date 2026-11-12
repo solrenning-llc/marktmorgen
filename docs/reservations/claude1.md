@@ -6,4 +6,4 @@ Only Claude 1 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
-| Claude 1 | Defect (custo): the product share card pays before reading its picture | claude1/cost-api-product-card | `app/[handle]/p/[product]/opengraph-image.tsx`, `tests/c1-cost-product-card.test.ts`, `tests/c1-cost-product-card-world.ts`, `tests/aliases/c1-cost-product-card.test.ts.json` | 12/11/2026 17h30 |
+| Claude 1 | Defect (custo): the product share card pays before reading its picture | claude1/cost-api-product-card | `app/[handle]/p/[product]/opengraph-image.tsx`, `tests/c1-cost-product-card.test.ts`, `tests/c1-cost-product-card-world.ts`, `tests/aliases/c1-cost-product-card.test.ts.json`, `lib/public-read-rules.ts` (the product card constants only), `tests/plan-cost-registry.ts`, `tests/plan-cost-registry.test.ts` (the product card lines only) | 12/11/2026 17h30 |

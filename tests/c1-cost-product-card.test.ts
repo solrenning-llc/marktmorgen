@@ -15,6 +15,7 @@
  */
 import OpengraphImage from "@/app/[handle]/p/[product]/opengraph-image";
 import { CERTIFICATE_CARD_UNITS } from "@/lib/certificate";
+import { PRODUCT_CARD_UNITS } from "@/lib/public-read-rules";
 import { requestsIn } from "@/lib/traffic";
 import { publicVisitLimit, requestLimitFor } from "@/lib/traffic-rules";
 import { allowanceWindow } from "@/lib/allowance-window";
@@ -29,8 +30,8 @@ import { done, is, part } from "./check";
 const OWNER = "card-cost-owner@example.com";
 const HANDLE = "cardcost";
 
-async function cardFor(product: string): Promise<number | "image"> {
-  const result: unknown = await OpengraphImage({ params: Promise.resolve({ handle: `@${HANDLE}`, product }) });
+async function cardFor(product: string, handle = HANDLE): Promise<number | "image"> {
+  const result: unknown = await OpengraphImage({ params: Promise.resolve({ handle: `@${handle}`, product }) });
   return result instanceof Response ? result.status : "image";
 }
 
@@ -63,6 +64,12 @@ async function main(): Promise<void> {
   is("is drawn, with its picture read once", [await cardFor(id), reads.filter((p) => p === path).length], ["image", 1]);
   const taken = (await requestsIn(folder, window)) - before;
   is("and takes at least as many of the store's public requests as a certificate's lighter card", taken >= CERTIFICATE_CARD_UNITS, true);
+  is(`exactly PRODUCT_CARD_UNITS (${PRODUCT_CARD_UNITS}), held above the card's worst case in tests/plan-cost-registry.test.ts`, taken, PRODUCT_CARD_UNITS);
+
+  part("A store that does not exist gets no card, and nothing is read or drawn (reviews of #4211)");
+  reads.length = 0;
+  const drawnFirst = drawn.length;
+  is("404, no picture read, nothing drawn", [await cardFor(id, "nosuchstorehere"), reads.length, drawn.length - drawnFirst], [404, 0, 0]);
 
   part("A made-up product id is not free");
   before = await requestsIn(folder, window);

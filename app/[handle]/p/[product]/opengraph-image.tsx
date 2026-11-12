@@ -8,7 +8,7 @@ import { averageText, showsRating, summaryOf } from "@/lib/reviews";
 import { canUseDomain } from "@/lib/domains";
 import { pricePill } from "@/components/store-product";
 import { takePublicRequest } from "@/lib/traffic";
-import { PRODUCT_CARD_UNITS } from "@/lib/public-read-rules";
+import { PRODUCT_CARD_PICTURE_PIXELS, PRODUCT_CARD_UNITS } from "@/lib/public-read-rules";
 import { speech } from "@/lib/buyer-words";
 import { plain } from "@/lib/serve-file";
 
@@ -45,7 +45,8 @@ async function readPicture(path: string): Promise<string | null> {
       const { done, value } = await reader.read();
       if (done) break;
       total += value.byteLength;
-      if (total > MAX_IMAGE_BYTES * 2) {
+      // At most what an upload keeps, so the file store is never asked for more than PRODUCT_CARD_READ prices.
+      if (total > MAX_IMAGE_BYTES) {
         await reader.cancel().catch(() => {});
         return null;
       }
@@ -59,7 +60,7 @@ async function readPicture(path: string): Promise<string | null> {
       // A picture is checked when it is uploaded; the pixel ceiling is here
       // too, so one that is small on disk but enormous decoded is refused
       // rather than filling the memory of the function drawing the card.
-      bytes = await sharp(bytes, { limitInputPixels: 40_000_000 }).jpeg({ quality: 86 }).toBuffer();
+      bytes = await sharp(bytes, { limitInputPixels: PRODUCT_CARD_PICTURE_PIXELS }).jpeg({ quality: 86 }).toBuffer();
     }
     return `data:image/jpeg;base64,${bytes.toString("base64")}`;
   } catch {
@@ -76,6 +77,9 @@ export default async function OpengraphImage({ params }: Params) {
     // An address with a broken escape in it names no store: the plain card.
   }
   const store = decoded.startsWith("@") ? await storeForHandle(normaliseHandle(decoded)).catch(() => null) : null;
+  // No store, or one that cannot be read: nothing to share and nothing to pay with, so no card is drawn (reviews of
+  // #4211; the certificate's card answers the same).
+  if (!store) return new Response("Not found", { status: 404, headers: { "Cache-Control": "no-store" } });
   // Paid for as the store's other public pages are, before anything is read or drawn: one of its public requests
   // before its listing is read, the rest of PRODUCT_CARD_UNITS before its picture is read from the file store and the
   // card drawn. A store past its requests gets no card; an address asked again and again (a query string makes each

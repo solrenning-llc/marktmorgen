@@ -32,7 +32,7 @@ import { accountStores, claimHandle, createStore, ensureStoreId, storeForEmail }
 import { POST as recoveryRoute } from "@/app/api/auth/recovery-address/route";
 import { endMoving, isMoving, markBrokenMove, markMoving, readBrokenMove, sendMoveLink } from "@/lib/auth";
 import { clearBrokenMoveByHand, describeMove } from "@/lib/move-repair";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { removalWhen } from "@/lib/removal-time";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -859,6 +859,15 @@ async function main(): Promise<void> {
   await markBrokenMove(SPA, SPB);
   is("never while the store is on one address and its passkey on the other: that would let the emailed link in", await clearBrokenMoveByHand(SPA, SPA), "split");
   is("the support script is there", existsSync("scripts/move-repair.mjs") && existsSync("scripts/move-repair-run.ts"), true);
+  // Claude 1's LEVE on #3822: on "sessions" clearBrokenMoveByHand has already logged out the address it could, so the
+  // script must not tell the owner that nothing was done; only the record was kept.
+  {
+    const run = readFileSync("scripts/move-repair-run.ts", "utf8");
+    const sessions = /answer === "sessions"\s*\?\s*"([^"]+)"/.exec(run)?.[1] ?? "";
+    is("the sessions answer has words", sessions.length > 0, true);
+    is("it never says nothing was cleared", /nothing was cleared/i.test(sessions), false);
+    is("it says the record is kept", /record is kept/i.test(sessions), true);
+  }
 
   part("Undoing a move forgets two-step login the old address gained midway, and gives back the owner's");
   const APP = "app-from@example.com";

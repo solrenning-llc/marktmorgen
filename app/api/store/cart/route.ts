@@ -64,7 +64,10 @@ export async function GET(request: NextRequest) {
   const locale = LANGUAGES[store.language].locale;
   // Which products are still coming soon: a reading that cannot be had is never "none" (Claude 6's audit of rule 24),
   // so no line is payable right now, as for a stock count that cannot be read.
-  const [listings, coming] = await Promise.all([ids.length ? readListings(store, ids) : Promise.resolve([]), soonState(store).catch(() => null)]);
+  const [read, coming] = await Promise.all([ids.length ? readListings(store, ids) : Promise.resolve([]), soonState(store).catch(() => null)]);
+  // A draft is answered as an id the store does not have: no line, no name, no price (MM-SA-30, lib/draft-view.ts).
+  // Whoever knows its id learns nothing from the cart; a draft cannot be paid for in one anyway (lib/cart-rules.ts, cartable).
+  const listings = read.filter((product) => !product.hidden);
   // A limited product with none left cannot be paid for: said on its line (lib/stock.ts). A count that cannot be read is
   // not a unit either, but is not said to be sold out: it is not available in a cart right now (undefined).
   const left = new Map(await Promise.all(listings.filter((p) => p.stock !== null).map(async (p) => [p.id, await stockLeft(store, p).catch(() => undefined)] as const)));

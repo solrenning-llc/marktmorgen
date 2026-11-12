@@ -6,3 +6,4 @@ Only Claude 1 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
+| Claude 1 | 506 [SG1] MM-SA-30, the cart GET leg: a draft answered as an id the store does not have | claude1/sg1-cart-draft | `app/api/store/cart/route.ts` (GET only), `tests/cart-draft-get.test.ts` (new), `tests/aliases/cart-draft-get.test.ts.json` (new), `docs/security-audit-2026-10-28.md` (status cell of MM-SA-18, 19, 27, 28, 29 and 30 only) | 12/11/2026 05h05 |

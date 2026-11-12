@@ -419,13 +419,15 @@ async function deliver(store: Store, device: Device, event: PhoneEvent | "test",
  * thing happened: a device turned on more than an hour after it is not told
  * about it. Returns
  * how many devices it is sending to; the sending itself happens after the
- * answer to the request that noticed it.
+ * answer to the request that noticed it. With `wait` (a job that must know
+ * whether anyone was reached), it sends now and returns how many devices
+ * answered well.
  */
 export async function alertCreator(
   store: Store,
   event: PhoneEvent,
   alert: Alert,
-  options: { seed: string; at?: number; pathTimeZone?: string },
+  options: { seed: string; at?: number; pathTimeZone?: string; wait?: boolean },
 ): Promise<number> {
   if (event === "path" && !maySendPathReminder(options.pathTimeZone || "", Date.now())) return 0;
   if (!store.statsId || !isRedisConfigured()) return 0;
@@ -458,7 +460,13 @@ export async function alertCreator(
     const count = countOf(replies?.[1]);
     if (count === null || count > QUIET_PER_HOUR) return 0;
   }
-  await soon(() => Promise.all(listening.map((device) => event === "path" && !maySendPathReminder(options.pathTimeZone || "", Date.now()) ? Promise.resolve(null) : deliver(store, device, event, alert))));
+  const send = () => Promise.all(listening.map((device) => event === "path" && !maySendPathReminder(options.pathTimeZone || "", Date.now()) ? Promise.resolve(null) : deliver(store, device, event, alert)));
+  // A job that must know whether anyone was reached waits for the answers: then only the devices that answered well count.
+  if (options.wait) {
+    const states = await send().catch(() => [] as (DeviceState | null)[]);
+    return states.filter((state) => state?.ok === true).length;
+  }
+  await soon(send);
   return listening.length;
 }
 

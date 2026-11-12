@@ -11,15 +11,20 @@
  * Now the checkouts are read in Stripe's exact list shape (lib/stripe-list.ts) and to their end, a few pages at most;
  * anything less is unknown, and a course whose opening depends on Stripe's answer is not opened on it (nothing is
  * kept, so the next page asks again). What does not depend on Stripe stays open: a course brought over from another
- * platform. Synthetic only: an in-memory Redis and a stand-in for the creator's Stripe account.
+ * platform. The emailed link to the course follows the same answer: while it is unknown, the request says the email
+ * could not be sent ("error", for every address, so it says nothing about who bought what), never "sent" with no link
+ * sent, which would leave a buyer who paid waiting for an email that never comes. Synthetic only: an in-memory Redis and a stand-in for the creator's Stripe account.
  */
 import { addProduct, claimHandle, ensureStatsId, setProductCourse, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
-import { paidCourses, recordEnrollment } from "@/lib/learn";
+import { paidCourses, recordEnrollment, requestCourseLink } from "@/lib/learn";
+import { readCourseListing } from "@/lib/catalog";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_course_ledger_unknown";
+// A stand-in key, so service mail is not known unavailable and a link request reaches the ledger (lib/email.ts).
+process.env.RESEND_API_KEY = "re_test_a_stand_in_key_for_tests_only";
 
 const OWNER = "teacher@example.com";
 const ACCOUNT = "acct_1TestLedgerUnk1";
@@ -106,6 +111,20 @@ async function main(): Promise<void> {
   mode["carla@example.com"] = "ok";
   sessions["carla@example.com"] = [paid("cs_test_carla0paid02", course, false, NOW - 600), ...sessions["carla@example.com"]];
   is("bought again, Stripe back: open", await open("carla@example.com"), [course]);
+
+  part("A link asked for while Stripe's answer is unknown: said as not sent, never as sent with nothing sent");
+  const listing = (await readCourseListing(store, course))!;
+  const ask = (email: string, ip: string) => requestCourseLink({ store, product: listing, email, ip, origin: "https://marktmorgen.com" });
+  const links = () => redis.keys().filter((k) => k.startsWith("nl:learn:link:")).length;
+  sessions["fiona@example.com"] = [paid("cs_test_fiona0paid01", course, false)];
+  mode["fiona@example.com"] = "fail";
+  await recordEnrollment(store, "fiona@example.com", course, NOW - 86_400);
+  const before = links();
+  is("a buyer who paid, Stripe failing: could not send", await ask("fiona@example.com", "192.0.2.21"), "error");
+  mode["gavin@example.com"] = "shape";
+  is("an address that bought nothing, Stripe unreadable: the same answer", await ask("gavin@example.com", "192.0.2.22"), "error");
+  is("no link made on an unknown", links(), before);
+  is("an address that bought nothing, Stripe read whole: sent, as ever", await ask("hanna@example.com", "192.0.2.23"), "sent");
 
   done();
 }

@@ -716,6 +716,24 @@ export class MemoryRedis {
           this.scriptCalls += 2;
           return this.run(["HSET", args[1], args[2], String(Math.floor(this.now() / 1000))]);
         }
+        // lib/erasure-request.ts, GRANT_NEXT: what is left of an erasure link, written or deleted only while the link
+        // still holds what the press read, with its own expiry; 1 when written, 0 when nothing was.
+        if (key.startsWith("-- marktmorgen:erase-grant-next:v1\n") && args[0] === "1" && args.length === 4) {
+          const [, link, read, next] = args;
+          this.scriptCalls += 1;
+          if (this.run(["GET", link]) !== read) return 0;
+          this.scriptCalls += 1;
+          if (next === "") {
+            this.run(["DEL", link]);
+            return 1;
+          }
+          const left = Number(this.run(["PTTL", link]));
+          if (!(left > 0)) return 0;
+          this.scriptCalls += 2;
+          this.run(["SET", link, next]);
+          this.run(["PEXPIRE", link, left]);
+          return 1;
+        }
         // lib/store-readings.ts, READING_COPY: a reading kept only when nobody it names was deleted from the store;
         // the places of those who were answered, and the copy gone.
         if (key.startsWith("-- marktmorgen:reading-copy:v1\n") && args[0] === "2" && args.length >= 6) {

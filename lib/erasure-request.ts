@@ -32,6 +32,7 @@ import { after } from "next/server";
 import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { countOf, repliesFor } from "@/lib/redis-reply";
 import { withinLimit } from "@/lib/request-guard";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { type Store, storeForHandle, storeForId } from "@/lib/store";
@@ -286,6 +287,21 @@ export type EraseDone = {
  * pressing again finishes it. Each store's owner is told, with the address,
  * so they can delete it from their own tools too (Stripe, an email platform).
  */
+/**
+ * What is left of a link, written only while it still holds what this press read (Codex L, #4281): KEYS[1] the link,
+ * ARGV[1] the grant as read, ARGV[2] what is left, or "" to delete it. Rewritten with its own expiry, never a new one.
+ * Answers 1 when written, 0 when the link no longer holds what was read (another press finished it or rewrote it, or
+ * it expired): then nothing is written. Billed 1 + 4; lib/redis-memory.ts runs it the same way.
+ */
+export const GRANT_NEXT = `-- marktmorgen:erase-grant-next:v1
+if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end
+if ARGV[2] == '' then redis.call('DEL', KEYS[1]) return 1 end
+local left = redis.call('PTTL', KEYS[1])
+if left <= 0 then return 0 end
+redis.call('SET', KEYS[1], ARGV[2])
+redis.call('PEXPIRE', KEYS[1], left)
+return 1`;
+
 export async function confirmErasure(token: string, now = Date.now()): Promise<EraseDone> {
   if (!ERASE_TOKEN.test(token) || !isRedisConfigured()) return { state: "gone", deleted: [], later: [] };
   const key = linkKey(token);
@@ -319,12 +335,20 @@ export async function confirmErasure(token: string, now = Date.now()): Promise<E
     deleted.push(store.name);
     await tellOwner(store, grant.e).catch((error: unknown) => console.error("telling a store's owner about a deletion failed", error));
   }
-  if (later.length) {
-    await redisPipeline([["SET", key, JSON.stringify({ e: grant.e, s: later } satisfies Grant), "EX", Math.max(60, ttl)]]);
-    return { state: "more", deleted, later };
+  // Written, or deleted, only while the link still holds what this press read: a press that finished in another tab
+  // is never undone, and the link keeps the expiry it had.
+  const next = later.length ? JSON.stringify({ e: grant.e, s: later } satisfies Grant) : "";
+  const [wrote] = repliesFor(await redisPipeline([["EVAL", GRANT_NEXT, 1, key, raw as string, next]]), 1) ?? [undefined];
+  const held = countOf(wrote);
+  // Not known whether it was written: said as more to do, so pressing again reads the link as it is.
+  if (held === null || held > 1) return { state: "more", deleted, later };
+  if (held === 0) {
+    // Changed meanwhile: said from what the link holds now, never "more" for stores another press finished.
+    const current = repliesFor(await redisPipeline([["GET", key]]), 1);
+    const still = current ? parseGrant(current[0]) : null;
+    return still ? { state: "more", deleted, later: still.s } : { state: "gone", deleted, later: [] };
   }
-  await redisPipeline([["DEL", key]]);
-  return { state: "done", deleted, later };
+  return later.length ? { state: "more", deleted, later } : { state: "done", deleted, later };
 }
 
 /** The owner's note: done, not asked. One of the store's own emails (lib/store-allowance-rules.ts, "email"). */

@@ -1,3 +1,33 @@
+/** The real editor's local keyboard operations; no save or AI call is needed. */
+export async function checkFaqEditorKeyboard({page,section,is}){
+ const add=section.getByRole("button",{name:"Add a question",exact:true});
+ const questions=section.locator("input");
+ const focused=()=>page.evaluate(()=>document.activeElement?.id??"");
+ const press=async button=>{await button.focus();await button.press("Enter");};
+ for(let n=0;n<3;n++){
+  await press(add);
+  is("FAQ new question receives keyboard focus "+n,await focused(),await questions.nth(n).getAttribute("id"));
+  await questions.nth(n).fill(["Alpha?","Beta?","Gamma?"][n]);
+  await section.locator("textarea").nth(n).fill(["Alpha answer.","Beta answer.","Gamma answer."][n]);
+ }
+ // A move may disable its own button at the boundary: focus must survive it.
+ await press(section.getByRole("button",{name:"Move up question 2",exact:true}));
+ is("FAQ reordered question keeps its own focus",await focused(),await questions.nth(0).getAttribute("id"));
+ is("FAQ moving keeps question/answer pairs",await section.locator("input,textarea").evaluateAll(nodes=>nodes.map(n=>n.value)),["Beta?","Beta answer.","Alpha?","Alpha answer.","Gamma?","Gamma answer."]);
+ await press(section.getByRole("button",{name:"Move down question 1",exact:true}));
+ is("FAQ downward move follows the same question",await focused(),await questions.nth(1).getAttribute("id"));
+ const controls=section.locator("li button");
+ is("FAQ action names are distinct",await controls.evaluateAll(nodes=>new Set(nodes.map(n=>n.getAttribute("aria-label")??n.textContent.trim())).size),9);
+ is("FAQ action targets are at least 44 by 44",await controls.evaluateAll(nodes=>nodes.every(n=>{const r=n.getBoundingClientRect();return r.width>=44&&r.height>=44;})),true);
+ await press(section.getByRole("button",{name:"Remove question 2",exact:true}));
+ is("FAQ middle removal focuses the following question",await focused(),await questions.nth(1).getAttribute("id"));
+ is("FAQ removal preserves its neighbors",await questions.evaluateAll(nodes=>nodes.map(n=>n.value)),["Alpha?","Gamma?"]);
+ await press(section.getByRole("button",{name:"Remove question 2",exact:true}));
+ is("FAQ last removal focuses the previous question",await focused(),await questions.nth(0).getAttribute("id"));
+ await press(section.getByRole("button",{name:"Remove question 1",exact:true}));
+ is("FAQ empty list returns focus to Add",await add.evaluate(n=>n===document.activeElement),true);
+}
+
 /** Local fixture only. Every manual save and AI request is intercepted. */
 export async function checkFaqAcknowledgment({browser,LOCAL,fixture,is}){
  const cases=[
@@ -33,7 +63,8 @@ export async function checkFaqAcknowledgment({browser,LOCAL,fixture,is}){
    await page.goto(LOCAL+"/studio?store="+fixture.sid,{waitUntil:"networkidle",timeout:60000});
    await page.locator("main details").evaluateAll(nodes=>nodes.forEach(n=>{n.open=true;}));
    const section=page.locator("section#faq");await section.waitFor({state:"visible"});
-   while(await section.getByRole("button",{name:"Remove",exact:true}).count())await section.getByRole("button",{name:"Remove",exact:true}).first().click();
+   while(await section.getByRole("button",{name:/^Remove(?: question \d+)?$/}).count())await section.getByRole("button",{name:/^Remove(?: question \d+)?$/}).first().click();
+   await checkFaqEditorKeyboard({page,section,is});
    await section.getByRole("button",{name:"Add a question",exact:true}).click();
    await section.getByRole("button",{name:"Add a question",exact:true}).click();
    const questions=section.locator("input");const answers=section.locator("textarea");

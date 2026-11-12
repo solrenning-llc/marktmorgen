@@ -40,7 +40,7 @@ export const de: BuyerWords = {
 
   fairHead: (country, percent) => `Fairer Preis für Ihr Land (${country}): ${percent}${S}% Rabatt`,
   fairNote: (store, plan) =>
-    `${store} senkt die Preise dort, wo Geld weniger wert ist. Der Rabatt wird auf der Zahlungsseite abgezogen, ohne Code${plan ? "; der reduzierte Preis gilt bei Zahlung des vollen Betrags" : ""}.`,
+    `${store} senkt die Preise dort, wo Geld weniger wert ist. Dieser Preis wurde automatisch für Sie festgelegt, anhand des Landes Ihrer Internetverbindung. Der Rabatt wird auf der Zahlungsseite abgezogen, ohne Code${plan ? "; der reduzierte Preis gilt bei Zahlung des vollen Betrags" : ""}.`,
   saleHead: (name, percent, ends) => `${name ? `${name}: ` : ""}${percent}${S}% Rabatt · ${ends}`,
   saleNote: (until, plan) =>
     `Bis ${until}. Der Rabatt wird auf der Zahlungsseite abgezogen, ohne Code${plan ? "; der Aktionspreis gilt bei Zahlung des vollen Betrags" : ""}.`,
@@ -86,7 +86,7 @@ export const de: BuyerWords = {
   buyAsGift: "Als Geschenk kaufen",
   buyAsGiftFor: (price) => `Als Geschenk kaufen — ${price}`,
   giftNote: (store) =>
-    `Sie bezahlen auf der Seite von Stripe. Direkt danach erhält die beschenkte Person eine einzige E-Mail von ${store} mit Ihrem Namen, Ihrer Nachricht und einem Link, um es mit der eigenen Adresse zu öffnen. Sie erhalten die Quittung, keine Kopie.`,
+    `Sie bezahlen auf der Seite von Stripe. Nach der Zahlung gehört das Geschenk zu ihrer Adresse. Falls die einzige E-Mail von ${store} sie erreicht, enthält sie Ihren Namen, Ihre Nachricht und einen Link zum Öffnen. Sie erhalten die Quittung, keine Kopie.`,
   giftProblems: {
     email: "Das sieht nicht nach einer E-Mail-Adresse aus. Prüfen Sie die Adresse der beschenkten Person und versuchen Sie es erneut.",
     option: "Wählen Sie, was Sie verschenken möchten, und versuchen Sie es erneut. Es wurde nichts berechnet.",
@@ -136,7 +136,8 @@ export const de: BuyerWords = {
   /** The store's blog (lib/store-blog.ts; app/[handle]/blog). */
   blog: "Blog",
   blogOf: (store) => `Blog von ${store}`,
-  blogEmpty: "Hier gibt es noch nichts.",
+  blogPastEnd: "Keine Beiträge auf dieser Seite",
+  blogPastEndBody: "Diese Seite liegt hinter dem letzten Beitrag.",
   blogMinutes: (n) => `${n} Min. Lesezeit`,
   blogNewer: "Neuere Beiträge",
   blogOlder: "Ältere Beiträge",
@@ -149,6 +150,7 @@ export const de: BuyerWords = {
   /** How much less each unit costs than in the option of one. */
   unitSaving: (percent) => `Sie sparen ${percent}\u00a0%`,
   chooseOptionFor: (title) => `Wählen Sie eine Option für ${title}`,
+  chooseOne: "Bitte wählen",
   recommended: "Empfohlen",
   recommendedAfter: " (empfohlen)",
   howToPayFor: (title) => `Zahlungsweise für ${title}`,
@@ -185,6 +187,8 @@ export const de: BuyerWords = {
     `Sobald sie live ist, wird die Zahlung von Stripe auf dem eigenen Konto von ${store} eingezogen: Marktmorgen hält das Geld nie und behält nichts davon.`,
   paidBy: (takers, store) =>
     `Die Zahlung wird von ${takers} auf dem eigenen Konto von ${store} eingezogen. Marktmorgen hält das Geld nie und behält nichts davon.`,
+  whoAnswers: (store) =>
+    `${store} ist der Verkäufer und verantwortlich für das, was Sie kaufen, für Erstattungen und für ein etwaiges Widerrufsrecht. Marktmorgen stellt die Seiten des Shops bereit und ist nicht Partei des Kaufvertrags.`,
   noPaymentsTitle: "Dieser Shop kann noch keine Zahlungen annehmen.",
   noPaymentsBody: (store) => `Die Preise oben sind echt, aber hier kann noch keine Karte belastet werden. Um zu kaufen, schreiben Sie direkt an ${store}.`,
   noPaymentsBodyOne: (store) => `Der Preis oben ist echt, aber hier kann noch keine Karte belastet werden. Um zu kaufen, schreiben Sie direkt an ${store}.`,
@@ -194,6 +198,7 @@ export const de: BuyerWords = {
     busy: { title: "Jemand anderes kauft das gerade", body: "Es wurde nichts berechnet. Klicken Sie gleich noch einmal auf Kaufen." },
     slow: { title: "Viele Versuche in wenigen Minuten", body: "Es wurde nichts berechnet. Warten Sie ein paar Minuten und klicken Sie dann erneut auf Kaufen." },
     error: { title: "Die Zahlungsseite konnte nicht geöffnet werden", body: "Es wurde nichts berechnet. Versuchen Sie es gleich noch einmal." },
+    nocharges: { title: "Dieser Shop kann gerade keine Kartenzahlungen annehmen", body: "Es wurde nichts berechnet. Ein neuer Versuch klappt erst, wenn der Shop das behoben hat." },
     paused: { title: "Dieser Shop nimmt gerade keine neuen Bestellungen an", body: "Es wurde nichts berechnet. Neue Bestellungen sind ab Anfang nächsten Monats wieder möglich, oder früher." },
     "paypal-declined": {
       title: "PayPal hat die Zahlung nicht angenommen",
@@ -300,11 +305,15 @@ export const de: BuyerWords = {
   newer: "Neuere",
   older: "Ältere",
   askUnknown: (store) => `Das steht nicht auf dieser Seite. Fragen Sie ${store} vor dem Kauf.`,
+  askTermsCut: () => "Die vollständigen Bedingungen liegen mir hier nicht vor. Fragen Sie vor dem Kauf beim Ersteller nach.",
 
   noLongerOnSale: "Dieses Produkt ist nicht mehr im Verkauf.",
+  cardUnread: "Dieses Produkt konnte gerade nicht geladen werden. Versuchen Sie es gleich noch einmal.",
+  cardBuyUnread: "Kaufen ist gerade nicht möglich. Versuchen Sie es gleich noch einmal.",
   seeStore: (store) => `${store} ansehen`,
   cardTestMode: "Testmodus: Es wird keine echte Karte belastet.",
   cardCheckout: "Sichere Zahlung über Stripe, in einem neuen Tab.",
+  cardSoldBy: (store) => `${store} ist der Verkäufer und dafür verantwortlich.`,
   cardOpens: (store) => `Öffnet sich im Shop von ${store}, in einem neuen Tab.`,
 
   // ---- Email cards (lib/mail-product-price.ts)

@@ -111,9 +111,9 @@ test("the host is slow: let through within three seconds, not held", async () =>
 
 test("asking for a login link is checked after the limit per machine and before anything is sent", () => {
   const route = readFileSync(join(process.cwd(), "app/api/auth/request/route.ts"), "utf8");
-  const limit = route.indexOf("withinRateLimit(ip)");
+  const limit = route.indexOf("rateLimitAnswer(ip)");
   const check = route.indexOf("await isAutomated()");
-  const address = route.indexOf("withinAddressLimit(email)");
+  const address = route.indexOf("addressLimitAnswer(email)");
   const send = route.indexOf("sendSignInLink(email");
   assert.ok(limit > 0 && check > limit, "the check comes after the limit per machine");
   assert.ok(address > check && send > address, "and before the address is counted or written to");
@@ -122,7 +122,10 @@ test("asking for a login link is checked after the limit per machine and before 
 
 test("the form sends its request with the challenge, and without it if the challenge cannot load", () => {
   const form = readFileSync(join(process.cwd(), "components/signin-form.tsx"), "utf8");
-  assert.match(form, /initBotId\(\{ protect: \[\{ path: "\/api\/auth\/request", method: "POST" \}\] \}\)/);
+  // The check is set up once for the window, with the store's counts too (lib/browser-check-client.ts).
+  assert.match(form, /plainFetch = startBrowserCheck\(\)/);
+  const client = readFileSync(join(process.cwd(), "lib/browser-check-client.ts"), "utf8");
+  assert.match(client, /\{ path: "\/api\/auth\/request", method: "POST" \}/);
   assert.match(form, /return ask\(plainFetch\)/);
   assert.match(form, /unconfirmed:/);
   const config = readFileSync(join(process.cwd(), "next.config.ts"), "utf8");

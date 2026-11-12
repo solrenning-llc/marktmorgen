@@ -38,7 +38,7 @@ async function main(): Promise<void> {
     const listed = [...text.matchAll(/^- `([a-z_]+)`: /gm)].map((m) => m[1]);
     is("nothing is listed that the server does not serve", listed.filter((name) => !MCP_TOOLS.some((t) => t.name === name)), []);
     is("inputs are listed under their tool", text.includes("  - `days`: number (one of 7, 30, 90). The window; 30 when left out.") && text.includes("  - `cursor`: string"), true);
-    is("it says every tool reads only, because every one does", [MCP_TOOLS.every((t) => t.annotations.readOnlyHint), text.includes("Every tool reads only")], [true, true]);
+    is("it says which tools prepare a change and that nothing changes before the creator confirms", [MCP_TOOLS.filter((t) => !t.annotations.readOnlyHint).map((t) => t.name), text.includes("nothing on the store changes until they do")], [["propose_product_description"], true]);
 
     part("The MCP server answers from the same list");
     const listedByServer = await mcp(new Request(`${SITE_URL}/api/mcp`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} }) }));
@@ -56,7 +56,7 @@ async function main(): Promise<void> {
     is("404 there", elsewhere.status, 404);
 
     part("/developers counts the same tools");
-    const words = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen", "twenty"];
+    const words = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen", "twenty", "twenty-one", "twenty-two", "twenty-three", "twenty-four", "twenty-five", "twenty-six", "twenty-seven", "twenty-eight", "twenty-nine", "thirty"];
     const developers = readFileSync("app/developers/page.tsx", "utf8");
     is("the developers page says how many tools there are, and it is right", developers.includes(`It has ${words[MCP_TOOLS.length]} tools`), true);
 

@@ -56,10 +56,10 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (!account) {
     if (method === "GET" && path === "/application_fees") {
       const since = Number(url.searchParams.get("created[gte]")) || 0;
-      return json({ object: "list", data: [...fees.values()].filter((f) => f.created >= since), has_more: false });
+      return json({ object: "list", data: [...fees.values()].filter((f) => f.created >= since).map(f => ({ object: "application_fee", ...f })), has_more: false });
     }
     const one = path.match(/^\/application_fees\/([^/]+)$/);
-    if (one && method === "GET") return fees.has(one[1]) ? json(fees.get(one[1])) : json({ error: { message: "No such fee" } }, 404);
+    if (one && method === "GET") return fees.has(one[1]) ? json({ object: "application_fee", ...fees.get(one[1]) }) : json({ error: { message: "No such fee" } }, 404);
     const back = path.match(/^\/application_fees\/([^/]+)\/refunds$/);
     if (back && method === "POST") {
       const fee = fees.get(back[1])!;
@@ -70,7 +70,10 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     }
   } else {
     const charge = path.match(/^\/charges\/([^/]+)$/);
-    if (charge && method === "GET") return json(charges.get(charge[1]) ?? {});
+    if (charge && method === "GET") {
+      const row = charges.get(charge[1]);
+      return json(row ? { object: "charge", ...row } : {});
+    }
     if (path === "/disputes" && method === "GET") {
       const chargeId=url.searchParams.get("charge");
       return json({ object: "list", has_more: false, data: chargeId === "ch_E" ? [{ id: "du_ShareLost01", object: "dispute", charge: chargeId, currency: "usd", status: "lost" }] : [] });
@@ -87,7 +90,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
       updated.push({ id: sub[1], percent });
       const row = subscriptions.find((s) => s.id === sub[1]);
       if (row) row.application_fee_percent = Number(percent);
-      return json(row ?? {});
+      return json(row ? { ...row, object: "subscription" } : {});
     }
   }
   return json({ error: { message: `not stood in for: ${method} ${path}` } }, 404);
@@ -161,24 +164,24 @@ async function main(): Promise<void> {
   const A = "acct_1TestShare00001";
   // A: $100 listed, a 20% code typed, $4 of tax: the fee was set on the least ($80, 500) — exact.
   fees.set("fee_A", { id: "fee_A", account: A, charge: "ch_A", amount: 500, amount_refunded: 0, currency: "usd", created: NOW - 3600 });
-  charges.set("ch_A", { id: "ch_A", amount: 8_400, amount_refunded: 0, disputed: false, payment_intent: { id: "pi_A", metadata: { share_bps: "625" } } });
-  sessions.set("pi_A", { amount_total: 8_400, total_details: { amount_tax: 400, amount_shipping: 0 } });
+  charges.set("ch_A", { invoice: null, id: "ch_A", currency: "usd", amount: 8_400, amount_refunded: 0, disputed: false, payment_intent: { object: "payment_intent", id: "pi_A", currency: "usd", amount: 8_400, latest_charge: "ch_A", metadata: { share_bps: "625" } } });
+  sessions.set("pi_A", { object: "checkout.session", id: "cs_test_A", payment_intent: "pi_A", currency: "usd", amount_total: 8_400, total_details: { amount_tax: 400, amount_shipping: 0 } });
   // B: the box could have taken 50%, nobody typed a code; tax included in the price: the fee was set on $50, paid $100 of which $10 tax.
   fees.set("fee_B", { id: "fee_B", account: A, charge: "ch_B", amount: 312, amount_refunded: 0, currency: "usd", created: NOW - 3600 });
-  charges.set("ch_B", { id: "ch_B", amount: 10_000, amount_refunded: 0, disputed: false, payment_intent: { id: "pi_B", metadata: { share_bps: "625" } } });
-  sessions.set("pi_B", { amount_total: 10_000, total_details: { amount_tax: 1_000, amount_shipping: 0 } });
+  charges.set("ch_B", { invoice: null, id: "ch_B", currency: "usd", amount: 10_000, amount_refunded: 0, disputed: false, payment_intent: { object: "payment_intent", id: "pi_B", currency: "usd", amount: 10_000, latest_charge: "ch_B", metadata: { share_bps: "625" } } });
+  sessions.set("pi_B", { object: "checkout.session", id: "cs_test_B", payment_intent: "pi_B", currency: "usd", amount_total: 10_000, total_details: { amount_tax: 1_000, amount_shipping: 0 } });
   // C: a $40 offer after checkout, refunded in full.
   fees.set("fee_C", { id: "fee_C", account: A, charge: "ch_C", amount: 250, amount_refunded: 0, currency: "usd", created: NOW - 3600 });
-  charges.set("ch_C", { id: "ch_C", amount: 4_000, amount_refunded: 4_000, disputed: false, payment_intent: { id: "pi_C", metadata: { share_bps: "625", share_base: "4000" } } });
+  charges.set("ch_C", { invoice: null, id: "ch_C", currency: "usd", amount: 4_000, amount_refunded: 4_000, disputed: false, payment_intent: { object: "payment_intent", id: "pi_C", currency: "usd", amount: 4_000, latest_charge: "ch_C", metadata: { share_bps: "625", share_base: "4000" } } });
   // D: a membership's payment made while the store was still in its trial.
   fees.set("fee_D", { id: "fee_D", account: A, charge: "ch_D", amount: 125, amount_refunded: 0, currency: "usd", created: NOW - 3600 });
-  charges.set("ch_D", { id: "ch_D", amount: 2_000, amount_refunded: 0, disputed: false, invoice: { created: NOW - 20 * 86_400, total_excluding_tax: 2_000, subscription_details: { metadata: { store: "maker", share_bps: "625" } } } });
+  charges.set("ch_D", { id: "ch_D", currency: "usd", amount: 2_000, amount_refunded: 0, disputed: false, invoice: { object: "invoice", id: "in_D", charge: "ch_D", currency: "usd", created: NOW - 20 * 86_400, total_excluding_tax: 2_000, subscription_details: { metadata: { store: "maker", share_bps: "625" } } } });
   // E: a $60 sale whose dispute was lost.
   fees.set("fee_E", { id: "fee_E", account: A, charge: "ch_E", amount: 375, amount_refunded: 0, currency: "usd", created: NOW - 3600 });
-  charges.set("ch_E", { id: "ch_E", amount: 6_000, amount_refunded: 0, currency: "usd", disputed: true, payment_intent: { id: "pi_E", metadata: { share_bps: "625", share_base: "6000" } } });
+  charges.set("ch_E", { invoice: null, id: "ch_E", amount: 6_000, amount_refunded: 0, currency: "usd", disputed: true, payment_intent: { object: "payment_intent", id: "pi_E", currency: "usd", amount: 6_000, latest_charge: "ch_E", metadata: { share_bps: "625", share_base: "6000" } } });
   // F: an old sale, refunded in half yesterday, found through the refund itself.
   fees.set("fee_F", { id: "fee_F", account: A, charge: "ch_F", amount: 625, amount_refunded: 0, currency: "usd", created: NOW - 40 * 86_400 });
-  charges.set("ch_F", { id: "ch_F", amount: 10_000, amount_refunded: 5_000, disputed: false, payment_intent: { id: "pi_F", metadata: { share_bps: "625", share_base: "10000" } } });
+  charges.set("ch_F", { invoice: null, id: "ch_F", currency: "usd", amount: 10_000, amount_refunded: 5_000, disputed: false, payment_intent: { object: "payment_intent", id: "pi_F", currency: "usd", amount: 10_000, latest_charge: "ch_F", metadata: { share_bps: "625", share_base: "10000" } } });
   events.push({ id: "evt_F", type: "charge.refunded", data: { object: { id: "ch_F", application_fee: "fee_F" } } });
   // The store's plan was Studio when its memberships were sold; it is Store now.
   await redisPipeline([["HSET", "nl:share:applied", ref, "275"]]);

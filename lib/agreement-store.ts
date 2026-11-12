@@ -26,7 +26,9 @@
 import { createHash, createHmac } from "node:crypto";
 import { personKey } from "@/lib/person-key";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { type Held, LockBusyError, releaseLock, takeLock, withLock } from "@/lib/redis-lock";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
+import { claimMark, releaseMark } from "@/lib/claim-mark";
+import { type Held, LockBusyError, deleteIfHeldOnly, releaseLock, takeLock, withLock } from "@/lib/redis-lock";
 import { type Store } from "@/lib/store";
 import { dataBytes } from "@/lib/store-data-rules";
 import { takeData } from "@/lib/store-data";
@@ -40,6 +42,7 @@ import {
   MAX_KEPT_AGREEMENTS,
   MAX_PER_PERSON,
   MAX_VERSIONS,
+  SHA_PATTERN,
   SIGN_MS,
   type Agreement,
   type AgreementDraft,
@@ -192,15 +195,78 @@ export async function createAgreement(store: Store, draft: AgreementDraft, now =
   }
 }
 
-/** One agreement by its id, or null. */
+/**
+ * One agreement by its id, or null. Read exactly (CX-123 rule 24): null only when the record is confirmed absent
+ * (GET null) or its text does not read; any other reply throws UnknownReplyError, so a withdraw or a delete is never
+ * told "gone" while the record may still be there.
+ */
 export async function readAgreement(id: string): Promise<Agreement | null> {
   if (!ID_PATTERN.test(id) || !isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["GET", recordKey(id)]]);
-  if (typeof raw !== "string") return null;
+  const reply = repliesFor(await redisPipeline([["GET", recordKey(id)]]), 1);
+  if (!reply || (reply[0] !== null && typeof reply[0] !== "string")) throw new UnknownReplyError("reading an agreement");
+  const raw = reply[0];
+  if (raw === null) return null;
   try {
     return parseAgreement(JSON.parse(raw));
   } catch {
     return null;
+  }
+}
+
+/**
+ * Whether the stored record names version n with this fingerprint, read exactly (CX-123 rule 24): "yes", "no" (the
+ * record is there and does not, or there is no record at all), or "unknown" (no reply, a reply of another shape, or
+ * a record that does not read).
+ */
+async function recordNames(id: string, n: number, sha256: string): Promise<"yes" | "no" | "unknown"> {
+  try {
+    const reply = repliesFor(await redisPipeline([["GET", recordKey(id)]]), 1);
+    if (!reply) return "unknown";
+    if (reply[0] === null) return "no";
+    if (typeof reply[0] !== "string") return "unknown";
+    // Read at the edge of a clean-up, strictly (Codex CX1 on #2723): parseAgreement drops rows it does not understand
+    // and cuts at MAX_VERSIONS, which is right for a page but would turn a record that still names this version into
+    // "no" here. Any row that names it exactly is "yes"; "no" only when every row is understood and the list is whole.
+    const raw: unknown = JSON.parse(reply[0]);
+    const rows = raw && typeof raw === "object" && !Array.isArray(raw) ? Object.getOwnPropertyDescriptor(raw, "versions")?.value : undefined;
+    if (!Array.isArray(rows)) return "unknown";
+    const field = (row: unknown, name: string): unknown =>
+      row && typeof row === "object" && !Array.isArray(row) ? Object.getOwnPropertyDescriptor(row, name)?.value : undefined;
+    if (rows.some((row) => field(row, "n") === n && field(row, "sha256") === sha256)) return "yes";
+    const understood = rows.every((row) => {
+      const at = field(row, "n"), sha = field(row, "sha256");
+      return Number.isSafeInteger(at) && (at as number) >= 1 && typeof sha === "string" && SHA_PATTERN.test(sha);
+    });
+    if (!understood || rows.length > MAX_VERSIONS || !parseAgreement(raw)) return "unknown";
+    return "no";
+  } catch {
+    return "unknown";
+  }
+}
+
+/**
+ * Whether the stored record carries exactly this signature on version n with this fingerprint, read exactly: "yes",
+ * "no" (no record, or one that does not), or "unknown" (no reply, another shape, or a record that does not read).
+ */
+async function recordSigned(id: string, n: number, sha256: string, signature: Signature): Promise<"yes" | "no" | "unknown"> {
+  try {
+    const reply = repliesFor(await redisPipeline([["GET", recordKey(id)]]), 1);
+    if (!reply) return "unknown";
+    if (reply[0] === null) return "no";
+    if (typeof reply[0] !== "string") return "unknown";
+    const raw: unknown = JSON.parse(reply[0]);
+    const own = (value: unknown, name: string): unknown =>
+      value && typeof value === "object" && !Array.isArray(value) ? Object.getOwnPropertyDescriptor(value, name)?.value : undefined;
+    const rows = own(raw, "versions");
+    if (!Array.isArray(rows)) return "unknown";
+    const signed = rows.some((row) => {
+      const mark = own(row, "signature");
+      return own(row, "n") === n && own(row, "sha256") === sha256 &&
+        own(mark, "name") === signature.name && own(mark, "at") === signature.at && own(mark, "sha256") === signature.sha256;
+    });
+    return signed ? "yes" : "no";
+  } catch {
+    return "unknown";
   }
 }
 
@@ -223,10 +289,27 @@ export async function versionExists(a: Pick<Agreement, "id" | "versions">, n: nu
 }
 
 export async function readVersion(a: Pick<Agreement, "id" | "versions">, n: number): Promise<AgreementVersion | null> {
+  // As before for the studio, the signing page and the emails: a reply of another shape is "can't be read right now".
+  return readVersionExact(a, n).catch((error: unknown) => {
+    if (error instanceof UnknownReplyError) return null;
+    throw error;
+  });
+}
+
+/**
+ * Version n's text, read exactly (CX-123 rules 24 and 30), for the person's
+ * data copy (lib/person-copy.ts): null when the version is not one the record
+ * lists, is confirmed absent (GET null) or does not read as its fingerprint
+ * says; a reply of any other shape throws UnknownReplyError, so a copy is
+ * never handed over with a version's text silently missing.
+ */
+export async function readVersionExact(a: Pick<Agreement, "id" | "versions">, n: number): Promise<AgreementVersion | null> {
   const mark = a.versions.find((m) => m.n === n);
   if (!mark || !isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["GET", versionKey(a.id, n)]]);
-  if (typeof raw !== "string") return null;
+  const reply = repliesFor(await redisPipeline([["GET", versionKey(a.id, n)]]), 1);
+  if (!reply || (reply[0] !== null && typeof reply[0] !== "string")) throw new UnknownReplyError("reading an agreement's version");
+  const raw = reply[0];
+  if (raw === null) return null;
   try {
     const v = parseVersion(JSON.parse(raw));
     return v && v.n === n && v.sha256 === mark.sha256 && fingerprint(v.text) === mark.sha256 ? v : null;
@@ -235,9 +318,37 @@ export async function readVersion(a: Pick<Agreement, "id" | "versions">, n: numb
   }
 }
 
-/** Writes the record back as it now is, for the rest of the days it is kept. Versions are never written here. */
-export async function saveAgreement(a: Agreement, now = Date.now()): Promise<void> {
-  await redisPipeline([["SET", recordKey(a.id), JSON.stringify(a), "EX", keepSeconds(a, now)]]);
+/**
+ * The record written back only while the agreement's lock still holds this writer's token, with its expiry, in one
+ * step (Codex M on #3151): a signature or a new version held up past its lock (a slow network, a paused function)
+ * cannot land a stale copy after the lock ran out, in particular after a person's erasure took the lock and deleted
+ * the agreement. Modeled step for step in lib/redis-memory.ts.
+ */
+export const AGREEMENT_SAVE = `-- marktmorgen:agreement-save:v1
+if redis.call("GET", KEYS[1]) ~= ARGV[1] then return 0 end
+redis.call("SET", KEYS[2], ARGV[2], "EX", ARGV[3])
+return 1`;
+
+/** The agreement's lock was no longer this writer's when it wrote: nothing was written. */
+export class AgreementLockLostError extends Error {
+  constructor() {
+    super("the agreement's lock ran out before the write: nothing written");
+    this.name = "AgreementLockLostError";
+  }
+}
+
+/**
+ * Writes the record back as it now is, for the rest of the days it is kept, only while `held` (the agreement's lock)
+ * is still this writer's. Versions are never written here. Read exactly (CX-123 rule 24, Claude 3 on #2723): 1 is
+ * written; 0 is the lock lost, nothing written (AgreementLockLostError); anything else is unknown (UnknownReplyError).
+ */
+export async function saveAgreement(a: Agreement, held: Held, now = Date.now()): Promise<void> {
+  const saved = repliesFor(
+    await redisPipeline([["EVAL", AGREEMENT_SAVE, 2, held.key, recordKey(a.id), held.token, JSON.stringify(a), keepSeconds(a, now)]]),
+    1,
+  );
+  if (saved?.[0] === 0) throw new AgreementLockLostError();
+  if (!saved || saved[0] !== 1) throw new UnknownReplyError("saving an agreement");
 }
 
 /** The agreement's lock, taken at once or not at all: null when somebody else holds it. */
@@ -260,12 +371,12 @@ const letGo = (held: Held) => releaseLock(held);
  */
 export async function changeAgreement(store: Pick<Store, "sid">, id: string, change: (current: Agreement) => Agreement | null, now = Date.now()): Promise<Agreement | null> {
   if (!ID_PATTERN.test(id) || !isRedisConfigured()) return null;
-  return withLock(lockKey(id), 10, 5_000, async () => {
+  return withLock(lockKey(id), 10, 5_000, async (held) => {
     const current = await agreementOf(store, id);
     if (!current) return null;
     const next = change(current);
     if (!next) return current;
-    await saveAgreement(next, now);
+    await saveAgreement(next, held, now);
     return next;
   });
 }
@@ -289,9 +400,13 @@ export async function reviseAgreement(store: Store, id: string, draft: Agreement
     // The version's own key, and its title kept in the record's mark of it (the record's growth room is for signatures and sends).
     const room = await takeData(store, [{ until: a.createdAt + KEEP_MS, bytes: versionRoomBytes(version) + dataBytes([version.title], 1) }], now);
     if (!room.ok) return room.reason === "full" ? { ok: false, reason: "full", message: room.message } : unavailable();
-    const [written] = await redisPipeline([["SET", versionKey(a.id, n), JSON.stringify(version), "NX", "EX", keepSeconds(a, now)]]);
-    // A version's key is written once: never over one already there.
-    if (written === null) return unavailable();
+    // A version's key is written once: never over one already there. Read exactly (CX-123 rule 24): the record names
+    // it only when the key holds this version's own text. One that cannot be read is let go only while it holds this
+    // text, so the next try can write version n; another text there is never touched.
+    const text = JSON.stringify(version);
+    const written = await claimMark(versionKey(a.id, n), keepSeconds(a, now), text);
+    if (written === "unknown") await releaseMark(versionKey(a.id, n), text);
+    if (written !== "ours") return unavailable();
     const next: Agreement = {
       ...a,
       versions: [...a.versions, { n, sha256: version.sha256, title: version.title, createdAt: now, signature: null }],
@@ -299,7 +414,18 @@ export async function reviseAgreement(store: Store, id: string, draft: Agreement
       payRequest: draft.payRequest,
       failed: "",
     };
-    await saveAgreement(next, now);
+    try {
+      await saveAgreement(next, held, now);
+    } catch (error) {
+      // The save's answer may be lost while the save landed (Codex CX1 on #2723): the record is read back exactly
+      // first. Naming this version, the change went through; known not to name it, the text is let go (only while it
+      // is this text), so the next try writes version n (Claude 3 on #2723); not known, the text is kept, never let go
+      // under a record that may name it.
+      const named = await recordNames(a.id, n, version.sha256);
+      if (named === "yes") return { ok: true, agreement: next, version };
+      if (named === "no") await releaseMark(versionKey(a.id, n), text);
+      throw error;
+    }
     return { ok: true, agreement: next, version };
   } catch (error) {
     console.error("a new version of an agreement failed", error);
@@ -336,7 +462,13 @@ export async function signAgreement(store: Store, id: string, input: SignInput, 
     const words = agreementWords(store.language);
     const signature: Signature = { name, at: now, ipHash: signerIpCode(a.id, input.ip), consent: words.consent, consentVersion: CONSENT_VERSION, sha256: version.sha256 };
     const next: Agreement = { ...a, versions: a.versions.map((m) => (m.n === latest.n ? { ...m, signature } : m)), closedAt: now };
-    await saveAgreement(next, now);
+    try {
+      await saveAgreement(next, held, now);
+    } catch (error) {
+      // The write may have landed and only its reply been lost (Revisor 1 on #2723): read the record back exactly,
+      // and only this very signature on this version counts as signed, so the copies still go out once.
+      if ((await recordSigned(a.id, latest.n, latest.sha256, signature)) !== "yes") throw error;
+    }
     return { ok: true, agreement: next, version, signature };
   } catch (error) {
     console.error("signing an agreement failed", error);
@@ -350,15 +482,15 @@ export async function signAgreement(store: Store, id: string, input: SignInput, 
 export async function listAgreements(store: Store): Promise<Agreement[] | null> {
   if (!isRedisConfigured() || !store.sid) return null;
   try {
-    const index = await redisPipeline([["ZREVRANGE", storeKey(store.sid), 0, MAX_KEPT_AGREEMENTS - 1]]);
-    if (!Array.isArray(index) || index.length !== 1 || !Array.isArray(index[0])) return null;
-    const list: unknown[] = index[0];
-    if (list.length > MAX_KEPT_AGREEMENTS || new Set(list).size !== list.length || !list.every((id) => typeof id === "string" && ID_PATTERN.test(id))) return null;
+    // Each reply read from its own slots (lib/redis-reply.ts, rule 30): the person's data copy reads through here.
+    const index = repliesFor(await redisPipeline([["ZREVRANGE", storeKey(store.sid), 0, MAX_KEPT_AGREEMENTS - 1]]), 1);
+    const list = index ? stringList(index[0]) : null;
+    if (!list || list.length > MAX_KEPT_AGREEMENTS || new Set(list).size !== list.length || !list.every((id) => ID_PATTERN.test(id))) return null;
     if (!list.length) return [];
-    const ids = list as string[];
-    const records = await redisPipeline([["MGET", ...ids.map(recordKey)]]);
-    if (!Array.isArray(records) || records.length !== 1 || !Array.isArray(records[0]) || records[0].length !== ids.length) return null;
-    const values: unknown[] = records[0];
+    const ids = list;
+    const records = repliesFor(await redisPipeline([["MGET", ...ids.map(recordKey)]]), 1);
+    const values = records ? repliesFor(records[0], ids.length) : null;
+    if (!values) return null;
     const out: Agreement[] = [];
     const gone: string[] = [];
     ids.forEach((id, i) => {
@@ -386,12 +518,15 @@ export async function listAgreements(store: Store): Promise<Agreement[] | null> 
 export async function agreementsOfPerson(store: Pick<Store, "sid">, email: string): Promise<Agreement[] | null> {
   if (!isRedisConfigured() || !store.sid) return null;
   try {
-    const [members] = await redisPipeline([["SMEMBERS", personSet(store.sid, email)]]);
-    if (!Array.isArray(members)) return null;
-    const ids = members.map(String).filter((id) => ID_PATTERN.test(id)).slice(0, MAX_PER_PERSON * 2);
+    // The person's set read exactly (rule 30, as forgetAgreementsPerson reads it): another shape is null, never "none".
+    const listed = repliesFor(await redisPipeline([["SMEMBERS", personSet(store.sid, email)]]), 1);
+    const members = listed ? stringList(listed[0]) : null;
+    if (!members) return null;
+    const ids = members.filter((id) => ID_PATTERN.test(id)).slice(0, MAX_PER_PERSON * 2);
     if (!ids.length) return [];
-    const [values] = await redisPipeline([["MGET", ...ids.map(recordKey)]]);
-    if (!Array.isArray(values) || values.length !== ids.length) return null;
+    const read = repliesFor(await redisPipeline([["MGET", ...ids.map(recordKey)]]), 1);
+    const values = read ? repliesFor(read[0], ids.length) : null;
+    if (!values) return null;
     const out: Agreement[] = [];
     ids.forEach((id, i) => {
       const raw = values[i];
@@ -417,7 +552,7 @@ export async function withdrawAgreement(store: Store, id: string, now = Date.now
     const status = statusOf(a, now);
     if (status !== "open" && status !== "expired") return "not_open";
     const done: Agreement = { ...a, state: "withdrawn", closedAt: now };
-    await saveAgreement(done, now);
+    await saveAgreement(done, held, now);
     return done;
   } finally {
     await letGo(held);
@@ -441,21 +576,57 @@ async function forget(a: Agreement): Promise<void> {
   ]);
 }
 
+/** How many agreements one pass of an erasure deletes: their DEL and ZREM go in one pipeline. */
+const FORGET_BATCH = MAX_PER_PERSON * 2;
+/** How long an erasure waits for a signature or a new version in progress to let go of an agreement's lock. */
+const ERASE_LOCK_WAIT_MS = 5_000;
+
 /**
  * Deletes every agreement a store keeps for one person (lib/person-erasure.ts),
  * signed or not, with every version's text: an open one stops taking a
  * signature. The copies already emailed stay with whoever received them.
  * Answers how many were deleted.
+ *
+ * Exact (CX-123 rules 24 and 30): the person's set is the only way to find
+ * their agreements, so it is read exactly and deleted last. A reply of another
+ * shape to the set, or to any delete, throws UnknownReplyError (the erasure is
+ * then not finished and can be pressed again); the set goes only once every
+ * agreement's delete has answered with a count, so a retry still finds every
+ * one. Only an exact empty set is "nothing to erase".
  */
 export async function forgetAgreementsPerson(sid: string, email: string): Promise<number> {
   if (!isRedisConfigured() || !sid) return 0;
   const person = personSet(sid, email);
-  const [members] = await redisPipeline([["SMEMBERS", person]]);
-  const ids = (Array.isArray(members) ? members.map(String) : []).filter((id) => ID_PATTERN.test(id)).slice(0, MAX_PER_PERSON * 2);
-  if (!ids.length) {
-    await redisPipeline([["DEL", person]]);
-    return 0;
+  const listed = repliesFor(await redisPipeline([["SMEMBERS", person]]), 1);
+  const members = listed ? stringList(listed[0]) : null;
+  if (!members) throw new UnknownReplyError("listing a person's agreements");
+  // Sorted, so two erasures of the same person take the locks in the same order.
+  const ids = [...new Set(members.filter((id) => ID_PATTERN.test(id)))].sort();
+  for (let at = 0; at < ids.length; at += FORGET_BATCH) {
+    const batch = ids.slice(at, at + FORGET_BATCH);
+    // One agreement at a time: its lock (the one a signature, a new version or a change holds while it reads the record
+    // and writes it back), then its record and texts deleted in one script only while that lock is still this
+    // erasure's own (deleteIfHeldOnly), then the lock let go (Codex M on #3151). A writer in progress finishes first;
+    // a writer held up past its own lock cannot write (saveAgreement is fenced the same way); and an erasure held up
+    // past its lock deletes nothing. A lock still taken after the wait, or lost before the delete, throws: the erasure
+    // is not finished, the person's set is kept, and a retry finds everything.
+    for (const id of batch) {
+      const held = await takeLock(lockKey(id), 10, ERASE_LOCK_WAIT_MS);
+      try {
+        if (!(await deleteIfHeldOnly(held, agreementKeys(id)))) throw new LockBusyError("an agreement's lock was lost before its erasure");
+      } finally {
+        await letGo(held);
+      }
+    }
+    // Then out of the store's list (ZREM answers 0 or 1); the records it names are already gone.
+    const replies = repliesFor(await redisPipeline(batch.map((id) => ["ZREM", storeKey(sid), id])), batch.length);
+    if (!replies?.every((reply) => {
+      const n = countOf(reply);
+      return n !== null && n <= 1;
+    })) throw new UnknownReplyError("deleting a person's agreements");
   }
-  await redisPipeline([...ids.flatMap((id) => [["DEL", ...agreementKeys(id)], ["ZREM", storeKey(sid), id]]), ["DEL", person]]);
+  const dropped = repliesFor(await redisPipeline([["DEL", person]]), 1);
+  const gone = dropped ? countOf(dropped[0]) : null;
+  if (gone === null || gone > 1) throw new UnknownReplyError("deleting a person's agreement list");
   return ids.length;
 }

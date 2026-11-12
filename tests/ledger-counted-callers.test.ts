@@ -20,7 +20,7 @@
  * says how many this needs and how many are left.
  */
 import { readFileSync } from "node:fs";
-import { type Broadcast, EXTRA_READS, LIST_RETRY_SECONDS, NOTE_ROOM, NO_BUYERS_NOTE, PLAN_OFF_NOTE, READS_HELD, READ_FAILED_NOTE, READ_GAVE_UP_NOTE, READ_MISSES_ALLOWED, READ_RETRY_SECONDS, advanceBroadcast, planOffPartNote, cancelBroadcast, countTest, createBroadcast, readsSpentNote, studioWaitNote } from "@/lib/broadcasts";
+import { type Broadcast, EXTRA_READS, LIST_RETRY_SECONDS, NOTE_ROOM, NO_BUYERS_NOTE, PLAN_OFF_NARROWED_NOTE, PLAN_OFF_NOTE, READS_HELD, READ_FAILED_NOTE, READ_GAVE_UP_NOTE, READ_MISSES_ALLOWED, READ_RETRY_SECONDS, advanceBroadcast, planOffPartNote, cancelBroadcast, countTest, createBroadcast, readsSpentNote, studioWaitNote } from "@/lib/broadcasts";
 import { giveAllowanceIn } from "@/lib/store-allowance";
 import { allowanceWindow, opensAgainWords, windowAt, windowId } from "@/lib/allowance-window";
 import { StoreFullError } from "@/lib/store-full";
@@ -222,7 +222,9 @@ async function main(): Promise<void> {
   await redisPipeline([["DEL", ledgerKey]]);
   stripeCalls = 0;
   const off = await run(far.broadcast.id);
-  is("the plan ended before it was due: canceled, saying so; nothing read, sent or taken; its hold given back; out of the queue", [off?.status, off?.note, off?.sent, off?.listed, stripeCalls, await used(), await used(farKey), (await redisPipeline([["SISMEMBER", "nl:mail:queue", far.broadcast.id]]))[0]], ["cancelled", PLAN_OFF_NOTE, 0, false, 0, 0, 0, 0]);
+  is("the plan ended before it was due: canceled, saying so; nothing read, sent or taken; its hold given back; out of the queue", [off?.status, off?.note, off?.sent, off?.listed, stripeCalls, await used(), await used(farKey), (await redisPipeline([["SISMEMBER", "nl:mail:queue", far.broadcast.id]]))[0]], ["cancelled", PLAN_OFF_NARROWED_NOTE, 0, false, 0, 0, 0, 0]);
+  // Counting its buyers when it was written used studio requests: a narrowed email never says none were (C3-112).
+  is("a narrowed email canceled with the plan does not say none of the studio requests were used; one to the whole list may", [PLAN_OFF_NARROWED_NOTE.includes("none of your studio requests"), PLAN_OFF_NOTE.includes("none of your studio requests")], [false, true]);
   // Owner, C3-108: an email to the whole list follows the same rule.
   await setSubscription(OWNER, { customerId: "cus_ledger", subscriptionId: "sub_ledger", active: true, tier: "pro", period: paidPeriod() });
   const whole = await createBroadcast(await load(), { ...narrowed, narrow: undefined, sendAt: threeMonths } as Parameters<typeof createBroadcast>[1]);
@@ -285,7 +287,7 @@ async function main(): Promise<void> {
   await setRecord(recovers.broadcast.id, { retryAt: 0 });
   const back = await run(recovers.broadcast.id);
   is("Stripe answering again, it is read and listed, with no wait or miss left on it", [back?.listed, back?.reads, back?.misses, back?.retryAt], [true, 1, undefined, undefined]);
-  is("its notes fit the room they were given", [READ_FAILED_NOTE, READ_GAVE_UP_NOTE, NO_BUYERS_NOTE, PLAN_OFF_NOTE].every((note) => note.length <= NOTE_ROOM), true);
+  is("its notes fit the room they were given", [READ_FAILED_NOTE, READ_GAVE_UP_NOTE, NO_BUYERS_NOTE, PLAN_OFF_NOTE, PLAN_OFF_NARROWED_NOTE, studioWaitNote("September 30, 2027")].every((note) => note.length <= NOTE_ROOM), true);
 
   part("ALTO (round 2): a narrowed email whose store no longer reads its buyers is never sent without its narrowing");
   await upsertContact(shop.listId as string, "bea@example.com", { agreed: true, explicit: true, source: "import" }, ROOM);
@@ -481,7 +483,7 @@ async function main(): Promise<void> {
   is("asking the numbers checks the month's AI jobs, then counts their reading as their page does, then reads them", [at("aiLeft(store)") > 0, at("aiLeft(store)") < at("countUnits(store, STUDIO_PAGE_UNITS - 1)"), at("countUnits(store, STUDIO_PAGE_UNITS - 1)") < at("readNumbers(store)")], [true, true, true]);
   is("with the shared sentence when the count gave none", ask.includes("message: (counted && !counted.ok && counted.message) || NOT_COUNTED }"), true);
   const composer = flat("components/email-studio.tsx");
-  is("a narrowed email says, before it is confirmed, what it sets aside and from which month, and that what it does not use comes back; a refusal is shown as an alert", [composer.includes('" Scheduling it sets aside, from the month it goes out, the studio requests needed to find these buyers then, and to find them once more if it has to wait. If that month has too few left, it is not scheduled, and you see how many it needs. What it does not use, or all of it if you cancel, is given back."') && composer.includes('" Sending it sets aside the studio requests needed to find these buyers once more if it has to wait. What it does not use is given back."'), composer.includes('<p className="notice notice-error mt-3" role="alert">{error}</p>')], [true, true]);
+  is("a narrowed email says, before it is confirmed, what it sets aside and from which month, and that what it does not use comes back; a refusal is shown as an alert", [composer.includes('" Scheduling it sets aside, from the month it goes out, the studio requests needed to find these buyers then, and to find them once more if it has to wait. If that month has too few left, it is not scheduled, and you see how many it needs. What it has not used is given back, also if you cancel."') && composer.includes('" Sending it sets aside the studio requests needed to find these buyers once more if it has to wait. What it does not use is given back."'), composer.includes('<p className="notice notice-error mt-3" role="alert">{error}</p>')], [true, true]);
   is("the composer shows the sentence, on the count as on a send, and takes the count's away when the next count goes through", [composer.includes('a.error === "studio_used" && typeof a.message === "string" && a.message ? a.message'), composer.includes('} else if (a.error === "stripe" || a.error === "studio_used") {'), composer.includes("if (shown !== null) setError((current) => (current === shown ? null : current));")], [true, true, true]);
   is("so do the update box and the numbers question", [flat("components/product-update-box.tsx").includes('data.error === "studio_used" && typeof data.message === "string" && data.message ? data.message'), flat("components/numbers-ask.tsx").includes('else if (data.error === "studio_used" && typeof data.message === "string" && data.message) setError(data.message);')], [true, true]);
 

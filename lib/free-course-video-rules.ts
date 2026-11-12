@@ -71,6 +71,79 @@ export function freeVideoAdmission(input: { limitSeconds: number | null; percent
   return "play";
 }
 
+/**
+ * How long one free student's player may be signed for (541 [FC4], unit 2a;
+ * added 2 November 2026): the rule only. The units that use it store the
+ * counter and sign the player.
+ *
+ * What it does: before a free lesson's player is framed, its seconds are
+ * taken from the free share (`reservedFree`, every grant of the period
+ * added up), never more than what is left of that share, nor of the store's
+ * whole limit after what was measured and what free players hold, nor past
+ * the end of the period (so a grant never spills into the next one's share),
+ * nor more than a paid player is signed for. It is the video's length with
+ * FREE_PLAYER_ROOM_SECONDS to pause and go back, or
+ * FREE_PLAYER_UNKNOWN_SECONDS when the length is not known; less than
+ * FREE_PLAYER_MIN_SECONDS left is "paused", and a grant shorter than the
+ * video says so (`short`).
+ *
+ * What a grant bounds: the time a player may be loaded in, since its token
+ * is signed for those seconds. What it does NOT bound, and the units that
+ * frame the player must, before the free share can be said to hold:
+ *
+ *   - the same signed address opened in several tabs or devices at once;
+ *   - a player loaded before its token ends playing on after it, and what it
+ *     already holds being played again, as long as the video service lets
+ *     it (to be read from the service's own documents and a real test of the
+ *     library, as lib/watch.ts was; unknown counts as failing);
+ *   - playing faster than real time (the player offers speeds): seconds of
+ *     video can be more than seconds of clock;
+ *   - each reload taking a new grant, which uses the share up for every free
+ *     student without anyone watching (one live grant per student and
+ *     lesson, reused, is the cure);
+ *   - the video of a free preview lesson of a paid course, which plays today
+ *     outside this share.
+ *
+ * A video that is also in a lesson students paid for is to be counted, all
+ * of it, as watched by free students, since the video service measures a
+ * video, not who watched it: that reading keeps the paid students' time
+ * whole. Nothing here measures what free students watched yet.
+ */
+export const FREE_PLAYER_MAX_SECONDS = 4 * 60 * 60;
+export const FREE_PLAYER_ROOM_SECONDS = 5 * 60;
+export const FREE_PLAYER_UNKNOWN_SECONDS = 30 * 60;
+export const FREE_PLAYER_MIN_SECONDS = 2 * 60;
+
+export type FreePlayerGrant = { kind: "play"; seconds: number; short: boolean } | { kind: "paused" | "off" | "unknown" };
+
+export function freePlayerGrant(input: {
+  limitSeconds: number | null;
+  percent: number;
+  /** What the store's videos were measured to have played this period, all students. */
+  watchedAll: number | null;
+  /** The free players' seconds already granted this period. */
+  reservedFree: number | null;
+  /** Seconds until the period ends. */
+  periodLeft: number | null;
+  /** The lesson video's length in seconds, or null when not known. */
+  videoSeconds: number | null;
+}): FreePlayerGrant {
+  const count = (n: number | null): n is number => n !== null && Number.isSafeInteger(n) && n >= 0;
+  const share = readFreeVideoPercent(input.percent);
+  const cap = freeVideoSeconds(input.limitSeconds, share);
+  if (cap === null || !count(input.limitSeconds) || !count(input.watchedAll) || !count(input.reservedFree) || !count(input.periodLeft)) return { kind: "unknown" };
+  if (share === 0 || cap === 0) return { kind: "off" };
+  const leftFree = cap - input.reservedFree;
+  // What free players hold may not be measured yet: taken from the whole limit as well, so it is never counted as room.
+  const leftAll = input.limitSeconds - input.watchedAll - input.reservedFree;
+  // A length with a part of a second is rounded up, never taken for unknown.
+  const length = input.videoSeconds !== null && Number.isFinite(input.videoSeconds) && input.videoSeconds > 0 ? Math.ceil(input.videoSeconds) : null;
+  const want = length !== null ? length + FREE_PLAYER_ROOM_SECONDS : FREE_PLAYER_UNKNOWN_SECONDS;
+  const seconds = Math.min(want, FREE_PLAYER_MAX_SECONDS, leftFree, leftAll, input.periodLeft);
+  if (seconds < FREE_PLAYER_MIN_SECONDS) return { kind: "paused" };
+  return { kind: "play", seconds, short: seconds < want };
+}
+
 /** A length of video in words: minutes under an hour, so a small share never reads as none. */
 function lengthWords(seconds: number): string {
   if (seconds < 3600) {

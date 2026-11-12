@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { forgetCrm } from "@/lib/crm";
 import { forgetRecentSales } from "@/lib/recent-sales";
+import { forgetStoreReadings } from "@/lib/store-readings";
 import { away, creatorFrom, storeCookie } from "@/lib/studio-route";
 import { limited } from "@/lib/request-guard";
 import { forgetStoreWorkflows } from "@/lib/flows";
@@ -13,6 +14,9 @@ import { forgetStoreWebhooks } from "@/lib/webhooks";
 import { revokeAllKeys } from "@/lib/api-keys";
 import { endLapsed, findStoreSubscriptions, isBillingConfigured } from "@/lib/billing";
 import { forgetPath } from "@/lib/path";
+import { queueStoreForget } from "@/lib/store-forget-retry";
+import { forgetStoreCalendar } from "@/lib/calendar-sync";
+import { forgetMemory } from "@/lib/assistant-memory-store";
 
 /**
  * The studio's switcher, and the door out for a store.
@@ -66,10 +70,28 @@ export async function POST(request: NextRequest) {
       // Nothing of a deleted store is kept that could still reach anyone: the
       // sealed key to its email platform, its phones' push addresses, the
       // notes its team wrote about buyers (lib/buyer-profile.ts), its
-      // workflows, its webhook endpoints with their secrets and its API keys.
-      await Promise.all([forgetStoreSync(result.store.statsId), forgetStorePhones(result.store.statsId), forgetPersonNotes(result.store.statsId), forgetCrm(result.store.statsId), forgetRecentSales(result.store.statsId), forgetStoreWorkflows(result.store), forgetStoreWebhooks(result.store.statsId), revokeAllKeys(result.store.sid), forgetPath(result.store)]).catch((error: unknown) =>
-        console.error("forgetting a deleted store's integrations failed", error),
-      );
+      // workflows, its webhook endpoints with their secrets, its API keys, and its
+      // calendar feeds with the last copy of its bookings file (lib/calendar-sync.ts).
+      // Its webhooks (with the bodies sent, which can hold buyers' data) and its API keys: a failure is put in a
+      // durable line that the daily closing job tries again, with a ceiling of tries, and counted for the owner's
+      // report (lib/store-forget-retry.ts; review of #2556), never only a log line.
+      // The store assistant's notes too: an unconfirmed forgetting goes in the same line, never counted as done.
+      const forgetHooksAndKeys = async () => {
+        await forgetStoreWebhooks(result.store.statsId);
+        await revokeAllKeys(result.store.sid);
+        await forgetMemory(result.store.statsId ?? null, result.store);
+      };
+      await Promise.all([
+        Promise.all([forgetStoreSync(result.store.statsId), forgetStorePhones(result.store.statsId), forgetPersonNotes(result.store.statsId), forgetCrm(result.store.statsId), forgetRecentSales(result.store.statsId), forgetStoreWorkflows(result.store), forgetPath(result.store), forgetStoreCalendar(result.store.statsId), forgetStoreReadings(result.store.statsId)]).catch((error: unknown) =>
+          console.error("forgetting a deleted store's integrations failed", error),
+        ),
+        forgetHooksAndKeys().catch(async (error: unknown) => {
+          console.error("forgetting a deleted store's webhooks, keys and assistant notes failed; put in line to try again", error);
+          await queueStoreForget(result.store.statsId ?? null, result.store.sid).catch((queued: unknown) =>
+            console.error("putting a deleted store's webhooks, keys and assistant notes in line failed", queued),
+          );
+        }),
+      ]);
       // Back to the owner's first store, and the switcher forgets this one.
       const response = away(origin, "/studio?stores=deleted");
       response.headers.append("Set-Cookie", storeCookie("", request).replace(/Max-Age=\d+/, "Max-Age=0"));

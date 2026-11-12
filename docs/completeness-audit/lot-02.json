@@ -1,0 +1,1534 @@
+{
+ "lot": 2,
+ "main": "d7bbf9d35",
+ "request": "C1-20261105-1919-C4-1 / C4-20261105-1925-C5-3",
+ "items": [
+  {
+   "n": 2,
+   "tag": "FILA",
+   "state": "done",
+   "state_evidence": "queue.md 2111-2115: 'Estado: **feito (PR #621, mesclado em 19/10 19:54...)**'; 444: '2 [FILA] | sem mudança | MQ1(b): já concluído/publicado, sem reconstrução.' PR #621 = merge cb87077ba (only docs/codex-queue.md, +452).",
+   "asks": [
+    {
+     "what": "Arquivo da fila no repositório (docs/codex-queue.md)",
+     "status": "present",
+     "evidence": "docs/codex-queue.md (4,5 MB, título na linha 189 '# Fila de trabalho do Codex — Marktmorgen'); criado pelo merge cb87077ba (PR #621)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Proveniência registrada",
+     "status": "present",
+     "evidence": "docs/codex-queue.md:2068 '## Proveniência e prioridade'; linhas 'Pedido:' em cada item (ex.: 2112)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Ordem",
+     "status": "present",
+     "evidence": "docs/codex-queue.md:339 e 1581 (ordem vigente do Grupo A, MQ2/MQ3); tabela MQ1 a partir da linha 444",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Custos por item",
+     "status": "present",
+     "evidence": "linhas '- Custo e margem:' em cada item (ex.: docs/codex-queue.md:2109, 2114)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Estados por item",
+     "status": "present",
+     "evidence": "169 linhas '   - Estado:' em docs/codex-queue.md, além das linhas de estado/continuidade (ex.: 322-324)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Histórico",
+     "status": "present",
+     "evidence": "docs/codex-queue.md:3087 '## Evidência e histórico anterior', 15186, 16894 (históricos preservados)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Atualizar a fila no mesmo PR de cada próximo item (regra de processo)",
+     "status": "present",
+     "evidence": "Regra de processo, não verificável por arquivo isolado; a fila é atualizada continuamente (ex.: PR #622 e #623 alteram docs/codex-queue.md junto com o código: git diff --stat 2c061fffb^1 2c061fffb e aa669a9d^1 aa669a9d). Desde 02/11/2026 a fila é editada por PRs próprios de cada agente (scripts/reservation-check.mjs: 'the queue and the lanes through their own small docs PRs'), por decisão AV5 registrada",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "'Teste de consistência' citado na linha de custo",
+     "status": "uncertain",
+     "evidence": "Só aparece na linha de custo (queue.md:2114), não como pedido próprio; o PR #621 (commit 72c551f9e) alterou apenas docs/codex-queue.md, sem teste. Buscas: grep -rln 'codex-queue' tests scripts .github -> só tests/reservation-check.test.ts, scripts/reservation-check.mjs (conferem reservas, não a estrutura da fila) e tests/data-room-words.test.ts (comentário). Não há teste automático de consistência da fila; como a frase descreve o escopo de custo e não um entregável, não marco como faltante",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 3,
+   "tag": "B1",
+   "state": "done",
+   "state_evidence": "queue.md 2116-2120: 'Estado: **feito (PR #622, mesclado em 19/10 19:57...; entrega42 confirmada)**'; 445: MQ1(b) 'já concluído/publicado'. PR #622 = merge 2c061fffb.",
+   "asks": [
+    {
+     "what": "Declarar inglês americano no documento da plataforma (site público, estúdio, Path herdam o layout)",
+     "status": "present",
+     "evidence": "app/layout.tsx:110 lang=\"en-US\"; app/layout.tsx:95 locale \"en_US\"",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Política escrita: site, estúdio, Path e e-mails da plataforma em inglês americano; conteúdo dos criadores, citações em português e identificadores persistidos intactos",
+     "status": "present",
+     "evidence": "docs/platform-language-policy.md:1-7 (escopo e limites, incluindo lib/store-language.ts e lib/buyer-words/ preservados)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Teste que confere o idioma declarado",
+     "status": "present",
+     "evidence": "tests/e2e/store-copy.mjs:300 ('platform document declares American English' == en-US); guarda de grafia B3 em tests/platform-us-english.test.ts e tests/us-english-source.ts",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 59,
+   "tag": "EXCELENCIA",
+   "state": "done",
+   "state_evidence": "queue.md 2896: 'Estado: **absorvido pelo item 274 [AX1]; OR: decisão expressa do dono de 22/10/2026 às 14h45...**'; 7655: '59 [EXCELENCIA] passa a ter o estado \"absorvido pelo item 274 [AX1]\"'; 7673: 'absorvido pelo 274 por decisão expressa; isso não declara concluídas as Partes B/C'. Item 274 [AX1] segue na fila (queue.md:716, 1113: Grupo A, posição 4).",
+   "asks": [
+    {
+     "what": "AAA como ponto de partida em todo site/estúdio",
+     "status": "present",
+     "evidence": "Absorvido por AX274 Parte A: AGENTS.md:205 (WCAG 2.2 AAA em todos os critérios aplicáveis); trabalho restante das Partes B/C segue no item 274 [AX1] (queue.md:716, 1113)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Teclado, baixa visão, audição, motor, cognição",
+     "status": "present",
+     "evidence": "AGENTS.md:206 (COGA, APG), AX274 item 4 (visão, audição e mídia, alvos 44px/2.5.5, 2.5.6, teclado/leitores de tela); matrizes tests/e2e/accessibility-studio-matrix.mjs, tests/e2e/accessibility-signup-actions.mjs (forced-colors/reduced-motion)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Dispositivos, navegadores e desempenho",
+     "status": "present",
+     "evidence": "AGENTS.md:215 (celular simples e rede lenta); Firefox/WebKit nas matrizes tests/e2e/accessibility-studio-matrix.mjs e tests/e2e/accessibility-signup-actions.mjs (grep webkit|firefox); tests/e2e/mobile-render.mjs",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Referência GOV.UK/Apple",
+     "status": "present",
+     "evidence": "AGENTS.md:206 'Referências de qualidade: GOV.UK Design System e Apple Human Interface Guidelines'",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Evidência em accessibility-programme e critério transversal em cada PR",
+     "status": "present",
+     "evidence": "docs/accessibility-programme.md e docs/accessibility-inventory.json existem e são atualizados pelos PRs (ex.: PR #613/#617/#619); AX274 exige seção 'Acessibilidade' em cada PR (AGENTS.md, AX274 Parte A item 3)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Revisão contínua por área depois da fila (Partes B/C)",
+     "status": "present",
+     "evidence": "Coberta pelo item 274 [AX1], ainda na fila (queue.md:716, 1113; 7672 'Por último: 274 [AX1], Partes B e C'); a absorção não declara as Partes B/C concluídas (queue.md:7673), e elas pertencem ao 274, não ao 59",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Testes reais com pessoas/tecnologia assistiva",
+     "status": "out of scope",
+     "evidence": "Depende de pessoas e aparelhos reais; 17 [D15] 'aguardando o dono' junto ao plano 202 (queue.md:7656, 7673)",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 69,
+   "tag": "PATH-FEITO-612",
+   "state": "done",
+   "state_evidence": "queue.md 3003-3008: 'Estado: **feito (PR #612, mesclado em 19/10, 15:58...)**', commit d31e7b30; 511: MQ1(b) 'já concluído/publicado'.",
+   "asks": [
+    {
+     "what": "Nome de exibição do quarto nível 'High Sun' (chave estável 'midday')",
+     "status": "present",
+     "evidence": "lib/path-rules.ts:490 midday: \"High Sun\"",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Documentação do Path alinhada (lista de níveis e limiares)",
+     "status": "present",
+     "evidence": "docs/marktmorgen-path.md:83 'Morning $100, High Sun $1,000'; :283 'High Sun — complete'",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Guarda de teste contra o nome antigo",
+     "status": "present",
+     "evidence": "tests/path-words.test.ts:86, 130-133; tests/path-rules.test.ts:92",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 70,
+   "tag": "PATH-FEITO-613",
+   "state": "done",
+   "state_evidence": "queue.md 3009-3014: 'Estado: **feito (PR #613, mesclado em 19/10, 17:08...)**', commit 17fdabb5; 512: MQ1(b).",
+   "asks": [
+    {
+     "what": "Seis missões pós-venda a partir de fatos verificados da loja",
+     "status": "present",
+     "evidence": "lib/path-growth-rules.ts:12 (ids second-product, list-email, repeat-buyer, post-purchase-offer, buyer-review, ten-orders) e :21-26",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Leitura dos fatos com cota reservada",
+     "status": "present",
+     "evidence": "lib/path-growth-facts.ts:15 readPathGrowth (usa readProductsStrict de lib/catalog.ts, pathBuyerReview de lib/reviews.ts, listBroadcastsStrict); lib/path-growth-money.ts; tests/plan-cost-registry.ts:1722 PATH_GROWTH_READ e tests/plan-cost-registry.ts:1140",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Tela no estúdio",
+     "status": "present",
+     "evidence": "components/path-growth-missions.tsx:2; app/studio/path/page.tsx:8, 56, 88",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Testes unitários e de navegador",
+     "status": "present",
+     "evidence": "tests/path-growth-{catalog,facts,money,record,render,reviews,rules}.test.ts; tests/e2e/path-growth.mjs chamado em tests/e2e/store-copy.mjs:843",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Documentação e inventário de acessibilidade",
+     "status": "present",
+     "evidence": "docs/marktmorgen-path.md:313 '## Ordered Path item 2: post-sale evidence'; docs/accessibility-inventory.json:1421",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 71,
+   "tag": "PATH-FEITO-616",
+   "state": "done",
+   "state_evidence": "queue.md 3015-3020: 'Estado: **feito (PR #616, mesclado em 19/10, 17:52...)**', commit 27d72325; 513: MQ1(b).",
+   "asks": [
+    {
+     "what": "Missão de retorno factual de dez minutos depois de sete datas locais ausente",
+     "status": "present",
+     "evidence": "lib/path-return-rules.ts:7, 13 (pathReturnMission), 18 (texto 'about ten minutes'); lib/path.ts:4",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Tela de boas-vindas no estúdio",
+     "status": "present",
+     "evidence": "app/studio/path/page.tsx:7 (RETURN_HEADING), 53, 61",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Lembrete ajustado",
+     "status": "present",
+     "evidence": "lib/path-return-rules.ts:26 returnReminderOf; lib/path-reminder.ts:1; tests/path-reminder.test.ts",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Linha de privacidade",
+     "status": "present",
+     "evidence": "lib/path-return-rules.ts:5 RETURN_PRIVACY_LINE; app/privacy/page.tsx:5, 1351",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Testes (regras, registro, Redis atômico, navegador)",
+     "status": "present",
+     "evidence": "tests/path-return-rules.test.ts, tests/path-return-record.test.ts, scripts/test_path_atomic_redis.py, tests/e2e/path-return.mjs chamado em tests/e2e/store-copy.mjs:844",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 72,
+   "tag": "PATH-FEITO-617",
+   "state": "done",
+   "state_evidence": "queue.md 3021-3026: 'Estado: **feito (PR #617, mesclado em 19/10, 18:21...)**', commit 0a8afb8c; 514: MQ1(b).",
+   "asks": [
+    {
+     "what": "Roteiros fixos de post para Instagram, TikTok e YouTube, só de produtos próprios publicados",
+     "status": "present",
+     "evidence": "lib/path-script-rules.ts:4 SCRIPT_PLATFORMS, :35 pathPostScript; lib/path-scripts.ts:5 pathScriptProducts",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Componente no estúdio (revisão privada, copiar)",
+     "status": "present",
+     "evidence": "components/path-social-scripts.tsx:7; app/studio/path/page.tsx:5, 90",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Testes e inventário",
+     "status": "present",
+     "evidence": "tests/path-script-rules.test.ts, tests/path-script-render.test.ts, tests/path-scripts.test.ts; tests/e2e/path-scripts.mjs chamado em tests/e2e/store-copy.mjs:845; docs/accessibility-inventory.json:1426; docs/marktmorgen-path.md:341",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 73,
+   "tag": "PATH-FEITO-619",
+   "state": "done",
+   "state_evidence": "queue.md 3027-3032: 'Estado: **feito (PR #619, mesclado em 19/10, 19:05...)**', commit f2d044c0; 515: MQ1(b).",
+   "asks": [
+    {
+     "what": "Redação opcional paga por IA, só para loja paga fora do teste, com volta ao texto fixo",
+     "status": "present",
+     "evidence": "lib/path-wording.ts:6-25 (standingOf 'paid', aiAvailableFor, fallback com o passo original)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Um pedido Haiku de até 240 tokens/240 caracteres",
+     "status": "present",
+     "evidence": "lib/path-wording-rules.ts:4-5 PATH_WORDING_MAX_CHARS/TOKENS=240; lib/ai.ts:196-198 answerModel padrão claude-haiku-5-5",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Reserva monetária antes do provedor, dentro do contador de trabalhos existente",
+     "status": "present",
+     "evidence": "lib/ai.ts:206-207 askModel ('reserve its monetary ceiling here'); lib/ai.ts:362-370 counted; tests/path-wording-provider.test.ts",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Rota e componente",
+     "status": "present",
+     "evidence": "app/api/store/path/route.ts:3-4, 32 (action wording); components/path-ai-wording.tsx:5; app/studio/path/page.tsx:2, 85",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Privacidade",
+     "status": "present",
+     "evidence": "lib/path-wording-rules.ts:6 PATH_WORDING_PRIVACY; app/privacy/page.tsx:4, 1351",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Testes e documentação",
+     "status": "present",
+     "evidence": "tests/path-wording-{rules,source,render,route,provider}.test.ts; tests/e2e/path-wording.mjs chamado em tests/e2e/store-copy.mjs:846; docs/marktmorgen-path.md:354 '## Optional paid wording'. Observação: a lista em docs/marktmorgen-path.md:293 ainda diz '5. ... — pending', texto antigo não atualizado; a seção própria (354-362) descreve o recurso entregue",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": "Complemento de completude (05/11/2026, C1-20261105-1919-C4-1): falta atualizar a lista de recursos em docs/marktmorgen-path.md (linha 293, item 5, \"Optional paid, reserved and fact-checked AI mission wording — pending\"), que ainda diz \"pending\"; o recurso foi entregue por este item (PR #619) e a seção própria do documento (\"## Optional paid wording (ordered item 5)\", a partir da linha 354) já o descreve."
+  },
+  {
+   "n": 74,
+   "tag": "CLAUDE-614",
+   "state": "done",
+   "state_evidence": "queue.md 3033-3038: 'Estado: **feito pelo Claude (PR #614, mesclado em 19/10, 18:07...)**', commit b6b3d18e; 516: MQ1(b).",
+   "asks": [
+    {
+     "what": "Anunciar as páginas do próprio sitemap ao IndexNow, uma vez cada",
+     "status": "present",
+     "evidence": "lib/indexnow.ts:25-26 (chave e endpoint api.indexnow.org), :43 sitemapUrls, :61 announceNewPages",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Chave servida na raiz",
+     "status": "present",
+     "evidence": "public/7cf3353593a7c20e70bd0efdaf6db5b7.txt",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Tarefa diária",
+     "status": "present",
+     "evidence": "app/api/cron/indexnow/route.ts:14; vercel.json:77",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Registro da família de dados e destino no fechamento da loja",
+     "status": "present",
+     "evidence": "lib/data-families.ts:66, 282 (nl:indexnow:sent); tests/store-data-registry.ts:216",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Testes e inventário",
+     "status": "present",
+     "evidence": "tests/indexnow.test.ts; docs/accessibility-inventory.json:1610",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 75,
+   "tag": "CLAUDE-615",
+   "state": "done",
+   "state_evidence": "queue.md 3039-3044: 'Estado: **feito pelo Claude (PR #615, mesclado em 19/10, 17:59...)**', commit a1e4d9ab; 517: MQ1(b).",
+   "asks": [
+    {
+     "what": "App Zapier: gatilhos instantâneos (vendas, reembolsos, leads, inscritos, assinaturas, agendamentos) e ações (inscrito com consentimento, rótulos, acesso ao produto)",
+     "status": "present",
+     "evidence": "zapier/index.js:77-182 (sale_completed, refund_issued, lead_captured, list_joined, membership_started/canceled, call_booked/moved), :249 add_subscriber (campo agreed :261), :283 change_labels, :306 give_access; zapier/package.json, zapier/README.md",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Assinatura/remoção de webhook pela API pública",
+     "status": "present",
+     "evidence": "app/api/v1/hooks/route.ts:31 POST, :51 DELETE (addEndpoint lib/webhooks.ts:881, removeEndpoint :984)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Exemplos só de mensagens já enviadas",
+     "status": "present",
+     "evidence": "app/api/v1/events/route.ts:12 GET usando recentEvents (lib/api-read.ts:152, recentMessagesOf de lib/webhooks.ts); a função recentMessages original do PR foi substituída depois por essa leitura limitada",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Testes, documentação e inventário",
+     "status": "present",
+     "evidence": "tests/zapier-app.test.ts; docs/zapier-app.md (seções 'The code', 'Cost and the 60% floor', 'Before it is published'); docs/accessibility-inventory.json:1901-1902",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Publicar/enviar o app na plataforma Zapier",
+     "status": "out of scope",
+     "evidence": "Exige conta e aceite de termos de terceiro; o próprio PR deixa o app privado e sem envio até a abertura das vendas (docs/zapier-app.md:78 'Before it is published')",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 76,
+   "tag": "CLAUDE-618",
+   "state": "done",
+   "state_evidence": "queue.md 3045-3050: 'Estado: **feito pelo Claude (PR #618, mesclado em 19/10, 18:42...)**', commit a040d707; 518: MQ1(b).",
+   "asks": [
+    {
+     "what": "Aviso ao criador de que Alipay e WeChat Pay estão em prévia privada para cobranças diretas",
+     "status": "present",
+     "evidence": "lib/payment-methods.ts:40-41 (note 'not one to count on here yet ... private preview'), lido em :161 e mostrado em components/payments-panel.tsx:182, como já ocorre com PayPal (:30)",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 77,
+   "tag": "CLAUDE-BING",
+   "state": "done",
+   "state_evidence": "queue.md 3051-3056: 'Estado: **feito pelo Claude (sem PR informado; cadastro externo relatado pelo dono, não verificado por esta fila)**'; 519: MQ1(b).",
+   "asks": [
+    {
+     "what": "Cadastro do site no Bing Webmaster Tools",
+     "status": "out of scope",
+     "evidence": "Cadastro externo em conta de terceiro, relatado pelo dono; o item proíbe refazer cadastro ou criar conta. Não há artefato no repositório (busca: ls public | grep -i bing; grep -i 'msvalidate|BingSiteAuth' app/layout.tsx app/robots.ts: nada), compatível com verificação fora do repositório. O envio ao Bing pelo IndexNow existe (lib/indexnow.ts:4, item 74)",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 78,
+   "tag": "B2-PUBLIC",
+   "state": "done",
+   "state_evidence": "queue.md 3057-3062: 'Estado: **feito (PR #623, mesclado em 19/10, 20:10...; publicação confirmada)**', commit aa669a9d; 520: MQ1(b).",
+   "asks": [
+    {
+     "what": "Inglês americano na homepage e preços (Canceling)",
+     "status": "present",
+     "evidence": "components/home-parts.tsx:240 'Canceling' (tabela Pricing, usada em app/pricing/page.tsx:5); o texto da home foi reescrito depois e o teste atual confere outra frase, mantendo a rejeição das formas britânicas (tests/e2e/public-us-english.mjs:22)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Página Missão corrigida",
+     "status": "present",
+     "evidence": "app/mission/page.tsx:187 'but not a checkbox'",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Ajuda corrigida (canceling, color)",
+     "status": "present",
+     "evidence": "lib/help-content.ts sem 'cancelling'/'colour' (grep -i em lib/help-content.ts: nada)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Registro das 18 fontes revistas",
+     "status": "present",
+     "evidence": "docs/us-english-audit.md:5-20 (lista de fontes da primeira área), :59 ('18 public-area source count')",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Regressão no navegador",
+     "status": "present",
+     "evidence": "tests/e2e/public-us-english.mjs:4 checkPublicAmericanEnglish, chamado em tests/e2e/store-copy.mjs:849",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 79,
+   "tag": "B2-LEGAL",
+   "state": "done",
+   "state_evidence": "queue.md:3065 'feito (PR #624, mesclado em 19/10, 20:12 ... publicação confirmada)'; queue.md:521 'MQ1(b): já concluído/publicado, sem reconstrução'.",
+   "asks": [
+    {
+     "what": "Inspect 12 legal/account-entry sources (privacy/terms/refunds/signin) and record coverage in the US-English ledger",
+     "status": "present",
+     "evidence": "docs/us-english-audit.md:39 '## Public legal and account-entry area'",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Fix the displayed British spelling in the privacy description of cancellation feedback ('cancelling' -> 'canceling')",
+     "status": "present",
+     "evidence": "app/privacy/page.tsx:1815-1816 'members wrote when canceling'; no 'cancelling' left in app/privacy/page.tsx (grep)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Browser regression on the real /privacy page for the reviewed wording and absence of British forms",
+     "status": "present",
+     "evidence": "tests/e2e/public-us-english.mjs:22 case ['/privacy','members wrote when canceling'] and line 30 British-forms regex; called from tests/e2e/store-copy.mjs:849",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 80,
+   "tag": "B2-SHARED",
+   "state": "done",
+   "state_evidence": "queue.md:3071 'feito (PR #625, mesclado em 19/10, 20:15 ...; entrega45 confirmada, READY20:16:32)'; queue.md:522 MQ1(b) já concluído/publicado. The later notes in the same block (composer, B3 parser) belong to items 81 and the B3 item, not to 80.",
+   "asks": [
+    {
+     "what": "Studio Meta notices in US English (closed or canceled; 'Read your ads' selected)",
+     "status": "present",
+     "evidence": "app/studio/page.tsx:365 and :369",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Affiliate studio copy (afterward; products you select)",
+     "status": "present",
+     "evidence": "components/affiliate-studio.tsx:923, :966, :1548",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Shared feature/resource texts (select who hosts it, store's color, reason for canceling, buyer selects that many, check marks)",
+     "status": "present",
+     "evidence": "lib/feature-pages.ts:557, :812, :1039, :1339, :1864; lib/help-content.ts:610",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Real-browser checks for public pages and authenticated studio Meta/affiliate wording",
+     "status": "present",
+     "evidence": "tests/e2e/public-us-english.mjs:22 (calls/email/insights/bundles/sales-pages) and :37 checkStudioAmericanEnglish; tests/e2e/store-copy.mjs:849, :901",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Ledger of the studio documents/shared text area",
+     "status": "present",
+     "evidence": "docs/us-english-audit.md:62 '## Studio documents and selected shared text'",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Competitor source list (Kajabi/Hotmart/Stan) supplied by the owner, to be checked in matrices",
+     "status": "out of scope",
+     "evidence": "Owner-supplied reference list recorded in the block for later matrices; no build asked by item 80 itself",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 81,
+   "tag": "B2-COMPOSER",
+   "state": "done",
+   "state_evidence": "queue.md:3112 'feito; entrega46 confirmada no domínio' (PR #626, c261e238); queue.md:523 MQ1(b).",
+   "asks": [
+    {
+     "what": "Composer comparison block hint: 'check marks' instead of 'ticks'",
+     "status": "present",
+     "evidence": "lib/sales-page.ts:130 'with check marks, crosses'",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "New template instruction: 'license terms'",
+     "status": "present",
+     "evidence": "lib/funnel-starters.ts:373 'and license terms'",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Import skip reason and internal error: 'license keys' / 'unique license key'",
+     "status": "present",
+     "evidence": "lib/store-copy-rules.ts:103; lib/licence-keys.ts:265 (file name and persisted identifiers kept, as the item says)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Real editor check opening the block picker without POST/AI",
+     "status": "present",
+     "evidence": "tests/e2e/us-english-composer.mjs:2-13; tests/e2e/store-copy.mjs:902",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Ledger section",
+     "status": "present",
+     "evidence": "docs/us-english-audit.md:113 '## Composer, import preview and template wording'",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 82,
+   "tag": "C-UE-RECORD",
+   "state": "done",
+   "state_evidence": "queue.md:3120 'feito; PR #629 incorporado19/10/2026 20:58:47 ... entrega48 confirmada'; queue.md:524 MQ1(b).",
+   "asks": [
+    {
+     "what": "Refuse impossible calendar dates in deemed-supplier records (recordedOn)",
+     "status": "present",
+     "evidence": "lib/deemed-supplier.ts:73 calendarDay(); :132 'if (!calendarDay(record.recordedOn))'",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Tests: impossible/malformed dates keep the gate closed, valid leap days/month ends accepted, no real record or sale opened",
+     "status": "present",
+     "evidence": "tests/tax-gate.test.ts:164-172 'A tax treatment needs an actual calendar date'",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Real records stay empty and sales closed",
+     "status": "present",
+     "evidence": "lib/deemed-supplier.ts DEEMED_SUPPLIER_RECORDS still []; asserted in tests/tax-gate.test.ts near :172",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 83,
+   "tag": "C-ANSWER-RECORD",
+   "state": "done",
+   "state_evidence": "queue.md:3128 'feito; PR #630 incorporado19/10/2026 21:20:13 ... entrega49 confirmada'; queue.md:525 MQ1(b).",
+   "asks": [
+    {
+     "what": "Refuse impossible dates in recorded consultation answers",
+     "status": "present",
+     "evidence": "lib/tax-gate.ts:45 calendarDay(); :58 'if (!calendarDay(answer?.date))'",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Tests for impossible/valid consultation dates; CONSULTATION_ANSWERS stays empty",
+     "status": "present",
+     "evidence": "tests/tax-gate.test.ts:176-178 'A consultation answer also needs an actual calendar date'; lib/tax-gate.ts:42 CONSULTATION_ANSWERS = []",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Validation notes: deterministic near-midnight fixture (Date.now and new Date() via Proxy) keeping the 600-second minimum",
+     "status": "present",
+     "evidence": "tests/workflow-retries.test.ts:46-54 baseNow + Proxy; :98 and :171 ten-minute minimum assertions",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 84,
+   "tag": "C-UE-TAX-SCOPE",
+   "state": "done",
+   "state_evidence": "queue.md:3141 'feito; PR #631 incorporado19/10/2026 21:26:19 ... entrega50 confirmada'; queue.md:526 MQ1(b).",
+   "asks": [
+    {
+     "what": "Remove the absolute 'you remain the seller who files and pays' claim; explain the account controls do not decide platform/marketplace obligations",
+     "status": "present",
+     "evidence": "components/tax-editor.tsx:81-83 id='tax-account-scope' 'they do not establish who owes tax under platform or marketplace rules'; :154 'Entering a number does not by itself establish...'",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Say platform VAT collection/records are still being built",
+     "status": "present",
+     "evidence": "components/tax-editor.tsx:87-88 id='tax-platform-scope'",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Form references the explanations (aria-describedby)",
+     "status": "present",
+     "evidence": "components/tax-editor.tsx:95 aria-describedby='tax-account-scope tax-platform-scope'",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Synthetic browser check 390/1280, no POST",
+     "status": "present",
+     "evidence": "tests/e2e/tax-scope.mjs:2 checkTaxScope; tests/e2e/store-copy.mjs:904",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 85,
+   "tag": "C-UE-RETENTION-COST",
+   "state": "done",
+   "state_evidence": "queue.md:3148 'feito documental; PR #632 incorporado19/10/2026 21:29:03'; queue.md:527 MQ1(b).",
+   "asks": [
+    {
+     "what": "Document the official 10-year-from-end-of-transaction-year retention and a 132-month conservative ceiling",
+     "status": "present",
+     "evidence": "docs/eu-vat-retention-funding.md:7, :9, :28",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Official PAYG prices read, conservative decimal GB divisor, no free quota credited",
+     "status": "present",
+     "evidence": "docs/eu-vat-retention-funding.md:15, :19",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Monthly/yearly matrix per plan with illustrative component and total cost unknown/failing",
+     "status": "present",
+     "evidence": "docs/eu-vat-retention-funding.md:44-51 (Store/Studio/Scale month/year, 'Unknown — fails admission')",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Full funding account and automatic reserves before real fiscal data",
+     "status": "out of scope",
+     "evidence": "Item itself defers this to before real tax records exist (art. 9a / opening); docs/eu-vat-retention-funding.md:61 lists required synthetic checks for that future build",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 86,
+   "tag": "C-TAX-SAVE-CONFIRMATION",
+   "state": "done",
+   "state_evidence": "queue.md:3155 'feito; PR #633 incorporado19/10/2026 21:53:43 ... entrega51 confirmada'; queue.md:528 MQ1(b).",
+   "asks": [
+    {
+     "what": "Success only with HTTP ok, boolean ok, no error and the four returned values equal to the request",
+     "status": "present",
+     "evidence": "components/tax-editor.tsx:54-63 (requested object; response.ok && reply.ok === true && reply.error === undefined && every key equal); server returns tax at app/api/store/tax/route.ts:46",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Incomplete/contradictory/lost answers leave the result unknown and tell to reload",
+     "status": "present",
+     "evidence": "components/tax-editor.tsx:18 server_error 'We could not confirm whether your tax settings were saved. Reload this page...'; :64-66",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Controls locked during confirmation",
+     "status": "present",
+     "evidence": "components/tax-editor.tsx:50 guard; :95 aria-busy; disabled={!ready || busy} on inputs/fieldsets/button (around lines 119-186)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Eleven intercepted scenarios at 390/1280 with no tax POST reaching the server",
+     "status": "present",
+     "evidence": "tests/e2e/tax-save-acknowledgment.mjs:2 checkTaxSaveAcknowledgment; tests/e2e/store-copy.mjs:905",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 87,
+   "tag": "B2-SIGNIN-ACKNOWLEDGMENT",
+   "state": "done",
+   "state_evidence": "queue.md:3165 'feito; PR #634 incorporado19/10/2026 21:59:03 ... entrega52 confirmada'; queue.md:529 MQ1(b).",
+   "asks": [
+    {
+     "what": "Email field locked while sending; double submit ignored",
+     "status": "present",
+     "evidence": "components/signin-form.tsx:85, :118, :169 disabled={state.kind === 'sending'}, :157 aria-busy",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Success requires HTTP ok, boolean ok and no contradictory error",
+     "status": "present",
+     "evidence": "components/signin-form.tsx:102",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Eight intercepted responses at 390/1280, no request to the auth endpoint",
+     "status": "present",
+     "evidence": "tests/e2e/signin-acknowledgment.mjs; called from tests/e2e/agreements.mjs:346",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 88,
+   "tag": "B2-ADDRESS-ACKNOWLEDGMENT",
+   "state": "done",
+   "state_evidence": "queue.md:3175 still says 'em andamento; branch codex/address-confirmation', but queue.md:3201 'item88/PR635 incorporado19/10/2026 22:12:37 ... entrega53 confirmada ... esta evidência posterior registra sua conclusão'. queue.md:530 MQ1(b) keeps the protected position. The later blocks extracted with item 88 (PR639 details, PR640, PR642, PR644, section S) belong to other items (B2 4/140/141, S1–S12) and were not audited here. | Estado corrigido nesta auditoria com a prova do merge (C4-20261105-1940-C5-4): PR #635, commit 4eabb47abec4c03e9309f4376c55df512a7e34e6, 19/10/2026 22h12 Fortaleza",
+   "asks": [
+    {
+     "what": "Success requires HTTP ok, boolean ok, no error and normalized returned address equal to the requested one",
+     "status": "present",
+     "evidence": "components/rename-form.tsx:33 preview normalization; :48 'response.ok && data.ok === true && data.error === undefined && data.handle === preview'; route returns handle at app/api/store/rename/route.ts:25",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Editing/cancel locked during the request; uncertain-result message",
+     "status": "present",
+     "evidence": "components/rename-form.tsx:37, :95, :120, :128 disabled while saving; :25 server_error 'We could not confirm whether your address changed...'",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Fields can shrink on mobile (no horizontal overflow)",
+     "status": "present",
+     "evidence": "components/rename-form.tsx:80 'w-full min-w-0' on form; :98 'min-w-0 flex-1' on input",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Nine intercepted responses at 390/1280, no real store renamed",
+     "status": "present",
+     "evidence": "tests/e2e/rename-acknowledgment.mjs; tests/e2e/store-copy.mjs:906",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": "",
+   "state_fix": "PR #635, commit 4eabb47abec4c03e9309f4376c55df512a7e34e6, 19/10/2026 22h12 Fortaleza"
+  },
+  {
+   "n": 89,
+   "tag": "C2-CAPACITY",
+   "state": "in progress",
+   "state_evidence": "queue.md:2203 'Estado vigente: remanescente financeiro aguardando o dono conforme1371; guardas técnicas1351/1362 incorporadas e publicadas. 89 não concluído'; queue.md:2217 'aguardando o dono para a prova de configuração/tarifas/tetos/reservas reais; sem declarar 89 concluído'. Technical units: PR638 precheck (queue.md:3215 area), PR641 provider review, PR1351 (merge f0dd7db), PR1362 (merge 9a67c82, queue.md:21251), PR1371 state (queue.md:21252).",
+   "asks": [
+    {
+     "what": "Capacity precheck deriving prices and quantities for six plan/interval cases from code, 12 annual windows, concurrent storage, counterfactual bound (16.82%)",
+     "status": "present",
+     "evidence": "docs/plan-capacity-precheck.md:3, :9-11, :28-41; tests/plan-capacity-review.test.ts (reads docs/plan-capacity-precheck.md, PLAN_PRICES, VISITS_INCLUDED, ORDERS_INCLUDED, PAID_STORAGE_BYTES, PAID_VIDEO_HOURS)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Provider assumptions review (R2, Blob, Resend) against official sources, incl. email not approved from one marginal rate",
+     "status": "present",
+     "evidence": "docs/plan-capacity-provider-review.md:1, :10, :26, :32",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "PR1351 guards: Blob and S3 listing pages over 1000 entries are unavailable, never empty",
+     "status": "present",
+     "evidence": "lib/file-store.ts:139 'answer.blobs.length > 1000'; lib/vault.ts:442 'entries.length > 1000'; tests/storage-measurement.test.ts:55-61; tests/vault.test.ts:371-383",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "PR1362 S3 listing evidence: strict single IsTruncated/KeyCount/MaxKeys integers 0..1000 consistent with Contents",
+     "status": "present",
+     "evidence": "lib/vault.ts:421 listingField(); :443-449 KeyCount/MaxKeys checks; tests/vault.test.ts:384-388",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "No allowance raised without proof on both intervals; prices/visible limits unchanged",
+     "status": "present",
+     "evidence": "docs/plan-capacity-precheck.md:21 'infeasible; no approved maximum'; tests/plan-capacity-review.test.ts asserts maximum null / status 'unreviewed' for all six rows",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Paid maxima per provider from real configuration/contract, invoice attributable to the LLC, ceilings and funded reserves, then full recalculation of the 6 cases",
+     "status": "out of scope",
+     "evidence": "queue.md:2217-2221: waits for owner-supplied dated proof of real configuration/contract; needs real accounts/invoices, not code",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 90,
+   "tag": "C2-EMAIL-HONESTY",
+   "state": "done",
+   "state_evidence": "queue.md:2227 'concluído; PR637 incorporado em19/10/2026 às22:31:33Fortaleza; entrega54 verificada'; queue.md:532 MQ1(b).",
+   "asks": [
+    {
+     "what": "Check the four real templates and the editor",
+     "status": "present",
+     "evidence": "lib/mail-body.ts:267 MAIL_TEMPLATES with ids news/launch/welcome/spotlight (:269, :282, :294, :305); components/mail-designer.tsx exists",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Replace 'No templates or columns' limitation with what exists and what is missing (one column, four templates)",
+     "status": "present",
+     "evidence": "lib/feature-pages.ts:850 'Email layouts use one column. You can start from four templates...'; no 'No templates or columns' in lib/feature-pages.ts",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Regression on the real /platform/email page at 390/1280, no API write",
+     "status": "present",
+     "evidence": "tests/e2e/email-capabilities.mjs:2-19; tests/e2e/store-copy.mjs:910",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 91,
+   "tag": "D2-EU-WITHDRAWAL",
+   "state": "done",
+   "state_evidence": "queue.md:2288 'Estado atual: pronto e desligado, aguardando a abertura (VR: incorporado; desligado pelas travas...)' PR #1279 merge 2cfa966; queue.md:2289 correction PR #1282 merge 084a184, version 2026-10-30.2. Built-but-gated counts as present.",
+   "asks": [
+    {
+     "what": "Versioned consent text, server-side refusal, 'yes'+version+time stored in metadata[dc]",
+     "status": "present",
+     "evidence": "lib/digital-consent.ts:77 EU_WITHDRAWAL_CONSENT_VERSION='2026-10-30.2', :87-91 dc fields, :179-185 consentFromForm/valid, :111-122/:199 Stripe 50-field limit refusal; tests/digital-consent.test.ts",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Unchecked mandatory box in every applicable checkout (product, gift, group, pre-sale, chosen bundle, course, renewal, cart, one-click offers, welcome offer, win-back, moved member, PayPal)",
+     "status": "present",
+     "evidence": "components/digital-consent-box.tsx; app/api/store/checkout/route.ts:38,:99; app/api/store/cart/route.ts:1,:259; app/api/store/upsell/route.ts:2; app/api/store/welcome/open/route.ts:2; app/api/store/come-back/open/route.ts:2; app/api/store/move/open/route.ts:2; app/api/store/paypal/checkout/route.ts:2; components/pick-bundle-form.tsx; app/[handle]/course|renew|move|free/...; lib/gifts.ts:210; lib/group-buy.ts:255; lib/preorders.ts:281",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Confirmation line in purchase emails (true to each case)",
+     "status": "present",
+     "evidence": "lib/digital-consent-email.ts; lib/purchase-email.ts:39, :282",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Terms, Refund, Privacy, person-data and help updated together",
+     "status": "present",
+     "evidence": "app/terms/page.tsx:167-176 id='instant-access'; app/refunds/page.tsx:188-195; app/privacy/page.tsx:481-485 id='instant-access'; lib/person-data.ts:141, :149; lib/help-content.ts:327",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "German wording with 'Sie' and § 356(6) BGB; subscriptions keep the right with proportional payment",
+     "status": "present",
+     "evidence": "lib/buyer-words/digital-consent.ts:10, :111-112; app/refunds/page.tsx:195 and app/terms/page.tsx:176 (pay only for what was used)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Whether tier-switch and yearly-switch must ask the box again",
+     "status": "out of scope",
+     "evidence": "queue.md:2289 'Depende do dono' question; current reading: existing contract change, nothing asked",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "UK rules reread; local e2e run; EUR-Lex text read directly",
+     "status": "out of scope",
+     "evidence": "queue.md:2288 records these as gaps in the PR; verification steps, not code to build, and conformity cannot be declared before opening",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 98,
+   "tag": "D2-COMPLIANCE-REVIEW",
+   "state": "in progress",
+   "state_evidence": "queue.md:2343 'Estado: a fazer' + 2344 'Em andamento pelo Claude 2: 31/10/2026 16h55 ... unidade 1 (\"Can everyone use your store?\" ...) ramo claude2/d2-store-access-check ... Seguintes: legendas das aulas sem legenda, imagens das páginas de venda e da comunidade, IVA da seção C quando 300–303 existirem'. Complemento diferencial em item separado 493 [DE2] (queue.md:14187), com estado próprio. Units 2 and 3 are in main code but have no state line in the queue.",
+   "asks": [
+    {
+     "what": "Unit 1: studio block 'Can everyone use your store?' listing first-page product pictures without description, named, with where to fix, never changing creator text",
+     "status": "present",
+     "evidence": "lib/store-access-check.ts:45-59 (accessCheck), components/store-access-check.tsx, app/studio/page.tsx:1333-1334, tests/store-access-check.test.ts, docs/accessibility-inventory.json:1504",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Show what every store already gets: digital-delivery consent box on every checkout (withdrawal, item 91)",
+     "status": "present",
+     "evidence": "lib/store-access-check.ts:62-63 (ACCESS_DONE_FOR_YOU); lib/digital-consent.ts:189 requireDigitalConsent",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Automatic FTC/affiliate disclosure on affiliate posts",
+     "status": "present",
+     "evidence": "lib/affiliate-kit-rules.ts:44,55 (DISCLOSURE, DISCLOSURE_SHORT); stated in lib/store-access-check.ts:65",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Contrast check of creator pages (button colors held at 7:1)",
+     "status": "present",
+     "evidence": "lib/store-look.ts:327 (fill vs card >=3, text >=7); stated in lib/store-access-check.ts:64",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Vague link purpose on the store page (extra in unit 1)",
+     "status": "present",
+     "evidence": "lib/store-access-check.ts:36-49 (links.vague via lib/link-purpose.ts)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Next unit: lessons whose videos have no captions, with where to fix",
+     "status": "present",
+     "evidence": "lib/course-access-check.ts:1-30 ('98 [D2-COMPLIANCE-REVIEW] unit 2'), components/course-access-check.tsx, app/studio/course/[product]/page.tsx:14-15, tests/course-access-check.test.ts",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Next unit: pictures on sales pages without description",
+     "status": "present",
+     "evidence": "lib/page-coach.ts:224-240 ('98 [D2-COMPLIANCE-REVIEW] unit 3', check 'described'), tests/page-coach.test.ts:69",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Next unit: community pictures without description",
+     "status": "missing",
+     "evidence": "Searched lib/community*.ts, components/community*.tsx, app/studio/community, lib/store-access-check.ts, lib/page-coach.ts for 'alt', 'no description', 'undescribed', 'bare', 'D2-COMPLIANCE'. Only an optional alt field exists at composition (components/community-composer.tsx:267-268, name img_alt) and the server accepts an empty alt (app/api/store/community/route.ts:214); no studio check lists community post pictures without a description or says where to fix them.",
+     "where_it_should_be": "a pure rule beside lib/store-access-check.ts / lib/course-access-check.ts, shown in the studio community area (app/studio/community)"
+    },
+    {
+     "what": "EU/UK VAT of section C in the compliance view",
+     "status": "out of scope",
+     "evidence": "Item text conditions it on 300–303 existing; queue.md:8271-8300 shows 300 [9A-1] to 303 [9A-4] all 'Estado: na fila' (deemed-supplier VAT not built).",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Creator terms/refund-policy check (DE2 complement)",
+     "status": "out of scope",
+     "evidence": "Tracked as its own item 493 [DE2] (queue.md:14187), not part of item 98's own state; lib/terms-check-rules.ts exists (unit 1 merged per queue)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Generic 'files of the creator' accessibility check beyond pictures and captions",
+     "status": "uncertain",
+     "evidence": "Item scope says 'alt/contraste/legendas em páginas/arquivos do criador'; the recorded unit list (queue.md:2344) does not name a separate file (PDF/EPUB) check, so absence is not counted as missing.",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Never claim AAA or legal conformity",
+     "status": "present",
+     "evidence": "lib/store-access-check.ts:18-19 ('Not a conformity claim'); lib/course-access-check.ts:16-17",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": "Complemento de completude (05/11/2026, C1-20261105-1919-C4-1): falta a unidade das imagens da comunidade sem descrição, prevista na própria linha de andamento do item (\"imagens ... da comunidade\"): nenhum aviso no estúdio lista as fotos dos posts da comunidade sem texto alternativo nem diz onde corrigir; hoje só existe o campo opcional img_alt no compositor (components/community-composer.tsx) e o servidor aceita descrição vazia (app/api/store/community/route.ts). A regra deve ficar pura, ao lado de lib/store-access-check.ts e lib/course-access-check.ts, e ser mostrada na área da comunidade do estúdio (app/studio/community), sem alterar o conteúdo do criador e sem dizer conformidade. As unidades 2 (legendas, lib/course-access-check.ts) e 3 (imagens das páginas de venda, lib/page-coach.ts) já estão no main, mas sem linha de estado na fila. O IVA da seção C continua dependente de 300–303, ainda na fila, e os termos do criador seguem no 493 [DE2]."
+  },
+  {
+   "n": 138,
+   "tag": "P0-BUTTON-CONTRAST",
+   "state": "done",
+   "state_evidence": "queue.md:2152 'Estado: feito; PR640 incorporado19/10/2026 às22:58:07Fortaleza, entrega56 confirmada'; queue.md:3234 PR640 merge bc0f5bf89; queue.md:580 MQ1(b) concluído/publicado.",
+   "asks": [
+    {
+     "what": "Fill and text adjusted together to 7:1, button border vs card 3:1, preserving creator's persisted choice",
+     "status": "present",
+     "evidence": "lib/store-look.ts:327 (contrast(c, palette.card) >= 3 && contrast(c, onAccent) >= 7); lib/store-look.ts:253 contrast()",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Hover highlight by shadow, no brightness/saturation filter changing the color pair",
+     "status": "present",
+     "evidence": "app/globals.css:2148-2156 (.st-btn:hover only changes box-shadow)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Property tests over themes/presets/RGB grid",
+     "status": "present",
+     "evidence": "tests/store-button-contrast.test.ts",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Real CSS of buttons in normal/hover/focus in synthetic browser",
+     "status": "present",
+     "evidence": "tests/e2e/button-contrast.mjs; wired in tests/e2e/store-copy.mjs:63,657",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 139,
+   "tag": "B2-CLAIM-ACKNOWLEDGMENT",
+   "state": "done",
+   "state_evidence": "queue.md:2145 'Estado: feito; PR642 incorporado19/10/2026 às23:04:11Fortaleza, entrega57 confirmada'; queue.md:3236; queue.md:581.",
+   "asks": [
+    {
+     "what": "HandleForm requires HTTP ok, ok===true, no error, returned handle equal to normalized request, store id in server format",
+     "status": "present",
+     "evidence": "components/handle-form.tsx:56-60 (response.ok && data.ok === true && !data.error && data.handle === preview && /^[0-9a-f]{32}$/)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Unknown error names do not select inherited properties",
+     "status": "present",
+     "evidence": "components/handle-form.tsx:72 (Object.hasOwn(MESSAGES, data.error))",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Fields locked during confirmation",
+     "status": "present",
+     "evidence": "components/handle-form.tsx (form aria-busy, fieldset disabled while saving)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Uncertain reply asks to check the studio before retrying, without saying nothing was created",
+     "status": "present",
+     "evidence": "components/handle-form.tsx:22 server_error message",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Five-store limit and persisted ids preserved",
+     "status": "present",
+     "evidence": "components/handle-form.tsx:18 too_many message ('five stores at most')",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Browser proof: intercepted replies on the real new-store page at 390/1280",
+     "status": "present",
+     "evidence": "tests/e2e/claim-acknowledgment.mjs (14 named cases), wired in tests/e2e/store-copy.mjs:60",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 140,
+   "tag": "B2-SAFE-ERROR-MESSAGES",
+   "state": "done",
+   "state_evidence": "queue.md:2129 'Estado: em andamento; branch codex/safe-error-messages' (no merge/publication line found in queue.md for this item); queue.md:582 MQ1(b) 'andamento/posição protegidos'. The work is however in main history: commit c4acf5c91 'Keep unexpected form error names on the existing safe fallback message' (19/10/2026). | Estado corrigido nesta auditoria com a prova do merge (C4-20261105-1940-C5-4): PR #643, commit 59f8e30f2c336e6bb7088711a66667703fcf9fcc, 19/10/2026 23h15 Fortaleza",
+   "asks": [
+    {
+     "what": "Sign-in form uses only own messages; __proto__/constructor fall back to generic text",
+     "status": "present",
+     "evidence": "components/signin-form.tsx:109 (Object.hasOwn(MESSAGES, data.error))",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Address change (rename) form same guard",
+     "status": "present",
+     "evidence": "components/rename-form.tsx:60",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Tax settings form same guard",
+     "status": "present",
+     "evidence": "components/tax-editor.tsx:68",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Two new unexpected-error cases per real form in browser tests",
+     "status": "present",
+     "evidence": "tests/e2e/signin-acknowledgment.mjs:4-5, tests/e2e/rename-acknowledgment.mjs:4-5, tests/e2e/tax-save-acknowledgment.mjs:4-5; wired in tests/e2e/agreements.mjs:51 and tests/e2e/store-copy.mjs:66-67",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": "",
+   "state_fix": "PR #643, commit 59f8e30f2c336e6bb7088711a66667703fcf9fcc, 19/10/2026 23h15 Fortaleza"
+  },
+  {
+   "n": 141,
+   "tag": "B2-PAUSE-ACKNOWLEDGMENT",
+   "state": "done",
+   "state_evidence": "Header queue.md:2137 still says 'em andamento; branch codex/pause-acknowledgment', but queue.md:3241-3243 '### PR644 — conclusão ... Incorporado19/10/2026 às23:50:49 ... Entrega59 ... 56casos ... item141 está concluído'. | Estado corrigido nesta auditoria com a prova do merge (C4-20261105-1940-C5-4): PR #644, commit ca31becced39e7e15ec7b8ff1746336ba6860861, 19/10/2026 23h50 Fortaleza",
+   "asks": [
+    {
+     "what": "Client requires HTTP ok, ok===true, no error and numeric pause equal to the chosen value",
+     "status": "present",
+     "evidence": "components/pause-editor.tsx:33",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Selector locked while waiting, aria-busy, duplicate submit refused",
+     "status": "present",
+     "evidence": "components/pause-editor.tsx:25 (if busy return), :71 and :87 aria-busy, :79 select disabled={busy}",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Only own messages; uncertain reply asks to check the page",
+     "status": "present",
+     "evidence": "components/pause-editor.tsx:9-15, :38 (Object.hasOwn)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Server returns pause",
+     "status": "present",
+     "evidence": "app/api/store/pause/route.ts:12",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "56 intercepted browser cases with two local fixtures",
+     "status": "present",
+     "evidence": "tests/e2e/pause-acknowledgment.mjs, wired in tests/e2e/store-copy.mjs:58",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": "",
+   "state_fix": "PR #644, commit ca31becced39e7e15ec7b8ff1746336ba6860861, 19/10/2026 23h50 Fortaleza"
+  },
+  {
+   "n": 142,
+   "tag": "S1-COMPARISONS",
+   "state": "done",
+   "state_evidence": "queue.md:3261 'Estado: concluído; 15 comparações e índice publicados, entrega69, PR655, 20/10/2026'; queue.md:584.",
+   "asks": [
+    {
+     "what": "Comparisons Kajabi, Skool, ClickFunnels, Circle, Kit, Whop, Hotmart, HighLevel, Teachable",
+     "status": "present",
+     "evidence": "lib/site-pages.ts:107,143,181,226,262,300,339,379,454 (slugs teachable, highlevel, hotmart, whop, kit, circle, clickfunnels, skool, kajabi)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Comparisons Substack, Patreon, Linktree, Podia, Thinkific, Systeme.io",
+     "status": "present",
+     "evidence": "lib/final-comparison-pages.ts:8,56-132",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "SEO 'Marktmorgen vs Kajabi' and 'A Kajabi alternative where...'",
+     "status": "present",
+     "evidence": "lib/site-pages.ts:459-460",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "'Where they are ahead' on each comparison",
+     "status": "present",
+     "evidence": "lib/site-pages.ts:130,167,208,248,285,... (9 occurrences); lib/final-comparison-pages.ts:45 (every page)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Public index linked from menu/footer",
+     "status": "present",
+     "evidence": "lib/site-pages.ts:420 (slug comparisons); components/site-nav.tsx:137; components/site-footer.tsx:36,89",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "ClickFunnels <-> /platform/move-from-clickfunnels both ways",
+     "status": "present",
+     "evidence": "lib/site-pages.ts:360; lib/feature-pages.ts:2539",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Dated official sources per price",
+     "status": "present",
+     "evidence": "lib/competitor-prices.ts:5 (OfficialPriceSource readOn), :25,27",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Sitemap",
+     "status": "present",
+     "evidence": "app/sitemap.ts:56-60 (PAGES, which includes FINAL_COMPARISON_PAGES, lib/site-pages.ts:91-94)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Data/page tests",
+     "status": "present",
+     "evidence": "tests/competitor-comparisons.test.ts, tests/comparison-fee-disclosures.test.ts, tests/hotmart-comparison.test.ts, tests/site-pages.test.ts",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 143,
+   "tag": "S2-PRICING",
+   "state": "done",
+   "state_evidence": "queue.md:3267 'Estado: concluído; PR656, entrega70, READY20/10/2026 02:13:44Fortaleza'; queue.md:585.",
+   "asks": [
+    {
+     "what": "/pricing page with three plans monthly/yearly from lib/plan.ts",
+     "status": "present",
+     "evidence": "app/pricing/page.tsx:46-52; lib/pricing-page-data.ts:5",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "All limits from their rule modules",
+     "status": "present",
+     "evidence": "lib/pricing-page-data.ts:8-26 (imports from catalog-rules, traffic-rules, order-rules, crm-rules, ai-rules...), app/pricing/page.tsx:62-65",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "'0% of each sale' with processor fee explained",
+     "status": "present",
+     "evidence": "components/home-parts.tsx:231-232",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Store assistant and AI captions add-ons with real prices",
+     "status": "present",
+     "evidence": "lib/pricing-page-data.ts:24-25,93-94; app/pricing/page.tsx:69",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "FAQ",
+     "status": "present",
+     "evidence": "app/pricing/page.tsx:73; lib/pricing-page-data.ts:97 (decisionQuestions)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Space for S3 calculator",
+     "status": "present",
+     "evidence": "app/pricing/page.tsx:11,71 (ToolsCalculator)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Home links /pricing; indexable/sitemap",
+     "status": "present",
+     "evidence": "app/page.tsx:194 (/pricing#plans); app/sitemap.ts:33",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Tests",
+     "status": "present",
+     "evidence": "tests/pricing-page.test.ts",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 144,
+   "tag": "S3-TOOLS-CALCULATOR",
+   "state": "done",
+   "state_evidence": "queue.md:3272 'Estado: concluído; entrega71 em produção confirmada, PR657 incorporado20/10/2026'; queue.md:586.",
+   "asks": [
+    {
+     "what": "Browser-only calculator inside /pricing",
+     "status": "present",
+     "evidence": "components/tools-calculator.tsx (client, no fetch), app/pricing/page.tsx:71",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Single lib/competitor-prices.ts shared with S1, source/date per price",
+     "status": "present",
+     "evidence": "lib/competitor-prices.ts:5,50; used by lib/site-pages.ts and lib/final-comparison-pages.ts",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Own prices from lib/plan.ts, commission zero",
+     "status": "present",
+     "evidence": "components/tools-calculator.tsx:6",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Invalid inputs handled, no server call; pure logic tested",
+     "status": "present",
+     "evidence": "lib/tools-calculator.ts (centsInput, countInput), tests/tools-calculator.test.ts",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 145,
+   "tag": "S4-HOME-SALES",
+   "state": "in progress",
+   "state_evidence": "queue.md:3277 'Estado: parcial implementado; capturas aguardando o dono por condição de faturamento não confirmada'; queue.md:1134 'A #25 ... (parcialmente implementado)'. Later owner decisions changed the home: 571 [VS1] (queue.md:20984 unit 1 merged PR #1334; owner complement 30/10/2026 18h59 at queue.md:20997 removes the 'Your store. Your Stripe. Your money.' badge, the six repeated 'See the live demo' and the 'Everything in one place' heading) and 498 [ME3] (queue.md:14330: home <=600 words/30 links; 145 must move what does not fit to internal pages).",
+   "asks": [
+    {
+     "what": "Keep 'Your store. Your Stripe. Your money.'",
+     "status": "out of scope",
+     "evidence": "Removed by recorded owner decision in 571 [VS1] complement 30/10/2026 18h59 (queue.md:20997: 'o selo ... que o dono não quer'); home now app/page.tsx (VS1 header comment lines 19-31).",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "'See the live demo' link",
+     "status": "present",
+     "evidence": "components/home-claim.tsx:127 ('Open the demo store', /demo); repeated CTA pairs reduced by VS1",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "'Everything in one place' list of modules with verified links",
+     "status": "present",
+     "evidence": "Moved by ME3/VS1 to internal pages: /platform feature pages (lib/feature-pages.ts slugs crm, courses, memberships, community, email, calls, funnels, sales-pages, checkout, affiliates, insights, ai-writing), nav components/site-nav.tsx; home keeps 'What you can sell' and 'One store instead of five apps' (app/page.tsx sections hm-sell/hm-apps)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Strip leading to the S3 calculator",
+     "status": "present",
+     "evidence": "Home links /pricing#plans (app/page.tsx:194); calculator on /pricing (app/pricing/page.tsx:71), per ME3 move to internal pages",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Real studio screenshots of the demo, unique, with alt",
+     "status": "out of scope",
+     "evidence": "Queue.md:3277 records screenshots waiting on the owner; VS1 leaves the studio 'Today' screen out until 484 [IT1] exists (app/page.tsx:28-30)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Honest closing without income promises",
+     "status": "present",
+     "evidence": "app/page.tsx end section hm-end ('Set up your store today. Selling opens when the plans do.')",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Video",
+     "status": "out of scope",
+     "evidence": "Item says not required; needs approved fixed-cost ceiling",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 146,
+   "tag": "S5-PUBLIC-CRM",
+   "state": "done",
+   "state_evidence": "queue.md:3282 'Estado: concluído; entrega73, PR659, incorporado2026-10-20'; queue.md:588.",
+   "asks": [
+    {
+     "what": "Feature page in lib/feature-pages.ts for people/deals/pipelines",
+     "status": "present",
+     "evidence": "lib/feature-pages.ts slug 'crm' (seo 'People, deals and pipelines — Marktmorgen CRM')",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Per-plan pipelines and other limits from lib/crm-rules.ts",
+     "status": "present",
+     "evidence": "crm page table 'Published CRM ceilings' using PIPELINES_BY_TIER, MAX_CRM_FIELDS, MAX_DEALS, MAX_STAGES",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "What it does not do: no SMS, WhatsApp or phone",
+     "status": "present",
+     "evidence": "crm page feature 'Follow up with permission': 'Email is separate from SMS, WhatsApp and phone-call sending; those channels are not included here.' (same wording as merged in PR659, commit 5253f6912)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Linked from menu and HighLevel comparison",
+     "status": "present",
+     "evidence": "components/site-nav.tsx:58; lib/site-pages.ts:164; crm page 'Compare with HighLevel'",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Linked from home S4",
+     "status": "out of scope",
+     "evidence": "Home rebuilt by owner decisions 571 [VS1] and 498 [ME3] (max 30 links); CRM stays reachable from nav",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Sitemap",
+     "status": "present",
+     "evidence": "app/sitemap.ts:56-60 via PAGES/FEATURE_PAGES",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 147,
+   "tag": "S6-FEATURE-MECHANISMS",
+   "state": "done",
+   "state_evidence": "queue.md:3287 'Estado: concluído; entrega74, PR660, incorporado2026-10-20'; queue.md:589.",
+   "asks": [
+    {
+     "what": "Short factual mechanism block on every lib/feature-pages.ts page, no numbers/promises",
+     "status": "present",
+     "evidence": "lib/feature-mechanisms.ts:4+ (FEATURE_MECHANISMS for every feature/creator slug); lib/feature-pages.ts:2956-2957 (withFeatureMechanisms on FEATURE_PAGES and CREATOR_PAGES)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Tests",
+     "status": "present",
+     "evidence": "tests/feature-mechanisms.test.ts",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 148,
+   "tag": "S7-CREATOR-PAGES",
+   "state": "done",
+   "state_evidence": "queue.md:3292 'Estado: concluído; entrega75, PR661, incorporado2026-10-20'; queue.md:590.",
+   "asks": [
+    {
+     "what": "Pages for course creators, community builders, newsletter writers, consultants and mentors",
+     "status": "present",
+     "evidence": "lib/creator-situations.ts:5-8,19,37,55,73; merged via lib/feature-pages.ts:46,2953; route app/for/[slug]/page.tsx",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Existing coaches/cooks/fitness/designers preserved",
+     "status": "present",
+     "evidence": "lib/feature-pages.ts slugs coaches, cooks, fitness, designers",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Ladder and one unique licensed photo per page, not-a-customer notice",
+     "status": "present",
+     "evidence": "lib/creator-situations.ts:5-10 (CREATOR_PHOTOS, CREATOR_PHOTO_LICENSE), :94-98 (badge 'An illustrative product path', 'not a customer')",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Consulting: paid calls, Stripe payment terms, forms, agreements, reminders only as the code does; no Brazilian installments argument",
+     "status": "present",
+     "evidence": "lib/creator-situations.ts:73-86",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Sitemap and tests",
+     "status": "present",
+     "evidence": "app/sitemap.ts:56-60 via PAGES (CREATOR_PAGES); tests/creator-situations.test.ts",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 150,
+   "tag": "S9-DECISION-BLOG",
+   "state": "done",
+   "state_evidence": "queue.md:3302 'Estado: concluído; entrega76, PR662, incorporado2026-10-20'; queue.md:592.",
+   "asks": [
+    {
+     "what": "Post 'How much Kajabi costs in 2026'",
+     "status": "present",
+     "evidence": "lib/blog.ts:55-57",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Post 'Skool fees explained'",
+     "status": "present",
+     "evidence": "lib/blog.ts:134-136",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Post 'Kajabi vs Teachable vs Marktmorgen'",
+     "status": "present",
+     "evidence": "lib/blog.ts:208-210",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Dated official sources and links to S1 comparisons",
+     "status": "present",
+     "evidence": "lib/blog.ts posts link /proof/kajabi, /proof/skool, /proof/teachable and official kajabi.com/skool.com/teachable.com pages",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Categories Courses/Community created only with a real first post",
+     "status": "present",
+     "evidence": "lib/blog.ts:40-49 (BLOG_CATEGORIES incl. Courses, Community), posts at :136 Community and :210 Courses",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Sitemap",
+     "status": "present",
+     "evidence": "app/sitemap.ts:61-66 (BLOG_POSTS)",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 151,
+   "tag": "S10-HOME-PRICING-FAQ",
+   "state": "done",
+   "state_evidence": "queue.md:3308 'Estado: implementado e absorvido na versão publicada179; reconciliação documental23/10/2026 ... Não refazer'; queue.md:593.",
+   "asks": [
+    {
+     "what": "Questions 'How much does it cost?', 'Is there a contract? Can I cancel anytime?', 'Can I move from Kajabi, Stan...', 'Does it connect to my other tools?', 'Is there support, and how?', 'How long does it take to open a store?'",
+     "status": "present",
+     "evidence": "lib/home-faq.ts:16-22 (decisionQuestions), shown on /pricing via lib/pricing-page-data.ts:97 and app/pricing/page.tsx:73",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Home FAQ",
+     "status": "present",
+     "evidence": "lib/home-faq.ts:36-75 (homeQuestions, six short questions with links to /pricing), app/page.tsx Faq section; shortened by owner decision VS1 (lib/home-faq.ts:24-31 comment) and ME3 word limit, longer answers kept on /pricing",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Prices from lib/plan.ts, links to /platform/switching-to-marktmorgen and /developers",
+     "status": "present",
+     "evidence": "lib/home-faq.ts:17,19-20; lib/home-faq.ts:56",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Tests",
+     "status": "present",
+     "evidence": "tests/home-faq.test.ts, tests/home-faq-capabilities.test.ts",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  }
+ ]
+}

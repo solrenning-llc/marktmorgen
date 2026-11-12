@@ -1,5 +1,5 @@
 import { originFrom } from "@/lib/request-origin";
-import { addComment, deleteComment, dropLessonComments, readComment, setCommentsOn, setHidden } from "@/lib/lesson-comments";
+import { addComment, deleteComment, dropComments, dropLessonComments, readComment, setCommentsOn, setHidden } from "@/lib/lesson-comments";
 import { COMMENT_ID_PATTERN, CREATOR_AUTHOR } from "@/lib/lesson-comments-rules";
 import { tellStudent } from "@/lib/lesson-comment-notify";
 import type { NextRequest } from "next/server";
@@ -25,19 +25,19 @@ import {
   findLesson,
   lessonCount,
   lessonsInOrder,
-  readBody,
+  readBodyExact,
   readCourse,
   saveBody,
   saveCourse,
 } from "@/lib/course";
 import { emailKey, registerDrip, setBlocked, storeKey, studentEmail } from "@/lib/learn";
-import { dropTask, readTaskFor, review, saveTask } from "@/lib/assignment";
+import { type TaskDrop, applyTaskDrop, readTaskDrop, readTaskFor, review, saveTask } from "@/lib/assignment";
 import { readTask } from "@/lib/assignment-rules";
 import { tellStudentOfReview } from "@/lib/assignment-notify";
 import { EMAIL_PATTERN } from "@/lib/auth";
 import { dropQuiz, readQuiz, readQuizFor, resetTries, saveQuiz, setupOf } from "@/lib/quiz";
 import { CERT_ID_PATTERN, withdrawCertificate } from "@/lib/certificate";
-import { readListing } from "@/lib/catalog";
+import { hasProduct, readListing } from "@/lib/catalog";
 import { communityOf, courseChanged, unindexCourse } from "@/lib/community-index";
 import { LockBusyError, withLock } from "@/lib/redis-lock";
 import { claimUpload, dropStream } from "@/lib/stream";
@@ -77,7 +77,10 @@ export async function GET(request: NextRequest) {
   if (request.nextUrl.searchParams.get("quiz") === "1") {
     return Response.json({ ok: true, quiz: await readQuizFor(course.id, lessonId) }, { headers: { "Cache-Control": "no-store" } });
   }
-  return Response.json({ ok: true, text: await readBody(course.id, lessonId) }, { headers: { "Cache-Control": "no-store" } });
+  // Read exactly: an unknown reply is said as such, never handed to the editor as an empty lesson (rule 24).
+  const lessonText = await readBodyExact(course.id, lessonId).catch(() => null);
+  if (lessonText === null) return Response.json({ ok: false, error: "unavailable" }, { status: 503, headers: { "Cache-Control": "no-store" } });
+  return Response.json({ ok: true, text: lessonText }, { headers: { "Cache-Control": "no-store" } });
 }
 
 /**
@@ -99,7 +102,9 @@ export async function GET(request: NextRequest) {
  * verdict, feedback }` approves a student's work or asks for another try;
  * `{ action: "template", id, template }` gives a new course one of the ready
  * structures (lib/course-templates.ts) by its id, applied here to the course
- * as it is kept, in one write.
+ * as it is kept, in one write; `{ action: "shelf", id, products }` sets the
+ * course's "More from" shelf (628 [HN4](b)) to up to six of the store's own
+ * products, in that order, and `products: []` takes it off.
  *
  * `id` is always the product's, and the course is found through the
  * creator's own store, so nothing here can reach anyone else's course.
@@ -234,6 +239,11 @@ export async function POST(request: NextRequest) {
 
       if (action === "disable") {
         if (lessonCount(course) > 0) return Response.json({ ok: false, error: "not_empty" }, { status: 400 });
+        try {
+          await dropComments(course.id, [], store);
+        } catch {
+          return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+        }
         const result = await setProductCourse(ref, id, null);
         if (!result.ok) return Response.json({ ok: false, error: result.reason }, { status: 400 });
         await dropCourse(course, store);
@@ -256,9 +266,12 @@ export async function POST(request: NextRequest) {
         if (body.task === null) {
           const result = editCourse(course, { op: "task", lessonId, task: null });
           if (!result.ok) return Response.json({ ok: false, error: result.reason }, { status: 400 });
+          // The work handed in for it goes with it, files and all: read before the assignment leaves the course, so a
+          // read that fails keeps the assignment and everything handed in, findable for the next try (Revisor 1 on #2810).
+          const drop = await readTaskDrop(course.id, lessonId).catch((error: unknown) => (console.error("could not read the work handed in for an assignment", error), null));
+          if (!drop) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
           await save(result.course);
-          // The work handed in for it goes with it, files and all.
-          const files = await dropTask(course.id, lessonId, storeKey(store), store);
+          const files = await applyTaskDrop(drop, storeKey(store), store);
           if (files.length) await del(files).catch((error: unknown) => console.error("could not delete handed-in work", error));
           return Response.json({ ok: true, course: result.course });
         }
@@ -351,6 +364,17 @@ export async function POST(request: NextRequest) {
       // How long certificates issued from now on stay valid (639 [GL7](32)): 1 to 120 months, or for good.
       if (action === "cert-months") {
         const result = editCourse(course, { op: "certificate-months", months: body.months ?? null });
+        if (!result.ok) return Response.json({ ok: false, error: result.reason }, { status: 400 });
+        await save(result.course);
+        return Response.json({ ok: true, course: result.course });
+      }
+
+      // The "More from" shelf (628 [HN4](b)): up to six of the store's own products, in the creator's order; anything the
+      // store does not have, and the course itself, are left out here, so the course keeps only ids the store holds.
+      if (action === "shelf") {
+        const asked = Array.isArray(body.products) ? body.products.filter((p: unknown) => typeof p === "string" && hasProduct(store, p)) : null;
+        if (!asked) return Response.json({ ok: false, error: "invalid" }, { status: 400 });
+        const result = editCourse(course, { op: "shelf", products: asked, courseProductId: product.id });
         if (!result.ok) return Response.json({ ok: false, error: result.reason }, { status: 400 });
         await save(result.course);
         return Response.json({ ok: true, course: result.course });
@@ -464,6 +488,18 @@ export async function POST(request: NextRequest) {
       if (!result.ok) {
         return Response.json({ ok: false, error: result.reason }, { status: result.reason === "unknown" ? 404 : 400 });
       }
+      // An assignment that goes with its lesson is read before the course is saved without it (Revisor 1 on #2810): a
+      // read that fails keeps the lesson, its assignment and the work handed in, for the next try.
+      const taskDrops: TaskDrop[] = [];
+      if (edit.op === "lesson-remove" || edit.op === "module-remove") {
+        const keptNow = new Set(lessonsInOrder(result.course).map(({ lesson }) => lesson.id));
+        for (const { lesson } of lessonsInOrder(course)) {
+          if (keptNow.has(lesson.id) || !lesson.task) continue;
+          const drop = await readTaskDrop(course.id, lesson.id).catch((error: unknown) => (console.error("could not read the work handed in for a lesson's assignment", error), null));
+          if (!drop) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+          taskDrops.push(drop);
+        }
+      }
       await save(result.course);
       const lessons = lessonCount(result.course);
       if (lessons !== courseInfo.lessons) await setCourseLessons(ref, id, lessons);
@@ -476,10 +512,9 @@ export async function POST(request: NextRequest) {
         const goneLessons = lessonsInOrder(course).filter(({ lesson }) => !kept.has(lesson.id));
         const gone = goneLessons.map(({ lesson }) => lesson.id);
         await dropLessonComments(course.id, gone, store).catch((error) => console.error("could not delete a lesson's comments", error));
-        // An assignment goes with its lesson, and the work handed in for it.
-        for (const { lesson } of goneLessons) {
-          if (!lesson.task) continue;
-          const files = await dropTask(course.id, lesson.id, storeKey(store), store).catch(() => [] as string[]);
+        // An assignment goes with its lesson, and the work handed in for it, as read before the save.
+        for (const drop of taskDrops) {
+          const files = await applyTaskDrop(drop, storeKey(store), store);
           if (files.length) await del(files).catch((error: unknown) => console.error("could not delete handed-in work", error));
         }
       }

@@ -265,7 +265,7 @@ const SCRIPTS = new Map<string, (k: string[], a: string[]) => Promise<number>>([
   }],
   [BOOK_FORGET, async (k, a) => {
     if (text(await one(["GET", k[3]])) !== a[0]) return 2;
-    await memory([["DEL", k[0], k[1]], ["INCR", k[2]], ["EXPIRE", k[2], a[1]]]);
+    await memory([["DEL", k[0], k[1]], ["SET", k[2], a[2], "NX", "EX", a[1]], ["INCR", k[2]], ["EXPIRE", k[2], a[1]]]);
     return 1;
   }],
 ]);
@@ -542,6 +542,32 @@ async function main(): Promise<void> {
   is("the address is already off the lead: nothing more to take off it", await forgetLeadPerson(shop, THIRD), 0);
   is("but the kept book is deleted all the same", (await redis.pipeline([["EXISTS", statsKey]]))[0], 0);
 
+  part("The version never repeats, even after its keep ran out");
+  {
+    // A refresh reads the version, then the lead with the address on it; the version's keep (BOOK_KEEP_SECONDS) runs out while it reads Stripe and the person is deleted.
+    const own = { ...shop, statsId: "bookver01" };
+    const ver = `nl:aff:${own.statsId}:book:ver`;
+    const base = await readBook(shop);
+    const withLead = (email: string): typeof base => ({ ...base, rows: base.rows.slice(0, 1), refundsChecked: true, invoicesChecked: true, lines: [{ aff: base.rows[0].affiliate.id, currency: "usd", title: "Course", lead: { id: "l1", kind: "signup", email, readyAt: 0, why: "" } }] } as typeof base);
+    const keep = async (b: typeof base, at: number) => {
+      const held = (await claimRefresh(own))!;
+      await writeSnapshot(own, b, at, held, await readBookVersion(own), 1);
+      await releaseRefresh(held);
+    };
+    await keep(withLead("someone@example.com"), 1_000);
+    await forgetBookSnapshot(own.statsId);
+    await keep(withLead(""), 2_000);
+    const heldV = (await claimRefresh(own))!;
+    const readV = await readBookVersion(own);
+    await redis.pipeline([["PEXPIRE", ver, 1]]);
+    skew += 5;
+    await forgetBookSnapshot(own.statsId);
+    is("the version after the deletion is not the one the refresh read", (await readBookVersion(own)) !== readV, true);
+    is("so the refresh that read before the deletion keeps nothing", await writeSnapshot(own, withLead("bob@example.com"), 3_000, heldV, readV, 1), null);
+    is("and the deleted person's masked address is not in the kept book", JSON.stringify(await redis.pipeline([["HGETALL", `nl:aff:${own.statsId}:book`]])).includes("b•••@example.com"), false);
+    await releaseRefresh(heldV);
+  }
+
   part("A Redis that cannot run the scripts writes nothing");
   await writeHeld(shop, await readBook(shop), Math.floor(stale / 1000) + 8);
   const kept8 = JSON.stringify(await redis.pipeline([["HGETALL", statsKey]]));
@@ -578,8 +604,9 @@ async function main(): Promise<void> {
   const gate = page.indexOf("const admission = await admitAffiliatePage(store, affiliate);");
   is("the page asks before it reads listings or codes, never works the book out itself, and says when its figures are from", [gate > 0, gate < page.indexOf("await readListings("), gate < page.indexOf("await codeOwners("), page.includes("await readBook("), page.includes("a.figuresAsOf(asOf)"), page.includes("a.figuresSoon")], [true, true, true, false, true, true]);
 
-  part("Only the affiliate book is counted outside a connection's share");
-  is("a closed list: the one refresh done for everybody", sharedCallers(sourcesUnder("lib", "app")), ["lib/affiliate-page-admission.ts"]);
+  part("Only the affiliate book and the community archive's walk are counted outside a connection's share");
+  // The walk of a community's archive is done once for everybody who searches it (C3-83 (d), app/[handle]/community/search/page.tsx).
+  is("a closed list: the work done for everybody", sharedCallers(sourcesUnder("lib", "app")).sort(), ["app/[handle]/community/search/page.tsx", "lib/affiliate-page-admission.ts"]);
   const tricks = [
     { file: "multi-line.ts", text: "await takePublicRequest(\n  store,\n  \"buyer\",\n  now,\n  units,\n  { shared: true },\n);" },
     { file: "variable.ts", text: "const shared = true;\nawait takePublicRequest(store, \"buyer\", now, units, { shared });" },

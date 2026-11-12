@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { cronAllowed } from "@/lib/request-guard";
-import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { isRedisConfigured } from "@/lib/redis";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { isBillingConfigured } from "@/lib/billing";
 import { sendFailedPlanNotices, sendReminders } from "@/lib/billing-reminders";
 import { runBreaks } from "@/lib/plan-pause";
@@ -34,8 +35,12 @@ export async function GET(request: NextRequest) {
   if (!isRedisConfigured() || !isBillingConfigured()) {
     return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
   }
-  const [got] = await redisPipeline([["SET", "nl:remind:lock", "1", "NX", "EX", 300]]);
-  if (got === null) return Response.json({ ok: true, busy: true });
+  // One run at a time, on an exact claim (lib/claim-mark.ts): held by another run is busy; an unknown answer
+  // runs nothing this time, and the lock is let go at the end only while it still holds this run's own value.
+  const lock = claimValue();
+  const got = await claimMark("nl:remind:lock", 300, lock);
+  if (got === "taken") return Response.json({ ok: true, busy: true });
+  if (got !== "ours") return Response.json({ ok: false, error: "lock_unknown" }, { status: 503 });
   try {
     const counts = await sendReminders();
     const failed = await sendFailedPlanNotices();
@@ -51,6 +56,6 @@ export async function GET(request: NextRequest) {
     console.error("sending billing reminders failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });
   } finally {
-    await redisPipeline([["DEL", "nl:remind:lock"]]).catch(() => {});
+    await releaseMark("nl:remind:lock", lock);
   }
 }

@@ -25,6 +25,8 @@ import { phoneBeginnerQuestions } from "@/lib/phone-faq";
 import { MAX_DEVICES } from "@/lib/phone-alerts-rules";
 import { teamBeginnerQuestions } from "@/lib/team-faq";
 import { securityBeginnerQuestions } from "@/lib/security-faq";
+import { MAX_IMAGE_BYTES } from "@/lib/product-image";
+import { maxFileLabel } from "@/lib/product-file";
 import { domainBeginnerQuestions } from "@/lib/domain-faq";
 import { insightsBeginnerQuestions } from "@/lib/insights-faq";
 import { reviewsBeginnerQuestions } from "@/lib/reviews-faq";
@@ -35,6 +37,7 @@ import { liveEventsBeginnerQuestions } from "@/lib/live-events-faq";
 import { emailBeginnerQuestions } from "@/lib/email-faq";
 import { outreachBeginnerQuestions } from "@/lib/outreach-faq";
 import { switchingBeginnerQuestions } from "@/lib/switching-faq";
+import { MIGRATION_GUIDES, MIGRATION_GUIDE_PAGES } from "@/lib/migration-guides";
 import { clickFunnelsBeginnerQuestions } from "@/lib/clickfunnels-faq";
 import { crmBeginnerQuestions } from "@/lib/crm-faq";
 import { aiWritingBeginnerQuestions } from "@/lib/ai-writing-faq";
@@ -71,7 +74,8 @@ import { EXPECTATION, OPEN_COUNTRIES_WORDS, PITCHES_PER_DAY, REPITCH_DAYS } from
 import type { TopicPage } from "@/lib/site-pages";
 import { PLAN_AT, feeWords } from "@/lib/fee-words";
 import { paypalAtCheckout, paypalConnectionWords } from "@/lib/public-explanations";
-import { TEAM_LIMITS, teamLimitWords } from "@/lib/team-scheduling-rules";
+import { busyReadLimit, googleWritesLimit, teamHostCalendarLimit, teamSyncLimit } from "@/lib/host-sync-words";
+import { HOST_STALE_MINUTES, TEAM_LIMITS, teamLimitWords } from "@/lib/team-scheduling-rules";
 import { STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
 import { COMMUNITY_PICTURES } from "@/lib/community-picture-rules";
 import { TASK_ROOM_BYTES } from "@/lib/assignment-rules";
@@ -79,9 +83,18 @@ import { storageWords } from "@/lib/storage-quota";
 import { MAX_AUTO_REMINDERS, MAX_LINES, OPEN_DAYS, REQUEST_LIMITS } from "@/lib/payment-request-rules";
 import { MAX_VERSIONS as AGREEMENT_VERSIONS, SIGN_DAYS } from "@/lib/agreement-rules";
 import { PLAN_TITLES, TIERS } from "@/lib/plan";
+import { uploadBackendOpen } from "@/lib/upload-budget-policy";
 
 /** Whether stores can be put on their own domain on this deployment. */
 const DOMAINS = isDomainsConfigured();
+/**
+ * Whether a new lesson video can be kept by the video service: the same door
+ * the studio's video upload asks (reserveStoreUpload, app/api/store/stream).
+ * Captions and video made into several sizes exist only for such a video;
+ * while the door is closed a lesson video is a plain file, played at its own
+ * size with no captions, and the pages say only that.
+ */
+const LESSON_VIDEO_SERVICE = uploadBackendOpen("stream");
 /** What Studio and the trial send in a month, as the pages say it: read from the limit the code enforces, never typed. */
 const PRO_EMAILS = PRO_MONTHLY_EMAILS.toLocaleString("en-US");
 const TRIAL_EMAILS = TRIAL_MONTHLY_EMAILS.toLocaleString("en-US");
@@ -258,7 +271,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         items: [
           { title: "Add up to 50 options", body: "A name the buyer reads — “1 week,” “Commercial license” — a price for each, and, if you like, a few lines on what each one includes." },
           { title: "Give each option its own delivery", body: "Its own file, up to 5 GB, or its own link. The buyer of the small size never receives the big one. On a course, every option opens the course, and a file or link on one is what that one adds." },
-          { title: "The buyer compares and picks", body: "With what each includes written down, the options stand side by side, and the one you recommend opens chosen. More than six become a list to pick from. What is charged is read from what you saved, never from the page." },
+          { title: "The buyer compares and picks", body: "With what each includes written down, the options stand side by side, and the one you recommend is marked and listed first, while the buyer still picks. More than six become a list to pick from. What is charged is read from what you saved, never from the page." },
         ],
       },
       {
@@ -314,7 +327,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
     title: "Courses your students",
     highlight: "open without a password",
     intro:
-      "Modules and lessons with video that plays in the size each student's connection can carry, text and downloads, free preview lessons on your store, and modules that open on the day you choose. Students get in with the email they paid with.",
+      (LESSON_VIDEO_SERVICE ? "Modules and lessons with video that plays in the size each student's connection can carry," : "Modules and lessons with video,") + " text and downloads, free preview lessons on your store, and modules that open on the day you choose. Students get in with the email they paid with.",
     badge: WORKING,
     accent: "from-sky-brand to-violet-brand",
     visual: "course",
@@ -336,11 +349,11 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         kind: "features",
         title: "What a course holds",
         items: [
-          { icon: "play", title: "Video that does not stop to load", body: "Each video is made into up to five sizes, from 240p to 1080p and never larger than the video itself. The player sends the size the student's connection can carry and changes it as the connection changes." },
-          { icon: "video", title: "A player students control", body: "Students can pick a size and a playback speed, watch full screen or in a small window, and the video goes on from where they stopped on that device." },
+          ...(LESSON_VIDEO_SERVICE ? [{ icon: "play" as const, title: "Video that does not stop to load", body: "Each video is made into up to five sizes, from 240p to 1080p and never larger than the video itself. The player sends the size the student's connection can carry and changes it as the connection changes." }] : []),
+          { icon: "video", title: "A player students control", body: `Students can pick ${LESSON_VIDEO_SERVICE ? "a size and " : ""}a playback speed, watch full screen or in a small window, and the video goes on from where they stopped on that device.` },
           { icon: "phone", title: "Video that stays upright", body: "Up to 5 GB a lesson. A video filmed upright on a phone plays upright, in a frame of its own shape." },
-          { icon: "type", title: "Captions in up to 12 languages", body: "Upload a .vtt or .srt file for a language and the player shows a captions button. Bold, italics and where a caption sits are kept; a file that is not captions is refused instead of shown as nothing." },
-          { icon: "sparkle", title: "Captions written by AI", body: `One press writes a lesson's captions from what is said in it, in the language spoken and, if you like, translated into up to two more. ${dollars(CENTS_PER_MINUTE)} a minute of video for each language, shown before you press and charged then to the card your plan is paid with; anything not delivered within ${GIVE_UP_HOURS} hours is refunded.` },
+          ...(LESSON_VIDEO_SERVICE ? [{ icon: "type" as const, title: "Captions in up to 12 languages", body: "Upload a .vtt or .srt file for a language and the player shows a captions button. Bold, italics and where a caption sits are kept; a file that is not captions is refused instead of shown as nothing." },
+          { icon: "sparkle" as const, title: "Captions written by AI", body: `One press writes a lesson's captions from what is said in it, in the language spoken and, if you like, translated into up to two more. ${dollars(CENTS_PER_MINUTE)} a minute of video for each language, shown before you press and charged then to the card your plan is paid with; anything not delivered within ${GIVE_UP_HOURS} hours is refunded.` }] : []),
           { icon: "lock", title: "A video address that expires", body: "The player on a lesson page is signed for a few hours. Without that signature, the video and its files are refused." },
           { icon: "eye", title: "Free preview lessons", body: "Any lesson can be watched from your store before buying, so the buyer knows what they are paying for." },
           { icon: "calendar", title: "Modules that open over time", body: "A module can open a set number of days after each student joins, and the student gets an email the day it does." },
@@ -373,8 +386,8 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
           "No live lessons inside the course itself. Hold them as live events in your community, or put a link in a lesson to where you hold them.",
           `Stream video has a finite threshold of ${paidVideoWords()} a month across your store. New playback pauses at the recorded threshold. The meter is read about once an hour; existing player links may remain valid until they expire. Your studio shows the recorded hours.`,
           `Without a paid plan, lesson videos pause past the store's hours until the plan is paid (for a store with no plan, until the month turns): ${hoursWords(TRIAL_VIDEO_SECONDS)} a month in the free trial, and ${hoursWords(SETUP_VIDEO_SECONDS)} a month before a plan starts and after one ends.`,
-          "Video is kept up to 1080p: a 4K file plays at 1080p.",
-          `Captions written by AI are machine transcription: read them before you rely on them, and replace a language with your own file whenever you like. They are for videos of up to ${MAX_AUTO_MINUTES / 60} hours, need a paid plan, and come as captions in the player, not as a separate transcript.`,
+          ...(LESSON_VIDEO_SERVICE ? ["Video is kept up to 1080p: a 4K file plays at 1080p.",
+          `Captions written by AI are machine transcription: read them before you rely on them, and replace a language with your own file whenever you like. They are for videos of up to ${MAX_AUTO_MINUTES / 60} hours, need a paid plan, and come as captions in the player, not as a separate transcript.`] : []),
           "A signed address stops a link from being passed around. It does not stop a student from recording their own screen; nothing does.",
         ],
       },
@@ -384,7 +397,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         items: [
           // 534 [FQ1], unit 2: what someone starting out asks, answered by what the code does (lib/course-faq.ts).
           ...courseBeginnerQuestions(),
-          { q: "How long until a video I upload can be watched?", a: "It plays as soon as its first size is made, and the larger sizes follow by themselves. Your studio says when it is ready, and a student who opens the lesson before that is told the video is being prepared." },
+          { q: "How long until a video I upload can be watched?", a: LESSON_VIDEO_SERVICE ? "It plays as soon as its first size is made, and the larger sizes follow by themselves. Your studio says when it is ready, and a student who opens the lesson before that is told the video is being prepared." : "As soon as its upload finishes. It plays in the student's browser at the size you uploaded it." },
           { q: "How does a student come back next week?", a: "On the device they paid on, the course simply opens. On any other, they ask for a link on the course page and it is emailed to the address they paid with. No account, no password." },
           { q: "Can I sell a course monthly?", a: "Yes. Sold as a membership, the course stays open while the member pays and closes when the membership ends." },
           { q: "Can students pay in installments?", a: "Yes. A course with one price can be offered in two to twelve weekly or monthly payments. The student gets in after the first." },
@@ -530,8 +543,8 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         kind: "limits",
         title: "What it does not do yet",
         items: [
-          "Your calendars are read for busy times, and only calls set to Google Meet, and team calls whose host connected their own Google Calendar, are written into Google Calendar. Other bookings reach your calendar as a feed you subscribe to, and a new busy time can take about ten minutes to close a slot.",
-          "Two-way Google Calendar sync for team hosts is built and switches on once Google approves the added permissions for our app; until then, hosts add their calendar's private iCal address, which is read the same way but writes nothing.",
+          googleWritesLimit(),
+          ...[teamSyncLimit()].filter((line) => line !== null),
           "A team call has one person per time, keeps its host when the buyer moves it, and sends its booking email to one address: yours when you host it, otherwise its first host's. Its reminders before the call come to you. A host's daily cap counts team calls only.",
           "Buyers move a booking themselves, but canceling is a reply to their confirmation email, which reaches you; a refund is made from your Stripe dashboard.",
           "Zoom links are not made for you yet. Connecting Zoom opens to every store once Zoom approves our app; until then, for Zoom, you type your own link. Stan creates Zoom links automatically.",
@@ -552,7 +565,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
           { q: "Is sales tax added to calls?", a: "When you switch Stripe Tax on, it is added to calls as it is to everything else, on your own account." },
           { q: "Where is the video room, and who runs it?", a: "At meet.jit.si, the free Jitsi Meet service run by 8x8, not by us. Its link is in the booking and reminder emails, the calendar file, your bookings feed and the buyer's list of purchases. Open it a few minutes early: the first person in may be asked to sign in to Jitsi (with a Google account, for example) to start the meeting." },
           { q: "What if a buyer picks a time and leaves without paying?", a: "The time is held for them while Stripe's page is open, about half an hour, and goes back on sale when it closes. With checkout reminders on, a buyer who agreed on that page to hear from you gets one email: the time they picked, that it was not kept, and a link to the times still open, at today's price. It is sent only while a time is left to book, never twice in a week, and never once they have booked." },
-          { q: "How do team event types work?", a: "Under a call with weekly hours and one person per time, choose Make it a team event, pick round robin or collective, and select who hosts it: you and anyone on your store's team. Each host gets their own hours, time zone, gap between calls, notice and a cap of team calls a day, read on their own clock, daylight saving included. Round robin gives each booking to the free host with the fewest bookings of it so far. Each host sets their own calendar once, under Your calendar in the studio: a private iCal address, or their Google Calendar for two-way sync once it is switched on. A host whose calendar was last read more than 45 minutes ago, or cannot be read, is left out until it can be, so nobody is booked over a meeting we could not see; the other hosts' times stay open. Every hold and booking takes its hosts' time in one step, so the same person can never be held twice for one time, even by two stores." },
+          { q: "How do team event types work?", a: `Under a call with weekly hours and one person per time, choose Make it a team event, pick round robin or collective, and select who hosts it: you and anyone on your store's team. Each host gets their own hours, time zone, gap between calls, notice and a cap of team calls a day, read on their own clock, daylight saving included. Round robin gives each booking to the free host with the fewest bookings of it so far. Each host sets their own calendar once, under Your calendar in the studio: a private iCal address, or their Google Calendar for two-way sync once it is switched on. A host whose calendar was last read more than ${HOST_STALE_MINUTES} minutes ago, or cannot be read, is left out until it can be, so nobody is booked over a meeting we could not see; the other hosts' times stay open. Every hold and booking takes its hosts' time in one step, so the same person can never be held twice for one time, even by two stores.` },
           { q: "How are Google Meet links made?", a: "Connect your own Google Calendar under Video calls in your studio, then choose Google Meet (automatic) under Where the call happens. Each booking gets an event with a Meet link on your primary calendar, with the buyer on its guest list; a group call or a live session has one event per time, with up to 200 guests who do not see one another. Google emails nobody: buyers get the link in our booking email, reminders and calendar file. A moved booking moves its event, and a full refund deletes a one-to-one call's event or takes the buyer off a group's guest list. If a meeting cannot be made, the booking gets your own link or a Jitsi Meet room, and we keep trying for a few hours. If a Meet link is made more than two hours before the call, it is emailed to those booked, up to 20 people." },
         ],
       },
@@ -814,7 +827,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
           { icon: "pin", title: "Your postal address", body: "In every email, as US law (CAN-SPAM) requires of commercial email, with a line on why the reader is getting it." },
           { icon: "shield", title: "Dead addresses taken off for you", body: "An address that cannot be delivered to, or whose owner reports an email as spam, is taken off your list by itself and never written to again. Mail apps judge a sender by exactly those two things." },
           { icon: "download", title: "Your list is yours", body: "Download it as a CSV any time, from any plan. Bring one in from a spreadsheet, up to 50,000 addresses a file, confirming each time that those people agreed.", href: "/platform/switching-to-marktmorgen" },
-          { icon: "download", title: "Your whole store as one file", body: "Your products and their pages, posts, courses with every lesson's text, forms and their answers, contacts and a summary of your orders, downloaded as one file from your studio: from your studio's requests by its size while a plan runs, and up to five times once it has ended, before your store closes 30 days later. Files and videos download from their own pages." },
+          { icon: "download", title: "Your store's main data as one file", body: "Your store's address, name, bio, links, currency and the date it was created, your products and their pages, thank-you notes, posts, courses with every lesson's text, forms and their answers, contacts and a summary of your orders, downloaded as one file from your studio: from your studio's requests by its size while a plan runs, and up to five times once it has ended, before your store closes 30 days later. Files and videos download from their own pages. Nothing else is in it. For example, files, videos, community posts, email sequences and broadcasts, reviews, coupons, affiliates, the times of booked calls (their payments are in your orders), funnels and CRM deals and tasks stay in your studio." },
           { icon: "target", title: "Sequences that stop selling to buyers", body: "End a sequence for anyone who buys, or gets one product, checked before each email, so a launch sequence never pitches the course to somebody who already owns it. And send any email of it only to those who have a product or do not, who have bought or not yet, or who carry a label, from your import or from a sequence; everyone else skips it or leaves the sequence there. Or only to those who used a link in the email before, or did not: counted only for readers who allowed it with a box of their own when they joined, and never from opens." },
           { icon: "ladder", title: "Steps that act, not only emails", body: "A step can give someone a label, take one off, start them on another sequence or tell your webhooks, with the same conditions an email has, and a sequence can split its people into halves A and B to try two versions on one list. “If they used the link and have not bought, label them interested”, and a sequence that starts with that label takes it from there: automations, in the sequences you already have." },
           { icon: "ladder", title: "Workflows that branch, with a goal and a history", body: "Any step can be an IF/ELSE: those its condition holds for do it and go on to a later step you choose, everyone else goes to another, or the run ends. A goal (bought anything, got one product, carries a label) ends a run before its next step. Before switching a workflow on, preview the exact path someone would take: describe them, or pick someone from your list. New workflows are saved paused. Every run keeps its history: each step attempted, then confirmed, failed or uncertain. An uncertain step is never repeated by itself; the run waits for you to say it went through, try it again or end it." },
@@ -823,7 +836,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
           { icon: "refresh", title: "Tell buyers about an update", body: "A new edition, more templates, new lessons: one press emails everyone who bought that product, with your words and the link to get the new version, in your store's language. Once a week at most per product, with a link to stop these emails." },
           { icon: "chart", title: "What each email brought", body: "Links to your store in an email carry that email's tag, so the visits it brought and the sales made on the page a link opened are counted for it, the sales read from your own Stripe account. One tag per email, never one per reader: no tracking pixel and no open rate. Who used a link is kept only in sequences, only for readers who allowed it, and only to choose their next email." },
           { icon: "flask", title: "Two subject lines, the better one to the rest", body: "Try a second subject on 20%, 30% or 50% of a list of 100 people or more, half each, chosen at random. After the hours you choose, everyone else gets the one whose links brought more visits or sales for each email sent. When neither did better they get the first, and your studio says so with the counts." },
-          { icon: "mail", title: "An email you sent, published on your store", body: "Press Publish on your store under a sent email and it gets a page of your store, listed with every other one you chose at /letters, in your store\u2019s look. Nothing is published by itself, and you are asked first, because anyone can read it once it is. Only its subject and words go up, with the links as you typed them, never who received it. Take it off and its copy is deleted." },
+          { icon: "mail", title: "An email you sent, published on your store", body: "Press Publish on your store under a sent email and it gets a page of your store, listed with every other one you chose at /letters, in your store\u2019s look. Nothing is published by itself, and you are asked first, because anyone can read it once it is, unless you keep it for the people who have products you choose. Only its subject and words go up, with the links as you typed them, never who received it. Take it off and its copy is deleted." },
           { icon: "repeat", title: "An email that worked, used again", body: "From the list of what you sent: write it again as a new email, or keep sending it by itself to everyone who joins from now on. Written only to those who had not bought, or did not own a product, it keeps going only to them. It becomes one more email of a sequence you can open, pause or delete, counted in the same monthly emails." },
           { icon: "sparkle", title: "A first draft with AI, on " + AI_PLANS_WORDS, body: "Pick what the email is for and which product it is about, say it in a few words, and the subject and body are filled in for you to read and change, with the product's link. Your unsubscribe link and postal address are added at the bottom as always." },
           { icon: "chat", title: "Announcements to your community", body: "A post in your community can also go by email to the members who asked for it, counted in the same monthly emails.", href: "/platform/community" },
@@ -1490,10 +1503,10 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         title: "What it does not do",
         items: [
           "For your own calls it is not a two-way sync. Only calls set to Google Meet are written into your calendar, on a Google Calendar you connect under Video calls; other bookings reach it through the feed you subscribe to, which your calendar app refreshes on its own schedule.",
-          "Hosts of team calls set their own calendar under Your calendar: a private iCal address, or their own Google Calendar for two-way sync (busy times read from the calendars they pick, bookings written to the one they choose), which switches on once Google approves the added permissions for our app.",
+          teamHostCalendarLimit(),
           "A new busy time can take about ten minutes to close a slot.",
           "Up to three calendars, read 120 days ahead.",
-          "Busy times are read only through a private iCal address, not through a Google or Microsoft connection. A calendar that cannot give one cannot be read.",
+          busyReadLimit(),
         ],
       },
       {
@@ -2451,6 +2464,11 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         ],
       },
       {
+        kind: "features",
+        title: "Guides for one platform",
+        items: MIGRATION_GUIDES.map((g) => ({ icon: "door" as const, title: `Move from ${g.platform}`, body: g.summary, href: `/platform/${g.slug}` })),
+      },
+      {
         kind: "faq",
         title: "Questions about moving",
         items: [
@@ -2538,6 +2556,8 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
       ] },
     ],
   },
+  // 239 [CF2]: one guide per source platform, out of the menu (lib/migration-guides.ts).
+  ...MIGRATION_GUIDE_PAGES,
   {
     slug: "security",
     section: "platform",
@@ -2545,7 +2565,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
     title: "How your store",
     highlight: "and your buyers are protected",
     intro:
-      "What we do, written so you can check it: payments on your own Stripe account, sign-in without passwords, strict rules on what your pages may run, and a refund that closes what it paid for. And, at the end, what none of it does.",
+      "What we do, written so you can check it: payments on your own Stripe account, sign-in without passwords, strict rules on what your pages may run, a refund that closes what it paid for, your data yours to take or delete, and how the code is checked. And, at the end, what none of it does.",
     visual: "security",
     badge: WORKING,
     accent: "from-violet-brand to-mint-brand",
@@ -2560,12 +2580,13 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         items: [
           { icon: "bank", title: "Sales on your own Stripe", body: "The buyer pays on Stripe's own checkout, on your account. We never see a card number and never hold a balance of yours." },
           { icon: "tag", title: "Prices worked out on our side", body: "What a buyer is charged is read on our server from what you saved, never from anything the page sends." },
-          { icon: "key", title: "No password to steal", body: "You sign in with a link sent to your email. It works once, stops working after 15 minutes, and there is a limit on how often a link can be requested." },
+          { icon: "key", title: "No password to steal", body: "You sign in with a link sent to your email. It works once and stops working after 15 minutes. We keep only a hash of the link, not the link itself, and there is a limit on how often a link can be requested." },
           { icon: "phone", title: "Passkeys, if you want them", body: "Optional: sign in with the face, fingerprint or PIN that unlocks your phone or laptop. We keep only the public half of the key, and the emailed link keeps working." },
           { icon: "lock", title: "Two-step login", body: "Turn it on and the emailed link also asks for the six-digit code in your authenticator app, so somebody who gets into your email still cannot open your studio. Ten recovery codes for when your phone is not at hand, each good once; a passkey needs no code. A code is never taken twice, five wrong ones end the login, and turning it on or off emails you. Turning it on asks for a recovery address, a second inbox: lose your phone and your codes, and a link sent there lets you straight back in." },
           { icon: "mail", title: "Lost your email? Still yours", body: "Add a recovery address, a second inbox you confirm with a code, and a passkey. If you can no longer open the inbox you log in with, a passkey logs you in with everything open, and a link to your recovery address lets you in at once, with payments, exports, settings, sending and your sign-in address opening a week later, unless your old inbox answers first. Then move your sign-in address to one you have. Nobody here has to open anything for you." },
           { icon: "users", title: "Team roles checked on our server", body: "What an Admin, an Editor or Support may do is checked on the server for every request, not only hidden on the screen." },
           { icon: "refresh", title: "A fresh session every time", body: "Each sign-in starts a new session, and a session the browser held before is closed." },
+          { icon: "lock", title: "A session cookie scripts cannot read", body: "After you sign in, your browser keeps a cookie that says it is you. Scripts on a page cannot read it, because it is HttpOnly, and on the live site it is sent only over an encrypted connection. We keep only a hash of it. It ends after 30 days, or when you log out." },
           { icon: "door", title: "Log out of all devices", body: "One button at the bottom of your studio closes every session you have open, everywhere." },
           { icon: "mail", title: "An email when something important changes", body: "Whenever your Stripe account, your domain or your webhooks change, we write to your sign-in address saying what changed and when." },
         ],
@@ -2587,11 +2608,34 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         items: [
           { icon: "download", title: "Downloads that expire", body: "The download on the thank-you page works for 3 days; after that the buyer gets it again by email. Where a file is stored is never shown, and large files go through signed links that expire in minutes." },
           { icon: "file", title: "Files that cannot run", body: "Every file is handed over as a download, with headers that stop a browser running anything inside it." },
+          { icon: "camera", title: "Pictures checked, files size-limited", body: `A product or page picture you upload is checked by its first bytes, not by its name. It must really be a JPEG or a WebP, at most ${MAX_IMAGE_BYTES / 1_000_000} MB, or it is refused. A file you sell can be at most ${maxFileLabel()}.` },
           { icon: "ban", title: "A full refund closes the door", body: "Refund a payment in full on your Stripe account and its download stops at once, its course closes within 10 minutes, the community within 5 minutes, and its license key is revoked within about 5 minutes. A partial refund keeps access." },
           { icon: "clock", title: "Limits that stop bots", body: "Checkouts are limited to 20 per 10 minutes per connection per store, and bookings and every form that sends an email have limits of their own, so a script cannot sit on your limited stock or your call times." },
-          { icon: "plug", title: "Signed webhooks, guarded addresses", body: "Webhooks are signed with HMAC-SHA256, and a calendar or webhook address that points into a private network is refused." },
+          { icon: "shield", title: "Hidden traps for bots", body: "The sign-in form and your store's contact and free-product forms have a hidden box that people never see. A request that fills it in is dropped. Sign-in also asks our hosting provider whether the request came from a program." },
+          { icon: "plug", title: "Signed webhooks, guarded addresses", body: "Webhooks are signed with HMAC-SHA256. When our server fetches an address someone typed, such as a webhook or a calendar feed, it first looks up where the address leads and refuses one inside a private network." },
+          { icon: "gauge", title: "Ceilings on paid work", body: "Work that costs us money, such as AI writing and uploads, is counted against a monthly ceiling for your store, and one for the whole site, before it starts. If a ceiling is reached, or cannot be checked, the work is refused instead of run." },
           { icon: "lock", title: "Email platform keys kept encrypted", body: "The API key of your Mailchimp, Kit, beehiiv or MailerLite is encrypted before it is stored, and never shown again." },
           { icon: "star", title: "Reviews only from paying buyers", body: "A review can be written only for an order your own Stripe account says was paid and not refunded in full." },
+        ],
+      },
+      {
+        kind: "features",
+        title: "Your data, yours to take or delete",
+        items: [
+          { icon: "download", title: "A copy of your store's main data", body: "You, or a teammate allowed to export, can download a copy of your store's address, name, bio, links, currency and the date it was created, your products and their pages, thank-you notes, courses with every lesson's text, blog posts, forms and their answers, contacts and a summary of your orders as one file, from your studio. Nothing else is in it. For example, files, videos, community posts, email sequences and broadcasts, reviews, coupons, affiliates, the times of booked calls (their payments are in your orders), funnels and CRM deals and tasks stay in your studio." },
+          { icon: "trash", title: "Buyers can delete their own data", body: "A buyer can delete what a store keeps about them through a link emailed to them. No account is needed, and nobody has to approve it.", href: "/privacy/delete" },
+          { icon: "users", title: "Delete a person when they ask", body: "You, or a teammate allowed to, can delete one person from your store. Before you confirm, the studio says what is deleted, what is kept and why." },
+        ],
+      },
+      {
+        kind: "features",
+        title: "How the code is checked",
+        intro: "None of these checks proves that there are no faults. Each one finds some kinds of faults early.",
+        items: [
+          { icon: "flask", title: "Tests on every change", body: "Every proposed change to the code, and the main code once a day, runs our automated tests." },
+          { icon: "eye", title: "Code scanning", body: "CodeQL, GitHub's code scanner, looks for known kinds of security faults in the code on every proposed change to the code and once a day." },
+          { icon: "list", title: "Packages checked for known flaws", body: "npm audit compares the packages the site is built from with public lists of known security flaws, on every proposed change to the code and once a day." },
+          { icon: "scroll", title: "A written review", body: "On October 18, 2026, the code was reviewed for security faults. Each fault found was tried out on test data, written down with how serious it was, and then fixed or listed as not fixed yet." },
         ],
       },
       {
@@ -2599,6 +2643,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         title: "What this does not do",
         intro: "Said here so nobody relies on it for more than it does.",
         items: [
+          "No system is free of faults, and this one is not either. The checks above find some kinds of faults, not every one. If you find one, please tell us: the question “How do I report a security problem?” below says how.",
           "Two-step login is off until you turn it on. Without it, your account is as safe as your email inbox: protect that one.",
           `Lose your phone, your recovery codes and every passkey, and a link to your recovery address gets you straight back in. Lose that inbox too, and you still get in at once, with the emailed link alone: you can sell, edit your products and pages and answer buyers, while ${LOCKED_LIST} stay locked for 7 days, until two-step login turns off. That lock is what stops somebody who only has your sign-in inbox, and a login with a code or a passkey, or Cancel in your studio, logs them out.`,
           "On a payment plan, a refund in full of the first payment closes access like any refund in full; a refund of a later payment is not detected, so take the buyer off the course, or remove their access, yourself. A refunded membership closes when its subscription is canceled in Stripe.",
@@ -2617,6 +2662,23 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
           { q: "Who handles a refund?", a: "You do, in your own Stripe dashboard. What a full refund closes here happens by itself, read from Stripe." },
           { q: "Can I sign in with a password?", a: "No. There is no password to set, and none kept here to be stolen. Each link we email works once, for 15 minutes." },
           { q: "How do I report a security problem?", a: "Email support@marktmorgen.com with what you found and how to see it, and a person answers by email. Please test only your own store and your own data. The same address is in our security.txt file, at marktmorgen.com/.well-known/security.txt, the standard place security researchers look." },
+        ],
+      },
+      {
+        kind: "terms",
+        title: "Words on this page",
+        items: [
+          { term: "Passkey", meaning: "A way to sign in with the face, fingerprint or PIN that unlocks your phone or computer. Your device keeps the private part of the key; we keep only the public part." },
+          { term: "Two-step login", meaning: "Signing in with two things instead of one: the link sent to your email, and a six-digit code from an authenticator app on your phone." },
+          { term: "Recovery code", meaning: "A code you save when you turn on two-step login. Each one works once, for when your phone is not at hand." },
+          { term: "Hash", meaning: "A scrambled stand-in for a piece of text. The same text always gives the same hash, but there is no practical way to turn the hash back into the text. So a stolen hash does not give anyone the link or the session it came from." },
+          { term: "Cookie, HttpOnly", meaning: "A cookie is a small note a website asks your browser to keep. HttpOnly means scripts on the page cannot read it; only the browser sends it back to us." },
+          { term: "Content-Security-Policy", meaning: "A rule a page sends to the browser saying which scripts may run on it. Anything else is blocked." },
+          { term: "HSTS", meaning: "HTTP Strict Transport Security: a rule that tells the browser to use only the encrypted connection to this site." },
+          { term: "Webhook", meaning: "A message our server sends to an address you choose when something happens in your store." },
+          { term: "HMAC-SHA256", meaning: "A way to sign a message with a secret key, so the receiver can check that it came from us and was not changed on the way." },
+          { term: "Private network", meaning: "Addresses inside a company's or a cloud's own network, which the open internet cannot reach." },
+          { term: "Code scanning", meaning: "A program that reads the code and points out patterns that often lead to security faults." },
         ],
       },
     ],

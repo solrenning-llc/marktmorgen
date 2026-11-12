@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { LIST_TAG, STORE_TAG, heardFromSender } from "@/lib/mail-health";
+import { recordSesEvent } from "@/lib/mail-report";
 import { redisPipeline } from "@/lib/redis";
 import { clientAddress, limited, withinLimit } from "@/lib/request-guard";
 import { isSesConfigured, sesConfig } from "@/lib/ses";
@@ -12,6 +12,7 @@ const MAX_BODY_BYTES = 300_000;
 const PER_MINUTE = 3_000;
 
 export const maxDuration = 30;
+
 
 /**
  * Amazon's announcement that an email we sent through Amazon SES bounced, or
@@ -72,11 +73,8 @@ export async function POST(request: NextRequest) {
     }
     const event = readSesEvent(message.Message);
     if (!event) return Response.json({ ok: true });
-    const results: string[] = [];
-    for (const to of event.recipients) {
-      results.push(await heardFromSender({ kind: event.kind, permanent: event.permanent, to, store: event.tags[STORE_TAG] ?? "", list: event.tags[LIST_TAG] ?? "" }));
-    }
-    return Response.json({ ok: true, result: results.includes("paused") ? "paused" : results.includes("counted") ? "counted" : "ignored" });
+    const result = await recordSesEvent(event);
+    return result === null ? Response.json({ ok: true }) : Response.json({ ok: true, result });
   } catch (error) {
     console.error("an announcement from Amazon could not be acted on", error);
     await letGo();

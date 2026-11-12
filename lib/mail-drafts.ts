@@ -17,6 +17,7 @@ import { readDraftSubjectTest, type DraftSubjectTest } from "@/lib/mail-draft-te
 import { readDraftAudience, type DraftAudience } from "@/lib/mail-draft-audience";
 import { randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { repliesFor, stringList } from "@/lib/redis-reply";
 import { MAX_MAIL_BODY, MAX_SUBJECT } from "@/lib/mail";
 import type { Store } from "@/lib/store";
 import { hasProduct } from "@/lib/catalog";
@@ -94,14 +95,15 @@ function parse(raw: unknown): Draft | null {
 
 /** A complete hash or unknown: never silently drop an unreadable saved draft. */
 export function parseDraftList(raw: unknown): Draft[] | null {
-  if (!Array.isArray(raw) || raw.length % 2 !== 0) return null;
+  const rows = stringList(raw);
+  if (!rows || rows.length % 2 !== 0) return null;
   const drafts: Draft[] = [];
   const seen = new Set<string>();
-  for (let i = 0; i < raw.length; i += 2) {
-    const id = raw[i];
-    if (typeof id !== "string" || !DRAFT_ID.test(id) || seen.has(id) || typeof raw[i + 1] !== "string") return null;
+  for (let i = 0; i < rows.length; i += 2) {
+    const id = rows[i];
+    if (!DRAFT_ID.test(id) || seen.has(id)) return null;
     let value: unknown;
-    try { value = JSON.parse(raw[i + 1]); } catch { return null; }
+    try { value = JSON.parse(rows[i + 1]); } catch { return null; }
     if (!value || typeof value !== "object" || Array.isArray(value)) return null;
     const draft = value as Record<string, unknown>;
     if (draft.id !== id || typeof draft.subject !== "string" || typeof draft.body !== "string" || !(draft.productId === null || (typeof draft.productId === "string" && draft.productId !== "")) || typeof draft.by !== "string" || typeof draft.savedAt !== "string" || !Number.isFinite(Date.parse(draft.savedAt))) return null;
@@ -119,8 +121,8 @@ export function parseDraftList(raw: unknown): Draft[] | null {
 export async function listDraftsStrict(listId: string | null): Promise<Draft[]> {
   if (!listId) return [];
   if (!isRedisConfigured()) throw new Error("Draft storage is unavailable");
-  const response = await redisPipeline([["HGETALL", draftsKey(listId)]]);
-  if (!Array.isArray(response) || response.length !== 1) throw new Error("Draft list response is incomplete");
+  const response = repliesFor(await redisPipeline([["HGETALL", draftsKey(listId)]]), 1);
+  if (!response) throw new Error("Draft list response is incomplete");
   const drafts = parseDraftList(response[0]);
   if (drafts === null) throw new Error("Draft list could not be read");
   return drafts;
@@ -128,13 +130,7 @@ export async function listDraftsStrict(listId: string | null): Promise<Draft[]> 
 
 /** A store's drafts, the most recently saved first. */
 export async function listDrafts(listId: string | null): Promise<Draft[]> {
-  if (!listId || !isRedisConfigured()) return [];
-  const [flat] = await redisPipeline([["HGETALL", draftsKey(listId)]]);
-  const values = Array.isArray(flat) ? flat.filter((_, i) => i % 2 === 1) : [];
-  return values
-    .map(parse)
-    .filter((d): d is Draft => d !== null)
-    .sort((a, b) => b.savedAt.localeCompare(a.savedAt));
+  return listDraftsStrict(listId);
 }
 
 export type DraftResult =

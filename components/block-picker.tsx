@@ -22,6 +22,8 @@ export const BLOCK_GROUPS: { title: string; kinds: BlockKind[] }[] = [
   { title: "Show it", kinds: ["video", "pictures", "feature", "row", "inside"] },
   { title: "Answer and reassure", kinds: ["faq", "guarantee", "reviews", "quotes", "bio", "text"] },
   { title: "Move them to buy", kinds: ["cta", "product", "countdown", "hero", "form"] },
+  // Only arrangement, no words (375 [TB1], fifth complement): a line, or some room, between two parts.
+  { title: "Arrange the page", kinds: ["divider", "space"] },
 ];
 
 /** The groups as they show for `query` among the kinds `allowed`: a group with nothing left is not shown. */

@@ -3,15 +3,17 @@
  * module the erasure reaches is said in COPY_PLAN, and every one marked
  * copied has a reader; while any is pending the copy is not complete and no
  * door gives it out. Made from a store with a contact, the team's note, a
- * deal, an inbox conversation with a reply: the person's data is in it, a
- * teammate's address is not, and nothing in the database changed.
+ * deal, a task the team wrote about them (given to a teammate), an inbox
+ * conversation with a reply: the person's data is in it, a teammate's
+ * address is not, and nothing in the database changed.
  */
 import { existsSync } from "node:fs";
 import { claimHandle, ensureListId, ensureStatsId, storeForEmail } from "@/lib/store";
 import { importContactRows } from "@/lib/contacts";
 import { addPersonNote } from "@/lib/buyer-profile";
 import { personKey } from "@/lib/person-key";
-import { readStages, writeDeal } from "@/lib/crm";
+import { changePersonTasks, readStages, writeDeal } from "@/lib/crm";
+import { addTask, markTask } from "@/lib/person-tasks";
 import { fileContact, readInbox, replyTo } from "@/lib/inbox";
 import { ERASERS, erasureScope } from "@/lib/person-erasure";
 import { COPIERS, COPY_COMPLETE, COPY_PLAN, copyPerson } from "@/lib/person-copy";
@@ -24,7 +26,7 @@ const TEAMMATE = "teammate@example.com";
 const PERSON = "ada@example.com";
 
 /** Every command that only reads; anything else sent during the copy is a write. */
-const READS = new Set(["GET", "MGET", "HGET", "HMGET", "HGETALL", "HEXISTS", "HLEN", "HKEYS", "HVALS", "SMEMBERS", "SISMEMBER", "SCARD", "SUNION", "LRANGE", "LLEN", "LINDEX", "ZRANGE", "ZREVRANGE", "ZRANGEBYSCORE", "ZREVRANGEBYSCORE", "ZSCORE", "ZCARD", "ZCOUNT", "ZRANK", "EXISTS", "TTL", "PTTL", "TYPE", "STRLEN"]);
+const READS = new Set(["GET", "MGET", "HGET", "HMGET", "HGETALL", "HEXISTS", "HLEN", "HKEYS", "HVALS", "SMEMBERS", "SISMEMBER", "SCARD", "SUNION", "LRANGE", "LLEN", "LINDEX", "ZRANGE", "ZREVRANGE", "ZRANGEBYSCORE", "ZREVRANGEBYSCORE", "ZSCORE", "ZCARD", "ZCOUNT", "ZRANK", "ZSCAN", "EXISTS", "TTL", "PTTL", "TYPE", "STRLEN"]);
 const sent: string[] = [];
 const run = redis.run.bind(redis);
 redis.run = (command: (string | number)[]) => {
@@ -53,6 +55,9 @@ async function main(): Promise<void> {
   await addPersonNote(store.statsId!, personKey(store.statsId!, PERSON), TEAMMATE, "Prefers calls in the morning.", store);
   const stages = await readStages(store.statsId);
   await writeDeal(store.statsId!, { id: "dealada001", title: "Coaching for Ada", email: PERSON, cents: 50_000, stage: stages[0].id, note: "Asked about the group.", assignee: TEAMMATE, createdAt: 1_790_000_000, updatedAt: 1_790_000_000 }, store);
+  const task = await changePersonTasks(store.statsId!, personKey(store.statsId!, PERSON), store, (tasks) => addTask(tasks, { text: "Send Ada the workbook", due: "2026-11-10", assignee: TEAMMATE }, "taskada001", 1_790_000_100));
+  const doneTask = await changePersonTasks(store.statsId!, personKey(store.statsId!, PERSON), store, (tasks) => markTask(tasks, "taskada001", true, 1_790_000_200));
+  is("a task about them, given to a teammate and done", [task.ok, doneTask.ok && doneTask.tasks[0].assignee], [true, TEAMMATE]);
   await fileContact({ store, email: PERSON, name: "Ada", text: "Is the course still open?" });
   const conversation = (await readInbox(store.statsId)).find((c) => c.email === PERSON)!;
   await replyTo(store, conversation.id, TEAMMATE, "Yes, until Friday.");
@@ -72,6 +77,7 @@ async function main(): Promise<void> {
   is("their place on the list", (section("lib/contacts.ts")[0] as { email: string; agreed: boolean }).agreed, true);
   is("the team's note about them, without who wrote it", section("lib/buyer-profile.ts").map((n) => (n as { note: string }).note), ["Prefers calls in the morning."]);
   is("the deal with them", (section("lib/crm.ts")[0] as { deal: string; note: string }).note, "Asked about the group.");
+  is("the team's task about them: its words, date, done and when", section("lib/crm.ts").filter((r) => (r as { task?: string }).task), [{ task: "Send Ada the workbook", dueDate: "2026-11-10", done: true, created: "2026-09-21T14:15:00.000Z", doneAt: "2026-09-21T14:16:40.000Z" }]);
   is("their conversation, both sides, said as you and the store", (section("lib/inbox.ts")[0] as { messages: { from: string; text: string }[] }).messages.map((m) => [m.from, m.text]), [["you", "Is the course still open?"], ["the store", "Yes, until Friday."]]);
   is("a teammate's address is nowhere in it", text.includes(TEAMMATE), false);
   is("nor anybody else's", text.includes("someone@example.com"), false);

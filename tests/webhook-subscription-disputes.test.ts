@@ -124,6 +124,8 @@ async function setup(listen: string[]) {
   await claimHandle(OWNER, HANDLE, "Sub Disputes", "");
   await ensureStatsId(OWNER);
   await setStripeAccount(OWNER, account);
+  // A paid plan, so its messages are kept: a store whose month has no webhook deliveries keeps none (lib/webhooks.ts, emitEvent).
+  await setSubscription(OWNER, { customerId: "cus_SubDisputesSetup", subscriptionId: "sub_SubDisputesSetup", active: true, tier: "scale", cycle: "month", period: paidPeriod() });
   const store = (await storeForEmail(OWNER))!;
   statsId = store.statsId as string;
   is("an endpoint listening for them is kept", (await addEndpoint(store, "https://hooks.example.net/in", listen)).ok, true);

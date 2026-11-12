@@ -11,10 +11,11 @@ import { GET as statsRead } from "@/app/api/v1/stats/route";
 import { GET as eventsRead } from "@/app/api/v1/events/route";
 import { GET as productsRead } from "@/app/api/v1/products/route";
 import { GET as leadsRead } from "@/app/api/v1/leads/route";
+import { DELETE as codeStop, POST as codeMake } from "@/app/api/v1/codes/route";
 import { POST as mcp } from "@/app/api/mcp/route";
 import { makeKey } from "@/lib/api-keys";
 import {
-  MEMBERSHIPS_COLD_WORK, NUMBERS_KEEP_WORK, addWork, apiReadUnits, eventsWork, keptNumbersWork, listPageMost, membershipsWork, numbersWork, productsPageWork,
+  MEMBERSHIPS_COLD_WORK, NUMBERS_KEEP_WORK, addWork, apiReadUnits, codeMakeWork, codeStopWork, eventsWork, keptNumbersWork, listPageMost, membershipsWork, numbersWork, productsPageWork,
 } from "@/lib/api-read-rules";
 import { productIds } from "@/lib/catalog";
 import { listingsToRead } from "@/lib/catalog-read-count";
@@ -158,11 +159,12 @@ async function main(): Promise<void> {
   is("get_emails answers", (await tool(s.key, "get_emails")).result?.isError, false);
   is("it takes more than its request", (await used(s)) - before > 1, true);
 
-  part("The recent events: the newest deliveries at their most, taken first");
+  part("The recent events: the deliveries measured first, set aside at their size and settled at what was read and sent");
   before = await used(s);
   const events = await eventsRead(get(s.key, "/api/v1/events?type=sale.completed"));
   is("answered", events.status, 200);
-  is("one request and what the deliveries cost", (await used(s)) - before, 1 + apiReadUnits(eventsWork()));
+  // An empty log: the log read and nothing sent but an empty list (large deliveries: tests/api-events-measured.test.ts).
+  is("one request and what an empty log costs", (await used(s)) - before, 1 + apiReadUnits(eventsWork({ deliveries: 0, bytes: 0, sent: 2 })));
 
   part("A page of products: its listings counted first");
   for (let i = 0; i < 30; i += 1) await addProduct(s.owner, `Synthetic product ${i}`, "", "10");
@@ -261,8 +263,9 @@ async function main(): Promise<void> {
     ["get_numbers", async () => { const r = await tool(s.key, "get_numbers"); return r.error?.code === -32001 && /This read (takes|may take up to)/.test(r.error.message); }, statsKeys],
     ["get_buyers", async () => { const r = await tool(s.key, "get_buyers"); return r.error?.code === -32001 && /This read (takes|may take up to)/.test(r.error.message); }, statsKeys],
     ["get_memberships", async () => { const r = await tool(s.key, "get_memberships"); return r.error?.code === -32001 && /This read takes/.test(r.error.message); }, touches(/^nl:mnum:/)],
-    ["get_emails", async () => { const r = await tool(s.key, "get_emails"); return r.error?.code === -32001 && /This read takes/.test(r.error.message); }, (c) => c[0] === "GET" && /^nl:mail:/.test(String(c[1]))],
-    ["events", async () => { const r = await eventsRead(get(s.key, "/api/v1/events?type=sale.completed")); return r.status === 429 && (await r.json()).error === "monthly_limit"; }, touches(/^nl:hooks:/)],
+    ["get_emails", async () => { const r = await tool(s.key, "get_emails"); return r.error?.code === -32001 && /This read (takes|may take up to)/.test(r.error.message); }, (c) => c[0] === "GET" && /^nl:mail:/.test(String(c[1]))],
+    // The log of deliveries is read to measure them (their ids, then a STRLEN each); no delivery is.
+    ["events", async () => { const r = await eventsRead(get(s.key, "/api/v1/events?type=sale.completed")); return r.status === 429 && (await r.json()).error === "monthly_limit"; }, (c) => c[0] === "GET" && /^nl:hooks:d:/.test(String(c[1]))],
     ["products", async () => { const r = await productsRead(get(s.key, "/api/v1/products")); return r.status === 429 && (await r.json()).data === undefined; }, touches(/^nl:catalog:.*:l:/)],
     ["leads", async () => { const r = await leadsRead(get(s.key, "/api/v1/leads")); return r.status === 429 && (await r.json()).data === undefined; }, (c) => c[0] === "HSCAN"],
   ];
@@ -277,6 +280,29 @@ async function main(): Promise<void> {
     is(`${name}: neither Stripe nor its records read`, [stripe.length, commands.some(forbidden)], [0, false]);
     const left = await s.store();
     is(`${name}: only the door's request kept`, await allowanceUsed(left, "api"), allowanceFor(left, "api"));
+  }
+
+  part("Making a code and switching one off take their calls to Stripe before Stripe is asked");
+  {
+    const writer = await makeKey((await s.store()).sid, "Synthetic writer", Date.now(), true);
+    if (!writer.ok) throw new Error("no synthetic writing key");
+    const send = (method: "POST" | "DELETE") =>
+      method === "POST"
+        ? codeMake(new Request("https://marktmorgen.com/api/v1/codes", { method, headers: { Authorization: `Bearer ${writer.key}`, "Content-Type": "application/json" }, body: JSON.stringify({ code: "LAUNCH20", percent: 20 }) }))
+        : codeStop(new Request("https://marktmorgen.com/api/v1/codes?id=promo_Synthetic1", { method, headers: { Authorization: `Bearer ${writer.key}` } }));
+    for (const [method, work] of [["POST", codeMakeWork()], ["DELETE", codeStopWork()]] as const) {
+      const [, keys] = (await redis.pipeline([["SCAN", "0", "MATCH", "nl:allow:api:*", "COUNT", 10_000]]))[0] as [string, string[]];
+      if (keys.length) await redis.pipeline([["DEL", ...keys]]);
+      await leaveOne(s);
+      stripe = [];
+      const refused = await send(method);
+      is(`${method}: refused with nothing asked of Stripe`, [refused.status, ((await refused.json()) as { error: string }).error, stripe.length], [429, "monthly_limit", 0]);
+      await redis.pipeline([["DEL", ...((await redis.pipeline([["SCAN", "0", "MATCH", "nl:allow:api:*", "COUNT", 10_000]]))[0] as [string, string[]])[1]]]);
+      before = await used(s);
+      stripe = [];
+      await send(method);
+      is(`${method}: with them left, the door's request and its calls taken, then Stripe asked`, [(await used(s)) - before, stripe.length > 0], [1 + apiReadUnits(work), true]);
+    }
   }
 
   done();

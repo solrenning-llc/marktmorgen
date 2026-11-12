@@ -5,9 +5,10 @@ import {
   EMAIL_PATTERN,
   MAX_EMAIL_LENGTH,
   isAuthConfigured,
+  addressLimitAnswer,
+  rateLimitAnswer,
   sendSignInLink,
-  withinAddressLimit,
-  withinRateLimit,
+  unusedSignInRequest,
 } from "@/lib/auth";
 import { fromAnotherSite, limited } from "@/lib/request-guard";
 import { isAutomated } from "@/lib/bot-check";
@@ -44,7 +45,8 @@ export async function POST(request: NextRequest) {
 
   // Honeypot: a real creator never sees this field.
   if (typeof body.website === "string" && body.website.trim() !== "") {
-    return Response.json({ ok: true }, { status: 200 });
+    // The same answer as a real request's, with an id that opens nothing (652 [WG12]): a program cannot tell them apart.
+    return Response.json({ ok: true, request: unusedSignInRequest() }, { status: 200, headers: { "Cache-Control": "no-store" } });
   }
 
   const email = typeof body.email === "string" ? body.email.trim() : "";
@@ -62,7 +64,11 @@ export async function POST(request: NextRequest) {
     "unknown";
 
   try {
-    if (!(await withinRateLimit(ip))) {
+    // Past the limit is "too many tries"; a count that could not be read is our side's trouble, said as such
+    // (CX-123 rules 24 and 27): nothing is sent either way.
+    const machine = await rateLimitAnswer(ip);
+    if (machine === "unknown") return Response.json({ ok: false, error: "server_error" }, { status: 503 });
+    if (machine === "over") {
       return Response.json({ ok: false, error: "rate_limited" }, { status: 429 });
     }
     // A program typing other people's addresses into this form would send
@@ -75,7 +81,9 @@ export async function POST(request: NextRequest) {
     }
     // The counter above bounds one machine. This one bounds one inbox, so a
     // flood sent from many machines cannot bury a creator in sign-in emails.
-    if (!(await withinAddressLimit(email))) {
+    const inbox = await addressLimitAnswer(email);
+    if (inbox === "unknown") return Response.json({ ok: false, error: "server_error" }, { status: 503 });
+    if (inbox === "over") {
       return Response.json({ ok: false, error: "rate_limited" }, { status: 429 });
     }
     // The link always points at this site, whatever host the request named.
@@ -86,17 +94,17 @@ export async function POST(request: NextRequest) {
     if (serviceMailKnownUnavailable()) {
       return Response.json({ ok: false, error: "server_error" }, { status: 503 });
     }
-    const sent = await sendSignInLink(email, linkOrigin(request), prefillHandle(body.handle));
+    const asked = await sendSignInLink(email, linkOrigin(request), prefillHandle(body.handle));
     // Sign-in mail is attempted equally for existing and unknown addresses.
     // The public demo owner is deliberately ignored by sendSignInLink and
     // retains its neutral response; no creator lookup is introduced here.
-    if (!sent && !isHouseAddress(email)) {
+    if (!asked.sent && !isHouseAddress(email)) {
       return Response.json({ ok: false, error: "server_error" }, { status: 503 });
     }
+    // The request's id, for the code in the email (652 [WG12]): given to this browser for every address alike.
+    return Response.json({ ok: true, request: asked.request }, { status: 200, headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     console.error("sign-in request failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });
   }
-
-  return Response.json({ ok: true }, { status: 200 });
 }

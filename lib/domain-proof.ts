@@ -5,6 +5,7 @@
  */
 import { resolveTxt } from "node:dns/promises";
 import { redisPipeline } from "@/lib/redis";
+import { claimMark } from "@/lib/claim-mark";
 import { UNPROVED, UNPROVED_SECONDS, domainKey, proofRecord } from "@/lib/domains";
 import type { Store } from "@/lib/store";
 
@@ -59,8 +60,11 @@ export async function proveDomain(store: Pick<Store, "sid" | "handle" | "previou
   }
   if (held === store.handle) return "proved";
   if (!held) {
-    const [claimed] = await redisPipeline([["SET", domainKey(name), `${UNPROVED}${store.handle}`, "NX", "EX", UNPROVED_SECONDS]]);
-    if (claimed === null) return "taken";
+    // Read exactly (CX-123 rule 24): this store's claim read back is ours; another's is taken; one that cannot be read
+    // asks the DNS nothing now, and the creator's next check claims it again.
+    const claimed = await claimMark(domainKey(name), UNPROVED_SECONDS, `${UNPROVED}${store.handle}`);
+    if (claimed === "taken") return "taken";
+    if (claimed === "unknown") return "waiting";
   }
   const proof = proofRecord(store, name);
   const found = await txtRecords(proof.host);

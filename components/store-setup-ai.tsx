@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
+import { AI_ALLOWANCE_UNKNOWN } from "@/components/ai-assist";
 import { useRouter } from "next/navigation";
 import { toast } from "@/components/toast";
 import { Icon } from "@/components/icons";
@@ -22,14 +23,17 @@ const KIND_WORDS: Record<Kind, string> = {
  * questions and answers, shown before anything is kept. The creator picks a
  * line, changes or drops each product, and keeps what they want; products
  * are put up as drafts, never on sale until they add what each hands over.
+ * `left` is null when the month's AI allowance could not be read: said in
+ * words, never "0 left"; the server still checks before a draft.
  */
-export function StoreSetupAi({ currency, left: startLeft, hasFaq, storeName }: { currency: string; left: number; hasFaq: boolean; storeName?: string }) {
+export function StoreSetupAi({ currency, left: startLeft, hasFaq, storeName }: { currency: string; left: number | null; hasFaq: boolean; storeName?: string }) {
   const router = useRouter();
   const [about, setAbout] = useState("");
   const [selling, setSelling] = useState("");
   const [drafting, setDrafting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [left, setLeft] = useState(startLeft);
+  const allowanceId = useId();
   const [note, setNote] = useState("");
   const [setup, setSetup] = useState<Setup | null>(null);
   const [bio, setBio] = useState("");
@@ -142,11 +146,11 @@ export function StoreSetupAi({ currency, left: startLeft, hasFaq, storeName }: {
         </div>
       </div>
       <div className="mt-4 flex flex-wrap items-center gap-3">
-        <button type="button" onClick={() => draft()} disabled={drafting || !about.trim() || asking} aria-busy={drafting} className="btn btn-primary">
+        <button type="button" onClick={() => draft()} disabled={drafting || !about.trim() || asking} aria-busy={drafting} aria-describedby={allowanceId} className="btn btn-primary">
           <Icon name="sparkle" size={16} />
           {drafting ? "Drafting your store…" : setup ? "Draft it again" : "Draft my store"}
         </button>
-        <span className="text-sm text-ink-soft">{`One draft counts once. ${left} left this month.`}</span>
+        <span id={allowanceId} className="text-sm text-ink-soft">{left === null ? `${AI_ALLOWANCE_UNKNOWN} One draft counts once.` : `One draft counts once. ${left} left this month.`}</span>
       </div>
 
       {setup?.questions?.length ? (

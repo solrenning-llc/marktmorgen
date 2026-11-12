@@ -269,9 +269,13 @@ export function namedPriceOffered(product: Listing, optionId: string): boolean {
   return !optionId || sellableOptions(product).some((option) => option.id === optionId);
 }
 
-/** The option to have chosen when the page opens: the creator's pick, else the first. */
-export function startingOption(options: ProductOption[]): ProductOption | null {
-  return options.find((option) => option.best) ?? options[0] ?? null;
+/**
+ * The options in the order a buyer sees them: the creator's "Recommended" first, the others in the creator's order
+ * (487 [IT4], C1-20261106-0100-TODOS-1). Only the order: nothing here chooses an option for the buyer.
+ */
+export function optionsInPickOrder<T extends { best?: boolean }>(options: readonly T[]): T[] {
+  const pick = options.findIndex((option) => option.best === true);
+  return pick <= 0 ? [...options] : [options[pick], ...options.slice(0, pick), ...options.slice(pick + 1)];
 }
 
 /** Whether a set of options has enough said about them to be compared side by side. */

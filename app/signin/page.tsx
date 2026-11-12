@@ -16,7 +16,7 @@ import { INVITE_PROGRAM_OPEN, INVITE_BONUS_CENTS, INVITE_HOLD_DAYS } from "@/lib
 import { newAddressProblem, normaliseHandle } from "@/lib/store";
 
 /** Somebody who came back to a store they have: by Log in, or sent here to log in again. */
-const RETURNING_STATUSES = new Set(["reauth", "out", "out-everywhere"]);
+const RETURNING_STATUSES = new Set(["reauth", "out", "out-everywhere", "out-everywhere-unknown", "login-unknown"]);
 function isReturning(params: { [key: string]: string | string[] | undefined }): boolean {
   return params.to === "login" || (typeof params.status === "string" && RETURNING_STATUSES.has(params.status));
 }
@@ -46,6 +46,10 @@ const NOTICES: Record<string, { title: string; body: string; tone?: "success" }>
     body: INVITE_PROGRAM_OPEN ? `Type your email below, open the link we send, and take your store address. The invite counts for that store: ${INVITE_HOLD_DAYS} days after your first payment, ${formatMoney(INVITE_BONUS_CENTS, "usd")} of credit goes on your plan.` : "If you previously accepted an invite on this browser, its original terms and expiry still apply. No new invitations are being accepted.",
     tone: "success",
   },
+  "login-unknown": {
+    title: "We could not finish logging you in",
+    body: "Your account's login settings could not be read just now, so nothing was opened. Ask for a fresh link below and try again in a moment.",
+  },
   expired: {
     title: "That link no longer works",
     body: "A login link works once and lasts 15 minutes. Ask for a fresh one below.",
@@ -69,6 +73,11 @@ const NOTICES: Record<string, { title: string; body: string; tone?: "success" }>
   "move-has-login": {
     title: "That address has its own passkeys or two-step login",
     body: "An account cannot be moved onto an address that already has its own passkeys, authenticator app or recovery codes. Nothing was changed. Remove them from that address first, or move to another address.",
+  },
+  // A move refused because what the new address had open could not be read (app/api/auth/move; review of #2556).
+  "move-unread": {
+    title: "We could not finish the move just now",
+    body: "Your account was not moved, and it stays at its old address. Log in, then try the move again in a minute.",
   },
   "move-error": {
     title: "The move did not finish",
@@ -134,6 +143,15 @@ const NOTICES: Record<string, { title: string; body: string; tone?: "success" }>
     title: "Too many tries",
     body: "Nothing was changed. Wait a little, then open the invitation again.",
   },
+  // Log out of all devices when the other sessions could not be read (audit SG2, rule 27): never said as done.
+  "out-everywhere-unknown": {
+    title: "Your other devices may still be logged in",
+    body: "This browser is logged out, but we could not log out your other devices just now. Log in again in a moment and choose “Log out of all devices” once more.",
+  },
+  "out-unknown": {
+    title: "Your session may still be open on our side",
+    body: "This browser is logged out, but we could not close its session on our side just now. If you think someone else may have it, log in again in a moment and choose “Log out of all devices”.",
+  },
 };
 
 /*
@@ -156,7 +174,7 @@ export default async function SignInPage({
   // The button on the site's own address only (lib/google-signin.ts); its notices only where it can be.
   const sent = await headers();
   const google = googleSignInShown(sent.get("x-forwarded-host") ?? sent.get("host"), params.google);
-  const notice = status.startsWith("google-") && !google ? undefined : NOTICES[status];
+  const notice = status.startsWith("google-") && !google ? undefined : Object.hasOwn(NOTICES, status) ? NOTICES[status] : undefined;
   // Somebody who pressed Log in has a store already, or believes so: the page
   // greets them that way, rather than with "Start your store", which reads as
   // if they had pressed the wrong thing. The form, the link and what it opens

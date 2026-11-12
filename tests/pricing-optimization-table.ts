@@ -251,10 +251,11 @@ export function printedShares(tier: Tier, shares: Shares): Shares {
   })) as Shares;
 }
 
-/** The monthly prices looked at: every $X9 from $9 to twice today's price. */
+/** The monthly prices looked at: every $X9 from $9 to three times today's price. */
 export function grid(tier: Tier): number[] {
   const out: number[] = [];
-  for (let c = 900; c <= 2 * PLAN_PRICES[tier].month; c += 1000) out.push(c);
+  // Up to three times today's price since 4 November 2026 (C4-4): with the calendar feed's and the store readings' own lines, Store's 60% floor passed twice its price. Looked at only.
+  for (let c = 900; c <= 3 * PLAN_PRICES[tier].month; c += 1000) out.push(c);
   return out;
 }
 export const ELASTICITIES = [-0.5, -1, -1.5, -2] as const;

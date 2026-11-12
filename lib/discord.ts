@@ -134,12 +134,18 @@ export async function serverName(serverId: string): Promise<string | null> {
 function readRole(raw: unknown): DiscordRole | null {
   const role = (raw ?? {}) as Record<string, unknown>;
   if (typeof role.id !== "string" || !SNOWFLAKE.test(role.id)) return null;
+  // Its place decides whether the bot can give it: one that is not Discord's whole number is not known, never
+  // place 0 (which would sit below the bot and be offered) (CX-123 rule 24).
+  if (typeof role.position !== "number" || !Number.isSafeInteger(role.position) || role.position < 0) return null;
+  // A managed role (a bot's or an integration's) can never be given by hand: only Discord's own true or false says
+  // which it is; anything else is not known and the role is not offered (review of Codex J on #2684).
+  if (typeof role.managed !== "boolean") return null;
   return {
     id: role.id,
     name: typeof role.name === "string" ? role.name.slice(0, 100) : "",
-    color: Number(role.color) || 0,
-    position: Number(role.position) || 0,
-    managed: role.managed === true,
+    color: typeof role.color === "number" && Number.isSafeInteger(role.color) && role.color >= 0 ? role.color : 0,
+    position: role.position,
+    managed: role.managed,
   };
 }
 
@@ -150,7 +156,10 @@ export async function serverRoles(serverId: string): Promise<{ roles: DiscordRol
   if (roles?.status !== 200 || !Array.isArray(roles.data) || typeof botId !== "string") return null;
   const all = roles.data.map(readRole).filter((r): r is DiscordRole => r !== null);
   const member = await call(`/guilds/${serverId}/members/${botId}`).catch(() => null);
-  const held = new Set(Array.isArray((member?.data as { roles?: unknown } | null)?.roles) ? ((member!.data as { roles: unknown[] }).roles as string[]) : []);
+  // The bot's own roles decide what it can give: not read, or not a list of ids, is not known, never "none".
+  const own = (member?.data as { roles?: unknown } | null)?.roles;
+  if (member?.status !== 200 || !Array.isArray(own) || !own.every((id) => typeof id === "string")) return null;
+  const held = new Set(own as string[]);
   const botTop = Math.max(0, ...all.filter((role) => held.has(role.id)).map((role) => role.position));
   return { roles: all, botTop };
 }
@@ -194,8 +203,14 @@ export async function removeMember(serverId: string, userId: string, reason: str
   return changed(await call(`/guilds/${serverId}/members/${userId}`, { method: "DELETE", reason }).catch(() => null));
 }
 
-/** The bot leaves the server: the creator disconnected it. Roles already given stay as they are. */
+/**
+ * The bot leaves the server: the creator disconnected it. Roles already given stay as they are. True only on
+ * Discord's exact answer that it is out: a 2xx, or 404 with Discord's code 10004 (Unknown Guild) when it was no
+ * longer there; anything else (no answer, a refusal, a 5xx, a 404 without that code, such as a proxy's page) is
+ * false, and the bot may still be in the server (independent review of #2994).
+ */
 export async function leaveServer(serverId: string): Promise<boolean> {
   const answer = await call(`/users/@me/guilds/${serverId}`, { method: "DELETE" }).catch(() => null);
-  return Boolean(answer && (answer.status === 204 || answer.status === 404));
+  if (answer && answer.status >= 200 && answer.status < 300) return true;
+  return answer?.status === 404 && Number((answer.data as { code?: unknown } | null)?.code) === 10004;
 }

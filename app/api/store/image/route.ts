@@ -20,6 +20,7 @@ import {
   MAX_IMAGE_BYTES,
   type ProductImage,
   type SmallCopy,
+  TONE_PATTERN,
   imagePaths,
   isDisplayStyle,
   ownsImagePath,
@@ -80,8 +81,11 @@ export async function POST(request: NextRequest) {
     if (action === "attach") {
       const store = await storeForEmail(ref);
       if (!store) return Response.json({ ok: false, error: "none" }, { status: 400 });
+      const product = await readListing(store, id);
       // A new picture deletes the one there: not from a session let in without its second step (lib/two-step.ts).
-      if ((await lockedFor(request, "products", "replace")) && (await readListing(store, id))?.image) return refusedJson("locked");
+      if ((await lockedFor(request, "products", "replace")) && product?.image) return refusedJson("locked");
+      // What this product shows now: the only names besides a fresh upload it may be given (picture-door.ts).
+      const own = new Set(imagePaths(product?.image));
       const path = text(body.path, 200);
       if (!ownsImagePath(path, await imageFolder(ref))) {
         return Response.json({ ok: false, error: "invalid" }, { status: 400 });
@@ -90,6 +94,17 @@ export async function POST(request: NextRequest) {
       const smallPath = sent ? text(sent.path, 200) : "";
       const smallOwned = smallPath !== "" && smallPath !== path && ownsImagePath(smallPath, await imageFolder(ref));
       fresh = await takePictureDoor(smallOwned ? [path, smallPath] : [path]);
+      if (!product) {
+        await dropFresh([path, smallPath]);
+        return Response.json({ ok: false, error: "unknown" }, { status: 404 });
+      }
+      // A name in the shared folder that is neither fresh from the door nor this product's own may be another
+      // product's, a link's, a page's, a buyer's review photo or an email's picture: refused, and nothing deleted,
+      // so replacing or removing this product's picture later can never delete it.
+      if (!fresh.has(path) && !own.has(path)) {
+        await dropFresh([smallPath]);
+        return Response.json({ ok: false, error: "in_use" }, { status: 400 });
+      }
       const found = await head(path);
       if (found.size > MAX_IMAGE_BYTES) {
         await dropFresh([path, smallPath]);
@@ -108,10 +123,17 @@ export async function POST(request: NextRequest) {
         await dropFresh([path, smallPath]);
         return Response.json({ ok: false, error: "invalid" }, { status: 400 });
       }
+      // The picture's color (Encanto 5b): absent, or exactly #rrggbb. Anything else refuses the picture and writes
+      // nothing (C4-20261106-0700-C5-27, condition 1; Codex K2 on #2790).
+      if (body.tone !== undefined && !(typeof body.tone === "string" && TONE_PATTERN.test(body.tone))) {
+        await dropFresh([path, smallPath]);
+        return Response.json({ ok: false, error: "invalid" }, { status: 400 });
+      }
 
       // The smaller copy for phones, checked exactly as the picture was.
       let small: SmallCopy | null = null;
-      if (smallOwned) {
+      // A smaller copy named that is neither fresh nor this product's own is left out, and kept.
+      if (smallOwned && (fresh.has(smallPath) || own.has(smallPath))) {
         const smallWidth = side(sent?.width);
         try {
           const copy = await head(smallPath);
@@ -131,7 +153,9 @@ export async function POST(request: NextRequest) {
           await dropFresh([smallPath]);
         }
       }
-      image = { path, width, height, alt, bytes: found.size, small };
+      // Checked above: exact, or none.
+      const tone = typeof body.tone === "string" ? body.tone : null;
+      image = { path, width, height, alt, bytes: found.size, small, ...(tone ? { tone } : {}) };
       // Copied to the pictures' own bucket when it is on (313 [CV1] unit 4b); off, nothing is read. A failed copy
       // never refuses the picture: it is kept where it always was, unmarked.
       const mirrored = await copyAttachedPicture(imagePaths(image)).catch(() => false);
@@ -144,9 +168,11 @@ export async function POST(request: NextRequest) {
       return Response.json({ ok: false, error: result.reason }, { status: result.reason === "unknown" ? 404 : 400 });
     }
     // Best effort, and deliberately after the write.
-    if (result.removed && result.removed.path !== image?.path) {
-      // The picture and the smaller copy made of it go together.
-      await del(imagePaths(result.removed)).catch((error: unknown) => {
+    // The picture and the smaller copy made of it go together, except a name the new picture still uses.
+    const still = new Set(imagePaths(image));
+    const replaced = imagePaths(result.removed).filter((removed) => !still.has(removed));
+    if (replaced.length) {
+      await del(replaced).catch((error: unknown) => {
         console.error("could not delete a replaced product picture", error);
       });
     }

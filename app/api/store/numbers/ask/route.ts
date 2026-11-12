@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { guardStoreWrite, text } from "@/lib/store-request";
-import { withinLimit } from "@/lib/request-guard";
+import { withinEssentialLimit } from "@/lib/request-guard";
 import { AI_PER_MINUTE } from "@/lib/ai-rules";
 import { readNumbers } from "@/lib/stats-report";
 import { MAX_QUESTION, askNumbers } from "@/lib/numbers-ask";
@@ -20,7 +20,7 @@ export async function POST(request: NextRequest) {
   const { store, body } = guarded;
   const question = text(body.question, MAX_QUESTION).trim();
   if (question.length < 3) return Response.json({ ok: false, error: "notes" }, { status: 400 });
-  if (!(await withinLimit("ai", store.sid || store.handle, AI_PER_MINUTE, 60))) return Response.json({ ok: false, error: "slow" }, { status: 429 });
+  if (!(await withinEssentialLimit("ai", store.sid || store.handle, AI_PER_MINUTE, 60))) return Response.json({ ok: false, error: "slow" }, { status: 429 });
   // The month's AI jobs first, as askNumbers checks them (lib/ai.ts): with none left, nothing is counted or read.
   if (!isAiConfigured()) return Response.json({ ok: false, error: "off" }, { status: 400 });
   if ((await aiLeft(store).catch(() => 0)) < 1) return Response.json({ ok: false, error: "used" }, { status: 400 });

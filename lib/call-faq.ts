@@ -39,7 +39,7 @@ export function callBeginnerQuestions(onSale = PLANS_ON_SALE, trialDays = TRIAL_
     },
     {
       q: "Do paid calls work?",
-      a: `${onSale ? "" : "Paid plans are not on sale yet, so no call can be booked now. "}We publish no number of calls or bookings, because we do not have a real, checked count to show. Once your Stripe account is connected and your store can take payments, your studio lists the calls still to come that it reads from your Stripe account, under “${UPCOMING_CALLS}”. The buyer gets a reminder a day before and an hour before, and you get one for each time, listing everyone booked, each sent only when it falls at least an hour after the booking or its move.`,
+      a: `${onSale ? "" : "Paid plans are not on sale yet, so no call can be booked now. "}We publish no number of calls or bookings, because we do not have a real, checked count to show. Once your Stripe account is connected and your store can take payments, your studio lists the calls still to come that it reads from your Stripe account, under “${UPCOMING_CALLS}”. Reminders are planned for a day before and an hour before the call. Each reminder must fall at least an hour after booking or moving the call. Your reminder lists everyone booked at that time.`,
     },
   ];
 }

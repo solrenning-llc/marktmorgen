@@ -23,7 +23,7 @@
  * Browser-safe: plain data and pure functions.
  */
 
-import { API_WRITE_UNITS, type AllowanceKind, KIND_WORDS, askedCeiling } from "@/lib/store-allowance-rules";
+import { API_SALES_UNITS, API_WRITE_UNITS, type AllowanceKind, KIND_WORDS, askedCeiling } from "@/lib/store-allowance-rules";
 import { STUDIO_PAGE_UNITS } from "@/lib/studio-allowance-rules";
 
 export type CheckState = "ok" | "problem" | "not-checked";
@@ -210,8 +210,8 @@ export function checkoutCheck(trouble: { week: number; last: { message: string }
   };
 }
 
-/** The most one use takes of a figure: a studio page is STUDIO_PAGE_UNITS, an API write API_WRITE_UNITS; anything else one. */
-const LARGEST_TAKE: Partial<Record<AllowanceKind, number>> = { studio: STUDIO_PAGE_UNITS, api: API_WRITE_UNITS };
+/** The most one use takes of a figure: a studio page is STUDIO_PAGE_UNITS, an API write API_WRITE_UNITS and a page of sales API_SALES_UNITS; anything else one. */
+const LARGEST_TAKE: Partial<Record<AllowanceKind, number>> = { studio: STUDIO_PAGE_UNITS, api: Math.max(API_WRITE_UNITS, API_SALES_UNITS) };
 
 /** What stops when a figure is used up, kind by kind. */
 function stopsWords(kind: AllowanceKind, reset: string, plansOnSale = true): string {

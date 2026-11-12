@@ -55,22 +55,33 @@ export const DEMO_COMMANDS_PER_ACTION = 12;
  */
 export const DEMO_START_COMMANDS = 19;
 /**
- * Refused demo requests the whole site counts in a day (UTC). Every request
- * that reaches Redis reads this count first, with its address's own; past it,
- * the demo answers "closed" for the rest of the day after that one command,
- * and writes nothing. A refusal reaches it only through its address's
- * DEMO_REFUSALS_PER_ADDRESS_PER_DAY, so one address alone can never fill it.
+ * Refused demo requests with no live session behind them (a door, a cookie
+ * that names no live session) the whole site counts in a day (UTC). Such a
+ * request reads this count first, with its address's own; past it, the door
+ * answers "closed" and the cookie reads nothing for the rest of the day,
+ * after those first reads (one for a door, two for a cookie), and nothing
+ * is written. A refusal reaches it only
+ * through its address's DEMO_REFUSALS_PER_ADDRESS_PER_DAY, so one address
+ * alone can never fill it. A live session is never answered by it: what a
+ * session refuses is counted in its own record (DEMO_REFUSALS_PER_SESSION).
  */
 export const DEMO_REFUSALS_PER_DAY = 5_000;
 /**
- * Refused demo requests one address (a new-kind one by its network, as
- * DEMO_SESSIONS_PER_ADDRESS_PER_DAY) counts in a day (UTC), each counted for
- * the whole site too. Past it, that address alone is answered after the first
- * read for the rest of the day, and nothing is written.
+ * Refused demo requests with no live session behind them one address (a
+ * new-kind one by its network, as DEMO_SESSIONS_PER_ADDRESS_PER_DAY) counts in
+ * a day (UTC), each counted for the whole site too. Past it, that address can
+ * open no session and read no made-up cookie for the rest of the day, after
+ * the first read and writing nothing; a session already open behind it goes on.
  */
 export const DEMO_REFUSALS_PER_ADDRESS_PER_DAY = 10;
+/**
+ * Refused actions one live session counts in its own record, whoever else
+ * shares its address. Past it, that session's next actions are answered after
+ * reading its record, and nothing is written. Priced with each day's openings.
+ */
+export const DEMO_REFUSALS_PER_SESSION = 10;
 /** Database commands a refused request sends at the most, its own counting included (held in tests/studio-demo.test.ts). */
-export const DEMO_REFUSAL_WORST_COMMANDS = 10;
+export const DEMO_REFUSAL_WORST_COMMANDS = 7;
 /** Bytes opening a session moves through the database at the most, both ways (held in tests/studio-demo.test.ts). */
 export const DEMO_START_DB_BYTES = 4_096;
 /** Bytes an action's own check and count, or a refused request with its counting, move through the database at the most, both ways (held in tests/studio-demo.test.ts). */
@@ -79,7 +90,12 @@ export const DEMO_TAKE_DB_BYTES = 2_048;
 export const DEMO_RESPONSE_MAX_BYTES = 120_000;
 /** Demo sessions the whole site opens in a day (UTC). */
 export const DEMO_SESSIONS_PER_DAY = 500;
-/** Database commands all demo sessions together may send in a day (UTC). */
+/**
+ * Database commands the accepted openings and actions of all demo sessions
+ * together may send in a day (UTC). Refusals are not inside it: a session's
+ * own (DEMO_REFUSALS_PER_SESSION) and the site's (DEMO_REFUSALS_PER_DAY) are
+ * capped and priced on their own.
+ */
 export const DEMO_COMMANDS_PER_DAY = 250_000;
 /**
  * Demo sessions one address may open in a day (UTC): an old-kind address as it
@@ -286,8 +302,28 @@ function functionMicroUsd(seconds: number, commands: number, dbBytes: number): n
 export const DEMO_ACTION_FUNCTION_MICRO_USD = functionMicroUsd(ACTION_SECONDS, DEMO_COMMANDS_PER_ACTION, 2 * DEMO_ACTION_MAX_BYTES + DEMO_TAKE_DB_BYTES);
 /** Opening a session at its worst: the bot check waited on up to 2.5 s, then the session written. */
 export const DEMO_START_FUNCTION_MICRO_USD = functionMicroUsd(START_SECONDS, DEMO_START_COMMANDS, DEMO_START_DB_BYTES);
-/** A session's bytes kept for its whole life. */
-export const DEMO_SESSION_KEPT_MICRO_USD = (UPSTASH_MICRO_USD_PER_GB_MONTH * DEMO_BYTES_PER_SESSION * DEMO_SESSION_SECONDS) / (1e9 * MONTH_SECONDS);
+/** How long a day's counts (nl:sdemo:day:<day>) are kept, in days (docs/studio-demo.md). */
+export const DEMO_DAY_KEEP_DAYS = 400;
+/**
+ * The most bytes a field of a demo hash holds, its name and its value
+ * together, and the most a demo key's name holds; priced as kept bytes
+ * (held in tests/studio-demo.test.ts on every key and field the demo writes).
+ */
+export const DEMO_FIELD_MAX_BYTES = 64;
+/** A session's record and keys: its six fields (day, startedAt, expiresAt, actions, bytes, refused) and its six keys' names. */
+const SESSION_RECORD_BYTES = 12 * DEMO_FIELD_MAX_BYTES;
+/** A session's bytes kept for its whole life: its drafts at their cap, its record and its keys' names. */
+export const DEMO_SESSION_KEPT_MICRO_USD = (UPSTASH_MICRO_USD_PER_GB_MONTH * (DEMO_BYTES_PER_SESSION + SESSION_RECORD_BYTES) * DEMO_SESSION_SECONDS) / (1e9 * MONTH_SECONDS);
+/**
+ * A day's own hashes kept: the day's counts (its key, the caps' three counters
+ * and DEMO_COUNTS) for DEMO_DAY_KEEP_DAYS, and the addresses' hash (its key,
+ * the day's refusals, a field for each address that opened a session, at most
+ * the day's sessions, and one for each that was refused, at most the day's
+ * refusals) until the day ends, one day at the most.
+ */
+export const DEMO_DAY_HASHES_KEPT_MICRO_USD =
+  (UPSTASH_MICRO_USD_PER_GB_MONTH * DEMO_FIELD_MAX_BYTES / (1e9 * MONTH_SECONDS))
+  * ((1 + 3 + DEMO_COUNTS.length) * DEMO_DAY_KEEP_DAYS * 86_400 + (2 + DEMO_SESSIONS_PER_DAY + DEMO_REFUSALS_PER_DAY) * 86_400);
 
 /** A refused request at its worst: up to the bot check's wait, its commands and its own count. */
 export const DEMO_REFUSAL_FUNCTION_MICRO_USD = functionMicroUsd(START_SECONDS, DEMO_REFUSAL_WORST_COMMANDS, DEMO_TAKE_DB_BYTES);
@@ -306,10 +342,16 @@ export function demoDayWorstActions(): number {
   return demoDayReachableSessions() * DEMO_ACTIONS_PER_SESSION;
 }
 
-/** One day's openings at their worst, with all their actions (some may run the next day), in micro-USD; the CDN's part is added by the test. */
+/** The most refusals one day's openings can count in their own records: every reachable session at its DEMO_REFUSALS_PER_SESSION. */
+export function demoDaySessionRefusals(): number {
+  return demoDayReachableSessions() * DEMO_REFUSALS_PER_SESSION;
+}
+
+/** One day's openings at their worst, with all their actions and their own refusals (some may run the next day), in micro-USD; the CDN's part is added by the test. */
 export function demoCohortFunctionWorstMicroUsd(): number {
   return demoDayReachableSessions() * (DEMO_START_FUNCTION_MICRO_USD + DEMO_SESSION_KEPT_MICRO_USD)
-    + demoDayWorstActions() * DEMO_ACTION_FUNCTION_MICRO_USD;
+    + demoDayWorstActions() * DEMO_ACTION_FUNCTION_MICRO_USD
+    + demoDaySessionRefusals() * DEMO_REFUSAL_FUNCTION_MICRO_USD;
 }
 
 /** A day's counted refusals at their worst, in micro-USD; the CDN's part is added by the test. */
@@ -317,9 +359,9 @@ export function demoRefusalsFunctionWorstMicroUsd(): number {
   return DEMO_REFUSALS_PER_DAY * DEMO_REFUSAL_FUNCTION_MICRO_USD;
 }
 
-/** A day's worst of what the rates above price: one day's openings and the day's refusals. */
+/** A day's worst of what the rates above price: one day's openings, the day's refusals and the day's own hashes kept. */
 export function demoDayFunctionWorstMicroUsd(): number {
-  return demoCohortFunctionWorstMicroUsd() + demoRefusalsFunctionWorstMicroUsd();
+  return demoCohortFunctionWorstMicroUsd() + demoRefusalsFunctionWorstMicroUsd() + DEMO_DAY_HASHES_KEPT_MICRO_USD;
 }
 
 /**
@@ -329,5 +371,5 @@ export function demoDayFunctionWorstMicroUsd(): number {
 export const DEMO_UNKNOWN_COSTS: readonly string[] = [
   "The script and style files a demo studio page loads from the CDN: not measured for the studio (tests/traffic-cost.ts measured 13 on a store's page).",
   "The bot check at its basic level: lib/bot-check.ts records no charge per check, without a dated official source in the repository.",
-  "Requests refused without being counted: a program the bot check refuses, and every request past the day's DEMO_REFUSALS_PER_DAY or past its own address's DEMO_REFUSALS_PER_ADDRESS_PER_DAY, each one database command at the most and nothing written; and requests that passed that first read together while one place was left and found it taken when counting, each up to DEMO_REFUSAL_WORST_COMMANDS and nothing written. Each is still a function call, and nothing bounds how many arrive across addresses; the bot check is the brake for the door, and reads and actions have none yet.",
+  "Requests refused without being counted: a program the bot check refuses; every door past the day's DEMO_REFUSALS_PER_DAY or past its own address's DEMO_REFUSALS_PER_ADDRESS_PER_DAY (one database command), every made-up cookie past them (two) and every action of a session past its DEMO_REFUSALS_PER_SESSION (one), each with nothing written; and requests that passed their first read together while one place was left and found it taken when counting, each up to DEMO_REFUSAL_WORST_COMMANDS and nothing written. Each is still a function call, and nothing bounds how many arrive across addresses; the bot check is the brake for the door, and reads and actions have none yet.",
 ];

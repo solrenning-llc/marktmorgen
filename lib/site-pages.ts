@@ -51,6 +51,8 @@ export type Block =
   /** What it does not do, said before anyone has to find out. */
   | { kind: "limits"; title: string; intro?: string; items: string[] }
   | { kind: "faq"; title: string; items: { q: string; a: string }[] }
+  /** The page's own glossary: each unusual word it uses, and what it means (WCAG 3.1.3). */
+  | { kind: "terms"; title: string; items: { term: string; meaning: string }[] }
   /** From the first free thing to the biggest sale, for one kind of creator. */
   | { kind: "ladder"; title: string; intro?: string; items: { step: string; title: string; price: string; body: string; href: string; icon: IconName }[] };
 

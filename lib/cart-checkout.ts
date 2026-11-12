@@ -28,14 +28,14 @@ import { fairOff } from "@/lib/fair-price";
 import { commissionRate } from "@/lib/affiliate-setting";
 import { applyTax, applyTaxDocuments, refusedTaxDocuments, withoutTaxDocuments } from "@/lib/tax";
 import { inTheCurrencyShown, onlyInstantMethods, saveCardForOffers } from "@/lib/instant-pay";
-import { StripeError, onAccount } from "@/lib/stripe-account";
+import { StripeError, checkoutClosesAt, onAccount } from "@/lib/stripe-account";
 import { LANGUAGES } from "@/lib/store-language";
 import { type CameFrom, hasSource } from "@/lib/came-from";
 import { isHouseStore } from "@/lib/house-store";
 import { CART_OFFER_META, MAX_CART, dealOff } from "@/lib/cart-rules";
 import { RECOVERY_OPEN_SECONDS, applyRecovery, recoveryOn, refusedRecovery, withoutRecovery } from "@/lib/recovery-setting";
 import { applyShare, leastPaid, linesTotal, shareBps } from "@/lib/platform-share";
-import { codesMayTakeOff } from "@/lib/discount";
+import { codesMayTakeOff, livePromotionId } from "@/lib/discount";
 import { CONSENT_META, type DigitalConsent, consentMetaValue, deliversDigitally, keepConsentOn, requireDigitalConsent } from "@/lib/digital-consent";
 import { applyCartShipping, cartItemOf, cartShipping, shippedFirst, shipsWithOnline } from "@/lib/cart-shipping";
 
@@ -60,7 +60,8 @@ const DISPLAY_NAME = "branding_settings[display_name]";
  * could go in one, read from its own index without a single product read.
  */
 export function offersCart(store: Store): boolean {
-  const never = KIND.free | KIND.call | KIND.recurring | KIND.limited | KIND.hidden;
+  // A limited product can go in one since its checkout holds a unit (lib/stock.ts, withCartStockHolds).
+  const never = KIND.free | KIND.call | KIND.recurring | KIND.hidden;
   let count = 0;
   for (const item of store.catalog.items) {
     if ((item.kind & KIND.paid) !== 0 && (item.kind & never) === 0 && item.options.length === 0) count += 1;
@@ -93,8 +94,16 @@ export async function createCartCheckout(
     channel?: Record<string, string>;
     /** The affiliate whose link the buyer followed, still inside the store's window (lib/affiliates.ts). */
     via?: { aff: string; rate: number; own?: number | null } | null;
+    /**
+     * A discount code that came in a link to this store (lib/code-link.ts),
+     * applied by Stripe only if it is one of the creator's live codes, and
+     * only when nothing else was taken off (624 [SZ8](23)).
+     */
+    code?: string;
     /** The buyer checked the Store assistant's box for one reminder (lib/assistant-reminder.ts): the checkout closes after an hour. */
     remind?: boolean;
+    /** A unit of a limited product in it is held (lib/stock.ts, withCartStockHolds), so the checkout closes before the hold runs out. */
+    held?: boolean;
     /** The buyer's yes to access at once (lib/digital-consent.ts), needed when anything in the cart is handed over digitally. */
     digitalConsent?: DigitalConsent | null;
     /**
@@ -122,6 +131,13 @@ export async function createCartCheckout(
   const country = extras.country ?? "";
   const body = new URLSearchParams({
     mode: "payment",
+    // Stripe's paying label on its submit button ("Buy"), so the button that
+    // places the order says it obliges payment (Directive 2011/83/EU art. 8(2);
+    // EU consumer audit 2026-11-06, row 11). Read 6 November 2026 at
+    // https://docs.stripe.com/api/checkout/sessions/create (API 2026-10-28):
+    // `pay` "Submit button includes a 'Buy' label"; allowed only in payment or
+    // subscription mode and not with ui_mode elements (this session is hosted).
+    submit_type: "pay",
     locale: LANGUAGES[store.language].stripe,
     "metadata[store]": store.handle,
     "metadata[product]": products[0].id,
@@ -201,7 +217,15 @@ export async function createCartCheckout(
   }
   // One discount at a time, as everywhere here: a code box only when nothing was taken off already.
   const box = !discounted && store.hasDiscounts;
-  if (box) body.set("allow_promotion_codes", "true");
+  // A code from a link goes on by itself, as on one product's checkout
+  // (lib/store-checkout.ts); Stripe takes an applied discount or the box,
+  // never both, so it is one or the other. Either is one of the store's own
+  // codes, so what may come off below is the same.
+  const promotion = box && extras.code ? await livePromotionId(store.stripeAccountId, extras.code) : null;
+  if (promotion) {
+    body.set("discounts[0][promotion_code]", promotion);
+    body.set("metadata[code]", extras.code as string);
+  } else if (box) body.set("allow_promotion_codes", "true");
   // The share of the sale, when the store's plan has one (lib/platform-share.ts):
   // the lines are already at the price the store set, and a code typed in the
   // box may take off as much as the largest the store has.
@@ -234,7 +258,9 @@ export async function createCartCheckout(
 
   for (;;) {
     try {
-      if (extras.remind && !body.has("expires_at")) body.set("expires_at", String(Math.floor(Date.now() / 1000) + RECOVERY_OPEN_SECONDS));
+      // A held unit's shorter time wins over a reminder's hour, as on one product's checkout (lib/store-checkout.ts).
+      if (extras.held) body.set("expires_at", String(checkoutClosesAt()));
+      else if (extras.remind && !body.has("expires_at")) body.set("expires_at", String(Math.floor(Date.now() / 1000) + RECOVERY_OPEN_SECONDS));
       const session = await onAccount("POST", store.stripeAccountId, "/checkout/sessions", body);
       if (typeof session.url !== "string" || !session.url || typeof session.id !== "string") throw new Error("Stripe did not return a checkout URL");
       return { url: session.url, id: session.id };
@@ -242,6 +268,16 @@ export async function createCartCheckout(
       if (named && error instanceof StripeError && error.status === 400) {
         body.delete(DISPLAY_NAME);
         named = false;
+        continue;
+      }
+      if (body.has("discounts[0][promotion_code]") && error instanceof StripeError && error.status === 400 && /promotion|coupon|discount/i.test(error.message)) {
+        // The code from the link is real but not for this cart (a minimum, a
+        // first order only, other products): the buyer is not turned away for
+        // it, and the checkout opens with the box, as it would have.
+        console.error("a code from a link did not fit this cart; opened with the box instead", error);
+        body.delete("discounts[0][promotion_code]");
+        body.delete("metadata[code]");
+        body.set("allow_promotion_codes", "true");
         continue;
       }
       if (asking && refusedRecovery(error)) {

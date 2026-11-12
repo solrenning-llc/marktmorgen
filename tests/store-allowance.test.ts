@@ -54,6 +54,23 @@ test("a figure is taken whole or refused, and a refused use takes nothing", asyn
   assert.equal((await takeAllowance(next, "studio", limit, next.period.start * 1000 + 1000)).ok, true);
 });
 
+// Codex H (#2269): a first period cut short before the first whole invoice (31 January to 15 February). In the two days
+// after it ends, before Stripe's next period is written down, and once it is (15 February to 15 March), the studio's
+// allowance is one, never two: the window in between begins at the known end, never on the anchor day after now.
+test("after a partial first period, the grace window and the real next period share one allowance", async () => {
+  const at = (m: number, d: number, h = 9) => Date.UTC(2027, m - 1, d, h, 23, 47);
+  const limit = STORE_ALLOWANCES.creator.studio;
+  const partial = paying(5, { period: { start: at(1, 31) / 1000, end: at(2, 15) / 1000, renews: true } });
+  const now = at(2, 16);
+  const grace = allowanceWindow(partial, now)!;
+  assert.deepEqual([grace.start, grace.end, grace.start <= now && now < grace.end], [at(2, 15), at(3, 15), true]);
+  assert.deepEqual(await takeAllowance(partial, "studio", limit, now), { ok: true, left: 0 });
+  const real = { ...partial, period: { start: at(2, 15) / 1000, end: at(3, 15) / 1000, renews: true } };
+  const again = await takeAllowance(real, "studio", limit, now);
+  assert.equal(again.ok, false, JSON.stringify(again));
+  assert.equal(await allowanceUsed(real, "studio", now), limit);
+});
+
 test("a paying store whose billing month is not known is let in to nothing", async () => {
   const unknown = await takeAllowance(paying(2, { period: null }), "api");
   assert.equal(unknown.ok, false);

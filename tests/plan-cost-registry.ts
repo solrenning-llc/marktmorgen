@@ -201,6 +201,20 @@ export function mailReportCallbackCost(deliveries: number, attempts: number, sns
   if (!Number.isFinite(totalUsd)) return null;
   return { notices: deliveries, invocations, redisCommands, snsUsd, hostingUsd, redisUsd, providerAllowanceUsd: totalUsd - snsUsd - hostingUsd - redisUsd, totalUsd };
 }
+/**
+ * The most commands an order's contact writes add since they are written only while the row still holds what was read
+ * (ALL-160, lib/contacts.ts upsertContact and noteProduct through lib/order-data.ts ORDER_WRITE's HCHECK): one HGET a
+ * checked write, at most MAX_CART of them, and at most two rounds more each when the row changed in between, a round
+ * that finds it changed costing its reads, the EVAL and the HGET and nothing else (the script stops before it writes or
+ * measures): upsertContact's three reads + 2, noteProduct's one + 2. At its worst, a cart of MAX_CART with the box
+ * ticked: 1 + 2 × 5 for the first product and 3 × (1 + 2 × 3) for the rest (lib/buyer-list.ts), 32, and the thank-you
+ * page's own upsertContact for the same order (app/[handle]/thanks/page.tsx), 1 + 2 × 5 more: 43. A free copy's
+ * (lib/free.ts, recordLead) is one upsertContact, 11, inside it. Billed as the EVAL plus each redis.call. Held, with
+ * CART_STOCK_COMMANDS_MOST, to a declared share of ORDER_COMPUTE (tests/contact-writes-cas.test.ts), so the rest of it is
+ * left for the order's pages and jobs.
+ */
+export const ORDER_CONTACT_CHECK_COMMANDS_MOST = 43;
+export const ORDER_CONTACT_CHECK_SHARE_OF_ORDER_COMPUTE = 0.3;
 /** An order's pages and jobs, set well over a visit's whole page (tests/traffic-cost.ts). */
 export const ORDER_COMPUTE = 0.0003;
 /**
@@ -1026,6 +1040,10 @@ export const COST_LINES: CostLine[] = [
       // CART_STOCK_COMMANDS_MOST, half of ORDER_COMPUTE at most. An opening whose answer is unknown asks nothing more: its holds lapse.
       { file: "lib/stock.ts", names: ["withCartStockHolds", "PENDING_MS", "releaseCartStockHolds", "STOCK_ADMIT", "STOCK_BIND", "stripeRefusedOpening", "LOCK_WAIT_MS = 500", "countStock(store, product, now, false)"] },
       { file: "app/api/store/free/download/route.ts", names: ["recordAffiliateLead"] },
+      // Since ALL-160 (12 November 2026) an order's contact writes are checked against what was read, in the same script (HCHECK),
+      // and a row changed in between is read again, two rounds more at most: ORDER_CONTACT_CHECK_COMMANDS_MOST, held to its share of ORDER_COMPUTE.
+      { file: "lib/order-data.ts", names: ["HCHECK", "orderWriteIf"] },
+      { file: "lib/contacts.ts", names: ["for (let round = 0; round < 3; round += 1)"] },
     ],
     basis: "The plan's figure, each order at the most one costs. An affiliate's lead for a free product claimed or a booked call (lib/affiliate-leads.ts, 18 October 2026) is three or four commands inside that order's own work, which ORDER_COMPUTE prices at well over a whole page, and no email; what it keeps is in the data room, taken before it is written. Nothing is sold past it: new orders are admitted only while the month's orders and the checkouts held from the last day are under the figure. A place in a purchase for several people is an order of the month it is taken in: inside its checkout's hold for a day, admitted when taken after (since 18 October 2026), its emails access emails. A payment request's record is changed under its own lock (since 18 October 2026, docs/security-audit-2026-10-18.md, MM-SA-02): four commands more a change, at most a dozen changes a request (made, sent, reminded twice, opened, paid, refunded), inside the same ORDER_COMPUTE. Since 8 November 2026 the record is written only while that lock is still the writer's (lib/payment-request-store.ts, SAVE): a change's three writes become one script that runs five inside it, three commands more a change with Lua's own counted, and the request is made under its lock too, seven more (the lock, the script's three over the plain write, the release's three); at most 43 commands more a request, $0.000086 at Upstash's $2 a million, no other command and nothing more kept.",
   },

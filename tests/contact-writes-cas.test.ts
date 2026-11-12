@@ -19,6 +19,8 @@ import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 import { ROOM } from "./data-room";
+import { CART_STOCK_COMMANDS_MOST, CART_STOCK_SHARE_OF_ORDER_COMPUTE, COMMAND, ORDER_COMPUTE, ORDER_CONTACT_CHECK_COMMANDS_MOST, ORDER_CONTACT_CHECK_SHARE_OF_ORDER_COMPUTE } from "./plan-cost-registry";
+import { MAX_CART } from "@/lib/cart-rules";
 
 type Command = (string | number)[];
 const real = redis.pipeline.bind(redis);
@@ -142,6 +144,13 @@ async function main(): Promise<void> {
   await stopCounting(halToken);
   const hal = await row("hal@example.com");
   is("agreed, product noted, counting stopped", [hal?.agreed, hal?.unsub, hal?.ids.includes("p-hal"), Boolean(hal?.clicks)], [true, false, true, false]);
+  part("What the checks add to an order is inside its declared share of the order's compute");
+  // A cart of MAX_CART with the box ticked: upsertContact (3 reads) then noteProduct (1 read) for the rest, each a check's
+  // HGET and two rounds more at most of its reads, the EVAL and the HGET; and the thank-you page's own upsertContact.
+  const upsert = 1 + 2 * (3 + 2);
+  const note = 1 + 2 * (1 + 2);
+  is("the worst order's checks are counted in full", upsert + (MAX_CART - 1) * note + upsert <= ORDER_CONTACT_CHECK_COMMANDS_MOST && MAX_CART * note + upsert <= ORDER_CONTACT_CHECK_COMMANDS_MOST, true);
+  is("and fit their share, beside the cart's stock work", [ORDER_CONTACT_CHECK_COMMANDS_MOST * COMMAND <= ORDER_CONTACT_CHECK_SHARE_OF_ORDER_COMPUTE * ORDER_COMPUTE, CART_STOCK_COMMANDS_MOST * COMMAND <= CART_STOCK_SHARE_OF_ORDER_COMPUTE * ORDER_COMPUTE, ORDER_CONTACT_CHECK_SHARE_OF_ORDER_COMPUTE + CART_STOCK_SHARE_OF_ORDER_COMPUTE < 1], [true, true, true]);
   done();
 }
 

@@ -224,80 +224,97 @@ export async function upsertContact(
   const email = normaliseEmail(rawEmail);
   if (!email || email.length > MAX_EMAIL_LENGTH || !EMAIL_PATTERN.test(email)) return none;
   const key = leadsKey(listId);
-  const replies = repliesFor(await redisPipeline([
-    ["HGET", key, email],
-    ["HLEN", key],
-    suppressedCommand(listId, email),
-  ]), 3);
-  // HGET answers text or nothing, HLEN a count, HEXISTS 0 or 1. Any other shape, or fewer replies than commands, is
-  // unknown (CX-123 rule 24): never "not on the list" (which wrote someone who unsubscribed back as a new contact who
-  // agreed, without why they were taken off or their link's token), never room on a full list, never "not deleted".
-  const raw = replies?.[0];
-  const size = countOf(replies?.[1]);
-  const erased = countOf(replies?.[2]);
-  if (!replies || (raw !== null && typeof raw !== "string") || size === null || erased === null || erased > 1) {
-    throw new UnknownReplyError("a contact's row, the list's size or whether the address was deleted");
+  for (let round = 0; round < 3; round += 1) {
+    const replies = repliesFor(await redisPipeline([
+      ["HGET", key, email],
+      ["HLEN", key],
+      suppressedCommand(listId, email),
+    ]), 3);
+    // HGET answers text or nothing, HLEN a count, HEXISTS 0 or 1. Any other shape, or fewer replies than commands, is
+    // unknown (CX-123 rule 24): never "not on the list" (which wrote someone who unsubscribed back as a new contact who
+    // agreed, without why they were taken off or their link's token), never room on a full list, never "not deleted".
+    const raw = replies?.[0];
+    const size = countOf(replies?.[1]);
+    const erased = countOf(replies?.[2]);
+    if (!replies || (raw !== null && typeof raw !== "string") || size === null || erased === null || erased > 1) {
+      throw new UnknownReplyError("a contact's row, the list's size or whether the address was deleted");
+    }
+    const before = parseContact(raw);
+    if (!before && size >= MAX_LEADS) return { ...none, full: true };
+
+    const now = new Date().toISOString();
+    const wasMailable = before ? mailable(before) : false;
+    // Somebody deleted from this store is kept, by a fingerprint, from being
+    // written to again: only their own yes, given now, lifts it. A purchase
+    // without the box still records the purchase, as anyone's does.
+    const deleted = wasSuppressed(erased);
+    const ownYes = input.agreed && input.explicit;
+    const agreed = Boolean(before?.agreed) || (input.agreed && (!deleted || ownYes));
+    // A yes only undoes an unsubscribe when it was given after it: a thank-you
+    // page reloaded, or a download link opened again, repeats an old tick.
+    const saidAt = Date.parse(input.at || now);
+    const leftAt = Date.parse(before?.unsubAt || "");
+    const resubscribe =
+      Boolean(before?.unsub) &&
+      input.agreed &&
+      input.explicit &&
+      (!Number.isFinite(leftAt) || !Number.isFinite(saidAt) || saidAt > leftAt);
+    const titles = before ? [...before.titles] : [];
+    if (input.title && !titles.includes(input.title)) titles.push(input.title);
+    const ids = before ? [...before.ids] : [];
+    const gotProduct = Boolean(input.productId) && !ids.includes(input.productId!);
+    if (input.productId && gotProduct) ids.push(input.productId);
+
+    const next: Contact = {
+      agreed,
+      agreedAt: before?.agreed ? before.agreedAt : agreed ? input.at || now : "",
+      firstAt: before?.firstAt || now,
+      lastAt: now,
+      titles: titles.slice(-MAX_TITLES),
+      ids: ids.slice(-MAX_TITLES),
+      source: before?.source || input.source,
+      unsub: resubscribe ? false : Boolean(before?.unsub),
+      unsubAt: resubscribe ? "" : before?.unsubAt ?? "",
+      // Their own yes, given since, clears why they were taken off as well.
+      ...(before?.gone && !resubscribe ? { gone: before.gone } : {}),
+      t: before?.t ?? "",
+      name: before?.name ?? "",
+      tags: before?.tags ?? [],
+      importedAt: before?.importedAt ?? "",
+    };
+    // Allowed only by their own tick, given with a yes to the list; kept once
+    // given, unless they left since — coming back, they are asked again.
+    const allowed = input.clicks === true && input.agreed && input.explicit;
+    const clicks = resubscribe ? (allowed ? input.at || now : "") : before?.clicks || (allowed ? input.at || now : "");
+    if (clicks) next.clicks = clicks;
+    if (deleted && !agreed) delete next.clicks;
+    await needContacts(room, [{ before, next }]);
+    const value = JSON.stringify(next);
+    const was = typeof raw === "string" ? sha1(raw) : "";
+    const commands: (string | number)[][] = [];
+    if (agreed && !before?.agreed) commands.push(["INCR", agreedKey(listId)]);
+    // The count of those who left holds only people who had agreed (unsubscribe, stopWriting, imports): a contact
+    // brought in already unsubscribed was never in it, so their yes takes nothing from it.
+    if (resubscribe && before?.agreed) commands.push(["DECR", unsubKey(listId)]);
+    if (deleted && ownYes) commands.push(liftCommand(listId, email));
+    if (input.sid) commands.push(...joinedCommands(input.sid, email));
+    // Written only while the row still holds what was read, in one step (ALL-160): an unsubscribe, a bounce or a merge
+    // made in between is never written over; the row is read again and decided again, three times at most. What goes
+    // with the row (the counts, the lift, the store's index) is written only with it.
+    if (room && isOrderRoom(room)) {
+      if (!(await orderWrite(room.order, [["HSET", key, email, value], ...commands], [{ key, field: email, was }]))) continue;
+    } else {
+      const [written] = await casWrite(key, [{ email, value, was }]);
+      if (!written) {
+        await settleContacts(room, [{ before, next }], [false]);
+        continue;
+      }
+      if (commands.length) await redisPipeline(commands);
+    }
+    return { joined: mailable(next) && !wasMailable, gotProduct, full: false };
   }
-  const before = parseContact(raw);
-  if (!before && size >= MAX_LEADS) return { ...none, full: true };
-
-  const now = new Date().toISOString();
-  const wasMailable = before ? mailable(before) : false;
-  // Somebody deleted from this store is kept, by a fingerprint, from being
-  // written to again: only their own yes, given now, lifts it. A purchase
-  // without the box still records the purchase, as anyone's does.
-  const deleted = wasSuppressed(erased);
-  const ownYes = input.agreed && input.explicit;
-  const agreed = Boolean(before?.agreed) || (input.agreed && (!deleted || ownYes));
-  // A yes only undoes an unsubscribe when it was given after it: a thank-you
-  // page reloaded, or a download link opened again, repeats an old tick.
-  const saidAt = Date.parse(input.at || now);
-  const leftAt = Date.parse(before?.unsubAt || "");
-  const resubscribe =
-    Boolean(before?.unsub) &&
-    input.agreed &&
-    input.explicit &&
-    (!Number.isFinite(leftAt) || !Number.isFinite(saidAt) || saidAt > leftAt);
-  const titles = before ? [...before.titles] : [];
-  if (input.title && !titles.includes(input.title)) titles.push(input.title);
-  const ids = before ? [...before.ids] : [];
-  const gotProduct = Boolean(input.productId) && !ids.includes(input.productId!);
-  if (input.productId && gotProduct) ids.push(input.productId);
-
-  const next: Contact = {
-    agreed,
-    agreedAt: before?.agreed ? before.agreedAt : agreed ? input.at || now : "",
-    firstAt: before?.firstAt || now,
-    lastAt: now,
-    titles: titles.slice(-MAX_TITLES),
-    ids: ids.slice(-MAX_TITLES),
-    source: before?.source || input.source,
-    unsub: resubscribe ? false : Boolean(before?.unsub),
-    unsubAt: resubscribe ? "" : before?.unsubAt ?? "",
-    // Their own yes, given since, clears why they were taken off as well.
-    ...(before?.gone && !resubscribe ? { gone: before.gone } : {}),
-    t: before?.t ?? "",
-    name: before?.name ?? "",
-    tags: before?.tags ?? [],
-    importedAt: before?.importedAt ?? "",
-  };
-  // Allowed only by their own tick, given with a yes to the list; kept once
-  // given, unless they left since — coming back, they are asked again.
-  const allowed = input.clicks === true && input.agreed && input.explicit;
-  const clicks = resubscribe ? (allowed ? input.at || now : "") : before?.clicks || (allowed ? input.at || now : "");
-  if (clicks) next.clicks = clicks;
-  if (deleted && !agreed) delete next.clicks;
-  await needContacts(room, [{ before, next }]);
-  const commands: (string | number)[][] = [["HSET", key, email, JSON.stringify(next)]];
-  if (agreed && !before?.agreed) commands.push(["INCR", agreedKey(listId)]);
-  // The count of those who left holds only people who had agreed (unsubscribe, stopWriting, imports): a contact
-  // brought in already unsubscribed was never in it, so their yes takes nothing from it.
-  if (resubscribe && before?.agreed) commands.push(["DECR", unsubKey(listId)]);
-  if (deleted && ownYes) commands.push(liftCommand(listId, email));
-  if (input.sid) commands.push(...joinedCommands(input.sid, email));
-  if (room && isOrderRoom(room)) await orderWrite(room.order, commands);
-  else await redisPipeline(commands);
-  return { joined: mailable(next) && !wasMailable, gotProduct, full: false };
+  // Changed under every try: not written, and said so, so it is tried again (never written over).
+  throw new UnknownReplyError("a contact's row that kept changing while it was written");
 }
 
 /**
@@ -307,20 +324,24 @@ export async function upsertContact(
 export async function noteProduct(listId: string, rawEmail: string, productId: string, title: string, order: DataOwner): Promise<boolean> {
   if (!isRedisConfigured() || !listId) return false;
   const email = normaliseEmail(rawEmail);
-  const [raw] = await redisPipeline([["HGET", leadsKey(listId), email]]);
-  const before = parseContact(raw);
-  if (!before) return false;
-  if (!before.ids.includes(productId)) {
+  const key = leadsKey(listId);
+  for (let round = 0; round < 3; round += 1) {
+    const [raw] = await redisPipeline([["HGET", key, email]]);
+    const before = parseContact(raw);
+    if (!before || typeof raw !== "string") return false;
+    if (before.ids.includes(productId)) return mailable(before);
     const next: Contact = {
       ...before,
       lastAt: new Date().toISOString(),
       ids: [...before.ids, productId].slice(-MAX_TITLES),
       titles: (before.titles.includes(title) ? before.titles : [...before.titles, title]).slice(-MAX_TITLES),
     };
-    // An order's: counted at what the record grew by (lib/order-data.ts).
-    await orderWrite(order, [["HSET", leadsKey(listId), email, JSON.stringify(next)]]);
+    // An order's: counted at what the record grew by (lib/order-data.ts), and written only while the row still holds
+    // what was read (ALL-160): an unsubscribe, a bounce or a merge made in between is read again, never written over.
+    if (await orderWrite(order, [["HSET", key, email, JSON.stringify(next)]], [{ key, field: email, was: sha1(raw) }])) return mailable(before);
   }
-  return mailable(before);
+  // Changed under every try: not written, and said so, so it is tried again (never written over).
+  throw new UnknownReplyError("a contact's row that kept changing while a product was noted");
 }
 
 /** Whether this address may be written to now. */
@@ -604,7 +625,7 @@ export async function importContactRows(listId: string, rows: ImportedContact[],
   return outcomes;
 }
 
-const sha1 = (value: string) => createHash("sha1").update(value).digest("hex");
+export const sha1 = (value: string) => createHash("sha1").update(value).digest("hex");
 
 /** Sets each field only if it still holds what was read (by its SHA-1, "" for none); one step on the Redis side. */
 const CAS_HSET = [
@@ -635,7 +656,7 @@ const CAS_HSET = [
  * only its answer was lost: written, and answered so (an undo needs it). Any
  * other read-back is unknown and throws UnknownReplyError, never "not written".
  */
-async function casWrite(key: string, writes: { email: string; value: string; was: string }[]): Promise<boolean[]> {
+export async function casWrite(key: string, writes: { email: string; value: string; was: string }[]): Promise<boolean[]> {
   try {
     const [result] = await redisPipeline([["EVAL", CAS_HSET, 1, key, ...writes.flatMap((w) => [w.email, w.was, w.value])]]);
     // Each one exactly 1 (written) or 0 (changed meanwhile); anything else is read back below, never "not written".
@@ -836,7 +857,7 @@ async function textOrNil(command: (string | number)[], what: string): Promise<st
  */
 export async function readUnsubToken(
   token: string,
-): Promise<{ listId: string; email: string; handle: string; contact: Contact } | null> {
+): Promise<{ listId: string; email: string; handle: string; contact: Contact; row: string } | null> {
   if (!UNSUB_TOKEN.test(token) || !isRedisConfigured()) return null;
   const raw = await textOrNil(["GET", tokenKey(token)], "an unsubscribe link");
   if (raw === null) return null;
@@ -850,7 +871,8 @@ export async function readUnsubToken(
   if (!email) return null;
   const row = await textOrNil(["HGET", leadsKey(listId), email], "the contact behind an unsubscribe link");
   const contact = parseContact(row);
-  return contact && contact.t === token ? { listId, email, handle, contact } : null;
+  // The row as it was read, so a write back of it can be made only while it still holds that (casWrite).
+  return contact && contact.t === token && row !== null ? { listId, email, handle, contact, row } : null;
 }
 
 /**

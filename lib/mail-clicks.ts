@@ -32,7 +32,7 @@ import { createHash } from "node:crypto";
 import { normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { countOf, repliesFor, stringList, UnknownReplyError } from "@/lib/redis-reply";
-import { type Contact, UNSUB_TOKEN, leadsKey, mailable, readUnsubToken } from "@/lib/contacts";
+import { type Contact, UNSUB_TOKEN, casWrite, leadsKey, mailable, readUnsubToken, sha1 } from "@/lib/contacts";
 
 /** How long a used link is remembered after the last one, in days. */
 export const CLICK_DAYS = 90;
@@ -107,20 +107,25 @@ export async function countingFor(token: string): Promise<{ email: string; handl
  * deleted, and their links stop carrying the key. Says whether it was found.
  */
 export async function stopCounting(token: string): Promise<boolean> {
-  const found = await readUnsubToken(token);
-  if (!found) return false;
-  const { listId, email, contact } = found;
-  const commands: (string | number)[][] = [
-    ["DEL", usedKey(listId, email)],
-    ["DEL", keyIndex(linkKeyOf(token))],
-  ];
-  if (contact.clicks) {
-    const { clicks: _was, ...kept } = contact;
-    void _was;
-    commands.push(["HSET", leadsKey(listId), email, JSON.stringify(kept satisfies Contact)]);
+  // The row is written back only while it still holds what was read (ALL-160): an unsubscribe, a bounce or a merge
+  // made in between is read again, never written over; three times at most, then thrown, to be tried again.
+  for (let round = 0; round < 3; round += 1) {
+    const found = await readUnsubToken(token);
+    if (!found) return false;
+    const { listId, email, contact, row } = found;
+    if (contact.clicks) {
+      const { clicks: _was, ...kept } = contact;
+      void _was;
+      const [written] = await casWrite(leadsKey(listId), [{ email, value: JSON.stringify(kept satisfies Contact), was: sha1(row) }]);
+      if (!written) continue;
+    }
+    await redisPipeline([
+      ["DEL", usedKey(listId, email)],
+      ["DEL", keyIndex(linkKeyOf(token))],
+    ]);
+    return true;
   }
-  await redisPipeline(commands);
-  return true;
+  throw new UnknownReplyError("a contact's row that kept changing while link counting was stopped");
 }
 
 /**

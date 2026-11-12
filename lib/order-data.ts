@@ -66,7 +66,12 @@ export const ORDER_WRITE_ERROR = "\u0000order-write-error:";
  * room's slot "o" (and to "#", with the slot's own 64 bytes the first time),
  * and answers {charged, reply...}. A malformed call answers {-1} and writes
  * nothing; a command Redis refuses is answered by ORDER_WRITE_ERROR and the
- * rest still run, the way a pipeline does.
+ * rest still run, the way a pipeline does. An HCHECK (a field and the SHA-1
+ * of what was read in it, "" for none) is a condition, not a command: checked
+ * before anything is run, and when any field no longer holds what was read
+ * the script answers {-2} and writes nothing (lib/contacts.ts, ALL-160), so a
+ * row read, decided and written back never writes over an unsubscribe made
+ * in between. Checks have no reply of their own.
  */
 export const ORDER_WRITE = `-- marktmorgen:order-write:v1
 local KEY = 96
@@ -82,13 +87,28 @@ for c = 1, n do
   local name = ARGV[i]
   local k = tonumber(ARGV[i + 1])
   local argc = tonumber(ARGV[i + 2])
-  if not name or not allowed[name] or not k or k < 2 or not KEYS[k] or not argc or argc < 0 or i + 2 + argc > #ARGV then return {-1} end
+  if not name or not (allowed[name] or name == 'HCHECK') or not k or k < 2 or not KEYS[k] or not argc or argc < 0 or i + 2 + argc > #ARGV then return {-1} end
+  if name == 'HCHECK' and argc ~= 2 then return {-1} end
   local args = {}
   for j = 1, argc do args[j] = ARGV[i + 2 + j] end
   plan[c] = {name, KEYS[k], args}
   i = i + 3 + argc
 end
 if i ~= #ARGV + 1 then return {-1} end
+local writes = {}
+for c = 1, n do
+  if plan[c][1] == 'HCHECK' then
+    local okc, cur = pcall(redis.call, 'HGET', plan[c][2], plan[c][3][1])
+    if not okc then return {-2} end
+    local seen = ''
+    if cur then seen = redis.sha1hex(cur) end
+    if seen ~= plan[c][3][2] then return {-2} end
+  else
+    writes[#writes + 1] = plan[c]
+  end
+end
+plan = writes
+n = #plan
 local existed = {}
 local function kind(key) return redis.call('TYPE', key)['ok'] end
 local function slen(key) if kind(key) == 'string' then return redis.call('STRLEN', key) end return 0 end
@@ -181,12 +201,15 @@ function checked(command: Command): string | null {
   return typeof name === "string" && ALLOWED.has(name) && typeof key === "string" && key.length > 0 && key.length <= 512 ? key : null;
 }
 
-/** One script's worth: its keys and arguments. */
-function scriptOf(room: string, commands: Command[]): (string | number)[] {
+/** A condition on one hash field: it still holds what was read, by its SHA-1 ("" for nothing there). */
+export type FieldCheck = { key: string; field: string; was: string };
+
+/** One script's worth: its keys and arguments, the checks (HCHECK) before the commands. */
+function scriptOf(room: string, commands: Command[], checks: FieldCheck[] = []): (string | number)[] {
   const keys = [room];
   const index = new Map<string, number>();
-  const argv: (string | number)[] = [commands.length];
-  for (const command of commands) {
+  const argv: (string | number)[] = [checks.length + commands.length];
+  for (const command of [...checks.map((c) => ["HCHECK", c.key, c.field, c.was]), ...commands]) {
     const key = String(command[1]);
     let at = index.get(key);
     if (at === undefined) {
@@ -297,8 +320,41 @@ export async function orderWriteCharged(owner: DataOwner, commands: Command[]): 
   return { charged, replies };
 }
 
-/** The same, answering only each command's reply: what a writer that used redisPipeline reads. */
-export async function orderWrite(owner: DataOwner, commands: Command[]): Promise<unknown[]> {
+/**
+ * An order's write made only while each checked field still holds what was
+ * read, in the same script, charged as orderWrite charges: each command's
+ * reply when written, null when a field changed meanwhile and nothing was
+ * written (the caller reads again and decides again). One script's worth at
+ * most, so the checks hold for every command. A reply in any other shape is
+ * unknown and throws UnknownReplyError, never "written" nor "changed".
+ */
+async function orderWriteIf(owner: DataOwner, checks: FieldCheck[], commands: Command[]): Promise<unknown[] | null> {
+  if (!commands.length) return [];
+  if (checks.length + commands.length > ORDER_WRITE_MAX) throw new Error("an order's checked write is longer than one script");
+  for (const command of commands) if (!checked(command)) throw new Error(`not a command an order's records are written with: ${String(command[0])}`);
+  for (const check of checks) if (!checked(["HSET", check.key]) || !check.field || !/^([0-9a-f]{40})?$/.test(check.was)) throw new Error("not a check an order's write can make");
+  const room = dataKey(owner);
+  // Without a room the write could not be made in one checked step: nothing is written rather than written over.
+  if (!room) throw new Error("an order's checked write needs its store's room");
+  const reply = repliesFor(await redisPipeline([scriptOf(room, commands, checks)]), 1)?.[0];
+  if (Array.isArray(reply) && reply.length === 1 && reply[0] === -2) return null;
+  try {
+    return readScript(reply, commands).replies;
+  } catch (error) {
+    // A command Redis refused is a known failure; any other shape is not known to have run or not (CX-123 rule 24).
+    if (error instanceof Error && error.message.startsWith("Redis error:")) throw error;
+    throw error instanceof UnknownReplyError ? error : new UnknownReplyError("an order's checked write");
+  }
+}
+
+/**
+ * The same, answering only each command's reply: what a writer that used redisPipeline reads. Given `checks`, written
+ * only while each checked field still holds what was read, and null when one changed and nothing was written.
+ */
+export async function orderWrite(owner: DataOwner, commands: Command[]): Promise<unknown[]>;
+export async function orderWrite(owner: DataOwner, commands: Command[], checks: FieldCheck[]): Promise<unknown[] | null>;
+export async function orderWrite(owner: DataOwner, commands: Command[], checks?: FieldCheck[]): Promise<unknown[] | null> {
+  if (checks) return orderWriteIf(owner, checks, commands);
   return (await orderWriteCharged(owner, commands)).replies;
 }
 

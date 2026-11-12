@@ -178,9 +178,11 @@ const nextConfig: NextConfig = {
        * Every other address under /embed/ (one part, or three and more) is
        * not the card: proxy.ts gives it no policy, so without these two rules
        * it went out with neither a policy nor X-Frame-Options and any site
-       * could frame it. It is a page like the rest; its not-found page is
-       * built ahead of time, so it gets the static policy, never a nonce one
-       * (tests/security-headers-config.test.ts).
+       * could frame it. It is a page like the rest. The request carries no
+       * nonce policy (the proxy writes none for it), so Next writes its
+       * scripts without a nonce and it gets the static policy, never a nonce
+       * one. The same address in another case (/Embed/...) is sent to the
+       * lowercase one by proxy.ts (tests/security-headers-config.test.ts).
        */
       ...["/embed/:one", "/embed/:one/:two/:rest+"].map((source) => ({
         source,

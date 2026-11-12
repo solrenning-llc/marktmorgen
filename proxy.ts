@@ -265,6 +265,19 @@ export async function proxy(request: NextRequest) {
   if (request.nextUrl.pathname.startsWith("/api/")) return guardApi(request);
 
   if (isPlatformHost(host)) {
+    /*
+     * The card's address in any case but lowercase (/Embed/kitchen/abc):
+     * next.config matches its header rules without regard to case, so the
+     * address escapes the page rule, while the card route and isEmbedPage
+     * do not match it either; it would answer a page with neither a policy
+     * nor X-Frame-Options, framable by any site. Sent to the lowercase
+     * address, which next.config and the card's own policy cover.
+     */
+    if (/^\/embed\//i.test(request.nextUrl.pathname) && !request.nextUrl.pathname.startsWith("/embed/")) {
+      const url = request.nextUrl.clone();
+      url.pathname = `/embed/${request.nextUrl.pathname.slice("/embed/".length)}`;
+      return NextResponse.redirect(url, 308);
+    }
     // The site's own map and rules: nothing of a store's to add to them.
     if (CRAWLER_FILES.test(request.nextUrl.pathname)) return NextResponse.next();
     // A store's own map, under its address here.

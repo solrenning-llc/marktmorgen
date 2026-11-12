@@ -11,12 +11,17 @@
  *   is left out of next.config's page rule, and proxy.ts gives a policy only
  *   to the card; it was sent with neither CSP nor X-Frame-Options, so any
  *   site could frame it. It gets the static page policy and X-Frame-Options
- *   from next.config (not the nonce policy: its not-found page is built
- *   ahead of time, and a nonce would switch its scripts off).
+ *   from next.config (not the nonce policy: the proxy puts no nonce on
+ *   its request, so its scripts are written without one).
+ * - The same address in another case (/Embed/kitchen/abc) escapes the page
+ *   rule, as Next matches header sources case-insensitively; the proxy
+ *   sends it to the lowercase address.
  */
 import nextConfig from "../next.config";
 import { getPathMatch } from "next/dist/shared/lib/router/utils/path-match";
 import { dynamicPolicy, isDynamicPage, isEmbedPage, staticPolicy } from "@/lib/csp";
+import { NextRequest } from "next/server";
+import { proxy } from "@/proxy";
 import { done, is, part } from "./check";
 
 type Header = { key: string; value: string };
@@ -44,7 +49,8 @@ async function main(): Promise<void> {
   const sent = (path: string) => {
     const out = new Map<string, string>();
     for (const rule of rules) {
-      if (!getPathMatch(rule.source, { removeUnnamedParams: true })(path)) continue;
+      // As Next compiles header sources: strict, and case-insensitive.
+      if (!getPathMatch(rule.source, { strict: true, removeUnnamedParams: true, sensitive: false })(path)) continue;
       for (const h of rule.headers) out.set(h.key.toLowerCase(), h.value);
     }
     return out;
@@ -59,6 +65,24 @@ async function main(): Promise<void> {
     const headers = sent(path);
     is(`the card ${path} is sent no X-Frame-Options and no fixed policy`, [headers.has("x-frame-options"), headers.has("content-security-policy")], [false, false]);
     is(`the card ${path} gets its framable nonce policy from the proxy`, isDynamicPage(path) && /frame-ancestors \*/.test(dynamicPolicy("n", { store: false, embed: isEmbedPage(path) })), true);
+    const res = await proxy(new NextRequest(`https://marktmorgen.com${path}`, { headers: { host: "marktmorgen.com" } }));
+    is(`the proxy serves the card ${path} with its nonce policy`, [res.headers.get("location"), /frame-ancestors \*/.test(res.headers.get("content-security-policy") ?? "")], [null, true]);
+  }
+
+  part("the card's address in another case");
+  /*
+   * Next matches header sources case-insensitively, so /Embed/kitchen/abc
+   * escapes the page rule and matches only the common /embed/ rule, while the
+   * card route and isEmbedPage are case-sensitive: it answers the not-found
+   * page with neither a policy nor X-Frame-Options. The proxy sends any
+   * /embed/ address not written in lowercase to the lowercase one, which the
+   * rules above cover.
+   */
+  for (const path of ["/Embed/kitchen/abc", "/EMBED/kitchen/join", "/eMbEd/kitchen/abc/", "/Embed/kitchen"]) {
+    if (path.split("/").filter(Boolean).length === 3) is(`${path} gets no policy from next.config's page rules`, sent(path).has("x-frame-options"), false);
+    const res = await proxy(new NextRequest(`https://marktmorgen.com${path}?a=1`, { headers: { host: "marktmorgen.com" } }));
+    const to = new URL(res.headers.get("location") ?? "https://none.invalid/");
+    is(`${path} is sent to its lowercase address`, [res.status, to.host, to.pathname, to.search], [308, "marktmorgen.com", path.replace(/^\/embed\//i, "/embed/"), "?a=1"]);
   }
 }
 

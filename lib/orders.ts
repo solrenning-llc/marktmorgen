@@ -465,15 +465,34 @@ export async function ordersIn(folder: string, month = calendarWindow().id): Pro
 }
 
 /**
+ * The orders a store had in a window, read exactly (CX-123 rule 24): none counted is 0, a count is that count, and a
+ * reply out of shape or a failed read is null (unknown), never 0. What decides a ceiling reads this, never ordersIn.
+ */
+export async function ordersInExact(folder: string, window: string): Promise<number | null> {
+  if (!isRedisConfigured() || !folder) return null;
+  try {
+    const replies = repliesFor(await redisPipeline([["GET", countKey(folder, window)]]), 1);
+    if (!replies) return null;
+    const raw = replies[0];
+    if (raw === null) return 0;
+    return typeof raw === "string" && /^(0|[1-9][0-9]{0,14})$/.test(raw) ? Number(raw) : null;
+  } catch (error) {
+    console.error("could not read a store's orders", error);
+    return null;
+  }
+}
+
+/**
  * The orders a store has had in its window (its billing month when it pays,
  * the calendar month when it has no plan), by the store. Null when it pays
  * and its billing window is unknown: never the calendar month's (rule 30),
- * and nothing counted against it may start.
+ * and nothing counted against it may start. Null too when the count does not
+ * read (ordersInExact): free copies stop at it (lib/free.ts), never past it.
  */
 export async function storeOrdersThisMonth(store: Store, now = Date.now()): Promise<number | null> {
   const window = allowanceWindow(store, now);
   if (!window) return null;
-  return ordersIn(await storeFolder(storeRef(store)), window.id);
+  return ordersInExact(await storeFolder(storeRef(store)), window.id);
 }
 
 /** The stores that had any order counted in a month. */

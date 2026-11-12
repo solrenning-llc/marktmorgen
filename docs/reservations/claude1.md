@@ -6,3 +6,4 @@ Only Claude 1 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
+| Claude 1 | Defect (custo): unknown slugs on static content routes answer 404 without rendering or caching | claude1/cost-vercel-unknown-slugs | `app/blog/[slug]/page.tsx`, `app/blog/[slug]/opengraph-image.tsx`, `app/platform/[slug]/page.tsx`, `app/for/[slug]/page.tsx`, `app/proof/[slug]/page.tsx`, `tests/c1-cost-unknown-slugs.test.ts` | 12/11/2026 18h10 |

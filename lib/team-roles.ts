@@ -137,7 +137,7 @@ export const ROLE_NAMES: Record<Role, string> = {
 
 /** One line each, shown where a role is chosen. */
 export const ROLE_SUMMARIES: Record<TeamRole, string> = {
-  admin: "Everything except the plan, the Stripe connection, the team and deleting the store.",
+  admin: "Everything except the plan, the Stripe connection, the team, deleting the store and, once the plan has ended, the whole store's file.",
   editor: "Products, courses, sales pages, the store page, the community's live events, community and review moderation, and email drafts. Cannot send email, touch payments, import from another platform, download buyers' data or delete a person.",
   support: "Reads orders and bookings, sends purchase emails again, sees who is coming to live events, and moderates the community and reviews. Cannot edit the store or delete a person.",
 };

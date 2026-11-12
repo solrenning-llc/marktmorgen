@@ -2632,7 +2632,13 @@ export default async function StudioPage({
                       : <>{"The last moment to start a plan and keep this store was "}<strong>{momentWords(lastPlanMoment(closing.day))}</strong>{". It has passed, so a plan can no longer be started for it."}</>}
                   </p>
                 )}
-                {/* A GET form, not a link: a link may be prefetched, and each prefetch would read the whole store. */}
+                {/* A GET form, not a link: a link may be prefetched, and each prefetch would read the whole store.
+                    Once the plan has ended, that file is the owner's only (issue #4081, app/api/store/export/route.ts). */}
+                {role !== "owner" ? (
+                  <p className="mt-5 text-sm text-ink-soft">
+                    Now that the plan has ended, only the store&rsquo;s owner can download the whole store&rsquo;s file. Ask them to download it before the closing day.
+                  </p>
+                ) : (
                 <div className="mt-5 flex flex-wrap items-center gap-3">
                   <form action="/api/store/export" method="get" className="max-w-full">
                     <input type="hidden" name="store" value={store.sid} />
@@ -2645,6 +2651,7 @@ export default async function StudioPage({
                     {`One file: your store's address, name, bio, links, currency and the date it was created, your products and their pages, thank-you notes, posts, courses with every lesson's text, forms and their answers, contacts and your orders as a spreadsheet. ${ENDED_STORE_EXPORTS === 1 ? "Once" : `${ENDED_STORE_EXPORTS} times`} now that your plan has ended, whatever your store's size, so download it when you are ready to keep it. Files and videos download from their own pages. Nothing else is in it. For example, files, videos, community posts, email sequences and broadcasts, reviews, coupons, affiliates, the times of booked calls (their payments are in your orders), funnels and CRM deals and tasks stay in your studio.`}
                   </span>
                 </div>
+                )}
                 <p className="mt-3 text-sm text-ink-soft">
                   {`We email you ${WARN_MONTH_DAYS} days before that day and ${WARN_WEEK_DAYS} days before it, and nothing is removed sooner than a week after the last of those emails.`}
                 </p>

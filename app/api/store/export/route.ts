@@ -86,6 +86,11 @@ export async function GET(request: NextRequest) {
     // ending and never taken from a figure or the share of stores that pay nothing, so it is
     // never refused for want of room (priced with its closing, tests/plan-cost-registry.ts).
     if (standingOf(store) === "ended") {
+      // That one file is the owner's (issue #4081): the terms and the studio promise it to them before
+      // the closing day, so a teammate with "export" is refused before anything is counted.
+      if (creator.role !== "owner") {
+        return plain(403, "After a plan ends, only the store's owner can download the whole store's file. Your list, sales and numbers can still be downloaded one by one from the studio.");
+      }
       if (!isRedisConfigured() || !store.statsId) return plain(503, "Your store's file could not be made just now. Try again in a minute.");
       const ended = Date.parse(store.planEndedAt) || 0;
       const key = `nl:rl:export:${store.statsId}:ended:${ended}`;

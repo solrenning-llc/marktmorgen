@@ -6,3 +6,4 @@ Only Claude 1 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
+| Claude 1 cloud | Fixes #4081: an ended store's whole-store file is the owner's | claude/blissful-carson-2v8k2m-ended-export-owner | `app/api/store/export/route.ts`, `tests/ended-export-owner.test.ts`; small shared edits, not reserved: app/studio/page.tsx, lib/team-roles.ts, lib/help-content.ts | 12/11/2026 18h40 |

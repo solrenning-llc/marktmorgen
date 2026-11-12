@@ -4,6 +4,7 @@
   "@/lib/billing": "plans-cron-billing-ok-world.ts",
   "@/lib/billing-sync": "plans-cron-billing-ok-world.ts",
   "@/lib/plan-disputes": "plans-cron-billing-ok-world.ts",
+  "@/lib/plan-fraud-warnings": "plans-cron-billing-ok-world.ts",
   "@/lib/store": "plans-cron-billing-ok-world.ts",
   "@/lib/creator-research-store": "plans-cron-billing-ok-world.ts",
   "@/lib/payment-recovery": "plans-cron-billing-ok-world.ts",

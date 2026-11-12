@@ -7,6 +7,7 @@ import { settlePlans } from "@/lib/plans";
 import { isBillingConfigured } from "@/lib/billing";
 import { syncSubscriptions } from "@/lib/billing-sync";
 import { syncPlanDisputes } from "@/lib/plan-disputes";
+import { syncPlanFraudWarnings } from "@/lib/plan-fraud-warnings";
 import { moveAllStores } from "@/lib/store";
 import { pruneResearch } from "@/lib/creator-research-store";
 import { recoverFailedPayments } from "@/lib/payment-recovery";
@@ -32,6 +33,9 @@ export const maxDuration = 60;
  *     written down;
  *   - writes down a payment for a plan that its creator disputed with their
  *     bank (lib/plan-disputes.ts), which pauses what costs us to run;
+ *   - refunds a plan or add-on payment its card's issuer warned was probably
+ *     fraudulent, before it becomes a dispute, and ends the subscription that
+ *     charged the card (lib/plan-fraud-warnings.ts);
  *   - tells each member whose renewal failed, once, with a link that pays it
  *     (lib/payment-recovery.ts), so a member whose card expired is not
  *     quietly cut off without ever being asked for a new one;
@@ -93,6 +97,16 @@ async function run(request: NextRequest): Promise<Response> {
         disputes = await syncPlanDisputes(Math.min(deadline, Date.now() + 8_000));
       } catch (error) {
         console.error("reading plan disputes failed", error);
+      }
+    }
+    // A plan or add-on payment that the card's issuer warned was probably fraudulent is refunded before it becomes a
+    // dispute, and its subscription ended (312 [HQ1]); before the subscriptions are read, so the ending is seen today.
+    let fraudWarnings = null;
+    if (isBillingConfigured()) {
+      try {
+        fraudWarnings = await syncPlanFraudWarnings(Math.min(deadline, Date.now() + 6_000));
+      } catch (error) {
+        console.error("acting on early fraud warnings failed", error);
       }
     }
     let billing = null;
@@ -175,8 +189,8 @@ async function run(request: NextRequest): Promise<Response> {
     if (demo && demo.pending.length) console.error("the demo store is missing something", demo.pending);
     // A subscription whose paid-up state could not be applied or checked
     // makes the run a failed one, not a healthy one (lib/billing-sync.ts).
-    const ok = plans !== null && ((billing !== null && billing.failed === 0 && disputes !== null) || !isBillingConfigured());
-    return Response.json({ ok, ...(plans ?? {}), billing, disputes, recovered, comeBack, nudged, yearly, verified, benchmarks, invites, catalogs, demo }, { status: ok ? 200 : 500, headers: { "Cache-Control": "no-store" } });
+    const ok = plans !== null && ((billing !== null && billing.failed === 0 && disputes !== null && fraudWarnings !== null) || !isBillingConfigured());
+    return Response.json({ ok, ...(plans ?? {}), billing, disputes, fraudWarnings, recovered, comeBack, nudged, yearly, verified, benchmarks, invites, catalogs, demo }, { status: ok ? 200 : 500, headers: { "Cache-Control": "no-store" } });
   } finally {
     await releaseMark("nl:plans:lock", lock);
   }

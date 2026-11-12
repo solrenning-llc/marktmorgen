@@ -450,6 +450,21 @@ async function main(): Promise<void> {
     is("the invoices' ten pages used up: the months after the oldest invoice read are still read", states(capped, "stripe"), [...Array(8).fill("read"), ...Array(4).fill("not_reached")]);
   }
 
+  part("Claude 1's MEDIUM (quality review at df4a75e836): PayPal turned off, its sales still kept, no Stripe");
+  reset();
+  {
+    // Sold through PayPal in June, then turned PayPal off: the store has neither Stripe nor a PayPal seller now.
+    const shop = { ...makeStore(false), stripeAccountId: null } as unknown as Store;
+    await paypalSale(shop, "PAYPALOFF000001", Date.UTC(2031, 5, 7), 4000);
+    const e = (await readEarningsYear(shop, "UTC", NOW))?.value ?? null;
+    is("June: the PayPal sale kept here is read, never a month with no source at all", of(e, "2031-06", "paypal")?.state, "read");
+    is("and its money is shown", (of(e, "2031-06", "paypal") as { lines?: { salesCents: number }[] })?.lines?.[0]?.salesCents, 4000);
+    reset();
+    const never = { ...makeStore(false), stripeAccountId: null } as unknown as Store;
+    const nothing = (await readEarningsYear(never, "UTC", NOW))?.value ?? null;
+    is("control: a store that never sold through either has no PayPal month", of(nothing, "2031-06", "paypal"), undefined);
+  }
+
   done();
 }
 

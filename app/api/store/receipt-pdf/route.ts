@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 import { countStudio, creatorFrom } from "@/lib/studio-route";
 import { saleHandles } from "@/lib/store";
 import { DEMO_CONNECTED_ACCOUNT } from "@/lib/demo-account";
+import { RECEIPT_NUMBER_MAX, assignReceiptNumber, receiptNumberText } from "@/lib/receipt-number";
 import { RECEIPT_PDF_MAX_BYTES, RECEIPT_PDF_UNITS, RECEIPT_REFERENCE, type ReceiptRefusal, readReceipt, receiptDrawable, receiptPdf } from "@/lib/receipt-pdf";
 
 // The longest one download may run: the two Stripe reads, side by side, and the drawing (RECEIPT_STRIPE_TIMEOUT_MS; priced
@@ -25,7 +26,9 @@ const REFUSED: Record<ReceiptRefusal, [number, string]> = {
  * `?reference=cs_…`, one of the sales listed in the studio. For a role that
  * may see the store's sales (lib/team-roles.ts, "orders"). The sale is read
  * from the store's own Stripe account each time and has to be this store's;
- * the file is made on request and kept nowhere. RECEIPT_PDF_UNITS of the
+ * the file is made on request and kept nowhere. Only its number is kept: the
+ * store's next one the first time, the same one after (lib/receipt-number.ts,
+ * U2), given only to a sale that makes a receipt. RECEIPT_PDF_UNITS of the
  * store's studio requests are taken before Stripe is read.
  */
 export async function GET(request: NextRequest) {
@@ -53,16 +56,24 @@ export async function GET(request: NextRequest) {
     const [status, words] = REFUSED[read.why];
     return plain(status, words);
   }
-  if (!(await receiptDrawable(read.receipt))) {
+  // Asked with the longest number, so a sale whose receipt cannot be drawn is never given one.
+  if (!(await receiptDrawable({ ...read.receipt, number: receiptNumberText(RECEIPT_NUMBER_MAX) }))) {
     return plain(422, "This sale has letters the PDF cannot draw. Its record is in your Stripe dashboard.");
   }
-  const bytes = await receiptPdf(read.receipt);
+  const numbered = await assignReceiptNumber(store, reference);
+  if (!numbered.ok) {
+    // A full room is said as full; any other answer is not a number, and no receipt goes out with a guessed one.
+    if (numbered.reason === "full") return plain(409, numbered.message);
+    return plain(503, "This receipt's number could not be read just now, so no receipt was made. Try again in a moment.");
+  }
+  const receipt = { ...read.receipt, number: numbered.number };
+  const bytes = await receiptPdf(receipt);
   // Never sent past the weight it is priced at (tests/kb22-receipt-pdf.test.ts draws the heaviest).
   if (bytes.byteLength > RECEIPT_PDF_MAX_BYTES) {
     console.error("a receipt came out heavier than its ceiling", bytes.byteLength);
     return plain(500, "This receipt could not be made. Its record is in your Stripe dashboard.");
   }
-  const name = `receipt-${new Date(read.receipt.paidAt * 1000).toISOString().slice(0, 10)}.pdf`;
+  const name = `receipt-${receipt.number}.pdf`;
   return new Response(new Uint8Array(bytes), {
     headers: {
       "Content-Type": "application/pdf",

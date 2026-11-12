@@ -783,6 +783,8 @@ export const FAMILIES: Record<string, Family> = {
   "nl:ppsell:receipt:@lib/paypal-delivery.ts": short("When a paid order's receipt was first tried, a week", "order", 7, MARK, KIND("paypal")),
   // RECEIPT_MAIL_BYTES and RECEIPT_MAIL_SECONDS of lib/paypal-delivery.ts (held by tests/paypal-receipt-once.test.ts, part J).
   "nl:ppsell:mail:@lib/paypal-delivery.ts": short("A paid order's receipt as first made, so every try sends the same email, a day", "order", 1, 8 * KB, KIND("paypal")),
+  "nl:rcpt:n:@lib/receipt-number.ts": room("A store's receipt numbers, one field a sale given one: taken from the room in the same script that writes it (RECEIPT_NUMBER_BYTES), a re-download taking nothing", "lib/receipt-number.ts"),
+  "nl:rcpt:seq:@lib/receipt-number.ts": room("A store's last receipt number: its key taken with its first number (RECEIPT_KEYS_BYTES)", "lib/receipt-number.ts"),
   "nl:preview:@lib/pdf-preview.ts": room("A PDF's preview, kept a year only while it fits", "lib/pdf-preview.ts"),
   "nl:stamp:copy:@lib/pdf-stamp.ts": room("A stamped copy's record, kept only while it fits", "lib/pdf-stamp.ts"),
   "nl:stamp:problem:@lib/pdf-stamp.ts": { what: "A file that could not be stamped", parts: [per("upload", 31, KB, "Per file.")] },

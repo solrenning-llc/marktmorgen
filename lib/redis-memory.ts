@@ -1241,6 +1241,26 @@ export class MemoryRedis {
           });
           return out;
         }
+        // lib/receipt-number.ts RECEIPT_NUMBER: a sale's number read, or its room taken and the next number given, in one step.
+        if (key.startsWith("-- marktmorgen:receipt-number:v1\n") && args[0] === "3" && args.length === 9) {
+          const [, room, numbers, counter, limit, month, reference, entry, keys] = args;
+          const held = this.run(["HGET", numbers, reference]);
+          if (typeof held === "string") {
+            const n = Number(held);
+            return Number.isSafeInteger(n) && n >= 1 ? [2, n] : [-1, 0];
+          }
+          if (!Number.isFinite(Number(entry)) || !Number.isFinite(Number(keys))) return [-1, 0];
+          // The count read before any room is taken (GET refuses another type, as Redis does); one INCR cannot add to, or
+          // that would pass RECEIPT_NUMBER_MAX (999,999,999,999), takes nothing.
+          const count = this.run(["GET", counter]);
+          if (count !== null && count !== "0" && !(typeof count === "string" && /^[1-9]\d{0,11}$/.test(count) && Number(count) < 999_999_999_999)) return [-1, 0];
+          const size = Number(entry) + (count === null ? Number(keys) : 0);
+          const taken = this.storeData([room, limit, "0", month, "a", "rcpt", String(size)]);
+          if (!Array.isArray(taken) || taken[0] !== 1) return taken;
+          const n = Number(this.run(["INCR", counter]));
+          this.run(["HSET", numbers, reference, String(n)]);
+          return [3, n];
+        }
         // lib/lesson-notes.ts NOTE_SAVE, NOTE_FORGET and NOTE_CLEAR: a student's notes, their tally and the notes' slot in
         // one step. Redis's TIME is this stand-in's clock.
         if (key.startsWith("-- marktmorgen:lesson-note-save:v1\n")) {
@@ -2226,14 +2246,20 @@ export class MemoryRedis {
     }
     const months = new Set<string>();
     let relist = false;
+    // Every month that is over, up to DATA_MONTHS_CLEARED_MOST (lib/store-data.ts) a call, read together and
+    // removed together; a month listed twice comes off once.
+    const over: string[] = [];
     for (const m of (room.get("~") ?? "").split(",").filter(Boolean)) {
-      if (m < month) {
-        const held = Number(room.get(`~${m}`) ?? "0") || 0;
-        if (held > 0) total -= held + 64;
-        room.delete(`~${m}`);
+      if (m < month && (over.includes(m) || over.length < 512)) {
+        if (!over.includes(m)) over.push(m);
         relist = true;
       } else months.add(m);
     }
+    for (const m of over) {
+      const held = Number(room.get(`~${m}`) ?? "0") || 0;
+      if (held > 0) total -= held + 64;
+    }
+    for (const m of over) room.delete(`~${m}`);
     if (total < 0) total = 0;
     const keep = () => {
       if (relist) {

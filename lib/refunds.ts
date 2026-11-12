@@ -174,13 +174,15 @@ function closingKnown(event: unknown): boolean {
   // An id that names a payment, as text or on the expanded payment, or null: an empty id names none (Codex Q, review 5794829222).
   const paymentKnown = payment === null || (typeof payment === "string" && !!payment) || (!!payment && typeof payment === "object" && !Array.isArray(payment) && typeof (payment as { id?: unknown }).id === "string" && !!(payment as { id: string }).id);
   if (!paymentKnown) return false;
+  // A prevented dispute decides by its money (unreadable is unknown, above); one whose money went back names its charge.
   return money !== "returned" || CHARGE_ID.test(idOf(charge));
 }
 
 /**
  * Whether the bank took this payment back from the creator for good: a
  * dispute on its charge that Stripe has closed with the money given back
- * (lost, or prevented and resolved: disputeMoney), whatever its amount
+ * (lost, or prevented with its own money withdrawn and not put back:
+ * disputeMoney, lib/dispute-statuses.ts), whatever its amount
  * (the owner's rule of 4 November 2026; the header says why). Takes what
  * refundedInFull() takes. Stripe marks a disputed charge with `disputed` but
  * no longer sends the dispute with it, and nothing can expand it, so only
@@ -189,12 +191,13 @@ function closingKnown(event: unknown): boolean {
  * A charge not expanded, or not marked, counts as not lost, as with refunds.
  * Throws when Stripe cannot be asked, and when its answer is not this
  * charge's own list (rule 30): a reply that is not a list, a row that is not
- * a dispute object, a row naming another charge or none, and a list not said
- * to be whole without a lost row of its own. Not paged, so no request is
- * added: a charge with more disputes than one page holds reads as unknown.
- * Throws too when a dispute listed cannot be read (a status Stripe does not
- * give, or a prevented one whose balance transactions cannot be read) and
- * none gave the money back (rule 24: unknown is never "not lost").
+ * a dispute object or a row naming another charge or none, whatever else
+ * the list holds; and, only when no row of its own that gave the money back
+ * decides, a row whose money cannot be read (a status Stripe does not give,
+ * or a prevented one whose balance transactions cannot be read; rule 24:
+ * unknown is never "not lost") or a list not said to be whole. Not paged, so
+ * no request is added: a charge with more disputes than one page holds reads
+ * as unknown.
  */
 export async function disputeLost(account: string, payment: unknown): Promise<boolean> {
   const charge = chargeOf(payment);
@@ -211,8 +214,9 @@ export async function disputeLost(account: string, payment: unknown): Promise<bo
     // Another charge's lost dispute, or one naming none, would close the doors on a buyer who paid.
     if (idOf((row as { charge?: unknown }).charge) !== id) throw new Error("Stripe listed another charge's dispute");
   }
-  // One of its own that gave the money back (lost, or prevented with it returned) is lost whatever else there is; one
-  // whose money cannot be read is unknown; "not lost" only from a list that says, exactly, there is no more.
+  // Every row is checked for its shape and its charge first. One of its own that gave the money back (lost, or prevented
+  // with it withdrawn and not put back) is lost whatever else there is; one whose money cannot be read decides only when
+  // none does (Codex V on #3569) and is unknown; "not lost" only from a list that says, exactly, there is no more.
   const money = rows.map(disputeMoney);
   if (money.includes("returned")) return true;
   if (money.includes("unknown")) throw new Error("a dispute listed for this charge cannot be read: where its money went is unknown");

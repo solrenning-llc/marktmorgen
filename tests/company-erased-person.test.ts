@@ -13,6 +13,8 @@ import {addCompany,changeCompanies,dropCompany,forgetCompanyPerson,linkPerson,re
 import {claimHandle,ensureStatsId,ensureStoreId,setSubscription,storeForEmail} from '@/lib/store';
 import {erasePerson} from '@/lib/person-erasure';
 import {personKey} from '@/lib/person-key';
+import {upsertContact} from '@/lib/contacts';
+import {restoredSentence} from '@/lib/crm-companies-rules';
 import {isSuppressed} from '@/lib/suppression';
 import {store as redis} from './redis-stub';
 import {paidPeriod} from './billing-period-fixture';
@@ -74,7 +76,7 @@ test('the undo of a company deleted before an erasure never puts the deleted per
   assert.equal(rows.some((c) => c.people.includes(s.person)), false, JSON.stringify({status: response.status, rows}));
   assert.equal(response.status, 200, JSON.stringify(answer));
   assert.deepEqual(rows.map((c) => c.people), [[s.other]]);
-  assert.deepEqual(answer.skipped, [s.person]);
+  assert.deepEqual(answer.skipped, []);
 });
 
 test('a link of a deleted person is refused and writes nothing; a person not deleted is still linked', async () => {
@@ -113,4 +115,51 @@ test('a restore whose write lands after the erasure began writes nothing', async
   assert.equal(struck, true);
   assert.equal((await readCompanies(s.statsId)).some((c) => c.people.includes(s.person)), false, JSON.stringify(result));
   assert.equal(result.ok, false);
+});
+
+// Claude 7's MÉDIO 1 and Claude 1's MÉDIO on #4026: the mark is the erased person's, not the address's. Someone who
+// comes back with their own yes (the suppression lifted, lib/contacts.ts) can be put on a company again at once.
+test('a person who comes back with their own yes after the erasure can be linked to a company again', async () => {
+  const s = await seed();
+  await erase(who);
+  const store = await storeForEmail(owner);
+  assert.ok(store?.listId);
+  await upsertContact(store.listId, who, {agreed: true, explicit: true, source: 'free', at: new Date().toISOString()}, store);
+  assert.equal(await isSuppressed(store.listId, who), false);
+  const linked = await post({action: 'link', id, person: s.person});
+  assert.equal(linked.status, 200, JSON.stringify(await linked.clone().json()));
+  assert.equal((await readCompanies(s.statsId)).find((c) => c.id === id)?.people.includes(s.person), true);
+});
+
+test('coming back without their own yes (a purchase without the box) keeps the deleted person off every company', async () => {
+  const s = await seed();
+  await erase(who);
+  const store = await storeForEmail(owner);
+  assert.ok(store?.listId);
+  await upsertContact(store.listId, who, {agreed: false, explicit: false, source: 'free', at: new Date().toISOString()}, store);
+  assert.equal(await isSuppressed(store.listId, who), true);
+  const refused = await post({action: 'link', id, person: s.person});
+  assert.notEqual(refused.status, 200);
+  assert.equal((await readCompanies(s.statsId)).some((c) => c.people.includes(s.person)), false);
+});
+
+// Claude 7's MÉDIO 2 on #4026: an undo that left out a deleted person never says they moved to another company.
+test('the undo says plainly that a deleted person was not put back, by a count only, and never that they moved', async () => {
+  const s = await seed();
+  assert.ok((await changeCompanies(s.statsId, s.store, (c) => dropCompany(c, id))).ok);
+  await erase(who);
+  const response = await post({action: 'restore', name: s.snapshot.name, website: s.snapshot.website, note: s.snapshot.note, people: s.snapshot.people});
+  const answer = (await response.json()) as {ok: boolean; skipped?: string[]; erased?: unknown};
+  assert.equal(response.status, 200, JSON.stringify(answer));
+  assert.deepEqual(answer.skipped, []);
+  assert.equal(answer.erased, 1);
+  const said = restoredSentence(s.snapshot.name, s.snapshot.people.length, 0, 1);
+  assert.doesNotMatch(said, /moved/);
+  assert.match(said, /deleted from your store/);
+  assert.match(said, /not put back/);
+  assert.equal(restoredSentence('North', 3, 1, 1), 'North is back with 1 of its 3 people. One person had moved to another company since, and stays there. One person was deleted from your store, so they were not put back.');
+  assert.equal(restoredSentence('North', 4, 0, 2), 'North is back with 2 of its 4 people. 2 people were deleted from your store, so they were not put back.');
+  assert.equal(restoredSentence('North', 2, 2, 0), 'North is back with 0 of its 2 people. 2 people had moved to another company since, and stay there.');
+  assert.equal(restoredSentence('North', 2, 0, 0), 'North is back with its people.');
+  assert.equal(restoredSentence('North', 0, 0, 0), 'North is back.');
 });

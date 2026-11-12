@@ -121,15 +121,16 @@ export async function POST(request: NextRequest) {
       if (!Array.isArray(body.people) || body.people.length > MAX_COMPANY_PEOPLE) return refuse("people");
       const madeId = newCompanyId();
       let skipped: string[] = [];
+      let erasedCount = 0;
       const people = restoredPeople(body.people as unknown[]);
       if ((refused = await countRead(store))) return refused;
-      // Never with a person deleted from the store since (Codex G2's MEDIUM 3): left out, and said in `skipped`.
+      // Never with a person deleted from the store since (Codex G2's MEDIUM 3): left out, and counted in `erased` (never named); `skipped` are those who moved.
       result = await changeCompanies(statsId, store, (companies, _unreadable, erased) => {
         const restored = restoreCompany(companies, input.value, madeId, Date.now() / 1000, people, erased);
-        if (restored.ok) skipped = restored.skipped;
+        if (restored.ok) ({ skipped, erased: erasedCount } = restored);
         return restored;
       });
-      if (result.ok) return Response.json({ ok: true, companies: result.companies, added: madeId, skipped }, { headers: NO_STORE });
+      if (result.ok) return Response.json({ ok: true, companies: result.companies, added: madeId, skipped, erased: erasedCount }, { headers: NO_STORE });
     } else if (body.action === "unlink") {
       if (!PERSON.test(person)) return refuse("unknown");
       if ((refused = await countRead(store))) return refused;

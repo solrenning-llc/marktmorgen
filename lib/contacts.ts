@@ -39,6 +39,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { MAX_CONTACT_NAME, MAX_IMPORT, MAX_LEADS, readTags } from "@/lib/contact-rules";
 import { liftCommand, suppressedAmongCommand, suppressedCommand, wasSuppressed } from "@/lib/suppression";
+import { liftCompanyMarkCommand } from "@/lib/crm-companies";
 import { joinedCommands } from "@/lib/joined-stores";
 import { DataRoomError, type DataStore, giveData, needData } from "@/lib/store-data";
 import { type DataOwner, orderWrite } from "@/lib/order-data";
@@ -293,8 +294,15 @@ export async function upsertContact(
   if (resubscribe) commands.push(["DECR", unsubKey(listId)]);
   if (deleted && ownYes) commands.push(liftCommand(listId, email));
   if (input.sid) commands.push(...joinedCommands(input.sid, email));
-  if (room && isOrderRoom(room)) await orderWrite(room.order, commands);
-  else await redisPipeline(commands);
+  // Their own yes also lifts the companies' mark of the deletion (lib/crm-companies.ts), after the suppression in
+  // the same request, so a company never takes them while the store still holds them as deleted. An order's write
+  // carries only an order's commands, so there it follows the write.
+  const statsId = room && isOrderRoom(room) ? room.order.statsId : room?.statsId;
+  const lift = deleted && ownYes && statsId ? liftCompanyMarkCommand(statsId, email) : null;
+  if (room && isOrderRoom(room)) {
+    await orderWrite(room.order, commands);
+    if (lift) await redisPipeline([lift]);
+  } else await redisPipeline(lift ? [...commands, lift] : commands);
   return { joined: mailable(next) && !wasMailable, gotProduct, full: false };
 }
 

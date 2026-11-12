@@ -46,6 +46,7 @@ import { type Held, LockBusyError, releaseLock, takeLock } from "@/lib/redis-loc
 import { type DataStore, giveData, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { INDEX_SECONDS } from "@/lib/erasure-index";
+import { personKey } from "@/lib/person-key";
 import { type Company, type CompanyResult, MAX_COMPANIES, MAX_COMPANY_NAME, MAX_COMPANY_NOTE, MAX_COMPANY_PEOPLE, PERSON_KEY, parseCompany, unlinkPerson } from "@/lib/crm-companies-rules";
 
 export * from "@/lib/crm-companies-rules";
@@ -67,6 +68,16 @@ const goneKey = (statsId: string, person: string) => `nl:crm:co:gone:${statsId}:
  * (lib/erasure-index.ts INDEX_SECONDS), far longer than a page holding an undo stays open.
  */
 export const GONE_SECONDS = INDEX_SECONDS;
+
+/**
+ * Lifts the mark when the same address comes back with the person's own yes, in the same place the store's
+ * suppression of it is lifted (lib/contacts.ts upsertContact, liftCommand): the mark is the erased person's, not the
+ * returning person's, who can be put on a company again at once (Claude 7's MÉDIO 1 on #4026). A link, undo or
+ * restore asked before they came back is still refused or left out while the mark stood.
+ */
+export function liftCompanyMarkCommand(statsId: string, email: string): (string | number)[] {
+  return ["DEL", goneKey(statsId, personKey(statsId, email))];
+}
 
 /**
  * KEYS[1] the companies' lock, KEYS[2] their hash, then the deletion marks

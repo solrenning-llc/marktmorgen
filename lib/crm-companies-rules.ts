@@ -183,14 +183,17 @@ export function addCompany(companies: readonly Company[], value: Pick<Company, "
  * another company now come back; someone who moved since stays where they
  * went, and someone deleted from the store since (`erased`, read under the
  * companies' lock: lib/crm-companies.ts changeCompanies) never comes back
- * (Codex G2's MEDIUM 3 on #2574). `skipped` are those left out.
+ * (Codex G2's MEDIUM 3 on #2574). `skipped` are those left out because they
+ * moved; `erased` only counts those left out because they were deleted, so the
+ * screen says each reason truly (Claude 7's MÉDIO 2 on #4026).
  */
-export function restoreCompany(companies: readonly Company[], value: Pick<Company, "name" | "website" | "note">, id: string, nowSeconds: number, people: readonly unknown[], erased: ReadonlySet<string> = new Set()): { ok: true; companies: Company[]; skipped: string[] } | { ok: false; error: CompanyRefusal } {
+export function restoreCompany(companies: readonly Company[], value: Pick<Company, "name" | "website" | "note">, id: string, nowSeconds: number, people: readonly unknown[], erased: ReadonlySet<string> = new Set()): { ok: true; companies: Company[]; skipped: string[]; erased: number } | { ok: false; error: CompanyRefusal } {
   const added = addCompany(companies, value, id, nowSeconds);
   if (!added.ok) return added;
   const asked = restoredPeople(people);
+  const gone = asked.filter((p) => erased.has(p));
   const back = asked.filter((p) => !erased.has(p) && !companies.some((c) => c.people.includes(p)));
-  return { ok: true, companies: added.companies.map((c) => (c.id === id ? { ...c, people: back } : c)), skipped: asked.filter((p) => !back.includes(p)) };
+  return { ok: true, companies: added.companies.map((c) => (c.id === id ? { ...c, people: back } : c)), skipped: asked.filter((p) => !back.includes(p) && !erased.has(p)), erased: gone.length };
 }
 
 /** The people an undo asks to put back, as restoreCompany reads them: well-formed keys, each once, at most MAX_COMPANY_PEOPLE. */
@@ -248,4 +251,18 @@ export function companiesForPerson(companies: readonly Company[], person: string
 /** The company a person works at, or null. */
 export function companyOf(companies: readonly Company[], person: string): Company | null {
   return companies.find((c) => c.people.includes(person)) ?? null;
+}
+
+/**
+ * What the studio says after an undo (components/companies-editor.tsx): how many of the company's people came back,
+ * then each reason someone did not, in its own words. A person deleted from the store is only counted, never named,
+ * and never said to have moved (Claude 7's MÉDIO 2 on #4026).
+ */
+export function restoredSentence(name: string, total: number, moved: number, erased: number): string {
+  const left = moved + erased;
+  if (!left) return total ? `${name} is back with its people.` : `${name} is back.`;
+  const said = [`${name} is back with ${total - left} of its ${total} people.`];
+  if (moved) said.push(`${moved === 1 ? "One person had" : `${moved} people had`} moved to another company since, and ${moved === 1 ? "stays" : "stay"} there.`);
+  if (erased) said.push(`${erased === 1 ? "One person was" : `${erased} people were`} deleted from your store, so they were not put back.`);
+  return said.join(" ");
 }

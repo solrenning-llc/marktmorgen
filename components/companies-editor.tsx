@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { toast } from "@/components/toast";
 import { agendaLinkWords } from "@/components/tasks-agenda";
-import { COMPANY_REFUSALS, type Company, MAX_COMPANIES, MAX_COMPANY_NAME, MAX_COMPANY_NOTE, MAX_COMPANY_WEBSITE } from "@/lib/crm-companies-rules";
+import { COMPANY_REFUSALS, type Company, MAX_COMPANIES, MAX_COMPANY_NAME, MAX_COMPANY_NOTE, MAX_COMPANY_WEBSITE, restoredSentence } from "@/lib/crm-companies-rules";
 
 type Shown = Company & { addresses: Record<string, string> };
 type Field = "name" | "website" | "note";
@@ -100,14 +100,14 @@ export function CompaniesEditor({
     if (errorField === field) clearError();
   }
 
-  async function send(body: Record<string, unknown>, done: string | null): Promise<{ companies: Company[]; added?: string; skipped?: string[] } | null> {
+  async function send(body: Record<string, unknown>, done: string | null): Promise<{ companies: Company[]; added?: string; skipped?: string[]; erased?: number } | null> {
     if (working.current) return null;
     working.current = true;
     setBusy(true);
     clearError();
     try {
       const response = await fetch("/api/store/companies", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-      const answer = (await response.json().catch(() => ({}))) as { ok?: boolean; companies?: Company[]; added?: string; skipped?: string[]; message?: string; error?: string };
+      const answer = (await response.json().catch(() => ({}))) as { ok?: boolean; companies?: Company[]; added?: string; skipped?: string[]; erased?: number; message?: string; error?: string };
       if (answer.ok && answer.companies) {
         const known = new Map(companies.map((c) => [c.id, c.addresses]));
         // A company put back keeps the addresses it was shown with, under its new id.
@@ -115,7 +115,7 @@ export function CompaniesEditor({
         setCompanies(answer.companies.map((c) => ({ ...c, addresses: known.get(c.id) ?? {} })));
         // Said once: a change also told in the status line beside it is not said again in a toast (AAA audit C6).
         if (done) toast(done);
-        return { companies: answer.companies, added: answer.added, skipped: answer.skipped };
+        return { companies: answer.companies, added: answer.added, skipped: answer.skipped, erased: typeof answer.erased === "number" ? answer.erased : 0 };
       }
       // Only the form's own fields are named: an undo is refused as a whole, under the form.
       const field = body.action === "add" || body.action === "edit" ? (FIELD_OF[answer.error ?? ""] ?? null) : null;
@@ -171,19 +171,12 @@ export function CompaniesEditor({
     }
   }
 
-  // Put back in one change, with the people who are not at another company now (review A2/A3); says who did not come back.
+  // Put back in one change, with the people who are not at another company now (review A2/A3); says who did not come back, and why (restoredSentence).
   async function undo() {
     if (!gone || busy) return;
     const back = await send({ action: "restore", name: gone.name, website: gone.website, note: gone.note, people: gone.people }, null);
     if (!back) return;
-    const left = back.skipped?.length ?? 0;
-    setPutBack(
-      left
-        ? `${gone.name} is back with ${gone.people.length - left} of its ${gone.people.length} people. ${left === 1 ? "One person had" : `${left} people had`} moved to another company since, and ${left === 1 ? "stays" : "stay"} there.`
-        : gone.people.length
-          ? `${gone.name} is back with its people.`
-          : `${gone.name} is back.`,
-    );
+    setPutBack(restoredSentence(gone.name, gone.people.length, back.skipped?.length ?? 0, back.erased ?? 0));
     setGone(null);
     focusAfterDrawing(back.added ? { to: "company", id: back.added } : { to: "list" });
   }

@@ -708,6 +708,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:nlink:opens:@lib/numbers-links.ts": short("A link's opens, by the day", "request", 2, 128, REQ("numbers link")),
   "nl:orders:n:@lib/order-admission.ts": { what: "Orders counted in the window", parts: [capped(14 * KEY, "One count a window, 400 days.")] },
   "nl:orders:open:@lib/order-admission.ts": { what: "Checkouts held, and the bytes they hold, by the hour", parts: [capped(2 * (26 * 64 + KEY), "Two hashes of the last 25 hours.")] },
+  "nl:orders:freed:@lib/order-admission.ts": short("A checkout that closed unpaid, marked as having given its order place back (#3970), until its hour leaves the window: at most one a checkout opened, two days at most", "request", 2),
   "nl:orders:pending:@lib/order-admission.ts": { what: "Orders paid while a paying store's billing window was unknown, until it is known", parts: [capped(KEY, "One count a store, emptied by the next admission or order once the window is known.")] },
   "nl:orders:folders:@lib/orders.ts": company("The stores with orders, a month", "One set a month for every store."),
   "nl:orders:n:@lib/orders.ts": { what: "Orders counted in the window", parts: [capped(0, "Counted with lib/order-admission.ts.")] },

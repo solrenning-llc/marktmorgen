@@ -35,7 +35,7 @@ import { type Counted, type SubjectTest, MIN_TEST_REACH, chooseSubject, newTest,
 import { campaignViews, readPaidSales } from "@/lib/stats";
 import { moneyByCampaign } from "@/lib/mail-revenue";
 import { BUYER_LEDGER_UNITS, LedgerNotCounted, type Narrow, isNarrowed, keepFor, ledgerReadBytes, ledgerReadingUnits, ledgerUnits, readNarrow, readsBuyers } from "@/lib/segments";
-import { sameNarrow } from "@/lib/segments-rules";
+import { sameAskedNarrow, sameNarrow } from "@/lib/segments-rules";
 
 export type BroadcastStatus = "scheduled" | "sending" | "sent" | "waiting" | "cancelled" | "failed";
 
@@ -418,12 +418,12 @@ export async function createBroadcast(
   // "Only the people who got X, who have not got X" is nobody, every time.
   if (notProductId && notProductId === productId) return { ok: false, reason: "empty" };
   // A group or a narrowing that cannot be read exactly is refused, never read as a wider one (the whole list): the
-  // same rule a draft and a kept record follow (sameNarrow). Nothing asked is everyone, as before.
+  // same rule a draft and a kept record follow (sameNarrow); a field left out is none there. Nothing asked is everyone, as before.
   const askedWho = input.who === undefined || input.who === null || input.who === "" ? "all" : input.who;
   if (!WHO.includes(askedWho as Who)) return { ok: false, reason: "who" };
   const who = askedWho as Who;
   const asNarrowed = readNarrow(input.narrow);
-  if (input.narrow !== undefined && input.narrow !== null && (typeof input.narrow !== "object" || Array.isArray(input.narrow) || !sameNarrow(input.narrow as Record<string, unknown>, asNarrowed))) return { ok: false, reason: "narrow" };
+  if (input.narrow !== undefined && input.narrow !== null && (typeof input.narrow !== "object" || Array.isArray(input.narrow) || !sameAskedNarrow(input.narrow as Record<string, unknown>, asNarrowed))) return { ok: false, reason: "narrow" };
   const narrow = isNarrowed(asNarrowed) ? asNarrowed : null;
   // A label as a file or a sequence writes one: cleaned, at most MAX_TAG_LENGTH; empty is none.
   const label = typeof input.label === "string" ? readTags([input.label])[0] ?? null : null;

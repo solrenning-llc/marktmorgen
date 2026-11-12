@@ -36,6 +36,18 @@ let trap: ((commands: Commands) => Promise<unknown[]> | null) | null = null;
   return caught ?? real(commands);
 };
 
+/**
+ * The contacts' read for unsubscribe links (tokensFor): the HMGET of the list's
+ * rows, sent alone or in one round trip with the read of the deleted people's
+ * prints. Its own answer is replaced by `shape`'s; anything else in the round
+ * trip is answered for real, so only the contacts' read is unknown.
+ */
+function contactsRead(commands: Commands, listId: string, shape: unknown[]): Promise<unknown[]> | null {
+  if (!commands.length || commands[0][0] !== "HMGET" || commands[0][1] !== leadsKey(listId)) return null;
+  if (commands.length === 1) return Promise.resolve(shape);
+  return real(commands.slice(1)).then((rest) => [...shape, ...rest]);
+}
+
 async function contactToken(listId: string, email: string): Promise<string> {
   const [raw] = await real([["HGET", leadsKey(listId), email]]);
   return typeof raw === "string" ? (JSON.parse(raw) as { t?: string }).t ?? "" : "";
@@ -77,7 +89,7 @@ async function main(): Promise<void> {
   part("The contacts are read back in an unknown shape");
   await upsertContact(listId, "two@example.com", { agreed: true, explicit: true, source: "free" }, ROOM);
   for (const shape of [[null], ["not a list"], [[]]]) {
-    trap = (commands) => (commands.length === 1 && commands[0][0] === "HMGET" && commands[0][1] === leadsKey(listId) ? Promise.resolve(shape) : null);
+    trap = (commands) => contactsRead(commands, listId, shape);
     const read = await outcome(() => tokensFor(listId, ["two@example.com"], store.handle));
     trap = null;
     is(`HMGET answering ${JSON.stringify(shape)} is unknown, never "everyone left"`, read, "threw");
@@ -93,7 +105,7 @@ async function main(): Promise<void> {
       const [, , , hash, field, , value] = commands[0];
       return real([["HSET", hash, field, value]]).then(() => { throw new Error("Redis request failed with status 502"); });
     }
-    if (evalRan && commands.length === 1 && commands[0][0] === "HMGET") return Promise.resolve([null]);
+    if (evalRan) return contactsRead(commands, listId, [null]);
     return null;
   };
   await outcome(() => tokensFor(listId, ["three@example.com"], store.handle));
@@ -113,7 +125,7 @@ async function main(): Promise<void> {
   const key = `nl:mail:bc:${id}`;
   const broadcast = { id, listId, handle: store.handle, subject: "New paper is in", body: "Fresh stock this week.", productId: null, notProductId: null, who: "all", narrow: null, status: "sending", createdAt: 100, sendAt: 100, finishedAt: 0, total: everyone.length, sent: 0, note: "", failures: 0, listed: true, tagged: true, test: null };
   await real([["SET", key, JSON.stringify(broadcast)], ["RPUSH", `${key}:to`, ...everyone], ["SADD", "nl:mail:queue", id]]);
-  trap = (commands) => (commands.length === 1 && commands[0][0] === "HMGET" && commands[0][1] === leadsKey(listId) ? Promise.resolve([null]) : null);
+  trap = (commands) => contactsRead(commands, listId, [null]);
   const cut = await advanceBroadcast(id, storeForHandle, Date.now() + 10_000).catch(() => null);
   trap = null;
   const [saved] = await real([["GET", key]]);

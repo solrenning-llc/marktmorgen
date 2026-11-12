@@ -58,6 +58,17 @@ async function main(): Promise<void> {
   const withKey = (key: string, value: unknown) => JSON.stringify({ ...JSON.parse(savedExtras), [key]: value });
 
   part("Confirmed readings");
+  // Claude 1 (coordinator) and Claude 1 cloud on #3888: #3004 (618 [SZ2] unit 2) writes the product's legal
+  // information into the same extras record, beside fields and funnel. That record is the writer's own shape: it
+  // reads, and an edit keeps it.
+  const withLegal = JSON.stringify({ ...JSON.parse(savedExtras), legal: { safety: null, prop65: "", quantities: [] } });
+  rewrite = { key: extrasKey, reply: withLegal };
+  is("extras written with legal information beside fields and funnel read", await outcome(() => readProducts(store, [id])), "answered");
+  is("the strict reader reads them too", await outcome(() => readProductsStrict(store, [id])), "answered");
+  is("the product still has its question", await readProducts(store, [id]).then((p) => p[0]?.fields.map((f) => f.label), () => "unknown"), ["Your company"]);
+  rewrite = { key: extrasKey, reply: JSON.stringify({ ...JSON.parse(savedExtras), legal: null }) };
+  is("legal information written as null reads too", await outcome(() => readProducts(store, [id])), "answered");
+  rewrite = null;
   const both = await readProducts(store, [id, other.product.id]);
   is("both products read, the workshop with its question", [both.length, both[0]?.fields.length], [2, 1]);
   rewrite = { key: extrasKey, reply: null };

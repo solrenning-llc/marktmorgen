@@ -10,18 +10,17 @@ import { dayIn } from "@/lib/person-tasks";
  * (and whether it is overdue, said in words, never only by color), and Edit and Remove buttons named with the task.
  * Removing asks once more on the same button. After each change the focus goes somewhere that still exists (2.4.3):
  * the new-task field after adding, the task's Edit button after saving, the list's heading after removing. What
- * happened is said in a polite live region; a confirmed refusal says nothing changed, while an unknown write asks for a reload.
+ * happened is said in a polite live region. Every refusal the route sends is a refusal before the write and keeps its
+ * own words ("Write what needs doing."); only an "unconfirmed" write, or a reply that is not exact, is of unknown result:
+ * the list is read again, and a reload is asked for only when that reading fails too (review of #3562 at 025cddde1c).
  */
 type Listed = { ok: true; tasks: BusinessTask[]; progress: { done: number; total: number; words: string } };
 type Answer = Listed | { ok: false; error?: string; message?: string };
 
 const READ_FAILED = "Your tasks could not be reached. Check your connection and try again.";
 const UNCONFIRMED = "We could not confirm this change. Reload the page to see your tasks.";
+const UNCONFIRMED_SHOWN = "We could not confirm this change. The list below is your tasks as they are saved now; check it before you try again.";
 const FAILED = "That did not work. Nothing was changed. Try again in a moment.";
-const REFUSED_BEFORE_WRITE = new Set([
-  "invalid", "unknown", "full", "store_full", "busy", "forbidden", "signed_out", "unavailable",
-  "role", "none", "store_gone", "locked", "two_step_required", "studio_used", "unreadable",
-]);
 
 const record = (value: unknown): Record<string, unknown> | null =>
   value !== null && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
@@ -39,6 +38,7 @@ export function decodeBusinessTasksAnswer(value: unknown, writing: boolean): Ans
   if (answer?.ok === true && Array.isArray(answer.tasks) && answer.tasks.every(taskShape) && progress &&
       typeof progress.done === "number" && Number.isSafeInteger(progress.done) && progress.done >= 0 &&
       typeof progress.total === "number" && Number.isSafeInteger(progress.total) && progress.total === answer.tasks.length &&
+      progress.done === (answer.tasks as BusinessTask[]).filter((task) => task.done).length &&
       typeof progress.words === "string") {
     return answer as Listed;
   }
@@ -47,6 +47,16 @@ export function decodeBusinessTasksAnswer(value: unknown, writing: boolean): Ans
     return { ok: false, error: answer.error, ...(typeof answer.message === "string" ? { message: answer.message } : {}) };
   }
   return writing ? { ok: false, error: "unconfirmed", message: UNCONFIRMED } : { ok: false, error: "unreadable", message: READ_FAILED };
+}
+
+/**
+ * What a write's answer says happened: the list as saved, a refusal before anything was written (every code the
+ * route or its guard sends, so its own words are shown), or a write of unknown result ("unconfirmed": the route's own,
+ * or a reply that was not exact).
+ */
+export function writeOutcome(answer: Answer): "listed" | "refused" | "unconfirmed" {
+  if (answer.ok) return "listed";
+  return answer.error === "unconfirmed" ? "unconfirmed" : "refused";
 }
 
 async function ask(init?: RequestInit): Promise<Answer> {
@@ -111,18 +121,20 @@ export function BusinessTasks() {
     setError("");
     const answer = await ask({ method: "POST", body: JSON.stringify(body) });
     if (!answer.ok) {
-      if (REFUSED_BEFORE_WRITE.has(answer.error ?? "")) {
+      if (writeOutcome(answer) === "refused") {
         setBusy(false);
         setError(answer.message ?? FAILED);
         return false;
       }
       const refreshed = await ask();
       if (refreshed.ok) {
+        // A task the list no longer holds took the focused control with it: the focus goes to the heading (2.4.3).
+        if (typeof body.id === "string" && !refreshed.tasks.some((t) => t.id === body.id)) focusNext.current = "heading";
         setToday(dayIn(Date.now(), Intl.DateTimeFormat().resolvedOptions().timeZone));
         setList(refreshed);
       }
       setBusy(false);
-      setError(UNCONFIRMED);
+      setError(refreshed.ok ? UNCONFIRMED_SHOWN : UNCONFIRMED);
       return false;
     }
     setBusy(false);

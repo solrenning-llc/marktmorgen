@@ -174,7 +174,7 @@ async function main(): Promise<void> {
   is("a parsed pre-write refusal stays a refusal", decodeBusinessTasksAnswer({ ok: false, error: "invalid" }, true), { ok: false, error: "invalid" });
   is("non-JSON on a reading is unreadable", decodeBusinessTasksAnswer(null, false), { ok: false, error: "unreadable", message: "Your tasks could not be reached. Check your connection and try again." });
   const clientSource = readFileSync("components/business-tasks.tsx", "utf8");
-  is("an unconfirmed write is re-read before writes are offered again", /const refreshed = await ask\(\);[\s\S]*setBusy\(false\);[\s\S]*setError\(UNCONFIRMED\)/.test(clientSource), true);
+  is("an unconfirmed write is re-read before writes are offered again", /const refreshed = await ask\(\);[\s\S]*setBusy\(false\);[\s\S]*setError\(refreshed\.ok \? UNCONFIRMED_SHOWN : UNCONFIRMED\)/.test(clientSource), true);
   is("the team copy names the actual settings permission", clientSource.includes("People on your team who can change store settings see it."), true);
   is("the remove confirmation name is announced", /setSaid\(`Press again to remove/.test(clientSource), true);
 

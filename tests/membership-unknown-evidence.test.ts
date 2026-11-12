@@ -89,6 +89,8 @@ async function main(): Promise<void> {
   part("The rule: a subscription object with no readable status is unknown, not ended");
   is("no status", (() => { try { return memberState({ id: "sub_TestNoStatus1" }); } catch { return "unknown"; } })(), "unknown");
   is("a numeric status", (() => { try { return isLiveSub({ id: "sub_TestNumber01", status: 3 }); } catch { return "unknown"; } })(), "unknown");
+  // Codex L on #3889: text outside Stripe's subscription states is not understood either, never "ended".
+  is("a status Stripe does not have", (() => { try { return isLiveSub({ id: "sub_TestFuture01", status: "future_state" }); } catch { return "unknown"; } })(), "unknown");
   is("canceled is still ended", isLiveSub({ status: "canceled" }), false);
   is("active is still open", isLiveSub({ status: "active" }), true);
 
@@ -97,6 +99,7 @@ async function main(): Promise<void> {
     ["null on a paid subscription checkout", () => null],
     ["no status", (id) => subOf(id, undefined)],
     ["a numeric status", (id) => subOf(id, 7)],
+    ["a status Stripe does not have", (id) => subOf(id, "future_state")],
   ];
   let n = 0;
   for (const [what, shape] of odd) {

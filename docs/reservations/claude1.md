@@ -6,3 +6,4 @@ Only Claude 1 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
+| Claude 1 | 557 [BG1] unit 1, categories of a store's blog: the rules (pure; not kept, shown or linked yet) | claude1/bg1-blog-categories | `lib/store-blog-categories.ts` (new), `tests/store-blog-categories.test.ts` (new) | 12/11/2026 14h50 |

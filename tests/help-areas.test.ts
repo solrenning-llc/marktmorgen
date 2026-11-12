@@ -111,7 +111,10 @@ part("Names quoted in the answers written for HC1 are on the screens");
     const code = plain(files.map((f) => readFileSync(f, "utf8")).join("\n"));
     const quoted = [...(answers.get(id) ?? "").matchAll(/\u201c([^\u201d]+)\u201d/g)].map((m) => plain(m[1]));
     is(`${id}: names something`, quoted.length > 0, true);
-    is(`${id}: every quoted name is in its screens`, quoted.filter((q) => !code.includes(q)), []);
+    // A name counts only as a whole word run, never inside a longer identifier ("Path" in studioPath does not count).
+    const escape = (q: string) => q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const onScreen = (q: string) => new RegExp(`(?<![A-Za-z0-9_])${escape(q)}(?![A-Za-z0-9_])`).test(code);
+    is(`${id}: every quoted name is in its screens`, quoted.filter((q) => !onScreen(q)), []);
   }
 }
 

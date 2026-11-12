@@ -749,6 +749,32 @@
       "parameters": []
     },
     {
+      "source": "app/help/[section]/[answer]/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/help/[section]/[answer]",
+      "parameters": [
+        {
+          "name": "section",
+          "kind": "segment"
+        },
+        {
+          "name": "answer",
+          "kind": "segment"
+        }
+      ]
+    },
+    {
+      "source": "app/help/[section]/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/help/[section]",
+      "parameters": [
+        {
+          "name": "section",
+          "kind": "segment"
+        }
+      ]
+    },
+    {
       "source": "app/help/buyers/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/help/buyers",
@@ -1419,7 +1445,9 @@
     "components/group-link-box.tsx",
     "components/handle-form.tsx",
     "components/heard-ask.tsx",
+    "components/help-answer-tools.tsx",
     "components/help-search.tsx",
+    "components/help-topics.tsx",
     "components/home-claim.tsx",
     "components/home-examples.tsx",
     "components/home-interactive.tsx",
@@ -2090,6 +2118,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 143
+    "pageTemplates": 145
   }
 }

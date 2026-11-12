@@ -1,7 +1,9 @@
 /**
  * Every area of the studio and the help center's answer for its main task
  * (564 [HC1], unit 1; added 12 November 2026). The list the help center's
- * area cards will be drawn from, kept beside the studio's own screens so a
+ * "Help for each part of your studio" links are drawn from (app/help/page.tsx;
+ * an area whose answer is gone is left out there, and the test below fails),
+ * kept beside the studio's own screens so a
  * new screen cannot go without help unnoticed: tests/help-areas.test.ts
  * fails when a folder of app/studio is in none of the three lists below,
  * when an answer named here is gone, or when it no longer speaks of its area.
@@ -14,8 +16,6 @@
  *     honestly, each to get its answer in a later unit of HC1.
  *   - NOT_AREAS: studio screens that are not an area of their own (a state
  *     of the studio, or a screen that is itself help).
- *
- * Nothing here changes what any page shows yet.
  */
 
 export type HelpArea = { folder: string; name: string; answer: string; mentions: string };

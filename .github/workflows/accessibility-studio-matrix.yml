@@ -82,6 +82,8 @@ jobs:
       - run: node scripts/ci-build.mjs
       - name: Authenticated studio and page editor at five widths with AAA and access modes
         run: node tests/e2e/accessibility-studio-matrix.mjs
+      - name: Help topics are 44 by 44 targets at a phone's and a computer's width, short names included (synthetic, no server)
+        run: node tests/e2e/help-topics-targets.mjs
 
   all-checks:
     # The one check GitHub requires before main (scripts/ci_all_checks.py): it always runs and

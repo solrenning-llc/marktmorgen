@@ -14,10 +14,11 @@ let reply: unknown;
 let reads: number;
 let mutations: number;
 let lookups: number;
+let writes: (string | number)[][];
 
 beforeEach(() => {
   redis.clear();
-  reads = 0; mutations = 0; lookups = 0;
+  reads = 0; mutations = 0; lookups = 0; writes = [];
   process.env.RESEND_API_KEY = "re_test_call_reminder_only";
   globalThis.fetch = (async () => { throw new Error("Unexpected external request"); }) as typeof fetch;
   redis.pipeline = (async (commands: (string | number)[][]) => {
@@ -26,6 +27,7 @@ beforeEach(() => {
       return reply as never;
     }
     mutations += commands.length;
+    writes.push(...commands);
     return pipeline(commands);
   }) as typeof redis.pipeline;
 });
@@ -106,4 +108,41 @@ test("a complete due pair is processed, with string and numeric scores", async (
     assert.deepEqual(await run(), { reminded: 0, confirmed: 0, dropped: 1 });
   }
   assert.equal(lookups, 2, "explicitly absent stores retain existing cleanup");
+});
+
+// Claude 3 (nuvem A) and Claude 7 on #2508: the two "keep the reminder" paths must give up, as the paidCalls path does,
+// once the reminder is hours late; otherwise one permanently failing read sits at the head of the queue for good.
+const HOURS = 3600_000;
+const late = `calls-evidence|harbor|cs_test_late00000000000000000000000|1|${now + 3600_000}`;
+const zrems = () => writes.filter((c) => c[0] === "ZREM").map((c) => c.slice(2));
+
+test("a store read that keeps failing gives up once the reminder is hours late, and keeps the one still of use", async () => {
+  reply = [[late, String(now - 7 * HOURS), member, String(now - 1)]];
+  const counts = await run(async () => { throw new Error("synthetic store read that never succeeds"); });
+  assert.deepEqual(counts, { reminded: 0, confirmed: 0, dropped: 1 });
+  assert.deepEqual(zrems(), [[late]], "only the hours-late reminder leaves the queue");
+});
+
+test("a permanent 404 on a single-session read gives up once the reminder is hours late, and keeps the one still of use", async () => {
+  reply = [[late, String(now - 7 * HOURS), member, String(now - 1)]];
+  process.env.STRIPE_SECRET_KEY = "sk_test_call_reminder_only";
+  let single = 0;
+  globalThis.fetch = (async (input: string | URL | Request) => {
+    const url = new URL(String(input));
+    assert.equal(url.hostname, "api.stripe.com");
+    if (url.pathname === "/v1/checkout/sessions") {
+      return new Response(JSON.stringify({ object: "list", data: [], has_more: false }), { status: 200 });
+    }
+    if (url.pathname.startsWith("/v1/checkout/sessions/cs_test_")) {
+      single += 1;
+      // A session of the account the store used before: Stripe answers 404 on every run.
+      return new Response(JSON.stringify({ error: { code: "resource_missing", type: "invalid_request_error", message: "No such checkout.session" } }), { status: 404 });
+    }
+    throw new Error("unexpected synthetic Stripe route");
+  }) as typeof fetch;
+  const store = { callsId: "calls-evidence", handle: "harbor", email: "owner@example.invalid", stripeAccountId: "acct_test_reminders", previousHandles: [] as string[] } as import("@/lib/store").Store;
+  const counts = await run(async () => store);
+  assert.equal(single, 2, "both sessions were read on their own and both failed");
+  assert.deepEqual(counts, { reminded: 0, confirmed: 0, dropped: 1 });
+  assert.deepEqual(zrems(), [[late]], "only the hours-late reminder leaves the queue");
 });

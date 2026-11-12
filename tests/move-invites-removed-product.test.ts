@@ -45,9 +45,25 @@ async function main(): Promise<void> {
   // inviteMembers answers false for an address deleted from the store (main's INVITE_UNLESS_ERASED); all three are text, checked above.
   const adaLink = (await readInvite(store.statsId!, fields[0] as string))!.t;
 
-  part("The membership with invited members is removed from the studio");
+  part("A removal that does not go through keeps every invitation (Claude 7, MEDIUM on #3473)");
   const session = await openSession(OWNER);
   const headers = { "content-type": "application/json", "x-nimbus-store": store.sid!, cookie: `${SESSION_COOKIE}=${session}` };
+  // The store's write fails at its lock (a Redis failure): the product stays on sale, so its invitations must stay too.
+  const real = redis.pipeline.bind(redis);
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (commands[0]?.[0] === "SET" && String(commands[0][1]).startsWith("nl:store:lock:")) throw new Error("synthetic Redis failure");
+    return real(commands);
+  }) as typeof redis.pipeline;
+  const failed = await productRoute(new NextRequest("https://marktmorgen.com/api/store/product", { method: "POST", headers, body: JSON.stringify({ action: "remove", id: club.product.id }) })).then(
+    async (r) => ((await r.json()) as { ok?: boolean }).ok,
+    () => false,
+  );
+  redis.pipeline = real;
+  is("the removal did not go through", failed === true, false);
+  const keptFields = (await redis.pipeline([["HKEYS", invitesKey]]))[0] as string[];
+  is("both invitations to it are kept, with Ada's link and the reminders", [keptFields.filter((f) => f.endsWith(`:${club.product.id}`)).length, (await redis.pipeline([["GET", `nl:mv:link:${adaLink}`]]))[0] !== null], [2, true]);
+
+  part("The membership with invited members is removed from the studio");
   const response = await productRoute(new NextRequest("https://marktmorgen.com/api/store/product", { method: "POST", headers, body: JSON.stringify({ action: "remove", id: club.product.id }) }));
   is("the removal answers ok", ((await response.json()) as { ok?: boolean }).ok, true);
   const fieldsLeft = (await redis.pipeline([["HKEYS", invitesKey]]))[0] as string[];

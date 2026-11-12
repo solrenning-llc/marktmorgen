@@ -96,14 +96,24 @@ async function act(request: NextRequest, progress: Progress): Promise<Response> 
     if (!text) return back(`${box}/${pairOf(key, to)}`, "empty");
     // Starting a conversation is limited harder than continuing one: the cost
     // of a stranger is in the opening, not in the tenth message of a talk
-    // somebody chose to have.
-    const started = await within(id, key, "dmNew");
+    // somebody chose to have. So the day's openings are counted only when this
+    // message is a new request (send asks), never for a message to the creator
+    // or in a conversation already going.
+    // Asked before send writes anything: a count it cannot read is "nothing was changed", never "could not confirm".
+    const started = owner
+      ? true
+      : async () => {
+          progress.writing = false;
+          const ok = await within(id, key, "dmNew");
+          progress.writing = true;
+          return ok;
+        };
     let sent: Awaited<ReturnType<typeof send>>;
     progress.writing = true;
     try {
       // Past the day's openings, a new request is refused before it is written
       // (never written and then answered "slow", which invites a second copy).
-      sent = await send(id, config.dm, key, to, text, store, { mayAsk: owner || started });
+      sent = await send(id, config.dm, key, to, text, store, { mayAsk: started });
     } catch (error) {
       // No room in the store's data room: nothing was sent (lib/store-data.ts).
       if (error instanceof DataRoomError) return back(`${box}/${pairOf(key, to)}`, "noroom");

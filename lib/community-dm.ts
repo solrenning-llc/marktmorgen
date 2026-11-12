@@ -201,7 +201,9 @@ export async function send(
   // false when the sender is past the day's openings (the route's dmNew
   // window): a new request is refused before anything is written. A follow-up
   // to one already waiting, and a message in a conversation, still go.
-  options: { mayAsk?: boolean } = {},
+  // Given as a function, it is asked only for a new request, so the day's
+  // openings are counted for openings and never for any other message.
+  options: { mayAsk?: boolean | (() => Promise<boolean>) } = {},
 ): Promise<SendResult> {
   const blocked = mayMessage(setting, from, to);
   if (blocked) return blocked;
@@ -255,7 +257,10 @@ export async function send(
   const asking = setting.ask && !talking && from !== CREATOR && to !== CREATOR;
   // Only a request that is not in the list yet takes a place in it.
   const fresh = asking && queued === null;
-  if (fresh && options.mayAsk === false) return { ok: false, reason: "slow" };
+  if (fresh && options.mayAsk !== undefined) {
+    const mayAsk = typeof options.mayAsk === "function" ? await options.mayAsk() : options.mayAsk;
+    if (!mayAsk) return { ok: false, reason: "slow" };
+  }
 
   // Its room first (DataRoomError when it does not fit). A conversation at
   // MAX_MESSAGES lets its oldest go, and that one's room comes back.

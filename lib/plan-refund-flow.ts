@@ -34,8 +34,11 @@
  * and the stop for the daily job. A refund whose answer was lost is found by
  * its metadata (`plan_refund` = the store's id) among the platform's refunds
  * made between the note and SETTLE_SECONDS after its last try. Undecidable
- * for GIVE_UP_DAYS: the stop is taken back and the plan goes on as it was,
- * never ended without a refund that can be seen.
+ * (rule 24: a reply that does not read is never "none"): the note and the
+ * stop stay and the daily job keeps reading it, so the plan is never ended
+ * without a refund that can be seen and the creator is never told "Nothing
+ * was refunded" for a refund nobody could read; after GIVE_UP_DAYS each run
+ * says the still-held case in the log (finding F1, Codex G and Claude 3).
  *
  * One at a time per store (FLOW_LOCK_SECONDS, lib/redis-lock.ts); the daily
  * job skips a store whose lock is held.
@@ -50,7 +53,7 @@ import { SUBSCRIPTION_PATTERN, type Store, setSubscription, storeForId, storeRef
 import { EMAIL_PATTERN, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
-import { planRefundLetter, planRefundNotMadeLetter, planRefundPartLetter, planRefundUnknownLetter } from "@/lib/plan-refund-words";
+import { planRefundLetter, planRefundNotMadeEndedLetter, planRefundNotMadeLetter, planRefundPartLetter, planRefundUnknownLetter } from "@/lib/plan-refund-words";
 import { randomBytes } from "node:crypto";
 import { types } from "node:util";
 import { UnknownReplyError } from "@/lib/redis-reply";
@@ -72,12 +75,20 @@ export const flowKeyOf = (sid: string): string => `nl:plan-refund:${sid}:flow`;
 export const FLOW_LOCK_SECONDS = LOCK_SECONDS + 160;
 /** A refund not found this long after its note was not made: Stripe's answer has long come back by then. */
 export const SETTLE_SECONDS = 10 * 60;
-/** A note the daily job could not decide (Stripe unread) for this long is dropped, said in the log. */
+/** A note the daily job could not decide (Stripe unread) for this long is said in the log on every run; it is kept, with its stop. */
 export const GIVE_UP_DAYS = 7;
 /** Pages of the platform's refunds read to find one (newest first, 100 a page, only those since the note). */
 export const MAX_REFUND_PAGES = 3;
 /** The most notes the daily job looks at in one run. */
 export const MAX_NOTES = 50;
+/**
+ * The store id whose note the daily job looked at last. The next run starts after it (store ids in order, from the
+ * start again after the last), so a note kept because its refund does not read never holds back the others: with N
+ * notes, each one is looked at within ceil(N / MAX_NOTES) runs that are not cut short.
+ */
+export const NEXT_KEY = "nl:plan-refund:next";
+/** The place goes by itself when the job has not moved it for this long (no note left to look at). */
+const NEXT_SECONDS = 30 * 86_400;
 /** Before the note: the refund's own `created` may be a few seconds before ours. */
 const CLOCK_SLACK = 300;
 const LIVE = ["active", "trialing", "past_due", "unpaid", "paused"];
@@ -197,17 +208,21 @@ const planState = (sub: Row | null): "stops" | "renews" | "ended" | "unknown" =>
   return stopSet(sub) ? "stops" : "renews";
 };
 
-/** Takes back the stop we set, when it is still there. True when nothing of ours is left. */
-async function takeBackStop(id: string): Promise<boolean> {
+/**
+ * Takes back the stop we set, when it is still there. "live" when nothing of ours is left and the plan goes on,
+ * "ended" when the subscription is no longer live (our stop may have ended it), null when it could not be done.
+ */
+async function takeBackStop(id: string): Promise<"live" | "ended" | null> {
   try {
     const sub = await subscriptionOf(id);
-    if (!sub) return false;
-    if (!LIVE.includes(String(sub.status)) || sub.cancel_at_period_end !== true) return true;
+    if (!sub) return null;
+    if (!LIVE.includes(String(sub.status))) return "ended";
+    if (sub.cancel_at_period_end !== true) return "live";
     await setCancelAtPeriodEnd(id, false);
-    return true;
+    return "live";
   } catch (error) {
     console.error("taking back a plan's stop after a refund that was not made failed", error);
-    return false;
+    return null;
   }
 }
 
@@ -222,6 +237,9 @@ const ownValue = (row: unknown, key: string): unknown => {
 /** Validate the complete observed page before any refund settles a plan or is said to be absent. */
 function refundPage(page: unknown, sid: string): { data: RefundRow[]; ids: string[]; more: boolean } | null {
   try {
+    // Stripe names every list reply `"object": "list"`: a reply named anything else, or not named, is not that list,
+    // however empty its `data` looks, so it never reads as "no refund" (Codex G on #3190, 6726655568).
+    if (ownValue(page, "object") !== "list") return null;
     const data = ownValue(page, "data"), more = ownValue(page, "has_more");
     if (typeof more !== "boolean" || types.isProxy(data) || !Array.isArray(data)) return null;
     const length = Object.getOwnPropertyDescriptor(data, "length")?.value;
@@ -241,10 +259,13 @@ function refundPage(page: unknown, sid: string): { data: RefundRow[]; ids: strin
       if ((owner && (!Object.hasOwn(owner, "value") || typeof owner.value !== "string")) || (!owner && "plan_refund" in metadata)) return null;
       if (!owner || owner.value !== sid) continue;
       const charge = ownValue(row, "charge"), amount = ownValue(row, "amount"), currency = ownValue(row, "currency"), status = ownValue(row, "status");
+      // The status first: one of ours that failed or was canceled gave no money back, whatever its amount reads, so it
+      // never holds the plan (R1 on #3190). Only a refund that gives money back must read its amount exactly.
+      if (typeof status !== "string" || !["succeeded", "pending", "requires_action", "failed", "canceled"].includes(status)) return null;
+      if (status === "failed" || status === "canceled") continue;
       if ((charge !== null && (typeof charge !== "string" || !OBJECT_ID.test(charge))) ||
           typeof amount !== "number" || !Number.isSafeInteger(amount) || amount < 1 ||
-          typeof currency !== "string" || !/^[a-z]{3}$/.test(currency) ||
-          typeof status !== "string" || !["succeeded", "pending", "requires_action", "failed", "canceled"].includes(status)) return null;
+          typeof currency !== "string" || !/^[a-z]{3}$/.test(currency)) return null;
       // Snapshot only validated data; later projections never observe an unchecked amount.
       refunds.push({ id, charge, amount, currency, status, metadata: { plan_refund: sid } });
     }
@@ -465,7 +486,7 @@ export async function refundAndEndPlan(store: Store, nowSeconds = Math.floor(Dat
     // our stop is taken back at once and the note goes.
     const notMade = async (reason: Exclude<PlanRefundFlow, { ok: true }>["reason"], maybe: boolean): Promise<PlanRefundFlow> => {
       if (!maybe) {
-        if (note.m === 1 && (await takeBackStop(id))) note = { ...note, m: 0 };
+        if (note.m === 1 && (await takeBackStop(id)) !== null) note = { ...note, m: 0 };
         if (note.m === 0) {
           await dropNote(store.sid);
           return { ok: false, reason, stopLeft: false };
@@ -518,24 +539,40 @@ export async function refundAndEndPlan(store: Store, nowSeconds = Math.floor(Dat
 /**
  * The daily job's part (app/api/cron/closing): each note left by a request that did not finish is decided. Its
  * refund found: the plan is ended. Not found SETTLE_SECONDS after the note: none was made, and a stop we set is
- * taken back. Not decidable: tried again tomorrow, for GIVE_UP_DAYS. One failure never stops the rest.
+ * taken back. Not decidable: kept and tried again tomorrow, said in the log after GIVE_UP_DAYS. One failure never
+ * stops the rest. At most MAX_NOTES a run, starting after the store looked at last (NEXT_KEY), so notes kept undecided
+ * never take the turn of the ones after them.
  */
 export async function finishPlanRefunds(deadline: number, nowSeconds = Math.floor(Date.now() / 1000)): Promise<{ ended: number; dropped: number; left: number }> {
   const counts = { ended: 0, dropped: 0, left: 0 };
   if (!isRedisConfigured() || !isBillingConfigured()) return counts;
+  // Rule 24: the notes and the job's place, each read exactly. One that does not read is unknown: nothing is decided
+  // on a guess (the caller logs it and the next run tries again), never "no notes" or "start from the top".
   const raw = await oneNoteReply(["HGETALL", ENDING_KEY], "the plan-refund recovery-note list");
   const flat = exactArray(raw);
   if (!flat || flat.length % 2 !== 0 || flat.some((value) => typeof value !== "string")) {
     throw new UnknownReplyError("the plan-refund recovery-note list");
   }
-  const fields: [string, unknown][] = [];
-  for (let i = 0; i + 1 < flat.length && fields.length < MAX_NOTES; i += 2) fields.push([String(flat[i]), flat[i + 1]]);
-  counts.left = Math.max(0, flat.length / 2 - fields.length);
+  const place = exactArray(await redisPipeline([["GET", NEXT_KEY]]), 1);
+  const last = place ? place[0] : undefined;
+  if (last !== null && typeof last !== "string") throw new UnknownReplyError(`GET ${NEXT_KEY}`);
+  const all: [string, string][] = [];
+  for (let i = 0; i < flat.length; i += 2) all.push([String(flat[i]), String(flat[i + 1])]);
+  // Fair turns: store ids in order, starting after the one looked at last, so every note has its turn however many
+  // stay undecided (finding of Claude 5, 6732230896, and Codex G, G102-Q). Unread notes are never let go to make room.
+  all.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  const after = last === null ? 0 : all.findIndex(([sid]) => sid > last);
+  const start = after < 0 ? 0 : after;
+  const fields: [string, string][] = [];
+  for (let j = 0; j < Math.min(MAX_NOTES, all.length); j += 1) fields.push(all[(start + j) % all.length]);
+  counts.left = all.length - fields.length;
+  let passed: string | null = null;
   for (const [sid, value] of fields) {
     if (Date.now() >= deadline) {
       counts.left += 1;
       continue;
     }
+    passed = sid;
     let held;
     try {
       held = await takeLock(flowKeyOf(sid), FLOW_LOCK_SECONDS, 0);
@@ -598,30 +635,46 @@ export async function finishPlanRefunds(deadline: number, nowSeconds = Math.floo
         continue;
       }
       if (found.kind === "unknown" || nowSeconds - note.t < SETTLE_SECONDS) {
-        if (nowSeconds - note.at <= GIVE_UP_DAYS * 86_400) {
-          counts.left += 1;
-          continue;
+        // Rule 24 (finding F1): an outcome that was not read is never "none", however long it lasts. The note and the
+        // stop stay (no renewal is charged, the plan is never ended without a refund we can see, the studio keeps
+        // saying it is being settled) and the creator is never emailed "Nothing was refunded" for it.
+        if (found.kind === "unknown" && nowSeconds - note.at > GIVE_UP_DAYS * 86_400) {
+          console.error(`plan-refund: the refund asked for store ${sid} is still undecided after ${GIVE_UP_DAYS} days; still held with its stop, read again tomorrow`);
         }
-        // Undecidable for GIVE_UP_DAYS: the plan goes on as it was, never ended without a refund we can see.
-        console.error(`plan-refund: the refund asked for store ${sid} could not be decided in ${GIVE_UP_DAYS} days; its stop is taken back and its note dropped`);
+        counts.left += 1;
+        continue;
       }
-      // None was made: our stop goes, the plan goes on as it was.
-      if (note.m === 1 && !(await takeBackStop(note.s))) {
-        if (nowSeconds - note.at <= GIVE_UP_DAYS * 86_400) {
-          counts.left += 1;
-          continue;
+      // None was made: our stop goes, the plan goes on as it was; or our stop already ended it, and the letter says so.
+      const back = note.m === 1 ? await takeBackStop(note.s) : "live";
+      // Our stop could not be taken back: the note and the stop stay and it is tried again tomorrow, however long, so no
+      // letter ever says the plan goes on while our stop would end it (Claude 1 on #3190).
+      if (back === null) {
+        if (nowSeconds - note.at > GIVE_UP_DAYS * 86_400) {
+          console.error(`plan-refund: the stop set for store ${sid}'s refund could not be taken back in ${GIVE_UP_DAYS} days; still held, tried again tomorrow`);
         }
-        console.error(`plan-refund: the stop set for store ${sid}'s refund could not be taken back in ${GIVE_UP_DAYS} days; its note is dropped`);
+        counts.left += 1;
+        continue;
       }
       await dropNote(sid);
-      // The creator saw "nothing was refunded" or "we check within a day": the outcome reaches them by email.
-      await mail(store, planRefundNotMadeLetter({ store: store.name || store.handle, undecided: found.kind === "unknown" }), `plan-refund-none:${sid}:${note.at}`);
+      // Read and none was made: the creator saw "nothing was refunded" or "we check every day", so it reaches them by email.
+      const letter = back === "ended" ? planRefundNotMadeEndedLetter : planRefundNotMadeLetter;
+      await mail(store, letter({ store: store.name || store.handle }), `plan-refund-none:${sid}:${note.at}`);
       counts.dropped += 1;
     } catch (error) {
       console.error(`plan-refund: the note for store ${sid} is not decided yet; tried again tomorrow`, error);
       counts.left += 1;
     } finally {
       await releaseLock(held);
+    }
+  }
+  // The place moves only past the notes whose turn came (not those the deadline left), so none loses its turn. Not
+  // written: the next run looks at the same notes again, which delays the others by a run and decides nothing wrong.
+  if (passed !== null) {
+    try {
+      const [set] = await redisPipeline([["SET", NEXT_KEY, passed, "EX", NEXT_SECONDS]]);
+      if (set !== "OK") console.error("plan-refund: the daily job's place was not confirmed written; the next run may look at the same notes again");
+    } catch (error) {
+      console.error("plan-refund: the daily job's place could not be written; the next run may look at the same notes again", error);
     }
   }
   return counts;

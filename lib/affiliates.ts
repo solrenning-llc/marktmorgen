@@ -4464,6 +4464,21 @@ export async function unconfirmedMonth(month: string): Promise<Record<Unconfirme
 }
 
 /**
+ * Writes a waiting sale's decision only over exactly the text read (AFFILIATE_SWAP, a compare-and-set on the sales
+ * hash), so the creator's approval and the sweep never write over each other and a sale deleted meanwhile never comes
+ * back (the reviews of #3485, LOW). The decision only takes "buyerUnknown" away and may add "tierOff", so it is never
+ * longer than what was read and takes no more of the store's room than the sale already holds; one that would be
+ * longer is refused. "written", "changed" (another write or a deletion came first) or "unknown" (any other answer).
+ */
+async function decideOnce(statsId: string, ref: string, was: string, next: string): Promise<"written" | "changed" | "unknown"> {
+  if (Buffer.byteLength(next, "utf8") > Buffer.byteLength(was, "utf8")) throw new Error("a sale's decision is never longer than the sale read");
+  const reply = repliesFor(await redisPipeline([["EVAL", AFFILIATE_SWAP, 1, salesKey(statsId), ref, was, next]]), 1);
+  if (reply?.[0] === 1) return "written";
+  if (reply?.[0] === 0) return "changed";
+  return "unknown";
+}
+
+/**
  * The creator approves in person the second tier of one sale whose buyer was not confirmed (the studio's "tier-confirm"):
  * the sale stops waiting, with no tierOff, so its tier joins the next payment batch. `ref` is the line's reference
  * ("tier2:<sale>") or the sale's own. "not-waiting" when it already was decided, "gone" when no such sale, "unknown"
@@ -4481,7 +4496,10 @@ export async function approveUnconfirmed(store: Store, ref: string): Promise<"ap
   if (!kept.buyerUnknown) return "not-waiting";
   const whole = JSON.parse(read[0]) as Record<string, unknown>;
   delete whole.buyerUnknown;
-  await orderWrite(store, [["HSET", salesKey(store.statsId), sale, JSON.stringify(whole)]]);
+  // Written only over exactly the sale read: one decided meanwhile by the sweep, or deleted, is left as it is.
+  const swapped = await decideOnce(store.statsId, sale, read[0], JSON.stringify(whole));
+  if (swapped === "unknown") return "unknown";
+  if (swapped === "changed") return "not-waiting";
   await redisPipeline([["ZREM", unconfirmedKey(store.statsId), sale]]).catch(() => undefined);
   await countUnconfirmed({ approved: 1 });
   return "approved";
@@ -4616,9 +4634,11 @@ async function settleUnconfirmedRun(store: Store, now: number, deadline: number 
       }
       const whole = JSON.parse(raw as string) as Record<string, unknown>;
       delete whole.buyerUnknown;
-      await orderWrite(store, [["HSET", salesKey(statsId), ref, JSON.stringify({ ...whole, ...tier })]]);
+      // Written only over exactly the sale read: one the creator approved meanwhile, or deleted, is left as it is.
+      const swapped = await decideOnce(statsId, ref, raw as string, JSON.stringify({ ...whole, ...tier }));
+      if (swapped === "unknown") throw new UnknownReplyError("a sale's second tier decided");
+      if (swapped === "written") out.decided += 1;
       await redisPipeline([["ZREM", unconfirmedKey(statsId), ref]]).catch(() => undefined);
-      out.decided += 1;
     } catch (error) {
       if (error instanceof PassTimeSpent) break;
       out.failed += 1;

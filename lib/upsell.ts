@@ -46,6 +46,7 @@
 import { admitOrders, settleAdmitted } from "@/lib/order-admission";
 import { createHash, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { StripeError, onAccount } from "@/lib/stripe-account";
 import {
   type FunnelStep,
@@ -174,8 +175,26 @@ async function readAnswers(session: string): Promise<Map<string, UpsellRecord>> 
   return out;
 }
 
-async function writeUpsell(session: string, slot: string, record: UpsellRecord): Promise<void> {
-  await redisPipeline([["SET", recordKey(session, slot), JSON.stringify(record), "EX", RECORD_SECONDS]]);
+/** Writes an offer's record; true only on Redis's exact "OK" (CX-123 rule 24), so a caller can refuse to go on. */
+async function writeUpsell(session: string, slot: string, record: UpsellRecord): Promise<boolean> {
+  const reply = repliesFor(await redisPipeline([["SET", recordKey(session, slot), JSON.stringify(record), "EX", RECORD_SECONDS]]), 1);
+  return reply?.[0] === "OK";
+}
+
+/**
+ * Writes the record naming the customer before Stripe is asked: true on Redis's exact "OK", or, when that reply is
+ * unclear, only when a read-back finds exactly this write's own payload (Codex's focal review on #3834: the SET may
+ * have landed and only its reply been lost; refusing then would hold a claim that was never sent to Stripe). The
+ * payload carries this press's own time and the claim is this press's alone (SET NX), so no other write matches it.
+ * A read-back that is lost, garbled or different is unknown: false, and the press is refused, nothing is sent.
+ */
+async function writeUpsellConfirmed(session: string, slot: string, record: UpsellRecord): Promise<boolean> {
+  const key = recordKey(session, slot);
+  const payload = JSON.stringify(record);
+  const reply = repliesFor(await redisPipeline([["SET", key, payload, "EX", RECORD_SECONDS]]), 1);
+  if (reply?.[0] === "OK") return true;
+  const back = repliesFor(await redisPipeline([["GET", key]]), 1);
+  return back !== null && back[0] === payload;
 }
 
 export type TakeResult =
@@ -360,10 +379,17 @@ export async function takeUpsell(input: {
   const digital = deliversDigitally(target);
   if (digital && !validConsent(input.consent)) return { kind: "consent" };
 
-  // Once, however many times the button is pressed.
-  const [claimed] = await redisPipeline([
-    ["SET", recordKey(session, slot), JSON.stringify({ state: "pending", product: target.id, ...extra, at: Date.now() }), "NX", "EX", RECORD_SECONDS],
-  ]);
+  // Once, however many times the button is pressed. Taken here only on exactly "OK"; null is an answer already
+  // written. Any other reply (none, a number, another word, more than one) does not say the claim is this press's,
+  // so it is unknown (CX-123 rule 24): the card is not charged and nothing more is written.
+  const claim = repliesFor(
+    await redisPipeline([
+      ["SET", recordKey(session, slot), JSON.stringify({ state: "pending", product: target.id, ...extra, at: Date.now() }), "NX", "EX", RECORD_SECONDS],
+    ]),
+    1,
+  );
+  const claimed = claim?.[0];
+  if (!claim || (claimed !== "OK" && claimed !== null)) throw new UnknownReplyError("an offer's claim");
   if (claimed === null) {
     const existing = await readUpsell(session, slot);
     return existing?.state === "failed" ? { kind: "failed" } : existing?.state === "declined" ? { kind: "declined" } : { kind: "done" };
@@ -387,7 +413,13 @@ export async function takeUpsell(input: {
 
   // Written down before Stripe is asked, so a lost answer can be looked for,
   // by the thanks page and by the five-minute job.
-  await writeUpsell(session, slot, { state: "pending", product: target.id, ...extra, customer, at: Date.now() });
+  // Only on an exact "OK" is Stripe asked (Claude 1 on #3834): a write that did not land would leave a bare claim,
+  // which the orphan release lets go once old, so a charge posted after it could be asked again. Unconfirmed, the
+  // press is refused here, nothing is sent, and the bare claim is released as an orphan (settleUpsells).
+  // An unclear reply is read back: the exact payload of this write found means it landed, and the press goes on.
+  if (!(await writeUpsellConfirmed(session, slot, { state: "pending", product: target.id, ...extra, customer, at: Date.now() }))) {
+    throw new UnknownReplyError("an offer's record naming the customer before its charge");
+  }
   await watchPending(store, session, slot);
 
   const email = typeof view.customer_details?.email === "string" ? view.customer_details.email : "";
@@ -549,6 +581,14 @@ export async function findOfferCharge(
   throw new StripeListUnreadable("more payments than are read");
 }
 
+/**
+ * Deletes an offer's record only while it is still exactly the orphan claim that was read (ARGV[1]): a record
+ * written since — naming the customer, a payment or an answer — is never taken off.
+ */
+const ORPHAN_RELEASE = `-- marktmorgen:upsell-orphan-release:v1
+if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) end
+return 0`;
+
 /** Settles one offer still waiting on an answer. Nothing is ever charged here. */
 async function settleOne(store: Store, session: string, slot: string, record: UpsellRecord, pages: number): Promise<void> {
   if (record.state !== "pending" || !store.stripeAccountId) return;
@@ -567,6 +607,13 @@ async function settleOne(store: Store, session: string, slot: string, record: Up
         return;
       }
     } else {
+      // Neither a customer nor a payment: only the claim was written (its reply lost, or the write naming the
+      // customer failed), and the charge is asked of Stripe only after that write. So it was never sent and nothing
+      // was charged: once older than a request in flight could still be, it is let go, only while it is still this
+      // very record, and the buyer can answer the offer again. Never shown as checking until it expires.
+      if (Date.now() - record.at > LOST_ANSWER_MS) {
+        await redisPipeline([["EVAL", ORPHAN_RELEASE, 1, recordKey(session, slot), JSON.stringify(record)]]);
+      }
       return;
     }
     const meta = pi.metadata as Record<string, string> | null;

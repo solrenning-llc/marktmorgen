@@ -345,6 +345,11 @@ export default async function StudioCoursePage({
             Everyone who has opened the course since buying it, with how many lessons they marked done. Buyers are
             read from your own Stripe account; this list is what they did here.
           </p>
+          <p className="mt-2 text-sm">
+            <Link href={studioPath(store, `product=${encodeURIComponent(product.id)}`, "students")} className="inline-flex min-h-11 items-center underline">
+              Filter students and change many at once
+            </Link>
+          </p>
           {studentsRead === null ? null : (
             <div className="mt-5 grid grid-cols-3 gap-3 text-center">
               <div className="rounded-[var(--r-sm)] bg-sand p-4">

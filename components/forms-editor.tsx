@@ -2,7 +2,7 @@
 
 import { StudioEmptyState } from "@/components/empty-state";
 import { FORM_STARTERS } from "@/lib/form-starters";
-import { canCopy, formCopy } from "@/lib/form-copy";
+import { canCopy, copyNote, formCopy } from "@/lib/form-copy";
 import { FormAnswers } from "@/components/form-answers";
 import { FormResponseDeal } from "@/components/form-response-deal";
 import { mergeFormOpportunities, type FormDealMatch } from "@/lib/form-deal";
@@ -308,13 +308,14 @@ export function FormsEditor({ saved, products, exportBase, dealStages = [], sid 
       {draft ? (
         <div className="mt-6 rounded-2xl border border-line bg-white p-4 sm:p-6">
           {copiedFrom !== null && !draft.id ? (
-            <p className="notice mb-4" role="status" data-form-copy-note="">
-              {`A copy of “${copiedFrom}”, not saved yet. It has the same questions and results, and none of the answers: those stay with the original. Its open and close times are empty. Press Save form to keep it.`}
+            <p id="form-copy-note" className="notice mb-4" role="status" data-form-copy-note="">
+              {copyNote(copiedFrom, draft)}
             </p>
           ) : null}
           <label className="block">
             <span className="field-label">Name, for you</span>
-            <input ref={nameField} className="field mt-2" value={draft.name} maxLength={MAX_FORM_NAME} placeholder="Application for coaching" onChange={(e) => patch({ name: e.target.value })} />
+            {/* A copy's note is read with the field the focus moves to: a live region mounted already filled is often not announced. */}
+            <input ref={nameField} className="field mt-2" value={draft.name} maxLength={MAX_FORM_NAME} placeholder="Application for coaching" aria-describedby={copiedFrom !== null && !draft.id ? "form-copy-note" : undefined} onChange={(e) => patch({ name: e.target.value })} />
           </label>
 
           <p className="field-label mt-6">Questions, in order</p>

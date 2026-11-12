@@ -114,7 +114,8 @@ async function main() {
       source.includes("onClick={() => openNew(formCopy(form, saved.map((s) => s.form.name)), form.name)}"),
       source.includes("setCopiedFrom(from);"),
       source.includes('{copiedFrom !== null && !draft.id ? ('),
-      source.includes("none of the answers: those stay with the original"),
+      // The note's words live in lib/form-copy.ts (copyNote) since the review of e974a02.
+      formCopyModule.copyNote("Quiz", quiz).includes("none of the answers: those stay with the original"),
       source.includes("requestAnimationFrame(() => nameField.current?.focus());"),
     ],
     [true, true, true, true, true],

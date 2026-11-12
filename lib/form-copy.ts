@@ -19,11 +19,19 @@ import { MAX_FORM_NAME, MAX_FORMS, type FormDef } from "@/lib/forms";
 
 export const COPY_PREFIX = "Copy of ";
 
-/** The name without any "Copy of " in front and any " (n)" after, so a copy of a copy is not "Copy of Copy of …". */
+/**
+ * The name without any "Copy of " in front, so a copy of a copy is not "Copy of Copy of …", and without the copy's
+ * own count after it, " (2)" to " (999)", which copyName adds. That count is dropped only from a name that was a
+ * copy: "Workshop (2026)" or "Application (2)" keep the number that is part of their name.
+ */
 export function copyBase(name: string): string {
   let base = name.trim();
-  while (/^copy of(\s|$)/i.test(base)) base = base.slice(COPY_PREFIX.length - 1).trimStart();
-  return base.replace(/\s\(\d+\)$/, "").trim();
+  let copied = false;
+  while (/^copy of(\s|$)/i.test(base)) {
+    base = base.slice(COPY_PREFIX.length - 1).trimStart();
+    copied = true;
+  }
+  return (copied ? base.replace(/\s\((?:[2-9]|[1-9]\d{1,2})\)$/, "") : base).trim();
 }
 
 /**
@@ -56,4 +64,13 @@ export function formCopy(form: FormDef, taken: readonly string[]): FormDef {
   delete copy.opensAt;
   delete copy.closesAt;
   return { ...copy, id: "", name: copyName(form.name, taken), updatedAt: 0 };
+}
+
+/**
+ * The note above a copy while it is not saved yet. It names the original, and says "results" only for a quiz that has
+ * them: a form or a survey has questions only.
+ */
+export function copyNote(from: string, form: FormDef): string {
+  const kept = form.outcomes.length > 0 ? "the same questions and results" : "the same questions";
+  return `A copy of “${from}”, not saved yet. It has ${kept}, and none of the answers: those stay with the original. Its open and close times are empty. Press Save form to keep it.`;
 }

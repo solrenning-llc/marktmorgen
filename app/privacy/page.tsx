@@ -2218,6 +2218,9 @@ export default function PrivacyPage() {
             What is kept, and why: a one-way fingerprint of your address, under
             that store, so it never emails you again and no import brings you
             back, which only you can lift by joining its list again yourself;
+            a one-way mark of you under that store, so none of its companies
+            (the businesses the creator keeps notes on) takes you again, kept
+            401 days or until you join its list again yourself;
             any stop you pressed on one kind of its emails, also a one-way hash;
             your payments, which are on the creator&apos;s own Stripe account as
             their sales and tax records and are not stored by us; and the few

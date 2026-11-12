@@ -27,6 +27,12 @@ import { store as redis } from "./redis-stub";
 import { allowanceUsed } from "@/lib/store-allowance";
 import { installSesMailFixture } from "./ses-mail-fixture";
 import { done, is, part } from "./check";
+import { withinOneUtcDay } from "./one-utc-day";
+
+// The emails are counted in the month the clock is in; a real month end passing mid-file counted half of them in the
+// next month (got [12,6]). The clock stays inside one UTC day
+// (tests/one-utc-day.ts).
+withinOneUtcDay();
 
 process.env.NIMBUS_DATA_KEY ??= "tests-only-not-a-real-deployment-secret";
 process.env.UPSTASH_REDIS_REST_URL ??= "http://stub";

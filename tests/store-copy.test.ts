@@ -45,6 +45,12 @@ import { POST } from "@/app/api/store/store-copy/route";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { ROOM } from "./data-room";
+import { withinOneUtcDay } from "./one-utc-day";
+
+// The studio requests each step is charged are counted in the month the clock is in; a real month end passing
+// mid-file read the new month's counts. The clock stays inside one UTC day
+// (tests/one-utc-day.ts).
+withinOneUtcDay();
 
 // Every command the code sends to the store, counted.
 let commands = 0;

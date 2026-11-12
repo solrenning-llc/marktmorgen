@@ -5,6 +5,10 @@ import {contractFundingConfiguration} from '@/lib/contract-funding-rules';
 import {recordRestartResult,contractFundingBinding,ownedRestartIntentFromAcknowledgement} from '@/lib/contract-funding';
 import {contractFixture} from './contract-funding-fixture';
 import {reset,calls,retained,clearTransform} from './restart-result-ack-world';
+import {withinOneUtcDay} from './one-utc-day';
+// The fixture names its month once (fundedExposure.month) and the code checks the month it reads at each call:
+// a real month end passing mid-file failed the retention. The clock stays inside one UTC day (tests/one-utc-day.ts).
+withinOneUtcDay();
 function setup(){
  const f=contractFixture(),config=contractFundingConfiguration(f.policy,f.context,f.now);assert.ok(config);
  const now=Math.floor(Date.now()/1000),charge=config.grantCents.creator_month,sourceGrantId='ctr_AckRestartSource';

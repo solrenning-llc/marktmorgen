@@ -18,6 +18,12 @@ import { readListing } from "@/lib/catalog";
 import { launch, runLaunches, setSoon, waitlistViews } from "@/lib/waitlist";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import { withinOneUtcDay } from "./one-utc-day";
+
+// The launches' sends are counted in the month the clock is in; a real month end passing mid-file moved the code to
+// the next month's counts while the checks still expected the first one's. The clock stays inside one UTC day
+// (tests/one-utc-day.ts).
+withinOneUtcDay();
 
 type Sent = { to: string[] };
 const batches: Sent[][] = [];

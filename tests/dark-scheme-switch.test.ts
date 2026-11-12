@@ -217,6 +217,18 @@ is("the proof read hundreds of pairs, not a handful", proof.pairs.length > 600, 
 const weakest = Math.min(...proof.pairs.filter((p) => p.min === 7).map((p) => p.ratio));
 is("the weakest text pair, recorded so a change is seen", Math.round(weakest * 100) / 100, 7.25);
 
+const paused = "app/studio/paused/page.tsx";
+const pausedProof = pagePairs(css, DARK_SELECTOR, closure([paused, ...layoutsOf(paused)]));
+const pausedWeakest = Math.min(...pausedProof.pairs.filter((p) => p.min === 7).map((p) => p.ratio));
+is("the paused studio screen alone: its pair count and weakest text pair, recorded so a growing screen is seen", [pausedProof.pairs.length, Math.round(pausedWeakest * 100) / 100], [57, 8.08]);
+
+part("In light, the role tokens are the same white as before");
+const light = css.slice(0, css.indexOf(DARK_BLOCK_START));
+const rootLight = light.slice(light.indexOf(":root {"), light.indexOf("}", light.indexOf(":root {")));
+is("outside the dark block, :root keeps --surface and --action-on at #fff", [/\n\s*--surface:\s*#fff;/.test(rootLight), /\n\s*--action-on:\s*#fff;/.test(rootLight)], [true, true]);
+const rule = (sel: string) => { const i = light.search(new RegExp(`\\n${sel.replace(".", "\\.")} \\{`)); return i < 0 ? "" : light.slice(i, light.indexOf("}", i)); };
+is("and the light rules that moved to them read exactly those roles", [/\bcolor: var\(--action-on\);/.test(rule(".btn-primary")), /background-color: var\(--surface\);/.test(rule(".btn-secondary")), /background: var\(--surface\);/.test(rule(".card"))], [true, true, true]);
+
 part("The proof fails when the dark rules are missing");
 const start = css.indexOf(DARK_BLOCK_START);
 const end = css.indexOf(DARK_BLOCK_END);

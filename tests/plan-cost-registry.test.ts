@@ -54,6 +54,7 @@ import { MAX_PERSON_TASKS, MAX_STORE_TASKS } from "@/lib/person-tasks";
 import { ADD_ON_LINES, ASSIST_REMIND_READ, CERTIFICATE_PDF_READ, PATH_REMINDER_PUSH, PATH_BOARD_JOIN, PATH_BOARD_PRIVACY, PATH_PAGE, PATH_STUDIO_PAGE, PATH_READ, COST_LINES, EMAIL_SITES, KIND_LINES, NEXT_OFFER_READ, NOT_A_COST, SHELF_READ, OPEN, PER_PAYMENT_LINES, PICTURE_READ, SCOPES, UNIT_COST, nonPayingWorst, request } from "./plan-cost-registry";
 import { NEXT_OFFER_REQUEST_UNITS } from "@/lib/next-offer-rules";
 import { CART_OFFER_REQUEST_UNITS } from "@/lib/cart-offers";
+import { RETURNING_CODE_REQUEST_UNITS } from "@/lib/returning-code";
 import { SHELF_REQUEST_UNITS } from "@/lib/course-shelf";
 import { ASSIST_REMIND_REQUEST_UNITS } from "@/lib/assistant-reminder-rules";
 import { DOWNLOAD_LOOKUP_READ, ORDERS_BUNDLE_READ, ORDERS_OLDER_READ, ORDERS_OPEN_READ, ORDERS_METERED_COMMAND, ORDERS_METERED_LISTING, ORDERS_METERED_MOVES, ORDERS_METERED_PROGRESS } from "./plan-cost-registry";
@@ -271,6 +272,8 @@ test("the units a figure is taken in cost at least what they stand for", () => {
   // The offers after a cart read what the buyer owns with the same reads and Stripe calls (ownedHere), without the model or the choice's
   // product reads, and count as many requests (lib/cart-offers.ts): the same ceiling holds them.
   assert.equal(CART_OFFER_REQUEST_UNITS, NEXT_OFFER_REQUEST_UNITS);
+  // A code only for people who bought here before reads the same purchases the same way (lib/returning-code.ts): the same ceiling holds it.
+  assert.equal(RETURNING_CODE_REQUEST_UNITS, NEXT_OFFER_REQUEST_UNITS);
   // A course's "More from" shelf (lib/course-shelf.ts) reads what a student owns the same way, plus its PayPal counts, and counts
   // SHELF_REQUEST_UNITS requests before it reads: more than its reads and Stripe calls cost.
   assert.ok(SHELF_REQUEST_UNITS * laterPageCost() >= SHELF_READ, `${SHELF_REQUEST_UNITS} x ${laterPageCost()} < ${SHELF_READ}`);

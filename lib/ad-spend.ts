@@ -50,7 +50,9 @@ async function typedSpends(statsId: string): Promise<AdSpend[]> {
 /** Every line: the typed ones, then those read from Meta while the store is connected. */
 export async function readSpends(statsId: string | null): Promise<AdSpend[]> {
   if (!statsId || !isRedisConfigured()) return [];
-  const [typed, meta] = await Promise.all([typedSpends(statsId), metaLines(statsId).catch(() => [])]);
+  // A Meta read that fails is not "no Meta spend": it throws, so a caller shows the spend as not read rather than
+  // the typed lines alone as if they were all of it (lib/numbers-ask.ts tells the AI it is missing, never zero).
+  const [typed, meta] = await Promise.all([typedSpends(statsId), metaLines(statsId)]);
   return [...typed, ...meta];
 }
 

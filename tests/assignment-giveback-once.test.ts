@@ -9,7 +9,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { applyTaskDrop, forgetTasksPerson, handIn, readTaskDrop } from "@/lib/assignment";
+import { HandInChangedError, applyTaskDrop, forgetTasksPerson, handIn, readTaskDrop } from "@/lib/assignment";
 import type { Task } from "@/lib/assignment-rules";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { store as redis } from "./redis-stub";
@@ -160,14 +160,22 @@ test("a hand-in racing a drop of the same assignment: the replaced file's bytes 
   seed();
   redis.run(["SET", bytesKey, "1300"]);
   const file = { path: "b.pdf", name: "b.pdf", bytes: 200, type: "application/pdf" };
-  // handIn has read the old record (a.pdf); the drop runs whole before handIn writes and takes a.pdf out.
-  const isWrite = (batch: Batch) => batch[0]?.[0] === "SET" && String(batch[0][1]).includes(":sub:");
+  // handIn has read the old record (a.pdf); the drop runs whole before handIn writes and takes a.pdf out. The work's
+  // write is its SET, or since #3135 the conditional write (HAND_IN_WRITE_IF, an EVAL with the work's key first).
+  const isWrite = (batch: Batch) =>
+    (batch[0]?.[0] === "SET" && String(batch[0][1]).includes(":sub:")) || (batch[0]?.[0] === "EVAL" && String(batch[0][3]).includes(":sub:"));
   const done = await aheadOf(isWrite, async () => applyTaskDrop(await readTaskDrop(COURSE, LESSON), ROOM, DATA), () =>
     handIn({ data: DATA, courseId: COURSE, lessonId: LESSON, who: WHO, email: "", task: TASK, text: "Again.", file }),
+  ).then(
+    () => "written",
+    (error: unknown) => (error instanceof HandInChangedError ? "changed" : error),
   );
-  assert.equal(counter(), 1200, "the drop gave a.pdf's 100 back");
-  assert.equal(done.replaced?.path, "a.pdf", "the old file is still handed back to be deleted");
-  assert.equal(done.freedBytes, 0, "the hand-in did not remove it, so it has nothing to give back");
+  assert.equal(counter(), 1200, "the drop gave a.pdf's 100 back, and nothing else gave it back again");
+  // The drop deleted the work, so the hand-in that read it before writes nothing over the dropped assignment
+  // (HandInChangedError): it gives nothing back, and the route lets its own new file go (app/api/store/course/task).
+  assert.equal(done, "changed", "the hand-in finds the work changed under it and writes nothing");
+  assert.equal(redis.run(["GET", `nl:course:${COURSE}:task:${LESSON}:sub:${WHO}`]), null, "no work is left on the dropped assignment");
+  assert.equal(redis.run(["HGET", `nl:course:${COURSE}:task:${LESSON}:files`, "b.pdf"]), null, "and no entry for the new file");
 });
 
 test("the hand-in route gives back what handIn removed, never the replaced file's size as read", () => {

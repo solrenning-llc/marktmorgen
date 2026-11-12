@@ -41,6 +41,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { type AwsKey, EMPTY_HASH, hashOf, presignV4, signV4 } from "@/lib/aws-sign";
 import { VAULT_TIMEOUT_MS, VAULT_WRITE_TIMEOUT_MS, timed } from "@/lib/fetch-timeout";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import {
   PIECE_BYTES,
   PIECE_SECONDS,
@@ -145,19 +146,46 @@ type Upload = {
   at: number;
 };
 
+/** The shape of a session id the provider hands back and openVaultUpload keeps. */
+const UPLOAD_ID = /^[A-Za-z0-9._~+/=-]{1,1024}$/;
+
 const uploadKey = (pathname: string) => `nl:vault:up:${createHash("sha256").update(pathname).digest("hex").slice(0, 40)}`;
 
+/**
+ * The upload opened at this path; null only when Redis confirms there is none.
+ * Any other reply, or a record that is not the one written for this path,
+ * throws UnknownReplyError (CX-123 rule 24): signing, joining, cancelling and
+ * giving reserved bytes back all act on it, so none may take it for "none".
+ */
 async function readUpload(pathname: string): Promise<Upload | null> {
   if (!isVaultPath(pathname)) return null;
-  const [raw] = await redisPipeline([["GET", uploadKey(pathname)]]);
-  if (typeof raw !== "string") return null;
+  const replies = repliesFor(await redisPipeline([["GET", uploadKey(pathname)]]), 1);
+  if (!replies) throw new UnknownReplyError("a vault upload record");
+  const raw = replies[0];
+  if (raw === null) return null;
+  let value: { [K in keyof Upload]?: unknown } | null;
   try {
-    const value = JSON.parse(raw) as Partial<Upload>;
-    if (value.pathname !== pathname || typeof value.bytes !== "number" || !(value.bytes > 0)) return null;
-    return { reservation: typeof value.reservation === "string" ? value.reservation : undefined, pathname, uploadId: typeof value.uploadId === "string" ? value.uploadId : "", bytes: value.bytes, type: typeof value.type === "string" ? value.type : "", at: typeof value.at === "number" ? value.at : 0 };
+    if (typeof raw !== "string") throw new Error();
+    value = JSON.parse(raw) as { [K in keyof Upload]?: unknown } | null;
   } catch {
-    return null;
+    throw new UnknownReplyError("a vault upload record");
   }
+  // Every field in exactly the shape openVaultUpload writes it. A session id
+  // read as "" would be taken for a file sent whole (the object deleted in
+  // place of the session cancelled), and a reservation read as none would
+  // never be given back: anything else is an unknown record, not a guess.
+  if (
+    !value ||
+    typeof value !== "object" ||
+    value.pathname !== pathname ||
+    !(value.reservation === undefined || (typeof value.reservation === "string" && /^[0-9a-f]{32}$/.test(value.reservation))) ||
+    !(value.uploadId === "" || (typeof value.uploadId === "string" && UPLOAD_ID.test(value.uploadId))) ||
+    !(Number.isSafeInteger(value.bytes) && (value.bytes as number) > 0) ||
+    typeof value.type !== "string" ||
+    !(Number.isSafeInteger(value.at) && (value.at as number) >= 0)
+  )
+    throw new UnknownReplyError("a vault upload record");
+  return { reservation: value.reservation, pathname, uploadId: value.uploadId, bytes: value.bytes as number, type: value.type, at: value.at as number };
 }
 
 export type OpenedUpload = {
@@ -198,10 +226,15 @@ export async function openVaultUpload(input: {
   if (pieces > 1 || input.multipart) {
     const made = await ask(config, "POST", `${objectUrl(config, pathname)}?uploads=`, { headers: { "content-type": input.type } });
     uploadId = made.status === 200 ? (tag(made.text, "UploadId") ?? "") : "";
-    if (!uploadId || !/^[A-Za-z0-9._~+/=-]{1,1024}$/.test(uploadId)) return { ok: false, reason: "unavailable" };
+    if (!uploadId || !UPLOAD_ID.test(uploadId)) return { ok: false, reason: "unavailable" };
   }
   const record: Upload = { reservation: input.reservation, pathname, uploadId, bytes: input.bytes, type: input.type, at: Date.now() };
-  await redisPipeline([["SET", uploadKey(pathname), JSON.stringify(record), "EX", UPLOAD_SECONDS]]);
+  const written = repliesFor(await redisPipeline([["SET", uploadKey(pathname), JSON.stringify(record), "EX", UPLOAD_SECONDS]]), 1);
+  if (written?.[0] !== "OK") {
+    // Not handed out: nothing can be signed for it, so its session is cancelled now.
+    if (uploadId) await retireVaultSession(pathname, uploadId).catch(() => false);
+    throw new UnknownReplyError("a vault upload record's write");
+  }
   return { ok: true, sessionId: uploadId, upload: { pathname, pieces, pieceBytes: PIECE_BYTES, ...(input.multipart ? { multipart: true as const } : {}) } };
 }
 
@@ -491,7 +524,7 @@ export async function vaultReservationId(pathname: string): Promise<string | und
 /** Cancels a known multipart session even after the short-lived upload record expires. */
 export async function retireVaultSession(pathname: string, uploadId: string): Promise<boolean> {
   const config = vaultConfig();
-  if (!config || !readVaultPath(pathname) || !/^[A-Za-z0-9._~+\/=-]{1,1024}$/.test(uploadId)) return false;
+  if (!config || !readVaultPath(pathname) || !UPLOAD_ID.test(uploadId)) return false;
   const answer = await ask(config, "DELETE", objectUrl(config, pathname) + "?uploadId=" + encodeURIComponent(uploadId));
   if ([200, 204].includes(answer.status)) return true;
   if (answer.status !== 404) return false;

@@ -20,6 +20,7 @@ import { MAX_TAG_LENGTH, readTags } from "@/lib/contact-rules";
 import { confirmedRecipientCount, confirmedDraftId, draftRemovalAnswer, confirmedMailCopy, keptWaitHours, mailAnswer, type MailAnswer } from "@/lib/mail-response";
 import { toast } from "@/components/toast";
 import { MailAccent, MailBodyEditor } from "@/components/mail-designer";
+import { MailAccessReview } from "@/components/mail-access-review";
 import { flowConfigurationIssues } from "@/lib/flow-review";
 import type { Flow, FlowCounts, FlowStep } from "@/lib/flows";
 import { flowWaitHours, type FlowAction, type FlowGoal, type FlowTrigger, MAX_CONDITION_TAG, type StepCondition, type StepIf, isCourseIf } from "@/lib/flow-rules";
@@ -813,6 +814,12 @@ function Compose(props: {
     setConfirming(false);
     requestAnimationFrame(() => document.getElementById(id)?.focus());
   }
+  // "Show it in the text" from "Can everyone read it?": the review closes, as with "Change", and the text box shows that place.
+  const [reveal, setReveal] = useState<{ start: number; end: number; key: number } | null>(null);
+  function showInText(start: number, end: number) {
+    setConfirming(false);
+    setReveal((was) => ({ start, end, key: (was?.key ?? 0) + 1 }));
+  }
   const [error, setError] = useState<string | null>(null);
   // What the writing help is asked to write, and about which product.
   const [goal, setGoal] = useState<EmailGoal>("announce");
@@ -1069,6 +1076,7 @@ function Compose(props: {
           boxRef={(el) => {
             bodyBox.current = el;
           }}
+          reveal={reveal}
         />
         <p className="text-sm text-ink-soft">
           Blank lines make paragraphs, lines starting with &quot;- &quot; make a list, web addresses become links, and a picture you add shows where its line is. Design lays it out in blocks, with headings, buttons and templates. Why they are getting it, the unsubscribe link and your postal address are added at the bottom.
@@ -1322,6 +1330,8 @@ function Compose(props: {
               </div>
             </dl>
             <SubjectTestReview preview={testPreview} />
+            {/* AX274 Part A item 6: what a reader cannot use, with fixes the creator presses; it never stops the email. */}
+            <MailAccessReview body={body} onChange={setBody} onShow={showInText} />
             <p id="mail-send-note" className="mt-2">
               Eligibility is checked again when sending starts.
               {/* A narrowed email holds its later readings of the buyers in the month it goes out (lib/broadcasts.ts, createBroadcast). */}

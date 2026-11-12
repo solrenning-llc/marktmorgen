@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { Icon } from "@/components/icons";
 import { MailPictureButton } from "@/components/mail-picture-button";
 import {
@@ -56,6 +56,7 @@ export function MailBodyEditor({
   label = "Email",
   rows = 12,
   boxRef,
+  reveal,
 }: {
   body: string;
   onChange: (next: string) => void;
@@ -63,6 +64,11 @@ export function MailBodyEditor({
   rows?: number;
   /** The text box, for "Add a picture" to put the picture where the cursor is. */
   boxRef?: (el: HTMLTextAreaElement | null) => void;
+  /**
+   * A place in the text to show: opens Write and selects [start, end) in the text box, once per `key`
+   * ("Show it in the text" in components/mail-access-review.tsx).
+   */
+  reveal?: { start: number; end: number; key: number } | null;
 }) {
   const accent = useContext(MailAccent);
   const [mode, setMode] = useState<"write" | "design">("write");
@@ -71,6 +77,22 @@ export function MailBodyEditor({
   const box = useRef<HTMLTextAreaElement | null>(null);
   // The preview starts at a phone's width, where most emails are read (487 [IT4], pattern 7).
   const [phone, setPhone] = useState(true);
+
+  // A place asked to be shown: Write first, then the text box takes the focus with that place selected.
+  const [opened, setOpened] = useState(0);
+  if (reveal && reveal.key !== opened) {
+    setOpened(reveal.key);
+    if (mode !== "write") setMode("write");
+  }
+  const shown = useRef(0);
+  useEffect(() => {
+    if (!reveal || reveal.key === shown.current || mode !== "write") return;
+    const el = box.current;
+    if (!el) return;
+    shown.current = reveal.key;
+    el.focus();
+    el.setSelectionRange(reveal.start, reveal.end);
+  }, [reveal, mode]);
 
   // A change made elsewhere (a picture added, a draft opened, the writing help) is read into the blocks again.
   if (mode === "design" && body !== written) {

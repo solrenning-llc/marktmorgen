@@ -34,8 +34,9 @@ import { after } from "next/server";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { countOf, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { StripeError, onAccount, platformKey } from "@/lib/stripe-account";
+import { readStripePage } from "@/lib/stripe-list";
 import { isSettled } from "@/lib/instant-pay";
 import type { ProductFile } from "@/lib/product-file";
 import { isLiveSub, soldAMembership } from "@/lib/membership-access";
@@ -97,6 +98,8 @@ export {
   ORDERS_OPEN_SECONDS,
   ORDERS_OPEN_UNITS,
   ORDERS_PREORDER_COMMANDS,
+  ORDERS_PROGRESS_COMMANDS,
+  ORDERS_PROGRESS_MS,
   ORDERS_READ_MS,
   ORDERS_ROOM_COMMANDS,
   ORDERS_UNIT_COMMANDS,
@@ -513,10 +516,15 @@ function deliveryOf(product: Listing, optionId: string | undefined): { delivery:
 }
 
 type Row = Record<string, unknown>;
-type Listed = { data?: unknown };
 
-function rows(listed: Listed): Row[] {
-  return Array.isArray(listed.data) ? (listed.data as Row[]) : [];
+/**
+ * The rows of one page of a Stripe list, read in its exact shape (readStripePage): a page that is not one throws
+ * StripeListUnreadable, as a failed request does, so the list says it could not load, never that the address bought
+ * nothing (rule 24; Claude 5, round 30). A row with no id it can read is left out, as it always was: nothing can be
+ * handed over under it.
+ */
+function rows(listed: unknown): Row[] {
+  return readStripePage(listed).rows;
 }
 
 /** Whether Stripe says this charge was given back in full: the shared rule (lib/refunds.ts). */
@@ -588,7 +596,7 @@ async function checkoutsOf(store: Store, email: string, meter?: OrdersMeter): Pr
     query.append("expand[]", "data.subscription.latest_invoice");
     query.append("expand[]", "data.payment_intent.latest_charge");
     meter?.alive();
-    const listed = (await onAccount("GET", account, `/checkout/sessions?${query}`)) as Listed;
+    const listed: unknown = await onAccount("GET", account, `/checkout/sessions?${query}`);
     for (const session of rows(listed)) {
       const id = typeof session.id === "string" ? session.id : "";
       if (!checkouts.has(id)) checkouts.set(id, session);
@@ -882,7 +890,7 @@ async function purchaseFromImported(store: Store, statsId: string, email: string
 async function oneClickList(account: string, customer: string): Promise<Row[]> {
   const query = new URLSearchParams({ customer, limit: "50" });
   query.append("expand[]", "data.latest_charge");
-  const listed = (await onAccount("GET", account, `/payment_intents?${query}`)) as Listed;
+  const listed: unknown = await onAccount("GET", account, `/payment_intents?${query}`);
   const created = (row: Row) => (typeof row.created === "number" ? row.created : 0);
   // One order for every reading, so a batch that resumes a customer's list after its first n resumes at the same one.
   return rows(listed).sort((a, b) => created(b) - created(a) || String(a.id).localeCompare(String(b.id)));
@@ -1142,7 +1150,10 @@ async function sendLink(store: Store, raw: string, email: string, origin: string
   const token = randomBytes(32).toString("hex");
   // Kept as typed: Stripe matches the address as it was written at checkout.
   const grant: Grant = { a: grantAccount(store), e: raw };
-  await redisPipeline([["SET", tokenKey(token), JSON.stringify(grant), "EX", ORDERS_LINK_SECONDS]]);
+  // Only a SET answered exactly "OK" is a grant (CX-123 rule 24): any other reply emails nothing and takes no store
+  // email, and afterAnswer logs it; whoever asked was already answered "sent", so it tells them nothing.
+  const written = repliesFor(await redisPipeline([["SET", tokenKey(token), JSON.stringify(grant), "EX", ORDERS_LINK_SECONDS]]), 1);
+  if (!written || written[0] !== "OK") throw new UnknownReplyError("a purchases link's grant");
 
   const name = store.name;
   // Only what was checked is counted; the rest is said as older purchases not checked yet, never as bought for certain.
@@ -1186,13 +1197,34 @@ export function chargedLine(
 /**
  * A link to the list of purchases for one address, made without asking:
  * for someone who was just given something (lib/gifts.ts), whose email is
- * the proof. Null when this store's purchases cannot be listed.
+ * the proof. Null when this store's purchases cannot be listed, and when
+ * the grant's write is not confirmed.
+ *
+ * Only a SET answered exactly "OK" makes the link (CX-123 rule 24). Any
+ * other reply, or Redis throwing, answers null rather than throwing: every
+ * caller already reads null as "use the generic orders link". The purchase,
+ * gift, place and pre-order emails (lib/gifts.ts, lib/group-buy.ts,
+ * lib/paypal-sales.ts, lib/preorders.ts) ask for this link after the
+ * purchase is recorded and given, so a throw would lose the email that
+ * delivers it (and, for PayPal, the order's count); null still sends it,
+ * with the generic link, which works. An unconfirmed grant is never
+ * returned as a working link.
  */
 export async function ordersLinkFor(store: Store, email: string, base: string): Promise<string | null> {
   if (!isRedisConfigured()) return null;
   const token = randomBytes(32).toString("hex");
   const grant: Grant = { a: grantAccount(store), e: normaliseEmail(email) };
-  await redisPipeline([["SET", tokenKey(token), JSON.stringify(grant), "EX", ORDERS_LINK_SECONDS]]);
+  let written: unknown[] | null = null;
+  try {
+    written = repliesFor(await redisPipeline([["SET", tokenKey(token), JSON.stringify(grant), "EX", ORDERS_LINK_SECONDS]]), 1);
+  } catch (error) {
+    console.error("a purchases link's grant could not be written; the generic orders link is used", error);
+    return null;
+  }
+  if (!written || written[0] !== "OK") {
+    console.error("a purchases link's grant was not confirmed; the generic orders link is used");
+    return null;
+  }
   return `${base}/orders?token=${token}`;
 }
 

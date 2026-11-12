@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { idsOfKind, readListing, readListings } from "@/lib/catalog";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
+import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { formatMoney } from "@/lib/money";
 import { MAX_BUNDLE_ITEMS, MIN_BUNDLE_ITEMS, bundleOwnerProblem, deliverableItems, whyNotInBundle, worthWords } from "@/lib/bundle-rules";
@@ -78,7 +79,7 @@ export default async function StudioBundlesPage({ searchParams }: Params) {
       />
       <StudioStorePin sid={store.sid}>
         <main id="content" className="container-page pb-20 pt-10 sm:pt-14">
-          <p className="eyebrow">Bundles</p>
+          <StudioTrail store={store} here="Bundles" />
           <h1 className="t-h2 mt-3">Several products, one price</h1>
           <p className="mt-3 max-w-2xl text-ink-soft">
             {`A bundle hands over ${MIN_BUNDLE_ITEMS} to ${MAX_BUNDLE_ITEMS} of your one-off products for one price you set. When they add up to more than that price, your store shows what the products cost on their own, worked out from their prices today, next to the bundle's price.`}

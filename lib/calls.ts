@@ -556,33 +556,52 @@ function ownerOf(store: Pick<Store, "email">): string {
  * time in the same store, that checkout is closed at Stripe first — so it can
  * never be paid as well — and only then is its time let go. A checkout that
  * was paid in the meantime cannot be closed, and its time stays booked.
+ *
+ * `openedHere`: the checkout was opened by this very request (the package's
+ * last session went elsewhere meanwhile), so its id is known to be this
+ * store's own. Then it is asked to expire at Stripe even when the diary
+ * cannot be read; the unread hold is still kept, never HDEL'd, and the read's
+ * error is thrown after that attempt. A session named only by a cookie is
+ * never closed unread.
  */
-export async function releaseOwnHold(store: Store, session: string): Promise<void> {
-  if (!store.stripeAccountId || !store.callsId || !isRedisConfigured()) return;
+export async function releaseOwnHold(store: Store, session: string, { openedHere = false }: { openedHere?: boolean } = {}): Promise<void> {
+  const account = store.stripeAccountId;
+  const callsId = store.callsId;
+  if (!account || !callsId || !isRedisConfigured()) return;
   if (!/^cs_(test|live)_[A-Za-z0-9]{8,200}$/.test(session)) return;
-  // A diary that cannot be read throws: the hold is left alone, as when it is not found, and runs out by itself.
-  const flat = await readDiary(store.callsId);
-  const held = readEntries(flat).filter(({ entry }) => entry.session === session && entry.until !== 0);
+  let held: { field: string; entry: Entry }[];
+  try {
+    // A diary that cannot be read throws: the hold is left alone, as when it is not found, and runs out by itself.
+    held = readEntries(await readDiary(callsId)).filter(({ entry }) => entry.session === session && entry.until !== 0);
+  } catch (error) {
+    if (openedHere) await expireCheckout(account, session);
+    throw error;
+  }
   const fields = held.map(({ field }) => field);
   if (!fields.length) return;
-  try {
-    const closed = await onAccount(
-      "POST",
-      store.stripeAccountId,
-      `/checkout/sessions/${encodeURIComponent(session)}/expire`,
-      new URLSearchParams(),
-    );
-    if (closed.status !== "expired") return;
-  } catch {
-    // Paid, or already closed by Stripe: either way the hold is left alone and
-    // runs out by itself if nobody paid.
-    return;
-  }
-  await redisPipeline([["HDEL", busyKey(store.callsId), ...fields]]);
+  // Paid, or already closed by Stripe: either way the hold is left alone and runs out by itself if nobody paid.
+  if (!(await expireCheckout(account, session))) return;
+  await redisPipeline([["HDEL", busyKey(callsId), ...fields]]);
   // A team hold lets its hosts' time go too, now that it can never be paid.
   for (const { entry } of held) {
     const team = teamOf(entry);
     if (team) await releaseClaim(team.hosts, team.claim).catch(() => {});
+  }
+}
+
+/**
+ * Asks Stripe to close a call's checkout; true only when Stripe says it is
+ * expired. Paid, already closed, or Stripe failing: false, and the failure is
+ * logged, never swallowed. The hold is then left alone and runs out by itself
+ * if nobody paid.
+ */
+async function expireCheckout(account: string, session: string): Promise<boolean> {
+  try {
+    const closed = await onAccount("POST", account, `/checkout/sessions/${encodeURIComponent(session)}/expire`, new URLSearchParams());
+    return closed.status === "expired";
+  } catch (error) {
+    console.error("Call checkout could not be closed at Stripe:", error instanceof Error ? error.message : error);
+    return false;
   }
 }
 
@@ -1388,6 +1407,18 @@ export async function moveBooking(input: {
     from = recorded
       ? { start: recorded.s, end: recorded.e, moves: recorded.n }
       : { start: input.booked.start, end: input.booked.end, moves: 0 };
+    if (recorded && recorded.s === start && recorded.n >= 1) {
+      // The same move asked again. A move refused after its key was kept (writeMove's reply and read-back both unknown,
+      // or the diary write below failed) leaves the diary at the time before it: that move is finished now, from the
+      // diary's time and counted once, through every step below, instead of answering "same" for good. Read exactly
+      // (readDiary, entryOf): an unknown diary throws and refuses. Only a diary holding this booking at another time
+      // and nowhere at the new one is half-written; anything else is the same move, done.
+      const mine = readEntries(await readDiary(callsId)).filter(({ entry }) => entry.session === session);
+      const before = mine.find(({ entry }) => entry.start !== start);
+      if (before && !mine.some(({ entry }) => entry.start === start)) {
+        from = { start: before.entry.start, end: before.entry.e, moves: recorded.n - 1 };
+      }
+    }
     if (from.moves >= MAX_MOVES) return { ok: false, reason: "limit" };
     // Weekly hours move at the length paid for, whatever the setup says now (lib/call-lengths.ts, ownLength).
     const kept = ownLength(setup, from.end - from.start);

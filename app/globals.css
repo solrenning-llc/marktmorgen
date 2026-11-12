@@ -1435,7 +1435,8 @@ a.chip {
   min-height: 48px;
   padding: 0.7rem 0.9rem;
   border-radius: var(--r-sm);
-  border: 1px solid var(--line-strong);
+  /* Its only outline: the control-edge token, 3.99:1 on white and 3.38:1 on sand (1.4.11, tests/field-edge-contrast.test.ts). */
+  border: 1px solid var(--line-off);
   background: #fff;
   color: var(--ink);
   font-size: 1rem;
@@ -2348,7 +2349,8 @@ a.chip {
   min-height: 48px;
   padding: 0.7rem 0.9rem;
   border-radius: var(--r-sm);
-  border: 1px solid var(--st-line-strong);
+  /* Its only outline: 3:1 on the field and on the page, card or item around it (1.4.11, lib/store-look.ts fieldEdge). */
+  border: 1px solid var(--st-field-edge);
   background: var(--st-field);
   color: var(--st-text);
   font-size: 1rem;

@@ -13,7 +13,10 @@
  *   - words are wrapped, never cut, and every box and line stays inside the
  *     picture.
  */
-import { BOX_WIDTH, LANE_WIDTH, LINE_CHARS, type FlowMapLayout, flowMapLayout, flowRoutes, wrapWords } from "@/lib/flow-map";
+import { BOX_WIDTH, LANE_WIDTH, LINE_CHARS, type FlowMapLayout, charWidth, flowMapLayout, flowRoutes, wrapWords } from "@/lib/flow-map";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { WorkflowMap } from "@/components/workflow-tools";
 import { END, type RoutedStep, afterIndex, checkRoutes, elseIndex } from "@/lib/flow-paths";
 import type { StepCondition } from "@/lib/flow-rules";
 import { done, is, part } from "./check";
@@ -26,11 +29,16 @@ part("Words wrap, never cut");
 {
   const text = "Email “A very long subject line that keeps going and going” Supercalifragilisticexpialidociousandthensome";
   const lines = wrapWords(text);
-  is("no line is longer than a line may be", lines.every((l) => [...l].length <= LINE_CHARS), true);
+  is("no line is wider than a line may be", lines.every((l) => [...l].reduce((sum, c) => sum + charWidth(c), 0) <= LINE_CHARS), true);
   is("every character is kept", lines.join("").replace(/\s/g, ""), text.replace(/\s/g, ""));
   is("a word longer than a line is broken inside, the rest kept whole", wrapWords("abcdefghij xy", 4), ["abcd", "efgh", "ij", "xy"]);
   is("an empty label is one empty line, not none", wrapWords("   "), [""]);
-  is("an emoji is one character", wrapWords("🎉🎉🎉 ok", 3), ["🎉🎉🎉", "ok"]);
+  is("an emoji is drawn twice as wide, and never split", wrapWords("🎉🎉🎉 ok", 6), ["🎉🎉🎉", "ok"]);
+  const width = (line: string) => [...line].reduce((sum, c) => sum + charWidth(c), 0);
+  const japanese = wrapWords("ワークショップの録画とボーナスのワークブックをお届けします今すぐ");
+  is("a Japanese subject wraps by its width: no line wider than a line may be", [japanese.every((l) => width(l) <= LINE_CHARS), japanese.length > 1, japanese.join("")], [true, true, "ワークショップの録画とボーナスのワークブックをお届けします今すぐ"]);
+  is("a line of W does not run out of its box", wrapWords("W".repeat(32)).every((l) => width(l) <= LINE_CHARS), true);
+  is("capitals weigh more than small letters", [charWidth("A") > charWidth("a"), charWidth("W") > charWidth("A")], [true, true]);
 }
 
 part("A straight list");
@@ -157,6 +165,20 @@ part("400 generated workflows");
     if (flowRoutes(steps).length !== layout.arrows.length) wrong.push(`${tag}: routes and arrows differ`);
   }
   is("every generated workflow is drawn as the job runs it, with nothing written over a line", wrong.slice(0, 5), []);
+}
+
+part("The picture in the studio");
+{
+  const tagged2 = { if: "tagged", tag: "vip" } as unknown as StepCondition;
+  const steps = [{ id: "a", subject: "Welcome" }, { id: "b", when: tagged2, otherwise: "jump" as const, jump: "d", subject: "VIP only" }, { id: "c", subject: "Everyone else" }, { id: "d", subject: "Last one" }];
+  const html = renderToStaticMarkup(createElement(WorkflowMap, { steps, conditionText: () => "they have the label \u201cvip\u201d" }));
+  const figure = html.match(/<figure[^>]*>/)?.[0] ?? "";
+  const titleId = html.match(/<title id="([^"]+)"/)?.[1] ?? "none";
+  is("its scroll box takes focus and is named by the picture's title (2.1.1)", [figure.includes('tabindex="0"'), figure.includes(`aria-labelledby="${titleId}"`), figure.includes("focus-visible:")], [true, true, true]);
+  const decode = (t: string) => t.replace(/&quot;/g, '"').replace(/&#x27;/g, "'").replace(/&amp;/g, "&");
+  const boxes = [...html.matchAll(/<g>(?:<rect[^>]*><\/rect>)((?:<text[^>]*>[^<]*<\/text>)+)<\/g>/g)].map((m) => decode([...m[1].matchAll(/>([^<]*)</g)].map((t) => t[1]).filter(Boolean).join(" ")));
+  const items = [...html.matchAll(/<li[^>]*><span[^>]*>(\d+)\.<\/span><span>([^<]*)<\/span>/g)].map((m) => decode(`${m[1]}. ${m[2]}`));
+  is("each box says what its line in the list says", [boxes.slice(0, steps.length), boxes.length], [items, steps.length + 1]);
 }
 
 done();

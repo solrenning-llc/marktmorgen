@@ -11,8 +11,9 @@
  * is also dashed: nothing is told by colour alone. The list of steps that
  * comes after the picture says everything it shows, so the picture is one
  * image with a name that points there, and a screen reader reads the list.
- * Wide workflows scroll sideways inside their own box, as a diagram may;
- * the page itself never does.
+ * Wide workflows scroll sideways inside their own box, as a diagram may,
+ * and the box takes focus so a keyboard can scroll it; the page itself
+ * never scrolls sideways.
  */
 import { useId } from "react";
 import { type FlowMapLayout, LINE_HEIGHT } from "@/lib/flow-map";
@@ -24,7 +25,14 @@ export function WorkflowDiagram({ layout, steps }: { layout: FlowMapLayout; step
   const head = `${id}-head`;
   const title = `${id}-title`;
   return (
-    <figure className="mt-2 max-w-full overflow-x-auto text-ink" data-workflow-diagram>
+    // A wide picture scrolls sideways in its own box: the box takes focus and is named, so a keyboard alone can scroll it
+    // in every browser (WCAG 2.1.1; the reviews of #4114), with the site's focus ring.
+    <figure
+      className="mt-2 max-w-full overflow-x-auto rounded-[var(--r-sm)] text-ink focus-visible:[outline:3px_solid_var(--focus)] focus-visible:[outline-offset:3px]"
+      tabIndex={0}
+      aria-labelledby={title}
+      data-workflow-diagram
+    >
       <svg
         role="img"
         aria-labelledby={title}

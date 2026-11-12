@@ -75,9 +75,12 @@ export function routeWords(steps: readonly MapStep[], index: number): string {
   return `if yes, ${then}; if not, ${stepName(otherwise)}`;
 }
 
-/** What a step's box and its line in the list say: its number, its condition, what it does. */
-export const stepLine = (step: MapStep, i: number, conditionText: (when: StepCondition) => string) =>
-  `${i + 1}. ${step.when ? `If ${conditionText(step.when)}: ` : ""}${stepWhat(step)}`;
+/** What a step says, in its box and in its line of the list: its condition, then what it does. One copy, so the two never differ. */
+export const stepText = (step: MapStep, conditionText: (when: StepCondition) => string) =>
+  `${step.when ? `If ${conditionText(step.when)}: ` : ""}${stepWhat(step)}`;
+
+/** A step's box: its number, then stepText. */
+export const stepLine = (step: MapStep, i: number, conditionText: (when: StepCondition) => string) => `${i + 1}. ${stepText(step, conditionText)}`;
 
 /** The map of a workflow: its picture (391 [CX2]), then every step with what it does and where it leads. */
 export function WorkflowMap({ steps, conditionText }: { steps: readonly MapStep[]; conditionText: (when: StepCondition) => string }) {
@@ -88,7 +91,7 @@ export function WorkflowMap({ steps, conditionText }: { steps: readonly MapStep[
       {steps.map((step, i) => (
         <li key={step.id} className="flex flex-wrap gap-x-2">
           <span className="font-semibold text-ink">{`${i + 1}.`}</span>
-          <span>{`${step.when ? `If ${conditionText(step.when)}: ` : ""}${stepWhat(step)}`}</span>
+          <span>{stepText(step, conditionText)}</span>
           <span aria-hidden="true">→</span>
           <span>{routeWords(steps, i)}</span>
         </li>

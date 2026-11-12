@@ -31,8 +31,26 @@ import { type RoutedStep, afterIndex, elseIndex } from "@/lib/flow-paths";
 
 /** The width of a step's box, in the picture's own units (CSS pixels at 100%). */
 export const BOX_WIDTH = 300;
-/** The most characters on one line of a box: wide enough for 300 units at 14px with room to spare. */
+/**
+ * The most width units on one line of a box: 288 units of room at 14px. A unit
+ * is about an ordinary letter; capitals, M and W weigh more, and a character
+ * drawn twice as wide (Chinese, Japanese, Korean, full-width forms, emoji)
+ * weighs 2, so no line runs out of its box (reviews of #4114).
+ */
 export const LINE_CHARS = 32;
+
+const WIDE = /[\u1100-\u115F\u2E80-\uA4CF\uAC00-\uD7A3\uF900-\uFAFF\uFE30-\uFE4F\uFF00-\uFF60\uFFE0-\uFFE6]|\p{Extended_Pictographic}|[\u{20000}-\u{3FFFD}]/u;
+
+/** How wide one character is drawn, in line units. */
+export function charWidth(char: string): number {
+  if (WIDE.test(char)) return 2;
+  if (/[MW]/.test(char)) return 1.6;
+  if (/[mw]/.test(char)) return 1.4;
+  if (/\p{Lu}/u.test(char)) return 1.2;
+  return 1;
+}
+
+const widthOf = (chars: readonly string[]) => chars.reduce((sum, c) => sum + charWidth(c), 0);
 /** The height of one line of words in a box. */
 export const LINE_HEIGHT = 20;
 const PAD_Y = 14;
@@ -75,33 +93,37 @@ export type MapArrow = {
 export type FlowMapLayout = { width: number; height: number; boxes: MapBox[]; arrows: MapArrow[]; lanes: number };
 
 /**
- * Words broken into lines of at most `max` characters, at spaces where it can
- * and inside a word only when the word alone is longer than a line. Nothing is
- * dropped: joining the lines gives back every character but the spaces broken at.
+ * Words broken into lines of at most `max` width units (charWidth), at spaces
+ * where it can and inside a word only when the word alone is wider than a line.
+ * Nothing is dropped: joining the lines gives back every character but the
+ * spaces broken at.
  */
 export function wrapWords(text: string, max = LINE_CHARS): string[] {
   const lines: string[] = [];
-  let line = "";
+  let line: string[] = [];
   for (const raw of text.split(/\s+/).filter(Boolean)) {
     let word = [...raw];
-    while (word.length > max) {
-      if (line) {
-        lines.push(line);
-        line = "";
+    // A word wider than a line is broken inside, at the last character that still fits.
+    while (widthOf(word) > max) {
+      if (line.length) {
+        lines.push(line.join(""));
+        line = [];
       }
-      lines.push(word.slice(0, max).join(""));
-      word = word.slice(max);
+      let fit = 0;
+      while (fit < word.length && widthOf(word.slice(0, fit + 1)) <= max) fit += 1;
+      fit = Math.max(1, fit);
+      lines.push(word.slice(0, fit).join(""));
+      word = word.slice(fit);
     }
-    const piece = word.join("");
-    if (!piece) continue;
-    if (!line) line = piece;
-    else if ([...line].length + 1 + word.length <= max) line = `${line} ${piece}`;
+    if (!word.length) continue;
+    if (!line.length) line = word;
+    else if (widthOf(line) + 1 + widthOf(word) <= max) line = [...line, " ", ...word];
     else {
-      lines.push(line);
-      line = piece;
+      lines.push(line.join(""));
+      line = word;
     }
   }
-  if (line) lines.push(line);
+  if (line.length) lines.push(line.join(""));
   return lines.length ? lines : [""];
 }
 

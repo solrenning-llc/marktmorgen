@@ -31,6 +31,9 @@ is("each part is found", [notYet.length > 0, emailTile.length > 0, domainCard.le
 is("no plan called Pro in what is not switched on yet, the Email tile, the domain card or the email card", [proWords(notYet), proWords(emailTile), proWords(domainCard), proWords(emailCard)], [[], [], [], []]);
 is("each names the plan from PLAN_TITLES", [notYet.includes("${PLAN_TITLES.pro} plan"), emailTile.includes("${PLAN_TITLES.pro} plan"), domainCard.includes("${PLAN_TITLES.pro} plan"), emailCard.includes("${PLAN_TITLES.pro} plan")], [true, true, true, true]);
 
+part("The tile that carries the tag");
+is("its tag can go under the icon on a narrow tile instead of running past it", readFileSync("components/studio-tools.tsx", "utf8").includes('<span className="flex flex-wrap items-center justify-between gap-2">'), true);
+
 part("The look editor's line about our name on the page");
 const look = code("components/look-editor.tsx");
 const badge = look.slice(look.indexOf("Take &ldquo;Made with Marktmorgen&rdquo;"), look.indexOf("</fieldset>", look.indexOf("Take &ldquo;Made with Marktmorgen&rdquo;")));

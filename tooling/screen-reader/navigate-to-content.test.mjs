@@ -161,6 +161,64 @@ test("unknown native snapshots stay explicit and cannot replace the reader gate"
  assert.equal(state.reports.length,2,"Real NVDA gates are unchanged by diagnostic failure");
 });
 
+// Merge-group jobs 130459016785 (after preparation, native snapshots at their
+// deadline), 130370897920 and 130070456398 (before preparation of the second
+// page): NVDA reported "Search" and every Alt+Escape left it in front.
+// Deterministic: the helper's 500 ms waits run on mocked timers.
+async function settle(t,run){
+ let settled=false;const promise=run().finally(()=>{settled=true;});promise.catch(()=>{});
+ while(!settled){await new Promise(resolve=>setImmediate(resolve));t.mock.timers.tick(500);}
+ return promise;
+}
+function readerSearch({stage,closesOnEscape=true}){
+ const f=fixture(stage==="after preparation"?{loseFocus:true,afterPreparationSwitches:Infinity,lostWindowTitle:"Search",recoverOnPlainEscape:closesOnEscape}:{recoverOnPlainEscape:closesOnEscape});
+ if(stage==="before preparation"){
+  // As in job 130070456398, Search is already in front at the first title
+  // report, after the exit-focus-mode Escape was sent.
+  const perform=f.reader.perform;let first=true;
+  f.reader.perform=async(command,options)=>{
+   if(first&&command===NVDAKeyCodeCommands.reportTitle){first=false;f.state.windowTitle="Search";f.state.switchesNeeded=Infinity;}
+   return perform(command,options);
+  };
+ }
+ // The native snapshot is unavailable, as in job 130459016785.
+ const foreground={async read(){throw Error("Native foreground query deadline exceeded");}};
+ return {...f,foreground};
+}
+for(const stage of ["before preparation","after preparation"]){
+ test(`Search reported by NVDA ${stage} is dismissed once before headings are read (50 runs)`,async(t)=>{
+  t.mock.timers.enable({apis:["setTimeout"]});
+  t.mock.method(console,"log",()=>{});t.mock.method(console,"error",()=>{});
+  for(let run=0;run<50;run++){
+   const {reader,page,state,foreground}=readerSearch({stage});
+   await settle(t,async()=>{await navigateToContent(reader,page,"nvda",foreground);await reader.nextHeading();});
+   assert.ok(state.reports.includes("Search"),"Search must be reported by NVDA before recovery");
+   assert.equal(state.plainEscapes,1,"Only the reported Search window is dismissed, once");
+   assert.equal(state.switches,0,"Dismissing Search does not consume the ten-switch budget");
+   assert.equal(state.reports.at(-1),browserTitle,"The exact browser title still proves recovery");
+   assert.equal(state.headingReads,1,"No heading assertion is retried");
+  }
+ });
+ test(`Search that Escape does not close ${stage} still refuses headings`,async(t)=>{
+  t.mock.timers.enable({apis:["setTimeout"]});
+  t.mock.method(console,"log",()=>{});t.mock.method(console,"error",()=>{});
+  const {reader,page,state,foreground}=readerSearch({stage,closesOnEscape:false});
+  await assert.rejects(settle(t,async()=>{await navigateToContent(reader,page,"nvda",foreground);await reader.nextHeading();}),/foreground window did not match/);
+  assert.equal(state.plainEscapes,1,"Search is never dismissed twice");
+  assert.equal(state.switches,10,"The original ten-switch ceiling is unchanged");
+  assert.equal(state.headingReads,0);
+ });
+}
+test("a foreground other than Search never receives the Search dismissal",async(t)=>{
+ t.mock.timers.enable({apis:["setTimeout"]});
+ t.mock.method(console,"log",()=>{});
+ const {reader,page,state}=fixture({loseFocus:true,afterPreparationSwitches:Infinity});
+ const escapes=[],perform=reader.perform;
+ reader.perform=async(command,options)=>{if(command!==NVDAKeyCodeCommands.exitFocusMode&&command.keyCode?.includes?.(WindowsKeyCodes.Escape)&&command.modifiers?.length===0)escapes.push(state.windowTitle);return perform(command,options);};
+ await assert.rejects(settle(t,async()=>{await navigateToContent(reader,page,"nvda");await reader.nextHeading();}),/foreground window did not match/);
+ assert.deepEqual(escapes,[]);assert.equal(state.switches,10);assert.equal(state.headingReads,0);
+});
+
 function voiceOverFixture({failAt}={}){
  const state={marker:false,events:[],position:1,last:"",resets:0};
  const failure=Error("synthetic "+failAt);

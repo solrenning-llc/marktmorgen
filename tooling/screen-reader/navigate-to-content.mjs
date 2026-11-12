@@ -22,7 +22,7 @@ export async function navigateToContent(reader,page,kind,foreground){
     return null;
    }
   }
-  let switches=0;
+  let switches=0,dismissedSearch=false,readerDismissedSearch=false;
   async function confirmForeground(stage,canSwitch=true,activatePage=false){
    let changed=false,activated=false;
    for(;;){
@@ -30,6 +30,16 @@ export async function navigateToContent(reader,page,kind,foreground){
     const windowTitle=(await reader.lastSpokenPhrase()).replace(/\s+/g," ").trim().toLowerCase();
     console.log("AX2_NVDA_WINDOW_FOCUS:"+JSON.stringify({attempt:switches,stage,pageTitle,windowTitle}));
     if(windowTitle.startsWith(pageTitle))return changed;
+    if(canSwitch&&windowTitle==="search"&&!dismissedSearch&&!readerDismissedSearch){
+     // NVDA itself reported exactly the Windows Search window. Alt+Escape never
+     // closes it (jobs 130459016785, 130370897920, 130070456398: ten switches,
+     // ten "Search" reports), so close only that window once per navigation,
+     // as when the native snapshot observes it, then prove the page title again.
+     readerDismissedSearch=true;changed=true;
+     await reader.perform({keyCode:[WindowsKeyCodes.Escape],modifiers:[]},{capture:false});
+     await new Promise(resolve=>setTimeout(resolve,500));
+     continue;
+    }
     if(activatePage&&!activated){
      // The exact native title check observed that another application owns the
      // foreground. Reactivate the already selected page, then prove its title;
@@ -64,7 +74,6 @@ export async function navigateToContent(reader,page,kind,foreground){
   await observeNativeForeground("after exit focus mode");
   await reader.perform({keyCode:[WindowsKeyCodes.Home],modifiers:[WindowsModifiers.Control]});
   const resetForeground=await observeNativeForeground("after document reset");
-  let dismissedSearch=false;
   if(typeof resetForeground==="string"&&resetForeground.replace(/\s+/g," ").trim().toLowerCase()==="search"){
    // Windows Search can take the foreground when Ctrl+Home is sent. Close
    // only that exactly observed window, then let NVDA's title gate prove the

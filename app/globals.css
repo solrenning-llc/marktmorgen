@@ -4973,6 +4973,15 @@ fieldset:disabled .cm-poll-row {
   .st-has-sticky {
     padding-bottom: 6.5rem;
   }
+  /*
+   * WCAG 2.2 2.4.11/2.4.12: the browser keeps what has keyboard focus above the
+   * bar instead of under it (tests/sticky-buy-focus.test.ts). Held while the bar
+   * is away too: focus can scroll the buy box off screen, and the bar then comes
+   * back over what was just focused.
+   */
+  html:has(.st-sticky-buy) {
+    scroll-padding-bottom: calc(5.5rem + env(safe-area-inset-bottom));
+  }
 }
 .st-sticky-price {
   min-width: 0;

@@ -106,7 +106,7 @@ export function whenQuiet(
 /**
  * One count per key, each sent once at the buyer's first pause (`whenQuiet`).
  *
- * A count still waiting is never dropped: a tap on a link inside the store
+ * While the page stays alive, a count still waiting is not dropped: a tap on a link inside the store
  * cleans up the page that asked for it while the document stays, so it goes
  * at the next pause, on the next page, with what it read when its own page
  * opened (where the visitor came from), or at once when the page is hidden.

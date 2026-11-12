@@ -6,7 +6,7 @@ import { countsAtPause } from "@/lib/quiet-moment";
 import { sourceTag } from "@/lib/source-rules";
 
 // One count per page load, however many times React runs the effect, each at the buyer's first pause
-// (lib/quiet-moment.ts). One still waiting when the buyer moves inside the store goes at the next pause, never dropped.
+// (lib/quiet-moment.ts). One still waiting when the buyer moves inside the store goes at the next pause, while the page stays alive.
 const countOnce = countsAtPause();
 
 // The host's browser check answers for every count this page sends but a link's (lib/bot-check.ts, browserProof). It
@@ -59,7 +59,7 @@ export function StoreBeacon({ handle, front = true, product = "" }: { handle: st
         ? { h: handle, k: "p", p: product }
         : { h: handle, k: "p" };
     // The count goes through the host's check, whose script is one long block of work: it waits for a pause in what
-    // the buyer is doing (lib/quiet-moment.ts), so it never lands on a tap. Leaving this page for another of the
+    // the buyer is doing (lib/quiet-moment.ts), so it rarely lands on a tap. Leaving this page for another of the
     // store's (a next/link card, the pager) does not drop it: it goes at the next pause, with the source read here.
     countOnce(key, () => beacon(payload));
     // Which links are followed is counted on the front page, where they are.

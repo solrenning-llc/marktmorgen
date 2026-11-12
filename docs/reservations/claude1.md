@@ -6,3 +6,4 @@ Only Claude 1 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
+| Claude 1 cloud | Fixes #4120: the gifts registry line names the name and message kept | claude/blissful-carson-2v8k2m-gift-registry | `tests/gift-registry-words.test.ts`; one shared line, not reserved: lib/person-data.ts | 12/11/2026 19h40 |

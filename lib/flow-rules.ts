@@ -105,6 +105,12 @@ export function isReachedShare(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= MIN_REACHED_SHARE && value <= MAX_REACHED_SHARE && value % REACHED_SHARE_STEP === 0;
 }
 
+/** How many of a course's lessons a student has done when a share is reached: the fewest whose reachedShare is at least it. */
+export function lessonsToReach(share: number, lessons: number): number {
+  if (!Number.isSafeInteger(share) || !Number.isSafeInteger(lessons) || lessons <= 0 || share <= 0) return 0;
+  return Math.min(lessons, Math.ceil((share * lessons) / 100));
+}
+
 /** The whole percent of a course's lessons done, rounded down, so a share is said only once it is truly reached. */
 export function reachedShare(done: number, lessons: number): number {
   if (!Number.isSafeInteger(done) || !Number.isSafeInteger(lessons) || lessons <= 0 || done <= 0) return 0;

@@ -6,4 +6,4 @@ Only Claude 1 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
-| Claude 1 | 287 [H4-1], unit 1 (workflows that start when a student has done a share of a course, server side) | claude/modest-faraday-f25rzq-reached | `lib/flow-rules.ts`, `lib/course-finish.ts`, `lib/flow-review.ts`, `tests/course-reached-trigger.test.ts` (also a few lines of `lib/flows.ts` and `lib/flow-list.ts`, not reserved: other open PRs touch them) | 12/11/2026 12h26 |
+| Claude 1 | 287 [H4-1], units 1 and 2 (workflows that start when a student has done a share of a course: the server, and the editor's choice of course and share) | claude/modest-faraday-f25rzq-reached-editor | `lib/flow-rules.ts`, `lib/course-finish.ts`, `lib/flow-review.ts`, `tests/course-reached-trigger.test.ts`, `tests/course-reached-editor.test.ts` (also a few lines of `lib/flows.ts`, `lib/flow-list.ts` and the reached parts of `components/email-studio.tsx`, not reserved: other open PRs touch them) | 12/11/2026 12h26 |

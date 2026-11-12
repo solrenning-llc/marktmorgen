@@ -22,7 +22,7 @@ import { toast } from "@/components/toast";
 import { MailAccent, MailBodyEditor } from "@/components/mail-designer";
 import { flowConfigurationIssues } from "@/lib/flow-review";
 import type { Flow, FlowCounts, FlowStep } from "@/lib/flows";
-import { flowWaitHours, type FlowAction, type FlowGoal, type FlowTrigger, MAX_CONDITION_TAG, type StepCondition, type StepIf, isCourseIf } from "@/lib/flow-rules";
+import { flowWaitHours, type FlowAction, type FlowGoal, type FlowTrigger, MAX_CONDITION_TAG, type StepCondition, type StepIf, isCourseIf, isReachedShare, lessonsToReach, MAX_REACHED_SHARE, MIN_REACHED_SHARE, REACHED_SHARE_STEP } from "@/lib/flow-rules";
 import { MAX_FLOWS, MAX_STEPS } from "@/lib/flow-limits";
 import { type MapStep, WorkflowMap, WorkflowPreview, WorkflowRuns } from "@/components/workflow-tools";
 import type { MailSettings } from "@/lib/store";
@@ -78,6 +78,7 @@ const MESSAGES: Record<string, string> = {
   stage_taken: "Another workflow already starts from that stage. A stage starts one workflow; that one can start others with a step.",
   signed_taken: "Another workflow already starts when someone signs. Signing starts one workflow; that one can start others with a step.",
   paid_request_taken: "Another workflow already starts when someone pays a payment request. Paying one starts one workflow; that one can start others with a step.",
+  share: "Choose how much of the course a student has done before this workflow starts: from 5% to 95% of the lessons, in steps of 5.",
   unknown: "That is not there anymore. Reload the page.",
   send: "The email service did not take it just now. Nothing was sent; try again in a moment.",
   signed_out: "Your session ended. What you wrote stays on this page: log in again in a new tab, then come back to this tab and press the same button again.",
@@ -1811,6 +1812,8 @@ type FlowDraft = {
   formOutcome: string;
   /** The deal stage that starts it, for "stage". */
   stageId: string;
+  /** For "reached": the percent of the course's lessons done that starts it (287 [H4-1]). */
+  share: number;
   active: boolean;
   steps: StepDraft[];
   /** When it ends early: never, once they have bought anything, once they get one product, or once they carry a label. */
@@ -2002,6 +2005,7 @@ function toDraft(flow: FlowRow | null, products: { id: string }[]): FlowDraft {
       formId: "",
       formOutcome: "",
       stageId: "",
+      share: DEFAULT_REACHED_SHARE,
       active: false,
       steps: [blankStep("0", "hours", first)],
       goal: "",
@@ -2018,6 +2022,7 @@ function toDraft(flow: FlowRow | null, products: { id: string }[]): FlowDraft {
     formId: flow.formId ?? "",
     formOutcome: flow.formOutcome ?? "",
     stageId: flow.stageId ?? "",
+    share: isReachedShare(flow.share) ? flow.share : DEFAULT_REACHED_SHARE,
     active: flow.active,
     steps: flow.steps.map((s) => stepToDraft(s, first)),
     goal: !flow.goal ? "" : "any" in flow.goal ? "any" : "tag" in flow.goal ? "tag" : "product",
@@ -2026,8 +2031,14 @@ function toDraft(flow: FlowRow | null, products: { id: string }[]): FlowDraft {
   };
 }
 
-/** The triggers that name a product: getting it, finishing or opening a course, leaving its checkout. */
-const productTrigger = (t: FlowTrigger) => t === "product" || t === "finished" || t === "started" || t === "abandoned";
+/** The triggers that name a product: getting it, finishing, opening or being partway through a course, leaving its checkout. */
+const productTrigger = (t: FlowTrigger) => t === "product" || t === "finished" || t === "started" || t === "abandoned" || t === "reached";
+/** The course size the share's hint counts an example in. */
+const REACHED_EXAMPLE_LESSONS = 10;
+/** The share a new "reached" workflow is set to until the creator picks another: halfway. */
+const DEFAULT_REACHED_SHARE = 50;
+/** Every share a "reached" workflow may start at, for its menu (lib/flow-rules.ts, isReachedShare). */
+const REACHED_SHARES: number[] = Array.from({ length: (MAX_REACHED_SHARE - MIN_REACHED_SHARE) / REACHED_SHARE_STEP + 1 }, (_, i) => MIN_REACHED_SHARE + i * REACHED_SHARE_STEP);
 
 /** The goal a draft stands for, as the server reads it. */
 function goalOf(draft: FlowDraft): FlowGoal | null {
@@ -2143,6 +2154,8 @@ function Flows({
         ? `Starts when someone who agreed to hear from you finishes ${products.find((p) => p.id === f.productId)?.title ?? "a course"}`
       : f.trigger === "started"
         ? `Starts when someone who agreed to hear from you opens ${products.find((p) => p.id === f.productId)?.title ?? "a course"} for the first time`
+      : f.trigger === "reached"
+        ? `Starts when someone who agreed to hear from you has done ${f.share ?? "part"}% of the lessons of ${products.find((p) => p.id === f.productId)?.title ?? "a course"}`
       : f.trigger === "abandoned"
         ? `Starts when someone on your list, who agreed on the checkout page to hear from you, leaves a checkout of ${products.find((p) => p.id === f.productId)?.title ?? "a product"} unpaid`
       : f.trigger === "signed"
@@ -2206,6 +2219,7 @@ function Flows({
         formId: draft.trigger === "form" ? draft.formId : null,
         formOutcome: draft.trigger === "form" ? draft.formOutcome : "",
         stageId: draft.trigger === "stage" ? draft.stageId : "",
+        ...(draft.trigger === "reached" ? { share: draft.share } : {}),
         // A new workflow is saved paused whatever is sent; switching on is its own step.
         active: draft.id ? draft.active : false,
         steps: draft.steps.map((s) => {
@@ -2259,7 +2273,7 @@ function Flows({
   }) : [];
   const draftIssues = draft ? flowConfigurationIssues({
     id: draft.id ?? "", name: draft.name, trigger: draft.trigger, active: draft.active, createdAt: 0,
-    productId: draft.productId, tag: draft.triggerTag, formId: draft.formId, ...(draft.trigger === "form" && draft.formOutcome ? { formOutcome: draft.formOutcome } : {}), ...(draft.trigger === "stage" ? { stageId: draft.stageId } : {}),
+    productId: draft.productId, tag: draft.triggerTag, formId: draft.formId, ...(draft.trigger === "form" && draft.formOutcome ? { formOutcome: draft.formOutcome } : {}), ...(draft.trigger === "stage" ? { stageId: draft.stageId } : {}), ...(draft.trigger === "reached" ? { share: draft.share } : {}),
     goal: goalOf(draft) ?? undefined,
     steps: draftSteps,
   }, { products, courses, paidProducts, flows, ...automation, assignees }) : [];
@@ -2502,9 +2516,9 @@ function Flows({
                 setDraft((current) => {
                   if (!current) return current;
                   const trigger: FlowTrigger =
-                    e.target.value === "product" ? "product" : e.target.value === "bought" ? "bought" : e.target.value === "tagged" ? "tagged" : e.target.value === "finished" ? "finished" : e.target.value === "form" ? "form" : e.target.value === "started" ? "started" : e.target.value === "abandoned" ? "abandoned" : e.target.value === "stage" ? "stage" : e.target.value === "signed" ? "signed" : e.target.value === "paid_request" ? "paid_request" : "joined";
-                  // Finishing and opening are only for a course: the first course, when the product chosen is not one.
-                  const productId = (trigger === "finished" || trigger === "started") && !courses.includes(current.productId) ? (courses[0] ?? current.productId) : current.productId;
+                    e.target.value === "product" ? "product" : e.target.value === "bought" ? "bought" : e.target.value === "tagged" ? "tagged" : e.target.value === "finished" ? "finished" : e.target.value === "form" ? "form" : e.target.value === "started" ? "started" : e.target.value === "abandoned" ? "abandoned" : e.target.value === "stage" ? "stage" : e.target.value === "signed" ? "signed" : e.target.value === "paid_request" ? "paid_request" : e.target.value === "reached" ? "reached" : "joined";
+                  // Finishing, opening and being partway through are only for a course: the first course, when the product chosen is not one.
+                  const productId = (trigger === "finished" || trigger === "started" || trigger === "reached") && !courses.includes(current.productId) ? (courses[0] ?? current.productId) : current.productId;
                   // A sequence that starts with a purchase cannot end at one.
                   const formId = trigger === "form" && !automation.forms.some((x) => x.id === current.formId) ? (automation.forms[0]?.id ?? "") : current.formId;
                   // A deal stage: the first stage of the first pipeline, when none of the store's is chosen yet.
@@ -2521,6 +2535,7 @@ function Flows({
               <option value="tagged">A sequence gives someone a label</option>
               {courses.length ? <option value="finished">Someone who agreed to hear from you finishes a course</option> : null}
               {courses.length ? <option value="started">Someone who agreed to hear from you opens a course for the first time</option> : null}
+              {courses.length ? <option value="reached">Someone who agreed to hear from you has done part of a course</option> : null}
               {products.length ? <option value="abandoned">Someone on your list leaves a checkout unpaid, having agreed to hear from you</option> : null}
               {automation.forms.length ? <option value="form">Someone on your list sends a form</option> : null}
               {automation.stages.length ? <option value="stage">A deal with someone on your list enters a stage</option> : null}
@@ -2610,6 +2625,31 @@ function Flows({
               </select>
               <span className="mt-2 block text-sm text-ink-soft">The first time a student opens the course. Each student starts it once.</span>
             </label>
+          ) : null}
+          {draft.trigger === "reached" ? (
+            <div className="space-y-4">
+              <label className="block">
+                <span className="field-label">Which course</span>
+                <select className="field mt-2" value={draft.productId} onChange={(e) => setDraft({ ...draft, productId: e.target.value })}>
+                  {products
+                    .filter((p) => courses.includes(p.id))
+                    .map((p) => (
+                      <option key={p.id} value={p.id}>{p.title}</option>
+                    ))}
+                </select>
+              </label>
+              <label className="block">
+                <span className="field-label">How much of it they have done</span>
+                <select className="field mt-2" value={draft.share} aria-describedby="flow-reached-hint" onChange={(e) => setDraft({ ...draft, share: Number(e.target.value) })}>
+                  {REACHED_SHARES.map((share) => (
+                    <option key={share} value={share}>{`${share}% of the lessons`}</option>
+                  ))}
+                </select>
+                <span id="flow-reached-hint" className="mt-2 block text-sm text-ink-soft">
+                  {`Counted from lessons marked done, by a button, a quiz passed or work approved: for example, in a course of ${REACHED_EXAMPLE_LESSONS} lessons, ${draft.share}% is reached once ${lessonsToReach(draft.share, REACHED_EXAMPLE_LESSONS)} are done. Each student starts it once. For the whole course, choose "finishes a course".`}
+                </span>
+              </label>
+            </div>
           ) : null}
           {draft.trigger === "abandoned" ? (
             <label className="block">

@@ -27,6 +27,7 @@ import { DoorTimer, LocalTime, RoomEmbed } from "@/components/community-event-ro
 import { VideoEmbed } from "@/components/video-embed";
 import { productSegment } from "@/lib/product-slug";
 import { NewTab } from "@/components/new-tab";
+import { ArrivalNotice } from "@/components/arrival-notice";
 
 type Params = {
   params: Promise<{ handle: string; event: string }>;
@@ -107,7 +108,7 @@ export default async function CommunityEventPage({ params, searchParams }: Param
         <p>
           <Link href={`${home}/events`} className="cm-quiet-link text-sm font-semibold underline underline-offset-4">{w.allEvents}</Link>
         </p>
-        {notice ? <p className={`cm-flash mt-4 ${notice.tone === "warn" ? "cm-flash-warn" : ""}`} role="status">{notice.text}</p> : null}
+        {notice ? <ArrivalNotice className={`cm-flash mt-4 ${notice.tone === "warn" ? "cm-flash-warn" : ""}`}>{notice.text}</ArrivalNotice> : null}
 
         <article aria-labelledby={labelId} className={`st-card mt-4 p-5 sm:p-7 ${event.cancelled ? "cm-hidden" : ""}`}>
           <div className="flex items-start gap-4">

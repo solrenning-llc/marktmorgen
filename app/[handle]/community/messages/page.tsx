@@ -11,6 +11,7 @@ import { CommunityBar, Face, authorName, communityNotices, storeWhen } from "@/c
 import { communityWords } from "@/lib/buyer-words/community";
 import { LANGUAGES } from "@/lib/store-language";
 import { EmptyState } from "@/components/empty-state";
+import { ArrivalNotice } from "@/components/arrival-notice";
 
 type Params = {
   params: Promise<{ handle: string }>;
@@ -104,7 +105,7 @@ export default async function MessagesPage({ params, searchParams }: Params) {
         <p className="mb-4">
           <Link href={home} className="cm-quiet-link text-sm font-semibold underline underline-offset-4">{w.backToFeed}</Link>
         </p>
-        {notice ? <p className={`cm-flash mb-5 ${notice.tone === "warn" ? "cm-flash-warn" : ""}`} role="status">{notice.text}</p> : null}
+        {notice ? <ArrivalNotice className={`cm-flash mb-5 ${notice.tone === "warn" ? "cm-flash-warn" : ""}`}>{notice.text}</ArrivalNotice> : null}
 
         <h1 className="font-display text-2xl font-semibold tracking-[-0.02em]">{w.tabMessages}</h1>
         <p className="st-muted mt-1 text-sm">

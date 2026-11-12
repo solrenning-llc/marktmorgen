@@ -1669,7 +1669,7 @@ const fr: CommunityWords = {
       `Vous êtes toujours sur la liste. Si le nouvel horaire ne vous convient pas, annulez votre participation sur la page de l'événement, pour que quelqu'un d'autre puisse prendre la place${S}:\n${page}`,
     ].join("\n\n"),
   evWhyMoved: (name) => `Vous recevez ceci parce que vous participez à cet événement de ${name}. Il est envoyé une fois à chaque changement d'horaire.`,
-  evReminderSubject: (tomorrow, title) => `${tomorrow ? "Demain" : "Dans 1${S}heure"}${S}: ${title}`,
+  evReminderSubject: (tomorrow, title) => `${tomorrow ? "Demain" : `Dans 1${S}heure`}${S}: ${title}`,
   evReminderBody: (tomorrow, title, name, when, early, page) =>
     [
       `Petit rappel${S}: «${S}${title}${S}», un événement en direct de ${name}, commence ${tomorrow ? "demain" : "dans une heure"}.`,

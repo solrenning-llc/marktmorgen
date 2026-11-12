@@ -45,6 +45,8 @@ const INVOICE_PATTERN = /^in_[A-Za-z0-9]{6,64}$/;
 
 /** States in which a membership is over, and has no card to keep. */
 const OVER = new Set(["canceled", "incomplete_expired"]);
+/** Every status Stripe gives a subscription (https://docs.stripe.com/api/subscriptions/object, read 11/11/2026). */
+const SUB_STATUSES = new Set(["incomplete", "incomplete_expired", "trialing", "active", "past_due", "canceled", "unpaid", "paused"]);
 
 async function sha256Hex(value: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
@@ -107,6 +109,8 @@ async function subFor(store: Store, account: string, customer: string, subscript
   if (!SUB_PATTERN.test(subscription)) return null;
   const sub = (await onAccount("GET", account, `/subscriptions/${subscription}?expand[]=latest_invoice`)) as SubRow;
   if (!isOwnReply(sub, subscription)) return null;
+  // Rule 24: a status Stripe has no name for (or none) is unknown, never "not ended": no page, no card set, no payment.
+  if (typeof sub.status !== "string" || !SUB_STATUSES.has(sub.status)) return null;
   if (customerOf(sub) !== customer || !saleHandles(store).has(sub.metadata?.store ?? "")) return null;
   return sub;
 }

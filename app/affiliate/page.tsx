@@ -119,7 +119,7 @@ export default async function AffiliateHubPage({ searchParams }: Params) {
                           </span>
                         )}
                         <div className="min-w-0">
-                          <p className="truncate text-lg font-semibold">{store.name}</p>
+                          <h2 className="text-lg font-semibold [overflow-wrap:anywhere]">{store.name}</h2>
                           <p className="text-sm text-ink-soft">{on ? STANDING[affiliate.status] : "Program switched off by the creator"}</p>
                         </div>
                       </div>
@@ -152,10 +152,12 @@ export default async function AffiliateHubPage({ searchParams }: Params) {
                         {open ? (
                           <a href={open} className="btn btn-primary btn-sm">
                             Open your numbers
+                            <span className="sr-only"> for {store.name}</span>
                           </a>
                         ) : null}
                         <a href={storeBase(store)} className="btn btn-secondary btn-sm">
                           Visit the store
+                          <span className="sr-only">: {store.name}</span>
                         </a>
                       </div>
                     </li>

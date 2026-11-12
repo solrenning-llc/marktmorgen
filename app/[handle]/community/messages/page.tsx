@@ -80,7 +80,10 @@ export default async function MessagesPage({ params, searchParams }: Params) {
                 <input type="hidden" name="handle" value={store.handle} />
                 <input type="hidden" name="action" value="accept" />
                 <input type="hidden" name="pair" value={c.pair} />
-                <button type="submit" className="cm-pill">{w.accept}</button>
+                <button type="submit" className="cm-pill">
+                  {w.accept}
+                  <span className="sr-only">: {nameOf(c.other)}</span>
+                </button>
               </form>
               <form action="/api/store/community/messages" method="post">
                 <input type="hidden" name="handle" value={store.handle} />
@@ -88,6 +91,7 @@ export default async function MessagesPage({ params, searchParams }: Params) {
                 <input type="hidden" name="pair" value={c.pair} />
                 <button type="submit" className="cm-quiet-link cm-mini cm-danger text-xs font-semibold">
                   {w.declineForGood}
+                  <span className="sr-only">: {nameOf(c.other)}</span>
                 </button>
               </form>
             </div>

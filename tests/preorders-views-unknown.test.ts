@@ -203,6 +203,18 @@ async function main(): Promise<void> {
     is(`(${label}) and the day still stands`, await dayOf(c), DAY);
   }
   is("control: stopping with a confirmed HDEL answers ok and lets the day go", [await answer(await stopDay(c)), await dayOf(c)], [[200, "ok"], null]);
+
+  // Claude 1 cloud on #3005 @5c01d5f81a (MEDIUM): the check before the write (soonOne) read unknown answered 503
+  // "preorders_unread", which the panel shows as "Saved.", while nothing was saved.
+  part("Unknown before the write: the coming-soon check answers in another shape, nothing saved, never \"Saved.\"");
+  {
+    const { pid: d } = await setUp("Course D", false);
+    const checked = await withBent("SISMEMBER", `nl:wl:${sid}:soon`, "maybe", () => switchDay(d));
+    is("the switch answers 503 \"soon_unchecked\", never \"preorders_unread\"", await answer(checked), [503, "soon_unchecked"]);
+    is("and no day was saved", await dayOf(d), null);
+    const panel = readFileSync("components/waitlist-panel.tsx", "utf8");
+    is("the panel says nothing was changed for it, never \"Saved.\"", /soon_unchecked: "(?!Saved)[^"]*Nothing was changed/.test(panel), true);
+  }
   {
     const panel = readFileSync("components/waitlist-panel.tsx", "utf8");
     is("the panel has its own words for an unconfirmed day, not \"Saved.\"", /day_unconfirmed: "(?!Saved)/.test(panel), true);

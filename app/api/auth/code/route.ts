@@ -4,6 +4,7 @@ import { DEVICE_COOKIE, SESSION_COOKIE, endSession, noteSignIn, openSession, ses
 import { TWO_STEP_COOKIE, enterLocked, finishSignIn, sendRescue, twoStepOn } from "@/lib/two-step";
 import { fromAnotherSite, limited } from "@/lib/request-guard";
 import { pendingRemoval } from "@/lib/passkeys";
+import { UnknownReplyError } from "@/lib/redis-reply";
 
 /**
  * The second step of logging in (lib/two-step.ts): the code from the app, or
@@ -59,7 +60,9 @@ export async function POST(request: NextRequest) {
       return response;
     } catch (error) {
       console.error("letting somebody in without two-step login failed", error);
-      return away("/signin/code?status=wrong");
+      // Not read (CX-123 rule 24): nothing was written and nobody was let in. Said in words of its own, since this
+      // person asked to come in without the app and typed no code (Claude 5 on #2896, LIGHT 3).
+      return away(`/signin/code?status=${error instanceof UnknownReplyError ? "reset-unknown" : "wrong"}`);
     }
   }
   let answer: Awaited<ReturnType<typeof finishSignIn>>;
@@ -67,26 +70,45 @@ export async function POST(request: NextRequest) {
     answer = await finishSignIn(held, code);
   } catch (error) {
     console.error("checking a two-step code failed", error);
-    return away("/signin/code?status=wrong");
+    // Not read (CX-123 rule 24): the code was not judged, so it is not called wrong.
+    return away(`/signin/code?status=${error instanceof UnknownReplyError ? "unknown" : "wrong"}`);
   }
   if (!answer.ok) return away(answer.reason === "expired" ? "/signin?status=expired" : `/signin/code?status=${answer.reason}`);
 
-  // Opened with its second step: the app's code or a recovery code (lib/auth.ts SecondStep).
-  const sessionId = await openSession(answer.email, answer.how);
-  // Turned off between the code's check and this session: turning it off closes what it opened
-  // (lib/auth.ts dropSecondStep), so this one is closed too, and the person logs in again.
-  if (!(await twoStepOn(answer.email))) {
-    await endSession(sessionId);
-    return away("/signin?status=expired");
-  }
-  const previous = request.cookies.get(SESSION_COOKIE)?.value;
-  if (previous && previous !== sessionId) await endSession(previous);
-  // A passkey removal whose days are over is applied at every login; none is called off by one (lib/passkeys.ts).
-  await pendingRemoval(answer.email).catch((error) => console.error("applying a passkey removal failed", error));
   const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
-  const response = away("/studio");
-  response.headers.append("Set-Cookie", sessionCookie(sessionId));
-  response.headers.append("Set-Cookie", `${TWO_STEP_COOKIE}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax${secure}`);
-  response.headers.append("Set-Cookie", await noteSignIn(answer.email, request.cookies.get(DEVICE_COOKIE)?.value, answer.byGoogle ? "google" : "link", request.headers.get("user-agent") ?? ""));
-  return response;
+  const noWait = `${TWO_STEP_COOKIE}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax${secure}`;
+  let sessionId = "";
+  try {
+    // Opened with its second step: the app's code or a recovery code (lib/auth.ts SecondStep).
+    sessionId = await openSession(answer.email, answer.how);
+    // Turned off between the code's check and this session: turning it off closes what it opened
+    // (lib/auth.ts dropSecondStep), so this one is closed too, and the person logs in again.
+    // Unreadable (CX-123 rule 24): not known still on, so the session is closed too, and the person is told so.
+    const stillOn = await twoStepOn(answer.email).catch((error: unknown) => {
+      console.error("reading two-step login after a right code failed", error);
+      return null;
+    });
+    if (stillOn !== true) {
+      await endSession(sessionId);
+      return away(stillOn === null ? "/signin?status=login-unknown" : "/signin?status=expired");
+    }
+    const previous = request.cookies.get(SESSION_COOKIE)?.value;
+    if (previous && previous !== sessionId) await endSession(previous);
+    // A passkey removal whose days are over is applied at every login; none is called off by one (lib/passkeys.ts).
+    await pendingRemoval(answer.email).catch((error) => console.error("applying a passkey removal failed", error));
+    const response = away("/studio");
+    response.headers.append("Set-Cookie", sessionCookie(sessionId));
+    response.headers.append("Set-Cookie", noWait);
+    response.headers.append("Set-Cookie", await noteSignIn(answer.email, request.cookies.get(DEVICE_COOKIE)?.value, answer.byGoogle ? "google" : "link", request.headers.get("user-agent") ?? ""));
+    return response;
+  } catch (error) {
+    console.error("logging in after a right code failed", error);
+    // The code and the wait are spent, but no session could be confirmed (CX-123 rule 24): nothing is handed out
+    // (one opened before the failure is closed), the spent wait's cookie goes, and the person logs in again with a
+    // fresh link and the app's next code (/signin login-unknown), never an error page.
+    if (sessionId) await endSession(sessionId).catch((end: unknown) => console.error("closing a login that could not be finished failed", end));
+    const response = away("/signin?status=login-unknown");
+    response.headers.append("Set-Cookie", noWait);
+    return response;
+  }
 }

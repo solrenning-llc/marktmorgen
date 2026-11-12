@@ -14,6 +14,23 @@
 import { type SecondStep, isMoving, sessionMark } from "@/lib/auth";
 import { holdsPasskeys, listPasskeys, pendingNow, pendingRemoval } from "@/lib/passkeys";
 import { twoStepOn } from "@/lib/two-step";
+import { UnknownReplyError } from "@/lib/redis-reply";
+
+/** The app's record when it cannot be read (CX-123 rule 24): counted as there, so nothing is added past it. */
+const appOnOrUnknown = (email: string) => twoStepOn(email).catch((error: unknown) => {
+  if (error instanceof UnknownReplyError) return true;
+  throw error;
+});
+
+/** A question about adding a way in whose answer could not be read: no (CX-123 rule 24). */
+async function refusedOnUnknown(work: () => Promise<boolean>): Promise<boolean> {
+  try {
+    return await work();
+  } catch (error) {
+    if (error instanceof UnknownReplyError) return false;
+    throw error;
+  }
+}
 
 /**
  * The second step a session really has now, which every check of one goes
@@ -57,15 +74,14 @@ export function mayKeepPasskey(step: SecondStep | null): boolean {
 export async function hasSecondStep(email: string, now = Date.now()): Promise<boolean> {
   if (await isMoving(email)) return true;
   await pendingRemoval(email, now);
-  const [app, keys] = await Promise.all([twoStepOn(email), listPasskeys(email)]);
+  const [app, keys] = await Promise.all([appOnOrUnknown(email), listPasskeys(email)]);
   return app || keys.length > 0;
 }
 
 /** Whether this session may add a passkey or turn on an app for this account. Never while the address is moving. */
 export async function mayAddSecondStep(email: string, session: string | undefined, now = Date.now()): Promise<boolean> {
   if (await isMoving(email)) return false;
-  if ((await liveSecondStep(email, session, now)) !== null) return true;
-  return !(await hasSecondStep(email, now));
+  return refusedOnUnknown(async () => (await liveSecondStep(email, session, now)) !== null || !(await hasSecondStep(email, now)));
 }
 
 /**
@@ -76,6 +92,10 @@ export async function mayAddSecondStep(email: string, session: string | undefine
  */
 export async function mayAddNow(email: string, session: string | undefined): Promise<boolean> {
   if (await isMoving(email)) return false;
+  return refusedOnUnknown(() => mayAddRead(email, session));
+}
+
+async function mayAddRead(email: string, session: string | undefined): Promise<boolean> {
   const [mark, app, keys, waiting] = await Promise.all([sessionMark(session, email), twoStepOn(email), listPasskeys(email), pendingNow(email)]);
   const id = mark?.startsWith("passkey:") ? mark.slice("passkey:".length) : "";
   const valid = mark === "app" || mark === "recovery" ? app : id !== "" && keys.some((p) => p.id === id) && !waiting?.ids.includes(id);
@@ -90,6 +110,6 @@ export async function mayAddNow(email: string, session: string | undefined): Pro
  * da5191515): its ways in would join the account's.
  */
 export async function holdsSecondStep(email: string): Promise<boolean> {
-  const [app, keys, moving] = await Promise.all([twoStepOn(email), holdsPasskeys(email), isMoving(email)]);
+  const [app, keys, moving] = await Promise.all([appOnOrUnknown(email), holdsPasskeys(email), isMoving(email)]);
   return app || keys || moving;
 }

@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { away, creatorFrom } from "@/lib/studio-route";
 import { isBillingConfigured, readStartedSubscription } from "@/lib/billing";
-import { setSubscription } from "@/lib/store";
+import { setSubscription, storeForEmail } from "@/lib/store";
 import { dropPause } from "@/lib/plan-pause";
 import { inClosingDay } from "@/lib/closing-holds";
 import { refuseSession } from "@/lib/closing-plan-guard";
@@ -34,6 +34,24 @@ export async function GET(request: NextRequest) {
     const started = await readStartedSubscription(store, sessionId);
     if (!started) return away(origin, studio("billing=unfinished"));
 
+    // A session keeps naming the subscription it made after that one has
+    // ended and another has taken its place (an old tab, the back button).
+    // So, as the daily job does (lib/billing-sync.ts, applyListed): the
+    // store's own subscription, or its first, is brought in line; another one
+    // is written only when it pays and the store has nothing paying written
+    // down. And the way back never ends a paying store: a subscription that
+    // could not be read comes back inactive too, and an end is the daily
+    // job's to write. Nothing is written then.
+    const own = !store.subscriptionId || store.subscriptionId === started.subscriptionId;
+    if (store.subscriptionActive && !started.active) {
+      return away(origin, studio(own ? "billing=unconfirmed" : "billing=already"));
+    }
+    if (!own && store.subscriptionActive) {
+      console.error(`store ${store.handle} has a second subscription in good standing: ${started.subscriptionId}`);
+      return away(origin, studio("billing=already"));
+    }
+    if (!own && !started.active) return away(origin, studio("billing=unconfirmed"));
+
     const saved = await setSubscription(ref, {
       customerId: started.customerId,
       subscriptionId: started.subscriptionId,
@@ -43,8 +61,20 @@ export async function GET(request: NextRequest) {
       trialEnds: started.trialEnds,
       shared: started.shared,
       period: started.period,
-    });
-    if (!saved) return away(origin, studio("billing=error"));
+    }, store);
+    if (!saved) {
+      // Held to the store the decision above was made on: another way back,
+      // or the daily job, may have written in between, and a stale write
+      // must never land over it. Then the creator is told what it holds now.
+      const now = await storeForEmail(ref);
+      const moved = !now || now.sid !== store.sid || now.statsId !== store.statsId || now.stripeCustomerId !== store.stripeCustomerId ||
+        now.subscriptionId !== store.subscriptionId || now.subscriptionActive !== store.subscriptionActive || now.tier !== store.tier || now.cycle !== store.cycle;
+      if (!moved) return away(origin, studio("billing=error"));
+      // The same paid checkout written by another tab meanwhile: this is the
+      // plan just paid for, so it is said to be on.
+      if (now?.subscriptionActive && now.subscriptionId === started.subscriptionId && started.active) return away(origin, studio("billing=on"));
+      return away(origin, studio(now?.subscriptionActive ? "billing=already" : "billing=unconfirmed"));
+    }
     // Started again by hand during a break: there is nothing left for the
     // break to start (lib/plan-pause.ts).
     if (started.active) await dropPause(saved).catch((error) => console.error("dropping a break failed", error));

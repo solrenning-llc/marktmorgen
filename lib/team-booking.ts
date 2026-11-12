@@ -25,6 +25,7 @@
  * block the host altogether when they cannot be read.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { repliesFor, stringList } from "@/lib/redis-reply";
 import type { Busy, CallSetup } from "@/lib/call-setup";
 import {
   type HostState,
@@ -124,9 +125,30 @@ export type TeamContext = {
   states: Map<string, HostState>;
   syncs: Map<string, HostSync>;
   /** Bookings of this event each host has had, and team calls each has coming up. */
-  assigned: Record<string, number>;
+  /** Each host's bookings of this event so far, by address; null when they could not be read (rule 24). */
+  assigned: Record<string, number> | null;
   upcoming: Record<string, number>;
 };
+
+/**
+ * Each host's bookings of a round-robin event so far, by host id, read exactly (rule 24; audit F2, 12 November 2026):
+ * one HGETALL whose reply is a list of field and count, each count a whole number from zero up. Anything else, or a
+ * failed read, is null: unknown, never every host at zero, which would hand the time to the host first by address
+ * however many bookings they had. No key (a store without calls) is no bookings.
+ */
+async function roundRobinCounts(key: string | null): Promise<Record<string, number> | null> {
+  if (!key) return {};
+  const flat = await redisPipeline([["HGETALL", key]]).then((replies) => stringList(repliesFor(replies, 1)?.[0]), () => null);
+  if (!flat || flat.length % 2 !== 0) return null;
+  const byId: Record<string, number> = {};
+  for (let i = 0; i < flat.length; i += 2) {
+    if (!/^(0|[1-9][0-9]*)$/.test(flat[i + 1]) || Object.hasOwn(byId, flat[i])) return null;
+    const count = Number(flat[i + 1]);
+    if (!Number.isSafeInteger(count)) return null;
+    byId[flat[i]] = count;
+  }
+  return byId;
+}
 
 /**
  * What every host of a team is taken for right now. `busy` is everything this
@@ -154,13 +176,10 @@ export async function teamContext(
       syncs.set(h.email, await hostSync(store, h.email, h.tz, { now, refresh: options.refresh, known: known.get(h.email) }));
     }),
   );
-  const counts = store.callsId ? await redisPipeline([["HGETALL", rrKey(store.callsId, product.id)]]).catch(() => [[]]) : [[]];
-  const flat = Array.isArray(counts[0]) ? (counts[0] as unknown[]).map(String) : [];
-  const byId: Record<string, number> = {};
-  for (let i = 0; i + 1 < flat.length; i += 2) byId[flat[i]] = Number(flat[i + 1]) || 0;
+  const byId = await roundRobinCounts(store.callsId ? rrKey(store.callsId, product.id) : null);
 
   const states = new Map<string, HostState>();
-  const assigned: Record<string, number> = {};
+  const assigned: Record<string, number> | null = byId ? {} : null;
   const upcoming: Record<string, number> = {};
   const exceptClaim = options.except?.claim ?? "";
   const exceptSession = options.except?.session ?? "";
@@ -187,7 +206,7 @@ export async function teamContext(
     const sync = syncs.get(host.email);
     if (sync) taken.push(...sync.busy);
     states.set(host.email, { email: host.email, busy: taken, booked: [...new Set(booked)], blocked: Boolean(sync?.blocked) });
-    assigned[host.email] = byId[id] ?? 0;
+    if (assigned && byId) assigned[host.email] = byId[id] ?? 0;
     upcoming[host.email] = booked.filter((s) => s > now).length;
   }
   return { team, ids, states, syncs, assigned, upcoming };
@@ -236,7 +255,9 @@ export async function holdTeam(input: {
   const free = freeHosts(setup, ctx.team, ctx.states, now, start);
   const ref = `${input.store.callsId}:${product.id}`;
   const until = now + input.holdMs + CLAIM_MARGIN_MS;
-  const tries = ctx.team.mode === "collective" ? (free.length === ctx.team.hosts.length ? [free] : []) : roundRobinOrder(free, ctx.assigned, ctx.upcoming).map((e) => [e]);
+  // Round robin with its counts unknown: no host can be said to be next, so nobody is held (rule 24).
+  if (ctx.team.mode !== "collective" && !ctx.assigned) return { ok: false, reason: "error" };
+  const tries = ctx.team.mode === "collective" ? (free.length === ctx.team.hosts.length ? [free] : []) : roundRobinOrder(free, ctx.assigned ?? {}, ctx.upcoming).map((e) => [e]);
   for (const emails of tries) {
     try {
       const taken = await claimHosts({ hosts: emails.map((e) => claimFor(setup, ctx, e, start)), start, end, claim, until, ref, now });

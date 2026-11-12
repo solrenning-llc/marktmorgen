@@ -67,7 +67,7 @@ const INLINE: { file: string; marker: string; reason: string }[] = [
   },
   {
     file: "components/workflow-tools.tsx",
-    marker: "onClick={erasePerson}",
+    marker: "ref={eraseButton}",
     reason: "\"Erase ... from every workflow\" is the middle of the sentence that says what is erased",
   },
   {

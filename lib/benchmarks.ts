@@ -15,6 +15,7 @@
  *   nl:bench:ranges       the ranges, a month
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { type Ranges, type Sample, parseSample, rangesFrom, sampleFrom } from "@/lib/benchmark-rules";
 import { isHouseStore } from "@/lib/house-store";
 import type { Store } from "@/lib/store";
@@ -48,10 +49,15 @@ export async function refreshRanges(now = Date.now()): Promise<KeptRanges | null
   if (!isRedisConfigured()) return null;
   const thisWeek = mondayOf(now);
   const lastWeek = mondayOf(now - 7 * 86_400_000);
-  const [last, current] = await redisPipeline([["HGETALL", weekKey(lastWeek)], ["HGETALL", weekKey(thisWeek)]]);
+  // Read exactly (CX-123 rule 24): a week answered in another shape is unknown, never a week with no samples, so
+  // nothing is worked out from it and the ranges kept are not written over.
+  const weeks = repliesFor(await redisPipeline([["HGETALL", weekKey(lastWeek)], ["HGETALL", weekKey(thisWeek)]]), 2);
+  if (!weeks || !weeks.every((flat) => Array.isArray(flat) && flat.length % 2 === 0 && flat.every((x) => typeof x === "string"))) {
+    throw new UnknownReplyError("the benchmark samples of the last two weeks");
+  }
   const latest = new Map<string, Sample>();
-  for (const flat of [last, current]) {
-    const list = Array.isArray(flat) ? (flat as unknown[]).map(String) : [];
+  for (const flat of weeks) {
+    const list = flat as string[];
     for (let i = 0; i + 1 < list.length; i += 2) {
       const sample = parseSample(list[i + 1]);
       // A later week's word wins, "no longer qualifies" included.

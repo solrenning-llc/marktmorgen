@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { FORMAT_INFO, defaultAnswers, outlineFor, questionsFor } from "@/lib/first-product";
+import { FORMAT_INFO, PRICE_WORDS, defaultAnswers, outlineFor, questionsFor, startingPoints } from "@/lib/first-product";
+import { formatMoney } from "@/lib/money";
+import { uploadReason, uploadSoldFile } from "@/lib/sold-file-upload";
 import { FIRST_PRODUCT_MAX_BREAKS, FIRST_PRODUCT_MAX_HEADING, FIRST_PRODUCT_MAX_PART, FIRST_PRODUCT_MAX_TEXT } from "@/lib/first-product-limits";
 
 /**
@@ -15,6 +17,12 @@ import { FIRST_PRODUCT_MAX_BREAKS, FIRST_PRODUCT_MAX_HEADING, FIRST_PRODUCT_MAX_
  *
  * What they write is kept on this device only (localStorage, read and written inside try/catch), so a reload or a
  * closed tab loses nothing; it is sent only when they ask for the PDF, and kept nowhere on our side.
+ *
+ * Once the PDF is made, it can become a product draft (unit 3): the creator types the price (empty to start; in US
+ * dollars three starting points to tap, none marked, lib/first-product.ts); a hidden product is made
+ * (app/api/store/first-product/draft), the PDF goes up through the same upload the product editor uses
+ * (lib/sold-file-upload.ts) and is attached to it. Nothing is published: the creator reviews it and publishes it in
+ * the studio.
  */
 const FORMAT = "guide" as const;
 /** A heading left as it was (undefined) is the outline's own; an empty one stays empty and is the outline's in the PDF. */
@@ -33,6 +41,22 @@ const MESSAGES: Record<string, string> = {
   forbidden: "Your role in this store cannot change products, so it cannot make this file.",
 };
 const FALLBACK = "The PDF could not be made just now. Your writing is kept on this device; try again in a moment.";
+
+/** Why a product draft could not be made or its file could not go up, in words. */
+const DRAFT_MESSAGES: Record<string, string> = {
+  title: "Give it a title first.",
+  price: "Type a price the store's currency can take, like 19 or 19.50, or 0 for a free product.",
+  too_many: "Your store lists as many products as it can. Remove one, then try again.",
+  wrong_type: "This file type cannot be sold here.",
+  too_big: "The PDF is larger than a product file may be.",
+  storage_full: "Your store's file storage is full. The draft is made without the file; free some room, then add the file in Products.",
+  slow_down: "Too many uploads at once. Wait a minute, then add the file in Products; the draft is made.",
+  upload_stopped: "The upload stopped. The draft is made without the file; add it in Products.",
+  files_unavailable: "Files cannot be uploaded just now. The draft is made without the file; add it in Products later.",
+  signed_out: "You are signed out. Sign in again in another tab.",
+  forbidden: "Your role in this store cannot change products.",
+};
+const DRAFT_FALLBACK = "The draft could not be made just now. Try again in a moment; your writing is kept on this device.";
 
 const fresh = (): Draft => ({ answers: defaultAnswers(FORMAT), title: "", know: "", parts: [] });
 const letters = (text: string) => Array.from(text).length;
@@ -60,13 +84,18 @@ function readKept(key: string): Draft | null {
   }
 }
 
-export function FirstProductMaker({ storeKey, productsHref }: { storeKey: string; productsHref: string }) {
+export function FirstProductMaker({ storeKey, productsHref, currency, folder }: { storeKey: string; productsHref: string; currency: string; folder: string }) {
   const key = `mm:first-product:${storeKey}`;
   const [draft, setDraft] = useState<Draft>(fresh);
   const [loaded, setLoaded] = useState(false);
   const [state, setState] = useState<{ kind: "idle" } | { kind: "working" } | { kind: "error"; message: string } | { kind: "done"; file: string }>({ kind: "idle" });
   const [confirmReset, setConfirmReset] = useState(false);
   const statusRef = useRef<HTMLParagraphElement>(null);
+  // The PDF made in this visit, for the draft: kept in memory only, never stored.
+  const [made, setMade] = useState<{ blob: Blob; file: string } | null>(null);
+  const [price, setPrice] = useState("");
+  const [draftState, setDraftState] = useState<{ kind: "idle" } | { kind: "working"; percent: number | null } | { kind: "error"; message: string } | { kind: "done"; title: string; withFile: boolean; message?: string }>({ kind: "idle" });
+  const draftRef = useRef<HTMLParagraphElement>(null);
 
   // What was written here before comes back once the page is in the browser (nothing on the server to wait for).
   useEffect(() => {
@@ -127,6 +156,8 @@ export function FirstProductMaker({ storeKey, productsHref }: { storeKey: string
         link.click();
         link.remove();
         setTimeout(() => URL.revokeObjectURL(url), 60_000);
+        setMade({ blob, file });
+        setDraftState({ kind: "idle" });
         setState({ kind: "done", file });
         return;
       }
@@ -137,6 +168,47 @@ export function FirstProductMaker({ storeKey, productsHref }: { storeKey: string
       setState({ kind: "error", message: FALLBACK });
     }
   }
+
+  async function makeDraft() {
+    const pdf = made;
+    if (!pdf || draftState.kind === "working") return;
+    setDraftState({ kind: "working", percent: null });
+    let product: { id: string; title: string } | null = null;
+    try {
+      const response = await fetch("/api/store/first-product/draft", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: draft.title, price }),
+      });
+      const data = (await response.json().catch(() => null)) as { ok?: boolean; error?: string; product?: { id?: string; title?: string } } | null;
+      if (!data?.ok || typeof data.product?.id !== "string") {
+        setDraftState({ kind: "error", message: DRAFT_MESSAGES[data?.error ?? ""] ?? DRAFT_FALLBACK });
+        return;
+      }
+      product = { id: data.product.id, title: data.product.title ?? draft.title };
+    } catch {
+      setDraftState({ kind: "error", message: DRAFT_FALLBACK });
+      return;
+    }
+    // The draft exists from here: a file that cannot go up leaves it, without the file, and says so.
+    try {
+      const file = new File([pdf.blob], pdf.file, { type: "application/pdf" });
+      const pathname = await uploadSoldFile(file, { folder, ownerId: product.id }, (percent) => setDraftState({ kind: "working", percent: Math.round(percent) }));
+      const attached = await fetch("/api/store/file/attach", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: product.id, pathname, name: pdf.file }),
+      });
+      const data = (await attached.json().catch(() => null)) as { ok?: boolean } | null;
+      setDraftState(data?.ok ? { kind: "done", title: product.title, withFile: true } : { kind: "done", title: product.title, withFile: false, message: DRAFT_MESSAGES.upload_stopped });
+    } catch (thrown) {
+      setDraftState({ kind: "done", title: product.title, withFile: false, message: DRAFT_MESSAGES[uploadReason(thrown)] ?? DRAFT_MESSAGES.upload_stopped });
+    }
+  }
+
+  useEffect(() => {
+    if (draftState.kind === "done" || draftState.kind === "error") draftRef.current?.focus();
+  }, [draftState.kind]);
 
   // The result is said where focus can find it, once, without moving the page (WCAG 3.2.5).
   useEffect(() => {
@@ -234,6 +306,45 @@ export function FirstProductMaker({ storeKey, productsHref }: { storeKey: string
         ) : null}
         <p className="mt-4 text-sm text-ink-soft">What you write is kept on this device only, until you clear it. It is sent to us only to make the PDF, and not kept.</p>
       </section>
+
+      {made ? (
+        <section aria-labelledby="fp-sell">
+          <h2 id="fp-sell" className="t-h3">4. Make it a product draft</h2>
+          <p className="mt-3 text-ink-soft">A draft is hidden from buyers. The PDF you just downloaded goes in as the file they get; you review the product and publish it yourself, in your studio.</p>
+          <label className="mt-4 block max-w-xs">
+            <span className="field-label">{`Price, in ${currency.toUpperCase()}`}</span>
+            <input className="field mt-2" inputMode="decimal" maxLength={12} value={price} onChange={(e) => { setPrice(e.target.value); setDraftState({ kind: "idle" }); }} aria-describedby="fp-price-hint" />
+            <span id="fp-price-hint" className="field-hint mt-1 block">{currency.toLowerCase() === "usd" ? `${PRICE_WORDS.range} Type 0 for a free product.` : "You choose. Type 0 for a free product."}</span>
+          </label>
+          {startingPoints(currency).length ? (
+            <fieldset className="mt-3">
+              <legend className="field-hint">{PRICE_WORDS.points}</legend>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {startingPoints(currency).map((cents) => (
+                  <button key={cents} type="button" className="btn btn-secondary btn-sm min-h-11" aria-pressed={price === String(cents / 100)} onClick={() => { setPrice(String(cents / 100)); setDraftState({ kind: "idle" }); }}>
+                    {formatMoney(cents, currency)}
+                  </button>
+                ))}
+              </div>
+            </fieldset>
+          ) : null}
+          <p className="mt-4">
+            <button type="button" className="btn btn-primary" onClick={makeDraft} disabled={draftState.kind === "working" || draftState.kind === "done" || !price.trim()} aria-busy={draftState.kind === "working"}>
+              {draftState.kind === "working" ? (draftState.percent === null ? "Making the draft…" : `Uploading the PDF… ${draftState.percent}%`) : "Make the product draft"}
+            </button>
+          </p>
+          {draftState.kind === "error" ? (
+            <p ref={draftRef} tabIndex={-1} role="alert" className="notice notice-error mt-4">{draftState.message}</p>
+          ) : draftState.kind === "done" ? (
+            <p ref={draftRef} tabIndex={-1} role="status" className="notice mt-4">
+              {draftState.withFile
+                ? `The draft “${draftState.title}” is in your products, hidden, with the PDF as its file. Review it, add a picture and a description, and publish it when you choose. `
+                : `The draft “${draftState.title}” is in your products, hidden, without the file. ${draftState.message ?? ""} `}
+              <a href={productsHref} className="underline">Go to your products</a>
+            </p>
+          ) : null}
+        </section>
+      ) : null}
     </div>
   );
 }

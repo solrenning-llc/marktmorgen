@@ -1842,6 +1842,7 @@
     "app/api/store/file/attach/route.ts",
     "app/api/store/file/download/route.ts",
     "app/api/store/file/route.ts",
+    "app/api/store/first-product/draft/route.ts",
     "app/api/store/first-product/pdf/route.ts",
     "app/api/store/form-opportunity/route.ts",
     "app/api/store/form/route.ts",

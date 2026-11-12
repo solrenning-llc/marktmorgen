@@ -22,7 +22,7 @@ import { FORMAT_INFO, outlineFor, questionsFor } from "@/lib/first-product";
 import { FIRST_PRODUCT_MAX_HEADING, FIRST_PRODUCT_MAX_PART } from "@/lib/first-product-limits";
 import { done, is, part } from "./check";
 
-const html = renderToStaticMarkup(createElement(FirstProductMaker, { storeKey: "abc", productsHref: "/studio#products" }));
+const html = renderToStaticMarkup(createElement(FirstProductMaker, { storeKey: "abc", productsHref: "/studio#products", currency: "usd", folder: "f0" }));
 const count = (re: RegExp) => (html.match(re) ?? []).length;
 
 part("Three steps, in order");

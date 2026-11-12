@@ -19,7 +19,7 @@ const bundle = await build({
     import React from 'react';
     import {createRoot} from 'react-dom/client';
     import {FirstProductMaker} from '@/components/first-product-maker';
-    createRoot(document.getElementById('root')).render(<FirstProductMaker storeKey="shop1" productsHref="/studio#products"/>);
+    createRoot(document.getElementById('root')).render(<FirstProductMaker storeKey="shop1" productsHref="/studio#products" currency="usd" folder="f0"/>);
   `, resolveDir: root, loader: "tsx" },
   bundle: true, write: false, platform: "browser", format: "iife", jsx: "automatic",
   alias: { "@": root }, define: { "process.env.NODE_ENV": '"production"' }, logLevel: "error",
@@ -50,6 +50,25 @@ try {
     sent.push(JSON.parse(route.request().postData() ?? "{}"));
     if (answer === "pdf") return route.fulfill({ status: 200, headers: { "content-type": "application/pdf", "content-disposition": 'attachment; filename="Bread-at-home.pdf"' }, body: "%PDF-1.7\n%%EOF" });
     return route.fulfill({ status: 400, contentType: "application/json", body: JSON.stringify({ ok: false, error: answer }) });
+  });
+  // The product draft (unit 3): the draft route, the file door (lib/vault-upload.ts) and the attach route, answered here.
+  const calls = [];
+  await page.route("https://studio.test/api/store/first-product/draft", async (route) => {
+    calls.push(["draft", JSON.parse(route.request().postData() ?? "{}")]);
+    return route.fulfill({ contentType: "application/json", body: JSON.stringify({ ok: true, product: { id: "p1abcd", title: "Bread at home", hidden: true } }) });
+  });
+  await page.route("https://studio.test/api/store/vault", async (route) => {
+    const body = JSON.parse(route.request().postData() ?? "{}");
+    calls.push(["vault", body.action, body.ownerId ?? null, body.type ?? null]);
+    if (body.action === "open") return route.fulfill({ contentType: "application/json", body: JSON.stringify({ ok: true, upload: { pathname: "v/f0/p1abcd/Bread-at-home.pdf", pieces: 1, pieceBytes: 8 * 1024 * 1024, multipart: true } }) });
+    if (body.action === "sign") return route.fulfill({ contentType: "application/json", body: JSON.stringify({ ok: true, pieces: [{ number: 1, url: "https://studio.test/piece/1", type: "application/pdf" }] }) });
+    if (body.action === "done") return route.fulfill({ contentType: "application/json", body: JSON.stringify({ ok: true, file: { pathname: "v/f0/p1abcd/Bread-at-home.pdf", bytes: 13, contentType: "application/pdf" } }) });
+    return route.fulfill({ contentType: "application/json", body: JSON.stringify({ ok: true }) });
+  });
+  await page.route("https://studio.test/piece/1", (route) => route.fulfill({ status: 200, headers: { etag: '"e1"', "access-control-expose-headers": "ETag" }, body: "" }));
+  await page.route("https://studio.test/api/store/file/attach", async (route) => {
+    calls.push(["attach", JSON.parse(route.request().postData() ?? "{}")]);
+    return route.fulfill({ contentType: "application/json", body: JSON.stringify({ ok: true }) });
   });
   const open = async () => {
     await page.goto("https://studio.test/");
@@ -82,6 +101,19 @@ try {
   const body = sent.at(-1);
   is("it sent the format, the answers, the title and exactly the outline's parts", [body.format, body.answers, body.title, body.parts.length, body.parts[1]], ["guide", { reader: "new", length: "short", tone: "friendly", ending: "summary" }, "Bread at home", 5, { heading: "", body: "Mix flour and water." }]);
   is("the notes are never sent", Object.hasOwn(body, "know"), false);
+
+  // Make it a product draft: the price is empty and nothing is marked; a starting point fills it.
+  is("after the download, the draft step appears, its price empty and its button off until a price is typed", [await page.getByRole("heading", { name: "4. Make it a product draft" }).isVisible(), await page.getByLabel("Price, in USD").inputValue(), await page.getByRole("button", { name: "Make the product draft" }).isDisabled()], [true, "", true]);
+  is("no starting point is marked", await page.getByRole("button", { name: /^\$\d+(\.\d\d)?$/ }).evaluateAll((buttons) => buttons.map((b) => b.getAttribute("aria-pressed"))), ["false", "false", "false"]);
+  await page.getByRole("button", { name: "$19", exact: true }).click();
+  is("a starting point fills the price and says it is chosen", [await page.getByLabel("Price, in USD").inputValue(), await page.getByRole("button", { name: "$19", exact: true }).getAttribute("aria-pressed")], ["19", "true"]);
+  await page.getByRole("button", { name: "Make the product draft" }).click();
+  const made = page.getByRole("status").filter({ hasText: "The draft" });
+  await made.waitFor();
+  is("the draft is made hidden, the PDF goes up as its file and is attached", calls.map((c) => c[0] === "vault" ? `vault:${c[1]}` : c[0]), ["draft", "vault:open", "vault:sign", "vault:done", "attach"]);
+  is("with the title and price the creator chose, the file for that product, as a PDF", [calls[0][1], calls[1][2], calls[1][3], calls.at(-1)[1]], [{ title: "Bread at home", price: "19" }, "p1abcd", "application/pdf", { id: "p1abcd", pathname: "v/f0/p1abcd/Bread-at-home.pdf", name: "Bread-at-home.pdf" }]);
+  is("it says the draft is hidden, with the file, to review and publish, with focus on it", [(await made.textContent())?.startsWith("The draft “Bread at home” is in your products, hidden, with the PDF as its file."), await page.evaluate(() => document.activeElement?.getAttribute("role"))], [true, "status"]);
+  is("and a second press makes no second draft", await page.getByRole("button", { name: "Make the product draft" }).isDisabled(), true);
 
   // Kept on this device: a reload brings it back.
   await open();

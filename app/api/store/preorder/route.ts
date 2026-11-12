@@ -19,7 +19,9 @@ import { UnknownReplyError } from "@/lib/redis-reply";
  * The change saved, its pre-orders read in an unknown shape answer 503
  * "preorders_unread": the counts are not invented as 0 (sweep APP3). The
  * change itself not confirmed (its write answered in another shape) answers
- * 502 "day_unconfirmed", never "Saved." (independent review of #3005).
+ * 502 "day_unconfirmed", never "Saved." (independent review of #3005). A read
+ * before the write in an unknown shape (whether it is coming soon) answers 503
+ * "soon_unchecked": nothing was changed (Claude 1 cloud on #3005).
  */
 export async function POST(request: NextRequest) {
   const guarded = await guardStoreWrite(request, "products", 2_000);
@@ -30,9 +32,12 @@ export async function POST(request: NextRequest) {
   if (!product) return Response.json({ ok: false, error: "unknown" }, { status: 404 });
   if (!store.statsId) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
 
+  // Set once the change is written: an unknown read before it changed nothing, one after it is the views' read.
+  let saved = false;
   try {
     if (body.day === null) {
       await setExpectedDay(store, product.id, null);
+      saved = true;
     } else {
       const problem = preorderProblem(product);
       if (problem) return Response.json({ ok: false, error: problem }, { status: 400 });
@@ -41,6 +46,7 @@ export async function POST(request: NextRequest) {
       if (!day) return Response.json({ ok: false, error: "day" }, { status: 400 });
       if (body.agree !== true) return Response.json({ ok: false, error: "agree" }, { status: 400 });
       await setExpectedDay(store, product.id, day);
+      saved = true;
     }
     const views = await preorderViews(store, [product.id]);
     return Response.json({ ok: true, view: views[product.id] ?? { day: null, waiting: 0, given: 0, refunded: 0 } });
@@ -48,6 +54,10 @@ export async function POST(request: NextRequest) {
     if (error instanceof PreorderDayUnconfirmed) {
       console.error("a pre-order change could not be confirmed saved", error);
       return Response.json({ ok: false, error: "day_unconfirmed" }, { status: 502 });
+    }
+    if (error instanceof UnknownReplyError && !saved) {
+      console.error("a product's pre-order state could not be read before a change; nothing was changed", error);
+      return Response.json({ ok: false, error: "soon_unchecked" }, { status: 503 });
     }
     if (error instanceof UnknownReplyError) {
       console.error("a pre-order change was saved, but its pre-orders could not be read", error);

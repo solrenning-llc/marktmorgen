@@ -19,6 +19,7 @@ const MESSAGES: Record<string, string> = {
   day: `Choose a day from tomorrow to ${MAX_PREORDER_DAYS} days ahead.`,
   agree: "Check the box that says you refund every pre-order in full if it does not come out: buyers are told so.",
   preorders_unread: "Saved. Its pre-orders could not be read just now, so they are not shown. Reload the page in a minute to see them.",
+  soon_unchecked: "We could not check this product just now. Nothing was changed; try again in a moment.",
   day_unconfirmed: "The change could not be confirmed and may or may not have been saved. Reload the page in a minute to see the day it has now, then change it again if it is not what you chose.",
 };
 

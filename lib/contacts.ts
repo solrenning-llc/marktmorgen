@@ -38,7 +38,7 @@ import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { MAX_CONTACT_NAME, MAX_IMPORT, MAX_LEADS, readTags } from "@/lib/contact-rules";
-import { liftCommand, suppressedAmongCommand, suppressedCommand, wasSuppressed } from "@/lib/suppression";
+import { liftCommand, suppressedAmongCommand, suppressedCommand, wasSuppressed, wholeErasedReply } from "@/lib/suppression";
 import { joinedCommands } from "@/lib/joined-stores";
 import { DataRoomError, type DataStore, giveData, needData } from "@/lib/store-data";
 import { type DataOwner, orderWrite } from "@/lib/order-data";
@@ -768,12 +768,23 @@ export async function tokensFor(
   for (let round = 0; round < 3 && pending.length; round += 1) {
     // Read only in its exact shape (CX-123 rule 24): an unknown answer is unknown, never "everyone left the list",
     // so a send counts nobody as gone on it (lib/mail.ts sendTo stops for a retry).
-    const found = fieldsOf((await redisPipeline([["HMGET", key, ...pending]]))[0], pending.length, "the contacts for unsubscribe links");
+    // With the store's fingerprints of deleted people, in the same round trip: an erasure writes the print first, so
+    // somebody whose row was not deleted yet (a failed or unfinished erasure) is never handed a link, nor emailed.
+    const replies = await redisPipeline([["HMGET", key, ...pending], suppressedAmongCommand(listId, pending)]);
+    if (!Array.isArray(replies) || replies.length !== 2) throw new UnknownReplyError("the contacts for unsubscribe links");
+    const found = fieldsOf(replies[0], pending.length, "the contacts for unsubscribe links");
+    let erased: (string | number | null)[];
+    try {
+      erased = wholeErasedReply(replies[1], pending.length);
+    } catch {
+      // Not read whole: unknown (CX-123 rule 24), never "nobody here was deleted".
+      throw new UnknownReplyError("the store's deleted people, for unsubscribe links");
+    }
     const writes: { email: string; value: string; was: string; token: string }[] = [];
     pending.forEach((email, i) => {
       const raw = found[i];
       const contact = parseContact(raw);
-      if (!contact || !mailable(contact) || typeof raw !== "string") return;
+      if (!contact || !mailable(contact) || typeof raw !== "string" || erased[i] !== null) return;
       if (contact.clicks) counting?.add(email);
       if (contact.t) {
         out.set(email, contact.t);

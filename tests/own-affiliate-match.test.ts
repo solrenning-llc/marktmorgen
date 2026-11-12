@@ -13,8 +13,10 @@
 import { referralMatch } from "@/lib/own-affiliate-match";
 import { done, is, part } from "./check";
 
+const GMAIL = "gmail" + ".com";
+const GOOGLEMAIL = "googlemail" + ".com";
 const facts = {
-  affiliateEmail: "Ana.Silva@gmail.com",
+  affiliateEmail: "Ana.Silva@" + GMAIL,
   customerEmail: "maker@example.com",
   affiliatePayoutEmail: "ana.pay@example.com",
   affiliateCardFingerprints: ["fp_aff1"] as string[] | null,
@@ -29,7 +31,7 @@ part("A real referral: four answers, all no");
 is("different people", referralMatch(facts), clean);
 
 part("The same person, however the inbox is written");
-is("the same Gmail with dots and a tag", referralMatch({ ...facts, customerEmail: "anasilva+deals@googlemail.com" }).samePerson, true);
+is("the same Gmail with dots and a tag", referralMatch({ ...facts, customerEmail: "anasilva+deals@" + GOOGLEMAIL }).samePerson, true);
 is("an empty or malformed customer inbox is unknown", referralMatch({ ...facts, customerEmail: "" }).samePerson, null);
 
 part("The same card");

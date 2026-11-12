@@ -383,7 +383,6 @@ async function giveBack(store: Store, id: string, stale: string): Promise<void> 
   if (swapped !== 0 && swapped !== 1) throw new UnknownReplyError("giving back a conversation whose person left");
 }
 
-/** One email to whoever has the conversation (the owner when nobody does), at most every half hour for one conversation. */
 /**
  * Tells the store's installed studios that asked for "message" (lib/phone-alerts.ts, 451 [AP3] complement): once
  * while a conversation is unread, so a buyer writing five times before anyone reads is one notification, and again
@@ -403,6 +402,7 @@ async function tellPhones(store: Store, conversation: Kept, unreadBefore: number
   ).catch((error) => console.error("telling a store's phones of a message failed", error));
 }
 
+/** One email to whoever has the conversation (the owner when nobody does), at most every half hour for one conversation. */
 async function tellTeam(store: Store, conversation: Kept, text: string): Promise<void> {
   if (!isSenderConfigured() || !store.statsId) return;
   if (!(await withinLimit("inbox-tell", `${store.statsId}:${conversation.id}`, 1, 1_800))) return;

@@ -101,11 +101,15 @@ const load = cache(async (raw: string, id: string): Promise<{ store: Store | nul
   return { store, product: product && !product.hidden ? product : null, unread: false };
 });
 
+/** A sentence's first sentence, without its full stop: what a page title holds. */
+const firstSentence = (text: string) => text.split(/(?<=[.!?])\s/)[0].replace(/[.!?]$/, "");
+
 export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const { handle, product: id } = await params;
   const { store, product, unread } = await load(handle, id);
   return {
-    title: store && product ? `${product.title} — ${store.name}` : unread ? "Not available just now" : "Not on sale",
+    // With a store, in its words, as the frame's sentence is (3.1.2); without one, in English, as the page.
+    title: store && product ? `${product.title} — ${store.name}` : store ? `${firstSentence(unread ? speech(store).w.cardUnread : speech(store).w.noLongerOnSale)} — ${store.name}` : unread ? "Not available just now" : "Not on sale",
     robots: { index: false, follow: false },
   };
 }
@@ -181,6 +185,8 @@ export default async function EmbedCard({ params, searchParams }: Params) {
             "This product is no longer on sale."
           )}
         </p>
+        {/* Escape still closes the overlay (lib/embed-open.ts, closeTo). */}
+        {open?.closeTo ? <EmbedMessenger to={open.closeTo} closeOnly /> : null}
       </div>
     );
   }
@@ -478,7 +484,7 @@ export default async function EmbedCard({ params, searchParams }: Params) {
       <main id="content" className="h-full">
         {card}
       </main>
-      {messaging ? <EmbedMessenger to={messaging} height={height} /> : null}
+      {messaging ? <EmbedMessenger to={messaging} height={height} /> : open?.closeTo ? <EmbedMessenger to={open.closeTo} closeOnly /> : null}
     </div>
   );
 }

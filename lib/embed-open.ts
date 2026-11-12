@@ -36,6 +36,12 @@ export type ScriptOpen = {
   tags: Record<string, string>;
   /** Whether the card may show its buy button and the form its box; false shows the plain link. */
   live: boolean;
+  /**
+   * The one origin the frame may tell that Escape was pressed, and nothing else (components/embed-messenger.tsx,
+   * closeOnly): the listed site, else the page that framed it (closeTarget). The script puts the focus in the frame,
+   * so without it Escape would not close the overlay wherever the card shows the plain link (WCAG 2.1.1, 2.1.2).
+   */
+  closeTo: string | null;
   /** Why not, for the page to say nothing more than it must. */
   reason: "" | "site" | "resting" | "limited";
 };
@@ -48,6 +54,25 @@ function fromThisSite(referer: string | null, host: string | null): boolean {
     return url.origin === new URL(SITE_URL).origin || (Boolean(host) && url.host === host);
   } catch {
     return false;
+  }
+}
+
+/**
+ * The one origin a frame opened by the script may tell of Escape (ScriptOpen.closeTo): in overlay mode only, the listed
+ * site, else the https origin of the page that framed it, which the script sends as the Referer (referrerPolicy
+ * "origin"). Never a page of this site (the studio's preview, or the frame moving on inside itself), never a Referer
+ * that does not read. Only "close" is ever said to it, so a page that was not listed learns nothing but that Escape
+ * was pressed in a frame it opened. Pure.
+ */
+export function closeTarget(mode: ScriptMode, site: string | null, referer: string | null, host: string | null): string | null {
+  if (mode !== "overlay") return null;
+  if (site) return site;
+  if (!referer || fromThisSite(referer, host)) return null;
+  try {
+    const url = new URL(referer);
+    return url.protocol === "https:" ? url.origin : null;
+  } catch {
+    return null;
   }
 }
 
@@ -66,6 +91,7 @@ export async function readScriptOpen(store: Store, mode: ScriptMode, query: Reco
     back: listedReturn(store.embedSites, query.return),
     via: scriptVia(query.via),
     tags: scriptTags(query),
+    closeTo: closeTarget(mode, site, referer, asked.get("host")),
   };
   // The visit itself is not counted here: an open is a request any program can send, and a visit is counted only
   // when the host's check says a person's browser sent it (app/api/store/hit). The page sends that count itself

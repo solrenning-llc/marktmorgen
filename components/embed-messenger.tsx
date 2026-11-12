@@ -17,8 +17,12 @@ import type { FrameMessage } from "@/lib/embed-sites";
  *   checkout  when the buy button's form is sent (it opens Stripe in a new tab)
  *   optin     on the sign-up form's answer page, with what happened
  *   close     when Escape is pressed inside the frame
+ *
+ * With closeOnly (lib/embed-open.ts, ScriptOpen.closeTo: a frame that shows the plain link, on a site the creator did
+ * not list, a resting store or past the open limit), only "close", on Escape: the script put the focus in the frame,
+ * so without it Escape would leave the overlay open (WCAG 2.1.1, 2.1.2). Nothing else is said there.
  */
-export function EmbedMessenger({ to, height, status }: { to: string; height?: number; status?: string }) {
+export function EmbedMessenger({ to, height, status, closeOnly }: { to: string; height?: number; status?: string; closeOnly?: boolean }) {
   useEffect(() => {
     if (window.parent === window) return;
     const say = (type: FrameMessage, more: Record<string, unknown> = {}) => {
@@ -28,11 +32,13 @@ export function EmbedMessenger({ to, height, status }: { to: string; height?: nu
         // A parent that is gone hears nothing; the frame still works.
       }
     };
-    say("ready", height ? { height } : {});
-    if (status) say("optin", { status });
+    if (!closeOnly) {
+      say("ready", height ? { height } : {});
+      if (status) say("optin", { status });
+    }
     const sent = (event: Event) => {
       const form = event.target;
-      if (form instanceof HTMLFormElement && form.hasAttribute("data-checkout")) say("checkout");
+      if (!closeOnly && form instanceof HTMLFormElement && form.hasAttribute("data-checkout")) say("checkout");
     };
     const key = (event: KeyboardEvent) => {
       if (event.key === "Escape") say("close");
@@ -43,6 +49,6 @@ export function EmbedMessenger({ to, height, status }: { to: string; height?: nu
       document.removeEventListener("submit", sent);
       document.removeEventListener("keydown", key);
     };
-  }, [to, height, status]);
+  }, [to, height, status, closeOnly]);
   return null;
 }

@@ -127,7 +127,7 @@ export default async function EmbedJoin({ params, searchParams }: Params) {
         <p className="st-muted mt-3">{notice.body}</p>
         {status === "sent" ? <p className="st-muted mt-3 text-sm">{w.sentNote}</p> : null}
         {back}
-        {talking ? <EmbedMessenger to={talking} height={FRAME_HEIGHT} status={status} /> : null}
+        {talking ? <EmbedMessenger to={talking} height={FRAME_HEIGHT} status={status} /> : open.closeTo && framed ? <EmbedMessenger to={open.closeTo} closeOnly /> : null}
       </>,
       said.lang.locale,
       look,
@@ -143,6 +143,8 @@ export default async function EmbedJoin({ params, searchParams }: Params) {
         <a href={storeLink} {...aside} className="btn st-btn mt-5">
           {said.w.seeStore(store.name)}
         </a>
+        {/* Escape still closes the overlay where only the plain link shows (lib/embed-open.ts, closeTo). */}
+        {talking ? <EmbedMessenger to={talking} height={FRAME_HEIGHT} /> : open.closeTo && framed ? <EmbedMessenger to={open.closeTo} closeOnly /> : null}
       </>,
       said.lang.locale,
       look,
@@ -181,7 +183,7 @@ export default async function EmbedJoin({ params, searchParams }: Params) {
         {canWrite(store) ? <ClicksBox id="embed-join-clicks" label={said.w.alsoClicks(store.mail?.fromName || store.name)} className="mt-3" always /> : null}
       </form>
       {back}
-      {talking ? <EmbedMessenger to={talking} height={FRAME_HEIGHT} /> : null}
+      {talking ? <EmbedMessenger to={talking} height={FRAME_HEIGHT} /> : open.closeTo && framed ? <EmbedMessenger to={open.closeTo} closeOnly /> : null}
     </>,
     said.lang.locale,
     look,

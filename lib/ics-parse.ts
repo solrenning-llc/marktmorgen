@@ -212,9 +212,17 @@ function offsetAt(zone: Zone, ms: number): number {
   for (const rule of zone.rules) {
     const starts: number[] = [];
     if (rule.rule && rule.rule.FREQ === "YEARLY") {
+      // A rule that has ended (UNTIL, in UTC in a time zone; a date or a local
+      // time read with the offset it changes from) no longer moves the clock:
+      // an Outlook zone carries the US rules before 2007 next to today's.
+      const end = rule.rule.UNTIL ? readStamp(rule.rule.UNTIL, {}) : null;
+      const until = !end ? Infinity
+        : end.date ? Date.UTC(end.y, end.mo - 1, end.d + 1) - 1
+        : Date.UTC(end.y, end.mo - 1, end.d, 0, end.minute, end.second) - (end.utc ? 0 : rule.from * 60000);
       for (let y = Math.max(rule.y, year - 1); y <= year + 1; y += 1) {
         const date = yearlyDate(rule.rule, y, rule.mo, rule.d);
-        if (date) starts.push(Date.UTC(y, date.mo - 1, date.d, 0, rule.minute) - rule.from * 60000);
+        const at = date ? Date.UTC(y, date.mo - 1, date.d, 0, rule.minute) - rule.from * 60000 : NaN;
+        if (date && at <= until) starts.push(at);
       }
     } else {
       starts.push(Date.UTC(rule.y, rule.mo - 1, rule.d, 0, rule.minute) - rule.from * 60000);

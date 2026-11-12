@@ -6,7 +6,7 @@ import { notFound } from "next/navigation";
 import { BlogCard } from "@/components/blog-browser";
 import { RevealOnScroll } from "@/components/home-parts";
 import { SiteFooter } from "@/components/site-footer";
-import { SiteNav } from "@/components/site-nav";
+import { SiteNav } from "@/components/site-nav-server";
 import { PostCover } from "@/components/post-cover";
 import { ShareRow } from "@/components/share-row";
 import { ArticleData } from "@/components/structured-data";

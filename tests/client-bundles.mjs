@@ -31,7 +31,8 @@ export async function checkClientBundles(root) {
  return {total:entries.length,failed:failures.length,failures};
 }
 /** Server-sized data a buyer's page must never carry: the store assistant's chat only reads two constants of its rules, never the look-alike table (lib/confusables-latin.ts). */
-const KEPT_OUT=[{entry:'components/store-assistant.tsx',module:'lib/confusables-latin.ts'}];
+/* The public menu gets the plans' state from the server (components/site-nav-server.tsx): lib/opening.ts reaches every gate and margin review, about 90 KB a visitor never needs. */
+const KEPT_OUT=[{entry:'components/store-assistant.tsx',module:'lib/confusables-latin.ts'},{entry:'components/site-nav.tsx',module:'lib/opening.ts'}];
 export async function checkKeptOut(root) {
  const failures=[];
  for(const {entry,module} of KEPT_OUT){

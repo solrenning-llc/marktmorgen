@@ -1576,6 +1576,7 @@
     "components/side-panel-switch.tsx",
     "components/signin-form.tsx",
     "components/site-footer.tsx",
+    "components/site-nav-server.tsx",
     "components/site-nav.tsx",
     "components/site-pages-editor.tsx",
     "components/skip-link.tsx",

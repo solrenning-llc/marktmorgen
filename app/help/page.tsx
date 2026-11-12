@@ -3,7 +3,7 @@ import Link from "next/link";
 import { Icon, iconFor } from "@/components/icons";
 import { RevealOnScroll } from "@/components/home-parts";
 import { SiteFooter } from "@/components/site-footer";
-import { SiteNav } from "@/components/site-nav";
+import { SiteNav } from "@/components/site-nav-server";
 import { HelpSearch } from "@/components/help-search";
 import { CopyLink } from "@/components/copy-link";
 import { HELP_SECTIONS, answerId } from "@/lib/help-content";

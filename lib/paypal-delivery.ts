@@ -317,6 +317,21 @@ async function handOver(store: Store, paid: Paid): Promise<"handed" | "gone" | "
 }
 
 /**
+ * Whether the person who paid was deleted from the store at or after the payment: their print in the store's list of
+ * deleted people (lib/suppression.ts, written by erasePerson before it deletes anything, in seconds) at or after
+ * paid.at, read as KEEP_RECEIPT reads it. A store with no list has deleted nobody (an erasure gives the store its list
+ * first, lib/person-erasure.ts erasureScope). A reply that is neither absent nor a number of seconds is unknown and
+ * throws UnknownReplyError (rule 24).
+ */
+async function erasedSincePaid(store: Store, paid: Paid): Promise<boolean> {
+  if (!store.listId) return false;
+  const read = repliesFor(await redisPipeline([["HGET", suppressedKey(store.listId), suppressionPrint(store.listId, paid.email)]]), 1);
+  const at = read?.[0];
+  if (!read || (at !== null && (typeof at !== "string" || !/^\d{1,12}$/.test(at)))) throw new UnknownReplyError("a PayPal order's person in the store's deletions");
+  return at !== null && Number(at) >= paid.at;
+}
+
+/**
  * Tries again the orders still owed their hand-over, oldest try first, a few a sweep, once their grace is over. One
  * handed over, whose product Redis answers is gone, or that PayPal refunded in full meanwhile, leaves the list; one
  * whose paid record Redis answers is not there any more (erased, or past its time) leaves it too, with nothing to hand
@@ -346,6 +361,15 @@ async function handOverAgain(store: Store, deadline: number): Promise<number> {
       // refund seen after a hand-over is taken back by the watch, as for any other order. One ZSCORE an order tried.
       if (await refundSeen(store.statsId, order)) {
         console.error("a PayPal order waiting to be handed over was refunded in full; nothing handed over", store.handle, order);
+        await redisPipeline([["ZREM", key, order]]);
+        continue;
+      }
+      // Deleted from the store at or after this payment (#4140): nothing about them is written again, not the grant, the
+      // enrolment, the sale's credit or its webhook. The order leaves the list. Read before anything else is, in its
+      // exact shape; unknown throws below and it is kept. One HGET an order tried. A person deleted before paying again
+      // is handed what they paid for, as the receipt's own check (KEEP_RECEIPT) reads it.
+      if (await erasedSincePaid(store, paid)) {
+        console.error("a PayPal order waiting to be handed over belongs to a person deleted from the store since; nothing handed over", store.handle, order);
         await redisPipeline([["ZREM", key, order]]);
         continue;
       }

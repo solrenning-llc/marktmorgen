@@ -10,7 +10,7 @@
  * Synthetic only: a stand-in for PayPal's API, the Redis stub, the real return route and the real sweep.
  */
 import { TEST_CONSENT } from "./digital-consent-fixture";
-import { claimHandle, ensureStatsId, addProduct, setProductLink, setSubscription, setPayPalSeller, storeForEmail, type Store } from "@/lib/store";
+import { claimHandle, ensureListId, ensureStatsId, storeRef, addProduct, setProductLink, setSubscription, setPayPalSeller, storeForEmail, type Store } from "@/lib/store";
 import { readListing, STORE_PAGE_SIZE } from "@/lib/catalog";
 import { openOrder } from "@/lib/paypal-sales";
 import { HAND_OVER_BATCH, RECEIPT_TRIES_AT_MOST, sweepPayPal } from "@/lib/paypal-delivery";
@@ -147,9 +147,12 @@ async function main(): Promise<void> {
   };
   /** The retry's own commands for one order: the paid record's GET, the refund mark's ZSCORE and the list's writes. */
   const own = (sent: Commands, order: string) =>
-    sent.filter((c) => (c[1] === handOverKey(statsId) && c[0] !== "ZRANGEBYSCORE" && c[c.length - 1] === order)
+    sent.filter((c, i) => (c[1] === handOverKey(statsId) && c[0] !== "ZRANGEBYSCORE" && c[c.length - 1] === order)
       || (c[0] === "GET" && c[1] === paidKey(order))
-      || (c[0] === "ZSCORE" && c[1] === refundedKey(statsId) && c[2] === order)).map((c) => String(c[0]));
+      || (c[0] === "ZSCORE" && c[1] === refundedKey(statsId) && c[2] === order)
+      // The person's deletion print, read right after this order's refund mark, before its hand-over is tried again
+      // (#4140): the order's own retry command (another order's print is that order's).
+      || (c[0] === "HGET" && String(c[1]).startsWith("nl:erased:") && sent[i - 1]?.[0] === "ZSCORE" && sent[i - 1]?.[2] === order)).map((c) => String(c[0]));
   const queued = async () => (await redis.pipeline([["ZRANGEBYSCORE", handOverKey(statsId), "-inf", "+inf"]]))[0] as string[];
 
   part("The registry states the hand-over list's commands");
@@ -174,6 +177,9 @@ async function main(): Promise<void> {
   is("as the registry states", idle.length, declared?.listReadsPerStoreRun);
 
   part("The retry's own commands for each order it tries, path by path");
+  // A store with its list, as every store has once a receipt was kept or a person deleted: the deletion print is read.
+  if (!(await fresh()).listId) await ensureListId(storeRef(await fresh()));
+  is("control: the store has its list, so the deletion print is read", Boolean((await fresh()).listId), true);
   const counted: Record<string, string[]> = {};
   // Its paid record gone (erased, or past its time): GET, then ZREM.
   const goneOrder = "HANDOVERGONE01";
@@ -192,13 +198,13 @@ async function main(): Promise<void> {
   // The product still unreadable: GET, ZSCORE, then the hand-over's ZADD and the retry's ZADD.
   const slow = await buy("slow@example.com", slowListing);
   counted.unreadable = own(await retry(slowListing), slow.order);
-  is("product unreadable: GET, ZSCORE and two ZADDs", counted.unreadable, ["GET", "ZSCORE", "ZADD", "ZADD"]);
+  is("product unreadable: GET, ZSCORE, the deletion print's HGET and two ZADDs", counted.unreadable, ["GET", "ZSCORE", "HGET", "ZADD", "ZADD"]);
   // Handed over: GET, ZSCORE, then the hand-over's ZREM (its other work is the order's own).
   counted.handed = own(await retry(), slow.order);
-  is("handed over: GET, ZSCORE and ZREM", counted.handed, ["GET", "ZSCORE", "ZREM"]);
+  is("handed over: GET, ZSCORE, HGET and ZREM", counted.handed, ["GET", "ZSCORE", "HGET", "ZREM"]);
   is("and it left the list", (await queued()).includes(slow.order), false);
   const most = Math.max(...Object.values(counted).map((c) => c.length));
-  is("the most on any path is four", most, 4);
+  is("the most on any path is five", most, 5);
   is("as the registry states", most, declared?.ownCommandsPerOrderTried);
 
   part("One sweep tries at most HAND_OVER_BATCH orders");

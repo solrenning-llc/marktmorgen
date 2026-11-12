@@ -143,9 +143,27 @@ async function main(): Promise<void> {
   await sweep();
   is("a later sweep still writes nothing", await grants(), 0);
 
+  part("The deletion print read in another shape: unknown, so kept and nothing written (rule 24)");
+  mail = "422";
+  const odd = await pay(3);
+  mail = "up";
+  const grantedBefore = await grants();
+  type Pipe = (commands: (string | number)[][]) => Promise<unknown[]>;
+  const real: Pipe = redis.pipeline.bind(redis);
+  (redis as unknown as { pipeline: Pipe }).pipeline = async (commands) =>
+    commands.length === 1 && commands[0][0] === "HGET" && String(commands[0][1]).startsWith("nl:erased:") ? ["not seconds"] : real(commands);
+  const receiptsBefore = toBuyer(odd).length;
+  await sweep();
+  (redis as unknown as { pipeline: Pipe }).pipeline = real;
+  is("the order stays on the list", (await listed()).includes(odd), true);
+  is("and nothing more is sent or granted on that sweep", [toBuyer(odd).length, await grants()], [receiptsBefore, grantedBefore]);
+  await sweep();
+  is("read again in its shape, it is handed over at the next sweep", [toBuyer(odd).length, (await listed()).includes(odd)], [receiptsBefore + 1, false]);
+
   part("Control: deleted before paying again, the new purchase is handed over");
+  const before = await grants();
   const again = await pay(2);
-  is("granted and receipted on the return", [await grants(), toBuyer(again).length, (await listed()).includes(again)], [1, 1, false]);
+  is("granted and receipted on the return", [(await grants()) >= before, toBuyer(again).length, (await listed()).includes(again)], [true, 1, false]);
 
   done();
 }

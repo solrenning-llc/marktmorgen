@@ -224,7 +224,10 @@ async function main() {
     is("so long 404/410 are problems, 403/500 not checked, 200 fine", [404, 410, 403, 500, 200].map((status) => say({ status })), ["problem", "problem", "not-checked", "not-checked", "ok"]);
     is("and a long answer with no status is never called fine", say({ problem: "too_big" }), "not-checked");
     const fetchSource = readFileSync("lib/safe-fetch.ts", "utf8");
+    // The third is an answer that would not unpack: its status goes only when it unpacked past the size read, never with
+    // a corrupt body (tests/safe-fetch-unpack.test.ts).
     is("lib/safe-fetch.ts gives the status it already has with every too_big of an answer", (fetchSource.match(/new SafeFetchError\("too_big", [^)]*\)/g) ?? []).map((m) => m.includes("response.statusCode")), [true, true, true]);
+    is("and an answer that would not unpack keeps it only when it was too long", fetchSource.includes('tooLong ? response.statusCode : undefined'), true);
   }
 
   part("The route: the product known first, the studio requests taken before anything is read");

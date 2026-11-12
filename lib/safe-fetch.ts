@@ -346,8 +346,11 @@ function once(
           try {
             if (encoding === "gzip") raw = gunzipSync(raw, { maxOutputLength: options.maxBytes });
             else if (encoding === "deflate") raw = inflateSync(raw, { maxOutputLength: options.maxBytes });
-          } catch {
-            reject(new SafeFetchError("too_big", "The answer could not be unpacked within the size we read.", response.statusCode));
+          } catch (error) {
+            // Only an answer that unpacked past the size read keeps its status; a body that is not compressed at all
+            // (corrupt) has none, so a caller never judges a page it could not read by its status (479 [SB2]).
+            const tooLong = (error as { code?: unknown } | null)?.code === "ERR_BUFFER_TOO_LARGE";
+            reject(new SafeFetchError("too_big", "The answer could not be unpacked within the size we read.", tooLong ? response.statusCode : undefined));
             return;
           }
           resolvePromise({ status: response.statusCode ?? 0, headers, body: raw });

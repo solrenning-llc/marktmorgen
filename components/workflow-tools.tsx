@@ -82,18 +82,51 @@ export const stepText = (step: MapStep, conditionText: (when: StepCondition) => 
 /** A step's box: its number, then stepText. */
 export const stepLine = (step: MapStep, i: number, conditionText: (when: StepCondition) => string) => `${i + 1}. ${stepText(step, conditionText)}`;
 
-/** The map of a workflow: its picture (391 [CX2]), then every step with what it does and where it leads. */
-export function WorkflowMap({ steps, conditionText }: { steps: readonly MapStep[]; conditionText: (when: StepCondition) => string }) {
+/** The id of the "Edit step" button of a step in a workflow's map, so the editor can give the focus back to it. */
+export const mapEditId = (flowId: string, index: number) => `flow-map-edit-${flowId}-${index}`;
+
+/**
+ * The map of a workflow: its picture (391 [CX2]), then every step with what it
+ * does and where it leads. With `onEdit` (unit 2), each step of the list has an
+ * "Edit step N" button and each box of the picture opens the same: the editor,
+ * at that step. The buttons are the way in by keyboard and screen reader; the
+ * boxes are a larger target for a pointer, doing exactly what the button does.
+ */
+export function WorkflowMap({
+  steps,
+  conditionText,
+  flowId,
+  onEdit,
+  editDisabled = false,
+}: {
+  steps: readonly MapStep[];
+  conditionText: (when: StepCondition) => string;
+  flowId?: string;
+  onEdit?: (index: number) => void;
+  editDisabled?: boolean;
+}) {
+  const edit = onEdit && flowId && !editDisabled ? onEdit : undefined;
   return (
     <>
-    <WorkflowDiagram layout={flowMapLayout(steps, steps.map((step, i) => stepLine(step, i, conditionText)))} steps={steps.length} />
+    <WorkflowDiagram layout={flowMapLayout(steps, steps.map((step, i) => stepLine(step, i, conditionText)))} steps={steps.length} onBox={edit} />
     <ol className="mt-2 space-y-1 text-sm text-ink-soft" data-workflow-map>
       {steps.map((step, i) => (
-        <li key={step.id} className="flex flex-wrap gap-x-2">
+        <li key={step.id} className="flex flex-wrap items-center gap-x-2">
           <span className="font-semibold text-ink">{`${i + 1}.`}</span>
           <span>{stepText(step, conditionText)}</span>
           <span aria-hidden="true">→</span>
           <span>{routeWords(steps, i)}</span>
+          {onEdit && flowId ? (
+            <button
+              type="button"
+              id={mapEditId(flowId, i)}
+              className="inline-flex min-h-11 min-w-11 items-center font-semibold text-ink underline underline-offset-4 hover:text-violet-deep"
+              disabled={editDisabled}
+              onClick={() => onEdit(i)}
+            >
+              {`Edit step ${i + 1}`}
+            </button>
+          ) : null}
         </li>
       ))}
     </ol>

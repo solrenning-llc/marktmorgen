@@ -24,7 +24,7 @@ import { flowConfigurationIssues } from "@/lib/flow-review";
 import type { Flow, FlowCounts, FlowStep } from "@/lib/flows";
 import { flowWaitHours, type FlowAction, type FlowGoal, type FlowTrigger, MAX_CONDITION_TAG, type StepCondition, type StepIf, isCourseIf } from "@/lib/flow-rules";
 import { MAX_FLOWS, MAX_STEPS } from "@/lib/flow-limits";
-import { type MapStep, WorkflowMap, WorkflowPreview, WorkflowRuns } from "@/components/workflow-tools";
+import { type MapStep, WorkflowMap, WorkflowPreview, WorkflowRuns, mapEditId } from "@/components/workflow-tools";
 import type { MailSettings } from "@/lib/store";
 import { StoreField } from "@/components/studio-store-pin";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
@@ -2104,10 +2104,15 @@ function Flows({
   // button that opened it, which the editor had removed or disabled (WCAG 2.4.3). A file brought in focuses its report instead.
   const openerId = (flow: FlowRow | null) => (flow ? `flow-edit-${flow.id}` : "flow-new-sequence");
   const opener = useRef<string | null>(null);
+  // Opened from a step of the map (391 [CX2], unit 2): the editor takes the focus at that step, not at the name.
+  const openAtStep = useRef<number | null>(null);
   const editing = draft !== null;
   useEffect(() => {
     if (editing) {
-      if (opener.current) document.getElementById("flow-name")?.focus();
+      const step = openAtStep.current;
+      openAtStep.current = null;
+      if (step !== null && document.getElementById(`flow-step-${step}`)) document.getElementById(`flow-step-${step}`)?.focus();
+      else if (opener.current) document.getElementById("flow-name")?.focus();
       return;
     }
     const back = opener.current;
@@ -2389,7 +2394,19 @@ function Flows({
               {f.steps.length ? (
                 <details className="mt-1 text-sm text-ink-soft">
                   <summary className="flex min-h-11 cursor-pointer items-center font-semibold">Map of its steps</summary>
-                  <WorkflowMap steps={f.steps} conditionText={conditionText} />
+                  <WorkflowMap
+                    steps={f.steps}
+                    conditionText={conditionText}
+                    flowId={f.id}
+                    editDisabled={locked || draft !== null}
+                    onEdit={(index) => {
+                      if (locked || draft !== null) return;
+                      openAtStep.current = index;
+                      openDraft(f);
+                      // Closing the editor gives the focus back to this step's button.
+                      opener.current = mapEditId(f.id, index);
+                    }}
+                  />
                 </details>
               ) : null}
               {activating === f.id ? (
@@ -2706,9 +2723,9 @@ function Flows({
           /> : <p role="status" className="text-sm text-ink-soft">AI writes at least 3 emails at a time. This sequence has {availableSlots} free {availableSlots === 1 ? "step" : "steps"}. Remove steps to make room before generating.</p>}
           <ol className="space-y-4">
             {draft.steps.map((s, i) => (
-              <li key={s.editorKey} className="rounded-[var(--r-sm)] bg-sand p-4">
+              <li key={s.editorKey} id={`flow-step-${i}`} tabIndex={-1} aria-labelledby={`flow-step-${i}-title`} className="rounded-[var(--r-sm)] bg-sand p-4 focus:[outline:3px_solid_var(--focus)] focus:[outline-offset:3px]">
                 <div className="flex flex-wrap items-end justify-between gap-2">
-                  <p className="text-sm font-bold text-ink">{s.kind === "email" ? `Email ${i + 1}` : `Step ${i + 1}`}</p>
+                  <p id={`flow-step-${i}-title`} className="text-sm font-bold text-ink">{s.kind === "email" ? `Email ${i + 1}` : `Step ${i + 1}`}</p>
                   <label className="block">
                     <span className="sr-only">{`What step ${i + 1} does`}</span>
                     <select

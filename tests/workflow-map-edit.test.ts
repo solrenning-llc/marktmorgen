@@ -1,0 +1,95 @@
+/**
+ * A workflow's map opens a step in the editor (391 [CX2], unit 2; added 12
+ * November 2026). Real components (components/workflow-tools.tsx WorkflowMap,
+ * components/workflow-diagram.tsx), rendered with React's own server renderer
+ * and run with tests/client-hooks.ts; the Email studio's wiring read from its
+ * source, since it is one 3,000-line component. Checked:
+ *
+ *   - each step of the list has an "Edit step N" button with its own id, and
+ *     pressing it asks for that step;
+ *   - a click on a step's box asks for the same step; the End box opens
+ *     nothing; the picture stays one image to assistive technology;
+ *   - while another sequence is open, or the page is locked, the buttons are
+ *     disabled and the boxes open nothing;
+ *   - without `onEdit` the map is as before: no button, no click;
+ *   - the studio opens the editor at that step, focuses the step (named by
+ *     its own title, with a visible ring), and gives the focus back to the
+ *     step's button when the editor closes.
+ */
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { readFileSync } from "node:fs";
+import { WorkflowMap, mapEditId } from "@/components/workflow-tools";
+import { WorkflowDiagram } from "@/components/workflow-diagram";
+import { flowMapLayout } from "@/lib/flow-map";
+import type { StepCondition } from "@/lib/flow-rules";
+import { find, mount, texts } from "./client-hooks";
+import { done, is, part } from "./check";
+
+const tagged = { if: "tagged", tag: "vip" } as unknown as StepCondition;
+const steps = [
+  { id: "a", subject: "Welcome" },
+  { id: "b", when: tagged, otherwise: "end" as const, subject: "For VIPs" },
+  { id: "c", subject: "Last one" },
+];
+const conditionText = () => "they have the label “vip”";
+
+async function main(): Promise<void> {
+  part("The list's buttons");
+  {
+    const asked: number[] = [];
+    const tree = WorkflowMap({ steps, conditionText, flowId: "f1", onEdit: (i) => asked.push(i) });
+    const buttons = find(tree, (n) => n.type === "button");
+    is("one button per step, each named for its step", buttons.map((b) => texts(b).join("")), ["Edit step 1", "Edit step 2", "Edit step 3"]);
+    is("each has its own id, for the focus to come back to", buttons.map((b) => b.props?.id), [mapEditId("f1", 0), mapEditId("f1", 1), mapEditId("f1", 2)]);
+    (buttons[1].props?.onClick as () => void)();
+    is("pressing one asks for its step", asked, [1]);
+    const html = renderToStaticMarkup(createElement(WorkflowMap, { steps, conditionText, flowId: "f1", onEdit: () => {} }));
+    is("rendered as real buttons, 44 px tall at least", (html.match(/<button type="button" id="flow-map-edit-f1-\d" class="[^"]*min-h-11 min-w-11/g) ?? []).length, 3);
+  }
+
+  part("The picture's boxes");
+  {
+    const asked: number[] = [];
+    const layout = flowMapLayout(steps, ["1. Email “Welcome”", "2. If they have the label “vip”: Email “For VIPs”", "3. Email “Last one”"]);
+    const shown = await mount(WorkflowDiagram, { layout, steps: 3, onBox: (i: number) => asked.push(i) });
+    const boxes = find(shown.tree(), (n) => n.type === "g" && n.props?.["data-step-box"] !== undefined);
+    is("a box for each step, none for the end", boxes.map((b) => b.props?.["data-step-box"]), [0, 1, 2]);
+    (boxes[2].props?.onClick as () => void)();
+    is("a click on a box asks for its step", asked, [2]);
+    const end = find(shown.tree(), (n) => n.type === "g" && n.props?.["data-step-box"] === undefined && Boolean(find(n, (c) => c.type === "rect").length));
+    is("the End box opens nothing", end.map((g) => typeof g.props?.onClick), ["undefined"]);
+    const svg = find(shown.tree(), (n) => n.type === "svg")[0];
+    is("the picture is still one named image", [svg.props?.role, typeof svg.props?.["aria-labelledby"]], ["img", "string"]);
+    is("its name says the list has the Edit buttons", texts(find(shown.tree(), (n) => n.type === "title")[0]).join(""), "Picture of the 3 steps and where each one leads. The same steps are listed after it, each with its Edit button.");
+    const rects = find(shown.tree(), (n) => n.type === "rect").map((r) => r.props?.fill);
+    is("a step's box is painted, so a click inside its words lands on it; the end is not", rects, ["transparent", "transparent", "transparent", "none"]);
+  }
+
+  part("Disabled while it cannot open");
+  {
+    const asked: number[] = [];
+    const tree = WorkflowMap({ steps, conditionText, flowId: "f1", onEdit: (i) => asked.push(i), editDisabled: true });
+    const buttons = find(tree, (n) => n.type === "button");
+    is("the buttons are disabled", buttons.map((b) => b.props?.disabled), [true, true, true]);
+    const diagram = find(tree, (n) => n.type === WorkflowDiagram)[0];
+    is("the boxes are given nothing to open", typeof diagram.props?.onBox, "undefined");
+    const plain = WorkflowMap({ steps, conditionText });
+    is("without onEdit: no button and no click, as before", [find(plain, (n) => n.type === "button").length, typeof find(plain, (n) => n.type === WorkflowDiagram)[0].props?.onBox], [0, "undefined"]);
+  }
+
+  part("The studio opens the editor at that step");
+  {
+    const studio = readFileSync("components/email-studio.tsx", "utf8");
+    const wiring = studio.slice(studio.indexOf("<WorkflowMap"), studio.indexOf("/>", studio.indexOf("<WorkflowMap")));
+    is("the map gets the sequence, its lock and a way to open it", [/flowId=\{f\.id\}/.test(wiring), /editDisabled=\{locked \|\| draft !== null\}/.test(wiring), /openAtStep\.current = index;\s*openDraft\(f\);/.test(wiring)], [true, true, true]);
+    is("closing gives the focus back to the step's button", /opener\.current = mapEditId\(f\.id, index\)/.test(wiring), true);
+    is("opening focuses that step, and only once", /const step = openAtStep\.current;\s*openAtStep\.current = null;\s*if \(step !== null && document\.getElementById\(`flow-step-\$\{step\}`\)\) document\.getElementById\(`flow-step-\$\{step\}`\)\?\.focus\(\);\s*else if \(opener\.current\) document\.getElementById\("flow-name"\)\?\.focus\(\);/.test(studio), true);
+    const item = studio.match(/<li key=\{s\.editorKey\}[^>]*>/)?.[0] ?? "";
+    is("each step of the editor can take the focus, is named by its title, and shows a ring", [/id=\{`flow-step-\$\{i\}`\}/.test(item), /tabIndex=\{-1\}/.test(item), /aria-labelledby=\{`flow-step-\$\{i\}-title`\}/.test(item), /focus:\[outline:3px_solid_var\(--focus\)\]/.test(item)], [true, true, true, true]);
+    is("the title it is named by exists", /<p id=\{`flow-step-\$\{i\}-title`\}/.test(studio), true);
+  }
+  done();
+}
+
+void main();

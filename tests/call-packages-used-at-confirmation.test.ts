@@ -18,12 +18,12 @@ import { addProduct, claimHandle, ensureStatsId, setCallPackage, setProductCall,
 import { readListing } from "@/lib/catalog";
 import { holdSession, packageState, readBought, recordPackage } from "@/lib/call-packages";
 import { CONFIRMED_SECONDS, confirmBooking, moveBooking, type CallListing } from "@/lib/calls";
-import { zonedToUtc } from "@/lib/call-setup";
 import type { CallSetup } from "@/lib/call-setup";
 import { createHash } from "node:crypto";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
+import { weekdayAt } from "./weekday";
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
@@ -99,16 +99,6 @@ function moveBothClocks(seconds: number): void {
 }
 
 /** A weekday at `minute` past midnight in New York, at least `days` from now. */
-function weekdayAt(days: number, minute: number): number {
-  for (let d = days; d < days + 8; d += 1) {
-    const day = new Date(Date.now() + d * DAY * 1000);
-    const p = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit", weekday: "short" }).formatToParts(day);
-    const get = (t: string) => p.find((x) => x.type === t)?.value ?? "";
-    if (get("weekday") === "Sat" || get("weekday") === "Sun") continue;
-    return zonedToUtc(Number(get("year")), Number(get("month")), Number(get("day")), minute, "America/New_York") as number;
-  }
-  throw new Error("no weekday");
-}
 
 const left = async (checkout: string) => (await packageState((await readBought(checkout))!)).left;
 

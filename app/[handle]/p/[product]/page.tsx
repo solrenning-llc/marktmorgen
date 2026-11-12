@@ -74,6 +74,7 @@ import { JsonLd } from "@/components/structured-data";
 import { offeredItems } from "@/lib/bundles";
 import { bundleReady as enoughToSell, picks } from "@/lib/bundle-rules";
 import { productSegment } from "@/lib/product-slug";
+import { storeAddress } from "@/lib/store-sitemap";
 import { breadcrumbData, faqData } from "@/lib/page-structured-data";
 import { PictureViewer } from "@/components/picture-viewer";
 import { featuredCards } from "@/lib/featured-cards";
@@ -184,7 +185,8 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
  * (canGiveProduct), a paid one while Stripe or the creator's PayPal takes it.
  */
 function productData(store: Store, product: Listing, description: string, soldOut: boolean, summary: Summary | null, soon = false, preorder = false, sellable = false) {
-  const url = `${SITE_URL}${productPath(store, product)}`;
+  // The page's own address, as its canonical names it: the creator's domain's when it is live there.
+  const url = storeAddress(store, `/p/${productSegment(product)}`);
   const options = sellableOptions(product);
   const availability = `https://schema.org/${preorder ? "PreOrder" : soon ? "OutOfStock" : soldOut ? "SoldOut" : "InStock"}`;
   // A call with several lengths (lib/call-lengths.ts): each length's own price, as its checkout charges it.
@@ -562,7 +564,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
       style={lookStyle(store.look) as React.CSSProperties}
     >
       <JsonLd data={productData(store, product, description, remaining === 0, summary, soon, Boolean(preorder), free ? canGiveProduct(store, product) : canSellProduct(store, product) || byPayPal)} />
-      <JsonLd data={breadcrumbData({ name: store.name, url: `${SITE_URL}/@${store.handle}` }, { title: product.title, url: `${SITE_URL}${productPath(store, product)}` })} />
+      <JsonLd data={breadcrumbData({ name: store.name, url: storeAddress(store) }, { title: product.title, url: storeAddress(store, `/p/${productSegment(product)}`) })} />
       {faq ? <JsonLd data={faq} /> : null}
       <ExitOfferSlot store={store} except={product.id} />
       {page.blocks.some((block) => block.kind === "pictures" && block.items.length > 0) ? <PictureViewer lang={store.language} /> : null}

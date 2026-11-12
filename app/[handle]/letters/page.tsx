@@ -3,7 +3,7 @@ import { EmptyState } from "@/components/empty-state";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { cache } from "react";
-import { normaliseHandle, storeForPage } from "@/lib/store";
+import { normaliseHandle, storeForPage, type Store } from "@/lib/store";
 import { storeRoot } from "@/lib/store-sitemap";
 import { speech } from "@/lib/buyer-words";
 import { letterWords } from "@/lib/buyer-words/letters";
@@ -23,11 +23,24 @@ const load = cache(async (raw: string) => {
   return store && !store.suspended ? store : null;
 });
 
+/** Whether the store rests (lib/traffic.ts), asked once for the head and the page, before anything else is read. */
+const restingOf = cache((store: Store) => isResting(store));
+/** The published emails, read once for the head and the page. */
+const lettersOf = cache((store: Store) => listLetters(store));
+
 export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const store = await load((await params).handle);
   if (!store) return { title: "Not found — Marktmorgen" };
   const w = letterWords(store.language);
-  return { title: w.listTitle(store.name), description: w.listLead(store.name), alternates: { canonical: `${storeRoot(store)}/letters` } };
+  // Kept by search engines only while it lists an email: an empty page, or one whose list could not be read
+  // (null, rule 24), is not a page anybody is looking for, as the blog's empty page is not found.
+  const letters = (await restingOf(store)) ? null : await lettersOf(store);
+  return {
+    title: w.listTitle(store.name),
+    description: w.listLead(store.name),
+    alternates: { canonical: `${storeRoot(store)}/letters` },
+    robots: { index: Boolean(letters?.length), follow: true },
+  };
 }
 
 /**
@@ -39,8 +52,8 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
 export default async function LettersPage({ params }: Params) {
   const store = await load((await params).handle);
   if (!store) notFound();
-  if (await isResting(store)) return <StoreResting store={store} />;
-  const letters = await listLetters(store);
+  if (await restingOf(store)) return <StoreResting store={store} />;
+  const letters = await lettersOf(store);
   const say = speech(store);
   const w = letterWords(store.language);
   const date = new Intl.DateTimeFormat(say.lang.locale, { year: "numeric", month: "long", day: "numeric", timeZone: "UTC" });

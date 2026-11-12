@@ -26,7 +26,7 @@ def main():
     redis = Redis()
 
     def run(client, *args):
-        return client.command("EVAL", lua, 1, key, *[str(a) for a in args])
+        return client.command("EVAL", lua, 2, key, key + ":opened", *[str(a) for a in args])
 
     def fields():
         flat = redis.command("HGETALL", key)
@@ -59,12 +59,12 @@ def main():
         # The TTL set when the month opened is kept.
         assert int(redis.command("TTL", key)) <= ttl
         lower = key + ":lower"
-        assert redis.command("EVAL", lua, 1, lower, "reserve", "100", "1000", "3600") == 1
-        assert redis.command("EVAL", lua, 1, lower, "reserve", "450", "500", "3600") == 0
-        assert redis.command("EVAL", lua, 1, lower, "reserve", "400", "500", "3600") == 1
+        assert redis.command("EVAL", lua, 2, lower, lower + ":opened", "reserve", "100", "1000", "3600") == 1
+        assert redis.command("EVAL", lua, 2, lower, lower + ":opened", "reserve", "450", "500", "3600") == 0
+        assert redis.command("EVAL", lua, 2, lower, lower + ":opened", "reserve", "400", "500", "3600") == 1
         assert int(redis.command("HGET", lower, "cap")) == 500
-        assert redis.command("EVAL", lua, 1, lower, "reserve", "1", "5000", "3600") == 0
-        redis.command("DEL", lower)
+        assert redis.command("EVAL", lua, 2, lower, lower + ":opened", "reserve", "1", "5000", "3600") == 0
+        redis.command("DEL", lower, lower + ":opened")
         print("PASS: the cap a month opened with is kept, and only ever lowered")
 
         before = redis.command("HGETALL", key)
@@ -76,6 +76,11 @@ def main():
         print("PASS: a malformed call, or a settle with nothing held, writes nothing")
 
         redis.command("DEL", key)
+        assert run(redis, "reserve", 1, 10, 10) == -1
+        assert redis.command("EXISTS", key) == 0
+        print("PASS: a month's pool gone while its month is marked opened reserves nothing, never a fresh pool")
+
+        redis.command("DEL", key, key + ":opened")
 
         def one(_):
             client = Redis()
@@ -90,12 +95,12 @@ def main():
         assert fields()["held"] == 1000
         print("PASS: forty at once on a pool of ten: exactly ten are reserved")
 
-        redis.command("DEL", key)
+        redis.command("DEL", key, key + ":opened")
         redis.command("SET", key, "not a hash")
         assert run(redis, "reserve", 1, 10, 10) == -1
         print("PASS: a key of another kind is never written")
     finally:
-        redis.command("DEL", key)
+        redis.command("DEL", key, key + ":opened")
         redis.close()
 
 

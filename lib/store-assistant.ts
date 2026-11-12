@@ -3,6 +3,7 @@
  * lib/store-assistant-rules.ts).
  *
  *   nl:assist:pool:<statsId>:<YYYY-MM-DD>  hash: the month's pool, in micro-USD: cap, held, spent, n
+ *   nl:assist:pool:<statsId>:<YYYY-MM-DD>:opened  "1": the month's pool was opened (a pool gone under it is unknown)
  *   nl:assist:c:<token>                    a conversation, by a random token only the buyer's browser holds, a day
  *   nl:assist:missed:<statsId>             list: the newest questions it could not answer, for the creator
  *
@@ -60,6 +61,8 @@ import {
 export const ASSISTANT_TOKEN = /^[A-Za-z0-9_-]{32}$/;
 const POOL_KEEP_SECONDS = 40 * 86_400;
 const poolKey = (statsId: string, windowId: string) => `nl:assist:pool:${statsId}:${windowId}`;
+/** That the month's pool was opened (ASSISTANT_POOL, KEYS[2]), kept as long as the pool. */
+const poolOpenedKey = (statsId: string, windowId: string) => `${poolKey(statsId, windowId)}:opened`;
 const threadKey = (token: string) => `nl:assist:c:${token}`;
 const missedKey = (statsId: string) => `nl:assist:missed:${statsId}`;
 
@@ -73,9 +76,11 @@ const bytes = (text: string) => new TextEncoder().encode(text).byteLength;
  * `release` gives a reservation back whole, when nothing was answered and
  * nothing billed. A malformed call, or a settle with nothing held, writes
  * nothing (-1). The cap a month opened with is kept, and a later lower one
- * wins. Gone by itself POOL_KEEP_SECONDS after it opened.
+ * wins. Gone by itself POOL_KEEP_SECONDS after it opened. KEYS[2] marks the
+ * month opened, for as long: a pool gone while its mark is still there (a key
+ * lost or evicted) is not known, and reserves nothing (-1), never a fresh one.
  */
-export const ASSISTANT_POOL = `-- marktmorgen:assistant-pool:v1
+export const ASSISTANT_POOL = `-- marktmorgen:assistant-pool:v2
 local function amount(value)
   if not value or not string.match(value, '^%d+$') or (#value > 1 and string.sub(value, 1, 1) == '0') then return nil end
   local n = tonumber(value)
@@ -94,6 +99,7 @@ if op == 'reserve' then
   local cap = amount(ARGV[3])
   local ttl = amount(ARGV[4])
   if not cap or not ttl or ttl <= 0 then return -1 end
+  if kind == 'none' and redis.call('EXISTS', KEYS[2]) ~= 0 then return -1 end
   local kept = redis.call('HGET', KEYS[1], 'cap')
   if kept then
     local was = amount(kept)
@@ -104,6 +110,7 @@ if op == 'reserve' then
   redis.call('HINCRBY', KEYS[1], 'held', hold)
   redis.call('HSET', KEYS[1], 'cap', cap)
   if redis.call('TTL', KEYS[1]) < 0 then redis.call('EXPIRE', KEYS[1], ttl) end
+  if redis.call('EXISTS', KEYS[2]) == 0 then redis.call('SET', KEYS[2], '1', 'EX', ttl) end
   return 1
 end
 if op == 'settle' or op == 'release' then
@@ -155,7 +162,7 @@ export async function assistantLeft(store: Store, now = Date.now()): Promise<{ l
 export async function pool(op: "reserve" | "settle" | "release", statsId: string, windowId: string, hold: number, value = 0): Promise<number> {
   const args: (string | number)[] = op === "reserve" ? [op, hold, value, POOL_KEEP_SECONDS] : op === "settle" ? [op, hold, value] : [op, hold];
   try {
-    const [result] = await redisPipeline([["EVAL", ASSISTANT_POOL, 1, poolKey(statsId, windowId), ...args]]);
+    const [result] = await redisPipeline([["EVAL", ASSISTANT_POOL, 2, poolKey(statsId, windowId), poolOpenedKey(statsId, windowId), ...args]]);
     return typeof result === "number" ? result : Number(result);
   } catch (error) {
     console.error("the assistant's pool could not be reached", error);

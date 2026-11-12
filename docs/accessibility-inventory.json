@@ -1661,6 +1661,7 @@
     "components/who-answers.tsx",
     "components/winback-editor.tsx",
     "components/withdrawal-where.tsx",
+    "components/workflow-diagram.tsx",
     "components/workflow-tools.tsx",
     "components/yearly-ask-editor.tsx"
   ],

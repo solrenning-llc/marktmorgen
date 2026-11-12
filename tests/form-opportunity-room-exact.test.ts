@@ -10,7 +10,7 @@
  */
 import { createFormOpportunity } from "@/lib/form-opportunity";
 import { DEFAULT_STAGES, MAX_DEALS, type Deal } from "@/lib/crm-rules";
-import { readDeals } from "@/lib/crm";
+import { dealBytes, readDeals } from "@/lib/crm";
 import { dataUsed, type DataStore } from "@/lib/store-data";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { store as redis } from "./redis-stub";
@@ -50,7 +50,10 @@ async function main(): Promise<void> {
     const { statsId, ref, room, draft } = fresh();
     is("a new deal is created", await create(statsId, ref, draft, room), "created");
     taken = await used(room);
-    is("its room is taken", taken > 0, true);
+    // The deal's own bytes (dealBytes, as createFormOpportunity reserves them) plus the 64 bytes the data room
+    // counts for a slot's own field while it is there (lib/store-data.ts, NEED script): 480 + 64 = 544 here.
+    const kept = (await readDeals(statsId, DEFAULT_STAGES))[0];
+    is("the new opportunity takes its exact room: the deal's bytes plus its slot's field", [taken, kept ? dealBytes(kept) + 64 : -1], [544, 544]);
     is("asked again, it is the existing one", await create(statsId, ref, draft, room), "existing");
     is("and its room is unchanged", await used(room), taken);
     is("one deal kept", (await readDeals(statsId, DEFAULT_STAGES)).length, 1);

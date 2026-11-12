@@ -290,12 +290,13 @@ async function handOver(store: Store, paid: Paid, again = false): Promise<"hande
   // earlier try (or a receipt noted as sent, markReceiptSent) does not skip it (review of #4099). A store from before
   // lists is given its list first (ensureListId, as an erasure and sameReceipt do), and the rest of the try uses it.
   if (again && store.statsId && isRedisConfigured()) {
+    const statsId = store.statsId;
     const listId = store.listId ?? (await ensureListId(storeRef(store)))?.listId ?? null;
     if (!listId) throw new UnknownReplyError("the store's list, to check a deletion before a PayPal hand-over is tried again");
     if (!store.listId) store = { ...store, listId };
     if (await erasedSincePaid(listId, paid)) {
       console.error("a PayPal purchase's person was deleted from the store before its hand-over was tried again; nothing handed over or told, and not tried again", store.handle, paid.order);
-      await handedOver(store.statsId, paid.order);
+      await handedOver(statsId, paid.order);
       return "erased";
     }
   }

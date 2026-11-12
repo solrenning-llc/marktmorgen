@@ -188,7 +188,8 @@ export default async function CertificatePage({ params, searchParams }: Params) 
                 <span>{"✓"}</span>
               </div>
               <div className="cert-proof">
-                <p>{sample ? w.sampleId : w.certId(certificate.id)}</p>
+                {/* Until when, on the sheet that is printed too, as on the PDF (639 [GL7](32)): an expired one never prints as standing. */}
+                <p>{sample ? w.sampleId : certificate.validUntil ? `${w.certId(certificate.id)} · ${w.validUntil(said.date(certificate.validUntil * 1000))}` : w.certId(certificate.id)}</p>
                 <p>{sample ? w.sampleCheck : w.checkAt(shortUrl)}</p>
               </div>
             </div>

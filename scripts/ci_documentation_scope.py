@@ -59,7 +59,9 @@ MERGE_GROUP_ONLY = frozenset("accessibility-" + key for key in (
 # made. scripts/test_ci_documentation_scope.py follows every file the six workflows run and what
 # those files read under tests/, and fails when one is left outside these rules.
 HARNESS_PREFIXES = (".github/", "tests/e2e/", "tooling/")
-HARNESS_FILES = frozenset({"package.json", "package-lock.json", "tsconfig.json", "tests/next-link-world.tsx"})
+# npm-shrinkwrap.json takes precedence over package-lock.json, and .npmrc changes how npm ci installs.
+HARNESS_FILES = frozenset({"package.json", "package-lock.json", "npm-shrinkwrap.json", ".npmrc",
+                           "tsconfig.json", "tests/next-link-world.tsx"})
 CHANGE = re.compile(r":[0-7]{6}\Z")
 MODE = re.compile(r"[0-7]{6}\Z")
 

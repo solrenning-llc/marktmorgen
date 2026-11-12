@@ -32,6 +32,8 @@ import { StoreResting } from "@/components/store-resting";
 import { StoreTracking } from "@/components/store-tracking";
 import { JsonLd } from "@/components/structured-data";
 import { collectionPath, listedItems } from "@/components/store-collections";
+import { WhoAnswers } from "@/components/who-answers";
+import { sellsThroughPayPal } from "@/lib/paypal-sales";
 
 type Params = {
   params: Promise<{ handle: string; collection: string }>;
@@ -126,23 +128,34 @@ export default async function CollectionPage({ params }: Params) {
   const cartOn = selling && offersCart(store);
   const writes = canWrite(store);
   const manageable = canManage(store);
-  const [coming, inBundles, rated, counts] = await Promise.all([
-    soonState(store).catch(() => ({ soon: new Set<string>(), days: new Map<string, string>() })),
+  const [soonRead, inBundles, rated, counts] = await Promise.all([
+    // A reading that failed or came back out of shape is unknown, never "none coming soon" (CX-123 rule 24).
+    soonState(store).catch(() => null),
     offeredItems(store, related).catch(() => new Map<string, Listing[]>()),
     store.reviewed ? summaries(store.statsId).catch(() => new Map()) : Promise.resolve(new Map()),
     Promise.all(
       products.map(async (product) => {
-        const [stock, out] = await Promise.all([stockLeft(store, product).catch(() => null), outOfKeys(store, product).catch(() => false)]);
-        return out ? 0 : stock;
+        // Keys left that could not be read are unknown, never "keys left" (CX-123 rule 24): no way to buy, no count.
+        const [stock, out] = await Promise.all([stockLeft(store, product).catch(() => null), outOfKeys(store, product).catch(() => null)]);
+        return out === null ? ("unread" as const) : out ? 0 : stock;
       }),
     ),
   ]);
+  const coming = soonRead ?? { soon: new Set<string>(), days: new Map<string, string>() };
   const soon = coming.soon;
   const left = new Map<string, number>();
+  const unread = new Set<string>();
   products.forEach((product, i) => {
-    if (counts[i] !== null) left.set(product.id, counts[i] as number);
+    const count = counts[i];
+    if (count === "unread") unread.add(product.id);
+    else if (count !== null) left.set(product.id, count);
   });
-  const inCart = cartOn ? products.filter((p) => cartable(p) && canSellProduct(store, p) && !soon.has(p.id) && left.get(p.id) !== 0).map((p) => p.id) : [];
+  const inCart = cartOn ? products.filter((p) => cartable(p) && canSellProduct(store, p) && !soon.has(p.id) && left.get(p.id) !== 0 && !unread.has(p.id)).map((p) => p.id) : [];
+
+  // With coming soon unknown, any product may not be out yet: each card draws no way to buy it and nothing for the
+  // cart, and says buying is not available just now, as the card on the creator's own site does (#2910). With only
+  // part of it read, a product read as coming soon keeps its waitlist; each other one is unknown.
+  if (!soonRead || soonRead.partial) for (const product of products) if (!soon.has(product.id)) unread.add(product.id);
 
   const say = speech(store);
   const { w } = say;
@@ -176,7 +189,7 @@ export default async function CollectionPage({ params }: Params) {
         <h1 className="font-display mt-8 text-center text-3xl font-semibold leading-tight tracking-[-0.02em] sm:text-4xl">{collection.title}</h1>
         <p className="st-muted mt-2 text-center text-sm font-semibold">{w.productCount(products.length)}</p>
         {collection.blurb ? <p className="st-muted mx-auto mt-3 max-w-md text-center text-lg leading-relaxed">{collection.blurb}</p> : null}
-        {inCart.length >= 2 && inCart.length <= MAX_CART ? <AddAllToCart handle={store.handle} productIds={inCart} lang={store.language} /> : null}
+        {soonRead && !soonRead.partial && inCart.length >= 2 && inCart.length <= MAX_CART ? <AddAllToCart handle={store.handle} productIds={inCart} lang={store.language} /> : null}
         <ul className="mt-8 space-y-4">
           {products.map((product, i) => (
             <ProductCard
@@ -195,9 +208,12 @@ export default async function CollectionPage({ params }: Params) {
               soon={soon.has(product.id)}
               preorder={preorderDay(store, product, soon.has(product.id), coming.days.get(product.id) ?? null)}
               cart={inCart.includes(product.id)}
+              unread={unread.has(product.id)}
             />
           ))}
         </ul>
+        {/* Before paying for any of them, as the store page says it (components/who-answers.tsx). */}
+        {selling || sellsThroughPayPal(store) ? <WhoAnswers store={store} className="st-muted mt-6 text-center text-sm" /> : null}
         <div className="mt-12 text-center">
           <Link href={`/@${store.handle}`} className="st-footer-link text-sm font-semibold">
             {w.everythingFrom(store.name)}

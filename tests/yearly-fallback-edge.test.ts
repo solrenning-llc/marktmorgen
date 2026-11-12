@@ -53,6 +53,36 @@ let invoiceReadCount = 0;
 let monthVoidFails = false;
 let yearVoidFails = false;
 let yearPaidOnVoid = false; // the year gets paid by the member right as we void
+/**
+ * Rule 30: undefined answers with the object's own id; a string answers with another object's id; null with no id;
+ * NULL_BODY with an HTTP 200 whose JSON body is `null` itself.
+ */
+const NULL_BODY = "null body";
+let subReplyId: string | null | undefined;
+let yearReplyAt = -1; // 1-based count of GET /invoices/YEAR answered with yearReplyId
+let yearReplyId: string | null | undefined;
+let yearReplyStatus: string | undefined; // the status that reply carries, when not the year's own
+/** Rule 30 on the move's own reply (POST): undefined answers as the membership; a string with another's id; null with no id. */
+let moveReplyId: string | null | undefined;
+/** The move's reply as the membership itself, but without the yearly invoice the move was written to replace. */
+let moveReplyUnwritten = false;
+const replyAs = (row: Record<string, unknown>, id: string | null | undefined, status?: string) => {
+  if (id === undefined) return row;
+  if (id === NULL_BODY) return null;
+  const copy: Record<string, unknown> = status === undefined ? { ...row } : { ...row, status };
+  if (id === null) delete copy.id;
+  else copy.id = id;
+  return copy;
+};
+
+/** The move's reply, as moveReplyId and moveReplyUnwritten say; Stripe's state is changed as the mode says either way. */
+const moveReply = (row: Record<string, unknown>) => {
+  const copy = replyAs(row, moveReplyId);
+  if (!moveReplyUnwritten || copy === null) return copy;
+  const drop = (meta: unknown) => Object.fromEntries(Object.entries((meta ?? {}) as Record<string, string>).filter(([k]) => k !== "monthly_replaced"));
+  const pending = copy.pending_update as { metadata?: unknown } | null;
+  return { ...copy, metadata: drop(copy.metadata), pending_update: pending ? { ...pending, metadata: drop(pending.metadata) } : null };
+};
 
 const subJson = () => ({
   id: SUB,
@@ -87,11 +117,11 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const body = new URLSearchParams(init?.body ? String(init.body) : "");
   const headers = new Headers(init?.headers);
   calls.push({ method, path, body, key: headers.get("Idempotency-Key"), version: headers.get("Stripe-Version") });
-  if (method === "GET" && path === `/subscriptions/${SUB}`) return json(subJson());
+  if (method === "GET" && path === `/subscriptions/${SUB}`) return json(replyAs(subJson(), subReplyId));
   if (method === "GET" && path === `/invoices/${YEAR}`) {
     invoiceReadCount += 1;
     if (invoiceReadCount === failInvoiceReadAt) return err(500, "api_error");
-    return json(yearJson());
+    return json(invoiceReadCount === yearReplyAt ? replyAs(yearJson(), yearReplyId, yearReplyStatus) : yearJson());
   }
   if (method === "POST" && path === "/prices") return json({ id: "price_Month00001" });
   if (method === "POST" && path === `/invoices/${YEAR}`) {
@@ -127,19 +157,19 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
       st.month = { status: mode === "declined-paid-latest" ? "paid" : "open" };
       const latest =
         mode === "declined-unexpanded" ? MONTH : mode === "declined-latest-is-year" ? { id: YEAR, status: "open" } : { id: MONTH, status: st.month.status, amount_paid: 0, currency: "usd" };
-      return json({ ...subJson(), latest_invoice: latest });
+      return json(moveReply({ ...subJson(), latest_invoice: latest }));
     }
     if (mode === "applied-open") {
       applied();
       st.interval = "month";
       st.month = { status: "open" };
-      return json({ ...subJson(), latest_invoice: { id: MONTH, status: "open", amount_paid: 0, currency: "usd" } });
+      return json(moveReply({ ...subJson(), latest_invoice: { id: MONTH, status: "open", amount_paid: 0, currency: "usd" } }));
     }
     applied();
     st.interval = "month";
     st.pendingUpdate = false;
     st.month = { status: "paid" };
-    return json({ ...subJson(), latest_invoice: { id: MONTH, status: "paid", amount_paid: 2000, currency: "usd" } });
+    return json(moveReply({ ...subJson(), latest_invoice: { id: MONTH, status: "paid", amount_paid: 2000, currency: "usd" } }));
   }
   if (method === "POST" && path === `/invoices/${MONTH}/pay`) {
     // The member pays the month's invoice later: the pending update applies, and its metadata with it.
@@ -186,6 +216,12 @@ async function reset(): Promise<void> {
   monthVoidFails = false;
   yearVoidFails = false;
   yearPaidOnVoid = false;
+  subReplyId = undefined;
+  yearReplyAt = -1;
+  yearReplyId = undefined;
+  yearReplyStatus = undefined;
+  moveReplyId = undefined;
+  moveReplyUnwritten = false;
   await redisPipeline([["DEL", FALLBACK_VOID_KEY, FALLBACK_CHECK_KEY, FALLBACK_BOTH_KEY, `nl:yearly:fallback:try:${YEAR}`]]);
 }
 /** The year is safe when it is either retried (auto_advance true and open) or recorded for the daily job. */
@@ -417,6 +453,86 @@ async function main(): Promise<void> {
   await reset();
   st.method = "sepa_debit";
   is("K. a membership paid by bank debit (no pending updates) is never offered, nothing sent", [reason(await move()), posts()], ["fallback", []]);
+
+  // L. Rule 30 (from #2517): a Stripe reply decides only when it is the object asked for.
+  for (const [label, other] of [["another object's id", "other"], ["no id", null], ["a null body", NULL_BODY]] as const) {
+    const otherSub = other === "other" ? "sub_Somebody0001" : other;
+    const otherInvoice = other === "other" ? "in_Somebody00001" : other;
+    part(`L. replies with ${label}`);
+    await reset();
+    subReplyId = otherSub;
+    is(`L1. the membership read with ${label}: nothing is decided and nothing sent`, [reason(await move()), posts(), st.year.auto_advance], ["error", [], true]);
+
+    await reset();
+    yearReplyAt = 1;
+    yearReplyId = otherInvoice;
+    is(`L2. the failed invoice read with ${label}: nothing is decided and nothing sent`, [reason(await move()), posts(), st.year.auto_advance], ["error", [], true]);
+
+    await reset();
+    yearReplyAt = 2;
+    yearReplyId = otherInvoice;
+    is(
+      `L3. the year read again with ${label} after its retries stopped: never moved on it, and retried as before`,
+      [reason(await move()), moves().length, st.year.status, st.year.auto_advance],
+      ["error", 0, "open", true],
+    );
+
+    // A null body carries no status at all: one case for it (Claude 6 on #3098, the month already charged).
+    for (const said of other === NULL_BODY ? ["void"] : ["void", "paid"]) {
+      await reset();
+      yearVoidFails = true;
+      yearReplyAt = 3;
+      yearReplyId = otherInvoice;
+      yearReplyStatus = said;
+      const l4 = await move();
+      is(
+        `L4. moved and paid, the void failed, and the year read back ${other === NULL_BODY ? "" : `${said} `}with ${label}: left to void again for the daily job, never taken as ${said === "void" ? "voided" : "paid twice"}`,
+        [reason(l4), st.year.status, await members(FALLBACK_VOID_KEY), await members(FALLBACK_BOTH_KEY)],
+        ["moved-paid", "open", [`${ACCOUNT}|${YEAR}|${MONTH}`], []],
+      );
+    }
+  }
+
+  // M. Rule 30 on the move's own reply (a POST): it decides only when it is this membership and carries the yearly
+  // invoice it was written to replace. Any other reply is no answer: the move may have been made, so the year stays
+  // with no automatic retry for the daily job, as when Stripe does not answer; nothing is voided on it.
+  const left = [`${ACCOUNT}|${SUB}|${YEAR}`];
+  for (const [label, id, unwritten] of [
+    ["another membership's id", "sub_Somebody0001", false],
+    ["no id", null, false],
+    ["its own id but not the yearly invoice it replaces", undefined, true],
+    ["a null body", NULL_BODY, false],
+  ] as const) {
+    part(`M. the move answered with ${label}`);
+    await reset();
+    moveReplyId = id;
+    moveReplyUnwritten = unwritten;
+    is(
+      `M1. paid, answered with ${label}: never taken as moved, the year never voided on it, left for the daily job with no retry`,
+      [reason(await move()), st.year.status, st.year.auto_advance, posts().filter((p) => p.endsWith("/void")), await members(FALLBACK_CHECK_KEY)],
+      ["unknown", "open", false, [], left],
+    );
+
+    await reset();
+    moveReplyId = id;
+    moveReplyUnwritten = unwritten;
+    updateMode = "declined";
+    is(
+      `M2. declined, answered with ${label}: no invoice voided on it, the year not turned back on, left for the daily job`,
+      [reason(await move()), posts().filter((p) => p.endsWith("/void")), st.year.auto_advance, await members(FALLBACK_CHECK_KEY)],
+      ["unknown", [], false, left],
+    );
+
+    await reset();
+    moveReplyId = id;
+    moveReplyUnwritten = unwritten;
+    updateMode = "applied-open";
+    is(
+      `M3. applied with the month open, answered with ${label}: never taken as moved, left for the daily job`,
+      [reason(await move()), st.year.status, st.year.auto_advance, await members(FALLBACK_CHECK_KEY)],
+      ["unknown", "open", false, left],
+    );
+  }
 }
 
 void main().then(() => done(), (error) => {

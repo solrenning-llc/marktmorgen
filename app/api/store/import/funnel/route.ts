@@ -7,6 +7,7 @@ import { costPauseCode } from "@/lib/plan-standing";
 import { can } from "@/lib/team-roles";
 import { MAX_TRIMMED_PAGE_CHARS, convertSavedPage } from "@/lib/clickfunnels-page";
 import { planFunnelImport, saveFunnelImport } from "@/lib/clickfunnels-funnel";
+import { UnknownReplyError } from "@/lib/redis-reply";
 
 /**
  * Moving a funnel from ClickFunnels (lib/clickfunnels-page.ts reads a page,
@@ -79,6 +80,9 @@ export async function POST(request: NextRequest) {
 
     return refuse("invalid");
   } catch (error) {
+    // The run ledger read in an unknown shape: nothing was made, and it may be tried again (lib/clickfunnels-funnel.ts readLedger,
+    // readRun). Not "unavailable": imports are switched on, the read failed.
+    if (error instanceof UnknownReplyError) return refuse("try_again", 503);
     console.error("a ClickFunnels funnel import failed", error);
     return refuse(action === "save" ? "setup_incomplete" : "server_error", 500);
   }

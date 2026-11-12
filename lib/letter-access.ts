@@ -172,12 +172,22 @@ export async function requestLetterLink(input: { store: Store; letter: Letter; e
   return "sent";
 }
 
-/** The link itself, for an address that holds one of the email's products; nothing for one that does not, or when that cannot be known (logged). */
+/**
+ * The link itself, for an address that holds one of the email's products; nothing for one that does not, or when
+ * that cannot be known (logged). The grant's SET is read only in its exact shape (CX-123 rule 24): one reply,
+ * "OK". Any other means the link may open nothing, so no email is sent and none of the store's transactional
+ * allowance is taken (the meter is taken inside sendEmail); it is said in the server's log, and asking again makes
+ * a new link.
+ */
 async function sendLetterLink(store: Store, letter: Letter, raw: string, origin: string): Promise<void> {
   if (!(await holdsLetter(store, letter, raw))) return;
   const token = randomBytes(32).toString("hex");
   const grant: LetterGrant = { e: normaliseEmail(raw), k: storeKey(store), h: store.handle, l: letter.id };
-  await redisPipeline([["SET", linkKey(token), JSON.stringify(grant), "EX", LETTER_LINK_SECONDS]]);
+  const kept = repliesFor(await redisPipeline([["SET", linkKey(token), JSON.stringify(grant), "EX", LETTER_LINK_SECONDS]]), 1);
+  if (kept?.[0] !== "OK") {
+    console.error("a link to read an email kept for members was not sent: its grant was not confirmed kept", new UnknownReplyError("an emailed link's grant"));
+    return;
+  }
   const link = `${origin}/api/store/letters/open?token=${token}`;
   const w = letterWords(store.language);
   const sent = await sendEmail({

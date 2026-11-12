@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { originFrom } from "@/lib/request-origin";
+import { linkOrigin, originFrom } from "@/lib/request-origin";
 import { clientAddress, fromAnotherSite, limited } from "@/lib/request-guard";
 import { requestHubLink } from "@/lib/affiliate-hub";
 
@@ -24,7 +24,7 @@ export async function POST(request: NextRequest) {
   // A field no person can see: whatever filled it in is told it worked, and nothing is sent.
   if (honeypot.trim()) return away("sent");
   try {
-    return away(await requestHubLink({ email, ip: clientAddress(request), origin }));
+    return away(await requestHubLink({ email, ip: clientAddress(request), origin: linkOrigin(request) }));
   } catch (error) {
     console.error("sending an affiliate's page link failed", error);
     return away("error");

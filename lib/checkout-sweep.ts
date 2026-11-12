@@ -485,8 +485,9 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
   }
   // Sold through the creator's PayPal (lib/paypal-sales.ts): a payment PayPal
   // held as pending is handed over once it completes, and a full refund takes
-  // the purchase back.
-  if (store.paypalSeller) {
+  // the purchase back. Also after the creator disconnected PayPal, while the
+  // orders it took are still answered (paypalPast, lib/paypal-delivery.ts).
+  if (store.paypalSeller || store.paypalPast) {
     try {
       const paypal = await sweepPayPal(store, deadline);
       counts.confirmed += paypal.cleared;
@@ -762,7 +763,7 @@ export async function sweepCheckouts(deadline: number, taxPolicyValue: unknown =
       swept.add(id);
       const reviewed = Boolean(store.stripeAccountId) && (await storeHasReviews(store).catch(() => false));
       const asks = Boolean(store.sid) && requesting.has(store.sid);
-      if (worthAsking(store, asks) || reviewed || store.paypalSeller) {
+      if (worthAsking(store, asks) || reviewed || store.paypalSeller || store.paypalPast) {
         counts.stores += 1;
         try {
           await sweepStore(store, counts, deadline, reviewed, asks, taxPass);

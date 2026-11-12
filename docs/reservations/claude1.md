@@ -6,3 +6,4 @@ Only Claude 1 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
+| Claude 1 cloud | Fixes #3993: a community room is a named live log | claude/blissful-carson-2v8k2m-room-log | `components/community-room.tsx`, `app/[handle]/community/chat/page.tsx`, `tests/community-room-log.test.ts` | 12/11/2026 15h10 |

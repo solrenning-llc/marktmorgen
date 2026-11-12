@@ -85,15 +85,32 @@ export async function releaseStorage(folder: string, id: string): Promise<void> 
   });
 }
 
-/** Retires at most one expired session. Failure retains every reserved byte. */
+/** Provider sessions one cleanup may ask to retire. Each ask is a DELETE and at most a HEAD,
+ * each under VAULT_TIMEOUT_MS, so the asks stay well inside the 120-second lease. */
+export const RETIRE_ATTEMPTS = 2;
+
+/** Retires at most one expired session, asking the provider at most RETIRE_ATTEMPTS times.
+ * Failure retains every reserved byte. A session the provider did not retire goes to the
+ * back of the line, so one that can never be retired does not block the cleanup of others.
+ */
 export async function retireStorage(folder: string, before: number, retire: (entry: Readonly<StorageReservation>) => Promise<boolean>): Promise<boolean> {
   if (!Number.isSafeInteger(before) || before < 0) throw new Error("storage_invalid");
   return change(folder, async rows => {
-    const index = rows.findIndex(row => row.at <= before);
-    if (index < 0) return false;
-    const entry = rows[index];
-    if (entry.pathname !== undefined && !(await retire(Object.freeze({ ...entry })))) return false;
-    rows.splice(index, 1);
-    return true;
+    const refused: StorageReservation[] = [];
+    let retired = false;
+    for (let index = 0, asked = 0; index < rows.length;) {
+      const entry = rows[index];
+      if (entry.at > before) { index++; continue; }
+      if (entry.pathname !== undefined) {
+        if (asked >= RETIRE_ATTEMPTS) break;
+        asked++;
+        if (!(await retire(Object.freeze({ ...entry })))) { refused.push(...rows.splice(index, 1)); continue; }
+      }
+      rows.splice(index, 1);
+      retired = true;
+      break;
+    }
+    rows.push(...refused);
+    return retired;
   });
 }

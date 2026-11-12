@@ -42,6 +42,42 @@ test("provider refusal retains capacity beyond expiration; confirmed retirement 
   assert.equal(await retireStorage(folder(4), Date.now() + 1000, async () => true), true);
   await reserveStorage(folder(4), 10, 10, async () => 0);
 });
+test("one session the provider will not retire never blocks the cleanup of the others", async () => {
+  const at = (name: string) => "vault/" + folder(13) + "/product/0123456789abcdef-" + name;
+  const bind = async (bytes: number, name: string) => {
+    const entry = await reserveStorage(folder(13), bytes, 10, async () => 0);
+    await bindStorage(folder(13), entry.id, at(name), "session-" + name);
+  };
+  await bind(4, "a");
+  await bind(6, "b");
+  const asked: string[] = [];
+  const onlyB = async (row: Readonly<{ uploadId?: string }>) => { asked.push(row.uploadId ?? ""); return row.uploadId === "session-b"; };
+  assert.equal(await retireStorage(folder(13), Date.now() + 1000, onlyB), true);
+  assert.deepEqual(asked, ["session-a", "session-b"]);
+  await reserveStorage(folder(13), 6, 10, async () => 0);
+  await assert.rejects(reserveStorage(folder(13), 1, 10, async () => 0), /storage_(limit|pending)/, "the session that was not retired keeps its bytes");
+
+  // Many stuck sessions: each call asks the provider a bounded number of times, and the ones
+  // that refused go to the back, so a later call reaches a session that can be retired.
+  const many = folder(14);
+  const path = (n: number) => "vault/" + many + "/product/0123456789abcdef-f" + n;
+  for (let n = 0; n < 6; n++) {
+    const entry = await reserveStorage(many, 1, 10, async () => 0);
+    await bindStorage(many, entry.id, path(n), "stuck-" + n);
+  }
+  const tries: string[] = [];
+  const onlyLast = async (row: Readonly<{ uploadId?: string }>) => { tries.push(row.uploadId ?? ""); return row.uploadId === "stuck-5"; };
+  let retired = false;
+  for (let call = 0; call < 6 && !retired; call++) {
+    const before = tries.length;
+    retired = await retireStorage(many, Date.now() + 1000, onlyLast);
+    assert.ok(tries.length - before <= 2, "at most two provider calls per cleanup");
+  }
+  assert.equal(retired, true);
+  assert.deepEqual(tries, ["stuck-0", "stuck-1", "stuck-2", "stuck-3", "stuck-4", "stuck-5"], "every stuck session was asked once before any twice");
+  await reserveStorage(many, 5, 10, async () => 0);
+  await assert.rejects(reserveStorage(many, 1, 10, async () => 0), /storage_(limit|pending)/, "the five stuck sessions keep their bytes");
+});
 test("lost leases cannot persist stale reservations or delete a successor lease", async () => {
   const lock = "nl:storage:pending:" + folder(5) + ":lock";
   await assert.rejects(reserveStorage(folder(5), 1, 10, async () => { original(["SET", lock, "successor"]); return 0; }), /storage_lease_lost/);

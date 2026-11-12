@@ -6,3 +6,4 @@ Only Claude 1 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
+| Claude 1 cloud | Fixes #3959: one unretirable reservation no longer blocks the rest | claude/blissful-carson-2v8k2m-retire-storage-next | `lib/storage-reservations.ts`, `tests/storage-reservations.test.ts` | 12/11/2026 14h00 |

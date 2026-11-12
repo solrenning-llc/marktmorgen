@@ -29,8 +29,11 @@ function Linked({ text }: { text: string }) {
   );
 }
 
-/** `codeLabel` names each block of code for a screen reader, in the page's language (the lesson page passes its own word; the studio's preview is in English). */
-export function LessonText({ text, codeLabel = "Code", htmlPreviewLabel }: { text: string; codeLabel?: string; htmlPreviewLabel?: string }) {
+/**
+ * `codeLabel` names each block of code for a screen reader, in the page's language (the lesson page passes its own word; the studio's preview is in English).
+ * `lang` is the store's language, the one the page around it is marked with; an HTML block's frame is a document of its own and does not inherit it (#4158).
+ */
+export function LessonText({ text, lang, codeLabel = "Code", htmlPreviewLabel }: { text: string; lang: string; codeLabel?: string; htmlPreviewLabel?: string }) {
   return (
     <div className="space-y-4 leading-relaxed">
       {lessonBlocks(text).map((block, i) =>
@@ -49,7 +52,7 @@ export function LessonText({ text, codeLabel = "Code", htmlPreviewLabel }: { tex
             sandbox=""
             referrerPolicy="no-referrer"
             loading="lazy"
-            srcDoc={lessonHtmlDocument(block.source)}
+            srcDoc={lessonHtmlDocument(block.source, lang)}
             className="min-h-64 w-full rounded-[var(--r-sm)] border border-[var(--st-line)] bg-white"
           />
         ) : block.kind === "code" ? (

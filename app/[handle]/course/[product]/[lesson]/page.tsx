@@ -309,7 +309,7 @@ export default async function LessonPage({ params, searchParams }: Params) {
 
             {body ? (
               <div className="mt-6" style={{ color: "var(--st-text)" }}>
-                <LessonText text={body} codeLabel={w.codeBlock} />
+                <LessonText text={body} codeLabel={w.codeBlock} lang={said.lang.locale} />
               </div>
             ) : null}
 

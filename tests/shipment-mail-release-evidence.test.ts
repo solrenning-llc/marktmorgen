@@ -1,6 +1,7 @@
 /** CX-121 orchestration/UI evidence. The imported fixture is explicitly an
  * ACK stand-in; real Lua/counter evidence lives in the companion Python test.
  */
+import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MarkShipped } from "@/components/mark-shipped";
@@ -172,6 +173,11 @@ async function main(): Promise<void> {
   is("until a server status confirms it, missing acceptance is not asserted", html.includes("acceptance was not recorded"), false);
   const status = html.match(/<p\b[^>]*role="status"[^>]*>([\s\S]*?)<\/p>/)?.[1] ?? "";
   is("the shipment status region excludes the email detail line", /acceptance|email/i.test(status), false);
+  // "not_recorded" also covers a full pool and a missing buyer address, where
+  // nothing was queued: its sentence must not imply that a send happened.
+  const markSource = readFileSync("components/mark-shipped.tsx", "utf8");
+  is("a not-recorded email does not suggest a send whose acceptance went missing", markSource.includes("acceptance was not recorded"), false);
+  is("a not-recorded email says plainly that no shipping email is on record", markSource.includes("No shipping email is on record for this order. None will be sent automatically."), true);
   part("Real fulfillment remains possible when protected mail cannot be retained");
   store.clear();
   const owner = "shipment-release@example.test";

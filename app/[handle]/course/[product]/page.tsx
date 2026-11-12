@@ -5,7 +5,8 @@ import { isResting } from "@/lib/traffic";
 import { forVisitor } from "@/lib/visitor";
 import { activeIntro } from "@/lib/intro-price";
 import { salePrice } from "@/lib/store-sale";
-import { offNow } from "@/components/store-product";
+import { offNow, pricePill, productPath } from "@/components/store-product";
+import { shelfShown } from "@/lib/course-shelf";
 import { paypalReady } from "@/lib/paypal-sales";
 import type { Metadata } from "next";
 import Link from "next/link";
@@ -123,6 +124,9 @@ export default async function CoursePage({ params, searchParams }: Params) {
   // notes here, as the privacy policy says (#lesson-notes): no lesson's box is there to give them. Only while they keep
   // notes on this course (or when that cannot be read), never to any signed-in visitor (third review of #3031, M4).
   const notesAfter = await notesDownloadAfterAccess(store.statsId ?? "", access, course.id, () => takeBuyerRead(store));
+
+  // The "More from" shelf (628 [HN4](b), lib/course-shelf.ts): only for a student, never on a guess about what they have.
+  const shelf = studying ? await shelfShown(store, course.shelf, product.id, access.learner.email) : [];
 
   // What the code knows of the course, never what anyone typed (292 [SQ3], lib/course-facts.ts).
   const facts = await readCourseFacts(course);
@@ -366,6 +370,23 @@ export default async function CoursePage({ params, searchParams }: Params) {
             <CourseOutline course={course} base={base} start={start} done={known} held={held} language={store.language} />
           </div>
         </div>
+
+        {shelf.length ? (
+          <section className="st-card mt-6 p-6 sm:p-8" aria-labelledby="course-shelf-title">
+            <h2 id="course-shelf-title" className="font-display text-xl font-semibold">{w.shelfTitle(store.name)}</h2>
+            <ul className="mt-4 space-y-3">
+              {shelf.map((item) => (
+                <li key={item.id} className="rounded-2xl px-5 py-4" style={{ border: "1px solid var(--st-line)" }}>
+                  <Link href={productPath(store, item)} prefetch={false} className="inline-flex min-h-11 items-center font-semibold underline underline-offset-4" style={{ color: "var(--st-text)" }}>
+                    {item.title}
+                  </Link>
+                  <p className="st-muted mt-1 text-sm font-semibold">{pricePill(store, item)}</p>
+                  {item.summary ? <p className="st-muted mt-1 text-sm leading-relaxed">{item.summary}</p> : null}
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
 
         <div className="mt-6 text-center">
           <Link href={`/@${store.handle}`} className="st-footer-link text-sm font-semibold">

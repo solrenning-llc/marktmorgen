@@ -128,7 +128,8 @@ type Pending = {
 function parseOwed(raw: unknown): Owed | undefined {
   const value = raw as Partial<Owed> | null | undefined;
   if (!value || typeof value !== "object") return undefined;
-  const cents = value.cents === null ? null : Number.isSafeInteger(value.cents) && (value.cents as number) > 0 ? (value.cents as number) : undefined;
+  // 0 is a settlement that gives nothing back (every language delivered) whose close did not land: collectRefund closes it.
+  const cents = value.cents === null ? null : Number.isSafeInteger(value.cents) && (value.cents as number) >= 0 ? (value.cents as number) : undefined;
   if (cents === undefined || typeof value.key !== "string" || !value.key || typeof value.since !== "number" || !Number.isSafeInteger(value.looks)) return undefined;
   return { cents, key: value.key, since: value.since, looks: value.looks as number, ...(value.stuck === true ? { stuck: true as const } : {}) };
 }
@@ -285,7 +286,11 @@ async function heldBy(id: string, now: number): Promise<AutoAnswer> {
   const held = repliesFor(await redisPipeline([["GET", pendingKey(id)]]), 1);
   if (!held) return { ok: false, reason: "unavailable" };
   const order = parseOrder(held[0]);
-  if (!order) return { ok: false, reason: parsePending(held[0])?.owed ? "owed" : "busy" };
+  if (!order) {
+    const owed = parsePending(held[0])?.owed;
+    // Nothing owed (cents 0) is a request about to be closed, never a refund waiting on Stripe.
+    return { ok: false, reason: owed && owed.cents !== 0 ? "owed" : "busy" };
+  }
   if (now - order.at < ORDER_SETTLE_MS) return { ok: false, reason: "checking" };
   const settled = await settleOrder(id, held[0] as string, order, now);
   return { ok: false, reason: settled === "refund" ? "owed" : settled === "gone" ? "unavailable" : "checking" };
@@ -427,10 +432,11 @@ export async function syncAutoCaptions(id: string, now = Date.now()): Promise<"d
   if (delivered.length === pending.langs.length || now - pending.at > GIVE_UP_HOURS * 3_600_000) {
     return (await settle(id, raw as string, pending, delivered, now)) ? "done" : "waiting";
   }
-  await redisPipeline([
-    ["SET", key, JSON.stringify({ ...pending, got: delivered }), "EX", KEEP_SECONDS],
-    ["ZADD", QUEUE, now + LOOK_AGAIN_MS, id],
-  ]);
+  // Progress is written only over the record this look read, as settle is: a slow look must never bring back a
+  // request another look settled and closed, or overwrite a refund owed (it would then refund a delivered language).
+  // When the record changed, it looks again and reads what the other look decided.
+  await swapRecord(id, raw as string, JSON.stringify({ ...pending, got: delivered }), KEEP_SECONDS);
+  await redisPipeline([["ZADD", QUEUE, now + LOOK_AGAIN_MS, id]]);
   return "waiting";
 }
 
@@ -466,9 +472,9 @@ async function settle(id: string, raw: string, pending: Pending, got: string[], 
 const RECORD_SWAP = '-- marktmorgen:captions-swap:v1\nif redis.call("GET", KEYS[1]) == ARGV[1] then redis.call("SET", KEYS[1], ARGV[2], "EX", ARGV[3]) return 1 else return 0 end';
 
 /** True only when the record was `from` and is now `to`; any other answer, or none, is false and nothing is assumed written. */
-async function swapRecord(id: string, from: string, to: string): Promise<boolean> {
+async function swapRecord(id: string, from: string, to: string, seconds = REFUND_KEEP_SECONDS): Promise<boolean> {
   try {
-    const replies = repliesFor(await redisPipeline([["EVAL", RECORD_SWAP, 1, pendingKey(id), from, to, REFUND_KEEP_SECONDS]]), 1);
+    const replies = repliesFor(await redisPipeline([["EVAL", RECORD_SWAP, 1, pendingKey(id), from, to, seconds]]), 1);
     return replies?.[0] === 1;
   } catch (error) {
     console.error("a captions record could not be changed; looked at again", id, error);
@@ -695,6 +701,6 @@ export async function autoRefundsOwed(folder: string): Promise<{ id: string; cen
   const rows = await redisPipeline(ids.map((id) => ["GET", pendingKey(id)]));
   return ids.flatMap((id, i) => {
     const pending = parsePending(rows[i]);
-    return pending?.owed && readStreamPath(pending.path)?.folder === folder ? [{ id, cents: pending.owed.cents ?? pending.cents, stuck: pending.owed.stuck === true }] : [];
+    return pending?.owed && pending.owed.cents !== 0 && readStreamPath(pending.path)?.folder === folder ? [{ id, cents: pending.owed.cents ?? pending.cents, stuck: pending.owed.stuck === true }] : [];
   });
 }

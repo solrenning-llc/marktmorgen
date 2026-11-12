@@ -31,12 +31,15 @@ const keys = new Map<string, { body: string; made: Refund }>();
 const held: { release: (langs: string[]) => void; promise: Promise<string[]> }[] = [];
 let captionsNow: string[] = [];
 let holdNext = 0;
+/** The video deleted with its lesson: the service answers 404. */
+let videoGone = false;
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   const method = init?.method ?? "GET";
   const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
   if (url.hostname === "video.bunnycdn.com") {
+    if (videoGone) return json({ message: "not found" }, 404);
     let langs = captionsNow;
     if (holdNext > 0) {
       holdNext -= 1;
@@ -128,6 +131,46 @@ async function main(): Promise<void> {
   await late;
   for (let look = 1; look <= 5; look += 1) await syncAutoCaptions(VIDEO, now + look * 3_600_000);
   is("nothing returned for languages that were delivered", returned() - before, 0);
+
+  part("A slow look that is not settling never writes back a request another look settled and closed");
+  refunds.length = 0;
+  keys.clear();
+  const at3 = at + 2;
+  // Before GIVE_UP_HOURS: a look that sees only English writes its progress and looks again.
+  const early = at3 + 3_600_000;
+  await redis.pipeline([
+    ["SET", `nl:stream:auto:${VIDEO}`, JSON.stringify({ langs: ["en", "es"], got: [], at: at3, cents: CHARGED, pi: PI, path: PATH }), "EX", 7 * 86_400],
+    ["ZADD", "nl:stream:autoq", early, VIDEO],
+  ]);
+  captionsNow = [];
+  holdNext = 1;
+  held.length = 0;
+  const slow = syncAutoCaptions(VIDEO, early);
+  while (!held.length) await new Promise((resolve) => setTimeout(resolve, 1));
+  captionsNow = ["en", "es"];
+  is("the look that saw both languages settles and closes the request", [await syncAutoCaptions(VIDEO, early), returned()], ["done", 0]);
+  // The slow look's answer, English only, comes back after the request was closed.
+  held[0].release(["en"]);
+  await slow;
+  // Later the creator deletes the lesson's video, and the sweep keeps looking.
+  videoGone = true;
+  for (let look = 1; look <= 5; look += 1) await syncAutoCaptions(VIDEO, early + look * 3_600_000);
+  videoGone = false;
+  is("nothing returned: Spanish was delivered", returned(), 0);
+  is("the closed request does not come back", redis.run(["GET", `nl:stream:auto:${VIDEO}`]), null);
+
+  part("A settlement that gave nothing back, whose close did not land, is closed at the next look");
+  refunds.length = 0;
+  keys.clear();
+  const at4 = at + 3;
+  // Every language delivered; the record was swapped to "nothing owed", then its DEL timed out.
+  await redis.pipeline([
+    ["SET", `nl:stream:auto:${VIDEO}`, JSON.stringify({ langs: ["en", "es"], got: ["en", "es"], at: at4, cents: CHARGED, pi: PI, path: PATH, owed: { cents: 0, key: `nl-captions:${VIDEO}:${at4}:refund`, since: now, looks: 0 } }), "EX", 400 * 86_400],
+    ["ZADD", "nl:stream:autoq", now, VIDEO],
+  ]);
+  is("the next look closes it", await syncAutoCaptions(VIDEO, now + 60_000), "done");
+  is("the record is gone", redis.run(["GET", `nl:stream:auto:${VIDEO}`]), null);
+  is("and nothing was returned", returned(), 0);
   done();
 }
 

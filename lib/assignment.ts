@@ -42,6 +42,7 @@ import {
 
 const taskKey = (courseId: string, lessonId: string) => `nl:course:${courseId}:task:${lessonId}`;
 const subKey = (courseId: string, lessonId: string, who: string) => `nl:course:${courseId}:task:${lessonId}:sub:${who}`;
+const lockKey = (courseId: string, lessonId: string, who: string) => `${subKey(courseId, lessonId, who)}:lock`;
 const filesKey = (courseId: string, lessonId: string) => `nl:course:${courseId}:task:${lessonId}:files`;
 const waitingKey = (courseId: string) => `nl:course:${courseId}:tasks:waiting`;
 const allKey = (courseId: string) => `nl:course:${courseId}:tasks:all`;
@@ -394,8 +395,10 @@ const HAND_IN_WAIT_MS = 5_000;
  * from reading the earlier work to deleting the file it replaced inside this. A lock still taken after the wait
  * throws LockBusyError before anything is read or taken, so the student can simply hand in again.
  */
-export function oneHandInAtATime<T>(courseId: string, lessonId: string, who: string, work: () => Promise<T>): Promise<T> {
-  return withLock(`${subKey(courseId, lessonId, who)}:lock`, HAND_IN_LOCK_SECONDS, HAND_IN_WAIT_MS, () => work());
+export function oneHandInAtATime<T>(courseId: string, lessonId: string, who: string, work: (lock: string) => Promise<T>): Promise<T> {
+  // The lock's token goes to the work, so its write is made only while the lock is still this hand-in's (handIn's
+  // `lock`): one whose lock ran out, or that an erasure took away (forgetTasksPerson), writes nothing.
+  return withLock(lockKey(courseId, lessonId, who), HAND_IN_LOCK_SECONDS, HAND_IN_WAIT_MS, (held) => work(held.token));
 }
 
 /**
@@ -418,13 +421,17 @@ export class HandInChangedError extends Error {
 
 /**
  * The work written only over the one it was read as (KEYS: the work, the lesson's files, the course's waiting list,
- * its list of all work; ARGV: the work as read or "" for none, the new work, the file's path or "", its bytes, "1"
- * when a person reads it, when, the lists' member). 1 when written, 0 when the work changed since and nothing was
- * written; so the file it replaced is answered, deleted and given back by one hand-in only.
+ * its list of all work, the hand-in's lock; ARGV: the work as read or "" for none, the new work, the file's path or
+ * "", its bytes, "1" when a person reads it, when, the lists' member, the lock's token or "" for a write made outside
+ * oneHandInAtATime). 1 when written, 0 when the work changed since or the lock is no longer this hand-in's, and
+ * nothing was written; so the file it replaced is answered, deleted and given back by one hand-in only, and a
+ * student erased meanwhile (forgetTasksPerson takes the lock away first) stays erased, even when there was no work
+ * yet to differ from (Codex L's MEDIUM, Defect 4034). Modelled by lib/redis-memory.ts.
  */
-export const HAND_IN_WRITE_IF = `-- marktmorgen:hand-in-write-if:v1
+export const HAND_IN_WRITE_IF = `-- marktmorgen:hand-in-write-if:v2
 local now = redis.call('GET', KEYS[1]) or ''
 if now ~= ARGV[1] then return 0 end
+if ARGV[8] ~= '' and redis.call('GET', KEYS[5]) ~= ARGV[8] then return 0 end
 redis.call('SET', KEYS[1], ARGV[2])
 if ARGV[3] ~= '' then redis.call('HSET', KEYS[2], ARGV[3], ARGV[4]) end
 if ARGV[5] == '1' then redis.call('ZADD', KEYS[3], ARGV[6], ARGV[7]) else redis.call('ZREM', KEYS[3], ARGV[7]) end
@@ -452,6 +459,11 @@ export async function handIn(input: {
    * it) may be kept even when the call fails, its answer lost or a step after it failing (CX-123 rule 24).
    */
   writing?: () => void;
+  /**
+   * The token of the lock oneHandInAtATime holds for this work: the write is made only while the lock is still it
+   * (HAND_IN_WRITE_IF). The route always passes it; left out, the write is checked against the work alone.
+   */
+  lock?: string;
 }): Promise<HandIn> {
   const { courseId, lessonId, who, task } = input;
   const at = input.now ?? Math.floor(Date.now() / 1000);
@@ -480,11 +492,12 @@ export async function handIn(input: {
       [
         "EVAL",
         HAND_IN_WRITE_IF,
-        4,
+        5,
         subKey(courseId, lessonId, who),
         filesKey(courseId, lessonId),
         waitingKey(courseId),
         allKey(courseId),
+        lockKey(courseId, lessonId, who),
         read.raw,
         JSON.stringify(kept),
         input.file?.path ?? "",
@@ -492,6 +505,7 @@ export async function handIn(input: {
         task.review ? "1" : "0",
         at,
         member,
+        input.lock ?? "",
       ],
     ]),
     1,
@@ -771,6 +785,12 @@ export class TaskRecordUnreadError extends Error {
  */
 export async function forgetTasksPerson(courseId: string, lessonIds: string[], who: string, room: string | null): Promise<{ records: number; files: string[] }> {
   if (!lessonIds.length || !WHO.test(who) || !isRedisConfigured()) return { records: 0, files: [] };
+  // Every hand-in of theirs still in flight loses its lock first, before anything is read: its write, made only while
+  // the lock is its own (HAND_IN_WRITE_IF), writes nothing afterwards, even one whose read found no work yet (Codex
+  // L's MEDIUM, Defect 4034). Nothing is left behind for it. Read exactly: a count that is not a whole number throws
+  // before anything is read or deleted, and the erasure's retry takes them away again.
+  const unlocked = repliesFor(await redisPipeline([["DEL", ...lessonIds.map((l) => lockKey(courseId, l, who))]]), 1)?.[0];
+  if (countOf(unlocked) === null) throw new UnknownReplyError("the locks of a student's hand-ins");
   const raws = repliesFor(await redisPipeline(lessonIds.map((l) => ["GET", subKey(courseId, l, who)])), lessonIds.length);
   if (!raws || !raws.every((raw) => raw === null || typeof raw === "string")) throw new UnknownReplyError("a student's work on a course's assignments");
   const handed = lessonIds.flatMap((lessonId, i) => (typeof raws[i] === "string" ? [{ lessonId, file: fileOfRecord(raws[i] as string) }] : []));

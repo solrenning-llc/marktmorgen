@@ -65,7 +65,7 @@ export async function POST(request: NextRequest) {
 
     // One hand-in of this work at a time, from reading the earlier work to deleting the file it replaced
     // (oneHandInAtATime): otherwise two at once each give the earlier file's room back.
-    const refused = await oneHandInAtATime(course.id, lesson.id, who, async (): Promise<Response | null> => {
+    const refused = await oneHandInAtATime(course.id, lesson.id, who, async (lock): Promise<Response | null> => {
       const before = await submissionOf(course.id, lesson.id, who);
       if (before && task.review && before.state === "approved") return no("closed", 409);
 
@@ -114,7 +114,7 @@ export async function POST(request: NextRequest) {
       // Whether handIn sent its write: from then on the work may keep the file even when the call fails (its answer
       // lost, or a step after it failing), so neither the file nor its bytes may be let go (CX-123 rule 24).
       let written = false;
-      const done = await handIn({ courseId: course.id, lessonId: lesson.id, who, email, task, text, file, data: store, writing: () => { written = true; } }).catch(async (error: unknown) => {
+      const done = await handIn({ courseId: course.id, lessonId: lesson.id, who, email, task, text, file, data: store, lock, writing: () => { written = true; } }).catch(async (error: unknown) => {
         // Work that was not kept leaves no file behind it: the new file sent here (never the one the earlier work keeps)
         // is deleted, and its bytes come back once it is gone; a file that could not be deleted stays counted. Once the
         // write was sent, both stay counted, which only refuses sooner; except when the work changed under this one

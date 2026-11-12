@@ -83,7 +83,8 @@ test("a drop read before a student's erasure gives the file's bytes back once", 
 test("an erasure racing a drop the other way round gives the bytes back once", async () => {
   seed();
   // forgetTasksPerson reads the record, then the drop runs whole before forgetTasksPerson deletes.
-  const isErasure = (batch: Batch) => batch[0]?.[0] === "DEL" && String(batch[0][1]).includes(":sub:");
+  // The erasure's delete of the work, not its first DEL of the hand-in locks (Defect 4034).
+  const isErasure = (batch: Batch) => batch[0]?.[0] === "DEL" && String(batch[0][1]).includes(":sub:") && !String(batch[0][1]).endsWith(":lock");
   const done = await aheadOf(isErasure, async () => applyTaskDrop(await readTaskDrop(COURSE, LESSON), ROOM, DATA), () => forgetTasksPerson(COURSE, [LESSON], WHO, ROOM));
   assert.equal(counter(), 1000, "only lesson OTHER's 1000 bytes are still kept");
   assert.deepEqual(done.files, ["a.pdf"], "the file is still returned to be deleted");

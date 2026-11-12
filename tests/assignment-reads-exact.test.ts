@@ -64,6 +64,8 @@ async function withReplies<T>(alter: (batch: Batch, answers: unknown[]) => unkno
   }
 }
 const isGets = (batch: Batch) => batch.length > 0 && batch.every((c) => c[0] === "GET");
+/** The erasure's first command: one DEL of the student's hand-in locks only (Defect 4034), nothing of their work. */
+const isUnlock = (batch: Batch) => batch.length === 1 && batch[0][0] === "DEL" && batch[0].slice(1).every((k) => String(k).endsWith(":lock"));
 
 // ------------------------------------------------------------ deleting a person
 
@@ -83,7 +85,17 @@ test("erasure: a person who handed nothing in is confirmed absent, nothing delet
   redis.clear();
   const result = await withReplies((_b, a) => a, () => forgetTasksPerson(COURSE, [LESSON, OTHER_LESSON], WHO, ROOM_KEY));
   assert.deepEqual(result.value, { records: 0, files: [] });
-  assert.equal(result.sent.length, 1, "only the reading");
+  assert.equal(result.sent.length, 2, "only the locks taken away and the reading");
+  assert.ok(isUnlock(result.sent[0]) && isGets(result.sent[1]), "the locks first, then the reading");
+});
+
+test("erasure: a reply to taking the hand-in locks away that is not a count throws, nothing read or deleted", async () => {
+  redis.clear();
+  seed(LESSON, JSON.stringify(work(LESSON)));
+  const result = await withReplies((b, a) => (isUnlock(b) ? ["OK"] : a), () => forgetTasksPerson(COURSE, [LESSON, OTHER_LESSON], WHO, ROOM_KEY));
+  assert.ok(result.error, `rejected, not ${JSON.stringify(result.value)}`);
+  assert.equal(result.sent.length, 1, "nothing read or deleted after it");
+  assert.equal(typeof redis.run(["GET", sub(LESSON)]), "string", "the record is still there to erase on the retry");
 });
 
 for (const [label, alter] of [
@@ -97,7 +109,7 @@ for (const [label, alter] of [
     seed(LESSON, JSON.stringify(work(LESSON)));
     const result = await withReplies((b, a) => (isGets(b) ? alter(b, a) : a), () => forgetTasksPerson(COURSE, [LESSON, OTHER_LESSON], WHO, ROOM_KEY));
     assert.ok(result.error, `rejected, not ${JSON.stringify(result.value)}`);
-    assert.equal(result.sent.length, 1, "nothing sent after the reading");
+    assert.equal(result.sent.length, 2, "nothing sent after the reading (the locks taken away before it)");
     assert.equal(typeof redis.run(["GET", sub(LESSON)]), "string", "the record is still there to erase on the retry");
   });
 }
@@ -128,7 +140,8 @@ test("erasure: beside a record that does not read, the files that do read go to 
 
 // The deletion batch's own receipt (Codex P on #2847): DEL, ZREM, HDEL and ZADD each answer a count. A batch that
 // answers nothing, short or in another shape may have applied all, part or none of it: never "done".
-const isDeletion = (batch: Batch) => batch.length > 0 && batch[0][0] === "DEL";
+// Not the erasure's first DEL of the hand-in locks alone (isUnlock, Defect 4034).
+const isDeletion = (batch: Batch) => batch.length > 0 && batch[0][0] === "DEL" && !isUnlock(batch);
 for (const [label, alter, applied] of [
   ["nothing applied, no replies", () => [], 0],
   ["only the first DEL applied, no replies", () => [], 1],

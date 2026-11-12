@@ -223,10 +223,11 @@ export class MemoryRedis {
           return 1;
         }
         // lib/assignment.ts HAND_IN_WRITE_IF: a student's work written only over the one it was read as.
-        if (key.startsWith("-- marktmorgen:hand-in-write-if:v1\n") && args[0] === "4" && args.length === 12) {
-          const [, sub, files, waiting, all, expected, json, path, bytes, review, at, member] = args;
+        if (key.startsWith("-- marktmorgen:hand-in-write-if:v2\n") && args[0] === "5" && args.length === 14) {
+          const [, sub, files, waiting, all, lock, expected, json, path, bytes, review, at, member, token] = args;
           const now = this.run(["GET", sub]);
           if ((typeof now === "string" ? now : "") !== expected) return 0;
+          if (token !== "" && this.run(["GET", lock]) !== token) return 0;
           this.run(["SET", sub, json]);
           if (path !== "") this.run(["HSET", files, path, bytes]);
           this.run(review === "1" ? ["ZADD", waiting, at, member] : ["ZREM", waiting, member]);

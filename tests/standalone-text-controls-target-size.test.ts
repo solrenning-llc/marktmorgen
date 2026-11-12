@@ -8,7 +8,10 @@
  * "Start over", "Remove Stripe", "Let it go", "Move up") was only as tall as
  * its line, 16 to 24 px. On a store page the chat and the Store assistant are
  * on every page, so a buyer on a phone had to hit a 16 px line to reach the
- * creator.
+ * creator. Pages had the same gap: the capability titles and the calculator
+ * link on /platform, "View existing credits" beside the invite button, each
+ * letter's title under a store, and the logo of the recovery sign-in page
+ * (32 px, where every other sign-in page has 44).
  *
  * What is checked, in the real source of each file below, with the
  * TypeScript parser: every `<button>`, `<a>` and `<Link>` that sets a class
@@ -37,6 +40,10 @@ const FILES = [
   "components/task-editor.tsx",
   "components/link-editor.tsx",
   "components/old-addresses.tsx",
+  "app/platform/page.tsx",
+  "app/invite/[code]/page.tsx",
+  "app/[handle]/letters/page.tsx",
+  "app/signin/lost/confirm/page.tsx",
 ];
 
 /** Shared classes whose 44 px floor app/globals.css sets (checked below), or the utility itself. */
@@ -61,6 +68,28 @@ const INLINE: { file: string; marker: string; reason: string }[] = [
     file: "components/workflow-tools.tsx",
     marker: "onClick={erasePerson}",
     reason: "\"Erase ... from every workflow\" is the middle of the sentence that says what is erased",
+  },
+  {
+    file: "app/invite/[code]/page.tsx",
+    marker: 'href="/demo"',
+    reason: "\"Open the live demo store\" sits in the sentence \"Want to look around first? ... or see how we compare\"",
+  },
+  {
+    file: "app/invite/[code]/page.tsx",
+    marker: 'href="/proof/compare"',
+    reason: "\"see how we compare\" ends that same sentence",
+  },
+];
+
+/**
+ * A control whose floor another open pull request sets in app/globals.css, so this one does not touch it:
+ * the way back at the foot of a page under a store (`.st-page :is(div, nav) > a.st-footer-link`, PR #3746).
+ */
+const ELSEWHERE: { file: string; marker: string; reason: string }[] = [
+  {
+    file: "app/[handle]/letters/page.tsx",
+    marker: "w.visit(store.name)",
+    reason: "the way back to the store, given 44 px by app/globals.css in PR #3746 (Claude 4)",
   },
 ];
 
@@ -114,12 +143,12 @@ function controls(file: string): Control[] {
 async function main() {
   const found = FILES.flatMap(controls);
   assert.ok(found.length >= 40, `the parser reads the controls of every file (found ${found.length})`);
-  for (const inline of INLINE) {
+  for (const inline of [...INLINE, ...ELSEWHERE]) {
     assert.equal(found.filter((c) => c.file === inline.file && c.text.includes(inline.marker)).length, 1,
       `${inline.file}: the inline exemption (${inline.reason}) names exactly one control`);
   }
   const missing = found
-    .filter((c) => !INLINE.some((inline) => inline.file === c.file && c.text.includes(inline.marker)))
+    .filter((c) => ![...INLINE, ...ELSEWHERE].some((inline) => inline.file === c.file && c.text.includes(inline.marker)))
     .filter((c) => !c.classes.some((token) => FLOOR_CLASSES.includes(token) || PADDED.test(token)))
     .map((c) => `${c.file}:${c.line} <${c.tag} className="${c.classes.join(" ")}">`);
   assert.deepEqual(missing, [], "every stand-alone text control has a 44 px floor");

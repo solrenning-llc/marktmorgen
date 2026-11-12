@@ -267,7 +267,9 @@ async function main(): Promise<void> {
       videos: ranOn("nl:stream:due"),
       captions: ranOn(QUEUE),
       watch: ranOn("nl:watch:due"),
-      letGo: seen.some((c) => c[0] === "DEL" && c[1] === "nl:stream:lock"),
+      // Let go = this run touched the lock and it is gone afterward, whatever command released it (DEL here, the
+      // compare-and-delete script of lib/redis-lock.ts on main), so the check reads the outcome, not one command.
+      letGo: seen.some((c) => c.includes("nl:stream:lock")) && redis.run(["GET", "nl:stream:lock"]) === null,
     };
   };
   reset();

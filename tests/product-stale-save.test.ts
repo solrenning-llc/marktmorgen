@@ -111,6 +111,7 @@ async function main() {
   is("a stale answer is met in run() without touching the creator's draft", [staleBranch.includes("setStale("), /setDraft|setOpened/.test(staleBranch)], [true, false]);
   is("the saved version replaces the draft only on the creator's own press", /Use the saved version/.test(editor) && /onClick=\{\(\) => \{[\s\S]{0,300}setDraft\(saved\)/.test(editor), true);
   is("the message is announced and takes the focus", /data-stale-notice[\s\S]{0,400}tabIndex=\{-1\}/.test(editor) && /role="alert"/.test(editor), true);
+  is("the focus moves once the notice is on the page, from an effect, not a frame asked for before it", /useEffect\(\(\) => \{\s*if \(stale\) document\.getElementById\(`product-\$\{stale\.id\}-stale-title`\)\?\.focus\(\);/.test(editor), true);
   is("both ways forward are offered by name", /Keep my changes and save/.test(editor) && /Use the saved version/.test(editor), true);
 
   part("What a refusal reads is counted, in the studio request it is part of");

@@ -1966,6 +1966,10 @@ export function ProductEditor({
   const [openedRev, setOpenedRev] = useState(0);
   // A save refused because the product was saved elsewhere since: which product, and what is saved now.
   const [stale, setStale] = useState<{ id: string; current: StaleCurrent } | null>(null);
+  // The focus goes to the notice once it is on the page (2.4.3), never before: a frame asked for earlier can come first.
+  useEffect(() => {
+    if (stale) document.getElementById(`product-${stale.id}-stale-title`)?.focus();
+  }, [stale]);
   useLeaveGuard((adding || editingId !== null) && JSON.stringify(draft) !== JSON.stringify(opened) && !busy);
   // A new price on a product buyers can see is shown, old and new, before it is saved (487 [IT4], pattern 8): the id under review.
   const [priceReview, setPriceReview] = useState<string | null>(null);
@@ -2122,7 +2126,6 @@ export function ProductEditor({
       setPriceReview(null);
       // The rest of the page, and the price check, are brought up to what is saved now; the form keeps its words.
       router.refresh();
-      requestAnimationFrame(() => document.getElementById(`product-${productId}-stale-title`)?.focus());
       return;
     }
     if (problem) {

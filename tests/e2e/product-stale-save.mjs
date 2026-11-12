@@ -99,6 +99,26 @@ try{
  await tabB.locator(`#product-form-${id}`).waitFor({state:"detached",timeout:30000});
  await tabA.reload({waitUntil:"networkidle"});
  check("keeping one's own changes, chosen with both shown, saves them",await tabA.getByText("Weekly Meal Planner, renamed in tab B").count()>0,true);
+
+ // The other way: a third tab saves, the stale one takes what is saved now, and its form shows it.
+ const tabC=await context.newPage();
+ await tabC.goto(origin+studio,{waitUntil:"networkidle"});
+ await tabA.locator("[data-product-editor] li",{has:tabA.locator(`text="Weekly Meal Planner, renamed in tab B"`)}).first().getByRole("button",{name:"Edit",exact:true}).click();
+ await tabC.locator("[data-product-editor] li",{has:tabC.locator(`text="Weekly Meal Planner, renamed in tab B"`)}).first().getByRole("button",{name:"Edit",exact:true}).click();
+ await tabC.locator(`#product-summary-${id}`).fill("Saved in tab C.");
+ await tabC.locator(`#product-form-${id}`).getByRole("button",{name:"Save",exact:true}).click();
+ await tabC.locator(`#product-form-${id}`).waitFor({state:"detached",timeout:30000});
+ await tabA.locator(`#product-title-${id}`).fill("A name typed in tab A");
+ await tabA.locator(`#product-form-${id}`).getByRole("button",{name:"Save",exact:true}).click();
+ await tabA.locator("[data-stale-notice]").waitFor({timeout:30000});
+ await tabA.getByRole("button",{name:"Use the saved version"}).focus();
+ await tabA.keyboard.press("Enter");
+ await tabA.waitForFunction(id=>document.activeElement?.id===`product-title-${id}`,id,{timeout:5000}).catch(()=>{});
+ check("using the saved version fills the form with it",[await tabA.locator(`#product-title-${id}`).inputValue(),await tabA.locator(`#product-summary-${id}`).inputValue()],["Weekly Meal Planner, renamed in tab B","Saved in tab C."]);
+ check("the notice goes and the focus is on the name",[await tabA.locator("[data-stale-notice]").count(),await tabA.evaluate(()=>document.activeElement?.id)],[0,`product-title-${id}`]);
+ await tabA.locator(`#product-form-${id}`).getByRole("button",{name:"Save",exact:true}).click();
+ await tabA.locator(`#product-form-${id}`).waitFor({state:"detached",timeout:30000});
+ check("a save after taking the saved version is taken",await tabA.locator("[data-stale-notice]").count(),0);
  await context.close();
 }finally{
  await browser?.close();app.kill();await services.close();

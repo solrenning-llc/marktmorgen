@@ -4,7 +4,8 @@
 // control at least 44 × 44 px (2.5.5); real Tab presses reach every control with a visible focus; a fix pressed
 // with typed words changes only that place, is said in the status region and can be undone; vague words are
 // refused with the error tied to the field; "Show it in the text" selects the place; marking a picture as
-// decoration leaves the text as it is. Not a conformity claim; no assistive technology was run here.
+// decoration leaves the text as it is; the studio's own editor (components/mail-designer.tsx), left in Design, opens
+// Write and selects the place it is asked to show. Not a conformity claim; no assistive technology was run here.
 // node tests/e2e/mail-access-review.mjs  (E2E_BROWSER=chromium|firefox|webkit; CHROMIUM=<path> for a local browser)
 import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
@@ -39,6 +40,7 @@ const compiler = await compile(readFileSync(join(root, "app/globals.css"), "utf8
 const css = compiler.build(new Scanner({ sources: [
   { base: root, pattern: "components/mail-access-review.tsx", negated: false },
   { base: root, pattern: "tests/e2e/mail-access-harness.tsx", negated: false },
+  { base: root, pattern: "components/mail-designer.tsx", negated: false },
 ] }).scan());
 const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Email access check</title><link rel="stylesheet" href="/globals.css"></head><body><main id="root"></main><script>window.process={env:{NODE_ENV:"production"}};</script><script src="/panel.js"></script></body></html>`;
 
@@ -134,6 +136,15 @@ try {
     is(at + "clear: nothing to fix", (await page.locator("section").textContent()).includes("Nothing to fix"), true);
     is(at + "axe AAA: no violation once clear", await audit(), []);
     is(at + "every control at least 44 × 44 px once clear", await small(), []);
+
+    // The studio's own editor, left in Design: asked to show a place, it opens Write and selects it there.
+    const from = START.indexOf("[Click here]"), to = from + "[Click here](https://example.com/guide)".length;
+    await page.evaluate(([body, at]) => window.harness.editor(body, at), [START, [from, to]]);
+    await page.getByRole("button", { name: "Design" }).click();
+    await page.getByRole("button", { name: "Show the place" }).click();
+    await settled();
+    is(at + "the editor opens Write and selects the place", await page.evaluate(() => { const box = document.querySelector("textarea"); return [document.activeElement === box, box ? box.value.slice(box.selectionStart, box.selectionEnd) : null]; }), [true, "[Click here](https://example.com/guide)"]);
+    is(at + "Write is the pressed mode", await page.getByRole("button", { name: "Write" }).getAttribute("aria-pressed"), "true");
     await context.close();
   }
   is("no page error", errors, []);

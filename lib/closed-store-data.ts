@@ -43,6 +43,8 @@
  *   nl:closed:due     sorted set  a store's key -> when its records came due (ms)
  *   nl:closed:batch   hash        a store's key -> what the walk needs of it (JSON), while its walk runs
  *   nl:closed:walk    hash        cursor, started, finished
+ *   nl:closed:claims:<ref hash>   string  where a closing store's preparation stopped in its hosts' claims (JSON),
+ *                                         until it reaches their end; deleted with the store (claimsLeft)
  *
  * Reading the database is the company's, bounded by its schedule: one walk a
  * day at the most, WALK_COUNT keys a command (docs/funded-exposure-review.md).
@@ -57,7 +59,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor, scanPage, stringList } from "@/lib/redis-reply";
 import { type Held as LockHeld, LockBusyError, holdLock, releaseLock } from "@/lib/redis-lock";
 import { CLOSING, type Closing, closingFamilyOf } from "@/lib/data-families";
-import { DEL_BATCH, FOLLOW_BATCH, RENEWALS_AT_ONCE, closesStore } from "@/lib/plan-closing-rules";
+import { CLAIM_PAGES, CLAIMS_LEFT_DAYS, DEL_BATCH, FOLLOW_BATCH, RENEWALS_AT_ONCE, closesStore } from "@/lib/plan-closing-rules";
 import { ENDED_INDEX, standingOf } from "@/lib/plan-standing";
 import { SHARING_INDEX } from "@/lib/platform-share";
 import { idsIn } from "@/lib/data-recount";
@@ -65,9 +67,9 @@ import { readAllListings } from "@/lib/catalog";
 import { readCourses } from "@/lib/course";
 import { readFlows } from "@/lib/flows";
 import { FINAL_INDEX } from "@/lib/closing-holds";
-import { RELEASE_QUARANTINE_DAYS, STORE_ID_PATTERN, STRIPE_ACCOUNT_PATTERN, type Store, accountStores, closeStoreRecord, handleLeadsToStore, saleHandles, storeFolder, storeForEmailSeen, storeHandleKey, storeRef } from "@/lib/store";
+import { MAX_STORES_PER_ACCOUNT, RELEASE_QUARANTINE_DAYS, STORE_ID_PATTERN, STRIPE_ACCOUNT_PATTERN, type Store, accountStores, closeStoreRecord, handleLeadsToStore, saleHandles, storeFolder, storeForEmailSeen, storeHandleKey, storeRef } from "@/lib/store";
 import { domainKey } from "@/lib/domains";
-import { dropTeam, memberStores, readTeam } from "@/lib/team";
+import { dropTeam, memberStoresExact, readTeam } from "@/lib/team";
 import { hostCalendarKeys } from "@/lib/host-calendar";
 import { revokeAllKeys } from "@/lib/api-keys";
 import { forgetStoreWebhooks } from "@/lib/webhooks";
@@ -128,6 +130,14 @@ export type Batched = {
    * is never walked by its ids again, since by then another store may hold its address or key.
    */
   unfinished?: number;
+  /**
+   * Hosts (their emails) whose own calendar was kept at the preparation because whether they serve another store
+   * could not be known (servesAnother): each is read again before the store is finished (decideCalendars), and the
+   * store stays in the batch, set aside, until each is known (Claude 4 on #3660).
+   */
+  calendars?: string[];
+  /** Its last mark was written (ms; finishStores): it stays in the batch only for `calendars`, and is not told again. */
+  finished?: number;
 };
 
 /** Every file-like record in what a store keeps: a path and the day it was added. */
@@ -295,15 +305,17 @@ type Taken = { due: "gone" | "live" | "hold" } | { due: "due"; store: Store; hel
  * then the check and the first delete were separate steps: a store whose plan ran again while the check waited was
  * prepared from what was read before, closed and erased with its contacts.
  *
- * "gone" when no store is kept under the key, as before. A read that does not answer throws UnknownReplyError: the
- * run stops and the store stays in line untouched.
+ * "gone" only when Redis says no store is kept under the key (nil). A read that does not answer, or a record that is
+ * there but does not read as the store of this key (not a string, or a string that is not one: storeUnder), throws
+ * UnknownReplyError: the store stays in line untouched, moved back a walk (eraseClosed). Until then such a record was
+ * "gone" and the store left the line, so a closed store with a damaged record was never erased (Claude 6 on #3156).
  */
 async function takeDue(ref: string, now: number): Promise<Taken> {
   for (let attempt = 0; attempt < TAKE_ATTEMPTS; attempt += 1) {
     let reply: unknown;
     const store = await storeForEmailSeen(ref, (_, answer) => void (reply = answer));
     const read = repliesFor(reply, 1);
-    if (!read) throw new UnknownReplyError("a closing store's record (GET)");
+    if (!read || (read[0] !== null && (typeof read[0] !== "string" || !store))) throw new UnknownReplyError("a closing store's record (GET)");
     if (!store || typeof read[0] !== "string") return { due: "gone" };
     const seen = await dueForErasure(store, now);
     if (seen.due !== "due") return { due: seen.due };
@@ -492,30 +504,22 @@ export async function prepareStore(store: Store, now = Date.now(), held?: LockHe
   // Read whole or not at all: a team not read is never "no teammates" (rule 24); it throws, and the walk waits.
   const team = store.sid ? await readTeam(store.sid) : { members: [], invites: [] };
   const own = new Set(marks);
-  for (const host of [store.email, ...team.members.map((m) => m.email)].map(hostId)) {
-    let cursor = "0";
-    let kept = false;
-    for (let round = 0; round < 50; round += 1) {
-      const [reply] = await redisPipeline([["HSCAN", claimsKey(host), cursor, "COUNT", 500]]);
-      const [next, flat] = Array.isArray(reply) ? [String(reply[0]), (reply[1] as unknown[]).map(String)] : ["0", []];
-      const mine: string[] = [];
-      for (let i = 0; i + 1 < flat.length; i += 2) if (pieces(flat[i + 1]).some((part) => own.has(part))) mine.push(flat[i]);
-      if (mine.length) {
-        // Once for a host's claims, fifty pages at the most, before the first of them goes.
-        if (!kept) await keep();
-        kept = true;
-        await apply([["HDEL", claimsKey(host), ...mine]]);
-      }
-      cursor = next;
-      if (cursor === "0") break;
-    }
-  }
-  // A host's own calendar is the host's, across the stores they serve: it goes with the last of them. A read
-  // that fails is never "no other store" (rule 24): it throws, and the walk tries this store again later.
-  for (const email of [store.email, ...team.members.map((m) => m.email)]) {
-    const elsewhere = (await memberStores(email)).some((m) => m.store.sid !== store.sid)
-      || (await accountStores(email)).some((other) => other.sid !== store.sid);
-    if (!elsewhere) extra.push(...hostCalendarKeys(hostId(email)));
+  const hosts = [store.email, ...team.members.map((m) => m.email)];
+  extra.push(await clearClaims(store, hosts.map(hostId), own, keep, apply));
+  // A host's own calendar is the host's, across the stores they serve: it goes with the last of them, and only when
+  // it is known to be the last (servesAnother). Whether they serve another store is read exactly (Claude 6 on #3156):
+  // until then accountStores read an account set that did not answer as a list as no other store, and memberStores
+  // left out a store whose team or record did not read and stopped at fifty, so a live store's host lost their
+  // calendar. Not known is never "no other store" (rules 24 and 30): their calendar is kept, and the rest of the
+  // closing store goes on. Until then not known moved the store back a walk, and a host on more stores than are read
+  // (MEMBER_STORES_READ), which nothing bounds, made every closing store they host unerasable (Claude 4 on #3660).
+  // One not known is read again before the store is finished (decideCalendars), so a reply that did not read once
+  // never keeps a host's calendar, with their private calendar link, for good (Claude 4 on #3660 at af59d74bde).
+  const calendars: string[] = [];
+  for (const email of hosts) {
+    const serves = await servesAnother(email, store.sid);
+    if (serves === false) extra.push(...hostCalendarKeys(hostId(email)));
+    else if (serves === null) calendars.push(email);
   }
   await keep();
   await dropTeam(store, apply);
@@ -545,6 +549,7 @@ export async function prepareStore(store: Store, now = Date.now(), held?: LockHe
     marks,
     endedAt: Date.parse(store.planEndedAt) || now,
     at: now,
+    ...(calendars.length ? { calendars } : {}),
   };
   // The walk's entry is written before the record goes: once the record is gone, only this entry names the store's
   // keys (#3181). Under the walk's lock both go in one CLOSING_FENCED step, the entry first, so neither is made
@@ -561,6 +566,115 @@ export async function prepareStore(store: Store, now = Date.now(), held?: LockHe
   if (written !== 0 && written !== 1) throw new Error("the closing store's walk entry was not confirmed written");
   await closeStoreRecord(store);
   return entry;
+}
+
+/** Where a closing store's preparation stopped in its hosts' claims, until it reaches their end (clearClaims). */
+const claimsLeftKey = (ref: string) => `nl:closed:claims:${createHash("sha256").update(`closing-claims:${ref}`).digest("hex").slice(0, 40)}`;
+/** A host whose claims were read to their end, in claimsLeftKey. */
+const CLAIMS_END = "end";
+const CURSOR = /^\d{1,20}$/;
+
+/** A closing store whose hosts' claims are more than one walk reads: it waits a walk, and goes on from where it stopped. */
+class ClaimsLeftError extends Error {
+  constructor() {
+    super(`a closing store's hosts' claims are more than ${CLAIM_PAGES} pages a host; the next walk goes on from where this one stopped`);
+  }
+}
+
+/**
+ * Where an earlier walk stopped in this store's hosts' claims: a host's cursor, or CLAIMS_END for one read to the end.
+ * Only what this closing of the store wrote counts (`ended`, its plan's end): a store that ran again and closes again
+ * starts over. Nothing kept, or what does not read as one (an answer of another shape, a damaged value), starts over
+ * too: where it stopped only ever lets a walk skip pages already read, so starting over reads pages again and never
+ * leaves a claim (rule 24 is about the other way round: what does not read is never taken for "nothing to delete").
+ */
+async function claimsLeft(key: string, ended: string): Promise<Record<string, string>> {
+  const raw = repliesFor(await redisPipeline([["GET", key]]), 1)?.[0];
+  const value = typeof raw === "string" ? json(raw) : null;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const { ended: was, hosts } = value as { ended?: unknown; hosts?: unknown };
+  if (was !== ended || !hosts || typeof hosts !== "object" || Array.isArray(hosts)) return {};
+  const out: Record<string, string> = {};
+  for (const [host, at] of Object.entries(hosts)) if (typeof at === "string" && (at === CLAIMS_END || CURSOR.test(at))) out[host] = at;
+  return out;
+}
+
+/**
+ * Deletes the closing store's claims from each of its hosts' claims (a host's claims are theirs, across the stores
+ * they serve: only those that name one of the store's ids go), CLAIM_PAGES pages of HSCAN a host a walk at the most.
+ * Answers the key of where it stopped, for the preparation to delete with the store's other keys.
+ *
+ * A page that does not read, or a field without its value, is unknown, never the end of the host's claims (rules 24
+ * and 30, as scanAll; Claude 6 on #3156); a host not at their end after CLAIM_PAGES pages is not finished either
+ * (Claude 4 on #3660). Either way where it stopped is written (SET with EX, fenced as the deletes are, the lock made
+ * to last first) and the store waits a walk (ClaimsLeftError, or the error of the page): the next walk goes on from
+ * there, so every walk reads new pages and the store is prepared once the last host reaches their end. Until then
+ * the walk started over each time and a host with more than CLAIM_PAGES pages made the store unerasable, forever.
+ * A delete that fails throws as it is, and the walk goes on from where the last one wrote it stopped.
+ *
+ * A cursor kept from one walk to the next is a SCAN cursor: what was in the hash from the first page to the last is
+ * returned (Redis's SCAN guarantee); a claim of this store written in between may not be, as within one walk.
+ */
+async function clearClaims(store: Store, hosts: string[], own: Set<string>, keep: () => Promise<void>, apply: Apply): Promise<string> {
+  const key = claimsLeftKey(storeRef(store));
+  const ended = String(store.planEndedAt ?? "");
+  const left = await claimsLeft(key, ended);
+  let moved = false;
+  let stopped: unknown = null;
+  let unfinished = false;
+  let kept = false;
+  for (const host of hosts) {
+    let cursor = left[host] ?? "0";
+    for (let round = 0; round < CLAIM_PAGES && cursor !== CLAIMS_END; round += 1) {
+      let page: ReturnType<typeof scanPage> = null;
+      try {
+        page = scanPage(await redisPipeline([["HSCAN", claimsKey(host), cursor, "COUNT", 500]]));
+      } catch (error) {
+        stopped = error;
+        break;
+      }
+      if (!page || page.items.length % 2 !== 0) {
+        stopped = new UnknownReplyError("a closing store's host's claims (HSCAN)");
+        break;
+      }
+      const { next, items: flat } = page;
+      const mine: string[] = [];
+      for (let i = 0; i + 1 < flat.length; i += 2) if (pieces(flat[i + 1]).some((part) => own.has(part))) mine.push(flat[i]);
+      if (mine.length) {
+        // Once a walk, before the first of them goes.
+        if (!kept) await keep();
+        kept = true;
+        await apply([["HDEL", claimsKey(host), ...mine]]);
+      }
+      cursor = next === "0" ? CLAIMS_END : next;
+      left[host] = cursor;
+      moved = true;
+    }
+    if (stopped) break;
+    if (cursor !== CLAIMS_END) unfinished = true;
+  }
+  if (!stopped && !unfinished) return key;
+  if (moved) {
+    await keep();
+    await apply([["SET", key, JSON.stringify({ ended, hosts: left }), "EX", CLAIMS_LEFT_DAYS * 86_400]]);
+  }
+  throw stopped ?? new ClaimsLeftError();
+}
+
+/**
+ * Whether this person serves a store other than `sid` now, as one of its team (memberStoresExact) or as its owner
+ * (ownsAnother): true, false, or null when it cannot be known (a reply that does not read, a team or a store whose
+ * record does not read, more stores in their index than are read). Only false lets their own calendar go; null is
+ * never "no other store" (rule 24), and never stops the rest of the closing either (Claude 4 on #3660).
+ */
+async function servesAnother(email: string, sid: string): Promise<boolean | null> {
+  try {
+    if ((await memberStoresExact(email, sid)).some((m) => m.store.sid !== sid)) return true;
+    return await ownsAnother(email, sid);
+  } catch (error) {
+    console.error("whether a closing store's host serves another store could not be known; their own calendar is kept", error);
+    return null;
+  }
 }
 
 /** Who owns a key: the closing store one of whose ids names it. */
@@ -652,6 +766,28 @@ async function addressHeld(handle: string): Promise<boolean> {
  */
 const accountStoresKey = (email: string) =>
   `nl:account:stores:${createHash("sha256").update(`nimbus-account-stores:${email.toLowerCase()}`).digest("hex").slice(0, 40)}`;
+
+/**
+ * Whether this owner keeps a store other than `sid` now, read exactly (as accountHeld reads their stores): their first
+ * store, then each store of their account's set, at most MAX_STORES_PER_ACCOUNT of them. A reply that does not read, a
+ * record there that is not the store of its key, or a set of more stores than an account may have throws
+ * UnknownReplyError; an id with no record (nil), or a record of another owner (a move half done, which accountStores
+ * does not list either), is not one. Until then prepareStore read accountStores, which reads a set that does not
+ * answer as a list as no other store (Claude 6 on #3156). Its caller takes a throw as not known (servesAnother).
+ */
+async function ownsAnother(email: string, sid: string): Promise<boolean> {
+  const first = await storeUnder(email, "whether the owner of a closing store keeps a first store (GET)");
+  if (first && first.sid !== sid) return true;
+  const ids = stringList(repliesFor(await redisPipeline([["SMEMBERS", accountStoresKey(email)]]), 1)?.[0]);
+  if (!ids) throw new UnknownReplyError("the owner's other stores (SMEMBERS)");
+  const others = ids.filter((id) => STORE_ID_PATTERN.test(id) && id !== sid);
+  if (others.length > MAX_STORES_PER_ACCOUNT) throw new UnknownReplyError(`the owner's other stores, more than an account may have (SMEMBERS),`);
+  for (const id of others) {
+    const other = await storeUnder(`#${id}`, "whether the owner of a closing store keeps another store (GET)");
+    if (other && other.email.toLowerCase() === email.toLowerCase()) return true;
+  }
+  return false;
+}
 
 /** Whether a store of this owner sells through this Stripe account now, read exactly: its first store and every other store of its account. */
 async function accountHeld(email: string, account: string): Promise<boolean> {
@@ -1214,15 +1350,34 @@ async function finishStores(entries: Iterable<[string, Batched]>, finish: Finish
   let confirmed = true;
   for (const [ref, entry] of entries) {
     if (Date.now() > deadline) return null;
-    try {
-      await finish(entry, now);
-    } catch (error) {
-      console.error("a closed store's records are gone but its last mark could not be written; it is finished again on the next run", error);
-      left += 1;
-      if (entry.unfinished) continue;
-      const set = repliesFor(await redisPipeline([["HSET", BATCH_KEY, ref, JSON.stringify({ ...entry, unfinished: now })]]), 1)?.[0];
-      if (set !== 0 && set !== 1) confirmed = false;
-      continue;
+    // Its last mark is written once: a store kept in the batch only for its hosts' calendars is not told again.
+    if (!entry.finished) {
+      try {
+        await finish(entry, now);
+      } catch (error) {
+        console.error("a closed store's records are gone but its last mark could not be written; it is finished again on the next run", error);
+        left += 1;
+        if (entry.unfinished) continue;
+        const set = repliesFor(await redisPipeline([["HSET", BATCH_KEY, ref, JSON.stringify({ ...entry, unfinished: now })]]), 1)?.[0];
+        if (set !== 0 && set !== 1) confirmed = false;
+        continue;
+      }
+    }
+    if (entry.calendars?.length) {
+      const undecided = await decideCalendars(entry);
+      if (undecided.length) {
+        // Still not known (Claude 4 on #3660): the store stays in the batch, set aside and marked finished, with what
+        // is left to decide, read again on every run until it is known; never taken as "no other store".
+        left += 1;
+        // Kept only for that (Claude 1 C3 on #3660): nothing of the store but its ref, its id and its hosts to decide,
+        // never its owner's address, name, addresses, marks or stats id, which a walk no longer needs once it is told.
+        const slim = !entry.email && !entry.name && !entry.handle && !entry.handles.length && !entry.marks.length && entry.statsId === null;
+        if (entry.finished && entry.unfinished && slim && undecided.length === entry.calendars.length) continue;
+        const kept: Batched = { ...entry, email: "", name: "", handle: "", handles: [], marks: [], statsId: null, calendars: undecided, finished: entry.finished ?? now, unfinished: entry.unfinished ?? now };
+        const set = repliesFor(await redisPipeline([["HSET", BATCH_KEY, ref, JSON.stringify(kept)]]), 1)?.[0];
+        if (set !== 0 && set !== 1) confirmed = false;
+        continue;
+      }
     }
     // Out of the batch only on Redis's own answer (Claude 5 on #3279, rule 30): one still in it, not set aside,
     // would have its ids counted by the next walk. Not known to be out, the run stops here and finishes it again.
@@ -1235,6 +1390,27 @@ async function finishStores(entries: Iterable<[string, Batched]>, finish: Finish
     report.finished += 1;
   }
   return confirmed ? left : null;
+}
+
+/**
+ * The hosts of a walked store whose own calendar was kept because whether they serve another store was not known
+ * (prepareStore), read again: one known to serve no other store loses their calendar now, one known to serve another
+ * keeps it, and one still not known is answered back, to be read again on the next run. A delete not confirmed is not
+ * known either (rule 24). The store's record is gone by then, so the store itself is never counted as another.
+ */
+async function decideCalendars(entry: Batched): Promise<string[]> {
+  const undecided: string[] = [];
+  for (const email of entry.calendars ?? []) {
+    const serves = typeof email === "string" ? await servesAnother(email, entry.sid) : null;
+    if (serves === true) continue;
+    if (serves === false) {
+      const reply = repliesFor(await redisPipeline([["DEL", ...hostCalendarKeys(hostId(email))]]), 1)?.[0];
+      if (Number.isSafeInteger(reply) && (reply as number) >= 0) continue;
+      console.error("deleting a closed store's host's calendar was not confirmed; it is decided again on the next run", reply);
+    }
+    undecided.push(email);
+  }
+  return undecided;
 }
 
 /**
@@ -1290,8 +1466,10 @@ export async function eraseClosed(deadline: number, finish: Finisher, now = Date
           // The walk's lock ran out under it (LockBusyError): the store may run again, so the walk stops there and
           // changes nothing more of it, its place in line included; the next walk reads it again.
           if (error instanceof LockBusyError) throw error;
-          // Something it needs could not be read (rule 24), such as whether a host still serves another store: never
-          // taken as "nothing". It waits a walk, as above, and is prepared again (prepareStore is safe to repeat).
+          // Something it needs could not be read (rule 24), such as a page of a host's claims: never taken as
+          // "nothing". It waits a walk, as above, and is prepared again (prepareStore is safe to repeat); its hosts'
+          // claims go on from where this walk stopped (clearClaims), so a store with more than a walk reads still
+          // gets prepared.
           console.error("a closed store could not be prepared; it waits for the next walk", error);
           if (!(await moveBack(ref, now))) unsure = true;
           continue;

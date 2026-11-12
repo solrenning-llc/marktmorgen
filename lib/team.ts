@@ -41,11 +41,17 @@ import { withLock } from "@/lib/redis-lock";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { twoStepOn } from "@/lib/two-step";
 import { listPasskeys, pendingRemoval } from "@/lib/passkeys";
-import { type Store, STORE_ID_PATTERN, storeForId } from "@/lib/store";
+import { type Store, STORE_ID_PATTERN, storeForId, storeForIdExact } from "@/lib/store";
 import { type Role, type TeamRole, INVITE_DAYS, ROLE_NAMES, ROLE_SUMMARIES, parseTeamRole } from "@/lib/team-roles";
 
 /** People on one store's team, invitations still waiting included. */
 export const MAX_TEAM = 5;
+/**
+ * The most stores memberStores reads for one person: memberStoresExact throws past it (each is three reads), and its
+ * caller takes that as not known, never as "no other store" (lib/closed-store-data.ts, servesAnother, which keeps the
+ * person's own calendar and lets the rest of the closing go on; Claude 4 on #3660: nothing bounds a person's index).
+ */
+export const MEMBER_STORES_READ = 50;
 /** How long an invitation works (kept in lib/team-roles.ts, so a page can say it). */
 export { INVITE_DAYS };
 /** How many lines of the activity log are kept. */
@@ -332,7 +338,7 @@ export async function memberStores(email: string): Promise<{ store: Store; role:
   const list = ids.filter((id) => STORE_ID_PATTERN.test(id));
   const found: { store: Store; role: TeamRole }[] = [];
   const stale: string[] = [];
-  for (const sid of list.slice(0, 50)) {
+  for (const sid of list.slice(0, MEMBER_STORES_READ)) {
     // A store whose team answers in an unknown shape is left out of this answer and kept in the index: it is
     // neither "on it" nor "gone", and one other store's unreadable record never stops the person's own studio.
     const team = await readTeam(sid).catch((error: unknown) => {
@@ -351,6 +357,69 @@ export async function memberStores(email: string): Promise<{ store: Store; role:
     else stale.push(sid);
   }
   if (stale.length) await redisPipeline([["SREM", indexKey(address), ...stale]]).catch(() => {});
+  return found.sort((a, b) => a.store.name.localeCompare(b.store.name));
+}
+
+/**
+ * memberStores read exactly, for a caller that deletes what a person keeps across the stores they serve when they
+ * serve no other (lib/closed-store-data.ts, prepareStore: a host's own calendar; Claude 6 on #3156). Nothing is left
+ * out: a store whose team or record does not read, or an index of more than MEMBER_STORES_READ stores, throws
+ * UnknownReplyError instead of being skipped, since a store skipped may be the live one they still serve. Only a team
+ * read exactly without them, an id with no store (nil) or a store they own is not one. Its one caller takes a throw as
+ * not known (servesAnother): the person's calendar is kept and decided again on a later run, and the closing store is
+ * still erased, never held back a walk for it (Claude 4 on #3660). With `other`, it stops at the first store other
+ * than `other` the person serves, so a longer index than is read is unknown only when none was found. An id in the
+ * index that is not a store's id makes the whole index unknown (Codex G on #3660): it is not proof of no other store.
+ * A longer index than is read is read past, run after run (Codex G on #3660): the ids read exactly that are no store
+ * the person serves (a team without them or none, no store by that id, a store they own) leave the index, so the
+ * next read reaches the ones after them, until the whole index is read in one go and decides. Only those: an id not
+ * read, or read as a store they are on (`other` among them), stays. Each read past drops all it read but `other`
+ * (tests/plan-cost-registry.ts, decideCalendarRuns). memberStores itself is unchanged for its other callers (the
+ * studio's store list, sign-in and alerts), where one unreadable store must not stop the person's own studio.
+ */
+export async function memberStoresExact(email: string, other?: string): Promise<{ store: Store; role: TeamRole }[]> {
+  if (!isRedisConfigured()) return [];
+  const address = normaliseEmail(email);
+  const ids = stringList(repliesFor(await redisPipeline([["SMEMBERS", indexKey(address)]]), 1)?.[0]);
+  if (!ids) throw new UnknownReplyError("a teammate's stores");
+  // An id that is not a store's is not proof of no membership: the whole index is unknown (Codex G on #3660).
+  if (ids.some((id) => !STORE_ID_PATTERN.test(id))) throw new UnknownReplyError("a teammate's stores (an id that is not a store's)");
+  const over = () => new UnknownReplyError(`a teammate's stores, more than the ${MEMBER_STORES_READ} read,`);
+  // Without `other`, the whole list or nothing. With it, the first store found other than `other` is enough, so an
+  // index longer than is read is unknown only when none was found among those read (Claude 4 on #3660).
+  if (other === undefined && ids.length > MEMBER_STORES_READ) throw over();
+  const found: { store: Store; role: TeamRole }[] = [];
+  // The ids read exactly that are no store this person serves: out of the index when it is longer than is read.
+  const stale: string[] = [];
+  for (const sid of ids.slice(0, MEMBER_STORES_READ)) {
+    const member = (await readTeam(sid)).members.find((m) => m.email === address);
+    if (!member) {
+      stale.push(sid);
+      continue;
+    }
+    const store = await storeForIdExact(sid);
+    if (store && normaliseEmail(store.email) !== address) {
+      found.push({ store, role: member.role });
+      if (other !== undefined && store.sid !== other) return found;
+    } else stale.push(sid);
+  }
+  if (ids.length > MEMBER_STORES_READ) {
+    // Read past (Codex G on #3660): the next read starts after these. One not confirmed is only no progress this
+    // time; the answer is unknown either way, so this read never decides.
+    if (stale.length) {
+      await redisPipeline([["SREM", indexKey(address), ...stale]]).catch(() => {});
+      // A join that landed between its team's read and the SREM was taken out with it (its SADD was a no-op, the id
+      // was there): each id taken out is read again, and put back when the person is on its team now, or when that
+      // read is not known (Claude 1 C3 on #3660). A join saved after this read adds the id itself, after the SREM.
+      const back: string[] = [];
+      for (const sid of stale) {
+        const now = await readTeam(sid).catch(() => null);
+        if (!now || now.members.some((m) => m.email === address)) back.push(sid);
+      }
+      if (back.length) await redisPipeline([["SADD", indexKey(address), ...back]]).catch(() => {});
+    }
+    throw over();
+  }
   return found.sort((a, b) => a.store.name.localeCompare(b.store.name));
 }
 

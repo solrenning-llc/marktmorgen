@@ -10,7 +10,9 @@
  * other store" either (rule 24; found by Claude 6's money review of #3099):
  * prepareStore took a memberStores/accountStores read that threw as "nothing
  * else", and deleted the host's own calendar although the host still served
- * another, live store. Such a store now waits a walk, its host's calendar kept.
+ * another, live store. Such a host's calendar is now kept; the closing store is erased all the same (Claude 4's
+ * review of #3660: until then it waited a walk, and a host whose read never works, such as one on more stores than
+ * are read, made it unerasable, forever).
  *
  * Synthetic stores, in-memory Redis; the unreadable record is a read that times out. Each store is closed the
  * way the closing job leaves it (tests/closed-for-erasure.ts): the walk erases only a store really due (#3156).
@@ -102,7 +104,7 @@ async function main(): Promise<void> {
     for (const key of calendarOf(X)) redis.run(["SET", key, "test"]);
   }
 
-  part("A host whose other stores cannot be read keeps their calendar; the closing store waits");
+  part("A host whose other stores cannot be read keeps their calendar; the closing store is erased all the same");
   await world(true);
   if (redis.run(["SCARD", teamIndexKey(X)]) !== 1) throw new Error("setup: the team index formula does not match lib/team.ts");
   const T2 = Date.now();
@@ -112,8 +114,7 @@ async function main(): Promise<void> {
   unreadableSets.delete(teamIndexKey(X));
   const scoreX = redis.run(["ZSCORE", DUE_KEY, X]);
   is("the host's calendar is still there", kept(X), [1, 1, 1, 1]);
-  is("the closing store is not prepared", [blind.stores, redis.run(["HEXISTS", BATCH_KEY, X])], [0, 0]);
-  is("it is still in line, moved back a walk", scoreX !== null && Number(scoreX) >= T2 + WALK_GAP_MS, true);
+  is("the closing store is prepared and out of line (Claude 4 on #3660)", [blind.stores, scoreX], [1, null]);
 
   part("Control: a host who still serves another store keeps their calendar when the read works");
   await world(true);

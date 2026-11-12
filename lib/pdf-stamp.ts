@@ -42,7 +42,7 @@
 import { createHash } from "node:crypto";
 import { stampLine } from "@/lib/pdf-stamp-line";
 import { PDFDocument, StandardFonts, degrees, rgb } from "pdf-lib";
-import { deleteFile, listFiles, readFileWhole, writeFileWhole } from "@/lib/file-store";
+import { deleteFile, headFile, listFiles, readFileWhole, writeFileWhole } from "@/lib/file-store";
 import { VAULT_PREFIX, isVaultPath, keyName } from "@/lib/vault-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
@@ -152,6 +152,17 @@ async function noteProblem(pathname: string, problem: StampProblem): Promise<voi
 /** What writeWithinStorage did: kept the copy, found no room, could not pay for the measurement, or failed to write. */
 export type KeepOutcome = "kept" | "no_room" | "not_measured" | "failed";
 
+/** Writes over a copy already in place that is at least as big: the store's storage does not grow. */
+async function writeOver(pathname: string, bytes: Uint8Array, contentType: string): Promise<KeepOutcome> {
+  try {
+    await writeFileWhole(pathname, bytes, contentType);
+    return "kept";
+  } catch (error) {
+    console.error("a copy could not be written to the file store", error);
+    return "failed";
+  }
+}
+
 /** Whether the store holding `original` was found without room lately (noRoomKey). Unknown reads as no note. */
 export async function roomNotedOut(original: Pick<ProductFile, "pathname">): Promise<boolean> {
   const folder = folderFromPathname(original.pathname);
@@ -192,9 +203,19 @@ export async function writeWithinStorage(
   if (!folder || folderFromPathname(pathname) !== folder || bytes.byteLength <= 0) return "failed";
   if (!(await meter.take(STORAGE_MEASURE_UNITS).catch(() => false))) return "not_measured";
   const brake = storageBrakeFor(standingOf(store), store.tier);
+  // Both callers write to a path fixed by the sale or the page count, over whatever is there. A copy already in place
+  // (its record lost, expired or never written) is in the listing the reservation measures, so writing over it grows
+  // the store only by what is past its size, read exactly from the file store; not there, or not read, the whole
+  // copy is reserved, as for a new file.
+  const inPlace = await headFile(pathname).then(
+    (found) => (found.pathname === pathname && Number.isSafeInteger(found.size) && found.size > 0 ? found.size : 0),
+    () => 0,
+  );
+  const growth = bytes.byteLength - inPlace;
+  if (growth <= 0) return writeOver(pathname, bytes, contentType);
   let reservation: Awaited<ReturnType<typeof reserveStorage>>;
   try {
-    reservation = await reserveStorage(folder, bytes.byteLength, brake, async () => {
+    reservation = await reserveStorage(folder, growth, brake, async () => {
       const held = await storageUsed(folder, brake);
       if (held.available !== true) throw new Error("storage_unknown");
       return held.bytes;

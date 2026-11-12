@@ -6,8 +6,9 @@
  *
  * 1. Measuring the store's storage before a new copy is kept in it (lib/pdf-stamp.ts writeWithinStorage): one full
  *    listing of both file stores, at most MEASURE_LIST_PAGES pages each (lib/file-store.ts filesHeld, lib/vault.ts
- *    vaultHeld), the video service's size of the store, and the storage reservation taken and let go
- *    (lib/storage-reservations.ts). STORAGE_MEASURE_UNITS are taken before it lists; refused, nothing is listed and
+ *    vaultHeld), the video service's size of the store, the storage reservation taken and let go
+ *    (lib/storage-reservations.ts), and the copy's own path asked about once (lib/file-store.ts headFile), so a copy
+ *    already in place is written over without being reserved again as new storage. STORAGE_MEASURE_UNITS are taken before it lists; refused, nothing is listed and
  *    nothing is kept.
  * 2. A store found without room is noted for NO_ROOM_NOTE_SECONDS, for every file of the store: during that time
  *    no copy and no preview measures the store again.

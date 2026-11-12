@@ -186,6 +186,30 @@ async function main() {
   is("with room, the next sale's copy is kept", [again.kind, again.kind === "kept" ? world.files.has(again.copy.pathname) : false], ["kept", true]);
   is("and the studio no longer says the storage ran out for it", (await stamp.stampProblems([full])).get(full.pathname), undefined);
 
+  part("A copy already in place whose record went missing is overwritten, not charged again as new storage");
+  const landed = await original("Landed.pdf");
+  const firstCopy = await stamp.stampedDelivery(landed, sale(13), shop, meter().m);
+  const target = firstCopy.kind === "kept" ? firstCopy.copy.pathname : "";
+  const size = world.files.get(target)?.byteLength ?? 0;
+  is("control: the first copy is kept", [firstCopy.kind, size > 0], ["kept", true]);
+  await redis.pipeline([["DEL", stamp.copyKey(sale(13).reference, landed)]]);
+  /** The store's folder listed as holding the copy in place plus `other` bytes, for the next listing only. */
+  const holdingWith = (other: number, withTarget: boolean) => world.pages.push({ blobs: [{ pathname: `stores/${FOLDER}/0000000000/Big.zip`, size: other }, ...(withTarget ? [{ pathname: target, size }] : [])], hasMore: false });
+  holdingWith(BRAKE - size - 1_000, true);
+  const rewrite = await stamp.stampedDelivery(landed, sale(13), shop, meter().m);
+  is("less than one copy free, the copy in place is written over and kept", [rewrite.kind, rewrite.kind === "kept" ? rewrite.copy.pathname : ""], ["kept", target]);
+  is("the store is not noted without room", await noted(), false);
+  is("nor does the studio say the storage ran out", (await stamp.stampProblems([landed])).get(landed.pathname), undefined);
+  is("and nothing stays reserved", [null, "[]"].includes(await pending() as string | null), true);
+  world.pages.length = 0;
+  await redis.pipeline([["DEL", stamp.copyKey(sale(13).reference, landed)]]);
+  world.files.delete(target);
+  holdingWith(BRAKE - 1_000, false);
+  const fresh = await stamp.stampedDelivery(landed, sale(13), shop, meter().m);
+  is("control: the same free room with no copy in place is not enough, and a copy is made on the fly", [fresh.kind, world.files.has(target)], ["fly", false]);
+  world.pages.length = 0;
+  await forgetNoRoom();
+
   part("A copy made on the fly goes out from here, whole, as a download");
   const flown = await serveStamped({ kind: "fly", bytes: flyBytes, name: "Ledger.pdf", contentType: "application/pdf" }, full, "x");
   is("the stamped bytes, as an attachment, with their length", [flown.status, same(await body(flown), flyBytes), flown.headers.get("Content-Disposition")?.includes("attachment"), flown.headers.get("Content-Length")], [200, true, true, String(flyBytes.byteLength)]);

@@ -579,8 +579,10 @@ export const MEASURE_DB_BYTES = 4 * 64 * 256;
  * (lib/pdf-stamp.ts writeWithinStorage, lib/storage-quota.ts storageUsed): MEASURE_LIST_PAGES pages of each file
  * store's listing (lib/file-store.ts filesHeld, lib/vault.ts vaultHeld, both held to it below), the function held at
  * 2 GB for the whole of FLY_HOLD_SECONDS (the routes' time limit, which bounds every page and the video service's one
- * answer about the store's size, lib/stream.ts streamHeld) with the wait shape's share of CPU, and the reservation's
- * commands and bytes. Counted as STORAGE_MEASURE_UNITS public requests before it lists (lib/stamp-cost-rules.ts;
+ * answer about the store's size, lib/stream.ts streamHeld) with the wait shape's share of CPU, the reservation's
+ * commands and bytes, and the copy's own path asked about once (lib/file-store.ts headFile: the dearer of an R2
+ * Class B read and twice Blob's $0.40-per-million Simple Operation), so a copy already in place is written over
+ * without being charged again as new storage. Counted as STORAGE_MEASURE_UNITS public requests before it lists (lib/stamp-cost-rules.ts;
  * tests/plan-cost-registry.test.ts holds them above it).
  */
 export const STORAGE_MEASURE_READ =
@@ -588,7 +590,8 @@ export const STORAGE_MEASURE_READ =
   + FLY_HOLD_SECONDS * MEMORY_SECOND
   + FLY_HOLD_SECONDS * (SHAPES.wait.cpu / SHAPES.wait.seconds) * CPU_SECOND
   + MEASURE_COMMANDS * COMMAND
-  + MEASURE_DB_BYTES * DB_BYTE;
+  + MEASURE_DB_BYTES * DB_BYTE
+  + Math.max(micro(R2_CLASS_B_MICRO_USD_PER_MILLION) / 1e6, 0.8 / 1e6);
 /**
  * A copy stamped on the fly and sent without being kept (lib/pdf-stamp.ts stampedDelivery, "fly";
  * lib/stamp-cost-rules.ts flyUnits), in its three parts: the function held FLY_HOLD_SECONDS at 2 GB while it is

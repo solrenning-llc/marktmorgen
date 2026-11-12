@@ -163,6 +163,38 @@ async function main(): Promise<void> {
     is("and the hand-over still says the partners failed, so it is logged", threw, true);
   }
 
+  part("Claude 4's MEDIUM (cloud G): the sweep's list not confirmed still leaves the partners' shares written");
+  {
+    // A partner holding a share of the product, so the sale owes them something whatever the link.
+    const BEA = "bbbbbbbbbbbb";
+    await redis.pipeline([["HSET", people, BEA, JSON.stringify({ id: BEA, email: "bea@example.com", code: "bea", status: "approved", appliedAt: (NOW - 30 * 86_400) * 1000, decidedAt: 1, note: "", rate: null, share: { percent: 10, products: ["prod01"] } })]]);
+    const pend = await pendingAt();
+    const paid = { store: "oven", order: "PPORDERREV60009", capture: "CAPREV60009", email: "pp9@example.com", product: "prod01", cents: 4_000, currency: "USD", at: NOW - 60, handle: "oven", meta: { [VIA_PENDING_META]: pend } };
+    await redis.pipeline([["SET", `nl:ppsell:paid:${paid.order}`, JSON.stringify(paid)]]);
+    const real = redis.pipeline.bind(redis);
+    let lost = false;
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      if (!lost && commands.some((c) => c[0] === "ZADD" && String(c[1]).startsWith("nl:aff:pend:pp:"))) {
+        lost = true;
+        return commands.map(() => ({ unknown: "shape" }));
+      }
+      return real(commands);
+    }) as typeof redis.pipeline;
+    let threw = false;
+    try {
+      await creditPayPalSale(store, paid, "Sourdough course", send);
+    } catch {
+      threw = true;
+    } finally {
+      redis.pipeline = real;
+    }
+    is("control: the sweep's list answered in an unknown shape once", lost, true);
+    const [share] = await redis.pipeline([["HGET", `nl:aff:${statsId}:shares`, `paypal:${paid.order}:${BEA}`]]);
+    is("the partner's share of the sale is still written", typeof share === "string", true);
+    is("and the hand-over is still told something failed, so it is logged", threw, true);
+    await redis.pipeline([["HDEL", people, BEA]]);
+  }
+
   part("MEDIUM 2: a membership already carrying the affiliate is never told it is not credited");
   {
     const memberPend = await pendingAt();

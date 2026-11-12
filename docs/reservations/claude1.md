@@ -6,4 +6,4 @@ Only Claude 1 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
-| Claude 1 | 264 [CI2] unit 1, the weekly community digest's rules (pure; no box, read or sending yet) | claude1/ci2-digest-rules | `lib/community-digest-rules.ts` (new), `tests/community-digest-rules.test.ts` (new) | 12/11/2026 15h20 |
+| Claude 1 | 264 [CI2] unit 1, the weekly community digest's rules (pure; no box, read or sending yet) | claude1/ci2-digest-rules | `lib/community-digest-rules.ts` (new), `tests/community-digest-rules.test.ts` (new) | 12/11/2026 14h40 |

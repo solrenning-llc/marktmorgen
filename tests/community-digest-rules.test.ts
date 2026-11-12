@@ -53,7 +53,7 @@ const ids = (d: ReturnType<typeof build>, k: "discussions" | "announcements" | "
 part("Only for those who asked, while the creator offers it");
 is("asked and offered", getsDigest(true, reader), true);
 is("not offered", getsDigest(false, reader), false);
-is("did not tick the box", getsDigest(true, { ...reader, digest: false }), false);
+is("did not check the box", getsDigest(true, { ...reader, digest: false }), false);
 is("taken out by the creator", getsDigest(true, { ...reader, removed: true }), false);
 is("no address", getsDigest(true, { ...reader, email: "" }), false);
 
@@ -92,7 +92,7 @@ part("The week's facts, capped and in order");
     event({ id: "far", start: NOW + 9 * 86_400_000 }),
     event({ id: "off", start: NOW + 7_200_000, cancelled: true }),
   ]);
-  is(`at most ${MAX_EVENTS} events of the next ${DIGEST_DAYS} days, soonest first, none cancelled or past`, ids(events, "events"), ["soon", "next", "fourth"]);
+  is(`at most ${MAX_EVENTS} events of the next ${DIGEST_DAYS} days, soonest first, none canceled or past`, ids(events, "events"), ["soon", "next", "fourth"]);
 }
 
 part("Nothing to say, or nothing known");

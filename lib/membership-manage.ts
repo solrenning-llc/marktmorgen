@@ -33,12 +33,13 @@ import { readListings, sellsAny } from "@/lib/catalog";
 import { canOffer, saveOn } from "@/lib/save-offer";
 import { productOfSub } from "@/lib/tier-rules";
 import { LANGUAGES, parseLanguage } from "@/lib/store-language";
-import { membershipWords } from "@/lib/buyer-words/membership";
+import { type MembershipWords, membershipWords } from "@/lib/buyer-words/membership";
 import { type PauseSub, cannotPause, pauseOf, periodEndOf } from "@/lib/membership-pause-rules";
 import { isOwnReasonId, offers } from "@/lib/leave-rules";
 import { countLeave } from "@/lib/leave-flow";
 import { canSellProduct } from "@/lib/store-checkout";
 import { type YearlyChoice, type YearlySub, yearlyChoice } from "@/lib/yearly-switch-rules";
+import { currentPeriodEnd, hasSoldEnd, onlySoldEnd, soldEndOf } from "@/lib/fixed-end-rules";
 
 /** How long the emailed link keeps working. */
 export const MANAGE_LINK_SECONDS = 60 * 60;
@@ -117,7 +118,7 @@ export function sellsMemberships(store: Store): boolean {
   return sellsAny(store, "recurring");
 }
 
-type Listed = { data?: unknown };
+type Listed = { data?: unknown; has_more?: unknown };
 
 /**
  * The creator's customer behind an address, when that customer has a
@@ -292,7 +293,33 @@ async function portalConfiguration(store: Store, origin: string, fresh = false, 
   return id;
 }
 
-export type OpenResult = { ok: true; url: string } | { ok: false; reason: "expired" | "used" | "error" };
+/**
+ * "unsure": Stripe was asked to change something and its answer did not say
+ * whether it did (no answer, or one that does not match), so the member is
+ * told to look before trying again, never that nothing changed.
+ */
+export type OpenResult = { ok: true; url: string } | { ok: false; reason: "expired" | "used" | "error" | "unsure" };
+
+/**
+ * Whether the customer holds a live subscription with a set end: a membership
+ * sold as a number of payments, or a payment plan. Stripe's full portal may
+ * offer to renew a subscription with a cancel_at, which would wipe the end
+ * that was sold and charge on with no end; the portal is then opened on the
+ * card only. A list that cannot be read in full counts as holding one: the
+ * card can always be changed, and nothing is offered that could undo an end.
+ */
+async function holdsSetEnd(account: string, customer: string): Promise<boolean> {
+  try {
+    const listed = (await onAccount("GET", account, `/subscriptions?customer=${encodeURIComponent(customer)}&status=all&limit=100`)) as Listed;
+    if (!Array.isArray(listed.data) || listed.has_more !== false) return true;
+    return (listed.data as SubRow[]).some(
+      (sub) => (typeof sub.status !== "string" || LIVE.has(sub.status)) && (Boolean(sub.metadata?.ends_after) || sub.metadata?.kind === "plan"),
+    );
+  } catch (error) {
+    console.error("listing a member's subscriptions before the portal failed; it opens on the card only", error);
+    return true;
+  }
+}
 
 /**
  * Turns a live emailed link into a Stripe portal session and returns its URL.
@@ -314,6 +341,7 @@ export async function openPortal(store: Store, token: string, origin: string): P
   ]);
   if (Number(count) > MAX_OPENS) return { ok: false, reason: "used" };
 
+  const cardOnly = await holdsSetEnd(grant.a, grant.c);
   const session = async (configuration: string) =>
     onAccount(
       "POST",
@@ -324,6 +352,15 @@ export async function openPortal(store: Store, token: string, origin: string): P
         configuration,
         return_url: `${origin}/@${store.handle}`,
         locale: stripeLocale(store),
+        // Straight to the card, and back to the store after it, while the
+        // customer holds a subscription with a set end (lib/fixed-end-rules.ts).
+        ...(cardOnly
+          ? {
+              "flow_data[type]": "payment_method_update",
+              "flow_data[after_completion][type]": "redirect",
+              "flow_data[after_completion][redirect][return_url]": `${origin}/@${store.handle}`,
+            }
+          : {}),
       }),
     );
 
@@ -350,6 +387,56 @@ export async function openPortal(store: Store, token: string, origin: string): P
 
 // ---- Leaving one membership, with an offer made once ---------------------
 
+/**
+ * Cancels a membership sold to end after a set number of payments, at the end
+ * of the period already paid for, or of the free trial while it is in one:
+ * nothing more is charged, and nothing paid for is taken away.
+ *
+ * Stripe's own cancellation page is not used: the subscription already has a
+ * cancel_at (the end that was sold), which that page is not made for. The
+ * store's page is the confirmation: the member pressed Cancel and then
+ * "Cancel my membership" under the date it stops. cancel_at only ever moves
+ * earlier, to a period end Stripe gave; the end that was sold is never lost,
+ * and the creator's offer is not made (it needs Stripe's page).
+ */
+async function cancelSoldEnd(store: Store, grant: Grant, sub: SubRow, token: string, origin: string, why: string): Promise<OpenResult> {
+  const stopAt = currentPeriodEnd(sub);
+  if (!stopAt || stopAt <= Math.floor(Date.now() / 1000)) return { ok: false, reason: "error" };
+  const said = store.leaving.on && why && offers(store.leaving, why) ? why : "";
+  const body = new URLSearchParams({
+    cancel_at: String(stopAt),
+    proration_behavior: "none",
+    // When the member asked, for "Why members leave" (lib/membership-numbers.ts): Stripe's canceled_at
+    // on such a membership may still be the moment the end that was sold was written.
+    "metadata[cancel_requested_at]": String(Math.floor(Date.now() / 1000)),
+  });
+  if (said) {
+    // As openCancel writes it, so "Why members leave" counts it (lib/membership-numbers.ts).
+    body.set("metadata[leave_reason]", said);
+    body.set("metadata[leave_at]", String(Math.floor(Date.now() / 1000)));
+    body.set("metadata[leave_text]", isOwnReasonId(said) ? (store.leaving.own.find((o) => o.id === said)?.text ?? "") : "");
+  }
+  let made: Record<string, unknown>;
+  try {
+    made = await onAccount("POST", grant.a, `/subscriptions/${sub.id as string}`, body);
+  } catch (error) {
+    // A refusal changed nothing; no answer at all may have changed it.
+    const refused = error instanceof StripeError && error.status >= 400 && error.status < 500;
+    console.error(refused ? "Stripe refused canceling a fixed-end membership" : "canceling a fixed-end membership got no answer from Stripe", error);
+    return { ok: false, reason: refused ? "error" : "unsure" };
+  }
+  // The answer is this subscription's, with the end asked for (rule 30, Claude 3's L2 on #3488); anything else is not known.
+  if (made.id !== sub.id || made.cancel_at !== stopAt) {
+    console.error("Stripe's answer to canceling a fixed-end membership is not this one's, with the end asked for", sub.id);
+    return { ok: false, reason: "unsure" };
+  }
+  if (store.leaving.on) {
+    // Counted once it is done; a failure to count never reads as a failure to cancel.
+    await countLeave(store.statsId, "left").catch((error) => console.error("counting a member who left failed", error));
+  }
+  return { ok: true, url: `${origin}/@${store.handle}/manage?status=cancelled&token=${token}` };
+}
+
 /** A membership as the member's own page lists it. */
 export type Membership = {
   id: string;
@@ -368,9 +455,19 @@ export type Membership = {
   /**
    * When it stops, if the member already cancelled and it is running out the
    * time they paid for. Null while it runs on. A membership in this state has
-   * no Cancel button: there is nothing left to cancel.
+   * no Cancel button: there is nothing left to cancel. The end a membership
+   * was sold with ("12 monthly payments") is not a cancellation: it leaves
+   * this null while payments are still to come (lib/fixed-end-rules.ts).
    */
   endsAt: number | null;
+  /** That end, while it is still only the one that was sold and the member may still cancel; null otherwise. */
+  soldEnd: number | null;
+  /**
+   * How it ends, for the words the page shows (endLine): "canceled" when the member or the creator stopped it,
+   * "last-payment" when it ends with the end it was sold with, "set" when a fixed end's own date cannot be read
+   * (neither is claimed); null while it runs on.
+   */
+  ending: Ending;
   /** A pause the member chose (lib/membership-pause-rules.ts), started or still to start; null when there is none. */
   pause: { from: number; until: number } | null;
   /** Whether the member may pause it now, as the store allows. */
@@ -422,8 +519,41 @@ export async function grantOf(store: Store, token: string): Promise<Grant | null
   return grant && grant.a === store.stripeAccountId ? grant : null;
 }
 
-/** When a subscription stops, if it is set to; null while it runs on. */
+/**
+ * When a subscription stops, if it was cancelled or there is nothing left to
+ * cancel; null while it runs on. The end a fixed-end membership was sold with
+ * counts as running on while payments are still to come: the member may still
+ * cancel it (lib/fixed-end-rules.ts).
+ */
+export type Ending = "canceled" | "last-payment" | "set" | null;
+
+/**
+ * How a subscription ends, as the member's page says it (Claude 3 on #3488): the "unsure" notice after a
+ * Cancel whose answer was lost tells the member to look for "Canceled", so only a stop before the end that
+ * was sold, or any stop of an ordinary membership, reads that way. The end that was sold reads as the end
+ * after the last payment; a fixed end whose own date cannot be read claims neither.
+ */
+export function endingOf(sub: SubRow): Ending {
+  if (onlySoldEnd(sub)) return "last-payment";
+  const at = endsAtOf(sub);
+  if (!at) return null;
+  if (!hasSoldEnd(sub)) return "canceled";
+  const sold = soldEndOf(sub);
+  if (!sold) return "set";
+  return at < sold ? "canceled" : "last-payment";
+}
+
+/** The line under a membership saying when it ends, in the store's words; null while it runs on. */
+export function endLine(m: MembershipWords, one: Pick<Membership, "endsAt" | "soldEnd" | "ending">, date: (at: number) => string): string | null {
+  const at = one.endsAt ?? one.soldEnd;
+  if (!at || !one.ending) return null;
+  if (one.ending === "canceled") return m.endsCanceled(date(at));
+  if (one.ending === "last-payment") return m.endsAfterLast(date(at));
+  return m.ends(date(at));
+}
+
 export function endsAtOf(sub: SubRow): number | null {
+  if (onlySoldEnd(sub)) return null;
   const at = typeof sub.cancel_at === "number" && sub.cancel_at > 0 ? sub.cancel_at : 0;
   if (at) return at;
   if (sub.cancel_at_period_end !== true) return null;
@@ -508,6 +638,8 @@ export async function membershipsFor(store: Store, token: string): Promise<Membe
       interval: typeof price?.recurring?.interval === "string" ? price.recurring.interval : "month",
       intervalCount: typeof price?.recurring?.interval_count === "number" ? price.recurring.interval_count : 1,
       endsAt: endsAtOf(sub),
+      soldEnd: onlySoldEnd(sub) ? (sub.cancel_at as number) : null,
+      ending: endingOf(sub),
       pause: pauseOf(sub as PauseSub),
       canPause: cannotPause(sub as PauseSub, store.pause) === null,
       periodEnd: periodEndOf(sub as PauseSub),
@@ -552,6 +684,8 @@ export async function openCancel(store: Store, token: string, subscription: stri
     // Not this member's, not this store's, or already ended: the same answer
     // for all three, so the form cannot be used to learn which.
     if (!sub || endsAtOf(sub) !== null) return { ok: false, reason: "error" };
+    // Sold with a set end: cancelled here, after the store's own page asked to confirm.
+    if (hasSoldEnd(sub)) return await cancelSoldEnd(store, grant, sub, token, origin, why);
 
     const price = sub.items?.data?.[0]?.price;
     const interval = typeof price?.recurring?.interval === "string" ? price.recurring.interval : "";

@@ -18,6 +18,7 @@ import { OrdersPausedError } from "@/lib/order-admission";
 import { randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import type { Listing, Product, Store } from "@/lib/store";
 import { readListing, readProduct } from "@/lib/catalog";
 import { addressHash } from "@/lib/imported-purchases";
@@ -365,15 +366,21 @@ export async function forgetInvitesPerson(store: Pick<Store, "sid" | "statsId">,
   if (!store.statsId || !productIds.length || !isRedisConfigured()) return 0;
   const statsId = store.statsId;
   const fields = productIds.map((p) => inviteField(email, p));
-  const [rows] = await redisPipeline([["HMGET", invitesKey(statsId), ...fields]]);
-  const held = fields.flatMap((field, i) => {
-    const invite = parseInvite(Array.isArray(rows) ? rows[i] : null);
-    return invite ? [{ field, invite }] : [];
-  });
+  // Read exactly (rule 24): one slot per field, each an exact nil (none kept) or text. Any other reply is unknown,
+  // never "nothing kept": it throws, and the erasure says this part did not finish.
+  const replies = repliesFor(await redisPipeline([["HMGET", invitesKey(statsId), ...fields]]), 1);
+  const rows = replies ? replies[0] : null;
+  if (!Array.isArray(rows) || rows.length !== fields.length || !rows.every((row) => row === null || typeof row === "string")) {
+    throw new UnknownReplyError("a person's membership invitations");
+  }
+  // A kept record that does not read still holds the address: it goes too, with its reminder. Only its link, which
+  // it names, cannot be found; that runs out by itself (linkSeconds).
+  const held = fields.flatMap((field, i) => (rows[i] === null ? [] : [{ field, invite: parseInvite(rows[i]) }]));
   if (!held.length) return 0;
+  const links = held.flatMap((h) => (h.invite ? [linkKey(h.invite.t)] : []));
   await redisPipeline([
     ["HDEL", invitesKey(statsId), ...held.map((h) => h.field)],
-    ["DEL", ...held.map((h) => linkKey(h.invite.t))],
+    ...(links.length ? [["DEL", ...links]] : []),
     ["ZREM", DUE_KEY, ...held.map((h) => `${store.sid}|${h.field}`)],
   ]);
   return held.length;

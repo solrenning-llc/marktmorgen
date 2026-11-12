@@ -35,7 +35,7 @@ import { createHash } from "node:crypto";
 import { normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type DataStore, needData } from "@/lib/store-data";
-import { orderWrite } from "@/lib/order-data";
+import { fieldReleaseBytes, orderWrite, releaseOrderData } from "@/lib/order-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import type { Store } from "@/lib/store";
 
@@ -195,6 +195,28 @@ export function importedFrom(raw: unknown): ImportedPurchase[] {
     .filter((p): p is ImportedPurchase => p !== null);
 }
 
+/**
+ * Notes an address on the list of buyers an import brought, for a purchase imported before that list existed. The
+ * read that found the purchase was made before this write, so the person's erasure (forgetImportedPerson: their
+ * purchases deleted, their address taken off this list) may have landed in between (#4270, Codex L): once written,
+ * the purchases are looked at again, and when they are gone, or the answer is not exactly "there" (rule 24), the
+ * address is taken off again and its room given back. Erasure deletes the purchases before the list's entry, so an
+ * erasure after this check takes the entry off itself. Never throws: the list is only what segments read.
+ */
+async function noteBrought(store: Store, statsId: string, email: string, at: string): Promise<void> {
+  const address = normaliseEmail(email);
+  try {
+    const [wrote] = await orderWrite(store, [["HSETNX", importedWhoKey(statsId), address, at]]);
+    if (wrote !== 1) return;
+    const [still] = await redisPipeline([["EXISTS", importedKey(statsId, email)]]).catch(() => [null]);
+    if (still === 1) return;
+    await redisPipeline([["HDEL", importedWhoKey(statsId), address]]);
+    await releaseOrderData(store, fieldReleaseBytes(address, at));
+  } catch (error) {
+    console.error("noting an imported buyer failed", error instanceof Error ? error.message : "");
+  }
+}
+
 /** Everything this address was given here by an import; [] for a store that never imported buyers. */
 export async function importedFor(store: Store, email: string): Promise<ImportedPurchase[]> {
   const read = importedRead(store, email);
@@ -203,9 +225,7 @@ export async function importedFor(store: Store, email: string): Promise<Imported
   const found = importedFrom(raw);
   // Brought over before the list of who was brought existed: noted the first time they are read.
   const brought = found.filter((p) => IMPORT_JOB.test(p.job));
-  if (brought.length && store.statsId) {
-    await orderWrite(store, [["HSETNX", importedWhoKey(store.statsId), normaliseEmail(email), String(Math.min(...brought.map((p) => p.at)))]]).catch(() => {});
-  }
+  if (brought.length && store.statsId) await noteBrought(store, store.statsId, email, String(Math.min(...brought.map((p) => p.at))));
   return found;
 }
 

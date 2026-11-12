@@ -77,7 +77,9 @@ async function main() {
     const after = (await storeForEmail(owner))!;
     is("applied once, nothing failed, both steps complete", [result.updated, result.failed, result.checked, result.complete], [1, 0, 0, true]);
     is("the store stopped counting as paid up", after.subscriptionActive, false);
-    is("step 2 did not ask about a subscription step 1 settled", calls, ["/v1/subscriptions"]);
+    // Step 1 confirms a change by reading that one subscription fresh before writing it
+    // (tests/billing-sync-stale-listed-row.test.ts); step 2 asks nothing more (checked 0 above).
+    is("step 2 did not ask about a subscription step 1 settled", calls, ["/v1/subscriptions", `/v1/subscriptions/${id}`]);
   }
 
   part("A listed subscription whose apply failed is asked about again by step 2, in the same run");

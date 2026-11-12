@@ -69,7 +69,14 @@ export type SyncCounts = {
  * Stripe could not be asked, and changes nothing. Returns whether it wrote.
  */
 export async function recordState(store: Store, state: SubscriptionState): Promise<boolean> {
-  if (state.state === "unknown") return false;
+  const plan = changeOf(store, state);
+  if (!plan) return false;
+  return (await setSubscription(storeRef(store), plan)) !== null;
+}
+
+/** What a state would write over the store's snapshot, or null when it changes nothing (or is unknown). */
+function changeOf(store: Store, state: SubscriptionState): Parameters<typeof setSubscription>[1] | null {
+  if (state.state === "unknown") return null;
   const active = state.state === "active";
   const plan = active ? { tier: state.tier, cycle: state.cycle, trialEnds: state.trialing ? state.until : 0, shared: state.shared, period: state.period, renewalUnpaid: state.renewalUnpaid === true } : null;
   if (
@@ -77,9 +84,9 @@ export async function recordState(store: Store, state: SubscriptionState): Promi
     (!plan || (plan.tier === store.tier && plan.cycle === store.cycle && plan.trialEnds === store.trialEnds && plan.shared === store.shared && samePeriod(plan.period, store.period ?? null) &&
       plan.renewalUnpaid === (store.renewalUnpaidSince ?? 0) > 0))
   ) {
-    return false;
+    return null;
   }
-  return (await setSubscription(storeRef(store), { active, ...(plan ?? {}) })) !== null;
+  return { active, ...(plan ?? {}) };
 }
 
 /**
@@ -153,14 +160,19 @@ async function applyListed(subscription: Record<string, unknown>, counts: SyncCo
   }
   if (!store) return false;
 
-  // The one this store wrote down: Stripe's word stands.
+  // The one this store wrote down: Stripe's word stands, but only its word
+  // now. The page was read before the rows ahead of this one were applied
+  // (each can take Stripe calls of its own), so this row can be older than
+  // what the store wrote down since: a plan the money-back refund or the
+  // cancel button ended, or a switch. A change it would make is written only
+  // from a fresh read of this one subscription (readSubscription, which also
+  // observes contract funding); one Stripe cannot give writes nothing, and
+  // step 2 asks about the store again.
   if (store.subscriptionId === id) {
-    const state=stateOf(subscription);
-    if(state.state==='active'&&hasContractFunding(subscription)){
-      const observed=await startedFromObservedSubscription(store,subscription);if(!observed)return false;
-      state.period=observed.period;
-    }
-    if (await recordState(store, state)) counts.updated += 1;
+    if (!changeOf(store, stateOf(subscription))) return true;
+    const now = await readSubscription(id, store);
+    if (now.state === "unknown") return false;
+    if (await recordState(store, now)) counts.updated += 1;
     return true;
   }
 

@@ -48,8 +48,10 @@ test("only an upload is ever refused by it, never a download", () => {
     // And the two places a store whose plan has ended is measured against
     // the room of a store with no plan: the daily job that gives what it
     // keeps a date (lib/plan-closing.ts), and the studio, which shows its
-    // owner that date. Neither is a door a buyer comes through.
-    ["app/api/store/file/route.ts", "app/api/store/stream/route.ts", "app/studio/page.tsx", "lib/plan-closing.ts", "lib/vault-storage.ts"],
+    // owner that date. Neither is a door a buyer comes through. And the
+    // save of a product's file written with AI (758 [STN5] unit 3), which
+    // keeps a new PDF in the creator's storage: an upload of its own.
+    ["app/api/store/ai-file/route.ts", "app/api/store/file/route.ts", "app/api/store/stream/route.ts", "app/studio/page.tsx", "lib/plan-closing.ts", "lib/vault-storage.ts"],
     "what a store keeps is measured where an upload is let in, and for a store whose plan has ended. No download is ever refused by it.",
   );
 });

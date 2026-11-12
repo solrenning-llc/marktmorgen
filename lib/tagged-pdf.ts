@@ -149,3 +149,29 @@ export class PageTagger {
     catalog.set(PDFName.of("Metadata"), context.register(metadata));
   }
 }
+
+/**
+ * Bookmarks (the document outline), one for each entry, in order, each
+ * opening its page at its top (758 [STN5] unit 3: a long file is moved
+ * through by its parts, WCAG 2.4.5, PDF technique PDF2). The outline is shown
+ * when the file opens. Call once, before saving.
+ */
+export function addOutline(pdf: PDFDocument, entries: readonly { title: string; page: PDFPage; top: number }[]): void {
+  if (!entries.length) return;
+  const { context, catalog } = pdf;
+  const rootRef = context.nextRef();
+  const refs = entries.map(() => context.nextRef());
+  entries.forEach((entry, i) => {
+    const item = context.obj({
+      Title: PDFHexString.fromText(entry.title),
+      Parent: rootRef,
+      Dest: [entry.page.ref, PDFName.of("XYZ"), PDFNumber.of(0), PDFNumber.of(entry.top), PDFNumber.of(0)],
+    });
+    if (i > 0) item.set(PDFName.of("Prev"), refs[i - 1]);
+    if (i < refs.length - 1) item.set(PDFName.of("Next"), refs[i + 1]);
+    context.assign(refs[i], item);
+  });
+  context.assign(rootRef, context.obj({ Type: "Outlines", First: refs[0], Last: refs[refs.length - 1], Count: refs.length }));
+  catalog.set(PDFName.of("Outlines"), rootRef);
+  catalog.set(PDFName.of("PageMode"), PDFName.of("UseOutlines"));
+}

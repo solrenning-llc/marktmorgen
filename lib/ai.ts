@@ -378,7 +378,7 @@ export async function counted<T>(store: Store, now: number, run: () => Promise<T
  * `returned` is the jobs of those steps given back, and `left` the month's
  * after it; both null when the give-back could not be confirmed.
  */
-export type AiStopped = { ok: false; reason: AiGivenBack; returned: number | null; left: number | null };
+export type AiStopped = { ok: false; reason: AiGivenBack; returned: number | null; left: number | null; value?: unknown };
 
 /** A job told in steps that still drafted while a step's jobs were given back: `returned` is those jobs, null when not confirmed. */
 export type AiDraftedGiven<T> = { ok: true; value: T; left: number; returned: number | null };
@@ -389,11 +389,17 @@ export type AiDraftedGiven<T> = { ok: true; value: T; left: number; returned: nu
  * refused), and whether the creator asked for the stop (false when the
  * stop's mark could not be read, which starts no further step either).
  */
-type Unrun = { jobs: number; asked: boolean; empty?: boolean };
+export type Unrun = { jobs: number; asked: boolean; partial?: boolean; empty?: boolean };
 
 const givenReason = (unrun: Unrun): AiGivenBack => (unrun.asked ? "stopped" : unrun.empty ? "empty" : "failed");
 
-async function countedRun<T>(store: Store, now: number, run: () => Promise<T | null>, jobs: number, unrun?: Unrun): Promise<AiResult<T> | AiStopped | AiDraftedGiven<T>> {
+/**
+ * A job of `jobs` writing jobs, all taken before the first call; `unrun` says
+ * what the job left undone, given back once (lib/ai-file.ts tells a file's
+ * parts with it). With `unrun.partial`, what the steps that ran wrote comes
+ * back with the stop, so parts already paid for are never thrown away.
+ */
+export async function countedRun<T>(store: Store, now: number, run: () => Promise<T | null>, jobs: number, unrun?: Unrun): Promise<AiResult<T> | AiStopped | AiDraftedGiven<T>> {
   if (!isAiConfigured() || !store.statsId || !isRedisConfigured()) return { ok: false, reason: "off" };
   if (!Number.isSafeInteger(jobs) || jobs <= 0) return { ok: false, reason: "notes" };
   const allowance = aiAllowance(store, now);
@@ -443,6 +449,7 @@ async function countedRun<T>(store: Store, now: number, run: () => Promise<T | n
     if (after === null) console.error("the jobs of steps not run could not be confirmed given back");
   }
   if (value === null) return give > 0 && unrun ? settled(givenReason(unrun), give, after) : { ok: false, reason: "failed" };
+  if (give > 0 && unrun?.partial === true) return { ...settled(givenReason(unrun), give, after), value };
   const left = Math.max(0, allowance - (give > 0 && after !== null ? after : count));
   // A draft that came while a step's jobs were given back says how many, or that it could not be confirmed.
   return give > 0 ? { ok: true, value, left, returned: after === null ? null : give } : { ok: true, value, left };
@@ -459,7 +466,7 @@ const stopKey = (statsId: string, run: string) => `nl:ai:stop:${statsId}:${run}`
  * AI_STOP_KEEP_SECONDS. Written only where there is none (NX), so a stop already written is kept. Best effort: a
  * mark not written only means a stop for this run is not taken, which the page says.
  */
-async function markAiRunLive(store: Store, run: string): Promise<void> {
+export async function markAiRunLive(store: Store, run: string): Promise<void> {
   if (!store.statsId) return;
   await redisPipeline([["SET", stopKey(store.statsId, run), "0", "EX", AI_STOP_KEEP_SECONDS, "NX"]]).catch((error: unknown) => console.error("a run's live mark could not be written", error));
 }
@@ -476,7 +483,7 @@ export async function markAiStop(store: Store, run: string): Promise<boolean> {
 }
 
 /** Whether the creator asked to stop this run: true, false only for a confirmed absent mark, null when the reply cannot be read. */
-async function stopAsked(store: Store, run: string): Promise<boolean | null> {
+export async function stopAsked(store: Store, run: string): Promise<boolean | null> {
   if (!store.statsId) return null;
   const replies = repliesFor(await redisPipeline([["GET", stopKey(store.statsId, run)]]).catch(() => null), 1);
   if (!replies) return null;

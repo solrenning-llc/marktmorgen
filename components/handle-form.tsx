@@ -97,7 +97,7 @@ export function HandleForm({ another = false, initial = "" }: { another?: boolea
             value={handle}
             onChange={(event) => setHandle(event.target.value)}
             placeholder="yourname"
-            className="min-w-0 w-full rounded-r-2xl bg-transparent px-1 py-3.5 text-ink outline-none placeholder:text-ink-soft/60"
+            className="min-w-0 w-full rounded-r-2xl bg-transparent px-1 py-3.5 text-ink outline-none placeholder:text-ink-mute"
           />
         </div>
         <p className="mt-2 text-sm text-ink-soft">

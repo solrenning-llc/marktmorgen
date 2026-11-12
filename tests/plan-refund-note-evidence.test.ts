@@ -359,4 +359,40 @@ await t.test(`a retry never takes back a stop the creator set after ours was tak
   assert.equal(shop.sub().cancel_at_period_end, true, "a stop the creator set is never taken back by a retry");
 });
 }
+// Codex G on #3740: the note's m: 0 write after our stop was taken back fails without landing, so the note still says
+// m: 1. The creator then sets the stop themselves; the next run must still leave it. What decides is Stripe's own record
+// of whose stop it is, not a note that may be stale.
+for (const path of ["the daily job", "the creator's request"] as const) {
+await t.test(`a stale m: 1 note never takes back a stop the creator set after ours was taken back: ${path}`, async () => {
+  await reset();
+  const shop = path === "the daily job" ? await paidShop() : await paidShop({ at: NOW - 40 * DAY });
+  if (path === "the daily job") {
+    world.refundsDown = true;
+    await refundAndEndPlan(await shop.store(), NOW);
+    world.refundsDown = false;
+  }
+  // Every note write saying m: 0 fails before it lands, and the note's removal fails too.
+  const notLanded = (commands: Command[]) => (isNote(commands, "HSET") && String(commands[0][3]).includes('"m":0')) || isNote(commands, "HDEL");
+  redis.pipeline = async (commands) => {
+    if (notLanded(commands)) throw new Error("Redis request failed with status 503");
+    return original(commands);
+  };
+  const logged = console.error;
+  console.error = () => {};
+  try {
+    if (path === "the daily job") await finishPlanRefunds(Date.now() + 10_000, NOW + 601).catch(() => {});
+    else await refundAndEndPlan(await shop.store(), NOW).catch(() => {});
+  } finally {
+    console.error = logged;
+    redis.pipeline = original;
+  }
+  assert.equal(shop.sub().cancel_at_period_end, false, "our stop was taken back");
+  assert.equal(JSON.parse(String(await shop.note())).m, 1, "the note still says m: 1: its m: 0 never landed");
+  shop.sub().cancel_at_period_end = true;
+  const quiet = console.error;
+  console.error = () => {};
+  try { await finishPlanRefunds(Date.now() + 10_000, NOW + 2 * 3_600); } finally { console.error = quiet; }
+  assert.equal(shop.sub().cancel_at_period_end, true, "a stop the creator set is never taken back on a stale note");
+});
+}
 });

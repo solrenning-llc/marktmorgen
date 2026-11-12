@@ -72,7 +72,16 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     if (method === "POST") {
       if (world.stopDown || world.postDownFor.has(sub[1])) return fail();
       if (row.status === "canceled") return json({ error: { message: "canceled", type: "invalid_request_error" } }, 400);
-      row.cancel_at_period_end = form.get("cancel_at_period_end") === "true";
+      if (form.has("cancel_at_period_end")) row.cancel_at_period_end = form.get("cancel_at_period_end") === "true";
+      // As Stripe: metadata[key]=value sets a key, an empty value unsets it.
+      for (const [key, value] of form) {
+        const name = /^metadata\[(.+)\]$/.exec(key)?.[1];
+        if (!name) continue;
+        const metadata = { ...((row.metadata as Record<string, string> | undefined) ?? {}) };
+        if (value === "") delete metadata[name];
+        else metadata[name] = value;
+        row.metadata = metadata;
+      }
     }
     if (method === "DELETE") {
       if (world.endDown) return fail();

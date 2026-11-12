@@ -81,6 +81,8 @@ jobs:
       - run: node scripts/ci-build.mjs
       - name: Public entry journeys at five widths with AAA and access modes
         run: node tests/e2e/accessibility-public-matrix.mjs
+      - name: Help, legal, trust and error pages at 320 and 1280 px in light, dark and forced colors
+        run: node tests/e2e/accessibility-public-pages.mjs
 
   all-checks:
     # The one check GitHub requires before main (scripts/ci_all_checks.py): it always runs and

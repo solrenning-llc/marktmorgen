@@ -26,6 +26,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { onAccount, platformKey } from "@/lib/stripe-account";
+import { readStripePage } from "@/lib/stripe-list";
 import { type Store, saleHandles, storesAfter } from "@/lib/store";
 import { readListing, readProduct } from "@/lib/catalog";
 import { canSellProduct, createCheckout } from "@/lib/store-checkout";
@@ -97,6 +98,11 @@ type Ended = {
 
 /** Pages of a customer's memberships read before "has not come back" is left unknown. */
 const CAME_BACK_PAGES = 5;
+/**
+ * Pages of memberships read for one offer, across every customer of the address (audit R43): past them, "has not
+ * come back" is left unknown and nothing is sent. The customers of one address are read on one page of a hundred.
+ */
+const CAME_BACK_OFFER_PAGES = 10;
 
 /**
  * Whether this address has a live membership to this product on the creator's account now: true, false, or null
@@ -104,9 +110,11 @@ const CAME_BACK_PAGES = 5;
  * list. A page that is not one, a membership without an id to go on from, or more pages than are read is unknown,
  * never "has not come back", so no offer goes to somebody who may already be back.
  */
-async function cameBack(account: string, customer: string, product: string): Promise<boolean | null> {
+async function cameBack(account: string, customer: string, product: string, budget: { pages: number }): Promise<boolean | null> {
   let after = "";
   for (let page = 0; page < CAME_BACK_PAGES; page += 1) {
+    if (budget.pages <= 0) return null;
+    budget.pages -= 1;
     const listed = await onAccount("GET", account, `/subscriptions?customer=${customer}&status=all&limit=100${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`);
     const subs: unknown = listed.data;
     if (!Array.isArray(subs) || (listed.has_more !== true && listed.has_more !== false)) return null;
@@ -126,12 +134,43 @@ async function cameBack(account: string, customer: string, product: string): Pro
   return null;
 }
 
+/**
+ * Whether this address is back on this product under any of its customers on the creator's account: true, false, or
+ * null when it cannot be said (audit R43; CX-123 rule 24). Each store checkout makes a new customer, so the one whose
+ * membership ended is read first, then every other customer listed under the address as Stripe holds it and in small
+ * letters (Stripe's email filter matches the text exactly). A customer list that is not one, read in part, with a row
+ * that cannot be read, or not read at all (a provider error), and more memberships than CAME_BACK_OFFER_PAGES, are
+ * unknown, never "has not come back".
+ */
+async function cameBackUnder(account: string, customer: string, email: string, product: string): Promise<boolean | null> {
+  const budget = { pages: CAME_BACK_OFFER_PAGES };
+  const own = await cameBack(account, customer, product, budget);
+  if (own !== false) return own;
+  try {
+    const others: string[] = [];
+    for (const address of new Set([email, normaliseEmail(email)])) {
+      const page = readStripePage(await onAccount("GET", account, `/customers?${new URLSearchParams({ email: address, limit: "100" })}`), undefined, CUSTOMER_PATTERN);
+      if (page.hasMore || page.unreadable > 0) return null;
+      for (const row of page.rows) if (row.id !== customer && !others.includes(row.id)) others.push(row.id);
+    }
+    for (const other of others) {
+      const back = await cameBack(account, other, product, budget);
+      if (back !== false) return back;
+    }
+    return false;
+  } catch (error) {
+    console.error("reading whether a member came back failed", error);
+    return null;
+  }
+}
+
 /** Pages of a window's ended memberships read in one run (a hundred each). */
 const EVENT_PAGES = 10;
 /**
- * At most this many offers looked at per store per run (Claude 3 on #2714): each is a customer read, up to
- * CAME_BACK_PAGES pages of their memberships and an email. The window is read whole to decide, but no more than
- * this is spent on it in one run, as when only its first page was read; the rest wait for the next run.
+ * At most this many offers looked at per store per run (Claude 3 on #2714): each is a customer read, up to two
+ * pages of the address's customers, up to CAME_BACK_OFFER_PAGES pages of their memberships and an email. The window
+ * is read whole to decide, but no more than this is spent on it in one run, as when only its first page was read;
+ * the rest wait for the next run.
  */
 const OFFERS_PER_RUN = 100;
 
@@ -191,7 +230,7 @@ async function sweepStore(store: Store, deadline: number, now: number): Promise<
       const found = await onAccount("GET", account, `/customers/${customer}`);
       const email = typeof found.email === "string" && EMAIL_PATTERN.test(found.email) ? normaliseEmail(found.email) : "";
       if (!email || found.deleted === true) continue;
-      const back = await cameBack(account, customer, product.id);
+      const back = await cameBackUnder(account, customer, found.email as string, product.id);
       if (back === null) {
         // Not known whether they came back: nothing is sent, and the mark (ours) is let go for a whole reading next run.
         await releaseMark(sentKey(account, subId), claim);
@@ -244,11 +283,10 @@ async function sweepStore(store: Store, deadline: number, now: number): Promise<
         sent += 1;
         await redisPipeline([["INCR", countKey(statsId)]]);
       } else {
-        // Not sent: tried again on the next run, inside the same window.
-        // Only our own claims are let go (Revisor 1 on #2719); the offer's link is this run's alone.
-        await releaseMark(sentKey(account, subId), claim);
-        await releaseMark(onceKey(statsId, email, product.id), onceValue);
-        await redisPipeline([["DEL", linkKey(token)]]);
+        // false is refused or unknown alike (Amazon SES or Resend may have taken it and the reply been lost), so the
+        // marks and the offer's link are kept, as lib/trial-nudges.ts keeps its mark: the person is written to at most
+        // once, and the link in an email that may have arrived keeps working (CX-123 rule 24).
+        console.error("a come-back offer may not have gone; kept as sent", store.handle);
       }
     } catch (error) {
       console.error("sending a come-back offer failed", store.handle, error);
@@ -306,25 +344,39 @@ export async function sendWinBacks(deadline: number, now = Date.now()): Promise<
 /** `percent` and `months` are the offer as it was emailed, whatever the setting says now. */
 export type WinBackGrant = { email: string; product: string; option: string; coupon: string; until: number; percent: number; months: number };
 
-/** Who a link in a come-back email is for, on this store and product, while it works. */
+/**
+ * Who a link in a come-back email is for, on this store and product, while it works.
+ *
+ * null only for a link that is not one (a malformed token), an absent key (an
+ * offer never sent or ended) or a whole grant for another store, another
+ * product or no offer. Any other reply, or none, throws UnknownReplyError
+ * (CX-123 rule 24): an unknown reading is never told as an offer that has ended.
+ */
 export async function readWinBack(store: Store, product: string, token: string): Promise<WinBackGrant | null> {
   if (!TOKEN_PATTERN.test(token) || !store.statsId || !isRedisConfigured()) return null;
-  const [raw, ttl] = await redisPipeline([["GET", linkKey(token)], ["TTL", linkKey(token)]]);
-  if (typeof raw !== "string") return null;
+  const replies = repliesFor(await redisPipeline([["GET", linkKey(token)], ["TTL", linkKey(token)]]), 2);
+  if (!replies) throw new UnknownReplyError("a come-back link");
+  const [raw, ttl] = replies;
+  if (raw === null) return null;
+  if (typeof raw !== "string" || typeof ttl !== "number" || !Number.isSafeInteger(ttl)) throw new UnknownReplyError("a come-back link");
+  let parsed: unknown;
   try {
-    const g = JSON.parse(raw) as { s?: unknown; e?: unknown; p?: unknown; o?: unknown; c?: unknown; pc?: unknown; m?: unknown };
-    if (g.s !== store.statsId || g.p !== product || typeof g.e !== "string" || typeof g.c !== "string" || !g.c) return null;
-    const left = Number(ttl) > 0 ? Number(ttl) : 0;
-    const percent = typeof g.pc === "number" ? g.pc : 0;
-    const months = typeof g.m === "number" ? g.m : 1;
-    if (!percent) return null;
-    return { email: g.e, product, option: typeof g.o === "string" ? g.o : "", coupon: g.c, until: Math.floor(Date.now() / 1000) + left, percent, months };
+    parsed = JSON.parse(raw);
   } catch {
-    return null;
+    throw new UnknownReplyError("a come-back link");
   }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new UnknownReplyError("a come-back link");
+  const g = parsed as { s?: unknown; e?: unknown; p?: unknown; o?: unknown; c?: unknown; pc?: unknown; m?: unknown };
+  if (g.s !== store.statsId || g.p !== product || typeof g.e !== "string" || typeof g.c !== "string" || !g.c) return null;
+  const left = ttl > 0 ? ttl : 0;
+  const percent = typeof g.pc === "number" ? g.pc : 0;
+  const months = typeof g.m === "number" ? g.m : 1;
+  if (!percent) return null;
+  return { email: g.e, product, option: typeof g.o === "string" ? g.o : "", coupon: g.c, until: Math.floor(Date.now() / 1000) + left, percent, months };
 }
 
-export type OpenResult = { ok: true; url: string } | { ok: false; reason: "expired" | "unavailable" | "price" | "refused" | "consent" };
+/** "unknown": the link could not be read just now (readWinBack threw); never said as "expired". */
+export type OpenResult = { ok: true; url: string } | { ok: false; reason: "expired" | "unavailable" | "price" | "refused" | "consent" | "unknown" };
 
 /** The checkout a come-back link opens: this product, this address, the offer applied, no second trial. */
 export async function openWinBack(
@@ -335,7 +387,14 @@ export async function openWinBack(
   /** The box to start access at once, checked on the button's page (lib/digital-consent.ts). */
   consent: DigitalConsent | null = null,
 ): Promise<OpenResult> {
-  const grant = await readWinBack(store, productId, token);
+  let grant: WinBackGrant | null;
+  try {
+    grant = await readWinBack(store, productId, token);
+  } catch (error) {
+    // Redis answered the link oddly or not at all: nothing opened, nothing charged, and not said as ended (rule 24).
+    console.error("reading a come-back link failed", store.handle, error);
+    return { ok: false, reason: "unknown" };
+  }
   if (!grant) return { ok: false, reason: "expired" };
   const product = await readProduct(store, productId);
   if (!product?.recurring) return { ok: false, reason: "unavailable" };

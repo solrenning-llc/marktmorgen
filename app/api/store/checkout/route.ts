@@ -31,6 +31,7 @@ import { readCountry } from "@/lib/fair-price";
 import { memberClaim, readMemberClaim } from "@/lib/member-price";
 import { pageShown, runningTest, declaredMeasure } from "@/lib/sales-page";
 import { noteCheckoutTrouble } from "@/lib/checkout-trouble";
+import { chargesOffAfterRefusal } from "@/lib/stripe-charges";
 import { markFromReferer } from "@/lib/page-funnel";
 import { funnelHere } from "@/lib/page-funnel-store";
 import { listedReturn, listedSite } from "@/lib/embed-sites";
@@ -261,6 +262,9 @@ export async function POST(request: NextRequest) {
     let abTest = "";
     let ab: string | undefined;
     if (product.page && bucket !== null && !gift && !group) {
+      // A page whose read is not known never blocks the sale, and no version is claimed for it: the buyer goes on to
+      // Stripe with no metadata[ab], and the test counts nothing (C4-20261106-2610-C6-153, unit B;
+      // tests/checkout-ab-page-unknown.test.ts).
       const page = await readPage(store.statsId, product.id).catch(() => null);
       const test = page ? runningTest(page) : null;
       if (page && test && pageShown(page)) {
@@ -363,6 +367,8 @@ export async function POST(request: NextRequest) {
     console.error("checkout failed", error);
     // A checkout Stripe would not open: counted, and the creator told (lib/checkout-trouble.ts).
     after(() => noteCheckoutTrouble(store, error).catch(() => {}));
+    // Stripe says the account cannot take card payments: written down, and said, since trying again will not help.
+    if (await chargesOffAfterRefusal(store, error)) return away(`/@${store.handle}?status=nocharges`);
     return away(`/@${store.handle}?status=error`);
   }
 }

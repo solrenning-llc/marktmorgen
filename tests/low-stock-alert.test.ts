@@ -94,6 +94,10 @@ async function main(): Promise<void> {
   for (const p of many) results.push(await tellLowStock(store, p, 4, now + 5 * DAY));
   is("only the first ones are told", results.filter((r) => r === "told").length, LOW_STOCK_ALERTS_A_STORE_DAY);
   is("and only as many emails", emails.length, LOW_STOCK_ALERTS_A_STORE_DAY);
+  // Past the bound nothing of the crossing is spent: the product is told the next day (Claude 3 and Revisor 1 on #3725, MEDIUM 2).
+  const late = many[many.length - 1];
+  is("past the bound, the same units the next day: told then", await tellLowStock(store, late, 4, now + 6 * DAY), "told");
+  is("and only once", await tellLowStock(store, late, 4, now + 6 * DAY), "no");
   is("the rest are not, never unknown", results.slice(LOW_STOCK_ALERTS_A_STORE_DAY), ["no", "no"]);
   const pipe = redis.pipeline.bind(redis);
   const another = await addProduct(OWNER, "Cup", "", "30", null);
@@ -102,6 +106,7 @@ async function main(): Promise<void> {
   redis.pipeline = async (commands) => (commands.some((c) => c[0] === "INCR" && String(c[1]).includes(":lowday:")) ? [["QUEUED"], [1]] : pipe(commands));
   is("a store count that cannot be read: nothing sent", await tellLowStock(store, another.product, 4, now + 6 * DAY), "unknown");
   redis.pipeline = pipe;
+  is("and nothing of it was spent: told the next day", await tellLowStock(store, another.product, 4, now + 7 * DAY), "told");
   done();
 }
 

@@ -20,7 +20,7 @@
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { isSenderConfigured } from "@/lib/email";
-import { withinLimit } from "@/lib/request-guard";
+import { withinEssentialLimit } from "@/lib/request-guard";
 import { createHash } from "node:crypto";
 import { StripeError, onAccount } from "@/lib/stripe-account";
 import { isHouseStore } from "@/lib/house-store";
@@ -129,7 +129,7 @@ export async function keepAssistReminder(input: { store: Store; session: string;
   if (!email || email.length > MAX_EMAIL_LENGTH || !EMAIL_PATTERN.test(email)) return "email";
   const statsId = store.statsId as string;
   try {
-    if (!(await withinLimit("assist-remind-store", statsId, ASSIST_REMINDERS_PER_STORE_DAY, 86_400))) return "limited";
+    if (!(await withinEssentialLimit("assist-remind-store", statsId, ASSIST_REMINDERS_PER_STORE_DAY, 86_400))) return "limited";
     const consent: Consent = { s: statsId, e: email, t: assistReminderWords(store.language).box, v: ASSIST_REMIND_VERSION, l: store.language, at: now };
     const key = assistRemindKey(input.session);
     // Due an hour after the checkout closes, which it does an hour after it opened (lib/store-checkout.ts).

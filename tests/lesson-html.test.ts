@@ -2,6 +2,7 @@
  * 103 [E2-LESSON-MEDIA], unit 2: an explicit HTML preview in a lesson is
  * sanitized and drawn in a sandbox; ordinary HTML code remains code.
  */
+import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { LessonText } from "@/components/lesson-text";
@@ -67,5 +68,20 @@ is("an unclosed or empty explicit block follows the existing safe fence rules", 
   lessonBlocks(`${F}html-preview\n<p>unclosed</p>`).some((block) => block.kind === "html"),
   lessonBlocks(`${F}html-preview\n\n${F}`).length,
 ], [false, 0]);
+
+part("The framed document is in the store's language (#4158, WCAG 3.1.1 and 3.1.2)");
+is("the document names the language it is given on its html element", lessonHtmlDocument("<p>Hallo</p>", "de-DE").startsWith('<!doctype html><html lang="de-DE"><head>'), true);
+is("a language that is not a plain tag is never written into the document", [
+  lessonHtmlDocument("<p>Text</p>", 'en" onload="steal()').includes("onload"),
+  lessonHtmlDocument("<p>Text</p>", "").startsWith("<!doctype html><html><head>"),
+], [false, true]);
+const german = renderToStaticMarkup(createElement(LessonText, { text: `${F}html-preview\n<p>Hallo</p>\n${F}`, lang: "de-DE" }));
+is("a lesson's HTML block is framed in the language the lesson text is given", german.includes("&lt;html lang=&quot;de-DE&quot;&gt;"), true);
+const lessonPage = readFileSync("app/[handle]/course/[product]/[lesson]/page.tsx", "utf8");
+is("the buyer's lesson page gives the lesson text the language it marks the page with", [
+  lessonPage.includes("lang={said.lang.locale}"),
+  /<LessonText text=\{body\} codeLabel=\{w\.codeBlock\} lang=\{said\.lang\.locale\} \/>/.test(lessonPage),
+], [true, true]);
+is("the studio's preview gives it the language it marks the preview with", /<LessonText text=\{now\} lang=\{locale\} \/>/.test(readFileSync("components/course-editor.tsx", "utf8")), true);
 
 done();

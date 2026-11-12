@@ -35,7 +35,7 @@ export const HELP_AREAS: readonly HelpArea[] = [
   { folder: "copy", name: "Copy a store", answer: "can-i-copy-a-whole-store-into-another-of-my-stores", mentions: "copy" },
   { folder: "course", name: "Courses", answer: "can-i-sell-a-course", mentions: "course" },
   { folder: "deals", name: "Deals and pipelines", answer: "can-i-keep-my-own-details-about-people-and-track-deals", mentions: "deal" },
-  { folder: "discord", name: "Discord", answer: "can-i-sell-a-course", mentions: "Discord" },
+  { folder: "discord", name: "Discord", answer: "can-my-buyers-get-into-my-discord-server", mentions: "Discord" },
   { folder: "disputes", name: "Disputed purchases", answer: "who-handles-refunds-and-disputes", mentions: "dispute" },
   { folder: "email", name: "Email", answer: "can-i-email-the-people-on-my-list", mentions: "email" },
   { folder: "forms", name: "Forms, surveys and quizzes", answer: "can-i-add-a-form-a-survey-or-a-quiz", mentions: "form" },

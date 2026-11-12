@@ -10,12 +10,17 @@
  *   - no answer the help center has today is lost: each answerId below stays,
  *     so no link to /help#<id> breaks (HC1 asks that old ids keep working);
  *   - in the answers written for HC1, every button or screen named in quotes
- *     is in the code of the screens it explains.
+ *     is in the code of the screens it explains;
+ *   - the help page lists every area, each link going to an answer that is on
+ *     the page and saying the area and the question.
  */
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { AREAS_WITHOUT_HELP, HELP_AREAS, NOT_AREAS } from "@/lib/help-areas";
 import { HELP_SECTIONS, answerId } from "@/lib/help-content";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import HelpPage from "@/app/help/page";
 import { done, is, part } from "./check";
 
 const folders = readdirSync("app/studio").filter((f) => statSync(join("app/studio", f)).isDirectory()).sort();
@@ -76,11 +81,23 @@ part("No answer of today is lost");
   is("no two answers share an id", answers.size, HELP_SECTIONS.reduce((n, s) => n + s.items.length, 0));
 }
 
+part("The help page lists every area");
+{
+  const html = renderToStaticMarkup(createElement(HelpPage));
+  const nav = html.slice(html.indexOf("data-help-areas"), html.indexOf("</nav>", html.indexOf("data-help-areas")));
+  const links = [...nav.matchAll(/<a href="#([^"]+)"[^>]*><span[^>]*>([^<]+)<\/span><span[^>]*>([^<]+)<\/span><\/a>/g)];
+  is("one link per area", links.length, HELP_AREAS.length);
+  is("every link goes to an answer on the page", links.filter((l) => !html.includes(`id="${l[1]}"`)).map((l) => l[1]), []);
+  is("every link says its area and a question", links.every((l) => l[2].length > 2 && l[3].endsWith("?")), true);
+  is("the list has its own heading", /<h2 id="help-areas-title"[^>]*>Help for each part of your studio<\/h2>/.test(html), true);
+}
+
 part("Names quoted in the answers written for HC1 are on the screens");
 {
   const SCREENS: Record<string, string[]> = {
     "where-do-i-find-my-plans-invoices": ["app/studio/page.tsx", "app/studio/invoices/page.tsx"],
     "can-i-put-a-label-on-many-contacts-at-once": ["app/studio/import/page.tsx", "components/bulk-labels.tsx"],
+    "can-my-buyers-get-into-my-discord-server": ["app/studio/page.tsx", "components/discord-studio.tsx", "app/studio/discord/page.tsx"],
     "how-do-i-build-a-funnel": ["app/studio/page.tsx", "components/studio-tools.tsx", "app/studio/funnels/page.tsx", "components/funnel-type-picker.tsx", "components/page-funnel-editor.tsx", "components/funnel-editor.tsx"],
     "how-do-i-refund-members-for-unused-time-when-my-store-closes": ["app/studio/page.tsx", "app/studio/closing-refunds/page.tsx", "components/closing-refunds-confirm.tsx"],
     "how-do-i-make-a-business-card-to-share": ["app/studio/page.tsx", "app/studio/site/page.tsx", "app/studio/card/page.tsx", "components/creator-card-editor.tsx"],

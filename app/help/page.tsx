@@ -7,12 +7,16 @@ import { SiteNav } from "@/components/site-nav";
 import { HelpSearch } from "@/components/help-search";
 import { CopyLink } from "@/components/copy-link";
 import { HELP_SECTIONS, answerId } from "@/lib/help-content";
+import { HELP_AREAS } from "@/lib/help-areas";
 
 export const metadata: Metadata = {
   title: "Help center — Marktmorgen",
   description:
     "Straight answers about the store, the money, the files and what the subscription buys. If an answer is “not yet,” it says not yet.",
 };
+
+/** Each answer's question by its id, for the area links. */
+const questionOf = new Map(HELP_SECTIONS.flatMap((section) => section.items.map((item) => [answerId(item.q), item.q] as const)));
 
 export default function HelpPage() {
   return (
@@ -47,6 +51,28 @@ export default function HelpPage() {
             <HelpSearch />
           </div>
         </section>
+
+        {/*
+          One link per area of the studio (564 [HC1]), each to the answer for its main task, so a creator who knows where they
+          are in the studio finds its help without guessing a search word. The list comes from lib/help-areas.ts, which a test
+          keeps in step with the studio's own screens; the link says the area and the question, so it makes sense on its own.
+        */}
+        <nav aria-labelledby="help-areas-title" className="container-page pt-14 sm:pt-18" data-help-areas>
+          <h2 id="help-areas-title" className="t-section">Help for each part of your studio</h2>
+          <ul className="mt-5 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {[...HELP_AREAS].sort((a, b) => a.name.localeCompare(b.name, "en-US")).map((area) => (
+              <li key={area.folder} className="min-w-0">
+                <a
+                  href={`#${area.answer}`}
+                  className="flex min-h-11 flex-col justify-center rounded-[var(--r-md)] border border-line bg-white px-4 py-3 hover:border-line-strong"
+                >
+                  <span className="font-semibold text-ink">{area.name}</span>
+                  <span className="text-sm text-ink-soft">{questionOf.get(area.answer)}</span>
+                </a>
+              </li>
+            ))}
+          </ul>
+        </nav>
 
         <div className="container-page grid gap-10 py-14 sm:py-20 lg:grid-cols-[15rem_1fr] lg:gap-16">
           <nav aria-label="Help sections" className="min-w-0 lg:sticky lg:top-24 lg:self-start">

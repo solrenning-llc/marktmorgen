@@ -2346,16 +2346,19 @@ export async function attributedAffiliate(
   if (!affiliatesOn(store)) return null;
   const via = readViaCookie(cookies.via);
   if (!via) return null;
-  const click = store.affiliates.rule === "first" ? via.first : via.last;
   const now = Math.floor(Date.now() / 1000);
-  if (click.at > now + 60 || now - click.at > store.affiliates.days * 86_400) return null;
-  let affiliate = await approvedByCode(store, click.code);
-  // On first click, somebody the creator has since declined or removed leaves
-  // the sale to the affiliate who actually brought the buyer back, rather than
-  // taking it away from everyone.
-  if (!affiliate && store.affiliates.rule === "first" && via.last.code !== click.code) {
+  const inWindow = (c: { at: number }) => c.at <= now + 60 && now - c.at <= store.affiliates.days * 86_400;
+  const first = store.affiliates.rule === "first";
+  const click = first ? via.first : via.last;
+  // On first click, a first click past its window no longer holds the buyer: the cookie keeps it for as long as the
+  // browser keeps the cookie (up to 400 days), so stopping there would leave every later link unpaid for good.
+  let affiliate = inWindow(click) ? await approvedByCode(store, click.code) : null;
+  // On first click, somebody the creator has since declined or removed, or a
+  // first click past its window, leaves the sale to the affiliate who actually
+  // brought the buyer back, rather than taking it away from everyone.
+  if (!affiliate && first && (via.last.code !== click.code || via.last.at !== click.at)) {
     const back = via.last;
-    if (back.at <= now + 60 && now - back.at <= store.affiliates.days * 86_400) {
+    if (inWindow(back)) {
       affiliate = await approvedByCode(store, back.code);
     }
   }

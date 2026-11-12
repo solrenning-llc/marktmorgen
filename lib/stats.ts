@@ -1490,11 +1490,16 @@ async function readDisputes(store: Store, since: number, pages = DISPUTE_PAGES):
       if (takes !== true) continue;
       const raw = row.payment_intent;
       const pi = typeof raw === "string" ? raw : raw && typeof raw === "object" && typeof (raw as { id?: unknown }).id === "string" ? (raw as { id: string }).id : "";
-      const cents = typeof row.amount === "number" && row.amount > 0 ? row.amount : 0;
-      if (!cents) continue;
+      // A dispute that takes money but whose amount or date does not read is never dropped as
+      // nothing taken: the reading is partial (rule 24, MM-E2E-OT-2).
+      if (!Number.isSafeInteger(row.amount) || (row.amount as number) <= 0 || !Number.isSafeInteger(row.created) || (row.created as number) < 0) {
+        partial = true;
+        continue;
+      }
+      const cents = row.amount as number;
       const currency = currencyOf(row);
       if (!currency) partial = true;
-      out.push({ created: typeof row.created === "number" ? row.created * 1000 : 0, cents, currency, paymentIntent: pi });
+      out.push({ created: (row.created as number) * 1000, cents, currency, paymentIntent: pi });
     }
     if (!list.has_more) break;
     const last = rows[rows.length - 1];

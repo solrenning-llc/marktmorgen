@@ -39,9 +39,9 @@ const file = (handle: string) => `stores/${handle}/products/thing.zip`;
 test("a store inside the allowance is counted and not named", async () => {
   await recordDelivery(file("quiet"), 10 * GB);
   const month = await deliveredThisMonth("quiet");
-  assert.equal(month.bytes, 10 * GB);
-  assert.equal(month.allowance, DELIVERY_ALLOWANCE_BYTES);
-  assert.equal(month.over, false);
+  assert.equal(month?.bytes, 10 * GB);
+  assert.equal(month?.allowance, DELIVERY_ALLOWANCE_BYTES);
+  assert.equal(month?.over, false);
   assert.deepEqual(
     (await storesOverAllowance()).map((s) => s.folder),
     [],
@@ -52,7 +52,7 @@ test("a store inside the allowance is counted and not named", async () => {
 test("the delivery that crosses the line is the one that writes it down", async () => {
   // Right up to the line, and still nothing.
   await recordDelivery(file("busy"), DELIVERY_ALLOWANCE_BYTES - GB);
-  assert.equal((await deliveredThisMonth("busy")).over, false);
+  assert.equal((await deliveredThisMonth("busy"))?.over, false);
   assert.equal(
     (await storesOverAllowance()).some((s) => s.folder === "busy"),
     false,
@@ -61,7 +61,7 @@ test("the delivery that crosses the line is the one that writes it down", async 
 
   // The next file takes it past.
   await recordDelivery(file("busy"), 2 * GB);
-  assert.equal((await deliveredThisMonth("busy")).over, true);
+  assert.equal((await deliveredThisMonth("busy"))?.over, true);
   const over = await storesOverAllowance();
   const found = over.find((s) => s.folder === "busy");
   assert.ok(found, "the store is named once it is over");
@@ -76,11 +76,12 @@ test("a store far over is named once, not once per file", async () => {
 });
 
 test("nothing is ever blocked, whatever the number says", async () => {
-  // recordDelivery returns nothing and throws nothing: it cannot be the
-  // reason a buyer does not get what they paid for.
+  // recordDelivery throws nothing and only answers whether it counted: it
+  // cannot be the reason a buyer does not get what they paid for (a paid
+  // file goes out whatever it answers, lib/serve-file.ts).
   const huge = await recordDelivery(file("runaway"), 5_000 * GB);
-  assert.equal(huge, undefined);
-  assert.equal((await deliveredThisMonth("runaway")).bytes, 5_800 * GB);
+  assert.equal(huge, true);
+  assert.equal((await deliveredThisMonth("runaway"))?.bytes, 5_800 * GB);
 });
 
 test("the worst offender is listed first, because that is the one to call", async () => {
@@ -100,11 +101,11 @@ test("a path that is not a store's file is not counted against anyone", async ()
 });
 
 test("a size that is not a size is ignored rather than stored", async () => {
-  const before = (await deliveredThisMonth("quiet")).bytes;
+  const before = (await deliveredThisMonth("quiet"))?.bytes;
   await recordDelivery(file("quiet"), Number.NaN);
   await recordDelivery(file("quiet"), -5 * GB);
   await recordDelivery(file("quiet"), 0);
-  assert.equal((await deliveredThisMonth("quiet")).bytes, before);
+  assert.equal((await deliveredThisMonth("quiet"))?.bytes, before);
 });
 
 test("the figures read as figures in an email", () => {

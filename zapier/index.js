@@ -40,8 +40,134 @@ const explain = (response, z) => {
     const message = (body && body.message) || `Marktmorgen answered ${response.status}. Try again in a moment.`;
     throw new z.errors.Error(message, (body && body.error) || "api_error", response.status);
   }
+  if (!Number.isInteger(response.status) || response.status < 200 || response.status >= 300) {
+    unconfirmed(z);
+  }
   return response;
 };
+
+/** An unknown write result must not be reported as success or retried here. */
+const unconfirmed = (z) => {
+  throw new z.errors.Error(
+    "Marktmorgen could not confirm this operation. Check its status in your store before trying again.",
+    "unconfirmed_response",
+    502,
+  );
+};
+
+/** Keep a write's answer whole, but require the fields that identify its effect; anything else is unconfirmed. */
+const hookResult = (response, z, matches) => {
+  const body = response.data;
+  const data = body && typeof body === "object" && !Array.isArray(body) ? body.data : null;
+  if (!data || typeof data !== "object" || Array.isArray(data) || !matches(data)) unconfirmed(z);
+  return data;
+};
+
+const plain = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
+const text = (value) => typeof value === "string" && value.length > 0;
+
+/** A read whose answer is not the shape the API gives is unknown, never empty or nobody. */
+const unknownRead = (z) => {
+  throw new z.errors.Error("Marktmorgen's answer could not be read. Try again in a moment.", "unknown_response", 502);
+};
+
+/** The `data` of a read: a list of objects, or (`one`) one object that `matches`. */
+const readResult = (response, z, { one = false, matches = () => true } = {}) => {
+  const body = response.data;
+  const data = plain(body) ? body.data : undefined;
+  if (one ? !(plain(data) && matches(data)) : !(Array.isArray(data) && data.every(plain))) unknownRead(z);
+  return data;
+};
+
+/**
+ * How a message from the store's webhooks is known to be one (lib/webhooks.ts,
+ * `signature`): its Marktmorgen-Signature header is "t=<seconds>,v1=<hex>",
+ * the hex HMAC-SHA256 of "<seconds>.<raw body>" under the secret the Zap kept
+ * when it subscribed, with a second v1 under the old secret for a day after
+ * the creator makes a new one. A message is passed on only when one v1
+ * matches and its time is within SIGNATURE_TOLERANCE_SECONDS of now, either
+ * way. The server sets no number of its own (it signs at each try, a retry
+ * included, and gives up on a try after 8 seconds); five minutes is the
+ * window Stripe's scheme, which this one follows, checks.
+ *
+ * Repeats are not ignored here: Zapier runs this once per message with no
+ * memory between runs, so knowing an event id was already passed on would
+ * need storage this app does not have (docs/zapier-app.md).
+ */
+const SIGNATURE_TOLERANCE_SECONDS = 300;
+
+/** A header from Zapier's rawRequest, whose names come as "Http-Name", in any case. */
+const headerOf = (headers, name) => {
+  if (!plain(headers)) return undefined;
+  const wanted = [name, `http-${name}`];
+  const key = Object.keys(headers).find((k) => wanted.includes(k.toLowerCase()));
+  return key === undefined ? undefined : headers[key];
+};
+
+/** The time and every v1 of a signature header, or null when it is not that shape. */
+const parseSignature = (header) => {
+  if (typeof header !== "string") return null;
+  let t = null;
+  const v1 = [];
+  for (const part of header.split(",")) {
+    const at = part.indexOf("=");
+    const name = part.slice(0, at);
+    const value = part.slice(at + 1);
+    if (name === "t" && t === null && /^[0-9]{1,12}$/.test(value)) t = Number(value);
+    else if (name === "v1" && /^[0-9a-f]{64}$/.test(value)) v1.push(value);
+    else return null;
+  }
+  return t === null || v1.length === 0 ? null : { t, v1 };
+};
+
+const hmacHex = async (secret, payload) => {
+  const subtle = globalThis.crypto && globalThis.crypto.subtle;
+  if (!subtle) return null;
+  const encode = (value) => new TextEncoder().encode(value);
+  const key = await subtle.importKey("raw", encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const mac = new Uint8Array(await subtle.sign("HMAC", key, encode(payload)));
+  return Array.from(mac, (byte) => byte.toString(16).padStart(2, "0")).join("");
+};
+
+/** Equal hex of equal length, compared in time that does not depend on where they differ. */
+const sameHex = (a, b) => {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i += 1) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+};
+
+/** Halts the run before the Zap: shown in its history, and never counted toward turning it off. */
+const notPassedOn = (z, why) => {
+  const Halted = z.errors.HaltedError || z.errors.Error;
+  throw new Halted(`This message was not passed on: ${why}`, "unsigned_event", 401);
+};
+
+/** The message, parsed from the very bytes that were signed, once its signature and time check out. */
+const verifiedMessage = async (z, bundle) => {
+  const secret = bundle.subscribeData && bundle.subscribeData.secret;
+  const raw = bundle.rawRequest;
+  if (!text(secret)) notPassedOn(z, "this Zap has no signing secret. Turn it off and on again.");
+  if (!plain(raw) || typeof raw.content !== "string") notPassedOn(z, "its body could not be read to check its signature.");
+  const signed = parseSignature(headerOf(raw.headers, "marktmorgen-signature"));
+  if (!signed) notPassedOn(z, "it has no Marktmorgen signature.");
+  if (Math.abs(Math.floor(Date.now() / 1000) - signed.t) > SIGNATURE_TOLERANCE_SECONDS) notPassedOn(z, "it was not signed within the last 5 minutes.");
+  const expected = await hmacHex(secret, `${signed.t}.${raw.content}`);
+  if (!expected) notPassedOn(z, "its signature could not be checked here.");
+  let matched = false;
+  for (const candidate of signed.v1) matched = sameHex(candidate, expected) || matched;
+  if (!matched) notPassedOn(z, "its signature does not match this Zap's secret.");
+  try {
+    return JSON.parse(raw.content);
+  } catch {
+    return notPassedOn(z, "its signed body is not JSON.");
+  }
+};
+
+/** What each action's answer must be, exactly as lib/api-write.ts gives it. */
+const SUBSCRIBER = (data) => text(data.email) && (data.status === "added" || data.status === "already");
+const LABELS = (data) => text(data.email) && Array.isArray(data.labels) && data.labels.every((label) => typeof label === "string");
+const ACCESS = (data) => text(data.email) && text(data.product) && (data.status === "given" || data.status === "already") && typeof data.emailed === "boolean";
 
 const authentication = {
   type: "custom",
@@ -57,7 +183,7 @@ const authentication = {
   ],
   test: async (z) => {
     const response = await z.request({ url: `${API}/store` });
-    return response.data.data;
+    return readResult(response, z, { one: true, matches: (data) => text(data.handle) });
   },
   connectionLabel: "{{name}} (@{{handle}})",
 };
@@ -206,20 +332,25 @@ const hookTrigger = (spec) => ({
     type: "hook",
     performSubscribe: async (z, bundle) => {
       const response = await z.request({ url: `${API}/hooks`, method: "POST", body: { url: bundle.targetUrl, events: [spec.event] } });
-      return response.data.data;
+      return hookResult(response, z, (data) =>
+        typeof data.id === "string" && /^we_[0-9a-f]{16}$/.test(data.id) &&
+        Array.isArray(data.events) && data.events.length === 1 && data.events[0] === spec.event &&
+        // Kept as subscribeData: every message is checked against it.
+        text(data.secret),
+      );
     },
     performUnsubscribe: async (z, bundle) => {
       const id = bundle.subscribeData && bundle.subscribeData.id;
       const response = await z.request({ url: `${API}/hooks`, method: "DELETE", body: { id } });
-      return response.data.data;
+      return hookResult(response, z, (data) => typeof id === "string" && /^we_[0-9a-f]{16}$/.test(id) && data.id === id && data.status === "removed");
     },
     perform: async (z, bundle) => {
-      const body = bundle.cleanedRequest;
-      return body && body.type === spec.event ? [body] : [];
+      const body = await verifiedMessage(z, bundle);
+      return plain(body) && body.type === spec.event ? [body] : [];
     },
     performList: async (z) => {
       const response = await z.request({ url: `${API}/events`, params: { type: spec.event, limit: 3 } });
-      return response.data.data;
+      return readResult(response, z);
     },
     sample: message(spec),
   },
@@ -238,7 +369,7 @@ const productList = {
       // The API pages products 200 at a time, its cursor the count already read.
       const cursor = bundle.meta && bundle.meta.page ? String(bundle.meta.page * 200) : undefined;
       const response = await z.request({ url: `${API}/products`, params: cursor ? { cursor } : {} });
-      return response.data.data;
+      return readResult(response, z);
     },
     sample: { id: "p_8f2c1a", title: "The Weeknight Cookbook", price: 2900, currency: "usd", kind: "one_time", interval: null, hidden: false, url: "https://marktmorgen.com/@harbor/p_8f2c1a" },
   },
@@ -273,7 +404,7 @@ const addSubscriber = {
         method: "POST",
         body: { email: bundle.inputData.email, name: bundle.inputData.name || "", tags, agreed: bundle.inputData.agreed === true || bundle.inputData.agreed === "true" },
       });
-      return response.data.data;
+      return hookResult(response, z, SUBSCRIBER);
     },
     sample: { email: "ada@example.com", status: "added" },
   },
@@ -296,7 +427,7 @@ const changeLabels = {
         method: "POST",
         body: { email: bundle.inputData.email, add: list(bundle.inputData.add), remove: list(bundle.inputData.remove) },
       });
-      return response.data.data;
+      return hookResult(response, z, LABELS);
     },
     sample: { email: "ada@example.com", labels: ["vip"] },
   },
@@ -321,7 +452,7 @@ const giveAccess = {
         method: "POST",
         body: { email: bundle.inputData.email, product: bundle.inputData.product, notify: bundle.inputData.notify === true || bundle.inputData.notify === "true" },
       });
-      return response.data.data;
+      return hookResult(response, z, ACCESS);
     },
     sample: { email: "ada@example.com", product: "p_8f2c1a", status: "given", emailed: false },
   },

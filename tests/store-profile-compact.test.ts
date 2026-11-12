@@ -27,7 +27,9 @@ function main(): void {
   is("the introduction at the body size, whole", page.includes('<p className="st-muted mx-auto mt-2 max-w-md leading-relaxed">{store.bio}</p>'), true);
   is("nothing of the creator's cut or hidden: no clamp, no truncation", /line-clamp|truncate|text-ellipsis/.test(page.slice(page.indexOf('data-store-profile'), page.indexOf("</section>", page.indexOf('data-store-profile')))), false);
   is("the social links closer", socials.includes('className="mx-auto mt-3 max-w-lg"'), true);
-  is("the products start sooner", page.includes('<div className="mx-auto max-w-xl px-4 pb-16 pt-5">'), true);
+  // Rule 23: the class string grew lg: classes for the two-column store on a computer (Encanto 3,
+  // tests/encanto-store-desktop.test.ts); what this checks, the phone's room above the products (pt-5), is unchanged.
+  is("the products start sooner", page.includes('<div className="mx-auto max-w-xl px-4 pb-16 pt-5 lg:max-w-none lg:px-0 lg:pt-0">'), true);
   is("the profile is marked for the first-screen measure, apart from the reorderable parts", page.includes('data-store-profile=""') && !page.includes('data-part="profile"'), true);
 }
 

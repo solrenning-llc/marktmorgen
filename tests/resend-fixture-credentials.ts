@@ -18,6 +18,7 @@ const CREDENTIALS = [
   "re_test_affiliate_reversals_only",
   "re_test_agreements_only_a_stand_in",
   "re_test_allowances_only",
+  "re_test_after_trial_units_only",
   "re_test_api_write_only_a_stand_in",
   "re_test_assignments_only_a_stand_in",
   "re_test_assist_reminder_only",

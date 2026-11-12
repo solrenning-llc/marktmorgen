@@ -1,3 +1,5 @@
+import {waitForReactChangeHandler} from "./react-hydration.mjs";
+
 /** Synthetic intercepted replies only; never opens or sends a numbers link. */
 export async function checkNumbersAcknowledgment({browser,LOCAL,fixture,is}){
  const draft="  Partenaire   Étoile  ",canonical="Partenaire Étoile",password="synthetic-password";
@@ -37,6 +39,7 @@ export async function checkNumbersAcknowledgment({browser,LOCAL,fixture,is}){
    await page.locator("main details").evaluateAll(nodes=>nodes.forEach(n=>{n.open=true;}));
    const section=page.locator("[data-numbers-links]");await section.waitFor();
    const label=section.locator("#numbers-link-label"),pass=section.locator("#numbers-link-password"),days=section.locator("#numbers-link-days"),money=section.locator("#numbers-link-money");
+   await waitForReactChangeHandler(page,label);
    is("numbers revenue default off "+width,await money.isChecked(),false);
    async function attempt(scenario,action,revenue){
     let release;const held=new Promise(resolve=>{release=resolve;});pending={scenario,release:held};

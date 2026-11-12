@@ -70,6 +70,8 @@ import {
   requestOrdersLink,
 } from "@/lib/buyer-orders";
 import { ordersWords } from "@/lib/buyer-words/orders";
+import { saveServer, setProductRoles } from "@/lib/discord-store";
+import { storeKey } from "@/lib/learn";
 import { LANGUAGE_CODES } from "@/lib/store-language";
 import { BUMP_KEYS, MAX_BUNDLE_ITEMS, bundleMeta } from "@/lib/bundle-rules";
 import { MAX_PRODUCTS, MAX_SUMMARY_LENGTH, MAX_TITLE_LENGTH } from "@/lib/catalog-rules";
@@ -82,7 +84,7 @@ import { MAX_ROOM_LENGTH, readSetup } from "@/lib/call-setup";
 import { MAX_GROUPS, MAX_GROUP_LENGTH, MAX_PREFIX_LENGTH } from "@/lib/key-setup";
 import { MAX_KEY_LENGTH } from "@/lib/licence-keys";
 import { MAX_TITLE as MAX_AGREEMENT_TITLE, readDraft as readAgreementDraft } from "@/lib/agreement-rules";
-import { createAgreement, saveAgreement } from "@/lib/agreement-store";
+import { changeAgreement, createAgreement } from "@/lib/agreement-store";
 import { createRequest, changeRequest } from "@/lib/payment-request-store";
 import { readDraft as readRequestDraft } from "@/lib/payment-request-rules";
 import { requestsIn } from "@/lib/traffic";
@@ -108,6 +110,7 @@ import {
   storeFolder,
   storeForEmail,
 } from "@/lib/store";
+import { saveCourse } from "@/lib/course";
 
 const OWNER = "bounds-owner@example.test";
 const BUYER = "buyer@example.test";
@@ -286,13 +289,18 @@ async function listKey(id: string, index: number): Promise<void> {
 }
 
 /**
- * Makes a product the richest card of a shape: a course (its button, and "also in"), a private podcast (its feed's button,
+ * Makes a product the richest card of a shape: a course (its button, "also in" and how far the buyer is in its one lesson,
+ * 560 [AS1]), a private podcast (its feed's button,
  * "also in" and a key) or a plain product (a key), each sold at a price option with the longest label (said on the card)
  * whose own link is what that price adds. Returns the option's id, which the checkout names.
  */
 async function richMain(id: string, index: number, link: string, shape: CardShape = "course"): Promise<string> {
   const hex = createHash("sha256").update(id).digest("hex").slice(0, 32);
-  if (shape === "course") assert.ok((await setProductCourse(OWNER, id, { id: hex, lessons: 1 })).ok);
+  if (shape === "course") {
+    assert.ok((await setProductCourse(OWNER, id, { id: hex, lessons: 1 })).ok);
+    const lesson = { id: "lesson000001", title: "Lesson 1", preview: false, video: null, files: [], link: null, hasBody: false, quiz: null };
+    await saveCourse({ id: hex, modules: [{ id: "module000001", title: "Module 1", dripDays: 0, lessons: [lesson] }], certificate: false, startsAt: null }, (await storeForEmail(OWNER))!, true);
+  }
   if (shape === "podcast") assert.ok((await setProductPodcast(OWNER, id, { id: hex, episodes: 1 })).ok);
   assert.ok((await addOption(OWNER, id, "&".repeat(MAX_OPTION_LABEL_LENGTH), "10")).ok);
   const option = (await readProduct((await storeForEmail(OWNER))!, id))!.options[0].id;
@@ -337,7 +345,7 @@ function costlyLink(index: number): string {
 }
 
 /** The title of each purchase the page lists, in order (not a bundle's or a call's). */
-const listed = (html: string) => [...html.matchAll(/<li class="rounded-2xl p-5"[^>]*><p class="font-semibold">([^<]+)<\/p>/g)].map((m) => m[1]);
+const listed = (html: string) => [...html.matchAll(/<li class="rounded-2xl p-5"[^>]*><h2 class="font-semibold">([^<]+)<\/h2>/g)].map((m) => m[1]);
 
 /** The next batch of older purchases, from where the cursor says (a checkout, lib/buyer-orders.ts olderCursor), as the button asks for it. */
 const older = (from: string, by = token) => olderRoute(new NextRequest(`${ORIGIN}/api/store/orders/older?${new URLSearchParams({ handle: HANDLE, token: by, older: from })}`));
@@ -384,6 +392,43 @@ test("a hundred purchases paid in installments: at most ORDERS_STRIPE_CALLS call
   }
   assert.deepEqual(titles, Array.from({ length: 100 - checks }, (_, i) => `Plan product ${String(checks + i).padStart(3, "0")}`), "every older one, in order, to the last");
   console.log(`a hundred installment purchases: ${checks} checked on opening, the other ${100 - checks} in ${batches} batches of the button, each under ${ORDERS_STRIPE_CALLS} calls to Stripe (1,216 in one opening before)`);
+});
+
+test("Discord stays reachable when only an unchecked older purchase gives a role; complete unrelated purchases and an empty role list offer none", async () => {
+  const previous = [process.env.DISCORD_CLIENT_SECRET, process.env.DISCORD_BOT_TOKEN];
+  process.env.DISCORD_CLIENT_SECRET = "discord_test_orders_only";
+  process.env.DISCORD_BOT_TOKEN = "discord_test_orders_only";
+  try {
+    const store = await shop();
+    const checks = Math.floor((ORDERS_STRIPE_CALLS - ORDERS_STRIPE_LISTS) / PLAN_REFUND_CALLS);
+    const drafts = await addDraftProducts(OWNER, Array.from({ length: checks + 1 }, (_, i) => ({ title: `Discord plan ${i}`, summary: "", priceCents: 1000, link: `https://example.test/discord/${i}` })));
+    assert.ok(drafts.ok);
+    checkouts = drafts.ids.map((id, i) => plan(i, 60 * (i + 1), id));
+    const room = storeKey(store);
+    await saveServer(room, { id: "200000000000000001", name: "Bounds Discord", at: NOW, kick: false });
+    const deferred = drafts.ids[checks];
+    assert.deepEqual(await setProductRoles(room, deferred, ["200000000000000002"]), { ok: true });
+    const html = await open(store);
+    assert.equal(listed(html).length, checks);
+    assert.ok(!listed(html).includes(`Discord plan ${checks}`), "the purchase with the role was not checked or drawn");
+    assert.ok(html.includes(ordersWords("en").checkOlder), "its refund check remains deferred");
+    assert.ok(html.includes('action="/api/store/discord/join"'), "the older purchase must not hide the existing way into Discord");
+    assert.ok(calls.length <= ORDERS_STRIPE_CALLS, "showing the entry makes no additional calls to Stripe");
+
+    await setProductRoles(room, deferred, []);
+    assert.ok(!(await open(store)).includes('action="/api/store/discord/join"'), "a connected server with no product roles offers no entry, even with deferred purchases");
+
+    await setProductRoles(room, deferred, ["200000000000000002"]);
+    checkouts = checkouts.slice(0, 1);
+    assert.ok(!(await open(store)).includes('action="/api/store/discord/join"'), "a fully checked unrelated purchase offers no entry");
+    await setProductRoles(room, drafts.ids[0], ["200000000000000002"]);
+    assert.ok((await open(store)).includes('action="/api/store/discord/join"'), "a checked eligible purchase still offers the entry");
+  } finally {
+    for (const [i, name] of ["DISCORD_CLIENT_SECRET", "DISCORD_BOT_TOKEN"].entries()) {
+      if (previous[i] === undefined) delete process.env[name];
+      else process.env[name] = previous[i];
+    }
+  }
 });
 
 test("checking older purchases pays before it reads and refuses without reading: no room, a link that opens nothing, a checkout not the address's", async () => {
@@ -652,7 +697,7 @@ async function everyLimit(shape: CardShape): Promise<string[]> {
     assert.ok(draft.ok);
     const made = await createAgreement(full, draft.draft);
     assert.ok(made.ok);
-    await saveAgreement({ ...made.agreement, sent: [Date.now()] });
+    await changeAgreement(full, made.agreement.id, (current) => ({ ...current, sent: [Date.now()] }));
   }
   const ids = drafts.ids;
   checkouts = [
@@ -708,6 +753,8 @@ test("a page drawn at every limit the store has stays under ORDERS_PAGE_BYTES, w
         for (let i = 0; i < MAX_LISTED * 4; i++) assert.equal(count(`href="${escaped(costlyLink(i))}"`), 1, `${at}: link ${i}`);
         assert.equal(count(`>${escaped(words.openTitle(`1`.padEnd(MAX_TITLE_LENGTH, "&")))}<`), 1, `${at}: the button named by the product it opens`);
         assert.equal(count(escaped(words.alsoIn("&".repeat(MAX_OPTION_LABEL_LENGTH)))), shape === "plain" ? 0 : MAX_LISTED, `${at}: a course or podcast at a price option`);
+        // Each course says how far the buyer is, in words and a bar (560 [AS1]), measured with the rest.
+        assert.equal(count(`>${escaped(words.lessonsDone(0, 1))}</p>`), shape === "course" ? MAX_LISTED : 0, `${at}: each course's progress`);
         assert.equal(count('<input type="hidden" name="bundle"'), MAX_LISTED * 4, `${at}: and a bundle under each`);
         assert.equal(count(`>${escaped(words.addToCalendar)}<`), MAX_LISTED, `${at}: forty calls`);
         // Each key from the list whole, once as text, never split into a group by hyphen (components/licence-key-box.tsx).
@@ -980,7 +1027,7 @@ test("without JavaScript, the older purchases' button checks the next batch on t
   const before = await requestsIn(folder, window);
   const batch = renderToStaticMarkup(await pageTree(store, { token, older: cursor }));
   assert.ok((await requestsIn(folder, window)) - before >= 1 + ORDERS_OLDER_UNITS, "its call and its units");
-  assert.ok(batch.includes(`>${words.olderTitle}</h1>`) && batch.includes(words.olderShown(ORDERS_OLDER_MOST)));
+  assert.ok(batch.includes(`>${words.olderTitle}</h1>`) && batch.includes(words.olderBatchShown(ORDERS_OLDER_MOST)));
   assert.equal(listed(batch).length, ORDERS_OLDER_MOST);
   const next = batch.match(/name="older" value="([^"]+)"/)?.[1] ?? "";
   assert.ok(next && next !== cursor, "and the next batch is one more press of the same button");
@@ -998,15 +1045,41 @@ test("without JavaScript, the older purchases' button checks the next batch on t
   assert.deepEqual(calls, []);
 });
 
-test("the status regions are always on the page; after the last batch focus goes to its first purchase or to the status; a bundle's button keeps one name", () => {
+test("without JavaScript, each language describes only the purchases on the current batch page", async () => {
+  const store = await shop();
+  const checked = Math.floor((ORDERS_STRIPE_CALLS - ORDERS_STRIPE_LISTS) / PLAN_REFUND_CALLS);
+  const drafts = await addDraftProducts(OWNER, Array.from({ length: checked + 3 }, (_, i) => ({ title: `Batch ${i}`, summary: "", priceCents: 1000, link: `https://example.test/batch/${i}` })));
+  assert.ok(drafts.ok);
+  checkouts = drafts.ids.map((id, i) => plan(i, 60 * (i + 1), id));
+  await open(store);
+  const expected = {
+    en: "This page shows 3 purchases from this batch.",
+    es: "Esta página muestra 3 compras de este grupo.",
+    fr: "Cette page présente 3 achats de ce groupe.",
+    de: "Diese Seite zeigt 3 Käufe aus dieser Gruppe.",
+    it: "Questa pagina mostra 3 acquisti di questo gruppo.",
+    nl: "Deze pagina toont 3 aankopen uit deze groep.",
+    pt: "Esta página mostra 3 compras deste grupo.",
+  };
+  for (const language of LANGUAGE_CODES) {
+    assert.ok(await setLanguage(OWNER, language));
+    const batch = renderToStaticMarkup(await pageTree((await storeForEmail(OWNER))!, { token, older: checkouts[checked].id as string }));
+    assert.equal(listed(batch).length, 3, language);
+    // WCAG 2.4.10: the batch's own page is its h1, then each purchase an h2 under it, with no level skipped.
+    const headings = [...batch.matchAll(/<h([1-6])[^>]*>([^<]*)<\/h\1>/g)].map((m) => `h${m[1]}:${m[2]}`);
+    assert.deepEqual(headings, [`h1:${ordersWords(language).olderTitle}`, ...listed(batch).map((title) => `h2:${title}`)], `${language}: ${headings.join(" | ")}`);
+    assert.ok(batch.includes(expected[language]), `${language}: the page must describe this batch, not additions to a list on another page`);
+    assert.ok(!batch.includes(ordersWords(language).olderShown(3)), `${language}: the accumulated-list status belongs only to the JavaScript view`);
+  }
+});
+
+test("the status regions stay on the page and a bundle's button keeps one name; real focus behavior is checked in the buyer browser matrix", () => {
   const bundle = readFileSync("components/orders-bundle.tsx", "utf8");
   const older = readFileSync("components/older-purchases.tsx", "utf8");
   for (const source of [bundle, older]) {
     assert.ok(!source.includes("empty:hidden"), "never hidden from a screen reader when empty");
     assert.match(source, /<p role="status"[^>]*className=\{[^}]*"sr-only"\}/);
   }
-  assert.ok(older.includes(`answer.older ? null : answer.cards.length > 0 ? "card" : "status"`));
-  assert.match(older, /<p role="status" ref=\{statusRef\} tabIndex=\{-1\}/);
   assert.ok(!/\bhide\b|hideInside/.test(bundle), "one name, whether shown or not");
   assert.match(bundle, /aria-expanded=\{ready \? open : undefined\}/);
 });

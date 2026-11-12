@@ -6,6 +6,7 @@ import { storeFolder, storeRef } from "@/lib/store";
 import { storeKey } from "@/lib/learn";
 import { studentOnTask } from "@/lib/assignment-access";
 import { hasRoom, noteTaskUpload } from "@/lib/assignment";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { MAX_TASK_FILE_BYTES, taskExtension, taskFolder, taskRoomFor } from "@/lib/assignment-rules";
 import { takeBuyerAction } from "@/lib/buyer-actions";
 import { fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
@@ -79,6 +80,8 @@ export async function POST(request: NextRequest) {
     await noteTaskUpload(pathname);
     return Response.json(answer);
   } catch (error) {
+    // The room could not be read: said as not done right now, never as full (Codex P on #2655).
+    if (error instanceof UnknownReplyError) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
     console.error("signing an assignment upload failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });
   }

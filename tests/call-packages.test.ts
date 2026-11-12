@@ -65,7 +65,7 @@ async function main(): Promise<void> {
   process.env.RESEND_API_KEY = "re_test_packages_only";
 
   part("The offer");
-  is("2 to 20 sessions, a price, a limit that is offered", [parseCallPackage({ sessions: 5, priceCents: 50000, days: 90 }), parseCallPackage({ sessions: 1, priceCents: 1, days: 0 }), parseCallPackage({ sessions: 5, priceCents: 5, days: 45 })?.days], [{ sessions: 5, priceCents: 50000, days: 90 }, null, 0]);
+  is("2 to 20 sessions, a price, a limit that is offered; unknown validity never becomes unlimited", [parseCallPackage({ sessions: 5, priceCents: 50000, days: 90 }), parseCallPackage({ sessions: 1, priceCents: 1, days: 0 }), parseCallPackage({ sessions: 5, priceCents: 5, days: 45 })], [{ sessions: 5, priceCents: 50000, days: 90 }, null, null]);
   is("what it saves", [packageSaving({ sessions: 5, priceCents: 50000, days: 0 }, 12000), packageSaving({ sessions: 5, priceCents: 70000, days: 0 }, 12000)], [10000, 0]);
   is("its limit said", [packageLimitWords({ sessions: 5, priceCents: 1, days: 90 }), packageLimitWords({ sessions: 5, priceCents: 1, days: 0 })], ["Use them within 90 days", "No time limit to use them"]);
 

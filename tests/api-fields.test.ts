@@ -7,8 +7,11 @@ import { readFileSync } from "node:fs";
 import { GET as products } from "@/app/api/v1/products/route";
 import { GET as leads } from "@/app/api/v1/leads/route";
 import { makeKey } from "@/lib/api-keys";
-import { MAX_FIELDS_ASKED, apiOkFields, fieldsAsked, pickFields } from "@/lib/api-fields";
-import { claimHandle, ensureStatsId, setSubscription, storeForEmail } from "@/lib/store";
+import { FIELD_NAME_MAX, MAX_FIELDS_ASKED, apiOkFields, fieldsAsked, pickFields } from "@/lib/api-fields";
+import { LEAD_FIELDS, MEMBER_FIELDS, PRODUCT_FIELDS, members } from "@/lib/api-read";
+import { CODE_FIELDS, codeOut } from "@/lib/api-codes";
+import type { DiscountCode } from "@/lib/discount";
+import { addProduct, claimHandle, ensureListId, ensureStatsId, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -23,6 +26,12 @@ async function main(): Promise<void> {
   is("names, trimmed, each once", ask("?fields=email,%20agreed,email"), { ok: true, fields: ["email", "agreed"] });
   is("empty, or a name that cannot be one, refused", [ask("?fields=").ok, ask("?fields=,,").ok, ask("?fields=Email").ok, ask("?fields=a.b").ok], [false, false, false, false]);
   is(`at most ${MAX_FIELDS_ASKED}`, ask(`?fields=${Array.from({ length: MAX_FIELDS_ASKED + 1 }, (_, i) => `f${i}`).join(",")}`).ok, false);
+  // What the developers page and the 400 say a name is: lowercase letters, digits and underscores, starting with a letter, up to FIELD_NAME_MAX.
+  is("a name: lowercase letters, digits and underscores, starting with a letter, up to the most", [
+    ask(`?fields=a${"b_9".repeat(13)}`).ok, ask(`?fields=${"a".repeat(FIELD_NAME_MAX)}`).ok, ask(`?fields=${"a".repeat(FIELD_NAME_MAX + 1)}`).ok, ask("?fields=9lives").ok, ask("?fields=_x").ok, ask("?fields=aB").ok,
+  ], [true, true, false, false, false, false]);
+  const devPage = readFileSync("app/developers/page.tsx", "utf8");
+  is("the developers page says so, from the code's own figures", [devPage.includes("lowercase letters, digits and underscores, starting with a letter, up to {FIELD_NAME_MAX} characters"), devPage.includes("{MAX_FIELDS_ASKED} names"), devPage.includes("at most 30 names")], [true, true, false]);
 
   part("What is kept");
   const page = { data: [{ email: "a@example.com", agreed: true, tags: ["x"] }, { email: "b@example.com", agreed: false, tags: [] }], next: "200" };
@@ -53,6 +62,22 @@ async function main(): Promise<void> {
   const routes = ["products", "leads", "members", "students", "store", "bookings", "affiliates", "codes"];
   is("every list, Store and Bookings choose fields", routes.every((r) => readFileSync(`app/api/v1/${r}/route.ts`, "utf8").includes("apiOkFields(request,")), true);
   is("documented for developers", readFileSync("app/developers/page.tsx", "utf8").includes("/api/v1/leads?fields=email,agreed"), true);
+
+  part("Each list's fixed fields are exactly the fields its rows are sent with, so a field asked for is checked against what is sent");
+  const added = await addProduct(OWNER, "Synthetic product", "", "10");
+  if (!added.ok) throw new Error("no synthetic product");
+  const productRows = (await get(products, "/api/v1/products")).body.data as Record<string, unknown>[];
+  is("products", Object.keys(productRows[0]), [...PRODUCT_FIELDS]);
+  await ensureListId(OWNER);
+  const listId = (await storeForEmail(OWNER))!.listId!;
+  await redis.pipeline([["HSET", `nl:store:leads:${listId}`, "lead@example.com", JSON.stringify({ agreed: true, agreedAt: "2026-09-12T14:03:22.000Z", firstAt: "", lastAt: "", titles: [], ids: [], source: "free", unsub: false, unsubAt: "", t: "f".repeat(40), name: "Synthetic Person", tags: [], importedAt: "" })]]);
+  const leadRows = (await get(leads, "/api/v1/leads")).body.data as Record<string, unknown>[];
+  is("leads", Object.keys(leadRows[0]), [...LEAD_FIELDS]);
+  await redis.pipeline([["HSET", "nl:cm:synthetic-fields:m", "k1", JSON.stringify({ k: "k1", e: "member@example.com", n: "Synthetic Member", h: "synthetic", dir: true, mail: true, at: 1_790_000_000 })]]);
+  const memberPage = await members({ ...(await storeForEmail(OWNER))!, community: { id: "synthetic-fields" } } as Store, null, async () => async () => null);
+  is("members", memberPage instanceof Response ? null : Object.keys(memberPage.data[0]), [...MEMBER_FIELDS]);
+  const code = { id: "promo_Synthetic1", code: "LAUNCH20", off: { kind: "percent", percent: 20 }, timesRedeemed: 0, maxRedemptions: null, expiresAt: null, active: true, minimum: null, firstOrder: false, duration: { kind: "once" }, otherRules: false } as unknown as DiscountCode;
+  is("codes", Object.keys(codeOut(code)), [...CODE_FIELDS]);
 
   done();
 }

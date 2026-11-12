@@ -35,9 +35,10 @@ import { isSenderConfigured } from "@/lib/email";
 import { onAccount } from "@/lib/stripe-account";
 import { type LostRead, confirmLostRead, lostCursorKey, lostDisputesOrRetry, rowGivesBack } from "@/lib/refunds";
 import { readListing } from "@/lib/catalog";
-import { readMoves } from "@/lib/call-records";
-import { readRecord } from "@/lib/meet-records";
-import { MEET_STORES, callRefunded, dropScope, dueScopes, retryRecord } from "@/lib/meet-links";
+import { markBookingsChanged, readMoves } from "@/lib/call-records";
+import { MEET_QUEUE, readRecord } from "@/lib/meet-records";
+import { storeOrGone } from "@/lib/store-gone";
+import { MEET_STORES, RETRY_MINUTES, callRefunded, dropScope, dueScopes, retryRecord } from "@/lib/meet-links";
 import { type PaidCall, isCallProduct, paidCalls, tellNewLink } from "@/lib/calls";
 import { eventStillWants, readEventScope } from "@/lib/event-meetings";
 import type { Store } from "@/lib/store";
@@ -53,6 +54,9 @@ const INTENT = /^pi_[A-Za-z0-9]{6,200}$/;
 const anchorKey = (callsId: string) => `nl:meet:rf:${callsId}:since`;
 const seenKey = (callsId: string) => `nl:meet:rf:${callsId}:seen`;
 
+/** How far a record whose store could not be read moves back in the queue: the first retry step (lib/meet-links.ts). */
+const STORE_RETRY_MS = RETRY_MINUTES[0] * 60_000;
+
 export type MeetingsRun = { done: number; failed: number; switched: number; told: number; refunds: number };
 
 export async function syncMeetings(
@@ -64,8 +68,11 @@ export async function syncMeetings(
   if (!isRedisConfigured()) return run;
   const stores = new Map<string, Store | null>();
   const paid = new Map<string, PaidCall[] | null>();
+  // Throws what the read throws, and UnknownReplyError on an answer it cannot read: only an exact nil (or a released
+  // name) at the store's address is "no store" (CX-123 rule 24, lib/store-gone.ts). Only an answer is kept for the run,
+  // so one failed read never stands for the store's other records.
   const storeFor = async (handle: string) => {
-    if (!stores.has(handle)) stores.set(handle, await findStore(handle).catch(() => null));
+    if (!stores.has(handle)) stores.set(handle, await storeOrGone(findStore, handle));
     return stores.get(handle) ?? null;
   };
   const paidFor = async (store: Store) => {
@@ -80,7 +87,19 @@ export async function syncMeetings(
       await dropScope(scope);
       continue;
     }
-    const store = await storeFor(record.handle);
+    // A store that could not be read is not gone: the record stays queued, moved back STORE_RETRY_MS so the records
+    // behind it are reached, and a later run tries it again (Claude 2 on #3211). Only a record still queued is moved
+    // (ZADD XX): one done or dropped meanwhile stays out. A failed move keeps the old score, as before.
+    let store: Store | null;
+    try {
+      store = await storeFor(record.handle);
+    } catch (error) {
+      console.error("reading a store for its meeting failed", error);
+      await redisPipeline([["ZADD", MEET_QUEUE, "XX", Date.now() + STORE_RETRY_MS, scope]]).catch((failed) => {
+        console.error("moving a meeting back in the queue failed", failed);
+      });
+      continue;
+    }
     if (!store || store.statsId !== record.statsId || (record.callsId && store.callsId !== record.callsId)) {
       // The store is gone or is somebody else's now: nothing we may do with it.
       await dropScope(scope);
@@ -153,7 +172,8 @@ async function readRefunds(storeFor: (handle: string) => Promise<Store | null>, 
   for (const member of members) {
     if (Date.now() > deadline) break;
     const [callsId, handle] = member.split("|");
-    const store = callsId && handle ? await storeFor(handle) : null;
+    // A store that could not be read is skipped this run (nothing is written for it), and read again the next.
+    const store = callsId && handle ? await storeFor(handle).catch(() => null) : null;
     if (!store || store.callsId !== callsId || !store.stripeAccountId) continue;
     handled += await refundsOf(store, callsId, deadline).catch((error) => {
       console.error("reading a store's refunds for meetings failed", error);
@@ -229,6 +249,13 @@ async function refundsOf(store: Store, callsId: string, deadline: number): Promi
         const details = (session.customer_details ?? {}) as { email?: unknown };
         if (Number.isFinite(start) && (await callRefunded(store, { session: session.id, product: meta.product ?? "", start, email: typeof details.email === "string" ? details.email : null }))) {
           handled += 1;
+        }
+        // A call refunded in full leaves the private calendar feed (lib/calls.ts, callFromRow, drops a payment
+        // refunded in full): marked, its file is made again at the app's next check, not a day later, with or
+        // without a meeting room (inbox C4-18, M3). A lost dispute is not marked: the feed reads the payment, which a
+        // lost dispute does not show as refunded, so the booking stays there until lib/calls.ts reads it.
+        if (refund.object !== "dispute") {
+          await markBookingsChanged(callsId).catch((error: unknown) => console.error("marking the bookings changed failed", error));
         }
         // A team booking refunded in full gives its hosts their time back, on every store.
         const hosts = (meta.hosts ?? "").split(",").filter(isHostId);

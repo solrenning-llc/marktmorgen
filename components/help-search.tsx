@@ -1,6 +1,12 @@
 "use client";
 
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useState, useSyncExternalStore } from "react";
+
+// Stable snapshots keep server markup honest before hydration, including when
+// application scripts never arrive. No listener, timer, or request is needed.
+const subscribe = () => () => {};
+const clientReady = () => true;
+const serverReady = () => false;
 
 /** Opens the answer a link points at (#can-i-sell-a-course). */
 function openFromHash(resetSearch: () => void) {
@@ -42,6 +48,7 @@ function narrow(query: string): number | null {
  * JavaScript the whole list is simply there, so nothing depends on this.
  */
 export function HelpSearch() {
+  const interactive = useSyncExternalStore(subscribe, clientReady, serverReady);
   const [query, setQuery] = useState("");
   const [shown, setShown] = useState<number | null>(null);
   const hint = useId();
@@ -96,6 +103,7 @@ export function HelpSearch() {
         </span>
         <input
           id="help-search"
+          disabled={!interactive}
           type="search"
           value={query}
           onChange={(e) => search(e.target.value)}
@@ -106,7 +114,9 @@ export function HelpSearch() {
         />
       </div>
       <p id={hint} className="mt-3 text-sm text-ink-mute" aria-live="polite">
-        {shown === null
+        {!interactive
+          ? "All answers are below. Open a question to read its answer."
+          : shown === null
           ? "Type a word and the answers that mention it open below."
           : shown === 0
             ? "No answer mentions that yet. Write to us at the bottom of the page, and a person will answer."
@@ -120,6 +130,7 @@ export function HelpSearch() {
           <button
             key={word}
             type="button"
+            disabled={!interactive}
             onClick={() => search(word)}
             className="chip transition-colors hover:border-line-strong hover:text-ink"
           >

@@ -15,7 +15,9 @@
  * seconds for members and students, milliseconds for bookings and
  * affiliates, text already for contacts — so no tool has to guess the unit.
  */
+import { apiError } from "@/lib/api-guard";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import type { Store } from "@/lib/store";
 import { productIds, readListing, readListings } from "@/lib/catalog";
 import { listingsToRead } from "@/lib/catalog-read-count";
@@ -27,8 +29,10 @@ import { BOOK_STRIPE_PAGES, bookSizes, readBook } from "@/lib/affiliates";
 import { paidCalls } from "@/lib/calls";
 import { productLink } from "@/lib/checkout-recovery";
 import {
-  type ReadWork, API_PAGE_ROWS, addWork, apiReadUnits, bookWork, bookingsWork, listPageMost, numbersWork, productsPageWork, scannedPageWork, settledUnits, studentsPageWork,
+  type ReadWork, API_PAGE_ROWS, addWork, apiReadUnits, bookWork, bookingsWork, EVENTS_PROBE_MOST, eventsSentMost, eventsWork, listPageMost, numbersWork, productsPageWork, scannedPageWork, settledUnits,
+  studentsPageWork,
 } from "@/lib/api-read-rules";
+import { type WebhookEvent, deliveryReadBound, recentDeliverySizes, recentLimit, recentMessagesOf } from "@/lib/webhooks";
 import { readsSales } from "@/lib/stats";
 import { paypalCounts } from "@/lib/paypal-sales";
 
@@ -112,7 +116,7 @@ export async function products(store: Store, cursor: string | null, charge: Char
  * the same order Redis keeps them. `agreed=true` narrows it to those who
  * agreed to hear from the creator and have not left.
  */
-export async function leads(store: Store, cursor: string | null, onlyAgreed: boolean): Promise<Page<Record<string, unknown>>> {
+export async function leads(store: Store, cursor: string | null, onlyAgreed: boolean): Promise<LeadsPage> {
   return (await scanLeads(store, cursor, onlyAgreed)).page;
 }
 
@@ -123,12 +127,56 @@ export async function leads(store: Store, cursor: string | null, onlyAgreed: boo
  * (scannedPageWork), before it is sent. The refusal, as it is, when it is
  * not left. What /api/v1/leads answers.
  */
-export async function chargedLeads(store: Store, cursor: string | null, onlyAgreed: boolean, hold: Hold): Promise<Page<Record<string, unknown>> | Response> {
+export async function chargedLeads(store: Store, cursor: string | null, onlyAgreed: boolean, hold: Hold): Promise<LeadsPage | Response> {
   if (!store.listId || !isRedisConfigured()) return { data: [], next: null };
   return scannedPage(hold, listPageMost("leads", API_PAGE), async () => {
     const { page, readBytes } = await scanLeads(store, cursor, onlyAgreed);
     return { out: page, work: scannedPageWork(1, readBytes, sentBytes(page)) };
   });
+}
+
+/**
+ * The store's recent messages of one event (GET /api/v1/events), paid for by
+ * what they really are, each part before it is done (Codex G2, #2192):
+ *   1. the measuring at its most (EVENTS_PROBE_MOST) is set aside before the
+ *      log is read, so a store without it measures nothing;
+ *   2. the log and the size of each delivery in it are looked up
+ *      (recentDeliverySizes), and the rest of the reading is set aside at
+ *      each delivery's bound (deliveryReadBound: what its tries may still
+ *      write on it) and the most that can be sent of them;
+ *   3. they are read, each only up to its bound (recentMessagesOf), and the
+ *      whole is settled at the bytes read and sent (eventsWork), before they
+ *      are sent.
+ * The refusal, as it is, when a part is not left, with nothing of it done.
+ * Measuring or reading that cannot be confirmed keeps what was set aside.
+ */
+export async function recentEvents(store: Store, type: WebhookEvent, limit: number, hold: Hold): Promise<Record<string, unknown>[] | Response> {
+  const probeHeld = apiReadUnits(EVENTS_PROBE_MOST);
+  const settleProbe = await hold(probeHeld);
+  if (settleProbe instanceof Response) return settleProbe;
+  const sized = await recentDeliverySizes(store);
+  if (!sized) throw new Error("the recent deliveries could not be measured");
+  const most = recentLimit(limit);
+  const bounds = sized.sizes.map(deliveryReadBound);
+  const whole = apiReadUnits(eventsWork({ deliveries: sized.ids.length, bytes: sized.logBytes + bounds.reduce((n, b) => n + b, 0), sent: eventsSentMost(bounds, most) }));
+  // What the measuring already set aside counts toward the whole; only the rest is taken now.
+  const restHeld = Math.max(0, whole - probeHeld);
+  const settleRest = await hold(restHeld);
+  if (settleRest instanceof Response) {
+    // Nothing more is read: the measuring done is settled at what it was.
+    await settleProbe(settledUnits({ commands: 1 + sized.ids.length, bytes: sized.logBytes, roundTrips: sized.ids.length ? 2 : 1 }, probeHeld));
+    // Said with the whole the reading may take, not only the rest of it.
+    const words = settleRest.status === 429 ? ((await settleRest.clone().json().catch(() => null)) as { error?: string } | null) : null;
+    return words?.error === "monthly_limit"
+      ? apiError(429, "monthly_limit", `This read may take up to ${(whole + 1).toLocaleString("en-US")} of your store's API requests, more than your store has left, so no event was read. The requests used to measure them stay counted.`)
+      : settleRest;
+  }
+  const { messages, readBytes } = await recentMessagesOf(store, type, sized.ids, bounds, most);
+  const due = settledUnits(eventsWork({ deliveries: sized.ids.length, bytes: sized.logBytes + readBytes, sent: sentBytes(messages) }), probeHeld + restHeld);
+  // The whole is settled across the two: the measuring's part first, the rest after.
+  const refusedProbe = await settleProbe(Math.min(due, probeHeld));
+  const refused = await settleRest(Math.max(0, due - probeHeld));
+  return refusedProbe ?? refused ?? messages;
 }
 
 /** A page set aside at `most`, read, and settled at what it did before it is sent (lib/api-guard.ts, holdMoreApi). */
@@ -141,21 +189,31 @@ async function scannedPage<T>(hold: Hold, most: ReadWork, read: () => Promise<{ 
   return refused ?? out;
 }
 
-async function scanLeads(store: Store, cursor: string | null, onlyAgreed: boolean): Promise<{ page: Page<Record<string, unknown>>; readBytes: number }> {
+/** A page of the list, with how many contacts it holds that could not be read (only when there are any): never left out without a word (rule 24). */
+type LeadsPage = Page<Record<string, unknown>> & { unreadable?: number };
+
+async function scanLeads(store: Store, cursor: string | null, onlyAgreed: boolean): Promise<{ page: LeadsPage; readBytes: number }> {
   if (!store.listId || !isRedisConfigured()) return { page: { data: [], next: null }, readBytes: 0 };
   const start = cursor && /^\d{1,20}$/.test(cursor) ? cursor : "0";
-  const [reply] = await redisPipeline([["HSCAN", leadsKey(store.listId), start, "COUNT", API_PAGE]]);
-  if (!Array.isArray(reply) || reply.length < 2) return { page: { data: [], next: null }, readBytes: 0 };
-  const next = String(reply[0]);
-  const flat = Array.isArray(reply[1]) ? (reply[1] as unknown[]) : [];
+  // HSCAN answers [cursor, [field, value, ...]] (CX-123 rule 24): a page in any other shape is unknown, never a
+  // last or empty page, so a sync is never told it has the whole list when it has part of it (502 in the route).
+  const reply = repliesFor(repliesFor(await redisPipeline([["HSCAN", leadsKey(store.listId), start, "COUNT", API_PAGE]]), 1)?.[0], 2);
+  const cursorReply = reply?.[0];
+  const next = typeof cursorReply === "string" && /^\d{1,20}$/.test(cursorReply) ? cursorReply : countOf(cursorReply) !== null ? String(cursorReply) : null;
+  const flat = stringList(reply?.[1]);
+  if (next === null || !flat || flat.length % 2 !== 0) throw new UnknownReplyError("a page of a store's list");
   const data: Record<string, unknown>[] = [];
+  let unreadable = 0;
   for (let i = 0; i + 1 < flat.length; i += 2) {
     const c = parseContact(flat[i + 1]);
-    if (!c) continue;
+    if (!c) {
+      unreadable += 1;
+      continue;
+    }
     const mailable = c.agreed && !c.unsub;
     if (onlyAgreed && !mailable) continue;
     data.push({
-      email: String(flat[i]),
+      email: flat[i],
       name: c.name || null,
       agreed: c.agreed,
       agreed_at: isoFromText(c.agreedAt),
@@ -170,8 +228,8 @@ async function scanLeads(store: Store, cursor: string | null, onlyAgreed: boolea
     });
   }
   // The bytes the scan answered with, for the reading that pays for them (chargedLeads).
-  const readBytes = flat.reduce((n: number, v) => n + Buffer.byteLength(String(v)), 0);
-  return { page: { data, next: next === "0" ? null : next }, readBytes };
+  const readBytes = flat.reduce((n, v) => n + Buffer.byteLength(v), 0);
+  return { page: { data, next: next === "0" ? null : next, ...(unreadable ? { unreadable } : {}) }, readBytes };
 }
 
 /**

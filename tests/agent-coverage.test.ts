@@ -6,6 +6,7 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { AGENT_COVERAGE, MONEY_PREFIXES, type AgentAction, coverageCounts } from "@/lib/agent-coverage";
+import { MCP_TOOLS } from "@/lib/mcp-catalog";
 import { done, is, part } from "./check";
 
 const root = process.cwd();
@@ -51,10 +52,10 @@ is("every refusal says why", rows.filter(([, a]) => a.reach.kind === "never" && 
 is("every note says something", rows.filter(([, a]) => a.note !== undefined && a.note.trim().length < 10).map(([k]) => k), []);
 
 part("Tools named here are served by the MCP server");
-const mcp = readFileSync(join(api, "mcp/route.ts"), "utf8");
+const served = new Set(MCP_TOOLS.map((t) => t.name));
 const named = [...new Set(rows.flatMap(([, a]) => (a.reach.kind === "tool" ? a.reach.tools : [])))];
 is("at least one tool is named", named.length > 0, true);
-is("tools that the MCP server does not serve", named.filter((name) => !mcp.includes(`"${name}"`)), []);
+is("tools that the MCP server does not serve (lib/mcp-catalog.ts)", named.filter((name) => !served.has(name)), []);
 
 part("Money is never moved by the agent (631 (c))");
 const money = rows.filter(([k]) => MONEY_PREFIXES.some((p) => k.split(" ")[1].startsWith(p)));

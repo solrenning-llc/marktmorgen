@@ -8,6 +8,7 @@ import { useHydrated } from "@/components/use-hydrated";
 import { toast } from "@/components/toast";
 import { Icon } from "@/components/icons";
 import type { CalendarView } from "@/lib/calendar-sync";
+import { CALENDAR_CREDITS_PER_DAY, CALENDAR_POLLS_PER_HOUR, CALENDAR_REFUSED_PER_HOUR } from "@/lib/calendar-limits";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 import { LOOKAHEAD_DAYS, MAX_FEEDS } from "@/lib/calendar-limits";
 
@@ -17,6 +18,8 @@ const MESSAGES: Record<string, string> = {
   none: "This account has no store yet.",
   signed_out: "Your session ended. Log in again.",
   unavailable: "Stores are not switched on yet, so nothing was saved.",
+  slow: "Too many calendar addresses were tried from this store, or from this connection, in the last few minutes. Nothing was saved. Wait ten minutes, then try again.",
+  busy: "We could not check this just now, so the calendar was not read or saved. Try again in a moment.",
   server_error: "Something went wrong on our side. Nothing was changed; try again in a moment.",
 };
 
@@ -40,7 +43,20 @@ function addedOn(iso: string): string {
  * The creator's calendars, both ways: private calendar addresses read for
  * busy times, and the private address that puts every booking into theirs.
  */
-export function CalendarEditor({ view: initial, weekly }: { view: CalendarView; weekly: boolean }) {
+export function CalendarEditor({
+  view: initial,
+  weekly,
+  namesLater,
+}: {
+  view: CalendarView;
+  weekly: boolean;
+  /**
+   * The store has no list yet to look a deleted buyer up in, so its file names nobody (lib/store-readings.ts,
+   * listForNaming): the names come back on their own, or after its next saved change for a store not yet moved to
+   * product records (lib/store.ts, withStore moves it). Undefined when its file names who booked.
+   */
+  namesLater?: "on-their-own" | "after-change";
+}) {
   const local = useHydrated();
   const router = useRouter();
   const [view, setView] = useState(initial);
@@ -233,9 +249,27 @@ export function CalendarEditor({ view: initial, weekly }: { view: CalendarView; 
         <p className="mt-1 text-sm text-ink-soft">
           Subscribe to this private address from Google Calendar (&ldquo;From URL&rdquo;), Outlook (&ldquo;Subscribe from
           web&rdquo;) or Apple Calendar (&ldquo;New Calendar Subscription&rdquo;), and every booked call and dated session
-          shows up with who booked it. Calendar apps refresh it on their own schedule, from every few minutes to a few
-          hours.
+          shows up{namesLater ? " in it" : " with who booked it"}. Calendar apps check it on their own schedule, from every few minutes to about a
+          day (Google). It answers up to {CALENDAR_POLLS_PER_HOUR} times an hour; an app that asks more often is told
+          to come back later and keeps what it has. Set your app to check every 15 minutes or less often: asked more
+          than {CALENDAR_REFUSED_PER_HOUR} times too often in an hour, as an app checking every 5 minutes does, the
+          address stops and a new one shows here. A booking made, moved, refunded or canceled shows at your
+          app&apos;s next check, for up to {CALENDAR_CREDITS_PER_DAY} changes a day; anything past that shows within a
+          day.
         </p>
+        {namesLater ? (
+          <p className="mt-2 text-sm text-ink">
+            For now, each booking shows as &ldquo;A buyer&rdquo;, without the buyer&apos;s name.{" "}
+            {namesLater === "after-change"
+              ? "Names come back after your next saved change to your store, usually within a day of it, when this file is next updated."
+              : "Names come back on their own, usually within a day, when this file is next updated."}
+          </p>
+        ) : null}
+        {view.stoppedAt ? (
+          <p className="notice notice-warn mt-3 text-sm text-ink" role="note">
+            {`Your previous address was asked too often (more than ${CALENDAR_REFUSED_PER_HOUR} times too often in an hour), so it stopped on ${new Date(view.stoppedAt).toUTCString().slice(5, 22)} UTC. This is a new one: subscribe to it again, and set your calendar app to check every 15 minutes or less often.`}
+          </p>
+        ) : null}
         {view.subscribeUrl ? (
           <>
             <div className="mt-3 flex flex-col gap-3 sm:flex-row">

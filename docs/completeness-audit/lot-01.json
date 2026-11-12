@@ -1,0 +1,818 @@
+{
+ "lot": 1,
+ "main": "d7bbf9d35",
+ "request": "C1-20261105-1919-C4-1 / C4-20261105-1925-C5-3",
+ "items": [
+  {
+   "n": 1,
+   "tag": "ATUAL-D6",
+   "state": "done",
+   "state_evidence": "queue.md:2108 'Estado: feito (PR #620, mesclado em 19/10 19:43 ...; publicado como entrega41, versão da6924e)'; queue.md:443 MQ1 '1 [ATUAL-D6] | sem mudança | já concluído/publicado'",
+   "asks": [
+    {
+     "what": "Private certificates per reached Path level (owner-only page, no public endpoint)",
+     "status": "present",
+     "evidence": "lib/path-certificate.ts:19 certificateLevels, :23 pathCertificate; components/path-certificates.tsx:26 section; mounted only on owner page app/studio/path/page.tsx:93; privacy text lib/path-certificate.ts:17 ('No public certificate page'); docs/marktmorgen-path.md:365-373",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Accessible HTML file download",
+     "status": "present",
+     "evidence": "lib/path-certificate.ts:35-37 pathCertificateHtml (lang=en-US, viewport, h1, dl/dt/dd, time, print CSS); components/path-certificates.tsx:15-21 download as .html; read-only text fallback components/path-certificates.tsx:36; tests/path-certificate-render.test.ts",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Money values off by default, opt-in only",
+     "status": "present",
+     "evidence": "components/path-certificates.tsx:11 useState(false) for includeMoney, :33 checkbox; lib/path-certificate.ts:23 includeMoney=false default",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Level data from the server-saved level of the creator's own store",
+     "status": "present",
+     "evidence": "app/studio/path/page.tsx:45 readPath(store), :93 input level=record.best, recordedAt=record.bestAt; lib/path-certificate.ts:27 reading from recordedAt",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Tests of the certificate",
+     "status": "present",
+     "evidence": "tests/path-certificate.test.ts, tests/path-certificate-render.test.ts",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 4,
+   "tag": "B2",
+   "state": "in progress",
+   "state_evidence": "queue.md:2123 'Estado: em andamento; áreas e lacunas em docs/us-english-audit.md; próxima revisão codex/safe-error-messages'; queue.md:446 MQ1 'andamento/posição protegidos'; queue.md:7633 '4/140/141/88 [B2]' em andamento. Sub-itens: 78-81 feitos (queue.md:3056-3081), 139 feito (2143), 140/141 em andamento (2127-2141), 88 (3173).",
+   "asks": [
+    {
+     "what": "Area inventory kept (docs/us-english-audit.md)",
+     "status": "present",
+     "evidence": "docs/us-english-audit.md:1-215 (areas: public/help :5-33, legal/account entry :39-57, studio documents :62-111, composer/import :113-128, B3 guard :130-137, form acknowledgments :139-215)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Small PRs per area without changing meaning",
+     "status": "present",
+     "evidence": "PRs #623/#624/#625 (queue.md:3056-3081) and later form-acknowledgment areas (docs/us-english-audit.md:139-215)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Public marketing/help pages reviewed",
+     "status": "present",
+     "evidence": "docs/us-english-audit.md:5-33 (app/page.tsx, platform, grow-sales, products, creators, mission, help, for, developers, library); pricing via PR623/624 (queue.md:3101)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Legal pages and account entry reviewed",
+     "status": "present",
+     "evidence": "docs/us-english-audit.md:39-57 and :62-70 (privacy, terms, refunds, copyright, signin/*, report, affiliate)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Studio page sources reviewed (first pass)",
+     "status": "present",
+     "evidence": "docs/us-english-audit.md:62-104 (37 studio/signin page files listed)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Test texts (diagnostic titles) in US English",
+     "status": "present",
+     "evidence": "B3 guard scans tests/ titles: tests/us-english-source.ts:3, tests/platform-us-english.test.ts:16-17,25-31",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Unexpected-error and form acknowledgment messages (sub-items 139-141, 88, 154-163)",
+     "status": "present",
+     "evidence": "components/signin-form.tsx, components/tax-editor.tsx, components/handle-form.tsx, components/pause-editor.tsx:38 (Object.hasOwn own messages), :71/:87 aria-busy; docs/us-english-audit.md:139-215",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Studio pages created after the review, not in the inventory",
+     "status": "missing",
+     "evidence": "find app/studio -name page.tsx vs grep in docs/us-english-audit.md: absent app/studio/checkup, app/studio/closing-refunds, app/studio/disputes, app/studio/labels, app/studio/refund, app/studio/totals",
+     "where_it_should_be": "docs/us-english-audit.md (new area) + app/studio/{checkup,closing-refunds,disputes,labels,refund,totals}/page.tsx"
+    },
+    {
+     "what": "Public routes not in the inventory",
+     "status": "missing",
+     "evidence": "grep 'app/<dir>/' in docs/us-english-audit.md returned 0 for: app/accessibility, app/blog, app/demo, app/numbers, app/open, app/outreach, app/proof, app/takedown, app/transparency, app/unsubscribe, app/invite, app/l, app/embed, app/[handle] (platform-owned strings only; creator content excluded)",
+     "where_it_should_be": "docs/us-english-audit.md (new area) + those app/ routes"
+    },
+    {
+     "what": "Error, empty, dialog and aria-label/alt states of every studio screen",
+     "status": "missing",
+     "evidence": "the ledger itself records it as pending: docs/us-english-audit.md:36 ('every studio screen/error/empty/aria/alt state ... still need their own review'), :134 ('Continue the manual area/state audit, including dialogs, empty/error variants and accessibility wording'); no later section covers it",
+     "where_it_should_be": "docs/us-english-audit.md + components/ (354 files) and app/studio/"
+    },
+    {
+     "what": "Platform e-mail templates as actually sent",
+     "status": "missing",
+     "evidence": "docs/us-english-audit.md:134 says producers were read only for selected British hits; :147 'Continue with the remaining components and actual sent-message templates'; no later section",
+     "where_it_should_be": "docs/us-english-audit.md + lib/email.ts, lib/mail.ts, lib/inbound-mail.ts and EMAIL_SITES producers"
+    },
+    {
+     "what": "Remaining components/API messages and buyer-library states",
+     "status": "missing",
+     "evidence": "docs/us-english-audit.md:36 ('buyer-library states'), :125 ('the remaining search candidates and unreviewed components/API messages'); no later section closes them",
+     "where_it_should_be": "docs/us-english-audit.md + components/, app/api/, app/library/"
+    }
+   ],
+   "complement": "Complemento de completude (05/11/2026, C1-20261105-1919-C4-1): falta registrar e fazer a revisão manual de inglês americano, conforme o próprio inventário docs/us-english-audit.md (linhas 36, 125, 134 e 147), de: (1) estados de erro, vazio, diálogos e textos de aria-label e alt de cada tela do estúdio (app/studio/ e components/); (2) os modelos de e-mail da plataforma como são enviados (lib/email.ts, lib/mail.ts, lib/inbound-mail.ts e produtores de EMAIL_SITES); (3) os componentes e mensagens de API ainda não revistos (components/, app/api/) e os estados da biblioteca do comprador (app/library/); (4) as telas do estúdio que não constam do inventário: app/studio/checkup, closing-refunds, disputes, labels, refund e totals; (5) as rotas públicas que não constam do inventário: app/accessibility, blog, demo, numbers, open, outreach, proof, takedown, transparency, unsubscribe, invite, l, embed e os textos da plataforma em app/[handle]. Cada área revista entra como nova seção em docs/us-english-audit.md."
+  },
+  {
+   "n": 5,
+   "tag": "B3",
+   "state": "done",
+   "state_evidence": "queue.md:2159 'Estado: feito; PR #627 incorporado 19/10/2026 20:46:10 ...; entrega47 confirmada'; queue.md:447 MQ1 'já concluído/publicado'",
+   "asks": [
+    {
+     "what": "Test rejecting colour, centre, organise, licence, cancelled, behaviour, afterwards, tick/untick",
+     "status": "present",
+     "evidence": "tests/us-english-source.ts:3 BRITISH regex; tests/platform-us-english.test.ts:19-20 each requested word rejected, :22-23 US counterparts pass",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Distinguish displayed text from code, comments, imports, statuses and data",
+     "status": "present",
+     "evidence": "tests/us-english-source.ts:23,35 (syntax-only, omits imports/literal types); tests/platform-us-english.test.ts:9 negative fixtures (className, comment, import, status, keys), :12-14 foreign buyer words, :18 test sample data",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Sweep of the real source corpus",
+     "status": "present",
+     "evidence": "tests/platform-us-english.test.ts:24-31 walks app/components/lib/tests and requires zero hits",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 6,
+   "tag": "B4",
+   "state": "done",
+   "state_evidence": "queue.md:2165 'Estado: feito; documento incorporado no PR #628 em 19/10/2026 20:49:55'; queue.md:448 MQ1 'já concluído/publicado'",
+   "asks": [
+    {
+     "what": "docs/site-languages.md exists",
+     "status": "present",
+     "evidence": "docs/site-languages.md:1-64",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Complete translations in code only after opening/authorization",
+     "status": "present",
+     "evidence": "docs/site-languages.md:3, :13, :17 (checked-in dictionaries, no runtime translation), :64 release checklist (sales open + owner authorization)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "German, French, Dutch, Spanish, Italian",
+     "status": "present",
+     "evidence": "docs/site-languages.md:13 (de-DE, fr-FR, nl-NL, ...)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Selector without flags",
+     "status": "present",
+     "evidence": "docs/site-languages.md:23",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "hreflang",
+     "status": "present",
+     "evidence": "docs/site-languages.md:25 (long line; quote: \"reciprocal hreflang links only to equivalent published pages, with an intentional x-default destination\")",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Forbidden phrases per language",
+     "status": "present",
+     "evidence": "docs/site-languages.md:29-41 table",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Country tax study for Japanese/Korean/Chinese",
+     "status": "present",
+     "evidence": "docs/site-languages.md:45-56 (Japan, South Korea, Mainland China, Taiwan/HK/Macau)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Future Brazilian Portuguese",
+     "status": "present",
+     "evidence": "docs/site-languages.md:19, :41",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 7,
+   "tag": "C-UE",
+   "state": "in progress",
+   "state_evidence": "queue.md:2174 'Estado: em andamento; auditoria de 13 caminhos e registro, primeiro endurecimento de data no PR #629; coleta/duas provas/retenção/OSS ainda não implementados'; queue.md:449 MQ1 'andamento/posição protegidos'; queue.md:14723 AV1 passo 5: 'a cobrança do IVA europeu e do Reino Unido (7 [C-UE], 8 [C-UK], 300 a 303) vem logo depois da abertura'; queue.md:333 e 1046 (logo depois da abertura). Sub-itens feitos: 82 [C-UE-RECORD], 84 [C-UE-TAX-SCOPE], 85 [C-UE-RETENTION-COST] (queue.md:524-527).",
+   "asks": [
+    {
+     "what": "Treatment document docs/eu-vat-article-9a.md",
+     "status": "present",
+     "evidence": "docs/eu-vat-article-9a.md:13-145 (sources :25, art. 9a reading :34-50, next build :93-107)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Audit of checkout paths (per path reading)",
+     "status": "present",
+     "evidence": "docs/eu-vat-article-9a.md:52-66 path table (digital, courses, podcasts, memberships, calls, tips, payment requests, physical, own plans)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Record admission hardening (real calendar dates)",
+     "status": "present",
+     "evidence": "lib/deemed-supplier.ts:73 calendarDay, :132; docs/eu-vat-article-9a.md:130-137; tests/tax-gate.test.ts:33",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Creator tax controls scope explained (sub-item 84)",
+     "status": "present",
+     "evidence": "docs/eu-vat-article-9a.md:139-145; components/tax-editor.tsx",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Retention cost/funding audit (sub-item 85)",
+     "status": "present",
+     "evidence": "docs/eu-vat-retention-funding.md:1-65",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Non-Union OSS from the first sale, OSS return data",
+     "status": "out of scope",
+     "evidence": "not built: DEEMED_SUPPLIER_RECORDS empty (lib/deemed-supplier.ts:70); no OSS code (grep 'OSS|nonUnionOss|63c' in lib/app/components). Owner AV1 step 5 (queue.md:14723) places EU VAT collection right after opening, and registration needs the owner's OSS registration (external act); pre-opening path is refuse-consumers (item 300 [9A-1], AV1 step 5)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Two non-contradictory location evidences (arts. 24b/24f)",
+     "status": "out of scope",
+     "evidence": "not built (grep '24b|24f|locationEvidence' finds only lib/deemed-supplier.ts comments and docs). Part of the post-opening collection (AV1 step 5, queue.md:14723; item 302 [9A-3])",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Art. 63c record kept 10 years",
+     "status": "out of scope",
+     "evidence": "not built (grep '63c' only in docs/tests text). Post-opening collection (AV1 step 5; item 302 [9A-3]); funding audit in docs/eu-vat-retention-funding.md",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Tax on buyer or payout, never on commission",
+     "status": "out of scope",
+     "evidence": "rule recorded in lib/deemed-supplier.ts:20,57 and docs/eu-vat-article-9a.md:82; collection itself is post-opening (AV1 step 5; item 302 [9A-3])",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Split PRs per checkout path with cost registered in plan-cost-registry/spend-floor",
+     "status": "out of scope",
+     "evidence": "no EU VAT cost lines in tests/plan-cost-registry.ts or tests/spend-floor.test.ts; belongs to the post-opening collection build (AV1 step 5; items 302/303)",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 8,
+   "tag": "C-UK",
+   "state": "in progress",
+   "state_evidence": "queue.md:2181 'Estado: aguardando o dono no remanescente de registro e financiamento; implementação fiscal incompleta'; queue.md:450 MQ1 'AV1/abertura/vínculo vigente mantido'; queue.md:14723 AV1 passo 5: cobrança do Reino Unido logo depois da abertura; recusa antes disso.",
+   "asks": [
+    {
+     "what": "UK reading with more tax, official sources",
+     "status": "present",
+     "evidence": "docs/eu-vat-article-9a.md:117-123 (UK, question 26); docs/tx4-uk-vat-evidence.md (TX4, 04/11/2026); tests/tx4-uk-vat-evidence.test.ts",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "UK treatment built in every applicable checkout path",
+     "status": "out of scope",
+     "evidence": "not built: DEEMED_SUPPLIER_RECORDS empty (lib/deemed-supplier.ts:70). Owner AV1 step 5 (queue.md:14723) puts UK VAT collection right after opening; pre-opening refusal belongs to AV1 step 5 / item 300 [9A-1]",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "UK VAT registration and funding",
+     "status": "out of scope",
+     "evidence": "needs registration with HMRC (external act forbidden to agents; queue.md:2183) and owner decision",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 9,
+   "tag": "C-US",
+   "state": "in progress",
+   "state_evidence": "queue.md:2192 'Estado: aguardando o dono no remanescente de registros e financiamento; pesquisa e matriz por jurisdição incompletas'; queue.md:451 MQ1; queue.md:14723 AV1 passo 5: nos EUA, ponto 11 da TX com contador por estado.",
+   "asks": [
+    {
+     "what": "Research per jurisdiction (official sources)",
+     "status": "present",
+     "evidence": "docs/tx-legal-source-review-2026-10-27.md; docs/tx4-california-evidence.md; docs/tx4-delaware-evidence.md; lib/deemed-supplier.ts:45 US rule text",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Complete state-by-state marketplace-facilitator matrix",
+     "status": "uncertain",
+     "evidence": "no full 50-state+DC+PR matrix found (docs/ lists only California and Delaware tx4 files; NY only in queue text). The matrix is the explicit scope of item 301 [9A-2] (queue.md, 9A section) and 473 [TX3] under AV1 step 5, so it is covered by other queue items, not counted as missing here",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Per-state sales counter that switches collection on before each threshold",
+     "status": "present",
+     "evidence": "lib/tax-sales-counter.ts, lib/tax-threshold.ts (assessTaxSalesThreshold); docs/tx3-sales-counter.md (pure calculation, not wired to checkout; remaining wiring is 473 [TX3]/301 [9A-2]/AV1 step 5)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Treatment per jurisdiction and checkout path in DEEMED_SUPPLIER_RECORDS",
+     "status": "uncertain",
+     "evidence": "lib/deemed-supplier.ts:70 empty; covered by AV1 step 5 (queue.md:14723) and items 300 [9A-1]/301 [9A-2]",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "State registrations",
+     "status": "out of scope",
+     "evidence": "external registration and accounts are forbidden to agents; owner decision (queue.md:2192-2194)",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 10,
+   "tag": "D7",
+   "state": "not started",
+   "state_evidence": "queue.md:2233 'Estado: a fazer'; queue.md:452 MQ1 Grupo B; queue.md:1232 'B | 19 | 10 [D7]'; queue.md:369 ordem vigente do Grupo B",
+   "asks": [],
+   "complement": ""
+  },
+  {
+   "n": 11,
+   "tag": "D8",
+   "state": "not started",
+   "state_evidence": "queue.md:2239 'Estado: a fazer'; queue.md:453 MQ2 B#96; queue.md:1308; queue.md:1565 relação parcial com 25 [E8]/405 [HX1]",
+   "asks": [],
+   "complement": ""
+  },
+  {
+   "n": 12,
+   "tag": "D9",
+   "state": "not started",
+   "state_evidence": "queue.md:2245 'Estado: a fazer'; queue.md:454 MQ2 B#161; queue.md:1373",
+   "asks": [],
+   "complement": ""
+  },
+  {
+   "n": 13,
+   "tag": "D10",
+   "state": "not started",
+   "state_evidence": "queue.md:2251 'Estado: a fazer'; queue.md:455 MQ2 B#4; queue.md:369",
+   "asks": [],
+   "complement": ""
+  },
+  {
+   "n": 14,
+   "tag": "D11",
+   "state": "not started",
+   "state_evidence": "queue.md:2257 'Estado: a fazer'; queue.md:456 Grupo A#49; queue.md:2260-2261 conferência do Claude 2 (01/11/2026): o selo já existe ligado por padrão e removível só no Pro (app/[handle]/page.tsx, lib/store-look.ts StoreLook.badge, canUse(store,'branding') em lib/plan.ts, components/look-editor.tsx); 'Depende do dono' com três escolhas, nada alterado no código",
+   "asks": [],
+   "complement": ""
+  },
+  {
+   "n": 15,
+   "tag": "D12",
+   "state": "not started",
+   "state_evidence": "queue.md:2265 'Estado: a fazer'; queue.md:457 MQ3 B#111; queue.md:1537 'mesmo painel do 445–447 [GE1–GE3]; é construção, não estudo'. A absorção por 445–447 (LQ14(b), queue.md:16391/17324) está no trecho histórico desfeito pela LQ17 (queue.md:15186-15188, 16957 'Desfeito por decisão do dono em 28/10/2026, 23h37'); 445–447 também na fila",
+   "asks": [],
+   "complement": ""
+  },
+  {
+   "n": 16,
+   "tag": "D13",
+   "state": "not started",
+   "state_evidence": "queue.md:2271 'Estado: **a fazer**'; 17210 [LQ7] cancelou ('Cancelado por decisão do dono em 28/10/2026 (LQ7)'); 17320 'LQ13 reabre 16 [D13] ... Executar depois da abertura, na ordem AV1'; 458/1457 FIM1#21. Nenhum código: grep 'creator group|pod|accountability' em lib/ sem resultado relevante.",
+   "asks": [],
+   "complement": ""
+  },
+  {
+   "n": 18,
+   "tag": "E1",
+   "state": "not started",
+   "state_evidence": "queue.md:2351 'Estado: **a fazer**'; complemento MQ3 (2353-2363) por duplicação com 198 [HT13] (5075 'Duplicado do item 18 [E1]; não executar'); 17208 [LQ6] 'o tutor fica reprovado até nova avaliação de custo'. docs/ht13-student-tutor-cost-review.md existe (avaliação reprovada); nenhum tutor em lib/app/components.",
+   "asks": [],
+   "complement": ""
+  },
+  {
+   "n": 19,
+   "tag": "E2",
+   "state": "not started",
+   "state_evidence": "queue.md:2368 'Estado: **a fazer**'; 461 'B#98'; 1310. Nenhum desafio de comunidade no código (grep 'challenge' só acha tipos de funil e textos de páginas).",
+   "asks": [],
+   "complement": ""
+  },
+  {
+   "n": 20,
+   "tag": "E3",
+   "state": "not started",
+   "state_evidence": "queue.md:2374 'Estado: **a fazer**'; 462 'B#121'; 1555 sobreposição com 227 [HL8]. Existem rascunhos por IA de sequência (lib/ai.ts:1101 writeSequence) e de funil (lib/funnel-ai.ts), mas não de automação a partir do objetivo.",
+   "asks": [],
+   "complement": ""
+  },
+  {
+   "n": 21,
+   "tag": "E4",
+   "state": "not started",
+   "state_evidence": "queue.md:2380 'Estado: **a fazer**'; complemento MQ3 (2382-2403) por duplicação com 403 [SN1] (11310 'Duplicado do item 21 [E4]; não executar'); 463 'B#20'. Nenhum complemento 'content coach' no código (há só writePosts/writeAffiliatePosts em lib/ai.ts:831/1642, anteriores).",
+   "asks": [],
+   "complement": ""
+  },
+  {
+   "n": 22,
+   "tag": "E5",
+   "state": "in progress",
+   "state_evidence": "queue.md:2408 'Estado: **a fazer**' + 2411 'Andamento (Claude 2, 01/11/2026)': unidade 0 'incorporada' (#1591), unidades 1, 2a–2f 'testada num PR'; no main as unidades 1–2f estão incorporadas (git log: 44eb9222a unit 1, 43bc3b1ab 2a, 24e41c579 2b, 34263ded1 2c, 53e4239c6 2d, ce96a78aa 2e, 7bd8c0baf 2f). Falta a unidade 3 (checkout e campos) e o idioma, conforme a própria ordem do item.",
+   "asks": [
+    {
+     "what": "Unidade 0: desenho do idioma e das moedas (fontes Stripe datadas, ordem das unidades, absorção parcial do 208 [SH5])",
+     "status": "present",
+     "evidence": "docs/buyer-currency-and-language.md:1 (seções 'Part 1: the checkout's language' :20, 'Part 2: prices in several currencies' :24, 'How it meets 208 [SH5] and 393 [CX4]' :45, 'Units' :58, 'Cost and margin' :67)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Unidade 1: modelo puro do valor do criador em outras moedas (faixas, moedas aceitas, zero, sessão só com todos os valores, currency_options com tax_behavior, limite de bytes)",
+     "status": "present",
+     "evidence": "lib/currency-prices.ts:99 parseCurrencyPrices, :121 amountFits, :129 amountIn, :140 localizableIn, :145 sessionCurrencies, :157 fixedPriceCurrencyOptions, :167 currencyPricesMaxBytes; tests/currency-prices.test.ts",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Unidade 2a: inventário classificado dos leitores de store.currency, com teste que falha em leitor novo sem classe",
+     "status": "present",
+     "evidence": "docs/e5-money-readers.md:7 'The classes', :33 tabela; tests/e5-money-readers.test.ts",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Unidade 2b: troca de nível recusa assinatura em outra moeda, com motivo e texto em 7 idiomas, e nota na página do membro",
+     "status": "present",
+     "evidence": "lib/tier-switch.ts:84 e :175 (reason 'currency'); lib/buyer-words/membership.ts:74,101,431,773,1125,1488,1836; app/[handle]/manage/page.tsx:217 switchCurrencyNote",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Unidade 2b: alerta de chamada e API de agendamentos com a moeda em que a chamada foi paga",
+     "status": "present",
+     "evidence": "lib/calls.ts:245-246,301,534; lib/call-reminders.ts:224; lib/api-read.ts:65 (BOOKING_FIELDS currency), :372-373",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Unidade 2b: reembolsos e contestações de 90 dias em outra moeda contados e ditos na página de números",
+     "status": "present",
+     "evidence": "lib/stats.ts:799-804 takenBackElsewhere; components/stats-panel.tsx:722-726; tests/e5-currency-defects.test.ts",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Unidade 2c: pedidos de pagamento, compradores dos segmentos e versão antiga de acordo na moeda de cada registro, com frase na tela de e-mail",
+     "status": "present",
+     "evidence": "components/payment-requests-studio.tsx:58-113; lib/segments.ts:56,66-69,220,237; components/email-studio.tsx:183-191,1185; components/agreements-studio.tsx:139-142",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Unidade 2d: receita de e-mail e sequências contam vendas em outra moeda à parte; campo MCP sales_in_another_currency; teste de assunto conta venda em qualquer moeda",
+     "status": "present",
+     "evidence": "lib/mail-revenue.ts:15-28 (elsewhere); lib/mcp-tools.ts:411,417; lib/broadcasts.ts:922-923; tests/mail-links.test.ts:70",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Unidade 2e: recuperação de pagamento e saúde de membros em outra moeda",
+     "status": "present",
+     "evidence": "lib/payment-recovery-report.ts:26,40-44,82; lib/member-health.ts:34,56-57; app/studio/memberships/page.tsx:253,280; tests/payment-recovery.test.ts:249-250",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Unidade 2f: testes A/B, impacto de desconto e 'how did you hear' conferidos sem mudança e registrados no inventário",
+     "status": "present",
+     "evidence": "docs/e5-money-readers.md (unidade 2f; commit 7bd8c0baf '22 [E5] unit 2f: the rest of the totals, checked')",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Nenhum custo de câmbio: conversão automática do Stripe (Adaptive Pricing) desligada em todo Checkout",
+     "status": "present",
+     "evidence": "lib/instant-pay.ts:111-113 inTheCurrencyShown (adaptive_pricing[enabled]=false), usado por lib/billing.ts:34, lib/calls.ts:61, lib/cart-checkout.ts:30, lib/payment-requests.ts:31, lib/store-tip-checkout.ts:18, lib/call-packages.ts:27",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Unidade 3: campos no estúdio para o criador definir o preço de cada produto/valor em outras moedas, guardados no produto",
+     "status": "missing",
+     "evidence": "grep 'currency-prices' em lib/app/components: só tests/currency-prices.test.ts importa o modelo; nenhum editor de produto nem lib/catalog grava 'prices' por moeda; o próprio item (queue.md:2411) lista 'o checkout e os campos juntos' como unidade ainda não feita",
+     "where_it_should_be": "editor de produto do estúdio (components/ do produto) e o registro do produto em lib/catalog.ts, usando lib/currency-prices.ts"
+    },
+    {
+     "what": "Unidade 3: checkout oferece a sessão na moeda do comprador com Price e currency_options, sem conversão, só quando todos os valores têm a moeda",
+     "status": "missing",
+     "evidence": "grep 'currency_options' em lib/app: só lib/discount.ts:211-218 (leitura de cupom) e comentários de lib/currency-prices.ts; nenhuma criação de Price com currency_options no checkout; lib/store-checkout.ts continua cobrando só em store.currency",
+     "where_it_should_be": "lib/store-checkout.ts (e lib/cart-checkout.ts), com fixedPriceCurrencyOptions/sessionCurrencies de lib/currency-prices.ts"
+    },
+    {
+     "what": "Prova em modo de teste do Stripe dos dois desconhecidos (localização com Adaptive Pricing desligado; preços manuais em cobrança direta na conta conectada)",
+     "status": "out of scope",
+     "evidence": "Exige chave de teste da conta Stripe do dono, que a sessão não tem (queue.md:2411 'esta sessão não tem chave de teste do Stripe'); continua desconhecido e reprova antes da unidade 3",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Checkout no idioma do navegador entre os idiomas oferecidos pela loja",
+     "status": "out of scope",
+     "evidence": "Hoje cada loja tem um só idioma e o Checkout já abre nele (lib/store-checkout.ts:341 locale: LANGUAGES[store.language].stripe); lojas com vários idiomas são o 621 [SZ5] (queue.md:21921-21922), do qual esta parte depende, conforme o próprio item",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Preço próprio por país (393 [CX4])",
+     "status": "out of scope",
+     "evidence": "Item separado 393 [CX4] (queue.md:11202), na fila; o E5 só o deixa por último na ordem",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": "Complemento de completude (05/11/2026, C1-20261105-1919-C4-1): falta a unidade 3 do 22 [E5], que o próprio item já prevê: (1) os campos no estúdio para o criador definir o valor de cada produto em outras moedas, guardados no produto (editor de produto do estúdio e lib/catalog.ts, usando lib/currency-prices.ts, que hoje só é usado pelo teste); e (2) o checkout oferecer a sessão na moeda do comprador com Price e currency_options, sem conversão e só quando todos os valores têm aquela moeda (lib/store-checkout.ts e lib/cart-checkout.ts). As unidades 0 a 2f estão no main. A prova em modo de teste do Stripe depende de chave de teste do dono, e o idioma do navegador depende do 621 [SZ5]."
+  },
+  {
+   "n": 23,
+   "tag": "E6",
+   "state": "unclear",
+   "state_evidence": "queue.md:2415 'Estado: **a fazer**' e 2416 'Estado a conferir (MQ3, 30/10/2026, 13h45): o 389 [TB15] diz que a pergunta de telefone no checkout já existe e a parte de checkbox repete o 387 [TB13]'; 1543 lista 23 [E6] em 'Estado a conferir (MQ3)'; 1572 'parte checkbox ↔ 387 [TB13]'. No código: telefone existe (lib/checkout-fields.ts:31 FIELD_TYPES inclui 'phone', :145 phone_number_collection, desde 11/10/2026); checkbox não existe e é do 387 [TB13] (queue.md:11112, 'na fila'). Sem pendência própria além do 387.",
+   "asks": [],
+   "complement": ""
+  },
+  {
+   "n": 24,
+   "tag": "E7",
+   "state": "not started",
+   "state_evidence": "queue.md:2422 'Estado: **a fazer**'; 466 'MQ3: B#100'; 1539 junção com 112 [E2-POINTS]; 17208 [LQ6] '112 [E2-POINTS] em 24 [E7]'. Nenhuma expiração de acesso a curso no código (grep expir/until em lib/learn.ts e lib/course*.ts) e lib/community-points.ts sem pontos por aula.",
+   "asks": [],
+   "complement": ""
+  },
+  {
+   "n": 25,
+   "tag": "E8",
+   "state": "not started",
+   "state_evidence": "queue.md:2428 'Estado: **a fazer**'; 467 'B#163'; 1565 sobreposição com 405 [HX1] e 11 [D8]. Sem relatório personalizado agendado no código (só relatórios fixos: lib/stats-report.ts, lib/mail-report.ts).",
+   "asks": [],
+   "complement": ""
+  },
+  {
+   "n": 26,
+   "tag": "E9",
+   "state": "not started",
+   "state_evidence": "queue.md:2434 'Estado: **a fazer**'; 468/1461 FIM1#25. Observação: a revisão de página já tem checagens fixas (lib/page-coach.ts) e revisão por IA (lib/ai.ts:1381-1395 reviewPage); para funil há só checagens fixas (lib/funnel-launch-review.ts, lib/funnel-diagnosis.ts), sem explicação por IA. A fila não registra absorção; conferir sobreposição ao começar.",
+   "asks": [],
+   "complement": ""
+  },
+  {
+   "n": 27,
+   "tag": "E10",
+   "state": "in progress",
+   "state_evidence": "queue.md:2438 'Movido para o Grupo A dentro de 631 [AA1] por decisão do dono (02/11/2026, 02h15 Fortaleza); executar como parte do 631, sem fazer duas vezes'; 351 e 22101 ('absorve e substitui a posição de 27 [E10] e 258 [KJ3]'); 160 status Claude 3: unidades 1–3 do 631 em PR, unidade 4 em andamento. No main: lib/agent-coverage.ts, lib/agent-proposal-rules.ts, chaves 'agent' em lib/api-keys.ts:25-26.",
+   "asks": [
+    {
+     "what": "Inventário das ações do estúdio com o tipo de chave do agente, marcando páginas, e-mails e produtos como 'draft'",
+     "status": "present",
+     "evidence": "lib/agent-coverage.ts:59,77 e linhas como :103-104,112 ('pages', draft), :114 ('products', draft); tests/agent-coverage.test.ts",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Regras de rascunho/proposta com confirmação do criador, prévia antes/depois e desfazer",
+     "status": "present",
+     "evidence": "lib/agent-proposal-rules.ts:1-40; tests/agent-proposal-rules.test.ts; docs/ai-agent-store.md",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Chave de API de agente com escopo de rascunho",
+     "status": "present",
+     "evidence": "lib/api-keys.ts:25-26,59,158 (agentScopeOf, AgentScope)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Ferramentas de escrita no MCP que criam rascunhos de páginas, e-mails e produtos reutilizando lib/api-write.ts",
+     "status": "out of scope",
+     "evidence": "Coberto pelo 631 [AA1] em andamento (queue.md:22101, 160), não conta como faltante: no main o servidor MCP só tem ferramentas de leitura (lib/mcp-catalog.ts:28-73: get_numbers, list_products, get_memberships, get_emails, get_affiliates, get_store; app/api/mcp/route.ts:89-136) e lib/api-write.ts:1-25 só cobre lista, etiquetas e dar produto; a gravação das propostas espera o registro de chaves (queue.md:160)",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 28,
+   "tag": "E11",
+   "state": "in progress",
+   "state_evidence": "A fila ainda diz queue.md:2446 'Estado: **a fazer**' e 2450 'Conferência (Claude 2, 01/11/2026) ... começa quando [#1491] for incorporado. Nenhum código alterado', mas docs/agent-inbox.md:314 (C2-93) e :963 passaram 28 [E11] + 100 ao Claude 4, e o main já tem a unidade 1 incorporada: commit afb7b5212 (04/11/2026, PR #2150) 'Letters for members only ... (28 [E11] + 100 [E2-MEMBER-PUBLICATIONS], unit 1)'. A linha de andamento não foi gravada no item da fila.",
+   "asks": [
+    {
+     "what": "Campo de produtos na edição publicada (vazio = pública), só produtos da loja, com limite",
+     "status": "present",
+     "evidence": "lib/letter-rules.ts:22,37 MAX_LETTER_PRODUCTS=20, :55 letterProducts, :62 membersOnly; lib/letters.ts:55-65",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Escolha dos produtos pelo criador ao publicar",
+     "status": "present",
+     "evidence": "components/letter-publish-control.tsx:5,64,73; app/api/store/letters/route.ts",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Página da edição prova o endereço (learnerFrom) e pergunta holdsProducts (pago e não reembolsado, contestação perdida, assinatura em vigor, grátis, importado, presente), com o criador sempre lendo",
+     "status": "present",
+     "evidence": "lib/letter-access.ts:1-40 (holdsProducts de lib/community-access.ts, learnerFrom de lib/learn.ts); app/[handle]/letters/[letter]/page.tsx:41,52; app/api/store/letters/link/route.ts, app/api/store/letters/open/route.ts",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Lista de edições mostra assunto e para quem é, sem o texto; metadados sem o texto e sem indexação",
+     "status": "present",
+     "evidence": "app/[handle]/letters/page.tsx:35; app/[handle]/letters/[letter]/page.tsx:41",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Retirada de acesso por reembolso, contestação perdida ou fim da assinatura",
+     "status": "present",
+     "evidence": "lib/letter-access.ts:9-13 (fecha nos minutos em que a resposta fica guardada); tests/letter-members.test.ts",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Família de chaves nova registrada em tests/store-data-registry.ts (espera do #1491)",
+     "status": "present",
+     "evidence": "tests/store-data-registry.ts:718-721 (nl:letters:link, nl:letters:ok, nl:letters:rl:addr, nl:letters:rl:ip)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Custos (e-mail de acesso, leituras, registros) dentro das franquias existentes",
+     "status": "present",
+     "evidence": "lib/letter-access.ts:25-30 (requisições públicas da loja, leitura em cache, e-mail de acesso contado pelo medidor); tests/store-data-registry.ts:718 MAIL('letter lin...')",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Envio da própria edição só a quem comprou o produto",
+     "status": "present",
+     "evidence": "Público por produto já existe nos segmentos: lib/segments-rules.ts:42 (Segment.productId/notProductId)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Testes sintéticos de produtos escolhidos, quem lê, reembolso, link e nenhum vazamento",
+     "status": "present",
+     "evidence": "tests/letter-members.test.ts (incluindo :311 'the email holds a link to open, never the words' e :367 varredura de leitores)",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Posts do blog só para membros (parte do 100 [E2-MEMBER-PUBLICATIONS] que manda juntar)",
+     "status": "out of scope",
+     "evidence": "Parte própria do item 100 [E2-MEMBER-PUBLICATIONS] (queue.md:2480-2484), fora deste lote; não conferida aqui",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 29,
+   "tag": "E12",
+   "state": "not started",
+   "state_evidence": "queue.md:2453 'Estado: **a fazer**'; 471 'B#165'. O limite continua 5 (lib/team.ts:47 MAX_TEAM = 5).",
+   "asks": [],
+   "complement": ""
+  },
+  {
+   "n": 30,
+   "tag": "E13",
+   "state": "not started",
+   "state_evidence": "queue.md 2459: 'Estado: **a fazer**'; 2460: 'Estado a conferir (MQ3, 30/10/2026, 13h45): a conferência LQ5 achou o aviso de saída já existente (exit-offer) e o checkout hospedado pelo Stripe; fazer só a diferença'; 1543 (MQ3 list 'Estado a conferir ... sem mudança'); position B#9 (1222). The LQ5(a) reduction (17194) was undone by LQ17 (17349). Overlap already in main: components/exit-offer.tsx, components/exit-offer-editor.tsx, components/exit-offer-slot.tsx. Not audited (not started).",
+   "asks": [],
+   "complement": ""
+  },
+  {
+   "n": 32,
+   "tag": "F1",
+   "state": "not started",
+   "state_evidence": "queue.md 2601: 'Estado: **a fazer**'; 2604: TB1 complement incorporated 'sem ... mudança de número/posição/estado'; MQ2 A#84 (1193). Note: the related item 375 [TB1] (detailed visual-editor scope, queue.md 10805-10816) has its own 'Andamento (Claude 4, 04/11/2026): unidade 1 testada num PR' (around queue.md 10808) and git log shows TB1 unit 1 merged; that progress is recorded on 375, not on 32, so 32 is judged by its own record. Not audited.",
+   "asks": [],
+   "complement": ""
+  },
+  {
+   "n": 33,
+   "tag": "F2",
+   "state": "not started",
+   "state_evidence": "queue.md 2608: 'Estado: **a fazer**'; MQ2 B#166 (1378). No later state line found for [F2] item 33 (grep '\\[F2\\]' gives only order tables). Not audited. (Existing podcast code such as lib/podcast.ts, lib/podcast-rules.ts is unrelated to completion of this item's record.)",
+   "asks": [],
+   "complement": ""
+  },
+  {
+   "n": 34,
+   "tag": "F3",
+   "state": "not started",
+   "state_evidence": "queue.md 2614: 'Estado: **a fazer**'; MQ2 B#167 (1379); MQ3 possible overlap '34 [F3] ↔ 385 [TB11]' (queue.md ~1557), 'sem mudança agora'. Not audited.",
+   "asks": [],
+   "complement": ""
+  },
+  {
+   "n": 35,
+   "tag": "F4",
+   "state": "not started",
+   "state_evidence": "queue.md 2620: 'Estado: **a fazer**'; MQ2 B#63 (1276). No later state line. Not audited.",
+   "asks": [],
+   "complement": ""
+  },
+  {
+   "n": 36,
+   "tag": "F5",
+   "state": "not started",
+   "state_evidence": "queue.md 2626: 'Estado: **a fazer**'; MQ2 B#64 (1277). LQ6 absorption into 109 [E2-EVENTS] (17208) was undone by LQ17 (17349). Later complements reference it (22052, 22243) without changing its state. Not audited.",
+   "asks": [],
+   "complement": ""
+  },
+  {
+   "n": 37,
+   "tag": "F6",
+   "state": "not started",
+   "state_evidence": "queue.md 2632: 'Estado: **a fazer**'; FIM1#24 (1460, 479 'FIM1: cauda vigente'). LQ7 cancellation (17210) and LQ13 reopening (17320) both marked undone/history by LQ17 (17347-17351), returning the item to its base state 'a fazer'. Not audited.",
+   "asks": [],
+   "complement": ""
+  },
+  {
+   "n": 38,
+   "tag": "F7",
+   "state": "not started",
+   "state_evidence": "queue.md 2638: 'Estado: **a fazer**'; FIM1#34 (1470). LQ14(a) cancellation (17324) is under the header 'Desfeito por decisão do dono em 28/10/2026, 23h37 (LQ17)' (17314) and LQ17 (17349) restores the base state. Not audited.",
+   "asks": [],
+   "complement": ""
+  },
+  {
+   "n": 39,
+   "tag": "G1",
+   "state": "not started",
+   "state_evidence": "queue.md 2726: 'Estado: **a fazer**'; MQ2 A#104 (1213: 'documentação da Meta (estudo); o 480 depende dele'). The complement 480 [SB3] (13927: 'Complemento ao 39 [G1] AutoDM, aplicando só a diferença, sem mudar número, posição ou estado do item 39') has its own 'Andamento' (13929: unit 1 testada num PR; git log b2d3c8808 merged lib/autodm-rules.ts), recorded on 480, not 39. Not audited.",
+   "asks": [],
+   "complement": ""
+  },
+  {
+   "n": 40,
+   "tag": "G2",
+   "state": "not started",
+   "state_evidence": "queue.md 2732: 'Estado: **a fazer**'; MQ2 B#208 (1420); MQ3 possible overlap '40 [G2] ↔ 228 [HL9]' (1553), 'sem mudança agora'. Not audited.",
+   "asks": [],
+   "complement": ""
+  },
+  {
+   "n": 41,
+   "tag": "G3",
+   "state": "not started",
+   "state_evidence": "queue.md 2738: 'Estado: **a fazer**'; FIM1#37 (1471). LQ7 cancellation (17210) and LQ13 reopening (17320) both undone/history by LQ17 (17347-17351). Not audited.",
+   "asks": [],
+   "complement": ""
+  },
+  {
+   "n": 42,
+   "tag": "G4",
+   "state": "duplicate",
+   "state_evidence": "queue.md 2742: '— Movido para o Grupo A dentro de 632 [AA2] por decisão do dono (02/11/2026, 02h17 Fortaleza); executar como parte do 632, sem fazer duas vezes'; 353 (entrada AA2); 22131 (632: 'absorve e substitui a posição de 42 [G4]'). 632 [AA2] itself is 'Estado: na fila' (queue.md ~22133), so nothing of G4 is implemented yet; not audited as done. Coverage of G4's asks by 632 checked below (queue-level coverage only).",
+   "asks": [
+    {
+     "what": "Document in-product ad creation (official sources, requirements)",
+     "status": "present",
+     "evidence": "Covered in the queue by 632 [AA2] part (a) (queue.md ~22137: estudo com fontes oficiais datadas da Marketing API da Meta, Google Ads API, TikTok Marketing API; 'Depende do dono' sem criar conta nem pedir revisão). Not yet built: 632 is 'na fila'.",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "Prepare ad creation inside the product, switched off",
+     "status": "present",
+     "evidence": "Covered by 632 [AA2] part (b) (campanha criada na conta do criador, pausada, só gasta após confirmação). Existing reusable code: lib/meta-ads.ts, lib/meta-ads-rules.ts, lib/ad-spend-rules.ts (spend reading only; no campaign creation found by grep 'createCampaign|/campaigns' in lib/ and app/), which is expected since 632 is na fila.",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "No campaigns, account or ad spend created; creator's ad budget kept separate from Marktmorgen",
+     "status": "present",
+     "evidence": "Covered by 632 text: 'a Marktmorgen nunca paga, adianta, recebe ou guarda dinheiro de anúncio' and 'nenhum gasto de anúncio passa pela Marktmorgen'; Proibido list forbids accounts/terms/payments.",
+     "where_it_should_be": ""
+    },
+    {
+     "what": "All costs/obligations computed before code",
+     "status": "present",
+     "evidence": "Covered by 632 'Custo:' paragraph (teto mensal por loja antes do gasto, custo desconhecido reprova, pior caso por plano mensal e anual pela regra MR e TX).",
+     "where_it_should_be": ""
+    }
+   ],
+   "complement": ""
+  },
+  {
+   "n": 44,
+   "tag": "H1",
+   "state": "not started",
+   "state_evidence": "queue.md 2755: 'Estado: **a fazer**'; 2758: 'SOMENTE DOCUMENTO agora'; MQ2 B#209 (1421); MQ3 note '44 [H1] ↔ 449–456 [AP1–AP7, AN1] ... O estudo H1 ficou depois da construção' (1574). Not audited.",
+   "asks": [],
+   "complement": ""
+  },
+  {
+   "n": 45,
+   "tag": "H2",
+   "state": "not started",
+   "state_evidence": "queue.md 2763: 'Estado: **a fazer**'; 2766: 'SOMENTE DOCUMENTO agora'; FIM1#6 (1444). No later state line. Not audited.",
+   "asks": [],
+   "complement": ""
+  }
+ ]
+}

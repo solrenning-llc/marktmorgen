@@ -44,7 +44,7 @@ export type AdContext = {
   verifiedReviews: readonly string[];
 };
 
-export type AdRule = TermsWarningKind | "testimonial_unverified" | "empty" | "too_long";
+export type AdRule = TermsWarningKind | "testimonial_unverified" | "empty" | "too_long" | "disguised";
 export type AdFinding = { field: keyof AdText; rule: AdRule; excerpt: string; why: string; fix: string };
 export type AdCheck = { sendable: boolean; refusals: AdFinding[]; warnings: AdFinding[]; notChecked: readonly string[] };
 
@@ -55,12 +55,74 @@ export const AD_NOT_CHECKED: readonly string[] = [
   "Each ad platform's own policies beyond these words: Meta's were not readable in the official check; Google's unreliable-claims and TikTok's misleading-content rules are covered here only where they match the store's own (earnings, results); TikTok's AI-content label and before-and-after pictures are not read here (docs/ad-platforms-official-check-2026-11-02.md)",
   "Each platform's length limits for headlines and text",
   "Pictures and videos: only the words are read here",
+  "A price in a currency other than US dollars: an amount is compared with the product's price only when the store sells in US dollars and the amount is written with $",
+  "Words in a language other than English: the honesty rules here read English words only",
 ];
 
 const REFUSED: ReadonlySet<TermsWarningKind> = new Set<TermsWarningKind>(["fast_money", "earnings_claim", "false_urgency", "price_mismatch"]);
 
 // Quoted words followed by who said them ("…" — Ana; "…", said Ben): bounded, with no nested repetition.
 const QUOTE = /["“]([^"”]{8,400})["”],? ?(?:[-–—] ?|said |says )[A-Z]/gu;
+/**
+ * An ad's line as a reader sees it: compatibility forms folded (fullwidth
+ * "＄５９" is "$59"), hidden format characters removed, every run of spaces
+ * one space, so nothing can hide a price, a promise or urgency from the rules.
+ */
+export function adPlain(text: string): string {
+  return text.normalize("NFKC").replace(/\p{Cf}|[\u034F\u115F\u1160\u3164\u180B-\u180F]/gu, "").replace(/\s+/gu, " ").trim();
+}
+
+/**
+ * Greek capitals and small letters that look like Latin ones: a Latin word
+ * holding one is a disguise (β, γ, ε, η, ω among them, since they pass for
+ * b, y, e, n, w). Other Greek letters (Δ, Ω, π, μ) are ordinary in brand
+ * names ("Δelta Yoga", "Ωmega 3") and are let through.
+ */
+const GREEK_LOOKALIKES = /[ΑΒΕΖΗΙΚΜΝΟΡΤΥΧαβγεηικνορτυχωϲϹϳͿ]/u;
+
+/** A word that mixes Latin letters with Cyrillic ones, or with Greek look-alikes ("Lаst" with a Cyrillic "а"): a disguise, never a real word. */
+function mixedScriptWord(text: string): string | null {
+  // Read as typed, as folded (some look-alikes, the lunate sigma "ϲ", fold into other letters) and as the check reads
+  // the line, without its marks: "L\u200Dаst" is split by the joiner as typed but read as one word (Codex G on #2581).
+  // Read once more without the marks that join letters (variation selectors U+FE00–FE0F and U+E0100–E01EF, combining
+  // marks): "L\uFE0Fа\uFE0Fst" is one word too (Codex G on #2581, second return). Only this scan drops them, so an
+  // emoji's own selector ("❤️") stays in the line.
+  const joined = adPlain(text).replace(/\p{Mn}/gu, "");
+  for (const [word] of `${text} ${text.normalize("NFKC")} ${adPlain(text)} ${joined}`.matchAll(/\p{L}+/gu)) {
+    if (!/\p{Script=Latin}/u.test(word)) continue;
+    if (/\p{Script=Cyrillic}/u.test(word) || GREEK_LOOKALIKES.test(word)) return word;
+  }
+  return null;
+}
+
+/**
+ * Characters that hide inside words and change nothing a reader sees: zero
+ * width space, word joiner and the invisible operators, byte order mark,
+ * soft hyphen, combining grapheme joiner, Hangul fillers, Mongolian
+ * variation selectors, tag characters, and the bidi overrides and
+ * embeddings. Not the joiners emoji and some scripts are made
+ * of (U+200C, U+200D), nor the direction marks Arabic and Hebrew text use.
+ */
+const HIDDEN = /[\u200B\u2060-\u2064\uFEFF\u00AD\u034F\u115F\u1160\u3164\u180B-\u180F\u202A-\u202E]|[\u{E0000}-\u{E007F}]/u;
+/**
+ * The flag emoji made of tags that Unicode recommends for general use
+ * (England, Scotland, Wales: the black flag, the tag letters of gbeng, gbsct
+ * or gbwls, and the cancel tag). Any other run of tags may carry hidden
+ * words, even one shaped like a subdivision code ("limit"), and is refused.
+ */
+const TAG_FLAG = /\u{1F3F4}(?:\u{E0067}\u{E0062}(?:\u{E0065}\u{E006E}\u{E0067}|\u{E0073}\u{E0063}\u{E0074}|\u{E0077}\u{E006C}\u{E0073}))\u{E007F}/gu;
+/** Mongolian free variation selectors right after a Mongolian letter: how the script chooses a letter's shape. */
+const MONGOLIAN_SHAPE = /(?<=\p{Script=Mongolian})[\u180B-\u180D\u180F]/gu;
+/** A line with what is written on purpose (flag emoji, Mongolian letter shapes) set aside, so only hiding characters are left to find. */
+const withoutPurposefulMarks = (text: string) => text.replace(TAG_FLAG, "\uD83C\uDFF4").replace(MONGOLIAN_SHAPE, "");
+/** Where a hidden character is, with the words around it, for the creator to find it. */
+function hiddenAt(raw: string): string {
+  const text = withoutPurposefulMarks(raw);
+  const at = text.search(HIDDEN);
+  if (at < 0) return "";
+  return `${text.slice(Math.max(0, at - 20), at)}[hidden character]${text.slice(at + 1, at + 21)}`.replace(new RegExp(HIDDEN.source, "gu"), "");
+}
+
 const normal = (words: string) => words.toLowerCase().replace(/[\s ]+/g, " ").replace(/[.!?,;:]+$/, "").trim();
 
 /** Checks an ad's words; `sendable` only when nothing is refused. */
@@ -73,13 +135,25 @@ export function checkAdText(ad: AdText, context: AdContext): AdCheck {
     refusals.push({ field: "text", rule: "too_long", excerpt: "", why: `An ad's words are kept under ${AD_TEXT_MAX} characters.`, fix: "Shorten it." });
     return { sendable: false, refusals, warnings, notChecked: AD_NOT_CHECKED };
   }
-  if (!(ad.headline ?? "").trim() && !(ad.text ?? "").trim()) {
+  if (!adPlain(ad.headline ?? "") && !adPlain(ad.text ?? "")) {
     refusals.push({ field: "headline", rule: "empty", excerpt: "", why: "An ad needs a headline or a main text.", fix: "Write what the product is and who it is for." });
   }
   const reviews = new Set(context.verifiedReviews.map(normal));
   for (const field of fields) {
-    const text = ad[field] ?? "";
-    if (!text.trim()) continue;
+    const raw = ad[field] ?? "";
+    const text = adPlain(raw);
+    if (!text) continue;
+    // Hidden characters or letters of another alphabet inside a word: refused, whatever the words say.
+    const mixed = mixedScriptWord(raw);
+    if (HIDDEN.test(withoutPurposefulMarks(raw)) || mixed) {
+      refusals.push({
+        field,
+        rule: "disguised",
+        excerpt: mixed ?? hiddenAt(raw),
+        why: mixed ? `"${mixed}" mixes letters of two alphabets, which looks the same as another word but is not.` : "This line has hidden characters in it.",
+        fix: "Type the line again with ordinary letters and spaces.",
+      });
+    }
     const found = checkCreatorTerms({
       text,
       ownHosts: context.ownHosts,
@@ -90,6 +164,8 @@ export function checkAdText(ad: AdText, context: AdContext): AdCheck {
       realDeadline: context.realDeadline,
       realStockLimit: context.realStockLimit,
       resaleLicense: true,
+      // The wider urgency phrases and "from $X" as a price; positions are in the read line, not the raw one.
+      asAd: true,
     });
     for (const w of found) {
       const finding = { field, rule: w.kind, excerpt: w.excerpt, why: w.why, fix: w.fix };

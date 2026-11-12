@@ -9,7 +9,7 @@ import { redisPipeline } from "@/lib/redis";
 
 export { setAssistantPlan };
 export const DAY = 86_400;
-export const NOW = Date.UTC(2026, 11, 2) / 1000;
+export const NOW = Math.floor(Date.now() / 1000);
 
 type Row = Record<string, unknown>;
 export const world = {
@@ -60,6 +60,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const q = url.searchParams;
   world.calls.push(`${method} ${path}`);
   const page = (data: unknown[]) => json({ object: "list", data, has_more: false });
+  const searchPage = (data: unknown[]) => json({ object: "search_result", data, has_more: false, next_page: null });
   const form = new URLSearchParams(String(init?.body ?? ""));
   const sub = path.match(/^\/subscriptions\/(sub_\w+)$/);
   if (sub) {
@@ -116,7 +117,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (path === "/charges") return page(world.charges.filter((c) => c.customer === q.get("customer")));
   const charge = path.match(/^\/charges\/(ch_\w+)$/);
   if (charge) return json(world.charges.find((c) => c.id === charge[1]));
-  if (path === "/charges/search" || path === "/customers/search") return page([]);
+  if (path === "/charges/search" || path === "/customers/search") return searchPage([]);
   if (path === "/disputes") return page([]);
   return json({ error: { message: `no stand-in for ${path}` } }, 404);
 }) as typeof fetch;
@@ -131,7 +132,7 @@ export async function paidShop(o: { at?: number; stopSet?: boolean } = {}) {
   await claimHandle(email, handle, `Flow ${n}`, "");
   await setSubscription(email, { customerId: customer, subscriptionId: subId, active: true, tier: "creator", cycle: "month", trialEnds: 0 });
   world.customers.set(customer, email);
-  world.subs.set(subId, { id: subId, customer, status: "active", cancel_at_period_end: o.stopSet ?? false, metadata: { store: handle } });
+  world.subs.set(subId, { id: subId, customer, status: "active", cancel_at: null, cancel_at_period_end: o.stopSet ?? false, metadata: { store: handle }, items: { object: "list", data: [{ quantity: 1, price: { unit_amount: 6_900, currency: "usd", recurring: { interval: "month", interval_count: 1 } } }] } });
   const at = o.at ?? NOW - 3 * DAY;
   const id = `ch_${handle}x1`;
   world.invoices.push({ id: `in_${handle}x1`, subscription: subId, status: "paid", created: at, total: 6_900, tax: null, billing_reason: "subscription_create", charge: id, status_transitions: { paid_at: at }, lines: { data: [{ type: "subscription", period: { start: at }, price: { unit_amount: 6_900, currency: "usd", recurring: { interval: "month" } } }] } });

@@ -17,7 +17,9 @@ export async function GET(request: NextRequest) {
   if (!FORM_ID.test(id)) return plain(400, "Which form?");
   const form = await readForm(store.statsId, id);
   if (!form) return plain(404, "That form is gone.");
-  const { responses } = await readResponses(store.statsId, id);
+  const read = await readResponses(store.statsId, id).catch(() => null);
+  if (read === null) return plain(503, "unavailable");
+  const { responses } = read;
   const name = `${form.name.replace(/[^A-Za-z0-9 _-]+/g, "").trim().replace(/\s+/g, "-").slice(0, 40) || "form"}-${new Date().toISOString().slice(0, 10)}.csv`;
   // The byte-order mark makes Excel read the file as UTF-8.
   return new Response(`﻿${responsesCsv(form, responses)}`, {

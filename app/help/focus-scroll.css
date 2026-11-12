@@ -1,0 +1,14 @@
+/*
+ * Firefox may leave the center of the next disclosure just below the viewport
+ * when native Tab focus advances through the fully opened help centre. Keep a
+ * small lower inset for that native focus scroll. The summary margin makes the
+ * same clearance explicit on the focused item; neither rule moves focus or
+ * scrolls the page from JavaScript.
+ */
+html:has([data-help-section]) {
+  scroll-padding-bottom: 3rem;
+}
+
+[data-help-section] summary {
+  scroll-margin-block: 3rem;
+}

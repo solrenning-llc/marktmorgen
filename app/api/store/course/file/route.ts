@@ -3,12 +3,14 @@ import { cookies } from "next/headers";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { findLesson, isOpen, readCourse } from "@/lib/course";
 import { courseAccess, emailKey } from "@/lib/learn";
-import { heldBack, passedQuizzes } from "@/lib/quiz";
+import { heldBack, passedForGate } from "@/lib/quiz";
 import { plain, serveFile } from "@/lib/serve-file";
 import { readCourseListing } from "@/lib/catalog";
 import { coursesWords } from "@/lib/buyer-words/courses";
 import { takePublicRequest } from "@/lib/traffic";
 import { speech } from "@/lib/buyer-words";
+import { SESSION_COOKIE } from "@/lib/auth";
+import { seesDrafts } from "@/lib/draft-view";
 
 /**
  * A lesson's download: a worksheet, the slides. Handed over only to someone
@@ -19,6 +21,13 @@ export async function GET(request: NextRequest) {
   const store = await storeForHandle(normaliseHandle(q.get("h") ?? ""));
   const product = await readCourseListing(store, q.get("p"));
   if (!store || !product?.course) return plain(404, "Not found.");
+  // A draft's lessons, its free preview included, hand out nothing to whoever
+  // only knows its id: only to its students and the store's owner and team,
+  // signed in (MM-SA-30). Anyone else gets what an id that does not exist gets.
+  if (product.hidden) {
+    const jar = await cookies();
+    if ((await courseAccess(store, product, jar)).state !== "open" && !(await seesDrafts(store, jar.get(SESSION_COOKIE)?.value))) return plain(404, "Not found.");
+  }
   const course = await readCourse(product.course.id);
   const found = course ? findLesson(course, q.get("l") ?? "") : null;
   const index = Number(q.get("i"));
@@ -33,7 +42,7 @@ export async function GET(request: NextRequest) {
       return plain(403, w.notOpenForYou);
     }
     if (!access.learner.owner && course) {
-      const passed = await passedQuizzes(course.id, emailKey(access.learner.email));
+      const passed = await passedForGate(course.id, emailKey(access.learner.email));
       const blocker = heldBack(course, passed).get(found.lesson.id);
       if (blocker) {
         // Held by a quiz to pass, or by work to hand in (lib/assignment-rules.ts).

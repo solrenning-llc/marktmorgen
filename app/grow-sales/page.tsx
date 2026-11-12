@@ -28,7 +28,7 @@ export default function GrowSalesPage() {
         <div className="container-page relative grid items-center gap-12 lg:grid-cols-[1.2fr_0.8fr]">
           <div>
             <p className="eyebrow">From evidence to your next action</p>
-            <h1 className="t-h1 balance mt-4">See what brings sales.<br /><span className="serif font-normal text-violet-deep">Prepare your next promotion.</span></h1>
+            <h1 className="t-h1 balance mt-4">Review your recorded sales.<br /><span className="serif font-normal text-violet-deep">Prepare your next promotion.</span></h1>
             <p className="t-lead mt-6 max-w-2xl text-ink-soft">Your store, sales numbers, campaign links and selling tools work together. Start with what your store recorded, choose a useful next step, and review the result.</p>
             <div className="mt-8 flex flex-wrap gap-3"><Link href="/demo" className="btn btn-primary btn-lg">Explore the demo store</Link><Link href="/signin" className="btn btn-secondary btn-lg">Set up your store</Link></div>
             {!PLANS_ON_SALE ? <p className="mt-4 text-sm text-ink-soft">You can set up a store today. Paid plans are not on sale yet.</p> : null}

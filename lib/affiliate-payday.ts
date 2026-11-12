@@ -19,7 +19,9 @@
  * overlap, a store seen twice while it moves between addresses — finds the day
  * taken and does nothing.
  */
-import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { isRedisConfigured } from "@/lib/redis";
+import { claimMark } from "@/lib/claim-mark";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { SITE_URL } from "@/lib/site-url";
 import { storesAfter, type Store } from "@/lib/store";
@@ -52,11 +54,15 @@ function monthOf(now: Date): string {
 
 /**
  * Claims this store's payday for this month. True the first time, false
- * every time after, which is what makes the job safe to run twice.
+ * every time after, which is what makes the job safe to run twice. Read
+ * exactly (lib/claim-mark.ts, CX-123 rule 24): a claim answered in another
+ * shape and not read back as ours is never ours, and throws, so the store is
+ * counted as failed and nobody is written to or paid on it.
  */
 async function claimMonth(statsId: string, month: string): Promise<boolean> {
-  const [got] = await redisPipeline([["SET", `nl:aff:payday:${statsId}:${month}`, "1", "NX", "EX", CLAIM_SECONDS]]);
-  return got !== null;
+  const got = await claimMark(`nl:aff:payday:${statsId}:${month}`, CLAIM_SECONDS);
+  if (got === "unknown") throw new UnknownReplyError("a store's payday claim");
+  return got === "ours";
 }
 
 /** The message itself. Plain text, so every word is what arrives. */
@@ -125,6 +131,21 @@ export function autoPayEmail(paid: Awaited<ReturnType<typeof payWithPayPal>>, cu
         `It is your affiliate payday, and you asked us to pay by ourselves. ${amount} went to ${who} from your own PayPal, in PayPal batch ${paid.batch}.`,
         "",
         "Each payment shows as paid on your affiliate page, and on the affiliate's own page, as soon as PayPal confirms it. Anyone PayPal cannot pay stays owed, to be paid again. The money went from your PayPal to theirs; it never passed through us.",
+        studio,
+        "",
+        "— Marktmorgen",
+      ].join("\n"),
+    };
+  }
+  if (paid.reason === "unknown") {
+    return {
+      subject: "Check your PayPal: your affiliates' payment may have gone",
+      text: [
+        "Hello,",
+        "",
+        "It is your affiliate payday, and you asked us to pay by ourselves. We sent the batch to PayPal, but PayPal's answer did not reach us, so we do not know whether it was paid.",
+        "",
+        "Nobody in it will be paid again by us while this is not known: they show as on their way on your affiliate page. Look at your PayPal activity to see whether the payment went.",
         studio,
         "",
         "— Marktmorgen",

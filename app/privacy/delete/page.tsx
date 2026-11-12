@@ -61,7 +61,11 @@ export default async function DeletePage({ searchParams }: Params) {
   const opensOn = opensAt && !Number.isNaN(opensAt.getTime()) ? opensAt.toLocaleDateString("en-US", { timeZone: "UTC", month: "long", day: "numeric", year: "numeric" }) : "";
   const handle = typeof query.store === "string" ? query.store.slice(0, 60).toLowerCase() : "";
   const store = handle ? await storeForHandle(handle).catch(() => null) : null;
-  const link = token ? await readErasureLink(token).catch(() => null) : null;
+  let linkUnavailable = false;
+  const link = token ? await readErasureLink(token).catch(() => {
+    linkUnavailable = true;
+    return null;
+  }) : null;
   const receipt = readErasureReceipt(query.receipt, token);
   const confirmed = receipt?.state === statusKey ? receipt : null;
   const n = confirmed?.count ?? 0;
@@ -87,6 +91,21 @@ export default async function DeletePage({ searchParams }: Params) {
               </p>
               <p className="mt-6 text-sm text-ink-soft">
                 Their creators keep your payments on their own Stripe accounts, as their sales records. <Link href="/privacy#delete" className="underline underline-offset-4">What is kept, and why</Link>.
+              </p>
+            </div>
+          ) : linkUnavailable ? (
+            <div className="max-w-2xl">
+              <p className="notice notice-info mb-6" role="status">
+                {statusKey === "more" && confirmed
+                  ? `Deleted from ${n} ${n === 1 ? "store" : "stores"} so far. The rest could not be finished just now.`
+                  : "We could not check every store just now. Your request has not been confirmed as complete."}
+              </p>
+              <p className="text-ink-soft">Keep this page open and try checking again. This does not delete anything until the stores can be shown and you confirm.</p>
+              <a className="btn btn-secondary mt-6" href={`/privacy/delete?${new URLSearchParams({ token, ...(statusKey === "more" && confirmed && typeof query.receipt === "string" ? { status: "more", receipt: query.receipt } : {}) }).toString()}`}>
+                Try checking again
+              </a>
+              <p className="mt-6 text-sm text-ink-soft">
+                If you still cannot continue, write to <a className="underline underline-offset-4" href="mailto:support@marktmorgen.com">support@marktmorgen.com</a> from this address and ask us to delete your data.
               </p>
             </div>
           ) : link ? (

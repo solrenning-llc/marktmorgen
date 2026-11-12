@@ -40,6 +40,16 @@ function main() {
     vtt("WEBVTT - my file\n\nNOTE made by a tool\n\nSTYLE\n::cue { color: red }\n\nREGION\nid:fred\n\n00:00:01.000 --> 00:00:02.000\nOnly this.\n"),
     "WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nOnly this.\n",
   );
+  is(
+    "a cue whose start goes back before the previous cue is refused",
+    vtt("WEBVTT\n\n00:00:05.000 --> 00:00:07.000\nLater first.\n\n00:00:04.000 --> 00:00:06.000\nEarlier second.\n"),
+    "refused: format",
+  );
+  is(
+    "cues may start together",
+    vtt("WEBVTT\n\n00:00:05.000 --> 00:00:06.000\nFirst.\n\n00:00:05.000 --> 00:00:07.000\nSecond.\n"),
+    "WEBVTT\n\n00:00:05.000 --> 00:00:06.000\nFirst.\n\n00:00:05.000 --> 00:00:07.000\nSecond.\n",
+  );
 
   part("The words");
   is(
@@ -62,6 +72,16 @@ function main() {
   is("a time that cannot be read", vtt("1\n00:00:01 --> 00:00:02\nNo fractions.\n"), "refused: format");
   is("a caption that ends before it starts", vtt("1\n00:00:05,000 --> 00:00:02,000\nBackwards.\n"), "refused: format");
   is("one good caption and one broken: the whole file is refused, not half kept", vtt("1\n00:00:01,000 --> 00:00:02,000\nGood.\n\n2\nxx --> yy\nBad.\n"), "refused: format");
+  for (const broken of ["2\n00:00:03,000 -> 00:00:04,000\nMissing a dash.", "2\n00:00:03,000 00:00:04,000\nNo separator.", "A detached part of the transcript."]) {
+    is(`a broken block without an arrow is refused, never silently lost: ${broken.split("\n")[0]}`, vtt(`1\n00:00:01,000 --> 00:00:02,000\nGood.\n\n${broken}`), "refused: format");
+  }
+  is("a forbidden timing separator in cue words refuses the whole file, never drops a line", vtt("WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nGood words.\nThis --> that.\n"), "refused: format");
+  // YouTube header/timings example reported by the yt-dlp maintainer:
+  // https://github.com/yt-dlp/yt-dlp/issues/13654
+  // The NOTE is an additional compatibility control, not downloaded speech.
+  const youtube = "WEBVTT\nKind: captions\nLanguage: en\n\nNOTE export metadata\n\n00:00:00.000 --> 00:00:04.080\ntext\n\n00:00:04.080 --> 00:00:05.840\ntext\n";
+  is("a documented YouTube header with Kind, Language and a NOTE keeps both cues", vtt(youtube), "WEBVTT\n\n00:00:00.000 --> 00:00:04.080\ntext\n\n00:00:04.080 --> 00:00:05.840\ntext\n");
+  is("valid trailing spaces and tabs on metadata markers are preserved as metadata", vtt("WEBVTT\n\nSTYLE \t\n::cue { color: red }\n\nREGION\t \nid:fred\n\n00:00:01.000 --> 00:00:02.000\nGood words.\n"), "WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nGood words.\n");
   is("a file over the size one may be", vtt(`WEBVTT\n\n00:00:01.000 --> 00:00:02.000\n${"a".repeat(MAX_CAPTION_BYTES)}\n`), "refused: too_big");
 
   part("The languages");

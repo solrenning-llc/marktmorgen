@@ -1,9 +1,9 @@
 import { type NextRequest, after } from "next/server";
 import { noticeCreator } from "@/lib/account-notice";
-import { ACCOUNT_NAMES, forgetUser } from "@/lib/meet-connect";
+import { ACCOUNT_NAMES, IncompleteForget, forgetUser } from "@/lib/meet-connect";
 import { isConfigured, zoomClientId, zoomSigned, zoomValidation } from "@/lib/meet-providers";
 import { clientAddress, limited, withinLimit } from "@/lib/request-guard";
-import { redisPipeline } from "@/lib/redis";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 
 /** Zoom's notices are small; anything bigger is not one. */
 const MAX_BODY_BYTES = 64_000;
@@ -46,13 +46,17 @@ export async function POST(request: NextRequest) {
     return Response.json({ ok: false }, { status: 401 });
   }
   // Once only (see above). A notice we failed to act on is let go of again,
-  // so Zoom's retry of it is heard.
+  // so Zoom's retry of it is heard. Read exactly (CX-123 rule 24): a mark
+  // that cannot be read, the database not answering included, acts on
+  // nothing and is not answered with a success, so Zoom tries again; a mark
+  // this request may have written is let go first, only while it is ours.
   const seenKey = `nl:meet:zoomseen:${(request.headers.get("x-zm-signature") ?? "").slice(3, 67)}`;
-  try {
-    const [fresh] = await redisPipeline([["SET", seenKey, "1", "NX", "EX", 600]]);
-    if (fresh === null) return Response.json({ ok: true });
-  } catch {
-    // Without Redis nothing can be forgotten either; carry on.
+  const mine = claimValue();
+  const fresh = await claimMark(seenKey, 600, mine);
+  if (fresh === "taken") return Response.json({ ok: true });
+  if (fresh === "unknown") {
+    await releaseMark(seenKey, mine);
+    return Response.json({ ok: false }, { status: 503 });
   }
   let notice: { event?: unknown; payload?: Record<string, unknown> };
   try {
@@ -72,8 +76,7 @@ export async function POST(request: NextRequest) {
     const user = typeof payload.user_id === "string" ? payload.user_id : "";
     const client = typeof payload.client_id === "string" ? payload.client_id : "";
     if (!user || (client && client !== zoomClientId())) return Response.json({ ok: true });
-    try {
-      const forgot = await forgetUser("zoom", user);
+    const tell = (forgot: Awaited<ReturnType<typeof forgetUser>>) => {
       for (const one of forgot) {
         if (!one.owner.email) continue;
         after(() =>
@@ -83,11 +86,17 @@ export async function POST(request: NextRequest) {
           ),
         );
       }
+    };
+    try {
+      tell(await forgetUser("zoom", user));
       return Response.json({ ok: true });
     } catch (error) {
       console.error("forgetting a Zoom user failed", error);
+      // The stores this pass did forget are told now: the next pass reads them as gone (Claude 5 on #2869).
+      if (error instanceof IncompleteForget) tell(error.forgot);
       // Zoom tries again when it is not answered with a success.
-      await redisPipeline([["DEL", seenKey]]).catch(() => {});
+      // Only while it is still ours: a mark that ran out and was taken by another request is that one's.
+      await releaseMark(seenKey, mine);
       return Response.json({ ok: false }, { status: 500 });
     }
   }

@@ -96,9 +96,13 @@ export function erasureWork(size: Partial<ErasureSize>): { commands: number; byt
   let commands = ERASE_FIXED_COMMANDS;
   let bytes = ERASE_FIXED_BYTES;
   for (const [key, [c, b]] of Object.entries(ERASE_PER) as [keyof ErasureSize, [number, number]][]) {
-    const n = Math.max(0, Math.ceil(Number(size[key]) || 0));
-    commands += c * n;
-    bytes += b * n;
+    const n = Object.hasOwn(size, key) ? size[key] : 0;
+    if (typeof n !== "number" || !Number.isSafeInteger(n) || n < 0) throw new RangeError("Unknown erasure size");
+    const nextCommands = commands + c * n;
+    const nextBytes = bytes + b * n;
+    if (!Number.isSafeInteger(nextCommands) || !Number.isSafeInteger(nextBytes)) throw new RangeError("Unknown erasure size");
+    commands = nextCommands;
+    bytes = nextBytes;
   }
   return { commands, bytes };
 }

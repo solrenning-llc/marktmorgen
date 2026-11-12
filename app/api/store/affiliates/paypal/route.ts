@@ -45,7 +45,7 @@ export async function POST(request: NextRequest) {
       const refused = await withinServiceWhy("paypal-pay", store.handle, 6, 3600, store);
       if (refused) return serviceRefusedJson(refused, "slow");
       const result = await payWithPayPal(store);
-      return result.ok ? Response.json(result) : fail(result.reason, result.reason === "error" ? 502 : 409);
+      return result.ok ? Response.json(result) : fail(result.reason, result.reason === "error" || result.reason === "unknown" ? 502 : 409);
     }
     if (op === "settle") {
       return Response.json({ ok: true, ...(await settlePayPal(store)) });

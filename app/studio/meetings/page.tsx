@@ -94,9 +94,13 @@ export default async function StudioMeetingsPage({ searchParams }: Params) {
   // What the store is offered, and any account it has connected either way.
   const offered = view ? view.providers : offeredProviders(store, review);
   if (view !== null && offered.length === 0 && configured.length > 0) notFound();
-  // The test meeting each connected account has, where one was made (lib/meet-test.ts).
+  // The test meeting each connected account has, where one was made (lib/meet-test.ts). A failed read is null,
+  // never "none": the page then offers no "Make a test meeting" over one that may be there (CX-123 rule 24).
   const tests = view
-    ? await readTests(store.statsId, offered.filter((p) => configured.includes(p) && view.connected[p])).catch(() => ({}))
+    ? await readTests(store.statsId, offered.filter((p) => configured.includes(p) && view.connected[p])).catch((error) => {
+        console.error("reading the test meetings failed", error);
+        return null;
+      })
     : {};
   // The store's calls to connected services used, no place this month, or not counted (lib/metered-limits.ts).
   const allowance = typeof query.meet === "string" ? serviceAllowanceWords(store, query.meet) : null;

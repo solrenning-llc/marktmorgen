@@ -20,6 +20,7 @@ export function BuyerNumbers({
   span,
   currency,
   top,
+  buyersLater,
 }: {
   windows: Record<"d7" | "d30" | "d90", BuyersWindow>;
   range: "d7" | "d30" | "d90";
@@ -28,6 +29,11 @@ export function BuyerNumbers({
   currency: string;
   /** Absent for a role that may not see buyers' addresses. */
   top?: TopBuyer[];
+  /**
+   * The biggest buyers were left out of the kept reading for lack of a list to look a deleted buyer up in
+   * (lib/store-readings.ts, Kept.unnamed): said, and when they come back. Never inferred from an empty list.
+   */
+  buyersLater?: "on-their-own" | "after-change";
 }) {
   const sid = useStudioStore();
   const money = (cents: number) => formatMoney(cents, currency);
@@ -53,6 +59,13 @@ export function BuyerNumbers({
         ))}
       </dl>
 
+      {top && !top.length && buyersLater ? (
+        <p className="mt-4 text-sm text-ink">
+          {buyersLater === "after-change"
+            ? "Your biggest buyers show here again after your next saved change to your store, when these numbers are next updated."
+            : "Your biggest buyers show here again on their own, usually within a day, when these numbers are next updated."}
+        </p>
+      ) : null}
       {top && top.length ? (
         <div className="mt-4 overflow-x-auto" tabIndex={0} role="region" aria-labelledby="numbers-top-buyers">
           <table className="w-full text-left text-sm">

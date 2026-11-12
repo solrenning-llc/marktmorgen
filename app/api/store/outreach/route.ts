@@ -1,11 +1,12 @@
 import { serviceRefusedJson, withinServiceWhy } from "@/lib/metered-limits";
 import type { NextRequest } from "next/server";
 import { guardStoreWrite, text } from "@/lib/store-request";
-import { withinLimit } from "@/lib/request-guard";
+import { withinEssentialLimit } from "@/lib/request-guard";
 import { ensureStatsId, storeRef } from "@/lib/store";
 import { AI_PER_MINUTE, MAX_AI_NOTES } from "@/lib/ai-rules";
 import { dropPitch, editPitch, readStoreSite, saveSender, setPitchStatus, startPitch } from "@/lib/outreach";
 import { MAX_PITCH_BODY, MAX_PITCH_SUBJECT, PITCH_STATUSES, type PitchStatus, isGoal } from "@/lib/outreach-rules";
+import { UnknownReplyError } from "@/lib/redis-reply";
 
 /** Reading somebody else's website and asking the model can each take seconds. */
 export const maxDuration = 60;
@@ -42,7 +43,7 @@ export async function POST(request: NextRequest) {
   try {
     if (action === "find") {
       // The day's limit first, so a read refused for the day takes nothing from the store's month.
-      if (!(await withinLimit("outreach-find-day", who, FINDS_PER_DAY, 86_400))) return fail("day", 429);
+      if (!(await withinEssentialLimit("outreach-find-day", who, FINDS_PER_DAY, 86_400))) return fail("day", 429);
       const refused = await withinServiceWhy("outreach-find", who, FINDS_PER_MINUTE, 60, store);
       if (refused) return serviceRefusedJson(refused, "slow");
       const read = await readStoreSite(store, text(body.site, 300));
@@ -51,7 +52,7 @@ export async function POST(request: NextRequest) {
     }
     if (action === "draft") {
       if (!isGoal(body.goal)) return fail("invalid");
-      if (!(await withinLimit("ai", who, AI_PER_MINUTE, 60))) return fail("slow", 429);
+      if (!(await withinEssentialLimit("ai", who, AI_PER_MINUTE, 60))) return fail("slow", 429);
       const done = await startPitch(store, {
         goal: body.goal,
         country: text(body.country, 2).toUpperCase(),
@@ -85,6 +86,8 @@ export async function POST(request: NextRequest) {
     return fail("invalid");
   } catch (error) {
     console.error("outreach failed", error);
+    // A read or a receipt not known (rule 24): said as nothing known to have changed, never done.
+    if (error instanceof UnknownReplyError) return fail("unavailable", 503);
     return fail("server_error", 500);
   }
 }

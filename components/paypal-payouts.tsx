@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/icons";
+import { NewTab } from "@/components/new-tab";
 import { toast } from "@/components/toast";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 import { formatMoney } from "@/lib/money";
@@ -25,6 +26,7 @@ const MESSAGES: Record<string, string> = {
   off: "Switch your affiliate program on first.",
   slow: "Too many tries for now. Try again in an hour.",
   error: "PayPal could not be reached. Nothing was sent. Try again in a moment.",
+  unknown: "We sent the batch to PayPal, but its answer did not reach us, so we do not know whether it was paid. Nobody in it will be sent again: they show as on their way. Look at your PayPal activity to see whether it went.",
 };
 
 async function send(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -42,6 +44,8 @@ export function PayPalPayouts({
   cents,
   currency,
   onTheirWay,
+  checking = 0,
+  manualCheck = 0,
   payday,
 }: {
   initial: View | null;
@@ -51,6 +55,10 @@ export function PayPalPayouts({
   currency: string;
   /** Payments sent through PayPal and not yet confirmed. */
   onTheirWay: number;
+  /** Of those, the ones whose answer from PayPal did not reach us, asked again once a day (lib/paypal-payouts.ts). */
+  checking?: number;
+  /** Of those, the ones PayPal could not confirm after a week, or said exist without saying which: not sent again. */
+  manualCheck?: number;
   /** The day of the month the creator pays; 0 when none is set. */
   payday: number;
 }) {
@@ -182,6 +190,21 @@ export function PayPalPayouts({
                 Check with PayPal
               </button>
             </div>
+          ) : null}
+          {checking > 0 ? (
+            <p className="mt-3 text-sm text-ink-soft" role="status">
+              {`${checking} of these ${checking === 1 ? "is" : "are"} being checked with PayPal: its answer to the payment did not reach us, so the same payment request is sent to PayPal once a day until it answers. Nobody is paid twice.`}
+            </p>
+          ) : null}
+          {manualCheck > 0 ? (
+            <p className="notice notice-warn mt-3 text-sm" role="status">
+              {`PayPal could not confirm ${manualCheck} ${manualCheck === 1 ? "payment" : "payments"}, so we will not send ${manualCheck === 1 ? "it" : "them"} again. Please check them in your PayPal activity, and pay anyone PayPal did not pay from there: `}
+              <a className="underline underline-offset-2" href="https://www.paypal.com/myaccount/activities/" target="_blank" rel="noreferrer">
+                your PayPal activity
+                <NewTab />
+              </a>
+              .
+            </p>
           ) : null}
           <label className="mt-4 flex min-h-[44px] items-center gap-3 text-sm text-ink">
             <input

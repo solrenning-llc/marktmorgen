@@ -18,7 +18,7 @@ def main():
         raise RuntimeError("Expected static application AI reservation script")
     script = match.group(1)
     prefix = "marktmorgen:integration:ai-spend:" + uuid.uuid4().hex + ":"
-    keys = [prefix + str(index) for index in range(10)]
+    keys = [prefix + str(index) for index in range(16)]
     redis = Redis()
     def seed(key, slots=1):
         redis.command("HSET", key, "review", "review-v2", "policy", "funded-snapshot-v2", "company", 0, "slots:creator", slots, "slots:pro", 0, "slots:scale", 0, "slots:trial", 0, "slots:setup", 0, "slots:ended", 0)
@@ -96,15 +96,74 @@ def main():
         seed(keys[8])
         redis.command("HSET", keys[8], "slots:pro", 1)
         assert take(redis, keys[8]) == 1
-        assert take(redis, keys[8], tier="pro") == 0
+        assert take(redis, keys[8], tier="pro") == 1
+        assert redis.command("HGET", keys[8], "tier:store:one") == "pro"
         redis.command("HDEL", keys[8], "store:one")
         assert take(redis, keys[8]) == 0
-        assert redis.command("HGET", keys[8], "company") == "100"
+        assert redis.command("HGET", keys[8], "company") == "200"
         seed(keys[9])
         redis.command("HDEL", keys[9], "slots:creator")
         assert take(redis, keys[9]) == 0
         assert redis.command("HGET", keys[9], "company") == "0"
-        print("PASS: tier transitions and missing allocation metadata require review")
+        print("PASS: tier transitions keep their counters and missing allocation metadata require review")
+
+        # A plan switched inside the window (R32 finding 1): one total, under the current tier's ceiling.
+        def seed_switch(key):
+            redis.command("HSET", key, "review", "review-v2", "policy", "funded-snapshot-v2", "company", 0, "slots:creator", 0, "slots:pro", 5, "slots:scale", 5, "slots:trial", 0, "slots:setup", 0, "slots:ended", 0)
+        def switch(key, tier, charge=100, customer="one"):
+            limit = 300 if tier == "pro" else 600
+            return take(redis, key, customer=customer, charge=charge, store_limit=limit, company_limit=10000, tier=tier, funded=5)
+        seed_switch(keys[10])
+        assert switch(keys[10], "pro", charge=200) == 1
+        assert switch(keys[10], "scale", charge=400) == 1
+        assert switch(keys[10], "scale", charge=1) == 0
+        assert redis.command("HGET", keys[10], "store:one") == "600"
+        assert redis.command("HGET", keys[10], "tier:store:one") == "scale"
+        assert redis.command("HGET", keys[10], "held:pro:store:one") == "1"
+        assert redis.command("HGET", keys[10], "slots:pro") == "4"
+        assert redis.command("HGET", keys[10], "slots:scale") == "4"
+        print("PASS: an upgrade gets the new ceiling minus what the window spent")
+
+        seed_switch(keys[11])
+        assert switch(keys[11], "scale", charge=400) == 1
+        before = redis.command("HGETALL", keys[11])
+        assert switch(keys[11], "pro", charge=1) == 0
+        assert redis.command("HGETALL", keys[11]) == before
+        seed_switch(keys[12])
+        assert switch(keys[12], "scale", charge=100) == 1
+        assert switch(keys[12], "pro", charge=200) == 1
+        assert switch(keys[12], "pro", charge=1) == 0
+        assert redis.command("HGET", keys[12], "store:one") == "300"
+        print("PASS: a downgrade never adds the lower ceiling to what was spent")
+
+        seed_switch(keys[13])
+        for tier in ("pro", "scale", "pro", "scale", "pro"):
+            assert switch(keys[13], tier, charge=10) == 1
+        assert redis.command("HGET", keys[13], "slots:pro") == "4"
+        assert redis.command("HGET", keys[13], "slots:scale") == "4"
+        assert redis.command("HGET", keys[13], "store:one") == "50"
+        print("PASS: switching back and forth claims one allocation per tier")
+
+        seed_switch(keys[14])
+        assert switch(keys[14], "pro") == 1
+        for field, odd in (("tier:store:one", "bogus"), ("tier:store:one", ""), ("tier:store:one", "PRO"), ("held:scale:store:one", "2"), ("held:scale:store:one", ""), ("held:pro:store:one", "0")):
+            redis.command("HSET", keys[14], "tier:store:one", "pro")
+            redis.command("HDEL", keys[14], "held:scale:store:one", "held:pro:store:one")
+            redis.command("HSET", keys[14], field, odd)
+            before = redis.command("HGETALL", keys[14])
+            assert switch(keys[14], "scale") == 0
+            assert redis.command("HGETALL", keys[14]) == before
+        redis.command("HSET", keys[14], "held:scale:store:two", "1")
+        assert switch(keys[14], "scale", customer="two") == 0
+        assert redis.command("HEXISTS", keys[14], "tier:store:two") == 0
+        assert take(redis, keys[14], tier="unknown", funded=5) == 0
+        seed_switch(keys[15])
+        assert switch(keys[15], "pro") == 1
+        redis.command("HSET", keys[15], "slots:scale", 0)
+        before = redis.command("HGETALL", keys[15])
+        assert switch(keys[15], "scale") == 0
+        assert redis.command("HGETALL", keys[15]) == before
+        print("PASS: unknown scopes, markers or tiers and a spent allocation refuse without writes")
 
     finally:
         assert all(key.startswith(prefix) for key in keys)

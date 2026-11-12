@@ -4,6 +4,7 @@
  * removed since are not shown; counting needs a real block id.
  */
 import { countDepth, reachShares, readDepth } from "@/lib/page-depth";
+import { playerOfOrigin } from "@/components/page-depth";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -21,6 +22,11 @@ async function main(): Promise<void> {
   await countDepth("s1", "p1", "bene0001");
   await countDepth("s1", "p1", "<script>");
   is("counted, and nothing that is not a block id", await readDepth("s1", "p1"), { visitors: 2, stopped: { bene0001: 2 }, whyNot: {}, videos: {} });
+
+  part("Players heard");
+  // A message is heard only from the players' own origins, never from one that only contains their names.
+  is("YouTube and Vimeo by their exact origins", [playerOfOrigin("https://www.youtube-nocookie.com"), playerOfOrigin("https://www.youtube.com"), playerOfOrigin("https://player.vimeo.com")], ["youtube", "youtube", "vimeo"]);
+  is("look-alikes are no player", [playerOfOrigin("https://evilyoutube.example"), playerOfOrigin("https://www.youtube.com.example"), playerOfOrigin("https://evilvimeo.com"), playerOfOrigin("http://player.vimeo.com")], [null, null, null, null]);
   done();
 }
 

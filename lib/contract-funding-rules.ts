@@ -1,4 +1,4 @@
-import { assessPlanPaymentDisputeCosts, PLAN_PAYMENT_DISPUTE_COST_RULES } from '@/lib/plan-payment-dispute-cost-rules';
+import { assessPlanPaymentDisputeCosts, PLAN_PAYMENT_DISPUTE_COST_RULES, PLAN_PAYMENT_DISPUTE_KEYS } from '@/lib/plan-payment-dispute-cost-rules';
 import { PUBLISHED_PLAN_PRICES, TRIAL_DAYS, REFUND_DAYS, type Tier, type Cycle } from '@/lib/plan';
 import { CLOSING_DAYS } from '@/lib/plan-closing-rules';
 import { LONGEST_PAUSE_MONTHS, PAUSE_EVERY_DAYS, PLAN_BREAKS_ENABLED } from '@/lib/plan-pause-rules';
@@ -13,11 +13,17 @@ export const CONTRACT_ADMISSION_COVERAGE={checkout:true,planSwitch:true,pauseRes
 /** AV3: disabled optional facilities do not certify coverage or block unrelated
  * core lifecycle work. Every core contract obligation remains mandatory. */
 export const CORE_CONTRACT_ADMISSION_KEYS=['checkout','planSwitch','resourceAllocations','renewals','settlementAndReserveReconciliation'] as const;
+function parseOwnFinancialJson<T>(encoded:string):T|null{
+ try{
+  return JSON.parse(encoded,(_key,value)=>value&&typeof value==='object'&&!Array.isArray(value)
+   ?Object.create(null,Object.getOwnPropertyDescriptors(value)):value) as T;
+ }catch{return null;}
+}
 export function contractLifecycleReady(coverage:unknown=CONTRACT_ADMISSION_COVERAGE,planBreaksEnabled:unknown=PLAN_BREAKS_ENABLED):boolean{
  if(typeof planBreaksEnabled!=='boolean')return false;
  const encoded=canonicalFinancialSnapshot(coverage);
  if(encoded===null)return false;
- const value=JSON.parse(encoded) as Record<string,unknown>|null;
+ const value=parseOwnFinancialJson<Record<string,unknown>|null>(encoded);
  const keys=[...CORE_CONTRACT_ADMISSION_KEYS,'pauseRestart'];
  if(!value||Array.isArray(value)||typeof value!=='object'||Object.keys(value).length!==keys.length||
   !keys.every(key=>Object.hasOwn(value,key)&&typeof value[key]==='boolean'))return false;
@@ -29,6 +35,34 @@ export type ContractFundingContext={termsSnapshot:string;review:CommercialMargin
 export const CURRENT_CONTRACT_FUNDING_POLICY:ContractFundingPolicy|null=null;
 const integer=(n:unknown):n is number=>typeof n==='number'&&Number.isSafeInteger(n)&&n>=0;
 const bounded=(n:unknown):n is number=>integer(n)&&n<=CONTRACT_FUNDING_RULES.maxInteger;
+const inertProxyDetector:((value:unknown)=>boolean)|null=(()=>{
+ try{
+  if(typeof process==='undefined'||typeof process.getBuiltinModule!=='function')return null;
+  const util=process.getBuiltinModule('node:util');
+  return util?.types?.isProxy??null;
+ }catch{return null;}
+})();
+/** Admit only an inert own-data graph before any financial observation. Node's
+ * Proxy detector is acquired without a static browser import and does not
+ * invoke traps. A runtime without it fails closed before observing the graph. */
+function inertOwnDataGraph(value:unknown,active=new WeakSet<object>(),depth=0):boolean{
+ try{
+  if(value===null||typeof value==='string'||typeof value==='boolean'||typeof value==='number')return true;
+  if((typeof value!=='object'&&typeof value!=='function')||!inertProxyDetector||inertProxyDetector(value))return false;
+  if(typeof value==='function'||depth>30||active.has(value))return false;
+  const proto=Object.getPrototypeOf(value);
+  if(!Array.isArray(value)&&proto!==Object.prototype&&proto!==null)return false;
+  const keys=Reflect.ownKeys(value);
+  if(keys.some(key=>typeof key!=='string'))return false;
+  active.add(value);
+  for(const key of keys as string[]){
+   const field=Object.getOwnPropertyDescriptor(value,key);
+   if(!field||!Object.hasOwn(field,'value')||(!field.enumerable&&!(Array.isArray(value)&&key==='length'))||
+    !inertOwnDataGraph(field.value,active,depth+1)){active.delete(value);return false;}
+  }
+  active.delete(value);return true;
+ }catch{return false;}
+}
 /** Stable own-data financial evidence, without executing accessors or toJSON. */
 export function canonicalFinancialSnapshot(value:unknown):string|null {
  const active=new WeakSet<object>();
@@ -66,7 +100,7 @@ export function canonicalFinancialSnapshot(value:unknown):string|null {
    const parts:string[]=[];for(const key of (keys as string[]).sort()){const d=descriptors.get(key);if(!d||!Object.hasOwn(d,'value')){active.delete(v);return null;}const part=encode(d.value,depth+1);if(part===null){active.delete(v);return null;}parts.push(JSON.stringify(key)+':'+part);}result='{'+parts.join(',')+'}';
   }
   active.delete(v);
-  if(contextKind!==null&&result!==null&&(result.length>1024*1024||customerTaxContractContextState(JSON.parse(result))!==contextKind))return null;
+  if(contextKind!==null&&result!==null&&(result.length>1024*1024||customerTaxContractContextState(parseOwnFinancialJson(result))!==contextKind))return null;
   return result;
  }
  try{const result=encode(value,0);return result!==null&&new TextEncoder().encode(result).length<=1024*1024?result:null;}catch{return null;}
@@ -88,30 +122,51 @@ export type ContractFundingConfiguration={reviewId:string;binding:string;cashLim
 /** Pure reserve calculation. The caller must also enforce commercialMarginReady
  * and actual admission coverage before enabling real sales. */
 export function contractFundingConfiguration(policy:ContractFundingPolicy|null,context:ContractFundingContext,now=new Date()):ContractFundingConfiguration|null {
+ if(!inertProxyDetector||!now||typeof now!=='object'||inertProxyDetector(now))return null;
+ let nowMs:number;
+ try{
+  if(Object.getPrototypeOf(now)!==Date.prototype||Reflect.ownKeys(now).length!==0)return null;
+  nowMs=Date.prototype.getTime.call(now);
+ }catch{return null;}
+ if(!Number.isFinite(nowMs))return null;
+ const observedAt=new Date(nowMs);
  // Scoped TX may fund a contract only when it is bound to this exact policy,
  // the actual admission time and the complete existing liability horizon.
- // Inspect original data first: the canonical clone must not erase presence.
+ // Reject executable wrappers before the first descriptor or ordinary read.
+ if(!context||typeof context!=='object'||!inertOwnDataGraph({policy,context})||Array.isArray(context))return null;
+ const contextKeys=Reflect.ownKeys(context);
+ if(contextKeys.length!==2||!contextKeys.includes('termsSnapshot')||!contextKeys.includes('review'))return null;
+ const sourceReviewField=Object.getOwnPropertyDescriptor(context,'review');
+ if(!sourceReviewField||!Object.hasOwn(sourceReviewField,'value')||!sourceReviewField.enumerable||
+  !sourceReviewField.value||typeof sourceReviewField.value!=='object'||Array.isArray(sourceReviewField.value))return null;
+ const sourceDisputesField=Object.getOwnPropertyDescriptor(sourceReviewField.value,'planPaymentDisputes');
+ if(!sourceDisputesField||!Object.hasOwn(sourceDisputesField,'value')||!sourceDisputesField.enumerable)return null;
+ const disputes=assessPlanPaymentDisputeCosts(sourceDisputesField.value);
+ if(!disputes)return null;
  const taxState=customerTaxContractContextState(context);
- if(taxState==='unknown'||!customerTaxContractContextSupported(context,policy,now))return null;
- // Stabilize both original inputs together. A Proxy can offer one value to
- // the precheck and another to serialization; only the captured pair may
- // decide calculations, financial bindings and the returned liability period.
+ if(taxState==='unknown'||!customerTaxContractContextSupported(context,policy,observedAt))return null;
  const encoded=canonicalFinancialSnapshot({policy,context});
  if(!encoded)return null;
- const captured=JSON.parse(encoded) as {policy:ContractFundingPolicy|null;context:ContractFundingContext};
+ const captured=parseOwnFinancialJson<{policy:ContractFundingPolicy|null;context:ContractFundingContext}>(encoded);
+ if(!captured)return null;
  const p=captured.policy;context=captured.context;
- if(!context||typeof context!=='object'||Array.isArray(context)||customerTaxContractContextState(context)!==taxState||!customerTaxContractContextSupported(context,p,now))return null;
+ if(!context||typeof context!=='object'||Array.isArray(context)||customerTaxContractContextState(context)!==taxState||!customerTaxContractContextSupported(context,p,observedAt))return null;
  const reviewEncoded=canonicalFinancialSnapshot(context.review);
- if(!reviewEncoded||!Number.isFinite(now.getTime())||typeof context.termsSnapshot!=='string'||!context.termsSnapshot)return null;
- const review=JSON.parse(reviewEncoded) as CommercialMarginReview|null;
+ if(!reviewEncoded||typeof context.termsSnapshot!=='string'||!context.termsSnapshot)return null;
+ const review=parseOwnFinancialJson<CommercialMarginReview|null>(reviewEncoded);
  if(!p||!review||p.financialSnapshot!==reviewEncoded||review.priceAndRightsSnapshot!==context.termsSnapshot||typeof p.reviewId!=='string'||!/^[A-Za-z0-9_-]{1,128}$/.test(p.reviewId)||p.allTermCostsAndLiabilitiesBounded!==true||typeof p.coverageEvidence!=='string'||!p.coverageEvidence.trim()||typeof p.reserveEvidence!=='string'||!p.reserveEvidence.trim()||!bounded(p.reservedFundsCents)||!bounded(p.carryForwardReservedCents)||!p.fundedGrants)return null;
- const disputes=assessPlanPaymentDisputeCosts(review.planPaymentDisputes);
- if(!disputes)return null;
+ const boundDisputesField=Object.getOwnPropertyDescriptor(review,'planPaymentDisputes');
+ if(!boundDisputesField||!Object.hasOwn(boundDisputesField,'value')||!boundDisputesField.enumerable)return null;
+ const boundDisputes=assessPlanPaymentDisputeCosts(boundDisputesField.value);
+ if(!boundDisputes||!PLAN_PAYMENT_DISPUTE_KEYS.every(key=>
+  boundDisputes[key].principalCents===disputes[key].principalCents&&
+  boundDisputes[key].feesCents===disputes[key].feesCents&&
+  boundDisputes[key].lostPaymentWorstCaseCents===disputes[key].lostPaymentWorstCaseCents))return null;
  const until=iso(p.admissionsUntil),through=iso(p.liabilitiesThrough);
- if(until===null||through===null||until<now.getTime()||p.reviewedLiabilityTailDays===null)return null;
+ if(until===null||through===null||until<nowMs||p.reviewedLiabilityTailDays===null)return null;
  const monthDays=contractCoverageDays('month',p.reviewedLiabilityTailDays),yearDays=contractCoverageDays('year',p.reviewedLiabilityTailDays);
  if(monthDays===null||yearDays===null)return null;
- const exposure=fundedExposureDetails(review.fundedExposure,now),fixed=review.companyBase;
+ const exposure=fundedExposureDetails(review.fundedExposure,observedAt),fixed=review.companyBase;
  if(!exposure||!fixed||!integer(fixed.monthlyFixedCostsCeilingCents)||!integer(fixed.monthlyFixedTaxesCeilingCents)||!integer(fixed.reviewedPayingCustomers)||fixed.reviewedPayingCustomers<1||review.allocatedFixedCostsVerified!==true||review.prepaidUsageEnforced!==true||!review.scenarios)return null;
  const fixedWithExposure=fixed.monthlyFixedCostsCeilingCents+exposure.budgetCents;
  if(!Number.isSafeInteger(fixedWithExposure))return null;

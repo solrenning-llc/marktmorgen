@@ -51,7 +51,7 @@ async function main(): Promise<void> {
     await saveReview(statsId, { productId, email: `buyer${i}@example.com`, reference: `cs_test_sum${i}0000000000`, pi: `pi_sum${i}`, rating: i === 5 ? 1 : 5, text, name: `Buyer ${i}` }, ROOM);
   }
   let store = (await storeForEmail(OWNER))!;
-  const now = Date.UTC(2026, 10, 4, 12);
+  const now = Date.now() - 2 * 86_400_000;
 
   part("Made from the reviews");
   // The numbers the reviews are sent under, newest first: the model's themes cite the ones that say them.
@@ -101,9 +101,13 @@ async function main(): Promise<void> {
   const third = await addProduct(OWNER, "Glaze Guide", "", "29");
   if (!third.ok) throw new Error("no product");
   const glaze = third.product.id;
+  const glazeAt = Date.now();
   for (const [i, text] of ["Clear steps", "Clear steps, nice photos", "Nice photos", "Clear and short", "Short and clear", "Nice photos again"].entries()) {
-    await saveReview(statsId, { productId: glaze, email: `glaze${i}@example.com`, reference: `cs_test_glz${i}0000000000`, pi: `pi_glz${i}`, rating: 5, text, name: `Glazer ${i}` }, ROOM);
+    // Force the adverse order that equal millisecond timestamps can produce:
+    // the review later rewritten is first, independently of the random ids.
+    await saveReview(statsId, { productId: glaze, email: `glaze${i}@example.com`, reference: `cs_test_glz${i}0000000000`, pi: `pi_glz${i}`, rating: 5, text, name: `Glazer ${i}` }, ROOM, glazeAt + (i === 1 ? 100 : i));
   }
+  is("the review later rewritten is first in the adverse fixture", (await visibleReviews(statsId, glaze, 0, 10))[0].text, "Clear steps, nice photos");
   store = (await storeForEmail(OWNER))!;
   // Days inside the store's paid month (tests/billing-period-fixture.ts: from ten days before today to twenty after).
   const day = Date.now() - 2 * 86_400_000;
@@ -115,7 +119,9 @@ async function main(): Promise<void> {
   is("the next try the same day may be made", next.ok && next.fresh, true);
   is("the lock is let go only by the call that took it", readFileSync("lib/review-ai-summary.ts", "utf8").includes("await releaseLock(held);"), true);
   is("and a summary found under the lock is the answer, not a second AI job", readFileSync("lib/review-ai-summary.ts", "utf8").includes("const now2 = await week(statsId, productId);"), true);
-  const one = (await visibleReviews(statsId, glaze, 0, 10))[0];
+  // This deletion must leave glaze1 in place for the rewrite below. Position
+  // zero can be glaze1 when timestamps tie and random ids break the tie.
+  const one = (await visibleReviews(statsId, glaze, 0, 10)).find((review) => review.text === "Clear steps")!;
   await deleteReview(statsId, glaze, one.id, ROOM);
   is("a review deleted takes the summary that counted it", await readReviewSummary(statsId, glaze), null);
   part("Review of the fixes: a rewritten review, and a review that goes while the model answers");

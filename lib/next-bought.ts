@@ -85,13 +85,15 @@ export function pathsFrom(sales: SaleRow[], now = Date.now()): BuyerPaths {
     }
     firsts.set(who, mine);
   }
-  const starts: Record<string, number> = {};
+  // A product id is read from the sale's metadata, which the creator's own Stripe account can set to anything, even
+  // "__proto__" or "constructor": counted in Maps and handed on as plain records of own keys only (tests/proto-keys.test.ts).
+  const starts = new Map<string, number>();
   const gaps = new Map<string, Map<string, number[]>>();
   for (const mine of firsts.values()) {
     if (mine.size > 200) continue;
     const ordered = [...mine.entries()].sort((a, b) => a[1] - b[1]);
     // The first purchase, and any product in the same visit as it.
-    for (const [id, at] of ordered) if (at - ordered[0][1] <= SAME_VISIT_SECONDS) starts[id] = (starts[id] ?? 0) + 1;
+    for (const [id, at] of ordered) if (at - ordered[0][1] <= SAME_VISIT_SECONDS) starts.set(id, (starts.get(id) ?? 0) + 1);
     for (const [a, atA] of ordered) {
       for (const [b, atB] of ordered) {
         if (a === b || atB - atA <= SAME_VISIT_SECONDS) continue;
@@ -101,16 +103,16 @@ export function pathsFrom(sales: SaleRow[], now = Date.now()): BuyerPaths {
       }
     }
   }
-  const next: Record<string, NextStep[]> = {};
+  const next = new Map<string, NextStep[]>();
   for (const [a, row] of gaps) {
     const kept = [...row.entries()]
       .filter(([, days]) => days.length >= MIN_NEXT)
       .map(([id, days]) => ({ id, buyers: days.length, days: Math.round(median(days)) }))
       .sort((x, y) => y.buyers - x.buyers || x.days - y.days || x.id.localeCompare(y.id))
       .slice(0, NEXT_KEPT);
-    if (kept.length) next[a] = kept;
+    if (kept.length) next.set(a, kept);
   }
-  return { at: now, starts, next };
+  return { at: now, starts: Object.fromEntries(starts), next: Object.fromEntries(next) };
 }
 
 const nextKey = (statsId: string) => `nl:next:${statsId}`;
@@ -120,19 +122,19 @@ export function parsePaths(raw: unknown): BuyerPaths | null {
   if (!raw || typeof raw !== "object") return null;
   const value = raw as { at?: unknown; starts?: unknown; next?: unknown };
   if (typeof value.at !== "number") return null;
-  const starts: Record<string, number> = {};
+  const starts = new Map<string, number>();
   for (const [id, n] of Object.entries(value.starts && typeof value.starts === "object" ? (value.starts as Record<string, unknown>) : {})) {
-    if (typeof n === "number" && Number.isInteger(n) && n > 0) starts[id] = n;
+    if (typeof n === "number" && Number.isInteger(n) && n > 0) starts.set(id, n);
   }
-  const next: Record<string, NextStep[]> = {};
+  const next = new Map<string, NextStep[]>();
   for (const [id, list] of Object.entries(value.next && typeof value.next === "object" ? (value.next as Record<string, unknown>) : {})) {
     if (!Array.isArray(list)) continue;
     const kept = list
       .filter((s): s is NextStep => Boolean(s) && typeof s.id === "string" && Number.isInteger(s.buyers) && s.buyers >= MIN_NEXT && Number.isInteger(s.days) && s.days >= 0)
       .slice(0, NEXT_KEPT);
-    if (kept.length) next[id] = kept;
+    if (kept.length) next.set(id, kept);
   }
-  return { at: value.at, starts, next };
+  return { at: value.at, starts: Object.fromEntries(starts), next: Object.fromEntries(next) };
 }
 
 /** How many bytes what buyers bought next holds as kept, 0 when none, looked up before it is read by a reading that pays for its size (lib/mcp-tools.ts, productsTool); null when it did not come back. */

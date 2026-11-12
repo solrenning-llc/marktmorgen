@@ -136,6 +136,10 @@ async function main(): Promise<void> {
   part("A refund");
   const dropped: string[] = [];
   refunds = [{ id: "re_1", created: Math.floor(Date.now() / 1000), status: "succeeded", payment_intent: "pi_Gift0000001", charge: { refunded: true } }];
+  // The course first, then the purchase (Codex G on #2781; rule 30): a course removal that fails keeps the purchase,
+  // so the next run takes both away again.
+  await revokeRefundedGifts(store, Date.now() + 10_000, async () => { throw new Error("the ledger did not answer"); }).catch(() => 0);
+  is("a course removal that fails keeps the purchase for the next run", (await importedFor(store, "friend@example.com")).length, 1);
   is("a full refund takes it back", await revokeRefundedGifts(store, Date.now() + 10_000, async (email, id) => void dropped.push(`${email}|${id}`)), 1);
   is("from the recipient's purchases", (await importedFor(store, "friend@example.com")).length, 0);
   is("and their course", dropped, [`friend@example.com|${product.id}`]);

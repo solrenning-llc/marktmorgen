@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { LegalPage, LegalSection } from "@/components/legal-page";
 import { TakedownButton } from "@/components/takedown-actions";
-import { openReport, reportedProduct } from "@/lib/takedown";
+import { openReport, reportedProduct, unsentNotices } from "@/lib/takedown";
 import { NewTab } from "@/components/new-tab";
 
 export const metadata: Metadata = { title: "A notice — Marktmorgen", robots: { index: false, follow: false } };
@@ -22,6 +22,20 @@ export default async function TakedownPage({ params }: Params) {
   // The product the address points at, however far down the list, and the first page of the rest.
   const pointed = store ? await reportedProduct(report, store) : null;
   const products = store ? [...(pointed && !pointed.hidden ? [pointed] : []), ...store.catalog.head.filter((p) => !p.hidden && p.id !== pointed?.id)] : [];
+  // Taken down, but the email to the creator did not go out (Claude 6 on #3087): listed whenever the page is opened,
+  // so the notice the law asks for can still be sent after the page that failed was closed.
+  // Content up again stays listed, with a note: the statement of reasons is still owed (EU DSA Art. 17(1)). An owed
+  // list that cannot be read is said, and the rest of the page stays usable (Claude 6 on #3087, LEVE 2).
+  let owed: Awaited<ReturnType<typeof unsentNotices>> = [];
+  let owedUnknown = false;
+  if (store) {
+    try {
+      owed = await unsentNotices(report, store);
+    } catch (error) {
+      console.error("the owed takedown notices could not be read", error);
+      owedUnknown = true;
+    }
+  }
   return (
     <LegalPage title={report.kind === "copyright" ? "Copyright notice" : "Notice of illegal content"} eyebrow={`Notice ${report.id}`} effective={null} legalNav={false} lastUpdated={new Date(report.at).toLocaleString("en-US", { dateStyle: "long", timeStyle: "short", timeZone: "UTC" }) + " UTC"}>
       <LegalSection title="What it says">
@@ -39,6 +53,23 @@ export default async function TakedownPage({ params }: Params) {
               ? `${store.strikes.length} piece${store.strikes.length === 1 ? "" : "s"} of content taken down before, the latest ${new Date(store.strikes[0].at).toLocaleDateString("en-US", { dateStyle: "long" })}: ${store.strikes.slice(0, 3).map((s) => s.what).join("; ")}.`
               : "Nothing taken down from it before."}
           </p>
+          {owedUnknown ? <p>We could not check whether an email to the creator is still owed. Reload this page to check again.</p> : null}
+          {owed.length ? (
+            <>
+              <p className="font-semibold text-black">Taken down, but we could not confirm the creator was told</p>
+              <ul className="space-y-3">
+                {owed.map((o) => (
+                  <li key={JSON.stringify(o.action)} className="flex flex-wrap items-center justify-between gap-3">
+                    <span className="[overflow-wrap:anywhere]">
+                      {o.what}
+                      {o.up ? <span className="block">It is back up now; the email still explains why it was taken down.</span> : null}
+                    </span>
+                    <TakedownButton token={token} action={o.action} label="Send the email to the creator" owed />
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : null}
           {store.links.filter((l) => !l.header).length ? (
             <>
               <p className="font-semibold text-black">Its links</p>

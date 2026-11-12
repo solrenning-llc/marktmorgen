@@ -1,5 +1,6 @@
 "use client";
 
+import { StudioEmptyState } from "@/components/empty-state";
 import { useLeaveGuard } from "@/components/leave-guard";
 import { PIPELINE_ACCESS_REFUSAL } from "@/lib/pipeline-access-rules";
 import { dealActionFilter, filterDeals, type DealActionFilter } from "@/lib/crm-deal-filter";
@@ -144,8 +145,8 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
   // What is wrong in the open editor, tied to each control it is about (3.3.1, 3.3.3): those controls are
   // aria-invalid, point to the words beside the first one, and the first one gets focus.
   const [invalid, setInvalid] = useState<{ ids: string[]; message: string } | null>(null);
-  // The deal whose removal is waiting for "Remove deal" or "Keep deal" (3.3.6): nothing is removed before.
-  const [confirming, setConfirming] = useState<string | null>(null);
+  // The deal whose removal is waiting for "Remove deal" or "Keep deal" (3.3.6), and the stage it was in when asked: nothing is removed before.
+  const [confirming, setConfirming] = useState<{ id: string; stage: string } | null>(null);
   const clearMessages = () => { setError(null); setInvalid(null); setLost(null); setConfirming(null); };
   const openDraft = (deal: Deal, from: string) => { opener.current = from; const base = draftFromDeal(deal, currency); clearMessages(); setDraft({ ...base, base, version: versions[deal.id] ?? "", conflicts: [] }); };
   const dealNameInput = useRef<HTMLInputElement>(null);
@@ -203,6 +204,20 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
   const totals = boardTotals(stages, pipelineDeals);
   const visibleDeals = orderDeals(scopedDeals.filter(d => !visibleIds || visibleIds.has(d.id)), order);
   const columns = boardTotals(stages, visibleDeals);
+  // The question stays open only while its deal is on the board where it was asked: hidden by a search or a filter, the agenda
+  // shown, another pipeline chosen or the deal moved, it closes for good, so it never comes back by itself on the card (3.2.5).
+  // Cleared while rendering, never shown for a frame: focus is not inside it then (it is on the control that hid or moved the deal).
+  // The right to change taken away (a refresh with this pipeline now view only) closes it for good too (Codex review of #2295).
+  const confirmingId = confirming && canChange && view === "board" && visibleDeals.some(d => d.id === confirming.id && d.stage === confirming.stage) ? confirming.id : null;
+  if (confirming && !confirmingId) setConfirming(null);
+  // When the right to change goes while focus is on a control it removes (the question, Remove, Edit), focus would fall to the
+  // page itself: it goes to the notice that says why, never to nothing (2.4.3). Focus the person put elsewhere stays there.
+  const couldChange = useRef(canChange);
+  useLayoutEffect(() => {
+    const lost = couldChange.current && !canChange;
+    couldChange.current = canChange;
+    if (lost && (!document.activeElement || document.activeElement === document.body)) document.getElementById("deal-board-view-only")?.focus();
+  }, [canChange]);
   const selectionChanged = !!search || responsible !== "all" || filter !== "all" || order !== (view === "agenda" ? "due" : "current");
   const open = totals.filter((t) => t.stage.kind === "open");
   const won = totals.filter((t) => t.stage.kind === "won");
@@ -504,7 +519,7 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
           ) : null}
         </div>
         {/* Said once, at the top of the board, for a pipeline this person may only see (639 [GL7](7)); a refused change says why too. */}
-        {!canChange ? <p id="deal-board-view-only" className="notice mt-4">{VIEW_ONLY_WORDS}</p> : null}
+        {!canChange ? <p id="deal-board-view-only" tabIndex={-1} className="notice mt-4">{VIEW_ONLY_WORDS}</p> : null}
 
         <div className="mt-5" role="group" aria-label="Pipelines">
           <div className="flex flex-wrap items-center gap-2">
@@ -651,9 +666,7 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
 
         {/* An empty board says what it is for and how to start (487 [IT4], pattern 5). */}
         {pipelineDeals.length === 0 && draft === null ? (
-          <p className="mt-6 rounded-[var(--r-md)] bg-sand p-4 text-sm text-ink-soft">
-            {canChange ? <>No deals yet. When someone asks about something you sell outside a checkout, press &ldquo;New deal&rdquo; and move it across the stages as the talk goes on.</> : "No deals in this pipeline yet."}
-          </p>
+          <StudioEmptyState title={canChange ? "No deals yet" : "No deals in this pipeline yet"} body={canChange ? "When someone asks about something you sell outside a checkout, press \u201cNew deal\u201d and move it across the stages as the talk goes on." : "Deals show here once someone who can change them adds one."} className="mt-6 rounded-[var(--r-md)] bg-sand p-4" />
         ) : null}
         {view === "agenda" ? <DealAgenda deals={visibleDeals} stages={stages} currency={currency} today={today} disabled={paused} whyId={WHY_ID} onEdit={canChange ? deal => openDraft(deal, `deal-agenda-edit-${deal.id}`) : undefined} /> : (
         <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -715,7 +728,7 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
                           Edit
                         </button>
                         {/* Removing asks first (3.3.6): nothing is removed until "Remove deal" is pressed. */}
-                        <button type="button" id={`deal-remove-${deal.id}`} className="btn btn-secondary btn-sm" {...offProps(paused, WHY_ID)} aria-expanded={confirming === deal.id} aria-controls={confirming === deal.id ? `deal-confirm-${deal.id}` : undefined} onClick={() => { if (paused) return; setError(null); setConfirming(deal.id); moveFocus(`deal-confirm-${deal.id}`); }} aria-label={`Remove ${deal.title}`}>
+                        <button type="button" id={`deal-remove-${deal.id}`} className="btn btn-secondary btn-sm" {...offProps(paused, WHY_ID)} aria-expanded={confirmingId === deal.id} aria-controls={confirmingId === deal.id ? `deal-confirm-${deal.id}` : undefined} onClick={() => { if (paused) return; setError(null); setConfirming({ id: deal.id, stage: deal.stage }); moveFocus(`deal-confirm-${deal.id}`); }} aria-label={`Remove ${deal.title}`}>
                           <Icon name="minus" size={16} />
                         </button>
                           </>
@@ -729,7 +742,7 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
                           </a>
                         ) : null}
                       </div>
-                      {confirming === deal.id && canChange ? (
+                      {confirmingId === deal.id && canChange ? (
                         <div id={`deal-confirm-${deal.id}`} role="group" tabIndex={-1} aria-labelledby={`deal-confirm-${deal.id}-title`} aria-describedby={`deal-confirm-${deal.id}-text`} className="mt-3 rounded-xl bg-sand p-3" onKeyDown={e => { if (e.key === "Escape" && !locked) keepDeal(deal.id); }}>
                           <p id={`deal-confirm-${deal.id}-title`} className="font-semibold text-ink [overflow-wrap:anywhere]">{`Remove “${deal.title}”?`}</p>
                           <p id={`deal-confirm-${deal.id}-text`} className="mt-1 text-ink-soft">This deletes the deal and its note. You cannot get it back.</p>

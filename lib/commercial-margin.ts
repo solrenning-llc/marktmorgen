@@ -136,14 +136,66 @@ export const CURRENT_COMMERCIAL_MARGIN_REVIEW:CommercialMarginReview|null=null;
  * The same bounded canonical representation already binds contract funding.
  * Keep real reviews absent until their evidence is established independently.
  */
+function commercialOwnReviewData(review:unknown):CommercialMarginReview|null{
+ if(!review||typeof review!=='object')return null;
+ try{
+  if(typeof process==='undefined'||typeof process.getBuiltinModule!=='function')return null;
+  const isProxy=process.getBuiltinModule('node:util').types.isProxy;
+  const active=new WeakSet<object>();
+  // Capture the whole original graph before any semantic reader can inspect
+  // it. A Proxy is rejected before reflection, including at nested fields.
+  function capture(value:unknown,depth:number):unknown{
+   if(depth>30)return undefined;
+   if(value===null||typeof value==='string'||typeof value==='boolean')return value;
+   if(typeof value==='number')return Number.isSafeInteger(value)?value:undefined;
+   if(!value||typeof value!=='object'||isProxy(value)||active.has(value))return undefined;
+   const list=Array.isArray(value),prototype=Object.getPrototypeOf(value);
+   if(list?(prototype!==Array.prototype&&prototype!==null):(prototype!==Object.prototype&&prototype!==null))return undefined;
+   const keys=Reflect.ownKeys(value);
+   if(keys.some(key=>typeof key!=='string'))return undefined;
+   active.add(value);
+   try{
+    if(list){
+     const descriptor=Object.getOwnPropertyDescriptor(value,'length');
+     if(!descriptor||!Object.hasOwn(descriptor,'value'))return undefined;
+     const length=descriptor.value;
+     if(typeof length!=='number'||!Number.isSafeInteger(length)||length<0||keys.length!==length+1)return undefined;
+     const copy:unknown[]=[];
+     for(let i=0;i<length;i++){
+      const item=Object.getOwnPropertyDescriptor(value,String(i));
+      if(!item||!Object.hasOwn(item,'value')||!item.enumerable)return undefined;
+      const child=capture(item.value,depth+1);
+      if(child===undefined)return undefined;
+      copy.push(child);
+     }
+     return copy;
+    }
+    const copy:Record<string,unknown>=Object.create(null);
+    for(const key of keys as string[]){
+     const descriptor=Object.getOwnPropertyDescriptor(value,key);
+     if(!descriptor||!Object.hasOwn(descriptor,'value')||!descriptor.enumerable)return undefined;
+     const child=capture(descriptor.value,depth+1);
+     if(child===undefined)return undefined;
+     copy[key]=child;
+    }
+    return copy;
+   }finally{active.delete(value);}
+  }
+  const data=capture(review,0);
+  return data&&typeof data==='object'&&!Array.isArray(data)?data as CommercialMarginReview:null;
+ }catch{return null;}
+}
 function commercialReviewData(review:CommercialMarginReview|null):CommercialMarginReview|null{
- if(!review||typeof review!=="object"||Array.isArray(review))return null;
- const taxState=customerTaxCollectionState(review);
+ const original=commercialOwnReviewData(review);
+ if(!original)return null;
+ const taxState=customerTaxCollectionState(original);
  if(taxState==='unknown')return null;
- const encoded=canonicalFinancialSnapshot(review);
+ const encoded=canonicalFinancialSnapshot(original);
  if(encoded===null)return null;
  const data=JSON.parse(encoded) as CommercialMarginReview;
- return customerTaxCollectionState(data)===taxState?data:null;
+ // Keep the detached null-prototype data for all later checks: parsing the
+ // encoding must not reintroduce inherited assertions into the calculation.
+ return customerTaxCollectionState(data)===taxState?original:null;
 }
 export function commercialMarginReady(review:CommercialMarginReview|null=CURRENT_COMMERCIAL_MARGIN_REVIEW):boolean{
  const data=commercialReviewData(review);
@@ -270,6 +322,47 @@ function profitCents(value:unknown):value is number {
 function safeProfitNumber(value:bigint):number|null {
  return value>BigInt(Number.MAX_SAFE_INTEGER)||value<BigInt(Number.MIN_SAFE_INTEGER)?null:Number(value);
 }
+/** Copy descriptive accounting evidence without traversing executable caller data.
+ * Node's native Proxy check runs before descriptors/prototypes on each container.
+ * No Node module enters the browser bundle: without that native proof this
+ * descriptive report is unknown. Release policy above is independent of it.
+ */
+export function commercialProfitMixData(input:unknown):CommercialProfitMixInput|null {
+ try{
+  if(typeof process==='undefined'||typeof process.getBuiltinModule!=='function')return null;
+  const isProxy=process.getBuiltinModule('node:util').types.isProxy;
+  const ownData=(value:unknown,keys:readonly string[]):Record<string,unknown>|null=>{
+   if(!value||typeof value!=='object'||isProxy(value)||Array.isArray(value))return null;
+   const prototype=Object.getPrototypeOf(value);
+   if(prototype!==null&&prototype!==Object.prototype)return null;
+   const actual=Reflect.ownKeys(value);
+   if(actual.length!==keys.length||!actual.every(key=>typeof key==='string'&&keys.includes(key)))return null;
+   const copy:Record<string,unknown>=Object.create(null);
+   for(const key of keys){
+    const descriptor=Object.getOwnPropertyDescriptor(value,key);
+    if(!descriptor||!Object.hasOwn(descriptor,'value'))return null;
+    copy[key]=descriptor.value;
+   }
+   return copy;
+  };
+  const root=ownData(input,['basis','interval','period','currency','companyFixedCostsCents','sources']);
+  if(!root||(root.basis!=='worst_case'&&root.basis!=='reconciled_actual')||
+   (root.interval!=='month'&&root.interval!=='year')||root.currency!=='USD'||
+   typeof root.period!=='string'||!root.period.trim()||
+   (root.companyFixedCostsCents!==null&&!profitCents(root.companyFixedCostsCents)))return null;
+  const sources=ownData(root.sources,COMMERCIAL_PROFIT_SOURCES);
+  if(!sources)return null;
+  for(const source of COMMERCIAL_PROFIT_SOURCES){
+   if(sources[source]===null)continue;
+   const row=ownData(sources[source],[...profitAmountKeys,'evidence']);
+   if(!row||typeof row.evidence!=='string'||!row.evidence.trim()||
+    !profitAmountKeys.every(key=>row[key]===null||profitCents(row[key])))return null;
+   sources[source]=row;
+  }
+  root.sources=sources;
+  return root as CommercialProfitMixInput;
+ }catch{return null;}
+}
 /** A missing source is unknown, even when sales are closed. Explicit evidenced zero is supported.
  * Negative source profits remain negative; their share may be negative or exceed 100%.
  * Shares are truncated to one basis point and need not sum to exactly 10,000.
@@ -280,9 +373,7 @@ export function commercialProfitMix(input:CommercialProfitMixInput|null):Commerc
   rows:COMMERCIAL_PROFIT_SOURCES.map(source=>({source,netProfitCents:null,shareOfNetProfitBps:null})),
   totalNetProfitCents:null,reason:"unknown",
  };
- const encoded=canonicalFinancialSnapshot(input);
- if(encoded===null)return result;
- const data=JSON.parse(encoded) as CommercialProfitMixInput|null;
+ const data=commercialProfitMixData(input);
  if(!data||Array.isArray(data)||(data.basis!=="worst_case"&&data.basis!=="reconciled_actual")||
   (data.interval!=="month"&&data.interval!=="year")||data.currency!=="USD"||
   typeof data.period!=="string"||!data.period.trim()||
@@ -294,8 +385,9 @@ export function commercialProfitMix(input:CommercialProfitMixInput|null):Commerc
  for(const row of result.rows){
   const amounts=data.sources[row.source];
   if(!amounts||Array.isArray(amounts)||typeof amounts!=="object"||
+   Object.keys(amounts).length!==profitAmountKeys.length+1||!Object.hasOwn(amounts,'evidence')||
    typeof amounts.evidence!=="string"||!amounts.evidence.trim()||
-   !profitAmountKeys.every(key=>profitCents(amounts[key]))){complete=false;continue;}
+   !profitAmountKeys.every(key=>Object.hasOwn(amounts,key)&&profitCents(amounts[key]))){complete=false;continue;}
   const net=BigInt(amounts.revenueCents!)-BigInt(amounts.variableCostsCents!)-
    BigInt(amounts.allocatedFixedCostsCents!)-BigInt(amounts.taxesCents!)-
    BigInt(amounts.refundsCents!)-BigInt(amounts.reservesCents!);

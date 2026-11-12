@@ -1,7 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import { flushSync } from "react-dom";
 import { useRouter } from "next/navigation";
+import { useLeaveGuard } from "@/components/leave-guard";
 import { toast } from "@/components/toast";
 import { PROVIDER_NAMES, type Video, readVideo, videoAddress } from "@/lib/sales-page";
 
@@ -13,11 +15,13 @@ import { PROVIDER_NAMES, type Video, readVideo, videoAddress } from "@/lib/sales
 export function IntroEditor({ intro }: { intro: Video | null }) {
   const router = useRouter();
   const [url, setUrl] = useState(intro ? videoAddress(intro) : "");
+  const [saved, setSaved] = useState(intro ? videoAddress(intro) : "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const video = url.trim() ? readVideo(url) : null;
   const wrong = url.trim() !== "" && !video;
-  const changed = (intro ? videoAddress(intro) : "") !== (video ? videoAddress(video) : url.trim());
+  const changed = saved !== (video ? videoAddress(video) : url.trim());
+  useLeaveGuard(changed);
 
   async function save(next: string) {
     if (saving) return;
@@ -36,6 +40,9 @@ export function IntroEditor({ intro }: { intro: Video | null }) {
           && (saved as Record<string, unknown>).id === expected.id
           && (saved as Record<string, unknown>).hash === expected.hash;
       if (response.ok && data.ok === true && data.error === undefined && matches) {
+        // Committed at once, so useLeaveGuard's cleanup has run before the toast says it was saved: a page that says
+        // "saved" never still asks before leaving.
+        flushSync(() => setSaved(expected ? videoAddress(expected) : ""));
         toast(next ? "Welcome video settings saved." : "Welcome video removed.");
         router.refresh();
         return;

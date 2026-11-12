@@ -22,14 +22,19 @@
  *   nl:verified:cursor      where the last daily pass stopped
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { types } from "node:util";
 import { readFullNumbers } from "@/lib/mcp-tools";
 import { readTitles } from "@/lib/catalog";
 import { type Store, storesAfter } from "@/lib/store";
 import type { StatsData } from "@/lib/stats";
+import { paidFiguresComplete } from "@/lib/paid-coverage";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 
 export type VerifiedWindow = { visitors: number; views: number; checkouts: number; sales: number | null; cents: number | null };
 
 export type Verified = {
+  /** Identifies snapshots whose producer checked paid-reading completeness. */
+  coverageVersion: 1;
   /** The day it was read (UTC), and when. */
   day: string;
   at: number;
@@ -51,7 +56,7 @@ const key = (statsId: string) => `nl:verified:${statsId}`;
 
 /** The record from the studio's own numbers. Pure. */
 export function verifiedFrom(data: StatsData, titles: Map<string, string>, now: number): Verified {
-  const known = data.sales === "ok";
+  const known = paidFiguresComplete(data);
   const window = (w: "d7" | "d30" | "d90"): VerifiedWindow => {
     const t = data.totals[w];
     return { visitors: t.visitors, views: t.views, checkouts: t.checkouts, sales: known ? t.sales : null, cents: known ? t.cents : null };
@@ -59,6 +64,7 @@ export function verifiedFrom(data: StatsData, titles: Map<string, string>, now: 
   const countries = data.salesCountries?.d90 ?? [];
   const withCountry = countries.reduce((sum, c) => sum + c.sales, 0);
   return {
+    coverageVersion: 1,
     day: new Date(now).toISOString().slice(0, 10),
     at: Math.floor(now / 1000),
     currency: data.currency,
@@ -76,11 +82,34 @@ export function verifiedFrom(data: StatsData, titles: Map<string, string>, now: 
   };
 }
 
+function recordWith(value: unknown, fields: readonly string[]): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value) && Object.keys(value).length === fields.length && fields.every(field => Object.hasOwn(value, field)));
+}
+
+function count(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
 function parse(raw: unknown): Verified | null {
   if (typeof raw !== "string") return null;
   try {
-    const value = JSON.parse(raw) as Verified;
-    return value && typeof value.day === "string" && value.windows?.d30 ? value : null;
+    const value: unknown = JSON.parse(raw);
+    // Legacy snapshots could certify a partial purchase reading. They have no
+    // coverage provenance, so leave them unavailable until normal refresh.
+    if (!recordWith(value, ["coverageVersion", "day", "at", "currency", "salesRead", "windows", "channels", "products", "countries"]) || value.coverageVersion !== 1) return null;
+    if (typeof value.day !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value.day) || !count(value.at) || !Number.isSafeInteger(value.at * 1000) || new Date(value.at * 1000).toISOString().slice(0, 10) !== value.day) return null;
+    if (typeof value.currency !== "string" || !/^[a-zA-Z]{3}$/.test(value.currency) || typeof value.salesRead !== "boolean") return null;
+    const money = (v: unknown) => value.salesRead ? count(v) : v === null;
+    if (!recordWith(value.windows, ["d7", "d30", "d90"]) || !Object.values(value.windows).every(w => recordWith(w, ["visitors", "views", "checkouts", "sales", "cents"]) && count(w.visitors) && count(w.views) && count(w.checkouts) && money(w.sales) && money(w.cents))) return null;
+    // These are the existing writer's list ceilings, not a new display limit.
+    if (!Array.isArray(value.channels) || value.channels.length > 8 || !value.channels.every(c => recordWith(c, ["source", "visits", "sales", "cents"]) && typeof c.source === "string" && count(c.visits) && money(c.sales) && money(c.cents))) return null;
+    if (!Array.isArray(value.products) || value.products.length > 8 || !value.products.every(p => recordWith(p, ["title", "sales", "cents"]) && typeof p.title === "string" && count(p.sales) && count(p.cents))) return null;
+    if (!Array.isArray(value.countries) || value.countries.length > 6 || !value.countries.every(c => recordWith(c, ["country", "share"]) && typeof c.country === "string" && typeof c.share === "number" && Number.isFinite(c.share) && c.share >= 0 && c.share <= 1)) return null;
+    if (!value.salesRead && (value.products.length || value.countries.length)) return null;
+    // The writer uses JSON.stringify. A duplicate member must not silently
+    // select which saved count or availability flag is presented as known.
+    if (JSON.stringify(value) !== raw) return null;
+    return value as Verified;
   } catch {
     return null;
   }
@@ -89,8 +118,10 @@ function parse(raw: unknown): Verified | null {
 /** The record kept for a store, or null before the first one. */
 export async function readVerified(store: Pick<Store, "statsId">): Promise<Verified | null> {
   if (!store.statsId || !isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["GET", key(store.statsId)]]);
-  return parse(raw);
+  const reply = await redisPipeline([["GET", key(store.statsId)]]);
+  if (types.isProxy(reply) || !Array.isArray(reply) || reply.length !== 1) return null;
+  const slot = Object.getOwnPropertyDescriptor(reply, "0");
+  return slot && Object.hasOwn(slot, "value") ? parse(slot.value) : null;
 }
 
 /** Reads the numbers again and keeps them: from the daily job, and when the creator first turns one on. */
@@ -101,7 +132,9 @@ export async function refreshVerified(store: Store, now = Date.now()): Promise<V
   if (!data) return null;
   const titles = await readTitles(store).catch(() => new Map<string, string>());
   const record = verifiedFrom(data, titles, now);
-  await redisPipeline([["SET", key(store.statsId), JSON.stringify(record), "EX", KEEP_SECONDS]]);
+  // Kept only when Redis said OK: another reply leaves the record unknown, never counted as kept (CX-123 rule 24).
+  const kept = repliesFor(await redisPipeline([["SET", key(store.statsId), JSON.stringify(record), "EX", KEEP_SECONDS]]), 1);
+  if (kept?.[0] !== "OK") throw new UnknownReplyError("keeping the shared numbers");
   return record;
 }
 
@@ -116,7 +149,11 @@ export function usesVerified(store: Store, nowSeconds = Math.floor(Date.now() / 
 export async function sendVerified(deadline: number): Promise<{ stores: number }> {
   const counts = { stores: 0 };
   if (!isRedisConfigured()) return counts;
-  const [saved] = await redisPipeline([["GET", CURSOR_KEY]]);
+  // Where the last pass stopped: a string, or null before the first pass. Any other reply is unknown and the
+  // pass stops here, so the kept position is not overwritten by one counted from the start (CX-123 rule 24).
+  const read = repliesFor(await redisPipeline([["GET", CURSOR_KEY]]), 1);
+  const saved = read?.[0];
+  if (!read || (saved !== null && typeof saved !== "string")) throw new UnknownReplyError("where the shared numbers' last pass stopped");
   const [savedCursor, savedDone] = typeof saved === "string" ? saved.split("|") : ["0", "0"];
   let cursor = /^\d+$/.test(savedCursor ?? "") ? savedCursor : "0";
   let skip = Number(savedDone) || 0;

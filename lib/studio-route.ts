@@ -38,8 +38,9 @@ import { lockedOut, lockedUntil } from "@/lib/two-step";
 import { type Store, STORE_ID_PATTERN, accountStores, ensureStoreId, storeForEmail, storeForId, storeRef } from "@/lib/store";
 import { type Permission, type Role, PERMISSION_WORDS, can } from "@/lib/team-roles";
 import { logTeam, memberStores, roleIn, teamTwoStepBlocks } from "@/lib/team";
-import { withinEssentialLimit } from "@/lib/request-guard";
-import { takeAllowance } from "@/lib/store-allowance";
+import { UnknownReplyError } from "@/lib/redis-reply";
+import { essentialLimitState, essentialTakeBelow, type LimitState } from "@/lib/request-guard";
+import { forceAllowance, giveAllowance, takeAllowance } from "@/lib/store-allowance";
 import { refreshPeriod } from "@/lib/billing-sync";
 import { ESSENTIAL_NEEDS, ESSENTIAL_PER_DAY, STUDIO_PAGE_UNITS } from "@/lib/studio-allowance-rules";
 
@@ -135,7 +136,13 @@ export async function resolveAccess(
     if (!access) return { ok: false, reason: "gone" };
   } else {
     const remembered = wanted.remembered ?? "";
-    if (STORE_ID_PATTERN.test(remembered)) access = await pick(remembered);
+    // Only a preference: a remembered store whose team answers in an unknown shape is "not this one" (rule 24:
+    // no role is granted on it), and the person's own store is used, never a studio closed by another store's record.
+    if (STORE_ID_PATTERN.test(remembered))
+      access = await pick(remembered).catch((error: unknown) => {
+        if (error instanceof UnknownReplyError) return null;
+        throw error;
+      });
     if (!access) {
       const own = await storeForEmail(email);
       if (own) access = { email, store: own, ref: storeRef(own), role: "owner" };
@@ -218,13 +225,33 @@ export async function studioAccess(
 }
 
 /**
+ * Takes one of the store's ESSENTIAL_PER_DAY requests of the day: the small
+ * daily figure what the owner needs to leave or pay is counted on (countStudio
+ * below, and the plan's invoices, lib/plan-invoices.ts), with its three
+ * answers. One key for all of them, so none can drift onto another counter.
+ */
+export function takeEssential(store: Pick<Store, "sid" | "handle">): Promise<LimitState> {
+  return essentialLimitState("studio-essential", store.sid || store.handle, ESSENTIAL_PER_DAY, 86_400);
+}
+
+/**
+ * One of the same requests for a use that is not leaving or paying, taken
+ * only while fewer than `below` of them were taken in the window (one
+ * script on the same key, lib/request-guard.ts essentialTakeBelow), so the
+ * rest always stays for what the owner needs to leave or pay.
+ */
+export function takeEssentialBelow(store: Pick<Store, "sid" | "handle">, below: number): Promise<LimitState> {
+  return essentialTakeBelow("studio-essential", store.sid || store.handle, Math.min(below, ESSENTIAL_PER_DAY), 86_400);
+}
+
+/**
  * One studio request for a store, taken from its window: `units` of them for
  * a page drawn. What the owner needs to leave or pay is taken from a small
  * daily figure instead, so it is never shut out by the month's.
  */
 export async function countStudio(store: Store, need: Need | null, units = 1): Promise<{ ok: true; store?: Store } | { ok: false; reason: "used" | "unknown" | "pool" | "daily"; message: string; left?: number; reset?: string }> {
   if (need && ESSENTIAL_NEEDS.includes(need)) {
-    return (await withinEssentialLimit("studio-essential", store.sid || store.handle, ESSENTIAL_PER_DAY, 86_400))
+    return (await takeEssential(store)) === "within"
       ? { ok: true }
       : { ok: false, reason: "daily", message: "Too many of these today. Try again tomorrow, or write to support." };
   }
@@ -233,6 +260,32 @@ export async function countStudio(store: Store, need: Need | null, units = 1): P
   const taken = await takeAllowance(current, "studio", units);
   if (!taken.ok) return { ok: false, reason: taken.reason, message: taken.message, left: taken.left, reset: taken.reset };
   return current === store ? { ok: true } : { ok: true, store: current };
+}
+
+/**
+ * Takes `units` of the store's studio requests before a reading whose size is known only once it is read, at that
+ * reading's worst; `give(n)` then gives back, in the same window (the same moment's), what the reading did not need,
+ * and `force(n)` counts what it read beyond them (forceAllowance).
+ * The caller gives back only down to the measured size, never below; a measure it cannot trust gives nothing back.
+ */
+export async function holdStudio(
+  store: Store,
+  units: number,
+): Promise<{ ok: true; give: (n: number) => Promise<void>; force: (n: number) => Promise<void> } | { ok: false; message: string }> {
+  const now = Date.now();
+  const current = await refreshPeriod(store);
+  const taken = await takeAllowance(current, "studio", units, now);
+  if (!taken.ok) return { ok: false, message: taken.message };
+  return {
+    ok: true,
+    give: async (n) => {
+      if (Number.isSafeInteger(n) && n > 0 && n <= units) await giveAllowance(current, "studio", n, now);
+    },
+    // What a reading moved beyond what was taken for it, counted past the figure if it must: never refused after it.
+    force: async (n) => {
+      if (Number.isSafeInteger(n) && n > 0) await forceAllowance(current, "studio", n, now);
+    },
+  };
 }
 
 /** The sentence a refused request is answered with, for a route that answers in JSON. */

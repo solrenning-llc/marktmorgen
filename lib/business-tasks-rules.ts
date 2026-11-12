@@ -66,7 +66,16 @@ export function readBusinessTaskInput(raw: { title?: unknown; due?: unknown }): 
   return { ok: true, value: { title, due: due as string } };
 }
 
-const seconds = (n: unknown): number | null => (n === undefined ? 0 : typeof n === "number" && Number.isSafeInteger(n) && n >= 0 ? n : null);
+/** The latest second a Date can hold (+275760-09-13): a later time would make the data copy throw (#3560 review, LOW). */
+export const MAX_TASK_SECONDS = 8_640_000_000_000;
+
+const seconds = (n: unknown): number | null => (n === undefined ? 0 : typeof n === "number" && Number.isSafeInteger(n) && n >= 0 && n <= MAX_TASK_SECONDS ? n : null);
+
+/** The time a change is written with: whole seconds, or 0 (not known) for a clock that is not one a date can hold. */
+const stamp = (nowSeconds: number): number => {
+  const s = Math.floor(nowSeconds);
+  return Number.isSafeInteger(s) && s >= 0 && s <= MAX_TASK_SECONDS ? s : 0;
+};
 
 /**
  * The list as kept, read exactly: an array of tasks, each in its shape, each id once, at most MAX_BUSINESS_TASKS.
@@ -99,7 +108,7 @@ export type BusinessTaskResult = { ok: true; tasks: BusinessTask[] } | { ok: fal
 export function addBusinessTask(tasks: readonly BusinessTask[], input: BusinessTaskInput, id: string, nowSeconds: number): BusinessTaskResult {
   if (tasks.length >= MAX_BUSINESS_TASKS) return { ok: false, error: "full" };
   if (!BUSINESS_TASK_ID.test(id) || tasks.some((t) => t.id === id)) return { ok: false, error: "unknown" };
-  return { ok: true, tasks: [...tasks, { id, title: input.title, due: input.due, done: false, createdAt: Math.max(0, Math.floor(nowSeconds)), doneAt: 0 }] };
+  return { ok: true, tasks: [...tasks, { id, title: input.title, due: input.due, done: false, createdAt: stamp(nowSeconds), doneAt: 0 }] };
 }
 
 /** The list with one task's words and date changed; whether it is done stays as it is. */
@@ -111,7 +120,7 @@ export function editBusinessTask(tasks: readonly BusinessTask[], id: string, inp
 /** The list with one task marked done (now) or open again. */
 export function markBusinessTask(tasks: readonly BusinessTask[], id: string, done: boolean, nowSeconds: number): BusinessTaskResult {
   if (!tasks.some((t) => t.id === id)) return { ok: false, error: "unknown" };
-  return { ok: true, tasks: tasks.map((t) => (t.id === id ? { ...t, done, doneAt: done ? Math.max(0, Math.floor(nowSeconds)) : 0 } : t)) };
+  return { ok: true, tasks: tasks.map((t) => (t.id === id ? { ...t, done, doneAt: done ? stamp(nowSeconds) : 0 } : t)) };
 }
 
 /** The list without one task; a task already gone is said so, never taken for done. */

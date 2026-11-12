@@ -15,6 +15,7 @@
  * host there is no check to answer it (lib/bot-check.ts).
  */
 import { initBotId } from "botid/client/core";
+import { QUIET_INPUTS } from "@/lib/quiet-moment";
 
 /** Every request the check signs: asking for a sign-in link, and a store's counts. */
 export const BROWSER_CHECK_ROUTES = [
@@ -47,6 +48,22 @@ export function startBrowserCheck(init: Init = initBotId as unknown as Init): ty
 /** How long after the page's load event the challenge waits for an idle moment, at most. */
 export const WARM_IDLE_TIMEOUT_MS = 1_000;
 
+/** The host's challenge script, at the path botid/client/core loads it from. */
+export const CHALLENGE_SCRIPT = "/149e9513-01fa-4fb0-aad4-566afd725d1b/2d206a39-8ed7-437e-a3be-862e0f06eea3/a-4-a/c.js";
+
+/**
+ * The address botid/client/core asks for its script on its first load: the path with i=0 (its first try), v=3 (its
+ * protocol) and h=<host>. A preload is used only by a request for the very same address; one that differs is fetched
+ * again (the check still works, as before, only without the head start). tests/browser-check-preload.test.ts holds this
+ * against the installed botid.
+ */
+export function challengeScriptUrl(host: string): string {
+  return `${CHALLENGE_SCRIPT}?i=0&v=3&h=${encodeURIComponent(host)}`;
+}
+
+/** How long after a press, tap or key the challenge's script waits before it runs, so the tap paints first. */
+export const QUIET_TAP_MS = 300;
+
 let warming = false;
 
 /**
@@ -64,14 +81,50 @@ let warming = false;
 export function warmBrowserCheckWhenIdle(win: Window & typeof globalThis = window): void {
   if (warming || typeof win === "undefined" || process.env.NODE_ENV !== "production") return;
   warming = true;
+  const doc = win.document;
+  // The script is fetched at once, by the network only: a preload runs nothing (v2, #3642 option 1). Then the
+  // challenge is started, and the script runs, only at a moment the buyer is not tapping: not within QUIET_TAP_MS of
+  // a press, tap or key, and not while the browser has input waiting. Fetched ahead, the script then runs at once, at
+  // the moment chosen here, and not whenever it happens to arrive from the network.
+  let lastInput = -Infinity;
+  const mark = () => {
+    lastInput = win.performance.now();
+  };
+  for (const type of QUIET_INPUTS) win.addEventListener(type, mark, { capture: true, passive: true });
+  const fetched = new Promise<void>((done) => {
+    const link = doc.createElement("link");
+    link.rel = "preload";
+    link.as = "script";
+    link.href = challengeScriptUrl(win.location.host);
+    link.onload = link.onerror = () => done();
+    doc.head.appendChild(link);
+  });
+  const scheduling = (win.navigator as Navigator & { scheduling?: { isInputPending?: () => boolean } }).scheduling;
+  let started = false;
   const warm = () => {
+    if (started) return;
+    started = true;
+    for (const type of QUIET_INPUTS) win.removeEventListener(type, mark, true);
     if (!startBrowserCheck()) return;
     win.fetch(BROWSER_CHECK_ROUTES[1].path, { method: "POST", signal: AbortSignal.abort(), keepalive: true }).catch(() => {});
   };
-  const whenIdle = () => {
-    if (typeof win.requestIdleCallback === "function") win.requestIdleCallback(warm, { timeout: WARM_IDLE_TIMEOUT_MS });
-    else win.setTimeout(warm, 0);
+  const whenQuiet = () => {
+    if (started) return;
+    // Leaving the page: nobody is tapping, and the count needs the challenge now.
+    if (doc.visibilityState === "hidden") return warm();
+    const since = win.performance.now() - lastInput;
+    if (since < QUIET_TAP_MS || scheduling?.isInputPending?.() === true) {
+      win.setTimeout(whenIdle, Math.max(16, QUIET_TAP_MS - since));
+      return;
+    }
+    warm();
   };
-  if (win.document.readyState === "complete") whenIdle();
-  else win.addEventListener("load", whenIdle, { once: true });
+  const whenIdle = () => {
+    if (typeof win.requestIdleCallback === "function") win.requestIdleCallback(whenQuiet, { timeout: WARM_IDLE_TIMEOUT_MS });
+    else win.setTimeout(whenQuiet, 0);
+  };
+  // A page being left starts it at once, fetched or not.
+  doc.addEventListener("visibilitychange", () => doc.visibilityState === "hidden" && warm(), { once: true });
+  const loaded = new Promise<void>((done) => (doc.readyState === "complete" ? done() : win.addEventListener("load", () => done(), { once: true })));
+  void Promise.all([loaded, fetched]).then(whenIdle);
 }

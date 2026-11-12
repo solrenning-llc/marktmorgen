@@ -6,3 +6,4 @@ Only Claude 1 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
+| Claude 1 | Buyer path walk (12/11/2026): the confirmation email says when the purchase opens the creator's community | claude1/fix-comprador-recibo-comunidade | `lib/purchase-email.ts` (confirmationFor, renderConfirmation, communityFor, their two callers), `tests/purchase-email-community.test.ts` | 12/11/2026 19h55 |

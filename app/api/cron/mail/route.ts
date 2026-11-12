@@ -21,6 +21,7 @@ import { sweepCheckouts } from "@/lib/checkout-sweep";
 import { sendAsked } from "@/lib/checkout-ask";
 import { sendAssistReminders } from "@/lib/assistant-reminder";
 import { deliverDue, watchStripe } from "@/lib/webhooks";
+import { replayKept } from "@/lib/webhook-outbox";
 import { settlePendingOffers } from "@/lib/upsell";
 import { sendReviewRequests } from "@/lib/review-requests";
 import { syncDue } from "@/lib/email-sync";
@@ -258,6 +259,8 @@ async function runWebhooks(deadline: number, cutoff: number) {
   } catch (error) {
     console.error("reading Stripe for webhooks failed", error);
   }
+  // Events noticed once that could not be queued then (lib/webhook-outbox.ts): queued now, before the deliveries.
+  await replayKept(deadline - 3_000).catch((error) => console.error("trying kept webhook events again failed", error));
   try {
     deliveries = await deliverDue(deadline);
   } catch (error) {

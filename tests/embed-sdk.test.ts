@@ -351,7 +351,8 @@ async function main(): Promise<void> {
 
   part("Webhooks");
   is("list.joined is an event", (WEBHOOK_EVENTS as readonly string[]).includes("list.joined"), true);
-  is("and is sent when an address is confirmed", /emitEvent\(store, "list\.joined"/.test(read("app/api/store/join/confirm/route.ts")), true);
+  // Through emitOrKeep, which keeps it to be tried again when it cannot be queued at once (lib/webhook-outbox.ts, #4275).
+  is("and is sent when an address is confirmed", /emitOrKeep\(store, "list\.joined"/.test(read("app/api/store/join/confirm/route.ts")), true);
   is("the studio lists it", /key: "list\.joined"/.test(read("components/webhook-editor.tsx")), true);
   is(
     "sale.completed says where the sale came from",

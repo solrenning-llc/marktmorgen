@@ -54,6 +54,16 @@ const OWN_USE = new RegExp(String.raw`^(?:what\s+(?:do|did|would|will)\s+you\s+u
 const NAMED_SECRET = new RegExp(String.raw`\b(?:a|an|the|your|my)\s+(?:${NOT_TOPIC}${WORD}\s+){0,3}${SECRET}\b`, "iu");
 // "What is it?" after a sentence naming the visitor's own secret ("Do you remember your password? If so, what is it?").
 const WHAT_IS_IT = /^(?:(?:and|so|then)\s+)?what(?:'s|\s+is|\s+are)\s+(?:it|they|that)$/i;
+// "Tell us what it is" after a sentence naming a secret (Codex L, #3668 @0b7bad2f5d).
+const TELL_WHAT_IT_IS = /\b(?:tell|let)\s+(?:us|me)\s+(?:know\s+)?what\s+(?:it|they|that)\s+(?:is|are)\b/i;
+// Typographic apostrophes (U+2018, U+2019, U+02BC, U+2032, U+FF07, a backtick or an acute accent) read as "'", so
+// "What’s your Instagram password?" is the same question as "What's your Instagram password?" (Codex L, #3668).
+const APOSTROPHES = /[\u2018\u2019\u02BC\u2032\uFF07`\u00B4]/g;
+// An email or login and the secret joined by "and"/"plus"/"then" in one field name, however far apart
+// ("Login email for the shop and its password"); "Email address and what you think about passwords" names a topic.
+const CREDENTIAL = String.raw`(?:e-?mail|user\s*name|username|login)`;
+const JOINED = String.raw`(?:and|plus|then|also|with)`;
+const CREDENTIAL_JOINED = new RegExp(String.raw`\b${CREDENTIAL}\b(?:\s+${WORD}){0,8}?\s+${JOINED}\b(?:\s+${NOT_TOPIC}${WORD}){0,4}?\s+${SECRET}\b|\b${SECRET}\b(?:\s+${WORD}){0,8}?\s+${JOINED}\b(?:\s+${NOT_TOPIC}${WORD}){0,4}?\s+${CREDENTIAL}\b`, "iu");
 
 function asksForPassword(label: string): boolean {
   // This is only a classification copy; the creator's label is never rewritten.
@@ -73,6 +83,9 @@ function asksForPassword(label: string): boolean {
   // themselves questions ("Do you write them down?") ask about the secret, not for it.
   const clauses = request.split(/[?!.:;,\n]+/).map((part) => part.trim()).filter(Boolean);
   if (NAMED_SECRET.test(request) && clauses.some((clause) => WHAT_IS_IT.test(clause))) return true;
+  // A secret named with "a"/"an"/"the" and then handed over as "it" ("Do you have a Netflix password? Send it to us"):
+  // the same as with "your" (Codex L, #3668 @0b7bad2f5d). A question clause ("Do you write them down?") is not a request.
+  if (NAMED_SECRET.test(request) && clauses.some((clause) => !ABOUT_QUESTION.test(clause) && (REQUEST_IT.test(clause) || TELL_WHAT_IT_IS.test(clause)))) return true;
   if (OWN_SECRET.test(request) && clauses.some((clause) => !ABOUT_QUESTION.test(clause) && (REQUEST_VERB.test(clause) || REQUEST_IT.test(clause)))) return true;
 
   // Punctuation is a separator in ordinary credential labels ("Email, password"
@@ -82,7 +95,7 @@ function asksForPassword(label: string): boolean {
   // to disclose a secret. Explicit questions for the actual password matched above.
   const topicQuestion = TOPIC_QUESTION.test(normalized);
   const credentialPair = /\b(?:e-?mail|user\s*name|username|login)\b(?:\s+[\p{L}\p{N}'’\-]+){0,3}\s+pass(?:word|code|phrase)s?\b|\bpass(?:word|code|phrase)s?\b(?:\s+[\p{L}\p{N}'’\-]+){0,3}\s+\b(?:e-?mail|user\s*name|username|login)\b/iu.test(normalized);
-  if (credentialPair && !topicQuestion) return true;
+  if ((credentialPair || CREDENTIAL_JOINED.test(normalized)) && !topicQuestion) return true;
 
   // A short field name may name a service, or use "email and password" with
   // a courtesy suffix or a reason ("Instagram password so we can post for you"). Narrow exceptions below keep
@@ -107,7 +120,8 @@ export const SENSITIVE_WHY: Readonly<Record<SensitiveKind, string>> = {
  * asked to type something (631 [AA1] (d): code the AI generates, lib/generated-code-check.ts).
  */
 export function sensitiveKindOf(text: string): SensitiveKind | null {
-  const label = text.trim();
+  // Only a classification copy: the creator's words are never rewritten.
+  const label = text.trim().replace(APOSTROPHES, "'");
   if (asksForPassword(label)) return "password";
   for (const [what, rule] of RULES) if (rule.test(label)) return what;
   return null;

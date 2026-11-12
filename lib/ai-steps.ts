@@ -43,9 +43,11 @@ export const AI_STOP_KEEP_SECONDS = 300;
  * Database commands a stepped page adds at the most, priced in the ai line
  * of tests/plan-cost-registry.ts for every writing job of the month: the
  * stop's mark read once between the two steps, written once by a stop, and
- * the jobs of the step not run given back once.
+ * the jobs of the step not run given back once, and the run's own live mark
+ * written once as it starts (a stop is written only over it: cloud I on
+ * #3435, MEDIUM 1).
  */
-export const AI_STOP_COMMANDS = 3;
+export const AI_STOP_COMMANDS = 4;
 
 /**
  * The first line of a stepped answer: some browsers hold a reply until its

@@ -26,7 +26,7 @@ function main(): void {
   is("named in plain words", two.map((s) => s.label), [`Reading the first ${READ_PDF_PAGES} pages of your PDF`, "Writing your page"]);
   is("without it: writing only", pageSteps(false).map((s) => s.id), ["write"]);
   is("a run id is 16 to 40 plain characters", [AI_RUN_ID.test("a".repeat(16)), AI_RUN_ID.test("a".repeat(15)), AI_RUN_ID.test("a".repeat(41)), AI_RUN_ID.test("aaaaaaaa aaaaaaaa")], [true, false, false, false]);
-  is("the figures the cost line reads are whole and positive", [AI_STOP_COMMANDS, AI_STEP_EXTRA_BYTES > AI_STEP_PADDING_BYTES, AI_STEP_PADDING_BYTES >= 1024], [3, true, true]);
+  is("the figures the cost line reads are whole and positive", [AI_STOP_COMMANDS, AI_STEP_EXTRA_BYTES > AI_STEP_PADDING_BYTES, AI_STEP_PADDING_BYTES >= 1024], [4, true, true]);
 
   part("Lines from the server are read in their exact shape");
   is("a step", readStepLine('{"step":"read","state":"started"}'), { step: "read", state: "started" });

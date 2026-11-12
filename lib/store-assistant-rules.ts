@@ -51,6 +51,7 @@ import { AI_CALL_INFRA_MICRO_USD, ANTHROPIC_RATES, PROVIDER_CHARGES_BPS, UPSTASH
 import { assessCustomerWorstCase, MINIMUM_NET_PROFIT_CENTS, type CustomerWorstCase } from "@/lib/net-margin-rules";
 import { captureCustomerTaxInput, customerTaxCeiling, type CustomerTaxInput } from "@/lib/customer-tax-review";
 import { MAX_STORED_PAGE_BYTES } from "@/lib/sales-page";
+import { MAX_ASSISTANT_QUESTION, MIN_ASSISTANT_QUESTION } from "@/lib/assistant-question-length";
 import { CONFUSABLE_LATIN_SOURCES, LOOKALIKES_BEFORE_GATE_RANGE } from "@/lib/confusables-latin";
 import { PAGE_GOES_ON } from "@/lib/answers-rules";
 import { DISPUTE_COUNTER_FEE_CENTS, DISPUTE_FEE_CENTS, DISPUTE_RESERVE_BPS, MOST_CORRECT_READING, PROVIDER_FEES, REFUND_RESERVE_BPS, REMITTANCE_BPS, STRIPE_TOTAL_BPS, chargedOf, providerFeeCents, receivingOf } from "@/lib/receiving-costs";
@@ -117,8 +118,8 @@ export const ASSISTANT_OUTPUT_TOKENS = 320;
 export const ASSISTANT_PRODUCTS = 40;
 export const ASSISTANT_PAGES = 6;
 
-export const MIN_ASSISTANT_QUESTION = 2;
-export const MAX_ASSISTANT_QUESTION = 400;
+/* The question's length lives in lib/assistant-question-length.ts, so the buyer's chat reads it without this file. */
+export { MAX_ASSISTANT_QUESTION, MIN_ASSISTANT_QUESTION };
 /** The longest reply shown. */
 export const MAX_ASSISTANT_REPLY = 900;
 /** The creator's own notes for the assistant: who to write to, what is true of every product. */

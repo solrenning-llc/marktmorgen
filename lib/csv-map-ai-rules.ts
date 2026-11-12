@@ -12,8 +12,9 @@
  *
  *   - Only the names in the file's first row reach the model, never a cell
  *     of any row below it, and only when that row is clearly a header
- *     (clearHeader): every name it holds reads as a column's label, with a
- *     word columns are named by or written as an identifier. A file with no
+ *     (clearHeader): every name it holds reads as a column's label, made
+ *     only of words columns are named by (an identifier is split into its
+ *     words first, so "Anne-Marie" or "jane_doe" is not one). A file with no
  *     header has a person, an order or a product in its first row; if any of
  *     its cells looks like data (a name, a city, a number, a date, an amount,
  *     an email or web address, a yes or a no) or is not plainly a label,
@@ -131,15 +132,16 @@ const words = (name: string) =>
     .filter(Boolean);
 
 /**
- * Whether one header name reads plainly as a column's label: not data, and an identifier, or words that are every one
- * a label word or a joining word, with at least one label word. One label word among others ("Grace Price") is not
- * enough: a person's name or a title is data, and is never sent.
+ * Whether one header name reads plainly as a column's label: not data, and words that are every one a label word or a
+ * joining word, with at least one label word. One label word among others ("Grace Price") is not enough: a person's
+ * name or a title is data, and is never sent. An identifier is read the same way, split at "_", "-" and capitals
+ * ("first_name", "optIn" pass), so its form alone never makes a label of a hyphenated name ("Anne-Marie") or a
+ * username ("jane_doe").
  */
 export function labelLike(name: string): boolean {
   const clean = name.trim();
   if (!clean) return true;
   if (looksLikeData(clean)) return false;
-  if (/^[a-z][a-z0-9]*([_-][a-z0-9]+)+$/i.test(clean) || /^[a-z]+([A-Z][a-z0-9]*)+$/.test(clean)) return true;
   const all = words(clean);
   return all.some((w) => LABEL_WORDS.has(w)) && all.every((w) => LABEL_WORDS.has(w) || JOINING_WORDS.has(w));
 }

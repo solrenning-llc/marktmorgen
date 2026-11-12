@@ -233,6 +233,14 @@ export class MemoryRedis {
           this.run(["ZADD", all, at, member]);
           return 1;
         }
+        // lib/calendar-sync.ts WRITE_CALENDAR_CONFIG_IF: a store's calendar settings written only over the text they were read as ("" for none).
+        if (key.startsWith("-- marktmorgen:calendar-config-write-if:v1\n") && args[0] === "1" && args.length === 4) {
+          const [, settings, expected, text] = args;
+          const now = this.run(["GET", settings]);
+          if ((typeof now === "string" ? now : "") !== expected) return 0;
+          this.run(["SET", settings, text]);
+          return 1;
+        }
         // lib/product-about.ts WRITE_ABOUT_IF: the description written only over the one it was read as.
         if (key.startsWith("-- marktmorgen:about-write-if:v1\n") && args[0] === "1" && args.length === 4) {
           const [, about, expected, text] = args;

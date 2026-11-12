@@ -56,16 +56,26 @@ export async function readForm(statsId: string | null, id: string): Promise<Form
  * a shorter definition that exports or edits would then certify.
  */
 function confirmedForm(raw: unknown, what: string): FormDef {
-  if (typeof raw === "string") {
-    try {
-      const value: unknown = JSON.parse(raw);
-      const form = parseForm(value);
-      if (form && complete(value as Record<string, unknown>, form)) return form;
-    } catch {
-      // The record is unavailable, rather than absent.
-    }
-  }
+  const form = storedFormRecord(raw);
+  if (form) return form;
   throw new UnknownReply(what);
+}
+
+/**
+ * The form a stored record holds, only when parsing keeps all of it; null for
+ * anything else (unreadable, not a form, or one parseForm would shorten).
+ * Every reader of nl:forms: uses this, so a record is unknown everywhere or nowhere.
+ */
+export function storedFormRecord(raw: unknown): FormDef | null {
+  if (typeof raw !== "string") return null;
+  try {
+    const value: unknown = JSON.parse(raw);
+    const form = parseForm(value);
+    return form && complete(value as Record<string, unknown>, form) ? form : null;
+  } catch {
+    // The record is unavailable, rather than absent.
+    return null;
+  }
 }
 
 /** Whether parsing kept every question, choice, result and category the stored record has. */

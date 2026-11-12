@@ -38,7 +38,8 @@
  * from reason "fraudulent", refuses its next charge).
  *
  * Only `actionable` warnings are refunded, so a charge already disputed or
- * fully refunded is never refunded twice; the refund carries an idempotency
+ * fully refunded is never refunded twice (its subscription is still ended);
+ * the refund carries an idempotency
  * key per warning, and what each warning came to is remembered (SEEN_KEY,
  * written before the refund is asked for, so a refund made at Stripe whose
  * answer is lost still ends its subscription on a later run),
@@ -60,6 +61,7 @@
  * rules, exactly as for any other plan that stops being paid.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { BillingError, isAddOn, isBillingConfigured, onPlatform, onPlatformAt } from "@/lib/billing";
 import { type StripePage, readStripePage } from "@/lib/stripe-list";
 
@@ -116,9 +118,19 @@ const count = (value: unknown): number | null => (Number.isSafeInteger(value) &&
 /** The idempotency key of the refund of one warning's payment: the same warning never refunds twice. */
 export const refundKeyOf = (warningId: string): string => `efw-refund:${warningId}`;
 
+/**
+ * Writes what a warning came to, and throws unless both replies read exactly (review of #4168, second round): the
+ * `act:` mark must be known to be written before a refund is asked for, or a lost refund answer would leave nothing
+ * that brings the next run back to the subscription.
+ */
 async function remember(id: string, what: string): Promise<void> {
-  await redisPipeline([["HSET", SEEN_KEY, id, what], ["EXPIRE", SEEN_KEY, SEEN_SECONDS]]);
+  const replies = repliesFor(await redisPipeline([["HSET", SEEN_KEY, id, what], ["EXPIRE", SEEN_KEY, SEEN_SECONDS]]), 2);
+  const added = replies ? countOf(replies[0]) : null;
+  if (!replies || added === null || added > 1 || replies[1] !== 1) throw new Error("what was decided about an early fraud warning was not confirmed as written");
 }
+
+/** At most this many old decided fields are dropped a run (see syncPlanFraudWarnings). */
+export const MAX_PRUNE = 500;
 
 /** Whether the subscription is one of ours: a store's plan or an add-on. */
 function ours(subscription: Record<string, unknown>): boolean {
@@ -220,11 +232,9 @@ async function applyWarning(
   if (known === "final" || known === "unmatched") return "skipped";
   // Already decided: refund what may still be left and end the subscription, whatever the warning says now.
   if (known?.startsWith("act:")) return settle(id, warning, known.slice(4), budget, deadline);
-  // Disputed or fully refunded before we ever acted: nothing to do, and never a second refund.
-  if (warning.actionable !== true) {
-    await remember(id, "final");
-    return "skipped";
-  }
+  // A warning first seen when it is no longer actionable (disputed, or fully refunded, before we acted) goes the same
+  // way: settle refunds only an actionable warning, so nothing is refunded, but the subscription that charged the card
+  // the issuer called stolen still ends (review of #4168, second round, MEDIUM): otherwise the next renewal charges it again.
   const charge = chargeOf(warning);
   // A charge not expanded or not readable: not acted on, read again next run.
   if (!charge) throw new Error("the warning's charge could not be read");
@@ -258,10 +268,17 @@ export async function syncPlanFraudWarnings(
   const counts: FraudWarningCounts = { seen: 0, refunded: 0, ended: 0, unmatched: 0, skipped: 0, failed: 0, complete: false };
   if (!on) return { ...counts, off: true };
   if (!isRedisConfigured() || !isBillingConfigured()) return counts;
-  const [raw] = await redisPipeline([["HGETALL", SEEN_KEY]]);
+  // Read exactly (rule 24; review of #4168, second round, HIGH): a reply that is not an even list of strings is not
+  // "nothing decided yet", which would let a decided warning be taken afresh; the run stops before acting on any.
+  const read = repliesFor(await redisPipeline([["HGETALL", SEEN_KEY]]), 1);
+  const pairs = read ? stringList(read[0]) : null;
+  if (!pairs || pairs.length % 2 !== 0) {
+    counts.failed += 1;
+    console.error("early fraud warnings: what was decided could not be read; nothing is acted on this run");
+    return counts;
+  }
   const seen = new Map<string, string>();
-  if (Array.isArray(raw)) for (let i = 0; i + 1 < raw.length; i += 2) seen.set(String(raw[i]), String(raw[i + 1]));
-  else if (raw && typeof raw === "object") for (const [key, value] of Object.entries(raw)) seen.set(key, String(value));
+  for (let i = 0; i < pairs.length; i += 2) seen.set(pairs[i], pairs[i + 1]);
   const listed = new Set<string>();
   const since = nowSeconds - LOOKBACK_DAYS * 24 * 60 * 60;
   let after = "";
@@ -333,6 +350,13 @@ export async function syncPlanFraudWarnings(
       counts.failed += 1;
       console.error(`ending the subscription of early fraud warning ${id} failed`, error);
     }
+  }
+  // A finished field ("final", "unmatched") whose warning a complete read of the window no longer lists is older than
+  // LOOKBACK_DAYS and is never listed again, so it is dropped, at most MAX_PRUNE a run (review of #4168, second round,
+  // LOW): the field list stays bounded by the warnings of the window. "act:" fields are never dropped here.
+  if (listDone && readable && Date.now() <= deadline) {
+    const old = [...seen].filter(([id, what]) => (what === "final" || what === "unmatched") && !listed.has(id)).map(([id]) => id).slice(0, MAX_PRUNE);
+    if (old.length) await redisPipeline([["HDEL", SEEN_KEY, ...old]]).catch((error) => console.error("early fraud warnings: dropping old fields failed", error));
   }
   counts.complete = listDone && readable && held === 0 && counts.failed === 0 && due.length <= MAX_RETRIES;
   return counts;

@@ -14,7 +14,7 @@
  *   - the daily plans job runs it before the subscriptions are read.
  */
 import { readFileSync } from "node:fs";
-import { FRAUD_REFUNDS_ON, MAX_PAGES, MAX_REFUNDS, SEEN_KEY, refundKeyOf, syncPlanFraudWarnings } from "@/lib/plan-fraud-warnings";
+import { FRAUD_REFUNDS_ON, MAX_PAGES, MAX_PRUNE, MAX_REFUNDS, SEEN_KEY, refundKeyOf, syncPlanFraudWarnings } from "@/lib/plan-fraud-warnings";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -38,7 +38,17 @@ let refundAnswerLost = false;
 /** The receipt says pending. */
 let refundPending = false;
 let listBroken = false;
+/** HGETALL of the decided warnings answers something that is not a list of strings. */
+let seenUnreadable: unknown = undefined;
+/** The HSET that writes a decision answers in another shape. */
+let decisionUnconfirmed = false;
 const asked: string[] = [];
+const pipeline = redis.pipeline.bind(redis);
+redis.pipeline = (async (commands: (string | number)[][]) => {
+  if (seenUnreadable !== undefined && commands[0]?.[0] === "HGETALL") return [seenUnreadable];
+  if (decisionUnconfirmed && commands[0]?.[0] === "HSET") return ["OK", 1];
+  return pipeline(commands);
+}) as typeof redis.pipeline;
 const refundBodies: { key: string | null; body: string }[] = [];
 
 function header(init: RequestInit | undefined, name: string): string | null {
@@ -104,6 +114,8 @@ function reset(): void {
   refundAnswerLost = false;
   refundPending = false;
   listBroken = false;
+  seenUnreadable = undefined;
+  decisionUnconfirmed = false;
   asked.length = 0;
   refundBodies.length = 0;
 }
@@ -160,16 +172,16 @@ async function main(): Promise<void> {
     is("5,900 cents", new URLSearchParams(refundBodies[0]?.body ?? "").get("amount"), "5900");
   }
 
-  part("A warning that is not actionable, or a payment that is not ours, is never touched");
+  part("A payment that is not ours is never touched; a warning no longer actionable is not refunded, but its subscription ends");
   {
     reset();
     warn(4, plan(4), 6_900, { actionable: false });
     warn(5, foreign(5));
     warn(6, null);
     const counts = await run();
-    is("counts", [counts.skipped, counts.unmatched, counts.refunded, counts.complete], [1, 2, 0, true]);
-    is("no refund, no ending", [posts().length, deletes().length], [0, 0]);
-    is("their subscriptions still active", [subscriptions.sub_P4.status, subscriptions.sub_F5.status], ["active", "active"]);
+    is("counts", [counts.ended, counts.unmatched, counts.refunded, counts.complete], [1, 2, 0, true]);
+    is("no refund; only the plan's subscription ended", [posts().length, deletes()], [0, ["DELETE /v1/subscriptions/sub_P4"]]);
+    is("the foreign subscription still active, ours ended", [subscriptions.sub_P4.status, subscriptions.sub_F5.status], ["canceled", "active"]);
     asked.length = 0;
     await run();
     is("and the unmatched one costs no subscription read again", asked.filter((line) => line.startsWith("GET /v1/subscriptions/")).length, 0);
@@ -300,6 +312,72 @@ async function main(): Promise<void> {
     await run();
     is("no refund on a disputed charge", refundBodies.length, 0);
     is("its subscription ended", subscriptions.sub_P53.status, "canceled");
+  }
+
+  part("A warning first seen after its charge was disputed: no refund, and the stolen card's subscription ends (review of #4168, second round, MEDIUM)");
+  {
+    reset();
+    const id = warn(60, plan(60));
+    charges.ch_C60.disputed = true;
+    const counts = await run();
+    is("no refund on a disputed charge", refundBodies.length, 0);
+    is("its subscription ended, and the warning final", [subscriptions.sub_P60.status, await redis.pipeline([["HGET", SEEN_KEY, id]])], ["canceled", ["final"]]);
+    is("counted as ended", [counts.ended, counts.complete], [1, true]);
+  }
+
+  part("Decisions that cannot be read act on nothing, and a decided warning is never taken afresh (review of #4168, second round, HIGH)");
+  {
+    for (const reply of [null, "nope", ["issfr_W61", "act:sub_P61", "odd"], [1, 2]]) {
+      reset();
+      const id = warn(61, plan(61));
+      deleteFails.add("sub_P61");
+      await run();
+      is(`run 1 refunds and decides (${JSON.stringify(reply)})`, [refundBodies.length, await redis.pipeline([["HGET", SEEN_KEY, id]])], [1, ["act:sub_P61"]]);
+      deleteFails.clear();
+      seenUnreadable = reply;
+      asked.length = 0;
+      const second = await run();
+      is("run 2: nothing asked of Stripe, failed, not complete", [asked.length, second.failed, second.complete], [0, 1, false]);
+      is("the decision kept", await redis.pipeline([["HGET", SEEN_KEY, id]]), ["act:sub_P61"]);
+      seenUnreadable = undefined;
+      await run();
+      is("run 3 ends the subscription with no second refund", [subscriptions.sub_P61.status, refundBodies.length], ["canceled", 1]);
+    }
+  }
+
+  part("A decision not confirmed as written asks for no refund (review of #4168, second round, MEDIUM)");
+  {
+    reset();
+    warn(62, plan(62));
+    decisionUnconfirmed = true;
+    const first = await run();
+    is("no refund asked, nothing ended, failed", [refundBodies.length, deletes().length, first.failed, first.complete], [0, 0, 1, false]);
+    decisionUnconfirmed = false;
+    await run();
+    is("the next run refunds and ends it", [refundBodies.length, subscriptions.sub_P62.status], [1, "canceled"]);
+  }
+
+  part("Finished fields older than the window are dropped; a decision still to end is kept (review of #4168, second round, LOW)");
+  {
+    reset();
+    await redis.pipeline([["HSET", SEEN_KEY, "issfr_Old1", "final", "issfr_Old2", "unmatched", "issfr_Old3", "act:sub_P63"]]);
+    subscriptions.sub_P63 = plan(63);
+    deleteFails.add("sub_P63");
+    const id = warn(64, plan(64));
+    await run();
+    is("old finished fields dropped, the listed one and the one still to end kept",
+      await redis.pipeline([["HGET", SEEN_KEY, "issfr_Old1"], ["HGET", SEEN_KEY, "issfr_Old2"], ["HGET", SEEN_KEY, "issfr_Old3"], ["HGET", SEEN_KEY, id]]),
+      [null, null, "act:sub_P63", "final"]);
+    reset();
+    const old = Array.from({ length: MAX_PRUNE + 3 }, (_, i) => [`issfr_Z${i}`, "final"]).flat();
+    await redis.pipeline([["HSET", SEEN_KEY, ...old]]);
+    await run();
+    is("at most MAX_PRUNE a run", await redis.pipeline([["HLEN", SEEN_KEY]]), [3]);
+    reset();
+    await redis.pipeline([["HSET", SEEN_KEY, "issfr_Old4", "final"]]);
+    for (let n = 1_000; n < 1_000 + 100 * (MAX_PAGES + 1); n += 1) warn(n, null);
+    await run();
+    is("never while the window was not read to its end", await redis.pipeline([["HGET", SEEN_KEY, "issfr_Old4"]]), ["final"]);
   }
 
   done();

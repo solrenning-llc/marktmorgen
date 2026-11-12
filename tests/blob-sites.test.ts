@@ -87,6 +87,13 @@ export const BLOB_SITES: Record<string, Record<string, Paid>> = {
   // Its fallback to Blob goes through the door above, which production closes.
   "lib/sold-file-upload.ts": { uploadPresigned: { notInProduction: 'handleUploadUrl: "/api/store/file"' } },
   "lib/takedown.ts": { del: DELETE_IS_FREE },
+  // A product taken down keeps its picture only under a new name (R44, on main since 9 November 2026, after this guard was
+  // written): its copies and their checks are Blob operations no line prices yet, a company cost, written down, never zero.
+  "lib/picture-withdraw.ts": {
+    copy: { open: "audit 11: a takedown copies a product's picture and its smaller copy to new names, every try, priced nowhere" },
+    head: { open: "audit 11: a takedown checks each copy and each old name, every try, priced nowhere" },
+    del: DELETE_IS_FREE,
+  },
   "lib/demo-seed.ts": { put: { open: "audit 10: the demo store's seed pictures, a company cost not in the fixed costs" }, del: DELETE_IS_FREE },
 };
 
@@ -194,5 +201,7 @@ test("the open Blob costs are exactly the ones the audit names, so none is added
   const open = Object.entries(BLOB_SITES).flatMap(([file, ops]) => Object.entries(ops).filter(([, paid]) => "open" in paid).map(([op, paid]) => `${(paid as { open: string }).open.split(":")[0]} ${file} ${op}`));
   console.log(`open Blob costs (${open.length}):\n  ${open.sort().join("\n  ")}`);
   // Rule 23: this list only shrinks, as each audit unit prices its operations; a new entry needs Claude 4's decision.
-  assert.equal(open.length, 23);
+  // 23 when written; 25 since main's lib/picture-withdraw.ts (R44) was found by this guard on the merge of 12 November 2026:
+  // its two open entries (audit 11) are written down for Claude 4's decision, not added in silence.
+  assert.equal(open.length, 25);
 });

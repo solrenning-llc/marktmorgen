@@ -62,7 +62,7 @@
 import { createHash } from "node:crypto";
 import { normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { dataBytes } from "@/lib/store-data-rules";
 import { MAX_RUN_EVENTS, MAX_STEPS, RUN_KEEP_SECONDS } from "@/lib/flow-limits";
 
@@ -282,30 +282,53 @@ export async function settleAttempts(listId: string, flowId: string, index: numb
   const commands: (string | number)[][] = [];
   for (const o of outcomes) {
     const person = personOf(o.email);
-    const run = runKey(flowId, person);
-    const log = logKey(flowId, person);
+    const keys = [runKey(flowId, person), logKey(flowId, person), indexKey(flowId), heldKey(listId)];
+    const common = (status: RunStatus | "held", step: number, note: string) => [normaliseEmail(o.email), status, step, note.slice(0, 300), nowSeconds, person, `${flowId}|${person}`];
     if (o.state === "uncertain") {
-      commands.push(
-        ["RPUSH", log, event({ at: nowSeconds, step: index, stepId, kind, state: "uncertain", note: o.note })],
-        ["HSET", run, "email", normaliseEmail(o.email), "status", "held", "step", index, "note", o.note.slice(0, 300), "updatedAt", nowSeconds],
-        ["ZADD", heldKey(listId), nowSeconds, `${flowId}|${person}`],
-        ["ZADD", indexKey(flowId), nowSeconds, person],
-      );
+      commands.push(["EVAL", SETTLE_IF_RUN, 4, ...keys, "uncertain", ...common("held", index, o.note), "push", event({ at: nowSeconds, step: index, stepId, kind, state: "uncertain", note: o.note }), "", RUN_KEEP_SECONDS]);
       continue;
     }
     const status: RunStatus = o.status ?? (o.state === "deferred" ? "waiting" : o.to < 0 ? (o.state === "failed" ? "failed" : "done") : "running");
-    commands.push(["HDEL", run, "open"]);
     // A wait is a status, not an event: a month that runs out is not written down forty times,
     // and the attempt claimAttempts wrote for this try is taken back out (the same event, word for word).
-    if (o.state !== "deferred") commands.push(["RPUSH", log, event({ at: nowSeconds, step: index, stepId, kind, state: o.state, note: o.note })]);
-    else commands.push(["LREM", log, -1, event({ at: nowSeconds, step: index, stepId, kind, state: "attempted", note: "" })]);
-    commands.push(["HSET", run, "email", normaliseEmail(o.email), "status", status, "step", o.state === "deferred" ? index : o.to, "note", o.state === "deferred" ? o.note.slice(0, 300) : "", "updatedAt", nowSeconds]);
-    // In the index at every write, so a run started before history existed can be found and erased too.
-    commands.push(["ZADD", indexKey(flowId), nowSeconds, person]);
-    if (TERMINAL.has(status)) commands.push(["EXPIRE", run, RUN_KEEP_SECONDS], ["EXPIRE", log, RUN_KEEP_SECONDS]);
+    const logged = o.state !== "deferred"
+      ? ["push", event({ at: nowSeconds, step: index, stepId, kind, state: o.state, note: o.note })]
+      : ["lrem", event({ at: nowSeconds, step: index, stepId, kind, state: "attempted", note: "" })];
+    commands.push(["EVAL", SETTLE_IF_RUN, 4, ...keys, "settle", ...common(status, o.state === "deferred" ? index : o.to, o.state === "deferred" ? o.note : ""), ...logged, TERMINAL.has(status) ? "1" : "", RUN_KEEP_SECONDS]);
   }
-  await redisPipeline(commands);
+  // Each outcome lands only while its run is still there (#4267): a person's erasure that deleted the run while the
+  // step was in flight (forgetWorkflowPerson) is never undone by writing its record, history or index entry back.
+  // 1 written, 0 the run gone; anything else is unknown (rule 24) and throws, so the step is said as not settled.
+  const replies = repliesFor(await redisPipeline(commands), commands.length);
+  if (!replies || !replies.every((reply) => reply === 0 || reply === 1)) throw new UnknownReplyError("settling a workflow step's attempts");
 }
+
+/**
+ * One claimed attempt's outcome, written only while its run is still kept (#4267; settleAttempts). KEYS[1] the run,
+ * KEYS[2] its history, KEYS[3] the flow's run index, KEYS[4] the store's held runs. ARGV[1] "uncertain" (the run is
+ * held, its attempt left open) or "settle" (the attempt closed); ARGV[2..8] the address, status, step, note, time,
+ * the person's key and the held list's member; ARGV[9] "push" or "lrem" and ARGV[10] the history event; ARGV[11] "1"
+ * for a status that ends the run, whose run and history then expire after ARGV[12] seconds. Answers 0, writing
+ * nothing, when the run is gone; 1 once written. lib/redis-memory.ts runs it the same way.
+ */
+export const SETTLE_IF_RUN = `-- marktmorgen:flow-settle-if-run:v1
+if redis.call("EXISTS", KEYS[1]) == 0 then return 0 end
+if ARGV[1] == "uncertain" then
+  redis.call("RPUSH", KEYS[2], ARGV[10])
+  redis.call("HSET", KEYS[1], "email", ARGV[2], "status", ARGV[3], "step", ARGV[4], "note", ARGV[5], "updatedAt", ARGV[6])
+  redis.call("ZADD", KEYS[4], ARGV[6], ARGV[8])
+  redis.call("ZADD", KEYS[3], ARGV[6], ARGV[7])
+  return 1
+end
+redis.call("HDEL", KEYS[1], "open")
+if ARGV[9] == "push" then redis.call("RPUSH", KEYS[2], ARGV[10]) else redis.call("LREM", KEYS[2], -1, ARGV[10]) end
+redis.call("HSET", KEYS[1], "email", ARGV[2], "status", ARGV[3], "step", ARGV[4], "note", ARGV[5], "updatedAt", ARGV[6])
+redis.call("ZADD", KEYS[3], ARGV[6], ARGV[7])
+if ARGV[11] == "1" then
+  redis.call("EXPIRE", KEYS[1], ARGV[12])
+  redis.call("EXPIRE", KEYS[2], ARGV[12])
+end
+return 1`;
 
 /** What happened at a step without an attempt: a condition that did not hold, the goal reached, the run ended. */
 export async function noteRuns(

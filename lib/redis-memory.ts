@@ -788,6 +788,32 @@ export class MemoryRedis {
             return this.run(["HSETNX", target, rest[4 * i + 2], rest[4 * i + 3]]);
           });
         }
+        // lib/flow-runs.ts SETTLE_IF_RUN (#4267): a step's outcome written only while its run is still kept.
+        if (key.startsWith("-- marktmorgen:flow-settle-if-run:v1\n") && args[0] === "4" && args.length === 17) {
+          const [, run, log, index, held, mode, email, status, step, note, at, person, member, logOp, logged, terminal, keep] = args;
+          this.scriptCalls += 1;
+          if (this.run(["EXISTS", run]) === 0) return 0;
+          const fields = ["email", email, "status", status, "step", step, "note", note, "updatedAt", at];
+          if (mode === "uncertain") {
+            this.run(["RPUSH", log, logged]);
+            this.run(["HSET", run, ...fields]);
+            this.run(["ZADD", held, at, member]);
+            this.run(["ZADD", index, at, person]);
+            this.scriptCalls += 4;
+            return 1;
+          }
+          this.run(["HDEL", run, "open"]);
+          this.run(logOp === "push" ? ["RPUSH", log, logged] : ["LREM", log, -1, logged]);
+          this.run(["HSET", run, ...fields]);
+          this.run(["ZADD", index, at, person]);
+          this.scriptCalls += 4;
+          if (terminal === "1") {
+            this.run(["EXPIRE", run, keep]);
+            this.run(["EXPIRE", log, keep]);
+            this.scriptCalls += 2;
+          }
+          return 1;
+        }
         // lib/move-members.ts INVITE_UNLESS_ERASED: each invitation HSETNX only when its print is not among the store's
         // deleted people (-1, nothing written).
         if (key.startsWith("-- marktmorgen:invite-unless-erased:v1\n") && args[0] === "2" && args.length >= 6 && (args.length - 3) % 3 === 0) {

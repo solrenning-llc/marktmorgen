@@ -910,12 +910,34 @@ export async function listCounts(listId: string | null): Promise<ListCounts> {
 }
 
 /**
+ * How a walk of the list reads Redis: redisPipeline itself, or a download's
+ * metered read (lib/list-download.ts), which holds the units of a read before
+ * it is made, at `most`, the most bytes its reply can carry, and counts every
+ * byte it moved once it is made (second cost review of #3354).
+ */
+export type ListRead = (commands: (string | number)[][], most: number) => Promise<unknown[]>;
+/** A read that is not metered: the walk's own callers that are priced elsewhere (a broadcast, a whole export). */
+export const plainRead: ListRead = (commands) => redisPipeline(commands);
+/**
+ * The most bytes one contact of the list comes back as in a page of its walk:
+ * its address and its record at every cap a contact has, with the reply's
+ * framing. A review ceiling: 3,973 bytes for a record at every cap in
+ * tests/list-download-units.test.ts. A page that comes back larger is counted
+ * at what it moved all the same, once it is read.
+ */
+export const CONTACT_READ_BYTES = 4_500;
+/** The most bytes a page of the walk (HSCAN COUNT 1000) is held at before it is read. */
+export const LIST_PAGE_READ_BYTES = 1_000 * CONTACT_READ_BYTES;
+
+/**
  * Walks the whole list, page by page, calling `each` for every address. A
- * large list never has to fit in one answer from Redis.
+ * large list never has to fit in one answer from Redis. Each page is read
+ * through `read`, so a download holds its units before it is read.
  */
 export async function forEachContact(
   listId: string,
   each: (email: string, contact: Contact) => void,
+  read: ListRead = plainRead,
 ): Promise<void> {
   if (!isRedisConfigured()) return;
   const key = leadsKey(listId);
@@ -923,7 +945,7 @@ export async function forEachContact(
   for (let page = 0; page < MAX_LEADS / 500 + 10; page += 1) {
     // HSCAN answers [cursor, [field, value, ...]]: any other shape is unknown (CX-123 rule 24), never the end of the
     // list, so an email is never sent to part of it as if to all, nor an export cut short as if whole.
-    const reply = repliesFor(repliesFor(await redisPipeline([["HSCAN", key, cursor, "COUNT", 1000]]), 1)?.[0], 2);
+    const reply = repliesFor(repliesFor(await read([["HSCAN", key, cursor, "COUNT", 1000]], LIST_PAGE_READ_BYTES), 1)?.[0], 2);
     const next = reply?.[0];
     const flat = stringList(reply?.[1]);
     const nextCursor = typeof next === "string" && /^\d+$/.test(next) ? next : countOf(next) !== null ? String(next) : null;
@@ -963,6 +985,8 @@ export async function audience(
   keep?: (email: string) => boolean,
   /** Only people who carry this label (99 [E2-TAG-BROADCAST]), compared as a sequence compares one: case and spaces at the ends aside. Read from the same record, so no extra read. */
   label?: string,
+  /** How the list's pages are read: a download's metered read (lib/ad-audience.ts), or Redis itself. */
+  read: ListRead = plainRead,
 ): Promise<string[]> {
   const out: string[] = [];
   const wanted = label?.trim().toLocaleLowerCase() ?? "";
@@ -974,7 +998,7 @@ export async function audience(
     if (wanted && !contact.tags.some((t) => t.trim().toLocaleLowerCase() === wanted)) return;
     if (keep && !keep(email)) return;
     out.push(email);
-  });
+  }, read);
   return out;
 }
 

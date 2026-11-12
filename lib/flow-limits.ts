@@ -96,6 +96,9 @@ export const RUN_START_COMMANDS = 8;
 export const HISTORY_COMMANDS_PER_STEP = 9;
 // The queue's own commands for one person's step: the scan, the take from the queue, the lease, the person's row, the lease entry read with
 // it (since 4 November 2026: a stop step of another workflow may have removed it), the next step queued while leased, and the lease let go: 7.
+// Since 12 November 2026 the take and the lease are one script (MOVE_STEP in lib/flows.ts), billed 3 (the EVAL and its ZREM and ZADD) where
+// the two writes were billed 2. This constant counts commands sent and scripts as one, so it already understated what Upstash bills
+// (12 billed per step on main, 13 with MOVE_STEP): recounted in issue #3966, never lowered here.
 // The actions' own commands (a deal read and moved, a rotate's lock, a stop's removal) are not in it yet: measured and added in the follow-up on workflow step costs.
 export const QUEUE_COMMANDS_PER_STEP = 7;
 /**

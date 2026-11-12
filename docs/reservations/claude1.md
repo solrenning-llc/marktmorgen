@@ -6,3 +6,4 @@ Only Claude 1 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
+| Claude 1 cloud | Fixes #3961: a due step moves queue→lease in one step | claude/blissful-carson-2v8k2m-flow-lease | `lib/flows.ts`, `lib/flow-limits.ts`, `lib/redis-memory.ts`, `tests/flow-lease-atomic.test.ts` | 12/11/2026 13h30 |

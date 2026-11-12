@@ -178,6 +178,28 @@ if redis.call('ZSCORE', KEYS[1], ARGV[1]) then
   return 1
 end
 return 0`;
+/**
+ * Moves one step between the queue and its lease in one command: removed from KEYS[1] and, only when this call
+ * removed it, added to KEYS[2] at ARGV[2]. Two separate writes left a step in neither set when the second one failed
+ * (a timeout, the cutoff), and then no later run found it. KEYS: from, to; ARGV: the member, its score in `to`.
+ * 1 when this call moved it (and so owns it), 0 when it was not there.
+ */
+const MOVE_STEP = `-- marktmorgen:flow-step-move:v1
+if redis.call('ZREM', KEYS[1], ARGV[1]) == 1 then
+  redis.call('ZADD', KEYS[2], ARGV[2], ARGV[1])
+  return 1
+end
+return 0`;
+/**
+ * Which of `members` this call moved from `from` to `to` (MOVE_STEP). Only an exact 1 counts: any other answer, or
+ * a reply out of shape, is "not moved by this call", and the step stays in one of the two sets either way, so the
+ * orphan return below finds it once its lease is up.
+ */
+async function moveSteps(members: string[], from: string, to: string, score: number): Promise<boolean[]> {
+  if (!members.length) return [];
+  const reply: unknown = await redisPipeline(members.map((m) => ["EVAL", MOVE_STEP, 2, from, to, m, score]));
+  return members.map((_, i) => Array.isArray(reply) && reply.length === members.length && reply[i] === 1);
+}
 const flowsKey = (listId: string) => `nl:mail:flows:${listId}`;
 const enrolledKey = (flowId: string, email: string) =>
   `nl:mail:enr:${flowId}:${createHash("sha256").update(`nimbus-flow:${normaliseEmail(email)}`).digest("hex").slice(0, 32)}`;
@@ -1139,22 +1161,19 @@ export async function sendDueSteps(
   const [stuck] = await redisPipeline([["ZRANGEBYSCORE", LEASE, 0, Math.floor(Date.now() / 1000), "LIMIT", 0, 1000]]);
   const orphans = Array.isArray(stuck) ? (stuck as string[]) : [];
   if (orphans.length) {
-    const back = await redisPipeline(orphans.map((m) => ["ZREM", LEASE, m]));
-    const mine = orphans.filter((_, i) => Number(back[i]) === 1);
-    if (mine.length) await redisPipeline(mine.map((m) => ["ZADD", QUEUE, Math.floor(Date.now() / 1000), m]));
+    // One step each (MOVE_STEP): a failed write leaves it in the lease for the next run, never in neither set.
+    await moveSteps(orphans, LEASE, QUEUE, Math.floor(Date.now() / 1000));
   }
   while (Date.now() < deadline) {
     const now = Math.floor(Date.now() / 1000);
     const [due] = await redisPipeline([["ZRANGEBYSCORE", QUEUE, 0, now, "LIMIT", 0, 300]]);
     const members = Array.isArray(due) ? (due as string[]) : [];
     if (!members.length) break;
-    // Whoever removes a member from the queue is the one who sends it.
-    const taken = await redisPipeline(members.map((m) => ["ZREM", QUEUE, m]));
-    const owned = members.filter((_, i) => Number(taken[i]) === 1);
-    if (owned.length) await redisPipeline(owned.map((m) => ["ZADD", LEASE, now + LEASE_SECONDS, m]));
+    // Whoever moves a member from the queue into the lease, in one step (MOVE_STEP), is the one who sends it.
+    const taken = await moveSteps(members, QUEUE, LEASE, now + LEASE_SECONDS);
     const groups = new Map<string, string[]>();
     members.forEach((member, i) => {
-      if (Number(taken[i]) !== 1) return;
+      if (!taken[i]) return;
       // listId|handle|flowId|step|address — an address may itself hold a "|".
       const parts = member.split("|");
       const group = parts.slice(0, 4).join("|");
@@ -1164,11 +1183,9 @@ export async function sendDueSteps(
     for (const [group, emails] of groups) {
       // Back in the queue for a later run, but only for whoever still holds this step's lease entry: a stop step of
       // another workflow, done earlier in this batch, removes it (act, "stop"), and that run stays ended. As with the
-      // orphans above, whoever removes the lease entry is the one who puts it back.
+      // orphans above, whoever removes the lease entry is the one who puts it back, in the same step (MOVE_STEP).
       const putBack = async (at: number) => {
-        const back = await redisPipeline(emails.map((email) => ["ZREM", LEASE, `${group}|${email}`]));
-        const held = emails.filter((_, i) => Number(back[i]) === 1);
-        if (held.length) await redisPipeline(held.map((email) => ["ZADD", QUEUE, at, `${group}|${email}`]));
+        await moveSteps(emails.map((email) => `${group}|${email}`), LEASE, QUEUE, at);
       };
       if (Date.now() > deadline) {
         // Out of time: back in the queue for the next run, untouched.

@@ -845,6 +845,13 @@ export class MemoryRedis {
           this.run(["ZADD", queue, score, next]);
           return 1;
         }
+        // lib/flows.ts MOVE_STEP: a step moved between the workflow queue and its lease in one step.
+        if (key.startsWith("-- marktmorgen:flow-step-move:v1\n") && args[0] === "2" && args.length === 5) {
+          const [, from, to, member, score] = args;
+          if (this.run(["ZREM", from, member]) !== 1) return 0;
+          this.run(["ZADD", to, score, member]);
+          return 1;
+        }
         if (key.startsWith("-- marktmorgen:crm-pipelines-save:v2\n") && args[0] === "1" && args.length === 4) {
           const target = args[1];
           this.live(target);

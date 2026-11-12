@@ -321,4 +321,42 @@ await t.test("a damaged note of a store that is gone is dropped, with no letter 
     delete process.env.RESEND_API_KEY;
   }
 });
+
+// Comment 6807195181 on #3585: once our stop is taken back, a note left behind by a removal whose answer was lost must
+// not let a later run take back a stop the creator has set themselves since. The note says m: 0 before it is dropped.
+const dropLost = (commands: Command[]) => isNote(commands, "HDEL");
+for (const path of ["the daily job", "the creator's request"] as const) {
+await t.test(`a retry never takes back a stop the creator set after ours was taken back: ${path}`, async () => {
+  await reset();
+  const shop = path === "the daily job" ? await paidShop() : await paidShop({ at: NOW - 40 * DAY });
+  if (path === "the daily job") {
+    world.refundsDown = true;
+    await refundAndEndPlan(await shop.store(), NOW);
+    world.refundsDown = false;
+    assert.equal(JSON.parse(String(await shop.note())).m, 1, "our stop is noted for the daily job");
+  }
+  // The removal is not done and its answer is lost: the note stays behind.
+  redis.pipeline = async (commands) => dropLost(commands) ? [] : original(commands);
+  const logged = console.error;
+  console.error = () => {};
+  try {
+    if (path === "the daily job") await finishPlanRefunds(Date.now() + 10_000, NOW + 601);
+    else {
+      const store = await shop.store();
+      await assert.rejects(() => refundAndEndPlan(store, NOW), "a lost removal answer is not taken for a removal");
+    }
+  } finally {
+    console.error = logged;
+    redis.pipeline = original;
+  }
+  assert.equal(shop.sub().cancel_at_period_end, false, "our stop was taken back");
+  assert.notEqual(await shop.note(), null, "the removal was lost, so the note is still there");
+  // The creator now sets the stop themselves; the next daily run must leave it.
+  shop.sub().cancel_at_period_end = true;
+  const quiet = console.error;
+  console.error = () => {};
+  try { await finishPlanRefunds(Date.now() + 10_000, NOW + 2 * 3_600); } finally { console.error = quiet; }
+  assert.equal(shop.sub().cancel_at_period_end, true, "a stop the creator set is never taken back by a retry");
+});
+}
 });

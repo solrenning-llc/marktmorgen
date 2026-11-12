@@ -183,10 +183,10 @@ async function main() {
   replyFor((c) => c[0]?.[0] === "GET" && String(c[0][1]).startsWith("nl:crm:fields:"), () => {
     throw new Error("network");
   }, false);
-  is("the field list unreadable throws", await outcome(() => listAsCsv(shopWithFields, false)), "Error");
+  is("the field list unreadable throws", await outcome(() => listAsCsv(shopWithFields, false)), "CrmSchemaReadUnavailable");
   restore();
   await original([["SET", "nl:crm:fields:stats-exact-1", JSON.stringify([{ id: "f1abcd", name: "Company", type: "text" }])]]);
-  replyFor((c) => c[0]?.[0] === "HGETALL", () => {
+  replyFor((c) => c[0]?.[0] === "HMGET", () => {
     throw new Error("network");
   }, false);
   is("their answers unreadable throws", await outcome(() => listAsCsv(shopWithFields, false)), "Error");
@@ -212,19 +212,19 @@ async function main() {
   ];
   for (const [label, reply] of fieldShapes) {
     replyFor((c) => c[0]?.[0] === "GET" && String(c[0][1]).startsWith("nl:crm:fields:"), reply, false);
-    is(`the field list as ${label}: throws`, await outcome(() => listAsCsv(shopWithFields, false)), "UnknownReplyError");
+    is(`the field list as ${label}: throws`, await outcome(() => listAsCsv(shopWithFields, false)), "CrmSchemaReadUnavailable");
     restore();
   }
-  const answerShapes: [string, () => unknown][] = [
+  const answerShapes: [string, (commands: Commands) => unknown][] = [
     ["no reply", () => []],
     ["a reply without result (undefined)", () => [undefined]],
     ["QUEUED", () => ["QUEUED"]],
     ["null", () => [null]],
-    ["an odd-length list", () => [["ann-key"]]],
-    ["a list holding a number", () => [["ann-key", 7]]],
+    ["a list without a value for each person", () => [[]]],
+    ["a list holding a number", (c: Commands) => [c[0].slice(2).map(() => 7)]],
   ];
   for (const [label, reply] of answerShapes) {
-    replyFor((c) => c[0]?.[0] === "HGETALL", reply, false);
+    replyFor((c) => c[0]?.[0] === "HMGET", reply, false);
     is(`the answers as ${label}: throws`, await outcome(() => listAsCsv(shopWithFields, false)), "UnknownReplyError");
     restore();
   }

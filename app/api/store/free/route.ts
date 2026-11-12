@@ -94,8 +94,9 @@ export async function POST(request: NextRequest) {
     if (result === "sent") after(() => countHit(request, store, { kind: "checkout", id: product.id, free: true }));
     // The sign-up as a lead to the creator's ad platforms, with the buyer's yes (lib/ad-events.ts),
     // and its id on the page it lands on, so the pixel's lead and this one count once.
+    // Without the address: it is not confirmed yet, so it may be someone else's, who never said yes.
     const lead = result === "sent" && sendsFromServer(store) && allowedBy(request, store) ? newLeadId() : "";
-    if (lead) after(() => sendServerLead(store, request, { id: lead, email, product: product.id }).catch((error) => console.error("sending a lead failed", error)));
+    if (lead) after(() => sendServerLead(store, request, { id: lead, email: "", product: product.id }).catch((error) => console.error("sending a lead failed", error)));
     if (result === "sent" && here && store.statsId) {
       const statsId = store.statsId;
       after(async () => {

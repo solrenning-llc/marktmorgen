@@ -114,7 +114,7 @@ part("The words: where, never why, and every count out of its whole");
     "First project: 1 of 7 students marked it done.",
     "Wrapping up: 1 of 7 students marked it done.",
   ]);
-  is("the summary", lines.summary, "Of 7 students, 1 finished, 1 is still going and 5 stopped (not seen for 14 days).");
+  is("the summary", lines.summary, "Of 7 students, 1 finished, 1 is still going and 5 stopped (not seen for more than 14 days).");
   is("the lesson named, and that the map says where, not why", lines.most, "Students stopped most often at \"Setting up\". This shows where they stopped, not why.");
   const tied = dropoffLines(lessonDropoff(lessons, [...Array.from({ length: 3 }, () => student(["l1"], away)), ...Array.from({ length: 3 }, () => student(["l1", "l2", "l3"], away))], NOW));
   is("a tie is said, the earliest named", tied.most, "Students stopped most often at \"Setting up\", as often as at 1 other lesson. This shows where they stopped, not why.");
@@ -123,7 +123,7 @@ part("The words: where, never why, and every count out of its whole");
   const one = dropoffLines(lessonDropoff(lessons, [student(["l1"], recent)], NOW));
   is("one student, in the singular; nothing named", [one.lessons[0], one.summary, one.most], [
     "Welcome: 1 of 1 student marked it done.",
-    "Of 1 student, 0 finished, 1 is still going and 0 stopped (not seen for 14 days).",
+    "Of 1 student, 0 finished, 1 is still going and 0 stopped (not seen for more than 14 days).",
     "",
   ]);
   const unread = dropoffLines(lessonDropoff(lessons, [student([], away), { done: [], lastSeen: Number.NaN }], NOW));
@@ -147,6 +147,27 @@ part("A clock or a time that cannot be right is never read as a result");
   is("an unreadable clock is refused, never a confident map", threw, 5);
   const odd = lessonDropoff(lessons, [{ done: ["l1"], lastSeen: -1 }, { done: ["l1"], lastSeen: 0 }, { done: ["l1"], lastSeen: NOW - 2.5 }, { done: ["l1"], lastSeen: NOW + 30 * DAY }, { done: ["l1"], lastSeen: NOW - 20 * DAY }], NOW);
   is("impossible times are unread, not stopped or going", [odd.unread, odd.stopped, odd.going, odd.students], [3, 1, 1, 2]);
+}
+
+part("A course whose lessons cannot be told apart is never read as a result");
+{
+  // Claude 3 (6795042817) and Claude 1 (6799237269): with lessons [a, a, b], the first "a" row read 0 done while the
+  // student who did a and b counted as finished, so the rows and the summary disagreed. Each lesson once, with an id.
+  const refused = (course: unknown[]) => {
+    try {
+      lessonDropoff(course as never, [student(["a", "b"], recent)], NOW);
+      return false;
+    } catch (error) {
+      return error instanceof TypeError;
+    }
+  };
+  is("a lesson twice, an empty id, or a title that is not text: refused", [
+    refused([{ id: "a", title: "A1" }, { id: "a", title: "A2" }, { id: "b", title: "B" }]),
+    refused([{ id: "", title: "Nameless" }, { id: "b", title: "B" }]),
+    refused([{ id: "a", title: 7 }, { id: "b", title: "B" }]),
+    refused([null, { id: "b", title: "B" }]),
+  ], [true, true, true, true]);
+  is("control: each lesson once still reads", lessonDropoff([{ id: "a", title: "A" }, { id: "b", title: "B" }], [student(["a", "b"], recent)], NOW).finished, 1);
 }
 
 done();

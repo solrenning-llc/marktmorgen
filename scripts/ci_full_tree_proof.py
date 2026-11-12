@@ -33,6 +33,12 @@ WORKFLOWS = {
     "dependency-security": {"audit"},
     "accessibility-real-readers": {"Real reader entry (windows-latest)", "Real reader entry (macos-latest)"},
 }
+# Cross-browser runs tests/e2e/store-copy.mjs in shards, one job per browser and shard
+# (SHARD_COUNT in tests/e2e/store-copy-shards.mjs; tests/store-copy-shards.test.ts keeps them equal).
+CROSS_BROWSER_SHARDS = 4
+WORKFLOWS["product-checks"] = (WORKFLOWS["product-checks"] - {"Cross-browser (firefox)", "Cross-browser (webkit)"}) | {
+    "Cross-browser (%s, %d/%d)" % (browser, shard, CROSS_BROWSER_SHARDS)
+    for browser in ("firefox", "webkit") for shard in range(1, CROSS_BROWSER_SHARDS + 1)}
 for key, label in [("buyer-actions", "Buyer action"), ("product-actions", "Product action"),
                    ("public-matrix", "Public"), ("signup-actions", "Signup action"),
                    ("studio-matrix", "Studio")]:

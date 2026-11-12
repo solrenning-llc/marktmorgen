@@ -268,7 +268,7 @@ jobs:
   cross-browser:
     needs: documentation-scope
     if: ${{ !cancelled() && needs.documentation-scope.outputs.full != 'false' }}
-    name: Cross-browser (${{ matrix.browser }})
+    name: Cross-browser (${{ matrix.browser }}, ${{ matrix.shard }}/4)
     runs-on: ubuntu-latest
     container:
       image: mcr.microsoft.com/playwright:v1.56.1-noble
@@ -276,11 +276,15 @@ jobs:
     timeout-minutes: 45
     strategy:
       fail-fast: false
+      # tests/e2e/store-copy.mjs split into 4 parallel shards per browser (tests/e2e/store-copy-shards.mjs);
+      # their union is the whole run, each segment once (tests/store-copy-shards.test.ts).
       matrix:
         browser: [firefox, webkit]
+        shard: [1, 2, 3, 4]
     env:
       NEXT_TELEMETRY_DISABLED: "1"
       E2E_BROWSER: ${{ matrix.browser }}
+      E2E_SHARD: ${{ matrix.shard }}/4
       AX2_KEYBOARD_PUBLIC_STANDARD: ${{ (github.repository_id == '1334793724' || github.repository == 'viniciussucupira/marktmorgen') && github.event.repository.private == false && github.event.repository.visibility == 'public' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7

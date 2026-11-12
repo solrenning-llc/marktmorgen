@@ -267,6 +267,40 @@ export class MemoryRedis {
           this.run(text === "" ? ["DEL", about] : ["SET", about, text]);
           return [1];
         }
+        // lib/redis-reply.ts HDEL_IF_EQUAL: one hash field deleted only while it holds the value given.
+        if (key.startsWith("-- marktmorgen:hdel-if-equal:v1\n") && args[0] === "1" && args.length === 4) {
+          const [, hash, field, value] = args;
+          if (this.run(["HGET", hash, field]) !== value) return 0;
+          return this.run(["HDEL", hash, field]);
+        }
+        // lib/paypal-delivery.ts TAKE_BACK_OWN: a deleted person's library, bond and purchase taken back together, only while
+        // the purchase is still the record read (-1, nothing touched); the store out of their library only while it is their
+        // only purchase here, the bond only while it names this order's affiliate, the purchase last.
+        if (key.startsWith("-- marktmorgen:paypal-take-back:v1\n") && Number(args[0]) >= 2 && args.length === 1 + Number(args[0]) + 5) {
+          const n = Number(args[0]);
+          const [purchases, bond, ...library] = args.slice(1, 1 + n);
+          const [field, raw, bondField, affiliate, sid] = args.slice(1 + n);
+          this.scriptCalls += 1;
+          if (this.run(["HGET", purchases, field]) !== raw) return -1;
+          if (sid !== "") {
+            this.scriptCalls += 1;
+            if (Number(this.run(["HLEN", purchases])) === 1) {
+              for (const set of library) {
+                this.scriptCalls += 1;
+                this.run(["SREM", set, sid]);
+              }
+            }
+          }
+          if (bondField !== "") {
+            this.scriptCalls += 1;
+            if (this.run(["HGET", bond, bondField]) === affiliate) {
+              this.scriptCalls += 1;
+              this.run(["HDEL", bond, bondField]);
+            }
+          }
+          this.scriptCalls += 1;
+          return this.run(["HDEL", purchases, field]);
+        }
         // lib/paypal-sales.ts PAYPAL_REVOKE: a refunded payment's purchase taken back only while nothing else stands for it.
         if (key.startsWith("-- marktmorgen:paypal-revoke:v1\n") && args[0] === "2" && args.length >= 5) {
           const [, imported, own, field, job, ...known] = args;

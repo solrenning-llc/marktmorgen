@@ -9,6 +9,7 @@ import { HelpAnswerTools } from "@/components/help-answer-tools";
 import { answerSummary, helpAnswer, helpAnswerPath, helpDay, helpPagePaths, sectionNeighbors, helpTopics } from "@/lib/help-pages";
 import { HELP_DATES } from "@/lib/help-dates";
 import { answerLinks } from "@/lib/help-areas";
+import { termsIn } from "@/lib/help-glossary";
 
 /**
  * One answer of the help center on a page of its own (564 [HC1]): the trail
@@ -41,6 +42,7 @@ export default async function HelpAnswerPage({ params }: Params) {
   if (!found) notFound();
   const others = sectionNeighbors(found);
   const links = answerLinks(found.id);
+  const terms = termsIn([found.q, ...found.a].join(" "));
   return (
     <div className="flex min-h-screen flex-col bg-paper text-ink print:bg-white">
       {/* Printed, the answer stands alone: no menus, no footer, no list of other answers (564 [HC1]). */}
@@ -72,6 +74,20 @@ export default async function HelpAnswerPage({ params }: Params) {
               </p>
             ))}
           </div>
+          {/* The unusual words this answer uses, said in plain words beside it (564 [HC1] item 5, WCAG 3.1.3). Printed with it. */}
+          {terms.length ? (
+            <section aria-labelledby="help-terms-title" className="mt-8 max-w-[80ch] rounded-[var(--r-md)] border border-line bg-white p-5" data-help-terms>
+              <h2 id="help-terms-title" className="text-base font-semibold text-ink">Words in this answer</h2>
+              <dl className="mt-3 grid gap-3">
+                {terms.map((t) => (
+                  <div key={t.term}>
+                    <dt className="font-semibold text-ink">{t.term}</dt>
+                    <dd className="mt-0.5 text-[0.9375rem] leading-relaxed text-ink-soft">{t.meaning}</dd>
+                  </div>
+                ))}
+              </dl>
+            </section>
+          ) : null}
           <HelpAnswerTools />
         </article>
         {/* Where the task is done and read about (564 [HC1], item 3), only for an answer that is a studio area's main one. */}

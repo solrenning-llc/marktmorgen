@@ -22,6 +22,7 @@ import { statusRunResult } from "@/lib/status-page";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { withCutoff } from "@/lib/fetch-timeout";
+import { installVirtualClock } from "./slow-test-virtual-clock";
 
 const REGION = "us-east-1";
 const TOPIC = `arn:aws:sns:${REGION}:123456789012:marktmorgen-email`;
@@ -113,6 +114,9 @@ const failing = (checks: { check: string; ok: boolean }[]) => checks.filter((c) 
 const leftBehind = () => redis.keys().filter((k) => k.startsWith("nl:store:leads:") || k.startsWith("nl:mail:health:") || k.startsWith("nl:mail:paused:"));
 
 async function main(): Promise<void> {
+  // The check's poll (lib/verify-mail.ts, every 3 s up to its deadline) and the senders' announcements a moment
+  // after an email pass on a virtual clock, in the order the real one would give; request cutoffs stay real.
+  const clock = installVirtualClock({ maxMs: 3_000 });
   redis.clear();
   for (const name of ["AWS_SES_ROLE_ARN", "AWS_SES_ACCESS_KEY_ID", "AWS_SES_SECRET_ACCESS_KEY", "AWS_SES_REGION", "AWS_SES_CONFIGURATION_SET", "AWS_SES_TOPIC_ARN", "VERCEL_OIDC_TOKEN", "RESEND_WEBHOOK_SECRET"]) delete process.env[name];
   process.env.RESEND_API_KEY = "re_test_check_only_a_stand_in";
@@ -267,6 +271,7 @@ async function main(): Promise<void> {
   process.env.AWS_SES_ROLE_ARN = priorRole;
   globalThis.fetch = collectorFetch;
 
+  clock.restore();
   done();
 }
 

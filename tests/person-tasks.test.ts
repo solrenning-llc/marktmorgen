@@ -19,6 +19,7 @@ import { GET, POST } from "@/app/api/store/person-tasks/route";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { claimHandle, ensureStatsId, ensureStoreId, setSubscription, storeForEmail } from "@/lib/store";
 import { paidPeriod } from "./billing-period-fixture";
+import { installVirtualClock } from "./slow-test-virtual-clock";
 
 const NOW = 1_793_700_000;
 const STATS = "t".repeat(16);
@@ -34,6 +35,9 @@ const input = (raw: Record<string, unknown>) => {
 const id = (n: number) => `task${String(n).padStart(6, "0")}`;
 
 async function main(): Promise<void> {
+  // The lock waits (lib/redis-lock.ts polls up to TASKS_LOCK_WAIT_MS and longer) pass on a virtual clock, in the
+  // order the real one would give: every check of the time below still sees the whole wait.
+  const clock = installVirtualClock({ maxMs: 1_000 });
   redis.clear();
 
   part("What a task may be");
@@ -300,6 +304,7 @@ async function main(): Promise<void> {
   part("As kept: whatever is stored is checked again");
   is("broken entries and repeated ids dropped", parseTasks([{ id: id(1), text: "Fine", due: "", assignee: "", done: false, createdAt: NOW }, { id: id(1), text: "Repeated" }, { id: "BAD", text: "x" }, { id: id(2), text: "Bad date", due: "soon", assignee: "" }, null]).map((t) => t.text), ["Fine"]);
 
+  clock.restore();
   done();
 }
 

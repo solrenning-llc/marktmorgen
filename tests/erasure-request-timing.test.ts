@@ -13,6 +13,7 @@ import { askErasureLink } from "@/lib/erasure-request";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import { installVirtualClock } from "./slow-test-virtual-clock";
 
 const SLOW_MS = 400;
 let sends = 0;
@@ -50,6 +51,9 @@ async function timed(email: string, handle?: string): Promise<{ answer: unknown;
 }
 
 async function main(): Promise<void> {
+  // The slow email and the waits for what runs after the answer pass on a virtual clock, in the order the real
+  // one would give; performance.now() moves with it, so an answer that waited for the email still measures slow.
+  const clock = installVirtualClock({ maxMs: SLOW_MS * 3 });
   redis.clear();
   process.env.NIMBUS_DATA_KEY ??= "tests-only-not-a-real-deployment-secret";
   process.env.RESEND_API_KEY = "re_test_erasure_timing_only_a_stand_in";
@@ -83,6 +87,7 @@ async function main(): Promise<void> {
     fails = false;
     is("with the email provider down, still the same answer for both", [aDown.answer, bDown.answer], [{ status: "sent" }, { status: "sent" }]);
   }
+  clock.restore();
   done();
 }
 

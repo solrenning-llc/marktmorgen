@@ -6,7 +6,11 @@ import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 import { ROOM } from "./data-room";
 import { installSesMailFixture } from "./ses-mail-fixture";
+import { installVirtualClock } from "./slow-test-virtual-clock";
 async function main() {
+  // The pace between list batches (lib/mail.ts, 1.5 s) passes on a virtual clock, in the order the real one
+  // would give; request cutoffs stay on the real clock.
+  const clock = installVirtualClock({ maxMs: 1_500 });
   redis.clear();
   const owner = "batch-owner@example.com";
   await claimHandle(owner, "batch-check", "Batch Check", "");
@@ -125,7 +129,7 @@ async function main() {
     }
     is("known refusals still allow exactly the existing five tries and accept nobody",
       [mail.calls.ses, mail.ses.length, mail.resendAttempts.length], [10, 0, 0]);
-  } finally { redis.pipeline = original; mail.restore(); }
+  } finally { redis.pipeline = original; mail.restore(); clock.restore(); }
   done();
 }
 void main();

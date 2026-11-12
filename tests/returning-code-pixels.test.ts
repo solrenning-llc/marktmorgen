@@ -18,7 +18,7 @@
  */
 import * as React from "react";
 import { StorePixels } from "@/components/store-pixels";
-import { linkTokenHere } from "@/components/returning-code-box";
+import { linkTokenHere, typedCodeHere } from "@/components/returning-code-box";
 import { NO_PIXELS } from "@/lib/pixels";
 import { done, is, part } from "./check";
 
@@ -117,6 +117,24 @@ async function main(): Promise<void> {
   browserAt("https://marktmorgen.com/@returnbox/p/prod000003");
   run({ handle: "returnbox2", storeName: "Return Box", pixels: { ...NO_PIXELS, meta: "523456789012345" }, names: "Meta", askFirst: false });
   is("no token", linkTokenHere(), "");
+
+  part("The product page sent back with a refused code (?returning=...&rc=CODE), on a store with pixels");
+  // The creator's code words only for people who bought here before: an ad
+  // script must not read them as the page's address (#3690, Claude 3 cloud L, LEVE 2).
+  const CODE = "THANKS2026";
+  const back = browserAt(`https://marktmorgen.com/@returnbox/p/prod000004?returning=code&rc=${CODE}#returning`);
+  is("before the pixels: the field reads the typed code from the address", typedCodeHere(), CODE);
+  run({ handle: "returnbox3", storeName: "Return Box", pixels: { ...NO_PIXELS, meta: "623456789012345", google: "G-CB12CD34EG" }, names: "Meta and Google", askFirst: false });
+  is("the two platforms' scripts were started", back.seen.length, 2);
+  is(
+    "no platform's script is started on an address that names the code",
+    back.seen.filter((s) => s.page.includes(CODE)).map((s) => new URL(s.src).hostname),
+    [],
+  );
+  is("the refusal stays in the address, the code does not", here().href, "https://marktmorgen.com/@returnbox/p/prod000004?returning=code#returning");
+  is("after the pixels: the field still fills the code in again (WCAG 3.3.7)", typedCodeHere(), CODE);
+  (here() as unknown as { href: string }).href = "https://marktmorgen.com/@returnbox/p/prod000005?returning=code";
+  is("another product's page: no code", typedCodeHere(), "");
 
   done();
 }

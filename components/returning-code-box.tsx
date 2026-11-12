@@ -24,7 +24,12 @@ import { type ReturningStatus, readLinkToken, readRefusal, readTypedCode } from 
 const stays = () => () => {};
 const query = () => new URLSearchParams(window.location.search);
 const statusHere = () => readRefusal(query().get("returning"));
-const codeHere = () => readTypedCode(query().get("rc"));
+/**
+ * The typed code sent back with a refusal (rc): from the address, or, once
+ * the store's pixels have taken it out so no ad script reads it, from what
+ * they took out (as the link's token below).
+ */
+export const typedCodeHere = () => readTypedCode(query().get("rc") ?? keyTakenOut("rc"));
 /**
  * The emailed link's token for this page: from its address, or, once the
  * store's pixels have taken it out of the address so no ad script reads it
@@ -38,7 +43,7 @@ export function ReturningCodeBox({ id, lang, className = "" }: { id: string; lan
   const w = returningCodeWords(lang);
   // Read from the address once the page is in the browser; on the server there is none.
   const status: ReturningStatus | null = useSyncExternalStore(stays, statusHere, nothing);
-  const sentBack = useSyncExternalStore(stays, codeHere, empty);
+  const sentBack = useSyncExternalStore(stays, typedCodeHere, empty);
   const token = useSyncExternalStore(stays, linkTokenHere, empty);
   // What the buyer types wins; until then, the code that was sent back.
   const [typed, setTyped] = useState<string | null>(null);

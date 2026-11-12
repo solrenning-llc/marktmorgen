@@ -30,6 +30,8 @@ for (const [label, what] of [
   ["SSN", "id"],
   ["Passport number", "id"],
   ["Driver's license number", "id"],
+  // Codex L, review @0b7bad2f5d: a typographic apostrophe asks the same.
+  ["Driver\u2019s license number", "id"],
   ["National ID number", "id"],
 ] as const) is(`refused: ${label}`, sensitiveFieldOf(form(["Your name", label]))?.what, what);
 

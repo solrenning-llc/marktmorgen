@@ -111,6 +111,27 @@ for (const label of [
   // the two gaps also present on main, named in the same review.
   "Instagram password so we can post for you",
   "Instagram account password, needed to set up your page",
+  // Codex L, review @0b7bad2f5d (MEDIUM): a typographic apostrophe (U+2019, U+2018, U+02BC) in "what's"/"where's".
+  "What\u2019s your Instagram password?",
+  "What\u2019s the password for Instagram?",
+  "What\u2019s the password?",
+  "Where\u2019s the Gmail password?",
+  "What\u2019s the password you use for Gmail?",
+  "What\u2018s the wifi password?",
+  "What\u02BCs your Gmail password?",
+  "Do you have a Netflix password? What\u2019s it?",
+  // the same review (MEDIUM): a secret named with "a"/"an"/"the", then handed over as "it".
+  "Do you have a Netflix password? Send it to us",
+  "Do you have a Netflix password? Type it below",
+  "Do you have an Instagram password? If so, enter it here",
+  "Got a Netflix password? Paste it here",
+  "Do you have the Gmail password? Share it with us",
+  "Do you have a Netflix password? Tell us what it is",
+  // the same review (MEDIUM): an email or login and the password, more than three words apart.
+  "Email address and the account password",
+  "Login email for the shop and its password",
+  "Email address for the Instagram business account, plus the password",
+  "Instagram account password and after that the login email",
 ] as const) {
   is(`refused: ${label}`, sensitiveKindOf(label), "password");
   const field = { id: "field1", type: "short" as const, label, required: true, options: [] };
@@ -168,6 +189,17 @@ for (const label of [
   "What is the best password for Gmail?",
   "What is a good password for Instagram?",
   "Password managers so we can plan the course",
+  // Controls for the fix of Codex L's review @0b7bad2f5d: apostrophes, "it" and a credential far from the password.
+  "What\u2019s the best password?",
+  "What\u2019s a password?",
+  "What\u2019s your password manager\u2019s name?",
+  "Do you have a password manager? Tell us about it",
+  "Do you use a strong password? Tell us why",
+  "What did the chapter on passwords teach you? Write it below",
+  "Your email (we never ask for a password)",
+  "Email address, and we will send password tips",
+  "Email address and what you think about passwords",
+  "How do you use email sign-in and, at work, a password?",
 ]) is(`kept: ${label}`, sensitiveKindOf(label), null);
 
 part("Generated forms use the same refusal for labels and accessible input names");

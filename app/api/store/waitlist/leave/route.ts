@@ -23,7 +23,8 @@ export async function POST(request: NextRequest) {
     }
   }
   const grant = WAIT_TOKEN.test(token) ? await readWaitToken(token) : null;
-  // The store's room gets the place back; a store renamed since keeps it counted.
+  // The store's room gets the place back. A store renamed since is still found: its old address keeps pointing at it
+  // (lib/store.ts renameHandle); only a store deleted or closed lets it go, and then there is no room to give back.
   const store = grant ? await storeForHandle(grant.h).catch(() => null) : null;
   const done = grant ? await leaveWaitlist(token, store && store.statsId === grant.s ? store : null) : false;
   if (oneClick) return new Response(null, { status: 200 });

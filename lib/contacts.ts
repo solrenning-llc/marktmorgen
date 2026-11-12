@@ -216,7 +216,7 @@ async function settleContacts(room: ContactRoom, pairs: ContactPair[], written: 
  * did not use is let go), and counted there at what it changed.
  */
 async function orderWriteCounted(owner: DataStore, before: Contact, next: Contact, commands: (string | number)[][]): Promise<void> {
-  await redisPipeline(commands);
+  if (commands.length) await redisPipeline(commands);
   const grown = contactBytes(next) - contactBytes(before);
   if (grown > 0) await noteData(owner, [{ slot: CONTACTS_SLOT, bytes: grown }]);
   else if (grown < 0) await giveData(owner, [{ slot: CONTACTS_SLOT, bytes: -grown }]);
@@ -382,23 +382,34 @@ export async function upsertContact(
 export async function noteProduct(listId: string, rawEmail: string, productId: string, title: string, order: DataStore): Promise<boolean> {
   if (!isRedisConfigured() || !listId) return false;
   const email = normaliseEmail(rawEmail);
-  const [raw] = await redisPipeline([["HGET", leadsKey(listId), email]]);
-  const before = parseContact(raw);
-  if (!before) return false;
-  if (!before.ids.includes(productId)) {
-    const next: Contact = {
-      ...before,
-      lastAt: new Date().toISOString(),
-      ids: [...before.ids, productId].slice(-MAX_TITLES),
-      titles: (before.titles.includes(title) ? before.titles : [...before.titles, title]).slice(-MAX_TITLES),
-    };
-    // An order's: counted at what the record grew by (lib/order-data.ts), or
-    // in the contacts' slot for a contact counted there.
-    const commands = [["HSET", leadsKey(listId), email, JSON.stringify(next)]];
-    if (before.r === "c") await orderWriteCounted(order, before, next, commands);
-    else await orderWrite(order, commands);
+  const noted = (before: Contact): Contact => ({
+    ...before,
+    lastAt: new Date().toISOString(),
+    ids: [...before.ids, productId].slice(-MAX_TITLES),
+    titles: (before.titles.includes(title) ? before.titles : [...before.titles, title]).slice(-MAX_TITLES),
+  });
+  for (let tries = 0; tries < 3; tries += 1) {
+    const [raw] = await redisPipeline([["HGET", leadsKey(listId), email]]);
+    const before = parseContact(raw);
+    if (!before) return false;
+    if (before.ids.includes(productId)) return mailable(before);
+    const next = noted(before);
+    if (before.r !== "c") {
+      // An order's: counted at what the record grew by (lib/order-data.ts).
+      await orderWrite(order, [["HSET", leadsKey(listId), email, JSON.stringify(next)]]);
+      return mailable(before);
+    }
+    // A contact counted in the contacts' slot: written only over the row read, in one step (casWrite), so a label
+    // taken off meanwhile is never put back, and the slot follows what was written (Claude 1 cloud's LEVE on #2576).
+    // A row changed meanwhile is read again.
+    const [written] = await casWrite(leadsKey(listId), [{ email, value: JSON.stringify(next), was: sha1(String(raw)) }]);
+    if (written) {
+      await orderWriteCounted(order, before, next, []);
+      return mailable(before);
+    }
   }
-  return mailable(before);
+  // Changed under it every time: the product is not noted this time; whether they may be written to is read afresh.
+  return isMailable(listId, email);
 }
 
 /** Whether this address may be written to now. */

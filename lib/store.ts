@@ -2220,7 +2220,8 @@ export type MoveResult =
  * deleted (fenced), and the account's other stores, rewritten for the new
  * address before that step, are written back to it or listed under it. The
  * copy is deleted when it is still what the move wrote (`copy`, its
- * copyPrint noted with the move's record), however the store itself changed
+ * copyPrint noted with the move's record, and its whole stored record exactly
+ * what its reader gives back, at its own address), however the store itself changed
  * since (its daily jobs and Stripe's answers write to it by its id); without
  * that print, only when the two records are the same but for the address.
  * A copy somebody edited is never deleted: null is answered and the record
@@ -2239,7 +2240,14 @@ export async function settleDoubledStore(fromEmail: string, toEmail: string, cop
       // The copy left behind: deleted only while it is still what the move wrote (review of #2140), or, with no
       // print noted, while both records are the same but for the address.
       const left = home === from ? b : a;
-      const untouched = copy ? (await copyPrint(left)) === copy : recordJson({ ...a, email: "" }) === recordJson({ ...b, email: "" });
+      const leftAt = home === from ? to : from;
+      // With a print, the whole stored record is compared too, not only its print, which is taken without the
+      // address (Claude 7 on #2271, MEDIUM): the copy is deleted only while the record kept there is exactly what
+      // its reader gives back, at its own address, so a field the reader drops or another address in it is kept.
+      const [stored] = copy ? await redisPipeline([["GET", await ownerKey(leftAt)]]) : [null];
+      const untouched = copy
+        ? stored === recordJson(left) && left.email.toLowerCase() === leftAt && (await copyPrint(left)) === copy
+        : recordJson({ ...a, email: "" }) === recordJson({ ...b, email: "" });
       if (!untouched) return null;
       const [members] = await redisPipeline([["SMEMBERS", await accountKey(from)]]);
       const extras = (Array.isArray(members) ? members : []).filter((id): id is string => typeof id === "string" && STORE_ID_PATTERN.test(id));

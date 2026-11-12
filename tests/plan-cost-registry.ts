@@ -1661,7 +1661,7 @@ export const MOVE_TAP_LOCKS: Record<string, { takes: number; waitMs: number; sou
  * 213 before #2271's place among the open broken moves and the exact read of every store of the account.
  */
 export const MOVE_TAP_COMMANDS_UNCONTENDED = 232;
-/** Pipelines a tap sends, each a trip to the database one after another: measured 99. */
+/** Pipelines a tap sends, each a trip to the database one after another: measured 101 (tests/move-cost.test.ts). */
 export const MOVE_TAP_PIPELINES = 105;
 /**
  * Bytes a tap moves through the database both ways, as the REST API carries them, with every store at MAX_STORE_BYTES:

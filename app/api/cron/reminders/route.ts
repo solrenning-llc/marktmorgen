@@ -47,11 +47,15 @@ export async function GET(request: NextRequest) {
     const breaks = PLAN_BREAKS_ENABLED ? await runBreaks() : { told: 0, restarted: 0, failed: 0, dropped: 0 };
     const nudges = await sendTrialNudges();
     // Creators' payment requests still unpaid, reminded on the day they asked for (lib/payment-requests.ts), within what is left of the run.
+    // A pass that threw is said as such, never as "nothing was due" (#4278); the reminders stay on their list.
     const requests = await sendDueReminders(Date.now() + 20_000).catch((error) => {
       console.error("sending payment request reminders failed", error);
-      return { sent: 0, skipped: 0 };
+      return null;
     });
-    return Response.json({ ok: true, ...counts, failedPayments: failed, breaks, nudges, requests }, { headers: { "Cache-Control": "no-store" } });
+    return Response.json(
+      { ok: true, ...counts, failedPayments: failed, breaks, nudges, requests, ...(requests === null ? { requestsFailed: true } : {}) },
+      { headers: { "Cache-Control": "no-store" } },
+    );
   } catch (error) {
     console.error("sending billing reminders failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });

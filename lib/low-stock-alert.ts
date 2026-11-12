@@ -22,9 +22,9 @@
  *
  * Nothing calls this yet: unit 5b calls it where the units change.
  */
-import { claimMark } from "@/lib/claim-mark";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
-import { noteUnitsLeft, lowStockOf, wouldCrossLow } from "@/lib/low-stock";
+import { noteUnitsLeft, lowStockOf, restoreUnitsSeen, wouldCrossLow } from "@/lib/low-stock";
 import { alertCreator } from "@/lib/phone-alerts";
 import { SITE_URL } from "@/lib/site-url";
 import { weeklyOff, weeklyToken } from "@/lib/stats-report";
@@ -76,28 +76,37 @@ export async function tellLowStock(store: Store, product: { id: string; title: s
   }
   if (count === null || count < 1) return "unknown";
   if (count > LOW_STOCK_ALERTS_A_STORE_DAY) return "no";
+  // The record as it was, to put back if nothing reaches the creator.
+  let before: { low: number; seen: number | null } | null = null;
+  try {
+    before = await lowStockOf(store, product.id);
+  } catch {
+    return "unknown";
+  }
+  if (!before) return "off";
+  const low = before.low;
   const crossed = await noteUnitsLeft(store, product.id, left);
   if (crossed !== "crossed") return crossed;
   const key = toldKey(store.statsId, product.id, day);
-  const claimed = await claimMark(key, TOLD_SECONDS);
+  const value = claimValue(now);
+  const claimed = await claimMark(key, TOLD_SECONDS, value);
   if (claimed === "unknown") return "unknown";
   if (claimed !== "ours") return "no";
 
-  let low: number | null = null;
-  try {
-    low = (await lowStockOf(store, product.id))?.low ?? null;
-  } catch {
-    low = null;
-  }
   const units = left as number;
   const title = `${product.title.slice(0, 140)}: ${units} left`;
   const studio = `/studio${store.sid ? `?store=${store.sid}` : ""}#products`;
-  await alertCreator(store, "alert", { title, body: "Restock it before it sells out.", url: studio }, { seed: key, at: now }).catch((error) =>
-    console.error("a low-stock notification failed", error),
-  );
+  const pushed = await alertCreator(store, "alert", { title, body: "Restock it before it sells out.", url: studio }, { seed: key, at: now }).catch((error) => {
+    console.error("a low-stock notification failed", error);
+    return 0;
+  });
+  // Emails the creator stopped are their own choice: then the crossing is said by the phone alone, or not at all.
+  let emailTried = false;
+  let emailed = false;
   if (isSenderConfigured() && !(await weeklyOff(store.handle))) {
+    emailTried = true;
     const stopUrl = `${SITE_URL}/api/store/weekly?h=${encodeURIComponent(store.handle)}&t=${encodeURIComponent(weeklyToken(store.handle))}`;
-    await sendEmail({
+    emailed = await sendEmail({
       // The store's own emails, taken before it goes (Claude 1 and Claude 3 on #3725): one that does not fit is not sent.
       meter: { by: "store", store, kind: "email" },
       from: NIMBUS_FROM,
@@ -112,6 +121,14 @@ export async function tellLowStock(store: Store, product: { id: string; title: s
       ].join("\n"),
       headers: { "List-Unsubscribe": `<${stopUrl}>` },
     }).catch(() => false);
+  }
+  // Nothing reached the creator (the store's emails used up, or the send failed, and no phone told): nothing is spent,
+  // so the next check says it (Revisor 1 and Claude 3 on #3725). The day's mark, the count seen and the store's place go back.
+  if (pushed < 1 && emailTried && !emailed) {
+    await releaseMark(key, value).catch(() => {});
+    await restoreUnitsSeen(store, product.id, left as number, before).catch(() => {});
+    await redisPipeline([["DECR", storeDayKey(store.statsId, day)]]).catch(() => {});
+    return "unknown";
   }
   return "told";
 }

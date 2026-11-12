@@ -305,6 +305,8 @@ const en = {
     addedToOrderNoPart: "The product added to this order has no such part.",
     noSuchProduct: "This order has no such product in it.",
     tooOften: "This link has been opened very many times in the last hour. Please try again in a little while.",
+    /** A copy marked with the buyer's email could not be made just now (lib/pdf-stamp.ts, "retry"): never the file unmarked instead. */
+    stampNotReady: "Your copy, marked with your email, could not be made just now. Please try again in a few minutes.",
   },
 };
 
@@ -556,6 +558,7 @@ const es: OrdersWords = {
     addedToOrderNoPart: "El producto añadido a este pedido no tiene esa parte.",
     noSuchProduct: "Este pedido no contiene ese producto.",
     tooOften: "Este enlace se ha abierto muchísimas veces en la última hora. Vuelve a intentarlo dentro de un rato.",
+    stampNotReady: "Ahora mismo no pudimos preparar tu copia, marcada con tu correo electrónico. Vuelve a intentarlo dentro de unos minutos.",
   },
 };
 
@@ -803,6 +806,7 @@ const fr: OrdersWords = {
     addedToOrderNoPart: "Le produit ajouté à cette commande ne contient pas cet élément.",
     noSuchProduct: "Cette commande ne contient pas ce produit.",
     tooOften: "Ce lien a été ouvert un très grand nombre de fois dans la dernière heure. Réessayez dans un moment.",
+    stampNotReady: "Votre copie, marquée avec votre adresse e-mail, n'a pas pu être préparée pour le moment. Réessayez dans quelques minutes.",
   },
 };
 
@@ -1051,6 +1055,7 @@ const de: OrdersWords = {
     addedToOrderNoPart: "Das zu dieser Bestellung hinzugefügte Produkt hat keinen solchen Teil.",
     noSuchProduct: "Diese Bestellung enthält kein solches Produkt.",
     tooOften: "Dieser Link wurde in der letzten Stunde sehr oft geöffnet. Bitte versuchen Sie es in Kürze noch einmal.",
+    stampNotReady: "Ihre mit Ihrer E-Mail-Adresse gekennzeichnete Kopie konnte gerade nicht erstellt werden. Bitte versuchen Sie es in ein paar Minuten noch einmal.",
   },
 };
 
@@ -1303,6 +1308,7 @@ const it: OrdersWords = {
     addedToOrderNoPart: "Il prodotto aggiunto a questo ordine non contiene quella parte.",
     noSuchProduct: "Questo ordine non contiene quel prodotto.",
     tooOften: "Questo link è stato aperto moltissime volte nell'ultima ora. Riprova tra poco.",
+    stampNotReady: "Al momento non è stato possibile preparare la tua copia, contrassegnata con la tua email. Riprova tra qualche minuto.",
   },
 };
 
@@ -1550,6 +1556,7 @@ const nl: OrdersWords = {
     addedToOrderNoPart: "Het product dat aan deze bestelling is toegevoegd, heeft zo'n onderdeel niet.",
     noSuchProduct: "Deze bestelling bevat zo'n product niet.",
     tooOften: "Deze link is het afgelopen uur heel vaak geopend. Probeer het over een poosje opnieuw.",
+    stampNotReady: "Je exemplaar, gemarkeerd met je e-mailadres, kon nu niet worden gemaakt. Probeer het over een paar minuten opnieuw.",
   },
 };
 
@@ -1798,6 +1805,7 @@ const pt: OrdersWords = {
     addedToOrderNoPart: "O produto adicionado a esta encomenda não tem essa parte.",
     noSuchProduct: "Esta encomenda não contém esse produto.",
     tooOften: "Esta ligação foi aberta muitíssimas vezes na última hora. Tente novamente daqui a pouco.",
+    stampNotReady: "Não foi possível preparar agora a sua cópia, marcada com o seu e-mail. Tente novamente dentro de alguns minutos.",
   },
 };
 

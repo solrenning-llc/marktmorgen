@@ -128,7 +128,7 @@ export function PdfStampToggle({ product }: { product: Product }) {
               {problem.reason === "too_big"
                 ? ` is ${readableSize(problem.bytes)}, over the ${readableSize(MAX_STAMP_BYTES)} that can be stamped, so buyers get it unstamped.`
                 : problem.reason === "storage"
-                  ? " was not stamped for a recent buyer: each buyer's stamped copy is kept in your store's storage, and there was no room for one more (or the storage could not be checked). That buyer got it unstamped. Free up storage to stamp it again."
+                  ? ": your store's storage had no room to keep a recent buyer's stamped copy (or the storage could not be checked), so it was stamped on the fly for that buyer and not kept. Downloads stamped this way use more of your store's monthly requests. Free up storage so copies can be kept again."
                   : problem.reason === "signed"
                     ? " carries a digital signature that a mark would break, so buyers get it unstamped."
                     : problem.reason === "encrypted"

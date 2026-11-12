@@ -3,10 +3,12 @@ import type { NextRequest } from "next/server";
 import { preorderWords } from "@/lib/buyer-words/preorder";
 import { type Listing, type Store, normaliseHandle, storeForHandle } from "@/lib/store";
 import { readOrder } from "@/lib/store-checkout";
-import { plain, serveFile } from "@/lib/serve-file";
+import { plain, serveFile, serveStamped } from "@/lib/serve-file";
 import { offerRefunded, upsellDelivery } from "@/lib/upsell";
 import { OrdersBusy, findPurchase } from "@/lib/buyer-orders";
-import { stampedCopy, wantsStamp } from "@/lib/pdf-stamp";
+import { stampedDelivery, wantsStamp } from "@/lib/pdf-stamp";
+import { givePublicRequests, holdPublicRequests } from "@/lib/traffic";
+import type { CopyMeter } from "@/lib/stamp-cost-rules";
 import { renewPath } from "@/lib/membership-access";
 import { originFrom } from "@/lib/request-origin";
 import type { ProductFile } from "@/lib/product-file";
@@ -53,7 +55,23 @@ const STATUSES = {
   refunded: 410,
 } as const;
 
-/** The file, stamped with its buyer's email when the product asks for it (a PDF or an EPUB). */
+/**
+ * The store's public requests a stamped copy takes for what it spends beyond the download (lib/stamp-cost-rules.ts):
+ * held from the buyer's share of the window at this moment, and given back from the same window.
+ */
+function copyMeter(store: Store): CopyMeter {
+  const now = Date.now();
+  return {
+    take: (units) => holdPublicRequests(store, units, now, "buyer"),
+    give: (units) => givePublicRequests(store, units, now),
+  };
+}
+
+/**
+ * The file, stamped with its buyer's email when the product asks for it (a PDF or an EPUB). A store with no room to
+ * keep the copy sends one stamped on the fly; when that cannot be made now the buyer is asked to try again, never
+ * handed the file unstamped (lib/serve-file.ts serveStamped).
+ */
 async function deliver(
   store: Store,
   product: Listing,
@@ -61,8 +79,8 @@ async function deliver(
   sale: { reference: string; email: string | null; paidAt: number },
 ): Promise<Response> {
   if (wantsStamp(product.stamp, file) && sale.email) {
-    const copy = await stampedCopy(file, { reference: sale.reference, email: sale.email, paidAt: sale.paidAt }, store);
-    if (copy) return serveFile(copy);
+    const delivery = await stampedDelivery(file, { reference: sale.reference, email: sale.email, paidAt: sale.paidAt }, store, copyMeter(store));
+    return serveStamped(delivery, file, ordersWords(store.language).downloadProblems.stampNotReady);
   }
   return serveFile(file);
 }

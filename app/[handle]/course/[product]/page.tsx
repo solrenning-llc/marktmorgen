@@ -42,7 +42,6 @@ import { readCourseFacts, videoTotalLine } from "@/lib/course-facts";
 import { WhoAnswers } from "@/components/who-answers";
 import { nextStepCookie, nextStepFor } from "@/lib/course-next-step";
 import { CourseNextStepCard } from "@/components/course-next-step-card";
-import { pricePill, productPath } from "@/components/store-product";
 
 type Params = {
   params: Promise<{ handle: string; product: string }>;

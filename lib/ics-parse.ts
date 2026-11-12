@@ -219,7 +219,13 @@ function offsetAt(zone: Zone, ms: number): number {
       const until = !end ? Infinity
         : end.date ? Date.UTC(end.y, end.mo - 1, end.d + 1) - 1
         : Date.UTC(end.y, end.mo - 1, end.d, 0, end.minute, end.second) - (end.utc ? 0 : rule.from * 60000);
-      for (let y = Math.max(rule.y, year - 1); y <= year + 1; y += 1) {
+      // A rule that ended before these years still gives its last change, so
+      // its offset stays in force after it (RFC 5545 3.6.5): a zone whose
+      // rules have all ended (summer time abolished) never reads as UTC.
+      const untilYear = Number.isFinite(until) ? new Date(until).getUTCFullYear() : Infinity;
+      const first = untilYear < year - 1 ? untilYear - 1 : year - 1;
+      const last = Math.min(year + 1, untilYear + 1);
+      for (let y = Math.max(rule.y, first); y <= last; y += 1) {
         const date = yearlyDate(rule.rule, y, rule.mo, rule.d);
         const at = date ? Date.UTC(y, date.mo - 1, date.d, 0, rule.minute) - rule.from * 60000 : NaN;
         if (date && at <= until) starts.push(at);

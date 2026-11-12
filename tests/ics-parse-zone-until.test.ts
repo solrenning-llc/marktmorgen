@@ -61,4 +61,34 @@ part("ics-parse: a zone the file defines, with an ended historical rule (UNTIL)"
   is("custom zone: 2026-04-01 10:00 (EDT; the ended April rule changes nothing) = 14:00Z", at("20260401T100000"), "2026-04-01T14:00:00.000Z");
 }
 
+part("ics-parse: a zone the file defines whose yearly rules have all ended keeps the last offset");
+{
+  // A zone that dropped summer time (Brazil, 2019), written as a custom zone
+  // with both yearly rules bounded by UNTIL and nothing after them: the
+  // offset of the last change (-03) stays in force (RFC 5545 3.6.5), never UTC.
+  const vtz = [
+    "BEGIN:VTIMEZONE",
+    "TZID:My Custom Zone",
+    "BEGIN:DAYLIGHT",
+    "TZOFFSETFROM:-0300",
+    "TZOFFSETTO:-0200",
+    "DTSTART:20081019T000000",
+    "RRULE:FREQ=YEARLY;BYMONTH=11;BYDAY=1SU;UNTIL=20181104T030000Z",
+    "END:DAYLIGHT",
+    "BEGIN:STANDARD",
+    "TZOFFSETFROM:-0200",
+    "TZOFFSETTO:-0300",
+    "DTSTART:20090215T000000",
+    "RRULE:FREQ=YEARLY;BYMONTH=2;BYDAY=3SU;UNTIL=20190217T020000Z",
+    "END:STANDARD",
+    "END:VTIMEZONE",
+  ].join("\r\n");
+  const at = (stamp: string) => {
+    const r = parseIcs(cal(`${vtz}\r\n${ev(`DTSTART;TZID=My Custom Zone:${stamp}`, "DURATION:PT1H")}`), window);
+    return r.busy[0] ? iso(r.busy[0].start) : "none";
+  };
+  is("all rules ended: 2026-07-10 10:00 (-03) = 13:00Z", at("20260710T100000"), "2026-07-10T13:00:00.000Z");
+  is("all rules ended: 2026-12-15 10:00 (-03, no summer time any more) = 13:00Z", at("20261215T100000"), "2026-12-15T13:00:00.000Z");
+}
+
 done();

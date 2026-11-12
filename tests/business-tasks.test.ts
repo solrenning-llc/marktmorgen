@@ -13,9 +13,10 @@
 import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import * as BusinessTasksBlock from "@/components/business-tasks";
 import { BusinessTasks, decodeBusinessTasksAnswer } from "@/components/business-tasks";
 import { BUSINESS_TASKS_SLOT, BusinessTasksUnreadable, BusinessTasksWriteUnconfirmed, changeBusinessTasks, readBusinessTasks } from "@/lib/business-tasks";
-import { MAX_BUSINESS_TASKS, addBusinessTask, markBusinessTask, removeBusinessTask, editBusinessTask, type BusinessTask } from "@/lib/business-tasks-rules";
+import { BUSINESS_TASK_REFUSALS, MAX_BUSINESS_TASKS, addBusinessTask, markBusinessTask, removeBusinessTask, editBusinessTask, type BusinessTask } from "@/lib/business-tasks-rules";
 import { CLOSING, COUNTED_FAMILIES, ELSEWHERE_FAMILIES } from "@/lib/data-families";
 import { type DataStore, dataKey, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
@@ -176,6 +177,45 @@ async function main(): Promise<void> {
   is("an unconfirmed write is re-read before writes are offered again", /const refreshed = await ask\(\);[\s\S]*setBusy\(false\);[\s\S]*setError\(UNCONFIRMED\)/.test(clientSource), true);
   is("the team copy names the actual settings permission", clientSource.includes("People on your team who can change store settings see it."), true);
   is("the remove confirmation name is announced", /setSaid\(`Press again to remove/.test(clientSource), true);
+
+  // Out-of-family review of #3562 at 025cddde1c, MEDIUM: a refusal of the input ("title", "long", "date") was taken
+  // for a write of unknown result, re-read, and shown as "We could not confirm this change", hiding its real reason.
+  // Every parsed refusal is a refusal before the write; only the route's own "unconfirmed" (or a reply that is not
+  // exact, which the decoder makes "unconfirmed") is a write of unknown result.
+  const outcome = (BusinessTasksBlock as Record<string, unknown>).writeOutcome as ((answer: unknown) => string) | undefined;
+  const routeCodes = [
+    ...Object.keys(BUSINESS_TASK_REFUSALS), "invalid", "store_full", "busy", "unreadable",
+    "forbidden", "signed_out", "unavailable", "role", "none", "store_gone", "locked", "two_step_required", "studio_used", "a_code_not_known_yet",
+  ];
+  is(
+    "every parsed refusal the route or its guard can send is a refusal before the write; only unconfirmed is unknown",
+    typeof outcome === "function" ? [routeCodes.filter((code) => outcome(decodeBusinessTasksAnswer({ ok: false, error: code }, true)) !== "refused"), outcome(decodeBusinessTasksAnswer({ ok: false, error: "unconfirmed", message: "x" }, true)), outcome(decodeBusinessTasksAnswer(null, true)), outcome(decodeBusinessTasksAnswer(exactListed, true))] : "writeOutcome is missing",
+    [[], "unconfirmed", "unconfirmed", "listed"],
+  );
+  is(
+    "a refused title keeps its own words",
+    decodeBusinessTasksAnswer({ ok: false, error: "title", message: BUSINESS_TASK_REFUSALS.title }, true),
+    { ok: false, error: "title", message: "Write what needs doing." },
+  );
+  is("the block decides by writeOutcome, not by a list of codes", [clientSource.includes('if (writeOutcome(answer) === "refused") {'), clientSource.includes("REFUSED_BEFORE_WRITE")], [true, false]);
+  // LOW 1: after a re-read that worked, the list on screen is current: the words never ask for a reload then.
+  is(
+    "after an unconfirmed write, the reload words only when the re-read failed too",
+    [/setError\(refreshed\.ok \? UNCONFIRMED_SHOWN : UNCONFIRMED\)/.test(clientSource), /UNCONFIRMED_SHOWN = "[^"]*"/.exec(clientSource)?.[0].includes("Reload") ?? null],
+    [true, false],
+  );
+  // LOW 2: a task the re-read no longer holds takes the focus with it: the focus goes to the list's heading.
+  is(
+    "after an unconfirmed write whose task is gone, the focus goes to the heading (2.4.3)",
+    /if \(refreshed\.ok\) \{[\s\S]*?if \(typeof body\.id === "string" && !refreshed\.tasks\.some\(\(t\) => t\.id === body\.id\)\) focusNext\.current = "heading";/.test(clientSource),
+    true,
+  );
+  // LOW 3: the progress line is read exactly: done is the count of done tasks, never more than the total.
+  is(
+    "a progress whose done count is not the tasks' own is not an exact list",
+    [decodeBusinessTasksAnswer({ ...exactListed, progress: { done: 2, total: 1, words: "2 of 1 done" } }, true), decodeBusinessTasksAnswer({ ...exactListed, progress: { done: 1, total: 1, words: "1 of 1 done" } }, false)],
+    [{ ok: false, error: "unconfirmed", message: "We could not confirm this change. Reload the page to see your tasks." }, { ok: false, error: "unreadable", message: "Your tasks could not be reached. Check your connection and try again." }],
+  );
 
   part("The block");
   // SSR and hydration must not depend on a clock read during render.

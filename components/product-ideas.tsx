@@ -64,8 +64,12 @@ export function ProductIdeas({
   const listId = useId();
   if (!on) return null;
 
+  // Not available while asking, while the allowance is unknown or once nothing is left. Said with aria-disabled, never
+  // `disabled`, so the keyboard focus stays on the button (WCAG 2.4.3; cloud I's LOW 2 on #3441).
+  const unavailable = busy || !allowanceKnown || left <= 0;
+
   async function ask() {
-    if (busy) return;
+    if (unavailable) return;
     setBusy(true);
     setError(null);
     setStatus("");
@@ -89,7 +93,8 @@ export function ProductIdeas({
         setStatus(ideasReadyWords(read.length));
         return;
       }
-      if (!Object.hasOwn(REFUSALS, data.error)) setAllowanceKnown(false);
+      // A failed job is counted, so what is left is no longer the figure shown (cloud I's LOW 1 on #3441).
+      if (!Object.hasOwn(REFUSALS, data.error) || data.error === "failed") setAllowanceKnown(false);
       setError(Object.hasOwn(REFUSALS, data.error) ? REFUSALS[data.error] : IDEAS_COPY.unconfirmed);
     } catch {
       setAllowanceKnown(false);
@@ -146,7 +151,7 @@ export function ProductIdeas({
           <button
             className="btn btn-secondary btn-sm inline-flex min-h-11 items-center"
             type="button"
-            disabled={busy || !allowanceKnown || left <= 0}
+            aria-disabled={unavailable}
             aria-busy={busy}
             aria-describedby={allowanceId}
             onClick={() => void ask()}

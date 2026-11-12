@@ -98,7 +98,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:rl:export:", "nl:rl:free:addr:", "nl:rl:free:ip:", "nl:rl:hooks:test:", "nl:rl:licence:",
   "nl:rl:manage:addr:", "nl:rl:manage:ip:", "nl:rl:orders:addr:", "nl:rl:orders:ip:", "nl:rl:phone:quiet:",
   "nl:rl:phone:test:", "nl:rl:signin:", "nl:rl:team-invite:", "nl:rlm:", "nl:sale:told:", "nl:sblocks:",
-  "nl:sdemo:", "nl:sdemo:{<session>}:<family>[:<part>]", "nl:sender:", "nl:ses:did:", "nl:ses:h:", "nl:ses:once:", "nl:ses:rest:", "nl:ses:state", "nl:ses:told:",
+  "nl:sdemo:", "nl:sdemo:{<session>}:<family>[:<part>]", "nl:sender:", "nl:ses:did:", "nl:ses:h:", "nl:ses:maybe:", "nl:ses:once:", "nl:ses:rest:", "nl:ses:state", "nl:ses:told:",
   "nl:share:applied", "nl:share:lock", "nl:share:read-until", "nl:share:stores", "nl:ship:done:",
   "nl:ship:mail:all", "nl:ship:mail:closed:", "nl:ship:mail:due", "nl:ship:mail:erased:",
   "nl:ship:mail:person:", "nl:ship:mail:pool", "nl:ship:mail:pool:", "nl:ship:mail:row:", "nl:ship:mail:store:",
@@ -397,7 +397,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:save:": E,
   "nl:sblock:uses:": E, "nl:sblocks:": E,
   "nl:sender:": C,
-  "nl:ses:did:": C, "nl:ses:h:": C, "nl:ses:once:": C, "nl:ses:rest:": C, "nl:ses:state": C, "nl:ses:told:": C,
+  "nl:ses:did:": C, "nl:ses:h:": C, "nl:ses:maybe:": C, "nl:ses:once:": C, "nl:ses:rest:": C, "nl:ses:state": C, "nl:ses:told:": C,
   // Global financial holds must not be erased to manufacture free quota.
   // They have no approved active funding; the production review is absent.
   "nl:resend-budget:{": C,

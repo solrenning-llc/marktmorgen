@@ -21,7 +21,7 @@ import { currentResendFallbackProofIsMissing, guardedResendPost, type ResendTran
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { atSiteAddress, creatorDomain, domainOf } from "@/lib/mail-from";
-import { countSesSent, isSesConfigured, notYetTaken, sesBatch, sesBulkRoom, sesConfig, sesDown, sesReady, sesSend } from "@/lib/ses";
+import { countSesSent, isSesConfigured, notMaybeSent, notYetTaken, sesBatch, sesBulkRoom, sesConfig, sesDown, sesReady, sesSend } from "@/lib/ses";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { type AllowanceStore, takeAllowance } from "@/lib/store-allowance";
 import { allowanceWindow } from "@/lib/allowance-window";
@@ -640,7 +640,11 @@ async function dispatchBatch(
     const pending = await notYetTaken(batchKey, going);
     // Unreadable evidence must not release recipients to either provider.
     if (pending === null) return "retry";
-    going = pending;
+    // Nor is anybody whose email under this key SES may have taken with its answer lost (lib/ses.ts, maybeKey): the
+    // caller's retry is never a second email to them (rule 30; webhooks/cron audit, Claude 1, 12/11/2026).
+    const unsure = await notMaybeSent(batchKey, pending);
+    if (unsure === null) return "retry";
+    going = unsure;
     // And a batch whose rest was once handed to Resend goes back to Resend,
     // under the same key: if Resend took it and the answer was lost on the
     // way, only Resend can tell, and Amazon would write to them all again.

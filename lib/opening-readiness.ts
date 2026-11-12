@@ -131,21 +131,30 @@ export function commercialReviewParts(records: CommercialRecords = CURRENT_RECOR
   );
 }
 
+/** The gate answers and plans-on-sale state the list is computed from: today's by default, synthetic ones only in tests. */
+export type OpeningState = Readonly<{ plansOnSale?: boolean; gates?: Readonly<Partial<Record<(typeof OPENING_GATES)[number]["id"], boolean>>> }>;
+
 /**
  * Every condition of opening with its state today. The owner's request is
- * not exported by lib/opening.ts and is never guessed: plans on sale means it
- * was given; every gate ready while plans are closed means it was not;
- * otherwise the gates cannot tell, and it says null.
+ * not exported by lib/opening.ts and is not read here; it is never guessed:
+ * plans on sale means it was given; every gate ready while plans are closed
+ * means it was not; otherwise the gates cannot tell, and it says null, and
+ * its text says so. `state` replaces today's answers only for tests; nothing
+ * here can change a gate.
  */
-export function openingReadiness(): readonly OpeningCondition[] {
-  const gates: OpeningCondition[] = OPENING_GATES.map((gate) => ({ id: gate.id, ready: gate.ready(), who: gate.who, where: gate.where, needs: gate.needs }));
+export function openingReadiness(state: OpeningState = {}): readonly OpeningCondition[] {
+  const plansOnSale = state.plansOnSale ?? PLANS_ON_SALE;
+  const gates: OpeningCondition[] = OPENING_GATES.map((gate) => ({ id: gate.id, ready: state.gates?.[gate.id] ?? gate.ready(), who: gate.who, where: gate.where, needs: gate.needs }));
   const gatesReady = gates.every((gate) => gate.ready === true);
+  const ready = plansOnSale ? true : gatesReady ? false : null;
   const request: OpeningCondition = {
     id: "ownerRequest",
-    ready: PLANS_ON_SALE ? true : gatesReady ? false : null,
+    ready,
     who: "owner",
     where: "lib/opening.ts (OPENING_REQUESTED)",
-    needs: "The owner's request, given last, once every gate is ready and the minimum customer base is computed and shown.",
+    needs:
+      "The owner's request, given last, once every gate is ready and the minimum customer base is computed and shown." +
+      (ready === null ? " Not read here: OPENING_REQUESTED is private to lib/opening.ts, so while a gate is not ready this list cannot tell whether it was given; see it there." : ""),
   };
   return Object.freeze([request, ...gates]);
 }

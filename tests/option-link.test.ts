@@ -80,6 +80,12 @@ async function main(): Promise<void> {
   const list = box("opt5", many);
   is("past six options, the list opens with the linked one selected", [/<option value="opt5" selected="">/.test(list), /<option value="opt4" selected="">/.test(list), list.includes(words("en").optionFromLink("Size 5"))], [true, false, true]);
   is("and without a link, on the choose-one line", /<option value="" disabled="" selected="">/.test(box(null, many)), true);
+  // Reviews of 8d83f7e (LOW): the reason is read with the control, not only seen above it, so a screen-reader user who
+  // tabs to the cards or the list hears why one is already chosen.
+  const noteId = (html: string) => /<p[^>]*id="([^"]+)"[^>]*data-option-from-link=""/.exec(html)?.[1] ?? null;
+  const describes = (html: string, tag: string) => new RegExp(`<${tag}[^>]*aria-describedby="${noteId(html) ?? "(none)"}"`).test(html);
+  is("the cards' group and the list are described by the reason", [noteId(withGold) !== null, describes(withGold, "fieldset"), noteId(list) !== null, describes(list, "select")], [true, true, true, true]);
+  is("without a link nothing points at a reason that is not there", [/<fieldset[^>]*aria-describedby/.test(without), /<select[^>]*aria-describedby/.test(box(null, many))], [false, false]);
 
   part("The page and the studio");
   const page = read("app/[handle]/p/[product]/page.tsx");

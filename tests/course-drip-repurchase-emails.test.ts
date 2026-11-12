@@ -26,6 +26,15 @@ const course: Course = {
     ...[1, 2, 3, 4, 5, 6].map((n) => ({ id: `module00000${n}`, title: `Month ${n}`, dripDays: 30 * n, lessons: [lesson(`lesson00000${n}`)] })),
   ],
 };
+/** A short course: one module, 30 days after buying, and nothing later to come due under an old start (Codex G on #3369). */
+const short: Course = {
+  id: courseId, certificate: false, startsAt: null,
+  modules: [
+    { id: "module000000", title: "Week 1", dripDays: 0, lessons: [lesson("lesson000000")] },
+    { id: "module000001", title: "Month 1", dripDays: 30, lessons: [lesson("lesson000001")] },
+  ],
+};
+let current: Course = course;
 const product = { id: "prod_dripmail1", title: "Drip course", priceCents: 4900, course: { id: courseId, lessons: 7 } } as unknown as Listing;
 const store = { handle: "drip-school", previousHandles: [], name: "Drip School", email: "owner@example.test", statsId: "6".repeat(32), sid: "5".repeat(32), language: "en", stripeAccountId: "acct_synthetic02" } as unknown as Store;
 const buyer = "buyer-drip@example.test";
@@ -48,7 +57,7 @@ async function openedOn(start: number, who = buyer) {
 /** One run of the daily job at `now`; the subjects of what it sent. */
 async function run(now: number): Promise<string[]> {
   mail.sent = [];
-  await sendDripEmails(async (handle) => (handle === store.handle ? store : null), async (id) => (id === courseId ? course : null), origin, now);
+  await sendDripEmails(async (handle) => (handle === store.handle ? store : null), async (id) => (id === courseId ? current : null), origin, now);
   return mail.sent.map((m) => m.subject);
 }
 const subject = (title: string) => `Now open in Drip course: ${title}`;
@@ -82,7 +91,7 @@ async function fresh(sessions: Record<string, unknown>[]) {
   catalog.listings = [product];
   stripe.sessions = sessions;
   stripe.fail = false;
-  await registerDrip(store, product, course);
+  await registerDrip(store, product, current);
 }
 
 async function main() {
@@ -172,6 +181,17 @@ async function main() {
   is("and reads no more students at Stripe", stripe.asked.filter((p) => p.startsWith("/checkout/sessions?")).length, reads);
   is("the next run, in the store's next window, announces it to the last one", await run(first + 31 * DAY), [subject("Month 1")]);
   is("and then to nobody again", await run(first + 32 * DAY), []);
+
+  part("A short course bought again after a full refund, not opened since: its restarted Month 1 still goes (Codex G on #3369)");
+  current = short;
+  await fresh([session("cs_test_second", second, false), session("cs_test_first", first, true)]);
+  await recordEnrollment(store, buyer, product.id, first);
+  await openedOn(first);
+  is("before the new Month 1 opens, nothing is announced", await run(second + 29 * DAY), []);
+  is("Month 1 is announced the day the page opens it again, 30 days after buying again", await run(second + 30 * DAY), [subject("Month 1")]);
+  is("the studio's start follows the purchase that stands", (await studentDates(courseId, buyer))?.since, second);
+  is("once", await run(second + 31 * DAY), []);
+  current = course;
 
   part("One purchase, written down on its thanks page (unchanged)");
   await fresh([session("cs_test_once", first, false)]);

@@ -788,6 +788,18 @@ export class MemoryRedis {
             return this.run(["HSETNX", target, rest[4 * i + 2], rest[4 * i + 3]]);
           });
         }
+        // lib/imported-purchases.ts BACKFILL_UNLESS_ERASED (#4270): the buyers brought noted only while the address's
+        // purchases are still kept and its print is not among the store's deleted people.
+        if (key.startsWith("-- marktmorgen:backfill-unless-erased:v1\n") && args[0] === "3" && args.length === 7) {
+          const [, erased, who, purchases, print, address, at] = args;
+          if (!["none", "hash"].includes(this.run(["TYPE", erased]) as string)) throw new Error("WRONGTYPE Operation against a key holding the wrong kind of value");
+          this.scriptCalls += 1;
+          if (this.run(["EXISTS", purchases]) === 0) return 0;
+          this.scriptCalls += 1;
+          if (this.run(["HEXISTS", erased, print]) === 1) return -1;
+          this.scriptCalls += 1;
+          return this.run(["HSETNX", who, address, at]);
+        }
         // lib/move-members.ts INVITE_UNLESS_ERASED: each invitation HSETNX only when its print is not among the store's
         // deleted people (-1, nothing written).
         if (key.startsWith("-- marktmorgen:invite-unless-erased:v1\n") && args[0] === "2" && args.length >= 6 && (args.length - 3) % 3 === 0) {

@@ -36,6 +36,7 @@ import { normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type DataStore, needData } from "@/lib/store-data";
 import { orderWrite } from "@/lib/order-data";
+import { suppressedKey, suppressionPrint } from "@/lib/suppression";
 import { dataBytes } from "@/lib/store-data-rules";
 import type { Store } from "@/lib/store";
 
@@ -201,12 +202,35 @@ export async function importedFor(store: Store, email: string): Promise<Imported
   if (!read || !isRedisConfigured()) return [];
   const [raw] = await redisPipeline([read]);
   const found = importedFrom(raw);
-  // Brought over before the list of who was brought existed: noted the first time they are read.
+  // Brought over before the list of who was brought existed: noted the first time they are read, but only while
+  // their purchases are still here and they are not among the store's deleted people, in one step with the write
+  // (BACKFILL_UNLESS_ERASED; #4270): a read taken before their erasure never writes their address back after it.
+  // Best effort, as before: a store with no list to check against, a full room or an unknown answer writes nothing.
   const brought = found.filter((p) => IMPORT_JOB.test(p.job));
-  if (brought.length && store.statsId) {
-    await orderWrite(store, [["HSETNX", importedWhoKey(store.statsId), normaliseEmail(email), String(Math.min(...brought.map((p) => p.at)))]]).catch(() => {});
+  if (brought.length && store.statsId && store.listId) {
+    await backfillUnlessErased(store, email, Math.min(...brought.map((p) => p.at))).catch(() => {});
   }
   return found;
+}
+
+/**
+ * The backfill of the buyers an import brought (nl:imp:who), in one step with its checks (#4270, as
+ * GRANT_UNLESS_ERASED): KEYS[1] the store's prints (nl:erased:<listId>), KEYS[2] the buyers brought, KEYS[3] the
+ * address's purchases; ARGV[1] the address's print, ARGV[2] the address, ARGV[3] when it was brought. Their purchases
+ * gone answers 0 and their print found answers -1, nothing written either way; otherwise HSETNX's own 1 or 0.
+ * lib/redis-memory.ts runs it the same way.
+ */
+export const BACKFILL_UNLESS_ERASED = `-- marktmorgen:backfill-unless-erased:v1
+if redis.call("EXISTS", KEYS[3]) == 0 then return 0 end
+if redis.call("HEXISTS", KEYS[1], ARGV[1]) == 1 then return -1 end
+return redis.call("HSETNX", KEYS[2], ARGV[2], ARGV[3])`;
+
+async function backfillUnlessErased(store: Store, email: string, at: number): Promise<void> {
+  if (!store.statsId || !store.listId) return;
+  const address = normaliseEmail(email);
+  // At the most it weighs, taken from the store's room before the step, as grantUnlessErased takes a grant's.
+  await needData(store, [{ slot: "imp", bytes: dataBytes([address, String(at)], 1) }]);
+  await redisPipeline([["EVAL", BACKFILL_UNLESS_ERASED, 3, suppressedKey(store.listId), importedWhoKey(store.statsId), importedKey(store.statsId, address), suppressionPrint(store.listId, address), address, String(at)]]);
 }
 
 /**

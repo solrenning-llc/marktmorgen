@@ -39,6 +39,14 @@ async function main(): Promise<void> {
   is("(control) the erasure deleted the purchase", redis.run(["EXISTS", importedKey(STATS, EMAIL)]), 0);
   is("after completed erasure, the erased address is not among the buyers an import brought", redis.run(["HGET", importedWhoKey(STATS), EMAIL]), null);
   is("after completed erasure, the creator's imported-buyer list does not name them", (await importedBuyers(STATS)).has(EMAIL), false);
+
+  part("a buyer who was not deleted is still noted the first time their imported purchases are read");
+  const KEPT = "kept-imported@example.com";
+  await redis.pipeline([["HSET", importedKey(STATS, KEPT), "prod_1", JSON.stringify({ at: 1_700_000_100, job: "b".repeat(24), items: null, option: null })]]);
+  is("(control) not on the list of buyers brought before the read", redis.run(["HGET", importedWhoKey(STATS), KEPT]), null);
+  is("(control) the read finds the purchase", (await importedFor(store, KEPT)).length, 1);
+  is("and their address is noted among the buyers an import brought, at when it was brought", redis.run(["HGET", importedWhoKey(STATS), KEPT]), "1700000100");
+  is("so the creator's imported-buyer list names them", (await importedBuyers(STATS)).has(KEPT), true);
   done();
 }
 main().catch((error) => { console.error(error); process.exit(1); });

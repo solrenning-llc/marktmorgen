@@ -10,7 +10,7 @@ import { readAllListings } from "@/lib/catalog";
 import { factsFrom, readPathCounts, readPathMoney } from "@/lib/path-facts";
 import { readPaidSales, readLifeRecord } from "@/lib/stats";
 import { readPayPalSales } from "@/lib/paypal-sales";
-import { addProduct, claimHandle, ensureListId, ensureStatsId, setPayPalSeller, setProductHidden, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { addProduct, claimHandle, ensureListId, ensureStatsId, setMailSettings, setPayPalSeller, setProductHidden, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -43,6 +43,8 @@ async function seed() {
   await setStripeAccount(owner, "acct_1TestD7Path0001", true);
   await setPayPalSeller(owner, "D7PAYPALMERCHANT");
   await setSubscription(owner, { customerId: "cus_D7Owner0001", subscriptionId: "sub_D7Owner0001", active: true, period: paidPeriod() });
+  // A members import needs the postal address its emails carry (lib/move-members.ts, movePostal); a synthetic one.
+  await setMailSettings(owner, { fromName: "Synthetic path store", address: "1 Synthetic Lane, Portland, ME 04101, USA" });
 }
 
 async function runImportOf(kind: ImportKind, rows: string[][], input: Partial<StartInput> = {}) {

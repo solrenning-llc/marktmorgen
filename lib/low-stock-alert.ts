@@ -110,9 +110,14 @@ export async function tellLowStock(store: Store, product: { id: string; title: s
 }
 
 /** Products the job checks a run, at most. */
-export const LOW_STOCK_RUN_PRODUCTS = 10;
-/** How long a product waits before its next check. */
-export const LOW_STOCK_WAIT_MS = 15 * 60_000;
+export const LOW_STOCK_RUN_PRODUCTS = 50;
+/**
+ * How long a product waits before its next check when nothing sold: a sale
+ * makes it due at once (lowStockTouched, from the cart's hold), so this is
+ * only the safety recheck, a day (Revisor 1 on #3814: a fixed pace over the
+ * whole platform would grow with it).
+ */
+export const LOW_STOCK_WAIT_MS = 86_400_000;
 
 export type LowStockDeps = {
   /** The store by its own id, read exactly (lib/store-exact.ts). */
@@ -123,10 +128,10 @@ export type LowStockDeps = {
 };
 
 /** One product's turn: "told" when the creator was told, "done" when it leaves the set, "later" otherwise. */
-async function checkOne(member: string, now: number, deps: LowStockDeps): Promise<"told" | "done" | "later"> {
-  const cut = member.indexOf("|");
-  const storeId = cut > 0 ? member.slice(0, cut) : "";
-  const productId = cut > 0 ? member.slice(cut + 1) : "";
+async function checkOne(entry: string, now: number, deps: LowStockDeps): Promise<"told" | "done" | "later"> {
+  const cut = entry.indexOf("|");
+  const storeId = cut > 0 ? entry.slice(0, cut) : "";
+  const productId = cut > 0 ? entry.slice(cut + 1) : "";
   if (!storeId || !/^[a-z0-9]{1,40}$/.test(productId)) return "done";
   const found = await deps.load(storeId);
   // The store is gone: its numbers went with it (lib/data-families.ts).
@@ -153,24 +158,24 @@ async function checkOne(member: string, now: number, deps: LowStockDeps): Promis
 export async function runLowStockChecks(deadline: number, deps: LowStockDeps): Promise<number> {
   if (!isRedisConfigured()) return 0;
   const reply = repliesFor(await redisPipeline([["ZRANGEBYSCORE", LOW_STOCK_DUE, "-inf", Date.now(), "LIMIT", 0, LOW_STOCK_RUN_PRODUCTS]]), 1);
-  const members = reply ? stringList(reply[0]) : null;
-  if (!members) {
+  const entries = reply ? stringList(reply[0]) : null;
+  if (!entries) {
     console.error("checking low-stock numbers: the products due were read in an unknown shape, so they wait", new UnknownReplyError("the low-stock products due"));
     return 0;
   }
   let told = 0;
-  for (const member of members) {
+  for (const entry of entries) {
     if (Date.now() > deadline) break;
     let turn: "told" | "done" | "later";
     try {
-      turn = await checkOne(member, Date.now(), deps);
+      turn = await checkOne(entry, Date.now(), deps);
     } catch (error) {
       console.error("checking low-stock numbers: a product could not be read as asked, so it waits", error);
       turn = "later";
     }
     if (turn === "told") told += 1;
-    if (turn === "done") await redisPipeline([["ZREM", LOW_STOCK_DUE, member]]);
-    else await redisPipeline([["ZADD", LOW_STOCK_DUE, "XX", Date.now() + LOW_STOCK_WAIT_MS, member]]);
+    if (turn === "done") await redisPipeline([["ZREM", LOW_STOCK_DUE, entry]]);
+    else await redisPipeline([["ZADD", LOW_STOCK_DUE, "XX", Date.now() + LOW_STOCK_WAIT_MS, entry]]);
   }
   return told;
 }

@@ -85,6 +85,19 @@ export async function lowStockOf(store: DataStore, productId: string): Promise<L
   return parsed;
 }
 
+/**
+ * A sale's hold changed these products' units left: each that has a number
+ * (already on LOW_STOCK_DUE, ZADD XX) is due for the job at once; one
+ * without a number is never added. One command a product, in one round
+ * trip, inside the cart's stock commands (tests/cart-stock.test.ts). Its
+ * failure is only a later check: the job still checks every product a day.
+ */
+export async function lowStockTouched(store: { sid?: string }, productIds: string[]): Promise<void> {
+  if (!store.sid || !productIds.length || !isRedisConfigured()) return;
+  const now = Date.now();
+  await redisPipeline(productIds.map((id) => ["ZADD", LOW_STOCK_DUE, "XX", now, lowStockMember(store.sid!, id)])).catch(() => {});
+}
+
 export type LowStockSave = "saved" | "off" | "invalid" | "full" | "unknown";
 
 /**

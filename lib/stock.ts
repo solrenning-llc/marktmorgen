@@ -18,6 +18,7 @@ import { type Held, LockBusyError, releaseLock, takeLock } from "@/lib/redis-loc
 import { OrdersPausedError } from "@/lib/order-admission";
 import { DigitalConsentMissing } from "@/lib/digital-consent";
 import type { Listing, Store } from "@/lib/store";
+import { lowStockTouched } from "@/lib/low-stock";
 
 const HOLD_MS = HOLD_SECONDS * 1000;
 const MAX_CHECKS = 5;
@@ -430,7 +431,11 @@ export async function withCartStockHolds<T extends { id: string }>(
   const bound = acknowledged(receipt, keys.length)
     ? scriptAnswer(await redisPipeline([["EVAL", STOCK_BIND, keys.length, ...keys, keys.length, pending, value.id]]).catch(() => null))
     : null;
-  if (bound === 1) return { ok: true, value };
+  if (bound === 1) {
+    // The units left changed: the creator's low-stock numbers among these are checked by the mail job at once (623 [SZ7]).
+    await lowStockTouched(store, limited.map((product) => product.id));
+    return { ok: true, value };
+  }
   // Nobody is sent to a checkout whose units are not proven its own: it is closed at Stripe, and only Stripe's "expired" lets its holds go.
   if (store.stripeAccountId) {
     const closed = await onAccount("POST", store.stripeAccountId, `/checkout/sessions/${encodeURIComponent(value.id)}/expire`, new URLSearchParams()).catch(() => null);

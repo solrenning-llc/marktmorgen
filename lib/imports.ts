@@ -85,7 +85,7 @@ import { suppressedAmong, suppressedKey, suppressionPrint } from "@/lib/suppress
 import { grantUnlessErased, importedFor } from "@/lib/imported-purchases";
 import { deliverableItems } from "@/lib/bundle-rules";
 import { NIMBUS_FROM, isSenderConfigured, sendBatch } from "@/lib/email";
-import { GIVE_BACK_FLOOR, GIVE_BACK_FLOOR_EXTRA_COMMANDS, giveBackToMonth, monthlyAllowance, releaseDay, reserveDay, takeFromMonth, takeFromMonthExact } from "@/lib/mail";
+import { GIVE_BACK_FLOOR, GIVE_BACK_FLOOR_EXTRA_COMMANDS, giveBackToMonth, mailDay, monthlyAllowance, releaseDay, reserveDay, takeFromMonth, takeFromMonthExact } from "@/lib/mail";
 import { IMPORT_MIN_ROWS_PER_UPLOAD, IMPORT_ROW_BYTES, importAllowanceFor, importRowsFor } from "@/lib/import-limits";
 import { costsPaused } from "@/lib/plan-standing";
 import { healthTags, noteSent, pausedFor, rampBack, rampRoom, startRamp } from "@/lib/mail-health";
@@ -1566,7 +1566,8 @@ async function mailStep(job: ImportJob, store: Store): Promise<"more" | "done" |
     return "more";
   }
   // The company's day first: over it, the same buyers wait for tomorrow.
-  if (!(await reserveDay(messages.length))) {
+  const day = mailDay();
+  if (!(await reserveDay(messages.length, day))) {
     await redisPipeline([["SADD", mailKey(job.id), ...emails]]);
     await unsent(portion);
     return "retry";
@@ -1586,12 +1587,12 @@ async function mailStep(job: ImportJob, store: Store): Promise<"more" | "done" |
     if (saved !== "OK") {
       held.n += room;
       await redisPipeline([["SADD", mailKey(job.id), ...emails]]);
-      await releaseDay(messages.length);
+      await releaseDay(messages.length, day);
       await unsent(portion);
       throw new UnknownReplyError("an import's hold saved before its send");
     }
   }
-  if (sending.length < messages.length) await releaseDay(messages.length - sending.length);
+  if (sending.length < messages.length) await releaseDay(messages.length - sending.length, day);
   if (sending.length === 0) {
     job.counts.unmailed += messages.length;
     await unsent(portion);
@@ -1602,7 +1603,7 @@ async function mailStep(job: ImportJob, store: Store): Promise<"more" | "done" |
     await redisPipeline([["SADD", mailKey(job.id), ...emails]]);
     if (held) held.n += sending.length;
     else await releaseMoved(store, sending.length);
-    await releaseDay(sending.length);
+    await releaseDay(sending.length, day);
     await unsent(portion);
     return "retry";
   }
@@ -1868,12 +1869,13 @@ export async function sendMoveReminders(deadline: number, now = Date.now()): Pro
       }
       const letter = await reminderEmail(store, field, now);
       if (!letter) continue;
-      if (!(await reserveDay(1))) {
+      const day = mailDay();
+      if (!(await reserveDay(1, day))) {
         await remindLater(sid, field, now);
         continue;
       }
       if ((await reserveMoved(store, 1)) < 1) {
-        await releaseDay(1);
+        await releaseDay(1, day);
         // The month's emails are spent: tried once more when they open again, while that is still before the renewal
         // date (after it, reminderEmail has nothing to send). Due REMIND_DAYS_BEFORE days before it, and every window
         // longer than that, a second refusal finds the next opening past the renewal date, so it is put back at most
@@ -1901,7 +1903,7 @@ export async function sendMoveReminders(deadline: number, now = Date.now()): Pro
         counts.sent += 1;
       } else if (sent === "retry") {
         await releaseMoved(store, 1);
-        await releaseDay(1);
+        await releaseDay(1, day);
         await remindLater(sid, field, now);
       }
     } catch (error) {

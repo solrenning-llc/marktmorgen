@@ -29,7 +29,7 @@ import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { orderWrite } from "@/lib/order-data";
 import { type BatchMessage, sendBatch } from "@/lib/email";
-import { CHECKED_BATCH_SIZE, SENDER_WAIT_NOTE, canWrite, fromLine, monthlyAllowance, release, render, reserve } from "@/lib/mail";
+import { CHECKED_BATCH_SIZE, SENDER_WAIT_NOTE, canWrite, fromLine, mailDay, monthlyAllowance, release, render, reserve } from "@/lib/mail";
 import { SITE_URL } from "@/lib/site-url";
 import type { Store } from "@/lib/store";
 import {
@@ -392,7 +392,8 @@ export async function advanceAnnouncement(
       }
       const { recipients, tokens, skipped } = read;
       if (recipients.length) {
-        const reserved = await reserve(store, recipients.length);
+        const day = mailDay();
+        const reserved = await reserve(store, recipients.length, false, day);
         if (reserved !== "ok") {
           job = {
             ...job,
@@ -421,7 +422,7 @@ export async function advanceAnnouncement(
         }
         const outcome = await sendBatch(messages, `cm:${id}:${job.done}:${keys.length}`, { by: "monthly" });
         if (outcome !== "sent") {
-          await release(store, recipients.length);
+          await release(store, recipients.length, day);
           const failures = job.failures + 1;
           job = failures >= 5
             ? { ...job, status: "failed", failures, note: "The email service would not take it. Nothing more was sent." }

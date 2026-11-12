@@ -38,7 +38,7 @@ import { type BatchMessage, sendBatch } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { countOf, repliesFor } from "@/lib/redis-reply";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
-import { canWrite, fromLine, release, render, reserve } from "@/lib/mail";
+import { canWrite, fromLine, mailDay, release, render, reserve } from "@/lib/mail";
 import { leadsKey, parseContact } from "@/lib/contacts";
 import { storeBase } from "@/lib/purchase-email";
 import { SITE_URL } from "@/lib/site-url";
@@ -402,7 +402,8 @@ export async function sendReviewRequests(
       if (at !== null) for (const item of firsts) await later(item.member, at);
       counts.waiting += at === null ? 0 : agains.length;
     };
-    const reserved = await reserve(store, ready.length);
+    const day = mailDay();
+    const reserved = await reserve(store, ready.length, false, day);
     if (reserved !== "ok") {
       await unclaim(nowSeconds + RETRY_SECONDS.plan);
       continue;
@@ -412,7 +413,7 @@ export async function sendReviewRequests(
       `review-ask:${sha(ready.map((item) => item.entry.reference).join(","))}`, { by: "monthly" },
     );
     if (outcome !== "sent") {
-      await release(store, ready.length);
+      await release(store, ready.length, day);
       if (outcome === "refused") {
         await unclaim(null);
         for (const item of ready) await drop(item.member);

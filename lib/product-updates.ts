@@ -39,7 +39,7 @@ import { type BatchMessage, sendBatch } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
-import { BATCH_SIZE, SENDER_WAIT_NOTE, canWrite, fromLine, monthlyAllowance, release, render, reserve } from "@/lib/mail";
+import { BATCH_SIZE, SENDER_WAIT_NOTE, canWrite, fromLine, mailDay, monthlyAllowance, release, render, reserve } from "@/lib/mail";
 import { leadsKey, parseContact } from "@/lib/contacts";
 import { storeBase } from "@/lib/purchase-email";
 import { SITE_URL } from "@/lib/site-url";
@@ -416,7 +416,8 @@ export async function advanceUpdate(id: string, load: (handle: string) => Promis
         break;
       }
       if (recipients.length) {
-        const reserved = await reserve(store, recipients.length);
+        const day = mailDay();
+        const reserved = await reserve(store, recipients.length, false, day);
         if (reserved !== "ok") {
           job = {
             ...job,
@@ -448,7 +449,7 @@ export async function advanceUpdate(id: string, load: (handle: string) => Promis
         }
         const outcome = await sendBatch(messages, `upd:${id}:${job.done}:${emails.length}`, { by: "monthly" });
         if (outcome !== "sent") {
-          await release(store, recipients.length);
+          await release(store, recipients.length, day);
           const failures = job.failures + 1;
           job =
             failures >= 5 || outcome === "refused"

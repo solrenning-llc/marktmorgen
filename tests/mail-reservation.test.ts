@@ -4,7 +4,7 @@ import { claimHandle, ensureListId, ensureStatsId, setMailSettings, setSubscript
 import { upsertContact } from '@/lib/contacts';
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { reserve, reserveDay, usedThisMonth, monthlyAllowance, sendTo, takeFromMonth } from '@/lib/mail';
+import { reserve, reserveDay, release, releaseDay, mailDay, usedThisMonth, monthlyAllowance, sendTo, takeFromMonth } from '@/lib/mail';
 import { PRO_MONTHLY_EMAILS, SCALE_MONTHLY_EMAILS } from '@/lib/plan';
 import type { Store } from '@/lib/store';
 import { store as memory } from './redis-stub';
@@ -157,4 +157,50 @@ test('unknown acceptance still holds capacity and stops automatic list retry',as
  assert.equal(result.stopped,'retry');assert.deepEqual(result.uncertain,['reader@example.com']);
  assert.equal(dispatch.listCalls,1);assert.equal(await usedThisMonth(made.listId,windowId(made)),1);
  assert.equal(pipelines.some(commands=>commands.some(command=>command[0]==='DECRBY')),false);
+});
+
+/**
+ * A give-back that runs after 00:00 UTC goes to the day its reservation was taken from (found while fixing
+ * tests/mail-health.test.ts): before, release()/releaseDay() read the day at the moment of the give-back, so the new
+ * day's counter went below zero (letting that day send past MARKETING_DAILY_CAP) and the old day's stayed inflated.
+ */
+const BEFORE_MIDNIGHT=Date.parse('2026-11-12T23:59:59.900Z'),AFTER_MIDNIGHT=Date.parse('2026-11-13T00:00:00.100Z');
+const OLD_DAY='nl:mail:day:2026-11-12',NEW_DAY='nl:mail:day:2026-11-13';
+async function atClock<T>(start:number,run:(set:(at:number)=>void)=>Promise<T>):Promise<T>{
+ const Real=globalThis.Date;let now=start;
+ class Fake extends Real{constructor(...args:unknown[]){if(args.length)super(...(args as [number]));else super(now);}static now(){return now;}}
+ globalThis.Date=Fake as DateConstructor;
+ try{return await run(at=>{now=at;});}finally{globalThis.Date=Real;}
+}
+async function dayCount(key:string):Promise<number|null>{const [value]=await memory.pipeline([['GET',key]]);return value===null||value===undefined?null:Number(value);}
+test('a list reservation taken before 00:00 UTC and given back after it returns to its own day',async()=>{
+ process.env.MARKETING_DAILY_CAP='1';
+ await atClock(BEFORE_MIDNIGHT,async set=>{
+  const before=await dayCount(OLD_DAY);
+  const day=mailDay();
+  assert.equal(await reserve(store,1,false,day),'ok');
+  assert.equal(await dayCount(OLD_DAY),(before??0)+1);
+  set(AFTER_MIDNIGHT);
+  await release(store,1,day);
+  assert.equal(await dayCount(OLD_DAY),before??0,'the original day returns to its prior value');
+  const fresh=await dayCount(NEW_DAY);
+  assert.ok(fresh===null || fresh===0,`the new day is untouched, never negative (was ${fresh})`);
+  assert.equal(await reserve(store,1,false,mailDay()),'ok','the next reservation on the new day is accepted');
+  assert.equal(await reserve(store,1,false,mailDay()),'day','and the new day still stops at its cap');
+  assert.equal(await dayCount(NEW_DAY),1);
+ });
+});
+test('a day-only reservation taken before 00:00 UTC and given back after it returns to its own day',async()=>{
+ process.env.MARKETING_DAILY_CAP='1';
+ await atClock(BEFORE_MIDNIGHT,async set=>{
+  const day=mailDay();
+  assert.equal(await reserveDay(1,day),true);
+  set(AFTER_MIDNIGHT);
+  await releaseDay(1,day);
+  assert.equal(await dayCount(OLD_DAY),0,'the original day returns to its prior value');
+  const fresh=await dayCount(NEW_DAY);
+  assert.ok(fresh===null || fresh===0,`the new day is untouched, never negative (was ${fresh})`);
+  assert.equal(await reserveDay(1,mailDay()),true,'the next reservation on the new day is accepted');
+  assert.equal(await reserveDay(1,mailDay()),false,'and the new day still stops at its cap');
+ });
 });

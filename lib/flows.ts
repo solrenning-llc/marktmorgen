@@ -1,6 +1,6 @@
 import { agreementsAllowed } from "@/lib/agreement-rules";
 import { readFlowListStrict } from "@/lib/flow-list";
-import { FLOW_TRIGGERS, type FlowTrigger, MAX_FLOW_WAIT_HOURS } from "@/lib/flow-rules";
+import { FLOW_TRIGGERS, type FlowTrigger, MAX_FLOW_WAIT_HOURS, isReachedShare } from "@/lib/flow-rules";
 import { MAX_FLOWS, MAX_RETRIES_BY_YOU, MAX_STEPS, RUN_KEEP_SECONDS, activeFlowLimit, dailyRunLimit, startableFlows } from "@/lib/flow-limits";
 import { type WaitReason, nextTry, stopWaiting } from "@/lib/flow-retry";
 import { allowanceWindow } from "@/lib/allowance-window";
@@ -123,7 +123,9 @@ export type Flow = {
    * agreed to hear from the creator; "paid_request": paid one of the store's
    * payment requests, sent to their address (635 [GL3], lib/payment-flow-
    * trigger.ts), while they are on the list and agreed to hear from the
-   * creator.
+   * creator; "reached": marked done at least `share` percent of the lessons
+   * of the course `productId` is (287 [H4-1], added 12 November 2026,
+   * lib/course-finish.ts).
    */
   trigger: FlowTrigger;
   productId: string | null;
@@ -157,6 +159,8 @@ export type Flow = {
   starter?: "welcome" | "bought";
   /** Ends for anyone who gets this product, or has bought anything (lib/flow-rules.ts). */
   goal?: FlowGoal;
+  /** For "reached": the percent of the course's lessons done that starts it (lib/flow-rules.ts, isReachedShare). */
+  share?: number;
 };
 
 const QUEUE = "nl:mail:flowq";
@@ -289,7 +293,7 @@ const starterOf = (raw: unknown): Flow["starter"] => (raw === "welcome" || raw =
 
 export type FlowResult =
   | { ok: true; flows: Flow[] }
-  | { ok: false; reason: "name" | "trigger" | "product" | "tag" | "form" | "steps" | "step" | "route" | "goal" | "too_many" | "active_limit" | "unknown" | "setup" | "plan" | "placeholder" | "stage" | "stage_taken" | "signed_taken" | "paid_request_taken" };
+  | { ok: false; reason: "name" | "trigger" | "product" | "tag" | "form" | "steps" | "step" | "route" | "goal" | "too_many" | "active_limit" | "unknown" | "setup" | "plan" | "placeholder" | "stage" | "stage_taken" | "signed_taken" | "paid_request_taken" | "share" };
 
 /**
  * Adds a sequence, or replaces one with the same id. Checked whole every time.
@@ -307,11 +311,14 @@ export async function saveFlow(store: Store, raw: Record<string, unknown>, opts:
   if (!trigger) return { ok: false, reason: "trigger" };
   const courses = new Set(idsOfKind(store, "course"));
   const isCourse = (id: string) => courses.has(id);
-  const aboutProduct = trigger === "product" || trigger === "finished" || trigger === "started" || trigger === "abandoned";
+  const aboutProduct = trigger === "product" || trigger === "finished" || trigger === "started" || trigger === "abandoned" || trigger === "reached";
   const productId = aboutProduct && typeof raw.productId === "string" ? raw.productId : null;
   if ((trigger === "product" || trigger === "abandoned") && !(productId && hasProduct(store, productId))) return { ok: false, reason: "product" };
   // Finishing and opening are things only a course can be done to.
-  if ((trigger === "finished" || trigger === "started") && !(productId && hasProduct(store, productId) && isCourse(productId))) return { ok: false, reason: "product" };
+  if ((trigger === "finished" || trigger === "started" || trigger === "reached") && !(productId && hasProduct(store, productId) && isCourse(productId))) return { ok: false, reason: "product" };
+  // How much of the course a student has done before it starts (287 [H4-1]).
+  const share = trigger === "reached" && isReachedShare(raw.share) ? raw.share : null;
+  if (trigger === "reached" && share === null) return { ok: false, reason: "share" };
   const tag = trigger === "tagged" ? cleanTag(raw.tag) : "";
   if (trigger === "tagged" && !tag) return { ok: false, reason: "tag" };
   // A form of the store's own that asks for an address: without one, nobody it starts could be written to.
@@ -382,6 +389,7 @@ export async function saveFlow(store: Store, raw: Record<string, unknown>, opts:
     ...(formId ? { formId } : {}),
     ...(formOutcome ? { formOutcome } : {}),
     ...(stageId ? { stageId } : {}),
+    ...(share !== null ? { share } : {}),
     steps,
     active,
     createdAt: at >= 0 ? flows[at].createdAt : Math.floor(Date.now() / 1000),
@@ -557,7 +565,7 @@ export async function flowsStartedFor(flows: Flow[], email: string): Promise<str
  * Starts whichever sequences this event begins, for this person. Never
  * throws: the list must never cost anyone what they asked for.
  */
-export async function enroll(store: Store, email: string, event: { joined: boolean; signed?: boolean; paidRequest?: boolean; productId?: string; tag?: string; finished?: string; form?: string; formOutcome?: string; started?: string; abandoned?: string; stage?: string }): Promise<void> {
+export async function enroll(store: Store, email: string, event: { joined: boolean; signed?: boolean; paidRequest?: boolean; productId?: string; tag?: string; finished?: string; form?: string; formOutcome?: string; started?: string; abandoned?: string; stage?: string; reached?: { productId: string; share: number } }): Promise<void> {
   try {
     if (!store.listId || monthlyAllowance(store) === 0 || !isRedisConfigured()) return;
     // Whether what they just got is sold for money: the store's own index
@@ -575,6 +583,8 @@ export async function enroll(store: Store, email: string, event: { joined: boole
           (f.trigger === "tagged" && event.tag && f.tag && sameLabel(f.tag, event.tag)) ||
           (f.trigger === "finished" && event.finished && f.productId === event.finished) ||
           (f.trigger === "started" && event.started && f.productId === event.started) ||
+          // Every share at or below what they have now: a student who went from 20% to 60% at once has reached 25% and 50%.
+          (f.trigger === "reached" && event.reached && f.productId === event.reached.productId && isReachedShare(f.share) && event.reached.share >= f.share) ||
           (f.trigger === "abandoned" && event.abandoned && f.productId === event.abandoned) ||
           (f.trigger === "stage" && event.stage && f.stageId === event.stage) ||
           (f.trigger === "signed" && event.signed) ||

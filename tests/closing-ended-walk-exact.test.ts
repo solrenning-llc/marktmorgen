@@ -62,6 +62,35 @@ for (const [label, reply] of MALFORMED) {
   });
 }
 
+// A score the shape test lets through but no moment can be: a full page ending on it
+// once took the next page from "Infinity", found it empty and ended the walk as
+// complete, so every store after that point was skipped with nothing failing.
+const PAGE = 200;
+for (const bad of ["1e999", "-1e999", "1e20"]) {
+  test(`the ended walk: a full page ending on the score ${bad} is unknown, never a cursor`, async () => {
+    redis.clear();
+    await redis.pipeline([["SET", AFTER, "1700000000000"]]);
+    const asked: string[] = [];
+    const full = Array.from({ length: PAGE }, (_, i) => [`store:fake${i}`, i === PAGE - 1 ? bad : String(1700000000000 + i)]).flat();
+    const original = redis.pipeline;
+    redis.pipeline = async (commands: (string | number)[][]) => {
+      if (commands[0]?.[0] === "ZRANGEBYSCORE" && commands[0]?.[1] === ENDED_INDEX) {
+        asked.push(String(commands[0][2]));
+        return (asked.length === 1 ? [full] : [[]]) as Awaited<ReturnType<typeof original>>;
+      }
+      return original.call(redis, commands);
+    };
+    try {
+      await assert.rejects(() => closeEnded(Number.POSITIVE_INFINITY, Date.now(), HANDS), UnknownReplyError);
+    } finally {
+      redis.pipeline = original;
+    }
+    const [kept] = await redis.pipeline([["GET", AFTER]]);
+    assert.equal(kept, "1700000000000", "the place a long line had reached is kept");
+    assert.ok(!asked.some((from) => /Infinity/.test(from)), `no page is asked from Infinity: ${asked.join(", ")}`);
+  });
+}
+
 test("the ended walk: a confirmed empty line ends the walk and lets the place go", async () => {
   redis.clear();
   await redis.pipeline([["SET", AFTER, "1700000000000"]]);

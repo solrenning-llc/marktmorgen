@@ -1189,7 +1189,9 @@ export async function closeEnded(deadline: number, now = Date.now(), hands: Hand
     if (!flat || flat.length % 2 !== 0 || flat.length > 2 * PAGE) throw new UnknownReplyError("a page of the stores whose plan ended");
     const rows: { key: string; score: string }[] = [];
     for (let i = 0; i + 1 < flat.length; i += 2) {
-      if (!/^-?(0|[1-9][0-9]*)(\.[0-9]+)?(e[+-]?[0-9]+)?$/i.test(flat[i + 1])) throw new UnknownReplyError("a page of the stores whose plan ended");
+      // A score the shape test passes but no moment can be ("1e999", "1e20") is unknown too: taken as one,
+      // the next page began at "Infinity", read empty and ended the walk as complete, skipping every store after it.
+      if (!/^-?(0|[1-9][0-9]*)(\.[0-9]+)?(e[+-]?[0-9]+)?$/i.test(flat[i + 1]) || !Number.isSafeInteger(Math.floor(Number(flat[i + 1])))) throw new UnknownReplyError("a page of the stores whose plan ended");
       rows.push({ key: flat[i], score: flat[i + 1] });
     }
     for (const row of rows) {

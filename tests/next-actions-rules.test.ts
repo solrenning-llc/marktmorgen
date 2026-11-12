@@ -7,7 +7,7 @@
  *   - a count that cannot be read is "unknown", never zero: no action on it, and the view names it;
  *   - a role without the permissions, or a screen the studio does not have for this person, shows neither the
  *     action nor that its number is missing;
- *   - at most three, money at risk first, then recorded money highest first, money not known or in another currency
+ *   - up to five (the item asks for up to five, one per kind), money at risk first, then recorded money highest first, money not known or in another currency
  *     after, then by count, then the fixed order;
  *   - the time each count was made, or that it is not known; no forecast, no percentage in any words.
  */
@@ -53,8 +53,8 @@ part("The item's acceptance case");
   const view = nextActions({ failedPayments: { count: 86, monthly: usd(258_000), at: AT } }, as("owner"));
   is("one action", view.kind === "actions" ? view.actions.length : -1, 1);
   const one = first(view);
-  is("it says 86", one?.words, "86 members' latest payment failed, and Stripe is trying again.");
-  is("with the recorded money", one?.money, "Together they pay $2,580 a month.");
+  is("it says 86", one?.words, "The latest payment of 86 members failed, and Stripe is trying again.");
+  is("with the recorded money, said as recurring revenue (a yearly member does not pay each month)", one?.money, "Together they make up $2,580 a month of your recurring revenue.");
   is("where the number comes from", one?.source, "From your membership numbers, read from your Stripe account.");
   is("when it was counted", one?.asOf, "Counted November 10, 2026 (UTC).");
   is("a link named by where it goes", [one?.link, one?.href], ["See your membership numbers", "/studio/memberships"]);
@@ -70,7 +70,7 @@ is(
   { kind: "nothing", words: NOTHING_NEXT, looked: true },
 );
 is("one person: singular words", first(nextActions({ noWelcome: { count: 1, at: AT } }, as("owner")))?.words, "1 person joined your list and never got a welcome email.");
-is("one member: singular words", [first(nextActions({ failedPayments: { count: 1, monthly: usd(900), at: AT } }, as("owner")))?.words, first(nextActions({ failedPayments: { count: 1, monthly: usd(900), at: AT } }, as("owner")))?.money], ["1 member's latest payment failed, and Stripe is trying again.", "They pay $9 a month."]);
+is("one member: singular words", [first(nextActions({ failedPayments: { count: 1, monthly: usd(900), at: AT } }, as("owner")))?.words, first(nextActions({ failedPayments: { count: 1, monthly: usd(900), at: AT } }, as("owner")))?.money], ["The latest payment of 1 member failed, and Stripe is trying again.", "They make up $9 a month of your recurring revenue."]);
 
 part("A count that cannot be read is unknown, never zero");
 for (const bad of [null, -1, 1.5, Number.NaN, "3", Number.MAX_SAFE_INTEGER + 2] as unknown[]) {
@@ -88,6 +88,10 @@ is("a course without both titles: unknown", nextActions({ courseNext: { count: 4
 is("a course pointing to itself: unknown", nextActions({ courseNext: { count: 4, from: "Course A", to: " Course  A ", at: AT } }, as("owner")).kind, "unknown");
 is("money that is not whole: the action stays, without money", first(nextActions({ failedPayments: { count: 3, monthly: { amount: 1.5, currency: "usd" }, at: AT } }, as("owner")))?.money, null);
 is("money in a currency that is not one: without money", first(nextActions({ failedPayments: { count: 3, monthly: { amount: 500, currency: "zzz" }, at: AT } }, as("owner")))?.money, null);
+{
+  const zero = nextActions({ failedPayments: { count: 3, monthly: usd(0), at: AT }, monthlyMembers: { count: 2, monthly: usd(0), at: AT }, formerMembers: { count: 1, monthly: usd(0), at: AT } }, as("owner"));
+  is("a count above zero with money of 0: no money line, never \"$0.00\"", zero.kind === "actions" ? zero.actions.map((a) => a.money) : "x", [null, null, null]);
+}
 
 part("Only for a role that may act on it, and only where the studio has the screen");
 is("every action needs the numbers", NEXT_ACTION_ORDER.every((id) => NEXT_ACTION_NEEDS[id].includes("stats")), true);
@@ -108,9 +112,10 @@ for (const role of ["owner", "admin", "editor", "support"] as Role[]) {
   is("nor its missing number", nextActions({ formerMembers: { count: null, at: AT } }, as("owner", { failed_payments: "/studio/memberships" })), { kind: "nothing", words: NOTHING_NEXT, looked: false });
 }
 
-part("At most three, in order");
-is("at most three", ids(nextActions(full, as("owner"))).length, NEXT_ACTIONS_MAX);
-is("money at risk first, then the most money", ids(nextActions(full, as("owner"))), ["failed_payments", "yearly_switch", "winback"]);
+part("Up to five, in order");
+is("up to five, as the item asks", NEXT_ACTIONS_MAX, 5);
+is("a store with all five kinds above zero shows all five", ids(nextActions(full, as("owner"))).length, 5);
+is("money at risk first, then the most money, then by count", ids(nextActions(full, as("owner"))), ["failed_payments", "yearly_switch", "winback", "welcome", "course_next"]);
 {
   const atRiskSmall: NextFacts = { ...full, failedPayments: { count: 1, monthly: usd(500), at: AT } };
   is("money at risk first even when smaller", ids(nextActions(atRiskSmall, as("owner")))[0], "failed_payments");
@@ -150,7 +155,7 @@ part("Words: facts, never a forecast");
   is("no forecast or promise", all.filter((w) => /could earn|you could make|estimat|expected|forecast|guarantee|\bwill earn/i.test(w)), []);
   is("no link sends, switches on or charges", all.filter((w) => /^(send|turn on|charge|start)\b/i.test(w)), []);
   is("the course action names both courses", course.kind === "actions" ? course.actions[0].words : "", '9 students finished "Course A" and do not have "Course B".');
-  is("the members who left, and that the come-back email is off", left.kind === "actions" ? [left.actions[0].words, left.actions[0].money, left.actions[0].link] : null, ["4 members left in the last 30 days, and your come-back email is off.", "Together they paid $80 a month before leaving.", "Set up the come-back email"]);
+  is("the members who left, and that the come-back email is off", left.kind === "actions" ? [left.actions[0].words, left.actions[0].money, left.actions[0].link] : null, ["4 memberships ended in the last 30 days, and your come-back email is off.", "Together they paid $80 a month before leaving.", "Set up the come-back email"]);
   const long = nextActions({ courseNext: { count: 1, from: "x".repeat(200), to: "B", at: AT } }, as("owner"));
   is("a long title is cut, not dropped", long.kind === "actions" ? long.actions[0].words.includes(`${"x".repeat(79)}…`) : false, true);
 }

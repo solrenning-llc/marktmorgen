@@ -1,7 +1,7 @@
 /**
  * "Do this next": the store's next best actions (complement WG of 484 [IT1], 5 November 2026, "Próximas ações da
  * loja com números reais"; units 1 and 2, Claude 1, 10 November 2026). The rules, pure and browser-safe: from counts
- * the store already keeps, choose one to three actions, each with the count, where the count comes from and when it
+ * the store already keeps, choose one to five actions, each with the count, where the count comes from and when it
  * was counted. No model is called here; a later unit may ask one to word a draft, inside its own cost ceiling, and
  * only when the creator asks.
  *
@@ -28,7 +28,7 @@ import { formatMoney, isCurrency } from "@/lib/money";
 import type { Permission } from "@/lib/team-roles";
 
 /** The most actions shown at once. */
-export const NEXT_ACTIONS_MAX = 3;
+export const NEXT_ACTIONS_MAX = 5;
 
 /** How far ahead of now a count's time may be (clock skew) before the time is taken as not known. */
 const FUTURE_SKEW_MS = 5 * 60 * 1000;
@@ -48,7 +48,10 @@ export type NextFacts = {
   failedPayments?: { count: number | null; monthly?: MoneyFact | null; at: number | null };
   /** Members paying monthly for a product that also has a yearly price, with what they pay together each month. */
   monthlyMembers?: { count: number | null; monthly?: MoneyFact | null; at: number | null };
-  /** Members who left in the last 30 days while the store's come-back email is off, with what they paid together each month. */
+  /**
+   * Memberships that ended in the last 30 days while the store's come-back email is off, with what they paid together
+   * each month when that is known (a reading that counts trials that never paid gives no money).
+   */
   formerMembers?: { count: number | null; monthly?: MoneyFact | null; at: number | null };
   /** Students who finished one course and do not have the next one, both named by their titles. */
   courseNext?: { count: number | null; from: string; to: string; at: number | null };
@@ -60,7 +63,7 @@ export type NextAction = {
   id: NextActionId;
   /** The action in one sentence, with its count. */
   words: string;
-  /** Recorded money that goes with the count, in words, or null when there is none or it is not known. */
+  /** Recorded money that goes with the count, in words, or null when there is none, it is 0 or it is not known. */
   money: string | null;
   /** Where the count comes from, in plain words. */
   source: string;
@@ -171,22 +174,23 @@ function candidate(id: NextActionId, facts: NextFacts, currency: string, now: nu
   switch (id) {
     case "failed_payments": {
       money = moneyOf((fact as NonNullable<NextFacts["failedPayments"]>).monthly);
-      words = `${plural(count, "member's", "members'")} latest payment failed, and Stripe is trying again.`;
-      moneyWords = money ? `${count === 1 ? "They pay" : "Together they pay"} ${formatMoney(money.amount, money.currency)} a month.` : null;
+      words = `The latest payment of ${plural(count, "member", "members")} failed, and Stripe is trying again.`;
+      // Recurring revenue, a monthly equivalent: a yearly member does not pay each month.
+      moneyWords = money && money.amount > 0 ? `${count === 1 ? "They make up" : "Together they make up"} ${formatMoney(money.amount, money.currency)} a month of your recurring revenue.` : null;
       link = "See your membership numbers";
       break;
     }
     case "yearly_switch": {
       money = moneyOf((fact as NonNullable<NextFacts["monthlyMembers"]>).monthly);
       words = `${plural(count, "member pays", "members pay")} monthly for a product that also has a yearly price.`;
-      moneyWords = money ? `${count === 1 ? "They pay" : "Together they pay"} ${formatMoney(money.amount, money.currency)} a month now.` : null;
+      moneyWords = money && money.amount > 0 ? `${count === 1 ? "They pay" : "Together they pay"} ${formatMoney(money.amount, money.currency)} a month now.` : null;
       link = "Set up the email about the yearly price";
       break;
     }
     case "winback": {
       money = moneyOf((fact as NonNullable<NextFacts["formerMembers"]>).monthly);
-      words = `${plural(count, "member", "members")} left in the last 30 days, and your come-back email is off.`;
-      moneyWords = money ? `${count === 1 ? "They paid" : "Together they paid"} ${formatMoney(money.amount, money.currency)} a month before leaving.` : null;
+      words = `${plural(count, "membership", "memberships")} ended in the last 30 days, and your come-back email is off.`;
+      moneyWords = money && money.amount > 0 ? `${count === 1 ? "They paid" : "Together they paid"} ${formatMoney(money.amount, money.currency)} a month before leaving.` : null;
       link = "Set up the come-back email";
       break;
     }
@@ -232,7 +236,7 @@ export function unknownWords(unknown: NextActionId[]): string {
 }
 
 /**
- * The next one to three actions for this role, from the store's recorded counts. `may` says whether the role holds a
+ * The next one to five actions for this role, from the store's recorded counts. `may` says whether the role holds a
  * permission; `where` is the address of each screen the studio has for this person (an action without one is left
  * out, neither shown nor said to be missing); `currency` is the store's own, the only one money is ranked in; `now`
  * is the time of the reading.

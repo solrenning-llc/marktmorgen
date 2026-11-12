@@ -76,6 +76,14 @@ const en = {
       body: "Wait a moment and look at your membership below before trying again.",
     },
     currency: { title: "This membership stays on its plan", body: "It is paid in a different currency from the one the store's plans use now, so it stays on its current plan. Nothing was changed, and you can still cancel it on your membership page." },
+    cancelled: {
+      title: "Your membership is canceled",
+      body: "Nothing more is charged. What it includes stays open to you until the date shown below.",
+    },
+    unsure: {
+      title: "We could not confirm the cancellation",
+      body: "Stripe's answer did not say whether it went through. Look at your membership below: if it says “Canceled”, it is. If not, press Cancel again.",
+    },
     "cannot-switch": {
       title: "That switch cannot be made",
       body: "The plan may no longer be offered, or the membership may be canceled or waiting on a payment. Nothing was changed.",
@@ -100,6 +108,10 @@ const en = {
   /** "a month", "every 3 months": how often a membership is paid for. */
   every: (interval: Interval, count: number) => (count === 1 ? `a ${interval}` : `every ${count} ${interval}s`),
   ends: (date: string) => `Ends ${date}`,
+  /** The word only a cancelled membership's line shows, which the "unsure" notice points at. */
+  canceledMark: "Canceled",
+  endsCanceled: (date: string) => `Canceled. Ends ${date}`,
+  endsAfterLast: (date: string) => `Ends ${date}, after the last payment`,
   cancel: "Cancel",
   switchPlan: "Switch plan",
   switchCurrencyNote: "Switching plans is not offered on this membership: it is paid in a different currency from the one the store's plans use now.",
@@ -139,6 +151,9 @@ const en = {
   } as Record<string, Notice>,
   cancelNote:
     "If you cancel, the membership stays on until the end of the period you have already paid for, and nothing more is charged.",
+  /** Under Cancel on a membership sold as a number of payments: the store's own page cancels it, with no Stripe page after. */
+  fixedCancelNote: (date: string) =>
+    `It stays on until ${date}, the end of what you have already paid for or of your free trial. None of the payments still to come is taken.`,
 
   // ---- Asking why before a member cancels (added 12 October 2026) --------------------------
   leaveTitle: "Before you go",
@@ -439,6 +454,14 @@ const es: MembershipWords = {
       body: "Espera un momento y revisa tu membresía abajo antes de volver a intentarlo.",
     },
     currency: { title: "Esta membresía se queda en su plan", body: "Se paga en una moneda distinta de la que usan ahora los planes de la tienda, así que se queda en su plan actual. No se cambió nada, y aún puedes cancelarla en la página de tu membresía." },
+    cancelled: {
+      title: "Tu membresía está cancelada",
+      body: "No se cobra nada más. Lo que incluye sigue abierto para ti hasta la fecha que ves abajo.",
+    },
+    unsure: {
+      title: "No pudimos confirmar la cancelación",
+      body: "La respuesta de Stripe no dijo si se completó. Mira tu membresía abajo: si dice “Cancelada”, lo está. Si no, pulsa Cancelar otra vez.",
+    },
     "cannot-switch": {
       title: "Ese cambio no se puede hacer",
       body: "Puede que el plan ya no se ofrezca, o que la membresía esté cancelada o pendiente de un pago. No se cambió nada.",
@@ -464,6 +487,9 @@ const es: MembershipWords = {
       ? { day: "al día", week: "a la semana", month: "al mes", year: "al año" }[interval]
       : `cada ${count} ${{ day: "días", week: "semanas", month: "meses", year: "años" }[interval]}`,
   ends: (date) => `Termina el ${date}`,
+  canceledMark: "Cancelada",
+  endsCanceled: (date) => `Cancelada. Termina el ${date}`,
+  endsAfterLast: (date) => `Termina el ${date}, después del último pago`,
   cancel: "Cancelar",
   switchPlan: "Cambiar de plan",
   switchCurrencyNote: "Esta membresía no ofrece cambiar de plan: se paga en una moneda distinta de la que usan ahora los planes de la tienda.",
@@ -502,6 +528,8 @@ const es: MembershipWords = {
     },
   } as Record<string, Notice>,
   cancelNote: "Si cancelas, la membresía sigue activa hasta el final del periodo que ya pagaste, y no se cobra nada más.",
+  fixedCancelNote: (date) =>
+    `Sigue activa hasta el ${date}, el final de lo que ya pagaste o de tu prueba gratis. No se cobra ninguno de los pagos que faltan.`,
 
   leaveTitle: "Antes de irte",
   leaveHead: (title) => `¿Cancelar ${title}?`,
@@ -786,6 +814,14 @@ const fr: MembershipWords = {
       body: "Patientez un instant et consultez votre abonnement ci-dessous avant de réessayer.",
     },
     currency: { title: "Cet abonnement garde sa formule", body: "Il est payé dans une autre devise que celle des formules actuelles de la boutique, il garde donc sa formule actuelle. Rien n'a été modifié, et vous pouvez toujours l'annuler sur la page de votre abonnement." },
+    cancelled: {
+      title: "Votre abonnement est annulé",
+      body: "Plus rien n'est débité. Ce qu'il comprend reste ouvert pour vous jusqu'à la date indiquée ci-dessous.",
+    },
+    unsure: {
+      title: "Nous n'avons pas pu confirmer l'annulation",
+      body: `La réponse de Stripe ne disait pas si elle a abouti. Regardez votre abonnement ci-dessous${S}: s'il indique «${S}Annulé${S}», il l'est. Sinon, appuyez de nouveau sur Annuler.`,
+    },
     "cannot-switch": {
       title: "Ce changement est impossible",
       body: "La formule n'est peut-être plus proposée, ou l'abonnement est peut-être annulé ou en attente d'un paiement. Rien n'a été modifié.",
@@ -816,6 +852,9 @@ const fr: MembershipWords = {
           year: `tous les ${count}${S}ans`,
         }[interval],
   ends: (date) => `Se termine le ${date}`,
+  canceledMark: "Annulé",
+  endsCanceled: (date) => `Annulé. Se termine le ${date}`,
+  endsAfterLast: (date) => `Se termine le ${date}, après le dernier paiement`,
   cancel: "Annuler",
   switchPlan: "Changer de formule",
   switchCurrencyNote: "Cet abonnement ne propose pas de changer de formule, car il est payé dans une autre devise que celle des formules actuelles de la boutique.",
@@ -854,6 +893,8 @@ const fr: MembershipWords = {
     },
   } as Record<string, Notice>,
   cancelNote: "Si vous annulez, l'abonnement reste actif jusqu'à la fin de la période déjà payée, et plus rien n'est débité.",
+  fixedCancelNote: (date) =>
+    `Il reste actif jusqu'au ${date}, la fin de ce que vous avez déjà payé ou de votre essai gratuit. Aucun des paiements restants n'est débité.`,
 
   leaveTitle: "Avant de partir",
   leaveHead: (title) => `Annuler ${title}${S}?`,
@@ -1143,6 +1184,14 @@ const de: MembershipWords = {
       body: "Warten Sie einen Moment und sehen Sie sich unten Ihre Mitgliedschaft an, bevor Sie es erneut versuchen.",
     },
     currency: { title: "Diese Mitgliedschaft bleibt bei ihrem Tarif", body: "Sie wird in einer anderen Währung bezahlt als der, in der die Tarife des Shops jetzt angeboten werden, und bleibt deshalb bei ihrem Tarif. Es wurde nichts geändert, und Sie können sie weiterhin auf der Seite Ihrer Mitgliedschaft kündigen." },
+    cancelled: {
+      title: "Ihre Mitgliedschaft ist gekündigt",
+      body: "Es wird nichts mehr berechnet. Was sie umfasst, bleibt für Sie bis zu dem Datum unten offen.",
+    },
+    unsure: {
+      title: "Wir konnten die Kündigung nicht bestätigen",
+      body: "Die Antwort von Stripe sagte nicht, ob sie durchgegangen ist. Sehen Sie sich Ihre Mitgliedschaft unten an: Steht dort „Gekündigt“, ist sie es. Wenn nicht, tippen Sie erneut auf Kündigen.",
+    },
     "cannot-switch": {
       title: "Dieser Wechsel ist nicht möglich",
       body: "Der Tarif wird möglicherweise nicht mehr angeboten, oder die Mitgliedschaft ist gekündigt oder wartet auf eine Zahlung. Es wurde nichts geändert.",
@@ -1169,6 +1218,9 @@ const de: MembershipWords = {
       ? { day: "pro Tag", week: "pro Woche", month: "pro Monat", year: "pro Jahr" }[interval]
       : `alle ${count} ${{ day: "Tage", week: "Wochen", month: "Monate", year: "Jahre" }[interval]}`,
   ends: (date) => `Endet am ${date}`,
+  canceledMark: "Gekündigt",
+  endsCanceled: (date) => `Gekündigt. Endet am ${date}`,
+  endsAfterLast: (date) => `Endet am ${date}, nach der letzten Zahlung`,
   cancel: "Kündigen",
   switchPlan: "Tarif wechseln",
   switchCurrencyNote: "Bei dieser Mitgliedschaft ist kein Tarifwechsel möglich: Sie wird in einer anderen Währung bezahlt als der, in der die Tarife des Shops jetzt angeboten werden.",
@@ -1208,6 +1260,8 @@ const de: MembershipWords = {
   } as Record<string, Notice>,
   cancelNote:
     "Wenn Sie kündigen, läuft die Mitgliedschaft bis zum Ende des bereits bezahlten Zeitraums weiter, und es wird nichts mehr berechnet.",
+  fixedCancelNote: (date) =>
+    `Sie läuft bis zum ${date}, dem Ende dessen, was Sie schon bezahlt haben, oder Ihrer kostenlosen Testphase. Keine der noch ausstehenden Zahlungen wird berechnet.`,
 
   leaveTitle: "Bevor Sie gehen",
   leaveHead: (title) => `${title} kündigen?`,
@@ -1511,6 +1565,14 @@ const it: MembershipWords = {
       body: "Aspetta un momento e controlla il tuo abbonamento qui sotto prima di riprovare.",
     },
     currency: { title: "Questo abbonamento resta sul suo piano", body: "È pagato in una valuta diversa da quella dei piani attuali del negozio, quindi resta sul suo piano attuale. Non è stato modificato nulla, e puoi ancora annullarlo dalla pagina del tuo abbonamento." },
+    cancelled: {
+      title: "Il tuo abbonamento è annullato",
+      body: "Non ti viene addebitato altro. Quello che include resta aperto per te fino alla data indicata qui sotto.",
+    },
+    unsure: {
+      title: "Non siamo riusciti a confermare l'annullamento",
+      body: "La risposta di Stripe non diceva se è andato a buon fine. Guarda il tuo abbonamento qui sotto: se dice “Annullato”, lo è. Altrimenti, premi di nuovo Annulla.",
+    },
     "cannot-switch": {
       title: "Quel cambio non si può fare",
       body: "Il piano potrebbe non essere più offerto, oppure l'abbonamento potrebbe essere annullato o in attesa di un pagamento. Non è stato modificato nulla.",
@@ -1537,6 +1599,9 @@ const it: MembershipWords = {
       ? { day: "al giorno", week: "a settimana", month: "al mese", year: "all'anno" }[interval]
       : `ogni ${count} ${{ day: "giorni", week: "settimane", month: "mesi", year: "anni" }[interval]}`,
   ends: (date) => `Termina ${il(date)}`,
+  canceledMark: "Annullato",
+  endsCanceled: (date) => `Annullato. Termina ${il(date)}`,
+  endsAfterLast: (date) => `Termina ${il(date)}, dopo l'ultimo pagamento`,
   cancel: "Annulla",
   switchPlan: "Cambia piano",
   switchCurrencyNote: "Questo abbonamento non può cambiare piano: è pagato in una valuta diversa da quella dei piani attuali del negozio.",
@@ -1575,6 +1640,8 @@ const it: MembershipWords = {
     },
   } as Record<string, Notice>,
   cancelNote: "Se annulli, l'abbonamento resta attivo fino alla fine del periodo che hai già pagato, e non ti viene addebitato altro.",
+  fixedCancelNote: (date) =>
+    `Resta attivo fino ${al(date)}, la fine di ciò che hai già pagato o della prova gratuita. Nessuno dei pagamenti rimanenti ti viene addebitato.`,
 
   leaveTitle: "Prima di andare",
   leaveHead: (title) => `Annullare ${title}?`,
@@ -1864,6 +1931,14 @@ const nl: MembershipWords = {
       body: "Wacht even en bekijk hieronder je lidmaatschap voordat je het opnieuw probeert.",
     },
     currency: { title: "Dit lidmaatschap blijft bij zijn abonnement", body: "Het wordt betaald in een andere valuta dan die van de huidige abonnementen van de winkel, dus het blijft bij zijn huidige abonnement. Er is niets gewijzigd, en je kunt het nog steeds opzeggen op de pagina van je lidmaatschap." },
+    cancelled: {
+      title: "Je lidmaatschap is opgezegd",
+      body: "Er wordt niets meer afgeschreven. Wat erbij hoort, blijft voor je open tot de datum hieronder.",
+    },
+    unsure: {
+      title: "We konden de opzegging niet bevestigen",
+      body: "Het antwoord van Stripe zei niet of het gelukt is. Kijk hieronder naar je lidmaatschap: staat er “Opgezegd”, dan is het opgezegd. Zo niet, druk dan nog eens op Opzeggen.",
+    },
     "cannot-switch": {
       title: "Die overstap kan niet",
       body: "Het abonnement wordt misschien niet meer aangeboden, of het lidmaatschap is misschien opgezegd of wacht op een betaling. Er is niets gewijzigd.",
@@ -1889,6 +1964,9 @@ const nl: MembershipWords = {
       ? { day: "per dag", week: "per week", month: "per maand", year: "per jaar" }[interval]
       : `elke ${count} ${{ day: "dagen", week: "weken", month: "maanden", year: "jaar" }[interval]}`,
   ends: (date) => `Eindigt op ${date}`,
+  canceledMark: "Opgezegd",
+  endsCanceled: (date) => `Opgezegd. Eindigt op ${date}`,
+  endsAfterLast: (date) => `Eindigt op ${date}, na de laatste betaling`,
   cancel: "Opzeggen",
   switchPlan: "Abonnement wijzigen",
   switchCurrencyNote: "Bij dit lidmaatschap kun je niet van abonnement wisselen: het wordt betaald in een andere valuta dan die van de huidige abonnementen van de winkel.",
@@ -1927,6 +2005,8 @@ const nl: MembershipWords = {
     },
   } as Record<string, Notice>,
   cancelNote: "Als je opzegt, loopt het lidmaatschap door tot het einde van de periode die je al hebt betaald, en wordt er niets meer afgeschreven.",
+  fixedCancelNote: (date) =>
+    `Het loopt door tot ${date}, het einde van wat je al hebt betaald of van je gratis proefperiode. Geen van de betalingen die nog komen wordt afgeschreven.`,
 
   leaveTitle: "Voordat je gaat",
   leaveHead: (title) => `${title} opzeggen?`,
@@ -2214,6 +2294,14 @@ const pt: MembershipWords = {
       body: "Aguarde um momento e veja a sua subscrição abaixo antes de tentar novamente.",
     },
     currency: { title: "Esta subscrição mantém o plano atual", body: "É paga numa moeda diferente da dos planos atuais da loja, por isso mantém o plano atual. Nada foi alterado, e pode ainda cancelá-la na página da sua subscrição." },
+    cancelled: {
+      title: "A sua subscrição está cancelada",
+      body: "Não é cobrado mais nada. O que inclui continua aberto para si até à data indicada abaixo.",
+    },
+    unsure: {
+      title: "Não conseguimos confirmar o cancelamento",
+      body: "A resposta da Stripe não dizia se foi concluído. Veja a sua subscrição abaixo: se disser “Cancelada”, está. Se não, prima Cancelar outra vez.",
+    },
     "cannot-switch": {
       title: "Essa mudança não pode ser feita",
       body: "O plano pode já não estar disponível, ou a subscrição pode estar cancelada ou à espera de um pagamento. Nada foi alterado.",
@@ -2239,6 +2327,9 @@ const pt: MembershipWords = {
       ? { day: "por dia", week: "por semana", month: "por mês", year: "por ano" }[interval]
       : `a cada ${count} ${{ day: "dias", week: "semanas", month: "meses", year: "anos" }[interval]}`,
   ends: (date) => `Termina a ${date}`,
+  canceledMark: "Cancelada",
+  endsCanceled: (date) => `Cancelada. Termina a ${date}`,
+  endsAfterLast: (date) => `Termina a ${date}, após o último pagamento`,
   cancel: "Cancelar",
   switchPlan: "Mudar de plano",
   switchCurrencyNote: "Esta subscrição não pode mudar de plano: é paga numa moeda diferente da dos planos atuais da loja.",
@@ -2277,6 +2368,8 @@ const pt: MembershipWords = {
     },
   } as Record<string, Notice>,
   cancelNote: "Se cancelar, a subscrição mantém-se ativa até ao fim do período que já pagou, e não é cobrado mais nada.",
+  fixedCancelNote: (date) =>
+    `Mantém-se ativa até ${date}, o fim do que já pagou ou do seu período de teste grátis. Nenhum dos pagamentos que faltam é cobrado.`,
 
   leaveTitle: "Antes de sair",
   leaveHead: (title) => `Cancelar ${title}?`,

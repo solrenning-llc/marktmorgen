@@ -59,6 +59,22 @@ async function main(): Promise<void> {
     is("not answered as ok", unread.body.ok === true, false);
     is("and never as an empty list", Array.isArray(unread.body.versions), false);
   }
+  // Claude 7 on #3805: a kept entry that is not a version is unknown too, never left out so part reads as the whole.
+  for (const [what, entry] of [["not a text", 7], ["no time before its page", "{\"blocks\":[]}"], ["a page that does not read", "1700000000000\n{not json"]] as const) {
+    part(`A kept version that is ${what}: never the part that could be read`);
+    redis.pipeline = async (commands) => {
+      const reply = await original.call(redis, commands);
+      if (commands.length === 1 && commands[0][0] === "LRANGE" && String(commands[0][1]).startsWith(`nl:product:pages:${statsId}:`)) {
+        const list = (reply as unknown[][])[0] ?? [];
+        return [[...list, entry]];
+      }
+      return reply;
+    };
+    const partial = await ask();
+    redis.pipeline = original;
+    is("not answered as ok", partial.body.ok === true, false);
+    is("and never as the versions that did read", Array.isArray(partial.body.versions), false);
+  }
   console.error = quiet;
   done();
 }

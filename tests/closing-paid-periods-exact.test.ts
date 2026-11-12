@@ -37,19 +37,19 @@ async function main(): Promise<void> {
   await redis.pipeline([["HSET", key, "sub_ClosingPaid0001", JSON.stringify(row)]]);
   const real: Pipe = redis.pipeline.bind(redis);
   const answering = (reply: unknown): Pipe => async (b) => (b[0][0] === "HGETALL" && b[0][1] === key ? [reply] : real(b));
-  const use = (pipe: Pipe) => ((redis as unknown as { pipeline: Pipe }).pipeline = pipe);
+  const setPipe = (pipe: Pipe) => ((redis as unknown as { pipeline: Pipe }).pipeline = pipe);
 
   part("Control: a list that reads");
   is("the member is read", await outcome(() => paidPeriods(store)), "read 1");
 
   part("The list in another shape is unknown, never no members");
   for (const [what, reply] of [["text", "garbled"], ["a number", 7], ["an object", { a: 1 }], ["an odd list", ["sub_ClosingPaid0001"]]] as [string, unknown][]) {
-    use(answering(reply));
+    setPipe(answering(reply));
     try {
       is(`${what}: paidPeriods`, await outcome(() => paidPeriods(store)), "unknown");
       is(`${what}: the closing day's refunds are not settled as nothing to give`, await outcome(() => giveBackUnused(store, DAY, { final: true })), "unknown");
     } finally {
-      use(real);
+      setPipe(real);
     }
   }
 

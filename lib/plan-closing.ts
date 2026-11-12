@@ -83,7 +83,7 @@ import { onBreak, pauseView } from "@/lib/plan-pause";
 import { withLock } from "@/lib/redis-lock";
 import { SITE_URL } from "@/lib/site-url";
 import { storageUsed, storageWords } from "@/lib/storage-quota";
-import { type Store, setPodcastEpisodes, setProductFile, setSubscription, storeFolder, storeForEmail, storeRef } from "@/lib/store";
+import { type Store, imageFolder, setPodcastEpisodes, setProductFile, setSubscription, storeFolder, storeForEmail, storeRef } from "@/lib/store";
 import { dropAllStreams, dropStream } from "@/lib/stream";
 import { readStreamPath } from "@/lib/stream-rules";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
@@ -625,7 +625,7 @@ const HANDS: Hands = {
  * Past `until` this stops where it is and says it was not seen through, and
  * the next day's run carries on from what is left in the folders.
  */
-export async function removeStored(key: string, hands: Pick<Hands, "list" | "remove"> = HANDS, until = Number.POSITIVE_INFINITY): Promise<{ files: number; clean: boolean }> {
+export async function removeStored(key: string, hands: Pick<Hands, "list" | "remove"> = HANDS, until = Number.POSITIVE_INFINITY, closing = false): Promise<{ files: number; clean: boolean }> {
   const store = await storeForEmail(key);
   if (!store) return { files: 0, clean: true };
   const folder = await storeFolder(key);
@@ -717,7 +717,12 @@ export async function removeStored(key: string, hands: Pick<Hands, "list" | "rem
   // and its community's pictures (since 18 October 2026), which the
   // community's posts then show without.
   const pictures = store.community ? `community/${communityFolder(store.community.id)}/` : "";
-  for (const prefix of [`vault/${folder}/`, `stores/${folder}/`, ...(pictures ? [pictures] : [])]) {
+  // A store that closes takes its pictures with it (product, link and page pictures, email pictures, its buyers'
+  // review photos: images/<imageFolder>/), as the privacy policy says its files go that day (#closed-stores);
+  // app/api/image serves them to anybody with the address, whether the store is there or not. A store that stays
+  // (a plan ended before October 18, 2026) still shows them, so they are kept.
+  const images = closing ? `images/${await imageFolder(key)}/` : "";
+  for (const prefix of [`vault/${folder}/`, `stores/${folder}/`, ...(pictures ? [pictures] : []), ...(images ? [images] : [])]) {
     try {
       await removeAll(await hands.list(prefix));
       if (prefix === pictures && store.community) await forgetPictures(communityFolder(store.community.id));
@@ -1032,7 +1037,7 @@ async function closingDay(store: Store, key: string, state: State, endedAt: numb
     console.error("deleting what a closing store's files left failed", error);
     return { key, state: "held", note: "what its files left could not be deleted" };
   }
-  const done = await removeStored(key, hands, until);
+  const done = await removeStored(key, hands, until, true);
   if (!done.clean) return { key, state: "held", note: `removed ${done.files}, and something could not be removed` };
   const after = (await hands.measure(folder)) + (store.community && hands.pictures ? await hands.pictures(store.community.id) : 0);
   if (after > keptRoomFor(endedAt)) return { key, state: "held", note: `removed ${done.files} and it still keeps ${bytesWords(after)}` };

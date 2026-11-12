@@ -385,8 +385,11 @@ export async function inClosingDay(ref: string): Promise<boolean> {
 /** How the hold stands: the members it could not reach yet, and those past the budget. */
 export async function holdCounts(folder: string): Promise<{ failed: number; over: number }> {
   if (!isRedisConfigured()) return { failed: 0, over: 0 };
-  const [fields] = await redisPipeline([["HKEYS", workKey(folder)]]);
-  const keys = Array.isArray(fields) ? (fields as unknown[]).map(String) : [];
+  // Read exactly (CX-123 rule 24): an unknown reply is never "every member paused" ({ failed: 0, over: 0 }), which
+  // the creator's notice would say as nobody being charged again; it throws, and the notice says it could not check.
+  const replies = repliesFor(await redisPipeline([["HKEYS", workKey(folder)]]), 1);
+  const keys = replies ? stringList(replies[0]) : null;
+  if (!keys) throw new UnknownReplyError("a closing's paused members");
   return { failed: keys.filter((k) => k.startsWith("f:")).length, over: keys.filter((k) => k.startsWith("o:")).length };
 }
 

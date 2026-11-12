@@ -36,6 +36,7 @@ import { createHash, createHmac, randomBytes } from "node:crypto";
 import { deriveKey } from "@/lib/secret-box";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { type BatchMessage, sendBatch } from "@/lib/email";
+import { stopTags } from "@/lib/mail-health-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
@@ -444,7 +445,7 @@ export async function advanceUpdate(id: string, load: (handle: string) => Promis
             sent: g.sentWith,
             lang: speech(store).lang.locale,
           });
-          messages.push({ from: fromLine(store), to: email, subject: r.subject, text: r.text, html: r.html, replyTo: store.email, headers: r.headers });
+          messages.push({ from: fromLine(store), to: email, subject: r.subject, text: r.text, html: r.html, replyTo: store.email, headers: r.headers, tags: stopTags(store) });
         }
         const outcome = await sendBatch(messages, `upd:${id}:${job.done}:${emails.length}`, { by: "monthly" });
         if (outcome !== "sent") {

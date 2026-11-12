@@ -52,6 +52,7 @@ import { ordersLinkFor } from "@/lib/buyer-orders";
 import { saleHandles } from "@/lib/store";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
+import { stopTags } from "@/lib/mail-health-rules";
 import { StripeError, onAccount } from "@/lib/stripe-account";
 import { isSettled } from "@/lib/instant-pay";
 import { canUseDomain } from "@/lib/domains";
@@ -595,7 +596,7 @@ async function confirmOnce(
 
   let sent = false;
   try {
-    sent = await sendEmail({ meter: { by: "order" },
+    sent = await sendEmail({ meter: { by: "order" }, tags: stopTags(store),
       from: fromStore(store),
       to: letter.to,
       subject: letter.subject,
@@ -807,7 +808,7 @@ export async function confirmOffer(store: Store, offer: TakenOffer): Promise<Con
   if (claimed === null) return "already";
   let sent = false;
   try {
-    sent = await sendEmail({ meter: { by: "order" },
+    sent = await sendEmail({ meter: { by: "order" }, tags: stopTags(store),
       from: fromStore(store),
       to: letter.to,
       subject: letter.subject,

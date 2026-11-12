@@ -35,6 +35,7 @@ import { createHash, createHmac, randomBytes } from "node:crypto";
 import { deriveKey } from "@/lib/secret-box";
 import { normaliseEmail } from "@/lib/auth";
 import { type BatchMessage, sendBatch } from "@/lib/email";
+import { stopTags } from "@/lib/mail-health-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { countOf, repliesFor } from "@/lib/redis-reply";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
@@ -386,7 +387,7 @@ export async function sendReviewRequests(
       member,
       stage,
       claim,
-      message: { from: fromLine(store), to: email, subject: r.subject, text: r.text, html: r.html, replyTo: store.email, headers: r.headers },
+      message: { from: fromLine(store), to: email, subject: r.subject, text: r.text, html: r.html, replyTo: store.email, headers: r.headers, tags: stopTags(store) },
     });
     groups.set(entry.handle, group);
   }

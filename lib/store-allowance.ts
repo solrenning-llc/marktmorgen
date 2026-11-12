@@ -24,7 +24,9 @@ import type { Tier } from "@/lib/plan";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type AllowanceKind, KIND_WORDS, NON_PAYING_ALLOWANCES, allowanceFor, askedCeiling, usedWords } from "@/lib/store-allowance-rules";
 
-export type AllowanceStore = WindowFields & { tier?: Tier; sid?: string; statsId?: string | null; handle?: string };
+export type AllowanceStore = WindowFields & { tier?: Tier; sid?: string; statsId?: string | null; handle?: string;
+  /** Read only to tag the store's email with its list (lib/mail-health-rules.ts stopTags), never to count. */
+  listId?: string | null };
 
 /**
  * What taking from a figure answered. A refusal for being used says, when

@@ -76,9 +76,9 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { stopWriting } from "@/lib/contacts";
 import { normaliseEmail } from "@/lib/auth";
 import type { Store } from "@/lib/store";
-import { BOUNCE_FLOOR, BOUNCE_RATE, COMPLAINT_FLOOR, COMPLAINT_RATE, HEALTH_WINDOW_DAYS, PAUSE_DAYS, RAMP_FIRST, RAMP_GAP_MINUTES, RAMP_LAST, RAMP_TRIGGER } from "@/lib/mail-health-rules";
+import { BOUNCE_FLOOR, BOUNCE_RATE, COMPLAINT_FLOOR, COMPLAINT_RATE, HEALTH_WINDOW_DAYS, PAUSE_DAYS, RAMP_FIRST, RAMP_GAP_MINUTES, RAMP_LAST, RAMP_TRIGGER, STOP_TAG, stopTags } from "@/lib/mail-health-rules";
 
-export { BOUNCE_FLOOR, BOUNCE_RATE, COMPLAINT_FLOOR, COMPLAINT_RATE, HEALTH_WINDOW_DAYS, PAUSE_DAYS };
+export { BOUNCE_FLOOR, BOUNCE_RATE, COMPLAINT_FLOOR, COMPLAINT_RATE, HEALTH_WINDOW_DAYS, PAUSE_DAYS, STOP_TAG, stopTags };
 
 /** The tag a watched email carries, naming the store it is counted for. */
 export const STORE_TAG = "nl_store";
@@ -338,7 +338,8 @@ export async function forgetHealth(id: string, emails: string[], now = Date.now(
   await redisPipeline([["DEL", ...keys]]);
 }
 
-export type Told = "counted" | "paused" | "ignored";
+/** "stopped": a non-list email's address was taken off its store's list (STOP_TAG), and nothing was counted. */
+export type Told = "counted" | "paused" | "stopped" | "ignored";
 
 /** What the sender said about one email, whichever sender it was (app/api/mail/inbound). */
 export type SenderNotice = {
@@ -349,6 +350,8 @@ export type SenderNotice = {
   /** The email's tags, as it was sent with them. */
   store: string;
   list: string;
+  /** On a store's non-list email, its list (STOP_TAG): taken off it, never counted. */
+  stop?: string;
 };
 
 /**
@@ -356,19 +359,33 @@ export type SenderNotice = {
  * was marked as spam. The address is taken off that store's list, the day's
  * count goes up, and the store is paused if that puts it over a line.
  *
+ * A store's email that is not a list email (a receipt, a reminder, a notice)
+ * carries only its list (STOP_TAG): the address is taken off it the same way,
+ * and nothing is counted ("stopped").
+ *
  * "ignored" for anything that is not ours to act on: an email that carried no
  * tag (a login link to a mistyped address is nobody's bad list), a bounce
  * that is only temporary, or an address already counted this week — the same
  * address bouncing twice is one bad address.
  */
 export async function heardFromSender(notice: SenderNotice, now = Date.now()): Promise<Told> {
-  if (!isRedisConfigured() || !HEALTH_ID.test(notice.store)) return "ignored";
+  if (!isRedisConfigured()) return "ignored";
+  const counted = HEALTH_ID.test(notice.store);
+  // A list email names its list (LIST_TAG); any other email of a store names
+  // it as STOP_TAG (ALL-160): a complaint or a bounce for good on a checkout
+  // reminder, a receipt or an announcement takes the address off the list
+  // too, so the person is never sent the store's marketing again.
+  const list = HEALTH_ID.test(notice.list) ? notice.list : typeof notice.stop === "string" && HEALTH_ID.test(notice.stop) ? notice.stop : "";
+  if (!counted && !list) return "ignored";
   if (notice.kind === "bounced" && !notice.permanent) return "ignored";
   const email = normaliseEmail(notice.to);
   if (!email) return "ignored";
   // Off the list first, and every time: this is the part that must not be
   // skipped because a count had already been made.
-  if (HEALTH_ID.test(notice.list)) await stopWriting(notice.list, email, notice.kind);
+  if (list) await stopWriting(list, email, notice.kind);
+  // A non-list email is not counted as sent for the store, so its bounces
+  // are not counted against it either, and never pause its list email.
+  if (!counted) return "stopped";
   const [first] = await redisPipeline([["SET", seenKey(notice.store, email), "1", "NX", "EX", MAIL_HEALTH_SEEN_SECONDS]]);
   if (first === null) return "ignored";
   await add(notice.store, notice.kind === "complained" ? "c" : "b", 1, now);

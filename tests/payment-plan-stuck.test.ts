@@ -91,6 +91,9 @@ const refusing = new Set<string>([STUCK]);
 let platform: { status: number; body: unknown } | null = null;
 const emails: { to: string; subject: string; text: string; key: string | null }[] = [];
 let resendFails = false;
+/** Resend answers 5xx without saying whether it took the email: an uncertain send (Claude 1 cloud on #3367, MEDIUM 1). */
+let resendUncertain = false;
+let resendPosts = 0;
 /** Every checkout session read, in order: which plans a run reached (the review of #3367, item 1). */
 const sessionReads: string[] = [];
 /** Subscriptions ended at once (DELETE), with the time on the test clock. */
@@ -107,6 +110,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const url = new URL(String(input));
   const answer = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
   if (url.hostname === "api.resend.com") {
+    resendPosts += 1;
+    if (resendUncertain) return answer({ message: "bad gateway" }, 502);
     // A certain refusal (422): since #3387 a 5xx is an unknown answer, never posted again under its key (lib/resend-fallback-transport.ts).
     if (resendFails) return answer({ message: "refused" }, 422);
     const body = JSON.parse(String(init?.body)) as { to: string | string[]; subject: string; text: string };
@@ -348,6 +353,23 @@ async function main(): Promise<void> {
   is("an email that could not be sent on day 30 is sent at the next weekly try, once", mailedOn, [37]);
   // Rule 23: new assertion, red at d62a81f1 (the review of #3367, item 2: an unsent notice left no log line at all).
   is("the stuck plan whose email could not be sent is logged, not let go in silence", logged.filter((line) => line.includes("could not be emailed now")).length >= 1, true);
+
+  // Claude 1 cloud on #3367 @d2c9bf5b6c (MEDIUM 1): a 5xx may have delivered the notice. Resend's guard never posts that
+  // key and body again, so reading it as "not sent" left the plan untold, "tried again" every week with no POST.
+  redis.clear();
+  emails.length = 0;
+  logged.length = 0;
+  setClock(Math.floor(realNow() / 1000));
+  await remember(STUCK, "cs_test_tell00000002", await planStore(STUCK));
+  resendUncertain = true;
+  resendPosts = 0;
+  for (let d = 1; d <= 44; d += 1) {
+    if (d === 31) resendUncertain = false;
+    tick(1);
+    await settlePlans();
+  }
+  is("an uncertain send is posted once, never again", resendPosts, 1);
+  is("and is said as possibly sent, never as \"could not be emailed now\" tried again each week", [logged.some((line) => line.includes("may have been sent")), logged.filter((line) => line.includes("could not be emailed now")).length], [true, 0]);
 
   redis.clear();
   setClock(ANCHOR + DAY);

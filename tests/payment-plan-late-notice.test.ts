@@ -49,6 +49,9 @@ const emails: { to: string; subject: string; text: string; key: string | null }[
 /** Payment intents whose refund Stripe refuses for good (a 400 with this code). */
 const refusedFor = new Map<string, string>();
 let resendFails = false;
+/** Resend answers 5xx without saying whether it took the email (Claude 1 cloud on #3367, MEDIUM 1). */
+let resendUncertain = false;
+let resendPosts = 0;
 let balance = 1_000_000;
 let stripeCalls = 0;
 
@@ -56,6 +59,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const url = new URL(String(input));
   const answer = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
   if (url.hostname === "api.resend.com") {
+    resendPosts += 1;
+    if (resendUncertain) return answer({ message: "bad gateway" }, 502);
     // A certain refusal (422): since #3387 a 5xx is an unknown answer, never posted again under its key (lib/resend-fallback-transport.ts).
     if (resendFails) return answer({ message: "refused" }, 422);
     const body = JSON.parse(String(init?.body)) as { to: string | string[]; subject: string; text: string };
@@ -204,6 +209,21 @@ async function main(): Promise<void> {
   await remember(ACCOUNT, c.session, about);
   await settlePlans();
   is("never again", to(later).length, 1);
+
+  part("An email whose send is not known (a 5xx) is never posted again, and the plan is not kept for it");
+  const unsure = "late-buyer-unsure@example.com";
+  const u = plan(2, 80, 3, unsure);
+  await remember(ACCOUNT, u.session, about);
+  resendUncertain = true;
+  resendPosts = 0;
+  await settlePlans();
+  resendUncertain = false;
+  is("the plan is settled at once, not kept to try an email that may have gone", await inALine(u.session), false);
+  for (let day = 0; day < 9; day += 1) {
+    tick(1);
+    await settlePlans();
+  }
+  is("posted once, never again under the same key", resendPosts, 1);
 
   part("Owed for PLAN_OWED_TELL_DAYS: the creator is told once");
   const N = (plans as Record<string, unknown>).PLAN_OWED_TELL_DAYS;

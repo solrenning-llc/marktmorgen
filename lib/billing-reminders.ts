@@ -47,6 +47,16 @@ function day(seconds: number): string {
   });
 }
 
+/**
+ * The exact moment of a charge, its time zone named in full: "December 1, 2026, at 2:00 AM UTC (Coordinated Universal
+ * Time)". The day alone, as UTC reads it, let a creator west of UTC think they had the whole of a day that, for them,
+ * had already ended, and cancel after the charge (ALL-154).
+ */
+function moment(seconds: number): string {
+  const time = new Date(seconds * 1000).toLocaleTimeString("en-US", { timeZone: "UTC", hour: "numeric", minute: "2-digit" });
+  return `${day(seconds)}, at ${time} UTC (Coordinated Universal Time)`;
+}
+
 function money(cents: number): string {
   // "$2,388": a yearly charge in the thousands is written the way it is said.
   return `$${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: cents % 100 ? 2 : 0, maximumFractionDigits: 2 })}`;
@@ -55,6 +65,7 @@ function money(cents: number): string {
 /** The email itself. Plain text, so every word is exactly what arrives. */
 export function reminderEmail(reminder: Reminder): { subject: string; text: string } {
   const date = day(reminder.at);
+  const when = moment(reminder.at);
   const name = PLAN_NAMES[reminder.tier];
   const price = money(reminder.amountCents);
   const studio = `${SITE_URL}/studio#billing`;
@@ -68,7 +79,7 @@ export function reminderEmail(reminder: Reminder): { subject: string; text: stri
       text: [
         "Hello,",
         "",
-        `Your free trial of ${name} ends on ${date}. On that day your card will be charged ${then}, until you cancel.`,
+        `Your free trial of ${name} ends on ${when}. Then your card will be charged ${then}, until you cancel.`,
         "",
         "If you do not want to be charged, cancel before then in your studio. It takes two clicks, with no email to us:",
         studio,
@@ -87,12 +98,12 @@ export function reminderEmail(reminder: Reminder): { subject: string; text: stri
     text: [
       "Hello,",
       "",
-      `Your yearly subscription to ${name} renews automatically on ${date}. Your card will be charged ${price} for another year, unless you cancel before then.`,
+      `Your yearly subscription to ${name} renews automatically on ${when}. Your card will be charged ${price} for another year, unless you cancel before then.`,
       "",
       `To cancel, or to switch to paying ${monthly} a month instead, open your studio. Canceling takes two clicks, with no email to us:`,
       studio,
       "",
-      `If you cancel, nothing more is charged, and your store keeps taking payments until ${date}.`,
+      `If you cancel, nothing more is charged, and your store keeps taking payments until ${when}.`,
       "",
       `Questions: reply to this email, or write to ${SUPPORT_EMAIL}.`,
       "",
@@ -216,7 +227,7 @@ export function failedPlanEmail(failed: FailedPlan): { subject: string; text: st
             `${RENEWAL_PAUSED_WORDS} ${RENEWAL_KEPT_WORDS} ${RENEWAL_RESUME_WORDS}`,
             "",
             failed.nextTry
-              ? `We will try your card again on ${day(failed.nextTry)}. If it is still unpaid after the last try, your plan can end, and then your store closes as our Terms say.`
+              ? `We will try your card again on ${moment(failed.nextTry)}. If it is still unpaid after the last try, your plan can end, and then your store closes as our Terms say.`
               : "If it is not paid, your plan can end, and then your store closes as our Terms say.",
           ].join("\n"),
       "",

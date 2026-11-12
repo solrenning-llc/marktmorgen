@@ -2,6 +2,7 @@
 
 import { useMemo, useRef, useState } from "react";
 import { formatMoney } from "@/lib/money";
+import { PLAN_TITLES } from "@/lib/plan";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/icons";
 import { toast } from "@/components/toast";
@@ -445,8 +446,8 @@ export function LookEditor({
                 </span>
                 <span className="field-hint mt-1 block">
                   {canHideBadge
-                    ? "Your page carries your name and nothing of ours. Leaving Pro puts it back, and your choice here is kept for if you return."
-                    : "On Pro. Every page keeps the line until then — it is how a store brings us the next creator, which is part of what the lower price is."}
+                    ? `Your page carries your name and nothing of ours. Leaving the ${PLAN_TITLES.pro} plan puts it back, and your choice here is kept for if you return.`
+                    : `On the ${PLAN_TITLES.pro} plan. Every page keeps the line until then — it is how a store brings us the next creator, which is part of what the lower price is.`}
                 </span>
               </span>
             </label>

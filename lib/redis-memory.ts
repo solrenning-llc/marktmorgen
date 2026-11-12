@@ -1656,7 +1656,12 @@ export class MemoryRedis {
       case "DEL": {
         // DEL takes several keys.
         let gone = 0;
-        for (const one of [key, ...args]) if (this.data.delete(one)) gone += 1;
+        // Its expiry goes with it, as in Redis: a key made again later under the same name starts with none (before,
+        // the old expiry stayed behind and hid a write that recreates a key without its expiry, C7 retention hunt).
+        for (const one of [key, ...args]) {
+          if (this.data.delete(one)) gone += 1;
+          this.until.delete(one);
+        }
         return gone;
       }
       case "EXISTS":

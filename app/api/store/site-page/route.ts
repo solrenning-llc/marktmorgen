@@ -217,6 +217,9 @@ export async function POST(request: NextRequest) {
       const made = importedPage(read.page, (id) => products.has(id), (id) => forms.has(id));
       const entry = importedEntry(read.title, pages, randomBytes(5).toString("hex"));
       if (!entry) return refuse("taken");
+      // A file with no blocks left to bring in keeps no page record, so nothing could keep it back from visitors (as
+      // for a copy, placeNewPage): refused before anything is written, in the import's own words.
+      if (made.page.blocks.length === 0) return refuse("import_empty");
       // The same order as a copy (placeNewPage): the blocks take the room first, then the page is listed; refused, nothing stays.
       const placed = await placeNewPage(ref, store, entry, made.page);
       if (!placed.ok) return refuse(placed.error, placed.status);

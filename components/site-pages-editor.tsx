@@ -25,6 +25,7 @@ export const MESSAGES: Record<string, string> = {
   kind: "That file holds a kind of block a store's own page cannot have. Nothing was added.",
   forms_unread: "Your forms could not be read just now, so the page was not brought in. Try again in a moment.",
   copy_empty: "This page has no blocks yet, so there is nothing to copy. Add a new page instead.",
+  import_empty: "That file has no blocks to bring in, so nothing was added. Add a new page instead.",
   server_error: "Something went wrong on our side. Try again in a moment.",
 };
 

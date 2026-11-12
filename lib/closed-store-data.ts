@@ -805,8 +805,19 @@ export async function stopRenewals(store: Store, until: number): Promise<{ done:
     for (let round = 0; round < 50; round += 1) {
       if (Date.now() > until) return { ...out, done: false };
       const query = encodeURIComponent(`metadata['store']:'${handle}'`);
-      const found = (await onAccount("GET", account, `/subscriptions/search?limit=100&query=${query}${page ? `&page=${encodeURIComponent(page)}` : ""}`)) as Record<string, unknown>;
-      const rows = Array.isArray(found.data) ? (found.data as Record<string, unknown>[]) : [];
+      const found = (await onAccount("GET", account, `/subscriptions/search?limit=100&query=${query}${page ? `&page=${encodeURIComponent(page)}` : ""}`)) as Record<string, unknown> | null;
+      // Read exactly (rules 24 and 30, as eachSold in lib/closing-holds.ts): a page with no list of objects is never
+      // a page with no subscription, and one that does not say exactly whether more follow is never the last, or the
+      // closing day would write the renewals down as stopped while members are still charged. Not done: the closing
+      // day is held and the search read again.
+      const data = found !== null && typeof found === "object" ? found.data : undefined;
+      if (!Array.isArray(data) || data.some((row) => row === null || typeof row !== "object" || Array.isArray(row))) {
+        console.error("plan-closing: Stripe's search for a closing store's renewals gave a page that could not be read; tried again");
+        return { ...out, done: false };
+      }
+      const rows = data as Record<string, unknown>[];
+      const more = (found as Record<string, unknown>).has_more;
+      const next = (found as Record<string, unknown>).next_page;
       const toStop: string[] = [];
       for (const sub of rows) {
         const id = typeof sub.id === "string" ? sub.id : "";
@@ -821,8 +832,12 @@ export async function stopRenewals(store: Store, until: number): Promise<{ done:
           onAccount("DELETE", account, `/subscriptions/${encodeURIComponent(id)}`, undefined, undefined, `closed-now:${id}`)));
         out.stopped += Math.min(RENEWALS_AT_ONCE, toStop.length - i);
       }
-      page = typeof found.next_page === "string" ? found.next_page : "";
-      if (found.has_more !== true || !page) break;
+      if (typeof more !== "boolean" || (more && (typeof next !== "string" || !next))) {
+        console.error("plan-closing: Stripe's search for a closing store's renewals did not say whether more follow; tried again");
+        return { ...out, done: false };
+      }
+      if (!more) break;
+      page = next as string;
     }
   }
   return out;

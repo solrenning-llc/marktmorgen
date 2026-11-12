@@ -190,6 +190,20 @@ async function main(): Promise<void> {
   is("and it is sent once", [again.sent, emails.length], [0, sentBefore + 1]);
   is("the studio counts who was invited and who kept it", await moveCounts(store), { invited: 3, kept: 1 });
 
+  part("A link already used to keep it opens no second membership");
+  const hal = emails.find((e) => [e.to].flat()[0] === "hal@example.com")!;
+  const halLink = hal.text.match(/\/move\/([A-Za-z0-9_-]+)\?k=([0-9a-f]{40})/);
+  if (!halLink) throw new Error("no link for Hal");
+  const checkoutsBefore = checkouts.length;
+  const halAgain = await openMove(store, halLink[1], halLink[2], "https://marktmorgen.com", now, TEST_CONSENT);
+  is("Hal, noted as having kept it, gets no checkout from the same link", [halAgain.ok ? "opened" : halAgain.reason, checkouts.length], ["kept", checkoutsBefore]);
+  // Ada paid through her link; the thanks page has not noted it yet, but her membership is live on the creator's account.
+  customersByEmail.set("ada@example.com", "cus_Ada000001");
+  liveSubs.set("cus_Ada000001", [{ status: "trialing", metadata: { store: "harbor", product: club.product.id, moved: "yes" } }]);
+  const adaAgain = await openMove(store, adaLink[1], adaLink[2], "https://marktmorgen.com", now, TEST_CONSENT);
+  is("Ada, whose membership is live, gets no second checkout either", [adaAgain.ok ? "opened" : adaAgain.reason, checkouts.length], ["kept", checkoutsBefore]);
+  is("and her invitation is noted as kept", await moveCounts(store), { invited: 3, kept: 2 });
+
   done();
 }
 

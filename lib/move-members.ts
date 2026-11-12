@@ -317,7 +317,7 @@ export async function readMove(store: Store, productId: string, token: string): 
   }
 }
 
-export type MoveOpen = { ok: true; url: string } | { ok: false; reason: "expired" | "unavailable" | "price" | "refused" | "consent" };
+export type MoveOpen = { ok: true; url: string } | { ok: false; reason: "expired" | "kept" | "unavailable" | "price" | "refused" | "consent" };
 
 /** The checkout a member's link opens: this membership, this address, first charged on the renewal date. */
 export async function openMove(
@@ -339,6 +339,18 @@ export async function openMove(
   if (namedPriceGone(product, invite.o)) return { ok: false, reason: "price" };
   // Not on sale now, or the option kept with nothing to hand over: the general answer, nothing charged.
   if (!canSellProduct(store, product) || !namedPriceOffered(product, invite.o)) return { ok: false, reason: "unavailable" };
+  // Kept already, through this link or found live on the creator's account: a second checkout would be a second
+  // membership of the same thing, charged every period beside the first. A reply that cannot be read opens nothing.
+  if (invite.kept) return { ok: false, reason: "kept" };
+  try {
+    if (await keptAlready(store, invite.e, productId)) {
+      await noteKept(store, invite.e, productId, now);
+      return { ok: false, reason: "kept" };
+    }
+  } catch (error) {
+    console.error("reading a moved member's live membership failed", store.handle, error);
+    return { ok: false, reason: "refused" };
+  }
   const option = product.options.length ? invite.o : undefined;
   try {
     const held = await withStockHold(store, product, (holding) =>

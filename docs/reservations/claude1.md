@@ -6,3 +6,4 @@ Only Claude 1 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
+| Claude 1 | Defect (custo) #4143: settlePlans reads only what a run settles | claude1/cost-redis-plans-pending | `lib/plans.ts`, `tests/c1-cost-plans-pending.test.ts` | 12/11/2026 17h10 |

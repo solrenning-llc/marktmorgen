@@ -176,6 +176,9 @@ export async function readWaitToken(token: string): Promise<TokenGrant | null> {
 
 /** Presses the button in the email: the address now counts, and joins the creator's list if it asked to. */
 export async function confirmSpot(token: string, store: Store | null): Promise<{ ok: true; productId: string } | { ok: false }> {
+  // The yes is given when the button is pressed, before anything is read: a deletion that lands while this runs is
+  // after it, so the contact is never written back (Defect 4219).
+  const pressedAt = new Date().toISOString();
   const grant = await readWaitToken(token);
   if (!grant || grant.k !== "confirm" || !store || store.statsId !== grant.s) return { ok: false };
   const [raw] = await redisPipeline([["HGET", listKey(grant.s, grant.p), grant.e]]);
@@ -185,7 +188,7 @@ export async function confirmSpot(token: string, store: Store | null): Promise<{
     await redisPipeline([["HSET", listKey(grant.s, grant.p), grant.e, JSON.stringify({ ...entry, ok: now() })]]);
   }
   if (entry.c && store.listId) {
-    await upsertContact(store.listId, grant.e, { agreed: true, explicit: true, clicks: entry.k === true, source: "free", at: new Date().toISOString(), sid: store.sid }, store, () => takePublicRequest(store, "public")).catch((error) =>
+    await upsertContact(store.listId, grant.e, { agreed: true, explicit: true, clicks: entry.k === true, source: "free", at: pressedAt, sid: store.sid }, store, () => takePublicRequest(store, "public")).catch((error) =>
       console.error("could not add a waitlist address to a list", error),
     );
   }

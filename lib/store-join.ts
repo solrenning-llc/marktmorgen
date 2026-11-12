@@ -128,10 +128,13 @@ export type ConfirmResult = { ok: true; grant: Grant; added: AddResult } | { ok:
  * sign anybody else up.
  */
 export async function confirmJoin(token: string, store: Store | null): Promise<ConfirmResult> {
+  // The yes is given when the button is pressed, before anything is read: a deletion that lands while this runs is
+  // after it, so the contact is never written back (Defect 4219; lib/contacts.ts writes nothing from before a deletion).
+  const pressedAt = new Date().toISOString();
   const grant = await readJoinToken(token);
   if (!grant || !store || store.statsId !== grant.s || !store.listId) return { ok: false, reason: "expired" };
   // The list's room in the store's data room is its room too: past it, the address is not added, as on a full list.
-  const added = await upsertContact(store.listId, grant.e, { agreed: true, explicit: true, clicks: grant.k === true, source: "free", at: new Date().toISOString(), sid: store.sid }, store, () => takePublicRequest(store, "public")).catch((error) => {
+  const added = await upsertContact(store.listId, grant.e, { agreed: true, explicit: true, clicks: grant.k === true, source: "free", at: pressedAt, sid: store.sid }, store, () => takePublicRequest(store, "public")).catch((error) => {
     if (error instanceof DataRoomError) return { joined: false, gotProduct: false, full: true };
     throw error;
   });

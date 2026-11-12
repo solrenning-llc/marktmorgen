@@ -58,8 +58,8 @@ import { createHash } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
-import { type BatchMessage, isSenderConfigured, sendBatch } from "@/lib/email";
-import { BATCH_SIZE, CHECKED_BATCH_SIZE, bodyHtml, render } from "@/lib/mail";
+import { type BatchMessage, isSenderConfigured, sendListBatch } from "@/lib/email";
+import { BATCH_SIZE, CHECKED_BATCH_SIZE, SENDER_WAIT_NOTE, bodyHtml, render } from "@/lib/mail";
 import { storeSender } from "@/lib/calls";
 import { SITE_URL } from "@/lib/site-url";
 import { type Store, handleLeadsToStore, storeHandleKey } from "@/lib/store";
@@ -752,7 +752,13 @@ export async function advanceEventJob(
             });
           }
         }
-        const outcome = await sendBatch(messages, `cmev:${id}:${job.done}:${keys.length}`, { by: "store", store, kind: "email" });
+        const outcome = await sendListBatch(messages, `cmev:${id}:${job.done}:${keys.length}`, { by: "store", store, kind: "email" });
+        if (outcome === "waiting") {
+          // Known not handed to any provider (the store's figure was given back): it waits for the sender, never
+          // counted as a failure.
+          job = { ...job, note: SENDER_WAIT_NOTE };
+          break;
+        }
         if (outcome !== "sent") {
           const failures = job.failures + 1;
           if (outcome === "refused" || failures >= 5) return await finish("failed", "The email service would not take it. Nothing more was sent.");

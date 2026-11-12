@@ -23,7 +23,7 @@ import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { atSiteAddress, creatorDomain, domainOf } from "@/lib/mail-from";
 import { countSesSent, isSesConfigured, notYetTaken, sesBatch, sesBulkRoom, sesConfig, sesDown, sesReady, sesSend } from "@/lib/ses";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
-import { type AllowanceStore, takeAllowance } from "@/lib/store-allowance";
+import { type AllowanceStore, giveAllowance, takeAllowance } from "@/lib/store-allowance";
 import { allowanceWindow } from "@/lib/allowance-window";
 import type { ShipmentMailDispatch } from "@/lib/shipment-mail-outbox";
 import { repliesFor } from "@/lib/redis-reply";
@@ -622,6 +622,13 @@ async function dispatchBatch(
     : serviceMailKnownUnavailable(runtime))) return "retry";
   const resendSelected = only === "resend" || !(config && isSesConfigured());
   let authorization: MeterAuthorization | undefined;
+  // A store's figure taken for this batch, given back when it is known that
+  // nothing was handed to a provider and the batch waits ("waiting").
+  let debited = 0;
+  const wait = async (): Promise<"waiting"> => {
+    if (debited > 0 && meter.by === "store") await giveAllowance(meter.store, meter.kind, debited);
+    return "waiting";
+  };
   if (going.length) {
     if (resendSelected) {
       // Keep the same recipients/content through tags/domain variants and
@@ -633,6 +640,7 @@ async function dispatchBatch(
       authorization = lazyMeter(meter, going.length);
       if (!(await authorization.preflight())) return "refused";
     } else if (!(await metered(meter, going.length))) return "refused";
+    else if (meter.by === "store") debited = going.length;
   }
   let idempotencyKey = batchKey;
   if (config && isSesConfigured() && only !== "resend") {
@@ -672,8 +680,8 @@ async function dispatchBatch(
     // emails that go one at a time (lib/ses.ts).
     const room = state ? await sesBulkRoom(state) : null;
     // Unknown usage cannot authorize SES or a fallback provider attempt.
-    if (state && room === null) return listOnly ? "waiting" : "retry";
-    if (listOnly && going.length && (!state || room === null || room < going.length)) return "waiting";
+    if (state && room === null) return listOnly ? await wait() : "retry";
+    if (listOnly && going.length && (!state || room === null || room < going.length)) return await wait();
     if (state && room !== null && room >= going.length) {
       const result = await sesBatch(
         config,
@@ -712,7 +720,7 @@ async function dispatchBatch(
     if (going.length === 0) return "sent";
     // List mail that SES throttled before taking anyone is known not sent: it
     // waits in the queue for SES. An account refusal stays held as "retry".
-    if (only === "amazon") return listOnly && throttledNoneTaken ? "waiting" : "retry";
+    if (only === "amazon") return listOnly && throttledNoneTaken ? await wait() : "retry";
     if (!toResend) {
       try {
         const reply: unknown = await redisPipeline([["SET", handed, "1", "EX", 2 * 86_400]]);

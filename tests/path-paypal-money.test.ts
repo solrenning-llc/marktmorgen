@@ -22,8 +22,8 @@
  */
 import { readFileSync } from "node:fs";
 import { claimHandle, ensureStatsId, ensureStoreId, setPayPalSeller, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
-import { readPathMoney, soldOf } from "@/lib/path-facts";
-import { startPath, visitPath } from "@/lib/path";
+import { PATH_MONEY_SECONDS, readPathMoney, soldOf } from "@/lib/path-facts";
+import { parsePath, pathJson, startPath, visitPath } from "@/lib/path";
 import { readAnswers } from "@/lib/path-rules";
 import { payPalSale } from "@/lib/stats";
 import { captureOrder, paypalPaymentId, readPayPalSales, watchPayPal, type Paid } from "@/lib/paypal-sales";
@@ -355,6 +355,42 @@ async function main(): Promise<void> {
     const read = await readPathMoney(store, now * 1000);
     bend = null;
     is("money unknown, no sale counted as kept", [read?.cents, read?.real], [null, 0]);
+  }
+
+  part("Codex G's MEDIUM: a mixed store, PayPal's sales off their shape, one live Stripe sale: never Stripe's money alone");
+  {
+    const { store } = await setup();
+    sessions = [{ id: "cs_live_pp000009", object: "checkout.session", status: "complete", payment_status: "paid", amount_total: 1000, currency: "usd", created: now - 400, livemode: true, payment_intent: "pi_pp00000009", metadata: { store: "paypalpath", product: "p1" } }];
+    bend = bendFirst("nl:ppsell:sales:", "ZREVRANGEBYSCORE", () => ["x"]);
+    const read = await readPathMoney(store, now * 1000);
+    bend = null;
+    sessions = [];
+    is("mixed store, PayPal gap: money unknown, no sale counted as kept", [read?.cents, read?.real], [null, 0]);
+  }
+
+  part("Claude 7's MEDIUM: a reading with refunds unknown is not tried again, nor charged, before PATH_MONEY_SECONDS");
+  {
+    const { store } = await setup();
+    const answers = readAnswers({ goalCents: 100_000, skills: "baking", subject: "sourdough", minutes: 30, audience: "instagram", timeZone: "America/Sao_Paulo" }, store.currency);
+    if (!answers.ok) throw new Error("answers");
+    const started = await startPath(store, answers.answers, now * 1000);
+    if (!started.ok) throw new Error("path");
+    const kept = await visitPath(store, started.record, now * 1000, async () => true);
+    let charged = 0;
+    const charge = async () => { charged += 1; return true; };
+    const day = now * 1000 + 86_400_000;
+    // The refunds stay unreadable on every reading from here on.
+    bend = bendFirst("nl:ppsell:refunded:", "ZRANGEBYSCORE", () => ["1"]);
+    const first = await visitPath(store, kept.record, day, charge);
+    const second = await visitPath(store, first.record, day + 60_000, charge);
+    const stored = parsePath(pathJson(second.record));
+    if (!stored) throw new Error("stored path");
+    const third = await visitPath(store, stored, day + 120_000, charge);
+    bend = null;
+    is("the stale reading is tried once, then not again before PATH_MONEY_SECONDS, even from the stored record", charged, 1);
+    is("the kept money is still shown, its own time unchanged", [third.record.money?.real, third.record.money?.cents, third.record.money?.at], [2, 4400, kept.record.money?.at]);
+    const after = await visitPath(store, third.record, day + PATH_MONEY_SECONDS * 1000, charge);
+    is("once PATH_MONEY_SECONDS have passed it is read again, and the readable reading replaces the kept one", [charged, after.record.money?.cents, after.record.money?.at], [2, 4400, day + PATH_MONEY_SECONDS * 1000]);
   }
 
   done();

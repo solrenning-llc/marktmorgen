@@ -10,6 +10,7 @@ const MESSAGES: Record<string, string> = {
   used: "This month's AI jobs are used up. They come back with your next billing month.",
   off: "Asking your numbers is not available right now.",
   numbers: "Your numbers could not be read just now. Try again in a moment.",
+  unavailable: "Your AI jobs for this month could not be read just now. Nothing was counted. Try again in a moment.",
   slow: "A few questions a minute at most. Try again in a moment.",
   failed: "No answer came back, and nothing was counted. Try again.",
   server_error: "Something went wrong on our side. Nothing was counted; try again in a moment.",

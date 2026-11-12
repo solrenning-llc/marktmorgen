@@ -205,7 +205,10 @@ async function refundsOf(store: Store, callsId: string, deadline: number): Promi
     query.append("expand[]", "data.charge");
     if (after) query.set("starting_after", after);
     const listed = await onAccount("GET", account, `/refunds?${query}`);
-    const refunds = Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : [];
+    // Read exactly (unknown is never zero): a list Stripe answered without its rows is not "no refunds", the end of
+    // the list. It throws, so nothing is written and the place does not move (readRefunds keeps it for the next run).
+    if (!Array.isArray(listed.data)) throw new Error("Stripe answered the refunds list without its list");
+    const refunds = listed.data as Record<string, unknown>[];
     // A dispute closed as lost ends the booking's meeting
     // as a full refund does (lib/refunds.ts, queue 388 [TB14]): read once,
     // with the first page, from Stripe's closing events (kept thirty days).
@@ -241,7 +244,10 @@ async function refundsOf(store: Store, callsId: string, deadline: number): Promi
       if (lookups <= 0) continue;
       lookups -= 1;
       const sessions = await onAccount("GET", account, `/checkout/sessions?${new URLSearchParams({ payment_intent: intent, limit: "1" })}`);
-      const session = (Array.isArray(sessions.data) ? (sessions.data as Record<string, unknown>[]) : [])[0];
+      // A lookup answered without its list is not "no booking": the refund is never marked read on it, or the
+      // meeting would stay and the hosts' time would never come back. It throws, and the next run looks again.
+      if (!Array.isArray(sessions.data)) throw new Error("Stripe answered a payment's checkout session lookup without its list");
+      const session = (sessions.data as Record<string, unknown>[])[0];
       const meta = ((session?.metadata ?? {}) as Record<string, string>) ?? {};
       if (session && typeof session.id === "string" && meta.kind === "call" && handles.has(meta.store ?? "")) {
         const moved = (await readMoves([session.id])).get(session.id);

@@ -47,6 +47,7 @@ import {
   ASSISTANT_TIMEOUT_MS,
   ASSISTANT_TURNS_KEPT,
   HANDOFF_WORDS,
+  MAX_ASSISTANT_QUESTION,
   MAX_ASSISTANT_REPLY,
   assistantMessageExtraMicroUsd,
   assistantMessageWorstMicroUsd,
@@ -388,10 +389,11 @@ export async function askAssistant(input: { store: Store; token?: unknown; text:
   // Shown only when it says nothing the store did not publish: a figure, a deal, a code, a link.
   if (status === "answer" && reply && heldToFacts(reply, facts)) return finish({ text: reply, status: "answer" });
 
-  // Not known, or not shown. When the model said it did not know, the creator sees the question; never who asked.
+  // Not known, or not shown. When the model said it did not know, the creator sees the question; never who asked:
+  // an address, a phone number or a link typed into it is taken out first, as in the conversation kept.
   if (json && json.status === "unknown") {
     await redisPipeline([
-      ["LPUSH", missedKey(store.statsId), JSON.stringify({ q: text, at: Math.floor(now / 1000) })],
+      ["LPUSH", missedKey(store.statsId), JSON.stringify({ q: forAi(text, MAX_ASSISTANT_QUESTION), at: Math.floor(now / 1000) })],
       ["LTRIM", missedKey(store.statsId), 0, ASSISTANT_MISSED_KEPT - 1],
       ["EXPIRE", missedKey(store.statsId), ASSISTANT_MISSED_SECONDS],
     ]).catch((error) => console.error("keeping an unanswered question failed", error));

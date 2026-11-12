@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { Breadcrumb } from "@/components/breadcrumb";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteNav } from "@/components/site-nav";
+import { HelpAnswerTools } from "@/components/help-answer-tools";
 import { answerSummary, helpAnswer, helpAnswerPath, helpPagePaths, sectionNeighbors } from "@/lib/help-pages";
 
 /**
@@ -37,8 +38,11 @@ export default async function HelpAnswerPage({ params }: Params) {
   if (!found) notFound();
   const others = sectionNeighbors(found);
   return (
-    <div className="flex min-h-screen flex-col bg-paper text-ink">
-      <SiteNav />
+    <div className="flex min-h-screen flex-col bg-paper text-ink print:bg-white">
+      {/* Printed, the answer stands alone: no menus, no footer, no list of other answers (564 [HC1]). */}
+      <div className="print:hidden">
+        <SiteNav />
+      </div>
       <main id="content" className="container-page flex-1 py-12 sm:py-16">
         <Breadcrumb path={[{ label: "Help center", href: "/help" }, { label: found.section.title, href: `/help/${found.section.id}` }]} here={found.q} />
         <article className="mt-4 max-w-3xl">
@@ -50,9 +54,10 @@ export default async function HelpAnswerPage({ params }: Params) {
               </p>
             ))}
           </div>
+          <HelpAnswerTools />
         </article>
         {others.length ? (
-          <nav aria-labelledby="help-more-title" className="mt-12 max-w-3xl">
+          <nav aria-labelledby="help-more-title" className="mt-12 max-w-3xl print:hidden">
             <h2 id="help-more-title" className="t-section">{`More in ${found.section.title}`}</h2>
             <ul className="mt-4 space-y-1">
               {others.map((item) => (
@@ -65,13 +70,15 @@ export default async function HelpAnswerPage({ params }: Params) {
             </ul>
           </nav>
         ) : null}
-        <p className="mt-10">
+        <p className="mt-10 print:hidden">
           <Link href="/help" className="inline-flex min-h-11 items-center font-semibold text-violet-deep underline underline-offset-4">
             Search all of the help center
           </Link>
         </p>
       </main>
-      <SiteFooter />
+      <div className="print:hidden">
+        <SiteFooter />
+      </div>
     </div>
   );
 }

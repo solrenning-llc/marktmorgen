@@ -1445,6 +1445,7 @@
     "components/group-link-box.tsx",
     "components/handle-form.tsx",
     "components/heard-ask.tsx",
+    "components/help-answer-tools.tsx",
     "components/help-search.tsx",
     "components/home-claim.tsx",
     "components/home-examples.tsx",

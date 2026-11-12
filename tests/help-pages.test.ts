@@ -14,7 +14,9 @@
  *   - the summary is the answer's own first sentence, or its first words cut
  *     at a word, never longer than a search result shows;
  *   - each answer on /help links to its own page, and the old /help#id
- *     anchors stay.
+ *     anchors stay;
+ *   - "Copy link" and "Print" on an answer's page work once scripts run and
+ *     are not offered before; printed, the answer stands alone.
  */
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -25,6 +27,9 @@ import HelpAnswerPage, { generateMetadata as answerMeta, generateStaticParams as
 import HelpPage from "@/app/help/page";
 import sitemap from "@/app/sitemap";
 import { NotFoundError } from "./help-pages-navigation";
+import { readFileSync } from "node:fs";
+import { HelpAnswerTools } from "@/components/help-answer-tools";
+import { find, mount, texts } from "./client-hooks";
 import { done, is, part } from "./check";
 
 const decode = (html: string) => html.replace(/&#x27;/g, "'").replace(/&quot;/g, '"').replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">");
@@ -87,6 +92,32 @@ async function main(): Promise<void> {
     const long = answerSummary(["A ".repeat(200)]);
     is(`never over ${SUMMARY_CHARS} characters, cut at a word`, [[...long].length <= SUMMARY_CHARS, long.endsWith("…")], [true, true]);
     is("every real answer's summary fits and is its own words", answers.every((a) => [...answerSummary(a.item.a)].length <= SUMMARY_CHARS && a.item.a[0].replace(/\s+/g, " ").startsWith(answerSummary(a.item.a).replace(/…$/, ""))), true);
+  }
+
+  part("Copy link and Print");
+  {
+    const page = renderToStaticMarkup(await HelpAnswerPage({ params: Promise.resolve({ section: "delivery", answer: "does-the-download-link-expire" }) }));
+    is("before scripts run, nothing that could not work is offered", page.includes("data-help-answer-tools"), false);
+    const g = globalThis as unknown as { window?: unknown; navigator?: unknown };
+    const copied: string[] = [];
+    let printed = 0;
+    g.window = { location: { origin: "https://marktmorgen.com", pathname: "/help/delivery/does-the-download-link-expire" }, print: () => (printed += 1) };
+    Object.defineProperty(globalThis, "navigator", { value: { clipboard: { writeText: async (t: string) => void copied.push(t) } }, configurable: true });
+    const shown = await mount(HelpAnswerTools, {});
+    const buttons = find(shown.tree(), (n) => n.type === "button");
+    is("two buttons, named for what they do", buttons.map((b) => texts(b).join("").trim()), ["Copy link", "Print"]);
+    await (buttons[0].props?.onClick as () => Promise<void>)();
+    await shown.settle();
+    is("Copy link copies the page's own address and says so", [copied, texts(find(shown.tree(), (n) => n.props?.role === "status")[0]).join("")], [["https://marktmorgen.com/help/delivery/does-the-download-link-expire"], "Link copied."]);
+    (find(shown.tree(), (n) => n.type === "button")[1].props?.onClick as () => void)();
+    is("Print opens the browser's print dialog", printed, 1);
+    Object.defineProperty(globalThis, "navigator", { value: { clipboard: { writeText: async () => { throw new Error("denied"); } } }, configurable: true });
+    const again = await mount(HelpAnswerTools, {});
+    await (find(again.tree(), (n) => n.type === "button")[0].props?.onClick as () => Promise<void>)();
+    await again.settle();
+    is("a copy the browser refuses is said, with what to do", texts(find(again.tree(), (n) => n.props?.role === "status")[0]).join(""), "The link could not be copied here. Copy it from the address bar instead.");
+    const source = readFileSync("app/help/[section]/[answer]/page.tsx", "utf8");
+    is("printed, the answer stands alone: menus, footer, other answers and the tools are left out", [/<div className="print:hidden">\s*<SiteNav \/>/.test(source), /<div className="print:hidden">\s*<SiteFooter \/>/.test(source), source.includes('className="mt-12 max-w-3xl print:hidden"'), readFileSync("components/help-answer-tools.tsx", "utf8").includes("print:hidden")], [true, true, true, true]);
   }
 
   part("From /help");

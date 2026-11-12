@@ -35,7 +35,7 @@ const CFG = `nl:hostcal:cfg:${HOST}`;
 const GOOD = `nl:hostcal:good:${HOST}`;
 const ERR = `nl:hostcal:err:${HOST}`;
 const URL_ICS = "https://calendar.example.com/private-abc123.ics";
-const statsStore = { statsId: "s0000000000000000077" };
+const statsStore = { statsId: "s0000000000000000077", sid: "", email: "" };
 /** setHostSource takes a whole store; it reads only statsId and the paid period (none here). */
 const sourceStore = statsStore as unknown as Store;
 const real = redis.pipeline.bind(redis);

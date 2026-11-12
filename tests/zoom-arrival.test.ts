@@ -114,7 +114,7 @@ async function main(): Promise<void> {
   part("Nothing to test before an account is connected");
   const early = await makeTest(shop, "zoom").catch((error) => error);
   is("says it is not connected", early instanceof NotConnected, true);
-  is("and removing one that is not there does nothing", await removeTest(statsId, "zoom"), false);
+  is("and removing one that is not there does nothing", await removeTest(shop, "zoom"), false);
 
   part("A test meeting on the connected account");
   const connected = await finishConsent("zoom", { statsId, code: "code-1", verifier: "v".repeat(43), by: "owner@example.com", owner: { email: "owner@example.com", handle: "harbor" } });
@@ -148,7 +148,7 @@ async function main(): Promise<void> {
 
   part("Deleting it");
   seen.length = 0;
-  is("deleted", await removeTest(statsId, "zoom"), true);
+  is("deleted", await removeTest(shop, "zoom"), true);
   is("on Zoom, by its own number", seen.filter((s) => s.method === "DELETE").map((s) => s.url), [`https://api.zoom.us/v2/meetings/${test.id}`]);
   is("and forgotten here", await readTests(statsId, ["zoom"]), {});
   is("with none left, there is nothing to move", await moveTest(shop, "zoom"), null);
@@ -169,7 +169,7 @@ async function main(): Promise<void> {
   const refusedMove = await moveTest(funded, "zoom").catch((error) => error);
   is("a new provider move needs financial approval", refusedMove instanceof TestMeetingUnavailable, true);
   is("no credential refresh or provider request, and the meeting is unchanged", [seen.length, (await readTests(statsId, ["zoom"])).zoom], [0, after]);
-  is("retained removal is still available", await removeTest(statsId, "zoom"), true);
+  is("retained removal is still available", await removeTest(shop, "zoom"), true);
   is("removal uses the existing provider cleanup", seen.filter((entry) => entry.method === "DELETE").length, 1);
   seen.length = 0;
   const refusedCreate = await makeTest(funded, "zoom").catch((error) => error);

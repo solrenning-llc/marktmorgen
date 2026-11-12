@@ -19,7 +19,7 @@ import { randomBytes } from "node:crypto";
 import type { Store } from "@/lib/store";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import type { MeetProvider } from "@/lib/call-setup";
-import { accessFor, testKey, NotConnected } from "@/lib/meet-connect";
+import { type MeetStore, accessFor, testKey, NotConnected } from "@/lib/meet-connect";
 import { eventId, googleCreate, googleDelete, googleMove, zoomCreate, zoomDelete, zoomMove } from "@/lib/meet-providers";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { countOf, repliesFor } from "@/lib/redis-reply";
@@ -93,7 +93,7 @@ export async function makeTest(store: Store, provider: MeetProvider, now = Date.
   const had = (await readTests(statsId, [provider]))[provider];
   if (had) return had;
   if (store.period?.funded === true && !await reservePaidResourceWindow(store)) throw new TestMeetingUnavailable();
-  const access = await accessFor(statsId, provider);
+  const access = await accessFor(statsId, provider, undefined, "", store);
   // An hour from now, on the next five minutes: far enough not to ring anybody's phone as "starting".
   const start = Math.ceil((now + 3_600_000) / 300_000) * 300_000;
   const end = start + TEST_MEETING_MINUTES * 60_000;
@@ -127,7 +127,7 @@ export async function moveTest(store: Store, provider: MeetProvider): Promise<Te
   const had = (await readTests(statsId, [provider]))[provider];
   if (!had) return null;
   if (store.period?.funded === true && !await reservePaidResourceWindow(store)) throw new TestMeetingUnavailable();
-  const access = await accessFor(statsId, provider);
+  const access = await accessFor(statsId, provider, undefined, "", store);
   const shift = TEST_MOVE_MINUTES * 60_000;
   const when = { start: had.start + shift, end: had.end + shift, tz: "UTC" };
   if (provider === "zoom") await zoomMove(access.token, had.id, when);
@@ -138,10 +138,12 @@ export async function moveTest(store: Store, provider: MeetProvider): Promise<Te
 }
 
 /** Deletes the test meeting on the creator's account, and forgets it. False when there was none. */
-export async function removeTest(statsId: string, provider: MeetProvider): Promise<boolean> {
+export async function removeTest(store: MeetStore, provider: MeetProvider): Promise<boolean> {
+  const statsId = store.statsId;
+  if (!statsId) return false;
   const had = (await readTests(statsId, [provider]))[provider];
   if (!had) return false;
-  const access = await accessFor(statsId, provider);
+  const access = await accessFor(statsId, provider, undefined, "", store);
   if (provider === "zoom") await zoomDelete(access.token, had.id);
   else await googleDelete(access.token, had.id);
   // Read as written (CX-123 rule 24): a DEL whose reply is not a count is not known to be done, and is said so;

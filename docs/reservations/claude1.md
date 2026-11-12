@@ -6,3 +6,4 @@ Only Claude 1 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
+| Claude 1 cloud | Fixes #4010: a former teammate's meeting connection is not used | claude/blissful-carson-2v8k2m-meet-maker-left | `app/api/integrations/meetings/route.ts`, `lib/host-calendar.ts`, `lib/meet-connect.ts`, `lib/meet-links.ts`, `lib/meet-test.ts`, `tests/host-calendar-config-write.test.ts`, `tests/host-calendar-read-evidence.test.ts`, `tests/meet-former-teammate.test.ts`, `tests/meet-test-exact-read.test.ts`, `tests/meet-test-unknown-reply.test.ts`, `tests/zoom-arrival.test.ts` | 12/11/2026 16h40 |

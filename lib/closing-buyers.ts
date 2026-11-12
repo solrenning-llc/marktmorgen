@@ -237,7 +237,15 @@ export async function tellBuyers(store: Store, endedAt: number, day: number, aft
     for (const sub of held.missing) if (await markUntold(folder, `#${sub}`, 0)) out.untold += 1;
     const kept: string[] = [...members.keys()];
     kept.push(...(await importedBuyers(store.statsId)).keys());
-    kept.push(...(await readPayPalSales(store.statsId, 0, 100_000)).sales.map((sale) => sale.email));
+    // A PayPal reading that failed whole (its range or records out of shape: partial with nothing read) is not done:
+    // the first step stays unmarked and the closing job asks again, so no PayPal buyer is left out for good
+    // (Claude 1 cloud's L1 on #3443). A reading cut at its limit still tells the ones it read.
+    const paypal = await readPayPalSales(store.statsId, 0, 100_000);
+    if (paypal.partial && !paypal.sales.length) {
+      console.error("closing-buyers: a closing store's PayPal sales could not be read; tried again");
+      return out;
+    }
+    kept.push(...paypal.sales.map((sale) => sale.email));
     if (!(await tell(kept))) return out;
     out.after = "start";
   }

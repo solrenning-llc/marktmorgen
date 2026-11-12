@@ -23,7 +23,7 @@
  * "told" mark, and lets it go when this answers "unsent").
  */
 import { createHash } from "node:crypto";
-import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
+import { NIMBUS_FROM, isSenderConfigured, sendEmailOutcome } from "@/lib/email";
 import { storeForId } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
 
@@ -93,6 +93,17 @@ export function owedPlanWords(storeName: string, product: string | null, session
 }
 
 /**
+ * What a notice's send outcome means for its plan. A 5xx may have delivered it, and the sender never posts the same
+ * key and body again (lib/email.ts, sendEmailOutcome; #3387), so an uncertain send is "told", said in the log, and
+ * never retried (Claude 1 cloud on #3367, MEDIUM 1). Only a certain refusal, or a throw before anything was posted,
+ * is "unsent" and tried again.
+ */
+function toldBy(outcome: "sent" | "refused" | "uncertain", what: string, session: string): "told" | "unsent" {
+  if (outcome === "uncertain") console.error(`a ${what} notice may have been sent (the email service's answer is not known); not sent again`, session);
+  return outcome === "refused" ? "unsent" : "told";
+}
+
+/**
  * Emails the store's owner, once a plan, about a payment after the plan's end still to refund: "told", "unsent" or
  * "nobody", as tellPlanStuck answers.
  */
@@ -103,8 +114,8 @@ export async function tellPlanOwed(plan: OwedPlan): Promise<"told" | "unsent" | 
   if (!isSenderConfigured()) return "unsent";
   const listing = plan.product ? await readListing(store, plan.product).catch(() => null) : null;
   const words = owedPlanWords(store.name, listing?.title ?? null, plan.session, plan.invoices, plan.days);
-  const sent = await sendEmail({ meter: { by: "store", store, kind: "email" }, from: NIMBUS_FROM, to: store.email, subject: words.subject, text: words.text, idempotencyKey: noticeKey("plan-owed", plan.account, plan.session) }).catch(() => false);
-  return sent ? "told" : "unsent";
+  const outcome = await sendEmailOutcome({ meter: { by: "store", store, kind: "email" }, from: NIMBUS_FROM, to: store.email, subject: words.subject, text: words.text, idempotencyKey: noticeKey("plan-owed", plan.account, plan.session) }).catch(() => "refused" as const);
+  return toldBy(outcome, "plan-owed", plan.session);
 }
 
 /**
@@ -121,6 +132,6 @@ export async function tellPlanStuck(plan: StuckPlan): Promise<"told" | "unsent" 
   if (!isSenderConfigured()) return "unsent";
   const listing = plan.product ? await readListing(store, plan.product).catch(() => null) : null;
   const words = stuckPlanWords(store.name, listing?.title ?? null, plan.account, plan.session, plan.days);
-  const sent = await sendEmail({ meter: { by: "store", store, kind: "email" }, from: NIMBUS_FROM, to: store.email, subject: words.subject, text: words.text, idempotencyKey: noticeKey("plan-stuck", plan.account, plan.session) }).catch(() => false);
-  return sent ? "told" : "unsent";
+  const outcome = await sendEmailOutcome({ meter: { by: "store", store, kind: "email" }, from: NIMBUS_FROM, to: store.email, subject: words.subject, text: words.text, idempotencyKey: noticeKey("plan-stuck", plan.account, plan.session) }).catch(() => "refused" as const);
+  return toldBy(outcome, "plan-stuck", plan.session);
 }

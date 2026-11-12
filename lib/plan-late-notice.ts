@@ -21,7 +21,7 @@
  */
 import { createHash } from "node:crypto";
 import { EMAIL_PATTERN, normaliseEmail } from "@/lib/auth";
-import { isSenderConfigured, sendEmail } from "@/lib/email";
+import { isSenderConfigured, sendEmailOutcome } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { countOf, repliesFor } from "@/lib/redis-reply";
 import { storeForId } from "@/lib/store";
@@ -111,15 +111,18 @@ export async function tellLateRefunds(about: { sid: string; product: string }, e
       endedOn: say.date(end * 1000),
       link: storeBase(store),
     }).join("\n");
-    const sent = await sendEmail({
+    const outcome = await sendEmailOutcome({
       meter: { by: "store", store, kind: "transactional" },
       from: fromStore(store),
       to: normaliseEmail(paid.email as string),
       subject: words.subject(store.name).slice(0, 180),
       text,
       idempotencyKey: `plan-late-told:${createHash("sha256").update(paid.invoice).digest("hex").slice(0, 32)}`,
-    }).catch(() => false);
-    if (sent) {
+    }).catch(() => "refused" as const);
+    // A 5xx may have delivered it, and the sender never posts this key and body again (#3387): an uncertain send keeps
+    // its claim, said in the log, and is never tried again (Claude 1 cloud on #3367, MEDIUM 1).
+    if (outcome === "uncertain") console.error("a plan's late refund email may have been sent to its buyer (the email service's answer is not known); not sent again", paid.invoice);
+    if (outcome !== "refused") {
       out.told += 1;
       continue;
     }

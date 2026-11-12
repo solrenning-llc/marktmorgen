@@ -19,6 +19,7 @@
  *
  *   nl:csa:held:<store>:<YYYY-MM-DD>   set      products held automatically that day, 2 days
  *   nl:csa:keep:<store>:<product>      "1"      preservation hold, 400 days (unit 2)
+ *   nl:csa:files:<store>:<product>     JSON     where its held files are, 400 days (unit 3b)
  *   nl:csa:hide                        zset     held products whose taking off the store is not confirmed yet, by
  *                                               when each is next tried (hideHeldProducts); KEEP_SECONDS from the
  *                                               last one added
@@ -59,6 +60,9 @@ import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { type Store, setProductHidden, storeForEmail, storeRef } from "@/lib/store";
 import { productIdFromAddress, productIds, readListingExactly } from "@/lib/catalog";
 import { handleIn, type ReportKind } from "@/lib/takedown-rules";
+import { MAX_VAULT_PATH_BYTES } from "@/lib/vault-rules";
+import { holdFiles, isFileHeld } from "@/lib/held-files";
+import { productFilePaths } from "@/lib/held-product-files";
 import { type Listing, productIdFor, readListings } from "@/lib/catalog";
 import { heldIdsAmong, heldInCatalog, isHeldForReport, keepKey, touchesHeld } from "@/lib/child-safety-holds";
 import { imagePaths } from "@/lib/product-image";
@@ -74,7 +78,54 @@ const COUNT_SECONDS = 2 * 86_400;
 /** How long a reported product is kept from removal, editing and publishing: a year from the report and a margin. */
 export const KEEP_SECONDS = 400 * 86_400;
 
-export type HoldOutcome = "held" | "no_product" | "not_held" | "capped" | "unknown" | "failed";
+/**
+ * How many paths the held list keeps: every file stays marked whatever the list
+ * holds (lib/held-files.ts); the list is for finding them again, and `more`
+ * says how many it left out. 400 until Claude 6's focal review of #3480
+ * (6758141878): 400 longest vault paths wrote 88,106 bytes, priced at 48,000.
+ */
+export const HELD_LIST_PATHS = 200;
+/** The list's frame, `{"paths":[],"more":N}`, with room for any count. */
+const HELD_LIST_FRAME_BYTES = 40;
+/**
+ * The most a held list ever weighs, in bytes: HELD_LIST_PATHS of the longest
+ * vault paths the path rules allow (lib/vault-rules.ts), each quoted with a
+ * comma, and the frame. heldListOf never writes more, whatever the paths, so
+ * the price in tests/store-data-registry.ts cannot drift from the code.
+ */
+export const HELD_LIST_BYTES = HELD_LIST_PATHS * (MAX_VAULT_PATH_BYTES + 3) + HELD_LIST_FRAME_BYTES;
+
+/**
+ * The held list as it is written: the paths in order while they fit in
+ * HELD_LIST_PATHS and HELD_LIST_BYTES (a path longer than any vault path, say
+ * a picture's, is passed over rather than written), and how many were left out.
+ */
+export function heldListOf(paths: string[]): string {
+  const kept: string[] = [];
+  let bytes = HELD_LIST_FRAME_BYTES;
+  for (const path of paths) {
+    if (kept.length >= HELD_LIST_PATHS) break;
+    const cost = Buffer.byteLength(JSON.stringify(path), "utf8") + 1;
+    if (bytes + cost > HELD_LIST_BYTES) continue;
+    kept.push(path);
+    bytes += cost;
+  }
+  return JSON.stringify({ paths: kept, more: paths.length - kept.length });
+}
+const listKey = (store: Pick<Store, "statsId" | "handle">, productId: string) => `nl:csa:files:${storeTag(store)}:${productId}`;
+
+/**
+ * Where the held product's files are, kept beside the marks for as long: the marks are hashes, and once a store
+ * closes or a person is erased this list is how the owner finds what to hand over (18 U.S.C. § 2258A(h)). It is
+ * read by the owner only, from the store's data in the hosting console, never served by the site.
+ */
+async function listHeldFiles(store: Pick<Store, "statsId" | "handle">, productId: string, paths: string[]): Promise<boolean> {
+  const list = heldListOf(paths);
+  const replies = repliesFor(await redisPipeline([["SET", listKey(store, productId), list, "EX", KEEP_SECONDS]]), 1);
+  return replies?.[0] === "OK";
+}
+
+export type HoldOutcome = "held" | "files_unconfirmed" | "no_product" | "not_held" | "capped" | "unknown" | "failed";
 
 const storeTag = (store: Pick<Store, "statsId" | "handle">) => store.statsId || `h:${store.handle}`;
 const countKey = (store: Pick<Store, "statsId" | "handle">, day: string) => `nl:csa:held:${storeTag(store)}:${day}`;
@@ -159,7 +210,8 @@ export async function heldRefusalAmong(store: Store, ids: readonly string[]): Pr
  * instead of sending a held product's picture to the AI provider, or null to
  * go on. The request names a product or a page of the store's own and sends
  * a path, so the hold is read on the picture's owner, not on what is named:
- * the marks of every product of the store (heldInCatalog, two MGETs at most),
+ * the picture's own mark (unit 3b, isFileHeld), then the marks of every
+ * product of the store (heldInCatalog, two MGETs at most),
  * then, for each held product only, its listing and its sales page (both
  * versions), exactly. 409 `on_hold`, without saying whose, when the path is a
  * held product's picture, its smaller copy or a picture on its page; 503 when
@@ -168,6 +220,9 @@ export async function heldRefusalAmong(store: Store, ids: readonly string[]): Pr
  */
 export async function heldPictureRefusal(store: Store, path: string): Promise<Response | null> {
   try {
+    // The picture's own mark first (unit 3b, lib/held-files.ts): written when the product was held, whatever has
+    // happened to its listing or page since.
+    if (await isFileHeld(path)) return Response.json({ ok: false, error: "on_hold" }, { status: 409 });
     for (const id of await heldInCatalog(store, productIds(store))) {
       const listing = await readListingExactly(store, id);
       if (listing === "unknown") throw new Error("A held product could not be read");
@@ -254,15 +309,19 @@ export async function holdReported(report: { kind: ReportKind; url: string }, st
     // Kept before it is taken off: a creator who acts in between can still not remove or change it.
     const kept = repliesFor(await redisPipeline([["SET", keepKey(store, product.id), "1", "EX", KEEP_SECONDS]]), 1);
     if (kept?.[0] !== "OK") return "unknown";
-    // Waiting to be taken off before it is: should the hide below not go through, the hourly job takes it off
-    // (hideHeldProducts). A queue write not confirmed does not stop the hide; the owner's email says what happened.
+    // Waiting to be taken off before anything else is done: should the files below or the hide not go through (or the
+    // request be cut short), the hourly job takes it off (hideHeldProducts). A queue write not confirmed does not stop the hide; the owner's email says what happened.
     const member = hideMember(store, product.id);
     await redisPipeline([["ZADD", HIDE_DUE, now, member], ["EXPIRE", HIDE_DUE, KEEP_SECONDS]]).catch(() => console.error("a held product could not be queued to be taken off"));
+    // Its files are kept and closed to everyone before it is taken off (unit 3b, lib/held-files.ts).
+    const files = await productFilePaths(product, store.statsId || undefined)
+      .then(async ({ paths, complete }) => (await holdFiles(paths)) && (await listHeldFiles(store, product.id, paths)) && complete)
+      .catch(() => false);
     const done = await setProductHidden(storeRef(store), product.id, true);
     if (!done.ok) return done.reason === "unknown" ? "unknown" : "failed";
     // Confirmed off: it waits no more. If this is lost, the job confirms it off and lets it go.
     await redisPipeline([["ZREM", HIDE_DUE, member]]).catch(() => console.error("a held product taken off could not leave the queue"));
-    return "held";
+    return files ? "held" : "files_unconfirmed";
   } catch (error) {
     console.error("a child-safety hold could not be confirmed", error instanceof Error ? error.message : "unknown");
     return "unknown";
@@ -363,7 +422,8 @@ export async function hideHeldProducts(now = Date.now(), until = Date.now() + HI
 }
 
 const WHAT_HAPPENED: Record<HoldOutcome, string> = {
-  held: "The product it points at was taken off the store at once (unpublished), so visitors can no longer see or buy it. Nothing was deleted: its files and records are kept as they are. For 400 days the creator cannot remove it, change it or publish it again, nor replace or delete its files, price options, picture, page, podcast episodes, course lessons, lesson captions, license keys, bundle list, waitlist or buyers' reviews, from the studio, and it goes into no bundle. A bundle that already held it is not sold, and a checkout box that offered it, or such a bundle, is not shown or charged. Its course pages and files, podcast feed and episodes, preview and shared card are closed to everyone but the store's owner. People who bought it before may still reach its files through download links: switching that off is not automatic yet.",
+  held: "The product it points at was taken off the store at once (unpublished), so visitors can no longer see or buy it. Nothing was deleted: its files and records are kept as they are. For 400 days the creator cannot remove it, change it or publish it again, nor replace or delete its files, price options, picture, page, podcast episodes, course lessons, lesson captions, license keys, bundle list, waitlist or buyers' reviews, from the studio, and it goes into no bundle. A bundle that already held it is not sold, and a checkout box that offered it, or such a bundle, is not shown or charged. Its course pages and files, podcast feed and episodes, preview and shared card are closed to everyone but the store's owner. Its files are kept from deletion, whoever asks, and handed to nobody, buyers included. Two things the site cannot take back: a download address issued before the report works until it expires (up to 4 hours), and a picture of it fetched before may still be served from the CDN's and browsers' caches for up to a year; purge the CDN cache in the hosting dashboard now, as docs/incident-response.md section 8 says.",
+  files_unconfirmed: "The product it points at was taken off the store at once (unpublished), but keeping its files from deletion and download could not be confirmed. Suspend the store now, as docs/incident-response.md section 8 says.",
   no_product: "The address does not name a product of a store, so nothing was taken off automatically. Act on it by hand, as docs/incident-response.md section 8 says.",
   not_held: "Nothing was taken off automatically. Act on it by hand, as docs/incident-response.md section 8 says.",
   capped: `This store already had ${CHILD_SAFETY_HOLDS_PER_DAY} products taken off automatically today, so nothing more was. Act on it by hand, as docs/incident-response.md section 8 says.`,

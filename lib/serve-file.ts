@@ -9,6 +9,7 @@
  */
 import { get } from "@/lib/blob";
 import { fileUrl } from "@/lib/file-store";
+import { isFileHeld } from "@/lib/held-files";
 import { isVaultPath } from "@/lib/vault-rules";
 import {
   DOWNLOAD_URL_SECONDS,
@@ -59,6 +60,11 @@ export async function serveFile(
   file: ProductFile,
   { paid = true }: { paid?: boolean } = {},
 ): Promise<Response> {
+  // A file kept for a child-safety report goes to nobody, paid or not, and the answer does not say why
+  // (lib/held-files.ts); a mark that cannot be read hands nothing out.
+  const held = await isFileHeld(file.pathname).catch(() => null);
+  if (held === null) return notChecked();
+  if (held) return plain(404, "This file is not available.");
   /*
     The one place a delivery is ever refused, and it is never a paid one.
 

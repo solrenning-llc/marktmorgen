@@ -19,7 +19,9 @@
  *     query is its fingerprint, is sent to its current one before it is drawn;
  *   - every answer a function gives, the read or the "not found", is paced in
  *     this server's memory (lib/local-limit.ts), by connection and by file,
- *     which costs no store command. A visitor's browser asks the CDN, not us;
+ *     which costs no store command; an answer it lets through then reads the
+ *     picture's child-safety mark once (lib/held-files.ts, one GET). A
+ *     visitor's browser asks the CDN, not us;
  *     a first visitor in a region, who does reach us, asks for a page's worth
  *     of pictures, far inside either pace.
  */

@@ -1,4 +1,5 @@
 import { get } from "@/lib/blob";
+import { isFileHeld } from "@/lib/held-files";
 import { canonicalPicture, connectionRefusal, readRefusal } from "@/lib/picture-pace";
 import { IMAGE_FILE_PATTERN, IMAGE_FOLDER_PATTERN, imageType } from "@/lib/product-image";
 
@@ -31,6 +32,15 @@ export async function GET(
   if (!IMAGE_FOLDER_PATTERN.test(folder) || !IMAGE_FILE_PATTERN.test(file)) return missing();
   const refused = connectionRefusal(request) ?? canonicalPicture(request) ?? readRefusal(`image:${folder}/${file}`);
   if (refused) return refused;
+
+  // A picture kept for a child-safety report is shown to nobody, and never cached (lib/held-files.ts).
+  const held = await isFileHeld(`images/${folder}/${file}`).catch(() => null);
+  if (held === null)
+    return new Response("Try again in a moment.", {
+      status: 503,
+      headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" },
+    });
+  if (held) return missing();
 
   try {
     const found = await get(`images/${folder}/${file}`, { access: "private" });

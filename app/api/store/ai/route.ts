@@ -198,7 +198,8 @@ export async function POST(request: NextRequest) {
     if (!product) return fail("unknown", 404);
     const path = text(body.path, 200);
     // A held product's picture, or one on its sales page, goes to no AI provider, whichever product or page names it
-    // (lib/child-safety.ts, heldPictureRefusal); a hold that cannot be read is not a yes.
+    // (lib/child-safety.ts, heldPictureRefusal: the file's own mark, then its owner's hold), and nothing says whose it
+    // is; a mark that cannot be read is not a yes.
     const heldPicture = path ? await heldPictureRefusal(store, path) : null;
     if (heldPicture) return heldPicture;
     const folder = await imageFolder(guarded.ref);

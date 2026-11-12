@@ -36,12 +36,24 @@ export const VAULT_FILES = "https://*.r2.cloudflarestorage.com";
 /** The first piece of the path of a file this store keeps. */
 export const VAULT_PREFIX = "vault";
 
-const FOLDER_PATTERN = /^[0-9a-f]{32}$/;
+/** The lengths the path rules below allow; MAX_VAULT_PATH_BYTES is built from them. */
+const FOLDER_CHARS = 32;
+const OWNER_MAX_CHARS = 40;
+const TOKEN_CHARS = 16;
+const KEY_NAME_MAX_CHARS = 120;
+const FOLDER_PATTERN = new RegExp(`^[0-9a-f]{${FOLDER_CHARS}}$`);
 /** What a file hangs on: a product, a price option, a lesson. Their ids are short and plain. */
-const OWNER_PATTERN = /^[A-Za-z0-9_-]{1,40}$/;
-const TOKEN_PATTERN = /^[0-9a-f]{16}$/;
+const OWNER_PATTERN = new RegExp(`^[A-Za-z0-9_-]{1,${OWNER_MAX_CHARS}}$`);
+const TOKEN_PATTERN = new RegExp(`^[0-9a-f]{${TOKEN_CHARS}}$`);
 /** A name the store keeps a file under: plain characters only, so its address never needs escaping. */
-const KEY_NAME_PATTERN = /^[A-Za-z0-9._-]{1,120}$/;
+const KEY_NAME_PATTERN = new RegExp(`^[A-Za-z0-9._-]{1,${KEY_NAME_MAX_CHARS}}$`);
+/**
+ * The longest path a file this store keeps can have, in bytes (every character
+ * allowed is one byte): vault/<folder>/<owner>/<token>-<name>. What prices a
+ * list of such paths (the child-safety hold's, lib/child-safety.ts) reads it,
+ * so the figure follows these rules.
+ */
+export const MAX_VAULT_PATH_BYTES = VAULT_PREFIX.length + 1 + FOLDER_CHARS + 1 + OWNER_MAX_CHARS + 1 + TOKEN_CHARS + 1 + KEY_NAME_MAX_CHARS;
 
 /**
  * A file's name as the store keeps it. What the creator called the file is
@@ -58,7 +70,7 @@ export function keyName(name: string): string {
     .replace(/-{2,}/g, "-")
     .replace(/-+\./g, ".")
     .replace(/^[-.]+|[-.]+$/g, "");
-  return plain.slice(-120) || "file";
+  return plain.slice(-KEY_NAME_MAX_CHARS) || "file";
 }
 
 /** The folder of one store's files on one product, option or lesson. */

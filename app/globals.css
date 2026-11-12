@@ -4076,7 +4076,7 @@ a.rv-line:hover {
 .cm-tab[aria-current="page"] .cm-tab-n {
   background: rgba(255, 255, 255, 0.24);
 }
-/* How far a member is towards their next level (the leaderboard page). */
+/* How far a member is towards their next level (the leaderboard page), and a buyer in a course (components/purchase-card.tsx). */
 .cm-progress {
   height: 0.5rem;
   overflow: hidden;
@@ -4088,6 +4088,16 @@ a.rv-line:hover {
   height: 100%;
   border-radius: 999px;
   background: var(--st-accent);
+}
+@media (forced-colors: active) {
+  /* Forced colors drop the bar's backgrounds: the track keeps an outline and the share done the system's highlight. */
+  .cm-progress {
+    outline: 1px solid CanvasText;
+  }
+  .cm-progress > span {
+    forced-color-adjust: none;
+    background: Highlight;
+  }
 }
 /* The viewer's own row on the leaderboard. */
 .cm-me {

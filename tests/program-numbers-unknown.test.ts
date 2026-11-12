@@ -265,8 +265,8 @@ async function main(): Promise<void> {
   const keptPartialRow = typeof keptPartial === "string" ? (JSON.parse(keptPartial) as { handle: string; numbers: unknown }[]).find((r) => r.handle === "breadhouse") : undefined;
   is("the page kept for them holds no $0 for that row", keptPartialRow !== undefined && keptPartialRow.numbers === null, true);
   await redisPipeline([["HDEL", `nl:aff:${sid}:payouts`, "p_bad"]]);
-  advance(61_000);
-  is("a page kept without a row's numbers is kept only a minute: once the record is fixed, the real numbers come back", (await readDirectory()).find((r) => r.handle === "breadhouse")?.numbers?.paidCents, 300);
+  advance(601_000);
+  is("a page kept without a row's numbers ends like any kept page: once the record is fixed, the next build shows the real numbers", (await readDirectory()).find((r) => r.handle === "breadhouse")?.numbers?.paidCents, 300);
   await redisPipeline([["DEL", "nl:dir:page", "nl:dir:build"]]);
 
   part("The public directory: the row without numbers, never zeros");

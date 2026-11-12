@@ -106,8 +106,14 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     // data-reveal is set on <html> by the first script in the body, before
     // React loads (lib/reveal-scripts.ts); React is told that attribute is
     // expected, so it does not report the page as mismatched.
+    // data-scroll-behavior="smooth" tells the Next.js router that globals.css
+    // makes document scrolling smooth, so a route change jumps to the new page's
+    // top at once instead of animating from where the old page was left; the
+    // page and its links are still while the reader (or a test) acts on them.
+    // In-page anchor scrolling keeps its smooth behavior.
     <html
       lang="en-US"
+      data-scroll-behavior="smooth"
       className={`${geist.variable} ${accent.variable} ${STORE_FONTS} h-full antialiased`}
       suppressHydrationWarning
     >

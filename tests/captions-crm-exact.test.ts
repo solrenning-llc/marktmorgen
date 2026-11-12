@@ -7,7 +7,7 @@
  *   - autoRefundsOwed (lib/auto-captions.ts): the AI-caption refunds Stripe has
  *     not confirmed, shown on the studio's course page. An unknown read said
  *     none were owed, and the page then showed nothing.
- *   - readFields, readValues, allValues and readPipelines (lib/crm.ts): an
+ *   - readFields, readValues, valuesOf and readPipelines (lib/crm.ts): an
  *     unknown read said no fields, no values or the default pipelines; the
  *     person's deletion (forgetCrmPerson) then deleted none of the person's
  *     answers or deals and still said it was done.
@@ -25,8 +25,8 @@ import { strict as assert } from "node:assert";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { autoRefundsOwed } from "@/lib/auto-captions";
-import { allValues, forgetCrm, forgetCrmPerson, readFields, readPipelines, readValues } from "@/lib/crm";
-import { upsertContact } from "@/lib/contacts";
+import { forgetCrm, forgetCrmPerson, readFields, readPipelines, readValues, valuesOf } from "@/lib/crm";
+import { plainRead, upsertContact } from "@/lib/contacts";
 import { listAsCsv } from "@/lib/free";
 import { personKey } from "@/lib/person-key";
 import { streamPath } from "@/lib/stream-rules";
@@ -113,7 +113,7 @@ test("control: fields, values, pipelines read as saved; nothing saved reads as n
   await seedCrm();
   assert.deepEqual((await readFields(STATS)).map((f) => f.id), [FIELD.id]);
   assert.deepEqual(await readValues(STATS, ANA, [FIELD as never]), { [FIELD.id]: "Gold" });
-  assert.deepEqual(await allValues(STATS, [FIELD as never]), { [FIELD.id]: { [ANA]: "Gold" } });
+  assert.deepEqual(await valuesOf(STATS, [FIELD as never], [ANA], plainRead), { [FIELD.id]: ["Gold"] });
   assert.deepEqual((await readPipelines(STATS)).map((p) => p.id), ["sales0", "part01"]);
   assert.deepEqual(await readFields("synthetic-crm-none"), []);
   assert.deepEqual((await readPipelines("synthetic-crm-none")).map((p) => p.id), ["sales0"]);
@@ -145,13 +145,13 @@ for (const [label, fault] of [
 for (const [label, fault] of [
   ["the reply missing", []],
   ["an object in place of the list", [{ [ANA]: "Gold" }]],
-  ["a list cut in the middle of a pair", [[ANA]]],
-  ["a value not a string", [[ANA, 5]]],
+  ["a list without a value for each person", [[]]],
+  ["a value not a string", [[5]]],
   ["not a list", [5]],
 ]) {
   test(`every value: ${label} is unknown, never "no values"`, async () => {
     await seedCrm();
-    await assert.rejects(() => faulted(1, fault, () => allValues(STATS, [FIELD as never])));
+    await assert.rejects(() => faulted(1, fault, () => valuesOf(STATS, [FIELD as never], [ANA], plainRead)));
   });
 }
 

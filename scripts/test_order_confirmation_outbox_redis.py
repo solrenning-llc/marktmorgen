@@ -64,14 +64,25 @@ def main():
     def candidate(row, session, token):
         return dict(row, session=session, bindingFingerprint=hashlib.sha256(token.encode()).hexdigest(),
                     phase="awaiting_payment", sourceValue="bound:" + session, sealed="s1." + token)
-    def stats():
+    def stats(text):
         out = {}
-        for line in db.command("INFO", "COMMANDSTATS").splitlines():
+        for line in text.splitlines():
             match = re.match(r"cmdstat_([^:]+):calls=(\d+),", line)
             if match and match[1] != "info": out[match[1]] = int(match[2])
         return out
     def measured(run):
-        before = stats(); result = run(); after = stats()
+        # INFO COMMANDSTATS counts every client's commands. CI's Redis service runs its
+        # health check (`redis-cli ping`) every 5 s, and a PING that landed between the two
+        # INFOs was counted as ours ("bind": 19, not 18, in merge_group jobs 129264490715,
+        # 129522790103 and 130685108880). MULTI/EXEC runs the two INFOs and the one measured
+        # command as one transaction, so no other client's command can come in between,
+        # as scripts/test_shipment_mail_outbox_redis.py already measures.
+        db.command("MULTI")
+        assert db.command("INFO", "COMMANDSTATS") == "QUEUED"
+        assert run() == "QUEUED", "a measured step issues exactly one command"
+        assert db.command("INFO", "COMMANDSTATS") == "QUEUED"
+        before, result, after = db.command("EXEC")
+        before, after = stats(before), stats(after)
         return result, sum(after.get(k, 0) - before.get(k, 0) for k in set(before) | set(after))
     profiles = {}
     try:

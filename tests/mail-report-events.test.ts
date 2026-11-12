@@ -200,7 +200,9 @@ async function main() {
   part("Every delivered email would bring its own callback bill");
   const price = callbackCosts.mailReportCallbackCost;
   const one = price(1, 1, 0.2);
-  is("one delivery scenario includes its notice, invocation and eleven commands", one && [one.notices, one.invocations, one.redisCommands], [1, 1, 11]);
+  // Eleven before #2612; the SNS receipt's pending/done protocol (lib/sns-receipt.ts) bills up to eight instead of one.
+  is("one delivery scenario includes its notice, invocation and eighteen commands", one && [one.notices, one.invocations, one.redisCommands], [1, 1, 18]);
+  is("the SNS receipt's key and value fit the counted 256-byte transport record", callbackCosts.SNS_RECEIPT_RECORD_BYTES_MOST <= 256, true);
   is("the known sizing components have positive cost", Boolean(one && one.totalUsd > 0.0012), true);
   is("the full allowance is counted without free tier", price(10_000, 1, 0.2)?.totalUsd, one && one.totalUsd * 10_000);
   is("retries still have an invocation cost", price(1, 101, 0.2)?.invocations, 101);

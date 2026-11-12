@@ -1,9 +1,9 @@
 import type { NextRequest } from "next/server";
 import { recordSesEvent } from "@/lib/mail-report";
-import { redisPipeline } from "@/lib/redis";
 import { clientAddress, limited, withinLimit } from "@/lib/request-guard";
 import { isSesConfigured, sesConfig } from "@/lib/ses";
-import { readSesEvent, readSns, snsUrl, verifySns } from "@/lib/sns";
+import { readSesEvent, readSns, snsUrl, verifySns, type SnsMessage } from "@/lib/sns";
+import { finishSnsReceipt, letGoSnsReceipt, takeSnsReceipt } from "@/lib/sns-receipt";
 import { SES_TIMEOUT_MS, timed } from "@/lib/fetch-timeout";
 
 /** An announcement carries one email's headers at most. Anything bigger is not one. */
@@ -22,9 +22,11 @@ export const maxDuration = 30;
  *
  * Not found until Amazon is set up (lib/ses.ts). Each announcement is
  * believed only as lib/sns.ts describes — our topic, Amazon's signature, no
- * more than an hour old — and acted on once: its id is kept for a day. One
- * we failed to act on is let go of again and answered with a failure, so
- * Amazon's retry of it is heard.
+ * more than an hour old — and acted on once: its id is kept for a day, pending
+ * while it is acted on and done after (lib/sns-receipt.ts). One we failed to
+ * act on is let go of again and answered with a failure, so Amazon's retry of
+ * it is heard; one whose run ended unfinished is acted on again by a later
+ * retry, never acknowledged unacted.
  *
  * The first thing Amazon posts to a new address is a question: do you want
  * this topic's announcements? It is answered yes, by opening the link in it,
@@ -54,39 +56,41 @@ export async function POST(request: NextRequest) {
   if (verdict !== "ok") return Response.json({ ok: false }, { status: 401 });
 
   const seenKey = `nl:sns:seen:${message.MessageId.replace(/[^A-Za-z0-9-]/g, "").slice(0, 80)}`;
-  let claim: unknown;
-  try {
-    claim = await redisPipeline([["SET", seenKey, "1", "NX", "EX", 86_400]]);
-  } catch {
-    return Response.json({ ok: false }, { status: 503 });
-  }
-  // Only a confirmed claim may authorize effects. An unknown reply does not
-  // prove ownership, so it must not authorize deleting the existing marker.
-  if (!Array.isArray(claim) || claim.length !== 1) return Response.json({ ok: false }, { status: 503 });
-  if (claim[0] === null) return Response.json({ ok: true });
-  if (claim[0] !== "OK") return Response.json({ ok: false }, { status: 503 });
-  const letGo = () => redisPipeline([["DEL", seenKey]]).catch(() => {});
+  // Pending, then done (lib/sns-receipt.ts): only a receipt this request holds authorizes effects, a finished one is
+  // acknowledged, and one whose run ended unfinished is taken over and acted on again, never acknowledged unacted.
+  const receipt = await takeSnsReceipt(seenKey);
+  if (receipt.state === "done") return Response.json({ ok: true });
+  if (receipt.state === "busy") return Response.json({ ok: false }, { status: 503 });
 
+  let answer: Response;
   try {
-    if (message.Type === "SubscriptionConfirmation") {
-      const link = snsUrl(message.SubscribeURL, config.region);
-      if (!link) return Response.json({ ok: false }, { status: 400 });
-      const answer = await timed(SES_TIMEOUT_MS, (signal) => fetch(link.href, { cache: "no-store", signal }));
-      if (!answer.ok) throw new Error(`Amazon answered ${answer.status} to the confirmation`);
-      return Response.json({ ok: true, result: "confirmed" });
-    }
-    if (message.Type === "UnsubscribeConfirmation") {
-      // Somebody ended the subscription at Amazon. Nothing to do here but say so where it is read.
-      console.error("Amazon SNS says this address no longer gets the topic's announcements");
-      return Response.json({ ok: true });
-    }
-    const event = readSesEvent(message.Message);
-    if (!event) return Response.json({ ok: true });
-    const result = await recordSesEvent(event);
-    return result === null ? Response.json({ ok: true }) : Response.json({ ok: true, result });
+    answer = await act(message, config);
   } catch (error) {
     console.error("an announcement from Amazon could not be acted on", error);
-    await letGo();
+    await letGoSnsReceipt(receipt);
     return Response.json({ ok: false }, { status: 500 });
   }
+  // Acted on: a done that does not land leaves the pending value to run out, and a late retry acts again, harmlessly.
+  await finishSnsReceipt(receipt);
+  return answer;
+}
+
+/** What one verified announcement asks for. Throws when it could not be acted on, so Amazon tries again. */
+async function act(message: SnsMessage, config: NonNullable<ReturnType<typeof sesConfig>>): Promise<Response> {
+  if (message.Type === "SubscriptionConfirmation") {
+    const link = snsUrl(message.SubscribeURL, config.region);
+    if (!link) return Response.json({ ok: false }, { status: 400 });
+    const answer = await timed(SES_TIMEOUT_MS, (signal) => fetch(link.href, { cache: "no-store", signal }));
+    if (!answer.ok) throw new Error(`Amazon answered ${answer.status} to the confirmation`);
+    return Response.json({ ok: true, result: "confirmed" });
+  }
+  if (message.Type === "UnsubscribeConfirmation") {
+    // Somebody ended the subscription at Amazon. Nothing to do here but say so where it is read.
+    console.error("Amazon SNS says this address no longer gets the topic's announcements");
+    return Response.json({ ok: true });
+  }
+  const event = readSesEvent(message.Message);
+  if (!event) return Response.json({ ok: true });
+  const result = await recordSesEvent(event);
+  return result === null ? Response.json({ ok: true }) : Response.json({ ok: true, result });
 }

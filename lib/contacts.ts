@@ -894,6 +894,32 @@ export async function stopWriting(listId: string, rawEmail: string, why: "bounce
   return false;
 }
 
+/**
+ * Takes back the permission to see this person's link use (lib/mail-clicks.ts,
+ * stopCounting), leaving them on the list exactly as they are. Written only if
+ * the row still holds what was read (casWrite), so an unsubscribe or a purchase
+ * noted in the same moment is never written over; a row that changed is read
+ * again, three times at most. "gone" when the row no longer belongs to this
+ * link, "off" when the permission is (now) not on. A reply in another shape, or
+ * a row that keeps changing, throws UnknownReplyError: never answered as done.
+ */
+export async function dropClicks(listId: string, email: string, token: string): Promise<"off" | "gone"> {
+  const key = leadsKey(listId);
+  for (let round = 0; round < 3; round += 1) {
+    const replies = repliesFor(await redisPipeline([["HGET", key, email]]), 1);
+    const raw = replies?.[0];
+    if (!replies || (raw !== null && typeof raw !== "string")) throw new UnknownReplyError("a contact's row before its link counting stops");
+    const contact = parseContact(raw);
+    if (!contact || contact.t !== token || typeof raw !== "string") return "gone";
+    if (!contact.clicks) return "off";
+    const { clicks: _was, ...kept } = contact;
+    void _was;
+    const [written] = await casWrite(key, [{ email, value: JSON.stringify(kept satisfies Contact), was: sha1(raw) }]);
+    if (written) return "off";
+  }
+  throw new UnknownReplyError("a contact's row that kept changing while its link counting stopped");
+}
+
 export type ListCounts = { total: number; agreed: number; left: number; mailable: number; full: boolean };
 
 export async function listCounts(listId: string | null): Promise<ListCounts> {

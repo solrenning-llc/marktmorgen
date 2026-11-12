@@ -32,7 +32,7 @@ import { createHash } from "node:crypto";
 import { normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { countOf, repliesFor, stringList, UnknownReplyError } from "@/lib/redis-reply";
-import { type Contact, UNSUB_TOKEN, leadsKey, mailable, readUnsubToken } from "@/lib/contacts";
+import { UNSUB_TOKEN, dropClicks, leadsKey, mailable, readUnsubToken } from "@/lib/contacts";
 
 /** How long a used link is remembered after the last one, in days. */
 export const CLICK_DAYS = 90;
@@ -109,17 +109,16 @@ export async function countingFor(token: string): Promise<{ email: string; handl
 export async function stopCounting(token: string): Promise<boolean> {
   const found = await readUnsubToken(token);
   if (!found) return false;
-  const { listId, email, contact } = found;
-  const commands: (string | number)[][] = [
-    ["DEL", usedKey(listId, email)],
-    ["DEL", keyIndex(linkKeyOf(token))],
-  ];
-  if (contact.clicks) {
-    const { clicks: _was, ...kept } = contact;
-    void _was;
-    commands.push(["HSET", leadsKey(listId), email, JSON.stringify(kept satisfies Contact)]);
+  const { listId, email } = found;
+  // The permission first, written only over the row as it was read (dropClicks), so a click in between is not
+  // counted again after the deletion below and an unsubscribe made in the same moment is never written over.
+  if ((await dropClicks(listId, email, token)) === "gone") return false;
+  const keys = [usedKey(listId, email), keyIndex(linkKeyOf(token))];
+  // Each DEL answers exactly 0 or 1 (CX-123 rule 24); anything else is unknown and never answered as stopped.
+  const deleted = repliesFor(await redisPipeline(keys.map((key) => ["DEL", key])), keys.length);
+  if (!deleted || deleted.some((reply) => { const n = countOf(reply); return n === null || n > 1; })) {
+    throw new UnknownReplyError("a link-use deletion");
   }
-  await redisPipeline(commands);
   return true;
 }
 

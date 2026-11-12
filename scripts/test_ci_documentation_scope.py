@@ -156,7 +156,8 @@ class MergeGroupOnlyTests(unittest.TestCase):
                      "scripts/ci_all_checks.py", "scripts/ci_documentation_scope.py",
                      "scripts/ci_full_tree_proof.py", "scripts/test_ci_all_checks.py",
                      "scripts/test_ci_documentation_scope.py", "scripts/ci-build.mjs",
-                     "package.json", "package-lock.json", "tsconfig.json"]:
+                     "package.json", "package-lock.json", "tsconfig.json",
+                     "npm-shrinkwrap.json", ".npmrc"]:
             with self.subTest(path=path):
                 self.assertTrue(harness_path(path))
                 self.assertFalse(deferred_to_merge_group(True, "pull_request", A, B,

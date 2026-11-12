@@ -53,6 +53,7 @@
 import { createHash } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { withinLimit } from "@/lib/request-guard";
 import { recoveryOn } from "@/lib/recovery-setting";
 import { type RemindOutcome, remindAsked } from "@/lib/checkout-recovery";
@@ -135,6 +136,58 @@ export async function askCartReminder(input: { store: Store; items: Listing[]; e
   const items = input.items.filter((product) => cartable(product) && canSellProduct(store, product));
   if (!isRedisConfigured() || !store.statsId || !recoveryOn(store) || items.length === 0) return "closed";
   return keep(store, cartAskKey(items.map((p) => p.id)), input.email, input.ip, "checkout", ASK_AFTER_SECONDS);
+}
+
+/** How many ZSCAN pages one person's erasure reads of the queue before it says it could not finish. */
+const FORGET_SCAN_ROUNDS = 1_000;
+
+/**
+ * Takes one person's asks at one store off the queue (lib/person-erasure.ts): each member holds their address in
+ * plain text and waits up to three days for its time (ASK_WHENS), more with the send's retries, so it is deleted
+ * with them rather than left for the job to skip (webhooks/cron audit, Claude 1, 12/11/2026). The queue holds every
+ * store's asks; it is read with ZSCAN narrowed to members naming this store's id, which returns every member present
+ * for the whole read. Read exactly (CX-123 rule 24): a page, or the removal's count, in another shape throws, so the
+ * erasure says this part did not finish and is tried again, never "nothing here". Counts what it took off.
+ */
+export async function forgetAskPerson(statsId: string | null, rawEmail: string): Promise<number> {
+  const theirs = await askMembersOf(statsId, rawEmail);
+  if (!theirs.length) return 0;
+  const taken = countOf(repliesFor(await redisPipeline([["ZREM", QUEUE, ...theirs]]), 1)?.[0]);
+  if (taken === null || taken > theirs.length) throw new UnknownReplyError("the removal of a person's checkout reminder asks");
+  return taken;
+}
+
+/** One person's asks still waiting at one store, for their copy of their data (lib/person-copy.ts). */
+export async function asksOf(statsId: string | null, rawEmail: string): Promise<{ product: string; asked: string; from: AskFrom }[]> {
+  return (await askMembersOf(statsId, rawEmail)).flatMap((member) => {
+    const ask = parseAsk(member);
+    return ask ? [{ product: ask.productId, asked: new Date(ask.askedAt * 1000).toISOString(), from: ask.from }] : [];
+  });
+}
+
+/** The queue's members that are this person's asks at this store, read exactly (see forgetAskPerson). */
+async function askMembersOf(statsId: string | null, rawEmail: string): Promise<string[]> {
+  const email = normaliseEmail(rawEmail);
+  if (!statsId || !email || !isRedisConfigured()) return [];
+  // A store's id is lowercase hex, so it can be matched as it is (no glob characters to escape).
+  const match = /^[0-9a-f]+$/.test(statsId) ? `*"${statsId}"*` : "*";
+  const theirs: string[] = [];
+  let cursor = "0";
+  for (let round = 0; ; round += 1) {
+    if (round >= FORGET_SCAN_ROUNDS) throw new UnknownReplyError("the scan of a person's checkout reminder asks, which did not end");
+    const pair = repliesFor(repliesFor(await redisPipeline([["ZSCAN", QUEUE, cursor, "MATCH", match, "COUNT", 500]]), 1)?.[0], 2);
+    const next = typeof pair?.[0] === "number" ? String(pair[0]) : pair?.[0];
+    const flat = pair ? stringList(pair[1]) : null;
+    if (typeof next !== "string" || !/^\d+$/.test(next) || !flat || flat.length % 2 !== 0) {
+      throw new UnknownReplyError("the scan of a person's checkout reminder asks");
+    }
+    for (let i = 0; i < flat.length; i += 2) {
+      const ask = parseAsk(flat[i]);
+      if (ask && ask.statsId === statsId && normaliseEmail(ask.email) === email && !theirs.includes(flat[i])) theirs.push(flat[i]);
+    }
+    cursor = next;
+    if (cursor === "0") return theirs;
+  }
 }
 
 /** Keeps an ask for a reminder. Says what happened; never throws at the buyer. */

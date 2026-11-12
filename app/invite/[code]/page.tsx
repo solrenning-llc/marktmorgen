@@ -36,7 +36,7 @@ export default async function InvitePage({ params }: { params: Promise<{ code: s
         <p className="t-lead mt-6">{INVITE_PAUSE_NOTICE}</p>
         <p className="mt-4 text-ink-soft">If you previously accepted an invite on this browser, you can still finish creating your first store within its original 60-day window. Opening this page does not renew that window.</p>
         <Link href="/signin" className="btn btn-primary mt-6">Continue to your account</Link>
-        <Link href="/studio/invite" className="link ml-4 inline-flex min-h-11 items-center">View existing credits</Link>
+        <Link href="/studio/invite" className="link ml-4 inline-flex min-h-11 min-w-11 items-center">View existing credits</Link>
       </main>
       <SiteFooter />
     </div>

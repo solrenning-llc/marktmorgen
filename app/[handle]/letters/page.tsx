@@ -57,7 +57,7 @@ export default async function LettersPage({ params }: Params) {
         <ul className="mt-8 space-y-3">
           {(letters ?? []).map((letter) => (
             <li key={letter.id} className="st-card p-5">
-              <Link href={`/@${store.handle}/letters/${letter.id}`} className="inline-flex min-h-11 items-center font-semibold [overflow-wrap:anywhere]">
+              <Link href={`/@${store.handle}/letters/${letter.id}`} className="inline-flex min-h-11 min-w-11 items-center font-semibold [overflow-wrap:anywhere]">
                 {letter.subject}
               </Link>
               <p className="st-muted mt-1 text-sm">

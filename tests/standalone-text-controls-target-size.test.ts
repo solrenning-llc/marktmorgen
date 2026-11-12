@@ -21,10 +21,11 @@
  * sentence keeps the line's height, as WCAG 2.5.5 allows; each one is named
  * below with its reason, so nothing else can hide behind the exemption.
  *
- * Not checked here: the rendered height in a browser (the size comes from
- * the compiled class only), the 44 px width of one-word buttons (their
- * spacing is checked by eye only), and the files of this list that other
- * agents' open pull requests own.
+ * Measured once in Chromium on a local production build (12/11/2026):
+ * every link and button fixed here 44 px tall; the store chat's "Close" was
+ * 36-38 px wide with the height alone, hence the width check. Not checked
+ * here: the rendered size in a browser on every run (the size comes from the
+ * compiled class), and the files that other agents' open pull requests own.
  */
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -152,6 +153,13 @@ async function main() {
     .filter((c) => !c.classes.some((token) => FLOOR_CLASSES.includes(token) || PADDED.test(token)))
     .map((c) => `${c.file}:${c.line} <${c.tag} className="${c.classes.join(" ")}">`);
   assert.deepEqual(missing, [], "every stand-alone text control has a 44 px floor");
+
+  // 2.5.5 is both ways: a one-word control ("Close", "Path") measured 36 to 38 px wide in Chromium with only
+  // min-h-11. A control given its height by min-h-11 carries min-w-11 too (or a fixed 44 px square).
+  const narrow = found
+    .filter((c) => c.classes.includes("min-h-11") && !c.classes.some((t) => t === "min-w-11" || t === "w-11"))
+    .map((c) => `${c.file}:${c.line} <${c.tag} className="${c.classes.join(" ")}">`);
+  assert.deepEqual(narrow, [], "every control given 44 px of height by min-h-11 is 44 px wide at least");
 
   const smaller = found.filter((c) => c.classes.some((token) => /^(h|w|size)-(\d+)$/.test(token) && Number(token.split("-")[1]) < 11));
   assert.deepEqual(smaller.map((c) => `${c.file}:${c.line}`), [], "no control is drawn smaller than 44 px with a fixed size");

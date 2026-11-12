@@ -67,7 +67,7 @@ export function OldAddresses({ handles }: { handles: string[] }) {
                     setAsking(handle);
                     setError(null);
                   }}
-                  className="inline-flex min-h-11 items-center text-sm font-bold text-ink-soft underline underline-offset-4 transition hover:text-danger"
+                  className="inline-flex min-h-11 min-w-11 items-center text-sm font-bold text-ink-soft underline underline-offset-4 transition hover:text-danger"
                 >
                   Let it go
                 </button>

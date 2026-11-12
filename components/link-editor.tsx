@@ -408,7 +408,7 @@ export function LinkEditor({ links, folder }: { links: StoreLink[]; folder: stri
                       href={link.url}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-flex min-h-11 items-center text-ink-soft underline underline-offset-4 transition hover:text-violet-deep"
+                      className="inline-flex min-h-11 min-w-11 items-center text-ink-soft underline underline-offset-4 transition hover:text-violet-deep"
                     >
                       Open it to check
                     <NewTab /></a>
@@ -416,7 +416,7 @@ export function LinkEditor({ links, folder }: { links: StoreLink[]; folder: stri
                   <button
                     type="button"
                     onClick={() => startEditing(link)}
-                    className="inline-flex min-h-11 items-center text-ink-soft underline underline-offset-4 transition hover:text-violet-deep"
+                    className="inline-flex min-h-11 min-w-11 items-center text-ink-soft underline underline-offset-4 transition hover:text-violet-deep"
                   >
                     Edit
                   </button>
@@ -426,7 +426,7 @@ export function LinkEditor({ links, folder }: { links: StoreLink[]; folder: stri
                     onClick={() =>
                       run({ action: "move", id: link.id, direction: "up" }, () => {})
                     }
-                    className="inline-flex min-h-11 items-center text-ink-soft underline underline-offset-4 transition hover:text-violet-deep disabled:no-underline disabled:opacity-40"
+                    className="inline-flex min-h-11 min-w-11 items-center text-ink-soft underline underline-offset-4 transition hover:text-violet-deep disabled:no-underline disabled:opacity-40"
                   >
                     Move up
                   </button>
@@ -439,7 +439,7 @@ export function LinkEditor({ links, folder }: { links: StoreLink[]; folder: stri
                         () => {},
                       )
                     }
-                    className="inline-flex min-h-11 items-center text-ink-soft underline underline-offset-4 transition hover:text-violet-deep disabled:no-underline disabled:opacity-40"
+                    className="inline-flex min-h-11 min-w-11 items-center text-ink-soft underline underline-offset-4 transition hover:text-violet-deep disabled:no-underline disabled:opacity-40"
                   >
                     Move down
                   </button>
@@ -454,7 +454,7 @@ export function LinkEditor({ links, folder }: { links: StoreLink[]; folder: stri
                         archiveDoneWords(link, !link.archived),
                       )
                     }
-                    className="inline-flex min-h-11 items-center text-ink-soft underline underline-offset-4 transition hover:text-violet-deep disabled:no-underline disabled:opacity-40"
+                    className="inline-flex min-h-11 min-w-11 items-center text-ink-soft underline underline-offset-4 transition hover:text-violet-deep disabled:no-underline disabled:opacity-40"
                   >
                     {link.archived ? "Show again" : "Archive"}
                   </button>
@@ -465,7 +465,7 @@ export function LinkEditor({ links, folder }: { links: StoreLink[]; folder: stri
                         setRemovingId(link.id);
                         setError(null);
                       }}
-                      className="inline-flex min-h-11 items-center text-ink-soft underline underline-offset-4 transition hover:text-danger"
+                      className="inline-flex min-h-11 min-w-11 items-center text-ink-soft underline underline-offset-4 transition hover:text-danger"
                     >
                       Remove
                     </button>

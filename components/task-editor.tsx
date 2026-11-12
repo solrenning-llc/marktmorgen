@@ -9,7 +9,7 @@ import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 
 type Draft = { prompt: string; review: boolean; gate: boolean; file: boolean };
 
-const small = "inline-flex min-h-11 items-center text-ink-soft underline underline-offset-4 transition hover:text-violet-deep disabled:no-underline disabled:opacity-40";
+const small = "inline-flex min-h-11 min-w-11 items-center text-ink-soft underline underline-offset-4 transition hover:text-violet-deep disabled:no-underline disabled:opacity-40";
 
 const ERRORS: Record<string, string> = {
   prompt: "Write what the student should do or hand in.",
@@ -224,7 +224,7 @@ export function TaskEditor({
               <button type="button" className={`${small} font-bold`} onClick={() => setRemoving(false)}>Keep it</button>
             </span>
           ) : (
-            <button type="button" className="ml-auto inline-flex min-h-11 items-center text-sm font-bold text-ink-soft underline underline-offset-4 hover:text-danger" onClick={() => setRemoving(true)}>
+            <button type="button" className="ml-auto inline-flex min-h-11 min-w-11 items-center text-sm font-bold text-ink-soft underline underline-offset-4 hover:text-danger" onClick={() => setRemoving(true)}>
               Remove the assignment
             </button>
           )

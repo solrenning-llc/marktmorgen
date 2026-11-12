@@ -76,6 +76,17 @@ export function shipmentOutboxFixture() {
             ["id", "statsId", "session", "person", "sourceValue", "sealed", "fingerprint", "bytes", "created", "authorizedAt", "checks", "reviewId"].every(key => prior[key] === current[key]);
         } catch { return false; }
       })())) answer = ["changed"];
+      else if (!["claim", "cancel"].includes(op) && (() => {
+        // Mirror the application Lua's state preconditions: a transition from
+        // the wrong state is held, never silently applied by this stand-in.
+        const value = JSON.parse(raw);
+        if (value.owner !== owner) return true;
+        if (op === "dispatch") return value.state !== "preparing" || value.leaseUntil < now;
+        if (op === "defer") return value.state !== "preparing";
+        if (op === "not-posted") return value.state !== "preparing" && value.state !== "dispatching";
+        if (["not-accepted", "refused", "accepted"].includes(op)) return value.state !== "dispatching";
+        return false;
+      })()) answer = ["held", raw];
       else {
         const value = JSON.parse(raw);
         if (op === "accepted" || op === "cancel" || op === "refused") {

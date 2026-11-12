@@ -63,6 +63,43 @@ async function main(): Promise<void> {
     is(`${stage}: the original check was charged and never reset`, kept?.checks, 1);
   }
 
+  part("A refused barrier after this call's own dispatch returns to waiting with the real sender contract");
+  // lib/email.ts and lib/resend-fallback-transport.ts report a refused barrier
+  // as "unknown"; the worker itself knows no POST followed its dispatch.
+  for (const stage of ["deadline", "lease", "lost"] as const) {
+    store.clear();
+    const lateWorld = shipmentOutboxFixture();
+    let clock = now, slowed = false;
+    const lateRuntime = { ...runtime, now: () => clock, pipeline: async (commands: (string | number)[][]) => {
+      const answer = await lateWorld.pipeline(commands);
+      if (!slowed && commands.some(command => command[0] === "EVAL" && command[13] === "dispatch")) {
+        slowed = true;
+        if (stage === "deadline") clock = now + 5_001;
+        if (stage === "lease") clock = now + 60_001;
+      }
+      return answer;
+    } };
+    const lateInput = { ...input, statsId: `synthetic_late_${stage}`, session: `cs_test_shipmentlate${stage}0001` };
+    await enqueueShipmentMail(lateInput, lateRuntime);
+    const created = lateWorld.commands.find(command => command[0] === "EVAL")!;
+    if (stage === "lost") lateWorld.loseNext("dispatch");
+    let posts = 0;
+    const realSender = async (_message: unknown, beforePost: () => Promise<boolean>) => {
+      if (!(await beforePost())) return "unknown" as const;
+      posts++; return "accepted" as const;
+    };
+    const first = await runShipmentMail(now + (stage === "lease" ? 120_000 : 5_000), realSender, lateRuntime);
+    is(`${stage}: a refused barrier makes no POST`, posts, 0);
+    is(`${stage}: the worker reports known waiting, not unknown acceptance`, first, { accepted: 0, waiting: 1, unknown: 0 });
+    is(`${stage}: the creator sees a saved, waiting email`, (await shipmentMailStatus(lateInput.statsId, lateInput.session, lateRuntime))?.state, "queued");
+    const kept = JSON.parse(String(store.run(["GET", String(created[3])])));
+    is(`${stage}: custody keeps its sealed content and charged check`, [kept.state, kept.owner, typeof kept.sealed, kept.checks], ["queued", "", "string", 1]);
+    clock = now + 30 * 60_000;
+    const second = await runShipmentMail(clock + 5_000, realSender, lateRuntime);
+    is(`${stage}: a later pass sends the buyer's shipping email once`, [second, posts], [{ accepted: 1, waiting: 0, unknown: 0 }, 1]);
+    is(`${stage}: acceptance releases the protected row`, store.run(["GET", String(created[3])]), null);
+  }
+
   part("Incomplete receipts and unrecognized provider outcomes stay unknown");
   for (const scenario of ["no-post-short", "no-post-bad-row", "no-post-extra", "no-post-checks", "no-post-schedule", "no-post-owner", "claim-extra", "dispatch-extra", "accepted-extra"]) {
     store.clear();

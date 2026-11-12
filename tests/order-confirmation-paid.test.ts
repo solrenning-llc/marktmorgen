@@ -285,3 +285,21 @@ test("the demonstration account can neither reserve nor dispatch a physical conf
     {...f.runtime,provider:async()=>{providerReads++;return f.session;}},f.id);
   assert.equal(providerReads,0);assert.equal(posts,0);assert.ok(await readConfirmationOrigin(f.id,f.runtime));
 });
+
+test("a paid confirmation reported as not posted after its barrier stays queued and is sent later", async () => {
+  // The shared ShipmentMailDispatch type admits "not_posted": an explicit
+  // no-POST outcome must never be recorded as a refusal of the paid email.
+  const f = await paid(); let posts = 0;
+  const first = await runOrderConfirmationMail(f.runtime.now!() + 30_000, async (_message, beforePost) => {
+    assert.equal(await beforePost(), true); return "not_posted";
+  }, f.runtime, f.id);
+  assert.deepEqual(first, { accepted: 0, waiting: 1, unknown: 0 });
+  const kept = await readConfirmationOrigin(f.id, f.runtime); assert.ok(kept, "the paid origin is kept");
+  assert.equal(kept.row.state, "queued"); assert.equal(kept.row.owner, ""); assert.ok(kept.payload.message);
+  f.advance(61_000);
+  const later = await runOrderConfirmationMail(f.runtime.now!() + 30_000, async (_message, beforePost) => {
+    assert.equal(await beforePost(), true); posts++; return "accepted";
+  }, f.runtime, f.id);
+  assert.deepEqual(later, { accepted: 1, waiting: 0, unknown: 0 }); assert.equal(posts, 1);
+  assert.equal(await readConfirmationOrigin(f.id, f.runtime), null);
+});

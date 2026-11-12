@@ -60,6 +60,12 @@ const opened: { id: string; body: URLSearchParams; account: string | null }[] = 
 /** What Stripe answers about each checkout: open until the buyer pays. */
 const sessions = new Map<string, Record<string, unknown>>();
 const emails: { to: string[]; subject: string; text: string }[] = [];
+/** As Stripe answers: the payment is only its id unless the request expanded it. */
+const asAsked = (session: Record<string, unknown>, url: URL) => {
+  const pi = session.payment_intent as { id?: string } | string | undefined;
+  const expanded = url.searchParams.getAll("expand[]").some((field) => field.startsWith("payment_intent"));
+  return pi && typeof pi === "object" && !expanded ? { ...session, payment_intent: pi.id } : session;
+};
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
@@ -86,7 +92,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (one && method === "GET") {
     const found = sessions.get(decodeURIComponent(one[1]));
     if (!found) return new Response(JSON.stringify({ error: { message: "No such checkout.session" } }), { status: 404 });
-    return new Response(JSON.stringify(found));
+    return new Response(JSON.stringify(asAsked(found, url)));
   }
   return new Response(JSON.stringify({ object: "list", data: [], has_more: false }));
 }) as typeof fetch;

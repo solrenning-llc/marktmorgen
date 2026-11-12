@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 /**
  * An ad account whose last 30 days hold more rows than one read of Meta's insights takes (20 pages of 500: 84
  * campaigns x 30 days x 4 platforms is already 10,080) can never be read whole: the read asks Meta its 20 pages and
@@ -91,6 +92,10 @@ async function main(): Promise<void> {
   is("over a day of the five-minute job, Meta is asked at most two reads' worth of pages (before: 20 an hour, 480)", calls <= 40 ? "at most 40" : `${calls} calls`, "at most 40");
   is("and at least one read was tried", calls >= 20, true);
   is("the spend already read is kept", await metaCents(statsId), 3000);
+  const noted = JSON.parse(String((await redis.pipeline([["GET", `nl:metaads:read:${statsId}`]]))[0] ?? "{}"));
+  is("noted as too big, not as Meta being unreachable (review of #4167)", noted.problem, "big");
+  const editor = readFileSync("components/ad-spend-editor.tsx", "utf8");
+  is("the studio says when it tries again, without promising a few hours", editor.includes('read?.problem === "big"') && editor.includes("It tries again tomorrow."), true);
 
   part("Meta merely down is still tried again within the hour");
   insights = "down";

@@ -77,7 +77,8 @@ export type MetaRead = {
   day: string;
   at: number;
   /** What stopped the last try: the currencies differ, Meta was busy or failed. Empty when it worked. */
-  problem: "" | "currency" | "busy" | "error";
+  /** "big": the account has more lines over 30 days than one reading takes; tried again the next UTC day. */
+  problem: "" | "currency" | "busy" | "big" | "error";
   /** No try before this, after a problem Meta may get over (seconds). */
   after: number;
   /** Lines read, and what they come to, over the 30 days read. */
@@ -122,6 +123,8 @@ const STORES_KEY = "nl:metaads:stores";
 /** The daily pass's mark and the generation it holds (readMetaDue). */
 const PASS_KEY = "nl:metaads:pass";
 const GEN_KEY = "nl:metaads:gen";
+/** The longest a pass mark lasts while a store is paused (its payment may be recorded at any time). */
+export const PAUSED_PASS_SECONDS = 3600;
 const readingKey = (statsId: string) => `nl:metaads:reading:${statsId}`;
 const context = (statsId: string) => `metaads|${statsId}|token`;
 
@@ -239,7 +242,7 @@ function parseRead(raw: unknown): MetaRead | null {
     return {
       day: typeof v.day === "string" ? v.day : "",
       at: Number(v.at) || 0,
-      problem: v.problem === "currency" || v.problem === "busy" || v.problem === "error" ? v.problem : "",
+      problem: v.problem === "currency" || v.problem === "busy" || v.problem === "big" || v.problem === "error" ? v.problem : "",
       after: Number(v.after) || 0,
       lines: Number(v.lines) || 0,
       cents: Number(v.cents) || 0,
@@ -664,7 +667,7 @@ export async function readMetaSpend(statsId: string, storeCurrency: string, now 
     console.error("reading Meta ad spend failed", error instanceof Error ? error.message : error);
     // Too big for one read: looked at again the next day, as a currency that differs is, not every hour.
     const after = error instanceof MetaTooBig ? Math.floor(Date.parse(`${window.to}T00:00:00Z`) / 1000) + 86_400 : Math.floor(now / 1000) + (busy ? 3600 : 6 * 3600);
-    await note({ problem: busy ? "busy" : "error", after }).catch(() => false);
+    await note({ problem: error instanceof MetaTooBig ? "big" : busy ? "busy" : "error", after }).catch(() => false);
     return busy ? "busy" : "error";
   } finally {
     // Only this read's own lock: one that ran out may be the next read's now.
@@ -730,6 +733,7 @@ export async function readMetaDue(
   // The next UTC day, when every store read today is due again.
   let wake = Date.parse(`${today}T00:00:00Z`) + 86_400_000;
   let whole = generation !== null;
+  let paused = false;
   let seen = 0;
   for (const statsId of stores) {
     if (Date.now() >= deadline) break;
@@ -764,9 +768,12 @@ export async function readMetaDue(
     // Paused (lib/integration-pause.ts): tried again the next day. Anything else asked of this pass is looked at
     // again by the next run, which finds what it wrote and only then may leave the mark.
     if (result !== "paused") whole = false;
+    else paused = true;
   }
   if (whole && seen === stores.length) {
-    const seconds = Math.max(1, Math.ceil((wake - Date.now()) / 1000));
+    // A paused store starts again on its own once its payment is recorded, and nothing moves GEN_KEY then: with one
+    // paused, the mark lasts at most PAUSED_PASS_SECONDS, so it is read within the hour, not the next day.
+    const seconds = Math.min(paused ? PAUSED_PASS_SECONDS : Infinity, Math.max(1, Math.ceil((wake - Date.now()) / 1000)));
     await redisPipeline([["SET", PASS_KEY, generation as string, "EX", seconds]]);
   }
   return counts;

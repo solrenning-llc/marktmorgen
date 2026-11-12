@@ -21,7 +21,7 @@
  *   - a store whose plan's costs are paused waits for the next day, as the
  *     pass says, instead of being looked up every five minutes.
  */
-import { chooseAccount, readMetaDue } from "@/lib/meta-ads";
+import { PAUSED_PASS_SECONDS, chooseAccount, readMetaDue } from "@/lib/meta-ads";
 import { claimHandle, ensureStatsId, setSubscription, storeForEmail, storeForId } from "@/lib/store";
 import { costsPaused } from "@/lib/plan-standing";
 import { paidPeriod } from "./billing-period-fixture";
@@ -152,6 +152,12 @@ const pausedRun = await readMetaDue(Date.now() + 60_000, counting);
 is("the paused store is skipped, looked up once", [pausedRun.read, pausedRun.skipped, lookups], [0, 1, 1]);
 const afterPaused = await counted(() => readMetaDue(Date.now() + 60_000, counting));
 is("the next run is O(1) and does not look it up again", [afterPaused.commands <= 5, lookups], [true, 1]);
+// Its payment may be recorded at any time, and nothing moves the generation then: the mark lasts at most an hour.
+const pausedTtl = Number((await original([["TTL", "nl:metaads:pass"]]))[0]);
+is("with a paused store the mark lasts at most PAUSED_PASS_SECONDS (review of #4167)", pausedTtl > 0 && pausedTtl <= PAUSED_PASS_SECONDS, true);
+redis.advance((pausedTtl + 1) * 1000);
+await readMetaDue(Date.now() + 60_000, counting);
+is("an hour on, it is looked up again", lookups, 2);
 
 done();
 }

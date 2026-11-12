@@ -128,10 +128,12 @@ function MetaAds({
             {read?.problem === "currency"
               ? `Not read: this ad account pays in ${meta.account.currency.toUpperCase()} and your store sells in ${meta.currency.toUpperCase()}, and no exchange rate is guessed.${meta.accounts.length > 1 ? " Choose an account in your store's currency below." : ""}`
               : read?.day
-                ? `Read ${longDay(read.at)}: ${money(read.cents)} over the last 30 days${read.campaigns ? `, ${read.campaigns === 1 ? "1 campaign" : `${read.campaigns} campaigns`}` : ""}.${meta.readPaused ? ` ${READ_PAUSED}` : " Read again once a day."}${!meta.readPaused && read.problem ? " The last try did not reach Meta; it tries again within a few hours." : ""}`
+                ? `Read ${longDay(read.at)}: ${money(read.cents)} over the last 30 days${read.campaigns ? `, ${read.campaigns === 1 ? "1 campaign" : `${read.campaigns} campaigns`}` : ""}.${meta.readPaused ? ` ${READ_PAUSED}` : " Read again once a day."}${!meta.readPaused && read.problem === "big" ? " The last try found more ad lines over 30 days than one reading can take; it tries again tomorrow." : !meta.readPaused && read.problem ? " The last try did not reach Meta; it tries again within a few hours." : ""}`
                 : meta.readPaused
                   ? READ_PAUSED
-                  : read?.problem
+                  : read?.problem === "big"
+                    ? "Not read yet: this ad account has more ad lines over 30 days than one reading can take. It tries again tomorrow."
+                    : read?.problem
                     ? "Meta could not be read yet; it tries again within a few hours."
                     : "Read for the first time within the hour."}
           </p>

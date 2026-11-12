@@ -1969,27 +1969,42 @@ export async function renameHandle(
 
 export type StripeAccountResult =
   | { ok: true; store: Store }
-  | { ok: false; reason: "none" | "shape" };
+  | { ok: false; reason: "none" | "shape" | "moved" };
 
 /**
  * Writes down which Stripe account a creator connected.
  *
  * Only the identifier is kept. Marktmorgen never holds a key to that account and
  * never holds the money that lands in it.
+ *
+ * `expected`, when given, is the account the caller read before asking Stripe
+ * (null: none yet). The write is made only while the store still points at it,
+ * under the store's lock; otherwise nothing is written and the answer is
+ * "moved". An account forgotten, or another one connected, while Stripe was
+ * being asked is never written over (the studio's Stripe routes).
  */
 export async function setStripeAccount(
   email: string,
   accountId: string,
   chargesEnabled = false,
+  options: { expected?: string | null } = {},
 ): Promise<StripeAccountResult> {
   if (!STRIPE_ACCOUNT_PATTERN.test(accountId)) {
     return { ok: false, reason: "shape" };
   }
-  const next = await patchStore(email, () => ({
-    stripeAccountId: accountId,
-    stripeChargesEnabled: chargesEnabled,
-    stripeCheckedAt: new Date().toISOString(),
-  }));
+  let moved = false;
+  const next = await patchStore(email, (store) => {
+    if (options.expected !== undefined && store.stripeAccountId !== options.expected) {
+      moved = true;
+      return null;
+    }
+    return {
+      stripeAccountId: accountId,
+      stripeChargesEnabled: chargesEnabled,
+      stripeCheckedAt: new Date().toISOString(),
+    };
+  });
+  if (moved) return { ok: false, reason: "moved" };
   return next ? { ok: true, store: next } : { ok: false, reason: "none" };
 }
 

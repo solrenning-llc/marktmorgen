@@ -2560,7 +2560,7 @@ export default async function StudioPage({
             ) : null}
 
             {!closing && may("export") && standing !== "ended" && standing !== "none" ? (
-              <div className="card mt-8 p-6 sm:p-8">
+              <div id="store-data-export" tabIndex={-1} className="card mt-8 scroll-mt-32 p-6 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ink sm:p-8">
                 <p className="text-lg font-semibold tracking-[-0.02em] text-ink">Your store&rsquo;s main data, as one file</p>
                 <p className="mt-2 text-ink-soft">
                   Your store&rsquo;s address, name, bio, links, currency and the date it was created, your products and their pages, thank-you notes, posts, courses with every lesson&rsquo;s text, forms and their answers,
@@ -3169,6 +3169,14 @@ export default async function StudioPage({
                           ? `Your store keeps taking payments until ${endsOn ?? "the trial ends"}, and your card is never charged.`
                           : `Your store keeps taking payments until ${endsOn ?? "the end of the period you already paid for"}, and nothing more is charged.`}
                       </p>
+                      {!closing && may("export") && standing !== "ended" && standing !== "none" ? (
+                        <p className="mt-3 text-sm text-ink-soft">
+                          Before you leave, review what is included in the data file and what is not.{" "}
+                          <a href="#store-data-export" className="inline-flex min-h-11 items-center font-bold text-ink underline underline-offset-2">
+                            See what the data file holds, and download it
+                          </a>
+                        </p>
+                      ) : null}
                       <form action={`/api/billing/cancel${pin}`} method="post" className="mt-3">
                         <input type="hidden" name="intent" value="cancel" />
                         <button

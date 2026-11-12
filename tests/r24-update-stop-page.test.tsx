@@ -56,3 +56,26 @@ test("a link confirmed absent is still unknown", async () => {
   const html = await page();
   assert.ok(html.includes(words.unknownLink));
 });
+
+async function pageWith(query: Record<string, string>): Promise<string> {
+  const outer = (await UnsubscribePage({ searchParams: Promise.resolve(query) } as never)) as ReactElement;
+  const render = outer.type as (props: unknown) => Promise<ReactElement>;
+  return renderToStaticMarkup(await render(outer.props));
+}
+
+test("a press the route could not save (done=0) is said in a status message, and the button is offered again", async () => {
+  redis.clear();
+  await pipeline([["SET", `nl:upd:stop:${TOKEN}`, GRANT]]);
+  const html = await pageWith({ u: TOKEN, done: "0" });
+  const status = /<p role="status"[^>]*>([^<]*)<\/p>/.exec(html);
+  assert.ok(status, "a role=status message is drawn");
+  assert.equal(status[1], words.reviewsNotSaved);
+  assert.ok(html.includes('type="submit"'), "the button is still offered");
+});
+
+test("without done=0 the status region stays empty", async () => {
+  redis.clear();
+  await pipeline([["SET", `nl:upd:stop:${TOKEN}`, GRANT]]);
+  const html = await pageWith({ u: TOKEN });
+  assert.ok(!html.includes(words.reviewsNotSaved));
+});

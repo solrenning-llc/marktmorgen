@@ -22,7 +22,7 @@
  *   - Only for a PDF up to MAX_STAMP_BYTES that pdf-lib can read. Anything
  *     else simply has no preview, and the studio says why.
  *
- *   nl:preview:<sha(pathname|addedAt|pages)>   the preview's ProductFile, JSON
+ *   nl:preview:<sha(pathname|addedAt|pages)>   the preview's ProductFile, JSON, or NO_PREVIEW
  */
 import { createHash } from "node:crypto";
 import { PDFDocument } from "pdf-lib";
@@ -43,6 +43,14 @@ const PREVIEW_SECONDS = 400 * 24 * 60 * 60;
  * has not made yet, and every one it has.
  */
 export const PREVIEW_RECORD_BYTES = 1_024;
+/**
+ * Kept in the preview's place, in the room taken for its record, when this file has none (Codex V's 4215): asked
+ * again, it is answered from here, with no more room taken and no read. Room for what expires by itself is never
+ * given back (lib/store-data.ts), so without it every visit to a preview that cannot be made took 1,024 bytes more.
+ */
+const NO_PREVIEW = "none";
+/** A file that could not be read is tried again after a day: missing now, it may be there then. */
+const UNREAD_RETRY_SECONDS = 24 * 60 * 60;
 
 const sha = (value: string) => createHash("sha256").update(value).digest("hex");
 export const previewKey = (file: Pick<ProductFile, "pathname" | "addedAt">, pages: number) => `nl:preview:${sha(`${file.pathname}|${file.addedAt}|${pages}`).slice(0, 40)}`;
@@ -74,6 +82,7 @@ export async function previewCopy(file: ProductFile, pages: number, store: DataS
   try {
     if (isRedisConfigured()) {
       const [kept] = await redisPipeline([["GET", key]]);
+      if (kept === NO_PREVIEW) return null;
       if (typeof kept === "string") {
         try {
           return JSON.parse(kept) as ProductFile;
@@ -81,9 +90,16 @@ export async function previewCopy(file: ProductFile, pages: number, store: DataS
       }
     }
     if (isRedisConfigured() && !(await keepFor(store, PREVIEW_RECORD_BYTES, PREVIEW_SECONDS))) return null;
+    // The room taken holds that there is no preview, so that it is taken once.
+    const none = async (seconds: number) => {
+      if (isRedisConfigured()) await redisPipeline([["SET", key, NO_PREVIEW, "EX", seconds]]);
+      return null;
+    };
     const original = await readFileWhole(file.pathname, MAX_STAMP_BYTES);
-    if (!original) return null;
-    const bytes = await firstPages(original, pages);
+    if (!original) return await none(UNREAD_RETRY_SECONDS);
+    // A file pdf-lib cannot read stays so: noted for as long as a preview would be kept.
+    const bytes = await firstPages(original, pages).catch(() => null);
+    if (!bytes) return await none(PREVIEW_SECONDS);
     const base = file.name.replace(/\.pdf$/i, "") || "preview";
     const name = `${base} (preview).pdf`;
     const pathname = `${copyFolder(file)}preview-${pages}-${sha(file.addedAt).slice(0, 12)}.pdf`;

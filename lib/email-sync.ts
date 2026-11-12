@@ -442,8 +442,17 @@ async function runClaimed(statsId: string, id: string, budget: number, now = Dat
   }
   const done = await attempt(job, now, budget);
   const record: (string | number)[] = ["SET", jobKey(id), JSON.stringify(done), "EX", JOB_SECONDS];
-  if (done.state === "retrying") await redisPipeline([record, ["ZADD", QUEUE_KEY, done.next, `${statsId}|${id}`]]);
-  else await retire(statsId, id, now, [record]);
+  if (done.state === "retrying") {
+    // Written back only over the record still there (XX), and queued again only once that write is confirmed: a
+    // person's erasure that deleted the job while it was being tried (forgetSyncPerson) is never undone, and their
+    // address is never sent again by a later try (#4266). Nil is "deleted meanwhile": nothing more is written, and
+    // the leased queue entry left behind names no one and is retired by the next run that reads no record. Any
+    // other reply is unknown (rule 24): it throws, and the job comes back when its lease ends.
+    const [wrote] = repliesFor(await redisPipeline([[...record, "XX"]]), 1) ?? [undefined];
+    if (wrote === null) return null;
+    if (wrote !== "OK") throw new UnknownReplyError("writing an email platform job's next try");
+    await redisPipeline([["ZADD", QUEUE_KEY, done.next, `${statsId}|${id}`]]);
+  } else await retire(statsId, id, now, [record]);
   return done;
 }
 

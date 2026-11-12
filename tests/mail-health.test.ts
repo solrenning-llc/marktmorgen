@@ -416,7 +416,8 @@ async function main(): Promise<void> {
       const commandsSeen: (string | number)[][] = [];
       redis.pipeline = async commands => {
         commandsSeen.push(...commands);
-        if (commands.length === 1 && commands[0][0] === "SET" && commands[0][1] === checkedRampKey) {
+        // The checkpoint is written by a compare-and-set (EVAL script, 1, key, ...).
+        if (commands.length === 1 && commands[0][0] === "EVAL" && commands[0][3] === checkedRampKey) {
           await rampPipeline.call(redis, commands);
           if (reply instanceof Error) throw reply;
           return reply as unknown[];
@@ -427,7 +428,7 @@ async function main(): Promise<void> {
       is(`${name}: sender waits with the whole recipient list`,
         [held.done, held.rest, held.stopped], [[], ["member0@example.com"], "portion"]);
       is(`${name}: no allowance increment or rollback command`,
-        commandsSeen.map(c => c[0]), ["GET", "GET", "SET"]);
+        commandsSeen.map(c => c[0]), ["GET", "GET", "EVAL"]);
       const applied = JSON.parse(String((await rampPipeline.call(redis, [["GET", checkedRampKey]]))[0]));
       is(`${name}: applied uncertain portion remains taken`, applied.left, RAMP_FIRST - 1);
     }

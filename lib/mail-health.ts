@@ -277,50 +277,81 @@ export async function startRamp(id: string, added: number): Promise<void> {
  * which is nearly every store nearly all the time; 0 while the next portion
  * has not opened yet, or when its read/write checkpoint is unconfirmed.
  */
+/**
+ * The ramp checkpoint is replaced only while it still holds the text that was
+ * read: the same compare-and-set as a call lock's (lib/calls.ts), word for
+ * word, so the tests' Redis (lib/redis-memory.ts) runs it in one step too.
+ * Two sends of one store at once (a campaign, a sequence, an import's emails)
+ * would otherwise both read the same open portion and both take it.
+ */
+const RAMP_SWAP = '-- marktmorgen:call-lock-swap:v1\nif redis.call("GET", KEYS[1]) == ARGV[1] then redis.call("SET", KEYS[1], ARGV[2], "EX", ARGV[3]) return 1 else return 0 end';
+
+/** 1 written, 0 changed meanwhile, null when the answer is in any other shape (CX-123 rule 24). */
+async function swapRamp(key: string, was: string, next: Ramp): Promise<0 | 1 | null> {
+  const reply = rampReply(await redisPipeline([["EVAL", RAMP_SWAP, 1, key, was, JSON.stringify(next), RAMP_KEPT_SECONDS]]));
+  return reply?.value === 1 ? 1 : reply?.value === 0 ? 0 : null;
+}
+
+/**
+ * How many of `want` emails this store may send right now, taken from the
+ * portion that is open. `want` itself for a store with no portions running,
+ * which is nearly every store nearly all the time; 0 while the next portion
+ * has not opened yet, or when its read/write checkpoint is unconfirmed.
+ */
 export async function rampRoom(id: string, want: number, now = Date.now()): Promise<number> {
   if (!id || !Number.isSafeInteger(want) || want <= 0 || !Number.isFinite(now) || !isRedisConfigured()) return 0;
   const key = rampKey(id);
   try {
-    const found = rampReply(await redisPipeline([["GET", key]]));
-    if (!found) return 0;
-    // Only confirmed absence means no portions are running. An unreadable
-    // checkpoint cannot authorize the whole requested audience.
-    if (found.value === null) return want;
-    let ramp = parseRamp(found.value);
-    if (!ramp) return 0;
-    const seconds = Math.floor(now / 1000);
-    if (ramp.left <= 0) {
-      if (seconds < ramp.opens) return 0;
-      const next = ramp.size * 2;
-      if (next > RAMP_LAST) {
-        // The confirmed final portion has finished; this only cleans up
-        // its existing checkpoint, without changing the progression.
-        await redisPipeline([["DEL", key]]);
-        return want;
+    // A checkpoint changed by another send since it was read is read again, three times at most; then nothing is taken.
+    for (let round = 0; round < 3; round += 1) {
+      const found = rampReply(await redisPipeline([["GET", key]]));
+      if (!found) return 0;
+      // Only confirmed absence means no portions are running. An unreadable
+      // checkpoint cannot authorize the whole requested audience.
+      if (found.value === null) return want;
+      if (typeof found.value !== "string") return 0;
+      let ramp = parseRamp(found.value);
+      if (!ramp) return 0;
+      const seconds = Math.floor(now / 1000);
+      if (ramp.left <= 0) {
+        if (seconds < ramp.opens) return 0;
+        const next = ramp.size * 2;
+        if (next > RAMP_LAST) {
+          // The confirmed final portion has finished; this only cleans up
+          // its existing checkpoint, without changing the progression.
+          await redisPipeline([["DEL", key]]);
+          return want;
+        }
+        ramp = { size: next, left: next, opens: 0 };
       }
-      ramp = { size: next, left: next, opens: 0 };
+      const take = Math.min(want, ramp.left);
+      const left = ramp.left - take;
+      const after: Ramp = { size: ramp.size, left, opens: left === 0 ? seconds + RAMP_GAP_MINUTES * 60 : 0 };
+      const saved = await swapRamp(key, found.value, after);
+      // A missing acknowledgement may have applied. Keep that capacity taken
+      // and grant no dispatch; do not refund or overwrite an uncertain write.
+      if (saved === 1) return take;
+      if (saved === null) return 0;
     }
-    const take = Math.min(want, ramp.left);
-    const left = ramp.left - take;
-    const after: Ramp = { size: ramp.size, left, opens: left === 0 ? seconds + RAMP_GAP_MINUTES * 60 : 0 };
-    const saved = rampReply(await redisPipeline([["SET", key, JSON.stringify(after), "EX", RAMP_KEPT_SECONDS]]));
-    // A missing acknowledgement may have applied. Keep that capacity taken
-    // and grant no dispatch; do not refund or overwrite an uncertain write.
-    return saved?.value === "OK" ? take : 0;
+    return 0;
   } catch {
     return 0;
   }
 }
 
-/** Gives back what rampRoom took, for a batch that did not go out. */
+/** Gives back what rampRoom took, for a batch that did not go out. Never over a change made meanwhile. */
 export async function rampBack(id: string, n: number): Promise<void> {
   if (!id || n <= 0 || !isRedisConfigured()) return;
   const key = rampKey(id);
-  const [raw] = await redisPipeline([["GET", key]]);
-  const ramp = parseRamp(raw);
-  if (!ramp) return;
-  const after: Ramp = { size: ramp.size, left: Math.min(ramp.size, ramp.left + n), opens: 0 };
-  await redisPipeline([["SET", key, JSON.stringify(after), "EX", RAMP_KEPT_SECONDS]]);
+  for (let round = 0; round < 3; round += 1) {
+    const found = rampReply(await redisPipeline([["GET", key]]));
+    // Giving back less than was taken only slows the portions; an unknown read gives nothing back.
+    if (!found || typeof found.value !== "string") return;
+    const ramp = parseRamp(found.value);
+    if (!ramp) return;
+    const after: Ramp = { size: ramp.size, left: Math.min(ramp.size, ramp.left + n), opens: 0 };
+    if ((await swapRamp(key, found.value, after)) !== 0) return;
+  }
 }
 
 /** What an email waiting for its next portion says in the studio. */

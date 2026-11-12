@@ -80,6 +80,9 @@ jobs:
         run: node tests/e2e/agreements.mjs --no-build
       - name: Copying a whole store, in a browser
         run: node tests/e2e/store-copy.mjs --no-build
+      # VR Part A item 2: every public and studio page answers, and no link on it leads nowhere.
+      - name: Every page answers and every link leads somewhere, in a browser
+        run: node tests/e2e/site-links.mjs --no-build
 
   form-opportunity-redis:
     needs: documentation-scope

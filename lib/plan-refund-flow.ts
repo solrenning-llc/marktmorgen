@@ -40,7 +40,8 @@
  * One at a time per store (FLOW_LOCK_SECONDS, lib/redis-lock.ts); the daily
  * job skips a store whose lock is held.
  */
-import { BillingError, isBillingConfigured, onPlatform } from "@/lib/billing";
+import { BillingError, PLAN_REFUND_STOP_MARK, PLAN_STOP_LOCK_SECONDS, PLAN_STOP_LOCK_WAIT_MS, isBillingConfigured, onPlatform, planStopLockKey } from "@/lib/billing";
+import { withLock } from "@/lib/redis-lock";
 import { LOCK_SECONDS, type PlanRefundMade, refundPlanPayment } from "@/lib/plan-refund-write";
 import { dropPause } from "@/lib/plan-pause";
 import { syncAssistant } from "@/lib/assistant-billing";
@@ -203,11 +204,11 @@ const planState = (sub: Row | null): "stops" | "renews" | "ended" | "unknown" =>
  * unset in the same call that takes it back. A note in Redis can be stale (its m: 0 write may never land); Stripe's own
  * record cannot, so a stop the creator set after ours was taken back carries no mark and is never touched.
  */
-export const OUR_STOP_MARK = "plan_refund_stop";
+export const OUR_STOP_MARK = PLAN_REFUND_STOP_MARK;
 
 /** Sets our stop with its mark, in one call. Only an answer naming this subscription, stopped and marked, confirms it. */
 async function setOurStop(id: string, mark: string): Promise<void> {
-  const sub = await onPlatform("POST", `/subscriptions/${encodeURIComponent(id)}`, new URLSearchParams({ cancel_at_period_end: "true", [`metadata[${OUR_STOP_MARK}]`]: mark }));
+  const sub = await withLock(planStopLockKey(id), PLAN_STOP_LOCK_SECONDS, PLAN_STOP_LOCK_WAIT_MS, () => onPlatform("POST", `/subscriptions/${encodeURIComponent(id)}`, new URLSearchParams({ cancel_at_period_end: "true", [`metadata[${OUR_STOP_MARK}]`]: mark })));
   const row = sub as Row & { metadata?: unknown };
   const metadata = row && typeof row === "object" && row.metadata && typeof row.metadata === "object" ? (row.metadata as Record<string, unknown>) : null;
   if (!row || row.id !== id || row.cancel_at_period_end !== true || metadata?.[OUR_STOP_MARK] !== mark) {
@@ -221,18 +222,22 @@ async function setOurStop(id: string, mark: string): Promise<void> {
  */
 async function takeBackStop(id: string): Promise<boolean> {
   try {
-    const sub = await subscriptionOf(id);
-    if (!sub) return false;
-    const metadata = (sub as Row & { metadata?: unknown }).metadata;
-    const mark = metadata && typeof metadata === "object" && !Array.isArray(metadata) ? (metadata as Record<string, unknown>)[OUR_STOP_MARK] : undefined;
-    if (!LIVE.includes(String(sub.status))) return true;
-    if (mark === undefined || mark === null || mark === "") return true;
-    if (typeof mark !== "string") return false;
-    // Taken back and unmarked in one call: a later run, on a stale note, finds no mark and leaves any stop alone.
-    const after = await onPlatform("POST", `/subscriptions/${encodeURIComponent(id)}`, new URLSearchParams({ cancel_at_period_end: "false", [`metadata[${OUR_STOP_MARK}]`]: "" }));
-    const row = after as Row & { metadata?: unknown };
-    const left = row && typeof row === "object" && row.metadata && typeof row.metadata === "object" ? (row.metadata as Record<string, unknown>)[OUR_STOP_MARK] : undefined;
-    return Boolean(row) && row.id === id && row.cancel_at_period_end === false && (left === undefined || left === "");
+    // Read and taken back under the stop's lock (Codex U on #3740): the creator's own cancel or resume
+    // (lib/billing.ts setCancelAtPeriodEnd, which also clears the mark) cannot land between the two.
+    return await withLock(planStopLockKey(id), PLAN_STOP_LOCK_SECONDS, PLAN_STOP_LOCK_WAIT_MS, async () => {
+      const sub = await subscriptionOf(id);
+      if (!sub) return false;
+      const metadata = (sub as Row & { metadata?: unknown }).metadata;
+      const mark = metadata && typeof metadata === "object" && !Array.isArray(metadata) ? (metadata as Record<string, unknown>)[OUR_STOP_MARK] : undefined;
+      if (!LIVE.includes(String(sub.status))) return true;
+      if (mark === undefined || mark === null || mark === "") return true;
+      if (typeof mark !== "string") return false;
+      // Taken back and unmarked in one call: a later run, on a stale note, finds no mark and leaves any stop alone.
+      const after = await onPlatform("POST", `/subscriptions/${encodeURIComponent(id)}`, new URLSearchParams({ cancel_at_period_end: "false", [`metadata[${OUR_STOP_MARK}]`]: "" }));
+      const row = after as Row & { metadata?: unknown };
+      const left = row && typeof row === "object" && row.metadata && typeof row.metadata === "object" ? (row.metadata as Record<string, unknown>)[OUR_STOP_MARK] : undefined;
+      return Boolean(row) && row.id === id && row.cancel_at_period_end === false && (left === undefined || left === "");
+    });
   } catch (error) {
     console.error("taking back a plan's stop after a refund that was not made failed", error);
     return false;

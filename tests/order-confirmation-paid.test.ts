@@ -303,3 +303,13 @@ test("a paid confirmation reported as not posted after its barrier stays queued 
   assert.deepEqual(later, { accepted: 1, waiting: 0, unknown: 0 }); assert.equal(posts, 1);
   assert.equal(await readConfirmationOrigin(f.id, f.runtime), null);
 });
+
+test("an unrecognized sender value after the paid barrier keeps the confirmation instead of a refusal", async () => {
+  const f = await paid();
+  const result = await runOrderConfirmationMail(f.runtime.now!() + 30_000, async (_message, beforePost) => {
+    assert.equal(await beforePost(), true); return "unrecognized" as never;
+  }, f.runtime, f.id);
+  assert.deepEqual(result, { accepted: 0, waiting: 0, unknown: 1 });
+  const kept = await readConfirmationOrigin(f.id, f.runtime); assert.ok(kept, "the paid origin keeps its permanent barrier");
+  assert.equal(kept.row.state, "dispatching"); assert.ok(kept.payload.message);
+});

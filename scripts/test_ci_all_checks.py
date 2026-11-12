@@ -10,6 +10,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from ci_all_checks import decide, SCOPE  # noqa: E402
 from ci_full_tree_proof import NEVER_REUSED, WORKFLOWS  # noqa: E402
+from ci_documentation_scope import MERGE_GROUP_ONLY  # noqa: E402
 
 ROOT = os.path.dirname(HERE)
 WORKFLOW_DIR = os.path.join(ROOT, ".github", "workflows")
@@ -21,6 +22,17 @@ NOT_CI = {"main-red-alarm.yml", "stale-pr-report.yml"}
 
 def scope(result="success", full="true"):
     return {"result": result, "outputs": {"full": full} if full is not None else {}}
+
+
+def deferred_scope(result="success", full="true", deferred="true"):
+    return {"result": result, "outputs": {"full": full, "deferred": deferred}}
+
+
+def clean_env(**extra):
+    """The command's environment without the runner's own event and switch, then the given ones."""
+    env = {k: v for k, v in os.environ.items() if k not in ("CI_EVENT", "CI_MERGE_GROUP_ONLY", "NEEDS")}
+    env.update(extra)
+    return env
 
 
 class DecisionRules(unittest.TestCase):
@@ -59,6 +71,57 @@ class DecisionRules(unittest.TestCase):
             with self.subTest(needs=needs):
                 self.assertFalse(decide(needs)[0])
 
+    def test_deliberate_pull_request_skip_passes_only_in_a_merge_group_only_workflow(self):
+        needs = {SCOPE: deferred_scope(), "matrix": {"result": "skipped"}}
+        self.assertEqual(decide(needs, "pull_request", True), (True, []))
+        # The same skip is a failure without the switch, in any other event, or by default.
+        self.assertFalse(decide(needs)[0])
+        self.assertFalse(decide(needs, "pull_request", False)[0])
+        for flag in ("true", 1, None, "True"):
+            with self.subTest(flag=flag):
+                self.assertFalse(decide(needs, "pull_request", flag)[0])
+        for event in ("merge_group", "push", "schedule", "workflow_dispatch", "", None,
+                      "pull_request_target", "PULL_REQUEST"):
+            with self.subTest(event=event):
+                self.assertFalse(decide(needs, event, True)[0])
+
+    def test_deferral_needs_a_successful_scope_that_said_so_exactly(self):
+        for scope_value in (deferred_scope(result="failure"), deferred_scope(result="cancelled"),
+                            deferred_scope(result="skipped"), deferred_scope(deferred="True"),
+                            deferred_scope(deferred="yes"), deferred_scope(deferred=""),
+                            deferred_scope(deferred="false"), deferred_scope(full="maybe"), scope()):
+            with self.subTest(scope=scope_value):
+                self.assertFalse(decide({SCOPE: scope_value, "matrix": {"result": "skipped"}}, "pull_request", True)[0])
+
+    def test_deferral_never_hides_a_failure_or_cancellation(self):
+        for result in ("failure", "cancelled", None, "", "neutral", "timed_out", "SUCCESS"):
+            with self.subTest(result=result):
+                self.assertFalse(decide({SCOPE: deferred_scope(), "matrix": {"result": result}}, "pull_request", True)[0])
+        self.assertTrue(decide({SCOPE: deferred_scope(), "matrix": {"result": "success"}}, "pull_request", True)[0])
+
+    def test_merge_group_and_push_keep_every_rule(self):
+        for event in ("merge_group", "push", "schedule", "workflow_dispatch"):
+            with self.subTest(event=event):
+                self.assertTrue(decide({SCOPE: scope(), "matrix": {"result": "success"}}, event, True)[0])
+                self.assertFalse(decide({SCOPE: scope(), "matrix": {"result": "skipped"}}, event, True)[0])
+                self.assertFalse(decide({SCOPE: scope(), "matrix": {"result": "failure"}}, event, True)[0])
+                self.assertFalse(decide({SCOPE: scope(), "matrix": {"result": "cancelled"}}, event, True)[0])
+                self.assertFalse(decide({SCOPE: deferred_scope(), "matrix": {"result": "skipped"}}, event, True)[0])
+
+    def test_command_reads_the_event_and_the_switch(self):
+        script = os.path.join(HERE, "ci_all_checks.py")
+        needs = json.dumps({SCOPE: deferred_scope(), "matrix": {"result": "skipped"}})
+        cases = [({"CI_EVENT": "pull_request", "CI_MERGE_GROUP_ONLY": "true"}, 0),
+                 ({"CI_EVENT": "pull_request"}, 1),
+                 ({"CI_EVENT": "pull_request", "CI_MERGE_GROUP_ONLY": "True"}, 1),
+                 ({"CI_EVENT": "merge_group", "CI_MERGE_GROUP_ONLY": "true"}, 1),
+                 ({"CI_EVENT": "push", "CI_MERGE_GROUP_ONLY": "true"}, 1),
+                 ({"CI_MERGE_GROUP_ONLY": "true"}, 1)]
+        for extra, code in cases:
+            with self.subTest(env=extra):
+                env = clean_env(NEEDS=needs, **extra)
+                self.assertEqual(subprocess.run([sys.executable, script], env=env, capture_output=True).returncode, code)
+
     def test_command_exit_code_follows_the_decision(self):
         script = os.path.join(HERE, "ci_all_checks.py")
         cases = [({SCOPE: scope(), "verify": {"result": "success"}}, 0),
@@ -66,10 +129,10 @@ class DecisionRules(unittest.TestCase):
                  ({SCOPE: scope(full="false"), "verify": {"result": "skipped"}}, 0),
                  ({SCOPE: scope(), "verify": {"result": "skipped"}}, 1)]
         for needs, code in cases:
-            env = dict(os.environ, NEEDS=json.dumps(needs))
+            env = clean_env(NEEDS=json.dumps(needs))
             self.assertEqual(subprocess.run([sys.executable, script], env=env, capture_output=True).returncode, code)
         for raw in ("", "not json", "null"):
-            env = dict(os.environ, NEEDS=raw)
+            env = clean_env(NEEDS=raw)
             self.assertEqual(subprocess.run([sys.executable, script], env=env, capture_output=True).returncode, 1)
 
 
@@ -122,6 +185,15 @@ class EveryWorkflowEndsWithTheFinalCheck(unittest.TestCase):
                 for job, job_lines in jobs.items():
                     if job != "all-checks":
                         self.assertNotIn("always()", "\n".join(job_lines))
+                # The event and the switch reach the final check only in the six accessibility
+                # workflows; the other three can never accept a deliberate skip.
+                if stem in MERGE_GROUP_ONLY:
+                    self.assertIn("          CI_EVENT: ${{ github.event_name }}\n", body + "\n")
+                    self.assertIn("          CI_MERGE_GROUP_ONLY: \"true\"\n", body + "\n")
+                    self.assertEqual(text.count("CI_MERGE_GROUP_ONLY: \"true\""), 2)
+                else:
+                    self.assertNotIn("CI_MERGE_GROUP_ONLY", text)
+                    self.assertNotIn("deferred", text)
                 # The required check name must be unique across the repository.
                 self.assertEqual(text.count("All checks ("), 1)
 

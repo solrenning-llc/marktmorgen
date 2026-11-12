@@ -9,8 +9,14 @@ every other job of the same workflow:
 - every job succeeded: pass;
 - documentation-scope succeeded and said the change is documentation only
   (outputs.full == "false"), and every other job succeeded or was skipped: pass;
+- only on a pull request, only in the six accessibility workflows (CI_MERGE_GROUP_ONLY is
+  "true" there and nowhere else), documentation-scope succeeded and said the heavy jobs wait
+  for the merge queue (outputs.full == "true" and outputs.deferred == "true"), and every other
+  job succeeded or was skipped: pass. Their real run is in the merge group, where this rule
+  never applies, so every change still passes them before it reaches main;
 - anything else (a failure, a cancellation, a skip without that proof, a missing
-  result or a failed documentation-scope): fail.
+  result or a failed documentation-scope): fail. Under merge_group, push, schedule and
+  workflow_dispatch a skip passes only for a documentation-only change, as before.
 
 A pass here never replaces a test; it only repeats the results of the jobs it reads.
 scripts/test_ci_all_checks.py holds the rules and checks that every workflow has
@@ -23,8 +29,8 @@ import sys
 SCOPE = "documentation-scope"
 
 
-def decide(needs):
-    """Return (passed, problems) from a workflow's `needs` context."""
+def decide(needs, event="", merge_group_only=False):
+    """Return (passed, problems) from a workflow's `needs` context, its event and its switch."""
     if not isinstance(needs, dict) or SCOPE not in needs or len(needs) < 2:
         return False, ["the final check must depend on documentation-scope and on every other job"]
     problems = []
@@ -34,6 +40,8 @@ def decide(needs):
         problems.append(SCOPE + ": " + str(scope_result))
     outputs = scope.get("outputs") or {}
     documentation_only = scope_result == "success" and outputs.get("full") == "false"
+    deferred = (scope_result == "success" and merge_group_only is True and event == "pull_request"
+                and outputs.get("full") == "true" and outputs.get("deferred") == "true")
     for name in sorted(needs):
         if name == SCOPE:
             continue
@@ -41,7 +49,7 @@ def decide(needs):
         result = job.get("result") if isinstance(job, dict) else None
         if result == "success":
             continue
-        if result == "skipped" and documentation_only:
+        if result == "skipped" and (documentation_only or deferred):
             continue
         problems.append(name + ": " + str(result))
     return not problems, problems
@@ -52,12 +60,17 @@ def main():
         needs = json.loads(os.environ.get("NEEDS", ""))
     except ValueError:
         needs = None
-    passed, problems = decide(needs)
+    event = os.environ.get("CI_EVENT", "")
+    merge_group_only = os.environ.get("CI_MERGE_GROUP_ONLY") == "true"
+    passed, problems = decide(needs, event, merge_group_only)
     if isinstance(needs, dict):
         for name in sorted(needs):
             job = needs.get(name)
             print(name + ": " + str(job.get("result") if isinstance(job, dict) else None))
     if passed:
+        outputs = (needs.get(SCOPE) or {}).get("outputs") or {}
+        if event == "pull_request" and merge_group_only and outputs.get("deferred") == "true":
+            print("Heavy jobs skipped on purpose on this pull request: their real run is in the merge queue.")
         print("All checks passed.")
         return 0
     print("Final check failed:")

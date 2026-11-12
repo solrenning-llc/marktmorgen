@@ -26,6 +26,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       full: ${{ steps.scope.outputs.full }}
+      deferred: ${{ steps.scope.outputs.deferred }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -44,10 +45,14 @@ jobs:
           CI_TOKEN: ${{ github.token }}
           CI_BASE: ${{ github.event.pull_request.base.sha }}
           CI_HEAD: ${{ github.event.pull_request.head.sha }}
+          # On a pull request that leaves the accessibility harness alone, the heavy jobs below
+          # wait for the merge queue (owner, 12/11/2026); merge_group, push, schedule and
+          # workflow_dispatch always run them (scripts/ci_documentation_scope.py).
+          CI_MERGE_GROUP_ONLY: "true"
         run: python3 scripts/ci_documentation_scope.py
   studio-matrix:
     needs: documentation-scope
-    if: ${{ !cancelled() && needs.documentation-scope.outputs.full != 'false' }}
+    if: ${{ !cancelled() && needs.documentation-scope.outputs.full != 'false' && needs.documentation-scope.outputs.deferred != 'true' }}
     name: Studio AAA (${{ matrix.browser }})
     runs-on: ubuntu-latest
     # Match the exact playwright-core package; browsers and OS libraries are preinstalled.
@@ -85,7 +90,8 @@ jobs:
 
   all-checks:
     # The one check GitHub requires before main (scripts/ci_all_checks.py): it always runs and
-    # passes only when every job above passed, or was skipped for a documentation-only change.
+    # passes only when every job above passed, or was skipped for a documentation-only change,
+    # or, on a pull request only, was skipped because its real run is in the merge queue.
     name: All checks (accessibility-studio-matrix)
     needs: [documentation-scope, studio-matrix]
     if: ${{ always() }}
@@ -95,9 +101,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - name: Read every job's result; a skip counts only for a documentation-only change
+      - name: Read every job's result; a skip counts only for a documentation-only change or a pull request's merge-queue deferral
         env:
           NEEDS: ${{ toJSON(needs) }}
+          CI_EVENT: ${{ github.event_name }}
+          CI_MERGE_GROUP_ONLY: "true"
         run: |
           python3 scripts/test_ci_all_checks.py
           python3 scripts/ci_all_checks.py

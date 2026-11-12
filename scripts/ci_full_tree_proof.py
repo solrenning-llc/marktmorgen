@@ -5,6 +5,8 @@ Two proofs, either one enough, both read again on every push and both refused on
   merge_group runs GitHub already made are on main's HEAD itself; every expected workflow's
   latest run there passed with every expected job (prove_merge_group);
 - the pull request: complete PR coverage of a merge commit with HEAD's tree (prove_full_tree).
+  A pull request run whose accessibility jobs waited for the merge queue
+  (scripts/ci_documentation_scope.py) skipped them, so it never proves a tree.
 Only on a push to main (schedule and workflow_dispatch always run everything), and never for
 CodeQL: it is in no reuse path, so its push run on main always analyzes the code for real."""
 import json

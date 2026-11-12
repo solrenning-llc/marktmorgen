@@ -238,6 +238,25 @@ async function sameReceipt(store: Store, paid: Paid, made: PayPalReceipt): Promi
   return keptReceipt(kept, made);
 }
 
+/**
+ * Whether the person who paid was deleted from the store at or after the payment (lib/suppression.ts: erasePerson
+ * writes their print, with its time, before it deletes anything, and the print is kept), read as KEEP_RECEIPT reads it:
+ * a print whose time is not a number counts as deleted. Asked before a hand-over is tried again (handOverAgain), so a
+ * person deleted between tries is never written back (their purchase, course or buyer record) nor told to the store's
+ * webhooks, whatever an earlier try left owed (review of #4099). One HGET. Throws UnknownReplyError when the reply is
+ * not exactly HGET's: the order stays on the list and nothing is handed over.
+ */
+async function erasedSincePaid(listId: string, paid: Paid): Promise<boolean> {
+  const replies = repliesFor(await redisPipeline([["HGET", suppressedKey(listId), suppressionPrint(listId, paid.email)]]), 1);
+  const at = replies?.[0];
+  if (!replies || (at !== null && typeof at !== "string" && typeof at !== "number")) {
+    throw new UnknownReplyError("a deletion print, before a PayPal hand-over is tried again");
+  }
+  if (at === null) return false;
+  const seconds = Number(at);
+  return !Number.isFinite(seconds) || seconds >= paid.at;
+}
+
 /** Takes a handed-over order out of the list. Not known whether it left: it stays, and the next try finds it handed over. */
 async function handedOver(statsId: string, order: string): Promise<void> {
   await redisPipeline([["ZREM", handOverKey(statsId), order]]).catch((error) => console.error("taking a handed-over PayPal order out of the list failed", order, error));
@@ -265,7 +284,21 @@ export async function handOverPayPal(store: Store, paid: Paid): Promise<boolean>
  * accepted is noted so (markReceiptSent) and not asked of the sender again; the event's id is made from the order, so
  * it is recorded once whatever the tries.
  */
-async function handOver(store: Store, paid: Paid): Promise<"handed" | "gone" | "owed"> {
+async function handOver(store: Store, paid: Paid, again = false): Promise<"handed" | "gone" | "owed" | "erased"> {
+  // Tried again (handOverAgain): a person deleted at or after the payment leaves the list with nothing written and
+  // nothing told, before the product is read or anything of the hand-over runs; a receipt or an event owed by an
+  // earlier try (or a receipt noted as sent, markReceiptSent) does not skip it (review of #4099). A store from before
+  // lists is given its list first (ensureListId, as an erasure and sameReceipt do), and the rest of the try uses it.
+  if (again && store.statsId && isRedisConfigured()) {
+    const listId = store.listId ?? (await ensureListId(storeRef(store)))?.listId ?? null;
+    if (!listId) throw new UnknownReplyError("the store's list, to check a deletion before a PayPal hand-over is tried again");
+    if (!store.listId) store = { ...store, listId };
+    if (await erasedSincePaid(listId, paid)) {
+      console.error("a PayPal purchase's person was deleted from the store before its hand-over was tried again; nothing handed over or told, and not tried again", store.handle, paid.order);
+      await handedOver(store.statsId, paid.order);
+      return "erased";
+    }
+  }
   let product: Listing | null;
   let bundled: Map<string, Listing>;
   try {
@@ -393,7 +426,7 @@ async function handOverAgain(store: Store, deadline: number): Promise<number> {
       // Handed over with its receipt accepted and its sale told to the webhooks, or its product gone: handOver takes it
       // out of the list. Its receipt not accepted or its event not recorded: kept and tried again later, inside
       // RECEIPT_RETRY_SECONDS, and not counted as handed over yet.
-      if ((await handOver(store, paid)) === "handed") handed += 1;
+      if ((await handOver(store, paid, true)) === "handed") handed += 1;
     } catch (error) {
       // Still unknown: kept, moved behind the others, tried at the next sweep (XX: one a concurrent run took out is not
       // put back). A receipt is still sent only inside its window (receiptMayGo), whenever it is tried.

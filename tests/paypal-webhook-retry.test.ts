@@ -24,6 +24,8 @@ import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 import { NextRequest } from "next/server";
 import { GET as paypalReturn } from "@/app/api/store/paypal/return/route";
+import { erasePerson } from "@/lib/person-erasure";
+import { importedKey } from "@/lib/imported-purchases";
 
 const PARTNER_CLIENT = "AZpartnerClientId0123456789";
 const SELLER = "7KNGBPH2U58GQ";
@@ -209,6 +211,31 @@ async function main(): Promise<void> {
   await sweep();
   is("the sweep sends the receipt and tells the endpoint", [sales(third), receiptTries(third)], [1, 2]);
   is("then off the list", (await listed()).includes(third), false);
+
+  part("The buyer deleted between tries, the event owed: nothing told, nothing written back (review of #4099)");
+  const granted = async () => Number((await original([["EXISTS", importedKey(statsId, BUYER)]]))[0]);
+  markThrows = 1;
+  const fifth = await pay(5);
+  is("control: the mark did time out, the order kept", [markThrows, (await listed()).includes(fifth)], [0, true]);
+  const erased = await erasePerson(await fresh(), BUYER, { kind: "person" });
+  is("the buyer is deleted from the store", [erased.ok, await granted()], [true, 0]);
+  await sweep();
+  is("the creator's endpoint is not told of a deleted buyer", sales(fifth), 0);
+  is("their purchase is not written back", await granted(), 0);
+  is("the order leaves the list", (await listed()).includes(fifth), false);
+  is("no receipt asked of the sender again", receiptTries(fifth), 1);
+
+  part("The buyer deleted between tries, the receipt refused: nothing written back, nothing sent");
+  mail = "422";
+  const sixth = await pay(6);
+  mail = "up";
+  is("control: kept on the list, the receipt refused, the sale told once at payment", [(await listed()).includes(sixth), receiptTries(sixth), sales(sixth)], [true, 1, 1]);
+  const erasedAgain = await erasePerson(await fresh(), BUYER, { kind: "person" });
+  is("the buyer is deleted again", [erasedAgain.ok, await granted()], [true, 0]);
+  await sweep();
+  is("no receipt and no event again for a deleted buyer", [receiptTries(sixth), sales(sixth)], [1, 1]);
+  is("their purchase is not written back", await granted(), 0);
+  is("the order leaves the list", (await listed()).includes(sixth), false);
 
   part("Bounded: a mark that keeps timing out leaves the list past the window, never retried forever");
   markThrows = 1_000;

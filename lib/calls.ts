@@ -1794,7 +1794,10 @@ export async function confirmBooking(input: {
   // written), and once the mark is down nothing confirms the booking again, so the event would be lost. Thrown here,
   // the booking stays unconfirmed and the mail job, catchUpBookings and the thanks page confirm it later; the event's
   // id is made from the checkout, so it is recorded once whatever the tries. A booking already confirmed (or moved
-  // before it was) is not told again: one EXISTS, read exactly (rule 24), before the event.
+  // before it was) is not told again: one EXISTS, read exactly (rule 24), before the event. Known edge (review of
+  // #4099, LOW): an event recorded whose mark below (or what follows it) keeps failing until the call's end is never
+  // confirmed, since the retries look only at calls not yet ended, so the creator was told of a booking whose emails and
+  // meeting link never went out; the narrow window of the same transient faults, logged by the retries that catch them.
   const confirmed = repliesFor(await redisPipeline([["EXISTS", confirmedKey(session)]]), 1)?.[0];
   if (confirmed !== 0 && confirmed !== 1) throw new UnknownReplyError("a booking's confirmation mark");
   if (confirmed === 1) return;

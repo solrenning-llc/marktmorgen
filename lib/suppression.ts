@@ -59,6 +59,25 @@ export function suppressedAtCommand(listId: string, email: string): Command {
   return ["HGET", suppressedKey(listId), suppressionPrint(listId, email)];
 }
 
+/**
+ * Whether this address was deleted from this store within the last ARGV[2] seconds, on Redis's own clock (TIME), in
+ * one step: 1 when it was, 0 when it never was or longer ago, -1 when its mark is not whole seconds. The mark is
+ * written on that same clock (ERASED_PRINT), so the two times are never one instance's wall clock against Redis's
+ * (Claude 1 cloud's LEVE on #2576). Billed 1 + 2; lib/redis-memory.ts runs it the same way.
+ */
+export const ERASED_WITHIN = `-- marktmorgen:erased-within:v1
+local at = redis.call('HGET', KEYS[1], ARGV[1])
+if not at then return 0 end
+if not string.match(at, '^%d+$') then return -1 end
+local now = tonumber(redis.call('TIME')[1])
+if tonumber(at) >= now - tonumber(ARGV[2]) then return 1 end
+return 0`;
+
+/** Whether this address was deleted from this store within the last `seconds`, on Redis's clock (ERASED_WITHIN). */
+export function erasedWithinCommand(listId: string, email: string, seconds: number): Command {
+  return ["EVAL", ERASED_WITHIN, 1, suppressedKey(listId), suppressionPrint(listId, email), seconds];
+}
+
 /** Lifts it: the person's own yes, given again. */
 export function liftCommand(listId: string, email: string): Command {
   return ["HDEL", suppressedKey(listId), suppressionPrint(listId, email)];

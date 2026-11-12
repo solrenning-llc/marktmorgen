@@ -46,7 +46,7 @@ import { cleanText, cleanLine } from "@/lib/community-text";
 import { productSegment } from "@/lib/product-slug";
 import { noteForErasure } from "@/lib/erasure-index";
 import { blankInLists } from "@/lib/erasure-lists";
-import { suppressedAtCommand } from "@/lib/suppression";
+import { erasedWithinCommand } from "@/lib/suppression";
 
 const soonKey = (sid: string) => `nl:wl:${sid}:soon`;
 const listKey = (sid: string, pid: string) => `nl:wl:${sid}:${pid}`;
@@ -220,11 +220,13 @@ export async function joinWaitlist(input: {
   // deletion may still be running; an address deleted that recently is
   // asked to try again later.
   if (store.listId) {
-    const [erasedAt] = await redisPipeline([suppressedAtCommand(store.listId, email)]);
-    // Only an exact null is "not deleted"; a mark that is not whole seconds (a missing or other reply) is unknown and
-    // taken as a recent deletion (rule 24), as is one that recent.
-    const known = erasedAt === null || (typeof erasedAt === "string" && /^\d{1,15}$/.test(erasedAt));
-    if (!known || (erasedAt !== null && Number(erasedAt) >= startedAt - ERASURE_SECONDS)) {
+    // Judged on Redis's clock alone (Claude 1 cloud's LEVE on #2576): the mark is written in seconds of Redis's TIME,
+    // and read against TIME in the same step, over ERASURE_SECONDS and how long this request has run (a duration, so
+    // no instance's clock is ever compared with Redis's). Only an exact 0 is "not deleted that recently"; a mark that
+    // is not whole seconds (-1) or a missing or other reply is unknown and taken as a recent deletion (rule 24).
+    const ran = Math.max(0, Math.ceil(Date.now() / 1000) - startedAt);
+    const recent = repliesFor(await redisPipeline([erasedWithinCommand(store.listId, email, ERASURE_SECONDS + ran)]), 1)?.[0];
+    if (recent !== 0) {
       const [taken] = await redisPipeline([["EVAL", HASH_TAKE_FIELD, 1, listKey(sid, product.id), email], ["DEL", tokenKey(confirm), tokenKey(leave)]]);
       if (typeof taken === "string") await giveData(store, [{ slot: waitSlot(product.id), bytes: placeBytes(sid, product.id, email, taken) }]);
       return "error";

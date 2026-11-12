@@ -711,6 +711,14 @@ export class MemoryRedis {
           this.run(["SET", copy, value, "EX", seconds]);
           return 1;
         }
+        // lib/suppression.ts ERASED_WITHIN: a deleted person's print read against Redis's clock (this stand-in's).
+        if (key.startsWith("-- marktmorgen:erased-within:v1\n") && args[0] === "1" && args.length === 4) {
+          this.scriptCalls += 2;
+          const at = this.run(["HGET", args[1], args[2]]);
+          if (at === null || at === undefined) return 0;
+          if (!/^\d+$/.test(String(at))) return -1;
+          return Number(at) >= Math.floor(this.now() / 1000) - Number(args[3]) ? 1 : 0;
+        }
         // lib/suppression.ts ERASED_PRINT: a deleted person's print, at the second on Redis's clock (this stand-in's).
         if (key.startsWith("-- marktmorgen:erased-print:v1\n") && args[0] === "1" && args.length === 3) {
           this.scriptCalls += 2;

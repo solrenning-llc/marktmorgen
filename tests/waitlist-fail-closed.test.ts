@@ -9,6 +9,7 @@ import { addProduct, claimHandle, ensureListId, ensureStatsId, storeForEmail } f
 import { readListing } from "@/lib/catalog";
 import { joinWaitlist, setSoon } from "@/lib/waitlist";
 import { dataUsed } from "@/lib/store-data";
+import { suppressedKey, suppressionPrint } from "@/lib/suppression";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -39,7 +40,7 @@ async function fixture() {
   const used = async () => (await dataUsed(store))?.used ?? -1;
   const join = (email: string) => joinWaitlist({ store, product, email, consent: false, ip: "1.1.1.1", origin: "https://marktmorgen.com" });
   const placed = async (email: string) => ((await redis.pipeline([["HEXISTS", key, email]])) as number[])[0];
-  return { store, product, key, used, join, placed };
+  return { store, product, key, used, join, placed, listId: store.listId! };
 }
 
 async function main(): Promise<void> {
@@ -85,7 +86,9 @@ async function main(): Promise<void> {
     const before = await f.used();
     redis.pipeline = (async (cs: (string | number)[][]) => {
       const replies = (await pipe(cs)) as unknown[];
-      if (cs.length === 1 && cs[0][0] === "HGET" && String(cs[0][1]).startsWith("nl:erased:")) return [reply];
+      // The mark is read against Redis's clock in one script since Claude 1 cloud's LEVE on #2576 (ERASED_WITHIN):
+      // the same unknown answers are given to that script's reply.
+      if (cs.length === 1 && cs[0][0] === "EVAL" && String(cs[0][1]).startsWith("-- marktmorgen:erased-within:v1\n")) return [reply];
       return replies;
     }) as typeof redis.pipeline;
     const answer = await f.join("dana@example.test").catch((error: Error) => error.name);
@@ -96,15 +99,20 @@ async function main(): Promise<void> {
     is("nothing is sent", sent.length, 0);
   }
 
+  part("A deletion mark kept in another shape than whole seconds is unknown, never \"not deleted\"");
+  const bad = await fixture();
+  const badBefore = await bad.used();
+  await pipe([["HSET", suppressedKey(bad.listId), suppressionPrint(bad.listId, "dana@example.test"), "soon"]]);
+  is("the sign-up fails", await bad.join("dana@example.test"), "error");
+  is("the place with the address is taken back", await bad.placed("dana@example.test"), 0);
+  is("its room is given back", (await bad.used()) - badBefore, 0);
+  is("nothing is sent", sent.length, 0);
+
   part("An old deletion mark (a whole number of seconds, long ago) lets the sign-up go on");
   const old = await fixture();
-  redis.pipeline = (async (cs: (string | number)[][]) => {
-    const replies = (await pipe(cs)) as unknown[];
-    if (cs.length === 1 && cs[0][0] === "HGET" && String(cs[0][1]).startsWith("nl:erased:")) return ["1000"];
-    return replies;
-  }) as typeof redis.pipeline;
+  // A real mark, at the second 1000 of Redis's clock: the script reads it against TIME.
+  await pipe([["HSET", suppressedKey(old.listId), suppressionPrint(old.listId, "dana@example.test"), "1000"]]);
   const oldAnswer = await old.join("dana@example.test");
-  redis.pipeline = pipe;
   is("signed up", oldAnswer, "sent");
   is("its place is there", await old.placed("dana@example.test"), 1);
 

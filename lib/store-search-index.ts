@@ -81,11 +81,10 @@ async function buildIndex(store: Store, visible: string[], key: string, signatur
   return { index, read: new Map(all.map((listing) => [listing.id, listing])) };
 }
 
-/** Pays for reading `ids` (at least one request when any is read from Redis) and reads them; null when refused. */
-async function paidRead(store: Store, ids: string[], minimum: number): Promise<Listing[] | null> {
+/** Pays for reading `ids` (one request for each PUBLIC_LISTINGS_PER_UNIT read from Redis) and reads them; null when refused. */
+async function paidRead(store: Store, ids: string[]): Promise<Listing[] | null> {
   if (ids.length === 0) return [];
-  const toRead = listingsToRead(store, ids);
-  const units = toRead > 0 ? Math.max(minimum, listingUnits(toRead)) : 0;
+  const units = listingUnits(listingsToRead(store, ids));
   if (units > 0 && !(await takePublicRequest(store, "public", undefined, units))) return null;
   return readListings(store, ids);
 }
@@ -102,6 +101,10 @@ export async function searchStorePaid(store: Store, query: string): Promise<{ li
   const signature = signatureOf(visible);
   // A store whose record carries every listing reads nothing for the index, and keeps none.
   const fromRecord = listingsToRead(store, visible) === 0;
+  // The kept index's read is paid before it is read (reviews of #4172, second round): one request, as a later page
+  // is priced, covers its one GET of at most SEARCH_INDEX_MAX_BYTES at Upstash's paid transfer price
+  // (lib/spend-cost-table.ts, UPSTASH_MICRO_USD_PER_GB_TRANSFER: 1 MiB is about $0.00003, a request $0.000063).
+  if (!fromRecord && !(await takePublicRequest(store, "public", undefined, 1))) return null;
   const kept = fromRecord ? null : await readIndex(key, signature);
   const built = kept ? null : await buildIndex(store, visible, key, signature);
   const index = kept ?? built?.index;
@@ -110,10 +113,9 @@ export async function searchStorePaid(store: Store, query: string): Promise<{ li
     const entry = index.get(id);
     return entry !== undefined && matchesSearch(entry, query);
   });
-  // Just built: the matches are already read. Otherwise each is read fresh, paid first; the index read itself is one
-  // command, paid with them (at least one request when any is read from Redis).
+  // Just built: the matches are already read. Otherwise each is read fresh, paid first.
   const shownIds = found.slice(0, STORE_SEARCH_LIMIT);
-  const fresh = built ? shownIds.map((id) => built.read.get(id)).filter((listing): listing is Listing => Boolean(listing)) : await paidRead(store, shownIds, 1);
+  const fresh = built ? shownIds.map((id) => built.read.get(id)).filter((listing): listing is Listing => Boolean(listing)) : await paidRead(store, shownIds);
   if (!fresh) return null;
   const listings = fresh.filter((listing) => matchesSearch(listing, query));
   const shown = new Set(listings.map((listing) => listing.id));
@@ -121,6 +123,7 @@ export async function searchStorePaid(store: Store, query: string): Promise<{ li
   // Just built: the boxes' products the index read are taken from it; only the others are paid for and read.
   const have = built ? targets.map((id) => built.read.get(id)).filter((listing): listing is Listing => Boolean(listing)) : [];
   const missing = built ? targets.filter((id) => !built.read.has(id)) : targets;
-  const related = [...have, ...((await paidRead(store, missing, 0)) ?? [])];
-  return { listings, related, total: found.length - (fresh.length - listings.length) };
+  const related = [...have, ...((await paidRead(store, missing)) ?? [])];
+  // A shown match deleted since the index was kept, or no longer matching, is not counted (review of #4172, LOW).
+  return { listings, related, total: found.length - (shownIds.length - listings.length) };
 }

@@ -121,7 +121,7 @@ async function main(): Promise<void> {
   is(`and pays for each (${second.taken - plain.taken} taken)`, second.taken - plain.taken >= listingUnits(second.read), true);
   is("the same results", second.html.includes(`Lesson ${STORE_PAGE_SIZE + 1}`), true);
   const narrow = await draw({ q: "lesson 101" });
-  is(`a narrow search reads its one match (read ${narrow.read}) and takes at most two requests besides the page`, [narrow.read <= 1, narrow.taken - plain.taken <= 2], [true, true]);
+  is(`a narrow search reads its one match (read ${narrow.read}) and takes at most three requests besides the page: its own, the kept index's and its match's`, [narrow.read <= 1, narrow.taken - plain.taken <= 3], [true, true]);
 
   const boxed = await draw({ q: "lesson 31" });
   is(
@@ -129,6 +129,9 @@ async function main(): Promise<void> {
     [boxed.read, boxed.taken - narrow.taken],
     [4, 1],
   );
+
+  const none = await draw({ q: "nothingmatcheszz" });
+  is(`a search that matches nothing still pays for reading the kept index, besides its own request (${none.taken - plain.taken} taken, ${none.read} listings read)`, [none.taken - plain.taken >= 2, none.read], [true, 0]);
 
   part("A buyer who searches a dozen times is not shut out of the store");
   for (let n = 0; n < 12; n += 1) await draw({ q: `lesson ${n + 1}` });

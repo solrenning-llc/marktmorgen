@@ -1294,7 +1294,7 @@ export const COST_LINES: CostLine[] = [
       // ten minutes and paid as the store's shared work; then the matches it shows and their checkout boxes, each paid
       // before it is read (lib/store-search-index.ts, c1-cost-store-search).
       { file: "app/[handle]/page.tsx", names: ["searchStorePaid(store, wantedSearch)"] },
-      { file: "lib/store-search-index.ts", names: ["takePublicRequest(store, \"public\", undefined, units, { shared: true })", "paidRead(store, shownIds, 1)", "paidRead(store, missing, 0)", "takePublicRequest(store, \"public\", undefined, units)"] },
+      { file: "lib/store-search-index.ts", names: ["takePublicRequest(store, \"public\", undefined, units, { shared: true })", "takePublicRequest(store, \"public\", undefined, 1)", "paidRead(store, shownIds)", "paidRead(store, missing)", "takePublicRequest(store, \"public\", undefined, units)"] },
       // The open cart counts what is left of each limited product in it, as a product's page does (513 [PF1], unit 3, 2 November 2026): one read each, at most MAX_CART.
       { file: "app/api/store/cart/route.ts", names: ["withinStore(\"cart-read\"", "stockLeft(store, p)"] },
       { file: "lib/stock.ts", names: ["MAX_CHECKS"] },

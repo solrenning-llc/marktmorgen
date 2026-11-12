@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { storeRoot } from "@/lib/store-sitemap";
+import { storeAddress, storeRoot } from "@/lib/store-sitemap";
 import Link from "next/link";
 import { notFound, permanentRedirect } from "next/navigation";
 import { normaliseHandle, storeForPage } from "@/lib/store";
@@ -10,7 +10,6 @@ import { isResting } from "@/lib/traffic";
 import { StoreResting } from "@/components/store-resting";
 import { StoreTracking } from "@/components/store-tracking";
 import { JsonLd } from "@/components/structured-data";
-import { SITE_URL } from "@/lib/site-url";
 import { photoUrl } from "@/lib/photo-limits";
 import { PostBody } from "@/components/blog-body";
 import { BlockView } from "@/components/sales-blocks";
@@ -85,7 +84,7 @@ export default async function PostPage({ params }: Params) {
           url,
           datePublished: published.toISOString(),
           dateModified: new Date(post.updatedAt * 1000).toISOString(),
-          author: { "@type": "Organization", name: store.name, url: `${SITE_URL}/@${store.handle}` },
+          author: { "@type": "Organization", name: store.name, url: storeAddress(store) },
         }}
       />
       <main id="content" className="relative mx-auto max-w-2xl px-4 pb-16 pt-10 sm:pt-14">

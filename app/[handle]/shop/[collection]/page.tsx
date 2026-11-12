@@ -24,8 +24,9 @@ import { speech } from "@/lib/buyer-words";
 import { lookStyle } from "@/lib/store-look";
 import { photoUrl } from "@/lib/photo-limits";
 import { SITE_URL } from "@/lib/site-url";
-import { storeRoot } from "@/lib/store-sitemap";
+import { storeAddress, storeRoot } from "@/lib/store-sitemap";
 import { collectionInSegment, collectionSegment, shownProducts } from "@/lib/store-collections";
+import { productSegment } from "@/lib/product-slug";
 import { ProductCard, productPath } from "@/components/store-product";
 import { AddAllToCart, CartButton } from "@/components/store-cart";
 import { StoreResting } from "@/components/store-resting";
@@ -167,10 +168,10 @@ export default async function CollectionPage({ params }: Params) {
           "@type": "CollectionPage",
           name: collection.title,
           ...(collection.blurb ? { description: collection.blurb } : {}),
-          url: `${SITE_URL}${path}`,
+          url: storeAddress(store, `/shop/${collectionSegment(collection)}`),
           mainEntity: {
             "@type": "ItemList",
-            itemListElement: products.map((product, i) => ({ "@type": "ListItem", position: i + 1, url: `${SITE_URL}${productPath(store, product)}`, name: product.title })),
+            itemListElement: products.map((product, i) => ({ "@type": "ListItem", position: i + 1, url: storeAddress(store, `/p/${productSegment(product)}`), name: product.title })),
           },
         }}
       />

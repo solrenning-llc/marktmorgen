@@ -15,7 +15,7 @@ test("the SG2(17) row exists", () => {
 
 test("lib/store-join.ts stays reserved to Codex N while the row says N retains its other hunks", () => {
   assert.match(row ?? "", /N retains askToJoin\/readJoinToken/);
-  const held = reservations(text, "codex").filter((r) => r.item.startsWith("SG2(17): remaining")).map((r) => r.file);
+  const held = reservations(text).filter((r) => r.item.startsWith("SG2(17): remaining")).map((r) => r.file);
   assert.ok(held.includes("lib/store-join.ts"), `files reserved by the row: ${held.join(", ")}`);
 });
 

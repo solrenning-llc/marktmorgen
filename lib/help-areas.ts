@@ -39,11 +39,13 @@ export const HELP_AREAS: readonly HelpArea[] = [
   { folder: "inbox", name: "Inbox", answer: "can-visitors-chat-with-me-and-where-do-i-answer-them", mentions: "inbox" },
   { folder: "integrations", name: "Email platforms", answer: "can-i-send-my-list-to-mailchimp-kit-beehiiv-or-mailerlite", mentions: "Mailchimp" },
   { folder: "invite", name: "Invite creators", answer: "are-creator-invitations-available", mentions: "invit" },
+  { folder: "meetings", name: "Video calls", answer: "can-i-sell-paid-calls", mentions: "Video calls" },
   { folder: "memberships", name: "Memberships", answer: "can-i-sell-a-membership", mentions: "membership" },
   { folder: "new", name: "A new store", answer: "can-i-run-more-than-one-store-or-have-someone-help-me", mentions: "store" },
   { folder: "outreach", name: "Outreach", answer: "can-my-store-help-me-find-sponsors-and-partners", mentions: "Outreach" },
   { folder: "pages", name: "Sales pages", answer: "can-i-build-a-sales-page-or-a-landing-page", mentions: "page" },
   { folder: "people", name: "Buyers", answer: "can-i-see-everything-one-buyer-has-bought-from-me", mentions: "buyer" },
+  { folder: "phone", name: "Phone notifications", answer: "does-it-work-on-a-phone", mentions: "notifications" },
   { folder: "podcast", name: "Private podcasts", answer: "can-i-sell-a-private-podcast", mentions: "podcast" },
   { folder: "refund", name: "Your plan's refund", answer: "what-about-refunds-on-the-marktmorgen-subscription-itself", mentions: "refund" },
   { folder: "requests", name: "Payment requests", answer: "how-do-i-ask-one-person-to-pay-me-a-custom-amount", mentions: "link" },
@@ -64,9 +66,7 @@ export const AREAS_WITHOUT_HELP: Readonly<Record<string, string>> = {
   growth: "Choosing the next business goal.",
   invoices: "Finding and downloading the plan's invoices.",
   labels: "Labels on contacts: adding, renaming and emailing by label.",
-  meetings: "Video calls and how buyers join them.",
   path: "The Path and what each level asks.",
-  phone: "Phone notifications: turning them on and choosing what they say.",
 };
 
 /** Studio screens that are not an area of their own. */

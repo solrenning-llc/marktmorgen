@@ -51,16 +51,32 @@ export const NOT_A_SALE: readonly (Omit<SaleOpening, "what"> & { why: string })[
 
 /**
  * Files that open a session only on behalf of a listed sale opening, so the
- * refusal there covers them: each is reached only from `by`, which refuses
- * before it is called. Named so the scan still sees every opening.
+ * refusal there covers them: each is reached only through the exported
+ * function `through`, which only `by` calls, after it refuses. Named so the
+ * scan still sees every opening; tests/sale-openings.test.ts reads the
+ * sources to hold that no other file names `through`.
  */
-export const COVERED_OPENINGS: readonly (Omit<SaleOpening, "what"> & { by: string; why: string })[] = Object.freeze([
+export const COVERED_OPENINGS: readonly (Omit<SaleOpening, "what"> & { by: string; through: string; why: string })[] = Object.freeze([
   Object.freeze({
     file: "lib/order-confirmation-outbox.ts",
     opens: "/checkout/sessions" as const,
     by: "lib/store-checkout.ts",
+    through: "openConfirmationOrigin",
     why: "the original paid confirmation's session, created only from inside createCheckout",
   }),
+]);
+
+/**
+ * Files that name an opening endpoint but never open a charge on a creator's
+ * account for a store, each with the reason. With the lists above, they
+ * account for every file in lib/ and app/ that names one, however the call
+ * is written (out-of-family review of #3682).
+ */
+export const NOT_A_STORE_OPENING: readonly { file: string; why: string }[] = Object.freeze([
+  Object.freeze({ file: "lib/stripe-account.ts", why: "the onAccount helper itself, which the openings call" }),
+  Object.freeze({ file: "lib/billing.ts", why: "Marktmorgen's own plans, on the platform account (onPlatform)" }),
+  Object.freeze({ file: "lib/assistant-billing.ts", why: "the Store assistant add-on, Marktmorgen's own, on the platform account (onPlatform), and a read of open sessions" }),
+  Object.freeze({ file: "lib/verify-stripe.ts", why: "the operator's check on the demo account (onDemoAccount), never a creator's" }),
 ]);
 
 /** A source with its comments taken out, so a name in a comment never reads as code. */
@@ -69,19 +85,21 @@ const withoutComments = (source: string) => source.replace(/\/\*[\s\S]*?\*\//g, 
 /**
  * The openings in a source text: each POST through onAccount (called by name,
  * or as the default of a provider chosen at run time, `(… ?? onAccount)(`)
- * whose path is exactly "/checkout/sessions" or "/payment_intents", and each
- * PayPal `call("POST", "/v2/checkout/orders"`. A path that goes on
- * ("/checkout/sessions/" + id + "/expire", an order's "/capture") acts on one
- * that exists. Comments are left out.
+ * whose path is exactly "/checkout/sessions" or "/payment_intents", with an
+ * account argument that may itself be a call with commas inside, and each
+ * PayPal POST to "/v2/checkout/orders", whatever the helper is named. A path
+ * that goes on ("/checkout/sessions/" + id + "/expire", an order's
+ * "/capture") acts on one that exists. Comments are left out.
  */
 export function openingCalls(text: string): SaleOpening["opens"][] {
   const source = withoutComments(text);
   const found: SaleOpening["opens"][] = [];
-  const stripe = /\bonAccount\s*\)?\s*\(\s*["'`]POST["'`]\s*,[^,]*,\s*(["'`])(\/checkout\/sessions|\/payment_intents)\1/g;
+  // The account argument: anything but a comma or a bracket, or one level of brackets holding anything (accountOf(store, "live")).
+  const stripe = /\bonAccount\s*\)?\s*\(\s*["'`]POST["'`]\s*,(?:[^,()]|\([^()]*\))*,\s*(["'`])(\/checkout\/sessions|\/payment_intents)\1/g;
   for (let match = stripe.exec(source); match; match = stripe.exec(source)) {
     found.push(match[2] as SaleOpening["opens"]);
   }
-  const paypal = /\bcall\s*\(\s*["'`]POST["'`]\s*,\s*(["'`])(\/v2\/checkout\/orders)\1/g;
+  const paypal = /\(\s*["'`]POST["'`]\s*,\s*(["'`])(\/v2\/checkout\/orders)\1/g;
   for (let match = paypal.exec(source); match; match = paypal.exec(source)) {
     found.push(match[2] as SaleOpening["opens"]);
   }

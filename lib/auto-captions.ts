@@ -261,7 +261,15 @@ export async function requestAutoCaptions(store: Store, pathname: string, spoken
     generateMoments: false,
   });
   const success = (answer.data as { success?: unknown } | null)?.success;
-  if (answer.status !== 200 || success === false) {
+  // No answer (a timeout, a network error), a 408 or a 5xx does not say the service did not start: it may be writing,
+  // and charging for it. The request stays recorded and queued, as written above: the look delivers what arrives and
+  // refunds, after GIVE_UP_HOURS, only what never did. Only a definite refusal is refunded here.
+  const definite = (answer.status === 200 && success === false) || (answer.status >= 400 && answer.status < 500 && answer.status !== 408);
+  if (answer.status !== 200 && !definite) {
+    console.error("the video service's answer to a captions request is not known", answer.status);
+    return { ok: false, reason: "checking" };
+  }
+  if (definite) {
     console.error("the video service would not write captions", answer.status, answer.data);
     const refundKey = `nl-${sign}:refund`;
     if (await giveBack(pending, null, refundKey)) {

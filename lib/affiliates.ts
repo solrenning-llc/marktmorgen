@@ -2824,7 +2824,9 @@ async function refundsSince(store: Store, since: number, deadline?: number): Pro
       undefined,
       wait,
     );
-    const rows = Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : [];
+    // A list answered without its rows or its has_more is unknown, never "no refunds" (AFF-E2E-1).
+    if (!Array.isArray(listed.data) || typeof listed.has_more !== "boolean") return { byIntent, complete: false };
+    const rows = listed.data as Record<string, unknown>[];
     for (const refund of rows) {
       if (refund.status !== "succeeded" && refund.status !== "pending") continue;
       const pi = typeof refund.payment_intent === "string" ? refund.payment_intent : "";
@@ -2860,7 +2862,8 @@ export async function disputesSince(store: Store, since: number, deadline?: numb
       undefined,
       wait,
     );
-    const rows = Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : [];
+    if (!Array.isArray(listed.data) || typeof listed.has_more !== "boolean") return { byIntent, complete: false };
+    const rows = listed.data as Record<string, unknown>[];
     for (const dispute of rows) {
       if (typeof dispute.status !== "string" || !DISPUTE_TAKES.has(dispute.status)) continue;
       const raw = dispute.payment_intent;

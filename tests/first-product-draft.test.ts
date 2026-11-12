@@ -38,8 +38,8 @@ async function main(): Promise<void> {
 
   part("Refused, and nothing made");
   const before = await count();
-  const refused = await Promise.all([post({ title: "", price: "19" }), post({ title: placeholderTitle("guide"), price: "19" }), post({ title: "A guide", price: "nineteen" })]);
-  is("a missing or placeholder title, a price the currency cannot take", await Promise.all(refused.map(async (r) => [r.status, ((await r.json()) as { error?: string }).error])), [[400, "title"], [400, "title"], [400, "price"]]);
+  const refused = await Promise.all([post({ title: "", price: "19" }), post({ title: placeholderTitle("guide"), price: "19" }), post({ title: "A guide", price: "nineteen" }), post({ title: "T".repeat(81), price: "19" })]);
+  is("a missing or placeholder title, a price the currency cannot take, a title longer than a product\'s, refused rather than cut", await Promise.all(refused.map(async (r) => [r.status, ((await r.json()) as { error?: string }).error])), [[400, "title"], [400, "title"], [400, "price"], [400, "title_long"]]);
   is("no product was made by a refusal", await count(), before);
 
   part("The route");

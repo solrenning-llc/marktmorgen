@@ -97,23 +97,29 @@ try {
   const download = await downloading;
   is("the file is downloaded under the title's name", download.suggestedFilename(), "Bread-at-home.pdf");
   const status = page.getByRole("status");
-  is("then it says where to go next, with focus on that sentence", [(await status.textContent())?.startsWith("Downloaded “Bread-at-home.pdf”. Next, sell it:"), await page.evaluate(() => document.activeElement?.getAttribute("role")), await status.getByRole("link", { name: "Go to your products" }).getAttribute("href")], [true, "status", "/studio#products"]);
+  is("then it says where to go next, with focus on that sentence", [(await status.textContent())?.startsWith("Downloaded “Bread-at-home.pdf”. Next, make it a product draft below"), await page.evaluate(() => document.activeElement?.getAttribute("role")), await status.getByRole("link", { name: "Go to your products" }).getAttribute("href")], [true, "status", "/studio#products"]);
   const body = sent.at(-1);
   is("it sent the format, the answers, the title and exactly the outline's parts", [body.format, body.answers, body.title, body.parts.length, body.parts[1]], ["guide", { reader: "new", length: "short", tone: "friendly", ending: "summary" }, "Bread at home", 5, { heading: "", body: "Mix flour and water." }]);
   is("the notes are never sent", Object.hasOwn(body, "know"), false);
 
   // Make it a product draft: the price is empty and nothing is marked; a starting point fills it.
-  is("after the download, the draft step appears, its price empty and its button off until a price is typed", [await page.getByRole("heading", { name: "4. Make it a product draft" }).isVisible(), await page.getByLabel("Price, in USD").inputValue(), await page.getByRole("button", { name: "Make the product draft" }).isDisabled()], [true, "", true]);
+  const priceField = page.getByLabel(/^Price, in /);
+  is("after the download, the draft step appears with the price empty", [await page.getByRole("heading", { name: "4. Make it a product draft" }).isVisible(), await priceField.inputValue()], [true, ""]);
+  await page.getByRole("button", { name: "Make the product draft" }).click();
+  is("pressed with no price, it says what to type, in the currency's own range, and marks the field", [(await page.getByRole("alert").textContent())?.startsWith("Type a price between"), await priceField.getAttribute("aria-invalid"), calls.length], [true, "true", 0]);
   is("no starting point is marked", await page.getByRole("button", { name: /^\$\d+(\.\d\d)?$/ }).evaluateAll((buttons) => buttons.map((b) => b.getAttribute("aria-pressed"))), ["false", "false", "false"]);
   await page.getByRole("button", { name: "$19", exact: true }).click();
-  is("a starting point fills the price and says it is chosen", [await page.getByLabel("Price, in USD").inputValue(), await page.getByRole("button", { name: "$19", exact: true }).getAttribute("aria-pressed")], ["19", "true"]);
+  is("a starting point fills the price and says it is chosen", [await priceField.inputValue(), await page.getByRole("button", { name: "$19", exact: true }).getAttribute("aria-pressed")], ["19", "true"]);
   await page.getByRole("button", { name: "Make the product draft" }).click();
-  const made = page.getByRole("status").filter({ hasText: "The draft" });
+  const made = page.getByRole("status").filter({ hasText: "is in your products" });
   await made.waitFor();
   is("the draft is made hidden, the PDF goes up as its file and is attached", calls.map((c) => c[0] === "vault" ? `vault:${c[1]}` : c[0]), ["draft", "vault:open", "vault:sign", "vault:done", "attach"]);
   is("with the title and price the creator chose, the file for that product, as a PDF", [calls[0][1], calls[1][2], calls[1][3], calls.at(-1)[1]], [{ title: "Bread at home", price: "19" }, "p1abcd", "application/pdf", { id: "p1abcd", pathname: "v/f0/p1abcd/Bread-at-home.pdf", name: "Bread-at-home.pdf" }]);
   is("it says the draft is hidden, with the file, to review and publish, with focus on it", [(await made.textContent())?.startsWith("The draft “Bread at home” is in your products, hidden, with the PDF as its file."), await page.evaluate(() => document.activeElement?.getAttribute("role"))], [true, "status"]);
-  is("and a second press makes no second draft", await page.getByRole("button", { name: "Make the product draft" }).isDisabled(), true);
+  is("and no button is left to make a second draft", await page.getByRole("button", { name: /Make the product draft|Try the file again/ }).count(), 0);
+  await page.getByLabel("Title").fill("Bread at home, revised");
+  is("a change after the PDF was made asks for the PDF again before any draft", (await page.getByRole("heading", { name: "4. Make it a product draft" }).locator("xpath=..").textContent())?.includes("You changed the guide since the PDF was made"), true);
+  await page.getByLabel("Title").fill("Bread at home");
 
   // Kept on this device: a reload brings it back.
   await open();

@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { FORMAT_INFO, PRICE_WORDS, defaultAnswers, outlineFor, questionsFor, startingPoints } from "@/lib/first-product";
-import { formatMoney } from "@/lib/money";
+import { currencyLabel, currencyRule, formatMoney, parseCurrency, rangeWords } from "@/lib/money";
+import { MAX_TITLE_LENGTH } from "@/lib/catalog-rules";
 import { uploadReason, uploadSoldFile } from "@/lib/sold-file-upload";
 import { FIRST_PRODUCT_MAX_BREAKS, FIRST_PRODUCT_MAX_HEADING, FIRST_PRODUCT_MAX_PART, FIRST_PRODUCT_MAX_TEXT } from "@/lib/first-product-limits";
 
@@ -45,7 +46,7 @@ const FALLBACK = "The PDF could not be made just now. Your writing is kept on th
 /** Why a product draft could not be made or its file could not go up, in words. */
 const DRAFT_MESSAGES: Record<string, string> = {
   title: "Give it a title first.",
-  price: "Type a price the store's currency can take, like 19 or 19.50, or 0 for a free product.",
+  title_long: `A product's title is at most ${MAX_TITLE_LENGTH} characters. Shorten the title, download the PDF again, then make the draft.`,
   too_many: "Your store lists as many products as it can. Remove one, then try again.",
   wrong_type: "This file type cannot be sold here.",
   too_big: "The PDF is larger than a product file may be.",
@@ -56,7 +57,13 @@ const DRAFT_MESSAGES: Record<string, string> = {
   signed_out: "You are signed out. Sign in again in another tab.",
   forbidden: "Your role in this store cannot change products.",
 };
-const DRAFT_FALLBACK = "The draft could not be made just now. Try again in a moment; your writing is kept on this device.";
+const DRAFT_FALLBACK = "We could not confirm that the draft was made. Look in your products before trying again, so it is not made twice.";
+/** A price the store's currency takes, said with its own range and decimals (lib/money.ts), never an example it would refuse. */
+const priceWords = (currency: string) => {
+  const c = parseCurrency(currency);
+  return `Type a price ${rangeWords(c)}${currencyRule(c).decimals ? "" : ", with no decimals"}, or 0 for a free product.`;
+};
+const ATTACH_FAILED = "The PDF went up but could not be attached to the draft. Add it in Products, on the draft's own row.";
 
 const fresh = (): Draft => ({ answers: defaultAnswers(FORMAT), title: "", know: "", parts: [] });
 const letters = (text: string) => Array.from(text).length;
@@ -92,9 +99,12 @@ export function FirstProductMaker({ storeKey, productsHref, currency, folder }: 
   const [confirmReset, setConfirmReset] = useState(false);
   const statusRef = useRef<HTMLParagraphElement>(null);
   // The PDF made in this visit, for the draft: kept in memory only, never stored.
-  const [made, setMade] = useState<{ blob: Blob; file: string } | null>(null);
+  // With the title and the writing it was made from: a draft is made only from the PDF of what the page shows now.
+  const [made, setMade] = useState<{ blob: Blob; file: string; title: string; from: string } | null>(null);
   const [price, setPrice] = useState("");
-  const [draftState, setDraftState] = useState<{ kind: "idle" } | { kind: "working"; percent: number | null } | { kind: "error"; message: string } | { kind: "done"; title: string; withFile: boolean; message?: string }>({ kind: "idle" });
+  const [draftState, setDraftState] = useState<{ kind: "idle" } | { kind: "working"; percent: number | null } | { kind: "error"; message: string; price?: boolean } | { kind: "done"; title: string; withFile: boolean; message?: string }>({ kind: "idle" });
+  // The product this PDF became: one draft per PDF; a file that did not go up is tried again on the same draft.
+  const [madeProduct, setMadeProduct] = useState<{ id: string; title: string } | null>(null);
   const draftRef = useRef<HTMLParagraphElement>(null);
 
   // What was written here before comes back once the page is in the browser (nothing on the server to wait for).
@@ -156,7 +166,8 @@ export function FirstProductMaker({ storeKey, productsHref, currency, folder }: 
         link.click();
         link.remove();
         setTimeout(() => URL.revokeObjectURL(url), 60_000);
-        setMade({ blob, file });
+        setMade({ blob, file, title: draft.title.trim(), from: JSON.stringify(draft) });
+        setMadeProduct(null);
         setDraftState({ kind: "idle" });
         setState({ kind: "done", file });
         return;
@@ -169,28 +180,10 @@ export function FirstProductMaker({ storeKey, productsHref, currency, folder }: 
     }
   }
 
-  async function makeDraft() {
-    const pdf = made;
-    if (!pdf || draftState.kind === "working") return;
-    setDraftState({ kind: "working", percent: null });
-    let product: { id: string; title: string } | null = null;
-    try {
-      const response = await fetch("/api/store/first-product/draft", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: draft.title, price }),
-      });
-      const data = (await response.json().catch(() => null)) as { ok?: boolean; error?: string; product?: { id?: string; title?: string } } | null;
-      if (!data?.ok || typeof data.product?.id !== "string") {
-        setDraftState({ kind: "error", message: DRAFT_MESSAGES[data?.error ?? ""] ?? DRAFT_FALLBACK });
-        return;
-      }
-      product = { id: data.product.id, title: data.product.title ?? draft.title };
-    } catch {
-      setDraftState({ kind: "error", message: DRAFT_FALLBACK });
-      return;
-    }
-    // The draft exists from here: a file that cannot go up leaves it, without the file, and says so.
+  // The PDF made is still the page's writing: after any change the draft waits for the PDF to be made again.
+  const current = made !== null && made.from === JSON.stringify(draft);
+
+  async function attachFile(pdf: { blob: Blob; file: string }, product: { id: string; title: string }) {
     try {
       const file = new File([pdf.blob], pdf.file, { type: "application/pdf" });
       const pathname = await uploadSoldFile(file, { folder, ownerId: product.id }, (percent) => setDraftState({ kind: "working", percent: Math.round(percent) }));
@@ -199,11 +192,48 @@ export function FirstProductMaker({ storeKey, productsHref, currency, folder }: 
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id: product.id, pathname, name: pdf.file }),
       });
-      const data = (await attached.json().catch(() => null)) as { ok?: boolean } | null;
-      setDraftState(data?.ok ? { kind: "done", title: product.title, withFile: true } : { kind: "done", title: product.title, withFile: false, message: DRAFT_MESSAGES.upload_stopped });
+      const data = (await attached.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+      setDraftState(data?.ok ? { kind: "done", title: product.title, withFile: true } : { kind: "done", title: product.title, withFile: false, message: DRAFT_MESSAGES[data?.error ?? ""] ?? ATTACH_FAILED });
     } catch (thrown) {
       setDraftState({ kind: "done", title: product.title, withFile: false, message: DRAFT_MESSAGES[uploadReason(thrown)] ?? DRAFT_MESSAGES.upload_stopped });
     }
+  }
+
+  async function makeDraft() {
+    const pdf = made;
+    if (!pdf || !current || draftState.kind === "working") return;
+    // One draft per PDF: once made, only its file is tried again.
+    if (madeProduct) {
+      setDraftState({ kind: "working", percent: null });
+      await attachFile(pdf, madeProduct);
+      return;
+    }
+    if (!price.trim()) {
+      setDraftState({ kind: "error", message: priceWords(currency), price: true });
+      return;
+    }
+    setDraftState({ kind: "working", percent: null });
+    let product: { id: string; title: string } | null = null;
+    try {
+      const response = await fetch("/api/store/first-product/draft", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: pdf.title, price }),
+      });
+      const data = (await response.json().catch(() => null)) as { ok?: boolean; error?: string; product?: { id?: string; title?: string } } | null;
+      if (!data?.ok || typeof data.product?.id !== "string") {
+        const error = data?.error ?? "";
+        setDraftState(data && data.ok === false && error ? { kind: "error", message: error === "price" ? priceWords(currency) : (DRAFT_MESSAGES[error] ?? DRAFT_FALLBACK), price: error === "price" } : { kind: "error", message: DRAFT_FALLBACK });
+        return;
+      }
+      product = { id: data.product.id, title: data.product.title ?? pdf.title };
+    } catch {
+      setDraftState({ kind: "error", message: DRAFT_FALLBACK });
+      return;
+    }
+    // The draft exists from here: a file that cannot go up leaves it, without the file, and says so.
+    setMadeProduct(product);
+    await attachFile(pdf, product);
   }
 
   useEffect(() => {
@@ -249,8 +279,8 @@ export function FirstProductMaker({ storeKey, productsHref, currency, folder }: 
         <div className="mt-4 space-y-6">
           <label className="block">
             <span className="field-label">Title</span>
-            <input className="field mt-2" maxLength={FIRST_PRODUCT_MAX_HEADING} value={draft.title} onChange={(e) => { setDraft({ ...draft, title: e.target.value }); setState({ kind: "idle" }); }} aria-describedby="fp-title-hint" />
-            <span id="fp-title-hint" className="field-hint mt-1 block">The first line of the PDF and the name of its file.</span>
+            <input className="field mt-2" maxLength={MAX_TITLE_LENGTH} value={draft.title} onChange={(e) => { setDraft({ ...draft, title: e.target.value }); setState({ kind: "idle" }); }} aria-describedby="fp-title-hint" />
+            <span id="fp-title-hint" className="field-hint mt-1 block">{`The first line of the PDF, the name of its file and of the product. Up to ${MAX_TITLE_LENGTH} characters.`}</span>
           </label>
           <label className="block">
             <span className="field-label">{info.know}</span>
@@ -300,7 +330,7 @@ export function FirstProductMaker({ storeKey, productsHref, currency, folder }: 
           <p ref={statusRef} tabIndex={-1} role="alert" className="notice notice-error mt-4">{state.message}</p>
         ) : state.kind === "done" ? (
           <p ref={statusRef} tabIndex={-1} role="status" className="notice mt-4">
-            {`Downloaded “${state.file}”. Next, sell it: add a product in your studio and choose this file as what buyers get. `}
+            {`Downloaded “${state.file}”. Next, make it a product draft below, or add it to a product yourself. `}
             <a href={productsHref} className="underline">Go to your products</a>
           </p>
         ) : null}
@@ -310,39 +340,62 @@ export function FirstProductMaker({ storeKey, productsHref, currency, folder }: 
       {made ? (
         <section aria-labelledby="fp-sell">
           <h2 id="fp-sell" className="t-h3">4. Make it a product draft</h2>
-          <p className="mt-3 text-ink-soft">A draft is hidden from buyers. The PDF you just downloaded goes in as the file they get; you review the product and publish it yourself, in your studio.</p>
-          <label className="mt-4 block max-w-xs">
-            <span className="field-label">{`Price, in ${currency.toUpperCase()}`}</span>
-            <input className="field mt-2" inputMode="decimal" maxLength={12} value={price} onChange={(e) => { setPrice(e.target.value); setDraftState({ kind: "idle" }); }} aria-describedby="fp-price-hint" />
-            <span id="fp-price-hint" className="field-hint mt-1 block">{currency.toLowerCase() === "usd" ? `${PRICE_WORDS.range} Type 0 for a free product.` : "You choose. Type 0 for a free product."}</span>
-          </label>
-          {startingPoints(currency).length ? (
-            <fieldset className="mt-3">
-              <legend className="field-hint">{PRICE_WORDS.points}</legend>
-              <div className="mt-2 flex flex-wrap gap-2">
-                {startingPoints(currency).map((cents) => (
-                  <button key={cents} type="button" className="btn btn-secondary btn-sm min-h-11" aria-pressed={price === String(cents / 100)} onClick={() => { setPrice(String(cents / 100)); setDraftState({ kind: "idle" }); }}>
-                    {formatMoney(cents, currency)}
+          {!current ? (
+            <p className="mt-3">You changed the guide since the PDF was made. Download it again, and the draft is made from that PDF.</p>
+          ) : (
+            <>
+              <p className="mt-3 text-ink-soft">A draft is hidden from buyers. The PDF you just downloaded goes in as the file they get; you review the product and publish it yourself, in your studio.</p>
+              {madeProduct ? null : (
+                <>
+                  <label className="mt-4 block max-w-sm">
+                    <span className="field-label">{`Price, in ${currencyLabel(parseCurrency(currency))}`}</span>
+                    <input
+                      className="field mt-2"
+                      inputMode="decimal"
+                      maxLength={12}
+                      value={price}
+                      onChange={(e) => { setPrice(e.target.value); setDraftState({ kind: "idle" }); }}
+                      aria-invalid={draftState.kind === "error" && draftState.price ? true : undefined}
+                      aria-describedby={draftState.kind === "error" && draftState.price ? "fp-price-hint fp-draft-result" : "fp-price-hint"}
+                    />
+                    <span id="fp-price-hint" className="field-hint mt-1 block">{`${currency.toLowerCase() === "usd" ? PRICE_WORDS.range : `You choose, ${rangeWords(parseCurrency(currency))}.`} Type 0 for a free product.`}</span>
+                  </label>
+                  {startingPoints(currency).length ? (
+                    <fieldset className="mt-3">
+                      <legend className="field-hint">{PRICE_WORDS.points}</legend>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {startingPoints(currency).map((cents) => (
+                          <button key={cents} type="button" className="btn btn-secondary btn-sm min-h-11" aria-pressed={price === String(cents / 100)} onClick={() => { setPrice(String(cents / 100)); setDraftState({ kind: "idle" }); }}>
+                            {formatMoney(cents, currency)}
+                          </button>
+                        ))}
+                      </div>
+                    </fieldset>
+                  ) : null}
+                </>
+              )}
+              {draftState.kind === "done" && draftState.withFile ? null : (
+                <p className="mt-4">
+                  {/* aria-disabled while working, so focus stays on the button and nothing runs twice. */}
+                  <button type="button" className="btn btn-primary" onClick={makeDraft} aria-disabled={draftState.kind === "working" || undefined} aria-busy={draftState.kind === "working"}>
+                    {madeProduct ? "Try the file again" : "Make the product draft"}
                   </button>
-                ))}
-              </div>
-            </fieldset>
-          ) : null}
-          <p className="mt-4">
-            <button type="button" className="btn btn-primary" onClick={makeDraft} disabled={draftState.kind === "working" || draftState.kind === "done" || !price.trim()} aria-busy={draftState.kind === "working"}>
-              {draftState.kind === "working" ? (draftState.percent === null ? "Making the draft…" : `Uploading the PDF… ${draftState.percent}%`) : "Make the product draft"}
-            </button>
-          </p>
-          {draftState.kind === "error" ? (
-            <p ref={draftRef} tabIndex={-1} role="alert" className="notice notice-error mt-4">{draftState.message}</p>
-          ) : draftState.kind === "done" ? (
-            <p ref={draftRef} tabIndex={-1} role="status" className="notice mt-4">
-              {draftState.withFile
-                ? `The draft “${draftState.title}” is in your products, hidden, with the PDF as its file. Review it, add a picture and a description, and publish it when you choose. `
-                : `The draft “${draftState.title}” is in your products, hidden, without the file. ${draftState.message ?? ""} `}
-              <a href={productsHref} className="underline">Go to your products</a>
-            </p>
-          ) : null}
+                </p>
+              )}
+              {draftState.kind === "working" ? (
+                <p role="status" className="mt-4">{draftState.percent === null ? "Making the draft…" : `Uploading the PDF… ${draftState.percent}%`}</p>
+              ) : draftState.kind === "error" ? (
+                <p ref={draftRef} id="fp-draft-result" tabIndex={-1} role="alert" className="notice notice-error mt-4">{draftState.message}</p>
+              ) : draftState.kind === "done" ? (
+                <p ref={draftRef} tabIndex={-1} role="status" className="notice mt-4">
+                  {draftState.withFile
+                    ? `The draft “${draftState.title}” is in your products, hidden, with the PDF as its file. Review it, add a picture and a description, and publish it when you choose. `
+                    : `The draft “${draftState.title}” is in your products, hidden, without the file. ${draftState.message ?? ""} `}
+                  <a href={productsHref} className="underline">Go to your products</a>
+                </p>
+              ) : null}
+            </>
+          )}
         </section>
       ) : null}
     </div>

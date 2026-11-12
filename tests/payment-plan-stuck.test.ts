@@ -107,7 +107,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const url = new URL(String(input));
   const answer = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
   if (url.hostname === "api.resend.com") {
-    if (resendFails) return answer({ message: "down" }, 500);
+    // A certain refusal (422): since #3387 a 5xx is an unknown answer, never posted again under its key (lib/resend-fallback-transport.ts).
+    if (resendFails) return answer({ message: "refused" }, 422);
     const body = JSON.parse(String(init?.body)) as { to: string | string[]; subject: string; text: string };
     emails.push({ to: [body.to].flat()[0], subject: body.subject, text: body.text, key: ((init?.headers ?? {}) as Record<string, string>)["Idempotency-Key"] ?? null });
     return answer({ id: `email_${emails.length}` });

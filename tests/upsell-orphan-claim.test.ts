@@ -37,6 +37,8 @@ type Command = (string | number)[];
 let garble: { session: string; reply: unknown[] } | null = null;
 /** For this session, the write that names the customer before Stripe is asked fails (Redis down a moment). */
 let failCustomerWrite: string | null = null;
+/** For this session, the write that names the customer is answered [] and does not land (Claude 1 on #3834). */
+let dropCustomerWrite: string | null = null;
 const real = redis.pipeline.bind(redis);
 redis.pipeline = (async (batch: Command[]) => {
   const one = batch.length === 1 && batch[0][0] === "SET" ? batch[0] : null;
@@ -48,6 +50,9 @@ redis.pipeline = (async (batch: Command[]) => {
   const naming =
     failCustomerWrite && one && String(one[1]).startsWith(`nl:upsell:${failCustomerWrite}`) && !one.includes("NX") && String(one[2]).includes('"pending"') && String(one[2]).includes('"customer"');
   if (naming) throw new Error("Redis request failed with status 503");
+  const dropped =
+    dropCustomerWrite && one && String(one[1]).startsWith(`nl:upsell:${dropCustomerWrite}`) && !one.includes("NX") && String(one[2]).includes('"pending"') && String(one[2]).includes('"customer"');
+  if (dropped) return [];
   return real(batch);
 }) as typeof redis.pipeline;
 
@@ -187,6 +192,18 @@ async function main(): Promise<void> {
     is("pressed once more: nothing charged again", await press(session), { upsell: "done", charges: 0 });
     is("one charge for this order's offer in all", charges.filter((c) => c.get("metadata[parent]") === session).length, 1);
   }
+
+  part("The write naming the customer answered [] without landing: Stripe is never asked (Claude 1 on #3834)");
+  const dropping = "cs_test_orphanclaim00004";
+  later = 0;
+  dropCustomerWrite = dropping;
+  is("the press is refused and charges nothing: no customer named, no charge asked", await press(dropping), { upsell: "refused", charges: 0 });
+  dropCustomerWrite = null;
+  is("left a bare claim that was never sent to Stripe", await shape(dropping), orphan);
+  later = 11 * 60 * 1000;
+  is("released once old: nothing read, nothing charged", await settle(dropping), { reads: 0, charges: 0 });
+  is("answered again: charged once in all", await press(dropping), { upsell: "done", charges: 1 });
+  is("one POST for this order's offer in all", charges.filter((c) => c.get("metadata[parent]") === dropping).length, 1);
 
   part("An offer that named the customer and whose Stripe state cannot be read stays unknown");
   const unknown = "cs_test_orphanclaim00003";

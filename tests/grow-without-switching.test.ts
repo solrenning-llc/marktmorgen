@@ -12,14 +12,16 @@ import { PLAN_TITLES, TIERS, publishedPriceWords } from "@/lib/plan";
 import { done, is, part } from "./check";
 
 part("What each plan adds");
-const steps = growthSteps();
+const steps = growthSteps(true);
 is("two steps up: Store to Studio, Studio to Scale", steps.map((s) => [s.fromTitle, s.toTitle]), [[PLAN_TITLES.creator, PLAN_TITLES.pro], [PLAN_TITLES.pro, PLAN_TITLES.scale]]);
 const rows = PRICING_GROUPS.flatMap((g) => g.rows.map((r) => ({ group: g.title, ...r })));
 for (const step of steps) {
   const changed = rows.filter((r) => r.values[step.from] !== r.values[step.to]);
-  is(`${step.toTitle}: exactly the pricing rows that change, with their values`, step.lines, changed.map((r) => ({ group: r.group, label: r.label, from: r.values[step.from], to: r.values[step.to] })));
+  is(`${step.toTitle}: exactly the pricing rows that change, with their values`, step.lines, changed.map((r) => ({ group: r.group, label: r.label, from: r.values[step.from], to: r.values[step.to], ...(r.note ? { note: r.note } : {}) })));
   is(`${step.toTitle}: its published prices`, [step.toPrice.monthly, step.toPrice.annual], [publishedPriceWords(step.to, "month"), publishedPriceWords(step.to, "year")]);
 }
+is("each group's period, as the pricing page says it", steps[0].periods, Object.fromEntries(PRICING_GROUPS.map((g) => [g.title, g.period])));
+is("what Studio switches on beyond the table: the own domain only where domains are offered, and our name off the page", [growthSteps(true)[0].features.length, growthSteps(false)[0].features, steps[1].features], [2, ["Our name off the foot of your page, so it carries yours and nothing of ours"], []]);
 is("the plans listed are the pricing page's, all of them", PRICING_PLANS.map((p) => p.tier), [...TIERS]);
 
 part("The page");
@@ -31,6 +33,9 @@ is("no promise of earnings or a global brand", /\b(earn|earnings|income|revenue|
 is("while plans are not on sale, it says so", page.includes("{PLANS_ON_SALE ? null : <p className=\"mt-3 font-semibold\">Paid plans and paid selling are not open yet. You can prepare your store now.</p>}"), true);
 const studio = readFileSync("app/studio/page.tsx", "utf8");
 is("the data it says can be downloaded is what the studio's file holds", ["products and their pages", "courses", "forms and their answers", "contacts and a summary of your orders", "Files and videos download from their own pages"].every((part) => page.includes(part) && studio.toLowerCase().includes(part.toLowerCase().replace("products and their pages", "products and their pages").replace("courses", "courses").replace("files and videos download from their own pages", "files and videos download from their own pages"))), true);
+is("changing the plan is said only while plans are on sale, and as the owner's", page.includes("{PLANS_ON_SALE ? (") && page.includes("The store&apos;s owner changes the plan"), true);
+is("the link says where it goes: the limits", page.includes('href="/pricing#limits-heading"') && readFileSync("app/pricing/page.tsx", "utf8").includes('id="limits-heading"'), true);
+is("never \"everything else stays as it is\"", /Everything else stays/.test(page), false);
 is("in the sitemap", readFileSync("app/sitemap.ts", "utf8").includes('{ path: "/grow-without-switching", priority: 0.5 }'), true);
 
 done();

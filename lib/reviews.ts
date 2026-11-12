@@ -378,12 +378,13 @@ export async function saveReview(statsId: string, input: SaveInput, room: DataSt
     // When the order was paid: kept from the first writing of the same order, else as the order's proof says.
     const paidAt = before && before.reference === input.reference && before.paidAt ? before.paidAt : input.paidAt;
     if (Number.isSafeInteger(paidAt) && (paidAt as number) > 0) review.paidAt = paidAt;
+    // Read before any room is taken or anything is written: an index that does not read stops the save whole, with
+    // the store's room as it was, never half (rule 24; review of #3862).
+    const entry = review.pi ? await payEntry(statsId, review.pi, `${review.productId}|${id}`) : null;
     const grown = reviewBytes(review) - reviewBytes(before);
     if (grown > 0 && !(await takeData(room, [{ slot: REVIEWS_SLOT(input.productId), bytes: grown }], now)).ok) return { state: "noroom" };
     // Words rewritten (perhaps to take something out): the AI summary built from the old words goes, in the same request.
     // A review hidden or refunded was never counted by one (lib/review-ai-summary-rules.ts, summaryInputs): it takes none away.
-    // Read before anything is written: an index that does not read stops the save whole, never half (rule 24).
-    const entry = review.pi ? await payEntry(statsId, review.pi, `${review.productId}|${id}`) : null;
     await write(statsId, review, before && before.text !== review.text && counted(before) ? summaryGone(statsId, review.productId, before.createdAt) : []);
     await redisPipeline([
       ["ZADD", newKey(statsId), now, `${review.productId}|${id}`],

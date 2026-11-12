@@ -239,6 +239,36 @@ test('an Error whose clone runs inherited getters is still copied through the ch
   assert.ok(before.log.length > 0, 'the reference ran the inherited getter');
 });
 
+test('a re-prototyped Node transferable whose clone runs an Object.prototype getter is refused as before, with the same effects', () => {
+  // Node clones its JS-transferable classes by looking up messaging_clone_symbol,
+  // which caller code can reach and install as an inherited getter.
+  const symbol = Object.getOwnPropertySymbols(DOMException.prototype).find(s => String(s) === 'Symbol(messaging_clone_symbol)');
+  assert.ok(symbol, 'Node exposes messaging_clone_symbol on DOMException.prototype');
+  const {SocketAddress} = process.getBuiltinModule('node:net');
+  const originalClone = (Object.getPrototypeOf(new SocketAddress({})) as Record<symbol, () => unknown>)[symbol];
+  const run = (capture: (value: unknown) => CustomerTaxInput | null) => {
+    const log: string[] = [];
+    const address = new SocketAddress({}) as unknown as Record<symbol, unknown>;
+    for (const own of Object.getOwnPropertySymbols(address)) delete address[own];
+    Object.setPrototypeOf(address, Object.prototype);
+    const root = {taxReview: {evidence: address}, taxContext: {rate: 1}};
+    try {
+      Object.defineProperty(Object.prototype, symbol, {configurable: true, get() {
+        log.push('clone getter');
+        // Rewrites a branch the detach has not reached yet.
+        Object.defineProperty(root.taxContext, 'rate', {configurable: true, enumerable: true, get() { log.push('rate getter'); return 999; }});
+        return function () { return originalClone.call(new SocketAddress({})); };
+      }});
+      return {result: capture(root), log};
+    } finally {
+      delete (Object.prototype as Record<symbol, unknown>)[symbol];
+    }
+  };
+  const before = run(referenceCapture), after = run(captureCustomerTaxInput);
+  assert.equal(before.result, null, 'the reference refuses');
+  assert.deepStrictEqual(after, before);
+});
+
 test('real review fixtures detach identically through both implementations', () => {
   const row = txCustomerFixture();
   const pair = {taxReview: row.taxReview, taxContext: row.taxContext};

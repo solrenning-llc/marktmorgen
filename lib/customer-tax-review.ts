@@ -64,13 +64,16 @@ function codeRunningProbe(): ((v: object) => boolean) | null {
  *
  * Same outcome as structuredClone on every node after its children (the
  * checked pass), without re-serializing each subtree once per ancestor. The
- * fast pass reflects only on non-Proxy, non-Error objects, so no caller code
- * runs and nothing can change while it copies; one structuredClone of the
- * root then succeeds exactly when every per-node clone would. On a Proxy or
- * an Error it stops before touching it and the checked pass runs instead. */
+ * fast pass reflects only on non-Proxy, non-Error objects, and runs only while
+ * Object.prototype has no own symbol keys (Node finds a transferable's clone
+ * hook by symbol, so an inherited symbol getter could run inside the clone).
+ * Under those conditions no caller code runs and nothing can change while it
+ * copies; one structuredClone of the root then succeeds exactly when every
+ * per-node clone would. On a Proxy or an Error it stops before touching it,
+ * and otherwise the checked pass runs instead. */
 function detached(value: unknown): unknown {
   const probe = codeRunningProbe();
-  if (probe) {
+  if (probe && Object.getOwnPropertySymbols(Object.prototype).length === 0) {
     try { return detachedPass(value, probe); } catch (error) { if (error !== REPLAY_CHECKED) throw error; }
   }
   return detachedPass(value, null);

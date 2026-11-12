@@ -18,6 +18,7 @@ const MESSAGES: Record<string, string> = {
   applies_full: "Pages have been updated from sections as often as your store's figure allows for now. More can be done when the figure opens again.",
   pages: "Those pages no longer use this section. Reload and try again.",
   forbidden: "Your role cannot change one of those pages.",
+  placeholder: "The section still has a part for you to write, and visitors see one of those pages. Replace the part with your own words first, or update only hidden pages. Nothing was changed.",
   unknown: "That section is gone. Reload the page.",
   server_error: "We could not confirm the result. Reload before trying again.",
   ...STUDIO_MESSAGES,
@@ -82,6 +83,11 @@ export function SavedSections({
       const response = await fetch("/api/store/saved-blocks", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const data = ((await response.json().catch(() => null)) ?? {}) as Record<string, unknown>;
       if (data.ok !== true) {
+        // A part left to write, said back as the server found it (754 [STN1]).
+        if (data.error === "placeholder" && typeof data.part === "string" && data.part) {
+          setNote(`The section still has a part for you to write: “${data.part}”. Visitors see ${Array.isArray(data.pages) && data.pages.length > 1 ? "some of those pages" : "one of those pages"}, so nothing was changed. Replace the part with your own words first, or update only hidden pages.`);
+          return null;
+        }
         setNote(MESSAGES[String(data.error)] ?? MESSAGES.server_error);
         return null;
       }

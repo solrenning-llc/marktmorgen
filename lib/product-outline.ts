@@ -38,9 +38,9 @@ export function productPromptsLeft(words: { title: string; summary: string; abou
 /** What the editor says when a product still holds a prompt, by what was refused: adding it, saving it while it is on the store, or publishing it. */
 export function productOutlineMessage(when: "add" | "save" | "publish", left: string | null, product: string | null): string {
   const part = left ? ` The first one left: ${left}` : "";
-  if (when === "publish") return `${product ? `“${product}”` : "This product"} still has a part in [brackets] from the outline. Press Edit, replace each one with your own words, including the brackets, then publish it.${part}`;
-  if (when === "save") return `This product is on your store, so it cannot be saved with a part in [brackets] from the outline. Replace each one with your own words, including the brackets.${part}`;
-  return `Replace each part in [brackets] from the outline with your own words, including the brackets, before you add it: it goes on your store at once.${part}`;
+  if (when === "publish") return `${product ? `“${product}”` : "This product"} still has a part in [brackets] from the outline. Press Edit, replace each one, brackets and all, with your own words, then publish it.${part}`;
+  if (when === "save") return `This product is on your store, so it cannot be saved with a part in [brackets] from the outline. Replace each one, brackets and all, with your own words.${part}`;
+  return `Replace each part in [brackets] from the outline, brackets and all, with your own words before you add it: it goes on your store at once.${part}`;
 }
 
 /** The plain refusal, for a screen that has only one way to save. */

@@ -5,12 +5,12 @@ import { StoreFullError, imageFolder, isFree, setProductPage } from "@/lib/store
 import { productIdFor, readListing } from "@/lib/catalog";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { EMPTY_PAGE, MAX_BLOCKS, type SalesPage, copyOfPage, declareMeasure, oversized, pageProblem, parsePage, picturePaths } from "@/lib/sales-page";
-import { jsonAccess, refusedJson } from "@/lib/studio-route";
+import { countStudio, jsonAccess, refusedJson } from "@/lib/studio-route";
 import { lockedFor } from "@/lib/two-step";
 import { claimNewPictures, readPage, releasePictures, writePage } from "@/lib/sales-page-store";
 import { del } from "@/lib/blob";
 import { imagePaths, ownsImagePath } from "@/lib/product-image";
-import { checkedPictures } from "@/lib/picture-check";
+import { pictureChecker } from "@/lib/picture-check";
 
 /**
  * Thirty full blocks as JSON, twice — a page and a second version tested
@@ -108,7 +108,7 @@ export async function POST(request: NextRequest) {
       // shared folder, so taking it off later deletes only this page's own (lib/sales-page-store.ts, claimNewPictures).
       // Only those this save takes from the door are checked in the file store, and once (MR audit gap 1): one taken
       // by an earlier save was checked then, so a save tried again never asks Blob about the same picture twice.
-      if (!(await claimNewPictures(store.statsId, id, fresh, checkedPictures))) {
+      if (!(await claimNewPictures(store.statsId, id, fresh, pictureChecker(async (units) => (await countStudio(store, "products", units)).ok)))) {
         return Response.json({ ok: false, error: "pictures" }, { status: 400 });
       }
     }

@@ -2,13 +2,13 @@ import { randomBytes } from "node:crypto";
 import type { NextRequest } from "next/server";
 import { StoreFullError, imageFolder, setSitePages } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
-import { refusedJson } from "@/lib/studio-route";
+import { countStudio, refusedJson } from "@/lib/studio-route";
 import { lockedFor } from "@/lib/two-step";
 import { MAX_BLOCKS, emptyBlock, oversized, pageProblem, parsePage, picturePaths, type PageBlock } from "@/lib/sales-page";
 import { claimNewPictures, dropPage, picturesOfFailedDrop, readPage, releasePictures, writePage } from "@/lib/sales-page-store";
 import { del } from "@/lib/blob";
 import { ownsImagePath } from "@/lib/product-image";
-import { checkedPictures } from "@/lib/picture-check";
+import { pictureChecker } from "@/lib/picture-check";
 import { hasPlaceholder } from "@/lib/mail-body";
 import { MAX_SITE_PAGES, SITE_KINDS, SITE_PAGE_ID, SITE_STARTERS, type SitePage, outFrom, siteKey, siteTitle, slugFrom, slugProblem } from "@/lib/site-page-rules";
 
@@ -137,7 +137,7 @@ export async function POST(request: NextRequest) {
         // Fresh from the picture door or already this page's, never a product's, a link's or another page's picture
         // from the shared folder (lib/sales-page-store.ts, claimNewPictures). Only those this save takes from the door
         // are checked in the file store, and once (MR audit gap 1).
-        if (!(await claimNewPictures(statsId, key, fresh, checkedPictures))) return refuse("pictures");
+        if (!(await claimNewPictures(statsId, key, fresh, pictureChecker(async (units) => (await countStudio(store, "page", units)).ok)))) return refuse("pictures");
       }
       await writePage(statsId, key, page, store);
       // When it is out, kept on the list so the menu reads nothing more (lib/site-page-rules.ts).

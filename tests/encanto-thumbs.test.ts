@@ -63,7 +63,9 @@ part("Its cost, in the studio's one Blob line, from the official price");
 const line = COST_LINES.find((each) => each.id === "studio-blob");
 is("the studio's Blob line counts the thumbnail copy", Boolean(line) && (line?.sources ?? []).some((source) => source.names.includes("MAX_THUMB_BYTES")), true);
 is("and the thumbnail's own line is gone", COST_LINES.some((each) => each.id === "picture-thumbnails"), false);
-is("its source and date are said", /vercel\.com\/docs\/vercel-blob\/usage-and-pricing/.test(line?.basis ?? "") && /6 November 2026/.test(line?.basis ?? ""), true);
+// Rule 23 (#2801, CodeQL "Missing regular expression anchor"): the source was an unanchored pattern, which a longer
+// address holding it would also pass; it is now a whole word of the basis, the page's exact address, and the date as text.
+is("its source and date are said", (line?.basis ?? "").split(/[\s,]+/).includes("vercel.com/docs/vercel-blob/usage-and-pricing") && (line?.basis ?? "").includes("read on 6 November 2026"), true);
 is("the signing request is named among its sources", line?.sources.some((each) => each.file === "app/api/store/image/upload/route.ts" && each.names.includes("issueSignedToken")) ?? false, true);
 // One typed CDN price only (Claude 4 on #2801, 6711058322, finding 2): the registry types no CDN request price of its
 // own; the studio-blob line's reads take traffic-cost's CDN_PER_REQUEST (tests/picture-upload-costs.test.ts).

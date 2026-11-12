@@ -1421,7 +1421,9 @@ export async function buyerOfOrder(store: Store, sessionId: string): Promise<str
 
 export type JoinResult =
   | { ok: true; session: string; affiliate: Affiliate; created: boolean }
-  | { ok: false; reason: "unavailable" | "order" | "owner" | "declined" | "full" };
+  | { ok: false; reason: "unavailable" | "order" | "owner" | "declined" | "full" }
+  /** Already an affiliate here: an order is no sign-in, so the caller emails their link (MM-SA-34). */
+  | { ok: false; reason: "known"; email: string; affiliate: Affiliate };
 
 /**
  * A buyer taking their own link, where the creator lets buyers join: made
@@ -1474,6 +1476,12 @@ export async function joinAsBuyer(store: Store, sessionId: string): Promise<Join
       created = true;
     }
   }
+
+  // An order's id travels in the purchase email, the thanks page's address and the ad pixels' events
+  // (MM-SA-25), and is honored here for as long as Stripe keeps the checkout: it proves who paid, not
+  // who holds the browser now. It makes a new affiliate, never a session on one that was already there,
+  // with its address, earnings and where their money is paid: that one signs in by the emailed link (MM-SA-34).
+  if (!created) return { ok: false, reason: "known", email: affiliate.email, affiliate };
 
   const session = randomBytes(32).toString("hex");
   await redisPipeline([["SET", sessionKey(session), JSON.stringify({ s: statsId, a: affiliate.id }), "EX", AFFILIATE_SESSION_SECONDS]]);

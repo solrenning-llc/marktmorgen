@@ -356,6 +356,9 @@ async function main(): Promise<void> {
   const [record] = await redis.pipeline([["HGET", `nl:cm:${cid}:m`, memberKey]]);
   await redis.pipeline([["HSET", `nl:cm:${cid}:m`, memberKey, JSON.stringify({ ...JSON.parse(String(record)), n: "Member One" })]]);
   if (!(await readMember(cid, memberKey))?.n) throw new Error("no name");
+  // A second member, for a message that opens a conversation (a request): only that spends the day's openings (dmNew).
+  const OTHER = "0123456789abcdef0123456789abcdef";
+  await redis.pipeline([["HSET", `nl:cm:${cid}:m`, OTHER, JSON.stringify({ ...JSON.parse(String(record)), k: OTHER, e: "other@number-gates.example", n: "Member Two", h: "member-two", t: "" })]]);
   const es = communityWords("es").notices;
   const en = communityWords("en").notices;
   const rateIs = (kind: string) => (commands: Command[]) =>
@@ -420,13 +423,18 @@ async function main(): Promise<void> {
         }),
       );
     const send = () => post({ action: "send", to: "creator", text: `A private message ${(n += 1)}` })();
+    // The day's openings are read only for a new request: a message to the creator never is one.
+    const opening = () => post({ action: "send", to: OTHER, text: `A private message ${(n += 1)}` })();
     const dmWrites = (from: number) => wroteSince(from, (c) => key(c).includes(":dm:"));
+    // An opening is known only once the pair is read (send's checks), so for it the reads come first: none may write.
+    const READS = new Set(["SISMEMBER", "EXISTS", "ZCARD", "ZSCORE", "LLEN", "LINDEX", "GET", "HGET", "SCARD"]);
+    const dmChanges = (from: number) => wroteSince(from, (c) => key(c).includes(":dm:") && !READS.has(String(c[0])));
     for (const kind of ["dm", "dmNew"]) {
       for (const [label, reply] of SET_INCR_UNKNOWN) {
         counter = { match: rateIs(kind), reply };
         const from = seen.length;
-        const got = await read(send);
-        is(`${kind}, ${label}: 503 "nothing was changed" in Spanish, nothing sent`, [got, dmWrites(from)], [{ status: 503, store: "no-store", cookie: false, location: null, body: es.error }, 0]);
+        const got = await read(kind === "dmNew" ? opening : send);
+        is(`${kind}, ${label}: 503 "nothing was changed" in Spanish, nothing sent`, [got, kind === "dmNew" ? dmChanges(from) : dmWrites(from)], [{ status: 503, store: "no-store", cookie: false, location: null, body: es.error }, 0]);
       }
     }
     // Once the message is being written, whether it went in is not known: the person is asked to look first.

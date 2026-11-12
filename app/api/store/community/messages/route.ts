@@ -3,7 +3,7 @@ import { originFrom } from "@/lib/request-origin";
 import { fromAnotherSite } from "@/lib/studio-route";
 import { limited } from "@/lib/request-guard";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
-import { CREATOR, within } from "@/lib/community";
+import { CREATOR, readMember, within } from "@/lib/community";
 import { communityViewer } from "@/lib/community-access";
 import {
   MAX_MESSAGE_TEXT,
@@ -94,16 +94,35 @@ async function act(request: NextRequest, progress: Progress): Promise<Response> 
     if (!owner && !(await within(id, key, "dm"))) return back(box, "slow");
     const text = field("text", MAX_MESSAGE_TEXT);
     if (!text) return back(`${box}/${pairOf(key, to)}`, "empty");
+    // Only to somebody in the community: a key nobody holds, or a member the
+    // creator removed, gets nothing written under it (no request waiting where
+    // nobody can read or decline it, no room taken). The sender is answered as
+    // a request sent, exactly as for a decline: a key is a plain hash of an
+    // address, so a different answer would tell who is a member.
+    if (to !== CREATOR) {
+      const them = await readMember(id, to);
+      if (!them || them.removed) return back(box, "dmasked");
+    }
     // Starting a conversation is limited harder than continuing one: the cost
     // of a stranger is in the opening, not in the tenth message of a talk
-    // somebody chose to have.
-    const started = await within(id, key, "dmNew");
+    // somebody chose to have. So the day's openings are counted only when this
+    // message is a new request (send asks), never for a message to the creator
+    // or in a conversation already going.
+    // Asked before send writes anything: a count it cannot read is "nothing was changed", never "could not confirm".
+    const started = owner
+      ? true
+      : async () => {
+          progress.writing = false;
+          const ok = await within(id, key, "dmNew");
+          progress.writing = true;
+          return ok;
+        };
     let sent: Awaited<ReturnType<typeof send>>;
     progress.writing = true;
     try {
       // Past the day's openings, a new request is refused before it is written
       // (never written and then answered "slow", which invites a second copy).
-      sent = await send(id, config.dm, key, to, text, store, { mayAsk: owner || started });
+      sent = await send(id, config.dm, key, to, text, store, { mayAsk: started });
     } catch (error) {
       // No room in the store's data room: nothing was sent (lib/store-data.ts).
       if (error instanceof DataRoomError) return back(`${box}/${pairOf(key, to)}`, "noroom");

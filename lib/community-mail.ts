@@ -40,10 +40,11 @@ import {
   readConfig,
   readMember,
   readMembersExact,
+  readPost,
   setMail,
   setMemberToken,
 } from "@/lib/community";
-import { askingAgainWontTell, holdsTicket } from "@/lib/community-access";
+import { askingAgainWontTell, holdsTicket, maySeeSpace } from "@/lib/community-access";
 import { communityWords } from "@/lib/buyer-words/community";
 
 export const COMMUNITY_UNSUB = /^[0-9a-f]{40}$/;
@@ -75,6 +76,12 @@ export type AnnouncementJob = {
   skipped?: number;
   /** The current batch's members not answered for, by member key, with the tries in a row so far (sortBatch). */
   tries?: Record<string, number>;
+  /**
+   * The space the post was written in. A member who cannot see that space (one kept for the buyers of a product
+   * they do not hold) is passed over, never emailed its words. Absent on a send queued before it was kept: the post
+   * is read for it.
+   */
+  space?: string;
 };
 
 function parse(raw: unknown): AnnouncementJob | null {
@@ -130,6 +137,7 @@ export async function queueAnnouncement(store: Store, config: CommunityConfig, p
     community: communityId,
     handle: store.handle,
     post: post.id,
+    space: post.sp,
     subject,
     body,
     total: members.length,
@@ -380,7 +388,13 @@ export async function advanceAnnouncement(
       const read: SortedBatch | null = await (async (): Promise<SortedBatch> => {
         const found = await readMembersExact(community, keys);
         const candidates = keys.map((k) => found.get(k)).filter((m): m is Member => Boolean(m && m.mail && !m.removed));
-        return sortBatch(store, community, candidates, (m) => holdsTicket(store, config, m.e, { strict: true }), job.tries);
+        // The post's space, as it is now: a space taken away leaves its posts in the whole community's feed.
+        const spaceId = job.space ?? (await readPost(community, job.post))?.sp;
+        const space = spaceId ? config.spaces.find((s) => s.id === spaceId) : undefined;
+        const letIn = async (m: Member) =>
+          (await holdsTicket(store, config, m.e, { strict: true })) &&
+          (!space?.only.length || (await maySeeSpace(store, config, space, { owner: false, email: m.e }, { strict: true })));
+        return sortBatch(store, community, candidates, letIn, job.tries);
       })().catch((error: unknown) => {
         console.error("an announcement could not read who is in a batch", error);
         return null;

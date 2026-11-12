@@ -350,6 +350,8 @@ export async function maySeeSpace(
   config: CommunityConfig,
   space: { id: string; only: string[] },
   viewer: { owner: boolean; email: string },
+  /** `strict` as holdsTicket's, for deciding who an email goes to: an answer that could not be had throws, never a no. */
+  options: { strict?: boolean } = {},
 ): Promise<boolean> {
   if (viewer.owner) return true;
   // The same rule the creator's "View as a member" uses (lib/community-gate.ts).
@@ -358,7 +360,7 @@ export async function maySeeSpace(
   const ids = gate.needs;
   const id = store.community?.id;
   if (!id) return false;
-  return holdsAnyOf(store, ids, viewer.email, `nl:cm:${id}:sp:ok:${space.id}:${emailKey(viewer.email)}`, String(config.v));
+  return holdsAnyOf(store, ids, viewer.email, `nl:cm:${id}:sp:ok:${space.id}:${emailKey(viewer.email)}`, String(config.v), options);
 }
 
 /**

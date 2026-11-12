@@ -17,6 +17,7 @@ import {
   editPost,
   moderateMember,
   readComment,
+  readMembers,
   readPost,
   report,
   saveConfig,
@@ -145,7 +146,29 @@ export async function POST(request: NextRequest) {
       return back(`${home}/you`, "saved");
     }
 
-    if (!viewer.canWrite) return back(fromPage, viewer.member?.muted ? "muted" : "full");
+    // A muted member writes nothing, but may still report: muting is no reason
+    // to leave somebody unable to flag what is said to or about them.
+    if (!viewer.canWrite && !(action === "report" && viewer.member)) return back(fromPage, viewer.member?.muted ? "muted" : "full");
+
+    // Who may hear about something said in a space: the creator, and members
+    // still in the community who can see that space. A removed member, or one
+    // without the product a gated space asks for, is never told, and so never
+    // gets its first words in their notifications nor a push. A read that
+    // fails leaves the person out: a notice missed is the smaller loss.
+    const mayHear = async (people: string[], spaceOf: { id: string; only: string[] } | undefined): Promise<string[]> => {
+      const wanted = [...new Set(people)].filter(Boolean);
+      if (!wanted.length) return [];
+      const members = await readMembers(id, wanted).catch(() => new Map<string, never>());
+      const out: string[] = [];
+      for (const one of wanted) {
+        if (one === CREATOR) { out.push(one); continue; }
+        const member = members.get(one);
+        if (!member || member.removed) continue;
+        if (spaceOf?.only.length && !(await maySeeSpace(store, config, spaceOf, { owner: false, email: member.e }).catch(() => false))) continue;
+        out.push(one);
+      }
+      return out;
+    };
 
     // ------------------------------------------------------------ a new post
     if (action === "post") {
@@ -232,7 +255,7 @@ export async function POST(request: NextRequest) {
         const named = await whoIs(id, mentionsIn(`${title}\n${text}`));
         await tell(
           id,
-          [...named.values()],
+          await mayHear([...named.values()], chosen),
           { kind: "mention", post: made.post.id, comment: "", by: key, words: title || text },
           store,
           { handle: store.handle, who: owner ? store.name : viewer.member?.n || communityWords(store.language).somebody, language: store.language },
@@ -281,12 +304,12 @@ export async function POST(request: NextRequest) {
         // a notification nobody can place is a notification nobody opens.
         const doer = owner ? store.name : viewer.member?.n || communityWords(store.language).somebody;
         const phone = { handle: store.handle, who: doer, language: store.language };
-        await tell(id, [post.a], { kind: "reply", post: post.id, comment: made.comment.id, by: key, words: text }, store, phone);
+        await tell(id, await mayHear([post.a], itsSpace), { kind: "reply", post: post.id, comment: made.comment.id, by: key, words: text }, store, phone);
         if (above && above.a !== post.a) {
-          await tell(id, [above.a], { kind: "answer", post: post.id, comment: made.comment.id, by: key, words: text }, store, phone);
+          await tell(id, await mayHear([above.a], itsSpace), { kind: "answer", post: post.id, comment: made.comment.id, by: key, words: text }, store, phone);
         }
         const others = [...named.values()].filter((one) => one !== post.a && one !== above?.a);
-        await tell(id, others, { kind: "mention", post: post.id, comment: made.comment.id, by: key, words: text }, store, phone);
+        await tell(id, await mayHear(others, itsSpace), { kind: "mention", post: post.id, comment: made.comment.id, by: key, words: text }, store, phone);
       }
       return back(postPage, "commented", `comment-${made.comment.id}`);
     }

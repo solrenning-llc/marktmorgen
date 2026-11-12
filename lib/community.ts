@@ -1230,7 +1230,12 @@ export async function report(id: string, target: ReportTarget, who: string, room
     ["SADD", traceKey(id, who), `r:${key}`],
   ]);
   if (Number(traced) !== 1) await giveData(room, [TRACE_ENTRY]);
-  if (Number(added) !== 1) return "again";
+  if (Number(added) !== 1) {
+    // Already a reporter. "again" only while the item really is in the queue: a
+    // retry after a lost queue write (or after the creator dismissed it) queues it.
+    const [queued] = await redisPipeline([["ZSCORE", reportsKey(id), key]]);
+    if (queued !== null && queued !== undefined) return "again";
+  }
   await redisPipeline([
     ["ZADD", reportsKey(id), Date.now(), key],
     ["ZREMRANGEBYRANK", reportsKey(id), 0, -(MAX_REPORT_QUEUE + 1)],

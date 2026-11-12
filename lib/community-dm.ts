@@ -42,7 +42,8 @@
  *   nl:cm:<id>:dm:<pair>        the messages, newest last (list, capped)
  *   nl:cm:<id>:dm:i:<who>       their conversations, by when each last moved
  *   nl:cm:<id>:dm:q:<who>       requests waiting on them, newest first
- *   nl:cm:<id>:dm:x:<who>       who they have declined, and so will not hear from again
+ *   nl:cm:<id>:dm:x:<who>       who they declined before declines kept their time (a set, read and trimmed first)
+ *   nl:cm:<id>:dm:xs:<who>      who they have declined, scored by when, and so will not hear from again
  *   nl:cm:<id>:dm:r:<pair>      how much of it each of the two has read
  *
  * A pair names itself: the two member keys, sorted, joined by a dot. Sorting
@@ -73,6 +74,8 @@ const chatKey = (id: string, pair: string) => `${base(id)}:dm:${pair}`;
 const inboxKey = (id: string, who: string) => `${base(id)}:dm:i:${who}`;
 const askedKey = (id: string, who: string) => `${base(id)}:dm:q:${who}`;
 const shutKey = (id: string, who: string) => `${base(id)}:dm:x:${who}`;
+/** Declines with their time, so the cap drops the oldest (SPOP on the set above drops one at random). */
+const shutAtKey = (id: string, who: string) => `${base(id)}:dm:xs:${who}`;
 const readKey = (id: string, pair: string) => `${base(id)}:dm:r:${pair}`;
 
 export const MAX_MESSAGE_TEXT = 2_000;
@@ -198,7 +201,9 @@ export async function send(
   // false when the sender is past the day's openings (the route's dmNew
   // window): a new request is refused before anything is written. A follow-up
   // to one already waiting, and a message in a conversation, still go.
-  options: { mayAsk?: boolean } = {},
+  // Given as a function, it is asked only for a new request, so the day's
+  // openings are counted for openings and never for any other message.
+  options: { mayAsk?: boolean | (() => Promise<boolean>) } = {},
 ): Promise<SendResult> {
   const blocked = mayMessage(setting, from, to);
   if (blocked) return blocked;
@@ -207,8 +212,8 @@ export async function send(
   const pair = pairOf(from, to);
 
   // Each reply in its exact shape (CX-123 rule 24): SISMEMBER and EXISTS 0 or 1,
-  // ZCARD a whole count, and the pair's place in the recipient's request list
-  // and in their inbox a score in text or none. A hole, null, text or a short
+  // ZCARD a whole count, and the pair's place in the recipient's request list,
+  // in their inbox and among those they declined a score in text or none. A hole, null, text or a short
   // pipeline is not "not declined", "under the cap" or "already talking":
   // nothing is written and the route answers 503.
   const checks = repliesFor(
@@ -218,20 +223,23 @@ export async function send(
       ["ZCARD", inboxKey(id, to)],
       ["ZSCORE", askedKey(id, to), pair],
       ["ZSCORE", inboxKey(id, to), pair],
+      ["ZSCORE", shutAtKey(id, to), from],
     ]),
-    5,
+    6,
   );
-  const declined = replyCount(checks?.[0]);
+  const declinedBefore = replyCount(checks?.[0]);
   const already = replyCount(checks?.[1]);
   const size = replyCount(checks?.[2]);
   const queued = checks?.[3];
   const listed = checks?.[4];
-  if (declined === null || declined > 1 || already === null || already > 1 || size === null || !scoreOrNone(queued) || !scoreOrNone(listed)) {
+  const declinedAt = checks?.[5];
+  if (declinedBefore === null || declinedBefore > 1 || !scoreOrNone(declinedAt) || already === null || already > 1 || size === null || !scoreOrNone(queued) || !scoreOrNone(listed)) {
     throw new UnknownReplyError("a private message's declined, conversation, count or request check");
   }
+  const declined = declinedBefore === 1 || declinedAt !== null;
   // Declined once is declined for good, and the sender is told nothing that
   // would let them work out they were declined rather than ignored.
-  if (declined === 1) return { ok: false, reason: "declined" };
+  if (declined) return { ok: false, reason: "declined" };
   // "Already talking" is the pair in the recipient's own inbox, never a
   // conversation that merely exists: one left behind with no line of theirs
   // (a request trimmed while its sender wrote again, Claude 6 on #3266) must
@@ -249,7 +257,10 @@ export async function send(
   const asking = setting.ask && !talking && from !== CREATOR && to !== CREATOR;
   // Only a request that is not in the list yet takes a place in it.
   const fresh = asking && queued === null;
-  if (fresh && options.mayAsk === false) return { ok: false, reason: "slow" };
+  if (fresh && options.mayAsk !== undefined) {
+    const mayAsk = typeof options.mayAsk === "function" ? await options.mayAsk() : options.mayAsk;
+    if (!mayAsk) return { ok: false, reason: "slow" };
+  }
 
   // Its room first (DataRoomError when it does not fit). A conversation at
   // MAX_MESSAGES lets its oldest go, and that one's room comes back.
@@ -390,7 +401,7 @@ export async function decline(id: string, who: string, pair: string, room: DataS
     ["ZREM", askedKey(id, who), pair],
     ["ZREM", inboxKey(id, other), pair],
     ["DEL", chatKey(id, pair), readKey(id, pair)],
-    ["SADD", shutKey(id, who), other],
+    ["ZADD", shutAtKey(id, who), Date.now(), other],
   ]);
   // The conversation's room comes back; the person declined takes a little,
   // never refused: saying no must always work.
@@ -399,9 +410,11 @@ export async function decline(id: string, who: string, pair: string, room: DataS
   // Bounded, so one person's refusals cannot grow without end. Dropping the
   // oldest is the right way round: somebody who declined five hundred people
   // is far likelier to meet a new stranger than the first one again.
-  const [count] = await redisPipeline([["SCARD", shutKey(id, who)]]);
-  if (Number(count) > MAX_DECLINED) {
-    await redisPipeline([["SPOP", shutKey(id, who)]]);
+  // Those kept in the old set, from before declines had a time, are the oldest
+  // of all and go first; then the earliest by time, never at random.
+  const [before, timed] = await redisPipeline([["SCARD", shutKey(id, who)], ["ZCARD", shutAtKey(id, who)]]);
+  if (Number(before) + Number(timed) > MAX_DECLINED) {
+    await redisPipeline([Number(before) > 0 ? ["SPOP", shutKey(id, who)] : ["ZREMRANGEBYRANK", shutAtKey(id, who), 0, 0]]);
     await giveData(room, [{ slot: DECLINED_SLOT, bytes: DECLINED_BYTES }]);
   }
   return true;
@@ -409,14 +422,15 @@ export async function decline(id: string, who: string, pair: string, room: DataS
 
 /** Lets somebody previously declined write again. */
 export async function unblock(id: string, who: string, other: string, room: DataStore): Promise<void> {
-  const [removed] = await redisPipeline([["SREM", shutKey(id, who), other]]);
-  if (Number(removed) === 1) await giveData(room, [{ slot: DECLINED_SLOT, bytes: DECLINED_BYTES }]);
+  const [before, timed] = await redisPipeline([["SREM", shutKey(id, who), other], ["ZREM", shutAtKey(id, who), other]]);
+  const removed = (Number(before) === 1 ? 1 : 0) + (Number(timed) === 1 ? 1 : 0);
+  if (removed) await giveData(room, [{ slot: DECLINED_SLOT, bytes: removed * DECLINED_BYTES }]);
 }
 
 /** Everyone this person has declined. */
 export async function declinedBy(id: string, who: string): Promise<string[]> {
-  const [raw] = await redisPipeline([["SMEMBERS", shutKey(id, who)]]);
-  return Array.isArray(raw) ? raw.map(String) : [];
+  const [raw, timed] = await redisPipeline([["SMEMBERS", shutKey(id, who)], ["ZRANGE", shutAtKey(id, who), 0, -1]]);
+  return [...new Set([...(Array.isArray(raw) ? raw : []), ...(Array.isArray(timed) ? timed : [])].map(String))];
 }
 
 /** One page of a person's conversations, the ones that moved last on top. */
@@ -481,7 +495,7 @@ export async function thread(id: string, who: string, pair: string): Promise<Thr
 
 /** Everything a conversation leaves behind, for when a member is removed. */
 export function dmKeys(id: string, who: string): string[] {
-  return [inboxKey(id, who), askedKey(id, who), shutKey(id, who)];
+  return [inboxKey(id, who), askedKey(id, who), shutKey(id, who), shutAtKey(id, who)];
 }
 
 /** How many of a person's conversations one search reads, the most recent first. */

@@ -3,6 +3,7 @@
 import { useId, useMemo, useRef, useState } from "react";
 import { MAX_SEQUENCE_FILE_BYTES, SEQUENCE_TEMPLATE, sequenceTemplateCsv } from "@/lib/sequence-template";
 import { MAX_STEPS } from "@/lib/flow-limits";
+import { decodeCsvBytes } from "@/lib/csv";
 
 export type ImportedStep = { delayHours: number; subject: string; body: string };
 export type ImportReportLine = { line: number; column: string; reason: string };
@@ -51,7 +52,8 @@ export function SequenceImportBox({
     }
     setBusy(true);
     try {
-      const csv = await file.text();
+      // Its bytes as the spreadsheet wrote them: UTF-8, UTF-16 or Excel's Windows-1252 (lib/csv.ts).
+      const csv = decodeCsvBytes(new Uint8Array(await file.arrayBuffer()));
       const response = await fetch("/api/store/mail", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "flow-import", csv }) });
       const data = (await response.json().catch(() => null)) as { ok?: boolean; error?: string; steps?: ImportedStep[]; report?: ImportReportLine[] } | null;
       const lines = Array.isArray(data?.report) ? data.report : [];

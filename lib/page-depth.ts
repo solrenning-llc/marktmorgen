@@ -17,6 +17,7 @@
  *   nl:depth:<statsId>:<productId>   hash: <blockId> (stopped there); _n (visitors) until 11 October 2026
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { cappedCount, cappedCountCommand } from "@/lib/capped-count";
 import { DEPTH_FIELDS_MAX, DEPTH_RECORD_BYTES, TIME_RANGES, timeField } from "@/lib/page-depth-rules";
 import { BLOCK_ID_PATTERN } from "@/lib/sales-page";
@@ -110,11 +111,11 @@ export function reachShares(order: string[], stopped: Record<string, number>, vi
   return { shares, visitors };
 }
 
+/** What was counted for a product: visitors, how many stopped at each block id, why they did not buy, how far into each video. */
+export type Depth = { visitors: number; stopped: Record<string, number>; whyNot: Partial<Record<WhyNot, number>>; videos: Record<string, VideoReach> };
+
 /** What was counted for a product: visitors, and how many stopped at each block id. */
-export async function readDepth(
-  statsId: string | null,
-  productId: string,
-): Promise<{ visitors: number; stopped: Record<string, number>; whyNot: Partial<Record<WhyNot, number>>; videos: Record<string, VideoReach>; time: Record<string, number>; timeUnread: boolean }> {
+export async function readDepth(statsId: string | null, productId: string): Promise<Depth & { time: Record<string, number>; timeUnread: boolean }> {
   if (!statsId || !isRedisConfigured()) return { visitors: 0, stopped: {}, whyNot: {}, videos: {}, time: {}, timeUnread: false };
   const [raw, rawTime] = await redisPipeline([["HGETALL", key(statsId, productId)], ["HGETALL", timeKey(statsId, productId)]]);
   // Counted in Maps, never on plain objects: any visitor can send a block id
@@ -123,22 +124,52 @@ export async function readDepth(
   const pairs = new Map<string, string>();
   if (Array.isArray(raw)) for (let i = 0; i + 1 < raw.length; i += 2) pairs.set(String(raw[i]), String(raw[i + 1]));
   else if (raw && typeof raw === "object") for (const [field, value] of Object.entries(raw)) pairs.set(field, String(value));
-  const stopped = new Map<string, number>();
-  const whyNot = new Map<WhyNot, number>();
-  const videos = new Map<string, VideoReach>();
   const time = new Map<string, number>();
-  const timeFields = new Set<string>(TIME_RANGES.map((range) => range.field));
   // The time record's reply read exactly (rule 24): a list of field and value
   // texts, or a record of them. Anything else is unread, said as such by the
   // studio, never an empty record shown as "0 so far".
   const timePairs = hashPairs(rawTime);
   const timeUnread = timePairs === null;
-  for (const [field, value] of timePairs ?? []) if (timeFields.has(field) && Number(value) > 0) time.set(field, Number(value));
+  for (const [field, value] of timePairs ?? []) if (TIME_FIELDS.has(field) && Number(value) > 0) time.set(field, Number(value));
+  return { ...depthOf(pairs), time: Object.fromEntries(time), timeUnread };
+}
+
+/** A count as countDepth keeps it with HINCRBY by one: a whole number, never below zero, as text (Codex T on #3225). */
+const COUNT_TEXT = /^\d{1,15}$/;
+
+/**
+ * What was counted for a product, read only in its exact shape (CX-123 rule 24): the hash as a list of field and
+ * count pairs, where an empty list is a product nobody was counted for. A reply of another shape, a count that is not
+ * a whole number of zero or more, or no Redis throws UnknownReplyError, never zero visitors. readDepth stays as it is for the studio's
+ * own page.
+ */
+export async function readDepthExact(statsId: string, productId: string): Promise<Depth> {
+  const what = "how far down a page visitors read";
+  if (!isRedisConfigured()) throw new UnknownReplyError(what);
+  const list = stringList(repliesFor(await redisPipeline([["HGETALL", key(statsId, productId)]]), 1)?.[0]);
+  if (!list || list.length % 2 !== 0) throw new UnknownReplyError(what);
+  // A Map: a field is only ever a count, whatever its name.
+  const pairs = new Map<string, string>();
+  for (let i = 0; i < list.length; i += 2) {
+    if (!COUNT_TEXT.test(list[i + 1])) throw new UnknownReplyError(what);
+    pairs.set(list[i], list[i + 1]);
+  }
+  return depthOf(pairs);
+}
+
+/** The time-on-page fields, never counted as blocks. */
+const TIME_FIELDS = new Set<string>(TIME_RANGES.map((range) => range.field));
+
+/** The counts of a depth record, by field, added up into what readDepth answers. Pure; counted in Maps (proto-keys). */
+function depthOf(pairs: Map<string, string>): Depth {
+  const stopped = new Map<string, number>();
+  const whyNot = new Map<WhyNot, number>();
+  const videos = new Map<string, VideoReach>();
   let visitors = 0;
   for (const [field, value] of pairs) {
     if (field === "_n" || !(Number(value) > 0)) continue;
     // A time field left in the blocks' record by an earlier build is never a visitor of its own.
-    if (timeFields.has(field)) continue;
+    if (TIME_FIELDS.has(field)) continue;
     const n = Number(value);
     const [head, video] = field.split("!");
     const [block, answer] = head.split("?");
@@ -166,8 +197,6 @@ export async function readDepth(
     stopped: Object.fromEntries(stopped),
     whyNot: Object.fromEntries(whyNot) as Partial<Record<WhyNot, number>>,
     videos: Object.fromEntries(videos),
-    time: Object.fromEntries(time),
-    timeUnread,
   };
 }
 

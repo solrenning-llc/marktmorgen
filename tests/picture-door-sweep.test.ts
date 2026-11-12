@@ -92,9 +92,12 @@ async function main(): Promise<void> {
   const onStore = (path: string) => redis.run(["ZSCORE", doors, path]) !== null;
   const onList = (path: string) => redis.run(["ZSCORE", UNCLAIMED, path]) !== null;
   /** Both notes moved back in time, as if the door had been opened `ago` ms before now. */
+  // One reading of the clock for both notes: the sweep deletes only when their scores are equal (867ea88a5), so two
+  // reads a millisecond apart would keep the picture as "other" (Claude 1 on #3347).
   const age = (path: string, ago: number) => {
-    redis.run(["ZADD", doors, Date.now() - ago, path]);
-    redis.run(["ZADD", UNCLAIMED, Date.now() - ago, path]);
+    const at = Date.now() - ago;
+    redis.run(["ZADD", doors, at, path]);
+    redis.run(["ZADD", UNCLAIMED, at, path]);
   };
 
   part("Every door is written on the list of unclaimed pictures with the store's note");
@@ -189,9 +192,11 @@ async function main(): Promise<void> {
   const many: string[] = [];
   for (let i = 0; i < 12; i += 1) {
     const path = name();
-    files.set(path, { bytes: JPEG, contentType: "image/jpeg", at: Date.now() - GRACE - 3 * DAY + i + 1 });
-    redis.run(["ZADD", doors, Date.now() - GRACE - 3 * DAY + i, path]);
-    redis.run(["ZADD", UNCLAIMED, Date.now() - GRACE - 3 * DAY + i, path]);
+    // One reading of the clock a picture: the file just after its notes, and the two notes at the same score.
+    const at = Date.now() - GRACE - 3 * DAY + i;
+    files.set(path, { bytes: JPEG, contentType: "image/jpeg", at: at + 1 });
+    redis.run(["ZADD", doors, at, path]);
+    redis.run(["ZADD", UNCLAIMED, at, path]);
     many.push(path);
   }
   is("a run with a cap of five deletes the five oldest", await run(Date.now(), 5), many.slice(0, 5));

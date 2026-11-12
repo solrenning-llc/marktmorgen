@@ -11,6 +11,7 @@ import { readListings } from "@/lib/catalog";
 import { CommunityBar, Face, LevelBadge } from "@/components/community-parts";
 import { communityWords } from "@/lib/buyer-words/community";
 import { LANGUAGES } from "@/lib/store-language";
+import { EmptyState } from "@/components/empty-state";
 
 type Params = { params: Promise<{ handle: string }>; searchParams: Promise<{ [key: string]: string | string[] | undefined }> };
 
@@ -119,9 +120,7 @@ export default async function CommunityLeaderboardPage({ params, searchParams }:
         </nav>
 
         {standing.top.length === 0 ? (
-          <p className="st-muted mt-6">
-            {period === "all" ? w.nobodyPoints : w.noPointsPeriod}
-          </p>
+          <EmptyState title={w.nothingHereYet} body={period === "all" ? w.nobodyPoints : w.noPointsPeriod} className="mt-6" />
         ) : (
           <ol className="mt-4 space-y-2">
             {standing.top.map((s, i) => {

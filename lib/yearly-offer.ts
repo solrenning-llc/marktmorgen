@@ -39,7 +39,7 @@ import { type Store, saleHandles } from "@/lib/store";
 import { onAccount } from "@/lib/stripe-account";
 
 /** Kept for good: the day a store first sold does not change. */
-const firstSaleKey = (store: Pick<Store, "sid" | "handle">) => `nl:firstsale:${store.sid || `h:${store.handle}`}`;
+export const firstSaleKey = (store: Pick<Store, "sid" | "handle">) => `nl:firstsale:${store.sid || `h:${store.handle}`}`;
 /** One offer per subscription, ever. */
 const offeredKey = (subscription: string) => `nl:yearly-offer:${subscription}`;
 

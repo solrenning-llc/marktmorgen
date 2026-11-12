@@ -19,6 +19,7 @@ export async function guardStoreWrite(){return state.denied?{ok:false,response:n
 export async function readForms(){return [form,{...form,id:'form000002',name:'Healthy form'}];}
 export async function readForm(){return form;}
 export async function readResponses(_stats:unknown,id:string){if(state.unavailable&&id===form.id)throw new UnknownReply('form responses');return {responses,total:responses.length};}
+export async function readResponse(_stats:unknown,id:string,responseId:string){if(state.unavailable&&id===form.id)throw new UnknownReply('form response');return responses.find(r=>r.id===responseId)??null;}
 export async function readCards(){return new Map();}
 export async function readOpportunityReview(){return {available:false,stages:[],deals:[],pipelines:[],versions:{}};}
 export async function readStages(){return [];}

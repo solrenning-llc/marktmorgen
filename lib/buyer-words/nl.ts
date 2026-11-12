@@ -195,6 +195,7 @@ export const nl: BuyerWords = {
     busy: { title: "Iemand anders koopt dit op dit moment", body: "Er is niets afgeschreven. Druk zo meteen opnieuw op kopen." },
     slow: { title: "Veel pogingen in een paar minuten", body: "Er is niets afgeschreven. Wacht een paar minuten en druk dan opnieuw op kopen." },
     error: { title: "De betaalpagina kon niet worden geopend", body: "Er is niets afgeschreven. Probeer het zo meteen opnieuw." },
+    nocharges: { title: "Deze winkel kan nu geen kaartbetalingen ontvangen", body: "Er is niets afgeschreven. Opnieuw proberen werkt pas als de winkel dit heeft opgelost." },
     paused: { title: "Deze winkel neemt nu geen nieuwe bestellingen aan", body: "Er is niets afgeschreven. Nieuwe bestellingen kunnen weer begin volgende maand, of eerder." },
     "paypal-declined": {
       title: "PayPal heeft de betaling niet aangenomen",
@@ -304,6 +305,8 @@ export const nl: BuyerWords = {
   askTermsCut: () => "Ik heb de volledige voorwaarden hier niet. Vraag het de maker voordat je koopt.",
 
   noLongerOnSale: "Dit product is niet meer te koop.",
+  cardUnread: "Dit product kon nu niet worden geladen. Probeer het zo meteen opnieuw.",
+  cardBuyUnread: "Kopen is nu niet mogelijk. Probeer het zo meteen opnieuw.",
   seeStore: (store) => `Bekijk ${store}`,
   cardTestMode: "Testmodus: er wordt geen echte kaart belast.",
   cardCheckout: "Veilig betalen via Stripe, in een nieuw tabblad.",

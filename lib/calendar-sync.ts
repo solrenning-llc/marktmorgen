@@ -42,6 +42,8 @@ import { placeIcsLines, placeLine } from "@/lib/call-place";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { createHash, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { suppressedAmong, suppressedKey, suppressionPrint } from "@/lib/suppression";
 import { type Busy, isTimeZone, roomFor, seatsAt } from "@/lib/call-setup";
 import { SafeFetchError, checkUrl, problemWords, safeFetch } from "@/lib/safe-fetch";
@@ -168,10 +170,25 @@ function parseReading(raw: unknown): Reading | null {
   }
 }
 
+/**
+ * The store's calendar settings, or null only when Redis confirms there are none. Any other answer, or text that
+ * is not the object writeConfig stores (with its list of calendars), throws (rule 24): read as none, the rewrite
+ * that follows (ensureFeedToken, newFeedToken, addFeed) erased the creator's calendars.
+ */
 async function readConfig(store: Store): Promise<Config | null> {
   if (!store.statsId || !isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["GET", cfgKey(store.statsId)]]);
-  return parseConfig(raw);
+  const reply = repliesFor(await redisPipeline([["GET", cfgKey(store.statsId)]]), 1);
+  if (reply && reply[0] === null) return null;
+  const raw = reply?.[0];
+  let value: unknown;
+  try {
+    value = typeof raw === "string" ? JSON.parse(raw) : undefined;
+  } catch {
+    value = undefined;
+  }
+  const config = value && typeof value === "object" && !Array.isArray(value) && Array.isArray((value as { feeds?: unknown }).feeds) ? parseConfig(raw) : null;
+  if (!config) throw new UnknownReplyError("a store's calendar settings");
+  return config;
 }
 
 async function writeConfig(store: Store, config: Config): Promise<void> {
@@ -264,8 +281,9 @@ export async function calendarBusy(
       if (fresh) return fresh.busy;
       const good = cached ? parseReading(cached[i * 2 + 1]) : null;
       // Somebody else is reading it right now: the last good reading will do.
-      const [mine] = await redisPipeline([["SET", lockKey(feed.id), "1", "NX", "EX", 20]]).catch(() => [null]);
-      if (mine === null) return good?.busy ?? [];
+      // Read exactly (lib/claim-mark.ts, CX-123 rule 24): only a lock known to be this read's own reads the calendar.
+      const lock = claimValue();
+      if ((await claimMark(lockKey(feed.id), 20, lock)) !== "ours") return good?.busy ?? [];
       try {
         const reading = await readFeed(feed.url, fallbackTz, now, hooks);
         const text = JSON.stringify(reading);
@@ -286,7 +304,7 @@ export async function calendarBusy(
         ]).catch(() => {});
         return good?.busy ?? [];
       } finally {
-        await redisPipeline([["DEL", lockKey(feed.id)]]).catch(() => {});
+        await releaseMark(lockKey(feed.id), lock);
       }
     }),
   );

@@ -82,6 +82,19 @@ async function main(): Promise<void> {
   is("the agent's write: unknown hold", await PRODUCT_DESCRIPTION.write(store, OWNER, held, "New words for it.", ""), "terms");
   redis.pipeline = real;
 
+  part("A store with no list id gets one before its hold, so the hold's key never moves (LEVE 3)");
+  const OLD = "hold.old@example.com";
+  await claimHandle(OLD, "holdold", "Hold Old", "");
+  const oldMade = await addProduct(OLD, "reported-item-old", "", "19", null);
+  if (!oldMade.ok) throw new Error("no old product");
+  // An old store read before its list id was given (the record as the report read it).
+  const before = { ...(await storeForEmail(OLD))!, statsId: "" };
+  is("held", await holdReported({ kind: "child_safety", url: `${ORIGIN}/@holdold/p/${oldMade.product.id}` }, before), "held");
+  const after = (await ensureStatsId(OLD))!;
+  is("the store has a list id", Boolean(after.statsId), true);
+  is("the hold is read under that id", typeof (await descriptionRefusal(after, oldMade.product.id, "New words.")), "string");
+  is("no hold was written under the handle", (await redis.pipeline([["EXISTS", `nl:csa:keep:h:holdold:${oldMade.product.id}`]]))[0], 0);
+
   done();
 }
 

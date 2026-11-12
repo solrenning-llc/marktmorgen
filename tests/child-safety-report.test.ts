@@ -96,6 +96,8 @@ async function main(): Promise<void> {
   const alert = sent.at(-1);
   is("one urgent email to the support inbox", [sent.length, /^URGENT/.test(alert?.subject ?? "")], [1, true]);
   is("it says what was done and where", [alert?.text.includes(url), alert?.text.includes("taken off the store")], [true, true]);
+  // Claude 3's second review on #3471, LEVE 2: plan closing does not read the hold yet, so the email never promises more.
+  is("it says closing the store, or a plan ending, still deletes it, and to suspend the store instead", [alert?.text.includes("Closing the store, or its plan ending, still deletes"), alert?.text.includes("suspend the store")], [true, true]);
   is("it never quotes the reporter's description", alert?.text.includes(DESCRIPTION), false);
   is("it says not to open the content, and that no AI agent may look at it", [alert?.text.includes("Do not open, download, forward or describe"), alert?.text.includes("AI")], [true, true]);
   is("it names the CyberTipline and the procedure", [alert?.text.includes("NCMEC's CyberTipline (report.cybertip.org)"), alert?.text.includes("docs/incident-response.md")], [true, true]);

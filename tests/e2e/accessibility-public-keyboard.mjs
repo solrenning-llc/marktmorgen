@@ -1,5 +1,5 @@
 /** Native target reachability and fragment-center hit tests; not a complete keyboard audit. */
-export async function checkPublicKeyboardCycle({page,path,is}) {
+export async function checkPublicKeyboardCycle({page,path,is,onFocusSettled=undefined}) {
  await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
  const state=await page.evaluateHandle(()=>{
   const nodes=[...document.querySelectorAll("*")];
@@ -125,6 +125,7 @@ export async function checkPublicKeyboardCycle({page,path,is}) {
      await checkUnobscured(current.key);
      if(visited.has(current.key)){innerLoop=true;break;}
      visited.add(current.key);
+     await onFocusSettled?.({key:current.key,direction});
      await checkRadios(current);
      if(expected.every(key=>visited.has(key)))break;
     }

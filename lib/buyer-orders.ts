@@ -26,6 +26,7 @@ import { currentMeta } from "@/lib/tier-rules";
 import { packageState, readBought } from "@/lib/call-packages";
 import { giftFrom } from "@/lib/gifts";
 import { readPreorder, soonOne } from "@/lib/preorders";
+import { readPreorderJob } from "@/lib/preorder-rules";
 import { isGroupJob } from "@/lib/group-buy";
 import { saleHandles } from "@/lib/store";
 import { createHash, randomBytes } from "node:crypto";
@@ -33,6 +34,7 @@ import { after } from "next/server";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { StripeError, onAccount, platformKey } from "@/lib/stripe-account";
 import { isSettled } from "@/lib/instant-pay";
 import type { ProductFile } from "@/lib/product-file";
@@ -46,6 +48,7 @@ import type { CallSetup } from "@/lib/call-setup";
 import { type BumpKey, bumpsFromMeta, bundleFromMeta } from "@/lib/bundle-rules";
 import { IMPORTED_REFERENCE, type ImportedPurchase, importedFor, importedFrom, importedKey, importedReference } from "@/lib/imported-purchases";
 import { ordersWords } from "@/lib/buyer-words/orders";
+import { type KeptConsent, readConsentMeta } from "@/lib/digital-consent";
 import { takePublicRequest } from "@/lib/traffic";
 import {
   ORDERS_LINK_READ_MS,
@@ -94,6 +97,8 @@ export {
   ORDERS_OPEN_SECONDS,
   ORDERS_OPEN_UNITS,
   ORDERS_PREORDER_COMMANDS,
+  ORDERS_PROGRESS_COMMANDS,
+  ORDERS_PROGRESS_MS,
   ORDERS_READ_MS,
   ORDERS_ROOM_COMMANDS,
   ORDERS_UNIT_COMMANDS,
@@ -353,6 +358,19 @@ export type Purchase = {
   giftFrom?: string | null;
   /** A place in a purchase somebody made for several people (lib/group-buy.ts). */
   place?: boolean;
+  /**
+   * The buyer's yes to start during the cancellation period, as kept on the
+   * order (lib/digital-consent.ts, readConsentMeta), or null; read for the
+   * withdrawal function (lib/withdrawal-rules.ts, 588 [KB9]).
+   */
+  consent?: KeptConsent | null;
+  /**
+   * The order's confirmation email is known to have gone (its nl:confirm: mark read exactly "sent"), set only by
+   * lib/withdrawal.ts (withConfirmations) where the withdrawal function needs it; absent is not known.
+   */
+  confirmed?: boolean;
+  /** Shipped by the creator (the checkout's metadata ship=yes): its withdrawal period runs from a receipt not known here. */
+  shipped?: boolean;
   /** Paid for with PayPal, into the creator's own PayPal account (lib/paypal-sales.ts). */
   paidWith?: "paypal";
   /** Given by the creator's own tools, through the API (lib/api-write.ts): no payment, and not brought over either. */
@@ -368,6 +386,12 @@ export type Purchase = {
    * with that day when one is set, or handed over since.
    */
   preorder?: { day: string | null; given: boolean };
+  /**
+   * A pre-order handed over (job "pre:<checkout>"): the checkout it was paid at. The list names it by its brought-over
+   * reference, but the contract is the checkout's, so the withdrawal function keeps its record and names the order to the
+   * creator by it (lib/withdrawal.ts, withdrawalReference; Claude 5's F on #2827).
+   */
+  checkout?: string;
 };
 
 /**
@@ -562,6 +586,8 @@ async function checkoutsOf(store: Store, email: string, meter?: OrdersMeter): Pr
   for (const variant of variants) {
     const query = new URLSearchParams({ "customer_details[email]": variant, status: "complete", limit: "100" });
     query.append("expand[]", "data.subscription");
+    // Whether a past-due membership is still being retried is on its latest invoice (lib/membership-access.ts).
+    query.append("expand[]", "data.subscription.latest_invoice");
     query.append("expand[]", "data.payment_intent.latest_charge");
     meter?.alive();
     const listed = (await onAccount("GET", account, `/checkout/sessions?${query}`)) as Listed;
@@ -627,6 +653,8 @@ async function purchaseFromSession(
     return { customer: null, purchase: {
       reference: id,
       kind: "sale",
+      consent: readConsentMeta(meta),
+      shipped: meta.ship === "yes",
       title: product.title,
       option: null,
       paidAt: typeof session.created === "number" ? session.created : 0,
@@ -652,6 +680,8 @@ async function purchaseFromSession(
     return { customer: null, purchase: {
       reference: id,
       kind: "sale",
+      consent: readConsentMeta(meta),
+      shipped: meta.ship === "yes",
       title: ordersWords(store.language).packageTitle(product.title, bought.total),
       option: null,
       paidAt: typeof session.created === "number" ? session.created : 0,
@@ -679,6 +709,8 @@ async function purchaseFromSession(
       return { customer: null, purchase: {
         reference: id,
         kind: "sale",
+        consent: readConsentMeta(meta),
+        shipped: meta.ship === "yes",
         title: product.title,
         option: null,
         paidAt: typeof session.created === "number" ? session.created : 0,
@@ -713,6 +745,8 @@ async function purchaseFromSession(
   return { customer, purchase: {
     reference: id,
     kind: "sale",
+    consent: readConsentMeta(meta),
+    shipped: meta.ship === "yes",
     title: product.title,
     option,
     paidAt: typeof session.created === "number" ? session.created : 0,
@@ -771,6 +805,8 @@ async function purchaseFromIntent(store: Store, intent: Row, find: Finder, lines
   return {
     reference: id,
     kind: "upsell",
+    consent: readConsentMeta(meta),
+    shipped: meta.ship === "yes",
     title: product.title,
     option: null,
     paidAt: typeof intent.created === "number" ? intent.created : 0,
@@ -782,6 +818,27 @@ async function purchaseFromIntent(store: Store, intent: Row, find: Finder, lines
     items,
     added: [],
   };
+}
+
+/**
+ * A pre-order handed over (job "pre:<checkout>", with ":s" or ":d" since Claude 1's H on #2827): its checkout, when the
+ * job names one, and whether it is shipped, as its job says, or else read from its entry (one HGET, taken through the
+ * meter before it is made). Shipped unless the entry says exactly it is not:
+ * an entry written before the shipping was kept with it, a read that fails or no entry are not known, and its withdrawal
+ * function is then kept open with no end rather than closed on a guess (CX-123; Claude 5's G on #2827).
+ */
+async function handedOver(store: Store, productId: string, job: string, meter?: OrdersMeter): Promise<{ checkout: string | null; shipped: boolean }> {
+  const named = readPreorderJob(job);
+  if (!named || !SESSION_ID_PATTERN.test(named.checkout)) return { checkout: null, shipped: true };
+  const { checkout } = named;
+  // Said by the grant's own job, which never expires (Claude 1's H on #2827): no read, and an entry gone changes nothing.
+  if (named.ship !== null) return { checkout, shipped: named.ship };
+  await meter?.take(1);
+  const entry = await readPreorder(store, productId, checkout).catch((error) => {
+    console.error("a handed-over pre-order's entry could not be read", error);
+    return null;
+  });
+  return { checkout, shipped: entry?.ship !== false };
 }
 
 /** What one purchase brought over or given hands over again, or null: the list's reading and one download's. */
@@ -797,6 +854,8 @@ async function purchaseFromImported(store: Store, statsId: string, email: string
   if (!delivery && !courseProduct && !podcastProduct && !items) return null;
   // Who gave it is one read more.
   if (given.job.startsWith("gift:")) await meter?.take(1);
+  // A pre-order handed over: its checkout, and whether it is shipped, one read of its entry more (lib/preorders.ts).
+  const handed = given.job.startsWith("pre:") ? await handedOver(store, product.id, given.job, meter) : null;
   return {
     reference,
     kind: "imported",
@@ -805,6 +864,8 @@ async function purchaseFromImported(store: Store, statsId: string, email: string
     ...(given.job.startsWith("paypal:") ? { paidWith: "paypal" as const } : {}),
     ...(given.job.startsWith("api:") ? { givenByStore: true } : {}),
     ...(given.job.startsWith("pre:") ? { preorder: { day: null, given: true } } : {}),
+    ...(handed?.checkout ? { checkout: handed.checkout } : {}),
+    ...(handed?.shipped ? { shipped: true } : {}),
     podcastProduct,
     title: product.title,
     option,
@@ -953,20 +1014,37 @@ export async function purchasesFor(store: Store, email: string, meter?: OrdersMe
   return kept.slice(0, MAX_LISTED);
 }
 
-async function within(key: string, limit: number): Promise<boolean> {
-  const [, count] = await redisPipeline([
-    ["SET", key, "0", "EX", RATE_WINDOW_SECONDS, "NX"],
-    ["INCR", key],
-  ]);
-  return Number(count) <= limit;
+/** A whole number from one up after INCR, or null when the reply is not exactly that. */
+function incremented(reply: unknown): number | null {
+  const count = countOf(reply);
+  return count !== null && count >= 1 ? count : null;
+}
+
+/**
+ * Whether one more request fits in the hour: true or false on a count read in
+ * its exact shape, null when the answer is missing, cut short or of another
+ * shape, which is never taken as room (CX-123 rule 24).
+ */
+async function within(key: string, limit: number): Promise<boolean | null> {
+  const both = repliesFor(
+    await redisPipeline([
+      ["SET", key, "0", "EX", RATE_WINDOW_SECONDS, "NX"],
+      ["INCR", key],
+    ]),
+    2,
+  );
+  if (!both || (both[0] !== "OK" && both[0] !== null)) return null;
+  const count = incremented(both[1]);
+  return count === null ? null : count <= limit;
 }
 
 /** A name that can sit inside the quotes of an email's From line. */
-function displayName(name: string): string {
+export function displayName(name: string): string {
   return name.replace(/["\\<>\r\n]/g, "").trim().slice(0, 60) || "A store";
 }
 
-function senderAddress(): string {
+/** The address part of the sender (NIMBUS_FROM). */
+export function senderAddress(): string {
   const match = NIMBUS_FROM.match(/<([^>]+)>/);
   return (match ? match[1] : NIMBUS_FROM).trim();
 }
@@ -978,7 +1056,7 @@ type Grant = {
   e: string;
 };
 
-export type OrdersRequest = "sent" | "email" | "limited" | "busy" | "unavailable";
+export type OrdersRequest = "sent" | "email" | "limited" | "busy" | "unavailable" | "error";
 
 /**
  * Emails a way back to what the address bought here.
@@ -1019,8 +1097,14 @@ export async function requestOrdersLink(input: {
   const email = normaliseEmail(raw);
   if (!canRecover(store)) return "unavailable";
 
-  if (!(await within(ipKey(ip, store.handle), IP_LIMIT))) return "limited";
-  if (!(await within(addressKey(email), ADDRESS_LIMIT))) return "limited";
+  // A count that could not be read takes, reads and sends nothing, for every address alike, so saying so tells nobody
+  // who bought here; it is said as an error on our side, never as too many requests (CX-123 rule 24).
+  const byConnection = await within(ipKey(ip, store.handle), IP_LIMIT);
+  if (byConnection === null) return "error";
+  if (!byConnection) return "limited";
+  const byAddress = await within(addressKey(email), ADDRESS_LIMIT);
+  if (byAddress === null) return "error";
+  if (!byAddress) return "limited";
 
   if (!(await takePublicRequest(store, "buyer", Date.now(), ORDERS_OPEN_UNITS))) return "busy";
   // From here the answer is "sent" whatever happens, and at once: the reading, the grant and the email run after it,
@@ -1060,7 +1144,10 @@ async function sendLink(store: Store, raw: string, email: string, origin: string
   const token = randomBytes(32).toString("hex");
   // Kept as typed: Stripe matches the address as it was written at checkout.
   const grant: Grant = { a: grantAccount(store), e: raw };
-  await redisPipeline([["SET", tokenKey(token), JSON.stringify(grant), "EX", ORDERS_LINK_SECONDS]]);
+  // Only a SET answered exactly "OK" is a grant (CX-123 rule 24): any other reply emails nothing and takes no store
+  // email, and afterAnswer logs it; whoever asked was already answered "sent", so it tells them nothing.
+  const written = repliesFor(await redisPipeline([["SET", tokenKey(token), JSON.stringify(grant), "EX", ORDERS_LINK_SECONDS]]), 1);
+  if (!written || written[0] !== "OK") throw new UnknownReplyError("a purchases link's grant");
 
   const name = store.name;
   // Only what was checked is counted; the rest is said as older purchases not checked yet, never as bought for certain.
@@ -1104,28 +1191,74 @@ export function chargedLine(
 /**
  * A link to the list of purchases for one address, made without asking:
  * for someone who was just given something (lib/gifts.ts), whose email is
- * the proof. Null when this store's purchases cannot be listed.
+ * the proof. Null when this store's purchases cannot be listed, and when
+ * the grant's write is not confirmed.
+ *
+ * Only a SET answered exactly "OK" makes the link (CX-123 rule 24). Any
+ * other reply, or Redis throwing, answers null rather than throwing: every
+ * caller already reads null as "use the generic orders link". The purchase,
+ * gift, place and pre-order emails (lib/gifts.ts, lib/group-buy.ts,
+ * lib/paypal-sales.ts, lib/preorders.ts) ask for this link after the
+ * purchase is recorded and given, so a throw would lose the email that
+ * delivers it (and, for PayPal, the order's count); null still sends it,
+ * with the generic link, which works. An unconfirmed grant is never
+ * returned as a working link.
  */
 export async function ordersLinkFor(store: Store, email: string, base: string): Promise<string | null> {
   if (!isRedisConfigured()) return null;
   const token = randomBytes(32).toString("hex");
   const grant: Grant = { a: grantAccount(store), e: normaliseEmail(email) };
-  await redisPipeline([["SET", tokenKey(token), JSON.stringify(grant), "EX", ORDERS_LINK_SECONDS]]);
+  let written: unknown[] | null = null;
+  try {
+    written = repliesFor(await redisPipeline([["SET", tokenKey(token), JSON.stringify(grant), "EX", ORDERS_LINK_SECONDS]]), 1);
+  } catch (error) {
+    console.error("a purchases link's grant could not be written; the generic orders link is used", error);
+    return null;
+  }
+  if (!written || written[0] !== "OK") {
+    console.error("a purchases link's grant was not confirmed; the generic orders link is used");
+    return null;
+  }
   return `${base}/orders?token=${token}`;
 }
 
-/** The address a live link was issued to, for this store only. */
+/**
+ * The address a live link was issued to, for this store only.
+ *
+ * Only the exact shape the grant was written in counts (Codex K2, CX-123
+ * rule 24): one reply for the one GET, from the list's own slot; a record
+ * that is exactly `{"a":…,"e":…}` as JSON.stringify wrote it, so an extra
+ * field, a duplicated member or any other spelling is unknown; and an
+ * address the request form itself would accept. Anything else, like an
+ * exact null (expired), grants nothing and never returns an address.
+ */
 export async function ordersGrant(store: Store, token: string): Promise<string | null> {
   if (!ORDERS_TOKEN_PATTERN.test(token) || !isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["GET", tokenKey(token)]]);
+  const replies = repliesFor(await redisPipeline([["GET", tokenKey(token)]]), 1);
+  const raw = replies?.[0];
   if (typeof raw !== "string" || !raw) return null;
+  return grantFrom(raw, grantAccount(store));
+}
+
+/** The address in a grant record written exactly as `Grant` for this account, or null. */
+function grantFrom(raw: string, account: string): string | null {
+  let grant: unknown;
   try {
-    const grant = JSON.parse(raw) as Partial<Grant>;
-    if (grant.a !== grantAccount(store) || typeof grant.e !== "string" || !grant.e) return null;
-    return grant.e;
+    grant = JSON.parse(raw);
   } catch {
     return null;
   }
+  if (!grant || typeof grant !== "object" || Array.isArray(grant)) return null;
+  const keys = Object.keys(grant);
+  if (keys.length !== 2 || !Object.hasOwn(grant, "a") || !Object.hasOwn(grant, "e")) return null;
+  const { a, e } = grant as Record<string, unknown>;
+  if (typeof a !== "string" || typeof e !== "string") return null;
+  // A duplicated member parses as its last value; the record's own text is
+  // then not what writing that value gives, so it is refused as unknown.
+  const exact: Grant = { a, e };
+  if (JSON.stringify(exact) !== raw) return null;
+  if (a !== account || !e || e.length > MAX_EMAIL_LENGTH || !EMAIL_PATTERN.test(e)) return null;
+  return e;
 }
 
 /**
@@ -1161,7 +1294,7 @@ export async function findPurchase(
   token: string,
   reference: string,
   want: DownloadWant = {},
-): Promise<{ purchase: Purchase; email: string; listing: (id: string) => Promise<Listing | null> } | null> {
+): Promise<{ purchase: Purchase; email: string; listing: (id: string) => Promise<Listing | null>; meter: OrdersMeter } | null> {
   const kind = referenceKind(reference);
   if (!kind || !ORDERS_TOKEN_PATTERN.test(token)) return null;
   // The grant is one read, paid by the download's own request: a link that opens nothing takes nothing more.
@@ -1171,7 +1304,9 @@ export async function findPurchase(
   const meter = new OrdersMeter(store);
   const found = await withinOpening(lookUp(store, email, kind, reference, meter, want), meter, DOWNLOAD_LOOKUP_MS);
   if (found === "late") throw new OrdersLate();
-  return found;
+  // The lookup's meter goes with what it found, so a caller's further reads of it (the withdrawal function's
+  // confirmation mark, lib/withdrawal.ts) are taken from it before they are made, as the lookup's own were.
+  return found && { ...found, meter };
 }
 
 /** A customer waiting in a batch's address, with how many of its payments taken in one click were shown before. */
@@ -1376,6 +1511,7 @@ async function readOne(store: Store, path: string, meter: OrdersMeter): Promise<
 async function sessionOf(store: Store, email: string, id: string, meter: OrdersMeter): Promise<Row | null> {
   const query = new URLSearchParams();
   query.append("expand[]", "subscription");
+  query.append("expand[]", "subscription.latest_invoice");
   query.append("expand[]", "payment_intent.latest_charge");
   const session = await readOne(store, `/checkout/sessions/${encodeURIComponent(id)}?${query}`, meter);
   if (!session || session.status !== "complete") return null;

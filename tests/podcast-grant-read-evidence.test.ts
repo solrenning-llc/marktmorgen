@@ -16,8 +16,13 @@ async function refuses(reply: unknown[]) {
   assert.equal(calls.length, 1);
 }
 
-test("extra pipeline result is unknown, not a confirmed feed grant", () =>
-  refuses([JSON.stringify(grant), null]));
+// Main's reading (podcast-access-exact): a reply in an unknown shape throws UnknownReplyError, so the feed answers a
+// server error its app asks again after, never a 404 or a grant.
+test("extra pipeline result is unknown, not a confirmed feed grant", async () => {
+  reset([JSON.stringify(grant), null]);
+  await assert.rejects(readFeedToken(token), { name: "UnknownReplyError" });
+  assert.equal(calls.length, 1);
+});
 
 for (const [name, row] of [
   ["missing handle", { s: grant.s, p: grant.p, e: grant.e }],

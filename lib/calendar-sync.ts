@@ -42,6 +42,8 @@ import { placeIcsLines, placeLine } from "@/lib/call-place";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { createHash, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { suppressedAmong, suppressedKey, suppressionPrint } from "@/lib/suppression";
 import { type Busy, isTimeZone, roomFor, seatsAt } from "@/lib/call-setup";
 import { SafeFetchError, checkUrl, problemWords, safeFetch } from "@/lib/safe-fetch";
@@ -168,10 +170,25 @@ function parseReading(raw: unknown): Reading | null {
   }
 }
 
+/**
+ * The store's calendar settings, or null only when Redis confirms there are none. Any other answer, or text that
+ * is not the object writeConfig stores (with its list of calendars), throws (rule 24): read as none, the rewrite
+ * that follows (ensureFeedToken, newFeedToken, addFeed) erased the creator's calendars.
+ */
 async function readConfig(store: Store): Promise<Config | null> {
   if (!store.statsId || !isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["GET", cfgKey(store.statsId)]]);
-  return parseConfig(raw);
+  const reply = repliesFor(await redisPipeline([["GET", cfgKey(store.statsId)]]), 1);
+  if (reply && reply[0] === null) return null;
+  const raw = reply?.[0];
+  let value: unknown;
+  try {
+    value = typeof raw === "string" ? JSON.parse(raw) : undefined;
+  } catch {
+    value = undefined;
+  }
+  const config = value && typeof value === "object" && !Array.isArray(value) && Array.isArray((value as { feeds?: unknown }).feeds) ? parseConfig(raw) : null;
+  if (!config) throw new UnknownReplyError("a store's calendar settings");
+  return config;
 }
 
 async function writeConfig(store: Store, config: Config): Promise<void> {
@@ -194,11 +211,13 @@ export function providerOf(url: string): string {
   } catch {
     return "Calendar";
   }
+  // The domain itself or a name under it: "evilicloud.com" is not iCloud.
+  const on = (domain: string) => host === domain || host.endsWith(`.${domain}`);
   if (host === "calendar.google.com" || host.endsWith(".google.com")) return "Google Calendar";
-  if (host.endsWith("outlook.office365.com") || host.endsWith("outlook.live.com") || host.endsWith("outlook.office.com")) return "Outlook";
-  if (host.endsWith("icloud.com")) return "iCloud";
-  if (host.endsWith("fastmail.com")) return "Fastmail";
-  if (host.endsWith("calendly.com")) return "Calendly";
+  if (on("outlook.office365.com") || on("outlook.live.com") || on("outlook.office.com")) return "Outlook";
+  if (on("icloud.com")) return "iCloud";
+  if (on("fastmail.com")) return "Fastmail";
+  if (on("calendly.com")) return "Calendly";
   return host.replace(/^www\./, "");
 }
 
@@ -262,8 +281,9 @@ export async function calendarBusy(
       if (fresh) return fresh.busy;
       const good = cached ? parseReading(cached[i * 2 + 1]) : null;
       // Somebody else is reading it right now: the last good reading will do.
-      const [mine] = await redisPipeline([["SET", lockKey(feed.id), "1", "NX", "EX", 20]]).catch(() => [null]);
-      if (mine === null) return good?.busy ?? [];
+      // Read exactly (lib/claim-mark.ts, CX-123 rule 24): only a lock known to be this read's own reads the calendar.
+      const lock = claimValue();
+      if ((await claimMark(lockKey(feed.id), 20, lock)) !== "ours") return good?.busy ?? [];
       try {
         const reading = await readFeed(feed.url, fallbackTz, now, hooks);
         const text = JSON.stringify(reading);
@@ -284,7 +304,7 @@ export async function calendarBusy(
         ]).catch(() => {});
         return good?.busy ?? [];
       } finally {
-        await redisPipeline([["DEL", lockKey(feed.id)]]).catch(() => {});
+        await releaseMark(lockKey(feed.id), lock);
       }
     }),
   );
@@ -825,13 +845,20 @@ export async function bookedCalendarFeed(owner: { statsId: string; handle: strin
   // so: the copy carried both from its first release) or one made before the owner's account moved (lib/store.ts,
   // moveAccount: the handle then leads to the new address) is set aside once and made again.
   const copy = kept.copy && kept.copy.ref === ref && kept.copy.sid === owner.statsId ? kept.copy : null;
-  const changed = Number(changedRaw) || 0;
+  // A count is read only in its own shape: digits (a counter INCR wrote), or nothing for one not taken yet. Any
+  // other answer is unknown, never a number below a ceiling (rule 24 audit of Claude 4, C4-20261105-2000-C3-2).
+  const countOf = (raw: unknown): number | null => {
+    if (raw === null) return 0;
+    if (typeof raw !== "string" || !/^\d{1,15}$/.test(raw)) return null;
+    return Number(raw);
+  };
+  const changed = countOf(changedRaw) ?? 0;
   const changedSince = copy !== null && changed > copy.at;
   const fresh = copy !== null && !changedSince && now - copy.at < CALENDAR_REFRESH_SECONDS * 1000;
   if (fresh) return { state: "copy", ics: copy.ics };
   // A booking made, moved or let go since the copy: one of the day's credits, which bookings give, up to
   // CALENDAR_CREDITS_PER_DAY. Otherwise (or with none left) one of the day's own CALENDAR_BUILDS_PER_DAY.
-  const credits = Math.min(Number(creditsRaw) || 0, CALENDAR_CREDITS_PER_DAY);
+  const credits = Math.min(countOf(creditsRaw) ?? 0, CALENDAR_CREDITS_PER_DAY);
   const creditKey = creditsUsedKey(owner.statsId, day);
   const ownKey = buildsKey(owner.statsId, day);
   const attemptsKey = calendarAttemptsKey(owner.statsId, day);
@@ -839,7 +866,11 @@ export async function bookedCalendarFeed(owner: { statsId: string; handle: strin
   // No making left by the counts just read: the copy, with no count taken (an answer's priced shape has none). Only
   // at the moment the day's last try is taken can an answer read room and lose the take (its SET NX, INCRBY, EXPIRE
   // NX and DECRBY): once a day, a few commands, inside the making's own shape (CALENDAR_BUILD_SHAPE counts 4 for it).
-  const roomFor = (used: unknown, ceiling: number) => (Number(used) || 0) < ceiling;
+  // An unknown count is no room: nothing is made (the copy, or nothing).
+  const roomFor = (used: unknown, ceiling: number) => {
+    const count = countOf(used);
+    return count !== null && count < ceiling;
+  };
   if (!roomFor(attemptsRaw, tries) || !((changedSince && roomFor(creditsUsedRaw, credits)) || roomFor(ownRaw, CALENDAR_BUILDS_PER_DAY))) {
     return copy ? { state: "copy", ics: copy.ics } : { state: "none" };
   }

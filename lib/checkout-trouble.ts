@@ -25,6 +25,7 @@
 import { type Store } from "@/lib/store";
 import { StripeError } from "@/lib/stripe-account";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { SITE_URL } from "@/lib/site-url";
 
@@ -56,8 +57,10 @@ export async function noteCheckoutTrouble(store: Store, error: unknown, now = Da
     ["EXPIRE", key(store.statsId), KEEP_SECONDS],
   ]);
   if (!isRefusal(error) || !isSenderConfigured()) return "counted";
-  const [claimed] = await redisPipeline([["SET", mailKey(store.statsId, day), "1", "NX", "EX", 2 * 86_400]]);
-  if (claimed === null) return "counted";
+  // The day's email is ours only on an exact claim (lib/claim-mark.ts), and a failed send lets go of our own
+  // mark only: one that ran out and was taken by another run stays.
+  const mark = claimValue(now);
+  if ((await claimMark(mailKey(store.statsId, day), 2 * 86_400, mark)) !== "ours") return "counted";
   const sent = await sendEmail({ meter: { by: "store", store: store, kind: "email" },
     from: NIMBUS_FROM,
     to: store.email,
@@ -78,7 +81,7 @@ export async function noteCheckoutTrouble(store: Store, error: unknown, now = Da
     ].join("\n"),
   }).catch(() => false);
   // Not sent: the day's claim is let go, so the next refusal tries again.
-  if (!sent) await redisPipeline([["DEL", mailKey(store.statsId, day)]]).catch(() => undefined);
+  if (!sent) await releaseMark(mailKey(store.statsId, day), mark);
   return sent ? "emailed" : "counted";
 }
 

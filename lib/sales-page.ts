@@ -136,7 +136,7 @@ export const BLOCK_KINDS: { kind: BlockKind; label: string; hint: string }[] = [
   { kind: "form", label: "Form", hint: "One of your forms, surveys or quizzes, made under Forms: the questions, and where the answers lead. On your own pages." },
   // On a product's page only: not in SITE_KINDS (lib/site-page-rules.ts) nor in a saved section (lib/saved-blocks.ts, NOT_IN_SECTIONS).
   { kind: "row", label: "Columns", hint: "One to three columns side by side, each with headings, words, a list, icons, buttons, pictures or a video. One column on a phone." },
-  // On a product's page only, for now: not in SITE_KINDS (lib/site-page-rules.ts), so a store page's menu leaves their group out.
+  // On a product's page and a store's own pages (SITE_KINDS, lib/site-page-rules.ts).
   { kind: "divider", label: "Divider", hint: "A thin line across the page, between two parts. Nothing to write." },
   { kind: "space", label: "Space", hint: "Extra empty room between two parts of the page, on top of the usual gap: small, medium or large. Nothing to write." },
 ];

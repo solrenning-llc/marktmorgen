@@ -43,6 +43,10 @@ const en = {
       title: "Something went wrong on our side",
       body: "Nothing was changed. Try again in a moment.",
     },
+    unconfirmed: {
+      title: "We could not confirm the switch",
+      body: "Stripe's answer did not say whether it went through. Look at your membership below before you try again: it shows the plan you are on now.",
+    },
     expired: {
       title: "This link has expired",
       body: "A link to your membership works for one hour. Ask for a new one below; it takes a few seconds.",
@@ -225,6 +229,8 @@ const en = {
     unavailable: "This offer cannot be used for this membership any more. You can still come back at the usual price below, if it is offered.",
     refused: "The offer could not be applied just now. You can come back at the usual price below, or reply to the email it came in.",
     limited: "Too many tries for now. Wait a few minutes and press the button again.",
+    /** The link could not be checked just now (CX-123 rule 24): never said as an offer that ended. */
+    unknown: "We could not check this offer right now. Nothing was charged. Please try again in a moment.",
   } as Record<string, string>,
   membershipLabel: "Membership",
   endedBody: (title: string) =>
@@ -399,6 +405,10 @@ const es: MembershipWords = {
     error: {
       title: "Algo salió mal por nuestra parte",
       body: "No se cambió nada. Vuelve a intentarlo en un momento.",
+    },
+    unconfirmed: {
+      title: "No pudimos confirmar el cambio",
+      body: "La respuesta de Stripe no dijo si se hizo. Mira tu membresía abajo antes de intentarlo de nuevo: muestra el plan que tienes ahora.",
     },
     expired: {
       title: "Este enlace ha expirado",
@@ -581,6 +591,7 @@ const es: MembershipWords = {
     unavailable: "Esta oferta ya no se puede usar para esta membresía. Todavía puedes volver al precio habitual, abajo, si se ofrece.",
     refused: "No se pudo aplicar la oferta en este momento. Puedes volver al precio habitual, abajo, o responder al email en el que llegó.",
     limited: "Demasiados intentos por ahora. Espera unos minutos y vuelve a pulsar el botón.",
+    unknown: "No pudimos comprobar esta oferta en este momento. No se cobró nada. Vuelve a intentarlo en un momento.",
   },
   membershipLabel: "Membresía",
   endedBody: (title) =>
@@ -741,6 +752,10 @@ const fr: MembershipWords = {
     error: {
       title: "Un problème est survenu de notre côté",
       body: "Rien n'a été modifié. Réessayez dans un instant.",
+    },
+    unconfirmed: {
+      title: "Nous n'avons pas pu confirmer le changement",
+      body: `La réponse de Stripe ne disait pas s'il a été fait. Regardez votre abonnement ci-dessous avant de réessayer${S}: il montre la formule que vous avez maintenant.`,
     },
     expired: {
       title: "Ce lien a expiré",
@@ -931,6 +946,7 @@ const fr: MembershipWords = {
     unavailable: "Cette offre ne peut plus être utilisée pour cet abonnement. Vous pouvez toujours revenir au prix habituel ci-dessous, s'il est proposé.",
     refused: "L'offre n'a pas pu être appliquée pour le moment. Vous pouvez revenir au prix habituel ci-dessous, ou répondre à l'e-mail dans lequel elle est arrivée.",
     limited: "Trop de tentatives pour le moment. Attendez quelques minutes et appuyez à nouveau sur le bouton.",
+    unknown: "Nous n'avons pas pu vérifier cette offre pour le moment. Rien n'a été débité. Réessayez dans un instant.",
   },
   membershipLabel: "Abonnement",
   endedBody: (title) =>
@@ -1093,6 +1109,10 @@ const de: MembershipWords = {
     error: {
       title: "Bei uns ist etwas schiefgelaufen",
       body: "Es wurde nichts geändert. Versuchen Sie es gleich noch einmal.",
+    },
+    unconfirmed: {
+      title: "Wir konnten den Wechsel nicht bestätigen",
+      body: "Die Antwort von Stripe sagte nicht, ob er durchging. Sehen Sie sich Ihre Mitgliedschaft unten an, bevor Sie es noch einmal versuchen: Dort steht Ihr aktueller Tarif.",
     },
     expired: {
       title: "Dieser Link ist abgelaufen",
@@ -1288,6 +1308,7 @@ const de: MembershipWords = {
     refused:
       "Das Angebot konnte gerade nicht angewendet werden. Sie können unten zum normalen Preis zurückkehren oder auf die E-Mail antworten, mit der es kam.",
     limited: "Vorerst zu viele Versuche. Warten Sie ein paar Minuten und drücken Sie die Schaltfläche erneut.",
+    unknown: "Wir konnten dieses Angebot gerade nicht prüfen. Es wurde nichts berechnet. Versuchen Sie es gleich noch einmal.",
   },
   membershipLabel: "Mitgliedschaft",
   endedBody: (title) =>
@@ -1456,6 +1477,10 @@ const it: MembershipWords = {
     error: {
       title: "Qualcosa è andato storto da parte nostra",
       body: "Non è stato modificato nulla. Riprova tra un momento.",
+    },
+    unconfirmed: {
+      title: "Non abbiamo potuto confermare il cambio",
+      body: "La risposta di Stripe non diceva se è andato a buon fine. Guarda la tua iscrizione qui sotto prima di riprovare: mostra il piano che hai adesso.",
     },
     expired: {
       title: "Questo link è scaduto",
@@ -1642,6 +1667,7 @@ const it: MembershipWords = {
     unavailable: "Questa offerta non può più essere usata per questo abbonamento. Puoi comunque tornare al prezzo normale qui sotto, se è offerto.",
     refused: "Non è stato possibile applicare l'offerta in questo momento. Puoi tornare al prezzo normale qui sotto, o rispondere all'email con cui è arrivata.",
     limited: "Troppi tentativi per ora. Aspetta qualche minuto e premi di nuovo il pulsante.",
+    unknown: "Non è stato possibile verificare questa offerta in questo momento. Non è stato addebitato nulla. Riprova tra un momento.",
   },
   membershipLabel: "Abbonamento",
   endedBody: (title) =>
@@ -1804,6 +1830,10 @@ const nl: MembershipWords = {
     error: {
       title: "Er ging bij ons iets mis",
       body: "Er is niets gewijzigd. Probeer het zo opnieuw.",
+    },
+    unconfirmed: {
+      title: "We konden de wissel niet bevestigen",
+      body: "Het antwoord van Stripe zei niet of die gelukt is. Kijk hieronder naar je lidmaatschap voordat je het opnieuw probeert: daar staat het abonnement dat je nu hebt.",
     },
     expired: {
       title: "Deze link is verlopen",
@@ -1989,6 +2019,7 @@ const nl: MembershipWords = {
     unavailable: "Dit aanbod kan niet meer voor dit lidmaatschap worden gebruikt. Je kunt hieronder nog steeds terugkomen tegen de gewone prijs, als die wordt aangeboden.",
     refused: "Het aanbod kon nu niet worden toegepast. Je kunt hieronder terugkomen tegen de gewone prijs, of de e-mail beantwoorden waarin het kwam.",
     limited: "Even te veel pogingen. Wacht een paar minuten en druk dan opnieuw op de knop.",
+    unknown: "We konden dit aanbod nu niet controleren. Er is niets afgeschreven. Probeer het zo meteen opnieuw.",
   },
   membershipLabel: "Lidmaatschap",
   endedBody: (title) =>
@@ -2149,6 +2180,10 @@ const pt: MembershipWords = {
     error: {
       title: "Algo correu mal do nosso lado",
       body: "Nada foi alterado. Tente novamente daqui a pouco.",
+    },
+    unconfirmed: {
+      title: "Não conseguimos confirmar a mudança",
+      body: "A resposta do Stripe não disse se ela foi feita. Veja a sua subscrição abaixo antes de tentar de novo: mostra o plano que tem agora.",
     },
     expired: {
       title: "Esta ligação expirou",
@@ -2334,6 +2369,7 @@ const pt: MembershipWords = {
     unavailable: "Esta oferta já não pode ser usada nesta subscrição. Ainda pode voltar ao preço habitual, abaixo, se estiver disponível.",
     refused: "Não foi possível aplicar a oferta neste momento. Pode voltar ao preço habitual, abaixo, ou responder ao email em que ela chegou.",
     limited: "Demasiadas tentativas por agora. Aguarde alguns minutos e carregue novamente no botão.",
+    unknown: "Não foi possível verificar esta oferta neste momento. Não foi cobrado nada. Tente novamente daqui a pouco.",
   },
   membershipLabel: "Subscrição",
   endedBody: (title) =>

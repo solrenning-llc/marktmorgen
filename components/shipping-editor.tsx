@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "@/components/toast";
 import type { Product } from "@/lib/store";
@@ -11,6 +11,10 @@ import { MAX_SHIP_NOTE, MAX_SHIPPING_SKU, SHIP_REGIONS, type ShipRegion, readCou
 import { confirmsShipping } from "@/lib/shipping-confirmation";
 
 const UNKNOWN_SAVE = "Shipping was not confirmed. Reload to check its status before trying again.";
+
+const subscribeReady = () => () => {};
+const clientReady = () => true;
+const serverReady = () => false;
 
 const MESSAGES: Record<string, string> = {
   ship_sku: "Use up to 64 characters for the inventory reference, without line breaks or control characters.",
@@ -40,6 +44,7 @@ const REGIONS: { id: ShipRegion; label: string }[] = [
 export function ShippingEditor({ product }: { product: Product }) {
   const router = useRouter();
   const currency = useStoreCurrency();
+  const ready = useSyncExternalStore(subscribeReady, clientReady, serverReady);
   const current = product.shipping ?? null;
   const [open, setOpen] = useState(false);
   const [price, setPrice] = useState(current ? (current.cents ? moneyField(current.cents, currency) : "0") : "");
@@ -89,13 +94,45 @@ export function ShippingEditor({ product }: { product: Product }) {
             </span>
             {current.sku ? <span className="ml-2 break-all">{`SKU: ${current.sku}`}</span> : null}
             {" · "}
-            <button type="button" className={link} disabled={busy} onClick={() => setOpen(true)}>Change</button>
+            <button
+              type="button"
+              className={link}
+              aria-disabled={ready ? undefined : true}
+              disabled={!ready || busy}
+              onClick={() => {
+                if (!ready) return;
+                setOpen(true);
+              }}
+            >
+              {ready ? "Change" : "Change — Loading…"}
+            </button>
             {" · "}
-            <button type="button" className={link} aria-busy={busy} disabled={busy} onClick={() => send(null, "It is no longer shipped.")}>Stop shipping it</button>
+            <button
+              type="button"
+              className={link}
+              aria-busy={busy}
+              aria-disabled={ready ? undefined : true}
+              disabled={!ready || busy}
+              onClick={() => {
+                if (!ready) return;
+                send(null, "It is no longer shipped.");
+              }}
+            >
+              {ready ? "Stop shipping it" : "Stop shipping it — Loading…"}
+            </button>
           </p>
         ) : (
-          <button type="button" className={`block ${link}`} onClick={() => setOpen(true)}>
-            Ship it: a physical product, sent by you
+          <button
+            type="button"
+            className={`block ${link}`}
+            aria-disabled={ready ? undefined : true}
+            disabled={!ready}
+            onClick={() => {
+              if (!ready) return;
+              setOpen(true);
+            }}
+          >
+            {ready ? "Ship it: a physical product, sent by you" : "Ship it: a physical product, sent by you — Loading…"}
           </button>
         )}
         {error ? <p className="notice notice-error mt-2" role="alert">{error}</p> : null}

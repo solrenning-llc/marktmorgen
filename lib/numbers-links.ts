@@ -22,8 +22,9 @@
  *   nl:nlink:<id>              the store it belongs to, until it ends
  *   nl:nlink:opens:<id>:<day>  how many times it opened that day
  */
-import { createHmac, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
+import { createHmac, randomBytes, randomInt, scryptSync, timingSafeEqual } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { deriveKey } from "@/lib/secret-box";
 
 export type NumbersLink = {
@@ -88,7 +89,8 @@ export function makeLink(input: { label: unknown; password: unknown; days: unkno
   const days = Number(input.days);
   if (!(LINK_DAYS as readonly number[]).includes(days)) return { ok: false, reason: "days" };
   const salt = randomBytes(16).toString("hex");
-  const id = Array.from(randomBytes(20), (b) => "abcdefghijklmnopqrstuvwxyz0123456789"[b % 36]).join("");
+  // randomInt draws each letter evenly; a byte taken modulo 36 would favour the first four.
+  const id = Array.from({ length: 20 }, () => "abcdefghijklmnopqrstuvwxyz0123456789"[randomInt(36)]).join("");
   const made = Math.floor(now / 1000);
   return { ok: true, link: { id, label, expires: made + days * 86_400, made, money: input.money === true, salt, hash: hashOf(password, salt) } };
 }
@@ -138,13 +140,19 @@ export async function unindexLink(id: string): Promise<void> {
 /** The store a link belongs to, or null when it has ended or was taken back. */
 export async function linkStore(id: string): Promise<string | null> {
   if (!LINK_ID.test(id) || !isRedisConfigured()) return null;
-  const [sid] = await redisPipeline([["GET", indexKey(id)]]);
-  return typeof sid === "string" && sid ? sid : null;
+  // Only a link that is not there finds nothing; any other reply is unknown and throws (rule 24), never "ended".
+  const replies = repliesFor(await redisPipeline([["GET", indexKey(id)]]), 1);
+  const sid = replies ? replies[0] : undefined;
+  if (sid === null) return null;
+  if (typeof sid !== "string" || !sid) throw new UnknownReplyError("a numbers link's store");
+  return sid;
 }
 
 /** Counts one opening; false once the day's openings are used. */
 export async function countOpen(id: string, now: number): Promise<boolean> {
   const day = new Date(now).toISOString().slice(0, 10);
-  const [n] = await redisPipeline([["INCR", opensKey(id, day)], ["EXPIRE", opensKey(id, day), 2 * 86_400]]);
-  return Number(n) <= OPENS_PER_DAY;
+  // A count in any other shape is unknown and throws (rule 24), never "opened too many times".
+  const n = countOf(repliesFor(await redisPipeline([["INCR", opensKey(id, day)], ["EXPIRE", opensKey(id, day), 2 * 86_400]]), 2)?.[0]);
+  if (n === null) throw new UnknownReplyError("a numbers link's openings");
+  return n <= OPENS_PER_DAY;
 }

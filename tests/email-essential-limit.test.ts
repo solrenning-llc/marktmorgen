@@ -27,9 +27,11 @@ const expected = new Map<string, string[]>([
 part("SG2(17): unknown email counters refuse before work or delivery");
 for (const [file, scopes] of expected) {
   const source = read(file);
-  is(`${file} imports the fail-closed allowance`, /\bwithinEssentialLimit\b/.test(source), true);
+  is(`${file} imports the fail-closed allowance`, /\b(?:withinEssentialLimit|essentialLimitState)\b/.test(source), true);
   for (const scope of scopes) {
-    const strict = new RegExp(`withinEssentialLimit\\(\\s*[\"']${scope}[\"']`);
+    // Either fail-closed helper; essentialLimitState also tells "limited" from "error"
+    // (email-essential-limit-behaviour.test.ts runs that).
+    const strict = new RegExp(`(?:withinEssentialLimit|essentialLimitState)\\(\\s*[\"']${scope}[\"']`);
     const permissive = new RegExp(`withinLimit\\(\\s*[\"']${scope}[\"']`);
     is(`${file}: ${scope} refuses unknown evidence`, [strict.test(source), permissive.test(source)], [true, false]);
   }

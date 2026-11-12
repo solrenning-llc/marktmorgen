@@ -21,6 +21,7 @@ export { ADD_ON_MARK, isAddOn } from "@/lib/billing";
 import { standingOf } from "@/lib/plan-standing";
 import { CUSTOMER_PATTERN, SUBSCRIPTION_PATTERN, type Store, setAssistantPlan, storeForHandle, storeRef } from "@/lib/store";
 import { ASSISTANT_NAME, ASSISTANT_PRICE_CENTS, type AssistantPlan } from "@/lib/store-assistant-rules";
+import { StripeListUnreadable, hasOwnField, ownField, plainObject, readStripePage } from "@/lib/stripe-list";
 
 export const ASSISTANT_PRODUCT_ID = "nimbus_labs_store_assistant";
 export const ASSISTANT_LOOKUP_KEY = "nimbus_assistant_month";
@@ -29,6 +30,28 @@ const SESSION_PATTERN = /^cs_(test|live)_[A-Za-z0-9]{10,200}$/;
 /** The version invoices are read at, where a paid invoice names its charge (lib/billing.ts, CHARGE_VERSION). */
 const INVOICE_VERSION = "2024-06-20";
 const CHECKOUT_VERSION = "2025-09-30.clover";
+
+/**
+ * A Stripe reply decides only when it is the object asked for (rule 30): it holds its own id, equal to the one
+ * requested. A reply for another object, or with no id, says nothing about this add-on. A reply that is not an object at all (an HTTP 200 whose JSON body is `null`) is not this object either: it never
+ * throws here.
+ */
+const isOwnReply = (reply: unknown, id: string): boolean =>
+  reply !== null && typeof reply === "object" && Object.hasOwn(reply, "id") && (reply as { id?: unknown }).id === id;
+
+/** Thrown on a reply that is not the object asked for: nothing is decided on it, and the next pass reads again. */
+class NotOwnReply extends Error {
+  constructor(id: string) {
+    super(`Stripe's reply was not the object asked for (${id})`);
+  }
+}
+
+/** The add-on's subscription as Stripe has it, read by its id; throws NotOwnReply on a reply for anything else. */
+async function readSubscription(id: string): Promise<Record<string, unknown>> {
+  const reply = await onPlatform("GET", `/subscriptions/${encodeURIComponent(id)}`);
+  if (!isOwnReply(reply, id)) throw new NotOwnReply(id);
+  return reply;
+}
 
 /** Why a store may not buy the add-on now, or null when it may. */
 export function assistantRefusal(store: Store, nowSeconds = Date.now() / 1000): "plan" | "already" | "disputed" | "customer" | null {
@@ -126,22 +149,39 @@ export async function readAssistantReturn(store: Store, sessionId: string | unde
     if (error instanceof BillingError && error.status === 404) return null;
     throw error;
   }
+  // Another page's reply, or one with no id, grants nothing: the return says "unconfirmed", and the daily job
+  // (billing-sync) reads the add-on again from Stripe's list.
+  if (!isOwnReply(session, sessionId)) throw new NotOwnReply(sessionId);
   const meta = session.metadata as Record<string, string> | null;
   if (session.mode !== "subscription" || meta?.addon !== ADD_ON_MARK || meta.assistant_for !== store.handle) return null;
   if (typeof session.customer !== "string" || session.customer !== store.stripeCustomerId) return null;
   const subscriptionId = typeof session.subscription === "string" ? session.subscription : "";
   if (!SUBSCRIPTION_PATTERN.test(subscriptionId)) return null;
-  return assistantPlanOf(await onPlatform("GET", `/subscriptions/${encodeURIComponent(subscriptionId)}`));
+  // A reply for another subscription throws: the return says "unconfirmed", and the daily job (billing-sync) reads
+  // the add-on again from Stripe's list.
+  return assistantPlanOf(await readSubscription(subscriptionId));
 }
 
-/** Whether any of the add-on's last payments was disputed. */
+/**
+ * Whether any of the add-on's last payments was disputed. The page is read in its exact shape (lib/stripe-list.ts):
+ * a disputed charge on any readable row is a yes; "none disputed" is said only when every row of the page is readable
+ * (each with its charge, or none, and that charge's own disputed true or false). Otherwise it throws, and nothing is
+ * written on it this run (syncAssistant leaves the store as it is). The page is the last three payments by design, so
+ * more invoices after them do not make it incomplete.
+ */
 async function disputed(subscriptionId: string): Promise<boolean> {
-  const listed = await onPlatformAt(INVOICE_VERSION, "GET", `/invoices?${new URLSearchParams({ subscription: subscriptionId, limit: "3", "expand[]": "data.charge" })}`);
-  const rows = Array.isArray(listed.data) ? (listed.data as { charge?: unknown }[]) : [];
-  return rows.some((row) => {
-    const charge = row.charge as { disputed?: unknown } | null | undefined;
-    return Boolean(charge && typeof charge === "object" && charge.disputed === true);
-  });
+  const chargeOf = (row: Record<string, unknown>) => ownField(row, "charge");
+  const read = readStripePage(
+    await onPlatformAt(INVOICE_VERSION, "GET", `/invoices?${new URLSearchParams({ subscription: subscriptionId, limit: "3", "expand[]": "data.charge" })}`),
+    (row) => {
+      if (!hasOwnField(row, "charge")) return false;
+      const charge = chargeOf(row);
+      return charge === null || (plainObject(charge) && typeof ownField(charge, "disputed") === "boolean");
+    },
+  );
+  if (read.rows.some((row) => { const charge = chargeOf(row); return plainObject(charge) && ownField(charge, "disputed") === true; })) return true;
+  if (read.unreadable) throw new StripeListUnreadable("an add-on invoice not readable");
+  return false;
 }
 
 /**
@@ -150,13 +190,16 @@ async function disputed(subscriptionId: string): Promise<boolean> {
  * store again; a plan that is no longer paid sets it to stop at the end of
  * the month already paid. Called on the way back from checkout, from the
  * studio, and by the daily job (lib/billing-sync.ts). Returns the store as
- * it is now. Unchanged when Stripe cannot be asked.
+ * it is now. Unchanged when Stripe cannot be asked, or answers for another
+ * subscription than this add-on's (rule 30): nothing is ended, stopped or
+ * written on such a reply, and the next call reads again.
  */
 export async function syncAssistant(store: Store, subscription?: Record<string, unknown>, nowSeconds = Date.now() / 1000): Promise<Store> {
   const id = store.assistantPlan?.subscriptionId;
   if (!id) return store;
   try {
-    let current = subscription ?? (await onPlatform("GET", `/subscriptions/${encodeURIComponent(id)}`));
+    let current = subscription ?? (await readSubscription(id));
+    if (!isOwnReply(current, id)) throw new NotOwnReply(id);
     let disputedAt = store.assistantPlan?.disputedAt ?? "";
     if (!disputedAt && current.status === "active" && (await disputed(id))) {
       disputedAt = new Date(nowSeconds * 1000).toISOString();
@@ -164,7 +207,7 @@ export async function syncAssistant(store: Store, subscription?: Record<string, 
     }
     if (!disputedAt && current.status === "active" && current.cancel_at_period_end !== true && standingOf(store, nowSeconds) !== "paid") {
       await setCancelAtPeriodEnd(id, true);
-      current = await onPlatform("GET", `/subscriptions/${encodeURIComponent(id)}`);
+      current = await readSubscription(id);
     }
     const plan = assistantPlanOf(current, disputedAt);
     if (!plan) return store;

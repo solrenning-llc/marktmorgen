@@ -37,7 +37,7 @@ export const nl: BuyerWords = {
 
   fairHead: (country, percent) => `Eerlijke prijs voor jouw land (${country}): ${percent}${S}% korting`,
   fairNote: (store, plan) =>
-    `${store} verlaagt de prijzen waar geld minder waard is. De korting gaat eraf op de betaalpagina, zonder code${plan ? "; de lagere prijs geldt bij betaling in één keer" : ""}.`,
+    `${store} verlaagt de prijzen waar geld minder waard is. Deze prijs is automatisch voor jou bepaald, op basis van het land van je internetverbinding. De korting gaat eraf op de betaalpagina, zonder code${plan ? "; de lagere prijs geldt bij betaling in één keer" : ""}.`,
   saleHead: (name, percent, ends) => `${name ? `${name}: ` : ""}${percent}${S}% korting · ${ends}`,
   saleNote: (until, plan) =>
     `Tot ${until}. De korting gaat eraf op de betaalpagina, zonder code${plan ? "; de actieprijs geldt bij betaling in één keer" : ""}.`,
@@ -133,7 +133,8 @@ export const nl: BuyerWords = {
   /** The store's blog (lib/store-blog.ts; app/[handle]/blog). */
   blog: "Blog",
   blogOf: (store) => `Blog van ${store}`,
-  blogEmpty: "Hier staat nog niets.",
+  blogPastEnd: "Geen berichten op deze pagina",
+  blogPastEndBody: "Deze pagina komt na het laatste bericht.",
   blogMinutes: (n) => `${n} min lezen`,
   blogNewer: "Nieuwere berichten",
   blogOlder: "Oudere berichten",
@@ -146,6 +147,7 @@ export const nl: BuyerWords = {
   /** How much less each unit costs than in the option of one. */
   unitSaving: (percent) => `je bespaart ${percent}%`,
   chooseOptionFor: (title) => `Kies een optie voor ${title}`,
+  chooseOne: "Kies er een",
   recommended: "Aanbevolen",
   recommendedAfter: " (aanbevolen)",
   howToPayFor: (title) => `Hoe je ${title} betaalt`,
@@ -182,6 +184,8 @@ export const nl: BuyerWords = {
     `Zodra hij live is, wordt de betaling door Stripe geïnd op de eigen rekening van ${store}: Marktmorgen houdt het geld nooit vast en neemt er niets van.`,
   paidBy: (takers, store) =>
     `De betaling wordt door ${takers} geïnd op de eigen rekening van ${store}. Marktmorgen houdt het geld nooit vast en neemt er niets van.`,
+  whoAnswers: (store) =>
+    `${store} is de verkoper en is verantwoordelijk voor wat je koopt, voor terugbetalingen en voor een eventueel herroepingsrecht. Marktmorgen host de pagina's van de winkel en is geen partij bij de verkoop.`,
   noPaymentsTitle: "Deze winkel kan nog geen betalingen ontvangen.",
   noPaymentsBody: (store) => `De prijzen hierboven zijn echt, maar hier kan nog geen kaart worden belast. Wil je kopen, schrijf dan rechtstreeks naar ${store}.`,
   noPaymentsBodyOne: (store) => `De prijs hierboven is echt, maar hier kan nog geen kaart worden belast. Wil je kopen, schrijf dan rechtstreeks naar ${store}.`,
@@ -191,6 +195,7 @@ export const nl: BuyerWords = {
     busy: { title: "Iemand anders koopt dit op dit moment", body: "Er is niets afgeschreven. Druk zo meteen opnieuw op kopen." },
     slow: { title: "Veel pogingen in een paar minuten", body: "Er is niets afgeschreven. Wacht een paar minuten en druk dan opnieuw op kopen." },
     error: { title: "De betaalpagina kon niet worden geopend", body: "Er is niets afgeschreven. Probeer het zo meteen opnieuw." },
+    nocharges: { title: "Deze winkel kan nu geen kaartbetalingen ontvangen", body: "Er is niets afgeschreven. Opnieuw proberen werkt pas als de winkel dit heeft opgelost." },
     paused: { title: "Deze winkel neemt nu geen nieuwe bestellingen aan", body: "Er is niets afgeschreven. Nieuwe bestellingen kunnen weer begin volgende maand, of eerder." },
     "paypal-declined": {
       title: "PayPal heeft de betaling niet aangenomen",
@@ -297,11 +302,15 @@ export const nl: BuyerWords = {
   newer: "Nieuwer",
   older: "Ouder",
   askUnknown: (store) => `Dat staat niet op deze pagina. Vraag het ${store} voordat je koopt.`,
+  askTermsCut: () => "Ik heb de volledige voorwaarden hier niet. Vraag het de maker voordat je koopt.",
 
   noLongerOnSale: "Dit product is niet meer te koop.",
+  cardUnread: "Dit product kon nu niet worden geladen. Probeer het zo meteen opnieuw.",
+  cardBuyUnread: "Kopen is nu niet mogelijk. Probeer het zo meteen opnieuw.",
   seeStore: (store) => `Bekijk ${store}`,
   cardTestMode: "Testmodus: er wordt geen echte kaart belast.",
   cardCheckout: "Veilig betalen via Stripe, in een nieuw tabblad.",
+  cardSoldBy: (store) => `Verkocht door ${store}, die ervoor verantwoordelijk is.`,
   cardOpens: (store) => `Opent in de winkel van ${store}, in een nieuw tabblad.`,
 
   // ---- Email cards (lib/mail-product-price.ts)

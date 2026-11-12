@@ -62,6 +62,12 @@ async function main(): Promise<void> {
   const first = await enterLocked(await holdSignIn(LOST));
   if (!first) throw new Error("not let in");
   malform(on("SMEMBERS", "nl:2fa:lockedset:"), null);
+  // The mark (endLocked) and a session's opening read Date.now(), and advance() moved only the in-memory Redis's
+  // clock: in the same millisecond a session is not "opened after" the mark and stays locked (the safe side).
+  // Here both read the same simulated clock, so the second session is opened exactly 1 s after the mark.
+  advance(0);
+  const realNow = Date.now;
+  Date.now = () => redis.now();
   const c = await cancelReset(LOST, "studio");
   restore();
   advance(1000);
@@ -72,6 +78,7 @@ async function main(): Promise<void> {
   is("old one locked on day 8, new one's until", [(await lockedUntil(first.session, t8)) > 0, second.until > Date.now()], [true, true]);
   advance((RESET_DAYS + 1) * DAY);
   is("new one free after its own day (two-step turns off then by design)", await lockedUntil(second.session, t8 + 1000), 0);
+  Date.now = realNow;
   advance(25 * DAY);
   const t34 = Date.now() + 34 * DAY;
   is("day 34: old one ended (session gone) or still locked", (await emailForSession(first.session)) === null || (await lockedUntil(first.session, t34)) > 0, true);

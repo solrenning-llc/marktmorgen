@@ -99,6 +99,7 @@
 
 /* The line above everything while plans are not on sale (lib/opening.ts). */
 .hm-topbar {
+  position: relative;
   background: var(--hm-sky-2);
   color: var(--hm-text);
 }
@@ -115,6 +116,29 @@
   font-weight: 700;
   text-decoration: underline;
   text-underline-offset: 2px;
+}
+.hm-preview {
+  max-width: 77.5rem;
+  margin: 0 auto;
+}
+.hm-preview-compact {
+  min-height: 44px;
+  margin-inline: 0.5rem;
+  padding: 0.625rem 1rem;
+  box-sizing: border-box;
+  font-size: 1rem;
+  line-height: 1.5;
+  cursor: pointer;
+  text-align: center;
+  list-style-position: inside;
+}
+.hm-topbar .hm-preview-full {
+  padding-top: 0;
+}
+.hm-preview-full a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
 }
 
 /* The menu and the first screen: a morning sky, light blue above and peach
@@ -494,11 +518,20 @@
   white-space: nowrap;
 }
 
-/* Three cards around the phone; on a narrow screen they sit under it. */
+/* The example cards keep their own space below the phone at every width. */
+.hm-hero-cards {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.75rem;
+  width: 100%;
+  margin-top: 1rem;
+}
 .hm-float {
   position: relative;
+  flex: 0 1 15rem;
+  min-width: 0;
   width: min(15rem, 100%);
-  margin-top: 0.75rem;
 }
 .hm-float-card {
   background: #fff;
@@ -556,35 +589,6 @@
   .hm-hero-art {
     min-height: 37.5rem;
     justify-content: flex-end;
-  }
-  .hm-float {
-    position: absolute;
-    margin: 0;
-  }
-  .hm-float {
-    width: 13.5rem;
-  }
-  .hm-float-a {
-    left: -0.5rem;
-    top: 4.5rem;
-  }
-  .hm-float-b {
-    right: -0.5rem;
-    top: 13.5rem;
-  }
-  .hm-float-c {
-    left: -0.5rem;
-    bottom: 4.5rem;
-    width: 12.5rem;
-  }
-  .hm-tilt-l {
-    transform: rotate(-5deg);
-  }
-  .hm-tilt-r {
-    transform: rotate(4deg);
-  }
-  .hm-tilt-s {
-    transform: rotate(3deg);
   }
 }
 /* One rise on page load, and only for people who have not asked for less

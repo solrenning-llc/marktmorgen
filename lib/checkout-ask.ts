@@ -55,7 +55,8 @@ import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { withinEssentialLimit } from "@/lib/request-guard";
 import { recoveryOn } from "@/lib/recovery-setting";
-import { remindAsked } from "@/lib/checkout-recovery";
+import { type RemindOutcome, remindAsked } from "@/lib/checkout-recovery";
+import { REMINDER_RETRIES, reminderRetryAfter, retriesOf } from "@/lib/reminder-retry";
 import { canSellProduct } from "@/lib/store-checkout";
 import type { Listing, Store } from "@/lib/store";
 import { ASK_WHENS, type AskWhen } from "@/lib/ask-when";
@@ -94,26 +95,27 @@ export function askable(store: Store, product: Listing | null): product is Listi
 /** Where it was asked for: on the way back from a checkout, or on the product's own page. */
 export type AskFrom = "checkout" | "page";
 
-type Ask = { statsId: string; handle: string; productId: string; email: string; askedAt: number; from: AskFrom; after: number };
+/** `tries`: how many times it was put back after a send that failed (lib/reminder-retry.ts); absent when never. */
+type Ask = { statsId: string; handle: string; productId: string; email: string; askedAt: number; from: AskFrom; after: number; tries?: number };
 
 /** One ask as it waits in the queue. The address is here until it is sent and nowhere else. */
 export function askMember(ask: Ask): string {
+  const base = [ask.statsId, ask.handle, ask.productId, ask.email, ask.askedAt];
+  // Put back after a failed send: the long shape, with the count of tries last.
+  if (ask.tries) return JSON.stringify([...base, ask.from, ask.after, ask.tries]);
   // An ask from a checkout keeps the shape it always had, so one already waiting reads the same.
-  return JSON.stringify(
-    ask.from === "checkout" && ask.after === ASK_AFTER_SECONDS
-      ? [ask.statsId, ask.handle, ask.productId, ask.email, ask.askedAt]
-      : [ask.statsId, ask.handle, ask.productId, ask.email, ask.askedAt, ask.from, ask.after],
-  );
+  return JSON.stringify(ask.from === "checkout" && ask.after === ASK_AFTER_SECONDS ? base : [...base, ask.from, ask.after]);
 }
 
 export function parseAsk(member: unknown): Ask | null {
   if (typeof member !== "string") return null;
   try {
-    const [statsId, handle, productId, email, askedAt, from, after] = JSON.parse(member) as unknown[];
+    const [statsId, handle, productId, email, askedAt, from, after, tried] = JSON.parse(member) as unknown[];
     if (typeof statsId !== "string" || typeof handle !== "string" || typeof productId !== "string") return null;
     if (typeof email !== "string" || typeof askedAt !== "number" || !statsId || !handle || !productId || !email) return null;
     const wait = typeof after === "number" && (Object.values(ASK_WHENS) as number[]).includes(after) ? after : ASK_AFTER_SECONDS;
-    return { statsId, handle, productId, email, askedAt, from: from === "page" ? "page" : "checkout", after: wait };
+    const tries = retriesOf(tried);
+    return { statsId, handle, productId, email, askedAt, from: from === "page" ? "page" : "checkout", after: wait, ...(tries ? { tries } : {}) };
   } catch {
     return null;
   }
@@ -158,16 +160,41 @@ async function keep(store: Store, productId: string, typed: string, ip: string, 
 }
 
 /**
+ * Puts an ask whose send failed back in the queue, for a later try
+ * (lib/reminder-retry.ts): a few times at the most, and never when the try
+ * would land past its six hours — a reminder that arrives hours late is worse
+ * than none, and the buyer can ask again. Its name (askKey) does not change,
+ * so a try that does go is the one email. Whether it went back.
+ */
+async function again(ask: Ask, now: number): Promise<boolean> {
+  const tries = ask.tries ?? 0;
+  const at = now + reminderRetryAfter(tries);
+  if (tries >= REMINDER_RETRIES || at - (ask.askedAt + ask.after) > STALE_SECONDS) return false;
+  try {
+    const [added] = await redisPipeline([["ZADD", QUEUE, at, askMember({ ...ask, tries: tries + 1 })]]);
+    // 1 put back; 0 one just like it already waits. Anything else is unknown: not counted as put back.
+    if (added === 1 || added === 0) return true;
+    console.error("putting an asked-for reminder back answered in no known shape", ask.handle);
+  } catch (error) {
+    console.error("putting an asked-for reminder back failed", ask.handle, error);
+  }
+  return false;
+}
+
+/**
  * Sends every ask that is due. For the five-minute job. Each is taken off the
- * queue before anything is sent, so two runs never send the same one; one
- * that could not be sent is not put back — a reminder that arrives hours late
- * is worse than none, and the buyer can ask again.
+ * queue before anything is sent, so two runs never send the same one. One
+ * that is no longer to be sent (another store at the handle, too late, paid
+ * since, stopped) is dropped, and so is one the email service was asked for
+ * and did not take; one that failed on the way, before the email service was
+ * asked (an error reading the store or Stripe), is put back for a later try
+ * (again).
  */
 export async function sendAsked(
   load: (handle: string) => Promise<Store | null>,
   deadline: number,
-): Promise<{ sent: number; skipped: number }> {
-  const counts = { sent: 0, skipped: 0 };
+): Promise<{ sent: number; skipped: number; retried: number }> {
+  const counts = { sent: 0, skipped: 0, retried: 0 };
   if (!isRedisConfigured()) return counts;
   const now = Math.floor(Date.now() / 1000);
   const [due] = await redisPipeline([["ZRANGEBYSCORE", QUEUE, 0, now, "LIMIT", 0, 200]]);
@@ -181,20 +208,23 @@ export async function sendAsked(
       counts.skipped += 1;
       continue;
     }
+    // "retry": it failed on the way, before the email service was asked (lib/reminder-retry.ts).
+    let outcome: RemindOutcome | "retry";
     try {
       const store = await load(ask.handle);
       // The store the ask was made on, and not another that has since taken its address.
-      if (!store || store.statsId !== ask.statsId) {
-        counts.skipped += 1;
-        continue;
-      }
-      const outcome = await remindAsked(store, { productId: ask.productId, email: ask.email, askedAt: ask.askedAt, key: askKey(ask), from: ask.from });
-      if (outcome === "sent") counts.sent += 1;
-      else counts.skipped += 1;
+      outcome =
+        store && store.statsId === ask.statsId
+          ? await remindAsked(store, { productId: ask.productId, email: ask.email, askedAt: ask.askedAt, key: askKey(ask), from: ask.from })
+          : "skip";
     } catch (error) {
       console.error("sending an asked-for reminder failed", ask.handle, error);
-      counts.skipped += 1;
+      outcome = "retry";
     }
+    if (outcome === "sent") counts.sent += 1;
+    // "failed" is a send the email service was asked for and did not take: never again (lib/reminder-retry.ts).
+    else if (outcome === "retry" && (await again(ask, now))) counts.retried += 1;
+    else counts.skipped += 1;
   }
   return counts;
 }

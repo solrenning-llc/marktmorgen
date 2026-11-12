@@ -61,6 +61,7 @@ import { canSellProduct } from "@/lib/store-checkout";
 import { productOfSub } from "@/lib/tier-rules";
 import { forgetTierPrice, tierPrice } from "@/lib/tier-switch";
 import { LockBusyError, withLock } from "@/lib/redis-lock";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { type FallbackSub, type MonthlyFallback, monthlyFallback } from "@/lib/yearly-fallback-rules";
 import type { Listing, Store } from "@/lib/store";
 
@@ -164,10 +165,27 @@ const refused = (error: unknown) => error instanceof StripeError && error.status
 /** A monthly price Stripe no longer has or no longer sells: the cached one is dropped, so the next try makes another. */
 const priceGone = (error: unknown) =>
   error instanceof StripeError && (error.code === "resource_missing" || /\binactive\b|no such price/i.test(error.stripeMessage));
-/** Whether the entry is on its list for the daily job. */
+/**
+ * A Stripe reply decides only when it is the object asked for (rule 30): it holds its own id, equal to the one
+ * requested. A reply for another membership or invoice, or with no id, says nothing about this one. A reply that is not an object at all (an HTTP 200 whose JSON body is `null`) is not this object either: it never
+ * throws here, so the read after a failed void still records VOID (Claude 6 on #3098).
+ */
+const isOwnReply = (reply: unknown, id: string): boolean =>
+  reply !== null && typeof reply === "object" && Object.hasOwn(reply, "id") && (reply as { id?: unknown }).id === id;
+/** Thrown when a reply is not the object asked for: nothing is decided on it. */
+class NotOwnReply extends Error {
+  constructor(id: string) {
+    super(`Stripe's reply was not the object asked for (${id})`);
+  }
+}
+/**
+ * Whether the entry is on its list for the daily job: only a whole count from SADD says so (1 added, 0 already
+ * there); any other reply is unknown and said as not left (CX-123 rule 24).
+ */
 const record = async (key: string, entry: string): Promise<boolean> => {
   try {
-    await redisPipeline([["SADD", key, entry]]);
+    const [added] = repliesFor(await redisPipeline([["SADD", key, entry]]), 1) ?? [];
+    if (countOf(added) === null) throw new UnknownReplyError("a list for the daily job");
     return true;
   } catch (error) {
     console.error("a move to monthly could not be left for the daily job; the result says so", key, entry, error);
@@ -191,9 +209,13 @@ export async function moveToMonthly(store: Store, customer: string, subscription
     // The same lock as a switch between plans or to yearly: one change to a membership at a time.
     return await withLock(fallbackLockKey(subscription), FALLBACK_LOCK_SECONDS, 5_000, async (): Promise<FallbackResult> => {
       const sub = (await onAccount("GET", account, `/subscriptions/${encodeURIComponent(subscription)}?${fallbackReadQuery()}`, undefined, v)) as SubRead;
+      // Nothing is sent yet: a reply for another membership, or with no id, ends here with "error", the year still
+      // retried by itself.
+      if (!isOwnReply(sub, subscription)) throw new NotOwnReply(subscription);
       const owner = sub.customer && typeof sub.customer === "object" ? (sub.customer as { id?: unknown }).id : sub.customer;
       if (owner !== customer) return { ok: false, reason: "gone" };
       const invoice = await onAccount("GET", account, `/invoices/${encodeURIComponent(failedInvoice)}`, undefined, v);
+      if (!isOwnReply(invoice, failedInvoice)) throw new NotOwnReply(failedInvoice);
       const itemId = typeof sub.items?.data?.[0]?.id === "string" ? (sub.items.data[0].id as string) : "";
       if (!itemId) return { ok: false, reason: "gone" };
       const productId = productOfSub(sub as Parameters<typeof productOfSub>[0]);
@@ -207,15 +229,21 @@ export async function moveToMonthly(store: Store, customer: string, subscription
 
       // Never charged for the year while the month is; then read once more, so a year paid meanwhile is never moved.
       // Nothing is sent to the subscription yet: whatever fails here turns the year's retries back on.
-      let attempt: unknown;
+      let attempt: number | null;
       try {
         await onAccount("POST", account, `/invoices/${encodeURIComponent(failedInvoice)}`, new URLSearchParams({ auto_advance: "false" }), v);
         const still = await onAccount("GET", account, `/invoices/${encodeURIComponent(failedInvoice)}`, undefined, v);
+        // Another invoice's "open" never proves the year still unpaid: the catch below turns its retries back on.
+        if (!isOwnReply(still, failedInvoice)) throw new NotOwnReply(failedInvoice);
         if (still.status !== "open") {
           if (still.status !== "paid") await retryYear(account, failedInvoice);
           return { ok: false, reason: "fallback" };
         }
-        [attempt] = await redisPipeline([["INCR", tryKey(failedInvoice)], ["EXPIRE", tryKey(failedInvoice), 2 * 86_400]]);
+        // The try's own number, read exactly (CX-123 rule 24): any other reply is unknown, never "try 1", so the move
+        // is never sent under a key a declined try already used, whose saved answer Stripe would give again.
+        const counted = repliesFor(await redisPipeline([["INCR", tryKey(failedInvoice)], ["EXPIRE", tryKey(failedInvoice), 2 * 86_400]]), 2);
+        attempt = counted ? countOf(counted[0]) : null;
+        if (!attempt) throw new UnknownReplyError("the try counter of a move to monthly");
       } catch (error) {
         await retryYear(account, failedInvoice);
         throw error;
@@ -223,7 +251,7 @@ export async function moveToMonthly(store: Store, customer: string, subscription
 
       let updated: Record<string, unknown>;
       try {
-        updated = await onAccount("POST", account, `/subscriptions/${encodeURIComponent(subscription)}`, fallbackBody(itemId, price, failedInvoice), v, `fallback:${failedInvoice}:${Number(attempt) || 1}`);
+        updated = await onAccount("POST", account, `/subscriptions/${encodeURIComponent(subscription)}`, fallbackBody(itemId, price, failedInvoice), v, `fallback:${failedInvoice}:${attempt}`);
       } catch (error) {
         if (refused(error)) {
           // Refused for certain: nothing was done, and the year is retried as before.
@@ -275,7 +303,12 @@ export async function moveToMonthly(store: Store, customer: string, subscription
       try {
         await onAccount("POST", account, `/invoices/${encodeURIComponent(failedInvoice)}/void`, new URLSearchParams(), v);
       } catch (error) {
-        const again = await onAccount("GET", account, `/invoices/${encodeURIComponent(failedInvoice)}`, undefined, v).catch(() => null);
+        // A reply for another invoice, or with no id, is no answer: the year is left to void again (VOID), never taken
+        // as voided or as paid twice on it.
+        const again = await onAccount("GET", account, `/invoices/${encodeURIComponent(failedInvoice)}`, undefined, v).then(
+          (reply) => (isOwnReply(reply, failedInvoice) ? reply : null),
+          () => null,
+        );
         if (again?.status === "paid") {
           // Paid in the seconds the month was: the month is refunded, never both kept.
           console.error("a yearly invoice was paid while the monthly move was made; the month is refunded by the daily job", error);
@@ -290,6 +323,7 @@ export async function moveToMonthly(store: Store, customer: string, subscription
   } catch (error) {
     if (error instanceof LockBusyError) return { ok: false, reason: "busy" };
     if (!(error instanceof StripeError)) console.error("moving a yearly membership to monthly failed", error);
+    // NotOwnReply lands here too: "error", nothing decided on that reply.
     return { ok: false, reason: "error" };
   }
 }

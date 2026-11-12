@@ -26,6 +26,7 @@ export const orderWrite = unexpected;
 export const withinStore = unexpected;
 export const withinLimit = unexpected;
 export const withinEssentialLimit = unexpected;
+export const essentialLimitState = unexpected;
 export const holdsProducts = unexpected;
 export const sendEmail = unexpected;
 export const coursesWords = unexpected;

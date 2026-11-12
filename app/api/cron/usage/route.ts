@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { cronAllowed } from "@/lib/request-guard";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import {
   DELIVERY_ALLOWANCE_BYTES,
@@ -234,7 +235,19 @@ export async function GET(request: NextRequest) {
   const visits = await visitsRun();
   const orders = await ordersRun();
 
-  const over = await storesOverAllowance();
+  // The delivery part on its own: a list or total Redis answered in an unknown shape (CX-123 rule 24) is never
+  // "nobody is over". It is said as unknown, nobody is written to on it and its told list is left as it was; the
+  // other parts above have run whatever it does, and the run answers an error only here, at the end.
+  let over: Awaited<ReturnType<typeof storesOverAllowance>>;
+  try {
+    over = await storesOverAllowance();
+  } catch (error) {
+    console.error("usage-watch: the stores over the delivery allowance are unknown today; nobody was written to about it", error);
+    return Response.json(
+      { ok: false, unread: ["delivery"], video, visits, orders },
+      { status: 503, headers: { "Cache-Control": "no-store" } },
+    );
+  }
   const allowance = bytesWords(DELIVERY_ALLOWANCE_BYTES);
 
   console.log(
@@ -243,8 +256,19 @@ export async function GET(request: NextRequest) {
       : `usage-watch: ${over.length} over ${allowance} — ${over.map((s) => `${s.folder} ${bytesWords(s.bytes)}`).join(", ")}`,
   );
 
-  const [seenRaw] = await redisPipeline([["GET", TOLD]]);
-  const seen = new Set<string>(typeof seenRaw === "string" ? (JSON.parse(seenRaw) as string[]) : []);
+  // Who was already told, read exactly (CX-123 rule 24): nil is nobody yet; anything but a JSON list of names is
+  // unknown, and is never "nobody told yet". Then nobody is written to about the allowance, the list is left as it
+  // was, and the part is said as unknown, as above.
+  let seen: Set<string>;
+  try {
+    seen = await readTold();
+  } catch (error) {
+    console.error("usage-watch: who was already told about the delivery allowance is unknown today; nobody was written to about it", error);
+    return Response.json(
+      { ok: false, unread: ["delivery"], video, visits, orders },
+      { status: 503, headers: { "Cache-Control": "no-store" } },
+    );
+  }
   const fresh = over.filter((s) => !seen.has(s.folder));
   if (fresh.length === 0) {
     return Response.json(
@@ -253,13 +277,34 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const owners = await ownersOf(fresh.map((s) => s.folder));
+  // Whose these stores are, read exactly (lib/delivery.ts): unknown is never "no address on file". A read unknown as
+  // a whole: nobody is written to about the allowance, support is told nothing, the told list is left as it was, and
+  // the part is unknown. One store's owner unknown (undefined): that store only is postponed, below.
+  let owners: (string | null | undefined)[];
+  try {
+    owners = await ownersOf(fresh.map((s) => s.folder));
+  } catch (error) {
+    console.error("usage-watch: who the stores over the delivery allowance belong to is unknown today; nobody was written to about it", error);
+    return Response.json(
+      { ok: false, unread: ["delivery"], video, visits, orders },
+      { status: 503, headers: { "Cache-Control": "no-store" } },
+    );
+  }
   let told = 0;
   const unknown: string[] = [];
+  // Stores whose owner could not be read today: not written to, support not told, not recorded; tried next run.
+  let unreadOwners = 0;
+  // Only a notice that went out is recorded as given: a refused send, a store left because no sender is configured,
+  // or an ownerless store support could not be told about stays off the told list and is tried again next run.
+  const given: string[] = [];
 
   for (let i = 0; i < fresh.length; i += 1) {
     const store = fresh[i];
     const email = owners[i];
+    if (email === undefined) {
+      unreadOwners += 1;
+      continue;
+    }
     if (!email) {
       unknown.push(store.folder);
       continue;
@@ -300,7 +345,10 @@ export async function GET(request: NextRequest) {
       console.error("sending the allowance notice failed", error);
       return false;
     });
-    if (sent !== false) told += 1;
+    if (sent === true) {
+      told += 1;
+      given.push(store.folder);
+    }
   }
 
   /*
@@ -310,7 +358,7 @@ export async function GET(request: NextRequest) {
     It is said out loud rather than passed over in silence.
   */
   if (unknown.length > 0 && isSenderConfigured()) {
-    await sendEmail({ meter: { by: "company" },
+    const supportTold = await sendEmail({ meter: { by: "company" },
       from: NIMBUS_FROM,
       to: SUPPORT_EMAIL,
       subject: `${unknown.length} store(s) over the allowance could not be written to`,
@@ -321,17 +369,44 @@ export async function GET(request: NextRequest) {
         "",
         ...unknown.map((f) => `  ${f}`),
       ].join("\n"),
-    }).catch((error) => console.error("sending the unknown-owner notice failed", error));
+    }).catch((error) => {
+      console.error("sending the unknown-owner notice failed", error);
+      return false;
+    });
+    if (supportTold === true) given.push(...unknown);
   }
 
+
   await redisPipeline([
-    ["SET", TOLD, JSON.stringify([...new Set([...seen, ...over.map((s) => s.folder)])]), "EX", 40 * 86_400],
+    ["SET", TOLD, JSON.stringify([...new Set([...seen, ...given])]), "EX", 40 * 86_400],
   ]);
 
+  if (unreadOwners > 0) {
+    console.error(`usage-watch: ${unreadOwners} store(s) over the delivery allowance have an owner that could not be read today; they were not written to and are tried again next run`);
+  }
+
   return Response.json(
-    { ok: true, over: over.length, told, unknown: unknown.length, video, visits, orders },
+    { ok: true, over: over.length, told, unknown: unknown.length, unreadOwners, video, visits, orders },
     { headers: { "Cache-Control": "no-store" } },
   );
+}
+
+/** The stores already told about the delivery allowance this month: nil is none; any other shape throws. */
+async function readTold(): Promise<Set<string>> {
+  const replies = repliesFor(await redisPipeline([["GET", TOLD]]), 1);
+  if (!replies) throw new UnknownReplyError("the stores told about the delivery allowance");
+  const raw = replies[0];
+  if (raw === null) return new Set();
+  if (typeof raw !== "string") throw new UnknownReplyError("the stores told about the delivery allowance");
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new UnknownReplyError("the stores told about the delivery allowance");
+  }
+  const names = stringList(parsed);
+  if (!names) throw new UnknownReplyError("the stores told about the delivery allowance");
+  return new Set(names);
 }
 
 type OrdersRun = { stores: number; failed: number; told: number };

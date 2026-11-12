@@ -21,6 +21,7 @@ import {
   normaliseHex,
 } from "@/lib/store-look";
 import { MAX_PHOTO_BYTES, PHOTO_SIDE, photoUrl } from "@/lib/photo-limits";
+import { emailColourNotice } from "@/lib/email-theme";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 
 const MESSAGES: Record<string, string> = {
@@ -136,6 +137,8 @@ export function LookEditor({
   // Said out loud when the page will not paint exactly what was picked, so the
   // creator is never left wondering why their button is darker than their logo.
   const adjusted = colours.accent !== accent;
+  // Emails need 7:1 for every word, links included (369 [SU2]); when that moves the color, the creator is told which.
+  const emailNotice = useMemo(() => emailColourNotice({ theme, accent, font }), [theme, accent, font]);
 
   async function post(path: string, body: unknown): Promise<{ ok?: boolean; error?: string }> {
     const response = await fetch(path, {
@@ -324,7 +327,7 @@ export function LookEditor({
                 <label
                   key={option.hex}
                   title={option.label}
-                  className="relative grid h-10 w-10 cursor-pointer place-items-center rounded-full ring-offset-2 transition has-[:checked]:ring-2 has-[:checked]:ring-ink has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-violet-brand"
+                  className="relative grid h-11 w-11 cursor-pointer place-items-center rounded-full ring-offset-2 transition has-[:checked]:ring-2 has-[:checked]:ring-ink has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-violet-brand"
                   style={{ background: option.hex }}
                 >
                   <input
@@ -340,7 +343,7 @@ export function LookEditor({
                 </label>
               ))}
               <label
-                className={`flex h-10 cursor-pointer items-center gap-2 rounded-full border px-3 text-sm font-semibold transition has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-violet-brand ${
+                className={`flex h-11 cursor-pointer items-center gap-2 rounded-full border px-3 text-sm font-semibold transition has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-violet-brand ${
                   preset ? "border-line-strong text-ink-soft" : "border-ink text-ink"
                 }`}
               >
@@ -364,6 +367,7 @@ export function LookEditor({
                   : "The preview shows your page's theme and color, with an example product until you add one."
               }`}
             </p>
+            {emailNotice ? <p className="field-hint mt-2">{emailNotice}</p> : null}
           </fieldset>
 
           {/* Letters */}

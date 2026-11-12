@@ -23,10 +23,12 @@ export function claimValue(now = Date.now()): string {
   return `${now}.${String(randomInt(1_000_000_000)).padStart(9, "0")}`;
 }
 
-export async function claimMark(key: string, seconds: number, value = claimValue()): Promise<Claimed> {
+export async function claimMark(key: string, seconds: number | null, value = claimValue()): Promise<Claimed> {
   let reply: unknown[] | null = null;
+  // null: a claim kept for good (a record written once, such as a credit), with no expiry.
+  const command = seconds === null ? ["SET", key, value, "NX"] : ["SET", key, value, "NX", "EX", seconds];
   try {
-    reply = repliesFor(await redisPipeline([["SET", key, value, "NX", "EX", seconds]]), 1);
+    reply = repliesFor(await redisPipeline([command]), 1);
   } catch {
     reply = null;
   }
@@ -46,8 +48,10 @@ export async function claimMark(key: string, seconds: number, value = claimValue
 
 /**
  * Lets go of a claim only while it still holds this claim's own value (Revisor 1 on #2719): a run whose mark ran out
- * and was taken by another run never deletes the other run's mark. The compare and delete is one script, read and
- * deleted in two steps where scripts are not run (lib/redis-lock.ts, releaseLock). Never throws.
+ * and was taken by another run never deletes the other run's mark. The compare and delete is one script; when the
+ * script cannot run, nothing is sent and the mark stays (lib/redis-lock.ts, releaseLock; Codex G on #2721): one taken
+ * with an expiry runs out at it, but one kept for good (claimMark with seconds null) never does: it stays, and whatever
+ * it guards is not done again on it (Claude 5 on #2722). Never throws.
  */
 export async function releaseMark(key: string, value: string): Promise<void> {
   await releaseLock({ key, token: value, ttlSeconds: 1 });

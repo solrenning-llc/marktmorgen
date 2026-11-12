@@ -16,6 +16,7 @@
  */
 import { clicksFrom, leadIdOf, nextAdsCookie, readAdsCookie, adsCookieName, parseAdsServer } from "@/lib/ad-consent";
 import {
+  adEventId,
   adsCheckout,
   gaClientId,
   gaSessionId,
@@ -157,14 +158,14 @@ async function main(): Promise<void> {
     "api.pinterest.com", "api.pinterest.com", "business-api.tiktok.com", "business-api.tiktok.com", "graph.facebook.com", "graph.facebook.com", "www.google-analytics.com", "www.google-analytics.com",
   ]);
   const metaOut = out.filter((o) => o.host === "graph.facebook.com").map((o) => (o.body.data as Ev[])[0]);
-  const first = metaOut.find((e) => e.event_id === "cs_test_order000000001")!;
-  is("Meta: the order's id, a website purchase, the money, new or returning", [
+  const first = metaOut.find((e) => e.event_id === adEventId("cs_test_order000000001"))!;
+  is("Meta: the id made from the order's, a website purchase, the money, new or returning", [
     first.event_name,
     first.action_source,
     first.event_source_url,
     first.custom_data.value,
     first.custom_data.customer_type,
-    metaOut.find((e) => e.event_id === "cs_test_order000000002")!.custom_data.customer_type,
+    metaOut.find((e) => e.event_id === adEventId("cs_test_order000000002"))!.custom_data.customer_type,
   ], ["Purchase", "website", "https://marktmorgen.com/@harbor/p/club", 49, "new", "returning"]);
   is("matched with the hashed address, the browser, Meta's cookie and the click", [
     first.user_data.em,
@@ -172,7 +173,7 @@ async function main(): Promise<void> {
     first.user_data.fbp,
     String(first.user_data.fbc).endsWith(".IwAR0abc"),
   ], [[sha256("new@example.com")], "203.0.113.9", "fb.1.1.1", true]);
-  const google = out.find((o) => o.host === "www.google-analytics.com" && JSON.stringify(o.body).includes("cs_test_order000000001"))!;
+  const google = out.find((o) => o.host === "www.google-analytics.com" && JSON.stringify(o.body).includes(adEventId("cs_test_order000000001")))!;
   const gEvent = (google.body.events as { name: string; params: Record<string, unknown> }[])[0];
   is("Google: the visitor and the visit, the purchase with its transaction id", [
     new URL(google.url).searchParams.get("measurement_id"),
@@ -183,7 +184,7 @@ async function main(): Promise<void> {
     gEvent.params.session_id,
     gEvent.params.value,
     (google.body.consent as Record<string, string>).ad_user_data,
-  ], ["G-AB12CD34EF", true, "111.222", "purchase", "cs_test_order000000001", "1700000500", 49, "GRANTED"]);
+  ], ["G-AB12CD34EF", true, "111.222", "purchase", adEventId("cs_test_order000000001"), "1700000500", 49, "GRANTED"]);
   const pin = out.find((o) => o.host === "api.pinterest.com")!;
   const pEvent = (pin.body.data as Ev[])[0];
   is("Pinterest: to the ad account, with the click and the value as text", [
@@ -221,7 +222,7 @@ async function main(): Promise<void> {
   is("only the renewal of a membership bought with the yes", await sendRenewals(store, NOW), 1);
   const renewal = (out.find((o) => o.host === "graph.facebook.com")!.body.data as Ev[])[0];
   is("Meta: made by the subscription, a returning customer, no address or browser", [renewal.event_id, renewal.action_source, renewal.custom_data.customer_type, "client_ip_address" in renewal.user_data, "event_source_url" in renewal], [
-    "in_Renew000001",
+    adEventId("in_Renew000001"),
     "system_generated",
     "returning",
     false,

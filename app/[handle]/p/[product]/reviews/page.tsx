@@ -23,7 +23,8 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const decoded = decodeURIComponent(handle);
   const store = decoded.startsWith("@") ? await storeForPage(normaliseHandle(decoded)) : null;
   const product = store ? await readListing(store, productIdFromAddress(store, id) ?? id) : null;
-  if (!store || !product) return { title: "Not found — Marktmorgen" };
+  // A draft has no page of its own, so no list of its reviews either (MM-SA-30), as p/[product]/page.tsx.
+  if (!store || !product || product.hidden) return { title: "Not found — Marktmorgen" };
   return {
     title: `${speech(store).w.reviewsOf(product.title)} — ${store.name}`,
     // The product's own page carries the rating for search engines; this
@@ -43,7 +44,7 @@ export default async function ReviewsPage({ params, searchParams }: Params) {
   const store = await storeForPage(normaliseHandle(decoded));
   if (!store) notFound();
   const product = await readListing(store, productIdFromAddress(store, id) ?? id);
-  if (!product) redirect(`/@${store.handle}`);
+  if (!product || product.hidden) redirect(`/@${store.handle}`);
   const reachedOn = (await headers()).get("x-nimbus-domain");
   if (reachedOn && (store.domain?.name !== reachedOn || !canUseDomain(store))) {
     redirect(`${SITE_URL}${productPath(store, product)}/reviews`);
@@ -64,9 +65,9 @@ export default async function ReviewsPage({ params, searchParams }: Params) {
       className={`st-page st-theme-${store.look.theme} relative min-h-screen overflow-hidden`}
       style={lookStyle(store.look) as React.CSSProperties}
     >
-      <main id="content" className="relative mx-auto max-w-2xl px-4 pb-16 pt-10 sm:pt-14">
+      <main id="content" className="st-measure relative mx-auto max-w-2xl px-4 pb-16 pt-10 sm:pt-14">
         <p className="text-center">
-          <Link href={productPath(store, product)} className="st-footer-link text-sm font-semibold">
+          <Link href={productPath(store, product)} className="st-footer-link inline-flex min-h-11 items-center text-sm font-semibold">
             {w.backTo(product.title)}
           </Link>
         </p>
@@ -79,6 +80,7 @@ export default async function ReviewsPage({ params, searchParams }: Params) {
             productTitle={product.title}
             moreHref={null}
             lang={store.language}
+            level={1}
           />
           {summary.visible === 0 ? <p className="st-note mt-6 text-sm">{w.noReviewsToShow}</p> : null}
         </div>

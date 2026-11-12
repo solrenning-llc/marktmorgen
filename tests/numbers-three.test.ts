@@ -146,7 +146,7 @@ async function main(): Promise<void> {
   const made = await makeKey((await ensureStoreId(OWNER))!.sid, "Claude");
   if (!made.ok) throw new Error("no key made");
   const tools = (await answer({ jsonrpc: "2.0", id: 5, method: "tools/list" }, made.key)).result?.tools as { name: string; annotations: { readOnlyHint: boolean } }[];
-  is("with the key: eleven tools, all reading", tools.map((t) => [t.name, t.annotations.readOnlyHint]), [
+  is("with the key: twenty tools, all reading but the one that prepares a change", tools.map((t) => [t.name, t.annotations.readOnlyHint]), [
     ["get_numbers", true],
     ["list_products", true],
     ["get_revenue_by_channel", true],
@@ -157,6 +157,15 @@ async function main(): Promise<void> {
     ["get_memberships", true],
     ["get_emails", true],
     ["get_affiliates", true],
+    ["get_product_description", true],
+    ["get_sales_page", true],
+    ["get_course_outline", true],
+    ["get_lesson", true],
+    ["get_page_test", true],
+    ["get_page_reading", true],
+    ["get_page_versions", true],
+    ["list_saved_blocks", true],
+    ["propose_product_description", false],
     ["get_store", true],
   ]);
   const call = async (name: string, args: Record<string, unknown> = {}) => {
@@ -164,8 +173,12 @@ async function main(): Promise<void> {
     return { error: got.isError, data: JSON.parse(got.content[0].text) as Record<string, unknown>, text: got.content[0].text };
   };
   // Every tool, read: none answers with an address, the store owner's included.
-  const everything = await Promise.all(tools.map((t) => call(t.name)));
-  is("each answers, and none of them hands out anybody's address", [everything.every((r) => !r.error), everything.some((r) => /@/.test(r.text))], [true, false]);
+  // The tool that prepares a change needs a key allowed to (tests/agent-propose.test.ts); this read key is refused there.
+  const readers = tools.filter((t) => t.annotations.readOnlyHint);
+  const everything = await Promise.all(readers.map((t) => call(t.name)));
+  // Tools about one product, page or lesson (631 [AA1] units 9 to 14) need it named: with nothing, they say so as an error.
+  const needs = new Set(["get_product_description", "get_sales_page", "get_course_outline", "get_lesson", "get_page_test", "get_page_reading", "get_page_versions"]);
+  is("each answers, and none of them hands out anybody's address", [everything.every((r, i) => !r.error || needs.has(readers[i].name)), everything.some((r) => /@/.test(r.text))], [true, false]);
   const channels = await call("get_revenue_by_channel", { days: 7 });
   is("revenue by channel for the days asked for", [channels.data.window, (channels.data.channels as { channel: string }[])[0]?.channel], ["last_7_days", "tiktok"]);
   const funnel = await call("get_funnel", { days: 90 });

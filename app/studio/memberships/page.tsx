@@ -5,6 +5,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
+import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { MemberDiscount } from "@/components/member-discount";
 import { LEAVE_NAMES, STAY_AGES, isLeaveReason, membershipNumbers } from "@/lib/membership-numbers";
@@ -104,7 +105,7 @@ export default async function StudioMembershipsPage({ searchParams }: Params) {
       />
       <StudioStorePin sid={store.sid}>
         <main id="content" className="container-page pb-20 pt-10 sm:pt-14">
-          <p className="eyebrow">Membership numbers</p>
+          <StudioTrail store={store} here="Membership numbers" />
           <h1 className="t-h2 mt-3">How your memberships are doing</h1>
           <p className="mt-3 max-w-2xl text-ink-soft">
             Read from your own Stripe account: every membership of this store it holds. Payment plans are not memberships and

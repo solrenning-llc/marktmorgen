@@ -32,7 +32,7 @@
  * once ask for the same one and money is never returned twice.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { repliesFor } from "@/lib/redis-reply";
+import { repliesFor, stringList, UnknownReplyError } from "@/lib/redis-reply";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { askStream, noteCaptionLanguages, streamCaptions, streamConfig, streamRecord } from "@/lib/stream";
 import { readStreamPath, STREAM_ID_PATTERN } from "@/lib/stream-rules";
@@ -662,14 +662,24 @@ export async function autoWriting(pathnames: string[]): Promise<Record<string, s
 }
 
 /** Refunds for AI captions not yet confirmed by Stripe in one store folder, deleted videos included: cents owed and whether automatic looks have stopped. */
+/**
+ * Rule 24: a set or a record that does not read is unknown, never "nothing owed". A member whose record is gone
+ * (null) is no longer owed; one whose record is there but does not read throws UnknownReplyError, so the studio
+ * says it could not check instead of hiding a refund the creator may need to write to support about.
+ */
 export async function autoRefundsOwed(folder: string): Promise<{ id: string; cents: number; stuck: boolean }[]> {
   if (!isRedisConfigured() || !/^[0-9a-f]{32}$/.test(folder)) return [];
-  const [members] = await redisPipeline([["SMEMBERS", owedKey(folder)]]);
-  const ids = (Array.isArray(members) ? members : []).filter((m): m is string => typeof m === "string" && STREAM_ID_PATTERN.test(m)).sort().slice(0, 100);
+  const read = repliesFor(await redisPipeline([["SMEMBERS", owedKey(folder)]]), 1);
+  const members = read ? stringList(read[0]) : null;
+  if (!members) throw new UnknownReplyError("the owed captions refunds");
+  const ids = members.filter((m) => STREAM_ID_PATTERN.test(m)).sort().slice(0, 100);
   if (!ids.length) return [];
-  const rows = await redisPipeline(ids.map((id) => ["GET", pendingKey(id)]));
+  const rows = repliesFor(await redisPipeline(ids.map((id) => ["GET", pendingKey(id)])), ids.length);
+  if (!rows) throw new UnknownReplyError("the owed captions refunds");
   return ids.flatMap((id, i) => {
+    if (rows[i] === null) return [];
     const pending = parsePending(rows[i]);
-    return pending?.owed && readStreamPath(pending.path)?.folder === folder ? [{ id, cents: pending.owed.cents ?? pending.cents, stuck: pending.owed.stuck === true }] : [];
+    if (!pending) throw new UnknownReplyError("an owed captions refund");
+    return pending.owed && readStreamPath(pending.path)?.folder === folder ? [{ id, cents: pending.owed.cents ?? pending.cents, stuck: pending.owed.stuck === true }] : [];
   });
 }

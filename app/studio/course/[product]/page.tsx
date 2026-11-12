@@ -32,7 +32,7 @@ import { CourseShelfStudio } from "@/components/course-shelf-studio";
 import { templateById } from "@/lib/course-templates";
 import { isStreamConfigured, streamCaptions, streamStates } from "@/lib/stream";
 import { autoRefundsOwed, autoWriting } from "@/lib/auto-captions";
-import { SUPPORT_EMAIL } from "@/lib/creator-research";
+import { CaptionsRefundsOwed } from "@/components/captions-refunds-owed";
 import { isBillingConfigured } from "@/lib/billing";
 import { can } from "@/lib/team-roles";
 import { parseLanguage } from "@/lib/store-language";
@@ -82,8 +82,9 @@ export default async function StudioCoursePage({
   // And those being written by AI (lib/auto-captions.ts), which only somebody
   // who may spend on the plan's card, on a store with a plan, may ask for.
   const writing = await autoWriting(videoPaths).catch(() => ({}));
-  // Refunds for AI captions Stripe has not confirmed yet, shown to whoever may see the plan's card.
-  const owedRows: Awaited<ReturnType<typeof autoRefundsOwed>> = can(view.role, "billing") ? await autoRefundsOwed(folder).catch(() => []) : [];
+  // Refunds for AI captions Stripe has not confirmed yet, shown to whoever may see the plan's card; null when they
+  // could not be read (rule 24), so the section says so instead of hiding as if nothing were owed.
+  const owedRows: Awaited<ReturnType<typeof autoRefundsOwed>> | null = can(view.role, "billing") ? await autoRefundsOwed(folder).catch(() => null) : [];
   const autoCan =
     can(view.role, "billing") && store.subscriptionActive && Boolean(store.subscriptionId && store.stripeCustomerId) && isBillingConfigured() && isStreamConfigured();
   // Null when the students could not be read (rule 24): the page says so instead of "No students yet" or counts of 0.
@@ -180,22 +181,7 @@ export default async function StudioCoursePage({
           </span>
         </div>
 
-        {owedRows.length ? (
-          <section aria-labelledby="captions-refunds" className="mt-5 rounded-2xl border border-line bg-paper p-4" data-captions-refunds>
-            <h2 id="captions-refunds" className="text-base font-bold text-ink">
-              Refunds for AI captions not confirmed yet
-            </h2>
-            <ul className="mt-2 space-y-1 text-sm text-ink">
-              {owedRows.map((row) => (
-                <li key={row.id}>
-                  {row.stuck
-                    ? `A refund of $${(row.cents / 100).toFixed(2)} for AI captions was not confirmed by Stripe, and we have stopped checking it on our own. Write to ${SUPPORT_EMAIL} about it.`
-                    : `A refund of $${(row.cents / 100).toFixed(2)} for AI captions was asked for, and Stripe has not confirmed it yet. We check it again on our own; you do not need to do anything.`}
-                </li>
-              ))}
-            </ul>
-          </section>
-        ) : null}
+        <CaptionsRefundsOwed rows={owedRows} />
         <CourseAccessCheck
           check={lessonCaptionCheck(course, streams, captions, writing)}
           productId={product.id}

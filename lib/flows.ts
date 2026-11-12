@@ -172,6 +172,37 @@ const LEASE_SECONDS = 15 * 60;
  * another workflow removes that entry (act, "stop"), and then nothing of the run is queued again. KEYS: the lease,
  * the queue; ARGV: the lease member, the score, the queue member. 1 when queued, 0 when the run was taken out.
  */
+/**
+ * Moves each member from one sorted set to another, at a score, in one step (CX-123 rule 24): a member is written to
+ * KEYS[2] only by whoever took it off KEYS[1], and the answer is 1 or 0 for each, in order. Taking due runs off the
+ * queue into the lease, and putting them back, never leaves a run in neither: a reply lost after it ran leaves the run
+ * moved, where the next run's orphan pass (or the queue itself) finds it.
+ */
+export const FLOW_MOVE = `-- marktmorgen:flow-move:v1
+local out = {}
+for i = 2, #ARGV do
+  if redis.call('ZREM', KEYS[1], ARGV[i]) == 1 then
+    redis.call('ZADD', KEYS[2], ARGV[1], ARGV[i])
+    out[#out + 1] = 1
+  else
+    out[#out + 1] = 0
+  end
+end
+return out`;
+
+/** Moves `members` from `from` to `to` at `score`: true for each one this call moved. An answer of another shape throws. */
+async function moveMembers(from: string, to: string, score: number, members: string[]): Promise<boolean[]> {
+  if (!members.length) return [];
+  const reply = repliesFor(await redisPipeline([["EVAL", FLOW_MOVE, 2, from, to, score, ...members]]), 1);
+  const moved = reply?.[0];
+  if (!Array.isArray(moved) || moved.length !== members.length) throw new UnknownReplyError("a move in the sequence queue");
+  return moved.map((value) => {
+    const n = countOf(value);
+    if (n !== 0 && n !== 1) throw new UnknownReplyError("a move in the sequence queue");
+    return n === 1;
+  });
+}
+
 const QUEUE_IF_LEASED = `-- marktmorgen:flow-queue-if-leased:v1
 if redis.call('ZSCORE', KEYS[1], ARGV[1]) then
   redis.call('ZADD', KEYS[2], ARGV[2], ARGV[3])
@@ -1134,23 +1165,19 @@ export async function sendDueSteps(
   // What an earlier run took and never finished goes back in the queue first.
   const [stuck] = await redisPipeline([["ZRANGEBYSCORE", LEASE, 0, Math.floor(Date.now() / 1000), "LIMIT", 0, 1000]]);
   const orphans = Array.isArray(stuck) ? (stuck as string[]) : [];
-  if (orphans.length) {
-    const back = await redisPipeline(orphans.map((m) => ["ZREM", LEASE, m]));
-    const mine = orphans.filter((_, i) => Number(back[i]) === 1);
-    if (mine.length) await redisPipeline(mine.map((m) => ["ZADD", QUEUE, Math.floor(Date.now() / 1000), m]));
-  }
+  if (orphans.length) await moveMembers(LEASE, QUEUE, Math.floor(Date.now() / 1000), orphans);
   while (Date.now() < deadline) {
     const now = Math.floor(Date.now() / 1000);
     const [due] = await redisPipeline([["ZRANGEBYSCORE", QUEUE, 0, now, "LIMIT", 0, 300]]);
     const members = Array.isArray(due) ? (due as string[]) : [];
     if (!members.length) break;
     // Whoever removes a member from the queue is the one who sends it.
-    const taken = await redisPipeline(members.map((m) => ["ZREM", QUEUE, m]));
-    const owned = members.filter((_, i) => Number(taken[i]) === 1);
-    if (owned.length) await redisPipeline(owned.map((m) => ["ZADD", LEASE, now + LEASE_SECONDS, m]));
+    // Off the queue and into the lease in one step: an answer not read leaves them leased, sent by nobody this run,
+    // and the orphan pass puts them back once the lease runs out.
+    const taken = await moveMembers(QUEUE, LEASE, now + LEASE_SECONDS, members);
     const groups = new Map<string, string[]>();
     members.forEach((member, i) => {
-      if (Number(taken[i]) !== 1) return;
+      if (!taken[i]) return;
       // listId|handle|flowId|step|address — an address may itself hold a "|".
       const parts = member.split("|");
       const group = parts.slice(0, 4).join("|");
@@ -1162,9 +1189,7 @@ export async function sendDueSteps(
       // another workflow, done earlier in this batch, removes it (act, "stop"), and that run stays ended. As with the
       // orphans above, whoever removes the lease entry is the one who puts it back.
       const putBack = async (at: number) => {
-        const back = await redisPipeline(emails.map((email) => ["ZREM", LEASE, `${group}|${email}`]));
-        const held = emails.filter((_, i) => Number(back[i]) === 1);
-        if (held.length) await redisPipeline(held.map((email) => ["ZADD", QUEUE, at, `${group}|${email}`]));
+        await moveMembers(LEASE, QUEUE, at, emails.map((email) => `${group}|${email}`));
       };
       if (Date.now() > deadline) {
         // Out of time: back in the queue for the next run, untouched.

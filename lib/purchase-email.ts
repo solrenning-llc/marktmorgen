@@ -445,7 +445,9 @@ function renderConfirmation(store: Store, session: SessionRecord, nowSeconds: nu
 
   return {
     to: email,
-    subject: words.confirmSubject(name, product.title).slice(0, 200),
+    // Every product the order hands over is named, as the page after paying names them ("Sunday Baking and Pantry
+    // Checklist"): a cart or a box ticked at checkout is not filed under its first product only.
+    subject: words.confirmSubject(name, ticked.length ? listed([product.title, ...ticked.map((added) => added.listing.title)]) : product.title).slice(0, 200),
     text: lines.join("\n"),
   };
 }

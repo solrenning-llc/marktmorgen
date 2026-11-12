@@ -35,6 +35,7 @@ import { autoRefundsOwed, autoWriting } from "@/lib/auto-captions";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { isBillingConfigured } from "@/lib/billing";
 import { can } from "@/lib/team-roles";
+import { NO_BUYER_ADDRESSES, seesBuyerAddresses } from "@/lib/buyer-addresses";
 import { parseLanguage } from "@/lib/store-language";
 import { CourseWorkStudio, type StudioWork } from "@/components/course-work-studio";
 import { isUnreadSubmission, submissionsOf, waitingWork } from "@/lib/assignment";
@@ -69,6 +70,9 @@ export default async function StudioCoursePage({
   }
   const { view } = found;
   const { store } = view;
+  // Students' email addresses are orders data (ALL-160): a role without "orders", such as an Editor, sees the
+  // course and its students' progress without them, and is told why (lib/buyer-addresses.ts).
+  const seesBuyers = seesBuyerAddresses(view.role);
   const product = await readListing(store, productId);
   if (!product?.course) redirect(studioPath(store));
   const course = await readCourse(product.course.id);
@@ -109,7 +113,7 @@ export default async function StudioCoursePage({
   const work = hasTasks ? await waitingWork(course.id, 50, showingWork === "all") : { rows: [], total: 0 };
   const [handed, addresses] = await Promise.all([
     submissionsOf(course.id, work.rows),
-    Promise.all(work.rows.map((row) => studentEmail(course.id, row.who).catch(() => null))),
+    seesBuyers ? Promise.all(work.rows.map((row) => studentEmail(course.id, row.who).catch(() => null))) : work.rows.map(() => null),
   ]);
   const workRows: StudioWork[] = work.rows.flatMap((row, i) => {
     const submission = handed[i];
@@ -298,12 +302,14 @@ export default async function StudioCoursePage({
               body={course.certificate ? "Nobody has finished yet. When a student does and asks for their certificate, it is listed here." : "Switch certificates on above and each student who finishes is listed here with theirs."}
             />
           ) : (
+            <>
+            {seesBuyers ? null : <p className="mt-3 text-sm text-ink-soft">{NO_BUYER_ADDRESSES}</p>}
             <div className="mt-3 overflow-x-auto" tabIndex={0} role="region" aria-label="Certificates issued, one row each">
               <table className="w-full text-left text-sm">
                 <thead>
                   <tr className="text-ink-mute">
                     <th scope="col" className="py-2 pr-3 font-semibold">Name on it</th>
-                    <th scope="col" className="py-2 pr-3 font-semibold">Student</th>
+                    {seesBuyers ? <th scope="col" className="py-2 pr-3 font-semibold">Student</th> : null}
                     <th scope="col" className="py-2 pr-3 font-semibold">Issued</th>
                     <th scope="col" className="py-2 font-semibold"><span className="sr-only">Actions</span></th>
                   </tr>
@@ -314,7 +320,7 @@ export default async function StudioCoursePage({
                       <td className={`max-w-[14rem] break-words py-2 pr-3 font-semibold ${certificate.withdrawnAt ? "text-ink-mute line-through" : "text-ink"}`}>
                         {certificate.name}
                       </td>
-                      <td className="max-w-[14rem] break-all py-2 pr-3">{certificate.email}</td>
+                      {seesBuyers ? <td className="max-w-[14rem] break-all py-2 pr-3">{certificate.email}</td> : null}
                       <td className="whitespace-nowrap py-2 pr-3">
                         {day(certificate.issuedAt)}
                         {certificate.withdrawnAt ? <span className="block text-xs text-ink-mute">{`Withdrawn ${day(certificate.withdrawnAt)}`}</span> : null}
@@ -335,6 +341,7 @@ export default async function StudioCoursePage({
                 </tbody>
               </table>
             </div>
+            </>
           )}
         </section>
 
@@ -344,6 +351,7 @@ export default async function StudioCoursePage({
             Everyone who has opened the course since buying it, with how many lessons they marked done. Buyers are
             read from your own Stripe account; this list is what they did here.
           </p>
+          {seesBuyers ? null : <p className="mt-2 text-sm text-ink-soft">{NO_BUYER_ADDRESSES}</p>}
           {studentsRead === null ? null : (
             <div className="mt-5 grid grid-cols-3 gap-3 text-center">
               <div className="rounded-[var(--r-sm)] bg-sand p-4">
@@ -378,18 +386,18 @@ export default async function StudioCoursePage({
               <table className="w-full text-left text-sm">
                 <thead>
                   <tr className="text-ink-mute">
-                    <th scope="col" className="py-2 pr-3 font-semibold">Student</th>
+                    {seesBuyers ? <th scope="col" className="py-2 pr-3 font-semibold">Student</th> : null}
                     <th scope="col" className="py-2 pr-3 font-semibold">Joined</th>
                     <th scope="col" className="py-2 pr-3 font-semibold">Done</th>
                     <th scope="col" className="py-2 pr-3 font-semibold">Last here</th>
                     {quizLessons.length ? <th scope="col" className="py-2 pr-3 font-semibold">Quizzes passed</th> : null}
-                    <th scope="col" className="py-2 font-semibold"><span className="sr-only">Access</span></th>
+                    {seesBuyers ? <th scope="col" className="py-2 font-semibold"><span className="sr-only">Access</span></th> : null}
                   </tr>
                 </thead>
                 <tbody>
                   {students.map((student, i) => (
-                    <tr key={student.email} className="border-t border-line align-top">
-                      <td className="max-w-[14rem] break-all py-2 pr-3">{student.email}</td>
+                    <tr key={seesBuyers ? student.email : i} className="border-t border-line align-top">
+                      {seesBuyers ? <td className="max-w-[14rem] break-all py-2 pr-3">{student.email}</td> : null}
                       <td className="whitespace-nowrap py-2 pr-3">{day(student.since)}</td>
                       <td className="whitespace-nowrap py-2 pr-3 tabular-nums">{`${Math.min(student.done, lessons)} of ${lessons}`}</td>
                       <td className="whitespace-nowrap py-2 pr-3">{day(student.lastSeen)}</td>
@@ -398,12 +406,14 @@ export default async function StudioCoursePage({
                           {`${quizLessons.filter((id) => passed[i]?.has(id)).length} of ${quizLessons.length}`}
                         </td>
                       ) : null}
-                      <td className="py-2">
-                        <span className="flex flex-wrap items-center gap-x-4 gap-y-1">
-                          <StudentAccess productId={product.id} email={student.email} blocked={student.blocked} />
-                          {quizLessons.some((id) => !passed[i]?.has(id)) ? <GiveTriesBack productId={product.id} email={student.email} /> : null}
-                        </span>
-                      </td>
+                      {seesBuyers ? (
+                        <td className="py-2">
+                          <span className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                            <StudentAccess productId={product.id} email={student.email} blocked={student.blocked} />
+                            {quizLessons.some((id) => !passed[i]?.has(id)) ? <GiveTriesBack productId={product.id} email={student.email} /> : null}
+                          </span>
+                        </td>
+                      ) : null}
                     </tr>
                   ))}
                 </tbody>

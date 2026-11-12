@@ -749,6 +749,12 @@
       "parameters": []
     },
     {
+      "source": "app/grow-without-switching/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/grow-without-switching",
+      "parameters": []
+    },
+    {
       "source": "app/help/buyers/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/help/buyers",
@@ -2090,6 +2096,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 143
+    "pageTemplates": 144
   }
 }

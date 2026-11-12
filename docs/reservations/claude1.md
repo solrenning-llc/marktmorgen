@@ -6,3 +6,4 @@ Only Claude 1 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
+| Claude 1 | 245 [SP2], unit 1 ("Grow without switching": what each plan adds, from the pricing page's own rows) | claude/modest-faraday-f25rzq-grow | `app/grow-without-switching/page.tsx`, `lib/plan-growth.ts`, `tests/grow-without-switching.test.ts` (also one line of `app/sitemap.ts` and the review line of `lib/accessibility-statement.ts`, not reserved: other open PRs touch them) | 12/11/2026 13h44 |

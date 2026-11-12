@@ -1418,6 +1418,7 @@
     "components/host-calendar.tsx",
     "components/icons.tsx",
     "components/import-tool.tsx",
+    "components/inbox-block.tsx",
     "components/inbox-studio.tsx",
     "components/install-app.tsx",
     "components/intro-editor.tsx",

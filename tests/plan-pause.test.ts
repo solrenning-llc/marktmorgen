@@ -46,6 +46,7 @@ function subscription(id: string, over: Record<string, unknown> = {}): Record<st
     status: "active",
     customer: "cus_TestPause0001",
     default_payment_method: "pm_TestCard00001",
+    cancel_at: null,
     cancel_at_period_end: false,
     start_date: NOW - 100 * DAY,
     trial_end: NOW - 86 * DAY,

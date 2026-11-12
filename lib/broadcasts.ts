@@ -22,7 +22,7 @@ import { needData, takeData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { WHO, type Who, audience, readTags } from "@/lib/contacts";
 import { PORTION_NOTE, pauseNote } from "@/lib/mail-health";
-import { BATCH_SIZE, MAX_MAIL_BODY, MAX_SUBJECT, SENDER_WAIT_NOTE, monthlyAllowance, sendTo, usedThisMonth } from "@/lib/mail";
+import { BATCH_SIZE, MAX_MAIL_BODY, MAX_SUBJECT, SENDER_WAIT_NOTE, monthlyAllowance, sendTo, usedThisMonthExact } from "@/lib/mail";
 import { WINDOW_ID, allowanceWindow, opensAgainWords, windowId } from "@/lib/allowance-window";
 import { refreshPeriod } from "@/lib/billing-sync";
 import { costStandingOf } from "@/lib/plan-standing";
@@ -157,6 +157,10 @@ export const NO_BUYERS_NOTE = "Your store can no longer read its sales (Stripe a
 export const LIST_RETRY_SECONDS = 3_600;
 /** Said when a narrowed email's list could not be made now for a reason that passes: tried again in an hour. */
 const LIST_WAIT_NOTE = "The list of who it goes to could not be prepared just now. Nothing was sent. It is tried again in an hour.";
+/** Said on an email due while its store is switched off after notices about its content (lib/takedown.ts): it waits. */
+const SWITCHED_OFF_NOTE = "Your store is switched off after notices about its content, so nothing was sent. It goes out by itself once your store is back on.";
+/** The same for an email part of the way out: the rest wait. */
+const SWITCHED_OFF_PART_NOTE = "Your store is switched off after notices about its content, so nothing more was sent. The rest go out by themselves once your store is back on.";
 /** Said on an email to the whole list canceled because, when it was due, the plan was not paid and running: nothing read, sent or used. */
 export const PLAN_OFF_NOTE = "Your plan was not active when this email was due, so it was canceled. Nothing was sent and none of your studio requests were used for it. To send it, write it again while your plan is on.";
 /**
@@ -213,10 +217,18 @@ function parse(raw: unknown): Broadcast | null {
   }
 }
 
+/**
+ * One campaign's record. Null only when Redis answers its own nil (not there, or expired after RECORD_DAYS); a reply
+ * in any other shape throws BroadcastsUnreadable (rule 24), never "this email does not exist".
+ */
 export async function readBroadcast(id: string): Promise<Broadcast | null> {
   if (!BROADCAST_ID.test(id) || !isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["GET", bcKey(id)]]);
-  return parse(raw);
+  const response = await redisPipeline([["GET", bcKey(id)]]);
+  if (!Array.isArray(response) || response.length !== 1) throw new BroadcastsUnreadable("a campaign's record");
+  if (response[0] === null) return null;
+  const b = parse(response[0]);
+  if (!b) throw new BroadcastsUnreadable("a campaign's record");
+  return b;
 }
 
 async function save(b: Broadcast): Promise<void> {
@@ -435,9 +447,9 @@ export async function createBroadcast(
   if (startsNow) {
     // The month as the plan counts it (lib/allowance-window.ts), the same window
     // reserve takes from and the studio shows; a window that cannot be told
-    // leaves nothing, as reserve would refuse every batch of it.
+    // leaves nothing, as reserve would refuse every batch of it. A count that cannot be read throws: never an untouched month.
     const window = windowId(store);
-    const left = window ? monthlyAllowance(store) - (await usedThisMonth(store.listId, window)) : 0;
+    const left = window ? monthlyAllowance(store) - (await usedThisMonthExact(store.listId, window)) : 0;
     if (reach > left) return { ok: false, reason: "allowance" };
   }
   const broadcast: Broadcast = {
@@ -527,7 +539,9 @@ export async function cancelBroadcast(store: Store, id: string): Promise<boolean
     await redisPipeline([["DEL", toKey(id)]]).catch(() => {});
     if (b.hold?.units) await giveAllowanceIn(store, "studio", b.hold.units, b.hold.window);
     return true;
-  } catch {
+  } catch (error) {
+    // Its record is read before any write: one that could not be read changed nothing, so it is passed on as it is.
+    if (error instanceof BroadcastsUnreadable) throw error;
     // Either write may have happened: do not retry or restore a scheduled state.
     throw new BroadcastCancellationUnconfirmed();
   } finally {
@@ -599,6 +613,14 @@ export async function advanceBroadcast(
       await save(b);
       await redisPipeline([["SREM", QUEUE, id], ["DEL", toKey(id)]]);
       if (held?.units) await giveAllowanceIn(store, "studio", held.units, held.window);
+      return b;
+    }
+    // Switched off after notices about its content (lib/takedown.ts; any value but nothing or "" reads as off, rule 24):
+    // nothing is read, listed or sent. It waits in line, saying so, looked at again in an hour, and goes on by itself
+    // once the store is back on; what it holds and what it wrote down are kept.
+    if (store.suspended) {
+      b = { ...b, status: "waiting", note: b.sent > 0 ? SWITCHED_OFF_PART_NOTE : SWITCHED_OFF_NOTE, retryAt: now + LIST_RETRY_SECONDS };
+      await save(b);
       return b;
     }
     if (monthlyAllowance(store) === 0) {

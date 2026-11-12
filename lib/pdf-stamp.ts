@@ -222,10 +222,12 @@ export async function stampedCopy(
       }
     }
     const contentType = epub ? "application/epub+zip" : "application/pdf";
-    // In the store that charges nothing to send, a path is plain characters
-    // only (lib/vault-rules.ts); the name the buyer saves it under is kept
-    // beside the path, as it is for the original.
-    const last = isVaultPath(file.pathname) ? keyName(file.name) : file.name;
+    // A path is plain characters only, in either store (lib/vault-rules.ts);
+    // the name the buyer saves it under is kept beside the path, as it is for
+    // the original. In the host's own store too: its SDK writes a path as a
+    // query value but reads it from the address unescaped, so a "#" or a "?"
+    // in the creator's name made a copy that could never be read back.
+    const last = keyName(file.name);
     const pathname = `${copyFolder(file)}${sha(`${sale.reference}|${file.addedAt}`).slice(0, 24)}/${last}`;
     await writeFileWhole(pathname, stamped, contentType);
     const copy: ProductFile = {

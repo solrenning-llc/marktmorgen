@@ -37,7 +37,9 @@ import { HELP_AREAS } from "@/lib/help-areas";
 import { find, mount, texts } from "./client-hooks";
 import { done, is, part } from "./check";
 
-const decode = (html: string) => html.replace(/&#x27;/g, "'").replace(/&quot;/g, '"').replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">");
+// One pass, so "&amp;lt;" becomes "&lt;" and is never decoded twice.
+const ENTITIES: Record<string, string> = { "&#x27;": "'", "&quot;": '"', "&amp;": "&", "&lt;": "<", "&gt;": ">" };
+const decode = (html: string) => html.replace(/&(?:#x27|quot|amp|lt|gt);/g, (entity) => ENTITIES[entity]);
 
 async function main(): Promise<void> {
   const answers = HELP_SECTIONS.flatMap((s) => s.items.map((item) => ({ section: s.id, id: answerId(item.q), item })));

@@ -1371,3 +1371,20 @@ Unidades fechadas nesta rodada, sempre no head exato:
 - #3821 `44b2d285752fe457af681eef5940dc5c51c2a792`: **CHANGES / MÉDIO novo** apesar de 44 checks verdes. Resposta NX desconhecida + valor preexistente byte-idêntico é inferida como escrita própria pelo MGET e depois apagada; após OK, DEL incondicional também pode apagar substituição concorrente. Direção: nunca inferir ownership por igualdade após NX desconhecido; compare-and-delete atômico apenas para OK confirmado, com testes sintéticos das duas corridas. Comentário `6811502410`.
 
 Resultado causal: 10 unidades comentadas; nenhum ramo/produto alterado. #3821 ficou explicitamente bloqueado por risco de perda de dado concorrente; #3827 ficou bloqueado por CI real sem log legível; #3830/#3824/#3823/#3822 não receberam conserto duplicado para Mobile render. Nenhum PR foi fechado, incorporado ou enfileirado. Continuidade permanece habilitada: na próxima rodada, revalidar MAIN VERMELHO e fila primeiro; abaixo do teto, corrigir somente achado autorizado em um push por PR; acima do teto, continuar revisões e preparação sem push.
+
+## Rodada Codex L — 11/11/2026, 23:16 (Fortaleza)
+
+- Continuidade: lote de triagem/revisão de PRs no head exato, somente pela integração GitHub; nenhum subagente e nenhum uso do computador do dono.
+- Gates: fila do Actions começou em 292 e terminou em 326; por ALL-120, nenhum push de produto, rerun, atualização de ramo, fila ou merge. `main` permaneceu em `1d3f367a2d52279eb57ecfd41c705bfdb25fe273`; busca direta por issue aberta `MAIN VERMELHO` retornou 0.
+- Foram lidos integralmente metadados, diffs, discussão e checks dos dez heads, e publicados pareceres em inglês:
+  - PR #3819 — head `3b0931027f741b6806784df3ec6f9259639ef4a6`; 9/9 agregados verdes, sem achado novo, conflito com main; comentário 6812382653.
+  - PR #3820 — head `780a8dc8b0b6f9b7714803e5938f5b42cd0f77be`; 9/9 verdes, sem bloqueio novo, conflito; comentário 6812382130.
+  - PR #3818 — head `23d2d67df2f12665d0c51f7e99fe2afc43d2a80f`; 9/9 verdes, sem achado novo, conflito; comentário 6812382398.
+  - PR #3812 — head `ccf4c1230c14361687f91f2a02ad1f6ba58f533d`; revisão independente do caminho monetário aprovada, 9/9 verdes, conflito; comentário 6812380582.
+  - PR #3817 — head `c7423f704ee296c9e97e36d790284eca475d5699`; 8/9, `verify` vermelho, conflito; log integral fechou transporte em duas tentativas, sem excerpt/anotação; nenhuma correção inferida; comentário 6812381638.
+  - PR #3815 — head `bd7e55062fd2e8a48c14533744fd8d7234e4895c`; 8/9, somente `Mobile render (candidate)` vermelho com amostras 296/40/169 ms, mesma família tratada no #3642, conflito; comentário 6812382889.
+  - PR #3813 — head `03dce56843226d7a1a226b8498a6687f6ec6956e`; 8/9, `verify` vermelho, conflito; log integral fechou transporte em duas tentativas, sem excerpt/anotação; nenhuma correção inferida; comentário 6812381871.
+  - PR #3814 — head `885abf21ef49dc5409cdadd8fdb873000ff4d1f7`; 8/9, `verify` e Mobile vermelhos, conflito. MEDIUM confirmado: `nl:ls:due` registrado como company data sem disposição obrigatória de person data; Mobile 48/310/217 ms, mesma família #3642; comentário 6812381340.
+  - PR #3811 — head `14d6689aac477b55c6648a1acf2c8e170fc43170`; 8/9, somente Mobile vermelho com 210/40/40 ms, mesma família #3642, conflito; comentário 6812380849.
+  - PR #3816 — head `e85b7ebbac9fc9ba4fba41b8522985c13c1da779`; 9/9 verdes e mergeável, mas MEDIUM confirmado continua aberto: aplicação avalia 1+30 módulos antes de remover o módulo vazio recém-criado; comentário 6812381086.
+- Próxima continuidade: antes de qualquer mutação, repetir gates frescos; com fila acima de 300, seguir apenas com revisão/comentários e preparar correções sem push. Retomar pelos próximos PRs abertos ainda sem parecer Codex L no head atual.

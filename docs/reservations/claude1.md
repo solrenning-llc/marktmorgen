@@ -6,3 +6,4 @@ Only Claude 1 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
+| Claude 1 | 291 [SQ2] unit 1, "Find a lesson" over a course's outline | claude1/sq2-find-lesson | `lib/lesson-find-rules.ts` (new), `components/course-find.tsx` (new), `tests/lesson-find.test.ts` (new), `tests/e2e/course-find.mjs` (new), `components/course-outline.tsx` (the two data attributes only), `app/[handle]/course/[product]/page.tsx` (the wrapper only), `lib/buyer-words/courses.ts` (the three find phrases only), `.github/workflows/accessibility-studio-matrix.yml` (its one step only) | 12/11/2026 19h44 |

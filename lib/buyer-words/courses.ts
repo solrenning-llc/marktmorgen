@@ -102,6 +102,10 @@ const en = {
   alreadyBoughtNote: "Type the address you paid with and a link to open the course on this device is sent there. No password.",
   sendLink: "Send me the link",
   inside: "What is inside",
+  // 291 [SQ2] unit 1: "Find a lesson" above the course's outline (components/course-find.tsx).
+  findLabel: "Find a lesson",
+  findMatches: (n: number) => (n === 1 ? "1 lesson matches." : `${n} lessons match.`),
+  findNone: (q: string) => `No lesson matches “${q}”.`,
   cohortBefore:
     "Everyone on this course moves through it together. It begins on {day}, and the first module opens that morning — buying earlier holds your place rather than starting you early.",
   cohortAfter:
@@ -429,6 +433,10 @@ const es: CoursesWords = {
   alreadyBoughtNote: "Escribe la dirección con la que pagaste y se enviará allí un enlace para abrir el curso en este dispositivo. Sin contraseña.",
   sendLink: "Envíame el enlace",
   inside: "Qué incluye",
+  // 291 [SQ2] unit 1: "Find a lesson" above the course's outline (components/course-find.tsx).
+  findLabel: "Buscar una lección",
+  findMatches: (n: number) => (n === 1 ? "1 lección coincide." : `${n} lecciones coinciden.`),
+  findNone: (q: string) => `Ninguna lección coincide con «${q}».`,
   cohortBefore:
     "Todos en este curso avanzan juntos. Empieza el {day}, y el primer módulo se abre esa mañana: comprar antes te guarda el lugar, pero no te hace empezar antes.",
   cohortAfter:
@@ -736,6 +744,10 @@ const fr: CoursesWords = {
     "Saisissez l'adresse avec laquelle vous avez payé, et un lien pour ouvrir la formation sur cet appareil y sera envoyé. Sans mot de passe.",
   sendLink: "Envoyez-moi le lien",
   inside: "Ce qu'elle contient",
+  // 291 [SQ2] unit 1: "Find a lesson" above the course's outline (components/course-find.tsx).
+  findLabel: "Trouver une leçon",
+  findMatches: (n: number) => (n === 1 ? "1 leçon correspond." : `${n} leçons correspondent.`),
+  findNone: (q: string) => `Aucune leçon ne correspond à « ${q} ».`,
   cohortBefore:
     "Tous les participants suivent cette formation ensemble. Elle commence le {day}, et le premier module ouvre ce matin-là — acheter plus tôt vous réserve une place, sans vous faire commencer plus tôt.",
   cohortAfter:
@@ -1037,6 +1049,10 @@ const de: CoursesWords = {
     "Geben Sie die Adresse ein, mit der Sie bezahlt haben, und ein Link, der den Kurs auf diesem Gerät öffnet, wird dorthin gesendet. Kein Passwort.",
   sendLink: "Link an mich senden",
   inside: "Was enthalten ist",
+  // 291 [SQ2] unit 1: "Find a lesson" above the course's outline (components/course-find.tsx).
+  findLabel: "Lektion suchen",
+  findMatches: (n: number) => (n === 1 ? "1 Lektion passt." : `${n} Lektionen passen.`),
+  findNone: (q: string) => `Keine Lektion passt zu „${q}“.`,
   cohortBefore:
     "Alle Teilnehmenden durchlaufen diesen Kurs gemeinsam. Er beginnt am {day}, und das erste Modul wird an diesem Morgen freigeschaltet — wer früher kauft, sichert sich einen Platz, fängt aber nicht früher an.",
   cohortAfter:
@@ -1340,6 +1356,10 @@ const it: CoursesWords = {
   alreadyBoughtNote: "Scrivi l'indirizzo con cui hai pagato e lì verrà inviato un link per aprire il corso su questo dispositivo. Nessuna password.",
   sendLink: "Inviami il link",
   inside: "Cosa contiene",
+  // 291 [SQ2] unit 1: "Find a lesson" above the course's outline (components/course-find.tsx).
+  findLabel: "Trova una lezione",
+  findMatches: (n: number) => (n === 1 ? "1 lezione corrisponde." : `${n} lezioni corrispondono.`),
+  findNone: (q: string) => `Nessuna lezione corrisponde a «${q}».`,
   cohortBefore:
     "Tutti gli iscritti seguono questo corso insieme. Inizia il {day}, e il primo modulo si apre quella mattina: acquistare prima ti riserva il posto, ma non ti fa iniziare prima.",
   cohortAfter:
@@ -1644,6 +1664,10 @@ const nl: CoursesWords = {
     "Vul het adres in waarmee je hebt betaald, dan wordt daar een link naartoe gestuurd om de cursus op dit apparaat te openen. Geen wachtwoord.",
   sendLink: "Stuur me de link",
   inside: "Wat erin zit",
+  // 291 [SQ2] unit 1: "Find a lesson" above the course's outline (components/course-find.tsx).
+  findLabel: "Een les zoeken",
+  findMatches: (n: number) => (n === 1 ? "1 les komt overeen." : `${n} lessen komen overeen.`),
+  findNone: (q: string) => `Geen les komt overeen met ‘${q}’.`,
   cohortBefore:
     "Iedereen in deze cursus doorloopt hem samen. Hij begint op {day}, en de eerste module gaat die ochtend open — wie eerder koopt, houdt een plek vrij maar begint niet eerder.",
   cohortAfter:
@@ -1948,6 +1972,10 @@ const pt: CoursesWords = {
     "Introduza o endereço com que pagou e será enviada para lá uma ligação para abrir o curso neste dispositivo. Sem palavra-passe.",
   sendLink: "Enviar-me a ligação",
   inside: "O que inclui",
+  // 291 [SQ2] unit 1: "Find a lesson" above the course's outline (components/course-find.tsx).
+  findLabel: "Procurar uma lição",
+  findMatches: (n: number) => (n === 1 ? "1 lição corresponde." : `${n} lições correspondem.`),
+  findNone: (q: string) => `Nenhuma lição corresponde a «${q}».`,
   cohortBefore:
     "Todos neste curso avançam em conjunto. Começa a {day}, e o primeiro módulo abre nessa manhã — comprar mais cedo garante o seu lugar, mas não o faz começar mais cedo.",
   cohortAfter:

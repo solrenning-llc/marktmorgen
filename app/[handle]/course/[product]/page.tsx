@@ -24,6 +24,8 @@ import { heldBack, passedForGate, requiredQuizLessons } from "@/lib/quiz";
 import { MAX_CERT_NAME, MIN_CERT_NAME, certificateOf, hasFinished } from "@/lib/certificate";
 import { canManage } from "@/lib/membership-manage";
 import { CourseOutline, WithDay } from "@/components/course-outline";
+import { CourseFind } from "@/components/course-find";
+import { FIND_MIN_LESSONS } from "@/lib/lesson-find-rules";
 import { ForgetLessonPositions } from "@/components/forget-lesson-positions";
 import { deviceLastKey, devicePlaceKey } from "@/lib/lesson-position";
 import { ForgetLastLesson } from "@/components/remember-last-lesson";
@@ -366,7 +368,14 @@ export default async function CoursePage({ params, searchParams }: Params) {
             </p>
           ) : null}
           <div className="mt-4">
-            <CourseOutline course={course} base={base} start={start} done={known} held={held} language={store.language} />
+            {/* 291 [SQ2]: "Find a lesson" over the outline, in a course long enough to need it. */}
+            {course.modules.reduce((n, unit) => n + unit.lessons.length, 0) >= FIND_MIN_LESSONS ? (
+              <CourseFind language={store.language}>
+                <CourseOutline course={course} base={base} start={start} done={known} held={held} language={store.language} />
+              </CourseFind>
+            ) : (
+              <CourseOutline course={course} base={base} start={start} done={known} held={held} language={store.language} />
+            )}
           </div>
         </div>
 

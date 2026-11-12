@@ -62,6 +62,8 @@ const en = {
   ownTitle: "This is your own course",
   ownBody: "You see every lesson, as a student sees an open one. Nothing you do here is counted as progress.",
   seeSample: "See the certificate students get",
+  /** The heading of the course page's shelf of the store's other products (628 [HN4](b)). */
+  shelfTitle: (store: string) => `More from ${store}`,
   endedTitle: "Your membership has ended",
   endedBody:
     "This course came with your membership, which is no longer running, so its lessons are closed now. Renew and it opens right away, with your progress where you left it.",
@@ -70,7 +72,13 @@ const en = {
   manageMembership: "manage your membership",
   doneOf: (done: number, total: number) => `${done} of ${total} done`,
   yourProgress: "Your progress",
+  /** Said instead of the count when the lessons done could not be read (rule 24). */
+  progressUnknown: "We could not check your progress just now. Your lessons are all here. Reload the page to try again.",
+  /** Said in the certificate box when the lessons done could not be read. */
+  certProgressUnknown: "We could not check just now whether you finished the course, so the certificate cannot be asked for yet. Reload the page to try again.",
   startFirst: "Start the first lesson",
+  /** The button when the lessons done could not be read: it opens the first lesson, claiming no progress. */
+  openFirst: "Open the first lesson",
   startOver: "Go back to the start",
   continueOn: "Continue where you left off",
   opensSoon: "The first lessons open soon: the dates are below.",
@@ -306,7 +314,7 @@ const en = {
   podcastNotices: {
     sent: {
       title: "Check your inbox",
-      body: "If that address has this podcast, a link to its own feed is on its way. It comes from the store via Marktmorgen and usually arrives within a minute; if it is not there, look in spam.",
+      body: "If that address has access to this podcast, we'll try to email its feed link. Check your inbox and spam folder.",
     },
     email: { title: "That does not look like an email address", body: "Type the address you bought it with." },
     limited: { title: "Too many requests for now", body: "Try again in an hour." },
@@ -387,6 +395,7 @@ const es: CoursesWords = {
   ownTitle: "Este es tu propio curso",
   ownBody: "Ves todas las lecciones, como un estudiante ve una que ya está abierta. Nada de lo que hagas aquí cuenta como progreso.",
   seeSample: "Ver el certificado que reciben los estudiantes",
+  shelfTitle: (store) => `Más de ${store}`,
   endedTitle: "Tu membresía terminó",
   endedBody:
     "Este curso venía con tu membresía, que ya no está activa, así que sus lecciones ahora están cerradas. Renuévala y se abre al instante, con tu progreso donde lo dejaste.",
@@ -394,7 +403,10 @@ const es: CoursesWords = {
   manageMembership: "gestiona tu membresía",
   doneOf: (done, total) => `${done} de ${total} completadas`,
   yourProgress: "Tu progreso",
+  progressUnknown: "No pudimos comprobar tu progreso en este momento. Todas tus lecciones siguen aquí. Vuelve a cargar la página para intentarlo de nuevo.",
+  certProgressUnknown: "No pudimos comprobar en este momento si terminaste el curso, así que todavía no puedes pedir el certificado. Vuelve a cargar la página para intentarlo de nuevo.",
   startFirst: "Empezar la primera lección",
+  openFirst: "Abrir la primera lección",
   startOver: "Volver al principio",
   continueOn: "Seguir donde lo dejaste",
   opensSoon: "Las primeras lecciones se abren pronto: las fechas están abajo.",
@@ -610,7 +622,7 @@ const es: CoursesWords = {
   podcastNotices: {
     sent: {
       title: "Revisa tu bandeja de entrada",
-      body: "Si esa dirección tiene este pódcast, va en camino un enlace a su propio feed. Lo envía la tienda a través de Marktmorgen y suele llegar en menos de un minuto; si no está, mira en spam.",
+      body: "Si esa dirección tiene acceso a este pódcast, intentaremos enviarle por email el enlace a su feed. Revisa la bandeja de entrada y el spam.",
     },
     email: { title: "Eso no parece una dirección de email", body: "Escribe la dirección con la que lo compraste." },
     limited: { title: "Demasiadas solicitudes por ahora", body: "Inténtalo de nuevo dentro de una hora." },
@@ -689,6 +701,7 @@ const fr: CoursesWords = {
   ownTitle: "C'est votre propre formation",
   ownBody: "Vous voyez toutes les leçons, comme un participant voit une leçon ouverte. Rien de ce que vous faites ici n'est compté comme progression.",
   seeSample: "Voir le certificat que reçoivent les participants",
+  shelfTitle: (store) => `Plus de ${store}`,
   endedTitle: "Votre abonnement a pris fin",
   endedBody:
     "Cette formation était incluse dans votre abonnement, qui n'est plus actif. Ses leçons sont donc fermées pour le moment. Renouvelez-le et elle s'ouvre aussitôt, avec votre progression là où vous l'aviez laissée.",
@@ -696,7 +709,10 @@ const fr: CoursesWords = {
   manageMembership: "gérer votre abonnement",
   doneOf: (done, total) => `${done} sur ${total} ${frPlural(done, "terminée", "terminées")}`,
   yourProgress: "Votre progression",
+  progressUnknown: "Nous n'avons pas pu vérifier votre progression pour le moment. Toutes vos leçons sont bien là. Rechargez la page pour réessayer.",
+  certProgressUnknown: "Nous n'avons pas pu vérifier pour le moment si vous avez terminé la formation. Le certificat ne peut donc pas encore être demandé. Rechargez la page pour réessayer.",
   startFirst: "Commencer la première leçon",
+  openFirst: "Ouvrir la première leçon",
   startOver: "Revenir au début",
   continueOn: "Reprendre là où vous en étiez",
   opensSoon: `Les premières leçons ouvrent bientôt${S}: les dates sont indiquées ci-dessous.`,
@@ -912,7 +928,7 @@ const fr: CoursesWords = {
   podcastNotices: {
     sent: {
       title: "Consultez votre boîte de réception",
-      body: `Si cette adresse possède ce podcast, un lien vers son propre flux est en route. Il vient de la boutique via Marktmorgen et arrive généralement en moins d'une minute${S}; s'il n'est pas là, regardez dans les spams.`,
+      body: "Si cette adresse a accès à ce podcast, nous essaierons de lui envoyer le lien de son flux par e-mail. Vérifiez votre boîte de réception et vos spams.",
     },
     email: { title: "Cela ne ressemble pas à une adresse e-mail", body: "Saisissez l'adresse avec laquelle vous l'avez acheté." },
     limited: { title: "Trop de demandes pour le moment", body: "Réessayez dans une heure." },
@@ -985,6 +1001,7 @@ const de: CoursesWords = {
   ownTitle: "Das ist Ihr eigener Kurs",
   ownBody: "Sie sehen jede Lektion so, wie Teilnehmende eine freigeschaltete sehen. Nichts, was Sie hier tun, zählt als Fortschritt.",
   seeSample: "Das Zertifikat ansehen, das Teilnehmende erhalten",
+  shelfTitle: (store) => `Mehr von ${store}`,
   endedTitle: "Ihre Mitgliedschaft ist beendet",
   endedBody:
     "Dieser Kurs gehörte zu Ihrer Mitgliedschaft, die nicht mehr läuft, deshalb sind seine Lektionen jetzt geschlossen. Verlängern Sie sie, und er öffnet sich sofort wieder, mit Ihrem Fortschritt dort, wo Sie aufgehört haben.",
@@ -992,7 +1009,10 @@ const de: CoursesWords = {
   manageMembership: "Mitgliedschaft verwalten",
   doneOf: (done, total) => `${done} von ${total} erledigt`,
   yourProgress: "Ihr Fortschritt",
+  progressUnknown: "Wir konnten Ihren Fortschritt gerade nicht prüfen. Alle Ihre Lektionen sind noch da. Laden Sie die Seite neu, um es noch einmal zu versuchen.",
+  certProgressUnknown: "Wir konnten gerade nicht prüfen, ob Sie den Kurs abgeschlossen haben. Das Zertifikat kann deshalb noch nicht angefordert werden. Laden Sie die Seite neu, um es noch einmal zu versuchen.",
   startFirst: "Erste Lektion beginnen",
+  openFirst: "Erste Lektion öffnen",
   startOver: "Zurück zum Anfang",
   continueOn: "Dort weitermachen, wo Sie aufgehört haben",
   opensSoon: "Die ersten Lektionen werden bald freigeschaltet: Die Termine stehen unten.",
@@ -1210,7 +1230,7 @@ const de: CoursesWords = {
   podcastNotices: {
     sent: {
       title: "Sehen Sie in Ihrem Posteingang nach",
-      body: "Wenn zu dieser Adresse dieser Podcast gehört, ist ein Link zu ihrem eigenen Feed unterwegs. Er kommt vom Shop über Marktmorgen und ist meist innerhalb einer Minute da; wenn nicht, sehen Sie im Spam nach.",
+      body: "Wenn diese Adresse Zugang zu diesem Podcast hat, versuchen wir, ihr den Feed-Link per E-Mail zu senden. Sehen Sie im Posteingang und im Spam-Ordner nach.",
     },
     email: { title: "Das sieht nicht wie eine E-Mail-Adresse aus", body: "Geben Sie die Adresse ein, mit der Sie ihn gekauft haben." },
     limited: { title: "Vorerst zu viele Anfragen", body: "Versuchen Sie es in einer Stunde erneut." },
@@ -1286,6 +1306,7 @@ const it: CoursesWords = {
   ownTitle: "Questo è il tuo corso",
   ownBody: "Vedi ogni lezione come uno studente vede una lezione aperta. Niente di ciò che fai qui viene contato come progresso.",
   seeSample: "Vedi l'attestato che ricevono gli studenti",
+  shelfTitle: (store) => `Altro da ${store}`,
   endedTitle: "La tua iscrizione è terminata",
   endedBody:
     "Questo corso era incluso nella tua iscrizione, che non è più attiva, quindi ora le sue lezioni sono chiuse. Rinnovala e si riapre subito, con i tuoi progressi dove li avevi lasciati.",
@@ -1293,7 +1314,10 @@ const it: CoursesWords = {
   manageMembership: "gestisci la tua iscrizione",
   doneOf: (done, total) => `${done} di ${total} completate`,
   yourProgress: "I tuoi progressi",
+  progressUnknown: "Non siamo riusciti a controllare i tuoi progressi in questo momento. Tutte le tue lezioni sono ancora qui. Ricarica la pagina per riprovare.",
+  certProgressUnknown: "Non siamo riusciti a controllare in questo momento se hai finito il corso, quindi non puoi ancora chiedere il certificato. Ricarica la pagina per riprovare.",
   startFirst: "Inizia la prima lezione",
+  openFirst: "Apri la prima lezione",
   startOver: "Torna all'inizio",
   continueOn: "Riprendi da dove avevi lasciato",
   opensSoon: "Le prime lezioni si aprono presto: le date sono qui sotto.",
@@ -1509,7 +1533,7 @@ const it: CoursesWords = {
   podcastNotices: {
     sent: {
       title: "Controlla la tua casella di posta",
-      body: "Se quell'indirizzo ha questo podcast, un link al suo feed personale è in arrivo. Lo invia il negozio tramite Marktmorgen e di solito arriva entro un minuto; se non c'è, guarda nello spam.",
+      body: "Se quell'indirizzo ha accesso a questo podcast, proveremo a inviargli il link al feed per email. Controlla la posta in arrivo e lo spam.",
     },
     email: { title: "Non sembra un indirizzo email", body: "Scrivi l'indirizzo con cui l'hai acquistato." },
     limited: { title: "Troppe richieste per ora", body: "Riprova tra un'ora." },
@@ -1585,6 +1609,7 @@ const nl: CoursesWords = {
   ownTitle: "Dit is je eigen cursus",
   ownBody: "Je ziet elke les zoals een cursist een geopende les ziet. Niets wat je hier doet, telt als voortgang.",
   seeSample: "Bekijk het certificaat dat cursisten krijgen",
+  shelfTitle: (store) => `Meer van ${store}`,
   endedTitle: "Je lidmaatschap is afgelopen",
   endedBody:
     "Deze cursus hoorde bij je lidmaatschap, dat niet meer loopt, dus de lessen zijn nu gesloten. Verleng het en hij gaat meteen weer open, met je voortgang waar je was gebleven.",
@@ -1592,7 +1617,10 @@ const nl: CoursesWords = {
   manageMembership: "beheer je lidmaatschap",
   doneOf: (done, total) => `${done} van ${total} afgerond`,
   yourProgress: "Je voortgang",
+  progressUnknown: "We konden je voortgang op dit moment niet controleren. Al je lessen staan er nog. Laad de pagina opnieuw om het nog eens te proberen.",
+  certProgressUnknown: "We konden op dit moment niet controleren of je de cursus hebt afgerond, dus je kunt het certificaat nog niet aanvragen. Laad de pagina opnieuw om het nog eens te proberen.",
   startFirst: "Begin met de eerste les",
+  openFirst: "Open de eerste les",
   startOver: "Terug naar het begin",
   continueOn: "Ga verder waar je was gebleven",
   opensSoon: "De eerste lessen gaan binnenkort open: de data staan hieronder.",
@@ -1809,7 +1837,7 @@ const nl: CoursesWords = {
   podcastNotices: {
     sent: {
       title: "Kijk in je inbox",
-      body: "Als dat adres deze podcast heeft, is er een link naar een eigen feed onderweg. Die komt van de winkel via Marktmorgen en is er meestal binnen een minuut; staat hij er niet, kijk dan bij spam.",
+      body: "Als dat adres toegang heeft tot deze podcast, proberen we de feedlink per e-mail te sturen. Kijk in je inbox en bij spam.",
     },
     email: { title: "Dat lijkt geen e-mailadres", body: "Vul het adres in waarmee je hem hebt gekocht." },
     limited: { title: "Voorlopig te veel verzoeken", body: "Probeer het over een uur opnieuw." },
@@ -1885,6 +1913,7 @@ const pt: CoursesWords = {
   ownTitle: "Este é o seu próprio curso",
   ownBody: "Vê todas as aulas, tal como um aluno vê uma aula aberta. Nada do que fizer aqui conta como progresso.",
   seeSample: "Ver o certificado que os alunos recebem",
+  shelfTitle: (store) => `Mais de ${store}`,
   endedTitle: "A sua subscrição terminou",
   endedBody:
     "Este curso fazia parte da sua subscrição, que já não está ativa, por isso as aulas estão agora fechadas. Renove-a e o curso abre de imediato, com o seu progresso onde o deixou.",
@@ -1892,7 +1921,10 @@ const pt: CoursesWords = {
   manageMembership: "gerir a sua subscrição",
   doneOf: (done, total) => `${done} de ${total} concluídas`,
   yourProgress: "O seu progresso",
+  progressUnknown: "Não foi possível verificar o seu progresso agora. Todas as suas aulas continuam aqui. Recarregue a página para tentar de novo.",
+  certProgressUnknown: "Não foi possível verificar agora se concluiu o curso, por isso o certificado ainda não pode ser pedido. Recarregue a página para tentar de novo.",
   startFirst: "Começar a primeira aula",
+  openFirst: "Abrir a primeira aula",
   startOver: "Voltar ao início",
   continueOn: "Continuar onde ficou",
   opensSoon: "As primeiras aulas abrem em breve: as datas estão abaixo.",
@@ -2109,7 +2141,7 @@ const pt: CoursesWords = {
   podcastNotices: {
     sent: {
       title: "Consulte a sua caixa de entrada",
-      body: "Se esse endereço tem este podcast, uma ligação para o seu próprio feed está a caminho. É enviada pela loja através da Marktmorgen e costuma chegar em menos de um minuto; se não estiver lá, veja no spam.",
+      body: "Se esse endereço tiver acesso a este podcast, tentaremos enviar-lhe por email a ligação para o feed. Consulte a sua caixa de entrada e o spam.",
     },
     email: { title: "Isso não parece um endereço de email", body: "Introduza o endereço com que o comprou." },
     limited: { title: "Demasiados pedidos por agora", body: "Tente novamente daqui a uma hora." },

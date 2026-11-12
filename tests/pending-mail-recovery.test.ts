@@ -570,3 +570,29 @@ test('small funded successor grants compose both normal workers through an unsup
   assert.equal(f.calls.filter(call=>call.method==='POST').length,1,'only the original checkout was created');
  });
 });
+
+test('a row seen under an unsupported review stays scheduled and is sent once its review is continued', {skip:redisOptIn}, async()=>{
+ await isolatedRecoveryProof(async(pipeline)=>{
+  let clock=Date.now();const start=clock;
+  const reviewA={...shipmentPolicy(start),reviewId:'SYNTHETIC_REVIEW_A'};
+  const reviewB={...shipmentPolicy(start),reviewId:'SYNTHETIC_REVIEW_B'};
+  const continued={...reviewB,continuedReviewIds:[reviewA.reviewId]};
+  const at=(policy:typeof reviewA)=>({lifecycle:'active' as const,policy,pipeline,now:()=>clock});
+  const input={statsId:'synthetic_review_continuation',session:'cs_test_ReviewContinuation0001',authorizedAt:start,
+   shipped:{at:Math.floor(start/1000),tracking:'https://example.test/track'},
+   message:{from:'Store <mail@example.test>',to:'buyer@example.test',subject:'Shipped',text:'Synthetic shipping update',replyTo:'owner@example.test'}};
+  assert.equal((await enqueueShipmentMail(input,at(reviewA))).ok,true);
+  const id=shipmentMailId(input.statsId,input.session);
+  assert.deepEqual(await runShipmentMail(clock+30000,async()=> 'waiting',at(reviewA)),{accepted:0,waiting:1,unknown:0},'claimed and deferred under A');
+  clock+=reviewA.retryMilliseconds;
+  assert.deepEqual(await runShipmentMail(clock+30000,async()=>{throw Error('An unsupported review may not send');},at(reviewB)),{accepted:0,waiting:0,unknown:1});
+  const [score]=await pipeline([['ZSCORE','nl:ship:mail:due',id]]);
+  assert.ok(score!==null&&Number(score)>clock,'the unsupported row stays scheduled, behind this pass');
+  clock=Number(score);let posts=0;
+  const later=await runShipmentMail(clock+30000,async(_message,beforePost)=>{assert.equal(await beforePost(),true);posts++;return 'accepted';},at(continued));
+  assert.deepEqual(later,{accepted:1,waiting:0,unknown:0},'continuing review A lets the same row be sent');
+  assert.equal(posts,1);
+  const [row,items]=await pipeline([['GET','nl:ship:mail:row:'+id],['HGET','nl:ship:mail:pool','items']]);
+  assert.equal(row,null);assert.equal(items,'0','the pending hold is released');
+ });
+});

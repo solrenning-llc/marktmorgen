@@ -297,6 +297,32 @@ def main():
             assert db.command("EXISTS", exactkeys[0]) == 0
         print("PASS: cancellation retains both erasure fields, exact canonical pool decrements and the unchanged25-command bound")
 
+        # A paid confirmation shares the shipment Lua and pool HASHes. Its
+        # provider refusal keeps the confirmation family's own refused row and
+        # never writes a shipment-family refusal summary that shipment erasure
+        # and person copy cannot own.
+        refused_row, refused_keys = fixture("refused-paid-confirmation")
+        for key_index in [2, 3, 5, 6, 7]:
+            refused_keys[key_index] += ":refused"
+        made.update(refused_keys)
+        assert enqueue(refused_row, refused_keys)[0] == "queued"
+        sent = json.loads(db.command("GET", refused_keys[0]))
+        sent.update(state="dispatching", phase="queued", owner="f" * 48, next=0, leaseUntil=now + 60_000)
+        db.command("SET", refused_keys[0], json.dumps(sent)); db.command("ZREM", refused_keys[2], sent["id"])
+        pools_before = [db.command("HGETALL", refused_keys[5]), db.command("HGETALL", refused_keys[6])]
+        answer = shared_change("refused", refused_keys)
+        assert answer[0] == "refused", answer
+        kept = json.loads(db.command("GET", refused_keys[0]))
+        assert kept["state"] == "refused" and kept["next"] == 0 and kept["sealed"] == sent["sealed"]
+        assert db.command("ZSCORE", refused_keys[2], sent["id"]) is None
+        for pool_key in [refused_keys[5], refused_keys[6]]:
+            assert [f for f in db.command("HKEYS", pool_key) if f.startswith("refused:")] == []
+        assert [db.command("HGETALL", refused_keys[5]), db.command("HGETALL", refused_keys[6])] == pools_before
+        assert db.command("TTL", refused_keys[0]) == -1 and db.command("TTL", refused_keys[1]) == -1
+        assert shared_change("cancel", refused_keys) == ["canceled"]
+        assert db.command("EXISTS", refused_keys[0]) == 0
+        print("PASS: a refused paid confirmation keeps its own refused row and hold, writes no shipment refusal summary, and its own erasure removes it")
+
         # The actual production erasure Lua snapshots older origins and stores
         # bounded markers in the already-funded envelope, never a new key/slot.
         erased, erasedkeys = fixture("unresolved-erasure")

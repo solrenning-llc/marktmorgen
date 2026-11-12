@@ -7,7 +7,7 @@ import { COMMIT_ORDER_CONFIRMATION, prepareOrderConfirmationPreintent } from "@/
 import { createCheckout } from "@/lib/store-checkout";
 import { confirmationFor, confirmPurchase, originalPhysicalConfirmation } from "@/lib/purchase-email";
 import { confirmationOriginRowKey, forgetOrderConfirmationMail, readConfirmationOrigin, reserveConfirmationOrigin, runOrderConfirmationMail } from "@/lib/order-confirmation-outbox";
-import { enqueueShipmentMail, runShipmentMail } from "@/lib/shipment-mail-outbox";
+import { enqueueShipmentMail, forgetShipmentMail, runShipmentMail, shipmentMailOf } from "@/lib/shipment-mail-outbox";
 import { store as redis } from "./redis-stub";
 import { physicalPaidFixture, originId, confirmationLocalPipeline } from "./order-confirmation-paid-fixture";
 
@@ -312,4 +312,33 @@ test("an unrecognized sender value after the paid barrier keeps the confirmation
   assert.deepEqual(result, { accepted: 0, waiting: 0, unknown: 1 });
   const kept = await readConfirmationOrigin(f.id, f.runtime); assert.ok(kept, "the paid origin keeps its permanent barrier");
   assert.equal(kept.row.state, "dispatching"); assert.ok(kept.payload.message);
+});
+
+test("a refused paid confirmation leaves no shipment refusal summary, so the buyer's copy and erasure still work", async () => {
+  // Paid confirmations share the shipment Lua and its pool HASHes. A refusal
+  // of one must keep the confirmation family's own refused row, never write a
+  // shipment-family summary that shipment erasure and copy cannot own.
+  const f = await paid(); let posts = 0;
+  const result = await runOrderConfirmationMail(f.runtime.now!() + 30_000, async (_message, beforePost) => {
+    assert.equal(await beforePost(), true); posts++; return "refused";
+  }, f.runtime, f.id);
+  assert.equal(posts, 1); assert.deepEqual(result, { accepted: 0, waiting: 0, unknown: 1 });
+  const kept = await readConfirmationOrigin(f.id, f.runtime); assert.ok(kept, "the refused confirmation keeps its own protected row");
+  assert.equal(kept.row.state, "refused");
+  for (const pool of ["nl:ship:mail:pool", `nl:ship:mail:pool:${f.store.statsId}`]) {
+    const fields = (redis.run(["HKEYS", pool]) as string[] | null) ?? [];
+    assert.deepEqual(fields.filter(field => field.startsWith("refused:")), [], `${pool} holds no shipment refusal summary`);
+  }
+  assert.deepEqual(await shipmentMailOf(f.store.statsId!, "buyer@example.test", f.runtime), [], "the person copy succeeds");
+  assert.equal(await forgetShipmentMail(f.store.statsId, "buyer@example.test", f.runtime), 0, "shipment erasure succeeds");
+  const fence = `nl:ship:mail:erased:${f.store.statsId}:${person("buyer@example.test")}`;
+  const ttl = Number(redis.run(["TTL", fence]));
+  assert.ok(ttl > 0 && ttl <= 600, "the person's shipment erasure fence gets its expiry");
+  assert.equal(await forgetOrderConfirmationMail(f.store.statsId, "buyer@example.test", f.runtime), 1, "the confirmation family erases its own refused row");
+  assert.equal(await readConfirmationOrigin(f.id, f.runtime), null);
+  redis.run(["DEL", fence]); // The fence has a finite expiry; model it having passed.
+  const later = await enqueueShipmentMail({ statsId: f.store.statsId!, session: "cs_test_laterShipmentAfter0001", authorizedAt: f.runtime.now!(),
+    shipped: { at: Math.floor(f.runtime.now!() / 1000), tracking: "" },
+    message: { from: "Store <mail@example.test>", to: "buyer@example.test", subject: "Shipped", text: "Synthetic shipping update", replyTo: "owner@example.test" } }, f.runtime);
+  assert.equal(later.ok, true, "a later shipment for the same buyer is not unknown");
 });

@@ -62,12 +62,12 @@ def evidence(redis):
         assert answer[0] == "queued", answer
         return row, keys
 
-    def apply(op, row, keys, raw, at, owner="c" * 48):
+    def apply(op, row, keys, raw, at, owner="c" * 48, p=None):
         def stats(text):
             return {m[1]: int(m[2]) for m in re.finditer(r"^cmdstat_([^:]+):calls=(\d+),", text, re.M)}
         redis.command("MULTI")
         redis.command("INFO", "COMMANDSTATS")
-        redis.command("EVAL", lua, 10, *keys, op, raw, json.dumps(row), at, 131072, json.dumps(policy), owner)
+        redis.command("EVAL", lua, 10, *keys, op, raw, json.dumps(row), at, 131072, json.dumps(policy if p is None else p), owner)
         redis.command("INFO", "COMMANDSTATS")
         before, result, after = redis.command("EXEC")
         a, b = stats(before), stats(after)
@@ -167,7 +167,26 @@ def evidence(redis):
             check(kind + " never grants dispatch permission", answer[0] == "preparing", False)
             score = redis.command("ZSCORE", keys[2], row["id"])
             check(kind + " does not stay eligible at this same instant", score is None or float(score) > now, True)
+            check(kind + " stays scheduled for a later poll", score is not None, True)
             check(kind + " preserves immutable protected evidence", redis.command("GET", keys[0]), raw)
+
+        # A row first seen under a review that does not support it must still
+        # be polled: once that review is continued, the same row is claimable.
+        row, keys = setup("continued_review", store="synthetic_continued")
+        prepared = apply("claim", row, keys, redis.command("GET", keys[0]), now)
+        deferred = apply("defer", row, keys, prepared[1], now)
+        check("the deferred row waits for its next check", json.loads(deferred[1])["next"], now + policy["retryMilliseconds"])
+        review_b = dict(policy, reviewId="SYNTHETIC_REVIEW_B")
+        later = now + policy["retryMilliseconds"]
+        check("an unsupported review cannot claim", apply("claim", row, keys, deferred[1], later, p=review_b), ["unknown"])
+        score = redis.command("ZSCORE", keys[2], row["id"])
+        check("the unsupported row keeps a later due score", score is not None and float(score) > later, True)
+        check("the unsupported row keeps its pending hold", redis.command("HGET", keys[6], "items"), "1")
+        continued = dict(review_b, continuedReviewIds=[policy["reviewId"]])
+        due = redis.command("ZRANGEBYSCORE", keys[2], 0, int(float(score or 0)), "LIMIT", 0, 25) if score is not None else []
+        check("the continued review finds the row in its next due read", row["id"] in due, True)
+        reclaimed = apply("claim", row, keys, deferred[1], int(float(score or 0)), p=continued)
+        check("the continued review can claim the same row", reclaimed[0], "preparing")
         # Reserved terminal metadata must be bounded before another paid enqueue.
         for index in range(10000):
             redis.command("HSET", "nl:ship:mail:pool", "refused:" + hashlib.sha256(("capacity" + str(index)).encode()).hexdigest(), "synthetic")

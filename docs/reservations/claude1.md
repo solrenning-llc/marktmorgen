@@ -6,3 +6,4 @@ Only Claude 1 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
+| Claude 1 | Codex X8 money defect #3941 (tip with unknown Stripe amount) | claude/pensive-wozniak-s7bk9y | `lib/store-tip-checkout.ts`, `app/[handle]/tip/page.tsx`, `lib/buyer-words/tips.ts`, `tests/tip-unknown-amount.test.ts`, `tests/aliases/tip-unknown-amount.test.ts.json` | 12/11/2026 12h16 |

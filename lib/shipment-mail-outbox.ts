@@ -313,11 +313,21 @@ if r.originKind~=nil and r.originKind~='single_digital' then return {'unknown'} 
 -- Retention-only digital origins have no proved access/dispatch stage.
 if r.originKind=='single_digital' and op~='claim' and op~='defer' then return {'unknown'} end
 if source ~= r.sourceValue then return {'unknown'} end
+local good,p=pcall(cjson.decode,ARGV[6])
+-- A fenced or unsupported row keeps its protected evidence, its hold and its
+-- place in the schedule: it moves only behind this pass, so it no longer
+-- excludes later work and is polled again once its fence/review changes.
+-- Parked (negative) markers and members not due now are left untouched.
+local function later()
+ local delay=60000
+ if good and type(p)=='table' and type(p.retryMilliseconds)=='number' and p.retryMilliseconds%1==0 and p.retryMilliseconds>=60000 and p.retryMilliseconds<=86400000 then delay=p.retryMilliseconds end
+ local score=tonumber(redis.call('ZSCORE',KEYS[3],r.id))
+ if score and score>=0 and score<=now then redis.call('ZADD',KEYS[3],now+delay,r.id) end
+end
 if redis.call('EXISTS',KEYS[9],KEYS[10])~=0 then
- redis.call('ZREM',KEYS[3],r.id)
+ later()
  return {'held',raw}
 end
-local good,p=pcall(cjson.decode,ARGV[6])
 if not good or type(p)~='table' then return {'unknown'} end
 if r.originKind=='single_digital' then
  local covered=false
@@ -327,7 +337,7 @@ end
 local supported = r.reviewId==p.reviewId
 if type(p.continuedReviewIds)=='table' then for _,id in ipairs(p.continuedReviewIds) do if id==r.reviewId then supported=true end end end
 if not supported then
- redis.call('ZREM',KEYS[3],r.id)
+ later()
  return {'unknown'}
 end
 if op == 'claim' then
@@ -350,6 +360,12 @@ elseif op == 'not-posted' then
 elseif op == 'not-accepted' then
  if r.state~='dispatching' or r.owner~=ARGV[7] then return {'held',raw} end
  r.state='queued'; r.owner=''; r.leaseUntil=0; r.next=now+p.retryMilliseconds
+elseif op == 'refused' and (r.kind~=nil or type(r.id)~='string' or type(r.session)~='string' or KEYS[1]~='nl:ship:mail:row:'..r.id or KEYS[2]~='nl:ship:done:'..r.session) then
+ -- Paid confirmations share this script and these pool HASHes. Their refusal
+ -- keeps the confirmation family's own refused row (no TTL, erased and copied
+ -- by that family); only a physical shipment row writes a refusal summary.
+ if r.state~='dispatching' or r.owner~=ARGV[7] then return {'held',raw} end
+ r.state='refused'; r.next=0
 elseif op == 'refused' then
  if r.state~='dispatching' or r.owner~=ARGV[7] then return {'held',raw} end
  -- Save only non-content outcome evidence, with individual field expiry.

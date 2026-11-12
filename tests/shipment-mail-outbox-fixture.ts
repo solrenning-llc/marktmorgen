@@ -89,7 +89,11 @@ export function shipmentOutboxFixture() {
       })()) answer = ["held", raw];
       else {
         const value = JSON.parse(raw);
-        if (op === "accepted" || op === "cancel" || op === "refused") {
+        // Mirror the application Lua: only a physical shipment row (its own key
+        // family, no confirmation kind) turns a refusal into a summary; a paid
+        // confirmation keeps its own refused row.
+        const shipmentRow = value.kind === undefined && k[0] === `nl:ship:mail:row:${value.id}` && k[1] === `nl:ship:done:${value.session}`;
+        if (op === "accepted" || op === "cancel" || (op === "refused" && shipmentRow)) {
           if (op === "refused") {
             const summary = JSON.stringify({ state: "refused", at: now, session: value.session });
             store.run(["HSET", k[5], `refused:${value.id}`, summary]);
@@ -108,7 +112,7 @@ export function shipmentOutboxFixture() {
         } else if (value.owner !== owner) answer = ["held", raw];
         else {
           value.state = op === "dispatch" ? "dispatching" : op === "refused" ? "refused" : "queued";
-          value.leaseUntil = op === "dispatch" ? now + 60000 : 0;
+          value.leaseUntil = op === "dispatch" ? now + 60000 : op === "refused" ? value.leaseUntil : 0;
           if (["not-posted", "not-accepted", "defer"].includes(op)) value.owner = "";
           value.next = value.state === "queued" ? now + policy!.retryMilliseconds : 0;
           const next = JSON.stringify(value); store.run(["SET", k[0], next]);

@@ -6,7 +6,7 @@ import { COMMUNITY_UNSUB, stopAnnouncements } from "@/lib/community-mail";
 import { limited } from "@/lib/request-guard";
 import { REVIEW_STOP, stopReviewRequests } from "@/lib/review-requests";
 import { UPDATE_STOP, stopUpdates } from "@/lib/product-updates";
-import { stopCounting } from "@/lib/mail-clicks";
+import { forgetClicksPerson, stopCounting } from "@/lib/mail-clicks";
 
 /**
  * Leaving a creator's list. A mail app's own unsubscribe button posts here
@@ -62,7 +62,9 @@ export async function POST(request: NextRequest) {
       // A stop whose write cannot be confirmed is not done (CX-123 rule 24): null, answered below.
       ? await stopReminders(reminder).catch(() => null)
       // A list link: true left, false no such link (an exact nil), null a read or write not confirmed (CX-123 rule 24).
-      : await unsubscribe(token).then((left) => left !== null, () => null);
+      // Leaving takes back the permission to see their link use, so what was counted of it goes too
+      // (lib/mail-clicks.ts, as "stop counting" does): not confirmed, not done, and pressing again finishes it.
+      : await unsubscribe(token).then(async (left) => left !== null && (await forgetClicksPerson(left.listId, left.email), true), () => null).catch(() => null);
   const which = UPDATE_STOP.test(update) ? `u=${update}` : REVIEW_STOP.test(review) ? `v=${review}` : COMMUNITY_UNSUB.test(community) ? `c=${community}` : STOP_TOKEN.test(reminder) ? `r=${reminder}` : `t=${token}`;
   if (fromPage) {
     return new Response(null, {

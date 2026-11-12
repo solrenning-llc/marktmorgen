@@ -74,7 +74,7 @@ import { QUIZ_MONTHLY_SUBMISSIONS } from "@/lib/quiz-usage-rules";
 import { TEAM_LIMITS } from "@/lib/team-scheduling-rules";
 import { SYNC_SECONDS } from "@/lib/host-calendar";
 import { MAX_TEAM } from "@/lib/team";
-import { MAX_TASK_FILE_BYTES, TASK_ROOM_BYTES, TRIAL_TASK_ROOM_BYTES } from "@/lib/assignment-rules";
+import { MAX_ANSWER_TEXT, MAX_FEEDBACK, MAX_TASK_FILE_BYTES, TASK_ROOM_BYTES, TRIAL_TASK_ROOM_BYTES } from "@/lib/assignment-rules";
 import { COMMUNITY_PICTURES, PICTURE_BYTES, TRIAL_COMMUNITY_PICTURES } from "@/lib/community-picture-rules";
 import { CLOSING_DAYS, DEL_BATCH, ENDED_LIST_DOWNLOADS, ENDED_STORE_EXPORTS, FOLLOW_BATCH, RENEWALS_AT_ONCE, WARN_WEEK_DAYS } from "@/lib/plan-closing-rules";
 import { MAX_CRM_FIELDS } from "@/lib/crm-rules";
@@ -119,7 +119,7 @@ import { ASSISTANT_ON_SALE } from "@/lib/opening";
 import { NEXT_OFFER_CHOICES, NEXT_OFFER_COMMANDS, NEXT_OFFER_PRODUCTS } from "@/lib/next-offer-rules";
 import { MAX_SHELF } from "@/lib/course-shelf-rules";
 import { ASSIST_REMIND_COMMANDS, ASSIST_REMIND_PRODUCTS } from "@/lib/assistant-reminder-rules";
-import type { ReadWork } from "@/lib/api-read-rules";
+import { DONE_SET_BYTES, LISTING_BYTES, TASK_BYTES, type ReadWork } from "@/lib/api-read-rules";
 import { DOWNLOAD_LOOKUP_COMMANDS, DOWNLOAD_LOOKUP_MS, ORDERS_BUNDLE_BYTES, ORDERS_OLDER_BYTES, ORDERS_OLDER_COMMANDS, ORDERS_OPEN_COMMANDS, ORDERS_OPEN_SECONDS, ORDERS_PAGE_BYTES } from "@/lib/buyer-orders-rules";
 import { MOVES_PER_MGET, MOVE_BYTES, MOVE_KEY_BYTES } from "@/lib/call-moves-read";
 import { MAX_PER_PERSON as AGREEMENTS_PER_PERSON, MAX_BODY as AGREEMENT_BODY, MAX_LINES as AGREEMENT_LINES, MAX_LINE_TEXT as AGREEMENT_LINE_TEXT, MAX_NAME as AGREEMENT_NAME, MAX_TITLE as AGREEMENT_TITLE } from "@/lib/agreement-rules";
@@ -362,10 +362,59 @@ export const ORIGIN_PER_BYTE = 0.06 / 1e9;
  * (app/api/store/community/image).
  */
 export const BLOB_TRANSFER_PER_BYTE = 0.1 / 1e9;
+/**
+ * One "Simple Operation" of Vercel Blob (a head: a file's details read without its bytes), at US$ 0.400 per million on
+ * demand, from the official page "Vercel Blob usage and pricing" (vercel.com/docs/vercel-blob/usage-and-pricing, read by
+ * Claude on 2 November 2026, docs/codex-queue.md item PP2), which also says every interaction counts: never a free quota.
+ */
+export const BLOB_SIMPLE_OPERATION = 0.4 / 1e6;
+/**
+ * One "Advanced Operation" of Vercel Blob (a put, a copy, a list; a delete is taken as one too), as a review
+ * ceiling: twice the US$ 5.00 per million on demand of Vercel's published price, the same doubling as
+ * BLOB_TRANSFER_PER_BYTE. Not read from an official page in this session (vercel.com could not be reached on
+ * 9 November 2026): not certified, never zero; a dated official read replaces it. A review ceiling not read: the
+ * official pricing page was refused through this session's proxy (403, 9 November 2026), so the figure is the one
+ * remembered, doubled, and stays a ceiling to be read and dated before any margin is certified.
+ */
+export const BLOB_ADVANCED_OPERATION = 10 / 1e6;
 /** How long a door's file may be kept before it is used or swept away, in months: a day, and the day the job may take to reach it. */
 export const DOOR_KEPT_MONTHS = 2 / 31;
 /** What one community picture costs to send: the request, the reads, a second held at 2 GB, and its megabyte from the file store and on to the browser. */
 export const PICTURE_READ = request("light", 16) + PICTURE_BYTES * (ORIGIN_PER_BYTE + BLOB_TRANSFER_PER_BYTE);
+/**
+ * The daily sweep's commands for one assignment door's file, on both its lists (lib/assignment.ts, sweepTaskUploads):
+ * on each, its share of the list read, its ZREM, the doors' ZSCORE for a held name, the student's work read to keep a
+ * handed-in file, and the ZADD when it is put back; and the hand-in's hold written, taken back or let go
+ * (takeTaskUpload, releaseTaskHold).
+ */
+export const TASK_SWEEP_COMMANDS = 14;
+/**
+ * The most one student's work on an assignment reads as (lib/assignment.ts, submissionOf), which the sweep reads to
+ * keep a handed-in file: the answer and the creator's reply at their longest, each character escaped in JSON at six
+ * bytes, and four kilobytes for the rest of the record.
+ */
+export const TASK_WORK_BYTES = (MAX_ANSWER_TEXT + MAX_FEEDBACK) * 6 + 4_096;
+/** Heads of the file store one assignment door's file takes: the door's own, and the hand-in's (app/api/store/course/task). */
+export const TASK_DOOR_SIMPLE_OPERATIONS = 2;
+/**
+ * Advanced Operations one assignment door's file takes at the most: the browser's PUT, a delete by the hand-in (refused,
+ * or the file replaced later) and one by the sweep (a held name no work keeps), counted in tests/task-upload-path.test.ts.
+ */
+export const TASK_DOOR_ADVANCED_OPERATIONS = 3;
+/**
+ * The most one assignment upload door costs (app/api/store/course/task/upload, 9 November 2026): held as a call waited
+ * on for ten seconds at 2 GB, forty commands (the student, the store, the course, its listing, the gate, the task,
+ * the pace, the room, the buyer action, the listing and the one taken back), the store's record, the course's and
+ * its listing's, the task and the lessons done read at their largest, the heads of the file store (the door's and
+ * the hand-in's), the browser's upload through the door and every delete of its file (TASK_DOOR_ADVANCED_OPERATIONS),
+ * and the sweep's commands and its two reads of the student's work for it. One buyer action is taken before the head;
+ * tests/task-upload-path.test.ts holds this at or under UNIT_COST.buyer, so the line buyer-actions already pays for it.
+ * (The two Blob prices are declared as in #3414, same name and value: whichever lands second keeps one copy.)
+ */
+export const TASK_DOOR_COST =
+  request("wait", 40 + TAKE_COMMANDS, MAX_STORE_BYTES + COURSE_BYTES + LISTING_BYTES + TASK_BYTES + DONE_SET_BYTES)
+  + TASK_DOOR_SIMPLE_OPERATIONS * BLOB_SIMPLE_OPERATION + TASK_DOOR_ADVANCED_OPERATIONS * BLOB_ADVANCED_OPERATION
+  + TASK_SWEEP_COMMANDS * COMMAND + 2 * TASK_WORK_BYTES * DB_BYTE;
 /**
  * One certificate of completion drawn as a PDF file (app/[handle]/certificate/[id]/pdf/route.ts): the store and the
  * certificate (or the sample's course and listing) read, its two counts (REQUEST_COMMANDS each), the fonts embedded and the page drawn at a
@@ -1464,8 +1513,11 @@ export const COST_LINES: CostLine[] = [
       { file: "app/api/store/community/push/route.ts", names: ["takeBuyerAction"] },
       { file: "app/api/store/community/upload/route.ts", names: ["takeBuyerAction", "takePicturePlace"] },
       { file: "app/api/store/course/comment/route.ts", names: ["takeBuyerAction"] },
-      { file: "app/api/store/course/task/route.ts", names: ["takeBuyerAction(store)"] },
-      { file: "app/api/store/course/task/upload/route.ts", names: ["takeBuyerAction(on.store)"] },
+      // The hand-in's head of its file and its deletes are priced with the door the file came through (TASK_DOOR_COST).
+      { file: "app/api/store/course/task/route.ts", names: ["takeBuyerAction(store)", "headFile(path)", "deleteFile(path)", "releaseTaskHold(file.path)"] },
+      // The assignment door also asks the file store once whether the browser's name is already a file (one head, and
+      // a listing it may take back), after its buyer action is taken (9 November 2026).
+      { file: "app/api/store/course/task/upload/route.ts", names: ["takeBuyerAction(on.store)", "head(pathname)", "dropTaskDoor(pathname)"] },
       { file: "app/api/store/course/progress/route.ts", names: ["takeBuyerAction"] },
       { file: "app/api/store/course/certificate/route.ts", names: ["takeBuyerAction(store)"] },
       // The download takes one buyer read, then, before any note is read, the rest of what its most costs to read

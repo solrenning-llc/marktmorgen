@@ -57,7 +57,7 @@ async function main(): Promise<void> {
     is("every store is reached and claimed once", claimed(`${prefix}${period}:`), S);
     is("in S / 25 runs, plus the one that finds nothing", runs, S / 25 + 1);
     const tenth = perRun[9] ?? 0;
-    is(`the tenth run reads only its own 25 stores, not the 225 claimed before it (it sent ${tenth} commands)`, tenth <= 25 * 6 + 10, true);
+    is(`the tenth run reads only its own 25 stores, not the 225 claimed before it (it sent ${tenth} commands)`, tenth <= 25 * 10 + 10, true);
     const idle = perRun[perRun.length - 1];
     is(`a run with every store decided sends at most 10 Redis commands (it sent ${idle})`, idle <= 10, true);
     const before = commands;

@@ -8,7 +8,7 @@ import { monthKey } from "@/lib/delivery";
 import { storeOf } from "@/lib/usage-billing";
 import { standingOf } from "@/lib/plan-standing";
 import { SITE_URL } from "@/lib/site-url";
-import { claimMonth, lastMonthOf, releaseMonth, monthlyMessage, readNumbers, weeklyOff, weeklyToken } from "@/lib/stats-report";
+import { claimMonth, lastMonthOf, noteSeen, readSeen, releaseMonth, monthlyMessage, readNumbers, weeklyOff, weeklyToken } from "@/lib/stats-report";
 import { UNKNOWN_SALES_GOAL_CENTS, goalForMonth, readSalesGoal, withGoalAvailability } from "@/lib/sales-goal";
 import { chatAddress, forChat, postToChat } from "@/lib/chat-summary";
 
@@ -44,17 +44,27 @@ export async function GET(request: NextRequest) {
 
   const started = Date.now();
   const out = { looked: 0, sent: 0, posted: 0, quiet: 0, stopped: 0, unpaid: 0, failed: 0 };
+  const month = lastMonthOf(started);
+  // The folders decided this month, kept so no later run reads their stores again (lib/stats-report.ts readSeen).
+  const decided: string[] = [];
   try {
-    const month = lastMonthOf(Date.now());
     // The stores that had visitors in the month just ended.
     const folders = await visitedFolders(monthKey(new Date(`${month}-15T00:00:00Z`)));
+    const seen = await readSeen("monthly", month).catch(() => new Set<string>());
     for (const folder of folders) {
+      if (seen.has(folder)) continue;
       if (out.looked >= MAX_PER_RUN || Date.now() - started > TIME_BUDGET_MS) break;
-      const store = await storeOf(folder).catch(() => null);
-      if (!store) continue;
+      // A store that could not be read is not decided: the next run reads it again.
+      const store = await storeOf(folder).catch(() => undefined);
+      if (store === undefined) continue;
+      if (!store) {
+        decided.push(folder);
+        continue;
+      }
       const standing = standingOf(store);
       if (standing !== "paid" && standing !== "trial") {
         out.unpaid += 1;
+        decided.push(folder);
         continue;
       }
       const emailOff = await weeklyOff(store.handle);
@@ -66,9 +76,14 @@ export async function GET(request: NextRequest) {
       }
       if (emailOff && !chat) {
         out.stopped += 1;
+        decided.push(folder);
         continue;
       }
-      if (!(await claimMonth(store.handle, month))) continue;
+      if (!(await claimMonth(store.handle, month))) {
+        // Claimed already (or not known to be this run's, which no later run would take either).
+        decided.push(folder);
+        continue;
+      }
       out.looked += 1;
       const data = await readNumbers(store).catch(() => null);
       if (!data) {
@@ -77,6 +92,7 @@ export async function GET(request: NextRequest) {
         out.failed += 1;
         continue;
       }
+      decided.push(folder);
       const token = weeklyToken(store.handle);
       const stopUrl = `${SITE_URL}/api/store/weekly?h=${encodeURIComponent(store.handle)}&t=${encodeURIComponent(token)}`;
       // Only a goal set by the month being reported is measured: one set on the 1st is for the month ahead.
@@ -105,6 +121,7 @@ export async function GET(request: NextRequest) {
     console.error("monthly emails failed", error);
     return Response.json({ ok: false, error: "failed", ...out }, { status: 500 });
   } finally {
+    await noteSeen("monthly", month, decided).catch((error) => console.error("monthly: keeping the stores decided failed", error));
     await releaseMark("nl:monthly:lock", lock);
   }
 }

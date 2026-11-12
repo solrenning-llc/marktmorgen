@@ -8,7 +8,7 @@ import { monthKey } from "@/lib/delivery";
 import { storeOf } from "@/lib/usage-billing";
 import { standingOf } from "@/lib/plan-standing";
 import { SITE_URL } from "@/lib/site-url";
-import { claimWeek, readNumbers, releaseWeek, weeklyMessage, weeklyOff, weeklyToken } from "@/lib/stats-report";
+import { claimWeek, noteSeen, readNumbers, readSeen, releaseWeek, weekOf, weeklyMessage, weeklyOff, weeklyToken } from "@/lib/stats-report";
 import { weeklySummary } from "@/lib/numbers-ask";
 import { aiAvailableFor } from "@/lib/ai";
 import { readSpends } from "@/lib/ad-spend";
@@ -56,17 +56,28 @@ export async function GET(request: NextRequest) {
 
   const started = Date.now();
   const out = { looked: 0, sent: 0, quiet: 0, stopped: 0, unpaid: 0, failed: 0 };
+  // The folders decided this week, kept so no later run reads their stores again (lib/stats-report.ts readSeen).
+  const week = weekOf(started);
+  const decided: string[] = [];
   try {
     const now = new Date();
     const lastMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 15));
     const folders = [...new Set([...(await visitedFolders(monthKey(now))), ...(await visitedFolders(monthKey(lastMonth)))])];
+    const seen = await readSeen("weekly", week).catch(() => new Set<string>());
     for (const folder of folders) {
+      if (seen.has(folder)) continue;
       if (out.looked >= MAX_PER_RUN || Date.now() - started > TIME_BUDGET_MS) break;
-      const store = await storeOf(folder).catch(() => null);
-      if (!store) continue;
+      // A store that could not be read is not decided: the next run reads it again.
+      const store = await storeOf(folder).catch(() => undefined);
+      if (store === undefined) continue;
+      if (!store) {
+        decided.push(folder);
+        continue;
+      }
       const standing = standingOf(store);
       if (standing !== "paid" && standing !== "trial") {
         out.unpaid += 1;
+        decided.push(folder);
         continue;
       }
       const emailOff = await weeklyOff(store.handle);
@@ -78,11 +89,16 @@ export async function GET(request: NextRequest) {
       }
       if (emailOff && !chat) {
         out.stopped += 1;
+        decided.push(folder);
         continue;
       }
       // The week is read once, so the claim and its release name the same week even across Monday's midnight.
       const at = Date.now();
-      if (!(await claimWeek(store.handle, at))) continue;
+      if (!(await claimWeek(store.handle, at))) {
+        // Claimed already (or not known to be this run's, which no later run would take either).
+        decided.push(folder);
+        continue;
+      }
       out.looked += 1;
       const data = await readNumbers(store).catch(() => null);
       if (!data) {
@@ -92,6 +108,7 @@ export async function GET(request: NextRequest) {
         out.failed += 1;
         continue;
       }
+      decided.push(folder);
       // Its rates, for the ranges stores its size are set beside (lib/benchmarks.ts): read here anyway.
       await recordSample(store, data);
       const token = weeklyToken(store.handle);
@@ -142,6 +159,7 @@ export async function GET(request: NextRequest) {
     console.error("weekly emails failed", error);
     return Response.json({ ok: false, error: "failed", ...out }, { status: 500 });
   } finally {
+    await noteSeen("weekly", week, decided).catch((error) => console.error("weekly: keeping the stores decided failed", error));
     await releaseMark("nl:weekly:lock", lock);
   }
 }

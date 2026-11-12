@@ -376,6 +376,32 @@ export async function claimWeek(handle: string, now = Date.now()): Promise<boole
   return ownClaim(sentKey(weekOf(now), handle), 9 * 86400);
 }
 
+/**
+ * The visited folders the weekly or monthly job has decided for a period (C1 cost audit, 12 November 2026): emailed,
+ * quiet, stopped, not on a running plan, no store, or claimed already. The job runs every hour for two days; before,
+ * each run started again at the first folder and read every store already claimed (its record, its stop, its channel
+ * and a claim answering "taken") before reaching one not yet decided, so run k read about 25k stores and every run
+ * after the last one re-read them all until its time ran out. A folder left undecided (its store, its channel or its
+ * numbers could not be read) is not kept, and the next run reads it again. Read whole or not at all: an answer in
+ * another shape decides nothing, and the run reads every folder as before (the claims keep anyone from two emails).
+ */
+const seenKey = (kind: "weekly" | "monthly", period: string) => (kind === "weekly" ? `nl:weekly:seen:${period}` : `nl:monthly:seen:${period}`);
+
+export async function readSeen(kind: "weekly" | "monthly", period: string): Promise<Set<string>> {
+  if (!isRedisConfigured()) return new Set();
+  const replies = repliesFor(await redisPipeline([["SMEMBERS", seenKey(kind, period)]]), 1);
+  const members = replies?.[0];
+  if (!Array.isArray(members) || members.some((member) => typeof member !== "string")) return new Set();
+  return new Set(members as string[]);
+}
+
+/** Keeps the folders decided in this run, for as long as the period's claims last. */
+export async function noteSeen(kind: "weekly" | "monthly", period: string, folders: string[]): Promise<void> {
+  if (!folders.length || !isRedisConfigured()) return;
+  const key = seenKey(kind, period);
+  await redisPipeline([["SADD", key, ...folders], ["EXPIRE", key, (kind === "weekly" ? 9 : 40) * 86400]]);
+}
+
 /** A once-only claim (SET NX): true only when it is this run's; taken or unknown is false, and unknown is said. */
 async function ownClaim(key: string, seconds: number): Promise<boolean> {
   const got = await claimMark(key, seconds);

@@ -233,6 +233,14 @@ export class MemoryRedis {
           this.run(["ZADD", all, at, member]);
           return 1;
         }
+        // lib/assignment.ts REVIEW_WRITE_IF: a creator's review written only over the work it read.
+        if (key.startsWith("-- marktmorgen:review-write-if:v1\n") && args[0] === "2" && args.length === 6) {
+          const [, sub, waiting, expected, json, member] = args;
+          if (this.run(["GET", sub]) !== expected) return 0;
+          this.run(["SET", sub, json]);
+          this.run(["ZREM", waiting, member]);
+          return 1;
+        }
         // lib/product-about.ts WRITE_ABOUT_IF: the description written only over the one it was read as.
         if (key.startsWith("-- marktmorgen:about-write-if:v1\n") && args[0] === "1" && args.length === 4) {
           const [, about, expected, text] = args;

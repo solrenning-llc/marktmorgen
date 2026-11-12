@@ -650,12 +650,16 @@ export async function autoWriting(pathnames: string[]): Promise<Record<string, s
     return parts ? [{ path, id: parts.id }] : [];
   });
   if (!wanted.length || !isRedisConfigured()) return {};
-  const rows = await redisPipeline(wanted.map(({ id }) => ["GET", pendingKey(id)]));
+  // Rule 24: a record that is there but does not read is unknown, never "not being written".
+  const rows = repliesFor(await redisPipeline(wanted.map(({ id }) => ["GET", pendingKey(id)])), wanted.length);
+  if (!rows) throw new UnknownReplyError("captions being written");
   const out: Record<string, string[]> = {};
   wanted.forEach(({ path }, i) => {
+    if (rows[i] === null) return;
     const pending = parsePending(rows[i]);
+    if (!pending) throw new UnknownReplyError("captions being written");
     // A request whose refund is owed is no longer being written.
-    const left = pending && !pending.owed ? pending.langs.filter((lang) => !pending.got.includes(lang)) : [];
+    const left = !pending.owed ? pending.langs.filter((lang) => !pending.got.includes(lang)) : [];
     if (left.length) out[path] = left;
   });
   return out;

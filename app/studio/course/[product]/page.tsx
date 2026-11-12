@@ -78,10 +78,10 @@ export default async function StudioCoursePage({
   const videoPaths = lessonsInOrder(course).flatMap(({ lesson }) => (lesson.video ? [lesson.video.pathname] : []));
   const streams = await streamStates(videoPaths).catch(() => ({}));
   // And the languages each one has captions in.
-  const captions = await streamCaptions(videoPaths).catch(() => ({}));
+  const captions = await streamCaptions(videoPaths).catch(() => null);
   // And those being written by AI (lib/auto-captions.ts), which only somebody
   // who may spend on the plan's card, on a store with a plan, may ask for.
-  const writing = await autoWriting(videoPaths).catch(() => ({}));
+  const writing = await autoWriting(videoPaths).catch(() => null);
   // Refunds for AI captions Stripe has not confirmed yet, shown to whoever may see the plan's card; null when they
   // could not be read (rule 24), so the section says so instead of hiding as if nothing were owed.
   const owedRows: Awaited<ReturnType<typeof autoRefundsOwed>> | null = can(view.role, "billing") ? await autoRefundsOwed(folder).catch(() => null) : [];
@@ -197,8 +197,9 @@ export default async function StudioCoursePage({
           draft={product.hidden === true}
           folder={folder}
           streams={streams}
-          captions={captions}
-          writing={writing}
+          // The editor's own lesson Captions part still reads a missing entry as none (a leftover; the check above says unknown).
+          captions={captions ?? {}}
+          writing={writing ?? {}}
           auto={{ can: autoCan, spoken: parseLanguage(store.language) }}
           title={product.title}
           ai={aiState}

@@ -12,6 +12,8 @@ import { hasFinished, issueCertificate } from "@/lib/certificate";
 import { limited } from "@/lib/request-guard";
 import { readCourseListing } from "@/lib/catalog";
 import { restingAway, takeBuyerAction } from "@/lib/buyer-actions";
+import { UnknownReplyError } from "@/lib/redis-reply";
+import { coursesWords } from "@/lib/buyer-words/courses";
 
 /**
  * "Get my certificate": issues a student's certificate of completion under
@@ -46,7 +48,15 @@ export async function POST(request: NextRequest) {
   if (!(await takeBuyerAction(store))) return restingAway(origin, store);
 
   const who = emailKey(access.learner.email);
-  const [done, passed] = await Promise.all([doneLessons(course.id, access.learner.email), passedForGate(course.id, who)]);
+  let done: Set<string>;
+  let passed: Set<string>;
+  try {
+    [done, passed] = await Promise.all([doneLessons(course.id, access.learner.email), passedForGate(course.id, who)]);
+  } catch (error) {
+    // Progress that could not be read is unknown, never "unfinished": said as it is, in the store's language (rule 24).
+    if (error instanceof UnknownReplyError) return new Response(coursesWords(store.language).certProgressUnknown, { status: 503, headers: { "Cache-Control": "no-store" } });
+    throw error;
+  }
   if (!hasFinished(course, done, passed)) return away(`${base}?cert=unfinished#certificate`);
 
   let issued: Awaited<ReturnType<typeof issueCertificate>>;

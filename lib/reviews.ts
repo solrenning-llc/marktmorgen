@@ -287,9 +287,12 @@ async function recount(statsId: string, productId: string): Promise<Summary> {
   const flat = stringList(repliesFor(await redisPipeline([["HGETALL", productKey(statsId, productId)]]), 1)?.[0]);
   if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError("a product's reviews");
   const reviews: Review[] = [];
+  // Every stored review must read, under its own id and for this product: one that does not is unknown too, never
+  // left out, which would count fewer stars (or take the numbers away) while the review itself is still kept.
   for (let i = 1; i < flat.length; i += 2) {
     const review = parseReview(flat[i]);
-    if (review) reviews.push(review);
+    if (!review || review.id !== flat[i - 1] || review.productId !== productId) throw new UnknownReplyError("a product's reviews");
+    reviews.push(review);
   }
   const summary = summarise(reviews);
   await redisPipeline([
@@ -475,7 +478,15 @@ export async function deleteReview(statsId: string, productId: string, id: strin
       const again = repliesFor(await redisPipeline([["HGET", productKey(statsId, productId), id]]), 1);
       removed = again !== null && again[0] === null;
     }
-    await recount(statsId, productId);
+    try {
+      await recount(statsId, productId);
+    } catch (error) {
+      // The review is gone, but another review of the product does not read, so its numbers cannot be counted again:
+      // they stay as they were (never lowered by leaving that review out), for the next change to count again. The
+      // deletion itself is done, and is said so: a person's erasure never waits on someone else's unreadable review.
+      if (!removed || !(error instanceof UnknownReplyError)) throw error;
+      console.error("deleting a review: the product's numbers could not be counted again; they stay as they were", error);
+    }
     if (!removed) throw new UnknownReplyError(what);
     return "deleted" as const;
   });

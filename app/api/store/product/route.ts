@@ -46,6 +46,7 @@ import { deliveredFile, idsOfKind, readAllListings, readDelivery, readListing, r
 import { fastMoneyOnPage, fastMoneyRefusal } from "@/lib/terms-check-rules";
 import { productPromptsLeft } from "@/lib/product-outline";
 import { pageWords } from "@/lib/page-translate";
+import { templateLeft } from "@/lib/template-text";
 import { readPage } from "@/lib/sales-page-store";
 import { quietedBy } from "@/lib/extras-notes";
 
@@ -416,6 +417,10 @@ export async function POST(request: NextRequest) {
           if (refused) return Response.json({ ok: false, error: "fast_money", passage: { ...refused, product: draft.title } }, { status: 409 });
           const promptLeft = productPromptsLeft({ title: draft.title, summary: draft.summary, about: words })[0];
           if (promptLeft) return Response.json({ ok: false, error: "outline_left", left: promptLeft, product: draft.title }, { status: 409 });
+          // Nor while its sales page, in either version, still holds a part a template left to write: saving it
+          // is refused once the product is on the store, so publishing never takes it there (754 [STN1], Revisor 2 on #3593).
+          const pageLeft = shownPage ? templateLeft(shownPage) : null;
+          if (pageLeft) return Response.json({ ok: false, error: "placeholder", ...pageLeft, product: draft.title }, { status: 409 });
           // A course from a ready structure is published only once its example titles are replaced (540 [CU1]).
           if (draft.course) {
             const course = await readCourse(draft.course.id);
@@ -424,8 +429,23 @@ export async function POST(request: NextRequest) {
           }
         }
       }
-      const done = await setProductHidden(ref, id, body.hidden);
-      result = done.ok ? { ok: true, product: done.product } : done;
+      // The sales page read again under the lock its saves are written under, so a part saved since the read above
+      // is never published with it (754 [STN1], Codex P on #3693). A page that cannot be read publishes nothing.
+      let heldBy: { fast: ReturnType<typeof fastMoneyOnPage>; left: ReturnType<typeof templateLeft>; title: string } | null = null;
+      const done = await setProductHidden(ref, id, body.hidden, async (store, now) => {
+        if (!now.page || !store.statsId) return true;
+        const page = await readPage(store.statsId, now.id);
+        const fast = fastMoneyOnPage(pageWords(page));
+        const left = templateLeft(page);
+        heldBy = { fast, left, title: now.title };
+        return !fast && !left;
+      });
+      if (!done.ok && done.reason === "held" && heldBy) {
+        const { fast, left, title } = heldBy as { fast: ReturnType<typeof fastMoneyOnPage>; left: ReturnType<typeof templateLeft>; title: string };
+        if (fast) return Response.json({ ok: false, error: "fast_money", passage: { ...fast, product: title } }, { status: 409 });
+        if (left) return Response.json({ ok: false, error: "placeholder", ...left, product: title }, { status: 409 });
+      }
+      result = done.ok ? { ok: true, product: done.product } : { ok: false, reason: done.reason === "held" ? "unknown" : done.reason };
     } else if (action === "unlink") {
       const cleared = await setProductLink(ref, id, null);
       result = cleared.ok ? { ok: true, product: null } : { ok: false, reason: asProductReason(cleared.reason) };

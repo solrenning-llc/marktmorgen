@@ -118,12 +118,29 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const marked = await setProductPage(guarded.ref, id, has);
-    if (!marked.ok) return Response.json({ ok: false, error: marked.reason }, { status: 400 });
-    if (!marked.store.statsId) return Response.json({ ok: false, error: "server_error" }, { status: 500 });
     // A running test declares, once, the measure it is decided by (lib/headline-test-rules.ts, rule 2).
     const saved = declareMeasure(page, stored, isFree(product) ? "checkouts" : "money");
-    await writePage(marked.store.statsId, id, saved, marked.store);
+    // Checked again on the product as it is now, and written under the lock that publishes it: a draft published
+    // since the check above never takes a page that check would have refused (754 [STN1], Codex P on #3693).
+    let onStore: { fast: ReturnType<typeof fastMoneyOnPage>; left: ReturnType<typeof templateLeft> } | null = null;
+    const marked = await setProductPage(guarded.ref, id, has, {
+      refuse: (now) => {
+        if (now.hidden === true) return null;
+        onStore = { fast: fastMoneyOnPage(pageWords(page)), left: templateLeft(page) };
+        return onStore.fast || onStore.left ? "on_store" : null;
+      },
+      write: async (written) => {
+        if (!written.statsId) throw new Error("a product page has nowhere to be kept");
+        await writePage(written.statsId, id, saved, written);
+      },
+    });
+    if (!marked.ok && marked.reason === "on_store" && onStore) {
+      const { fast, left } = onStore as { fast: ReturnType<typeof fastMoneyOnPage>; left: ReturnType<typeof templateLeft> };
+      if (fast) return Response.json({ ok: false, error: "fast_money", passage: fast }, { status: 409 });
+      if (left) return Response.json({ ok: false, error: "placeholder", ...left }, { status: 400 });
+    }
+    if (!marked.ok) return Response.json({ ok: false, error: marked.reason }, { status: 400 });
+    if (!marked.store.statsId) return Response.json({ ok: false, error: "server_error" }, { status: 500 });
     // A picture taken off the page is deleted, best effort and only after the
     // page that no longer shows it is written.
     const gone = await releasePictures(marked.store.statsId, id, before.filter((path) => !shown.includes(path))).catch(() => [] as string[]);

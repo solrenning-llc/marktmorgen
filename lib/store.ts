@@ -2372,6 +2372,7 @@ async function onProduct<R extends string>(
   id: string,
   change: (product: Product, store: Store) => Product | Refusal<R> | Promise<Product | Refusal<R>>,
   extra: (store: Store, product: Product) => Partial<Store> = () => ({}),
+  after?: (store: Store, product: Product) => Promise<void>,
 ): Promise<{ ok: true; store: Store; product: Product; before: Product } | Refusal<R | "none" | "unknown">> {
   const result = await withStore(email, async (store, save) => {
     const product = await readProduct(store, id);
@@ -2379,6 +2380,8 @@ async function onProduct<R extends string>(
     const changed = await change(product, store);
     if (refused<R>(changed)) return changed;
     const saved = await save({ ...store, ...extra(store, changed) }, { put: [changed] });
+    // Still under the lock: what has to be written with the record, so no other write of the product comes between.
+    if (after) await after(saved, changed);
     return { ok: true as const, store: saved, product: changed, before: product };
   });
   return result ?? { ok: false, reason: "none" };
@@ -3873,13 +3876,35 @@ export async function setProductKeys(email: string, id: string, keys: KeySetup |
  * are written by lib/sales-page-store.ts under the store's statsId, which is
  * made here for a store written before it had one.
  */
-export async function setProductPage(email: string, id: string, has: boolean): Promise<ProductPartResult> {
-  return changeProduct(
+export async function setProductPage(email: string, id: string, has: boolean): Promise<ProductPartResult>;
+export async function setProductPage<R extends string>(
+  email: string,
+  id: string,
+  has: boolean,
+  held: { refuse: (product: Product) => R | null; write: (store: Store) => Promise<void> },
+): Promise<{ ok: true; store: Store; product: Product } | { ok: false; reason: "none" | "unknown" | R }>;
+/**
+ * With `held`, the page is checked against the product as it is now and written under the same lock that
+ * publishes it (setProductHidden), so a draft published meanwhile never takes a page its check refused
+ * (754 [STN1], Codex P on #3693): `refuse` names why it is not saved, and nothing is written then.
+ */
+export async function setProductPage<R extends string>(
+  email: string,
+  id: string,
+  has: boolean,
+  held?: { refuse: (product: Product) => R | null; write: (store: Store) => Promise<void> },
+): Promise<{ ok: true; store: Store; product: Product } | { ok: false; reason: "none" | "unknown" | R }> {
+  const done = await onProduct<R>(
     email,
     id,
-    (product) => ({ ...product, page: has }),
+    (product) => {
+      const why = held?.refuse(product) ?? null;
+      return why === null ? { ...product, page: has } : { ok: false, reason: why };
+    },
     (store) => ({ statsId: store.statsId ?? newListId() }),
+    held ? (store) => held.write(store) : undefined,
   );
+  return done.ok ? { ok: true, store: done.store, product: done.product } : done;
 }
 
 /**
@@ -4131,15 +4156,22 @@ export async function setProductNote(email: string, id: string, note: boolean): 
 
 export type HiddenResult =
   | { ok: true; store: Store; product: Product }
-  | { ok: false; reason: "none" | "unknown" };
+  | { ok: false; reason: "none" | "unknown" | "held" };
 
 /**
  * Publishes a draft, or takes a product off the store without removing it.
  * A hidden product keeps everything it has, its buyers keep what they bought,
  * and a bundle that holds it still hands it over.
  */
-export async function setProductHidden(email: string, id: string, hidden: boolean): Promise<HiddenResult> {
-  const done = await onProduct<never>(email, id, (product) => ({ ...product, hidden }), (store) => {
+export async function setProductHidden(
+  email: string,
+  id: string,
+  hidden: boolean,
+  mayPublish?: (store: Store, product: Product) => Promise<boolean>,
+): Promise<HiddenResult> {
+  // `mayPublish` looks again, under the lock a product's page is saved under, at what a draft would publish:
+  // false answers "held", and the product stays as it was (754 [STN1], Codex P on #3693).
+  const done = await onProduct<"held">(email, id, async (product, store) => (!hidden && mayPublish && !(await mayPublish(store, product)) ? { ok: false, reason: "held" } : { ...product, hidden }), (store) => {
     // Same existing bounded store write: no event table, extra command or provider call.
     // Older stores with a visible offer have unknown historical timing, never backfilled as now.
     if (!store.activationTracked || hidden || store.firstOfferPublishedAt || store.catalog.items.some(item => (item.kind & KIND.hidden) === 0)) return {};

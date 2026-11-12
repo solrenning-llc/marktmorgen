@@ -106,6 +106,6 @@ test("site identity and article facts remain independently available", () => {
   assert.equal(article["@type"], "BlogPosting");
   assert.equal(article.headline, post.title);
   assert.equal(article.datePublished, post.date);
-  assert.equal(article.dateModified, post.date);
+  assert.equal(Object.hasOwn(article, "dateModified"), false);
   assert.equal(Object.hasOwn(article, "offers"), false);
 });

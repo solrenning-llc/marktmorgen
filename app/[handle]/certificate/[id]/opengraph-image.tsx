@@ -2,9 +2,11 @@ import { ImageResponse } from "next/og";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { lookColours } from "@/lib/store-look";
 import { storeKey } from "@/lib/learn";
-import { CERT_ID_PATTERN, readCertificate } from "@/lib/certificate";
+import { CERTIFICATE_CARD_UNITS, CERT_ID_PATTERN, readCertificate, standingOf } from "@/lib/certificate";
 import { coursesWords } from "@/lib/buyer-words/courses";
 import { speech } from "@/lib/buyer-words";
+import { takePublicRequest } from "@/lib/traffic";
+import { plain } from "@/lib/serve-file";
 
 /**
  * The picture a certificate's link unfolds into when a student shares it, on
@@ -12,9 +14,16 @@ import { speech } from "@/lib/buyer-words";
  * who finished which course, taught by whom, and where to check it.
  *
  * Every word is read from the record kept when it was issued, as the page's
- * are (lib/certificate.ts). A certificate that was withdrawn, or an address
- * that names none, unfolds into the store's name alone: a shared link never
- * shows a certificate that does not stand.
+ * are (lib/certificate.ts). A certificate that was withdrawn or has run out
+ * of validity (standingOf), or an address that names none, unfolds into the
+ * store's name alone: a shared link never shows a certificate that does not
+ * stand.
+ *
+ * Paid for as its PDF is (./pdf/route.ts): one of the store's public
+ * requests before the record is read and the rest of CERTIFICATE_CARD_UNITS
+ * before anything is drawn, each counted against the asking connection's
+ * share of the day too. Past them the store is resting and nothing is drawn;
+ * an address that names no store draws nothing either.
  */
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
@@ -31,13 +40,18 @@ export default async function OpengraphImage({ params }: Params) {
     // A broken escape names no store: the plain card.
   }
   const store = decoded.startsWith("@") ? await storeForHandle(normaliseHandle(decoded)).catch(() => null) : null;
-  const found = store && CERT_ID_PATTERN.test(id) ? await readCertificate(id).catch(() => null) : null;
-  const certificate = found && store && found.store === storeKey(store) && found.withdrawnAt === 0 ? found : null;
-  const colours = lookColours(store?.look ?? { theme: "light", accent: "#5a36ee" });
-  const storeName = store?.name ?? "Marktmorgen";
-  const w = coursesWords(store?.language);
-  const issued = certificate && store ? speech(store).date(certificate.issuedAt * 1000) : "";
-  const address = `marktmorgen.com/@${store?.handle ?? ""}/certificate/${certificate?.id ?? ""}`;
+  if (!store) return new Response("Not found", { status: 404, headers: { "Cache-Control": "no-store" } });
+  const now = Date.now();
+  const resting = () => plain(503, speech(store).w.restingTitle);
+  if (!(await takePublicRequest(store, "public", now, 1))) return resting();
+  const found = CERT_ID_PATTERN.test(id) ? await readCertificate(id).catch(() => null) : null;
+  const certificate = found && found.store === storeKey(store) && standingOf(found, Math.floor(now / 1000)) === "valid" ? found : null;
+  if (CERTIFICATE_CARD_UNITS > 1 && !(await takePublicRequest(store, "public", now, CERTIFICATE_CARD_UNITS - 1))) return resting();
+  const colours = lookColours(store.look);
+  const storeName = store.name;
+  const w = coursesWords(store.language);
+  const issued = certificate ? speech(store).date(certificate.issuedAt * 1000) : "";
+  const address = `marktmorgen.com/@${store.handle}/certificate/${certificate?.id ?? ""}`;
 
   return new ImageResponse(
     (

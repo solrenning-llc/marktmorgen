@@ -24,17 +24,28 @@
  *   nl:course:<course>:certs:all  -> set of every certificate id issued, withdrawn ones too
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReply, exactReplies, plainList, replyCount } from "@/lib/redis-exact";
 import { type DataStore, giveData, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { type Course, lessonsInOrder } from "@/lib/course";
 import { requiredQuizLessons } from "@/lib/quiz";
 import { emailKey } from "@/lib/learn";
+import { randomLetters } from "@/lib/random-letters";
 
 export const CERT_ID_PATTERN = /^[a-z0-9]{16}$/;
 export const MIN_CERT_NAME = 2;
 export const MAX_CERT_NAME = 80;
 /** The most certificates the studio lists for one course. */
 export const MAX_LISTED_CERTS = 500;
+/**
+ * The store's public requests the picture a certificate's shared link unfolds
+ * into takes (app/[handle]/certificate/[id]/opengraph-image.tsx): one before
+ * the record is read and the rest before anything is drawn, as many as its
+ * PDF (CERTIFICATE_PDF_UNITS, lib/certificate-pdf.ts), which weighs more: the
+ * heaviest picture measured 153 KB and 0.59 s of CPU cold, inside what
+ * CERTIFICATE_PDF_READ prices (tests/plan-cost-registry.ts).
+ */
+export const CERTIFICATE_CARD_UNITS = 2;
 
 export type Certificate = {
   id: string;
@@ -75,10 +86,7 @@ export function standingOf(c: Pick<Certificate, "withdrawnAt" | "validUntil">, n
 }
 
 export function newCertificateId(): string {
-  const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
-  const bytes = new Uint8Array(16);
-  crypto.getRandomValues(bytes);
-  return [...bytes].map((b) => alphabet[b % alphabet.length]).join("");
+  return randomLetters("abcdefghijklmnopqrstuvwxyz0123456789", 16);
 }
 
 /**
@@ -206,14 +214,45 @@ export async function readCertificate(id: string): Promise<Certificate | null> {
   return parseCertificate(raw);
 }
 
-/** The standing certificate this student holds for this course, if any. */
+/**
+ * The id the student's slot names and the certificate it names when that one
+ * still stands, both read exactly (CX-123 rule 24): null only for a slot
+ * Redis confirms empty (nil); a record confirmed gone (nil), malformed or
+ * withdrawn is no standing certificate; any other reply throws UnknownReply.
+ */
+async function slotHolder(courseId: string, who: string, what: string): Promise<{ id: string; standing: Certificate | null } | null> {
+  const [id] = exactReplies(await redisPipeline([["HGET", indexKey(courseId), who]]), 1, what);
+  if (id === null) return null;
+  if (typeof id !== "string") throw new UnknownReply(what);
+  if (!CERT_ID_PATTERN.test(id)) return { id, standing: null };
+  const [raw] = exactReplies(await redisPipeline([["GET", certKey(id)]]), 1, what);
+  if (raw !== null && typeof raw !== "string") throw new UnknownReply(what);
+  const found = parseCertificate(raw);
+  return { id, standing: found && !found.withdrawnAt ? found : null };
+}
+
+/**
+ * The standing certificate this student holds for this course, if any; a
+ * reply that is not exactly what was asked for throws UnknownReply, never
+ * read as "none".
+ */
 export async function certificateOf(courseId: string, who: string): Promise<Certificate | null> {
   if (!isRedisConfigured()) return null;
-  const [id] = await redisPipeline([["HGET", indexKey(courseId), who]]);
-  if (typeof id !== "string") return null;
-  const found = await readCertificate(id);
-  return found && !found.withdrawnAt ? found : null;
+  return (await slotHolder(courseId, who, "a student's certificate"))?.standing ?? null;
 }
+
+/**
+ * The student's slot moved from the certificate it names to a new one, only
+ * while it still names that one, in one step: 1 when moved, 0 when it names
+ * another meanwhile and nothing was written. Modelled by lib/redis-memory.ts.
+ */
+export const CERT_SLOT_SWAP = `-- marktmorgen:cert-slot-swap:v1
+if redis.call('HGET', KEYS[1], ARGV[1]) ~= ARGV[2] then return 0 end
+redis.call('HSET', KEYS[1], ARGV[1], ARGV[3])
+return 1`;
+
+/** How many times one press looks at the slot again when it changed between two reads. */
+const CLAIM_TRIES = 3;
 
 export type IssueResult = { ok: true; certificate: Certificate; fresh: boolean } | { ok: false; reason: "name" };
 
@@ -262,30 +301,71 @@ export async function issueCertificate(input: {
   const bytes = dataBytes([JSON.stringify(certificate)], 3);
   await needData(input.room, [{ slot: CERTS_SLOT(input.course.id), bytes }]);
   await redisPipeline([["SET", certKey(id), JSON.stringify(certificate)]]);
-  const [claimed] = await redisPipeline([["HSETNX", indexKey(input.course.id), input.who, id]]);
-  if (Number(claimed) !== 1) {
-    const existing = await certificateOf(input.course.id, input.who);
-    if (existing) {
-      // This press made nothing that stands: its record goes, the standing one is the answer.
-      await redisPipeline([["DEL", certKey(id)]]);
-      await giveData(input.room, [{ slot: CERTS_SLOT(input.course.id), bytes }]);
-      return { ok: true, certificate: existing, fresh: false };
-    }
-    // The slot pointed at a certificate that was withdrawn: take it.
-    await redisPipeline([["HSET", indexKey(input.course.id), input.who, id]]);
+  let existing: Certificate | null;
+  try {
+    existing = await claimSlot(input.course.id, input.who, id);
+  } catch (error) {
+    // Unknown whether the slot names this press's record (CX-123 rule 24): the
+    // record goes and its room comes back once its deletion is confirmed, and
+    // the press is refused; a slot left naming it reads as gone and is taken
+    // by the next press.
+    const [gone] = await redisPipeline([["DEL", certKey(id)]]).catch(() => [null]);
+    if (gone === 1) await giveData(input.room, [{ slot: CERTS_SLOT(input.course.id), bytes }]).catch(() => {});
+    throw error;
+  }
+  if (existing) {
+    // This press made nothing that stands: its record goes, the standing one is the answer.
+    await redisPipeline([["DEL", certKey(id)]]);
+    await giveData(input.room, [{ slot: CERTS_SLOT(input.course.id), bytes }]);
+    return { ok: true, certificate: existing, fresh: false };
   }
   await redisPipeline([["SADD", allKey(input.course.id), id], ["SADD", byKey(input.course.id, input.who), id]]);
   return { ok: true, certificate, fresh: true };
 }
 
-/** Every certificate issued for a course, newest first, withdrawn ones included. */
-export async function certificatesFor(courseId: string): Promise<{ list: Certificate[]; total: number }> {
+/**
+ * Takes the student's slot for the certificate `id`, already written: null
+ * when this press holds it, or the standing certificate another press holds,
+ * which is the answer. A slot that names a certificate no longer standing is
+ * taken only while it still names that one (CERT_SLOT_SWAP), so a press never
+ * writes over one made meanwhile. Every reply is read exactly: one that is not
+ * what was asked for throws UnknownReply (CX-123 rule 24).
+ */
+async function claimSlot(courseId: string, who: string, id: string): Promise<Certificate | null> {
+  const what = "a certificate's issue";
+  for (let i = 0; i < CLAIM_TRIES; i += 1) {
+    const [claimed] = exactReplies(await redisPipeline([["HSETNX", indexKey(courseId), who, id]]), 1, what);
+    if (claimed === 1) return null;
+    if (claimed !== 0) throw new UnknownReply(what);
+    const holder = await slotHolder(courseId, who, what);
+    // Emptied since (a withdrawal): claim it again.
+    if (!holder) continue;
+    if (holder.standing) return holder.standing;
+    const [swapped] = exactReplies(await redisPipeline([["EVAL", CERT_SLOT_SWAP, 1, indexKey(courseId), who, holder.id, id]]), 1, what);
+    if (swapped === 1) return null;
+    if (swapped !== 0) throw new UnknownReply(what);
+  }
+  throw new Error("The student's certificate slot kept changing; nothing was issued");
+}
+
+/**
+ * Every certificate issued for a course, newest first, withdrawn ones
+ * included; null when Redis answered in a shape that cannot be read (rule 24),
+ * so the studio never says "No certificates yet" while some were issued. Only
+ * Redis's own empty set is none; a certificate that is gone (nil) or whose
+ * record is itself malformed is skipped, as before, so one broken record
+ * never hides the rest.
+ */
+export async function certificatesFor(courseId: string): Promise<{ list: Certificate[]; total: number } | null> {
   if (!isRedisConfigured()) return { list: [], total: 0 };
-  const [raw] = await redisPipeline([["SMEMBERS", allKey(courseId)]]);
-  const ids = Array.isArray(raw) ? (raw as unknown[]).map(String) : [];
-  const valid = ids.filter((id) => CERT_ID_PATTERN.test(id));
+  const read = plainList(await redisPipeline([["SMEMBERS", allKey(courseId)]]));
+  if (!read || read.length !== 1) return null;
+  const members = plainList(read[0]);
+  if (!members || members.some((id) => typeof id !== "string")) return null;
+  const valid = (members as string[]).filter((id) => CERT_ID_PATTERN.test(id));
   if (valid.length === 0) return { list: [], total: 0 };
-  const rows = await redisPipeline(valid.map((id) => ["GET", certKey(id)]));
+  const rows = plainList(await redisPipeline(valid.map((id) => ["GET", certKey(id)])));
+  if (!rows || rows.length !== valid.length || rows.some((row) => row !== null && typeof row !== "string")) return null;
   const list = rows
     .map(parseCertificate)
     .filter((c): c is Certificate => c !== null && c.courseId === courseId)
@@ -301,10 +381,14 @@ export async function withdrawCertificate(courseId: string, id: string): Promise
   const found = await readCertificate(id);
   if (!found || found.courseId !== courseId) return false;
   if (!found.withdrawnAt) {
-    await redisPipeline([["SET", certKey(id), JSON.stringify({ ...found, withdrawnAt: Math.floor(Date.now() / 1000) })]]);
+    // XX: only while it is still there, so a withdrawal racing the person's deletion never writes it back.
+    const [written] = exactReplies(await redisPipeline([["SET", certKey(id), JSON.stringify({ ...found, withdrawnAt: Math.floor(Date.now() / 1000) }), "XX"]]), 1, "a certificate's withdrawal");
+    if (written === null) return false;
+    // Unknown whether it was marked withdrawn: the slot is not freed for a second one (CX-123 rule 24).
+    if (written !== "OK") throw new UnknownReply("a certificate's withdrawal");
   }
   const who = emailKey(found.email);
-  const [current] = await redisPipeline([["HGET", indexKey(courseId), who]]);
+  const [current] = exactReplies(await redisPipeline([["HGET", indexKey(courseId), who]]), 1, "a certificate's withdrawal");
   if (current === id) await redisPipeline([["HDEL", indexKey(courseId), who]]);
   return true;
 }
@@ -315,31 +399,80 @@ export async function withdrawCertificate(courseId: string, id: string): Promise
  * not found. Found by the student's own list, and, for certificates issued
  * before that list was kept, by reading the course's certificates when it
  * has LEGACY_SCAN or fewer; a standing one is always found by its slot.
+ * A reply that is not exactly what was asked for throws UnknownReply, and a
+ * certificate whose deletion is unknown keeps the references that find it.
  */
-export async function forgetCertificatesPerson(courseIds: string[], email: string): Promise<number> {
+export async function forgetCertificatesPerson(courseIds: string[], email: string, room?: DataStore): Promise<number> {
   if (!courseIds.length || !isRedisConfigured()) return 0;
   const who = emailKey(email);
   const address = email.trim().toLowerCase();
+  const what = "the deletion of a person's certificates";
+  // Every reply read exactly (lib/redis-exact.ts): one that is not what was
+  // asked for throws UnknownReply before any reference that finds a
+  // certificate is removed, so a retry still finds it.
+  const ids = (raw: unknown): string[] => {
+    const list = plainList(raw);
+    if (!list || !list.every((id) => typeof id === "string")) throw new UnknownReply(what);
+    return list as string[];
+  };
   let gone = 0;
   for (const courseId of courseIds) {
-    const [mine, current, size] = await redisPipeline([["SMEMBERS", byKey(courseId, who)], ["HGET", indexKey(courseId), who], ["SCARD", allKey(courseId)]]);
-    const [all] = Number(size) > 0 && Number(size) <= LEGACY_SCAN ? await redisPipeline([["SMEMBERS", allKey(courseId)]]) : [[]];
-    const ids = new Set<string>([...(Array.isArray(mine) ? mine.map(String) : []), ...(typeof current === "string" ? [current] : [])]);
-    const others = (Array.isArray(all) ? all.map(String) : []).filter((id) => CERT_ID_PATTERN.test(id) && !ids.has(id));
+    const [mine, current, size] = exactReplies(await redisPipeline([["SMEMBERS", byKey(courseId, who)], ["HGET", indexKey(courseId), who], ["SCARD", allKey(courseId)]]), 3, what);
+    if (current !== null && typeof current !== "string") throw new UnknownReply(what);
+    const known = new Set<string>([...ids(mine), ...(typeof current === "string" ? [current] : [])]);
+    const [all] = replyCount(size, what) > 0 && (size as number) <= LEGACY_SCAN ? exactReplies(await redisPipeline([["SMEMBERS", allKey(courseId)]]), 1, what) : [[]];
+    const others = ids(all).filter((id) => CERT_ID_PATTERN.test(id) && !known.has(id));
     for (let i = 0; i < others.length; i += 500) {
       const chunk = others.slice(i, i + 500);
-      const [rows] = await redisPipeline([["MGET", ...chunk.map(certKey)]]);
-      (Array.isArray(rows) ? rows : []).forEach((raw, j) => {
+      const [rows] = exactReplies(await redisPipeline([["MGET", ...chunk.map(certKey)]]), 1, what);
+      const values = plainList(rows);
+      if (!values || values.length !== chunk.length || !values.every((raw) => raw === null || typeof raw === "string")) throw new UnknownReply(what);
+      values.forEach((raw, j) => {
         const record = certificateRecord(raw);
-        if (typeof record?.email === "string" && record.email.trim().toLowerCase() === address) ids.add(chunk[j]);
+        if (typeof record?.email === "string" && record.email.trim().toLowerCase() === address) known.add(chunk[j]);
       });
     }
-    const list = [...ids].filter((id) => CERT_ID_PATTERN.test(id));
-    await redisPipeline([
-      ["DEL", byKey(courseId, who), ...list.map(certKey)],
-      ["HDEL", indexKey(courseId), who],
-      ...(list.length ? [["SREM", allKey(courseId), ...list]] : []),
-    ]);
+    const list = [...known].filter((id) => CERT_ID_PATTERN.test(id));
+    // Each record taken out with GETDEL, so only the deletion that removed it
+    // gives back what it took when issued (the record as made, withdrawnAt 0):
+    // two deletions at once never give the same room back twice. Each reply
+    // must be the record or a confirmed none (null), one per certificate.
+    let freed = 0;
+    let unknown = false;
+    for (let i = 0; i < list.length; i += 500) {
+      const chunk = list.slice(i, i + 500);
+      const rows = plainList(await redisPipeline(chunk.map((id) => ["GETDEL", certKey(id)])));
+      if (!rows || rows.length !== chunk.length) {
+        unknown = true;
+        continue;
+      }
+      for (const raw of rows) {
+        if (raw === null) continue;
+        if (typeof raw !== "string") {
+          unknown = true;
+          continue;
+        }
+        try {
+          const value = JSON.parse(raw) as Record<string, unknown>;
+          if (value && typeof value === "object") freed += dataBytes([JSON.stringify({ ...value, withdrawnAt: 0 })], 3);
+        } catch {
+          // Unreadable: nothing is known of what it took, so nothing is given back for it.
+        }
+      }
+    }
+    // What was confirmed taken comes back now; a retry finds it gone and gives nothing again.
+    if (room && freed > 0) await giveData(room, [{ slot: CERTS_SLOT(courseId), bytes: freed }]);
+    // A certificate whose deletion is unknown keeps every reference to it, for the retry.
+    if (unknown) throw new UnknownReply(what);
+    exactReplies(
+      await redisPipeline([
+        ["DEL", byKey(courseId, who)],
+        ["HDEL", indexKey(courseId), who],
+        ...(list.length ? [["SREM", allKey(courseId), ...list]] : []),
+      ]),
+      list.length ? 3 : 2,
+      what,
+    ).forEach((n) => replyCount(n, what));
     gone += list.length;
   }
   return gone;
@@ -356,15 +489,41 @@ export async function certificatesOf(courseIds: string[], email: string): Promis
   const who = emailKey(email);
   const address = email.trim().toLowerCase();
   const out: CertificateCopy[] = [];
+  const what = "a person's certificate copy";
+  const idsOf = (raw: unknown): string[] => {
+    const list = plainList(raw);
+    if (!list || !list.every((id) => typeof id === "string" && CERT_ID_PATTERN.test(id))) throw new UnknownReply(what);
+    return list as string[];
+  };
+  const countOf = (raw: unknown): number => {
+    const count = replyCount(raw, what);
+    if (!Number.isSafeInteger(count)) throw new UnknownReply(what);
+    return count;
+  };
   for (const courseId of courseIds) {
-    const [mine, current, size] = await redisPipeline([["SMEMBERS", byKey(courseId, who)], ["HGET", indexKey(courseId), who], ["SCARD", allKey(courseId)]]);
-    const [all] = Number(size) > 0 && Number(size) <= LEGACY_SCAN ? await redisPipeline([["SMEMBERS", allKey(courseId)]]) : [[]];
-    const ids = new Set<string>([...(Array.isArray(mine) ? mine.map(String) : []), ...(typeof current === "string" ? [current] : [])].filter((id) => CERT_ID_PATTERN.test(id)));
-    const candidates = [...new Set([...ids, ...(Array.isArray(all) ? all.map(String) : []).filter((id) => CERT_ID_PATTERN.test(id))])];
+    const [mine, current, size] = exactReplies(
+      await redisPipeline([["SMEMBERS", byKey(courseId, who)], ["HGET", indexKey(courseId), who], ["SCARD", allKey(courseId)]]),
+      3,
+      what,
+    );
+    if (current !== null && (typeof current !== "string" || !CERT_ID_PATTERN.test(current))) throw new UnknownReply(what);
+    const count = countOf(size);
+    const [all] = count > 0 && count <= LEGACY_SCAN
+      ? exactReplies(await redisPipeline([["SMEMBERS", allKey(courseId)]]), 1, what)
+      : [[]];
+    const ids = new Set<string>([
+      ...idsOf(mine),
+      ...(typeof current === "string" ? [current] : []),
+    ]);
+    const candidates = [...new Set([...ids, ...idsOf(all)])];
     for (let i = 0; i < candidates.length; i += 500) {
       const chunk = candidates.slice(i, i + 500);
-      const [rows] = await redisPipeline([["MGET", ...chunk.map(certKey)]]);
-      (Array.isArray(rows) ? rows : []).forEach((raw, k) => {
+      const [rows] = exactReplies(await redisPipeline([["MGET", ...chunk.map(certKey)]]), 1, what);
+      const values = plainList(rows);
+      if (!values || values.length !== chunk.length || !values.every((raw) => raw === null || typeof raw === "string")) {
+        throw new UnknownReply(what);
+      }
+      values.forEach((raw, k) => {
         const record = certificateRecord(raw);
         if (record && (ids.has(chunk[k]) || (typeof record.email === "string" && record.email.trim().toLowerCase() === address))) out.push(copyCertificate(record));
       });
@@ -376,6 +535,11 @@ export async function certificatesOf(courseIds: string[], email: string): Promis
 /** How many certificates each course keeps: what deleting a person may read (lib/person-erasure.ts). */
 export async function certificateCount(courseIds: string[]): Promise<number> {
   if (!courseIds.length || !isRedisConfigured()) return 0;
-  const counts = await redisPipeline(courseIds.map((c) => ["SCARD", allKey(c)]));
-  return counts.reduce<number>((sum, n) => sum + Math.min(Number(n) || 0, LEGACY_SCAN), 0);
+  const what = "the certificates counted for a person's erasure";
+  const counts = exactReplies(await redisPipeline(courseIds.map((c) => ["SCARD", allKey(c)])), courseIds.length, what);
+  return counts.reduce<number>((sum, raw) => {
+    const count = replyCount(raw, what);
+    if (!Number.isSafeInteger(count)) throw new UnknownReply(what);
+    return sum + Math.min(count, LEGACY_SCAN);
+  }, 0);
 }

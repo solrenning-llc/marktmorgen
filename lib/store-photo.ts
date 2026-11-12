@@ -59,18 +59,21 @@ export function decodePhoto(raw: unknown): { bytes: Uint8Array; type: PhotoType 
   return { bytes, type };
 }
 
+/** A fresh id for a photo, to be named in the store record before anything is written under it. */
+export function newPhotoId(): string {
+  return crypto.randomUUID().replace(/-/g, "");
+}
+
 /**
- * Keeps a photo under a fresh id and returns the id, once Redis answers the
- * SET exactly "OK"; any other reply throws UnknownReplyError (CX-123 rule 24),
+ * Keeps a photo under an id (a fresh one unless given) and returns the id.
+ * Written only on Redis's exact "OK" (CX-123 rule 24): any other answer throws,
  * so the page is never pointed at a photo that may not be there.
  */
-export async function writePhoto(bytes: Uint8Array, type: PhotoType): Promise<string> {
-  const id = crypto.randomUUID().replace(/-/g, "");
-  const replies = repliesFor(
-    await redisPipeline([["SET", photoKey(id), `${type};${Buffer.from(bytes).toString("base64")}`]]),
-    1,
-  );
-  if (!replies || replies[0] !== "OK") throw new UnknownReplyError("a page photo saved");
+export async function writePhoto(bytes: Uint8Array, type: PhotoType, id = newPhotoId()): Promise<string> {
+  const replies = repliesFor(await redisPipeline([
+    ["SET", photoKey(id), `${type};${Buffer.from(bytes).toString("base64")}`],
+  ]), 1);
+  if (!replies || replies[0] !== "OK") throw new UnknownReplyError("writing a store photo: SET");
   return id;
 }
 
@@ -89,13 +92,22 @@ export async function readPhoto(
 }
 
 /**
- * Forgets a photo, once Redis confirms the DEL (a count of 0 or 1); any other
- * reply throws UnknownReplyError (CX-123 rule 24): /api/photo/<id> reads only
- * this record, so a photo whose delete is not confirmed is not "removed".
+ * Deletes photos nothing points at any more. Done only on each DEL's exact
+ * count, 0 (already gone) or 1 (CX-123 rule 24): any other answer, or a
+ * failure, throws, and whoever keeps their names keeps them until a later try
+ * is confirmed (lib/store.ts, photoLeft). /api/photo/<id> reads only the
+ * photo's own record, so a photo whose delete is not confirmed is not "removed".
  */
+export async function deletePhotos(ids: (string | null)[]): Promise<void> {
+  const ours = [...new Set(ids.filter((id): id is string => typeof id === "string" && PHOTO_ID_PATTERN.test(id)))];
+  if (ours.length === 0) return;
+  const replies = repliesFor(await redisPipeline(ours.map((id) => ["DEL", photoKey(id)])), ours.length);
+  if (!replies || replies.some((reply) => { const n = countOf(reply); return n !== 0 && n !== 1; })) {
+    throw new UnknownReplyError("deleting a store photo: DEL");
+  }
+}
+
+/** Deletes one photo nothing points at any more; throws when that is not confirmed. */
 export async function deletePhoto(id: string | null): Promise<void> {
-  if (!id || !PHOTO_ID_PATTERN.test(id)) return;
-  const replies = repliesFor(await redisPipeline([["DEL", photoKey(id)]]), 1);
-  const deleted = replies ? countOf(replies[0]) : null;
-  if (deleted === null || deleted > 1) throw new UnknownReplyError("a page photo deleted");
+  await deletePhotos([id]);
 }

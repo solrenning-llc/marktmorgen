@@ -19,9 +19,9 @@
  * overlap, a store seen twice while it moves between addresses — finds the day
  * taken and does nothing.
  */
-import { isRedisConfigured } from "@/lib/redis";
+import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { claimMark } from "@/lib/claim-mark";
-import { UnknownReplyError } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { SITE_URL } from "@/lib/site-url";
 import { storesAfter, type Store } from "@/lib/store";
@@ -35,6 +35,15 @@ import { formatMoney } from "@/lib/money";
 const CLAIM_SECONDS = 40 * 86_400;
 /** A ceiling on one run, so a job that is behind still ends. */
 const MAX_STEPS = 10_000;
+/**
+ * How many days after its payday a store the payday run did not finish is still caught up (webhooks/cron audit,
+ * Claude 1, 12/11/2026). The job runs once a day (vercel.json, "0 13 * * *"): a store whose payday failed (a Redis
+ * or PayPal read that threw, a claim answered unknown) or that the run's deadline never reached used to wait until
+ * the same day next month, with its affiliates unpaid and the creator never told. A store the payday did handle
+ * (an email sent, or nobody owed anything that day: both claim the month) is never caught up, so a sale that clears
+ * after the payday still joins next month's batch, as before.
+ */
+export const PAYDAY_CATCH_UP_DAYS = 3;
 
 export type PaydayCounts = {
   /** Stores looked at. */
@@ -60,9 +69,36 @@ function monthOf(now: Date): string {
  * counted as failed and nobody is written to or paid on it.
  */
 async function claimMonth(statsId: string, month: string): Promise<boolean> {
-  const got = await claimMark(`nl:aff:payday:${statsId}:${month}`, CLAIM_SECONDS);
+  const got = await claimMark(claimKey(statsId, month), CLAIM_SECONDS);
   if (got === "unknown") throw new UnknownReplyError("a store's payday claim");
   return got === "ours";
+}
+
+function claimKey(statsId: string, month: string): string {
+  return `nl:aff:payday:${statsId}:${month}`;
+}
+
+/**
+ * The payday a run on `now` is for, if any: today's, or one up to PAYDAY_CATCH_UP_DAYS back (in its own month,
+ * so a payday on the 28th caught up on the 1st is still the earlier month's), with how many days late it is.
+ */
+export function paydayDue(payday: number, now: Date): { month: string; late: number } | null {
+  for (let late = 0; late <= PAYDAY_CATCH_UP_DAYS; late += 1) {
+    const day = new Date(now.getTime() - late * 86_400_000);
+    if (day.getUTCDate() === payday) return { month: monthOf(day), late };
+  }
+  return null;
+}
+
+/**
+ * Whether a missed-looking payday was in fact handled: the month claimed, by an email that went or by a payday that
+ * found nobody owed. Read exactly (CX-123 rule 24): any answer but a count of 0 or 1 throws, and the store is
+ * counted as failed this run and looked at again tomorrow, never paid on a guess.
+ */
+async function handled(statsId: string, month: string): Promise<boolean> {
+  const count = countOf(repliesFor(await redisPipeline([["EXISTS", claimKey(statsId, month)]]), 1)?.[0]);
+  if (count !== 0 && count !== 1) throw new UnknownReplyError("whether a store's payday was handled");
+  return count === 1;
 }
 
 /** The message itself. Plain text, so every word is what arrives. */
@@ -77,6 +113,8 @@ export function paydayEmail(input: {
   refundsChecked: boolean;
   /** Of what is waiting, the leads in hold or waiting for the creator's approval (lib/affiliate-leads.ts). */
   leadsCents?: number;
+  /** Days since the payday, when it is caught up after a run that did not finish it (PAYDAY_CATCH_UP_DAYS). */
+  late?: number;
 }): { subject: string; text: string } {
   // What can be paid today, not what is owed in all: when a wait is set the
   // two differ, and a subject line that calls the smaller number "owed" tells
@@ -87,7 +125,9 @@ export function paydayEmail(input: {
   const lines = [
     "Hello,",
     "",
-    `Today is the ${ordinal(input.payday)}, the day you told your affiliates you pay them. ${who} can be paid ${amount}.`,
+    input.late
+      ? `The ${ordinal(input.payday)}, ${daysAgo(input.late)}, was the day you told your affiliates you pay them. We could not finish this email that day, so here it is now. ${who} can be paid ${amount}.`
+      : `Today is the ${ordinal(input.payday)}, the day you told your affiliates you pay them. ${who} can be paid ${amount}.`,
     "",
     "Open your affiliate page, download the batch, and upload it to your own PayPal or Wise. The money goes straight from your account to theirs — it never passes through us, so there is nothing to wait for once you have sent it:",
     studio,
@@ -114,12 +154,19 @@ export function paydayEmail(input: {
     );
   }
   lines.push("", "— Marktmorgen");
-  return { subject: `${amount} to pay your affiliates today`, text: lines.join("\n") };
+  return { subject: input.late ? `${amount} to pay your affiliates` : `${amount} to pay your affiliates today`, text: lines.join("\n") };
+}
+
+/** "yesterday", "2 days ago". */
+function daysAgo(late: number): string {
+  return late === 1 ? "yesterday" : `${late} days ago`;
 }
 
 /** The payday email of a store that pays by itself: what PayPal was asked to send, or why not. */
-export function autoPayEmail(paid: Awaited<ReturnType<typeof payWithPayPal>>, currency: string): { subject: string; text: string } {
+export function autoPayEmail(paid: Awaited<ReturnType<typeof payWithPayPal>>, currency: string, late = 0): { subject: string; text: string } {
   const studio = `${SITE_URL}/studio/affiliates`;
+  // Caught up after a run that did not finish the payday (PAYDAY_CATCH_UP_DAYS): never "it is your payday" on another day.
+  const opening = late ? `Your affiliate payday was ${daysAgo(late)}` : "It is your affiliate payday";
   if (paid.ok) {
     const amount = formatMoney(paid.cents, currency);
     const who = `${paid.people} ${paid.people === 1 ? "affiliate" : "affiliates"}`;
@@ -128,7 +175,7 @@ export function autoPayEmail(paid: Awaited<ReturnType<typeof payWithPayPal>>, cu
       text: [
         "Hello,",
         "",
-        `It is your affiliate payday, and you asked us to pay by ourselves. ${amount} went to ${who} from your own PayPal, in PayPal batch ${paid.batch}.`,
+        `${opening}, and you asked us to pay by ourselves. ${amount} went to ${who} from your own PayPal, in PayPal batch ${paid.batch}.`,
         "",
         "Each payment shows as paid on your affiliate page, and on the affiliate's own page, as soon as PayPal confirms it. Anyone PayPal cannot pay stays owed, to be paid again. The money went from your PayPal to theirs; it never passed through us.",
         studio,
@@ -143,7 +190,7 @@ export function autoPayEmail(paid: Awaited<ReturnType<typeof payWithPayPal>>, cu
       text: [
         "Hello,",
         "",
-        "It is your affiliate payday, and you asked us to pay by ourselves. We sent the batch to PayPal, but PayPal's answer did not reach us, so we do not know whether it was paid.",
+        `${opening}, and you asked us to pay by ourselves. We sent the batch to PayPal, but PayPal's answer did not reach us, so we do not know whether it was paid.`,
         "",
         "Nobody in it will be paid again by us while this is not known: they show as on their way on your affiliate page. Look at your PayPal activity to see whether the payment went.",
         studio,
@@ -163,11 +210,11 @@ export function autoPayEmail(paid: Awaited<ReturnType<typeof payWithPayPal>>, cu
     error: "PayPal could not be reached",
   };
   return {
-    subject: "Your affiliates were not paid today",
+    subject: late ? "Your affiliates were not paid" : "Your affiliates were not paid today",
     text: [
       "Hello,",
       "",
-      `It is your affiliate payday, and nothing was sent: ${why[paid.reason] ?? why.error}. Nothing left your PayPal.`,
+      `${opening}, and nothing was sent: ${why[paid.reason] ?? why.error}. Nothing left your PayPal.`,
       "",
       "Open your affiliate page to pay them with one press, or download the batch for PayPal or Wise:",
       studio,
@@ -177,17 +224,24 @@ export function autoPayEmail(paid: Awaited<ReturnType<typeof payWithPayPal>>, cu
   };
 }
 
-/** One store, if today is its payday and anybody is owed. True when sent. */
-async function payday(store: Store, month: string, dayOfMonth: number): Promise<boolean> {
-  if (!affiliatesOn(store) || store.affiliates.payday !== dayOfMonth) return false;
+/** One store, on its payday (or that payday caught up `late` days after), if anybody is owed. True when sent. */
+async function payday(store: Store, month: string, late: number): Promise<boolean> {
+  if (!affiliatesOn(store)) return false;
   if (!store.statsId || !store.email) return false;
+  // A payday caught up only when that day's run did not handle it: never twice, never for a store with nobody owed.
+  if (late > 0 && (await handled(store.statsId, month))) return false;
   const book = await readBook(store);
   // Anyone with a PayPal payment already on its way is not due again.
   const lines = payableLines(book, await onTheirWay(store));
-  // Nobody to pay is not a message worth sending, and it must not spend the
-  // month's claim either: a sale that lands later today should still be able
-  // to bring the email.
-  if (lines.length === 0) return false;
+  // Nobody to pay is not a message worth sending. The month is claimed all
+  // the same (the job runs once a day, so no later run that day could send
+  // it), so the days after do not catch this payday up when a sale clears:
+  // that sale joins next month's batch, as before. A claim that cannot be
+  // written only means one more look tomorrow.
+  if (lines.length === 0) {
+    await claimMark(claimKey(store.statsId, month), CLAIM_SECONDS).catch(() => undefined);
+    return false;
+  }
   // Claimed last, so that whichever run gets here first is the only one that
   // sends. A second run reads the same book and stops here.
   if (!(await claimMonth(store.statsId, month))) return false;
@@ -195,7 +249,7 @@ async function payday(store: Store, month: string, dayOfMonth: number): Promise<
   // the email then says what was sent, or why it could not be.
   if (book.refundsChecked && (await paysAutomatically(store))) {
     const paid = await payWithPayPal(store);
-    const { subject, text } = autoPayEmail(paid, book.currency);
+    const { subject, text } = autoPayEmail(paid, book.currency, late);
     return sendEmail({ meter: { by: "store", store: store, kind: "email" }, from: NIMBUS_FROM, to: store.email, subject, text, idempotencyKey: `aff-payday-${store.statsId}-${month}` });
   }
   const { subject, text } = paydayEmail({
@@ -208,6 +262,7 @@ async function payday(store: Store, month: string, dayOfMonth: number): Promise<
     hold: store.affiliates.hold,
     refundsChecked: book.refundsChecked,
     leadsCents: book.lines.filter((l) => l.how === "lead" && l.status !== "approved" && l.currency === book.currency).reduce((sum, l) => sum + l.commission, 0),
+    late,
   });
   return sendEmail({ meter: { by: "store", store: store, kind: "email" },
     from: NIMBUS_FROM,
@@ -219,26 +274,26 @@ async function payday(store: Store, month: string, dayOfMonth: number): Promise<
 }
 
 /**
- * Every store, once, for whichever of them pays today. `deadline` is when the
- * run has to stop whatever it has reached; the next run starts again from the
- * beginning, and the month's claim keeps anybody already emailed from being
- * emailed twice.
+ * Every store, once, for whichever of them pays today, and for any whose
+ * payday in the last PAYDAY_CATCH_UP_DAYS a run did not finish. `deadline` is
+ * when the run has to stop whatever it has reached; the next run (tomorrow:
+ * the job runs once a day) starts again from the beginning, and the month's
+ * claim keeps anybody already emailed from being emailed twice.
  */
 export async function sendPaydayEmails(deadline: number, now = new Date()): Promise<PaydayCounts> {
   const counts: PaydayCounts = { seen: 0, due: 0, sent: 0, failed: 0, complete: false };
   if (!isRedisConfigured() || !isSenderConfigured()) return counts;
-  const month = monthOf(now);
-  const dayOfMonth = now.getUTCDate();
   let cursor = "0";
   for (let step = 0; step < MAX_STEPS; step += 1) {
     if (Date.now() >= deadline) return counts;
     const { stores, next } = await storesAfter(cursor);
     for (const store of stores) {
       counts.seen += 1;
-      if (store.affiliates.payday !== dayOfMonth) continue;
+      const due = paydayDue(store.affiliates.payday, now);
+      if (!due) continue;
       counts.due += 1;
       try {
-        if (await payday(store, month, dayOfMonth)) counts.sent += 1;
+        if (await payday(store, due.month, due.late)) counts.sent += 1;
       } catch (error) {
         counts.failed += 1;
         console.error("sending an affiliate payday email failed", error);

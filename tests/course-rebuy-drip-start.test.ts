@@ -24,7 +24,7 @@ import { paidPeriod } from "./billing-period-fixture";
 process.env.STRIPE_SECRET_KEY = "sk_test_rebuy_drip_only";
 
 const OWNER = "maker@example.com";
-const ACCOUNT = "acct_1TestRebuyDrip01";
+const ACCOUNT = "acct_1TestRebuyDrip1";
 const NOW = Math.floor(Date.now() / 1000);
 const DAY = 86_400;
 

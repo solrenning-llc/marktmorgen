@@ -27,6 +27,7 @@ import { ordersIn } from "@/lib/orders";
 import { confirmPurchase } from "@/lib/purchase-email";
 import { addProduct, claimHandle, ensureStatsId, setProductFunnel, setProductLink, setStripeAccount, setSubscription, storeFolder, storeForEmail } from "@/lib/store";
 import { newUpsellKey, readUpsell, settleUpsells, takeUpsell } from "@/lib/upsell";
+import { shownRef } from "./upsell-ref-fixture";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -210,7 +211,9 @@ async function main(): Promise<void> {
     };
     return id;
   };
-  const take = (session: string) => takeUpsell({ store, session, secret: browser.secret, origin: "https://marktmorgen.com", step: "kit001", answer: "yes", consent: TEST_CONSENT });
+  // The form names the step by the terms the page drew (lib/upsell.ts, offerRef), as the thanks page posts it.
+  const take = async (session: string) =>
+    takeUpsell({ store, session, secret: browser.secret, origin: "https://marktmorgen.com", step: await shownRef(store, "kit001"), answer: "yes", consent: TEST_CONSENT });
 
   part("A paid one-click offer (takeUpsell): control");
   {

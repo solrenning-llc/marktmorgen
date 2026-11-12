@@ -81,6 +81,10 @@ async function main(): Promise<void> {
   const visitor = await page();
   is("no address to the file is signed for them", blobWorld.issued, 0);
   is("the page says the video is paused", visitor.includes(w.pausedStrong), true);
+  // The store has a paid plan: the plan-hours sentence would be untrue here (VR rule 2).
+  is("the page does not say the store has no paid plan", visitor.includes("has no paid plan"), false);
+  is("it says free previews are paused until next month", visitor.includes("paused until next month"), true);
+  is("and that what the visitor bought is unaffected", visitor.includes("Anything you have bought is unaffected"), true);
 
   part("a student who holds the course: their video plays");
   const started = Math.floor(Date.now() / 1000) - 86_400;

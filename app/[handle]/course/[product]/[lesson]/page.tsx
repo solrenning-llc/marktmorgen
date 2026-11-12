@@ -300,6 +300,10 @@ export default async function LessonPage({ params, searchParams }: Params) {
                 <p className="st-note mt-6" role="status">
                   <strong>{w.pausedStrong}</strong>{` ${w.pausedRest(store.name)}`}
                 </p>
+              ) : video?.kind === "free_paused" ? (
+                <p className="st-note mt-6" role="status">
+                  <strong>{w.pausedStrong}</strong>{` ${w.freePausedRest}`}
+                </p>
               ) : video?.kind === "failed" ? (
                 <p className="st-note mt-6">{w.videoFailed(store.name)}</p>
               ) : (

@@ -787,7 +787,10 @@ export type LessonVideo =
   | { kind: "stream"; src: string; width: number; height: number }
   | { kind: "preparing" }
   | { kind: "failed" }
-  | { kind: "paused" };
+  | { kind: "paused" }
+  // A preview played free, paused with the store's other free copies (lib/serve-file.ts freeDeliveryPause),
+  // whatever the plan: never told as the no-plan hours being used up.
+  | { kind: "free_paused" };
 
 /**
  * The video of a lesson, for somebody who may watch it; null when it cannot
@@ -812,7 +815,7 @@ export async function lessonVideo(file: ProductFile, limit: number | null = null
     if (free) {
       const folder = folderFromPathname(file.pathname);
       const pause = folder ? await freeDeliveryPause(folder) : "open";
-      if (pause === "over") return { kind: "paused" };
+      if (pause === "over") return { kind: "free_paused" };
       if (pause === "unknown") return null;
     }
     const src = await signedMedia(file, VIDEO_URL_SECONDS);

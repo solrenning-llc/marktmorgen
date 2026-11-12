@@ -43,6 +43,14 @@ type Answer = { status: number; data: Record<string, unknown> };
 const str = (v: unknown) => (typeof v === "string" ? v : "");
 const num = (v: unknown) => (typeof v === "number" ? v : NaN);
 const err = (a: Answer) => str((a.data.error as { message?: unknown } | undefined)?.message);
+/**
+ * A subscription read back proves a switch only when the reply is that very subscription (rule 30): its own id, equal
+ * to the one asked for. Another subscription's reply, or one with no id, fails the check; it never passes it. A body
+ * that is not an object (JSON `null`) fails it the same way, without throwing.
+ */
+const isOwnReply = (a: Answer, id: string): boolean =>
+  a.status === 200 && a.data !== null && typeof a.data === "object" && Object.hasOwn(a.data, "id") && a.data.id === id;
+const notOwn = (a: Answer, id: string) => (isOwnReply(a, id) ? "" : `Stripe's reply was not ${id}; `);
 
 function tier(id: string, title: string, cents: number, interval: "month" | "year"): Listing {
   return { id, title, priceCents: cents, recurring: { interval, trialDays: 0, payments: 0 } } as unknown as Listing;
@@ -107,7 +115,11 @@ export async function verifyTiers(): Promise<Check[]> {
       const after = await onDemoAccount("GET", `/subscriptions/${m.sub}`);
       const now = productOfSub(after.data);
       const meta = currentMeta({ store: s.handle, product: A.id }, { mode: "subscription", subscription: after.data });
-      note(`${label}: every door now reads the new tier`, now === to.id && meta.product === to.id, `subscription reads ${now}; a checkout bought as ${A.id} now hands over ${meta.product}`);
+      note(
+        `${label}: every door now reads the new tier`,
+        isOwnReply(after, m.sub) && now === to.id && meta.product === to.id,
+        `${notOwn(after, m.sub)}subscription reads ${now}; a checkout bought as ${A.id} now hands over ${meta.product}`,
+      );
     };
 
     const m = await subscribe("verify+tiers@example.com");
@@ -131,8 +143,8 @@ export async function verifyTiers(): Promise<Check[]> {
     const still = await onDemoAccount("GET", `/subscriptions/${d.sub}`);
     note(
       "a declined card changes nothing, and its invoice is voided",
-      pending && voided === "void" && productOfSub(still.data) === A.id,
-      `answer ${refused.status}${err(refused) ? ` (${err(refused)})` : ""}, pending update ${pending}, invoice ${voided || str(inv.status)}, still on ${productOfSub(still.data)}`,
+      pending && voided === "void" && isOwnReply(still, d.sub) && productOfSub(still.data) === A.id,
+      `${notOwn(still, d.sub)}answer ${refused.status}${err(refused) ? ` (${err(refused)})` : ""}, pending update ${pending}, invoice ${voided || str(inv.status)}, still on ${productOfSub(still.data)}`,
     );
   } finally {
     for (const id of made) await onDemoAccount("DELETE", `/subscriptions/${id}`).catch(() => null);

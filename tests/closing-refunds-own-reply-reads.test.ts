@@ -29,7 +29,7 @@ const goodIntent = (id: string, charge: Record<string, unknown> = {}) => ({
   id,
   amount: 1000,
   currency: "usd",
-  latest_charge: { id: "ch_p3097" + id.slice(9), amount: 1000, currency: "usd", amount_refunded: 0, disputed: false, ...charge },
+  latest_charge: { id: "ch_p3097" + id.slice(9), amount: 1000, currency: "usd", amount_refunded: 0, disputed: false, balance_transaction: null, ...charge },
 });
 const emptyPayments = { object: "list", data: [], has_more: false };
 const paidRow = (invoice: string, intent: string) => ({ id: "inpay_p3097", object: "invoice_payment", invoice, status: "paid", payment: { type: "payment_intent", payment_intent: intent } });
@@ -37,7 +37,7 @@ const paidRow = (invoice: string, intent: string) => ({ id: "inpay_p3097", objec
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input instanceof Request ? input.url : input));
   const path = url.pathname.replace(/^\/v1/, "");
-  if (path === "/balance") return Response.json({ available: [{ amount: 100_000, currency: "usd" }] });
+  if (path === "/balance") return Response.json({ object: "balance", available: [{ amount: 100_000, currency: "usd" }] });
   if (path === `/invoices/${INVOICE}`) return Response.json(invoiceReply);
   if (path === "/invoice_payments") return Response.json(paymentsReply);
   if (path === `/payment_intents/${MINE}`) return Response.json(intentReply);

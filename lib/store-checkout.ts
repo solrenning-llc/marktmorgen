@@ -699,19 +699,20 @@ export async function createCheckout(
     else body.set(`subscription_data[metadata][${CONSENT_META}]`, consentMetaValue(extras.digitalConsent, kind));
   }
 
-  // This ordinary origin has no verified original-file access recipe yet.
-  // Funding alone cannot authorize taking payment. In particular, never_activated
-  // must not route these new purchases through the legacy unprotected POST.
-  // Its protected reservation/reconciliation adapter is constructed separately;
-  // dispatch and hosted payment creation stay closed until rights are proved.
+  // Until the durable lifecycle is activated, the existing single-file sale
+  // keeps its legacy checkout, independently of optional newsletter consent.
+  // An activated durable producer still needs original-file access proof;
+  // optional consent must never bypass that requirement.
   const singleDigital = Boolean(store.stripeAccountId !== DEMO_CONNECTED_ACCOUNT && product.file && !product.link && !shipping &&
     product.priceCents > 0 && !product.bundle && !product.course && !product.podcast && !product.keys && !product.note &&
     !product.callPackage && !product.recurring && !product.plan && !product.pwyw && product.options.length === 0 &&
     product.fields.length === 0 && added.length === 0 && !extras.gift && !extras.group && !extras.preorder && !extras.email &&
-    !extras.buyerKey && !extras.upsellKey && !extras.news && !extras.held && !extras.remind && !recovering && !named &&
+    !extras.buyerKey && !extras.upsellKey && !extras.held && !recovering && !named &&
     !store.tax.ids && !store.tax.invoices && !store.domain?.liveAt && !(store.affiliates.enabled && store.affiliates.buyers) &&
     !body.has("discounts[0][promotion_code]") && !body.has("discounts[0][coupon]"));
-  if (singleDigital) throw new Error("The payment page could not be opened");
+  if (singleDigital && (confirmationRuntime.lifecycle ?? CURRENT_SHIPMENT_MAIL_LIFECYCLE) !== "never_activated") {
+    throw new Error("The payment page could not be opened");
+  }
 
   // A paid store's new orders stop at its plan's figure (lib/order-admission.ts):
   // admitted here, before Stripe's page opens, so nobody is stopped while paying.
@@ -969,7 +970,7 @@ export async function readOrder(
     session = await onAccount(
       "GET",
       store.stripeAccountId as string,
-      `/checkout/sessions/${encodeURIComponent(sessionId)}?expand[]=subscription&expand[]=payment_intent.latest_charge&expand[]=payment_intent.payment_method`,
+      `/checkout/sessions/${encodeURIComponent(sessionId)}?expand[]=subscription&expand[]=subscription.latest_invoice&expand[]=payment_intent.latest_charge&expand[]=payment_intent.payment_method`,
     );
   } catch (error) {
     if (error instanceof StripeError && error.status === 404) {

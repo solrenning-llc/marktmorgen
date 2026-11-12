@@ -34,7 +34,15 @@
  * What the service delivered is read only from its answer in its own shape
  * (inventory of money calls, finding 9, rule 24): any other answer is unknown,
  * never "nothing delivered", and nothing is refunded on it (deliveredIn,
- * unknownLook).
+ * unknownLook). The same holds for its answer to the request to write them:
+ * only a 4xx or a 2xx saying `success: false` is a refusal, refunded at once;
+ * any other answer keeps the request for the sweep (finding R32).
+ *
+ * Only the service's own captions count as delivered (Claude 5 on #3427):
+ * while a request holds a language (ordered, being written, or kept for a
+ * person), a caption in it is not added or removed by hand (withOwnCaptions),
+ * and a language once delivered stays delivered, so a caption by hand is never
+ * charged as the AI's and what the AI never wrote is given back.
  *
  * A request kept for a person (what was delivered still unknown after every
  * automatic look) is marked `kept`: never shown as being written, never a
@@ -53,6 +61,10 @@ import type { Store } from "@/lib/store";
 import { GIVE_UP_HOURS, MAX_AUTO_MINUTES, autoCaptionCents, chargedMinutes, readAutoAsk } from "@/lib/auto-captions-rules";
 
 const pendingKey = (id: string) => `nl:stream:auto:${id}`;
+/** Held while a caption in one language is added or removed by hand (withOwnCaptions), so no request for it starts meanwhile. */
+const ownKey = (id: string, lang: string) => `nl:stream:auto:${id}:own:${lang}`;
+/** How long a change by hand holds its language at the most: its calls to the service end long before. */
+const OWN_HOLD_SECONDS = 120;
 /** The videos of one store folder with captions money not settled: a refund owed, or a charge kept for a person. */
 const owedKey = (folder: string) => `nl:stream:autoowed:${folder}`;
 const QUEUE = "nl:stream:autoq";
@@ -204,7 +216,10 @@ export async function autoQuote(pathname: string): Promise<{ minutes: number; se
 /**
  * Charges for captions in the languages asked, and asks the service to write
  * them. Nothing is charged unless all of it can be asked for; a request the
- * service refuses is refunded at once.
+ * service refuses (a 4xx, or a 2xx saying `success: false`) is refunded at
+ * once. Any other answer is unknown, never a refusal: the request is kept,
+ * charged and queued, and the sweep uses it or gives it back on a known
+ * answer.
  */
 export async function requestAutoCaptions(store: Store, pathname: string, spoken: unknown, also: unknown, now = Date.now()): Promise<AutoAnswer> {
   if (!streamConfig() || !isRedisConfigured() || !isBillingConfigured()) return { ok: false, reason: "off" };
@@ -232,6 +247,13 @@ export async function requestAutoCaptions(store: Store, pathname: string, spoken
     return { ok: false, reason: "unavailable" };
   }
   if (claim === "taken") return heldBy(record.id, now);
+  // A caption by hand in an asked language, in flight or landed since the read above, is never charged as the AI's:
+  // read after the claim, so a change by hand either sees this order or is seen here (withOwnCaptions).
+  const free = await askedFree(record.id, pathname, asked.languages);
+  if (free !== "free") {
+    await releaseMark(key, value);
+    return { ok: false, reason: free === "language" ? "language" : "unavailable" };
+  }
   // Queued before the charge, so the sweep finds this order if nothing after the charge runs.
   const queued = repliesFor(await redisPipeline([["ZADD", QUEUE, now + ORDER_SETTLE_MS, record.id]]), 1);
   if (!queued || (queued[0] !== 0 && queued[0] !== 1)) {
@@ -289,7 +311,17 @@ export async function requestAutoCaptions(store: Store, pathname: string, spoken
     generateMoments: false,
   });
   const success = (answer.data as { success?: unknown } | null)?.success;
-  if (answer.status !== 200 || success === false) {
+  // Only a stated refusal gives the charge back here (finding R32, Claude 5 on #3286, #3345 and #3346; rule 24): a
+  // 4xx, or a 2xx saying `success: false`. Any other answer that is not a plain 200 (no answer, a request cut off, a
+  // 5xx whatever its body says) is unknown: the service may be writing them, so nothing is given back on it and the
+  // request stays as written above, charged and queued. The sweep settles it on an answer that says what was
+  // delivered: used, or given back once after GIVE_UP_HOURS; a retry meanwhile is told they are being written and
+  // charges nothing more.
+  const refused = (answer.status >= 400 && answer.status < 500) || (answer.status >= 200 && answer.status < 300 && success === false);
+  if (!refused && answer.status !== 200) {
+    console.error("the video service's answer to writing captions is unknown; the request is kept and looked at, nothing given back on it", record.id, answer.status);
+  }
+  if (refused) {
     console.error("the video service would not write captions", answer.status, answer.data);
     const refundKey = `nl-${sign}:refund`;
     if (await giveBack(pending, null, refundKey)) {
@@ -300,6 +332,82 @@ export async function requestAutoCaptions(store: Store, pathname: string, spoken
     return { ok: false, reason: "refund_pending" };
   }
   return { ok: true, writing: asked.languages, cents };
+}
+
+/**
+ * Whether the asked languages are still free once the order holds the video: no change by hand to one of them in
+ * flight (its hold, ownKey), none listed here since, and none the service itself lists. The service's own list is
+ * read (its free GET /videos/<id>, read as the sweep reads it, deliveredIn), because a change by hand whose answer was
+ * lost is not written down here and its hold runs out after OWN_HOLD_SECONDS, while the sweep counts every asked
+ * language the service lists as the AI's (Claude 2's MEDIUM on #3427). A language it lists that is not written down
+ * here is written down, so the studio lists what the player offers. Read exactly (rule 24): anything else, a 404
+ * included, is "unknown", never free, and nothing is charged.
+ */
+async function askedFree(id: string, pathname: string, langs: string[]): Promise<"free" | "language" | "unknown"> {
+  try {
+    const holds = repliesFor(await redisPipeline(langs.map((lang) => ["GET", ownKey(id, lang)])), langs.length);
+    if (!holds || holds.some((hold) => hold !== null)) return "unknown";
+    const listed = ((await streamCaptions([pathname]))[pathname] ?? []).map((t) => t.lang);
+    if (langs.some((lang) => listed.includes(lang))) return "language";
+    const answer = await askStream("GET", `/videos/${id}`);
+    const there = answer.status === 200 ? deliveredIn(answer.data) : null;
+    if (!there) {
+      console.error("the video service's list of a video's captions could not be read exactly; nothing charged", id, answer.status);
+      return "unknown";
+    }
+    const landed = langs.filter((lang) => there.includes(lang));
+    if (!landed.length) return "free";
+    await noteCaptionLanguages(id, landed);
+    return "language";
+  } catch (error) {
+    console.error("whether captions by hand are being changed for a video could not be read; nothing charged", id, error);
+    return "unknown";
+  }
+}
+
+/**
+ * A change by hand to a video's captions in one language (`change`: added or removed), run only while no AI captions
+ * request holds that language, so a caption by hand is never counted as delivered by the AI (Claude 5 on #3427).
+ * Refused with "auto_writing" while a request holds it (its order, or captions not yet delivered in it), "auto_held"
+ * while a request kept for a person holds it, "changing" while another change by hand in it holds it, and
+ * "unavailable" when that cannot be read exactly (rule 24). A
+ * request settled, owed a refund, or holding other languages lets it run. The language is held (ownKey) for the
+ * change, so no request for it starts meanwhile (askedFree); the hold is let go when the change's outcome is known
+ * (`known`), and otherwise kept until it runs out, since the service may still take it.
+ */
+export async function withOwnCaptions<T>(pathname: string, lang: string, change: () => Promise<T>, known: (result: T) => boolean): Promise<{ ok: true; result: T } | { ok: false; reason: "auto_writing" | "auto_held" | "changing" | "unavailable" }> {
+  const parts = readStreamPath(pathname);
+  // No request can hold a video that is not one, a language there is none of, or anything without the database.
+  if (!parts || !STREAM_ID_PATTERN.test(parts.id) || !captionLabel(lang) || !isRedisConfigured()) return { ok: true, result: await change() };
+  const own = ownKey(parts.id, lang);
+  const value = claimValue();
+  const claimed = await claimMark(own, OWN_HOLD_SECONDS, value);
+  // Held by another change by hand in this language (in flight, or its answer lost): said so (Claude 2's LOW on
+  // #3427). A claim that cannot be read is not known to be anyone's (rule 24).
+  if (claimed === "taken") return { ok: false, reason: "changing" };
+  if (claimed !== "ours") return { ok: false, reason: "unavailable" };
+  let letGo = true;
+  try {
+    const read = repliesFor(await redisPipeline([["GET", pendingKey(parts.id)]]), 1);
+    if (!read || (read[0] !== null && typeof read[0] !== "string")) return { ok: false, reason: "unavailable" };
+    const raw = read[0];
+    if (raw !== null) {
+      const order = parseOrder(raw);
+      const pending = order ? null : parsePending(raw);
+      // Neither an order nor a request (one still being charged, or in no known shape): not known free.
+      if (!order && !pending) return { ok: false, reason: "unavailable" };
+      if (order && order.langs.includes(lang)) return { ok: false, reason: "auto_writing" };
+      if (pending && !pending.owed && pending.langs.includes(lang) && !pending.got.includes(lang)) {
+        return { ok: false, reason: pending.kept !== undefined ? "auto_held" : "auto_writing" };
+      }
+    }
+    letGo = false;
+    const result = await change();
+    letGo = known(result);
+    return { ok: true, result };
+  } finally {
+    if (letGo) await releaseMark(own, value);
+  }
 }
 
 /**
@@ -448,7 +556,7 @@ export async function syncAutoCaptions(id: string, now = Date.now()): Promise<"d
   }
   const pending = parsePending(raw);
   if (!pending) {
-    if (raw !== "charging") await redisPipeline([["ZREM", QUEUE, id]]);
+    if (raw !== "charging") await unqueue(id, raw, now);
     return "none";
   }
   if (pending.owed) return collectRefund(id, pending, pending.owed, now);
@@ -459,14 +567,18 @@ export async function syncAutoCaptions(id: string, now = Date.now()): Promise<"d
   }
   const there = answer.status === 200 ? deliveredIn(answer.data) : null;
   if (!there) return unknownLook(id, pending, raw as string, answer.status, now);
-  const got = pending.langs.filter((lang) => there.includes(lang));
+  // Delivered once is delivered: a language the service listed stays so if it is removed by hand later, and only the
+  // service's own captions are listed in a language the request holds (withOwnCaptions).
+  const got = pending.langs.filter((lang) => pending.got.includes(lang) || there.includes(lang));
   const fresh = got.filter((lang) => !pending.got.includes(lang));
   if (fresh.length) await noteCaptionLanguages(id, fresh);
-  if (got.length === pending.langs.length || now - pending.at > GIVE_UP_HOURS * 3_600_000) {
-    return (await settle(id, pending, got, now)) ? "done" : "waiting";
+  // A language delivered at an earlier look stays delivered (R47): captions taken off since are not refunded.
+  const delivered = pending.langs.filter((lang) => got.includes(lang) || pending.got.includes(lang));
+  if (delivered.length === pending.langs.length || now - pending.at > GIVE_UP_HOURS * 3_600_000) {
+    return (await settle(id, pending, delivered, now)) ? "done" : "waiting";
   }
   await redisPipeline([
-    ["SET", key, JSON.stringify({ ...pending, got }), "EX", KEEP_SECONDS],
+    ["SET", key, JSON.stringify({ ...pending, got: delivered }), "EX", KEEP_SECONDS],
     ["ZADD", QUEUE, now + LOOK_AGAIN_MS, id],
   ]);
   return "waiting";
@@ -552,44 +664,58 @@ async function settle(id: string, pending: Pending, got: string[], now: number):
       }
     }
   }
-  // Out of its store's listing too, where a request kept for a person was listed.
+  // Out of its store's listing too, where a request kept for a person was listed; then out of the queue, unless a newer
+  // record was written meanwhile (unqueue).
   const folder = readStreamPath(pending.path)?.folder;
-  await redisPipeline([["DEL", pendingKey(id)], ["ZREM", QUEUE, id], ...(folder ? [["SREM", owedKey(folder), id]] : [])]);
+  await redisPipeline([["DEL", pendingKey(id)], ...(folder ? [["SREM", owedKey(folder), id]] : [])]);
+  await unqueue(id, null, now);
   return true;
 }
 
 /** Gives back `cents` (null: all of it) of a charge: to the card it was paid with, or to the credit balance that paid it. True only when confirmed. */
 async function giveBack(pending: Pending, cents: number | null, key: string): Promise<boolean> {
-  return pending.credit ? creditBack(pending.credit, cents ?? pending.cents, key) : refundCharge(pending.pi, cents, key);
+  return pending.credit ? creditBack(pending.credit, cents ?? pending.cents, pending.cents, key) : refundCharge(pending.pi, cents, key);
 }
 
 const CUSTOMER_PATTERN = /^cus_[A-Za-z0-9]{6,64}$/;
+const INVOICE_PATTERN = /^in_[A-Za-z0-9]{6,64}$/;
 /** The most pages of a customer's balance history read; one longer than that is not known whole. */
 const CREDIT_HISTORY_PAGES = 10;
 
 /**
- * The amount of the credit back marked `key` on a customer's balance, null when the history holds none, "unknown"
- * when it cannot be read whole or exactly (rule 24): never taken for "none", so a credit is never made twice.
+ * What a captions charge paid from the balance already got back: the sum of every captions credit on the customer's
+ * history carrying this invoice (`metadata[invoice]`), whatever path made it and under whatever key, as Stripe caps a
+ * card refund at what was paid (Claude 6 on #3286). "unknown" when the history cannot be read whole or a row exactly
+ * (rule 24): a row carrying the captions mark whose invoice, amount or currency does not read is never taken for
+ * "not this invoice's", so a credit is never made twice.
  */
-async function creditedUnder(customer: string, key: string): Promise<number | null | "unknown"> {
+async function creditedFor(credit: Credit): Promise<number | "unknown"> {
   let after = "";
+  let returned = 0;
   for (let page = 0; page < CREDIT_HISTORY_PAGES; page += 1) {
     const query = new URLSearchParams({ limit: "100" });
     if (after) query.set("starting_after", after);
-    const list = await onPlatformAt(CHARGE_READ_VERSION, "GET", `/customers/${customer}/balance_transactions?${query}`);
+    const list = await onPlatformAt(CHARGE_READ_VERSION, "GET", `/customers/${credit.customer}/balance_transactions?${query}`);
     if (!list || list.object !== "list" || typeof list.has_more !== "boolean" || !Array.isArray(list.data) || list.data.length > 100) return "unknown";
     let last = "";
     for (const row of list.data as unknown[]) {
       if (!row || typeof row !== "object") return "unknown";
-      const { id, amount, metadata } = row as { id?: unknown; amount?: unknown; metadata?: unknown };
+      const { id, amount, currency, metadata } = row as { id?: unknown; amount?: unknown; currency?: unknown; metadata?: unknown };
       if (typeof id !== "string" || !id) return "unknown";
       if (metadata !== null && (typeof metadata !== "object" || Array.isArray(metadata))) return "unknown";
-      const mark = metadata ? (metadata as Record<string, unknown>).nl_captions_credit : undefined;
+      const fields = (metadata ?? {}) as Record<string, unknown>;
+      const mark = fields.nl_captions_credit;
       if (mark !== undefined && typeof mark !== "string") return "unknown";
-      if (mark === key) return Number.isSafeInteger(amount) ? (amount as number) : "unknown";
+      if (typeof mark === "string") {
+        if (typeof fields.invoice !== "string") return "unknown";
+        if (fields.invoice === credit.invoice) {
+          if (!Number.isSafeInteger(amount) || (amount as number) >= 0 || currency !== "usd") return "unknown";
+          returned -= amount as number;
+        }
+      }
       last = id;
     }
-    if (list.has_more === false) return null;
+    if (list.has_more === false) return returned;
     if (!last) return "unknown";
     after = last;
   }
@@ -597,28 +723,33 @@ async function creditedUnder(customer: string, key: string): Promise<number | nu
 }
 
 /**
- * Puts `cents` back on the customer's credit balance, once: the balance history is read first for a credit already
- * carrying `key` (a credit made whose answer was lost, even past Stripe's 24-hour idempotency window), and the credit
- * is sent under its own idempotency key. True only when Stripe confirms one for exactly that amount.
+ * Puts back on the customer's credit balance what is owed of a charge paid from it (`cents`, never more than its
+ * `total`), once: the balance history is read first for every captions credit already made for this invoice (one
+ * whose answer was lost, one made by another path, even past Stripe's 24-hour idempotency window), and only what is
+ * left is sent, under one idempotency key that follows the invoice and what it already got back, never the caller's.
+ * Two paths at once ask for the same one. True only when the history shows enough back, or Stripe confirms exactly
+ * what was left.
  */
-async function creditBack(credit: Credit, cents: number, key: string): Promise<boolean> {
-  if (!CUSTOMER_PATTERN.test(credit.customer) || !Number.isSafeInteger(cents) || cents <= 0) return false;
+async function creditBack(credit: Credit, cents: number, total: number, key: string): Promise<boolean> {
+  if (!CUSTOMER_PATTERN.test(credit.customer) || !INVOICE_PATTERN.test(credit.invoice) || !Number.isSafeInteger(cents) || cents <= 0 || !Number.isSafeInteger(total) || total <= 0) return false;
   try {
-    const found = await creditedUnder(credit.customer, key);
-    if (found === "unknown") return false;
-    if (found !== null) {
-      if (found !== -cents) console.error("a captions credit back carries another amount than owed", credit.invoice);
-      return found === -cents;
+    const returned = await creditedFor(credit);
+    if (returned === "unknown") return false;
+    const target = Math.min(cents, total);
+    if (returned >= target) {
+      if (returned > target) console.error("a captions charge paid from the credit balance already got back more than owed", credit.invoice);
+      return true;
     }
+    const left = target - returned;
     const body = new URLSearchParams({
-      amount: String(-cents),
+      amount: String(-left),
       currency: "usd",
       description: "Refund of AI captions that were not written",
       "metadata[nl_captions_credit]": key,
       "metadata[invoice]": credit.invoice,
     });
-    const made = await onPlatformAt(CHARGE_READ_VERSION, "POST", `/customers/${credit.customer}/balance_transactions`, body, `${key}:credit`);
-    return made?.object === "customer_balance_transaction" && typeof made.id === "string" && made.amount === -cents && made.currency === "usd" && made.customer === credit.customer;
+    const made = await onPlatformAt(CHARGE_READ_VERSION, "POST", `/customers/${credit.customer}/balance_transactions`, body, `nl-captions-credit:${credit.invoice}:${returned}`);
+    return made?.object === "customer_balance_transaction" && typeof made.id === "string" && made.amount === -left && made.currency === "usd" && made.customer === credit.customer;
   } catch (error) {
     console.error("a captions credit back was not confirmed", credit.invoice, error);
     return false;
@@ -645,9 +776,23 @@ function keepListed(pending: Pending): (string | number)[][] {
 }
 
 /** A refund owed is settled: the record and its listings go. */
-async function closeOwed(id: string, pending: Pending): Promise<void> {
+async function closeOwed(id: string, pending: Pending, now: number): Promise<void> {
   const folder = readStreamPath(pending.path)?.folder;
-  await redisPipeline([["DEL", pendingKey(id)], ["ZREM", QUEUE, id], ...(folder ? [["SREM", owedKey(folder), id]] : [])]);
+  await redisPipeline([["DEL", pendingKey(id)], ...(folder ? [["SREM", owedKey(folder), id]] : [])]);
+  await unqueue(id, null, now);
+}
+
+/**
+ * Takes a video out of the queue once its key was read holding `left` (null: nothing there). A newer order or
+ * record may have been written and queued between that read and the ZREM (Claude 2 on #3286, N1), so the key is read
+ * again after it: still `left`, the video stays out; anything else, or a read that does not read exactly (rule 24),
+ * and it is queued again (NX: an entry already back keeps its time), so a paid order is never left unqueued.
+ */
+async function unqueue(id: string, left: unknown, now: number): Promise<void> {
+  await redisPipeline([["ZREM", QUEUE, id]]);
+  const back = repliesFor(await redisPipeline([["GET", pendingKey(id)]]), 1);
+  if (back && back[0] === left) return;
+  await redisPipeline([["ZADD", QUEUE, "NX", back ? now : now + LOOK_AGAIN_MS, id]]);
 }
 
 /**
@@ -663,8 +808,8 @@ async function collectRefund(id: string, pending: Pending, owed: Owed, now: numb
     await redisPipeline([["ZREM", QUEUE, id]]);
     return "waiting";
   }
-  if (await (pending.credit ? creditBack(pending.credit, owed.cents ?? pending.cents, owed.key) : cardRefundSettled(id, pending, owed))) {
-    await closeOwed(id, pending);
+  if (await (pending.credit ? creditBack(pending.credit, owed.cents ?? pending.cents, pending.cents, owed.key) : cardRefundSettled(id, pending, owed))) {
+    await closeOwed(id, pending, now);
     return "done";
   }
   const looks = owed.looks + 1;

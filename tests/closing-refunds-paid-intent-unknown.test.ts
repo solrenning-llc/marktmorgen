@@ -8,10 +8,10 @@ const DAY=Date.UTC(2026,10,6),SEC=DAY/1000,SUB="sub_GMissingPi01",INV="in_GMissi
 let payment:unknown=PI,empty=false,posts=0;
 globalThis.fetch=(async(input:string|URL|Request,init?:RequestInit)=>{
  const path=new URL(String(input)).pathname;
- if(path==="/v1/balance")return Response.json({available:[{amount:100000,currency:"usd"}]});
+ if(path==="/v1/balance")return Response.json({object:"balance",available:[{amount:100000,currency:"usd"}]});
  if(path===`/v1/invoices/${INV}`)return Response.json({id:INV,payment_intent:null});
  if(path==="/v1/invoice_payments")return Response.json({object:"list",has_more:false,data:empty?[]:[{id:"inpay_GMissingPi",invoice:INV,status:"paid",payment:{type:"payment_intent",payment_intent:payment}}]});
- if(path===`/v1/payment_intents/${PI}`)return Response.json({id:PI,latest_charge:{id:"ch_GMissingPi01",amount:1000,currency:"usd",amount_refunded:0,disputed:false}});
+ if(path===`/v1/payment_intents/${PI}`)return Response.json({id:PI,latest_charge:{id:"ch_GMissingPi01",amount:1000,currency:"usd",amount_refunded:0,disputed:false,balance_transaction:null}});
  if(path==="/v1/refunds"&&init?.method==="POST"){
   posts++;const b=new URLSearchParams(String(init.body));return Response.json({object:"refund",id:"re_GMissingPi01",amount:Number(b.get("amount")),currency:"usd",payment_intent:PI,status:"succeeded"});
  }

@@ -33,7 +33,7 @@ import { types } from "node:util";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { canSeal, deriveKey, seal, unseal } from "@/lib/secret-box";
 import { type Book, addPayoutOnce, payAddress, payoutIdForItem, payoutReference, payoutReferences, readBook } from "@/lib/affiliates";
-import { type BatchLine, batchTotal, owedLines, payoutNote } from "@/lib/affiliate-payouts";
+import { type BatchLine, batchTotal, dropPayFile, owedLines, payoutIdForFileLine, payoutNote, readPayFile } from "@/lib/affiliate-payouts";
 import { plainAmount } from "@/lib/money";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { LockBusyError, withLock } from "@/lib/redis-lock";
@@ -430,6 +430,51 @@ export async function payWithPayPal(store: Store): Promise<PayResult> {
     if (error instanceof LockBusyError) return { ok: false, reason: "busy" };
     console.error("paying affiliates with PayPal failed", error);
     return { ok: false, reason: "error" };
+  }
+}
+
+export type FileConfirmed =
+  | { ok: true; written: number; cents: number; skipped: number }
+  /** "file": no kept file under that id (never downloaded, already written down, run out or unreadable); "busy": the store's payouts are being written by another request. */
+  | { ok: false; reason: "file" | "busy" };
+
+/**
+ * Writes down a payout file the creator says they paid in their own provider (app/api/store/affiliates/payout-batch,
+ * POST): exactly the lines that file paid, as it was handed out (lib/affiliate-payouts.ts keepPayFile), never what
+ * the book says is owed now (C1-20261112-1000-C7-141, item 2c). Whatever was earned since stays owed.
+ *
+ * Under the store's payout lock, the one payWithPayPal and settlePayPal hold, so a confirmation never runs beside an
+ * automatic PayPal payout reading the same book. Each line is written once under an id named by the file and the
+ * affiliate (addPayoutOnce), and the file is let go only after every line is in the book: a double click, a retry
+ * after an unknown reply or a second confirmation writes nothing twice, and one that finds the file gone writes
+ * nothing at all. A line whose affiliate has no record any more is skipped and counted.
+ */
+export async function confirmPayFile(store: Store, file: string, input: { date: string; reference: string }): Promise<FileConfirmed> {
+  if (!store.statsId || !isRedisConfigured()) throw new Error("Payout records are unavailable");
+  const statsId = store.statsId;
+  try {
+    return await withLock(`nl:pp:${statsId}:lock`, 120, 5_000, async (): Promise<FileConfirmed> => {
+      const kept = await readPayFile(statsId, file);
+      if (!kept) return { ok: false, reason: "file" };
+      const reference = payoutReference(input.reference);
+      let written = 0;
+      let cents = 0;
+      let skipped = 0;
+      for (const line of kept.lines) {
+        const result = await addPayoutOnce(store, { id: payoutIdForFileLine(file, line.a), aff: line.a, cents: line.c, currency: kept.currency, date: input.date, reference });
+        if (result === "gone") {
+          skipped += 1;
+          continue;
+        }
+        written += 1;
+        cents += line.c;
+      }
+      await dropPayFile(statsId, file);
+      return { ok: true, written, cents, skipped };
+    });
+  } catch (error) {
+    if (error instanceof LockBusyError) return { ok: false, reason: "busy" };
+    throw error;
   }
 }
 

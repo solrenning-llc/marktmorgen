@@ -1523,11 +1523,17 @@ async function readRefunds(store: Store, since: number, pages: number): Promise<
     const rows = financialPage(list, seen);
     for (const row of rows) {
       if (row.status !== "succeeded" && row.status !== "pending") continue;
+      // A refund whose date or amount does not read cannot be placed in any window nor
+      // subtracted: the reading is partial, never "no refund" (rule 24, MM-E2E-OT-1).
+      if (!Number.isSafeInteger(row.created) || (row.created as number) < 0 || !Number.isSafeInteger(row.amount) || (row.amount as number) < 0) {
+        partial = true;
+        continue;
+      }
       const currency = currencyOf(row);
       if (!currency) partial = true;
       out.push({
-        created: typeof row.created === "number" ? row.created * 1000 : 0,
-        cents: typeof row.amount === "number" ? row.amount : 0,
+        created: (row.created as number) * 1000,
+        cents: row.amount as number,
         currency,
         paymentIntent: typeof row.payment_intent === "string" ? row.payment_intent : "",
       });

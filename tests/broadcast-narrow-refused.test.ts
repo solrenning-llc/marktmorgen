@@ -42,6 +42,10 @@ async function main(): Promise<void> {
   is("no narrowing", reason(await createBroadcast(store, { ...base, narrow: null })), "made for 2, narrow null, who all");
   is("everyone, said", reason(await createBroadcast(store, { ...base, who: "all" })), "made for 2, narrow null, who all");
   is("an empty narrowing, every field at none", reason(await createBroadcast(store, { ...base, narrow: { minSpent: 0, channel: "", quietDays: 0 } })), "made for 2, narrow null, who all");
+  // A field left out is "none" for that field, as readNarrow reads it: only what was sent must be read exactly.
+  // Nobody here has spent $50: read as that spend, it is nobody ("empty"); refused it would be "narrow", widened "made for 2".
+  is("a narrowing that names only a spend", reason(await createBroadcast(store, { ...base, narrow: { minSpent: 5000 } })), "empty");
+  is("a field left out never hides a wrong one", reason(await createBroadcast(store, { ...base, narrow: { quietDays: 45 } })), "narrow");
   done();
 }
 

@@ -12,6 +12,14 @@ const nextConfig: NextConfig = {
    */
   env: { NEXT_PUBLIC_BROWSER_CHECK: process.env.VERCEL === "1" ? "1" : "0" },
   /**
+   * No image optimizer. Nothing renders next/image: every picture is served
+   * as the file itself. Left on, /_next/image took any local address with any
+   * query string, so anyone could mint new billed transformations in a loop
+   * (/og.png?n=1, ?n=2 …). With this, Vercel publishes no optimizer and
+   * /_next/image answers 404 (tests/c1-cost-image-optimizer.test.ts).
+   */
+  images: { unoptimized: true },
+  /**
    * The letters a certificate's PDF is drawn with (lib/certificate-pdf.ts),
    * read from disk by the one route that needs them, so only its function
    * carries them.

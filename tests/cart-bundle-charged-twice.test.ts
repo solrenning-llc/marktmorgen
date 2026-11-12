@@ -77,6 +77,16 @@ async function main(): Promise<void> {
   const lines = ((await read.json()) as { items?: { id: string; ok: boolean }[] }).items ?? [];
   is("the bundle is payable, its product is not", lines.map((line) => [line.id === ids.Set ? "set" : "bread", line.ok]), [["set", true], ["bread", false]]);
 
+  part("A bundle that cannot be paid for right now does not hold its product back");
+  // Reviews of #4021 (LOW): with the bundle coming soon, Bread was still marked not payable, so a cart of Bread and the
+  // bundle had nothing to pay for. Only a bundle that is payable itself brings its products.
+  const statsId = (await ensureStatsId(OWNER))?.statsId ?? "";
+  redis.run(["SADD", `nl:wl:${statsId}:soon`, ids.Set]);
+  const soon = await readCart(new NextRequest(`https://marktmorgen.test/api/store/cart?handle=huntcbundle&ids=${ids.Set},${ids.Bread}`, { headers: { host: "marktmorgen.test" } }));
+  const soonLines = ((await soon.json()) as { items?: { id: string; ok: boolean }[] }).items ?? [];
+  is("the bundle coming soon is not payable, and Bread is", soonLines.map((line) => [line.id === ids.Set ? "set" : "bread", line.ok]), [["set", false], ["bread", true]]);
+  redis.run(["SREM", `nl:wl:${statsId}:soon`, ids.Set]);
+
   part("A bundle and a product it does not hold still check out together");
   const other = withConsent(new URLSearchParams([["handle", "huntcbundle"], ["id", ids.Set], ["id", ids.Jam]]));
   await payCart(new NextRequest("https://marktmorgen.test/api/store/cart", {

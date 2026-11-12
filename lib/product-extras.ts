@@ -208,9 +208,23 @@ export function bumpState(products: Listing[], product: Listing, bump: Bump): { 
   return { bump, target };
 }
 
-/** Every box as it stands, in the product's order. */
+/**
+ * Every box as it stands, in the product's order.
+ *
+ * Boxes are also read against each other: a later box whose product and one
+ * shown before it are a bundle and a product it already holds (Bread and Set,
+ * Bread + Starter) is paused, as both ticked would charge the buyer twice for
+ * one copy (reviews of #4021). The checkout adds only boxes shown here.
+ */
 export function bumpStates(products: Listing[], product: Listing): ({ bump: Bump; target: Listing } | { paused: BumpPause; bump: Bump })[] {
-  return product.bumps.map((bump) => bumpState(products, product, bump));
+  const shown: Listing[] = [];
+  return product.bumps.map((bump) => {
+    const state = bumpState(products, product, bump);
+    if (!("target" in state)) return state;
+    if (heldByABundle([product, ...shown, state.target]).length > 0) return { paused: "inBundle" as const, bump };
+    shown.push(state.target);
+    return state;
+  });
 }
 
 /** The boxes a buyer may be offered on this product right now, in its order. */

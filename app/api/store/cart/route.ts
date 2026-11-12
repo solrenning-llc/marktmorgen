@@ -83,7 +83,9 @@ export async function GET(request: NextRequest) {
     return [{ id, title: product.title, href: `/@${store.handle}/p/${productSegment(product)}`, cents, price: formatMoney(cents, store.currency, locale), ok: selling && cartable(product) && coming !== null && !coming.soon.has(id) && !soldOut && !unknown, ships, soldOut }];
   });
   // A product a bundle in the same cart already hands over is not payable on its own line: the bundle brings it (lib/bundle-rules.ts, heldByABundle).
-  const inABundle = new Set(heldByABundle(listings).map((p) => p.id));
+  // Only a bundle that can be paid for itself brings anything: one sold out or coming soon holds nothing back.
+  const payableIds = new Set(items.filter((item) => item.ok).map((item) => item.id));
+  const inABundle = new Set(heldByABundle(listings.filter((p) => !p.bundle || payableIds.has(p.id))).map((p) => p.id));
   for (const item of items) if (inABundle.has(item.id)) item.ok = false;
   // What ships, as the checkout will ask Stripe for it (lib/cart-shipping.ts), from what can be paid for.
   const shippable = items.filter((item) => item.ok).flatMap((item) => listings.filter((p) => p.id === item.id));

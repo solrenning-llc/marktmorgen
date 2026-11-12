@@ -38,6 +38,7 @@
 import type { CancelPromise } from "@/lib/call-setup";
 import type { Listing } from "@/lib/store";
 import { type Bump, type BumpPause, MAX_BUMPS, bumpTargetPause } from "@/lib/product-extras";
+import { heldByABundle } from "@/lib/bundle-rules";
 
 /** Why an add-on set on a call is not offered right now, or a reason of the boxes'. */
 export type CallAddOnPause =
@@ -106,10 +107,16 @@ export function callAddOnState(products: readonly Listing[], product: Listing, b
 
 /** The add-ons a buyer may be offered on this booking right now, in the creator's order, at most MAX_BUMPS. */
 export function activeCallAddOns(products: readonly Listing[], product: Listing, context: CallAddOnContext): { bump: Bump; target: Listing }[] {
-  return product.bumps
-    .slice(0, MAX_BUMPS)
-    .map((bump) => callAddOnState(products, product, bump, context))
-    .filter((state): state is { bump: Bump; target: Listing } => "target" in state);
+  const offered: { bump: Bump; target: Listing }[] = [];
+  for (const bump of product.bumps.slice(0, MAX_BUMPS)) {
+    const state = callAddOnState(products, product, bump, context);
+    if (!("target" in state)) continue;
+    // A later add-on whose product and one offered before it are a bundle and a product it already holds is left
+    // out, as both checked would charge the buyer twice for one copy (reviews of #4021, as bumpStates does).
+    if (heldByABundle([product, ...offered.map((offer) => offer.target), state.target]).length > 0) continue;
+    offered.push(state);
+  }
+  return offered;
 }
 
 /** One add-on the buyer checked: the product added and what it costs this way, both from the creator's record. */

@@ -180,9 +180,10 @@ const notAFigureAfter = (text: string, at: number) => (sticky(ORDINAL, text, at)
 /**
  * Digits right after one of these words number a part of the draft, they claim nothing: "Week 1: Getting
  * started", "Step 2. Rest", "Module 3" (Claude 1's LOW on #3437). Read in English only; another language's
- * labels stay listed, on the side of a prompt to check, never a refusal.
+ * labels stay listed, on the side of a prompt to check, never a refusal. Singular only: a plural before digits
+ * ("12 lessons 40 minutes", "30 days 500 students") is a count followed by a figure, which stays listed.
  */
-const PART_LABEL = /(?<![\p{L}\p{N}])(?:weeks?|days?|steps?|modules?|lessons?|parts?|chapters?|emails?|sessions?)\s*#?\s*$/iu;
+const PART_LABEL = /(?<![\p{L}\p{N}])(?:week|day|step|module|lesson|part|chapter|email|session)\s*#?\s*$/iu;
 const labelsAPart = (text: string, at: number) => PART_LABEL.test(text.slice(Math.max(0, at - 24), at));
 
 /**

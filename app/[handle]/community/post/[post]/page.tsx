@@ -30,6 +30,7 @@ import {
   storeWhen,
 } from "@/components/community-parts";
 import { ConfirmDeletes } from "@/components/community-composer";
+import { ArrivalNotice } from "@/components/arrival-notice";
 
 type Params = { params: Promise<{ handle: string; post: string }>; searchParams: Promise<{ [key: string]: string | string[] | undefined }> };
 
@@ -221,7 +222,7 @@ export default async function CommunityPostPage({ params, searchParams }: Params
         <p className="mb-4">
           <Link href={home} className="cm-quiet-link text-sm font-semibold underline underline-offset-4">{w.backToFeed}</Link>
         </p>
-        {notice ? <p className={`cm-flash mb-5 ${notice.tone === "warn" ? "cm-flash-warn" : ""}`} role="status">{notice.text}</p> : null}
+        {notice ? <ArrivalNotice className={`cm-flash mb-5 ${notice.tone === "warn" ? "cm-flash-warn" : ""}`}>{notice.text}</ArrivalNotice> : null}
 
         {editingPost ? (
           <form action="/api/store/community" method="post" className="st-card p-5 sm:p-6">

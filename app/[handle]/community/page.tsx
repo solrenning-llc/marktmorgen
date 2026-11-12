@@ -27,6 +27,7 @@ import { MAX_POLL_OPTIONS } from "@/lib/community-polls";
 import { LANGUAGES } from "@/lib/store-language";
 import { CommunityComposer, ConfirmDeletes } from "@/components/community-composer";
 import { EmptyState } from "@/components/empty-state";
+import { ArrivalNotice } from "@/components/arrival-notice";
 
 type Params = {
   params: Promise<{ handle: string }>;
@@ -157,7 +158,7 @@ export default async function CommunityPage({ params, searchParams }: Params) {
           </nav>
 
           {notice ? (
-            <p className={`cm-flash mb-5 ${notice.tone === "warn" ? "cm-flash-warn" : ""}`} role="status">{notice.text}</p>
+            <ArrivalNotice className={`cm-flash mb-5 ${notice.tone === "warn" ? "cm-flash-warn" : ""}`}>{notice.text}</ArrivalNotice>
           ) : null}
 
           {owner && !store.community.on ? (

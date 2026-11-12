@@ -1,0 +1,138 @@
+"use client";
+
+import { useEffect, useId, useRef, useState } from "react";
+
+/**
+ * A draft's private preview link, made and stopped from the studio (754 [STN1],
+ * unit 4b; app/api/store/draft-preview). The link is shown once, with a Copy
+ * button and the day it ends; making a new one ends the one before, and "Stop
+ * this link" ends it at once. Every answer is said in a live region. On load it
+ * asks whether a link is still open (its address is never shown again, it is not
+ * kept), so after a reload the creator still sees until when and can stop it
+ * (Claude 1's LOW on #3440).
+ */
+export function DraftPreviewLink({ productId, handle }: { productId: string; handle: string }) {
+  const statusId = useId();
+  const [busy, setBusy] = useState(false);
+  const [link, setLink] = useState<{ url: string; until: string } | null>(null);
+  const [said, setSaid] = useState("");
+  // A link made before this page opened: until when it works, read on load; null when none is open.
+  const [open, setOpen] = useState<string | null>(null);
+  const day = (seconds: number) => new Date(seconds * 1000).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
+  // After "Stop this link" goes away, the focus comes back here, not to the page (2.4.3).
+  const makeButton = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    let current = true;
+    void (async () => {
+      try {
+        // A read, so a GET: opening a draft's panel writes nothing.
+        const response = await fetch(`/api/store/draft-preview?id=${encodeURIComponent(productId)}`, { cache: "no-store" });
+        const data = (await response.json().catch(() => null)) as { ok?: boolean; live?: { expiresAt?: unknown } | null } | null;
+        if (!current) return;
+        if (!response.ok || !data?.ok || (data.live !== null && typeof data.live?.expiresAt !== "number")) {
+          setSaid("We could not check whether a preview link is open just now. Reload the page in a minute to try again.");
+          return;
+        }
+        setOpen(data.live ? day(data.live.expiresAt as number) : null);
+      } catch {
+        if (current) setSaid("We could not check whether a preview link is open just now. Reload the page in a minute to try again.");
+      }
+    })();
+    return () => {
+      current = false;
+    };
+  }, [productId]);
+
+  async function send(action: "make" | "revoke") {
+    if (busy) return;
+    setBusy(true);
+    setSaid("");
+    try {
+      const response = await fetch("/api/store/draft-preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, id: productId }),
+      });
+      const data = (await response.json().catch(() => null)) as { ok?: boolean; code?: string; expiresAt?: number; error?: string } | null;
+      if (!response.ok || !data?.ok) {
+        setSaid(
+          data?.error === "not_draft"
+            ? "This product is on your store, so its own page is the preview."
+            : data?.error === "taken_down"
+              ? "This product was taken down after a notice, so it has no preview link. Publishing it again is the step the notice explains."
+              : data?.error === "suspended"
+                ? "Your store is switched off after notices, so nothing can be previewed."
+                : "The preview link could not be changed just now. Try again in a minute.",
+        );
+        return;
+      }
+      if (action === "revoke") {
+        setLink(null);
+        setOpen(null);
+        setSaid("The preview link is stopped. Nobody can open it now.");
+        requestAnimationFrame(() => makeButton.current?.focus());
+        return;
+      }
+      if (typeof data.code !== "string" || typeof data.expiresAt !== "number") {
+        setSaid("The preview link could not be changed just now. Try again in a minute.");
+        return;
+      }
+      const until = day(data.expiresAt);
+      setOpen(null);
+      setLink({ url: `${window.location.origin}/@${handle}/preview/${data.code}`, until });
+      setSaid(`A new preview link is ready. It works until ${until} (UTC). Any older link no longer works.`);
+    } catch {
+      setSaid("The preview link could not be changed just now. Try again in a minute.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function copy() {
+    if (!link) return;
+    try {
+      await navigator.clipboard.writeText(link.url);
+      setSaid("The preview link is copied.");
+    } catch {
+      setSaid("Copying did not work here. Select the link and copy it yourself.");
+    }
+  }
+
+  return (
+    <div className="mt-3 space-y-2" data-draft-preview>
+      <p className="text-sm text-ink-soft">Show this draft to someone before you publish it. Only people with the link can see it, for seven days.</p>
+      <div className="flex flex-wrap gap-2">
+        {/* aria-disabled, not disabled, while a change is on its way: the focus stays on the pressed button (send() ignores a second press). */}
+        <button ref={makeButton} type="button" className="btn btn-secondary btn-sm" aria-busy={busy} aria-disabled={busy} aria-describedby={statusId} onClick={() => void send("make")}>
+          {link || open ? "Make a new preview link" : "Get a private preview link"}
+        </button>
+        {link || open ? (
+          <button type="button" className="btn btn-secondary btn-sm" aria-busy={busy} aria-disabled={busy} onClick={() => void send("revoke")}>
+            Stop this link
+          </button>
+        ) : null}
+      </div>
+      {open && !link ? (
+        <p className="text-sm text-ink" data-draft-preview-open>
+          {`A preview link is open until ${open} (UTC). Its address was shown only when it was made. Stop it here, or make a new one, which ends it.`}
+        </p>
+      ) : null}
+      {link ? (
+        <div className="flex flex-wrap items-center gap-2">
+          {/* A visible label, not one for screen readers only (reviewer 2 on #3440, LOW 2). */}
+          <label className="w-full text-sm font-semibold text-ink" htmlFor={`${statusId}-url`}>
+            Private preview link
+          </label>
+          <input id={`${statusId}-url`} className="field min-w-0 flex-1" readOnly value={link.url} onFocus={(event) => event.currentTarget.select()} />
+          <button type="button" className="btn btn-secondary btn-sm" onClick={() => void copy()}>
+            Copy
+          </button>
+        </div>
+      ) : null}
+      <p id={statusId} role="status" className="text-sm text-ink">
+        {said}
+      </p>
+    </div>
+  );
+}

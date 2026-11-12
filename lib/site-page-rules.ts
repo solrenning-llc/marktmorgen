@@ -93,6 +93,8 @@ export const RESERVED_SLUGS = new Set([
   // A payment request's page (app/[handle]/pay/[request]).
   "pay",
   "podcast",
+  // A draft's private preview (app/[handle]/preview/[code], 754 [STN1]).
+  "preview",
   "renew",
   // A proposal or agreement's page to sign (app/[handle]/sign/[agreement]).
   "sign",

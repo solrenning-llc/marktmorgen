@@ -567,7 +567,7 @@ async function main(): Promise<void> {
     },
     "discord": "need:settings",
     "discount": "need:settings",
-    "draft-preview": { make: "open:adds", revoke: "open:reversible" },
+    "draft-preview": { make: "open:adds", revoke: "open:reversible", status: "open:reads" },
     "free/download": "not:a buyer asking for a free product, put on the list by their own request",
     "forms": { remove: "act:page" },
     "funnel-share": {

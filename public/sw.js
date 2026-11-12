@@ -7,7 +7,8 @@
 // through this worker only made a second copy of every one of them, and made a
 // font the page asks for early arrive twice. The new name empties the old copies.
 // v7: a buyer's library (/library) joined the private pages below.
-const CACHE = "nimbus-v7";
+// v8: a draft's private preview (/preview/<code>) joined them; copies kept before are emptied.
+const CACHE = "nimbus-v8";
 const SHELL = ["/", "/demo", "/icons/icon-192.png", "/icons/icon-512.png"];
 
 self.addEventListener("install", (event) => {
@@ -37,7 +38,7 @@ self.addEventListener("activate", (event) => {
 // withdraw, so an old copy must never stand in for it), on either address a
 // store has (/@name/thanks here, /thanks on its own domain), and the site's
 // signed-in pages.
-const PRIVATE = /^\/(?:@[^/]+\/)?(?:thanks|orders|manage|course|book|community|affiliates|renew|certificate|review)(?:\/|$)|^\/(?:studio|signin|unsubscribe|library|demo\/thanks)(?:\/|$)/;
+const PRIVATE = /^\/(?:@[^/]+\/)?(?:thanks|orders|manage|course|book|community|affiliates|renew|certificate|review|preview)(?:\/|$)|^\/(?:studio|signin|unsubscribe|library|demo\/thanks)(?:\/|$)/;
 const PRIVATE_QUERY = /[?&](?:session_id|token|t|r|ask|ref|v)=/;
 
 self.addEventListener("fetch", (event) => {

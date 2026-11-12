@@ -75,6 +75,29 @@ export async function makeDraftPreview(store: Owner, productId: string, now = Ma
   return { code, expiresAt };
 }
 
+/**
+ * Whether the draft has a link open now, and until when (never its code, which is not kept): the pointer names a
+ * record that is there, for this draft, and not ended. Null when none is; a reply that cannot be read throws, never
+ * "no link" (Claude 1's LOW on #3440: the studio says so after a reload, with "Stop this link").
+ */
+export async function liveDraftPreview(store: Owner, productId: string, now = Math.floor(Date.now() / 1000)): Promise<{ expiresAt: number } | null> {
+  const statsId = statsOf(store);
+  const hash = stringOrNull((await exactly([["GET", pointerKey(statsId, productId)]]))[0], "pointer");
+  if (hash === null) return null;
+  if (!HASH.test(hash)) throw new Error("A preview link pointer could not be read");
+  const raw = stringOrNull((await exactly([["GET", lookupKey(hash)]]))[0], "record");
+  if (raw === null) return null;
+  let record: unknown;
+  try {
+    record = JSON.parse(raw);
+  } catch {
+    throw new Error("A preview link record could not be read");
+  }
+  const { s, p, e } = (record && typeof record === "object" && !Array.isArray(record) ? record : {}) as Record<string, unknown>;
+  if (s !== statsId || p !== productId || typeof e !== "number" || !Number.isInteger(e)) throw new Error("A preview link record could not be read");
+  return e > now ? { expiresAt: e } : null;
+}
+
 /** Ends the draft's link at once. */
 export async function revokeDraftPreview(store: Owner, productId: string): Promise<void> {
   const statsId = statsOf(store);

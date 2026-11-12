@@ -25,6 +25,7 @@ import { canSellProduct, createCheckout } from "@/lib/store-checkout";
 import { namedPriceGone, namedPriceOffered } from "@/lib/product-option";
 import { withStockHold } from "@/lib/stock";
 import { onAccount } from "@/lib/stripe-account";
+import { StripeListUnreadable, readStripePage } from "@/lib/stripe-list";
 import { storeBase } from "@/lib/purchase-email";
 import { membershipLine, speech } from "@/lib/buyer-words";
 import { moveWords } from "@/lib/buyer-words/move";
@@ -270,16 +271,49 @@ export async function reminderEmail(store: Store, field: string, now = Date.now(
   return { to: invite.e, subject: m.reminderSubject(product.title).slice(0, 200), text };
 }
 
-/** Whether this address has a live membership to this product on the creator's account now. */
+/** Every status Stripe names a subscription with; another is a row that cannot be read. */
+const SUB_STATUSES = new Set(["incomplete", "incomplete_expired", "trialing", "active", "past_due", "canceled", "unpaid", "paused"]);
+const SUB_PATTERN = /^sub_[A-Za-z0-9]{6,64}$/;
+const CUSTOMER_PATTERN = /^cus_[A-Za-z0-9]{6,64}$/;
+/** Pages of a hundred memberships read for one customer at most; one with more is unknown, never "not kept". */
+const KEPT_PAGES = 5;
+
+/** A membership row read whole: a status Stripe names and its metadata as a map of strings (as lib/winback-send.ts cameBack). */
+function legibleSub(row: Record<string, unknown>): boolean {
+  const { status, metadata } = row;
+  if (typeof status !== "string" || !SUB_STATUSES.has(status)) return false;
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return false;
+  return Object.values(metadata).every((value) => typeof value === "string");
+}
+
+/**
+ * Whether this address has a live membership to this product on the creator's account now. Read whole (CX-123 rule
+ * 24; review of #4121, MEDIUM): the customers under the address, and every page of each one's memberships, each list
+ * in its exact shape and each row legible. A list in another shape, one read in part (has_more past what is read), or
+ * a row that cannot be read throws StripeListUnreadable (an unknown answer, never "not kept"), so openMove opens
+ * nothing and a reminder is put back in line.
+ */
 export async function keptAlready(store: Store, email: string, productId: string): Promise<boolean> {
   const account = store.stripeAccountId;
   if (!account || !EMAIL_PATTERN.test(email)) return false;
-  const customers = await onAccount("GET", account, `/customers?${new URLSearchParams({ email, limit: "10" })}`);
-  for (const customer of (Array.isArray(customers.data) ? customers.data : []) as { id?: unknown }[]) {
-    if (typeof customer.id !== "string") continue;
-    const subs = await onAccount("GET", account, `/subscriptions?customer=${customer.id}&status=all&limit=100`);
-    const list = (Array.isArray(subs.data) ? subs.data : []) as { status?: unknown; metadata?: Record<string, string> | null }[];
-    if (list.some((s) => LIVE.has(String(s.status)) && s.metadata?.product === productId)) return true;
+  const customers: string[] = [];
+  for (const address of new Set([email, normaliseEmail(email)])) {
+    const page = readStripePage(await onAccount("GET", account, `/customers?${new URLSearchParams({ email: address, limit: "100" })}`), undefined, CUSTOMER_PATTERN);
+    if (page.hasMore || page.unreadable > 0) throw new StripeListUnreadable("a moved member's customers, read in part");
+    for (const row of page.rows) if (!customers.includes(row.id)) customers.push(row.id);
+  }
+  for (const customer of customers) {
+    let after = "";
+    for (let pages = 0; ; pages += 1) {
+      if (pages >= KEPT_PAGES) throw new StripeListUnreadable("a moved member's memberships, more than are read");
+      const query = new URLSearchParams({ customer, status: "all", limit: "100", ...(after ? { starting_after: after } : {}) });
+      const page = readStripePage(await onAccount("GET", account, `/subscriptions?${query}`), legibleSub, SUB_PATTERN);
+      if (page.unreadable > 0) throw new StripeListUnreadable("a moved member's membership that cannot be read");
+      if (page.rows.some((s) => LIVE.has(String(s.status)) && (s.metadata as Record<string, string>).product === productId)) return true;
+      if (!page.hasMore) break;
+      if (!page.lastId) throw new StripeListUnreadable("a moved member's memberships, with no place to read on from");
+      after = page.lastId;
+    }
   }
   return false;
 }

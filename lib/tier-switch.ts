@@ -302,8 +302,9 @@ async function find(store: Store, token: string, subscription: string, target: s
   const sub = (await subsOf(store, grant)).find((s) => s.id === subscription);
   // Not this member's, not this store's, or no longer running: one answer for all.
   if (!sub || endsAtOf(sub) !== null || sub.metadata?.ends_after || !SWITCHABLE.has(String(sub.status))) return { reason: "gone" };
-  // Its charges held by a pause (choicesFor): refused, whatever the page was sent.
-  if (sub.pause_collection && typeof sub.pause_collection === "object") return { reason: "gone" };
+  // Its charges held by a pause (choicesFor): refused, whatever the page was sent. Stripe answers null or an object;
+  // anything else is unknown (rule 24) and refused as a pause, never read as none.
+  if (sub.pause_collection !== null && sub.pause_collection !== undefined) return { reason: "gone" };
   const itemId = typeof sub.items?.data?.[0]?.id === "string" ? (sub.items.data[0].id as string) : "";
   if (!itemId || (sub.items?.data?.length ?? 0) !== 1) return { reason: "gone" };
   // The new tier's Price is made in the store's currency (tierPrice); a subscription

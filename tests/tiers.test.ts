@@ -41,6 +41,8 @@ let priceMeta: Record<string, string> = {};
 let paidIn = "usd";
 // A pause the member chose: Stripe holds the charges (void) while the subscription stays "active" (lib/membership-pause.ts).
 let pausedSub = false;
+/** The pause as Stripe answers it; another shape is unknown and refuses a switch too (review of #4121, LOW). */
+let pauseShape: unknown = null;
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   if (url.hostname === "api.resend.com") {
@@ -64,6 +66,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
           created: 1,
           metadata: pausedSub ? { store: "harbor", product: tierA, pause_from: String(Math.floor(Date.now() / 1000) + 86_400) } : { store: "harbor", product: tierA },
           ...(pausedSub ? { pause_collection: { behavior: "void", resumes_at: Math.floor(Date.now() / 1000) + 31 * 86_400 } } : {}),
+          ...(pauseShape !== null ? { pause_collection: pauseShape } : {}),
           items: { data: [{ id: "si_Member0001", price: { unit_amount: 1000, currency: paidIn, metadata: priceMeta, recurring: { interval: "month", interval_count: 1 } } }] },
         },
       ],
@@ -216,6 +219,15 @@ async function main(): Promise<void> {
   is("a switch sent anyway changes nothing", [pausedPreview.ok ? "shown" : pausedPreview.reason, pausedSwitch.ok ? "switched" : pausedSwitch.reason], ["gone", "gone"]);
   is("no price made, no preview asked, no subscription touched while paused", calls.slice(beforePause).filter((c) => c.method === "POST").map((c) => c.path), []);
   pausedSub = false;
+  // A pause in a shape Stripe does not send (a string, a number, true): unknown, so refused as a pause, never read as none.
+  for (const shape of ["void", 1, true] as unknown[]) {
+    pauseShape = shape;
+    const beforeOdd = calls.length;
+    const oddPreview = await previewSwitch(store, token, "sub_Member0001", b.product.id);
+    const oddSwitch = await switchTier(store, token, "sub_Member0001", b.product.id, Math.floor(Date.now() / 1000), TEST_CONSENT);
+    is(`a pause read as ${JSON.stringify(shape)} refuses the switch too`, [oddPreview.ok ? "shown" : oddPreview.reason, oddSwitch.ok ? "switched" : oddSwitch.reason, calls.slice(beforeOdd).filter((c) => c.method === "POST").length], ["gone", "gone", 0]);
+  }
+  pauseShape = null;
 
   part("The box is asked again before a switch charges (91 [D2-EU-WITHDRAWAL]; owner, C1-20261106-0100-TODOS-1)");
   is("the preview says the tier is delivered at once, so the page shows the box", preview.preview.digital, true);

@@ -785,6 +785,17 @@ if redis.call("HGET", KEYS[1], ARGV[1]) == ARGV[2] then return redis.call("HDEL"
 return 0`;
 
 /**
+ * A code claimed for an id given back only while it still names that id AND that id has no record (Claude 7's LEVE on
+ * #3809): after an unknown reply from AFFILIATE_CLAIM, the script may have run (the record exists, and the code is
+ * the new affiliate's) or not (the code is held for nobody). Only the second is let go. Modelled by lib/redis-memory.ts.
+ */
+export const AFFILIATE_CODE_ORPHAN_RELEASE = `-- marktmorgen:affiliate-code-orphan-release:v1
+if redis.call("HGET", KEYS[1], ARGV[1]) == ARGV[2] and redis.call("HEXISTS", KEYS[2], ARGV[2]) == 0 then
+  return redis.call("HDEL", KEYS[1], ARGV[1])
+end
+return 0`;
+
+/**
  * A new affiliate for this address, made whole or not at all: the record `build` makes from a fresh id and its
  * code, written with the address's claim (AFFILIATE_CLAIM). `other` when the address already belongs to a record
  * (a second press, another link): that id, with the code claimed here given back. An unknown reply throws.
@@ -804,6 +815,11 @@ async function makeAffiliate(store: Store, email: string, build: (id: string, co
     await redisPipeline([["EVAL", AFFILIATE_CODE_RELEASE, 1, codesKey(statsId), code, id]]).catch((error) => console.error("an unused affiliate code was not given back", error));
     return { other: reply };
   }
+  // Unknown: the claim may or may not have run. The code is given back only if its id has no record, so a code is
+  // never held for nobody and a real new affiliate never loses theirs; a failure here only logs.
+  await redisPipeline([["EVAL", AFFILIATE_CODE_ORPHAN_RELEASE, 2, codesKey(statsId), peopleKey(statsId), code, id]]).catch((error) =>
+    console.error("an affiliate code claimed for an unknown claim was not given back", error),
+  );
   throw new UnknownReplyError("a new affiliate's claim of their address");
 }
 

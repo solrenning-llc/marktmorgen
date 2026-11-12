@@ -817,6 +817,12 @@ export class MemoryRedis {
           this.run(["HSET", people, id, record]);
           return "ok";
         }
+        // lib/affiliates.ts AFFILIATE_CODE_ORPHAN_RELEASE: a code given back only while it still names that id and that id
+        // has no record.
+        if (key.startsWith("-- marktmorgen:affiliate-code-orphan-release:v1\n") && args[0] === "2" && args.length === 5) {
+          const [, codes, people, code, id] = args;
+          return this.run(["HGET", codes, code]) === id && this.run(["HEXISTS", people, id]) === 0 ? this.run(["HDEL", codes, code]) : 0;
+        }
         // lib/affiliates.ts AFFILIATE_CODE_RELEASE: a code given back only while it still names that id.
         if (key.startsWith("-- marktmorgen:affiliate-code-release:v1\n") && args[0] === "1" && args.length === 4) {
           const [, codes, code, id] = args;

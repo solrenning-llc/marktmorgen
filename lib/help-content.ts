@@ -844,7 +844,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         q: "Can my buyers get into my Discord server?",
         a: [
           "Yes, once your studio shows \u201cDiscord\u201d: it appears when the Discord connection is set up on Marktmorgen, for whoever may change the store\u2019s settings. Open it and, under \u201cConnect your server\u201d, press \u201cConnect a Discord server\u201d to add the bot on Discord\u2019s own page, then, under \u201cWhich products give which roles\u201d, choose the roles each product gives.",
-          `A buyer presses \u201cJoin the Discord\u201d after paying, or on their orders, says yes on Discord\u2019s own page, and is in with those roles. They keep them while they hold what they bought; when a membership ends or a purchase is refunded in full, the roles are taken back at the next check, about every ${DISCORD_CHECK_HOURS} hours. You can also tick \u201cRemove people from the server when their access ends.\u201d`,
+          `A buyer presses \u201cJoin the Discord\u201d after paying, or on their orders, says yes on Discord\u2019s own page, and is in with those roles. They keep them while they hold what they bought; when a membership ends or a purchase is refunded in full, the roles are taken back at the next check, about every ${DISCORD_CHECK_HOURS} hours. You can also check \u201cRemove people from the server when their access ends.\u201d`,
         ],
       },
       {

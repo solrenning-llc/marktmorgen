@@ -74,6 +74,30 @@ jobs:
         run: node scripts/ci-build.mjs
       - name: Verify reviewed development dependencies stay outside runtime
         run: python3 scripts/check_dependency_runtime.py .next
+
+  # The browser regressions in the runner's own Chrome, beside verify instead of after it: they took about 17 of
+  # verify's 41 minutes (12/11/2026) and only need the built app, so they no longer wait for lint and the unit tests.
+  # Same Chrome, same scripts, same environment as verify; the build skips the type check verify's build already runs
+  # (scripts/ci-build.mjs, tests/ci-build-type-check.test.ts).
+  browser-chrome:
+    needs: documentation-scope
+    if: ${{ !cancelled() && needs.documentation-scope.outputs.full != 'false' }}
+    name: Browser regressions (chrome)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+      AX2_KEYBOARD_PUBLIC_STANDARD: ${{ (github.repository_id == '1334793724' || github.repository == 'viniciussucupira/marktmorgen') && github.event.repository.private == false && github.event.repository.visibility == 'public' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci
+      - run: node scripts/ci-build.mjs --skip-type-check
       # The signing flow in a real browser (the runner's own Chrome through playwright-core: no browser is downloaded),
       # on the build above, against the stand-in database and email sender of tests/e2e/services.mjs.
       - name: Agreements signed with a link, in a browser
@@ -301,7 +325,7 @@ jobs:
     # The one check GitHub requires before main (scripts/ci_all_checks.py): it always runs and
     # passes only when every job above passed, or was skipped for a documentation-only change.
     name: All checks (product-checks)
-    needs: [cross-browser, documentation-scope, form-opportunity-redis, mobile-render, verify]
+    needs: [browser-chrome, cross-browser, documentation-scope, form-opportunity-redis, mobile-render, verify]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5

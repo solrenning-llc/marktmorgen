@@ -29,7 +29,7 @@ def current_repo(env=os.environ):
 REPO = current_repo()
 SHA = re.compile(r"[0-9a-f]{40}\Z")
 WORKFLOWS = {
-    "product-checks": {"verify", "form-opportunity-redis", "Mobile render (candidate)", "Cross-browser (firefox)", "Cross-browser (webkit)"},
+    "product-checks": {"verify", "Browser regressions (chrome)", "form-opportunity-redis", "Mobile render (candidate)", "Cross-browser (firefox)", "Cross-browser (webkit)"},
     "dependency-security": {"audit"},
     "accessibility-real-readers": {"Real reader entry (windows-latest)", "Real reader entry (macos-latest)"},
 }

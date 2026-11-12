@@ -290,7 +290,9 @@ export async function upsertContact(
   await needContacts(room, [{ before, next }]);
   const commands: (string | number)[][] = [["HSET", key, email, JSON.stringify(next)]];
   if (agreed && !before?.agreed) commands.push(["INCR", agreedKey(listId)]);
-  if (resubscribe) commands.push(["DECR", unsubKey(listId)]);
+  // The count of those who left holds only people who had agreed (unsubscribe, stopWriting, imports): a contact
+  // brought in already unsubscribed was never in it, so their yes takes nothing from it.
+  if (resubscribe && before?.agreed) commands.push(["DECR", unsubKey(listId)]);
   if (deleted && ownYes) commands.push(liftCommand(listId, email));
   if (input.sid) commands.push(...joinedCommands(input.sid, email));
   if (room && isOrderRoom(room)) await orderWrite(room.order, commands);

@@ -30,7 +30,7 @@ import { readListings } from "@/lib/catalog";
 import { canSellProduct } from "@/lib/store-checkout";
 import { type Grant, MANAGE_TOKEN_PATTERN, grantOf, subsOf } from "@/lib/membership-manage";
 import { dueNow, productOfSub } from "@/lib/tier-rules";
-import { chargedOf, previewBody, previewKnown, switchBody, switchReply, PREVIEW_SECONDS, SWITCH_STRIPE_VERSION } from "@/lib/tier-switch";
+import { chargedOf, keepWhileUnconfirmed, previewBody, previewKnown, refusedUnapplied, switchBody, switchKey, switchReply, PREVIEW_SECONDS, SWITCH_STRIPE_VERSION } from "@/lib/tier-switch";
 import { type YearlyChoice, type YearlySub, yearlyChoice } from "@/lib/yearly-switch-rules";
 import { formatMoney } from "@/lib/money";
 import { membershipLine } from "@/lib/buyer-words";
@@ -38,6 +38,7 @@ import { membershipWords } from "@/lib/buyer-words/membership";
 import { DEFAULT_LANGUAGE, LANGUAGES, parseLanguage } from "@/lib/store-language";
 import { NIMBUS_FROM, sendEmail } from "@/lib/email";
 import { LockBusyError, withLock } from "@/lib/redis-lock";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { forgetPaid } from "@/lib/learn";
 import type { Listing, Store } from "@/lib/store";
 
@@ -59,14 +60,19 @@ async function sha256Hex(value: string): Promise<string> {
 const linkKey = async (token: string) => `nl:yearly:link:${(await sha256Hex(`nimbus-yearly:${token}`)).slice(0, 40)}`;
 const priceKey = (account: string, product: Listing, cents: number, currency: string) => `nl:yearly:price:${account}:${product.id}:${cents}:${currency}`;
 
-/** A link to one membership's switch, for the email that offers it. Opens nothing else. */
+/**
+ * A link to one membership's switch, for the email that offers it. Opens nothing else. Handed out only when Redis
+ * answered its SET "OK": any other reply is unknown (CX-123 rule 24) and throws, so no email carries a link that may
+ * not open (lib/yearly-ask.ts then lets the membership's "sent" mark go).
+ */
 export async function mintYearlyLink(store: Store, customer: string, subscription: string): Promise<string> {
   const bytes = new Uint8Array(32);
   crypto.getRandomValues(bytes);
   const token = Array.from(bytes)
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
-  await redisPipeline([["SET", await linkKey(token), JSON.stringify({ a: store.stripeAccountId, c: customer, s: subscription }), "EX", YEARLY_LINK_SECONDS]]);
+  const [kept] = repliesFor(await redisPipeline([["SET", await linkKey(token), JSON.stringify({ a: store.stripeAccountId, c: customer, s: subscription }), "EX", YEARLY_LINK_SECONDS]]), 1) ?? [];
+  if (kept !== "OK") throw new UnknownReplyError("the emailed link to a move to yearly");
   return token;
 }
 
@@ -227,12 +233,14 @@ export async function switchYearly(store: Store, token: string, subscription: st
       if (digital && validConsent(consent)) keepConsentOn(body, consent, consentKind(found.product));
       let updated: Record<string, unknown>;
       try {
-        updated = await onAccount("POST", account, `/subscriptions/${encodeURIComponent(subscription)}`, body, SWITCH_STRIPE_VERSION);
+        // Under the switch's stable key, as a switch between tiers (lib/tier-switch.ts, switchKey).
+        updated = await onAccount("POST", account, `/subscriptions/${encodeURIComponent(subscription)}`, body, SWITCH_STRIPE_VERSION, switchKey(subscription, at, price));
       } catch (error) {
-        // Stripe answered a refusal (below 500): nothing was applied, said as before. No answer at all, or Stripe's own
-        // failure, after the update was sent: it may have been applied, so it is "unconfirmed", never "nothing changed"
-        // (Codex CX1 on #2764). Nothing is sent again.
-        if (error instanceof StripeError && error.status < 500) throw error;
+        // Stripe answered a refusal (below 500): nothing was applied, said as before. No answer at all, Stripe's own
+        // failure, or its answer that this key is still running or was used (refusedUnapplied), after the update was
+        // sent: it may have been applied, so it is "unconfirmed", never "nothing changed" (Codex CX1 on #2764).
+        // Nothing is sent again, and the lock is left to run out (keepWhileUnconfirmed).
+        if (refusedUnapplied(error)) throw error;
         console.error("a move to yearly's charging update had no answer that can be read", error);
         return { ok: false, reason: "unconfirmed" };
       }
@@ -260,7 +268,7 @@ export async function switchYearly(store: Store, token: string, subscription: st
       ).catch((error) => console.error("recording a move to yearly failed", error));
       await tell(store, account, found, updated, kept);
       return { ok: true, title: found.product.title };
-    });
+    }, keepWhileUnconfirmed);
   } catch (error) {
     if (error instanceof LockBusyError) return { ok: false, reason: "busy" };
     if (!(error instanceof StripeError)) console.error("moving a membership to yearly failed", error);

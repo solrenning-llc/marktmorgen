@@ -19,7 +19,7 @@
  */
 import { readFileSync } from "node:fs";
 import { creatorDueLine } from "@/lib/call-deposit";
-import { zonedToUtc, type CallSetup } from "@/lib/call-setup";
+import type { CallSetup } from "@/lib/call-setup";
 import * as calls from "@/lib/calls";
 import { confirmBooking, paidCall, type CallListing } from "@/lib/calls";
 import * as purchaseEmail from "@/lib/purchase-email";
@@ -28,6 +28,7 @@ import { addProduct, claimHandle, ensureStatsId, setProductCall, setProductLink,
 import { readListing, type Listing } from "@/lib/catalog";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import { NY, weekdayAt } from "./weekday";
 import { paidPeriod } from "./billing-period-fixture";
 
 const emails: { to: string; text: string }[] = [];
@@ -46,19 +47,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   return answer({ object: "list", data: [], has_more: false });
 }) as typeof fetch;
 
-const NY = "America/New_York";
 const WEEKDAYS: [number, number][][] = [[], [[540, 1020]], [[540, 1020]], [[540, 1020]], [[540, 1020]], [[540, 1020]], []];
-
-function weekdayAt(days: number, minute: number): number {
-  for (let d = days; d < days + 8; d += 1) {
-    const day = new Date(Date.now() + d * 86_400_000);
-    const p = new Intl.DateTimeFormat("en-US", { timeZone: NY, year: "numeric", month: "2-digit", day: "2-digit", weekday: "short" }).formatToParts(day);
-    const get = (t: string) => p.find((x) => x.type === t)?.value ?? "";
-    if (get("weekday") === "Sat" || get("weekday") === "Sun") continue;
-    return zonedToUtc(Number(get("year")), Number(get("month")), Number(get("day")), minute, NY) as number;
-  }
-  throw new Error("no weekday");
-}
 
 const flat = (file: string) => readFileSync(file, "utf8").replace(/\s+/g, " ");
 

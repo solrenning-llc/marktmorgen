@@ -8,7 +8,7 @@
  */
 import { COURSE_IMPORT_FORMAT, previewCourseImport, type CourseImportDraft } from "@/lib/course-import";
 import { planCourseImport } from "@/lib/course-import-apply";
-import { MAX_LESSONS, cleanBody, editCourse, emptyCourse, lessonCount, lessonsInOrder } from "@/lib/course";
+import { MAX_LESSONS, MAX_MODULES, cleanBody, editCourse, emptyCourse, lessonCount, lessonsInOrder } from "@/lib/course";
 import { done, is, part } from "./check";
 
 function draftOf(modules: CourseImportDraft["modules"]): CourseImportDraft {
@@ -64,6 +64,11 @@ is("listed by place", cleaned.changed, [
   { path: "modules[0].lessons[0].text", from: "Line one\r\nLine two\n", to: cleanBody("Line one\r\nLine two\n") },
 ]);
 is("saved as the editor keeps it", cleaned.bodies[0].text, "Line one\nLine two");
+
+part("At the course editor's own module limit (Claude 3 on #3816)");
+const most = draftOf(Array.from({ length: MAX_MODULES }, (_, i) => ({ title: `M${i + 1}`, lessons: [{ title: "L", text: "", video: null, files: [] }] })));
+const allModules = planCourseImport(emptyCourse(), most);
+is("an outline the preview takes fits whole", allModules.ok && allModules.course.modules.length, MAX_MODULES);
 
 part("At the course editor's own lesson limit, whole or nothing");
 const many = draftOf([{ title: "All", lessons: Array.from({ length: MAX_LESSONS }, (_, i) => ({ title: `L${i + 1}`, text: "", video: null, files: [] })) }]);

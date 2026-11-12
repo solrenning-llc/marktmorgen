@@ -19,8 +19,9 @@
  *     meanwhile does not wait for the pass;
  *   - a row that cannot be handled, or that is not readable at all, never
  *     holds the older pages: the pass goes on in the same run, the row is
- *     never marked read, and the anchor waits at it (or, for a row not
- *     readable, where it was), so the next pass reads it again; a page whose
+ *     never marked read, and either kept on the list to try again (a refund
+ *     Stripe finished, #3302) or the anchor waits at it (or, for a row not
+ *     readable, stays where it was), so it is read again; a page whose
  *     last row is not readable goes on from its last readable one (reviews of
  *     #3301, Claude 2 M1 and Claude 5);
  *   - a pass kept from the store's earlier Stripe account starts over on the
@@ -133,7 +134,9 @@ async function check(job: Job, base: number): Promise<void> {
   is(`${job.name}: the row not handled is still held, never taken as done`, await stuck.holds(), true);
   is(`${job.name}: run 1 went on past the page with the row not handled`, afters(), [null, id("b", 99), id("b", 199)]);
   is(`${job.name}: run 2 ends the pass, the row still not handled`, await job.run(failing), 0);
-  is(`${job.name}: the anchor waits at the row not handled, never past it`, await read(job.anchor), String(base + 900 - 10));
+  // A refund Stripe finished goes on the list to try again (gift-preorder-refunds-retry.test.ts), so the anchor need not wait for it.
+  is(`${job.name}: the row not handled is kept on the list to try again, so the anchor moves`, await read(job.anchor), String(base + 900));
+  is(`${job.name}: kept on the list, refund to payment`, (await redis.pipeline([["HGET", job.pass.replace(/:pass$/, ":retry"), id("b", 10)]]))[0], stuck.pi);
   is(`${job.name}: and the pass is let go`, await read(job.pass), null);
   is(`${job.name}: once it can be handled, the next pass takes it back`, await job.run(), 1);
   is(`${job.name}: no longer held`, await stuck.holds(), false);

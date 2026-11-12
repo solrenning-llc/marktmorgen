@@ -17,7 +17,7 @@ import { done, is, part } from "./check";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_plans_pending_only";
 
-const ACCOUNT = "acct_1TestPlansPend01";
+const ACCOUNT = "acct_1TestPend";
 const OPENED = 1_000;
 const PER_RUN = 200;
 

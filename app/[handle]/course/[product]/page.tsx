@@ -5,7 +5,8 @@ import { isResting } from "@/lib/traffic";
 import { forVisitor } from "@/lib/visitor";
 import { activeIntro } from "@/lib/intro-price";
 import { salePrice } from "@/lib/store-sale";
-import { offNow } from "@/components/store-product";
+import { offNow, pricePill, productPath } from "@/components/store-product";
+import { shelfShown } from "@/lib/course-shelf";
 import { paypalReady } from "@/lib/paypal-sales";
 import type { Metadata } from "next";
 import Link from "next/link";
@@ -18,16 +19,20 @@ import { photoUrl } from "@/lib/photo-limits";
 import { canSellProduct } from "@/lib/store-checkout";
 import { activePwyw } from "@/lib/pay-what-you-want";
 import { beforeStart, isCohort, isOpen, lessonCount, lessonsInOrder, readCourse } from "@/lib/course";
-import { courseAccess, doneLessons, emailKey, touchStudent } from "@/lib/learn";
+import { courseAccess, doneLessonsOrUnknown, emailKey, touchStudent } from "@/lib/learn";
 import { heldBack, passedForGate, requiredQuizLessons } from "@/lib/quiz";
 import { MAX_CERT_NAME, MIN_CERT_NAME, certificateOf, hasFinished } from "@/lib/certificate";
 import { canManage } from "@/lib/membership-manage";
 import { CourseOutline, WithDay } from "@/components/course-outline";
 import { ForgetLessonPositions } from "@/components/forget-lesson-positions";
-import { devicePlaceKey } from "@/lib/lesson-position";
+import { deviceLastKey, devicePlaceKey } from "@/lib/lesson-position";
+import { ForgetLastLesson } from "@/components/remember-last-lesson";
 import { readListing } from "@/lib/catalog";
 import { membershipLine, speech } from "@/lib/buyer-words";
 import { coursesWords } from "@/lib/buyer-words/courses";
+import { takeBuyerRead } from "@/lib/buyer-actions";
+import { notesDownloadAfterAccess } from "@/lib/lesson-notes";
+import { LessonNotesKept } from "@/components/lesson-notes-kept";
 import { productSegment } from "@/lib/product-slug";
 import { noteIfOpened } from "@/lib/course-finish";
 import { exampleTitlesLeft } from "@/lib/course-templates";
@@ -79,6 +84,8 @@ export default async function CoursePage({ params, searchParams }: Params) {
   const access = await courseAccess(store, product, jar);
   // A signed-in student whose access is not open: their places in this course's videos go from their device (650 [WG10]).
   const forgetKey = access.state !== "open" && access.learner && !access.learner.owner ? devicePlaceKey(course.id, access.learner.email) : null;
+  // And the last lesson kept for their library, when it is in this course (650 [WG10], unit 2).
+  const forgetPerson = access.state !== "open" && access.learner && !access.learner.owner ? deviceLastKey(access.learner.email) : null;
   const open = access.state === "open";
   // A draft is left off the store and its own page (lib/catalog.ts): its front
   // door, title, price and outline are for its students and for the store's
@@ -89,13 +96,14 @@ export default async function CoursePage({ params, searchParams }: Params) {
   // A course still holding a ready structure's example titles is hidden and shown to its owner only (540 [CU1]).
   if (product.hidden && exampleTitlesLeft(course) > 0 && !(open && access.learner.owner)) redirect(`/@${store.handle}`);
   const who = studying ? emailKey(access.learner.email) : "";
+  // Null: the lessons done could not be read just now; said so, never shown as 0 done (rule 24).
   const [done, passed, certificate] = studying
     ? await Promise.all([
-        doneLessons(course.id, access.learner.email),
+        doneLessonsOrUnknown(course.id, access.learner.email),
         passedForGate(course.id, who),
         course.certificate ? certificateOf(course.id, who) : Promise.resolve(null),
       ])
-    : [new Set<string>(), new Set<string>(), null];
+    : [new Set<string>() as Set<string> | null, new Set<string>(), null];
   if (open && !access.learner.owner) {
     const { email } = access.learner;
     after(() => touchStudent(course.id, email, access.start, store));
@@ -108,18 +116,26 @@ export default async function CoursePage({ params, searchParams }: Params) {
   }
   // Lessons a quiz that has to be passed still holds shut, for this student.
   const held = studying ? heldBack(course, passed) : new Map<string, string>();
-  const finished = studying && hasFinished(course, done, passed);
+  const finished = studying && done !== null && hasFinished(course, done, passed);
   const mustPass = requiredQuizLessons(course).length;
   const certNotice = w.certNotices(MIN_CERT_NAME, MAX_CERT_NAME)[typeof query.cert === "string" ? query.cert : ""] ?? null;
+  // A student the course is no longer open to (a refund, an ended membership) still downloads, or deletes, their own
+  // notes here, as the privacy policy says (#lesson-notes): no lesson's box is there to give them. Only while they keep
+  // notes on this course (or when that cannot be read), never to any signed-in visitor (third review of #3031, M4).
+  const notesAfter = await notesDownloadAfterAccess(store.statsId ?? "", access, course.id, () => takeBuyerRead(store));
+
+  // The "More from" shelf (628 [HN4](b), lib/course-shelf.ts): only for a student, never on a guess about what they have.
+  const shelf = studying ? await shelfShown(store, course.shelf, product.id, access.learner.email) : [];
 
   // What the code knows of the course, never what anyone typed (292 [SQ3], lib/course-facts.ts).
   const facts = await readCourseFacts(course);
   const all = lessonsInOrder(course);
   const total = lessonCount(course);
-  const doneCount = all.filter(({ lesson }) => done.has(lesson.id)).length;
+  const known = done ?? new Set<string>();
+  const doneCount = all.filter(({ lesson }) => known.has(lesson.id)).length;
   const reachable = (entry: (typeof all)[number]) => isOpen(course, entry.unit, start!) && !held.has(entry.lesson.id);
   const next = open
-    ? all.find((entry) => !done.has(entry.lesson.id) && reachable(entry)) ?? all.find(reachable)
+    ? all.find((entry) => !known.has(entry.lesson.id) && reachable(entry)) ?? all.find(reachable)
     : null;
   const preview = all.find(({ lesson }) => lesson.preview);
   const base = `/@${store.handle}/course/${product.id}`;
@@ -143,6 +159,7 @@ export default async function CoursePage({ params, searchParams }: Params) {
         {/* Access not open for a signed-in student (a refund, a lost dispute, an ended membership, taken off):
             where they stopped in this course's videos is removed from their device (650 [WG10]). */}
         {forgetKey ? <ForgetLessonPositions courseId={course.id} learner={forgetKey} /> : null}
+        {forgetPerson ? <ForgetLastLesson courseId={course.id} person={forgetPerson} /> : null}
         <div className="flex items-center justify-center gap-3">
           {store.photoId ? (
             // eslint-disable-next-line @next/next/no-img-element
@@ -206,9 +223,19 @@ export default async function CoursePage({ params, searchParams }: Params) {
             </div>
           ) : null}
 
+          {/* Their private lesson notes stay theirs once the course is no longer open to them (a refund, an ended
+              membership; Claude 2's review of #3031, M4, and Claude 4's focal return, C4-2): download or delete them
+              here, only while they keep notes on it (notesDownloadAfterAccess), never to any signed-in visitor (third
+              review, M4). A student with the course open has them on each lesson. */}
+          {notesAfter ? (
+            <LessonNotesKept handle={store.handle} product={product.id} language={store.language} />
+          ) : null}
+
           {open ? (
             <div className="mt-6">
-              {!access.learner.owner ? (
+              {access.learner.owner ? null : done === null ? (
+                <p className="st-note text-sm" role="status">{w.progressUnknown}</p>
+              ) : (
                 <>
                   <p className="text-sm font-semibold" style={{ color: "var(--st-text)" }}>
                     {w.doneOf(doneCount, total)}
@@ -225,10 +252,10 @@ export default async function CoursePage({ params, searchParams }: Params) {
                     <div className="h-full rounded-full" style={{ width: `${total ? Math.round((doneCount / total) * 100) : 0}%`, background: "var(--st-accent)" }} />
                   </div>
                 </>
-              ) : null}
+              )}
               {next ? (
                 <Link href={`${base}/${next.lesson.id}`} className="btn st-btn btn-lg mt-5">
-                  {doneCount === 0 ? w.startFirst : doneCount >= total ? w.startOver : w.continueOn}
+                  {done === null ? w.openFirst : doneCount === 0 ? w.startFirst : doneCount >= total ? w.startOver : w.continueOn}
                 </Link>
               ) : (
                 <p className="st-muted mt-5 text-sm">{w.opensSoon}</p>
@@ -270,6 +297,8 @@ export default async function CoursePage({ params, searchParams }: Params) {
                         <button type="submit" className="btn st-btn">{w.getCertificate}</button>
                       </div>
                     </form>
+                  ) : done === null ? (
+                    <p className="st-muted mt-1 text-sm">{w.certProgressUnknown}</p>
                   ) : (
                     <p className="st-muted mt-1 text-sm">{w.certHow(mustPass)}</p>
                   )}
@@ -337,9 +366,26 @@ export default async function CoursePage({ params, searchParams }: Params) {
             </p>
           ) : null}
           <div className="mt-4">
-            <CourseOutline course={course} base={base} start={start} done={done} held={held} language={store.language} />
+            <CourseOutline course={course} base={base} start={start} done={known} held={held} language={store.language} />
           </div>
         </div>
+
+        {shelf.length ? (
+          <section className="st-card mt-6 p-6 sm:p-8" aria-labelledby="course-shelf-title">
+            <h2 id="course-shelf-title" className="font-display text-xl font-semibold">{w.shelfTitle(store.name)}</h2>
+            <ul className="mt-4 space-y-3">
+              {shelf.map((item) => (
+                <li key={item.id} className="rounded-2xl px-5 py-4" style={{ border: "1px solid var(--st-line)" }}>
+                  <Link href={productPath(store, item)} prefetch={false} className="inline-flex min-h-11 items-center font-semibold underline underline-offset-4" style={{ color: "var(--st-text)" }}>
+                    {item.title}
+                  </Link>
+                  <p className="st-muted mt-1 text-sm font-semibold">{pricePill(store, item)}</p>
+                  {item.summary ? <p className="st-muted mt-1 text-sm leading-relaxed">{item.summary}</p> : null}
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
 
         <div className="mt-6 text-center">
           <Link href={`/@${store.handle}`} className="st-footer-link text-sm font-semibold">

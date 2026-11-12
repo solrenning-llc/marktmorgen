@@ -81,6 +81,8 @@ const en = {
   /** Each link names what it opens, so two of them never read the same (WCAG 2.4.9). `due` is a date already said, or "". */
   openRequest: (amount: string, due: string): string => (due ? `Open the ${amount} payment request due ${due}` : `Open the ${amount} payment request`),
   openToSign: (title: string): string => `Read and sign “${title}”`,
+  /** The heading over nothingToOpen (656 [WG16], components/empty-state.tsx). */
+  nothingToOpenTitle: "Nothing to open here",
   nothingToOpen: (store: string) =>
     `There is nothing to open here anymore. A purchase that was refunded in full is no longer listed. If something is missing, reply to the order confirmation you were emailed when you paid, and it reaches ${store}.`,
   everythingSold: (store: string) =>
@@ -101,6 +103,10 @@ const en = {
     "This membership is no longer running, so what it gave you access to is closed now. Renew it and everything opens again right away.",
   renew: "Renew your membership",
   openCourse: "Open the course",
+  /** How far the buyer is in a course on the list (560 [AS1]): lessons done of the lessons it has now. */
+  lessonsDone: (done: number, total: number) => `${done} of ${total} ${plural(total, "lesson", "lessons")} done`,
+  /** Said when that could not be read just now: never as 0 done. */
+  progressUnread: "We could not check your progress in this course just now. Open the course to see where you are.",
   bookSession: (left: number) => `Book a session (${left} left)`,
   packageExpired: "The time to book this package's sessions has passed.",
   packageAllBooked: "Every session of this package is booked.",
@@ -361,6 +367,7 @@ const es: OrdersWords = {
   waitingUnread: "No pudimos leer ahora lo que te espera. Vuelve a abrir esta página en un momento.",
   openRequest: (amount, due) => (due ? `Abrir la solicitud de pago de ${amount} con vencimiento el ${due}` : `Abrir la solicitud de pago de ${amount}`),
   openToSign: (title) => `Leer y firmar «${title}»`,
+  nothingToOpenTitle: "Nada que abrir aquí",
   nothingToOpen: (store) =>
     `Aquí ya no hay nada que abrir. Una compra reembolsada por completo deja de aparecer. Si falta algo, responde a la confirmación del pedido que te llegó por email cuando pagaste, y le llegará a ${store}.`,
   everythingSold: (store) =>
@@ -378,6 +385,8 @@ const es: OrdersWords = {
   endedNote: "Esta membresía ya no está activa, así que lo que te daba acceso está cerrado ahora. Renuévala y todo se abre de nuevo al instante.",
   renew: "Renueva tu membresía",
   openCourse: "Abrir el curso",
+  lessonsDone: (done, total) => `${done} de ${total} ${plural(total, "lección completada", "lecciones completadas")}`,
+  progressUnread: "No pudimos comprobar tu progreso en este curso en este momento. Abre el curso para ver por dónde vas.",
   bookSession: (left) => `Reservar una sesión (${left === 1 ? "queda 1" : `quedan ${left}`})`,
   packageExpired: "Ya pasó el plazo para reservar las sesiones de este paquete.",
   packageAllBooked: "Todas las sesiones de este paquete están reservadas.",
@@ -607,6 +616,7 @@ const fr: OrdersWords = {
   waitingUnread: "Ce qui vous attend n’a pas pu être lu pour le moment. Rouvrez cette page dans un instant.",
   openRequest: (amount, due) => (due ? `Ouvrir la demande de paiement de ${amount} à régler le ${due}` : `Ouvrir la demande de paiement de ${amount}`),
   openToSign: (title) => `Lire et signer «${S}${title}${S}»`,
+  nothingToOpenTitle: "Rien à ouvrir ici",
   nothingToOpen: (store) =>
     `Il n'y a plus rien à ouvrir ici. Un achat remboursé en totalité n'apparaît plus. S'il manque quelque chose, répondez à la confirmation de commande reçue par e-mail lors de votre paiement, et votre message parviendra à ${store}.`,
   everythingSold: (store) =>
@@ -624,6 +634,8 @@ const fr: OrdersWords = {
   endedNote: "Cet abonnement n'est plus actif, l'accès qu'il vous donnait est donc fermé. Renouvelez-le et tout s'ouvre de nouveau immédiatement.",
   renew: "Renouveler votre abonnement",
   openCourse: "Ouvrir la formation",
+  lessonsDone: (done, total) => `${done} ${pluralFr(done, "leçon terminée", "leçons terminées")} sur ${total}`,
+  progressUnread: "Nous n'avons pas pu vérifier votre progression dans cette formation pour le moment. Ouvrez la formation pour voir où vous en êtes.",
   bookSession: (left) => `Réserver une séance (${left}${S}${pluralFr(left, "restante", "restantes")})`,
   packageExpired: "Le délai pour réserver les séances de ce forfait est dépassé.",
   packageAllBooked: "Toutes les séances de ce forfait sont réservées.",
@@ -851,6 +863,7 @@ const de: OrdersWords = {
   waitingUnread: "Was auf Sie wartet, konnte gerade nicht gelesen werden. Öffnen Sie diese Seite gleich noch einmal.",
   openRequest: (amount, due) => (due ? `Zahlungsanfrage über ${amount}, fällig am ${due}, öffnen` : `Zahlungsanfrage über ${amount} öffnen`),
   openToSign: (title) => `„${title}“ lesen und unterschreiben`,
+  nothingToOpenTitle: "Hier gibt es nichts zu öffnen",
   nothingToOpen: (store) =>
     `Hier gibt es nichts mehr zu öffnen. Ein vollständig erstatteter Kauf wird nicht mehr aufgeführt. Wenn etwas fehlt, antworten Sie auf die Bestellbestätigung, die Sie beim Bezahlen per E-Mail erhalten haben, dann erreicht Ihre Nachricht ${store}.`,
   everythingSold: (store) =>
@@ -868,6 +881,8 @@ const de: OrdersWords = {
   endedNote: "Diese Mitgliedschaft läuft nicht mehr, daher ist der Zugang, den sie Ihnen gab, jetzt geschlossen. Verlängern Sie sie, und alles ist sofort wieder offen.",
   renew: "Mitgliedschaft verlängern",
   openCourse: "Kurs öffnen",
+  lessonsDone: (done, total) => `${done} von ${total} ${plural(total, "Lektion", "Lektionen")} erledigt`,
+  progressUnread: "Wir konnten Ihren Fortschritt in diesem Kurs gerade nicht prüfen. Öffnen Sie den Kurs, um zu sehen, wo Sie stehen.",
   bookSession: (left) => `Termin buchen (noch ${left} übrig)`,
   packageExpired: "Die Frist, um die Termine dieses Pakets zu buchen, ist abgelaufen.",
   packageAllBooked: "Alle Termine dieses Pakets sind gebucht.",
@@ -1100,6 +1115,7 @@ const it: OrdersWords = {
   waitingUnread: "Non è stato possibile leggere ora cosa ti aspetta. Riapri questa pagina tra un momento.",
   openRequest: (amount, due) => (due ? `Apri la richiesta di pagamento di ${amount} con scadenza ${due}` : `Apri la richiesta di pagamento di ${amount}`),
   openToSign: (title) => `Leggi e firma «${title}»`,
+  nothingToOpenTitle: "Niente da aprire qui",
   nothingToOpen: (store) =>
     `Qui non c'è più nulla da aprire. Un acquisto rimborsato per intero non compare più. Se manca qualcosa, rispondi alla conferma d'ordine che hai ricevuto via email quando hai pagato, e il messaggio arriverà a ${store}.`,
   everythingSold: (store) =>
@@ -1117,6 +1133,8 @@ const it: OrdersWords = {
   endedNote: "Questo abbonamento non è più attivo, quindi ciò a cui ti dava accesso ora è chiuso. Rinnovalo e tutto si riapre subito.",
   renew: "Rinnova il tuo abbonamento",
   openCourse: "Apri il corso",
+  lessonsDone: (done, total) => `${done} di ${total} ${plural(total, "lezione completata", "lezioni completate")}`,
+  progressUnread: "Non siamo riusciti a controllare i tuoi progressi in questo corso in questo momento. Apri il corso per vedere a che punto sei.",
   bookSession: (left) => `Prenota una sessione (${left === 1 ? "ne resta 1" : `ne restano ${left}`})`,
   packageExpired: "Il tempo per prenotare le sessioni di questo pacchetto è scaduto.",
   packageAllBooked: "Tutte le sessioni di questo pacchetto sono prenotate.",
@@ -1345,6 +1363,7 @@ const nl: OrdersWords = {
   waitingUnread: "Wat op je wacht, kon nu niet worden gelezen. Open deze pagina zo meteen opnieuw.",
   openRequest: (amount, due) => (due ? `Het betaalverzoek van ${amount}, te betalen op ${due}, openen` : `Het betaalverzoek van ${amount} openen`),
   openToSign: (title) => `‘${title}’ lezen en ondertekenen`,
+  nothingToOpenTitle: "Hier is niets te openen",
   nothingToOpen: (store) =>
     `Hier valt niets meer te openen. Een aankoop die volledig is terugbetaald, staat er niet meer bij. Mist er iets, beantwoord dan de orderbevestiging die je per e-mail kreeg toen je betaalde, dan komt je bericht bij ${store} aan.`,
   everythingSold: (store) =>
@@ -1362,6 +1381,8 @@ const nl: OrdersWords = {
   endedNote: "Dit lidmaatschap loopt niet meer, dus waar het je toegang toe gaf, is nu gesloten. Verleng het en alles gaat meteen weer open.",
   renew: "Verleng je lidmaatschap",
   openCourse: "Open de cursus",
+  lessonsDone: (done, total) => `${done} van ${total} ${plural(total, "les", "lessen")} afgerond`,
+  progressUnread: "We konden je voortgang in deze cursus op dit moment niet controleren. Open de cursus om te zien waar je bent.",
   bookSession: (left) => `Boek een sessie (nog ${left} over)`,
   packageExpired: "De tijd om de sessies van dit pakket te boeken is verstreken.",
   packageAllBooked: "Alle sessies van dit pakket zijn geboekt.",
@@ -1589,6 +1610,7 @@ const pt: OrdersWords = {
   waitingUnread: "Não foi possível ler agora o que está à sua espera. Volte a abrir esta página daqui a pouco.",
   openRequest: (amount, due) => (due ? `Abrir o pedido de pagamento de ${amount} que vence a ${due}` : `Abrir o pedido de pagamento de ${amount}`),
   openToSign: (title) => `Ler e assinar «${title}»`,
+  nothingToOpenTitle: "Nada para abrir aqui",
   nothingToOpen: (store) =>
     `Já não há nada para abrir aqui. Uma compra reembolsada na totalidade deixa de aparecer. Se faltar alguma coisa, responda à confirmação da encomenda que recebeu por email quando pagou, e a mensagem chega a ${store}.`,
   everythingSold: (store) =>
@@ -1606,6 +1628,8 @@ const pt: OrdersWords = {
   endedNote: "Esta subscrição já não está ativa, por isso aquilo a que lhe dava acesso está agora fechado. Renove-a e tudo volta a abrir de imediato.",
   renew: "Renovar a sua subscrição",
   openCourse: "Abrir o curso",
+  lessonsDone: (done, total) => `${done} de ${total} ${plural(total, "aula concluída", "aulas concluídas")}`,
+  progressUnread: "Não foi possível verificar o seu progresso neste curso agora. Abra o curso para ver onde está.",
   bookSession: (left) => `Marcar uma sessão (${left === 1 ? "resta 1" : `restam ${left}`})`,
   packageExpired: "O prazo para marcar as sessões deste pacote já terminou.",
   packageAllBooked: "Todas as sessões deste pacote estão marcadas.",

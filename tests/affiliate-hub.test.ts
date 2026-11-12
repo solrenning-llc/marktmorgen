@@ -10,12 +10,19 @@
  *   - from the page, each store's own page opens with a sign-in made on the
  *     spot, and never for an address the store does not have.
  */
+import { mock } from "node:test";
 import { claimHandle, ensureStatsId, ensureStoreId, setAffiliateSetting, setStripeAccount, storeForEmail } from "@/lib/store";
 import { affiliateByEmail, joinAsBuyer, linkEmail, signInLinkFor } from "@/lib/affiliates";
 import { hubOwner, requestHubLink, storesPromoted } from "@/lib/affiliate-hub";
 import { NO_AFFILIATES } from "@/lib/affiliate-setting";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+
+// A store with no plan counts its emails in the calendar month (lib/allowance-window.ts), and sendEmail (lib/email.ts)
+// refuses a send whose window changed while it was going out: a run crossing 00:00 UTC on a month's last day during the
+// sign-in email answered "error" and sent no link. Only Date is stopped, for the whole run; timers and performance.now()
+// run as usual.
+mock.timers.enable({ apis: ["Date"], now: Date.now() });
 
 const sent: { to: string; text: string }[] = [];
 const sessions = new Map<string, Record<string, unknown>>();

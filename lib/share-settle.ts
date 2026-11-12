@@ -27,6 +27,7 @@ import { onAccount } from "@/lib/stripe-account";
 import { redisPipeline } from "@/lib/redis";
 import { storeForEmail, storeForHandle, type Store } from "@/lib/store";
 import { SHARING_INDEX, owedOn, percentOf, planShareBps, shareBps, toGiveBack } from "@/lib/platform-share";
+import { disputeMoneyGone } from "@/lib/retained-revenue";
 
 /**
  * Pinned for the reads below, where a charge still names its invoice and an
@@ -187,7 +188,13 @@ export async function owedOnFee(fee: Fee, nowSeconds: number, live = COMMISSION_
     // account for a complete, bounded list tied to this exact charge.
     const listed = await onAccount("GET", fee.account,
       `/disputes?${new URLSearchParams({ charge: fee.charge, limit: "100" })}`, undefined, READ_VERSION);
-    const statuses = new Set(["lost", "won", "needs_response", "under_review", "warning_needs_response", "warning_under_review", "warning_closed"]);
+    // `prevented` is a resolution (refunded to the buyer before a chargeback) or a block (the network
+    // stopped it; the creator keeps the money). READ_VERSION has no case_type, so its own balance
+    // transactions decide (disputeMoneyGone, lib/retained-revenue.ts): withdrawn and not put back
+    // takes the money as `lost` does, nothing withdrawn keeps the share as `won` does, and any other
+    // shape fails closed below (Claude 5's review of #3318, Claude 2's of #3321). `charge_refunded`
+    // left the API in 2023-08-16, before READ_VERSION, and stays unknown, as any status not listed here.
+    const statuses = new Set(["lost", "prevented", "won", "needs_response", "under_review", "warning_needs_response", "warning_under_review", "warning_closed"]);
     const rows = listed?.data;
     if (listed?.object !== "list" || listed.has_more !== false || !Array.isArray(rows) || rows.length < 1 || rows.length > 100) {
       throw new Error("Dispute evidence is incomplete");
@@ -205,6 +212,11 @@ export async function owedOnFee(fee: Fee, nowSeconds: number, live = COMMISSION_
       }
       if (!statuses.has(status)) throw new UnknownDisputeStatus(fee.id);
       seen.add(id);
+      if (status === "prevented") {
+        const gone = disputeMoneyGone(row);
+        if (gone === null) throw new UnknownDisputeStatus(fee.id);
+        if (gone) lostDispute = true;
+      }
       if (status === "lost") lostDispute = true;
     }
   }

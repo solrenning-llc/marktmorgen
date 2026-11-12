@@ -71,6 +71,8 @@ const toKey = (id: string) => `nl:upd:job:${id}:to`;
 const lockKey = (id: string) => `nl:upd:job:${id}:lock`;
 const lastKey = (statsId: string, product: string) => `nl:upd:last:${statsId}:${product}`;
 const latestKey = (statsId: string, product: string) => `nl:upd:latest:${statsId}:${product}`;
+/** That address's stop on update emails, for the person's copy to read (lib/person-copy.ts). */
+export const updatesStopMarkKey = (statsId: string, email: string) => offKey(statsId, email);
 const offKey = (statsId: string, email: string) => `nl:upd:off:${statsId}:${sha(`nimbus-update-off:${normaliseEmail(email)}`).slice(0, 32)}`;
 const stopKey = (token: string) => `nl:upd:stop:${token}`;
 

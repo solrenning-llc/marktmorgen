@@ -160,6 +160,8 @@ const ANCHOR_SECONDS = 30 * 86400;
 
 const EVENT_SECONDS = 30 * 86400;
 const DELIVERY_SECONDS = 7 * 86400;
+/** How long a delivery is kept, as the store is told (lib/person-data.ts): read by tests/person-copy-families.test.ts. */
+export const WEBHOOK_DELIVERY_KEEP_SECONDS = DELIVERY_SECONDS;
 
 /** What the studio's log says of a message past the bound: written down, not sent. */
 export const TOO_LARGE_WORDS = `Not sent: this message would take more than ${DELIVERY_WRITE_MAX_BYTES / 1024} KB to keep, the most a webhook message may take. Nothing was counted.`;
@@ -991,6 +993,50 @@ export async function recentMessages(store: Store, type: WebhookEvent, limit = 3
 }
 
 /** Whether a word is one of the events an endpoint can hear. */
+/** One delivery of the store's webhooks that carried an address, for the person's copy. */
+export type DeliveryTrace = { event: string; made: string; state: Delivery["state"]; sent: unknown };
+
+/**
+ * The deliveries this store's webhooks made that carry one address, for the person's copy (lib/person-copy.ts, GDPR
+ * art. 15; C7 data-copy hunt): each is kept DELIVERY_SECONDS as the endpoint received it (lib/person-data.ts). Only
+ * reads; each read in its exact shape (CX-123 rule 24): an unknown answer throws UnknownReplyError, so the copy fails
+ * rather than leave them out. What cannot be reached is said in `unread`: a delivery kept in a shape that cannot be
+ * read, and deliveries past the end of the store's log (its last LOG_SIZE), still kept for up to the week but not on it.
+ */
+export async function deliveriesAbout(store: Store, email: string, now = Date.now()): Promise<{ records: DeliveryTrace[]; unread: string[] }> {
+  const address = email.trim().toLowerCase();
+  const records: DeliveryTrace[] = [];
+  const unread: string[] = [];
+  if (!store.statsId || !address || !isRedisConfigured()) return { records, unread };
+  const ids = stringList(repliesFor(await redisPipeline([["LRANGE", logKey(store.statsId), 0, LOG_SIZE - 1]]), 1)?.[0]);
+  if (ids === null) throw new UnknownReplyError("the store's webhook deliveries");
+  const list = ids.filter((id) => DELIVERY_ID_PATTERN.test(id));
+  if (!list.length) return { records, unread };
+  const raws = repliesFor(await redisPipeline(list.map((id) => ["GET", deliveryKey(id)])), list.length);
+  if (!raws || raws.some((raw) => raw !== null && typeof raw !== "string")) throw new UnknownReplyError("one of the store's webhook deliveries");
+  let oldest = Infinity;
+  for (const raw of raws) {
+    // Gone by itself after the week: nothing is kept.
+    if (raw === null) continue;
+    const delivery = parseDelivery(raw);
+    if (!delivery) {
+      unread.push("A delivery of the store's webhooks could not be read.");
+      continue;
+    }
+    oldest = Math.min(oldest, Number(delivery.createdAt) || 0);
+    if (!delivery.body.toLowerCase().includes(address)) continue;
+    let sent: unknown = delivery.body;
+    try {
+      sent = JSON.parse(delivery.body);
+    } catch {
+      // Kept as the text the endpoint received.
+    }
+    records.push({ event: delivery.type, made: new Date(Number(delivery.createdAt) || 0).toISOString(), state: delivery.state, sent });
+  }
+  if (ids.length >= LOG_SIZE && oldest > now - DELIVERY_SECONDS * 1000) unread.push(`Deliveries of the store's webhooks older than its last ${LOG_SIZE} are kept up to ${DELIVERY_SECONDS / 86_400} days and could not be read for this copy.`);
+  return { records, unread };
+}
+
 export function isWebhookEvent(value: unknown): value is WebhookEvent {
   return isEvent(value);
 }

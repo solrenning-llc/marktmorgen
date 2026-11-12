@@ -1644,6 +1644,96 @@ function batchOf(raw: unknown): string[][] | null {
   return batch as string[][];
 }
 
+/** A glob that matches its text exactly, for HSCAN MATCH: the pattern characters escaped. */
+const globExact = (text: string) => text.replace(/[\\*?[\]]/g, (c) => `\\${c}`);
+
+/** What one import of the store holds about one address, for the person's copy. */
+export type ImportTrace = {
+  import: string;
+  kind: ImportKind;
+  started: string;
+  rowsWaiting: string[][];
+  notBroughtIn: { row: number; column: string; problem: string; value: string }[];
+  rowsSeen: { key: string; row: string }[];
+  toBeEmailed: boolean;
+};
+
+/**
+ * What the store's kept imports hold about one address, for the person's copy (lib/person-copy.ts, GDPR art. 15; C7
+ * data-copy hunt): rows of a file still waiting to be brought in (RAW_DAYS) that name the address, the report of rows
+ * not brought in (KEEP_SECONDS), the note of which row it was seen on, and whether an email to it still waits. Only
+ * reads. Each read in its exact shape (CX-123 rule 24): an unknown answer throws UnknownReplyError, so the copy fails
+ * rather than leave this out. What cannot be reached is said in `unread`, never left out in silence: a report line or
+ * a batch of rows kept in an unreadable shape, and imports older than the store's last LIST_SIZE, which are kept for
+ * KEEP_SECONDS but are no longer on its list.
+ */
+export async function importTracesOf(store: Store, email: string, now = Date.now()): Promise<{ records: ImportTrace[]; unread: string[] }> {
+  const address = normaliseEmail(email);
+  const records: ImportTrace[] = [];
+  const unread: string[] = [];
+  if (!address) return { records, unread };
+  const jobs = await storeImports(store);
+  const names = (cells: string[]) => cells.some((cell) => normaliseEmail(cell).includes(address));
+  for (const job of jobs) {
+    const replies = repliesFor(await redisPipeline([["LRANGE", errorsKey(job.id), 0, MAX_REPORT_ROWS - 1], ["LLEN", rowsKey(job.id)], ["SMEMBERS", mailKey(job.id)]]), 3);
+    const errors = stringList(replies?.[0]);
+    const batches = countOf(replies?.[1]);
+    const mail = stringList(replies?.[2]);
+    if (errors === null || batches === null || mail === null) throw new UnknownReplyError("an import's records about a person");
+    const notBroughtIn: ImportTrace["notBroughtIn"] = [];
+    for (const raw of errors) {
+      let line: unknown;
+      try {
+        line = JSON.parse(raw);
+      } catch {
+        line = null;
+      }
+      if (!Array.isArray(line) || line.length !== 4 || typeof line[0] !== "number" || line.slice(1).some((cell) => typeof cell !== "string")) {
+        unread.push(`A line of the report of the import "${job.file}" could not be read.`);
+        continue;
+      }
+      const [row, column, problem, value] = line as [number, string, string, string];
+      if (names([value])) notBroughtIn.push({ row, column, problem, value });
+    }
+    const rowsWaiting: string[][] = [];
+    for (let i = 0; i < batches; i += 1) {
+      const read = repliesFor(await redisPipeline([["LINDEX", rowsKey(job.id), i]]), 1);
+      if (!read) throw new UnknownReplyError("an import's rows");
+      // Gone since the length was read (brought in, or let go): nothing waits there any more.
+      if (read[0] === null) continue;
+      const batch = batchOf(read[0]);
+      if (!batch) {
+        unread.push(`Rows of the import "${job.file}" waiting to be brought in could not be read.`);
+        continue;
+      }
+      rowsWaiting.push(...batch.filter(names));
+    }
+    const rowsSeen: ImportTrace["rowsSeen"] = [];
+    let cursor = "0";
+    do {
+      const read = repliesFor(await redisPipeline([["HSCAN", seenKey(job.id), cursor, "MATCH", `?:${globExact(address)}*`, "COUNT", 1000]]), 1);
+      const page = read?.[0];
+      if (!Array.isArray(page) || page.length !== 2 || typeof page[0] !== "string") throw new UnknownReplyError("an import's rows seen");
+      const pairs = stringList(page[1]);
+      if (pairs === null || pairs.length % 2) throw new UnknownReplyError("an import's rows seen");
+      for (let i = 0; i < pairs.length; i += 2) {
+        const key = pairs[i].slice(2);
+        // Only this address (`e:<address>`, `p:<address>|<product>`, `m:<address>|<product>`), not a longer one it starts.
+        if (key === address || key.startsWith(`${address}|`)) rowsSeen.push({ key, row: pairs[i + 1] });
+      }
+      cursor = page[0];
+    } while (cursor !== "0");
+    const toBeEmailed = mail.some((m) => normaliseEmail(m).includes(address));
+    if (rowsWaiting.length || notBroughtIn.length || rowsSeen.length || toBeEmailed) {
+      records.push({ import: job.file, kind: job.kind, started: new Date(job.at).toISOString(), rowsWaiting, notBroughtIn, rowsSeen, toBeEmailed });
+    }
+  }
+  // The list holds the last LIST_SIZE imports; one before them is kept KEEP_SECONDS from its start but is off the list.
+  const oldest = Math.min(...jobs.map((job) => job.at));
+  if (jobs.length >= LIST_SIZE && oldest > now - KEEP_SECONDS * 1000) unread.push(`Imports older than the store's last ${LIST_SIZE} are kept up to ${KEEP_SECONDS / 86_400} days and could not be read for this copy.`);
+  return { records, unread };
+}
+
 export async function runImport(id: string, deadline: number): Promise<ImportJob | null> {
   let held;
   try {

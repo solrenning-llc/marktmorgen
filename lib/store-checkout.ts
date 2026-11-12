@@ -44,6 +44,7 @@ export { sellableOptions };
 import { isPaidUp } from "@/lib/billing";
 import { codesMayTakeOff, livePromotionId } from "@/lib/discount";
 import { StripeError, checkoutClosesAt, onAccount, platformKey } from "@/lib/stripe-account";
+import { ownField, plainObject, readStripePage } from "@/lib/stripe-list";
 import { type Bump, MAX_BUMPS, activeBumps, bumpTargets, planFor } from "@/lib/product-extras";
 import { planLine } from "@/lib/buyer-words";
 import { LANGUAGES } from "@/lib/store-language";
@@ -699,19 +700,20 @@ export async function createCheckout(
     else body.set(`subscription_data[metadata][${CONSENT_META}]`, consentMetaValue(extras.digitalConsent, kind));
   }
 
-  // This ordinary origin has no verified original-file access recipe yet.
-  // Funding alone cannot authorize taking payment. In particular, never_activated
-  // must not route these new purchases through the legacy unprotected POST.
-  // Its protected reservation/reconciliation adapter is constructed separately;
-  // dispatch and hosted payment creation stay closed until rights are proved.
+  // Until the durable lifecycle is activated, the existing single-file sale
+  // keeps its legacy checkout, independently of optional newsletter consent.
+  // An activated durable producer still needs original-file access proof;
+  // optional consent must never bypass that requirement.
   const singleDigital = Boolean(store.stripeAccountId !== DEMO_CONNECTED_ACCOUNT && product.file && !product.link && !shipping &&
     product.priceCents > 0 && !product.bundle && !product.course && !product.podcast && !product.keys && !product.note &&
     !product.callPackage && !product.recurring && !product.plan && !product.pwyw && product.options.length === 0 &&
     product.fields.length === 0 && added.length === 0 && !extras.gift && !extras.group && !extras.preorder && !extras.email &&
-    !extras.buyerKey && !extras.upsellKey && !extras.news && !extras.held && !extras.remind && !recovering && !named &&
+    !extras.buyerKey && !extras.upsellKey && !extras.held && !recovering && !named &&
     !store.tax.ids && !store.tax.invoices && !store.domain?.liveAt && !(store.affiliates.enabled && store.affiliates.buyers) &&
     !body.has("discounts[0][promotion_code]") && !body.has("discounts[0][coupon]"));
-  if (singleDigital) throw new Error("The payment page could not be opened");
+  if (singleDigital && (confirmationRuntime.lifecycle ?? CURRENT_SHIPMENT_MAIL_LIFECYCLE) !== "never_activated") {
+    throw new Error("The payment page could not be opened");
+  }
 
   // A paid store's new orders stop at its plan's figure (lib/order-admission.ts):
   // admitted here, before Stripe's page opens, so nobody is stopped while paying.
@@ -969,7 +971,7 @@ export async function readOrder(
     session = await onAccount(
       "GET",
       store.stripeAccountId as string,
-      `/checkout/sessions/${encodeURIComponent(sessionId)}?expand[]=subscription&expand[]=payment_intent.latest_charge&expand[]=payment_intent.payment_method`,
+      `/checkout/sessions/${encodeURIComponent(sessionId)}?expand[]=subscription&expand[]=subscription.latest_invoice&expand[]=payment_intent.latest_charge&expand[]=payment_intent.payment_method`,
     );
   } catch (error) {
     if (error instanceof StripeError && error.status === 404) {
@@ -1240,41 +1242,50 @@ export async function listSales(store: Store): Promise<SaleList> {
   for (const sale of sales) if (sale.shipTo) sale.shipped = shippedAt.get(sale.reference) ?? null;
 
   // Products taken in one click after paying are their own charges, not
-  // checkouts, so they are read from the payments on the same account.
-  let added: Sale[] = [];
+  // checkouts, so they are read from the payments on the same account. They
+  // are sales like any other: a page that is not a Stripe list in its exact
+  // shape, a payment it cannot read, or a read that failed, is not "none were
+  // taken", so the list says it could not be verified, as it does for an
+  // unreadable page of checkouts (rule 24; Claude 5, round 30).
+  let added: Sale[];
   try {
     const intents = await onAccount(
       "GET",
       store.stripeAccountId as string,
       `/payment_intents?limit=${ORDERS_PAGE_SIZE}`,
     );
-    const list = Array.isArray(intents.data) ? (intents.data as Record<string, unknown>[]) : [];
-    added = list
-      .filter((pi) => {
-        const meta = pi.metadata as Record<string, string> | null;
-        return meta?.kind === "upsell" && handles.has(meta?.store ?? "") && pi.status === "succeeded";
-      })
-      .map((pi): Sale => {
-        const meta = pi.metadata as Record<string, string>;
-        const paidAt = typeof pi.created === "number" ? pi.created : 0;
-        return {
-          reference: typeof pi.id === "string" ? pi.id : "",
-          title: `${meta.title || "A product that is no longer listed"} (added after paying)`,
-          amount: typeof pi.amount === "number" ? pi.amount : 0,
-          currency: typeof pi.currency === "string" && pi.currency ? pi.currency : "usd",
-          email: typeof pi.receipt_email === "string" && pi.receipt_email ? pi.receipt_email : null,
-          paidAt,
-          stillDownloadable: now - paidAt <= DOWNLOAD_WINDOW_SECONDS,
-          isCall: false,
-          answers: [],
-          trial: false,
-          isTip: false,
-        };
-      })
-      .filter((sale) => sale.reference !== "");
+    const page = readStripePage(intents, (pi) => plainObject(ownField(pi, "metadata")) && typeof ownField(pi, "status") === "string");
+    if (page.unreadable > 0) return { state: "error" };
+    const offers = page.rows.filter((pi) => {
+      const meta = ownField(pi, "metadata") as Record<string, unknown>;
+      return meta.kind === "upsell" && handles.has(typeof meta.store === "string" ? meta.store : "") && pi.status === "succeeded";
+    });
+    // An offer of this store is shown with what it cost, when it was paid and in what: none of them is guessed.
+    const legible = (pi: Record<string, unknown>) =>
+      Number.isSafeInteger(pi.amount) && (pi.amount as number) >= 0 &&
+      Number.isSafeInteger(pi.created) && (pi.created as number) > 0 &&
+      typeof pi.currency === "string" && /^[a-z]{3}$/.test(pi.currency);
+    if (!offers.every(legible)) return { state: "error" };
+    added = offers.map((pi): Sale => {
+      const meta = pi.metadata as Record<string, string>;
+      const paidAt = pi.created as number;
+      return {
+        reference: pi.id,
+        title: `${meta.title || "A product that is no longer listed"} (added after paying)`,
+        amount: pi.amount as number,
+        currency: pi.currency as string,
+        email: typeof pi.receipt_email === "string" && pi.receipt_email ? pi.receipt_email : null,
+        paidAt,
+        stillDownloadable: now - paidAt <= DOWNLOAD_WINDOW_SECONDS,
+        isCall: false,
+        answers: [],
+        trial: false,
+        isTip: false,
+      };
+    });
   } catch (error) {
-    // The checkouts are still the whole of the list; this part is extra.
     console.error("listing upsells failed", error);
+    return { state: "error" };
   }
 
   const all = [...sales, ...added].sort((a, b) => b.paidAt - a.paidAt).slice(0, ORDERS_PAGE_SIZE);

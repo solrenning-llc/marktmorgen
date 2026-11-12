@@ -96,6 +96,7 @@ export const STUDIO_ACTIONS: readonly StudioAction[] = [
   { id: "team", title: "Invite someone to help run your store", segment: "team", permission: "team", words: ["team", "staff", "helper", "role", "permission", "admin", "assistant", "activity log"] },
   { id: "invite", title: "Invite other creators for plan credit", segment: "invite", permission: "billing", words: ["invite", "refer", "referral", "credit", "invite creator"] },
   { id: "refund", title: "Ask for a refund of your Marktmorgen plan", segment: "refund", permission: "billing", words: ["refund", "money back", "plan refund", "refund plan"] },
+  { id: "invoices", title: "See what your Marktmorgen plan charged you", segment: "invoices", permission: "billing", words: ["plan receipt", "billing history", "plan bill", "plan charges", "plan payments"] },
   { id: "copy", title: "Copy this store into another of your stores", segment: "copy", permission: "page", words: ["copy", "duplicate", "clone"] },
   { id: "agent", title: "Review what the AI proposes", segment: "agent", permission: "settings", words: ["ai", "agent", "proposed changes", "api", "confirm changes"] },
 ];

@@ -504,6 +504,48 @@ def main():
         assert db.command("HGET", option_keys[5], "items") == "0"
         print("PASS: digital-option own lifetime scope, immutable CAS, one charged envelope, closed workers and existing erasure")
 
+        # An abandoned reservation must not hold shared capacity forever: one
+        # release deadline (created + 48h) in the due index, released once by
+        # Redis TIME with CAS, returning exactly its item and bytes.
+        release_ms = 48 * 3_600_000
+        abandoned, abandoned_keys = fixture("digital-option-abandoned")
+        abandoned_keys = [k.replace(prefix, prefix + "abandoned:") for k in abandoned_keys]
+        made.update(abandoned_keys)
+        abandoned.update(originKind="digital_option", phase="digital_option_reserved", next=0)
+        abandoned["sourceValue"] = json.dumps(dict(kind="confirmation", originKind="digital_option",
+            nonce=abandoned["nonce"], accountId=abandoned["accountId"], bodyDigest=abandoned["bodyDigest"], session=""))
+        def release(raw, keys=abandoned_keys):
+            return db.command("EVAL", shared, 10, *keys, "release-reservation", raw, "", now, 131072, "null", "")
+        def counters():
+            return [int(db.command("HGET", key, field) or 0) for key in abandoned_keys[5:7] for field in ("items", "bytes")]
+        assert db.command("EVAL", shared, 10, *abandoned_keys, "enqueue", "", json.dumps(dict(abandoned, created=now - 1)), now,
+            131072, json.dumps(option_policy), "") == ["unknown"]
+        before = counters()
+        assert db.command("EVAL", shared, 10, *abandoned_keys, "enqueue", "", json.dumps(abandoned), now,
+            131072, json.dumps(option_policy), "")[0] == "queued"
+        live = db.command("GET", abandoned_keys[0])
+        taken = counters()
+        assert taken == [before[0] + 1, before[1] + abandoned["bytes"], before[2] + 1, before[3] + abandoned["bytes"]]
+        assert int(db.command("ZSCORE", abandoned_keys[2], abandoned["id"])) == now + release_ms
+        assert release(live) == ["held", live] and counters() == taken
+        moved = json.dumps(dict(json.loads(live), phase="awaiting_creation", created=now - release_ms - 1))
+        db.command("SET", abandoned_keys[0], moved)
+        assert release(moved) == ["unknown"] and counters() == taken
+        aged = json.dumps(dict(json.loads(live), created=now - release_ms - 1, authorizedAt=now - release_ms - 1))
+        db.command("SET", abandoned_keys[0], aged)
+        assert release(live) == ["changed"] and counters() == taken
+        assert release(aged) == ["released"]
+        assert counters() == before
+        assert db.command("GET", abandoned_keys[0]) is None
+        assert db.command("ZSCORE", abandoned_keys[2], abandoned["id"]) is None
+        assert db.command("SISMEMBER", abandoned_keys[3], abandoned["id"]) == 0
+        assert db.command("SISMEMBER", abandoned_keys[7], abandoned["id"]) == 0
+        assert db.command("TTL", abandoned_keys[1]) > 399 * 86_400
+        assert release(aged) == ["missing"]
+        assert db.command("EVAL", shared, 10, *abandoned_keys, "cancel", aged, "", now, 131072, "null", "") == ["missing"]
+        assert counters() == before
+        print("PASS: abandoned digital-option reservation released once at its 48h deadline with its exact item/bytes; live and moved rows kept")
+
         print(json.dumps({"observed_commands_including_eval_and_redis_call": profiles, "supplier_invoice": False}))
         # Exercise production TypeScript plus the exact shared/paid/accounting
         # Lua together, under the same explicitly disposable loopback opt-in.

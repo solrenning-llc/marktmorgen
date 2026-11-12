@@ -74,7 +74,7 @@
  *   nl:aff:<id>:payouts  hash  payout id -> what the creator says they paid
  */
 import { rememberAffiliate } from "@/lib/affiliate-hub";
-import { type Paid, paypalPaymentId, readPayPalRefundsWithCoverage, refundedKey as paypalRefundedKey } from "@/lib/paypal-sales";
+import { type Paid, paypalPaymentId, readPayPalPartlyRefunded, readPayPalRefundsWithCoverage, refundedKey as paypalRefundedKey } from "@/lib/paypal-sales";
 import { MAX_STORE_BYTES, saleHandles, storeForEmailSeen, storeForId, storeRef } from "@/lib/store";
 import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
@@ -3058,6 +3058,9 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
   const bookings = leads.filter((l) => l.kind === "booking" && l.pi);
   let refunds = new Map<string, number>();
   let refundsChecked = true;
+  // PayPal payments refunded in part (lib/paypal-sales.ts partlyRefundedKey), named as the lines name them: how much
+  // was given back is not known, so nothing is paid on them (below), never the commission on the whole price.
+  let partlyRefunded = new Set<string>();
   if (everything.length || bookings.length) {
     const since = Math.min(...[...everything, ...bookings].map((r) => r.at));
     try {
@@ -3088,6 +3091,12 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
           refunds.set(paypalPaymentId(r.capture), (refunds.get(paypalPaymentId(r.capture)) ?? 0) + r.cents);
         }
       }
+      // Read only when a PayPal sale is in the book: a store that never sold with PayPal has none.
+      if (paypalSales.size) {
+        const partly = await readPayPalPartlyRefunded(store.statsId, since);
+        if (partly.partial) refundsChecked = false;
+        partlyRefunded = new Set([...partly.captures].map(paypalPaymentId));
+      }
     } catch (error) {
       console.error("reading refunds for the affiliate book failed", error);
       refundsChecked = false;
@@ -3106,7 +3115,14 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
       }
     }
   }
-  const settled = everything.map((r) => settleLine(r, r.pi ? refunds.get(r.pi) ?? 0 : 0));
+  // A PayPal sale refunded in part, not in full: what it still earns is not known, so it earns nothing until it is (it
+  // is marked "partly refunded", the same for the affiliate's line and every partner's share of it). It also counts
+  // toward no monthly goal and no second tier, which are worked out from what the sales earn.
+  const settled = everything.map((r) => {
+    const line = settleLine(r, r.pi ? refunds.get(r.pi) ?? 0 : 0);
+    return partlyRefunded.has(r.pi) && (line.status === "earned" || line.status === "partly refunded") ? { ...line, commission: 0, status: "partly refunded" as const } : line;
+  });
+  const earning = settled.filter((l) => !partlyRefunded.has(l.pi));
   // Each lead as it stands: the program's caps and budget counted across every affiliate's, then only the ones asked for.
   let ends = new Map<string, number>();
   const openBookings = leads.filter((l) => l.kind === "booking" && l.state === "open" && l.ref && mine(l.aff)).slice(0, 200);
@@ -3125,7 +3141,7 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
   // A goal reached in a month adds its bonus, and a sale by somebody an
   // affiliate brought adds their second tier, both worked out from the sales
   // as they stand after refunds. Then only the one affiliate's, when it is one.
-  const lines = [...settled, ...bonusLines(store, settled), ...tierLines(everyone, settled, flagsOf), ...leadLines]
+  const lines = [...settled, ...bonusLines(store, earning), ...tierLines(everyone, earning, flagsOf), ...leadLines]
     .filter((l) => !only || l.aff === only)
     .sort((a, b) => b.at - a.at);
 

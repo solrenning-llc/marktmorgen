@@ -175,6 +175,8 @@ export const AFFILIATE_SENT_BYTES = 512;
 export const BOOK_PAYPAL_REFUNDS = 500;
 /** A PayPal sale's record, read for its refund: the order, the payment, the buyer, what the visit carried. */
 export const PAYPAL_PAID_BYTES = 4_096;
+/** One PayPal sale refunded in part as readBook reads it (lib/paypal-sales.ts, readPayPalPartlyRefunded): a capture id of at most 64 characters and its score, with room. */
+export const PAYPAL_PARTLY_BYTES = 96;
 /** Open bookings whose moves readBook reads at the most, a hundred at a command (lib/call-moves-read.ts). */
 export const BOOK_MOVES = 200;
 /** Invoices readBook reads at the most, so products named by them at the most (lib/affiliates.ts, INVOICE_PAGES of a hundred). */
@@ -191,13 +193,15 @@ export function bookWork(s: BookSizes, stripePages: number): ReadWork {
   const stripe = s.stripe && s.people > 0;
   const products = stripe ? Math.min(s.products, BOOK_INVOICES) : 0;
   return {
-    // Counting it (seven counts and the PayPal refunds'), reading the seven records, then each read below; the moves a hundred at an MGET.
-    commands: 8 + 7 + (any ? 1 + paypal : 0) + moveReads(moves) + products,
-    bytes: s.entries * AFFILIATE_ENTRY_BYTES + paypal * PAYPAL_PAID_BYTES + moves * (MOVE_BYTES + MOVE_KEY_BYTES) + products * LISTING_BYTES,
+    // Counting it (seven counts and the PayPal refunds'), reading the seven records, then each read below; the moves a
+    // hundred at an MGET. The PayPal sales refunded in part are one more read of at most BOOK_PAYPAL_REFUNDS of them,
+    // counted whenever anything is credited (it is made only when a PayPal sale is).
+    commands: 8 + 7 + (any ? 2 + paypal : 0) + moveReads(moves) + products,
+    bytes: s.entries * AFFILIATE_ENTRY_BYTES + paypal * PAYPAL_PAID_BYTES + (any ? BOOK_PAYPAL_REFUNDS * PAYPAL_PARTLY_BYTES : 0) + moves * (MOVE_BYTES + MOVE_KEY_BYTES) + products * LISTING_BYTES,
     sent: s.people * AFFILIATE_SENT_BYTES,
     // Invoices while it has affiliates; refunds and disputes while it has anything credited.
     stripePages: s.stripe && any ? stripePages : 0,
-    roundTrips: 2 + (any ? 1 + paypal : 0) + (moves ? 1 : 0) + (products ? 1 : 0),
+    roundTrips: 2 + (any ? 2 + paypal : 0) + (moves ? 1 : 0) + (products ? 1 : 0),
   };
 }
 

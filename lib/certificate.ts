@@ -317,6 +317,17 @@ export async function issueCertificate(input: {
     // This press made nothing that stands: its record goes, the standing one is the answer.
     await redisPipeline([["DEL", certKey(id)]]);
     await giveData(input.room, [{ slot: CERTS_SLOT(input.course.id), bytes }]);
+    // The standing one goes on the course's two lists again (SADD is idempotent): a press whose index write failed
+    // after its slot was claimed left it off them, and only a later press can repair that (#4277). Each reply read
+    // exactly as 0 or 1 (rule 24); any other throws, and the next press tries again.
+    const what = "a standing certificate's places in its course's lists";
+    exactReplies(
+      await redisPipeline([["SADD", allKey(input.course.id), existing.id], ["SADD", byKey(input.course.id, input.who), existing.id]]),
+      2,
+      what,
+    ).forEach((n) => {
+      if (replyCount(n, what) > 1) throw new UnknownReply(what);
+    });
     return { ok: true, certificate: existing, fresh: false };
   }
   await redisPipeline([["SADD", allKey(input.course.id), id], ["SADD", byKey(input.course.id, input.who), id]]);

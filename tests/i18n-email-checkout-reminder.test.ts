@@ -45,8 +45,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
 const BAD = /\bundefined\b|\bNaN\b|\bnull\b|\[object Object\]|\bInfinity\b|⟦|\$\{/;
 const ADDRESS = "9 Kiln Road, Portland, OR 97201";
 const STORES = [
-  { owner: "i18n-rem-usd@example.test", handle: "i18nremusd", name: `Tom & Jerry's <b>"Shop"</b>`, currency: "USD" as const, prices: ["24.50", "9.99"] },
-  { owner: "i18n-rem-jpy@example.test", handle: "i18nremjpy", name: "متجر الكتب 🎨", currency: "JPY" as const, prices: ["2400", "1000"] },
+  { owner: "i18n-rem-usd@example.test", handle: "i18nremusd", name: `Tom & Jerry's <b>"Shop"</b>`, currency: "usd" as const, prices: ["24.50", "9.99"] },
+  { owner: "i18n-rem-jpy@example.test", handle: "i18nremjpy", name: "متجر الكتب 🎨", currency: "jpy" as const, prices: ["2400", "1000"] },
 ];
 const TITLES = [`Glaze <Recipes> & "Tips"`, `Café ✨ ${"Long ".repeat(20).trim()}`];
 
@@ -94,8 +94,8 @@ async function main(): Promise<void> {
         is(`${where}: to the buyer`, mail.to, email);
         is(`${where}: nothing unwritten`, [BAD.test(mail.subject), BAD.test(mail.text)], [false, false]);
         is(`${where}: names as typed, never escaped`, [mail.text.includes(shop.name), mail.text.includes(TITLES[0]), /&(amp|lt|gt|quot|#39);/.test(mail.text + mail.subject)], [true, true, false]);
-        is(`${where}: the price as the language writes it`, mail.text.includes(formatMoney(shop.currency === "JPY" ? 2400 : 2450, store.currency, locale)), true);
-        if (cart) is(`${where}: the second item's price too`, mail.text.includes(formatMoney(shop.currency === "JPY" ? 1000 : 999, store.currency, locale)), true);
+        is(`${where}: the price as the language writes it`, mail.text.includes(formatMoney(shop.currency === "jpy" ? 2400 : 2450, store.currency, locale)), true);
+        if (cart) is(`${where}: the second item's price too`, mail.text.includes(formatMoney(shop.currency === "jpy" ? 1000 : 999, store.currency, locale)), true);
         is(`${where}: the creator's name and postal address`, mail.text.includes(`${shop.name} · ${ADDRESS}`), true);
         const token = /\/unsubscribe\?r=([0-9a-f]{40})/.exec(mail.text)?.[1] ?? "";
         is(`${where}: a stop link whose token the page reads`, (await readStopToken(token))?.email, email);

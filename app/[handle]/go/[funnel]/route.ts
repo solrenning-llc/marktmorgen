@@ -3,6 +3,7 @@ import { normaliseHandle, storeForPage } from "@/lib/store";
 import { originFrom } from "@/lib/request-origin";
 import { nextOpen, withMark } from "@/lib/page-funnel";
 import { readPageFunnelsStrict, stepStates } from "@/lib/page-funnel-store";
+import { offDomainRedirect } from "@/lib/domain-gate";
 
 /**
  * A funnel of pages' own address, /@chef/go/launch (and chef.com/go/launch on
@@ -27,6 +28,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   if (!decoded.startsWith("@")) return new Response("Not found", { status: 404 });
   const store = await storeForPage(normaliseHandle(decoded));
   if (!store) return new Response("Not found", { status: 404 });
+  // On a creator's domain only while it is this store's and the store is on Pro, as every page (lib/domain-gate.ts).
+  const offDomain = offDomainRedirect(store, request.headers);
+  if (offDomain) return offDomain;
   if (store.suspended) return away(`/@${store.handle}`);
 
   // A store without a stats id has never kept a funnel; any other reading is exact or unknown.

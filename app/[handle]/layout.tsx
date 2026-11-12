@@ -2,8 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { cache } from "react";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { canUseDomain } from "@/lib/domains";
-import { SITE_URL } from "@/lib/site-url";
+import { offDomainTarget } from "@/lib/domain-gate";
 import { normaliseHandle, storeForPage } from "@/lib/store";
 import { iconUrl, shortName, themeColour } from "@/lib/store-app";
 import { StoreApp } from "@/components/store-app";
@@ -69,19 +68,14 @@ export default async function StoreLayout({ children, params }: LayoutProps<"/[h
   // Reached on a creator's own domain (proxy.ts says which): every page of
   // the store, not only its front page, is served there only while the
   // domain is this store's and the store is on Pro. Otherwise the visitor is
-  // sent to the same page at the address that always works.
+  // sent to the same page at the address that always works. The routes
+  // under the store's address make the same check (lib/domain-gate.ts).
   const asked = await headers();
-  const reachedOn = asked.get("x-nimbus-domain");
   const { handle } = await params;
   // The read the head above already made for this visit: nothing is asked twice.
   const store = await loadStore(handle);
-  if (reachedOn) {
-    if (store && (store.domain?.name !== reachedOn || !canUseDomain(store))) {
-      const path = asked.get("x-nimbus-path") ?? "/";
-      const own = /^\/@/.test(path) ? path : `/@${store.handle}${path === "/" || path.startsWith("/?") ? path.slice(1) : path}`;
-      redirect(`${SITE_URL}${own.startsWith("/") ? own : `/@${store.handle}`}`);
-    }
-  }
+  const away = store ? offDomainTarget(store, asked) : null;
+  if (away) redirect(away);
   // What this layout draws around the page is in the store's language and marked with it (the root <html> is en-US).
   const skip = store ? skipWords(store.language) : null;
   return (

@@ -15,6 +15,7 @@ import { takePublicRequest } from "@/lib/traffic";
 import { plain } from "@/lib/serve-file";
 import { SESSION_COOKIE } from "@/lib/auth";
 import { seesDrafts } from "@/lib/draft-view";
+import { offDomainRedirect } from "@/lib/domain-gate";
 
 /**
  * A certificate of completion as a PDF file (lib/certificate-pdf.ts): the
@@ -43,6 +44,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   if (!decoded.startsWith("@") || (id !== "sample" && !CERT_ID_PATTERN.test(id))) return new Response("Not found", { status: 404 });
   const store = await storeForPage(normaliseHandle(decoded));
   if (!store) return new Response("Not found", { status: 404 });
+  // On a creator's domain only while it is this store's and the store is on Pro, before anything is paid for (lib/domain-gate.ts).
+  const offDomain = offDomainRedirect(store, request.headers);
+  if (offDomain) return offDomain;
   const sample = id === "sample";
   const now = Date.now();
   const resting = () => plain(503, speech(store).w.restingTitle);

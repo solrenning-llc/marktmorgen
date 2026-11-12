@@ -5,6 +5,7 @@ import { normaliseHandle, storeForPage } from "@/lib/store";
 import { takePublicRequest } from "@/lib/traffic";
 import { speech } from "@/lib/buyer-words";
 import { plain } from "@/lib/serve-file";
+import { offDomainRedirect } from "@/lib/domain-gate";
 
 /**
  * The creator's business card as a file to save in a phone's or a
@@ -19,11 +20,14 @@ import { plain } from "@/lib/serve-file";
  * request covers it. Past the window's requests, or with no window they can
  * be counted in, the store is resting and nothing is read.
  */
-export async function GET(_request: NextRequest, { params }: { params: Promise<{ handle: string }> }) {
+export async function GET(request: NextRequest, { params }: { params: Promise<{ handle: string }> }) {
   const { handle } = await params;
   const decoded = decodeURIComponent(handle);
   if (!decoded.startsWith("@")) return new Response("Not found", { status: 404 });
   const store = await storeForPage(normaliseHandle(decoded));
+  // On a creator's domain only while it is this store's and the store is on Pro, before anything is paid for (lib/domain-gate.ts).
+  const offDomain = store ? offDomainRedirect(store, request.headers) : null;
+  if (offDomain) return offDomain;
   // Switched off after notices about its content (lib/takedown.ts): its card is not given either.
   if (!store || store.suspended) return new Response("Not found", { status: 404, headers: { "Cache-Control": "no-store" } });
   if (!(await takePublicRequest(store, "public"))) return plain(503, speech(store).w.restingTitle);

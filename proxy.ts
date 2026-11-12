@@ -271,7 +271,11 @@ export async function proxy(request: NextRequest) {
     if (STORE_SITEMAP.test(request.nextUrl.pathname)) {
       const url = request.nextUrl.clone();
       url.pathname = request.nextUrl.pathname.replace(/\/sitemap\.xml$/i, "/store-sitemap");
-      return NextResponse.rewrite(url);
+      // The domain headers are ours to set: one sent by a visitor is dropped here too (lib/domain-gate.ts).
+      const headers = new Headers(request.headers);
+      headers.delete(DOMAIN_HEADER);
+      headers.delete(PATH_HEADER);
+      return NextResponse.rewrite(url, { request: { headers } });
     }
     const params = request.nextUrl.searchParams;
     const store = params.has("via") || params.has("code") ? handleInPath(request.nextUrl.pathname) : "";

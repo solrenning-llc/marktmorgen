@@ -42,11 +42,21 @@ export function AffiliateUnconfirmed({ lines, total, who, days }: { lines: reado
   const [busy, setBusy] = useState<string | null>(null);
   const [problem, setProblem] = useState<{ ref: string; text: string } | null>(null);
   const confirmButton = useRef<HTMLButtonElement>(null);
-  const opener = useRef<HTMLButtonElement | null>(null);
+  // Each line's opener as it is on the page now, by the line's ref: opening the confirmation takes the opener off the
+  // page and closing it draws a new one, so the node kept from the press is never the one to focus (review of #3485, M2).
+  const openers = useRef(new Map<string, HTMLButtonElement>());
+  // The line whose opener takes the focus back once the confirmation has closed.
+  const returnTo = useRef<string | null>(null);
 
   // The confirmation takes the focus when it opens, and gives it back to the button that opened it when it closes.
   useEffect(() => {
-    if (asking) confirmButton.current?.focus();
+    if (asking) {
+      confirmButton.current?.focus();
+      return;
+    }
+    const back = returnTo.current;
+    returnTo.current = null;
+    if (back) openers.current.get(back)?.focus();
   }, [asking]);
 
   if (!lines.length) return null;
@@ -95,8 +105,11 @@ export function AffiliateUnconfirmed({ lines, total, who, days }: { lines: reado
                   className="btn btn-secondary btn-sm mt-2 inline-flex min-h-11 items-center"
                   disabled={busy !== null}
                   aria-label={`Review and approve ${money(line.commission, line.currency)} for ${who2}, sale of ${line.title} on ${day(line.at)}`}
-                  onClick={(event) => {
-                    opener.current = event.currentTarget;
+                  ref={(node) => {
+                    if (node) openers.current.set(line.ref, node);
+                    else openers.current.delete(line.ref);
+                  }}
+                  onClick={() => {
                     setProblem(null);
                     setAsking(line.ref);
                   }}
@@ -118,11 +131,10 @@ export function AffiliateUnconfirmed({ lines, total, who, days }: { lines: reado
                       className="btn btn-secondary btn-sm inline-flex min-h-11 items-center"
                       disabled={busy !== null}
                       onClick={() => {
+                        // Back to the button that opened it, once it is on the page again (the effect above).
+                        returnTo.current = line.ref;
                         setAsking(null);
                         setProblem(null);
-                        // Back to the button that opened it, once it is on the page again.
-                        const back = opener.current;
-                        window.setTimeout(() => back?.focus(), 0);
                       }}
                     >
                       Cancel

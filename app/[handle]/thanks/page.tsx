@@ -630,6 +630,8 @@ export default async function ThanksPage({ params, searchParams }: Params) {
   const thanksNote = order.state === "paid" && order.product.note ? await readThanksNote(store.statsId, order.product.id).catch(() => null) : null;
   // How often a membership charges as it was bought: a monthly one may have been paid yearly (lib/yearly-price.ts).
   const paidEvery = order.state === "paid" && order.product.recurring ? (((order.record.metadata ?? {}) as Record<string, string>).every === "year" ? "year" : order.product.recurring.interval) : "month";
+  // What the first payment after a trial or a move will be: paid yearly, the year's price, as the confirmation email says.
+  const firstCents = order.state !== "paid" ? 0 : paidEvery === "year" && order.product.yearly ? order.product.yearly.cents : order.option ? order.option.priceCents : order.product.priceCents;
   // A membership's introductory price, as its checkout carried it (lib/intro-price.ts).
   const introPaid = order.state === "paid" && order.product.recurring ? introOf((order.record.metadata ?? {}) as Record<string, string>) : null;
 
@@ -845,7 +847,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
                   style={{ background: "var(--st-accent-soft)", color: "var(--st-text)" }}
                 >
                   {t.movedNote(
-                    money(order.option ? order.option.priceCents : order.product.priceCents, order.currency),
+                    money(firstCents, order.currency),
                     store.tax.enabled && !store.tax.included,
                     longDate(order.firstChargeAt),
                   )}
@@ -856,7 +858,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
                   style={{ background: "var(--st-accent-soft)", color: "var(--st-text)" }}
                 >
                   {t.trialNote(
-                    money(order.option ? order.option.priceCents : order.product.priceCents, order.currency),
+                    money(firstCents, order.currency),
                     store.tax.enabled && !store.tax.included,
                     order.trialDays,
                     longDate(order.created + order.trialDays * 86400),

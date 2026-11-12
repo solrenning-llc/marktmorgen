@@ -38,7 +38,8 @@ export async function POST(request: Request) {
   try {
     // Kept with the key that added it, so it pauses and stops with that key (owner C3-100).
     const now = Date.now();
-    const result = await addEndpoint(writer.store, url, body.events, now, writer.keyId);
+    // The view it answers from is read without the delivery log, which this answer never sends (inside one API request).
+    const result = await addEndpoint(writer.store, url, body.events, now, writer.keyId, false);
     if (!result.ok) return apiError(ADD_ERRORS[result.reason], result.reason, result.message);
     // R34: the address it added, from its own URL, so the notice never names an endpoint added at the same moment.
     const addedWhere = addedEndpointWhere(url) ?? "a new address";
@@ -60,9 +61,10 @@ export async function DELETE(request: Request) {
   if (body instanceof Response) return body;
   const id = typeof body.id === "string" ? body.id.slice(0, 40) : "";
   try {
-    const before = (await webhooksView(writer.store)).endpoints.find((e) => e.id === id);
+    // Only the endpoints, never the delivery log, which this answer never sends (inside one API request).
+    const before = (await webhooksView(writer.store, { log: false })).endpoints.find((e) => e.id === id);
     if (!before) return apiError(404, "not_found", "No endpoint with that id on this store.");
-    await removeEndpoint(writer.store, id);
+    await removeEndpoint(writer.store, id, false);
     later(() => noticeCreator(writer.store, { kind: "webhook-removed", where: before.where }));
     return apiOk({ data: { id, status: "removed" } });
   } catch (error) {

@@ -51,6 +51,8 @@ import { KEEP_DAYS as AGREEMENT_KEEP_DAYS, MAX_VERSIONS, SIGN_DAYS } from "@/lib
 import { KEEP_DAYS, MAX_AUTO_REMINDERS, MAX_LINES, MAX_PER_PERSON, MAX_SENDS, OPEN_DAYS, REMIND_EVERY_DAYS, REQUEST_LIMITS } from "@/lib/payment-request-rules";
 import { LEAVING_ANSWER, LEAVING_QUESTION, STAN_QUESTION, stanComparison } from "@/lib/home-faq";
 import { MAX_SEQUENCE_FILE_BYTES, SEQUENCE_TEMPLATE } from "@/lib/sequence-template";
+import { MAX_BULK_ADDRESSES } from "@/lib/bulk-label-rules";
+import { MAX_CONTACT_TAGS, MAX_TAG_LENGTH } from "@/lib/contact-rules";
 
 /**
  * The help center's questions a feature page asks too, word for word, so
@@ -332,6 +334,13 @@ export const HELP_SECTIONS: HelpSection[] = [
         q: "What about refunds on the Marktmorgen subscription itself?",
         a: [
           `Your first payment to us is refunded in full if you ask within ${REFUND_DAYS} days of it, for any reason or none. A yearly plan is refunded at any time for the months you have not started, with the months you used charged at the monthly price and Stripe's card fee on that payment kept, since Stripe does not give it back. You can cancel at any time and keep access until the end of the period you already paid for; a renewal is not refunded, except where the law requires it. The refund policy page has the exact wording.`,
+        ],
+      },
+      {
+        q: "Where do I find my plan's invoices?",
+        a: [
+          "In your studio, under \u201cWhat you pay us\u201d, choose \u201cYour plan\u2019s invoices\u201d. It lists the invoices Marktmorgen has made for this store\u2019s plan, newest first, read from Stripe when the page opens. Each one opens on Stripe\u2019s own page, where you can see it, download it and, if it is not paid yet, pay it.",
+          "The link is there once your store has a plan. Only the plan your store has now is listed: invoices of an earlier one are not shown. Anyone on your team who may manage the plan can open it.",
         ],
       },
       {
@@ -722,6 +731,13 @@ export const HELP_SECTIONS: HelpSection[] = [
           "A sequence can also follow your courses. It can start when someone who agreed to hear from you finishes a course, every lesson done, which is the moment to offer the next one; and any of its emails can go only to those who have, or have not, opened or finished a course. Wait three days after the purchase, send only to those who have not opened it, and the reminder reaches exactly the people who need it.",
           "You can also choose who gets an email by what your store knows about them: everyone who has spent at least an amount with you, everyone who first found you through one channel, like Instagram or a podcast, or everyone who has bought before but not in the last 30, 60, 90, 180 or 365 days. These are worked out from your own Stripe account when the email goes out, so they match buyers only, and nothing extra is recorded about anyone. Save any choice as a group with a name, up to 20, and pick it again for the next email.",
           "Someone on your team with the Editor role can write drafts, up to 20 per store; you or an Admin read them and send them. And, if you switch it on, one email asks each buyer for a review, 3 to 30 days after buying, counted in the same monthly emails.",
+        ],
+      },
+      {
+        q: "Can I put a label on many contacts at once?",
+        a: [
+          `Yes. On \u201cMoving from another platform\u201d in your studio, next to bringing contacts in, choose \u201cLabel several contacts at once\u201d. Paste their addresses, one per line or separated by commas, up to ${MAX_BULK_ADDRESSES.toLocaleString("en-US")} at a time, type the label (up to ${MAX_TAG_LENGTH} characters), choose \u201cAdd the label\u201d or \u201cTake the label off\u201d, then \u201cReview the change\u201d.`,
+          `Before anything is saved you see how many contacts will change, how many already have it, which addresses are not on your list and which contacts already have ${MAX_CONTACT_TAGS} labels, the most a contact can have. Then press \u201cAdd it to\u201d or \u201cTake it off\u201d. No automation starts and no email is sent, and \u201cUndo\u201d puts everything back until you start another change or leave the page. Anyone on your team who may bring contacts in can do it.`,
         ],
       },
       {

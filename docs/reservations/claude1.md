@@ -7,3 +7,4 @@ Only Claude 1 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
 | Claude 1 | 564 [HC1] unit 1, every studio area mapped to its help answer, with the gaps said and today's answer ids kept | claude1/hc1-help-areas | `lib/help-areas.ts` (new), `tests/help-areas.test.ts` (new) | 12/11/2026 18h20 |
+| Claude 1 | 564 [HC1] unit 2, the first answers for studio areas without help: plan invoices and labels on many contacts (stacked on unit 1) | claude1/hc1-answers | `lib/help-content.ts` (the two new answers and their imports only), `lib/help-areas.ts`, `tests/help-areas.test.ts` | 12/11/2026 18h50 |

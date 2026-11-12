@@ -36,9 +36,11 @@ export const HELP_AREAS: readonly HelpArea[] = [
   { folder: "email", name: "Email", answer: "can-i-email-the-people-on-my-list", mentions: "email" },
   { folder: "forms", name: "Forms, surveys and quizzes", answer: "can-i-add-a-form-a-survey-or-a-quiz", mentions: "form" },
   { folder: "import", name: "Moving from another platform", answer: "can-i-move-my-store-from-stan-gumroad-or-another-platform", mentions: "Moving from another platform" },
+  { folder: "invoices", name: "Your plan's invoices", answer: "where-do-i-find-my-plans-invoices", mentions: "invoices" },
   { folder: "inbox", name: "Inbox", answer: "can-visitors-chat-with-me-and-where-do-i-answer-them", mentions: "inbox" },
   { folder: "integrations", name: "Email platforms", answer: "can-i-send-my-list-to-mailchimp-kit-beehiiv-or-mailerlite", mentions: "Mailchimp" },
   { folder: "invite", name: "Invite creators", answer: "are-creator-invitations-available", mentions: "invit" },
+  { folder: "labels", name: "Labels on contacts", answer: "can-i-put-a-label-on-many-contacts-at-once", mentions: "label" },
   { folder: "meetings", name: "Video calls", answer: "can-i-sell-paid-calls", mentions: "Video calls" },
   { folder: "memberships", name: "Memberships", answer: "can-i-sell-a-membership", mentions: "membership" },
   { folder: "new", name: "A new store", answer: "can-i-run-more-than-one-store-or-have-someone-help-me", mentions: "store" },
@@ -64,8 +66,6 @@ export const AREAS_WITHOUT_HELP: Readonly<Record<string, string>> = {
   "closing-refunds": "Refunding members the time they paid for after a store closes.",
   funnels: "Building a funnel from its steps, and what each step's numbers mean.",
   growth: "Choosing the next business goal.",
-  invoices: "Finding and downloading the plan's invoices.",
-  labels: "Labels on contacts: adding, renaming and emailing by label.",
   path: "The Path and what each level asks.",
 };
 

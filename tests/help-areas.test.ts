@@ -8,9 +8,11 @@
  *     an area, and in exactly one of the three;
  *   - every answer named exists and still speaks of its area;
  *   - no answer the help center has today is lost: each answerId below stays,
- *     so no link to /help#<id> breaks (HC1 asks that old ids keep working).
+ *     so no link to /help#<id> breaks (HC1 asks that old ids keep working);
+ *   - in the answers written for HC1, every button or screen named in quotes
+ *     is in the code of the screens it explains.
  */
-import { readdirSync, statSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { AREAS_WITHOUT_HELP, HELP_AREAS, NOT_AREAS } from "@/lib/help-areas";
 import { HELP_SECTIONS, answerId } from "@/lib/help-content";
@@ -72,6 +74,21 @@ part("No answer of today is lost");
   is("the list is the 111 of today", KEPT.length, 111);
   is("every one is still there", KEPT.filter((id) => !answers.has(id)), []);
   is("no two answers share an id", answers.size, HELP_SECTIONS.reduce((n, s) => n + s.items.length, 0));
+}
+
+part("Names quoted in the answers written for HC1 are on the screens");
+{
+  const SCREENS: Record<string, string[]> = {
+    "where-do-i-find-my-plans-invoices": ["app/studio/page.tsx", "app/studio/invoices/page.tsx"],
+    "can-i-put-a-label-on-many-contacts-at-once": ["app/studio/import/page.tsx", "components/bulk-labels.tsx"],
+  };
+  const plain = (text: string) => text.replace(/&apos;|\u2019/g, "'");
+  for (const [id, files] of Object.entries(SCREENS)) {
+    const code = plain(files.map((f) => readFileSync(f, "utf8")).join("\n"));
+    const quoted = [...(answers.get(id) ?? "").matchAll(/\u201c([^\u201d]+)\u201d/g)].map((m) => plain(m[1]));
+    is(`${id}: names something`, quoted.length > 0, true);
+    is(`${id}: every quoted name is in its screens`, quoted.filter((q) => !code.includes(q)), []);
+  }
 }
 
 done();

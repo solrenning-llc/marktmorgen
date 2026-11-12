@@ -1268,6 +1268,19 @@ function grantFrom(raw: string, account: string): string | null {
 }
 
 /**
+ * ordersLinkFor with a token its caller made, for an email sent again under one idempotency key (a PayPal receipt,
+ * lib/paypal-delivery.ts): the same token on every try makes the same email, and each try writes its grant again for
+ * ORDERS_LINK_SECONDS, so the link opens for a day from the latest email. Null unless the SET answered exactly "OK"
+ * (CX-123 rule 24), or the token is not one, or Redis is not there.
+ */
+export async function ordersLinkWithToken(store: Store, email: string, base: string, token: string): Promise<string | null> {
+  if (!ORDERS_TOKEN_PATTERN.test(token) || !isRedisConfigured()) return null;
+  const grant: Grant = { a: grantAccount(store), e: normaliseEmail(email) };
+  const written = repliesFor(await redisPipeline([["SET", tokenKey(token), JSON.stringify(grant), "EX", ORDERS_LINK_SECONDS]]), 1);
+  return written?.[0] === "OK" ? `${base}/orders?token=${token}` : null;
+}
+
+/**
  * What a download asks for besides its purchase: a product of a bundle by its
  * id (`pid`), and a product ticked at checkout by its key (`item`). Or, to
  * show a bundle's products (bundleFor), which bundle: the one bought

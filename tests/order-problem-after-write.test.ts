@@ -64,7 +64,7 @@ beforeEach(() => {
 async function shop(): Promise<Store> {
   await claimHandle(OWNER, "afterwrite", "After Write", "");
   await ensureStatsId(OWNER);
-  await setStripeAccount(OWNER, "acct_1TestAfterWrite1", true);
+  await setStripeAccount(OWNER, "acct_TestAfterWr1", true);
   await setSubscription(OWNER, { customerId: "cus_afterwrite01", subscriptionId: "sub_afterwrite01", active: true, tier: "pro", trialEnds: 0, period: paidPeriod() });
   return (await storeForEmail(OWNER)) as Store;
 }

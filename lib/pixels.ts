@@ -186,6 +186,10 @@ export function pixelNames(pixels: Pixels, and = "and"): string {
 export const CONSENT_COUNTRIES = new Set([
   "AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR", "DE", "GR", "HU", "IE", "IT", "LV", "LT", "LU",
   "MT", "NL", "PL", "PT", "RO", "SK", "SI", "ES", "SE", "IS", "LI", "NO", "GB", "CH", "BR",
+  // Parts of the EU with their own ISO 3166-1 code, which a visitor's country
+  // header gives instead of FR or FI: French Guiana, Guadeloupe, Martinique,
+  // Réunion, Mayotte, Saint Martin and the Åland Islands.
+  "GF", "GP", "MQ", "RE", "YT", "MF", "AX",
 ]);
 
 /** Whether a visitor from this country is asked first. Unknown means ask. */

@@ -7,7 +7,7 @@ import { LANGUAGES, type LanguageCode, parseLanguage } from "@/lib/store-languag
 import { pixelChoiceState, type Pixels } from "@/lib/pixels";
 import { X_SCRIPT, xConfigCall, xEventCall } from "@/lib/x-pixel";
 import { type Place, redditInitCall, redditScript, redditTrackCall } from "@/lib/reddit-pixel";
-import { ADS_COOKIE_SECONDS, adsCookieName, nextAdsCookie } from "@/lib/ad-consent";
+import { ADS_COOKIE_SECONDS, adsCookieName, mayClearPlatformCookies, nextAdsCookie, platformCookieExpiries } from "@/lib/ad-consent";
 
 /**
  * The creator's own ad pixels, on their store's pages.
@@ -69,6 +69,20 @@ function readChoice(handle: string): "yes" | "no" | null {
   }
 }
 
+/** Every store's stored choice in this browser, by handle. */
+function storedChoices(): Record<string, string> {
+  const out: Record<string, string> = {};
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i) ?? "";
+      if (key.startsWith(consentKey(""))) out[key.slice(consentKey("").length)] = localStorage.getItem(key) ?? "";
+    }
+  } catch {
+    // Nothing readable: no other store's yes is known.
+  }
+  return out;
+}
+
 function writeChoice(handle: string, value: "yes" | "no" | null) {
   try {
     if (value) localStorage.setItem(consentKey(handle), value);
@@ -83,12 +97,17 @@ function writeChoice(handle: string, value: "yes" | "no" | null) {
  * the pixels may run, with the ad click this visit came from, and deleted the
  * moment they may not.
  */
-function writeAdsCookie(handle: string, on: boolean) {
+function writeAdsCookie(handle: string, on: boolean, gpc = false) {
   try {
     const name = adsCookieName(handle);
     const secure = location.protocol === "https:" ? "; Secure" : "";
     if (!on) {
       document.cookie = `${name}=; Path=/; Max-Age=0; SameSite=Lax${secure}`;
+      // What the platforms' scripts kept under the yes goes with it, unless
+      // another store on this site still has this browser's yes.
+      if (mayClearPlatformCookies(handle, storedChoices(), gpc)) {
+        for (const expiry of platformCookieExpiries(document.cookie, location.hostname, secure !== "")) document.cookie = expiry;
+      }
       return;
     }
     const existing = document.cookie.split("; ").find((c) => c.startsWith(`${name}=`))?.slice(name.length + 1);
@@ -442,7 +461,7 @@ export function StorePixels({
   }, [handle, askFirst]);
 
   useEffect(() => {
-    if (state === "on" || state === "off") writeAdsCookie(handle, state === "on");
+    if (state === "on" || state === "off") writeAdsCookie(handle, state === "on", (navigator as Navigator & { globalPrivacyControl?: boolean }).globalPrivacyControl === true);
   }, [state, handle]);
 
   useEffect(() => {
@@ -549,7 +568,8 @@ export function StorePixels({
           </button>
           <button
             type="button"
-            className="btn st-option !w-auto !py-2.5 font-semibold"
+            // As prominent as "Allow": saying no is exactly as easy as saying yes.
+            className="btn st-btn"
             onClick={() => {
               writeChoice(handle, "no");
               setState("off");
@@ -574,7 +594,8 @@ export function StorePixels({
             // page this store opens loads none.
             window.location.reload();
           } else {
-            writeChoice(handle, null);
+            // Only the question again: a no stays a no until "Allow" is pressed,
+            // so looking at the settings and leaving never turns the pixels on.
             setState("ask");
           }
         }}

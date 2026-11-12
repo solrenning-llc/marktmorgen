@@ -96,7 +96,7 @@ export async function tellLowStock(store: Store, product: { id: string; title: s
   const units = left as number;
   const title = `${product.title.slice(0, 140)}: ${units} left`;
   const studio = `/studio${store.sid ? `?store=${store.sid}` : ""}#products`;
-  const pushed = await alertCreator(store, "alert", { title, body: "Restock it before it sells out.", url: studio }, { seed: key, at: now }).catch((error) => {
+  const pushed = await alertCreator(store, "alert", { title, body: "Restock it before it sells out.", url: studio }, { seed: `${key}:${value}`, at: now, wait: true }).catch((error) => {
     console.error("a low-stock notification failed", error);
     return 0;
   });

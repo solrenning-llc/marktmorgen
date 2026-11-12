@@ -1447,6 +1447,7 @@
     "components/heard-ask.tsx",
     "components/help-answer-tools.tsx",
     "components/help-search.tsx",
+    "components/help-topics.tsx",
     "components/home-claim.tsx",
     "components/home-examples.tsx",
     "components/home-interactive.tsx",

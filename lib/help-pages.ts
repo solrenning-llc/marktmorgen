@@ -11,6 +11,8 @@
  * before. Pure and browser-safe.
  */
 import { HELP_SECTIONS, type HelpSection, answerId } from "@/lib/help-content";
+import { HELP_AREAS } from "@/lib/help-areas";
+import type { HelpTopic } from "@/lib/help-topics-rules";
 
 /** The most characters of a page's description: what a search result shows. */
 export const SUMMARY_CHARS = 160;
@@ -55,3 +57,16 @@ export function answerSummary(paragraphs: readonly string[]): string {
 /** The other answers of the same section, in its order, for "More in <section>". */
 export const sectionNeighbors = (answer: HelpAnswer): { id: string; q: string }[] =>
   answer.section.items.filter((_, i) => i !== answer.index).map((item) => ({ id: answerId(item.q), q: item.q }));
+
+/** The section an answer is in, by the answer's id; null when no answer has it. */
+export const sectionOfAnswer = (id: string): string | null => HELP_SECTIONS.find((s) => s.items.some((item) => answerId(item.q) === id))?.id ?? null;
+
+/** Every studio area as a topic of the side list, by name, each to its answer's own page (564 [HC1]). */
+export function helpTopics(): HelpTopic[] {
+  return [...HELP_AREAS]
+    .sort((a, b) => a.name.localeCompare(b.name, "en-US"))
+    .flatMap((area) => {
+      const section = sectionOfAnswer(area.answer);
+      return section ? [{ name: area.name, href: helpAnswerPath(section, area.answer) }] : [];
+    });
+}

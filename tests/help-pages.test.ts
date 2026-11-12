@@ -28,7 +28,12 @@ import HelpPage from "@/app/help/page";
 import sitemap from "@/app/sitemap";
 import { NotFoundError } from "./help-pages-navigation";
 import { readFileSync } from "node:fs";
+import Link from "next/link";
 import { HelpAnswerTools } from "@/components/help-answer-tools";
+import { HelpTopics } from "@/components/help-topics";
+import { filterTopics } from "@/lib/help-topics-rules";
+import { helpTopics } from "@/lib/help-pages";
+import { HELP_AREAS } from "@/lib/help-areas";
 import { find, mount, texts } from "./client-hooks";
 import { done, is, part } from "./check";
 
@@ -55,7 +60,9 @@ async function main(): Promise<void> {
     is("the trail: Help center, then the section, then the question marked current", [html.includes('<nav aria-label="Breadcrumb"'), html.includes('href="/help"'), html.includes(`href="/help/${first.section}"`), html.includes(`aria-current="page">${first.item.q}</li>`)], [true, true, true, true]);
     is("the question is the page's only h1", (html.match(/<h1/g) ?? []).length === 1 && html.includes(`>${first.item.q}</h1>`), true);
     is("the answer word for word", first.item.a.every((p) => html.includes(p)), true);
-    is("the other answers of its section, linked, and not itself", [html.includes("More in "), html.includes(`href="${helpAnswerPath(first.section, first.id)}"`)], [true, false]);
+    const more = html.slice(html.indexOf('aria-labelledby="help-more-title"'), html.indexOf("</nav>", html.indexOf('aria-labelledby="help-more-title"')));
+    is("the other answers of its section, linked, and not itself", [more.includes("More in "), more.includes(`href="${helpAnswerPath(first.section, first.id)}"`)], [true, false]);
+    is("the side list marks this answer as the current page", html.includes(`aria-current="page" class="inline-flex min-h-11 items-center text-[0.9375rem] underline-offset-4 hover:underline font-semibold text-ink" href="${helpAnswerPath(first.section, first.id)}"`) || new RegExp(`href="${helpAnswerPath(first.section, first.id)}"[^>]*aria-current="page"|aria-current="page"[^>]*href="${helpAnswerPath(first.section, first.id)}"`).test(html), true);
     const meta = await answerMeta({ params: Promise.resolve({ section: first.section, answer: first.id }) });
     is("its own title, description and canonical address", [meta.title, meta.description, (meta.alternates as { canonical: string }).canonical], [`${first.item.q} — Marktmorgen Help`, answerSummary(first.item.a), helpAnswerPath(first.section, first.id)]);
   }
@@ -118,6 +125,29 @@ async function main(): Promise<void> {
     is("a copy the browser refuses is said, with what to do", texts(find(again.tree(), (n) => n.props?.role === "status")[0]).join(""), "The link could not be copied here. Copy it from the address bar instead.");
     const source = readFileSync("app/help/[section]/[answer]/page.tsx", "utf8");
     is("printed, the answer stands alone: menus, footer, other answers and the tools are left out", [/<div className="print:hidden">\s*<SiteNav \/>/.test(source), /<div className="print:hidden">\s*<SiteFooter \/>/.test(source), source.includes('className="mt-12 max-w-3xl print:hidden"'), readFileSync("components/help-answer-tools.tsx", "utf8").includes("print:hidden")], [true, true, true, true]);
+  }
+
+  part("The side list of topics");
+  {
+    const topics = helpTopics();
+    is("every studio area is a topic, each to its answer's page", [topics.length, topics.every((t) => answers.some((a) => t.href === helpAnswerPath(a.section, a.id)))], [HELP_AREAS.length, true]);
+    is("the filter keeps names with every word typed, any case, with or without accents", [filterTopics([{ name: "Café menu", href: "/a" }, { name: "Funnels", href: "/b" }], "CAFE").map((t) => t.href), filterTopics(topics, "  ").length, filterTopics(topics, "your pa").map((t) => t.name)], [["/a"], topics.length, ["Your Path", "Your pages"].filter((n) => topics.some((t) => t.name === n)).sort((a, b) => a.localeCompare(b, "en-US"))]);
+    const server = renderToStaticMarkup(createElement(HelpTopics, { topics }));
+    is("before scripts run, the list is open, the filter off and no fold button", [server.includes('class="block mt-3 lg:mt-0 lg:block"'), /<input[^>]*disabled=""/.test(server), server.includes("All help topics</button>")], [true, true, false]);
+    is("it is a named navigation with a visible label on the filter", [server.includes('<nav aria-label="All help topics"'), /<label for="[^"]+"[^>]*>Filter by name<\/label>/.test(server)], [true, true]);
+    const shown = await mount(HelpTopics, { topics });
+    const tree = () => shown.tree();
+    const button = find(tree(), (n) => n.type === "button")[0];
+    is("with scripts: folded on a small screen behind All help topics", [texts(button).join(""), button.props?.["aria-expanded"], String(find(tree(), (n) => typeof n.props?.className === "string" && (n.props.className as string).includes("lg:block") && n.type === "div")[0]?.props?.className).startsWith("hidden")], ["All help topics", false, true]);
+    (button.props?.onClick as () => void)();
+    await shown.settle();
+    is("pressing it opens the list", find(tree(), (n) => n.type === "button")[0].props?.["aria-expanded"], true);
+    (find(tree(), (n) => n.type === "input")[0].props?.onChange as (e: { target: { value: string } }) => void)({ target: { value: "funn" } });
+    await shown.settle();
+    is("typing narrows the list and says how many", [find(tree(), (n) => n.type === Link).map((n) => texts(n).join("")), texts(find(tree(), (n) => n.props?.role === "status")[0]).join("")], [["Funnels"], "1 topic"]);
+    (find(tree(), (n) => n.type === "input")[0].props?.onChange as (e: { target: { value: string } }) => void)({ target: { value: "zzzz" } });
+    await shown.settle();
+    is("nothing found is said", texts(find(tree(), (n) => n.props?.role === "status")[0]).join(""), "No topic has that in its name.");
   }
 
   part("From /help");

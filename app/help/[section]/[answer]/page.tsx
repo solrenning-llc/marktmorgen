@@ -4,8 +4,9 @@ import { notFound } from "next/navigation";
 import { Breadcrumb } from "@/components/breadcrumb";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteNav } from "@/components/site-nav";
+import { HelpTopics } from "@/components/help-topics";
 import { HelpAnswerTools } from "@/components/help-answer-tools";
-import { answerSummary, helpAnswer, helpAnswerPath, helpPagePaths, sectionNeighbors } from "@/lib/help-pages";
+import { answerSummary, helpAnswer, helpAnswerPath, helpPagePaths, sectionNeighbors, helpTopics } from "@/lib/help-pages";
 
 /**
  * One answer of the help center on a page of its own (564 [HC1]): the trail
@@ -43,7 +44,11 @@ export default async function HelpAnswerPage({ params }: Params) {
       <div className="print:hidden">
         <SiteNav />
       </div>
-      <main id="content" className="container-page flex-1 py-12 sm:py-16">
+      <main id="content" className="container-page grid flex-1 gap-8 py-12 sm:py-16 lg:grid-cols-[15rem_1fr] lg:gap-14">
+        <aside className="min-w-0 print:hidden lg:sticky lg:top-24 lg:self-start">
+          <HelpTopics topics={helpTopics()} current={helpAnswerPath(found.section.id, found.id)} />
+        </aside>
+        <div className="min-w-0">
         <Breadcrumb path={[{ label: "Help center", href: "/help" }, { label: found.section.title, href: `/help/${found.section.id}` }]} here={found.q} />
         <article className="mt-4 max-w-3xl">
           <h1 className="t-h2">{found.q}</h1>
@@ -75,6 +80,7 @@ export default async function HelpAnswerPage({ params }: Params) {
             Search all of the help center
           </Link>
         </p>
+        </div>
       </main>
       <div className="print:hidden">
         <SiteFooter />

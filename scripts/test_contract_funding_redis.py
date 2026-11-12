@@ -1449,8 +1449,8 @@ def main():
         keys.extend([pause_key, due_key])
         worker_raw = json.dumps({'until': 1800000000, 'subscription': 'sub_SyntheticWorker'})
         replacement = json.dumps({'until': 1800086400, 'subscription': 'sub_SyntheticWorker'})
-        def worker_forget(mode, raw):
-            return redis.command('EVAL', forget_script, 2, pause_key, due_key, 'synthetic-member', mode, raw)
+        def worker_forget(mode, raw, action='forget'):
+            return redis.command('EVAL', forget_script, 2, pause_key, due_key, 'synthetic-member', mode, raw, action)
         def seed_worker(raw=worker_raw, score=1800000000):
             redis.command('DEL', pause_key, due_key)
             if raw is not None: redis.command('SET', pause_key, raw)
@@ -1489,6 +1489,25 @@ def main():
         assert measured_ack == 1
         assert sum(missing_counts.values()) <= 3, missing_counts
         assert redis.command('ZSCORE', due_key, 'synthetic-member') is None
+        # The legacy one-shot claim: the old three-argument call is refused, a claim removes only the
+        # exact due member, "claimed" deletes only after that claim, and "missing" never claims.
+        seed_worker()
+        assert redis.command('EVAL', forget_script, 2, pause_key, due_key, 'synthetic-member', 'known', worker_raw) == 0
+        assert redis.command('GET', pause_key) == worker_raw
+        assert worker_forget('known', worker_raw, 'claimed') == 0  # Not claimed yet: the due member is still there.
+        assert redis.command('GET', pause_key) == worker_raw
+        assert worker_forget('known', worker_raw, 'claim') == 1
+        assert redis.command('GET', pause_key) == worker_raw
+        assert redis.command('ZSCORE', due_key, 'synthetic-member') is None
+        assert worker_forget('known', worker_raw, 'claim') == 0  # One-shot: a second claim never authorizes a second POST.
+        assert worker_forget('known', replacement, 'claimed') == 0  # A changed record is never deleted.
+        assert redis.command('GET', pause_key) == worker_raw
+        assert worker_forget('known', worker_raw, 'claimed') == 1
+        assert redis.command('GET', pause_key) is None
+        seed_worker(None)
+        assert worker_forget('missing', '', 'claim') == 0
+        assert redis.command('ZSCORE', due_key, 'synthetic-member') == '1800000000'
+        assert worker_forget('known', worker_raw, 'other') == 0
         print('PASS:pause worker exact raw/due cleanup preserves replacements, changed score, funded ownership and lostACK;known=' + json.dumps(worker_counts, sort_keys=True) + ';missing=' + json.dumps(missing_counts, sort_keys=True))
 
 

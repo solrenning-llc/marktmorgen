@@ -30,7 +30,7 @@ import { readListing } from "@/lib/catalog";
 import { fileFolder } from "@/lib/product-file";
 import { store as redis } from "./redis-stub";
 import { files } from "./failure-cleanup-world";
-import { PICTURE_DOOR_MAX, PICTURE_DOOR_SECONDS, notePictureDoor, takePictureDoor } from "@/lib/picture-door";
+import { PICTURE_DOOR_MAX, PICTURE_DOOR_SECONDS, PictureDoorFull, notePictureDoor, takePictureDoor } from "@/lib/picture-door";
 import { done, is, part } from "./check";
 import { POST as linkImage } from "@/app/api/store/link-image/route";
 import { POST as productImage } from "@/app/api/store/image/route";
@@ -136,9 +136,11 @@ async function main(): Promise<void> {
   is("a note older than the window is not taken", [...(await takePictureDoor([stale], now)).keys()], []);
   const mine = picture("4");
   await notePictureDoor(mine, now);
-  for (let n = 0; n <= PICTURE_DOOR_MAX; n += 1) await notePictureDoor(other(n), now + 1 + n);
-  is("another store's doors, past its own limit, leave this store's note", [...(await takePictureDoor([mine], now + 2_000)).keys()], [mine]);
-  is("and that store keeps only its newest", [...(await takePictureDoor([other(0), other(PICTURE_DOOR_MAX)], now + 2_000)).keys()], [other(PICTURE_DOOR_MAX)]);
+  for (let n = 0; n < PICTURE_DOOR_MAX; n += 1) await notePictureDoor(other(n), now + 1 + n);
+  const past = await notePictureDoor(other(PICTURE_DOOR_MAX), now + 1_500).then(String, (error: unknown) => (error instanceof PictureDoorFull ? "full" : "threw"));
+  is("another store's doors, up to its own limit, leave this store's note", [...(await takePictureDoor([mine], now + 2_000)).keys()], [mine]);
+  // Refused past its cap, never by pushing its oldest out (lib/picture-door.ts; tests/picture-door-ceiling.test.ts).
+  is("and that store is refused one more, keeping its oldest", [past, ...(await takePictureDoor([other(0), other(PICTURE_DOOR_MAX)], now + 2_000)).keys()], ["full", other(0)]);
   const [ttl] = (await redis.pipeline([["TTL", `nl:pictures:doors:${"9".repeat(24)}`]])) as number[];
   is("each list expires a window after its last note", ttl > 0 && ttl <= PICTURE_DOOR_SECONDS, true);
 

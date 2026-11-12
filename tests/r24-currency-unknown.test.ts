@@ -21,6 +21,7 @@
 import { readAllTimeSales, readRenewalPayments, readSales } from "@/lib/stats";
 import { addProduct, claimHandle, ensureStatsId, setProductFunnel, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { newUpsellKey, takeUpsell } from "@/lib/upsell";
+import { shownRef } from "./upsell-ref-fixture";
 import { TEST_CONSENT } from "./digital-consent-fixture";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
@@ -186,7 +187,7 @@ async function offers() {
       payment_intent: { id: "pi_test_front00001", payment_method: { id: "pm_test_card0001", type: "card", customer: "cus_TestBuyer01" } },
     }, currency);
     const before = charged;
-    const result = await takeUpsell({ store, session: id, secret: browser.secret, origin: "https://marktmorgen.com", step: "kit001", answer: "yes", consent: TEST_CONSENT });
+    const result = await takeUpsell({ store, session: id, secret: browser.secret, origin: "https://marktmorgen.com", step: await shownRef(store, "kit001"), answer: "yes", consent: TEST_CONSENT });
     return [result.kind, charged - before];
   };
 

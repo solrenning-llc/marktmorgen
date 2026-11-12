@@ -8,11 +8,12 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
+import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { formatMoney } from "@/lib/money";
 import { canBeBumped } from "@/lib/product-extras";
 import { MAX_FUNNEL_STEPS } from "@/lib/funnel";
-import { imageUrl } from "@/lib/product-image";
+import { imageUrl, picturedFrom } from "@/lib/product-image";
 import { FunnelEditor } from "@/components/funnel-editor";
 import { offerableAfterPaying } from "@/lib/bundles";
 import { PageFunnelEditor, type SavedFunnel, type StepChoice } from "@/components/page-funnel-editor";
@@ -106,8 +107,9 @@ export default async function StudioFunnelsPage({ searchParams }: Params) {
       bundle: Boolean(p.bundle),
       draft: p.hidden,
     }));
+  // The same rule as the offer itself (lib/upsell.ts funnelView), so the preview shows what buyers get.
   const pictures = listings
-    .filter((p) => p.image)
+    .filter((p) => picturedFrom(p))
     .map((p) => ({ id: p.id, title: p.title, src: imageUrl(p.image!) }));
 
   // Funnels of pages (lib/page-funnel.ts): every saved one, each step as the
@@ -195,7 +197,7 @@ export default async function StudioFunnelsPage({ searchParams }: Params) {
       <StudioStorePin sid={store.sid}>
 
       <main id="content" className="container-page pb-20 pt-10 sm:pt-14">
-        <p className="eyebrow">Funnels</p>
+        <StudioTrail store={store} here="Funnels" />
         <h1 className="t-h2 mt-3">Funnels</h1>
         <p className="mt-3 max-w-2xl text-ink-soft">
           Pages walked in order from one address, and the offers a buyer meets right after paying.

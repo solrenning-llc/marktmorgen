@@ -198,6 +198,9 @@ async function main(): Promise<void> {
     callsId: held.store.callsId,
   })]]);
   is("an unreadable configured calendar makes weekly availability unknown", await offered(held.store, held.call), null);
+  // Claude 4 (cloud D) on #3751: the failure's two-minute cache must not read as a fresh, empty calendar.
+  is("asked again while the failure is cached, availability is still unknown", await offered(held.store, held.call), null);
+  is("and once more", await offered(held.store, held.call), null);
 
   done();
 }

@@ -238,6 +238,8 @@ export async function takeImportRows(store: Store, n: number, now = Date.now(), 
   }
 }
 const KEEP_SECONDS = 14 * 86_400;
+/** How long an import's records are kept, as the store is told (lib/person-data.ts): read by tests/import-mail-putback-retention.test.ts. */
+export const IMPORT_KEEP_SECONDS = KEEP_SECONDS;
 /**
  * How long the rows themselves are kept while they wait to be brought in
  * (since 18 October 2026): what they weigh is counted in the database's
@@ -1512,12 +1514,15 @@ async function mailStep(job: ImportJob, store: Store): Promise<"more" | "done" |
     if (emails === null) throw new UnknownReplyError("the addresses an import took to email");
     return "retry";
   }
+  // Every put-back below sends the queue's expiry with it: when the portion was the whole queue, the SREM emptied it
+  // and Redis deleted the key, expiry and all, so a bare SADD would make a key holding those addresses for good
+  // (tests/import-mail-putback-retention.test.ts).
   // Then SREM of exactly those, in its exact shape: all of them gone. Any other answer, or a reply lost on the way
   // back, puts the same addresses back (SADD of one still there changes nothing), gives the portion back and
   // throws, so the step is left as it was, still mailing (runImport), with every address queued.
   const taken = countOf(repliesFor(await redisPipeline([["SREM", mailKey(job.id), ...emails]]), 1)?.[0]);
   if (taken !== emails.length) {
-    await redisPipeline([["SADD", mailKey(job.id), ...emails]]);
+    await redisPipeline([["SADD", mailKey(job.id), ...emails], ["EXPIRE", mailKey(job.id), KEEP_SECONDS]]);
     if (!paused) await rampBack(job.sid, portion);
     throw new UnknownReplyError("the addresses an import took to email");
   }
@@ -1555,7 +1560,7 @@ async function mailStep(job: ImportJob, store: Store): Promise<"more" | "done" |
       });
       deleted = await deletedAmong(listId, messages.map((m) => m.to));
     } catch (error) {
-      await redisPipeline([["SADD", mailKey(job.id), ...emails]]);
+      await redisPipeline([["SADD", mailKey(job.id), ...emails], ["EXPIRE", mailKey(job.id), KEEP_SECONDS]]);
       await unsent(portion);
       throw error;
     }
@@ -1567,7 +1572,7 @@ async function mailStep(job: ImportJob, store: Store): Promise<"more" | "done" |
   }
   // The company's day first: over it, the same buyers wait for tomorrow.
   if (!(await reserveDay(messages.length))) {
-    await redisPipeline([["SADD", mailKey(job.id), ...emails]]);
+    await redisPipeline([["SADD", mailKey(job.id), ...emails], ["EXPIRE", mailKey(job.id), KEEP_SECONDS]]);
     await unsent(portion);
     return "retry";
   }
@@ -1585,7 +1590,7 @@ async function mailStep(job: ImportJob, store: Store): Promise<"more" | "done" |
     const saved = repliesFor(await redisPipeline([saveJob(job)]), 1)?.[0];
     if (saved !== "OK") {
       held.n += room;
-      await redisPipeline([["SADD", mailKey(job.id), ...emails]]);
+      await redisPipeline([["SADD", mailKey(job.id), ...emails], ["EXPIRE", mailKey(job.id), KEEP_SECONDS]]);
       await releaseDay(messages.length);
       await unsent(portion);
       throw new UnknownReplyError("an import's hold saved before its send");
@@ -1599,7 +1604,7 @@ async function mailStep(job: ImportJob, store: Store): Promise<"more" | "done" |
   }
   const sent = await sendBatch(sending, `nimbus-import:${job.id}:${emails.slice().sort()[0]}:${emails.length}`, { by: "monthly" });
   if (sent === "retry") {
-    await redisPipeline([["SADD", mailKey(job.id), ...emails]]);
+    await redisPipeline([["SADD", mailKey(job.id), ...emails], ["EXPIRE", mailKey(job.id), KEEP_SECONDS]]);
     if (held) held.n += sending.length;
     else await releaseMoved(store, sending.length);
     await releaseDay(sending.length);

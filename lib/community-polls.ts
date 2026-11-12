@@ -30,6 +30,7 @@
  *
  *   nl:cm:<id>:pv:<post>   who voted what: member key -> option ids, comma separated
  *   nl:cm:<id>:pc:<post>   the tally: option id -> how many
+ *   nl:cm:<id>:pl:<post>:<member>   a short lock: one vote of one member at a time
  *
  * The tally is kept as its own small hash rather than counted from the votes,
  * because counting 50,000 votes to draw one bar is work nobody should pay for
@@ -37,6 +38,7 @@
  * moves the count off the old option and on to the new one in the same call.
  */
 import { redisPipeline } from "@/lib/redis";
+import { withLock } from "@/lib/redis-lock";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { type DataStore, giveData, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
@@ -46,6 +48,7 @@ import { TRACE_ENTRY, traceKey } from "@/lib/community-trace";
 const base = (id: string) => `nl:cm:${id}`;
 const votesKey = (id: string, post: string) => `${base(id)}:pv:${post}`;
 const tallyKey = (id: string, post: string) => `${base(id)}:pc:${post}`;
+const voteLockKey = (id: string, post: string, who: string) => `${base(id)}:pl:${post}:${who}`;
 
 /** More than Circle's 5 and more than Kajabi's and Discord's 10. */
 export const MAX_POLL_OPTIONS = 12;
@@ -135,6 +138,13 @@ export async function vote(
 ): Promise<boolean> {
   if (pollClosed(poll)) return false;
   const picked = cleanChoice(poll, choice);
+  // One member's vote on one post at a time (Claude 1 cloud on #3820): the earlier vote is read, then the tally
+  // moved, in two round trips, so two requests at once would each read "no vote" and each add one. A lock that
+  // stays taken, or whose answer is unproven, throws LockBusyError before anything is read or written.
+  return withLock(voteLockKey(id, post, who), 10, 3_000, () => castVote(id, post, who, picked, room));
+}
+
+async function castVote(id: string, post: string, who: string, picked: string[], room: DataStore): Promise<boolean> {
   // Rule 24: no earlier vote only for Redis's null or the empty string; any
   // other reply is unknown, never "no vote" (the tally would count it twice).
   const read = repliesFor(await redisPipeline([["HGET", votesKey(id, post), who]]), 1);

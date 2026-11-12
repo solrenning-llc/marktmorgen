@@ -58,6 +58,25 @@ async function main(): Promise<void> {
     is(`HGET answered ${what}: tally and vote untouched`, [await counts(), await mine()], before);
   }
 
+  part("Concurrent votes from one member count once (Claude 1 cloud on #3820)");
+  await real([["DEL", votes], ["DEL", tally]]);
+  const together = await Promise.all([1, 2, 3].map(() => outcome(() => vote(ID, POST, POLL, WHO, ["0"], ROOM))));
+  is("each burst vote either counted or refused as busy, never counted twice", together.every((one) => one === "returned true" || one === "LockBusyError"), true);
+  is("tally after a burst: one Yes", await counts(), ["0", "1"]);
+  is("the member's vote is Yes", await mine(), "0");
+
+  part("An unproven lock answer: refused, nothing written");
+  await real([["DEL", votes], ["DEL", tally]]);
+  const wrapped = redis.pipeline;
+  redis.pipeline = (async (batch: Command[]) => {
+    if (batch[0]?.[0] === "SET" && String(batch[0][1]).includes(":pl:")) return [["QUEUED"]];
+    return real(batch);
+  }) as typeof redis.pipeline;
+  const odd = await outcome(() => vote(ID, POST, POLL, WHO, ["0"], ROOM));
+  redis.pipeline = wrapped;
+  is("lock answered in an odd shape: busy", odd, "LockBusyError");
+  is("lock answered in an odd shape: tally and vote untouched", [await counts(), await mine()], [[], null]);
+
   part("The empty string is still no vote");
   await real([["HSET", votes, WHO, ""], ["DEL", tally]]);
   is("a vote over an empty record counts once", await vote(ID, POST, POLL, WHO, ["0"], ROOM), true);

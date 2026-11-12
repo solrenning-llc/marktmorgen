@@ -533,6 +533,35 @@ export async function doneLessonsOrUnknown(courseId: string, email: string): Pro
   }
 }
 
+/**
+ * How far one person is in each of these courses, for their list of purchases
+ * (560 [AS1]): the lessons done among the lessons each course has now, all in
+ * one round trip. Each course asks only about its own lessons (SMISMEMBER),
+ * so what comes back is one 0 or 1 a lesson, MAX_LESSONS at the most, however
+ * many marks were kept for lessons since taken out. A course with no lessons
+ * is left out: there is nothing to count. A reply that is not exactly one 0 or
+ * 1 for each lesson asked is null for that course, said as "could not be
+ * checked", never as 0 done (CX-123 rule 24).
+ */
+export async function lessonsDoneIn(courses: Course[], email: string): Promise<Map<string, { done: number; total: number } | null>> {
+  const out = new Map<string, { done: number; total: number } | null>();
+  const asked = courses.flatMap((course) => {
+    const ids = lessonsInOrder(course).map(({ lesson }) => lesson.id);
+    return ids.length ? [{ course, ids }] : [];
+  });
+  if (!asked.length || !isRedisConfigured()) return out;
+  const rows = repliesFor(await redisPipeline(asked.map(({ course, ids }) => ["SMISMEMBER", doneKey(course.id, email), ...ids])), asked.length);
+  asked.forEach(({ course, ids }, i) => {
+    const flags = rows ? repliesFor(rows[i], ids.length) : null;
+    if (!flags || flags.some((flag) => flag !== 0 && flag !== 1)) {
+      out.set(course.id, null);
+      return;
+    }
+    out.set(course.id, { done: flags.filter((flag) => flag === 1).length, total: ids.length });
+  });
+  return out;
+}
+
 /** Where lessons marked done are counted in the store's data room (lib/store-data.ts). */
 const DONE_SLOT = (courseId: string) => `cd:${courseId}`;
 

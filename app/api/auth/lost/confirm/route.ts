@@ -25,6 +25,7 @@ export async function POST(request: NextRequest) {
   } catch {
     return away("/signin?status=expired");
   }
+  let opened = "";
   try {
     const email = await spendLostEmailLink(token);
     if (!email) return away("/signin?status=expired");
@@ -46,12 +47,17 @@ export async function POST(request: NextRequest) {
     // Locked until the lock's day; after it has run out unanswered, everything is open (lib/recovery-address.ts).
     const until = await recoveryLockUntil(email);
     const session = until > 0 ? await openLockedSession(email, until) : await openSession(email);
+    opened = session;
     const response = away("/studio");
     response.headers.append("Set-Cookie", sessionCookie(session));
     response.headers.append("Set-Cookie", await noteSignIn(email, request.cookies.get(DEVICE_COOKIE)?.value, "link", request.headers.get("user-agent") ?? ""));
     return response;
   } catch (error) {
     console.error("logging in through a recovery address failed", error);
-    return away("/signin?status=expired");
+    // Not known (CX-123 rule 24): the link may already be spent, so it is never called expired. Nothing is handed
+    // out (a session opened before the failure is closed), and /signin says so, with the passkey, a fresh link and
+    // "Cannot open your email any more?" for a fresh link to the recovery address.
+    if (opened) await endSession(opened).catch((end: unknown) => console.error("closing a login that could not be finished failed", end));
+    return away("/signin?status=login-unknown");
   }
 }

@@ -8,6 +8,7 @@ import { HelpSearch } from "@/components/help-search";
 import { CopyLink } from "@/components/copy-link";
 import { HELP_SECTIONS, answerId } from "@/lib/help-content";
 import { HELP_AREAS } from "@/lib/help-areas";
+import { helpAnswerPath } from "@/lib/help-pages";
 
 export const metadata: Metadata = {
   title: "Help center — Marktmorgen",
@@ -121,7 +122,12 @@ export default function HelpPage() {
                             {paragraph}
                           </p>
                         ))}
-                        <CopyLink id={answerId(item.q)} />
+                        <p className="flex flex-wrap items-center gap-x-4">
+                          <CopyLink id={answerId(item.q)} />
+                          <Link href={helpAnswerPath(section.id, answerId(item.q))} className="inline-flex min-h-11 items-center text-sm font-medium text-violet-deep underline underline-offset-4">
+                            This answer on its own page
+                          </Link>
+                        </p>
                       </div>
                     </details>
                   ))}

@@ -102,6 +102,7 @@ import { SEARCH_MESSAGES } from "@/lib/community-dm";
 import { MAX_FORMS } from "@/lib/forms";
 import { EXPORT_COMMANDS, EXPORT_PAGE_SECONDS, EXPORT_STRIPE_PAGES } from "@/lib/store-export";
 import { PATH_REFUND_PAGES, PATH_SALE_PAGES } from "@/lib/path-facts";
+import { SNS_RECEIPT_COMMANDS_MOST, SNS_RECEIPT_VALUE_BYTES_MOST } from "@/lib/sns-receipt-rules";
 import { ALL_TIME_PAGES } from "@/lib/stats";
 import { MAX_PAID_BYTES, PAYPAL_REFUNDS_READ } from "@/lib/paypal-sales";
 import { AGENDA_MAX_ROWS, AGENDA_ROW_SENT_BYTES, AGENDA_TASKS_BYTES } from "@/lib/person-agenda";
@@ -158,6 +159,10 @@ export const MAIL_REPORT_COST_COMPONENTS = {
   completeMonthlyUsd: null,
   reviewedAdmission: CURRENT_MAIL_REPORT_ADMISSION,
 } as const;
+/** Redis commands one callback attempt is billed at its most: the rate guard's two, the SNS receipt's and the report's first outcome. */
+export const MAIL_CALLBACK_COMMANDS_PER_ATTEMPT = 2 + SNS_RECEIPT_COMMANDS_MOST + MAIL_REPORT_COST_COMPONENTS.firstOutcomeCommands;
+/** The SNS receipt's key and value fit in one of the 256-byte transport records counted in mailReportCallbackCost (key prefix, an 80-character id, the value). */
+export const SNS_RECEIPT_RECORD_BYTES_MOST = "nl:sns:seen:".length + 80 + SNS_RECEIPT_VALUE_BYTES_MOST;
 /** One published delivery notice, without supplier free-tier credit:
  * SNS $0.50/million publishes + $0.60/million HTTPS deliveries, each 64 KiB
  * chunk charged. Read 2026-11-04: aws.amazon.com/sns/faqs/ and /sns/pricing/.
@@ -165,8 +170,11 @@ export const MAIL_REPORT_COST_COMPONENTS = {
  * This is an explicit sizing calculation, never a current account review.
  * A retry is charged the full route envelope even when deduplication wins.
  * Thirty CPU seconds and 2 GB held for all 30 seconds use maxDuration, not
- * an observed fast callback. Eleven Redis commands = SET/INCR rate guard,
- * SET SNS receipt, EVAL plus its seven internal report commands. Storage
+ * an observed fast callback. Redis commands = SET/INCR rate guard, the SNS
+ * receipt at its most (lib/sns-receipt.ts, SNS_RECEIPT_COMMANDS_MOST: claim,
+ * read-back, owner-bound take-over and done or let-go scripts with their inner
+ * commands, eight since #2612; one before), and the report's EVAL plus its
+ * seven internal commands: MAIL_CALLBACK_COMMANDS_PER_ATTEMPT. Storage
  * includes two report fields kept ten days and two 256-byte transport/guard
  * records per attempt kept a full day (above the actual minute-long guard).
  * Report fields are also in the data-family model: deliberately overlapping
@@ -178,7 +186,7 @@ export function mailReportCallbackCost(deliveries: number, attempts: number, sns
       typeof snsTransferPerGb !== "number" || !Number.isFinite(snsTransferPerGb) || snsTransferPerGb <= 0 ||
       !Number.isSafeInteger(deliveries * attempts)) return null;
   const invocations = deliveries * attempts;
-  const redisCommands = invocations * 11;
+  const redisCommands = invocations * MAIL_CALLBACK_COMMANDS_PER_ATTEMPT;
   if (!Number.isSafeInteger(redisCommands)) return null;
   // Five chunks for an accepted 300,000-byte envelope, plus transport
   // headers. An oversized/rejected publication is outside this delivery
@@ -192,7 +200,7 @@ export function mailReportCallbackCost(deliveries: number, attempts: number, sns
   const networkBytes = 300_000 + 128 + 32_768;
   const hostingPerAttempt = CALL + 30 * CPU_SECOND + 30 * MEMORY_SECOND + 2 / 1_000_000
     + networkBytes * (ORIGIN_PER_BYTE + 0.15 / 1e9);
-  const redisPerAttempt = 11 * COMMAND + 4096 * DB_BYTE + 512 / 30 * DB_BYTE_MONTH;
+  const redisPerAttempt = MAIL_CALLBACK_COMMANDS_PER_ATTEMPT * COMMAND + 4096 * DB_BYTE + 512 / 30 * DB_BYTE_MONTH;
   const retainedPerNotice = 512 * 10 / 30 * DB_BYTE_MONTH;
   const snsUsd = deliveries * (snsPerNotice + attempts * snsPerAttempt);
   const hostingUsd = invocations * hostingPerAttempt;

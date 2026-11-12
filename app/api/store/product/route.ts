@@ -338,9 +338,11 @@ export async function POST(request: NextRequest) {
         }
       }
       // And the invitations an import gave members to keep it here (lib/move-members.ts), with their links and
-      // reminders: kept under its id, a person's erasure would never reach them once it is gone. Paid for and
-      // refused the same way; not finished, nothing is removed.
-      if (before) {
+      // reminders: kept under its id, a person's erasure would never reach them once it is gone. Deleted only once the
+      // product is (below): a removal that does not go through keeps every invitation and its emailed link (Claude 7,
+      // MEDIUM on #3473). Asked again for a product already removed, what an earlier removal left is deleted now,
+      // paid for and refused as the feeds are.
+      if (!before && id && PRODUCT_ID.test(id)) {
         try {
           await dropProductInvites(guarded.store, id, pay);
         } catch (error) {
@@ -348,7 +350,7 @@ export async function POST(request: NextRequest) {
             const refused = studioRefusal(refusal.reason ?? "unknown", refusal.message ?? "");
             return Response.json(refused.body, { status: refused.status });
           }
-          console.error("could not delete the invitations to a membership before removing it", error);
+          console.error("could not delete the invitations to a removed membership", error);
           return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
         }
       }
@@ -381,6 +383,12 @@ export async function POST(request: NextRequest) {
       }
       if (removed.ok) {
         const going = removed.product;
+        // Its invitations, now that it is gone (above): not finished (a reply not known, the studio's requests used up),
+        // it is said to the caller (cleanupPending), and the same removal asked again deletes what is left.
+        await dropProductInvites(removed.store, id, pay).catch((error: unknown) => {
+          console.error("could not delete the invitations to a removed membership", error);
+          cleanupPending = true;
+        });
         const removedCourse = course as Awaited<ReturnType<typeof readCourseExact>>;
         const had: { pathname: string }[] = filesOnProduct(going);
         // Its picture goes with it, and so does its long description.

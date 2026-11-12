@@ -174,8 +174,11 @@ type Prop65 = string;                                      // "" is none
 
 Limits: each text field has a maximum length (`MAX_*` in the module), control
 characters and overlong values read as empty (never silently cut),
-a clock that goes back adds the new step one second after the last (no
-applied price is lost), the price history holds at most `MAX_PRICE_STEPS`
+a step is never stamped later than the latest time seen (a change in the
+same second keeps that second, after the earlier step in order; a clock that
+goes back stamps the new step at the last step's second; no applied price is
+lost or moved into the future), a history with any unreadable step reads as
+"unreadable" as a whole (never a filtered subset taken as complete), the price history holds at most `MAX_PRICE_STEPS`
 steps; when a creator changes prices more often than that within the kept period,
 adjacent old steps are merged into one at the **lower** price, so the prior
 price can only come out lower (a smaller announced reduction), never higher.
@@ -193,9 +196,14 @@ on a page view beyond the product record already read.
 - `gpsrClosedCountries(countries, info, hasPicture)`: the shipping countries in
   the EU/EEA that the product cannot ship to while gaps remain.
 - `checkProp65(text)`: `null` when acceptable or empty; otherwise the problem.
+  The site counts only when named on its own (`www.P65Warnings.ca.gov`,
+  optionally with `https://` and a path), not as part of a longer hostname.
 - `unitPrice(priceCents, quantity)`: the price per base unit, rounded half up
   to the smallest currency unit, from exact integer arithmetic.
-- `recordPrice(history, cents, now)` and `priorLowestPrice(history, start)`.
+- `recordPrice(history, cents, now)` and `priorLowestPrice(history, start)`;
+  the latter returns `"unreadable"` when any step of the history cannot be
+  read, and a price replaced within the sale's own starting second counts as
+  before it (it can only lower the prior price).
 
 ## Accessibility (AX274)
 

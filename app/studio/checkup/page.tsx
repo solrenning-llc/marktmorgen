@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { STORE_ID_PATTERN } from "@/lib/store";
 import { StudioHeader } from "@/components/studio-header";
+import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { checkupClock, runCheckup } from "@/lib/checkup";
 import { CheckupList } from "@/components/checkup-list";
@@ -44,15 +45,7 @@ export default async function StudioCheckupPage({ searchParams }: Params) {
       <StudioHeader current={store} role={view.role} stores={view.stores} owned={view.owned} action={{ href: studioPath(store), label: "Back to the studio", short: "Studio" }} />
       <StudioStorePin sid={store.sid}>
         <main id="content" className="container-page pb-20 pt-10 sm:pt-14">
-          <nav aria-label="Breadcrumb" className="text-sm text-ink-soft">
-            <ol className="flex flex-wrap gap-2">
-              <li>
-                <Link href={studioPath(store)} className="underline underline-offset-4 hover:text-violet-deep">Studio</Link>
-                <span aria-hidden="true"> /</span>
-              </li>
-              <li aria-current="page">Something not working?</li>
-            </ol>
-          </nav>
+          <StudioTrail store={store} here="Something not working?" />
           <h1 className="t-h2 mt-3">Something not working?</h1>
           <p className="mt-3 max-w-2xl text-ink-soft">
             We check the parts of your store that a sale depends on, each time this page opens. A problem says what happens if it stays that way and where to fix it.

@@ -22,6 +22,17 @@ import {
   type PriceStep,
 } from "@/lib/physical-legal";
 import { MAX_SALE_DAYS } from "@/lib/store-sale";
+import { join } from "node:path";
+import {
+  createCompilerHost,
+  createProgram,
+  flattenDiagnosticMessageText,
+  getDefaultLibFileName,
+  getPreEmitDiagnostics,
+  parseJsonConfigFileContent,
+  readConfigFile,
+  sys,
+} from "typescript";
 import { done, is, part } from "./check";
 
 const DAY = 86_400;
@@ -127,7 +138,7 @@ const runningSale = recordPrice(history, 1000, saleStart + (MAX_SALE_DAYS - 1) *
 is("on the last day of a long sale its prior price is unchanged", priorLowestPrice(runningSale, saleStart), { cents: 800, complete: true });
 const long = recordPrice(recordPrice([{ at: t0, cents: 500 }], 1000, t0 + DAY), 1200, t0 + 200 * DAY);
 is("steps that ended before the kept period are dropped", long, [{ at: t0 + DAY, cents: 1000 }, { at: t0 + 200 * DAY, cents: 1200 }]);
-is("a clock that goes back never reorders and never drops a price that was applied", recordPrice([{ at: t0, cents: 500 }], 600, t0 - 10), [{ at: t0, cents: 500 }, { at: t0 + 1, cents: 600 }]);
+is("a clock that goes back never reorders, never drops a price and never stamps one later than any time seen", recordPrice([{ at: t0, cents: 500 }], 600, t0 - 10), [{ at: t0, cents: 500 }, { at: t0, cents: 600 }]);
 let busy: PriceStep[] = [];
 let lowest = Infinity;
 for (let i = 0; i < MAX_PRICE_STEPS + 20; i += 1) {
@@ -136,8 +147,91 @@ for (let i = 0; i < MAX_PRICE_STEPS + 20; i += 1) {
   busy = recordPrice(busy, cents, t0 + i * 600);
 }
 is("the history never holds more than its cap", busy.length <= MAX_PRICE_STEPS, true);
-is("merging keeps the lower price, so the prior price is never higher than the truth", priorLowestPrice(busy, t0 + (MAX_PRICE_STEPS + 19) * 600)?.cents, lowest);
+is("merging keeps the lower price, so the prior price is never higher than the truth", priorLowestPrice(busy, t0 + (MAX_PRICE_STEPS + 19) * 600), { cents: lowest, complete: false });
 is("the current price is never merged away", busy[busy.length - 1].cents, 1000 + (((MAX_PRICE_STEPS + 19) * 37) % 300));
 is("a non-integer or negative price is not recorded", recordPrice([{ at: t0, cents: 500 }], -1, t0 + DAY), [{ at: t0, cents: 500 }]);
+
+part("Prior lowest price: same-second changes keep their real time (review J5809017387, MEDIUM)");
+const tS = t0 + 40 * DAY;
+let quick: PriceStep[] = [{ at: t0, cents: 1000 }];
+quick = recordPrice(quick, 500, tS);
+quick = recordPrice(quick, 20, tS);
+quick = recordPrice(quick, 10, tS + 1);
+is("no step is stamped later than the clock that recorded it", quick.every((step) => step.at <= tS + 1), true);
+is("two prices in the same second both stay, in the order applied", quick, [{ at: t0, cents: 1000 }, { at: tS, cents: 500 }, { at: tS, cents: 20 }, { at: tS + 1, cents: 10 }]);
+is("a sale a second later finds the 20 applied before it, not the 500", priorLowestPrice(quick, tS + 1), { cents: 20, complete: true });
+const sameSecond = recordPrice(recordPrice(recordPrice([{ at: t0, cents: 1000 }], 500, tS), 20, tS), 10, tS);
+is("a sale in the same second counts the prices it replaced in that second", priorLowestPrice(sameSecond, tS), { cents: 20, complete: true });
+is("the healthy sequential case is unchanged", priorLowestPrice(recordPrice(recordPrice([{ at: t0, cents: 1000 }], 500, tS), 10, tS + DAY), tS + DAY), { cents: 500, complete: true });
+
+part("Prior lowest price: an unreadable history is never a complete subset (review J5809017387, LOW)");
+const corrupt = [{ at: t0, cents: 1000 }, { at: tS - 5 * DAY, cents: "20" }] as unknown as PriceStep[];
+/** A throw is recorded as a result, so a crash shows as a failing check instead of ending the run. */
+const caught = (read: () => unknown): unknown => {
+  try {
+    return read();
+  } catch {
+    return "threw";
+  }
+};
+is("one unreadable step makes the whole history unreadable, not a complete 1000", caught(() => priorLowestPrice(corrupt, tS)), "unreadable");
+is("a history that is not a list is unreadable", caught(() => priorLowestPrice("x" as unknown as PriceStep[], tS)), "unreadable");
+is("a step that is not a record is unreadable", caught(() => priorLowestPrice([{ at: t0, cents: 1000 }, null] as unknown as PriceStep[], tS)), "unreadable");
+is("recording onto an unreadable history keeps it as it came, never filtered", caught(() => recordPrice(corrupt, 900, tS)), corrupt);
+is("so it still reads as unreadable afterward", caught(() => priorLowestPrice(recordPrice(corrupt, 900, tS), tS + DAY)), "unreadable");
+
+part("Prior lowest price: a missing slot is unreadable, never a crash, a subset or an empty history (review J5813414204, LOW)");
+/** A list with a missing slot after one real step, as a typed in-memory boundary could hand over. */
+const withHole = (): PriceStep[] => {
+  const list: PriceStep[] = [{ at: t0, cents: 1000 }];
+  list.length = 2;
+  return list;
+};
+const holeFirst = (): PriceStep[] => {
+  const list: PriceStep[] = [];
+  list[1] = { at: t0, cents: 1000 };
+  return list;
+};
+is("a list with a missing slot is unreadable, not a crash", caught(() => priorLowestPrice(withHole(), tS)), "unreadable");
+is("a list whose first slot is missing is unreadable", caught(() => priorLowestPrice(holeFirst(), tS)), "unreadable");
+is("a list of only a missing slot is unreadable, not an empty history", caught(() => priorLowestPrice(new Array<PriceStep>(1), tS)), "unreadable");
+is("recording onto a list with a missing slot keeps it as it came", caught(() => {
+  const kept = recordPrice(withHole(), 900, tS - 1);
+  return [kept.length, 0 in kept, 1 in kept];
+}), [2, true, false]);
+is("so it still reads as unreadable afterward", caught(() => priorLowestPrice(recordPrice(withHole(), 900, tS - 1), tS)), "unreadable");
+is("control: the same real step, dense, still reads as a complete 1000", caught(() => priorLowestPrice([{ at: t0, cents: 1000 }], tS)), { cents: 1000, complete: true });
+is("control: an empty list is still a known empty history", caught(() => priorLowestPrice([], tS)), null);
+is("control: recording onto the dense list still adds the step", caught(() => recordPrice([{ at: t0, cents: 1000 }], 900, tS - 1)), [{ at: t0, cents: 1000 }, { at: tS - 1, cents: 900 }]);
+const untouched = [{ at: t0, cents: 1000 }, { at: tS - 2, cents: 20 }];
+const before = JSON.stringify(untouched);
+priorLowestPrice(untouched, tS);
+recordPrice(untouched, 900, tS - 1);
+is("reading and recording never change the list given", JSON.stringify(untouched), before);
+
+part("Types: the module compiles under the repository's strict settings (review J5813414204, LOW, TS4104)");
+/** The project's own tsconfig options on this module alone, libraries read from node_modules (the test runs from a bundle). */
+const typeErrors = (() => {
+  const libDir = join(process.cwd(), "node_modules/typescript/lib");
+  const config = readConfigFile("tsconfig.json", sys.readFile);
+  const { options } = parseJsonConfigFileContent(config.config, sys, process.cwd());
+  const host = createCompilerHost(options);
+  host.getDefaultLibLocation = () => libDir;
+  host.getDefaultLibFileName = (o) => join(libDir, getDefaultLibFileName(o));
+  const program = createProgram(["lib/physical-legal.ts"], { ...options, noEmit: true, incremental: false }, host);
+  return getPreEmitDiagnostics(program)
+    .filter((d) => d.file?.fileName.endsWith("lib/physical-legal.ts"))
+    .map((d) => `TS${d.code} ${flattenDiagnosticMessageText(d.messageText, " ")}`);
+})();
+is("lib/physical-legal.ts has no type errors (strict, ES2017, bundler)", typeErrors, []);
+
+part("Proposition 65: the site is named on its own (review J5809017387, LOW)");
+is("a longer hostname that only starts with the site does not name it", checkProp65("WARNING: Lead. See www.P65Warnings.ca.gov.example.invalid"), "site");
+is("the site inside another word does not name it", checkProp65("WARNING: Lead. See xwww.P65Warnings.ca.gov"), "site");
+is("the site as a path on another host does not name it", checkProp65("WARNING: Lead. See evil.example/www.P65Warnings.ca.gov"), "site");
+is("the site with a hyphenated suffix does not name it", checkProp65("WARNING: Lead. See www.P65Warnings.ca.gov-x.example"), "site");
+is("the site with https and a path names it", checkProp65("WARNING: Lead. See https://www.P65Warnings.ca.gov/fact-sheets"), null);
+is("the site in parentheses names it", checkProp65("WARNING: Lead (www.P65Warnings.ca.gov)."), null);
+is("the site followed by a comma names it", checkProp65("WARNING: Lead. See www.P65Warnings.ca.gov, thank you."), null);
 
 done();

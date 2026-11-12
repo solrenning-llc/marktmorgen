@@ -169,7 +169,14 @@ export function prop65Matters(shipsTo: readonly string[]): boolean {
 export type Prop65Problem = "control" | "long" | "signal" | "site";
 
 const SIGNAL = /^(WARNING|CA WARNING|CALIFORNIA WARNING):/;
-const SITE = /www\.P65Warnings\.ca\.gov/i;
+/**
+ * The site named on its own: at the start, after a space or an opening mark,
+ * optionally after http(s)://, and ending there (a space, a closing mark, a
+ * path, or a final period), so www.P65Warnings.ca.gov.example.invalid or
+ * evil.example/www.P65Warnings.ca.gov does not count. Text shape only; no URL
+ * is fetched.
+ */
+const SITE = /(?:^|[\s(<"'])(?:https?:\/\/)?www\.P65Warnings\.ca\.gov(?=$|[\s)>"'/,;:!?]|\.(?:$|[\s)>"']))/i;
 
 /**
  * The creator's Proposition 65 text, as their manufacturer or supplier gave
@@ -274,27 +281,50 @@ export const PRICE_KEEP_SECONDS = PRIOR_PRICE_SECONDS + MAX_SALE_DAYS * DAY;
 /** The most steps kept per product; beyond it the oldest two merge into one at the lower price. */
 export const MAX_PRICE_STEPS = 64;
 
-function steps(history: readonly PriceStep[]): PriceStep[] {
-  return history
-    .filter((step) => Number.isSafeInteger(step?.at) && step.at > 0 && Number.isSafeInteger(step.cents) && step.cents >= 0)
-    .map((step) => ({ at: step.at, cents: step.cents }))
-    .sort((a, b) => a.at - b.at);
+function validStep(step: unknown): step is PriceStep {
+  if (!step || typeof step !== "object") return false;
+  const { at, cents } = step as Record<string, unknown>;
+  return Number.isSafeInteger(at) && (at as number) > 0 && Number.isSafeInteger(cents) && (cents as number) >= 0;
+}
+
+/**
+ * The history in time order, steps of the same second kept in the order they
+ * were applied (a stable sort); null when it is not a list or any step is
+ * unreadable, a missing slot included (every and map skip holes, so each index
+ * is read), so a filtered subset is never taken for the whole history.
+ */
+function steps(history: unknown): PriceStep[] | null {
+  if (!Array.isArray(history)) return null;
+  const out: PriceStep[] = [];
+  for (let index = 0; index < history.length; index += 1) {
+    const step: unknown = history[index];
+    if (!validStep(step)) return null;
+    out.push({ at: step.at, cents: step.cents });
+  }
+  return out.sort((a, b) => a.at - b.at);
 }
 
 /**
  * The history once `cents` is the price applied from `now` (seconds). The
- * same price adds nothing; a clock that went back adds the step a second
- * after the last one, so no price that was applied is lost. Steps that ended
- * before the kept period are dropped; past the cap, the oldest two merge at
- * the lower price, so a prior price read later can only come out lower than
- * the truth (a smaller reduction announced), never higher. Pure.
+ * same price adds nothing. A step is never stamped later than the latest time
+ * seen: a change in the same second as the last step keeps that second, after
+ * it in order, and a clock that went back stamps the step at the last step's
+ * second, so no price that was applied is lost or moved into the future.
+ * Steps that ended before the kept period are dropped; past the cap, the
+ * oldest two merge at the lower price, so a prior price read later can only
+ * come out lower than the truth (a smaller reduction announced), never
+ * higher. An unreadable history comes back as it came, so it keeps reading as
+ * unreadable instead of a filtered subset that would read as complete. Pure.
  */
-export function recordPrice(history: readonly PriceStep[], cents: number, now: number): PriceStep[] {
+export function recordPrice(history: readonly PriceStep[], cents: number, now: number): PriceStep[];
+// The body takes any value: an unreadable one is handed back as it came, a list copied with its holes.
+export function recordPrice(history: unknown, cents: number, now: number): unknown {
   const out = steps(history);
+  if (!out) return Array.isArray(history) ? history.slice() : history;
   if (!Number.isSafeInteger(cents) || cents < 0 || !Number.isSafeInteger(now) || now <= 0) return out;
   const last = out[out.length - 1];
   if (!last) out.push({ at: now, cents });
-  else if (last.cents !== cents) out.push({ at: Math.max(now, last.at + 1), cents });
+  else if (last.cents !== cents) out.push({ at: Math.max(now, last.at), cents });
   const edge = Math.max(now, out[out.length - 1].at) - PRICE_KEEP_SECONDS;
   while (out.length > 1 && out[1].at <= edge) out.shift();
   while (out.length > MAX_PRICE_STEPS) out.splice(0, 2, { at: out[0].at, cents: Math.min(out[0].cents, out[1].cents) });
@@ -303,17 +333,22 @@ export function recordPrice(history: readonly PriceStep[], cents: number, now: n
 
 /**
  * The lowest price applied in the 30 days before `start` (seconds), the
- * reduction's own price from `start` excluded; `complete` is false when the
- * history begins inside that period (a product priced less than 30 days
- * before). Null when no price was applied before `start`.
+ * reduction's own price from `start` excluded; a price replaced within the
+ * second of `start` itself counts as before it (it can only lower the
+ * result). `complete` is false when the history begins inside that period (a
+ * product priced less than 30 days before). Null when no price was applied
+ * before `start`; "unreadable" when the history is not a list or any step is
+ * unreadable: nothing is certified from it, never a filtered subset.
  */
-export function priorLowestPrice(history: readonly PriceStep[], start: number): { cents: number; complete: boolean } | null {
+export function priorLowestPrice(history: readonly PriceStep[], start: number): { cents: number; complete: boolean } | null | "unreadable" {
   const list = steps(history);
+  if (!list) return "unreadable";
   const from = start - PRIOR_PRICE_SECONDS;
   let lowest: number | null = null;
   list.forEach((step, index) => {
     const end = index + 1 < list.length ? list[index + 1].at : Infinity;
-    if (step.at < start && end > from) lowest = lowest === null ? step.cents : Math.min(lowest, step.cents);
+    const before = step.at < start || (step.at === start && end === start);
+    if (before && end > from) lowest = lowest === null ? step.cents : Math.min(lowest, step.cents);
   });
   if (lowest === null) return null;
   return { cents: lowest, complete: list[0].at <= from };

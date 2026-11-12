@@ -1014,6 +1014,12 @@
       "parameters": []
     },
     {
+      "source": "app/studio/companies/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/studio/companies",
+      "parameters": []
+    },
+    {
       "source": "app/studio/copy/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/studio/copy",
@@ -1339,6 +1345,7 @@
     "components/community-push-toggle.tsx",
     "components/community-room.tsx",
     "components/community-studio.tsx",
+    "components/companies-editor.tsx",
     "components/company-owner-report.tsx",
     "components/confirm-action.tsx",
     "components/contact-box-editor.tsx",
@@ -1392,6 +1399,7 @@
     "components/feature-catalogue.tsx",
     "components/feature-demos.tsx",
     "components/feature-visuals.tsx",
+    "components/forget-inbox-drafts.tsx",
     "components/forget-lesson-positions.tsx",
     "components/form-answers.tsx",
     "components/form-branching.tsx",
@@ -1401,6 +1409,7 @@
     "components/funnel-ai-draft.tsx",
     "components/funnel-editor.tsx",
     "components/funnel-form-setup.tsx",
+    "components/funnel-issue-explain.tsx",
     "components/funnel-next-check.tsx",
     "components/funnel-share-panel.tsx",
     "components/funnel-sharing-review.tsx",
@@ -1468,6 +1477,7 @@
     "components/offer-planning.tsx",
     "components/old-addresses.tsx",
     "components/older-purchases.tsx",
+    "components/option-link-copy.tsx",
     "components/orders-bundle.tsx",
     "components/orders-shared.tsx",
     "components/outreach-studio.tsx",
@@ -1505,6 +1515,7 @@
     "components/pdf-preview-toggle.tsx",
     "components/pdf-stamp-toggle.tsx",
     "components/pending-submit.tsx",
+    "components/person-company.tsx",
     "components/person-erase.tsx",
     "components/person-fields.tsx",
     "components/person-find.tsx",
@@ -1785,6 +1796,7 @@
     "app/api/store/community/route.ts",
     "app/api/store/community/rsvp/route.ts",
     "app/api/store/community/upload/route.ts",
+    "app/api/store/companies/route.ts",
     "app/api/store/contact-box/route.ts",
     "app/api/store/contact-labels/route.ts",
     "app/api/store/contact/route.ts",
@@ -1831,6 +1843,7 @@
     "app/api/store/forms/route.ts",
     "app/api/store/free/download/route.ts",
     "app/api/store/free/route.ts",
+    "app/api/store/funnel-explain/route.ts",
     "app/api/store/funnel-share/route.ts",
     "app/api/store/funnel/route.ts",
     "app/api/store/goal/route.ts",
@@ -1839,6 +1852,7 @@
     "app/api/store/heard-ask/route.ts",
     "app/api/store/heard/route.ts",
     "app/api/store/help/route.ts",
+    "app/api/store/help/support/route.ts",
     "app/api/store/hit/route.ts",
     "app/api/store/host-calendar/route.ts",
     "app/api/store/ics/route.ts",
@@ -2077,6 +2091,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 142
+    "pageTemplates": 143
   }
 }

@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { storeFolder } from "@/lib/store";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
+import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { canSellProduct } from "@/lib/store-checkout";
 import { readListing } from "@/lib/catalog";
@@ -50,7 +51,7 @@ export default async function StudioPodcastPage({
       />
       <StudioStorePin sid={store.sid}>
         <main id="content" className="container-page pb-20 pt-10 sm:pt-14">
-          <p className="eyebrow">Private podcast</p>
+          <StudioTrail store={store} path={[{ label: "Products", href: `${studioPath(store)}#products` }]} here="Private podcast" />
           <h1 className="t-h2 mt-3 break-words">{product.title}</h1>
           <p className="mt-3 max-w-2xl text-ink-soft">
             Each buyer gets a feed of their own for their own podcast app: Apple Podcasts, Overcast, Pocket Casts and most others.

@@ -62,7 +62,9 @@ export async function POST(request: NextRequest) {
   });
   if (!result.ok) {
     // An invitation whose share no longer fits the cap (lib/affiliates.ts): the page's "not taking affiliates right now".
-    const status = result.reason === "committed" || result.reason === "crowded" ? "unavailable" : result.reason;
+    // One made before the creator declined or removed this person (#4045): the page's "this link has expired".
+    const status =
+      result.reason === "committed" || result.reason === "crowded" ? "unavailable" : result.reason === "withdrawn" ? "expired" : result.reason;
     return new Response(null, { status: 303, headers: { Location: `${page}?status=${status}`, "Cache-Control": "no-store" } });
   }
   const secure = origin.startsWith("https://") ? "; Secure" : "";

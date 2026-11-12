@@ -31,7 +31,7 @@ export async function POST(request: NextRequest) {
   }
   try {
     await sendLostEmailLink(email, clientIp(request), linkOrigin(request));
-  } catch (error) {
+  } catch {
     console.error("sending a recovery-address link failed");
   }
   return new Response(null, { status: 303, headers: { Location: `${origin}/signin/lost?status=sent`, "Cache-Control": "no-store" } });

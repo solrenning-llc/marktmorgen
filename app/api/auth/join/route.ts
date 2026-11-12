@@ -71,7 +71,7 @@ export async function POST(request: NextRequest) {
     signedInAs = previous ? await emailForSession(previous) : null;
     if (signedInAs && normaliseEmail(signedInAs) !== invite.email) return away("/signin?status=invite-other");
     existing = !signedInAs && (await hasAccount(invite.email));
-  } catch (error) {
+  } catch {
     console.error("reading an invitation failed");
     return away("/signin?status=invite-error");
   }
@@ -79,7 +79,7 @@ export async function POST(request: NextRequest) {
   let joined;
   try {
     joined = await spendInvite(token);
-  } catch (error) {
+  } catch {
     console.error("taking an invitation failed");
     return away("/signin?status=invite-error");
   }
@@ -108,7 +108,7 @@ export async function POST(request: NextRequest) {
   try {
     if (previous) await endSession(previous);
     sessionId = await openSession(member.email);
-  } catch (error) {
+  } catch {
     console.error("logging in after an invitation failed");
     return away("/signin?status=invite-error");
   }

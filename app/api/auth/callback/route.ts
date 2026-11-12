@@ -55,7 +55,7 @@ export async function POST(request: NextRequest) {
   let owner: string | null = null;
   try {
     owner = await takeSignInLink(token);
-  } catch (error) {
+  } catch {
     console.error("sign-in callback failed");
   }
   // Two-step login, the session, the recovery address, the browser this was

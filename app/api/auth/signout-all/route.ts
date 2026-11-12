@@ -25,7 +25,7 @@ export async function POST(request: NextRequest) {
   let email: string | null | undefined;
   try {
     email = await sessionEmail(id);
-  } catch (error) {
+  } catch {
     console.error("reading the session to log out everywhere failed");
     email = undefined;
   }

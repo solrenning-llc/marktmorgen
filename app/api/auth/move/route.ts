@@ -54,7 +54,7 @@ export async function POST(request: NextRequest) {
   let moved: { from: string; to: string } | null = null;
   try {
     moved = await spendMoveLink(token);
-  } catch (error) {
+  } catch {
     console.error("address move failed");
   }
   if (!moved) return away("/signin?status=expired");
@@ -95,7 +95,7 @@ async function step(what: string, work: () => Promise<unknown>): Promise<boolean
   try {
     await work();
     return true;
-  } catch (error) {
+  } catch {
     console.error(`${what} failed`);
     return false;
   }
@@ -179,7 +179,7 @@ async function finishMove(from: string, to: string, away: (path: string) => Resp
     sessionId = await openSession(to);
     // Passkeys set to be removed moved with the rest (lib/passkeys.ts movePasskeys); a removal whose days are over is applied at every login.
     await pendingRemoval(to).catch(() => console.error("applying a passkey removal failed"));
-  } catch (error) {
+  } catch {
     console.error("address move failed");
     // Undone only when the store is known to be still at `from` alone: a passing error reading it never undoes
     // a move whose store already landed at `to`. Known at `to` alone, the move stands with its ways in. Any

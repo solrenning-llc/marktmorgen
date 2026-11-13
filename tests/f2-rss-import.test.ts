@@ -262,6 +262,11 @@ function main(): void {
   const many = parseRssImport(slow);
   const took = performance.now() - started;
   is("300 such episodes parse well under 400 ms", [many.ok, took < 400], [true, true]);
+  part("A missing description falls back to the summary, never a crash (cloud J on cloud K's fix for #3456)");
+  const noDescription = parseRssImport(feed([`<item><title>E</title><itunes:summary>Only a summary</itunes:summary><enclosure url="https://cdn.example.com/1.mp3" type="audio/mpeg"/></item>`]));
+  is("an episode with no <description> takes its summary", noDescription.ok ? noDescription.show.episodes[0].notes : noDescription.reason, "Only a summary");
+  const neither = parseRssImport(feed([`<item><title>E</title><enclosure url="https://cdn.example.com/1.mp3" type="audio/mpeg"/></item>`]));
+  is("an episode with neither has empty notes", neither.ok ? neither.show.episodes[0].notes : neither.reason, "");
   is("no request was made by any of it", fetched, 0);
 }
 

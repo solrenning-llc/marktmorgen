@@ -17,7 +17,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
   try {
     const store = await storeForHandle(normaliseHandle(decoded));
-    if (!store) return missing();
+    // Nor for a store switched off after a report (lib/takedown.ts), as its sitemap.
+    if (!store || store.suspended) return missing();
     const host = (request.headers.get("x-forwarded-host") ?? request.headers.get("host") ?? "")
       .split(",")[0]
       .trim()

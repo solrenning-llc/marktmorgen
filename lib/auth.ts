@@ -855,6 +855,8 @@ export async function endAllSessions(email: string): Promise<number | null> {
     // The set is the only way to the sessions (audit SG2, rule 30): unread, it is kept and nothing is deleted.
     const keys = stringList(members);
     if (!keys) throw new SessionsUnknownError("an account's sessions");
+    // Nothing listed is nothing to close: no empty pipeline is sent (#4365 LOW; an empty /pipeline may answer an error).
+    if (!keys.length) return 0;
     const marks = await Promise.all(keys.map((key) => secondKeyOf(key)));
     // Only the sessions read leave the set (#4263, as dropSecondStep does): a login landing between the read and these
     // deletes keeps its session named in the set, so the next "log out of all devices" still closes it.

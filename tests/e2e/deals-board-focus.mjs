@@ -378,6 +378,24 @@ try {
   await page.waitForTimeout(200);
   is("a refused move of a deal now in another pipeline names it, and focus goes to the stage's heading", [await page.locator("#deal-board-alert").textContent(), await active()], ["This deal changed a moment ago and is now in Coaching, so it was not moved. Open Coaching to check it.", "deal-column-lead00"]);
 
+  // #4164 review: the editor's closing question belongs to the deal it was asked for. Asked for one deal and cancelled,
+  // it never opens on another deal already in that stage, nor on a deal whose stage is changed before any Save.
+  await mount(world({ deals: [deal("dealqqqq01", "Asked one", "lead00"), deal("dealqqqq02", "Already won", "won000"), deal("dealqqqq03", "Moved later", "lead00")], versions: { dealqqqq01: v(31), dealqqqq02: v(32), dealqqqq03: v(33) } }));
+  await press("deal-edit-dealqqqq01");
+  await page.locator("#deal-field-stage").selectOption("won000");
+  await press("deal-save");
+  await page.locator("#deal-save-close").waitFor({ timeout: 5000 });
+  is("the editor asks before saving a deal moved into a won stage", await page.locator("#deal-save-close").count(), 1);
+  await press("deal-cancel");
+  await press("deal-edit-dealqqqq02");
+  await page.locator("#deal-field-title").waitFor({ timeout: 5000 });
+  is("cancelled, then a deal already in that stage opened: no question on it", await page.locator("#deal-save-close").count(), 0);
+  await press("deal-cancel");
+  await press("deal-edit-dealqqqq03");
+  await page.locator("#deal-field-stage").selectOption("won000");
+  is("another deal moved to that stage, before any Save: no question yet", await page.locator("#deal-save-close").count(), 0);
+  await press("deal-cancel");
+
   // C3-118: a removal question left unanswered closes for good once its deal leaves the board (hidden by a search or a filter,
   // the agenda shown, or the deal moved): it never comes back by itself on the card, and focus stays where the person put it.
   await mount(world());

@@ -1,8 +1,8 @@
 import { type NextRequest, after } from "next/server";
 import { noticeCreator } from "@/lib/account-notice";
 import { away, creatorFrom } from "@/lib/studio-route";
-import { checkSeller, endOnboarding, onboardingStarted, paypalSalesConfigured } from "@/lib/paypal-sales";
-import { setPayPalSeller } from "@/lib/store";
+import { checkSeller, endOnboarding, onboardingStarted, onboardingStill, paypalSalesConfigured } from "@/lib/paypal-sales";
+import { connectPayPalSellerIf } from "@/lib/store";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 
 /**
@@ -27,7 +27,11 @@ export async function GET(request: NextRequest) {
   if (!started) return away(origin, studio(store.paypalSeller ? "#paypal" : "paypal=id#paypal"));
   const checked = await checkSeller(store.statsId);
   if (!checked.ok) return away(origin, studio(`paypal=${checked.reason}#paypal`));
-  const saved = await setPayPalSeller(ref, checked.merchant);
+  // Written only while this same connect is still the store's current one, read again under the store's write lock:
+  // a disconnect, or a newer connect, made while PayPal was being asked wins (lib/store.ts connectPayPalSellerIf).
+  const statsId = store.statsId;
+  const saved = await connectPayPalSellerIf(ref, checked.merchant, () => onboardingStill(statsId, started));
+  if (saved === "stale") return away(origin, studio("#paypal"));
   if (!saved) return away(origin, studio("paypal=error#paypal"));
   await endOnboarding(store.statsId);
   if (store.paypalSeller?.merchant !== checked.merchant) after(() => noticeCreator(store, { kind: "paypal-connected" }));

@@ -45,6 +45,7 @@ import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { fairOff } from "@/lib/fair-price";
 import { admitOrders } from "@/lib/order-admission";
 import { countOrder } from "@/lib/orders";
+import { randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { EMAIL_PATTERN } from "@/lib/auth";
@@ -270,27 +271,58 @@ export async function onboardingUrl(store: Store, returnUrl: string): Promise<st
  * tracking id for as long as the creator has not removed Marktmorgen in their PayPal settings. So the way back is
  * taken only while this mark is there: a visit from the browser's history, or from a link on another site, after
  * the creator stopped selling with PayPal (or before they ever asked) connects nothing. Ended by a way back that
- * connected, and by disconnecting. One per store, holding only "1".
+ * connected, and by disconnecting. One per store, holding the attempt's own random token: the way back writes the
+ * seller only while that same token is still there, read again under the store's write lock
+ * (lib/store.ts connectPayPalSellerIf), so a disconnect, or a newer connect, made while PayPal was being asked wins
+ * over the older way back (Codex X4 on #4345).
  */
 export const ONBOARDING_SECONDS = 86_400;
 const onboardingKey = (statsId: string) => `nl:ppsell:start:${statsId}`;
+const ATTEMPT = /^[0-9a-f]{32}$/;
 
-/** Writes the mark before the creator is sent to PayPal; throws when the write is not confirmed (rule 24). */
-export async function markOnboarding(statsId: string): Promise<void> {
-  const set = repliesFor(await redisPipeline([["SET", onboardingKey(statsId), "1", "EX", ONBOARDING_SECONDS]]), 1);
+/** Writes a new attempt's mark before the creator is sent to PayPal; throws when the write is not confirmed (rule 24). */
+export async function markOnboarding(statsId: string): Promise<string> {
+  const attempt = randomBytes(16).toString("hex");
+  const set = repliesFor(await redisPipeline([["SET", onboardingKey(statsId), attempt, "EX", ONBOARDING_SECONDS]]), 1);
   if (!set || set[0] !== "OK") throw new UnknownReplyError("a PayPal connect's start");
+  return attempt;
 }
 
-/** Whether a connect was started from the studio: true, false, or "unknown" for any reply not exactly GET's (rule 24). */
-export async function onboardingStarted(statsId: string): Promise<boolean | "unknown"> {
+/**
+ * The connect started from the studio: its attempt token, false when none was started, or "unknown" for any reply not
+ * exactly GET's (rule 24).
+ */
+export async function onboardingStarted(statsId: string): Promise<string | false | "unknown"> {
   const read = repliesFor(await redisPipeline([["GET", onboardingKey(statsId)]]), 1);
   if (!read) return "unknown";
-  return read[0] === null ? false : read[0] === "1" ? true : "unknown";
+  if (read[0] === null) return false;
+  return typeof read[0] === "string" && ATTEMPT.test(read[0]) ? read[0] : "unknown";
 }
 
-/** Ends the mark; a write that fails leaves it to run out within ONBOARDING_SECONDS. */
+/** Whether this attempt is still the store's current connect: true, false, or "unknown" (rule 24). */
+export async function onboardingStill(statsId: string, attempt: string): Promise<boolean | "unknown"> {
+  const now = await onboardingStarted(statsId);
+  return now === "unknown" ? "unknown" : now === attempt;
+}
+
+/** Ends the mark after a way back that connected; a write that fails leaves it to run out within ONBOARDING_SECONDS. */
 export async function endOnboarding(statsId: string): Promise<void> {
   await redisPipeline([["DEL", onboardingKey(statsId)]]).catch((error) => console.error("ending a PayPal connect's start failed", error));
+}
+
+/**
+ * Ends any connect in progress before a disconnect is written: true only when the DEL's reply is exactly its own
+ * (0 or 1). Run before the store's seller is cleared, so a way back still asking PayPal finds no attempt under the
+ * store's write lock and writes nothing.
+ */
+export async function stopOnboarding(statsId: string): Promise<boolean> {
+  try {
+    const gone = repliesFor(await redisPipeline([["DEL", onboardingKey(statsId)]]), 1);
+    return gone !== null && (gone[0] === 0 || gone[0] === 1);
+  } catch (error) {
+    console.error("ending a PayPal connect's start failed", error);
+    return false;
+  }
 }
 
 export type SellerCheck = { ok: true; merchant: string } | { ok: false; reason: "id" | "email" | "receivable" | "permissions" | "error" };

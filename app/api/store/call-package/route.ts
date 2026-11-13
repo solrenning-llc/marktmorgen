@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { setCallPackage, storeForEmail } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
+import { heldRefusal } from "@/lib/child-safety";
 import { priceInRange, readMoney } from "@/lib/money";
 import { MAX_PACKAGE_SESSIONS, MIN_PACKAGE_SESSIONS, PACKAGE_DAYS } from "@/lib/call-package-rules";
 
@@ -17,6 +18,9 @@ export async function POST(request: NextRequest) {
   const store = await storeForEmail(ref);
   if (!store) return fail("none");
   const id = text(body.id, 40);
+  // A product kept for a report keeps its package as it is (lib/child-safety.ts).
+  const held = await heldRefusal(store, id);
+  if (held) return held;
   const sessions = Number(body.sessions);
   if (!sessions) {
     const result = await setCallPackage(ref, id, null);

@@ -142,7 +142,11 @@ async function refundedOn(invoice: Invoice): Promise<number> {
       if (typeof amount !== "number" || !Number.isSafeInteger(amount) || amount < 0 || typeof status !== "string") {
         throw new UnknownReplyError("invite credits: a refund");
       }
+      // Only Stripe's known refund states are read (issue #4424): succeeded, pending and requires_action took or are
+      // taking the money back; failed and canceled did not. Any other status does not tell whether the money went
+      // back, so it is unknown, not "no refund": the store fails this run and no credit is written.
       if (status === "succeeded" || status === "pending" || status === "requires_action") total += amount;
+      else if (status !== "failed" && status !== "canceled") throw new UnknownReplyError("invite credits: a refund status");
     }
   }
   return total;

@@ -187,10 +187,19 @@ function detail(json: Record<string, unknown>): string {
   return text.replace(/\s+/g, " ").trim().slice(0, 200);
 }
 
+/**
+ * The platform's words with every address in them said as "this address" (nuvem I privacy audit, 13 November
+ * 2026): platforms echo the address they refused, and an error's message is logged whole and kept as the sync
+ * job's lastError, where no erasure reaches it. The reason itself stays.
+ */
+function withoutAddresses(words: string): string {
+  return words.replace(/[^\s@<>()[\]",;:]+@[^\s@<>()[\]",;:]+/g, "this address");
+}
+
 /** Turns an answer that is not a success into the error it means. */
 function failure(provider: EmailProvider, answer: Answer, what: "key" | "target" | "contact"): PlatformError {
   const name = PROVIDER_NAMES[provider];
-  const said = detail(answer.json);
+  const said = withoutAddresses(detail(answer.json));
   const { status } = answer;
   if (status === 401 || status === 403) return new PlatformError("key", status, `${name} did not accept the API key${said ? `: ${said}` : "."}`);
   if (status === 404 && what !== "key") return new PlatformError("target", status, `${name} says the ${TARGET_WORDS[provider]} is not there anymore.`);

@@ -10,7 +10,7 @@
  *
  * Synthetic transport only (tests/email-platform-target-world.ts): no DNS, socket, provider account or real key.
  */
-import { PlatformError, addContact } from "@/lib/email-platforms";
+import { PlatformError, addContact, type Contact } from "@/lib/email-platforms";
 import { answerWith } from "./email-platform-target-world";
 import { done, is, part } from "./check";
 
@@ -21,7 +21,7 @@ const other = "someone.else@example.org";
 async function refusal(detail: string): Promise<PlatformError | null> {
   answerWith({ status: 400, body: JSON.stringify({ title: "Invalid Resource", detail }) });
   try {
-    await addContact("mailchimp", KEY, "list0001", { email: person, firstName: "", tags: [] }, new Map() as never);
+    await addContact("mailchimp", KEY, "list0001", { email: person, firstName: null, tags: [], source: "purchase", storeUrl: "https://marktmorgen.com/@synthetic" } satisfies Contact, new Map() as never);
     return null;
   } catch (error) {
     return error instanceof PlatformError ? error : null;

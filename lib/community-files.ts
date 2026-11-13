@@ -283,18 +283,35 @@ export async function untakeCommunityUpload(path: string, author: string, now = 
 /** Deletes a picture a post no longer needs, and gives its place back. Best effort: never throws. */
 export async function dropCommunityImage(path: string | undefined | null): Promise<void> {
   if (!path) return;
+  await removeCommunityImage(path);
+}
+
+/**
+ * Deletes a picture, then, once the file is gone, lets `forget` take away what names it (a held post's line), and only
+ * once that is confirmed gives its place back: a picture whose file could not be deleted keeps its name where an
+ * erasure finds it again (Codex G on #3020, 6751455863). `forget` answers true when this call took the name away (its
+ * own one-time right to give the place back), "gone" when the name was already gone (somebody else took it, and gave
+ * the place back), and false when that is not confirmed: only true gives the place back, so a picture deleted by two
+ * callers at once is given back once (Codex P on #3020). True when the file and the name are both confirmed gone.
+ * Never throws.
+ */
+export async function removeCommunityImage(path: string, forget: () => Promise<boolean | "gone"> = async () => true): Promise<boolean> {
   try {
     await del(path);
     // Its mark and any listing left for it go with the file (security reviews of #3414): the name is free again only
-    // once nothing holds it, and a listing left behind can never give its place back a second time.
+    // once nothing holds it, and a listing left behind can never give its place back a second time. The place itself is
+    // given back below, only once `forget` confirms (main, Codex G and Codex P on #3020).
     await redisPipeline([
       ["DEL", uploadKey(path)],
       ["ZREM", DOORS_KEY, path],
     ]);
-    await givePicturePlace(path);
   } catch (error) {
     console.error("could not delete a community picture", error);
+    return false;
   }
+  const forgot = await forget().catch(() => false as const);
+  if (forgot === true) await givePicturePlace(path);
+  return forgot !== false;
 }
 
 /**

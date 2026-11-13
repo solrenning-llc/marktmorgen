@@ -86,9 +86,11 @@ export async function stockLeft(store: Store, product: Listing, now = Date.now()
  * stockLeft, but null when any lapsed hold's checkout could not be read
  * (Stripe failed, or answered something that is neither settled nor expired):
  * the count is then a guess on the safe side, never proof of "Sold out"
- * (Claude 6's LOW on #1732). Used where a refusal is decided.
+ * (Claude 6's LOW on #1732). Used where a refusal is decided, and by the
+ * low-stock job (lib/low-stock-alert.ts, lowStockJobDeps), which never tells
+ * a creator their units fell on a guess.
  */
-async function stockLeftKnown(store: Store, product: Listing, now = Date.now()): Promise<number | null> {
+export async function stockLeftKnown(store: Store, product: Listing, now = Date.now()): Promise<number | null> {
   const count = await countStock(store, product, now, true);
   return count && count.unknown === 0 ? count.left : null;
 }

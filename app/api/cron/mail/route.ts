@@ -1,9 +1,7 @@
 import { runLaunches } from "@/lib/waitlist";
 import { runPreorderReleases } from "@/lib/preorders";
 import { runRestocks } from "@/lib/stock-alert-send";
-import { runLowStockChecks } from "@/lib/low-stock-alert";
-import { storeForIdExactly } from "@/lib/store-exact";
-import { stockLeft } from "@/lib/stock";
+import { lowStockJobDeps, runLowStockChecks } from "@/lib/low-stock-alert";
 import { preorderDeps } from "@/lib/purchase-email";
 import { readListing } from "@/lib/catalog";
 import type { NextRequest } from "next/server";
@@ -218,7 +216,8 @@ async function run(request: NextRequest, started: number): Promise<Response> {
     }
     // The creators' low-stock numbers (623 [SZ7]): checked here, one run at a time, never in the checkout.
     try {
-      await runLowStockChecks(deadline, { load: storeForIdExactly, readProduct: readListing, left: (store, product) => stockLeft(store, product) });
+      // The units left as read where something is decided: never a guess (lowStockJobDeps).
+      await runLowStockChecks(deadline, lowStockJobDeps);
     } catch (error) {
       console.error("checking low-stock numbers failed", error);
     }

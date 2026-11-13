@@ -29,7 +29,10 @@ import { alertCreator } from "@/lib/phone-alerts";
 import { SITE_URL } from "@/lib/site-url";
 import { weeklyOff, weeklyToken } from "@/lib/stats-report";
 import type { Listing, Store } from "@/lib/store";
-import { type ExactStore } from "@/lib/store-exact";
+import { type ExactStore, storeForIdExactly } from "@/lib/store-exact";
+import { readListing } from "@/lib/catalog";
+import { stockLeftKnown } from "@/lib/stock";
+import { limitedStock } from "@/lib/product-extras";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 
@@ -153,6 +156,24 @@ export type LowStockDeps = {
   readProduct: (store: Store, id: string) => Promise<Listing | null>;
   /** Units left (lib/stock.ts); throws when they cannot be read. */
   left: (store: Store, product: Listing) => Promise<number | null>;
+};
+
+/**
+ * What the mail job hands the check (app/api/cron/mail/route.ts). The units left are read as lib/stock.ts reads them
+ * where something is decided (stockLeftKnown): a lapsed hold whose checkout Stripe could not answer for is counted as
+ * sold by stockLeft, the safe guess for selling, never proof of a sale; read here it would cross the creator's number
+ * and send the alert for a sale that never happened (Claude 1's MEDIUM on #3814). A limited product whose count is not
+ * known throws, as LowStockDeps.left says: never null, which reads as "not limited" and would clear the count seen.
+ * Nothing is sent or kept, and the product waits for its next check.
+ */
+export const lowStockJobDeps: LowStockDeps = {
+  load: storeForIdExactly,
+  readProduct: readListing,
+  left: async (store, product) => {
+    const known = await stockLeftKnown(store, product);
+    if (known === null && limitedStock(product) !== null) throw new Error("Units left not known: a lapsed hold's checkout could not be read");
+    return known;
+  },
 };
 
 /** One product's turn: "told" when the creator was told, "done" when it leaves the set, "later" otherwise. */

@@ -6,6 +6,7 @@
  * the in-memory Redis double only.
  */
 import { clearBrokenMove, markBrokenMove, noteMoveCopy, readBrokenMove } from "@/lib/auth";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -32,7 +33,7 @@ async function main(): Promise<void> {
   await clearBrokenMove(A, B, old);
   const replaced = await markBrokenMove(A, C);
   await noteMoveCopy(A, B, COPY, old);
-  is("A's record is still A to C, with no copy", await readBrokenMove(A), { from: A, to: C });
+  is("A's record is still A to C, with no copy", await readBrokenMove(A), { from: A, to: C, op: replaced });
   is("and nothing is written for B, whose move was cleared", await readBrokenMove(B), null);
   await noteMoveCopy(A, C, OTHER, replaced);
   is("the move that replaced it notes its own copy", [(await readBrokenMove(A))?.copy, (await readBrokenMove(C))?.copy], [OTHER, OTHER]);
@@ -59,9 +60,22 @@ async function main(): Promise<void> {
   is("and its place is still held", score !== null, true);
   const route = readFileSync("app/api/auth/move/route.ts", "utf8");
   const repair = readFileSync("lib/move-repair.ts", "utf8");
-  is("every clear names the move it read: the route its own token, the repairs the record's", [route.includes("clearBrokenMove(from, to, op)"), (repair.match(/clearBrokenMove\([^)]*, (broken\.)?op\)/g) ?? []).length, /clearBrokenMove\([^,)]*,[^,)]*\)/.test(route + repair)], [true, 2, false]);
+  is("every clear names the move it read: the route its own token, the repairs the record's", [route.includes("clearBrokenMove(from, to, op)"), (repair.match(/clearBrokenMove\([^)]*, (broken\.)?op \?\? null\)/g) ?? []).length, /clearBrokenMove\([^,)]*,[^,)]*\)/.test(route + repair)], [true, 2, false]);
   await clearBrokenMove(A, B, third);
   is("cleared by its own token", [await readBrokenMove(A), await readBrokenMove(B)], [null, null]);
+
+  part("A record written before moves had a token: cleared only by a clear that names none");
+  const key = async (email: string) => `nl:auth:move-broken:${createHash("sha256").update(`nimbus-auth-move-broken:${email}`).digest("hex").slice(0, 40)}`;
+  const legacy = JSON.stringify({ from: A, to: B, at: 1 });
+  await redis.pipeline([["SET", await key(A), legacy], ["SET", await key(B), legacy]]);
+  is("read with no token", await readBrokenMove(A), { from: A, to: B });
+  await clearBrokenMove(A, B, "c".repeat(64));
+  is("a clear naming a move is not it: kept", (await readBrokenMove(B))?.to, B);
+  await clearBrokenMove(A, B, null);
+  is("a clear naming none clears it", [await readBrokenMove(A), await readBrokenMove(B)], [null, null]);
+  await redis.pipeline([["SET", await key(A), JSON.stringify({ from: A, to: B, at: 1, op: 7 })]]);
+  is("a token that is not text: the record is unknown, never read", await readBrokenMove(A).then(() => "read", (error: Error) => error.name), "UnknownReplyError");
+  await redis.pipeline([["DEL", await key(A)]]);
 
   part("A move already cleared is never marked again");
   await noteMoveCopy(A, B, COPY, second);

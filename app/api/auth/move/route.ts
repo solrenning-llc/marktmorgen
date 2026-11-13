@@ -111,7 +111,7 @@ export async function POST(request: NextRequest) {
       broken = true;
     });
   } finally {
-    const cleared = broken ? false : await clearBrokenMove(from, to).then(() => true, (error) => (console.error("clearing a move's record failed", error), false));
+    const cleared = broken ? false : await clearBrokenMove(from, to, op).then(() => true, (error) => (console.error("clearing a move's record failed", error), false));
     // Kept when the record could not be cleared either way: it holds the addresses until it is repaired.
     if (cleared || broken) await endMoving(from, to, mark).catch((error) => console.error("unmarking a move failed", error));
   }

@@ -61,6 +61,8 @@ async function main(): Promise<void> {
   console.error = () => {};
   const mark = auth.markBrokenMove as (from: string, to: string) => Promise<string | "full">;
   const most = (auth as Record<string, unknown>).MAX_OPEN_BROKEN_MOVES;
+  // A clear names the move it read (Codex X5 on #2271): the token its record carries.
+  const clear = async (from: string, to: string) => auth.clearBrokenMove(from, to, (await auth.readBrokenMove(from))?.op ?? null);
 
   part("1. broken moves left open are bounded, the place taken in the same write");
   is("MAX_OPEN_BROKEN_MOVES is a positive whole number", typeof most === "number" && Number.isSafeInteger(most) && most > 0, true);
@@ -72,10 +74,10 @@ async function main(): Promise<void> {
   const refused = await mark("over-a@example.com", "over-b@example.com");
   is("with every place held, the next move's record is refused", refused, "full");
   is("and nothing of it is written", brokenKeys().length, held);
-  await auth.clearBrokenMove("held-0@example.com", "held-0-to@example.com");
+  await clear("held-0@example.com", "held-0-to@example.com");
   const again = await mark("over-a@example.com", "over-b@example.com");
   is("clearing one gives its place back", typeof again === "string" && /^[A-Za-z0-9_-]{16,}$/.test(again), true);
-  await auth.clearBrokenMove("over-a@example.com", "over-b@example.com");
+  await clear("over-a@example.com", "over-b@example.com");
 
   part("1b. the tap is refused before anything moves, and its running mark ends");
   await mark("held-0@example.com", "held-0-to@example.com");
@@ -98,7 +100,7 @@ async function main(): Promise<void> {
   is("no open item is the broken moves' stock any more", unknowns.some((line) => line.toLowerCase().startsWith("broken moves kept")), false);
   is("the registry prices the open places the code keeps", r.MOVE_BROKEN_OPEN_MOST, most);
 
-  for (let i = 0; i < cap; i += 1) await auth.clearBrokenMove(`held-${i}@example.com`, `held-${i}-to@example.com`);
+  for (let i = 0; i < cap; i += 1) await clear(`held-${i}@example.com`, `held-${i}-to@example.com`);
   is("clearing every one leaves no record", brokenKeys().length, 0);
 
   part("2. LOW 1: a renewal that did not go through takes the others' room");

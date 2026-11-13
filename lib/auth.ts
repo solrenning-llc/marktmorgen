@@ -263,37 +263,51 @@ redis.call('SET', KEYS[3], ARGV[2])
 redis.call('ZADD', KEYS[1], ARGV[4], ARGV[1])
 return 1`;
 
-/** Gives back the place of each record's move (its `op`) and deletes the records: how many records went. Modelled by lib/redis-memory.ts. */
-export const CLEAR_BROKEN_MOVE = `-- marktmorgen:move-broken-clear:v1
+/**
+ * Deletes each record that is still the move ARGV[1] names (its `op`; "" for a record written before moves had one)
+ * and gives that move's place back: how many records went. A record of another move (one that replaced it, even of
+ * the same two addresses) is left whole, its place too (Codex X5 on #2271). Modelled by lib/redis-memory.ts.
+ */
+export const CLEAR_BROKEN_MOVE = `-- marktmorgen:move-broken-clear:v2
+local gone = 0
 for i = 2, #KEYS do
   local held = redis.call('GET', KEYS[i])
   if held then
     local ok, record = pcall(cjson.decode, held)
-    if ok and type(record) == 'table' and type(record.op) == 'string' then redis.call('ZREM', KEYS[1], record.op) end
+    if ok and type(record) == 'table' then
+      local op = record.op
+      if (type(op) == 'string' and op == ARGV[1]) or (op == nil and ARGV[1] == '') then
+        if type(op) == 'string' then redis.call('ZREM', KEYS[1], op) end
+        gone = gone + redis.call('DEL', KEYS[i])
+      end
+    end
   end
 end
-return redis.call('DEL', KEYS[2], KEYS[3])`;
+return gone`;
 
 /**
  * A broken move's record, read exactly (SG2 rule 24; Claude 5 on #2271): null only when there is none. A reply cut
  * short or of another kind, or a record that does not read as one, throws UnknownReplyError, never "no broken move":
  * a new move then never starts over a broken one (markMoving), nor writes over its record.
  */
-export async function readBrokenMove(email: string): Promise<{ from: string; to: string; copy?: string } | null> {
+export async function readBrokenMove(email: string): Promise<{ from: string; to: string; copy?: string; op?: string } | null> {
   if (!isRedisConfigured()) return null;
   const replies = repliesFor(await redisPipeline([["GET", await brokenKey(email)]]), 1);
   if (!replies) throw new UnknownReplyError("a broken move's record");
   const [raw] = replies;
   if (raw === null) return null;
   if (typeof raw !== "string") throw new UnknownReplyError("a broken move's record");
-  let value: { from?: unknown; to?: unknown; copy?: unknown } | null;
+  let value: { from?: unknown; to?: unknown; copy?: unknown; op?: unknown } | null;
   try {
-    value = JSON.parse(raw) as { from?: unknown; to?: unknown; copy?: unknown } | null;
+    value = JSON.parse(raw) as { from?: unknown; to?: unknown; copy?: unknown; op?: unknown } | null;
   } catch {
     throw new UnknownReplyError("a broken move's record");
   }
   if (!value || typeof value !== "object" || typeof value.from !== "string" || typeof value.to !== "string") throw new UnknownReplyError("a broken move's record");
-  return typeof value.copy === "string" && /^[0-9a-f]{64}$/.test(value.copy) ? { from: value.from, to: value.to, copy: value.copy } : { from: value.from, to: value.to };
+  // The move's own token, which its clear names (clearBrokenMove); a record written before moves had one has none.
+  if (value.op !== undefined && typeof value.op !== "string") throw new UnknownReplyError("a broken move's record");
+  const op = typeof value.op === "string" ? { op: value.op } : {};
+  return typeof value.copy === "string" && /^[0-9a-f]{64}$/.test(value.copy) ? { from: value.from, to: value.to, copy: value.copy, ...op } : { from: value.from, to: value.to, ...op };
 }
 
 /**
@@ -386,9 +400,14 @@ for i = 1, #KEYS do
 end
 return written`;
 
-/** Clears a move's records and gives its place back (CLEAR_BROKEN_MOVE); a reply in any other shape throws UnknownReplyError. */
-export async function clearBrokenMove(from: string, to: string): Promise<void> {
-  const replies = repliesFor(await redisPipeline([["EVAL", CLEAR_BROKEN_MOVE, 3, BROKEN_OPEN_KEY, await brokenKey(from), await brokenKey(to)]]), 1);
+/**
+ * Clears the records of the move `op` names (its token from markBrokenMove, or the `op` its record was read with;
+ * null for a record written before moves had one) and gives its place back (CLEAR_BROKEN_MOVE). A record of any
+ * other move is left alone, so a late clear never deletes the move that replaced it (Codex X5 on #2271). A reply in
+ * any other shape throws UnknownReplyError.
+ */
+export async function clearBrokenMove(from: string, to: string, op: string | null): Promise<void> {
+  const replies = repliesFor(await redisPipeline([["EVAL", CLEAR_BROKEN_MOVE, 3, BROKEN_OPEN_KEY, await brokenKey(from), await brokenKey(to), op ?? ""]]), 1);
   const gone = replies ? countOf(replies[0]) : null;
   if (gone === null || gone > 2) throw new UnknownReplyError("the clearing of a broken move");
 }

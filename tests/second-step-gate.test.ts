@@ -925,13 +925,15 @@ async function main(): Promise<void> {
     if (rSeen === null && c && c[0] === "SET" && c.includes("NX") && c.includes(15)) {
       redis.pipeline = rPipe;
       // The ways in have left; the store has not. Were the process to die now, this is what would be left.
-      rSeen = [await readBrokenMove(RSD), (await listPasskeys(RSD)).length];
+      // The record carries its move's own token (Codex X5 on #2271): any 64 hex is shown as one.
+      const seen = await readBrokenMove(RSD);
+      rSeen = [seen && typeof seen.op === "string" && /^[0-9a-f]{64}$/.test(seen.op) ? { ...seen, op: "<token>" } : seen, (await listPasskeys(RSD)).length];
     }
     return rPipe(commands);
   }) as typeof redis.pipeline;
   await moveRoute(form(`${ORIGIN}/api/auth/move`, { token: rsdToken }));
   redis.pipeline = rPipe;
-  is("in the gap, the record is already there", rSeen, [{ from: RSD, to: RSDD }, 0]);
+  is("in the gap, the record is already there", rSeen, [{ from: RSD, to: RSDD, op: "<token>" }, 0]);
   is("and cleared once the move is done", [await readBrokenMove(RSD), await readBrokenMove(RSDD), Boolean(await storeForEmail(RSDD))], [null, null, true]);
 
   part("When moving two-step login refuses and its copy could not be taken back, the undo takes it");

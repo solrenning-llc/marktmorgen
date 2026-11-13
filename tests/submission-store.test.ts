@@ -441,6 +441,39 @@ async function main(): Promise<void> {
     is("its place comes back", await liveCount(FOLDER, COURSE, lesson, ANA, NOW), 0);
     is("and its door is gone", await signSubmissionDoor(at, path, [1], w.steps), { ok: false, reason: "unknown" });
   }
+
+  // Review of #3568 (Claude 6 and Claude 1, MEDIUM; taken by Claude 3): the room was taken for the place and the door
+  // before the place, as entries that expire only with their month, so a refusal or an abort still held it, and one
+  // buyer trying again and again filled the store's whole room with nothing kept.
+  part("Opens that keep nothing never fill the store's data room");
+  {
+    const lesson = "lesson0room1";
+    const DAN = "d".repeat(32);
+    const at = { ...where(DAN), lessonId: lesson, data: SHOP as DataStore };
+    const used = async () => (await dataUsed(SHOP))?.used ?? -1;
+    const base = await used();
+    const w = world();
+    const paths: string[] = [];
+    for (let i = 0; i < MAX_WAITING_PER_BUYER; i += 1) {
+      const opened = await openSubmissionDoor({ ...ask(DAN), lessonId: lesson }, w.steps);
+      if (opened.ok) paths.push(opened.upload.pathname);
+    }
+    is("control: three uploads open", paths.length, MAX_WAITING_PER_BUYER);
+    const held = await used();
+    is("control: what is open is counted", held > base, true);
+    for (let i = 0; i < 25; i += 1) await openSubmissionDoor({ ...ask(DAN), lessonId: lesson }, w.steps);
+    is("twenty-five refusals for a full set of places take no room", await used(), held);
+    for (const path of paths) await abortSubmissionDoor(at, path, w.steps);
+    is("given up, the room comes back to where it was", await used(), base);
+    for (let i = 0; i < 30; i += 1) {
+      const opened = await openSubmissionDoor({ ...ask(DAN), lessonId: lesson }, w.steps);
+      if (opened.ok) await abortSubmissionDoor(at, opened.upload.pathname, w.steps);
+    }
+    is("thirty uploads opened and given up leave no room taken", await used(), base);
+    const broke = world({ reserveStoreUpload: async () => false });
+    for (let i = 0; i < 10; i += 1) await openSubmissionDoor({ ...ask(DAN), lessonId: lesson }, broke.steps);
+    is("ten refusals for the allowance leave no room taken", await used(), base);
+  }
 }
 
 main().then(done, (error: unknown) => {

@@ -730,6 +730,18 @@ export class MemoryRedis {
           this.run(["SET", copy, value, "EX", seconds]);
           return 1;
         }
+        // lib/path-lead.ts PATH_LEAD_COUNT: a Path lead's mark taken only with its count, in one step; -1 when the record
+        // is not a hash, having written nothing.
+        if (key.startsWith("-- marktmorgen:path-lead-count:v1\n") && args[0] === "2" && args.length === 5) {
+          const [, mark, life, seconds, field] = args;
+          this.scriptCalls += 1;
+          const held = this.run(["TYPE", life]);
+          if (held !== "none" && held !== "hash") return -1;
+          this.scriptCalls += 1;
+          if (this.run(["SET", mark, "1", "NX", "EX", seconds]) === null) return 0;
+          this.scriptCalls += 1;
+          return this.run(["HINCRBY", life, field, "1"]);
+        }
         // lib/suppression.ts ERASED_PRINT: a deleted person's print, at the second on Redis's clock (this stand-in's).
         if (key.startsWith("-- marktmorgen:erased-print:v1\n") && args[0] === "1" && args.length === 3) {
           this.scriptCalls += 2;

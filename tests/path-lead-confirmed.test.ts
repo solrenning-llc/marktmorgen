@@ -188,6 +188,48 @@ async function main(): Promise<void> {
   redis.pipeline = pipe;
   is("said in the server's log", logged.some((line) => line.includes("counting a confirmed lead failed")), true);
 
+  part("A missing erasure note leaves no mark and counts nothing (Codex X8 on #3591)");
+  {
+    const pipe = redis.pipeline.bind(redis);
+    const before = await leads();
+    const marksBefore = marks().length;
+    // The note's trip answers in another shape (an entry with neither result nor error): nothing may be marked.
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      const replies = (await pipe(commands)) as unknown[];
+      return commands[0]?.[0] === "ZADD" && String(commands[0]?.[1]).startsWith("nl:erase:ix:") ? [undefined, 0, 1] : replies;
+    }) as typeof redis.pipeline;
+    const refused = await countConfirmedLead(store.statsId, "noted-unknown@example.com").then(() => "resolved", (error: Error) => error.name);
+    redis.pipeline = pipe;
+    is("the call fails as unknown", refused, "UnknownReplyError");
+    is("and no mark is left that deleting the person could not find", marks().length, marksBefore);
+    is("and nothing is counted", await leads(), before);
+    is("a later call counts the address, once", await countConfirmedLead(store.statsId, "noted-unknown@example.com"), "counted");
+    is("by one", await leads(), before + 1);
+  }
+
+  part("The count failing before it is applied never leaves the address marked and uncounted (Codex X5 on #3591)");
+  {
+    const pipe = redis.pipeline.bind(redis);
+    const before = await leads();
+    let failed = false;
+    // The trip that counts fails before Redis applies it, once.
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      const counts = commands.some((c) => c[0] === "HINCRBY" || (c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:path-lead-count:v1\n")));
+      if (counts && !failed) {
+        failed = true;
+        throw new Error("synthetic Redis timeout");
+      }
+      return pipe(commands);
+    }) as typeof redis.pipeline;
+    const first = await countConfirmedLead(store.statsId, "count-lost@example.com").then(() => "resolved", () => "threw");
+    redis.pipeline = pipe;
+    is("the call that failed throws", [failed, first], [true, "threw"]);
+    is("and counted nothing", await leads(), before);
+    is("the next confirmation counts it", await countConfirmedLead(store.statsId, "count-lost@example.com"), "counted");
+    is("once", await leads(), before + 1);
+    is("and a third counts nothing more", [await countConfirmedLead(store.statsId, "count-lost@example.com"), await leads()], ["already", before + 1]);
+  }
+
   part("What a lead costs is held: never more commands than PATH_LEAD_COMMANDS, the line's figure (M2)");
   {
     const pipe = redis.pipeline.bind(redis);
@@ -196,14 +238,19 @@ async function main(): Promise<void> {
       sent.push(...commands);
       return pipe(commands);
     }) as typeof redis.pipeline;
+    // Billed as Upstash bills them: each command sent, and each one a script runs beside its EVAL.
+    const inside = redis.scriptCalls;
     const first = await countConfirmedLead(store.statsId, "kim@example.com");
-    const firstCommands = sent.length;
+    const firstCommands = sent.length + redis.scriptCalls - inside;
+    const firstSent = [...sent];
     sent.length = 0;
+    const insideAgain = redis.scriptCalls;
     const again = await countConfirmedLead(store.statsId, "kim@example.com");
     redis.pipeline = pipe;
     is("the counting call: the note, the mark and the count", [first, firstCommands], ["counted", PATH_LEAD_COMMANDS]);
-    is("a call for an address already counted: the note and the mark only", [again, sent.length], ["already", PATH_LEAD_COMMANDS - 1]);
-    is("and neither takes a public request or touches a capped count", sent.some((c) => c[0] === "EVAL"), false);
+    is("a call for an address already counted: the note and the mark only", [again, sent.length + redis.scriptCalls - insideAgain], ["already", PATH_LEAD_COMMANDS - 1]);
+    is("and neither takes a public request or touches a capped count: its only script is the mark and the count's own",
+      [...firstSent, ...sent].filter((c) => c[0] === "EVAL").every((c) => String(c[1]).startsWith("-- marktmorgen:path-lead-count:v1\n")), true);
   }
 
   part("Asking counts nothing for Path");

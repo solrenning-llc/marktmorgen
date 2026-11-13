@@ -29,7 +29,7 @@ import { NumbersNotes } from "@/components/numbers-notes";
 import { AdSpendEditor } from "@/components/ad-spend-editor";
 import type { MetaAdsView } from "@/lib/meta-ads";
 import { HEARD_NAMES, isHeardAnswer } from "@/lib/heard-rules";
-import { toast } from "@/components/toast";
+import { toast, toastProblem } from "@/components/toast";
 import { type InsightContext, insightsFrom } from "@/lib/insights";
 import { WeeklyTeamPicker } from "@/components/weekly-team-picker";
 import { SalesGoalCard } from "@/components/sales-goal-card";
@@ -245,9 +245,9 @@ function HeardTable({
       if (body.ok && typeof body.ask === "boolean") {
         setAsking(body.ask);
         toast(body.ask ? "Buyers are asked again." : "Buyers are no longer asked.");
-      } else toast("That did not save. Try again.");
+      } else toastProblem("That did not save. Try again.");
     } catch {
-      toast("That did not save. Check your connection and try again.");
+      toastProblem("That did not save. Check your connection and try again.");
     } finally {
       setBusy(false);
     }

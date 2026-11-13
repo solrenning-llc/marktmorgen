@@ -6,9 +6,12 @@ import { Icon } from "@/components/icons";
 /*
  * The confirmation toast: a small violet box, bottom right, that says an
  * action the person just took has worked. It is for successes that would
- * otherwise be invisible, off-screen or ambiguous, and for nothing else.
- * Errors, and anything the person has to read or keep, stay inline next to
- * the control that caused them.
+ * otherwise be invisible, off-screen or ambiguous. Errors are best inline next
+ * to the control that caused them; where a component reports a failure in the
+ * corner instead, it uses toastProblem(): an alert mark and the word
+ * "Problem:" instead of the check, read out by a role="alert" region, and no
+ * time limit, so it stays until the person closes it or a newer message
+ * replaces it (WCAG 2.2.3, 3.3.1, 1.3.1; tests/toast-problems.test.ts).
  *
  * `toast()` works from any client component without a provider: it fires a
  * window event that the one Toaster, mounted in the root layout, listens for.
@@ -26,17 +29,35 @@ const EVENT = "nimbus:toast";
 const FLASH_KEY = "nimbus:flash-toast";
 const SHOWN_FOR = 5000;
 
+/** A confirmation ("done") or a report that something went wrong ("problem"). */
+export type ToastKind = "done" | "problem";
+type Message = { message: string; kind: ToastKind };
+
+/** How long a toast shows before it leaves by itself: never, for a problem (2.2.3). */
+export function toastShownFor(kind: ToastKind): number | null {
+  return kind === "problem" ? null : SHOWN_FOR;
+}
+
 // Effects run children first, so a page that confirms something on arrival
 // can call toast() a moment before the Toaster in the layout is listening.
 // That one message waits here instead of being lost.
 let listening = false;
-let waiting: string | null = null;
+let waiting: Message | null = null;
+
+function send(detail: Message): void {
+  if (typeof window === "undefined") return;
+  if (!listening) waiting = detail;
+  window.dispatchEvent(new CustomEvent<Message>(EVENT, { detail }));
+}
 
 /** Shows a confirmation now. One short sentence, ending with a full stop. */
 export function toast(message: string): void {
-  if (typeof window === "undefined") return;
-  if (!listening) waiting = message;
-  window.dispatchEvent(new CustomEvent<string>(EVENT, { detail: message }));
+  send({ message, kind: "done" });
+}
+
+/** Says something went wrong, with what to do; it stays until the person closes it. */
+export function toastProblem(message: string): void {
+  send({ message, kind: "problem" });
 }
 
 /** Shows a confirmation after the next page load, for an action that ends in a navigation. */
@@ -61,7 +82,7 @@ function takeFlash(): string | null {
 const reducedMotion = () =>
   typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-type Current = { id: number; message: string };
+type Current = Message & { id: number };
 
 /** The corners the toast may sit in, in the order they are tried. */
 export const TOAST_PLACES = ["bottom-end", "top-end", "bottom-start", "top-start"] as const;
@@ -168,6 +189,31 @@ export function followToastFocus(
   };
 }
 
+/** The box's classes: a problem has its own colors (app/globals.css .nb-toast-problem). */
+export function toastBoxClass(kind: ToastKind): string {
+  return kind === "problem" ? "nb-toast nb-toast-problem" : "nb-toast";
+}
+
+/** What the toast box holds: its mark, its words and its Dismiss button. */
+export function ToastMessage({ message, kind, onDismiss }: { message: string; kind: ToastKind; onDismiss: () => void }) {
+  const mark = kind === "problem" ? "alert" : "check";
+  return (
+    <>
+      <span className="nb-toast-icon" data-icon={mark} aria-hidden="true">
+        <Icon name={mark} size={14} strokeWidth={2.5} />
+      </span>
+      {/* Read out by the live regions above; hidden here so it is not read twice. */}
+      <p className="nb-toast-text" aria-hidden="true">
+        {kind === "problem" ? <strong>Problem: </strong> : null}
+        {message}
+      </p>
+      <button type="button" className="nb-toast-close" aria-label="Dismiss" onClick={onDismiss}>
+        <Icon name="close" size={16} strokeWidth={2} />
+      </button>
+    </>
+  );
+}
+
 /** Mounted once, in the root layout. */
 export function Toaster() {
   const [current, setCurrent] = useState<Current | null>(null);
@@ -175,7 +221,8 @@ export function Toaster() {
   const region = useRef<HTMLDivElement>(null);
   const next = useRef(0);
   const timer = useRef<number | undefined>(undefined);
-  const remaining = useRef(SHOWN_FOR);
+  // null: no time limit (a problem stays until it is closed or replaced).
+  const remaining = useRef<number | null>(SHOWN_FOR);
   const deadline = useRef(0);
   const hovered = useRef(false);
   const focused = useRef(false);
@@ -218,7 +265,7 @@ export function Toaster() {
 
   const startTimer = useCallback(() => {
     stopTimer();
-    if (hovered.current || focused.current || leaving.current || hidden.current) return;
+    if (hovered.current || focused.current || leaving.current || hidden.current || remaining.current === null) return;
     deadline.current = Date.now() + remaining.current;
     timer.current = window.setTimeout(dismiss, remaining.current);
   }, [dismiss, stopTimer]);
@@ -226,22 +273,23 @@ export function Toaster() {
   const pauseTimer = useCallback(() => {
     if (timer.current === undefined) return;
     stopTimer();
-    remaining.current = Math.max(0, deadline.current - Date.now());
+    if (remaining.current !== null) remaining.current = Math.max(0, deadline.current - Date.now());
   }, [stopTimer]);
 
   useEffect(() => {
     const show = (event: Event) => {
-      const message = (event as CustomEvent<string>).detail;
-      if (typeof message !== "string" || !message) return;
+      const detail = (event as CustomEvent<Message>).detail;
+      if (!detail || typeof detail.message !== "string" || !detail.message) return;
       waiting = null;
       next.current += 1;
-      setCurrent({ id: next.current, message });
+      setCurrent({ id: next.current, message: detail.message, kind: detail.kind === "problem" ? "problem" : "done" });
     };
     window.addEventListener(EVENT, show);
     listening = true;
-    const early = waiting ?? takeFlash();
+    const flash = waiting ? null : takeFlash();
+    const early = waiting ?? (flash ? { message: flash, kind: "done" as const } : null);
     waiting = null;
-    if (early) toast(early);
+    if (early) send(early);
     return () => {
       listening = false;
       window.removeEventListener(EVENT, show);
@@ -254,7 +302,7 @@ export function Toaster() {
     leaving.current = false;
     hovered.current = false;
     focused.current = false;
-    remaining.current = SHOWN_FOR;
+    remaining.current = toastShownFor(current.kind);
     // Placed before it is painted, so it never covers the focused control even for a frame.
     hidden.current = region.current ? keepToastClear(region.current, document.activeElement, "bottom-end") === "hidden" : false;
     box.current?.animate(
@@ -282,16 +330,19 @@ export function Toaster() {
 
   return (
     <div ref={region} className="nb-toast-region">
-      {/* Always in the page, empty when idle, so each message is announced. */}
+      {/* Always in the page, empty when idle, so each message is announced: confirmations politely, problems at once. */}
       <div role="status" aria-live="polite" aria-atomic="true" className="sr-only">
-        {current ? <span key={current.id}>{current.message}</span> : null}
+        {current?.kind === "done" ? <span key={current.id}>{current.message}</span> : null}
+      </div>
+      <div role="alert" aria-atomic="true" className="sr-only">
+        {current?.kind === "problem" ? <span key={current.id}>{`Problem: ${current.message}`}</span> : null}
       </div>
       {current ? (
         <div
           key={current.id}
           ref={box}
           data-id={current.id}
-          className="nb-toast"
+          className={toastBoxClass(current.kind)}
           onPointerEnter={() => {
             hovered.current = true;
             pauseTimer();
@@ -320,16 +371,7 @@ export function Toaster() {
             }
           }}
         >
-          <span className="nb-toast-icon" aria-hidden="true">
-            <Icon name="check" size={14} strokeWidth={2.5} />
-          </span>
-          {/* Read out by the live region above; hidden here so it is not read twice. */}
-          <p className="nb-toast-text" aria-hidden="true">
-            {current.message}
-          </p>
-          <button type="button" className="nb-toast-close" aria-label="Dismiss" onClick={dismiss}>
-            <Icon name="close" size={16} strokeWidth={2} />
-          </button>
+          <ToastMessage message={current.message} kind={current.kind} onDismiss={dismiss} />
         </div>
       ) : null}
     </div>

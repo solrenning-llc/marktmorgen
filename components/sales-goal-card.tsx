@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { toast } from "@/components/toast";
+import { toast, toastProblem } from "@/components/toast";
 import { formatMoney, parseCurrency, plainAmount, readMoney } from "@/lib/money";
 import { GOAL_UNAVAILABLE_LINE, UNKNOWN_SALES_GOAL_CENTS, goalProgress, monthTitle } from "@/lib/sales-goal-rules";
 
@@ -40,10 +40,10 @@ export function SalesGoalCard({
         setEditing(false);
         toast(answer.goal ? "Goal saved" : "Goal taken away");
       } else {
-        toast("That did not save. Type an amount, like 3000, and try again.");
+        toastProblem("That did not save. Type an amount, like 3000, and try again.");
       }
     } catch {
-      toast("That did not save. Check your connection and try again.");
+      toastProblem("That did not save. Check your connection and try again.");
     } finally {
       setBusy(false);
     }

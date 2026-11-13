@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import QRCode from "qrcode";
 import { Icon } from "@/components/icons";
-import { toast } from "@/components/toast";
+import { toast, toastProblem } from "@/components/toast";
 import { POST_PLACES, qrFileName, qrSvg } from "@/lib/share-links";
 import { type LinkTarget, MAX_LINKS, MAX_NAME, type ShortLink, linkName, shortUrl } from "@/lib/short-link-rules";
 import { formatMoney } from "@/lib/money";
@@ -128,9 +128,9 @@ export function ShortLinks({
         toast(done);
         return true;
       }
-      toast(REASONS[answer.error ?? ""] ?? "That did not save. Try again.");
+      toastProblem(REASONS[answer.error ?? ""] ?? "That did not save. Try again.");
     } catch {
-      toast("That did not save. Check your connection and try again.");
+      toastProblem("That did not save. Check your connection and try again.");
     } finally {
       setBusy(false);
     }

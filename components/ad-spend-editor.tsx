@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { toast } from "@/components/toast";
+import { toast, toastProblem } from "@/components/toast";
 import { type AdSpend, typedOverlap } from "@/lib/ad-spend-rules";
 import { formatMoney } from "@/lib/money";
 import type { MetaAdsView } from "@/lib/meta-ads";
@@ -76,9 +76,9 @@ function MetaAds({
       if (answer.ok && answer.meta && answer.spends) {
         onChosen(answer.meta, answer.spends);
         toast(answer.meta.readPaused ? `Chosen. ${READ_PAUSED}` : answer.meta.read?.day ? "Read from Meta." : "Chosen. It is read within the hour.");
-      } else toast("That did not save. Try again.");
+      } else toastProblem("That did not save. Try again.");
     } catch {
-      toast("That did not save. Check your connection and try again.");
+      toastProblem("That did not save. Check your connection and try again.");
     } finally {
       setBusy(false);
     }
@@ -241,9 +241,9 @@ export function AdSpendEditor({
         toast(done);
         return true;
       }
-      toast(REASONS[answer.error ?? ""] ?? "That did not save. Try again.");
+      toastProblem(REASONS[answer.error ?? ""] ?? "That did not save. Try again.");
     } catch {
-      toast("That did not save. Check your connection and try again.");
+      toastProblem("That did not save. Check your connection and try again.");
     } finally {
       setBusy(false);
     }

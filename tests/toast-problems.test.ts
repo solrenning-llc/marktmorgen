@@ -27,6 +27,7 @@ type Kind = "done" | "problem";
 const api = toastModule as unknown as {
   toastProblem?: (message: string) => void;
   toastShownFor?: (kind: Kind) => number | null;
+  toastBoxClass?: (kind: Kind) => string;
   ToastMessage?: (props: { message: string; kind: Kind; onDismiss: () => void }) => unknown;
 };
 
@@ -34,6 +35,7 @@ const api = toastModule as unknown as {
 is("toastProblem is exported", typeof api.toastProblem, "function");
 is("toastShownFor is exported", typeof api.toastShownFor, "function");
 is("ToastMessage is exported", typeof api.ToastMessage, "function");
+is("toastBoxClass is exported", typeof api.toastBoxClass, "function");
 
 // 2. Timing: a confirmation leaves after 5 seconds; a problem never leaves by itself.
 is("a confirmation shows for 5 seconds", api.toastShownFor!("done"), 5000);
@@ -47,7 +49,9 @@ const problem = draw("problem");
 is("a problem is not drawn with the success check", /data-icon="check"/.test(problem), false);
 is("a problem is drawn with the alert mark", /data-icon="alert"/.test(problem), true);
 is("a confirmation keeps its check", /data-icon="check"/.test(done), true);
-is("a problem's box is marked as a problem for its style", /class="nb-toast nb-toast-problem"/.test(problem), true);
+is("a problem's box is marked as a problem for its style", api.toastBoxClass!("problem"), "nb-toast nb-toast-problem");
+is("a confirmation's box keeps the plain class", api.toastBoxClass!("done"), "nb-toast");
+is("the Toaster draws its box with toastBoxClass", /className=\{toastBoxClass\(current\.kind\)\}/.test(readFileSync("components/toast.tsx", "utf8")), true);
 is("a problem names itself in words, not only by its mark (1.3.1, 1.4.1)", /Problem:/.test(problem.replace(/<[^>]+>/g, "")), true);
 is("a confirmation is not called a problem", /Problem:/.test(done.replace(/<[^>]+>/g, "")), false);
 for (const [name, html] of [["confirmation", done], ["problem", problem]] as const) {

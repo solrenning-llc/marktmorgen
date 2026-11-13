@@ -21,7 +21,8 @@ import { StoreTipBox } from "@/components/store-tip-box";
 import { kitShown } from "@/lib/store-kit";
 import { kitWords } from "@/lib/buyer-words/kit";
 import { Icon } from "@/components/icons";
-import { MAX_STORE_SEARCH, STORE_PAGE_SIZE, searchStore, searchWords } from "@/lib/catalog";
+import { MAX_STORE_SEARCH, STORE_PAGE_SIZE, searchWords } from "@/lib/catalog";
+import { searchStorePaid } from "@/lib/store-search-index";
 import { StoreQuotes } from "@/components/store-quotes";
 import { showsRating, storeSummary } from "@/lib/review-summary";
 import { RatingLine } from "@/components/review-list";
@@ -220,8 +221,12 @@ export default async function StorePage({ params, searchParams }: Params) {
     wantedSearch !== "" && searchable && searchWords(wantedSearch).length > 0
       ? await withinStore("store-search", `${(await headers()).get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown"}|${store.handle}`, 30, 600, store)
       : false;
-  const searching = searchAllowed ? wantedSearch : "";
-  const results = searching ? await searchStore(store, searching) : null;
+  // A search pays for what it reads before reading it (lib/store-search-index.ts): the full read of the store's
+  // listings once for everybody, as shared work kept ten minutes, then only the matches it shows and their checkout
+  // boxes. Refused, it reads nothing and the page says why, as for the per-connection limit (c1-cost-store-search).
+  const results = searchAllowed ? await searchStorePaid(store, wantedSearch) : null;
+  const searchRefused = wantedSearch !== "" && searchable && searchWords(wantedSearch).length > 0 && !results;
+  const searching = results ? wantedSearch : "";
   // A search that found nothing is counted, by its words only (lib/stats.ts, countSearchMiss).
   if (results && results.total === 0 && store.statsId && !isBot((await headers()).get("user-agent") ?? "")) {
     const statsId = store.statsId;
@@ -429,7 +434,7 @@ export default async function StorePage({ params, searchParams }: Params) {
                           {bw.searchButton}
                         </button>
                       </div>
-                      {wantedSearch && !searchAllowed && searchWords(wantedSearch).length > 0 ? (
+                      {searchRefused ? (
                         <p className="st-note mt-3 text-sm" role="status">{bw.searchSlow}</p>
                       ) : null}
                       {results ? (

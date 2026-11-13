@@ -2955,6 +2955,8 @@ try {
     await form.getByLabel("Starts when").selectOption("bought");
     is("a sequence that starts with a purchase cannot end at one", [await form.locator("[data-flow-goal-choice]").inputValue(), await form.locator("[data-flow-goal-choice] option[value=any]").count()], ["", 0]);
     await form.getByRole("button", { name: "Close" }).click();
+    // Removing a sequence asks first (WCAG 3.3.6): yes, and the question names it.
+    studio.once("dialog", (dialog) => void (dialog.message().startsWith("Remove the sequence “") ? dialog.accept() : dialog.dismiss()));
     await row.getByRole("button", { name: "Remove" }).click();
     await row.waitFor({ state: "detached", timeout: 30_000 });
   }
@@ -3008,6 +3010,8 @@ try {
     await form.getByRole("button", { name: "Close" }).click();
     for (const name of ["Welcome that hands on", "The offer"]) {
       const gone = studio.locator("li:not([data-mark])", { hasText: name }).first();
+      // Removing a sequence asks first (WCAG 3.3.6): yes, and the question names it.
+      studio.once("dialog", (dialog) => void (dialog.message().startsWith("Remove the sequence “") ? dialog.accept() : dialog.dismiss()));
       await gone.getByRole("button", { name: "Remove" }).click();
       await gone.waitFor({ state: "detached", timeout: 30_000 });
     }
@@ -3047,6 +3051,8 @@ try {
       listed.includes("Puts their deal in a stage of your deals board"),
       listed.includes("Emails you who reached it"),
     ], [true, true, true, true]);
+    // Removing a sequence asks first (WCAG 3.3.6): yes, and the question names it.
+    studio.once("dialog", (dialog) => void (dialog.message().startsWith("Remove the sequence “") ? dialog.accept() : dialog.dismiss()));
     await row.getByRole("button", { name: "Remove" }).click();
     await row.waitFor({ state: "detached", timeout: 30_000 });
     await post("/api/store/forms", { action: "remove", id: made.form?.id ?? "" });

@@ -2,15 +2,16 @@ import { withinStore } from "@/lib/metered-limits";
 import type { NextRequest } from "next/server";
 import { originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
-import { affiliateCookieName, affiliateForSession, answerShareChange, sharePromiseProblem } from "@/lib/affiliates";
+import { affiliateCookieName, affiliateForSession, answerShareChange } from "@/lib/affiliates";
 import { fromAnotherSite, limited } from "@/lib/request-guard";
-import { LockBusyError } from "@/lib/redis-lock";
+import { UnknownReplyError } from "@/lib/redis-reply";
 
 /**
  * A signed-in partner answering a change to their share that the store asked
  * for (630 [HN6](39); lib/affiliates.ts answerShareChange): yes applies it
- * after the cap is checked again with what the products promise today; no
- * keeps the share in force. Nothing already earned moves either way.
+ * after the cap is checked again with what the products promise today, under
+ * the program's partner lock, against its people read exactly; no keeps the
+ * share in force. Nothing already earned moves either way.
  */
 export async function POST(request: NextRequest) {
   const origin = originFrom(request);
@@ -42,10 +43,11 @@ export async function POST(request: NextRequest) {
   const now = Math.floor(Date.now() / 1000);
   let result;
   try {
-    result = await answerShareChange(store, affiliate.id, answer === "yes", seen, now, async (share) => (await sharePromiseProblem(store, affiliate.id, share, now)) === null);
+    // The partner lock stayed taken, or the record kept changing: "busy", nothing applied (answerShareChange).
+    result = await answerShareChange(store, affiliate.id, answer === "yes", seen, now);
   } catch (error) {
-    // The store was changing this partner at the same moment and held it past our wait: nothing was applied.
-    if (error instanceof LockBusyError) return back("partner-busy");
+    // The program's people or the record could not be read exactly (rule 24): nothing was applied.
+    if (error instanceof UnknownReplyError) return back("partner-busy");
     throw error;
   }
   return back(result.ok ? `partner-${result.state === "changed" ? "yes" : "no"}` : `partner-${result.reason}`);

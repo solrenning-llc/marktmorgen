@@ -165,7 +165,7 @@ export async function POST(request: Request) {
       const value = {
         ...((await tool(read.data)) as Record<string, unknown>),
         asOf: read.asOf,
-        ...(read.listed ? {} : { products_note: "The products' names were not read: your store's API requests left did not cover them." }),
+        ...(read.listed ? {} : { products_note: "The products' names were not read: your store's API requests left did not cover them, or they could not be read just now. An empty products list here is not a store without products." }),
       };
       const answer = said(value);
       // What the answer sends is settled before it is sent.

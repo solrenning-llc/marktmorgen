@@ -32,6 +32,11 @@
  *   report     a member reported a post or a comment (told once for each
  *              post or comment, however many members report it).
  *   affiliate  somebody confirmed an application to the affiliate programme.
+ *   message    a buyer wrote in the store's inbox (lib/inbox.ts): once while a
+ *              conversation is unread, at most QUIET_PER_HOUR an hour; "New
+ *              message from a buyer", never their words, name or address; it
+ *              opens the conversation. A device kept before this event existed
+ *              hears of these only once its person switches them on.
  *   alert      the store's numbers went off course: visits or sales from them
  *              fell, refunds piled up, the month's goal is off pace or reached
  *              (lib/store-alerts.ts). A device kept before this event existed
@@ -61,7 +66,8 @@ import { maySendPathReminder } from "@/lib/path-reminder-rules";
 import { createHash, randomBytes } from "node:crypto";
 import { after } from "next/server";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { countOf, repliesFor } from "@/lib/redis-reply";
+import { SAVE_CRM_PIPELINES as COMPARE_AND_SET } from "@/lib/crm";
+import { countOf, repliesFor, stringList, UnknownReplyError } from "@/lib/redis-reply";
 import { type Store, accountStores, setPhoneSales, storeRef } from "@/lib/store";
 import { normaliseEmail } from "@/lib/auth";
 import { type Permission, type Role, can } from "@/lib/team-roles";
@@ -69,7 +75,7 @@ import { memberStores, readTeam } from "@/lib/team";
 import { type PushFetchHooks, type Subscription, readSubscription, sendPush, vapidKeys, vapidKeysFor } from "@/lib/web-push";
 import { MAX_DEVICES } from "@/lib/phone-alerts-rules";
 
-export const PHONE_EVENTS = ["sale", "booking", "report", "affiliate", "live", "comment", "alert", "path"] as const;
+export const PHONE_EVENTS = ["sale", "booking", "report", "affiliate", "live", "comment", "message", "alert", "path"] as const;
 export type PhoneEvent = (typeof PHONE_EVENTS)[number];
 
 export { MAX_DEVICES };
@@ -91,6 +97,8 @@ const EVENT_NEEDS: Record<PhoneEvent, Permission[]> = {
   affiliate: ["settings"],
   live: ["community"],
   comment: ["products"],
+  // A buyer's new message in the inbox: whoever may answer buyers, as the inbox itself is shown (app/studio/inbox, "orders").
+  message: ["orders"],
   alert: ["stats"],
   path: [],
 };
@@ -99,7 +107,7 @@ const EVENT_NEEDS: Record<PhoneEvent, Permission[]> = {
 export function eventsFor(role: Role): PhoneEvent[] {
   return PHONE_EVENTS.filter((event) => event === "path" ? role === "owner" : EVENT_NEEDS[event].some((need) => can(role, need)));
 }
-/** Reports, and applications, a store's devices are told about in an hour, at most, of each. */
+/** Reports, applications, lesson comments and buyers' messages a store's devices are told about in an hour, at most, of each. */
 export const QUIET_PER_HOUR = 20;
 /** Tests one store may send in a minute. */
 const TESTS_PER_MINUTE = 6;
@@ -142,6 +150,14 @@ const cfgKey = (statsId: string) => `nl:phone:cfg:${statsId}`;
 const stateKey = (statsId: string) => `nl:phone:st:${statsId}`;
 const seenKey = (statsId: string, event: string, seed: string) =>
   `nl:phone:seen:${createHash("sha256").update(`${statsId}|${event}|${seed}`).digest("hex").slice(0, 40)}`;
+/**
+ * The seed of a conversation's unread episode in the inbox (event "message"): alertCreator's SET NX on it is the
+ * one atomic claim of "told once until read" across workers, and lib/inbox.ts deletes it in the same write that
+ * marks the conversation read, so the next message tells again (Codex C2 on #3619).
+ */
+export const messageEpisodeSeed = (conversationId: string) => `inbox:${conversationId}`;
+/** The key alertCreator claims for a conversation's unread episode; deleted when it is read. */
+export const messageEpisodeKey = (statsId: string, conversationId: string) => seenKey(statsId, "message", messageEpisodeSeed(conversationId));
 const testsKey = (statsId: string) => `nl:rl:phone:test:${statsId}`;
 const quietKey = (statsId: string, event: string) => `nl:rl:phone:quiet:${statsId}:${event}`;
 
@@ -189,18 +205,72 @@ function parseState(raw: unknown): DeviceState | null {
   }
 }
 
-async function readConfig(statsId: string): Promise<Config | null> {
-  const [raw] = await redisPipeline([["GET", cfgKey(statsId)]]);
-  return parseConfig(raw);
+/**
+ * The device list from its GET answer: null only when Redis confirms there is none. Any other shape, or a record
+ * that does not read, throws (rule 24): read as "no devices", a device added on it would write the list back alone.
+ */
+function configOf(raw: unknown): Config | null {
+  if (raw === null) return null;
+  const config = typeof raw === "string" ? parseConfig(raw) : null;
+  // Every device kept, or none read (Claude 6 and Claude 5 on #2882): a record without a list of devices, or with
+  // one that does not read, would be written back without them by the next change.
+  if (!config || listedDevices(raw as string) !== config.devices.length) throw new UnknownReplyError("the phone devices");
+  return config;
 }
 
-async function writeConfig(store: Store, config: Config): Promise<void> {
+/** How many devices a kept record lists, or null when it is not a record with a list of devices. */
+function listedDevices(raw: string): number | null {
+  try {
+    const value: unknown = JSON.parse(raw);
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+    const devices = (value as { devices?: unknown }).devices;
+    return Array.isArray(devices) ? devices.length : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The device list and the very text it was read from, so a change lands only on that text (changeConfig). */
+async function readConfigText(statsId: string): Promise<{ config: Config | null; raw: string | null }> {
+  const reply = repliesFor(await redisPipeline([["GET", cfgKey(statsId)]]), 1);
+  if (!reply) throw new UnknownReplyError("the phone devices");
+  return { config: configOf(reply[0]), raw: reply[0] as string | null };
+}
+
+async function readConfig(statsId: string): Promise<Config | null> {
+  return (await readConfigText(statsId)).config;
+}
+
+/**
+ * Changes the device list on a fresh read, written only while it still holds the very text read (COMPARE_AND_SET,
+ * as lib/webhooks.ts does; Claude 5 on #2882): two changes at once never write one over the other, and the one
+ * that finds the list changed reads it again and makes its change on that, a few times, then throws. `change`
+ * returns null to write nothing. A write whose answer is not known is read back: our own text is written, the text
+ * read is not (and it goes again), anything else throws.
+ */
+async function changeConfig(store: Store, change: (config: Config | null) => Config | null): Promise<Config | null> {
   const statsId = store.statsId as string;
-  await redisPipeline([["SET", cfgKey(statsId), JSON.stringify({ ...config, handle: store.handle })]]);
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const { config, raw } = await readConfigText(statsId);
+    const next = change(config);
+    if (!next) return null;
+    const text = JSON.stringify({ ...next, handle: store.handle });
+    const saved = repliesFor(await redisPipeline([["EVAL", COMPARE_AND_SET, 1, cfgKey(statsId), raw ?? "", text]]), 1)?.[0];
+    if (saved === 1) return wrote(store, next);
+    if (Array.isArray(saved) && saved[0] === -1) continue;
+    const back = repliesFor(await redisPipeline([["GET", cfgKey(statsId)]]), 1)?.[0];
+    if (back === text) return wrote(store, next);
+    if (back !== raw) throw new UnknownReplyError("the phone devices saved");
+  }
+  throw new Error("The phone devices kept changing while being saved.");
+}
+
+async function wrote(store: Store, config: Config): Promise<Config> {
   // The five-minute job looks for sales on this store only while some device wants them.
   const wantsSales = config.devices.some((d) => d.events.includes("sale"));
   // By the key the store is kept under (lib/store.ts): an account's other stores are not kept under the address.
   if (wantsSales !== store.phoneSales) await setPhoneSales(storeRef(store), wantsSales).catch(() => null);
+  return config;
 }
 
 /** Whose a device is, as an address: "" (from before teams) is the owner's. */
@@ -228,14 +298,18 @@ export async function movePhoneDevices(from: string, to: string): Promise<number
   let moved = 0;
   for (const store of stores) {
     if (!store.statsId) continue;
-    const config = await readConfig(store.statsId);
-    if (!config || !config.devices.some((d) => d.who === before)) continue;
-    const devices = config.devices.map((d) => {
-      if (d.who !== before) return d;
-      moved += 1;
-      return { ...d, who: whoFor(store, after) };
+    let here = 0;
+    await changeConfig(store, (config) => {
+      here = 0;
+      if (!config || !config.devices.some((d) => d.who === before)) return null;
+      const devices = config.devices.map((d) => {
+        if (d.who !== before) return d;
+        here += 1;
+        return { ...d, who: whoFor(store, after) };
+      });
+      return { ...config, devices };
     });
-    await writeConfig(store, { ...config, devices });
+    moved += here;
   }
   return moved;
 }
@@ -337,7 +411,7 @@ async function deliver(store: Store, device: Device, event: PhoneEvent | "test",
     // saving power; the rest waits for it.
     urgency: event === "sale" || event === "booking" || event === "live" || event === "test" ? "high" : "normal",
     // A newer report or application replaces one still waiting at the push service.
-    topic: event === "report" || event === "affiliate" || event === "comment" ? `nimbus-${event}` : undefined,
+    topic: event === "report" || event === "affiliate" || event === "comment" || event === "message" ? `nimbus-${event}` : undefined,
     // A live event's notice is no use once the event has started.
     ttlSeconds: event === "path" ? 0 : event === "test" ? 600 : event === "live" ? 900 : 86400,
     hooks: hooksForTests,
@@ -347,11 +421,10 @@ async function deliver(store: Store, device: Device, event: PhoneEvent | "test",
   await redisPipeline([["HSET", stateKey(statsId), device.id, JSON.stringify(state)]]);
   if (result.gone && event !== "path") {
     // Read again, so a device added a moment ago is never lost with this one.
-    const config = await readConfig(statsId);
-    if (config && config.devices.some((d) => d.id === device.id)) {
-      await writeConfig(store, { ...config, devices: config.devices.filter((d) => d.id !== device.id) });
-      await redisPipeline([["HDEL", stateKey(statsId), device.id]]);
-    }
+    const left = await changeConfig(store, (config) =>
+      config && config.devices.some((d) => d.id === device.id) ? { ...config, devices: config.devices.filter((d) => d.id !== device.id) } : null,
+    );
+    if (left) await redisPipeline([["HDEL", stateKey(statsId), device.id]]);
   }
   return state;
 }
@@ -391,7 +464,7 @@ export async function alertCreator(
   // SET NX answers OK when this event is new here and null when it was sent already; anything else is unknown, and nothing is sent on it.
   const fresh = repliesFor(await redisPipeline([["SET", seenKey(statsId, event, options.seed), "1", "NX", "EX", SEEN_SECONDS]]), 1)?.[0];
   if (fresh !== "OK") return 0;
-  if (event === "report" || event === "affiliate" || event === "comment") {
+  if (event === "report" || event === "affiliate" || event === "comment" || event === "message") {
     const replies = repliesFor(await redisPipeline([
       ["SET", quietKey(statsId, event), "0", "EX", 3600, "NX"],
       ["INCR", quietKey(statsId, event)],
@@ -429,13 +502,15 @@ export async function phoneView(store: Store, who: string, role: Role): Promise<
   const keys = vapidKeys();
   const allowed = eventsFor(role);
   if (!store.statsId || !isRedisConfigured()) return { publicKey: keys?.publicKey ?? null, devices: [], allowed };
-  const [rawConfig, rawStates] = await redisPipeline([
+  const reply = repliesFor(await redisPipeline([
     ["GET", cfgKey(store.statsId)],
     ["HGETALL", stateKey(store.statsId)],
-  ]);
-  const config = parseConfig(rawConfig);
+  ]), 2);
+  if (!reply) throw new UnknownReplyError("the phone devices");
+  const config = configOf(reply[0]);
   const states = new Map<string, DeviceState>();
-  const flat = Array.isArray(rawStates) ? (rawStates as unknown[]).map(String) : [];
+  const flat = stringList(reply[1]);
+  if (!flat || flat.length % 2) throw new UnknownReplyError("the phone device states");
   for (let i = 0; i + 1 < flat.length; i += 2) {
     const state = parseState(flat[i + 1]);
     if (state) states.set(flat[i], state);
@@ -454,7 +529,7 @@ export async function phoneView(store: Store, who: string, role: Role): Promise<
   };
 }
 
-export type AddResult = { ok: true; id: string; created: boolean; label: string; view: PhoneView } | { ok: false; reason: "invalid" | "full" | "unavailable" };
+export type AddResult = { ok: true; id: string; created: boolean; label: string; view: PhoneView | null } | { ok: false; reason: "invalid" | "full" | "unavailable" };
 
 /**
  * Keeps a device's subscription, as one of this person's devices. The same
@@ -479,27 +554,8 @@ export async function addDevice(
   if (!subscription) return { ok: false, reason: "invalid" };
   const person = normaliseEmail(who);
   const allowed = eventsFor(role);
-  const config = (await readConfig(store.statsId)) ?? { handle: store.handle, devices: [] };
-  const same = config.devices.find((d) => d.endpoint === subscription.endpoint);
-  if (same) {
-    const moved = !isMine(store, same, person);
-    const updated: Device = {
-      ...same,
-      ...subscription,
-      kid: keys.kid,
-      who: whoFor(store, person),
-      events: same.events.filter((event) => allowed.includes(event)),
-      // Handed to another person: counted from now, as a device of theirs.
-      addedAt: moved ? now : same.addedAt,
-    };
-    await writeConfig(store, { ...config, devices: config.devices.map((d) => (d.id === same.id ? updated : d)) });
-    return { ok: true, id: same.id, created: moved, label: same.label, view: await phoneView(store, person, role) };
-  }
-  if (config.devices.filter((d) => isMine(store, d, person)).length >= MAX_DEVICES || config.devices.length >= MAX_STORE_DEVICES) {
-    return { ok: false, reason: "full" };
-  }
   const chosen = eventsFrom(events).filter((event) => allowed.includes(event));
-  const device: Device = {
+  const fresh: Device = {
     id: `pd_${randomBytes(8).toString("hex")}`,
     ...subscription,
     kid: keys.kid,
@@ -509,8 +565,41 @@ export async function addDevice(
     addedAt: now,
     who: whoFor(store, person),
   };
-  await writeConfig(store, { ...config, devices: [...config.devices, device] });
-  return { ok: true, id: device.id, created: true, label: device.label, view: await phoneView(store, person, role) };
+  // Decided again on each fresh read (changeConfig): the same subscription updates its device, a new one is added.
+  let outcome: { id: string; created: boolean; label: string } | "full" = "full";
+  await changeConfig(store, (read) => {
+    const config = read ?? { handle: store.handle, devices: [] };
+    const same = config.devices.find((d) => d.endpoint === subscription.endpoint);
+    if (same) {
+      const moved = !isMine(store, same, person);
+      const updated: Device = {
+        ...same,
+        ...subscription,
+        kid: keys.kid,
+        who: whoFor(store, person),
+        events: same.events.filter((event) => allowed.includes(event)),
+        // Handed to another person: counted from now, as a device of theirs.
+        addedAt: moved ? now : same.addedAt,
+      };
+      outcome = { id: same.id, created: moved, label: same.label };
+      return { ...config, devices: config.devices.map((d) => (d.id === same.id ? updated : d)) };
+    }
+    if (config.devices.filter((d) => isMine(store, d, person)).length >= MAX_DEVICES || config.devices.length >= MAX_STORE_DEVICES) {
+      outcome = "full";
+      return null;
+    }
+    outcome = { id: fresh.id, created: true, label: fresh.label };
+    return { ...config, devices: [...config.devices, fresh] };
+  });
+  const done = outcome as { id: string; created: boolean; label: string } | "full";
+  if (done === "full") return { ok: false, reason: "full" };
+  // Written down: it is added, and the owner is told of it (the route), even when the view cannot be read just now
+  // (Claude 5 on #2882); the studio then keeps the view it has.
+  const view = await phoneView(store, person, role).catch((error: unknown) => {
+    console.error("phone alerts: the view after adding a device could not be read", error);
+    return null;
+  });
+  return { ok: true, ...done, view };
 }
 
 /**
@@ -522,11 +611,11 @@ export async function renewDevice(store: Store, who: string, oldEndpoint: string
   if (!store.statsId || !keys) return "missing";
   const subscription = readSubscription(raw);
   if (!subscription) return "invalid";
-  const config = await readConfig(store.statsId);
-  const device = config?.devices.find((d) => d.endpoint === oldEndpoint && isMine(store, d, who));
-  if (!config || !device) return "missing";
-  await writeConfig(store, { ...config, devices: config.devices.map((d) => (d.id === device.id ? { ...d, ...subscription, kid: keys.kid } : d)) });
-  return "renewed";
+  const renewed = await changeConfig(store, (config) => {
+    const device = config?.devices.find((d) => d.endpoint === oldEndpoint && isMine(store, d, who));
+    return config && device ? { ...config, devices: config.devices.map((d) => (d.id === device.id ? { ...d, ...subscription, kid: keys.kid } : d)) } : null;
+  });
+  return renewed ? "renewed" : "missing";
 }
 
 /** Which device, if any, a subscription belongs to: how the studio knows "this device". */
@@ -539,22 +628,22 @@ export async function findDevice(store: Store, who: string, endpoint: string): P
 /** Changes which events one device hears. None at all is allowed: the device stays, silent. */
 export async function setDeviceEvents(store: Store, who: string, role: Role, id: string, events: unknown): Promise<PhoneView | "missing"> {
   if (!store.statsId) return "missing";
-  const config = await readConfig(store.statsId);
-  if (!config || !config.devices.some((d) => d.id === id && isMine(store, d, who))) return "missing";
   const allowed = eventsFor(role);
   const chosen = eventsFrom(events).filter((event) => allowed.includes(event));
-  await writeConfig(store, { ...config, devices: config.devices.map((d) => (d.id === id ? { ...d, events: chosen } : d)) });
+  const changed = await changeConfig(store, (config) =>
+    config && config.devices.some((d) => d.id === id && isMine(store, d, who)) ? { ...config, devices: config.devices.map((d) => (d.id === id ? { ...d, events: chosen } : d)) } : null,
+  );
+  if (!changed) return "missing";
   return phoneView(store, who, role);
 }
 
 /** Forgets a device. */
 export async function removeDevice(store: Store, who: string, role: Role, id: string): Promise<PhoneView> {
   if (!store.statsId) return { publicKey: vapidKeys()?.publicKey ?? null, devices: [], allowed: eventsFor(role) };
-  const config = await readConfig(store.statsId);
-  if (config && config.devices.some((d) => d.id === id && isMine(store, d, who))) {
-    await writeConfig(store, { ...config, devices: config.devices.filter((d) => d.id !== id) });
-    await redisPipeline([["HDEL", stateKey(store.statsId), id]]);
-  }
+  const left = await changeConfig(store, (config) =>
+    config && config.devices.some((d) => d.id === id && isMine(store, d, who)) ? { ...config, devices: config.devices.filter((d) => d.id !== id) } : null,
+  );
+  if (left) await redisPipeline([["HDEL", stateKey(store.statsId), id]]);
   return phoneView(store, who, role);
 }
 
@@ -569,10 +658,12 @@ export async function forgetPerson(store: Store, who: string): Promise<number> {
   if (!store.statsId || !isRedisConfigured()) return 0;
   const person = normaliseEmail(who);
   if (person === normaliseEmail(store.email)) return 0;
-  const config = await readConfig(store.statsId);
-  const theirs = (config?.devices ?? []).filter((d) => ownerOf(store, d) === person);
-  if (!config || theirs.length === 0) return 0;
-  await writeConfig(store, { ...config, devices: config.devices.filter((d) => ownerOf(store, d) !== person) });
+  let theirs: Device[] = [];
+  await changeConfig(store, (config) => {
+    theirs = (config?.devices ?? []).filter((d) => ownerOf(store, d) === person);
+    return config && theirs.length ? { ...config, devices: config.devices.filter((d) => ownerOf(store, d) !== person) } : null;
+  });
+  if (theirs.length === 0) return 0;
   await redisPipeline([["HDEL", stateKey(store.statsId), ...theirs.map((d) => d.id)]]);
   return theirs.length;
 }

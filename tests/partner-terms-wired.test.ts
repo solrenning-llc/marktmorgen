@@ -118,15 +118,19 @@ async function main(): Promise<void> {
   is("decline is refused the same way", (await post({ action: "decline", id: p })).error, "share_term_held");
   is("they stay approved with their share", [(await read(p)).status, (await read(p)).share?.percent], ["approved", 5]);
   is("a share until revoked", await post({ action: "share", id: q, percent: 10, products: [A] }), { ok: true, state: "started" });
-  is("can be removed", [await post({ action: "remove", id: q }), (await read(q)).status, (await read(q)).share], [{ ok: true }, "removed", null]);
-  is("and the step is in its history", (await read(q)).terms?.history.at(-1)?.kind, "revoked");
+  // Ported onto main (#1924): taking a partner out keeps their share on the record, as main does; they earn nothing
+  // while out (notePartners credits the approved only), and letting them back in checks it against the cap again.
+  is("can be removed", [await post({ action: "remove", id: q }), (await read(q)).status, (await read(q)).share?.percent], [{ ok: true }, "removed", 10]);
+  is("and its history still says how it started", (await read(q)).terms?.history.at(-1)?.kind, "started");
 
-  part("A share only for someone approved");
+  // Ported onto main (#1924): main lets the studio give a share to somebody not approved, which counts (and is checked
+  // against the cap) only once they are approved (lib/affiliates.ts decide). Their status is never changed by it.
+  part("A share for somebody not approved: written, and their status kept");
   const w = "cccccccccccc";
   for (const status of ["pending", "declined", "removed"]) {
     await redis.pipeline([["HSET", `nl:aff:${statsId}:people`, w, JSON.stringify({ id: w, email: `${w}@example.com`, code: `c${w}`, status, appliedAt: 1, decidedAt: 5, note: "", rate: null, paypal: "", share: null, cleared: null, by: null })]]);
-    is(`refused for somebody ${status}`, (await post({ action: "share", id: w, percent: 10, products: [A], ends: future(30) })).error, "share_not_approved");
-    is(`and nothing is written for somebody ${status}`, [(await read(w)).share, (await read(w)).terms], [null, undefined]);
+    is(`written for somebody ${status}`, (await post({ action: "share", id: w, percent: 10, products: [A], ends: future(30) })).ok, true);
+    is(`and they stay ${status}`, (await read(w)).status, status);
   }
 
   part("The partner hears what became of their answer even after the share ended");

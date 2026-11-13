@@ -529,7 +529,8 @@ export default function PrivacyPage() {
           about you goes with it, and the box says the answer is automatic.
           We keep the answer for a day, so the same question about the same
           page is not asked twice. When the page could not answer, we keep
-          the question, the product and the day for up to about four months
+          the question, the product and the day until about four months after
+          the store&apos;s latest unanswered question, and only the 50 latest,
           and show them to the store&apos;s creator, so they can see what
           their page is missing; we do not keep who asked. The network
           address your browser connects from is used, for up to a day, only
@@ -550,8 +551,9 @@ export default function PrivacyPage() {
           random code kept in your browser and nothing that names you, so the
           chat can carry on while you shop; then it is deleted by itself, and
           you can delete it at any time with &ldquo;Delete this chat&rdquo;.
-          When it could not answer, the question and the day are kept for up
-          to about four months and shown to the store&apos;s creator, without
+          When it could not answer, the question and the day are kept until
+          about four months after the store&apos;s latest unanswered question,
+          and only the 50 latest, and shown to the store&apos;s creator, without
           who asked. The network address your browser connects from is used,
           for up to a day, only to limit how many questions come from one
           place. If you ask for your question to go to the creator, you type
@@ -912,8 +914,10 @@ export default function PrivacyPage() {
           rows were already seen, the report of rows not brought in (each
           with its row number, column, reason and value), the buyers still to
           be emailed, and the import&apos;s own record (the file&apos;s name,
-          who started it and its counts) for 14 days after the import began,
-          and then delete them. Contacts are added to the creator&apos;s list
+          who started it and its counts) for 14 days after the import&apos;s
+          last step, and then delete them; while the store&apos;s plan payment
+          is unpaid or disputed, the import waits and they are kept until that
+          is settled or the store closes. Contacts are added to the creator&apos;s list
           only when the creator confirms that the people in the file agreed
           to hear from them; each is marked as imported, with when, and keeps
           the name and labels from the file. An address that unsubscribed from
@@ -2134,7 +2138,8 @@ export default function PrivacyPage() {
           creator deletes the event once it is over or canceled, or until it
           makes room after 500 are kept; the record of each event email, for
           30 days. What an import from another platform sends us is deleted 14
-          days after it began, except the contacts it added to a list, kept as
+          days after the import&apos;s last step (longer only while the
+          store&apos;s plan payment is unpaid or disputed), except the contacts it added to a list, kept as
           the list is, what past buyers were given and the members invited to
           move, kept for as long as the store exists. A Google Calendar or Zoom connection is kept until the
           creator disconnects it or removes our app, each meeting&apos;s record
@@ -2204,7 +2209,8 @@ export default function PrivacyPage() {
           <p>
             What is deleted: your place on the store&apos;s list and every link
             in its emails to you; what its team noted about you (its fields,
-            notes, deals and tasks); your form answers with their quiz results and
+            notes, kept three years after the team&apos;s latest note about you,
+            deals and tasks); your form answers with their quiz results and
             scores, inbox conversations, reviews
             and their photos, and waitlist places; your way through its
             sequences and workflows, and any email still waiting to reach you;
@@ -2240,7 +2246,8 @@ export default function PrivacyPage() {
             email already going out is sent down, which passes a deleted address
             over (until it finishes, at most 60 days); a reminder waiting for its
             hour, which is then not sent (at most a week); an import&apos;s file
-            (14 days after it began); the events a store&apos;s webhooks already
+            (14 days after the import&apos;s last step, longer only while the
+            store&apos;s plan payment is unpaid or disputed); the events a store&apos;s webhooks already
             sent to the creator (7 days); and one-way marks that limit how often
             something is sent or asked (at most 32 days).
           </p>

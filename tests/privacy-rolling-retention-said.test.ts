@@ -29,6 +29,8 @@ is("the code renews 14 days at each step and keeps it alive while costs are paus
 is("the policy no longer counts from when the import began", /14 days after the import began|14 days after it began/.test(policy), false);
 is("it says 14 days after the import's last step, kept while the plan's payment is paused", (policy.match(/14 days after the import's last step/g) ?? []).length >= 2 && /while the store's plan payment is unpaid or disputed/.test(policy), true);
 
+is("the studio's own line says the same", /kept for 14 days after the import's last step \(longer only while your plan's payment is unpaid or disputed\)/.test(source("lib/person-data.ts")), true);
+
 part("A team's notes about a person: three years from the latest note");
 is("the code keeps them three years, renewed by each note", /NOTES_SECONDS = 3 \* 365 \* 86_400/.test(source("lib/buyer-profile.ts")), true);
 is("the policy says it", /notes, kept three years after the team's latest note about you/.test(policy), true);

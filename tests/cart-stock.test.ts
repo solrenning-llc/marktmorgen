@@ -28,7 +28,7 @@ import { NextRequest } from "next/server";
 import { cartable } from "@/lib/cart-rules";
 import { createCartCheckout, offersCart } from "@/lib/cart-checkout";
 import { KIND, parseProduct } from "@/lib/catalog";
-import { confirmCartStock, releaseCartStockHolds, stockLeft, withCartStockHolds } from "@/lib/stock";
+import { confirmCartStock, confirmStock, releaseCartStockHolds, stockLeft, withCartStockHolds } from "@/lib/stock";
 import { addProduct, claimHandle, ensureStatsId, setProductExtras, setProductKeys, setProductLink, setProductPairs, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { StripeError, onAccount } from "@/lib/stripe-account";
 import { GET as readCart, POST as payCart } from "@/app/api/store/cart/route";
@@ -162,6 +162,11 @@ async function main(): Promise<void> {
   await confirmCartStock(creator, [plain("guide1"), a, b], "cs_test_cartstockpaid0001");
   await releaseCartStockHolds(creator, [a, b], "cs_test_cartstockpaid0001");
   is("a paid cart's units are sold, never handed back, and Stripe is not asked to close it", [expired.length, await stockLeft(creator, a), await stockLeft(creator, b)], [1, 0, 1]);
+  // An old receipt's thanks page opened again (its link is in the purchase email) never spends a unit its checkout did not hold:
+  // a product sold before it was limited would otherwise read "Sold out" with every unit still there.
+  await confirmCartStock(creator, [b], "cs_test_cartstockoldrcpt1");
+  await confirmStock(creator, b, "cs_test_cartstockoldrcpt2");
+  is("a checkout that held nothing takes no unit when its thanks page is opened", await stockLeft(creator, b), 1);
 
   part("What can go wrong between the count and the checkout");
   const key = (id: string) => `nl:stock:${creator.statsId}:${id}`;

@@ -187,10 +187,18 @@ export async function withStockHold<T extends { id: string }>(
 
 /** Marks a limited product's checkout as sold, once the buyer is back. */
 export async function confirmStock(store: Store, product: Listing, session: string): Promise<void> {
-  if (limitedStock(product) === null || !store.statsId || !isRedisConfigured()) return;
-  await redisPipeline([
-    ["HSET", stockKey(store.statsId, product.id), session, JSON.stringify({ until: 0, paid: true })],
-  ]);
+  await confirmCartStock(store, [product], session);
+}
+
+/**
+ * Of the keys given, those that hold an entry for this checkout. Only a checkout that held a unit is marked sold:
+ * a thanks page opened again from an old receipt (before the product was limited, or past its unit's settling) never
+ * spends one. A held unit is never removed once its checkout is paid (countStock), so an entry read here is its own.
+ */
+async function heldBy(keys: string[], session: string): Promise<string[]> {
+  const receipt = await redisPipeline(keys.map((key) => ["HEXISTS", key, session]));
+  if (!Array.isArray(receipt) || receipt.length !== keys.length) throw new Error("Stock reading unavailable");
+  return keys.filter((_, i) => Number(receipt[i]) === 1);
 }
 
 /**
@@ -445,7 +453,9 @@ export async function confirmCartStock(store: Store, products: Listing[], sessio
   const limited = products.filter((product) => limitedStock(product) !== null);
   if (limited.length === 0 || !store.statsId || !isRedisConfigured()) return;
   const statsId = store.statsId;
-  await redisPipeline(limited.map((product) => ["HSET", stockKey(statsId, product.id), session, JSON.stringify({ until: 0, paid: true })]));
+  const held = await heldBy(limited.map((product) => stockKey(statsId, product.id)), session);
+  if (held.length === 0) return;
+  await redisPipeline(held.map((key) => ["HSET", key, session, JSON.stringify({ until: 0, paid: true })]));
 }
 
 /**

@@ -90,6 +90,9 @@ is("links and email addresses are taken out of a comment", (cleanJoinAnswer(on, 
   is("a phone with a country code and spaces is taken out", clean("call me at +1 415 555 0100 please"), "call me at please");
   is("with hyphens and brackets too", clean("my number (415) 555-0100 thanks"), "my number thanks");
   is("a social handle is taken out", clean("find me @potter_jane on there"), "find me on there");
+  // Glued to punctuation (Claude 3 nuvem M on #3652, LEVE): still a handle, taken out; a plain "5@" is not one.
+  is("a handle after punctuation is taken out", clean("ig:@jane_doe (@jane_doe)"), "ig: ()");
+  is("an at sign after a number is kept", clean("I paid 5@ each"), "I paid 5@ each");
   is("control: a plain number stays", clean("I want 3 courses by 2027"), "I want 3 courses by 2027");
 }
 is("a comment that is not text is none", (cleanJoinAnswer(on, { v: 1, choice: "learn", comment: 5 }) as { answer: { comment: string } }).answer.comment, "");

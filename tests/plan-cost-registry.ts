@@ -114,7 +114,6 @@ import {
   VERCEL_CPU_MICRO_USD_PER_HOUR, VERCEL_FUNCTION_GB, VERCEL_MEMORY_MICRO_USD_PER_GB_HOUR,
 } from "@/lib/spend-cost-table";
 import { PAGES_PER_VISIT, PAGE_BYTES, laterPageCost, visitCost } from "./traffic-cost";
-import { CARD_BUILDS_PER_WINDOW, CARD_FRESH_SECONDS } from "@/lib/embed-card-view";
 import { ASSISTANT_IN_PROGRESS_WAIT_MS, ASSISTANT_START_CUTOFF_MS, ASSISTANT_START_LIST_PAGES, ASSISTANT_START_STRIPE_CALLS, assistantMonthWorst } from "@/lib/store-assistant-rules";
 import { ASSISTANT_ON_SALE } from "@/lib/opening";
 import { NEXT_OFFER_CHOICES, NEXT_OFFER_COMMANDS, NEXT_OFFER_PRODUCTS } from "@/lib/next-offer-rules";
@@ -399,8 +398,10 @@ export const SHELF_READ = request("wait", NEXT_OFFER_COMMANDS + TAKE_COMMANDS + 
 export const ASSIST_REMIND_READ = request("wait", ASSIST_REMIND_COMMANDS + TAKE_COMMANDS, 1_000_000 + ASSIST_REMIND_PRODUCTS * 16_384 + 4_096);
 /**
  * The pasted card's copy kept by the CDN (lib/embed-card-view.ts,
- * DONO-20261113-DEC-2): what one copy costs to make, at the most. Its counter
- * (the two commands of withinLimit) and every read of the card at once, a
+ * DONO-20261113-DEC-2): what one copy costs to make, at the most, which the
+ * CARD_COPY_UNITS public requests it takes must pay for (held in
+ * tests/embed-card-cached.test.ts against laterPageCost). Its count of those
+ * requests and every read of the card at once, a
  * limited product with license keys and MAX_BUMPS boxes and a rating
  * (CARD_COPY_COMMANDS, a review ceiling held over the measured reads in
  * tests/embed-card-cached.test.ts), the store's record and those products
@@ -421,10 +422,6 @@ export const CARD_COPY_BUILD =
   request("light", CARD_COPY_COMMANDS, MAX_STORE_BYTES + (1 + MAX_BUMPS) * MAX_PRODUCT_BYTES + 65_536) +
   PAGE_BYTES * ORIGIN_PER_BYTE +
   Math.ceil(CARD_COPY_WRITTEN_BYTES / ISR_WRITE_UNIT_BYTES) * ISR_WRITE_PER_UNIT;
-/** CARD_FRESH_SECONDS windows a 31-day billing month can touch: its counter's windows start with their first use, so one more than fit. */
-export const CARD_WINDOWS_PER_MONTH = Math.floor((31 * 86_400) / CARD_FRESH_SECONDS) + 1;
-/** The most copies one store's cards can be made in a month: CARD_BUILDS_PER_WINDOW in every window. */
-export const CARD_COPIES_PER_MONTH = CARD_BUILDS_PER_WINDOW * CARD_WINDOWS_PER_MONTH;
 /**
  * Review ceilings for the two public reads paid for since 4 November 2026
  * (lib/public-read-rules.ts): a field of an affiliate program's records (an
@@ -1236,17 +1233,17 @@ export const COST_LINES: CostLine[] = [
   {
     id: "embed",
     feature: "Selling from any website (#518)",
-    monthlyUsd: ALL_TIERS_SAME(CARD_COPIES_PER_MONTH * CARD_COPY_BUILD),
+    monthlyUsd: ALL_TIERS_SAME(0),
     sources: [
       { file: "lib/embed-open.ts", names: ["isResting", "OPENS_PER_TEN_MINUTES", "admitOpen"] },
-      { file: "lib/embed-card-view.ts", names: ["CARD_FRESH_SECONDS", "CARD_BUILDS_PER_WINDOW", "cardCopyPath"] },
-      { file: "app/embed/[handle]/[product]/card/[view]/page.tsx", names: ["export const revalidate = 300;", 'export const dynamic = "force-static";', 'withinLimit("embed-card", handle, CARD_BUILDS_PER_WINDOW, CARD_FRESH_SECONDS)'] },
+      { file: "lib/embed-card-view.ts", names: ["CARD_FRESH_SECONDS", "CARD_COPY_UNITS", "cardCopyPath"] },
+      { file: "app/embed/[handle]/[product]/card/[view]/page.tsx", names: ["export const revalidate = 300;", 'export const dynamic = "force-static";', 'takePublicRequest(store, "public", undefined, CARD_COPY_UNITS, { shared: true })'] },
       { file: "app/embed/[handle]/[product]/page.tsx", names: ["admitOpen(handle)", "CardRefused"] },
       { file: "components/embed-card.tsx", names: ["StoreBeacon", "stockLeftUnasked"] },
       { file: "app/embed/[handle]/join/page.tsx", names: ["StoreBeacon"] },
       { file: "proxy.ts", names: ["cardCopyPath("] },
     ],
-    basis: "DONO-20261113-DEC-2 (13 November 2026; before it, every display of the pasted card ran the card page and read the database, priced here at zero). A display of the card pasted with the frame code is sent by proxy.ts to the copy the CDN keeps (lib/embed-card-view.ts), which reads nothing from the database; a copy is made at most once a CARD_FRESH_SECONDS window for each address, and the store's copies at most CARD_BUILDS_PER_WINDOW times a window, counted before the store is read, so a month is CARD_COPIES_PER_MONTH copies at CARD_COPY_BUILD each (the counter, every read of the card at once, the light function, the page sent and the copy written to the ISR store). A copy past the window's count reads nothing (a plain link to the product's page) and costs its counter's two commands and its function, like every refusal of a pace; the window's count stops what reads. An open by the checkout script (?mm=) is held to OPENS_PER_TEN_MINUTES a connection and store before the store or the product is read (admitOpen), counts as a visit through the card's own beacon (app/api/store/hit, through the host's browser check) and rests with the public pages, so it is inside the visits line, and a checkout from it is an order. Not certified, never zero: each display's own CDN request ($2.00 a million at iad1) and the proxy's run before the cache, drawn on every page of the creator's site that holds the card whether or not anyone looks, which no counter in the code bounds.",
+    basis: "DONO-20261113-DEC-2 (13 November 2026; before it, every display of the pasted card ran the card page and read the database, with no limit, priced here at zero, which was false). A display of the card pasted with the frame code is sent by proxy.ts to the copy the CDN keeps (lib/embed-card-view.ts), which reads nothing from the database; a copy is made at most once a CARD_FRESH_SECONDS window for each address, and making one reads the store's record, as every public page of the store does, then takes CARD_COPY_UNITS of the store's public requests of the window before the product is read (shared: no connection's share of the day), refused past them with a plain link that reads nothing more. Each public request is priced at a later page (line public-requests) and CARD_COPY_UNITS of them cover CARD_COPY_BUILD, a copy at its largest written to the ISR store, so a store's copies of a month are inside the figure its plan already prices: at most the requests its public pages may take in the window (publicVisitLimit) over CARD_COPY_UNITS, held per plan in tests/embed-card-cached.test.ts. An open by the checkout script (?mm=) is held to OPENS_PER_TEN_MINUTES a connection and store before the store or the product is read (admitOpen), counts as a visit through the card's own beacon (app/api/store/hit, through the host's browser check) and rests with the public pages, so it is inside the visits line, and a checkout from it is an order. Not certified, never zero: each display's own CDN request ($2.00 a million at iad1) and the proxy's run before the cache, drawn on every page of the creator's site that holds the card whether or not anyone looks, which no counter in the code bounds.",
   },
   {
     id: "certificate-page",
@@ -1920,7 +1917,7 @@ export const SCOPES: Record<string, ScopeClass> = {
   // A copy into another store of the same account (18 October 2026): the destination's own previews and imports, the same line.
   "countUse:storeMonthKey(to.statsId": line("funnel-share"), "countUse:storeUseKey(to.statsId": line("funnel-share"),
   ai: line("ai"), ask: line("ai"), "ask-day": line("ai"), "ask-store": line("ai"), "chat-summary": line("ai"),
-  "embed-open": line("embed"), "embed-card": line("embed"), checkout: line("orders"), upsell: line("orders"), "group-place": line("orders"),
+  "embed-open": line("embed"), checkout: line("orders"), upsell: line("orders"), "group-place": line("orders"),
   book: line("orders"), "paypal-return": line("orders"),
   "podcast-feed": line("visits"), "<dynamic:allowance[0]>": line("visits"),
   "<dynamic:scope>": guard("withinStore and withinService pass their scope on to withinLimit (lib/metered-limits.ts)."),

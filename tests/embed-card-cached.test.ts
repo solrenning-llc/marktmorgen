@@ -17,16 +17,17 @@
  *     time, framed by any site;
  *   - the copy is forced static and made again once a CARD_FRESH_SECONDS
  *     window (revalidate, expireTime), reads nothing of the request, and
- *     each store's copies take one of CARD_BUILDS_PER_WINDOW before the store
- *     is read: past them a copy reads nothing and is a plain link;
+ *     takes CARD_COPY_UNITS of the store's public requests before its product
+ *     is read: past them a copy reads no product and is a plain link;
  *   - a copy at its largest (limited stock, boxes added at checkout, a rating)
  *     stays inside CARD_COPY_COMMANDS, never says how many are left, and
  *     still says "Sold out" when it was; whether it sells on a site follows
  *     the store's list as the card page does;
  *   - an open by the checkout script past its limit per connection and store
  *     reads neither the store nor the product;
- *   - the registry's line is the store's month of copies at the most each
- *     costs, and it is no longer zero.
+ *   - those units pay for a copy at its largest (CARD_COPY_BUILD), so a
+ *     store's month of copies is inside its plan's public requests, already
+ *     priced (line public-requests); the embed line says so.
  */
 import { renderToReadableStream } from "react-dom/server";
 import { NextRequest } from "next/server";
@@ -35,14 +36,18 @@ import EmbedCard from "@/app/embed/[handle]/[product]/page";
 import CardCopy, { dynamic, revalidate } from "@/app/embed/[handle]/[product]/card/[view]/page";
 import { proxy } from "@/proxy";
 import { OPENS_PER_TEN_MINUTES } from "@/lib/embed-sites";
-import { CARD_BUILDS_PER_WINDOW, CARD_FRESH_SECONDS, cardView, readCardView } from "@/lib/embed-card-view";
+import { CARD_COPY_UNITS, CARD_FRESH_SECONDS, cardView, readCardView } from "@/lib/embed-card-view";
+import { requestsIn } from "@/lib/traffic";
+import { publicVisitLimit, requestLimitFor } from "@/lib/traffic-rules";
+import { allowanceWindow } from "@/lib/allowance-window";
 import { wordsIn } from "@/lib/buyer-words";
 import { MAX_BUMPS } from "@/lib/product-extras";
-import { addProduct, claimHandle, ensureStatsId, setEmbedSites, setProductExtras, setProductLink, setProductShipping, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
-import { CARD_COPIES_PER_MONTH, CARD_COPY_BUILD, CARD_COPY_COMMANDS, CARD_WINDOWS_PER_MONTH, COST_LINES } from "./plan-cost-registry";
+import { addProduct, claimHandle, ensureStatsId, setEmbedSites, setProductExtras, setProductLink, setProductShipping, setStripeAccount, setSubscription, storeFolder, storeForEmail } from "@/lib/store";
+import { CARD_COPY_BUILD, CARD_COPY_COMMANDS, COST_LINES } from "./plan-cost-registry";
+import { laterPageCost } from "./traffic-cost";
 import { answering } from "./security/next-headers";
 import { paidPeriod } from "./billing-period-fixture";
-import { advance, store as redis } from "./redis-stub";
+import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
 type Command = (string | number)[];
@@ -147,8 +152,6 @@ async function main(): Promise<void> {
     const added = await setProductExtras(OWNER, kit.product.id, { bump: { productId: extra.product.id, priceCents: 500, pitch: "Add it." }, slot });
     if (!added.ok) throw new Error(`bump fixture: ${added.reason}`);
   }
-  // A new window for the store's copies.
-  advance((CARD_FRESH_SECONDS + 1) * 1000);
   const largest = await copy(kit.product.id);
   console.log(`one copy at its largest: ${largest.commands.length} commands (${largest.commands.map((c) => c[0]).join(", ")})`);
   is(`it stays inside CARD_COPY_COMMANDS (${largest.commands.length} of ${CARD_COPY_COMMANDS})`, largest.commands.length <= CARD_COPY_COMMANDS, true);
@@ -171,20 +174,30 @@ async function main(): Promise<void> {
   is("with no site read, the same", (await copy(pan.product.id)).page.includes('action="/api/store/checkout"'), false);
   if (!(await setEmbedSites(OWNER, [])).ok) throw new Error("sites fixture");
 
-  part("Each store's copies of a window are counted before anything is read");
-  advance((CARD_FRESH_SECONDS + 1) * 1000);
-  for (let i = 0; i < CARD_BUILDS_PER_WINDOW; i += 1) await copy(id);
+  part("A copy takes the store's public requests before its product is read");
+  const store = (await storeForEmail(OWNER))!;
+  const folder = await storeFolder(OWNER);
+  const window = allowanceWindow(store)!.id;
+  const before = await requestsIn(folder, window);
+  await copy(id);
+  is(`one copy takes CARD_COPY_UNITS (${CARD_COPY_UNITS}) of the store's requests`, (await requestsIn(folder, window)) - before, CARD_COPY_UNITS);
+  const publicLimit = publicVisitLimit(requestLimitFor(store, Date.now() / 1000));
+  await redis.pipeline([["SET", `nl:traffic:r:${folder}:${window}`, String(publicLimit)]]);
   const spent = await copy(id);
-  is(`the copy after ${CARD_BUILDS_PER_WINDOW} in a window reads neither the store nor the product`, spent.commands.some(readsStoreOrProduct), false);
-  is("and sends only its counter", spent.commands.length <= 2, true);
-  is("it is a plain link to the product's page, in a new tab", [spent.page.includes(`href="/@${HANDLE}/p/${id}?utm_source=blog&amp;utm_medium=buy-button"`), spent.page.includes('target="_blank"'), spent.page.includes('action="/api/store/checkout"')], [true, true, false]);
+  const productRead = (c: Command) => c[0] === "SISMEMBER" || c.slice(1).some((k) => typeof k === "string" && /^nl:(catalog|product|stock|keys|soon|review)/.test(k));
+  is("past them, no product is read", spent.commands.some(productRead), false);
+  is("and the copy is a plain link to the product's page, in a new tab", [spent.page.includes(`href="/@${HANDLE}/p/${id}?utm_source=blog&amp;utm_medium=buy-button"`), spent.page.includes('target="_blank"'), spent.page.includes('action="/api/store/checkout"')], [true, true, false]);
+  await redis.pipeline([["DEL", `nl:traffic:r:${folder}:${window}`]]);
 
-  part("The registry prices the store's month of copies");
+  part("The store's month of copies is inside the public requests its plan prices");
+  is(`CARD_COPY_UNITS later pages pay for a copy at its largest ($${CARD_COPY_BUILD.toFixed(6)} against ${CARD_COPY_UNITS} x $${laterPageCost().toFixed(6)})`, CARD_COPY_UNITS * laterPageCost() >= CARD_COPY_BUILD, true);
+  is("and fewer would not", (CARD_COPY_UNITS - 1) * laterPageCost() < CARD_COPY_BUILD, true);
   const line = COST_LINES.find((l) => l.id === "embed")!;
-  is("a month is CARD_BUILDS_PER_WINDOW copies in every window a 31-day month can touch", [CARD_WINDOWS_PER_MONTH, CARD_COPIES_PER_MONTH], [Math.floor((31 * 86_400) / CARD_FRESH_SECONDS) + 1, CARD_BUILDS_PER_WINDOW * CARD_WINDOWS_PER_MONTH]);
-  is("the line is that many copies at the most each costs, on every plan", (["creator", "pro", "scale"] as const).map((tier) => line.monthlyUsd(tier)), (["creator", "pro", "scale"] as const).map(() => CARD_COPIES_PER_MONTH * CARD_COPY_BUILD));
-  console.log(`one copy at its largest: $${CARD_COPY_BUILD.toFixed(6)}; a store's worst month: $${line.monthlyUsd("creator").toFixed(4)}`);
-  is("and it is no longer priced at zero", line.monthlyUsd("creator") > 0, true);
+  is("the embed line adds nothing on top of them, and says where they are priced", [line.monthlyUsd("creator"), /CARD_COPY_UNITS/.test(line.basis), /public-requests/.test(line.basis)], [0, true, true]);
+  for (const tier of ["creator", "pro", "scale"] as const) {
+    const most = Math.floor(publicVisitLimit(requestLimitFor({ ...store, tier } as never, Date.now() / 1000)) / CARD_COPY_UNITS);
+    console.log(`${tier}: at most ${most} copies a month, inside its public requests`);
+  }
 
   part("An open by the checkout script past its limit reads nothing");
   const ip = "203.0.113.41";

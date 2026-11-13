@@ -7,9 +7,11 @@
  * function and read the store, the product, its stock and the rest from the
  * database, with no limit. Now proxy.ts sends a display to a copy kept by
  * the CDN (app/embed/[handle]/[product]/card/[view]/page.tsx), made again at
- * most once a CARD_FRESH_SECONDS window for each address, and each store's
- * copies are made at most CARD_BUILDS_PER_WINDOW times in a window, counted
- * before anything is read. A display reads nothing from the database.
+ * most once a CARD_FRESH_SECONDS window for each address. A display reads
+ * nothing from the database; making a copy reads the store's record, as every
+ * public page of the store does, and then takes CARD_COPY_UNITS of the
+ * store's public requests of the month before the product is read, so the
+ * copies rest with the store's public pages.
  *
  * The copy is the same for every visitor of one address, so what the card
  * page read from the request is put in the address instead, before the copy
@@ -39,15 +41,18 @@ import { scriptMode } from "./embed-sites";
 export const CARD_FRESH_SECONDS = 300;
 
 /**
- * How many copies one store's cards may be made in a CARD_FRESH_SECONDS
- * window, all its products, places and sites together, counted before the
- * store is read: past it a copy is drawn as a plain link to the product's
- * page, reading nothing, for that window. Room for six cards a store shown
- * at once, each made again once a window, which bounds the store's month
- * (tests/plan-cost-registry.ts, line embed: about $9.29 at every copy's
- * largest; twelve would be $18.58).
+ * The store's public requests one copy takes (lib/traffic.ts,
+ * takePublicRequest, shared by everyone the copy is shown to, so not any one
+ * connection's share of the day), before its product is read: past the
+ * store's window the copy is a plain link to the product's page and reads
+ * nothing more. Each public request is priced at a later page of the store
+ * (tests/plan-cost-registry.ts, line public-requests), and three of them pay
+ * for a copy at its largest, written to the CDN's store included
+ * (CARD_COPY_BUILD, held in tests/embed-card-cached.test.ts), so a store's
+ * month of copies is inside the figure its plan already prices. A card shown
+ * all month long on a busy page takes CARD_COPY_UNITS every window.
  */
-export const CARD_BUILDS_PER_WINDOW = 6;
+export const CARD_COPY_UNITS = 3;
 
 /** The site part of a copy's address when the display had no Referer this site can read. */
 const NO_SITE = "-";

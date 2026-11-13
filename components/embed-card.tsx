@@ -66,7 +66,7 @@ import { placeLine } from "@/lib/call-place";
 import { WhoAnswers, saysWhoAnswers } from "@/components/who-answers";
 
 /** The store and the product, or null for one that is not there; `unread` when a read failed (rule 24). */
-export type LoadedCard = { store: Store | null; product: Listing | null; unread: boolean };
+export type LoadedCard = { store: Store | null; product: Listing | null; unread: boolean; resting?: boolean };
 
 /** What the card is drawn from: the load, the open by the checkout script if any, and what the display said. */
 export type CardDrawing = {
@@ -90,7 +90,7 @@ export type CardDrawing = {
  * (lib/store-exact.ts), so an address that answered out of shape is unread too (Codex J on #2910), and so is the
  * product's own record (readListingExactly; Claude 3 on #2910).
  */
-export async function loadCard(raw: string, id: string): Promise<LoadedCard> {
+export async function loadCard(raw: string, id: string, beforeProduct?: (store: Store) => Promise<boolean>): Promise<LoadedCard> {
   let decoded = "";
   try {
     decoded = decodeURIComponent(raw);
@@ -107,6 +107,8 @@ export async function loadCard(raw: string, id: string): Promise<LoadedCard> {
   const store = found === "none" ? null : found;
   // A store switched off after notices (lib/takedown.ts) shows no card.
   if (!store || store.suspended) return { store: null, product: null, unread: false };
+  // Paid for before the product is read, where its page asks (the cached copy, CARD_COPY_UNITS): refused, nothing more is read.
+  if (beforeProduct && !(await beforeProduct(store))) return { store, product: null, unread: false, resting: true };
   // A draft is not on sale, and its card says so as its page would.
   let product: Listing | null;
   try {
@@ -141,13 +143,12 @@ const TIMES_HEIGHT = 640;
 const LONG_TITLE = 30;
 
 /**
- * The card when its limit is spent, before anything is read: an open by the
- * checkout script past what one connection gets for a store
- * (OPENS_PER_TEN_MINUTES, lib/embed-open.ts), or a copy past what the store's
- * cards may be made in a window (CARD_BUILDS_PER_WINDOW,
- * lib/embed-card-view.ts). It reads neither the store nor the product, so it
- * is a plain link to the product's own page, in US English (the store's
- * language is not read), and that page says what it can.
+ * The card when its limit is spent: an open by the checkout script past what
+ * one connection gets for a store (OPENS_PER_TEN_MINUTES, lib/embed-open.ts),
+ * before anything is read, or a copy past the store's public requests
+ * (CARD_COPY_UNITS, lib/embed-card-view.ts), before the product is read. It
+ * draws nothing of the store or the product, so it is a plain link to the
+ * product's own page, in US English, and that page says what it can.
  */
 export function CardRefused({ handle, id, place, page }: { handle: string; id: string; place: string; page: boolean }): ReactElement {
   let store = "";

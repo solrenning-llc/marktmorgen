@@ -1483,7 +1483,7 @@ export const COST_LINES: CostLine[] = [
   },
   {
     id: "buyer-actions",
-    feature: "What buyers do inside what they bought: community posts, comments, likes, votes, reports, messages, live-room messages, RSVPs, picture doors and phones signed up; lesson comments, hand-ins and their doors, lessons marked done, certificates (18 October 2026)",
+    feature: "What buyers do inside what they bought: community posts, comments, likes, votes, reports, messages, live-room messages, RSVPs, picture doors and phones signed up; lesson comments, hand-ins and their doors, lessons marked done, certificates (18 October 2026), quiz tries (9 November 2026)",
     monthlyUsd: (tier) => figureCost(STORE_ALLOWANCES[tier], "buyer"),
     sources: [
       { file: "lib/store-allowance-rules.ts", names: ["STORE_ALLOWANCES", "buyer"] },
@@ -1502,6 +1502,9 @@ export const COST_LINES: CostLine[] = [
       { file: "app/api/store/course/task/upload/route.ts", names: ["takeBuyerAction(on.store)"] },
       { file: "app/api/store/course/progress/route.ts", names: ["takeBuyerAction"] },
       { file: "app/api/store/course/certificate/route.ts", names: ["takeBuyerAction(store)"] },
+      // A quiz try (9 November 2026): limited per connection before the access is read and per student before its action.
+      { file: "app/api/store/course/quiz/route.ts", names: ["takeBuyerAction(store)", "withinLimit(\"quiz-connection\"", "withinLimit(\"quiz-student\""] },
+      { file: "lib/quiz-usage-rules.ts", names: ["QUIZ_TRIES_PER_CONNECTION_MINUTE", "QUIZ_TRIES_PER_STUDENT_HOUR"] },
       // The download takes one buyer read, then, before any note is read, the rest of what its most costs to read
       // (Codex J's review of #3031, M3; tests/sq1-lesson-notes-review.test.ts, tests/sq1-lesson-notes-second.test.ts), read
       // in base64 so no escaping can grow it (third review, M3; tests/sq1-lesson-notes-third.test.ts). A save, an emptied note and a course's notes
@@ -1945,7 +1948,7 @@ export const SCOPES: Record<string, ScopeClass> = {
   "assist-day": guard("A daily limit per connection under the Store assistant's monthly pool (add-on line store-assistant)."),
   "assist-store": guard("A per-minute limit per store under the Store assistant's monthly pool (add-on line store-assistant)."),
   "assist-read": PUBLIC, "assist-handoff": PUBLIC, "assist-next-dismiss": PUBLIC,
-  "lesson-comment": BURST("buyer-actions"), "lesson-comment-day": BURST("buyer-actions"), "task-hand-in": BURST("buyer-actions"), "lesson-note": BURST("buyer-actions"), "task-upload": BURST("buyer-actions"),
+  "lesson-comment": BURST("buyer-actions"), "lesson-comment-day": BURST("buyer-actions"), "task-hand-in": BURST("buyer-actions"), "quiz-connection": BURST("buyer-actions"), "quiz-student": BURST("buyer-actions"), "lesson-note": BURST("buyer-actions"), "task-upload": BURST("buyer-actions"),
   // Per store, under a figure of the window.
   "api-add": BURST("rest-api"), "api-give": BURST("rest-api"),
   "picture-door": BURST("studio"),

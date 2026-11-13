@@ -38,7 +38,7 @@ import { fromStore, storeBase } from "@/lib/purchase-email";
 import { speechFor } from "@/lib/buyer-words";
 import { requestWords } from "@/lib/buyer-words/requests";
 import { type Store, saleHandles, storeForId, storeIdGone } from "@/lib/store";
-import { type OutsideMethod, type PaymentRequest, statusOf, nextReminderAt, canSendAgain } from "@/lib/payment-request-rules";
+import { type CheckedRequest, type OutsideMethod, type PaymentRequest, statusOf, nextReminderAt, canSendAgain } from "@/lib/payment-request-rules";
 import { changeRequest, delayReminder, dropReminder, dueReminders, holdForCheckout, letGo, markPaid, reminderRequestOf, requestOf, requestRecordKey } from "@/lib/payment-request-store";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { countOf, repliesFor } from "@/lib/redis-reply";
@@ -338,37 +338,102 @@ export async function settleFromReturn(store: Store, request: PaymentRequest, se
   }
 }
 
+/** A payment on the creator's Stripe that its refunds can be looked up by. */
+const PAYMENT_INTENT = /^pi_[A-Za-z0-9]{8,255}$/;
+/** Pages of refunds (100 each) one studio reading asks Stripe for, at most. */
+const REFUND_PAGES = 3;
+/** Every status Stripe gives a refund (the same list as lib/refunds.ts): any other is a row in another shape. */
+const REFUND_STATUSES = new Set(["pending", "requires_action", "succeeded", "failed", "canceled"]);
+/** A refund still under way: not yet given back, but it may be, so its payment is not checked. */
+const REFUND_UNDER_WAY = new Set(["pending", "requires_action"]);
+
+/**
+ * The account's succeeded refunds since `since`, summed per payment, and
+ * whether every one was read (rule 24): a list still marked has_more after
+ * the last page read, a page or a row in another shape (a status Stripe does
+ * not list, an empty payment id), or the same refund twice leaves `complete`
+ * false, and so does a page that is not Stripe's list (`object: "list"`) or
+ * a refund of nothing (Stripe never refunds 0). What was read is still
+ * counted, once each: it is a floor of what was refunded, never the total.
+ * `underWay` names the payments with a refund still pending or waiting on an
+ * action: not counted, and not checked. `otherMoney` names the payments in
+ * `currencyOf` with a refund in another currency, or in none: its amount is
+ * never added to the request's own (unlike cents), and the payment is not
+ * checked. Throws when Stripe cannot be read.
+ */
+async function readRefunds(account: string, since: number, currencyOf: Map<string, string>): Promise<{ back: Map<string, number>; complete: boolean; underWay: Set<string>; otherMoney: Set<string> }> {
+  const back = new Map<string, number>();
+  const underWay = new Set<string>();
+  const otherMoney = new Set<string>();
+  const seen = new Set<string>();
+  let complete = true;
+  let after = "";
+  for (let page = 0; ; page += 1) {
+    if (page === REFUND_PAGES) return { back, complete: false, underWay, otherMoney };
+    const listed = await onAccount("GET", account, `/refunds?limit=100&created[gte]=${since}${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`);
+    if (listed.object !== "list" || !Array.isArray(listed.data) || typeof listed.has_more !== "boolean") return { back, complete: false, underWay, otherMoney };
+    for (const item of listed.data as unknown[]) {
+      const row = item && typeof item === "object" ? (item as Record<string, unknown>) : null;
+      const id = row && typeof row.id === "string" && row.id ? row.id : "";
+      const intent = row?.payment_intent;
+      if (!row || !id || seen.has(id) || (intent !== null && (typeof intent !== "string" || !intent)) || typeof row.status !== "string" || !REFUND_STATUSES.has(row.status) || !Number.isSafeInteger(row.amount) || (row.amount as number) <= 0) {
+        complete = false;
+        continue;
+      }
+      seen.add(id);
+      if (typeof intent !== "string") continue;
+      const own = currencyOf.get(intent);
+      if (own !== undefined && row.currency !== own) {
+        otherMoney.add(intent);
+        continue;
+      }
+      if (row.status === "succeeded") back.set(intent, (back.get(intent) ?? 0) + (row.amount as number));
+      else if (REFUND_UNDER_WAY.has(row.status)) underWay.add(intent);
+    }
+    if (!listed.has_more) return { back, complete, underWay, otherMoney };
+    const last = (listed.data as unknown[]).at(-1) as Record<string, unknown> | null | undefined;
+    if (!last || typeof last !== "object" || typeof last.id !== "string" || !last.id) return { back, complete: false, underWay, otherMoney };
+    after = last.id;
+  }
+}
+
 /**
  * Brings the studio's list up to date with refunds made on the creator's
  * Stripe (from its dashboard or anywhere else): one read of the account's
  * refunds since the oldest paid request shown, at most three pages. A
  * request refunded in full is "refunded"; in part, it says how much.
+ *
+ * Each request comes back with `refundsChecked`: false for one paid on
+ * Stripe whose refunds were not all read (more than the pages read, a reply
+ * in another shape, Stripe not answering, no Stripe account or no payment
+ * to look up, or a whole list giving back less than the record holds), so
+ * the studio never shows it as surely not refunded. `refundsRetry` says
+ * whether reading again may change that. What was read is still written,
+ * only ever upward: a refund read is a refund.
  */
-export async function refreshRefunds(store: Store, requests: PaymentRequest[], now = Date.now()): Promise<PaymentRequest[]> {
-  const paid = requests.filter((r) => r.state === "paid" && /^pi_[A-Za-z0-9]{8,255}$/.test(r.payment));
-  if (!paid.length || !store.stripeAccountId) return requests;
+export async function refreshRefunds(store: Store, requests: PaymentRequest[], now = Date.now()): Promise<CheckedRequest[]> {
+  // Only a request paid through its checkout has refunds on Stripe; one refunded in full has nothing more to learn.
+  const onStripe = (r: PaymentRequest) => r.state === "paid" && !r.outside;
+  const shown = (r: PaymentRequest, read: boolean, retry = false): CheckedRequest => {
+    const refundsChecked = !onStripe(r) || (read && PAYMENT_INTENT.test(r.payment));
+    // Without a payment to look up or a Stripe account, every reading is the same: no reload is promised.
+    return { ...r, refundsChecked, refundsRetry: !refundsChecked && retry && PAYMENT_INTENT.test(r.payment) && !!store.stripeAccountId };
+  };
+  const paid = requests.filter((r) => onStripe(r) && PAYMENT_INTENT.test(r.payment));
+  if (!paid.length || !store.stripeAccountId) return requests.map((r) => shown(r, false));
   const since = Math.floor(Math.min(...paid.map((r) => r.paidAt)) / 1000) - 60;
-  const back = new Map<string, number>();
+  let read: Awaited<ReturnType<typeof readRefunds>>;
   try {
-    let after = "";
-    for (let page = 0; page < 3; page += 1) {
-      const listed = await onAccount("GET", store.stripeAccountId, `/refunds?limit=100&created[gte]=${since}${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`);
-      const rows = Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : [];
-      for (const row of rows) {
-        const intent = typeof row.payment_intent === "string" ? row.payment_intent : "";
-        if (intent && row.status === "succeeded" && typeof row.amount === "number") back.set(intent, (back.get(intent) ?? 0) + row.amount);
-      }
-      const last = rows[rows.length - 1];
-      if (listed.has_more !== true || !last || typeof last.id !== "string") break;
-      after = last.id;
-    }
+    read = await readRefunds(store.stripeAccountId, since, new Map(paid.map((r) => [r.payment, r.currency.toLowerCase()])));
   } catch (error) {
     console.error("reading a store's refunds for payment requests failed", error);
-    return requests;
+    return requests.map((r) => shown(r, false, true));
   }
+  if (!read.complete) console.error("a store's refunds for payment requests were not all read; shown as not checked", { pages: REFUND_PAGES });
   const changed = new Map<string, PaymentRequest>();
+  const unsaved = new Set<string>();
   for (const r of paid) {
-    const refunded = back.get(r.payment) ?? 0;
+    const refunded = read.back.get(r.payment) ?? 0;
     if (refunded > r.refunded) {
       const done = await changeRequest(store, r.id, (current) =>
         current.payment === r.payment && refunded > current.refunded
@@ -376,9 +441,23 @@ export async function refreshRefunds(store: Store, requests: PaymentRequest[], n
           : { next: null, answer: null },
       now).catch(() => null);
       if (done) changed.set(r.id, done.request);
+      // What was read could not be written: what is shown is older than Stripe, so not checked.
+      else unsaved.add(r.id);
     }
   }
-  return requests.map((r) => changed.get(r.id) ?? r);
+  return requests.map((r) => {
+    const latest = changed.get(r.id) ?? r;
+    // Stripe's whole list gives back less than the record holds (a refund since failed): what is shown is not what
+    // Stripe says, so not checked, and a reload reads the same list. Nothing is lowered here.
+    const short = read.complete && (read.back.get(latest.payment) ?? 0) < latest.refunded;
+    // A refund still under way may yet give the money back, and a write that failed may not fail again: not checked,
+    // and reading again may change that. A list not read in full reads the same next time.
+    const passing = unsaved.has(r.id) || read.underWay.has(r.payment);
+    // A refund of this payment in another currency (or none) was not added: what is shown may be short of it, and a
+    // reload reads the same list.
+    const otherMoney = read.otherMoney.has(r.payment);
+    return shown(latest, read.complete && !short && !passing && !otherMoney, read.complete && !short && !otherMoney && passing);
+  });
 }
 
 /** Why a request could not be marked as paid outside Stripe. */

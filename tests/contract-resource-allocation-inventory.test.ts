@@ -71,28 +71,13 @@ const ALLOWANCE_TAKE_INVENTORY: Record<string, Entry> = {
 };
 
 /**
- * Cost primitives outside the monthly figures, not inventoried in this part.
- * Each needs its own call-site inventory, as above, before resourceAllocations
- * may be true. Several already prove the cohort themselves; that is not yet
- * recorded here, so it is not counted.
+ * Cost primitives outside the monthly figures: all 15 found on 13 November
+ * 2026 are inventoried in part 2, tests/contract-resource-primitive-inventory.test.ts,
+ * which keeps the key false while any of their call sites is pending. None is left
+ * uninventoried here; a new primitive is added there, not here.
  */
-const UNINVENTORIED_COST_PRIMITIVES = [
-  "lib/ai-spend.ts#reserveAiSpend",
-  "lib/upload-budget.ts#reserveStoreUpload",
-  "lib/storage-reservations.ts#reserveStorage",
-  "lib/mail.ts#reserve",
-  "lib/mail.ts#takeFromMonth",
-  "lib/mail.ts#takeFromMonthExact",
-  "lib/imports.ts#takeImportRows",
-  "lib/imports.ts#reserveMoved",
-  "lib/quiz-usage.ts#reserveQuizSubmission",
-  "lib/store-readings.ts#takeStoreReading",
-  "lib/traffic.ts#takePublicRequest",
-  "lib/traffic.ts#holdPublicRequests",
-  "lib/answers.ts#takeAnswer",
-  "lib/list-download.ts#holdListDownload",
-  "lib/resend-fallback-budget.ts#reserveResendFallback",
-] as const;
+const UNINVENTORIED_COST_PRIMITIVES: readonly string[] = [];
+const PART_2 = "tests/contract-resource-primitive-inventory.test.ts";
 
 type Decl = { name: string; exported: boolean; line: number };
 const DECL = /^(export\s+)?(?:default\s+)?(?:async\s+)?function\s+([A-Za-z0-9_$]+)|^(export\s+)?const\s+([A-Za-z0-9_$]+)\s*=\s*(?:async\s*)?(?:\(|[A-Za-z0-9_$]+\s*=>)/;
@@ -217,6 +202,7 @@ const pending = Object.values(ALLOWANCE_TAKE_INVENTORY).filter((e) => e.state ==
 const pendingCalls = Object.values(ALLOWANCE_TAKE_INVENTORY).filter((e) => e.state === "pending").reduce((n, e) => n + e.calls, 0);
 is("pending takes, down from 11 (part 1) as part 1b gates them", pendingCalls, 0);
 is("pending takes keep resourceAllocations false", pending > 0 && CONTRACT_ADMISSION_COVERAGE.resourceAllocations, false);
+is("part 2 exists, so no primitive outside the figures is left uninventoried", readFileSync(join(root, PART_2), "utf8").includes("PRIMITIVE_INVENTORY"), true);
 is("the other two core keys are untouched", [CONTRACT_ADMISSION_COVERAGE.renewals, CONTRACT_ADMISSION_COVERAGE.settlementAndReserveReconciliation], [false, false]);
 
 part("The audit refuses what it is for (synthetic sources)");

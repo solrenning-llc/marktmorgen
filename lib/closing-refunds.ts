@@ -169,12 +169,12 @@ const KNOWN_UNPAID: ReadonlySet<unknown> = new Set(["open", "canceled"]);
  * status is not one this code knows (missing, null, not a string, or a value Stripe does not document: Codex G's residual
  * finding on #3120): only "paid" decides paid, and only KNOWN_UNPAID decides not paid.
  */
-async function intentsOf(account: string, invoice: string, count: () => void): Promise<{ intents: string[]; whole: boolean }> {
+async function intentsOf(account: string, invoice: string, count: () => void): Promise<{ intents: string[]; whole: boolean; shares: Map<string, number> | null }> {
   count();
   const read = await onAccount("GET", account, `/invoices/${encodeURIComponent(invoice)}`);
   if (!isOwnReply(read, invoice)) throw new Error("Stripe answered for another invoice");
   const direct = idOf(read.payment_intent);
-  if (typeof direct === "string" && INTENT_ID.test(direct)) return { intents: [direct], whole: true };
+  if (typeof direct === "string" && INTENT_ID.test(direct)) return { intents: [direct], whole: true, shares: null };
   count();
   const listed = await onAccount("GET", account, `/invoice_payments?${new URLSearchParams({ invoice, limit: "10" })}`);
   const rows = objectOf(listed)?.data;
@@ -186,6 +186,9 @@ async function intentsOf(account: string, invoice: string, count: () => void): P
   let unknownStatus = false;
   // Every paid payment of the invoice (#4411): one paid in two charges is given back over both, so all are needed.
   const paid: string[] = [];
+  // What each paid payment paid toward this invoice (#4451): a charge may also pay another invoice, and only its share
+  // of this one can be given back for it. A paid payment whose share does not read keeps the debt: nothing is sent.
+  const shares = new Map<string, number>();
   for (const item of rows) {
     const row = objectOf(item);
     if (!row || idOf(row.invoice) !== invoice) throw new Error("a payment listed is not this invoice's");
@@ -195,7 +198,10 @@ async function intentsOf(account: string, invoice: string, count: () => void): P
     }
     const id = idOf(objectOf(row.payment)?.payment_intent);
     if (typeof id === "string" && INTENT_ID.test(id)) {
+      const share = row.amount_paid;
+      if (!Number.isSafeInteger(share) || (share as number) <= 0) throw new Error("what a payment paid toward this invoice did not read");
       if (!paid.includes(id)) paid.push(id);
+      shares.set(id, (shares.get(id) ?? 0) + (share as number));
       continue;
     }
     unread = true;
@@ -204,12 +210,12 @@ async function intentsOf(account: string, invoice: string, count: () => void): P
   // readable intent, a status this code does not know, or more pages), the readable ones are not known to be all
   // of them: `whole` says so, and the caller never settles a member owed more than they can give back (#4411).
   const whole = !unread && !unknownStatus && objectOf(listed)?.has_more === false;
-  if (paid.length) return { intents: paid, whole };
+  if (paid.length) return { intents: paid, whole, shares };
   if (unread) throw new Error("an invoice's paid payment did not read as a payment intent");
   if (unknownStatus) throw new Error("an invoice's payment has a status that does not read as paid or not paid");
   // "None" only from a whole list: one that says, exactly, that there is no more.
   if (!whole) throw new Error("an invoice's payments could not be read whole");
-  return { intents: [], whole };
+  return { intents: [], whole, shares };
 }
 
 /** Stripe's currency codes: three lowercase letters (https://docs.stripe.com/currencies). */
@@ -334,6 +340,7 @@ export async function giveBackUnused(
       row: UnusedRow,
       intents: string[],
       whole: boolean,
+      shares: Map<string, number> | null,
       ops: { settle: (r: PaidPeriod["r"], amount?: number) => Promise<void>; short: (give: number) => Promise<void>; count: () => void; final: boolean },
     ) => {
       const charges: { intent: string; charge: Record<string, unknown>; refunded: number; prior: { state: "done" | "pending"; amount: number } | null }[] = [];
@@ -344,7 +351,11 @@ export async function giveBackUnused(
         const prior = priorRefund(list, intent, row.paid.inv, row.paid.cur);
         if (prior === "unknown") throw new Error("the refunds already made for this payment could not be read whole");
         // Never less than ours already made on it, whether or not the charge counts a pending refund yet.
-        charges.push({ intent, charge, refunded: Math.max(charge.amount_refunded as number, prior?.amount ?? 0), prior });
+        // A charge that also paid another invoice (#4451): only the refunds proven to be this invoice's (ours, under it)
+        // are counted against it; what it gave back for the other invoice is not this invoice's.
+        const share = shares?.get(intent);
+        const shared = share !== undefined && share < (charge.amount as number);
+        charges.push({ intent, charge, refunded: shared ? (prior?.amount ?? 0) : Math.max(charge.amount_refunded as number, prior?.amount ?? 0), prior });
       }
       if (charges.some((c) => c.charge.disputed)) {
         await ops.settle("disputed");
@@ -371,7 +382,9 @@ export async function giveBackUnused(
         if (left <= 0) break;
         // One refund of ours per charge under this invoice: one already there is never followed by a second.
         if (c.prior) continue;
-        const give = Math.min(left, (c.charge.amount as number) - c.refunded);
+        // Never more than the charge can still give back, nor more than it paid toward this invoice (#4451); a charge
+        // with a refund of ours under this invoice was passed over above, so its whole share is still this invoice's.
+        const give = Math.min(left, (c.charge.amount as number) - (c.charge.amount_refunded as number), shares?.get(c.intent) ?? Infinity);
         if (give <= 0) continue;
         const cost = settledCost(give, c.charge);
         if ((funds.get(cost.cur) ?? 0) < cost.amount) {
@@ -495,13 +508,13 @@ export async function giveBackUnused(
         continue;
       }
       try {
-        const { intents, whole } = row.paid.pi ? { intents: [row.paid.pi], whole: true } : await intentsOf(account, row.paid.inv, count);
+        const { intents, whole, shares } = row.paid.pi ? { intents: [row.paid.pi], whole: true, shares: null } : await intentsOf(account, row.paid.inv, count);
         if (!intents.length) {
           await settle("none");
           out.none += 1;
           continue;
         }
-        if (intents.length > 1 || !whole) {
+        if (intents.length > 1 || !whole || shares !== null) {
           // An invoice paid in more than one charge (#4411): two reads for each charge and at most one refund each,
           // beyond the five already taken (the invoice, its list and one charge's three). Taken before any is made.
           const extra = 3 * intents.length - 3;
@@ -510,7 +523,7 @@ export async function giveBackUnused(
             await notMade();
             continue;
           }
-          await giveSplit(row, intents, whole, { settle, short, count, final: options.final === true });
+          await giveSplit(row, intents, whole, shares, { settle, short, count, final: options.final === true });
           continue;
         }
         const intent = intents[0];

@@ -37,7 +37,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
 
 const intent = { type: "payment_intent", payment_intent: PI };
 /** A row of this invoice; `status` absent when undefined, so "missing" is a row with no status key at all. */
-const row = (label: string, status: unknown, payment: unknown = intent) => ({ id: `inpay_${label}`, invoice: INV, ...(status === undefined ? {} : { status }), payment });
+// Each listed payment says what it paid toward the invoice, as Stripe lists it (lib/closing-refunds.ts reads it, #4451).
+const row = (label: string, status: unknown, payment: unknown = intent) => ({ id: `inpay_${label}`, invoice: INV, amount_paid: 1000, ...(status === undefined ? {} : { status }), payment });
 
 async function seed(label: string) {
   redis.clear();

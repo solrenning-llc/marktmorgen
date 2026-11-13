@@ -27,7 +27,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   throw Error("unexpected synthetic request");
 }) as typeof fetch;
 
-const row = (status: string, payment: unknown) => ({ id: `inpay_${status}`, invoice: INV, status, ...(payment === undefined ? {} : { payment }) });
+// Each listed payment says what it paid toward the invoice, as Stripe lists it (lib/closing-refunds.ts reads it, #4451).
+const row = (status: string, payment: unknown) => ({ id: `inpay_${status}`, invoice: INV, status, amount_paid: 1000, ...(payment === undefined ? {} : { payment }) });
 
 async function seed(label: string) {
   redis.clear();

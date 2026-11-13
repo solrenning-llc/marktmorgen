@@ -32,7 +32,8 @@ const goodIntent = (id: string, charge: Record<string, unknown> = {}) => ({
   latest_charge: { id: "ch_p3097" + id.slice(9), amount: 1000, currency: "usd", amount_refunded: 0, disputed: false, balance_transaction: null, ...charge },
 });
 const emptyPayments = { object: "list", data: [], has_more: false };
-const paidRow = (invoice: string, intent: string) => ({ id: "inpay_p3097", object: "invoice_payment", invoice, status: "paid", payment: { type: "payment_intent", payment_intent: intent } });
+// Each listed payment says what it paid toward the invoice, as Stripe lists it (lib/closing-refunds.ts reads it, #4451).
+const paidRow = (invoice: string, intent: string) => ({ id: "inpay_p3097", object: "invoice_payment", invoice, status: "paid", amount_paid: 1000, payment: { type: "payment_intent", payment_intent: intent } });
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input instanceof Request ? input.url : input));

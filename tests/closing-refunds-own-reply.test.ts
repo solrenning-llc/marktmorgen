@@ -95,7 +95,7 @@ async function main() {
   part("Control: the invoice names no payment, and its own paid payment is listed");
   const listedControl = await run("listedcontrol", false, {
     invoice: { id: INVOICE, object: "invoice", payment_intent: null },
-    listed: { object: "list", has_more: false, data: [{ id: "inpay_closeown1", object: "invoice_payment", invoice: INVOICE, status: "paid", payment: { type: "payment_intent", payment_intent: INTENT } }] },
+    listed: { object: "list", has_more: false, data: [{ id: "inpay_closeown1", object: "invoice_payment", invoice: INVOICE, status: "paid", amount_paid: 1000, payment: { type: "payment_intent", payment_intent: INTENT } }] },
     intent: ownIntent,
   });
   is("one refund, on this member's payment", posts, [INTENT]);
@@ -116,7 +116,7 @@ async function main() {
     false,
     {
       invoice: { id: INVOICE, object: "invoice", payment_intent: null },
-      listed: { object: "list", has_more: false, data: [{ id: "inpay_closeother1", object: "invoice_payment", invoice: "in_closeother1", status: "paid", payment: { type: "payment_intent", payment_intent: OTHER_INTENT } }] },
+      listed: { object: "list", has_more: false, data: [{ id: "inpay_closeother1", object: "invoice_payment", invoice: "in_closeother1", status: "paid", amount_paid: 1000, payment: { type: "payment_intent", payment_intent: OTHER_INTENT } }] },
       intent: ownIntent,
     },
     2,
@@ -140,7 +140,7 @@ async function main() {
     false,
     {
       invoice: noIntentInvoice,
-      listed: { object: "list", has_more: false, data: [{ id: "inpay_closeown2", object: "invoice_payment", invoice: INVOICE, status: "paid", payment: { type: "payment_intent", payment_intent: 7 } }] },
+      listed: { object: "list", has_more: false, data: [{ id: "inpay_closeown2", object: "invoice_payment", invoice: INVOICE, status: "paid", amount_paid: 1000, payment: { type: "payment_intent", payment_intent: 7 } }] },
       intent: ownIntent,
     },
     2,

@@ -36,8 +36,9 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (path === "/balance") return Response.json({ object: "balance", available: [{ amount: 100_000, currency: "usd" }] });
   if (path === `/invoices/${INVOICE}`) return Response.json({ id: INVOICE, object: "invoice", payment_intent: null });
   if (path === "/invoice_payments") {
-    const rows = (unreadRow ? [A] : [A, B]).map((pi, i) => ({ id: `inpay_closetwo${i}`, object: "invoice_payment", invoice: INVOICE, status: "paid", payment: { type: "payment_intent", payment_intent: pi } }));
-    if (unreadRow) rows.push({ id: "inpay_closetwox", object: "invoice_payment", invoice: INVOICE, status: "paid", payment: { type: "charge", charge: "ch_closetwox" } as never });
+    const rows = (unreadRow ? [A] : [A, B]).map((pi, i) => ({ id: `inpay_closetwo${i}`, object: "invoice_payment", invoice: INVOICE, status: "paid", amount_paid: charges.get(pi)?.amount ?? 0, payment: { type: "payment_intent", payment_intent: pi } }));
+    // What each payment paid toward this invoice, as Stripe lists it (#4451): here, the whole of each charge.
+    if (unreadRow) rows.push({ id: "inpay_closetwox", object: "invoice_payment", invoice: INVOICE, status: "paid", amount_paid: 6000, payment: { type: "charge", charge: "ch_closetwox" } as never });
     return Response.json({ object: "list", has_more: false, data: rows });
   }
   if (path.startsWith("/payment_intents/")) {

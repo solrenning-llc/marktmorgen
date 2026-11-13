@@ -16,6 +16,12 @@
  * meaning: it is not derived from the address, the offer or the store. The
  * record keeps only a digest of it and a digest of the address, never either
  * one in plain text, so a copy of the record opens nothing and names nobody.
+ * The address's digest is keyed with the deployment's own key
+ * (lib/secret-box.ts, deriveKey): an address has little entropy, so a plain
+ * hash would let whoever holds a copy confirm a guessed address offline. With
+ * no key, the digest is unknown, never a plain hash; a key that changes makes
+ * an older record's address no longer match, and its link (30 days at most)
+ * opens nothing.
  *
  * Unknown is never a yes (CX-123 rule 24): a record that does not parse
  * exactly, a state this file does not know, a clock that is not a whole
@@ -25,8 +31,9 @@
  * `purchaseWith` and keep its result with a mark taken once
  * (lib/claim-mark.ts) before any session is made.
  */
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
+import { deriveKey } from "@/lib/secret-box";
 
 const DAY_MS = 86_400_000;
 /** The link's life when the creator chooses nothing. */
@@ -89,12 +96,19 @@ export function applyTokenDigest(token: string): string {
   return createHash("sha256").update(`nimbus-apply-first-token:${token}`).digest("hex");
 }
 
-/** What the record keeps of an address, or null for one that is not an address. */
+/** The key the address's digest is made with; null when the deployment has none. */
+const applicantKey = () => deriveKey("apply-first-applicant/v1");
+
+/**
+ * What the record keeps of an address: an HMAC under the deployment's key, or
+ * null for one that is not an address or when there is no key (unknown).
+ */
 export function applicantDigest(email: string): string | null {
   if (typeof email !== "string") return null;
   const clean = normaliseEmail(email);
   if (!clean || clean.length > MAX_EMAIL_LENGTH || !EMAIL_PATTERN.test(clean)) return null;
-  return createHash("sha256").update(`nimbus-apply-first-applicant:${clean}`).digest("hex");
+  const key = applicantKey();
+  return key ? createHmac("sha256", key).update(clean).digest("hex") : null;
 }
 
 const clock = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0;
@@ -215,6 +229,7 @@ export function canPurchase(
   if (typeof attempt.token !== "string" || !APPLY_TOKEN.test(attempt.token) ||
       !sameDigest(app.tokenDigest, applyTokenDigest(attempt.token))) return { ok: false, why: "wrong-token" };
   if (attempt.now >= app.expiresAt) return { ok: false, why: "expired" };
+  if (!applicantKey()) return { ok: false, why: "unknown" };
   const applicant = applicantDigest(attempt.email);
   if (!applicant || !sameDigest(app.applicant, applicant)) return { ok: false, why: "wrong-email" };
   if (attempt.offer !== app.offer) return { ok: false, why: "wrong-offer" };

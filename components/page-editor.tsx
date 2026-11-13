@@ -8,7 +8,7 @@ import { PageAnswers } from "@/components/page-answers";
 import type { WhyNot } from "@/lib/why-not-rules";
 import type { VideoReach } from "@/lib/page-depth";
 
-import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { SavedSections } from "@/components/saved-sections";
 import { useRouter } from "next/navigation";
 import { uploadPresigned } from "@vercel/blob/client";
@@ -571,6 +571,8 @@ export function PageEditor({
   const clearKeep = useRef<HTMLButtonElement>(null);
   const clearOpen = useRef<HTMLButtonElement>(null);
   const clearBack = useRef(false);
+  // The question's own id, unique per editor, so a second editor on one screen never names its group by this one's.
+  const clearQuestionId = useId();
   useEffect(() => {
     if (confirmClear) clearKeep.current?.focus();
     else if (clearBack.current) {
@@ -2870,8 +2872,8 @@ export function PageEditor({
         ) : null}
         {initial.blocks.length > 0 && !dirty && !site ? (
           confirmClear ? (
-            <span role="group" aria-labelledby="clear-question" className="flex flex-wrap items-center gap-2 text-sm text-ink-soft">
-              <span id="clear-question">
+            <span role="group" aria-labelledby={clearQuestionId} className="flex flex-wrap items-center gap-2 text-sm text-ink-soft">
+              <span id={clearQuestionId}>
                 Back to the plain page?
               </span>
               <button type="button" className="btn btn-danger btn-sm" aria-disabled={busy || undefined} onClick={clearNow}>

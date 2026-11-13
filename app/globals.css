@@ -4159,6 +4159,12 @@ a.rv-line:hover {
   flex-direction: column;
   gap: 0.15rem;
 }
+/* The box takes the keyboard focus so it can be scrolled (components/community-room.tsx): the same ring as the
+   community's other controls. */
+.cm-room:focus-visible {
+  outline: 3px solid var(--st-accent-text);
+  outline-offset: 2px;
+}
 
 /* One conversation in the message list. */
 .cm-dm-row {

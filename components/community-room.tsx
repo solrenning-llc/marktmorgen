@@ -375,6 +375,9 @@ export function CommunityRoom({
     <div className="mt-5">
       <ul
         ref={list}
+        // In the tab order, so the earlier messages can be scrolled to from the keyboard where a browser does not
+        // focus a scrolling box by itself; a member has nothing else to focus inside it (WCAG 2.1.1, 274 [AX1]).
+        tabIndex={0}
         className="cm-room"
         onScroll={(e) => {
           const box = e.currentTarget;

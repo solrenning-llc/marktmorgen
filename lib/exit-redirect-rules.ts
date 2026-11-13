@@ -141,7 +141,9 @@ export function exitHoldSeconds(closedAt: number, now: number, quarantineDays: n
   const until = exitNoticeUntil(closedAt);
   if (until === null) return quarantine ?? notice;
   if (!Number.isFinite(now)) return Math.max(quarantine ?? 0, notice);
-  const left = Math.ceil((until - now) / 1000);
+  // Never past the notice counted from now (Claude 1 on #3648, LEVE): a closedAt later than now is not the real closing
+  // day, and the hold's code ceiling stays the 90 days the cost line pays for.
+  const left = Math.min(Math.ceil((until - now) / 1000), notice);
   return Math.max(quarantine ?? notice, left);
 }
 

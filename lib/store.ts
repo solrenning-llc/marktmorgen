@@ -188,6 +188,7 @@ export type { CourseRef, Listing, Product };
  * inventing a different one for this store alone.
  */
 import { HANDLE_PATTERN } from "@/lib/store-handle-pattern";
+import { type ExitNotice, exitHoldSeconds, readExitNotice, releasedValue } from "@/lib/exit-redirect-rules";
 export { HANDLE_PATTERN } from "@/lib/store-handle-pattern";
 
 
@@ -367,6 +368,13 @@ export type Store = {
   firstOfferPublishedAt?: string;
   /** True only for stores registered after activation tracking was installed. */
   activationTracked?: boolean;
+  /**
+   * The new address its owner chose before the store's closing day, shown
+   * for EXIT_NOTICE_DAYS at its old addresses once the store is closed
+   * (queue item 97 [D2-OPEN-EXIT]; lib/exit-redirect-rules.ts). Read whole
+   * or dropped.
+   */
+  exitNotice?: ExitNotice;
   /** Addresses this store used before. They lead here until it lets them go. */
   previousHandles: string[];
   /**
@@ -940,6 +948,7 @@ function parseStore(raw: unknown): Store | null {
       createdAt: value.createdAt ?? "",
       activationTracked: value.activationTracked === true,
       ...(typeof value.firstOfferPublishedAt === "string" && /^\d{4}-\d{2}-\d{2}T/.test(value.firstOfferPublishedAt) && Number.isFinite(Date.parse(value.firstOfferPublishedAt)) ? { firstOfferPublishedAt: value.firstOfferPublishedAt.slice(0, 30) } : {}),
+      ...((notice) => (notice ? { exitNotice: notice } : {}))(readExitNotice(value.exitNotice)),
       previousHandles: Array.isArray(value.previousHandles)
         ? value.previousHandles.filter((h) => typeof h === "string")
         : [],
@@ -1884,10 +1893,15 @@ export async function deleteStore(email: string): Promise<DeleteResult> {
  * everything that needed the record has read it.
  */
 export async function closeStoreRecord(store: Store, extraKeys: string[] = []): Promise<void> {
-  const released = `${RELEASED_PREFIX}${new Date().toISOString()}`;
+  // With a moved notice chosen, the notice goes into the same value and the
+  // addresses are held until it ends, never less than the quarantine
+  // (lib/exit-redirect-rules.ts); with none, exactly as before.
+  const now = Date.now();
+  const released = releasedValue(new Date(now), store.exitNotice ?? null);
+  const hold = store.exitNotice ? exitHoldSeconds(store.exitNotice.closedAt, now, RELEASE_QUARANTINE_DAYS) : RELEASE_QUARANTINE_DAYS * 24 * 60 * 60;
   const owner = await ownerKey(storeRef(store));
   await redisPipeline([
-    ...[store.handle, ...store.previousHandles].map((handle) => ["SET", handleKey(handle), released, "EX", RELEASE_QUARANTINE_DAYS * 24 * 60 * 60]),
+    ...[store.handle, ...store.previousHandles].map((handle) => ["SET", handleKey(handle), released, "EX", hold]),
     ["DEL", owner, beforeMoveKeyOf(owner), ...extraKeys],
     ...(STORE_ID_PATTERN.test(store.sid) ? [["DEL", storeIdKey(store.sid)], ["SREM", await accountKey(store.email), store.sid]] : []),
     ["ZREM", ENDED_INDEX, storeRef(store)],

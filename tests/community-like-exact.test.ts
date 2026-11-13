@@ -9,7 +9,10 @@
  * room given back.
  */
 import { readFileSync } from "node:fs";
+import * as community from "@/lib/community";
+import { TRACE_ENTRY } from "@/lib/community-trace";
 import { SET_ENTRY_BYTES, toggleCommentLike, toggleLike } from "@/lib/community";
+import { REMOVE_POINT, award, pointsOf } from "@/lib/community-points";
 import { dataUsed, giveData } from "@/lib/store-data";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { ROOM } from "./data-room";
@@ -26,8 +29,31 @@ const trace = `nl:cm:${ID}:tr:${WHO}`;
 const real = redis.pipeline.bind(redis);
 /** Replaces the reply of the first command named `name` on `key` while set. */
 let bend: { name: string; key: string; reply: unknown } | null = null;
+/**
+ * Holds a batch the test names (hold) until what it waits for has run (ran), to play two presses in a set order; never
+ * longer than 400 ms, so a press that cannot reach it (it waits on a lock) is let through rather than hung.
+ */
+let gate: { hold: (batch: Command[]) => boolean; ran: () => boolean } | null = null;
+const seen: Command[][] = [];
 redis.pipeline = (async (batch: Command[]) => {
+  if (gate && gate.hold(batch)) {
+    const g = gate;
+    for (let waited = 0; waited < 400 && !g.ran(); waited += 5) await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  // The memory Redis has no Lua: lib/community-points.ts REMOVE_POINT is played here as tests/community-points.test.ts does.
+  const one = batch[0];
+  if (batch.length === 1 && one?.[0] === "EVAL" && one[1] === REMOVE_POINT) {
+    seen.push(batch);
+    const [total, today] = await real([["ZSCORE", String(one[3]), String(one[5])], ["ZSCORE", String(one[4]), String(one[5])]]);
+    const n = (raw: unknown) => (raw === null ? 0 : Number(raw));
+    const writes: Command[] = [];
+    if (n(total) > 0) writes.push(["ZINCRBY", String(one[3]), -1, String(one[5])]);
+    if (n(today) > 0) writes.push(["ZINCRBY", String(one[4]), -1, String(one[5])]);
+    if (writes.length) await real(writes);
+    return [[n(total) > 0 ? 1 : 0, n(today) > 0 ? 1 : 0]];
+  }
   const values = await real(batch);
+  seen.push(batch);
   if (!bend) return values;
   const b = bend;
   return values.map((v, i) => (batch[i][0] === b.name && batch[i][1] === b.key ? b.reply : v));
@@ -117,6 +143,45 @@ async function main(): Promise<void> {
   is("the room is a like and one trace entry, as before: the trace room taken again is given back", await used(), complete);
   await toggleLike(ID, POST, WHO, ROOM);
   await real([["DEL", likes, trace]]);
+
+  part("Codex T and Codex U on #3819: two presses at once of one member never leave a point or a like the other did not");
+  // What the route does with a press: the like, then the author's point. pressLike (lib/community.ts) holds both under
+  // one lock per member and liked thing; before it, the route ran them as two steps, as this stand-in does.
+  type Press = (id: string, post: string, comment: string | null, who: string, author: string, room: typeof ROOM, owner: typeof ROOM) => Promise<boolean | null>;
+  const press: Press = ((community as Record<string, unknown>).pressLike as Press | undefined) ?? (async (id, post, comment, who, author, room, owner) => {
+    const added = comment ? await toggleCommentLike(id, post, comment, who, room) : await toggleLike(id, post, who, room);
+    if (added !== null && author !== who) await award(id, author, added ? 1 : -1, owner);
+    return added;
+  });
+  const AUTHOR = "a".repeat(32);
+  const authorPoints = async () => (await pointsOf(ID, [AUTHOR])).get(AUTHOR) ?? 0;
+  const isSadd = (batch: Command[]) => batch.some((c) => c[0] === "SADD" && c[1] === likes);
+  const isSrem = (batch: Command[]) => batch.some((c) => c[0] === "SREM" && c[1] === likes);
+  const reset = async () => { await real([["DEL", likes, trace, `nl:cm:${ID}:pts`]]); seen.length = 0; };
+
+  // Codex T: no like yet; one press likes, the other, at the same moment, takes it back. The point of the like must
+  // never be left after its taking back has run: hold the like's point until a point was taken off.
+  await reset();
+  const before = await authorPoints();
+  gate = { hold: (batch) => batch.some((c) => c.includes("ZINCRBY") || c[0] === "ZINCRBY"), ran: () => seen.some((b) => b.some((c) => c[0] === "EVAL" && c[1] === REMOVE_POINT)) };
+  await Promise.all([press(ID, POST, null, WHO, AUTHOR, ROOM, ROOM), press(ID, POST, null, WHO, AUTHOR, ROOM, ROOM)]);
+  gate = null;
+  const likeThere = (await members(likes)).includes(WHO);
+  is("Codex T: like and take-back at once: the author has a point only if the like is there", (await authorPoints()) - before, likeThere ? 1 : 0);
+
+  // Codex U: the like is there; two presses at once both read it as held. One takes it back and gives its room back;
+  // the other must never write it again without taking its room: hold a second write of the like until a removal ran.
+  await reset();
+  await press(ID, POST, null, WHO, AUTHOR, ROOM, ROOM);
+  const withLike = await used();
+  let adds = 0;
+  gate = { hold: (batch) => isSadd(batch) && ++adds > 1, ran: () => seen.some(isSrem) };
+  await Promise.all([press(ID, POST, null, WHO, AUTHOR, ROOM, ROOM), press(ID, POST, null, WHO, AUTHOR, ROOM, ROOM)]);
+  gate = null;
+  const there = (await members(likes)).includes(WHO);
+  is("Codex U: two presses on a like that is there: the room counts the like exactly when it is there", await used(), there ? withLike : (withLike ?? 0) - SET_ENTRY_BYTES - TRACE_ENTRY.bytes);
+  is("and the route serializes each press under the like's lock", [readFileSync("app/api/store/community/route.ts", "utf8").includes("pressLike("), /withLock\(likeLockKey\(/.test(readFileSync("lib/community.ts", "utf8"))], [true, true]);
+  await reset();
 
   part("The comment's like reads the same way (rule 30)");
   const clikes = `nl:cm:${ID}:lc:${POST}:k1`;

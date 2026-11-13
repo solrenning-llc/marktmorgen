@@ -322,6 +322,19 @@ async function main(): Promise<void> {
       reset();
       seed();
       video = answer;
+      // The hook's refund was not confirmed meanwhile and queued to be looked at again (settle's SET + ZADD).
+      during = () => {
+        const now = JSON.parse(String(redis.run(["GET", KEY]))) as Pending;
+        redis.run(["SET", KEY, JSON.stringify({ ...now, owed: { cents: 6000, key: REFUND_KEY, since: at, looks: 0 } }), "EX", 400 * 86_400]);
+        redis.run(["ZADD", QUEUE, at + HOUR, VIDEO]);
+        redis.run(["SADD", OWED_KEY, VIDEO]);
+      };
+      await look(at);
+      is(`${branch}, ${name}, a refund owed queued during the look: it stays queued, so the refund is still collected`, queuedAt() !== null, true);
+
+      reset();
+      seed();
+      video = answer;
       // The hook's refund was not confirmed meanwhile: it wrote what is owed and listed it for the store.
       during = () => {
         const now = JSON.parse(String(redis.run(["GET", KEY]))) as Pending;

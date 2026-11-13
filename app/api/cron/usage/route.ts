@@ -3,7 +3,7 @@ import { cronAllowed } from "@/lib/request-guard";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
-import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
+import { NIMBUS_FROM, isSenderConfigured, sendEmail, sendEmailOutcome } from "@/lib/email";
 import {
   DELIVERY_ALLOWANCE_BYTES,
   FREE_PAUSE_ABOVE_BYTES,
@@ -17,15 +17,15 @@ import { largerPlanFor } from "@/lib/larger-plan";
 import { SITE_URL } from "@/lib/site-url";
 import { SETUP_VIDEO_SECONDS, costsPaused, standingOf, videoLimitFor } from "@/lib/plan-standing";
 import { watchedFolders, watchedIn } from "@/lib/watch";
-import { firstWord, settleAll, storeOf } from "@/lib/watch-billing";
+import { giveVideoWordBack, settleAll, storeOf, takeVideoWord } from "@/lib/watch-billing";
 import { allowanceWindow, calendarWindow, resetWords } from "@/lib/allowance-window";
 
 import { centsWords } from "@/lib/watch-rules";
 import { videoUsageNotice } from "@/lib/video-usage-notice";
 import { visitedFolders, visitsIn } from "@/lib/traffic";
-import { firstWordOnVisits } from "@/lib/traffic-billing";
+import { giveVisitsWordBack, takeVisitsWord } from "@/lib/traffic-billing";
 import { SETUP_VISITS, countWords, publicVisitLimit, visitLimitFor, visitsWords } from "@/lib/traffic-rules";
-import { firstWordOnOrders } from "@/lib/orders-billing";
+import { giveOrdersWordBack, takeOrdersWord } from "@/lib/orders-billing";
 import { orderedFolders, ordersIn } from "@/lib/orders";
 import { ORDERS_INCLUDED, ordersWords, paidOrdersLimitFor } from "@/lib/order-rules";
 
@@ -125,19 +125,23 @@ async function videoRun(): Promise<VideoRun> {
       // A renewal Stripe could not collect pauses video for its own reason, and the
       // creator is told that one (232 [CA1] unit 4): not a plan's hours used up.
       if (costsPaused(store)) continue;
-      if (!isSenderConfigured() || !(await firstWord(folder, month))) continue;
+      if (!isSenderConfigured()) continue;
+      // The month's mark, kept with this run's value: given back only on a certain refusal (lib/usage-billing.ts).
+      const word = await takeVideoWord(folder, month);
+      if (word === null) continue;
       const notice = videoUsageNotice({ seconds, limit, standing: standingOf(store),
         studioUrl: `${SITE_URL}/studio`, supportEmail: SUPPORT_EMAIL });
-      const sent = await sendEmail({ meter: { by: "company" },
+      const outcome = await sendEmailOutcome({ meter: { by: "company" },
         from: NIMBUS_FROM,
         to: store.email,
         replyTo: SUPPORT_EMAIL,
         ...notice,
       }).catch((error) => {
         console.error("sending the video hours notice failed", error);
-        return false;
+        return "uncertain" as const;
       });
-      if (sent !== false) out.told += 1;
+      if (outcome === "refused") await giveVideoWordBack(folder, month, word);
+      if (outcome === "sent") out.told += 1;
     } catch (error) {
       console.error("writing to a creator about video hours failed", error);
     }
@@ -178,9 +182,12 @@ async function visitsRun(): Promise<VisitsRun> {
       if (visits < shown) continue;
       out.stores += 1;
       out.resting += 1;
-      if (!isSenderConfigured() || !(await firstWordOnVisits(folder, month))) continue;
+      if (!isSenderConfigured()) continue;
+      // The month's mark, kept with this run's value: given back only on a certain refusal (lib/usage-billing.ts).
+      const word = await takeVisitsWord(folder, month);
+      if (word === null) continue;
       const standing = standingOf(store);
-      const sent = await sendEmail({ meter: { by: "company" },
+      const outcome = await sendEmailOutcome({ meter: { by: "company" },
         from: NIMBUS_FROM,
         to: store.email,
         replyTo: SUPPORT_EMAIL,
@@ -211,9 +218,10 @@ async function visitsRun(): Promise<VisitsRun> {
         ].join("\n"),
       }).catch((error) => {
         console.error("sending the visits notice failed", error);
-        return false;
+        return "uncertain" as const;
       });
-      if (sent !== false) out.told += 1;
+      if (outcome === "refused") await giveVisitsWordBack(folder, month, word);
+      if (outcome === "sent") out.told += 1;
     } catch (error) {
       out.failed += 1;
       console.error("writing to a creator about visits failed", error);
@@ -456,8 +464,11 @@ async function ordersRun(): Promise<OrdersRun> {
       const limit = paidOrdersLimitFor(store);
       if (limit === null || orders < limit) continue;
       out.stores += 1;
-      if (!isSenderConfigured() || !(await firstWordOnOrders(folder, month))) continue;
-      const sent = await sendEmail({ meter: { by: "company" },
+      if (!isSenderConfigured()) continue;
+      // The month's mark, kept with this run's value: given back only on a certain refusal (lib/usage-billing.ts).
+      const word = await takeOrdersWord(folder, month);
+      if (word === null) continue;
+      const outcome = await sendEmailOutcome({ meter: { by: "company" },
         from: NIMBUS_FROM,
         to: store.email,
         replyTo: SUPPORT_EMAIL,
@@ -482,9 +493,10 @@ async function ordersRun(): Promise<OrdersRun> {
         ].join("\n"),
       }).catch((error) => {
         console.error("sending the orders notice failed", error);
-        return false;
+        return "uncertain" as const;
       });
-      if (sent !== false) out.told += 1;
+      if (outcome === "refused") await giveOrdersWordBack(folder, month, word);
+      if (outcome === "sent") out.told += 1;
     } catch (error) {
       out.failed += 1;
       console.error("writing to a creator about orders failed", error);

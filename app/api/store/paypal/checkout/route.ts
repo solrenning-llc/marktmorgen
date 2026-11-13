@@ -1,3 +1,4 @@
+import { bundleItemsAvailable } from "@/lib/bundle-available";
 import { type NextRequest, after } from "next/server";
 import { type DigitalConsent, consentFromForm } from "@/lib/digital-consent";
 import { linkOrigin, originFrom } from "@/lib/request-origin";
@@ -51,8 +52,12 @@ export async function POST(request: NextRequest) {
   const comingSoon = await isComingSoon(store, product.id).catch(() => null);
   if (comingSoon === null) return away(`/@${store.handle}?status=error`);
   if (comingSoon) return away(`/@${store.handle}/p/${product.id}#waitlist`);
-  if (product.bundle && deliverableItems(product, await readListings(store, product.bundle)).length < MIN_BUNDLE_ITEMS) {
-    return away(`/@${store.handle}`);
+  if (product.bundle) {
+    const items = deliverableItems(product, await readListings(store, product.bundle));
+    if (items.length < MIN_BUNDLE_ITEMS) return away(`/@${store.handle}`);
+    // Nor while a product in it is coming soon or out of keys, or that cannot be read (lib/bundle-available.ts):
+    // said on the store page, before any PayPal order is made.
+    if (!(await bundleItemsAvailable(store, items))) return away(`/@${store.handle}?status=bundleunready`);
   }
   // What the visit carried, as a Stripe checkout carries it: the channel this
   // sale is credited to (lib/visit-channel.ts) and the affiliate who sent the

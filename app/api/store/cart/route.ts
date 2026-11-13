@@ -6,6 +6,7 @@ import { linkOrigin, originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { readListings, readProduct } from "@/lib/catalog";
 import { canSell, canSellProduct } from "@/lib/store-checkout";
+import { BundleUnavailable, bundleAvailable } from "@/lib/bundle-available";
 import { cartPrice, createCartCheckout } from "@/lib/cart-checkout";
 import { codeCookieName, readLinkCode } from "@/lib/code-link";
 import { MAX_CART, cartable, dealOff, readCartIds } from "@/lib/cart-rules";
@@ -310,6 +311,11 @@ export async function POST(request: NextRequest) {
     if (out === null) return away(`/@${store.handle}?cart=error#cart`);
     if (out) return away(`/@${store.handle}?cart=changed#cart`);
   }
+  // A bundle in the cart holding a product coming soon or out of keys, or one that cannot be read, is not sold now
+  // (lib/bundle-available.ts): said on the store page, nothing charged.
+  for (const product of products) {
+    if (product.bundle && !(await bundleAvailable(store, product))) return away(`/@${store.handle}?status=bundleunready`);
+  }
 
   try {
     const via = await attributionFor(store, products[0].id, {
@@ -340,7 +346,7 @@ export async function POST(request: NextRequest) {
       via,
       digitalConsent,
       offers: upsell && offerFrom ? { upsellKey: upsell.fingerprint, from: offerFrom.id } : null,
-    }), (error) => error instanceof OrdersPausedError || error instanceof DigitalConsentMissing || error instanceof CartShippingRefused);
+    }), (error) => error instanceof OrdersPausedError || error instanceof DigitalConsentMissing || error instanceof CartShippingRefused || error instanceof BundleUnavailable);
     // Sold out since the cart was opened: back to it, which says which; busy or unreadable: nothing was charged, try again.
     if (!holding.ok) return away(`/@${store.handle}?cart=${holding.reason === "soldout" ? "changed" : "error"}#cart`);
     const opened = holding.value;
@@ -359,6 +365,8 @@ export async function POST(request: NextRequest) {
     if (error instanceof DigitalConsentMissing) return away(`/@${store.handle}?cart=consent#cart`);
     // Its physical products cannot all be shipped to one address any more (lib/cart-shipping.ts): back to the cart, which says which.
     if (error instanceof CartShippingRefused) return away(`/@${store.handle}?cart=changed#cart`);
+    // A product in a bundle in it stopped being ready since the check above: the same notice, nothing charged.
+    if (error instanceof BundleUnavailable) return away(`/@${store.handle}?status=bundleunready`);
     console.error("a cart's checkout failed", error);
     after(() => noteCheckoutTrouble(store, error).catch(() => {}));
     // Stripe says the account cannot take card payments: written down, and said on the store page (lib/stripe-charges.ts).

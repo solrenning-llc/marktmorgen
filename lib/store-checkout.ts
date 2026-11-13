@@ -7,6 +7,7 @@
  * and leaves Marktmorgen with nothing to hold, skim or lose. The 0% on the home
  * page is this file.
  */
+import { BundleUnavailable, bundleItemsAvailable } from "@/lib/bundle-available";
 import { randomBytes } from "node:crypto";
 import { prepareOrderConfirmationPreintent } from "@/lib/orders";
 import { CURRENT_SHIPMENT_MAIL_LIFECYCLE } from "@/lib/shipment-record";
@@ -300,6 +301,8 @@ export async function createCheckout(
   // buyer gets is what it held when they paid, whatever it holds later.
   const pool = product.bundle ? deliverableItems(product, await readListings(store, product.bundle)) : null;
   if (pool && pool.length < MIN_BUNDLE_ITEMS) throw new Error("This bundle holds too little that can be handed over right now");
+  // Nor while a product in it is coming soon or out of keys, or that cannot be read (lib/bundle-available.ts).
+  if (pool && !(await bundleItemsAvailable(store, pool))) throw new BundleUnavailable();
   // A bundle its buyer builds: exactly the ones they chose, from what it can
   // hand over now (lib/bundle-rules.ts). Anything else is refused, not guessed.
   const pick = picks(product);
@@ -424,6 +427,8 @@ export async function createCheckout(
     // be handed over always is (lib/product-extras.ts).
     const bundled = offer.target.bundle ? deliverableItems(offer.target, await readListings(store, offer.target.bundle)) : null;
     if (bundled && bundled.length < MIN_BUNDLE_ITEMS) continue;
+    // So is one holding a product coming soon or out of keys, or one that cannot be read (lib/bundle-available.ts).
+    if (bundled && !(await bundleItemsAvailable(store, bundled))) continue;
     const key = BUMP_KEYS[added.length];
     const line = added.length + 1;
     if (bundled) {

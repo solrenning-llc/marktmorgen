@@ -43,6 +43,7 @@
  * the affiliate's credit follow Stripe's answer within minutes, whether or
  * not the buyer ever comes back to the thanks page.
  */
+import { withAvailableBundles } from "@/lib/bundle-available";
 import { admitOrders, settleAdmitted } from "@/lib/order-admission";
 import { createHash, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
@@ -300,7 +301,8 @@ export async function takeUpsell(input: {
   const { view, product, cart } = found;
   // A one-click charge cannot carry Stripe Tax, so with tax on there is none.
   // A bundle that holds a course is never offered here (lib/bundles.ts).
-  const offered = sellableTargets(store, await offerableAfterPaying(store, await readListings(store, funnelProductIds(product.funnel))));
+  // A bundle holding a product coming soon or out of keys is not sold now (lib/bundle-available.ts).
+  const offered = sellableTargets(store, await withAvailableBundles(store, await offerableAfterPaying(store, await readListings(store, funnelProductIds(product.funnel)))));
   const funnel = store.tax.enabled ? null : activeFunnel(offered, product);
   if (!funnel) return { kind: "unavailable" };
   const created = typeof view.created === "number" ? view.created : 0;
@@ -768,7 +770,8 @@ export async function funnelView(input: {
   const open = input.eligible && !store.tax.enabled && canSell(store) && offerOpen(input.created, input.secret, input.upsellKey ?? undefined);
   const owner = input.cart ? input.cart.offerFrom : product.id;
   const full = open && owner ? await readProduct(store, owner) : null;
-  const listed = full ? await offerableAfterPaying(store, await readListings(store, funnelProductIds(full.funnel))) : [];
+  // Never shown where the answer would be refused: a bundle that cannot be sold now (lib/bundle-available.ts) included.
+  const listed = full ? await withAvailableBundles(store, await offerableAfterPaying(store, await readListings(store, funnelProductIds(full.funnel)))) : [];
   const offered = sellableTargets(store, listed);
   const funnel = full ? activeFunnel(offered, full) : null;
   if (!funnel) return { offer: null, taken, notes, declined };

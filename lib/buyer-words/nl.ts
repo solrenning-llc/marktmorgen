@@ -193,6 +193,7 @@ export const nl: BuyerWords = {
 
   notices: {
     soldout: { title: "Die is net uitverkocht", body: "De laatste ging vlak voordat je op kopen drukte. Er is niets afgeschreven." },
+    bundleunready: { title: "Deze bundel is nu niet beschikbaar", body: "Een van de producten erin is nog niet klaar. Er is niets afgeschreven. De producten die klaar zijn, kun je los kopen." },
     busy: { title: "Iemand anders koopt dit op dit moment", body: "Er is niets afgeschreven. Druk zo meteen opnieuw op kopen." },
     slow: { title: "Veel pogingen in een paar minuten", body: "Er is niets afgeschreven. Wacht een paar minuten en druk dan opnieuw op kopen." },
     error: { title: "De betaalpagina kon niet worden geopend", body: "Er is niets afgeschreven. Probeer het zo meteen opnieuw." },

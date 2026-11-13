@@ -38,6 +38,7 @@
  * than three of the creator's customers, so a buyer's fourth checkout with
  * offers is followed by none. Safe, not yet good.
  */
+import { withAvailableBundles } from "@/lib/bundle-available";
 import { activeFunnel, funnelPosition, funnelProductIds, type Funnel } from "@/lib/funnel";
 import { offerableAfterPaying } from "@/lib/bundles";
 import { readListings } from "@/lib/catalog";
@@ -59,7 +60,8 @@ export const CART_OFFER_REQUEST_UNITS = NEXT_OFFER_REQUEST_UNITS;
 /** A product's live funnel among the offers that can follow a payment, with those offers, or null. */
 export async function liveFunnel(store: Store, product: Product): Promise<{ funnel: Funnel; offered: Listing[] } | null> {
   if (store.tax.enabled || !product.funnel) return null;
-  const offered = await offerableAfterPaying(store, await readListings(store, funnelProductIds(product.funnel)));
+  // A bundle that cannot be sold now (lib/bundle-available.ts) is no offer either.
+  const offered = await withAvailableBundles(store, await offerableAfterPaying(store, await readListings(store, funnelProductIds(product.funnel))));
   const funnel = activeFunnel(offered, product);
   return funnel ? { funnel, offered } : null;
 }

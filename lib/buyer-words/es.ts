@@ -199,6 +199,7 @@ export const es: BuyerWords = {
 
   notices: {
     soldout: { title: "Se acaba de agotar", body: "El último se vendió justo antes de que pulsaras comprar. No se ha cobrado nada." },
+    bundleunready: { title: "Este paquete no está disponible ahora", body: "Uno de los productos que incluye aún no está listo. No se ha cobrado nada. Puedes comprar por separado los productos que ya están listos." },
     busy: { title: "Alguien lo está comprando ahora mismo", body: "No se ha cobrado nada. Vuelve a pulsar comprar en un momento." },
     slow: { title: "Demasiados intentos en pocos minutos", body: "No se ha cobrado nada. Espera unos minutos y vuelve a pulsar comprar." },
     error: { title: "No se pudo abrir la página de pago", body: "No se ha cobrado nada. Vuelve a intentarlo en un momento." },

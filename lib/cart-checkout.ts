@@ -18,6 +18,7 @@
  * products and not others; a discount code box is offered only when nothing
  * was taken off, as on any other checkout here.
  */
+import { BundleUnavailable, bundleItemsAvailable } from "@/lib/bundle-available";
 import { itemsHandedOver } from "@/lib/store-data-rules";
 import { ADMITTED_FIELD, OrdersPausedError, admitOrders } from "@/lib/order-admission";
 import type { Product, Store } from "@/lib/store";
@@ -173,6 +174,8 @@ export async function createCartCheckout(
     if (product.bundle) {
       const items = deliverableItems(product, await readListings(store, product.bundle));
       if (items.length < MIN_BUNDLE_ITEMS) throw new Error("A bundle in the cart holds too little right now");
+      // Nor while a product in it is coming soon or out of keys, or that cannot be read (lib/bundle-available.ts).
+      if (!(await bundleItemsAvailable(store, items))) throw new BundleUnavailable();
       for (const [name, value] of Object.entries(bundleMeta(key ? `${key}_bundle` : "bundle", items.map((p) => p.id)))) body.set(`metadata[${name}]`, value);
     }
     const shown = cartPrice(store, product, country);

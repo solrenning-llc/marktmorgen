@@ -196,6 +196,7 @@ export const de: BuyerWords = {
 
   notices: {
     soldout: { title: "Das ist gerade ausverkauft", body: "Das letzte Exemplar ging kurz vor Ihrem Klick auf Kaufen weg. Es wurde nichts berechnet." },
+    bundleunready: { title: "Dieses Paket ist gerade nicht erhältlich", body: "Eines der Produkte darin ist noch nicht fertig. Es wurde nichts berechnet. Die fertigen Produkte können Sie einzeln kaufen." },
     busy: { title: "Jemand anderes kauft das gerade", body: "Es wurde nichts berechnet. Klicken Sie gleich noch einmal auf Kaufen." },
     slow: { title: "Viele Versuche in wenigen Minuten", body: "Es wurde nichts berechnet. Warten Sie ein paar Minuten und klicken Sie dann erneut auf Kaufen." },
     error: { title: "Die Zahlungsseite konnte nicht geöffnet werden", body: "Es wurde nichts berechnet. Versuchen Sie es gleich noch einmal." },

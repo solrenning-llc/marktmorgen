@@ -224,6 +224,7 @@ export const en = {
   // ---- The store page ----------------------------------------------------------------
   notices: {
     soldout: { title: "That one just sold out", body: "The last one went a moment before you pressed buy. Nothing was charged." },
+    bundleunready: { title: "This bundle isn't available right now", body: "One of the products in it isn't ready yet. Nothing was charged. You can buy the products that are ready on their own." },
     busy: { title: "Someone else is buying that right now", body: "Nothing was charged. Press buy again in a moment." },
     slow: { title: "That was a lot of tries in a few minutes", body: "Nothing was charged. Wait a few minutes, then press buy again." },
     error: { title: "The payment page could not be opened", body: "Nothing was charged. Try again in a moment." },

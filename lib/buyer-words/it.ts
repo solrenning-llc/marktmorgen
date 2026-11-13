@@ -194,6 +194,7 @@ export const it: BuyerWords = {
 
   notices: {
     soldout: { title: "È appena andato esaurito", body: "L'ultimo è stato venduto un attimo prima che premessi acquista. Non è stato addebitato nulla." },
+    bundleunready: { title: "Questo pacchetto non è disponibile al momento", body: "Uno dei prodotti che contiene non è ancora pronto. Non è stato addebitato nulla. Puoi acquistare separatamente i prodotti già pronti." },
     busy: { title: "Qualcun altro lo sta acquistando proprio ora", body: "Non è stato addebitato nulla. Premi di nuovo acquista tra un momento." },
     slow: { title: "Troppi tentativi in pochi minuti", body: "Non è stato addebitato nulla. Attendi qualche minuto, poi premi di nuovo acquista." },
     error: { title: "Non è stato possibile aprire la pagina di pagamento", body: "Non è stato addebitato nulla. Riprova tra un momento." },

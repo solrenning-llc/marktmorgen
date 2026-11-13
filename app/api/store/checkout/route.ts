@@ -1,3 +1,4 @@
+import { BundleUnavailable, bundleItemsAvailable } from "@/lib/bundle-available";
 import { startGift } from "@/lib/gifts";
 import { OrdersPausedError } from "@/lib/order-admission";
 import { startGroup } from "@/lib/group-buy";
@@ -172,6 +173,9 @@ export async function POST(request: NextRequest) {
   if (product.bundle) {
     const pool = deliverableItems(product, await readListings(store, product.bundle));
     if (!bundleReady(product, pool.length)) return away(`/@${store.handle}`);
+    // Nor while a product in it is coming soon or out of keys, or that cannot be read: nobody pays for what is not
+    // ready yet (lib/bundle-available.ts). Said on the store page, before any checkout opens.
+    if (!(await bundleItemsAvailable(store, pool))) return away(`/@${store.handle}?status=bundleunready`);
     // A bundle the buyer builds: exactly as many as it asks, from its list,
     // or back to its page to choose again.
     const pick = picks(product);
@@ -340,6 +344,8 @@ export async function POST(request: NextRequest) {
     // changed: back to the form it belongs to, said beside the box. Refused
     // before Stripe is reached, so nothing is charged and no unit is held.
     if (error instanceof DigitalConsentMissing) return away(consentBack);
+    // A product in the bundle stopped being ready since the check above: the same notice, nothing charged.
+    if (error instanceof BundleUnavailable) return away(`/@${store.handle}?status=bundleunready`);
     console.error("checkout failed", error);
     // A checkout Stripe would not open: counted, and the creator told (lib/checkout-trouble.ts).
     after(() => noteCheckoutTrouble(store, error).catch(() => {}));

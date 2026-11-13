@@ -202,6 +202,7 @@ export const fr: BuyerWords = {
 
   notices: {
     soldout: { title: "Il vient d'être épuisé", body: "Le dernier est parti juste avant que vous cliquiez sur acheter. Rien n'a été débité." },
+    bundleunready: { title: "Ce lot n'est pas disponible pour le moment", body: "L'un des produits qu'il contient n'est pas encore prêt. Rien n'a été débité. Vous pouvez acheter séparément les produits déjà prêts." },
     busy: { title: "Quelqu'un est en train de l'acheter", body: "Rien n'a été débité. Cliquez de nouveau sur acheter dans un instant." },
     slow: { title: "Beaucoup de tentatives en quelques minutes", body: "Rien n'a été débité. Patientez quelques minutes, puis cliquez de nouveau sur acheter." },
     error: { title: "La page de paiement n'a pas pu s'ouvrir", body: "Rien n'a été débité. Réessayez dans un instant." },

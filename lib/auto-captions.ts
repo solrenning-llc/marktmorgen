@@ -32,7 +32,7 @@
  * once ask for the same one and money is never returned twice.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { repliesFor } from "@/lib/redis-reply";
+import { repliesFor, scanPage } from "@/lib/redis-reply";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { askStream, noteCaptionLanguages, streamCaptions, streamConfig, streamRecord } from "@/lib/stream";
 import { readStreamPath, STREAM_ID_PATTERN } from "@/lib/stream-rules";
@@ -662,6 +662,33 @@ export async function autoWriting(pathnames: string[]): Promise<Record<string, s
 }
 
 /** Refunds for AI captions not yet confirmed by Stripe in one store folder, deleted videos included: cents owed and whether automatic looks have stopped. */
+/** How many unconfirmed refunds the studio's lessons tab lists on one load (issue #4304, unit D). */
+export const OWED_SHOWN = 20;
+
+/**
+ * The refunds for AI captions Stripe has not confirmed yet, as the studio's lessons tab shows them: one SSCAN
+ * page of the set (COUNT OWED_SHOWN, read exactly, rule 30), at most OWED_SHOWN of them read, and `more` when the
+ * set holds others, so the page says "at least" and never a count it did not read. Null when it could not be read.
+ */
+export async function autoRefundsOwedPage(folder: string): Promise<{ rows: { id: string; cents: number; stuck: boolean }[]; more: boolean } | null> {
+  if (!isRedisConfigured() || !/^[0-9a-f]{32}$/.test(folder)) return { rows: [], more: false };
+  const page = scanPage(await redisPipeline([["SSCAN", owedKey(folder), "0", "COUNT", OWED_SHOWN]]));
+  if (!page) return null;
+  const valid = page.items.filter((m) => STREAM_ID_PATTERN.test(m)).sort();
+  const ids = valid.slice(0, OWED_SHOWN);
+  const more = page.next !== "0" || valid.length > ids.length;
+  if (!ids.length) return { rows: [], more };
+  const rows = repliesFor(await redisPipeline(ids.map((id) => ["GET", pendingKey(id)])), ids.length);
+  if (!rows) return null;
+  return {
+    more,
+    rows: ids.flatMap((id, i) => {
+      const pending = parsePending(rows[i]);
+      return pending?.owed && readStreamPath(pending.path)?.folder === folder ? [{ id, cents: pending.owed.cents ?? pending.cents, stuck: pending.owed.stuck === true }] : [];
+    }),
+  };
+}
+
 export async function autoRefundsOwed(folder: string): Promise<{ id: string; cents: number; stuck: boolean }[]> {
   if (!isRedisConfigured() || !/^[0-9a-f]{32}$/.test(folder)) return [];
   const [members] = await redisPipeline([["SMEMBERS", owedKey(folder)]]);

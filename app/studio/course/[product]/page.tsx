@@ -30,7 +30,7 @@ import { readListing, readTitles, visibleIds } from "@/lib/catalog";
 import { CourseShelfStudio } from "@/components/course-shelf-studio";
 import { templateById } from "@/lib/course-templates";
 import { isStreamConfigured } from "@/lib/stream";
-import { autoRefundsOwed } from "@/lib/auto-captions";
+import { OWED_SHOWN, autoRefundsOwedPage } from "@/lib/auto-captions";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { isBillingConfigured } from "@/lib/billing";
 import { can } from "@/lib/team-roles";
@@ -148,7 +148,9 @@ export default async function StudioCoursePage({
   // captions when it is opened, in a request of its own. The Videos tab checks a block of them for captions.
   const videos = tab === "videos" ? await videosTab(course, page) : null;
   // Refunds for AI captions Stripe has not confirmed yet, shown to whoever may see the plan's card.
-  const owedRows: Awaited<ReturnType<typeof autoRefundsOwed>> = onCourse && can(view.role, "billing") ? await autoRefundsOwed(folder).catch(() => []) : [];
+  // A page of them (unit D): at most OWED_SHOWN read, with whether there are more; null when they could not be read.
+  const owed = onCourse && can(view.role, "billing") ? await autoRefundsOwedPage(folder).catch(() => null) : { rows: [], more: false };
+  const owedRows = owed?.rows ?? [];
   const autoCan =
     can(view.role, "billing") && store.subscriptionActive && Boolean(store.subscriptionId && store.stripeCustomerId) && isBillingConfigured() && isStreamConfigured();
   const aiState = (onCourse || tab === "work") && aiAvailableFor(store) ? { on: true, left: await aiLeft(store).catch(() => 0) } : { on: false, left: 0 };
@@ -265,6 +267,11 @@ export default async function StudioCoursePage({
         <h2 id="tab-title" tabIndex={-1} className="mt-6 text-lg font-semibold tracking-[-0.02em] text-ink">{COURSE_TAB_LINKS.find(([to]) => to === tab)?.[1]}</h2>
         {onCourse ? (
           <>
+        {owed === null ? (
+          <p role="status" className="notice mt-5">
+            Refunds for AI captions could not be checked just now. Reload this page in a moment; this does not mean none are pending.
+          </p>
+        ) : null}
         {owedRows.length ? (
           <section aria-labelledby="captions-refunds" className="mt-5 rounded-2xl border border-line bg-paper p-4" data-captions-refunds>
             <h2 id="captions-refunds" className="text-base font-bold text-ink">
@@ -279,6 +286,9 @@ export default async function StudioCoursePage({
                 </li>
               ))}
             </ul>
+            {owed?.more ? (
+              <p className="mt-2 text-sm text-ink">{`At least ${OWED_SHOWN} refunds for AI captions are pending; this page lists ${OWED_SHOWN} at a time. The rest are checked on our own all the same.`}</p>
+            ) : null}
           </section>
         ) : null}
         <CourseEditor

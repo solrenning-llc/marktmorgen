@@ -8,6 +8,7 @@
  * (the route answers "error" and awards nothing), with nothing removed and no
  * room given back.
  */
+import { readFileSync } from "node:fs";
 import { toggleCommentLike, toggleLike } from "@/lib/community";
 import { dataUsed } from "@/lib/store-data";
 import { UnknownReplyError } from "@/lib/redis-reply";
@@ -87,6 +88,22 @@ async function main(): Promise<void> {
   is("SREM answered null: unknown", await threw(() => toggleLike(ID, POST, WHO, ROOM)), "unknown");
   bend = null;
   is("no room given back for a removal not confirmed", ((await used()) ?? 0) >= (liked ?? 0), true);
+
+  part("Claude 1's MEDIUM on #3819: two un-likes at once give the room back once, and only one of them takes a like back");
+  await real([["DEL", likes, trace, `nl:cm:${ID}:tr:${"a".repeat(32)}`]]);
+  const A = "a".repeat(32);
+  const base = await used();
+  is("setup: A likes", await toggleLike(ID, POST, A, ROOM), true);
+  const withA = await used();
+  is("setup: M likes", await toggleLike(ID, POST, WHO, ROOM), true);
+  const both = await Promise.all([toggleLike(ID, POST, WHO, ROOM), toggleLike(ID, POST, WHO, ROOM)]);
+  is("only A's like is left", await members(likes), [A]);
+  is("the room is A's like alone: given back once, never twice", await used(), withA);
+  is("exactly one press took M's like back; the other changed nothing (no point taken from the author twice)", [both.filter((b) => b === false).length, both.filter((b) => b === null).length], [1, 1]);
+  is("(the room was taken for A's like)", (withA ?? 0) > (base ?? 0), true);
+  const route = readFileSync("app/api/store/community/route.ts", "utf8");
+  is("the route awards nothing for a press that changed nothing", [route.includes("if (added !== null && post.a !== key)"), route.includes("if (added !== null && comment.a !== key)")], [true, true]);
+  await real([["DEL", likes, trace, `nl:cm:${ID}:tr:${A}`]]);
 
   part("The comment's like reads the same way (rule 30)");
   const clikes = `nl:cm:${ID}:lc:${POST}:k1`;

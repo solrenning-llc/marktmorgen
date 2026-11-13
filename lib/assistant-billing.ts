@@ -121,12 +121,14 @@ export async function ensureAssistantPrice(): Promise<string> {
  * startAssistant, which first makes sure the store has no add-on live, still charged or open at Stripe.
  */
 export async function createAssistantCheckout(store: Store, origin: string): Promise<string> {
-  if (assistantRefusal(store)) throw new Error("the add-on cannot be sold to this store now");
+  // assistantRefusal already refuses a store without its Stripe customer; read here too, so the type proves it.
+  const customer = store.stripeCustomerId;
+  if (assistantRefusal(store) || !customer) throw new Error("the add-on cannot be sold to this store now");
   const body = new URLSearchParams({
     mode: "subscription",
     "subscription_data[billing_mode][type]": "classic",
     locale: "en",
-    customer: store.stripeCustomerId!,
+    customer,
     "line_items[0][price]": await ensureAssistantPrice(),
     "line_items[0][quantity]": "1",
     "metadata[addon]": ADD_ON_MARK,
@@ -220,8 +222,8 @@ export function startAssistant(store: Store, origin: string): Promise<AssistantS
 }
 
 async function startWithinCutoff(store: Store, origin: string): Promise<AssistantStart> {
-  if (assistantRefusal(store)) throw new Error("the add-on cannot be sold to this store now");
-  const customer = store.stripeCustomerId!;
+  const customer = store.stripeCustomerId;
+  if (assistantRefusal(store) || !customer) throw new Error("the add-on cannot be sold to this store now");
   const subscriptions = await readCustomerList("/subscriptions", new URLSearchParams({ customer, status: "all", limit: "100" }), (row) => {
     const meta = ownField(row, "metadata");
     const status = ownField(row, "status");
@@ -340,8 +342,9 @@ async function disputed(subscriptionId: string): Promise<boolean> {
  * written on such a reply, and the next call reads again.
  */
 export async function syncAssistant(store: Store, subscription?: Record<string, unknown>, nowSeconds = Date.now() / 1000): Promise<Store> {
-  const id = store.assistantPlan?.subscriptionId;
-  if (!id) return store;
+  const held = store.assistantPlan;
+  const id = held?.subscriptionId;
+  if (!held || !id) return store;
   try {
     let current = subscription ?? (await readSubscription(id));
     if (!isOwnReply(current, id)) throw new NotOwnReply(id);
@@ -359,7 +362,7 @@ export async function syncAssistant(store: Store, subscription?: Record<string, 
     return (await setAssistantPlan(storeRef(store), plan)) ?? store;
   } catch (error) {
     if (error instanceof BillingError && error.status === 404) {
-      return (await setAssistantPlan(storeRef(store), { ...store.assistantPlan!, active: false })) ?? store;
+      return (await setAssistantPlan(storeRef(store), { ...held, active: false })) ?? store;
     }
     console.error("reading a store's add-on failed", error);
     return store;

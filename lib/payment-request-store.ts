@@ -444,13 +444,24 @@ const intentOf = (value: unknown): string =>
  * still paid it (its checkout was opened while it was open), so it is paid.
  */
 export async function markPaid(store: Store, id: string, session: PaidSession, now = Date.now()): Promise<{ request: PaymentRequest; fresh: boolean } | null> {
+  // What Stripe charged, tax included, only when the session says it (#4475): never the request's own total, which
+  // leaves out a tax added at checkout. 0 means not known yet; a later read of the same session completes it.
+  const charged = typeof session.amount_total === "number" && Number.isSafeInteger(session.amount_total) && session.amount_total >= 0 ? session.amount_total : 0;
+  const sessionId = typeof session.id === "string" ? session.id.slice(0, 255) : "";
   const done = await changeRequest(store, id, (request) => {
-    if (request.state === "paid" || request.state === "refunded") return { next: null, answer: false };
+    if (request.state === "paid" || request.state === "refunded") {
+      // Paid already with the amount not known: the same session read again with it completes the record, once, and
+      // starts nothing again (answer false).
+      if (request.amountPaid === 0 && !request.outside && charged > 0 && sessionId && sessionId === request.session) {
+        return { next: { ...request, amountPaid: charged }, answer: false };
+      }
+      return { next: null, answer: false };
+    }
     const paid: PaymentRequest = {
       ...request,
       state: "paid",
       paidAt: typeof session.created === "number" ? Math.min(now, session.created * 1000) : now,
-      amountPaid: typeof session.amount_total === "number" ? session.amount_total : request.total,
+      amountPaid: charged,
       payment: intentOf(session.payment_intent).slice(0, 255),
       session: typeof session.id === "string" ? session.id.slice(0, 255) : request.session,
       failed: "",

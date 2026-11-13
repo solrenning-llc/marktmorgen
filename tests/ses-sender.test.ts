@@ -50,6 +50,8 @@ const fetched: string[] = [];
 const exchanges: { role: string; token: string; action: string }[] = [];
 let stsRefuses = false;
 let stsAnswersXml = false;
+/** Synthetic only: Amazon's certificate host does not answer for a while (j-mail-8). */
+let certUnreachable = false;
 const { publicKey, privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
 const CERT = publicKey.export({ type: "spki", format: "pem" }).toString();
 
@@ -96,7 +98,10 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
       : json({ AssumeRoleWithWebIdentityResponse: { AssumeRoleWithWebIdentityResult: { Credentials: credentials } } });
   }
   fetched.push(url.href);
-  if (url.hostname === `sns.${REGION}.amazonaws.com`) return new Response(url.pathname.endsWith(".pem") ? CERT : "<ok/>");
+  if (url.hostname === `sns.${REGION}.amazonaws.com`) {
+    if (certUnreachable && url.pathname.endsWith(".pem")) return new Response("synthetic outage", { status: 503 });
+    return new Response(url.pathname.endsWith(".pem") ? CERT : "<ok/>");
+  }
   return json({}, 404);
 }) as typeof fetch;
 
@@ -1266,6 +1271,39 @@ async function main(): Promise<void> {
   await POST(twice);
   const repeat = new NextRequest("https://marktmorgen.com/api/mail/ses", { method: "POST", headers: { host: "marktmorgen.com", "content-length": String(Buffer.byteLength(body)) }, body });
   is("the same announcement again is acted on once", [await (await POST(repeat)).json(), (await listHealth(healthId(store))).bounced], [{ ok: true }, 2]);
+
+  // j-mail-8 (Claude 3 cloud J audit): an announcement Amazon must send again is never answered so that it is not.
+  part("Amazon's certificate host does not answer: Amazon is asked to send again, and the bounce is heard then");
+  await upsertContact(list, "later@example.com", { agreed: true, explicit: true, source: "import" }, ROOM);
+  certUnreachable = true;
+  const outage = announce({ MessageId: "sns-outage", SigningCertURL: `https://sns.${REGION}.amazonaws.com/SimpleNotificationService-outage.pem`, event: bounce("later@example.com") });
+  const outageBody = await outage.clone().text();
+  is("a certificate that could not be read is a failure to try again (5xx), never a refusal (4xx), which Amazon does not retry", [(await POST(outage)).status >= 500, await isMailable(list, "later@example.com")], [true, true]);
+  certUnreachable = false;
+  const resent = new NextRequest("https://marktmorgen.com/api/mail/ses", { method: "POST", headers: { host: "marktmorgen.com", "content-length": String(Buffer.byteLength(outageBody)) }, body: outageBody });
+  is("sent again once it answers, the bounce is acted on", [(await POST(resent)).status, await isMailable(list, "later@example.com")], [200, false]);
+
+  part("The work fails and so does letting its mark go: the next delivery still acts on it");
+  await upsertContact(list, "retry@example.com", { agreed: true, explicit: true, source: "import" }, ROOM);
+  const healthy = redis.pipeline;
+  let failing = true;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    // Taking the address off the list fails, and so does every DEL of an announcement's mark meanwhile.
+    if (failing && commands.some((c) => commands.length && (String(c[1] ?? "").startsWith("nl:sns:seen:") ? String(c[0]).toUpperCase() === "DEL" : String(c[1] ?? "").startsWith(`nl:store:leads:${list}`) || String(c[2] ?? "").startsWith(`nl:store:leads:${list}`) || String(c[3] ?? "").startsWith(`nl:store:leads:${list}`)))) throw new Error("synthetic Redis outage");
+    return healthy.call(redis, commands);
+  }) as typeof redis.pipeline;
+  const failed = announce({ MessageId: "sns-failed-work", event: bounce("retry@example.com") });
+  const failedBody = await failed.clone().text();
+  const first = await POST(failed);
+  failing = false;
+  redis.pipeline = healthy;
+  is("the failed work answers 5xx, so Amazon sends it again", first.status >= 500, true);
+  // Amazon's next try, twenty seconds on (its default delivery policy).
+  redis.advance(21_000);
+  const again = new NextRequest("https://marktmorgen.com/api/mail/ses", { method: "POST", headers: { host: "marktmorgen.com", "content-length": String(Buffer.byteLength(failedBody)) }, body: failedBody });
+  const second = await POST(again);
+  redis.now = () => Date.now();
+  is("the next delivery acts on it: the address is off the list", [second.status, await isMailable(list, "retry@example.com")], [200, false]);
 
   part("Amazon asks whether we want the topic's announcements");
   fetched.length = 0;

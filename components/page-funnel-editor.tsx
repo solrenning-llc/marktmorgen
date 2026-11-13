@@ -79,9 +79,10 @@ export function PageFunnelEditor({
 }) {
   const router = useRouter();
   // The month's AI allowance is one count for the whole page: an explanation asked under one funnel lowers it under
-  // every funnel (Revisor 2's LOW on #3508). Kept with the page's own reading, so a fresh reading replaces it.
-  const [usedAi, setUsedAi] = useState<{ base: number | null | undefined; left: number } | null>(null);
-  const aiLeft = usedAi && usedAi.base === ai?.left ? usedAi.left : ai?.left ?? null;
+  // every funnel (Revisor 2's LOW on #3508). Kept with the page's own reading, that very reading and not its number,
+  // so any fresh reading from the server replaces it, one with the same number too (Codex X5's LOW on #3508).
+  const [usedAi, setUsedAi] = useState<{ base: typeof ai; left: number } | null>(null);
+  const aiLeft = usedAi && usedAi.base === ai ? usedAi.left : ai?.left ?? null;
   const [draft, setDraft] = useState<Draft | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -306,7 +307,7 @@ export function PageFunnelEditor({
                 settingsDisabled={locked || draft !== null}
                 onSettings={() => start(funnel)}
                 onNavigate={event => { if (flight.current || recovery.current) event.preventDefault(); }}
-                explain={ai?.on ? { funnelId: funnel.id, left: aiLeft, onLeft: (left) => setUsedAi({ base: ai.left, left }) } : null}
+                explain={ai?.on ? { funnelId: funnel.id, left: aiLeft, onLeft: (left) => setUsedAi({ base: ai, left }) } : null}
               />
 
               <ol className="mt-4 space-y-2">

@@ -852,8 +852,10 @@ export async function bookedCalendarFeed(owner: { statsId: string; handle: strin
     if (typeof raw !== "string" || !/^\d{1,15}$/.test(raw)) return null;
     return Number(raw);
   };
-  const changed = countOf(changedRaw) ?? 0;
-  const changedSince = copy !== null && changed > copy.at;
+  // A changed mark in another shape is unknown, never "nothing changed" (#4287, Codex X2): the copy is not answered as
+  // current over it, and the file is made again within the day's ceilings below.
+  const changed = countOf(changedRaw);
+  const changedSince = copy !== null && (changed === null || changed > copy.at);
   const fresh = copy !== null && !changedSince && now - copy.at < CALENDAR_REFRESH_SECONDS * 1000;
   if (fresh) return { state: "copy", ics: copy.ics };
   // A booking made, moved or let go since the copy: one of the day's credits, which bookings give, up to

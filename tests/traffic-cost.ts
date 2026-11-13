@@ -74,7 +74,7 @@ const CALL = 0.6 / 1_000_000;
 const CPU_PER_SECOND = 0.128 / 3600;
 const MEMORY_PER_SECOND = (0.0106 * 2) / 3600;
 /** What a function sends the CDN, by the byte. */
-const ORIGIN_PER_BYTE = 0.06 / 1_000_000_000;
+export const ORIGIN_PER_BYTE = 0.06 / 1_000_000_000;
 /** A page of a store as it leaves the function: 44 KB measured, costed at 48. */
 export const PAGE_BYTES = 48_000;
 
@@ -140,10 +140,12 @@ export const COMMANDS = {
   /**
    * Putting a subscriber's feed together (tests/podcast.test.ts holds the
    * code under both): the day's first time, which also writes the day's
-   * visit and starts the day's count of it, and each time after.
+   * visit and starts the day's count of it, and each time after. The day's
+   * count sends its expiry with every count since November 7, 2026 (finding
+   * L1 on #2888), one command more each time after the first.
    */
   feedFirst: 13,
-  feed: 9,
+  feed: 10,
 };
 
 /** Answering one page and its count: two calls, a tenth of a second of work, and memory held while the database is waited on. */

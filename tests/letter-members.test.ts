@@ -549,7 +549,7 @@ async function main(): Promise<void> {
   const badRoute = await publishRoute(new NextRequest("https://marktmorgen.com/api/store/letters", { method: "POST", headers: { "content-type": "application/json", cookie: `${SESSION_COOKIE}=${owner}` }, body: JSON.stringify({ action: "publish", id: kept.id, products: ["nope_not_a_product"] }) }));
   is("and refuses one the store does not have", badRoute.status, 409);
   is("no EXPIRE with an option was ever sent", expireOptions, 0);
-  is("the store lists all four", (await listLetters(store)).length, 4);
+  is("the store lists all four", (await listLetters(store))?.length, 4);
 
   part("The feature page says what is true of an email kept for members");
   // lib/help-content.ts says the same and waits: it is reserved by another agent (Claude 2, 513 [PF1]).

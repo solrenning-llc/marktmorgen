@@ -49,7 +49,7 @@ is("never below nothing", editColumnWidth(100), 0);
 
 const editor = readFileSync("components/page-editor.tsx", "utf8");
 part("The editor: one column beside the blocks");
-is("two columns on a wide screen, the blocks and the shared one", editor.includes('<div className={sideBySide ? "grid grid-cols-[minmax(0,1fr)_25.5rem] items-start gap-5" : ""}>'), true);
+is("two columns on a wide screen, the blocks and the shared one", editor.includes('<div className="min-[1280px]:grid min-[1280px]:grid-cols-[minmax(0,1fr)_25.5rem] min-[1280px]:items-start min-[1280px]:gap-5">'), true);
 is("no third column of its own for the menu", !editor.includes("_15rem_24.5rem"), true);
 is("the shared column's width is the one counted here", `${SIDE_COLUMN_PX / 16}rem`, "25.5rem");
 is(

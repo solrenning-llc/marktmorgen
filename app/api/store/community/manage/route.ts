@@ -3,6 +3,7 @@ import { hasProduct, readKind } from "@/lib/catalog";
 import { MAX_LEVEL, parseRewards, saveRewards } from "@/lib/community-points";
 import { StoreFullError, setCommunity, storeForEmail } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import {
   type CommunityConfig,
   deleteComment,
@@ -10,12 +11,12 @@ import {
   dismissReport,
   dropSpace,
   freshConfig,
+  ReportQueueReadError,
   moderateMember,
   newItemId,
   parseTarget,
-  readComment,
-  readConfig,
-  readPost,
+  readConfigExact,
+  readReportedTarget,
   saveConfig,
   setCommentHidden,
   setPostHidden,
@@ -34,7 +35,6 @@ import {
   MAX_QUESTION,
   MAX_QUESTIONS,
   MAX_WELCOME,
-  ITEM_ID,
   cleanLine,
   cleanText,
 } from "@/lib/community-text";
@@ -86,6 +86,15 @@ export async function POST(request: NextRequest) {
   const action = text(body.action, 20);
   if (!ACTIONS.has(action)) return Response.json({ ok: false, error: "invalid" }, { status: 400 });
   const fail = (error: string, status = 400) => Response.json({ ok: false, error }, { status });
+  // The setup read exactly, or null when the reply was in no exact shape.
+  const exactSetup = async (communityId: string) => {
+    try {
+      return { config: await readConfigExact(communityId) };
+    } catch (error) {
+      if (error instanceof UnknownReplyError) return null;
+      throw error;
+    }
+  };
 
   try {
     let store = await storeForEmail(ref);
@@ -93,9 +102,18 @@ export async function POST(request: NextRequest) {
 
     if (action === "enable") {
       const on = body.on === true;
+      // The setup is read exactly before the switch is written: an unknown
+      // reply refuses with nothing changed, and only an exact absence means
+      // there is none yet. A fresh setup written over a lost read would drop
+      // the spaces and the products that let members in.
+      const before = store.community?.id;
+      const read = before ? await exactSetup(before) : { config: null };
+      if (!read) return fail("setup_read_unavailable", 503);
       store = await setCommunity(ref, on);
       if (!store?.community) return fail("none");
-      let config = await readConfig(store.community.id);
+      const again = store.community.id === before ? read : await exactSetup(store.community.id);
+      if (!again) return fail("setup_read_unavailable", 503);
+      let config = again.config;
       if (!config) {
         config = freshConfig(store.name);
         await saveConfig(store.community.id, config);
@@ -103,8 +121,12 @@ export async function POST(request: NextRequest) {
       return Response.json({ ok: true, on, config });
     }
 
+    // The same exact read for every other action: a lost or off-shape reply
+    // refuses as unavailable, and only an exact absence is "not set up".
     const id = store.community?.id;
-    const config = id ? await readConfig(id) : null;
+    const read = id ? await exactSetup(id) : { config: null };
+    if (!read) return fail("setup_read_unavailable", 503);
+    const config = read.config;
     if (!id || !config) return fail("not_set_up");
     const save = async (next: CommunityConfig) => {
       await saveConfig(id, next);
@@ -231,17 +253,17 @@ export async function POST(request: NextRequest) {
       await dismissReport(id, reportKey);
       return Response.json({ ok: true });
     }
-    const post = await readPost(id, target.post);
-    if (!post) {
+    // Only an exact absence clears the report as already gone; an unknown
+    // read throws ReportQueueReadError and the report stays in the queue.
+    const found = await readReportedTarget(id, target);
+    if (!found) {
       await dismissReport(id, reportKey);
       return Response.json({ ok: true });
     }
-    if (target.kind === "comment") {
-      const comment = ITEM_ID.test(target.comment) ? await readComment(id, post.id, target.comment) : null;
-      if (comment) {
-        if (action === "report-delete") await deleteComment(id, post.id, comment, store);
-        else await setCommentHidden(id, post.id, comment, true);
-      }
+    const { post, comment } = found;
+    if (comment) {
+      if (action === "report-delete") await deleteComment(id, post.id, comment, store);
+      else await setCommentHidden(id, post.id, comment, true);
     } else if (action === "report-delete") {
       await deletePost(id, post, store);
       await dropCommunityImage(post.img?.path);
@@ -258,6 +280,15 @@ export async function POST(request: NextRequest) {
     // Switching the community on is the one change here that writes to the
     // store record, and a record at its ceiling refuses to grow.
     if (error instanceof StoreFullError) return fail("store_full", 409);
+    // A member's record read or written in another shape (CX-123 rule 24, lib/community.ts patchMember):
+    // the change is not known to be made, and the member is not known to be gone.
+    if (error instanceof UnknownReplyError) {
+      console.error("changing a community could not be confirmed", action, error);
+      return fail("not_confirmed", 503);
+    }
+    // The reported post or comment was not read in its exact shape: nothing
+    // was changed and the report is still waiting.
+    if (error instanceof ReportQueueReadError) return fail("report_read_unavailable", 503);
     console.error("changing a community failed", action, error);
     return fail("server_error", 500);
   }

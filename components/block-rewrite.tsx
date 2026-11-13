@@ -1,6 +1,6 @@
 "use client";
 
-import { useContext, useId, useState } from "react";
+import { useContext, useId, useLayoutEffect, useRef, useState } from "react";
 import { Icon } from "@/components/icons";
 import { AI_ALLOWANCE_UNKNOWN, AiOn, allowanceOf } from "@/components/ai-assist";
 import { FILLABLE, REWRITABLE, REWRITE_STYLES, type RewriteStyle, blockText } from "@/lib/block-rewrite-rules";
@@ -14,6 +14,7 @@ const MESSAGES: Record<string, string> = {
   off: "The writing help is not available right now.",
   forbidden: "Your role on this store cannot do this.",
   notes: "Write something in this block first: it rewrites your words, it does not start from nothing.",
+  changed: "You changed this block while it was being rewritten, so your words were kept and the rewrite was not used. Started attempts count toward the monthly allowance.",
 };
 
 /**
@@ -37,18 +38,33 @@ export function BlockRewrite({
   const [busy, setBusy] = useState<RewriteStyle | "fill" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [before, setBefore] = useState<PageBlock | null>(null);
+  // The block as the AI left it: Undo is offered only while the block is still exactly that, so it never throws
+  // away words typed after the rewrite.
+  const [applied, setApplied] = useState<string | null>(null);
+  // The block as the editor holds it now, read when a rewrite comes back.
+  const latest = useRef(block);
+  // Kept current inside the commit itself (a ref is never written during render). A layout effect, not a passive one:
+  // a fetch that settles after the editor committed new words but before passive effects ran would otherwise still
+  // read the old block here and write the rewrite over them.
+  useLayoutEffect(() => {
+    latest.current = block;
+  }, [block]);
   const [left, setLeft] = useState(allowanceOf(ai));
   const allowanceId = useId();
   // An allowance that could not be read (null) keeps the buttons off and is said in words, never "0 left".
   const spent = left === null || left <= 0;
   if (!ai.on || !REWRITABLE.includes(block.kind)) return null;
   const empty = !blockText(block).trim();
+  // Undo is offered only while the block is exactly what the rewrite wrote; the status line follows the same test, so it
+  // never names an Undo that is not on the screen.
+  const canUndo = before !== null && applied === JSON.stringify(block);
 
   const fillable = FILLABLE.includes(block.kind);
 
   async function run(style: RewriteStyle | "fill") {
     setBusy(style);
     setError(null);
+    const sent = JSON.stringify(block);
     try {
       const response = await fetch("/api/store/ai", {
         method: "POST",
@@ -57,9 +73,15 @@ export function BlockRewrite({
       });
       const data = (await response.json().catch(() => ({}))) as { ok?: boolean; value?: PageBlock; left?: number; error?: string };
       if (data.ok && data.value) {
-        setBefore(block);
-        onChange(data.value);
         if (typeof data.left === "number") setLeft(data.left);
+        // Typed in while it ran: the creator's words win, and the rewrite is not used.
+        if (JSON.stringify(latest.current) !== sent) {
+          setError(MESSAGES.changed);
+          return;
+        }
+        setBefore(block);
+        setApplied(JSON.stringify(data.value));
+        onChange(data.value);
         return;
       }
       setError(MESSAGES[data.error ?? ""] ?? (style === "fill" ? MESSAGES.unwritten : MESSAGES.failed));
@@ -95,13 +117,14 @@ export function BlockRewrite({
             {busy === style.id ? "Rewriting…" : style.label}
           </button>
         ))}
-        {before ? (
+        {canUndo ? (
           <button
             type="button"
             className="btn btn-secondary btn-sm"
             onClick={() => {
               onChange(before);
               setBefore(null);
+              setApplied(null);
             }}
           >
             <Icon name="refresh" size={14} />
@@ -116,9 +139,11 @@ export function BlockRewrite({
         </p>
       ) : (
         <p className="mt-1.5 text-xs text-ink-soft" role="status">
-          {before
+          {canUndo
             ? "Written in your store's language. Read it before you save; Undo puts it back as it was."
-            : empty && fillable
+            : before
+              ? "Written in your store's language. Read it before you save."
+              : empty && fillable
               ? "A first draft from your product's description and the rest of this page. It adds no number or promise they do not already make."
               : empty
                 ? "Write something here first, and it can rewrite it four ways."

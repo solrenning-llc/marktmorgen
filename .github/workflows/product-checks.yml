@@ -215,6 +215,10 @@ jobs:
         env:
           MARKTMORGEN_REDIS_INTEGRATION: "1"
         run: python3 scripts/test_order_data_redis.py
+      - name: Actual Redis sequence queue move checks
+        env:
+          MARKTMORGEN_REDIS_INTEGRATION: "1"
+        run: python3 scripts/test_flow_move_redis.py
       - name: Actual Redis one-time recount checks
         env:
           MARKTMORGEN_REDIS_INTEGRATION: "1"

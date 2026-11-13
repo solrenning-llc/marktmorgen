@@ -148,7 +148,7 @@ export function productCardHtml(product: MailProduct, style: CardStyle): string 
     picture +
     `<${h} style="margin:0 0 4px;font-size:18px;line-height:1.3;font-weight:700;color:#1c1917">${escape(product.title)}</${h}>` +
     `<p style="margin:0 0 12px;color:#1c1917">${escape(mailPriceLabel(style.store, product.facts, style.now))}</p>` +
-    `<p style="margin:0"><a href="${href}" style="display:inline-block;padding:12px 22px;border-radius:999px;background:${pair.fill};color:${pair.on};font-weight:700;text-decoration:none">${escape(style.see(product.title))}</a></p>` +
+    `<p style="margin:0"><a href="${href}" style="display:inline-block;padding:10px 20px;border:2px solid transparent;border-radius:999px;background:${pair.fill};color:${pair.on};font-weight:700;text-decoration:none">${escape(style.see(product.title))}</a></p>` +
     `</div>`
   );
 }

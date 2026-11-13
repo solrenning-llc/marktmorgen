@@ -43,6 +43,7 @@ import { offerableAfterPaying } from "@/lib/bundles";
 import { readListings } from "@/lib/catalog";
 import { bumpsFromMeta, deliverableItems } from "@/lib/bundle-rules";
 import { takeBuyerRead } from "@/lib/buyer-actions";
+import { unknownLimit } from "@/lib/request-guard";
 import { ownedHere } from "@/lib/next-offer";
 import { NEXT_OFFER_REQUEST_UNITS } from "@/lib/next-offer-rules";
 import type { Listing, Product, Store } from "@/lib/store";
@@ -108,6 +109,7 @@ export function cartOfferFrom(meta: Record<string, string | undefined> | null | 
  */
 export async function ownedBeforeCart(store: Store, email: string | null): Promise<Set<string> | null> {
   if (!email) return null;
-  if (!(await takeBuyerRead(store, CART_OFFER_REQUEST_UNITS))) return null;
+  // Not known (rule 24) is "cannot be read in full": nothing is offered, and the page after paying still opens.
+  if ((await takeBuyerRead(store, CART_OFFER_REQUEST_UNITS).catch(unknownLimit)) !== true) return null;
   return ownedHere(store, email);
 }

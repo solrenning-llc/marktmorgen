@@ -15,6 +15,7 @@ import { takePublicRequest } from "@/lib/traffic";
 import { plain } from "@/lib/serve-file";
 import { SESSION_COOKIE } from "@/lib/auth";
 import { seesDrafts } from "@/lib/draft-view";
+import { limitUnknownResponse, unknownLimit } from "@/lib/request-guard";
 
 /**
  * A certificate of completion as a PDF file (lib/certificate-pdf.ts): the
@@ -46,7 +47,10 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const sample = id === "sample";
   const now = Date.now();
   const resting = () => plain(503, speech(store).w.restingTitle);
-  if (!(await takePublicRequest(store, "public", now, 1))) return resting();
+  const taken = await takePublicRequest(store, "public", now, 1).catch(unknownLimit);
+  // A count that could not be read is never "resting" or "too many" (rule 24): it could not be checked just now.
+  if (taken === "unknown") return limitUnknownResponse();
+  if (!taken) return resting();
   const w = coursesWords(store.language);
   let certificate = sample ? null : await readCertificate(id);
   // A draft's sample: drawn only for the store's owner and team, signed in, and kept by no shared cache (MM-SA-30).
@@ -94,7 +98,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   if (!sample && (request.headers.get("if-none-match") ?? "").split(",").some((one) => one.trim().replace(/^W\//, "") === tag)) {
     return new Response(null, { status: 304, headers: { ...cache, "X-Robots-Tag": "noindex" } });
   }
-  if (CERTIFICATE_PDF_UNITS > 1 && !(await takePublicRequest(store, "public", now, CERTIFICATE_PDF_UNITS - 1))) return resting();
+  const rest = CERTIFICATE_PDF_UNITS > 1 ? await takePublicRequest(store, "public", now, CERTIFICATE_PDF_UNITS - 1).catch(unknownLimit) : true;
+  if (rest === "unknown") return limitUnknownResponse();
+  if (!rest) return resting();
   if (!(await canDraw(certificate.name, certificate.title, certificate.creator, store.name))) {
     return new Response(null, { status: 303, headers: { Location: new URL(page, request.nextUrl.origin).toString(), "Cache-Control": "no-store" } });
   }

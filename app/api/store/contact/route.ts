@@ -2,7 +2,7 @@ import type { NextRequest } from "next/server";
 import { originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { takePublicRequest } from "@/lib/traffic";
-import { clientAddress, fromAnotherSite, limited } from "@/lib/request-guard";
+import { clientAddress, fromAnotherSite, limited, unknownLimit } from "@/lib/request-guard";
 import { sendContact } from "@/lib/store-contact";
 
 const MAX_BODY_BYTES = 6_000;
@@ -37,9 +37,12 @@ export async function POST(request: NextRequest) {
   const store = handle ? await storeForHandle(handle) : null;
   if (!store) return new Response("No such store.", { status: 404 });
   // One of the store's public requests for its window (lib/traffic.ts).
-  if (!(await takePublicRequest(store))) return new Response("This store can't take messages right now. Please try again later.", { status: 429 });
+  const taken = await takePublicRequest(store).catch(unknownLimit);
+  if (!taken) return new Response("This store can't take messages right now. Please try again later.", { status: 429 });
   const away = (status: string) =>
     new Response(null, { status: 303, headers: { Location: `${origin}/@${store.handle}/contact?status=${status}`, "Cache-Control": "no-store" } });
+  // A count that could not be read is never "can't take messages" (rule 24): the page's own error notice, nothing sent.
+  if (taken === "unknown") return away("error");
   // A field no person can see: whatever filled it in is told it worked, and nothing is sent.
   if (honeypot.trim()) return away("sent");
   try {

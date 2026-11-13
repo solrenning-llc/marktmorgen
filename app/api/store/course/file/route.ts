@@ -11,6 +11,7 @@ import { takePublicRequest } from "@/lib/traffic";
 import { speech } from "@/lib/buyer-words";
 import { SESSION_COOKIE } from "@/lib/auth";
 import { seesDrafts } from "@/lib/draft-view";
+import { limitUnknownResponse, unknownLimit } from "@/lib/request-guard";
 
 /**
  * A lesson's download: a worksheet, the slides. Handed over only to someone
@@ -51,6 +52,9 @@ export async function GET(request: NextRequest) {
     }
   }
   // One of the store's public requests: on the buyers' side, or the public's for a lesson anyone may preview (lib/buyer-actions.ts).
-  if (!(await takePublicRequest(store, found.lesson.preview ? "public" : "buyer"))) return plain(503, speech(store).w.restingTitle);
+  const taken = await takePublicRequest(store, found.lesson.preview ? "public" : "buyer").catch(unknownLimit);
+  // A count that could not be read is never "resting" or "too many" (rule 24): it could not be checked just now.
+  if (taken === "unknown") return limitUnknownResponse();
+  if (!taken) return plain(503, speech(store).w.restingTitle);
   return serveFile(file);
 }

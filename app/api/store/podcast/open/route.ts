@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
-import { fromAnotherSite, limited } from "@/lib/request-guard";
+import { fromAnotherSite, limited, limitUnknownResponse, unknownLimit } from "@/lib/request-guard";
 import { readOrder } from "@/lib/store-checkout";
 import { feedToken } from "@/lib/podcast-access";
 import { takeBuyerRead } from "@/lib/buyer-actions";
@@ -27,7 +27,10 @@ export async function POST(request: NextRequest) {
   if (!store) return new Response("No such store.", { status: 404 });
   const away = (path: string) => new Response(null, { status: 303, headers: { Location: `${origin}${path}`, "Cache-Control": "no-store" } });
   // One of the store's public requests on the buyers' side: the order is read from Stripe (lib/buyer-actions.ts).
-  if (!(await takeBuyerRead(store))) return away(`/@${store.handle}/resting`);
+  const taken = await takeBuyerRead(store).catch(unknownLimit);
+  // A count that could not be read is never "resting" or "too many" (rule 24): it could not be checked just now.
+  if (taken === "unknown") return limitUnknownResponse();
+  if (!taken) return away(`/@${store.handle}/resting`);
   const order = await readOrder(store, sessionId);
   if (order.state !== "paid" || order.gift || order.group || order.preorder || !order.product.podcast || !order.email || order.membership === "ended") return away(`/@${store.handle}`);
   const token = await feedToken(store, order.product.id, order.email);

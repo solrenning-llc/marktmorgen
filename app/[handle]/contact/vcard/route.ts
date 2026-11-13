@@ -5,6 +5,7 @@ import { normaliseHandle, storeForPage } from "@/lib/store";
 import { takePublicRequest } from "@/lib/traffic";
 import { speech } from "@/lib/buyer-words";
 import { plain } from "@/lib/serve-file";
+import { limitUnknownResponse, unknownLimit } from "@/lib/request-guard";
 
 /**
  * The creator's business card as a file to save in a phone's or a
@@ -26,7 +27,10 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
   const store = await storeForPage(normaliseHandle(decoded));
   // Switched off after notices about its content (lib/takedown.ts): its card is not given either.
   if (!store || store.suspended) return new Response("Not found", { status: 404, headers: { "Cache-Control": "no-store" } });
-  if (!(await takePublicRequest(store, "public"))) return plain(503, speech(store).w.restingTitle);
+  const taken = await takePublicRequest(store, "public").catch(unknownLimit);
+  // A count that could not be read is never "resting" or "too many" (rule 24): it could not be checked just now.
+  if (taken === "unknown") return limitUnknownResponse();
+  if (!taken) return plain(503, speech(store).w.restingTitle);
   const card = await readCreatorCard(store.statsId);
   const file = cardVcard(card, store.name, `${SITE_URL}/@${store.handle}`);
   if (!file) return new Response("Not found", { status: 404, headers: { "Cache-Control": "no-store" } });

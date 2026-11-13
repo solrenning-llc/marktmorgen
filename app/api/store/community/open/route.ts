@@ -5,6 +5,7 @@ import { mintPass, passCookie, storeKey } from "@/lib/learn";
 import { openCommunityLink } from "@/lib/community-access";
 import { restingAway, takeBuyerRead } from "@/lib/buyer-actions";
 import { communityWords } from "@/lib/buyer-words/community";
+import { limitUnknownResponse, unknownLimit } from "@/lib/request-guard";
 
 /**
  * The link from the email. Whoever holds it has read that inbox, so this
@@ -40,7 +41,10 @@ async function open(request: NextRequest, seen: { language?: unknown }): Promise
     );
   }
   // One of the store's public requests on the buyers' side (lib/buyer-actions.ts).
-  if (!(await takeBuyerRead(store))) return restingAway(origin, store);
+  const taken = await takeBuyerRead(store).catch(unknownLimit);
+  // A count that could not be read is never "resting" or "too many" (rule 24): it could not be checked just now.
+  if (taken === "unknown") return limitUnknownResponse();
+  if (!taken) return restingAway(origin, store);
   const pass = await mintPass(store, grant.e, "all");
   const headers = new Headers({ Location: `${origin}/@${store.handle}/community`, "Cache-Control": "no-store" });
   headers.append("Set-Cookie", passCookie(store, pass, origin.startsWith("https://")));

@@ -6,7 +6,7 @@ import { readLetter } from "@/lib/letters";
 import { LETTER_ID, membersOnly } from "@/lib/letter-rules";
 import { requestLetterLink } from "@/lib/letter-access";
 import { clientIp } from "@/lib/visit";
-import { limited } from "@/lib/request-guard";
+import { limited, limitUnknownResponse, unknownLimit } from "@/lib/request-guard";
 import { restingAway, takeBuyerRead } from "@/lib/buyer-actions";
 
 /** "Send me the link": a reader proving their address to read an email kept for members (lib/letter-access.ts). */
@@ -29,7 +29,10 @@ export async function POST(request: NextRequest) {
   if (!store || store.suspended) return new Response("Not found.", { status: 404 });
 
   // One of the store's public requests on the buyers' side (lib/buyer-actions.ts); the email it sends is an access email.
-  if (!(await takeBuyerRead(store))) return restingAway(origin, store);
+  const taken = await takeBuyerRead(store).catch(unknownLimit);
+  // A count that could not be read is never "resting" or "too many" (rule 24): it could not be checked just now.
+  if (taken === "unknown") return limitUnknownResponse();
+  if (!taken) return restingAway(origin, store);
   const letter = await readLetter(store, id);
   if (!letter || !membersOnly(letter)) return new Response("Not found.", { status: 404 });
   let result: string;

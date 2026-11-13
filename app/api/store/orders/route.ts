@@ -3,7 +3,7 @@ import { linkOrigin, originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { takePublicRequest } from "@/lib/traffic";
 import { requestOrdersLink } from "@/lib/buyer-orders";
-import { fromAnotherSite, limited } from "@/lib/request-guard";
+import { fromAnotherSite, limited, unknownLimit } from "@/lib/request-guard";
 
 const MAX_BODY_BYTES = 2_000;
 
@@ -56,9 +56,12 @@ export async function POST(request: NextRequest) {
   const store = await storeForHandle(handle);
   if (!store) return new Response("No such store.", { status: 404 });
   // One of the store's public requests for its window (lib/traffic.ts).
-  if (!(await takePublicRequest(store, "buyer"))) return tooMany();
+  const taken = await takePublicRequest(store, "buyer").catch(unknownLimit);
+  if (!taken) return tooMany();
 
   const page = `/@${store.handle}/orders`;
+  // A count that could not be read is never "try again later" (rule 24): the page's own error notice, nothing read.
+  if (taken === "unknown") return away(`${page}?status=error`);
   // A field no person can see. Whatever filled it in is told it worked.
   if (honeypot.trim()) return away(`${page}?status=sent`);
 

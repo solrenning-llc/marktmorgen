@@ -6,6 +6,7 @@ import { buyerNote, callInvite } from "@/lib/calls";
 import { roomOf } from "@/lib/call-rooms";
 import { bookingWords } from "@/lib/buyer-words/booking";
 import { linkUpdates } from "@/lib/meet-links";
+import { limitUnknownResponse, unknownLimit } from "@/lib/request-guard";
 
 /**
  * The calendar file for a booked call, for the "Add to your calendar" button.
@@ -22,7 +23,10 @@ export async function GET(request: NextRequest) {
   const store = handle ? await storeForHandle(handle) : null;
   if (!store) return new Response("Not found.", { status: 404 });
   // One of the store's public requests for its window (lib/traffic.ts).
-  if (!(await takePublicRequest(store, "buyer"))) return new Response("Please try again later.", { status: 429, headers: { "Cache-Control": "no-store" } });
+  const taken = await takePublicRequest(store, "buyer").catch(unknownLimit);
+  // A count that could not be read is never "resting" or "too many" (rule 24): it could not be checked just now.
+  if (taken === "unknown") return limitUnknownResponse();
+  if (!taken) return new Response("Please try again later.", { status: 429, headers: { "Cache-Control": "no-store" } });
 
   const order = await readOrder(store, sessionId);
   if (order.state !== "paid" || !order.call || !order.product.call) {

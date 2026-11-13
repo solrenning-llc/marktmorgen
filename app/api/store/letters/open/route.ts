@@ -5,6 +5,7 @@ import { mintPass, passCookie, storeKey } from "@/lib/learn";
 import { readLetterGrant, spendLetterOpen } from "@/lib/letter-access";
 import { letterWords } from "@/lib/buyer-words/letters";
 import { restingAway, takeBuyerRead } from "@/lib/buyer-actions";
+import { limitUnknownResponse, unknownLimit } from "@/lib/request-guard";
 
 /** The browser's first language, as a store language code ("es" from "es-MX,es;q=0.9"); the default when it names none of them. */
 function browserLanguage(request: NextRequest): string {
@@ -33,7 +34,10 @@ export async function GET(request: NextRequest) {
     });
   if (!grant || !store || storeKey(store) !== grant.k) return gone(browserLanguage(request));
   // One of the store's public requests on the buyers' side (lib/buyer-actions.ts).
-  if (!(await takeBuyerRead(store))) return restingAway(origin, store);
+  const taken = await takeBuyerRead(store).catch(unknownLimit);
+  // A count that could not be read is never "resting" or "too many" (rule 24): it could not be checked just now.
+  if (taken === "unknown") return limitUnknownResponse();
+  if (!taken) return restingAway(origin, store);
   // The link's count of opens read only in its exact shape (CX-123 rule 24): an unknown count lets no browser in, and
   // the buyer is told in the store's words to try again, never shown a bare server error.
   let spent: boolean;

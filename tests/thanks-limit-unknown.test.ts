@@ -1,7 +1,7 @@
 /**
  * Claude 2's MEDIUM on #3068 (and #3067): the thanks page after a payment is never the error page because its
- * views' count could not be read (PF1). withinStore now throws UnknownReplyError for an unknown count of the page's own
- * window (the store's public requests read exactly belong to #3068, which adds that case here); the page reads it with `.catch(unknownLimit)` and says it could not check
+ * views' count could not be read (PF1). withinStore now throws UnknownReplyError for an unknown count (the page's own
+ * window, or the store's public requests); the page reads it with `.catch(unknownLimit)` and says it could not check
  * just now: the PayPal page its "could not check this payment" state, the Stripe page its "could not check this
  * order" notice. A confirmed spent window still says to wait. Synthetic data only; next/headers reads the request.
  */
@@ -54,6 +54,7 @@ async function main(): Promise<void> {
   for (const [label, on, value] of [
     ["the page's window answered in another shape", "window", ["OK", "seven"]],
     ["the page's window answered with no reply", "window", []],
+    ["the store's public requests answered in another shape", "requests", ["seven"]],
   ] as [string, "window" | "requests", unknown][]) {
     part(label);
     target = on;

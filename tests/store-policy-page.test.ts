@@ -35,6 +35,11 @@ is("a pixel switched on: the measurement section, named by its platform", withPi
 is("and a new version", policyFingerprint(withPixel) === policyFingerprint(before), false);
 is("PayPal taken: said", policyFacts(policyInputFrom(store, [ebook], true), "en")[0].sentences[2].includes("PayPal"), true);
 is("no postal address: no contact section", policyFacts(policyInputFrom({ ...store, mail: null } as typeof store, [ebook], false), "en").some((s) => s.id === "contact"), false);
+// Claude 1's MEDIUM on #1824: the studio collects the email footer's postal address for CAN-SPAM only ("Postal
+// address at the bottom of each email"), and many creators type their home. It is never published on the public
+// policy page, which is at a predictable address, without the creator choosing that.
+is("the email footer's postal address is never published on the policy page", policyInputFrom(store, [ebook], false).postalAddress, "");
+is("so a store with one has no contact section either", policyFacts(policyInputFrom(store, [ebook], false), "en").some((s) => s.id === "contact"), false);
 
 part("The page");
 const page = readFileSync("app/[handle]/policies/page.tsx", "utf8");

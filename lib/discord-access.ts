@@ -83,11 +83,17 @@ export async function joinServer(input: { store: Store; email: string; accessTok
     if (before && before !== user.id) {
       // A take that failed (a 429, a 5xx, no answer) leaves the earlier account its role: it is not forgotten and the
       // join fails, so the earlier account stays in the register and the periodic check, and a later try takes it back.
-      let kept = false;
+      const kept: string[] = [];
       for (const role of old?.r ?? []) {
-        if ((await takeRole(server.id, before, role, "Marktmorgen: the buyer joined with another Discord account")) === "failed") kept = true;
+        if ((await takeRole(server.id, before, role, "Marktmorgen: the buyer joined with another Discord account")) === "failed") kept.push(role);
       }
-      if (kept) return { ok: false, reason: "failed" };
+      if (kept.length) {
+        // Its record then lists only the roles Discord still gives it: one taken is not held any more, so the next
+        // check (rolesDiff(member.r, wanted)) gives it back while the buyer still holds it, and the failed one stays
+        // on the record to be taken later (#4087 review).
+        if (old) await keepMember(room, store.sid, before, { ...old, r: kept }, input.now);
+        return { ok: false, reason: "failed" };
+      }
       await forgetMember(room, store.sid, before, email);
     }
   } catch (error) {

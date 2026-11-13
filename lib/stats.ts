@@ -1508,6 +1508,9 @@ async function readDisputes(store: Store, since: number, pages = DISPUTE_PAGES):
 /** One refund as Stripe lists it: when, how much, in what, and the payment it gave back. */
 export type RefundRow = { created: number; cents: number; currency: string; paymentIntent: string };
 
+/** Stripe's refund states in which nothing has been given back (yet): known, not counted, not partial. */
+const REFUND_NOT_GIVEN_BACK: ReadonlySet<string> = new Set(["pending", "requires_action", "failed", "canceled"]);
+
 /** The refunds made on the creator's account since `since` (seconds) that went through; at most `pages` pages of a hundred. */
 async function readRefunds(store: Store, since: number, pages: number): Promise<{ rows: RefundRow[]; partial: boolean }> {
   const out: RefundRow[] = [];
@@ -1522,12 +1525,23 @@ async function readRefunds(store: Store, since: number, pages: number): Promise<
     )) as { data?: unknown; has_more?: unknown };
     const rows = financialPage(list, seen);
     for (const row of rows) {
-      if (row.status !== "succeeded" && row.status !== "pending") continue;
+      // Only a refund that went through is money given back (#4369): one still waiting (pending, requires_action)
+      // or that gave nothing back (failed, canceled) is a known state and not counted. Any other status cannot be
+      // placed, so the reading is partial rather than complete without it (#4370).
+      if (row.status !== "succeeded") {
+        if (!REFUND_NOT_GIVEN_BACK.has(String(row.status))) partial = true;
+        continue;
+      }
+      // A refund that went through without a whole, non-negative amount is not $0.00 known: partial (#4370).
+      if (typeof row.amount !== "number" || !Number.isSafeInteger(row.amount) || row.amount < 0) {
+        partial = true;
+        continue;
+      }
       const currency = currencyOf(row);
       if (!currency) partial = true;
       out.push({
         created: typeof row.created === "number" ? row.created * 1000 : 0,
-        cents: typeof row.amount === "number" ? row.amount : 0,
+        cents: row.amount,
         currency,
         paymentIntent: typeof row.payment_intent === "string" ? row.payment_intent : "",
       });

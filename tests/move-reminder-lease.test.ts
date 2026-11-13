@@ -9,6 +9,7 @@
  * Synthetic only: an in-memory Redis and the SES mail fixture.
  */
 import { sendMoveReminders } from "@/lib/imports";
+import { dropReminder, remindLater } from "@/lib/move-members";
 import { store as redis } from "./redis-stub";
 import { installSesMailFixture } from "./ses-mail-fixture";
 import { done, is, part } from "./check";
@@ -56,6 +57,17 @@ async function main(): Promise<void> {
   await plain([["ZADD", DUE, Math.floor(now / 1000) - 60, ONE, Math.floor(now / 1000) - 60, TWO]]);
   await sendMoveReminders(Date.now() + 30_000, now);
   is("both are off the line", [await score(ONE), await score(TWO)], [null, null]);
+
+  part("A reminder taken off the line meanwhile is never put back (Codex U on #4359)");
+  // Leased, then withdrawn while the run worked on it (a deletion, a renewal confirmed): a put-back after that only
+  // moves a reminder still in line, so the withdrawn one is not made again.
+  await plain([["ZADD", DUE, Math.floor(now / 1000) - 60, ONE]]);
+  await dropReminder(ONE.slice(0, ONE.indexOf("|")), ONE.slice(ONE.indexOf("|") + 1));
+  await remindLater(ONE.slice(0, ONE.indexOf("|")), ONE.slice(ONE.indexOf("|") + 1), now);
+  is("the withdrawn reminder stays off the line", await score(ONE), null);
+  await plain([["ZADD", DUE, Math.floor(now / 1000) - 60, TWO]]);
+  await remindLater(TWO.slice(0, TWO.indexOf("|")), TWO.slice(TWO.indexOf("|") + 1), now);
+  is("one still in line is moved to an hour on", Number(await score(TWO)), Math.floor(now / 1000) + 3_600);
   done();
 }
 

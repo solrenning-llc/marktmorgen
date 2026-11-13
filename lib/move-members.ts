@@ -311,9 +311,13 @@ export async function dropReminder(sid: string, field: string): Promise<void> {
   await redisPipeline([["ZREM", DUE_KEY, `${sid}|${field}`]]);
 }
 
-/** Puts a reminder back in line, to be tried again in an hour. */
+/**
+ * Puts a leased reminder back in line, to be tried again in an hour: only while it is still in line (XX), so one taken
+ * off meanwhile (a deletion, a membership kept) is never made again (Codex U on #4359). New reminders are put in line
+ * where the invite is made, never here.
+ */
 export async function remindLater(sid: string, field: string, now = Date.now()): Promise<void> {
-  await redisPipeline([["ZADD", DUE_KEY, Math.floor(now / 1000) + 3_600, `${sid}|${field}`]]);
+  await redisPipeline([["ZADD", DUE_KEY, "XX", Math.floor(now / 1000) + 3_600, `${sid}|${field}`]]);
 }
 
 /** Who a member's link is for, on this store and membership, while it works. */

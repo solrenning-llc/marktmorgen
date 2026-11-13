@@ -590,7 +590,8 @@ function Settings({ name, mail }: { name: string; mail: MailSettings | null }) {
       </label>
       <p className="text-sm text-ink-soft">
         Replies go to the email address the store&apos;s owner logs in with. The postal address is required by the CAN-SPAM Act for emails
-        like these; a PO box or a mail service address counts.
+        like these; a PO box or a mail service address counts. It is also shown publicly on your store&apos;s policies page, so you may
+        prefer one of those to a home address.
       </p>
       <button type="submit" aria-busy={busy} disabled={busy} className="btn btn-secondary">Save</button>
       <Feedback error={error} done={null} />

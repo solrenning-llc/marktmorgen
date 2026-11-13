@@ -23,18 +23,18 @@ const club = { priceCents: 900, recurring: { interval: "month" } };
 const call = { priceCents: 9900, call: { minutes: 30 } };
 
 part("What the store sells, counting only what is paid for");
-is("an ebook: digital", policyInputFrom(store, [ebook], false).sellsDigital, true);
-is("a free download alone: nothing sold", [policyInputFrom(store, [free], false).sellsDigital, policyInputFrom(store, [free], false).sellsMemberships], [false, false]);
-is("a membership: memberships, not digital content", [policyInputFrom(store, [club], false).sellsMemberships, policyInputFrom(store, [club], false).sellsDigital], [true, false]);
-is("a call: neither", [policyInputFrom(store, [call], false).sellsDigital, policyInputFrom(store, [call], false).sellsMemberships], [false, false]);
+is("an ebook: digital", policyInputFrom(store, [ebook], false, true).sellsDigital, true);
+is("a free download alone: nothing sold", [policyInputFrom(store, [free], false, true).sellsDigital, policyInputFrom(store, [free], false, true).sellsMemberships], [false, false]);
+is("a membership: memberships, not digital content", [policyInputFrom(store, [club], false, true).sellsMemberships, policyInputFrom(store, [club], false, true).sellsDigital], [true, false]);
+is("a call: neither", [policyInputFrom(store, [call], false, true).sellsDigital, policyInputFrom(store, [call], false, true).sellsMemberships], [false, false]);
 
 part("Settings flow into the page, and change it");
-const before = policyFacts(policyInputFrom(store, [ebook], false), "en");
-const withPixel = policyFacts(policyInputFrom({ ...store, pixels: { ...NO_PIXELS, meta: "123456789012345" } } as typeof store, [ebook], false), "en");
+const before = policyFacts(policyInputFrom(store, [ebook], false, true), "en");
+const withPixel = policyFacts(policyInputFrom({ ...store, pixels: { ...NO_PIXELS, meta: "123456789012345" } } as typeof store, [ebook], false, true), "en");
 is("a pixel switched on: the measurement section, named by its platform", withPixel.find((s) => s.id === "measurement")?.sentences[0], "Harbor Kitchen measures its ads with Meta.");
 is("and a new version", policyFingerprint(withPixel) === policyFingerprint(before), false);
-is("PayPal taken: said", policyFacts(policyInputFrom(store, [ebook], true), "en")[0].sentences[2].includes("PayPal"), true);
-is("no postal address: no contact section", policyFacts(policyInputFrom({ ...store, mail: null } as typeof store, [ebook], false), "en").some((s) => s.id === "contact"), false);
+is("PayPal taken: said", policyFacts(policyInputFrom(store, [ebook], true, true), "en")[0].sentences[2].includes("PayPal"), true);
+is("no postal address: no contact section", policyFacts(policyInputFrom({ ...store, mail: null } as typeof store, [ebook], false, true), "en").some((s) => s.id === "contact"), false);
 
 part("The page");
 const page = readFileSync("app/[handle]/policies/page.tsx", "utf8");
@@ -100,4 +100,11 @@ async function storedSchedule() {
 storedSchedule().then(done, (e) => {
   console.error(e);
   process.exitCode = 1;
-});
+});// Claude 1 on #1824 (MEDIUM): the email footer address is published here, so the creator is told so where it is
+// typed and in the privacy policy, before the page shows it.
+const studio = readFileSync("components/email-studio.tsx", "utf8").replace(/\s+/g, " ");
+const privacy = readFileSync("app/privacy/page.tsx", "utf8").replace(/\s+/g, " ");
+is("the address field says it is shown on the policies page", studio.includes("It is also shown publicly on your store&apos;s policies page"), true);
+is("the privacy policy says so too", privacy.includes("is also shown publicly on your store&apos;s policies page"), true);
+
+

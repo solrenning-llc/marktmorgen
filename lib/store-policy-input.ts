@@ -18,6 +18,7 @@ import { PIXEL_INFO, PIXEL_KINDS } from "@/lib/pixels";
 import type { PolicyFactsInput } from "@/lib/store-policy-facts";
 import { takePublicRequest } from "@/lib/traffic";
 import { bundleItemUnits } from "@/lib/page-read-rules";
+import { canManage } from "@/lib/membership-manage";
 
 /**
  * The fields the policy reads, each named as Listing's own (Pick fails to compile on a name Listing does not have),
@@ -30,7 +31,8 @@ type Sold = { priceCents?: number } & Partial<Record<Exclude<Read, "priceCents">
 const paid = (p: Sold) => (p.priceCents ?? 0) > 0 || Boolean(p.recurring) || Boolean(p.pwyw) || Boolean(p.plan);
 
 /** The input from products already read: kept apart so it can be checked without a store. */
-export function policyInputFrom(store: Pick<Store, "name" | "pixels" | "mail">, products: readonly Sold[], paypal: boolean): PolicyFactsInput {
+/** `selfCancel`: whether membership emails carry the cancel link (canManage), so the page says only what they do. */
+export function policyInputFrom(store: Pick<Store, "name" | "pixels" | "mail">, products: readonly Sold[], paypal: boolean, selfCancel: boolean): PolicyFactsInput {
   const sold = products.filter(paid);
   return {
     storeName: store.name,
@@ -39,6 +41,7 @@ export function policyInputFrom(store: Pick<Store, "name" | "pixels" | "mail">, 
     paypal,
     pixels: PIXEL_KINDS.filter((kind) => Boolean(store.pixels?.[kind])).map((kind) => PIXEL_INFO[kind].name),
     postalAddress: store.mail?.address ?? "",
+    selfCancel,
   };
 }
 
@@ -47,7 +50,7 @@ export async function policyInput(store: Store): Promise<PolicyFactsInput> {
   // No catch, and every listed product read exactly (readListingsAll): a page that could not read one
   // must not quietly leave out the 14-day rules or the subscription terms (Codex G's review of #1824).
   const products = await readListingsAll(store, visibleIds(store));
-  return policyInputFrom(store, products, sellsThroughPayPal(store));
+  return policyInputFrom(store, products, sellsThroughPayPal(store), canManage(store));
 }
 
 /**

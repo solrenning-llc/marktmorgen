@@ -9,7 +9,7 @@ import { POLICY_WORDS } from "@/lib/buyer-words/policies";
 import { type PolicyFactsInput, notAdvice, policyFacts, policyFingerprint } from "@/lib/store-policy-facts";
 import { done, is, part } from "./check";
 
-const all: PolicyFactsInput = { storeName: "Harbor Kitchen", sellsDigital: true, sellsMemberships: true, paypal: true, pixels: ["Meta", "Google", "TikTok"], postalAddress: "1 Main St, Portland, OR 97201" };
+const all: PolicyFactsInput = { storeName: "Harbor Kitchen", sellsDigital: true, sellsMemberships: true, paypal: true, pixels: ["Meta", "Google", "TikTok"], postalAddress: "1 Main St, Portland, OR 97201", selfCancel: true };
 
 part("Every language says every part");
 for (const code of LANGUAGE_CODES) {

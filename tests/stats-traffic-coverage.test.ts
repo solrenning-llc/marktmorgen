@@ -64,10 +64,15 @@ async function main(){
   const missingLong=(await read())!;
   is("long history failure leaves shorter histories confirmed",missingLong.previousTrafficAvailable,{d7:true,d30:true,d90:false});
   is("long history failure preserves current long window",missingLong.windows.d90.visitors,90);
-  replies=good.slice(0,183);
+  replies=[...good.slice(0,183),...Array(good.length-183).fill(null)];
   const noHistory=(await read())!;
   is("all missing history leaves current data available",noHistory.windows.d7.views,7);
   is("all missing history stays unavailable",noHistory.previousTrafficAvailable,{d7:false,d30:false,d90:false});
+  // Outage drill (13 November 2026): a reply cut short never reaches the reader; lib/redis.ts fails it as a
+  // network error, so no snapshot is read from it.
+  replies=good.slice(0,183);
+  {let refused=false;try{refused=(await read())===null;}catch{refused=true;}
+  is("a reply cut short is refused, never a partial snapshot",refused,true);}
   replies=replace(0,null);
   is("invalid current source returns no dashboard snapshot",await read(),null);
   is("public summary reader does not publish a partial current snapshot",await readNumbers(store,now),null);

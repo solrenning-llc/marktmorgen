@@ -45,18 +45,24 @@ async function main(){
   is("valid current values survive",[complete.totals.visitors,complete.totals.views,complete.totals.checkouts],[3,5,2]);
   is("valid prior traffic survives",[complete.before?.visitors,complete.before?.views,complete.before?.checkouts],[1,1,1]);
   is("channels retain confirmed visits",complete.channels.map(row=>[row.source,row.visits]),[["newsletter",2]]);
-  replies=replace(0,undefined);
+  replies=replace(0,null);
   is("missing current hash returns no report instead of partial totals",await read(),null);
   replies=replace(2,null);
   is("missing current visitors returns no report instead of zero",await read(),null);
   replies=replace(4,"not-a-count");
   is("invalid consolidated visitors returns no report",await read(),null);
-  replies=replace(6,undefined);
+  replies=replace(6,null);
   const priorMissing=(await read())!;
   is("prior failure keeps current report",priorMissing.totals.views,5);
   is("prior failure does not publish provisional zeros",priorMissing.before,null);
-  replies=good.slice(0,5);
+  replies=[...good.slice(0,5),null,null,null];
   is("truncated prior command results keep history unavailable",(await read())?.before,null);
+  // Outage drill (13 November 2026): a reply that lacks a slot, or is cut short, never reaches the reader;
+  // lib/redis.ts fails it as a network error, so the route's error path answers, not a partial report.
+  for(const [what,cut] of [["a slot with no result",replace(0,undefined)],["a reply cut short",good.slice(0,5)]] as const){
+   replies=cut;let refused=false;try{await read();}catch{refused=true;}
+   is(`${what} is refused by the client, never read as missing`,refused,true);
+  }
   replies=[[],[],0,0,0,0,[null,null],[null,null]];
   const quiet=(await read())!;
   is("confirmed empty current traffic remains zero",[quiet.totals.visitors,quiet.totals.views,quiet.totals.checkouts],[0,0,0]);

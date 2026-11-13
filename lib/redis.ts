@@ -15,6 +15,24 @@ function getConfig() {
   return { url: url.replace(/\/+$/, ""), token };
 }
 
+type Reply = { result?: unknown; error?: string };
+
+/**
+ * One reply per command, each an object holding its own result or error: a
+ * reply cut short (a proxy, a connection dropped after the writes were
+ * applied) or a slot with neither is unknown, never "the key is not there",
+ * so it fails as a network error does (outage drill, 13 November 2026).
+ */
+function wholeReply(results: unknown, commands: number): Reply[] {
+  if (!Array.isArray(results) || results.length !== commands) throw new Error("Redis answered a partial reply");
+  for (const entry of results) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry) || (!Object.hasOwn(entry, "result") && !Object.hasOwn(entry, "error"))) {
+      throw new Error("Redis answered a malformed reply");
+    }
+  }
+  return results as Reply[];
+}
+
 export function isRedisConfigured(): boolean {
   return getConfig() !== null;
 }
@@ -44,10 +62,11 @@ export async function redisPipeline(commands: Command[]): Promise<unknown[]> {
       error?: string;
     }[];
   });
-  const failed = results.find((item) => item.error);
+  const replies = wholeReply(results, commands.length);
+  const failed = replies.find((item) => item.error);
   if (failed) throw new Error(`Redis error: ${failed.error}`);
 
-  return results.map((item) => item.result);
+  return replies.map((item) => item.result);
 }
 
 /**
@@ -70,7 +89,7 @@ export async function redisPipelineBase64(commands: Command[]): Promise<unknown[
     if (!response.ok) throw new Error(`Redis request failed with status ${response.status}`);
     return (await response.json()) as { result?: unknown; error?: string }[];
   });
-  return results.map((entry) => {
+  return wholeReply(results, commands.length).map((entry) => {
     if (entry.error) throw new Error(`Redis error: ${entry.error}`);
     return entry.result;
   });

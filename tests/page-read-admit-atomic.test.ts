@@ -78,6 +78,12 @@ async function main(): Promise<void> {
   is("its reading is counted once", depthCounted() - before, 1);
   is("the window's count stays within the ceiling", count() <= pass.cap, true);
   is("and the token is marked used", redis.run(["EXISTS", `nl:read:once:${readTokenPass(once, PRODUCT)!.nonce}`]), 1);
+  // A replay of the same token never takes another place in the window's count (Codex X2's MEDIUM on #2571): 200 sends
+  // leave it at 1, not at up to the ceiling, and a second server that saw nothing leaves it at 1 too.
+  is("the same token takes one place in the window's count", count(), 1);
+  forgetReadingsSeen();
+  await Promise.all(Array.from({ length: 50 }, () => sale(once)));
+  is("replayed on a server that saw nothing, still one place", count(), 1);
   done();
 }
 

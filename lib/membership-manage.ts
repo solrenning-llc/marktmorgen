@@ -615,19 +615,29 @@ export async function ownedSub(store: Store, grant: Grant, subscription: string)
  * mail scanner that follows the link changes nothing and uses up nothing.
  */
 export async function membershipsFor(store: Store, token: string): Promise<Membership[] | null> {
+  return (await membershipsListed(store, token))?.list ?? null;
+}
+
+/**
+ * The memberships behind a live link and whether that list may not be whole. A link whose address has more
+ * customers than one link holds (`m`) lists the memberships it does hold, with `more`, so the page says some may
+ * be missing (Claude 7's, Codex L's and Claude 1 cloud's MÉDIO on #2985): listing nothing stranded a frequent
+ * buyer's memberships for good, on every link. A customer whose memberships could not be read is still no list:
+ * the page says it cannot list them (R43 F1 on #2985), never one left out as if it were not theirs.
+ */
+export async function membershipsListed(store: Store, token: string): Promise<{ list: Membership[]; more: boolean } | null> {
   const grant = await grantOf(store, token);
   if (!grant) return null;
   let owned: OwnedSub[];
+  let more = false;
   try {
     const read = await ownedSubsOf(store, grant);
-    // A list that may miss one of the member's memberships is not shown: the page says it cannot list them, with
-    // Stripe's own page still there, rather than leave one out as if it were not theirs (R43 F1 on #2985).
     if (read.unread) throw read.unread;
-    if (read.more) throw new StripeListUnreadable("a member's customers, more than the link holds");
+    more = read.more;
     owned = read.subs;
   } catch (error) {
     console.error("listing a member's memberships failed", error);
-    return [];
+    return { list: [], more: false };
   }
   const subs = owned.map((o) => o.sub);
   const holder = new Map(owned.map((o) => [o.sub.id, o.grant.c]));
@@ -635,7 +645,7 @@ export async function membershipsFor(store: Store, token: string): Promise<Membe
   const listings = new Map(ids.length ? (await readListings(store, ids).catch(() => [])).map((p) => [p.id, p]) : []);
   const titles = new Map([...listings.values()].map((p) => [p.id, p.title]));
   const nowSeconds = Math.floor(Date.now() / 1000);
-  return subs.map((sub) => {
+  const list = subs.map((sub) => {
     const price = sub.items?.data?.[0]?.price;
     const product = productOfSub(sub);
     return {
@@ -659,6 +669,7 @@ export async function membershipsFor(store: Store, token: string): Promise<Membe
       })(),
     };
   });
+  return { list, more };
 }
 
 /**

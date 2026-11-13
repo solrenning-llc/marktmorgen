@@ -5,7 +5,7 @@ import { notFound } from "next/navigation";
 import { normaliseHandle, storeForPage } from "@/lib/store";
 import { lookStyle } from "@/lib/store-look";
 import { photoUrl } from "@/lib/photo-limits";
-import { MANAGE_LINK_SECONDS, type Membership, canManage, membershipsFor } from "@/lib/membership-manage";
+import { MANAGE_LINK_SECONDS, type Membership, canManage, membershipsListed } from "@/lib/membership-manage";
 import { formatMoney } from "@/lib/money";
 import { speech } from "@/lib/buyer-words";
 import { membershipWords } from "@/lib/buyer-words/membership";
@@ -51,7 +51,10 @@ export default async function ManagePage({ params, searchParams }: Params) {
   const status = typeof query.status === "string" ? query.status : "";
   // Reading the memberships spends nothing: opening this page is never an
   // action, so a mail scanner following the link changes and uses up nothing.
-  const memberships: Membership[] | null = token ? await membershipsFor(store, token) : null;
+  const listed = token ? await membershipsListed(store, token) : null;
+  const memberships: Membership[] | null = listed ? listed.list : null;
+  // The link holds fewer customers than the address has: what it holds is listed, and the page says so (#2985).
+  const more = Boolean(listed?.more);
   const live = memberships !== null;
   // A member who bought in two checkouts is two customers at Stripe, and Stripe's page shows one customer's: then
   // each membership gets its own button to it, and the one at the bottom is not shown (R43 F1 on #2985).
@@ -259,6 +262,11 @@ export default async function ManagePage({ params, searchParams }: Params) {
                   {m.cannotList}
                 </p>
               )}
+              {memberships.length && more ? (
+                <p className="st-muted mt-4 text-base leading-relaxed" role="note">
+                  {m.mayBeMore}
+                </p>
+              ) : null}
 
               {severalCustomers ? null : (
                 <form action="/api/store/manage/open" method="post" className="mt-6">

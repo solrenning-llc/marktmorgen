@@ -201,4 +201,17 @@ is(
 );
 is("a client with no bookings sees nothing", view({ client: "cara@example.com", calls: CALLS, notes: [note("aaaa0022", "cara@example.com", S1, true)], tasks: [] }), { calls: [], notes: [], tasks: [] });
 
+part("A booking or a note that cannot be read makes the answer unknown, never a shorter list (Claude 1 cloud on #3453)");
+{
+  const unreadable = (calls: SharedCallIn[], notes: ShareableNote[] = []) => sharedWithClient({ client: ANA, calls, notes, tasks: [] });
+  const ok = CALLS[0];
+  is("a call whose checkout reference did not read (empty) is unknown", unreadable([ok, { ...ok, session: "" }]), { ok: false, reason: "unreadable" });
+  const shared = note("aaaa0099", ANA, ok.session, true);
+  is("a shared note whose time is not a number is unknown, never 1 January 1970", unreadable([ok], [{ ...shared, at: Number.NaN }]), { ok: false, reason: "unreadable" });
+  is("control: the same note with its time is shown", (() => {
+    const r = unreadable([ok], [shared]);
+    return r.ok ? r.notes.length : r.reason;
+  })(), 1);
+}
+
 done();

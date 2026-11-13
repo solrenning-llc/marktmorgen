@@ -30,6 +30,7 @@
 import { nextUtcMidnight } from "@/lib/local-clock";
 import { HEAVY_READINGS_PER_DAY, READING_FRESH_SECONDS, STORE_READINGS_PER_DAY } from "@/lib/store-reading-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { UnknownReplyError, countOf, replyList, repliesFor } from "@/lib/redis-reply";
 import { keyFor } from "@/lib/stripe-account";
 import { KEEP_UNLESS_ERASED, suppressedAmong, suppressedKey, suppressionPrint } from "@/lib/suppression";
@@ -205,7 +206,7 @@ export type ReadingGuard<T> = {
  * anyone (NotRead) gives its unit back. With a `guard` naming people, it is
  * kept by READING_COPY, never over someone deleted since `read` looked.
  */
-export async function keptReading<T>(store: Pick<Store, "statsId">, kind: ReadingKind, read: () => Promise<T>, now = Date.now(), fresh = false, guard?: ReadingGuard<T>): Promise<Kept<T> | null> {
+export async function keptReading<T>(store: Pick<Store, "statsId"> & Partial<Pick<Store, "period">>, kind: ReadingKind, read: () => Promise<T>, now = Date.now(), fresh = false, guard?: ReadingGuard<T>): Promise<Kept<T> | null> {
   if (!store.statsId || !isRedisConfigured()) return null;
   const key = copyKey(kind, store.statsId);
   let kept: Kept<T> | null = null;
@@ -219,7 +220,10 @@ export async function keptReading<T>(store: Pick<Store, "statsId">, kind: Readin
     kept = null;
   }
   if (kept && !fresh && now - kept.at < READING_FRESH_SECONDS * 1000) return kept;
-  if (!(await takeStoreReading(store, now, kind === "sales"))) {
+  // A funded period's new reading needs its paid cohort first (resourceAllocations): without it, as with no reading
+  // left today, the last one kept is shown. Only a whole store record carries a funded period.
+  const cohortReady = store.period?.funded !== true || (await reservePaidResourceWindow(store as Store).catch(() => false));
+  if (!cohortReady || !(await takeStoreReading(store, now, kind === "sales"))) {
     if (kept) return { ...kept, stale: true };
     throw new ReadingsUsed();
   }

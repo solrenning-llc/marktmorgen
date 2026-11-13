@@ -34,6 +34,8 @@ type Entry =
   | { state: "gated-by-callers"; calls: number; guard: string }
   /** takeAllowance itself proves the cohort for this kind (lib/store-allowance.ts). */
   | { state: "gated-in-primitive"; calls: number; kind: "webhook" }
+  /** Only settles what `after` (an inventoried, gated site) admitted earlier in the same function: never a new admission. */
+  | { state: "settles"; calls: number; after: string }
   /** A right that is never refused for the cohort; its cost stays inside the plan's own figure. Needs the reviewer's acceptance. */
   | { state: "kept-right"; calls: number; why: string }
   /** No cohort proof before the take yet: keeps resourceAllocations false. */
@@ -50,7 +52,7 @@ const ALLOWANCE_TAKE_INVENTORY: Record<string, Entry> = {
   "lib/broadcasts.ts#readNarrowing": { state: "pending", calls: 1, why: "Studio units for narrowing a list before a send; no cohort proof before the take." },
   "lib/broadcasts.ts#countTest": { state: "pending", calls: 1, why: "Studio units for an A/B test's counts; no cohort proof before the take." },
   "lib/buyer-actions.ts#takeBuyerAction": { state: "gated", calls: 2 },
-  "lib/cart-link-products.ts#cartLinkProducts": { state: "pending", calls: 1, why: "Settles what countStudio admitted; only as covered as countStudio, which is pending." },
+  "lib/cart-link-products.ts#cartLinkProducts": { state: "settles", calls: 1, after: "lib/studio-route.ts#countStudio" },
   "lib/dispute-preorder-review.ts#readRetainedPreorderReview": { state: "gated", calls: 1 },
   "lib/dispute-purchase-review.ts#readDisputePurchaseReview": { state: "gated", calls: 2 },
   "lib/email.ts#takeMeteredAllowance": { state: "gated-by-callers", calls: 1, guard: "meterCohortReady" },
@@ -60,8 +62,8 @@ const ALLOWANCE_TAKE_INVENTORY: Record<string, Entry> = {
   "lib/metered-limits.ts#withinServiceWhy": { state: "pending", calls: 1, why: "The generic \"integration\" figure; each calling service gates on its own or not, and its callers are not inventoried yet." },
   "lib/person-erasure.ts#erasePerson": { state: "kept-right", calls: 2, why: "Erasing a person is their right and the store's legal duty; never refused because a period's cash proof is missing." },
   "lib/store-copy.ts#charge": { state: "pending", calls: 1, why: "Studio units for copying a store; no cohort proof before the take." },
-  "lib/studio-route.ts#countStudio": { state: "pending", calls: 1, why: "The generic studio figure: leaving, paying and removing must keep working, so the cohort needs the per-operation split (docs/av-contract-allowance-admission.md)." },
-  "lib/studio-route.ts#holdStudio": { state: "pending", calls: 2, why: "Same generic studio figure as countStudio, held at a reading's worst and settled after." },
+  "lib/studio-route.ts#countStudio": { state: "gated", calls: 1, note: "After the essential needs (billing, delete, export, member), which take their own daily figure and stay open." },
+  "lib/studio-route.ts#holdStudio": { state: "gated", calls: 2 },
   "lib/webhooks.ts#attempt": { state: "gated-in-primitive", calls: 1, kind: "webhook" },
   "lib/webhooks.ts#resendDelivery": { state: "gated", calls: 1 },
   "lib/webhooks.ts#sendTest": { state: "gated", calls: 1 },
@@ -175,6 +177,12 @@ function audit(sources: Map<string, string>, inventory: Record<string, Entry>, u
       });
       for (const [other, source] of sources) if (other !== file && new RegExp(`\\b${fn}\\b`).test(source) && source.includes(`from "@/${file.replace(/\.ts$/, "")}"`)) problems.push(`${key}: used outside its file in ${other}`);
     }
+    if (entry.state === "settles") {
+      const admitted = inventory[entry.after];
+      const fn = entry.after.split("#")[1];
+      if (!admitted || !["gated", "gated-by-callers", "gated-in-primitive"].includes(admitted.state)) problems.push(`${key}: settles after ${entry.after}, which is not a gated site`);
+      for (const site of found) if (!site.before.includes(`${fn}(`)) problems.push(`${key}: line ${site.line} settles without ${fn} before it`);
+    }
     if ((entry.state === "pending" || entry.state === "kept-right") && !entry.why.trim()) problems.push(`${key}: needs its reason`);
   }
   for (const key of Object.keys(inventory)) if (!byKey.has(key)) problems.push(`stale inventory entry: ${key} has no take any more`);
@@ -206,6 +214,8 @@ for (const problem of problems) console.log(`        ${problem}`);
 is("no problem between sources, inventory and key", problems, []);
 is("the scan finds every take (29 on 13 November 2026)", allowanceSites(sources).length, Object.values(ALLOWANCE_TAKE_INVENTORY).reduce((n, e) => n + e.calls, 0));
 const pending = Object.values(ALLOWANCE_TAKE_INVENTORY).filter((e) => e.state === "pending").length;
+const pendingCalls = Object.values(ALLOWANCE_TAKE_INVENTORY).filter((e) => e.state === "pending").reduce((n, e) => n + e.calls, 0);
+is("pending takes, down from 11 (part 1) as part 1b gates them", pendingCalls, 7);
 is("pending takes keep resourceAllocations false", pending > 0 && CONTRACT_ADMISSION_COVERAGE.resourceAllocations, false);
 is("the other two core keys are untouched", [CONTRACT_ADMISSION_COVERAGE.renewals, CONTRACT_ADMISSION_COVERAGE.settlementAndReserveReconciliation], [false, false]);
 

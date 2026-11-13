@@ -76,6 +76,7 @@ import { SYNC_SECONDS } from "@/lib/host-calendar";
 import { MAX_TEAM } from "@/lib/team";
 import { MAX_TASK_FILE_BYTES, TASK_ROOM_BYTES, TRIAL_TASK_ROOM_BYTES } from "@/lib/assignment-rules";
 import { COMMUNITY_PICTURES, PICTURE_BYTES, TRIAL_COMMUNITY_PICTURES } from "@/lib/community-picture-rules";
+import { MAX_IMAGE_BYTES } from "@/lib/product-image";
 import { CLOSING_DAYS, DEL_BATCH, ENDED_LIST_DOWNLOADS, ENDED_STORE_EXPORTS, FOLLOW_BATCH, RENEWALS_AT_ONCE, WARN_WEEK_DAYS } from "@/lib/plan-closing-rules";
 import { MAX_CRM_FIELDS } from "@/lib/crm-rules";
 import { PERSON_ARG_BYTES } from "@/lib/crm";
@@ -96,7 +97,7 @@ import { STRIPE_TIMEOUT_MS } from "@/lib/fetch-timeout";
 import { MAX_LESSONS } from "@/lib/course";
 import { MAX_POSTS, POSTS_PER_PAGE } from "@/lib/store-blog";
 import { MAX_BUMPS } from "@/lib/product-extras";
-import { AFFILIATE_ROW_CAP, type AffiliateLoadSize, type AffiliatePageSize, type SitemapSize } from "@/lib/public-read-rules";
+import { AFFILIATE_ROW_CAP, PRODUCT_CARD_CPU_SECONDS, PRODUCT_CARD_HELD_SECONDS, PRODUCT_CARD_MAX_BYTES, type AffiliateLoadSize, type AffiliatePageSize, type SitemapSize } from "@/lib/public-read-rules";
 import { BOOK_SNAPSHOT_MAX_BYTES } from "@/lib/affiliate-book-snapshot";
 import { SEARCH_PAGE } from "@/lib/community-search";
 import { MAX_CHAT_KEPT } from "@/lib/community-chat-rules";
@@ -374,6 +375,17 @@ export const PICTURE_READ = request("light", 16) + PICTURE_BYTES * (ORIGIN_PER_B
  * public requests before it is drawn, held above it in tests/plan-cost-registry.test.ts.
  */
 export const CERTIFICATE_PDF_READ = CALL + 1 * CPU_SECOND + 4 * MEMORY_SECOND + (16 + 2 * (1 + SHARE_COMMANDS_PER_REQUEST)) * COMMAND + 64_000 * DB_BYTE + CERTIFICATE_PDF_MAX_BYTES * ORIGIN_PER_BYTE;
+/**
+ * One product's shared card (app/[handle]/p/[product]/opengraph-image.tsx), at its worst (reviews of #4211): the call,
+ * PRODUCT_CARD_CPU_SECONDS of CPU held PRODUCT_CARD_HELD_SECONDS at 2 GB (a stated bound: a picture decoded at the pixels
+ * an upload keeps and the card drawn), the store, the listing and the review summary read with the two takes, the
+ * picture read from the file store (at most MAX_IMAGE_BYTES, the route's own cap) and the largest PNG sent
+ * (PRODUCT_CARD_MAX_BYTES). Taken as PRODUCT_CARD_UNITS public requests before it is drawn, held above it in
+ * tests/plan-cost-registry.test.ts.
+ */
+export const PRODUCT_CARD_READ =
+  CALL + PRODUCT_CARD_CPU_SECONDS * CPU_SECOND + PRODUCT_CARD_HELD_SECONDS * MEMORY_SECOND + (16 + 2 * (1 + SHARE_COMMANDS_PER_REQUEST)) * COMMAND + 64_000 * DB_BYTE
+  + MAX_IMAGE_BYTES * BLOB_TRANSFER_PER_BYTE + PRODUCT_CARD_MAX_BYTES * ORIGIN_PER_BYTE;
 /**
  * What one next product after a purchase costs besides the model (lib/next-offer.ts),
  * at the most: its commands and its counting, the listings it reads (a product's
@@ -1290,6 +1302,10 @@ export const COST_LINES: CostLine[] = [
       // (153 KB, 0.59 s of CPU cold, measured; audit R41, item 3), so CERTIFICATE_PDF_READ prices it too (tests/certificate-card-standing.test.ts).
       { file: "app/[handle]/certificate/[id]/opengraph-image.tsx", names: ["takePublicRequest(store, \"public\", now, 1)", "takePublicRequest(store, \"public\", now, CERTIFICATE_CARD_UNITS - 1)"] },
       { file: "lib/certificate.ts", names: ["CERTIFICATE_CARD_UNITS = 2"] },
+      // A product's shared card reads its picture from the file store and draws: one request before its listing, the rest of
+      // PRODUCT_CARD_UNITS before the picture is read (tests/c1-cost-product-card.test.ts).
+      { file: "app/[handle]/p/[product]/opengraph-image.tsx", names: ["takePublicRequest(store, \"public\", now, 1)", "takePublicRequest(store, \"public\", now, PRODUCT_CARD_UNITS - 1)"] },
+      { file: "lib/public-read-rules.ts", names: ["PRODUCT_CARD_UNITS = 9"] },
       // A payment request first written down as paid takes one more before the workflow that starts on it is checked (635 [GL3], 2 November 2026).
       { file: "lib/payment-flow-trigger.ts", names: ["PAID_TRIGGER_UNITS", "takePublicRequest(store, \"buyer\", Date.now(), PAID_TRIGGER_UNITS)"] },
       // An affiliate's own page and the store's map read in proportion to the store: counted first, paid before they read (4 November 2026).

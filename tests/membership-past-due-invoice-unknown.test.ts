@@ -14,6 +14,7 @@
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { liveExpanded, membershipStatus, memberState, PAST_DUE_NO_RETRY } from "@/lib/membership-access";
 import type { Store } from "@/lib/store";
+import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_past_due_invoice_unknown";
@@ -73,6 +74,22 @@ async function main(): Promise<void> {
   asked = [];
   reply = { id: "sub_TestById0002", object: "subscription", status: "past_due", latest_invoice: { id: "in_E", object: "invoice", next_payment_attempt: null } };
   is("no attempt any more, read by id: ended", await membershipStatus(store, "sub_TestById0002"), PAST_DUE_NO_RETRY);
+
+  part("A state kept for two minutes obeys the same closed set as Stripe's own (Codex L on #3889)");
+  const kept = (sub: string) => `nl:member:status:acct_1TestInvoice01:${sub}`;
+  // Kept by the version before this one, which kept any text Stripe sent, or a damaged record.
+  await redis.pipeline([["SET", kept("sub_TestCache0001"), "future_state", "EX", 120]]);
+  asked = [];
+  reply = { id: "sub_TestCache0001", object: "subscription", status: "past_due", latest_invoice: { id: "in_F", object: "invoice", next_payment_attempt: NOW + 3600 } };
+  is("a kept state Stripe does not have is never read as ended: Stripe is asked again", await membershipStatus(store, "sub_TestCache0001"), "past_due");
+  is("and that read asked Stripe, with the latest invoice", asked.some((path) => path.includes("latest_invoice")), true);
+  const [rewritten] = await redis.pipeline([["GET", kept("sub_TestCache0001")]]);
+  is("what is kept now is the state just read", rewritten, "past_due");
+  for (const state of ["active", PAST_DUE_NO_RETRY, "paused", "canceled"]) {
+    await redis.pipeline([["SET", kept("sub_TestCache0002"), state, "EX", 120]]);
+    asked = [];
+    is(`a kept "${state}" is used as it is, without asking Stripe`, [await membershipStatus(store, "sub_TestCache0002"), asked.length], [state, 0]);
+  }
 
   done();
 }

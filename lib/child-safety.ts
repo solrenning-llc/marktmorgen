@@ -34,7 +34,7 @@ export const CHILD_SAFETY_HOLDS_PER_DAY = 3;
 export const TAKE_IT_DOWN_HOURS = 48;
 const COUNT_SECONDS = 2 * 86_400;
 
-export type HoldOutcome = "held" | "no_product" | "not_held" | "capped" | "unknown" | "failed";
+export type HoldOutcome = "held" | "no_product" | "not_held" | "outside" | "capped" | "unknown" | "failed";
 
 const countKey = (store: Pick<Store, "statsId" | "handle">, day: string) => `nl:csa:held:${store.statsId || `h:${store.handle}`}:${day}`;
 
@@ -45,6 +45,9 @@ const countKey = (store: Pick<Store, "statsId" | "handle">, day: string) => `nl:
  */
 export async function holdReported(report: { kind: ReportKind; url: string }, store: Store, now = Date.now()): Promise<HoldOutcome> {
   if (report.kind !== "child_safety") return "not_held";
+  // Only an address on Marktmorgen itself names content it hosts: another host whose path imitates a store's route
+  // (https://evil.example/@victim/p/<id>) never takes a real product off (Codex U and Codex L on #3587).
+  if (!onMarktmorgen(report.url)) return "outside";
   try {
     // Read exactly (rule 24): an address that names no product of this store is no_product; a read that fails or
     // answers off its shape is unknown, never "names nothing" (lib/takedown.ts reportedProduct swallows it).
@@ -83,6 +86,7 @@ const WHAT_HAPPENED: Record<HoldOutcome, string> = {
   held: "The product it points at was taken off the store at once (unpublished), so visitors can no longer see or buy it. Nothing was deleted: its files and records are kept as they are. People who bought it before may still reach its files: switching that off is not automatic yet.",
   no_product: "The address does not name a product of a store, so nothing was taken off automatically. Act on it by hand, as docs/incident-response.md section 8 says.",
   not_held: "Nothing was taken off automatically. Act on it by hand, as docs/incident-response.md section 8 says.",
+  outside: "The address is not a Marktmorgen address, so nothing was taken off automatically, even if its path looks like a store's. Act on it by hand, as docs/incident-response.md section 8 says.",
   capped: `This store already had ${CHILD_SAFETY_HOLDS_PER_DAY} products taken off automatically today, so nothing more was. Act on it by hand, as docs/incident-response.md section 8 says.`,
   unknown: "Taking it off the store could not be confirmed. Act on it now by hand, as docs/incident-response.md section 8 says.",
   failed: "Taking it off the store did not work. Act on it now by hand, as docs/incident-response.md section 8 says.",
@@ -99,6 +103,17 @@ function productIdIn(url: string, store: Store): string | null {
     return segment ? productIdFromAddress(store, segment) : null;
   } catch {
     return null;
+  }
+}
+
+/** Whether an address is on Marktmorgen itself, over https: the only kind a report may act on automatically. */
+function onMarktmorgen(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.toLowerCase();
+    return parsed.protocol === "https:" && (host === "marktmorgen.com" || host === "www.marktmorgen.com");
+  } catch {
+    return false;
   }
 }
 

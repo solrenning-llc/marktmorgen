@@ -19,6 +19,8 @@ import { renderToReadableStream } from "react-dom/server";
 import StudioCoursePage from "@/app/studio/course/[product]/page";
 import StudioPodcastPage from "@/app/studio/podcast/[product]/page";
 import ProductPage from "@/app/[handle]/p/[product]/page";
+import BookPage, { generateMetadata as bookMetadata } from "@/app/[handle]/book/[product]/page";
+import type { CallSetup } from "@/lib/call-setup";
 import { productTextTool, readCourseTool, readLessonTool, readPageReadingTool, readPageTestTool, readPageVersionsTool, readSalesPageTool } from "@/lib/mcp-tools";
 import { readListing, readPage, searchStore } from "@/lib/catalog";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
@@ -26,7 +28,7 @@ import { saveCourse, type Course } from "@/lib/course";
 import { putMember } from "@/lib/team";
 import * as childSafety from "@/lib/child-safety";
 import { holdReported } from "@/lib/child-safety";
-import { addProduct, claimHandle, ensureStatsId, ensureStoreId, setProductCourse, setProductHidden, setProductPodcast, setSubscription, storeForEmail, type Store } from "@/lib/store";
+import { addProduct, claimHandle, ensureStatsId, ensureStoreId, setProductCall, setProductCourse, setProductHidden, setProductPodcast, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { answering } from "./security/next-headers";
 import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
@@ -169,6 +171,10 @@ async function main(): Promise<void> {
   is("it is still on the store", (await readListing(await now(), lateId))?.hidden, false);
   is("its public page sends a visitor to the store at once", await productPage(lateId), `redirect /@${HANDLE}`);
   is("and it waits to be taken off", await queued(), 1);
+  // Claude 2 cloud L's MEDIUM on #3588: the waiting entry named the store by its owner's address (a company key no
+  // erasure reaches, kept 400 days, and lost when the owner's address changes). It names the store by its id only.
+  const waiting = (await real([["ZRANGEBYSCORE", "nl:csa:hide", "-inf", "+inf"]]))[0] as string[];
+  is("the waiting entry names the store by its id, never by the owner's address", [waiting.some((m) => m.includes("@")), waiting.some((m) => m.includes(store.sid!))], [false, true]);
   lockBusy();
   for (let n = 0; n < 3; n++) await run(Date.now() + (n + 1) * 2 * 3_600_000);
   redis.pipeline = real as typeof redis.pipeline;
@@ -185,6 +191,36 @@ async function main(): Promise<void> {
   is("nor does its search", (await found()).includes(lateId), false);
   is("nor another product's page", await productPage(freeId), "drawn without it");
   is("a product that is not held is still listed", (await front()).includes(freeId), true);
+
+  // Codex T's MEDIUM on #3588: a held call whose taking off did not go through still named itself in its booking
+  // page's tab and drew its title, price and times there. Both answer as for a call that does not exist.
+  part("A held call whose taking off did not go through: its booking page and its tab show nothing of it");
+  const callMade = await addProduct(OWNER, "Held Product call", "", "90", null);
+  if (!callMade.ok) throw new Error("no call product");
+  const callId = callMade.product.id;
+  const weekly = { kind: "weekly", minutes: 60, tz: "America/New_York", weekly: [[], [[540, 1020]], [[540, 1020]], [[540, 1020]], [[540, 1020]], [[540, 1020]], []], noticeHours: 1, horizonDays: 30, bufferMinutes: 0, room: "https://example.com/room", video: false, meet: null, seats: 1, sessions: [] } as unknown as CallSetup;
+  if (!(await setProductCall(OWNER, callId, weekly)).ok) throw new Error("no call");
+  const bookTab = async (who: Who) => {
+    asked(who, `/@${HANDLE}/book/${callId}`);
+    return String((await bookMetadata({ params: Promise.resolve({ handle: `@${HANDLE}`, product: callId }), searchParams: Promise.resolve({}) })).title);
+  };
+  const bookPage = (who: Who) => {
+    asked(who, `/@${HANDLE}/book/${callId}`);
+    return outcome(() => BookPage({ params: Promise.resolve({ handle: `@${HANDLE}`, product: callId }), searchParams: Promise.resolve({}) }));
+  };
+  is("before the hold, its tab names it", (await bookTab("stranger")).includes("Held Product call"), true);
+  redis.run(["DEL", ...redis.keys().filter((key) => key.startsWith("nl:csa:held:"))]);
+  lockBusy();
+  const callHeld = await holdReported({ kind: "child_safety", url: `${BASE}/@${HANDLE}/p/${callId}` }, await now());
+  redis.pipeline = real as typeof redis.pipeline;
+  is("taking it off did not go through", [callHeld, (await readListing(await now(), callId))?.hidden], ["unknown", false]);
+  is("its booking tab names nothing, for a visitor or the team", [await bookTab("stranger"), await bookTab("editor")], ["Book a call — Marktmorgen", "Book a call — Marktmorgen"]);
+  is("its booking page sends a visitor and the team to the store", [await bookPage("stranger"), await bookPage("editor")], [`redirect /@${HANDLE}`, `redirect /@${HANDLE}`]);
+  is("the owner still reads its tab", (await bookTab("owner")).includes("Held Product call"), true);
+  redis.pipeline = (async (commands: (string | number)[][]) =>
+    commands.some((command) => command.slice(1).some((arg) => String(arg).startsWith("nl:csa:keep:"))) ? commands.map(() => 42) : real(commands)) as typeof redis.pipeline;
+  is("a mark that cannot be read: the tab names nothing and the page sends them to the store", [await bookTab("stranger"), await bookPage("stranger")], ["Book a call — Marktmorgen", `redirect /@${HANDLE}`]);
+  redis.pipeline = real as typeof redis.pipeline;
 
   part("A mark that cannot be read refuses, never shows the content");
   redis.pipeline = (async (commands: (string | number)[][]) =>

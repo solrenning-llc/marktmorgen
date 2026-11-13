@@ -66,7 +66,10 @@ async function main(): Promise<void> {
   // The person's index is named by the store in clear and the address only as a hash: no store value goes into a
   // fast hash (CodeQL js/insufficient-password-hash on #3542), and the address is never in the name.
   const index = (sid: string, email: string) => `nl:api:idem:p:${sid}:${createHash("sha256").update(email.trim().toLowerCase()).digest("hex")}`;
-  is("Ada's index in store A is named by the store and her hashed address", has(index(a.sid, ADA)), true);
+  // Codex X5 on #3542 @1c5fa00 (MÉDIO): the index outlives the erasure by a day with its mark, so a name made by a
+  // plain SHA-256 of the address lets anyone holding a list of addresses confirm, offline, who was in this store.
+  is("no index is named by the plain SHA-256 of her address: it could be confirmed offline from a list", has(index(a.sid, ADA)), false);
+  is("her answers are still indexed (an index in store A names its store, one per address)", redis.keys().filter((k) => k.startsWith(`nl:api:idem:p:${a.sid}:`)).length, 2);
   is("no index name says an address", redis.keys().filter((k) => k.startsWith("nl:api:idem:p:") && /@/.test(k)), []);
 
   part("One keyed write about a person stays inside the cost ceiling's commands");

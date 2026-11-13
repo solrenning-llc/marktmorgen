@@ -1739,8 +1739,9 @@ export function nonPayingWorst(): number {
     // A store in its trial, or whose plan ended until its closing day, keeps its calendar feed and its readings of
     // its numbers (C4-4, review of #2111): their own lines, at Store's figures, which are more than a trial's.
     + ["calendar-feed", "store-readings"].reduce((sum, id) => sum + creator(id), 0)
-    // Its students' work and its community's pictures, kept for the trial and then to its closing day (lib/plan-closing.ts).
-    + ((TRIAL_TASK_ROOM_BYTES + TRIAL_COMMUNITY_PICTURES * PICTURE_BYTES) / GB) * STORAGE_PER_GB * (1 + (CLOSING_DAYS + WARN_WEEK_DAYS) / 30)
+    // Its students' work, its community's pictures and its buyers' review photos (as many as its data room holds reviews,
+    // line review-photos), kept for the trial and then to its closing day (lib/plan-closing.ts).
+    + ((TRIAL_TASK_ROOM_BYTES + TRIAL_COMMUNITY_PICTURES * PICTURE_BYTES + Math.floor(NON_PAYING_DATA_ROOM_BYTES.trial / REVIEW_ROOM_FLOOR_BYTES) * MAX_REVIEW_PHOTO_BYTES) / GB) * STORAGE_PER_GB * (1 + (CLOSING_DAYS + WARN_WEEK_DAYS) / 30)
     // Its data room, and what it keeps outside it at Store's figures, which are more than a trial's, for the trial and to its closing day
     // (what a unit writes is paid for to its end by the window that wrote it, tests/closing-cost.test.ts).
     + (NON_PAYING_DATA_ROOM_BYTES.trial * (1 + (CLOSING_DAYS + WARN_WEEK_DAYS) / 30) + reserveBytes("creator") + cappedByteMonths("creator", CLOSING_DAYS + WARN_WEEK_DAYS)) * DB_BYTE_MONTH

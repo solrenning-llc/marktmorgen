@@ -79,7 +79,7 @@ export async function GET(request: NextRequest) {
     const ships = shipped ? [shipped.cents > 0 ? sw.cost(formatMoney(shipped.cents, store.currency, locale)) : sw.free, shipped.note].filter(Boolean).join(" · ") : null;
     const soldOut = left.get(id) === 0;
     const unknown = left.has(id) && left.get(id) === undefined;
-    return [{ id, title: product.title, href: `/@${store.handle}/p/${productSegment(product)}`, cents, price: formatMoney(cents, store.currency, locale), ok: selling && cartable(product) && coming !== null && !coming.soon.has(id) && !soldOut && !unknown, ships, soldOut }];
+    return [{ id, title: product.title, href: `/@${store.handle}/p/${productSegment(product)}`, cents, price: formatMoney(cents, store.currency, locale), ok: selling && cartable(product) && coming !== null && knownNotSoon(coming, id) && !soldOut && !unknown, ships, soldOut }];
   });
   // What ships, as the checkout will ask Stripe for it (lib/cart-shipping.ts), from what can be paid for.
   const shippable = items.filter((item) => item.ok).flatMap((item) => listings.filter((p) => p.id === item.id));
@@ -139,9 +139,11 @@ export async function GET(request: NextRequest) {
     const listing = listings.find((p) => p.id === item.id);
     return listing ? [{ id: item.id, title: item.title, pairs: listing.pairs ?? [] }] : [];
   });
-  // With the coming-soon reading unknown nothing is offered either: a suggestion or a bundle could be a product not out yet.
-  const suggest = coming ? await suggestions(store, inCart, ids, coming.soon, country, locale).catch(() => []) : [];
-  const bundle = coming ? bundleSwap(store, payable, ids, coming.soon, country, locale) : null;
+  // With the coming-soon reading unknown, or read only in part (#4287, item 14), nothing is offered either: a suggestion
+  // or a bundle could be a product not out yet.
+  const whole = coming && !coming.partial ? coming : null;
+  const suggest = whole ? await suggestions(store, inCart, ids, whole.soon, country, locale).catch(() => []) : [];
+  const bundle = whole ? bundleSwap(store, payable, ids, whole.soon, country, locale) : null;
   return Response.json(
     {
       ok: true,

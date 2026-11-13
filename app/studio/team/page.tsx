@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import { StudioEmptyState } from "@/components/empty-state";
 import { StudioHeader } from "@/components/studio-header";
+import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { TeamManager } from "@/components/team-manager";
 import { type OwnerStep, TeamTwoStepSwitch } from "@/components/team-two-step-switch";
@@ -43,7 +45,8 @@ export default async function StudioTeamPage({
   }
   const { view } = found;
   const { store } = view;
-  const [team, log] = await Promise.all([readTeam(store.sid), readLog(store.sid)]);
+  // The log is null when it could not be read (rule 24): the page says so instead of "No activity yet".
+  const [team, log] = await Promise.all([readTeam(store.sid), readLog(store.sid).catch(() => null)]);
   // The two-step switch (612 [WP11], owner C3-100) is the owner's alone: how
   // their own session stands, who on the team has no second step yet, and
   // which API keys would pause, for the review before it is saved.
@@ -75,7 +78,7 @@ export default async function StudioTeamPage({
       />
       <StudioStorePin sid={store.sid}>
         <main id="content" className="container-page pb-20 pt-10 sm:pt-14">
-          <p className="eyebrow">Team</p>
+          <StudioTrail store={store} here="Team" />
           <h1 className="t-h2 mt-3">People who help run {store.name}</h1>
           <p className="mt-3 max-w-2xl text-ink-soft">
             {`Up to ${MAX_TEAM} people, each with a role that decides what they can do here. They log in with their own email, never yours, and every change they make is written in the activity log below.`}
@@ -127,8 +130,18 @@ export default async function StudioTeamPage({
               Every change a team member sends from the studio, every download of buyers&apos; data they make, and every
               change to the team, newest first. The last 500 are kept.
             </p>
-            {log.length === 0 ? (
-              <p className="mt-4 rounded-[12px] bg-paper px-4 py-3 text-sm text-ink-soft ring-1 ring-line">Nothing yet.</p>
+            {log === null ? (
+              <p role="status" className="notice notice-warn mt-4">
+                The activity could not be read just now. Reload this page in a moment; this does not mean nothing happened.
+              </p>
+            ) : log.length === 0 ? (
+              <StudioEmptyState
+                level={3}
+                compact
+                className="mt-4"
+                title="No activity yet"
+                body="Each change a teammate makes from the studio, each download of buyers' data, and each change to the team is listed here, newest first."
+              />
             ) : (
               <>
                 <LogList lines={log.slice(0, FIRST_LINES)} />
@@ -149,7 +162,7 @@ export default async function StudioTeamPage({
   );
 }
 
-function LogList({ lines }: { lines: Awaited<ReturnType<typeof readLog>> }) {
+function LogList({ lines }: { lines: NonNullable<Awaited<ReturnType<typeof readLog>>> }) {
   return (
     <ol className="mt-4 divide-y divide-line">
       {lines.map((line, i) => (

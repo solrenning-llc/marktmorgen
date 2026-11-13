@@ -349,6 +349,13 @@ export async function advanceAnnouncement(
       await redisPipeline([["SREM", QUEUE, id]]);
       return job;
     }
+    // Switched off after notices about its content (lib/takedown.ts; any value but nothing or "" reads as off, rule 24):
+    // nobody is read, reserved or emailed. It waits in line, saying so, and goes on by itself once the store is back on.
+    if (store.suspended) {
+      job = { ...job, status: "waiting", note: job.done > 0 ? "Your store is switched off after notices about its content, so nothing more was sent. The rest go out by themselves once your store is back on." : "Your store is switched off after notices about its content, so nothing was sent. It goes out by itself once your store is back on." };
+      await save(job);
+      return job;
+    }
     if (monthlyAllowance(store) === 0 || !store.mail) {
       job = { ...job, status: "waiting", note: "Your plan does not include email right now. It goes out once Pro is on again." };
       await save(job);

@@ -79,7 +79,9 @@ async function main() {
         const email = await person(), key = `nl:course:${course.id}:${kind}:${emailKey(email)}`;
         let claims = 0, readsAfterClaim = 0, queued = 0, seenClaim = false;
         redis.pipeline = async commands => {
-          if (commands[0]?.[0] === "SET" && commands[0][1] === key) {
+          // The claim is one script with the suppression check (#4418, lib/course-finish.ts CLAIM_COURSE_MOMENT).
+          const claiming = commands[0]?.[0] === "EVAL" && String(commands[0][1]).startsWith("-- marktmorgen:course-moment:") && commands[0][3] === key;
+          if (claiming) {
             claims++; seenClaim = true;
             if (variant.apply) await original(commands);
             if (variant.fail) throw Error("Synthetic lost claim response");

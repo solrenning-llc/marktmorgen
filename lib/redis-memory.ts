@@ -1023,6 +1023,11 @@ export class MemoryRedis {
           this.data.set(args[1], String(n - 1));
           return n - 1;
         }
+        if (key.startsWith("-- marktmorgen:course-moment:v1\n") && args[0] === "2" && args.length === 5) {
+          const [, claim, erased, print, seconds] = args;
+          if (this.run(["HEXISTS", erased, print]) === 1) return null;
+          return this.run(["SET", claim, "1", "NX", "EX", seconds]);
+        }
         if (key.startsWith("-- marktmorgen:lesson-comments-add:v2\n") && args[0] === "4" && args.length === 13) {
           const [, comments, lesson, all, replies, parentId, lessonId, id, raw, score, rawMost, rawRecent, rawLessonMost] = args;
           let count = 0;

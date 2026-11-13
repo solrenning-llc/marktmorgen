@@ -251,6 +251,15 @@ async function main(): Promise<void> {
   const unknown = await askAssistant({ store, text: "Does it include vegan dinners?", facts, now });
   is("said plainly, with the creator offered", unknown.ok ? [unknown.reply.status, unknown.reply.text] : unknown, ["unknown", assistantWords("en").unknown("Assist Shop")]);
   is("and the question is kept for the creator, with the day and nothing about who asked", (await assistantMissed(store)).map((m) => [m.question, Object.keys(m).sort().join(",")]), [["Does it include vegan dinners?", "at,question"]]);
+  // #4118: the question is kept as the conversation keeps it (forAi), never with the address or phone the buyer typed,
+  // and only for the window the privacy policy states, whatever the list's key does.
+  next = { reply: JSON.stringify({ status: "unknown", reply: "" }) };
+  await askAssistant({ store, text: "Do you ship to Berlin? I am Jane Roe, jane.roe@example.com, +49 151 2345 6789", facts, now });
+  const kept = (await assistantMissed(store))[0]?.question ?? "";
+  is("#4118: the kept question has no address the buyer typed", kept.includes("jane.roe@example.com") || kept.includes("@"), false);
+  is("#4118: nor their phone", /\d{3}\s?\d{4}/.test(kept), false);
+  await redis.pipeline([["RPUSH", `nl:assist:missed:${store.statsId}`, JSON.stringify({ q: "An old question", at: Math.floor(now / 1000) - 121 * 86_400 })]]);
+  is("#4118: one asked more than 120 days ago is no longer shown", (await assistantMissed(store, 50)).some((m) => m.question === "An old question"), false);
   next = { reply: JSON.stringify({ status: "handoff", reply: "" }) };
   is("the model can hand a question over", ((r) => (r.ok ? r.reply.status : r))(await askAssistant({ store, text: "My download link does not open", facts, now })), "handoff");
   const calls = asked.length, spentBefore = (await poolOf(store.statsId!, window.id)).spent;

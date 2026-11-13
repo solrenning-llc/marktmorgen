@@ -16,6 +16,7 @@
  *   - an email that does not choose this changed at all.
  */
 import { bodyButtons, bodyHtml, bodyText } from "@/lib/mail-body";
+import { MAX_SENT_LINKS } from "@/lib/sent-link-rules";
 import { done, is, part } from "./check";
 
 const body = [
@@ -55,5 +56,14 @@ is("the studio's list holds only the buttons that can be changed", bodyButtons(m
 const mixedHtml = bodyHtml(mixed, (href) => `${href}?utm_source=x`, undefined, undefined, to);
 is("a button that is already our redirect or has no public host goes to itself, tagged, never through a second redirect", [mixedHtml.includes('href="https://marktmorgen.com/r/S/E/0?u=x?utm_source=x"'), mixedHtml.includes('href="https://intranet/page?utm_source=x"')], [true, true]);
 is("the changeable button is number 0 in the HTML and the text, as in the studio's list", [mixedHtml.includes(`href="${to("https://example.com/book", 0).replace(/&/g, "&amp;")}"`), bodyText(mixed, to).includes(`Book a seat: ${to("https://example.com/book", 0)}`)], [true, true]);
+
+part(`At most MAX_SENT_LINKS (${MAX_SENT_LINKS}) buttons can be changed: never one the redirect cannot sign (Claude 1 on #3715, LEVE)`);
+const many = Array.from({ length: MAX_SENT_LINKS + 1 }, (_, i) => `[Class ${i}](https://example.com/c${i})`).join("\n\n");
+is("the studio's list stops at MAX_SENT_LINKS", bodyButtons(many).length, MAX_SENT_LINKS);
+const manyHtml = bodyHtml(many, (href) => `${href}?utm_source=x`, undefined, undefined, to);
+is("the last one in the list is wrapped with its number", manyHtml.includes(`href="${to(`https://example.com/c${MAX_SENT_LINKS - 1}`, MAX_SENT_LINKS - 1).replace(/&/g, "&amp;")}"`), true);
+is("a button past it goes to its own address, tagged, never numbered past what can be signed", [manyHtml.includes(`/${MAX_SENT_LINKS}?u=`), manyHtml.includes(`href="https://example.com/c${MAX_SENT_LINKS}?utm_source=x"`)], [false, true]);
+const manyText = bodyText(many, to);
+is("and the same in the text", [manyText.includes(`/${MAX_SENT_LINKS}?u=`), manyText.includes(`Class ${MAX_SENT_LINKS}: https://example.com/c${MAX_SENT_LINKS}`)], [false, true]);
 
 done();

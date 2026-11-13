@@ -45,7 +45,7 @@ import {
   runBackupFiles,
   type RunReport,
 } from "../workers/backup-files/src/run";
-import { BACKUP_FILES_SOURCES, parseStoresPage, BackupFilesContractError, type BackupFilesSource } from "@/lib/backup-files-contract";
+import { BACKUP_FILES_OBJECTS_PER_MONTH, BACKUP_FILES_SOURCES, parseStoresPage, BackupFilesContractError, type BackupFilesSource } from "@/lib/backup-files-contract";
 import { ALARM, BEAT, DAY, DAY0, FakeBucket, ROUTE, SECRET, fakeFetch, listingKey, objects, resetWorld, world, type SourceObject } from "./backup-files-worker-world";
 import { done, is, part } from "./check";
 
@@ -345,6 +345,26 @@ async function main(): Promise<void> {
   files.putFault = () => undefined;
   report = await runAt(1, 1, { fetch: watched });
   is("the next day, inside the same 32 days, the ceiling still holds: no read, nothing copied", [originBytes() <= BACKUP_FILES_COPY_TIMES * R, copies().length, has(report, "files_copy_ceiling")], [true, 0, true]);
+  // Claude 1's MEDIUM at 58d23815ca (adopted by Claude 3, nuvem E): small objects whose copy write is refused were read,
+  // charged and put again every hour, and the 10,000-objects-in-30-days ceiling counted only confirmed copies.
+  {
+    fresh([{ store: S, roomBytes: R }]);
+    setListing("blob", S, [0, 1, 2].map((i) => ({ key: `stores/${S}/small${i}.bin`, etag: `"small${i}"`, bytes: big(10, 20 + i) })));
+    files.putFault = (key) => (key.startsWith("copies/") ? "null" : undefined);
+    const readsBefore = world.calls.filter((c) => c.url.startsWith("https://src.test/")).length;
+    for (let hour = 1; hour <= 3; hour++) report = await runAt(0, hour, { fetch: watched });
+    const smallReads = world.calls.filter((c) => c.url.startsWith("https://src.test/")).length - readsBefore;
+    is("a small object whose copy write is refused is tried once that day, not every hour", smallReads, 3);
+    files.putFault = () => undefined;
+    // The store has already read the month's object ceiling (attempts, not only copies): no further read.
+    const key = `state/stores/${S}.json`;
+    const state = files.json(key) as { read: { day: number; objects: number; bytes: number }[] };
+    state.read = state.read.map((d) => ({ ...d, objects: BACKUP_FILES_OBJECTS_PER_MONTH }));
+    await files.put(key, JSON.stringify(state));
+    const readsAtCeiling = world.calls.filter((c) => c.url.startsWith("https://src.test/")).length;
+    report = await runAt(1, 1, { fetch: watched });
+    is("attempts count toward the object ceiling: refused files_objects_ceiling, nothing read", [has(report, "files_objects_ceiling"), world.calls.filter((c) => c.url.startsWith("https://src.test/")).length - readsAtCeiling], [true, 0]);
+  }
   fresh([{ store: S, roomBytes: R }]);
   setListing("blob", S, [{ key: `stores/${S}/same.bin`, etag: '"same1"', bytes: big(R, 3) }]);
   report = await runAt(0, 1, { fetch: watched });

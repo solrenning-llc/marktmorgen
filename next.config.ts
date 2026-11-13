@@ -183,8 +183,13 @@ const nextConfig: NextConfig = {
        * scripts without a nonce and it gets the static policy, never a nonce
        * one. The same address in another case (/Embed/...) is sent to the
        * lowercase one by proxy.ts (tests/security-headers-config.test.ts).
+       * A two-part address whose last part has an extension (/embed/x/y.html,
+       * in any case) is never the card either, as a card's product id has no
+       * dot, and the proxy's matcher skips any path ending in an extension, so
+       * its redirect never runs for it: the third rule gives it the same
+       * (tests/security-headers-embed-extension.test.ts, #4093 review).
        */
-      ...["/embed/:one", "/embed/:one/:two/:rest+"].map((source) => ({
+      ...["/embed/:one", "/embed/:one/:two/:rest+", "/embed/:one/:two(.*\\..*)"].map((source) => ({
         source,
         headers: [
           { key: "Content-Security-Policy", value: staticPolicy() },

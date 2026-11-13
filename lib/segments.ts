@@ -211,7 +211,9 @@ export async function buyerLedger(store: Store, count?: (units: number) => Promi
     stripe ? readInvoicePayments(store, 0, ALL_TIME_PAGES, until).catch(() => null) : Promise.resolve({ byInvoice: new Map<string, string[]>(), partial: false }),
   ]);
   const { sales } = paid;
-  const readPartial = paid.partial || renewals.partial || refunds.partial || disputes.partial || !paypalBack || paypalBack.partial;
+  // The invoice payments read only in part (more past the last page, or out of time) leave a refund of a payment
+  // not read unmatched: the reading is partial, never a whole count (#4396).
+  const readPartial = paid.partial || renewals.partial || refunds.partial || disputes.partial || !paypalBack || paypalBack.partial || Boolean(invoicePayments?.partial);
   // An invoice whose payment had to be looked up and was not found (the list unread, cut short, or a charge with no payment
   // intent) leaves its refunds unmatched: the reading is then partial, never "none refunded".
   let missed = false;

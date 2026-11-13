@@ -113,7 +113,11 @@ export type JoinAnswer = { v: number; choice: string; label: string; comment: st
 
 const LINK = /\b(?:https?:\/\/|www\.)\S+/gi;
 const EMAIL = /[^\s@]+@[^\s@]+\.[^\s@]+/g;
-/** A phone number, as lib/inbox-rules.ts forAi reads one: eight or more digits with spaces, dots, hyphens or brackets. */
+/**
+ * A phone number, as lib/inbox-rules.ts forAi reads one: eight or more digits with spaces, dots, hyphens or brackets.
+ * Wide on purpose (Claude 1 on #3652, LEVE): a long date or figure ("2026-11-11", "1 000 000") goes too, losing a few
+ * words a member typed rather than ever keeping a way to reach them.
+ */
 const PHONE = /\+?\(?\d[\d\s().-]{7,}\d/g;
 /**
  * A social handle: "@" and a name (an address is taken out above), also glued to punctuation such as "ig:@name" or

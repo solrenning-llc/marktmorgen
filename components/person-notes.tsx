@@ -11,6 +11,23 @@ function when(seconds: number): string {
   return new Date(seconds * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
+/** The route's answers given before anything is written: only these prove a change did not save. */
+const REFUSED_BEFORE_WRITING = new Set(["invalid", "store_full"]);
+
+/**
+ * What the notes box says when a change was not confirmed (Codex G on #3159).
+ * A lost response, a body that is not JSON or any answer that does not prove
+ * the change was refused before writing is an unknown outcome: the note may
+ * have been saved, so it never says "did not save", which would lead to the
+ * same note twice. `answer` is null when the response never arrived.
+ */
+export function personNoteFailureWords(answer: unknown): string {
+  const error = answer && typeof answer === "object" && !Array.isArray(answer) ? (answer as { error?: unknown }).error : undefined;
+  if (typeof error === "string" && REFUSED_BEFORE_WRITING.has(error)) return "That did not save. Try again in a moment.";
+  if (error === "unavailable") return "Your notes could not be loaded just now. Open this page again in a moment to see whether that saved.";
+  return "We could not confirm whether that saved. Open this page again to see whether it did before you try again.";
+}
+
 /**
  * Your team's notes about one buyer (lib/buyer-profile.ts): what they asked,
  * what was promised, what they like. Seen only by whoever may read orders.
@@ -28,15 +45,17 @@ export function PersonNotes({ person, initial }: { person: string; initial: Pers
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...body, person }),
       });
-      const answer = (await response.json().catch(() => ({}))) as { ok?: boolean; notes?: PersonNote[] };
+      const answer = (await response.json().catch(() => ({}))) as { ok?: boolean; notes?: PersonNote[]; error?: string };
       if (answer.ok && answer.notes) {
         setNotes(answer.notes);
         toast(done);
         return true;
       }
-      toast("That did not save. Try again in a moment.");
+      // Whether it saved is said only when the route proved it refused before writing.
+      toast(personNoteFailureWords(answer));
     } catch {
-      toast("That did not save. Check your connection and try again.");
+      // The request may have reached the server and saved: unknown, never "did not save".
+      toast(personNoteFailureWords(null));
     } finally {
       setBusy(false);
     }

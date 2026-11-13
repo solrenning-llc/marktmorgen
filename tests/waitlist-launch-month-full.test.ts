@@ -9,7 +9,7 @@ import { addProduct, claimHandle, ensureListId, ensureStatsId, storeForEmail, st
 import { readListing } from "@/lib/catalog";
 import { launch, runLaunches, setSoon, waitlistViews } from "@/lib/waitlist";
 import { allowanceFor } from "@/lib/store-allowance-rules";
-import { giveAllowance, takeAllowance } from "@/lib/store-allowance";
+import { allowanceUsedExact, giveAllowance, takeAllowance } from "@/lib/store-allowance";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -81,7 +81,9 @@ async function main(): Promise<void> {
   is("the send list outlives the wait for the month (Claude 2 on #4473)", Number((await redis.pipeline([["TTL", sendList]]))[0]) > 100 * 86_400, true);
 
   part("The month turns (its figure free again): the other is emailed, each once");
-  await giveAllowance(store, "email", figure);
+  /** The month turning, as far as the store's figure goes: what was used is given back, all of it, never more. */
+  const monthTurns = async (s: typeof store) => giveAllowance(s, "email", (await allowanceUsedExact(s, "email")) ?? 0);
+  await monthTurns(store);
   const second = await runLaunches(storeForHandle, readListing, Date.now() + 10_000);
   is("the other emailed; each once", [second, sentTo().sort()], [1, people.slice().sort()]);
   is("the launch is done", (await waitlistViews(store, [pid]))[pid].launch?.finished ? true : (await redis.pipeline([["SISMEMBER", JOBS, `${sid}|${pid}`]]))[0] === 0, true);
@@ -96,11 +98,11 @@ async function main(): Promise<void> {
   for (const [i, email] of crowd.entries()) await redis.pipeline([["HSET", `nl:wl:${sid}:${small.id}`, email, JSON.stringify({ at: 1, ok: 1, c: false, t: String(i % 10).repeat(48) })]]);
   is("launched for all of them", (await launch(shop, small, { note: "", address: ADDRESS })).total, crowd.length);
   // Nothing of this month used yet: its whole figure is free, and the batch would be larger than that.
-  await giveAllowance(shop, "email", figure);
+  await monthTurns(shop);
   const before = sentTo().length;
   await runLaunches(storeForHandle, readListing, Date.now() + 10_000);
   is("the month's whole figure goes out, never waiting for ever", sentTo().length - before, figure);
-  await giveAllowance(shop, "email", figure);
+  await monthTurns(shop);
   await runLaunches(storeForHandle, readListing, Date.now() + 10_000);
   const got = sentTo().filter((to) => to.startsWith("reader"));
   is("the rest go when the month turns; everyone once", [got.length, new Set(got).size], [crowd.length, crowd.length]);

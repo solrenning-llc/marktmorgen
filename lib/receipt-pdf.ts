@@ -147,6 +147,12 @@ export function receiptFrom(seller: Seller, reference: string, session: unknown,
   const intent = ownField(session, "payment_intent");
   const charge = field(intent, "latest_charge");
   if (!plainObject(intent) || ownField(intent, "status") !== "succeeded" || !plainObject(charge)) return refuse("unreadable");
+  // The charge is this payment's only when it names it (#4437): another payment's charge, even of the same amount,
+  // never gives this receipt its date, its refund or its "refunded".
+  const intentId = ownField(intent, "id");
+  const named = ownField(charge, "payment_intent");
+  const chargeIntent = typeof named === "string" ? named : plainObject(named) ? ownField(named, "id") : null;
+  if (typeof intentId !== "string" || !intentId || chargeIntent !== intentId) return refuse("unreadable");
   const chargeId = ownField(charge, "id");
   const charged = ownField(charge, "amount");
   const refunded = ownField(charge, "amount_refunded");

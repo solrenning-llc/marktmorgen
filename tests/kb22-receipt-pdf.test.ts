@@ -55,6 +55,8 @@ function paidSession(over: Record<string, unknown> = {}, charge: Record<string, 
       latest_charge: {
         id: "ch_1TestReceipt0001",
         object: "charge",
+        // The payment it belongs to, as Stripe names it on a charge (lib/receipt-pdf.ts checks it, #4437).
+        payment_intent: "pi_1TestReceipt0001",
         paid: true,
         status: "succeeded",
         amount: 5260,

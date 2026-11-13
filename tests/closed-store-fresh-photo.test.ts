@@ -37,8 +37,22 @@ let ownerOf = "";
 let releaseLost = false;
 // How many takings-out of a walk entry (WITHDRAW_ENTRY) answer what EVAL never says, from now.
 let withdrawUnknown = 0;
+// The record's fenced delete runs, and its answer is lost on the way back (Codex L on #3643).
+let deleteAckLost = false;
+// The entry's rewrite without `pending` lands, and its answer is lost on the way back (Codex P on #3643).
+let unpendAckLost = false;
 const realPipeline = redis.pipeline.bind(redis);
 redis.pipeline = async (commands: (string | number)[][]) => {
+  if (deleteAckLost && commands.length === 1 && commands[0][0] === "EVAL" && String(commands[0][1]).startsWith("-- marktmorgen:fenced-del:v1")) {
+    deleteAckLost = false;
+    await realPipeline(commands);
+    return [null];
+  }
+  if (unpendAckLost && commands.length === 1 && commands[0][0] === "HSET" && commands[0][1] === BATCH_KEY && !String(commands[0][3]).includes('"pending":true')) {
+    unpendAckLost = false;
+    await realPipeline(commands);
+    return [null];
+  }
   if (withdrawUnknown > 0 && commands.length === 1 && commands[0][0] === "EVAL" && String(commands[0][1]).startsWith("-- marktmorgen:closing-withdraw-entry:v1")) {
     withdrawUnknown -= 1;
     return [null];
@@ -373,6 +387,62 @@ async function main(): Promise<void> {
     is("and it left the line", redis.run(["ZSCORE", DUE_KEY, email]), null);
     const given = String(redis.keys().find((key) => key.startsWith("nl:store:id:")) ?? "");
     is("the id it was given is released too, never left naming it", given, "");
+  }
+
+  part("Codex L on #3643: the record's delete lands and its answer is lost: the entry stays and the walk erases the store's photo");
+  redis.clear();
+  {
+    const email = "lostdelete@example.com";
+    const store = await makeStore(email, "lostdelete");
+    const photo = await putPhoto(email);
+    deleteAckLost = true;
+    const T = Date.now();
+    await markDue(email, T - 1000);
+    await erase(T);
+    is("the delete was answered with nothing", deleteAckLost, false);
+    is("the record is gone", await storeForEmail(email), null);
+    for (let n = 1; n <= 3 && redis.run(["HGET", BATCH_KEY, email]) !== null; n++) await erase(T + n * (WALK_GAP_MS + 1));
+    is("no store photo is left", photoKeys(), []);
+    is("nothing named by its ids is left", leftNamedBy([store.sid, store.statsId ?? "-", photo]), []);
+    is("and its entry is finished, out of the batch", redis.run(["HGET", BATCH_KEY, email]), null);
+  }
+
+  part("Codex P on #3643: the entry's rewrite without `pending` lands and its answer is lost: no walk while the record is there");
+  redis.clear();
+  {
+    const email = "lostunpend@example.com";
+    const store = await makeStore(email, "lostunpend");
+    redis.run(["SET", `nl:zz:${store.statsId}:data`, "p"]);
+    unpendAckLost = true;
+    const T = Date.now();
+    await markDue(email, T - 1000);
+    const first = await erase(T);
+    is("the rewrite was answered with nothing", unpendAckLost, false);
+    is("the record is still there", (await storeForEmail(email))?.sid ?? null, store.sid);
+    is("no walk starts and nothing is finished", [first.started, first.finished], [false, 0]);
+    is("its data is not erased while its record is there", redis.run(["GET", `nl:zz:${store.statsId}:data`]), "p");
+    const next = await erase(T + WALK_GAP_MS + 1);
+    is("the next walk prepares it and finishes", [next.stores, next.finished], [1, 1]);
+    is("the record is gone then, and its data", [await storeForEmail(email), redis.run(["GET", `nl:zz:${store.statsId}:data`])], [null, null]);
+  }
+
+  part("Claude 2 cloud L on #3643: a confirmed entry whose record is still there is never walked, whatever the deadline of the run");
+  redis.clear();
+  {
+    const email = "leftentry@example.com";
+    const store = await makeStore(email, "leftentry");
+    redis.run(["SET", `nl:zz:${store.statsId}:data`, "z"]);
+    const now = Date.now();
+    // As a run leaves it when its record stayed and the entry could not be taken out: confirmed, with its record there.
+    const entry = { ref: email, email, sid: store.sid, statsId: store.statsId, name: store.name, handle: store.handle, handles: [store.handle], marks: [store.sid, store.statsId].sort(), endedAt: now, at: now };
+    redis.run(["HSET", BATCH_KEY, email, JSON.stringify(entry)]);
+    await markDue(email, now + 10 * WALK_GAP_MS);
+    // A run whose deadline is already past before it reaches any due store, then a run with all its time.
+    await eraseClosed(Date.now() - 1, async () => {}, now);
+    const after = await erase(now + WALK_GAP_MS + 1);
+    is("its record is still there", (await storeForEmail(email))?.sid ?? null, store.sid);
+    is("its data is not erased", redis.run(["GET", `nl:zz:${store.statsId}:data`]), "z");
+    is("nothing of it is finished", after.finished, 0);
   }
 
   part("Claude 6's P4 on #3643: an account moved while an extra store's erasure runs keeps the erased store's id at neither address");

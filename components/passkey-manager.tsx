@@ -1,5 +1,6 @@
 "use client";
 
+import { SESSION_ENDED } from "@/lib/studio-messages";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { type PublicKeyCredentialCreationOptionsJSON, browserSupportsWebAuthn, startRegistration } from "@simplewebauthn/browser";
@@ -16,7 +17,7 @@ const MESSAGES: Record<string, string> = {
   taken: "That passkey is already on an account here.",
   cancelled: "Nothing was added: the passkey prompt was closed.",
   unknown: "That passkey is not on your account anymore. Reload the page.",
-  signed_out: "Your session ended. Log in again.",
+  signed_out: SESSION_ENDED,
   server_error: "Something went wrong on our side. Try again in a moment.",
   rate_limited: "That is a lot of passkey changes in an hour. Try again later.",
   busy: "Your passkeys are being changed by another request right now. Try again in a moment.",

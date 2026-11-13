@@ -4,13 +4,13 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "@/components/toast";
 import { LEAVE_NAMES, LEAVE_REASONS, isOwnReasonId, type LeaveReason, type LeaveSetting, MAX_OWN_REASONS, MAX_OWN_REASON_LENGTH } from "@/lib/leave-rules";
-import { STUDIO_MESSAGES } from "@/lib/studio-messages";
+import { STUDIO_MESSAGES, SESSION_ENDED } from "@/lib/studio-messages";
 
 const MESSAGES: Record<string, string> = {
   ...STUDIO_MESSAGES,
   leaving: `Each reason of your own needs words, up to ${MAX_OWN_REASON_LENGTH} characters, and there can be ${MAX_OWN_REASONS} at most.`,
   none: "This account has no store yet.",
-  signed_out: "Your session ended. Log in again.",
+  signed_out: SESSION_ENDED,
   server_error: "We could not confirm these cancellation settings. Reload this page to check before trying again.",
 };
 

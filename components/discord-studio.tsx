@@ -1,5 +1,6 @@
 "use client";
 
+import { SESSION_ENDED } from "@/lib/studio-messages";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "@/components/toast";
@@ -16,7 +17,7 @@ const ERRORS: Record<string, string> = {
   unavailable: "We could not read your Discord connection just now. Nothing was changed; try again in a few minutes.",
   not_finished: "The bot left your server, but we could not finish disconnecting just now. Try again in a few minutes.",
   name: "Type a name for the role.",
-  signed_out: "Your session ended. Log in again.",
+  signed_out: SESSION_ENDED,
 };
 
 const errorText = (code: string | undefined) => ERRORS[code ?? ""] ?? "Something went wrong on our side. Nothing was changed; try again in a moment.";

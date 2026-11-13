@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "@/components/toast";
 import { HELD_DAYS, MAX_FIRST, MAX_HELD, MAX_WHY, TOLD_DAYS } from "@/lib/community-approval-rules";
-import { STUDIO_MESSAGES } from "@/lib/studio-messages";
+import { STUDIO_MESSAGES, SESSION_ENDED } from "@/lib/studio-messages";
 
 /** One post or comment waiting for approval, as the studio shows it. */
 export type HeldRow = {
@@ -36,7 +36,7 @@ const MESSAGES: Record<string, string> = {
   held_post_gone: "The post it answered was deleted, so it was not published. Its author sees that in the community.",
   store_full: "Your store has reached the most it can hold. Remove something first.",
   unknown_reply: "We could not confirm that, so nothing was published. Try again in a moment.",
-  signed_out: "Your session ended. Log in again.",
+  signed_out: SESSION_ENDED,
   invalid: "That could not be read. Nothing was changed.",
   server_error: "Something went wrong on our side. Try again in a moment.",
 };

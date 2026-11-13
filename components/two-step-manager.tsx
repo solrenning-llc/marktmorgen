@@ -1,5 +1,6 @@
 "use client";
 
+import { SESSION_ENDED } from "@/lib/studio-messages";
 import { useMemo, useState } from "react";
 import { EmailInput } from "@/components/email-input";
 import Link from "next/link";
@@ -19,7 +20,7 @@ const MESSAGES: Record<string, string> = {
   second_step: "Your account already has a passkey, so turning on an authenticator app needs a login with it. Log in again with your passkey, then come back here.",
   rate_limited: "That is a lot of changes in an hour. Try again later.",
   unavailable: "Two-step login is not available on this deployment yet.",
-  signed_out: "Your session ended. Log in again.",
+  signed_out: SESSION_ENDED,
   server_error: "Something went wrong on our side. Try again in a moment.",
   backup: "Type the email address of a second inbox you can open, to get back in if you lose your phone.",
   same: "The recovery address has to be another inbox than the one you log in with: that is what makes it a way back in.",

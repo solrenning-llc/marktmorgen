@@ -1,5 +1,6 @@
 "use client";
 
+import { SESSION_ENDED } from "@/lib/studio-messages";
 import { useState } from "react";
 import { MAKER_FORMER, MAKER_UNRECORDED, type PausePreview } from "@/lib/api-key-rules";
 
@@ -9,7 +10,7 @@ export type OwnerStep = "live" | "other_session" | "none";
 const ERRORS: Record<string, string> = {
   owner_no_step: "Set up your own second step first: add a passkey or turn on an authenticator app under Two-step login in the studio, then log in again with it.",
   owner_step_session: "You logged in this time without your passkey or app code. Log in again with one of them, then come back here.",
-  signed_out: "Your session ended. Log in again.",
+  signed_out: SESSION_ENDED,
 };
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;

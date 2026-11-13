@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "@/components/toast";
 import { MAX_WELCOME_ADDRESS, WELCOME_HOURS, WELCOME_PERCENTS, type WelcomeOffer } from "@/lib/welcome-offer";
-import { STUDIO_MESSAGES } from "@/lib/studio-messages";
+import { STUDIO_MESSAGES, SESSION_ENDED } from "@/lib/studio-messages";
 
 const MESSAGES: Record<string, string> = {
   ...STUDIO_MESSAGES,
@@ -15,7 +15,7 @@ const MESSAGES: Record<string, string> = {
   stripe: "Connect your Stripe account first.",
   stripe_refused: "Stripe would not make the discount on your account, so nothing was changed. Try again in a moment.",
   none: "This account has no store yet.",
-  signed_out: "Your session ended. Log in again.",
+  signed_out: SESSION_ENDED,
   server_error: "Something went wrong on our side. Nothing was changed; try again in a moment.",
 };
 

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "@/components/toast";
-import { STUDIO_MESSAGES } from "@/lib/studio-messages";
+import { STUDIO_MESSAGES, SESSION_ENDED } from "@/lib/studio-messages";
 import { SITE_URL } from "@/lib/site-url";
 import { NewTab } from "@/components/new-tab";
 
@@ -14,7 +14,7 @@ const MESSAGES: Record<string, string> = {
   days: "Pick how long the link works.",
   full: "Five links at most work at once. Take one back first.",
   none: "This account has no store yet.",
-  signed_out: "Your session ended. Log in again.",
+  signed_out: SESSION_ENDED,
   server_error: "We could not confirm this link change. Reload this page to check before trying again.",
 };
 

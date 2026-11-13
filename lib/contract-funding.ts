@@ -92,13 +92,20 @@ redis.call('HSET',KEYS[1],'pending:'..ARGV[3],ARGV[9])
 redis.call('HSET',KEYS[1],'grant:'..ARGV[9],ARGV[10]..(sourceGrant and '|'..sourceGrant or ''))
 return 1
 `;
-export type ContractGrant={sourceSubscriptionId:string|null;action:'checkout'|'switch'|'restart';id:string;reviewId:string;statsId:string;key:ContractKey;reservedCents:number;submitUntilSeconds:number;checkoutExpiresAtSeconds:number;activationUntilSeconds:number;liabilitiesThrough:string};
+/** A checkout has no source subscription; a switch or restart always names the one it replaces (reserveContractFunding). */
+type ContractGrantSource={action:'checkout';sourceSubscriptionId:null}|{action:'switch';sourceSubscriptionId:string}|{action:'restart';sourceSubscriptionId:string};
+/** A restart's grant: the only kind a restart intent carries (claimRestartIntent refuses any other). */
+export type RestartContractGrant=ContractGrant&{action:'restart'};
+export type ContractGrant=ContractGrantSource&{id:string;reviewId:string;statsId:string;key:ContractKey;reservedCents:number;submitUntilSeconds:number;checkoutExpiresAtSeconds:number;activationUntilSeconds:number;liabilitiesThrough:string};
 /** Single-use, full-cost grant. Failure or lost acknowledgement never frees
  * money, capacity or the store's pending lock. No initialization or expiry. */
 export async function reserveContractFunding(statsId:string,tier:Tier,cycle:Cycle,action:'checkout'|'switch'|'restart',policy:ContractFundingPolicy|null=CURRENT_CONTRACT_FUNDING_POLICY,context:ContractFundingContext={termsSnapshot:CURRENT_PRICE_AND_RIGHTS_SNAPSHOT,review:CURRENT_COMMERCIAL_MARGIN_REVIEW},nonce='ctr_'+randomUUID(),sourceSubscriptionId:string|null=null):Promise<ContractGrant|null>{
  if(typeof statsId!=='string'||!/^[A-Za-z0-9_-]{1,128}$/.test(statsId)||!['checkout','switch','restart'].includes(action)||typeof nonce!=='string'||!/^ctr_[A-Za-z0-9_-]{1,80}$/.test(nonce)||typeof tier!=='string'||typeof cycle!=='string'||!isRedisConfigured())return null;
  if(action==='restart'&&(!Boolean(CONTRACT_ADMISSION_COVERAGE.pauseRestart)||cycle!=='month'))return null;
- if((action==='switch'||action==='restart')?(typeof sourceSubscriptionId!=='string'||!/^sub_[A-Za-z0-9]{6,64}$/.test(sourceSubscriptionId)):sourceSubscriptionId!==null)return null;
+ const source:ContractGrantSource|null=action==='checkout'?(sourceSubscriptionId===null?{sourceSubscriptionId,action}:null):
+  typeof sourceSubscriptionId!=='string'||!/^sub_[A-Za-z0-9]{6,64}$/.test(sourceSubscriptionId)?null:
+  action==='switch'?{sourceSubscriptionId,action}:{sourceSubscriptionId,action};
+ if(!source)return null;
  const key=(tier+'_'+cycle) as ContractKey;
  if(!customerTaxContractContextSupported(context,policy))return null;
  const encodedContext=canonicalFinancialSnapshot(context);
@@ -117,7 +124,7 @@ export async function reserveContractFunding(statsId:string,tier:Tier,cycle:Cycl
   const current=contractFundingConfiguration(policy,context,new Date()),ready=commercialMarginReady(context.review);
   const checkedAt=Date.now();
   const acknowledged=current!==null&&current.binding===config.binding&&ready&&checkedAt>=reservedAt.getTime()&&checkedAt<=config.admissionsUntilMs&&new Date(checkedAt).toISOString().slice(0,7)===context.review?.fundedExposure?.month&&ack!==null&&ack.value===1&&checkedAt<=submitUntilSeconds*1000;
-  return acknowledged?{sourceSubscriptionId,action,id:nonce,reviewId:config.reviewId,statsId,key,reservedCents:charge,submitUntilSeconds,checkoutExpiresAtSeconds,activationUntilSeconds,liabilitiesThrough:new Date(config.liabilitiesThroughMs).toISOString()}:null;
+  return acknowledged?{...source,id:nonce,reviewId:config.reviewId,statsId,key,reservedCents:charge,submitUntilSeconds,checkoutExpiresAtSeconds,activationUntilSeconds,liabilitiesThrough:new Date(config.liabilitiesThroughMs).toISOString()}:null;
  }catch{return null;}
 }
 
@@ -402,7 +409,7 @@ export type RestartIntentInput={
 };
 
 export type OwnedRestartIntent=Readonly<{
- claim:string;grant:Readonly<ContractGrant>;ref:string;handle:string;paused:string;claimedAtSeconds:number;
+ claim:string;grant:Readonly<RestartContractGrant>;ref:string;handle:string;paused:string;claimedAtSeconds:number;
  source:Readonly<{binding:string;receipt:string;restartReceipt:string;reservedCents:number;carriedCents:number;annual:number}>;
 }>;
 /** Pure wire validation, not submission permission. Only claimRestartIntent's
@@ -422,7 +429,8 @@ export function ownedRestartIntentFromAcknowledgement(
   if(!Array.isArray(ack)||ack.length!==2||ack[0]!==1||typeof ack[1]!=='string'||Buffer.byteLength(ack[1])>CONTRACT_FUNDING_RULES.restartIntent.maxIntentBytes)return null;
   const owned=JSON.parse(ack[1]) as Record<string,unknown>;
   if(!owned||typeof owned!=='object'||Array.isArray(owned))return null;
-  const {grant,ref,handle,paused,claim,sourceGrantId}=input;
+  // candidate is input.grant itself, already narrowed to a restart's grant by the check above.
+  const grant=candidate,{ref,handle,paused,claim,sourceGrantId}=input;
   const expected={version:1,grant:grant.id,review:grant.reviewId,statsId:grant.statsId,sourceSubscription:grant.sourceSubscriptionId,sourceGrant:sourceGrantId,ref,handle,paused,claim,created:now,deadline:grant.submitUntilSeconds};
   const fields=[...Object.keys(expected),'sourceBinding','sourceReceipt','restartReceipt','reservedCents','carriedCents','annual'].sort();
   if(JSON.stringify(Object.keys(owned).sort())!==JSON.stringify(fields)||Object.entries(expected).some(([key,value])=>owned[key]!==value))return null;
@@ -466,7 +474,7 @@ export async function claimRestartIntent(
  const intent=JSON.stringify({version:1,grant:grant.id,review:grant.reviewId,statsId:grant.statsId,sourceSubscription:grant.sourceSubscriptionId,sourceGrant:sourceGrantId,ref,handle,paused,claim,created:now,deadline:grant.submitUntilSeconds});
  if(Buffer.byteLength(intent)>CONTRACT_FUNDING_RULES.restartIntent.maxIntentBytes)return null;
  try{
-  const result=await redisPipeline([['EVAL',CLAIM_RESTART_INTENT,4,'nl:contract-reserve:v1','nl:pause:'+ref,'nl:pause:due','nl:pause:last:'+ref,contractFundingBinding(config),config.reviewId,grant.statsId,grant.key,grant.id,grant.sourceSubscriptionId!,now,grant.reservedCents,config.cashLimitCents,config.carryForwardCents,CONTRACT_FUNDING_RULES.submissionSeconds,ref,paused,claim,handle,intent]]);
+  const result=await redisPipeline([['EVAL',CLAIM_RESTART_INTENT,4,'nl:contract-reserve:v1','nl:pause:'+ref,'nl:pause:due','nl:pause:last:'+ref,contractFundingBinding(config),config.reviewId,grant.statsId,grant.key,grant.id,grant.sourceSubscriptionId,now,grant.reservedCents,config.cashLimitCents,config.carryForwardCents,CONTRACT_FUNDING_RULES.submissionSeconds,ref,paused,claim,handle,intent]]);
   const ack=singleOwnContractAcknowledgement(result);
   const current=contractFundingConfiguration(policy,context,new Date()),checked=Date.now();
   if(current===null||current.binding!==config.binding||!commercialMarginReady(context.review)||checked<before.getTime()||checked>grant.submitUntilSeconds*1000||ack===null)return null;

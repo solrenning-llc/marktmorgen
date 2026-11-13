@@ -305,7 +305,7 @@ export async function publishRestartStore(
  let paused:{customer?:unknown};try{paused=JSON.parse(intent.paused);}catch{return null;}
  if(typeof paused.customer!=="string")return null;
  const tier=intent.grant.key.split("_")[0] as Tier;
- const goal:RestartPublicationGoal={handle:intent.handle,statsId:intent.grant.statsId,sourceSubscriptionId:intent.grant.sourceSubscriptionId!,
+ const goal:RestartPublicationGoal={handle:intent.handle,statsId:intent.grant.statsId,sourceSubscriptionId:intent.grant.sourceSubscriptionId,
   customerId:paused.customer,tier,subscriptionId,periodStartSeconds,periodEndSeconds,renews,shared};
  return withRestartPublicationRecord<PublishedRestart|null>(intent.ref,goal,async record=>{
   const fresh=prepareRestartActivation(prepared.input,prepared.policy,prepared.context);

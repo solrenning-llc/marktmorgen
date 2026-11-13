@@ -48,7 +48,7 @@ import { STRIPE_LIST_VERSION, StripeListUnreadable, hasOwnField, ownField, plain
 
 /** Internal billing calls must keep their route-issued cash grant bound to the
  * published offer. This does not create or release a funding reservation. */
-function assertFunding(funding:ContractGrant|undefined,tier:Tier,cycle:Cycle,action:ContractGrant['action'],statsId?:string,subscriptionId?:string):void {
+function assertFunding(funding:ContractGrant|undefined,tier:Tier,cycle:Cycle,action:'checkout'|'switch',statsId?:string,subscriptionId?:string):void {
  if(!funding)return;
  const now=Math.floor(Date.now()/1000);
  if(funding.action!==action||(action==='switch'?funding.sourceSubscriptionId!==subscriptionId:funding.sourceSubscriptionId!==null)||funding.key!==tier+'_'+cycle||!/^ctr_[A-Za-z0-9_-]{1,80}$/.test(funding.id)||!Number.isSafeInteger(funding.reservedCents)||funding.reservedCents<PUBLISHED_PLAN_PRICES[tier][cycle]||PLAN_PRICES[tier][cycle]!==PUBLISHED_PLAN_PRICES[tier][cycle]||!Number.isSafeInteger(funding.submitUntilSeconds)||(now<funding.submitUntilSeconds-CONTRACT_FUNDING_RULES.submissionSeconds||now>funding.submitUntilSeconds)||!Number.isSafeInteger(funding.checkoutExpiresAtSeconds)||funding.checkoutExpiresAtSeconds<now+1800||statsId!==undefined&&funding.statsId!==statsId)throw new Error('Funding grant does not cover this published plan or activation window');
@@ -971,7 +971,7 @@ export async function restartPlan(input: {
     const ownedCustomer=paused.customer as string,ownedTier=paused.tier as Tier;
     // Only the first acknowledged owner may read its exact original subscription.
     // No search/list, cancellation mutation or retry can infer that it stopped.
-    const original = await onPlatform("GET", `/subscriptions/${encodeURIComponent(intent.grant.sourceSubscriptionId!)}`);
+    const original = await onPlatform("GET", `/subscriptions/${encodeURIComponent(intent.grant.sourceSubscriptionId)}`);
     observeStoppedRestartSource(intent, original);
     // A bounded read of an existing published price cannot create products or
     // prices. Empty/ambiguous/partial pages are unknown, never inline fallback.

@@ -52,7 +52,7 @@ const ALLOWANCE_TAKE_INVENTORY: Record<string, Entry> = {
   "lib/broadcasts.ts#readNarrowing": { state: "gated", calls: 1, note: "Refused, the broadcast waits and is read again later, as when its window is unknown." },
   "lib/broadcasts.ts#countTest": { state: "gated", calls: 1, note: "Refused, the test is decided without its sales, as when they cannot be counted." },
   "lib/buyer-actions.ts#takeBuyerAction": { state: "gated", calls: 2 },
-  "lib/cart-link-products.ts#cartLinkProducts": { state: "settles", calls: 1, after: "lib/studio-route.ts#countStudio" },
+  "lib/cart-link-products.ts#cartLinkProducts": { state: "gated", calls: 1, note: "Gated before its countStudio reading, which it then settles." },
   "lib/dispute-preorder-review.ts#readRetainedPreorderReview": { state: "gated", calls: 1 },
   "lib/dispute-purchase-review.ts#readDisputePurchaseReview": { state: "gated", calls: 2 },
   "lib/email.ts#takeMeteredAllowance": { state: "gated-by-callers", calls: 1, guard: "meterCohortReady" },
@@ -62,8 +62,8 @@ const ALLOWANCE_TAKE_INVENTORY: Record<string, Entry> = {
   "lib/metered-limits.ts#withinServiceWhy": { state: "gated", calls: 1, note: "Removals skip it at their callers (host-calendar removing, email-sync disconnect)." },
   "lib/person-erasure.ts#erasePerson": { state: "kept-right", calls: 2, why: "Erasing a person is their right and the store's legal duty; never refused because a period's cash proof is missing." },
   "lib/store-copy.ts#charge": { state: "gated", calls: 1 },
-  "lib/studio-route.ts#countStudio": { state: "gated", calls: 1, note: "After the essential needs (billing, delete, export, member), which take their own daily figure and stay open." },
-  "lib/studio-route.ts#holdStudio": { state: "gated", calls: 2 },
+  "lib/studio-route.ts#countStudio": { state: "pending", calls: 1, why: "The generic studio door also serves removal and disconnection: gating it here refused Discord role removal and disconnect (tests/discord.test.ts, 13 November 2026). Each caller that starts new work needs the gate itself, as cart-link now does." },
+  "lib/studio-route.ts#holdStudio": { state: "pending", calls: 2, why: "Held for list downloads (the store's own data taken away) and the affiliates page; gating here would refuse a download, so each new-work caller needs its own gate." },
   "lib/webhooks.ts#attempt": { state: "gated-in-primitive", calls: 1, kind: "webhook" },
   "lib/webhooks.ts#resendDelivery": { state: "gated", calls: 1 },
   "lib/webhooks.ts#sendTest": { state: "gated", calls: 1 },
@@ -200,7 +200,7 @@ is("no problem between sources, inventory and key", problems, []);
 is("the scan finds every take (29 on 13 November 2026)", allowanceSites(sources).length, Object.values(ALLOWANCE_TAKE_INVENTORY).reduce((n, e) => n + e.calls, 0));
 const pending = Object.values(ALLOWANCE_TAKE_INVENTORY).filter((e) => e.state === "pending").length;
 const pendingCalls = Object.values(ALLOWANCE_TAKE_INVENTORY).filter((e) => e.state === "pending").reduce((n, e) => n + e.calls, 0);
-is("pending takes, down from 11 (part 1) as part 1b gates them", pendingCalls, 0);
+is("pending takes, down from 11 (part 1): the 3 left are the generic studio door", pendingCalls, 3);
 is("pending takes keep resourceAllocations false", pending > 0 && CONTRACT_ADMISSION_COVERAGE.resourceAllocations, false);
 is("part 2 exists, so no primitive outside the figures is left uninventoried", readFileSync(join(root, PART_2), "utf8").includes("PRIMITIVE_INVENTORY"), true);
 is("the other two core keys are untouched", [CONTRACT_ADMISSION_COVERAGE.renewals, CONTRACT_ADMISSION_COVERAGE.settlementAndReserveReconciliation], [false, false]);

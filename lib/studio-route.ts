@@ -42,8 +42,6 @@ import { UnknownReplyError } from "@/lib/redis-reply";
 import { essentialLimitState, essentialTakeBelow, type LimitState } from "@/lib/request-guard";
 import { forceAllowance, giveAllowance, takeAllowance } from "@/lib/store-allowance";
 import { refreshPeriod } from "@/lib/billing-sync";
-import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
-import { allowanceFor } from "@/lib/store-allowance-rules";
 import { ESSENTIAL_NEEDS, ESSENTIAL_PER_DAY, STUDIO_PAGE_UNITS } from "@/lib/studio-allowance-rules";
 
 /** The store last chosen in the studio's switcher: only a preference. */
@@ -246,9 +244,6 @@ export function takeEssentialBelow(store: Pick<Store, "sid" | "handle">, below: 
   return essentialTakeBelow("studio-essential", store.sid || store.handle, Math.min(below, ESSENTIAL_PER_DAY), 86_400);
 }
 
-/** Said when a funded period's paid cohort cannot be proved: the same words as a count that cannot be made. */
-const COHORT_UNKNOWN = "This can't be counted right now. Try again in a minute.";
-
 /**
  * One studio request for a store, taken from its window: `units` of them for
  * a page drawn. What the owner needs to leave or pay is taken from a small
@@ -262,9 +257,6 @@ export async function countStudio(store: Store, need: Need | null, units = 1): P
   }
   // A paying store whose billing month is not known has it read from Stripe first (lib/billing-sync.ts).
   const current = await refreshPeriod(store);
-  // A funded period's studio work needs its paid cohort first (resourceAllocations,
-  // tests/contract-resource-allocation-inventory.test.ts); the essential needs above stay open.
-  if (current.period?.funded === true && !(await reservePaidResourceWindow(current))) return { ok: false, reason: "unknown", message: COHORT_UNKNOWN };
   const taken = await takeAllowance(current, "studio", units);
   if (!taken.ok) return { ok: false, reason: taken.reason, message: taken.message, left: taken.left, reset: taken.reset };
   return current === store ? { ok: true } : { ok: true, store: current };
@@ -282,7 +274,6 @@ export async function holdStudio(
 ): Promise<{ ok: true; give: (n: number) => Promise<void>; force: (n: number) => Promise<void> } | { ok: false; message: string; reason: "used" | "unknown" | "pool"; limit: number; left?: number; reset?: string }> {
   const now = Date.now();
   const current = await refreshPeriod(store);
-  if (current.period?.funded === true && !(await reservePaidResourceWindow(current))) return { ok: false, message: COHORT_UNKNOWN, reason: "unknown", limit: allowanceFor(current, "studio", now / 1000) };
   const taken = await takeAllowance(current, "studio", units, now);
   // Why it was refused, and how many were left when that was read, for a caller that words it for itself (lib/list-download.ts).
   if (!taken.ok) return { ok: false, message: taken.message, reason: taken.reason, limit: taken.limit, left: taken.left, reset: taken.reset };

@@ -22,6 +22,8 @@ type PrimitiveEntry =
   | { state: "self-gated"; via: string }
   /** The primitive's body calls `via` ("file#function"), whose own body holds the gate. */
   | { state: "via-gated"; via: string }
+  /** A right that is never refused for the cohort; its cost stays inside the plan's own figure. Needs the reviewer's acceptance. */
+  | { state: "kept-right"; why: string }
   /** Each call site, by file and top-level function. */
   | { state: "sites"; sites: Record<string, SiteEntry> };
 
@@ -33,7 +35,7 @@ const PRIMITIVE_INVENTORY: Record<string, PrimitiveEntry> = {
   "lib/mail.ts#takeFromMonthExact": { state: "self-gated", via: "monthToTake" },
   "lib/traffic.ts#takePublicRequest": { state: "self-gated", via: "takePublic" },
   "lib/traffic.ts#holdPublicRequests": { state: "self-gated", via: "takePublic" },
-  "lib/list-download.ts#holdListDownload": { state: "via-gated", via: "lib/studio-route.ts#holdStudio" },
+  "lib/list-download.ts#holdListDownload": { state: "kept-right", why: "Downloading the store's lists is taking its own data away, never refused for the cohort (lib/studio-route.ts, studioAccess); its cost stays in the studio figure. Needs the reviewer's acceptance." },
   "lib/ai-spend.ts#reserveAiSpend": { state: "sites", sites: { "lib/ai.ts#askModel": { state: "gated", calls: 1 } } },
   "lib/imports.ts#reserveMoved": { state: "sites", sites: {
     "lib/api-write.ts#giveAccess": { state: "gated", calls: 1 },
@@ -109,6 +111,7 @@ function audit(sources: Map<string, string>, inventory: Record<string, Primitive
       if (entry.via !== name && !own.includes(`${entry.via}(`)) problems.push(`${key}: does not call ${entry.via}`);
       if (via === null || !via.includes(GATE)) problems.push(`${key}: ${entry.via} does not hold ${GATE}`);
     }
+    if (entry.state === "kept-right" && !entry.why.trim()) problems.push(`${key}: needs its reason`);
     if (entry.state === "via-gated") {
       const [viaFile, viaName] = entry.via.split("#");
       const via = body(sources, viaFile, viaName);

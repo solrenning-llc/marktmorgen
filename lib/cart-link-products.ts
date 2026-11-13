@@ -27,6 +27,7 @@ import type { Store } from "@/lib/store";
 import { dataKey } from "@/lib/store-data";
 import { forceAllowance } from "@/lib/store-allowance";
 import { countStudio } from "@/lib/studio-route";
+import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 
 /** The most products the builder lists, in the store's order: the first page of the store, which a cart of MAX_CART is chosen from. */
 export const CART_LINK_CHOICES = STORE_PAGE_SIZE;
@@ -84,6 +85,9 @@ export async function cartLinkProducts(store: Store): Promise<{ id: string; titl
     let taken = 0;
     let counted: Store = store;
     if (toRead.length) {
+      // A funded period's reading needs its paid cohort first (resourceAllocations): the generic studio
+      // count below also serves removals, so it is not gated there; without the cohort nothing is listed.
+      if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return [];
       // The data room's weights, raised to what each listing record weighs now (Codex G on #1928: a record that grew
       // after it was weighed is paid at its new size before it is read); one that cannot be measured at its ceiling.
       const weights = await weigh(store, toRead);

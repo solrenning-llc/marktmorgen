@@ -15,8 +15,8 @@ export type ContractKey=typeof CONTRACT_KEYS[number];
  * (docs/opening-lifecycle-requirements.md), so each is built, never switched off:
  * - resourceAllocations: the published allowances are the plan. Every take
  *   from the monthly figures is inventoried in
- *   tests/contract-resource-allocation-inventory.test.ts (none pending since
- *   part 1b), and the cost primitives outside the figures in
+ *   tests/contract-resource-allocation-inventory.test.ts (3 pending after
+ *   part 1b: the generic studio door), and the cost primitives outside the figures in
  *   tests/contract-resource-primitive-inventory.test.ts (part 2, calls still
  *   pending); either fails while this is true with a call still pending.
  * - renewals: ordinary renewal is the subscription; a funded period gets no

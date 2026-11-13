@@ -10,7 +10,8 @@
  *     who are not in yet (the same words the community's own door shows);
  *   - the ways in: the products that open it and are on sale now
  *     (canSellProduct: published, priced, deliverable, on a store that can
- *     sell), each with its published price and how many of the community's
+ *     sell), or free ones the store can give now (lib/free.ts canGiveProduct),
+ *     each with its published price ("Free") and how many of the community's
  *     spaces it opens, linked to the product's own page, which is the
  *     checkout's door. A draft or anything that cannot be bought is left out;
  *   - with the creator's second choice, two counts: how many people have
@@ -34,6 +35,7 @@ import type { Store } from "@/lib/store";
 import { isFree } from "@/lib/store";
 import { type Listing, readListings } from "@/lib/catalog";
 import { canSellProduct, fromPriceCents } from "@/lib/store-checkout";
+import { canGiveProduct } from "@/lib/free";
 import { type CommunityConfig, readConfig, readConfigExact } from "@/lib/community";
 import { seesSpace } from "@/lib/community-gate";
 import { isResting, takePublicRequest } from "@/lib/traffic";
@@ -120,7 +122,9 @@ export async function aboutPage(store: Store, now = Date.now()): Promise<AboutAn
   if (config.access.length && !(await takePublicRequest(store, "public", now, listingUnits(config.access.length)))) return { state: "resting" };
   const products = config.access.length ? await readListings(store, config.access) : [];
   const ways = products
-    .filter((p) => canSellProduct(store, p))
+    // A product on sale now, or a free one the store can give now (Claude 1 cloud's MEDIUM on #3016): canSellProduct
+    // is false for anything free, and a free product does let people in (lib/community-access.ts, gotFree).
+    .filter((p) => canSellProduct(store, p) || canGiveProduct(store, p))
     .map((p) => ({
       id: p.id,
       title: p.title,

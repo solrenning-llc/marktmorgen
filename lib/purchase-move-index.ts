@@ -313,11 +313,12 @@ export async function forgetMovedPerson(store: Store, raw: string): Promise<numb
   // there. A try stopped in the first step keeps both pointers, so the next try finds every line again.
   const others: (string | number)[][] = [];
   const own: (string | number)[][] = [];
-  const olds = new Set<string>();
+  // The erased address's own room is given back even when no line names it: a move from it that stopped after taking
+  // its room and before writing its lines leaves the room alone (Claude 1 on #3625).
+  const olds = new Set<string>([address]);
   if (mark) {
     others.push(["HDEL", intoKey(sid, mark.to), address]);
     own.push(["DEL", movedKey(sid, address)]);
-    olds.add(address);
   }
   if (lines.size) {
     for (const old of lines.keys()) {
@@ -326,7 +327,6 @@ export async function forgetMovedPerson(store: Store, raw: string): Promise<numb
     }
     own.push(["DEL", intoKey(sid, address)]);
   }
-  if (!own.length) return 0;
   for (const commands of [others, own]) {
     if (!commands.length) continue;
     const done = repliesFor(await redisPipeline(commands), commands.length);

@@ -69,6 +69,10 @@ export const moveWords = {
       title: "These purchases can't be moved here",
       body: "One of these addresses has already moved its purchases or holds purchases moved from other addresses, so this move can't be made. Nothing moved. If you need help, write to the store.",
     },
+    full: {
+      title: "Both addresses are confirmed, but this store has no room to finish the move",
+      body: "This store has used all the room it has to keep records, so your purchases have not moved yet. Nothing is lost. Write to the store and ask them to make room, then open this link again.",
+    },
     elsewhere: { title: "These purchases already moved", body: "They were moved to another address before. Nothing else changes." },
     link: { title: "This link does not work", body: "It may be mistyped or too old. You can ask again from your purchases page." },
     deleted: { title: "This move can't be made", body: "This store can't move purchases to or from one of these addresses. Nothing moved." },

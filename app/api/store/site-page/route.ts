@@ -161,7 +161,19 @@ export async function POST(request: NextRequest) {
       // When it is out, kept on the list so the menu reads nothing more (lib/site-page-rules.ts).
       const from = outFrom(page);
       // Only this page's moment is changed, on the latest list; a page removed meanwhile stays removed.
-      await changeSitePages(ref, (latest) => (latest.some((p) => p.id === found.id && p.from !== from) ? latest.map((p) => (p.id === found.id ? { ...p, from } : p)) : { refuse: "same" }));
+      const listed = await changeSitePages(ref, (latest) => {
+        const now = latest.find((p) => p.id === found.id);
+        if (!now) return { refuse: "gone" };
+        return now.from !== from ? latest.map((p) => (p.id === found.id ? { ...p, from } : p)) : { refuse: "same" };
+      });
+      // Removed while this save ran (Claude 2 nuvem F, Claude 1 cloud on #4253): the removal's drop ran before this
+      // write, so what was just written is under a key no list names, charged to the store for good. It is dropped
+      // with its pictures, and the creator is told the page is gone, never that it was saved.
+      if (!listed.ok && listed.reason === "gone") {
+        const dropped = await dropPage(statsId, key, store).catch(picturesOfFailedDrop);
+        if (dropped.length) await del(dropped).catch((error: unknown) => console.error("could not delete a removed page's pictures", error));
+        return refuse("unknown", 404);
+      }
       const gone = await releasePictures(statsId, key, before.filter((path) => !shown.includes(path))).catch(() => [] as string[]);
       if (gone.length) await del(gone).catch((error: unknown) => console.error("could not delete pictures taken off a page", error));
       return Response.json({ ok: true, blocks: page.blocks.length, page });

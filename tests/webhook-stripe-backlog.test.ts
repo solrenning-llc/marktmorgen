@@ -139,6 +139,23 @@ async function main() {
   redis.pipeline = plain;
   is("the anchor's write was refused (diagnostic)", refused > 0, true);
   is("the cursor is still there, to walk on from", (await redis.pipeline([["GET", `${key}:back`]]))[0], cursor);
+
+  part("F: the walk's cursor read in an unknown shape stops the round, the cursor untouched (Codex U on #4362)");
+  key = await setup("backlog-f@example.com", null);
+  const kept = ids[999];
+  await redis.pipeline([["SET", `${key}:back`, kept]]);
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    const replies = (await plain(commands)) as unknown[];
+    return commands.map((c, i) => (c[0] === "GET" && c[1] === `${key}:back` ? undefined : replies[i]));
+  }) as typeof redis.pipeline;
+  requests.length = 0;
+  console.error = () => {};
+  const unknown = await watchStripe(Date.now() + 60_000).then(() => "resolved", () => "threw");
+  console.error = log;
+  redis.pipeline = plain;
+  is("no Stripe page is read from the newest end", requests.filter((u) => u.pathname === "/v1/events" && !u.searchParams.has("starting_after") && !u.searchParams.has("ending_before")).length, 0);
+  is("the cursor is still where the walk stood", (await redis.pipeline([["GET", `${key}:back`]]))[0], kept);
+  console.log(`  (diagnostic: the round ${unknown})`);
   done();
 }
 main().catch((error) => { console.error(error); process.exit(1); });

@@ -2013,8 +2013,14 @@ async function watchStore(store: Store, statsId: string, config: Config, now = D
     // leave the older ones, still inside Stripe's thirty days, unread for good (#4285). Once the walk reaches the
     // oldest event, the pages of this run are sent oldest first and the anchor is set: the events newer than them,
     // read on earlier runs of the walk, are read forward from it as on every later run.
-    const [backRaw] = await redisPipeline([["GET", backKey(statsId)]]);
-    const back = typeof backRaw === "string" && /^evt_[A-Za-z0-9]+$/.test(backRaw) ? backRaw : "";
+    // Read exactly (Codex U on #4362): null is no walk yet, an event id is where it stands, and any other reply stops
+    // the round with the cursor untouched, never read as "no walk" (which would start again from the newest pages and
+    // overwrite the walk's progress).
+    const [backRaw] = repliesFor(await redisPipeline([["GET", backKey(statsId)]]), 1) ?? [undefined];
+    if (backRaw !== null && !(typeof backRaw === "string" && /^evt_[A-Za-z0-9]+$/.test(backRaw))) {
+      throw new UnknownReplyError("a Stripe backlog walk's cursor");
+    }
+    const back = backRaw ?? "";
     const pages: StripeEvent[][] = [];
     let older = back;
     let reachedEnd = false;

@@ -140,6 +140,14 @@ const RATE_WINDOW_SECONDS = 60 * 60;
 export const REFUND_PAGES = 10;
 /** And of a hundred disputes, which are far fewer. */
 export const DISPUTE_PAGES = 3;
+/**
+ * Days after a sale (a booked call: after the later of its booking and its call) during which a refund or a dispute
+ * can still take its money back, for a sale paid into another Stripe account than the store's, whose refunds readBook
+ * cannot read: the longest dispute window the code reads (lib/checkup.ts DISPUTE_DAYS, 180), longer than the plan
+ * charges' (lib/refund-reserve-rules.ts DISPUTE_DAYS, 120) and than any hold a creator may set on sales or leads (90).
+ * tests/affiliate-book-account-switch.test.ts holds it at least as long as each of them.
+ */
+export const OTHER_ACCOUNT_DAYS = 180;
 // DISPUTE_TAKES, the dispute states that take the money, is lib/retained-revenue.ts's: the numbers read the same set.
 
 /** The cookie an affiliate's own browser is signed in with, one per store. */
@@ -3164,8 +3172,13 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
     // creator disconnected it or moved to a new one since), or any Stripe sale while none is connected, cannot be
     // judged there: what it earns is not known (refundsChecked), so no payout is made on a refund nobody read.
     // A booking's lead is reversed by its refund in the same way (settleLeads), so it is judged with the sales.
+    // Only while a refund or a dispute can still come (OTHER_ACCOUNT_DAYS): a sale past it is settled for good, so one
+    // old sale on a former account never holds every affiliate's payout for ever. A time that does not read is inside.
     const account = store.stripeAccountId;
-    if ([...everything, ...bookings].some((r) => r.pi !== "" && !r.pi.startsWith("paypal:") && (!account || (r.acct !== undefined && r.acct !== account)))) {
+    const cut = Math.floor(Date.now() / 1000) - OTHER_ACCOUNT_DAYS * 86_400;
+    const open = (at: number) => !(Number.isFinite(at) && at > 0) || at >= cut;
+    const unread = (r: { pi: string; acct?: string }) => r.pi !== "" && !r.pi.startsWith("paypal:") && (!account || (r.acct !== undefined && r.acct !== account));
+    if (everything.some((r) => unread(r) && open(r.at)) || bookings.some((l) => unread(l) && (open(l.at) || open(Math.max(l.at, l.end))))) {
       refundsChecked = false;
     }
   }

@@ -13,10 +13,16 @@
 import { NO_AFFILIATES } from "@/lib/affiliate-setting";
 import { noteCharge, readBook } from "@/lib/affiliates";
 import { decideLeads, readLeads, recordLead } from "@/lib/affiliate-leads";
+import { leadsKey } from "@/lib/affiliate-lead-rules";
 import { claimHandle, clearStripeAccount, ensureStatsId, setAffiliateSetting, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
+import { OTHER_ACCOUNT_DAYS } from "@/lib/affiliates";
+import { DISPUTE_DAYS as CHECKUP_DISPUTE_DAYS } from "@/lib/checkup";
+import { DISPUTE_DAYS as PLAN_DISPUTE_DAYS } from "@/lib/refund-reserve-rules";
+import { MAX_HOLD_DAYS } from "@/lib/affiliate-setting";
+import { MAX_LEAD_HOLD_DAYS } from "@/lib/affiliate-lead-rules";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_affiliate_account_switch_only";
 process.env.RESEND_API_KEY = "re_test_affiliate_account_switch_only";
@@ -140,6 +146,60 @@ async function main(): Promise<void> {
   book = await readBook((await storeForEmail(LEAD_OWNER))!);
   is("lead refunded on the old account: it earns nothing, or the book is not checked", book.refundsChecked === false || book.lines.every((l) => l.commission === 0), true);
   is("lead paid into the old account: not checked", book.refundsChecked, false);
+
+  part("only a sale on another account still inside its refund and dispute window holds the book");
+  is("the window is at least the longest dispute window and hold the code knows", [CHECKUP_DISPUTE_DAYS, PLAN_DISPUTE_DAYS, MAX_HOLD_DAYS, MAX_LEAD_HOLD_DAYS].every((days) => OTHER_ACCOUNT_DAYS >= days), true);
+  const WINDOW_OWNER = "book-switch-window@example.com";
+  await claimHandle(WINDOW_OWNER, "bookwindow", "Book Window", "");
+  await ensureStatsId(WINDOW_OWNER);
+  is("new account connected", (await setStripeAccount(WINDOW_OWNER, NEW, true)).ok, true);
+  await setAffiliateSetting(WINDOW_OWNER, { ...NO_AFFILIATES, enabled: true, percent: 30 });
+  const windowStats = (await storeForEmail(WINDOW_OWNER))!.statsId!;
+  await redis.pipeline([
+    ["HSET", `nl:aff:${windowStats}:people`, ANA, JSON.stringify({ id: ANA, email: "ana@example.com", code: "ana", status: "approved", appliedAt: (NOW - 800 * 86_400) * 1000, decidedAt: 1, note: "" })],
+    ["HSET", `nl:aff:${windowStats}:codes`, "ana", ANA],
+  ]);
+  const oldSale = (pi: string, at: number | undefined) => JSON.stringify({
+    ref: pi, pi, aff: ANA, ...(at === undefined ? {} : { at }), product: "prod01", title: "Bread course",
+    base: 10_000, total: 10_000, currency: "usd", rate: 30, self: false, how: "click", acct: OLD,
+  });
+  // Paid into the old account two years ago, as writeReferral writes it: long past any refund or dispute window.
+  await redis.pipeline([["HSET", `nl:aff:${windowStats}:sales`, "pi_1WindowOld", oldSale("pi_1WindowOld", NOW - 730 * 86_400)]]);
+  // And a new sale on the new account, through the real writer.
+  await noteCharge((await storeForEmail(WINDOW_OWNER))!, {
+    id: "pi_1WindowNew", status: "succeeded", amount: 10_000, currency: "usd", created: NOW - 3600,
+    receipt_email: "buyer2@example.com", metadata: { via: ANA, via_rate: "30", product: "prod01", title: "Bread course" },
+  });
+  book = await readBook((await storeForEmail(WINDOW_OWNER))!);
+  is("both sales on the book", book.lines.length, 2);
+  is("a sale on the old account 730 days ago no longer holds the book: checked", book.refundsChecked, true);
+  await redis.pipeline([["HSET", `nl:aff:${windowStats}:sales`, "pi_1WindowRecent", oldSale("pi_1WindowRecent", NOW - 10 * 86_400)]]);
+  book = await readBook((await storeForEmail(WINDOW_OWNER))!);
+  is("a sale on the old account 10 days ago: not checked", book.refundsChecked, false);
+  await redis.pipeline([["HDEL", `nl:aff:${windowStats}:sales`, "pi_1WindowRecent"], ["HSET", `nl:aff:${windowStats}:sales`, "pi_1WindowNoTime", oldSale("pi_1WindowNoTime", undefined)]]);
+  book = await readBook((await storeForEmail(WINDOW_OWNER))!);
+  is("a sale on the old account whose time does not read counts as inside the window: not checked", book.refundsChecked, false);
+  await redis.pipeline([["HDEL", `nl:aff:${windowStats}:sales`, "pi_1WindowNoTime"]]);
+  book = await readBook((await storeForEmail(WINDOW_OWNER))!);
+  is("control: only the old sale outside the window and the new one: checked", book.refundsChecked, true);
+  // A booked call's lead paid into the old account: its window runs from the later of its booking and its call.
+  const oldLead = (at: number, end: number) => JSON.stringify({
+    id: "bbbbbbbbbbbbbbbbbbbbbbbb", aff: ANA, kind: "booking", at, end, ref: "cs_test_windowcall01", pi: "pi_1WindowCall", paid: 5_000,
+    title: "Bread call", email: "caller@example.com", cents: 1_500, currency: "usd", hold: 7, daily: 10, budget: 50_000, state: "approved", d: 1, why: "", acct: OLD,
+  });
+  await redis.pipeline([["HSET", leadsKey(windowStats), "bbbbbbbbbbbbbbbbbbbbbbbb", oldLead(NOW - 400 * 86_400, NOW - 400 * 86_400)]]);
+  book = await readBook((await storeForEmail(WINDOW_OWNER))!);
+  is("a lead on the old account booked and held 400 days ago: checked", book.refundsChecked, true);
+  await redis.pipeline([["HSET", leadsKey(windowStats), "bbbbbbbbbbbbbbbbbbbbbbbb", oldLead(NOW - 400 * 86_400, NOW - 10 * 86_400)]]);
+  book = await readBook((await storeForEmail(WINDOW_OWNER))!);
+  is("a lead on the old account booked 400 days ago for a call 10 days ago: not checked", book.refundsChecked, false);
+  await redis.pipeline([["HSET", leadsKey(windowStats), "bbbbbbbbbbbbbbbbbbbbbbbb", oldLead(0, NOW - 400 * 86_400)]]);
+  book = await readBook((await storeForEmail(WINDOW_OWNER))!);
+  is("a lead on the old account whose booking time does not read: not checked", book.refundsChecked, false);
+  await redis.pipeline([["HDEL", leadsKey(windowStats), "bbbbbbbbbbbbbbbbbbbbbbbb"]]);
+  await clearStripeAccount(WINDOW_OWNER);
+  book = await readBook((await storeForEmail(WINDOW_OWNER))!);
+  is("no account connected, a sale inside the window: not checked", book.refundsChecked, false);
   done();
 }
 

@@ -787,7 +787,11 @@ function ceilingOf(ctx: Ctx, state: StoreState, object: ObjectState): string | n
   if (room === null) return "files_room";
   if (heldBytes(state) + object.size > BACKUP_FILES_ROOM_TIMES * room) return "files_room";
   if (readSince(ctx, state) + uploadsLeft(state, object.key) + object.size > BACKUP_FILES_COPY_TIMES * room) return "files_copy_ceiling";
-  if (sumSince(state.copied, ctx.day - BACKUP_FILES_OBJECT_WINDOW_DAYS + 1).objects + 1 > BACKUP_FILES_OBJECTS_PER_MONTH) return "files_objects_ceiling";
+  // Attempts, not only confirmed copies (Claude 1's MEDIUM at 58d23815ca): every read is charged before it is made
+  // (chargeRead), so a copy refused or unverified still counts toward the month's objects.
+  const since = ctx.day - BACKUP_FILES_OBJECT_WINDOW_DAYS + 1;
+  const objects = Math.max(sumSince(state.copied, since).objects, sumSince(state.read, since).objects);
+  if (objects + 1 > BACKUP_FILES_OBJECTS_PER_MONTH) return "files_objects_ceiling";
   return null;
 }
 

@@ -85,7 +85,7 @@ async function main(): Promise<void> {
   await people(A, B);
   await sell("cs_a1", A, 1_000);
   const file = await download();
-  is("the file is handed out, with its print", [file.status, file.cookie.startsWith("nl_aff_batch=")], [200, true]);
+  is("the file is handed out, with its print", [file.status, file.cookie.startsWith("nl_paybatch=")], [200, true]);
   const fine = await confirm(file.cookie);
   is("written as the file says: A $5.00, nobody else", [fine.status, await paid(sid)], [200, [[A, 500]]]);
 
@@ -110,10 +110,10 @@ async function main(): Promise<void> {
   part("No print, a tampered one or an expired one");
   const none = await confirm("");
   is("no file downloaded here: nothing written", [none.status, none.body.error, await paid(who.store!.statsId!)], [409, "no_file", []]);
-  const [exp, sig] = small.cookie.slice("nl_aff_batch=".length).split(".");
-  const tampered = await confirm(`nl_aff_batch=${Number(exp) + 86_400}.${sig}`);
+  const [exp, sig] = small.cookie.slice("nl_paybatch=".length).split(".");
+  const tampered = await confirm(`nl_paybatch=${Number(exp) + 86_400}.${sig}`);
   is("a print whose time was changed: nothing written", [tampered.status, tampered.body.error], [409, "changed"]);
-  const old = await confirm(`nl_aff_batch=${NOW - 60}.${sig}`);
+  const old = await confirm(`nl_paybatch=${NOW - 60}.${sig}`);
   is("an expired print: nothing written", [old.status, old.body.error], [409, "no_file"]);
   const fresh = await download();
   const again = await confirm(fresh.cookie);

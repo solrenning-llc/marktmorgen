@@ -5,6 +5,7 @@ import { guardStoreWrite, text } from "@/lib/store-request";
 import { MAX_REFERENCE_LENGTH, readBook } from "@/lib/affiliates";
 import { type BatchProvider, batchFile, batchTotal, recordBatch } from "@/lib/affiliate-payouts";
 import { onTheirWay, payableLines } from "@/lib/paypal-payouts";
+import { batchPrint, batchPrintCookie, batchPrintOf, matchesBatchPrint } from "@/lib/affiliate-batch-print";
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -44,13 +45,16 @@ export async function GET(request: NextRequest) {
     const provider: BatchProvider = asked === "paypal" ? "paypal" : "worksheet";
     const day = new Date().toISOString().slice(0, 10);
     const { body, filename } = batchFile(provider, lines, store, day);
-    return new Response(body, {
-      headers: {
-        "Content-Type": "text/csv; charset=utf-8",
-        "Content-Disposition": `attachment; filename="${filename}"`,
-        "Cache-Control": "no-store",
-      },
+    const headers = new Headers({
+      "Content-Type": "text/csv; charset=utf-8",
+      "Content-Disposition": `attachment; filename="${filename}"`,
+      "Cache-Control": "no-store",
     });
+    // The file's own lines, signed (lib/affiliate-batch-print.ts): "Mark the batch as paid" writes down this file and
+    // nothing else (#4479). Nothing is stored for it on the server.
+    const print = store.statsId ? batchPrint(store.statsId, store.currency, lines) : null;
+    if (print) headers.append("Set-Cookie", batchPrintCookie(print));
+    return new Response(body, { headers });
   } catch (error) {
     console.error("building the affiliate payout batch failed", error);
     return new Response("Something went wrong on our side. Try again in a moment.", { status: 500 });
@@ -59,10 +63,13 @@ export async function GET(request: NextRequest) {
 
 /**
  * `{ date: "2026-09-30", reference: "PayPal batch 4821" }` — the creator
- * confirming they have just paid the batch in their own provider, which
- * writes one payout per affiliate against what the book says is owed at this
- * moment. A sale refunded between the download and this call is not paid out
- * on, because the book is read again here.
+ * confirming they have just paid the batch file they downloaded here, in
+ * their own provider. One payout per affiliate is written only when the book
+ * still owes exactly the file's lines (issue #4479): the download left their
+ * signed print in a cookie (lib/affiliate-batch-print.ts). An affiliate who
+ * became owed since, a changed amount, a refund in between or a PayPal
+ * payment set on its way since makes the lines differ, and nothing is written:
+ * the creator downloads the file again, or records each payout on its own.
  */
 export async function POST(request: NextRequest) {
   const guarded = await guardStoreWrite(request, "settings", 8_000);
@@ -85,7 +92,12 @@ export async function POST(request: NextRequest) {
 
     const away = await onTheirWay(store);
     const lines = payableLines(book, away);
+    // Only the file that was paid (#4479): no print, or one that no longer reads or has expired, is no file to
+    // confirm; a valid print over other lines than the book's now is a batch that changed since the download.
     if (!lines.length) return fail("nothing", 409);
+    const print = batchPrintOf(request.headers.get("cookie"));
+    const matched = matchesBatchPrint(print, store.statsId, store.currency, lines);
+    if (matched !== "same") return fail(matched, 409);
 
     const done = await recordBatch(
       store,

@@ -1137,7 +1137,12 @@ export default function PrivacyPage() {
           the date each affiliate was last warned. Before an affiliate is taken
           out, we email them at the address they joined with, at least {IDLE_WARN_DAYS} days
           ahead. An affiliate taken out keeps their records, as when a creator
-          removes them by hand. Where a creator pays affiliates
+          removes them by hand. When a creator downloads the file to pay
+          their affiliates in their own PayPal or Wise, a cookie named{" "}
+          <code>nl_paybatch</code> is set in their browser for 30 days. It holds
+          only when it stops being valid and a one-way print of who is in the
+          file and how much, so that marking the batch as paid writes down
+          exactly that file. Nothing about it is kept on our side. Where a creator pays affiliates
           per lead (since October 18, 2026) &mdash; an email sign-up to their
           list the person confirmed, a free product claimed from its emailed
           link, or a booked call that took place &mdash; the affiliate the

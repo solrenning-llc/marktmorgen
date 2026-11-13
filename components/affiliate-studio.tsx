@@ -75,6 +75,10 @@ const MESSAGES: Record<string, string> = {
   amount: "Type the amount you paid, like 25 or 25.50.",
   date: "Pick the day you paid it.",
   nothing: "Nobody is owed anything right now, so there was nothing to write down.",
+  changed:
+    "What your affiliates are owed has changed since you downloaded the file, so nothing was written down. Write down each payout you made from that affiliate's row, or download the file again before you pay it.",
+  no_file:
+    "A batch can be written down only from a file downloaded in this browser in the last 30 days, so nothing was written down. Download the file, pay it, then choose I have paid this batch, or write down each payout from that affiliate's row.",
   refunds:
     "Stripe could not be asked about refunds just now, so what is owed is not settled. Try again in a moment rather than record a payout against a guess.",
   unknown: "That affiliate or payout is no longer on record. Reload the page.",
@@ -359,7 +363,7 @@ export function AffiliateStudio({
             <div className="mt-5 rounded-2xl border border-line bg-paper p-4">
               <h3 className="font-semibold text-ink">Pay everyone at once</h3>
               <p className="mt-1 text-sm leading-relaxed text-ink-soft">
-                {`${owedNow.length} ${owedNow.length === 1 ? "affiliate" : "affiliates"} can be paid ${money(batchTotal, currency)} today. Download the batch, upload it to your own PayPal or Wise, and the money goes straight from your account to theirs. It never passes through Marktmorgen, so there is no payout to wait for.`}
+                {`${owedNow.length} ${owedNow.length === 1 ? "affiliate" : "affiliates"} can be paid ${money(batchTotal, currency)} today. Download the batch, upload it to your own PayPal or Wise, and the money goes straight from your account to theirs. It never passes through Marktmorgen, so there is no payout to wait for. Then choose I have paid this batch in this browser: it writes down exactly the file you downloaded.`}
               </p>
               {waitingTotal > 0 ? (
                 <p className="mt-2 text-sm leading-relaxed text-ink-soft">

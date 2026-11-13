@@ -31,18 +31,27 @@ export const MIN_LEAD_MS = 15 * 60_000;
 /** More distinct 9:00s than the world has on one day (about 40): a bound, never reached by real zones. */
 export const MAX_GROUPS = 48;
 
-/** A reader's time zone as kept, or null when there is none or it is not a real zone. */
+/** An IANA-style name ("America/New_York", "Etc/GMT+5", "UTC"): never an offset such as "+05:17", which Intl also takes. */
+const ZONE_NAME = /^[A-Za-z][A-Za-z0-9_+-]*(?:\/[A-Za-z0-9_+-]+)*$/;
+
+/**
+ * A reader's time zone as kept, or null when there is none or it is not a real zone. Only IANA-style names: an offset
+ * ("+05:17", "-00:01") is refused, as every minute of the day would be a zone of its own and a group with it (#4166
+ * review). A name in another case ("america/new_york") is kept as the zone data writes it.
+ */
 export function readerZone(raw: unknown): string | null {
+  if (typeof raw !== "string" || !ZONE_NAME.test(raw) || !isTimeZone(raw)) return null;
   // Any name the time zone data knows, aliases included: a browser may report "Asia/Kolkata" where this
-  // runtime's data says "Asia/Calcutta", and both are the same 9:00.
-  return isTimeZone(raw) ? raw : null;
+  // runtime's data says "Asia/Calcutta", and both are the same 9:00; such an alias is kept as given.
+  const resolved = new Intl.DateTimeFormat("en-US", { timeZone: raw }).resolvedOptions().timeZone;
+  return resolved.toLowerCase() === raw.toLowerCase() ? resolved : raw;
 }
 
 export type DeliveryGroup = { at: number; zones: string[]; readers: number };
 
 export type DeliveryPlan =
   | { ok: true; day: string; groups: DeliveryGroup[]; readers: number; storeZoneReaders: number; first: number; last: number }
-  | { ok: false; reason: "day" | "store-zone" | "past" | "far"; firstDay?: string };
+  | { ok: false; reason: "day" | "store-zone" | "past" | "far" | "groups"; firstDay?: string };
 
 const DAY = /^(\d{4})-(\d{2})-(\d{2})$/;
 
@@ -63,9 +72,20 @@ function groupsFor(day: { y: number; m: number; d: number }, storeZone: string, 
   const byTime = new Map<number, { zones: Set<string>; readers: number }>();
   let storeZoneReaders = 0;
   const atStore = zonedToUtc(day.y, day.m, day.d, hour * 60, storeZone);
+  // One reading and one conversion per distinct zone written, not per reader: most of a list shares a few zones.
+  const seen = new Map<unknown, { zone: string | null; at: number | null }>();
+  const read = (raw: unknown) => {
+    let known = seen.get(raw);
+    if (!known) {
+      const zone = readerZone(raw);
+      known = { zone, at: zone ? zonedToUtc(day.y, day.m, day.d, hour * 60, zone) : null };
+      seen.set(raw, known);
+    }
+    return known;
+  };
   for (const raw of zones) {
-    const zone = readerZone(raw);
-    let at = zone ? zonedToUtc(day.y, day.m, day.d, hour * 60, zone) : null;
+    const { zone, at: zoneAt } = read(raw);
+    let at = zoneAt;
     let used = zone;
     if (at === null) {
       at = atStore;
@@ -92,21 +112,31 @@ export function deliveryPlan(input: { day: string; storeZone: string; zones: rea
   const day = readDay(input.day);
   if (!day) return { ok: false, reason: "day" };
   if (!readerZone(input.storeZone)) return { ok: false, reason: "store-zone" };
+  const plan = dayPlan(day, input, hour);
+  if (plan.when === "far") return { ok: false, reason: "far" };
+  if (plan.when === "past") {
+    // The first day that works in the next week: one flat pass over the 7 candidates, each judged alone, never a
+    // search inside a search (a day k days back used to cost about 7^k plans; #4166 review).
+    let next = input.day;
+    for (let i = 0; i < 7; i += 1) {
+      next = nextDay(next);
+      if (dayPlan(readDay(next)!, input, hour).when === "ok") return { ok: false, reason: "past", firstDay: next };
+    }
+    return { ok: false, reason: "past" };
+  }
+  // A bound held by the code, not only by today's zone data: never one scheduled job per handful of contacts.
+  if (plan.groups.length > MAX_GROUPS) return { ok: false, reason: "groups" };
+  return { ok: true, day: input.day, groups: plan.groups, readers: input.zones.length, storeZoneReaders: plan.storeZoneReaders, first: plan.first, last: plan.last };
+}
+
+/** One day's groups and whether that day is too soon, too far or fine, with no search for another day. */
+function dayPlan(day: { y: number; m: number; d: number }, input: { storeZone: string; zones: readonly (string | null)[]; now: number }, hour: number) {
   const { groups, storeZoneReaders } = groupsFor(day, input.storeZone, input.zones, hour);
   // With no reader, the day is judged at the store's own 9:00.
   const first = groups[0]?.at ?? zonedToUtc(day.y, day.m, day.d, hour * 60, input.storeZone) ?? 0;
   const last = groups[groups.length - 1]?.at ?? first;
-  if (last > input.now + MAIL_SCHEDULE_WINDOW_MS) return { ok: false, reason: "far" };
-  if (first < input.now + MIN_LEAD_MS) {
-    let next = input.day;
-    for (let i = 0; i < 7; i += 1) {
-      next = nextDay(next);
-      const plan = deliveryPlan({ ...input, day: next });
-      if (plan.ok) return { ok: false, reason: "past", firstDay: next };
-    }
-    return { ok: false, reason: "past" };
-  }
-  return { ok: true, day: input.day, groups, readers: input.zones.length, storeZoneReaders, first, last };
+  const when: "far" | "past" | "ok" = last > input.now + MAIL_SCHEDULE_WINDOW_MS ? "far" : first < input.now + MIN_LEAD_MS ? "past" : "ok";
+  return { groups, storeZoneReaders, first, last, when };
 }
 
 /** What the scheduler says before the creator confirms, in the creator's time zone. */
@@ -124,4 +154,5 @@ export const PLAN_PROBLEMS: Record<Extract<DeliveryPlan, { ok: false }>["reason"
   "store-zone": "Pick your time zone first: readers whose time zone we do not know get the email at 9:00 AM yours.",
   past: "9:00 AM on that day has already started somewhere in the world. Pick a later day.",
   far: "Pick a day within a year from today.",
+  groups: "Your readers are in more time zones than one day's sending can take. Send it at one time for everyone instead.",
 };

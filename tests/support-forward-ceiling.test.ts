@@ -233,13 +233,15 @@ const notices = () => fixture.ses.filter((m) => m.subject !== "hello");
   // that nothing was deleted; no dated source says how long Resend keeps a message, so it no longer promises that.
   is("it does not promise every message is kept or that sending resumes by itself", /Every message is kept|Nothing was deleted|starts again by itself/.test(notice?.text ?? ""), false);
 
+  // Announced as the route passes them: Resend's `data.to` shows support@ (Claude 7's MEDIUM 1 on #3481: only such an
+  // announcement is counted before the read; one that shows no address of ours is read first, below).
   part("announcements of support mail are counted before the message is read at Resend");
   fresh();
-  for (let i = 0; i < ANNOUNCED; i++) await forward(message(`a${i}@q${i}.example`), NOON);
+  for (let i = 0; i < ANNOUNCED; i++) await forward(message(`a${i}@q${i}.example`), NOON, "support@marktmorgen.com");
   const readsBefore = mailReads;
   commands = 0;
   const pastAnnounced: string[] = [];
-  for (let i = 0; i < 50; i++) pastAnnounced.push(await forward(message(`b${i}@q${i}.example`), NOON));
+  for (let i = 0; i < 50; i++) pastAnnounced.push(await forward(message(`b${i}@q${i}.example`), NOON, "support@marktmorgen.com"));
   is("past the day's announcements: held without reading Resend", [mailReads - readsBefore, pastAnnounced.every((r) => r === "held")], [0, true]);
   is("each costs a few commands only (the counter and the day's notice mark)", (commands + 50 * ROUTE_COMMANDS) / 50 <= ROUTE_COMMANDS + 3, true);
   const toStore = await forward(message("buyer@example.com", [], [], "nobody-here@mail.marktmorgen.com"), NOON, ["nobody-here@mail.marktmorgen.com"]);
@@ -397,10 +399,10 @@ const notices = () => fixture.ses.filter((m) => m.subject !== "hello");
 
   part("2nd pre-review MEDIO 3: past the day's announcements a held one costs no command beyond the route's");
   fresh();
-  for (let i = 0; i < ANNOUNCED + 1; i++) await forward(message(`a${i}@q${i}.example`), NOON);
+  for (let i = 0; i < ANNOUNCED + 1; i++) await forward(message(`a${i}@q${i}.example`), NOON, "support@marktmorgen.com");
   commands = 0;
   const pastDay: string[] = [];
-  for (let i = 0; i < 500; i++) pastDay.push(await forward(message(`b${i}@q${i}.example`), NOON));
+  for (let i = 0; i < 500; i++) pastDay.push(await forward(message(`b${i}@q${i}.example`), NOON, "support@marktmorgen.com"));
   is("500 more are held", pastDay.every((r) => r === "held"), true);
   is("with no command of ours (a memory of the exhausted day, per instance)", commands, 0);
   is("and the inbox still got one notice for the day", notices().length, 1);

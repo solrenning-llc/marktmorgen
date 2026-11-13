@@ -512,9 +512,17 @@ export async function forwardInbound(id: string, now = Date.now(), announcedTo?:
   // store owners' addresses, not one free store's (Claude 1's review of #3481, MEDIUM); every other, and every one with
   // no From, the public share, so made-up senders cannot hold a creator's mail unread. With the reserve used up, a store
   // owner's announcement still takes the public share while it has room (Claude 3's LOW 2).
+  // Counted only when the announcement positively shows our own support's address and none on the creators' domain
+  // (Claude 7's review of #3481, MEDIUM 1): a store's mail announced without the store's address (on Cc or Bcc, through
+  // an alias, with no `to` or one in another shape) is read and decided after the read, where admitSupport bounds
+  // support mail, so a flood of public announcements never holds a creator's mail unread. Reads of announcements that
+  // show neither stay outside the day's count: unknown, never zero (docs/funded-exposure-review.md).
   const creatorsDomain = creatorDomain(NIMBUS_FROM);
   const announced = typeof announcedTo === "string" ? [announcedTo] : list(announcedTo);
-  if (!creatorsDomain || !announced.some((one) => (parseSender(one).address ?? "").toLowerCase().endsWith(`@${creatorsDomain}`))) {
+  const announcedAddresses = announced.map((one) => (parseSender(one).address ?? "").toLowerCase());
+  const showsSupport = announcedAddresses.some((address) => address.endsWith(`@${platformDomain()}`));
+  const showsStore = creatorsDomain !== null && creatorsDomain !== undefined && creatorsDomain !== "" && announcedAddresses.some((address) => address.endsWith(`@${creatorsDomain}`));
+  if (showsSupport && !showsStore) {
     const today = new Date(now).toISOString().slice(0, 10);
     const first = announced.map((one) => parseSender(one).address).find((a) => a && a.toLowerCase().endsWith(`@${platformDomain()}`));
     const named = first ?? `support@${platformDomain()}`;

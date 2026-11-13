@@ -391,7 +391,7 @@ export async function importHubSpotDeals(store: Store, file: HubSpotFile, option
     // deal has a new id, so each of its slots is new, and so is the pipelines slot when none was saved before (Claude
     // 1's MÉDIO on #2048). Without them, a file in the band [grows, grows + 64 per new slot) passed this read and was
     // refused only after the room's work for each deal.
-    const grows = room.take.reduce((sum, change) => sum + change.bytes + (change.slot.startsWith(dealSlot("")) || !snapshot.raw ? ROOM_FIELD_BYTES : 0), 0);
+    const grows = room.take.reduce((sum, change) => sum + change.bytes + ("slot" in change && (change.slot.startsWith(dealSlot("")) || !snapshot.raw) ? ROOM_FIELD_BYTES : 0), 0);
     const used = await liveDataUsed(store, now);
     if (used === null) return refuse("unavailable", HUBSPOT_IMPORT_WORDS.unavailable);
     if (grows > 0 && used + grows > contentRoomFor(store, nowSeconds)) return refuse("store_full", dataFullWords(used, dataRoomFor(store, nowSeconds), largerPlanFor(store, nowSeconds)));

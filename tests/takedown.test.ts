@@ -166,6 +166,42 @@ async function main(): Promise<void> {
   const later = await makeDraftPreview(await store(), hiddenDraft.product.id);
   is("a link written after it never opens", await readDraftPreview(later.code), null);
   is("a second press finds nothing more to do", await takeDown(draftNotice, await store(), { type: "product", id: hiddenDraft.product.id }, "https://marktmorgen.com"), null);
+
+  // Claude 1 cloud rev-odd's MEDIUM on #3597: a published product can still have a live preview link from its draft
+  // days. When the takedown mark's write failed once after the product was hidden, the product read as "a draft with a
+  // live preview": the takedown was no longer down, the creator was never told the product was unpublished, and the old
+  // link kept opening. The mark is written before the product is hidden, so a failed mark leaves nothing taken down,
+  // and a press again takes the product down and tells the creator so.
+  part("A takedown whose preview mark fails once is not lost (Claude 1 cloud rev-odd on #3597)");
+  const once = await addProduct(owner, "Once Pack", "", "9", null);
+  if (!once.ok) throw new Error("setup");
+  await setProductHidden(owner, once.product.id, true);
+  const fromDraft = await makeDraftPreview(await store(), once.product.id);
+  await setProductHidden(owner, once.product.id, false);
+  is("the draft's link still opens once the product is published", (await readDraftPreview(fromDraft.code))?.productId, once.product.id);
+  const pipeline = redis.pipeline.bind(redis);
+  let failMark = true;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (failMark && commands.some((c) => String(c[0]).toUpperCase() === "SET" && String(c[1]).startsWith("nl:dpv:down:"))) {
+      failMark = false;
+      throw new Error("a transient 500 on the mark");
+    }
+    return pipeline(commands);
+  }) as typeof redis.pipeline;
+  const onceAction = { type: "product", id: once.product.id } as const;
+  const thrown = await takeDown(report, await store(), onceAction, "https://marktmorgen.com").then(() => false, () => true);
+  redis.pipeline = pipeline;
+  is("the first press throws on the failed mark", thrown, true);
+  const emailsBefore = sent.length;
+  is(
+    "a press again takes the product down, in those words",
+    await takeDown(report, await store(), onceAction, "https://marktmorgen.com"),
+    'The product "Once Pack", now unpublished',
+  );
+  is("the product is hidden and marked", [((await store()).catalog.items.find((p) => p.id === once.product.id)?.kind ?? 0) & KIND.hidden, await isTakenDown(await store(), once.product.id)], [KIND.hidden, true]);
+  is("the old link no longer opens", await readDraftPreview(fromDraft.code), null);
+  is("one email to the creator says the product was unpublished", [sent.length - emailsBefore, sent.slice(emailsBefore).some((m) => m.text.includes('The product "Once Pack", now unpublished'))], [1, true]);
+  is("a third press finds nothing more to do", await takeDown(report, await store(), onceAction, "https://marktmorgen.com"), null);
   done();
 }
 

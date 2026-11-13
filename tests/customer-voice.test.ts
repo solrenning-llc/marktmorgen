@@ -23,6 +23,13 @@ import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 import { ROOM } from "./data-room";
+import { mock } from "node:test";
+
+// The checks pass one moment (`now` below) to the code, which still reads the clock itself in places: a run crossing
+// 00:00 UTC (any day) between the two failed "questions, reviews and searches, never the old question" and "fewer
+// than 8 texts: nothing asked, nothing counted". Only Date is stopped, for the whole run; timers and
+// performance.now() run as usual.
+mock.timers.enable({ apis: ["Date"], now: Date.now() });
 
 let reply: string | null = null;
 const prompts: string[] = [];
@@ -105,7 +112,7 @@ async function main(): Promise<void> {
   }
   await countSearchMiss(statsId, ["printable"]);
   await countSearchMiss(statsId, ["printable"]);
-  const gathered = await gatherVoice(store, now);
+  const { items: gathered } = await gatherVoice(store, now);
   is("questions, reviews and searches, never the old question", gathered.map((g) => `${g.source}|${g.text}|${g.n}`).sort(), [
     "question|Can I print the planner?|1",
     "question|Does it work in metric?|1",

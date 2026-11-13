@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
-import { TasksRecountRefused, changePersonTasks, readAllTasks, readPersonTasks, taskPeople, tasksRecountUnits } from "@/lib/crm";
+import { TasksRecountRefused, TasksUnreadable, changePersonTasks, readAllTasks, readPersonTasks, taskPeople, tasksRecountUnits } from "@/lib/crm";
 import { validCrmDate } from "@/lib/crm-rules";
-import { TASKS_BUSY, TASK_ID, TASK_REFUSALS, type TaskRefusal, addTask, dropTask, editTask, markTask, readTaskInput, studioRefusal, taskAssignees, tasksDue } from "@/lib/person-tasks";
+import { AGENDA_NOT_READ, TASKS_BUSY, TASKS_NOT_CHANGED, TASKS_NOT_READ, TASK_ID, TASK_REFUSALS, type TaskRefusal, addTask, dropTask, editTask, markTask, readTaskInput, studioRefusal, taskAssignees, tasksDue } from "@/lib/person-tasks";
 import { LockBusyError } from "@/lib/redis-lock";
 import { StoreFullError } from "@/lib/store";
 import { guardStoreWrite } from "@/lib/store-request";
@@ -23,7 +23,11 @@ import { randomBytes } from "node:crypto";
  * one who can see deals, as on the deals board; an edit may keep the one a
  * task already names, even after they left the team, as a deal may. A change
  * that keeps waiting on another one (lib/crm.ts, changePersonTasks) is
- * answered 409 "busy", with nothing written.
+ * answered 409 "busy", with nothing written. Tasks that cannot be read whole
+ * (lib/crm.ts, TasksUnreadable: a reply missing or of another shape, or a
+ * record that is not a list of tasks) are answered 503 "unreadable" in plain
+ * words, never as no tasks or nothing due, and a change on them writes
+ * nothing (CX-123 rule 24).
  *
  * A store that kept tasks before their count (lib/crm.ts, TASK_COUNT_FIELD)
  * has it made once, when a change first adds a task: every task is read,
@@ -75,6 +79,10 @@ export async function GET(request: NextRequest) {
     const entries = people > 0 ? await readAllTasks(store.statsId) : [];
     return Response.json({ ok: true, day: today, ...tasksDue(entries, today) }, { headers: NO_STORE });
   } catch (error) {
+    if (error instanceof TasksUnreadable) {
+      console.error("tasks could not be read whole", error);
+      return Response.json({ ok: false, error: "unreadable", message: person ? TASKS_NOT_READ : AGENDA_NOT_READ }, { status: 503, headers: NO_STORE });
+    }
     console.error("reading tasks failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });
   }
@@ -126,6 +134,11 @@ export async function POST(request: NextRequest) {
       return Response.json(refused.body, { status: refused.status });
     }
     if (error instanceof LockBusyError) return Response.json({ ok: false, error: "busy", message: TASKS_BUSY }, { status: 409 });
+    // Thrown only by the read before any write (changeOnce, or the recount in it): nothing was written.
+    if (error instanceof TasksUnreadable) {
+      console.error("a task change found tasks it could not read whole", error);
+      return Response.json({ ok: false, error: "unreadable", message: TASKS_NOT_CHANGED }, { status: 503 });
+    }
     console.error("saving a task failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });
   }

@@ -51,7 +51,7 @@ import { AI_CALL_INFRA_MICRO_USD, ANTHROPIC_RATES, PROVIDER_CHARGES_BPS, UPSTASH
 import { assessCustomerWorstCase, MINIMUM_NET_PROFIT_CENTS, type CustomerWorstCase } from "@/lib/net-margin-rules";
 import { captureCustomerTaxInput, customerTaxCeiling, type CustomerTaxInput } from "@/lib/customer-tax-review";
 import { MAX_STORED_PAGE_BYTES } from "@/lib/sales-page";
-import { CONFUSABLE_LATIN_SOURCES } from "@/lib/confusables-latin";
+import { CONFUSABLE_LATIN_SOURCES, LOOKALIKES_BEFORE_GATE_RANGE } from "@/lib/confusables-latin";
 import { PAGE_GOES_ON } from "@/lib/answers-rules";
 import { DISPUTE_COUNTER_FEE_CENTS, DISPUTE_FEE_CENTS, DISPUTE_RESERVE_BPS, MOST_CORRECT_READING, PROVIDER_FEES, REFUND_RESERVE_BPS, REMITTANCE_BPS, STRIPE_TOTAL_BPS, chargedOf, providerFeeCents, receivingOf } from "@/lib/receiving-costs";
 
@@ -64,6 +64,33 @@ export const ASSISTANT_PRICE_CENTS = 6_900;
 export const ASSISTANT_NAME = "Store assistant";
 /** What every reply is shown under, in the store's language too (lib/buyer-words/assistant.ts). */
 export const ASSISTANT_LABEL = "AI assistant";
+
+/**
+ * Pages of each of the customer's lists (subscriptions, open checkout pages) the add-on's start reads before it opens
+ * a page (lib/assistant-billing.ts, startAssistant): a longer list is not known to hold no add-on, and nothing opens.
+ */
+export const ASSISTANT_START_LIST_PAGES = 2;
+/**
+ * The most Stripe calls one start of the add-on makes (lib/assistant-billing.ts, startAssistant): the subscriptions,
+ * the open pages, the open pages read again after Stripe answers 409 for a key in progress, then the price read, the
+ * product read and write, the price write and the checkout POST. Adopting a live add-on makes fewer (its pages, the
+ * invoices read and one ending). Priced at every essential billing event in tests/plan-cost-registry.ts
+ * (assistant-start-reads).
+ */
+export const ASSISTANT_START_STRIPE_CALLS = 3 * ASSISTANT_START_LIST_PAGES + 5;
+/** How long a start waits, when Stripe answers that another tab's request under the same key is in progress, before it reads the open pages again; inside the start's cutoff. */
+export const ASSISTANT_IN_PROGRESS_WAIT_MS = 1_000;
+/**
+ * The hard end of one start of the add-on (lib/assistant-billing.ts, startAssistant, run inside withCutoff from
+ * lib/fetch-timeout.ts): no request is sent after it, one still waiting is given up at it, and the in-progress wait is
+ * not begun when it would end past it. So a start holds the function for at most this long, whatever Stripe does,
+ * well under ASSISTANT_START_STRIPE_CALLS calls each waited on for STRIPE_TIMEOUT_MS; the cost line
+ * (assistant-start-reads, tests/plan-cost-registry.ts) is priced at the smaller of the two. Set to the two Stripe GETs
+ * of STRIPE_TIMEOUT_MS that platform-subscription-search already prices for every essential billing event, so a start
+ * fits inside what that event is already paid for and the line adds nothing. A start that meets it fails as a network
+ * failure does: nothing is written down, and the creator is told something went wrong.
+ */
+export const ASSISTANT_START_CUTOFF_MS = 40_000;
 
 /** The model: the cheapest current one, fixed here so no deployment setting can make a message dearer than priced. */
 export const ASSISTANT_MODEL = "claude-haiku-5-5" as const;
@@ -556,7 +583,22 @@ function lookalike(sign: string, stroke: "l" | "i"): string {
 const SPECIAL_SPACES = /[\u00A0\u1680\u2000-\u200A\u202F\u205F\u3000]/u;
 /** A line break that ends a sentence ("Pro.\nMost") or comes before a capital ("Pro\nMonthly"): read as a space, never joined. */
 const SENTENCE_BREAK = /(?:[.!?:;][\t ]*(?:\r\n|[\n\r\v\f\u0085\u2028\u2029])|[\t ]*(?:\r\n|[\n\r\v\f\u0085\u2028\u2029])[\t ]*(?=[\p{Lu}\p{Lt}]))/gu;
-const MAY_LOOK_ALIKE = /[\u00B5\u0250-\u1FFF\u2070-\uFFFF\u{10000}-\u{10FFFF}]/u;
+/**
+ * The signs that may be or become a look-alike: the micro sign (NFKC makes it
+ * Greek mu), every look-alike of the table before U+0180, listed by the
+ * generator (lib/confusables-latin.ts), and every sign from U+0180 on except
+ * general punctuation. Made from the table, never typed: before Claude 5's
+ * review of #2579 it began at U+0250 with eight letters by hand, and 51 of the
+ * table's own letters below it ("Ra\u0180att") were never read.
+ * Marked pure so a page that never folds text (the buyer's chat reads only two
+ * constants of these rules) leaves the table out of its bundle
+ * (tests/client-bundles.mjs, KEPT_OUT).
+ */
+export const MAY_LOOK_ALIKE = /* @__PURE__ */ gateOf(LOOKALIKES_BEFORE_GATE_RANGE);
+/** The gate from the table's look-alikes before U+0180 (MAY_LOOK_ALIKE). */
+function gateOf(before: readonly number[]): RegExp {
+  return new RegExp(`[\\u00B5${before.map((code) => `\\u{${code.toString(16)}}`).join("")}\\u0180-\\u1FFF\\u2070-\\uFFFF\\u{10000}-\\u{10FFFF}]`, "u");
+}
 /**
  * Text folded to the one form it is matched in, never shown: compatibility
  * forms as their plain letter and digit (fullwidth, mathematical bold, a
@@ -633,7 +675,7 @@ class Readings {
     if (value === undefined) this.made.set(name, (value = make()));
     return value;
   }
-  /** Only a text with a sign that may be or become a look-alike (from the micro sign on, past Latin-1 and Latin Extended) is folded again. */
+  /** Only a text with a sign that may be or become a look-alike (MAY_LOOK_ALIKE) is folded again. */
   private get lookalikes() { return MAY_LOOK_ALIKE.test(this.text); }
   private get splits() { return SPECIAL_SPACES.test(this.text) || /[\n\r\v\f\u0085\u2028\u2029]/u.test(this.text); }
   get plain() { return this.once("plain", () => plainText(this.text)); }

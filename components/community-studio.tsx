@@ -76,6 +76,7 @@ const MESSAGES: Record<string, string> = {
   level: "Pick who may start posts here.",
   store_full: "Your store has reached the most it can hold. Remove something, or shorten a long list of choices, first.",
   server_error: "Something went wrong on our side. Try again in a moment.",
+  not_confirmed: "We could not confirm that change just now. Reload the page to see where it stands, then try again.",
   setup_read_unavailable: "Your community could not be read just now, so nothing was changed. Try again in a moment.",
   report_read_unavailable: "This report could not be checked just now, so nothing was changed and it is still in the list. Try again in a moment.",
 };
@@ -116,6 +117,7 @@ export function CommunityStudio({
   canSettings = true,
   isOwner = true,
   events = null,
+  approval = null,
   rewards = [],
   courses = [],
 }: {
@@ -138,6 +140,8 @@ export function CommunityStudio({
   isOwner?: boolean;
   /** The live events section (components/community-events-studio.tsx), drawn after the basics. */
   events?: React.ReactNode;
+  /** Approval before publishing and what waits for it (components/community-approval-studio.tsx), drawn beside the reports. */
+  approval?: React.ReactNode;
   /** Which course each level hands over (lib/community-points.ts). */
   rewards?: Reward[];
   /** The store's courses: what a level can hand over. */
@@ -215,6 +219,7 @@ export function CommunityStudio({
         ) : (
           events
         )}
+        {approval}
         <Queue queue={queue} busy={busy} run={run} problem={problem} isOwner={isOwner} />
         <Members members={members} total={totals.members} busy={busy} run={run} problem={problem} />
       </div>

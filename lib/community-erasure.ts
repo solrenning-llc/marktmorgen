@@ -12,7 +12,10 @@
  *     they held there;
  *   - their answers to whether they are coming to each live event, and the
  *     answers kept about whether they may come in;
- *   - the record behind the unsubscribe link in the announcements they got.
+ *   - the record behind the unsubscribe link in the announcements they got;
+ *   - what they sent that waits for the creator's approval, the notes about
+ *     what was not published, and how many of theirs were approved
+ *     (lib/community-approval.ts, 543 [CM2]).
  *
  * What they wrote in the feed — posts, comments, likes, poll votes, reports
  * — is kept by post, not by member, and is not reached from here yet; the
@@ -21,7 +24,7 @@
  */
 import { redisPipeline } from "@/lib/redis";
 import { traceKey } from "@/lib/community-trace";
-import { forgetMemberRecord, readConfig } from "@/lib/community";
+import { DamagedConfigError, forgetMemberRecord, readConfigExact } from "@/lib/community";
 import { forgetHandle } from "@/lib/community-mentions";
 import { forgetCommunityUnsub } from "@/lib/community-mail";
 import { forgetPointsPerson } from "@/lib/community-points";
@@ -33,10 +36,21 @@ import { forgetGrantPerson } from "@/lib/chat-grant";
 import { forgetRsvpsPerson } from "@/lib/community-events";
 import { forgetAccessPerson } from "@/lib/community-access";
 import { unindexMember } from "@/lib/community-index";
+import { forgetHeldPerson } from "@/lib/community-approval";
 
 /** Deletes one person from one community. Answers how many records went. */
 export async function forgetCommunityPerson(id: string, who: string, email: string, productIds: string[]): Promise<number> {
-  const config = await readConfig(id).catch(() => null);
+  // Not swallowed (CX-123 rule 24): read as none, every space's record of
+  // the person below would be skipped while the erasure said it was done.
+  // Except a setup stored damaged (review of #3091 by Claude 2), which asking
+  // again never mends: while it cannot be read the community is off for
+  // everyone (communityViewer), so no space's answer about them is read or
+  // written, and those written before expire on their own within five
+  // minutes (lib/community-access.ts, OPEN_SECONDS). Everything else goes now.
+  const config = await readConfigExact(id).catch((error: unknown) => {
+    if (error instanceof DamagedConfigError) return null;
+    throw error;
+  });
   const member = await forgetMemberRecord(id, who);
   let records = member ? 1 : 0;
   if (member?.h) records += await forgetHandle(id, member.h, who);
@@ -53,5 +67,6 @@ export async function forgetCommunityPerson(id: string, who: string, email: stri
   records += await forgetGrantPerson(id, who);
   records += await forgetRsvpsPerson(id, who, email);
   records += await forgetAccessPerson(id, email, (config?.spaces ?? []).map((s) => s.id), productIds);
+  records += await forgetHeldPerson(id, who);
   return records;
 }

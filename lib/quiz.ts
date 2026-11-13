@@ -31,7 +31,7 @@ import { reserveQuizSubmission } from "@/lib/quiz-usage";
 import { MAX_WAIT_MINUTES, drawn, trySeed, waitLeft } from "@/lib/quiz-bank-rules";
 import { QUIZ_USAGE_POLICY } from "@/lib/quiz-usage-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { type DataStore, giveData, needData, noteData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { type Course, ITEM_ID_PATTERN, lessonsInOrder, newItemId } from "@/lib/course";
@@ -372,6 +372,22 @@ export async function readQuizFor(courseId: string, lessonId: string): Promise<Q
 }
 
 /**
+ * One lesson's quiz, read only in its exact shape (CX-123 rule 24): the quiz, or null when Redis answers there is none
+ * (nil). A reply of another shape, a record that does not read as a quiz, a lesson id that cannot be one or no Redis
+ * throws UnknownReplyError, never "this lesson has no quiz". readQuizFor stays as it is for its other callers.
+ */
+export async function readQuizForExact(courseId: string, lessonId: string): Promise<Quiz | null> {
+  const what = "a lesson's quiz";
+  if (!isRedisConfigured() || !ITEM_ID_PATTERN.test(lessonId)) throw new UnknownReplyError(what);
+  const reply = repliesFor(await redisPipeline([["GET", quizKey(courseId, lessonId)]]), 1);
+  if (!reply || (reply[0] !== null && typeof reply[0] !== "string")) throw new UnknownReplyError(what);
+  if (reply[0] === null) return null;
+  const quiz = parseQuiz(reply[0]);
+  if (!quiz) throw new UnknownReplyError(what);
+  return quiz;
+}
+
+/**
  * Where a course's quizzes are counted in the store's data room
  * (lib/store-data.ts): the quizzes the creator writes, and what students'
  * tries leave (their last answers and marks, their count, what they passed).
@@ -652,10 +668,19 @@ export async function resetTries(course: Course, who: string, room: DataStore): 
   );
 }
 
-/** Deletes one student's tries, results and passes in these courses' quizzes (lib/person-erasure.ts). `who` is lib/learn.ts emailKey. */
+/**
+ * Deletes one student's tries, results and passes in these courses' quizzes (lib/person-erasure.ts). `who` is
+ * lib/learn.ts emailKey. Only the exact one-slot DEL count, from zero up to the distinct keys sent, says how many
+ * were deleted; any other reply throws UnknownReplyError, so the erasure reports this part as not done for a retry
+ * instead of a finished part that may have deleted nothing (CX-123 rule 24).
+ */
 export async function forgetQuizPerson(courses: { courseId: string; lessonIds: string[] }[], who: string): Promise<number> {
   if (!courses.length || !isRedisConfigured()) return 0;
-  const keys = courses.flatMap((c) => [passedKey(c.courseId, who), ...c.lessonIds.flatMap((l) => [triesKey(c.courseId, l, who), resultKey(c.courseId, l, who)])]);
-  const [gone] = await redisPipeline([["DEL", ...keys]]);
-  return Number(gone) || 0;
+  const keys = [
+    ...new Set(courses.flatMap((c) => [passedKey(c.courseId, who), ...c.lessonIds.flatMap((l) => [triesKey(c.courseId, l, who), resultKey(c.courseId, l, who)])])),
+  ];
+  const replies = repliesFor(await redisPipeline([["DEL", ...keys]]), 1);
+  const gone = replies ? countOf(replies[0]) : null;
+  if (gone === null || gone > keys.length) throw new UnknownReplyError("the deletion of a student's quiz tries, results and passes");
+  return gone;
 }

@@ -47,8 +47,10 @@ export type MemberSub = {
   amount: number;
   currency: string;
   interval: string;
-  /** Whether a discount already comes off it. */
+  /** Whether a discount already comes off it, or may (its discount state could not be read). */
   discounted: boolean;
+  /** Its discount state could not be read (#4469): no code is put on it until it reads. */
+  discountUnread: boolean;
 };
 
 type Raw = Record<string, unknown>;
@@ -68,10 +70,22 @@ function page(value: unknown, what: string): { rows: Raw[]; more: boolean } {
   return { rows: rows as Raw[], more: listed.has_more };
 }
 
-/** Whether Stripe says a subscription already has a discount on it (old `discount` or new `discounts`). */
+/**
+ * What Stripe says of a subscription's discounts (#4469): "some" (the old `discount` object, or a `discounts` list with
+ * something in it), "none" (a `discounts` list that is empty, with no old `discount`), or "unknown" (no `discounts`
+ * list in its shape: missing, null or not a list). Unknown is never "none": an update sending a new code would replace
+ * a live discount the reading did not see.
+ */
+export function discountState(sub: Raw): "some" | "none" | "unknown" {
+  if (sub.discount && typeof sub.discount === "object" && !Array.isArray(sub.discount)) return "some";
+  if (sub.discount !== undefined && sub.discount !== null) return "unknown";
+  if (!Array.isArray(sub.discounts)) return "unknown";
+  return sub.discounts.length > 0 ? "some" : "none";
+}
+
+/** Whether a subscription may already have a discount on it: a discount seen, or a state that cannot be read. */
 export function hasDiscount(sub: Raw): boolean {
-  if (sub.discount && typeof sub.discount === "object") return true;
-  return Array.isArray(sub.discounts) && sub.discounts.length > 0;
+  return discountState(sub) !== "none";
 }
 
 /** A subscription row made safe for the studio, or null when it is not a running membership of this store. */
@@ -92,6 +106,7 @@ export function readMemberSub(sub: Raw, handles: Set<string>): MemberSub | null 
     currency: typeof price.currency === "string" ? price.currency : "",
     interval: typeof recurring.interval === "string" ? recurring.interval : "",
     discounted: hasDiscount(sub),
+    discountUnread: discountState(sub) === "unknown",
   };
 }
 
@@ -153,6 +168,8 @@ export async function applyMemberDiscount(store: Store, email: string, subscript
   if (subs === null) return { ok: false, reason: "stripe" };
   const sub = subs.find((s) => s.id === subscription);
   if (!sub) return { ok: false, reason: "not_member" };
+  // A discount state that cannot be read is a temporary failure, never "no discount" (#4469): nothing is sent.
+  if (sub.discountUnread) return { ok: false, reason: "stripe" };
   if (sub.discounted) return { ok: false, reason: "discounted" };
   const codes = await listCodes(account);
   if (codes.state !== "ok") return { ok: false, reason: "stripe" };

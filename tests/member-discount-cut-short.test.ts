@@ -39,6 +39,8 @@ const membership = (id: string, extra: Record<string, unknown> = {}) => ({
   status: "active",
   metadata: { store: "cutshortmember", product: "prod000001" },
   items: { data: [{ price: { unit_amount: 2900, currency: "usd", recurring: { interval: "month" } } }] },
+  // No discount, as Stripe says it at this API version: an empty list (lib/member-discount.ts, discountState; #4469).
+  discounts: [],
   ...extra,
 });
 

@@ -1063,9 +1063,15 @@ async function toggleIn(id: string, key: string, ref: string, post: string, who:
   if (held !== 1) await needData(room, [{ slot: POST_SLOT(post), bytes: SET_ENTRY_BYTES }, TRACE_ENTRY]);
   const adds = repliesFor(await redisPipeline([["SADD", key, who], ["SADD", traceKey(id, who), ref]]), 2);
   const added = zeroOrOne(adds?.[0]);
+  const traceAdded = zeroOrOne(adds?.[1]);
   // Unknown: the room taken is kept, since the like may be written.
-  if (added === null || zeroOrOne(adds?.[1]) === null) throw new UnknownReplyError("a like's SADD");
-  if (added === 1) return true;
+  if (added === null || traceAdded === null) throw new UnknownReplyError("a like's SADD");
+  if (added === 1) {
+    // The trace entry an earlier attempt left was already there (its SADD answered 0): the room this press took for it
+    // is given back, never left counted (Codex P on #3819).
+    if (held !== 1 && traceAdded === 0) await giveData(room, [TRACE_ENTRY]);
+    return true;
+  }
   const removed = repliesFor(await redisPipeline([["SREM", key, who], ["SREM", traceKey(id, who), ref]]), 2);
   // Room is given back only once the removal is confirmed.
   const like = zeroOrOne(removed?.[0]);

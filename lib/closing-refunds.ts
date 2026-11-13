@@ -204,6 +204,11 @@ async function intentsOf(account: string, invoice: string, count: () => void): P
   // readable intent, a status this code does not know, or more pages), the readable ones are not known to be all
   // of them: `whole` says so, and the caller never settles a member owed more than they can give back (#4411).
   const whole = !unread && !unknownStatus && objectOf(listed)?.has_more === false;
+  // A paid payment that does not read, or a list that may hold more, may already have been given back or disputed:
+  // nothing is given back on the readable ones beside it (Codex L on #4428; a deliberate tightening of the decision
+  // reviewed on #3120). A row whose status is not paid (processing and the like) has no refund and no dispute yet,
+  // so the readable ones may still be given back over (`whole` false keeps such a member from settling short).
+  if (paid.length && (unread || objectOf(listed)?.has_more !== false)) throw new Error("a paid payment of this invoice, or a page of its payments, did not read; nothing is given back until it does");
   if (paid.length) return { intents: paid, whole };
   if (unread) throw new Error("an invoice's paid payment did not read as a payment intent");
   if (unknownStatus) throw new Error("an invoice's payment has a status that does not read as paid or not paid");

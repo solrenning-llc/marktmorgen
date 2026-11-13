@@ -34,6 +34,7 @@
  * scripts/test_order_admission_redis.py runs the scripts on a real Redis.
  */
 import { allowanceWindow } from "@/lib/allowance-window";
+import { refreshPeriodOnce } from "@/lib/billing-sync";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { admitNonPaying } from "@/lib/free-pool";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
@@ -246,7 +247,10 @@ export function orderConfirmationHoldKeys(folder: string): [string, string] {
  * otherwise it goes on the checkout, as ADMITTED_FIELD, and back to
  * settleAdmitted with its order.
  */
-export async function admitOrders(store: Store, n = 1, now = Date.now(), items = 1): Promise<Admission> {
+export async function admitOrders(given: Store, n = 1, now = Date.now(), items = 1): Promise<Admission> {
+  // A store that pays but whose billing month the record lacks (a trial just turned into its first paid month) has
+  // it read from Stripe here, once per store at a time (lib/billing-sync.ts, refreshPeriodOnce); still unknown, refused below.
+  const store = allowanceWindow(given, now) ? given : await refreshPeriodOnce(given, now);
   const limit = paidOrdersLimitFor(store, now / 1000);
   if (limit === null) {
     const result: Admission={ok:true,hour:null};

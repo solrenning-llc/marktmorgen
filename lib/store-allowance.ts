@@ -22,6 +22,7 @@ import { planAboveSold } from "@/lib/larger-plan";
 import { poolFullWords } from "@/lib/free-pool-rules";
 import type { Tier } from "@/lib/plan";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import type { Store } from "@/lib/store";
 import { type AllowanceKind, KIND_WORDS, NON_PAYING_ALLOWANCES, allowanceFor, askedCeiling, usedWords } from "@/lib/store-allowance-rules";
 
 export type AllowanceStore = WindowFields & { tier?: Tier; sid?: string; statsId?: string | null; handle?: string };
@@ -53,6 +54,12 @@ export function serviceAllowanceWords(store: AllowanceStore, code: string, now =
   return usedWords("integration", allowanceFor(store, "integration", now / 1000), resetWords(store, now, NON_PAYING_ALLOWANCES.ended.integration === 0), standingOf(store, now / 1000), PLANS_ON_SALE, planAboveSold(store.tier ?? "creator"));
 }
 
+/** Whether what a caller passed is a store as lib/store.ts reads it, so its billing month can be read and written back. */
+function isWholeStore(store: AllowanceStore): store is Store {
+  const s = store as Partial<Store>;
+  return typeof s.email === "string" && typeof s.handle === "string" && typeof s.sid === "string" && typeof s.subscriptionId === "string" && !!s.subscriptionId;
+}
+
 /**
  * Takes `n` of a kind from the store's window, or refuses with the sentence to
  * show. `asked`: a confirmation to an address a visitor typed, which may take
@@ -60,7 +67,11 @@ export function serviceAllowanceWords(store: AllowanceStore, code: string, now =
  * is for (lib/store-allowance-rules.ts, ASKED_SHARE_BPS). It is counted in the
  * same figure, by the same two commands.
  */
-export async function takeAllowance(store: AllowanceStore, kind: AllowanceKind, n = 1, now = Date.now(), asked = false): Promise<Taken> {
+export async function takeAllowance(given: AllowanceStore, kind: AllowanceKind, n = 1, now = Date.now(), asked = false): Promise<Taken> {
+  // A whole store that pays but whose billing month the record lacks (a trial just turned into its first paid month)
+  // has it read from Stripe first, once per store at a time (lib/billing-sync.ts, refreshPeriodOnce); still unknown,
+  // refused below. Imported when needed: billing-sync reaches this module through the email it sends.
+  const store: AllowanceStore = allowanceWindow(given, now) || !isWholeStore(given) ? given : await (await import("@/lib/billing-sync")).refreshPeriodOnce(given, now);
   const whole = allowanceFor(store, kind, now / 1000);
   const limit = asked ? askedCeiling(whole) : whole;
   const refuse = (reason: "used" | "unknown" | "pool", message: string): Taken => ({ ok: false, reason, limit, message });

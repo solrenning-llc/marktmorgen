@@ -90,8 +90,8 @@ export async function recordState(store: Store, state: SubscriptionState): Promi
  * shut out by the very thing it would put right. Answers the store as it is
  * now; unchanged when Stripe cannot be asked.
  */
-export async function refreshPeriod(store: Store): Promise<Store> {
-  if (!store.subscriptionId || !isBillingConfigured() || allowanceWindow(store)) return store;
+export async function refreshPeriod(store: Store, now = Date.now()): Promise<Store> {
+  if (!store.subscriptionId || !isBillingConfigured() || allowanceWindow(store, now)) return store;
   try {
     const state = await readSubscription(store.subscriptionId,store);
     if (!(await recordState(store, state))) return store;
@@ -100,6 +100,38 @@ export async function refreshPeriod(store: Store): Promise<Store> {
     console.error("reading a store's billing month failed", error);
     return store;
   }
+}
+
+/** How long one buyer-side read of a store's billing month holds its claim: at most one such call to Stripe per store in it. */
+export const PERIOD_READ_CLAIM_SECONDS = 60;
+const periodReadKey = (store: Store) => `nl:billing:period-read:${storeRef(store)}`;
+
+/**
+ * refreshPeriod for a buyer's path (a checkout's admission, a buyer's email):
+ * a store that pays but whose billing month the record does not have yet (a
+ * trial that has just turned into its first paid month, a renewal past its
+ * grace) would otherwise refuse its buyers until the studio is opened or the
+ * daily job runs. Asks Stripe at most once per store in
+ * PERIOD_READ_CLAIM_SECONDS, whatever the number of buyers: the first takes a
+ * short claim in Redis, and every other one in that time only reads the store
+ * back from Redis (what the first wrote down, or still unknown and refused as
+ * before). No claim (Redis unknown), a failed or unreadable reply: the store
+ * is answered unchanged, still unknown. Never assumes a window.
+ */
+export async function refreshPeriodOnce(store: Store, now = Date.now()): Promise<Store> {
+  if (!store.subscriptionId || !isBillingConfigured() || !isRedisConfigured() || allowanceWindow(store, now)) return store;
+  try {
+    const [claimed] = await redisPipeline([["SET", periodReadKey(store), "1", "NX", "EX", PERIOD_READ_CLAIM_SECONDS]]);
+    // Another buyer holds the claim: what it may have written down already is read back (Redis only, no call to Stripe).
+    if (claimed !== "OK") {
+      const again = await storeForHandle(store.handle);
+      return again && storeRef(again) === storeRef(store) ? again : store;
+    }
+  } catch (error) {
+    console.error("could not claim the read of a store's billing month", error);
+    return store;
+  }
+  return refreshPeriod(store, now);
 }
 
 /**

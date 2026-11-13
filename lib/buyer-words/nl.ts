@@ -148,6 +148,7 @@ export const nl: BuyerWords = {
   unitSaving: (percent) => `je bespaart ${percent}%`,
   chooseOptionFor: (title) => `Kies een optie voor ${title}`,
   chooseOne: "Kies er een",
+  optionFromLink: (label) => `Je kwam hier voor ${label}, dus die optie is hieronder gekozen. Je kunt een andere kiezen.`,
   recommended: "Aanbevolen",
   recommendedAfter: " (aanbevolen)",
   howToPayFor: (title) => `Hoe je ${title} betaalt`,

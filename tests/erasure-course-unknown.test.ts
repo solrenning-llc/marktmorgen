@@ -14,6 +14,12 @@
  *
  * Synthetic: an in-memory Redis whose replies are bent, no email or Stripe call
  * leaves the process.
+ *
+ * Branch dependencies (#4418, agreed with the coordinator 13/11/2026): this
+ * branch waits for #4301 (claude2/course-finish-lost-start) to enter main,
+ * then CLAIM_COURSE_MOMENT moves inside its claimAndStart, the suppression
+ * checked with the hour-long SET. The startFlows window of Codex T's addendum
+ * is a new unit on main after #4307 and #4234 enter it.
  */
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";

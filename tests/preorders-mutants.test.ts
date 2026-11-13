@@ -41,7 +41,7 @@ async function main(): Promise<void> {
   await setExpectedDay(store, p2, "2099-06-01");
   is("one product's read", await soonOne(store, p1), { soon: true, day: "2099-05-01" });
   const state = await soonState(store);
-  is("the store's read: who is coming soon, and every day", [[...state.soon], [...state.days.entries()].sort()], [[p1], [[p1, "2099-05-01"], [p2, "2099-06-01"]]]);
+  is("the store's read: who is coming soon, and every day", [[...state.soon], [...state.days.entries()].sort()], [[p1], ([[p1, "2099-05-01"], [p2, "2099-06-01"]] as [string, string][]).sort()]);
   is("the store's read with no records", await soonState({ ...store, statsId: "" } as Store), { soon: new Set(), days: new Map() });
 
   part("When a pre-order is open");

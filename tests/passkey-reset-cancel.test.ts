@@ -6,6 +6,7 @@
  */
 import { createHash } from "node:crypto";
 import { NextRequest } from "next/server";
+import { emailForSession, openSession } from "@/lib/auth";
 import { PASSKEY_COOKIE } from "@/lib/passkeys";
 import { RESET_DAYS, finishSetup, startSetup } from "@/lib/two-step";
 import { base32Decode, codeAt, STEP_SECONDS } from "@/lib/totp";
@@ -56,11 +57,11 @@ async function turnOnApp(email: string, backup: string): Promise<{ secret: Buffe
   return { secret, codes: finished.codes };
 }
 
-async function signInWithPasskey(key: ReturnType<typeof makePasskey>): Promise<string> {
+async function signInWithPasskey(key: ReturnType<typeof makePasskey>, earlier = ""): Promise<string> {
   const options = await passkeySignIn(asJson(`${ORIGIN}/api/auth/passkey/signin`, { action: "options" }, ""));
   const nonce = (options.headers.get("set-cookie") ?? "").match(new RegExp(`${PASSKEY_COOKIE}=([^;]*)`))?.[1] ?? "";
   const { options: asked } = (await options.json()) as { options: { challenge: string } };
-  const verified = await passkeySignIn(asJson(`${ORIGIN}/api/auth/passkey/signin`, { action: "verify", response: key.answer(asked.challenge) }, `${PASSKEY_COOKIE}=${nonce}`));
+  const verified = await passkeySignIn(asJson(`${ORIGIN}/api/auth/passkey/signin`, { action: "verify", response: key.answer(asked.challenge) }, `${PASSKEY_COOKIE}=${nonce}${earlier ? `; nl_session=${earlier}` : ""}`));
   return (verified.headers.get("set-cookie") ?? "").match(/nl_session=([^;]*)/)?.[1] ?? "";
 }
 
@@ -105,6 +106,23 @@ async function main(): Promise<void> {
   part("With no reset waiting, nothing changes");
   const plain = await signInWithPasskey(key);
   is("a passkey login with nothing to call off still succeeds", plain.length > 0, true);
+  part("A refused login leaves the browser's earlier session as it was; a login that stands replaces it");
+  await redis.pipeline([["SET", rec, JSON.stringify({ ...JSON.parse(String((await redis.pipeline([["GET", rec]]))[0])), reset: due })]]);
+  const earlier = await openSession(ZED);
+  const real = redis.pipeline.bind(redis);
+  (redis as unknown as { pipeline: typeof real }).pipeline = (async (commands: (string | number)[][]) =>
+    commands.some((c) => (c[0] === "SET" || c[0] === "EVAL" || c[0] === "EVALSHA") && c.includes(rec)) ? [] : real(commands)) as typeof real;
+  let refused = "";
+  try {
+    refused = await signInWithPasskey(key, earlier);
+  } finally {
+    (redis as unknown as { pipeline: typeof real }).pipeline = real;
+  }
+  is("the refused login sets no session", refused, "");
+  is("and the browser's earlier session still stands", await emailForSession(earlier), ZED);
+  const stands = await signInWithPasskey(key, earlier);
+  is("a login that stands sets its own session", stands.length > 0 && stands !== earlier, true);
+  is("and closes the earlier one", await emailForSession(earlier), null);
   done();
 }
 void main();

@@ -79,10 +79,6 @@ export async function POST(request: NextRequest) {
         await endSession(id);
         return Response.json({ ok: false, error: "not_recognised" }, { status: 401 });
       }
-      // As with the emailed link: whatever session this browser held before
-      // is closed, and only the new one is kept.
-      const previous = request.cookies.get(SESSION_COOKIE)?.value;
-      if (previous && previous !== id) await endSession(previous);
       // A passkey is the second step: a pending request to turn two-step login off is called off, and what
       // the recovery address opened is closed (lib/two-step.ts). Not by a passkey that is itself set to be
       // removed (owner C3-88): whoever holds it may not be its owner, so it calls off nothing at all, not its
@@ -107,6 +103,11 @@ export async function POST(request: NextRequest) {
           throw error;
         }
       }
+      // As with the emailed link: whatever session this browser held before
+      // is closed, and only the new one is kept. Only once this login stands (#4355): a login refused above leaves
+      // the browser's earlier session as it was.
+      const previous = request.cookies.get(SESSION_COOKIE)?.value;
+      if (previous && previous !== id) await endSession(previous);
       const response = Response.json({ ok: true, next: "/studio" });
       response.headers.append("Set-Cookie", sessionCookie(id));
       response.headers.append("Set-Cookie", `${PASSKEY_COOKIE}=; Path=/api/auth/passkey; Max-Age=0; HttpOnly; SameSite=Strict${secure}`);

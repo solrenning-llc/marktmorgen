@@ -82,11 +82,12 @@ function subscription(status: string, over: Record<string, unknown> = {}, invoic
     created: NOW - 90 * DAY,
     trial_end: NOW - 76 * DAY,
     metadata: { store: handle },
-    customer: { email: owner },
+    customer: { id: "cus_RenewalUnpaid01", email: owner },
     cancel_at: null,
     cancel_at_period_end: false,
     items: { data: [{ current_period_start: period.start, current_period_end: period.end, price: { lookup_key: "nimbus_labs_pro_month", unit_amount: 44900, recurring: { interval: "month" } } }] },
-    latest_invoice: { id: "in_RenewalUnpaid01", status: "open", amount_due: 44900, hosted_invoice_url: "https://invoice.stripe.com/i/acct_x/test_unpaid", next_payment_attempt: NOW + 3 * DAY, ...invoice },
+    // The subscription's own invoice, as Stripe names it (lib/billing.ts, ownLatestInvoice; #4449).
+    latest_invoice: { id: "in_RenewalUnpaid01", subscription: SUB, customer: "cus_RenewalUnpaid01", status: "open", amount_due: 44900, hosted_invoice_url: "https://invoice.stripe.com/i/acct_x/test_unpaid", next_payment_attempt: NOW + 3 * DAY, ...invoice },
     ...over,
   };
 }

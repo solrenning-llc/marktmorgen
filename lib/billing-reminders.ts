@@ -10,7 +10,7 @@
  * charge, and says the date, the amount and the one click that stops it.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { isAddOn, keepCardThatPays, listSubscriptions, pastDueInGrace, periodEnd, planOf } from "@/lib/billing";
+import { isAddOn, keepCardThatPays, listSubscriptions, ownLatestInvoice, pastDueInGrace, periodEnd, planOf } from "@/lib/billing";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { SITE_URL } from "@/lib/site-url";
 import { recordUnpaidRenewal } from "@/lib/billing-sync";
@@ -175,7 +175,8 @@ export function failedPlan(subscription: Record<string, unknown>): FailedPlan | 
     | { id?: unknown; status?: unknown; amount_due?: unknown; hosted_invoice_url?: unknown; next_payment_attempt?: unknown; billing_reason?: unknown }
     | string
     | null;
-  if (!invoice || typeof invoice !== "object") return null;
+  // Only the subscription's own invoice (#4449): another subscription's or customer's never gives this email its link.
+  if (!invoice || typeof invoice !== "object" || !ownLatestInvoice(subscription, invoice as Record<string, unknown>)) return null;
   const invoiceId = typeof invoice.id === "string" && INVOICE_ID.test(invoice.id) ? invoice.id : "";
   const amountCents = typeof invoice.amount_due === "number" ? invoice.amount_due : 0;
   const payUrl = typeof invoice.hosted_invoice_url === "string" ? invoice.hosted_invoice_url : "";

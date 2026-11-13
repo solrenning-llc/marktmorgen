@@ -218,6 +218,31 @@ async function main(): Promise<void> {
   const parts = await buyerLedger({ ...store, statsId: "v".repeat(32) } as Store);
   is("an invoice paid in parts: each part's refund is taken off", parts.buyers.get("rae@example.com")?.cents, 1500);
 
+  // #4398: a store that sold with PayPal and disconnected it still sells through Stripe. Its PayPal sale is read with
+  // the store's sales, and that sale's refund in full, kept here, is read too: the buyer is not back at the full total.
+  {
+    const ps = "p".repeat(32);
+    const at = Math.floor(NOW / 1000) - 5 * DAY;
+    await redis.pipeline([
+      ["ZADD", `nl:ppsell:sales:${ps}`, at, "PAYPALORDER00401"],
+      ["SET", `nl:ppsell:paid:PAYPALORDER00401`, JSON.stringify({ store: ps, order: "PAYPALORDER00401", capture: "PAYPALCAPT000401", email: "pat@example.com", product: "p1", cents: 10000, currency: "usd", at })],
+      ["ZADD", `nl:ppsell:refunded:${ps}`, at + DAY, "PAYPALORDER00401"],
+    ]);
+    const before = { sessions: [...sessions], invoices, refunds, disputes, invoicePayments };
+    sessions.length = 0;
+    invoices = [];
+    refunds = [];
+    disputes = [];
+    invoicePayments = [];
+    const unplugged = await buyerLedger({ ...store, statsId: ps, paypalSeller: undefined } as Store);
+    is("a PayPal sale refunded in full stays out after PayPal is disconnected", unplugged.buyers.get("pat@example.com")?.cents ?? 0, 0);
+    sessions.push(...before.sessions);
+    invoices = before.invoices;
+    refunds = before.refunds;
+    disputes = before.disputes;
+    invoicePayments = before.invoicePayments;
+  }
+
   // A member of a year: one checkout and eleven monthly payments, the last ten days ago, is a best customer, not a new one.
   sessions.push(session("sam1", "sam@example.com", 340, 1000));
   invoices = Array.from({ length: 11 }, (_, i) => ({ ...renewal(`sam${String(i).padStart(2, "0")}`, "sam@example.com", 10 + i * 30, 1000), payments: undefined, payment_intent: `pi_sam${i}` }));

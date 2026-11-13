@@ -25,7 +25,14 @@ const trace = `nl:cm:${ID}:tr:${WHO}`;
 const real = redis.pipeline.bind(redis);
 /** Replaces the reply of the first command named `name` on `key` while set. */
 let bend: { name: string; key: string; reply: unknown } | null = null;
+/** Another tab's whole un-like, run just before this run's SREM reaches Redis (two un-likes at once). */
+let interleave: (() => Promise<unknown>) | null = null;
 redis.pipeline = (async (batch: Command[]) => {
+  if (interleave && batch[0]?.[0] === "SREM" && batch[0][1] === likes) {
+    const other = interleave;
+    interleave = null;
+    await other();
+  }
   const values = await real(batch);
   if (!bend) return values;
   const b = bend;
@@ -87,6 +94,17 @@ async function main(): Promise<void> {
   is("SREM answered null: unknown", await threw(() => toggleLike(ID, POST, WHO, ROOM)), "unknown");
   bend = null;
   is("no room given back for a removal not confirmed", ((await used()) ?? 0) >= (liked ?? 0), true);
+
+  // Claude 1's MEDIUM on #3819: two un-likes at once (a double click, two tabs) both read the like as held; one SREM
+  // answers 1, the other 0. Only the one that removed it gives its room back, or the store is credited twice.
+  part("Two un-likes at once: the room comes back once, never twice");
+  await real([["DEL", likes, trace]]);
+  const bare = await used();
+  is("setup: liked", await toggleLike(ID, POST, WHO, ROOM), true);
+  interleave = () => toggleLike(ID, POST, WHO, ROOM);
+  is("this press: taken back", await toggleLike(ID, POST, WHO, ROOM), false);
+  is("the like is gone", await members(likes), []);
+  is("room back where it was before the like, not below it", await used(), bare);
 
   part("The comment's like reads the same way (rule 30)");
   const clikes = `nl:cm:${ID}:lc:${POST}:k1`;

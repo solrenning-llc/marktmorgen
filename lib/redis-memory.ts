@@ -241,6 +241,12 @@ export class MemoryRedis {
           this.run(["HSET", slots, who, id]);
           return 1;
         }
+        // lib/certificate.ts CERT_SLOT_FREE: a student's slot freed only while it still names the certificate withdrawn.
+        if (key.startsWith("-- marktmorgen:cert-slot-free:v1\n") && args[0] === "1" && args.length === 4) {
+          const [, slots, who, expected] = args;
+          if (this.run(["HGET", slots, who]) !== expected) return 0;
+          return this.run(["HDEL", slots, who]);
+        }
         // lib/assignment.ts HAND_IN_WRITE_IF: a student's work written only over the one it was read as.
         if (key.startsWith("-- marktmorgen:hand-in-write-if:v1\n") && args[0] === "4" && args.length === 12) {
           const [, sub, files, waiting, all, expected, json, path, bytes, review, at, member] = args;

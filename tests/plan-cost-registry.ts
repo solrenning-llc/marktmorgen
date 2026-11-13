@@ -1466,6 +1466,9 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/store-allowance-rules.ts", names: ["STORE_ALLOWANCES", "buyer"] },
       { file: "lib/buyer-actions.ts", names: ["takeBuyerAction", "restingAway"] },
       { file: "app/api/store/community/route.ts", names: ["takeBuyerAction(store, owner ? \"owner\" : \"buyer\")", "UNCOUNTED"] },
+      // 543 [CM2]: a post or comment held for approval is the same action, a few commands lighter than one published, inside the community's and the member's ceilings;
+      // a hold first sweeps at most HOLD_SWEEP expired items. A member's visit to the community reads their own held items with one read (heldOf), MGET only when they have some.
+      { file: "lib/community-approval.ts", names: ["holdPost", "holdComment", "MAX_HELD", "MAX_MINE", "needData", "HOLD_SWEEP", "heldOf", "ZREVRANGEBYSCORE"] },
       { file: "app/api/store/community/rsvp/route.ts", names: ["takeBuyerAction(store)"] },
       { file: "app/api/store/community/chat/route.ts", names: ["takeBuyerAction"] },
       { file: "app/api/store/community/messages/route.ts", names: ["takeBuyerAction"] },

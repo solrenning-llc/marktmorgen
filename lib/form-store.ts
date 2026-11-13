@@ -185,45 +185,118 @@ export function isResponderOf(response: Pick<FormResponse, "answers" | "by">, em
 }
 
 /**
- * Removes, from every list of responses given, each response that is this
- * person's (ARGV[1], lower case) by isResponderOf, on the Redis side so no
- * response travels. Answers how many went.
+ * The same response with every answer that is this person's address (`email`,
+ * lower case, trimmed and compared as isResponderOf does) emptied, nothing else
+ * changed, written as addResponse writes it; null when no answer names them.
+ * Used on a response that is somebody else's: it stays theirs, but the person's
+ * address in it is the person's data and goes with their erasure (Codex L's and
+ * Claude 2's review of #4436). Only a whole answer that is the address is
+ * emptied, as only a whole answer makes a response someone's; a mention inside a
+ * longer text is not looked for.
  */
-export const FORGET_FORM_PERSON = `-- marktmorgen:form-forget:v4
+export function withoutAddress(raw: string, email: string): string | null {
+  const wanted = email.trim().toLowerCase();
+  const value = JSON.parse(raw) as FormResponse;
+  if (!value || typeof value !== "object" || !value.answers || typeof value.answers !== "object") return null;
+  let named = false;
+  const answers = Object.fromEntries(Object.entries(value.answers).map(([id, a]) => {
+    if (typeof a !== "string" || a.trim().toLowerCase() !== wanted) return [id, a];
+    named = true;
+    return [id, ""];
+  }));
+  return named ? JSON.stringify({ ...value, answers }) : null;
+}
+
+/**
+ * For every list of responses given, on the Redis side so no response travels,
+ * in one script, and with nothing written unless all of it reads: removes each
+ * response that is this person's (ARGV[1], lower case) by isResponderOf, and,
+ * in every other response, empties each answer that is their address
+ * (withoutAddress), cutting only that answer's text out of the JSON as
+ * addResponse wrote it, checked to read back with the answer empty. Answers
+ * two lists: {form's place, response, times removed} for each response removed,
+ * and {form's place, response as it was, response as it is now} for each one
+ * emptied. A response it cannot empty exactly is an error, with nothing changed.
+ */
+export const FORGET_FORM_PERSON = `-- marktmorgen:form-forget:v5
 local function trim(text) return string.match(text, "^%s*(.-)%s*$") end
-local out = {}
+local function named(answer) return type(answer) == "string" and string.lower(trim(answer)) == ARGV[1] end
+local function blank(raw, id)
+  if type(id) ~= "string" or not string.match(id, "^[%w_%-]+$") then return nil end
+  local from = string.find(raw, '"answers":{', 1, true)
+  if not from then return nil end
+  local _, e = string.find(raw, '"' .. id .. '":"', from, true)
+  if not e then return nil end
+  local j = e + 1
+  while true do
+    local c = string.sub(raw, j, j)
+    if c == "" then return nil end
+    if c == "\\\\" then j = j + 2 elseif c == '"' then break else j = j + 1 end
+  end
+  return string.sub(raw, 1, e) .. string.sub(raw, j)
+end
+local hits, edits = {}, {}
 for k = 1, #KEYS do
   local items = redis.call("LRANGE", KEYS[k], 0, -1)
-  for _, raw in ipairs(items) do
+  for i, raw in ipairs(items) do
     local ok, value = pcall(cjson.decode, raw)
-    local hit = false
     if ok and type(value) == "table" and type(value.answers) == "table" then
+      local hit = false
       if type(value.by) == "string" and trim(value.by) ~= "" then
         hit = string.lower(trim(value.by)) == ARGV[1]
       else
         for _, answer in pairs(value.answers) do
-          if type(answer) == "string" and string.lower(trim(answer)) == ARGV[1] then hit = true end
+          if named(answer) then hit = true end
         end
       end
-    end
-    if hit then
-      local n = redis.call("LREM", KEYS[k], 0, raw)
-      if n > 0 then
-        table.insert(out, k)
-        table.insert(out, raw)
-        table.insert(out, n)
+      if hit then
+        table.insert(hits, {k, raw})
+      else
+        local text, ids = raw, {}
+        for id, answer in pairs(value.answers) do
+          if named(answer) then
+            text = blank(text, id)
+            if not text then return redis.error_reply("form-forget: an answer naming the person does not read") end
+            table.insert(ids, id)
+          end
+        end
+        if #ids > 0 then
+          local read, now = pcall(cjson.decode, text)
+          if not read or type(now) ~= "table" or type(now.answers) ~= "table" then return redis.error_reply("form-forget: an emptied response does not read") end
+          for _, id in ipairs(ids) do
+            if now.answers[id] ~= "" then return redis.error_reply("form-forget: an emptied response does not read") end
+          end
+          table.insert(edits, {k, i - 1, raw, text})
+        end
       end
     end
   end
 end
-return out`;
+local removed, emptied = {}, {}
+for _, edit in ipairs(edits) do
+  redis.call("LSET", KEYS[edit[1]], edit[2], edit[4])
+  table.insert(emptied, edit[1])
+  table.insert(emptied, edit[3])
+  table.insert(emptied, edit[4])
+end
+for _, hit in ipairs(hits) do
+  local n = redis.call("LREM", KEYS[hit[1]], 0, hit[2])
+  if n > 0 then
+    table.insert(removed, hit[1])
+    table.insert(removed, hit[2])
+    table.insert(removed, n)
+  end
+end
+return {removed, emptied}`;
 
 /**
  * Deletes every response one person gave to any of the store's forms
- * (lib/person-erasure.ts), and gives back to `room` exactly what each one
- * took when it was kept (addResponse): the script answers each response it
- * removed, by form, with how many times it was there. A reply that is not
- * exactly that throws UnknownReply (lib/redis-exact.ts).
+ * (lib/person-erasure.ts), empties their address wherever it is an answer in
+ * somebody else's response (FORGET_FORM_PERSON), and gives back to `room`
+ * exactly what each removed response took when it was kept (addResponse) and
+ * what each emptied one no longer takes. A reply that is not exactly that, or an
+ * emptied response that is not exactly withoutAddress of what it was, throws
+ * UnknownReply (lib/redis-exact.ts), and nothing is given back.
  */
 export async function forgetFormsPerson(statsId: string | null, email: string, room?: DataStore): Promise<number> {
   if (!statsId || !isRedisConfigured()) return 0;
@@ -245,21 +318,40 @@ export async function forgetFormsPerson(statsId: string | null, email: string, r
     throw new UnknownReply(`${what} (its forms)`);
   });
   if (!forms.length) return 0;
-  const [reply] = exactReplies(await redisPipeline([["EVAL", FORGET_FORM_PERSON, forms.length, ...forms.map((f) => responsesKey(statsId, f.id)), email.trim().toLowerCase()]]), 1, what);
-  // Exactly {form's place, response, times removed} for each: any other shape
-  // leaves the deletion unknown (UnknownReply), and nothing is given back.
-  const list = plainList(reply);
-  if (!list || list.length % 3 !== 0) throw new UnknownReply(what);
+  const address = email.trim().toLowerCase();
+  const [reply] = exactReplies(await redisPipeline([["EVAL", FORGET_FORM_PERSON, forms.length, ...forms.map((f) => responsesKey(statsId, f.id)), address]]), 1, what);
+  // Exactly {removed, emptied}: {form's place, response, times removed} for each removed, {form's place, response
+  // as it was, as it is now} for each emptied. Any other shape leaves the deletion unknown (UnknownReply), and
+  // nothing is given back.
+  const parts = plainList(reply);
+  const gone = parts && parts.length === 2 ? plainList(parts[0]) : null;
+  const emptied = parts && parts.length === 2 ? plainList(parts[1]) : null;
+  if (!gone || gone.length % 3 !== 0 || !emptied || emptied.length % 3 !== 0) throw new UnknownReply(what);
+  const formAt = (at: unknown) => (typeof at === "number" && Number.isInteger(at) ? forms[at - 1] : undefined);
   let removed = 0;
   const freed = new Map<string, number>();
-  for (let i = 0; i < list.length; i += 3) {
-    const [at, raw, n] = [list[i], list[i + 1], list[i + 2]];
-    const form = typeof at === "number" && Number.isInteger(at) ? forms[at - 1] : undefined;
+  for (let i = 0; i < gone.length; i += 3) {
+    const [at, raw, n] = [gone[i], gone[i + 1], gone[i + 2]];
+    const form = formAt(at);
     if (!form || typeof raw !== "string" || typeof n !== "number" || !Number.isSafeInteger(n) || n < 1) throw new UnknownReply(what);
     removed += n;
     freed.set(form.id, (freed.get(form.id) ?? 0) + dataBytes([raw], 1) * n);
   }
-  if (room && freed.size) await giveData(room, [...freed].map(([id, bytes]) => ({ slot: ANSWERS_SLOT(id), bytes })));
+  for (let i = 0; i < emptied.length; i += 3) {
+    const [at, was, now] = [emptied[i], emptied[i + 1], emptied[i + 2]];
+    const form = formAt(at);
+    if (!form || typeof was !== "string" || typeof now !== "string") throw new UnknownReply(what);
+    let expected: string | null = null;
+    try {
+      expected = withoutAddress(was, address);
+    } catch {
+      // Falls through to the refusal below.
+    }
+    if (expected === null || now !== expected || isResponderOf(JSON.parse(was) as FormResponse, address)) throw new UnknownReply(what);
+    freed.set(form.id, (freed.get(form.id) ?? 0) + Math.max(0, dataBytes([was], 1) - dataBytes([now], 1)));
+  }
+  const back = [...freed].filter(([, bytes]) => bytes > 0);
+  if (room && back.length) await giveData(room, back.map(([id, bytes]) => ({ slot: ANSWERS_SLOT(id), bytes })));
   return removed;
 }
 

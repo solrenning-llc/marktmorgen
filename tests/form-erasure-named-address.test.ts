@@ -63,6 +63,30 @@ async function main(): Promise<void> {
   is("Ana's erasure then removes hers whole", await forgetFormsPerson(STATS, "ana@example.com", ROOM), 1);
   is("Cleo's erasure removes hers", await forgetFormsPerson(STATS, "cleo@example.com", ROOM), 1);
   is("and the room is back to nothing", await used(), 0);
+
+  part("A reply that is not exactly what was emptied leaves the erasure unknown");
+  redis.clear();
+  await writeForm(STATS, referral);
+  await addResponse(STATS, referral.id, ana, ROOM);
+  const raw = JSON.stringify(ana);
+  const roomKept = await used();
+  type Pipeline = typeof redis.pipeline;
+  const real = redis.pipeline.bind(redis) as Pipeline;
+  const wrong = JSON.stringify({ ...ana, answers: { ...ana.answers, friend: "" } });
+  for (const bad of [[[]], [[1, raw, 1]], [[[], [1, raw]]], [[[], [1, raw, wrong]]], [[[], [1, raw, raw]]], [[[], [2, raw, wrong]]], [[[], [1, "{", "{"]]]]) {
+    redis.pipeline = (async (commands: (string | number)[][]) =>
+      commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:form-forget:")) ? bad : real(commands)) as Pipeline;
+    let threw = false;
+    try {
+      await forgetFormsPerson(STATS, "bob@example.com", ROOM);
+    } catch {
+      threw = true;
+    } finally {
+      redis.pipeline = real;
+    }
+    is(`refused on ${JSON.stringify(bad).slice(0, 60)}`, threw, true);
+    is("and no room given back", await used(), roomKept);
+  }
   done();
 }
 

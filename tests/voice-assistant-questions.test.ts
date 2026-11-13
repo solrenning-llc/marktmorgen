@@ -91,3 +91,14 @@ test("the screen names the list", () => {
   assert.equal(voiceScreen.unreadWords(["assistant"]), "Questions the assistant could not answer");
   assert.equal(voiceScreen.unreadWords(["review", "assistant"]), "Reviews and questions the assistant could not answer");
 });
+
+test("a stored question is read by the shape it was written in, not by today's length bounds (LEVE 1 of Claude 2 on #3731)", async () => {
+  // Written under a bound that is not today's: a question shorter than MIN_ASSISTANT_QUESTION is still a question
+  // this code wrote, so the list reads, and the report is never held "unread" until it ages out.
+  const store = await assistantStore("voice.bounds@example.com", "voice-bounds", [["Ok", S(now - 60_000)], ["?", S(now - 30_000)]]);
+  const read = await assistantMissedExact(store);
+  assert.deepEqual(read.map((q) => q.question).sort(), ["?", "Ok"]);
+  // A row with no question at all is still one this code never wrote: unknown.
+  const empty = await assistantStore("voice.empty@example.com", "voice-empty", [["   ", S(now - 60_000)]]);
+  await assert.rejects(() => assistantMissedExact(empty));
+});

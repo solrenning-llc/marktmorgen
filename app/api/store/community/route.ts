@@ -29,6 +29,7 @@ import {
   withPin,
 } from "@/lib/community";
 import { communityViewer, maySeeSpace } from "@/lib/community-access";
+import { approvalFor, holdComment, holdPost, mustHold, withdrawHeld } from "@/lib/community-approval";
 import { MAX_POLL_DAYS, parsePoll, vote } from "@/lib/community-polls";
 import { mentionsIn, whoIs } from "@/lib/community-mentions";
 import { tell } from "@/lib/community-notify";
@@ -59,7 +60,7 @@ const MAX_FORM_BYTES = 40_000;
 
 const OWNER_ONLY = new Set(["hide", "unhide", "hide-comment", "unhide-comment", "pin", "unpin", "start", "unstart", "mute", "unmute"]);
 /** Acts that are not counted: taking away what was counted when it was made. */
-const UNCOUNTED = new Set(["delete", "delete-comment"]);
+const UNCOUNTED = new Set(["delete", "delete-comment", "withdraw"]);
 
 /**
  * Everything a member, or the creator, does inside a community: plain forms
@@ -145,6 +146,15 @@ export async function POST(request: NextRequest) {
       return back(`${home}/you`, "saved");
     }
 
+    // Taking back one's own post or comment that waits for the creator's
+    // approval, or putting away the note about one that was not published
+    // (543 [CM2]): only one's own, and open to a muted member too.
+    if (action === "withdraw") {
+      const item = field("item", 12);
+      const result = ITEM_ID.test(item) ? await withdrawHeld(id, item, key) : "gone";
+      return back(fromPage, result === "done" ? "withdrawn" : "gone");
+    }
+
     if (!viewer.canWrite) return back(fromPage, viewer.member?.muted ? "muted" : "full");
 
     // ------------------------------------------------------------ a new post
@@ -188,6 +198,11 @@ export async function POST(request: NextRequest) {
       if (!owner && !viewer.member?.n) return back(`${home}/you`, "name");
       if (!owner && config.questions.length && !viewer.member?.qa) return back(`${home}/you`, "questions");
       if (!owner && (!(await within(id, key, "post")) || !(await within(id, key, "postDay")))) return back(fromPage, "slow");
+      // Whether this space's creator approves posts first (543 [CM2]), asked
+      // before a picture is taken for it. The creator is never held. A rule
+      // that cannot be read is thrown: the member is told to try again, and
+      // nothing is published.
+      const holding = !owner && (await mustHold(id, (await approvalFor(id, chosen.id)).posts, "p", viewer.member));
       let img: CommunityImage | null = null;
       if (path) {
         const side = (raw: string) => {
@@ -214,6 +229,23 @@ export async function POST(request: NextRequest) {
         img = { path, w, h, alt: cleanLine(form.get("img_alt"), MAX_ALT_LENGTH) };
       }
       const announce = owner && form.get("kind") === "announcement";
+      // Held for the creator's approval (543 [CM2]): the post waits, seen only
+      // by its author and the creator, and nothing below runs for it (no
+      // mention, no email) until it is approved.
+      if (holding) {
+        let waiting: Awaited<ReturnType<typeof holdPost>>;
+        try {
+          waiting = await holdPost(id, { space: chosen.id, author: key, title, text, img, kind: "post", poll }, store);
+        } catch (error) {
+          if (error instanceof DataRoomError && img) await dropCommunityImage(img.path);
+          throw error;
+        }
+        if (!waiting.ok) {
+          if (img) await dropCommunityImage(img.path);
+          return back(fromPage, waiting.reason === "mine" ? "heldmine" : "heldfull");
+        }
+        return back(fromPage, "held", `held-${waiting.held.id}`);
+      }
       // Not given back if this fails: the post may have been written anyway,
       // and a picture must never end up in two posts.
       let made: Awaited<ReturnType<typeof createPost>>;
@@ -268,6 +300,13 @@ export async function POST(request: NextRequest) {
       if (!owner && config.questions.length && !viewer.member?.qa) return back(`${home}/you`, "questions");
       if (!owner && !(await within(id, key, "comment"))) return back(postPage, "slow", "reply");
       const parent = field("parent", 12);
+      // A space whose creator approves comments first (543 [CM2]): the comment
+      // waits, seen only by its author and the creator; nobody is told of it yet.
+      if (!owner && (await mustHold(id, (await approvalFor(id, post.sp)).comments, "c", viewer.member))) {
+        const waiting = await holdComment(id, { post: post.id, space: post.sp, parent: ITEM_ID.test(parent) ? parent : "", author: key, text }, store);
+        if (!waiting.ok) return back(postPage, waiting.reason === "mine" ? "heldmine" : "heldfull", "reply");
+        return back(postPage, "heldcomment", `held-${waiting.held.id}`);
+      }
       const made = await addComment(id, post.id, { parent: ITEM_ID.test(parent) ? parent : "", author: key, text }, store);
       if (!made.ok) return back(postPage, made.reason === "full" ? "fullcomments" : "gone");
       // Who hears about it: the post's author, the author of the comment this

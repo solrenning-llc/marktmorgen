@@ -7,8 +7,8 @@ import { linkOrigin, originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle, syncTakesBuyer } from "@/lib/store";
 import { canSellProduct, createCheckout } from "@/lib/store-checkout";
 import { countHit } from "@/lib/visit";
-import { releaseStockHold, withStockHold } from "@/lib/stock";
-import { activePlan } from "@/lib/product-extras";
+import { giveBackHold, holdAdmission, releaseStockHold, withStockHold } from "@/lib/stock";
+import { activePlan, limitedStock } from "@/lib/product-extras";
 import { activeFunnel, funnelProductIds } from "@/lib/funnel";
 import { affiliateCookieName, attributionFor } from "@/lib/affiliates";
 import { viaCookieName } from "@/lib/affiliate-setting";
@@ -223,11 +223,23 @@ export async function POST(request: NextRequest) {
   const mark = markFromReferer(request.headers.get("referer"), new URL(origin).hostname);
   const funnel = mark ? ((await funnelHere(store, mark, "product", product.id).catch(() => null))?.funnel.id ?? null) : null;
 
+  // Whether this press took a hold count (holdAdmission), given back when no unit stays held.
+  let charged = false;
   try {
     // A buyer who went back from Stripe's page hands back the unit they held
     // before holding another.
     const previous = request.cookies.get(HOLD_COOKIE)?.value ?? "";
-    if (previous) await releaseStockHold(store, product, previous).catch(() => {});
+    const handedBack = previous ? await releaseStockHold(store, product, previous).catch(() => false) : false;
+    // A limited unit is held for the checkout's whole life, so holding has its own, smaller bound per connection
+    // (lib/stock.ts, HOLDS_PER_ADDRESS). Charged here, after every way back that holds nothing (consent, waitlist,
+    // bundle choice, gift or group), and not for a press that just handed back its own unit; a count that cannot be
+    // read holds nothing (tests/checkout-stock-hold-per-address.test.ts).
+    charged = limitedStock(product) !== null && !handedBack;
+    if (charged) {
+      const admitted = await holdAdmission(store, clientAddress(request));
+      if (admitted === "unknown") return away(`/@${store.handle}?status=error`);
+      if (admitted === "exceeded") return away(`/@${store.handle}?status=slow`);
+    }
 
     // When offers follow the payment, this browser gets a secret, and only
     // its fingerprint travels with the charge.
@@ -310,7 +322,10 @@ export async function POST(request: NextRequest) {
         digitalConsent,
       }),
     );
-    if (!held.ok) return away(`/@${store.handle}?status=${held.reason}`);
+    if (!held.ok) {
+      if (charged) await giveBackHold(store, clientAddress(request));
+      return away(`/@${store.handle}?status=${held.reason}`);
+    }
     // Written down before the buyer leaves, so the plan — or a membership that
     // ends after a set number of payments — is given its end whether or not
     // they come back from paying.
@@ -334,6 +349,8 @@ export async function POST(request: NextRequest) {
     }
     return new Response(null, { status: 303, headers });
   } catch (error) {
+    // Refused before Stripe was asked: no unit stays held, so the hold count is given back.
+    if (charged && (error instanceof OrdersPausedError || error instanceof DigitalConsentMissing)) await giveBackHold(store, clientAddress(request));
     // The store's orders for the month are reached (lib/order-admission.ts): said plainly, nothing charged.
     if (error instanceof OrdersPausedError) return away(`/@${store.handle}?status=${error.reason === "paused" ? "paused" : "error"}`);
     // The box was not checked, or the page was from before its words

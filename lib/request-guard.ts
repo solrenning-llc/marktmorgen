@@ -171,6 +171,24 @@ export async function essentialLimitState(scope: string, who: string, limit: num
   return count <= limit ? "within" : "exceeded";
 }
 
+/**
+ * Gives back one count taken by essentialLimitState when the work it admitted did not happen (lib/stock.ts
+ * giveBackHold). Best effort: a failed give-back leaves the count as taken, the safe way to be wrong. A window that
+ * ended in between starts again at -1 with its own expiry, never a key that outlives it.
+ */
+export async function giveBackLimit(scope: string, who: string, windowSeconds: number): Promise<void> {
+  if (!isRedisConfigured() || !Number.isSafeInteger(windowSeconds) || windowSeconds <= 0) return;
+  try {
+    const key = await limitKey(scope, who);
+    await redisPipeline([
+      ["SET", key, "0", "EX", windowSeconds, "NX"],
+      ["DECR", key],
+    ]);
+  } catch {
+    // Kept as taken.
+  }
+}
+
 export async function withinLimit(scope: string, who: string, limit: number, windowSeconds: number): Promise<boolean> {
   if (!isRedisConfigured()) return true;
   let reply: unknown;

@@ -18,6 +18,7 @@ import { type Held, LockBusyError, releaseLock, takeLock } from "@/lib/redis-loc
 import { OrdersPausedError } from "@/lib/order-admission";
 import { DigitalConsentMissing } from "@/lib/digital-consent";
 import type { Listing, Store } from "@/lib/store";
+import { type LimitState, essentialLimitState, giveBackLimit } from "@/lib/request-guard";
 
 const HOLD_MS = HOLD_SECONDS * 1000;
 const MAX_CHECKS = 5;
@@ -153,6 +154,35 @@ async function countStock(store: Store, product: Listing, now: number, ask: bool
   return { left: Math.max(0, limit - used), unresolved, unknown };
 }
 
+/**
+ * The holds one connection may start on a store's limited products within one hold's time (HOLD_SECONDS). The shared
+ * "checkout" limit (20 a connection and store in ten minutes) let a connection that never pays hold about 60 units at
+ * once, every unit of a small drop, and real buyers saw "Sold out" until the holds ran out. A buyer who goes back and
+ * presses again hands back the unit they held first (the hold cookie) and is not counted, and a press that holds
+ * nothing is given back, so only units actually held count. Ten leaves room for several buyers behind one shared
+ * address (an office, a campus, a carrier's NAT); a count keyed by the browser's own cookie would add nothing, since a
+ * script sends none.
+ * tests/checkout-stock-hold-per-address.test.ts.
+ */
+export const HOLDS_PER_ADDRESS = 10;
+
+/**
+ * Charged right before a checkout that holds a unit opens, for an order with a limited product, and never for a press
+ * that just handed back its own unit: "within" holds, "exceeded" is sent back as too fast, and "unknown" (a count that
+ * could not be read) holds nothing (rule 24). Given back by giveBackHold when nothing stayed held.
+ */
+export function holdAdmission(store: Store, address: string): Promise<LimitState> {
+  return essentialLimitState("stock-hold", `${address}|${store.handle}`, HOLDS_PER_ADDRESS, HOLD_SECONDS);
+}
+
+/**
+ * Gives back a hold admitted by holdAdmission when no unit stayed held: the order was refused before Stripe was asked
+ * (no consent, orders paused) or no unit was free. A checkout Stripe may have opened keeps its count.
+ */
+export function giveBackHold(store: Store, address: string): Promise<void> {
+  return giveBackLimit("stock-hold", `${address}|${store.handle}`, HOLD_SECONDS);
+}
+
 export type StockHold<T> = { ok: true; value: T } | { ok: false; reason: "soldout" | "busy" };
 
 /**
@@ -197,13 +227,14 @@ export async function confirmStock(store: Store, product: Listing, session: stri
  * Hands back the unit a buyer was holding when they go back from Stripe's
  * page and press buy again: the old checkout is closed at Stripe first, so it
  * can never be paid as well. A paid checkout cannot be closed, and stays sold.
+ * True only when a held unit was handed back (holdAdmission is then not charged).
  */
-export async function releaseStockHold(store: Store, product: Listing, session: string): Promise<void> {
-  if (limitedStock(product) === null || !store.statsId || !store.stripeAccountId || !isRedisConfigured()) return;
-  if (!/^cs_(test|live)_[A-Za-z0-9]{8,200}$/.test(session)) return;
+export async function releaseStockHold(store: Store, product: Listing, session: string): Promise<boolean> {
+  if (limitedStock(product) === null || !store.statsId || !store.stripeAccountId || !isRedisConfigured()) return false;
+  if (!/^cs_(test|live)_[A-Za-z0-9]{8,200}$/.test(session)) return false;
   const entries = await readEntries(store, product);
   const entry = entries.get(session);
-  if (!entry || entry.paid) return;
+  if (!entry || entry.paid) return false;
   try {
     const closed = await onAccount(
       "POST",
@@ -211,11 +242,12 @@ export async function releaseStockHold(store: Store, product: Listing, session: 
       `/checkout/sessions/${encodeURIComponent(session)}/expire`,
       new URLSearchParams(),
     );
-    if (closed.status !== "expired") return;
+    if (closed.status !== "expired") return false;
   } catch {
-    return;
+    return false;
   }
   await redisPipeline([["HDEL", stockKey(store.statsId, product.id), session]]);
+  return true;
 }
 
 /** Exactly `count` replies, each an explicit 0 or 1, read by index so a hole in a sparse reply is never taken for one. */
@@ -456,23 +488,24 @@ export async function confirmCartStock(store: Store, products: Listing[], sessio
  * the new cart that it held. A hold on a product no longer in the cart is
  * let go by stockLeft once Stripe says the checkout expired.
  */
-export async function releaseCartStockHolds(store: Store, products: Listing[], session: string): Promise<void> {
+export async function releaseCartStockHolds(store: Store, products: Listing[], session: string): Promise<boolean> {
   const limited = products.filter((product) => limitedStock(product) !== null);
-  if (limited.length === 0 || !store.statsId || !store.stripeAccountId || !isRedisConfigured()) return;
-  if (!/^cs_(test|live)_[A-Za-z0-9]{8,200}$/.test(session)) return;
+  if (limited.length === 0 || !store.statsId || !store.stripeAccountId || !isRedisConfigured()) return false;
+  if (!/^cs_(test|live)_[A-Za-z0-9]{8,200}$/.test(session)) return false;
   const holding: Listing[] = [];
   for (const product of limited) {
     const entry = (await readEntries(store, product)).get(session);
-    if (entry?.paid) return;
+    if (entry?.paid) return false;
     if (entry) holding.push(product);
   }
-  if (holding.length === 0) return;
+  if (holding.length === 0) return false;
   try {
     const closed = await onAccount("POST", store.stripeAccountId, `/checkout/sessions/${encodeURIComponent(session)}/expire`, new URLSearchParams());
-    if (closed.status !== "expired") return;
+    if (closed.status !== "expired") return false;
   } catch {
-    return;
+    return false;
   }
   const statsId = store.statsId;
   await redisPipeline(holding.map((product) => ["HDEL", stockKey(statsId, product.id), session]));
+  return true;
 }

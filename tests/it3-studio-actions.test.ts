@@ -154,7 +154,12 @@ is("\"affiliates\" (plural) opens Affiliates", first("affiliates"), "affiliates"
 is("\"invoice\" opens Payment requests", first("invoice"), "requests");
 is("\"invoice\" also finds the plan's own invoices", ids("invoice").includes("invoices"), true);
 is("\"plan invoice\" opens the plan's own invoices", first("plan invoice"), "invoices");
-is("\"receipt\" opens the plan's own invoices", first("receipt"), "invoices");
+is("a bare \"receipt\" puts the buyers first, where a buyer's order receipt is", first("receipt"), "people");
+is("\"receipt\" still finds the plan's own invoices", ids("receipt").includes("invoices"), true);
+is("\"plan receipt\" opens the plan's own invoices", first("plan receipt"), "invoices");
+is("\"companies\" opens the companies", first("companies"), "companies");
+is("\"company\" (singular) opens the companies", first("company"), "companies");
+is("\"b2b\" finds the companies", ids("b2b").includes("companies"), true);
 is("\"zoom\" opens video calls", first("zoom"), "meetings");
 is("\"move from gumroad\" opens the import", first("move from gumroad"), "import");
 is("\"tax\" opens the tax report", first("tax"), "tax");

@@ -21,7 +21,7 @@ import { planLine, speech, worthLine } from "@/lib/buyer-words";
 import { readAllTimeSales } from "@/lib/stats";
 import { paypalReady } from "@/lib/paypal-sales";
 import { saleClock, salePrice } from "@/lib/store-sale";
-import { preorderDay, soonOne, soonState } from "@/lib/preorders";
+import { knownNotSoon, preorderDay, soonOne, soonState } from "@/lib/preorders";
 import { GoesWellWith, InCollections } from "@/components/store-collections";
 import { canGift } from "@/lib/gift-rules";
 import { canGroup } from "@/lib/group-rules";
@@ -526,11 +526,16 @@ export default async function ProductPage({ params, searchParams }: Params) {
     const other = pairListings.find((p) => p.id === id);
     return other && !other.hidden ? [other] : [];
   });
-  // Which of them can go in the cart now: one more read, only when there are any (lib/preorders.ts).
-  const pairedSoon = cartOn && paired.length ? (await soonState(store).catch(() => ({ soon: new Set<string>() }))).soon : new Set<string>();
-  // A limited one with none left is not offered for the cart (lib/stock.ts); only limited ones are counted.
-  const pairedOut = new Set((await Promise.all(paired.filter((p) => cartOn && p.stock !== null).map(async (p) => ((await stockLeft(store, p).catch(() => 0)) === 0 ? p.id : null)))).filter((id) => id !== null));
-  const pairedCart = new Set(paired.filter((p) => cartOn && cartable(p) && canSellProduct(store, p) && !pairedSoon.has(p.id) && !pairedOut.has(p.id)).map((p) => p.id));
+  // Which of them can go in the cart now: one more read, only when there are any (lib/preorders.ts). A reading that
+  // failed, or came back partial, is unknown, never "none coming soon" (CX-123 rule 24): no pick goes in the cart then.
+  const pairedSoon = cartOn && paired.length ? await soonState(store).catch(() => null) : null;
+  // A limited one with none left is not offered for the cart (lib/stock.ts); only limited ones are counted. Nor one
+  // handing out keys from a pool that is empty or cannot be read, which the checkout would refuse (lib/licence-keys.ts).
+  const pairedOut = new Set((await Promise.all(paired.filter((p) => cartOn && (p.stock !== null || p.keys)).map(async (p) => {
+    const none = (p.stock !== null && (await stockLeft(store, p).catch(() => 0)) === 0) || (p.keys && (await outOfKeys(store, p).catch(() => true)));
+    return none ? p.id : null;
+  }))).filter((id) => id !== null));
+  const pairedCart = new Set(paired.filter((p) => cartOn && pairedSoon && knownNotSoon(pairedSoon, p.id) && cartable(p) && canSellProduct(store, p) && !pairedOut.has(p.id)).map((p) => p.id));
   const shownElsewhere = [...paired.map((p) => p.id), ...alsoBought.map((item) => item.product.id)];
   const more = (
     <>

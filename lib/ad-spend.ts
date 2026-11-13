@@ -14,6 +14,7 @@
  */
 import { randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { type AdSpend, MAX_SPEND_ENTRIES, readSpend } from "@/lib/ad-spend-rules";
 import { metaLines } from "@/lib/meta-ads";
 
@@ -79,6 +80,12 @@ export async function addSpend(
 }
 
 export async function removeSpend(statsId: string, id: unknown): Promise<AdSpend[]> {
-  if (typeof id === "string" && ID.test(id) && isRedisConfigured()) await redisPipeline([["HDEL", key(statsId), id]]);
+  if (typeof id === "string" && ID.test(id) && isRedisConfigured()) {
+    await redisPipeline([["HDEL", key(statsId), id]]);
+    // Removed only once the line reads gone (#4434): a lost or unapplied HDEL
+    // is unknown, so the route answers an error, never "Removed.".
+    const checked = repliesFor(await redisPipeline([["HGET", key(statsId), id]]), 1);
+    if (!checked || checked[0] !== null) throw new UnknownReplyError("removing an ad spend line");
+  }
   return readSpends(statsId);
 }

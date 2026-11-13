@@ -216,7 +216,8 @@ async function main(): Promise<void> {
   const keep = redis.pipeline.bind(redis);
   redis.pipeline = (async (commands: (string | number)[][]) => {
     const reply = await keep(commands);
-    return reply.map((r, i) => (commands[i][0] === "SET" && String(commands[i][1]).endsWith(":cfg") ? null : r));
+    // The save is a compare-and-set since Codex X5's review (EVAL of WRITE_ABOUT_IF over the :cfg key): its answer lost.
+    return reply.map((r, i) => (commands[i][0] === "EVAL" && String(commands[i][3]).endsWith(":cfg") ? null : r));
   }) as typeof redis.pipeline;
   const unconfirmed = await choose({ id: secret, view: "locked" });
   redis.pipeline = keep;

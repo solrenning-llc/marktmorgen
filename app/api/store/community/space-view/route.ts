@@ -1,7 +1,10 @@
 import type { NextRequest } from "next/server";
 import { storeForEmail } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
-import { type Space, readConfig, saveConfig } from "@/lib/community";
+import { type Space, readConfigExactRaw, saveConfigIfSame } from "@/lib/community";
+
+/** How many times the setup is read again when another save lands between the read and the write. */
+const VIEW_TRIES = 3;
 
 /**
  * How a space kept for some buyers looks to a member without one of its
@@ -25,18 +28,24 @@ export async function POST(request: NextRequest) {
     const store = await storeForEmail(ref);
     if (!store) return fail("none");
     const id = store.community?.id;
-    const config = id ? await readConfig(id) : null;
-    if (!id || !config) return fail("not_set_up");
+    if (!id) return fail("not_set_up");
     const spaceId = text(body.id, 12);
-    if (!config.spaces.some((s) => s.id === spaceId)) return fail("unknown", 404);
     const viewed = (space: Space): Space => {
       const rest: Space = { ...space };
       delete rest.shown;
       return view === "locked" ? { ...rest, shown: true } : rest;
     };
-    const next = { ...config, spaces: config.spaces.map((s) => (s.id === spaceId ? viewed(s) : s)) };
-    await saveConfig(id, next);
-    return Response.json({ ok: true, config: next });
+    // Written only over the setup as read (Codex X5's review of #3007): an edit saved meanwhile (another space, a
+    // level, access) is read again and kept, with only this space's view changed on it, a few times at most.
+    for (let attempt = 0; attempt < VIEW_TRIES; attempt += 1) {
+      const read = await readConfigExactRaw(id);
+      if (!read) return fail("not_set_up");
+      const config = read.config;
+      if (!config.spaces.some((s) => s.id === spaceId)) return fail("unknown", 404);
+      const next = { ...config, spaces: config.spaces.map((s) => (s.id === spaceId ? viewed(s) : s)) };
+      if (await saveConfigIfSame(id, read.raw, next)) return Response.json({ ok: true, config: next });
+    }
+    return fail("busy", 409);
   } catch (error) {
     console.error("changing how a community space is shown failed", error);
     return fail("server_error", 500);

@@ -83,6 +83,7 @@ import { type Poll, parsePoll, pollKeys } from "@/lib/community-polls";
 import { type DmSetting, NO_DM, parseDmSetting } from "@/lib/community-dm";
 import { type ChatSetting, NO_CHAT, parseChatSetting } from "@/lib/community-chat";
 import { claimHandle } from "@/lib/community-mentions";
+import { WRITE_ABOUT_IF } from "@/lib/product-about";
 
 /** The author of what the creator writes. Never a member key, which is hex. */
 export const CREATOR = "creator";
@@ -363,6 +364,32 @@ export async function readConfigExact(id: string): Promise<CommunityConfig | nul
   const config = parseConfig(replies[0]);
   if (!config) throw typeof replies[0] === "string" ? new DamagedConfigError() : new UnknownReplyError("a community setup");
   return config;
+}
+
+/**
+ * The settings as readConfigExact reads them, with the exact stored text, for a write that must land only over what
+ * was read (saveConfigIfSame): null only when there is no setup yet; anything unknown throws.
+ */
+export async function readConfigExactRaw(id: string): Promise<{ config: CommunityConfig; raw: string } | null> {
+  if (!COMMUNITY_ID.test(id)) throw new UnknownReplyError("a community id");
+  const replies = repliesFor(await redisPipeline([["GET", cfgKey(id)]]), 1);
+  if (!replies) throw new UnknownReplyError("a community setup");
+  if (replies[0] === null) return null;
+  const config = parseConfig(replies[0]);
+  if (!config || typeof replies[0] !== "string") throw typeof replies[0] === "string" ? new DamagedConfigError() : new UnknownReplyError("a community setup");
+  return { config, raw: replies[0] };
+}
+
+/**
+ * The settings written only while the stored text is still `read` (Codex X5's review of #3007): true when written,
+ * false when another save landed in between and nothing was written; any other answer throws UnknownReplyError. The
+ * same compare-and-set script as a product's description (lib/product-about.ts, modeled in lib/redis-memory.ts).
+ */
+export async function saveConfigIfSame(id: string, read: string, config: CommunityConfig): Promise<boolean> {
+  const reply = repliesFor(await redisPipeline([["EVAL", WRITE_ABOUT_IF, 1, cfgKey(id), read, JSON.stringify(config)]]), 1)?.[0];
+  if (Array.isArray(reply) && reply.length === 1 && reply[0] === 1) return true;
+  if (Array.isArray(reply) && reply.length === 2 && reply[0] === 0) return false;
+  throw new UnknownReplyError("a community's setup save");
 }
 
 export async function saveConfig(id: string, config: CommunityConfig): Promise<void> {

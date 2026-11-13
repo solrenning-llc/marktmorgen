@@ -196,16 +196,23 @@ async function call(method: "GET" | "DELETE", path: string, params: Record<strin
 
 // ---- Reading what is kept ----------------------------------------------------------
 
-function parseConnection(raw: unknown): Connection | null {
+const wholeAccount = (a: unknown): a is MetaAccount => Boolean(a && typeof (a as MetaAccount).id === "string" && typeof (a as MetaAccount).currency === "string");
+
+/**
+ * A kept connection, or null. With `whole`, every ad account in it must be in the shape this code writes, so what the
+ * studio is shown is never a list with one left out, nor "choose an account" for one that could not be read.
+ */
+function parseConnection(raw: unknown, whole = false): Connection | null {
   if (typeof raw !== "string" || !raw) return null;
   try {
     const v = JSON.parse(raw) as Partial<Connection>;
     if (typeof v.user !== "string" || typeof v.token !== "string" || !Array.isArray(v.accounts)) return null;
+    if (whole && !v.accounts.every(wholeAccount)) return null;
     return {
       user: v.user,
       token: v.token,
       expires: Number(v.expires) || 0,
-      accounts: v.accounts.filter((a): a is MetaAccount => Boolean(a && typeof a.id === "string" && typeof a.currency === "string")).map((a) => ({ id: a.id, name: String(a.name ?? ""), currency: a.currency.toLowerCase() })),
+      accounts: v.accounts.filter(wholeAccount).map((a) => ({ id: a.id, name: String(a.name ?? ""), currency: a.currency.toLowerCase() })),
       account: typeof v.account === "string" ? v.account : "",
       connectedAt: Number(v.connectedAt) || 0,
       by: typeof v.by === "string" ? v.by : "",
@@ -218,18 +225,29 @@ function parseConnection(raw: unknown): Connection | null {
   }
 }
 
+const keptCount = (n: unknown): n is number => typeof n === "number" && Number.isSafeInteger(n) && n >= 0;
+
+/**
+ * The last read, only in the shape this code writes (CX-123 rule 24; Claude 6 on #3069): every field present, the day
+ * a date or empty, each figure a non-negative whole number. A record with an amount missing or out of shape is not a
+ * last read (null), never "Read <day>: $0.00 over the last 30 days".
+ */
 function parseRead(raw: unknown): MetaRead | null {
   if (typeof raw !== "string" || !raw) return null;
   try {
-    const v = JSON.parse(raw) as Partial<MetaRead>;
+    const v = JSON.parse(raw) as Record<string, unknown>;
+    if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+    if (typeof v.day !== "string" || (v.day !== "" && !/^\d{4}-\d{2}-\d{2}$/.test(v.day))) return null;
+    if (v.problem !== "" && v.problem !== "currency" && v.problem !== "busy" && v.problem !== "error") return null;
+    if (![v.at, v.after, v.lines, v.cents, v.campaigns].every(keptCount)) return null;
     return {
-      day: typeof v.day === "string" ? v.day : "",
-      at: Number(v.at) || 0,
-      problem: v.problem === "currency" || v.problem === "busy" || v.problem === "error" ? v.problem : "",
-      after: Number(v.after) || 0,
-      lines: Number(v.lines) || 0,
-      cents: Number(v.cents) || 0,
-      campaigns: Number(v.campaigns) || 0,
+      day: v.day,
+      at: v.at as number,
+      problem: v.problem,
+      after: v.after as number,
+      lines: v.lines as number,
+      cents: v.cents as number,
+      campaigns: v.campaigns as number,
     };
   } catch {
     return null;
@@ -266,15 +284,22 @@ export async function metaView(statsId: string | null, currency: string): Promis
   if (!isMetaConfigured()) return null;
   const empty: MetaAdsView = { connected: false, accounts: [], account: null, currency, read: null, broken: "", expires: 0, by: "" };
   if (!statsId || !isRedisConfigured()) return empty;
-  const [rawConn, rawRead] = await redisPipeline([["GET", connKey(statsId)], ["GET", readKey(statsId)]]);
-  const c = parseConnection(rawConn);
-  if (!c) return empty;
+  // Read exactly (CX-123 rule 24): "not connected" only for a confirmed nil, the last read null only for one; a reply
+  // or a kept record in another shape throws, so the studio is never told "not connected", "choose an account" or
+  // "read for the first time within the hour" about a connection it could not read (the Meta route answers 503).
+  const replies = repliesFor(await redisPipeline([["GET", connKey(statsId)], ["GET", readKey(statsId)]]), 2);
+  if (!replies) throw new UnknownReplyError("the studio's Meta connection");
+  const [rawConn, rawRead] = replies;
+  if (rawConn === null) return empty;
+  const c = parseConnection(rawConn, true);
+  const read = rawRead === null ? null : parseRead(rawRead);
+  if (!c || (rawRead !== null && !read)) throw new UnknownReplyError("the studio's Meta connection");
   return {
     connected: true,
     accounts: c.accounts,
     account: c.accounts.find((a) => a.id === c.account) ?? null,
     currency,
-    read: parseRead(rawRead),
+    read,
     broken: c.broken,
     expires: c.expires,
     by: c.by,
@@ -372,7 +397,10 @@ export async function finishMeta(input: {
     await call("DELETE", "/me/permissions", {}, token).catch(() => ({}));
     return { ok: false, error: "accounts" };
   }
-  const before = await readConnection(input.statsId);
+  // The connection it replaces read exactly (CX-123 rule 24): an unknown reply throws before anything is written, so
+  // a connection it could not read is never overwritten with the old person's token kept and the old account's lines
+  // counted under the new one. Only a confirmed nil is "nothing to replace".
+  const before = await exactConnection(input.statsId);
   const connection: Connection = {
     user,
     token: seal(token, context(input.statsId)),
@@ -385,19 +413,26 @@ export async function finishMeta(input: {
     owner: input.owner,
     broken: "",
   };
-  await redisPipeline([
-    ["SET", connKey(input.statsId), JSON.stringify(connection)],
-    ["DEL", readKey(input.statsId)],
-    ["SADD", STORES_KEY, input.statsId],
-    ["SADD", userKey(user), input.statsId],
-  ]);
+  // The new connection's write confirmed (CX-123 rule 24; Claude 6 on #3069): "OK" and a count for each other command.
+  // Otherwise it throws before anything of the old connection is given back, unlisted or deleted, so a write that may
+  // not have landed never leaves the kept connection with its token revoked, and the reconnect answers an error.
+  const written = repliesFor(
+    await redisPipeline([
+      ["SET", connKey(input.statsId), JSON.stringify(connection)],
+      ["DEL", readKey(input.statsId)],
+      ["SADD", STORES_KEY, input.statsId],
+      ["SADD", userKey(user), input.statsId],
+    ]),
+    4,
+  );
+  if (!written || written[0] !== "OK" || written.slice(1).some((reply) => countOf(reply) === null)) throw new UnknownReplyError("a Meta connection written");
   // Another person's token in its place: theirs is given back.
   if (before && before.user !== user) {
     await giveBack(input.statsId, before).catch(() => {});
     await redisPipeline([["SREM", userKey(before.user), input.statsId]]).catch(() => {});
   }
   // Lines of an account no longer read go.
-  if (before && before.account !== connection.account) await redisPipeline([["DEL", linesKey(input.statsId)]]);
+  if (before && before.account !== connection.account) confirmDeleted(await redisPipeline([["DEL", linesKey(input.statsId)]]), 1, "the lines of an account no longer read");
   const view = (await metaView(input.statsId, input.currency)) as MetaAdsView;
   return { ok: true, view, account: view.account };
 }

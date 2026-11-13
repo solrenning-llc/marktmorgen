@@ -1262,6 +1262,25 @@ function invoiceMeta(invoice: Record<string, unknown>): Record<string, string> {
 }
 
 /**
+ * The day a renewal's money came in: when Stripe confirmed the payment
+ * (status_transitions.paid_at), which after a retry is days after the invoice
+ * was made (#4371); the day it was made only when Stripe gives no such time.
+ */
+function renewalPaidDay(invoice: Record<string, unknown>): string {
+  const transitions = invoice.status_transitions as { paid_at?: unknown } | null | undefined;
+  const paidAt = transitions && typeof transitions.paid_at === "number" ? transitions.paid_at : null;
+  return dayKey((paidAt ?? (typeof invoice.created === "number" ? invoice.created : 0)) * 1000);
+}
+
+/**
+ * How many days before the window the renewals are read from: Stripe lists
+ * invoices by when they were made, and its automatic retries can take up to
+ * two months to collect one, so an invoice made that long before the window
+ * may still be paid inside it (#4371).
+ */
+export const RENEWAL_PAID_LATE_DAYS = 62;
+
+/**
  * The payments after the first of this store's memberships and payment plans
  * since `since` (seconds): paid invoices Stripe made because a period came
  * round (billing_reason "subscription_cycle"), on subscriptions this store
@@ -1277,6 +1296,7 @@ export function renewalsFrom(
   const handles = saleHandles(store);
   const cut7 = dayKey(now - 6 * 86400_000);
   const cut30 = dayKey(now - 29 * 86400_000);
+  const cut90 = dayKey(now - (STATS_DAYS - 1) * 86400_000);
   const zero = (): Renewals => ({ payments: 0, cents: 0 });
   const out = { d7: zero(), d30: zero(), d90: zero() };
   const by = new Map<string, Renewals>();
@@ -1290,7 +1310,9 @@ export function renewalsFrom(
     if (currencyOf(invoice) !== currency) continue;
     const cents = typeof invoice.amount_paid === "number" ? invoice.amount_paid : 0;
     if (cents <= 0) continue;
-    const day = dayKey((typeof invoice.created === "number" ? invoice.created : 0) * 1000);
+    const day = renewalPaidDay(invoice);
+    // Read from before the window (RENEWAL_PAID_LATE_DAYS): one paid before it is in none.
+    if (day < cut90) continue;
     const windows: ("d7" | "d30" | "d90")[] = ["d90", ...(day >= cut30 ? (["d30"] as const) : []), ...(day >= cut7 ? (["d7"] as const) : [])];
     for (const w of windows) {
       out[w].payments += 1;
@@ -1328,7 +1350,7 @@ export function renewalEntries(store: Store, invoices: Record<string, unknown>[]
     const cents = typeof invoice.amount_paid === "number" ? invoice.amount_paid : 0;
     if (cents <= 0) continue;
     const source = "channel" in meta ? (meta.channel === "direct" ? "" : meta.channel) : meta.utm_source || UNRECORDED;
-    out.push({ day: dayKey((typeof invoice.created === "number" ? invoice.created : 0) * 1000), cents, currency: currencyOf(invoice), source });
+    out.push({ day: renewalPaidDay(invoice), cents, currency: currencyOf(invoice), source });
   }
   return out;
 }
@@ -1342,7 +1364,7 @@ async function readRenewals(store: Store, since: number, now: number, pages: num
     const list = (await onAccount(
       "GET",
       store.stripeAccountId as string,
-      `/invoices?limit=100&status=paid&created[gte]=${since}${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`,
+      `/invoices?limit=100&status=paid&created[gte]=${since - RENEWAL_PAID_LATE_DAYS * 86400}${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`,
     )) as { data?: unknown; has_more?: unknown };
     const rows = financialPage(list, seen);
     invoices.push(...rows);

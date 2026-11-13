@@ -7,7 +7,8 @@
  * "Alert and Message Dialogs Pattern" (read November 13, 2026): an alert dialog is modal and takes the focus.
  * The question is not modal, so it is now asked the way every other "are you sure" in the studio is asked
  * (components/confirm-action.tsx): a labelled group whose safe choice takes the focus (WCAG 2.4.3, 3.3.6), Escape
- * keeps the currency (2.1.1), and the focus goes back to Save when the question closes (2.4.3).
+ * keeps the currency (2.1.1), and the focus goes back to the currency list when the question closes (2.4.3):
+ * Save is off again once the currency is kept, so it cannot hold the focus.
  */
 import { execFileSync } from "node:child_process";
 import { done, is } from "./check";
@@ -47,7 +48,7 @@ try{
  await page.addScriptTag({content:app.outputFiles[0].text});
  await page.waitForSelector('#store-currency');
  const where=()=>page.evaluate(()=>{const a=document.activeElement;const box=document.getElementById('currency-confirm-title')?.closest('[aria-labelledby]');
-  return {open:!!box,role:box?box.getAttribute('role'):null,modal:box?box.getAttribute('aria-modal'):null,text:a?(a.textContent||'').trim():'',tag:a?a.tagName:'',inside:!!(box&&box.contains(a))};});
+  return {open:!!box,role:box?box.getAttribute('role'):null,modal:box?box.getAttribute('aria-modal'):null,text:a?(a.textContent||'').trim():'',tag:a?a.tagName:'',id:a?a.id:'',inside:!!(box&&box.contains(a))};});
  await page.selectOption('#store-currency','eur');
  await page.getByRole('button',{name:'Save',exact:true}).focus();
  await page.keyboard.press('Enter');
@@ -65,7 +66,7 @@ try{
 const result = JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e", browserScript], { encoding: "utf8", timeout: 90_000, maxBuffer: 2_000_000 })) as {
   errors: string[];
   asked: { open: boolean; role: string | null; modal: string | null; text: string; tag: string; inside: boolean };
-  escaped: { open: boolean; text: string; tag: string };
+  escaped: { open: boolean; text: string; tag: string; id: string };
   currency: string;
 };
 
@@ -75,5 +76,5 @@ is("it is not an alert dialog unless it is modal", result.asked.role !== "alertd
 is("the focus is taken into the question, on the safe choice", [result.asked.inside, result.asked.text], [true, "Keep USD"]);
 is("Escape closes it", result.escaped.open, false);
 is("and keeps the currency", result.currency, "usd");
-is("the focus goes back to Save", [result.escaped.tag, result.escaped.text], ["BUTTON", "Save"]);
+is("the focus goes back to the currency list", result.escaped.id, "store-currency");
 done();

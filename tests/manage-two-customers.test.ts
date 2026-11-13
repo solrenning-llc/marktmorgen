@@ -12,8 +12,11 @@
  *     Stripe's own page still there) and an action on a membership it may hold ends in an error, never "gone".
  */
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { MEMBERSHIP_WORDS } from "@/lib/buyer-words/membership";
 import { NextRequest } from "next/server";
-import { MANAGE_CUSTOMERS_MAX, MANAGE_GRANT_BYTES, grantRecord, membershipsFor, openCancel, openPortal, requestManageLink } from "@/lib/membership-manage";
+import { MANAGE_CUSTOMERS_MAX, MANAGE_GRANT_BYTES, grantRecord, membershipsFor,
+  membershipsListed, openCancel, openPortal, requestManageLink } from "@/lib/membership-manage";
 import { pauseMembership } from "@/lib/membership-pause";
 import { previewSwitch } from "@/lib/tier-switch";
 import { POST as openRoute } from "@/app/api/store/manage/open/route";
@@ -176,7 +179,15 @@ async function main(): Promise<void> {
   const past = "b".repeat(64);
   const pastKey = `nl:manage:link:${createHash("sha256").update(`nimbus-manage:${past}`).digest("hex").slice(0, 40)}`;
   await redis.pipeline([["SET", pastKey, JSON.stringify({ a: ACCOUNT, c: "cus_Second000001", h: "harbor", cs: ["cus_Second000001", "cus_First0000001"], m: 1 })]]);
-  is("a link that may miss customers lists nothing rather than a list missing one", await membershipsFor(store, past), []);
+  // Claude 7's, Codex L's and Claude 1 cloud's MÉDIO on #2985: listing nothing stranded a frequent buyer's every
+  // membership for good. What the link holds is listed, and the page says there may be more.
+  is("a link that may miss customers lists what it holds", ((await membershipsFor(store, past)) ?? []).map((m) => m.id).sort(), ["sub_First0000001", "sub_Second000001"].sort());
+  const pastListed = await membershipsListed(store, past);
+  is("and says the list may not be whole", pastListed?.more, true);
+  is("a link that holds every customer says it is whole", (await membershipsListed(store, token))?.more, false);
+  const pageSource = readFileSync("app/[handle]/manage/page.tsx", "utf8");
+  is("the page says so under the list when it may not be whole", /more \? \(\s*<p[^>]*>\s*\{m\.mayBeMore\}/.test(pageSource), true);
+  for (const [language, words] of Object.entries(MEMBERSHIP_WORDS)) is(`${language}: the words for it`, typeof (words as { mayBeMore?: unknown }).mayBeMore === "string" && ((words as { mayBeMore: string }).mayBeMore.length > 40), true);
   is("and an action on a membership not found on it is an error, not 'gone'", await previewSwitch(store, past, "sub_Other0000001", b.product.id), { ok: false, reason: "error" });
   const forged = "c".repeat(64);
   const forgedKey = `nl:manage:link:${createHash("sha256").update(`nimbus-manage:${forged}`).digest("hex").slice(0, 40)}`;

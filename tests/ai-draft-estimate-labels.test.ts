@@ -29,6 +29,13 @@ is("a plural word before digits is a count, so the figure after it is still list
   ],
   [["12", "40"], ["30", "500"], ["4", "10"]]);
 
+// Codex L on #3437 at 62373a0f99 (MEDIUM): only a label shaped as a heading or a list item numbers a part. A
+// singular word before a figure in a sentence ("Each lesson 45 minutes", "by day 30") is a claim, still listed.
+is("a figure after a singular word inside a sentence is still listed",
+  unsourcedNumbers(["Each lesson 45 minutes. The session 90 minutes long. Reach the goal by day 30."], "", "en"), ["45", "90", "30"]);
+is("control: heading and list labels are still not estimates",
+  unsourcedNumbers(["Week 1: Getting started\nStep 2. Rest\nModule 3 — Practice\n- Lesson 4: Shaping\n## Day 5\nPart 6.\nChapter 7)"], "", "en"), []);
+
 const source = readFileSync("components/ai-draft-review.tsx", "utf8");
 is("the estimates list is never keyed by the written figure alone", /key=\{figure\}/.test(source), false);
 const twice = renderToStaticMarkup(createElement(AiDraftReview, { checks: [false], onToggle: () => {}, estimates: ["10m", "10m"] }));

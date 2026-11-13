@@ -83,7 +83,7 @@ test("erasure: a person who handed nothing in is confirmed absent, nothing delet
   redis.clear();
   const result = await withReplies((_b, a) => a, () => forgetTasksPerson(COURSE, [LESSON, OTHER_LESSON], WHO, ROOM_KEY));
   assert.deepEqual(result.value, { records: 0, files: [] });
-  assert.equal(result.sent.length, 1, "only the reading");
+  assert.equal(result.sent.length, 2, "only the erasure mark (#4271), then the reading");
 });
 
 for (const [label, alter] of [
@@ -97,7 +97,7 @@ for (const [label, alter] of [
     seed(LESSON, JSON.stringify(work(LESSON)));
     const result = await withReplies((b, a) => (isGets(b) ? alter(b, a) : a), () => forgetTasksPerson(COURSE, [LESSON, OTHER_LESSON], WHO, ROOM_KEY));
     assert.ok(result.error, `rejected, not ${JSON.stringify(result.value)}`);
-    assert.equal(result.sent.length, 1, "nothing sent after the reading");
+    assert.equal(result.sent.length, 2, "nothing sent after the reading (the erasure mark, #4271, goes first)");
     assert.equal(typeof redis.run(["GET", sub(LESSON)]), "string", "the record is still there to erase on the retry");
   });
 }

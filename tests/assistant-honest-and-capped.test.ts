@@ -205,6 +205,17 @@ is("and 'cheaper' about the price", heldToFacts("It is cheaper than the usual pr
 is("and 'save' about money", heldToFacts("You save $20 if you buy it now.", bread), false);
 
 const sourdough = "Sourdough Basics. A video course. Price: $49. Refunds within 14 days. 12 lessons.";
+part("E2. A count that names what it counts is held only by a count of the same thing (Codex G, MEDIUM on #3484 at 743f1dad0d)");
+{
+  const lessons = "It includes 12 video lessons.";
+  is("[CORRETO] 12 recipes on a fact of 12 video lessons is refused", heldToFacts("It includes 12 recipes.", lessons), false);
+  is("[CORRETO] 12 downloads on a fact of 12 lessons is refused", heldToFacts("You get 12 downloads.", sourdough), false);
+  is("[CORRETO] in another language too: 12 Rezepte on a fact of 12 lessons", heldToFacts("Der Kurs hat 12 Rezepte.", sourdough), false);
+  is("[CORRETO] a count of a thing on a fact that names no thing", heldToFacts("It has 12 recipes.", "Sourdough Basics. Price: $49. Ask me: 12."), false);
+  is("the same thing is held: 12 lessons on 12 video lessons", heldToFacts("It has 12 lessons.", lessons), true);
+  is("and the same thing in another store language", heldToFacts("Il corso ha 12 lezioni.", lessons), true);
+}
+
 part("F. A number with no unit is a price where the sentence speaks of one");
 is("each priced figure the facts hold only as days or lessons is refused", [
   "The price is 14.", "It costs 14 per month.", "It costs 14/month.", "The course costs fourteen a month.", "Only 12 a month.", "It costs 12 each.",

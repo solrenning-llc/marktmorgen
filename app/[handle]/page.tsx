@@ -22,7 +22,7 @@ import { kitShown } from "@/lib/store-kit";
 import { kitWords } from "@/lib/buyer-words/kit";
 import { Icon } from "@/components/icons";
 import { MAX_STORE_SEARCH, STORE_PAGE_SIZE, searchWords } from "@/lib/catalog";
-import { searchStorePaid } from "@/lib/store-search-index";
+import { SEARCH_UNAVAILABLE, searchStorePaid } from "@/lib/store-search-index";
 import { StoreQuotes } from "@/components/store-quotes";
 import { showsRating, storeSummary } from "@/lib/review-summary";
 import { RatingLine } from "@/components/review-list";
@@ -224,7 +224,10 @@ export default async function StorePage({ params, searchParams }: Params) {
   // A search pays for what it reads before reading it (lib/store-search-index.ts): the full read of the store's
   // listings once for everybody, as shared work kept ten minutes, then only the matches it shows and their checkout
   // boxes. Refused, it reads nothing and the page says why, as for the per-connection limit (c1-cost-store-search).
-  const results = searchAllowed ? await searchStorePaid(store, wantedSearch) : null;
+  const answer = searchAllowed ? await searchStorePaid(store, wantedSearch) : null;
+  // A store whose index is too large to keep offers no search for now, and says so; its products are listed as usual.
+  const searchUnavailable = answer === SEARCH_UNAVAILABLE;
+  const results = answer === SEARCH_UNAVAILABLE ? null : answer;
   const searchRefused = wantedSearch !== "" && searchable && searchWords(wantedSearch).length > 0 && !results;
   const searching = results ? wantedSearch : "";
   // A search that found nothing is counted, by its words only (lib/stats.ts, countSearchMiss).
@@ -435,7 +438,7 @@ export default async function StorePage({ params, searchParams }: Params) {
                         </button>
                       </div>
                       {searchRefused ? (
-                        <p className="st-note mt-3 text-sm" role="status">{bw.searchSlow}</p>
+                        <p className="st-note mt-3 text-sm" role="status">{searchUnavailable ? bw.searchUnavailable : bw.searchSlow}</p>
                       ) : null}
                       {results ? (
                         <p className="mt-3 flex flex-wrap items-baseline justify-between gap-2 text-sm" role="status">

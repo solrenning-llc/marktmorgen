@@ -36,23 +36,39 @@ import { takePublicRequest } from "@/lib/traffic";
 
 /** How long a store's search index is kept: new products are found by a search within this time. */
 export const SEARCH_INDEX_SECONDS = 600;
-/** The largest index kept: a larger one (long titles and summaries in many scripts) is used for that search and not kept. */
+/**
+ * The largest index kept. A larger one (long titles and summaries in many scripts) is not kept and not rebuilt on
+ * every search: its first build notes, under the same key and for the same time, that this list of products is too
+ * large, and the store's searches are refused with an honest sentence (searchUnavailable) while its products are
+ * listed as usual (review of #4172 at 45a4b04514; the coordinator's decision of 13 November 2026).
+ */
 export const SEARCH_INDEX_MAX_BYTES = 1_048_576;
+/** How long one search holds the right to build the index (SET NX): searches meanwhile are refused, never each building it. */
+export const SEARCH_BUILD_LOCK_SECONDS = 60;
 
 export const searchIndexKey = (store: Pick<Store, "sid" | "handle">): string => `nl:search:${store.sid || `h:${store.handle}`}`;
+/** The build lock: one build at a time of a store's index for one list of products (a product added builds at once). */
+export const searchBuildKey = (store: Pick<Store, "sid" | "handle">, signature: string): string => `nl:search:build:${store.sid || `h:${store.handle}`}:${signature}`;
+
+/** What a search answers when the store's index is too large to keep: search is not offered there for now. */
+export const SEARCH_UNAVAILABLE = "unavailable";
 
 type Entry = { title: string; summary: string };
 
 /** The exact list of visible products, in order, as the index is keyed to it. */
 const signatureOf = (ids: string[]): string => createHash("sha256").update(ids.join("\n")).digest("hex").slice(0, 32);
 
-/** The kept index for this exact list of visible products, or null when there is none or it does not read. */
-async function readIndex(key: string, signature: string): Promise<Map<string, Entry> | null> {
+/**
+ * The kept index for this exact list of visible products; "too large" when its build noted it is over
+ * SEARCH_INDEX_MAX_BYTES; null when there is none or it does not read.
+ */
+async function readIndex(key: string, signature: string): Promise<Map<string, Entry> | "too large" | null> {
   try {
     const replies = repliesFor(await redisPipeline([["GET", key]]), 1);
     const raw = replies?.[0];
     if (typeof raw !== "string") return null;
-    const kept = JSON.parse(raw) as { sig?: unknown; rows?: unknown };
+    const kept = JSON.parse(raw) as { sig?: unknown; rows?: unknown; large?: unknown };
+    if (kept.sig === signature && kept.large === true) return "too large";
     if (kept.sig !== signature || !Array.isArray(kept.rows)) return null;
     const index = new Map<string, Entry>();
     for (const row of kept.rows) {
@@ -65,19 +81,31 @@ async function readIndex(key: string, signature: string): Promise<Map<string, En
   }
 }
 
-/** Reads every visible listing once, paid as shared work, and keeps the index; null when the store's window refuses it. */
-async function buildIndex(store: Store, visible: string[], key: string, signature: string): Promise<{ index: Map<string, Entry>; read: Map<string, Listing> } | null> {
+/**
+ * Reads every visible listing once, paid as shared work, and keeps the index. Null when another search is building it
+ * (the build lock, SET NX, answered anything but "OK") or the store's window refuses the build; "too large" when the
+ * index is over SEARCH_INDEX_MAX_BYTES, which is then noted for SEARCH_INDEX_SECONDS so no search rebuilds it.
+ * The lock is taken before anything is paid or read and simply expires: a search after a build finds the index kept.
+ */
+async function buildIndex(store: Store, visible: string[], key: string, signature: string): Promise<{ index: Map<string, Entry>; read: Map<string, Listing> } | "too large" | null> {
   const units = listingUnits(listingsToRead(store, visible));
-  if (units > 0 && !(await takePublicRequest(store, "public", undefined, units, { shared: true }))) return null;
+  if (units > 0) {
+    const locked = repliesFor(await redisPipeline([["SET", searchBuildKey(store, signature), "1", "NX", "EX", SEARCH_BUILD_LOCK_SECONDS]]), 1);
+    // Only an exact "OK" is this search's build; nothing (another build holds it) or a reply of another shape refuses it.
+    if (!locked || locked[0] !== "OK") return null;
+    if (!(await takePublicRequest(store, "public", undefined, units, { shared: true }))) return null;
+  }
   const all = await readListings(store, visible);
-  const index = new Map(all.map((listing) => [listing.id, { title: listing.title, summary: listing.summary }]));
   if (units > 0 && isRedisConfigured()) {
     const rows = all.map((listing) => [listing.id, listing.title, listing.summary]);
     const value = JSON.stringify({ sig: signature, rows });
-    if (Buffer.byteLength(value) <= SEARCH_INDEX_MAX_BYTES) {
-      await redisPipeline([["SET", key, value, "EX", SEARCH_INDEX_SECONDS]]).catch((error) => console.error("store search: keeping the index failed", error));
+    if (Buffer.byteLength(value) > SEARCH_INDEX_MAX_BYTES) {
+      await redisPipeline([["SET", key, JSON.stringify({ sig: signature, large: true }), "EX", SEARCH_INDEX_SECONDS]]).catch((error) => console.error("store search: noting a large index failed", error));
+      return "too large";
     }
+    await redisPipeline([["SET", key, value, "EX", SEARCH_INDEX_SECONDS]]).catch((error) => console.error("store search: keeping the index failed", error));
   }
+  const index = new Map(all.map((listing) => [listing.id, { title: listing.title, summary: listing.summary }]));
   return { index, read: new Map(all.map((listing) => [listing.id, listing])) };
 }
 
@@ -95,7 +123,7 @@ async function paidRead(store: Store, ids: string[]): Promise<Listing[] | null> 
  * window refuses the search (nothing of it is read); `related` is empty when
  * only the checkout boxes are refused.
  */
-export async function searchStorePaid(store: Store, query: string): Promise<{ listings: Listing[]; related: Listing[]; total: number } | null> {
+export async function searchStorePaid(store: Store, query: string): Promise<{ listings: Listing[]; related: Listing[]; total: number } | typeof SEARCH_UNAVAILABLE | null> {
   const visible = visibleIds(store);
   const key = searchIndexKey(store);
   const signature = signatureOf(visible);
@@ -105,8 +133,12 @@ export async function searchStorePaid(store: Store, query: string): Promise<{ li
   // is priced, covers its one GET of at most SEARCH_INDEX_MAX_BYTES at Upstash's paid transfer price
   // (lib/spend-cost-table.ts, UPSTASH_MICRO_USD_PER_GB_TRANSFER: 1 MiB is about $0.00003, a request $0.000063).
   if (!fromRecord && !(await takePublicRequest(store, "public", undefined, 1))) return null;
-  const kept = fromRecord ? null : await readIndex(key, signature);
-  const built = kept ? null : await buildIndex(store, visible, key, signature);
+  const keptOrLarge = fromRecord ? null : await readIndex(key, signature);
+  if (keptOrLarge === "too large") return SEARCH_UNAVAILABLE;
+  const kept = keptOrLarge;
+  const builtOrLarge = kept ? null : await buildIndex(store, visible, key, signature);
+  if (builtOrLarge === "too large") return SEARCH_UNAVAILABLE;
+  const built = builtOrLarge;
   const index = kept ?? built?.index;
   if (!index) return null;
   const found = visible.filter((id) => {

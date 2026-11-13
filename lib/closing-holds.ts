@@ -460,20 +460,36 @@ export async function releaseHolds(store: Store, until: number, nowSeconds = Mat
   const account = store.stripeAccountId;
   if (!account) return out;
   const folder = await storeFolder(storeRef(store));
+  // The ending the store's members were held for (HELD_INDEX, the same value as each member's store_hold): the key a
+  // draft's first try back used, so a draft tried again once its member is no longer held uses it too (#4394).
+  const [heldRaw] = await redisPipeline([["ZSCORE", HELD_INDEX, storeRef(store)]]);
+  const heldAt = typeof heldRaw === "string" && /^\d+$/.test(heldRaw) ? heldRaw : typeof heldRaw === "number" && Number.isSafeInteger(heldRaw) ? String(heldRaw) : "";
   // Each held member's release was taken from the budget with its hold (STRIPE_CALLS_PER_MEMBER): it is never refused for want of it.
   const reached = await eachSold(store, folder, "rc", until, async (rows) => {
-    const todo = rows.filter((sub) => typeof sub.id === "string" && SUB_ID.test(sub.id) && Boolean(sub.metadata?.store_hold) && chargeable(sub));
+    const members = rows.filter((sub) => typeof sub.id === "string" && SUB_ID.test(sub.id) && chargeable(sub));
+    if (!members.length) return true;
+    // The drafts each member's hold kept, read exactly before anything is let go: a member no longer held whose drafts
+    // are still written down did not finish its release, and is let go of what is left (#4394).
+    const kept = repliesFor(await redisPipeline([["HMGET", workKey(folder), ...members.map((sub) => `d:${sub.id as string}`)]]), 1);
+    const drafts = kept && Array.isArray(kept[0]) && kept[0].length === members.length ? (kept[0] as unknown[]) : null;
+    if (!drafts || drafts.some((d) => d !== null && typeof d !== "string")) {
+      console.error("plan-closing: the drafts kept by the holds could not be read; tried again tomorrow");
+      return false;
+    }
+    const todo = members.map((sub, i) => ({ sub, drafts: drafts[i] as string | null })).filter(({ sub, drafts: d }) => Boolean(sub.metadata?.store_hold) || d !== null);
     let failed = 0;
-    const all = await inTurn(todo, until, async (sub) => {
+    const all = await inTurn(todo, until, async ({ sub, drafts: d }) => {
       const id = sub.id as string;
+      const hold = sub.metadata?.store_hold || heldAt;
       try {
-        await onAccount("POST", account, `/subscriptions/${encodeURIComponent(id)}`, releaseBody(sub, nowSeconds), undefined, `closing-release:${id}:${sub.metadata?.store_hold}`);
-        // The drafts its hold kept as drafts go on as they were (their calls were taken with the hold); voided invoices do not come back.
-        const [kept] = await redisPipeline([["HGET", workKey(folder), `d:${id}`]]);
-        for (const draft of typeof kept === "string" ? kept.split(",").filter((d) => INVOICE_ID.test(d)) : []) {
-          await onAccount("POST", account, `/invoices/${encodeURIComponent(draft)}`, new URLSearchParams({ auto_advance: "true", "metadata[closing_draft]": "" }), undefined, `closing-draft-back:${draft}:${sub.metadata?.store_hold}`);
+        // Let go only while still held: a member let go already is never let go a second time.
+        if (sub.metadata?.store_hold) await onAccount("POST", account, `/subscriptions/${encodeURIComponent(id)}`, releaseBody(sub, nowSeconds), undefined, `closing-release:${id}:${sub.metadata?.store_hold}`);
+        // The drafts its hold kept as drafts go on as they were (their calls were taken with the hold); voided invoices
+        // do not come back. Each with the key its first try used; the note goes only once every one went back.
+        for (const draft of d === null ? [] : d.split(",").filter((x) => INVOICE_ID.test(x))) {
+          await onAccount("POST", account, `/invoices/${encodeURIComponent(draft)}`, new URLSearchParams({ auto_advance: "true", "metadata[closing_draft]": "" }), undefined, `closing-draft-back:${draft}:${hold}`);
         }
-        if (typeof kept === "string") await redisPipeline([["HDEL", workKey(folder), `d:${id}`]]);
+        if (d !== null) await redisPipeline([["HDEL", workKey(folder), `d:${id}`]]);
         out.released += 1;
       } catch (error) {
         failed += 1;

@@ -399,7 +399,10 @@ export async function giveBackUnused(
             out.disputed += 1;
             return;
           }
-          if (error instanceof StripeError && error.code === "charge_already_refunded") continue;
+          // Refunded elsewhere since it was read (Codex P on #4428): the figures this split was worked out from are
+          // stale, so nothing more is sent on them. The member is tried again, and the next run reads every charge
+          // and its refunds anew and gives only what is still owed.
+          if (error instanceof StripeError && error.code === "charge_already_refunded") throw new Error("a charge of this invoice was refunded since it was read; the member is tried again on fresh figures");
           throw error;
         }
         const state = refundState(refund, c.intent, give, row.paid.cur);

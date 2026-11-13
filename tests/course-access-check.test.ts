@@ -78,7 +78,8 @@ function main(): void {
   part("Where it is drawn");
   const page = readFileSync("app/studio/course/[product]/page.tsx", "utf8");
   const editor = readFileSync("components/course-editor.tsx", "utf8");
-  is("the course page draws it from what it already read, with no read more", /<CourseAccessCheck\s+check=\{lessonCaptionCheck\(course, streams, captions, writing\)\}/.test(page), true);
+  // Since #4304 unit B the check is drawn on the Videos tab from the block of videos that tab read.
+  is("the course page draws it from what it already read, with no read more", /<CourseAccessCheck\s+check=\{lessonCaptionCheck\(course, videos\.states, videos\.captions, videos\.writing, videos\.only\)\}/.test(page), true);
   is("its links keep the store, as every studio link does", /hrefOf=\{\(id\) => `\$\{studioPath\(store, `lesson=\$\{encodeURIComponent\(id\)\}`, `course\/\$\{product\.id\}`\)\}#\$\{captionsAnchor\(id\)\}`\}/.test(page), true);
   is("the language menu keeps its own id, and the anchor is the Captions title, which takes focus", [/const selectId = `captions-\$\{lessonId\}`/.test(editor), /<p id=\{captionsAnchor\(lessonId\)\} tabIndex=\{-1\} className="field-label">Captions<\/p>/.test(editor)], [true, true]);
   is("and opens the lesson linked to, only when it is one of this course's", /openFirst=\{typeof query\.lesson === "string" && lessonsInOrder\(course\)\.some\(\(\{ lesson \}\) => lesson\.id === query\.lesson\) \? query\.lesson : null\}/.test(page), true);

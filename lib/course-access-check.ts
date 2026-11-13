@@ -50,9 +50,11 @@ export function lessonCaptionCheck(
   states: Record<string, StreamState>,
   captions: Record<string, CaptionTrack[]>,
   writing: Record<string, string[]>,
+  only?: ReadonlySet<string>,
 ): LessonCaptionCheck | null {
+  // `only`: the lessons whose videos were read (the studio's Videos tab reads a block at a time, issue #4304).
   const videos = course.modules.flatMap((unit, m) =>
-    unit.lessons.flatMap((lesson, l) => (lesson.video ? [{ id: lesson.id, title: lesson.title, module: m + 1, lesson: l + 1, path: lesson.video.pathname }] : [])),
+    unit.lessons.flatMap((lesson, l) => (lesson.video && (!only || only.has(lesson.id)) ? [{ id: lesson.id, title: lesson.title, module: m + 1, lesson: l + 1, path: lesson.video.pathname }] : [])),
   );
   if (!videos.length) return null;
   const missing: CheckedLesson[] = [];

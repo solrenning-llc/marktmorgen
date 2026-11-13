@@ -40,7 +40,8 @@ import { CERT_ID_PATTERN, withdrawCertificate } from "@/lib/certificate";
 import { hasProduct, readListing } from "@/lib/catalog";
 import { communityOf, courseChanged, unindexCourse } from "@/lib/community-index";
 import { LockBusyError, withLock } from "@/lib/redis-lock";
-import { claimUpload, dropStream } from "@/lib/stream";
+import { claimUpload, dropStream, streamCaptions, streamStates } from "@/lib/stream";
+import { autoWriting } from "@/lib/auto-captions";
 import { type StreamState, isStreamPath } from "@/lib/stream-rules";
 import { noteIfFinished } from "@/lib/course-finish";
 import { applyTemplate, templateById } from "@/lib/course-templates";
@@ -73,6 +74,18 @@ export async function GET(request: NextRequest) {
   if (!course || !findLesson(course, lessonId)) return Response.json({ ok: false, error: "unknown" }, { status: 404 });
   if (request.nextUrl.searchParams.get("task") === "1") {
     return Response.json({ ok: true, task: await readTaskFor(course.id, lessonId) }, { headers: { "Cache-Control": "no-store" } });
+  }
+  // One lesson's video, read when the lesson is opened in the editor (issue #4304, unit B): its state, captions and
+  // AI captions, three commands within this studio request. A read that fails is "unavailable", never a state.
+  if (request.nextUrl.searchParams.get("video") === "1") {
+    const path = findLesson(course, lessonId)?.lesson.video?.pathname;
+    if (!path || !isStreamPath(path)) return Response.json({ ok: true, state: null, captions: [], writing: [] }, { headers: { "Cache-Control": "no-store" } });
+    try {
+      const [states, tracks, writing] = await Promise.all([streamStates([path]), streamCaptions([path]), autoWriting([path])]);
+      return Response.json({ ok: true, state: states[path] ?? null, captions: tracks[path] ?? [], writing: writing[path] ?? [] }, { headers: { "Cache-Control": "no-store" } });
+    } catch {
+      return Response.json({ ok: false, error: "unavailable" }, { status: 503, headers: { "Cache-Control": "no-store" } });
+    }
   }
   if (request.nextUrl.searchParams.get("quiz") === "1") {
     return Response.json({ ok: true, quiz: await readQuizFor(course.id, lessonId) }, { headers: { "Cache-Control": "no-store" } });

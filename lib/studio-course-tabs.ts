@@ -15,12 +15,14 @@ import { emailKey, studentEmail, studentsPage } from "@/lib/learn";
 import { passedFor } from "@/lib/quiz";
 import { isUnreadSubmission, submissionsOf, waitingWork } from "@/lib/assignment";
 import { recentComments } from "@/lib/lesson-comments";
+import { streamCaptions, streamStates } from "@/lib/stream";
+import { autoWriting } from "@/lib/auto-captions";
 
-export const COURSE_TABS = ["course", "work", "comments", "students", "certificates"] as const;
+export const COURSE_TABS = ["course", "videos", "work", "comments", "students", "certificates"] as const;
 export type CourseTab = (typeof COURSE_TABS)[number];
 
 /** How many rows a tab shows at a time, each sized so the tab's worst case fits the page's reads. */
-export const COURSE_TAB_PAGE: Record<Exclude<CourseTab, "course">, number> = {
+export const COURSE_TAB_PAGE: Record<Exclude<CourseTab, "course" | "videos">, number> = {
   // A piece of work can hold MAX_ANSWER_TEXT and MAX_FEEDBACK characters (up to ~44 KB): three fit the page's
   // bytes with the ids of every page before it (MAX_WORK_PAGES).
   work: 3,
@@ -79,4 +81,28 @@ export async function studentsTab(course: Course, cursor: string) {
 /** A page of the certificates by cursor (unit C); null when they could not be read (rule 24). */
 export async function certificatesTab(courseId: string, cursor: string) {
   return certificatesPage(courseId, cursor, COURSE_TAB_PAGE.certificates, TAB_BYTES).catch(() => null);
+}
+
+/**
+ * Lesson videos the Videos tab checks at a time (unit B): three reads a video (its state, its captions, its AI
+ * captions), so twenty fit the page's reads with room.
+ */
+export const VIDEO_BLOCK = 20;
+
+/**
+ * One block of the course's lesson videos, in course order, with their states, captions and AI captions: what the
+ * captions check reads. `from`–`to` of `total` say which lessons these are. Null when they could not be read.
+ */
+export async function videosTab(course: Course, pageAsked: number) {
+  const all = lessonsInOrder(course).flatMap(({ lesson }) => (lesson.video ? [{ id: lesson.id, path: lesson.video.pathname }] : []));
+  const pages = Math.max(1, Math.ceil(all.length / VIDEO_BLOCK));
+  const page = Math.min(Math.max(1, pageAsked), pages);
+  const block = all.slice((page - 1) * VIDEO_BLOCK, page * VIDEO_BLOCK);
+  const paths = block.map((v) => v.path);
+  try {
+    const [states, captions, writing] = await Promise.all([streamStates(paths), streamCaptions(paths), autoWriting(paths)]);
+    return { page, pages, from: block.length ? (page - 1) * VIDEO_BLOCK + 1 : 0, to: (page - 1) * VIDEO_BLOCK + block.length, total: all.length, only: new Set(block.map((v) => v.id)), states, captions, writing };
+  } catch {
+    return null;
+  }
 }

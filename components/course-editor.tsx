@@ -113,8 +113,16 @@ const Streams = createContext<{
   wrote: (path: string, langs: string[]) => void;
   /** Whether this person may have captions written by AI, charged to the plan's card; and the store's language. */
   auto: { can: boolean; spoken: string };
+  /**
+   * Whether each video's state, captions and AI captions were read (issue #4304, unit B): the page reads none, the
+   * lesson asks for its own when it is opened. Until "read", nothing is said about the video's state.
+   */
+  checked: Record<string, "checking" | "read" | "unknown">;
+  check: (lessonId: string, path: string) => void;
 }>({
   states: {},
+  checked: {},
+  check: () => {},
   learned: () => {},
   captions: {},
   writing: {},
@@ -277,11 +285,34 @@ export function CourseEditor({
   const [focusExamples, setFocusExamples] = useState(0);
   const examplesLine = useRef<HTMLParagraphElement>(null);
   const [streamStates, setStreamStates] = useState<Record<string, StreamState>>(streams);
-  const learned = (path: string, state: StreamState) => setStreamStates((known) => ({ ...known, [path]: state }));
+  const learned = (path: string, state: StreamState) => {
+    setStreamStates((known) => ({ ...known, [path]: state }));
+    setChecked((known) => ({ ...known, [path]: "read" }));
+  };
   const [captionTracks, setCaptionTracks] = useState<Record<string, CaptionTrack[]>>(captions);
   const captioned = (path: string, tracks: CaptionTrack[]) => setCaptionTracks((known) => ({ ...known, [path]: tracks }));
   const [writingNow, setWritingNow] = useState<Record<string, string[]>>(writing);
   const wrote = (path: string, langs: string[]) => setWritingNow((known) => ({ ...known, [path]: langs }));
+  // Videos whose state was read: the page's own (a video just placed is learned here too) and those asked for.
+  const [checked, setChecked] = useState<Record<string, "checking" | "read" | "unknown">>(() => Object.fromEntries(Object.keys(streams).map((path) => [path, "read" as const])));
+  async function check(lessonId: string, path: string) {
+    if (checked[path] === "read" || checked[path] === "checking") return;
+    setChecked((known) => ({ ...known, [path]: "checking" }));
+    try {
+      const response = await fetch(`/api/store/course?id=${productId}&lessonId=${lessonId}&video=1`, { cache: "no-store" });
+      const data = (await response.json()) as { ok?: boolean; state?: unknown; captions?: unknown; writing?: unknown };
+      // Only an answer in its exact shape is a state; anything else is unknown, and nothing is said or done on it.
+      const state = data.state;
+      const known = state === null || (typeof state === "string" && state in STREAM_WORDS);
+      if (!data.ok || !known || !Array.isArray(data.captions) || !Array.isArray(data.writing)) throw new Error("unknown");
+      if (typeof state === "string") setStreamStates((all) => ({ ...all, [path]: state as StreamState }));
+      setCaptionTracks((all) => ({ ...all, [path]: data.captions as CaptionTrack[] }));
+      setWritingNow((all) => ({ ...all, [path]: (data.writing as unknown[]).filter((code): code is string => typeof code === "string") }));
+      setChecked((all) => ({ ...all, [path]: "read" }));
+    } catch {
+      setChecked((all) => ({ ...all, [path]: "unknown" }));
+    }
+  }
 
   async function run(payload: Record<string, unknown>): Promise<Answer> {
     setBusy(true);
@@ -302,7 +333,7 @@ export function CourseEditor({
 
   return (
     <Look.Provider value={look ? { look, language } : null}>
-    <Streams.Provider value={{ states: streamStates, learned, captions: captionTracks, captioned, writing: writingNow, wrote, auto }}>
+    <Streams.Provider value={{ states: streamStates, learned, captions: captionTracks, captioned, writing: writingNow, wrote, auto, checked, check }}>
     <div className="mt-8 space-y-6">
       {error ? (
         <p className="notice notice-error" role="alert">{error}</p>
@@ -870,6 +901,13 @@ function LessonEditor({
   const unsaved = title !== lesson.title || preview !== lesson.preview || link !== (lesson.link ?? "") || text !== savedText;
   useLeaveGuard(unsaved || uploading !== null);
   const streams = useContext(Streams);
+  // The lesson's own video, read once it is opened (issue #4304, unit B): the page no longer reads every video's.
+  const openedVideo = lesson.video && isStreamPath(lesson.video.pathname) ? lesson.video.pathname : null;
+  useEffect(() => {
+    if (openedVideo) streams.check(lesson.id, openedVideo);
+    // Once a lesson and its video: a second press while one read is out is skipped inside check.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lesson.id, openedVideo]);
 
   async function loadText() {
     onError(null);
@@ -950,7 +988,10 @@ function LessonEditor({
       </div>
     </div>
   );
-  const streamed = lesson.video && isStreamPath(lesson.video.pathname) ? streams.states[lesson.video.pathname] ?? "working" : null;
+  const videoPath = lesson.video && isStreamPath(lesson.video.pathname) ? lesson.video.pathname : null;
+  // Read when the lesson is opened (issue #4304, unit B); a state is said only once it was read.
+  const videoCheck = videoPath ? streams.checked[videoPath] : undefined;
+  const streamed = videoPath && videoCheck === "read" ? streams.states[videoPath] ?? "working" : null;
   return (
     <div className="mt-4 space-y-5 border-t border-line pt-4">
       <form
@@ -1004,9 +1045,13 @@ function LessonEditor({
             >
               Remove video
             </button>
-            {streamed ? (
-              <p className={`w-full text-sm ${streamed === "failed" ? "font-semibold text-danger" : "text-ink-mute"}`} role="status">
-                {STREAM_WORDS[streamed]}
+            {videoPath ? (
+              <p className={`w-full text-sm ${streamed === "failed" ? "font-semibold text-danger" : "text-ink-mute"}`} role="status" aria-live="polite">
+                {streamed
+                  ? STREAM_WORDS[streamed]
+                  : videoCheck === "unknown"
+                    ? "We could not check this lesson's video just now. Close the lesson and open it again in a moment."
+                    : "Checking this lesson's video…"}
               </p>
             ) : null}
             {streamed === "ready" || streamed === "working" ? (

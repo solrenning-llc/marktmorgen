@@ -21,12 +21,15 @@ export function CourseAccessCheck({
   hrefOf,
   canWrite,
   canReupload,
+  scope,
 }: {
   check: LessonCaptionCheck | null;
   productId: string;
   hrefOf: (lessonId: string) => string;
   canWrite: boolean;
   canReupload: boolean;
+  /** Which lesson videos were checked, when not all of them were ("lessons 1–20 of 200"): never said as all. */
+  scope?: string;
 }) {
   if (!check) return null;
   return (
@@ -40,7 +43,7 @@ export function CourseAccessCheck({
       {check.done ? (
         <p className="mt-5 flex items-center gap-2 text-sm text-ink" data-course-captions="done">
           <Icon name="check" size={16} className="text-violet-deep" />
-          Every lesson video has captions.
+          {scope ? `Every lesson video in ${scope} has captions.` : "Every lesson video has captions."}
         </p>
       ) : null}
       {check.missing.length ? (

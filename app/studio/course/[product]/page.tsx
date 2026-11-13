@@ -17,7 +17,7 @@ import { lessonCount, lessonsInOrder, readCourse } from "@/lib/course";
 import { captionsAnchor, lessonCaptionCheck } from "@/lib/course-access-check";
 import { CourseAccessCheck } from "@/components/course-access-check";
 import { canSellProduct } from "@/lib/store-checkout";
-import { COURSE_TAB_PAGE, MAX_TAB_PAGES, MAX_WORK_PAGES, type CourseTab, certificatesTab, commentsTab, courseTab, studentsTab, tabCursor, tabPage, workTab } from "@/lib/studio-course-tabs";
+import { COURSE_TAB_PAGE, MAX_TAB_PAGES, MAX_WORK_PAGES, type CourseTab, VIDEO_BLOCK, certificatesTab, commentsTab, courseTab, studentsTab, tabCursor, tabPage, videosTab, workTab } from "@/lib/studio-course-tabs";
 import { CertificateValidity } from "@/components/certificate-validity";
 import {
   CertificateSwitch, CourseStart,
@@ -29,8 +29,8 @@ import {
 import { readListing, readTitles, visibleIds } from "@/lib/catalog";
 import { CourseShelfStudio } from "@/components/course-shelf-studio";
 import { templateById } from "@/lib/course-templates";
-import { isStreamConfigured, streamCaptions, streamStates } from "@/lib/stream";
-import { autoRefundsOwed, autoWriting } from "@/lib/auto-captions";
+import { isStreamConfigured } from "@/lib/stream";
+import { autoRefundsOwed } from "@/lib/auto-captions";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { isBillingConfigured } from "@/lib/billing";
 import { can } from "@/lib/team-roles";
@@ -47,6 +47,7 @@ export const metadata: Metadata = {
 /** The course page's tabs, in order, with the words of their links (issue #4304). */
 const COURSE_TAB_LINKS: [CourseTab, string][] = [
   ["course", "Lessons"],
+  ["videos", "Videos"],
   ["work", "Work handed in"],
   ["comments", "Comments"],
   ["students", "Students"],
@@ -143,14 +144,9 @@ export default async function StudioCoursePage({
   const titles = new Map(lessonsInOrder(course).map(({ lesson }) => [lesson.id, lesson.title]));
   const hasTasks = lessonsInOrder(course).some(({ lesson }) => lesson.task);
   const onCourse = tab === "course";
-  // Where each lesson video kept by the video service stands (lib/stream.ts), and its captions; read on the
-  // lessons tab only (reading them when a lesson is opened is unit B).
-  const videoPaths = onCourse ? lessonsInOrder(course).flatMap(({ lesson }) => (lesson.video ? [lesson.video.pathname] : [])) : [];
-  const streams = onCourse ? await streamStates(videoPaths).catch(() => ({})) : {};
-  const captions = onCourse ? await streamCaptions(videoPaths).catch(() => ({})) : {};
-  // And those being written by AI (lib/auto-captions.ts), which only somebody
-  // who may spend on the plan's card, on a store with a plan, may ask for.
-  const writing = onCourse ? await autoWriting(videoPaths).catch(() => ({})) : {};
+  // Lesson videos (unit B): the lessons tab reads none; the editor reads one lesson's state, captions and AI
+  // captions when it is opened, in a request of its own. The Videos tab checks a block of them for captions.
+  const videos = tab === "videos" ? await videosTab(course, page) : null;
   // Refunds for AI captions Stripe has not confirmed yet, shown to whoever may see the plan's card.
   const owedRows: Awaited<ReturnType<typeof autoRefundsOwed>> = onCourse && can(view.role, "billing") ? await autoRefundsOwed(folder).catch(() => []) : [];
   const autoCan =
@@ -285,13 +281,6 @@ export default async function StudioCoursePage({
             </ul>
           </section>
         ) : null}
-        <CourseAccessCheck
-          check={lessonCaptionCheck(course, streams, captions, writing)}
-          productId={product.id}
-          hrefOf={(id) => `${studioPath(store, `lesson=${encodeURIComponent(id)}`, `course/${product.id}`)}#${captionsAnchor(id)}`}
-          canWrite={autoCan}
-          canReupload={isStreamConfigured()}
-        />
         <CourseEditor
           productId={product.id}
           initialTemplate={initialTemplate?.id ?? null}
@@ -299,9 +288,9 @@ export default async function StudioCoursePage({
           initial={course}
           draft={product.hidden === true}
           folder={folder}
-          streams={streams}
-          captions={captions}
-          writing={writing}
+          streams={{}}
+          captions={{}}
+          writing={{}}
           auto={{ can: autoCan, spoken: parseLanguage(store.language) }}
           title={product.title}
           ai={aiState}
@@ -328,6 +317,29 @@ export default async function StudioCoursePage({
           )}
         </section>
 
+          </>
+        ) : null}
+        {tab === "videos" ? (
+          <>
+            {videos === null ? (
+              <p role="status" className="notice mt-5">
+                The lesson videos could not be checked just now. Reload this page in a moment; this does not mean they have no captions.
+              </p>
+            ) : videos.total === 0 ? (
+              <p className="mt-5 text-ink-soft">This course has no lesson videos yet. Add one to a lesson on the Lessons tab, and its captions are checked here.</p>
+            ) : (
+              <>
+                <CourseAccessCheck
+                  check={lessonCaptionCheck(course, videos.states, videos.captions, videos.writing, videos.only)}
+                  productId={product.id}
+                  hrefOf={(id) => `${studioPath(store, `lesson=${encodeURIComponent(id)}`, `course/${product.id}`)}#${captionsAnchor(id)}`}
+                  canWrite={autoCan}
+                  canReupload={isStreamConfigured()}
+                  scope={videos.pages > 1 ? `lesson videos ${videos.from}–${videos.to} of ${videos.total}` : undefined}
+                />
+                <TabPager label="Pages of lesson videos" noun="lesson videos" page={videos.page} size={VIDEO_BLOCK} shown={videos.to - videos.from + 1} total={videos.total} maxPages={videos.pages} href={(at) => tabHref("videos", at)} />
+              </>
+            )}
           </>
         ) : null}
         {tab === "work" ? (

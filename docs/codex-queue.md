@@ -6298,6 +6298,8 @@ Crie uma seção pública de ferramentas gratuitas, cada uma com página própri
 
 245. [SP2] Página "Grow without switching"
 
+Estado (Claude 1, 12/11/2026 13h44 Fortaleza): **unidade 1 testada num PR** do ramo `claude/modest-faraday-f25rzq-grow`: página /grow-without-switching (no mapa do site) com os três planos e seus preços publicados, o que o Studio acrescenta ao Store e o Scale ao Studio (só as linhas da própria tabela da página de preços que mudam, com os mesmos valores, agrupadas como lá; nenhum número digitado na página), a troca de plano feita pelo próprio criador no cartão do plano, o que continua dele (pagamentos na própria conta Stripe; o arquivo dos dados principais, descrito como o estúdio o descreve) e, enquanto os planos não estão à venda, o mesmo aviso da página de preços; sem promessa de ganho.
+
 Estado: OR: após o Bloco A, na ordem já existente entre 206 [SH3] e 272 [HM1]; 232 [CA1] foi antecipado e não se repete; antes do Bloco B. Registro de posição; os estados e provas históricos abaixo permanecem válidos.
 Crie, em inglês americano, uma página que mostre como o criador começa no plano Store e cresce para o Studio e o Scale sem trocar de ferramenta, usando somente os preços e os limites reais de lib/plan.ts: o que cada plano acrescenta, que a troca de plano é feita pelo próprio criador, que os dados e os compradores continuam com ele (a conta Stripe é dele, e há exportação dos dados) e que não há perda de nada ao subir de plano. Nada de promessa de ganho ou de "marca global". Não altere preços, limites, nomes nem número de planos. Coordene com o item 224 [HL5] e com a página de preços.
 

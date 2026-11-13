@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
+import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { InboxStudio } from "@/components/inbox-studio";
 import { aiAvailableFor, aiLeft } from "@/lib/ai";
@@ -66,7 +67,7 @@ export default async function StudioInboxPage({ searchParams }: Params) {
       />
       <StudioStorePin sid={store.sid}>
         <main id="content" className="container-page pb-20 pt-10 sm:pt-14">
-          <p className="eyebrow">Inbox</p>
+          <StudioTrail store={store} here="Inbox" />
           <h1 className="t-h2 mt-3">What people write to you</h1>
           <p className="mt-3 max-w-2xl text-ink-soft">
             Your store&apos;s chat and its contact form, in one place. Answer here: it shows in their chat and goes to their email, and the conversation stays

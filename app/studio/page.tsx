@@ -74,7 +74,7 @@ import { readRanges, recordSample } from "@/lib/benchmarks";
 import { compare, sampleFrom } from "@/lib/benchmark-rules";
 import { heardOff } from "@/lib/heard";
 import { weeklyTeam } from "@/lib/stats-report";
-import { NO_SETUP, SERVER_PLATFORMS, serverSetup } from "@/lib/ad-events";
+import { SERVER_PLATFORMS, serverSetup } from "@/lib/ad-events";
 import { claimPathsRead, laterWords, pathsStale, readPaths } from "@/lib/next-bought";
 import { BuyerPaths } from "@/components/buyer-paths";
 import { canBeBumped, isOneOff } from "@/lib/product-extras";
@@ -2069,7 +2069,9 @@ export default async function StudioPage({
                 {hasPixels(store.pixels) ? (async () => {
                   const before = serverWrite.done;
                   const setupRead = (async () => {
-                    const setup = await serverSetup(store.statsId).catch(() => NO_SETUP);
+                    // Not read: said so, never shown as an empty setup nor written on the store as none.
+                    const setup = await serverSetup(store.statsId).catch(() => null);
+                    if (!setup) return null;
                     // A token saved before the store kept its own list of platforms is written there now, once, after
                     // the cart link's write.
                     const on = SERVER_PLATFORMS.filter((p) => setup.on[p]);
@@ -2078,9 +2080,17 @@ export default async function StudioPage({
                   })();
                   // The writes after this one wait for the cart link's too, even when this part writes nothing.
                   serverWrite.done = Promise.all([before.catch(() => null), setupRead]);
+                  const setup = await setupRead;
+                  if (!setup) {
+                    return (
+                      <p className="text-ink-soft">
+                        Server-sent conversions could not be read just now. Nothing was changed; reload the page in a moment.
+                      </p>
+                    );
+                  }
                   return (
                   <ServerEventsEditor
-                    setup={await setupRead}
+                    setup={setup}
                     pixels={{
                       meta: Boolean(store.pixels.meta),
                       tiktok: Boolean(store.pixels.tiktok),
@@ -2563,7 +2573,7 @@ export default async function StudioPage({
             ) : null}
 
             {!closing && may("export") && standing !== "ended" && standing !== "none" ? (
-              <div className="card mt-8 p-6 sm:p-8">
+              <div id="store-data-export" tabIndex={-1} className="card mt-8 scroll-mt-32 p-6 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ink sm:p-8">
                 <p className="text-lg font-semibold tracking-[-0.02em] text-ink">Your store&rsquo;s main data, as one file</p>
                 <p className="mt-2 text-ink-soft">
                   Your store&rsquo;s address, name, bio, links, currency and the date it was created, your products and their pages, thank-you notes, posts, courses with every lesson&rsquo;s text, forms and their answers,
@@ -3172,6 +3182,14 @@ export default async function StudioPage({
                           ? `Your store keeps taking payments until ${endsOn ?? "the trial ends"}, and your card is never charged.`
                           : `Your store keeps taking payments until ${endsOn ?? "the end of the period you already paid for"}, and nothing more is charged.`}
                       </p>
+                      {!closing && may("export") && standing !== "ended" && standing !== "none" ? (
+                        <p className="mt-3 text-sm text-ink-soft">
+                          Before you leave, review what is included in the data file and what is not.{" "}
+                          <a href="#store-data-export" className="inline-flex min-h-11 items-center font-bold text-ink underline underline-offset-2">
+                            See what the data file holds, and download it
+                          </a>
+                        </p>
+                      ) : null}
                       <form action={`/api/billing/cancel${pin}`} method="post" className="mt-3">
                         <input type="hidden" name="intent" value="cancel" />
                         <button

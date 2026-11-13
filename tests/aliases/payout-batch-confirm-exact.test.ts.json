@@ -1,0 +1,4 @@
+{
+  "@/lib/studio-route": "payout-batch-confirm-exact-world.ts",
+  "@/lib/store-request": "payout-batch-confirm-exact-world.ts"
+}

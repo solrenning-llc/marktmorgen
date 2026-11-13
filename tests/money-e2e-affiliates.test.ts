@@ -18,7 +18,7 @@ import { NO_AFFILIATES } from "@/lib/affiliate-setting";
 import { creditPayPalSale, noteSession, readBook } from "@/lib/affiliates";
 import { batchFile, batchTotal, owedLines, recordBatch } from "@/lib/affiliate-payouts";
 import { connectPayPal, onTheirWay, payableLines, payWithPayPal, settlePayPal } from "@/lib/paypal-payouts";
-import { watchPayPal, type Paid } from "@/lib/paypal-sales";
+import { type Paid } from "@/lib/paypal-sales";
 import { claimHandle, ensureStatsId, setAffiliateSetting, setStripeAccount, storeForEmail, type Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -36,7 +36,6 @@ const OWNER = "chef@example.com";
 const NOW = Math.floor(Date.now() / 1000);
 const ANA = "aaaaaaaaaaaa";
 const BEN = "bbbbbbbbbbbb";
-const SELLER = "SELLERMERCH001";
 const CLIENT = "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789";
 const SECRET = "EFGHijklMNOPqrstUVWXyz0123456789abcd";
 

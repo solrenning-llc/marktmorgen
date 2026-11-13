@@ -230,7 +230,7 @@ async function main(): Promise<void> {
 
   part("A capture whose status is missing: never paid, kept for the sweep, handed over once PayPal says COMPLETED");
   const n = await open("noa@example.com", { status: undefined });
-  const nBack = await returnFor(store, n);
+  await returnFor(store, n);
   is("no status: nothing paid, no access, kept pending", await state(n, "noa@example.com"), {
     paid: false, owned: 0, receipts: 0, sales: 0, pending: true, owed: false, captured: 1,
   });

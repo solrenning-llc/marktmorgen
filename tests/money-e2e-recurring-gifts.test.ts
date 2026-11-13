@@ -38,9 +38,9 @@ type Pay = { amount: number; back: number; disputed?: boolean };
 const pays = new Map<string, Pay>();
 const chargeId = (pi: string) => `ch_${pi.slice(3)}`;
 /** Refunds, newest first, as GET /refunds lists them with their charge expanded. */
-let refundRows: Record<string, unknown>[] = [];
+const refundRows: Record<string, unknown>[] = [];
 /** charge.dispute.closed events, newest first. */
-let closings: Record<string, unknown>[] = [];
+const closings: Record<string, unknown>[] = [];
 const disputes = new Map<string, { status: string }[]>();
 const invoices = new Map<string, Record<string, unknown>>();
 const invoicePayments = new Map<string, { data: unknown[]; has_more: boolean }>();

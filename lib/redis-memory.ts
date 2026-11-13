@@ -1208,6 +1208,17 @@ export class MemoryRedis {
           }
           return n;
         }
+        // lib/form-store.ts KEEP_FORM_RESPONSE_UNLESS_ERASED: the same keep, refused (0) while the respondent's address is deleted.
+        if (key.startsWith("-- marktmorgen:form-keep-unless-erased:v1\n") && args[0] === "2" && args.length === 7) {
+          const [, listKey, erasedKey, row, most, print, seen] = args;
+          if (seen !== "1" && this.run(["HEXISTS", erasedKey, print]) === 1) return 0;
+          this.live(listKey);
+          const list = this.list(listKey);
+          list.unshift(row);
+          const out: string[] = [];
+          while (list.length > Number(most)) out.push(list.pop()!);
+          return out;
+        }
         if (key.startsWith("-- marktmorgen:form-keep:v1\n") && args[0] === "1" && args.length === 4) {
           const listKey = args[1];
           this.live(listKey);

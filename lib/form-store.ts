@@ -16,6 +16,7 @@
  * its room back. The forms themselves are few and bounded (MAX_FORMS).
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { suppressedKey, suppressionPrint } from "@/lib/suppression";
 import { type DataStore, giveData, needData, noteData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { UnknownReply, exactReplies, plainList } from "@/lib/redis-exact";
@@ -99,23 +100,61 @@ end
 return out`;
 
 /**
+ * KEEP_FORM_RESPONSE, refused when the respondent's address was deleted from the store since the request read it
+ * (the store's suppression print, lib/suppression.ts, written by lib/person-erasure.ts before their responses go):
+ * KEYS[2] the store's prints, ARGV[3] the address's print, ARGV[4] "1" when the request found the print already there.
+ * Refused, it answers 0 and keeps nothing, so a response let in before an erasure and written after it brings nothing
+ * back (issue #4459); a response sent after the erasure, by the person's own choice, is kept as any other.
+ */
+export const KEEP_FORM_RESPONSE_UNLESS_ERASED = `-- marktmorgen:form-keep-unless-erased:v1
+if ARGV[4] ~= "1" and redis.call("HEXISTS", KEYS[2], ARGV[3]) == 1 then return 0 end
+redis.call("LPUSH", KEYS[1], ARGV[1])
+local out = {}
+while redis.call("LLEN", KEYS[1]) > tonumber(ARGV[2]) do
+  table.insert(out, redis.call("RPOP", KEYS[1]))
+end
+return out`;
+
+/**
  * Keeps one response, the newest first, and lets the oldest go past
  * KEPT_RESPONSES. The room is taken first from what is read (the new one
  * less the oldest that should go), then set right from what the keep really
  * let go, in one script, so a deletion of the person's responses at the same
  * time, or another response, never leaves the room counting less than is kept.
  */
-export async function addResponse(statsId: string, formId: string, response: FormResponse, room: DataStore): Promise<void> {
+export async function addResponse(
+  statsId: string,
+  formId: string,
+  response: FormResponse,
+  room: DataStore,
+  /**
+   * The address the respondent gave as theirs, the store's list and whether that address was already deleted when the
+   * request read it (isSuppressed, lib/suppression.ts; issue #4459): the response is then refused when it was deleted since, checked in
+   * the same step as the write. Refused, nothing is kept, the room it took comes back and the answer is "erased".
+   */
+  erased?: { listId: string; email: string; seen: boolean },
+): Promise<"kept" | "erased"> {
   const json = JSON.stringify(response);
   const [kept, oldest] = await redisPipeline([["LLEN", responsesKey(statsId, formId)], ["LINDEX", responsesKey(statsId, formId), -1]]);
   const guessed = Number(kept) >= KEPT_RESPONSES && typeof oldest === "string" ? dataBytes([oldest], 1) : 0;
   const charged = dataBytes([json], 1) - guessed;
   await needData(room, [{ slot: ANSWERS_SLOT(formId), bytes: charged }]);
-  const [gone] = await redisPipeline([["EVAL", KEEP_FORM_RESPONSE, 1, responsesKey(statsId, formId), json, KEPT_RESPONSES]]);
+  const [gone] = await redisPipeline([
+    erased
+      ? ["EVAL", KEEP_FORM_RESPONSE_UNLESS_ERASED, 2, responsesKey(statsId, formId), suppressedKey(erased.listId), json, KEPT_RESPONSES, suppressionPrint(erased.listId, erased.email), erased.seen ? "1" : "0"]
+      : ["EVAL", KEEP_FORM_RESPONSE, 1, responsesKey(statsId, formId), json, KEPT_RESPONSES],
+  ]);
+  if (erased && (gone === 0 || gone === "0")) {
+    // Refused: nothing was kept, so what was taken for it comes back whole.
+    if (charged > 0) await giveData(room, [{ slot: ANSWERS_SLOT(formId), bytes: charged }]);
+    else if (charged < 0) await noteData(room, [{ slot: ANSWERS_SLOT(formId), bytes: -charged }]);
+    return "erased";
+  }
   const dropped = (Array.isArray(gone) ? gone : []).reduce<number>((sum, raw) => sum + (typeof raw === "string" ? dataBytes([raw], 1) : 0), 0);
   const off = dataBytes([json], 1) - dropped - charged;
   if (off > 0) await noteData(room, [{ slot: ANSWERS_SLOT(formId), bytes: off }]);
   else if (off < 0) await giveData(room, [{ slot: ANSWERS_SLOT(formId), bytes: -off }]);
+  return "kept";
 }
 
 function parseResponse(raw: unknown): FormResponse | null {

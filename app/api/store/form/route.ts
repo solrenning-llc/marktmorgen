@@ -4,8 +4,9 @@ import type { NextRequest } from "next/server";
 import { DataRoomError } from "@/lib/store-data";
 import { originFrom, linkOrigin } from "@/lib/request-origin";
 import { clientAddress, fromAnotherSite, limited } from "@/lib/request-guard";
-import { normaliseHandle, storeForHandle } from "@/lib/store";
+import { ensureListId, normaliseHandle, storeForHandle } from "@/lib/store";
 import { readForm, addResponse } from "@/lib/form-store";
+import { isSuppressed } from "@/lib/suppression";
 import { enroll } from "@/lib/flows";
 import { FORM_ID, formOpen, outcomeOf, readAnswers, scoreOf, scoreQuery } from "@/lib/forms";
 import { askToJoin } from "@/lib/store-join";
@@ -80,6 +81,11 @@ export async function POST(request: NextRequest) {
   const measured = score && score.answered > 0 ? score : null;
 
   try {
+    // Whether the address they gave as theirs is deleted from this store, read now, before anything is done with it:
+    // the response is refused if it is deleted between this read and its write (issue #4459). The list is made as the
+    // erasure makes it. A form with no email question names nobody, and is kept as before.
+    const listId = read.email ? store.listId || ((await ensureListId(store.email))?.listId ?? null) : null;
+    const erased = read.email && listId ? { listId, email: read.email, seen: await isSuppressed(listId, read.email) } : undefined;
     // The list, only when they checked the box: the email that asks them to confirm, never the list itself.
     let joined = false;
     if (def.offerList && one("consent") === "yes" && read.email) {
@@ -87,7 +93,10 @@ export async function POST(request: NextRequest) {
       const asked = await askToJoin({ store, email: read.email, ip, origin: linkOrigin(request, store), fromForm: true, formId: def.id, formOutcome: outcome?.id, lead }).catch(() => "error" as const);
       joined = asked === "sent";
     }
-    await addResponse(statsId, def.id, { id: randomBytes(16).toString("hex"), at: Math.floor(Date.now() / 1000), page: page?.id ?? "", answers: read.answers, outcome: outcome?.id ?? "", joined, ...(measured ? { score: measured.total, scores: measured.categories } : {}) }, store);
+    const kept = await addResponse(statsId, def.id, { id: randomBytes(16).toString("hex"), at: Math.floor(Date.now() / 1000), page: page?.id ?? "", answers: read.answers, outcome: outcome?.id ?? "", joined, ...(measured ? { score: measured.total, scores: measured.categories } : {}) }, store, erased);
+    // Their address was deleted from this store while this was on its way: nothing was kept, nothing more is done with it,
+    // and they are told it did not go through (sending it again is their own new choice, kept as any other).
+    if (kept === "erased") return back("error");
     // Somebody already on the list: the sequences that start with this form start now (lib/flows.ts checks they may be written to).
     if (read.email) await enroll(store, read.email, { joined: false, form: def.id, formOutcome: outcome?.id ?? "" });
 

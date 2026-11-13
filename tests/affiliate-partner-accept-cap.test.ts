@@ -16,7 +16,7 @@ import { createHash } from "node:crypto";
 import { NextRequest } from "next/server";
 import { addProduct, claimHandle, ensureStatsId, ensureStoreId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
-import { acceptPartnership, listAffiliates, openAffiliateLink } from "@/lib/affiliates";
+import { acceptPartnership, listAffiliates, openAffiliateLink, setPartnerShare } from "@/lib/affiliates";
 import { offerPartnership, waitingFor } from "@/lib/partner-invites";
 import { POST as affiliatesRoute } from "@/app/api/store/affiliates/route";
 import { store as redis } from "./redis-stub";
@@ -163,7 +163,9 @@ async function main(): Promise<void> {
   const ten = await shop("ten@example.com", "tenshop");
   const parked = await offerPartnership("ten@example.com", { sid: (await store()).sid, storeName: "makershop store", handle: "makershop", share: { percent: 1, products: [product2] }, titles: ["Bread Basics"] });
   if (!parked.ok) throw new Error("no offer");
-  await post2({ action: "share", id: small.id, percent: 1, products: [product2] });
+  // 630 [HN6](39): a change to a share the partner agreed to waits for their yes, so the 1% this part starts from is
+  // set on the record directly; what is checked below (nothing is written while the lock is held) is unchanged.
+  await setPartnerShare(await store(), small.id, { percent: 1, products: [product2] });
   const lockKey = `nl:aff:${(await store()).statsId}:partners:lock`;
   await redis.pipeline([["SET", lockKey, "somebody-else", "EX", 60]]);
   const busy = await ten({ action: "answer", invite: parked.id, accept: true });

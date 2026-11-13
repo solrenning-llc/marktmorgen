@@ -140,7 +140,9 @@ async function main(): Promise<void> {
     return (await response.json()) as { ok?: boolean; error?: string; state?: string };
   };
   is("saving it as it is passes", await post({ action: "share", id: s, percent: 10, products: [A], ends: today }), { ok: true, state: "same" });
-  is("a new end of today is still refused", (await post({ action: "share", id: s, percent: 20, products: [A], ends: today })).error, "share_ends");
+  // The same end with another percentage is still that end: it is accepted, and the change waits for their yes.
+  is("the same end with another percentage waits for their yes", await post({ action: "share", id: s, percent: 20, products: [A], ends: today }), { ok: true, state: "waiting" });
+  is("an end of today for a share that ends on another day is still refused", (await post({ action: "share", id: r, percent: 10, products: [A], ends: today })).error, "share_ends");
 
   part("7. A bulk decision that stops halfway keeps the undo of what it did");
   const ids = ["eeeeeeeeeee1", "eeeeeeeeeee2", "eeeeeeeeeee3"];

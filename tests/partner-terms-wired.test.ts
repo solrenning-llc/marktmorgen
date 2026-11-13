@@ -126,16 +126,18 @@ async function main(): Promise<void> {
   is("decline is refused the same way", (await post({ action: "decline", id: p })).error, "share_term_held");
   is("they stay approved with their share", [(await read(p)).status, (await read(p)).share?.percent], ["approved", 5]);
   is("a share until revoked", await post({ action: "share", id: q, percent: 10, products: [A] }), { ok: true, state: "started" });
-  is("can be removed", [await post({ action: "remove", id: q }), (await read(q)).status, await endedNow(q)], [{ ok: true }, "removed", true]);
-  is("and the step is in its history", (await read(q)).terms?.history.at(-1)?.kind, "revoked");
+  // Removed, the share stays on the record as on main (restoring counts it against the cap again); no step ends it.
+  is("can be removed, the share kept as it is", [await post({ action: "remove", id: q }), (await read(q)).status, await endedNow(q), (await read(q)).share?.percent], [{ ok: true }, "removed", false, 10]);
+  is("and no step says the store ended it", (await read(q)).terms?.history.at(-1)?.kind, "started");
 
-  part("A share only for someone approved");
+  part("A share for somebody waiting, as main allows it: it counts once they are approved");
+  // On main a share may be set on somebody still waiting (tests/affiliate-bulk-held.test.ts): approving them checks it
+  // against the cap then (decideMany, decide). The term rules apply to it the same way.
   const w = "cccccccccccc";
-  for (const status of ["pending", "declined", "removed"]) {
-    await redis.pipeline([["HSET", `nl:aff:${statsId}:people`, w, JSON.stringify({ id: w, email: `${w}@example.com`, code: `c${w}`, status, appliedAt: 1, decidedAt: 5, note: "", rate: null, paypal: "", share: null, cleared: null, by: null })]]);
-    is(`refused for somebody ${status}`, (await post({ action: "share", id: w, percent: 10, products: [A], ends: future(30) })).error, "share_not_approved");
-    is(`and nothing is written for somebody ${status}`, [(await read(w)).share, (await read(w)).terms], [null, undefined]);
-  }
+  await redis.pipeline([["HSET", `nl:aff:${statsId}:people`, w, JSON.stringify({ id: w, email: `${w}@example.com`, code: `c${w}`, status: "pending", appliedAt: 1, decidedAt: 5, note: "", rate: null, paypal: "", share: null, cleared: null, by: null })]]);
+  is("a share for somebody waiting starts", await post({ action: "share", id: w, percent: 5, products: [A], ends: future(30) }), { ok: true, state: "started" });
+  is("and its start is in the history", (await read(w)).terms?.history.map((s) => s.kind), ["started"]);
+  is("declining them with that dated share in force is refused", (await post({ action: "decline", id: w })).error, "share_term_held");
 
   part("The partner hears what became of their answer even after the share ended");
   await post({ action: "share", id: p, percent: null });
@@ -177,7 +179,6 @@ async function main(): Promise<void> {
   }
   is("en: who ends a share until revoked", AFFILIATES_WORDS.en.partnerRuns(null), "It runs until the store ends it, or you ask it to.");
   is("en: an unknown outcome", AFFILIATES_WORDS.en.partnerAnswered.unsure.includes("Nothing changed"), false);
-  is("the studio says a share is only for someone approved", studio.includes("Only someone approved in your program can have a partner share."), true);
   is("a refused removal says what to do instead, in the row's alert", studio.includes("their share runs to a set end date") && studio.includes("press End the partnership; it ends once they accept. Or wait until the end date, then remove them.") && studio.includes('role="alert"'), true);
   const en = AFFILIATES_WORDS.en;
   is("the words say the share stays until the answer", en.partnerAskedKeep("Dec 3, 2026"), "Until you answer, your share stays exactly as it is. If you have not answered by Dec 3, 2026, nothing changes.");

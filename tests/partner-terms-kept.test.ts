@@ -103,9 +103,11 @@ async function main(): Promise<void> {
   is("decline is refused too", await decideWhy(await store(), d, "decline", T + 1), { ok: false, reason: "term" });
   is("they stay approved, with their share and no new step", [(await read(d)).status, (await read(d)).share?.percent, (await read(d)).terms?.history.length], ["approved", 20, 1]);
   is("in bulk it is never touched either", [await decideMany(await store(), [d], "decline"), (await read(d)).status], [{ before: [], held: [] }, "approved"]);
+  // On main, somebody removed keeps their share on the record (they earn nothing while removed, and letting them back
+  // in counts it against the cap again): removing is not ending it, so no step says the store ended it.
   const untilRevoked = await decideWhy(await store(), u, "remove", T + 2);
-  is("a share until revoked can be removed, ending then", [untilRevoked.ok && untilRevoked.affiliate.status, untilRevoked.ok && untilRevoked.affiliate.share], ["removed", { percent: 20, products: [B], until: T + 2 }]);
-  is("and the history says the store ended it", (await read(u)).terms?.history.map((s) => `${s.kind}:${s.by}`), ["started:creator", "revoked:creator"]);
+  is("a share until revoked does not stop a removal, and is kept as it is", [untilRevoked.ok && untilRevoked.affiliate.status, untilRevoked.ok && untilRevoked.affiliate.share], ["removed", { percent: 20, products: [B] }]);
+  is("and the history is unchanged", (await read(u)).terms?.history.map((s) => `${s.kind}:${s.by}`), ["started:creator"]);
   const after = await decideWhy(await store(), x, "remove", T + 61 * DAY);
   is("after the end date it can be removed, the share left as it ended", [after.ok && after.affiliate.status, after.ok && after.affiliate.share?.until], ["removed", T + 60 * DAY]);
   is("with no step saying the store ended it: it ended on its date", (await read(x)).terms?.history.map((s) => s.kind), ["started"]);
@@ -168,7 +170,8 @@ async function main(): Promise<void> {
   await proposePartnerShare(await store(), e, { percent: 40, products: [B] }, T + 1);
   const eSeen = await seen(e);
   // The yes holds the partner lock while its check runs; the removal is written meanwhile (it raises nothing, so it
-  // needs no lock). The yes then finds the record moved and writes nothing: busy (LockBusyError), never over it.
+  // needs no lock), taking the waiting change back. The yes then finds the record moved and writes nothing: busy
+  // (LockBusyError), never over it.
   const [late] = await Promise.all([
     answerShareChange(shop, e, true, eSeen, T + 2, slowYes).then(
       () => "written",
@@ -178,8 +181,8 @@ async function main(): Promise<void> {
   ]);
   const eEnd = await read(e);
   is("the yes that lost the race says busy", late, "busy");
-  is("a removal racing a yes is never undone by it: removed, the share ended then", [eEnd.status, eEnd.share], ["removed", { percent: 10, products: [B], until: T + 2 }]);
-  is("and the history ends with the store ending it", eEnd.terms?.history.at(-1)?.kind, "revoked");
+  is("a removal racing a yes is never undone by it: removed, the share as it was", [eEnd.status, eEnd.share], ["removed", { percent: 10, products: [B] }]);
+  is("and the history ends with the store taking its request back", [eEnd.terms?.history.at(-1)?.kind, eEnd.terms?.change], ["withdrawn", null]);
   done();
 }
 

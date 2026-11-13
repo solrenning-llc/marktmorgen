@@ -69,11 +69,12 @@ const CREDENTIAL_JOINED = new RegExp(String.raw`\b${CREDENTIAL}\b(?:\s+${WORD}){
 const SECRET_FOR = new RegExp(String.raw`^(?:${WORD}\s+){0,3}${SECRET}\s+(?:for|of|on|at)\b`, "iu");
 // Read only on the words before the secret (Claude 1 cloud, #3668 @fff18e7784): a reassurance after it ("... for our
 // team (safe with us)") never excuses the ask, and "security", "recovery" or "common" before it name the very secret
-// asked for ("Security password for your bank").
-const ADVICE = /\b(?:good|best|strong|stronger|strongest|secure|safe|weak|weakest|ideal|perfect|typical|tips?|advice|polic(?:y|ies)|rules?|managers?|hints?|reset|resets|strength|hygiene|habits?|courses?|lessons?|chapters?|guides?|ideas?|examples?|requirements?|feedback|opinions?|thoughts|experiences?)\b/i;
+// asked for ("Security password for your bank"); nor do "secure" or "safe", which reassure rather than advise
+// ("Secure Instagram password for our team"). "pass code" is a passcode, never an event pass.
+const ADVICE = /\b(?:good|best|strong|stronger|strongest|weak|weakest|ideal|perfect|typical|tips?|advice|polic(?:y|ies)|rules?|managers?|hints?|reset|resets|strength|hygiene|habits?|courses?|lessons?|chapters?|guides?|ideas?|examples?|requirements?|feedback|opinions?|thoughts|experiences?)\b/i;
 // The bare word "pass" counts only right after a login ("Login and pass", "Username/pass"), never alone ("Day pass").
 // Never "Email or pass number": a noun after "pass" names an event or season pass (Claude 1 cloud, #3668 @fff18e7784).
-const LOGIN_PASS = /\b(?:e-?mail|user\s*name|username|login)(?:\s*[/&+,|:]\s*|\s+(?:and|or|plus)\s+)pass\b(?!\s+(?:numbers?|ids?|codes?|holders?|types?|levels?|names?|tiers?)\b)/i;
+const LOGIN_PASS = /\b(?:e-?mail|user\s*name|username|login)(?:\s*[/&+,|:]\s*|\s+(?:and|or|plus)\s+)pass\b(?!\s+(?:numbers?|ids?|holders?|types?|levels?|names?|tiers?)\b)/i;
 
 function asksForPassword(label: string): boolean {
   // This is only a classification copy; the creator's label is never rewritten.

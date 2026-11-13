@@ -434,7 +434,11 @@ export default async function StorePage({ params, searchParams }: Params) {
                       ) : null}
                       {results ? (
                         <p className="mt-3 flex flex-wrap items-baseline justify-between gap-2 text-sm" role="status">
-                          <span className="font-semibold">{results.total ? bw.searchFound(results.total, searching) : bw.searchNone(searching)}</span>
+                          <span className="font-semibold">{results.total > results.listings.length
+                              ? bw.searchCut(results.listings.length, results.total, searching)
+                              : results.total
+                                ? bw.searchFound(results.total, searching)
+                                : bw.searchNone(searching)}</span>
                           <a href={pageHref(store.handle, 1, reachedOn !== null)} className="st-footer-link">
                             {bw.searchClear}
                           </a>

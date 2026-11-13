@@ -1357,7 +1357,7 @@ export function StatsPanel({
             <tbody>
               {shownProducts.map((product, index) => (
                 <tr key={product.id} className="border-t border-line">
-                  <td className="max-w-[7rem] truncate py-1.5 pr-2 font-semibold text-ink sm:max-w-[14rem]">
+                  <td className="min-w-[7rem] max-w-[14rem] py-1.5 pr-2 font-semibold text-ink [overflow-wrap:anywhere]">
                     {index < 3 && product.cents !== null && product.cents > 0 ? <span className="mr-1.5 tabular-nums text-violet-deep">{index + 1}.</span> : null}
                     {product.title}
                   </td>

@@ -672,7 +672,10 @@ export async function cancelReset(email: string, why: "login" | "studio"): Promi
   const called = await withTwoStep(email, async (held) => {
     const record = await read(email);
     if (!record || record.reset === 0) return false;
-    return writeHeld(held, email, { ...record, reset: 0 });
+    // Not written, or written with no known answer, is not called off (issue #4355, CX-123 rule 24): said as unknown,
+    // never as "nothing was waiting", so no caller goes on as if two-step login were safe from the waiting reset.
+    if (!(await writeHeld(held, email, { ...record, reset: 0 }))) throw new UnknownReplyError("calling off a two-step reset");
+    return true;
   });
   if (!called) return false;
   const ended = await endLocked(email);

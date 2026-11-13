@@ -79,10 +79,6 @@ export async function POST(request: NextRequest) {
         await endSession(id);
         return Response.json({ ok: false, error: "not_recognised" }, { status: 401 });
       }
-      // As with the emailed link: whatever session this browser held before
-      // is closed, and only the new one is kept.
-      const previous = request.cookies.get(SESSION_COOKIE)?.value;
-      if (previous && previous !== id) await endSession(previous);
       // A passkey is the second step: a pending request to turn two-step login off is called off, and what
       // the recovery address opened is closed (lib/two-step.ts). Not by a passkey that is itself set to be
       // removed (owner C3-88): whoever holds it may not be its owner, so it calls off nothing at all, not its
@@ -92,13 +88,26 @@ export async function POST(request: NextRequest) {
       // Read under the account's lock as it was checked (lib/passkeys.ts signInWith), or set to go since.
       // No login calls a passkey removal off, this one included: only "Keep it" does (lib/passkeys.ts).
       // Checked again under the account's lock, held while it runs (lib/passkeys.ts unlessSetToGo).
+      // Not confirmed is not done (issue #4355, CX-123 rule 24): a reset or a recovery login this login should call off,
+      // where calling it off failed or answered in no known shape, would still turn two-step login off when it came
+      // due. So the session just opened is closed again and the error below answers without a session cookie, before
+      // the browser's earlier session is touched; a later login, with its proof, calls them off.
       const doomed = signed.doomed || waiting?.ids.includes(signed.id) === true;
       if (!doomed) {
-        await unlessSetToGo(email, signed.id, async () => {
-          await cancelReset(email, "login").catch((error) => console.error("calling off a two-step reset failed", error));
-          await endRecoveryAccess(email).catch((error) => console.error("closing a recovery login failed", error));
-        }).catch((error) => console.error("calling off a two-step reset failed", error));
+        try {
+          await unlessSetToGo(email, signed.id, async () => {
+            await cancelReset(email, "login");
+            await endRecoveryAccess(email);
+          });
+        } catch (error) {
+          await endSession(id).catch((ended) => console.error("closing a passkey session whose second step could not be applied failed", ended));
+          throw error;
+        }
       }
+      // As with the emailed link: whatever session this browser held before
+      // is closed, and only the new one is kept.
+      const previous = request.cookies.get(SESSION_COOKIE)?.value;
+      if (previous && previous !== id) await endSession(previous);
       const response = Response.json({ ok: true, next: "/studio" });
       response.headers.append("Set-Cookie", sessionCookie(id));
       response.headers.append("Set-Cookie", `${PASSKEY_COOKIE}=; Path=/api/auth/passkey; Max-Age=0; HttpOnly; SameSite=Strict${secure}`);

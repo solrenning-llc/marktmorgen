@@ -1279,6 +1279,38 @@ async function main(): Promise<void> {
   is("logging in with the passkey meanwhile", [busyIn.status, ((await busyIn.json()) as { error?: string }).error], [503, "busy"]);
   await releaseLock(blocking);
 
+  part("Calling off a waiting two-step reset fails during a passkey login: no session, the wait stays for a later try (issue #4355)");
+  const RIA4355 = "ria-reset-4355@example.com";
+  await turnOnApp(RIA4355, "ria-backup-4355@example.org");
+  const riaKey = makePasskey(RIA4355, "cred-ria-4355");
+  await riaKey.keep();
+  const riaRecord = `nl:2fa:${hex(`nimbus-2fa:${RIA4355}`).slice(0, 40)}`;
+  const [riaRaw] = await redis.pipeline([["GET", riaRecord]]);
+  const riaDue = Date.now() + RESET_DAYS * 86_400_000;
+  await redis.pipeline([["SET", riaRecord, JSON.stringify({ ...JSON.parse(String(riaRaw)), reset: riaDue })]]);
+  const riaSessions = async () => {
+    const keys = redis.keys().filter((k) => k.startsWith("nl:auth:session:"));
+    const owners = keys.length ? await redis.pipeline(keys.map((k) => ["GET", k])) : [];
+    return owners.filter((owner) => owner === RIA4355).length;
+  };
+  const openBefore = await riaSessions();
+  const realPipeline = redis.pipeline.bind(redis);
+  // The two-step record's write answers in no known shape: calling the reset off is not confirmed.
+  (redis as unknown as { pipeline: typeof realPipeline }).pipeline = async (commands) =>
+    commands.some((c) => (c[0] === "SET" || c[0] === "EVAL" || c[0] === "EVALSHA") && c.includes(riaRecord)) ? [] : realPipeline(commands);
+  let riaIn: string;
+  try {
+    riaIn = await signInWithPasskey(riaKey);
+  } finally {
+    (redis as unknown as { pipeline: typeof realPipeline }).pipeline = realPipeline;
+  }
+  is("no session cookie while the reset could not be called off", riaIn, "");
+  is("and the session it opened is closed again", await riaSessions(), openBefore);
+  is("the reset still waits, for a later login to call off", (JSON.parse(String((await redis.pipeline([["GET", riaRecord]]))[0])) as { reset?: number }).reset, riaDue);
+  const riaAgain = await signInWithPasskey(riaKey);
+  is("a later passkey login, with the record readable again, logs in", (await emailForSession(riaAgain)) === RIA4355, true);
+  is("and calls the reset off", (JSON.parse(String((await redis.pipeline([["GET", riaRecord]]))[0])) as { reset?: number }).reset ?? 0, 0);
+
   done();
 }
 

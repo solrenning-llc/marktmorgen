@@ -35,6 +35,21 @@ part("A picture with no words");
   is("only the pictures that are drawn", kinds(seven).filter((k) => k === "picture").length, 6);
 }
 
+part("A picture whose words say nothing");
+{
+  // "image" or a file name is read out, but says no more than nothing (WCAG 1.1.1): named, with the words it has.
+  for (const alt of ["image", "Photo", "IMG_2041", "loaves.jpg", "picture 3"]) {
+    const notes = mailAccessNotes(pictureLine(alt, pic(1)));
+    is(`"${alt}" named`, notes.map((n) => [n.kind, n.kind === "picture" ? n.alt : null]), [["picture", alt]]);
+  }
+  is("a real description is not named", kinds(pictureLine("Photo of three loaves on a board", pic(1))), []);
+  const note = mailAccessNotes(pictureLine("", pic(1)))[0];
+  is("no words: alt is empty", note.kind === "picture" ? note.alt : null, "");
+  const body = pictureLine("", pic(1));
+  is("fix refuses a word that says nothing", describePicture(body, note, "image"), { ok: false, why: "vague" });
+  is("fix refuses a file name", describePicture(body, note, "IMG_2041.jpg"), { ok: false, why: "vague" });
+}
+
 part("Button words that do not say where they go");
 is("Click here", kinds("[Click here](https://example.com/a)"), ["button"]);
 is("Read more", kinds("[Read more](https://example.com/a)"), ["button"]);

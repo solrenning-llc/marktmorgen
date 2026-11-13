@@ -3,7 +3,7 @@
  * about what a reader cannot use and offers the fix; it never changes the creator's content on its own).
  *
  * Read from the email's own text exactly as it is drawn (lib/mail-body.ts, parseMailBlocks and bodyHtml):
- *   - a picture with no words (WCAG 1.1.1): a screen reader says nothing for it, or only "image";
+ *   - a picture with no words, or words that say nothing such as "image" or a file name (WCAG 1.1.1);
  *   - a button whose words do not say where it goes, such as "Click here" (2.4.4, and 2.4.9 at AAA,
  *     lib/link-purpose.ts);
  *   - a bare web address, which the email turns into a link whose words are the address (2.4.9 at AAA):
@@ -24,7 +24,8 @@ import { vagueLinkTitle } from "@/lib/link-purpose";
 type At = { start: number; end: number; source: string };
 
 export type MailAccessNote =
-  | (At & { kind: "picture"; url: string })
+  /** `alt`: the words it has, empty when none; a picture is named when they are empty or say nothing (vagueAlt). */
+  | (At & { kind: "picture"; url: string; alt: string })
   | (At & { kind: "button"; label: string; href: string })
   /** `alone`: the address is a paragraph of its own, so it can become a button with words. */
   | (At & { kind: "address"; address: string; alone: boolean });
@@ -34,6 +35,15 @@ const ADDRESS = /https:\/\/[^\s<>"')\]]+/g;
 const TRAILING = /[.,;:!?]+$/;
 /** A paragraph: lines with no blank line between them, as parseMailBlocks splits them (after it turns \r\n into \n). */
 const PARAGRAPH = /[^\r\n]+(?:\r?\n[^\r\n]+)*/g;
+/** Words a screen reader reads out for a picture that say nothing about it: a bare "image", a camera's name, a file name. */
+const SAYS_NOTHING = /^(?:an? )?(?:image|img|picture|pic|photo|photograph|graphic|screenshot|dsc|untitled)(?:[\s_-]*\d+)?$/i;
+const FILE_NAME = /\.(?:jpe?g|png|gif|webp|avif|svg|heic)$/i;
+
+/** Whether words given for a picture say nothing about what it shows. Empty words are "no description", not this. */
+export function vagueAlt(words: string): boolean {
+  const clean = words.replace(/\s+/g, " ").trim();
+  return clean !== "" && (SAYS_NOTHING.test(clean.replace(/[.!:]+$/, "")) || FILE_NAME.test(clean));
+}
 
 /** What a reader cannot use in this email, in the order it reads. */
 export function mailAccessNotes(body: string): MailAccessNote[] {
@@ -57,7 +67,7 @@ export function mailAccessNotes(body: string): MailAccessNote[] {
       const picture = pictures < MAX_MAIL_PICTURES ? readPicture(block.line) : null;
       if (picture) {
         pictures += 1;
-        if (!picture.alt) notes.push({ kind: "picture", url: picture.url, ...at });
+        if (!picture.alt || vagueAlt(picture.alt)) notes.push({ kind: "picture", url: picture.url, alt: picture.alt, ...at });
         continue;
       }
     }
@@ -68,7 +78,7 @@ export function mailAccessNotes(body: string): MailAccessNote[] {
       if (picture) {
         pictures += 1;
         const lineLead = line.length - line.trimStart().length;
-        if (!picture.alt) notes.push({ kind: "picture", url: picture.url, start: offset + lineLead, end: offset + lineLead + line.trim().length, source: line.trim() });
+        if (!picture.alt || vagueAlt(picture.alt)) notes.push({ kind: "picture", url: picture.url, alt: picture.alt, start: offset + lineLead, end: offset + lineLead + line.trim().length, source: line.trim() });
       } else {
         for (const match of line.matchAll(ADDRESS)) {
           const address = match[0].replace(TRAILING, "");
@@ -102,6 +112,7 @@ function buttonWords(words: string): string | Exclude<FixResult, { ok: true }> {
 export function describePicture(body: string, note: MailAccessNote, words: string): FixResult {
   if (note.kind !== "picture") return { ok: false, why: "changed" };
   if (!words.replace(/[[\]\r\n]/g, " ").trim()) return { ok: false, why: "empty" };
+  if (vagueAlt(words.replace(/[[\]\r\n]/g, " "))) return { ok: false, why: "vague" };
   return replaceAt(body, note, pictureLine(words, note.url));
 }
 

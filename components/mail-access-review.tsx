@@ -9,7 +9,7 @@
  * A picture the creator says is only decoration is left as it is: an email already draws a picture with no
  * words as one a screen reader skips (alt=""). That choice is kept on this page only, not with the email.
  */
-import { useId, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { addressToButton, describePicture, mailAccessNotes, MAIL_ACCESS_DONE_FOR_YOU, renameButton, type FixResult, type MailAccessNote } from "@/lib/mail-access-check";
 import { MAX_MAIL_BUTTON } from "@/lib/mail-body";
 import { MAX_PICTURE_ALT } from "@/lib/mail-picture-rules";
@@ -21,6 +21,7 @@ const REFUSED: Record<Exclude<FixResult, { ok: true }>["why"], string> = {
   changed: "This part of the text changed. Look at it again below.",
   not_alone: "Put the address on a line of its own first.",
 };
+const PICTURE_VAGUE = "Say what it shows, for example “Three sourdough loaves on a board”.";
 
 /** A short, readable form of an address for a sentence: no https://, and cut when it is long. */
 function shortAddress(address: string): string {
@@ -46,8 +47,13 @@ export function MailAccessReview({
   const [words, setWords] = useState<Record<string, string>>({});
   const [refused, setRefused] = useState<Record<string, string>>({});
   const [said, setSaidText] = useState("");
+  const saidLine = useRef<HTMLParagraphElement>(null);
   // The same sentence twice is still a change to the live region, so it is said again (as in the page editor).
-  const setSaid = (text: string) => setSaidText((was) => (was === text ? `${text}\u00a0` : text));
+  // The control just pressed leaves with its note, so focus goes to this sentence, never back to the page (2.4.3).
+  const setSaid = (text: string) => {
+    setSaidText((was) => (was === text ? `${text}\u00a0` : text));
+    saidLine.current?.focus();
+  };
   const [undo, setUndo] = useState<{ before: string; after: string; what: string } | null>(null);
 
   const all = mailAccessNotes(body);
@@ -57,7 +63,8 @@ export function MailAccessReview({
 
   function apply(key: string, result: FixResult, done: string) {
     if (!result.ok) {
-      setRefused((was) => ({ ...was, [key]: REFUSED[result.why] }));
+      const why = result.why === "vague" && key.startsWith("picture-") ? PICTURE_VAGUE : REFUSED[result.why];
+      setRefused((was) => ({ ...was, [key]: why }));
       return;
     }
     setRefused({});
@@ -75,10 +82,11 @@ export function MailAccessReview({
   }
 
   return (
-    <section aria-labelledby={`${id}-title`} className="mt-3 border-t border-line pt-3">
+    <section aria-labelledby={`${id}-title`} className="mt-3 border-t border-line pt-3 [overflow-wrap:anywhere]">
       <h4 id={`${id}-title`} className="font-semibold">Can everyone read it?</h4>
-      {/* Says only what a press did, never what is typed: a fix, an undo, a choice. */}
-      <p role="status" className="mt-1 empty:hidden">{said}</p>
+      {/* Says only what a press did, never what is typed: a fix, an undo, a choice. In the page from the start, so its
+          first sentence is announced; focused after a press, since the pressed control may be gone. */}
+      <p ref={saidLine} role="status" tabIndex={-1} className="mt-1 rounded-md focus:outline-3 focus:outline-offset-3 focus:outline-(--focus)">{said}</p>
       {undo && body === undo.after ? (
         <button
           type="button"
@@ -112,7 +120,9 @@ export function MailAccessReview({
                 <li key={key} className="rounded-[var(--r-md)] bg-white p-3">
                   <p className="font-semibold">
                     {note.kind === "picture"
-                      ? "A picture has no description."
+                      ? note.alt
+                        ? `A picture’s description, “${note.alt}”, does not say what it shows.`
+                        : "A picture has no description."
                       : note.kind === "button"
                         ? `The button “${note.label}” does not say where it goes.`
                         : `The address ${shortAddress(note.address)} is read out letter by letter.`}

@@ -81,6 +81,8 @@ try {
     const overflow = () => page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
 
     is(at + "three notes listed", await page.locator("section ol > li").count(), 3);
+    // The live region is in the page before its first sentence, so that sentence is announced (4.1.3).
+    is(at + "status region rendered before any message", await page.locator('section p[role="status"]').evaluate((node) => getComputedStyle(node).display !== "none"), true);
     is(at + "axe AAA: no violation with notes", await audit(), []);
     is(at + "every control at least 44 × 44 px", await small(), []);
     is(at + "no sideways scroll", await overflow(), false);
@@ -109,11 +111,15 @@ try {
     await settled();
     is(at + "button renamed in the text", (await text()).includes("[Read the bread guide](https://example.com/guide)"), true);
     is(at + "the fix is said", await status(), "Button words changed. You can undo it.");
+    // The pressed control is gone with its note: focus goes to the sentence that says what happened, never to the page (2.4.3).
+    const focusOn = () => page.evaluate(() => { const node = document.activeElement; return node ? [node.getAttribute("role"), node.closest("section") !== null, node.matches(":focus-visible")] : null; });
+    is(at + "after a fix, focus is on what was said, with a visible ring", await focusOn(), ["status", true, true]);
     is(at + "two notes left", await page.locator("section ol > li").count(), 2);
     await page.getByRole("button", { name: /^Undo/ }).click();
     await settled();
     is(at + "undo brings the text back", await text(), START);
     is(at + "the undo is said", await status(), "Button words changed: undone.");
+    is(at + "after undo, focus is on what was said", (await focusOn()).slice(0, 2), ["status", true]);
 
     // Show it in the text: the place is selected in the text box.
     await page.getByRole("button", { name: /^Show it in the text ?: the picture$/ }).click();
@@ -124,6 +130,7 @@ try {
     await settled();
     is(at + "decoration changes no text", await text(), START);
     is(at + "decoration is said", await status(), "Marked as decoration: screen readers skip it.");
+    is(at + "after decoration, focus is on what was said", (await focusOn()).slice(0, 2), ["status", true]);
     is(at + "two notes left after decoration", await page.locator("section ol > li").count(), 2);
 
     // The lone address made a button with typed words, then the button: nothing left to fix.
@@ -148,6 +155,11 @@ try {
     }
     is(at + "a repeated sentence is said again", [heard[0].trim() === heard[1].trim(), heard[0] !== heard[1], heard[0].trim()], [true, true, "Marked as decoration: screen readers skip it."]);
     is(at + "both pictures marked, text unchanged", [await page.locator("section ol > li").count(), await text()], [0, TWO]);
+
+    // A long address with no place to break stays inside the panel at 320 px (1.4.10).
+    await page.evaluate((body) => window.harness.mount(body), `Hello\n\nhttps://example.com/${"a".repeat(160)}`);
+    await settled();
+    is(at + "a long address causes no sideways scroll", await overflow(), false);
 
     // The studio's own editor, left in Design: asked to show a place, it opens Write and selects it there.
     const from = START.indexOf("[Click here]"), to = from + "[Click here](https://example.com/guide)".length;

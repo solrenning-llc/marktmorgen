@@ -19,7 +19,7 @@ inventory from main `f964dbd9` and a record of what this change adds. It is not 
 `lib/mail-access-check.ts` reads the email exactly as it is drawn (`parseMailBlocks`, the first six pictures,
 the same `https://` addresses made links) and names, in reading order:
 
-- a picture with no words (WCAG 1.1.1);
+- a picture with no words, or words that say nothing, such as "image" or a file name (WCAG 1.1.1);
 - a button whose words do not say where it goes, such as "Click here" (2.4.4, 2.4.9);
 - a bare web address, which the email turns into a link whose words are the address (2.4.9).
 
@@ -27,7 +27,8 @@ the same `https://` addresses made links) and names, in reading order:
 selects the place) and, where safe, a fix in one press with words the creator types: describe the picture,
 rename the button, or turn an address alone on its line into a button. Vague, empty or too long words are
 refused with the error tied to the field. A fix refuses to write when that place changed since the check.
-Every fix is said in a status region and can be undone. "It is only decoration" changes nothing in the text
+Every fix is said in a status region, which is in the page from the start and takes the focus after a press
+(the pressed control may be gone), and can be undone. Long addresses wrap, so nothing scrolls sideways at 320 px. "It is only decoration" changes nothing in the text
 (an email already draws a picture with no words as `alt=""`); that choice is kept on the page only.
 
 The email is never blocked: the panel says "You can still send it", and "Yes, send it" stays as it was.

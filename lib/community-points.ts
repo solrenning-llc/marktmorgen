@@ -84,6 +84,19 @@ export async function award(id: string, who: string, delta: 1 | -1, owner: DataO
   if (!COMMUNITY.test(id) || !MEMBER.test(who) || !isRedisConfigured()) return;
   const day = dayKey(id, dayOf(now));
   if (delta > 0) {
+    // Only someone still in the community earns (Claude 7, 13 November 2026): a like on a post an erased member left
+    // wrote their points and their place on the board again, and a removed member kept climbing it. A record that
+    // cannot be read is not "still in" (rule 24): no point is given on it. Imported when needed: lib/community.ts,
+    // which lib/community-push.ts reads, imports this file.
+    const { stillMembers } = await import("@/lib/community-push");
+    let still: readonly string[];
+    try {
+      still = await stillMembers(id, [who]);
+    } catch (error) {
+      console.error("reading whether a community member is still in failed; no point given", error);
+      return;
+    }
+    if (!still.includes(who)) return;
     // A member's first point puts them on the boards for good: counted in the store's room (lib/order-data.ts).
     await orderWrite(owner, [
       ["ZINCRBY", allKey(id), 1, who],

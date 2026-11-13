@@ -584,7 +584,7 @@ function ProductForm({
         >
           {draft.pwyw && !draft.every && !free ? "Lowest price" : "Price"}
         </label>
-        <div className="card mt-2 flex items-center pl-4 transition focus-within:border-violet-brand">
+        <div className="card mt-2 flex items-center border-(--line-off)! pl-4 transition focus-within:border-violet-brand!">
           <span className="whitespace-nowrap text-ink-soft">{prefix}</span>
           <input
             id={`product-price-${id}`}
@@ -645,7 +645,7 @@ function ProductForm({
               <label htmlFor={`product-suggested-${id}`} className="field-label">
                 Suggested price
               </label>
-              <div className="card mt-2 flex max-w-[14rem] items-center pl-4 transition focus-within:border-violet-brand">
+              <div className="card mt-2 flex max-w-[14rem] items-center border-(--line-off)! pl-4 transition focus-within:border-violet-brand!">
                 <span className="whitespace-nowrap text-ink-soft">{prefix}</span>
                 <input
                   id={`product-suggested-${id}`}
@@ -751,7 +751,7 @@ function ProductForm({
                 Introductory price <span className="font-normal text-ink-soft">(optional)</span>
               </label>
               <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2">
-                <div className="card flex w-40 items-center pl-4 transition focus-within:border-violet-brand">
+                <div className="card flex w-40 items-center border-(--line-off)! pl-4 transition focus-within:border-violet-brand!">
                   <span className="whitespace-nowrap text-ink-soft">{prefix}</span>
                   <input
                     id={`product-intro-${id}`}
@@ -796,7 +796,7 @@ function ProductForm({
                   Or pay yearly <span className="font-normal text-ink-soft">(optional)</span>
                 </label>
                 <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2">
-                  <div className="card flex w-40 items-center pl-4 transition focus-within:border-violet-brand">
+                  <div className="card flex w-40 items-center border-(--line-off)! pl-4 transition focus-within:border-violet-brand!">
                     <span className="whitespace-nowrap text-ink-soft">{prefix}</span>
                     <input
                       id={`product-yearly-${id}`}

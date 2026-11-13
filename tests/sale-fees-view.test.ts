@@ -16,6 +16,7 @@
  */
 import { readFileSync } from "node:fs";
 import { FEES_PAGE_SALES, feesOf, keptWords, monthWords, outWords, reachWords, readWords, stateWords, unavailableWords } from "@/lib/sale-fees-view";
+import { saleFeeMonths } from "@/lib/sale-fees-months";
 import { done, is, part } from "./check";
 
 const page = readFileSync("app/studio/fees/page.tsx", "utf8");
@@ -64,6 +65,17 @@ function main(): void {
   // tests/sale-fees-months.test.ts); the page shows the month's account fees as money out.
   is("the months table has the account fees column", page.includes("outWords(-l.accountFees, l.currency)"), true);
   is("a payout's 72-cent fee (account fees -72) reads as money out", outWords(-(-72), "usd"), "$0.72");
+  // Claude 3 nuvem K's LEVE on #3651: a payout line taken through the page's own reading (saleFeeMonths in "UTC", as
+  // app/studio/fees/page.tsx calls it) reaches the account fees cell, never only the formatter on a typed number.
+  const payout = {
+    id: "txn_payout1", object: "balance_transaction", amount: -4800, currency: "usd", fee: 72,
+    fee_details: [{ amount: 72, currency: "usd", type: "stripe_fee" }], net: -4872, type: "payout",
+    reporting_category: "payout", source: null, created: Math.floor(Date.UTC(2026, 10, 5, 15) / 1000),
+  };
+  const read = saleFeeMonths([payout], { complete: true, since: Date.UTC(2026, 0, 1), at: AT }, "UTC");
+  const november = read.available ? read.months.find((m) => m.month === "2026-11") : undefined;
+  const line = november && november.state !== "unknown" ? november.lines.find((l) => l.currency === "usd") : undefined;
+  is("a payout's fee reaches the month's account fees cell as the page draws it", line ? outWords(-line.accountFees, line.currency) : null, "$0.72");
 
   part("Tables a screen reader and a keyboard can use");
   is("two tables, each with a caption", (page.match(/<caption/g) ?? []).length, 2);

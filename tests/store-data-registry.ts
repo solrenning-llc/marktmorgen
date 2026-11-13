@@ -240,6 +240,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:rl:licence:@app/api/store/licence/route.ts": short("A license check's count per connection", "request", 1, KEY, REQ("license")),
   "nl:pod:@app/api/store/podcast/route.ts": short("A podcast's lock while the studio changes it", "studio", 1),
   "nl:pod:@app/api/store/podcast/public-settings/route.ts": short("A podcast's lock while the studio changes its public feed (33 [F2] part 3)", "studio", 1),
+  "nl:pod:@app/api/store/product/route.ts": short("A podcast's lock while a removed product drops its public feed settings (33 [F2] part 3)", "studio", 1),
 
   // ---------------------------------------------------------------- lib/ a–b
   "nl:adsrv:@lib/ad-events.ts": { what: "The store's server-side ad settings, its sealed tokens", parts: [capped(8 * KB, "Four platforms' sealed tokens and a test code: one record a store.")] },

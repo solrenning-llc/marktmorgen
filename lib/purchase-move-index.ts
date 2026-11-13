@@ -136,7 +136,8 @@ function linesOf(reply: unknown, what: string): Map<string, string> {
  * podcast feed, tests/traffic-cost.ts COMMANDS.feed): one GET, and one HGET
  * only when there is a mark. The same agreement as readMovedIndex: moved only
  * when the mark names the new address and its line names it back. Throws
- * UnknownReplyError when either cannot be read.
+ * UnknownReplyError when either cannot be read, and when a mark's line back
+ * is missing or names another move.
  */
 export async function movedAwayTo(sid: string, raw: string): Promise<string | null> {
   const address = normaliseEmail(raw);
@@ -151,7 +152,10 @@ export async function movedAwayTo(sid: string, raw: string): Promise<string | nu
   const back = second[0];
   // A line is a move's id, as readMovedIndex reads it: anything else is unknown, never "not moved" (Claude 1 on #3717).
   if (back !== null && (typeof back !== "string" || !ID.test(back))) throw new UnknownReplyError(what);
-  return back === mark.id ? mark.to : null;
+  // A missing line back, or one naming another move, is incomplete evidence, as readMovedIndex reads it (Codex H2 on
+  // #3626): unknown, never "not moved".
+  if (back !== mark.id) throw new UnknownReplyError(what);
+  return mark.to;
 }
 
 /**

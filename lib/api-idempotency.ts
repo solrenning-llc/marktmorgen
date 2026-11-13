@@ -13,7 +13,8 @@
  * Wired, for now, only on POST /api/v1/access and POST /api/v1/leads. Without the header nothing changes. Since unit 3 an
  * answer about an address is listed under that address, and deleting the person deletes it at once.
  */
-import { createHash } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
+import { deriveKey } from "@/lib/secret-box";
 import { redisPipeline } from "@/lib/redis";
 import { repliesFor } from "@/lib/redis-reply";
 import {
@@ -24,16 +25,23 @@ import {
 const keyHash = (key: string) => createHash("sha256").update(key).digest("hex");
 const recordName = (sid: string, hash: string) => `nl:api:idem:${sid}:${hash}`;
 /**
- *   nl:api:idem:p:<store id>:<sha(address)>  sorted set  the records whose answer is about that address, each by the
+ *   nl:api:idem:p:<store id>:<hmac(address)> sorted set  the records whose answer is about that address, each by the
  *                                             hash of its key and scored by when it ends (ms); and, for 24 hours after
  *                                             the person was deleted, ERASED_MARK
  *
  * (unit 3) so deleting a person from the store deletes those answers at once (forgetIdempotentPerson), instead of
- * leaving them until they expire. The name says the store, as every store key does, and never the address: only its
- * hash, and no store value goes into a fast hash. Each keep first drops the lines whose answer has ended, so the index
+ * leaving them until they expire. The name says the store, as every store key does, and never the address: only an
+ * HMAC of it under a key derived from the server's own secret (lib/secret-box.ts deriveKey), so a name kept for a day
+ * after the person's deletion cannot be matched against a list of addresses (Codex X5 on #3542, MÉDIO), and no store
+ * value goes into a fast hash. Each keep first drops the lines whose answer has ended, so the index
  * lists only answers still kept (review of #3542); it ends 24 hours after its latest keep.
  */
-const personKey = (sid: string, email: string) => `nl:api:idem:p:${sid}:${createHash("sha256").update(email.trim().toLowerCase()).digest("hex")}`;
+const PERSON_INDEX_LABEL = "api-idempotency-person-index/v1";
+/** The person's index name, or null when the server has no secret to key it with: then no answer about a person is kept. */
+export function personIndexName(sid: string, email: string): string | null {
+  const key = deriveKey(PERSON_INDEX_LABEL);
+  return key ? `nl:api:idem:p:${sid}:${createHmac("sha256", key).update(email.trim().toLowerCase()).digest("hex")}` : null;
+}
 /**
  * The line an erasure leaves in the person's index, for 24 hours: a keyed write that passed the grant's check before
  * the person was deleted and lists its answer after the erasure read the index sees it and keeps nothing (review of
@@ -98,7 +106,9 @@ export async function onceForKey(request: Request, sid: string, path: string, bo
     // lives 24 hours more, and the erasure's mark is read. The answer is kept only when all four replies are exactly
     // as expected and no erasure has marked the person; otherwise the claim is held, so a repeat is told 409 and runs
     // nothing. An erasure that deletes this record between the listing and the keep leaves nothing to keep (XX).
-    const pk = typeof person === "string" && person.trim() ? personKey(sid, person) : null;
+    const about = typeof person === "string" && person.trim() !== "";
+    // An answer about a person is kept only where an erasure can find it: with no key to name the index, it is not kept.
+    const pk = about ? personIndexName(sid, person as string) : null;
     const indexed = pk
       ? repliesFor(await redisPipeline([
         ["ZREMRANGEBYSCORE", pk, "-inf", Date.now() - LINE_SLACK_MS],
@@ -107,7 +117,7 @@ export async function onceForKey(request: Request, sid: string, path: string, bo
         ["ZSCORE", pk, ERASED_MARK],
       ]).catch(() => null), 4)
       : null;
-    const listed = pk === null || (indexed !== null && typeof indexed[0] === "number" && (indexed[1] === 0 || indexed[1] === 1) && indexed[2] === 1 && indexed[3] === null);
+    const listed = (!about && pk === null) || (indexed !== null && typeof indexed[0] === "number" && (indexed[1] === 0 || indexed[1] === 1) && indexed[2] === 1 && indexed[3] === null);
     if (listed) await redisPipeline([["SET", rk, after.record, "XX", "EX", left]]).catch(() => {});
   }
   return done.response;
@@ -125,7 +135,9 @@ export async function onceForKey(request: Request, sid: string, path: string, bo
  */
 export async function forgetIdempotentPerson(sid: string, email: string, now = Date.now()): Promise<number> {
   if (!sid || !email) return 0;
-  const pk = personKey(sid, email);
+  const pk = personIndexName(sid, email);
+  // No key: no answer about a person was ever kept (onceForKey keeps none without one), so there is nothing to delete.
+  if (pk === null) return 0;
   const read = repliesFor(await redisPipeline([
     ["ZADD", pk, now + IDEMPOTENCY_SECONDS * 1_000, ERASED_MARK],
     ["EXPIRE", pk, IDEMPOTENCY_SECONDS],
@@ -158,7 +170,9 @@ export async function forgetIdempotentPerson(sid: string, email: string, now = D
  */
 export async function idempotentLines(sid: string, email: string): Promise<number> {
   if (!sid || !email) return 0;
-  const read = repliesFor(await redisPipeline([["ZCARD", personKey(sid, email)]]), 1);
+  const pk = personIndexName(sid, email);
+  if (pk === null) return 0;
+  const read = repliesFor(await redisPipeline([["ZCARD", pk]]), 1);
   if (!read || typeof read[0] !== "number" || !Number.isSafeInteger(read[0]) || read[0] < 0) throw new Error("the kept API answers of a person could not be counted");
   return read[0];
 }

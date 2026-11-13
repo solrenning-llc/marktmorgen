@@ -13,7 +13,7 @@ import { makeKey } from "@/lib/api-keys";
 import { POST as postLead } from "@/app/api/v1/leads/route";
 import { POST as postAccess } from "@/app/api/v1/access/route";
 import { erasePerson, erasureScope, erasureSize } from "@/lib/person-erasure";
-import { ERASE_BATCH, forgetIdempotentPerson, idempotentLines } from "@/lib/api-idempotency";
+import { ERASE_BATCH, forgetIdempotentPerson, idempotentLines, personIndexName } from "@/lib/api-idempotency";
 import { erasureWork } from "@/lib/erasure-rules";
 import { advance, store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -70,6 +70,7 @@ async function main(): Promise<void> {
   // plain SHA-256 of the address lets anyone holding a list of addresses confirm, offline, who was in this store.
   is("no index is named by the plain SHA-256 of her address: it could be confirmed offline from a list", has(index(a.sid, ADA)), false);
   is("her answers are still indexed (an index in store A names its store, one per address)", redis.keys().filter((k) => k.startsWith(`nl:api:idem:p:${a.sid}:`)).length, 2);
+  is("Ada's index in store A is named by the store and a keyed HMAC of her address", has(personIndexName(a.sid, ADA) ?? ""), true);
   is("no index name says an address", redis.keys().filter((k) => k.startsWith("nl:api:idem:p:") && /@/.test(k)), []);
 
   part("One keyed write about a person stays inside the cost ceiling's commands");
@@ -174,7 +175,7 @@ async function main(): Promise<void> {
   part("The person's index lists only answers still kept");
   // Claude 3 cloud J's LOW on #3542: each keep set the index's expiry again, and answers past their 24 hours stayed
   // listed, so a busy address's index grew past the cap and the erasure threw until it lapsed.
-  const pk = (sid: string, email: string) => `nl:api:idem:p:${sid}:${createHash("sha256").update(email.trim().toLowerCase()).digest("hex")}`;
+  const pk = (sid: string, email: string) => personIndexName(sid, email) ?? "";
   const listed = async (name: string) => {
     try {
       const [members] = (await plain([["ZRANGEBYSCORE", name, "-inf", "+inf"]])) as unknown[];

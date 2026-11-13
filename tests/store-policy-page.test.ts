@@ -6,7 +6,7 @@
  * from its source, as other store page checks do.
  */
 import { readFileSync } from "node:fs";
-import { addProduct, claimHandle, ensureStatsId, moveProduct, setSubscription, storeForEmail } from "@/lib/store";
+import { addProduct, claimHandle, ensureStatsId, moveProduct, setMailSettings, setSubscription, storeForEmail } from "@/lib/store";
 import { visibleIds } from "@/lib/catalog";
 import { policyInput, policyInputFrom } from "@/lib/store-policy-input";
 import { policyFacts, policyFingerprint } from "@/lib/store-policy-facts";
@@ -35,6 +35,18 @@ is("a pixel switched on: the measurement section, named by its platform", withPi
 is("and a new version", policyFingerprint(withPixel) === policyFingerprint(before), false);
 is("PayPal taken: said", policyFacts(policyInputFrom(store, [ebook], true), "en")[0].sentences[2].includes("PayPal"), true);
 is("no postal address: no contact section", policyFacts(policyInputFrom({ ...store, mail: null } as typeof store, [ebook], false), "en").some((s) => s.id === "contact"), false);
+
+part("The email footer's postal address is on the page only by the creator's own choice (Claude 1's MEDIUM on #1824)");
+// Typed for the footer of list emails (CAN-SPAM), often a home address: never published on a public page unless the
+// creator chose it, where they type it.
+const footerOnly = { ...store, mail: { fromName: "Harbor Kitchen", address: "12 Elm St, Apt 3, Leeds" } } as typeof store;
+const chosen = { ...store, mail: { fromName: "Harbor Kitchen", address: "12 Elm St, Apt 3, Leeds", onPolicies: true } } as typeof store;
+is("typed for the emails only: no contact section, the address nowhere on the page", [policyFacts(policyInputFrom(footerOnly, [ebook], false), "en").some((s) => s.id === "contact"), JSON.stringify(policyFacts(policyInputFrom(footerOnly, [ebook], false), "en")).includes("Elm St")], [false, false]);
+is("chosen for the page: the contact section with it", policyFacts(policyInputFrom(chosen, [ebook], false), "en").find((s) => s.id === "contact")?.sentences.some((t) => t.includes("12 Elm St, Apt 3, Leeds")), true);
+const studio = readFileSync("components/email-studio.tsx", "utf8");
+is("the choice is made where the address is typed, unchecked until the creator checks it", [studio.includes("Also show this address on my store's policies page"), studio.includes("useState(mail?.onPolicies === true)"), studio.includes('type="checkbox"')], [true, true, true]);
+is("the settings route saves the choice only when it is exactly yes", readFileSync("app/api/store/mail/route.ts", "utf8").includes("body.onPolicies === true"), true);
+is("the privacy page says the address is public only by that choice", /postal address[\s\S]{0,200}policies page/.test(readFileSync("app/privacy/page.tsx", "utf8")), true);
 
 part("The page");
 const page = readFileSync("app/[handle]/policies/page.tsx", "utf8");
@@ -97,7 +109,19 @@ async function storedSchedule() {
   is("the readable schedule back: memberships again", await stored(JSON.parse(original).recurring), { memberships: true });
 }
 
-storedSchedule().then(done, (e) => {
+/** The choice is kept with the address, and only a yes is a yes. */
+async function mailChoice() {
+  part("The choice is kept with the store's email settings");
+  redis.clear();
+  const owner = "policy-mail@example.test";
+  await claimHandle(owner, "policymail", "Policy Mail", "");
+  await setMailSettings(owner, { fromName: "Policy Mail", address: "12 Elm St, Apt 3, Leeds", onPolicies: true });
+  is("checked: kept", (await storeForEmail(owner))!.mail?.onPolicies, true);
+  await setMailSettings(owner, { fromName: "Policy Mail", address: "12 Elm St, Apt 3, Leeds" });
+  is("unchecked: not kept", (await storeForEmail(owner))!.mail?.onPolicies === true, false);
+}
+
+mailChoice().then(storedSchedule).then(done, (e) => {
   console.error(e);
   process.exitCode = 1;
 });

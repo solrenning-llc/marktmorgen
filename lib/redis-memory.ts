@@ -1544,6 +1544,13 @@ export class MemoryRedis {
         }
         if (key.startsWith("-- marktmorgen:store-data:v1\n") && args[0] === "1") return this.storeData(args.slice(1));
         if (key.startsWith("-- marktmorgen:order-write:v1\n")) return this.orderWrite(args);
+        // lib/licence-keys.ts SALE_SWAP: a sale's place among the keys given changed only while it holds the expected mark.
+        if (key.startsWith("-- marktmorgen:license-sale-swap:v1\n") && args[0] === "1" && args.length === 5) {
+          const [, sales, reference, expected, next] = args;
+          if (this.run(["HGET", sales, reference]) !== expected) return 0;
+          this.run(next === "" ? ["HDEL", sales, reference] : ["HSET", sales, reference, next]);
+          return 1;
+        }
         // lib/order-data.ts ORDER_WRITE_ONCE: ORDER_WRITE behind a once-only mark (KEYS[2]), read first; a mark there
         // writes nothing, and a command refused inside takes the mark back out.
         if (key.startsWith("-- marktmorgen:order-write-once:v1\n") && Number(args[0]) >= 2) {

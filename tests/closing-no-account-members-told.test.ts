@@ -10,6 +10,7 @@ import { createHash } from "node:crypto";
 import { closeOne, type Hands } from "@/lib/plan-closing";
 import { FINAL_INDEX, paidKey, paidPeriods } from "@/lib/closing-holds";
 import { claimHandle, storeFolder, storeForEmail, storeRef } from "@/lib/store";
+import { toldKey } from "@/lib/closing-buyers";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -46,6 +47,8 @@ async function main(): Promise<void> {
   await redis.pipeline([
     ["ZADD", FINAL_INDEX, String(endedAt), key],
     ["SET", stateKey(key), JSON.stringify({ of: endedAt, day, renewals: now - 3_600_000, hold: endedAt, holdFrom: endedAt, week: day - 7 * DAY, buyersDone: day - 8 * DAY })],
+    // Told of the closing in its window, as every member is (lib/closing-buyers.ts), so no new credit is taken.
+    ["HSET", toldKey(folder), "member@example.com", String(Math.floor((day - 8 * DAY) / 1000))],
     ["HSET", paidKey(folder), "sub_NoAccountMember1", JSON.stringify({ inv: "in_NoAccountMember1", pi: "pi_NoAccountMember1", amt: 3000, tot: 3000, cur: "usd", ps: s - 15 * 86_400, pe: s + 15 * 86_400, e: "member@example.com" })],
   ]);
 

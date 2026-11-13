@@ -25,6 +25,7 @@ import { PORTION_NOTE, pauseNote } from "@/lib/mail-health";
 import { BATCH_SIZE, MAX_MAIL_BODY, MAX_SUBJECT, SENDER_WAIT_NOTE, monthlyAllowance, sendTo, usedThisMonthExact } from "@/lib/mail";
 import { WINDOW_ID, allowanceWindow, opensAgainWords, windowId } from "@/lib/allowance-window";
 import { refreshPeriod } from "@/lib/billing-sync";
+import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { costStandingOf } from "@/lib/plan-standing";
 import { allowancesUsedStrict, giveAllowance, giveAllowanceIn, holdAllowanceAt, takeAllowance } from "@/lib/store-allowance";
 import { paypalKept } from "@/lib/paypal-sales";
@@ -408,6 +409,9 @@ export function linksToStore(body: string, store: Pick<Store, "handle" | "domain
   return false;
 }
 
+/** Said when a funded period's paid cohort cannot be proved: the same words as a count that cannot be made. */
+const COHORT_UNKNOWN = "This can't be counted right now. Try again in a minute.";
+
 /**
  * Writes a broadcast down to go now or later. What it may contain is checked
  * here. `count` counts the reading of the store's buyers a narrowed email
@@ -501,7 +505,10 @@ export async function createBroadcast(
   if (narrow && count) {
     const units = (startsNow ? EXTRA_READS : READS_HELD) * (await ledgerReadingUnits(store));
     if (units > 0) {
-      const held = await holdAllowanceAt(await refreshPeriod(store), "studio", units, sendAt * 1000).catch(() => null);
+      const current = await refreshPeriod(store);
+      // A funded period's readings need its paid cohort first (resourceAllocations).
+      if (current.period?.funded === true && !(await reservePaidResourceWindow(current))) return { ok: false, reason: "studio_used", message: COHORT_UNKNOWN };
+      const held = await holdAllowanceAt(current, "studio", units, sendAt * 1000).catch(() => null);
       if (!held?.ok) return { ok: false, reason: "studio_used", message: held?.message ?? "" };
       broadcast.hold = { window: held.window, units };
     }
@@ -890,6 +897,8 @@ async function readNarrowing(start: Broadcast, store: Store, now: number): Promi
     return { stop: b };
   };
   if (!window) return wait();
+  // A funded period's readings need its paid cohort first (resourceAllocations): until then it waits, as without a window.
+  if (current.period?.funded === true && !(await reservePaidResourceWindow(current))) return wait();
   // Held for another month than the one it is read in: given back there once that is written down, and this month pays.
   if (b.hold && b.hold.window !== window.id) {
     const stale = b.hold;
@@ -1012,7 +1021,9 @@ export async function countTest(store: Store, b: Broadcast): Promise<{ visits: C
       // its pages, within that); without them the sales are not read, and the test is decided without them.
       const kept = await paypalKept(store.statsId, Boolean(store.paypalSeller));
       const units = BUYER_LEDGER_UNITS + ledgerUnits(ledgerReadBytes({ imported: 0, paypalSales: kept.sales, paypalRefunds: 0 }));
-      const paid = await takeAllowance(await refreshPeriod(store), "studio", units);
+      const current = await refreshPeriod(store);
+      if (current.period?.funded === true && !(await reservePaidResourceWindow(current))) throw new Error("a subject test's sales were not read: its paid cohort could not be proved");
+      const paid = await takeAllowance(current, "studio", units);
       if (!paid.ok) throw new Error("a subject test's sales were not read: its studio requests could not be counted");
       const read = await readPaidSales(store, b.sendAt - 60, TEST_SALES_PAGES);
       const by = moneyByCampaign(read.sales, store.currency);

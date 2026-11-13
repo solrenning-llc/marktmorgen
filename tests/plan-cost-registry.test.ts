@@ -440,7 +440,7 @@ test("a scheduled email's readings of the buyers are each paid in studio request
  // The only reading of the buyers in the scheduled job goes through the draw, which holds or takes before it says yes.
  assert.deepEqual(source.match(/keepFor\([^)]*\)/g), ["keepFor(store, narrow, count)", "keepFor(store, b.narrow, draw)"], "every reading of the buyers in lib/broadcasts.ts is counted");
  assert.ok(source.includes('const taken = await takeAllowance(current, "studio", rest, now * 1000)') && source.includes("return true;") && !source.includes("over += units"), "what the hold does not cover is taken from the month it is read in, never read over it");
- assert.ok(source.includes('await holdAllowanceAt(await refreshPeriod(store), "studio", units, sendAt * 1000)'), "the hold is taken from the month it goes out");
+ assert.ok(source.includes('const current = await refreshPeriod(store);') && source.includes('await holdAllowanceAt(current, "studio", units, sendAt * 1000)'), "the hold is taken from the month it goes out");
  // A subject test decided by sales reads TEST_SALES_PAGES pages of sales, paid as a reading of every sale (ALL_TIME_PAGES of them) first.
  assert.ok(TEST_SALES_PAGES <= ALL_TIME_PAGES, `${TEST_SALES_PAGES} > ${ALL_TIME_PAGES}`);
 });

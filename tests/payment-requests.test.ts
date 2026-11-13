@@ -221,10 +221,10 @@ async function main(): Promise<void> {
   is("and its page takes no second payment", await openRequestCheckout(store, request.id, "https://marktmorgen.com", now), { ok: false, reason: "gone" });
 
   part("A refund on Stripe shows");
-  refunds = [{ id: "re_1", payment_intent: "pi_ReqPaid000001", status: "succeeded", amount: 10_000 }];
+  refunds = [{ id: "re_1", object: "refund", payment_intent: "pi_ReqPaid000001", status: "succeeded", amount: 10_000, currency: "usd" }];
   let shown = await refreshRefunds(store, (await listRequests(store, now))!, now);
   is("in part: still paid, with what was refunded", [shown.find((r) => r.id === request.id)?.state, shown.find((r) => r.id === request.id)?.refunded], ["paid", 10_000]);
-  refunds = [...refunds, { id: "re_2", payment_intent: "pi_ReqPaid000001", status: "succeeded", amount: 38_000 }];
+  refunds = [...refunds, { id: "re_2", object: "refund", payment_intent: "pi_ReqPaid000001", status: "succeeded", amount: 38_000, currency: "usd" }];
   shown = await refreshRefunds(store, (await listRequests(store, now))!, now);
   is("in full: refunded, kept so", [shown.find((r) => r.id === request.id)?.state, (await readRequest(request.id))?.state], ["refunded", "refunded"]);
 

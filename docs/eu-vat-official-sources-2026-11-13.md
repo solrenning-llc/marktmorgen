@@ -6,16 +6,16 @@ Conferência feita em **13/11/2026** pelo Claude (subagente do Claude 2), a part
 
 ## 0. Acesso às fontes nesta sessão
 
-**Segunda conferência, 13/11/2026 (tarde).** O Claude 2 liberou na rede da sessão taxation-customs.ec.europa.eu, ec.europa.eu e www.gov.uk. Os pontos 1, 3, 4 e 5 foram então lidos nessas fontes; o ponto 2 continua quase todo dependente de hosts ainda bloqueados. A primeira passada da manhã, com tudo bloqueado, foi substituída por esta.
+**Segunda e terceira conferências, 13/11/2026 (tarde e noite).** O Claude 2 liberou na rede da sessão taxation-customs.ec.europa.eu, ec.europa.eu e www.gov.uk. Os pontos 1, 3, 4 e 5 foram então lidos nessas fontes. Na terceira passada, com vat-one-stop-shop.ec.europa.eu e www.legislation.gov.uk também liberados, foram lidos o ponto 2 (OSS não União) e a base legal britânica do registro. A primeira passada da manhã, com tudo bloqueado, foi substituída por estas.
 
 | Host | Resultado em 13/11/2026 |
 | --- | --- |
 | ec.europa.eu (TEDB e VIES) | **Acessível.** A TEDB foi lida pelo serviço oficial de consulta da própria Comissão (SOAP `VatRetrievalService`, endereço `https://ec.europa.eu/taxation_customs/tedb/ws/`, publicado no WSDL `https://ec.europa.eu/taxation_customs/tedb/ws/VatRetrievalService.wsdl`). Consulta: 27 Estados-membros, `situationOn` = 2026-11-13, sem filtro de categoria. A resposta (1 566 283 bytes, SHA-256 `d4303410636fd5e7398c2f52fea3a573a1d4576a00e7b3d9f977d00032936b0c`) foi guardada só no rascunho da sessão. O VIES foi lido pela API pública do próprio aplicativo (`/taxation_customs/vies/rest-api/`). |
 | taxation-customs.ec.europa.eu | **Acessível**, com limite de pedidos (HTTP 429 em algumas tentativas, superado com espera). Algumas páginas antigas do OSS mudaram de endereço (HTTP 404). |
 | www.gov.uk | **Acessível.** Lido pela API de conteúdo oficial do GOV.UK (`https://www.gov.uk/api/content/<caminho>`), que devolve o mesmo texto da página com as datas `public_updated_at`. |
-| host bloqueado: vat-one-stop-shop.ec.europa.eu (portal e guias do OSS) | O proxy recusou o CONNECT. |
+| vat-one-stop-shop.ec.europa.eu (portal e guias do OSS) | Bloqueado nas duas primeiras passadas; **acessível** na terceira (noite de 13/11/2026), depois de liberado pelo Claude 2. |
 | host bloqueado: eur-lex.europa.eu | HTTP 202 sem corpo (verificação anti-robô por JavaScript). Não se tentou contornar. |
-| host bloqueado: www.legislation.gov.uk | O proxy recusou o CONNECT. |
+| www.legislation.gov.uk | Bloqueado nas duas primeiras passadas; **acessível** na terceira. |
 | host bloqueado: autoridades fiscais nacionais (revenue.ie, bzst.de e as demais testadas de manhã) | O proxy recusou o CONNECT. |
 
 Consequência: o texto da Diretiva 2006/112/CE e do Regulamento 282/2011 **não foi lido** em EUR-Lex. Onde abaixo aparece uma regra desses atos como CONFERIDO, ela foi lida numa página oficial da Comissão ou do HMRC que a descreve, e isso está dito na linha. A página da Comissão não substitui o inteiro teor.
@@ -85,29 +85,70 @@ Regras para a construção, válidas pela leitura acima:
 
 ## 2. Regime OSS não União
 
-**Estado geral: NÃO CONFERIDO** nos detalhes de registro e declaração. O portal e os guias do OSS (vat-one-stop-shop.ec.europa.eu), a EUR-Lex e as autoridades nacionais continuaram bloqueados. Leitura anterior no repositório: [tx4-oss-evidence.md](tx4-oss-evidence.md), de **04/11/2026**.
+**Terceira conferência, 13/11/2026 (noite).** Com vat-one-stop-shop.ec.europa.eu liberado, foram lidos em 13/11/2026:
 
-Novo e **CONFERIDO** hoje:
+- [Register to OSS](https://vat-one-stop-shop.ec.europa.eu/one-stop-shop/register-oss_en), com página publicada em 21/06/2021 e alterada em 10/08/2021;
+- [Declare and pay in OSS](https://vat-one-stop-shop.ec.europa.eu/one-stop-shop/declare-and-pay-oss_en), com as mesmas datas;
+- a página [Guides](https://vat-one-stop-shop.ec.europa.eu/guides_en), alterada em 10/11/2026;
+- o **"Guide to the VAT One Stop Shop", revisado em julho de 2026** para as mudanças de 01/01/2027 ([PDF](https://vat-one-stop-shop.ec.europa.eu/document/download/55f4ec9d-83e6-4942-9e8d-11d44c243087_en?filename=OSS%20Guidelines_revised_1Jan2027_0.pdf)). O próprio guia avisa: "This guide is not legally binding and is only practical and informal guidance".
 
-- [Comissão, VAT for businesses](https://taxation-customs.ec.europa.eu/taxation/vat/vat-businesses_en), lida em 13/11/2026: o OSS "is aimed at businesses engaged in cross-border business-to-consumer (B2C) e-commerce activities"; as empresas "are required to register in only one Member State for the declaration and payment of VAT on all distance sales of goods and cross-border supplies of services to customers within the EU".
-- [Comissão, VAT in the Digital Age](https://taxation-customs.ec.europa.eu/taxation-1/value-added-tax-vat/vat-digital-age_en), lida em 13/11/2026:
-  - "Effective by 1 January 2027, minor legislative clarifications will impact users of the One-Stop Shop (OSS) and IOSS schemes".
-  - "Revised Explanatory Notes and OSS guidelines have been published on 24 July to reflect the changes as from 1 January 2027 introduced by the Single VAT Registration (SVR) pillar". O link aponta para <https://vat-one-stop-shop.ec.europa.eu/guides_en>, host bloqueado.
-  - A mesma notícia cita o Regulamento de Execução (UE) 2026/1869 (<https://eur-lex.europa.eu/eli/reg_impl/2026/1869/oj>, bloqueado), que "updates the detailed rules for the VAT special schemes".
-  - A partir de 01/07/2028, os modelos de fornecedor presumido novos são só para alojamento de curta duração e transporte rodoviário de passageiros.
+O inteiro teor da Diretiva (arts. 358a–369) e do Regulamento 282/2011 continua **não lido** (EUR-Lex bloqueado). Por isso, cada linha abaixo diz qual página oficial da Comissão a sustenta.
 
-  **Consequência:** a leitura de 04/11/2026 (guia de março de 2021 e manual irlandês de junho de 2025) pode estar desatualizada para declarações a partir de 01/01/2027. A equipe precisa ler as orientações revisadas de 24/07/2026 e o Regulamento 2026/1869 antes de implementar a declaração.
+| Ponto | O que a Comissão diz (13/11/2026) | Estado |
+| --- | --- | --- |
+| Quem pode usar | "Any taxable person, not established in the EU, who supplies services to non-taxable persons taking place in the EU, can register in the non-Union scheme" (Register to OSS, FAQ). Pelo guia revisado (Topic 4, a partir de 01/01/2027), o regime cobre serviços a não sujeitos passivos "whether established in the EU or not". | CONFERIDO (página da Comissão) |
+| Onde registrar: o Estado de identificação é livre? | **Sim.** "a taxable person (who has neither established his business nor has a fixed establishment in the EU) can choose any Member State to be the Member State of identification"; tabela: "Free choice of MSI". Só um Estado por regime. Troca: "may change his Member State of identification at any time. Such a change will take effect at the end of the calendar quarter". | CONFERIDO |
+| Como registrar | "Member States are free to choose how they collect this information [...] but it must be provided electronically. In practice, Member States will provide a web portal". O Estado confere os dados, verifica no mínimo se já há registro no mesmo regime em outro Estado ou se há quarentena, e "may refuse registration"; da recusa cabe recurso pelas vias nacionais. A Comissão publica o portal nacional de cada um dos 27 Estados na página [contact-country](https://vat-one-stop-shop.ec.europa.eu/contact-country_en) (alterada em 02/09/2025). | CONFERIDO |
+| Dados pedidos no registro | Guia revisado, anexo 2, coluna "non-Union scheme": | CONFERIDO (anexo do guia) |
+| | número nacional de identificação fiscal ("National tax number"); | |
+| | razão social e nomes comerciais; | |
+| | endereço postal completo; | |
+| | país do local do negócio; | |
+| | e-mail; | |
+| | site(s) "where available", que deixa de ser obrigatório a partir de 01/01/2027 (Topic 9); | |
+| | nome e telefone de contato; | |
+| | IBAN ou OBAN; BIC (opcional); | |
+| | números de IVA já atribuídos como não estabelecido; | |
+| | declaração eletrônica de que não é estabelecido na União; | |
+| | datas de pedido, de início e de decisão. | |
+| Custo do registro | Nenhuma das páginas e nenhum trecho do guia lidos menciona taxa, custo ou gratuidade. Custo desconhecido, nunca zero. | NÃO CONFERIDO |
+| Prazo de aprovação | Não há prazo de decisão nas páginas lidas. O Estado "will confirm [...] the date of the registration decision by electronic means". Início dos efeitos: "from the first day of the calendar quarter following that in which the taxable person informs the Member State of identification", ou desde a primeira venda se o Estado for informado "by the tenth day of the month following that first supply". Fora desse prazo, a empresa tem de se registrar e pagar diretamente em cada Estado de consumo. | Início dos efeitos CONFERIDO; prazo de decisão NÃO CONFERIDO |
+| O que se recebe | "That Member State will allocate an individual VAT identification number [...] (using the format EUxxxyyyyyz). This VAT identification number can only be used to declare supplies falling under the non-Union scheme." Anexo 2, nota 1: "xxx is the 3-digit ISO numeric code of the Member State of identification (MSI); yyyyy is the 5-digit number assigned by MSI; and z is a check digit." | CONFERIDO |
+| Prazo das declarações | Trimestre civil; entrega eletrônica "by the end of the month following the end of the tax period": 1º tri até 30/04, 2º até 31/07, 3º até 31/10, 4º até 31/01. "There is no change to the deadline [...] if this date falls on the weekend or on a public holiday". Não se entrega antes do fim do período. Declaração sem movimento ("nil return") obrigatória. | CONFERIDO |
+| Pagamento | Na entrega, ou até o mesmo prazo, sempre com o número de referência único da declaração (código do país, número de IVA e período). Atraso: lembrete no 10º dia após o prazo. Três trimestres seguidos de lembrete sem entrega, ou sem pagamento em 10 dias, levam à exclusão ("unless the amount unpaid for each return period is less than EUR 100", para o pagamento). Multas ficam com cada Estado de consumo. | CONFERIDO |
+| Dados de cada declaração | "The precise details are laid out in Annex III of the Commission Implementing Regulation (EU) 2020/194." Por Estado de consumo: base tributável e IVA à taxa padrão e às reduzidas, com as taxas da TEDB. Partes: 1, dados gerais e referência; 2, operações por Estado de consumo; 3, correções de períodos anteriores (período, Estado e IVA total); 4, saldo por Estado; 5, total. Isentas e taxa zero não entram. A parte 2 não pode ser negativa. Correções vão numa declaração posterior, até 3 anos após o prazo da original. | CONFERIDO |
+| Câmbio | "use the exchange rate as published by the European Central Bank on the last date of the tax period." Moeda: em geral o euro; Estados fora do euro podem exigir a moeda nacional. | CONFERIDO |
+| Guarda por 10 anos e conteúdo | "These records must be kept for 10 years from the end of the year in which the transaction was made, regardless of whether the taxable person has stopped using the scheme or not". Conteúdo "laid out in Council Regulation 282/2011 (Article 63c)": Estado de consumo, tipo e data da operação, IVA devido, pagamentos antecipados e "information used to determine the place where the customer is established, has his permanent address or usually resides". Os registros têm de estar disponíveis eletronicamente, "without delay", ao Estado de identificação ou de consumo; não entregá-los em um mês após o lembrete leva à exclusão. | CONFERIDO (guia); lista completa do art. 63c NÃO CONFERIDO |
+| Mudanças a partir de 01/01/2027 | Pelo guia revisado (Topics 1–10), o que toca o regime não União é: | Guia CONFERIDO |
+| | Topic 3: esclarecimento do momento do fato gerador pelas regras gerais (arts. 66, 167a e 226, 7a); | |
+| | Topic 4: o regime cobre serviços B2C a clientes estabelecidos ou não na UE (art. 359); | |
+| | Topic 5: os Estados podem exigir representante fiscal só para **pedidos de restituição** pela 13.ª Diretiva; | |
+| | Topic 9: o site deixa de ser dado obrigatório do registro (art. 361, n.º 1, c). | |
+| | O guia anuncia "a completely new version" para as mudanças de 01/07/2028. Base: Diretiva (UE) 2025/516, Regulamento (UE) 2025/517 e Regulamento de Execução (UE) 2025/518, de 11/03/2025. | |
+| Regulamento de Execução (UE) 2026/1869 | A página [VAT in the Digital Age](https://taxation-customs.ec.europa.eu/taxation-1/value-added-tax-vat/vat-digital-age_en) diz só: "The Regulation updates the detailed rules for the VAT special schemes and introduces the new transfer of own goods scheme under the Single VAT Registration (SVR) pillar". O guia revisado não o cita. O texto, inclusive a data de aplicação e a eventual alteração do formulário da declaração do Regulamento 2020/194, está na EUR-Lex, bloqueada. | NÃO CONFERIDO |
 
-| Ponto | Base legal a conferir | Leitura de 04/11/2026 (não reconferida) | Estado hoje |
-| --- | --- | --- | --- |
-| Quem pode usar | Diretiva, arts. 358a e 359 | Prestador de serviços B2C sem sede nem estabelecimento fixo na UE; regime opcional; uma vez escolhido, abrange todas as prestações B2C cobertas | NÃO CONFERIDO |
-| Onde registrar | Diretiva, arts. 358a, n.º 2, e 360 | Um Estado-membro de identificação à escolha do prestador | NÃO CONFERIDO |
-| Custo de registro | — | Nenhuma fonte oficial lida informa custo ou gratuidade: desconhecido, nunca zero | NÃO CONFERIDO |
-| Prazo de aprovação e o que se recebe | — | Não lido em fonte oficial | NÃO CONFERIDO |
-| Prazo das declarações | Diretiva, arts. 364 e 367 | Trimestre civil; declaração e pagamento até o fim do mês seguinte; declaração sem movimento obrigatória | NÃO CONFERIDO (e sujeito às mudanças de 01/01/2027) |
-| Dados da declaração | Diretiva, art. 365; Regulamento 282/2011, art. 59a; Regulamento de Execução (UE) 2020/194 e 2026/1869 | Por Estado de consumo e por taxa: base, taxa e IVA | NÃO CONFERIDO |
-| Câmbio para euro | Diretiva, art. 366 | Taxa do BCE do último dia do período | NÃO CONFERIDO |
-| Guarda por 10 anos e conteúdo do registro | Diretiva, art. 369; Regulamento 282/2011, art. 63c | 10 anos a partir do fim do ano da operação; lista do art. 63c ainda não lida no inteiro teor | NÃO CONFERIDO |
+### Portais nacionais do OSS (Comissão, contact-country, lido em 13/11/2026)
+
+Áustria finanzonline.bmf.gv.at; Bélgica finances.belgium.be (Intervat/OSS); Bulgária nra.bg; Croácia eusustavi.porezna-uprava.hr; Chipre gov.cy/mof-tax; República Tcheca financnisprava.gov.cz; Dinamarca skat.dk/onestopmoms; Estônia emta.ee; Finlândia vero.fi (MyTax); França impots.gouv.fr; Alemanha bzst.de (One-Stop-Shop EU); Grécia aade.gr/oss; Hungria moss.nav.gov.hu; Irlanda revenue.ie; Itália agenziaentrate.gov.it (One Stop Shop); Letônia vid.gov.lv; Lituânia vmi.lt/oss; Luxemburgo vatmoss.lu; Malta mtca.gov.mt; Países Baixos belastingdienst.nl; Polônia podatki.gov.pl; Portugal portaldasfinancas.gov.pt/oss; Romênia anaf.ro; Eslováquia financnasprava.sk; Eslovênia edavki.durs.si; Espanha sede.agenciatributaria.gob.es; Suécia skatteverket.se (one-stop-shop).
+
+Nenhuma dessas páginas nacionais foi aberta: os hosts das autoridades seguem bloqueados. Idioma, autenticação exigida de quem não tem identificação fiscal local, prazo e custo de cada portal: **NÃO CONFERIDO**.
+
+### Passos do dono, em ordem
+
+Os passos seguem a leitura acima. Nenhum deles foi feito ou preparado por este documento.
+
+1. **Ter a LLC constituída e o EIN em mãos.** O registro pede "National tax number", razão social, endereço postal completo, país do local do negócio, e-mail, contato, telefone e IBAN ou OBAN da empresa. Que o "National tax number" de uma LLC americana seja o EIN é inferência, **NÃO CONFERIDO**.
+2. **Escolher um Estado-membro de identificação.** A escolha é livre, só um Estado é permitido, e a troca pode ser feita depois, com efeito no fim do trimestre. Critérios práticos (idioma, autenticação do portal para quem não tem identificação local, atendimento) não foram conferidos.
+3. **Fazer o registro eletrônico no portal nacional desse Estado**, da lista acima, **antes da primeira venda** ou, no máximo, **até o dia 10 do mês seguinte à primeira venda**. Fora desse prazo, perde-se o regime para essas vendas e é preciso registrar e pagar em cada Estado de consumo.
+4. **Esperar a decisão eletrônica do Estado.**
+   - Prazo de decisão e custo: **NÃO CONFERIDOS**.
+   - O Estado pode recusar o registro, com recurso pelas vias nacionais.
+   - O dono recebe o número **EUxxxyyyyyz** (xxx é o código ISO numérico do Estado, yyyyy o número atribuído e z o dígito verificador), que só serve para o OSS não União, e a data da decisão.
+5. **Comunicar ao Estado qualquer mudança nos dados de registro** até o dia 10 do mês seguinte à mudança.
+6. **Todo trimestre:**
+   - entregar a declaração eletrônica, mesmo sem movimento, até o fim do mês seguinte (30/04, 31/07, 31/10 e 31/01), com o câmbio do BCE do último dia do trimestre;
+   - pagar até o mesmo prazo, com o número de referência da declaração.
+7. **Guardar os registros por 10 anos** contados do fim do ano de cada operação, mesmo depois de sair do regime, e entregá-los eletronicamente quando pedidos.
 
 ## 3. Provas do lugar do consumidor
 
@@ -159,7 +200,8 @@ Todas as páginas foram lidas em 13/11/2026 pela API de conteúdo do GOV.UK. A d
 | O que é serviço eletrônico (cursos) | Mesma página: "Education, training, or a similar service delivered by a person over the internet [...] (such as a webinar), is not considered to be an electronically supplied service"; "Automated learning does not have human involvement and is therefore a digital service". | CONFERIDO |
 | Prazo das declarações | [Sending a VAT Return](https://www.gov.uk/submit-vat-return), atualizada em 26/11/2024: declaração "usually [...] every 3 months"; obrigatória mesmo sem imposto; prazo "usually one calendar month and 7 days after the end of an accounting period", que também é o prazo do pagamento, "even if it's on a weekend or bank holiday". O período efetivo aparece na conta online. | CONFERIDO |
 | Bens por marketplace (questão 27, para comparação) | [HMRC, VATREG37210](https://www.gov.uk/hmrc-internal-manuals/vat-registration-manual/vatreg37210), atualizado em 29/04/2024: a seção 5A da VAT Act 1994 torna o marketplace o fornecedor presumido de bens fora do Reino Unido em remessas de até £135, desde 01/01/2021. | CONFERIDO |
-| Texto legal britânico (VAT Act 1994 e art. 9a da cópia britânica do Regulamento 282/2011) | www.legislation.gov.uk bloqueado | NÃO CONFERIDO |
+| Base legal do registro de não estabelecido | [VAT Act 1994, Schedule 1A](https://www.legislation.gov.uk/ukpga/1994/23/schedule/1A), "Registration in respect of taxable supplies: non-UK establishment", inserida pela Finance Act 2012 (Sch. 28), lida em 13/11/2026 em legislation.gov.uk. Para 1: fica obrigado ao registro quem cumpre as condições A a D: (A) faz prestações tributáveis ou há "reasonable grounds for believing" que as fará "in the period of 30 days then beginning"; (B) no curso de um negócio; (C) "has no business establishment, or other fixed establishment, in the United Kingdom"; (D) não está registrado. Para 5 e 6: notificar o HMRC em 30 dias do início da obrigação (ou antes do fim do período de 30 dias, no caso de previsão), e o HMRC registra "whether or not the person so notifies them" desde o dia em que a obrigação surgiu. Para 7 e 8: comunicar o fim das prestações em 30 dias e pedir o cancelamento. A Schedule 1A não traz limite de faturamento. | CONFERIDO (texto da lei; a página não mostrou o aviso de "changes to legislation" pendentes, e isso não foi conferido) |
+| Regra de plataforma na lei britânica | [Cópia britânica do art. 9a do Regulamento 282/2011](https://www.legislation.gov.uk/eur/2011/282/article/9a), lida em 13/11/2026: o mesmo texto do art. 9a, inclusive "a taxable person who [...] authorises the charge to the customer or the delivery of the services, or sets the general terms and conditions of the supply, shall not be permitted to explicitly indicate another person as the supplier", e o n.º 3 do mero processador de pagamentos. A vigência atual desse texto no direito britânico depois da Retained EU Law (Revocation and Reform) Act 2023 não foi conferida. | Texto CONFERIDO; vigência NÃO CONFERIDO |
 
 ## 6. Stripe: taxa de aplicação em cobrança direta e Stripe Tax
 

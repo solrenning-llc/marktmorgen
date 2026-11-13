@@ -2916,7 +2916,7 @@ export async function disputesSince(store: Store, since: number, deadline?: numb
   let after = "";
   for (let page = 0; page < DISPUTE_PAGES; page += 1) {
     const wait = stripeWait(deadline);
-    if (wait === null) return { byIntent, complete: false };
+    if (wait === null) return { byIntent, settled, open, complete: false };
     const listed = await onAccount(
       "GET",
       store.stripeAccountId,
@@ -3334,7 +3334,7 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
         await markRefunds(account, [
           ...[...referrals, ...partnerLines].map((r) => ({ r, cap: r.total })),
           ...bookings.map((l) => ({ r: l, cap: l.paid > 0 ? l.paid : Number.MAX_SAFE_INTEGER })),
-        ].flatMap(({ r, cap }) => {
+        ].flatMap(({ r, cap }): { key: string; field: string; raw: string; rf: number | null; at: number; rises: boolean }[] => {
           const origin = origins.get(r);
           if (!origin || r.acct !== account || r.pi === "" || r.pi.startsWith("paypal:")) return [];
           const before = origin.mark && origin.mark.rfa === account ? origin.mark.rf : -1;

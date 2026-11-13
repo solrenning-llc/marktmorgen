@@ -128,6 +128,12 @@ async function main(): Promise<void> {
     ["the team: an object", [{ members: [] }]],
     ["the team: two replies", ["{}", "{}"]],
     ["the team: not a list at all", { 0: null }],
+    // Codex X5 on #2969 at 58ef30ddd8: a string that is not a team record was parsed as an empty team.
+    ["the team: text that is not JSON", ["not a record"]],
+    ["the team: empty text", [""]],
+    ["the team: JSON that is not a record", ["[1,2]"]],
+    ["the team: JSON null", ["null"]],
+    ["the team: invitations that are not a list", ['{"members":[],"invites":7}']],
   ];
   for (const [name, reply] of teamShapes) {
     redis.pipeline = (async (batch: Command[]) => (isTeamRead(batch) ? reply : real(batch))) as typeof redis.pipeline;

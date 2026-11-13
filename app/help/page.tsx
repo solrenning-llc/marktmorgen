@@ -51,7 +51,7 @@ export default function HelpPage() {
         <div className="container-page grid gap-10 py-14 sm:py-20 lg:grid-cols-[15rem_1fr] lg:gap-16">
           <nav aria-label="Help sections" className="min-w-0 lg:sticky lg:top-24 lg:self-start">
             <p className="text-[0.8125rem] font-semibold uppercase tracking-[0.14em] text-ink-mute">Sections</p>
-            <ul className="mt-3 flex gap-2 overflow-x-auto pb-2 lg:block lg:space-y-1 lg:overflow-visible lg:pb-0">
+            <ul className="mt-3 flex flex-wrap gap-2 lg:block lg:space-y-1">
               {HELP_SECTIONS.map((section) => (
                 <li key={section.id} className="shrink-0">
                   <a

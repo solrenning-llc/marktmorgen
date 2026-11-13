@@ -48,6 +48,14 @@
 export const DISPUTE_TAKES: ReadonlySet<string> = new Set(["needs_response", "under_review", "lost", "prevented"]);
 
 /**
+ * The documented dispute states that take nothing from the creator: an
+ * inquiry (warning_*), a dispute won, and the legacy `charge_refunded`
+ * (see DISPUTE_TAKES). With DISPUTE_TAKES they are every status of stripe-node
+ * v22.6.0 Dispute.Status and the legacy one, the set lib/refunds.ts reads.
+ */
+export const DISPUTE_KEEPS: ReadonlySet<string> = new Set(["warning_needs_response", "warning_under_review", "warning_closed", "won", "charge_refunded"]);
+
+/**
  * Whether a dispute's own balance transactions took money from the creator
  * and did not put it back. Stripe's `prevented` is either a `resolution`,
  * "resolved (refunded) before it could become a chargeback", or a `block`,
@@ -87,12 +95,15 @@ export function disputeMoneyGone(dispute: unknown): boolean | null {
  * Whether one dispute Stripe listed takes the creator's money, for a reader
  * that has the dispute itself (lib/stats.ts). A prevented one by its own
  * money (disputeMoneyGone; null when that cannot be read, so the reader
- * says it is partial instead of guessing); every other status as
- * DISPUTE_TAKES says.
+ * says it is partial instead of guessing); every other documented status as
+ * DISPUTE_TAKES and DISPUTE_KEEPS say; null for a missing or unknown status.
  */
 export function disputeTakes(dispute: { status?: unknown; balance_transactions?: unknown }): boolean | null {
   if (dispute.status === "prevented") return disputeMoneyGone(dispute);
-  return typeof dispute.status === "string" && DISPUTE_TAKES.has(dispute.status);
+  if (typeof dispute.status === "string" && DISPUTE_TAKES.has(dispute.status)) return true;
+  if (typeof dispute.status === "string" && DISPUTE_KEEPS.has(dispute.status)) return false;
+  // A missing or undocumented status is not read as either (CX-123 rule 24).
+  return null;
 }
 
 /** A channel name for a renewal, refund or dispute that no sale read explains. */

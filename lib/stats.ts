@@ -1467,8 +1467,9 @@ const DISPUTE_PAGES = 3;
 /**
  * The disputes opened on the creator's account since `since` (seconds) that
  * the bank is holding or gave back to the buyer (disputeTakes). At most
- * DISPUTE_PAGES pages of a hundred; `partial` when there were more, or when a
- * prevented dispute's money could not be read.
+ * DISPUTE_PAGES pages of a hundred; `partial` when there were more, when a
+ * dispute's status or a prevented dispute's money could not be read, or when
+ * a dispute that takes the money has no readable amount.
  */
 async function readDisputes(store: Store, since: number, pages = DISPUTE_PAGES): Promise<{ rows: DisputeRow[]; partial: boolean }> {
   const out: DisputeRow[] = [];
@@ -1490,8 +1491,12 @@ async function readDisputes(store: Store, since: number, pages = DISPUTE_PAGES):
       if (takes !== true) continue;
       const raw = row.payment_intent;
       const pi = typeof raw === "string" ? raw : raw && typeof raw === "object" && typeof (raw as { id?: unknown }).id === "string" ? (raw as { id: string }).id : "";
-      const cents = typeof row.amount === "number" && row.amount > 0 ? row.amount : 0;
-      if (!cents) continue;
+      const cents = typeof row.amount === "number" && Number.isSafeInteger(row.amount) && row.amount > 0 ? row.amount : 0;
+      // A dispute that takes the money is never for nothing: an amount not read is a gap, not zero (CX-123 rule 24).
+      if (!cents) {
+        partial = true;
+        continue;
+      }
       const currency = currencyOf(row);
       if (!currency) partial = true;
       out.push({ created: typeof row.created === "number" ? row.created * 1000 : 0, cents, currency, paymentIntent: pi });

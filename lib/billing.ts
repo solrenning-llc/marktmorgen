@@ -540,6 +540,8 @@ export async function readStartedSubscription(
     throw error;
   }
 
+  // Rule 30: a reply that is not the session asked about says nothing about it.
+  if (session.id !== sessionId) throw new Error("The checkout session's reply is another session's");
   if (session.mode !== "subscription") return null;
   const metadata = session.metadata as Record<string, string> | null;
   const customerId = typeof session.customer === "string" ? session.customer : "";
@@ -584,6 +586,9 @@ export async function readStartedSubscription(
       console.error("reading the subscription failed",error);
       return {customerId,subscriptionId,active:false,tier:"creator",cycle:"month",trialEnds:0,shared:false,period:null};
     }
+    // Rule 30, as the funded path checks it: a reply that is another subscription, or this one answered as another
+    // customer's, says nothing about the session's own; thrown, so the return route writes nothing.
+    if(subscription&&(subscription.id!==subscriptionId||subscription.customer!==customerId))throw new Error("The started subscription's reply is another subscription's");
     const meta=subscription?.metadata as Record<string,unknown>|null|undefined;
     if(meta?.funding_grant!==undefined||meta?.funding_review!==undefined)return null;
     state=subscription?stateOf(subscription):{state:"inactive",reason:"missing"};
@@ -1340,6 +1345,9 @@ export async function switchPlan(
   if (!SUBSCRIPTION_PATTERN.test(subscriptionId)) return { kind: "refused", reason: "standing" };
   const path = `/subscriptions/${encodeURIComponent(subscriptionId)}`;
   const subscription = await onPlatform("GET", path);
+  // Rule 30: a reply that is another subscription decides nothing here; nothing has been sent yet, so nothing changed.
+  // A funded switch checks it below, with its plan unit.
+  if (!funding && subscription.id !== subscriptionId) throw new Error("The subscription's reply is another subscription's");
   const status = typeof subscription.status === "string" ? subscription.status : "";
   if (status !== "active" && status !== "trialing") return { kind: "refused", reason: "standing" };
   if (subscription.cancel_at_period_end === true || (typeof subscription.cancel_at === "number" && subscription.cancel_at > 0)) {
@@ -1434,6 +1442,8 @@ export async function switchPlan(
 
   // Stripe has taken the change: whatever fails from here, it may have switched and billed.
   try {
+    // Rule 30: an answer that is another subscription does not say what became of this one: not confirmed.
+    if(updated.id!==subscriptionId)throw new Error("The switch's answer is another subscription's");
     const updatedMeta=updated.metadata as Record<string,unknown>|null|undefined;
     if(funding&&(updated.id!==subscriptionId||updatedMeta?.funding_pending_grant!==funding.id||updatedMeta?.funding_pending_review!==funding.reviewId))throw new Error('Switch funding observation does not match the submitted contract');
     if (updated.pending_update) {

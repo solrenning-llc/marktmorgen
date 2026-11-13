@@ -15,7 +15,7 @@ test('pending plan changes retain a separate funding reference without replacing
 
 test('funded return reuses the provider read and adopts no rights until its receipt is acknowledged',async()=>{
  const old=globalThis.fetch,created=Math.floor(Date.now()/1000);
- const session={mode:'subscription',customer:'cus_Test000001',subscription:'sub_Test000001',metadata:{store:'harbor',funding_grant:'ctr_metadata',funding_review:'test_only'}};
+ const session={id:'cs_test_Activation001',mode:'subscription',customer:'cus_Test000001',subscription:'sub_Test000001',metadata:{store:'harbor',funding_grant:'ctr_metadata',funding_review:'test_only'}};
  const subscription={id:'sub_Test000001',customer:'cus_Test000001',created,status:'active',cancel_at:null,cancel_at_period_end:false,metadata:{...session.metadata},items:{data:[{quantity:1,current_period_start:created,current_period_end:created+30*86400,price:{lookup_key:'nimbus_creator_month',unit_amount:6900,currency:'usd',recurring:{interval:'month',interval_count:1}}}]}};
  let reads=0,writes=0;globalThis.fetch=async(input,init)=>{reads++;if(init?.method==='POST')writes++;return Response.json(new URL(String(input)).pathname.includes('/checkout/sessions/')?session:subscription);};
  activationObservations.calls.length=0;activationObservations.accept=false;
@@ -29,7 +29,7 @@ test('funded return reuses the provider read and adopts no rights until its rece
 });
 test('foreign ownership, currency, interval or funding references never reach activation',async()=>{
  const old=globalThis.fetch,created=Math.floor(Date.now()/1000);
- const session={mode:'subscription',customer:'cus_Test000001',subscription:'sub_Test000001',metadata:{store:'harbor',funding_grant:'ctr_metadata',funding_review:'test_only'}};
+ const session={id:'cs_test_Activation001',mode:'subscription',customer:'cus_Test000001',subscription:'sub_Test000001',metadata:{store:'harbor',funding_grant:'ctr_metadata',funding_review:'test_only'}};
  const base={id:'sub_Test000001',customer:'cus_Test000001',created,status:'active',cancel_at:null,cancel_at_period_end:false,metadata:{...session.metadata},items:{data:[{quantity:1,current_period_start:created,current_period_end:created+30*86400,price:{lookup_key:'nimbus_creator_month',unit_amount:6900,currency:'usd',recurring:{interval:'month',interval_count:1}}}]}};
  try{
   for(const change of [{customer:'cus_Other001'},{metadata:{...session.metadata,store:'other'}},{metadata:{...session.metadata,funding_grant:'ctr_other'}},{pending_update:{expires_at:created+100}},{items:{data:[{...base.items.data[0],price:{...base.items.data[0].price,currency:'eur'}}]}},{items:{data:[{...base.items.data[0],price:{...base.items.data[0].price,recurring:{interval:'month',interval_count:2}}}]}},{items:{data:[{...base.items.data[0],price:{...base.items.data[0].price,unit_amount:1}}]}}]){
@@ -42,7 +42,7 @@ test('foreign ownership, currency, interval or funding references never reach ac
 test('missing session funding fields cannot downgrade a funded subscription to legacy',async()=>{
  const old=globalThis.fetch,created=Math.floor(Date.now()/1000);
  const references={funding_grant:'ctr_metadata',funding_review:'test_only'};
- const baseSession={mode:'subscription',customer:'cus_Test000001',subscription:'sub_Test000001',metadata:{store:'harbor',...references}};
+ const baseSession={id:'cs_test_Activation001',mode:'subscription',customer:'cus_Test000001',subscription:'sub_Test000001',metadata:{store:'harbor',...references}};
  const subscription={id:'sub_Test000001',customer:'cus_Test000001',created,status:'active',cancel_at:null,cancel_at_period_end:false,metadata:{store:'harbor',...references},items:{data:[{quantity:1,current_period_start:created,current_period_end:created+30*86400,price:{lookup_key:'nimbus_creator_month',unit_amount:6900,currency:'usd',recurring:{interval:'month',interval_count:1}}}]}};
  activationObservations.accept=true;
  try{
@@ -56,7 +56,7 @@ test('missing session funding fields cannot downgrade a funded subscription to l
 });
 test('only two unmarked provider records keep the legacy return path; missing or unavailable subscriptions grant no rights',async()=>{
  const old=globalThis.fetch,created=Math.floor(Date.now()/1000);
- const session={mode:'subscription',customer:'cus_Test000001',subscription:'sub_Test000001',metadata:{store:'harbor'}};
+ const session={id:'cs_test_Activation001',mode:'subscription',customer:'cus_Test000001',subscription:'sub_Test000001',metadata:{store:'harbor'}};
  const subscription={id:'sub_Test000001',customer:'cus_Test000001',created,status:'active',cancel_at:null,cancel_at_period_end:false,metadata:{store:'harbor'},items:{data:[{quantity:1,current_period_start:created,current_period_end:created+30*86400,price:{lookup_key:'nimbus_creator_month',unit_amount:6900,currency:'usd',recurring:{interval:'month',interval_count:1}}}]}};
  try{
   for(const status of [200,404,503]){
@@ -265,7 +265,7 @@ test('checkout and plan-switch grants cannot reach a provider before their issui
 
 test('funded return, missed return and switch reject unknown or multiple units before activation',async()=>{
  const old=globalThis.fetch,created=Math.floor(Date.now()/1000);
- const session={mode:'subscription',customer:'cus_Test000001',subscription:'sub_Test000001',metadata:{store:'harbor',funding_grant:'ctr_metadata',funding_review:'test_only'}};
+ const session={id:'cs_test_Activation001',mode:'subscription',customer:'cus_Test000001',subscription:'sub_Test000001',metadata:{store:'harbor',funding_grant:'ctr_metadata',funding_review:'test_only'}};
  const own={...store,stripeCustomerId:'cus_Test000001',previousHandles:[],releasedHandles:[]} as Store;
  const raw={id:'sub_Test000001',customer:'cus_Test000001',created,status:'active',cancel_at:null,cancel_at_period_end:false,metadata:{...session.metadata},items:{data:[{quantity:1,current_period_start:created,current_period_end:created+30*86400,price:{lookup_key:'nimbus_creator_month',unit_amount:6900,currency:'usd',recurring:{interval:'month',interval_count:1}}}]}};
  activationObservations.accept=true;switchActivationObservations.accept=true;
@@ -838,7 +838,7 @@ test('a renamed store still owns its funded plan switch made under its earlier a
 
 test('the way back from a funded checkout is kept when the store changed its address meanwhile',async()=>{
  const old=globalThis.fetch,plan=fundedPlan('harbor','cus_Test000001');
- const session={mode:'subscription',customer:'cus_Test000001',subscription:'sub_Test000001',metadata:{store:'harbor',funding_grant:'ctr_metadata',funding_review:'test_only'}};
+ const session={id:'cs_test_Activation001',mode:'subscription',customer:'cus_Test000001',subscription:'sub_Test000001',metadata:{store:'harbor',funding_grant:'ctr_metadata',funding_review:'test_only'}};
  let current:Record<string,unknown>=session,subscription:Record<string,unknown>=plan;
  globalThis.fetch=async(input)=>Response.json(new URL(String(input)).pathname.includes('/checkout/sessions/')?current:subscription);
  activationObservations.accept=true;
@@ -873,7 +873,7 @@ test('the way back from a funded checkout is kept when the store changed its add
 test('the way back keeps a first plan bought under an address the store took back',async()=>{
  const old=globalThis.fetch,plan=fundedPlan('harbor','cus_New00000001');
  const reclaimed={...store,handle:'harbor',stripeCustomerId:null,previousHandles:[],releasedHandles:['harbor']} as Store;
- const session={mode:'subscription',customer:'cus_New00000001',subscription:'sub_Test000001',metadata:{store:'harbor',funding_grant:'ctr_metadata',funding_review:'test_only'}};
+ const session={id:'cs_test_Activation001',mode:'subscription',customer:'cus_New00000001',subscription:'sub_Test000001',metadata:{store:'harbor',funding_grant:'ctr_metadata',funding_review:'test_only'}};
  let current:Record<string,unknown>=session,subscription:Record<string,unknown>=plan;
  globalThis.fetch=async(input)=>Response.json(new URL(String(input)).pathname.includes('/checkout/sessions/')?current:subscription);
  activationObservations.calls.length=0;activationObservations.accept=true;

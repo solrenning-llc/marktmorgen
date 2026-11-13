@@ -6,7 +6,7 @@
 import { NOT_ADVICE, type PolicyFactsInput, policyFacts, policyFingerprint } from "@/lib/store-policy-facts";
 import { done, is, part } from "./check";
 
-const base: PolicyFactsInput = { storeName: "Harbor Kitchen", sellsDigital: true, sellsMemberships: false, paypal: false, pixels: [], postalAddress: "1 Main St, Portland, OR 97201" };
+const base: PolicyFactsInput = { storeName: "Harbor Kitchen", sellsDigital: true, sellsMemberships: false, paypal: false, pixels: [], postalAddress: "1 Main St, Portland, OR 97201", membersSelfCancel: true };
 const ids = (input: Partial<PolicyFactsInput>) => policyFacts({ ...base, ...input }).map((s) => s.id);
 const text = (input: Partial<PolicyFactsInput>) => policyFacts({ ...base, ...input }).flatMap((s) => s.sentences).join(" ");
 
@@ -20,6 +20,11 @@ is("digital only: the digital rule, no membership rule", [text({}).includes("For
 is("memberships: their rule and how to cancel them", ids({ sellsDigital: false, sellsMemberships: true }), ["seller", "cancel", "memberships", "contact"]);
 is("canceling ends at the end of the period paid for", text({ sellsMemberships: true }).includes("end of the period you already paid for"), true);
 is("neither: no 14-day section", ids({ sellsDigital: false, sellsMemberships: false }), ["seller", "contact"]);
+
+part("How a member cancels: the way the store's emails really offer (review of #1824, LEVE)");
+is("a store whose emails carry the manage link: cancel from the link", text({ sellsMemberships: true, membersSelfCancel: true }).includes("from the link in any email about it"), true);
+is("a store whose emails say to reply: no link promised", text({ sellsMemberships: true, membersSelfCancel: false }).includes("from the link in any email about it"), false);
+is("…and the reply is said instead", text({ sellsMemberships: true, membersSelfCancel: false }).includes("by replying to any email about it"), true);
 
 part("Ad measurement only with a pixel on");
 is("no pixel: no sentence", ids({}).includes("measurement"), false);

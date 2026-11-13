@@ -97,6 +97,18 @@ async function storedSchedule() {
   is("the readable schedule back: memberships again", await stored(JSON.parse(original).recurring), { memberships: true });
 }
 
+part("The postal address is told as public where it is typed and in the privacy policy (review of #1824, MÉDIO)");
+{
+  // The field was typed for email footers (CAN-SPAM); the policies page publishes it at a predictable address, so the
+  // creator is told at the field, and the privacy policy says it, before it is ever shown there.
+  const studio = readFileSync("components/email-studio.tsx", "utf8");
+  const note = studio.slice(studio.indexOf("Postal address at the bottom of each email"), studio.indexOf('type="submit"', studio.indexOf("Postal address at the bottom of each email")));
+  is("the field says it is also shown on the store's policies page", /also shown on your store.s public policies page/.test(note), true);
+  const privacy = readFileSync("app/privacy/page.tsx", "utf8").replace(/\s+/g, " ");
+  const creator = privacy.slice(privacy.indexOf("What a creator puts in a store."), privacy.indexOf("Buyer information."));
+  is("the privacy policy says the postal address is public on the policies page", /postal address[^.]*policies page/.test(creator), true);
+}
+
 storedSchedule().then(done, (e) => {
   console.error(e);
   process.exitCode = 1;

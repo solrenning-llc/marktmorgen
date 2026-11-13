@@ -59,6 +59,17 @@ async function main(): Promise<void> {
   is("no schedule inline: a one-off sold digitally, not a membership", await outcome({ ...store, catalog: withInline([none]) }), JSON.stringify({ digital: true, memberships: false }));
   is("a readable schedule inline: a membership", await outcome({ ...store, catalog: withInline([entry]) }), JSON.stringify({ digital: false, memberships: true }));
   is("a readable schedule in the head: a membership", await outcome({ ...store, catalog: withHead([entry]) }), JSON.stringify({ digital: false, memberships: true }));
+
+  part("read from Redis: the same contradiction is unknown there too (review of #1824, LEVE)");
+  // The head left empty, so the listing is read from its own record; that record says no schedule while the item,
+  // written with it, says a membership: never "not a membership".
+  const key = `nl:catalog:${store.catalog.id}:l:${member.product.id}`;
+  const original = await redis.pipeline([["GET", key]]);
+  is("(the listing has its own record)", typeof original[0], "string");
+  await redis.pipeline([["SET", key, JSON.stringify(none)]]);
+  is("no schedule in the record while its item says a membership: unknown, never a one-off", await outcome({ ...store, catalog: withHead([]) }), "unknown");
+  await redis.pipeline([["SET", key, original[0] as string]]);
+  is("the record's own schedule back: a membership", await outcome({ ...store, catalog: withHead([]) }), JSON.stringify({ digital: false, memberships: true }));
   done();
 }
 

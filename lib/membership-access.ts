@@ -34,7 +34,7 @@
  * choice.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError } from "@/lib/redis-reply";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { onAccount } from "@/lib/stripe-account";
 import type { Listing, Store } from "@/lib/store";
 import { type PauseSub, pausedNow } from "@/lib/membership-pause-rules";
@@ -85,6 +85,9 @@ function retryScheduled(sub: object): boolean {
  * understood (rule 24), never an ended membership (Codex L on #3889).
  */
 const STRIPE_SUB_STATUSES = new Set(["incomplete", "incomplete_expired", "trialing", "active", "past_due", "canceled", "unpaid", "paused"]);
+
+/** What memberState can answer, and so the only states membershipStatus keeps and reads back. */
+const KEPT_STATES = new Set([...STRIPE_SUB_STATUSES, PAST_DUE_NO_RETRY]);
 
 /**
  * The state a membership's doors go by: Stripe's own, or "paused" while a
@@ -146,8 +149,11 @@ export async function membershipStatus(store: Store, subscription: unknown): Pro
   const account = store.stripeAccountId;
   if (typeof subscription !== "string" || !SUBSCRIPTION_PATTERN.test(subscription) || !account) return null;
   if (isRedisConfigured()) {
-    const [cached] = await redisPipeline([["GET", statusKey(account, subscription)]]);
-    if (typeof cached === "string" && cached) return cached;
+    // A kept state obeys the same closed set as Stripe's own (Codex L on #3889): one of Stripe's states, or the doors'
+    // own PAST_DUE_NO_RETRY and "paused". Any other text (kept by an earlier version, or damaged) or a reply of
+    // another shape certifies nothing: Stripe is asked again, and the state read is kept over it.
+    const cached = repliesFor(await redisPipeline([["GET", statusKey(account, subscription)]]), 1)?.[0];
+    if (typeof cached === "string" && KEPT_STATES.has(cached)) return cached;
   }
   const sub = await onAccount("GET", account, `/subscriptions/${encodeURIComponent(subscription)}?expand[]=latest_invoice`);
   const status = memberState(sub);

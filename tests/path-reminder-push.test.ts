@@ -12,7 +12,7 @@ async function main(){
  for(const role of ["admin","editor","support"] as const)is(role+" cannot choose it",eventsFor(role).includes("path"),false);
  const added=await addDevice(store,owner,"owner",{endpoint:"https://fcm.googleapis.com/fcm/send/synthetic",keys:{p256dh:"test",auth:"test"}},[],"Test",Date.now()-1000);
  if(!added.ok)throw Error("synthetic device");
- is("no automatic opt-in",added.view.devices[0].events.includes("path"),false);
+ is("no automatic opt-in",added.view!.devices[0].events.includes("path"),false);
  await setDeviceEvents(store,owner,"owner",added.id,["path"]);
  is("explicit opt-in kept",(await phoneView(store,owner,"owner")).devices[0].events.includes("path"),true);
  const key="nl:phone:cfg:"+store.statsId;

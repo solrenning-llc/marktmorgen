@@ -86,12 +86,16 @@ test("a product's course: every assignment read before the product goes (Revisor
     redis.pipeline = original;
   }
   const route = readFileSync("app/api/store/product/route.ts", "utf8");
-  const read = route.indexOf("await readCourseTaskDrops(beforeCourse)");
-  const remove = route.indexOf("const removed = await removeProduct(ref, id);");
-  assert.ok(read > 0 && remove > read, "the product route reads the course's work before it removes the product");
-  assert.ok(route.slice(read, remove).includes('error: "unavailable" }, { status: 503 }'), "and answers 503 when it cannot");
   const lookup = route.indexOf("before = await readListing(guarded.store, id);");
-  const courseRead = route.indexOf("beforeCourse = await readCourse(before.course.id);");
+  const courseRead = route.indexOf("preparedCourse = await readCourseExact(before.course.id);");
+  const read = route.indexOf("taskDrops = await readCourseTaskDrops(preparedCourse)");
+  const remove = route.indexOf("const removed = await removeProduct(ref, id");
+  const confirm = route.indexOf("JSON.stringify(found) !== JSON.stringify(preparedCourse)", remove);
+  assert.ok(
+    lookup > 0 && courseRead > lookup && read > courseRead && remove > read && confirm > remove,
+    "the product route prepares the exact course's work before removal and confirms the same snapshot under the lock",
+  );
+  assert.ok(route.slice(read, remove).includes('error: "unavailable" }, { status: 503 }'), "and answers 503 when it cannot");
   const refuse = route.indexOf('error: "unavailable" }, { status: 503 }', courseRead);
-  assert.ok(lookup > 0 && courseRead > lookup && refuse > courseRead && refuse < read, "a product or course that cannot be read answers 503 too, never \"not a course\"");
+  assert.ok(lookup > 0 && courseRead > lookup && refuse > read && refuse < remove, "a product or course that cannot be read answers 503 too, never \"not a course\"");
 });

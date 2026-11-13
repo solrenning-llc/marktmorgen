@@ -1,15 +1,29 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { headers } from "next/headers";
+import { cache } from "react";
 import { normaliseHandle, storeForPage } from "@/lib/store";
 import { lookStyle } from "@/lib/store-look";
 import { speech } from "@/lib/buyer-words";
 import SiteNotFound from "@/app/not-found";
 
-export const metadata: Metadata = {
+const fallbackMetadata: Metadata = {
   title: "Not here — Marktmorgen",
   robots: { index: false, follow: true },
 };
+
+const loadStore = cache(async () => {
+  const asked = (await headers()).get("x-nimbus-store") ?? "";
+  return asked ? storeForPage(normaliseHandle(asked)).catch(() => null) : null;
+});
+
+/** The tab uses the store's language when the missing address belonged to a known store. */
+export async function generateMetadata(): Promise<Metadata> {
+  const store = await loadStore();
+  if (!store || store.suspended) return fallbackMetadata;
+  const { w } = speech(store);
+  return { title: `${w.missingTitle} — ${store.name}`, robots: fallbackMetadata.robots };
+}
 
 /**
  * An address under a store with nothing behind it: a product taken down, a
@@ -22,8 +36,7 @@ export const metadata: Metadata = {
  * behind the name, it is the site's own page.
  */
 export default async function StoreNotFound() {
-  const asked = (await headers()).get("x-nimbus-store") ?? "";
-  const store = asked ? await storeForPage(normaliseHandle(asked)).catch(() => null) : null;
+  const store = await loadStore();
   if (!store || store.suspended) return <SiteNotFound />;
   const { w, lang } = speech(store);
   return (

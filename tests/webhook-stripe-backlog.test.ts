@@ -14,7 +14,7 @@ import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_webhook_backlog_only";
-const account = "acct_StripeBacklog4285";
+const account = "acct_Backlog4285";
 // 1,100 matching events, newest first, in eleven pages of 100.
 const ids = Array.from({ length: 1100 }, (_, i) => `evt_Back${String(1100 - i).padStart(5, "0")}`);
 const row = (id: string) => ({ id, type: "payment_intent.succeeded", data: { object: {} } });

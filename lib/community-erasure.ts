@@ -84,7 +84,8 @@ export async function forgetCommunityPerson(id: string, who: string, email: stri
   // Their trace (lib/community-trace.ts): what they wrote and did, by reference. DEL's own count only (CX-123 rule 24).
   await step(async () => {
     const traced = countOf(repliesFor(await redisPipeline([["DEL", traceKey(id, who)]]), 1)?.[0]);
-    if (traced === null) throw new UnknownReplyError("a member's trace deleted");
+    // One key: 0 or 1, nothing else (Codex X5 on #3095).
+    if (traced !== 0 && traced !== 1) throw new UnknownReplyError("a member's trace deleted");
     return traced;
   });
   await step(() => forgetPointsPerson(id, who));

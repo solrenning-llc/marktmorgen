@@ -39,8 +39,8 @@ const NOW = Math.floor(Date.now() / 1000);
 /** Refunds by account: only the old account holds the refund of the sale paid into it. */
 const refundsOn: Record<string, Record<string, unknown>[]> = {
   [OLD]: [
-    { id: "re_old1", object: "refund", status: "succeeded", payment_intent: "pi_1BookSale", amount: 10_000 },
-    { id: "re_old2", object: "refund", status: "succeeded", payment_intent: "pi_1BookCall", amount: 5_000 },
+    { id: "re_old1", object: "refund", status: "succeeded", payment_intent: "pi_1BookSale", amount: 10_000, currency: "usd" },
+    { id: "re_old2", object: "refund", status: "succeeded", payment_intent: "pi_1BookCall", amount: 5_000, currency: "usd" },
   ],
   [NEW]: [],
 };
@@ -217,8 +217,8 @@ async function main(): Promise<void> {
   ]);
   // Paid into the old account 200 days ago and refunded there in full; a second sale there refunded 4,000 of 10,000.
   refundsOn[OLD].push(
-    { id: "re_old_mark", object: "refund", status: "succeeded", payment_intent: "pi_1MarkRefunded", amount: 10_000 },
-    { id: "re_old_part", object: "refund", status: "succeeded", payment_intent: "pi_1MarkPart", amount: 4_000 },
+    { id: "re_old_mark", object: "refund", status: "succeeded", payment_intent: "pi_1MarkRefunded", amount: 10_000, currency: "usd" },
+    { id: "re_old_part", object: "refund", status: "succeeded", payment_intent: "pi_1MarkPart", amount: 4_000, currency: "usd" },
   );
   for (const pi of ["pi_1MarkRefunded", "pi_1MarkPart"]) {
     await noteCharge((await storeForEmail(MARK_OWNER))!, {

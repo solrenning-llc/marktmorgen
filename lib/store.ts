@@ -48,7 +48,7 @@ import { cache } from "react";
 import { pointDomain } from "@/lib/domains";
 import { rememberListing } from "@/lib/directory-index";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { countOf, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { type Held, LockBusyError, deleteIfHeldOnly, holdLock, releaseLock, releaseLockStrict, setIfHeld, takeLock } from "@/lib/redis-lock";
 import {CONTRACT_ADMISSION_COVERAGE,canonicalFinancialSnapshot} from "@/lib/contract-funding-rules";
 import { type ProductFile } from "@/lib/product-file";
@@ -79,6 +79,7 @@ import { type PastSale, type StoreSale, NO_SALE, parsePastSales, parseSale, with
 import { parseTiers } from "@/lib/tier-rules";
 import { type BillingPeriod, isPeriod } from "@/lib/allowance-window";
 import { ENDED_INDEX } from "@/lib/plan-standing";
+import { closesStore } from "@/lib/plan-closing-rules";
 import { SHARING_INDEX } from "@/lib/platform-share";
 import { PAYING_INDEX } from "@/lib/free-pool-rules";
 import { type Cycle, type Tier, parseCycle, parseTier } from "@/lib/plan";
@@ -1110,6 +1111,24 @@ export async function storeForEmailSeen(
   // still be addressed by their own persistent id.
   if (!store || typeof store.email !== "string" ||
       storeRef(store).toLowerCase() !== email.toLowerCase()) return null;
+  return store;
+}
+
+/**
+ * The store kept under one ref, read exactly (rule 24), for a caller that takes the store out of a line when it is
+ * gone: null only when Redis answers nil for its key. A reply of another shape, a record that does not parse or a
+ * record under that key for another owner throws UnknownReplyError, and a request that fails throws as it did; none
+ * of them is "no store" (releaseRestarted, lib/closing-holds.ts; Codex G on #3672).
+ */
+export async function storeForRefExact(ref: string): Promise<Store | null> {
+  if (!isRedisConfigured()) throw new UnknownReplyError("a store's record (no Redis)");
+  const reply = repliesFor(await redisPipeline([["GET", await ownerKey(ref)]]), 1);
+  if (!reply) throw new UnknownReplyError("a store's record (GET)");
+  if (reply[0] === null) return null;
+  const store = typeof reply[0] === "string" ? parseStore(reply[0]) : null;
+  if (!store || typeof store.email !== "string" || storeRef(store).toLowerCase() !== ref.toLowerCase()) {
+    throw new UnknownReplyError("a store's record (unreadable, or another owner's)");
+  }
   return store;
 }
 
@@ -2146,7 +2165,60 @@ export async function clearStripeAccount(
 
 export type MoveResult =
   | { ok: true; store: Store }
-  | { ok: false; reason: "none" | "same" | "taken" };
+  | { ok: false; reason: "none" | "same" | "taken" | "closing" };
+
+/**
+ * The closing's final line, the walk's line and the line of stores whose members are held, by value: the same keys as
+ * FINAL_INDEX and HELD_INDEX (lib/closing-holds.ts) and DUE_KEY (lib/closed-store-data.ts), which import this file;
+ * tests/closing-moved-owner.test.ts puts stores in them by those names and fails when these differ.
+ */
+const CLOSING_FINAL_LINE = "nl:closing:final";
+const CLOSING_WALK_LINE = "nl:closed:due";
+const CLOSING_HELD_LINE = "nl:closing:held";
+/**
+ * A break's record and the line of breaks, by value: the same keys as recordKey and DUE in lib/plan-pause.ts, which
+ * imports this file; tests/closing-moved-owner.test.ts sets a break by those names and fails when these differ.
+ */
+const breakKey = (ref: string) => `nl:pause:${ref}`;
+const BREAK_LINE = "nl:pause:due";
+
+/** EXISTS as Redis answers it for one key: 0 or 1 (a string of one over REST). */
+const existsReply = (reply: unknown): 0 | 1 | null =>
+  reply === 0 || reply === "0" ? 0 : reply === 1 || reply === "1" ? 1 : null;
+
+/** A sorted set's score as Redis answers ZSCORE: nil, or a number (a string of one over REST). */
+const isScore = (reply: unknown): boolean =>
+  reply === null || (typeof reply === "number" && Number.isFinite(reply)) || (typeof reply === "string" && reply.trim() !== "" && Number.isFinite(Number(reply)));
+
+/**
+ * Whether a home store is in its closing (lib/plan-closing.ts): its plan ended on or after KEEP_NOTHING_FROM and does
+ * not run, or it is in the final line (its closing day began, so it is seen through whatever the plan does since) or
+ * in line for the walk that erases its records (lib/closed-store-data.ts). Everything that sees it through is keyed
+ * by its ref, its owner's address: its place in those lines and in the line of ended plans, its closing state, and
+ * its folder's holds, paid periods, notices and credit. A move gives it another ref, so the walk read the old one as
+ * nil and dropped the store, the daily run took it out of every line as gone, and its record stayed at the new
+ * address, never erased (Claude 6's probes P6 and P7 on #3643). Read under the store's own lock, so its plan cannot
+ * change meanwhile, and a store whose plan runs enters neither line. Its members are held under its ref too, from the
+ * day its plan ended (holdCharges, lib/closing-holds.ts): a plan that runs again is let go only by the daily
+ * releaseRestarted, which finds the store by that ref, so a store still in that line keeps its address until then; a
+ * move before it left the members paused for good and the buyers never told (Claude 1's review on #3672). A break the
+ * creator set is kept under the ref too (lib/plan-pause.ts: its record and its place in the line of breaks): the
+ * closing waits for it (onBreak, lib/plan-closing.ts) and the daily run of breaks finds the store by that ref to start
+ * its plan again, so a store with a break set, begun or not, keeps its address until the break is taken back or over;
+ * a move before it left the break at the old address and the closing began on the day the plan stopped (Revisor 2 on
+ * #3672). A line or a break that does not read is never "not in it" (rule 24): it throws, and nothing moves.
+ */
+async function closingUnderway(store: Store): Promise<boolean> {
+  if (!store.subscriptionActive && closesStore(Date.parse(store.planEndedAt))) return true;
+  const ref = storeRef(store);
+  const scores = repliesFor(await redisPipeline([["ZSCORE", CLOSING_FINAL_LINE, ref], ["ZSCORE", CLOSING_WALK_LINE, ref], ["ZSCORE", CLOSING_HELD_LINE, ref]]), 3);
+  if (!scores || !scores.every(isScore)) throw new UnknownReplyError("a store's place in the closing lines (ZSCORE)");
+  if (scores.some((score) => score !== null)) return true;
+  const kept = repliesFor(await redisPipeline([["EXISTS", breakKey(ref)], ["ZSCORE", BREAK_LINE, ref]]), 2);
+  const record = kept ? existsReply(kept[0]) : null;
+  if (!kept || record === null || !isScore(kept[1])) throw new UnknownReplyError("a store's break (EXISTS, ZSCORE)");
+  return record === 1 || kept[1] !== null;
+}
 
 /**
  * Moves a store from one sign-in address to another.
@@ -2215,6 +2287,8 @@ export async function moveAccount(
   if (!isRedisConfigured()) return { ok: false, reason: "none" };
 
   const result = await withStore<MoveResult>(from, async (store, _save, held) => {
+    // A store in its closing keeps its address until its records are erased, or its plan runs again and its members are let go; one with a break set, until the break is taken back or over (closingUnderway).
+    if (await closingUnderway(store)) return { ok: false, reason: "closing" };
     // The address it is moving to must not already own a store of its own.
     const [existing, theirs] = await redisPipeline([
       ["GET", await ownerKey(to)],

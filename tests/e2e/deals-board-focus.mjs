@@ -322,6 +322,8 @@ try {
   const moveAway = async (id, stage) => {
     await page.locator("#deal-stage-" + id).selectOption(stage);
     await press("deal-move-" + id);
+    // Into a won or lost stage the board asks first (553 [DB1]): the move is the one confirmed.
+    await page.locator("#deal-close-yes-" + id).waitFor({ timeout: 1000 }).then(() => press("deal-close-yes-" + id), () => {});
     await page.waitForFunction((id) => !document.getElementById("deal-stage-" + id), id, { timeout: 5000 });
     await settled();
     await page.waitForTimeout(200);
@@ -334,7 +336,12 @@ try {
     w.versions = { ...w.versions, dealoooo01: "e".repeat(32) };
     window.harness.refreshDelay = 1000;
   });
+  const sentBefore = (await writes()).length;
   await press("deal-move-dealoooo01");
+  // 553 [DB1]: closing a deal asks first, with focus on the question, and sends nothing until "Close as won".
+  await page.waitForFunction(() => document.activeElement?.id === "deal-close-dealoooo01", null, { timeout: 5000 }).catch(() => {});
+  is("Move into a won stage asks first, with focus on the question, and sends nothing", [await active(), await text("deal-close-dealoooo01-title"), (await writes()).length - sentBefore], ["deal-close-dealoooo01", "Close \u201cOverdue one\u201d as won?", 0]);
+  await press("deal-close-yes-dealoooo01");
   // L-F: once answered, the board says it is loading, never that a change is still being saved.
   await page.waitForFunction(() => document.getElementById("deal-board-why")?.textContent?.includes("loading"), null, { timeout: 5000 }).catch(() => {});
   is("after the answer, while the board loads, it says so (not \"still being saved\")", await page.evaluate(() => document.getElementById("deal-board-why")?.textContent ?? ""), "Please wait. The latest deals are loading.");

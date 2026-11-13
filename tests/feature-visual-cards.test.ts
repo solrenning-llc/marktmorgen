@@ -49,6 +49,7 @@ import { RECOVERY_CODES } from "@/lib/two-step";
 import { hideAddress } from "@/lib/recovery-address";
 import { eventTime, lengthWords } from "@/lib/community-events";
 import { done, is, part } from "./check";
+import { dealCount } from "@/lib/deal-close";
 
 const text = (html: string) => html.replace(/<[^>]+>/g, "\n").replace(/&#x27;/g, "'").replace(/&amp;/g, "&").split("\n").map((s) => s.trim()).filter(Boolean);
 const read = (file: string) => readFileSync(file, "utf8");
@@ -302,7 +303,7 @@ function main(): void {
   is("the heading and its sentence, summed from the deals drawn, one pipeline so no pipeline name in it", [cw.includes("Deals"), cw.includes(`People you are talking to about something sold outside a checkout: a coaching package, a custom project. ${openDeals.length} open, worth ${formatMoney(openSum, "usd")}; won so far, ${formatMoney(wonSum, "usd")}.`), flat(board).includes(flat("`People you are talking to about something sold outside a checkout: a coaching package, a custom project.${pipelines.length > 1 ? ` In ${pipeline.name}:` : \"\"} ${open.reduce((n, t) => n + t.count, 0)} open, worth ${money(open.reduce((n, t) => n + t.cents, 0))}; won so far, ${money(won.reduce((n, t) => n + t.cents, 0))}.`"))], [true, true, true]);
   is("New deal, and the first pipeline's button with its open count", [cw.includes("New deal"), /New deal/.test(board), cw.includes(FIRST_PIPELINE_NAME) && cw.includes(`· ${openDeals.length} open`), board.includes("{` · ${t.open.count} open`}"), FIRST_PIPELINE_NAME], [true, true, true, true, "Sales"]);
   is("New pipeline, since a paid Store plan keeps more than one, as the board's page counts them", [cw.includes("New pipeline"), CRM_PIPELINES, pipelineLimit({ tier: "creator", subscriptionActive: true, trialEnds: 0 }) > 1, dealsPage.includes("pipelineMax={Math.max(0, pipelineLimit(store) - hidden)}"), board.includes("pipelines.length < pipelineMax")], [true, PIPELINES_BY_TIER.creator, true, true, true]);
-  is("the stages a store starts with, each column with its count and total", DEFAULT_STAGES.slice(0, 2).map((st) => { const here = CRM_EXAMPLE.filter((d) => d.stage === st.id); return cw.includes(st.name) && cw.includes(`${here.length} · ${formatMoney(here.reduce((n, d) => n + d.cents, 0), "usd")}`); }).concat([board.includes("{`${count} · ${money(cents)}`}")]), [true, true, true]);
+  is("the stages a store starts with, each column with its count and total", DEFAULT_STAGES.slice(0, 2).map((st) => { const here = CRM_EXAMPLE.filter((d) => d.stage === st.id); return cw.includes(st.name) && cw.includes(`${dealCount(here.length)} · ${formatMoney(here.reduce((n, d) => n + d.cents, 0), "usd")}`); }).concat([board.includes("{`${dealCount(count)} · ${money(cents)}`}")]), [true, true, true]);
   is("each deal as the board writes it, in its own stage", [CRM_EXAMPLE.every((d) => cw.includes(d.title) && cw.includes(formatMoney(d.cents, "usd"))), cw.includes("Next: Follow up on the proposal"), board.includes("Next: {deal.nextAction}"), cw.includes("sam@example.com"), cw.filter((w) => w === "Edit").length, /\n\s*Edit\n/.test(board), CRM_EXAMPLE.every((d) => { const name = DEFAULT_STAGES.find((st) => st.id === d.stage)?.name ?? ""; const at = cw.indexOf(d.title); return at >= 0 && cw.slice(at).includes(name); })], [true, true, true, true, 2, true, true]);
   is("Request payment on the deal with an email only, for a role that may send (the owner may)", [cw.filter((w) => w === "Request payment").length, CRM_EXAMPLE.filter((d) => "email" in d).length, board.includes("{requestHref && deal.email ? ("), dealsPage.includes('requestHref={can(view.role, "send") ?'), can("owner", "send")], [1, 1, true, true, true]);
   is("no due date drawn, which the board would turn red once it has passed", cw.some((w) => /^Due /.test(w)), false);
@@ -389,7 +390,7 @@ function main(): void {
     ["team", t, new RegExp(`^(2 of ${MAX_TEAM} places used|Joined Oct 3, 2026|Invited as ${ROLE_NAMES.support} · the link works until Nov 8|.*example.*)$`)],
     ["sales pages", sg, new RegExp(`^(\\d\\. (${BLOCK_KINDS.map((k) => k.label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})|${blocks.length} blocks live on its page\\.|What you get · 5 items|\\d items|3 for, 2 not for|Add a block \\(${blocks.length} of ${MAX_BLOCKS}\\)|.*example.*)$`)],
     ["ai writing", ai, new RegExp(`^(${AI_LEFT_EXAMPLE} left this month\\. .*|.*example.*)$`)],
-    ["deals", cw, /^(People you are talking to .* 2 open, worth \$1,800; won so far, \$0\.|· 2 open|1 · \$(600|1,200)|\$(600|1,200)|.*example.*)$/],
+    ["deals", cw, /^(People you are talking to .* 2 open, worth \$1,800; won so far, \$0\.|· 2 open|1 deal · \$(600|1,200)|\$(600|1,200)|.*example.*)$/],
     ["outreach", ow, /^(Address printed on their own website, read October 28, 2026: .*|123 Example Street, Portland, ME 04101, United States|.*example.*)$/],
     ["import", iw, /^(Oct 30, 02:05\sPM UTC · 968 rows|912|41|12|3|.*example.*)$/],
     ["dry run", dw, /^(12|1|4|9|The same title as row 6|.*example.*)$/],

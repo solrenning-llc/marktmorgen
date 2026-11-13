@@ -24,6 +24,7 @@ import { OUTREACH_COUNTRIES, pitchFooter } from "@/lib/outreach-rules";
 import { SITE_URL } from "@/lib/site-url";
 import { HOUSE_HANDLE } from "@/lib/house-store";
 import { IMPORT_DATE, IMPORT_LEFT_WORDS, IMPORT_WORDS, OUTCOME_WORDS, type Outcome } from "@/lib/import-words";
+import { dealCount } from "@/lib/deal-close";
 
 /**
  * The pictures at the top of each feature page.
@@ -1173,7 +1174,7 @@ function CrmVisual() {
             <div key={stage.id} className="min-w-0 rounded-2xl bg-paper p-3 ring-1 ring-line">
               <div className="flex flex-wrap items-baseline justify-between gap-2">
                 <p className="text-[12.5px] font-semibold text-ink">{stage.name}</p>
-                <p className="text-[12px] tabular-nums text-ink-soft">{`${here.length} · ${money(sum(here))}`}</p>
+                <p className="text-[12px] tabular-nums text-ink-soft">{`${dealCount(here.length)} · ${money(sum(here))}`}</p>
               </div>
               {here.map((deal) => (
                 <div key={deal.title} className="mt-2 rounded-xl bg-white p-2.5 text-[12px] ring-1 ring-line">

@@ -30,6 +30,45 @@ const MAX_CHECKS = 5;
  */
 const CHECK_MS = 2_000;
 /**
+ * The most questions about lapsed holds one request has at Stripe at once,
+ * whatever it counts (Claude 3's performance audit, 13 November 2026): a
+ * store page of 24 limited products would otherwise ask up to 120 at once of
+ * the creator's account and run into Stripe's own rate limit.
+ */
+export const STOCK_STRIPE_IN_FLIGHT = 8;
+/**
+ * The longest one request waits on Stripe about lapsed holds, all its counts
+ * together. A question that cannot start in time is not asked: its hold
+ * counts as used and the count as unknown, as a slow answer does.
+ */
+export const STOCK_STRIPE_WAIT_MS = 2 * CHECK_MS;
+/** The least time worth asking Stripe in (lib/stripe-account.ts refuses a shorter ceiling). */
+const LEAST_ASK_MS = 50;
+
+/** What one request may still ask Stripe about lapsed holds: shared by every count it makes (stockBudget). */
+export type StockBudget = { readonly until: number; inFlight: number; readonly waiting: (() => void)[] };
+
+/** One request's questions to Stripe about lapsed holds, to share across every count it makes; timed by the real clock. */
+export function stockBudget(): StockBudget {
+  return { until: Date.now() + STOCK_STRIPE_WAIT_MS, inFlight: 0, waiting: [] };
+}
+
+/** Asks within the request's budget: at most STOCK_STRIPE_IN_FLIGHT at once, none started past its time; null when not asked. */
+async function askWithin<T>(budget: StockBudget, ask: (ms: number) => Promise<T>): Promise<T | null> {
+  if (budget.inFlight >= STOCK_STRIPE_IN_FLIGHT) await new Promise<void>((resolve) => budget.waiting.push(resolve));
+  else budget.inFlight += 1;
+  try {
+    const left = budget.until - Date.now();
+    if (left < LEAST_ASK_MS) return null;
+    return await ask(Math.min(CHECK_MS, left));
+  } finally {
+    // The slot goes straight to the next one waiting, or is let go.
+    const next = budget.waiting.shift();
+    if (next) next();
+    else budget.inFlight -= 1;
+  }
+}
+/**
  * The longest a checkout waits for another's stock lock (5 November 2026):
  * a lock is held only for a few Redis round trips (Stripe is never asked
  * under it), so a short wait is enough, and it bounds the tries a contended
@@ -77,8 +116,8 @@ async function readEntries(store: Store, product: Listing): Promise<Map<string, 
  * are handed back. When Stripe cannot be asked, a hold stays counted — the
  * safe way to be wrong is to show one unit too few, never to sell one too many.
  */
-export async function stockLeft(store: Store, product: Listing, now = Date.now()): Promise<number | null> {
-  return (await countStock(store, product, now, true))?.left ?? null;
+export async function stockLeft(store: Store, product: Listing, now = Date.now(), budget: StockBudget = stockBudget()): Promise<number | null> {
+  return (await countStock(store, product, now, budget))?.left ?? null;
 }
 
 /**
@@ -87,18 +126,18 @@ export async function stockLeft(store: Store, product: Listing, now = Date.now()
  * the count is then a guess on the safe side, never proof of "Sold out"
  * (Claude 6's LOW on #1732). Used where a refusal is decided.
  */
-async function stockLeftKnown(store: Store, product: Listing, now = Date.now()): Promise<number | null> {
-  const count = await countStock(store, product, now, true);
+async function stockLeftKnown(store: Store, product: Listing, budget: StockBudget, now = Date.now()): Promise<number | null> {
+  const count = await countStock(store, product, now, budget);
   return count && count.unknown === 0 ? count.left : null;
 }
 
 /**
- * The count itself. Without `ask` (under a stock lock) Stripe is never asked:
+ * The count itself. Without a budget to `ask` with (under a stock lock) Stripe is never asked:
  * a hold that ran out and is not settled yet counts as used, the safe way to
  * be wrong, and is counted in `unresolved` so the caller can have it settled
  * once the lock is let go.
  */
-async function countStock(store: Store, product: Listing, now: number, ask: boolean): Promise<{ left: number; unresolved: number; unknown: number } | null> {
+async function countStock(store: Store, product: Listing, now: number, ask: StockBudget | null): Promise<{ left: number; unresolved: number; unknown: number } | null> {
   const limit = limitedStock(product);
   if (limit === null) return null;
   if (!store.statsId || !isRedisConfigured()) throw new Error("Stock reading unavailable");
@@ -133,14 +172,17 @@ async function countStock(store: Store, product: Listing, now: number, ask: bool
     checks += 1;
     asking.push(session);
   }
-  // Asked side by side (Claude 3's performance audit, 13 November 2026): a page
-  // or a click waits on one CHECK_MS for all of them, never MAX_CHECKS of them
-  // in a row. The same holds are asked about and counted the same way.
+  // Asked side by side, inside the request's budget (Claude 3's performance
+  // audit, 13 November 2026): at most STOCK_STRIPE_IN_FLIGHT at once for the
+  // whole request and none started after STOCK_STRIPE_WAIT_MS, so a page or a
+  // click never waits MAX_CHECKS × CHECK_MS in a row, and a page of limited
+  // products never floods the creator's account. A question not asked in time
+  // counts as an answer that did not come: the unit used, the count unknown.
   const { stripeAccountId } = store;
-  const answers = stripeAccountId
+  const answers = stripeAccountId && ask
     ? await Promise.all(
         asking.map((session) =>
-          onAccount("GET", stripeAccountId, `/checkout/sessions/${encodeURIComponent(session)}`, undefined, undefined, undefined, CHECK_MS).then(
+          askWithin(ask, (ms) => onAccount("GET", stripeAccountId, `/checkout/sessions/${encodeURIComponent(session)}`, undefined, undefined, undefined, ms)).then(
             (found) => ({ session, found }),
             () => ({ session, found: null }),
           ),
@@ -383,7 +425,7 @@ export async function withCartStockHolds<T extends { id: string }>(
       const out: string[] = [];
       for (const product of limited) {
         // Never Stripe under a lock (review of 5 November 2026). A count that cannot be read throws: nothing opens, every lock is let go below.
-        const counted = await countStock(store, product, now, false);
+        const counted = await countStock(store, product, now, null);
         if (counted !== null && counted.left <= 0) {
           out.push(product.id);
           if (counted.unresolved > 0) unsettled.push(product);
@@ -420,7 +462,8 @@ export async function withCartStockHolds<T extends { id: string }>(
     // than one wave of MAX_CHECKS × CHECK_MS (CART_STOCK_STRIPE_WAIT_MS). Never "Sold out" on that guess.
     if (round > 0) return { ok: false, reason: "busy" };
     // The holds that ran out are asked about now, with no lock held, every product at once, so the next count is right.
-    const settled = await Promise.all(unsettled.map((product) => stockLeftKnown(store, product).catch(() => null)));
+    const budget = stockBudget();
+    const settled = await Promise.all(unsettled.map((product) => stockLeftKnown(store, product, budget).catch(() => null)));
     // A count that could not be read (Stripe or the database did not answer) is unknown: press again, never "Sold out".
     if (settled.some((left) => left === null)) return { ok: false, reason: "busy" };
     // Freed: every product refused had nothing but such holds, and each has a unit back now; otherwise it is sold out.

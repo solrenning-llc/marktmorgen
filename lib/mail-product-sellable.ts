@@ -50,7 +50,7 @@ import { outOfKeys } from "@/lib/licence-keys";
 import { paypalReady } from "@/lib/paypal-sales";
 import { activePwyw } from "@/lib/pay-what-you-want";
 import { knownNotSoon, soonState, type SoonState } from "@/lib/preorders";
-import { stockLeft } from "@/lib/stock";
+import { stockBudget, stockLeft } from "@/lib/stock";
 import { canSellProduct, fromPriceCents, sellableOptions } from "@/lib/store-checkout";
 import { saleOff } from "@/lib/store-sale";
 import { isFree } from "@/lib/store-field-rules";
@@ -78,11 +78,13 @@ export async function productsBuyableNow(store: Store, products: readonly Listin
   const ready = open.filter((p) => knownNotSoon(coming, p.id));
   const bundles = ready.filter((p) => p.bundle);
   const inside = bundles.length ? await offeredItems(store, bundles).catch(() => new Map<string, Listing[]>()) : new Map<string, Listing[]>();
+  // One budget of questions to Stripe for the whole list (lib/stock.ts, stockBudget).
+  const budget = stockBudget();
   const kept = await Promise.all(
     ready.map(async (p) => {
       if (p.bundle && !bundleReady(p, inside.get(p.id)?.length ?? 0)) return null;
       try {
-        const [left, noKeys] = await Promise.all([stockLeft(store, p, now), outOfKeys(store, p)]);
+        const [left, noKeys] = await Promise.all([stockLeft(store, p, now, budget), outOfKeys(store, p)]);
         if (left === 0 || noKeys) return null;
       } catch {
         return null;

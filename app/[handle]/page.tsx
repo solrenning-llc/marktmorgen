@@ -67,7 +67,7 @@ import { STORE_SCOPE, readToken } from "@/lib/page-read";
 import { countSearchMiss } from "@/lib/stats";
 import { isBot } from "@/lib/source-rules";
 import { ExitOfferSlot } from "@/components/exit-offer-slot";
-import { stockLeft } from "@/lib/stock";
+import { stockBudget, stockLeft } from "@/lib/stock";
 import { outOfKeys } from "@/lib/licence-keys";
 import { ProductCard } from "@/components/store-product";
 import { canWrite } from "@/lib/mail";
@@ -257,10 +257,12 @@ export default async function StorePage({ params, searchParams }: Params) {
   // What each bundle on this page holds now: one read for the page, none for
   // a page without bundles (lib/bundles.ts).
   const inBundles = offeredItems(store, known).catch(() => new Map<string, Listing[]>());
+  // One budget of questions to Stripe for the whole page (lib/stock.ts, stockBudget).
+  const stockAsks = stockBudget();
   const counts = await Promise.all(
     listings.map(async (product) => {
       const [stock, out] = await Promise.all([
-        stockLeft(store, product).catch(() => null),
+        stockLeft(store, product, undefined, stockAsks).catch(() => null),
         outOfKeys(store, product).catch(() => null),
       ]);
       return out === null ? ("unread" as const) : out ? 0 : stock;

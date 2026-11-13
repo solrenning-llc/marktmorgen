@@ -14,10 +14,13 @@
  * Checked with Redis stubbed and Stripe mocked, no network:
  *   - the lapsed holds are asked about at once (all MAX_CHECKS in flight together);
  *   - a Stripe that never answers holds the count for about one CHECK_MS, not five;
- *   - controls: still at most MAX_CHECKS asked, the rest counted as used, and the same count.
+ *   - controls: still at most MAX_CHECKS asked, the rest counted as used, and the same count;
+ *   - a whole page of limited products shares one budget (stockBudget): never more than
+ *     STOCK_STRIPE_IN_FLIGHT questions at once to the creator's account, and none started
+ *     after STOCK_STRIPE_WAIT_MS; what is not asked counts as used, the count unknown.
  */
 import { parseProduct } from "@/lib/catalog";
-import { stockLeft } from "@/lib/stock";
+import { STOCK_STRIPE_IN_FLIGHT, STOCK_STRIPE_WAIT_MS, stockBudget, stockLeft } from "@/lib/stock";
 import type { Listing, Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -95,6 +98,25 @@ async function main(): Promise<void> {
   is("the holds past it count as used without asking", many, 10 - (MAX_LAPSED + 3));
   reset("open");
   is("an unlimited product asks nothing", [await stockLeft(creator, parseProduct({ id: "side4", title: "Free", summary: "", priceCents: 2000, link: "https://example.com/side4" }) as Listing), asked.length], [null, 0]);
+
+  part("A page of 24 limited products shares one budget");
+  const page = Array.from({ length: 24 }, (_, i) => limited(`page${i}`, 8));
+  for (const product of page) await fillWithLapsed(product.id, MAX_LAPSED);
+  reset("open");
+  const shared = stockBudget();
+  const pageLeft = await Promise.all(page.map((product) => stockLeft(creator, product, undefined, shared)));
+  is("never more than STOCK_STRIPE_IN_FLIGHT questions at once to the creator's account", [mostInFlight <= STOCK_STRIPE_IN_FLIGHT, mostInFlight > 1], [true, true]);
+  is("every product still counted, each still-open checkout holding its unit", pageLeft.every((left) => left === 8 - MAX_LAPSED), true);
+
+  for (const product of page) await fillWithLapsed(`${product.id}h`, MAX_LAPSED);
+  reset("hang");
+  const sharedHang = stockBudget();
+  const hangStarted = Date.now();
+  const hung = await Promise.all(page.map((product) => stockLeft(creator, limited(`${product.id}h`, 8), undefined, sharedHang)));
+  const hangWaited = Date.now() - hangStarted;
+  is("a Stripe that never answers holds the whole page for its budget, not a ceiling per wave", hangWaited < STOCK_STRIPE_WAIT_MS + 1_000, true);
+  is("questions not asked in time are never asked late", asked.length <= STOCK_STRIPE_IN_FLIGHT * Math.ceil(STOCK_STRIPE_WAIT_MS / CHECK_MS), true);
+  is("and every hold not answered counts as used: never more units than are free", hung.every((left) => left === 8 - MAX_LAPSED), true);
 
   done();
 }

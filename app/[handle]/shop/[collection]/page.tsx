@@ -11,7 +11,7 @@ import { MAX_CART, cartable } from "@/lib/cart-rules";
 import { bumpTargets } from "@/lib/product-extras";
 import { bundleItemsToRead, offeredItems } from "@/lib/bundles";
 import { preorderDay, soonState } from "@/lib/preorders";
-import { stockLeft } from "@/lib/stock";
+import { stockBudget, stockLeft } from "@/lib/stock";
 import { outOfKeys } from "@/lib/licence-keys";
 import { canWrite } from "@/lib/mail";
 import { canManage } from "@/lib/membership-manage";
@@ -128,6 +128,8 @@ export default async function CollectionPage({ params }: Params) {
   const cartOn = selling && offersCart(store);
   const writes = canWrite(store);
   const manageable = canManage(store);
+  // One budget of questions to Stripe for the whole page (lib/stock.ts, stockBudget).
+  const stockAsks = stockBudget();
   const [soonRead, inBundles, rated, counts] = await Promise.all([
     // A reading that failed or came back out of shape is unknown, never "none coming soon" (CX-123 rule 24).
     soonState(store).catch(() => null),
@@ -136,7 +138,7 @@ export default async function CollectionPage({ params }: Params) {
     Promise.all(
       products.map(async (product) => {
         // Keys left that could not be read are unknown, never "keys left" (CX-123 rule 24): no way to buy, no count.
-        const [stock, out] = await Promise.all([stockLeft(store, product).catch(() => null), outOfKeys(store, product).catch(() => null)]);
+        const [stock, out] = await Promise.all([stockLeft(store, product, undefined, stockAsks).catch(() => null), outOfKeys(store, product).catch(() => null)]);
         return out === null ? ("unread" as const) : out ? 0 : stock;
       }),
     ),

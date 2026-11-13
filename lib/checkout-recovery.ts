@@ -52,7 +52,7 @@ import { RECOVERY_OPEN_SECONDS, recoveryOn } from "@/lib/recovery-setting";
 import { isSettled } from "@/lib/instant-pay";
 import { leadsKey, parseContact } from "@/lib/contacts";
 import { canSellProduct, fromPriceCents } from "@/lib/store-checkout";
-import { stockLeft } from "@/lib/stock";
+import { stockBudget, stockLeft } from "@/lib/stock";
 import { type SessionRecord, fromCreator, storeBase } from "@/lib/purchase-email";
 import { activePwyw } from "@/lib/pay-what-you-want";
 import { SITE_URL } from "@/lib/site-url";
@@ -266,7 +266,8 @@ async function cartItems(store: Store, raw: (string | undefined)[]): Promise<Lis
   });
   // A limited one with none left is not reminded of, as for one product below (513 [PF1], unit 3); nor one whose count cannot be
   // read, which is never taken for "some left" (CX-123, rule 24; review of 5 November 2026).
-  const left = await Promise.all(kept.map((product) => (product.stock !== null ? stockLeft(store, product).catch(() => undefined) : Promise.resolve(null))));
+  const budget = stockBudget();
+  const left = await Promise.all(kept.map((product) => (product.stock !== null ? stockLeft(store, product, undefined, budget).catch(() => undefined) : Promise.resolve(null))));
   return kept.filter((_, i) => left[i] !== 0 && left[i] !== undefined);
 }
 

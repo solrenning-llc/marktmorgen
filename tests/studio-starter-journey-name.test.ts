@@ -16,7 +16,17 @@ import { done, is } from "./check";
 
 const starters = FUNNEL_STARTERS.map(starterCard);
 const html = renderToStaticMarkup(createElement(FunnelStarterGallery, { starters, busy: false, onChoose: () => {} }));
-const text = (fragment: string) => fragment.replace(/<[^>]*>/g, "").replace(/&#x27;|&#39;/g, "'").replace(/&amp;/g, "&").replace(/&quot;/g, '"').trim();
+/** Tags dropped until none is left (a single pass can leave one behind), then entities read back, "&amp;" last. */
+function stripAll(fragment: string, pattern: RegExp): string {
+  let before: string;
+  let after = fragment;
+  do {
+    before = after;
+    after = before.replace(pattern, "");
+  } while (after !== before);
+  return after;
+}
+const text = (fragment: string) => stripAll(fragment, /<[^>]*>/g).replace(/&#x27;|&#39;/g, "'").replace(/&quot;/g, '"').replace(/&amp;/g, "&").trim();
 const toggles = [...html.matchAll(/<button[^>]*aria-expanded="false"[^>]*>([\s\S]*?)<\/button>/g)].map((found) => text(found[1]));
 
 is("one journey button per campaign", toggles.length, starters.length);

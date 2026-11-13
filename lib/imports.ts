@@ -890,7 +890,8 @@ function classifyContacts(options: ImportJob["options"], rows: string[][]): { va
         continue;
       }
     }
-    valid.push({ line, email, name: name.trim().slice(0, MAX_CONTACT_NAME), tags: readTags([...readTags(tags), ...options.tags]), consent: said, note });
+    // One line, its runs of spaces made one, as the API keeps a name (lib/api-write.ts addLead).
+    valid.push({ line, email, name: name.replace(/\s+/g, " ").trim().slice(0, MAX_CONTACT_NAME), tags: readTags([...readTags(tags), ...options.tags]), consent: said, note });
   }
   return { valid, problems, skipped };
 }

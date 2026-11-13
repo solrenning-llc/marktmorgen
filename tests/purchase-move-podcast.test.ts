@@ -12,9 +12,11 @@
  * deleting the move gives the old address its listening back; and at most
  * MAX_MOVED_INTO old addresses are asked about. The creator always listens.
  */
-import { addProduct, claimHandle, ensureListId, ensureStatsId, ensureStoreId, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
+import { addProduct, claimHandle, setProductPodcast, ensureListId, ensureStatsId, ensureStoreId, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { createHash } from "node:crypto";
-import { mayListen, sendFeedLink } from "@/lib/podcast-access";
+import { feedToken, mayListen, sendFeedLink } from "@/lib/podcast-access";
+import { GET as feedRoute } from "@/app/api/store/podcast/feed/[token]/route";
+import { GET as playRoute } from "@/app/api/store/podcast/play/[token]/[episode]/route";
 import { takePublicRequest } from "@/lib/traffic";
 import { answering } from "./security/next-headers";
 import { askPurchaseMove, confirmPurchaseMove } from "@/lib/purchase-moves";
@@ -208,6 +210,24 @@ async function main(): Promise<void> {
   is("the line back missing: the old address is unknown, never its listening back", await listens("gus.old@example.com"), "unknown");
   redis.run(["HSET", gusLine, "gus.old@example.com", "e".repeat(32)]);
   is("the line back naming another move: unknown too", await listens("gus.old@example.com"), "unknown");
+
+  part("The feed and an episode answer an unknown reading with 503 and Retry-After, never a 500 (Claude 3 nuvem L on #3717, LEVE)");
+  // The routes answer only for a product that is a podcast.
+  await setProductPodcast(OWNER, show.product.id, { id: "0123456789abcdef0123456789abcdef", episodes: 1 });
+  const gusToken = await feedToken(store, show.product.id, "gus.old@example.com");
+  if (!gusToken) throw new Error("no feed token");
+  // A route that throws is answered by Next.js as a 500 with no Retry-After.
+  const answered = async (route: () => Promise<Response>) => {
+    try {
+      return await route();
+    } catch {
+      return new Response("Internal Server Error", { status: 500 });
+    }
+  };
+  const feedAnswer = await answered(() => feedRoute(new Request(`https://marktmorgen.com/api/store/podcast/feed/${gusToken}.xml`) as never, { params: Promise.resolve({ token: `${gusToken}.xml` }) }));
+  is("the feed: 503 with Retry-After, kept by nobody", [feedAnswer.status, Number(feedAnswer.headers.get("Retry-After")) > 0, feedAnswer.headers.get("Cache-Control")], [503, true, "no-store"]);
+  const playAnswer = await answered(() => playRoute(new Request(`https://marktmorgen.com/api/store/podcast/play/${gusToken}/e1.mp3`) as never, { params: Promise.resolve({ token: gusToken, episode: "e1.mp3" }) }));
+  is("an episode: 503 with Retry-After, kept by nobody", [playAnswer.status, Number(playAnswer.headers.get("Retry-After")) > 0, playAnswer.headers.get("Cache-Control")], [503, true, "no-store"]);
 
   done();
 }

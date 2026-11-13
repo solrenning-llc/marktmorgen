@@ -4,7 +4,7 @@ import { markLesson } from "@/lib/learn";
 import { upsertContact } from "@/lib/contacts";
 import { readFlows, saveFlow } from "@/lib/flows";
 import { addProduct, claimHandle, ensureListId, ensureStatsId, setMailSettings, setProductCourse, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
-import { store as redis } from "./redis-stub";
+import { advance, store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
 import { ROOM } from "./data-room";
 import { done, is, part } from "./check";
@@ -75,6 +75,36 @@ async function main() {
       is(`${kind}: the student's sequence starts once the failure has passed, never lost for 400 days`, await queuedFor(), 1);
       await note(store, product.id, course.id, email);
       is(`${kind}: and never twice`, await queuedFor(), 1);
+
+      part(`${kind}: starting fails and the reply to letting the mark go is lost too`);
+      const unlucky = `lost${serial++}@example.com`;
+      await upsertContact(store.listId!, unlucky, { agreed: true, explicit: true, productId: product.id, title: product.title, source: "buyer" }, ROOM);
+      if (kind === "fin") await markLesson(course.id, unlucky, lesson, true, ROOM);
+      let listFailed = false, delLost = false;
+      redis.pipeline = async (commands) => {
+        if (!listFailed && commands.some((c) => c[0] === "GET" && String(c[1]).startsWith("nl:mail:flows:"))) {
+          listFailed = true;
+          return [42] as never;
+        }
+        // The mark's deletion never reaches Redis and its reply is not one: the mark is still there.
+        if (listFailed && !delLost && commands.some((c) => c[0] === "DEL" && String(c[1]).startsWith(`nl:course:${course.id}:`))) {
+          delLost = true;
+          return [] as never;
+        }
+        return original(commands);
+      };
+      await note(store, product.id, course.id, unlucky);
+      redis.pipeline = original;
+      is(`${kind}: both failures were injected`, [listFailed, delLost], [true, true]);
+      const queuedForUnlucky = async () => ((await original([["ZRANGEBYSCORE", "nl:mail:flowq", "-inf", "+inf"]]))[0] as string[]).filter((item) => item.endsWith(`|${unlucky}`)).length;
+      is(`${kind}: nothing was started by the failed try`, await queuedForUnlucky(), 0);
+      // A claim not yet confirmed holds only for minutes, never 400 days: the moment coming again later starts it.
+      advance(11 * 60_000);
+      await note(store, product.id, course.id, unlucky);
+      is(`${kind}: the sequence starts minutes later, although the mark's deletion was never confirmed`, await queuedForUnlucky(), 1);
+      advance(11 * 60_000);
+      await note(store, product.id, course.id, unlucky);
+      is(`${kind}: and the started moment is kept, never started twice`, await queuedForUnlucky(), 1);
     }
   } finally { redis.pipeline = original; globalThis.fetch = originalFetch; console.error = originalError; }
   done();

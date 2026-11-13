@@ -2013,10 +2013,11 @@ export const STUDIO_UNIT_BYTES = 1_000_000;
 /**
  * The most bytes one affiliate's record can take as JSON, by the caps it is written and read with (parseAffiliate):
  * two addresses of MAX_EMAIL_LENGTH and a note of MAX_NOTE_LENGTH characters, each character at its widest (a control
- * character, six bytes escaped), a share of 200 product ids of 40 characters, 50 ids let through and the rest.
- * tests/affiliate-bulk-cost.test.ts holds the widest record under it.
+ * character, six bytes escaped), a share of 200 product ids of 40 characters, 50 ids let through and the rest, and
+ * a partner's terms (630 [HN6](39)): a change waiting as wide as a share, and MAX_TERM_HISTORY steps of history.
+ * tests/affiliate-bulk-cost.test.ts holds the widest record under it (28,091 bytes when this was set).
  */
-export const AFFILIATE_RECORD_MAX_BYTES = 16_000;
+export const AFFILIATE_RECORD_MAX_BYTES = 32_000;
 
 /**
  * Commands the partner lock takes at the most: a try every 20 ms, doubling up to 250 ms, for PARTNER_LOCK_WAIT_MS;

@@ -83,7 +83,7 @@ is("an entry that is not an object: unknown", nextActions({ monthlyMembers: null
   is("with another action: it is shown", ids(view), ["welcome"]);
   is("and the missing one is named", view.kind === "actions" ? view.note : null, "Some numbers could not be read just now (failed payments), so these suggestions may not be complete. Reload the page in a moment.");
 }
-is("three names read as a list", unknownWords(["failed_payments", "winback", "welcome"]), "Some numbers could not be read just now (failed payments, former members and welcome emails), so these suggestions may not be complete. Reload the page in a moment.");
+is("three names read as a list", unknownWords(["failed_payments", "winback", "welcome"]), "Some numbers could not be read just now (failed payments, memberships that ended and welcome emails), so these suggestions may not be complete. Reload the page in a moment.");
 is("a course without both titles: unknown", nextActions({ courseNext: { count: 4, from: "  ", to: "Course B", at: AT } }, as("owner")).kind, "unknown");
 is("a course pointing to itself: unknown", nextActions({ courseNext: { count: 4, from: "Course A", to: " Course  A ", at: AT } }, as("owner")).kind, "unknown");
 is("money that is not whole: the action stays, without money", first(nextActions({ failedPayments: { count: 3, monthly: { amount: 1.5, currency: "usd" }, at: AT } }, as("owner")))?.money, null);

@@ -142,7 +142,7 @@ async function main(): Promise<void> {
   is("no script, no form, no button that acts", /<script|<form|<button/.test(html), false);
   const missing: NextView = nextActions(await nextFactsOf(shop("s-bent"), { copy: keptMembersCopy, sells }), owner);
   const missingHtml = renderToStaticMarkup(createElement(NextActionsPanel, { view: missing }));
-  is("numbers that could not be read are said", missingHtml.includes("Some numbers could not be read just now (failed payments and former members)"), true);
+  is("numbers that could not be read are said", missingHtml.includes("Some numbers could not be read just now (failed payments and memberships that ended)"), true);
   is("and no action is drawn on them", /data-next-action=/.test(missingHtml), false);
   const part0: NextView = nextActions(await nextFactsOf(shop("s-part"), { copy: keptMembersCopy, sells }), owner);
   const partHtml = renderToStaticMarkup(createElement(NextActionsPanel, { view: part0 }));

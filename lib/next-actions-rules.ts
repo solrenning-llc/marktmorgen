@@ -43,16 +43,22 @@ export type MoneyFact = { amount: number; currency: string };
  * neither proposed nor said to be missing. `count` null is a count that could not be read. `at` is when the count was
  * made (milliseconds), null when not known.
  */
+/**
+ * `partial` on a membership count: the reading covered only part of the store's memberships, because the store has
+ * more of them in its history than one reading counts (lib/membership-numbers.ts readMembers). The count is unknown
+ * like any other, but it is a limit of the store, not a passing failure: reading again reads the same, so the view
+ * never tells the creator to reload for it (Claude 1 cloud on #3556, MÉDIO).
+ */
 export type NextFacts = {
   /** Paying members whose latest payment failed and is being tried again, with what they pay together each month. */
-  failedPayments?: { count: number | null; monthly?: MoneyFact | null; at: number | null };
+  failedPayments?: { count: number | null; monthly?: MoneyFact | null; at: number | null; partial?: true };
   /** Members paying monthly for a product that also has a yearly price, with what they pay together each month. */
   monthlyMembers?: { count: number | null; monthly?: MoneyFact | null; at: number | null };
   /**
    * Memberships that ended in the last 30 days while the store's come-back email is off, with what they paid together
    * each month when that is known (a reading that counts trials that never paid gives no money).
    */
-  formerMembers?: { count: number | null; monthly?: MoneyFact | null; at: number | null };
+  formerMembers?: { count: number | null; monthly?: MoneyFact | null; at: number | null; partial?: true };
   /** Students who finished one course and do not have the next one, both named by their titles. */
   courseNext?: { count: number | null; from: string; to: string; at: number | null };
   /** People who joined the list and never got a welcome email. */
@@ -110,7 +116,7 @@ const SOURCE: Record<NextActionId, string> = {
 export const NEXT_ACTION_NAMES: Record<NextActionId, string> = {
   failed_payments: "failed payments",
   yearly_switch: "monthly members",
-  winback: "former members",
+  winback: "memberships that ended",
   course_next: "course progress",
   welcome: "welcome emails",
 };
@@ -228,11 +234,25 @@ function before(a: Candidate, b: Candidate): number {
   return NEXT_ACTION_ORDER.indexOf(a.action.id) - NEXT_ACTION_ORDER.indexOf(b.action.id);
 }
 
+const listOf = (ids: NextActionId[]) => {
+  const names = ids.map((id) => NEXT_ACTION_NAMES[id]);
+  return names.length < 3 ? names.join(" and ") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+};
+
 /** The words for the numbers that could not be read, naming each. */
 export function unknownWords(unknown: NextActionId[]): string {
-  const names = unknown.map((id) => NEXT_ACTION_NAMES[id]);
-  const list = names.length < 3 ? names.join(" and ") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
-  return `Some numbers could not be read just now (${list}), so these suggestions may not be complete. Reload the page in a moment.`;
+  return `Some numbers could not be read just now (${listOf(unknown)}), so these suggestions may not be complete. Reload the page in a moment.`;
+}
+
+/** The words for the numbers that cover only part of the store's memberships (NextFacts `partial`): a limit, never "reload". */
+export function partialWords(partial: NextActionId[]): string {
+  return `Your store has more memberships than one reading counts, so these numbers cover only part of them (${listOf(partial)}). No suggestion is made from them, and reloading will not change this.`;
+}
+
+/** Both notes, each only when it has something to name. */
+function notesOf(unknown: NextActionId[], partial: NextActionId[]): string | null {
+  const words = [partial.length ? partialWords(partial) : "", unknown.length ? unknownWords(unknown) : ""].filter(Boolean);
+  return words.length ? words.join(" ") : null;
 }
 
 /**
@@ -247,6 +267,7 @@ export function nextActions(
 ): NextView {
   const found: Candidate[] = [];
   const unknown: NextActionId[] = [];
+  const partial: NextActionId[] = [];
   let looked = false;
   for (const id of NEXT_ACTION_ORDER) {
     // A role that may not act on it is not told about it, nor that its number is missing.
@@ -256,12 +277,15 @@ export function nextActions(
     const got = candidate(id, facts, options.currency, options.now, href);
     if (got !== null) looked = true;
     else if (FACT_OF[id](facts) !== undefined) looked = true;
-    if (got === "unknown") unknown.push(id);
-    else if (got) found.push(got);
+    if (got === "unknown") {
+      const fact = FACT_OF[id](facts) as { partial?: unknown } | undefined;
+      (fact && typeof fact === "object" && fact.partial === true ? partial : unknown).push(id);
+    } else if (got) found.push(got);
   }
   found.sort(before);
   const actions = found.slice(0, NEXT_ACTIONS_MAX).map((c) => c.action);
-  if (actions.length) return { kind: "actions", actions, unknown, note: unknown.length ? unknownWords(unknown) : null };
-  if (unknown.length) return { kind: "unknown", unknown, words: unknownWords(unknown) };
+  const missing = [...partial, ...unknown];
+  if (actions.length) return { kind: "actions", actions, unknown: missing, note: notesOf(unknown, partial) };
+  if (missing.length) return { kind: "unknown", unknown: missing, words: notesOf(unknown, partial) ?? "" };
   return { kind: "nothing", words: NOTHING_NEXT, looked };
 }

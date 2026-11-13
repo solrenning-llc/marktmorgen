@@ -161,7 +161,7 @@ async function main(): Promise<void> {
 
   part("Renewals, refunds and disputes (270 [GR1], unit 2)");
   // In a newer API version's shape: the payment among the invoice's payments, not on the invoice.
-  const renewal = (id: string, email: string, daysAgo: number, cents: number, store = "bakery", currency = "usd") => ({ id: `in_${id}`, status: "paid", billing_reason: "subscription_cycle", amount_paid: cents, currency, created: now - daysAgo * DAY, customer_email: email, payments: { data: [{ status: "paid", payment: { payment_intent: `pi_${id.padEnd(14, "0")}` } }] }, parent: { subscription_details: { metadata: { store, channel: "newsletter" } } } });
+  const renewal = (id: string, email: string, daysAgo: number, cents: number, store = "bakery", currency = "usd") => ({ id: `in_${id}`, status: "paid", billing_reason: "subscription_cycle", amount_paid: cents, currency, created: now - daysAgo * DAY, customer_email: email, payments: { data: [{ status: "paid", payment: { payment_intent: `pi_${id.padEnd(14, "0")}` } }], has_more: false }, parent: { subscription_details: { metadata: { store, channel: "newsletter" } } } });
   sessions.push(
     session("gil1", "gil@example.com", 400, 2000),
     session("hal1", "hal@example.com", 10, 3000),
@@ -258,6 +258,29 @@ async function main(): Promise<void> {
   const cut = await buyerLedger({ ...store, statsId: "q".repeat(32) } as Store);
   is("a list of invoice payments cut short, when one was needed, makes the reading partial (#4396)", cut.partial, true);
   invoicePaymentsCut = false;
+  // Leave ivy's checkout out of the cases below, which list only their own invoice payments.
+  sessions.splice(sessions.findIndex((s) => (s as { id?: string }).id === session("ivy1", "ivy@example.com", 20, 10000).id), 1);
+
+  // #4410: a $100 renewal paid in two parts, both on the invoice's own list of payments and on the account's, the
+  // second ($40) refunded. Every part is matched, each once: the buyer kept $60, read in full.
+  const twoParts = { data: [
+    { status: "paid", payment: { payment_intent: "pi_partone0000000" } },
+    { status: "paid", payment: { payment_intent: "pi_parttwo0000000" } },
+  ], has_more: false };
+  invoices = [{ ...renewal("two", "zed@example.com", 3, 10000), payments: twoParts }];
+  invoicePayments = [
+    { id: "inpay_two1", invoice: "in_two", status: "paid", payment: { type: "payment_intent", payment_intent: "pi_partone0000000" } },
+    { id: "inpay_two2", invoice: "in_two", status: "paid", payment: { type: "payment_intent", payment_intent: "pi_parttwo0000000" } },
+    { id: "inpay_pam", invoice: "in_pamfirst", status: "paid", payment: { type: "payment_intent", payment_intent: "pi_pamfirst00000" } },
+  ];
+  refunds = [{ id: "re_two2", status: "succeeded", amount: 4000, currency: "usd", created: now - 2 * DAY, payment_intent: "pi_parttwo0000000" }];
+  const split = await buyerLedger({ ...store, statsId: "z".repeat(32) } as Store);
+  is("a renewal paid in two parts, both listed on the invoice: the refund of the second is taken off, once (#4410)", [split.buyers.get("zed@example.com")?.cents, split.partial], [6000, false]);
+  // The invoice's own list cut short, and the account's list without that invoice: its other parts are unread, so partial.
+  invoices = [{ ...renewal("two", "zed@example.com", 3, 10000), payments: { ...twoParts, data: twoParts.data.slice(0, 1), has_more: true } }];
+  invoicePayments = invoicePayments.slice(2);
+  const cutOwn = await buyerLedger({ ...store, statsId: "p".repeat(32) } as Store);
+  is("an invoice's own list of payments cut short, and not on the account's list: the reading is partial (#4410)", cutOwn.partial, true);
   invoicePayments = [];
   invoices = [];
   refunds = [];

@@ -253,7 +253,10 @@ export async function buyerLedger(store: Store, count?: (units: number) => Promi
   }
   // A renewal is a payment: it moves the last purchase, adds what was kept in the store's currency, and counts as one more time they bought.
   for (const renewal of renewals.rows) {
-    const left = kept(renewal.paymentIntent ? [renewal.paymentIntent] : paymentsOfInvoice(renewal.invoice), renewal.cents);
+    // Every part of a renewal paid in parts (#4410): the ones the invoice names, with the account's list of invoice
+    // payments, each once. Looked up there, with its coverage, when the invoice's own are not known to be all.
+    const listed = renewal.paymentsComplete ? (invoicePayments?.byInvoice.get(renewal.invoice) ?? []).filter(Boolean) : paymentsOfInvoice(renewal.invoice);
+    const left = kept([...new Set([...renewal.paymentIntents, ...listed])], renewal.cents);
     if (left === 0) continue;
     const email = normaliseEmail(renewal.email);
     // A buyer known only by a renewal came from the channel the subscription was sold through.

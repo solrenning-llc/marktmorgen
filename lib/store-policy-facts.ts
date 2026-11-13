@@ -21,8 +21,9 @@
  *     first where the law asks, and that a browser sending Global Privacy
  *     Control is never measured (components/store-pixels.tsx,
  *     lib/ad-consent.ts). No pixel on, no sentence about one.
- *   - Contact: the postal address the store sends its email from, only when
- *     it has one; otherwise no sentence (a contact page is optional).
+ *   - Contact: a postal address the creator chose to publish, only when there
+ *     is one; otherwise no sentence (a contact page is optional). The email
+ *     footer's address is never used for it (lib/store-policy-input.ts).
  *
  * It describes; it is not legal advice, and no sentence promises that a store
  * complies with any law (said in `NOT_ADVICE`). The fingerprint changes with

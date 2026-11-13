@@ -8,6 +8,7 @@ import { HelpTopics } from "@/components/help-topics";
 import { HelpAnswerTools } from "@/components/help-answer-tools";
 import { answerSummary, helpAnswer, helpAnswerPath, helpDay, helpPagePaths, sectionNeighbors, helpTopics } from "@/lib/help-pages";
 import { HELP_DATES } from "@/lib/help-dates";
+import { answerLinks } from "@/lib/help-areas";
 
 /**
  * One answer of the help center on a page of its own (564 [HC1]): the trail
@@ -39,6 +40,7 @@ export default async function HelpAnswerPage({ params }: Params) {
   const found = helpAnswer(section, answer);
   if (!found) notFound();
   const others = sectionNeighbors(found);
+  const links = answerLinks(found.id);
   return (
     <div className="flex min-h-screen flex-col bg-paper text-ink print:bg-white">
       {/* Printed, the answer stands alone: no menus, no footer, no list of other answers (564 [HC1]). */}
@@ -72,6 +74,22 @@ export default async function HelpAnswerPage({ params }: Params) {
           </div>
           <HelpAnswerTools />
         </article>
+        {/* Where the task is done and read about (564 [HC1], item 3), only for an answer that is a studio area's main one. */}
+        {links.studio.length || links.features.length ? (
+          <nav aria-labelledby="help-where-title" className="mt-10 max-w-3xl print:hidden" data-help-where>
+            <h2 id="help-where-title" className="t-section">Where to do it</h2>
+            <ul className="mt-4 space-y-1">
+              {[...links.studio, ...links.features].map((link) => (
+                <li key={link.href}>
+                  <Link href={link.href} className="inline-flex min-h-11 items-center font-semibold text-violet-deep underline underline-offset-4">
+                    {link.label}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+            {links.studio.length ? <p className="mt-2 max-w-[80ch] text-sm text-ink-soft">The studio asks you to sign in first.</p> : null}
+          </nav>
+        ) : null}
         {others.length ? (
           <nav aria-labelledby="help-more-title" className="mt-12 max-w-3xl print:hidden">
             <h2 id="help-more-title" className="t-section">{`More in ${found.section.title}`}</h2>

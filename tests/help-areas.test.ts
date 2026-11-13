@@ -12,11 +12,14 @@
  *   - in the answers written for HC1, every button or screen named in quotes
  *     is in the code of the screens it explains;
  *   - the help page lists every area, each link going to an answer that is on
- *     the page and saying the area and the question.
+ *     the page and saying the area and the question;
+ *   - each answer links to the studio screen it explains and to the area's
+ *     feature page (HC1 item 3), and both addresses are real.
  */
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { AREAS_WITHOUT_HELP, HELP_AREAS, NOT_AREAS } from "@/lib/help-areas";
+import { AREAS_WITHOUT_HELP, HELP_AREAS, NOT_AREAS, answerLinks } from "@/lib/help-areas";
+import { FEATURE_PAGES } from "@/lib/feature-pages";
 import { HELP_SECTIONS, answerId } from "@/lib/help-content";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -116,6 +119,29 @@ part("Names quoted in the answers written for HC1 are on the screens");
     const onScreen = (q: string) => new RegExp(`(?<![A-Za-z0-9_])${escape(q)}(?![A-Za-z0-9_])`).test(code);
     is(`${id}: every quoted name is in its screens`, quoted.filter((q) => !onScreen(q)), []);
   }
+}
+
+part("Each area's answer links to its studio screen and its feature page");
+{
+  for (const area of HELP_AREAS) {
+    const screen = existsSync(join("app/studio", area.folder, "page.tsx"));
+    is(`${area.folder}: marked without a screen exactly when /studio/${area.folder} has no page`, area.noScreen === true, !screen);
+    if (!area.feature) continue;
+    const page = FEATURE_PAGES.find((p) => p.slug === area.feature);
+    is(`${area.folder}: /platform/${area.feature} is a feature page`, Boolean(page), true);
+    is(`${area.folder}: /platform/${area.feature} speaks of the area`, JSON.stringify(page ?? {}).toLowerCase().includes(area.mentions.toLowerCase()), true);
+  }
+  const several = answerLinks("can-i-run-more-than-one-store-or-have-someone-help-me");
+  is("an answer for three areas links to each of their screens", several.studio.map((l) => l.href).sort(), ["/studio/new", "/studio/team", "/studio/totals"]);
+  is("and to one feature page, once", several.features, [{ href: "/platform/teams-and-stores", label: "Read the \u201cTeam\u201d feature page" }]);
+  is("the studio link says the area by name", several.studio.find((l) => l.href === "/studio/team")?.label, "Open \u201cTeam\u201d in your studio");
+  const course = answerLinks("can-i-sell-a-course");
+  is("an area with no screen of its own gets no studio link", course.studio, []);
+  is("but keeps its feature page", course.features.map((l) => l.href), ["/platform/courses"]);
+  const elsewhere = [...answers.keys()].find((id) => !HELP_AREAS.some((area) => area.answer === id)) ?? "";
+  is("an answer that is no area's main one", answerLinks(elsewhere), { studio: [], features: [] });
+  const everyLink = HELP_AREAS.flatMap((area) => { const l = answerLinks(area.answer); return [...l.studio, ...l.features]; });
+  is("every studio link opens a real screen", everyLink.filter((l) => l.href.startsWith("/studio/") && !existsSync(join("app", l.href, "page.tsx"))), []);
 }
 
 done();

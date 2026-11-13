@@ -103,6 +103,27 @@ async function main(): Promise<void> {
     is("every real answer's summary fits and is its own words", answers.every((a) => [...answerSummary(a.item.a)].length <= SUMMARY_CHARS && a.item.a[0].replace(/\s+/g, " ").startsWith(answerSummary(a.item.a).replace(/…$/, ""))), true);
   }
 
+  part("Where to do it: the studio screen and the feature page");
+  {
+    const sectionOf = (id: string) => answers.find((a) => a.id === id)?.section ?? "";
+    const id = "can-i-run-more-than-one-store-or-have-someone-help-me";
+    const page = decode(renderToStaticMarkup(await HelpAnswerPage({ params: Promise.resolve({ section: sectionOf(id), answer: id }) })));
+    const where = page.match(/<nav[^>]*data-help-where[^>]*>([\s\S]*?)<\/nav>/)?.[1] ?? "";
+    is("named by its own heading", /aria-labelledby="help-where-title"/.test(page) && where.includes('id="help-where-title"'), true);
+    is("each link says where it goes", [...where.matchAll(/<a[^>]*href="([^"]+)"[^>]*>([^<]+)<\/a>/g)].map((m) => `${m[1]} ${m[2]}`), [
+      "/studio/new Open \u201cA new store\u201d in your studio",
+      "/studio/team Open \u201cTeam\u201d in your studio",
+      "/studio/totals Open \u201cAll your stores\u201d in your studio",
+      "/platform/teams-and-stores Read the \u201cTeam\u201d feature page",
+    ]);
+    is("and says the studio asks to sign in", where.includes("The studio asks you to sign in first."), true);
+    const course = decode(renderToStaticMarkup(await HelpAnswerPage({ params: Promise.resolve({ section: sectionOf("can-i-sell-a-course"), answer: "can-i-sell-a-course" }) })));
+    const courseWhere = course.match(/<nav[^>]*data-help-where[^>]*>([\s\S]*?)<\/nav>/)?.[1] ?? "";
+    is("a feature page alone does not mention signing in", [courseWhere.includes("/platform/courses"), courseWhere.includes("sign in")], [true, false]);
+    const plain = decode(renderToStaticMarkup(await HelpAnswerPage({ params: Promise.resolve({ section: "delivery", answer: "does-the-download-link-expire" }) })));
+    is("an answer that is no area's main one has no such list", plain.includes("data-help-where"), false);
+  }
+
   part("Copy link and Print");
   {
     const page = renderToStaticMarkup(await HelpAnswerPage({ params: Promise.resolve({ section: "delivery", answer: "does-the-download-link-expire" }) }));

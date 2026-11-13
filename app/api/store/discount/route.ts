@@ -5,6 +5,7 @@ import { createCode, listCodes, stopCode } from "@/lib/discount";
 import { readCodeAsked } from "@/lib/discount-input";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { countStudio } from "@/lib/studio-route";
+import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { SCHEDULE_UNITS, readWindow } from "@/lib/discount-schedule-rules";
 import { cancelSchedule, dropSchedule, readSchedules, scheduleCode } from "@/lib/discount-schedule";
 
@@ -74,6 +75,8 @@ export async function POST(request: NextRequest) {
         return Response.json({ ok: false, error: "schedule", reason: window.reason }, { status: 400 });
       }
       // Every try the five-minute job may make is paid for now, before Stripe is asked anything.
+      // A funded period's schedule needs its paid cohort first (resourceAllocations).
+      if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return Response.json({ ok: false, error: "studio_used", message: "This can't be counted right now. Try again in a minute." }, { status: 429 });
       const paid = await countStudio(store, null, SCHEDULE_UNITS);
       if (!paid.ok) {
         return Response.json({ ok: false, error: "studio_used", message: paid.message }, { status: 429 });

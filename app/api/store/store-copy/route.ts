@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { countStudio } from "@/lib/studio-route";
+import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { can } from "@/lib/team-roles";
 import { StoreFullError } from "@/lib/store";
 import { COPY_ID } from "@/lib/store-copy-rules";
@@ -27,6 +28,8 @@ export async function POST(request: NextRequest) {
   const target = await ownTarget(email, store, role, body.to);
   if (!target.ok) return refuse(target.error, target.status);
   // A request into that store is one of its own studio requests (lib/store-allowance-rules.ts).
+  // A funded period's copy into that store needs its paid cohort first (resourceAllocations).
+  if (target.store.period?.funded === true && !(await reservePaidResourceWindow(target.store))) return refuse("target_used", 429, { message: "This can't be counted right now. Try again in a minute." });
   const counted = await countStudio(target.store, "page");
   if (!counted.ok) return refuse("target_used", 429, { message: counted.message });
   const to = counted.store ?? target.store;

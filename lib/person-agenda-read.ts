@@ -17,6 +17,7 @@ import { IncludedBytes, sentBytes, sentUnits } from "@/lib/sent-bytes";
 import type { DueTask } from "@/lib/person-tasks";
 import type { Store } from "@/lib/store";
 import { countStudio, studioPath } from "@/lib/studio-route";
+import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 
 /**
  * How many people have tasks kept (one HLEN), so a page with none reads and
@@ -59,6 +60,8 @@ export const NOT_COUNTED = "Your studio's requests could not be counted just now
  */
 export async function countUnits(store: Store, units: number): Promise<{ ok: true } | { ok: false; reason: "used" | "unknown" | "pool" | "daily"; message: string }> {
   if (units <= 0) return { ok: true };
+  // A funded period's reading needs its paid cohort first (resourceAllocations); nothing is read without it.
+  if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return { ok: false, reason: "unknown", message: NOT_COUNTED };
   const counted = await countStudio(store, null, units);
   if (counted.ok) return { ok: true };
   // One sentence with how many this needs and how many were left, from the figure's own count, and when they come

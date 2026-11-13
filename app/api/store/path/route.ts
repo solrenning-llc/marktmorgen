@@ -1,4 +1,5 @@
 import { creatorFrom, countStudio } from "@/lib/studio-route";
+import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { PATH_BOARD_JOIN_UNITS } from "@/lib/path-board-rules";
 import {writePathWording} from "@/lib/path-wording";
 import {currentWordingSource} from "@/lib/path-wording-source";
@@ -39,6 +40,8 @@ export async function POST(request: NextRequest) {
     if(body.action==="board_join" || body.action==="board_leave") {
       if(body.action==="board_join") {
         if(body.consent!==true)return Response.json({ok:false,error:"consent"},{status:400});
+        // A funded period's join needs its paid cohort first (resourceAllocations); leaving never counts.
+        if(store.period?.funded===true&&!(await reservePaidResourceWindow(store)))return Response.json({ok:false,error:"allowance"},{status:429});
         if(!(await countStudio(store,null,PATH_BOARD_JOIN_UNITS-1)).ok)return Response.json({ok:false,error:"allowance"},{status:429});
       }
       const result=body.action==="board_join"?await joinPathBoard(store):await leavePathBoard(store);

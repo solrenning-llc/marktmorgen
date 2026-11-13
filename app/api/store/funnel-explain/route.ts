@@ -4,6 +4,7 @@ import { withinEssentialLimit } from "@/lib/request-guard";
 import { AI_PER_MINUTE } from "@/lib/ai-rules";
 import { aiAvailableFor, aiLeft } from "@/lib/ai";
 import { countStudio } from "@/lib/studio-route";
+import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { FUNNEL_EXPLAIN_JOBS, FUNNEL_EXPLAIN_READ_UNITS, explainFunnelIssue } from "@/lib/funnel-explain";
 import { readFunnelChecks, readIssue, sameIssue } from "@/lib/funnel-review-issues";
 import { FUNNEL_ID } from "@/lib/page-funnel";
@@ -32,6 +33,8 @@ export async function POST(request: NextRequest) {
   if (left === null) return fail("allowance", 503);
   if (left < FUNNEL_EXPLAIN_JOBS) return fail("used");
   // Reading the funnel again costs what drawing the funnels page does: the rest of a page's studio requests, taken first.
+  // A funded period's reading needs its paid cohort first (resourceAllocations).
+  if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return Response.json({ ok: false, error: "studio", message: "This can't be counted right now. Try again in a minute." }, { status: 429 });
   const taken = await countStudio(store, null, FUNNEL_EXPLAIN_READ_UNITS);
   if (!taken.ok) return Response.json({ ok: false, error: "studio", message: taken.message }, { status: 429 });
   const read = await readFunnelChecks(taken.store ?? store, funnelId);

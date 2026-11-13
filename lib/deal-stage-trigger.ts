@@ -28,6 +28,7 @@ import { activeFlowLimit } from "@/lib/flow-limits";
 import { enroll } from "@/lib/flows";
 import type { Store } from "@/lib/store";
 import { countStudio } from "@/lib/studio-route";
+import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 
 /** Studio requests a deal entering a stage takes, for checking the workflow it may start: up to STAGE_ENTRY_COMMANDS commands, inside one. */
 export const STAGE_TRIGGER_UNITS = 1;
@@ -49,6 +50,8 @@ export type StageTrigger = "none" | "checked" | "not_checked";
 export async function dealEnteredStage(store: Store, deal: Pick<Deal, "email" | "stage">, before: Pick<Deal, "stage"> | null | undefined): Promise<StageTrigger> {
   if (!entersStage(deal, before) || activeFlowLimit(store) === 0) return "none";
   try {
+    // A funded period's workflow start needs its paid cohort first (resourceAllocations).
+    if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return "not_checked";
     const counted = await countStudio(store, null, STAGE_TRIGGER_UNITS);
     if (!counted.ok) return "not_checked";
     await enroll(counted.store ?? store, deal.email, { joined: false, stage: deal.stage });

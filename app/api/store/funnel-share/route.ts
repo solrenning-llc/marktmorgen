@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { countStudio, jsonAccess } from "@/lib/studio-route";
+import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { can } from "@/lib/team-roles";
 import { fileHeaders } from "@/lib/request-guard";
 import { FUNNEL_ID } from "@/lib/page-funnel";
@@ -109,6 +110,8 @@ async function otherOwnStore(email: string, store: Store, role: string, raw: unk
   if (!target) return { ok: false, response: refuse("not_yours", 404) };
   if (!target.statsId) return { ok: false, response: refuse("unavailable", 503) };
   // A request into that store is one of its own studio requests (lib/store-allowance-rules.ts).
+  // A funded period's copy into that store needs its paid cohort first (resourceAllocations).
+  if (target.period?.funded === true && !(await reservePaidResourceWindow(target))) return { ok: false, response: refuse("target_used", 429) };
   const counted = await countStudio(target, "page");
   if (!counted.ok) return { ok: false, response: refuse("target_used", 429) };
   return { ok: true, store: counted.store ?? target };

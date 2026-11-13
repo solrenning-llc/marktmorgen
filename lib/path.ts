@@ -44,6 +44,7 @@ import { dataKey, monthOf } from "@/lib/store-data";
 import { type PathAnswers, AUDIENCES, LEVELS, MINUTES, cleanLine, MAX_SKILLS, MAX_SUBJECT, localDay, validTimeZone, hasPathReturnGap, withCheckin, levelKept, type PathFacts } from "@/lib/path-rules";
 import { type PathCounts, type PathMoney, PATH_REFUND_PAGES, PATH_SALE_PAGES, countsFresh, factsFrom, moneyFresh, readPathCounts, readPathMoney } from "@/lib/path-facts";
 import { countStudio } from "@/lib/studio-route";
+import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { readGoal } from "@/lib/sales-goal-rules";
 import { isCurrency } from "@/lib/money";
 
@@ -200,7 +201,11 @@ export async function startPath(store: Store, answers: PathAnswers, now = Date.n
 
 /** Takes a reading's studio requests; false when the studio's figure has no room for it (the kept reading is shown then). */
 export type Charge = (units: number) => Promise<boolean>;
-export const chargeStudio = (store: Store): Charge => async (units) => (await countStudio(store, null, units).catch(() => ({ ok: false as const }))).ok;
+export const chargeStudio = (store: Store): Charge => async (units) => {
+  // A funded period's reading needs its paid cohort first (resourceAllocations); without it the kept reading is shown.
+  if (store.period?.funded === true && !(await reservePaidResourceWindow(store).catch(() => false))) return false;
+  return (await countStudio(store, null, units).catch(() => ({ ok: false as const }))).ok;
+};
 
 /**
  * What the owner opening their path records: today among the days they

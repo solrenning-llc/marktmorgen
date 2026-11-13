@@ -1,4 +1,5 @@
 import type { NextRequest } from "next/server";
+import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { StoreFullError, setAffiliateSetting, storeForEmail, storeForId, storeIdGone } from "@/lib/store";
 import { readMoney } from "@/lib/money";
 import { UnknownReplyError } from "@/lib/redis-reply";
@@ -91,7 +92,10 @@ export async function POST(request: NextRequest) {
   // requests it costs at its worst (lib/affiliates.ts bulkUnits), on top of the one this press took, and once read
   // gives back what it did not need (rule 30; coordinator, 2026-11-07). Not taken: nothing read, the press refused
   // (StudioNotPaidError, 429), or in bulk that part left out and named.
+  // A funded period's new work needs its paid cohort first (resourceAllocations); removing, declining, restoring and undoing never wait.
+  const keeps = action === "remove" || action === "decline" || action === "restore" || action.endsWith("-undo") || (action === "bulk" && body.decision === "decline");
   const charge: Charge = async (units) => {
+    if (!keeps && guarded.store.period?.funded === true && !(await reservePaidResourceWindow(guarded.store))) return null;
     const held = await holdStudio(guarded.store, units);
     return held.ok ? { give: held.give, force: held.force } : null;
   };

@@ -3,6 +3,7 @@ import Link from "next/link";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { countStudio, studioPath, studioView } from "@/lib/studio-route";
+import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { STUDIO_PAGE_UNITS } from "@/lib/studio-allowance-rules";
 import { StudioHeader } from "@/components/studio-header";
 import { StudioTrail } from "@/components/breadcrumb";
@@ -37,6 +38,8 @@ const moneyLines = (lines: Money[]) => (lines.length ? lines.map((m) => formatMo
 async function readStore(store: Store, mayRead: boolean, alreadyCounted: boolean): Promise<StoreRead> {
   if (!mayRead) return { state: "no_access" };
   if (!alreadyCounted) {
+    // A funded period's reading needs its paid cohort first (resourceAllocations).
+    if (store.period?.funded === true && !(await reservePaidResourceWindow(store).catch(() => false))) return { state: "paused" };
     const counted = await countStudio(store, null, STUDIO_PAGE_UNITS).catch(() => null);
     if (!counted) return { state: "error" };
     if (!counted.ok) return { state: "paused" };

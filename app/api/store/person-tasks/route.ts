@@ -6,6 +6,7 @@ import { LockBusyError } from "@/lib/redis-lock";
 import { StoreFullError } from "@/lib/store";
 import { guardStoreWrite } from "@/lib/store-request";
 import { countStudio, jsonAccess } from "@/lib/studio-route";
+import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { readTeam } from "@/lib/team";
 import { randomBytes } from "node:crypto";
 
@@ -70,6 +71,11 @@ export async function GET(request: NextRequest) {
     // reading when the studio will not. A store with no tasks reads nothing.
     const people = await taskPeople(store.statsId);
     if (people > 0) {
+      // A funded period's reading needs its paid cohort first (resourceAllocations).
+      if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) {
+        const refused = studioRefusal("unknown", "This can't be counted right now. Try again in a minute.");
+        return Response.json(refused.body, { status: refused.status });
+      }
       const counted = await countStudio(store, null, tasksRecountUnits(people));
       if (!counted.ok) {
         const refused = studioRefusal(counted.reason, counted.message);
@@ -104,6 +110,8 @@ export async function POST(request: NextRequest) {
     const now = Date.now() / 1000;
     // What making the store's count of tasks again costs, taken before it is made, at most once a store.
     const pay = async (units: number): Promise<{ ok: true } | { ok: false; reason: string; message: string }> => {
+      // New or edited tasks of a funded period need its paid cohort first (resourceAllocations); removing and marking done never wait.
+      if (body.action !== "remove" && body.action !== "done" && store.period?.funded === true && !(await reservePaidResourceWindow(store))) return { ok: false, reason: "unknown", message: "This can't be counted right now. Try again in a minute." };
       const counted = await countStudio(store, null, units);
       return counted.ok ? { ok: true } : { ok: false, reason: counted.reason, message: counted.message };
     };

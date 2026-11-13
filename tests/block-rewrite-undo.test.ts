@@ -94,6 +94,18 @@ function harness(initial: PageBlock, { holdPassive = false }: { holdPassive?: bo
       return true;
     },
     has(match: RegExp) { return buttons().some((n) => match.test(label(n))); },
+    /** Every string rendered anywhere in the tree, buttons or not. */
+    text() {
+      const out: string[] = [];
+      const walk = (n: unknown) => {
+        if (Array.isArray(n)) return n.forEach(walk);
+        if (typeof n === "string") return void out.push(n);
+        if (!n || typeof n !== "object") return;
+        walk((n as Node).props?.children);
+      };
+      walk(tree);
+      return out.join(" ");
+    },
   };
 }
 
@@ -137,8 +149,12 @@ async function main(): Promise<void> {
     await settle(); await settle();
     is("the rewrite is in", h.block, rewritten);
     is("Undo is offered right after it", h.has(/Undo/), true);
+    is("the status line names Undo while the button is there", /Undo puts it back/.test(h.text()), true);
     const edited = { ...rewritten, body: (rewritten as { body: string }).body + " Every Saturday." } as PageBlock;
     h.type(edited);
+    // Claude 1 rev-odd's MEDIUM on #3871: once Undo is hidden, no line may still tell the creator to use it.
+    is("Undo is hidden after more typing", h.has(/Undo/), false);
+    is("no status line mentions an Undo that is not there", /Undo/.test(h.text()), false);
     h.press(/Undo/);
     is("the edit made after the rewrite is still there", h.block, edited);
   }

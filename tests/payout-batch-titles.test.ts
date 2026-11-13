@@ -13,7 +13,7 @@
  */
 import { NextRequest } from "next/server";
 import { readBook } from "@/lib/affiliates";
-import { batchFile } from "@/lib/affiliate-payouts";
+import { batchFile, batchId } from "@/lib/affiliate-payouts";
 import { onTheirWay, payableLines } from "@/lib/paypal-payouts";
 import { NO_AFFILIATES } from "@/lib/affiliate-setting";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
@@ -79,7 +79,7 @@ async function main(): Promise<void> {
   }));
   const session = await openSession(OWNER);
   const download = async (provider: string) => {
-    const response = await batchRoute(new NextRequest(`https://marktmorgen.com/api/store/affiliates/payout-batch?provider=${provider}`, { headers: { cookie: `${SESSION_COOKIE}=${session}` } }));
+    const response = await batchRoute(new NextRequest(`https://marktmorgen.com/api/store/affiliates/payout-batch?provider=${provider}&batch=${batchId(payableLines(book, away))}`, { headers: { cookie: `${SESSION_COOKIE}=${session}` } }));
     return { status: response.status, body: await response.text() };
   };
   const named = (command: (string | number)[]) => String(command[1]) === `nl:catalog:${cat}:t` || String(command[1]).startsWith(`nl:catalog:${cat}:l:`);

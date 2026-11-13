@@ -20,6 +20,9 @@ import type { NextRequest } from "next/server";
 import { NO_AFFILIATES } from "@/lib/affiliate-setting";
 import { claimHandle, ensureStatsId, setAffiliateSetting, setStripeAccount, storeForEmail } from "@/lib/store";
 import { GET } from "@/app/api/store/affiliates/payout-batch/route";
+import { readBook } from "@/lib/affiliates";
+import { batchId } from "@/lib/affiliate-payouts";
+import { onTheirWay, payableLines } from "@/lib/paypal-payouts";
 import { who } from "./affiliate-payout-batch-route-world";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -48,8 +51,19 @@ const person = (id: string, email: string, code: string) =>
 const sale = (ref: string, aff: string, base: number) =>
   JSON.stringify({ ref, pi: `pi_${ref}`, aff, at: NOW - 60 * 86_400, product: "prod01", title: "Bread course", base, total: base, currency: "usd", rate: 30, self: false, how: "click" });
 
+// The batch the studio page shows (#4479): the file is handed out for it only. While refunds or disputes cannot be
+// read, the page names no batch, and the refusal below comes first either way.
+const pageBatch = async () => {
+  const store = who.store!;
+  try {
+    const book = await readBook(store, undefined, { titles: false });
+    return book.refundsChecked ? batchId(payableLines(book, await onTheirWay(store))) : "";
+  } catch {
+    return "";
+  }
+};
 const batch = async () => {
-  const response = await GET(new Request("https://local.example/api/store/affiliates/payout-batch?provider=paypal") as unknown as NextRequest);
+  const response = await GET(new Request(`https://local.example/api/store/affiliates/payout-batch?provider=paypal&batch=${await pageBatch()}`) as unknown as NextRequest);
   return { status: response.status, body: await response.text(), type: response.headers.get("content-type") ?? "" };
 };
 

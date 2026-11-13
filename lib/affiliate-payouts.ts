@@ -35,6 +35,7 @@
  * changed away from is left out of the totals there, and so is left out here.
  */
 import { MAX_REFERENCE_LENGTH, type Affiliate, type Book, type Row, addPayout, payAddress } from "@/lib/affiliates";
+import { createHash } from "node:crypto";
 import { csvCell } from "@/lib/csv";
 import { plainAmount } from "@/lib/money";
 import type { Store } from "@/lib/store";
@@ -67,6 +68,21 @@ export function owedLines(book: Book): BatchLine[] {
     .slice(0, MAX_BATCH_ROWS)
     .map((row) => ({ affiliate: row.affiliate, cents: row.payable }));
 }
+
+/**
+ * The id of a batch: every affiliate in it and what each is paid, nothing else (#4479). The studio page shows the
+ * batch under this id, the file is only handed out while the book still comes to it, and "I have paid this batch"
+ * only writes it down while the book still comes to it, so what is written down is exactly the file that was paid:
+ * never an affiliate who became payable after the file was issued, never an amount that grew since. The order of
+ * the lines does not change it; the amount of any one line does. Not a secret: the batch is the creator's own.
+ */
+export function batchId(lines: readonly BatchLine[]): string {
+  const parts = lines.map((line) => `${line.affiliate.id}:${line.cents}`).sort();
+  return `b${createHash("sha256").update(`affiliate-batch|${parts.join(",")}`).digest("hex").slice(0, 24)}`;
+}
+
+/** A batch id as batchId writes it: anything else names no batch. */
+export const BATCH_ID = /^b[0-9a-f]{24}$/;
 
 /** What the whole batch comes to, in the currency's smallest unit. */
 export function batchTotal(lines: BatchLine[]): number {
@@ -191,18 +207,27 @@ export type RecordedBatch = {
  * It is deliberately a second step, after the upload, and never automatic:
  * the file being downloaded proves nothing about money having moved, and a
  * book that says "paid" when nobody was paid is worse than one that says
- * nothing. Each line is checked against what the book says is owed at this
- * moment, so a sale refunded between the download and the confirmation is not
- * paid out on.
+ * nothing.
+ *
+ * Only the batch that was paid is written down (#4479): `batch` is the id the
+ * studio page showed and the file was handed out under (batchId). When what
+ * the book says can be paid now no longer comes to that batch — an affiliate
+ * became payable after the file was issued, one's amount grew, a sale was
+ * refunded — nothing is written down for anyone ("changed"), because the book
+ * cannot tell which of today's lines the paid file held; the creator writes
+ * each payment in that file down by hand instead (Mark as paid).
  */
 export async function recordBatch(
   store: Store,
   book: Book,
   input: { date: string; reference: string },
   /** Affiliates with a PayPal payment on its way (lib/paypal-payouts.ts): never written down twice. */
-  away: Set<string> = new Set(),
-): Promise<RecordedBatch> {
+  away: Set<string>,
+  /** The id of the batch the creator paid (batchId of the file they downloaded). */
+  batch: string,
+): Promise<RecordedBatch | { changed: true }> {
   const lines = owedLines(book).filter((line) => !away.has(line.affiliate.id));
+  if (!BATCH_ID.test(batch) || batchId(lines) !== batch) return { changed: true };
   const reference = input.reference.replace(/\s+/g, " ").trim().slice(0, MAX_REFERENCE_LENGTH);
   let written = 0;
   let cents = 0;

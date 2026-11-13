@@ -14,7 +14,7 @@ import { AffiliateSummary } from "@/components/affiliate-summary";
 import { SUMMARY_PERIODS, programSummary } from "@/lib/affiliate-summary";
 import { PayPalPayouts } from "@/components/paypal-payouts";
 import { onTheirWay, payableLines, paypalChecks, readPayPal, settlePayPal } from "@/lib/paypal-payouts";
-import { batchTotal } from "@/lib/affiliate-payouts";
+import { batchId, batchTotal } from "@/lib/affiliate-payouts";
 import { codeOwners } from "@/lib/affiliate-codes";
 import { offerWords, waitingFor } from "@/lib/partner-invites";
 import { PartnerOffers } from "@/components/affiliate-studio";
@@ -193,6 +193,7 @@ export default async function StudioAffiliatesPage({ searchParams }: Params) {
             why: line.lead!.why,
           }))}
           leadsTotal={book ? book.lines.filter((line) => line.how === "lead").length : 0}
+          batch={book && away !== null ? batchId(payableLines(book, away)) : ""}
           payouts={book?.payouts ?? []}
           refundsChecked={book?.refundsChecked ?? true}
           invoicesChecked={book?.invoicesChecked ?? true}

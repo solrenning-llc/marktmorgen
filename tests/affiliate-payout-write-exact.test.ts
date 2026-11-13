@@ -14,7 +14,7 @@ import { NextRequest } from "next/server";
 import { claimHandle, ensureStatsId, ensureStoreId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { addPayout } from "@/lib/affiliates";
-import { recordBatch } from "@/lib/affiliate-payouts";
+import { batchId, owedLines, recordBatch, type RecordedBatch } from "@/lib/affiliate-payouts";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { POST as affiliatesRoute } from "@/app/api/store/affiliates/route";
 import { store as redis } from "./redis-stub";
@@ -94,9 +94,11 @@ async function main(): Promise<void> {
     currency: store.currency,
     elsewhere: 0,
   } as unknown as Parameters<typeof recordBatch>[1];
+  // The id of the batch the creator paid: the book's own payable lines (#4479).
+  const paid = batchId(owedLines(book));
   payoutReply = { reply: null };
-  const batch = await recordBatch(store, book, { date: "2026-11-03", reference: "Batch" }).then(
-    (r) => `written ${r.written}`,
+  const batch = await recordBatch(store, book, { date: "2026-11-03", reference: "Batch" }, new Set(), paid).then(
+    (r) => ("changed" in r ? "changed" : `written ${r.written}`),
     (error: unknown) => (error instanceof UnknownReplyError ? "unknown" : `threw ${String(error)}`),
   );
   payoutReply = undefined;
@@ -122,7 +124,7 @@ async function main(): Promise<void> {
   const first = await addPayout(store, input);
   const second = await addPayout(store, input);
   is("the same payout written twice draws two ids", Boolean(first && second && first.id !== second.id && /^[0-9a-f]{12}$/.test(first.id)), true);
-  const again = async () => (await recordBatch(store, book, { date: "2026-11-05", reference: "Batch" })).written;
+  const again = async () => ((await recordBatch(store, book, { date: "2026-11-05", reference: "Batch" }, new Set(), paid)) as RecordedBatch).written;
   is("a payout file confirmed is written", await again(), 1);
   is("and confirmed again, written under a new id, never thrown", await again(), 1);
   is("(every one in the book)", await payouts(), 7);

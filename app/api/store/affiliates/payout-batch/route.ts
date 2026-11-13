@@ -3,7 +3,7 @@ import { creatorFrom } from "@/lib/studio-route";
 import { storeForEmail } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { MAX_REFERENCE_LENGTH, readBook } from "@/lib/affiliates";
-import { type BatchProvider, batchFile, batchTotal, recordBatch } from "@/lib/affiliate-payouts";
+import { BATCH_ID, type BatchProvider, batchFile, batchId, batchTotal, recordBatch } from "@/lib/affiliate-payouts";
 import { onTheirWay, payableLines } from "@/lib/paypal-payouts";
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -40,7 +40,14 @@ export async function GET(request: NextRequest) {
     if (!lines.length) {
       return new Response("Nobody is owed anything right now.", { status: 409, headers: { "Cache-Control": "no-store" } });
     }
-    const asked = new URL(request.url).searchParams.get("provider");
+    const url = new URL(request.url);
+    if (batchId(lines) !== (url.searchParams.get("batch") ?? "")) {
+      return new Response(
+        "What your affiliates can be paid changed since this page loaded (a sale cleared its wait, or a refund came in). Reload the affiliates page and download the file again.",
+        { status: 409, headers: { "Cache-Control": "no-store" } },
+      );
+    }
+    const asked = url.searchParams.get("provider");
     const provider: BatchProvider = asked === "paypal" ? "paypal" : "worksheet";
     const day = new Date().toISOString().slice(0, 10);
     const { body, filename } = batchFile(provider, lines, store, day);
@@ -58,11 +65,12 @@ export async function GET(request: NextRequest) {
 }
 
 /**
- * `{ date: "2026-09-30", reference: "PayPal batch 4821" }` — the creator
- * confirming they have just paid the batch in their own provider, which
- * writes one payout per affiliate against what the book says is owed at this
- * moment. A sale refunded between the download and this call is not paid out
- * on, because the book is read again here.
+ * `{ date: "2026-09-30", reference: "PayPal batch 4821", batch: "b…" }` — the
+ * creator confirming they have just paid the batch in their own provider. It
+ * writes one payout per affiliate in that batch, and only while the book,
+ * read again here, still comes to exactly that batch (#4479): an affiliate who
+ * became payable after the file was issued, an amount that grew or a sale
+ * refunded since is "changed", and nothing is written down for anyone.
  */
 export async function POST(request: NextRequest) {
   const guarded = await guardStoreWrite(request, "settings", 8_000);
@@ -77,6 +85,8 @@ export async function POST(request: NextRequest) {
 
     const date = text(body.date, 10);
     if (!DATE.test(date) || Number.isNaN(Date.parse(`${date}T00:00:00Z`))) return fail("date");
+    const batch = typeof body.batch === "string" ? body.batch : "";
+    if (!BATCH_ID.test(batch)) return fail("batch");
 
     const book = await readBook(store);
     // Refunds are read from Stripe: when that failed, what is owed is not yet
@@ -95,7 +105,9 @@ export async function POST(request: NextRequest) {
         reference: text(body.reference, MAX_REFERENCE_LENGTH * 2),
       },
       away,
+      batch,
     );
+    if ("changed" in done) return fail("changed", 409);
     return Response.json({
       ok: true,
       written: done.written,

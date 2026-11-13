@@ -75,6 +75,9 @@ const MESSAGES: Record<string, string> = {
   amount: "Type the amount you paid, like 25 or 25.50.",
   date: "Pick the day you paid it.",
   nothing: "Nobody is owed anything right now, so there was nothing to write down.",
+  changed:
+    "What your affiliates can be paid changed since you downloaded the file (a sale cleared its wait, or a refund came in), so this batch was not written down: we cannot tell which of today's amounts your file held. Reload this page, then use Mark as paid for each payment in the file you paid.",
+  batch: "This page is out of date, so nothing was written down. Reload it, download the file again and pay that one.",
   refunds:
     "Stripe could not be asked about refunds just now, so what is owed is not settled. Try again in a moment rather than record a payout against a guess.",
   unknown: "That affiliate or payout is no longer on record. Reload the page.",
@@ -206,6 +209,7 @@ export function AffiliateStudio({
   payPanel = null,
   leads = [],
   leadsTotal = 0,
+  batch = "",
 }: {
   handle: string;
   setting: AffiliateSetting;
@@ -235,6 +239,8 @@ export function AffiliateStudio({
   /** Confirmed leads, newest first (lib/affiliate-leads.ts), and how many there are in all. */
   leads?: LeadRow[];
   leadsTotal?: number;
+  /** The id of the batch this page shows (lib/affiliate-payouts.ts batchId): the file and its confirmation are that batch. */
+  batch?: string;
 }) {
   const router = useRouter();
   const pending = rows.filter((r) => r.affiliate.status === "pending");
@@ -372,6 +378,7 @@ export function AffiliateStudio({
                 <form action="/api/store/affiliates/payout-batch" method="get">
                   <StoreField />
                   <input type="hidden" name="provider" value="paypal" />
+                  <input type="hidden" name="batch" value={batch} />
                   <button type="submit" className="btn btn-secondary btn-sm">
                     <Icon name="download" size={16} />
                     PayPal Payouts file
@@ -380,6 +387,7 @@ export function AffiliateStudio({
                 <form action="/api/store/affiliates/payout-batch" method="get">
                   <StoreField />
                   <input type="hidden" name="provider" value="worksheet" />
+                  <input type="hidden" name="batch" value={batch} />
                   <button type="submit" className="btn btn-secondary btn-sm">
                     <Icon name="download" size={16} />
                     Worksheet for Wise or a bank
@@ -398,7 +406,7 @@ export function AffiliateStudio({
                     e.preventDefault();
                     setBusy("batch");
                     setError(null);
-                    const done = await postBatch({ date: batchDate, reference: batchReference });
+                    const done = await postBatch({ date: batchDate, reference: batchReference, batch });
                     setBusy(null);
                     if ("error" in done) {
                       setError({ where: "batch", text: done.error });
@@ -437,8 +445,8 @@ export function AffiliateStudio({
                     </label>
                   </div>
                   <p className="mt-2 text-xs text-ink-soft">
-                    This writes one payout for each of the {owedNow.length} owed right now, against what the book says at this
-                    moment. It records a payment you already made; no money moves from here.
+                    This writes one payout for each of the {owedNow.length} in the file you downloaded from this page, and only
+                    while the book still matches that file. It records a payment you already made; no money moves from here.
                   </p>
                   <div className="mt-3 flex flex-wrap gap-2">
                     <button type="submit" className="btn btn-primary btn-sm" disabled={busy !== null} aria-busy={busy === "batch"}>

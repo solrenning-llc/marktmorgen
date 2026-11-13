@@ -177,47 +177,69 @@ export function atCeiling(counted: ReserveCharge, charge: PlanRefundCharge): Res
   return { ...counted, refund: left > 0 ? { kind: "guarantee", cents: left } : { kind: "none", reason: "already_refunded" } };
 }
 
+class Halt extends Error {
+  constructor(readonly why: Exclude<ReserveReading["why"], null>) {
+    super(why);
+  }
+}
+
 /** The reserve the platform's balance must keep now, read from Stripe; unknown whenever any of it cannot be read. */
 export async function readRefundReserve(nowSeconds: number, deadlineMs: number): Promise<ReserveReading> {
   const counts = { charges: 0, pages: 0, disputeReads: 0, unclassified: 0 };
   const stop = (why: Exclude<ReserveReading["why"], null>): ReserveReading => ({ reserve: { kind: "unknown", reason: "unreadable", index: -1 }, why, ...counts });
   if (!isBillingConfigured()) return stop("billing_off");
   if (!Number.isSafeInteger(nowSeconds) || nowSeconds <= LOOKBACK_DAYS * DAY_SECONDS || !Number.isFinite(deadlineMs)) return stop("unreadable");
-  const charges: ReserveCharge[] = [];
+  // Each charge counted once, by id: a page and the whole second it ends in may both list it.
+  const charges = new Map<string, ReserveCharge | null>();
   let after: string | null = null;
+  const lookback = String(nowSeconds - LOOKBACK_DAYS * DAY_SECONDS);
+  /** One page of charges; null once the reading cannot go on (the reason already set). */
+  const readPage = async (extra: Record<string, string>) => {
+    if (counts.pages >= MAX_PAGES) throw new Halt("too_many");
+    if (Date.now() >= deadlineMs) throw new Halt("deadline");
+    const query = new URLSearchParams({ limit: String(PAGE_SIZE), ...extra });
+    for (const field of EXPAND) query.append("expand[]", field);
+    const page = readStripePage(await onPlatformAt(READ_VERSION, "GET", `/charges?${query}`), legibleCharge, CHARGE_ID);
+    counts.pages += 1;
+    if (page.unreadable > 0) throw new Halt("unreadable");
+    return page;
+  };
+  const count = async (rows: (Record<string, unknown> & { id: string })[]) => {
+    for (const row of rows) {
+      if (charges.has(row.id)) continue;
+      let dispute: { status: string; amount: number } | null = null;
+      if (ownField(row, "disputed") === true) {
+        if (counts.disputeReads >= MAX_DISPUTE_READS) throw new Halt("too_many");
+        if (Date.now() >= deadlineMs) throw new Halt("deadline");
+        counts.disputeReads += 1;
+        dispute = await disputeOf(row.id);
+        if (!dispute) throw new Halt("unreadable");
+      }
+      const { read, unclassified } = readOf(row, dispute);
+      const counted = reserveChargeOf(read, nowSeconds);
+      if (counted && unclassified) counts.unclassified += 1;
+      charges.set(row.id, counted && unclassified ? atCeiling(counted, read.charge) : counted);
+    }
+  };
   try {
     for (;;) {
-      if (counts.pages >= MAX_PAGES) return stop("too_many");
-      if (Date.now() >= deadlineMs) return stop("deadline");
-      const query = new URLSearchParams({ limit: String(PAGE_SIZE), "created[gte]": String(nowSeconds - LOOKBACK_DAYS * DAY_SECONDS) });
-      for (const field of EXPAND) query.append("expand[]", field);
-      if (after) query.set("starting_after", after);
-      const page = readStripePage(await onPlatformAt(READ_VERSION, "GET", `/charges?${query}`), legibleCharge, CHARGE_ID);
-      counts.pages += 1;
-      if (page.unreadable > 0) return stop("unreadable");
-      for (const row of page.rows) {
-        counts.charges += 1;
-        let dispute: { status: string; amount: number } | null = null;
-        if (ownField(row, "disputed") === true) {
-          if (counts.disputeReads >= MAX_DISPUTE_READS) return stop("too_many");
-          if (Date.now() >= deadlineMs) return stop("deadline");
-          counts.disputeReads += 1;
-          dispute = await disputeOf(row.id);
-          if (!dispute) return stop("unreadable");
-        }
-        const { read, unclassified } = readOf(row, dispute);
-        const counted = reserveChargeOf(read, nowSeconds);
-        if (!counted) continue;
-        if (unclassified) counts.unclassified += 1;
-        charges.push(unclassified ? atCeiling(counted, read.charge) : counted);
-      }
+      const page = await readPage({ "created[gte]": lookback, ...(after ? { starting_after: after } : {}) });
+      await count(page.rows);
       if (!page.hasMore) break;
-      if (!page.lastId) return stop("unreadable");
+      if (!page.lastId) throw new Halt("unreadable");
+      // The page ends inside a second whose charges Stripe may order otherwise on the next request: that whole
+      // second is read before going past it (Claude 3, 13/11/2026). More than a page in one second is unknown.
+      const second = String(ownField(page.rows[page.rows.length - 1], "created"));
+      const tie = await readPage({ "created[gte]": second, "created[lte]": second });
+      if (tie.hasMore) throw new Halt("too_many");
+      await count(tie.rows);
       after = page.lastId;
     }
   } catch (error) {
+    if (error instanceof Halt) return stop(error.why);
     console.error("reading the charges for the refund reserve failed", error);
     return stop("unreadable");
   }
-  return { reserve: refundReserve(charges, nowSeconds), why: null, ...counts };
+  counts.charges = charges.size;
+  return { reserve: refundReserve([...charges.values()].filter((c): c is ReserveCharge => c !== null), nowSeconds), why: null, ...counts };
 }

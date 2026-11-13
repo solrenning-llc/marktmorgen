@@ -75,15 +75,21 @@ function charge(spec:Spec):Built{
 type Seen={method:string;path:string;version:string|null;query:URLSearchParams};
 let seen:Seen[]=[];
 /** Stripe's charge list over `all`, newest first, `size` a page, and its disputes. */
-function stripe(all:Built[],o:{size?:number;page?:(page:Record<string,unknown>,index:number)=>unknown;fail?:boolean;disputes?:(chargeId:string)=>unknown}={}):void{
+let request=0;
+/** A different, repeatable order of one second's charges for each request (Stripe does not promise their order). */
+const mix=(id:string)=>{let h=2166136261^request;for(let i=0;i<id.length;i++)h=Math.imul(h^id.charCodeAt(i),16777619);return h>>>0;};
+function stripe(all:Built[],o:{size?:number;page?:(page:Record<string,unknown>,index:number)=>unknown;fail?:boolean;disputes?:(chargeId:string)=>unknown;shuffleTies?:boolean}={}):void{
  seen=[];const size=o.size??100;
- const sorted=[...all].sort((a,b)=>Number(b.json.created)-Number(a.json.created));
  globalThis.fetch=(async(input:string|URL|Request,init?:RequestInit)=>{
   const url=new URL(String(input)),headers=new Headers(init?.headers);
   seen.push({method:init?.method??'GET',path:url.pathname,version:headers.get('Stripe-Version'),query:url.searchParams});
   if((init?.method??'GET')!=='GET')throw Error('the reserve reading never writes to Stripe');
   if(o.fail)return Response.json({error:{message:'unavailable'}},{status:500});
   if(url.pathname==='/v1/charges'){
+   request++;
+   const gte=url.searchParams.get('created[gte]'),lte=url.searchParams.get('created[lte]');
+   const sorted=[...all].filter(c=>(gte===null||Number(c.json.created)>=Number(gte))&&(lte===null||Number(c.json.created)<=Number(lte)))
+    .sort((a,b)=>Number(b.json.created)-Number(a.json.created)||(o.shuffleTies?mix(String(a.json.id))-mix(String(b.json.id)):0));
    const after=url.searchParams.get('starting_after');
    const from=after?sorted.findIndex(c=>c.json.id===after)+1:0;
    const rows=sorted.slice(from,from+size).map(c=>c.json);
@@ -138,10 +144,12 @@ test('pages are followed to the end, and a list longer than MAX_PAGES leaves the
  const reading=await readRefundReserve(NOW,LATER());
  assert.equal(reading.why,null);
  assert.deepEqual(reading.reserve,expectedOf(all));
- assert.equal(reading.pages,3);
+ // Three pages, and each page boundary's whole second read before going past it.
+ assert.equal(reading.pages,5);
  assert.equal(reading.charges,250);
- const after=seen.filter(s=>s.path==='/v1/charges').map(s=>s.query.get('starting_after'));
- assert.deepEqual(after.slice(1),[[...all].sort((a,b)=>Number(b.json.created)-Number(a.json.created))[99].json.id,[...all].sort((a,b)=>Number(b.json.created)-Number(a.json.created))[199].json.id]);
+ const after=seen.filter(s=>s.path==='/v1/charges'&&s.query.get('starting_after')!==null).map(s=>s.query.get('starting_after'));
+ assert.equal(seen.filter(s=>s.path==='/v1/charges'&&s.query.get('created[lte]')!==null).length,2);
+ assert.deepEqual(after,[[...all].sort((a,b)=>Number(b.json.created)-Number(a.json.created))[99].json.id,[...all].sort((a,b)=>Number(b.json.created)-Number(a.json.created))[199].json.id]);
 
  assert.equal(MAX_PAGES,20,'2,000 charges in the lookback: past that, unit 3 needs an incremental reading before the sales lock');
  const many=Array.from({length:MAX_PAGES*2+1},(_,i)=>charge({kind:'plan',amount:6900,paidDaysAgo:1+(i%60)}));
@@ -200,4 +208,15 @@ test('without a Stripe key nothing is read and nothing is known',async()=>{
   assert.equal(reading.why,'billing_off');
   assert.equal(seen.length,0);
  }finally{process.env.STRIPE_SECRET_KEY=key;}
+});
+
+test('many charges of one second, listed in another order at every request across pages, are all counted once',async()=>{
+ // Clusters of 30 charges sharing a second, so every page boundary falls inside one (Claude 3, 13/11/2026).
+ const all:Built[]=[];
+ for(let c=0;c<12;c++)for(let i=0;i<30;i++)all.push(charge({kind:'plan',amount:6900+c,paidDaysAgo:(c+1)*3}));
+ stripe(all,{shuffleTies:true});
+ const reading=await readRefundReserve(NOW,LATER());
+ assert.equal(reading.why,null);
+ assert.equal(reading.charges,all.length,'every charge read once');
+ assert.deepEqual(reading.reserve,expectedOf(all));
 });

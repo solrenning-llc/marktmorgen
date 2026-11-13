@@ -230,6 +230,10 @@ test("the page asks a session that is not fresh to log in again, in plain words,
   assert.match(page, /"out-others-reauth"/);
   assert.match(page, /For your safety, log in again to log out your other devices\./);
   assert.match(page, /href="\/signin\?to=login"/);
+  // Review of #3459 (Claude 7, LOW; taken by Claude 3): logging in lands on the studio, not here, so the notice says
+  // how to come back, by the name of the link the studio home shows.
+  assert.match(page, /After you log in, your studio opens\. Choose “Log out of other devices” there again\./);
+  assert.match(read("app/studio/page.tsx"), /Log out of other devices/);
 });
 
 test("the page promises no more than the code does (Claude 3 on #3459, rule 27)", () => {

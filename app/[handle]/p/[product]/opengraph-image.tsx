@@ -4,6 +4,7 @@ import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { productIdFromAddress, readListing } from "@/lib/catalog";
 import { lookColours } from "@/lib/store-look";
 import { MAX_IMAGE_BYTES } from "@/lib/product-image";
+import { imageSize } from "@/lib/image-size";
 import { averageText, showsRating, summaryOf } from "@/lib/reviews";
 import { canUseDomain } from "@/lib/domains";
 import { pricePill } from "@/components/store-product";
@@ -53,6 +54,12 @@ async function readPicture(path: string): Promise<string | null> {
       chunks.push(value);
     }
     let bytes = Buffer.concat(chunks);
+    // Every picture, JPEG or WebP, is held to the pixels an upload keeps before it is decoded (reviews of #4211):
+    // the shrink to 1600 px happens in the creator's browser and the server checks only bytes, so a small file that
+    // declares a huge canvas, or one whose size cannot be read, is left off the card. PRODUCT_CARD_READ's CPU bound
+    // rests on this.
+    const declared = imageSize(bytes);
+    if (!declared || declared.width * declared.height > PRODUCT_CARD_PICTURE_PIXELS) return null;
     const isJpeg = bytes[0] === 0xff && bytes[1] === 0xd8;
     if (!isJpeg) {
       const sharp = (await import("sharp").catch(() => null))?.default;
@@ -76,24 +83,27 @@ export default async function OpengraphImage({ params }: Params) {
   } catch {
     // An address with a broken escape in it names no store: the plain card.
   }
-  const store = decoded.startsWith("@") ? await storeForHandle(normaliseHandle(decoded)).catch(() => null) : null;
-  // No store, or one that cannot be read: nothing to share and nothing to pay with, so no card is drawn (reviews of
-  // #4211; the certificate's card answers the same).
+  // No store: nothing to share and nothing to pay with, so no card is drawn (404). A store that cannot be read right
+  // now is "try later" (503), never "gone" (reviews of #4211; #4217, as the certificate's card answers).
+  let store: Awaited<ReturnType<typeof storeForHandle>> = null;
+  try {
+    store = decoded.startsWith("@") ? await storeForHandle(normaliseHandle(decoded)) : null;
+  } catch {
+    return new Response("Unavailable", { status: 503, headers: { "Cache-Control": "no-store" } });
+  }
   if (!store) return new Response("Not found", { status: 404, headers: { "Cache-Control": "no-store" } });
   // Paid for as the store's other public pages are, before anything is read or drawn: one of its public requests
   // before its listing is read, the rest of PRODUCT_CARD_UNITS before its picture is read from the file store and the
   // card drawn. A store past its requests gets no card; an address asked again and again (a query string makes each
   // one new to every cache) never reads the file store or draws for nothing.
   const now = Date.now();
-  if (store && !(await takePublicRequest(store, "public", now, 1))) return plain(503, speech(store).w.restingTitle);
+  if (!(await takePublicRequest(store, "public", now, 1))) return plain(503, speech(store).w.restingTitle);
   // A store switched off after notices (lib/takedown.ts) shows no product on
-  // its pages, so its card is the plain one a missing product gets. A store
-  // that cannot be read is already null above: the plain card too.
-  const found =
-    store && !store.suspended ? await readListing(store, productIdFromAddress(store, id) ?? id).catch(() => null) : null;
+  // its pages, so its card is the plain one a missing product gets.
+  const found = !store.suspended ? await readListing(store, productIdFromAddress(store, id) ?? id).catch(() => null) : null;
   // A draft has no picture to share either.
   const product = found && !found.hidden ? found : null;
-  if (store && PRODUCT_CARD_UNITS > 1 && !(await takePublicRequest(store, "public", now, PRODUCT_CARD_UNITS - 1))) return plain(503, speech(store).w.restingTitle);
+  if (PRODUCT_CARD_UNITS > 1 && !(await takePublicRequest(store, "public", now, PRODUCT_CARD_UNITS - 1))) return plain(503, speech(store).w.restingTitle);
   const colours = lookColours(store?.look ?? { theme: "light", accent: "#5a36ee" });
   const title = product?.title ?? "Marktmorgen";
   const storeName = store?.name ?? "Marktmorgen";

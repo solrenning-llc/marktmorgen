@@ -35,6 +35,13 @@ async function cardFor(product: string, handle = HANDLE): Promise<number | "imag
   return result instanceof Response ? result.status : "image";
 }
 
+/** A synthetic JPEG of `bytes` bytes whose start-of-frame header declares `width` x `height`, as lib/image-size.ts reads it. */
+function jpeg(width: number, height: number, bytes = 200_000): Uint8Array {
+  const out = new Uint8Array(bytes);
+  out.set([0xff, 0xd8, 0xff, 0xc0, 0x00, 0x11, 0x08, height >> 8, height & 0xff, width >> 8, width & 0xff, 0x03]);
+  return out;
+}
+
 async function main(): Promise<void> {
   redis.clear();
   files.clear();
@@ -46,10 +53,8 @@ async function main(): Promise<void> {
   if (!made.ok) throw new Error("no product");
   const id = made.product.id;
   const path = `images/${await imageFolder(OWNER)}/${"a".repeat(32)}.jpg`;
-  // A JPEG by its first bytes, so the card takes it as it is (no sharp): a synthetic picture of 200 KB.
-  const bytes = new Uint8Array(200_000);
-  bytes[0] = 0xff;
-  bytes[1] = 0xd8;
+  // A JPEG by its first bytes, so the card takes it as it is (no sharp): a synthetic picture of 200 KB, 800 x 800.
+  const bytes = jpeg(800, 800);
   files.set(path, { bytes, contentType: "image/jpeg" });
   const pictured = await setProductImage(OWNER, id, { path, width: 800, height: 800, alt: "", bytes: bytes.length, small: null } as never);
   if (!pictured.ok) throw new Error("no picture");
@@ -65,6 +70,19 @@ async function main(): Promise<void> {
   const taken = (await requestsIn(folder, window)) - before;
   is("and takes at least as many of the store's public requests as a certificate's lighter card", taken >= CERTIFICATE_CARD_UNITS, true);
   is(`exactly PRODUCT_CARD_UNITS (${PRODUCT_CARD_UNITS}), held above the card's worst case in tests/plan-cost-registry.test.ts`, taken, PRODUCT_CARD_UNITS);
+
+  part("A JPEG that declares more pixels than an upload keeps is left off the card (reviews of #4211)");
+  const hasPicture = (element: unknown) => JSON.stringify(element).includes("data:image/jpeg");
+  let before2 = drawn.length;
+  await cardFor(id);
+  is("an 800 x 800 picture is on the card", hasPicture(drawn[drawn.length - 1]) && drawn.length > before2, true);
+  files.set(path, { bytes: jpeg(4000, 4000), contentType: "image/jpeg" });
+  before2 = drawn.length;
+  is("a 4000 x 4000 one: the card is drawn without it", [await cardFor(id), drawn.length - before2, hasPicture(drawn[drawn.length - 1])], ["image", 1, false]);
+  files.set(path, { bytes: new Uint8Array([0xff, 0xd8, ...new Array(50).fill(0)]), contentType: "image/jpeg" });
+  before2 = drawn.length;
+  is("one whose size cannot be read: the card is drawn without it", [await cardFor(id), drawn.length - before2, hasPicture(drawn[drawn.length - 1])], ["image", 1, false]);
+  files.set(path, { bytes, contentType: "image/jpeg" });
 
   part("A store that does not exist gets no card, and nothing is read or drawn (reviews of #4211)");
   reads.length = 0;

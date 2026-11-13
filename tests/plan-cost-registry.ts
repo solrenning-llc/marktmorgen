@@ -85,6 +85,7 @@ import { BODIES_PER_READ } from "@/lib/course";
 import { COURSE_BYTES } from "@/lib/api-read-rules";
 import { MAX_LEADS } from "@/lib/contact-rules";
 import { DATA_ROOM_BYTES, ENTRY_BYTES, NON_PAYING_DATA_ROOM_BYTES } from "@/lib/store-data-rules";
+import { MAX_REVIEW_PHOTO_BYTES } from "@/lib/review-summary";
 import { ORDER_KEY_BYTES } from "@/lib/order-data";
 import { PERSON_RECORD_MONTHS } from "@/lib/joined-stores";
 import { FOLLOWED_FAMILIES } from "@/lib/data-families";
@@ -364,6 +365,16 @@ export const ORIGIN_PER_BYTE = 0.06 / 1e9;
 export const BLOB_TRANSFER_PER_BYTE = 0.1 / 1e9;
 /** How long a door's file may be kept before it is used or swept away, in months: a day, and the day the job may take to reach it. */
 export const DOOR_KEPT_MONTHS = 2 / 31;
+/**
+ * The fewest bytes of the data room a review takes (lib/reviews.ts, reviewBytes: five entries and its record), so the
+ * most reviews, and so the most review photos, a plan's data room can hold at once: each photo is on one review
+ * (setReviewPhoto), and each review takes its room before it is written (saveReview, takeData). Five entries alone,
+ * below the 944 bytes the smallest real review was measured at (tests/review-photo-cost.test.ts), so it counts more
+ * photos than can be kept, never fewer (CI audit of the cost registry, 13 November 2026).
+ */
+export const REVIEW_ROOM_FLOOR_BYTES = 5 * ENTRY_BYTES;
+/** The bytes of review photos a plan's store can keep at once, each at its heaviest. */
+export const reviewPhotoBytes = (tier: Tier): number => Math.floor(DATA_ROOM_BYTES[tier] / REVIEW_ROOM_FLOOR_BYTES) * MAX_REVIEW_PHOTO_BYTES;
 /** What one community picture costs to send: the request, the reads, a second held at 2 GB, and its megabyte from the file store and on to the browser. */
 export const PICTURE_READ = request("light", 16) + PICTURE_BYTES * (ORIGIN_PER_BYTE + BLOB_TRANSFER_PER_BYTE);
 /**
@@ -1538,6 +1549,18 @@ export const COST_LINES: CostLine[] = [
     ],
     basis: "Every picture the plan lets a community keep, each at the most one may weigh, at the dearest store a file may be in. A door takes a place before it is given; a picture deleted, or a door never used (swept a day on), gives it back.",
   },
+  {
+    id: "review-photos",
+    feature: "Buyers' photos on their reviews, kept in the store's picture folder (CI audit of the cost registry, 13 November 2026: no line priced them before)",
+    monthlyUsd: (tier) => (reviewPhotoBytes(tier) / GB) * STORAGE_PER_GB,
+    sources: [
+      { file: "lib/review-photo.ts", names: ["keepReviewPhoto", "await put(path, Buffer.from(checked.bytes)"] },
+      { file: "lib/review-summary.ts", names: ["MAX_REVIEW_PHOTO_BYTES"] },
+      { file: "lib/reviews.ts", names: ["const reviewBytes = (review: Review | null) => (review ? dataBytes([JSON.stringify(review)], 5) : 0);", "takeData(room, [{ slot: REVIEWS_SLOT(input.productId), bytes: grown }], now)", "export async function setReviewPhoto"] },
+      { file: "lib/store-data-rules.ts", names: ["DATA_ROOM_BYTES", "ENTRY_BYTES"] },
+    ],
+    basis: "A review photo has no figure of its own: it is bounded only because each one sits on a review and each review takes room in the plan's data room before it is written. So the photos kept at once are at most the data room over the fewest bytes a review takes (REVIEW_ROOM_FLOOR_BYTES, five entries, under the smallest review measured), each at MAX_REVIEW_PHOTO_BYTES, kept all month at the dearest store a file may be in. Not priced here: the file store's charge for each put (no dated official rate in lib/spend-cost-table.ts, so unknown, never zero), the photo's bytes coming into the function with the review's request (a public request priced as a later page), and photos left in the picture folder after the closing day (lib/plan-closing.ts does not empty images/): those wait on the owner.",
+  },
 ];
 
 /**
@@ -1563,12 +1586,12 @@ export const PER_PAYMENT_LINES: CostLine[] = [
   {
     id: "retained-files",
     feature: "Files a store keeps after its plan ends, until its closing day (18 October 2026: nothing past it)",
-    monthlyUsd: (tier) => ((paidStorageBytes(tier) + TASK_ROOM_BYTES[tier] + COMMUNITY_PICTURES[tier] * PICTURE_BYTES) / GB) * STORAGE_PER_GB * ((CLOSING_DAYS + WARN_WEEK_DAYS) / 30),
+    monthlyUsd: (tier) => ((paidStorageBytes(tier) + TASK_ROOM_BYTES[tier] + COMMUNITY_PICTURES[tier] * PICTURE_BYTES + reviewPhotoBytes(tier)) / GB) * STORAGE_PER_GB * ((CLOSING_DAYS + WARN_WEEK_DAYS) / 30),
     sources: [
       { file: "lib/plan-closing-rules.ts", names: ["CLOSING_DAYS", "KEEP_NOTHING_FROM", "keptRoomFor"] },
       { file: "lib/plan-closing.ts", names: ["if (!closes && held <= keptRoomFor(endedAt))", "communityFolder(store.community.id)", "removeStored"] },
     ],
-    basis: "All a plan may keep, kept for its closing days and the week a late last notice adds, once after the payment that was the last. A plan that ended before 18 October 2026 keeps the old rule (a store with no plan's room, with no date): a legacy exposure of docs/funded-exposure-review.md, when no plan could yet be bought.",
+    basis: "All a plan may keep, its buyers' review photos included (line review-photos, 13 November 2026), kept for its closing days and the week a late last notice adds, once after the payment that was the last. A plan that ended before 18 October 2026 keeps the old rule (a store with no plan's room, with no date): a legacy exposure of docs/funded-exposure-review.md, when no plan could yet be bought.",
   },
   {
     id: "retained-data",

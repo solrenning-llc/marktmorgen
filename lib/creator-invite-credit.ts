@@ -410,7 +410,13 @@ async function putOnPlan(id: string, history: Map<string, Map<string, string>>, 
       "metadata[nimbus_invite_credit]": id,
     });
     const made = await onPlatformAt(INVITE_STRIPE_VERSION, "POST", `/customers/${customer}/balance_transactions`, body, `nimbus-invite-${id}`);
-    txn = typeof made.id === "string" ? made.id : "";
+    // Done only on a receipt (issue #4422): Stripe answers a created balance transaction with its `cbtxn_` id. A reply
+    // without one does not show the credit landed, so it throws: the credit stays owed and on the owed list, and the
+    // next run reads the history again and, if it is still not there, sends with the same idempotency key.
+    if (typeof made.id !== "string" || !made.id.startsWith("cbtxn_") || made.id.length <= "cbtxn_".length) {
+      throw new UnknownReplyError(`invite credits: the receipt for ${id}`);
+    }
+    txn = made.id;
     known.set(id, txn);
   }
   await redisPipeline([

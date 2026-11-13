@@ -47,6 +47,7 @@ import { admitOrders } from "@/lib/order-admission";
 import { countOrder } from "@/lib/orders";
 import { randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { releaseLock } from "@/lib/redis-lock";
 import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { EMAIL_PATTERN } from "@/lib/auth";
 import { addressHash, grantImported, importedKey } from "@/lib/imported-purchases";
@@ -311,9 +312,14 @@ export async function onboardingStill(statsId: string, attempt: string): Promise
   return now === "unknown" ? "unknown" : now === attempt;
 }
 
-/** Ends the mark after a way back that connected; a write that fails leaves it to run out within ONBOARDING_SECONDS. */
-export async function endOnboarding(statsId: string): Promise<void> {
-  await redisPipeline([["DEL", onboardingKey(statsId)]]).catch((error) => console.error("ending a PayPal connect's start failed", error));
+/**
+ * Ends this attempt's own mark after its way back connected: only while the mark still holds this attempt's token, in
+ * one script (lib/redis-lock.ts releaseLock: GET and DEL together), so a newer connect started meanwhile keeps its mark
+ * and can finish (Codex G on #4345). Never throws; a mark it could not end runs out within ONBOARDING_SECONDS.
+ */
+export async function endOnboarding(statsId: string, attempt: string): Promise<void> {
+  if (!ATTEMPT.test(attempt)) return;
+  await releaseLock({ key: onboardingKey(statsId), token: attempt, ttlSeconds: ONBOARDING_SECONDS });
 }
 
 /**

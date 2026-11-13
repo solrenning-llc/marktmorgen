@@ -34,7 +34,8 @@ export async function GET(request: NextRequest) {
   const saved = await connectPayPalSellerIf(ref, checked.merchant, () => onboardingStill(statsId, started), attemptStartedAt(started));
   if (saved === "stale") return away(origin, studio("#paypal"));
   if (!saved) return away(origin, studio("paypal=error#paypal"));
-  await endOnboarding(store.statsId);
+  // Only this attempt's own mark: a newer connect started meanwhile keeps its own (Codex G on #4345).
+  await endOnboarding(store.statsId, started);
   if (store.paypalSeller?.merchant !== checked.merchant) after(() => noticeCreator(store, { kind: "paypal-connected" }));
   return away(origin, studio("paypal=ready#paypal"));
 }

@@ -14,6 +14,7 @@ import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
 import { allowanceUsed } from "@/lib/store-allowance";
 import { countStudio, holdStudio } from "@/lib/studio-route";
+import { holdMoreApi, takeMoreApi } from "@/lib/api-guard";
 import { claimHandle, ensureStatsId, setSubscription, storeForEmail, type Store } from "@/lib/store";
 
 beforeEach(() => {
@@ -50,4 +51,25 @@ test("studio requests: an unfunded paid period is untouched", async () => {
   const held = await holdStudio(store, 3);
   assert.equal(held.ok, true);
   assert.equal(await allowanceUsed(store, "studio"), 5);
+});
+
+test("API follow-on units: a funded period without its cohort is refused before the take, a removal is not", async () => {
+  const store = await payingStore("gatesapi");
+  const funded = fundedOf(store);
+  const more = await takeMoreApi(funded, 3);
+  assert.ok(more instanceof Response);
+  assert.equal(more.status, 429);
+  assert.equal(((await more.json()) as { error: string }).error, "unavailable");
+  assert.ok((await holdMoreApi(funded, 3)) instanceof Response);
+  assert.equal(await allowanceUsed(store, "api"), 0);
+  // Switching a discount code off (DELETE /api/v1/codes) is a removal: never refused for the cohort.
+  assert.equal(await takeMoreApi(funded, 2, 0, "removal"), null);
+  assert.equal(await allowanceUsed(store, "api"), 2);
+});
+
+test("API follow-on units: an unfunded paid period is untouched", async () => {
+  const store = await payingStore("gatesapiplain");
+  assert.equal(await takeMoreApi(store, 2), null);
+  assert.equal(typeof (await holdMoreApi(store, 3)), "function");
+  assert.equal(await allowanceUsed(store, "api"), 5);
 });

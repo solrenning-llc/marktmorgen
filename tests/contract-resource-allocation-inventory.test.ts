@@ -44,8 +44,8 @@ type Entry =
 /** Keyed "file#top-level function". Read on origin/main e5aaa11c80, 13 November 2026. */
 const ALLOWANCE_TAKE_INVENTORY: Record<string, Entry> = {
   "lib/api-guard.ts#apiKeyed": { state: "gated", calls: 1, note: "Skipped for purpose \"write\" by design: each write in lib/api-write.ts proves it, and removals stay open." },
-  "lib/api-guard.ts#takeMoreApi": { state: "pending", calls: 1, why: "Follow-on API units of an admitted request; a \"write\" request was admitted without the cohort, and not every caller is shown to prove it." },
-  "lib/api-guard.ts#holdMoreApi": { state: "pending", calls: 1, why: "Same as takeMoreApi: a reading held at its worst after admission, with no cohort proof of its own." },
+  "lib/api-guard.ts#takeMoreApi": { state: "gated", calls: 1, note: "Skipped only for a removal its caller names (DELETE /api/v1/codes switches a code off)." },
+  "lib/api-guard.ts#holdMoreApi": { state: "gated", calls: 1 },
   "lib/api-write.ts#addLead": { state: "gated", calls: 1 },
   "lib/api-write.ts#giveAccess": { state: "gated", calls: 1 },
   "lib/broadcasts.ts#createBroadcast": { state: "pending", calls: 1, why: "Studio units held for reading a list; the send proves the cohort in lib/mail.ts, this reading does not." },
@@ -215,7 +215,7 @@ is("no problem between sources, inventory and key", problems, []);
 is("the scan finds every take (29 on 13 November 2026)", allowanceSites(sources).length, Object.values(ALLOWANCE_TAKE_INVENTORY).reduce((n, e) => n + e.calls, 0));
 const pending = Object.values(ALLOWANCE_TAKE_INVENTORY).filter((e) => e.state === "pending").length;
 const pendingCalls = Object.values(ALLOWANCE_TAKE_INVENTORY).filter((e) => e.state === "pending").reduce((n, e) => n + e.calls, 0);
-is("pending takes, down from 11 (part 1) as part 1b gates them", pendingCalls, 7);
+is("pending takes, down from 11 (part 1) as part 1b gates them", pendingCalls, 5);
 is("pending takes keep resourceAllocations false", pending > 0 && CONTRACT_ADMISSION_COVERAGE.resourceAllocations, false);
 is("the other two core keys are untouched", [CONTRACT_ADMISSION_COVERAGE.renewals, CONTRACT_ADMISSION_COVERAGE.settlementAndReserveReconciliation], [false, false]);
 

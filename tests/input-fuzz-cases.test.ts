@@ -8,6 +8,7 @@ import { inboundSigned } from "@/lib/inbound-mail";
 import { readBatch } from "@/lib/imports";
 import { adjacentCustomRange, presetCustomRange } from "@/lib/custom-range-dates";
 import { signedUser } from "@/lib/meta-ads";
+import { seal, unseal } from "@/lib/secret-box";
 import { UnknownReply, exactReplies, plainList, replyCount } from "@/lib/redis-exact";
 
 part("Resend: a signature is believed only in its exact base64");
@@ -86,6 +87,21 @@ part("Meta: a signed_request is believed only with its exact base64url signature
   const swapped = good.replace(/-/g, "+").replace(/_/g, "/");
   for (const garbled of [`${good.slice(0, 9)}!${good.slice(9)}`, `${good}=`, `*${good}`, ...(swapped !== good ? [swapped] : [])]) {
     is(`a garbled signature ${JSON.stringify(garbled.slice(-6))} is refused`, signedUser(`${garbled}.${payload}`), null);
+  }
+}
+
+part("Sealed values: open only in their exact base64url");
+{
+  const sealed = seal("fuzz-value", "fuzz-context");
+  is("the sealed value opens", unseal(sealed, "fuzz-context"), { ok: true, value: "fuzz-value", legacy: false });
+  const parts = sealed.split(".");
+  const garble = (at: 2 | 3, change: (part: string) => string) => parts.map((part, i) => (i === at ? change(part) : part)).join(".");
+  for (const [what, garbled] of [
+    ["a character outside the alphabet in the nonce", garble(2, (p) => `${p.slice(0, 3)}!${p.slice(3)}`)],
+    ["padding on the data", garble(3, (p) => `${p}==`)],
+    ["a space inside the data", garble(3, (p) => `${p.slice(0, 5)} ${p.slice(5)}`)],
+  ] as const) {
+    is(`${what} is refused`, unseal(garbled, "fuzz-context"), { ok: false, reason: "broken" });
   }
 }
 

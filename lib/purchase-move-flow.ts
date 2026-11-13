@@ -297,6 +297,7 @@ function movedAs(applied: MoveApplied, moved: "both" | "done"): ConfirmState {
     case "gone":
       return "link";
     case "full":
+      return "full";
     case "unknown":
       return "unfinished";
     default:

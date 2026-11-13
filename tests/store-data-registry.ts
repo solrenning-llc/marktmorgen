@@ -262,6 +262,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:sdemo:{<session>}:<family>[:<part>]@lib/studio-demo-rules.ts": company("A studio demo session: its record and the drafts it changed, one key a family of DEMO_KEY_FAMILIES", "The company's, no store's (256 [KJ1], off): written only through sandboxKey, at most DEMO_SESSIONS_PER_DAY sessions a day, each held under DEMO_BYTES_PER_SESSION and ending all at once DEMO_SESSION_SECONDS (21 hours) after it opened (EXPIREAT, never extended), so two days of openings are alive at the most (docs/studio-demo.md)."),
   "nl:affkit:@lib/affiliate-kit.ts": short("An affiliate kit's counts, by the day and the window", "ai", 40),
   "nl:aff:payday:@lib/affiliate-payday.ts": short("A store's monthly payday claimed", "day", 40),
+  "nl:aff:payday:due:@lib/affiliate-payday.ts": short("A store's monthly payday marked as reached by its own run", "day", 40),
   "nl:aff:@lib/affiliates.ts": {
     what: "Affiliates: their records, addresses, codes, clicks, sales and shares, and what the creator says was paid",
     room: ["lib/affiliates.ts"],

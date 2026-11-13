@@ -11,6 +11,7 @@ import * as reviews from "@/lib/backup-files-review";
 import { BACKUP_FILES_ROUTE_REVIEW } from "@/lib/backup-files-review";
 import { deletionRecordsOn, recordDeletions } from "@/lib/backup-deletions";
 import { keptLines, linesOf } from "@/lib/person-data";
+import { copyMarks } from "@/lib/person-copy";
 import { blobWorld, resetBlobWorld } from "./backup-files-world";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -42,7 +43,8 @@ async function main(): Promise<void> {
   const aboutBackup = (text: string) => /backup/i.test(text);
   const shown = [...keptLines(), ...keptLines("team"), ...keptLines("person")].map((l) => `${l.what} ${l.why}`);
   is("no kept line in \"Delete this person\" speaks of the backup while its review is null", records === null ? shown.some(aboutBackup) : true, records === null ? false : true);
-  is("no line says \"Built but off\"", (["erased", "kept", "expires", "none", "open", "suppression"] as const).flatMap((how) => linesOf(how)).some((line) => /built but off/i.test(line)) || shown.some((line) => /built but off/i.test(line)), false);
+  is("a person's copy names no backup mark while its review is null", records === null ? copyMarks().some(aboutBackup) : true, records === null ? false : true);
+  is("no line says \"Built but off\"", (["erased", "kept", "expires", "none", "open", "suppression"] as const).flatMap((how) => linesOf(how)).some((line) => /built but off/i.test(line)) || shown.some((line) => /built but off/i.test(line)) || copyMarks().some((line) => /built but off/i.test(line)), false);
   done();
 }
 

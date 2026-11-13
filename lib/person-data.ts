@@ -24,6 +24,7 @@
  *   account      a creator's or teammate's own sign-in and account, not a store's people
  *   none         found by the scan, and keeps nothing about a store's people
  */
+import { BACKUP_DELETION_RECORDS_REVIEW, BACKUP_FILES_ROUTE_REVIEW } from "@/lib/backup-files-review";
 
 export type PersonData =
   | { file: string; how: "erased"; what: string; via?: string; only?: ErasureBy }
@@ -195,8 +196,11 @@ export const PERSON_DATA: PersonData[] = [
   { file: "lib/yearly-ask.ts", how: "none", what: "Marks that a membership's yearly offer went, by its Stripe subscription, never by address" },
 ];
 
+/** Whether a line is said today: the backup's deletion records only once their reviews are filled (VR item 2). */
+const saidToday = (d: PersonData) => d.file !== "lib/backup-deletions.ts" || (BACKUP_FILES_ROUTE_REVIEW !== null && BACKUP_DELETION_RECORDS_REVIEW !== null);
+
 /** Whether a line holds for this door. */
-const holdsFor = (d: PersonData, door?: ErasureBy) => !door || !("only" in d) || !d.only || d.only === door;
+const holdsFor = (d: PersonData, door?: ErasureBy) => saidToday(d) && (!door || !("only" in d) || !d.only || d.only === door);
 
 /** The lines of one kind, each said once, in the order above; for one door when given. */
 export function linesOf(how: PersonData["how"], door?: ErasureBy): string[] {

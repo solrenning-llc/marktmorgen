@@ -1201,7 +1201,7 @@ export async function runBackupFiles(env: BackupFilesEnv, opts: RunOptions): Pro
   } catch (error) {
     if (error instanceof OutOfRun) stoppedBy = error.why;
     else {
-      console.error("backup files: the run stopped", error instanceof Error ? error.name : "unknown", process.env.DBG3349 ? error : "");
+      console.error("backup files: the run stopped", error instanceof Error ? error.name : "unknown");
       raise(ctx, "run_failed");
     }
   }

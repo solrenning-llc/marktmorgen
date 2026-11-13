@@ -79,6 +79,7 @@ import { heldPaymentsOf } from "@/lib/closing-holds";
 import { shipmentMailOf } from "@/lib/shipment-mail-outbox";
 import { orderConfirmationMailOf } from "@/lib/order-confirmation-outbox";
 import type { PaidCheckout } from "@/lib/person-copy-stripe";
+import { BACKUP_DELETION_RECORDS_REVIEW, BACKUP_FILES_ROUTE_REVIEW } from "@/lib/backup-files-review";
 
 export type CopyHow = "copied" | "marks" | "elsewhere" | "pending";
 
@@ -498,6 +499,13 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
   },
 };
 
+/** What the copy says is kept only as marks; the backup's deletion records only once their reviews are filled (VR item 2). */
+export function copyMarks(): string[] {
+  return Object.entries(COPY_PLAN)
+    .filter(([module, p]) => p.how === "marks" && (module !== "lib/backup-deletions.ts" || (BACKUP_FILES_ROUTE_REVIEW !== null && BACKUP_DELETION_RECORDS_REVIEW !== null)))
+    .map(([, p]) => p.what);
+}
+
 /**
  * The copy for one person of one store, from its scope (lib/person-erasure.ts,
  * erasureScope). Each module's reader runs in turn; one that fails fails the
@@ -512,7 +520,7 @@ export async function copyPerson(scope: ErasureScope, now = Date.now()): Promise
     const records = await copier(scope);
     if (records.length) sections.push({ module, what: plan.what, records });
   }
-  const marks = Object.values(COPY_PLAN).filter((p) => p.how === "marks").map((p) => p.what);
+  const marks = copyMarks();
   const elsewhere = Object.values(COPY_PLAN).filter((p) => p.how === "elsewhere").map((p) => p.what);
   return { store: { name: scope.store.name, handle: scope.store.handle }, email: scope.email, made: new Date(now).toISOString(), sections, marks, elsewhere };
 }

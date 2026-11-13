@@ -26,6 +26,7 @@ import {
   SUBMISSION_SWEEP_PER_RUN,
   SUBMISSION_SWEEP_RETRY_SECONDS,
   type DoorSteps,
+  abortSubmissionDoor,
   buyerSlotFor,
   closeSubmissionDoor,
   forgetSubmissionsPerson,
@@ -325,6 +326,71 @@ async function main(): Promise<void> {
     const plain = world();
     const sent = await send("9".repeat(32), lesson(31), plain.steps);
     is("an ordinary close keeps its record", (await readSubmission(FOLDER, sent.id))?.state, "submitted");
+  }
+
+  // Review of #3570 (Claude 1 cloud, MEDIUM; taken by Claude 3): an abort that read the door, then a close that took it
+  // and wrote its record while the abort was at the vault, then the abort letting the place and the index entry go.
+  part("An abort and a close of the same upload: only one of them ever owns it");
+  {
+    const who = "6".repeat(32);
+    const at = { store: SHOP, folder: FOLDER, courseId: COURSE, lessonId: lesson(40), who, data: SHOP as DataStore };
+    const opened = await openSubmissionDoor(ask(who, lesson(40)), world().steps);
+    if (!opened.ok) throw new Error(`open refused: ${opened.reason}`);
+    const path = opened.upload.pathname;
+    const id = path.split("/")[2].slice(4);
+    let closedMeanwhile: unknown = "not run";
+    const racing = world({
+      abortReservedVault: async () => {
+        // The close runs to its end while the abort waits on the vault, and the vault then says the upload is gone.
+        closedMeanwhile = await closeSubmissionDoor({ ...at, note: "" }, path, ["e"], NOW, world().steps);
+        return true;
+      },
+    });
+    const given = await abortSubmissionDoor(at, path, racing.steps, NOW);
+    const kept = (closedMeanwhile as { ok?: boolean }).ok === true;
+    is("control: one of them finished", given === "done" || kept, true);
+    const files: string[] = [];
+    await forgetSubmissionsPerson(FOLDER, who, files, world().steps, SHOP);
+    is("after the buyer's erasure, no record of them remains", await readSubmission(FOLDER, id), null);
+    is("and a kept file is handed to the erasure, never left behind", !kept || files.includes(path), true);
+  }
+
+  // Review of #3570 (Claude 1 cloud, MEDIUM): an erasure during a close took the file off the sweep's list, and the
+  // close's own delete of the completed file failed: nothing would ever delete it.
+  part("A completed file the close could not delete, after an erasure, goes back on the sweep's list");
+  {
+    const who = "5".repeat(32);
+    const files: string[] = [];
+    const racing = world({
+      closeReservedVault: async (pathname) => {
+        await forgetSubmissionsPerson(FOLDER, who, files, world().steps, SHOP);
+        return { ok: true, file: { pathname, bytes: 5 * MiB, contentType: "video/mp4" } };
+      },
+      deleteVault: async () => false,
+    });
+    const opened = await openSubmissionDoor(ask(who, lesson(41)), racing.steps);
+    if (!opened.ok) throw new Error(`open refused: ${opened.reason}`);
+    const path = opened.upload.pathname;
+    await closeSubmissionDoor({ store: SHOP, folder: FOLDER, courseId: COURSE, lessonId: lesson(41), who, data: SHOP, note: "" }, path, ["e"], NOW, racing.steps).catch(() => null);
+    const score = (await redis.pipeline([["ZSCORE", "nl:sub:due", `${FOLDER}|${path}`]]))[0];
+    is("the file is due on the sweep's list again, from now", score !== null && Number(score) <= NOW, true);
+  }
+
+  // Review of #3570 (Claude 1 cloud, LOW): an erasure between the place and the door's write made the open fail, and its
+  // catch kept the door it had just written, with the buyer's address, for up to a day.
+  part("An open that fails after writing its door takes the door back");
+  {
+    const who = "4".repeat(32);
+    let id = "";
+    const racing = world({
+      openReservedVault: async (input) => {
+        id = input.ownerId.slice(4);
+        await forgetSubmissionsPerson(FOLDER, who, [], world().steps, SHOP);
+        return { ok: true, sessionId: "s", upload: { pathname: `vault/${input.folder}/${input.ownerId}/0000000000000001-${input.name}`, pieces: 1, pieceBytes: 16 * MiB, multipart: true } };
+      },
+    });
+    is("control: the open is refused as unknown", await threw(() => openSubmissionDoor(ask(who, lesson(42)), racing.steps)), "unknown");
+    is("and leaves no door behind", (await redis.pipeline([["EXISTS", `nl:sub:door:${FOLDER}:${id}`]]))[0], 0);
   }
 
   done();

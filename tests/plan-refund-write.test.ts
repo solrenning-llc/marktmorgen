@@ -98,7 +98,7 @@ async function paidShop(o: { at?: number; disputed?: boolean } = {}) {
   const at = o.at ?? NOW - 3 * DAY;
   const id = `ch_${handle}x1`;
   world.invoices.push({ id: `in_${handle}x1`, subscription: sub, status: "paid", created: at, total: 6_900, tax: null, billing_reason: "subscription_create", charge: id, status_transitions: { paid_at: at }, lines: { data: [{ type: "subscription", period: { start: at }, price: { unit_amount: 6_900, currency: "usd", recurring: { interval: "month" } } }] } });
-  world.charges.push({ id, customer, invoice: `in_${handle}x1`, payment_intent: `pi_${handle}x1`, status: "succeeded", paid: true, currency: "usd", created: at, amount_captured: 6_900, amount_refunded: 0, disputed: o.disputed ?? false, payment_method_details: { card: { fingerprint: `fp${handle}` } }, balance_transaction: { fee: 230, currency: "usd" } });
+  world.charges.push({ id, customer, invoice: `in_${handle}x1`, payment_intent: `pi_${handle}x1`, status: "succeeded", paid: true, currency: "usd", created: at, amount_captured: 6_900, amount_refunded: 0, disputed: o.disputed ?? false, payment_method_details: { card: { fingerprint: `fp${handle}` } }, balance_transaction: { object: "balance_transaction", type: "charge", source: id, fee: 230, currency: "usd" } });
   const store = async () => (await storeForEmail(email))!;
   return { id, store, refunds: () => world.refunds.filter((r) => r.charge === id) };
 }

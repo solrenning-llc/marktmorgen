@@ -133,7 +133,7 @@ function pay(s: { customer: string; subscriptionId: string; handle: string }, o:
   const cycle = o.cycle ?? "month";
   const amount = o.amount ?? (cycle === "year" ? 69_000 : 6_900);
   world.invoices.push({ id: inv, subscription: o.subscription ?? s.subscriptionId, status: "paid", created: o.at, total: o.total ?? amount, tax: o.tax ?? null, billing_reason: o.reason ?? "subscription_create", charge: id, status_transitions: { paid_at: o.at }, lines: { data: [{ type: "subscription", period: { start: o.at }, price: { unit_amount: cycle === "year" ? 69_000 : 6_900, currency: "usd", recurring: { interval: cycle } } }] } });
-  world.charges.push({ id, customer: s.customer, invoice: inv, payment_intent: `pi_${s.handle}x${k}`, status: "succeeded", paid: true, currency: "usd", created: o.at, amount_captured: amount, amount_refunded: o.refunded ?? 0, disputed: o.disputed ?? false, payment_method_details: { card: { fingerprint: o.card ?? `fp${s.handle}` } }, balance_transaction: { fee: o.fee ?? 230, currency: o.feeCurrency ?? "usd" } });
+  world.charges.push({ id, customer: s.customer, invoice: inv, payment_intent: `pi_${s.handle}x${k}`, status: "succeeded", paid: true, currency: "usd", created: o.at, amount_captured: amount, amount_refunded: o.refunded ?? 0, disputed: o.disputed ?? false, payment_method_details: { card: { fingerprint: o.card ?? `fp${s.handle}` } }, balance_transaction: { object: "balance_transaction", id: `txn_${s.handle}x${k}`, type: "charge", source: id, fee: o.fee ?? 230, currency: o.feeCurrency ?? "usd" } });
   return { id, inv, pi: `pi_${s.handle}x${k}` };
 }
 
@@ -244,6 +244,22 @@ async function main() {
   const yc = await shop("year");
   pay(yc, { at: start, cycle: "year", feeCurrency: "eur" });
   is("Stripe's fee in another currency: unknown", (await yc.read()).refund, { kind: "unknown", reason: "currency" });
+  // The fee is taken only from the refunded charge's own balance transaction (rule 30): one whose source is another
+  // charge, or that is not a charge's, would size the refund with a fee that is not this payment's (issue #4450).
+  const yo = await shop("year");
+  const yoPaid = pay(yo, { at: start, cycle: "year", fee: 230 });
+  is("control: the charge's own fee of $2.30 sets the refund", (await yo.read()).refund, { kind: "unstarted_months", cents: 69_000 - 4 * 6_900 - 230, monthsKept: 4 });
+  const yoRow = world.charges.find((c) => c.id === yoPaid.id)!;
+  yoRow.balance_transaction = { object: "balance_transaction", id: "txn_Fixture002", type: "charge", source: "ch_Fixture002", currency: "usd", fee: 30 };
+  is("a balance transaction whose source is another charge does not set the fee", (await yo.read()).refund, { kind: "unknown", reason: "fee_unread" });
+  yoRow.balance_transaction = { object: "balance_transaction", id: "txn_Fixture003", type: "charge", source: { id: "ch_Fixture003" }, currency: "usd", fee: 30 };
+  is("an expanded source of another charge does not set the fee", (await yo.read()).refund, { kind: "unknown", reason: "fee_unread" });
+  yoRow.balance_transaction = { object: "balance_transaction", id: "txn_Fixture004", type: "charge", currency: "usd", fee: 30 };
+  is("a balance transaction with no source does not set the fee", (await yo.read()).refund, { kind: "unknown", reason: "fee_unread" });
+  yoRow.balance_transaction = { object: "balance_transaction", id: "txn_Fixture005", type: "adjustment", source: yoPaid.id, currency: "usd", fee: 30 };
+  is("a balance transaction of another type does not set the fee", (await yo.read()).refund, { kind: "unknown", reason: "fee_unread" });
+  yoRow.balance_transaction = { object: "balance_transaction", id: "txn_Fixture006", type: "charge", source: { id: yoPaid.id, object: "charge" }, currency: "usd", fee: 230 };
+  is("the charge's own balance transaction with its source expanded sets the fee", (await yo.read()).refund, { kind: "unstarted_months", cents: 69_000 - 4 * 6_900 - 230, monthsKept: 4 });
   const yf = await shop("year");
   pay(yf, { at: NOW - 10 * DAY, cycle: "year" });
   is("a first yearly payment within 30 days: the guarantee, in full", (await yf.read()).refund, { kind: "guarantee", cents: 69_000 });

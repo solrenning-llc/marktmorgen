@@ -48,6 +48,13 @@
 export const DISPUTE_TAKES: ReadonlySet<string> = new Set(["needs_response", "under_review", "lost", "prevented"]);
 
 /**
+ * The states of a Stripe dispute that take none of the creator's money: an inquiry (warning_*), a dispute won, and
+ * the legacy `charge_refunded`, whose money the refund reading already takes off (see DISPUTE_TAKES). Every status
+ * of stripe-node v22.6.0 Dispute.Status is in exactly one of the two sets; any other is unknown (disputeTakes).
+ */
+export const DISPUTE_KEEPS: ReadonlySet<string> = new Set(["warning_needs_response", "warning_under_review", "warning_closed", "won", "charge_refunded"]);
+
+/**
  * Whether a dispute's own balance transactions took money from the creator
  * and did not put it back. Stripe's `prevented` is either a `resolution`,
  * "resolved (refunded) before it could become a chargeback", or a `block`,
@@ -88,11 +95,14 @@ export function disputeMoneyGone(dispute: unknown): boolean | null {
  * that has the dispute itself (lib/stats.ts). A prevented one by its own
  * money (disputeMoneyGone; null when that cannot be read, so the reader
  * says it is partial instead of guessing); every other status as
- * DISPUTE_TAKES says.
+ * DISPUTE_TAKES and DISPUTE_KEEPS say, and null for one in neither.
  */
 export function disputeTakes(dispute: { status?: unknown; balance_transactions?: unknown }): boolean | null {
   if (dispute.status === "prevented") return disputeMoneyGone(dispute);
-  return typeof dispute.status === "string" && DISPUTE_TAKES.has(dispute.status);
+  if (typeof dispute.status !== "string") return null;
+  if (DISPUTE_TAKES.has(dispute.status)) return true;
+  // A status this code does not know is not "takes nothing" (rule 24, #4374): null, so the reader says it is partial.
+  return DISPUTE_KEEPS.has(dispute.status) ? false : null;
 }
 
 /** A channel name for a renewal, refund or dispute that no sale read explains. */

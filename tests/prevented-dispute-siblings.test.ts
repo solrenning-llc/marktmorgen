@@ -70,7 +70,6 @@ const HEALTHY: Row[] = [
   ["warning_needs_response", 800, "pi_warningneedsresponse", []],
   ["needs_response", 700, "pi_needsresponse", moved(-700)],
   ["under_review", 600, "pi_underreview", moved(-600)],
-  ["a_status_stripe_adds_later", 7000, "pi_later", moved(-7000)],
 ];
 /** Prevented disputes whose money movement is not in Stripe's shape. */
 const UNREADABLE: unknown[] = [
@@ -132,16 +131,28 @@ test("a prevented dispute takes the money only when its own balance transactions
   for (const movement of UNREADABLE) assert.equal(disputeTakes(prevented(movement)), null, JSON.stringify(movement));
   // Every other status reads as today, by its status alone.
   for (const status of ["lost", "needs_response", "under_review"]) assert.equal(disputeTakes({ status, balance_transactions: [] }), true, status);
-  for (const status of ["won", "warning_closed", "warning_needs_response", "warning_under_review", "charge_refunded", "a_status_stripe_adds_later", "PREVENTED", "", "__proto__"]) {
+  for (const status of ["won", "warning_closed", "warning_needs_response", "warning_under_review", "charge_refunded"]) {
     assert.equal(disputeTakes({ status, balance_transactions: moved(-100) }), false, JSON.stringify(status));
   }
-  assert.equal(disputeTakes({}), false);
+  // A status this code does not know, or none, is unknown, never "takes nothing" (rule 24, #4374).
+  for (const status of ["a_status_stripe_adds_later", "PREVENTED", "", "__proto__"]) {
+    assert.equal(disputeTakes({ status, balance_transactions: moved(-100) }), null, JSON.stringify(status));
+  }
+  assert.equal(disputeTakes({}), null);
 });
 
 test("the status-only list still holds prevented, so a reader of the status alone never pays on it", () => {
   for (const status of ["lost", "prevented", "needs_response", "under_review"]) assert.equal(retained.DISPUTE_TAKES.has(status), true, status);
   for (const status of ["won", "warning_closed", "warning_needs_response", "warning_under_review", "charge_refunded"]) assert.equal(retained.DISPUTE_TAKES.has(status), false, status);
   for (const status of ["a_status_stripe_adds_later", "LOST", "Prevented", " prevented", "", "__proto__"]) assert.equal(retained.DISPUTE_TAKES.has(status), false, JSON.stringify(status));
+});
+
+test("a dispute with a status this code does not know leaves the store's numbers partial (#4374)", async () => {
+  listed = [...HEALTHY, ["a_status_stripe_adds_later", 7000, "pi_later", moved(-7000)] as Row].map(row);
+  const { rows, partial } = await readStoreDisputes(store, SINCE);
+  assert.equal(partial, true);
+  assert.equal(rows.some((r) => r.paymentIntent === "pi_later"), false);
+  listed = HEALTHY.map(row);
 });
 
 test("the store's numbers take off a resolution's money, never a block's", async () => {
@@ -177,9 +188,9 @@ test("a resolution that also made a Refund is counted once: the refund reading h
 
 test("the affiliate book still reads the status alone: every prevented dispute holds the commission", async () => {
   // A status Stripe adds later is unreadable (rule 24): it holds the whole book, never read as nothing.
-  listed = HEALTHY.map(row);
+  listed = [...HEALTHY, ["a_status_stripe_adds_later", 7000, "pi_later", moved(-7000)] as Row].map(row);
   assert.equal((await disputesSince(store, SINCE, undefined, new Map())).complete, false);
-  listed = HEALTHY.filter(([status]) => status !== "a_status_stripe_adds_later").map(row);
+  listed = HEALTHY.map(row);
   const { byIntent, complete } = await disputesSince(store, SINCE, undefined, new Map());
   assert.equal(complete, true);
   assert.deepEqual([...byIntent.entries()].sort(), [

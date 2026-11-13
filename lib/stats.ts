@@ -1490,8 +1490,12 @@ async function readDisputes(store: Store, since: number, pages = DISPUTE_PAGES):
       if (takes !== true) continue;
       const raw = row.payment_intent;
       const pi = typeof raw === "string" ? raw : raw && typeof raw === "object" && typeof (raw as { id?: unknown }).id === "string" ? (raw as { id: string }).id : "";
-      const cents = typeof row.amount === "number" && row.amount > 0 ? row.amount : 0;
-      if (!cents) continue;
+      // A dispute that takes the money with no whole positive amount is not "nothing taken" (rule 24, #4374).
+      const cents = wholeCents(row.amount);
+      if (cents === null) {
+        partial = true;
+        continue;
+      }
       const currency = currencyOf(row);
       if (!currency) partial = true;
       out.push({ created: typeof row.created === "number" ? row.created * 1000 : 0, cents, currency, paymentIntent: pi });
@@ -1504,6 +1508,12 @@ async function readDisputes(store: Store, since: number, pages = DISPUTE_PAGES):
   }
   return { rows: out, partial };
 }
+
+/** The refund states that are no money given back, now or yet (Stripe's Refund object): only "succeeded" is. */
+const REFUND_NOT_OUT: ReadonlySet<string> = new Set(["pending", "requires_action", "failed", "canceled"]);
+
+/** An amount in the smallest unit, as Stripe writes one that moved money: a whole positive number, or null. */
+const wholeCents = (value: unknown): number | null => (typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : null);
 
 /** One refund as Stripe lists it: when, how much, in what, and the payment it gave back. */
 export type RefundRow = { created: number; cents: number; currency: string; paymentIntent: string };
@@ -1522,12 +1532,23 @@ async function readRefunds(store: Store, since: number, pages: number): Promise<
     )) as { data?: unknown; has_more?: unknown };
     const rows = financialPage(list, seen);
     for (const row of rows) {
-      if (row.status !== "succeeded" && row.status !== "pending") continue;
+      // Only a succeeded refund is money given back (#4369): a pending or requires_action one is not yet, a failed or
+      // canceled one never is. Any other status, or a succeeded one with no whole positive amount, is unknown, never
+      // nothing given back: the reading says it is partial (rule 24, #4370). Statuses: Stripe's Refund object.
+      if (row.status !== "succeeded") {
+        if (!REFUND_NOT_OUT.has(row.status as string)) partial = true;
+        continue;
+      }
+      const cents = wholeCents(row.amount);
+      if (cents === null) {
+        partial = true;
+        continue;
+      }
       const currency = currencyOf(row);
       if (!currency) partial = true;
       out.push({
         created: typeof row.created === "number" ? row.created * 1000 : 0,
-        cents: typeof row.amount === "number" ? row.amount : 0,
+        cents,
         currency,
         paymentIntent: typeof row.payment_intent === "string" ? row.payment_intent : "",
       });

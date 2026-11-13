@@ -15,7 +15,7 @@
  *   nl:bench:ranges       the ranges, a month
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, listSlots, repliesFor } from "@/lib/redis-reply";
 import { type Ranges, type Sample, parseSample, rangesFrom, sampleFrom } from "@/lib/benchmark-rules";
 import { isHouseStore } from "@/lib/house-store";
 import type { Store } from "@/lib/store";
@@ -52,12 +52,14 @@ export async function refreshRanges(now = Date.now()): Promise<KeptRanges | null
   // Read exactly (CX-123 rule 24): a week answered in another shape is unknown, never a week with no samples, so
   // nothing is worked out from it and the ranges kept are not written over.
   const weeks = repliesFor(await redisPipeline([["HGETALL", weekKey(lastWeek)], ["HGETALL", weekKey(thisWeek)]]), 2);
-  if (!weeks || !weeks.every((flat) => Array.isArray(flat) && flat.length % 2 === 0 && flat.every((x) => typeof x === "string"))) {
+  // Each week through listSlots: a hole or an inherited slot is not a field, so it is not skipped as `.every` would.
+  const lists = weeks ? weeks.map((flat) => listSlots(flat)) : null;
+  if (!lists || !lists.every((list) => list !== null && list.length % 2 === 0 && list.every((x) => typeof x === "string"))) {
     throw new UnknownReplyError("the benchmark samples of the last two weeks");
   }
   const latest = new Map<string, Sample>();
-  for (const flat of weeks) {
-    const list = flat as string[];
+  for (const slots of lists) {
+    const list = slots as string[];
     for (let i = 0; i + 1 < list.length; i += 2) {
       const sample = parseSample(list[i + 1]);
       // A later week's word wins, "no longer qualifies" included.

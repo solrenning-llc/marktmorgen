@@ -50,7 +50,6 @@ test("readable replies: two empty weeks work out ranges from no stores, as befor
 // passed the shape check. Read through listSlots, as the other exact readers do.
 test("a week of samples read as a sparse list (a hole where a field is) is unknown: nothing is written over", async () => {
   const before = await real([["GET", "nl:bench:ranges"]]);
-  // eslint-disable-next-line no-sparse-arrays
   odd = { reply: [, "{}"] };
   await assert.rejects(refreshRanges(), (e) => e instanceof UnknownReplyError);
   odd = null;

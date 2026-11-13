@@ -21,6 +21,7 @@
 import { createHash } from "node:crypto";
 import { BATCH_KEY, DUE_KEY, WALK_GAP_MS, eraseClosed, markDue } from "@/lib/closed-store-data";
 import { FINAL_INDEX } from "@/lib/closing-holds";
+import * as closingLib from "@/lib/plan-closing";
 import { type Hands, closeOne, removeStored } from "@/lib/plan-closing";
 import { ENDED_INDEX } from "@/lib/plan-standing";
 import { claimHandle, ensureStatsId, ensureStoreId, setSubscription, storeForEmail } from "@/lib/store";
@@ -77,12 +78,17 @@ async function main(): Promise<void> {
     const kept = String(redis.run(["GET", ownerKey(A)]));
     spoil(ownerKey(A), kept);
     let look: string;
+    let row: closingLib.Closing | null = null;
     try {
-      look = (await closeOne(A, Date.now(), hands)).state;
+      row = await closeOne(A, Date.now(), hands);
+      look = row.state;
     } catch (error) {
       look = `threw: ${(error as Error).message}`;
     }
     is(`${what}: the daily look holds the store, to read it again tomorrow`, look, "held");
+    // Claude 1's LOW on #3687: held because its record does not read is counted apart, for the job's report.
+    const counted = (closingLib as unknown as { heldUnreadable?: (rows: closingLib.Closing[]) => number }).heldUnreadable;
+    is(`${what}: counted as held because its record does not read`, counted && row ? counted([row]) : "no count", 1);
     is(`${what}: it stays in the line of ended plans and the final line, its closing state kept`, lines(A), [String(endedAt), String(endedAt), state]);
   }
 
@@ -91,7 +97,10 @@ async function main(): Promise<void> {
     const N = "closing-n@example.com";
     await closing(N, "closingn");
     redis.run(["DEL", ownerKey(N)]);
-    is("nil record: gone", (await closeOne(N, Date.now(), hands)).state, "gone");
+    const gone = await closeOne(N, Date.now(), hands);
+    is("nil record: gone", gone.state, "gone");
+    const counted = (closingLib as unknown as { heldUnreadable?: (rows: closingLib.Closing[]) => number }).heldUnreadable;
+    is("nil record: not counted as held unreadable", counted ? counted([gone]) : "no count", 0);
     is("out of both lines, its closing state deleted", lines(N), [null, null, null]);
   }
 
@@ -109,6 +118,7 @@ async function main(): Promise<void> {
     is(`${what}: not prepared`, [walked.stores, redis.run(["HEXISTS", BATCH_KEY, B])], [0, 0]);
     is(`${what}: still in the walk's line, moved back a walk`, score !== null && Number(score) >= T + WALK_GAP_MS, true);
     is(`${what}: the record is left as it was`, redis.run(["GET", ownerKey(B)]) !== null, true);
+    is(`${what}: the walk's report counts it as a record that does not read (Claude 1's LOW on #3687)`, (walked as { unreadable?: number }).unreadable, 1);
   }
 
   part("eraseClosed, control: a record Redis says is not there (nil) leaves the walk's line");
@@ -121,6 +131,7 @@ async function main(): Promise<void> {
     redis.run(["DEL", ownerKey(N)]);
     const walked = await eraseClosed(Date.now() + 30_000, async () => {}, T);
     is("nil record: not prepared, out of the line", [walked.stores, redis.run(["ZSCORE", DUE_KEY, N])], [0, null]);
+    is("nil record: not counted as one that does not read", (walked as { unreadable?: number }).unreadable, 0);
   }
 
   /** Hands that count what they are asked to list and delete. */

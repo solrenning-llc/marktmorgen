@@ -77,15 +77,25 @@ async function main(): Promise<void> {
     id, mode: "payment", status: "complete", payment_status: "paid", created, amount_total: 1000, currency: "usd",
     total_details: { amount_tax: 0 }, payment_intent, metadata: { store: handle, product: A, title: "Book" }, customer_details: { email: "buyer@example.com" },
   });
-  // Opened an hour before the end, paid an hour after it: the payment is what counts.
-  await noteSession(await store(), session("cs_test_paid_after", end - 3600, { id: "pi_paid_after", created: end + 3600 }));
-  // Opened and paid before the end.
-  await noteSession(await store(), session("cs_test_paid_before", end - 7200, { id: "pi_paid_before", created: end - 3600 }));
+  // Codex G on #1924 at dda73b793b: the payment's time is its settled charge's (payment_intent.latest_charge), never
+  // the intent's creation nor the checkout's opening, which both come before the buyer pays.
+  const charged = (id: string, intentCreated: number, chargeCreated: number) => ({ id, created: intentCreated, latest_charge: { id: `ch_${id.slice(3)}`, object: "charge", status: "succeeded", paid: true, created: chargeCreated } });
+  // Opened two hours before the end, the intent made an hour before it, charged an hour after it: no share.
+  await noteSession(await store(), session("cs_test_paid_after", end - 7200, charged("pi_paid_after", end - 3600, end + 3600)));
+  // Opened and charged before the end.
+  await noteSession(await store(), session("cs_test_paid_before", end - 7200, charged("pi_paid_before", end - 7000, end - 3600)));
   const forQ = (await earned()).filter((key) => key.endsWith(`:${q}`));
-  is("only the sale paid before the end earns", forQ, [`cs_test_paid_before:${q}`]);
-  // Without the payment's own time (the intent not expanded), the checkout's is the only one known.
-  await noteSession(await store(), session("cs_test_only_session", end - 60, "pi_not_expanded"));
-  is("with only the checkout's time, it is used", (await earned()).includes(`cs_test_only_session:${q}`), true);
+  is("only the sale charged before the end earns, whatever the intent's own time", forQ, [`cs_test_paid_before:${q}`]);
+  // Without a settled charge's time, a checkout opened before the end may have been paid after it: not known, so the
+  // sale is left for the next run (the sweep's failOrder), never credited on the checkout's time.
+  const unknownAt = async (ref: string, payment_intent: unknown) => noteSession(await store(), session(ref, end - 60, payment_intent)).then(() => "noted", (error: Error) => error.name);
+  is("the intent not expanded: unknown, nothing credited", await unknownAt("cs_test_unk_intent", "pi_not_expanded"), "UnknownReplyError");
+  is("the charge not expanded: unknown", await unknownAt("cs_test_unk_charge", { id: "pi_charge_id", created: end - 120, latest_charge: "ch_only_id" }), "UnknownReplyError");
+  is("a charge that did not succeed: unknown", await unknownAt("cs_test_unk_failed", { id: "pi_charge_failed", created: end - 120, latest_charge: { id: "ch_failed", status: "failed", paid: false, created: end - 30 } }), "UnknownReplyError");
+  is("and nothing of them was credited", (await earned()).filter((key) => key.startsWith("cs_test_unk")).length, 0);
+  // A checkout opened after the end was paid after it too: no share, and nothing to wait for.
+  is("opened after the end, the intent not expanded: no share and no wait", await noteSession(await store(), session("cs_test_opened_after", end + 60, "pi_opened_after")).then(() => (async () => (await earned()).includes(`cs_test_opened_after:${q}`))(), (error: Error) => error.name), false);
+  is("the sweep reads each checkout with its charge, so the time is there", readFileSync("lib/checkout-sweep.ts", "utf8").includes("expand[]=data.payment_intent.latest_charge"), true);
 
   part("4. An answer whose write may have landed is never said to have changed nothing");
   const r = "cccccccccccc";

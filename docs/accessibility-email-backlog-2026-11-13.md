@@ -27,6 +27,13 @@ with no axe violation under the A, AA and AAA tags.
   Their gaps are in the audit of 11 November.
 - The signed agreement copy's missing viewport: PR #3768.
 
+## Left for a design decision, not a WCAG failure
+
+- Store email footers are 13 px (`lib/mail.ts` `render`, `lib/community-event-mail.ts`
+  `noticeHtml`). WCAG sets no minimum text size; this is recorded for 1.4.8 and
+  the plain-language goal, and a change belongs to a design decision, not to
+  this audit (Claude 3, 13 November 2026).
+
 ## Done on 13 November 2026, not merged (branches without a pull request)
 
 - `claude3/keep/p-mail-a11y-1`: the moved or canceled event email
@@ -34,3 +41,7 @@ with no axe violation under the A, AA and AAA tags.
   viewport and the subject as its title (2.4.2, 3.1.1, 1.4.10).
 - `claude3/keep/p-mail-a11y-2`: a long address in a store email's text wraps
   on a phone (`lib/mail-body.ts`, `linked`; 1.4.10).
+- `claude3/keep/p-mail-a11y-3`: an email's buttons, and a product card's, stay
+  boxes under forced colours (1.4.1, 1.4.11).
+- `claude3/keep/p-mail-a11y-4`: the live-event emails' links say where they go,
+  in the seven store languages (2.4.9).

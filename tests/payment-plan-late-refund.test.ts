@@ -37,7 +37,7 @@ const realNow = Date.now;
 const clock = Math.floor(realNow() / 1000);
 Date.now = () => clock * 1000;
 
-type Charge = { id: string; object: "charge"; payment_intent: string; amount: number; amount_refunded: number; disputed: boolean; currency: string; balance_transaction: { amount: number; currency: string }; invoice: string };
+type Charge = { id: string; object: "charge"; payment_intent: string; amount: number; amount_refunded: number; disputed: boolean; dispute?: { id: string; object: "dispute"; status: string; charge: string } | null; currency: string; balance_transaction: { amount: number; currency: string }; invoice: string };
 type Invoice = { id: string; object: "invoice"; subscription: string; status: string; created: number; amount_paid: number; paid_out_of_band: boolean; charge: Charge };
 type Refund = { id: string; object: "refund"; payment_intent: string; amount: number; currency: string; status: string; metadata: Record<string, string> };
 
@@ -108,7 +108,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     const intent = body.get("payment_intent") ?? "";
     const charge = Object.values(invoices).flat().map((row) => row.charge).find((c) => c.payment_intent === intent);
     if (!charge) return answer({ error: { message: "No such payment_intent" } }, 404);
-    if (charge.disputed) return answer({ error: { type: "invalid_request_error", code: "charge_disputed", message: "disputed" } }, 400);
+    // As Stripe does: a charge with a dispute still open (or lost) is refused; one whose dispute the creator won can be refunded.
+    if (charge.disputed && charge.dispute?.status !== "won") return answer({ error: { type: "invalid_request_error", code: "charge_disputed", message: "disputed" } }, 400);
     const refused = refusedFor.get(intent);
     if (refused) return answer({ error: { type: "invalid_request_error", code: refused, message: "This charge can no longer be refunded." } }, 400);
     const amount = Number(body.get("amount") ?? charge.amount - charge.amount_refunded);
@@ -199,8 +200,25 @@ async function main(): Promise<void> {
   reset();
   const c = plan(2, 100, 4);
   c.invoices[2].charge.disputed = true;
+  c.invoices[2].charge.dispute = { id: "du_lostx2", object: "dispute", status: "lost", charge: c.invoices[2].charge.id };
   is("settled, only the undisputed late payment refunded", [await finishPlan(ACCOUNT, c.session), madeFor(c.invoices[2]).length, madeFor(c.invoices[3]).length], ["done", 0, 1]);
   is("no refund was even asked for the disputed one", posts.filter((p) => p.body.get("payment_intent") === c.invoices[2].charge.payment_intent).length, 0);
+
+  // Codex X5's MEDIUM at 52e9c7a1ed (adopted by Claude 3, nuvem E): `charge.disputed` stays true after the dispute closes,
+  // so a dispute the creator won left them a payment taken after the plan's end, never refunded.
+  part("A late payment whose dispute the creator won is refunded");
+  reset();
+  const w = plan(2, 100, 3);
+  w.invoices[2].charge.disputed = true;
+  w.invoices[2].charge.dispute = { id: "du_wonx2", object: "dispute", status: "won", charge: w.invoices[2].charge.id };
+  is("settled, the late payment refunded once in full", [await finishPlan(ACCOUNT, w.session), madeFor(w.invoices[2]).map((r) => r.amount)], ["done", [5_000]]);
+
+  part("A late payment whose dispute is still open is tried again, never settled as given back");
+  reset();
+  const o = plan(2, 100, 3);
+  o.invoices[2].charge.disputed = true;
+  o.invoices[2].charge.dispute = { id: "du_openx2", object: "dispute", status: "under_review", charge: o.invoices[2].charge.id };
+  is("owed, nothing refunded while the bank decides", [await finishPlan(ACCOUNT, o.session), madeFor(o.invoices[2]).length], ["owed", 0]);
 
   part("A refund already made under the invoice's mark is never made again");
   reset();

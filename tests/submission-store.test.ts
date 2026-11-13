@@ -97,10 +97,14 @@ async function commandsOf<T>(work: () => Promise<T>): Promise<{ value: T; comman
   }
 }
 /** Answers one pipeline whose first command is `name` with nothing, as a reply out of shape. */
+/** A pipeline whose first command is `name`, or the close's one-step record write (lib/submission-store.ts, SUBMISSION_CLOSE_WRITE). */
+const CLOSE_WRITE = "close-write";
+const firstIs = (list: (string | number)[][], name: string) =>
+  name === CLOSE_WRITE ? String(list[0]?.[0]) === "EVAL" && String(list[0]?.[1]).startsWith("-- marktmorgen:submission-close-write:v1") : String(list[0]?.[0]) === name;
 function breakNext(name: string) {
   const original = redis.pipeline.bind(redis);
   redis.pipeline = (async (list: (string | number)[][]) => {
-    if (String(list[0]?.[0]) === name) {
+    if (firstIs(list, name)) {
       redis.pipeline = original;
       return [];
     }
@@ -114,7 +118,7 @@ function breakNext(name: string) {
 function landThenLose(name: string, thenGet = false) {
   const original = redis.pipeline.bind(redis);
   redis.pipeline = (async (list: (string | number)[][]) => {
-    if (String(list[0]?.[0]) === name) {
+    if (firstIs(list, name)) {
       redis.pipeline = original;
       if (thenGet) breakNext("GET");
       await original(list);
@@ -127,7 +131,7 @@ function landThenLose(name: string, thenGet = false) {
 function sendThenFail(name: string, runs: boolean) {
   const original = redis.pipeline.bind(redis);
   redis.pipeline = (async (list: (string | number)[][]) => {
-    if (String(list[0]?.[0]) === name) {
+    if (firstIs(list, name)) {
       redis.pipeline = original;
       if (runs) await original(list);
       throw new Error("fetch failed");
@@ -273,7 +277,12 @@ async function main(): Promise<void> {
       const timed = Number((await redis.pipeline([["HGET", room, `~${month}`]]))[0] ?? 0);
       is("its record's bytes are counted in the data room until it expires", timed >= dataBytes([recKey, recJson], 1), true);
       const slot = Number((await redis.pipeline([["HGET", room, buyerSlotFor(FOLDER, COURSE, lesson, ANA) ?? ""]]))[0] ?? -1);
-      is("the buyer's slot holds the one place, not the upload's door", slot, dataBytes([`nl:sub:live:${FOLDER}:${COURSE}:${lesson}:${ANA}`, "0".repeat(32)], 1));
+      // One place weighs its member on the lesson and its entry in the store, with a path at its longest.
+      const longestPath = "v".repeat("vault/".length + 32 + 1 + 36 + 1 + 16 + 1 + 120);
+      const onePlace =
+        dataBytes([`nl:sub:live:${FOLDER}:${COURSE}:${lesson}:${ANA}`, "0".repeat(32)], 1) +
+        dataBytes([`nl:sub:who:${FOLDER}:${ANA}`, [COURSE, lesson, "0".repeat(32), longestPath].join("|")], 1);
+      is("the buyer's slot holds the one place, not the upload's door", slot, onePlace);
       is("so the room is lighter than with the upload open", ((await dataUsed(SHOP))?.used ?? -1) < usedBefore + dataBytes([recKey, recJson], 1), true);
     }
     is("its place is held to the keeping time", await liveCount(FOLDER, COURSE, lesson, ANA, NOW + 10 * 86_400), 1);
@@ -296,7 +305,7 @@ async function main(): Promise<void> {
     const w = world();
     const opened = await openSubmissionDoor({ ...ask(), lessonId: lesson }, w.steps);
     const path = opened.ok ? opened.upload.pathname : "";
-    breakNext("ZADD");
+    breakNext(CLOSE_WRITE);
     is("a record write answered out of shape is unknown", await threw(() => closeSubmissionDoor({ ...at, data: SHOP, note: "" }, path, ["e"], NOW, w.steps)), "unknown");
     is("and the file it would have named is deleted", w.calls.includes("vault:delete"), true);
     is("Redis confirms no record was written", await readSubmission(FOLDER, idOf(path)), null);
@@ -308,7 +317,7 @@ async function main(): Promise<void> {
     const w = world();
     const opened = await openSubmissionDoor({ ...ask(), lessonId: lesson }, w.steps);
     const path = opened.ok ? opened.upload.pathname : "";
-    landThenLose("ZADD");
+    landThenLose(CLOSE_WRITE);
     is("a record written whose answer was lost is unknown", await threw(() => closeSubmissionDoor({ ...at, data: SHOP, note: "" }, path, ["e"], NOW, w.steps)), "unknown");
     is("its file is kept", w.calls.includes("vault:delete"), false);
     is("for the record that names it", (await readSubmission(FOLDER, idOf(path)))?.path, path);
@@ -320,7 +329,7 @@ async function main(): Promise<void> {
     const w = world();
     const opened = await openSubmissionDoor({ ...ask(), lessonId: lesson }, w.steps);
     const path = opened.ok ? opened.upload.pathname : "";
-    landThenLose("ZADD", true);
+    landThenLose(CLOSE_WRITE, true);
     is("a lost answer whose read-back is out of shape is unknown", await threw(() => closeSubmissionDoor({ ...at, data: SHOP, note: "" }, path, ["e"], NOW, w.steps)), "unknown");
     is("and the file is kept, never deleted on a guess", w.calls.includes("vault:delete"), false);
   }
@@ -331,7 +340,7 @@ async function main(): Promise<void> {
     const w = world();
     const opened = await openSubmissionDoor({ ...ask(), lessonId: lesson }, w.steps);
     const path = opened.ok ? opened.upload.pathname : "";
-    sendThenFail("ZADD", true);
+    sendThenFail(CLOSE_WRITE, true);
     is("a write sent and never answered is unknown", await threw(() => closeSubmissionDoor({ ...at, data: SHOP, note: "" }, path, ["e"], NOW, w.steps)), "Error: fetch failed");
     is("and the file is kept: the write may have landed", w.calls.includes("vault:delete"), false);
     is("as it did here", (await readSubmission(FOLDER, idOf(path)))?.path, path);
@@ -387,7 +396,7 @@ async function main(): Promise<void> {
     let wrote = false;
     let readBack = false;
     redis.pipeline = (async (list: (string | number)[][]) => {
-      if (!wrote && String(list[0]?.[0]) === "ZADD") {
+      if (!wrote && firstIs(list, CLOSE_WRITE)) {
         wrote = true;
         return [];
       }

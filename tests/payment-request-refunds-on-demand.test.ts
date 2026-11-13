@@ -69,8 +69,9 @@ setSendHooksForTests({ fetch: { resolve: async () => [{ address: "127.0.0.1", fa
 
 const INTENT = "pi_RefundsOnDemand0001";
 const PAID = 48_000;
-const other = (n: number) => ({ id: `re_other_${n}`, object: "refund", payment_intent: `pi_SomethingElse${String(n).padStart(6, "0")}`, status: "succeeded", amount: 500 });
-const ours = (id: string, amount: number, status = "succeeded") => ({ id, object: "refund", payment_intent: INTENT, status, amount });
+// Each refund names its currency, as Stripe's do (lib/payment-requests.ts reads it, as #3160's list does).
+const other = (n: number) => ({ id: `re_other_${n}`, object: "refund", payment_intent: `pi_SomethingElse${String(n).padStart(6, "0")}`, status: "succeeded", amount: 500, currency: "usd" });
+const ours = (id: string, amount: number, status = "succeeded", currency = "usd") => ({ id, object: "refund", payment_intent: INTENT, status, amount, currency });
 const list = (data: unknown, more: unknown) => ({ body: { object: "list", data, has_more: more } });
 const hundred = (from: number) => Array.from({ length: 100 }, (_, i) => other(from + i));
 /** 301 refunds on the account, ours the 301st: the list's three pages never reach it. */
@@ -187,6 +188,10 @@ async function main(): Promise<void> {
   is("a refund still under way: not checked, reading again may help", [d.request?.state, d.request?.refundsChecked, d.request?.refundsRetry, d.why], ["paid", false, true, "under_way"]);
   d = await check2([{ body: { object: "list", data: "none", has_more: false } }]);
   is("a page in another shape: not checked", [d.request?.refundsChecked, d.why], [false, "shape"]);
+  d = await check2([list([ours("re_eur", 10_000, "succeeded", "eur")], false)]);
+  is("a refund in another currency is never added to the request's own: not checked, nothing written", [d.request?.refundsChecked, d.request?.refunded, d.kept.refunded, d.why], [false, 0, 0, "shape"]);
+  d = await check2([{ body: { object: "something_else", data: [ours("re_obj", 10_000)], has_more: false } }]);
+  is("a page that is not Stripe's list: not checked, nothing written", [d.request?.refundsChecked, d.kept.refunded, d.why], [false, 0, "shape"]);
   d = await check2([list([], false)]);
   is("control: none on that payment, read whole: checked, nothing refunded", [d.request?.state, d.request?.refunded, d.request?.refundsChecked, d.why], ["paid", 0, true, ""]);
 

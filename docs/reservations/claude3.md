@@ -7,3 +7,4 @@ Only Claude 3 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
 | Claude 3 | 632 [AA2] (q) campaign QR code follow-up (#3728); (o) next step and (p) weekly ads report are merged | claude3/aa2-campaign-qr-variant-words | `components/campaign-qr.tsx`, `tests/campaign-qr.test.ts` | 08/11/2026 02h49 |
+| Claude 3 | 755 [STN2] unit 1: the free copy's email says how to write to the creator, through the store's contact form | claude3/stn2-free-contact | `lib/free.ts` (requestCopy's email text only), `lib/buyer-words/giving.ts` (freeContact), `tests/free-copy-contact-line.test.ts` (new) | 09/11/2026 21h50 |

@@ -19,6 +19,8 @@ const PAST = INVITE_HOLD_DAYS + 4;
 const INVITED = PAST + 20;
 const balance = new Map<string, { amount: number }[]>();
 const invoices = new Map<string, Record<string, unknown>[]>();
+/** #4422: Stripe answers the credit's POST with no balance transaction id, and applies nothing. */
+let missingReceipt = false;
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
@@ -30,6 +32,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const txns = path.match(/^\/customers\/(cus_[A-Za-z0-9]+)\/balance_transactions$/);
   if (txns && method === "GET") return answer({ object: "list", data: [], has_more: false });
   if (txns && method === "POST") {
+    if (missingReceipt) return answer({});
     const form = new URLSearchParams(String(init?.body ?? ""));
     const row = { id: `cbtxn_${Math.random().toString(36).slice(2, 10)}`, amount: Number(form.get("amount")) };
     balance.set(txns[1], [...(balance.get(txns[1]) ?? []), row]);
@@ -120,6 +123,15 @@ async function main(): Promise<void> {
     redis.pipeline = real;
   }
   is("an odd relisting reply is reported for retry and pays nothing", [oddWrite.failed >= 1, oddWrite.complete, balance.get("cus_Ana0001") ?? []], [true, false, []]);
+
+  part("A POST without an exact balance transaction id keeps the credit owed (#4422)");
+  missingReceipt = true;
+  const unreadable = await settleInvites(Date.now() + 60_000, NOW);
+  missingReceipt = false;
+  const kept = JSON.parse(String(redis.run(["GET", creditKey("in_BeaFirst01")])));
+  is("nothing is certified as added", unreadable.added, 0);
+  is("the unreadable receipt fails the pass", [unreadable.failed > 0, unreadable.complete], [true, false]);
+  is("the share remains owed and listed", [kept.state, redis.run(["SISMEMBER", OWED_KEY, "in_BeaFirst01"])], ["owed", 1]);
 
   part("Later runs still pay it, once");
   await settleInvites(Date.now() + 60_000, NOW);

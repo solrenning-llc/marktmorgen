@@ -123,9 +123,20 @@ is("already on it", replies[1], { valid: true, activated: true, reason: "already
 is("full", replies[2], { valid: true, activated: false, reason: "device_limit", used: 2, limit: 2 });
 is("revoked", replies[3], { valid: false, activated: false, reason: "revoked" });
 is("never given", replies[4], { valid: false, activated: false, reason: "unknown_key" });
-is("limit off", replies[5], { valid: true, activated: false, reason: "no_limit" });
-is("bad device", replies[6], { valid: false, activated: false, reason: "bad_device" });
-is("could not be read: never a yes", replies[7], { valid: false, activated: false, reason: "unavailable" });
+// A good key is never told it is invalid (Claude 7's MEDIUM on #3622): bad_device and unavailable come only after
+// the key was judged valid, so `valid` stays true while `activated` stays false. With no limit set every device runs,
+// as the module promises, so `activated` is true (Claude 1 cloud's LOW).
+is("limit off: the device runs, as without a limit today", replies[5], { valid: true, activated: true, reason: "no_limit" });
+is("bad device: the key is still good, the device is not activated", replies[6], { valid: true, activated: false, reason: "bad_device" });
+is("could not be read: the key is still good, never a yes", replies[7], { valid: true, activated: false, reason: "unavailable" });
+const through = (input: Parameters<typeof decideActivation>[0]) => activationReply(decideActivation(input));
+const healthy = { devices: [], releases: [] };
+is("through the decision: a malformed device id on a good key", through({ key: "valid", limit: 2, record: healthy, device: "a b", now: 1_800_000_000 }), { valid: true, activated: false, reason: "bad_device" });
+is("through the decision: a record that could not be read on a good key", through({ key: "valid", limit: 2, record: null, device: "device-0001", now: 1_800_000_000 }), { valid: true, activated: false, reason: "unavailable" });
+is("through the decision: a limit that could not be read on a good key", through({ key: "valid", limit: null, record: healthy, device: "device-0001", now: 1_800_000_000 }), { valid: true, activated: false, reason: "unavailable" });
+is("through the decision: no limit set", through({ key: "valid", limit: 0, record: null, device: "device-0001", now: 1_800_000_000 }), { valid: true, activated: true, reason: "no_limit" });
+is("control: a revoked key is still invalid, whatever else", through({ key: "revoked", limit: 2, record: null, device: "a b", now: 1_800_000_000 }), { valid: false, activated: false, reason: "revoked" });
+is("control: a key never given is still invalid", through({ key: "unknown", limit: null, record: null, device: null, now: 1_800_000_000 }), { valid: false, activated: false, reason: "unknown_key" });
 is("no reply carries an email, an order or a record", replies.every((r) => !/@|cs_|pi_|devices|record|email/.test(JSON.stringify(r))), true);
 
 done();

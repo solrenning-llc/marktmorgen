@@ -28,6 +28,8 @@ const charges = new Map<string, { amount: number; refunded: number }>();
 const made: { id: string; pi: string; amount: number; inv: string }[] = [];
 /** A third paid row of the invoice that does not read as a payment intent (a charge-type payment). */
 let unreadRow = false;
+/** The second payment (B) listed with this status instead of "paid", when set: one not paid yet. */
+let secondStatus: string | null = null;
 let posts: { pi: string; amount: number; ok: boolean; key: string }[] = [];
 /** Once, before a refund POST is taken: the creator refunds that whole charge elsewhere first (Codex P on #4428). */
 let refundedElsewhereFirst: string | null = null;
@@ -38,7 +40,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (path === "/balance") return Response.json({ object: "balance", available: [{ amount: 100_000, currency: "usd" }] });
   if (path === `/invoices/${INVOICE}`) return Response.json({ id: INVOICE, object: "invoice", payment_intent: null });
   if (path === "/invoice_payments") {
-    const rows = (unreadRow ? [A] : [A, B]).map((pi, i) => ({ id: `inpay_closetwo${i}`, object: "invoice_payment", invoice: INVOICE, status: "paid", payment: { type: "payment_intent", payment_intent: pi } }));
+    const rows = (unreadRow ? [A] : [A, B]).map((pi, i) => ({ id: `inpay_closetwo${i}`, object: "invoice_payment", invoice: INVOICE, status: pi === B && secondStatus ? secondStatus : "paid", payment: { type: "payment_intent", payment_intent: pi } }));
     if (unreadRow) rows.push({ id: "inpay_closetwox", object: "invoice_payment", invoice: INVOICE, status: "paid", payment: { type: "charge", charge: "ch_closetwox" } as never });
     return Response.json({ object: "list", has_more: false, data: rows });
   }
@@ -142,7 +144,7 @@ async function main() {
   await giveBackUnused(three.shop, DAY);
   is("no refund is POSTed", posts, []);
   is("settled done with $50 back", [(await saved(three.folder)).r, (await saved(three.folder)).back], ["done", 5000]);
-  part("A paid row that does not read, and the readable charge cannot give back all that is owed: tried again, never settled short");
+  part("A paid row that does not read beside a readable charge: nothing is given back, tried again, never settled short (Codex L on #4428)");
   redis.clear();
   charges.clear();
   made.length = 0;
@@ -152,12 +154,12 @@ async function main() {
   const four = await seller("four");
   const partial = await giveBackUnused(four.shop, DAY);
   const fourth = typeof partial === "object" ? partial : null;
-  is("what the readable charge can give is given, accepted", posts.map((p) => [p.pi, p.amount, p.ok]), [[A, 4000, true]]);
+  is("nothing is given back while a paid row does not read", posts, []);
   is("counted failed, not done", [fourth?.failed, fourth?.done.length], [1, 0]);
   is("the member is not settled and is still listed", [(await saved(four.folder)).r ?? null, (await unusedRows(four.shop, DAY)).length], [null, 1]);
   posts = [];
   await giveBackUnused(four.shop, DAY);
-  is("the next run never asks that charge again", posts.filter((p) => p.pi === A), []);
+  is("nor on the next run, while it still does not read", posts, []);
   unreadRow = false;
 
   part("The first charge is refunded whole elsewhere between the read and the POST (Codex P on #4428): nothing goes through the second on the old figures");
@@ -177,6 +179,25 @@ async function main() {
   await giveBackUnused(five.shop, DAY);
   is("the next run reads again and gives only the rest: $10 through the second", posts.map((p) => [p.pi, p.amount, p.ok]), [[B, 1000, true]]);
   is("$50 back in all, never $90", [...charges.values()].reduce((sum, c) => sum + c.refunded, 0), 5000);
+
+  part("The second payment not paid yet (processing): the first gives what it can, the member waits; once paid, the rest");
+  redis.clear();
+  charges.clear();
+  made.length = 0;
+  posts = [];
+  charges.set(A, { amount: 4000, refunded: 0 });
+  charges.set(B, { amount: 6000, refunded: 0 });
+  secondStatus = "processing";
+  const six = await seller("six");
+  const waiting = await giveBackUnused(six.shop, DAY);
+  const sixth = typeof waiting === "object" ? waiting : null;
+  is("the readable paid charge gives what it can: $40", posts.map((p) => [p.pi, p.amount, p.ok]), [[A, 4000, true]]);
+  is("the payment not yet paid is not taken as given back, and the member is not settled short", [sixth?.failed, (await saved(six.folder)).r ?? null], [1, null]);
+  secondStatus = null;
+  posts = [];
+  await giveBackUnused(six.shop, DAY);
+  is("once it is paid, the next run gives only the rest through it: $10", posts.map((p) => [p.pi, p.amount, p.ok]), [[B, 1000, true]]);
+  is("settled done with $50 back", [(await saved(six.folder)).r, (await saved(six.folder)).back], ["done", 5000]);
   done();
 }
 main().catch((error) => { console.error(error); process.exit(1); });

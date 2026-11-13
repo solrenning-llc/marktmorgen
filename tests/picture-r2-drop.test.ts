@@ -26,7 +26,7 @@ let status = 204;
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const headers = Object.fromEntries(Object.entries((init?.headers ?? {}) as Record<string, string>).map(([k, v]) => [k.toLowerCase(), v]));
   calls.push({ method: init?.method ?? "GET", url: String(input), signed: typeof headers.authorization === "string" && headers.authorization.startsWith("AWS4-HMAC-SHA256"), redirect: init?.redirect });
-  return new Response("", { status });
+  return new Response(status === 204 ? null : "", { status });
 }) as typeof fetch;
 
 type Delete = (config: PictureR2Config, path: string) => Promise<void>;

@@ -23,6 +23,7 @@
 import { createHmac } from "node:crypto";
 import { BlobNotFoundError } from "@vercel/blob";
 import { copy, del, head } from "@/lib/blob";
+import { dropMirroredPicture } from "@/lib/picture-r2-copy";
 import { readListingExactly } from "@/lib/catalog";
 import { imageType } from "@/lib/product-image";
 import { deriveKey } from "@/lib/secret-box";
@@ -111,6 +112,9 @@ async function withdrawOnce(
   if (before && product.image.path === movedName(key, before.path)) {
     // An earlier press pointed the record at the copies and its delete of the old files was not confirmed.
     await del(namesOf(before).filter((name) => !shown.includes(name)));
+    // A copy of the old names in the pictures' own bucket goes too, or the takedown would still answer there
+    // (#4237, item 4); off, or never copied there, nothing is left to delete.
+    await dropMirroredPicture(namesOf(before).filter((name) => !shown.includes(name)));
     return "moved";
   }
   const from = { path: product.image.path, small: product.image.small?.path ?? null };
@@ -138,7 +142,9 @@ async function withdrawOnce(
     if (unshown.length) await del(unshown);
     return unshown.length < olds.length ? "again" : "changed";
   }
-  // Only now, with the record confirmed to name the copies, the old files go.
+  // Only now, with the record confirmed to name the copies, the old files go, and their copy in the pictures' own
+  // bucket with them (#4237, item 4).
   await del(olds);
+  await dropMirroredPicture(olds);
   return "moved";
 }

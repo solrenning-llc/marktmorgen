@@ -6,7 +6,7 @@
  * from where it always was. Nothing serves from R2 yet: addressing marked pictures is unit 4c.
  */
 import { get } from "@/lib/blob";
-import { copyPictureToR2, pictureR2Config, type PictureR2Config } from "@/lib/picture-r2";
+import { copyPictureToR2, deletePictureFromR2, pictureR2Config, type PictureR2Config } from "@/lib/picture-r2";
 import { MAX_IMAGE_BYTES } from "@/lib/product-image";
 
 /** A picture's whole file from the file store, at most MAX_IMAGE_BYTES; it throws on anything else. */
@@ -48,6 +48,24 @@ export async function copyAttachedPicture(
     return true;
   } catch (error) {
     console.error("copying a picture to its own bucket failed; it stays where it was", error);
+    return false;
+  }
+}
+
+/**
+ * Deletes a copied picture's files from the pictures' bucket, wherever they are deleted from the file store (#4237,
+ * item 4): a picture replaced, removed with its product, dropped after a record that could not be written, or moved
+ * away by a takedown. True when every file is gone or the bucket is off (nothing was ever copied there to delete);
+ * false on any failure, said in the log, never thrown: the file store's own deletion goes on as before.
+ */
+export async function dropMirroredPicture(paths: readonly string[], options: { config?: PictureR2Config | null } = {}): Promise<boolean> {
+  const config = "config" in options ? options.config : pictureR2Config();
+  if (!config || paths.length === 0) return true;
+  try {
+    for (const path of paths) await deletePictureFromR2(config, path);
+    return true;
+  } catch (error) {
+    console.error("deleting a picture from its own bucket failed; its copy there stays", error);
     return false;
   }
 }

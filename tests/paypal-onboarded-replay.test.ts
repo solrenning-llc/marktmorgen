@@ -26,6 +26,8 @@ process.env.PAYPAL_PARTNER_SECRET = "partner-secret-replay";
 process.env.PAYPAL_PARTNER_MERCHANT_ID = PARTNER;
 process.env.PAYPAL_BN_CODE = "BN_REPLAY";
 let integrationAsks = 0;
+/** Runs while PayPal's integration lookup is pending, once: what the creator does meanwhile in another tab. */
+let duringLookup: (() => Promise<void>) | null = null;
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status });
@@ -37,6 +39,9 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const integrations = `/v1/customer/partners/${PARTNER}/merchant-integrations`;
   if (url.pathname === integrations) {
     integrationAsks += 1;
+    const meanwhile = duringLookup;
+    duringLookup = null;
+    if (meanwhile) await meanwhile();
     return json({ merchant_id: SELLER, tracking_id: url.searchParams.get("tracking_id") });
   }
   if (url.pathname === `${integrations}/${SELLER}`) {
@@ -107,6 +112,32 @@ async function main() {
   integrationAsks = 0;
   const stopped = await back();
   is("stays disconnected", [await seller(), integrationAsks, said(stopped)], [null, 0, "id"]);
+
+  part("A disconnect while PayPal is being asked wins over the way back already on its way (Codex X4)");
+  const stop = async () => {
+    try {
+      await disconnect(new NextRequest("https://marktmorgen.com/api/store/paypal/disconnect", { method: "POST", headers: posted }));
+    } catch {
+      // As above.
+    }
+  };
+  await connect(new NextRequest("https://marktmorgen.com/api/store/paypal/connect", { method: "POST", headers: posted }));
+  integrationAsks = 0;
+  duringLookup = stop;
+  const raced = await back();
+  is("PayPal was asked, and the disconnect ran while it was", [integrationAsks, duringLookup], [1, null]);
+  is("the store stays disconnected", await seller(), null);
+  is("the way back does not say ready", said(raced) === "ready", false);
+
+  part("A newer connect while an older way back is asking PayPal: only the newer one finishes");
+  await connect(new NextRequest("https://marktmorgen.com/api/store/paypal/connect", { method: "POST", headers: posted }));
+  duringLookup = async () => {
+    await connect(new NextRequest("https://marktmorgen.com/api/store/paypal/connect", { method: "POST", headers: posted }));
+  };
+  const older = await back();
+  is("the older way back connects nothing", [await seller(), said(older) === "ready"], [null, false]);
+  const newer = await back();
+  is("the newer one does", [said(newer), await seller()], ["ready", SELLER]);
   done();
 }
 

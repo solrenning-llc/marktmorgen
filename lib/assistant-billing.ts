@@ -307,18 +307,42 @@ export async function readAssistantReturn(store: Store, sessionId: string | unde
   return assistantPlanOf(await readSubscription(subscriptionId));
 }
 
+/** An id as Stripe gives it: a string, or an expanded object's own id; "" when it is neither. */
+const idOf = (value: unknown): string => {
+  if (typeof value === "string") return value;
+  if (!plainObject(value)) return "";
+  const id = ownField(value, "id");
+  return typeof id === "string" ? id : "";
+};
+
+/**
+ * Whether an invoice of the list is proven to be this add-on's own (rule 30, as lib/closing-holds.ts isOwnInvoice):
+ * its subscription, as a string id or an expanded object's id, on the invoice or under its parent in newer API
+ * versions, is the one asked for, and nothing on it names another. A row that names another subscription, or none,
+ * says nothing about this add-on (issue #4440: another subscription's dispute once ended this one).
+ */
+function isOwnInvoice(row: Record<string, unknown>, subscriptionId: string): boolean {
+  const parent = ownField(row, "parent");
+  const details = plainObject(parent) ? ownField(parent, "subscription_details") : undefined;
+  const named = [idOf(ownField(row, "subscription")), plainObject(details) ? idOf(ownField(details, "subscription")) : ""].filter(Boolean);
+  return named.length > 0 && named.every((one) => one === subscriptionId);
+}
+
 /**
  * Whether any of the add-on's last payments was disputed. The page is read in its exact shape (lib/stripe-list.ts):
  * a disputed charge on any readable row is a yes; "none disputed" is said only when every row of the page is readable
  * (each with its charge, or none, and that charge's own disputed true or false). Otherwise it throws, and nothing is
  * written on it this run (syncAssistant leaves the store as it is). The page is the last three payments by design, so
- * more invoices after them do not make it incomplete.
+ * more invoices after them do not make it incomplete. A row is readable only when it is proven this add-on's own
+ * (isOwnInvoice): another subscription's dispute is never a yes, and a row not proven own makes "none disputed"
+ * unknown, so it throws and the next pass reads again, rather than setting a stop on a list that is not this add-on's.
  */
 async function disputed(subscriptionId: string): Promise<boolean> {
   const chargeOf = (row: Record<string, unknown>) => ownField(row, "charge");
   const read = readStripePage(
     await onPlatformAt(INVOICE_VERSION, "GET", `/invoices?${new URLSearchParams({ subscription: subscriptionId, limit: "3", "expand[]": "data.charge" })}`),
     (row) => {
+      if (!isOwnInvoice(row, subscriptionId)) return false;
       if (!hasOwnField(row, "charge")) return false;
       const charge = chargeOf(row);
       return charge === null || (plainObject(charge) && typeof ownField(charge, "disputed") === "boolean");

@@ -169,7 +169,7 @@ async function assistant(): Promise<void> {
     return null;
   };
   const plan = { subscriptionId: "sub_LotOneAssist1", active: true, period, cancelsAtEnd: false, disputedAt: "" };
-  for (const [label, page] of [...GARBLED, ["a row not readable beside a readable one", { object: "list", data: [{ id: "in_ok1", charge: { id: "ch_ok1", disputed: false } }, { id: "in_bad1", charge: "ch_unexpanded" }], has_more: false }] as [string, unknown]]) {
+  for (const [label, page] of [...GARBLED, ["a row not readable beside a readable one", { object: "list", data: [{ id: "in_ok1", subscription: "sub_LotOneAssist1", charge: { id: "ch_ok1", disputed: false } }, { id: "in_bad1", subscription: "sub_LotOneAssist1", charge: "ch_unexpanded" }], has_more: false }] as [string, unknown]]) {
     await setAssistantPlan(owner, plan);
     invoices = page;
     writes.length = 0;
@@ -177,7 +177,7 @@ async function assistant(): Promise<void> {
     is(`invoices answered ${label}: nothing written this run`, writes, []);
   }
   await setAssistantPlan(owner, plan);
-  invoices = { object: "list", data: [{ id: "in_bad2", charge: "ch_unexpanded" }, { id: "in_disp1", charge: { id: "ch_disp1", disputed: true } }], has_more: true };
+  invoices = { object: "list", data: [{ id: "in_bad2", subscription: "sub_LotOneAssist1", charge: "ch_unexpanded" }, { id: "in_disp1", subscription: "sub_LotOneAssist1", charge: { id: "ch_disp1", disputed: true } }], has_more: true };
   writes.length = 0;
   const after = await syncAssistant((await storeForEmail(owner))!);
   is("a dispute on a readable row ends the add-on at once, whatever the other rows", [writes, Boolean(after.assistantPlan?.disputedAt)], [["DELETE"], true]);

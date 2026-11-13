@@ -129,6 +129,16 @@ export class MemoryRedis {
         return to < from ? "" : new TextDecoder().decode(bytes.slice(from, to + 1));
       }
       case "EVAL": {
+        // lib/request-guard.ts ESSENTIAL_BELOW: one more on an essential counter only while fewer than ARGV[1] were taken.
+        if (key.startsWith("-- marktmorgen:essential-below:v1\n") && args[0] === "1" && args.length === 4) {
+          const [, counter, below, window] = args;
+          this.run(["SET", counter, "0", "EX", window, "NX"]);
+          const held = this.run(["GET", counter]);
+          const n = held === null || held === undefined ? Number.NaN : Number(held);
+          if (!Number.isFinite(n)) return -2;
+          if (n >= Number(below)) return -1;
+          return this.run(["INCR", counter]);
+        }
         // lib/form-store.ts FIND_FORM_RESPONSE: the first kept response written with this id, as its text, or nil.
         if (key.startsWith("-- marktmorgen:form-find:v1\n") && args[0] === "1" && args.length === 4) {
           const [, listKey, id, kept] = args;
@@ -161,6 +171,25 @@ export class MemoryRedis {
             if ((record as { h?: unknown }).h === handle) return 0;
           }
           return this.run(["HDEL", handles, handle]);
+        }
+        // lib/community-push.ts STILL_IN: one mark per member key, "y" in, "r" taken out, "n" no record, "?" any other shape.
+        if (key.startsWith("-- marktmorgen:community-still-in:v1\n") && args[0] === "1" && args.length >= 3) {
+          const [, members, ...keys] = args;
+          const rows = this.run(["HMGET", members, ...keys]) as (string | null)[];
+          return keys.map((who, i) => {
+            const raw = rows[i];
+            if (raw === null) return "n";
+            let record: unknown;
+            try {
+              record = JSON.parse(raw);
+            } catch {
+              return "?";
+            }
+            if (!record || typeof record !== "object") return "?";
+            const fields = record as { k?: unknown; removed?: unknown; muted?: unknown };
+            if (fields.k !== who || typeof fields.removed !== "boolean" || typeof fields.muted !== "boolean") return "?";
+            return fields.removed ? "r" : "y";
+          }).join("");
         }
         // lib/group-buy.ts PLACE_RELEASE: a place's opening hold deleted only while its token is still the open's own.
         if (key.startsWith("-- marktmorgen:group-place-release:v1\n") && args[0] === "1" && args.length === 3) {
@@ -204,6 +233,13 @@ export class MemoryRedis {
             out.push(seen === args[i + 1] ? 1 : 0);
           }
           return out;
+        }
+        // lib/certificate.ts CERT_SLOT_SWAP: a student's slot moved to a new certificate only while it still names the one read.
+        if (key.startsWith("-- marktmorgen:cert-slot-swap:v1\n") && args[0] === "1" && args.length === 5) {
+          const [, slots, who, expected, id] = args;
+          if (this.run(["HGET", slots, who]) !== expected) return 0;
+          this.run(["HSET", slots, who, id]);
+          return 1;
         }
         // lib/assignment.ts HAND_IN_WRITE_IF: a student's work written only over the one it was read as.
         if (key.startsWith("-- marktmorgen:hand-in-write-if:v1\n") && args[0] === "4" && args.length === 12) {
@@ -711,6 +747,22 @@ export class MemoryRedis {
           else this.run(["SET", copy, value, "EX", seconds]);
           return gone;
         }
+        // lib/paypal-delivery.ts, KEEP_RECEIPT: a receipt kept and noted for the person's deletion, unless their print
+        // says they were deleted at or after the payment (0, nothing written); else [1 when this SET kept it or 0, the
+        // receipt kept], the second dropped when nothing is kept, as Redis ends a Lua table at its first nil.
+        if (key.startsWith("-- marktmorgen:paypal-receipt-keep:v1\n") && args[0] === "3" && args.length === 11) {
+          const [, receipt, erased, notes, value, seconds, print, paidAt, score, oldest, notesSeconds] = args;
+          this.scriptCalls += 1;
+          const at = this.run(["HGET", erased, print]);
+          if (at !== null && !(String(at).trim() !== "" && Number.isFinite(Number(at)) && Number(at) < Number(paidAt))) return 0;
+          this.scriptCalls += 5;
+          this.run(["ZADD", notes, score, receipt]);
+          this.run(["ZREMRANGEBYSCORE", notes, "-inf", oldest]);
+          this.run(["EXPIRE", notes, notesSeconds]);
+          const written = this.run(["SET", receipt, value, "NX", "EX", seconds]);
+          const kept = this.run(["GET", receipt]);
+          return kept === null ? [written === "OK" ? 1 : 0] : [written === "OK" ? 1 : 0, kept];
+        }
         // lib/imported-purchases.ts GRANT_UNLESS_ERASED: each grant written only when its print is not among the
         // store's deleted people (-1, nothing written); its address noted once among the buyers brought, its product HSETNX.
         if (key.startsWith("-- marktmorgen:grant-unless-erased:v1\n") && Number(args[0]) >= 3 && args.length === 1 + Number(args[0]) + 1 + 4 * (Number(args[0]) - 2)) {
@@ -830,6 +882,27 @@ export class MemoryRedis {
           if (!there && args[5] === "edit") return 2;
           if (!there && held instanceof Map && held.size >= Number(args[4])) return 0;
           this.hash(target).set(args[2], args[3]);
+          return 1;
+        }
+        if (key.startsWith("-- marktmorgen:crm-companies-write:v1\n") && args[0] === "2" && args.length >= 4 && (args.length - 4) % 2 === 0) {
+          // lib/crm-companies.ts WRITE_COMPANIES: written only while the lock still holds this change's token. It differs
+          // from Redis only on keys of the wrong type: a lock key that is not a string reads here as not ours (0), where
+          // Redis's GET would fail the script; a hash key that is not a hash fails in both.
+          const [lock, target, token] = [args[1], args[2], args[3]];
+          this.live(lock);
+          this.live(target);
+          if (this.data.get(lock) !== token) return 0;
+          const held = this.data.get(target);
+          if (held !== undefined && !(held instanceof Map)) throw new Error("WRONGTYPE");
+          const hash = this.hash(target);
+          for (let i = 4; i < args.length; i += 2) {
+            if (args[i + 1] === "") hash.delete(args[i]);
+            else hash.set(args[i], args[i + 1]);
+          }
+          if (hash.size === 0) {
+            this.data.delete(target);
+            this.until.delete(target);
+          }
           return 1;
         }
         if (key.startsWith("-- marktmorgen:crm-tasks-write:v1\n") && args[0] === "1" && args.length === 8) {

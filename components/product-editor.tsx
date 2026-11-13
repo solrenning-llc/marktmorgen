@@ -87,6 +87,7 @@ import { imageUrl } from "@/lib/product-image";
 import { StoreField, useStudioHref, useStudioStore } from "@/components/studio-store-pin";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 import { productSegment } from "@/lib/product-slug";
+import { OptionLinkCopy } from "@/components/option-link-copy";
 import { feeWords } from "@/lib/fee-words";
 import { COMMISSION_LIVE } from "@/lib/plan";
 import { NewTab } from "@/components/new-tab";
@@ -889,6 +890,7 @@ function ProductForm({
  */
 function OptionsBlock({
   product,
+  handle,
   fileBusyId,
   percent,
   fileError,
@@ -900,6 +902,8 @@ function OptionsBlock({
   tiers,
 }: {
   product: Product;
+  /** The store's address, for each option's link with it chosen (630 [HN6](27)). */
+  handle: string;
   /** Whether sales tax or VAT is added on top of prices at checkout (lib/tax.ts). */
   taxOnTop: boolean;
   /** The plans members switch between (lib/tier-switch.ts): none offers an introductory or yearly price. */
@@ -1352,6 +1356,11 @@ function OptionsBlock({
                       ? "1 person invited to move here on this price hasn’t moved yet. They keep this price even if you take it off sale."
                       : `${membersOn(invited, option.id)} people invited to move here on this price haven’t moved yet. They keep this price even if you take it off sale.`}
                   </p>
+                ) : null}
+
+                {/* A link that opens the product page with this option chosen, for a sales page or an email (630 [HN6](27)). */}
+                {opens || option.file || option.link ? (
+                  <OptionLinkCopy path={`/@${handle}/p/${productSegment(product)}`} optionId={option.id} label={option.label} />
                 ) : null}
 
                 {!opens && !option.file && !option.link ? (
@@ -2729,6 +2738,7 @@ export function ProductEditor({
                 {product.shipping ? (
                   <OptionsBlock
                     product={product}
+                    handle={handle}
                     taxOnTop={taxOnTop}
                     tiers={tiers}
                     fileBusyId={fileBusyId}
@@ -2765,6 +2775,7 @@ export function ProductEditor({
                 {(isFree(product) || product.pwyw) && product.options.length === 0 ? null : (
                 <OptionsBlock
                   product={product}
+                  handle={handle}
                   taxOnTop={taxOnTop}
                   tiers={tiers}
                   fileBusyId={fileBusyId}
@@ -2790,6 +2801,7 @@ export function ProductEditor({
                 {(product.course || product.podcast) && !product.recurring && !isFree(product) && !product.pwyw ? (
                   <OptionsBlock
                     product={product}
+                    handle={handle}
                     taxOnTop={taxOnTop}
                     tiers={tiers}
                     fileBusyId={fileBusyId}

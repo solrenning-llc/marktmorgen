@@ -718,7 +718,10 @@ async function dispatchBatch(
     // Unreadable evidence must not release recipients to either provider.
     if (pending === null) return "retry";
     // Nor whoever Amazon may have taken when its answer was lost: a batch tried again never writes to them twice.
-    const clear = await notMaybeTaken(batchKey, pending);
+    // A list batch is left out of this: it hands each uncertain address back to its caller (ListBatchOutcome), which
+    // keeps it and lets the creator choose, a retry included (lib/flows.ts, held runs); a mark would turn that
+    // chosen retry into "sent" with nothing sent.
+    const clear = listOnly ? pending : await notMaybeTaken(batchKey, pending);
     if (clear === null) return "retry";
     going = clear;
     // And a batch whose rest was once handed to Resend goes back to Resend,
@@ -764,6 +767,7 @@ async function dispatchBatch(
           original: m,
         })),
         batchKey,
+        { maybeMarks: !listOnly },
       );
       await countSesSent(result.taken.length);
       if (result.down) {

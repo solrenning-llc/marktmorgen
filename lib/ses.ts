@@ -624,6 +624,8 @@ export async function sesBatch<T extends SesMessage>(
   state: SesState,
   messages: T[],
   batchKey: string,
+  /** Whether whoever may have been taken is marked for notMaybeTaken: a plain batch's, never a list batch's (lib/email.ts). */
+  options: { maybeMarks?: boolean } = {},
 ): Promise<{ taken: T[]; left: T[]; refused: { message: T; why: string }[]; down: string; uncertain?: true }> {
   const taken: T[] = [];
   const refused = new Map<T, string>();
@@ -667,7 +669,7 @@ export async function sesBatch<T extends SesMessage>(
         await redisPipeline(done.map((m) => ["SET", didKey(batchKey, m.to), "1", "EX", DID_SECONDS])).catch(() => {});
       }
       // Written down at once too: whoever may have been taken is left out of a retry of this batch (notMaybeTaken).
-      if (unsure.length) await redisPipeline(unsure.map((m) => ["SET", maybeKey(batchKey, m.to), "1", "NX", "EX", DID_SECONDS])).catch(() => {});
+      if (unsure.length && options.maybeMarks === true) await redisPipeline(unsure.map((m) => ["SET", maybeKey(batchKey, m.to), "1", "NX", "EX", DID_SECONDS])).catch(() => {});
       if (down || uncertain) again.push(...queue.slice(i + perSecond));
       else if (i + perSecond < queue.length) await pause(Math.max(0, 1_000 - (Date.now() - waveStarted)));
     }

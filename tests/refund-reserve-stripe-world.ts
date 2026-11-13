@@ -24,6 +24,17 @@ export const world = {
   /** Ids Stripe no longer keeps (an event past its retention). */
   forgotten: new Set<string>(),
   fail: null as null | ((path: string, query: URLSearchParams) => unknown),
+  /** Items of one second listed in another order at every request (Stripe does not promise their order). */
+  shuffleTies: false,
+  /** A second every new event is stamped with, while set. */
+  frozen: null as number | null,
+};
+let request = 0;
+/** A different, repeatable order of one second's items for each request. */
+const mix = (id: string) => {
+  let h = 2166136261 ^ request;
+  for (let i = 0; i < id.length; i += 1) h = Math.imul(h ^ id.charCodeAt(i), 16777619);
+  return h >>> 0;
 };
 let sequence = 0;
 const pad = () => String(++sequence).padStart(9, "0");
@@ -34,6 +45,8 @@ export function resetWorld(clock: number): void {
   world.requests.length = 0;
   world.forgotten.clear();
   world.fail = null;
+  world.shuffleTies = false;
+  world.frozen = null;
   world.clock = clock;
 }
 
@@ -48,8 +61,8 @@ function view(charge: Charge): Record<string, unknown> {
 }
 
 function emit(type: string, object: Record<string, unknown>): void {
-  world.clock += 1;
-  world.events.push({ id: `evt_Reserve${pad()}`, type, created: world.clock, object });
+  if (world.frozen === null) world.clock += 1;
+  world.events.push({ id: `evt_Reserve${pad()}`, type, created: world.frozen ?? world.clock, object });
 }
 
 /** A charge, as Stripe's 2024-06-20 version shows it with invoice, subscription, fee and refunds expanded. */
@@ -106,7 +119,8 @@ export function dispute(id: string, status: string): void {
 
 /** Newest first, then by id descending, as Stripe lists. */
 function page<T extends { id: string; created: number }>(all: T[], query: URLSearchParams): { data: T[]; has_more: boolean } {
-  const sorted = [...all].sort((a, b) => b.created - a.created || (a.id < b.id ? 1 : -1));
+  request += 1;
+  const sorted = [...all].sort((a, b) => b.created - a.created || (world.shuffleTies ? mix(a.id) - mix(b.id) : a.id < b.id ? 1 : -1));
   const gte = query.get("created[gte]"), lte = query.get("created[lte]");
   const filtered = sorted.filter((row) => (gte === null || row.created >= Number(gte)) && (lte === null || row.created <= Number(lte)));
   const limit = Number(query.get("limit") ?? 10);

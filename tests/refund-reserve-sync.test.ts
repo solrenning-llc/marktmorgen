@@ -249,3 +249,30 @@ test('a charge or an event in the very second of the cursor, listed on the other
  const again=await syncRefundReserve(now,later());
  assert.equal(again.rereads,0,'and not again');
 });
+
+test('many charges and events of one second, listed in another order at every request across pages, are all counted once',async()=>{
+ const now=START;fresh(now);
+ // Clusters of 30 charges sharing a second, so every page boundary falls inside one.
+ const ids:string[]=[];
+ for(let c=0;c<12;c++)for(let i=0;i<30;i++)ids.push(addCharge({kind:'plan',amount:6900+c,paidAt:now-(c+1)*3*DAY}));
+ // The oracle reads Stripe in one order; the incremental reading meets the ties shuffled at every request.
+ const oracle=async()=>{world.shuffleTies=false;const full=await readRefundReserve(now,later());world.shuffleTies=true;return full.reserve;};
+ world.shuffleTies=true;
+ let run=await built(now);
+ assert.equal(run.why,null);
+ assert.equal(run.stored,ids.length,'every charge kept once');
+ assert.deepEqual(run.reserve,await oracle(),'built through shuffled ties');
+ // Forty refunds stamped in one second, then forty new charges in one second.
+ world.frozen=world.clock+1;
+ for(const id of ids.slice(0,40))refund(id,100,'pending');
+ world.frozen=null;
+ for(let i=0;i<40;i++)ids.push(addCharge({kind:'plan',amount:44900,paidAt:now}));
+ run=await syncRefundReserve(now,later());
+ assert.equal(run.why,null);
+ assert.equal(run.rereads,40,'each refunded charge reread once');
+ assert.deepEqual(run.reserve,await oracle(),'events and charges of one second');
+ run=await syncRefundReserve(now,later());
+ assert.equal(run.rereads,0,'nothing reread twice');
+ assert.equal(run.stored,ids.length);
+ assert.deepEqual(run.reserve,await oracle());
+});

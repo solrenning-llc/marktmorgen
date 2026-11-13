@@ -38,12 +38,12 @@ async function write(input: Parameters<typeof upsertContact>[2]): Promise<"writt
 async function main(): Promise<void> {
   part("An old yes, repeated after the deletion");
   reset();
-  is("the thank-you page of an order placed before the deletion, reloaded: written as a purchase only", await write({ agreed: true, explicit: true, source: "buyer", at: ORDER_AT }), "written");
-  is("not put back as agreeing", row()?.agreed, false);
+  is("the thank-you page of an order placed before the deletion, reloaded: nothing is written (#3908 review)", await write({ agreed: true, explicit: true, source: "buyer", at: ORDER_AT }), "written");
+  is("their row is not written back", row(), null);
   is("the deletion's print stays, with its second", print(), String(ERASED_SECONDS));
-  is("the same old yes again: still not agreeing, still deleted", [await write({ agreed: true, explicit: true, source: "buyer", at: ORDER_AT }), row()?.agreed, print()], ["written", false, String(ERASED_SECONDS)]);
+  is("the same old yes again: still no row, still deleted", [await write({ agreed: true, explicit: true, source: "buyer", at: ORDER_AT }), row(), print()], ["written", null, String(ERASED_SECONDS)]);
   reset();
-  is("a yes given in the very second of the deletion is not known to be after it", [await write({ agreed: true, explicit: true, source: "buyer", at: new Date(ERASED_SECONDS * 1000 + 500).toISOString() }), row()?.agreed, print()], ["written", false, String(ERASED_SECONDS)]);
+  is("a yes given in the very second of the deletion is not known to be after it", [await write({ agreed: true, explicit: true, source: "buyer", at: new Date(ERASED_SECONDS * 1000 + 500).toISOString() }), row(), print()], ["written", null, String(ERASED_SECONDS)]);
 
   part("Their own yes, given after the deletion, still lifts it");
   reset();

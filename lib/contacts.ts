@@ -254,6 +254,10 @@ export async function upsertContact(
   // A yes given now (no time given) is after the deletion by definition; one given with the time of an earlier
   // moment, as a reloaded thank-you page gives the order's, is compared with the deletion's own second.
   const ownYes = input.agreed && input.explicit && (!deleted || !input.at || (await saidAfterErased(listId, email, saidAt)));
+  // A yes of their own from before the deletion, repeated now, is not their yes: nothing is written for it, not even
+  // the purchase, so the row the deletion removed (their address and the old order's product) never comes back, as
+  // queuePerson treats the same replay ("off", lib/email-sync.ts). A purchase without the box still records it below.
+  if (deleted && input.agreed && input.explicit && !ownYes) return none;
   const agreed = Boolean(before?.agreed) || (input.agreed && (!deleted || ownYes));
   const leftAt = Date.parse(before?.unsubAt || "");
   const resubscribe =

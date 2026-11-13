@@ -1,6 +1,6 @@
 import { type NextRequest, after } from "next/server";
 import { isFree, storeForHandle } from "@/lib/store";
-import { recordLead, spendClaim } from "@/lib/free";
+import { giveBackClaimUse, recordLead, spendClaim } from "@/lib/free";
 import { recordLead as recordAffiliateLead } from "@/lib/affiliate-leads";
 import { scheduleReminder } from "@/lib/welcome-offer-send";
 import { enroll } from "@/lib/flows";
@@ -104,7 +104,10 @@ export async function POST(request: NextRequest) {
       headers: { Location: product.link, "Cache-Control": "no-store" },
     });
   }
-  return product.file
-    ? serveFile(product.file, { paid: false })
-    : plain(404, g.freeNothing);
+  if (!product.file) return plain(404, g.freeNothing);
+  const served = await serveFile(product.file, { paid: false });
+  // A delivery that failed on our side (the file store down, its count unknown) gives its use back: the buyer is
+  // told to try again, and the link is never spent by deliveries that never reached them (lib/free.ts).
+  if (served.status >= 500) await giveBackClaimUse(token);
+  return served;
 }

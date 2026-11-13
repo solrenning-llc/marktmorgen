@@ -335,6 +335,30 @@ export async function spendClaim(token: string): Promise<UseResult> {
 }
 
 /**
+ * Gives back the use a delivery spent when the delivery itself failed (the file store down, the delivery counter
+ * unknown: a 5xx of the file's own answer), so a link is never "used as many times as it can be" after deliveries that
+ * never reached anybody (outage drill, 13 November 2026). Called only after spendClaim confirmed its count, and once a
+ * delivery. Kept with the same expiry as the count; one that cannot be confirmed is logged and the count stays high,
+ * never lower than what was handed over.
+ */
+export async function giveBackClaimUse(token: string): Promise<boolean> {
+  if (!TOKEN_PATTERN.test(token) || !isRedisConfigured()) return false;
+  try {
+    const uses = await usesKey(token);
+    const both = repliesFor(await redisPipeline([["DECR", uses], ["EXPIRE", uses, CLAIM_TTL_SECONDS]]), 2);
+    const left = both ? countOf(both[0]) : null;
+    if (left === null || both?.[1] !== 1) {
+      console.error("a free link's use could not be confirmed given back");
+      return false;
+    }
+    return true;
+  } catch (error) {
+    console.error("giving back a free link's use failed", error);
+    return false;
+  }
+}
+
+/**
  * Puts a confirmed address on the store's list.
  *
  * Called when the emailed link is used, never before. Agreeing is kept once

@@ -7,8 +7,8 @@
  * Each tab's real reading code runs against a Redis that answers every command at its largest: the longest
  * pieces of work, comments and certificate records, ids for every row asked for and a count past the last page.
  * The commands sent and the bytes answered are added up and held against the figure. A tab that goes past it
- * fails here. Two limits are reported, not held, and stay open for unit C: the students tab reads the whole
- * students hash and the certificates tab the whole set of ids, whose bytes grow with the course.
+ * fails here. Since unit C the students and certificates tabs walk a cursor (HSCAN, SSCAN, COUNT 25) with the
+ * total from HLEN and SCARD, so their bytes are held too, whatever the size of the course.
  */
 import { readFileSync } from "node:fs";
 import { STUDIO_PAGE_UNITS } from "@/lib/studio-allowance-rules";
@@ -55,7 +55,16 @@ function largest(command: (string | number)[]): unknown {
     }
     case "ZCARD":
     case "ZCOUNT":
+    case "HLEN":
+    case "SCARD":
       return 1_000_000;
+    case "HSCAN":
+      // A page of students: the cursor goes on, and each row at its longest.
+      return ["123456789", Array.from({ length: Number(rest[rest.indexOf("COUNT") + 1]) }, (_, i) => [whoOf(i), JSON.stringify({ e: `${"e".repeat(240)}@example.com`, s: 1, l: i })]).flat()];
+    case "SSCAN":
+      return ["123456789", Array.from({ length: Number(rest[rest.indexOf("COUNT") + 1]) }, (_, i) => i.toString(36).padStart(16, "0"))];
+    case "SMISMEMBER":
+      return rest.map(() => 0);
     case "GET": {
       const key = String(command[1]);
       // A piece of work at its longest: the answer and the creator's feedback in the widest characters.
@@ -113,12 +122,13 @@ async function main(): Promise<void> {
       is(`${tab}: within ${BYTES} bytes`, used.bytes <= BYTES, true);
     }
     for (const [tab, run] of [
-      ["students", () => studentsTab(course, page)],
-      ["certificates", () => certificatesTab(course.id, page)],
+      ["students", () => studentsTab(course, "123456789")],
+      ["certificates", () => certificatesTab(course.id, "123456789")],
     ] as const) {
       const used = await measure(run);
-      console.log(`  ${tab} page ${page}: ${used.commands} commands, ${used.bytes} bytes (bytes grow with the course: unit C)`);
+      console.log(`  ${tab} (a cursor page): ${used.commands} commands, ${used.bytes} bytes`);
       is(`${tab}: within ${COMMANDS} commands`, used.commands <= COMMANDS, true);
+      is(`${tab}: within ${BYTES} bytes`, used.bytes <= BYTES, true);
     }
   }
 

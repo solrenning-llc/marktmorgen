@@ -577,7 +577,11 @@ export async function markLesson(courseId: string, email: string, lessonId: stri
     if (Number(held) === 1) return;
     if (always) await noteData(room, [{ slot: DONE_SLOT(courseId), bytes }]);
     else await needData(room, [{ slot: DONE_SLOT(courseId), bytes }]);
-    await redisPipeline([["SADD", doneKey(courseId, email), lessonId]]);
+    const [added] = await redisPipeline([["SADD", doneKey(courseId, email), lessonId]]);
+    // The set holds the lesson once, so its room is counted once: when another tab marked it first (or the check
+    // above could not be read), SADD answers 0 and what was just taken goes back. Any other reply than 0 or 1 keeps
+    // it counted: an unknown reply is never "already there" (CX-123 rule 24).
+    if (added === 0) await giveData(room, [{ slot: DONE_SLOT(courseId), bytes }]);
     return;
   }
   const [removed] = await redisPipeline([["SREM", doneKey(courseId, email), lessonId]]);

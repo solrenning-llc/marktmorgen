@@ -140,6 +140,11 @@ function main(): void {
   is("a doctype in lower case", reason(parseRssImport(feed([item(1)], "", '<?xml version="1.0"?>\n<!doctype rss>\n'))), "doctype");
   is("an entity declaration without a doctype", reason(parseRssImport(feed([item(1)], '<!ENTITY a "b">'))), "doctype");
   is("an undeclared named entity", reason(parseRssImport(feed([item(1, { title: "Caf&eacute;" })]))), "entity");
+  // Codex X5 on #3456 @84df6c3dea: a name Object.prototype holds is not one of the five predefined entities.
+  for (const name of ["constructor", "toString", "__proto__", "hasOwnProperty", "valueOf"]) {
+    is(`"&${name};" in a title is not an XML entity`, reason(parseRssImport(feed([item(1, { title: `A &${name}; B` })]))), "entity");
+  }
+  is("a prototype name in an attribute is not an XML entity", reason(parseRssImport(feed([item(1, { enclosure: '<enclosure url="https://cdn.example.com/&constructor;.mp3" type="audio/mpeg"/>' })]))), "entity");
   is("an entity in an attribute", reason(parseRssImport(feed([item(1, { enclosure: '<enclosure url="https://cdn.example.com/&ext;.mp3" type="audio/mpeg"/>' })]))), "entity");
   is("a character reference to a forbidden character", reason(parseRssImport(feed([item(1, { title: "a&#0;b" })]))), "malformed");
   is("a character reference to a lone surrogate", reason(parseRssImport(feed([item(1, { title: "a&#xD800;b" })]))), "malformed");

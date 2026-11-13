@@ -183,6 +183,14 @@ function main(): void {
   is("an escaped email in the query is refused", refusal(() => publicFeedXml({ ...input, page: "https://marktmorgen.com/@harbor?email=dana%40example.com" })), "buyer-data");
   is("an email in the path is refused", refusal(() => publicFeedXml({ ...input, audio: (e) => `https://x.example/dana@example.com/${e.id}.mp3` })), "buyer-data");
   is("an escaped buyer token is refused", refusal(() => publicFeedXml({ ...input, audio: (e) => `https://x.example/${"%66".repeat(48)}/${e.id}.mp3` })), "buyer-data");
+  // Codex G on #3456 @84df6c3dea: buyer data behind more than one layer of escapes is still buyer data.
+  is("a buyer token escaped twice is refused", refusal(() => publicFeedXml({ ...input, audio: (e) => `https://x.example/${"%2566".repeat(48)}/${e.id}.mp3` })), "buyer-data");
+  is("a buyer token escaped three times is refused", refusal(() => publicFeedXml({ ...input, audio: (e) => `https://x.example/${"%252566".repeat(48)}/${e.id}.mp3` })), "buyer-data");
+  is("an email escaped twice is refused", refusal(() => publicFeedXml({ ...input, page: "https://marktmorgen.com/@harbor?email=dana%2540example.com" })), "buyer-data");
+  is("an email escaped three times is refused", refusal(() => publicFeedXml({ ...input, page: "https://marktmorgen.com/@harbor?email=dana%252540example.com" })), "buyer-data");
+  is("an escape that stops reading after one layer is refused", refusal(() => publicFeedXml({ ...input, page: "https://marktmorgen.com/@harbor?x=%25E0%25A4%25A" })), "buyer-data");
+  is("a store page escaped once is still published", refusal(() => publicFeedXml({ ...input, page: "https://marktmorgen.com/%40harbor/podcast/radio" })), null);
+  is("an address with a plain percent sign as text is still published", refusal(() => publicFeedXml({ ...input, page: "https://marktmorgen.com/@harbor/podcast/radio?off=50%25" })), null);
   is("an audio address that is not https is refused", refusal(() => publicFeedXml({ ...input, audio: (e) => `http://media.example/${e.id}.mp3` })), "not-https");
   is("a page that is not https is refused", refusal(() => publicFeedXml({ ...input, page: "javascript:alert(1)" })), "not-https");
   is("an image that is not https is refused", refusal(() => publicFeedXml({ ...input, image: "http://x.example/a.jpg" })), "not-https");

@@ -107,7 +107,7 @@ async function main(): Promise<void> {
   pastDue = [{
     id: "sub_LsixFailing01", status: "past_due", metadata: { store: "lsixrec", product: club.product.id },
     customer: { id: "cus_LsixFailing1", email: "ana@example.com" },
-    latest_invoice: { id: "in_LsixFailing01", status: "open", amount_due: 2900, currency: "usd", hosted_invoice_url: "https://invoice.stripe.com/i/failing", next_payment_attempt: 0 },
+    latest_invoice: { id: "in_LsixFailing01", status: "open", amount_due: 2900, amount_remaining: 2900, currency: "usd", hosted_invoice_url: "https://invoice.stripe.com/i/failing", next_payment_attempt: 0 },
   }];
   await withReply("GET", mark, (real) => [...(real as unknown[]), "extra"], run);
   is("marks answered with an extra reply: nothing sent", sentTo("ana@example.com"), 0);
@@ -137,7 +137,7 @@ async function main(): Promise<void> {
     return {
       id: `sub_LsixMany${id}`, status: "past_due", metadata: { store: "lsixrec", product: club.product.id },
       customer: { id: `cus_LsixMany${id}`, email: `m${id}@example.com` },
-      latest_invoice: { id: `in_LsixMany${id}`, status: "open", amount_due: 2900, currency: "usd", hosted_invoice_url: `https://invoice.stripe.com/i/m${id}`, next_payment_attempt: 0 },
+      latest_invoice: { id: `in_LsixMany${id}`, status: "open", amount_due: 2900, amount_remaining: 2900, currency: "usd", hosted_invoice_url: `https://invoice.stripe.com/i/m${id}`, next_payment_attempt: 0 },
     };
   });
   pastDue = many(150);

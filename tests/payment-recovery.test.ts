@@ -138,7 +138,7 @@ async function main(): Promise<void> {
     status: "past_due",
     metadata: meta,
     customer: { id: "cus_Failing00001", email: "ana@example.com" },
-    latest_invoice: { id: "in_Failing000001", status: "open", amount_due: 2900, currency: "usd", hosted_invoice_url: "https://invoice.stripe.com/i/failing", next_payment_attempt: 0 },
+    latest_invoice: { id: "in_Failing000001", status: "open", amount_due: 2900, amount_remaining: 2900, currency: "usd", hosted_invoice_url: "https://invoice.stripe.com/i/failing", next_payment_attempt: 0 },
   };
   state.pastDue = [failing];
 
@@ -225,7 +225,7 @@ async function main(): Promise<void> {
   is("saved: the card is set on that membership", await finishCardUpdate(store, sessionId), "updated");
   is("on the membership itself", posts.filter((p) => p.path === "/subscriptions/sub_Running000001").map((p) => p.body.get("default_payment_method")), ["pm_NewCard0000001"]);
 
-  state.subs.set("sub_Running000001", { ...running, status: "past_due", customer: "cus_Member000001", latest_invoice: { id: "in_Owed00000000001", status: "open", amount_due: 2900 } });
+  state.subs.set("sub_Running000001", { ...running, status: "past_due", customer: "cus_Member000001", latest_invoice: { id: "in_Owed00000000001", status: "open", amount_due: 2900, amount_remaining: 2900 } });
   is("a payment already failed is paid with it", await finishCardUpdate(store, sessionId), "paid");
   state.payDeclines = true;
   is("declined: the card is still set, and it says so", await finishCardUpdate(store, sessionId), "declined");
@@ -244,7 +244,7 @@ async function main(): Promise<void> {
     return copy;
   };
   const touched = (mark: number) => posts.slice(mark).map((p) => p.path);
-  const owedElsewhere = { ...running, status: "past_due", customer: "cus_Member000001", latest_invoice: { id: "in_OtherOwed00001", status: "open", amount_due: 4900 } };
+  const owedElsewhere = { ...running, status: "past_due", customer: "cus_Member000001", latest_invoice: { id: "in_OtherOwed00001", status: "open", amount_due: 4900, amount_remaining: 4900 } };
   for (const [label, other] of [["another membership's id", "sub_Another0000001"], ["no id", null], ["a null body", NULL_BODY]] as const) {
     state.subs.set("sub_Running000001", withId(owedElsewhere, other));
     const mark = posts.length;

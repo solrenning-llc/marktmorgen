@@ -21,7 +21,7 @@ export function liveEventsBeginnerQuestions(onSale = PLANS_ON_SALE, trialDays = 
   return [
     {
       q: "How do I schedule my first event?",
-      a: `Events live inside your community, so the owner or an ${ROLE_NAMES.admin} sets that up first: on the studio's “${w.tool}” page, press “${w.setUp}”. Then, under “${w.part}”, press “${w.schedule}”, type a “${w.title}”, check the date and time under “${w.when}” and the place under “${w.where}” (a private video room unless you pick another), and press “${w.confirm}”. Members see it once the community is switched on.`,
+      a: `Events live inside your community, so the owner or an ${ROLE_NAMES.admin} sets that up first: on the studio's “${w.tool}” page, press “${w.setUp}”. Then, under “${w.part}”, press “${w.schedule}”, type a “${w.title}”, check the date and time under “${w.when}” and the place under “${w.where}” (a private video room unless you pick another). Then press “${w.confirm}”. Members see it once the community is switched on.`,
     },
     {
       q: "Is anyone told when I schedule an event?",

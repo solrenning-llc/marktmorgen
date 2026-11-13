@@ -44,7 +44,7 @@ export const AI_PLANS_WORDS = `${PLAN_TITLES.pro} and ${PLAN_TITLES.scale}`;
 
 /** The allowance as every public page states it, from the same numbers admission uses. */
 export function aiAllowanceWords(): string {
-  return `${AI_MONTHLY.pro} writing jobs a month on ${PLAN_TITLES.pro} and ${AI_MONTHLY.scale} on ${PLAN_TITLES.scale}; not included on ${PLAN_TITLES.creator} or during the free trial. Each request sets aside the most it could cost from the plan's monthly AI budget before it runs, so long ones, like a whole sales page or reading a PDF, use more of it, and the budget can run out before the jobs do. An attempt that fails still counts.`;
+  return `${AI_MONTHLY.pro} writing jobs a month on ${PLAN_TITLES.pro} and ${AI_MONTHLY.scale} on ${PLAN_TITLES.scale}; not included on ${PLAN_TITLES.creator} or during the free trial. Each request sets aside the most it could cost from the plan's monthly AI budget before it runs. So long ones, like a whole sales page or reading a PDF, use more of it, and the budget can run out before the jobs do. An attempt that fails still counts.`;
 }
 /** And in any one minute, so a stuck button cannot spend the month. */
 export const AI_PER_MINUTE = 6;

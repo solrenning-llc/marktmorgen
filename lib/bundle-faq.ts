@@ -25,7 +25,7 @@ export function bundleBeginnerQuestions(onSale = PLANS_ON_SALE, trialDays = TRIA
     },
     {
       q: "How do I make a bundle?",
-      a: `In your studio, open “${w.page}” and press “${w.start}”. Fill in “${w.name}” and the price, search for your products under “${w.find}”, press “${w.pick}” beside at least ${MIN_BUNDLE_ITEMS} of them, and press “${w.add}”. What can go in: your one-off products with one set price (not pay what you want, not another bundle) that hand over a file, a link or a course with lessons, and that have no limited number for sale. Drafts can go in too.`,
+      a: `In your studio, open “${w.page}” and press “${w.start}”. Fill in “${w.name}” and the price, search for your products under “${w.find}”, press “${w.pick}” beside at least ${MIN_BUNDLE_ITEMS} of them, and press “${w.add}”. What can go in: your one-off products with one set price (not pay what you want, not another bundle) that hand over a file, a link or a course with lessons. They must have no limited number for sale. Drafts can go in too.`,
     },
     {
       q: "Can I try bundles before paying?",

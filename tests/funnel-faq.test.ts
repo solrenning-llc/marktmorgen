@@ -42,7 +42,7 @@ function main(): void {
   const kinds = ask(closed, "Which kind of funnel should I use?");
   is("every kind of funnel by name, with how many there are", FUNNEL_TYPES.every((t) => kinds.includes(t.label)) && kinds.includes(`There are ${FUNNEL_TYPES.length} kinds`), true);
   is("and the ready starters, counted from their list", kinds.includes(`${FUNNEL_STARTERS.length} ready starters with first words already written`), true);
-  is("what a funnel is, as the page itself says: up to five offers, card, Apple Pay or Google Pay, one click", ask(closed, "What is a funnel?").includes("up to five offers of your other one-off products, each taken with one click"), true);
+  is("what a funnel is, as the page itself says: up to five offers, card, Apple Pay or Google Pay, one click", ask(closed, "What is a funnel?").includes("up to five offers of your other one-off products. Each is taken with one click"), true);
   const how = ask(closed, "How long does it take to build a funnel?");
   const picker = readFileSync("components/funnel-type-picker.tsx", "utf8");
   is("the steps are the studio's own buttons", FUNNEL_STUDIO_BUTTONS.every((label) => how.includes(`“${label}”`) && picker.includes(label)), true);

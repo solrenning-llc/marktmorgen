@@ -21,7 +21,7 @@ export function reviewsBeginnerQuestions(onSale = PLANS_ON_SALE): { q: string; a
   return [
     {
       q: "How do I get my first reviews?",
-      a: `Only a buyer can write one: a review needs a paid order, so none can arrive before your first sale, and a sale does not bring one by itself. Nothing has to be switched on for a buyer to write one. To also email each buyer to ask, open “${w.ask}” on the studio's ${w.tool} page, check “${w.askBox}”, pick the days and press “${w.save}”; it needs your email set up on ${PLAN_TITLES.pro} or ${PLAN_TITLES.scale}.`,
+      a: `Only a buyer can write one: a review needs a paid order, so none can arrive before your first sale, and a sale does not bring one by itself. Nothing has to be switched on for a buyer to write one. To also email each buyer to ask, open “${w.ask}” on the studio's ${w.tool} page, check “${w.askBox}”, pick the days and press “${w.save}”. It needs your email set up on ${PLAN_TITLES.pro} or ${PLAN_TITLES.scale}.`,
     },
     {
       q: "Where do I see and answer reviews?",

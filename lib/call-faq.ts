@@ -27,11 +27,11 @@ export function callBeginnerQuestions(onSale = PLANS_ON_SALE, trialDays = TRIAL_
   return [
     {
       q: "What is a paid call here?",
-      a: `A time with you that the buyer picks and pays for as they book it, on your own Stripe account, or books later from a package of sessions they already paid for: one person at a time, a group of up to ${MAX_SEATS} at each time, or seats in live sessions on dates you set. The buyer gets an email with a calendar file. You get one too, or the host does on a team call you do not host. If the call is already in that person's Google Calendar, their email has no file. The call itself happens on the meeting service you choose, or by a link you send yourself; or it is not a call at all but a time at the address you give, in person. Either way, nothing is streamed or recorded here.`,
+      a: `A time with you that the buyer picks and pays for as they book it, on your own Stripe account, or books later from a package of sessions they already paid for. It can be one person at a time, a group of up to ${MAX_SEATS} at each time, or seats in live sessions on dates you set. The buyer gets an email with a calendar file. You get one too, or the host does on a team call you do not host. If the call is already in that person's Google Calendar, their email has no file. The call itself happens on the meeting service you choose, or by a link you send yourself. Or it is not a call at all but a time at the address you give, in person. Either way, nothing is streamed or recorded here.`,
     },
     {
       q: "How do I set up a paid call?",
-      a: `In your studio, open a paid product with one set price that does not deliver a file or a link, and press “${CALL_EDITOR_WORDS.weekly}”. Set how long a call lasts, your time zone and your hours, then press “${CALL_EDITOR_WORDS.weeklySave}”. For seats on dates you set, press “${CALL_EDITOR_WORDS.live}” instead, then “${CALL_EDITOR_WORDS.liveSave}”. Something free, a membership, a course, a podcast, a bundle, something you ship, a product with several prices and one where the buyer names the price cannot be a call.`,
+      a: `In your studio, open a paid product with one set price that does not deliver a file or a link. Then press “${CALL_EDITOR_WORDS.weekly}”. Set how long a call lasts, your time zone and your hours, then press “${CALL_EDITOR_WORDS.weeklySave}”. For seats on dates you set, press “${CALL_EDITOR_WORDS.live}” instead, then “${CALL_EDITOR_WORDS.liveSave}”. Something free, a membership, a course, a podcast, a bundle, something you ship, a product with several prices and one where the buyer names the price cannot be a call.`,
     },
     {
       q: "Can I try paid calls before paying?",

@@ -22,7 +22,7 @@ export function currencyBeginnerQuestions(onSale = PLANS_ON_SALE, trialDays = TR
   return [
     {
       q: "How do I choose my store's currency?",
-      a: `A new store starts with “${currencyLabel(DEFAULT_CURRENCY)}” chosen. In your studio, pick another under “${w.field}” and press “${w.save}”; if your products have prices, you are asked to confirm first. When Stripe tells us which currencies your connected account can charge in, every currency on the list it cannot charge in, other than the one your store uses now, is marked “${w.off}”.`,
+      a: `A new store starts with “${currencyLabel(DEFAULT_CURRENCY)}” chosen. In your studio, pick another under “${w.field}” and press “${w.save}”; if your products have prices, you are asked to confirm first. Stripe tells us which currencies your connected account can charge in. Then every currency on the list it cannot charge in, other than the one your store uses now, is marked “${w.off}”.`,
     },
     {
       q: "Can my buyers pay in their own currency?",

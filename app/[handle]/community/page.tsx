@@ -29,6 +29,8 @@ import { communityWords, composerWords } from "@/lib/buyer-words/community";
 import { MAX_POLL_OPTIONS } from "@/lib/community-polls";
 import { LANGUAGES } from "@/lib/store-language";
 import { CommunityComposer, ConfirmDeletes } from "@/components/community-composer";
+import { heldOf } from "@/lib/community-approval";
+import { HeldList } from "@/components/community-held";
 import { EmptyState } from "@/components/empty-state";
 
 type Params = {
@@ -130,6 +132,9 @@ export default async function CommunityPage({ params, searchParams }: Params) {
   // on the first page of every space only, with what they read paid for first; nothing from inside them is read.
   const lockedList = !owner && !space && !before ? await lockedSpaces(store, config, mineIds, (units) => takePublicRequest(store, "buyer", undefined, units), unchecked, lasting) : [];
   if (lockedList === null) redirect(`/@${store.handle}/resting`);
+  // A member's own posts waiting for the creator's approval (543 [CM2]): only
+  // theirs, read under their own key, on the first page; null when they could not be read.
+  const held = owner || before ? [] : await heldOf(id, key).then((items) => items.filter((h) => h.kind === "post" && (!space || h.sp === space.id)), () => null);
 
   return (
     <div lang={lang} className={`st-page st-theme-${store.look.theme} relative min-h-screen`} style={lookStyle(store.look) as React.CSSProperties}>
@@ -232,6 +237,7 @@ export default async function CommunityPage({ params, searchParams }: Params) {
           ) : null}
 
           <LockedSpaces spaces={lockedList} language={store.language} />
+          <HeldList store={store} items={held} kind="post" from={from} space={space?.id ?? null} />
 
           {shown.length === 0 ? (
             <EmptyState

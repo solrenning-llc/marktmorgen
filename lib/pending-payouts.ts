@@ -4,6 +4,8 @@ export type PendingPayoutBatch = {
   currency: string;
   /** `r`: the SHA-256 (hex) of the PayPal address the line was sent to, never the address itself (lib/paypal-payouts.ts). */
   lines: { a: string; c: number; r?: string }[];
+  /** An HMAC (hex) of the PayPal app (Client ID) the batch was sent from (lib/paypal-payouts.ts); absent on older batches. */
+  s?: string;
   /** A batch whose answer was not known (lib/paypal-payouts.ts): when it was last sent again, ms. */
   t?: number;
   /** 1: it could not be confirmed with PayPal and needs the creator's own check; it is not sent again. */
@@ -49,10 +51,12 @@ export function readPendingPayoutBatches(results: unknown): Map<string, PendingP
     // The two marks of a batch whose answer was not known, each only in its own shape.
     if (value.t !== undefined && (!Number.isSafeInteger(value.t) || (value.t as number) < 0)) return unavailable();
     if (value.m !== undefined && value.m !== 1) return unavailable();
+    if (value.s !== undefined && (typeof value.s !== "string" || !/^[0-9a-f]{64}$/.test(value.s))) return unavailable();
     out.set(id, {
       at: value.at as number, currency: value.currency, lines,
       ...(value.t !== undefined ? { t: value.t as number } : {}),
       ...(value.m === 1 ? { m: 1 as const } : {}),
+      ...(typeof value.s === "string" ? { s: value.s } : {}),
     });
   }
   return out;

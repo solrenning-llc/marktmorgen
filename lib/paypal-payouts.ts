@@ -176,13 +176,29 @@ async function tokenFor(client: string, secret: string): Promise<{ token: string
   return { token: typeof data.access_token === "string" ? data.access_token : "", scope: typeof data.scope === "string" ? data.scope : "" };
 }
 
-async function bearer(store: Store): Promise<string | null> {
+/**
+ * A token for the store's PayPal app, with the fingerprint of the app it is for (senderPrint), read from the same
+ * link, so a batch can be tied to the account that sent it (issue #4448).
+ */
+async function bearer(store: Store): Promise<{ auth: string; sender: string } | null> {
   const link = await readLink(store);
   if (!link || !store.statsId) return null;
   const opened = unseal(link.secret, context(store.statsId));
   if (!opened.ok) return null;
   const { token } = await tokenFor(link.client, opened.value);
-  return token ? `Bearer ${token}` : null;
+  return token ? { auth: `Bearer ${token}`, sender: senderPrint(link.client) } : null;
+}
+
+/**
+ * The fingerprint of the PayPal app (its Client ID) a batch is sent from, kept with a batch on its way, so a batch
+ * whose answer is not known is only ever sent again from the same app (issue #4448): PayPal's own idempotency (the
+ * same sender_batch_id and PayPal-Request-Id) holds within one merchant, and nothing says it holds across two. Empty
+ * when there is no server secret: then the batch keeps none, and a retry is left for the creator's own check.
+ */
+const SENDER_PRINT_LABEL = "paypal-payout-sender/v1";
+function senderPrint(client: string): string {
+  const key = deriveKey(SENDER_PRINT_LABEL);
+  return key ? createHmac("sha256", key).update(client).digest("hex") : "";
 }
 
 export type ConnectResult = { ok: true } | { ok: false; reason: "format" | "refused" | "no-payouts" | "seal" | "error" };
@@ -380,13 +396,15 @@ export async function payWithPayPal(store: Store): Promise<PayResult> {
       if (!book.refundsChecked) return { ok: false, reason: "refunds" };
       const lines = payableLines(book, await onTheirWay(store));
       if (!lines.length) return { ok: false, reason: "nothing" };
-      const auth = await bearer(store);
-      if (!auth) return { ok: false, reason: "reconnect" };
+      const token = await bearer(store);
+      if (!token) return { ok: false, reason: "reconnect" };
+      const { auth, sender } = token;
       const senderBatchId = `nl-${statsId.slice(0, 12)}-${Date.now().toString(36)}`;
+      // `s`: the app the money is asked from, so a retry of an unknown answer never comes from another account (#4448).
       const open: OpenBatch = { at: Date.now(), currency: store.currency, lines: lines.map((l) => {
         const r = receiverPrint(receiverOf(l));
         return { a: l.affiliate.id, c: l.cents, ...(r ? { r } : {}) };
-      }) };
+      }), ...(sender ? { s: sender } : {}) };
       // Written down as on its way BEFORE the creator's money is asked for (CX-123 rule 24): whatever PayPal answers,
       // or if it never answers, nobody in it can be put in another batch or payout file. Redis must say it holds it.
       const unknownField = `${UNKNOWN_BATCH_PREFIX}${senderBatchId}`;
@@ -461,14 +479,15 @@ export async function settlePayPal(store: Store): Promise<Settled> {
     await redisPipeline([["SREM", STORES, store.sid]]);
     return out;
   }
-  const auth = await bearer(store).catch(() => null);
-  if (!auth) return { ...out, waiting: [...open.values()].reduce((n, b) => n + b.lines.length, 0) };
+  const token = await bearer(store).catch(() => null);
+  if (!token) return { ...out, waiting: [...open.values()].reduce((n, b) => n + b.lines.length, 0) };
+  const { auth, sender } = token;
   const day = new Date().toISOString().slice(0, 10);
   for (const [batch, sent] of open) {
     // A batch whose answer is not known has no PayPal id to read: the same request is sent again, at most once a
     // day, and its people stay on their way whatever comes back (decision C1-20261105-1830-C5-1, option A).
     if (batch.startsWith(UNKNOWN_BATCH_PREFIX)) {
-      await settleUnknown(store, batch, sent, auth).catch((error) => console.error("sending an unknown PayPal batch again failed", error));
+      await settleUnknown(store, batch, sent, auth, sender).catch((error) => console.error("sending an unknown PayPal batch again failed", error));
       out.waiting += sent.lines.length;
       continue;
     }
@@ -548,9 +567,9 @@ async function needsManualCheck(statsId: string, field: string, sent: OpenBatch)
  * batch sent: its id is kept when PayPal links it, and otherwise it is left
  * for the creator's own check. Anything else leaves it on its way, to be
  * tried again tomorrow; after UNKNOWN_MANUAL_AFTER_MS it is not tried again.
- * Never sent under a new key, never paid twice.
+ * Never sent under a new key or from another PayPal app, never paid twice.
  */
-async function settleUnknown(store: Store, field: string, seen: OpenBatch, auth: string): Promise<"settled" | "waiting" | "manual"> {
+async function settleUnknown(store: Store, field: string, seen: OpenBatch, auth: string, sender: string): Promise<"settled" | "waiting" | "manual"> {
   const statsId = store.statsId as string;
   const now = Date.now();
   if (seen.m === 1) return "manual";
@@ -561,6 +580,11 @@ async function settleUnknown(store: Store, field: string, seen: OpenBatch, auth:
     const sent = (await readOpen(statsId)).get(field);
     if (!sent || sent.m === 1) return sent ? "manual" : "waiting";
     if (sent.t !== undefined && now - sent.t < UNKNOWN_RETRY_EVERY_MS) return "waiting";
+    // Only from the same PayPal app that sent it (issue #4448): the first request may have paid from that account, and
+    // the same sender_batch_id sent from another account (the store connected a new app since) could pay everyone
+    // again. A batch that kept no sender (made before this check, or with no server secret) or whose app changed is
+    // money that may have left: never sent again, left for the creator's own check (rule 30).
+    if (!sent.s || !sender || sender !== sent.s) return needsManualCheck(statsId, field, sent);
     // The same request may make the batch now, if the first never reached PayPal, so it is sent only while the book
     // still owes every line in it (review of Codex G on #2681, second GRAVE). Refunds that cannot be read: not known,
     // wait (no try counted). A line no longer owed in full (refunded since, or the affiliate gone or no longer

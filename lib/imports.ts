@@ -60,6 +60,7 @@ import { allowanceWindow, resetWords, windowId } from "@/lib/allowance-window";
 import { randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { LockBusyError, releaseLock, takeLock } from "@/lib/redis-lock";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import {
@@ -1565,6 +1566,13 @@ async function mailStep(job: ImportJob, store: Store): Promise<"more" | "done" |
     await unsent(portion);
     return "more";
   }
+  // A funded period's emails need its paid cohort first (resourceAllocations): until then the same people wait, as
+  // over the company's day, and nothing is taken.
+  if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) {
+    await redisPipeline([["SADD", mailKey(job.id), ...emails]]);
+    await unsent(portion);
+    return "retry";
+  }
   // The company's day first: over it, the same buyers wait for tomorrow.
   if (!(await reserveDay(messages.length))) {
     await redisPipeline([["SADD", mailKey(job.id), ...emails]]);
@@ -1868,6 +1876,11 @@ export async function sendMoveReminders(deadline: number, now = Date.now()): Pro
       }
       const letter = await reminderEmail(store, field, now);
       if (!letter) continue;
+      // A funded period's reminder needs its paid cohort first (resourceAllocations): until then it is tried later.
+      if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) {
+        await remindLater(sid, field, now);
+        continue;
+      }
       if (!(await reserveDay(1))) {
         await remindLater(sid, field, now);
         continue;

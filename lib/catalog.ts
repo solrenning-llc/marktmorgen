@@ -804,6 +804,32 @@ export async function readProducts(store: Store, ids?: Iterable<string>): Promis
   return out;
 }
 
+/**
+ * Which of these products ask questions at checkout (lib/checkout-fields.ts), read without the products in full:
+ * the questions live in the heavy rest of a product's record, which a listing does not carry, so a cart that reads
+ * listings alone took a product with questions for one it could pay for, and the cart checkout then refused the
+ * whole order (#4350). One GET per product a store does not hold inline. A product with no heavy rest asks nothing
+ * (productWrites deletes it); a reply or record that does not read throws UnknownReplyError (CX-123 rule 24), never
+ * "asks nothing".
+ */
+export async function readAsking(store: Store, ids: Iterable<string>): Promise<Set<string>> {
+  const asked = wanted(store, ids);
+  const catalog = store.catalog;
+  if (catalog.inline) return new Set(catalog.inline.filter((p) => asked.includes(p.id) && p.fields.length > 0).map((p) => p.id));
+  if (asked.length === 0) return new Set();
+  if (!catalog.id || !isRedisConfigured()) throw new UnknownReplyError("a product's checkout questions");
+  const raws = await getMany(asked.map((id) => extrasKey(catalog.id!, id)));
+  const asking = new Set<string>();
+  asked.forEach((id, i) => {
+    if (raws[i] === null) return;
+    const extras = parseJson(raws[i]);
+    const fields = extras && typeof extras === "object" && !Array.isArray(extras) ? (extras as { fields?: unknown }).fields : undefined;
+    if (!Array.isArray(fields)) throw new UnknownReplyError("a product's checkout questions");
+    if (parseFields(fields).length > 0) asking.add(id);
+  });
+  return asking;
+}
+
 /** One product in full, or null when the store has no such product (or no id was given). */
 export async function readProduct(store: Store, id: string | null | undefined): Promise<Product | null> {
   if (typeof id !== "string" || !id) return null;

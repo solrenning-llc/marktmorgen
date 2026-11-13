@@ -182,6 +182,12 @@ async function main(): Promise<void> {
     is("the stale comment is not visible", (await lessonComments(COURSE, L1)).some((c) => c.by === dana), false);
     const after = await addComment({ room: ROOM, courseId: COURSE, lessonId: L1, by: hal, name: "Hal", text: "After the erasure.", now: 416 });
     is("a new request after the erasure can post", after.ok, true);
+    // The fence is non-personal, but a key kept for ever is a cost with no ceiling: it lapses a day after the last
+    // erasure (LESSON_COMMENT_FENCE_SECONDS), far past the longest any request can be on its way.
+    const fence = redis.keys().filter((key) => key.includes(COURSE) && key.includes("erase"));
+    const ttls = await Promise.all(fence.map(async (key) => Number((await real([["TTL", key]]))[0])));
+    is("the course's erasure fence is one key, in a family of its own, never under nl:lc:", [fence.length, fence.every((key) => key.startsWith("nl:lcerase:"))], [1, true]);
+    is("and it lapses within a day, never kept for ever", ttls.every((ttl) => ttl > 0 && ttl <= 86_400), true);
   }
 
   done();

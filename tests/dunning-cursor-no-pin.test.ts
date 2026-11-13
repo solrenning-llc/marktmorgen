@@ -104,6 +104,7 @@ function member(handle: string, product: string, id: string, lapses: boolean): R
   return {
     id: `sub_${handle}Run${id}`,
     status: "active",
+    cancel_at_period_end: false, cancel_at: null, pause_collection: null,
     metadata: { store: handle, product },
     customer: { id: `cus_${handle}Run${id}`, email: `${handle}-${id}@example.com`, invoice_settings: { default_payment_method: null } },
     items: { data: [{ current_period_end: payAt }] },

@@ -10,6 +10,9 @@
 import { readFileSync } from "node:fs";
 import { batchTotal } from "@/lib/affiliate-payouts";
 import { connectPayPal, onTheirWay, payWithPayPal, paypalPayableLines } from "@/lib/paypal-payouts";
+import { MAX_BATCH_ROWS } from "@/lib/affiliate-payouts";
+import { autoPayEmail } from "@/lib/affiliate-payday";
+import type { Book } from "@/lib/affiliates";
 import { readBook } from "@/lib/affiliates";
 import type { Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
@@ -70,6 +73,29 @@ async function main(): Promise<void> {
     const page = readFileSync("app/studio/affiliates/page.tsx", "utf8");
     const panel = page.slice(page.indexOf("<PayPalPayouts"), page.indexOf("/>", page.indexOf("<PayPalPayouts")));
     is("the panel's people and amount come from paypalPayableLines, the lines the batch sends", [/people=\{paypalPayableLines\(/.test(panel), /cents=\{batchTotal\(paypalPayableLines\(/.test(panel)], [true, true]);
+  }
+
+  part("The batch is cut to its row limit after leaving out addresses PayPal cannot take (Codex X5 MEDIUM on #4318)");
+  {
+    const row = (id: string, paypal: string, payable: number) => ({ affiliate: { id, email: `${id}@example.com`, status: "approved", paypal }, payable });
+    const longOnes = Array.from({ length: MAX_BATCH_ROWS }, (_, i) => row(`long${String(i).padStart(8, "0")}`, LONG, 50_000));
+    const book = { rows: [...longOnes, row("shortaffil01", "", 3_000)] } as unknown as Book;
+    const lines = paypalPayableLines(book, new Set());
+    is("an affiliate PayPal can pay is in the batch, though 5,000 larger balances with long addresses come first", lines.map((l) => l.affiliate.id), ["shortaffil01"]);
+  }
+
+  part("Payday by itself tells the creator who PayPal cannot pay, never 'nobody is owed' (Claude 7 MEDIUM on #4318)");
+  {
+    const left = { people: 1, cents: 3_000 };
+    const nothing = autoPayEmail({ ok: false, reason: "nothing" }, "usd", left);
+    is("nothing sent through PayPal, one owed with a long address: never 'nobody is owed'", /nobody is owed/i.test(nothing.text), false);
+    is("and the creator is told to pay them with the payout file", [/payout file/i.test(nothing.text), /\$30\.00/.test(nothing.text)], [true, true]);
+    const sent = autoPayEmail({ ok: true, batch: "BATCH1ABC", people: 1, cents: 3_000 }, "usd", left);
+    is("a batch sent, one left out: the email says who is left and how to pay them", [/payout file/i.test(sent.text), /\$30\.00/.test(sent.text)], [true, true]);
+    const none = autoPayEmail({ ok: false, reason: "nothing" }, "usd", { people: 0, cents: 0 });
+    is("control: nobody left out, nothing owed, the email still says nobody is owed", /nobody is owed/i.test(none.text), true);
+    const payday = readFileSync("lib/affiliate-payday.ts", "utf8");
+    is("payday hands the email the owed lines PayPal cannot take", /autoPayEmail\(paid, book\.currency, /.test(payday), true);
   }
 
   part("Paying with PayPal");

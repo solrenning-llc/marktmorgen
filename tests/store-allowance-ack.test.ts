@@ -65,13 +65,15 @@ async function main(){
  }
  redis.pipeline=async()=>{throw Error("synthetic read unavailable");};
  try{is("transport failure is unknown, not a number",await allowanceUsedExact(owner,"studio"),null);}finally{redis.pipeline=pipeline;}
- part("Only an exact signed decrement authorizes the existing repair");
+ part("A reply never authorizes a second, separate repair");
  for(const [name,shape] of [["coerced negative",()=>["-1"]],["extra decrement",()=>[-1,0]],["too negative",()=>[-4]],["getter decrement",()=>{const a=[-1];Object.defineProperty(a,"0",{get(){visited++;return -1;}});return a;}]] as [string,()=>unknown][]){
   let calls=0;redis.pipeline=async()=>{calls++;return shape() as never;};
   try{const now=Date.now();await giveAllowanceIn(owner,"studio",3,new Date(now).toISOString().slice(0,7),now);is("no repair from unknown: "+name,calls,1);}finally{redis.pipeline=pipeline;}
  }
- let repairs=0;redis.pipeline=async input=>{repairs++;return input.length===1?[-1]:[0,1];};
- try{const now=Date.now();await giveAllowanceIn(owner,"studio",3,new Date(now).toISOString().slice(0,7),now);is("confirmed negative repair retained",repairs,2);}finally{redis.pipeline=pipeline;}
+ // The repair below zero now happens inside the give-back's own script (GIVE_ALLOWANCE_BACK, Codex V on #4072):
+ // one round trip, so no take in between can read the counter negative, and no second command repairs it later.
+ let repairs=0;const sent:unknown[][]=[];redis.pipeline=async input=>{repairs++;sent.push(...input);return [0];};
+ try{const now=Date.now();await giveAllowanceIn(owner,"studio",3,new Date(now).toISOString().slice(0,7),now);is("the repair below zero is in the same script, one round trip",repairs,1);is("and that one command is the give-back script",sent.length===1&&sent[0][0]==="EVAL"&&String(sent[0][1]).startsWith("-- marktmorgen:allowance-give-back:"),true);}finally{redis.pipeline=pipeline;}
  is("no read or decrement getter executed",visited,0);
  done();
 }

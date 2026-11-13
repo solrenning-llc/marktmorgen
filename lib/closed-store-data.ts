@@ -53,7 +53,7 @@
  */
 import { onAccount } from "@/lib/stripe-account";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, repliesFor, scanPage, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, scanPage, stringList } from "@/lib/redis-reply";
 import { CLOSING, type Closing, closingFamilyOf } from "@/lib/data-families";
 import { DEL_BATCH, FOLLOW_BATCH, RENEWALS_AT_ONCE } from "@/lib/plan-closing-rules";
 import { idsIn } from "@/lib/data-recount";
@@ -217,16 +217,16 @@ export async function prepareStore(store: Store, now = Date.now()): Promise<Batc
   const team = store.sid ? await readTeam(store.sid) : { members: [], invites: [] };
   const own = new Set(marks);
   for (const host of [store.email, ...team.members.map((m) => m.email)].map(hostId)) {
-    let cursor = "0";
-    for (let round = 0; round < 50; round += 1) {
-      const [reply] = await redisPipeline([["HSCAN", claimsKey(host), cursor, "COUNT", 500]]);
-      const [next, flat] = Array.isArray(reply) ? [String(reply[0]), (reply[1] as unknown[]).map(String)] : ["0", []];
+    // Every page read exactly and the walk to cursor zero (scanAll), each HDEL confirmed as one whole count from 0 to
+    // the fields asked: anything else is unknown (rule 24, #4391), it throws before the record is closed, and the next
+    // run removes what is left. A claim left here would keep the host's slot taken for a store declared erased.
+    await scanAll("HSCAN", claimsKey(host), async (flat) => {
       const mine: string[] = [];
       for (let i = 0; i + 1 < flat.length; i += 2) if (pieces(flat[i + 1]).some((part) => own.has(part))) mine.push(flat[i]);
-      if (mine.length) await redisPipeline([["HDEL", claimsKey(host), ...mine]]);
-      cursor = next;
-      if (cursor === "0") break;
-    }
+      if (!mine.length) return;
+      const gone = countOf(repliesFor(await redisPipeline([["HDEL", claimsKey(host), ...mine]]), 1)?.[0]);
+      if (gone === null || gone > mine.length) throw new UnknownReplyError("the closing walk's removal of a host's claims");
+    });
   }
   // A host's own calendar is the host's, across the stores they serve: it goes with the last of them. A read
   // that fails is never "no other store" (rule 24): it throws, and the walk tries this store again later.

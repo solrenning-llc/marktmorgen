@@ -81,8 +81,18 @@ is("unknown rules never ship a physical order as clean", [shippingDecision({ rul
 is("unknown rules on something not shipped hold nothing", shippingDecision({ rules: null, physical: false, risk: "highest" }), "ship");
 
 part("A charge Stripe put in manual review is held, never shipped (Claude 3 review of #3633, LEVE 1)");
-const reviewed = { id: "ch_1", object: "charge", outcome: { type: "manual_review", risk_level: "normal" }, review: "prv_1" };
-is("outcome type manual_review, or an open review on the charge: in review", [riskLevelOf(reviewed), riskLevelOf({ ...reviewed, outcome: { type: "manual_review", risk_level: "normal" }, review: null }), riskLevelOf({ ...reviewed, outcome: { type: "authorized", risk_level: "normal" }, review: { id: "prv_1", object: "review" } })], ["in_review", "in_review", "in_review"]);
+// Only an expanded review that is open is "in review" (Claude 1 cloud, Claude 4 and Claude 7 on #3633): a review the
+// creator closed keeps its id on the charge and the outcome's type for good, so neither decides by itself. A review
+// whose state is not read is not available (said as such on a held shipment), never "in review" for good.
+const reviewed = { id: "ch_1", object: "charge", outcome: { type: "manual_review", risk_level: "normal" }, review: { id: "prv_1", object: "review", open: true } };
+is("an open review, whatever level it carries: in review", [riskLevelOf(reviewed), riskLevelOf({ ...reviewed, outcome: { type: "authorized", risk_level: "normal" } })], ["in_review", "in_review"]);
+const approved = { id: "ch_1", object: "charge", outcome: { type: "manual_review", risk_level: "normal" }, review: { id: "prv_1", object: "review", open: false, closed_reason: "approved" } };
+is("a review the creator approved and closed: the risk Stripe gave", riskLevelOf(approved), "normal");
+is("and it ships under the hold rule", shippingDecision({ rules: hold, physical: true, risk: riskLevelOf(approved) }), "ship");
+is("a closed review on an elevated charge: still elevated, still held", shippingDecision({ rules: hold, physical: true, risk: riskLevelOf({ ...approved, outcome: { type: "manual_review", risk_level: "elevated" } }) }), "hold");
+is("a review read only by its id, or without its open state: not available, never in review for good", [riskLevelOf({ ...reviewed, review: "prv_1" }), riskLevelOf({ ...reviewed, review: { id: "prv_1", object: "review" } }), riskLevelOf({ ...reviewed, review: { id: "prv_1", object: "review", open: "true" } })], ["not_available", "not_available", "not_available"]);
+is("manual review said by the outcome with no review on the charge: not available", riskLevelOf({ ...reviewed, review: null }), "not_available");
+is("and not available under the hold rule is said, never shipped clean", shippingDecision({ rules: hold, physical: true, risk: riskLevelOf({ ...reviewed, review: "prv_1" }) }), "risk_not_available");
 is("no review: the risk Stripe gave", riskLevelOf({ ...reviewed, outcome: { type: "authorized", risk_level: "normal" }, review: null }), "normal");
 is("in review under the rule: held", shippingDecision({ rules: hold, physical: true, risk: "in_review" }), "hold");
 

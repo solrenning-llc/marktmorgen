@@ -79,7 +79,9 @@ async function main(): Promise<void> {
   });
   // Codex G on #1924 at dda73b793b: the payment's time is its settled charge's (payment_intent.latest_charge), never
   // the intent's creation nor the checkout's opening, which both come before the buyer pays.
-  const charged = (id: string, intentCreated: number, chargeCreated: number) => ({ id, created: intentCreated, latest_charge: { id: `ch_${id.slice(3)}`, object: "charge", status: "succeeded", paid: true, created: chargeCreated } });
+  // The charge's settlement is its balance transaction's time (made when the charge succeeds, Codex T on #1924); the
+  // charge object's own `created` comes first, for a payment that settles later.
+  const charged = (id: string, intentCreated: number, settled: number, chargeCreated = intentCreated) => ({ id, created: intentCreated, latest_charge: { id: `ch_${id.slice(3)}`, object: "charge", status: "succeeded", paid: true, created: chargeCreated, balance_transaction: { id: `txn_${id.slice(3)}`, object: "balance_transaction", created: settled } } });
   // Opened two hours before the end, the intent made an hour before it, charged an hour after it: no share.
   await noteSession(await store(), session("cs_test_paid_after", end - 7200, charged("pi_paid_after", end - 3600, end + 3600)));
   // Opened and charged before the end.
@@ -96,6 +98,17 @@ async function main(): Promise<void> {
   // A checkout opened after the end was paid after it too: no share, and nothing to wait for.
   is("opened after the end, the intent not expanded: no share and no wait", await noteSession(await store(), session("cs_test_opened_after", end + 60, "pi_opened_after")).then(() => (async () => (await earned()).includes(`cs_test_opened_after:${q}`))(), (error: Error) => error.name), false);
   is("the sweep reads each checkout with its charge, so the time is there", readFileSync("lib/checkout-sweep.ts", "utf8").includes("expand[]=data.payment_intent.latest_charge"), true);
+  // Codex T on #1924 at b41a2fb0f3: a payment that settles later (an asynchronous method) has its charge created before
+  // the end and its balance transaction after it: no share.
+  await noteSession(await store(), session("cs_test_async_after", end - 7200, charged("pi_async_after", end - 7000, end + 600, end - 6000)));
+  is("a charge created before the end but settled after it earns nothing", (await earned()).includes(`cs_test_async_after:${q}`), false);
+  is("a charge whose settlement time was not read: unknown", await unknownAt("cs_test_unk_txn", { id: "pi_txn_id", created: end - 120, latest_charge: { id: "ch_txn_id", object: "charge", status: "succeeded", paid: true, created: end - 100, balance_transaction: "txn_only_id" } }), "UnknownReplyError");
+  // Codex G on #1924 at b41a2fb0f3: a checkout with no readable opening time is never taken as opened now, after the end.
+  const noOpening = async (ref: string, created: unknown) => noteSession(await store(), { ...session(ref, 0, "pi_no_opening"), created } as never).then(() => "noted", (error: Error) => error.name);
+  is("no opening time, the intent not expanded: unknown, never 'opened after the end'", [await noOpening("cs_test_no_created", undefined), await noOpening("cs_test_frac_created", end - 0.5), await noOpening("cs_test_zero_created", 0)], ["UnknownReplyError", "UnknownReplyError", "UnknownReplyError"]);
+  is("and nothing of them was written", (await earned()).filter((key) => /cs_test_(no|frac|zero)_created/.test(key)).length, 0);
+  is("the sweep reads each charge with its balance transaction, so the settlement time is there", readFileSync("lib/checkout-sweep.ts", "utf8").includes("expand[]=data.payment_intent.latest_charge.balance_transaction"), true);
+
 
   part("4. An answer whose write may have landed is never said to have changed nothing");
   const r = "cccccccccccc";

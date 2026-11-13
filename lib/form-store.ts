@@ -132,6 +132,8 @@ function parseResponse(raw: unknown): FormResponse | null {
       answers: value.answers,
       outcome: typeof value.outcome === "string" ? value.outcome : "",
       joined: value.joined === true,
+      // The address of whoever sent it (lib/forms.ts readAnswers), lower case; absent on responses kept before it was.
+      ...(typeof value.by === "string" ? { by: value.by.slice(0, 254) } : {}),
       // A scored quiz's total and categories, kept with the answers and deleted with them (forgetFormsPerson).
       ...(score !== null ? { score, ...(scores ? { scores: scores as Record<string, number> } : {}) } : {}),
     };
@@ -165,59 +167,42 @@ export async function responseCounts(statsId: string | null, ids: string[]): Pro
   return Object.fromEntries(ids.map((id, i) => [id, Number(counts[i]) || 0]));
 }
 
-/** The form's email questions, in order: the first one answered is the address of whoever answered (readAnswers). */
-export function emailFieldIds(form: FormDef): string[] {
-  return form.fields.filter((field) => field.type === "email").map((field) => field.id);
-}
-
 /**
- * Whether a response is this person's (`email`, lower case): by the address they
- * gave as their own, the first of the form's email questions they answered, which
- * is the address the store replies to and offers its list to. Never by another
- * email question (a friend's), which is not about who answered. A form with no
- * email question says nobody's address, so there any answer that is the address
- * counts, as before. The copy (lib/person-copy.ts) and the erasure
- * (FORGET_FORM_PERSON) both decide by this rule.
+ * Whether a response is this person's (`email`): by the address kept with it when
+ * it was sent (`by`, the form's first email question they answered, the address
+ * the store replies to and offers its list to), so a friend's address in another
+ * question never makes it theirs, and changing, deleting or reordering the form's
+ * questions later changes nothing (review of #4436). A response that names no
+ * address of its own (kept before `by` was, or sent with no email question
+ * answered) is matched by any answer that is the address: more is erased rather
+ * than anything about the person left behind. The copy (lib/person-copy.ts) and
+ * the erasure (FORGET_FORM_PERSON) both decide by this rule.
  */
-export function isResponderOf(form: FormDef, answers: Record<string, unknown>, email: string): boolean {
+export function isResponderOf(response: Pick<FormResponse, "answers" | "by">, email: string): boolean {
   const wanted = email.trim().toLowerCase();
-  const ids = emailFieldIds(form);
-  if (!ids.length) return Object.values(answers).some((a) => typeof a === "string" && a.trim().toLowerCase() === wanted);
-  for (const id of ids) {
-    const given = answers[id];
-    if (typeof given === "string" && given.trim() !== "") return given.trim().toLowerCase() === wanted;
-  }
-  return false;
+  if (typeof response.by === "string" && response.by.trim() !== "") return response.by.trim().toLowerCase() === wanted;
+  return Object.values(response.answers).some((a) => typeof a === "string" && a.trim().toLowerCase() === wanted);
 }
 
 /**
  * Removes, from every list of responses given, each response that is this
- * person's (ARGV[1], lower case) by isResponderOf: ARGV[1 + k] names the k-th
- * form's email questions in order, joined by ",", or is empty for a form with
- * none. Done on the Redis side so no response travels. Answers how many went.
+ * person's (ARGV[1], lower case) by isResponderOf, on the Redis side so no
+ * response travels. Answers how many went.
  */
-export const FORGET_FORM_PERSON = `-- marktmorgen:form-forget:v3
+export const FORGET_FORM_PERSON = `-- marktmorgen:form-forget:v4
 local function trim(text) return string.match(text, "^%s*(.-)%s*$") end
 local out = {}
 for k = 1, #KEYS do
-  local ids = {}
-  for id in string.gmatch(ARGV[1 + k] or "", "[^,]+") do table.insert(ids, id) end
   local items = redis.call("LRANGE", KEYS[k], 0, -1)
   for _, raw in ipairs(items) do
     local ok, value = pcall(cjson.decode, raw)
     local hit = false
     if ok and type(value) == "table" and type(value.answers) == "table" then
-      if #ids == 0 then
+      if type(value.by) == "string" and trim(value.by) ~= "" then
+        hit = string.lower(trim(value.by)) == ARGV[1]
+      else
         for _, answer in pairs(value.answers) do
           if type(answer) == "string" and string.lower(trim(answer)) == ARGV[1] then hit = true end
-        end
-      else
-        for _, id in ipairs(ids) do
-          local given = value.answers[id]
-          if type(given) == "string" and trim(given) ~= "" then
-            hit = string.lower(trim(given)) == ARGV[1]
-            break
-          end
         end
       end
     end
@@ -260,7 +245,7 @@ export async function forgetFormsPerson(statsId: string | null, email: string, r
     throw new UnknownReply(`${what} (its forms)`);
   });
   if (!forms.length) return 0;
-  const [reply] = exactReplies(await redisPipeline([["EVAL", FORGET_FORM_PERSON, forms.length, ...forms.map((f) => responsesKey(statsId, f.id)), email.trim().toLowerCase(), ...forms.map((f) => emailFieldIds(f).join(","))]]), 1, what);
+  const [reply] = exactReplies(await redisPipeline([["EVAL", FORGET_FORM_PERSON, forms.length, ...forms.map((f) => responsesKey(statsId, f.id)), email.trim().toLowerCase()]]), 1, what);
   // Exactly {form's place, response, times removed} for each: any other shape
   // leaves the deletion unknown (UnknownReply), and nothing is given back.
   const list = plainList(reply);

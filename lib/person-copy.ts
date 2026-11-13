@@ -249,8 +249,8 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
     for (const form of await readForms(s.statsId)) {
       const { responses } = await readResponses(s.statsId, form.id);
       for (const r of responses) {
-        // The same rule the erasure deletes by: their own email answer, never a friend's (lib/form-store.ts, isResponderOf).
-        if (!isResponderOf(form, r.answers, s.email)) continue;
+        // The same rule the erasure deletes by: the address kept with the response, never a friend's (lib/form-store.ts, isResponderOf).
+        if (!isResponderOf(r, s.email)) continue;
         const answers = Object.fromEntries(form.fields.map((f) => [f.label, r.answers[f.id] ?? ""]));
         out.push({ form: form.name, sent: iso(r.at), answers, ...(r.outcome ? { result: r.outcome } : {}), ...(typeof r.score === "number" ? { score: r.score } : {}) });
       }

@@ -1833,7 +1833,8 @@ export async function readSales(store: Store, now = Date.now()): Promise<SalesSt
   out.hours = hoursOfWeek(own.filter((sale) => !sale.upsell));
   out.discounts = {
     rows: discountImpact(read, new Set((refundRows ?? []).map((r) => r.paymentIntent).filter(Boolean)), store.currency, now, STATS_DAYS),
-    refundsRead: refundRows !== null,
+    // Only a whole reading can say a discounted sale was not refunded: a partial one may have missed it (#4372).
+    refundsRead: refundRead !== null && !refundRead.partial,
   };
   out.previous = {
     d7: stretch(dayKey(now - 13 * 86400_000), cut7),

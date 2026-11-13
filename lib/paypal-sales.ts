@@ -907,9 +907,8 @@ export async function watchPayPal(
   const statsId = store.statsId;
   const now = Math.floor(Date.now() / 1000);
 
-  const [waiting] = await redisPipeline([["ZRANGEBYSCORE", pendingKey(statsId), "-inf", "+inf", "LIMIT", "0", String(PAYPAL_WATCH_BATCH)]]);
-  for (const order of Array.isArray(waiting) ? (waiting as string[]) : []) {
-    if (Date.now() >= deadline) return result;
+  /** One pending order; true when it stays on pending (asked again next pass), false when this pass ended its wait. */
+  const sweepPending = async (order: string): Promise<boolean> => {
     let opened: Opened | null;
     let written: Paid | null;
     try {
@@ -919,31 +918,34 @@ export async function watchPayPal(
       // Unknown is not "ended": the order stays pending and is read again on the next pass (CX-123 rule 24).
       if (!(error instanceof UnknownReplyError)) throw error;
       console.error("a pending PayPal order could not be read", order, error);
-      continue;
+      return true;
     }
     // Thirty days without PayPal settling it: no longer asked about.
     if (!opened || written) {
       await redisPipeline([["ZREM", pendingKey(statsId), order]]);
-      continue;
+      return false;
     }
     let done: Record<string, unknown>;
     try {
       done = await call("GET", `/v2/checkout/orders/${encodeURIComponent(order)}`, { merchant: opened.m });
     } catch (error) {
       console.error("reading a PayPal order failed", error);
-      continue;
+      return true;
     }
     const { capture, payee, email } = captureIn(done);
     // No capture in the answer. Only PayPal's word that the order was voided means nothing will be charged; any
     // other answer (approved, created, saved, completed without its captures, no status) is kept and asked again
     // (CX-123 rule 24; review of Codex G on #2681). A kept order is let go when its record ends (30 days).
     if (!capture) {
-      if (done.status === "VOIDED") await redisPipeline([["ZREM", pendingKey(statsId), order]]);
-      continue;
+      if (done.status === "VOIDED") {
+        await redisPipeline([["ZREM", pendingKey(statsId), order]]);
+        return false;
+      }
+      return true;
     }
-    if (capture.status === "PENDING" || typeof capture.status !== "string") continue;
+    if (capture.status === "PENDING" || typeof capture.status !== "string") return true;
     // Completed and what was asked, but without the buyer's address or the capture's id: paid, not yet readable.
-    if (capture.status === "COMPLETED" && matches(opened, capture, payee) && (!email || typeof capture.id !== "string")) continue;
+    if (capture.status === "COMPLETED" && matches(opened, capture, payee) && (!email || typeof capture.id !== "string")) return true;
     if (capture.status === "COMPLETED" && matches(opened, capture, payee) && email && typeof capture.id === "string") {
       let settled: { paid: Paid; fresh: boolean };
       try {
@@ -952,18 +954,50 @@ export async function watchPayPal(
         // Not known to be written down by this pass: nothing handed over, still pending, asked again (CX-123 rule 24).
         if (!(error instanceof UnknownReplyError)) throw error;
         console.error("a PayPal payment could not be written down", order, error);
-        continue;
+        return true;
       }
       const { paid, fresh } = settled;
+      // Written down with every list (PAYPAL_SETTLE): off pending and owed in the hand-over list, so a hand-over that
+      // throws here is retried there (handOverAgain); it is not kept on pending.
       if (fresh) {
-        await on.handOver(paid);
         result.cleared += 1;
+        try {
+          await on.handOver(paid);
+        } catch (error) {
+          console.error("handing over a PayPal purchase failed; owed in the hand-over list", order, error);
+        }
       }
-      continue;
+      return false;
     }
     // Declined, failed, or not what was asked: nothing is handed over.
     await redisPipeline([["ZREM", pendingKey(statsId), order]]);
+    return false;
+  };
+  const [waiting] = await redisPipeline([["ZRANGEBYSCORE", pendingKey(statsId), "-inf", "+inf", "LIMIT", "0", String(PAYPAL_WATCH_BATCH)]]);
+  // Orders this pass leaves on pending (unknown, not yet completed, or failed here) go behind the others in one ZADD XX
+  // at the end of the pass, so 25 orders that stay pending never fill every slot of the next pass while a newer
+  // completed one waits (Claude 1 on #2895). XX moves only an order still there: one this pass took off stays off.
+  const kept: string[] = [];
+  const keepBehind = async () => {
+    if (!kept.length) return;
+    const at = String(Math.floor(Date.now() / 1000));
+    await redisPipeline([["ZADD", pendingKey(statsId), "XX", ...kept.flatMap((order) => [at, order])]]).catch((error) => console.error("moving kept PayPal orders behind failed", error));
+  };
+  for (const order of Array.isArray(waiting) ? (waiting as string[]) : []) {
+    if (Date.now() >= deadline) {
+      await keepBehind();
+      return result;
+    }
+    // Each order on its own: one that throws (a hand-over, a read, a write) is logged and kept, and the rest of the
+    // pass, the refund watch and the hand-over list still run (Claude 1 on #2895).
+    try {
+      if (await sweepPending(order)) kept.push(order);
+    } catch (error) {
+      console.error("a pending PayPal order failed in the sweep", order, error);
+      kept.push(order);
+    }
   }
+  await keepBehind();
 
   const dropStart = on.dropStart;
   const [due] = await redisPipeline([["ZRANGEBYSCORE", watchKey(statsId), "0", String(now), "LIMIT", "0", String(PAYPAL_WATCH_BATCH)]]);

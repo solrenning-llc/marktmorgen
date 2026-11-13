@@ -217,7 +217,7 @@ function problem(answer: Answer): string {
   return MESSAGES[answer.error ?? ""] ?? MESSAGES.server_error;
 }
 
-const small = "text-ink-soft underline underline-offset-4 transition hover:text-violet-deep disabled:no-underline disabled:opacity-40";
+const small = "inline-flex min-h-11 min-w-11 items-center text-ink-soft underline underline-offset-4 transition hover:text-violet-deep disabled:no-underline disabled:opacity-40";
 
 /** Building a course: modules, lessons, and what each lesson holds. */
 export function CourseEditor({

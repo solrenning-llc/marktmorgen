@@ -460,8 +460,18 @@ export async function takeUpsell(input: {
     return { kind: "failed" };
   } catch (error) {
     // Stripe answered and said no — a declined card, a refused request — so
-    // nothing was charged.
-    if (error instanceof StripeError && error.status < 500) {
+    // nothing was charged. Never a 429 (too many requests: nothing done, and
+    // nothing said of the card), a 409 or an idempotency error (a request
+    // under this key is still being worked on, or was made before): those
+    // say nothing of a charge, and go the way of no answer below.
+    if (
+      error instanceof StripeError &&
+      error.status < 500 &&
+      error.status !== 409 &&
+      error.status !== 429 &&
+      error.code !== "idempotency_error" &&
+      error.code !== "idempotency_key_in_use"
+    ) {
       await writeUpsell(session, slot, { state: "failed", product: target.id, ...extra, customer, at: Date.now() });
       await unwatchPending(store, session, slot);
       return { kind: "failed" };

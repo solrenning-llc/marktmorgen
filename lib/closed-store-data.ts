@@ -577,8 +577,13 @@ async function pruneIndex(key: string, owners: Owners): Promise<number> {
   return gone.length;
 }
 
-/** `unfinished`: the stores left in the batch whose records are gone but whose last mark could not be written yet. */
-export type WalkReport = { started: boolean; stores: number; pages: number; deleted: number; pruned: number; finished: number; unfinished: number; done: boolean };
+/**
+ * `unfinished`: the stores left in the batch whose records are gone but whose last mark could not be written yet.
+ * `unreadable`: the stores due this run whose record did not read (rule 24), kept in line and moved back a walk; one
+ * that stays unreadable is counted every run, so the job's report shows it instead of a log line alone (Claude 1's LOW
+ * on #3687).
+ */
+export type WalkReport = { started: boolean; stores: number; pages: number; deleted: number; pruned: number; finished: number; unfinished: number; unreadable: number; done: boolean };
 
 /**
  * One page of the walk: deletes what belongs to the closing stores, and
@@ -691,7 +696,7 @@ async function finishStores(entries: Iterable<[string, Batched]>, finish: Finish
  * Bounded by `deadline` and WALK_PAGES_PER_RUN.
  */
 export async function eraseClosed(deadline: number, finish: Finisher, now = Date.now()): Promise<WalkReport> {
-  const report: WalkReport = { started: false, stores: 0, pages: 0, deleted: 0, pruned: 0, finished: 0, unfinished: 0, done: false };
+  const report: WalkReport = { started: false, stores: 0, pages: 0, deleted: 0, pruned: 0, finished: 0, unfinished: 0, unreadable: 0, done: false };
   if (!isRedisConfigured()) return report;
   // A move back a walk that Redis did not confirm (moveBack): this run is never said to be done.
   let unsure = false;
@@ -724,6 +729,7 @@ export async function eraseClosed(deadline: number, finish: Finisher, now = Date
         // (storeForRefExact, lib/store.ts) is never "no store". It stays in line, moved back a walk so it does not hold
         // the head of the line, and is prepared once its record reads; only a store Redis says is gone (nil) leaves it.
         console.error("a closed store's record could not be read; it waits for the next walk", error);
+        report.unreadable += 1;
         if (!(await moveBack(ref, now))) unsure = true;
         continue;
       }

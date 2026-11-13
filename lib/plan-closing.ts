@@ -760,6 +760,17 @@ export type Closing = {
   coverage?: "unknown";
 };
 
+/** The note on a store held because its record did not read (rule 24), counted apart by heldUnreadable. */
+export const UNREADABLE_RECORD = "its record could not be read";
+
+/**
+ * How many of a day's looks held a store because its record did not read: one that never reads again is held every
+ * day, so the job's report counts it, instead of a log line alone (Claude 1's LOW on #3687).
+ */
+export function heldUnreadable(rows: readonly Closing[]): number {
+  return rows.filter((row) => row.state === "held" && row.note === UNREADABLE_RECORD).length;
+}
+
 /** One store whose plan has ended, looked at for today. */
 export async function closeOne(key: string, now = Date.now(), hands: Hands = HANDS, until = Number.POSITIVE_INFINITY, mayObserve?: () => Promise<boolean>): Promise<Closing> {
   // Only a record Redis says is not there (nil) is gone. One that does not read (a failed request, a record that does
@@ -770,7 +781,7 @@ export async function closeOne(key: string, now = Date.now(), hands: Hands = HAN
     store = await storeForRefExact(key);
   } catch (error) {
     console.error("a closing store's record could not be read; it stays in line and is looked at again tomorrow", error);
-    return { key, state: "held", note: "its record could not be read" };
+    return { key, state: "held", note: UNREADABLE_RECORD };
   }
   if (!store) {
     await redisPipeline([["ZREM", ENDED_INDEX, key], ["ZREM", FINAL_INDEX, key], ["DEL", stateKey(key)]]);

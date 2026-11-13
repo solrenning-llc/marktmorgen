@@ -2,7 +2,7 @@ import type { NextRequest } from "next/server";
 import { cronAllowed } from "@/lib/request-guard";
 import { withCutoff } from "@/lib/fetch-timeout";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { closeEnded } from "@/lib/plan-closing";
+import { closeEnded, heldUnreadable } from "@/lib/plan-closing";
 import { releaseRestarted } from "@/lib/closing-holds";
 import { tellStaysOpen } from "@/lib/closing-buyers";
 import { retryPlanUndos } from "@/lib/closing-plan-guard";
@@ -69,9 +69,10 @@ async function run(request: NextRequest): Promise<Response> {
     if (forgets && (forgets.failed || forgets.gaveUp || forgets.left)) console.error(`store-forget: ${forgets.done} done, ${forgets.failed} failed again, ${forgets.gaveUp} given up, ${forgets.left} left for the next run`);
     const looked = await closeEnded(start + 52_000);
     const count = (state: string) => looked.filter((row) => row.state === state).length;
-    const counts = { looked: looked.length, told: count("told"), waiting: count("waiting"), removed: count("removed"), held: count("held"), running: count("running") };
+    // `unreadable`: held because the record does not read, counted apart so one held for good shows in the answer.
+    const counts = { looked: looked.length, told: count("told"), waiting: count("waiting"), removed: count("removed"), held: count("held"), unreadable: heldUnreadable(looked), running: count("running") };
     if (counts.told || counts.removed || counts.held) {
-      console.log(`plan-closing: ${counts.looked} stores with an ended plan; ${counts.told} written to, ${counts.removed} had what they kept removed, ${counts.held} left for tomorrow`);
+      console.log(`plan-closing: ${counts.looked} stores with an ended plan; ${counts.told} written to, ${counts.removed} had what they kept removed, ${counts.held} left for tomorrow (${counts.unreadable} because their record does not read)`);
       for (const row of looked) if (row.state === "held") console.error(`plan-closing: left for tomorrow: ${row.note ?? "no reason given"}`);
     }
     return Response.json({ ok: true, ...counts }, { headers: { "Cache-Control": "no-store" } });

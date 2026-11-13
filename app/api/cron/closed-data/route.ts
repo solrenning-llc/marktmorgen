@@ -27,7 +27,7 @@ async function run(request: NextRequest): Promise<Response> {
   if (got === null) return Response.json({ ok: true, busy: true });
   try {
     const report = await eraseClosed(Date.now() + 45_000, finishClosed);
-    if (report.stores || report.finished || !report.done) console.log(`closed-data: ${report.stores} stores begun, ${report.pages} pages read, ${report.deleted} keys deleted, ${report.pruned} list members taken out, ${report.finished} stores done`);
+    if (report.stores || report.finished || report.unreadable || !report.done) console.log(`closed-data: ${report.stores} stores begun, ${report.pages} pages read, ${report.deleted} keys deleted, ${report.pruned} list members taken out, ${report.finished} stores done, ${report.unreadable} kept in line because their record does not read`);
     return Response.json({ ok: true, ...report }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     console.error("deleting closed stores' records failed", error);

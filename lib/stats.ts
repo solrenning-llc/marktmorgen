@@ -1262,10 +1262,20 @@ function invoiceMeta(invoice: Record<string, unknown>): Record<string, string> {
 }
 
 /**
+ * A paid invoice of a membership or payment plan that the checkout did not already count: every billing reason but
+ * "subscription_create" (whose payment is the checkout's), so a period renewal ("subscription_cycle") and a plan
+ * change charged at once ("subscription_update", lib/tier-switch.ts, lib/yearly-switch.ts) are both money kept,
+ * as a refund of either is subtracted (MM-E2E-SUB-1; docs/bx2-earnings-design.md).
+ */
+function paidAfterCheckout(invoice: Record<string, unknown>): boolean {
+  return invoice.status === "paid" && typeof invoice.billing_reason === "string" && invoice.billing_reason !== "subscription_create";
+}
+
+/**
  * The payments after the first of this store's memberships and payment plans
- * since `since` (seconds): paid invoices Stripe made because a period came
- * round (billing_reason "subscription_cycle"), on subscriptions this store
- * opened. At most `pages` pages of a hundred. Pure on what it is handed, so a
+ * since `since` (seconds): paid invoices after the checkout's own
+ * (paidAfterCheckout: a period renewal or a plan change charged at once), on
+ * subscriptions this store opened. At most `pages` pages of a hundred. Pure on what it is handed, so a
  * test can give it invoices.
  */
 export function renewalsFrom(
@@ -1284,7 +1294,7 @@ export function renewalsFrom(
   // and handed on as an ordinary record of own keys, which a page can take.
   const bySourceDay: ChannelDays = Object.create(null);
   for (const invoice of invoices) {
-    if (invoice.status !== "paid" || invoice.billing_reason !== "subscription_cycle") continue;
+    if (!paidAfterCheckout(invoice)) continue;
     const meta = invoiceMeta(invoice);
     if (!handles.has(meta.store ?? "")) continue;
     if (currencyOf(invoice) !== currency) continue;
@@ -1322,7 +1332,7 @@ export function renewalEntries(store: Store, invoices: Record<string, unknown>[]
   const handles = saleHandles(store);
   const out: Entry[] = [];
   for (const invoice of invoices) {
-    if (invoice.status !== "paid" || invoice.billing_reason !== "subscription_cycle") continue;
+    if (!paidAfterCheckout(invoice)) continue;
     const meta = invoiceMeta(invoice);
     if (!handles.has(meta.store ?? "")) continue;
     const cents = typeof invoice.amount_paid === "number" ? invoice.amount_paid : 0;
@@ -1412,7 +1422,7 @@ export async function readInvoicePayments(store: Store, since: number, pages: nu
 /**
  * The paid renewals of this store since `since` (seconds), each with the
  * buyer's address as the invoice has it: the same invoices renewalEntries
- * counts (paid, billing_reason "subscription_cycle", this store's handles),
+ * counts (paidAfterCheckout, this store's handles),
  * at most `pages` pages of a hundred; `partial` when there were more.
  */
 export async function readRenewalPayments(store: Store, since: number, pages: number, deadline = Infinity): Promise<{ rows: RenewalPayment[]; partial: boolean }> {
@@ -1429,7 +1439,7 @@ export async function readRenewalPayments(store: Store, since: number, pages: nu
     )) as { data?: unknown; has_more?: unknown };
     const rows = financialPage(list, seen);
     for (const invoice of rows) {
-      if (invoice.status !== "paid" || invoice.billing_reason !== "subscription_cycle") continue;
+      if (!paidAfterCheckout(invoice)) continue;
       if (!handles.has(invoiceMeta(invoice).store ?? "")) continue;
       const cents = typeof invoice.amount_paid === "number" ? invoice.amount_paid : 0;
       const email = typeof invoice.customer_email === "string" ? invoice.customer_email.trim() : "";

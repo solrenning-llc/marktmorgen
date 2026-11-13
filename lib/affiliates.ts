@@ -2912,10 +2912,16 @@ function bumpCents(value: unknown): number {
  */
 function paidAtOf(session: SessionLike): number | null {
   const intent = session.payment_intent && typeof session.payment_intent === "object" ? (session.payment_intent as { latest_charge?: unknown }) : null;
-  const charge = intent?.latest_charge && typeof intent.latest_charge === "object" ? (intent.latest_charge as { status?: unknown; paid?: unknown; created?: unknown }) : null;
+  const charge = intent?.latest_charge && typeof intent.latest_charge === "object" ? (intent.latest_charge as { status?: unknown; paid?: unknown; balance_transaction?: unknown }) : null;
   if (!charge || charge.status !== "succeeded" || charge.paid !== true) return null;
-  return typeof charge.created === "number" && Number.isSafeInteger(charge.created) && charge.created > 0 ? charge.created : null;
+  // The settlement is the charge's balance transaction, made when the charge succeeds; the charge object's own
+  // `created` comes first for a payment that settles later (Codex T on #1924).
+  const settled = charge.balance_transaction && typeof charge.balance_transaction === "object" ? (charge.balance_transaction as { created?: unknown }).created : undefined;
+  return typeof settled === "number" && Number.isSafeInteger(settled) && settled > 0 ? settled : null;
 }
+
+/** A Stripe time in whole seconds, or null when it is missing or not one. */
+const exactSeconds = (value: unknown): number | null => (typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : null);
 
 /**
  * The time a partner's dated end is compared with (Codex G on #1924): the settled charge's (paidAtOf). Without it, a
@@ -2923,15 +2929,16 @@ function paidAtOf(session: SessionLike): number | null {
  * sale is not known: UnknownReplyError, and the sweep leaves it for the next run (failOrder), never credited on the
  * checkout's time. A checkout opened after every such end was paid after it too, so the checkout's time serves.
  */
-async function paidForPartners(store: Store, session: SessionLike, opened: number, base: number, product: string, partners?: Affiliate[]): Promise<number> {
+async function paidForPartners(store: Store, session: SessionLike, opened: number | null, fallback: number, base: number, product: string, partners?: Affiliate[]): Promise<number> {
   const proven = paidAtOf(session);
   if (proven !== null) return proven;
   if (base > 0 && product) {
     const listed = partners ?? (await listPartners(store));
-    const straddles = listed.some((a) => a.status === "approved" && a.share?.until !== undefined && a.share.products.includes(product) && opened < a.share.until);
+    // A checkout with no exact opening time is never taken as opened after an end (Codex G on #1924).
+    const straddles = listed.some((a) => a.status === "approved" && a.share?.until !== undefined && a.share.products.includes(product) && (opened === null || opened < a.share.until));
     if (straddles) throw new UnknownReplyError("when a sale near a partner's end was paid");
   }
-  return opened;
+  return opened ?? fallback;
 }
 
 /**
@@ -2967,8 +2974,9 @@ export async function noteSession(
         : "";
   const buyer = typeof session.customer_details?.email === "string" ? session.customer_details.email : "";
   const base = Math.max(0, total - tax);
-  const at = typeof session.created === "number" ? session.created : Math.floor(Date.now() / 1000);
-  const paidAt = await paidForPartners(store, session, at, base, meta.product ?? "", partners);
+  const opened = exactSeconds(session.created);
+  const at = opened ?? Math.floor(Date.now() / 1000);
+  const paidAt = await paidForPartners(store, session, opened, at, base, meta.product ?? "", partners);
   const currency = readCurrencyCode(session.currency);
 
   // Partners first, and whatever happens next. A partner shares in the

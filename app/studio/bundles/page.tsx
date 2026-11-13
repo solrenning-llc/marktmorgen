@@ -112,7 +112,7 @@ export default async function StudioBundlesPage({ searchParams }: Params) {
                         }`}
                       >
                         <span className="max-w-[14rem] truncate font-semibold">{b.title}</span>
-                        <span className="shrink-0 rounded-full bg-mint-soft px-2 py-0.5 text-xs font-bold text-mint-deep">
+                        <span className="shrink-0 rounded-full bg-mint-soft px-2 py-0.5 text-xs font-bold text-mint-text">
                           {`${b.bundle?.length ?? 0} in it`}
                         </span>
                       </Link>

@@ -325,7 +325,7 @@ export default async function StudioFunnelsPage({ searchParams }: Params) {
                         <span className="max-w-[14rem] truncate font-semibold">{p.title}</span>
                         <span
                           className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-bold ${
-                            count ? "bg-mint-soft text-mint-deep" : "bg-sand text-ink-mute"
+                            count ? "bg-mint-soft text-mint-text" : "bg-sand text-ink-mute"
                           }`}
                         >
                           {count > 0 ? `${count} ${count === 1 ? "offer" : "offers"}` : count < 0 ? "Offers" : "None"}

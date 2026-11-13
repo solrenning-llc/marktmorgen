@@ -55,9 +55,10 @@ async function main(): Promise<void> {
   part("The page says what it shows");
   const page = readFileSync("app/studio/course/[product]/page.tsx", "utf8");
   // Since unit A (tabs), each tab shows a page at a time with "Showing X–Y of N" and Previous/Next links.
-  is("certificates: a pager over a page of them", /label="Pages of certificates"[\s\S]{0,200}total=\{certificates\.total\}/.test(page), true);
-  is("certificates: the issued count is never one over a partial read", /standing = certificates && !certificates\.partial/.test(page), true);
-  is("students: a pager over a page of them", /label="Pages of students"[\s\S]{0,200}total=\{total\}/.test(page), true);
+  // Since unit C the students and certificates tabs walk a cursor: next page and first page, in no set order.
+  is("certificates: a cursor pager", /<CursorPager label="Pages of certificates"[\s\S]{0,200}next=\{certificates\.next\}/.test(page), true);
+  is("certificates: the issued count only when one page held them all", page.includes('const whole = certificates !== null && cursor === "0" && certificates.next === null && !certificates.tooBig;') && page.includes("const standing = whole ?"), true);
+  is("students: a cursor pager", /<CursorPager label="Pages of students"[\s\S]{0,200}next=\{studentsRead\.next\}/.test(page), true);
   is("the pager says where the page sits", page.includes("`Showing ${first}–${last} of ${total === null ? `at least ${last}` : total}`"), true);
 
   done();

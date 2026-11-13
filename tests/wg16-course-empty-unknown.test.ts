@@ -96,12 +96,12 @@ async function main(): Promise<void> {
   const tabs = readFileSync("lib/studio-course-tabs.ts", "utf8");
   is(
     "the course page keeps an unknown read of the students apart",
-    [tabs.includes("const read = await studentsOf(course, size, size * (page - 1)).catch(() => null);\n  if (!read) return null;"), page.includes('const studentsRead = tab === "students" ? await studentsTab(course, page) : null;')],
+    [tabs.includes("const read = await studentsPage(course, cursor, COURSE_TAB_PAGE.students, TAB_BYTES).catch(() => null);\n  if (!read) return null;"), page.includes('const studentsRead = tab === "students" ? await studentsTab(course, cursor) : null;')],
     [true, true],
   );
   is(
     "and of the certificates",
-    [tabs.includes("return certificatesFor(courseId, size * (page - 1), size).catch(() => null);"), page.includes('const certificates = tab === "certificates" ? await certificatesTab(course.id, page) : null;')],
+    [tabs.includes("return certificatesPage(courseId, cursor, COURSE_TAB_PAGE.certificates, TAB_BYTES).catch(() => null);"), page.includes('const certificates = tab === "certificates" ? await certificatesTab(course.id, cursor) : null;')],
     [true, true],
   );
   is(

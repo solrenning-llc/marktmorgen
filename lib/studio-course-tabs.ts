@@ -5,12 +5,13 @@
  * worst case against that figure and fails when one goes past it.
  *
  * The lessons tab ("course") still reads every lesson video's state in this unit; reading it when a lesson is
- * opened is unit B. The students tab still reads the whole students hash in bytes; an ordered index is unit C.
+ * opened is unit B. The students and certificates tabs walk a cursor (unit C), in no set order: an ordered index
+ * with a migration of the data is a future item for the owner to decide (MODO PRODUZIR).
  */
-import { certificatesFor } from "@/lib/certificate";
+import { certificatesPage } from "@/lib/certificate";
 import type { Course } from "@/lib/course";
 import { lessonsInOrder } from "@/lib/course";
-import { emailKey, studentEmail, studentsOf } from "@/lib/learn";
+import { emailKey, studentEmail, studentsPage } from "@/lib/learn";
 import { passedFor } from "@/lib/quiz";
 import { isUnreadSubmission, submissionsOf, waitingWork } from "@/lib/assignment";
 import { recentComments } from "@/lib/lesson-comments";
@@ -58,18 +59,24 @@ export async function commentsTab(courseId: string, page: number) {
   return recentComments(courseId, size, size * (page - 1));
 }
 
-/** Null when the students could not be read (rule 24). */
-export async function studentsTab(course: Course, page: number) {
-  const size = COURSE_TAB_PAGE.students;
-  const read = await studentsOf(course, size, size * (page - 1)).catch(() => null);
+/** The most bytes one load's answers may come to: STUDIO_PAGE_UNITS studio requests of 50 KB each. */
+export const TAB_BYTES = 200_000;
+
+/** A cursor as it comes in the address: digits, else the first page ("0"). */
+export function tabCursor(raw: unknown): string {
+  return typeof raw === "string" && /^[0-9]{1,20}$/.test(raw) ? raw : "0";
+}
+
+/** A page of the students by cursor (unit C); null when they could not be read (rule 24). */
+export async function studentsTab(course: Course, cursor: string) {
+  const read = await studentsPage(course, cursor, COURSE_TAB_PAGE.students, TAB_BYTES).catch(() => null);
   if (!read) return null;
   const quizLessons = lessonsInOrder(course).filter(({ lesson }) => lesson.quiz).map(({ lesson }) => lesson.id);
-  const passed = quizLessons.length ? await passedFor(course.id, read.students.map((s) => emailKey(s.email))) : [];
+  const passed = quizLessons.length && read.students.length ? await passedFor(course.id, read.students.map((s) => emailKey(s.email))) : [];
   return { ...read, quizLessons, passed };
 }
 
-/** Null when the certificates could not be read (rule 24). */
-export async function certificatesTab(courseId: string, page: number) {
-  const size = COURSE_TAB_PAGE.certificates;
-  return certificatesFor(courseId, size * (page - 1), size).catch(() => null);
+/** A page of the certificates by cursor (unit C); null when they could not be read (rule 24). */
+export async function certificatesTab(courseId: string, cursor: string) {
+  return certificatesPage(courseId, cursor, COURSE_TAB_PAGE.certificates, TAB_BYTES).catch(() => null);
 }

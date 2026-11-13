@@ -33,7 +33,7 @@ import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, SESSION_COOKIE, emailForSession, norma
 import { NIMBUS_FROM, sendEmail, serviceMailKnownUnavailable } from "@/lib/email";
 import { coursesWords } from "@/lib/buyer-words/courses";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, scanPage, stringList } from "@/lib/redis-reply";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { type DataStore, giveData, needData, noteData, takeData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
@@ -635,6 +635,53 @@ export type Student = {
  * students. Only Redis's own empty answer is none; a row that is itself not
  * JSON is skipped, as before.
  */
+/**
+ * One page of a course's students for the studio (issue #4304, unit C, shape decided by the coordinator): a
+ * cursor through the students hash (HSCAN COUNT `count`), never the whole hash, with the total from HLEN and who
+ * is blocked from SMISMEMBER for this page's students only. HSCAN has no order, so the page is sorted by last
+ * visit within itself. A page whose rows come to more than `maxBytes` is not shown (`tooBig`), never taken as
+ * the rest. Null when a reply is not exactly what was asked for (rules 24 and 30).
+ */
+export async function studentsPage(course: Course, cursor: string, count: number, maxBytes: number): Promise<{ students: Student[]; total: number; next: string | null; tooBig: boolean } | null> {
+  if (!isRedisConfigured()) return { students: [], total: 0, next: null, tooBig: false };
+  const page = scanPage(await redisPipeline([["HSCAN", studentsKey(course.id), cursor, "COUNT", count]]));
+  if (!page || page.items.length % 2 !== 0) return null;
+  const next = page.next === "0" ? null : page.next;
+  const tooBig = Buffer.byteLength(JSON.stringify(page.items)) > maxBytes;
+  const rows: StudentRow[] = [];
+  if (!tooBig) {
+    for (let i = 1; i < page.items.length; i += 2) {
+      try {
+        const row = JSON.parse(page.items[i]) as StudentRow;
+        if (row && typeof row.e === "string" && row.e) rows.push(row);
+      } catch {}
+    }
+  }
+  rows.sort((a, b) => b.l - a.l);
+  const keys = rows.map((row) => emailKey(row.e));
+  const head = repliesFor(await redisPipeline([["HLEN", studentsKey(course.id)], ...(keys.length ? [["SMISMEMBER", blockedKey(course.id), ...keys]] : [])]), keys.length ? 2 : 1);
+  const total = head ? countOf(head[0]) : null;
+  const flags = keys.length ? (head ? repliesFor(head[1], keys.length) : null) : [];
+  if (total === null || !flags || flags.some((flag) => flag !== 0 && flag !== 1)) return null;
+  const lessonIds = new Set(lessonsInOrder(course).map(({ lesson }) => lesson.id));
+  const done = rows.length ? repliesFor(await redisPipeline(rows.map((row) => ["SMEMBERS", doneKey(course.id, row.e)])), rows.length) : [];
+  if (!done) return null;
+  const doneLists = done.map(stringList);
+  if (doneLists.some((list) => list === null)) return null;
+  return {
+    total,
+    next,
+    tooBig,
+    students: rows.map((row, i) => ({
+      email: row.e,
+      since: row.s,
+      lastSeen: row.l,
+      done: (doneLists[i] as string[]).filter((id) => lessonIds.has(id)).length,
+      blocked: flags[i] === 1,
+    })),
+  };
+}
+
 export async function studentsOf(course: Course, limit = 500, offset = 0): Promise<{ students: Student[]; total: number } | null> {
   if (!isRedisConfigured()) return { students: [], total: 0 };
   const replies = repliesFor(

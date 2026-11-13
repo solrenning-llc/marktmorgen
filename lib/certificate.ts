@@ -25,6 +25,7 @@
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReply, exactReplies, plainList, replyCount } from "@/lib/redis-exact";
+import { scanPage } from "@/lib/redis-reply";
 import { type DataStore, giveData, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { type Course, lessonsInOrder } from "@/lib/course";
@@ -382,6 +383,33 @@ export async function certificatesFor(courseId: string, offset = 0, limit = MAX_
     .sort((a, b) => b.issuedAt - a.issuedAt);
   const partial = valid.length > reading.length;
   return { list, total: partial ? valid.length : list.length, partial };
+}
+
+/**
+ * One page of a course's certificates for the studio (issue #4304, unit C, shape decided by the coordinator): a
+ * cursor through the set of ids (SSCAN COUNT `count`), never the whole set, with the total from SCARD. SSCAN has
+ * no order, so the page is sorted by date within itself. A page whose records come to more than `maxBytes` is not
+ * shown (`tooBig`). Null when a reply is not exactly what was asked for (rules 24 and 30).
+ */
+export async function certificatesPage(courseId: string, cursor: string, count: number, maxBytes: number): Promise<{ list: Certificate[]; total: number; next: string | null; tooBig: boolean } | null> {
+  if (!isRedisConfigured()) return { list: [], total: 0, next: null, tooBig: false };
+  const page = scanPage(await redisPipeline([["SSCAN", allKey(courseId), cursor, "COUNT", count]]));
+  if (!page) return null;
+  const next = page.next === "0" ? null : page.next;
+  const ids = page.items.filter((id) => CERT_ID_PATTERN.test(id));
+  const replies = plainList(await redisPipeline([["SCARD", allKey(courseId)], ...ids.map((id) => ["GET", certKey(id)])]));
+  if (!replies || replies.length !== ids.length + 1) return null;
+  const total = replies[0];
+  const rows = replies.slice(1);
+  if (typeof total !== "number" || !Number.isSafeInteger(total) || total < 0 || rows.some((row) => row !== null && typeof row !== "string")) return null;
+  const tooBig = Buffer.byteLength(JSON.stringify(rows)) > maxBytes;
+  const list = tooBig
+    ? []
+    : rows
+        .map(parseCertificate)
+        .filter((c): c is Certificate => c !== null && c.courseId === courseId)
+        .sort((a, b) => b.issuedAt - a.issuedAt);
+  return { list, total, next, tooBig };
 }
 
 /**

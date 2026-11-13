@@ -17,7 +17,7 @@ import { lessonCount, lessonsInOrder, readCourse } from "@/lib/course";
 import { captionsAnchor, lessonCaptionCheck } from "@/lib/course-access-check";
 import { CourseAccessCheck } from "@/components/course-access-check";
 import { canSellProduct } from "@/lib/store-checkout";
-import { COURSE_TAB_PAGE, MAX_TAB_PAGES, MAX_WORK_PAGES, type CourseTab, certificatesTab, commentsTab, courseTab, studentsTab, tabPage, workTab } from "@/lib/studio-course-tabs";
+import { COURSE_TAB_PAGE, MAX_TAB_PAGES, MAX_WORK_PAGES, type CourseTab, certificatesTab, commentsTab, courseTab, studentsTab, tabCursor, tabPage, workTab } from "@/lib/studio-course-tabs";
 import { CertificateValidity } from "@/components/certificate-validity";
 import {
   CertificateSwitch, CourseStart,
@@ -86,6 +86,30 @@ function TabPager({ label, noun, page, size, shown, total, maxPages, href }: { l
   );
 }
 
+/**
+ * Pages read by cursor (issue #4304, unit C): a cursor through the set has no way back, so the links are the next
+ * page and the first one, each its own request.
+ */
+function CursorPager({ label, noun, size, cursor, next, href }: { label: string; noun: string; size: number; cursor: string; next: string | null; href: (cursor: string) => string }) {
+  if (cursor === "0" && next === null) return null;
+  return (
+    <nav aria-label={label} className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
+      {cursor !== "0" ? (
+        <Link href={href("0")} className="inline-block min-h-11 py-3 font-bold text-ink-soft underline underline-offset-4 hover:text-violet-deep">
+          {`First page of ${noun}`}
+        </Link>
+      ) : null}
+      {next !== null ? (
+        <Link href={href(next)} className="inline-block min-h-11 py-3 font-bold text-ink-soft underline underline-offset-4 hover:text-violet-deep">
+          {`Next ${size} ${noun}`}
+        </Link>
+      ) : (
+        <p className="text-ink-soft">{`That is every one of the ${noun}.`}</p>
+      )}
+    </nav>
+  );
+}
+
 /** Where a creator builds a course: modules, lessons, and who is taking it. */
 export default async function StudioCoursePage({
   params,
@@ -139,7 +163,9 @@ export default async function StudioCoursePage({
   const shelfSaved = shelfTitles ? (course.shelf ?? []).filter((pid) => shelfTitles.has(pid)).map((pid) => ({ id: pid, title: shelfTitles.get(pid)! })) : [];
 
   // Students: a page of them; null when they could not be read (rule 24), never "No students yet" or counts of 0.
-  const studentsRead = tab === "students" ? await studentsTab(course, page) : null;
+  // By cursor (unit C): HSCAN has no order, so a page is sorted within itself and the page says so.
+  const cursor = tabCursor(query.cursor);
+  const studentsRead = tab === "students" ? await studentsTab(course, cursor) : null;
   const students = studentsRead?.students ?? [];
   const total = studentsRead?.total ?? 0;
   const quizLessons = studentsRead?.quizLessons ?? [];
@@ -148,9 +174,10 @@ export default async function StudioCoursePage({
   const started = students.filter((s) => s.done > 0).length;
 
   // Certificates: a page of them; null when they could not be read.
-  const certificates = tab === "certificates" ? await certificatesTab(course.id, page) : null;
-  // Counted only over a complete read: over a partial one the page says "Showing X–Y of N" instead.
-  const standing = certificates && !certificates.partial ? certificates.list.filter((c) => !c.withdrawnAt).length : null;
+  const certificates = tab === "certificates" ? await certificatesTab(course.id, cursor) : null;
+  // Counted only when this one page held every certificate; otherwise the page says how many there are in all.
+  const whole = certificates !== null && cursor === "0" && certificates.next === null && !certificates.tooBig;
+  const standing = whole ? certificates.list.filter((c) => !c.withdrawnAt).length : null;
 
   // Work handed in for the course's assignments (lib/assignment.ts): what is waiting, or everything, a page of it.
   const showingWork = query.work === "all" ? "all" : "waiting";
@@ -364,9 +391,14 @@ export default async function StudioCoursePage({
           </div>
 
           <h3 className="mt-7 font-semibold text-ink">{standing === null ? "Completions" : `Completions \u00b7 ${standing} ${standing === 1 ? "certificate" : "certificates"} issued`}</h3>
-          {certificates?.partial ? (
+          {certificates && !whole ? (
             <p className="mt-2 text-sm text-ink-soft">
-              {`${certificates.total} certificates in all, ${COURSE_TAB_PAGE.certificates} on each page, so how many are still standing is not counted here.`}
+              {`${certificates.total} certificates in all, in no set order, about ${COURSE_TAB_PAGE.certificates} on each page and sorted by date within it, so how many are still standing is not counted here.`}
+            </p>
+          ) : null}
+          {certificates?.tooBig ? (
+            <p role="status" className="notice mt-3">
+              This page of certificates is too large to show, so the rest could not be read here. Go to the next page, or reload in a moment.
             </p>
           ) : null}
           {certificates === null ? (
@@ -421,7 +453,7 @@ export default async function StudioCoursePage({
             </div>
           )}
           {certificates ? (
-            <TabPager label="Pages of certificates" noun="certificates" page={page} size={COURSE_TAB_PAGE.certificates} shown={certificates.list.length} total={certificates.total} maxPages={MAX_TAB_PAGES} href={(at) => tabHref("certificates", at)} />
+            <CursorPager label="Pages of certificates" noun="certificates" size={COURSE_TAB_PAGE.certificates} cursor={cursor} next={certificates.next} href={(at) => tabHref("certificates", 1, at === "0" ? "" : `cursor=${at}`)} />
           ) : null}
         </section>
           </>
@@ -450,9 +482,14 @@ export default async function StudioCoursePage({
               </div>
             </div>
           )}
-          {studentsRead !== null && total > students.length ? (
+          {studentsRead !== null && (cursor !== "0" || studentsRead.next !== null) ? (
             <p className="mt-3 text-sm text-ink-soft">
-              {`${total} students in all, the most recently here first, ${COURSE_TAB_PAGE.students} on each page. The lessons finished above count only the students on this page.`}
+              {`${total} students in all, in no set order, about ${COURSE_TAB_PAGE.students} on each page and sorted by last visit within it. The lessons finished above count only the students on this page.`}
+            </p>
+          ) : null}
+          {studentsRead?.tooBig ? (
+            <p role="status" className="notice mt-3">
+              This page of students is too large to show, so the rest could not be read here. Go to the next page, or reload in a moment.
             </p>
           ) : null}
           {studentsRead === null ? (
@@ -506,7 +543,7 @@ export default async function StudioCoursePage({
             </div>
           )}
           {studentsRead ? (
-            <TabPager label="Pages of students" noun="students" page={page} size={COURSE_TAB_PAGE.students} shown={students.length} total={total} maxPages={MAX_TAB_PAGES} href={(at) => tabHref("students", at)} />
+            <CursorPager label="Pages of students" noun="students" size={COURSE_TAB_PAGE.students} cursor={cursor} next={studentsRead.next} href={(at) => tabHref("students", 1, at === "0" ? "" : `cursor=${at}`)} />
           ) : null}
         </section>
           </>

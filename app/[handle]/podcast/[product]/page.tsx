@@ -13,6 +13,7 @@ import { speech } from "@/lib/buyer-words";
 import { coursesWords } from "@/lib/buyer-words/courses";
 import { SESSION_COOKIE } from "@/lib/auth";
 import { seesDrafts } from "@/lib/draft-view";
+import { ArrivalNotice } from "@/components/arrival-notice";
 
 type Params = {
   params: Promise<{ handle: string; product: string }>;
@@ -88,10 +89,11 @@ export default async function PodcastPage({ params, searchParams }: Params) {
           ) : (
             <>
               {notice ? (
-                <div className="mt-5" role={status === "sent" ? "status" : "alert"}>
+                // A plain form sent it back here: the answer takes the focus once (WCAG 2.4.3, 4.1.3).
+                <ArrivalNotice className="mt-5">
                   <p className="font-semibold" style={{ color: "var(--st-text)" }}>{notice.title}</p>
-                  <p className="st-muted mt-1">{notice.body}</p>
-                </div>
+                  <p id={`podcast-why-${product.id}`} className="st-muted mt-1">{notice.body}</p>
+                </ArrivalNotice>
               ) : (
                 <p className="st-muted mt-4 text-lg">{w.boughtIt}</p>
               )}
@@ -100,7 +102,7 @@ export default async function PodcastPage({ params, searchParams }: Params) {
                 <input type="hidden" name="product" value={product.id} />
                 <div>
                   <label htmlFor={`podcast-email-${product.id}`} className="st-label">{said.w.yourEmail}</label>
-                  <EmailField id={`podcast-email-${product.id}`} name="email" className="st-field mt-2" required autoComplete="email" placeholder={said.w.emailPlaceholder} language={store.language} />
+                  <EmailField id={`podcast-email-${product.id}`} name="email" className="st-field mt-2" required autoComplete="email" placeholder={said.w.emailPlaceholder} language={store.language} describedBy={status === "email" ? `podcast-why-${product.id}` : undefined} />
                 </div>
                 <button type="submit" className="btn st-btn btn-block">{w.emailMyFeed}</button>
               </form>

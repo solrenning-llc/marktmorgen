@@ -48,9 +48,9 @@ const ALLOWANCE_TAKE_INVENTORY: Record<string, Entry> = {
   "lib/api-guard.ts#holdMoreApi": { state: "gated", calls: 1 },
   "lib/api-write.ts#addLead": { state: "gated", calls: 1 },
   "lib/api-write.ts#giveAccess": { state: "gated", calls: 1 },
-  "lib/broadcasts.ts#createBroadcast": { state: "pending", calls: 1, why: "Studio units held for reading a list; the send proves the cohort in lib/mail.ts, this reading does not." },
-  "lib/broadcasts.ts#readNarrowing": { state: "pending", calls: 1, why: "Studio units for narrowing a list before a send; no cohort proof before the take." },
-  "lib/broadcasts.ts#countTest": { state: "pending", calls: 1, why: "Studio units for an A/B test's counts; no cohort proof before the take." },
+  "lib/broadcasts.ts#createBroadcast": { state: "gated", calls: 1 },
+  "lib/broadcasts.ts#readNarrowing": { state: "gated", calls: 1, note: "Refused, the broadcast waits and is read again later, as when its window is unknown." },
+  "lib/broadcasts.ts#countTest": { state: "gated", calls: 1, note: "Refused, the test is decided without its sales, as when they cannot be counted." },
   "lib/buyer-actions.ts#takeBuyerAction": { state: "gated", calls: 2 },
   "lib/cart-link-products.ts#cartLinkProducts": { state: "settles", calls: 1, after: "lib/studio-route.ts#countStudio" },
   "lib/dispute-preorder-review.ts#readRetainedPreorderReview": { state: "gated", calls: 1 },
@@ -215,7 +215,7 @@ is("no problem between sources, inventory and key", problems, []);
 is("the scan finds every take (29 on 13 November 2026)", allowanceSites(sources).length, Object.values(ALLOWANCE_TAKE_INVENTORY).reduce((n, e) => n + e.calls, 0));
 const pending = Object.values(ALLOWANCE_TAKE_INVENTORY).filter((e) => e.state === "pending").length;
 const pendingCalls = Object.values(ALLOWANCE_TAKE_INVENTORY).filter((e) => e.state === "pending").reduce((n, e) => n + e.calls, 0);
-is("pending takes, down from 11 (part 1) as part 1b gates them", pendingCalls, 3);
+is("pending takes, down from 11 (part 1) as part 1b gates them", pendingCalls, 0);
 is("pending takes keep resourceAllocations false", pending > 0 && CONTRACT_ADMISSION_COVERAGE.resourceAllocations, false);
 is("the other two core keys are untouched", [CONTRACT_ADMISSION_COVERAGE.renewals, CONTRACT_ADMISSION_COVERAGE.settlementAndReserveReconciliation], [false, false]);
 

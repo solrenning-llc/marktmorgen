@@ -57,6 +57,9 @@ export function keyName(name: string): string {
     .replace(/[^A-Za-z0-9._-]+/g, "-")
     .replace(/-{2,}/g, "-")
     .replace(/-+\./g, ".")
+    // Dots in a row become one ("…" is three once NFKD has taken it apart): a path holding ".." is refused by
+    // isVaultPath, so an upload under one would open at the store and could never be signed, joined or cancelled.
+    .replace(/\.{2,}/g, ".")
     .replace(/^[-.]+|[-.]+$/g, "");
   return plain.slice(-120) || "file";
 }

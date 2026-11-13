@@ -377,6 +377,50 @@ async function main(): Promise<void> {
     is("no Proxy trap was run", traps, 0);
   }
 
+  part("A batch written while the settling takes the store off the index stays where the daily job reads it (#4395)");
+  {
+    const INDEX = "nl:pp:stores";
+    const real = redis.pipeline.bind(redis);
+    /** Runs `between` once, right before the first command that takes the store off the index is forwarded. */
+    const raceOn = (between: () => Promise<unknown>) => {
+      let raced = false;
+      redis.pipeline = (async (commands: (string | number)[][]) => {
+        const drop = commands.some((c) => (c[0] === "SREM" || c[0] === "EVAL") && c.includes(INDEX));
+        if (drop && !raced) {
+          raced = true;
+          redis.pipeline = real;
+          await between();
+        }
+        return real(commands);
+      }) as typeof redis.pipeline;
+      return () => raced;
+    };
+    const indexed = async () => (await real([["SISMEMBER", INDEX, store.sid]]))[0];
+    try {
+      await seed(store);
+      next = "make";
+      const raced = raceOn(() => payWithPayPal(store));
+      await settlePayPal(store);
+      is("empty snapshot: the race happened and the new batch is in the hash", [raced(), await fields()], [true, ["BATCH1REC"]]);
+      is("empty snapshot: the store is still in the index the daily job reads", await indexed(), 1);
+
+      await seed(store);
+      next = "make";
+      is("a first batch is made", (await payWithPayPal(store)).ok, true);
+      const later = raceOn(() => real([["HSET", OPEN, "BATCH9REC", JSON.stringify({ at: Date.now(), currency: "usd", lines: [{ a: "bbbbbbbbbbbb", c: 1500 }] })]]));
+      await settlePayPal(store);
+      is("every batch of the snapshot settled: the race happened and the batch written meanwhile is in the hash", [later(), await fields()], [true, ["BATCH9REC"]]);
+      is("every batch of the snapshot settled: the store is still in the index the daily job reads", await indexed(), 1);
+
+      await seed(store);
+      await real([["SADD", INDEX, store.sid]]);
+      await settlePayPal(store);
+      is("nothing open and nothing written meanwhile: the store leaves the index", await indexed(), 0);
+    } finally {
+      redis.pipeline = real;
+    }
+  }
+
   part("The studio says it, with the way to look in PayPal");
   const panel = readFileSync("components/paypal-payouts.tsx", "utf8");
   is("words for a batch being checked and one that needs a manual check, and PayPal's activity page", [/being checked with PayPal/.test(panel), /check them in your PayPal activity/.test(panel), /href="https:\/\/www\.paypal\.com\/myaccount\/activities\/"/.test(panel)], [true, true, true]);

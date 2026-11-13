@@ -500,12 +500,28 @@ export type StartedSubscription = {
 };
 
 /**
+ * Whether a plan checkout's address and customer make it this store's, by
+ * ownedBy's rule: the store may have changed its address since the checkout
+ * opened (renaming does not rewrite Stripe's metadata). Its current and
+ * earlier addresses lead only here; one it let go may be another creator's
+ * now, so it counts only with this store's own customer. Its current address
+ * counts first, as it always did: one it let go of and took back stays on the
+ * released list, and a first plan's checkout makes a new customer.
+ */
+function sessionOwnedBy(store: Store, named: unknown, customerId: string): boolean {
+  if (typeof named !== "string" || !named) return false;
+  if (named === store.handle) return true;
+  if ((store.releasedHandles ?? []).includes(named)) return Boolean(store.stripeCustomerId) && customerId === store.stripeCustomerId;
+  return (store.previousHandles ?? []).includes(named);
+}
+
+/**
  * Reads a returning checkout session and says what it actually created.
  *
  * The session id arrives in a URL the creator's browser followed, so it is
  * treated as a claim, not a fact: it must look like a session id, Stripe must
- * know it, it must be a subscription, and its metadata must name this very
- * store. A session from somewhere else buys nothing here.
+ * know it, it must be a subscription, and its metadata must name an address of
+ * this very store (sessionOwnedBy). A session from somewhere else buys nothing here.
  */
 export async function readStartedSubscription(
   store: Store,
@@ -526,9 +542,9 @@ export async function readStartedSubscription(
 
   if (session.mode !== "subscription") return null;
   const metadata = session.metadata as Record<string, string> | null;
-  if (metadata?.store !== store.handle) return null;
-
   const customerId = typeof session.customer === "string" ? session.customer : "";
+  if (!metadata || !sessionOwnedBy(store, metadata.store, customerId)) return null;
+
   const subscriptionId =
     typeof session.subscription === "string" ? session.subscription : "";
   if (!CUSTOMER_PATTERN.test(customerId)) return null;
@@ -541,7 +557,7 @@ export async function readStartedSubscription(
     const subscription=await subscriptionRecord(subscriptionId);
     if(!subscription||subscription.id!==subscriptionId||subscription.customer!==customerId)return null;
     const meta=subscription.metadata as Record<string,unknown>|null;
-    if(meta?.store!==store.handle||meta?.funding_grant!==metadata.funding_grant||meta?.funding_review!==metadata.funding_review)return null;
+    if(meta?.store!==metadata.store||meta?.funding_grant!==metadata.funding_grant||meta?.funding_review!==metadata.funding_review)return null;
     state=stateOf(subscription);
     if(state.state!=="active"||state.changePending)return null;
     const items=subscription.items as {data?:{quantity?:unknown;price?:Record<string,unknown>}[]}|undefined;
@@ -1514,6 +1530,13 @@ export function ownedBy(store: Store, subscription: Record<string, unknown>): bo
   // An address this store let go of may be another store's now: a
   // subscription under it is this store's only when it pays as this store's
   // own customer, never by the email address alone.
+  // This runs before the current-address check on purpose, unlike
+  // sessionOwnedBy: an address let go of and then taken back stays on the
+  // released list, and a subscription seen here (webhook, daily sync) may be
+  // one another creator bought while holding it. sessionOwnedBy reads a
+  // checkout this store just opened, whose first plan makes a customer the
+  // store has not saved yet, so it counts the current address first. Do not
+  // align the two orders.
   if (store.releasedHandles.includes(named)) return sameCustomer;
   const handles = new Set([store.handle, ...store.previousHandles]);
   if (!handles.has(named)) return false;
@@ -1565,19 +1588,26 @@ async function activateObservedSwitch(statsId:string,grantId:string,reviewId:str
  if(items?.data?.length!==1||items.data[0].quantity!==1||price?.currency!=='usd'||recurring?.interval!==state.cycle||recurring?.interval_count!==1||state.amountCents!==PUBLISHED_PLAN_PRICES[state.tier][state.cycle])return false;
  return activateSwitchContract({statsId,grantId,reviewId,subscriptionId,tier:state.tier,cycle:state.cycle,createdSeconds:subscription.created as number,trialing:state.trialing,periodStartSeconds:(state.trialing?subscription.trial_start:periodStart(subscription)) as number,periodEndSeconds:(state.trialing?subscription.trial_end:periodEnd(subscription,false)) as number});
 }
+/**
+ * The plan as observed, once its funding (if any) is acknowledged. Whose it is
+ * is ownedBy's word alone: renaming does not rewrite the address in Stripe, so
+ * a store's own plan stays under the address it was bought with, an earlier
+ * one or one let go (then only with this store's own customer). The funded
+ * receipt itself is bound to the store's statsId (lib/contract-funding.ts).
+ */
 export async function startedFromObservedSubscription(store:Store,subscription:Record<string,unknown>):Promise<StartedSubscription|null>{
  const started=startedFrom(subscription);
  if(!started)return null;
  const meta=subscription.metadata as Record<string,unknown>|null|undefined;
  if(hasSwitchFunding(subscription)){
-  if(!ownedBy(store,subscription)||meta?.store!==store.handle||meta?.funding_action!==undefined&&meta.funding_action!=='switch')return null;
+  if(!ownedBy(store,subscription)||meta?.funding_action!==undefined&&meta.funding_action!=='switch')return null;
   const pending=meta?.funding_pending_grant!==undefined||meta?.funding_pending_review!==undefined;
   const grantId=pending?meta?.funding_pending_grant:meta?.funding_grant,reviewId=pending?meta?.funding_pending_review:meta?.funding_review;
   if(typeof grantId!=='string'||typeof reviewId!=='string')return null;
   return await activateObservedSwitch(store.statsId??'',grantId,reviewId,started.subscriptionId,subscription)?{...started,period:fundedPeriod(started.period)}:null;
  }
  if(meta?.funding_grant===undefined&&meta?.funding_review===undefined)return started;
- if(!ownedBy(store,subscription)||meta?.store!==store.handle||typeof meta.funding_grant!=="string"||typeof meta.funding_review!=="string")return null;
+ if(!ownedBy(store,subscription)||typeof meta.funding_grant!=="string"||typeof meta.funding_review!=="string")return null;
  const state=stateOf(subscription);
  if(state.state!=="active"||state.changePending)return null;
  const items=subscription.items as {data?:{quantity?:unknown;price?:Record<string,unknown>}[]}|undefined;

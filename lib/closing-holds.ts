@@ -488,6 +488,9 @@ export async function releaseHolds(store: Store, until: number, nowSeconds = Mat
   return out;
 }
 
+/** The outcomes a refund is written down with (PaidPeriod.r). */
+const PAID_OUTCOMES = ["done", "short", "disputed", "pending", "none", "over"] as const satisfies readonly NonNullable<PaidPeriod["r"]>[];
+
 /** One written-down payment, with every field the refunds and the notices read; null for anything else. */
 function paidRowOf(text: string): PaidPeriod | null {
   let row: unknown;
@@ -498,8 +501,14 @@ function paidRowOf(text: string): PaidPeriod | null {
   }
   if (!row || typeof row !== "object" || Array.isArray(row)) return null;
   const r = row as Record<string, unknown>;
-  const number = (v: unknown) => typeof v === "number" && Number.isFinite(v);
-  if (typeof r.inv !== "string" || !number(r.amt) || typeof r.cur !== "string" || !number(r.ps) || !number(r.pe) || typeof r.e !== "string") return null;
+  // Each field in the shape paidPeriodOf and savePaidPeriod write it (Claude 7's note 1 on #4454): amounts and times
+  // are safe whole numbers from 0, the money three lower-case letters, the outcome one of its six, f and m only 1.
+  // A corrupted row is unknown, never one still to refund (an odd `r` would read as unsettled).
+  const whole = (v: unknown) => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
+  const optional = (v: unknown, ok: (v: unknown) => boolean) => v === undefined || ok(v);
+  if (typeof r.inv !== "string" || !whole(r.amt) || typeof r.cur !== "string" || !/^[a-z]{3}$/.test(r.cur) || !whole(r.ps) || !whole(r.pe) || typeof r.e !== "string") return null;
+  if (!optional(r.pi, (v) => typeof v === "string") || !optional(r.tot, whole) || !optional(r.back, whole) || !optional(r.want, whole)) return null;
+  if (!optional(r.r, (v) => (PAID_OUTCOMES as readonly unknown[]).includes(v)) || !optional(r.f, (v) => v === 1) || !optional(r.m, (v) => v === 1)) return null;
   return row as PaidPeriod;
 }
 

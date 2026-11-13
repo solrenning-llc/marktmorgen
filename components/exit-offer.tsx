@@ -18,7 +18,10 @@ const QUIET_DAYS = 30;
  *   - Only on a computer, when the pointer leaves through the top of the
  *     window — the move toward the tabs or the address bar — and only after
  *     the visitor has been on the page a few seconds. Never on a phone, where
- *     "about to leave" cannot be told from scrolling, and never on load.
+ *     "about to leave" cannot be told from scrolling, never on load, and never
+     while a field, a box or an editable block has the focus, so it never takes
+     the keyboard away from an address being typed
+     (tests/exit-offer-interruption.test.ts).
  *   - Once per visitor per store in a month, remembered in this browser only.
  *     Closed with the button, Escape, or a click outside; nothing comes back.
  *   - It offers something free, says so, and asks for nothing but an address,
@@ -58,6 +61,11 @@ export function ExitOffer({
     if (!armed) return;
     const leave = (event: MouseEvent) => {
       if (event.relatedTarget !== null || event.clientY > 0) return;
+      // Never over what the visitor is filling in: a dialog takes the keyboard focus, and the pointer moving
+      // toward the tabs is not a request for one (WCAG 3.2.5 Change on Request, 2.2.4 Interruptions). Nothing is
+      // remembered, so the offer is still free to come later in the same visit, once the field is left.
+      const busy = document.activeElement as (Element & { isContentEditable?: boolean }) | null;
+      if (busy && (["INPUT", "TEXTAREA", "SELECT"].includes(busy.tagName) || busy.isContentEditable)) return;
       document.removeEventListener("mouseout", leave);
       try {
         window.localStorage.setItem(key, String(Date.now()));

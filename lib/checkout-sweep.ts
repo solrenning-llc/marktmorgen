@@ -386,7 +386,8 @@ async function walkDay(store: Store, kind: WalkKind, since: number, deadline: nu
   let ended = false;
   try {
     for (let page = 0; page < MAX_PAGES_PER_STORE && Date.now() < deadline; page += 1) {
-      const query = `/checkout/sessions?limit=100&status=${kind}&created[gte]=${since}${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`;
+      // Each checkout with its payment's charge, whose time decides a partner's dated end (lib/affiliates.ts paidAtOf).
+      const query = `/checkout/sessions?limit=100&status=${kind}&created[gte]=${since}&expand[]=data.payment_intent.latest_charge${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`;
       let listed: Record<string, unknown>;
       try {
         listed = await onAccount("GET", account, query);

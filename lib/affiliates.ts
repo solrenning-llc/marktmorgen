@@ -2905,13 +2905,33 @@ function bumpCents(value: unknown): number {
 }
 
 /**
- * When the buyer paid, for a partner's end (630 [HN6](39)): the payment's own time when Stripe sent the payment
- * expanded, which a checkout opened before an end and paid after it needs (review of #1924); otherwise `opened`, the
- * checkout's, the only time known then. A sale's own `at` stays the checkout's, as it always was.
+ * When the buyer paid, for a partner's end (630 [HN6](39)): the time of the payment's settled charge
+ * (`payment_intent.latest_charge`, expanded by the sweep), succeeded and paid. Neither the intent's own `created` (made
+ * before the buyer pays) nor the checkout's opening is a payment time (Codex G on #1924): without a settled charge's
+ * time this is null, not known. A sale's own `at` stays the checkout's, as it always was.
  */
-function paidAtOf(session: SessionLike, opened: number): number {
-  const created = session.payment_intent && typeof session.payment_intent === "object" ? (session.payment_intent as { created?: unknown }).created : undefined;
-  return typeof created === "number" && Number.isSafeInteger(created) && created > 0 ? Math.max(opened, created) : opened;
+function paidAtOf(session: SessionLike): number | null {
+  const intent = session.payment_intent && typeof session.payment_intent === "object" ? (session.payment_intent as { latest_charge?: unknown }) : null;
+  const charge = intent?.latest_charge && typeof intent.latest_charge === "object" ? (intent.latest_charge as { status?: unknown; paid?: unknown; created?: unknown }) : null;
+  if (!charge || charge.status !== "succeeded" || charge.paid !== true) return null;
+  return typeof charge.created === "number" && Number.isSafeInteger(charge.created) && charge.created > 0 ? charge.created : null;
+}
+
+/**
+ * The time a partner's dated end is compared with (Codex G on #1924): the settled charge's (paidAtOf). Without it, a
+ * partner whose share of this product ends after the checkout opened may have been paid for after the end, so the
+ * sale is not known: UnknownReplyError, and the sweep leaves it for the next run (failOrder), never credited on the
+ * checkout's time. A checkout opened after every such end was paid after it too, so the checkout's time serves.
+ */
+async function paidForPartners(store: Store, session: SessionLike, opened: number, base: number, product: string, partners?: Affiliate[]): Promise<number> {
+  const proven = paidAtOf(session);
+  if (proven !== null) return proven;
+  if (base > 0 && product) {
+    const listed = partners ?? (await listPartners(store));
+    const straddles = listed.some((a) => a.status === "approved" && a.share?.until !== undefined && a.share.products.includes(product) && opened < a.share.until);
+    if (straddles) throw new UnknownReplyError("when a sale near a partner's end was paid");
+  }
+  return opened;
 }
 
 /**
@@ -2948,7 +2968,7 @@ export async function noteSession(
   const buyer = typeof session.customer_details?.email === "string" ? session.customer_details.email : "";
   const base = Math.max(0, total - tax);
   const at = typeof session.created === "number" ? session.created : Math.floor(Date.now() / 1000);
-  const paidAt = paidAtOf(session, at);
+  const paidAt = await paidForPartners(store, session, at, base, meta.product ?? "", partners);
   const currency = readCurrencyCode(session.currency);
 
   // Partners first, and whatever happens next. A partner shares in the

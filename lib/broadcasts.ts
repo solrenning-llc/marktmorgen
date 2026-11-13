@@ -17,11 +17,12 @@ import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { hasPlaceholder } from "@/lib/mail-body";
 import { randomBytes, randomInt } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { needData, takeData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { WHO, type Who, audience, readTags } from "@/lib/contacts";
 import { PORTION_NOTE, pauseNote } from "@/lib/mail-health";
-import { BATCH_SIZE, MAX_MAIL_BODY, MAX_SUBJECT, SENDER_WAIT_NOTE, monthlyAllowance, sendTo, usedThisMonth } from "@/lib/mail";
+import { BATCH_SIZE, MAX_MAIL_BODY, MAX_SUBJECT, SENDER_WAIT_NOTE, monthlyAllowance, sendTo, usedThisMonthExact } from "@/lib/mail";
 import { WINDOW_ID, allowanceWindow, opensAgainWords, windowId } from "@/lib/allowance-window";
 import { refreshPeriod } from "@/lib/billing-sync";
 import { costStandingOf } from "@/lib/plan-standing";
@@ -117,6 +118,14 @@ export type Broadcast = {
   misses?: number;
   /** A waiting email is not tried before this moment (seconds): the month whose studio requests it waits for, or a failed reading's wait. */
   retryAt?: number;
+  /**
+   * Addresses on its list the email service refused for good (lib/mail.ts
+   * sendTo, `refused`): counted in `sent` as gone through, but not sent. Of
+   * them, `removed` were refused as addresses and taken off the list. Absent
+   * on an email that met none.
+   */
+  refused?: number;
+  removed?: number;
 };
 
 /** Creation may have been partially written even when its acknowledgement is lost. */
@@ -156,6 +165,10 @@ export const NO_BUYERS_NOTE = "Your store can no longer read its sales (Stripe a
 export const LIST_RETRY_SECONDS = 3_600;
 /** Said when a narrowed email's list could not be made now for a reason that passes: tried again in an hour. */
 const LIST_WAIT_NOTE = "The list of who it goes to could not be prepared just now. Nothing was sent. It is tried again in an hour.";
+/** Said on an email due while its store is switched off after notices about its content (lib/takedown.ts): it waits. */
+const SWITCHED_OFF_NOTE = "Your store is switched off after notices about its content, so nothing was sent. It goes out by itself once your store is back on.";
+/** The same for an email part of the way out: the rest wait. */
+const SWITCHED_OFF_PART_NOTE = "Your store is switched off after notices about its content, so nothing more was sent. The rest go out by themselves once your store is back on.";
 /** Said on an email to the whole list canceled because, when it was due, the plan was not paid and running: nothing read, sent or used. */
 export const PLAN_OFF_NOTE = "Your plan was not active when this email was due, so it was canceled. Nothing was sent and none of your studio requests were used for it. To send it, write it again while your plan is on.";
 /**
@@ -182,6 +195,19 @@ export function readsSpentNote(waiting: string): string {
 
 /** The longest note a broadcast's record was given room for (createBroadcast). */
 export const NOTE_ROOM = 300;
+
+/** What the studio says when the email service refused an email to the list as it is, for everyone in a batch. */
+export const REFUSED_EMAIL_NOTE = "The email service refused this email as it is, so nothing more was sent. The saved recipient list is retained.";
+
+/** What the studio says of the addresses the email service refused for good (Broadcast `refused`, `removed`); empty for none. */
+export function refusedNote(refused: number, removed: number): string {
+  if (!refused) return "";
+  const one = refused === 1;
+  const told = `${refused} ${one ? "address" : "addresses"} on your list ${one ? "was" : "were"} not accepted by the email service, so ${one ? "it" : "they"} did not get this email.`;
+  if (removed >= refused) return `${told} The email service refused ${one ? "the address itself, so it was" : "the addresses themselves, so they were"} taken off your list.`;
+  if (removed > 0) return `${told} ${removed} of them ${removed === 1 ? "was" : "were"} refused as ${removed === 1 ? "an address" : "addresses"} and taken off your list.`;
+  return told;
+}
 const QUEUE = "nl:mail:queue";
 const bcKey = (id: string) => `nl:mail:bc:${id}`;
 const toKey = (id: string) => `nl:mail:bc:${id}:to`;
@@ -212,15 +238,30 @@ function parse(raw: unknown): Broadcast | null {
   }
 }
 
+/**
+ * One campaign's record. Null only when Redis answers its own nil (not there, or expired after RECORD_DAYS); a reply
+ * in any other shape throws BroadcastsUnreadable (rule 24), never "this email does not exist".
+ */
 export async function readBroadcast(id: string): Promise<Broadcast | null> {
   if (!BROADCAST_ID.test(id) || !isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["GET", bcKey(id)]]);
-  return parse(raw);
+  const response = await redisPipeline([["GET", bcKey(id)]]);
+  if (!Array.isArray(response) || response.length !== 1) throw new BroadcastsUnreadable("a campaign's record");
+  if (response[0] === null) return null;
+  const b = parse(response[0]);
+  if (!b) throw new BroadcastsUnreadable("a campaign's record");
+  return b;
 }
 
 async function save(b: Broadcast): Promise<void> {
   const response = await redisPipeline([["SET", bcKey(b.id), JSON.stringify(b), "EX", RECORD_DAYS * 86_400]]);
   if (!Array.isArray(response) || response.length !== 1 || response[0] !== "OK") throw new Error("Campaign progress write could not be confirmed");
+}
+
+/** The ids LRANGE answered, when they are exactly a list of ids this code writes (rule 24, repliesFor/stringList); null otherwise. Pure. */
+function listedIds(response: unknown, limit: number): string[] | null {
+  const ids = stringList(repliesFor(response, 1)?.[0]);
+  if (!ids || ids.length > limit || !ids.every((id) => BROADCAST_ID.test(id)) || new Set(ids).size !== ids.length) return null;
+  return ids;
 }
 
 /**
@@ -230,23 +271,46 @@ async function save(b: Broadcast): Promise<void> {
  */
 export async function broadcastSizes(listId: string | null, limit = 30): Promise<{ count: number; bytes: number } | null> {
   if (!listId || !isRedisConfigured()) return { count: 0, bytes: 0 };
-  const [ids] = await redisPipeline([["LRANGE", listKey(listId), 0, limit - 1]]);
-  const list = Array.isArray(ids) ? (ids as string[]) : [];
+  // Only Redis's own list of ids: any other answer is unknown, never "no campaigns".
+  const list = listedIds(await redisPipeline([["LRANGE", listKey(listId), 0, limit - 1]]), limit);
+  if (!list) return null;
   if (!list.length) return { count: 0, bytes: 0 };
-  const lengths = (await redisPipeline(list.map((id) => ["STRLEN", bcKey(id)]))).map(Number);
-  if (lengths.some((n) => !Number.isSafeInteger(n) || n < 0)) return null;
+  const replies = repliesFor(await redisPipeline(list.map((id) => ["STRLEN", bcKey(id)])), list.length);
+  if (!replies) return null;
+  const lengths = replies.map(countOf);
+  if (lengths.some((n) => n === null)) return null;
   // A broadcast added between this and the reading is a few bytes more, bounded by how fast a store writes them.
-  return { count: list.length, bytes: lengths.reduce((a, b) => a + b, 0) };
+  return { count: list.length, bytes: (lengths as number[]).reduce((a, b) => a + b, 0) };
 }
 
-/** The store's broadcasts, newest first. */
+export class BroadcastsUnreadable extends Error {
+  constructor(what: string) {
+    super(`The store's campaigns could not be read: ${what}`);
+    this.name = "BroadcastsUnreadable";
+  }
+}
+
+/**
+ * The store's broadcasts, newest first, read exactly (rule 24). A record Redis answers as its own nil is a campaign
+ * whose record expired (it is written before its id is listed, and kept RECORD_DAYS): left out, known. A list of
+ * ids in another shape, a record that does not read, or one of another id or list throws BroadcastsUnreadable, never
+ * read as fewer or no campaigns. Records read as before (parse, with its documented defaults).
+ */
 export async function listBroadcasts(listId: string | null, limit = 30): Promise<Broadcast[]> {
   if (!listId || !isRedisConfigured()) return [];
-  const [ids] = await redisPipeline([["LRANGE", listKey(listId), 0, limit - 1]]);
-  const list = Array.isArray(ids) ? (ids as string[]) : [];
+  const list = listedIds(await redisPipeline([["LRANGE", listKey(listId), 0, limit - 1]]), limit);
+  if (!list) throw new BroadcastsUnreadable("the list of campaigns");
   if (!list.length) return [];
-  const rows = await redisPipeline(list.map((id) => ["GET", bcKey(id)]));
-  return rows.map(parse).filter((b): b is Broadcast => b !== null);
+  const rows = repliesFor(await redisPipeline(list.map((id) => ["GET", bcKey(id)])), list.length);
+  if (!rows) throw new BroadcastsUnreadable("the campaigns' records");
+  const out: Broadcast[] = [];
+  for (let i = 0; i < list.length; i += 1) {
+    if (rows[i] === null) continue;
+    const b = parse(rows[i]);
+    if (!b || b.id !== list[i] || b.listId !== listId) throw new BroadcastsUnreadable("a campaign's record");
+    out.push(b);
+  }
+  return out;
 }
 
 
@@ -265,7 +329,7 @@ function parseStoredBroadcast(raw: unknown, id: string, listId?: string): Broadc
   if (value.who !== undefined && !WHO.includes(value.who as Who) || value.notProductId !== undefined && !association(value.notProductId) || value.tagged !== undefined && typeof value.tagged !== "boolean" || value.test !== undefined && value.test !== null && b.test === null) throw new Error("Invalid campaign options");
   if (value.label !== undefined && value.label !== null && (typeof value.label !== "string" || readTags([value.label])[0] !== value.label)) throw new Error("Invalid campaign label");
   if (value.hold !== undefined && (!value.hold || typeof value.hold !== "object" || Array.isArray(value.hold) || typeof (value.hold as { window?: unknown }).window !== "string" || !WINDOW_ID.test((value.hold as { window: string }).window) || !nonnegative((value.hold as { units?: unknown }).units))) throw new Error("Invalid campaign hold");
-  for (const field of ["reads", "misses", "retryAt"] as const) if (value[field] !== undefined && !nonnegative(value[field])) throw new Error(`Invalid campaign ${field}`);
+  for (const field of ["reads", "misses", "retryAt", "refused", "removed"] as const) if (value[field] !== undefined && !nonnegative(value[field])) throw new Error(`Invalid campaign ${field}`);
   if (value.narrow !== undefined && value.narrow !== null) {
     if (typeof value.narrow !== "object" || Array.isArray(value.narrow)) throw new Error("Invalid campaign audience");
     const narrow = value.narrow as Record<string, unknown>;
@@ -404,9 +468,9 @@ export async function createBroadcast(
   if (startsNow) {
     // The month as the plan counts it (lib/allowance-window.ts), the same window
     // reserve takes from and the studio shows; a window that cannot be told
-    // leaves nothing, as reserve would refuse every batch of it.
+    // leaves nothing, as reserve would refuse every batch of it. A count that cannot be read throws: never an untouched month.
     const window = windowId(store);
-    const left = window ? monthlyAllowance(store) - (await usedThisMonth(store.listId, window)) : 0;
+    const left = window ? monthlyAllowance(store) - (await usedThisMonthExact(store.listId, window)) : 0;
     if (reach > left) return { ok: false, reason: "allowance" };
   }
   const broadcast: Broadcast = {
@@ -448,7 +512,7 @@ export async function createBroadcast(
   // the store's list of broadcasts.
   // Sized at the most the record can grow to: its longest note and status, and every count it keeps at its widest.
   const widest = Number.MAX_SAFE_INTEGER;
-  const grown = { ...broadcast, status: "cancelled", note: "x".repeat(NOTE_ROOM), finishedAt: widest, total: widest, sent: widest, failures: widest, hold: { window: "0000-00-00", units: widest }, reads: widest, misses: widest, retryAt: widest };
+  const grown = { ...broadcast, status: "cancelled", note: "x".repeat(NOTE_ROOM), finishedAt: widest, total: widest, sent: widest, failures: widest, hold: { window: "0000-00-00", units: widest }, reads: widest, misses: widest, retryAt: widest, refused: widest, removed: widest };
   try {
     await needData(store, [
       { until: (now + (MAX_SCHEDULE_DAYS + RECORD_DAYS + 1) * 86_400) * 1000, bytes: dataBytes([JSON.stringify(grown)], 1) },
@@ -496,7 +560,9 @@ export async function cancelBroadcast(store: Store, id: string): Promise<boolean
     await redisPipeline([["DEL", toKey(id)]]).catch(() => {});
     if (b.hold?.units) await giveAllowanceIn(store, "studio", b.hold.units, b.hold.window);
     return true;
-  } catch {
+  } catch (error) {
+    // Its record is read before any write: one that could not be read changed nothing, so it is passed on as it is.
+    if (error instanceof BroadcastsUnreadable) throw error;
     // Either write may have happened: do not retry or restore a scheduled state.
     throw new BroadcastCancellationUnconfirmed();
   } finally {
@@ -568,6 +634,14 @@ export async function advanceBroadcast(
       await save(b);
       await redisPipeline([["SREM", QUEUE, id], ["DEL", toKey(id)]]);
       if (held?.units) await giveAllowanceIn(store, "studio", held.units, held.window);
+      return b;
+    }
+    // Switched off after notices about its content (lib/takedown.ts; any value but nothing or "" reads as off, rule 24):
+    // nothing is read, listed or sent. It waits in line, saying so, looked at again in an hour, and goes on by itself
+    // once the store is back on; what it holds and what it wrote down are kept.
+    if (store.suspended) {
+      b = { ...b, status: "waiting", note: b.sent > 0 ? SWITCHED_OFF_PART_NOTE : SWITCHED_OFF_NOTE, retryAt: now + LIST_RETRY_SECONDS };
+      await save(b);
       return b;
     }
     if (monthlyAllowance(store) === 0) {
@@ -713,6 +787,10 @@ export async function advanceBroadcast(
       // Whatever went before a stop counts, so the next run starts after it.
       const processed = emails.length - result.rest.length;
       if (processed > 0) b = { ...b, sent: b.sent + processed };
+      // Refused for good: gone through, so counted in `sent`, but not sent, and the studio is told so.
+      if (result.refused?.length) {
+        b = { ...b, refused: (b.refused ?? 0) + result.refused.length, removed: (b.removed ?? 0) + result.refused.filter((r) => r.removed).length };
+      }
       if (result.uncertain?.length) {
         // Once this existing terminal progress write is confirmed, later
         // workers must not repeat a batch the provider may already have taken.
@@ -748,6 +826,13 @@ export async function advanceBroadcast(
         b = { ...b, status: "waiting", note: result.pause ? pauseNote(result.pause) : "Paused for now. The rest go out by themselves." };
         break;
       }
+      if (result.stopped === "refused") {
+        // The email service refused the email as it is, for everyone in the
+        // batch (lib/email.ts ListBatchOutcome): every next batch meets the
+        // same, so it stops at once, keeping its list, and says so.
+        b = { ...b, status: "failed", finishedAt: now, note: REFUSED_EMAIL_NOTE };
+        break;
+      }
       if (result.stopped) {
         const failures = b.failures + 1;
         b = failures >= 5
@@ -755,7 +840,7 @@ export async function advanceBroadcast(
           : { ...b, status: "sending", failures, note: "Paused for a moment: the email service asked us to slow down." };
         break;
       }
-      b = { ...b, failures: 0, note: "" };
+      b = { ...b, failures: 0, note: refusedNote(b.refused ?? 0, b.removed ?? 0) };
       await save(b);
     }
     if (b.status === "sending" && b.sent >= b.total) {

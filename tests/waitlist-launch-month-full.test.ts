@@ -67,20 +67,43 @@ async function main(): Promise<void> {
   const started = await launch(store, product, { note: "", address: ADDRESS });
   is("launched for both", started.ok && started.total, 2);
 
-  part("The month's figure has room for one, and the batch is two");
+  part("The month's figure has room for one, and two are waiting");
   const figure = allowanceFor(store, "email");
   is("the store has a figure to use (synthetic)", figure >= 2, true);
   const used = await takeAllowance(store, "email", figure - 1);
   is("all but one of the month used", used.ok, true);
+  const sendList = `nl:wl:${sid}:${pid}:send`;
   const first = await runLaunches(storeForHandle, readListing, Date.now() + 10_000);
   const view = (await waitlistViews(store, [pid]))[pid];
-  is("nobody emailed", [first, batches.flat().length, amazon.length], [0, 0, 0]);
-  is("the launch stays queued at the start, its list kept", [(await redis.pipeline([["SISMEMBER", JOBS, `${sid}|${pid}`]]))[0], view.launch?.cursor, Boolean(view.launch?.finished), view.confirmed], [1, 0, false, 2]);
+  const sentTo = () => [...amazon, ...batches.flat().map((m) => [m.to].flat()[0])];
+  is("the one the month has room for is emailed, never more (Claude 2 on #4473)", [first, sentTo().length], [1, 1]);
+  is("the launch stays queued past that one only, its list kept", [(await redis.pipeline([["SISMEMBER", JOBS, `${sid}|${pid}`]]))[0], view.launch?.cursor, Boolean(view.launch?.finished), view.confirmed], [1, 1, false, 2]);
+  is("the send list outlives the wait for the month (Claude 2 on #4473)", Number((await redis.pipeline([["TTL", sendList]]))[0]) > 100 * 86_400, true);
 
-  part("The month turns (its figure free again): both are emailed, once");
-  await giveAllowance(store, "email", figure - 1);
+  part("The month turns (its figure free again): the other is emailed, each once");
+  await giveAllowance(store, "email", figure);
   const second = await runLaunches(storeForHandle, readListing, Date.now() + 10_000);
-  is("both emailed once", [second, [...amazon, ...batches.flat().map((m) => [m.to].flat()[0])].sort()], [2, people.slice().sort()]);
+  is("the other emailed; each once", [second, sentTo().sort()], [1, people.slice().sort()]);
+  is("the launch is done", (await waitlistViews(store, [pid]))[pid].launch?.finished ? true : (await redis.pipeline([["SISMEMBER", JOBS, `${sid}|${pid}`]]))[0] === 0, true);
+
+  part("A whole month's figure smaller than one batch (Claude 2 on #4473): it goes out a month's figure at a time");
+  const more = await addProduct(OWNER, "The Small Month Book", "", "39", null);
+  if (!more.ok) throw new Error("no product");
+  const shop = (await storeForEmail(OWNER))!;
+  const small = (await readListing(shop, more.product.id))!;
+  const crowd = Array.from({ length: figure + 5 }, (_, i) => `reader${String(i).padStart(3, "0")}@example.com`);
+  await setSoon(shop, small.id, true);
+  for (const [i, email] of crowd.entries()) await redis.pipeline([["HSET", `nl:wl:${sid}:${small.id}`, email, JSON.stringify({ at: 1, ok: 1, c: false, t: String(i % 10).repeat(48) })]]);
+  is("launched for all of them", (await launch(shop, small, { note: "", address: ADDRESS })).total, crowd.length);
+  // Nothing of this month used yet: its whole figure is free, and the batch would be larger than that.
+  await giveAllowance(shop, "email", figure);
+  const before = sentTo().length;
+  await runLaunches(storeForHandle, readListing, Date.now() + 10_000);
+  is("the month's whole figure goes out, never waiting for ever", sentTo().length - before, figure);
+  await giveAllowance(shop, "email", figure);
+  await runLaunches(storeForHandle, readListing, Date.now() + 10_000);
+  const got = sentTo().filter((to) => to.startsWith("reader"));
+  is("the rest go when the month turns; everyone once", [got.length, new Set(got).size], [crowd.length, crowd.length]);
   done();
 }
 void main();

@@ -88,7 +88,7 @@ import { NIMBUS_FROM, isSenderConfigured, sendBatch } from "@/lib/email";
 import { GIVE_BACK_FLOOR, GIVE_BACK_FLOOR_EXTRA_COMMANDS, giveBackToMonth, monthlyAllowance, releaseDay, reserveDay, takeFromMonth, takeFromMonthExact } from "@/lib/mail";
 import { IMPORT_MIN_ROWS_PER_UPLOAD, IMPORT_ROW_BYTES, importAllowanceFor, importRowsFor } from "@/lib/import-limits";
 import { costsPaused } from "@/lib/plan-standing";
-import { healthTags, noteSent, pausedFor, rampBack, rampRoom, startRamp } from "@/lib/mail-health";
+import { healthTags, noteSent, pausedFor, pauseForSending, rampBack, rampRoom, startRamp } from "@/lib/mail-health";
 import { isPaidUp } from "@/lib/billing";
 import { storeBase } from "@/lib/purchase-email";
 import { movedPurchaseWords } from "@/lib/buyer-words/moved-purchases";
@@ -1862,9 +1862,21 @@ export async function sendMoveReminders(deadline: number, now = Date.now()): Pro
     };
     try {
       const store = await storeForId(sid);
-      if (!store?.statsId || !isPaidUp(store) || (await pausedFor(sid))) continue;
+      if (!store?.statsId || !isPaidUp(store)) continue;
       const invite = await readInvite(store.statsId, field);
       if (!invite || invite.kept) continue;
+      // A sending pause is temporary (Codex G on #4359): the reminder waits in line for its end while that is still
+      // before the renewal date, and only a pause running past it lets the reminder go (reminderEmail would have nothing
+      // to send by then). A pause read in an unknown shape is not "no pause" (CX-123 rule 24): tried again later.
+      const pause = await pauseForSending(sid, now);
+      if (pause === undefined) {
+        await putBack(now);
+        continue;
+      }
+      if (pause) {
+        if (pause.until * 1000 < invite.r * 1000) await putBack(pause.until * 1000 - 3_600_000);
+        continue;
+      }
       // Never to somebody deleted from the store. Read whole (CX-123 rule 24): unknown throws, and the reminder is put
       // back in line (the catch below).
       if ((await deletedAmong(store.listId, [invite.e])).size) continue;

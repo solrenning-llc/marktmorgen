@@ -140,9 +140,15 @@ test("an offer with an affiliate nobody approved is charged, without a share (co
   assert.equal(charges.at(-1)?.get("metadata[via]"), null);
 });
 
-// Only a read that fails outright reaches lib/upsell.ts: a reply of another shape is read by lib/affiliates.ts
-// readAffiliate, outside this change, which still answers "no such affiliate" on it (reported, not changed here).
-for (const [label, reply] of [["a Redis failure", "throw"]] as [string, unknown][]) {
+// A read that fails outright, and a reply of another shape (Claude 1's MEDIUM on #2897 at 879056d749): lib/affiliates.ts
+// funnelRate reads the affiliate exactly, so none of them is "no such affiliate" and the offer is not charged without it.
+for (const [label, reply] of [
+  ["a Redis failure", "throw"],
+  ["an object", {}],
+  ["a number", 1],
+  ["a short pipeline", "short"],
+  ["text that is not a record", "not a record"],
+] as [string, unknown][]) {
   test(`an offer whose affiliate read is ${label} is not charged without the affiliate`, async () => {
     const { front, withAffiliates, browser } = await world;
     const session = nextSession();

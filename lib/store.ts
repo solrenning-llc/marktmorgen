@@ -1915,7 +1915,8 @@ export async function closeStoreRecord(store: Store, extraKeys: string[] = []): 
 }
 
 export type RenameResult =
-  | { ok: true; store: Store }
+  /** domainBehind: the store's own domain is not known to have followed to the new address (lib/domains.ts pointDomain). */
+  | { ok: true; store: Store; domainBehind?: true }
   | {
       ok: false;
       reason: "taken" | "reserved" | "shape" | "none" | "same" | "too_many";
@@ -1980,7 +1981,10 @@ export async function renameHandle(
       throw error;
     }
     // The store's own domain follows it to the new address.
-    if (next.domain) await pointDomain(next.domain.name, [store.handle, ...store.previousHandles], handle);
+    // When that is not known, the rename still stands and the creator is told (Check again moves it).
+    if (next.domain && !(await pointDomain(next.domain.name, [store.handle, ...store.previousHandles], handle))) {
+      return { ok: true, store: next, domainBehind: true };
+    }
     return { ok: true, store: next };
   });
   return result ?? { ok: false, reason: "none" };

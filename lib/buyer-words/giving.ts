@@ -19,6 +19,8 @@ import { type LanguageCode, parseLanguage } from "@/lib/store-language";
 const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);
 /** French takes the singular for 0 and 1. */
 const pluralFr = (n: number, one: string, many: string) => (n < 2 ? one : many);
+/** "A, B and C" in a language's own "and": the things a deleted review takes with it (deleteReviewWhat). */
+const andList = (parts: string[], and: string) => (parts.length < 2 ? parts.join("") : `${parts.slice(0, -1).join(", ")} ${and} ${parts[parts.length - 1]}`);
 /** A non-breaking space, before the signs French spaces from the word before them. */
 const S = " ";
 
@@ -289,6 +291,10 @@ const en = {
     error: "Something went wrong on our side. Nothing was changed. Try again in a moment.",
     photo: "That photo could not be added. Try another one, as a JPEG or straight from your camera.",
     photoPaused: "Your review was saved, but the new photo was not added: this store is not taking new photos right now.",
+    photoLimit: "Your review was saved, but the new photo was not added: a review can take 3 new photos in all, and yours has had 3.",
+    photoFailed: "Your review was saved, but the new photo was not added because of a problem on our side. That try still counts as 1 of the 3 new photos a review can take.",
+    confirmDelete: "There is no review of yours here to delete.",
+    kept: "Your review was not deleted. Nothing was changed.",
   } as Record<string, string>,
   yourRating: (title: string) => `Your rating for ${title}`,
   whatYouThink: "What you think (optional)",
@@ -302,6 +308,13 @@ const en = {
   reviewPublic: (store: string) =>
     `Your review is public on ${store}'s page, marked as a verified purchase. Your email address is never shown. ${store} can reply and can hide it, but cannot change it.`,
   deleteReview: "Delete my review",
+  /** The question the first press of "Delete my review" opens (WCAG 3.3.4, 3.3.6): nothing is deleted until its yes. */
+  deleteReviewAsk: (title: string) => `Delete your review of ${title}?`,
+  /** Exactly what goes: the rating with its stars, the words when there are any, the photo when there is one. */
+  deleteReviewWhat: (stars: number, hasWords: boolean, hasPhoto: boolean, store: string) =>
+    `This deletes ${andList([`your ${stars}-star rating`, ...(hasWords ? ["your words"] : []), ...(hasPhoto ? ["your photo"] : [])], "and")} from ${store}'s page. It cannot be brought back.`,
+  deleteReviewYes: "Yes, delete my review",
+  deleteReviewKeep: "Keep my review",
   reviewPhoto: "Add a photo (optional)",
   reviewPhotoHint: "A photo of what you made with it, or of it in use. It shows with your review.",
   reviewPhotoRemove: "Remove my photo",
@@ -629,6 +642,10 @@ const es: GivingWords = {
     error: "Algo ha fallado por nuestra parte. No se ha cambiado nada. Vuelve a intentarlo en un momento.",
     photo: "No se pudo añadir esa foto. Prueba con otra, en JPEG o directamente de tu cámara.",
     photoPaused: "Su reseña se guardó, pero la foto nueva no se añadió: esta tienda no acepta fotos nuevas en este momento.",
+    photoLimit: "Su reseña se guardó, pero la foto nueva no se añadió: una reseña puede recibir 3 fotos nuevas en total, y la suya ya ha recibido 3.",
+    photoFailed: "Su reseña se guardó, pero la foto nueva no se añadió por un problema de nuestra parte. Ese intento cuenta igualmente como 1 de las 3 fotos nuevas que puede recibir una reseña.",
+    confirmDelete: "Aquí no hay ninguna reseña tuya que eliminar.",
+    kept: "Tu reseña no se ha eliminado. No se ha cambiado nada.",
   },
   yourRating: (title) => `Tu valoración de ${title}`,
   whatYouThink: "Qué te parece (opcional)",
@@ -640,6 +657,11 @@ const es: GivingWords = {
   reviewPublic: (store) =>
     `Tu reseña es pública en la página de ${store}, marcada como compra verificada. Tu dirección de email nunca se muestra. ${store} puede responder y ocultarla, pero no puede cambiarla.`,
   deleteReview: "Eliminar mi reseña",
+  deleteReviewAsk: (title) => `¿Eliminar tu reseña de ${title}?`,
+  deleteReviewWhat: (stars, hasWords, hasPhoto, store) =>
+    `Esto elimina ${andList([`tu valoración de ${stars} ${plural(stars, "estrella", "estrellas")}`, ...(hasWords ? ["tus palabras"] : []), ...(hasPhoto ? ["tu foto"] : [])], "y")} de la página de ${store}. No se puede recuperar.`,
+  deleteReviewYes: "Sí, eliminar mi reseña",
+  deleteReviewKeep: "Conservar mi reseña",
   reviewPhoto: "Añade una foto (opcional)",
   reviewPhotoHint: "Una foto de lo que hiciste con él o de cómo lo usas. Se muestra con tu reseña.",
   reviewPhotoRemove: "Quitar mi foto",
@@ -954,6 +976,10 @@ const fr: GivingWords = {
     error: "Un problème est survenu de notre côté. Rien n'a été modifié. Réessayez dans un instant.",
     photo: "Impossible d'ajouter cette photo. Essayez-en une autre, en JPEG ou prise directement avec votre appareil.",
     photoPaused: "Votre avis a été enregistré, mais la nouvelle photo n'a pas été ajoutée : cette boutique n'accepte pas de nouvelles photos pour le moment.",
+    photoLimit: "Votre avis a été enregistré, mais la nouvelle photo n'a pas été ajoutée : un avis peut recevoir 3 nouvelles photos au total, et le vôtre en a déjà reçu 3.",
+    photoFailed: "Votre avis a été enregistré, mais la nouvelle photo n'a pas été ajoutée à cause d'un problème de notre côté. Cet essai compte quand même comme 1 des 3 nouvelles photos qu'un avis peut recevoir.",
+    confirmDelete: "Vous n'avez ici aucun avis à supprimer.",
+    kept: "Votre avis n'a pas été supprimé. Rien n'a été modifié.",
   },
   yourRating: (title) => `Votre note pour ${title}`,
   whatYouThink: "Votre avis (facultatif)",
@@ -965,6 +991,11 @@ const fr: GivingWords = {
   reviewPublic: (store) =>
     `Votre avis est public sur la page de ${store}, marqué comme achat vérifié. Votre adresse e-mail n'est jamais affichée. ${store} peut y répondre et le masquer, mais pas le modifier.`,
   deleteReview: "Supprimer mon avis",
+  deleteReviewAsk: (title) => `Supprimer votre avis sur ${title}${S}?`,
+  deleteReviewWhat: (stars, hasWords, hasPhoto, store) =>
+    `Cela retire ${andList([`votre note de ${stars}${S}${pluralFr(stars, "étoile", "étoiles")}`, ...(hasWords ? ["votre texte"] : []), ...(hasPhoto ? ["votre photo"] : [])], "et")} de la page de ${store}. Cette suppression est définitive.`,
+  deleteReviewYes: "Oui, supprimer mon avis",
+  deleteReviewKeep: "Garder mon avis",
   reviewPhoto: "Ajoutez une photo (facultatif)",
   reviewPhotoHint: "Une photo de ce que vous avez réalisé avec, ou de son utilisation. Elle s'affiche avec votre avis.",
   reviewPhotoRemove: "Retirer ma photo",
@@ -1279,6 +1310,10 @@ const de: GivingWords = {
     error: "Bei uns ist etwas schiefgelaufen. Es wurde nichts geändert. Versuchen Sie es gleich noch einmal.",
     photo: "Dieses Foto konnte nicht hinzugefügt werden. Versuche ein anderes, als JPEG oder direkt aus der Kamera.",
     photoPaused: "Ihre Bewertung wurde gespeichert, aber das neue Foto wurde nicht hinzugefügt: Dieser Shop nimmt im Moment keine neuen Fotos an.",
+    photoLimit: "Ihre Bewertung wurde gespeichert, aber das neue Foto wurde nicht hinzugefügt: Eine Bewertung kann insgesamt 3 neue Fotos erhalten, und Ihre hat bereits 3 erhalten.",
+    photoFailed: "Ihre Bewertung wurde gespeichert, aber das neue Foto wurde wegen eines Problems bei uns nicht hinzugefügt. Dieser Versuch zählt trotzdem als 1 der 3 neuen Fotos, die eine Bewertung erhalten kann.",
+    confirmDelete: "Hier gibt es keine Bewertung von Ihnen, die gelöscht werden kann.",
+    kept: "Ihre Bewertung wurde nicht gelöscht. Es wurde nichts geändert.",
   },
   yourRating: (title) => `Ihre Sterne für ${title}`,
   whatYouThink: "Ihre Meinung (optional)",
@@ -1290,6 +1325,11 @@ const de: GivingWords = {
   reviewPublic: (store) =>
     `Ihre Bewertung ist auf der Seite von ${store} öffentlich sichtbar und als verifizierter Kauf gekennzeichnet. Ihre E-Mail-Adresse wird nie angezeigt. ${store} kann antworten und sie ausblenden, aber nicht ändern.`,
   deleteReview: "Meine Bewertung löschen",
+  deleteReviewAsk: (title) => `Ihre Bewertung von ${title} löschen?`,
+  deleteReviewWhat: (stars, hasWords, hasPhoto, store) =>
+    `Damit löschen Sie ${andList([`Ihre Bewertung mit ${stars} ${plural(stars, "Stern", "Sternen")}`, ...(hasWords ? ["Ihren Text"] : []), ...(hasPhoto ? ["Ihr Foto"] : [])], "und")} von der Seite von ${store}. Das lässt sich nicht rückgängig machen.`,
+  deleteReviewYes: "Ja, meine Bewertung löschen",
+  deleteReviewKeep: "Meine Bewertung behalten",
   reviewPhoto: "Füge ein Foto hinzu (optional)",
   reviewPhotoHint: "Ein Foto von dem, was du damit gemacht hast, oder davon im Einsatz. Es erscheint mit deiner Bewertung.",
   reviewPhotoRemove: "Mein Foto entfernen",
@@ -1608,6 +1648,10 @@ const it: GivingWords = {
     error: "Qualcosa è andato storto da parte nostra. Non è stato modificato nulla. Riprova tra un momento.",
     photo: "Non è stato possibile aggiungere quella foto. Provane un'altra, in JPEG o scattata dalla fotocamera.",
     photoPaused: "La Sua recensione è stata salvata, ma la nuova foto non è stata aggiunta: questo negozio al momento non accetta nuove foto.",
+    photoLimit: "La Sua recensione è stata salvata, ma la nuova foto non è stata aggiunta: una recensione può ricevere 3 nuove foto in tutto, e la Sua ne ha già ricevute 3.",
+    photoFailed: "La Sua recensione è stata salvata, ma la nuova foto non è stata aggiunta per un problema da parte nostra. Questo tentativo conta comunque come 1 delle 3 nuove foto che una recensione può ricevere.",
+    confirmDelete: "Qui non c'è nessuna tua recensione da eliminare.",
+    kept: "La tua recensione non è stata eliminata. Non è stato modificato nulla.",
   },
   yourRating: (title) => `Il tuo voto per ${title}`,
   whatYouThink: "Cosa ne pensi (facoltativo)",
@@ -1619,6 +1663,11 @@ const it: GivingWords = {
   reviewPublic: (store) =>
     `La tua recensione è pubblica sulla pagina di ${store}, segnata come acquisto verificato. Il tuo indirizzo email non viene mai mostrato. ${store} può rispondere e nasconderla, ma non può modificarla.`,
   deleteReview: "Elimina la mia recensione",
+  deleteReviewAsk: (title) => `Eliminare la tua recensione di ${title}?`,
+  deleteReviewWhat: (stars, hasWords, hasPhoto, store) =>
+    `Così elimini ${andList([`il tuo voto di ${stars} ${plural(stars, "stella", "stelle")}`, ...(hasWords ? ["il tuo testo"] : []), ...(hasPhoto ? ["la tua foto"] : [])], "e")} dalla pagina di ${store}. Non si può recuperare.`,
+  deleteReviewYes: "Sì, elimina la mia recensione",
+  deleteReviewKeep: "Mantieni la mia recensione",
   reviewPhoto: "Aggiungi una foto (facoltativo)",
   reviewPhotoHint: "Una foto di ciò che hai realizzato o di come lo usi. Appare con la tua recensione.",
   reviewPhotoRemove: "Rimuovi la mia foto",
@@ -1930,6 +1979,10 @@ const nl: GivingWords = {
     error: "Er ging iets mis aan onze kant. Er is niets gewijzigd. Probeer het zo opnieuw.",
     photo: "Die foto kon niet worden toegevoegd. Probeer een andere, als JPEG of rechtstreeks van je camera.",
     photoPaused: "Uw review is opgeslagen, maar de nieuwe foto is niet toegevoegd: deze winkel neemt op dit moment geen nieuwe foto's aan.",
+    photoLimit: "Uw review is opgeslagen, maar de nieuwe foto is niet toegevoegd: een review kan in totaal 3 nieuwe foto's krijgen, en de uwe heeft er al 3 gehad.",
+    photoFailed: "Uw review is opgeslagen, maar de nieuwe foto is niet toegevoegd door een probleem aan onze kant. Deze poging telt toch als 1 van de 3 nieuwe foto's die een review kan krijgen.",
+    confirmDelete: "Er staat hier geen beoordeling van je om te verwijderen.",
+    kept: "Je beoordeling is niet verwijderd. Er is niets gewijzigd.",
   },
   yourRating: (title) => `Je score voor ${title}`,
   whatYouThink: "Wat je ervan vindt (optioneel)",
@@ -1941,6 +1994,11 @@ const nl: GivingWords = {
   reviewPublic: (store) =>
     `Je beoordeling is openbaar op de pagina van ${store}, gemarkeerd als geverifieerde aankoop. Je e-mailadres wordt nooit getoond. ${store} kan erop reageren en haar verbergen, maar niet wijzigen.`,
   deleteReview: "Mijn beoordeling verwijderen",
+  deleteReviewAsk: (title) => `Je beoordeling van ${title} verwijderen?`,
+  deleteReviewWhat: (stars, hasWords, hasPhoto, store) =>
+    `Hiermee verwijder je ${andList([`je score van ${stars} ${plural(stars, "ster", "sterren")}`, ...(hasWords ? ["je tekst"] : []), ...(hasPhoto ? ["je foto"] : [])], "en")} van de pagina van ${store}. Dit kan niet ongedaan worden gemaakt.`,
+  deleteReviewYes: "Ja, mijn beoordeling verwijderen",
+  deleteReviewKeep: "Mijn beoordeling houden",
   reviewPhoto: "Voeg een foto toe (optioneel)",
   reviewPhotoHint: "Een foto van wat je ermee maakte, of ervan in gebruik. Hij verschijnt bij je beoordeling.",
   reviewPhotoRemove: "Mijn foto verwijderen",
@@ -2259,6 +2317,10 @@ const pt: GivingWords = {
     error: "Algo correu mal do nosso lado. Nada foi alterado. Tente novamente daqui a pouco.",
     photo: "Não foi possível adicionar essa fotografia. Experimente outra, em JPEG ou tirada diretamente com a câmara.",
     photoPaused: "A sua avaliação foi guardada, mas a nova fotografia não foi adicionada: esta loja não está a aceitar novas fotografias neste momento.",
+    photoLimit: "A sua avaliação foi guardada, mas a nova fotografia não foi adicionada: uma avaliação pode receber 3 novas fotografias no total, e a sua já recebeu 3.",
+    photoFailed: "A sua avaliação foi guardada, mas a nova fotografia não foi adicionada devido a um problema do nosso lado. Esta tentativa conta na mesma como 1 das 3 novas fotografias que uma avaliação pode receber.",
+    confirmDelete: "Não tem aqui nenhuma avaliação para eliminar.",
+    kept: "A sua avaliação não foi eliminada. Nada foi alterado.",
   },
   yourRating: (title) => `A sua classificação de ${title}`,
   whatYouThink: "O que achou (opcional)",
@@ -2270,6 +2332,11 @@ const pt: GivingWords = {
   reviewPublic: (store) =>
     `A sua avaliação é pública na página de ${store}, marcada como compra verificada. O seu endereço de email nunca é mostrado. ${store} pode responder e ocultá-la, mas não a pode alterar.`,
   deleteReview: "Eliminar a minha avaliação",
+  deleteReviewAsk: (title) => `Eliminar a sua avaliação de ${title}?`,
+  deleteReviewWhat: (stars, hasWords, hasPhoto, store) =>
+    `Isto elimina ${andList([`a sua classificação de ${stars} ${plural(stars, "estrela", "estrelas")}`, ...(hasWords ? ["o seu texto"] : []), ...(hasPhoto ? ["a sua fotografia"] : [])], "e")} da página de ${store}. Não é possível recuperá-la depois.`,
+  deleteReviewYes: "Sim, eliminar a minha avaliação",
+  deleteReviewKeep: "Manter a minha avaliação",
   reviewPhoto: "Adicione uma fotografia (opcional)",
   reviewPhotoHint: "Uma fotografia do que fez com ele, ou de como o usa. Aparece com a sua avaliação.",
   reviewPhotoRemove: "Remover a minha fotografia",

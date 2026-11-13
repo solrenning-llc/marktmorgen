@@ -1,0 +1,129 @@
+/**
+ * 623 [SZ7], unit 5a: the creator is told when a limited product falls to
+ * their low-stock number (lib/low-stock-alert.ts, tellLowStock, on unit 4's
+ * noteUnitsLeft). One email to the creator (and the phone alert, event
+ * "alert") per crossing, and at most one a day per product, claimed exactly
+ * before anything is sent; never when the numbers emails are stopped; never
+ * on a count, a record or a claim that cannot be read. Nothing calls it yet
+ * (unit 5b wires it where the units change).
+ */
+import { addProduct, claimHandle, ensureStatsId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { setLowStock } from "@/lib/low-stock";
+import { LOW_STOCK_ALERTS_A_STORE_DAY, LOW_STOCK_EMAILS_A_DAY, tellLowStock } from "@/lib/low-stock-alert";
+import { setWeeklyOff } from "@/lib/stats-report";
+import { store as redis } from "./redis-stub";
+import { done, is, part } from "./check";
+import { paidPeriod } from "./billing-period-fixture";
+
+// The same synthetic key as tests/store-alerts.test.ts: the Resend fixture takes only listed literals.
+process.env.RESEND_API_KEY = "re_test_store_alerts_stand_in";
+process.env.NIMBUS_DATA_KEY = "a-local-key-for-tests-only-0123456789abcdef";
+
+const OWNER = "kiln.owner@example.com";
+const DAY = 86_400_000;
+const emails: { to: string; subject: string; text: string }[] = [];
+let refuseEmails = false;
+globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+  const url = new URL(String(input));
+  if (url.hostname === "api.resend.com") {
+    if (refuseEmails) return new Response(JSON.stringify({ message: "synthetic refusal" }), { status: 422 });
+    const body = JSON.parse(String(init?.body)) as { to: string | string[]; subject: string; text: string };
+    emails.push({ to: [body.to].flat()[0], subject: body.subject, text: body.text });
+    return new Response(JSON.stringify({ id: `email_${emails.length}` }), { status: 200 });
+  }
+  throw new Error(`Only synthetic email: ${url.hostname}`);
+}) as typeof fetch;
+
+async function main(): Promise<void> {
+  redis.clear();
+  await claimHandle(OWNER, "kilnlow", "Kiln Goods", "");
+  await ensureStatsId(OWNER);
+  await setStripeAccount(OWNER, "acct_1TestKilnLw1", true);
+  await setSubscription(OWNER, { customerId: "cus_kilnlow", subscriptionId: "sub_kilnlow", active: true, period: paidPeriod() });
+  const made = await addProduct(OWNER, "Glazed Mug", "", "30", null);
+  if (!made.ok) throw new Error("no product");
+  const store = (await storeForEmail(OWNER))!;
+  const product = made.product;
+  const now = Date.UTC(2026, 10, 12, 15);
+
+  part("Told once when the units fall to the number");
+  is("set at 5 with 10 left", await setLowStock(store, product.id, 5, 10), "saved");
+  is("10 to 7: nothing", await tellLowStock(store, product, 7, now), "no");
+  is("no email yet", emails.length, 0);
+  is("7 to 5: told", await tellLowStock(store, product, 5, now), "told");
+  is("one email, to the creator", emails.map((e) => e.to), [OWNER]);
+  is("its subject names the product and the units left", emails[0]?.subject, "Glazed Mug: 5 left");
+  is("it says the number they set and where to restock", [/your low-stock number \(5\)/.test(emails[0]?.text ?? ""), /\/studio/.test(emails[0]?.text ?? "")], [true, true]);
+  is("no urgency words, no buyer", /hurry|only|now!|@example\.com/i.test(emails[0]?.text.replace(OWNER, "") ?? ""), false);
+  is("5 to 3: still under it, not again", await tellLowStock(store, product, 3, now), "no");
+  is("still one email", emails.length, 1);
+
+  part(`At most ${LOW_STOCK_EMAILS_A_DAY} a day per product, whatever the restocks`);
+  await tellLowStock(store, product, 20, now);
+  is("restocked, then down again the same day: the crossing is not said twice", await tellLowStock(store, product, 4, now), "no");
+  is("still one email", emails.length, 1);
+  await tellLowStock(store, product, 20, now + DAY);
+  is("the next day it is told again", await tellLowStock(store, product, 4, now + DAY), "told");
+  is("two emails", emails.length, 2);
+
+  part("Stopped with the numbers emails: no email");
+  await setWeeklyOff(store.handle, true);
+  await tellLowStock(store, product, 20, now + 2 * DAY);
+  // No phone answered and the emails are stopped: nobody was told, so never "told" (cloud J's LOW on #3725); the
+  // crossing stays spent, since the stop is the creator's own choice.
+  is("crossed, with the emails stopped and no phone: not said as told", await tellLowStock(store, product, 4, now + 2 * DAY), "no");
+  is("no email", emails.length, 2);
+  is("and the crossing is spent: not again the same day", await tellLowStock(store, product, 4, now + 2 * DAY), "no");
+  await setWeeklyOff(store.handle, false);
+
+  part("Unknown never sends");
+  is("a count that cannot be read", await tellLowStock(store, product, "4", now + 3 * DAY), "unknown");
+  await tellLowStock(store, product, 20, now + 3 * DAY);
+  const pipeline = redis.pipeline.bind(redis);
+  redis.pipeline = async (commands) => (commands.some((c) => c[0] === "SET" && String(c[1]).startsWith("nl:alert:")) ? [] : pipeline(commands));
+  is("a day's claim that cannot be read: nothing sent", await tellLowStock(store, product, 4, now + 3 * DAY), "unknown");
+  redis.pipeline = pipeline;
+  is("no email", emails.length, 2);
+  is("a product with no number", await tellLowStock(store, { ...product, id: "other00001" }, 1, now), "off");
+
+  part(`At most ${LOW_STOCK_ALERTS_A_STORE_DAY} a day for the whole store, however many products cross (Claude 1 and Claude 3 on #3725)`);
+  emails.length = 0;
+  const many: { id: string; title: string }[] = [];
+  for (let i = 0; i < LOW_STOCK_ALERTS_A_STORE_DAY + 2; i += 1) {
+    const extra = await addProduct(OWNER, `Bowl ${i}`, "", "30", null);
+    if (!extra.ok) throw new Error("no product");
+    await setLowStock(store, extra.product.id, 5, 10);
+    many.push(extra.product);
+  }
+  const results = [];
+  for (const p of many) results.push(await tellLowStock(store, p, 4, now + 5 * DAY));
+  is("only the first ones are told", results.filter((r) => r === "told").length, LOW_STOCK_ALERTS_A_STORE_DAY);
+  is("and only as many emails", emails.length, LOW_STOCK_ALERTS_A_STORE_DAY);
+  // Past the bound nothing of the crossing is spent: the product is told the next day (Claude 3 and Revisor 1 on #3725, MEDIUM 2).
+  const late = many[many.length - 1];
+  is("past the bound, the same units the next day: told then", await tellLowStock(store, late, 4, now + 6 * DAY), "told");
+  is("and only once", await tellLowStock(store, late, 4, now + 6 * DAY), "no");
+  is("the rest are not, never unknown", results.slice(LOW_STOCK_ALERTS_A_STORE_DAY), ["no", "no"]);
+  const pipe = redis.pipeline.bind(redis);
+  const another = await addProduct(OWNER, "Cup", "", "30", null);
+  if (!another.ok) throw new Error("no product");
+  await setLowStock(store, another.product.id, 5, 10);
+  redis.pipeline = async (commands) => (commands.some((c) => c[0] === "INCR" && String(c[1]).includes(":lowday:")) ? [["QUEUED"], [1]] : pipe(commands));
+  is("a store count that cannot be read: nothing sent", await tellLowStock(store, another.product, 4, now + 6 * DAY), "unknown");
+  redis.pipeline = pipe;
+  is("and nothing of it was spent: told the next day", await tellLowStock(store, another.product, 4, now + 7 * DAY), "told");
+
+  part("Nothing delivered, nothing spent (Revisor 1 and Claude 3 on #3725)");
+  const quiet = await addProduct(OWNER, "Plate", "", "30", null);
+  if (!quiet.ok) throw new Error("no product");
+  await setLowStock(store, quiet.product.id, 5, 10);
+  const sentBefore = emails.length;
+  refuseEmails = true;
+  is("the email refused and no phone to tell: unknown, never told", await tellLowStock(store, quiet.product, 4, now + 8 * DAY), "unknown");
+  refuseEmails = false;
+  is("so the same day, the email back: told then", await tellLowStock(store, quiet.product, 4, now + 8 * DAY), "told");
+  is("one email in all", emails.length - sentBefore, 1);
+  done();
+}
+
+void main();

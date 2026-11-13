@@ -677,6 +677,12 @@ export function upsellReference(session: string, slot: string, record: UpsellRec
 export async function offerRefunded(store: Store, reference: string): Promise<boolean> {
   if (!/^pi_[A-Za-z0-9]{6,200}$/.test(reference) || !store.stripeAccountId) return false;
   const pi = await onAccount("GET", store.stripeAccountId, `/payment_intents/${encodeURIComponent(reference)}?expand[]=latest_charge`);
+  // This offer's own payment (rule 30): another one's reply never decides that this one was kept. Its charge is this
+  // payment's too, when it says which. Thrown, the download answers that it could not check.
+  const charge = pi.latest_charge as { payment_intent?: unknown } | null | undefined;
+  if (pi.id !== reference || (charge && typeof charge === "object" && charge.payment_intent !== undefined && charge.payment_intent !== reference)) {
+    throw new Error("Stripe answered for another payment");
+  }
   return givenBack(store.stripeAccountId, pi);
 }
 

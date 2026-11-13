@@ -35,6 +35,10 @@ is("a pixel switched on: the measurement section, named by its platform", withPi
 is("and a new version", policyFingerprint(withPixel) === policyFingerprint(before), false);
 is("PayPal taken: said", policyFacts(policyInputFrom(store, [ebook], true), "en")[0].sentences[2].includes("PayPal"), true);
 is("no postal address: no contact section", policyFacts(policyInputFrom({ ...store, mail: null } as typeof store, [ebook], false), "en").some((s) => s.id === "contact"), false);
+// Claude 1 cloud rev-pares's MEDIUM on #1824: the email footer's postal address was typed for CAN-SPAM, not for a
+// public page, and many sole creators type a home address. It is never published without the creator's own choice to.
+is("an address typed for email footers is not published on the policy page", policyFacts(policyInputFrom(store, [ebook], false), "en").some((s) => s.id === "contact"), false);
+is("nor its words anywhere on it", JSON.stringify(policyFacts(policyInputFrom(store, [ebook], false), "en")).includes("1 Main St"), false);
 
 part("The page");
 const page = readFileSync("app/[handle]/policies/page.tsx", "utf8");

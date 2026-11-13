@@ -293,6 +293,13 @@ export async function POST(request: NextRequest) {
       if (!owner && config.questions.length && !viewer.member?.qa) return back(`${home}/you`, "questions");
       if (!owner && !(await within(id, key, "comment"))) return back(postPage, "slow", "reply");
       const parent = field("parent", 12);
+      // Answering a comment the creator hid, or a reply in a thread whose first comment they hid, is gone for a
+      // member, as liking or reporting it is: nothing is written under it and its author is not told.
+      if (!owner && ITEM_ID.test(parent)) {
+        const above = await readComment(id, post.id, parent);
+        const root = above?.parent ? await readComment(id, post.id, above.parent) : above;
+        if (above?.hid || root?.hid) return back(postPage, "gone");
+      }
       const made = await addComment(id, post.id, { parent: ITEM_ID.test(parent) ? parent : "", author: key, text }, store);
       if (!made.ok) return back(postPage, made.reason === "full" ? "fullcomments" : "gone");
       // Who hears about it: the post's author, the author of the comment this

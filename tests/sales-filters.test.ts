@@ -95,6 +95,18 @@ async function main(): Promise<void> {
   is("an address in product words is refused before it can outlive erasure", await saveSalesFilter(statsId, "Jane's orders", filterFromQuery("product=jane%40example.com")), { ok: false, reason: "email" });
   is("an address in the saved name is refused too", await saveSalesFilter(statsId, "jane@example.com", filterFromQuery("kind=tips")), { ok: false, reason: "email" });
   is("nothing written by a refusal", (await readSavedFilters(statsId)).length, 2);
+
+  part("Product words cut at a space are saved as they read back (Claude 3 cloud J's MEDIUM on #3495)");
+  // 99 letters, a space, a letter: cut to 100 characters, the words end in a space the read trims away. Saved as
+  // they were, the kept address read back as another filter, the list became unreadable and every save failed.
+  const cut = await saveSalesFilter(statsId, "Long words", filterFromQuery(`product=${"a".repeat(99)}+b`));
+  is("the filter is saved", cut.ok, true);
+  is("as it reads back: the words without the space the cut left", cut.ok ? cut.filter.query : null, `product=${"a".repeat(99)}`);
+  is("the list still reads, with it", await threw(() => readSavedFilters(statsId)), "no error");
+  is("and the next save still works", await saveSalesFilter(statsId, "Tips", filterFromQuery("kind=tips")).then((r) => r.ok, () => "failed"), true);
+  for (const id of [cut.ok ? cut.filter.id : ""].filter(Boolean)) await removeSalesFilter(statsId, id);
+  const tips = (await readSavedFilters(statsId).catch(() => [] as Saved[])).find((f) => f.name === "Tips");
+  if (tips) await removeSalesFilter(statsId, tips.id);
   const id = courses.ok ? courses.filter.id : "";
   is("a rename cannot introduce an address", await renameSalesFilter(statsId, id, "jane@example.com"), { ok: false, reason: "email" });
   const renamed = await renameSalesFilter(statsId, id, "My courses");

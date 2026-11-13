@@ -36,7 +36,7 @@ export async function GET(request: NextRequest) {
   if (got !== "ours") return Response.json({ ok: false, error: "lock_unknown" }, { status: 503 });
   try {
     const counts = await sendDripEmails(storeForHandle, readCourse, SITE_URL);
-    const stale = await sweepTaskUploads(deleteFile).catch((error: unknown) => {
+    const stale = await sweepTaskUploads((paths) => deleteFile(paths, "site_cleanup")).catch((error: unknown) => {
       console.error("could not sweep unused assignment uploads", error);
       return [] as string[];
     });

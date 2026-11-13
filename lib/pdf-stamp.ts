@@ -265,7 +265,8 @@ const COPY_FOLDER = new RegExp(`^(?:${VAULT_PREFIX}|stores)/[^/]+/stamped/[0-9a-
 /** Deletes every file in a folder of stamped copies. Throws when the folder cannot be listed whole or a file not deleted. */
 async function deleteFolder(folder: string): Promise<void> {
   const copies = await listFiles(folder);
-  for (let i = 0; i < copies.length; i += 1000) await deleteFile(copies.slice(i, i + 1000));
+  // The site's own copies: their backup records say so (lib/backup-deletions.ts).
+  for (let i = 0; i < copies.length; i += 1000) await deleteFile(copies.slice(i, i + 1000), "site_cleanup");
 }
 
 /** Puts a folder down to be tried again. False when that could not be confirmed (rule 24: SADD answers 0 or 1). */

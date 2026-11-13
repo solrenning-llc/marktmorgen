@@ -20,13 +20,15 @@
  * "over_bound" (the store holds more than its pages can list, so its listing
  * can never complete, and no cursor). An incomplete page never holds a
  * deletion: deletion records come on their own page (kind "deletions"), from
- * the records the site keeps, never from what a listing misses.
+ * the records the site keeps (lib/backup-deletions.ts), never from what a
+ * listing misses. Unlike a listing, a deletions page always carries a cursor:
+ * on the last page ("done") it is the point the next read resumes from, so
+ * the Worker reads each record once and keeps that point between days.
  *
  * A stores page (kind "stores") names each store to copy with R, the room of
  * its plan in bytes (docs/backup-costs-2026-11-08.md, 5b: plan storage, the
- * students' room and the community pictures), from which the Worker takes
- * its per-store ceilings (5R held, 4R copied in 32 days). The route does not
- * answer it yet (503 "stores_unavailable"), so the Worker copies nothing.
+ * students' room and the community pictures, lib/backup-stores.ts), from
+ * which the Worker takes its per-store ceilings (5R held, 4R copied in 32 days).
  *
  * Rule 24: anything else (an extra or missing field, a wrong type, an entry
  * of another source or folder) throws BackupFilesContractError. Unknown is
@@ -63,7 +65,12 @@ export const BACKUP_FILES_URL_SECONDS = 900;
 
 export const BACKUP_FILES_REASONS = ["done", "more", "cutoff", "page_bytes", "over_bound"] as const;
 export type BackupFilesReason = (typeof BACKUP_FILES_REASONS)[number];
-export const BACKUP_DELETION_REASONS = ["creator_deleted", "store_closed", "privacy_request"] as const;
+/**
+ * Why a file left the site: a person deleted it there (a creator, or a student their own hand-in), its store closed,
+ * a privacy request erased it, or the site removed a file of its own making (a stamped copy, an upload never attached).
+ * The Worker treats every reason alike (30 days, its guards, the 90-day end); the reason is kept for the record.
+ */
+export const BACKUP_DELETION_REASONS = ["creator_deleted", "store_closed", "privacy_request", "site_cleanup"] as const;
 export type BackupDeletionReason = (typeof BACKUP_DELETION_REASONS)[number];
 
 export type BackupFilesEntry = { source: BackupFilesSource; key: string; etag: string; size: number; url: string; expiresAt: number };
@@ -82,7 +89,8 @@ export type BackupDeletionPage = {
   version: 1;
   kind: "deletions";
   records: BackupDeletionRecord[];
-  cursor: string | null;
+  /** Never null: on the last page, where the next read resumes. */
+  cursor: string;
   complete: boolean;
   reason: "done" | "more" | "cutoff";
 };
@@ -154,13 +162,15 @@ function sizeCheck(value: unknown): void {
   if (Buffer.byteLength(JSON.stringify(value), "utf8") > BACKUP_FILES_PAGE_BYTES) fail("the page weighs more than 1 MB");
 }
 
-function pageEnd(value: Record<string, unknown>, reasons: readonly string[]): { cursor: string | null; complete: boolean; reason: string } {
+function pageEnd(value: Record<string, unknown>, reasons: readonly string[], resumes = false): { cursor: string | null; complete: boolean; reason: string } {
   const { cursor, complete, reason } = value;
   if (typeof complete !== "boolean") fail("complete is not a boolean");
   if (typeof reason !== "string" || !reasons.includes(reason)) fail("reason is not one the contract knows");
   if (cursor !== null && (typeof cursor !== "string" || !CURSOR_PATTERN.test(cursor))) fail("cursor is neither null nor base64url");
   if (complete !== (reason === "done")) fail("complete is true exactly when the reason is done");
-  if (reason === "done" || reason === "over_bound") {
+  if (resumes) {
+    if (cursor === null) fail("a page of records always carries the point to resume from");
+  } else if (reason === "done" || reason === "over_bound") {
     if (cursor !== null) fail(`a ${reason as string} page carries no cursor`);
   } else if (cursor === null) fail("an incomplete page needs a cursor to go on from");
   return { cursor: cursor as string | null, complete: complete as boolean, reason: reason as string };
@@ -227,8 +237,8 @@ export function parseDeletionPage(raw: unknown): BackupDeletionPage {
     if (typeof record.reason !== "string" || !(BACKUP_DELETION_REASONS as readonly string[]).includes(record.reason)) fail(`records[${i}].reason is not one the contract knows`);
     return { source: record.source as BackupFilesSource, key: keyOf(record.key, `records[${i}].key`), recordedAt: wholeTime(record.recordedAt, `records[${i}].recordedAt`), reason: record.reason as BackupDeletionReason };
   });
-  const end = pageEnd(value, ["done", "more", "cutoff"]);
-  return { version: 1, kind: "deletions", records, cursor: end.cursor, complete: end.complete, reason: end.reason as BackupDeletionPage["reason"] };
+  const end = pageEnd(value, ["done", "more", "cutoff"], true);
+  return { version: 1, kind: "deletions", records, cursor: end.cursor as string, complete: end.complete, reason: end.reason as BackupDeletionPage["reason"] };
 }
 
 const STORES_FIELDS = ["version", "kind", "stores", "cursor", "complete", "reason"] as const;

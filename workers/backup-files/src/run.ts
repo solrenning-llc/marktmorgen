@@ -11,15 +11,23 @@
  *
  *   1. forced deletions that reached their 90th day, whatever holds them;
  *   2. the deletion records (their own page), each written into the backup
- *      bucket as received (deletions/<day>/...), so a restore can reapply them;
- *   3. the stores to copy, each with R, the room of its plan;
+ *      bucket as received (deletions/<day>/<n>.json), so a restore can reapply
+ *      them, and deleted from it BACKUP_FILES_RECORD_FILE_DAYS after their day,
+ *      when every copy they name is gone (their keys can point to a person);
+ *      read from where the last complete read ended (recordsFrom), so each is
+ *      received once; a resume point the site no longer keeps (409) alarms
+ *      (deletions_expired) and the next run reads from the oldest it keeps;
+ *   3. the stores to copy, each with R, the room of its plan (a store named
+ *      on two pages is read once, at the larger R);
  *   4. each store's listing of each source, its guards, then its deletions;
  *   5. only then the copies, in 5 MiB parts that resume across runs.
  *
  * Deletions (5.1 item 2):
- *   - never from absence: an object missing from a listing is kept; it is an
- *     orphan, removed only after 90 days missing from every passing complete
- *     listing;
+ *   - never from absence: an object missing from a listing is kept; without
+ *     a deletion record it is an orphan, removed only after 90 days missing
+ *     from every passing complete listing, alarmed the day it is first seen
+ *     and again when that end comes (not every day in between); with its
+ *     record it is expected, no orphan and no alarm, and goes by the record;
  *   - from explicit records, 30 days after the record, unless a guard holds
  *     them; a held record is applied on its 90th day anyway, with an alarm
  *     every day that gives that date;
@@ -39,7 +47,8 @@
  * counted before it is made, inside BACKUP_FILES_RUN_SUBREQUESTS (the paid
  * plan's 10,000 less room) and BACKUP_FILES_RUN_MS (its 15 minutes less room);
  * the run stops at a step or part boundary and the next run goes on.
- * Heartbeat (item 5): only when the day's cycle finished with no alarm at all.
+ * Heartbeat (item 5): only when the day's cycle finished with no alarm at all;
+ * a record waiting its 30 days, or an orphan between its two alarms, is not one.
  *
  * Rule 24: every reply is read exactly. A route page goes through the
  * contract's parsers; an origin read must be 206 with the exact Content-Range
@@ -99,6 +108,13 @@ export const BACKUP_FILES_URL_MARGIN_MS = 60_000;
 export const BACKUP_FILES_FETCH_MS = 30_000;
 /** Pages of records, and of stores, read in one day at the most. */
 export const BACKUP_FILES_INDEX_PAGES = 100;
+/**
+ * Days the deletion records written into the backup bucket (deletions/<day>/<n>.json) are kept: each record in a
+ * day's files was recorded by that day's end, so on its 90th day (BACKUP_FILES_HOLD_MAX_DAYS) at the latest the copy
+ * it names is erased, held or not. Two days more, then the day's files go: they name files, and a hand-in's name
+ * holds a one-way fingerprint of its student's address (lib/backup-deletions.ts, lib/person-data.ts).
+ */
+export const BACKUP_FILES_RECORD_FILE_DAYS = BACKUP_FILES_HOLD_MAX_DAYS + 2;
 const HISTORY_DAYS = 40;
 const DAY_MS = 86_400_000;
 const WORKER_KEY = "state/worker.json";
@@ -276,9 +292,10 @@ const maxSince = (list: DayCount[], from: number) => {
 const shrunk = (earlier: DayCount, now: { objects: number; bytes: number }) =>
   over(earlier.objects - now.objects, earlier.objects) || (earlier.bytes > 0 && over(earlier.bytes - now.bytes, earlier.bytes));
 
-function newCycle(day: number): Cycle {
+function newCycle(day: number, recordsFrom: string | null): Cycle {
   const sum = () => ({ day, objects: 0, bytes: 0, stores: 0 });
-  return { day, records: "pending", recordsCursor: null, recordsPages: 0, stores: "pending", storesCursor: null, storesPages: 0, storeList: [], steps: {}, sums: { r2: sum(), blob: sum(), bunny: sum() }, alarms: [], sent: [], done: false };
+  // The day's read of the records resumes where the last complete one ended: each record is received once.
+  return { day, records: "pending", recordsCursor: recordsFrom, recordsPages: 0, stores: "pending", storesCursor: null, storesPages: 0, storeList: [], steps: {}, sums: { r2: sum(), blob: sum(), bunny: sum() }, alarms: [], sent: [], done: false };
 }
 
 const bucketOf = (ctx: Ctx, source: BackupFilesSource) => (source === "bunny" ? ctx.env.VIDEOS_BUCKET : ctx.env.FILES_BUCKET);
@@ -313,11 +330,16 @@ async function loadStore(ctx: Ctx, store: string): Promise<StoreState> {
   // Records received for this store join its own state as soon as it is read.
   const mine = ctx.state.inbox.filter((r) => r.store === store);
   if (mine.length) {
+    // Each source's pending records by key, made once: a day of mass deletions is joined in linear time.
+    const byKey = new Map(BACKUP_FILES_SOURCES.map((source) => [source, new Map(state.sources[source].pending.map((p) => [p.key, p]))]));
     for (const rec of mine) {
       const src = state.sources[rec.source];
-      const known = src.pending.find((p) => p.key === rec.key);
+      const pendingByKey = byKey.get(rec.source)!;
+      const known = pendingByKey.get(rec.key);
       if (!known) {
-        src.pending.push({ key: rec.key, recordedAt: rec.recordedAt, reason: rec.reason, receivedAt: rec.receivedAt });
+        const pending = { key: rec.key, recordedAt: rec.recordedAt, reason: rec.reason, receivedAt: rec.receivedAt };
+        src.pending.push(pending);
+        pendingByKey.set(rec.key, pending);
         src.received = addDay(src.received, dayOf(rec.receivedAt), 1, src.objects.get(rec.key)?.size ?? 0);
       } else {
         // The same record again (resent, or read again from its archive): its first arrival keeps counting, so a
@@ -411,17 +433,24 @@ async function applyDeletions(ctx: Ctx, state: StoreState, source: BackupFilesSo
   const end = BACKUP_FILES_HOLD_MAX_DAYS * DAY_MS;
   let held = 0;
   let heldOn = Infinity;
-  for (const rec of [...src.pending]) {
-    const since = recordClock(rec);
-    const age = ctx.now - since;
-    if (age < after) continue;
-    if (age < end && (rule.held || rule.forcedOnly)) {
-      held += 1;
-      heldOn = Math.min(heldOn, since + end);
-      continue;
+  // The records applied are taken out once, at the end (never a scan of every pending record for each one); a run
+  // stopped on the way still takes out those already applied.
+  const applied = new Set<(typeof src.pending)[number]>();
+  try {
+    for (const rec of [...src.pending]) {
+      const since = recordClock(rec);
+      const age = ctx.now - since;
+      if (age < after) continue;
+      if (age < end && (rule.held || rule.forcedOnly)) {
+        held += 1;
+        heldOn = Math.min(heldOn, since + end);
+        continue;
+      }
+      if (await eraseKey(ctx, state, source, rec.key)) applied.add(rec);
     }
-    if (await eraseKey(ctx, state, source, rec.key)) {
-      src.pending = src.pending.filter((r) => r !== rec);
+  } finally {
+    if (applied.size) {
+      src.pending = src.pending.filter((r) => !applied.has(r));
       ctx.dirty.add(state.store);
     }
   }
@@ -453,20 +482,28 @@ async function applyDeletions(ctx: Ctx, state: StoreState, source: BackupFilesSo
   if (versionsHeld && !rule.forcedOnly) raise(ctx, "versions_held", { ...where, count: versionsHeld, on: isoMs(versionsOn) });
   if (rule.forcedOnly) return;
 
+  // A file missing with its deletion record is expected, never an orphan: its record's 30 days (or the
+  // record's own 90-day end while held, alarmed above) decide when it goes, not the orphan clock.
+  const recorded = new Set(src.pending.map((r) => r.key));
   let orphans = 0;
   let orphanBytes = 0;
   let orphanOn = Infinity;
+  let notable = false;
   for (const object of [...src.objects.values()]) {
-    if (object.missingSince === null) continue;
-    if (rule.orphans && !rule.held && ctx.day - object.missingSince >= BACKUP_FILES_ORPHAN_DAYS) {
+    if (object.missingSince === null || recorded.has(object.key)) continue;
+    const end = object.missingSince + BACKUP_FILES_ORPHAN_DAYS;
+    if (rule.orphans && !rule.held && ctx.day >= end) {
       await eraseKey(ctx, state, source, object.key);
       continue;
     }
     orphans += 1;
     orphanBytes += object.size;
-    orphanOn = Math.min(orphanOn, object.missingSince + BACKUP_FILES_ORPHAN_DAYS);
+    orphanOn = Math.min(orphanOn, end);
+    // Alarmed the day it is first seen and again when its end comes (the day before, and every day it is
+    // still kept past it), not on each day in between.
+    if (object.missingSince === ctx.day || ctx.day >= end - 1) notable = true;
   }
-  if (orphans) raise(ctx, "orphans", { ...where, count: orphans, bytes: orphanBytes, on: isoDay(orphanOn) });
+  if (orphans && notable) raise(ctx, "orphans", { ...where, count: orphans, bytes: orphanBytes, on: isoDay(orphanOn) });
 }
 
 /** 1. Forced deletions on their 90th day, before anything else and whatever else fails today. */
@@ -509,7 +546,9 @@ function parseArchive(text: string, name: string): { receivedAt: number; records
     throw new BackupFilesStateError(`${name} did not read as an archive of records`);
   }
   try {
-    const page = parseDeletionPage(JSON.stringify({ version: 1, kind: "deletions", records: o.records, cursor: null, complete: true, reason: "done" }));
+    // Wrapped as a finished page so the contract reads each record; a page of records always carries a point to resume
+    // from (#3349), so a placeholder one, never used.
+    const page = parseDeletionPage(JSON.stringify({ version: 1, kind: "deletions", records: o.records, cursor: "archive", complete: true, reason: "done" }));
     return { receivedAt: o.receivedAt as number, records: page.records };
   } catch {
     throw new BackupFilesStateError(`${name} did not hold records as the contract reads them`);
@@ -517,7 +556,7 @@ function parseArchive(text: string, name: string): { receivedAt: number; records
 }
 
 /** Records of one page, received at `receivedAt`: into the inbox, counted in the source's share. */
-function receive(ctx: Ctx, records: ReturnType<typeof parseDeletionPage>["records"], receivedAt: number): void {
+function receive(ctx: Ctx, records: ReturnType<typeof parseDeletionPage>["records"], receivedAt: number, waiting: Set<string>): void {
   let unmapped = 0;
   for (const rec of records) {
     const store = storeOfKey(rec.source, rec.key);
@@ -525,6 +564,10 @@ function receive(ctx: Ctx, records: ReturnType<typeof parseDeletionPage>["record
       unmapped += 1;
       continue;
     }
+    // A record the site named twice (a file deleted twice, or a page read again from its archive) counts once.
+    const named = `${rec.source}\u0000${rec.key}`;
+    if (waiting.has(named)) continue;
+    waiting.add(named);
     ctx.state.inbox.push({ ...rec, store, receivedAt });
     ctx.state.received[rec.source] = addDay(ctx.state.received[rec.source], dayOf(receivedAt), 1, 0);
   }
@@ -533,6 +576,9 @@ function receive(ctx: Ctx, records: ReturnType<typeof parseDeletionPage>["record
 
 /** 2. The deletion records, each page written into the backup bucket before it counts as received. */
 async function readRecords(ctx: Ctx): Promise<void> {
+  // The records waiting in the inbox, by source and key, made once a run: a record the site named twice is found in
+  // constant time, never by a scan of the inbox for each record (100 pages of 1,000 on a day of mass deletions).
+  const waiting = new Set(ctx.state.inbox.map((r) => `${r.source}\u0000${r.key}`));
   // First, the archives received on a run whose state may not have been saved (JOURNAL_KEY): read again, every run.
   if (ctx.journal === null) {
     ctx.run.boundary(2);
@@ -542,7 +588,7 @@ async function readRecords(ctx: Ctx): Promise<void> {
       const text = await readText(ctx.run, ctx.env.FILES_BUCKET, name);
       if (text === null) throw new BackupFilesStateError(`${name} is named by the journal and missing`);
       const archive = parseArchive(text, name);
-      receive(ctx, archive.records, archive.receivedAt);
+      receive(ctx, archive.records, archive.receivedAt, waiting);
     }
     ctx.journal = journal;
   }
@@ -556,6 +602,15 @@ async function readRecords(ctx: Ctx): Promise<void> {
     }
     ctx.run.boundary(4);
     const reply = await routeGet(ctx, c.recordsCursor === null ? [["page", "deletions"]] : [["page", "deletions"], ["cursor", c.recordsCursor]]);
+    if (!reply.ok && reply.why === "status_409") {
+      // The site no longer keeps the records after that point: some may be lost. Alarm, and read again from the
+      // oldest it keeps; a file whose record was lost goes as an orphan, after 90 days of complete listings.
+      ctx.state.recordsFrom = null;
+      c.recordsCursor = null;
+      c.records = "failed";
+      raise(ctx, "deletions_expired");
+      return;
+    }
     let page;
     try {
       if (!reply.ok) throw new Error(reply.why);
@@ -566,24 +621,65 @@ async function readRecords(ctx: Ctx): Promise<void> {
       return;
     }
     if (page.records.length) {
-      const name = `deletions/${isoDay(ctx.day)}/${ctx.now}-${c.recordsPages}.json`;
+      // Named by the day and the page's index (below BACKUP_FILES_INDEX_PAGES), so a page read again is written over
+      // and the day's files can be deleted by name once their days end (sweepRecordFiles), without a listing.
+      const name = recordFileName(ctx.day, c.recordsPages);
+      noteRecordFile(ctx, ctx.day, c.recordsPages);
       await writeText(ctx.run, ctx.env.FILES_BUCKET, name, JSON.stringify({ version: 1, receivedAt: ctx.now, records: page.records }));
-      // Named in the journal before it counts as received, so it is read again until the state holding it is saved.
-      const journal: string[] = [...(ctx.journal ?? []), name];
+      // Named in the journal before it counts as received, so it is read again until the state holding it is saved; a
+      // page read again is written over under the same name, and named once.
+      const journal: string[] = ctx.journal?.includes(name) ? ctx.journal : [...(ctx.journal ?? []), name];
       await writeText(ctx.run, ctx.env.FILES_BUCKET, JOURNAL_KEY, JSON.stringify({ version: 1, files: journal }));
       ctx.journal = journal;
     }
-    receive(ctx, page.records, ctx.now);
+    receive(ctx, page.records, ctx.now, waiting);
     c.recordsPages += 1;
     c.recordsCursor = page.cursor;
-    if (page.complete) c.records = "done";
+    if (page.complete) {
+      c.records = "done";
+      ctx.state.recordsFrom = page.cursor;
+    }
   }
+}
+
+/** A file of a day's deletion records in the backup bucket: its day and its page's index that day. */
+const recordFileName = (day: number, index: number) => `deletions/${isoDay(day)}/${index}.json`;
+
+/**
+ * 2b. The deletion records written into the backup bucket go BACKUP_FILES_RECORD_FILE_DAYS after their day, once
+ * no forced deletion is still due (each copy they name is then erased): by name, every index that day wrote
+ * (recordFiles keeps, for each day, one more than the highest). A day leaves the list only when every delete is
+ * done; a delete that fails alarms, and that day is asked again the next run, never taken as done.
+ */
+async function sweepRecordFiles(ctx: Ctx): Promise<void> {
+  if (Object.values(ctx.state.forcedDue).some((due) => due <= ctx.now)) return;
+  for (const entry of ctx.state.recordFiles.filter((f) => ctx.day - f.day >= BACKUP_FILES_RECORD_FILE_DAYS)) {
+    ctx.run.boundary(entry.upTo + 4);
+    for (let index = 0; index < entry.upTo; index++) {
+      ctx.run.spend();
+      try {
+        await ctx.env.FILES_BUCKET.delete(recordFileName(entry.day, index));
+      } catch {
+        raise(ctx, "delete_failed");
+        return;
+      }
+    }
+    ctx.state.recordFiles = ctx.state.recordFiles.filter((f) => f !== entry);
+  }
+}
+
+/** Notes, before the file is written, that `day` wrote a records file at `index`, so the sweep deletes it in its time. */
+function noteRecordFile(ctx: Ctx, day: number, index: number): void {
+  const entry = ctx.state.recordFiles.find((f) => f.day === day);
+  if (entry) entry.upTo = Math.max(entry.upTo, index + 1);
+  else ctx.state.recordFiles.push({ day, upTo: index + 1 });
 }
 
 /** 3. The stores to copy, each with the room R of its plan. */
 async function readStores(ctx: Ctx): Promise<void> {
   const c = ctx.cycle;
   if (c.stores === "failed") c.stores = "pending";
+  const listed = new Map(c.storeList.map((s) => [s.store, s]));
   while (c.stores === "pending") {
     if (c.storesPages >= BACKUP_FILES_INDEX_PAGES) {
       c.stores = "failed";
@@ -596,14 +692,22 @@ async function readStores(ctx: Ctx): Promise<void> {
     try {
       if (!reply.ok) throw new Error(reply.why);
       page = parseStoresPage(reply.text);
-      const known = new Set(c.storeList.map((s) => s.store));
-      if (page.stores.some((s) => known.has(s.store))) throw new Error("a store listed twice");
     } catch {
       c.stores = "failed";
       raise(ctx, "stores_unavailable");
       return;
     }
-    c.storeList.push(...page.stores);
+    // A store the site's walk named on two pages (a SCAN may name a key twice) is read once, at the larger R; found by
+    // name in constant time, never by a scan of the list for each store.
+    for (const named of page.stores) {
+      const known = listed.get(named.store);
+      if (known) known.roomBytes = Math.max(known.roomBytes, named.roomBytes);
+      else {
+        const store = { ...named };
+        c.storeList.push(store);
+        listed.set(store.store, store);
+      }
+    }
     c.storesPages += 1;
     c.storesCursor = page.cursor;
     if (page.complete) c.stores = "done";
@@ -1056,7 +1160,7 @@ export async function runBackupFiles(env: BackupFilesEnv, opts: RunOptions): Pro
     }
     return { ...report, subrequests: run.used };
   }
-  if (!state.cycle || state.cycle.day !== day) state.cycle = newCycle(day);
+  if (!state.cycle || state.cycle.day !== day) state.cycle = newCycle(day, state.recordsFrom);
   const cycle = state.cycle;
   if (cycle.done && (state.heartbeatDay === day || cycle.alarms.some((a) => a.code !== "heartbeat_failed"))) return reportOf(day, cycle, cycle.alarms, run, false, null);
 
@@ -1085,6 +1189,7 @@ export async function runBackupFiles(env: BackupFilesEnv, opts: RunOptions): Pro
     else if (!cycle.done) {
       await forcedPass(ctx);
       await readRecords(ctx);
+      await sweepRecordFiles(ctx);
       ctx.recordsHold = cycle.alarms.some((a) => a.code === "deletions_unavailable") || cycle.records !== "done";
       await readStores(ctx);
       if (cycle.stores === "done") {

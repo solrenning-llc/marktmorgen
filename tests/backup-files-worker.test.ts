@@ -24,7 +24,10 @@
  *     taken as copied when its origin ignored Range, sent no ETag, or the
  *     bucket's reply did not read exactly (rule 24);
  *   - a run past its subrequest budget, or a heartbeat on any run that is not
- *     a finished, alarm-free day;
+ *     a finished, alarm-free day, or no heartbeat on a day whose only missing
+ *     files have their deletion record (expected, never an orphan);
+ *   - an orphan alarm repeated every day: it is raised when the orphan is
+ *     first seen and again when its 90-day end comes;
  *   - an object's name in what goes to the alarm hook.
  */
 import { existsSync, readFileSync, readdirSync } from "node:fs";
@@ -187,6 +190,10 @@ async function main(): Promise<void> {
   setListing("blob", S, objects("blob", S, 7));
   report = await runAt(6);
   is("a listing after the empty one starts the orphan clock only now, and deletes nothing", [deletesIn(files).length, report.alarms.find((a) => a.code === "orphans")?.count], [0, 3]);
+  report = await runAt(7);
+  is("the orphan alarm is not repeated the next day", [has(report, "orphans"), deletesIn(files).length], [false, 0]);
+  report = await runAt(50);
+  is("nor any day in between", [has(report, "orphans"), deletesIn(files).length], [false, 0]);
   report = await runAt(6 + BACKUP_FILES_ORPHAN_DAYS - 1);
   is("three objects missing without a record are kept 89 days, with the orphan alarm and the day they go", [deletesIn(files).length, report.alarms.find((a) => a.code === "orphans")?.count, report.alarms.find((a) => a.code === "orphans")?.on], [0, 3, iso(DAY0 + (6 + BACKUP_FILES_ORPHAN_DAYS) * DAY)]);
   report = await runAt(6 + BACKUP_FILES_ORPHAN_DAYS);
@@ -268,6 +275,7 @@ async function main(): Promise<void> {
   is("a due record while the listing fails: held, with the date it will be applied anyway", [deletesIn(files).length, held?.count, held?.on], [0, 15, iso(at1 + BACKUP_FILES_HOLD_MAX_DAYS * DAY)]);
   report = await runAt(60);
   is("still held, and alarmed, every day of the hold", [deletesIn(files).length, report.alarms.find((a) => a.code === "deletions_held")?.count], [0, 30]);
+  is("each day of the hold, the alarm gives the date the first held record will be applied anyway", report.alarms.find((a) => a.code === "deletions_held")?.on, iso(at1 + BACKUP_FILES_HOLD_MAX_DAYS * DAY));
   report = await runAt(91);
   is("90 days after the record: applied even while the guard holds", [deletesIn(files).length, copies().length], [15, 85]);
   report = await runAt(92);
@@ -472,6 +480,51 @@ async function main(): Promise<void> {
   for (let hour = 2; hour < 12 && !report.finished; hour++) report = await runAt(0, hour, { maxSubrequests: 60 });
   is("the following runs finish the day", [report.finished, copies(S).length, copies(T).length], [true, 40, 40]);
 
+  part("deletion records are read once: each day resumes where the last read ended");
+  fresh();
+  const six = objects("blob", S, 6);
+  setListing("blob", S, six);
+  await runAt(0);
+  world.records = [{ source: "blob", key: six[0].key, recordedAt: DAY0 + DAY + 60_000, reason: "creator_deleted" }];
+  setListing("blob", S, six.slice(1));
+  report = await runAt(1);
+  is("a file missing with its deletion record inside its 30 days is expected: no orphan, no alarm, the heartbeat", [codes(report), report.heartbeat], [[], true]);
+  const asks = () => world.calls.filter((c) => c.url.includes("page=deletions")).map((c) => new URL(c.url).searchParams.get("cursor"));
+  world.calls = [];
+  report = await runAt(2);
+  is("the next day asks from the point the last read ended", asks(), ["r1"]);
+  is("no second copy of a record already received, no share counted twice", [files.under(`deletions/${iso(DAY0 + 2 * DAY)}/`).length, has(report, "records_share"), report.heartbeat], [0, false, true]);
+
+  part("a resume point the site no longer keeps: alarm, then read again from the oldest kept");
+  world.recordsKeptFrom = 5;
+  report = await runAt(3);
+  is("409: alarmed as deletions_expired, nothing deleted, no heartbeat", [has(report, "deletions_expired"), report.heartbeat, deletesIn(files).length], [true, false, 0]);
+  world.calls = [];
+  await runAt(3, 2);
+  is("the next run asks from the start", asks(), [null]);
+  await runAt(4);
+  is("and the next day resumes from where that read ended", asks(), [null, "r5"]);
+
+  part("a record named twice by the site is counted once");
+  fresh();
+  const many = objects("blob", S, 100);
+  setListing("blob", S, many);
+  await runAt(0);
+  const twice = many.slice(0, 15).map((o) => ({ source: "blob" as const, key: o.key, recordedAt: DAY0 + DAY + 60_000, reason: "creator_deleted" as const }));
+  world.records = [...twice, ...twice];
+  setListing("blob", S, many.slice(15));
+  report = await runAt(1);
+  is("15 objects, 15%: under the 20% guard of the store and of the source", [has(report, "records_share"), has(report, "records_share_source")], [false, false]);
+
+  part("a store named on two pages of the stores list is read once, at its larger room");
+  fresh();
+  world.storePages = [[{ store: S, roomBytes: 10_000_000 }], [{ store: T, roomBytes: 10_000_000 }, { store: S, roomBytes: 20_000_000 }]];
+  setListing("blob", S, objects("blob", S, 2));
+  setListing("blob", T, objects("blob", T, 2));
+  report = await runAt(0);
+  is("the stores are read, both copied", [has(report, "stores_unavailable"), copies(S).length, copies(T).length], [false, 2, 2]);
+  is("at the larger of its two rooms, never the smaller", (files.json(`state/stores/${S}.json`) as { roomBytes?: number } | null)?.roomBytes, 20_000_000);
+
   part("two sources of one store, and the videos' own bucket");
   fresh();
   setListing("blob", S, objects("blob", S, 2));
@@ -480,6 +533,40 @@ async function main(): Promise<void> {
   is("each source copied under its own folder", [copies(S, "blob").length, copies(S, "r2").length, report.heartbeat], [2, 3, true]);
   is("a store's file is never put in the videos' bucket", videos.under("copies/").length, 0);
 
+  part("the records written into the backup bucket go after their 92 days (Claude 2, MEDIUM 3 on #3349)");
+  fresh();
+  const keep10 = objects("blob", S, 10);
+  setListing("blob", S, keep10);
+  await runAt(0);
+  world.records = [{ source: "blob", key: keep10[0].key, recordedAt: DAY0 + DAY + 60_000, reason: "privacy_request" }];
+  setListing("blob", S, keep10.slice(1));
+  await runAt(1);
+  const recordFiles = () => files.under(`deletions/${iso(DAY0 + DAY)}/`);
+  is("the day's records are written as received", recordFiles().length, 1);
+  report = await runAt(1 + 91);
+  is("91 days after: the record applied, its file still kept", [recordFiles().length, has(report, "delete_failed")], [1, false]);
+  files.deleteFault = (key) => key.startsWith("deletions/");
+  report = await runAt(1 + 92);
+  is("92 days after, a delete that fails: alarmed, the file kept for the next day, no heartbeat", [recordFiles().length, has(report, "delete_failed"), report.heartbeat], [1, true, false]);
+  files.deleteFault = () => false;
+  report = await runAt(1 + 93);
+  is("the next day it goes, and nothing else of that day is left under deletions/", [recordFiles().length, files.under("deletions/").length, has(report, "delete_failed")], [0, 0, false]);
+  const asked = files.log.length;
+  report = await runAt(1 + 94);
+  is("and that day is not asked again", [files.log.slice(asked).some((l) => l.startsWith(`delete deletions/${iso(DAY0 + DAY)}/`)), has(report, "delete_failed")], [false, false]);
+
+  part("a day of mass deletions is read in linear time (Claude 2, MEDIUM 4 on #3349)");
+  fresh();
+  setListing("blob", S, objects("blob", S, 2));
+  await runAt(0);
+  const massive = objects("blob", S, 60_000, 1, 1, 10).map((o) => ({ source: "blob" as const, key: o.key, recordedAt: DAY0 + DAY + 60_000, reason: "store_closed" as const }));
+  world.records = [...massive, ...massive.slice(0, 1000)];
+  const startedAt = performance.now();
+  report = await runAt(1);
+  const tookMs = performance.now() - startedAt;
+  const inbox = (files.json(`state/stores/${S}.json`) as { sources?: { blob?: { pending?: unknown[] } } } | null)?.sources?.blob?.pending?.length;
+  is("61 pages of 1,000 records, 1,000 named twice: 60,000 pending, each once", inbox, 60_000);
+  is(`in well under the Worker's CPU limit (took ${Math.round(tookMs)} ms; a scan of the inbox for each record takes many seconds)`, tookMs < 6_000, true);
 
   // Claude 3's second review of #3340 (HIGH 1): a live object's copy is never deleted as a version it once was.
   part("an etag that comes back (A, then B, then A): the live A's copy is never pruned as the old version A");

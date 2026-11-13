@@ -1231,19 +1231,34 @@ export async function report(id: string, target: ReportTarget, who: string, room
   const key = targetKey(target);
   // Its entry in the member's trace (traceKey) takes its room first; given back when it was a report made before.
   await needData(room, [TRACE_ENTRY]);
-  const [added, , traced] = await redisPipeline([
-    ["SADD", reportersKey(id, key), who],
-    ["EXPIRE", reportersKey(id, key), REPORTERS_SECONDS],
-    ["SADD", traceKey(id, who), `r:${key}`],
+  // The member written down as a reporter and the item put on the queue in one step (REPORT_ITEM): a press that
+  // fails leaves neither, so the next press queues it, never an "again" for an item that never reached the queue.
+  const [reply] = await redisPipeline([
+    ["EVAL", REPORT_ITEM, 3, reportersKey(id, key), traceKey(id, who), reportsKey(id), who, `r:${key}`, key, REPORTERS_SECONDS, Date.now(), MAX_REPORT_QUEUE],
   ]);
-  if (Number(traced) !== 1) await giveData(room, [TRACE_ENTRY]);
-  if (Number(added) !== 1) return "again";
-  await redisPipeline([
-    ["ZADD", reportsKey(id), Date.now(), key],
-    ["ZREMRANGEBYRANK", reportsKey(id), 0, -(MAX_REPORT_QUEUE + 1)],
-  ]);
-  return "added";
+  // {added, traced}, each 0 or 1 (CX-123 rule 24): any other reply is unknown, never "already reported"; the room
+  // stays taken, since the trace's entry may have been written.
+  const exact = Array.isArray(reply) && reply.length === 2 && reply.every((n) => n === 0 || n === 1);
+  if (!exact) throw new UnknownReplyError("a community report");
+  const [added, traced] = reply as number[];
+  if (traced !== 1) await giveData(room, [TRACE_ENTRY]);
+  return added === 1 ? "added" : "again";
 }
+
+/**
+ * A member's report, in one step. KEYS: the item's reporters, the member's trace, the queue. ARGV: the member, the
+ * trace's entry, the item, how long reporters are kept, now (ms), how many the queue keeps. Answers {added, traced}:
+ * whether the member was a new reporter (and the item was put on the queue) and whether the trace's entry is new.
+ */
+export const REPORT_ITEM = `-- marktmorgen:community-report:v1
+local added = redis.call('SADD', KEYS[1], ARGV[1])
+redis.call('EXPIRE', KEYS[1], ARGV[4])
+local traced = redis.call('SADD', KEYS[2], ARGV[2])
+if added == 1 then
+  redis.call('ZADD', KEYS[3], ARGV[5], ARGV[3])
+  redis.call('ZREMRANGEBYRANK', KEYS[3], 0, -(tonumber(ARGV[6]) + 1))
+end
+return {added, traced}`;
 
 export type QueuedReport = { target: ReportTarget; key: string; at: number; count: number | null };
 

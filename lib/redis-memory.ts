@@ -155,6 +155,18 @@ export class MemoryRedis {
           }
           return null;
         }
+        // lib/community.ts REPORT_ITEM: a member written down as a reporter, and the item queued when they are new, in one step.
+        if (key.startsWith("-- marktmorgen:community-report:v1\n") && args[0] === "3" && args.length === 10) {
+          const [, reporters, trace, queue, who, ref, item, keep, at, max] = args;
+          const added = this.run(["SADD", reporters, who]);
+          this.run(["EXPIRE", reporters, keep]);
+          const traced = this.run(["SADD", trace, ref]);
+          if (added === 1) {
+            this.run(["ZADD", queue, at, item]);
+            this.run(["ZREMRANGEBYRANK", queue, "0", String(-(Number(max) + 1))]);
+          }
+          return [added, traced];
+        }
         // lib/community.ts GIVE_BACK_HANDLE: a handle deleted only while it points at the member and their record does not carry it.
         if (key.startsWith("-- marktmorgen:community-handle-give-back:v1\n") && args[0] === "2" && args.length === 5) {
           const [, members, handles, handle, who] = args;

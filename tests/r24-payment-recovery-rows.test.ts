@@ -75,7 +75,7 @@ async function main(): Promise<void> {
   const failing = (n: string, invoice: Record<string, unknown>) => ({
     id: `sub_RtfFail${n}`, status: "past_due", metadata: meta,
     customer: { id: `cus_RtfFail${n}`, email: `fail${n}@example.com` },
-    latest_invoice: { id: `in_RtfFail${n}`, status: "open", amount_due: 2900, amount_remaining: 2900, currency: "usd", hosted_invoice_url: `https://invoice.stripe.com/i/f${n}`, next_payment_attempt: null, ...invoice },
+    latest_invoice: { id: `in_RtfFail${n}`, subscription: `sub_RtfFail${n}`, customer: `cus_RtfFail${n}`, status: "open", amount_due: 2900, amount_remaining: 2900, currency: "usd", hosted_invoice_url: `https://invoice.stripe.com/i/f${n}`, next_payment_attempt: null, ...invoice },
   });
   const odd: [string, string, Record<string, unknown>][] = [
     ["0001", "no next_payment_attempt", { next_payment_attempt: undefined }],
@@ -132,6 +132,28 @@ async function main(): Promise<void> {
   state.pastDue = [failing("0015", { amount_due: 2900, amount_paid: 2900, amount_remaining: 0 })];
   await run();
   is("a balance of zero: no email, nothing changed at Stripe", [to("fail0015@example.com").length, saved.includes("sub_RtfFail0015")], [0, false]);
+  state.pastDue = [];
+
+  // An expanded latest invoice that is not this membership's own (the #4449 class on the creator's members): its
+  // link and amount are someone else's, so nothing is sent, claimed or changed at Stripe on it.
+  part("Another membership's or customer's invoice never gives this member a link");
+  const foreign: [string, string, Record<string, unknown>][] = [
+    ["0016", "another subscription's invoice", { subscription: "sub_RtfOther0001", customer: "cus_RtfOther0001" }],
+    ["0017", "the same customer, another subscription", { subscription: "sub_RtfOther0002" }],
+    ["0018", "this subscription named, another customer", { customer: "cus_RtfOther0003" }],
+    ["0019", "naming no subscription", { subscription: undefined }],
+    ["0020", "another subscription under parent", { subscription: undefined, parent: { subscription_details: { subscription: "sub_RtfOther0004" } } }],
+    ["0021", "top level and parent disagreeing", { parent: { subscription_details: { subscription: "sub_RtfOther0005" } } }],
+    ["0022", "naming no customer", { customer: undefined }],
+  ];
+  state.pastDue = foreign.map(([n, , invoice]) => failing(n, invoice));
+  await run();
+  for (const [n, what] of foreign) {
+    is(`${what}: no email, no claim, nothing changed at Stripe`, [to(`fail${n}@example.com`).length, await markOf(`in_RtfFail${n}`), saved.includes(`sub_RtfFail${n}`)], [0, null, false]);
+  }
+  state.pastDue = [failing("0023", { subscription: undefined, parent: { subscription_details: { subscription: "sub_RtfFail0023" } }, customer: { id: "cus_RtfFail0023" } })];
+  await run();
+  is("its own, named under parent with the customer expanded: sent once", to("fail0023@example.com").length, 1);
   state.pastDue = [];
 
   part("A card that stops working: no notice on a row that does not say it is running");

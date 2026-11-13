@@ -1675,9 +1675,14 @@ export class MemoryRedis {
         return held;
       }
       case "DEL": {
-        // DEL takes several keys.
+        // DEL takes several keys. A set, hash or list left empty here (a read of a missing key makes one) is a key
+        // Redis never holds, so its deletion is not counted, as Redis would not count it.
         let gone = 0;
-        for (const one of [key, ...args]) if (this.data.delete(one)) gone += 1;
+        for (const one of [key, ...args]) {
+          const held = this.data.get(one);
+          const empty = (held instanceof Set || held instanceof Map || Array.isArray(held)) && (Array.isArray(held) ? held.length : held.size) === 0;
+          if (this.data.delete(one) && !empty) gone += 1;
+        }
         return gone;
       }
       case "EXISTS":

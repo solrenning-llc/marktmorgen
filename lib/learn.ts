@@ -1054,18 +1054,43 @@ export async function forgetLearnerPerson(
   const held = stringList(repliesFor(await redisPipeline([["SMEMBERS", passesKey(store, email)]]), 1)?.[0]);
   if (held === null) throw new UnknownReplyError("the passes of a person being deleted");
   const passes = held.filter((h) => /^[0-9a-f]{64}$/.test(h));
+  // What their lessons done and their row in each course took of the store's data room (markLesson, touchStudent),
+  // read before they go, so it is given back once each is confirmed deleted. Read exactly (rule 24): an unknown
+  // reply throws, and the erasure says this part did not finish rather than keep or give back a guess.
+  const field = emailKey(email);
+  const kept = courses.length
+    ? repliesFor(await redisPipeline(courses.flatMap((c) => [["SMEMBERS", doneKey(c.courseId, email)], ["HGET", studentsKey(c.courseId), field]])), courses.length * 2)
+    : [];
+  if (!kept) throw new UnknownReplyError("a person's course records before their deletion");
+  const weights = courses.map((_, i) => {
+    const lessons = stringList(kept[i * 2]);
+    const row = kept[i * 2 + 1];
+    if (!lessons || (row !== null && typeof row !== "string")) throw new UnknownReplyError("a person's course records before their deletion");
+    return { lessons: lessons.reduce((sum, id) => sum + dataBytes([id], 1), 0), row: typeof row === "string" ? dataBytes([field, row, "0000000000"], 1) : 0 };
+  });
   const keys = [
     ledgerKey(store, email),
     paidCacheKey(store, email),
     passesKey(store, email),
     ...passes.map((hash) => `nl:learn:pass:${hash}`),
-    ...courses.flatMap((c) => [doneKey(c.courseId, email), ...c.moduleIds.map((m) => dripMailKey(c.courseId, email, m))]),
+    ...courses.flatMap((c) => c.moduleIds.map((m) => dripMailKey(c.courseId, email, m))),
   ];
-  const commands: (string | number)[][] = [["DEL", ...keys], ...courses.map((c) => ["HDEL", studentsKey(c.courseId), emailKey(email)])];
+  const commands: (string | number)[][] = [["DEL", ...keys], ...courses.map((c) => ["HDEL", studentsKey(c.courseId), field])];
   const replies = repliesFor(await redisPipeline(commands), commands.length);
   // One whole count for each DEL and HDEL (CX-123 rule 24): never 0 removed on another shape; thrown, so the
   // erasure says this part did not finish (lib/person-erasure.ts).
   const counts = replies?.map(countOf);
   if (!counts || counts.some((n) => n === null)) throw new UnknownReplyError("the deletion of a person's course records");
-  return (counts as number[]).reduce((sum, n) => sum + n, 0);
+  // The lessons done, one course at a time, so each deletion confirmed gives back its own room.
+  const lessonCommands = courses.map((c) => ["DEL", doneKey(c.courseId, email)]);
+  const lessonReplies = lessonCommands.length ? repliesFor(await redisPipeline(lessonCommands), lessonCommands.length) : [];
+  const lessonCounts = lessonReplies?.map(countOf);
+  if (!lessonCounts || lessonCounts.some((n) => n === null)) throw new UnknownReplyError("the deletion of a person's lessons done");
+  // Given back only for what this deletion removed: a second deletion, or one that found nothing, gives back nothing.
+  const given = courses.flatMap((c, i) => {
+    const bytes = (lessonCounts[i] === 1 ? weights[i].lessons : 0) + (counts[1 + i] === 1 ? weights[i].row : 0);
+    return bytes > 0 ? [{ slot: DONE_SLOT(c.courseId), bytes }] : [];
+  });
+  if (given.length) await giveData(store, given);
+  return [...(counts as number[]), ...(lessonCounts as number[])].reduce((sum, n) => sum + n, 0);
 }

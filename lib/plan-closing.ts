@@ -976,12 +976,15 @@ export async function closeOne(key: string, now = Date.now(), hands: Hands = HAN
 async function closingDay(store: Store, key: string, state: State, endedAt: number, day: number, folder: string, now: number, hands: Hands, until: number, save: (next: State) => Promise<unknown>): Promise<Closing> {
   let next: State = state;
   if (!next.renewals) {
-    // From here the closing is seen through (FINAL_INDEX): no release, no "it stays open".
-    await redisPipeline([["ZADD", FINAL_INDEX, endedAt, key], ["ZREM", HELD_INDEX, key]]);
+    // The day is written down before the store enters FINAL_INDEX: once it is
+    // there, a run that finds no day takes its own `now` (closeOne, closingOf),
+    // a later date that would give members back less of what they paid for.
     if (!next.day) {
       next = { ...next, day };
       await save(next);
     }
+    // From here the closing is seen through (FINAL_INDEX): no release, no "it stays open".
+    await redisPipeline([["ZADD", FINAL_INDEX, endedAt, key], ["ZREM", HELD_INDEX, key]]);
     // No plan can be paid for it from here: its open plan checkouts are
     // expired, and its address is marked for after its records are gone.
     await markShut(store, next.day ?? day, endedAt);

@@ -15,7 +15,7 @@
  */
 import { readFileSync } from "node:fs";
 import { addProduct, claimHandle, ensureStatsId, setProductCourse, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
-import { courseAccess, mintPass, passCookieName, recordEnrollment } from "@/lib/learn";
+import { courseAccess, mintPass, passCookieName, recordEnrollment, setBlocked } from "@/lib/learn";
 import { closedDoor, forgetsOnDevice } from "@/lib/course-door";
 import { COURSES_WORDS } from "@/lib/buyer-words/courses";
 import { readListing } from "@/lib/catalog";
@@ -127,6 +127,16 @@ async function main(): Promise<void> {
   is("paid, thanks page never seen: unknown too (Stripe alone would have opened it)", tomas.state, "unknown");
   const stranger = await courseAccess(store, course, { get: () => undefined });
   is("a visitor is not asked about: closed, with the checkout", [stranger.state, closedDoor(stranger, true, true)], ["closed", "checkout"]);
+
+  part("Taken off the course by the creator: closed even while Stripe's answer is unknown (review LEVE lib/learn.ts:426)");
+  sessions["ugo@example.com"] = [paid("cs_test_ugo000paid01", product)];
+  await recordEnrollment(store, "ugo@example.com", product, NOW - 86_400);
+  await setBlocked(store, "c".repeat(32), "ugo@example.com", true);
+  const ugo = await courseAccess(store, course, await signedIn("ugo@example.com"));
+  is("taken off: closed, not \"could not check\"", ugo.state, "closed");
+  is("taken off: the device places are forgotten", forgetsOnDevice(ugo), true);
+  await setBlocked(store, "c".repeat(32), "ugo@example.com", false);
+  is("put back on: unknown again while Stripe is out", (await courseAccess(store, course, await signedIn("ugo@example.com"))).state, "unknown");
 
   part("Nothing unknown is kept: Stripe back, the next load opens it");
   failing = false;

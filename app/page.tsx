@@ -15,7 +15,7 @@ import { PLAN_TITLES, PUBLISHED_PRICE_CENTS as PRICE_CENTS, TRIAL_DAYS } from "@
 import { PLANS_ON_SALE } from "@/lib/opening";
 import { feeWords } from "@/lib/fee-words";
 import { INVITE_PROGRAM_OPEN, INVITE_SHARE_PERCENT } from "@/lib/creator-invite-rules";
-import { DEMO_CALL, DEMO_PRODUCT } from "@/lib/demo-seed";
+import { DEMO_CALL, DEMO_PRODUCT } from "@/lib/demo-catalog";
 
 /*
  * The home page, VS1 (queue item 571, the owner's approved mockup of

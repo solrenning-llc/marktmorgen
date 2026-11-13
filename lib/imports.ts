@@ -352,6 +352,11 @@ const rowsKey = (id: string) => `nl:import:${id}:rows`;
 const seenKey = (id: string) => `nl:import:${id}:seen`;
 const errorsKey = (id: string) => `nl:import:${id}:errors`;
 const mailKey = (id: string) => `nl:import:${id}:mail`;
+/**
+ * The portion of mailKey whose sending was not confirmed (the sender may have taken some of it), kept so the next
+ * step tries that same portion again under the same key (j-mail-6): every member is also still in mailKey.
+ */
+const againKey = (id: string) => `nl:import:${id}:mail:again`;
 const lockKey = (id: string) => `nl:import:${id}:lock`;
 const busyKey = (sid: string) => `nl:imports:busy:${sid}`;
 const listKey = (sid: string) => `nl:imports:list:${sid}`;
@@ -680,7 +685,7 @@ async function cancelJob(job: ImportJob, raw: string): Promise<ImportJob> {
     const ended: ImportJob = { ...job, state: "canceled", finishedAt: Date.now() };
     const back = heldLeft(ended);
     if (await writeJobIf(raw, ended)) {
-      await redisPipeline([["SREM", ACTIVE_KEY, job.id], ["DEL", rowsKey(job.id), seenKey(job.id), mailKey(job.id)]]);
+      await redisPipeline([["SREM", ACTIVE_KEY, job.id], ["DEL", rowsKey(job.id), seenKey(job.id), mailKey(job.id), againKey(job.id)]]);
       await giveBackHeld(ended.sid, back);
       await releaseBusy(ended);
       return ended;
@@ -1498,14 +1503,47 @@ async function mailStep(job: ImportJob, store: Store): Promise<"more" | "done" |
   // And until then they go out in portions that double, a hundred buyers
   // first, so that a file of dead addresses is found while few have been
   // written to. A portion not yet open is waited for; nobody is dropped.
-  const portion = paused ? MAIL_CHUNK : await rampRoom(job.sid, Math.min(MAIL_CHUNK, waiting));
+  let portion = paused ? MAIL_CHUNK : await rampRoom(job.sid, Math.min(MAIL_CHUNK, waiting));
   if (portion <= 0) return "retry";
+  // A portion whose sending was not confirmed is tried again as itself, under the same key, so whoever the sender
+  // already took is not written to twice (j-mail-6; lib/ses.ts notYetTaken is keyed by the batch). Drawn again at
+  // random, it went under another key and those were emailed again. Read exactly (rule 24), each member checked
+  // still waiting (SMISMEMBER): an unknown answer gives the portion back and throws, the step left as it was.
+  let again: string[] = [];
+  {
+    const kept = repliesFor(await redisPipeline([["SMEMBERS", againKey(job.id)]]), 1);
+    const members = kept ? stringList(kept[0]) : null;
+    let still: unknown[] | null = members && members.length ? repliesFor(await redisPipeline([["SMISMEMBER", mailKey(job.id), ...members]]), 1) : [];
+    if (still && members && members.length) {
+      const flags = Array.isArray(still[0]) ? (still[0] as unknown[]) : null;
+      still = flags && flags.length === members.length && flags.every((f) => f === 0 || f === 1) ? flags : null;
+    }
+    if (members === null || still === null) {
+      if (!paused) await rampBack(job.sid, portion);
+      throw new UnknownReplyError("the portion an import tries again");
+    }
+    again = members.filter((_, i) => still![i] === 1).sort();
+    if (members.length && !again.length) await redisPipeline([["DEL", againKey(job.id)]]);
+    if (again.length > portion) {
+      // Not open yet for the whole portion: it waits, never cut into another one.
+      if (!paused) await rampBack(job.sid, portion);
+      return "retry";
+    }
+    if (again.length) {
+      if (!paused && portion > again.length) await rampBack(job.sid, portion - again.length);
+      portion = again.length;
+    }
+  }
+  /** The kept portion has been dealt with (sent, refused, or not emailed): it goes. */
+  const settled = async () => {
+    if (again.length) await redisPipeline([["DEL", againKey(job.id)]]);
+  };
   // The portion is read first and taken off by name after (independent review on #2881, L3): SPOP took addresses
   // on the server even when its reply came back unreadable, and nobody knew which, so they were neither emailed
   // nor counted. SRANDMEMBER changes nothing: an answer in any shape but a list of addresses gives the portion back
   // and throws, the addresses still queued. Only SCARD says the queue is empty: an empty read waits for the next
   // pass to count again.
-  const read = repliesFor(await redisPipeline([["SRANDMEMBER", mailKey(job.id), portion]]), 1);
+  const read = again.length ? [again] : repliesFor(await redisPipeline([["SRANDMEMBER", mailKey(job.id), portion]]), 1);
   const emails = read ? stringList(read[0]) : null;
   if (emails === null || emails.length === 0) {
     if (!paused) await rampBack(job.sid, portion);
@@ -1523,6 +1561,7 @@ async function mailStep(job: ImportJob, store: Store): Promise<"more" | "done" |
   }
   if (paused) {
     job.counts.unmailed += emails.length;
+    await settled();
     return "more";
   }
   /** What was taken from the portion and did not go is given back to it. */
@@ -1563,6 +1602,7 @@ async function mailStep(job: ImportJob, store: Store): Promise<"more" | "done" |
   }
   if (messages.length === 0) {
     await unsent(portion);
+    await settled();
     return "more";
   }
   // The company's day first: over it, the same buyers wait for tomorrow.
@@ -1595,17 +1635,20 @@ async function mailStep(job: ImportJob, store: Store): Promise<"more" | "done" |
   if (sending.length === 0) {
     job.counts.unmailed += messages.length;
     await unsent(portion);
+    await settled();
     return "more";
   }
   const sent = await sendBatch(sending, `nimbus-import:${job.id}:${emails.slice().sort()[0]}:${emails.length}`, { by: "monthly" });
   if (sent === "retry") {
-    await redisPipeline([["SADD", mailKey(job.id), ...emails]]);
+    // Back to wait, and kept as this portion, so the next step sends it again as it is, under the same key.
+    await redisPipeline([["SADD", mailKey(job.id), ...emails], ["SADD", againKey(job.id), ...emails], ["EXPIRE", againKey(job.id), KEEP_SECONDS]]);
     if (held) held.n += sending.length;
     else await releaseMoved(store, sending.length);
     await releaseDay(sending.length);
     await unsent(portion);
     return "retry";
   }
+  await settled();
   job.counts.unmailed += messages.length - sending.length;
   if (sent === "sent") {
     // What a bounce or a complaint is later measured against.

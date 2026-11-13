@@ -23,7 +23,7 @@ async function main(): Promise<void> {
   const original = redis.pipeline.bind(redis);
   let erased: { records: number } | null = null;
   redis.pipeline = (async (commands: (string | number)[][]) => {
-    if (!erased && commands[0]?.[0] === "EVAL" && String(commands[0][1]).startsWith("-- marktmorgen:hand-in-write-if:v1")) {
+    if (!erased && commands[0]?.[0] === "EVAL" && String(commands[0][1]).startsWith("-- marktmorgen:hand-in-write-if:")) {
       erased = await forgetTasksPerson(COURSE, [LESSON], WHO, null);
     }
     return original(commands);

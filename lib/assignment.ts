@@ -42,6 +42,15 @@ import {
 
 const taskKey = (courseId: string, lessonId: string) => `nl:course:${courseId}:task:${lessonId}`;
 const subKey = (courseId: string, lessonId: string, who: string) => `nl:course:${courseId}:task:${lessonId}:sub:${who}`;
+/**
+ * A student's erasure count on a course's assignments (#4271): forgetTasksPerson raises it before it reads anything,
+ * even when it then finds nothing; handIn reads it before the work and writes only while it is unchanged, so a hand-in
+ * that read before an erasure never writes after it. It holds no work and lives ERASURE_MARK_SECONDS, far longer than
+ * any one request runs, so a hand-in in flight always meets it; an expired mark reads as absent, and a hand-in that
+ * read it present then finds it changed and writes nothing.
+ */
+const erasureMarkKey = (courseId: string, who: string) => `nl:course:${courseId}:task-erasure:${who}`;
+const ERASURE_MARK_SECONDS = 86_400;
 const filesKey = (courseId: string, lessonId: string) => `nl:course:${courseId}:task:${lessonId}:files`;
 const waitingKey = (courseId: string) => `nl:course:${courseId}:tasks:waiting`;
 const allKey = (courseId: string) => `nl:course:${courseId}:tasks:all`;
@@ -239,6 +248,15 @@ export async function submissionOf(courseId: string, lessonId: string, who: stri
 }
 
 /** The work as read, and its exact text ("" for none), for a write made only over that same text (HAND_IN_WRITE_IF). */
+/** A student's erasure mark on a course, exactly: "" when there is none, its digits when there is (rule 24). */
+async function readErasureMark(courseId: string, who: string): Promise<string> {
+  if (!isRedisConfigured() || !WHO.test(who)) return "";
+  const reply = repliesFor(await redisPipeline([["GET", erasureMarkKey(courseId, who)]]), 1)?.[0];
+  if (reply === null) return "";
+  if (typeof reply !== "string" || !/^[0-9]+$/.test(reply)) throw new UnknownReplyError("a student's erasure mark on a course");
+  return reply;
+}
+
 async function readSubmission(courseId: string, lessonId: string, who: string): Promise<{ found: Submission | null; raw: string }> {
   if (!isRedisConfigured() || !WHO.test(who) || !ITEM_ID_PATTERN.test(lessonId)) return { found: null, raw: "" };
   const reply = repliesFor(await redisPipeline([["GET", subKey(courseId, lessonId, who)]]), 1)?.[0];
@@ -418,13 +436,15 @@ export class HandInChangedError extends Error {
 
 /**
  * The work written only over the one it was read as (KEYS: the work, the lesson's files, the course's waiting list,
- * its list of all work; ARGV: the work as read or "" for none, the new work, the file's path or "", its bytes, "1"
- * when a person reads it, when, the lists' member). 1 when written, 0 when the work changed since and nothing was
- * written; so the file it replaced is answered, deleted and given back by one hand-in only.
+ * its list of all work, the student's erasure mark; ARGV: the work as read or "" for none, the new work, the file's
+ * path or "", its bytes, "1" when a person reads it, when, the lists' member, the erasure mark as read or ""). 1 when
+ * written, 0 when the work or the erasure mark changed since and nothing was written; so the file it replaced is
+ * answered, deleted and given back by one hand-in only, and nothing is written back after the student's erasure.
  */
-export const HAND_IN_WRITE_IF = `-- marktmorgen:hand-in-write-if:v1
+export const HAND_IN_WRITE_IF = `-- marktmorgen:hand-in-write-if:v2
 local now = redis.call('GET', KEYS[1]) or ''
 if now ~= ARGV[1] then return 0 end
+if (redis.call('GET', KEYS[5]) or '') ~= ARGV[8] then return 0 end
 redis.call('SET', KEYS[1], ARGV[2])
 if ARGV[3] ~= '' then redis.call('HSET', KEYS[2], ARGV[3], ARGV[4]) end
 if ARGV[5] == '1' then redis.call('ZADD', KEYS[3], ARGV[6], ARGV[7]) else redis.call('ZREM', KEYS[3], ARGV[7]) end
@@ -455,6 +475,8 @@ export async function handIn(input: {
 }): Promise<HandIn> {
   const { courseId, lessonId, who, task } = input;
   const at = input.now ?? Math.floor(Date.now() / 1000);
+  // The erasure mark before the work (#4271): an erasure that ran after this read changes it, and the write refuses.
+  const mark = await readErasureMark(courseId, who);
   const read = await readSubmission(courseId, lessonId, who);
   const before = read.found;
   const state: TaskState = task.review ? "waiting" : "approved";
@@ -480,11 +502,12 @@ export async function handIn(input: {
       [
         "EVAL",
         HAND_IN_WRITE_IF,
-        4,
+        5,
         subKey(courseId, lessonId, who),
         filesKey(courseId, lessonId),
         waitingKey(courseId),
         allKey(courseId),
+        erasureMarkKey(courseId, who),
         read.raw,
         JSON.stringify(kept),
         input.file?.path ?? "",
@@ -492,6 +515,7 @@ export async function handIn(input: {
         task.review ? "1" : "0",
         at,
         member,
+        mark,
       ],
     ]),
     1,
@@ -771,6 +795,16 @@ export class TaskRecordUnreadError extends Error {
  */
 export async function forgetTasksPerson(courseId: string, lessonIds: string[], who: string, room: string | null): Promise<{ records: number; files: string[] }> {
   if (!lessonIds.length || !WHO.test(who) || !isRedisConfigured()) return { records: 0, files: [] };
+  // First, even when nothing is found: a hand-in that read before this never writes after it (#4271). Both commands
+  // answer exactly, or the erasure is said as not finished and nothing is read or deleted.
+  const marked = repliesFor(
+    await redisPipeline([
+      ["INCR", erasureMarkKey(courseId, who)],
+      ["EXPIRE", erasureMarkKey(courseId, who), ERASURE_MARK_SECONDS],
+    ]),
+    2,
+  );
+  if (!marked || countOf(marked[0]) === null || marked[0] === 0 || marked[1] !== 1) throw new UnknownReplyError("a student's erasure mark on a course");
   const raws = repliesFor(await redisPipeline(lessonIds.map((l) => ["GET", subKey(courseId, l, who)])), lessonIds.length);
   if (!raws || !raws.every((raw) => raw === null || typeof raw === "string")) throw new UnknownReplyError("a student's work on a course's assignments");
   const handed = lessonIds.flatMap((lessonId, i) => (typeof raws[i] === "string" ? [{ lessonId, file: fileOfRecord(raws[i] as string) }] : []));

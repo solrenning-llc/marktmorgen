@@ -26,7 +26,9 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
   // Nothing of a store switched off after a report (lib/takedown.ts) is named in the tab.
   const product = store && !store.suspended ? await readListing(store, productIdFromAddress(store, id) ?? id) : null;
   // A draft has no page of its own, so no list of its reviews either (MM-SA-30), as p/[product]/page.tsx.
-  if (!store || !product || product.hidden) return { title: "Not found — Marktmorgen" };
+  // Not indexed either way (Codex G on #3193): a store switched off answers its "not available" page here, as its
+  // other pages do, while its crawler rules answer 404.
+  if (!store || !product || product.hidden) return { title: "Not found — Marktmorgen", robots: { index: false, follow: false } };
   return {
     title: `${speech(store).w.reviewsOf(product.title)} — ${store.name}`,
     // The product's own page carries the rating for search engines; this

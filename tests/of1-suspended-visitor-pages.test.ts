@@ -103,7 +103,7 @@ async function main(): Promise<void> {
   const titles = ["Glaze Workshop Replay", "Free Glaze Guide", "Studio Call With Ana"];
 
   const ask = (path: string, query: Query) => answering(new NextRequest(`https://marktmorgen.com/${handle}${path}${Object.keys(query).length ? `?${new URLSearchParams(query)}` : ""}`));
-  const pages: { name: string; path: string; query: Query; run: (query: Query) => Promise<unknown>; meta: () => Promise<{ title?: unknown }> }[] = [
+  const pages: { name: string; path: string; query: Query; run: (query: Query) => Promise<unknown>; meta: () => Promise<{ title?: unknown; robots?: unknown }> }[] = [
     { name: "the booking page of a call", path: `/book/${call.product.id}`, query: {}, run: (q) => BookPage({ params: Promise.resolve({ handle, product: call.product.id }), searchParams: Promise.resolve(q) }), meta: () => bookMeta({ params: Promise.resolve({ handle, product: call.product.id }), searchParams: Promise.resolve({}) }) },
     { name: "the free copy's page", path: "/free", query: { status: "sent", product: free.product.id }, run: (q) => FreePage({ params: Promise.resolve({ handle }), searchParams: Promise.resolve(q) }), meta: () => freeMeta({ params: Promise.resolve({ handle }), searchParams: Promise.resolve({}) }) },
     { name: "the sign-up box's page", path: "/join", query: { status: "sent" }, run: (q) => JoinPage({ params: Promise.resolve({ handle }), searchParams: Promise.resolve(q) }), meta: () => joinMeta({ params: Promise.resolve({ handle }), searchParams: Promise.resolve({}) }) },

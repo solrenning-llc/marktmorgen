@@ -76,6 +76,12 @@ jobs:
       - uses: github/codeql-action/analyze@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
         with:
           category: /language:${{ matrix.language }}
+          # A merge group's ref (gh-readonly-queue/main/pr-N-...) is deleted as soon as the group
+          # merges or is rebuilt, often before the upload, which then fails with "ref ... not found
+          # in this repository" and marks the scan as a configuration error. The merge group still
+          # runs the whole analysis; its results are uploaded by the push run on main for the same
+          # commit (main has no code-scanning merge rule, only the required checks).
+          upload: ${{ github.event_name == 'merge_group' && 'never' || 'always' }}
 
   all-checks:
     # The one check GitHub requires before main (scripts/ci_all_checks.py): it always runs and

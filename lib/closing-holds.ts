@@ -265,8 +265,12 @@ function isOwnInvoice(invoice: Record<string, unknown>, sub: string, customer: s
  * tried again the next day (f:), never counted as held with its hold part done.
  * A reply that is not a list throws the same way (listOf).
  */
-function ownInvoices(reply: unknown, sub: string, customer: string, what: string): Record<string, unknown>[] {
+function ownInvoices(reply: unknown, sub: string, customer: string, what: string, whole = false): Record<string, unknown>[] {
   const rows = listOf(reply);
+  // A list that must be read whole (every open invoice voided, every draft kept): its has_more read exactly, and more
+  // to follow throws before any write, so the member is never paused and counted held with invoices left to collect
+  // (#4347). Read 100 at a time, Stripe's most, so only a member with more than that many waits.
+  if (whole && (reply as { has_more?: unknown }).has_more !== false) throw new StripeListUnreadable(`${what}s past one page, or a page that does not say whether more follow`);
   if (rows.some((row) => !row || typeof row !== "object" || !isOwnInvoice(row as Record<string, unknown>, sub, customer))) throw new Error(`Stripe listed ${what} that is not the member's own`);
   return rows as Record<string, unknown>[];
 }
@@ -289,8 +293,8 @@ async function holdOne(account: string, folder: string, sub: Row, endedAt: numbe
   if (!(await takeCalls(folder, 5 + (plan ? 0 : REFUND_CALLS_PER_MEMBER)))) return "over";
   // Every list read and checked row by row before any write (ownInvoices): a row that is not the member's own decides nothing.
   const customer = idOf(sub.customer);
-  const open = ownInvoices(await onAccount("GET", account, `/invoices?${new URLSearchParams({ subscription: id, status: "open", limit: "10" })}`), id, customer, "an open invoice");
-  const drafts = ownInvoices(await onAccount("GET", account, `/invoices?${new URLSearchParams({ subscription: id, status: "draft", limit: "10" })}`), id, customer, "a draft").filter((d) => d.auto_advance !== false);
+  const open = ownInvoices(await onAccount("GET", account, `/invoices?${new URLSearchParams({ subscription: id, status: "open", limit: "100" })}`), id, customer, "an open invoice", true);
+  const drafts = ownInvoices(await onAccount("GET", account, `/invoices?${new URLSearchParams({ subscription: id, status: "draft", limit: "100" })}`), id, customer, "a draft", true).filter((d) => d.auto_advance !== false);
   let paid: Record<string, unknown>[] = [];
   if (!plan) {
     const query = new URLSearchParams({ subscription: id, status: "paid", limit: "10" });

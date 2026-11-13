@@ -800,6 +800,10 @@ async function dispatchBatch(
         return { refused: refusals };
       }
       going = result.left.map((m) => m.original);
+      // Nobody taken, no lost answer and no account stop: Amazon only asked to slow down (429, not a quota) or
+      // the time ran out before these were tried. Known not sent, so a list batch waits and is tried again whole
+      // under the same key, rather than being held as maybe sent (lib/mail.ts), which stops a broadcast for good.
+      if (listOnly && going.length && !result.down && result.taken.length === 0) return "waiting";
     }
     if (going.length === 0) return "sent";
     if (only === "amazon") return "retry";

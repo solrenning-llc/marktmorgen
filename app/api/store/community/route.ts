@@ -29,7 +29,7 @@ import {
   within,
   withPin,
 } from "@/lib/community";
-import { communityViewer, maySeeSpace } from "@/lib/community-access";
+import { communityViewer, holdsTicket, maySeeSpace } from "@/lib/community-access";
 import { MAX_POLL_DAYS, parsePoll, vote } from "@/lib/community-polls";
 import { mentionsIn, whoIs } from "@/lib/community-mentions";
 import { tell } from "@/lib/community-notify";
@@ -151,7 +151,8 @@ export async function POST(request: NextRequest) {
     if (!viewer.canWrite && !(action === "report" && viewer.member)) return back(fromPage, viewer.member?.muted ? "muted" : "full");
 
     // Who may hear about something said in a space: the creator, and members
-    // still in the community who can see that space. A removed member, or one
+    // still in the community who can see that space. A removed member, one
+    // whose ticket lapsed (communityViewer answers them "closed"), or one
     // without the product a gated space asks for, is never told, and so never
     // gets its first words in their notifications nor a push. A read that
     // fails leaves the person out: a notice missed is the smaller loss.
@@ -164,6 +165,7 @@ export async function POST(request: NextRequest) {
         if (one === CREATOR) { out.push(one); continue; }
         const member = members.get(one);
         if (!member || member.removed) continue;
+        if (!(await holdsTicket(store, config, member.e).catch(() => false))) continue;
         if (spaceOf?.only.length && !(await maySeeSpace(store, config, spaceOf, { owner: false, email: member.e }).catch(() => false))) continue;
         out.push(one);
       }

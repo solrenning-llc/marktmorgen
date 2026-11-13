@@ -1201,9 +1201,15 @@ export const PLAN_REFUND_STOP_MARK = "plan_refund_stop";
 /**
  * One lock per subscription for every change of its stop (Codex U on #3740): the plan refund's read-then-take-back
  * and the creator's own cancel or resume never interleave, so a change the creator was told is done is never undone.
+ * What it covers: every change made through this code, which is the only way a creator changes their plan (the
+ * studio's billing route, plan breaks; there is no Stripe portal for a creator's plan). Stripe offers no conditional
+ * update, so a change written straight into the platform's own Stripe account (by its owner, in the Dashboard) takes
+ * no lock: one landing inside a take-back's GET and POST, a window of one request, is not fenced.
  */
 export const planStopLockKey = (subscriptionId: string) => `nl:lock:plan-stop:${subscriptionId}`;
-export const PLAN_STOP_LOCK_SECONDS = 30;
+// Longer than the work it guards, so it cannot lapse in the middle (Claude 7 on #3740): a GET and a POST, each up to
+// STRIPE_TIMEOUT_MS (20 s), with room to spare; the take-back also checks the lock is still held before its POST.
+export const PLAN_STOP_LOCK_SECONDS = 60;
 export const PLAN_STOP_LOCK_WAIT_MS = 3_000;
 
 export async function setCancelAtPeriodEnd(

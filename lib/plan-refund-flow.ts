@@ -41,7 +41,7 @@
  * job skips a store whose lock is held.
  */
 import { BillingError, PLAN_REFUND_STOP_MARK, PLAN_STOP_LOCK_SECONDS, PLAN_STOP_LOCK_WAIT_MS, isBillingConfigured, onPlatform, planStopLockKey } from "@/lib/billing";
-import { withLock } from "@/lib/redis-lock";
+import { holdLock, withLock } from "@/lib/redis-lock";
 import { LOCK_SECONDS, type PlanRefundMade, refundPlanPayment } from "@/lib/plan-refund-write";
 import { dropPause } from "@/lib/plan-pause";
 import { syncAssistant } from "@/lib/assistant-billing";
@@ -224,7 +224,7 @@ async function takeBackStop(id: string): Promise<boolean> {
   try {
     // Read and taken back under the stop's lock (Codex U on #3740): the creator's own cancel or resume
     // (lib/billing.ts setCancelAtPeriodEnd, which also clears the mark) cannot land between the two.
-    return await withLock(planStopLockKey(id), PLAN_STOP_LOCK_SECONDS, PLAN_STOP_LOCK_WAIT_MS, async () => {
+    return await withLock(planStopLockKey(id), PLAN_STOP_LOCK_SECONDS, PLAN_STOP_LOCK_WAIT_MS, async (held) => {
       const sub = await subscriptionOf(id);
       if (!sub) return false;
       const metadata = (sub as Row & { metadata?: unknown }).metadata;
@@ -232,6 +232,9 @@ async function takeBackStop(id: string): Promise<boolean> {
       if (!LIVE.includes(String(sub.status))) return true;
       if (mark === undefined || mark === null || mark === "") return true;
       if (typeof mark !== "string") return false;
+      // Still ours after the read, or nothing is sent (Claude 7 on #3740): a slow read never outlives the lock and then
+      // posts over a change the creator made meanwhile. The job tries again tomorrow.
+      if (!(await holdLock(held))) return false;
       // Taken back and unmarked in one call: a later run, on a stale note, finds no mark and leaves any stop alone.
       const after = await onPlatform("POST", `/subscriptions/${encodeURIComponent(id)}`, new URLSearchParams({ cancel_at_period_end: "false", [`metadata[${OUR_STOP_MARK}]`]: "" }));
       const row = after as Row & { metadata?: unknown };

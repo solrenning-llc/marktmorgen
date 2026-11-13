@@ -70,6 +70,7 @@ import { alertCreator } from "@/lib/phone-alerts";
 import { JOIN_EARLY_MINUTES } from "@/lib/community-text";
 import { communityWords } from "@/lib/buyer-words/community";
 import { LANGUAGES, parseLanguage } from "@/lib/store-language";
+import { bodyText } from "@/lib/mail-body";
 import {
   type CommunityEvent,
   EVENT_QUEUE,
@@ -746,7 +747,7 @@ export async function advanceEventJob(
               from: storeSender(store),
               to: member.e,
               subject: words.subject.slice(0, 150),
-              text: `${words.body}\n\n—\n${words.why}\n${communityWords(store.language).mailSentWith}`,
+              text: `${bodyText(words.body)}\n\n—\n${words.why}\n${communityWords(store.language).mailSentWith}`,
               html: noticeHtml(words.body, words.why, LANGUAGES[parseLanguage(store.language)].locale, communityWords(store.language).mailSentWith),
               replyTo: store.email,
             });

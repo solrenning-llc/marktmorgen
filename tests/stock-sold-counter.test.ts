@@ -20,7 +20,7 @@ import type { Listing, Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
-const creator = { statsId: "s".repeat(32), stripeAccountId: "acct_1TestSoldCounter" } as Store;
+const creator = { statsId: "s".repeat(32), stripeAccountId: "acct_test_soldcounter" } as Store;
 const limited = (id: string, stock: number) => parseProduct({ id, title: `Print ${id}`, summary: "", priceCents: 2000, stock, link: `https://example.com/${id}` }) as Listing;
 const key = (id: string) => `nl:stock:${creator.statsId}:${id}`;
 const session = (i: number) => `cs_live_a1${String(i).padStart(56, "0")}`;

@@ -101,7 +101,7 @@ export function parsePage(stream: string): Op[] {
   let size = 12;
   const num = (s: string) => Number(s);
   for (const raw of stream.split("\n")) {
-    let line = raw.trim().replace(/^1 0 0 1 0 0 cm\s+/, "");
+    const line = raw.trim().replace(/^1 0 0 1 0 0 cm\s+/, "");
     if (!line) continue;
     let m: RegExpMatchArray | null;
     if ((m = line.match(/^([\d.]+) ([\d.]+) ([\d.]+) rg$/))) fill = [num(m[1]), num(m[2]), num(m[3])];

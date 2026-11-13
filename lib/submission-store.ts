@@ -24,7 +24,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
-import { type DataStore, giveData, needData, takeData } from "@/lib/store-data";
+import { type DataStore, giveData, needData, noteData, takeData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { UPLOAD_SECONDS, readVaultPath } from "@/lib/vault-rules";
 import { reserveStoreUpload, reserveUploadControl, type UploadStore } from "@/lib/upload-budget";
@@ -55,7 +55,9 @@ const LIVE_SECONDS = MAX_SUBMISSION_KEEP_DAYS * DAY + SUBMISSION_SWEEP_GRACE_SEC
  * tests/submission-store.test.ts. Each is far inside the hundred a buyer
  * action is priced at (tests/plan-cost-registry.ts, UNIT_COST.buyer).
  */
-export const SUBMISSION_STEP_COMMANDS = { open: 7, sign: 1, done: 7, abort: 3 } as const;
+// Closing and giving up each read the buyer's places twice and set their room slot (settleBuyerRoom): 6 commands at
+// the most, added to their own (review of #3568).
+export const SUBMISSION_STEP_COMMANDS = { open: 7, sign: 1, done: 13, abort: 9 } as const;
 
 /** The most a door weighs as JSON: its names and address at their longest (a 120-character file name, a 254-character address, the path). */
 const MAX_DOOR_BYTES = 4_096;
@@ -72,6 +74,13 @@ const doorKey = (pathname: string) => `nl:sub:door:${createHash("sha256").update
 const recordKey = (folder: string, id: string) => `nl:sub:rec:${part(folder)}:${part(id)}`;
 /** The data room's slot of one lesson's setup. */
 const SETUP_SLOT = (courseId: string, lessonId: string) => `sb:${courseId}:${lessonId}`;
+/**
+ * The data room's slot of one buyer's places and open uploads on one lesson
+ * (review of #3568, Claude 6 and Claude 1): set, never added to, so trying
+ * again never grows it, and given back to what is still held once an upload
+ * is refused, given up or closed.
+ */
+const BUYER_SLOT = (courseId: string, lessonId: string, who: string) => `sbl:${part(courseId)}:${part(lessonId)}:${part(who)}`;
 
 /** The owner id a submission's file is kept under in the vault: never a product's, an option's or a lesson's. */
 export const submissionOwnerId = (id: string) => `sub_${id}`;
@@ -123,6 +132,42 @@ export async function saveSetupFor(data: DataStore, courseId: string, lessonId: 
 }
 
 // ------------------------------------------------------------------- places
+
+/** What one place weighs in the room: its member in the buyer's set. */
+const placeBytes = (live: string) => dataBytes([live, "0".repeat(32)], 1);
+/** What one open upload weighs in the room: its door, at the largest a door is ever written. */
+const DOOR_BYTES = dataBytes([`nl:sub:door:${"h".repeat(40)}`], 1) + MAX_DOOR_BYTES;
+/** The most one buyer's places and open uploads on one lesson ever weigh: every place an open upload. */
+const buyerMost = (live: string) => MAX_WAITING_PER_BUYER * (placeBytes(live) + DOOR_BYTES);
+
+/** The buyer's places held now, and of them the ones that can still be an open upload; null when not read exactly. */
+async function heldNow(live: string, nowSeconds: number): Promise<{ places: number; doors: number } | null> {
+  const replies = await redisPipeline([["ZCOUNT", live, `(${nowSeconds}`, "+inf"], ["ZCOUNT", live, `(${nowSeconds}`, nowSeconds + UPLOAD_SECONDS]]).then(
+    (answer) => repliesFor(answer, 2),
+    () => null,
+  );
+  const places = countOf(replies?.[0]);
+  const doors = countOf(replies?.[1]);
+  return replies && places !== null && doors !== null ? { places, doors } : null;
+}
+
+/**
+ * Sets the buyer's slot to what they still hold: every place, and every
+ * place an upload can still be open on (a place whose time ends within an
+ * upload's day; a kept record about to end is counted as one too, which only
+ * makes the room look fuller). Not read exactly, the slot is left as it was,
+ * never emptier. Read again after: a place taken meanwhile by another open
+ * puts the slot back at its most, so an open is never left uncounted.
+ */
+async function settleBuyerRoom(data: DataStore, live: string, slot: string, nowSeconds: number): Promise<void> {
+  const before = await heldNow(live, nowSeconds);
+  if (!before) return;
+  const most = buyerMost(live);
+  const bytes = Math.min(most, before.places * placeBytes(live) + before.doors * DOOR_BYTES);
+  await giveData(data, [{ slot, bytes, set: true }], nowSeconds * 1000);
+  const after = await heldNow(live, nowSeconds);
+  if (!after || after.places > before.places || after.doors > before.doors) await noteData(data, [{ slot, bytes: most, set: true }], nowSeconds * 1000);
+}
 
 /** The buyer's files open or waiting on this lesson now; the ones that lapsed are let go first. */
 export async function liveCount(folder: string, courseId: string, lessonId: string, who: string, nowSeconds: number): Promise<number> {
@@ -255,25 +300,30 @@ export type DoorOpened =
 export async function openSubmissionDoor(ask: DoorAsk, steps: DoorSteps = VAULT_STEPS): Promise<DoorOpened> {
   const id = randomBytes(16).toString("hex");
   const live = liveKey(ask.folder, ask.courseId, ask.lessonId, ask.who);
-  // The place, for as long as a place can be kept, and the door, for its day, are counted in the store's data room
-  // before either is written; the door at MAX_DOOR_BYTES, which a door never passes (it is not written past it).
-  const room = await takeData(
-    ask.data,
-    [
-      { until: (ask.nowSeconds + LIVE_SECONDS) * 1000, bytes: dataBytes([live, id], 1) },
-      { until: (ask.nowSeconds + UPLOAD_SECONDS) * 1000, bytes: dataBytes([`nl:sub:door:${"h".repeat(40)}`], 1) + MAX_DOOR_BYTES },
-    ],
-    ask.nowSeconds * 1000,
-  );
+  const slot = BUYER_SLOT(ask.courseId, ask.lessonId, ask.who);
+  // A place first: a buyer whose places are all held is refused before the room is touched (review of #3568).
+  if (!(await takePlace(live, id, ask.nowSeconds + UPLOAD_SECONDS, ask.nowSeconds))) return { ok: false, reason: "busy" };
+  // Then the room, before the door is written: the buyer's one slot set to the most their places and open uploads
+  // can weigh (each door at MAX_DOOR_BYTES, which a door never passes). Set, never added to, so another try takes
+  // nothing more; given back to what is still held whenever an upload is refused, given up or closed.
+  const giveBack = () => settleBuyerRoom(ask.data, live, slot, ask.nowSeconds);
+  let room: Awaited<ReturnType<typeof takeData>>;
+  try {
+    room = await takeData(ask.data, [{ slot, bytes: buyerMost(live), set: true }], ask.nowSeconds * 1000);
+  } catch (error) {
+    await givePlace(live, id).catch(() => undefined);
+    throw error;
+  }
   if (!room.ok) {
+    await givePlace(live, id);
     if (room.reason === "full") return { ok: false, reason: "full" };
     throw new UnknownReplyError("the store's data room");
   }
-  if (!(await takePlace(live, id, ask.nowSeconds + UPLOAD_SECONDS, ask.nowSeconds))) return { ok: false, reason: "busy" };
   let opened: Awaited<ReturnType<typeof openReservedVault>> | null = null;
   try {
     if (!(await steps.reserveStoreUpload(ask.store, ask.file.bytes, "r2"))) {
       await givePlace(live, id);
+      await giveBack();
       return { ok: false, reason: "budget" };
     }
     try {
@@ -285,12 +335,14 @@ export async function openSubmissionDoor(ask: DoorAsk, steps: DoorSteps = VAULT_
       const message = error instanceof Error ? error.message : "";
       if (message === "storage_limit" || message === "storage_pending" || message === "storage_busy") {
         await givePlace(live, id);
+        await giveBack();
         return { ok: false, reason: message === "storage_limit" ? "room" : "pending" };
       }
       throw error;
     }
     if (!opened.ok) {
       await givePlace(live, id);
+      await giveBack();
       return { ok: false, reason: opened.reason };
     }
     const door: Door = {
@@ -316,7 +368,7 @@ export async function openSubmissionDoor(ask: DoorAsk, steps: DoorSteps = VAULT_
   } catch (error) {
     // Nothing has reached the browser: the provider's session is cancelled and the place given back.
     if (opened?.ok) await steps.abortReservedVault(opened.upload.pathname).catch(() => false);
-    await givePlace(live, id).catch(() => undefined);
+    await givePlace(live, id).then(giveBack, () => undefined);
     throw error;
   }
 }
@@ -389,9 +441,11 @@ export async function closeSubmissionDoor(
     }
     return { ok: false, reason: closed.reason };
   }
+  const live = liveKey(door.folder, door.courseId, door.lessonId, door.who);
+  const settle = () => settleBuyerRoom(where.data, live, BUYER_SLOT(door.courseId, door.lessonId, door.who), nowSeconds);
   const drop = async () => {
     const gone = await steps.deleteVault([pathname]).catch(() => false);
-    if (gone) await givePlace(liveKey(door.folder, door.courseId, door.lessonId, door.who), door.id).catch(() => undefined);
+    if (gone) await givePlace(live, door.id).then(settle, () => undefined);
   };
   if (closed.file.bytes !== door.bytes || closed.file.contentType !== door.type) {
     await drop();
@@ -430,7 +484,6 @@ export async function closeSubmissionDoor(
     throw error;
   }
   // The place is held until the keeping time first: a record written with its place lost would let a fourth in.
-  const live = liveKey(door.folder, door.courseId, door.lessonId, door.who);
   // A write sent and never answered may have landed: its file is kept for the record that may name it.
   const replies = repliesFor(
     await redisPipeline([
@@ -450,17 +503,27 @@ export async function closeSubmissionDoor(
     if (back && back[0] === null) await drop();
     throw new UnknownReplyError("a submission record's write");
   }
+  // The upload is closed: the buyer's slot comes down to the places they still hold.
+  await settle();
   return { ok: true, submission: kept };
 }
 
 /** Gives the buyer's own open upload up: the provider's session cancelled, then the place and the door let go. */
-export async function abortSubmissionDoor(where: DoorWhere, pathname: string, steps: DoorSteps = VAULT_STEPS): Promise<"done" | "unknown" | "unavailable"> {
+export async function abortSubmissionDoor(
+  where: DoorWhere & { data: DataStore },
+  pathname: string,
+  steps: DoorSteps = VAULT_STEPS,
+  nowSeconds = Math.floor(Date.now() / 1000),
+): Promise<"done" | "unknown" | "unavailable"> {
   const door = await ownDoor(pathname, where.folder, where.courseId, where.lessonId, where.who);
   if (!door) return "unknown";
   if (!(await steps.abortReservedVault(pathname))) return "unavailable";
-  await givePlace(liveKey(door.folder, door.courseId, door.lessonId, door.who), door.id);
+  const live = liveKey(door.folder, door.courseId, door.lessonId, door.who);
+  await givePlace(live, door.id);
   const replies = repliesFor(await redisPipeline([["DEL", doorKey(pathname)]]), 1);
   if (!replies || countOf(replies[0]) === null) throw new UnknownReplyError("a submission upload given up");
+  // Given up: the buyer's slot comes down to the places they still hold (review of #3568).
+  await settleBuyerRoom(where.data, live, BUYER_SLOT(door.courseId, door.lessonId, door.who), nowSeconds);
   return "done";
 }
 

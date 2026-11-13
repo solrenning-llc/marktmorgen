@@ -30,6 +30,8 @@ import { inboundSigned, parseSender } from "@/lib/inbound-mail";
 import { zoomSigned } from "@/lib/meet-providers";
 import { believed } from "@/lib/stream";
 import { fieldsAsked } from "@/lib/api-fields";
+import { signedUser } from "@/lib/meta-ads";
+import { seal, unseal } from "@/lib/secret-box";
 
 // ---- the generator ----------------------------------------------------------
 
@@ -369,6 +371,23 @@ part("Signed notices: only the exact signature is believed");
 
   const senders = ['"', " ", "<", ">", "a", "@", "\t", "x.y"];
   forAllStrings("parseSender answers inside the time box on a long header", 8004, (r) => r.text(senders, 4000), (s) => timed(() => parseSender(s)) < REGEX_BOX_MS);
+}
+
+part("Base64url tokens: only the exact text is believed");
+{
+  process.env.META_APP_SECRET = "fuzz-meta-secret";
+  const payload = Buffer.from(JSON.stringify({ algorithm: "HMAC-SHA256", user_id: "42" })).toString("base64url");
+  const metaGood = createHmac("sha256", "fuzz-meta-secret").update(payload).digest("base64url");
+  const NOISE64 = ["!", "=", "+", "/", " ", ".", "*", "\u00e9"];
+  forAllStrings("a Meta signed_request signature that is not exactly the expected one is refused", 8100, (r) => {
+    const at = r.int(0, metaGood.length);
+    return metaGood.slice(0, at) + r.pick(NOISE64.filter((c) => c !== ".")) + metaGood.slice(at);
+  }, (s) => s === metaGood || signedUser(`${s}.${payload}`) === null);
+  const sealed = seal("fuzz-value", "fuzz-context");
+  forAllStrings("a sealed value whose text was altered does not open", 8101, (r) => {
+    const at = r.int(sealed.indexOf(".", sealed.indexOf(".") + 1) + 1, sealed.length);
+    return sealed.slice(0, at) + r.pick(NOISE64) + sealed.slice(at);
+  }, (s) => s === sealed || !unseal(s, "fuzz-context").ok);
 }
 
 // ---- public API ---------------------------------------------------------------

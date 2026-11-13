@@ -433,12 +433,16 @@ async function finish(report: Report, store: Store, action: Exclude<TakedownActi
     await writeSteps(key, steps);
     // Owed from here until its notice goes out, so a page opened again can still send it (unsentNotices).
     await markOwed(report.id, part);
+    // The preview closed before the product is hidden (Claude 1 cloud rev-odd on #3597): a published product can
+    // still have a live link from its draft days, and hidden without its mark it would read as a draft with a live
+    // preview, "up", so the takedown would never be told. A mark that fails here throws with nothing taken down, and
+    // a press again does it all; a mark left on a product still published only stops preview links it does not need.
+    await closePreview(store, action);
     if (!(await apply(ref, store, action))) {
       await redisPipeline([["DEL", key], ["SREM", owedKey(report.id), part]]).catch(() => {});
       return null;
     }
-    // Down, confirmed: from here the steps say it landed (Claude 6, focal 6713440905), its preview closed first.
-    await closePreview(store, action);
+    // Down, confirmed: from here the steps say it landed (Claude 6, focal 6713440905).
     steps = { ...steps, applied: true };
     await writeSteps(key, steps);
   } else {

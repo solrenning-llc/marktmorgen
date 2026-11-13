@@ -60,12 +60,14 @@ export type BatchLine = {
  * it always was. `payable` can be below zero when refunds landed after a
  * payout; that is money to come back, not a payment, and is left out.
  */
-export function owedLines(book: Book): BatchLine[] {
+export function owedLines(book: Book, keep: (line: BatchLine) => boolean = () => true): BatchLine[] {
+  // `keep` is applied before the cap, so lines a caller leaves out never take the place of one it can pay.
   return book.rows
     .filter((row: Row) => row.payable > 0 && row.affiliate.status === "approved")
-    .sort((a, b) => b.payable - a.payable)
-    .slice(0, MAX_BATCH_ROWS)
-    .map((row) => ({ affiliate: row.affiliate, cents: row.payable }));
+    .map((row) => ({ affiliate: row.affiliate, cents: row.payable }))
+    .filter(keep)
+    .sort((a, b) => b.cents - a.cents)
+    .slice(0, MAX_BATCH_ROWS);
 }
 
 /** What the whole batch comes to, in the currency's smallest unit. */

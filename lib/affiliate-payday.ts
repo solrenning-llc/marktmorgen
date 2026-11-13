@@ -27,7 +27,7 @@ import { SITE_URL } from "@/lib/site-url";
 import { storesAfter, type Store } from "@/lib/store";
 import { affiliatesOn, readBook } from "@/lib/affiliates";
 import { batchTotal } from "@/lib/affiliate-payouts";
-import { onTheirWay, payableLines, payWithPayPal, paysAutomatically } from "@/lib/paypal-payouts";
+import { onTheirWay, payableLines, paypalLeftOut, payWithPayPal, paysAutomatically } from "@/lib/paypal-payouts";
 import { ordinal } from "@/lib/affiliate-setting";
 import { formatMoney } from "@/lib/money";
 
@@ -118,8 +118,21 @@ export function paydayEmail(input: {
 }
 
 /** The payday email of a store that pays by itself: what PayPal was asked to send, or why not. */
-export function autoPayEmail(paid: Awaited<ReturnType<typeof payWithPayPal>>, currency: string): { subject: string; text: string } {
+export function autoPayEmail(
+  paid: Awaited<ReturnType<typeof payWithPayPal>>,
+  currency: string,
+  left: { people: number; cents: number } = { people: 0, cents: 0 },
+): { subject: string; text: string } {
   const studio = `${SITE_URL}/studio/affiliates`;
+  // Owed today but no PayPal batch can pay them (an address longer than PayPal takes): said in every email, with
+  // the way to pay them, so the creator is never told nobody is owed (Claude 7 on #4318).
+  const leftOut =
+    left.people > 0
+      ? [
+          "",
+          `${left.people} ${left.people === 1 ? "affiliate is" : "affiliates are"} still owed ${formatMoney(left.cents, currency)} that no PayPal batch can pay, because the PayPal address is longer than PayPal takes. Download the payout file on your affiliate page to pay them another way.`,
+        ]
+      : [];
   if (paid.ok) {
     const amount = formatMoney(paid.cents, currency);
     const who = `${paid.people} ${paid.people === 1 ? "affiliate" : "affiliates"}`;
@@ -131,6 +144,7 @@ export function autoPayEmail(paid: Awaited<ReturnType<typeof payWithPayPal>>, cu
         `It is your affiliate payday, and you asked us to pay by ourselves. ${amount} went to ${who} from your own PayPal, in PayPal batch ${paid.batch}.`,
         "",
         "Each payment shows as paid on your affiliate page, and on the affiliate's own page, as soon as PayPal confirms it. Anyone PayPal cannot pay stays owed, to be paid again. The money went from your PayPal to theirs; it never passed through us.",
+        ...leftOut,
         studio,
         "",
         "— Marktmorgen",
@@ -146,6 +160,7 @@ export function autoPayEmail(paid: Awaited<ReturnType<typeof payWithPayPal>>, cu
         "It is your affiliate payday, and you asked us to pay by ourselves. We sent the batch to PayPal, but PayPal's answer did not reach us, so we do not know whether it was paid.",
         "",
         "Nobody in it will be paid again by us while this is not known: they show as on their way on your affiliate page. Look at your PayPal activity to see whether the payment went.",
+        ...leftOut,
         studio,
         "",
         "— Marktmorgen",
@@ -159,7 +174,7 @@ export function autoPayEmail(paid: Awaited<ReturnType<typeof payWithPayPal>>, cu
     "not-connected": "no PayPal app is connected",
     busy: "another payment was being sent at the same moment",
     refunds: "we could not check every refund on your Stripe account just now",
-    nothing: "nobody is owed anything that has cleared",
+    nothing: left.people > 0 ? "nobody owed can be paid through PayPal" : "nobody is owed anything that has cleared",
     error: "PayPal could not be reached",
   };
   return {
@@ -171,6 +186,7 @@ export function autoPayEmail(paid: Awaited<ReturnType<typeof payWithPayPal>>, cu
       "",
       "Open your affiliate page to pay them with one press, or download the batch for PayPal or Wise:",
       studio,
+      ...leftOut,
       "",
       "— Marktmorgen",
     ].join("\n"),
@@ -183,7 +199,8 @@ async function payday(store: Store, month: string, dayOfMonth: number): Promise<
   if (!store.statsId || !store.email) return false;
   const book = await readBook(store);
   // Anyone with a PayPal payment already on its way is not due again.
-  const lines = payableLines(book, await onTheirWay(store));
+  const away = await onTheirWay(store);
+  const lines = payableLines(book, away);
   // Nobody to pay is not a message worth sending, and it must not spend the
   // month's claim either: a sale that lands later today should still be able
   // to bring the email.
@@ -195,7 +212,8 @@ async function payday(store: Store, month: string, dayOfMonth: number): Promise<
   // the email then says what was sent, or why it could not be.
   if (book.refundsChecked && (await paysAutomatically(store))) {
     const paid = await payWithPayPal(store);
-    const { subject, text } = autoPayEmail(paid, book.currency);
+    const outside = paypalLeftOut(book, away);
+    const { subject, text } = autoPayEmail(paid, book.currency, { people: outside.length, cents: batchTotal(outside) });
     return sendEmail({ meter: { by: "store", store: store, kind: "email" }, from: NIMBUS_FROM, to: store.email, subject, text, idempotencyKey: `aff-payday-${store.statsId}-${month}` });
   }
   const { subject, text } = paydayEmail({

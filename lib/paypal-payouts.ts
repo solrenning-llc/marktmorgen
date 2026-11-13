@@ -241,7 +241,13 @@ export function payableLines(book: Book, away: Set<string>): BatchLine[] {
  * their way, and the payout file (lib/affiliate-payouts.ts), which carries the address whole, can pay them.
  */
 export function paypalPayableLines(book: Book, away: Set<string>): BatchLine[] {
-  return payableLines(book, away).filter(paypalCanReceive);
+  // Left out before the batch's row cap (Codex X5 on #4318): long addresses never take a payable affiliate's place.
+  return owedLines(book, (line) => !away.has(line.affiliate.id) && paypalCanReceive(line));
+}
+
+/** The lines owed today that no PayPal batch can pay (their address is too long): for the payout file. */
+export function paypalLeftOut(book: Book, away: Set<string>): BatchLine[] {
+  return owedLines(book, (line) => !away.has(line.affiliate.id) && !paypalCanReceive(line));
 }
 
 /** The most characters PayPal's receiver field holds (payments_payouts_batch_v1, payout_item receiver: maxLength 127). */

@@ -89,9 +89,9 @@ async function main(): Promise<void> {
     const left = { people: 1, cents: 3_000 };
     const nothing = autoPayEmail({ ok: false, reason: "nothing" }, "usd", left);
     is("nothing sent through PayPal, one owed with a long address: never 'nobody is owed'", /nobody is owed/i.test(nothing.text), false);
-    is("and the creator is told to pay them with the payout file", [/payout file/i.test(nothing.text), /\$30\.00/.test(nothing.text)], [true, true]);
+    is("and the creator is told to pay them with the payout file", [/payout file/i.test(nothing.text), /\$30(?:\.00)?(?![\d.])/.test(nothing.text)], [true, true]);
     const sent = autoPayEmail({ ok: true, batch: "BATCH1ABC", people: 1, cents: 3_000 }, "usd", left);
-    is("a batch sent, one left out: the email says who is left and how to pay them", [/payout file/i.test(sent.text), /\$30\.00/.test(sent.text)], [true, true]);
+    is("a batch sent, one left out: the email says who is left and how to pay them", [/payout file/i.test(sent.text), /\$30(?:\.00)?(?![\d.])/.test(sent.text)], [true, true]);
     const none = autoPayEmail({ ok: false, reason: "nothing" }, "usd", { people: 0, cents: 0 });
     is("control: nobody left out, nothing owed, the email still says nobody is owed", /nobody is owed/i.test(none.text), true);
     const payday = readFileSync("lib/affiliate-payday.ts", "utf8");

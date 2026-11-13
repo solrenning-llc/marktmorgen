@@ -118,7 +118,7 @@ function Funnel({
               </p>
             ) : null}
             <div className="mt-1 h-2 overflow-hidden rounded-full bg-paper ring-1 ring-line" aria-hidden="true">
-              <div className="h-full rounded-full bg-violet-brand/70" style={{ width: `${Math.max(1, Math.min(100, (step.value / top) * 100))}%` }} />
+              <div className="meter-fill h-full rounded-full bg-violet-brand/70" style={{ width: `${Math.max(1, Math.min(100, (step.value / top) * 100))}%` }} />
             </div>
           </li>
         ))}
@@ -208,7 +208,7 @@ function Breakdown({
                 <span className="shrink-0 tabular-nums text-ink-soft">{`${count(row.visits)} · ${share}%`}</span>
               </div>
               <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-paper ring-1 ring-line" aria-hidden="true">
-                <div className="h-full rounded-full bg-violet-brand/70" style={{ width: `${Math.max(2, share)}%` }} />
+                <div className="meter-fill h-full rounded-full bg-violet-brand/70" style={{ width: `${Math.max(2, share)}%` }} />
               </div>
             </li>
           );
@@ -833,7 +833,7 @@ export function StatsPanel({
                 title={`${shortDate(day.date)}: ${day.visitors} visitors, ${day.sales} sales${[...(notesOn.get(day.date) ?? []), ...(marksOn.get(day.date) ?? []).map((m) => m.text)].map((t) => `\n${t}`).join("")}`}
               >
                 <div
-                  className="w-full rounded-t-[3px] bg-violet-brand/80"
+                  className="meter-fill w-full rounded-t-[3px] bg-violet-brand/80"
                   style={{ height: `${Math.max(day.visitors ? 4 : 1, (day.visitors / peak) * 100)}%`, opacity: day.visitors ? 1 : 0.25 }}
                 />
               </div>
@@ -850,9 +850,9 @@ export function StatsPanel({
                     className="flex min-w-0 flex-1 flex-col items-center gap-px"
                     title={[...(notesOn.get(day.date) ?? []), ...(marksOn.get(day.date) ?? []).map((m) => m.text)].join("\n")}
                   >
-                    {notesOn.has(day.date) ? <span className="block h-1.5 w-1.5 rounded-full bg-amber-brand" /> : null}
+                    {notesOn.has(day.date) ? <span className="meter-fill block h-1.5 w-1.5 rounded-full bg-amber-brand" /> : null}
                     {kinds.map((kind) => (
-                      <span key={kind} className={`block h-1.5 w-1.5 rounded-full ${MARK_COLORS[kind]}`} />
+                      <span key={kind} className={`meter-fill block h-1.5 w-1.5 rounded-full ${MARK_COLORS[kind]}`} />
                     ))}
                   </div>
                 );

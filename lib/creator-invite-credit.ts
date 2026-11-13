@@ -149,13 +149,51 @@ async function refundedOn(invoice: Invoice): Promise<number> {
 }
 
 /**
+ * The part of an invoice's post-payment credit notes that is also a refund already counted by `refundedOn` (#4463):
+ * Stripe lists a refund made through a credit note both in the credit notes' total and in the refunds, so it would be
+ * taken off the basis twice. The invoice's credit notes are read exactly: a whole list, each note with a whole amount
+ * and, when it gave money back, whole `amount_refunded` on each of its refunds. The notes must add up to the invoice's
+ * `post_payment_credit_notes_amount`; otherwise they cannot be told apart and the store fails this run (the credit
+ * stays pending). Zero when the invoice has no post-payment credit notes.
+ */
+async function creditNoteRefundedOn(invoice: PaidInvoice): Promise<number> {
+  if (invoice.post_payment_credit_notes_amount === 0) return 0;
+  const list = await onPlatformAt(INVITE_STRIPE_VERSION, "GET", `/credit_notes?${new URLSearchParams({ invoice: invoice.id, limit: "100" })}`);
+  const rows = list && list.object === "list" && list.has_more === false && Array.isArray(list.data) && list.data.length <= 100 ? list.data : null;
+  if (!rows) throw new UnknownReplyError("invite credits: the credit notes of an invoice");
+  let notesTotal = 0;
+  let refundedThroughNotes = 0;
+  for (const note of rows as unknown[]) {
+    if (!note || typeof note !== "object") throw new UnknownReplyError("invite credits: a credit note");
+    const amount = (note as { amount?: unknown }).amount;
+    if (!whole(amount, 0)) throw new UnknownReplyError("invite credits: a credit note amount");
+    notesTotal += amount;
+    const noteRefunds = (note as { refunds?: unknown }).refunds;
+    if (noteRefunds === undefined || noteRefunds === null) continue;
+    if (!Array.isArray(noteRefunds)) throw new UnknownReplyError("invite credits: a credit note's refunds");
+    for (const refund of noteRefunds as unknown[]) {
+      if (!refund || typeof refund !== "object") throw new UnknownReplyError("invite credits: a credit note refund");
+      const back = (refund as { amount_refunded?: unknown }).amount_refunded;
+      if (!whole(back, 0)) throw new UnknownReplyError("invite credits: a credit note refund amount");
+      refundedThroughNotes += back;
+    }
+  }
+  // The notes read must be all of them, by their own total, and the refund part cannot exceed the notes' total.
+  if (notesTotal !== invoice.post_payment_credit_notes_amount || refundedThroughNotes > notesTotal) {
+    throw new UnknownReplyError("invite credits: the credit notes do not add up to the invoice's post-payment credit notes");
+  }
+  return refundedThroughNotes;
+}
+
+/**
  * What one invoice earns: the amount paid, less refunds and credit notes
  * issued after it was paid, of which the share is taken. Exported for the
  * tests, which feed it Stripe-shaped invoices. Only an invoice already read
  * exactly (`isPaidInvoice`) reaches it, so no amount is guessed here.
  */
-export function paidOn(invoice: Pick<PaidInvoice, "amount_paid" | "post_payment_credit_notes_amount">, refunded: number): number {
-  return Math.max(0, invoice.amount_paid - invoice.post_payment_credit_notes_amount - refunded);
+export function paidOn(invoice: Pick<PaidInvoice, "amount_paid" | "post_payment_credit_notes_amount">, refunded: number, refundedThroughNotes = 0): number {
+  // A refund made through a post-payment credit note is in both the notes' total and `refunded` (#4463): added back once.
+  return Math.max(0, invoice.amount_paid - invoice.post_payment_credit_notes_amount - refunded + refundedThroughNotes);
 }
 
 /**
@@ -298,7 +336,7 @@ async function earnFrom(sid: string, nowSeconds: number): Promise<number> {
     const id = inv.id;
     const paidAt = inv.status_transitions.paid_at;
     const cur = inv.currency;
-    const paid = inv.amount_paid > 0 ? paidOn(inv, await refundedOn(inv)) : 0;
+    const paid = inv.amount_paid > 0 ? paidOn(inv, await refundedOn(inv), await creditNoteRefundedOn(inv)) : 0;
     const cents = inviteShare(paid, terms);
     const share: Credit = { id, kind: "share", to: by.r, from: sid, cents, cur, at: paidAt, state: cents > 0 ? "owed" : "none" };
     // Written once, for good: ours only on OK or this record read back (CX-123 rule 24, L9). Not known (it may have

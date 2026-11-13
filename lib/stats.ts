@@ -1125,10 +1125,15 @@ const currencyOf = (row: { currency?: unknown }) => (typeof row.currency === "st
  * Why a reading of paid sales is partial, so what says so names the source
  * truly (lib/store-export.ts, its orders' note): the PayPal sales not all read
  * ("paypal"), more pages on the Stripe account than were read
- * ("stripe-pages"), or a Stripe sale whose currency was not named, kept with
- * its currency blank ("currency").
+ * ("stripe-pages"), a Stripe sale whose currency was not named, kept with
+ * its currency blank ("currency"), or a Stripe sale with no readable date,
+ * left out rather than put on a day it was not paid ("date", #4397).
  */
-export type SalesGap = "paypal" | "stripe-pages" | "currency";
+export type SalesGap = "paypal" | "stripe-pages" | "currency" | "date";
+
+/** Stripe's `created` (whole seconds after 1970) as milliseconds, or null when the answer gives no such date. */
+const paidAtOf = (created: unknown): number | null =>
+  typeof created === "number" && Number.isSafeInteger(created) && created > 0 ? created * 1000 : null;
 
 /**
  * Every paid sale of this store since `since` (seconds), newest first, read
@@ -1208,8 +1213,15 @@ export async function readPaidSales(store: Store, since: number, pages: number):
       partial = true;
       gaps.add("currency");
     }
+    // A paid sale with no date is put on no day (never the clock's): the reading is incomplete (#4397).
+    const created = paidAtOf(row.created);
+    if (created === null) {
+      partial = true;
+      gaps.add("date");
+      return;
+    }
     sales.push({
-      created: typeof row.created === "number" ? row.created * 1000 : Date.now(),
+      created,
       product: meta.product ?? "",
       cents: typeof row.amount_total === "number" ? row.amount_total : 0,
       currency,
@@ -1228,8 +1240,14 @@ export async function readPaidSales(store: Store, since: number, pages: number):
       partial = true;
       gaps.add("currency");
     }
+    const created = paidAtOf(pi.created);
+    if (created === null) {
+      partial = true;
+      gaps.add("date");
+      return;
+    }
     sales.push({
-      created: typeof pi.created === "number" ? pi.created * 1000 : Date.now(),
+      created,
       product: meta.product ?? "",
       cents: typeof pi.amount === "number" ? pi.amount : 0,
       currency: currencyOf(pi),

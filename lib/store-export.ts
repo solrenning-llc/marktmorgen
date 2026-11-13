@@ -146,6 +146,7 @@ const ORDERS_GAP: Record<SalesGap, string> = {
   "stripe-pages": "More orders than one file reads: the rest are on your own Stripe account.",
   paypal: "Not every PayPal sale could be read into this file: your own PayPal account lists them all.",
   currency: "Stripe did not name the currency of some orders, so their currency is blank in this file: your own Stripe account shows it.",
+  date: "Stripe did not give the date of some orders, so they are not in this file: your own Stripe account shows them.",
 };
 function ordersNote(gaps: SalesGap[]): string {
   // A partial reading that names no reason is said as it is, never put on a source.

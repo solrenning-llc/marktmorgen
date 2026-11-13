@@ -18,6 +18,7 @@ import { countUnits } from "@/lib/person-agenda-read";
 import { chargeStudio } from "@/lib/path";
 import { takeAnswer } from "@/lib/answers";
 import { windowId } from "@/lib/allowance-window";
+import { ReadingsUsed, keptReading } from "@/lib/store-readings";
 import { claimHandle, ensureStatsId, setSubscription, storeForEmail, type Store } from "@/lib/store";
 
 beforeEach(() => {
@@ -87,4 +88,13 @@ test("AI answers and the store guide: a funded period without its cohort takes n
   // An unfunded period reaches the month's count (given back at once when its plan has no answers).
   await takeAnswer(store);
   assert.notDeepEqual(await redis.pipeline([["GET", key]]), [null]);
+});
+
+test("kept readings: a funded period without its cohort reads nothing new", async () => {
+  const store = await payingStore("gatesreadingskept");
+  let reads = 0;
+  await assert.rejects(keptReading(fundedOf(store), "stats", async () => { reads += 1; return 1; }), ReadingsUsed);
+  assert.equal(reads, 0);
+  assert.equal((await keptReading(store, "stats", async () => { reads += 1; return 1; }))?.value, 1);
+  assert.equal(reads, 1);
 });

@@ -66,3 +66,45 @@ export function groupEntry<T extends GroupMember>(first: T, checkedOf: (name: st
   if (first.type !== "radio" || first.checked || !first.name) return first;
   return checkedOf(first.name) ?? first;
 }
+
+/**
+ * After the item at `at` of a list of `before` items is removed, its Remove
+ * button goes with it, and the browser would drop the focus to the top of the
+ * page (WCAG 2.4.3). Once the list is drawn shorter, this moves the focus to
+ * the Remove button now at the same place, or the one before when the last
+ * went, or to `empty()` (the button that adds one) when none is left: the page
+ * editor's rule (lib/block-insert.ts focusAfterRemoval), for any list whose
+ * Remove buttons `removeButtons()` finds in order.
+ */
+export function focusAfterListRemoval(
+  removeButtons: () => ArrayLike<Focusable>,
+  at: number,
+  before: number,
+  empty: () => Focusable | null | undefined,
+  frames: Frames,
+): () => void {
+  const left = before - 1;
+  return focusWhenDrawn(() => {
+    const now = removeButtons();
+    if (now.length > left) return null;
+    const next = left <= 0 ? null : now[Math.min(at, now.length - 1)];
+    // A Remove button that is off now (the last one a list must keep) cannot take the focus: the Add button does.
+    return next && !(next as { disabled?: boolean }).disabled ? next : empty();
+  }, frames);
+}
+
+/**
+ * focusAfterListRemoval for a list in the page: its Remove buttons carry
+ * data-list-remove="`mark`", and the button that adds one has the id `addId`.
+ * Nothing happens outside a browser (a test that presses Remove in Node).
+ */
+export function handFocusOnAfterRemoval(mark: string, at: number, before: number, addId: string): void {
+  if (typeof document === "undefined" || typeof window === "undefined") return;
+  focusAfterListRemoval(
+    () => document.querySelectorAll<HTMLElement>(`[data-list-remove="${mark}"]`),
+    at,
+    before,
+    () => document.getElementById(addId),
+    browserFrames(),
+  );
+}

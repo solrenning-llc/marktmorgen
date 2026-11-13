@@ -1,5 +1,6 @@
 "use client";
 
+import { handFocusOnAfterRemoval } from "@/lib/focus-when-drawn";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "@/components/toast";
@@ -203,14 +204,14 @@ export function KitEditor({
                 <label htmlFor={`kit-views-${row.key}`} className="text-xs font-semibold text-ink-soft">Average views (optional)</label>
                 <input id={`kit-views-${row.key}`} inputMode="numeric" value={row.views} aria-invalid={bad.includes(`views${i}`) ? true : undefined} onChange={(e) => setAudience(audience.map((r) => (r.key === row.key ? { ...r, views: e.target.value } : r)))} className="field mt-1" />
               </div>
-              <button type="button" onClick={() => setAudience(audience.filter((r) => r.key !== row.key))} className="text-sm font-bold text-ink-soft underline underline-offset-4 hover:text-danger sm:pb-3">
+              <button type="button" data-list-remove="kit-audience" onClick={() => { const at = audience.indexOf(row); setAudience(audience.filter((r) => r.key !== row.key)); handFocusOnAfterRemoval("kit-audience", at, audience.length, "kit-audience-add"); }} className="text-sm font-bold text-ink-soft underline underline-offset-4 hover:text-danger sm:pb-3">
                 Remove
               </button>
             </li>
           ))}
         </ul>
         {audience.length < MAX_KIT_AUDIENCE ? (
-          <button type="button" onClick={() => { setAudience([...audience, { key: next, n: firstFree(), count: "", views: "" }]); setNext(next + 1); }} className="btn btn-secondary btn-sm mt-3">
+          <button id="kit-audience-add" type="button" onClick={() => { setAudience([...audience, { key: next, n: firstFree(), count: "", views: "" }]); setNext(next + 1); }} className="btn btn-secondary btn-sm mt-3">
             <Icon name="plus" size={16} />
             Add a platform
           </button>
@@ -236,14 +237,14 @@ export function KitEditor({
                 <label htmlFor={`kit-price-${rate.key}`} className="text-xs font-semibold text-ink-soft">{`Price, ${fieldPrefix(currency)} (empty: on request)`}</label>
                 <input id={`kit-price-${rate.key}`} inputMode="decimal" value={rate.price} aria-invalid={bad.includes(`price${i}`) ? true : undefined} onChange={(e) => setRates(rates.map((r) => (r.key === rate.key ? { ...r, price: e.target.value } : r)))} className="field mt-1" />
               </div>
-              <button type="button" onClick={() => setRates(rates.filter((r) => r.key !== rate.key))} className="text-sm font-bold text-ink-soft underline underline-offset-4 hover:text-danger sm:pb-3">
+              <button type="button" data-list-remove="kit-rate" onClick={() => { const at = rates.indexOf(rate); setRates(rates.filter((r) => r.key !== rate.key)); handFocusOnAfterRemoval("kit-rate", at, rates.length, "kit-rate-add"); }} className="text-sm font-bold text-ink-soft underline underline-offset-4 hover:text-danger sm:pb-3">
                 Remove
               </button>
             </li>
           ))}
         </ul>
         {rates.length < MAX_KIT_RATES ? (
-          <button type="button" onClick={() => { setRates([...rates, { key: next, t: "", price: "" }]); setNext(next + 1); }} className="btn btn-secondary btn-sm mt-3">
+          <button id="kit-rate-add" type="button" onClick={() => { setRates([...rates, { key: next, t: "", price: "" }]); setNext(next + 1); }} className="btn btn-secondary btn-sm mt-3">
             <Icon name="plus" size={16} />
             Add an offer
           </button>

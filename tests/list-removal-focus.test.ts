@@ -4,7 +4,8 @@
  * offers, a bundle's products and a page funnel's steps: the questions asked at checkout, a media kit's platforms
  * and its rates, a funnel form's questions, an affiliate program's bonuses and the pages brought from ClickFunnels.
  *
- * Each now hands the focus on with focusAfterListRemoval (lib/focus-when-drawn.ts), by the page editor's rule:
+ * Each now hands the focus on with handFocusOnAfterRemoval (focusAfterListRemoval, lib/focus-when-drawn.ts), by the
+ * page editor's rule:
  * the item now in its place, or the one before, or the button that adds one once the list is empty. Driven here
  * with frames of its own; the source of each list is read for the call and for the marks its buttons carry.
  */
@@ -36,6 +37,17 @@ for (const [what, before, at, after, want] of [
   is(`${what}: then the focus goes to ${want}`, log, [want]);
 }
 
+{
+  // A list that must keep one item turns its last Remove off: the focus goes to Add instead of nowhere.
+  const log: string[] = [];
+  const hand = handFrames();
+  let drawn: (Focusable & { name: string; disabled?: boolean })[] = [button("a", log), button("b", log)];
+  focusAfterListRemoval(() => drawn, 0, 2, () => button("add", log), hand.frames);
+  drawn = [{ ...button("b", log), disabled: true }];
+  hand.step();
+  is("the one left is off: the focus goes to the button that adds one", log, ["add"]);
+}
+
 part("The six lists hand the focus on");
 for (const [file, mark] of [
   ["components/checkout-fields-editor.tsx", "checkout-question"],
@@ -47,6 +59,6 @@ for (const [file, mark] of [
 ] as const) {
   const text = readFileSync(file, "utf8");
   is(`${file}: its Remove buttons carry data-list-remove="${mark}"`, text.includes(`data-list-remove="${mark}"`), true);
-  is(`${file}: the removal hands the focus on for "${mark}"`, new RegExp(`focusAfterListRemoval\\([^;]*data-list-remove="${mark}"`).test(text), true);
+  is(`${file}: the removal hands the focus on for "${mark}"`, new RegExp(`handFocusOnAfterRemoval\\("${mark}", `).test(text), true);
 }
 done();

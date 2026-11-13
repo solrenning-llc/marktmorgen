@@ -317,10 +317,26 @@ export async function issueCertificate(input: {
     // This press made nothing that stands: its record goes, the standing one is the answer.
     await redisPipeline([["DEL", certKey(id)]]);
     await giveData(input.room, [{ slot: CERTS_SLOT(input.course.id), bytes }]);
+    // The standing certificate goes back on both lists: a press whose index
+    // write timed out after its slot was claimed left it off them, and only a
+    // later press can put it back (#4277). SADD is idempotent.
+    await indexCertificate(input.course.id, input.who, existing.id);
     return { ok: true, certificate: existing, fresh: false };
   }
-  await redisPipeline([["SADD", allKey(input.course.id), id], ["SADD", byKey(input.course.id, input.who), id]]);
+  await indexCertificate(input.course.id, input.who, id);
   return { ok: true, certificate, fresh: true };
+}
+
+/**
+ * Puts a certificate on its course's two lists (certs:all, certs:by:<who>),
+ * read exactly: each SADD answers 0 (already there) or 1 (added); anything
+ * else throws UnknownReply, so a write that may not have happened is never
+ * taken as done (CX-123 rule 24).
+ */
+async function indexCertificate(courseId: string, who: string, id: string): Promise<void> {
+  const what = "a certificate's place in its course's lists";
+  const replies = exactReplies(await redisPipeline([["SADD", allKey(courseId), id], ["SADD", byKey(courseId, who), id]]), 2, what);
+  if (replies.some((r) => r !== 0 && r !== 1)) throw new UnknownReply(what);
 }
 
 /**

@@ -7,3 +7,4 @@ Only Claude 2 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
 | Claude 2 | 655 [WG15], unit 2 (the studio's tax setting links to /studio/tax; stacked on #2735) | claude2/wg15-tax-link | `components/tax-editor.tsx`, `tests/wg15-tax-link.test.ts`, its row of `tests/test-config.mjs` | 07/11/2026 10h35 |
+| Claude 2 | #4277 (a certificate whose index write timed out is put back on its course's lists by the next press) | claude2/fix-4277-cert-index-repair | `lib/certificate.ts` (issueCertificate, indexCertificate only), `tests/cert-index-repair.test.ts` | 13/11/2026 14h00 |

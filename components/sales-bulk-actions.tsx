@@ -125,6 +125,31 @@ export function SalesBulkActions({ sales, canLabel, canExport, defaultOpen = fal
     return null;
   }
 
+  /**
+   * The bulk resend's request (Claude 1 cloud's money MEDIUM on #3543): the route sends the emails one by one, so an
+   * answer that is not its own exact refusal (JSON `ok: false` with an `error`, given before anything is sent) may
+   * come after some went: a 504 page, an answer of another shape, a dropped connection. Those are "unknown", never
+   * "nothing was changed", so Confirm is not offered again on a send that may have happened.
+   */
+  async function postResend(references: string[]): Promise<Record<string, unknown> | "refused" | "unknown"> {
+    setBusy(true);
+    setError("");
+    try {
+      const response = await fetch("/api/store/sales-bulk", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "resend", references }) });
+      const answer = (await response.json().catch(() => null)) as Record<string, unknown> | null;
+      if (answer && typeof answer === "object" && answer.ok === true) return answer;
+      if (answer && typeof answer === "object" && answer.ok === false && typeof answer.error === "string") {
+        setError(typeof answer.message === "string" ? answer.message : "That did not work. Nothing was sent. Try again in a moment.");
+        return "refused";
+      }
+      return "unknown";
+    } catch {
+      return "unknown";
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function review(event: React.FormEvent) {
     event.preventDefault();
     if (busy) return;
@@ -183,9 +208,9 @@ export function SalesBulkActions({ sales, canLabel, canExport, defaultOpen = fal
       return finish({ words, undo: null, noUndo: NO_UNDO.export }, words);
     }
     if (confirm.action === "resend") {
-      const answer = await post("/api/store/sales-bulk", { action: "resend", references: confirm.references });
-      if (!answer) return;
-      const tally = readTally(answer);
+      const answer = await postResend(confirm.references);
+      if (answer === "refused") return;
+      const tally = answer === "unknown" ? null : readTally(answer);
       if (!tally) {
         const words = "We could not confirm which emails were sent. Some may have gone. Ask your buyers before you send again.";
         return finish({ words, undo: null, noUndo: NO_UNDO.resend }, words);

@@ -75,7 +75,7 @@ async function main(): Promise<void> {
   const failing = (n: string, invoice: Record<string, unknown>) => ({
     id: `sub_RtfFail${n}`, status: "past_due", metadata: meta,
     customer: { id: `cus_RtfFail${n}`, email: `fail${n}@example.com` },
-    latest_invoice: { id: `in_RtfFail${n}`, status: "open", amount_due: 2900, currency: "usd", hosted_invoice_url: `https://invoice.stripe.com/i/f${n}`, next_payment_attempt: null, ...invoice },
+    latest_invoice: { id: `in_RtfFail${n}`, status: "open", amount_due: 2900, amount_remaining: 2900, currency: "usd", hosted_invoice_url: `https://invoice.stripe.com/i/f${n}`, next_payment_attempt: null, ...invoice },
   });
   const odd: [string, string, Record<string, unknown>][] = [
     ["0001", "no next_payment_attempt", { next_payment_attempt: undefined }],
@@ -109,6 +109,29 @@ async function main(): Promise<void> {
   await run();
   await run();
   is("every one now sent once", odd.map(([n]) => to(`fail${n}@example.com`).length), odd.map(() => 1));
+  state.pastDue = [];
+
+  // #4419: the email quotes what is left to pay (amount_remaining), which is what the payment page asks for; a
+  // balance that does not read is unknown (nothing sent, claimed or changed), and a balance of zero needs no email.
+  part("The email quotes the balance still owed, never the invoice's total");
+  state.pastDue = [failing("0010", { amount_due: 10000, amount_paid: 4000, amount_remaining: 6000 })];
+  await run();
+  const owed = to("fail0010@example.com");
+  is("one email, $60 and not $100", [owed.length, /\$60\b/.test(owed[0]?.text ?? ""), /\$100\b/.test(owed[0]?.text ?? "")], [1, true, false]);
+  const balance: [string, string, Record<string, unknown>][] = [
+    ["0011", "no amount_remaining", { amount_remaining: undefined }],
+    ["0012", "amount_remaining as text", { amount_remaining: "2900" }],
+    ["0013", "a fractional amount_remaining", { amount_remaining: 29.5 }],
+    ["0014", "a negative amount_remaining", { amount_remaining: -100 }],
+  ];
+  state.pastDue = balance.map(([n, , invoice]) => failing(n, invoice));
+  await run();
+  for (const [n, what] of balance) {
+    is(`${what}: no email, no claim, nothing changed at Stripe`, [to(`fail${n}@example.com`).length, await markOf(`in_RtfFail${n}`), saved.includes(`sub_RtfFail${n}`)], [0, null, false]);
+  }
+  state.pastDue = [failing("0015", { amount_due: 2900, amount_paid: 2900, amount_remaining: 0 })];
+  await run();
+  is("a balance of zero: no email, nothing changed at Stripe", [to("fail0015@example.com").length, saved.includes("sub_RtfFail0015")], [0, false]);
   state.pastDue = [];
 
   part("A card that stops working: no notice on a row that does not say it is running");

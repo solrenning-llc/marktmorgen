@@ -37,7 +37,8 @@ try{
   await page.setContent('<!doctype html><html lang="en"><head><style>'+input.css+'</style></head><body><div class="st-page st-theme-'+look.theme+'" style="'+look.style+'">'+look.html+'</div></body></html>');
   await page.evaluate(()=>{for(const d of document.querySelectorAll('details.cm-menu'))d.open=true;});
   const read=()=>page.evaluate(()=>{
-   const paint=c=>{const m=c.match(/[\d.]+/g).map(Number);return {r:m[0],g:m[1],b:m[2],a:m.length>3?m[3]:1};};
+   // Chromium gives rgb()/rgba() in 0-255, and color(srgb ...) from color-mix() in 0-1.
+   const paint=c=>{const m=c.match(/[\d.]+/g).map(Number);const unit=c.startsWith('color(')?255:1;return {r:m[0]*unit,g:m[1]*unit,b:m[2]*unit,a:m.length>3?m[3]:1};};
    const lum=c=>{const f=x=>{x/=255;return x<=0.04045?x/12.92:((x+0.055)/1.055)**2.4;};return 0.2126*f(c.r)+0.7152*f(c.g)+0.0722*f(c.b);};
    const over=(c,under)=>({r:c.r*c.a+under.r*(1-c.a),g:c.g*c.a+under.g*(1-c.a),b:c.b*c.a+under.b*(1-c.a),a:1});
    const ratio=(a,b)=>{const x=lum(a),y=lum(b);return Math.round((Math.max(x,y)+0.05)/(Math.min(x,y)+0.05)*100)/100;};

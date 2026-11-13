@@ -24,13 +24,17 @@
  */
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
-import { noteUnitsLeft, lowStockOf, restoreUnitsSeen, wouldCrossLow } from "@/lib/low-stock";
+import { LOW_STOCK_DUE, noteUnitsLeft, lowStockOf, restoreUnitsSeen, setLowStock, wouldCrossLow } from "@/lib/low-stock";
 import { alertCreator } from "@/lib/phone-alerts";
 import { SITE_URL } from "@/lib/site-url";
 import { weeklyOff, weeklyToken } from "@/lib/stats-report";
-import type { Store } from "@/lib/store";
-import { redisPipeline } from "@/lib/redis";
-import { countOf, repliesFor } from "@/lib/redis-reply";
+import type { Listing, Store } from "@/lib/store";
+import { type ExactStore, storeForIdExactly } from "@/lib/store-exact";
+import { readListing } from "@/lib/catalog";
+import { stockLeftKnown } from "@/lib/stock";
+import { limitedStock } from "@/lib/product-extras";
+import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 
 /** The most low-stock emails one product sends its creator in a day (UTC). */
 export const LOW_STOCK_EMAILS_A_DAY = 1;
@@ -134,4 +138,93 @@ export async function tellLowStock(store: Store, product: { id: string; title: s
   // spent, the creator's own choice, but it is never said as told (cloud J's LOW on #3725).
   if (pushed < 1 && !emailed) return "no";
   return "told";
+}
+
+/** Products the job checks a run, at most. */
+export const LOW_STOCK_RUN_PRODUCTS = 50;
+/**
+ * How long a product waits before its next check when nothing sold: a sale
+ * makes it due at once (lowStockTouched, from the cart's hold), so this is
+ * only the safety recheck, a day (Revisor 1 on #3814: a fixed pace over the
+ * whole platform would grow with it).
+ */
+export const LOW_STOCK_WAIT_MS = 86_400_000;
+
+export type LowStockDeps = {
+  /** The store by its own id, read exactly (lib/store-exact.ts). */
+  load: (storeId: string) => Promise<ExactStore>;
+  readProduct: (store: Store, id: string) => Promise<Listing | null>;
+  /** Units left (lib/stock.ts); throws when they cannot be read. */
+  left: (store: Store, product: Listing) => Promise<number | null>;
+};
+
+/**
+ * What the mail job hands the check (app/api/cron/mail/route.ts). The units left are read as lib/stock.ts reads them
+ * where something is decided (stockLeftKnown): a lapsed hold whose checkout Stripe could not answer for is counted as
+ * sold by stockLeft, the safe guess for selling, never proof of a sale; read here it would cross the creator's number
+ * and send the alert for a sale that never happened (Claude 1's MEDIUM on #3814). A limited product whose count is not
+ * known throws, as LowStockDeps.left says: never null, which reads as "not limited" and would clear the count seen.
+ * Nothing is sent or kept, and the product waits for its next check.
+ */
+export const lowStockJobDeps: LowStockDeps = {
+  load: storeForIdExactly,
+  readProduct: readListing,
+  left: async (store, product) => {
+    const known = await stockLeftKnown(store, product);
+    if (known === null && limitedStock(product) !== null) throw new Error("Units left not known: a lapsed hold's checkout could not be read");
+    return known;
+  },
+};
+
+/** One product's turn: "told" when the creator was told, "done" when it leaves the set, "later" otherwise. */
+async function checkOne(entry: string, now: number, deps: LowStockDeps): Promise<"told" | "done" | "later"> {
+  const cut = entry.indexOf("|");
+  const storeId = cut > 0 ? entry.slice(0, cut) : "";
+  const productId = cut > 0 ? entry.slice(cut + 1) : "";
+  if (!storeId || !/^[a-z0-9]{1,40}$/.test(productId)) return "done";
+  const found = await deps.load(storeId);
+  // The store is gone: its numbers went with it (lib/data-families.ts).
+  if (found === "none") return "done";
+  if (found === "unknown") return "later";
+  const store = found;
+  if (!store.statsId || store.suspended) return "later";
+  const product = await deps.readProduct(store, productId);
+  if (!product) {
+    // Still listed but unreadable: it waits. Gone exactly: its number goes too.
+    if (store.catalog.items.some((item) => item.id === productId)) return "later";
+    return (await setLowStock(store, productId, 0, null, now)) === "off" ? "done" : "later";
+  }
+  const told = await tellLowStock(store, product, await deps.left(store, product), now);
+  return told === "told" ? "told" : "later";
+}
+
+/**
+ * Checks the products with a low-stock number, until `deadline`: at most
+ * LOW_STOCK_RUN_PRODUCTS a run, each again after LOW_STOCK_WAIT_MS. Run by
+ * the mail job only (never in the checkout), one run at a time, so a count
+ * read late never rearms a crossing. Returns how many creators were told.
+ */
+export async function runLowStockChecks(deadline: number, deps: LowStockDeps): Promise<number> {
+  if (!isRedisConfigured()) return 0;
+  const reply = repliesFor(await redisPipeline([["ZRANGEBYSCORE", LOW_STOCK_DUE, "-inf", Date.now(), "LIMIT", 0, LOW_STOCK_RUN_PRODUCTS]]), 1);
+  const entries = reply ? stringList(reply[0]) : null;
+  if (!entries) {
+    console.error("checking low-stock numbers: the products due were read in an unknown shape, so they wait", new UnknownReplyError("the low-stock products due"));
+    return 0;
+  }
+  let told = 0;
+  for (const entry of entries) {
+    if (Date.now() > deadline) break;
+    let turn: "told" | "done" | "later";
+    try {
+      turn = await checkOne(entry, Date.now(), deps);
+    } catch (error) {
+      console.error("checking low-stock numbers: a product could not be read as asked, so it waits", error);
+      turn = "later";
+    }
+    if (turn === "told") told += 1;
+    if (turn === "done") await redisPipeline([["ZREM", LOW_STOCK_DUE, entry]]);
+    else await redisPipeline([["ZADD", LOW_STOCK_DUE, "XX", Date.now() + LOW_STOCK_WAIT_MS, entry]]);
+  }
+  return told;
 }

@@ -18,6 +18,7 @@ import { type Held, LockBusyError, releaseLock, takeLock } from "@/lib/redis-loc
 import { OrdersPausedError } from "@/lib/order-admission";
 import { DigitalConsentMissing } from "@/lib/digital-consent";
 import type { Listing, Store } from "@/lib/store";
+import { lowStockTouched } from "@/lib/low-stock";
 
 const HOLD_MS = HOLD_SECONDS * 1000;
 const MAX_CHECKS = 5;
@@ -85,9 +86,11 @@ export async function stockLeft(store: Store, product: Listing, now = Date.now()
  * stockLeft, but null when any lapsed hold's checkout could not be read
  * (Stripe failed, or answered something that is neither settled nor expired):
  * the count is then a guess on the safe side, never proof of "Sold out"
- * (Claude 6's LOW on #1732). Used where a refusal is decided.
+ * (Claude 6's LOW on #1732). Used where a refusal is decided, and by the
+ * low-stock job (lib/low-stock-alert.ts, lowStockJobDeps), which never tells
+ * a creator their units fell on a guess.
  */
-async function stockLeftKnown(store: Store, product: Listing, now = Date.now()): Promise<number | null> {
+export async function stockLeftKnown(store: Store, product: Listing, now = Date.now()): Promise<number | null> {
   const count = await countStock(store, product, now, true);
   return count && count.unknown === 0 ? count.left : null;
 }
@@ -430,7 +433,11 @@ export async function withCartStockHolds<T extends { id: string }>(
   const bound = acknowledged(receipt, keys.length)
     ? scriptAnswer(await redisPipeline([["EVAL", STOCK_BIND, keys.length, ...keys, keys.length, pending, value.id]]).catch(() => null))
     : null;
-  if (bound === 1) return { ok: true, value };
+  if (bound === 1) {
+    // The units left changed: the creator's low-stock numbers among these are checked by the mail job at once (623 [SZ7]).
+    await lowStockTouched(store, limited.map((product) => product.id));
+    return { ok: true, value };
+  }
   // Nobody is sent to a checkout whose units are not proven its own: it is closed at Stripe, and only Stripe's "expired" lets its holds go.
   if (store.stripeAccountId) {
     const closed = await onAccount("POST", store.stripeAccountId, `/checkout/sessions/${encodeURIComponent(value.id)}/expire`, new URLSearchParams()).catch(() => null);

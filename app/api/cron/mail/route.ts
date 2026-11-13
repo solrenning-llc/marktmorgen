@@ -1,6 +1,7 @@
 import { runLaunches } from "@/lib/waitlist";
 import { runPreorderReleases } from "@/lib/preorders";
 import { runRestocks } from "@/lib/stock-alert-send";
+import { lowStockJobDeps, runLowStockChecks } from "@/lib/low-stock-alert";
 import { preorderDeps } from "@/lib/purchase-email";
 import { readListing } from "@/lib/catalog";
 import type { NextRequest } from "next/server";
@@ -212,6 +213,13 @@ async function run(request: NextRequest, started: number): Promise<Response> {
       restocks = await runRestocks(deadline);
     } catch (error) {
       console.error("sending back-in-stock emails failed", error);
+    }
+    // The creators' low-stock numbers (623 [SZ7]): checked here, one run at a time, never in the checkout.
+    try {
+      // The units left as read where something is decided: never a guess (lowStockJobDeps).
+      await runLowStockChecks(deadline, lowStockJobDeps);
+    } catch (error) {
+      console.error("checking low-stock numbers failed", error);
     }
     // Reminders are kept apart from the creators' own emails: one failing
     // never stops the other, and the next run picks up whatever was left.

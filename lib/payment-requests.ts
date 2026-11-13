@@ -33,7 +33,7 @@ import { StripeError, onAccount } from "@/lib/stripe-account";
 import { LANGUAGES } from "@/lib/store-language";
 import { isHouseStore } from "@/lib/house-store";
 import { canSell } from "@/lib/store-checkout";
-import { sendEmail } from "@/lib/email";
+import { sendEmailOutcome } from "@/lib/email";
 import { fromStore, storeBase } from "@/lib/purchase-email";
 import { speechFor } from "@/lib/buyer-words";
 import { requestWords } from "@/lib/buyer-words/requests";
@@ -100,7 +100,7 @@ export async function sendRequestEmail(store: Store, request: PaymentRequest, no
     "",
     w.footer(store.name),
   ].join("\n");
-  const sent = await sendEmail({
+  const outcome = await sendEmailOutcome({
     meter: { by: "store", store, kind: "email" },
     from: fromStore(store),
     to: request.email,
@@ -108,7 +108,12 @@ export async function sendRequestEmail(store: Store, request: PaymentRequest, no
     subject: (reminder ? w.reminderSubject(store.name, total) : w.subject(store.name, total)).slice(0, 180),
     text,
     idempotencyKey: `nimbus-payreq:${request.id}:${request.sent.length}`,
-  }).catch(() => false);
+  }).catch(() => "refused" as const);
+  // An answer that is not known (a server error or a lost answer after the email was handed over) may have reached
+  // the buyer: it counts as sent (rule 30), so the daily job never asks again a day later, when neither sender still
+  // knows the key (webhooks/cron audit, Claude 1, 12/11/2026). Only a certain refusal is "not sent".
+  if (outcome === "uncertain") console.error("a payment request email may have gone; it is not sent again", request.id, request.sent.length);
+  const sent = outcome !== "refused";
   // Written onto the record as it is now, not as it was read before the email
   // went: a payment made while it was being sent stays paid (MM-SA-02).
   const failed = "Not sent: your store's emails for this month may be used, or email could not be sent just now. You can send it again from here.";

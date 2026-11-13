@@ -28,8 +28,11 @@
  * A link opens a page that says what would move, from where to where, and
  * asks for Confirm: opening it confirms nothing (mail scanners open links).
  * Confirm records that address's confirmation once, and only for this
- * store's request. The move itself, once both confirmed, is a later unit;
- * until then lib/purchase-move-open.ts keeps all of this closed.
+ * store's request. The Confirm that makes both writes the move into the
+ * index of moved addresses (lib/purchase-move-index.ts, unit 4a), once, and
+ * tells the creator; pressing a link again after that finishes a move that
+ * stopped midway. No reader of a buyer's purchases follows the index yet
+ * (unit 4b onward), so lib/purchase-move-open.ts keeps all of this closed.
  *
  * Cost: what each request reads besides the hold is counted below
  * (MOVE_ASK_COMMANDS, MOVE_LINK_COMMANDS, MOVE_CONFIRM_COMMANDS) and held
@@ -47,6 +50,7 @@ import { suppressedAmong } from "@/lib/suppression";
 import { takePublicRequest } from "@/lib/traffic";
 import { type MoveSide, type MoveState, moveState, readMoveAddresses } from "@/lib/purchase-move-rules";
 import { askPurchaseMove, confirmPurchaseMove, readMoveLink } from "@/lib/purchase-moves";
+import { type MoveApplied, applyPurchaseMove } from "@/lib/purchase-move-index";
 import { PURCHASE_MOVE_DELIVERED, purchaseMoveOpen } from "@/lib/purchase-move-open";
 import { type AskState, type ConfirmState, moveWords } from "@/lib/purchase-move-words";
 import { fromAnotherSite, limited } from "@/lib/request-guard";
@@ -54,14 +58,25 @@ import { linkOrigin, originFrom } from "@/lib/request-origin";
 
 /** Public requests an ask holds before it reads. */
 export const MOVE_ASK_UNITS = 1;
-/** Public requests a link's page, or its Confirm, holds before it reads. */
+/** Public requests a link's page holds before it reads. */
 export const MOVE_LINK_UNITS = 1;
+/** Public requests a Confirm holds before it reads: its own reads, and the move written into the index when it is the second. */
+export const MOVE_CONFIRM_UNITS = 2;
 /** Commands an ask makes besides the hold and its two emails: the purchases link, the deleted people, the day's count (one script, billed 3: lib/purchase-moves.ts MOVE_DAY_COUNT) and the request with its two links (3). */
 export const MOVE_ASK_COMMANDS = 8;
 /** Commands a link's page reads: the link, the request with both confirmations and the claim (4), the deleted people. */
 export const MOVE_LINK_COMMANDS = 6;
 /** Commands a Confirm makes: the page's reads, then the link, the request, the mark (with its read-back) and the request again. */
 export const MOVE_CONFIRM_COMMANDS = MOVE_LINK_COMMANDS + 1 + 4 + 2 + 4;
+/**
+ * Commands writing a move into the index makes at the most (lib/purchase-move-index.ts): the claim (the request and
+ * its marks read, the claim's mark with its read-back), the request read again on a later try of a move already
+ * claimed, the deleted people, the old address's mark read, the data room's script billed as four, the mark and the
+ * line in one script billed as four (MOVE_APPLY: the EVAL, GET, HSET and SET), and the creator's notice mark with its
+ * read-back and its release. The notice itself is one of the store's emails, taken from its figure. Each part at its
+ * most, so a later try of the same move is inside it too (Claude 3 on #3625, LOW 3).
+ */
+export const MOVE_APPLY_COMMANDS = 4 + 2 + 4 + 2 + 1 + 4 + 4 + 3;
 
 const MAX_BODY_BYTES = 2_000;
 const sec = (ms: number) => Math.floor(ms / 1000);
@@ -151,7 +166,7 @@ export async function askToMovePurchases(input: { store: Store; token: string; t
 
 export type MoveLinkView =
   | { kind: "busy" | "link" | "deleted" | "error" }
-  | { kind: "open"; side: MoveSide; from: string; to: string; state: MoveState; confirmed: boolean };
+  | { kind: "open"; id: string; side: MoveSide; from: string; to: string; state: MoveState; confirmed: boolean };
 
 /** What a link is for, at this store, read without confirming anything. */
 async function linkAt(store: Store, token: string, now: number): Promise<MoveLinkView> {
@@ -170,7 +185,7 @@ async function linkAt(store: Store, token: string, now: number): Promise<MoveLin
   const state = moveState(request, sec(now));
   if (state === "unknown") return { kind: "error" };
   const confirmed = (side === "from" ? request.fromConfirmedAt : request.toConfirmedAt) !== null;
-  return { kind: "open", side, from: request.from, to: request.to, state, confirmed };
+  return { kind: "open", id: found.id, side, from: request.from, to: request.to, state, confirmed };
 }
 
 /** What the page a link opens shows, after holding a public request. Confirms nothing. */
@@ -183,10 +198,12 @@ export async function moveLinkView(store: Store, token: string, now = Date.now()
 export async function confirmMoveLink(input: { store: Store; token: string; now?: number }): Promise<ConfirmState> {
   const { store, token } = input;
   const now = input.now ?? Date.now();
-  if (!(await takePublicRequest(store, "buyer", now, MOVE_LINK_UNITS))) return "busy";
+  if (!(await takePublicRequest(store, "buyer", now, MOVE_CONFIRM_UNITS))) return "busy";
   const found = await linkAt(store, token, now);
   if (found.kind !== "open") return found.kind;
-  if (found.state === "expired" || found.state === "done") return found.state;
+  if (found.state === "expired") return "expired";
+  // Moved already, or stopped midway: finished here, never written twice.
+  if (found.state === "done") return movedAs(await applyPurchaseMove(store, found.id, now), "done");
   let confirmed: Awaited<ReturnType<typeof confirmPurchaseMove>>;
   try {
     confirmed = await confirmPurchaseMove(token, now);
@@ -194,7 +211,7 @@ export async function confirmMoveLink(input: { store: Store; token: string; now?
     return "error";
   }
   if (!confirmed.ok) return confirmed.reason === "unknown" ? "error" : confirmed.reason;
-  if (confirmed.state === "ready") return "both";
+  if (confirmed.state === "ready") return movedAs(await applyPurchaseMove(store, confirmed.id, now), "both");
   if (confirmed.state === "done" || confirmed.state === "expired") return confirmed.state;
   if (confirmed.state === "waiting-from" || confirmed.state === "waiting-to") return "waiting";
   // "waiting-both" after a confirmation that was kept cannot be read as either: said as an error, never as done.
@@ -265,4 +282,25 @@ export async function confirmMoveRoute(request: NextRequest, delivered = PURCHAS
   const token = form.t.slice(0, 100);
   const answer = await confirmMoveLink({ store, token });
   return away(`${originFrom(request)}/@${store.handle}/orders/move/confirm?${new URLSearchParams({ t: token, c: answer })}`);
+}
+
+/** What a move written into the index, or not, says on the link's page. */
+function movedAs(applied: MoveApplied, moved: "both" | "done"): ConfirmState {
+  switch (applied.state) {
+    case "moved":
+      return moved;
+    case "deleted":
+    case "expired":
+      return applied.state;
+    case "already-moved":
+      return "elsewhere";
+    case "gone":
+      return "link";
+    case "full":
+      return "full";
+    case "unknown":
+      return "unfinished";
+    default:
+      return "error";
+  }
 }

@@ -29,6 +29,8 @@ import {
   MOVE_CONFIRM_COMMANDS,
   MOVE_LINK_COMMANDS,
   MOVE_LINK_UNITS,
+  MOVE_APPLY_COMMANDS,
+  MOVE_CONFIRM_UNITS,
   askMoveRoute,
   askToMovePurchases,
   confirmMoveLink,
@@ -217,7 +219,23 @@ async function main(): Promise<void> {
     is("the old address's page says it confirmed", after.kind === "open" ? [after.confirmed, after.state] : after, [true, "waiting-to"]);
     is("Confirm on the new address: both", await viaRoute(toLink), `${ORIGIN}/@moss/orders/move/confirm?${new URLSearchParams({ t: toLink, c: "both" })}`);
     const request = await readPurchaseMove(id);
-    is("both kept, nothing moved yet (a later unit)", [typeof request?.fromConfirmedAt, typeof request?.toConfirmedAt, request?.appliedAt], ["number", "number", null]);
+    is("both kept, and the move written into the index (unit 4a)", [typeof request?.fromConfirmedAt, typeof request?.toConfirmedAt, typeof request?.appliedAt], ["number", "number", "number"]);
+  }
+
+  part("A store with no room left says so, not that the move is merely unfinished (Claude 1 on #3625)");
+  {
+    const token = await signIn("full.buyer@example.com");
+    const m = mails.length;
+    is("asked", await askToMovePurchases({ store: moss, token, to: "full.new@example.com", origin: ORIGIN }), "sent");
+    const [a, b] = mails.slice(m).map((mail) => linkIn(mail.text) ?? "");
+    is("the first confirmation waits", await confirmMoveLink({ store: moss, token: a ?? "" }), "waiting");
+    // The store's data room answers full when the move takes its room.
+    odd = { command: "EVAL", prefix: "-- marktmorgen:store-data", reply: [0, 1], times: 1, skip: 0 };
+    const answer = await confirmMoveLink({ store: moss, token: b ?? "" });
+    odd = null;
+    is("the answer is full", answer, "full");
+    const said = moveWords.confirmed[answer];
+    is("its words name the store's room, never \"in a few minutes\"", [/room/i.test(said.title + said.body), /few minutes/i.test(said.body)], [true, false]);
   }
 
   part("A link that does not work here");
@@ -320,7 +338,7 @@ async function main(): Promise<void> {
   {
     is("the ask", request("light", MOVE_ASK_COMMANDS, 4_096) <= MOVE_ASK_UNITS * laterPageCost(), true);
     is("a link's page", request("light", MOVE_LINK_COMMANDS, 4_096) <= MOVE_LINK_UNITS * laterPageCost(), true);
-    is("a confirmation", request("light", MOVE_CONFIRM_COMMANDS, 8_192) <= MOVE_LINK_UNITS * laterPageCost(), true);
+    is("a confirmation, with the move it writes when it is the second", request("light", MOVE_CONFIRM_COMMANDS + MOVE_APPLY_COMMANDS, 12_288) <= MOVE_CONFIRM_UNITS * laterPageCost(), true);
     const token = await signIn("count.buyer@example.com");
     const m = mails.length;
     await askToMovePurchases({ store: moss, token, to: "count.new@example.com", origin: ORIGIN });

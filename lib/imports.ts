@@ -223,6 +223,8 @@ export async function takeImportRows(store: Store, n: number, now = Date.now(), 
   n = Math.max(n, IMPORT_MIN_ROWS_PER_UPLOAD, Number.isFinite(bytes) && bytes > 0 ? Math.ceil(bytes / IMPORT_ROW_BYTES) : 0);
   const window = utcMonth(store, now);
   if (!store.sid || !isRedisConfigured() || !window) return { ok: false, reason: "unavailable", limit };
+  // A funded period's rows need its paid cohort first (resourceAllocations); refused as a count that cannot be made.
+  if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return { ok: false, reason: "unavailable", limit };
   const key = `nl:imports:rows:${store.sid}:${window}`;
   try {
     const [, total] = await redisPipeline([

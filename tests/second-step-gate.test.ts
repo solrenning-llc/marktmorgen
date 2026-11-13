@@ -31,7 +31,7 @@ import { POST as moveRoute } from "@/app/api/auth/move/route";
 import { accountStores, claimHandle, createStore, ensureStoreId, storeForEmail } from "@/lib/store";
 import { POST as recoveryRoute } from "@/app/api/auth/recovery-address/route";
 import { endMoving, isMoving, markBrokenMove, markMoving, readBrokenMove, sendMoveLink } from "@/lib/auth";
-import { clearBrokenMoveByHand, describeMove } from "@/lib/move-repair";
+import { clearBrokenMoveByHand, describeMove, repairMove } from "@/lib/move-repair";
 import { existsSync } from "node:fs";
 import { removalWhen } from "@/lib/removal-time";
 import { store as redis } from "./redis-stub";
@@ -1278,6 +1278,22 @@ async function main(): Promise<void> {
   const busyIn = await passkeySignIn(asJson(`${ORIGIN}/api/auth/passkey/signin`, { action: "verify", response: wes.answer(askedBusy.challenge) }, `${PASSKEY_COOKIE}=${nonceBusy}`));
   is("logging in with the passkey meanwhile", [busyIn.status, ((await busyIn.json()) as { error?: string }).error], [503, "busy"]);
   await releaseLock(blocking);
+
+  part("Issue #4366: a broken move's repair whose logout of the away address is unknown keeps the lock");
+  const AWAY = "rep-away@example.com";
+  const HOME = "rep-home@example.com";
+  await claimHandle(HOME, "rep-home", "Rep Home", "");
+  const oldSession = await openSession(AWAY);
+  await markBrokenMove(AWAY, HOME);
+  const awaySet = `nl:auth:sessions:${hex(`nimbus-auth-sessions:${AWAY}`).slice(0, 40)}`;
+  const beforeRepair = redis.pipeline.bind(redis);
+  redis.pipeline = (async (commands: (string | number)[][]) =>
+    commands[0]?.[0] === "SMEMBERS" && commands[0]?.[1] === awaySet ? [42] : beforeRepair(commands)) as typeof redis.pipeline;
+  const repaired = await repairMove(AWAY);
+  redis.pipeline = beforeRepair;
+  is("control: the old session on the away address is still open", await emailForSession(oldSession), AWAY);
+  is("repairMove does not report success while its sessions were not logged out", repaired, false);
+  is("the broken-move record (the lock on both addresses) is kept", (await readBrokenMove(AWAY)) !== null, true);
 
   done();
 }

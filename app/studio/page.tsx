@@ -226,7 +226,10 @@ import { PasskeySignIn } from "@/components/passkey-signin";
 import { TwoStepManager } from "@/components/two-step-manager";
 import { AppCodeInvite } from "@/components/app-code-invite";
 import { showAppCodeInvite } from "@/lib/app-code-invite-words";
-import { lockedUntil, twoStepStatus } from "@/lib/two-step";
+import { TwoStepAsk } from "@/components/two-step-ask";
+import { noSecondStep, showTwoStepAsk } from "@/lib/two-step-ask-rules";
+import { firstSaleKnown, lockKnown } from "@/lib/two-step-ask";
+import { twoStepStatus } from "@/lib/two-step";
 import { LOCKED_LIST } from "@/lib/locked-words";
 import { RecoveryAddressManager, RecoveryAddressUnread } from "@/components/recovery-address-manager";
 import { hideAddress, recoveryAddress } from "@/lib/recovery-address";
@@ -873,8 +876,9 @@ export default async function StudioPage({
         store?.sid && may("team") ? readTeam(store.sid).catch(() => null) : Promise.resolve(null),
         isFreshSession(cookieStore.get(SESSION_COOKIE)?.value).catch(() => false),
         // Whether this browser got in without its second step, and until when what matters is locked (lib/two-step.ts).
-        // null when it could not be read: never taken for "not locked" (LOW 1 of Claude 1's review of #2945).
-        lockedUntil(cookieStore.get(SESSION_COOKIE)?.value).catch(() => null),
+        // null when it could not be read (lockKnown): never taken for "not locked" (LOW 1 of Claude 1's review of #2945),
+        // nor for "unlocked" by the first-sale ask (Codex H2 on #3511).
+        lockKnown(cookieStore.get(SESSION_COOKIE)?.value),
         // The person's two-step login (lib/two-step.ts), beside their passkeys.
         // null when it could not be read: never taken for "no request to turn it off" (Claude 4, C4-2980 on #2900).
         email ? twoStepStatus(email).catch(() => null) : Promise.resolve({ on: false, since: 0, codesLeft: 0, reset: 0, backup: "" }),
@@ -1233,13 +1237,18 @@ export default async function StudioPage({
   const passkeyRemovals: Record<string, number> = removed ? removed.atOf : {};
   const needsStep = firstReads.mayAdd ? !(await firstReads.mayAdd) : false;
   const canKeep = firstReads.liveStep ? mayKeepPasskey(await firstReads.liveStep) : false;
-  const [passkeysRead, team, freshLogin, lockedTill, twoStepRead, recoveryRead] = await firstReads.person;
+  const [passkeysRead, team, freshLogin, lockedRead, twoStepRead, recoveryRead] = await firstReads.person;
+  // An unread lock is null here and everywhere below: never "not locked" (rule 24), and the first-sale ask needs it for sure.
+  const lockedTill = lockedRead;
   // Not read just now (null) is not "no passkeys": each Passkeys section says so in place of its manager (rule 24).
   const passkeys = passkeysRead ?? [];
   // Not read just now (null) is not "none": the recovery section says so in place of its manager (rule 24).
   const recoveryShown = recoveryRead ?? "";
   // When it could not be read, the banner over Today and Two-step login below say so (unread); neither takes it for "off".
   const twoStep = twoStepRead ?? { on: false, since: 0, codesLeft: 0, reset: 0, backup: "" };
+  // 757 [STN4] unit 3: the store's first sale, read exactly and only for an account with no second step at all, so a
+  // protected one costs nothing; null (unknown) never asks (lib/two-step-ask.ts).
+  const soldFirstAt = store && noSecondStep({ appOn: twoStepRead === null ? null : twoStep.on, passkeys: passkeysRead === null ? null : passkeysRead.length, locked: lockedRead === null ? null : lockedRead > 0 }) ? await firstSaleKnown(store) : null;
   // This browser's lock: known and running (lockedNow), or not read just now (lockUnread). An unread lock is never
   // "not locked": the top of the page says so, the app's code is not offered and Two-step login offers nothing a lock
   // would refuse (tests/studio-lock-unread.test.ts).
@@ -1382,6 +1391,9 @@ export default async function StudioPage({
 
         {/* Passkeys but no app's code: a quiet invitation, once a browser session, from what was read above (owner C3-96). */}
         {store && twoStepRead !== null && !lockUnread && showAppCodeInvite({ passkeys: passkeys.length, appOn: twoStep.on, locked: lockedNow }) ? <AppCodeInvite /> : null}
+
+        {/* After the store's first sale, an account with no second step is asked to turn one on; dismissible, never blocking a sale (757 [STN4] unit 3). */}
+        {store && showTwoStepAsk({ firstSale: soldFirstAt, appOn: twoStepRead === null ? null : twoStep.on, passkeys: passkeysRead === null ? null : passkeysRead.length, locked: lockedRead === null ? null : lockedRead > 0 }) ? <TwoStepAsk sid={store.sid} seesSales={may("orders") || may("stats")} /> : null}
 
         {current && unpaidSince > 0 ? <RenewalUnpaidNotice payUrl={renewalPage} canPay={may("billing")} /> : null}
         {current && current.subscriptionActive && planDisputed(current) ? <PlanDisputeNotice /> : null}

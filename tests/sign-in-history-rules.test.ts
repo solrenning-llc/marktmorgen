@@ -126,7 +126,8 @@ const lockers = (dir: string): string[] =>
     if (statSync(join(process.cwd(), path)).isDirectory()) return lockers(path);
     return /\.tsx?$/.test(name) && /\blockedUntil\(/.test(source(path)) ? [path] : [];
   });
-const SHOWN_OR_CHECKED = ["lib/two-step.ts", "lib/studio-route.ts", "app/studio/page.tsx"];
+// lib/two-step-ask.ts reads the lock for the studio page only, to hide the first-sale ask (Codex H2 on #3511); it refuses nothing.
+const SHOWN_OR_CHECKED = ["lib/two-step.ts", "lib/studio-route.ts", "app/studio/page.tsx", "lib/two-step-ask.ts"];
 is("no other route refuses a locked session without the note saying so", [...lockers("app"), ...lockers("lib")].filter((file) => !SHOWN_OR_CHECKED.includes(file) && !(file in ACCOUNT_LOCKS)), []);
 is("every sentence shown is under twenty-one words", [...SIGN_IN_NOTES, ...LOCKED_NOTE].every((n) => n.split(/\s+/).length < 21), true);
 

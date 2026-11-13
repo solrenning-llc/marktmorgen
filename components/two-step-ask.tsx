@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Icon } from "@/components/icons";
-import { TWO_STEP_ASK_DISMISSED, TWO_STEP_ASK_HREF, TWO_STEP_ASK_WORDS, askShown, twoStepAskKey } from "@/lib/two-step-ask-rules";
+import { TWO_STEP_ASK_DISMISSED, TWO_STEP_ASK_HREF, askShown, twoStepAskKey, twoStepAskWords } from "@/lib/two-step-ask-rules";
 
 /** The browser's value changes under this page only by this note, which keeps its own state. */
 const noSubscription = () => () => {};
@@ -36,21 +36,23 @@ function canKeep(): boolean {
  * (757 [STN4] unit 3; lib/two-step-ask-rules.ts). The page draws it only for
  * an account with no second step whose store's first sale is known.
  *
- * A status region that is there from the first paint, empty on the server, so
- * the note is said politely once the browser has read its dismissal, and the
- * line after dismissing is said too (WCAG 4.1.3). Nothing is drawn where the
+ * The note itself is drawn outside any live region, so it is not read out on
+ * every studio load (review of #3511, Claude 1); a status region that is there
+ * from the first paint, empty on the server, holds only the short line after
+ * dismissing, so that line is said (WCAG 4.1.3). A member who cannot see sales
+ * is asked without being told of one (`seesSales`, twoStepAskWords). Nothing is drawn where the
  * dismissal could not be kept. No timer and no motion. Dismissing writes one
  * short value under the store's own key and moves the focus to the line that
  * says where to find it again, never to the top of the page (2.4.3).
  */
-export function TwoStepAsk({ sid }: { sid: string }) {
+export function TwoStepAsk({ sid, seesSales }: { sid: string; seesSales: boolean }) {
   const key = twoStepAskKey(sid);
   const raw = useSyncExternalStore(noSubscription, () => kept(key), () => undefined);
   const keeps = useSyncExternalStore(noSubscription, canKeep, () => false);
   const [dismissed, setDismissed] = useState(false);
   const said = useRef<HTMLParagraphElement>(null);
   const shown = !dismissed && askShown(raw, keeps);
-  const words = TWO_STEP_ASK_WORDS;
+  const words = twoStepAskWords(seesSales);
 
   useEffect(() => {
     if (dismissed) said.current?.focus();
@@ -66,7 +68,7 @@ export function TwoStepAsk({ sid }: { sid: string }) {
   }
 
   return (
-    <div role="status">
+    <div>
       {shown ? (
         <section aria-labelledby="two-step-ask-title" className="notice mt-6 flex items-start gap-3">
           <Icon name="shield" className="mt-0.5 shrink-0 text-ink" />
@@ -89,11 +91,14 @@ export function TwoStepAsk({ sid }: { sid: string }) {
             </div>
           </div>
         </section>
-      ) : dismissed ? (
-        <p ref={said} tabIndex={-1} className="mt-6 max-w-[80ch] text-sm text-ink-soft">
-          {words.dismissed}
-        </p>
       ) : null}
+      <div role="status">
+        {dismissed ? (
+          <p ref={said} tabIndex={-1} className="mt-6 max-w-[80ch] text-sm text-ink-soft">
+            {words.dismissed}
+          </p>
+        ) : null}
+      </div>
     </div>
   );
 }

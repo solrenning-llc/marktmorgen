@@ -79,3 +79,21 @@ export const TWO_STEP_ASK_WORDS = {
   dismiss: "Don't show this again",
   dismissed: "Hidden. You can turn it on any time under Two-step login on this page.",
 } as const;
+
+/**
+ * The same ask for a team member who cannot see sales (neither "orders" nor
+ * "stats"): nothing about a sale, which their role does not show them
+ * (review of #3511, Claude 1). Same link, same dismissal.
+ */
+export const TWO_STEP_ASK_WORDS_NO_SALES = {
+  title: "Keep your account safe.",
+  body: "Turn on two-step login. Then a person who gets into your email still cannot open this studio without your phone.",
+  link: TWO_STEP_ASK_WORDS.link,
+  dismiss: TWO_STEP_ASK_WORDS.dismiss,
+  dismissed: TWO_STEP_ASK_WORDS.dismissed,
+} as const;
+
+/** The ask's words for this member: about the first sale only for one who may see sales. */
+export function twoStepAskWords(seesSales: boolean): { title: string; body: string; link: string; dismiss: string; dismissed: string } {
+  return seesSales ? TWO_STEP_ASK_WORDS : TWO_STEP_ASK_WORDS_NO_SALES;
+}

@@ -1373,7 +1373,7 @@ export default async function StudioPage({
         {store && twoStepRead !== null && showAppCodeInvite({ passkeys: passkeys.length, appOn: twoStep.on, locked: lockedTill > 0 }) ? <AppCodeInvite /> : null}
 
         {/* After the store's first sale, an account with no second step is asked to turn one on; dismissible, never blocking a sale (757 [STN4] unit 3). */}
-        {store && showTwoStepAsk({ firstSale: soldFirstAt, appOn: twoStepRead === null ? null : twoStep.on, passkeys: passkeysRead === null ? null : passkeysRead.length, locked: lockedRead === null ? null : lockedRead > 0 }) ? <TwoStepAsk sid={store.sid} /> : null}
+        {store && showTwoStepAsk({ firstSale: soldFirstAt, appOn: twoStepRead === null ? null : twoStep.on, passkeys: passkeysRead === null ? null : passkeysRead.length, locked: lockedRead === null ? null : lockedRead > 0 }) ? <TwoStepAsk sid={store.sid} seesSales={may("orders") || may("stats")} /> : null}
 
         {current && unpaidSince > 0 ? <RenewalUnpaidNotice payUrl={renewalPage} canPay={may("billing")} /> : null}
         {current && current.subscriptionActive && planDisputed(current) ? <PlanDisputeNotice /> : null}

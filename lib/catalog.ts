@@ -481,7 +481,8 @@ function parseListing(entry: unknown): Listing | null {
   if (!product) return null;
   // A listing record has no fields, so whether it asks something at checkout is what the record says (#4350), never
   // the empty fields parseProduct fills in.
-  const { asks: _derived, ...listing } = listingOf(product);
+  const listing = listingOf(product);
+  delete listing.asks;
   return entry && typeof entry === "object" && (entry as { asks?: unknown }).asks === true ? { ...listing, asks: true } : listing;
 }
 

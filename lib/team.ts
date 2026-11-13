@@ -120,6 +120,18 @@ export type LogLine = {
 const EMPTY: Team = { members: [], invites: [] };
 
 /** A team record as read, keeping only members and invitations the studio accepts (a valid address and role, MAX_TEAM at most); lib/api-keys.ts reads the team with it too. */
+/** Whether a team GET's text is a team record as the writers make it: a JSON object whose invitations, if any, are a list. */
+function readsAsTeamRecord(raw: string): boolean {
+  try {
+    const value = JSON.parse(raw) as unknown;
+    if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+    const invites = (value as { invites?: unknown }).invites;
+    return invites === undefined || Array.isArray(invites);
+  } catch {
+    return false;
+  }
+}
+
 export function parseTeam(raw: unknown): Team {
   if (typeof raw !== "string" || !raw) return { members: [], invites: [] };
   try {
@@ -663,6 +675,9 @@ export async function peekInvite(token: string): Promise<{ store: Store; email: 
   if (!teamRead) throw new UnknownReplyError("a team");
   const [teamRaw] = teamRead;
   if (teamRaw !== null && typeof teamRaw !== "string") throw new UnknownReplyError("a team");
+  // A string is the record only when it reads as one (Codex X5 on #2969): text that is not JSON, empty text, JSON
+  // that is not a record or invitations that are not a list would be parsed as an empty team, which says expired.
+  if (typeof teamRaw === "string" && !readsAsTeamRecord(teamRaw)) throw new UnknownReplyError("a team record");
   const live = parseTeam(teamRaw).invites.filter((i) => i.expiresAt > now());
   if (!live.some((i) => i.id === claim.id)) return null;
   return { store, email: normaliseEmail(claim.email), role };

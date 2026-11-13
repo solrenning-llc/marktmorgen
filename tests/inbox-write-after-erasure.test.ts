@@ -61,7 +61,7 @@ async function main(): Promise<void> {
     const thread = await openConversation(statsId, conversation.id, store);
     is("it is opened", thread?.conversation.id, conversation.id);
     is("it is marked read", thread?.conversation.unread, 0);
-    is("it reads as read afterwards", (await readInbox(statsId)).find((c) => c.id === conversation.id)?.unread, 0);
+    is("it reads as read afterward", (await readInbox(statsId)).find((c) => c.id === conversation.id)?.unread, 0);
     is("its message is shown", thread?.messages.length, 1);
     is("(cleanup) erased", await forgetInboxPerson(statsId, PERSON), 1);
   }

@@ -16,7 +16,7 @@ import { productSegment } from "@/lib/product-slug";
 import { lessonCount, lessonsInOrder, readCourse } from "@/lib/course";
 import { captionsAnchor, lessonCaptionCheck } from "@/lib/course-access-check";
 import { CourseAccessCheck } from "@/components/course-access-check";
-import { emailKey, studentEmail, studentsOf } from "@/lib/learn";
+import { emailKey, studentEmail, studentSummary, studentsOf } from "@/lib/learn";
 import { canSellProduct } from "@/lib/store-checkout";
 import { passedFor } from "@/lib/quiz";
 import { certificatesFor } from "@/lib/certificate";
@@ -90,10 +90,9 @@ export default async function StudioCoursePage({
   // Null when the students could not be read (rule 24): the page says so instead of "No students yet" or counts of 0.
   const studentsRead = await studentsOf(course, 500).catch(() => null);
   const students = studentsRead?.students ?? [];
-  const total = studentsRead?.total ?? 0;
   const lessons = lessonCount(course);
-  const finished = students.filter((s) => lessons > 0 && s.done >= lessons).length;
-  const started = students.filter((s) => s.done > 0).length;
+  // Lesson counts come from the students read; past them, the page says how many (studentSummary, lib/learn.ts).
+  const { opened: total, started, finished, among } = studentSummary(studentsRead ?? { students: [], total: 0 }, lessons);
   const selling = canSellProduct(store, product);
   const quizLessons = lessonsInOrder(course).filter(({ lesson }) => lesson.quiz).map(({ lesson }) => lesson.id);
   const passed = quizLessons.length ? await passedFor(course.id, students.map((s) => emailKey(s.email))) : [];
@@ -361,6 +360,11 @@ export default async function StudioCoursePage({
               </div>
             </div>
           )}
+          {studentsRead !== null && among !== null ? (
+            <p className="mt-3 text-sm text-ink-soft">
+              The lessons finished are counted among the {among} students who opened the course most recently, not all {total}.
+            </p>
+          ) : null}
           {studentsRead === null ? (
             <p role="status" className="notice mt-5">
               The students could not be read just now. Reload this page in a moment; this does not mean nobody has opened the course.

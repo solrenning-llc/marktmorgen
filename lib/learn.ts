@@ -629,6 +629,23 @@ export type Student = {
 };
 
 /**
+ * The course page's counts from one reading of studentsOf (Claude 3's studio
+ * performance audit, 13 November 2026): everyone who opened it, and how many
+ * finished a lesson and the whole course among the students read. What each
+ * marked done is read only for the students seen most recently, so when there
+ * are more, `among` says how many the lesson counts come from, and the page
+ * says so instead of showing a part as the whole (VR item 2). Reads nothing.
+ */
+export function studentSummary(read: { students: Student[]; total: number }, lessons: number): { opened: number; started: number; finished: number; among: number | null } {
+  return {
+    opened: read.total,
+    started: read.students.filter((s) => s.done > 0).length,
+    finished: read.students.filter((s) => lessons > 0 && s.done >= lessons).length,
+    among: read.total > read.students.length ? read.students.length : null,
+  };
+}
+
+/**
  * Everyone who has opened the course, with how far they got; null when Redis
  * answered in a shape that cannot be read (rule 24), so a page never says
  * "nobody" and the drip schedule never acts on an unknown list of blocked

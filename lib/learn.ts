@@ -206,7 +206,7 @@ export async function dropEnrollment(store: Store, email: string, productId: str
   if (!replies || !replies.every((reply) => reply === 0 || reply === 1)) throw new UnknownReplyError("taking a course off a ledger");
 }
 
-type Listed = { data?: unknown };
+type Listed = { data?: unknown; has_more?: unknown };
 
 /** What Stripe says about one address's courses here. */
 type Ledger = {
@@ -240,7 +240,11 @@ async function paidAtStripe(store: Store, email: string): Promise<Ledger> {
     query.append("expand[]", "data.subscription.latest_invoice");
     query.append("expand[]", "data.payment_intent.latest_charge");
     const listed = (await onAccount("GET", account, `/checkout/sessions?${query}`)) as Listed;
-    const rows = Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : [];
+    // Stripe's list in its exact shape (CX-123 rules 24 and 30): a reply that is not one is unknown, never "bought
+    // nothing". Thrown, courseLedger keeps no answer for it, so the next page asks again instead of shutting a
+    // running membership's course for the ten minutes an answer is kept.
+    if (!listed || typeof listed !== "object" || !Array.isArray(listed.data) || typeof listed.has_more !== "boolean") throw new UnknownReplyError("a list of checkouts");
+    const rows = listed.data as Record<string, unknown>[];
     for (const session of rows) {
       // A membership switched to another tier hands over what it is on now (lib/tier-rules.ts).
       const meta = currentMeta((session.metadata ?? {}) as Record<string, string>, session);

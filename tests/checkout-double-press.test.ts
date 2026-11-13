@@ -133,6 +133,34 @@ async function main(): Promise<void> {
     drain();
     is("one checkout, not three", form.sent, 1);
   }
+  // Claude 1 cloud rev-odd's LEVE on #3873: when the delayed requestSubmit throws (the button was replaced during the
+  // 300 ms, NotFoundError), the timer that clears the mark was never set, so every later press was held for good.
+  part("A delayed submit that throws never leaves the form held for good");
+  {
+    const { form, press } = checkoutForm();
+    let failOnce = true;
+    form.requestSubmit = () => {
+      if (failOnce) {
+        failOnce = false;
+        throw new Error("NotFoundError: the submitter is not in this form");
+      }
+      press();
+    };
+    press();
+    let threw = false;
+    while (timers.length) {
+      try {
+        timers.shift()!();
+      } catch {
+        threw = true;
+      }
+    }
+    is("(the delayed submit threw)", threw, true);
+    is("nothing was sent by it", form.sent, 0);
+    press();
+    drain();
+    is("a press after it goes through", form.sent, 1);
+  }
   g.setTimeout = realSetTimeout;
 }
 

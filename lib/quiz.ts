@@ -35,6 +35,7 @@ import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-
 import { type DataStore, giveData, needData, noteData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { type Course, ITEM_ID_PATTERN, lessonsInOrder, newItemId } from "@/lib/course";
+import { suppressedKey, suppressionPrint } from "@/lib/suppression";
 
 export const MAX_QUESTIONS = 20;
 export const MIN_CHOICES = 2;
@@ -517,7 +518,38 @@ export async function attemptOf(courseId: string, lessonId: string, who: string)
 
 export type SubmitResult =
   | { ok: true; grade: Grade; attempt: Attempt }
-  | { ok: false; reason: "no_tries" | "passed" | "usage_limit" | "unavailable" | "wait" | "stale" };
+  | { ok: false; reason: "no_tries" | "passed" | "usage_limit" | "unavailable" | "wait" | "stale" | "erased" };
+
+/**
+ * Keeps a quiz result and its pass only when no person erasure that ended at
+ * or after this submission began has written the store's print (#4446), by
+ * the Redis-clock rule of lib/lesson-notes.ts NOTE_SAVE: a print from before
+ * the submission began does not refuse it. When it refuses, it also takes
+ * away the try a submission counted after the erasure, so nothing of it is
+ * kept. KEYS: the store's suppression prints, the tries, the result, the
+ * passed lessons. ARGV: the print ("" for no check), the seconds since the
+ * submission began, the result, the lesson, whether it passed ("1"/"0").
+ * Answers 1 kept, 2 erased, 0 for arguments it cannot read.
+ */
+export const QUIZ_KEEP_UNLESS_ERASED = `-- marktmorgen:quiz-keep-unless-erased:v1
+if #KEYS ~= 4 or #ARGV ~= 5 then return 0 end
+local print, since, json, lesson, passed = ARGV[1], tonumber(ARGV[2]), ARGV[3], ARGV[4], ARGV[5]
+if not since or since < 0 or json == '' or lesson == '' or (passed ~= '0' and passed ~= '1') then return 0 end
+if print ~= '' then
+  local erased = redis.call('HGET', KEYS[1], print)
+  if erased then
+    local at = tonumber(erased)
+    local start = tonumber(redis.call('TIME')[1]) - since
+    if not at or at >= start - 1 then
+      redis.call('DEL', KEYS[2], KEYS[3])
+      redis.call('SREM', KEYS[4], lesson)
+      return 2
+    end
+  end
+end
+redis.call('SET', KEYS[3], json)
+if passed == '1' then redis.call('SADD', KEYS[4], lesson) end
+return 1`;
 
 /**
  * Marks a try and keeps it.
@@ -548,7 +580,10 @@ export async function submitQuiz(
   room: DataStore,
   /** The question ids the page showed; needed when the quiz draws from a bank. */
   shown: string[] | null = null,
+  /** The store's list and the learner's address: the route always gives them, so a submission in flight never undoes a person erasure (#4446). */
+  erasure?: { listId: string | null | undefined; email: string },
 ): Promise<SubmitResult> {
+  const began = performance.now();
   let before: Attempt;
   try {
     before = await attemptOf(courseId, lessonId, who);
@@ -587,10 +622,28 @@ export async function submitQuiz(
     best: Math.max(before.best, grade.percent),
     passed: grade.passed,
   };
-  await redisPipeline([
-    ["SET", resultKey(courseId, lessonId, who), JSON.stringify(attempt)],
-    ...(grade.passed ? [["SADD", passedKey(courseId, who), lessonId]] : []),
-  ]);
+  const result = resultKey(courseId, lessonId, who);
+  const replies = repliesFor(await redisPipeline([[
+    "EVAL",
+    QUIZ_KEEP_UNLESS_ERASED,
+    4,
+    erasure?.listId ? suppressedKey(erasure.listId) : result,
+    triesKey(courseId, lessonId, who),
+    result,
+    passedKey(courseId, who),
+    erasure?.listId ? suppressionPrint(erasure.listId, erasure.email) : "",
+    Math.max(0, Math.ceil((performance.now() - began) / 1000)),
+    JSON.stringify(attempt),
+    lessonId,
+    grade.passed ? "1" : "0",
+  ]]), 1);
+  const keptResult = replies ? countOf(replies[0]) : null;
+  if (keptResult === 2) {
+    // Nothing of this try is kept: the room it took goes back.
+    if (grown > 0) await giveData(room, [{ slot: TRIES_SLOT(courseId), bytes: grown }]);
+    return { ok: false, reason: "erased" };
+  }
+  if (keptResult !== 1) return { ok: false, reason: "unavailable" };
   return { ok: true, grade, attempt };
 }
 

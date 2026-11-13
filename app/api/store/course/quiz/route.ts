@@ -5,7 +5,7 @@ import { DATA_FULL_BUYER_WORDS } from "@/lib/store-data-rules";
 import { cookies } from "next/headers";
 import { originFrom } from "@/lib/request-origin";
 import { fromAnotherSite } from "@/lib/studio-route";
-import { normaliseHandle, storeForHandle } from "@/lib/store";
+import { ensureListId, normaliseHandle, storeForHandle, storeRef } from "@/lib/store";
 import { findLesson, isOpen, readCourse } from "@/lib/course";
 import { courseAccess, emailKey, markLesson } from "@/lib/learn";
 import { MAX_QUESTIONS, heldBack, passedForGate, readAnswers, readQuizFor, submitQuiz } from "@/lib/quiz";
@@ -53,17 +53,23 @@ export async function POST(request: NextRequest) {
   const quiz = await readQuizFor(course.id, lessonId);
   if (!quiz || !found.lesson.quiz) return away(`${base}/${lessonId}`);
 
+  // The store's list holds the prints of the people it erased; a store
+  // without one gets it first, as the lesson-note route does (#4446).
+  const listId = store.listId || (await ensureListId(storeRef(store)))?.listId;
+  if (!listId) return new Response("Quiz submissions are temporarily unavailable. Please try again later.", { status: 503, headers: { "Cache-Control": "no-store" } });
   let result: Awaited<ReturnType<typeof submitQuiz>>;
   try {
     // The question ids the page showed, so a try drawn from a bank is marked on those (lib/quiz.ts).
     const shown = String(form.get("shown") ?? "").split(",").filter(Boolean).slice(0, MAX_QUESTIONS);
-    result = await submitQuiz(course.id, lessonId, who, quiz, readAnswers(quiz, form), store.sid, windowId(store), store, shown);
+    result = await submitQuiz(course.id, lessonId, who, quiz, readAnswers(quiz, form), store.sid, windowId(store), store, shown, { listId, email: access.learner.email });
   } catch (error) {
     // No room in the store's data room: the try was not counted (lib/store-data.ts).
     if (error instanceof DataRoomError) return new Response(DATA_FULL_BUYER_WORDS, { status: 409, headers: { "Cache-Control": "no-store" } });
     throw error;
   }
   if (!result.ok && result.reason === "usage_limit") return new Response("This store has reached its monthly quiz submission allowance. It resets at the start of the next UTC month.", { status: 429, headers: { "Cache-Control": "no-store" } });
+  // Erased while this submission was on its way: nothing of it was kept.
+  if (!result.ok && result.reason === "erased") return away(base);
   if (!result.ok && result.reason === "unavailable") return new Response("Quiz submissions are temporarily unavailable. Please try again later.", { status: 503, headers: { "Cache-Control": "no-store" } });
   // Too soon after the last try, or questions that are no longer this try's:
   // nothing was counted, and the lesson says why.

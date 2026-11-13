@@ -1241,6 +1241,26 @@ export class MemoryRedis {
           });
           return out;
         }
+        // lib/quiz.ts QUIZ_KEEP_UNLESS_ERASED (#4446): a quiz result and pass kept only when no erasure ended after the
+        // submission began, by Redis's TIME (this stand-in's clock), as NOTE_SAVE below.
+        if (key.startsWith("-- marktmorgen:quiz-keep-unless-erased:v1\n")) {
+          if (args[0] !== "4" || args.length !== 10) return 0;
+          const [, prints, tries, result, passed, print, rawSince, json, lesson, didPass] = args;
+          const since = Number(rawSince);
+          if (!Number.isFinite(since) || since < 0 || json === "" || lesson === "" || (didPass !== "0" && didPass !== "1")) return 0;
+          if (print !== "") {
+            const erased = this.run(["HGET", prints, print]);
+            const start = Math.floor(this.now() / 1000) - since;
+            if (typeof erased === "string" && !(Number(erased) < start - 1)) {
+              this.run(["DEL", tries, result]);
+              this.run(["SREM", passed, lesson]);
+              return 2;
+            }
+          }
+          this.run(["SET", result, json]);
+          if (didPass === "1") this.run(["SADD", passed, lesson]);
+          return 1;
+        }
         // lib/lesson-notes.ts NOTE_SAVE, NOTE_FORGET and NOTE_CLEAR: a student's notes, their tally and the notes' slot in
         // one step. Redis's TIME is this stand-in's clock.
         if (key.startsWith("-- marktmorgen:lesson-note-save:v1\n")) {

@@ -29,7 +29,14 @@ const validWindow = (days: unknown): days is number => typeof days === "number" 
  */
 async function readKept(): Promise<{ snapshot: PlatformProofSnapshot; validDays: number | null } | null> {
   if (!isRedisConfigured()) return null;
-  const replies = repliesFor(await redisPipeline([["GET", PROOF_KEY]]).catch(() => null), 1);
+  // A read that fails is unknown (nothing shown), and said in the log, never hidden silently (Claude 1 on #3509).
+  const replies = repliesFor(
+    await redisPipeline([["GET", PROOF_KEY]]).catch((error: unknown) => {
+      console.error("reading the platform proof snapshot failed", error);
+      return null;
+    }),
+    1,
+  );
   const raw = replies?.[0];
   if (typeof raw !== "string" || !raw || !keptWithinCeiling(raw)) return null;
   try {
@@ -61,8 +68,11 @@ export async function keptPlatformProof(now = Date.now(), minimum = PLATFORM_PRO
   return kept ? platformProof(kept.snapshot, minimum, now, kept.validDays) : null;
 }
 
-/** Keeps `snapshot` for `validDays` (30 or 40) days; throws when it is not one or the write is not confirmed. */
-export async function writePlatformProof(snapshot: PlatformProofSnapshot, validDays: number): Promise<void> {
+/**
+ * Keeps `snapshot` until its `asOf` plus `validDays` (30 or 40) days, when its reader stops showing it; throws when it
+ * is not one, is already past that, or the write is not confirmed.
+ */
+export async function writePlatformProof(snapshot: PlatformProofSnapshot, validDays: number, now = Date.now()): Promise<void> {
   const kept = parseProofSnapshot(snapshot);
   if (!kept || !(PROOF_VALID_DAYS as readonly number[]).includes(validDays)) throw new Error("not a platform proof snapshot");
   // Kept with its window, so whoever reads it shows it for exactly as long as it was written for.
@@ -70,6 +80,10 @@ export async function writePlatformProof(snapshot: PlatformProofSnapshot, validD
   const json = JSON.stringify({ ...kept, validDays });
   if (!keptWithinCeiling(json)) throw new Error(`a platform proof snapshot over ${PROOF_SNAPSHOT_MAX_BYTES} bytes is never kept`);
   if (!isRedisConfigured()) throw new Error("the platform proof cannot be kept (no database)");
-  const replies = repliesFor(await redisPipeline([["SET", PROOF_KEY, json, "EX", validDays * 86_400]]), 1);
+  // The key ends when its reader stops showing it, asOf plus the window (platformProof), so store and reader are on one
+  // clock; a snapshot already past its window is never written (Claude 1 on #3509).
+  const seconds = Math.ceil((Date.parse(kept.asOf) + validDays * 86_400_000 - now) / 1000);
+  if (!(seconds > 0)) throw new Error("a platform proof snapshot already past its window is never kept");
+  const replies = repliesFor(await redisPipeline([["SET", PROOF_KEY, json, "EX", seconds]]), 1);
   if (replies?.[0] !== "OK") throw new Error("keeping the platform proof could not be confirmed");
 }

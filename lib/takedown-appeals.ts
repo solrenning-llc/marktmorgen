@@ -29,7 +29,7 @@ import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import type { Store } from "@/lib/store";
 import {
   type Appeal, type AppealProblem, type Decision, type DecisionKind, APPEAL_NUMBER, APPEAL_PROBLEMS, MAX_APPEAL_TEXT, appealNumber,
-  appealVisibleTo, decisionKey, openAppeal, readAppeal,
+  appealVisibleTo, decisionKey, movesLeadTo, openAppeal, readAppeal,
 } from "@/lib/takedown-appeal-rules";
 
 const KEEP_SECONDS = 400 * 86_400;
@@ -99,7 +99,7 @@ function readKept(raw: string): KeptAppeal {
   const a = r?.appeal && typeof r.appeal === "object" ? (r.appeal as Record<string, unknown>) : null;
   if (!r || !a || typeof r.told !== "boolean" || typeof r.tries !== "number" || !Number.isSafeInteger(r.tries) || r.tries < 0 || typeof a.number !== "string" || !APPEAL_NUMBER.test(a.number) || typeof a.store !== "string" ||
       typeof a.decision !== "string" || typeof a.explanation !== "string" || typeof a.at !== "string" || !Array.isArray(a.moves) ||
-      !["received", "under_review", "upheld", "reversed"].includes(String(a.state))) {
+      !["received", "under_review", "upheld", "reversed"].includes(String(a.state)) || !movesLeadTo(a.state, a.moves)) {
     throw new UnknownReplyError("a request to look again");
   }
   return { appeal: a as unknown as Appeal, told: r.told, tries: r.tries };

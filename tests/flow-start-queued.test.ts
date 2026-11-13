@@ -20,10 +20,18 @@ let shift = 0;
 Date.now = () => realNow() + shift;
 const real = redis.pipeline.bind(redis);
 let failLease = false;
+let loseReply = false;
 redis.pipeline = (async (batch: Command[]) => {
-  if (failLease && batch.length > 1 && batch[0][0] === "ZADD" && batch[0][1] === "nl:mail:flowq" && batch.at(-1)?.[0] === "HINCRBY") {
+  const queueWrite = batch.length > 1 && batch[0][0] === "ZADD" && batch[0][1] === "nl:mail:flowq" && batch.at(-1)?.[0] === "HINCRBY";
+  if (failLease && queueWrite) {
     failLease = false;
     throw new Error("Redis request failed with status 503");
+  }
+  if (loseReply && queueWrite) {
+    // The write lands; only its answer is lost (Codex X5 and Codex P on #4307).
+    loseReply = false;
+    await real(batch);
+    throw new Error("Redis request timed out");
   }
   return real(batch);
 }) as typeof redis.pipeline;
@@ -64,6 +72,19 @@ async function main(): Promise<void> {
   for (let i = 0; i < 4; i += 1) { shift += 30 * 60_000; await run(); }
   const after = await readRun(flowId, personOf("start@example.com"));
   is("the welcome step went out once and the run moved on", [sentTo("start@example.com"), after?.run.step], [1, 1]);
+
+  part("The queue write lands but its answer is lost: the same event, days later, never starts the run again");
+  await upsertContact(list, "lost@example.com", { agreed: true, explicit: true, source: "free" }, ROOM);
+  loseReply = true;
+  await enroll(store, "lost@example.com", { joined: false, tag: "welcome" }).catch(() => null);
+  for (let i = 0; i < 4; i += 1) { shift += 30 * 60_000; await run(); }
+  is("the first step that did land went out once", sentTo("lost@example.com"), 1);
+  // Past the provider's own two-day mark of what it sent, the same event comes again.
+  shift += 3 * 86_400_000;
+  await enroll(store, "lost@example.com", { joined: false, tag: "welcome" }).catch(() => null);
+  for (let i = 0; i < 4; i += 1) { shift += 30 * 60_000; await run(); }
+  const lost = await readRun(flowId, personOf("lost@example.com"));
+  is("the retried event did not send the welcome again nor reset the run", [sentTo("lost@example.com"), lost?.run.step], [1, 1]);
   mail.restore();
   done();
 }

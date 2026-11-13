@@ -32,7 +32,7 @@ const COURTESY = String.raw`(?:\s*,?\s*(?:please|thanks|thank\s+you))?`;
 const PASSWORD_FOR = new RegExp(String.raw`^(?:what(?:'s|\s+is)|which\s+is|where(?:'s|\s+is))\s+(?:(?:the|your|my)\s+(?:${NOT_KIND}${WORD}\s+){0,2})?${SECRET}\s+(?:for|to|of|on|at)\s+(?:(?:your|my|the)\s+)?${WORD}`, "iu");
 // "What is the password?", "What is the Instagram password?", "Which is your password?": the secret itself, as the
 // whole answer. Never "What is a password?" or "What is the best password?", which ask about passwords.
-const PASSWORD_IS = new RegExp(String.raw`^(?:what(?:'s|\s+is|\s+are)|which\s+(?:is|are)|where(?:'s|\s+is|\s+are))\s+(?!(?:a|an)\b)(?:${NOT_KIND}${WORD}\s+){0,3}${SECRET}${COURTESY}$`, "iu");
+const PASSWORD_IS = new RegExp(String.raw`^(?:what(?:'s|\s+is|\s+are)|which\s+(?:is|are)|where(?:'s|\s+is|\s+are))\s+(?!(?:a|an)\b)(?:${NOT_KIND}${WORD}\s+){0,4}${SECRET}${COURTESY}$`, "iu");
 // "Your Instagram password", "Please send me your password": the secret named as the visitor's own.
 const OWN_SECRET = new RegExp(String.raw`\b(?:your|my)\b(?:\s+${NOT_TOPIC}${WORD}){0,5}\s+${SECRET}\b`, "iu");
 // Words that open a question, a review or an opinion: credential pairs are only refused outside them (below).
@@ -67,9 +67,13 @@ const CREDENTIAL_JOINED = new RegExp(String.raw`\b${CREDENTIAL}\b(?:\s+${WORD}){
 // A short field name with the secret "for" a service or a team ("Admin password for your WordPress site",
 // "Instagram password for our team"; Claude 2 cloud I, #3668 @973c1e1e88), unless it names advice or a topic.
 const SECRET_FOR = new RegExp(String.raw`^(?:${WORD}\s+){0,3}${SECRET}\s+(?:for|of|on|at)\b`, "iu");
-const ADVICE = /\b(?:good|best|strong|stronger|strongest|secure|safe|weak|weakest|ideal|perfect|typical|common|tips?|advice|polic(?:y|ies)|rules?|managers?|hints?|reset|resets|recovery|strength|hygiene|security|habits?|courses?|lessons?|chapters?|guides?|ideas?|examples?|requirements?|feedback|opinions?|thoughts|experiences?)\b/i;
+// Read only on the words before the secret (Claude 1 cloud, #3668 @fff18e7784): a reassurance after it ("... for our
+// team (safe with us)") never excuses the ask, and "security", "recovery" or "common" before it name the very secret
+// asked for ("Security password for your bank").
+const ADVICE = /\b(?:good|best|strong|stronger|strongest|secure|safe|weak|weakest|ideal|perfect|typical|tips?|advice|polic(?:y|ies)|rules?|managers?|hints?|reset|resets|strength|hygiene|habits?|courses?|lessons?|chapters?|guides?|ideas?|examples?|requirements?|feedback|opinions?|thoughts|experiences?)\b/i;
 // The bare word "pass" counts only right after a login ("Login and pass", "Username/pass"), never alone ("Day pass").
-const LOGIN_PASS = /\b(?:e-?mail|user\s*name|username|login)(?:\s*[/&+,|:]\s*|\s+(?:and|or|plus)\s+)pass\b/i;
+// Never "Email or pass number": a noun after "pass" names an event or season pass (Claude 1 cloud, #3668 @fff18e7784).
+const LOGIN_PASS = /\b(?:e-?mail|user\s*name|username|login)(?:\s*[/&+,|:]\s*|\s+(?:and|or|plus)\s+)pass\b(?!\s+(?:numbers?|ids?|codes?|holders?|types?|levels?|names?|tiers?)\b)/i;
 
 function asksForPassword(label: string): boolean {
   // This is only a classification copy; the creator's label is never rewritten.
@@ -109,7 +113,7 @@ function asksForPassword(label: string): boolean {
   const fieldName = request.replace(/(\bpass(?:word|code|phrase)s?)\s*\([^)]*\)(?=\s*(?:please|here|below)?\s*[:*?]?$)/gi, "$1")
     .replace(/[,:;|.–—():&/+]/g, " ").replace(/\s+/g, " ").trim();
   const fieldQuestion = /^(?:how|what|why|which|when|where|who|do|did|does|would|could|can|have|has|should|rate|describe|feedback|opinion|thoughts|experience|review)\b/i.test(fieldName);
-  if (!fieldQuestion && SECRET_FOR.test(fieldName) && !ADVICE.test(fieldName)) return true;
+  if (!fieldQuestion && SECRET_FOR.test(fieldName) && !ADVICE.test(fieldName.split(/\bpass(?:word|code|phrase)s?\b/i)[0])) return true;
   return !fieldQuestion &&
     /^(?:(?:[\p{L}\p{N}'’\-]+|[&/+])\s+){0,3}pass(?:word|code|phrase)s?(?:\s+(?:so|to|because|needed|required|in\s+order)\b.*)?\s*(?:please|here|below)?\s*[:*?]?$/iu.test(fieldName) ||
     /^(?:(?:a|the|new|current|account|email|login)\s+)*pass(?:word|code|phrase)s?\b/i.test(request);

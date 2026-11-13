@@ -155,6 +155,12 @@ export async function readPlanRefund(store: Store, nowSeconds = Math.floor(Date.
     if (!paidRows || paidRows.some((r) => !INVOICE_ID.test(idOf(r.id)) || idOf(r.subscription) !== subscriptionId || r.status !== "paid" || (r.charge !== null && !CHARGE_ID.test(idOf(r.charge))))) {
       return { refund: { kind: "unknown", reason: "unreadable" } };
     }
+    // The same invoice listed twice, or one charge named by two invoices: never judged twice, never a refund above
+    // what the charge captured (#4257).
+    const paidCharges = paidRows.map((r) => idOf(r.charge)).filter((id) => id !== "");
+    if (new Set(paidRows.map((r) => idOf(r.id))).size !== paidRows.length || new Set(paidCharges).size !== paidCharges.length) {
+      return { refund: { kind: "unknown", reason: "unreadable" } };
+    }
     const paid = paidRows.filter((r) => idOf(r.charge) !== "");
     if (!paid.length) return { refund: { kind: "none", reason: "no_plan_payment" } };
 
@@ -181,6 +187,10 @@ export async function readPlanRefund(store: Store, nowSeconds = Math.floor(Date.
       const price = obj(line?.price);
       const interval = obj(price?.recurring)?.interval;
       const cycle = interval === "year" ? "year" : interval === "month" ? "month" : planOf(sub).cycle;
+      // Stripe sends `tax: null` when there is none (API 2024-06-20, AT). A field that is not there, or not a whole
+      // number of cents, is an unknown shape, never "no tax" (#4257).
+      const tax = invoice.tax;
+      if (tax !== null && !(typeof tax === "number" && Number.isSafeInteger(tax) && tax >= 0)) return { refund: { kind: "unknown", reason: "unreadable" } };
       const fee = obj(charge.balance_transaction);
       const paidAt = num(obj(invoice.status_transitions)?.paid_at);
       const input: PlanRefundCharge = {
@@ -190,7 +200,7 @@ export async function readPlanRefund(store: Store, nowSeconds = Math.floor(Date.
         invoiceTotalCents: num(invoice.total),
         billingReason: typeof invoice.billing_reason === "string" ? invoice.billing_reason : "",
         refundedCents: num(charge.amount_refunded),
-        taxCents: invoice.tax === null || invoice.tax === undefined ? 0 : num(invoice.tax),
+        taxCents: tax === null ? 0 : tax,
         feeCents: fee ? num(fee.fee) : null,
         feeCurrency: fee && typeof fee.currency === "string" ? fee.currency : null,
         paidAtSeconds: Number.isFinite(paidAt) ? paidAt : num(charge.created),

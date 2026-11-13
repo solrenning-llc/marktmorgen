@@ -55,8 +55,8 @@ function stripeLists(path: string): unknown[] | null {
     withCurrency({ id: "dp_r24cur0001", status: "lost", amount: 400, created: S, payment_intent: "pi_r24cur0002" }, odd),
   ];
   if (path.endsWith("/invoices")) return [
-    { id: "in_r24cur0001", status: "paid", billing_reason: "subscription_cycle", amount_paid: 2000, currency: "usd", created: S, customer_email: "a@example.com", subscription_details: { metadata: meta } },
-    withCurrency({ id: "in_r24cur0002", status: "paid", billing_reason: "subscription_cycle", amount_paid: 3000, created: S, customer_email: "b@example.com", subscription_details: { metadata: meta } }, odd),
+    { id: "in_r24cur0001", status: "paid", billing_reason: "subscription_cycle", amount_paid: 2000, currency: "usd", created: S, status_transitions: { paid_at: S }, customer_email: "a@example.com", subscription_details: { metadata: meta } },
+    withCurrency({ id: "in_r24cur0002", status: "paid", billing_reason: "subscription_cycle", amount_paid: 3000, created: S, status_transitions: { paid_at: S }, customer_email: "b@example.com", subscription_details: { metadata: meta } }, odd),
   ];
   return null;
 }

@@ -1289,6 +1289,24 @@ function isStoreRenewal(handles: Set<string>, invoice: Record<string, unknown>):
 }
 
 /**
+ * When a paid invoice's money came in: its status_transitions.paid_at (seconds), the moment Stripe confirmed the
+ * payment, which is not the day it was invoiced when a retry paid it later (#4371). Null when the invoice does not
+ * say: unknown, never its creation day (rule 24).
+ */
+export function invoicePaidAt(invoice: Record<string, unknown>): number | null {
+  const moves = invoice.status_transitions;
+  const at = moves && typeof moves === "object" ? (moves as { paid_at?: unknown }).paid_at : undefined;
+  return typeof at === "number" && Number.isSafeInteger(at) && at > 0 ? at : null;
+}
+
+/**
+ * How far before a reading's window renewal invoices are asked for: one invoiced then and paid inside the window, after
+ * Stripe's automatic retries, is found. Smart Retries and a custom retry schedule both end within two months of the
+ * first try (Stripe, "Automate payment retries"). One paid by hand later than that is not found.
+ */
+export const RENEWAL_RETRY_DAYS = 60;
+
+/**
  * The payments after the first of this store's memberships and payment plans
  * since `since` (seconds): paid invoices Stripe made because a period came
  * round (billing_reason "subscription_cycle"), on subscriptions this store
@@ -1318,7 +1336,10 @@ export function renewalsFrom(
     // An amount that is not whole minor units is counted nowhere; readRenewals marks the reading partial for it.
     const cents = minorUnits(invoice.amount_paid);
     if (cents === null || cents === 0) continue;
-    const day = dayKey((typeof invoice.created === "number" ? invoice.created : 0) * 1000);
+    // The day the money came in (#4371); one that does not say is left out here and makes the reading partial (readRenewals).
+    const paidAt = invoicePaidAt(invoice);
+    if (paidAt === null || paidAt < Math.floor(now / 1000) - STATS_DAYS * 86400) continue;
+    const day = dayKey(paidAt * 1000);
     const windows: ("d7" | "d30" | "d90")[] = ["d90", ...(day >= cut30 ? (["d30"] as const) : []), ...(day >= cut7 ? (["d7"] as const) : [])];
     for (const w of windows) {
       out[w].payments += 1;
@@ -1346,7 +1367,7 @@ export function renewalsFrom(
  * not limited to the store's currency, so a line in another currency is
  * reconciled with its own renewals. Pure on what it is handed.
  */
-export function renewalEntries(store: Store, invoices: Record<string, unknown>[]): Entry[] {
+export function renewalEntries(store: Store, invoices: Record<string, unknown>[], now = Date.now()): Entry[] {
   const handles = saleHandles(store);
   const out: Entry[] = [];
   for (const invoice of invoices) {
@@ -1357,7 +1378,10 @@ export function renewalEntries(store: Store, invoices: Record<string, unknown>[]
     const cents = minorUnits(invoice.amount_paid);
     if (cents === null || cents === 0) continue;
     const source = "channel" in meta ? (meta.channel === "direct" ? "" : meta.channel) : meta.utm_source || UNRECORDED;
-    out.push({ day: dayKey((typeof invoice.created === "number" ? invoice.created : 0) * 1000), cents, currency: currencyOf(invoice), source });
+    // On the day the money came in, inside the reading's window, as renewalsFrom (#4371).
+    const paidAt = invoicePaidAt(invoice);
+    if (paidAt === null || paidAt < Math.floor(now / 1000) - STATS_DAYS * 86400) continue;
+    out.push({ day: dayKey(paidAt * 1000), cents, currency: currencyOf(invoice), source });
   }
   return out;
 }
@@ -1371,7 +1395,8 @@ async function readRenewals(store: Store, since: number, now: number, pages: num
     const list = (await onAccount(
       "GET",
       store.stripeAccountId as string,
-      `/invoices?limit=100&status=paid&created[gte]=${since}${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`,
+      // From RENEWAL_RETRY_DAYS before the window, so a renewal invoiced then and paid inside it is read (#4371).
+      `/invoices?limit=100&status=paid&created[gte]=${since - RENEWAL_RETRY_DAYS * 86400}${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`,
     )) as { data?: unknown; has_more?: unknown };
     const rows = financialPage(list, seen);
     invoices.push(...rows);
@@ -1381,13 +1406,15 @@ async function readRenewals(store: Store, since: number, now: number, pages: num
     if (!after) break;
     if (page === pages - 1) partial = true;
   }
-  const entries = renewalEntries(store, invoices);
+  const entries = renewalEntries(store, invoices, now);
   // A renewal in a currency the answer does not name is in no total: the reading is incomplete.
   if (entries.some((entry) => !entry.currency)) partial = true;
   // A paid renewal of this store whose amount is missing, negative, fractional or not a safe integer is in no total
   // either: the reading is incomplete, never a renewal of zero (issue #4388).
   const handles = saleHandles(store);
   if (invoices.some((invoice) => isStoreRenewal(handles, invoice) && minorUnits(invoice.amount_paid) === null)) partial = true;
+  // A paid renewal of this store that does not say when it was paid is in no day: the reading is incomplete (#4371).
+  if (invoices.some((invoice) => isStoreRenewal(handles, invoice) && invoicePaidAt(invoice) === null)) partial = true;
   return { ...renewalsFrom(store, invoices, now, store.currency), partial, entries, paymentIntents: renewalPaymentIntents(store, invoices) };
 }
 

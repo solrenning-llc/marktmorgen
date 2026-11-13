@@ -182,6 +182,7 @@ test(
       amount_paid: 2000,
       currency: "usd",
       created: SEC,
+      status_transitions: { paid_at: SEC },
       subscription_details: { metadata: { store: "harbor", channel } },
     });
     try {

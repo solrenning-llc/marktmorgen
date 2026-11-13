@@ -390,7 +390,7 @@ async function cancelAndReactivate(store: Store, club: string, pro: string): Pro
   const end = NOW + 20 * DAY;
   const ending = { ...subscription("active", pro, { cancel_at_period_end: true, cancel_at: end }), items: (subs.get(SUB) as { items: unknown }).items };
   subs.set(SUB, ending);
-  is("cancelled at the period's end, inside the period: still open", await doorById(store), "active");
+  is("canceled at the period's end, inside the period: still open", await doorById(store), "active");
   const before = await numbers(store);
 
   part("6. Undone before the period ends: open, nothing charged again");
@@ -407,7 +407,7 @@ async function cancelAndReactivate(store: Store, club: string, pro: string): Pro
   subs.set(SUB, subscription("active", club));
   is("read: active", await doorById(store), "active");
   subs.set(SUB, subscription("canceled", club));
-  is("cancelled at Stripe, read again within the two minutes: the kept answer (documented)", await membershipStatus(store, SUB), "active");
+  is("canceled at Stripe, read again within the two minutes: the kept answer (documented)", await membershipStatus(store, SUB), "active");
   advance((STATUS_SECONDS + 1) * 1000);
   is("after the two minutes: ended", await membershipStatus(store, SUB), "canceled");
 }

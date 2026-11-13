@@ -70,9 +70,11 @@ export type Contact = {
   unsubAt: string;
   /**
    * Why, when it was not their own unsubscribe: the address bounced for
-   * good, or they marked an email as spam. Absent when they left themselves.
+   * good, they marked an email as spam, or the email service refused the
+   * address itself when an email to the list was handed to it (lib/mail.ts
+   * sendTo). Absent when they left themselves.
    */
-  gone?: "bounced" | "complained";
+  gone?: "bounced" | "complained" | "refused";
   /** The token in their unsubscribe link, made the first time they are sent to. */
   t: string;
   /** Their name, when an import brought one (lib/imports.ts). "" when unknown. */
@@ -169,7 +171,7 @@ export function parseContact(raw: unknown): Contact | null {
       source: value.source === "free" || value.source === "buyer" || value.source === "import" ? value.source : "",
       unsub: value.unsub === true,
       unsubAt: typeof value.unsubAt === "string" ? value.unsubAt : "",
-      ...(value.unsub === true && (value.gone === "bounced" || value.gone === "complained") ? { gone: value.gone } : {}),
+      ...(value.unsub === true && (value.gone === "bounced" || value.gone === "complained" || value.gone === "refused") ? { gone: value.gone } : {}),
       t: typeof value.t === "string" && UNSUB_TOKEN.test(value.t) ? value.t : "",
       // Contacts written before imports kept names and labels have neither.
       name: typeof value.name === "string" ? value.name.slice(0, MAX_CONTACT_NAME) : "",
@@ -862,13 +864,14 @@ export async function unsubscribe(token: string): Promise<{ listId: string; emai
 
 /**
  * Takes an address off a list because the sender said so: it bounced for
- * good, or its owner marked an email as spam. Counted with those who left,
- * and kept as firmly — an import never puts it back.
+ * good, its owner marked an email as spam, or the email service refused the
+ * address itself. Counted with those who left, and kept as firmly — an
+ * import never puts it back.
  *
  * True when this took somebody off who could be written to until now; false
  * when the list does not hold the address, or it had already left.
  */
-export async function stopWriting(listId: string, rawEmail: string, why: "bounced" | "complained"): Promise<boolean> {
+export async function stopWriting(listId: string, rawEmail: string, why: "bounced" | "complained" | "refused"): Promise<boolean> {
   if (!isRedisConfigured() || !listId) return false;
   const email = normaliseEmail(rawEmail);
   if (!email || email.length > MAX_EMAIL_LENGTH) return false;
@@ -910,12 +913,34 @@ export async function listCounts(listId: string | null): Promise<ListCounts> {
 }
 
 /**
+ * How a walk of the list reads Redis: redisPipeline itself, or a download's
+ * metered read (lib/list-download.ts), which holds the units of a read before
+ * it is made, at `most`, the most bytes its reply can carry, and counts every
+ * byte it moved once it is made (second cost review of #3354).
+ */
+export type ListRead = (commands: (string | number)[][], most: number) => Promise<unknown[]>;
+/** A read that is not metered: the walk's own callers that are priced elsewhere (a broadcast, a whole export). */
+export const plainRead: ListRead = (commands) => redisPipeline(commands);
+/**
+ * The most bytes one contact of the list comes back as in a page of its walk:
+ * its address and its record at every cap a contact has, with the reply's
+ * framing. A review ceiling: 3,973 bytes for a record at every cap in
+ * tests/list-download-units.test.ts. A page that comes back larger is counted
+ * at what it moved all the same, once it is read.
+ */
+export const CONTACT_READ_BYTES = 4_500;
+/** The most bytes a page of the walk (HSCAN COUNT 1000) is held at before it is read. */
+export const LIST_PAGE_READ_BYTES = 1_000 * CONTACT_READ_BYTES;
+
+/**
  * Walks the whole list, page by page, calling `each` for every address. A
- * large list never has to fit in one answer from Redis.
+ * large list never has to fit in one answer from Redis. Each page is read
+ * through `read`, so a download holds its units before it is read.
  */
 export async function forEachContact(
   listId: string,
   each: (email: string, contact: Contact) => void,
+  read: ListRead = plainRead,
 ): Promise<void> {
   if (!isRedisConfigured()) return;
   const key = leadsKey(listId);
@@ -923,7 +948,7 @@ export async function forEachContact(
   for (let page = 0; page < MAX_LEADS / 500 + 10; page += 1) {
     // HSCAN answers [cursor, [field, value, ...]]: any other shape is unknown (CX-123 rule 24), never the end of the
     // list, so an email is never sent to part of it as if to all, nor an export cut short as if whole.
-    const reply = repliesFor(repliesFor(await redisPipeline([["HSCAN", key, cursor, "COUNT", 1000]]), 1)?.[0], 2);
+    const reply = repliesFor(repliesFor(await read([["HSCAN", key, cursor, "COUNT", 1000]], LIST_PAGE_READ_BYTES), 1)?.[0], 2);
     const next = reply?.[0];
     const flat = stringList(reply?.[1]);
     const nextCursor = typeof next === "string" && /^\d+$/.test(next) ? next : countOf(next) !== null ? String(next) : null;
@@ -963,6 +988,8 @@ export async function audience(
   keep?: (email: string) => boolean,
   /** Only people who carry this label (99 [E2-TAG-BROADCAST]), compared as a sequence compares one: case and spaces at the ends aside. Read from the same record, so no extra read. */
   label?: string,
+  /** How the list's pages are read: a download's metered read (lib/ad-audience.ts), or Redis itself. */
+  read: ListRead = plainRead,
 ): Promise<string[]> {
   const out: string[] = [];
   const wanted = label?.trim().toLocaleLowerCase() ?? "";
@@ -974,7 +1001,7 @@ export async function audience(
     if (wanted && !contact.tags.some((t) => t.trim().toLocaleLowerCase() === wanted)) return;
     if (keep && !keep(email)) return;
     out.push(email);
-  });
+  }, read);
   return out;
 }
 

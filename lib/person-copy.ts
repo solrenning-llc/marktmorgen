@@ -33,7 +33,7 @@ import { leadsKey, parseContact } from "@/lib/contacts";
 import { readDeals, readFields, readPersonTasks, readStages, readValues } from "@/lib/crm";
 import { readPersonNotes } from "@/lib/buyer-profile";
 import { readForms, readResponses } from "@/lib/form-store";
-import { listRequests } from "@/lib/payment-request-store";
+import { requestsOfPerson } from "@/lib/payment-request-store";
 import { listAgreements, readVersionExact } from "@/lib/agreement-store";
 import { doneLessons, studentDates } from "@/lib/learn";
 import { attemptOf, passedQuizzes } from "@/lib/quiz";
@@ -257,8 +257,10 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
     }
     return out;
   },
+  // From the person's own set, as the erasure deletes them (forgetRequestsPerson): never the store's newest few, which
+  // left out a request kept for its days once newer ones for other people, or a smaller plan, pushed it past them.
   "lib/payment-request-store.ts": async (s) => {
-    const list = await listRequests(s.store);
+    const list = await requestsOfPerson(s.store, s.email);
     if (list === null) throw new Error("the payment requests could not be read");
     return list.filter((r) => same(r.email, s.email));
   },

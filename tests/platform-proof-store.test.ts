@@ -31,7 +31,10 @@ async function main(): Promise<void> {
   // The snapshot as its only reader gives it, with the window it was kept for (Claude 1's LEVE on #3738: no reader drops it).
   const kept = lib.readPlatformProofKept ?? store.readPlatformProofKept;
   const read = kept ? async () => (await kept())?.snapshot ?? null : undefined;
-  const write = lib.writePlatformProof ?? store.writePlatformProof;
+  const writeAt = (lib.writePlatformProof ?? store.writePlatformProof) as ((s: PlatformProofSnapshot, validDays: number, at?: number) => Promise<void>) | undefined;
+  // Every write on this test's own clock (`now`), as the reads are: the key now ends at asOf plus its window
+  // (Claude 1 on #3509), so a write on the real clock would refuse these fixed snapshots once that date has passed.
+  const write = writeAt ? (s: PlatformProofSnapshot, validDays: number) => writeAt(s, validDays, now) : undefined;
   is("the store module exists", [typeof read, typeof write], ["function", "function"]);
   if (!read || !write) return done();
   redis.clear();
@@ -100,6 +103,36 @@ async function main(): Promise<void> {
   is("a value kept without its window: unknown, never a window guessed", withWindow.readPlatformProofKept ? await withWindow.readPlatformProofKept() : "missing", null);
   redis.run(["SET", key, JSON.stringify({ ...monthly, validDays: 365 })]);
   is("a window other than 30 or 40: not a snapshot", [await read(), withWindow.readPlatformProofKept ? await withWindow.readPlatformProofKept() : "missing"], [null, null]);
+  part("The kept key ends with the snapshot's own window, and a failed read is logged (Claude 1 rev-odd LEVEs on #3509)");
+  {
+    redis.clear();
+    const at = Date.parse(fresh.asOf);
+    await write(fresh, 30);
+    const [left] = (await redis.pipeline([["PTTL", "nl:platform:proof"]])) as number[];
+    is("the key ends when the reader stops showing it (asOf + 30 days), not 30 days after the write", Math.abs(left - (at + 30 * DAY - now)) <= 1_000, true);
+    redis.clear();
+    const stale = { ...fresh, asOf: new Date(now - 31 * DAY).toISOString().replace(/\.\d{3}Z$/, "Z") };
+    let refused = false;
+    try {
+      await write(stale, 30);
+    } catch {
+      refused = true;
+    }
+    is("a snapshot already past its window is never written", [refused, await read()], [true, null]);
+    const logged: unknown[] = [];
+    const error = console.error;
+    const pipeline = redis.pipeline.bind(redis);
+    console.error = (...args: unknown[]) => void logged.push(args);
+    (redis as unknown as { pipeline: unknown }).pipeline = async () => { throw new Error("a stand-in outage"); };
+    try {
+      is("a read that fails is unknown", await read(), null);
+    } finally {
+      (redis as unknown as { pipeline: unknown }).pipeline = pipeline;
+      console.error = error;
+    }
+    is("and it is logged, never hidden silently", logged.length > 0, true);
+  }
+
   done();
 }
 

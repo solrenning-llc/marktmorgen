@@ -19,6 +19,8 @@
  */
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { repliesFor } from "@/lib/redis-reply";
+import { suppressedKey, suppressionPrint } from "@/lib/suppression";
 import { isSenderConfigured } from "@/lib/email";
 import { withinLimit } from "@/lib/request-guard";
 import { createHash } from "node:crypto";
@@ -114,6 +116,23 @@ function parseConsent(raw: unknown): Consent | null {
 export type KeepOutcome = "kept" | "email" | "version" | "limited" | "closed";
 
 /**
+ * The yes, its queue place and the person's note of it, written in one step only while the address is not deleted
+ * from the store (issue #4381): KEYS[1] the consent, KEYS[2] the queue, KEYS[3] the person's note, KEYS[4] the
+ * store's deleted prints (lib/suppression.ts); ARGV[1] the address's print, ARGV[2] the consent, ARGV[3] how long it is
+ * kept, ARGV[4] when it is due, ARGV[5] the queue member, ARGV[6] the checkout. 1 when written, 0 when the address
+ * was deleted (nothing written). An erasure writes the print first (lib/person-erasure.ts), so one that completed
+ * before this step leaves nothing behind, and one that comes after finds the note and takes the consent away.
+ * lib/redis-memory.ts runs it the same way.
+ */
+export const KEEP_REMIND_UNLESS_ERASED = `-- marktmorgen:assist-remind-keep:v1
+if redis.call("HEXISTS", KEYS[4], ARGV[1]) == 1 then return 0 end
+redis.call("SET", KEYS[1], ARGV[2], "EX", ARGV[3])
+redis.call("ZADD", KEYS[2], ARGV[4], ARGV[5])
+redis.call("SADD", KEYS[3], ARGV[6])
+redis.call("EXPIRE", KEYS[3], ARGV[3])
+return 1`;
+
+/**
  * Keeps the buyer's yes for one checkout just opened, and puts its reminder
  * in the queue. Only from the checkout routes, only when the box was offered
  * and checked; `version` is the one the page showed. Never throws: a yes
@@ -128,19 +147,41 @@ export async function keepAssistReminder(input: { store: Store; session: string;
   const email = normaliseEmail(typeof input.email === "string" ? input.email : "");
   if (!email || email.length > MAX_EMAIL_LENGTH || !EMAIL_PATTERN.test(email)) return "email";
   const statsId = store.statsId as string;
+  // The store's deleted addresses are kept under its list (lib/suppression.ts): with no list, whether this address
+  // was deleted cannot be checked where the yes is written, so nothing is kept (issue #4381).
+  const listId = store.listId;
+  if (!listId) return "closed";
   try {
     if (!(await withinLimit("assist-remind-store", statsId, ASSIST_REMINDERS_PER_STORE_DAY, 86_400))) return "limited";
     const consent: Consent = { s: statsId, e: email, t: assistReminderWords(store.language).box, v: ASSIST_REMIND_VERSION, l: store.language, at: now };
     const key = assistRemindKey(input.session);
     // Due an hour after the checkout closes, which it does an hour after it opened (lib/store-checkout.ts).
     const due = Math.floor(now / 1000) + RECOVERY_OPEN_SECONDS + ASSIST_REMIND_AFTER_SECONDS;
-    await redisPipeline([
-      ["SET", key, JSON.stringify(consent), "EX", ASSIST_REMIND_KEEP_SECONDS],
-      ["ZADD", QUEUE, due, JSON.stringify([statsId, store.handle, input.session, due])],
-      ["SADD", whoKey(statsId, email), input.session],
-      ["EXPIRE", whoKey(statsId, email), ASSIST_REMIND_KEEP_SECONDS],
-    ]);
-    return "kept";
+    // Written only while the address is not deleted from the store, in the same step (KEEP_REMIND_UNLESS_ERASED):
+    // an erasure that completed meanwhile leaves no yes, no queue place and no note behind (issue #4381).
+    const written = repliesFor(
+      await redisPipeline([
+        [
+          "EVAL",
+          KEEP_REMIND_UNLESS_ERASED,
+          4,
+          key,
+          QUEUE,
+          whoKey(statsId, email),
+          suppressedKey(listId),
+          suppressionPrint(listId, email),
+          JSON.stringify(consent),
+          ASSIST_REMIND_KEEP_SECONDS,
+          due,
+          JSON.stringify([statsId, store.handle, input.session, due]),
+          input.session,
+        ],
+      ]),
+      1,
+    )?.[0];
+    if (written === 1) return "kept";
+    if (written !== 0) console.error("keeping a checkout reminder's consent answered in no known shape; nothing is relied on");
+    return "closed";
   } catch (error) {
     console.error("keeping a checkout reminder's consent failed", error);
     return "closed";

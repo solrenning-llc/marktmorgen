@@ -191,6 +191,16 @@ export class MemoryRedis {
             return fields.removed ? "r" : "y";
           }).join("");
         }
+        // lib/assistant-reminder.ts KEEP_REMIND_UNLESS_ERASED: the yes, its queue place and the person's note, only while the address is not deleted.
+        if (key.startsWith("-- marktmorgen:assist-remind-keep:v1\n") && args[0] === "4" && args.length === 11) {
+          const [, consent, queue, who, erased, print, text, seconds, due, member, session] = args;
+          if (this.run(["HEXISTS", erased, print]) === 1) return 0;
+          this.run(["SET", consent, text, "EX", seconds]);
+          this.run(["ZADD", queue, due, member]);
+          this.run(["SADD", who, session]);
+          this.run(["EXPIRE", who, seconds]);
+          return 1;
+        }
         // lib/group-buy.ts PLACE_RELEASE: a place's opening hold deleted only while its token is still the open's own.
         if (key.startsWith("-- marktmorgen:group-place-release:v1\n") && args[0] === "1" && args.length === 3) {
           const [, hold, token] = args;

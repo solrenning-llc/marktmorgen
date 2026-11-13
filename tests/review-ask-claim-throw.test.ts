@@ -9,6 +9,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { sendReviewRequests } from "@/lib/review-requests";
+import { monthlyAllowance } from "@/lib/mail";
+import { windowId } from "@/lib/allowance-window";
 import { ASK_DUE_KEY, askMember, scheduleReviewAsk } from "@/lib/review-ask";
 import { addProduct, claimHandle, ensureListId, ensureStatsId, setMailSettings, setProductLink, setReviewAsk, setStripeAccount, setSubscription, storeForEmail, storeForHandle } from "@/lib/store";
 import { store as redis } from "./redis-stub";
@@ -159,5 +161,97 @@ test("a reminder whose claim cannot be let go of stays on the list and is sent o
     const after = await sendReviewRequests(storeForHandle, Date.now() + 20000, later + 3601);
     assert.equal(after.sent, 1, "the reminder is sent");
     assert.equal(r.batches.flat().length, 2, "once");
+  } finally { redis.pipeline = r.base; globalThis.fetch = oldFetch; }
+});
+
+// Codex G on #4360: the month's allowance is refused before anything is sent, and letting the claim go fails too.
+// The allowance is reserved while the claim is still short, so the claim left behind lapses within the hour and the
+// order is asked again; a claim stretched before the reservation would have read as "may have gone" and been dropped.
+const monthKey = (shop: Awaited<ReturnType<typeof setup>>["shop"]) => `nl:mail:used:${shop.listId}:${windowId(shop)}`;
+const failRelease = (r: Awaited<ReturnType<typeof setup>>, key: string) => {
+  let failed = 0;
+  redis.pipeline = async (commands) => {
+    if (commands.some((c) => c[0] === "EVAL" && String(c[1]).includes("marktmorgen:release:v1") && c[3] === key)) {
+      failed += 1;
+      throw new Error("synthetic Redis timeout");
+    }
+    return r.original(commands);
+  };
+  return () => failed;
+};
+
+test("a known allowance refusal with a lost release does not drop an unsent review request", async () => {
+  const oldFetch = globalThis.fetch;
+  const r = await setup();
+  try {
+    redis.run(["SET", monthKey(r.shop), String(monthlyAllowance(r.shop))]);
+    const failed = failRelease(r, SENT);
+    const oldLog = console.error;
+    console.error = () => {};
+    const refused = await sendReviewRequests(storeForHandle, Date.now() + 20000, r.now);
+    console.error = oldLog;
+    redis.pipeline = r.original;
+    assert.equal(r.batches.flat().length, 0, "nothing was sent: the month was full");
+    assert.equal(refused.dropped, 0, "not dropped");
+    assert.ok(failed() >= 1, "letting the claim go failed");
+    const ttl = Number(redis.run(["TTL", SENT]));
+    assert.ok(ttl > 0 && ttl <= 3600, "the claim left behind lapses within the hour, never stretched for a send that did not go");
+    assert.notEqual(redis.run(["ZSCORE", ASK_DUE_KEY, r.member]), null, "the order is still due");
+    redis.run(["DEL", monthKey(r.shop)]); // the month opens again
+    redis.run(["DEL", SENT]); // the claim lapses
+    const after = await sendReviewRequests(storeForHandle, Date.now() + 20000, r.now + 6 * 3600 + 60);
+    assert.equal(after.sent, 1, "the order is sent once the claim lapsed");
+    assert.equal(r.batches.flat().length, 1, "once");
+  } finally { redis.pipeline = r.base; globalThis.fetch = oldFetch; }
+});
+
+test("a known allowance refusal with a lost release does not drop an unsent reminder", async () => {
+  const oldFetch = globalThis.fetch;
+  const r = await setup(3);
+  try {
+    const first = await sendReviewRequests(storeForHandle, Date.now() + 20000, r.now);
+    assert.equal(first.sent, 1, "the first goes");
+    const later = r.now + 3 * 86400 + 60;
+    redis.run(["SET", monthKey(r.shop), String(monthlyAllowance(r.shop))]);
+    const failed = failRelease(r, AGAIN);
+    const oldLog = console.error;
+    console.error = () => {};
+    const refused = await sendReviewRequests(storeForHandle, Date.now() + 20000, later);
+    console.error = oldLog;
+    redis.pipeline = r.original;
+    assert.equal(r.batches.flat().length, 1, "nothing more was sent: the month was full");
+    assert.equal(refused.dropped, 0, "not dropped");
+    assert.ok(failed() >= 1, "letting the claim go failed");
+    const ttl = Number(redis.run(["TTL", AGAIN]));
+    assert.ok(ttl > 0 && ttl <= 3600, "its claim lapses within the hour");
+    assert.notEqual(redis.run(["ZSCORE", ASK_DUE_KEY, r.member]), null, "the reminder is still on the list");
+    redis.run(["DEL", monthKey(r.shop)]);
+    redis.run(["DEL", AGAIN]);
+    const after = await sendReviewRequests(storeForHandle, Date.now() + 20000, later + 6 * 3600 + 60);
+    assert.equal(after.sent, 1, "the reminder is sent");
+    assert.equal(r.batches.flat().length, 2, "once");
+  } finally { redis.pipeline = r.base; globalThis.fetch = oldFetch; }
+});
+
+test("a claim that cannot be stretched after the reservation gives its allowance back and sends nothing", async () => {
+  const oldFetch = globalThis.fetch;
+  const r = await setup();
+  try {
+    redis.pipeline = async (commands) => {
+      if (commands.some((c) => c[0] === "EVAL" && String(c[1]).includes("marktmorgen:extend:v1") && c[3] === SENT)) throw new Error("synthetic Redis timeout");
+      return r.original(commands);
+    };
+    const oldLog = console.error;
+    console.error = () => {};
+    const run = await sendReviewRequests(storeForHandle, Date.now() + 20000, r.now);
+    console.error = oldLog;
+    redis.pipeline = r.original;
+    assert.equal(r.batches.flat().length, 0, "nothing was sent");
+    assert.equal(run.dropped, 0, "not dropped");
+    assert.equal(Number(redis.run(["GET", monthKey(r.shop)]) ?? 0), 0, "the month's allowance taken for it is given back");
+    assert.notEqual(redis.run(["ZSCORE", ASK_DUE_KEY, r.member]), null, "the order is still due");
+    const after = await sendReviewRequests(storeForHandle, Date.now() + 20000, r.now + 1800 + 60);
+    assert.equal(after.sent, 1, "the next run sends it");
+    assert.equal(r.batches.flat().length, 1, "once");
   } finally { redis.pipeline = r.base; globalThis.fetch = oldFetch; }
 });

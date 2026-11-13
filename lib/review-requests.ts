@@ -441,35 +441,43 @@ export async function sendReviewRequests(
   }
 
   for (const { store, ready: prepared } of groups.values()) {
+    // Undone when nothing was sent: this run's own claims are let go (releaseMark), never one another run holds now;
+    // every order is still on the list, and waits there.
+    const unclaim = async (items: Ready[], at: number | null) => {
+      for (const item of items) await releaseMark(claimKeyOf(item.stage, item.entry.reference), item.claim);
+      if (at !== null) for (const item of items) await later(item.member, at);
+    };
+    // A throw before the batch's outcome is known (the reservation, the sender) undoes the group's claims, as a
+    // batch not sent does, so the next run asks again; one after the batch went keeps them (it was sent).
+    let decided = false;
+    let ready: Ready[] = prepared;
+    let unheld = 0;
+    try {
+    // The allowance is reserved while every claim is still short (Codex G on #4360): a refusal here, or a stop
+    // before the claims are stretched, leaves claims that lapse in CLAIM_SECONDS, so the order is asked again.
+    const reserved = await reserve(store, prepared.length);
+    if (reserved !== "ok") {
+      decided = true;
+      await unclaim(prepared, nowSeconds + RETRY_SECONDS.plan);
+      continue;
+    }
     // Each claim stretched to SENT_MARK_SECONDS, confirmed, just before its batch goes (Codex T on #4360): from here
     // on the email may have gone, and a claim found stretched is never sent again. One not stretched (another run's
-    // by now, or a reply not read) goes back to waiting, its own claim let go, and is not sent on this run.
-    const ready: Ready[] = [];
+    // by now, or a reply not read) goes back to waiting, its own claim let go, and is not sent on this run; its share
+    // of the allowance is given back once the batch is decided.
+    ready = [];
     for (const item of prepared) {
       const key = claimKeyOf(item.stage, item.entry.reference);
       if (await holdLock({ key, token: item.claim, ttlSeconds: SENT_MARK_SECONDS }).catch(() => false)) {
         ready.push(item);
         continue;
       }
+      unheld += 1;
       await releaseMark(key, item.claim);
       await later(item.member, nowSeconds + RETRY_SECONDS.sender).catch(() => undefined);
     }
-    if (!ready.length) continue;
-    // Undone when nothing was sent: the first's mark goes, the reminder goes back on the list.
-    const unclaim = async (at: number | null) => {
-      // Only this run's own claims are let go (releaseMark), never one another run holds now; every order is still on
-      // the list, and waits there.
-      for (const item of ready) await releaseMark(claimKeyOf(item.stage, item.entry.reference), item.claim);
-      if (at !== null) for (const item of ready) await later(item.member, at);
-    };
-    // A throw before the batch's outcome is known (the reservation, the sender) undoes the group's claims, as a
-    // batch not sent does, so the next run asks again; one after the batch went keeps them (it was sent).
-    let decided = false;
-    try {
-    const reserved = await reserve(store, ready.length);
-    if (reserved !== "ok") {
+    if (!ready.length) {
       decided = true;
-      await unclaim(nowSeconds + RETRY_SECONDS.plan);
       continue;
     }
     const outcome = await sendBatch(
@@ -480,10 +488,10 @@ export async function sendReviewRequests(
     if (outcome !== "sent") {
       await release(store, ready.length);
       if (outcome === "refused") {
-        await unclaim(null);
+        await unclaim(ready, null);
         for (const item of ready) await drop(item.member);
       } else {
-        await unclaim(nowSeconds + RETRY_SECONDS.sender);
+        await unclaim(ready, nowSeconds + RETRY_SECONDS.sender);
       }
       continue;
     }
@@ -492,7 +500,11 @@ export async function sendReviewRequests(
     await redisPipeline(afterSent(ready.map((item) => ({ reference: item.entry.reference, member: item.member, paidAt: item.entry.paidAt, stage: item.stage })), store.reviewAsk, nowSeconds));
     } catch (error) {
       console.error("sending a store's review requests failed", error);
-      if (!decided) await unclaim(nowSeconds + RETRY_SECONDS.sender).catch(() => undefined);
+      if (!decided) await unclaim(ready, nowSeconds + RETRY_SECONDS.sender).catch(() => undefined);
+    } finally {
+      // Nothing went for the claims not stretched: their share of the allowance is given back, best effort (a give-back
+      // that fails only leaves the month counted higher, never an email sent past it).
+      if (unheld > 0) await release(store, unheld).catch((error) => console.error("giving back a review request's allowance failed", error));
     }
   }
   return counts;

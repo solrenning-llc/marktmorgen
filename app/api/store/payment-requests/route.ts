@@ -2,8 +2,8 @@ import type { NextRequest } from "next/server";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { ensureStoreId } from "@/lib/store";
 import { DRAFT_PROBLEMS, ID_PATTERN, readDraft, readOutside } from "@/lib/payment-request-rules";
-import { cancelRequest, createRequest, deleteRequest } from "@/lib/payment-request-store";
-import { markPaidOutside, remindNow, requestsOpen, sendRequestEmail } from "@/lib/payment-requests";
+import { createRequest, deleteRequest } from "@/lib/payment-request-store";
+import { markPaidOutside, remindNow, requestsOpen, sendRequestEmail, withdrawRequest } from "@/lib/payment-requests";
 
 /**
  * The studio's payment requests (lib/payment-request-rules.ts), for a role
@@ -62,10 +62,18 @@ export async function POST(request: NextRequest) {
       return refuse(done.reason, why[done.reason][0], why[done.reason][1]);
     }
     if (action === "cancel") {
-      const done = await cancelRequest(store, id);
-      if (done === null) return refuse("gone", "That request is gone. Reload the page.", 404);
-      if (done === "not_open") return refuse("not_open", "Only an open request can be canceled.", 409);
-      return Response.json({ ok: true });
+      // Its checkout, if the buyer opened one, is closed on Stripe first, so a canceled request can never be paid.
+      const done = await withdrawRequest(store, id);
+      if (done.ok) return Response.json({ ok: true });
+      const why: Record<typeof done.reason, [string, number]> = {
+        gone: ["That request is gone. Reload the page.", 404],
+        not_open: ["Only an open request can be canceled.", 409],
+        busy: ["The buyer is opening the payment page right now. Try again in a minute.", 409],
+        paid_online: ["It was paid online through its payment page, so it is now marked as paid. It was not canceled.", 409],
+        processing: ["The buyer's online payment is still being processed, so it was not canceled. Wait for it, then reload the page.", 409],
+        error: ["Its payment page could not be closed on Stripe, so it was not canceled. Try again in a minute.", 502],
+      };
+      return refuse(done.reason, why[done.reason][0], why[done.reason][1]);
     }
     if (action === "delete") {
       const done = await deleteRequest(store, id);

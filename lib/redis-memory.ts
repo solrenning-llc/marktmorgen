@@ -172,6 +172,25 @@ export class MemoryRedis {
           }
           return this.run(["HDEL", handles, handle]);
         }
+        // lib/community-push.ts STILL_IN: one mark per member key, "y" in, "r" taken out, "n" no record, "?" any other shape.
+        if (key.startsWith("-- marktmorgen:community-still-in:v1\n") && args[0] === "1" && args.length >= 3) {
+          const [, members, ...keys] = args;
+          const rows = this.run(["HMGET", members, ...keys]) as (string | null)[];
+          return keys.map((who, i) => {
+            const raw = rows[i];
+            if (raw === null) return "n";
+            let record: unknown;
+            try {
+              record = JSON.parse(raw);
+            } catch {
+              return "?";
+            }
+            if (!record || typeof record !== "object") return "?";
+            const fields = record as { k?: unknown; removed?: unknown; muted?: unknown };
+            if (fields.k !== who || typeof fields.removed !== "boolean" || typeof fields.muted !== "boolean") return "?";
+            return fields.removed ? "r" : "y";
+          }).join("");
+        }
         // lib/group-buy.ts PLACE_RELEASE: a place's opening hold deleted only while its token is still the open's own.
         if (key.startsWith("-- marktmorgen:group-place-release:v1\n") && args[0] === "1" && args.length === 3) {
           const [, hold, token] = args;
@@ -865,6 +884,27 @@ export class MemoryRedis {
           this.hash(target).set(args[2], args[3]);
           return 1;
         }
+        if (key.startsWith("-- marktmorgen:crm-companies-write:v1\n") && args[0] === "2" && args.length >= 4 && (args.length - 4) % 2 === 0) {
+          // lib/crm-companies.ts WRITE_COMPANIES: written only while the lock still holds this change's token. It differs
+          // from Redis only on keys of the wrong type: a lock key that is not a string reads here as not ours (0), where
+          // Redis's GET would fail the script; a hash key that is not a hash fails in both.
+          const [lock, target, token] = [args[1], args[2], args[3]];
+          this.live(lock);
+          this.live(target);
+          if (this.data.get(lock) !== token) return 0;
+          const held = this.data.get(target);
+          if (held !== undefined && !(held instanceof Map)) throw new Error("WRONGTYPE");
+          const hash = this.hash(target);
+          for (let i = 4; i < args.length; i += 2) {
+            if (args[i + 1] === "") hash.delete(args[i]);
+            else hash.set(args[i], args[i + 1]);
+          }
+          if (hash.size === 0) {
+            this.data.delete(target);
+            this.until.delete(target);
+          }
+          return 1;
+        }
         if (key.startsWith("-- marktmorgen:crm-tasks-write:v1\n") && args[0] === "1" && args.length === 8) {
           // lib/crm.ts WRITE_PERSON_TASKS: a person's tasks and the store's count, in one step.
           const [, target, person, read, value, added, start, field] = args;
@@ -1477,6 +1517,18 @@ export class MemoryRedis {
           for (const k of keys) this.run(["HDEL", k, argv[1]]);
           return 1;
         }
+        // lib/calls.ts CONFIRM_STEP: a booking's confirmation mark moved on only from a stage named, read and written in one step.
+        if (key.startsWith("-- marktmorgen:call-confirm-step:v1\n") && args[0] === "1") {
+          const held = this.run(["GET", args[1]]);
+          if (typeof held !== "string") return [0];
+          for (let i = 3; i + 1 < args.length; i += 2) {
+            if (held === args[i]) {
+              this.run(["SET", args[1], args[i + 1], "XX", "EX", args[2]]);
+              return [1, held];
+            }
+          }
+          return [0, held];
+        }
         // lib/closing-holds.ts CALL_BUDGET_ONCE: a closing's call budget, set once per ending, step for step (Codex S on #3309).
         if (key.startsWith("-- marktmorgen:closing-call-budget:v1\n") && args[0] === "1" && args.length === 4) {
           const [, work, calls, ending] = args;
@@ -1492,6 +1544,15 @@ export class MemoryRedis {
         }
         if (key.startsWith("-- marktmorgen:store-data:v1\n") && args[0] === "1") return this.storeData(args.slice(1));
         if (key.startsWith("-- marktmorgen:order-write:v1\n")) return this.orderWrite(args);
+        // lib/order-data.ts ORDER_WRITE_ONCE: ORDER_WRITE behind a once-only mark (KEYS[2]), read first; a mark there
+        // writes nothing, and a command refused inside takes the mark back out.
+        if (key.startsWith("-- marktmorgen:order-write-once:v1\n") && Number(args[0]) >= 2) {
+          const held = this.run(["GET", args[2]]);
+          if (typeof held === "string") return [-2, held];
+          const out = this.orderWrite(args);
+          if (Array.isArray(out) && out.slice(1).some((r) => typeof r === "string" && r.startsWith("\u0000order-write-error:"))) this.run(["DEL", args[2]]);
+          return out;
+        }
         if (key.startsWith("-- marktmorgen:recount-page:v1\n") && args[0] === "2") {
           const [state, sums, from, next, ...pairs] = args.slice(1);
           if (pairs.length % 2 !== 0) return -1;

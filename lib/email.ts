@@ -17,6 +17,7 @@
  * each email, from what Amazon last said.
  */
 import { createHash, randomBytes } from "node:crypto";
+import { domainToASCII } from "node:url";
 import { currentResendFallbackProofIsMissing, guardedResendPost, type ResendTransportRuntime } from "@/lib/resend-fallback-transport";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
@@ -591,13 +592,89 @@ export async function sendBatch(
   runtime: ResendTransportRuntime = {},
 ): Promise<"sent" | "retry" | "refused"> {
   const result = await dispatchBatch(messages, batchKey, meter, only, false, runtime);
-  return result === "waiting" ? "retry" : result;
+  // A partial answer is a list batch's only (listOnly); never one here.
+  return result === "waiting" || typeof result === "object" ? "retry" : result;
 }
+
+/**
+ * What Amazon said when it refused one email for that email's own sake,
+ * read as being about an address ("Illegal address", a domain it will not
+ * take). Anything else (the content) is the email as it is. The account's
+ * own refusals never get here (lib/ses.ts sesSend: "account"). The words
+ * alone never say WHICH address: an email also carries the creator's From
+ * line and Reply-To, and a refusal of either refuses every email of the
+ * batch. So a refusal is the recipient's own only with proof (`recipientsOwn`).
+ */
+const REFUSED_ADDRESS = /\b(address|addresses|domain|recipient|mailbox)\b/i;
+/** Words that put the refusal on the sender's side of the email; such a text never proves the recipient's address. */
+const SENDER_SIDE = /\b(from|reply-to|replyto|sender|source|return-path)\b/i;
+
+/** The bare address in a header value (`"Name" <a@b>` or `a@b`), lower-cased. */
+function bareAddress(line: string | null | undefined): string {
+  const value = line ?? "";
+  return (value.match(/<([^>]+)>/)?.[1] ?? value).trim().toLowerCase();
+}
+
+/** An address's spellings as Amazon may write it back: its domain as typed and in ASCII (punycode). */
+function spellingsOf(address: string): { whole: string[]; domains: string[] } {
+  const at = address.lastIndexOf("@");
+  if (at <= 0 || at === address.length - 1) return { whole: [], domains: [] };
+  const local = address.slice(0, at);
+  const domain = address.slice(at + 1);
+  const domains = [...new Set([domain, domainToASCII(domain)].filter((d) => d !== ""))];
+  return { whole: domains.map((d) => `${local}@${d}`), domains };
+}
+
+/** Whether `text` names `term` on its own: not inside a longer address or domain ("example.com" is not named by "café-example.com"). */
+function namesTerm(text: string, term: string): boolean {
+  const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(?<![\\p{L}\\p{N}._%+\\-])${escaped}(?!\\.?[\\p{L}\\p{N}_\\-])`, "iu").test(text);
+}
+
+/**
+ * Whether Amazon's refusal of one email of a list batch is proved to be its
+ * recipient's own address, so that address may be taken off the list for
+ * good. Proved when another email of the same batch, from the same From line
+ * and Reply-To, was taken (the sender side is then fine), or when the text
+ * names the recipient's address, or its domain when that is not also a
+ * sender's, and names neither the sender side nor a sender address.
+ * Anything else is not proved: nobody is taken off for it (C3, first review
+ * of #3489, HIGH 1).
+ */
+function recipientsOwn<M extends { to: string; from: string; replyTo?: string | null; original: BatchMessage }>(
+  why: string, message: M, taken: M[],
+): boolean {
+  if (!REFUSED_ADDRESS.test(why)) return false;
+  if (taken.some((t) => t.from === message.from && (t.replyTo ?? "") === (message.replyTo ?? ""))) return true;
+  if (SENDER_SIDE.test(why)) return false;
+  const senders = [bareAddress(message.from), bareAddress(message.replyTo), bareAddress(message.original.from), bareAddress(message.original.replyTo)]
+    .filter((a) => a !== "").map(spellingsOf);
+  const senderWhole = new Set(senders.flatMap((s) => s.whole));
+  const senderDomains = new Set(senders.flatMap((s) => s.domains));
+  if ([...senderWhole].some((term) => namesTerm(why, term))) return false;
+  const recipient = [bareAddress(message.to), bareAddress(message.original.to)].filter((a) => a !== "").map(spellingsOf);
+  if (recipient.flatMap((r) => r.whole).some((a) => !senderWhole.has(a) && namesTerm(why, a))) return true;
+  // A domain alone proves it only when it is not also the sender's.
+  if ([...senderDomains].some((term) => namesTerm(why, term))) return false;
+  return recipient.flatMap((r) => r.domains).some((d) => !senderDomains.has(d) && namesTerm(why, d));
+}
+
+/** One email of a list batch Amazon refused for good; `address` when it is proved to have refused the recipient's address itself (`recipientsOwn`). */
+export type ListRefusal = { to: string; address: boolean };
+
+/**
+ * A list batch's outcome. `{ refused }`: Amazon answered for every email of
+ * the batch, took every one not in `refused`, each with its `did` mark read
+ * back, and refused those in it for good; none of them is uncertain.
+ * "refused": Amazon refused the email as it is (not an address) and took it
+ * for nobody. "waiting": nothing went, and it may be tried again whole.
+ */
+export type ListBatchOutcome = "sent" | "waiting" | "retry" | "refused" | { refused: ListRefusal[] };
 
 /** List mail waits for SES; a known no-send result is distinct from unknown acceptance. */
 export async function sendListBatch(
   messages: BatchMessage[], batchKey: string, meter: EmailMeter,
-): Promise<"sent" | "waiting" | "retry" | "refused"> {
+): Promise<ListBatchOutcome> {
   if (messages.length === 0) return "sent";
   return dispatchBatch(messages, batchKey, meter, "amazon", true);
 }
@@ -605,7 +682,7 @@ export async function sendListBatch(
 async function dispatchBatch(
   messages: BatchMessage[], batchKey: string, meter: EmailMeter,
   only: "resend" | "amazon" | undefined, listOnly: boolean, runtime: ResendTransportRuntime = {},
-): Promise<"sent" | "waiting" | "retry" | "refused"> {
+): Promise<ListBatchOutcome> {
   if (!isSenderConfigured()) return listOnly ? "waiting" : "retry";
   if (messages.length === 0) return "sent";
   // What actually goes: a message with no address that can be written to is
@@ -697,9 +774,30 @@ async function dispatchBatch(
       // SES excludes definitively refused recipients from both accepted and
       // pending lists. Missing recipients cannot establish a completed list.
       if (listOnly && result.taken.length + result.left.length < going.length) {
-        // Accepted-recipient markers are not an acknowledged durable receipt.
-        // A partial send must hold the caller, never authorize automatic replay.
-        return result.taken.length > 0 ? "retry" : "refused";
+        // Amazon answered for every email and refused some for good: those are
+        // known not sent, never uncertain. That holds only with nothing left
+        // over (no account stop, no time out) and every one either taken or
+        // refused. Otherwise, with somebody taken, the batch holds its caller
+        // as before; with nobody taken nothing went (a lost answer returned
+        // above), so the batch waits and is tried again whole.
+        const refusals: ListRefusal[] = result.refused.map(({ message, why }) => ({ to: message.original.to, address: recipientsOwn(why, message, result.taken) }));
+        if (result.taken.length + result.left.length + refusals.length !== going.length) return "retry";
+        if (result.left.length || result.down) return result.taken.length > 0 ? "retry" : "waiting";
+        // Nobody taken and an email refused as it is, or for an address not
+        // proved to be the recipient's (it may be the creator's own From or
+        // Reply-To, which every email of the batch carries): the email's own,
+        // so it stops and nobody is taken off. "refused" for a list batch means only this.
+        if (!result.taken.length && refusals.some((r) => !r.address)) return "refused";
+        // Who was taken is proved by the `did` mark written for each (lib/ses.ts),
+        // read back exactly: each taken one marked, each refused one not. A mark
+        // that did not land or does not read keeps the batch uncertain, so
+        // nobody is counted as sent or taken off the list on an unproved answer.
+        const unmarked = await notYetTaken(batchKey, [...result.taken, ...result.refused.map((r) => r.message)]);
+        const refusedHere = new Set(result.refused.map((r) => r.message));
+        if (!unmarked || unmarked.length !== refusedHere.size || unmarked.some((m) => !refusedHere.has(m))) {
+          return result.taken.length > 0 ? "retry" : "waiting";
+        }
+        return { refused: refusals };
       }
       going = result.left.map((m) => m.original);
     }

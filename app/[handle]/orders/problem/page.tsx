@@ -25,7 +25,7 @@ export async function generateMetadata({ params }: Pick<Params, "params">): Prom
 }
 
 /** What the route answered (app/api/store/order-problem), as the page says it. */
-const STATES = ["filed", "already", "busy", "limited", "used", "full", "error", "unknown", "reason", "note", "order"] as const;
+const STATES = ["filed", "already", "pending", "busy", "limited", "used", "full", "error", "unknown", "reason", "note", "order"] as const;
 type State = (typeof STATES)[number];
 
 /**
@@ -82,6 +82,7 @@ export default async function ProblemPage({ params, searchParams }: Params) {
   const sentences: Record<State, string> = {
     filed: w.sent(store.name),
     already: w.alreadyOpen,
+    pending: w.pendingNow,
     busy: w.busyNow,
     limited: w.errorLimited,
     // The store's own inbox messages for its window used up: the store is not taking messages (review of #3837).
@@ -107,7 +108,7 @@ export default async function ProblemPage({ params, searchParams }: Params) {
           ? w.errorOrder
           : "";
   // No form while a report may already be in the inbox, so the same report is not sent twice (review of #3838).
-  const done = state === "filed" || state === "already" || state === "unknown";
+  const done = state === "filed" || state === "already" || state === "pending" || state === "unknown";
   const showForm = Boolean(found && !trouble && !done);
 
   return (

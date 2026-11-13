@@ -76,7 +76,10 @@ export async function POST(request: NextRequest) {
   if (!found) return back("order");
   if (!(await withinLimit("order-problem", `${store.statsId}:${found.email}`, ORDER_PROBLEM_PER_DAY, 86_400))) return back("limited");
   try {
-    return back(await reportOrderProblem(store, found.purchase, found.email, problem.problem));
+    const outcome = await reportOrderProblem(store, found.purchase, found.email, problem.problem);
+    // "busy" there is this order's mark pending: a report of it on its way (a double click, or a retry in the minutes
+    // kept after an answer not known). Said as such, never "nothing was sent" (review of #3838).
+    return back(outcome === "busy" ? "pending" : outcome);
   } catch (error) {
     console.error("reporting a problem with an order failed", error);
     return back("error");

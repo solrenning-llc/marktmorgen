@@ -170,4 +170,15 @@ is("the page is not indexed", pageSource.includes("index: false"), true);
 is("the studio home links to it", home.includes('studioPath(store, "", "privacy")'), true);
 is("lib/studio-modules.ts gives it a line", typeof NOT_MODULES.privacy === "string" && NOT_MODULES.privacy.length > 10, true);
 
+// Review of #3512 (Claude 1, LOW; checked by Claude 3): the home draws the data file only when `!closing`, and the
+// page here does not read `closing`. That is the same rule only while the home reads a closing date for an ended
+// plan alone, so `closing` is never set while a plan or a trial runs. Held here, so the two cannot drift apart.
+is(
+  "the home reads a closing date only for an ended plan, so `!closing` never hides the file from a paid or trial store",
+  home.includes('closingAt: store && standing === "ended" && may("settings") ? early(closingOf(store).catch(() => null)) : null,') &&
+    home.includes("const closing = closingAt && ") &&
+    home.includes('{!closing && may("export") && standing !== "ended" && standing !== "none" ? ('),
+  true,
+);
+
 done();

@@ -42,7 +42,9 @@ export async function repairMove(email: string): Promise<boolean> {
     }
     // An index a lost answer left on the other address is pointed back at the list's (C3-117).
     await repointPasskeys(home);
-    await endAllSessions(away);
+    // The record is the lock on both addresses: it is cleared only once the away address's
+    // sessions are known to be logged out. An unknown logout (null) keeps it for a later try (rule 30).
+    if ((await endAllSessions(away)) === null) return false;
     await clearBrokenMove(from, to);
     return true;
   } catch (error) {

@@ -22,7 +22,7 @@ import { needData, takeData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { WHO, type Who, audience, readTags } from "@/lib/contacts";
 import { PORTION_NOTE, pauseNote } from "@/lib/mail-health";
-import { BATCH_SIZE, MAX_MAIL_BODY, MAX_SUBJECT, SENDER_WAIT_NOTE, monthlyAllowance, sendTo, usedThisMonthExact } from "@/lib/mail";
+import { BATCH_SIZE, MAX_MAIL_BODY, MAX_SUBJECT, SENDER_RETRY_NOTE, SENDER_WAIT_NOTE, monthlyAllowance, sendTo, usedThisMonthExact } from "@/lib/mail";
 import { WINDOW_ID, allowanceWindow, opensAgainWords, windowId } from "@/lib/allowance-window";
 import { refreshPeriod } from "@/lib/billing-sync";
 import { costStandingOf } from "@/lib/plan-standing";
@@ -836,7 +836,7 @@ export async function advanceBroadcast(
       if (result.stopped) {
         // A refusal stopped above; a provider that is down keeps the email waiting, never abandoned (outage drill).
         const failures = b.failures + 1;
-        b = { ...b, status: "sending", failures, note: "Paused for a moment: the email service asked us to slow down." };
+        b = { ...b, status: "sending", failures, note: SENDER_RETRY_NOTE };
         break;
       }
       b = { ...b, failures: 0, note: refusedNote(b.refused ?? 0, b.removed ?? 0) };

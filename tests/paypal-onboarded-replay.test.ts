@@ -14,7 +14,7 @@ import { GET as onboarded } from "@/app/api/store/paypal/onboarded/route";
 import { POST as connect } from "@/app/api/store/paypal/connect/route";
 import { POST as disconnect } from "@/app/api/store/paypal/disconnect/route";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
-import { markOnboarding } from "@/lib/paypal-sales";
+import { markOnboarding, onboardingStarted } from "@/lib/paypal-sales";
 import { claimHandle, ensureStatsId, ensureStoreId, setPayPalSeller, storeForEmail } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -165,6 +165,31 @@ async function main() {
   integrationAsks = 0;
   const later = await back();
   is("opened again later, the old connect still connects nothing", [await seller(), said(later) === "ready"], [null, false]);
+
+  part("An older way back that connected never ends a newer connect started right before its cleanup (Codex G)");
+  await setPayPalSeller(email, null);
+  const statsId = (await storeForEmail(email))!.statsId!;
+  // A connect begun in the same millisecond as a disconnect counts as before it (refused): one millisecond apart here.
+  await new Promise((resolve) => setTimeout(resolve, 2));
+  await markOnboarding(statsId);
+  let newer = "";
+  const plain = redis.pipeline.bind(redis);
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    // The old way back has written its seller and is about to end its mark: a newer connect is started right then.
+    const ending = commands.length === 1 && String(commands[0][commands[0][0] === "EVAL" ? 3 : 1]).startsWith("nl:ppsell:start:") && (commands[0][0] === "DEL" || commands[0][0] === "EVAL");
+    if (ending && newer === "") {
+      redis.pipeline = plain;
+      newer = await markOnboarding(statsId);
+    }
+    return plain(commands);
+  }) as typeof redis.pipeline;
+  try {
+    await back();
+  } finally {
+    redis.pipeline = plain;
+  }
+  is("the old way back connected, and the newer connect was started at its cleanup", [await seller(), newer !== ""], [SELLER, true]);
+  is("the newer connect's mark is still there", await onboardingStarted(statsId), newer);
   done();
 }
 

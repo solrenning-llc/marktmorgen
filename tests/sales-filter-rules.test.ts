@@ -95,4 +95,23 @@ for (const [label, amount] of [["a fraction of a cent", 10.5], ["a negative amou
 }
 is("a currency that is not three letters is unknown too", salesTotals([sale({ currency: "" })]), null);
 
+part("Claude 1 cloud's three LOWs on #3460: unknown is never a smaller total, a free order is no charge, a saved filter is the same link");
+{
+  const undated = [sale({ paidAt: Number.NaN }), sale({})];
+  is("a sale whose time did not read is kept by the empty filter, never dropped", filterSales(undated, EMPTY_FILTER).length, 2);
+  is("and its totals are unknown, never a smaller total", salesTotals(filterSales(undated, EMPTY_FILTER)), null);
+  is("a sale whose time did not read gives no totals on its own", salesTotals([sale({ paidAt: Number.POSITIVE_INFINITY })]), null);
+  const free = salesTotals([sale({ amount: 0 }), sale({ amount: 0 })]);
+  is("orders that charged nothing (a 100% coupon) are orders, not charges: no average, never 0", free ? [free[0].orders, free[0].charged, free[0].averageCents] : free, [2, 0, null]);
+  const mixed = salesTotals([sale({ amount: 0 }), sale({ amount: 3000 })]);
+  is("a free order beside a paid one: the average is of what was charged", mixed ? [mixed[0].charged, mixed[0].averageCents] : mixed, [1, 3000]);
+  const long = "x".repeat(FILTER_TEXT_MAX - 1) + " tail";
+  const read = readSalesFilter({ product: long });
+  const again = readSalesFilter(Object.fromEntries(new URLSearchParams(filterQuery(read))));
+  is("a cut that ends on a space reads back the same through the saved link", again.product, read.product);
+  const astral = "a".repeat(FILTER_TEXT_MAX - 1) + "\u{1F600}rest";
+  const cut = readSalesFilter({ product: astral }).product;
+  is("a cut never splits a character in two (no lone surrogate)", /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(cut), false);
+}
+
 done();

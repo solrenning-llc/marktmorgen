@@ -674,13 +674,47 @@ export async function resetTries(course: Course, who: string, room: DataStore): 
  * were deleted; any other reply throws UnknownReplyError, so the erasure reports this part as not done for a retry
  * instead of a finished part that may have deleted nothing (CX-123 rule 24).
  */
-export async function forgetQuizPerson(courses: { courseId: string; lessonIds: string[] }[], who: string): Promise<number> {
+export async function forgetQuizPerson(courses: { courseId: string; lessonIds: string[] }[], who: string, room?: DataStore): Promise<number> {
   if (!courses.length || !isRedisConfigured()) return 0;
   const keys = [
     ...new Set(courses.flatMap((c) => [passedKey(c.courseId, who), ...c.lessonIds.flatMap((l) => [triesKey(c.courseId, l, who), resultKey(c.courseId, l, who)])])),
   ];
+  // With the store's room: what these records hold, read before they go, as resetTries reads it (each try's result
+  // and count at its size, each pass at its lesson id), in the store's slot for each course. Read exactly (rule 24).
+  const held = room ? await quizRoomOf(courses, who) : null;
   const replies = repliesFor(await redisPipeline([["DEL", ...keys]]), 1);
   const gone = replies ? countOf(replies[0]) : null;
   if (gone === null || gone > keys.length) throw new UnknownReplyError("the deletion of a student's quiz tries, results and passes");
+  // Given back only when this deletion took every record that was read: one that raced another deletion (fewer gone)
+  // gives back nothing rather than the same room twice; records written in between are left counted.
+  if (room && held && held.records > 0 && gone >= held.records && held.slots.length) await giveData(room, held.slots);
   return gone;
+}
+
+/** What one student's quiz records take of the store's data room, by course, and how many records there are. */
+async function quizRoomOf(courses: { courseId: string; lessonIds: string[] }[], who: string): Promise<{ records: number; slots: { slot: string; bytes: number }[] }> {
+  const ids = [...new Set(courses.map((c) => c.courseId))];
+  const lessons = ids.map((id) => [...new Set(courses.filter((c) => c.courseId === id).flatMap((c) => c.lessonIds))]);
+  const reads = ids.flatMap((id, i) => [["SMEMBERS", passedKey(id, who)], ...lessons[i].flatMap((l) => [["GET", resultKey(id, l, who)], ["GET", triesKey(id, l, who)]])]);
+  const replies = repliesFor(await redisPipeline(reads), reads.length);
+  if (!replies) throw new UnknownReplyError("a student's quiz records before their deletion");
+  let at = 0;
+  let records = 0;
+  const slots: { slot: string; bytes: number }[] = [];
+  ids.forEach((id, i) => {
+    const passed = stringList(replies[at]);
+    at += 1;
+    if (!passed) throw new UnknownReplyError("a student's quiz records before their deletion");
+    let bytes = passed.reduce((sum, lesson) => sum + dataBytes([lesson], 1), 0);
+    if (passed.length) records += 1;
+    for (let j = 0; j < lessons[i].length * 2; j += 1) {
+      const raw = replies[at];
+      at += 1;
+      if (raw !== null && typeof raw !== "string") throw new UnknownReplyError("a student's quiz records before their deletion");
+      if (typeof raw === "string") records += 1;
+      bytes += kept(raw);
+    }
+    if (bytes > 0) slots.push({ slot: TRIES_SLOT(id), bytes });
+  });
+  return { records, slots };
 }

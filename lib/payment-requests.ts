@@ -213,6 +213,19 @@ export async function sendDueReminders(deadline: number, now = Date.now()): Prom
 export type CheckoutRefusal = "closed" | "paused" | "error" | "busy" | "gone";
 
 /**
+ * Whether the checkout Stripe answered for a request's session is that request's own (#4447): `{}` (a session Stripe no
+ * longer has, after a 404) is no checkout and passes; otherwise its id must be the request's session, and a paid one
+ * must name this request and this store in its metadata. Anything else is someone else's answer.
+ */
+function ownRequestCheckout(known: Record<string, unknown>, request: { id: string; session: string }, store: Store): boolean {
+  if (Object.keys(known).length === 0) return true;
+  if (known.id !== request.session) return false;
+  if (!isSettled(known)) return true;
+  const meta = (known.metadata ?? {}) as Record<string, string>;
+  return meta.kind === "request" && meta.request === request.id && saleHandles(store).has(meta.store ?? "");
+}
+
+/**
  * Opens the payment for one request and returns where to send the buyer:
  * the checkout already opened for it in the last day, while Stripe still
  * holds it open, or a new one, never two side by side.
@@ -231,6 +244,10 @@ export async function openRequestCheckout(store: Store, id: string, origin: stri
         if (error instanceof StripeError && error.status === 404) return {};
         throw error;
       })) as Record<string, unknown>;
+      // Only this request's own checkout is reused or written down (#4447, review of #4455): Stripe answering with
+      // another session, or a paid one naming another request or store, is a read error, so the buyer is never sent to
+      // another request's page and this request is never written down with another's payment.
+      if (!ownRequestCheckout(known, request, store)) return { ok: false, reason: "error" };
       if (known.status === "open" && typeof known.url === "string" && known.url) return { ok: true, url: known.url };
       if (isSettled(known)) {
         await markPaid(store, request.id, known, now);
@@ -419,11 +436,8 @@ export async function markPaidOutside(
       // The checkout read must be this request's own (#4447): Stripe answering with another session, or a paid one
       // that names another request or store, is a read error, so this request is never written down with another's
       // payment, nor its checkout closed or marked on that answer. A session Stripe no longer has ({} on a 404) is not one.
-      const gone = Object.keys(known).length === 0;
-      if (!gone && known.id !== request.session) return { ok: false, reason: "error" };
+      if (!ownRequestCheckout(known, request, store)) return { ok: false, reason: "error" };
       if (isSettled(known)) {
-        const meta = (known.metadata ?? {}) as Record<string, string>;
-        if (meta.kind !== "request" || meta.request !== request.id || !saleHandles(store).has(meta.store ?? "")) return { ok: false, reason: "error" };
         await markPaid(store, request.id, known, now);
         return { ok: false, reason: "paid_online" };
       }

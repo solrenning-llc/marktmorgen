@@ -24,7 +24,7 @@ is("it opens with the doctype and the language", html.startsWith('<!doctype html
 is("it says its character set", html.includes('<meta charset="utf-8">'), true);
 is("it fits a phone's width", html.includes('<meta name="viewport" content="width=device-width, initial-scale=1">'), true);
 is("its title is the subject, escaped", html.includes("<title>New time: Bread &amp; &lt;butter&gt; class</title>"), true);
-is("the head closes before the body", /<\/title>.*<\/head><body /s.test(html), true);
+is("the head closes before the body", /<\/title>[\s\S]*<\/head><body /.test(html), true);
 is("the words are still there", ["Harbor Kitchen has moved the class.", "You are getting this because you RSVP&#39;d.", "Sent with Marktmorgen."].every((w) => html.includes(w)), true);
 is("the footer keeps its 7:1 color", html.includes("color:#57534e"), true);
 

@@ -12,7 +12,10 @@
  * Runs the real admitOrders and sweepCheckouts on the in-memory Redis, with a
  * stand-in for Stripe's list of Checkout Sessions. Synthetic data only.
  */
-import { ADMITTED_FIELD, OPEN_HOURS, admitOrders } from "@/lib/order-admission";
+import { ADMITTED_FIELD, OPEN_HOURS, admitOrders, holdCheckout } from "@/lib/order-admission";
+import { readProduct } from "@/lib/catalog";
+import { createCheckout } from "@/lib/store-checkout";
+import { TEST_CONSENT } from "./digital-consent-fixture";
 import { ORDERS_INCLUDED } from "@/lib/order-rules";
 import { sweepCheckouts } from "@/lib/checkout-sweep";
 import { addProduct, claimHandle, ensureStatsId, setMailSettings, setProductLink, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
@@ -40,9 +43,19 @@ function listSessions(url: URL): Response {
   return new Response(JSON.stringify({ object: "list", data: rows.slice(0, limit), has_more: rows.length > limit }));
 }
 
+/** The metadata of every checkout the real createCheckout asked Stripe to open, by the id the stand-in gave it. */
+const openedAtStripe = new Map<string, Record<string, string>>();
 const mail = installSesMailFixture({
-  fallback: (input) => {
+  fallback: (input, init) => {
     const url = new URL(String(input));
+    if (url.pathname === "/v1/checkout/sessions" && init?.method === "POST") {
+      const body = new URLSearchParams(String(init.body));
+      const metadata: Record<string, string> = {};
+      for (const [key, value] of body) if (/^metadata\[(.+)\]$/.test(key)) metadata[key.slice(9, -1)] = value;
+      const id = `cs_test_opened${String(openedAtStripe.size).padStart(12, "0")}`;
+      openedAtStripe.set(id, metadata);
+      return new Response(JSON.stringify({ id, url: "https://checkout.stripe.com/c/pay/test" }));
+    }
     if (url.pathname === "/v1/checkout/sessions") return listSessions(url);
     if (url.pathname === "/v1/account") return new Response(JSON.stringify({ id: "acct_1TestHoldSwp1", country: "US" }));
     return new Response(JSON.stringify({ object: "list", data: [], has_more: false }));
@@ -82,12 +95,17 @@ const expired = (id: string, created: number, hour: number | null, over: Record<
   ...over,
 });
 
-/** Fills every place of the month with checkouts admitted at `at` (ms), and answers their hour. */
-async function fill(store: Store, count: number, at = Date.now()): Promise<number> {
+/**
+ * Fills every place of the month with checkouts admitted at `at` (ms), and answers their hour. With `prefix`, each
+ * is recorded as ours under sid(prefix, i), as the checkout that opened it does once Stripe answers (holdCheckout);
+ * without it, no record of ours exists for any of them.
+ */
+async function fill(store: Store, count: number, at = Date.now(), prefix?: string): Promise<number> {
   let hour = -1;
   for (let i = 0; i < count; i += 1) {
     const admitted = await admitOrders(store, 1, at);
     if (!admitted.ok || admitted.hour === null) throw new Error(`checkout ${i} was not admitted: ${JSON.stringify(admitted)}`);
+    if (prefix) await holdCheckout(store, sid(prefix, i), admitted, at);
     hour = admitted.hour;
   }
   return hour;
@@ -104,7 +122,7 @@ async function main(): Promise<void> {
 
   part("Checkouts left unpaid give their places back once Stripe closes them");
   let store = await freshStore();
-  let hour = await fill(store, limit);
+  let hour = await fill(store, limit, Date.now(), "left");
   is("every place is held: the next checkout is refused", await admitOrders(store, 1), { ok: false, reason: "paused" });
   sessions = Array.from({ length: limit }, (_, i) => expired(sid("left", i), seconds() - 3600 - i, hour));
   await sweep();
@@ -115,7 +133,9 @@ async function main(): Promise<void> {
 
   part("Only an unpaid checkout of this store with a held hour gives a place back, and only once");
   store = await freshStore();
-  hour = await fill(store, limit);
+  hour = await fill(store, limit, Date.now(), "mine");
+  // The other store's and the paid one carry a record of ours too, so only the store and the payment stop them.
+  for (const id of [sid("other", 1), sid("paid", 1)]) await holdCheckout(store, id, { ok: true, hour });
   sessions = [
     expired(sid("mine", 1), seconds() - 3600, hour),
     expired(sid("other", 1), seconds() - 3600, hour, { metadata: { store: "someoneelse", product, [ADMITTED_FIELD]: String(hour) } }),
@@ -129,15 +149,47 @@ async function main(): Promise<void> {
   await sweep();
   is("reading the same closed checkouts again gives nothing back twice", await admitOrders(store, 1), { ok: false, reason: "paused" });
 
+  part("A closed checkout the creator wrote, with our hour copied into it but no mark of ours, gives nothing back");
+  // The metadata is the creator's to write on their own account: a session made there with mm_admit and the store's
+  // handle must not lower the figure below what was really admitted (the plan's limit is a cost ceiling, MR).
+  store = await freshStore();
+  hour = await fill(store, limit);
+  sessions = [expired(sid("forged", 1), seconds() - 3600, hour), expired(sid("forged", 2), seconds() - 3600, hour)];
+  await sweep();
+  is("a forged closed checkout gives no place back", await admitOrders(store, 1), { ok: false, reason: "paused" });
+
+  part("A record of ours whose hour the creator changed in the metadata gives nothing back");
+  store = await freshStore();
+  hour = await fill(store, limit, Date.now(), "edited");
+  sessions = [expired(sid("edited", 1), seconds() - 3600, hour - 1)];
+  await sweep();
+  is("the edited checkout gives no place back", await admitOrders(store, 1), { ok: false, reason: "paused" });
+
+  part("A checkout the real createCheckout opened gives its place back once it closes unpaid, and only once");
+  store = await freshStore();
+  openedAtStripe.clear();
+  await fill(store, limit - 1);
+  const course = await readProduct(store, product);
+  if (!course) throw new Error("no product");
+  const made = await createCheckout(store, course, "https://marktmorgen.com", undefined, { digitalConsent: TEST_CONSENT });
+  is("it opened with the hour it holds", typeof openedAtStripe.get(made.id)?.[ADMITTED_FIELD], "string");
+  is("every place is held", await admitOrders(store, 1), { ok: false, reason: "paused" });
+  const meta = openedAtStripe.get(made.id) ?? {};
+  sessions = [{ ...expired(made.id, seconds() - 3600, Number(meta[ADMITTED_FIELD])), metadata: meta }];
+  await sweep();
+  is("its place opens once the sweep reads it closed", (await admitOrders(store, 1)).ok, true);
+  await sweep();
+  is("the same closed checkout read again gives nothing back twice", await admitOrders(store, 1), { ok: false, reason: "paused" });
+
   part("A checkout left at Stripe's default, closed a day after it opened, still gives its place back");
   store = await freshStore();
   // The oldest hour still in the window, plus a minute: anchored to the hour, so the part passes at any minute
   // (it failed during the first ten minutes of every hour when written as "now less 24 h 10 min": reviews on #4232).
   const dayAgo = (Math.floor(Date.now() / 3_600_000) - (OPEN_HOURS - 1)) * 3_600_000 + 60_000;
-  hour = await fill(store, 1, dayAgo);
+  hour = await fill(store, 1, dayAgo, "dayold");
   await fill(store, limit - 1);
   is("every place is held", await admitOrders(store, 1), { ok: false, reason: "paused" });
-  sessions = [expired(sid("dayold", 1), Math.floor(dayAgo / 1000), hour, { expires_at: Math.floor(dayAgo / 1000) + 86_400 })];
+  sessions = [expired(sid("dayold", 0), Math.floor(dayAgo / 1000), hour, { expires_at: Math.floor(dayAgo / 1000) + 86_400 })];
   await sweep();
   is("its place opens once the sweep reads it closed", (await admitOrders(store, 1)).ok, true);
 

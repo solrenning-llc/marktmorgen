@@ -12,7 +12,7 @@ import { prepareOrderConfirmationPreintent } from "@/lib/orders";
 import { CURRENT_SHIPMENT_MAIL_LIFECYCLE } from "@/lib/shipment-record";
 import { confirmationBodyDigest, openConfirmationOrigin, reserveConfirmationOrigin, type ConfirmationOriginRuntime } from "@/lib/order-confirmation-outbox";
 import { itemsHandedOver } from "@/lib/store-data-rules";
-import { ADMITTED_FIELD, OrdersPausedError, admitOrders } from "@/lib/order-admission";
+import { ADMITTED_FIELD, OrdersPausedError, admitOrders, holdCheckout } from "@/lib/order-admission";
 import { firstCharge } from "@/lib/move-rules";
 import { currentMeta } from "@/lib/tier-rules";
 import { saleOff } from "@/lib/store-sale";
@@ -839,6 +839,8 @@ export async function createCheckout(
   if (typeof session.url !== "string" || !session.url || typeof session.id !== "string") {
     throw new Error("Stripe did not return a checkout URL");
   }
+  // Our record that this checkout holds its place, so the sweep can give it back if it closes unpaid (#3970).
+  await holdCheckout(store, session.id, admitted);
   return { url: session.url, id: session.id };
 }
 

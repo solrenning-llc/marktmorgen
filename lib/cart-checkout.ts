@@ -19,7 +19,7 @@
  * was taken off, as on any other checkout here.
  */
 import { itemsHandedOver } from "@/lib/store-data-rules";
-import { ADMITTED_FIELD, OrdersPausedError, admitOrders } from "@/lib/order-admission";
+import { ADMITTED_FIELD, OrdersPausedError, admitOrders, holdCheckout } from "@/lib/order-admission";
 import type { Product, Store } from "@/lib/store";
 import { KIND, readListings } from "@/lib/catalog";
 import { BUMP_KEYS, MIN_BUNDLE_ITEMS, bundleMeta, deliverableItems } from "@/lib/bundle-rules";
@@ -263,6 +263,8 @@ export async function createCartCheckout(
       else if (extras.remind && !body.has("expires_at")) body.set("expires_at", String(Math.floor(Date.now() / 1000) + RECOVERY_OPEN_SECONDS));
       const session = await onAccount("POST", store.stripeAccountId, "/checkout/sessions", body);
       if (typeof session.url !== "string" || !session.url || typeof session.id !== "string") throw new Error("Stripe did not return a checkout URL");
+      // Our record that this cart's checkout holds its place, so the sweep can give it back if it closes unpaid (#3970).
+      await holdCheckout(store, session.id, admitted);
       return { url: session.url, id: session.id };
     } catch (error) {
       if (named && error instanceof StripeError && error.status === 400) {

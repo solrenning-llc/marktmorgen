@@ -25,7 +25,7 @@
  * or a reminder that does not fit is not sent, and the creator is told why.
  * The receipt is the order's own email.
  */
-import { ADMITTED_FIELD, OrdersPausedError, admitOrders } from "@/lib/order-admission";
+import { ADMITTED_FIELD, OrdersPausedError, admitOrders, holdCheckout } from "@/lib/order-admission";
 import { applyShare } from "@/lib/platform-share";
 import { applyTax, applyTaxDocuments, refusedTaxDocuments, withoutTaxDocuments } from "@/lib/tax";
 import { inTheCurrencyShown, isSettled, onlyInstantMethods } from "@/lib/instant-pay";
@@ -317,6 +317,8 @@ export async function createRequestCheckout(store: Store, request: PaymentReques
     }
   }
   if (typeof session.url !== "string" || !session.url || typeof session.id !== "string") throw new Error("Stripe did not return a checkout URL");
+  // Our record that this checkout holds its place, so the sweep can give it back if it closes unpaid (#3970).
+  await holdCheckout(store, session.id, admitted);
   return { url: session.url, id: session.id };
 }
 

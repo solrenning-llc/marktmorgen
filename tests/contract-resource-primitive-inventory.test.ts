@@ -42,10 +42,7 @@ const PRIMITIVE_INVENTORY: Record<string, PrimitiveEntry> = {
     "lib/imports.ts#mailStep": { state: "gated", calls: 1 },
     "lib/imports.ts#sendMoveReminders": { state: "gated", calls: 1 },
   } },
-  "lib/answers.ts#takeAnswer": { state: "sites", sites: {
-    "lib/answers.ts#answerQuestion": { state: "pending", calls: 1, why: "An AI answer taken from the store's month before the model, without the cohort proof." },
-    "lib/store-guide.ts#guideVisitor": { state: "pending", calls: 1, why: "The store page's guide draws the same answers without the cohort proof." },
-  } },
+  "lib/answers.ts#takeAnswer": { state: "self-gated", via: "takeAnswer" },
   "lib/quiz-usage.ts#reserveQuizSubmission": { state: "sites", sites: { "lib/quiz.ts#submitQuiz": { state: "pending", calls: 1, why: "A quiz submission is reserved without the cohort proof." } } },
   "lib/resend-fallback-budget.ts#reserveResendFallback": { state: "sites", sites: { "lib/resend-fallback-transport.ts#guardedResendPost": { state: "pending", calls: 1, why: "The fallback sender's budget is reserved per send; the store meter's proof before it (lib/email.ts) is not shown here." } } },
   "lib/store-readings.ts#takeStoreReading": { state: "sites", sites: { "lib/store-readings.ts#keptReading": { state: "pending", calls: 1, why: "A kept reading of the day is taken without the cohort proof." } } },
@@ -162,7 +159,7 @@ const problems = audit(sources, PRIMITIVE_INVENTORY, CONTRACT_ADMISSION_COVERAGE
 for (const problem of problems) console.log(`        ${problem}`);
 is("no problem between sources, inventory and key", problems, []);
 is("all 15 primitives inventoried", Object.keys(PRIMITIVE_INVENTORY).length, 15);
-is("pending primitive calls on 13 November 2026", pendingCalls, 7);
+is("pending primitive calls on 13 November 2026", pendingCalls, 5);
 is("pending calls keep resourceAllocations false", pendingCalls > 0 && CONTRACT_ADMISSION_COVERAGE.resourceAllocations, false);
 
 part("The audit refuses what it is for (synthetic sources)");

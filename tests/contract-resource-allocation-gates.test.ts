@@ -16,6 +16,8 @@ import { holdMoreApi, takeMoreApi } from "@/lib/api-guard";
 import { withinServiceWhy } from "@/lib/metered-limits";
 import { countUnits } from "@/lib/person-agenda-read";
 import { chargeStudio } from "@/lib/path";
+import { takeAnswer } from "@/lib/answers";
+import { windowId } from "@/lib/allowance-window";
 import { claimHandle, ensureStatsId, setSubscription, storeForEmail, type Store } from "@/lib/store";
 
 beforeEach(() => {
@@ -75,4 +77,13 @@ test("studio readings behind the door: a funded period without its cohort reads 
   assert.equal((await countUnits(store, 2)).ok, true);
   assert.equal(await chargeStudio(store)(1), true);
   assert.equal(await allowanceUsed(store, "studio"), 3);
+});
+
+test("AI answers and the store guide: a funded period without its cohort takes no answer", async () => {
+  const store = await payingStore("gatesanswers");
+  const key = `nl:ask:${store.statsId}:${windowId(store, Date.now())}`;
+  assert.equal(await takeAnswer(fundedOf(store)), false);
+  assert.deepEqual(await redis.pipeline([["GET", key]]), [null]);
+  await takeAnswer(store);
+  assert.deepEqual(await redis.pipeline([["GET", key]]), ["1"]);
 });

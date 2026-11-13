@@ -55,6 +55,9 @@ export function BlockRewrite({
   const spent = left === null || left <= 0;
   if (!ai.on || !REWRITABLE.includes(block.kind)) return null;
   const empty = !blockText(block).trim();
+  // Undo is offered only while the block is exactly what the rewrite wrote; the status line follows the same test, so it
+  // never names an Undo that is not on the screen.
+  const canUndo = before !== null && applied === JSON.stringify(block);
 
   const fillable = FILLABLE.includes(block.kind);
 
@@ -114,7 +117,7 @@ export function BlockRewrite({
             {busy === style.id ? "Rewriting…" : style.label}
           </button>
         ))}
-        {before && applied === JSON.stringify(block) ? (
+        {canUndo ? (
           <button
             type="button"
             className="btn btn-secondary btn-sm"
@@ -136,9 +139,11 @@ export function BlockRewrite({
         </p>
       ) : (
         <p className="mt-1.5 text-xs text-ink-soft" role="status">
-          {before
+          {canUndo
             ? "Written in your store's language. Read it before you save; Undo puts it back as it was."
-            : empty && fillable
+            : before
+              ? "Written in your store's language. Read it before you save."
+              : empty && fillable
               ? "A first draft from your product's description and the rest of this page. It adds no number or promise they do not already make."
               : empty
                 ? "Write something here first, and it can rewrite it four ways."

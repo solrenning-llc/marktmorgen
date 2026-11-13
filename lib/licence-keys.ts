@@ -55,6 +55,7 @@ import { MAX_UPLOAD_KEYS, MAX_POOL_KEYS, MIN_KEY_LENGTH, MAX_KEY_LENGTH, KEY_ALP
 export { MAX_UPLOAD_KEYS, MAX_POOL_KEYS, MIN_KEY_LENGTH, MAX_KEY_LENGTH, KEY_ALPHABET, MAX_KEY_FILE_BYTES, sampleKey, type IssuedKey, type KeyCounts } from "@/lib/licence-key-rules";
 import { saleHandles } from "@/lib/store";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { orderWrite } from "@/lib/order-data";
 import { giveData, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
@@ -701,13 +702,20 @@ export async function checkKey(store: Store, product: Listing, key: string): Pro
 export async function keysOf(store: Store, productIds: string[], email: string): Promise<(IssuedKey & { product: string })[]> {
   if (!store.statsId || !productIds.length || !isRedisConfigured()) return [];
   const address = email.trim().toLowerCase();
-  const replies = await redisPipeline(productIds.map((id) => ["HGETALL", infoKey(store, { id })]));
+  // Each reply read exactly, each entry too (CX-123 rule 24; nuvem I privacy audit, 13 November 2026): a reply that
+  // is not a list, or an entry that cannot be read, may hold this person's key, so the copy fails rather than say it
+  // is whole without it.
+  const what = "a person's license keys";
+  const replies = repliesFor(await redisPipeline(productIds.map((id) => ["HGETALL", infoKey(store, { id })])), productIds.length);
+  if (!replies) throw new UnknownReplyError(what);
   return productIds.flatMap((product, i) => {
-    const flat = Array.isArray(replies[i]) ? (replies[i] as unknown[]) : [];
+    const flat = stringList(replies[i]);
+    if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError(what);
     const out: (IssuedKey & { product: string })[] = [];
     for (let k = 0; k + 1 < flat.length; k += 2) {
-      const entry = parseInfo(String(flat[k]), flat[k + 1]);
-      if (entry && entry.email.trim().toLowerCase() === address) out.push({ ...entry, product });
+      const entry = parseInfo(flat[k], flat[k + 1]);
+      if (!entry) throw new UnknownReplyError(what);
+      if (entry.email.trim().toLowerCase() === address) out.push({ ...entry, product });
     }
     return out;
   });

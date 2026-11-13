@@ -336,13 +336,20 @@ async function givenExactly(sid: string, productId: string, sessionId: string): 
 export async function preordersOf(store: Store, productIds: string[], email: string): Promise<(Preorder & { product: string; checkout: string })[]> {
   if (!store.statsId || !productIds.length || !isRedisConfigured()) return [];
   const address = email.trim().toLowerCase();
-  const replies = await redisPipeline(productIds.map((p) => ["HGETALL", entriesKey(store.statsId as string, p)]));
+  // Each reply read exactly, each entry too (CX-123 rule 24; nuvem I privacy audit, 13 November 2026): a reply that
+  // is not a list, or an entry that cannot be read, may hold this person's pre-order, so the copy fails rather than
+  // say it is whole without it.
+  const what = "a person's pre-orders";
+  const replies = repliesFor(await redisPipeline(productIds.map((p) => ["HGETALL", entriesKey(store.statsId as string, p)])), productIds.length);
+  if (!replies) throw new UnknownReplyError(what);
   return productIds.flatMap((product, i) => {
-    const flat = Array.isArray(replies[i]) ? (replies[i] as unknown[]) : [];
+    const flat = stringList(replies[i]);
+    if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError(what);
     const out: (Preorder & { product: string; checkout: string })[] = [];
     for (let k = 0; k + 1 < flat.length; k += 2) {
       const entry = parsePreorder(flat[k + 1]);
-      if (entry && entry.to.trim().toLowerCase() === address) out.push({ ...entry, product, checkout: String(flat[k]) });
+      if (!entry) throw new UnknownReplyError(what);
+      if (entry.to.trim().toLowerCase() === address) out.push({ ...entry, product, checkout: flat[k] });
     }
     return out;
   });

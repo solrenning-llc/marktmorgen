@@ -208,9 +208,16 @@ const byKey = (courseId: string, who: string) => `nl:course:${courseId}:certs:by
 /** How many certificates of a course deleting a person looks through for ones issued before byKey was kept. */
 const LEGACY_SCAN = 500;
 
+/**
+ * The certificate kept under this id, read exactly (CX-123 rule 24): null for
+ * a nil, or a record that does not read as one; any reply other than one nil
+ * or one string throws UnknownReply, never "not found", so the public page
+ * never says a real certificate does not exist.
+ */
 export async function readCertificate(id: string): Promise<Certificate | null> {
   if (!isRedisConfigured() || !CERT_ID_PATTERN.test(id)) return null;
-  const [raw] = await redisPipeline([["GET", certKey(id)]]);
+  const [raw] = exactReplies(await redisPipeline([["GET", certKey(id)]]), 1, "a certificate");
+  if (raw !== null && typeof raw !== "string") throw new UnknownReply("a certificate");
   return parseCertificate(raw);
 }
 

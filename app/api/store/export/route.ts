@@ -139,6 +139,11 @@ export async function GET(request: NextRequest) {
         if (!read.ok && read.reason === "unreadable") {
           return plain(502, "Some of your sales could not be read exactly just now, so no file was made: a file with sales missing would put wrong totals in your books. Nothing is lost. Try again in a few minutes.");
         }
+        if (!read.ok && read.reason === "pending") {
+          // A payment of the period can still be paid (money review on #2996, MÉDIO 2): its day's invoice number would
+          // come out again later with a larger total, which the accounting app refuses to import.
+          return plain(409, `Some payments in ${period.label} are not settled yet (a checkout still open, a payment still processing, or a renewal not paid yet), so no file was made: its totals could still change. Nothing is lost. Try again tomorrow, or choose an earlier part of the month.`);
+        }
         if (!read.ok) {
           // too_many: past the sales file's own ceiling, refused rather than cut short.
           return plain(422, `${period.label} has more sales than one file can read (${(ACCOUNTING_PAGES * 100).toLocaleString("en-US")} Stripe checkouts or ${ACCOUNTING_PAYPAL_LIMIT.toLocaleString("en-US")} PayPal sales). No file was made. Choose the first or the second half of the month. If that is still too many, write to support.`);

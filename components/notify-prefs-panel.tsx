@@ -53,14 +53,15 @@ export function savedText(stopped: boolean | null): string {
  * saving, so focus stays where the person left it; a successful restart
  * removes its own button, so focus moves to the "Alerts you choose" heading.
  */
-export function NotifyPrefsPanel({ off: initial, stopped: initiallyStopped }: { off: OptionalEvent[]; stopped: boolean | null }) {
-  const [saved, setSaved] = useState<OptionalEvent[]>(initial);
-  const [off, setOff] = useState<OptionalEvent[]>(initial);
+export function NotifyPrefsPanel({ off: initial, stopped: initiallyStopped }: { off: OptionalEvent[] | null; stopped: boolean | null }) {
+  // null: the kept choices could not be read (lib/notify-prefs-rules.ts, keptOff), so these emails are held until a save.
+  const [saved, setSaved] = useState<OptionalEvent[] | null>(initial);
+  const [off, setOff] = useState<OptionalEvent[]>(initial ?? []);
   const [stopped, setStopped] = useState<boolean | null>(initiallyStopped);
   const heading = useRef<HTMLHeadingElement>(null);
   const [busy, setBusy] = useState(false);
   const [said, setSaid] = useState<{ ok: boolean; text: string } | null>(null);
-  const changed = off.length !== saved.length || off.some((event) => !saved.includes(event));
+  const changed = saved === null || off.length !== saved.length || off.some((event) => !saved.includes(event));
 
   async function post(body: Record<string, unknown>): Promise<Answer | null> {
     try {
@@ -127,6 +128,12 @@ export function NotifyPrefsPanel({ off: initial, stopped: initiallyStopped }: { 
         <h2 id="notify-choose" ref={heading} tabIndex={-1} className="t-h3">
           Alerts you choose
         </h2>
+        {saved === null ? (
+          <p role="status" className="notice mt-3">
+            We could not read the choices you saved, so none of these alert emails are being sent. Check the boxes below and press Save to start
+            them again.
+          </p>
+        ) : null}
         <p className="mt-2 text-ink-soft">
           Each one is on until you turn it off. Turning one off stops its email only. Your phone and your team chat keep their own settings.
         </p>

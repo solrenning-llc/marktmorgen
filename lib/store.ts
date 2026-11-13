@@ -572,7 +572,8 @@ export type Store = {
    * until changed, so every alert is emailed as before. Kept here so each alert job follows the last saved choice
    * with the store it already holds, never a second reading. Account, payment, plan and legal emails never read it.
    */
-  alertEmailsOff: OptionalEvent[];
+  /** null: the kept list is not a list (keptOff), so optional alert emails are held until the owner saves again. */
+  alertEmailsOff: OptionalEvent[] | null;
   /**
    * The creator's own websites that may open the store's checkout card and
    * sign-up form over their pages with the checkout script, and be told what

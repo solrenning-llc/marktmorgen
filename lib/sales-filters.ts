@@ -26,6 +26,7 @@ import {
   type SavedFilter,
   type SavedFilterRefusal,
   byName,
+  filterFromQuery,
   filterQuery,
   isFiltered,
   parseSavedFilter,
@@ -80,7 +81,11 @@ function sameName(filters: readonly SavedFilter[], name: string, except = ""): b
  * Keeps `filter` under `name`. `known` is the list the caller has just read (readSavedFilters), so the name is
  * checked against it without reading again; read here when not given.
  */
-export async function saveSalesFilter(statsId: string, rawName: unknown, filter: SalesFilter, known?: SavedFilter[]): Promise<SaveFilterResult> {
+export async function saveSalesFilter(statsId: string, rawName: unknown, given: SalesFilter, known?: SavedFilter[]): Promise<SaveFilterResult> {
+  // Saved as it reads back (Claude 3 cloud J's MEDIUM on #3495): words cut at FILTER_TEXT_MAX can end in a space the
+  // read trims away, and a kept address that reads back as another filter made the whole list unreadable. Read once
+  // through the page's own address, the filter is the one every later read gives.
+  const filter = filterFromQuery(filterQuery(given));
   const name = savedFilterName(rawName);
   if (!name) return { ok: false, reason: "name" };
   if (filter.email || savedFilterHasAddress(name) || savedFilterHasAddress(filter.product)) return { ok: false, reason: "email" };

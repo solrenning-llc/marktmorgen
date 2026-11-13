@@ -412,8 +412,12 @@ export async function readDeals(statsId: string | null, stages: readonly Stage[]
   // never a board with no deals (a workflow would make a second one).
   const raw = repliesFor(await redisPipeline([["HVALS", dealsKey(statsId)]]), 1)?.[0];
   if (!Array.isArray(raw) || !raw.every((value) => typeof value === "string")) throw new CrmDealReadUnavailable();
-  return raw
-    .map((value) => parseDeal(json(value), stages))
+  // A kept deal that does not parse as a record is unknown too (Claude 1's and Codex L's LEVE on #3810), never "no deal":
+  // a workflow's deal step would make a second one beside it. Only a deal in a stage the store no longer has is left off.
+  const records = raw.map((value) => json(value));
+  if (records.some((record) => !record || typeof record !== "object" || Array.isArray(record))) throw new CrmDealReadUnavailable();
+  return records
+    .map((record) => parseDeal(record, stages))
     .filter((d): d is Deal => d !== null)
     .sort((a, b) => b.updatedAt - a.updatedAt);
 }

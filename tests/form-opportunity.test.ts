@@ -64,7 +64,9 @@ async function main() {
 
   part("Capacity and collisions fail closed");
   const key = "nl:crm:deals:" + statsId;
-  for (let i = 0; i < MAX_DEALS - 2; i++) await redis.pipeline([["HSET", key, "fill" + i, "invalid"]]);
+  // Filler that fills the hash but is no deal on this board: records in a stage the store no longer has (a kept record
+  // that does not parse is unknown since #3810's LEVE, and would make the whole board unreadable, not just full).
+  for (let i = 0; i < MAX_DEALS - 2; i++) await redis.pipeline([["HSET", key, "fill" + i, JSON.stringify({ id: "fill" + i, title: "Filler", stage: "gone00", createdAt: 1, updatedAt: 1 })]]);
   const third = { ...response, at: response.at + 2 }; await addResponse(statsId, form.id, third, ROOM);
   is("new conversions respect the whole CRM hash capacity", (await (await send(formOpportunityRef(statsId, form.id, third))).json()).error, "full");
   is("existing conversions can still be retrieved at capacity", (await (await send()).json()).state, "existing");

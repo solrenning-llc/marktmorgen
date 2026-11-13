@@ -684,6 +684,8 @@ export async function forgetInboxPerson(statsId: string | null, email: string): 
 /** How many conversations the inbox keeps: what deleting a person reads (lib/person-erasure.ts). */
 export async function conversationCount(statsId: string | null): Promise<number> {
   if (!statsId || !isRedisConfigured()) return 0;
-  const [n] = await redisPipeline([["ZCARD", indexKey(statsId)]]);
-  return Math.min(Number(n) || 0, MAX_CONVERSATIONS);
+  // ZCARD's own count only (CX-123 rule 24): a person's erasure is never sized as 0 on an unknown answer.
+  const n = countOf(repliesFor(await redisPipeline([["ZCARD", indexKey(statsId)]]), 1)?.[0]);
+  if (n === null) throw new UnknownReplyError("the conversations' count");
+  return Math.min(n, MAX_CONVERSATIONS);
 }

@@ -635,7 +635,7 @@ export type Student = {
  * students. Only Redis's own empty answer is none; a row that is itself not
  * JSON is skipped, as before.
  */
-export async function studentsOf(course: Course, limit = 500): Promise<{ students: Student[]; total: number } | null> {
+export async function studentsOf(course: Course, limit = 500, offset = 0): Promise<{ students: Student[]; total: number } | null> {
   if (!isRedisConfigured()) return { students: [], total: 0 };
   const replies = repliesFor(
     await redisPipeline([
@@ -660,7 +660,8 @@ export async function studentsOf(course: Course, limit = 500): Promise<{ student
     } catch {}
   }
   rows.sort((a, b) => b.l - a.l);
-  const shown = rows.slice(0, limit);
+  const from = Math.max(0, Math.floor(offset));
+  const shown = rows.slice(from, from + limit);
   const lessonIds = new Set(lessonsInOrder(course).map(({ lesson }) => lesson.id));
   const done = shown.length ? repliesFor(await redisPipeline(shown.map((row) => ["SMEMBERS", doneKey(course.id, row.e)])), shown.length) : [];
   if (!done) return null;

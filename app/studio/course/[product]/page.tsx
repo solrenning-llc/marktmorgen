@@ -1,5 +1,5 @@
 import { CourseCommentsStudio, type StudioComment } from "@/components/course-comments-studio";
-import { commentsOn, markSeen, recentComments } from "@/lib/lesson-comments";
+import { commentsOn, markSeen } from "@/lib/lesson-comments";
 import { CREATOR_AUTHOR, commentClock } from "@/lib/lesson-comments-rules";
 import type { Metadata } from "next";
 import { aiAvailableFor, aiLeft } from "@/lib/ai";
@@ -16,10 +16,8 @@ import { productSegment } from "@/lib/product-slug";
 import { lessonCount, lessonsInOrder, readCourse } from "@/lib/course";
 import { captionsAnchor, lessonCaptionCheck } from "@/lib/course-access-check";
 import { CourseAccessCheck } from "@/components/course-access-check";
-import { emailKey, studentEmail, studentsOf } from "@/lib/learn";
 import { canSellProduct } from "@/lib/store-checkout";
-import { passedFor } from "@/lib/quiz";
-import { certificatesFor } from "@/lib/certificate";
+import { COURSE_TAB_PAGE, MAX_TAB_PAGES, MAX_WORK_PAGES, type CourseTab, certificatesTab, commentsTab, courseTab, studentsTab, tabPage, workTab } from "@/lib/studio-course-tabs";
 import { CertificateValidity } from "@/components/certificate-validity";
 import {
   CertificateSwitch, CourseStart,
@@ -38,7 +36,7 @@ import { isBillingConfigured } from "@/lib/billing";
 import { can } from "@/lib/team-roles";
 import { parseLanguage } from "@/lib/store-language";
 import { CourseWorkStudio, type StudioWork } from "@/components/course-work-studio";
-import { isUnreadSubmission, submissionsOf, waitingWork } from "@/lib/assignment";
+import { isUnreadSubmission } from "@/lib/assignment";
 
 
 export const metadata: Metadata = {
@@ -46,9 +44,46 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 };
 
+/** The course page's tabs, in order, with the words of their links (issue #4304). */
+const COURSE_TAB_LINKS: [CourseTab, string][] = [
+  ["course", "Lessons"],
+  ["work", "Work handed in"],
+  ["comments", "Comments"],
+  ["students", "Students"],
+  ["certificates", "Certificates"],
+];
+
 function day(seconds: number): string {
   if (!seconds) return "—";
   return new Date(seconds * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+}
+
+/**
+ * A tab's pages (issue #4304): where this page of rows sits among all of them, and plain links to the pages
+ * either side of it, each its own request. A link names what it opens ("Next 20 comments").
+ */
+function TabPager({ label, noun, page, size, shown, total, maxPages, href }: { label: string; noun: string; page: number; size: number; shown: number; total: number | null; maxPages: number; href: (page: number) => string }) {
+  const first = (page - 1) * size + 1;
+  const last = (page - 1) * size + shown;
+  const more = total === null ? shown === size : last < total;
+  if (page === 1 && !more) return null;
+  return (
+    <nav aria-label={label} className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
+      <p className="text-ink-soft">{shown ? `Showing ${first}–${last} of ${total === null ? `at least ${last}` : total}` : `Nothing on page ${page}`}</p>
+      {page > 1 ? (
+        <Link href={href(page - 1)} className="inline-block min-h-11 py-3 font-bold text-ink-soft underline underline-offset-4 hover:text-violet-deep">
+          {`Previous ${size} ${noun}`}
+        </Link>
+      ) : null}
+      {more && page < maxPages ? (
+        <Link href={href(page + 1)} className="inline-block min-h-11 py-3 font-bold text-ink-soft underline underline-offset-4 hover:text-violet-deep">
+          {`Next ${size} ${noun}`}
+        </Link>
+      ) : more ? (
+        <p className="text-ink-soft">{`These are the last ${noun} this page can show at a time.`}</p>
+      ) : null}
+    </nav>
+  );
 }
 
 /** Where a creator builds a course: modules, lessons, and who is taking it. */
@@ -75,56 +110,62 @@ export default async function StudioCoursePage({
   const course = await readCourse(product.course.id);
   if (!course) redirect(studioPath(store));
   const folder = await storeFolder(view.ref);
-  // Where each lesson video kept by the video service stands (lib/stream.ts).
-  const videoPaths = lessonsInOrder(course).flatMap(({ lesson }) => (lesson.video ? [lesson.video.pathname] : []));
-  const streams = await streamStates(videoPaths).catch(() => ({}));
-  // And the languages each one has captions in.
-  const captions = await streamCaptions(videoPaths).catch(() => ({}));
+  // One tab at a time (issue #4304, unit A): each tab is its own address and reads only what it shows, a page
+  // at a time, so a load fits the STUDIO_PAGE_UNITS it is counted at (lib/studio-course-tabs.ts).
+  const tab = courseTab(query.tab);
+  const page = tabPage(query.page);
+  const lessons = lessonCount(course);
+  const selling = canSellProduct(store, product);
+  const titles = new Map(lessonsInOrder(course).map(({ lesson }) => [lesson.id, lesson.title]));
+  const hasTasks = lessonsInOrder(course).some(({ lesson }) => lesson.task);
+  const onCourse = tab === "course";
+  // Where each lesson video kept by the video service stands (lib/stream.ts), and its captions; read on the
+  // lessons tab only (reading them when a lesson is opened is unit B).
+  const videoPaths = onCourse ? lessonsInOrder(course).flatMap(({ lesson }) => (lesson.video ? [lesson.video.pathname] : [])) : [];
+  const streams = onCourse ? await streamStates(videoPaths).catch(() => ({})) : {};
+  const captions = onCourse ? await streamCaptions(videoPaths).catch(() => ({})) : {};
   // And those being written by AI (lib/auto-captions.ts), which only somebody
   // who may spend on the plan's card, on a store with a plan, may ask for.
-  const writing = await autoWriting(videoPaths).catch(() => ({}));
+  const writing = onCourse ? await autoWriting(videoPaths).catch(() => ({})) : {};
   // Refunds for AI captions Stripe has not confirmed yet, shown to whoever may see the plan's card.
-  const owedRows: Awaited<ReturnType<typeof autoRefundsOwed>> = can(view.role, "billing") ? await autoRefundsOwed(folder).catch(() => []) : [];
+  const owedRows: Awaited<ReturnType<typeof autoRefundsOwed>> = onCourse && can(view.role, "billing") ? await autoRefundsOwed(folder).catch(() => []) : [];
   const autoCan =
     can(view.role, "billing") && store.subscriptionActive && Boolean(store.subscriptionId && store.stripeCustomerId) && isBillingConfigured() && isStreamConfigured();
-  // Null when the students could not be read (rule 24): the page says so instead of "No students yet" or counts of 0.
-  const studentsRead = await studentsOf(course, 500).catch(() => null);
-  const students = studentsRead?.students ?? [];
-  const total = studentsRead?.total ?? 0;
-  const lessons = lessonCount(course);
-  const finished = students.filter((s) => lessons > 0 && s.done >= lessons).length;
-  const started = students.filter((s) => s.done > 0).length;
-  const selling = canSellProduct(store, product);
-  const quizLessons = lessonsInOrder(course).filter(({ lesson }) => lesson.quiz).map(({ lesson }) => lesson.id);
-  const passed = quizLessons.length ? await passedFor(course.id, students.map((s) => emailKey(s.email))) : [];
-  const certificates = await certificatesFor(course.id).catch(() => null);
-  // Counted only over a complete read (issue #4304): over a partial one the page says "Showing X of N" instead.
-  const standing = certificates && !certificates.partial ? certificates.list.filter((c) => !c.withdrawnAt).length : null;
-  // The newest comments under the lessons, marked new since this page last showed them.
-  const [talking, recent] = await Promise.all([commentsOn(course.id), recentComments(course.id, 50)]);
-  await markSeen(course.id);
-  const titles = new Map(lessonsInOrder(course).map(({ lesson }) => [lesson.id, lesson.title]));
-  const aiState = aiAvailableFor(store) ? { on: true, left: await aiLeft(store).catch(() => 0) } : { on: false, left: 0 };
-  // Work handed in for the course's assignments (lib/assignment.ts): what is waiting, or everything.
-  const hasTasks = lessonsInOrder(course).some(({ lesson }) => lesson.task);
-  const showingWork = query.work === "all" ? "all" : "waiting";
-  const work = hasTasks ? await waitingWork(course.id, 50, showingWork === "all") : { rows: [], total: 0 };
-  const [handed, addresses] = await Promise.all([
-    submissionsOf(course.id, work.rows),
-    Promise.all(work.rows.map((row) => studentEmail(course.id, row.who).catch(() => null))),
-  ]);
-  const workRows: StudioWork[] = work.rows.flatMap((row, i) => {
-    const submission = handed[i];
-    const title = titles.get(row.lessonId);
-    return submission && !isUnreadSubmission(submission) && title !== undefined ? [{ lessonId: row.lessonId, lessonTitle: title, who: row.who, email: addresses[i] ?? "", submission }] : [];
-  });
-  // Work that is there but whose record does not read is said in the list, never left out of it (CX-123 rule 24).
-  const unreadWork = work.rows.filter((row, i) => isUnreadSubmission(handed[i]) && titles.has(row.lessonId)).length;
+  const aiState = (onCourse || tab === "work") && aiAvailableFor(store) ? { on: true, left: await aiLeft(store).catch(() => 0) } : { on: false, left: 0 };
   // The "More from" shelf (628 [HN4](b)): the store's listed products to pick from, the course left out, by name.
   // Null when the names could not be read: the section says so instead of an empty list (rule 24).
-  const shelfTitles = await readTitles(store).catch(() => null);
+  const shelfTitles = onCourse ? await readTitles(store).catch(() => null) : null;
   const shelfOptions = shelfTitles ? visibleIds(store).filter((pid) => pid !== product.id && shelfTitles.has(pid)).map((pid) => ({ id: pid, title: shelfTitles.get(pid)! })) : [];
   const shelfSaved = shelfTitles ? (course.shelf ?? []).filter((pid) => shelfTitles.has(pid)).map((pid) => ({ id: pid, title: shelfTitles.get(pid)! })) : [];
+
+  // Students: a page of them; null when they could not be read (rule 24), never "No students yet" or counts of 0.
+  const studentsRead = tab === "students" ? await studentsTab(course, page) : null;
+  const students = studentsRead?.students ?? [];
+  const total = studentsRead?.total ?? 0;
+  const quizLessons = studentsRead?.quizLessons ?? [];
+  const passed = studentsRead?.passed ?? [];
+  const finished = students.filter((s) => lessons > 0 && s.done >= lessons).length;
+  const started = students.filter((s) => s.done > 0).length;
+
+  // Certificates: a page of them; null when they could not be read.
+  const certificates = tab === "certificates" ? await certificatesTab(course.id, page) : null;
+  // Counted only over a complete read: over a partial one the page says "Showing X–Y of N" instead.
+  const standing = certificates && !certificates.partial ? certificates.list.filter((c) => !c.withdrawnAt).length : null;
+
+  // Work handed in for the course's assignments (lib/assignment.ts): what is waiting, or everything, a page of it.
+  const showingWork = query.work === "all" ? "all" : "waiting";
+  const work = tab === "work" && hasTasks ? await workTab(course.id, page, showingWork === "all") : { rows: [], handed: [], addresses: [], total: 0, unread: 0 };
+  const workRows: StudioWork[] = work.rows.flatMap((row, i) => {
+    const submission = work.handed[i];
+    const title = titles.get(row.lessonId);
+    return submission && !isUnreadSubmission(submission) && title !== undefined ? [{ lessonId: row.lessonId, lessonTitle: title, who: row.who, email: work.addresses[i] ?? "", submission }] : [];
+  });
+  // Work that is there but whose record does not read is said in the list, never left out of it (CX-123 rule 24).
+  const unreadWork = work.rows.filter((row, i) => isUnreadSubmission(work.handed[i]) && titles.has(row.lessonId)).length;
+
+  // The newest comments under the lessons, a page of them, marked new since this page last showed them.
+  const [talking, recent] = tab === "comments" ? await Promise.all([commentsOn(course.id), commentsTab(course.id, page)]) : [false, { comments: [], fresh: 0, seen: 0 }];
+  if (tab === "comments") await markSeen(course.id);
   const byId = new Map(recent.comments.map((c) => [c.id, c]));
   const shownComments: StudioComment[] = recent.comments
     .filter((c) => titles.has(c.lesson))
@@ -144,6 +185,7 @@ export default async function StudioCoursePage({
         fresh: c.at > recent.seen && c.by !== CREATOR_AUTHOR,
       };
     });
+  const tabHref = (to: CourseTab, at = 1, extra = "") => `${studioPath(store, [`tab=${to}`, at > 1 ? `page=${at}` : "", extra].filter(Boolean).join("&"), `course/${product.id}`)}#tab-title`;
 
   return (
     <div className="min-h-screen bg-paper text-ink">
@@ -182,6 +224,24 @@ export default async function StudioCoursePage({
           </span>
         </div>
 
+        <nav aria-label="Course sections" className="mt-8 border-b border-line">
+          <ul className="flex flex-wrap gap-x-6 gap-y-2 text-sm font-bold">
+            {COURSE_TAB_LINKS.map(([to, label]) => (
+              <li key={to}>
+                <Link
+                  href={tabHref(to)}
+                  aria-current={tab === to ? "page" : undefined}
+                  className={`inline-block min-h-11 py-3 underline-offset-4 ${tab === to ? "border-b-2 border-violet-deep text-ink" : "text-ink-soft underline hover:text-violet-deep"}`}
+                >
+                  {label}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </nav>
+        <h2 id="tab-title" tabIndex={-1} className="mt-6 text-lg font-semibold tracking-[-0.02em] text-ink">{COURSE_TAB_LINKS.find(([to]) => to === tab)?.[1]}</h2>
+        {onCourse ? (
+          <>
         {owedRows.length ? (
           <section aria-labelledby="captions-refunds" className="mt-5 rounded-2xl border border-line bg-paper p-4" data-captions-refunds>
             <h2 id="captions-refunds" className="text-base font-bold text-ink">
@@ -222,27 +282,6 @@ export default async function StudioCoursePage({
           language={parseLanguage(store.language)}
         />
 
-        {hasTasks ? (
-          <CourseWorkStudio
-            productId={product.id}
-            rows={workRows}
-            unread={unreadWork}
-            total={work.total}
-            showing={showingWork}
-            hrefs={{ waiting: `${studioPath(store, "", `course/${product.id}`)}#work`, all: `${studioPath(store, "work=all", `course/${product.id}`)}#work` }}
-            ai={aiState}
-          />
-        ) : null}
-
-        <CourseCommentsStudio
-          productId={product.id}
-          storeName={store.name}
-          initialOn={talking}
-          initial={shownComments}
-          lessonHref={view.role === "owner" ? `/@${store.handle}/course/${product.id}` : null}
-          now={commentClock()}
-        />
-
         <section className="card mt-8 p-6 sm:p-8" aria-labelledby="shelf-title">
           <h2 id="shelf-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">More from your store</h2>
           <p className="mt-2 max-w-2xl text-ink-soft">
@@ -262,6 +301,44 @@ export default async function StudioCoursePage({
           )}
         </section>
 
+          </>
+        ) : null}
+        {tab === "work" ? (
+          <>
+        {hasTasks ? (
+          <CourseWorkStudio
+            productId={product.id}
+            rows={workRows}
+            unread={unreadWork}
+            total={work.total}
+            showing={showingWork}
+            hrefs={{ waiting: tabHref("work"), all: tabHref("work", 1, "work=all") }}
+            ai={aiState}
+          />
+        ) : null}
+        {hasTasks ? (
+          <TabPager label="Pages of work handed in" noun="pieces of work" page={page} size={COURSE_TAB_PAGE.work} shown={work.rows.length} total={work.total} maxPages={MAX_WORK_PAGES} href={(at) => tabHref("work", at, showingWork === "all" ? "work=all" : "")} />
+        ) : null}
+
+        {hasTasks ? null : <p className="mt-6 text-ink-soft">This course has no assignments yet. Add one to a lesson on the Lessons tab, and the work students hand in is listed here.</p>}
+          </>
+        ) : null}
+        {tab === "comments" ? (
+          <>
+        <CourseCommentsStudio
+          productId={product.id}
+          storeName={store.name}
+          initialOn={talking}
+          initial={shownComments}
+          lessonHref={view.role === "owner" ? `/@${store.handle}/course/${product.id}` : null}
+          now={commentClock()}
+        />
+        <TabPager label="Pages of comments" noun="comments" page={page} size={COURSE_TAB_PAGE.comments} shown={recent.comments.length} total={null} maxPages={MAX_TAB_PAGES} href={(at) => tabHref("comments", at)} />
+
+          </>
+        ) : null}
+        {tab === "certificates" ? (
+          <>
         <section className="card mt-8 p-6 sm:p-8" aria-labelledby="certificate-title">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h2 id="certificate-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">Certificate of completion</h2>
@@ -289,7 +366,7 @@ export default async function StudioCoursePage({
           <h3 className="mt-7 font-semibold text-ink">{standing === null ? "Completions" : `Completions \u00b7 ${standing} ${standing === 1 ? "certificate" : "certificates"} issued`}</h3>
           {certificates?.partial ? (
             <p className="mt-2 text-sm text-ink-soft">
-              {`Showing ${certificates.list.length} of ${certificates.total} certificates. This page reads up to ${certificates.list.length} at a time, so the count of certificates issued is not shown.`}
+              {`${certificates.total} certificates in all, ${COURSE_TAB_PAGE.certificates} on each page, so how many are still standing is not counted here.`}
             </p>
           ) : null}
           {certificates === null ? (
@@ -343,8 +420,14 @@ export default async function StudioCoursePage({
               </table>
             </div>
           )}
+          {certificates ? (
+            <TabPager label="Pages of certificates" noun="certificates" page={page} size={COURSE_TAB_PAGE.certificates} shown={certificates.list.length} total={certificates.total} maxPages={MAX_TAB_PAGES} href={(at) => tabHref("certificates", at)} />
+          ) : null}
         </section>
-
+          </>
+        ) : null}
+        {tab === "students" ? (
+          <>
         <section className="card mt-8 p-6 sm:p-8" aria-labelledby="students-title">
           <h2 id="students-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">Students</h2>
           <p className="mt-2 text-ink-soft">
@@ -367,9 +450,9 @@ export default async function StudioCoursePage({
               </div>
             </div>
           )}
-          {studentsRead !== null && students.length < total ? (
+          {studentsRead !== null && total > students.length ? (
             <p className="mt-3 text-sm text-ink-soft">
-              {`Showing ${students.length} of ${total} students, the most recently here first. The lessons finished above count only the students shown.`}
+              {`${total} students in all, the most recently here first, ${COURSE_TAB_PAGE.students} on each page. The lessons finished above count only the students on this page.`}
             </p>
           ) : null}
           {studentsRead === null ? (
@@ -422,7 +505,12 @@ export default async function StudioCoursePage({
               </table>
             </div>
           )}
+          {studentsRead ? (
+            <TabPager label="Pages of students" noun="students" page={page} size={COURSE_TAB_PAGE.students} shown={students.length} total={total} maxPages={MAX_TAB_PAGES} href={(at) => tabHref("students", at)} />
+          ) : null}
         </section>
+          </>
+        ) : null}
       </main>
       </StudioStorePin>
     </div>

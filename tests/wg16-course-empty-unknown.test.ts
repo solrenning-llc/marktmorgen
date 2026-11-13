@@ -92,8 +92,18 @@ async function main(): Promise<void> {
 
   part("The pages say the list could not be read, instead of the empty state");
   const page = readFileSync("app/studio/course/[product]/page.tsx", "utf8");
-  is("the course page keeps an unknown read of the students apart", page.includes("const studentsRead = await studentsOf(course, 500).catch(() => null);"), true);
-  is("and of the certificates", page.includes("const certificates = await certificatesFor(course.id).catch(() => null);"), true);
+  // Since #4304 unit A the reads are a tab's, a page at a time (lib/studio-course-tabs.ts); an unknown read stays null.
+  const tabs = readFileSync("lib/studio-course-tabs.ts", "utf8");
+  is(
+    "the course page keeps an unknown read of the students apart",
+    [tabs.includes("const read = await studentsOf(course, size, size * (page - 1)).catch(() => null);\n  if (!read) return null;"), page.includes('const studentsRead = tab === "students" ? await studentsTab(course, page) : null;')],
+    [true, true],
+  );
+  is(
+    "and of the certificates",
+    [tabs.includes("return certificatesFor(courseId, size * (page - 1), size).catch(() => null);"), page.includes('const certificates = tab === "certificates" ? await certificatesTab(course.id, page) : null;')],
+    [true, true],
+  );
   is(
     "students unread: a status note, not the empty state or the counts",
     page.includes('{studentsRead === null ? (\n            <p role="status" className="notice mt-5">\n              The students could not be read just now. Reload this page in a moment; this does not mean nobody has opened the course.\n            </p>\n          ) : students.length === 0 ? ('),

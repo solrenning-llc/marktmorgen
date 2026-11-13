@@ -488,10 +488,10 @@ export async function deleteComment(courseId: string, id: string, room: DataStor
 }
 
 /** The course's newest comments, for the studio, and how many came since it last looked. */
-export async function recentComments(courseId: string, limit = 50): Promise<{ comments: LessonComment[]; fresh: number; seen: number }> {
+export async function recentComments(courseId: string, limit = 50, offset = 0): Promise<{ comments: LessonComment[]; fresh: number; seen: number }> {
   if (!isRedisConfigured()) return { comments: [], fresh: 0, seen: 0 };
   const [ids, seenRaw] = await redisPipeline([
-    ["ZREVRANGE", allKey(courseId), 0, limit - 1],
+    ["ZREVRANGE", allKey(courseId), offset, offset + limit - 1],
     ["GET", seenKey(courseId)],
   ]);
   const seen = Number(seenRaw) || 0;

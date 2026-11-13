@@ -362,7 +362,7 @@ async function claimSlot(courseId: string, who: string, id: string): Promise<Cer
  * holds; `partial` says the records were not all read, so the page says "Showing X of N" and never counts what it
  * read as all of them. Null when a reply is not exactly what was asked for (rule 24).
  */
-export async function certificatesFor(courseId: string): Promise<{ list: Certificate[]; total: number; partial: boolean } | null> {
+export async function certificatesFor(courseId: string, offset = 0, limit = MAX_LISTED_CERTS): Promise<{ list: Certificate[]; total: number; partial: boolean } | null> {
   if (!isRedisConfigured()) return { list: [], total: 0, partial: false };
   const read = plainList(await redisPipeline([["SMEMBERS", allKey(courseId)]]));
   if (!read || read.length !== 1) return null;
@@ -370,7 +370,10 @@ export async function certificatesFor(courseId: string): Promise<{ list: Certifi
   if (!members || members.some((id) => typeof id !== "string")) return null;
   const valid = (members as string[]).filter((id) => CERT_ID_PATTERN.test(id)).sort();
   if (valid.length === 0) return { list: [], total: 0, partial: false };
-  const reading = valid.slice(0, MAX_LISTED_CERTS);
+  // In the order of their ids, so a page of them is the same page each time (the studio's certificates tab, #4304).
+  const from = Math.max(0, Math.floor(offset));
+  const reading = valid.slice(from, from + Math.max(0, Math.min(MAX_LISTED_CERTS, Math.floor(limit))));
+  if (!reading.length) return { list: [], total: valid.length, partial: valid.length > 0 };
   const rows = plainList(await redisPipeline(reading.map((id) => ["GET", certKey(id)])));
   if (!rows || rows.length !== reading.length || rows.some((row) => row !== null && typeof row !== "string")) return null;
   const list = rows

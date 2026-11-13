@@ -1,0 +1,75 @@
+/**
+ * The studio's course page in tabs (issue #4304; shape decided by the coordinator on 13/11/2026, unit A): each
+ * tab is its own address (?tab=…&page=…), and a load reads only what that tab shows, a page at a time, so its
+ * worst case fits the STUDIO_PAGE_UNITS the page is counted at. tests/course-tab-reads.test.ts adds up each tab's
+ * worst case against that figure and fails when one goes past it.
+ *
+ * The lessons tab ("course") still reads every lesson video's state in this unit; reading it when a lesson is
+ * opened is unit B. The students tab still reads the whole students hash in bytes; an ordered index is unit C.
+ */
+import { certificatesFor } from "@/lib/certificate";
+import type { Course } from "@/lib/course";
+import { lessonsInOrder } from "@/lib/course";
+import { emailKey, studentEmail, studentsOf } from "@/lib/learn";
+import { passedFor } from "@/lib/quiz";
+import { isUnreadSubmission, submissionsOf, waitingWork } from "@/lib/assignment";
+import { recentComments } from "@/lib/lesson-comments";
+
+export const COURSE_TABS = ["course", "work", "comments", "students", "certificates"] as const;
+export type CourseTab = (typeof COURSE_TABS)[number];
+
+/** How many rows a tab shows at a time, each sized so the tab's worst case fits the page's reads. */
+export const COURSE_TAB_PAGE: Record<Exclude<CourseTab, "course">, number> = {
+  // A piece of work can hold MAX_ANSWER_TEXT and MAX_FEEDBACK characters (up to ~44 KB): three fit the page's
+  // bytes with the ids of every page before it (MAX_WORK_PAGES).
+  work: 3,
+  // A comment holds MAX_LESSON_COMMENT characters (up to ~8 KB in four-byte characters): twenty fit.
+  comments: 20,
+  students: 25,
+  certificates: 25,
+};
+
+/** The most pages a tab offers; past it the page says how many more there are instead of linking to them. */
+export const MAX_TAB_PAGES = 400;
+/** The work tab reads the ids of every page before the one shown (lib/assignment.ts has no offset yet), so fewer. */
+export const MAX_WORK_PAGES = 250;
+
+export function courseTab(raw: unknown): CourseTab {
+  return typeof raw === "string" && (COURSE_TABS as readonly string[]).includes(raw) ? (raw as CourseTab) : "course";
+}
+
+export function tabPage(raw: unknown): number {
+  const n = typeof raw === "string" && /^[1-9][0-9]{0,3}$/.test(raw) ? Number(raw) : 1;
+  return Math.min(n, MAX_TAB_PAGES);
+}
+
+/** The work handed in, one page of it: the ids of the first pages are read (cheap), the records of this page only. */
+export async function workTab(courseId: string, pageAsked: number, all: boolean) {
+  const size = COURSE_TAB_PAGE.work;
+  const page = Math.min(pageAsked, MAX_WORK_PAGES);
+  const listed = await waitingWork(courseId, size * page, all);
+  const rows = listed.rows.slice(size * (page - 1), size * page);
+  const [handed, addresses] = await Promise.all([submissionsOf(courseId, rows), Promise.all(rows.map((row) => studentEmail(courseId, row.who).catch(() => null)))]);
+  return { rows, handed, addresses, total: listed.total, unread: rows.filter((_, i) => isUnreadSubmission(handed[i])).length };
+}
+
+export async function commentsTab(courseId: string, page: number) {
+  const size = COURSE_TAB_PAGE.comments;
+  return recentComments(courseId, size, size * (page - 1));
+}
+
+/** Null when the students could not be read (rule 24). */
+export async function studentsTab(course: Course, page: number) {
+  const size = COURSE_TAB_PAGE.students;
+  const read = await studentsOf(course, size, size * (page - 1)).catch(() => null);
+  if (!read) return null;
+  const quizLessons = lessonsInOrder(course).filter(({ lesson }) => lesson.quiz).map(({ lesson }) => lesson.id);
+  const passed = quizLessons.length ? await passedFor(course.id, read.students.map((s) => emailKey(s.email))) : [];
+  return { ...read, quizLessons, passed };
+}
+
+/** Null when the certificates could not be read (rule 24). */
+export async function certificatesTab(courseId: string, page: number) {
+  const size = COURSE_TAB_PAGE.certificates;
+  return certificatesFor(courseId, size * (page - 1), size).catch(() => null);
+}

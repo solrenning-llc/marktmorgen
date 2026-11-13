@@ -150,6 +150,17 @@ async function main(): Promise<void> {
   is("an answer that is not known: accepted, as an email that may have gone", (await post(urgentUnsure.product.id)).status, 200);
   urgentDown = null;
 
+  part("Codex U and Codex L on #3587: an address outside Marktmorgen that imitates a store's route holds nothing");
+  for (const [label, host] of [["another site", "https://evil.example"], ["a look-alike host", "https://marktmorgen.com.evil.example"], ["plain http elsewhere", "http://outside.example"]] as const) {
+    const victim = await addProduct(owner, `Not Hosted Elsewhere ${label}`, "On sale", "9", null);
+    if (!victim.ok) throw new Error("no product");
+    sent.length = 0;
+    const outside = await reportRoute(new NextRequest("https://marktmorgen.com/api/report", { method: "POST", headers: { "content-type": "application/json", origin: "https://marktmorgen.com", host: "marktmorgen.com", "x-forwarded-for": `203.0.113.${label.length}` }, body: JSON.stringify({ ...CHILD, url: `${host}/@safetyshop/p/${victim.product.id}` }) }));
+    const alert = sent.find((mail) => /^URGENT/.test(mail.subject));
+    is(`${label}: filed (200), the real product still published, the owner told nothing was held because it is not a Marktmorgen address`, [outside.status, (await readListing((await storeForEmail(owner))!, victim.product.id))?.hidden ?? false, Boolean(alert?.text.includes("not a Marktmorgen address"))], [200, false, true]);
+  }
+  is("held directly: an outside address never holds", await holdReported({ kind: "child_safety", url: `https://evil.example/@safetyshop/p/${id}` }, (await storeForEmail(owner))!), "outside");
+
   part("A product that cannot be read is said as such, never as an address that names nothing");
   const many = [];
   for (let n = 0; n < 26; n++) {

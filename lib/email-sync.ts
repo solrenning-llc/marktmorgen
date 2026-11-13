@@ -139,10 +139,12 @@ const seenKey = (statsId: string, seed: string) =>
   `nl:esync:seen:${createHash("sha256").update(`${statsId}|${seed}`).digest("hex").slice(0, 40)}`;
 
 /**
- * A try of one person's job in flight at the platform (#4266, review of #4392): set by FLY_IF_READ, atomically with
- * the check that the job still holds what was read, right before the platform is asked; deleted when the request is
- * over, and gone by itself within a lease at the most. Named by the store and the address, hashed: the person's
- * erasure (forgetSyncPerson) finds it whether or not a job is left, and says "not finished" while it is there.
+ * The tries of one person's jobs in flight at the platform (#4266, review of #4392): a set of job ids, one member a
+ * try, added by FLY_IF_READ atomically with the check that the job still holds what was read, right before the
+ * platform is asked; each try takes out only its own member when its request is over (two jobs of one person, one a
+ * checkout, can be in flight at once), and the set is gone by itself a lease after its last try at the most. Named
+ * by the store and the address, hashed: the person's erasure (forgetSyncPerson) finds it whether or not a job is
+ * left, and says "not finished" while it holds any member.
  */
 const flyKey = (statsId: string, email: string) =>
   `nl:esync:fly:${createHash("sha256").update(`${statsId}|${normaliseEmail(email)}`).digest("hex").slice(0, 40)}`;
@@ -420,7 +422,7 @@ async function attempt(job: Job, raw: string, now: number, budget: number): Prom
   // that deleted it since the read above refuses the mark, and the platform is never asked; one landing after the
   // mark, during the request, says "not finished" until the request is over (forgetSyncPerson).
   const fly = flyKey(job.statsId, job.email);
-  const marked = repliesFor(await redisPipeline([["EVAL", FLY_IF_READ, 2, jobKey(job.id), fly, raw, LEASE_MS]]), 1);
+  const marked = repliesFor(await redisPipeline([["EVAL", FLY_IF_READ, 2, jobKey(job.id), fly, raw, LEASE_MS, job.id]]), 1);
   const mark = marked ? countOf(marked[0]) : null;
   if (mark === null) throw new UnknownReplyError("marking an email platform try in flight");
   if (mark !== 1) return null;
@@ -449,19 +451,22 @@ async function attempt(job: Job, raw: string, now: number, budget: number): Prom
     if (!problem.retry) return { ...next, state: "failed", next: 0, lastError: problem.message };
     return again(problem.message);
   } finally {
-    // The request is over: an erasure may finish now. If this delete does not answer, the mark ends with its lease.
-    await redisPipeline([["DEL", fly]]).catch(() => undefined);
+    // This try's request is over: only its own member leaves (another try of the same person may still be in flight).
+    // If this does not answer, the member ends with the set's lease.
+    await redisPipeline([["SREM", fly, job.id]]).catch(() => undefined);
   }
 }
 
 /**
- * Marks a try in flight (#4266): KEYS[1] the job, KEYS[2] the in-flight mark; ARGV[1] the record as read, ARGV[2] the
- * mark's milliseconds. Answers 1 when marked, 0 when the record is gone or holds something else; then nothing is set.
+ * Marks a try in flight (#4266): KEYS[1] the job, KEYS[2] the person's in-flight set; ARGV[1] the record as read,
+ * ARGV[2] the set's milliseconds, ARGV[3] the job id. Answers 1 when marked, 0 when the record is gone or holds
+ * something else; then nothing is set.
  * lib/redis-memory.ts runs it the same way.
  */
-export const FLY_IF_READ = `-- marktmorgen:esync-fly-if-read:v1
+export const FLY_IF_READ = `-- marktmorgen:esync-fly-if-read:v2
 if redis.call("GET", KEYS[1]) ~= ARGV[1] then return 0 end
-redis.call("SET", KEYS[2], "1", "PX", ARGV[2])
+redis.call("SADD", KEYS[2], ARGV[3])
+redis.call("PEXPIRE", KEYS[2], ARGV[2])
 return 1`;
 
 /** Tries a job this caller has claimed, writes down how it went, and queues its next try. */
@@ -1051,12 +1056,12 @@ export async function forgetSyncPerson(statsId: string | null, email: string): P
   // A try of theirs in flight at the platform (#4266, review of #4392): its request may still carry the address, so
   // the part is not finished. Read after the jobs are deleted (below), so a try that had not marked itself yet finds
   // its job gone and never asks the platform.
-  const fly = ["EXISTS", flyKey(statsId, address)];
+  const fly = ["SCARD", flyKey(statsId, address)];
   if (!theirs.length) {
     const read = repliesFor(await redisPipeline([fly]), 1);
     const flying = read ? countOf(read[0]) : null;
-    if (flying === null || flying > 1) throw new UnknownReplyError("an email platform try in flight, erasing a person");
-    if (flying === 1) throw new UnknownReplyError("an email platform try still in flight, erasing a person");
+    if (flying === null) throw new UnknownReplyError("an email platform try in flight, erasing a person");
+    if (flying > 0) throw new UnknownReplyError("an email platform try still in flight, erasing a person");
     return 0;
   }
   // Each delete answers a count (CX-123 rule 24): DEL and ZREM at most the jobs named, LREM at most the log's length.
@@ -1064,8 +1069,8 @@ export async function forgetSyncPerson(statsId: string | null, email: string): P
   const commands: (string | number)[][] = [["DEL", ...theirs.map(jobKey)], ...theirs.map((id) => ["LREM", logKey(statsId), 0, id]), ["ZREM", QUEUE_KEY, ...theirs.map((id) => `${statsId}|${id}`)], fly];
   const all = repliesFor(await redisPipeline(commands), commands.length);
   const flying = all ? countOf(all[all.length - 1]) : null;
-  if (flying === null || flying > 1) throw new UnknownReplyError("an email platform try in flight, erasing a person");
-  if (flying === 1) throw new UnknownReplyError("an email platform try still in flight, erasing a person");
+  if (flying === null) throw new UnknownReplyError("an email platform try in flight, erasing a person");
+  if (flying > 0) throw new UnknownReplyError("an email platform try still in flight, erasing a person");
   const replies = all ? all.slice(0, -1) : null;
   const within = (reply: unknown, most: number) => {
     const n = countOf(reply);

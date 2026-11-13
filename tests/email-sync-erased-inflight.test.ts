@@ -125,7 +125,55 @@ async function main(): Promise<void> {
   is("the job record holding the address is gone", redis.run(["GET", jobKey]), null);
   is("the job is not queued again", redis.run(["ZSCORE", QUEUE_KEY, member]), null);
   is("once the try is over, the erasure is pressed again and finishes", await erase(), { finished: 0, refused: false });
-  is("nothing of the try is left in flight", redis.run(["EXISTS", `nl:esync:fly:${createHash("sha256").update(`${STATS}|${EMAIL}`).digest("hex").slice(0, 40)}`]), 0);
+  const flyKey = `nl:esync:fly:${createHash("sha256").update(`${STATS}|${EMAIL}`).digest("hex").slice(0, 40)}`;
+  is("nothing of the try is left in flight", redis.run(["SCARD", flyKey]), 0);
+
+  part("two tries of the same person in flight: the first ending does not let the erasure finish under the second");
+  await seed(now);
+  const ID2 = "esj_" + "e".repeat(24);
+  const job2 = { ...JSON.parse(String(redis.run(["GET", jobKey]))), id: ID2, title: "Second checkout" };
+  await redis.pipeline([["SET", `nl:esync:j:${ID2}`, JSON.stringify(job2)], ["RPUSH", logKey, ID2], ["ZADD", QUEUE_KEY, now - 1000, `${STATS}|${ID2}`]]);
+  const releases: (() => void)[] = [];
+  let bothAsked: () => void = () => undefined;
+  const bothIn = new Promise<void>((resolve) => (bothAsked = resolve));
+  let firstOver: () => void = () => undefined;
+  const firstDone = new Promise<void>((resolve) => (firstOver = resolve));
+  setPlatformHooksForTests({
+    resolve: () =>
+      new Promise((_, reject) => {
+        releases.push(() => reject(new Error("synthetic: the platform's host is not reached in tests")));
+        if (releases.length === 2) bothAsked();
+      }),
+  });
+  let marksCleared = 0;
+  redis.pipeline = (async (batch: Batch) => {
+    const leased = lease(batch);
+    if (leased) return leased;
+    const replies = await original(batch);
+    // A try's end clears its in-flight mark (whatever the command): the first one to do so lets the check go on.
+    if (batch.some((c) => (c[0] === "DEL" || c[0] === "SREM") && c[1] === flyKey) && ++marksCleared === 1) firstOver();
+    return replies;
+  }) as typeof redis.pipeline;
+  let twoErasure: Erasure | null = null;
+  const run = syncDue(now + 60_000, now);
+  try {
+    await bothIn;
+    releases[0]();
+    await firstDone;
+    redis.pipeline = original;
+    twoErasure = await erase();
+    redis.pipeline = (async (batch: Batch) => lease(batch) ?? original(batch)) as typeof redis.pipeline;
+    releases[1]();
+    await run;
+  } finally {
+    redis.pipeline = original;
+    setPlatformHooksForTests(undefined);
+  }
+  is("(control) both tries asked the platform", releases.length, 2);
+  is("while the second try is still in flight, the erasure does not report its part finished", (twoErasure as Erasure | null)?.refused, true);
+  is("once both tries are over, the erasure is pressed again and finishes", await erase(), { finished: 0, refused: false });
+  is("neither job record is left", [redis.run(["GET", jobKey]), redis.run(["GET", `nl:esync:j:${ID2}`])], [null, null]);
+  is("nothing of either try is left in flight", redis.run(["SCARD", flyKey]), 0);
   done();
 }
 main().catch((error) => {

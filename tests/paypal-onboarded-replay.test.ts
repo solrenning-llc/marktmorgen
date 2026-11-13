@@ -14,8 +14,9 @@ import { GET as onboarded } from "@/app/api/store/paypal/onboarded/route";
 import { POST as connect } from "@/app/api/store/paypal/connect/route";
 import { POST as disconnect } from "@/app/api/store/paypal/disconnect/route";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
+import { markOnboarding } from "@/lib/paypal-sales";
 import { claimHandle, ensureStatsId, ensureStoreId, setPayPalSeller, storeForEmail } from "@/lib/store";
-import "./redis-stub";
+import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
 const PARTNER = "PARTNERMERCH01";
@@ -140,6 +141,30 @@ async function main() {
   // scope in a test and throws once the seller is written (`back` then answers null): the seller is what is checked.
   await back();
   is("the newer one does", await seller(), SELLER);
+
+  part("A disconnect whose end of the connect is not confirmed still wins over the way back already on its way (Codex X5)");
+  await setPayPalSeller(email, null);
+  // Marked as the connect route marks it (that route is limited to ten an hour, spent by the parts above).
+  await markOnboarding((await storeForEmail(email))!.statsId!);
+  integrationAsks = 0;
+  const pipeline = redis.pipeline.bind(redis);
+  duringLookup = async () => {
+    // The connect mark's DEL comes back in a shape that is not its own: the mark stays.
+    redis.pipeline = (async (commands: (string | number)[][]) =>
+      commands.length === 1 && commands[0][0] === "DEL" && String(commands[0][1]).startsWith("nl:ppsell:start:") ? ["QUEUED"] : pipeline(commands)) as typeof redis.pipeline;
+    try {
+      await stop();
+    } finally {
+      redis.pipeline = pipeline;
+    }
+  };
+  const unsure = await back();
+  is("PayPal was asked, and the disconnect ran while it was", [integrationAsks, duringLookup], [1, null]);
+  is("the store stays disconnected", await seller(), null);
+  is("the way back does not say ready", said(unsure) === "ready", false);
+  integrationAsks = 0;
+  const later = await back();
+  is("opened again later, the old connect still connects nothing", [await seller(), said(later) === "ready"], [null, false]);
   done();
 }
 

@@ -23,6 +23,9 @@
 import { PDFDocument, type PDFPage, rgb } from "pdf-lib";
 import fontkit from "@pdf-lib/fontkit";
 import { PageTagger, type TagRole } from "@/lib/tagged-pdf";
+
+/** The roles a receipt draws: headings and paragraphs only (the tagger also knows table and list cells). */
+type ReceiptRole = Extract<TagRole, "H1" | "H2" | "P">;
 import { canDraw, loadFonts } from "@/lib/certificate-pdf";
 import { wrap } from "@/lib/form-response-pdf";
 import { formatMoney } from "@/lib/money";
@@ -240,9 +243,9 @@ export function receiptTitle(receipt: Receipt): string {
 }
 
 /** The texts the file draws, in reading order: what `canDraw` is asked about before anything is made. */
-export function receiptTexts(receipt: Receipt): { role: TagRole; text: string }[] {
+export function receiptTexts(receipt: Receipt): { role: ReceiptRole; text: string }[] {
   const money = (value: number) => formatMoney(value, receipt.currency, "en-US");
-  const out: { role: TagRole; text: string }[] = [{ role: "H1", text: `Receipt from ${receipt.sellerName}` }];
+  const out: { role: ReceiptRole; text: string }[] = [{ role: "H1", text: `Receipt from ${receipt.sellerName}` }];
   if (receipt.sellerAddress) out.push({ role: "P", text: receipt.sellerAddress });
   out.push(
     { role: "H2", text: "Sale" },
@@ -294,7 +297,7 @@ export async function receiptPdf(receipt: Receipt): Promise<Uint8Array> {
   paper(page);
   let y = H - MARGIN;
   const style = { H1: { font: semi, size: 20, gap: 10 }, H2: { font: semi, size: 13, gap: 4 }, P: { font: sans, size: 11, gap: 4 } } as const;
-  const lead = (role: TagRole) => style[role].size * 1.5;
+  const lead = (role: ReceiptRole) => style[role].size * 1.5;
   const turn = () => {
     page = pdf.addPage([W, H]);
     tag.nextPage(page);

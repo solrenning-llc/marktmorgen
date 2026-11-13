@@ -30,7 +30,7 @@ if ARGV[11]=='restart' then
 else
  if redis.call('HGET',KEYS[1],'policy')~=ARGV[1] or redis.call('HGET',KEYS[1],'review')~=ARGV[2] then return 0 end
 end
-if ARGV[11]~='checkout' and ARGV[11]~='switch' and ARGV[11]~='restart' then return 0 end
+if ARGV[11]~='checkout' and ARGV[11]~='switch' and ARGV[11]~='restart' and ARGV[11]~='renewal' then return 0 end
 local receiptPrefix=ARGV[2]..'|'..ARGV[3]..'|'..ARGV[4]..'|'..ARGV[11]..'|'
 if string.sub(ARGV[10] or '',1,#receiptPrefix)~=receiptPrefix then return 0 end
 -- An activated contract cannot open a second new-enrollment obligation.
@@ -41,7 +41,7 @@ local sourceCharge=nil
 if ARGV[11]=='checkout' then
  if ARGV[12]~='' then return 0 end
 else
- -- Switch/restart obligations name the same immutable funded subscription.
+ -- Switch/restart/renewal obligations name the same immutable funded subscription.
  -- A restart reserve does not prove that the provider actually stopped it.
  local active=redis.call('HGET',KEYS[1],'active:'..ARGV[3])
  if not active or #active>256 then return 0 end
@@ -52,6 +52,15 @@ else
  local created,start,finish,now=amount(source[4]),amount(source[6]),amount(source[7]),amount(ARGV[13])
  if (source[5]~='trial' and source[5]~='paid') or not created or not start or not finish or not now or start<created or start>now or finish<=start then return 0 end
  if ARGV[11]=='switch' and finish<=now then return 0 end
+ if ARGV[11]=='renewal' then
+  -- A renewal continues the paid or trial term it follows: the same plan and
+  -- interval, beginning exactly at its end, reserved only after that term
+  -- ended (the provider's paid observation comes first) and within one more
+  -- longest term (372 days a year, 31 a month), so it never funds a stale one.
+  local following=amount(ARGV[14])
+  local longest=(string.sub(ARGV[4],-5)=='_year') and 32140800 or 2678400
+  if source[3]~=ARGV[4] or not following or following~=finish or finish>now or now>=finish+longest then return 0 end
+ end
  if ARGV[11]=='restart' then
   if redis.call('HGET',KEYS[1],'restart-owner:'..source[1]) then return 0 end
   if source[5]~='paid' or created<=0 or start<=0 or now<=0 or finish>now or source[3]~=ARGV[4] or (ARGV[4]~='creator_month' and ARGV[4]~='pro_month' and ARGV[4]~='scale_month') then return 0 end
@@ -70,7 +79,8 @@ else
  local receipt={}
  for field in string.gmatch(raw,'[^|]+') do table.insert(receipt,field) end
  if table.concat(receipt,'|')~=raw or receipt[1]~=ARGV[2] or receipt[2]~=ARGV[3] or receipt[3]~=source[3] then return 0 end
- if not ((receipt[4]=='checkout' and #receipt==9) or ((receipt[4]=='switch' or receipt[4]=='restart') and #receipt==10 and string.match(receipt[10],'^ctr_[%w_-]+$'))) then return 0 end
+ -- A renewed proof may be switched or renewed again; restart lineage does not accept one yet.
+ if not ((receipt[4]=='checkout' and #receipt==9) or ((receipt[4]=='switch' or receipt[4]=='restart' or (receipt[4]=='renewal' and ARGV[11]~='restart')) and #receipt==10 and string.match(receipt[10],'^ctr_[%w_-]+$'))) then return 0 end
  sourceCharge=amount(receipt[5])
  local submitted,expires,activation=amount(receipt[6]),amount(receipt[7]),amount(receipt[8])
  if not submitted or not expires or not activation or (receipt[4]=='checkout' and (submitted<300 or created<submitted-300 or created>activation)) then return 0 end
@@ -92,13 +102,15 @@ redis.call('HSET',KEYS[1],'pending:'..ARGV[3],ARGV[9])
 redis.call('HSET',KEYS[1],'grant:'..ARGV[9],ARGV[10]..(sourceGrant and '|'..sourceGrant or ''))
 return 1
 `;
-export type ContractGrant={sourceSubscriptionId:string|null;action:'checkout'|'switch'|'restart';id:string;reviewId:string;statsId:string;key:ContractKey;reservedCents:number;submitUntilSeconds:number;checkoutExpiresAtSeconds:number;activationUntilSeconds:number;liabilitiesThrough:string};
+export type ContractGrant={sourceSubscriptionId:string|null;action:'checkout'|'switch'|'restart'|'renewal';id:string;reviewId:string;statsId:string;key:ContractKey;reservedCents:number;submitUntilSeconds:number;checkoutExpiresAtSeconds:number;activationUntilSeconds:number;liabilitiesThrough:string};
 /** Single-use, full-cost grant. Failure or lost acknowledgement never frees
  * money, capacity or the store's pending lock. No initialization or expiry. */
-export async function reserveContractFunding(statsId:string,tier:Tier,cycle:Cycle,action:'checkout'|'switch'|'restart',policy:ContractFundingPolicy|null=CURRENT_CONTRACT_FUNDING_POLICY,context:ContractFundingContext={termsSnapshot:CURRENT_PRICE_AND_RIGHTS_SNAPSHOT,review:CURRENT_COMMERCIAL_MARGIN_REVIEW},nonce='ctr_'+randomUUID(),sourceSubscriptionId:string|null=null):Promise<ContractGrant|null>{
- if(typeof statsId!=='string'||!/^[A-Za-z0-9_-]{1,128}$/.test(statsId)||!['checkout','switch','restart'].includes(action)||typeof nonce!=='string'||!/^ctr_[A-Za-z0-9_-]{1,80}$/.test(nonce)||typeof tier!=='string'||typeof cycle!=='string'||!isRedisConfigured())return null;
+export async function reserveContractFunding(statsId:string,tier:Tier,cycle:Cycle,action:'checkout'|'switch'|'restart'|'renewal',policy:ContractFundingPolicy|null=CURRENT_CONTRACT_FUNDING_POLICY,context:ContractFundingContext={termsSnapshot:CURRENT_PRICE_AND_RIGHTS_SNAPSHOT,review:CURRENT_COMMERCIAL_MARGIN_REVIEW},nonce='ctr_'+randomUUID(),sourceSubscriptionId:string|null=null,renewalStartSeconds:number|null=null):Promise<ContractGrant|null>{
+ if(typeof statsId!=='string'||!/^[A-Za-z0-9_-]{1,128}$/.test(statsId)||!['checkout','switch','restart','renewal'].includes(action)||typeof nonce!=='string'||!/^ctr_[A-Za-z0-9_-]{1,80}$/.test(nonce)||typeof tier!=='string'||typeof cycle!=='string'||!isRedisConfigured())return null;
  if(action==='restart'&&(!Boolean(CONTRACT_ADMISSION_COVERAGE.pauseRestart)||cycle!=='month'))return null;
- if((action==='switch'||action==='restart')?(typeof sourceSubscriptionId!=='string'||!/^sub_[A-Za-z0-9]{6,64}$/.test(sourceSubscriptionId)):sourceSubscriptionId!==null)return null;
+ // Renewals refuse before Redis until their whole coverage is reviewed.
+ if(action==='renewal'?(!Boolean(CONTRACT_ADMISSION_COVERAGE.renewals)||!Number.isSafeInteger(renewalStartSeconds)||(renewalStartSeconds as number)<=0||nonce!==renewalContractNonce(statsId,sourceSubscriptionId,renewalStartSeconds)):renewalStartSeconds!==null)return null;
+ if((action==='switch'||action==='restart'||action==='renewal')?(typeof sourceSubscriptionId!=='string'||!/^sub_[A-Za-z0-9]{6,64}$/.test(sourceSubscriptionId)):sourceSubscriptionId!==null)return null;
  const key=(tier+'_'+cycle) as ContractKey;
  if(!customerTaxContractContextSupported(context,policy))return null;
  const encodedContext=canonicalFinancialSnapshot(context);
@@ -112,7 +124,7 @@ export async function reserveContractFunding(statsId:string,tier:Tier,cycle:Cycl
  const seconds=Math.floor(reservedAt.getTime()/1000),submitUntilSeconds=seconds+CONTRACT_FUNDING_RULES.submissionSeconds,checkoutExpiresAtSeconds=seconds+CONTRACT_FUNDING_RULES.checkoutLifetimeSeconds,activationUntilSeconds=seconds+CONTRACT_FUNDING_RULES.activationDelayDays*86400;
  const charge=config.grantCents[key],receipt=[config.reviewId,statsId,key,action,charge,submitUntilSeconds,checkoutExpiresAtSeconds,activationUntilSeconds,config.liabilitiesThroughMs].join('|');
  try{
-  const result=await redisPipeline([['EVAL',RESERVE_CONTRACT,1,'nl:contract-reserve:v1',contractFundingBinding(config),config.reviewId,statsId,key,charge,config.cashLimitCents,config.carryForwardCents,config.fundedGrants[key],nonce,receipt,action,sourceSubscriptionId??'',seconds,...(action==='restart'?[CONTRACT_FUNDING_RULES.submissionSeconds]:[])]]);
+  const result=await redisPipeline([['EVAL',RESERVE_CONTRACT,1,'nl:contract-reserve:v1',contractFundingBinding(config),config.reviewId,statsId,key,charge,config.cashLimitCents,config.carryForwardCents,config.fundedGrants[key],nonce,receipt,action,sourceSubscriptionId??'',seconds,...(action==='restart'?[CONTRACT_FUNDING_RULES.submissionSeconds]:action==='renewal'?[renewalStartSeconds as number]:[])]]);
   const ack=singleOwnContractAcknowledgement(result);
   const current=contractFundingConfiguration(policy,context,new Date()),ready=commercialMarginReady(context.review);
   const checkedAt=Date.now();
@@ -144,6 +156,121 @@ export async function reserveRestartContractFunding(
  nonce='ctr_'+randomUUID(),
 ):Promise<ContractGrant|null>{
  return reserveContractFunding(statsId,tier,'month','restart',policy,context,nonce,subscriptionId);
+}
+
+/** The one grant id of a renewal: the store, the subscription and the day its
+ * new period begins. The same paid renewal observed any number of times (an
+ * event twice, the daily job, the studio) names the same grant, so the ledger
+ * can reserve it once and never a second time. */
+export function renewalContractNonce(statsId:string,subscriptionId:string|null,periodStartSeconds:number|null):string|null{
+ if(typeof statsId!=='string'||!/^[A-Za-z0-9_-]{1,128}$/.test(statsId)||typeof subscriptionId!=='string'||!/^sub_[A-Za-z0-9]{6,64}$/.test(subscriptionId)||!Number.isSafeInteger(periodStartSeconds)||(periodStartSeconds as number)<=0)return null;
+ return 'ctr_rn_'+createHash('sha256').update(['renewal',statsId,subscriptionId,String(periodStartSeconds)].join('|')).digest('hex');
+}
+
+/** A renewal reserves its own full grant against the active funded proof of
+ * the same subscription, plan and interval, after that term ended and only
+ * for the period beginning exactly at its end. Nothing of the source is
+ * released. The caller reserves only after the provider's paid observation:
+ * this never proves a payment, and a refusal means the store stays closed.
+ */
+export async function reserveRenewalContractFunding(
+ statsId:string,subscriptionId:string,tier:Tier,cycle:Cycle,periodStartSeconds:number,
+ policy:ContractFundingPolicy|null=CURRENT_CONTRACT_FUNDING_POLICY,
+ context:ContractFundingContext={termsSnapshot:CURRENT_PRICE_AND_RIGHTS_SNAPSHOT,review:CURRENT_COMMERCIAL_MARGIN_REVIEW},
+):Promise<ContractGrant|null>{
+ if(!Boolean(CONTRACT_ADMISSION_COVERAGE.renewals))return null;
+ const nonce=renewalContractNonce(statsId,subscriptionId,periodStartSeconds);
+ if(nonce===null)return null;
+ return reserveContractFunding(statsId,tier,cycle,'renewal',policy,context,nonce,subscriptionId,periodStartSeconds);
+}
+
+/** A renewal moves the active pointer from the term it continues to the paid
+ * period that begins exactly at that term's end. Every receipt and cent stays:
+ * the new grant and its source are both retained (as a switch retains both). */
+export const ACTIVATE_RENEWAL_CONTRACT = `
+local function amount(value)
+ if not value or not string.match(value,'^%d+$') or (#value>1 and string.sub(value,1,1)=='0') then return nil end
+ local n=tonumber(value)
+ if not n or n<0 or n>1000000000000 or n~=math.floor(n) then return nil end
+ return n
+end
+local function parts(raw,max)
+ if not raw or #raw>max then return nil end
+ local result={}
+ for field in string.gmatch(raw,'[^|]+') do table.insert(result,field) end
+ if table.concat(result,'|')~=raw then return nil end
+ return result
+end
+local function epoch(value)
+ if not value or not string.match(value,'^%d+$') or (#value>1 and string.sub(value,1,1)=='0') then return nil end
+ local n=tonumber(value)
+ if not n or n>9007199254740991 or n~=math.floor(n) then return nil end
+ return n
+end
+if redis.call('TYPE',KEYS[1]).ok~='hash' or redis.call('TTL',KEYS[1])~=-1 then return 0 end
+if redis.call('HGET',KEYS[1],'policy')~=ARGV[1] or redis.call('HGET',KEYS[1],'review')~=ARGV[2] then return 0 end
+local receipt=parts(redis.call('HGET',KEYS[1],'grant:'..ARGV[5]),1024)
+if not receipt or #receipt~=10 or receipt[1]~=ARGV[2] or receipt[2]~=ARGV[3] or receipt[3]~=ARGV[4] or receipt[4]~='renewal' or #receipt[10]>84 or not string.match(receipt[10],'^ctr_[%w_-]+$') or receipt[10]==ARGV[5] then return 0 end
+local charge,submitted,expires,deadline,through=amount(receipt[5]),amount(receipt[6]),amount(receipt[7]),amount(receipt[8]),epoch(receipt[9])
+if not charge or charge<=0 or not submitted or not expires or not deadline or expires<submitted or deadline<expires or not through then return 0 end
+local created,now,minimum,limit,carry,funded,start,finish,span=amount(ARGV[7]),amount(ARGV[8]),amount(ARGV[9]),amount(ARGV[10]),amount(ARGV[11]),amount(ARGV[12]),amount(ARGV[13]),amount(ARGV[14]),amount(ARGV[15])
+if not created or created<=0 or not now or not minimum or not limit or not carry or not funded or funded<=0 or not start or not finish or not span or span<=0 then return 0 end
+if charge~=minimum or start<created or start>now or finish<=now or finish<=start or finish-start>span or finish*1000>through then return 0 end
+local reserved,carried,slots=amount(redis.call('HGET',KEYS[1],'reserved')),amount(redis.call('HGET',KEYS[1],'carried')),amount(redis.call('HGET',KEYS[1],'slots:'..ARGV[4]))
+if not reserved or not carried or not slots or carried~=carry or reserved<carried or reserved>limit or slots>=funded then return 0 end
+-- The term it continues: the same subscription, plan, creation and an end
+-- exactly where the new period begins.
+local sourceBinding=redis.call('HGET',KEYS[1],'activated:'..receipt[10])
+local source=parts(sourceBinding,256)
+if not source or #source~=7 or source[1]~=receipt[10] or source[2]~=ARGV[6] or source[3]~=ARGV[4] or source[4]~=ARGV[7] or (source[5]~='trial' and source[5]~='paid') then return 0 end
+local sourceStart,sourceFinish=amount(source[6]),amount(source[7])
+if not sourceStart or not sourceFinish or sourceStart<created or sourceFinish<=sourceStart or sourceFinish~=start then return 0 end
+local original=parts(redis.call('HGET',KEYS[1],'grant:'..receipt[10]),1024)
+if not original or original[1]~=ARGV[2] or original[2]~=ARGV[3] or original[3]~=ARGV[4] or not ((#original==9 and original[4]=='checkout') or (#original==10 and (original[4]=='switch' or original[4]=='restart' or original[4]=='renewal'))) then return 0 end
+local originalCharge,originalThrough=amount(original[5]),epoch(original[9])
+if not originalCharge or originalCharge<=0 or not amount(original[6]) or not amount(original[7]) or not amount(original[8]) or not originalThrough or sourceFinish*1000>originalThrough then return 0 end
+if charge+originalCharge>reserved-carried then return 0 end
+local binding=ARGV[5]..'|'..ARGV[6]..'|'..ARGV[4]..'|'..ARGV[7]..'|paid|'..ARGV[13]..'|'..ARGV[14]
+if #binding>256 then return 0 end
+local consumed=redis.call('HGET',KEYS[1],'activated:'..ARGV[5])
+local active=redis.call('HGET',KEYS[1],'active:'..ARGV[3])
+if consumed then
+ if consumed~=binding or active~=binding then return 0 end
+ return {2,finish}
+end
+if now>deadline then return 0 end
+if active~=sourceBinding or redis.call('HGET',KEYS[1],'pending:'..ARGV[3])~=ARGV[5] then return 0 end
+redis.call('HSET',KEYS[1],'activated:'..ARGV[5],binding,'active:'..ARGV[3],binding)
+redis.call('HDEL',KEYS[1],'pending:'..ARGV[3])
+return {1,deadline}
+`;
+/** Trusted provider observations only: the caller has read Stripe's paid
+ * renewal invoice for exactly this subscription and period first. A renewal
+ * is always a paid period (never a trial), on its own deterministic grant. */
+export async function activateRenewalContract(
+ input:CheckoutContractActivation,
+ policy:ContractFundingPolicy|null=CURRENT_CONTRACT_FUNDING_POLICY,
+ context:ContractFundingContext={termsSnapshot:CURRENT_PRICE_AND_RIGHTS_SNAPSHOT,review:CURRENT_COMMERCIAL_MARGIN_REVIEW},
+):Promise<boolean>{
+ if(!Boolean(CONTRACT_ADMISSION_COVERAGE.renewals))return false;
+ if(!customerTaxContractContextSupported(context,policy))return false;
+ const encoded=canonicalFinancialSnapshot({input,context});if(!encoded)return false;
+ ({input,context}=JSON.parse(encoded) as {input:CheckoutContractActivation;context:ContractFundingContext});
+ if(!input||!context||typeof input!=='object'||typeof context!=='object')return false;
+ const {statsId,grantId,reviewId,subscriptionId,tier,cycle,createdSeconds,trialing,periodStartSeconds,periodEndSeconds}=input;
+ const key=(tier+'_'+cycle) as ContractKey;
+ if(typeof statsId!=='string'||!/^[A-Za-z0-9_-]{1,128}$/.test(statsId)||typeof reviewId!=='string'||typeof subscriptionId!=='string'||!/^sub_[A-Za-z0-9]{6,64}$/.test(subscriptionId)||!CONTRACT_KEYS.includes(key)||trialing!==false||!isRedisConfigured())return false;
+ if(![createdSeconds,periodStartSeconds,periodEndSeconds].every(n=>Number.isSafeInteger(n)&&n>0)||periodStartSeconds<createdSeconds||periodEndSeconds<=periodStartSeconds)return false;
+ if(typeof grantId!=='string'||grantId!==renewalContractNonce(statsId,subscriptionId,periodStartSeconds))return false;
+ const span=CONTRACT_FUNDING_RULES.paidMonths[cycle]*CONTRACT_FUNDING_RULES.longestMonthDays*86400;
+ if(periodEndSeconds-periodStartSeconds>span||!commercialMarginReady(context.review))return false;
+ const now=new Date(),config=contractFundingConfiguration(policy,context,now);if(!config||config.reviewId!==reviewId)return false;
+ const seconds=Math.floor(now.getTime()/1000);if(periodStartSeconds>seconds||periodEndSeconds<=seconds)return false;
+ try{
+  const result=await redisPipeline([['EVAL',ACTIVATE_RENEWAL_CONTRACT,1,'nl:contract-reserve:v1',contractFundingBinding(config),reviewId,statsId,key,grantId,subscriptionId,createdSeconds,seconds,config.grantCents[key],config.cashLimitCents,config.carryForwardCents,config.fundedGrants[key],periodStartSeconds,periodEndSeconds,span]]);
+  const current=contractFundingConfiguration(policy,context,new Date());
+  return current!==null&&current.binding===config.binding&&commercialMarginReady(context.review)&&Date.now()>=now.getTime()&&contractObservationAcknowledged(result,seconds,periodStartSeconds,periodEndSeconds);
+ }catch{return false;}
 }
 
 
@@ -256,7 +383,7 @@ local sourceStart,sourceFinish=amount(source[6]),amount(source[7])
 if not sourceStart or not sourceFinish or sourceStart<created or sourceStart>submitted-submission or sourceFinish<=submitted-submission or (source[5]~='trial' and source[5]~='paid') then return 0 end
 if ARGV[14]=='trial' and (source[5]~='trial' or finish>sourceFinish) then return 0 end
 local original=parts(redis.call('HGET',KEYS[1],'grant:'..receipt[10]),1024)
-if not original or original[1]~=ARGV[2] or original[2]~=ARGV[3] or original[3]~=source[3] or not ((#original==9 and original[4]=='checkout') or (#original==10 and original[4]=='switch')) then return 0 end
+if not original or original[1]~=ARGV[2] or original[2]~=ARGV[3] or original[3]~=source[3] or not ((#original==9 and original[4]=='checkout') or (#original==10 and (original[4]=='switch' or original[4]=='renewal'))) then return 0 end
 local originalCharge=amount(original[5])
 local originalThrough=tonumber(original[9])
 if not amount(original[6]) or not amount(original[7]) or not amount(original[8]) or not originalThrough or not string.match(original[9],'^%d+$') or (#original[9]>1 and string.sub(original[9],1,1)=='0') or originalThrough>9007199254740991 or originalThrough~=math.floor(originalThrough) or sourceFinish*1000>originalThrough then return 0 end

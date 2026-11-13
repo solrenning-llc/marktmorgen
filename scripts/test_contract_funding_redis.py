@@ -1810,7 +1810,7 @@ def main():
         measured_ack, renewal_changes = measured_command(redis, lambda: renew_take(redis, renewal_keys[0], renewed_at, instant+month))
         assert measured_ack == 1, 'A paid renewal of the active funded subscription reserves its own full grant'
         renewal_changes = {name: count for name, count in renewal_changes.items() if count}
-        assert renewal_changes.get('eval') == 1, renewal_changes
+        assert renewal_changes.get('eval') == 1 and sum(renewal_changes.values()) == 17, renewal_changes
         print('MEASURED renewal reservation commands:', sum(renewal_changes.values()), sorted(renewal_changes.items()))
         assert redis.command('HGET', renewal_keys[0], 'grant:ctr_rn_one').split('|')[-1] == 'ctr_one'
         assert redis.command('HGET', renewal_keys[0], 'grant:ctr_rn_one').split('|')[3] == 'renewal'
@@ -1828,7 +1828,7 @@ def main():
         measured_ack, renewal_activation = measured_command(redis, lambda: renew_activate(redis, renewal_keys[0], renewed_at+1, instant+month, instant+2*month))
         assert measured_ack == [1, renewed_at+86400], measured_ack
         renewal_activation = {name: count for name, count in renewal_activation.items() if count}
-        assert renewal_activation.get('eval') == 1, renewal_activation
+        assert renewal_activation.get('eval') == 1 and sum(renewal_activation.values()) == 16, renewal_activation
         print('MEASURED renewal activation commands:', sum(renewal_activation.values()), sorted(renewal_activation.items()))
         assert redis.command('HGET', renewal_keys[0], 'active:one') == new_binding
         assert redis.command('HGET', renewal_keys[0], 'activated:ctr_rn_one') == new_binding

@@ -31,7 +31,7 @@ if from<start*1000 or untilMs>finish*1000 or untilMs<=from or untilMs-from>31*86
 if count==1 and (index~=0 or from~=start*1000 or untilMs~=finish*1000) then return 0 end
 if redis.call('HGET',KEYS[1],'activated:'..proof[1])~=resourceActive then return 0 end
 local receipt=parts(redis.call('HGET',KEYS[1],'grant:'..proof[1]),1024)
-if not receipt or receipt[1]~=ARGV[2] or receipt[2]~=ARGV[3] or receipt[3]~=ARGV[5] or not ((#receipt==9 and receipt[4]=='checkout') or (#receipt==10 and (receipt[4]=='switch' or receipt[4]=='restart'))) then return 0 end
+if not receipt or receipt[1]~=ARGV[2] or receipt[2]~=ARGV[3] or receipt[3]~=ARGV[5] or not ((#receipt==9 and receipt[4]=='checkout') or (#receipt==10 and (receipt[4]=='switch' or receipt[4]=='restart' or receipt[4]=='renewal'))) then return 0 end
 local charge,through=amount(receipt[5],1000000000000),amount(receipt[9],9007199254740991)
 local minimum,limit,carry,funded=amount(ARGV[13],1000000000000),amount(ARGV[14],1000000000000),amount(ARGV[15],1000000000000),amount(ARGV[16],1000000000000)
 if not amount(receipt[6],1000000000000) or not amount(receipt[7],1000000000000) or not amount(receipt[8],1000000000000) or tonumber(receipt[7])<tonumber(receipt[6]) or tonumber(receipt[8])<tonumber(receipt[7]) then return 0 end

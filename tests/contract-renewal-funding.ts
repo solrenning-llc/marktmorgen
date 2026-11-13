@@ -23,7 +23,9 @@ export async function activateSwitchContract():Promise<boolean>{return false;}
 /** One reservation per store, subscription and new period start; a repeat is refused as the real ledger refuses it. */
 export async function reserveRenewalContractFunding(statsId:string,subscriptionId:string,tier:string,cycle:string,periodStartSeconds:number):Promise<{id:string}|null>{
  const same=renewalLedger.reserves.some(r=>r.statsId===statsId&&r.subscriptionId===subscriptionId&&r.periodStartSeconds===periodStartSeconds);
- if(renewalLedger.refuseReserve||same){renewalLedger.refusedReserves++;return null;}
+ // As RESERVE_CONTRACT: only the period beginning exactly where the active term ended.
+ const source=renewalLedger.renewed??renewalLedger.committed;
+ if(renewalLedger.refuseReserve||same||!source||periodStartSeconds!==source.end){renewalLedger.refusedReserves++;return null;}
  renewalLedger.reserves.push({statsId,subscriptionId,tier,cycle,periodStartSeconds});
  return {id:'ctr_rn_double'};
 }
@@ -41,4 +43,4 @@ export async function activateRenewalContract(input:CheckoutContractActivation):
 }
 
 // Production binding and closed restart guards stay exact for transitive imports.
-export {contractFundingBinding,reserveRestartContractFunding,takeRestartRecovery,restartSubmissionOpenNow,recordRestartResult,armRestartSubmission,claimRestartIntent} from '../lib/contract-funding';
+export {contractFundingBinding,renewalContractNonce,reserveRestartContractFunding,takeRestartRecovery,restartSubmissionOpenNow,recordRestartResult,armRestartSubmission,claimRestartIntent} from '../lib/contract-funding';

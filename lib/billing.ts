@@ -1,8 +1,9 @@
 import {activateRestartContract,type RestartContractActivation} from "@/lib/contract-restart-activation";
 import {publishRestartStore} from "@/lib/contract-restart-publication";
 import {createHash,randomUUID} from 'node:crypto';
-import {canonicalFinancialSnapshot,CONTRACT_FUNDING_RULES} from '@/lib/contract-funding-rules';
-import {takeRestartRecovery,restartSubmissionOpenNow,recordRestartResult,armRestartSubmission,claimRestartIntent,reserveRestartContractFunding,activateCheckoutContract,activateSwitchContract,type ContractGrant,type OwnedRestartIntent,type ArmedRestartSubmission} from '@/lib/contract-funding';
+import {canonicalFinancialSnapshot,CONTRACT_ADMISSION_COVERAGE,CONTRACT_FUNDING_RULES} from '@/lib/contract-funding-rules';
+import {takeRestartRecovery,restartSubmissionOpenNow,recordRestartResult,armRestartSubmission,claimRestartIntent,reserveRestartContractFunding,activateCheckoutContract,activateSwitchContract,activateRenewalContract,renewalContractNonce,reserveRenewalContractFunding,type ContractGrant,type OwnedRestartIntent,type ArmedRestartSubmission} from '@/lib/contract-funding';
+import {planDisputed} from '@/lib/plan-dispute-rules';
 /**
  * The one way Marktmorgen makes money.
  *
@@ -1604,7 +1605,8 @@ export async function startedFromObservedSubscription(store:Store,subscription:R
   const pending=meta?.funding_pending_grant!==undefined||meta?.funding_pending_review!==undefined;
   const grantId=pending?meta?.funding_pending_grant:meta?.funding_grant,reviewId=pending?meta?.funding_pending_review:meta?.funding_review;
   if(typeof grantId!=='string'||typeof reviewId!=='string')return null;
-  return await activateObservedSwitch(store.statsId??'',grantId,reviewId,started.subscriptionId,subscription)?{...started,period:fundedPeriod(started.period)}:null;
+  const funded=await activateObservedSwitch(store.statsId??'',grantId,reviewId,started.subscriptionId,subscription)||await activateObservedRenewal(store,subscription,reviewId);
+  return funded?{...started,period:fundedPeriod(started.period)}:null;
  }
  if(meta?.funding_grant===undefined&&meta?.funding_review===undefined)return started;
  if(!ownedBy(store,subscription)||typeof meta.funding_grant!=="string"||typeof meta.funding_review!=="string")return null;
@@ -1620,8 +1622,65 @@ export async function startedFromObservedSubscription(store:Store,subscription:R
   statsId:store.statsId??"",grantId:meta.funding_grant,reviewId:meta.funding_review,
   subscriptionId:started.subscriptionId,tier:state.tier,cycle:state.cycle,createdSeconds:subscription.created as number,
   trialing:state.trialing,periodStartSeconds:began as number,periodEndSeconds:until as number,
- })))return null;
+ }))&&!(await activateObservedRenewal(store,subscription,meta.funding_review)))return null;
  return {...started,period:fundedPeriod(started.period)};
+}
+
+const INVOICE_ID=/^in_[A-Za-z0-9]{6,64}$/;
+/**
+ * Whether Stripe says the renewal now running was paid: the subscription's
+ * latest invoice, read by its id, is this subscription's paid renewal
+ * (`subscription_cycle`) of exactly this period, at the published price of
+ * its plan, in dollars, with nothing left due and not marked paid outside
+ * Stripe. Stripe moves a subscription into its next period about an hour
+ * before it charges the renewal (a draft invoice), so an active subscription
+ * alone never proves it. Anything else, or a read that fails, is not paid.
+ */
+async function renewalInvoicePaid(subscription:Record<string,unknown>,tier:Tier,cycle:Cycle,start:number,end:number):Promise<boolean>{
+ try{
+  const latest=ownDataField(subscription,'latest_invoice');
+  const id=typeof latest==='string'?latest:plainRecord(latest)?ownDataField(latest,'id'):undefined;
+  if(typeof id!=='string'||!INVOICE_ID.test(id))return false;
+  const invoice:unknown=await onPlatform('GET',`/invoices/${encodeURIComponent(id)}`);
+  if(!plainRecord(invoice)||ownDataField(invoice,'id')!==id||ownDataField(invoice,'status')!=='paid'||ownDataField(invoice,'billing_reason')!=='subscription_cycle'||ownDataField(invoice,'currency')!=='usd')return false;
+  const paidAmount=ownDataField(invoice,'amount_paid'),outOfBand=ownDataField(invoice,'paid_out_of_band');
+  if(ownDataField(invoice,'subtotal')!==PUBLISHED_PLAN_PRICES[tier][cycle]||ownDataField(invoice,'amount_remaining')!==0||typeof paidAmount!=='number'||!Number.isSafeInteger(paidAmount)||paidAmount<0||(outOfBand!==undefined&&outOfBand!==false))return false;
+  // Older API versions name the subscription on the invoice, newer ones under parent; every name given must be this one.
+  const parent=ownDataField(invoice,'parent'),details=plainRecord(parent)?ownDataField(parent,'subscription_details'):undefined;
+  const named=[ownDataField(invoice,'subscription'),plainRecord(details)?ownDataField(details,'subscription'):undefined].filter(value=>value!==undefined&&value!==null);
+  if(named.length===0||!named.every(value=>value===subscription.id))return false;
+  const lines=ownDataField(invoice,'lines'),data=plainRecord(lines)?ownDataField(lines,'data'):undefined;
+  if(!plainRecord(lines)||ownDataField(lines,'has_more')!==false||!Array.isArray(data)||data.length!==1)return false;
+  const period=ownDataField(ownDataField(data,'0'),'period');
+  return plainRecord(period)&&ownDataField(period,'start')===start&&ownDataField(period,'end')===end;
+ }catch(error){
+  console.error("reading the renewal invoice failed",error);
+  return false;
+ }
+}
+
+/**
+ * A funded subscription Stripe renewed and was paid for: the new period gets
+ * its own full grant (lib/contract-funding.ts, reserveRenewalContractFunding),
+ * reserved only after the paid renewal invoice is read and then activated on
+ * the period beginning exactly where the funded one ended. The same renewal
+ * observed again reserves nothing more (one deterministic grant per period).
+ * Unpaid, past due, disputed, unreadable, refused or uncovered: false, and the
+ * store keeps its funded period, which gives no window past its end.
+ */
+async function activateObservedRenewal(store:Store,subscription:Record<string,unknown>,reviewId:string):Promise<boolean>{
+ if(!Boolean(CONTRACT_ADMISSION_COVERAGE.renewals))return false;
+ const state=stateOf(subscription),statsId=store.statsId,created=subscription.created;
+ if(state.state!=='active'||state.trialing||state.renewalUnpaid||state.changePending||subscription.status!=='active'||!state.period)return false;
+ if(typeof statsId!=='string'||typeof subscription.id!=='string'||!SUBSCRIPTION_PATTERN.test(subscription.id)||typeof created!=='number'||!Number.isSafeInteger(created)||typeof reviewId!=='string'||planDisputed(store))return false;
+ const items=subscription.items as {data?:{quantity?:unknown;price?:Record<string,unknown>}[]}|undefined;
+ const price=items?.data?.[0]?.price,recurring=price?.recurring as {interval?:unknown;interval_count?:unknown}|undefined;
+ if(items?.data?.length!==1||items.data[0].quantity!==1||price?.currency!=='usd'||recurring?.interval!==state.cycle||recurring?.interval_count!==1||state.amountCents!==PUBLISHED_PLAN_PRICES[state.tier][state.cycle])return false;
+ const {start,end}=state.period,grantId=renewalContractNonce(statsId,subscription.id,start);
+ if(grantId===null||!(await renewalInvoicePaid(subscription,state.tier,state.cycle,start,end)))return false;
+ // A refusal here may only mean this very renewal is reserved already; the activation decides.
+ await reserveRenewalContractFunding(statsId,subscription.id,state.tier,state.cycle,start);
+ return activateRenewalContract({statsId,grantId,reviewId,subscriptionId:subscription.id,tier:state.tier,cycle:state.cycle,createdSeconds:created,trialing:false,periodStartSeconds:start,periodEndSeconds:end});
 }
 
 /** How many of a store's subscriptions one search looks at. */

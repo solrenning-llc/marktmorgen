@@ -133,6 +133,8 @@ test('a renewal not yet paid, failed, past due or read in any other shape is nev
   ['another currency',subscriptionOf({cycle:'month',...P2,created:P1.start}),{...paid,currency:'eur'}],
   ['a period that does not begin where the paid one ended',subscriptionOf({cycle:'month',start:P2.start+DAY,end:P2.end+DAY,created:P1.start}),invoiceOf({cycle:'month',start:P2.start+DAY,end:P2.end+DAY})],
  ];
+ // Only this last case reads a paid invoice: the ledger is then asked, and refuses.
+ const paidButDiscontiguous=cases[cases.length-1][0];
  for(const [what,subscription,invoice] of cases){
   const store=await fundedStore('month',P1);
   stripe(subscription,invoice);
@@ -142,7 +144,8 @@ test('a renewal not yet paid, failed, past due or read in any other shape is nev
   assert.deepEqual(after.period,{start:P1.start,end:P1.end,renews:true,funded:true},what);
   assert.equal(allowanceWindow(after,Date.now()),null,what+': unknown never becomes paid');
   assert.equal(renewalLedger.reserves.length,0,what+': nothing reserved');
-  assert.equal(renewalLedger.activations.length,0,what+': nothing activated');
+  assert.equal(renewalLedger.renewed,null,what+': nothing activated');
+  assert.equal(renewalLedger.activations.length,what===paidButDiscontiguous?1:0,what+': the ledger is asked only after a paid renewal invoice');
  }
 });
 

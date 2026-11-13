@@ -10,4 +10,4 @@ export async function activateSwitchContract(input:CheckoutContractActivation):P
 }
 
 // Production binding and closed restart guards stay exact for transitive imports.
-export {contractFundingBinding,reserveRestartContractFunding,takeRestartRecovery,restartSubmissionOpenNow,recordRestartResult,armRestartSubmission,claimRestartIntent} from '../lib/contract-funding';
+export {contractFundingBinding,activateRenewalContract,renewalContractNonce,reserveRenewalContractFunding,reserveRestartContractFunding,takeRestartRecovery,restartSubmissionOpenNow,recordRestartResult,armRestartSubmission,claimRestartIntent} from '../lib/contract-funding';

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {canonicalFinancialSnapshot,contractCoverageDays,contractFundingConfiguration,CONTRACT_ADMISSION_COVERAGE,CONTRACT_KEYS,CONTRACT_FUNDING_RULES} from '@/lib/contract-funding-rules';
 import {assessCustomerWorstCase} from '@/lib/net-margin-rules';
-import {takeRestartRecovery,restartSubmissionOpenNow,recordRestartResult,armRestartSubmission,ownedRestartIntentFromAcknowledgement,claimRestartIntent,activateCheckoutContract,activateSwitchContract,type CheckoutContractActivation,reserveContractFunding,reserveSwitchContractFunding,reserveRestartContractFunding} from '@/lib/contract-funding';
+import {takeRestartRecovery,restartSubmissionOpenNow,recordRestartResult,armRestartSubmission,ownedRestartIntentFromAcknowledgement,claimRestartIntent,activateCheckoutContract,activateSwitchContract,type CheckoutContractActivation,reserveContractFunding,reserveSwitchContractFunding,reserveRestartContractFunding,reserveRenewalContractFunding,activateRenewalContract,renewalContractNonce} from '@/lib/contract-funding';
 import {contractFixture} from './contract-funding-fixture';
 import {reset,seed,ledger,calls,settings} from './contract-funding-redis';
 import {txCustomerFixture} from './customer-tax-review-fixture';
@@ -215,6 +215,22 @@ test('absent real approvals and unfinished lifecycle coverage keep admission clo
 
 test('computed financial context is not executed or accepted as reserve evidence',async()=>{const f=start();let reads=0;Object.defineProperty(f.context,'review',{get(){reads++;return f.review;}});assert.equal(contractFundingConfiguration(f.policy,f.context),null);assert.equal(await reserveContractFunding('one','creator','month','checkout',f.policy,f.context,'ctr_getter'),null);assert.equal(reads,0);assert.equal(calls.length,0);});
 
+test('renewals stay closed before any Redis command while their coverage is false, even with an approved policy',async()=>{
+ const f=start();const ledgerBefore=JSON.stringify([...ledger.get(key)!.entries()]);
+ assert.equal(CONTRACT_ADMISSION_COVERAGE.renewals,false);
+ const begins=Math.floor(f.now.getTime()/1000),nonce=renewalContractNonce('one','sub_Test000001',begins);
+ assert.match(String(nonce),/^ctr_rn_[a-f0-9]{64}$/);
+ assert.equal(renewalContractNonce('one','sub_Test000001',begins),nonce,'one paid renewal names one grant');
+ assert.notEqual(renewalContractNonce('one','sub_Test000001',begins+1),nonce);
+ for(const bad of [['one','bad',begins],['one','sub_Test000001',0],['one','sub_Test000001',1.5],['', 'sub_Test000001',begins]] as const)assert.equal(renewalContractNonce(bad[0],bad[1],bad[2]),null);
+ assert.equal(await reserveRenewalContractFunding('one','sub_Test000001','creator','month',begins,f.policy,f.context),null);
+ assert.equal(await reserveContractFunding('one','creator','month','renewal',f.policy,f.context,nonce!,'sub_Test000001',begins),null);
+ assert.equal(await activateRenewalContract({statsId:'one',grantId:nonce!,reviewId:f.config.reviewId,subscriptionId:'sub_Test000001',tier:'creator',cycle:'month',createdSeconds:begins-31*86400,trialing:false,periodStartSeconds:begins,periodEndSeconds:begins+30*86400},f.policy,f.context),false);
+ // A start for another action is never accepted either.
+ assert.equal(await reserveContractFunding('one','creator','month','checkout',f.policy,f.context,'ctr_checkout_with_start',null,begins),null);
+ assert.equal(calls.length,0,'no Redis command');
+ assert.equal(JSON.stringify([...ledger.get(key)!.entries()]),ledgerBefore);
+});
 test('missing or primitive financial contexts refuse admission without throwing',async()=>{const f=start();for(const value of [null,0,false,[],{}]){const context=value as unknown as typeof f.context;assert.equal(contractFundingConfiguration(f.policy,context),null);assert.equal(await reserveContractFunding('one','creator','month','checkout',f.policy,context,'ctr_invalid'),null);}assert.equal(calls.length,0);});
 
 function activation(statsId='one',grantId='ctr_activate',createdSeconds=Math.floor(Date.now()/1000)):CheckoutContractActivation{

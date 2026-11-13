@@ -7,11 +7,11 @@
  * the check. A fresh yes, given by a link made after the erasure, still lifts the print.
  * Synthetic only (in-memory Redis stand-in, no email sent).
  */
-import { store as redis } from "./redis-stub";
+import { advance, store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { addProduct, claimHandle, ensureListId, ensureStatsId, storeForEmail } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
-import { leadsKey, upsertContact } from "@/lib/contacts";
+import { agreedKey, leadsKey, upsertContact } from "@/lib/contacts";
 import { suppressedKey, suppressionPrint } from "@/lib/suppression";
 import { erasePerson } from "@/lib/person-erasure";
 import { confirmSpot, joinWaitlist, setSoon } from "@/lib/waitlist";
@@ -94,24 +94,58 @@ async function main(): Promise<void> {
   is("the erased address is not on the list", redis.run(["HGET", leads, PERSON]), null);
   is("the erasure print is still in place", print(), 1);
 
+  part("the person presses the link while their erasure is running (the print written, the link not yet deleted)");
+  redis.run(["HDEL", suppressedKey(store.listId!), suppressionPrint(store.listId!, PERSON)]);
+  advance(2_000);
+  await upsertContact(store.listId!, PERSON, { agreed: true, explicit: true, source: "free", sid: store.sid }, ROOM);
+  token = await join();
+  advance(2_000);
+  {
+    // erasePerson writes the print first (ERASED_PRINT) and deletes the noted links last (forgetNoted): the press lands
+    // right after the print's pipeline was answered.
+    const original = redis.pipeline.bind(redis);
+    let press: { ok: boolean } | null = null;
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      const replies = await original(commands);
+      if (!press && commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:erased-print:v1\n"))) {
+        press = await confirmSpot(token, store);
+      }
+      return replies;
+    }) as typeof redis.pipeline;
+    const erasure = await erase().finally(() => { redis.pipeline = original; });
+    is("(control) the erasure completed", erasure.ok, true);
+    is("(control) the press ran in the middle of it", press !== null, true);
+    is("the press in the middle of the erasure does not report a spot", (press as { ok: boolean } | null)?.ok, false);
+    is("the erased address is not on the list", redis.run(["HGET", leads, PERSON]), null);
+    is("the erasure print is still in place", print(), 1);
+  }
+
   part("a fresh yes, by a link made after the erasure, still lifts the print");
+  advance(2_000);
   token = await join();
   is("the new link confirms the spot", (await confirmSpot(token, store)).ok, true);
   is("the address is back on the list, as it asked again", typeof redis.run(["HGET", leads, PERSON]), "string");
   is("its own new yes lifted the print", print(), 0);
 
   part("upsertContact with a fence whose key is gone writes nothing and says so");
-  redis.run(["SET", "nl:test:fence", "1"]);
+  redis.run(["SET", "nl:test:fence", "1", "EX", 3600]);
+  const fence = { key: "nl:test:fence", seconds: 3600 };
   const other = "fence-gone@example.com";
   redis.run(["HSET", suppressedKey(store.listId!), suppressionPrint(store.listId!, other), 1]);
   redis.run(["DEL", "nl:test:fence"]);
-  const refused = await upsertContact(store.listId!, other, { agreed: true, explicit: true, source: "free", fence: "nl:test:fence" }, store);
+  const refused = await upsertContact(store.listId!, other, { agreed: true, explicit: true, source: "free", fence }, store);
   is("refused as gone", [refused.joined, refused.gone], [false, true]);
   is("nothing written", redis.run(["HGET", leads, other]), null);
   is("the print stays", redis.run(["HEXISTS", suppressedKey(store.listId!), suppressionPrint(store.listId!, other)]), 1);
-  redis.run(["SET", "nl:test:fence", "1"]);
-  const kept = await upsertContact(store.listId!, other, { agreed: true, explicit: true, source: "free", fence: "nl:test:fence" }, store);
+  redis.run(["SET", "nl:test:fence", "1", "EX", 3600]);
+  redis.run(["HSET", suppressedKey(store.listId!), suppressionPrint(store.listId!, other), Math.floor(redis.now() / 1000)]);
+  const sameSecond = await upsertContact(store.listId!, other, { agreed: true, explicit: true, source: "free", fence }, store);
+  is("a print written in the second the link was issued is not lifted by it", [sameSecond.gone, redis.run(["HGET", leads, other]), redis.run(["HEXISTS", suppressedKey(store.listId!), suppressionPrint(store.listId!, other)])], [true, null, 1]);
+  redis.run(["HSET", suppressedKey(store.listId!), suppressionPrint(store.listId!, other), 1]);
+  const agreedBefore = Number(redis.run(["GET", agreedKey(store.listId!)]) ?? 0);
+  const kept = await upsertContact(store.listId!, other, { agreed: true, explicit: true, source: "free", fence }, store);
   is("with the fence in place, the own yes is written and lifts the print", [kept.joined, kept.gone, redis.run(["HEXISTS", suppressedKey(store.listId!), suppressionPrint(store.listId!, other)])], [true, undefined, 0]);
+  is("and counts one more who agreed, in the same step", Number(redis.run(["GET", agreedKey(store.listId!)]) ?? 0), agreedBefore + 1);
   done();
 }
 main().catch((error) => { console.error(error); process.exit(1); });

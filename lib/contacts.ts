@@ -198,20 +198,44 @@ export type AddResult = {
 };
 
 /**
- * One contact write that happens only while the key fencing it still exists (#4268): KEYS[1] the fence, KEYS[2] the
- * list, KEYS[3] the store's erasure prints; ARGV[1] the address, ARGV[2] the row, ARGV[3] the address's print,
- * ARGV[4] "1" when the read found the print, ARGV[5] "1" to lift it. Refused (0) when the fence is gone, or when a print
- * the read did not find is there now; otherwise writes the row, lifts the print when asked and answers 1. A
- * confirmation link is noted for erasure, so an erasure that completes while its confirmation is in flight deletes
- * the fence, and the confirmation can no longer put the person back or lift the print the erasure wrote.
- * Billed as one EVAL; lib/redis-memory.ts runs the same check in one step.
+ * One contact write that happens only while the link fencing it still exists, and lifts an erasure print only when
+ * the print is older than that link (#4268). KEYS[1] the fence, KEYS[2] the list, KEYS[3] the store's erasure prints,
+ * KEYS[4] the list's agreed count, KEYS[5] its unsubscribed count, KEYS[6] (optional) the joined-stores set
+ * (lib/joined-stores.ts); ARGV[1] the address, ARGV[2] the row, ARGV[3] the address's print, ARGV[4] "1" when the
+ * read found the print, ARGV[5] "1" to lift it, ARGV[6] the fence's whole lifetime in ms (it was set with that EX),
+ * ARGV[7] "1" to count one more who agreed, ARGV[8] "1" to count one fewer who left, ARGV[9]/ARGV[10] the store id
+ * and the second the joined-stores set ends. Answers 1 written (with its counts), 0 refused, nothing written:
+ *   - the fence is gone: an erasure that finished deleted it (the link is noted for erasure);
+ *   - a print the read did not find is there now;
+ *   - a print to lift was written in or after the second the link was issued (PTTL against its lifetime, on Redis's
+ *     clock, as the print's second is: lib/suppression.ts ERASED_PRINT). erasePerson writes the print first and
+ *     deletes the noted links last, so a press during an erasure finds its link still there; only a link issued
+ *     after the erasure, a fresh yes, lifts the print. A fence with no expiry, or a print that is not a second,
+ *     cannot be placed in time and is refused.
+ * Billed as one EVAL and the commands it runs; lib/redis-memory.ts runs the same steps.
  */
 const FENCED_CONTACT_WRITE = [
-  "-- marktmorgen:contact-fenced-write:v1",
-  'if redis.call("EXISTS", KEYS[1]) == 0 then return 0 end',
-  'if ARGV[4] ~= "1" and redis.call("HEXISTS", KEYS[3], ARGV[3]) == 1 then return 0 end',
+  "-- marktmorgen:contact-fenced-write:v2",
+  'local left = redis.call("PTTL", KEYS[1])',
+  "if left == -2 then return 0 end",
+  'local printed = redis.call("HGET", KEYS[3], ARGV[3])',
+  'if printed and ARGV[4] ~= "1" then return 0 end',
+  'local lift = printed and ARGV[5] == "1"',
+  "if lift then",
+  "  local at = tonumber(printed)",
+  "  if left < 0 or not at then return 0 end",
+  '  local t = redis.call("TIME")',
+  "  local issued = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000) - (tonumber(ARGV[6]) - left)",
+  "  if (at + 1) * 1000 > issued then return 0 end",
+  "end",
   'redis.call("HSET", KEYS[2], ARGV[1], ARGV[2])',
-  'if ARGV[5] == "1" then redis.call("HDEL", KEYS[3], ARGV[3]) end',
+  'if lift then redis.call("HDEL", KEYS[3], ARGV[3]) end',
+  'if ARGV[7] == "1" then redis.call("INCR", KEYS[4]) end',
+  'if ARGV[8] == "1" then redis.call("DECR", KEYS[5]) end',
+  'if KEYS[6] then',
+  '  redis.call("SADD", KEYS[6], ARGV[9])',
+  '  redis.call("EXPIREAT", KEYS[6], ARGV[10])',
+  "end",
   "return 1",
 ].join("\n");
 
@@ -236,11 +260,12 @@ export async function upsertContact(
     /** The store's id, given when the person typed the address themselves, so asking to be deleted from every store finds this one (lib/joined-stores.ts). */
     sid?: string;
     /**
-     * A key that must still exist when the contact is written, checked in one step with the write and the lift of an
-     * erasure print (FENCED_CONTACT_WRITE): the confirmation link a yes was given by, which the person's erasure
-     * deletes. Gone, nothing is written and the answer says `gone`. Not for an order's room.
+     * The confirmation link a yes was given by, which the person's erasure deletes, and the lifetime it was set with
+     * (EX seconds). Checked in one step with the write (FENCED_CONTACT_WRITE): the link gone, or an erasure print
+     * written in or after the second the link was issued, and nothing is written; the answer says `gone`. Not for an
+     * order's room.
      */
-    fence?: string;
+    fence?: { key: string; seconds: number };
   },
   /** The store whose data room the contact takes from; orderRoom(store) for one an order put on (lib/order-data.ts); null for the company's own lists. */
   room: ContactRoom,
@@ -315,9 +340,16 @@ export async function upsertContact(
   if (deleted && !agreed) delete next.clicks;
   await needContacts(room, [{ before, next }]);
   if (input.fence && !(room && isOrderRoom(room))) {
+    // The joined-stores note goes inside the script, so the counts and the note are written with the row or not at all.
+    const joined = input.sid ? joinedCommands(input.sid, email) : [];
+    const [add, end] = joined;
+    if (joined.length && (joined.length !== 2 || add[0] !== "SADD" || end[0] !== "EXPIREAT" || end[1] !== add[1])) throw new Error("unexpected joined-stores commands");
     const [written] = await redisPipeline([[
-      "EVAL", FENCED_CONTACT_WRITE, 3, input.fence, key, suppressedKey(listId),
+      "EVAL", FENCED_CONTACT_WRITE, joined.length ? 6 : 5, input.fence.key, key, suppressedKey(listId), agreedKey(listId), unsubKey(listId),
+      ...(joined.length ? [add[1]] : []),
       email, JSON.stringify(next), suppressionPrint(listId, email), deleted ? "1" : "0", deleted && ownYes ? "1" : "0",
+      input.fence.seconds * 1000, agreed && !before?.agreed ? "1" : "0", resubscribe ? "1" : "0",
+      ...(joined.length ? [add[2], end[2]] : []),
     ]]);
     // Exactly 1 (written) or 0 (refused); anything else is unknown, never "joined" and never "refused".
     if (written === 0) {
@@ -326,11 +358,6 @@ export async function upsertContact(
       return { ...none, gone: true };
     }
     if (written !== 1) throw new UnknownReplyError("a fenced contact write");
-    const rest: (string | number)[][] = [];
-    if (agreed && !before?.agreed) rest.push(["INCR", agreedKey(listId)]);
-    if (resubscribe) rest.push(["DECR", unsubKey(listId)]);
-    if (input.sid) rest.push(...joinedCommands(input.sid, email));
-    if (rest.length) await redisPipeline(rest);
     return { joined: mailable(next) && !wasMailable, gotProduct, full: false };
   }
   const commands: (string | number)[][] = [["HSET", key, email, JSON.stringify(next)]];

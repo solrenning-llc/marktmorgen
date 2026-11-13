@@ -200,7 +200,7 @@ export async function confirmSpot(token: string, store: Store | null): Promise<{
     if (written !== 1) return { ok: false };
   }
   if (entry.c && store.listId) {
-    const added = await upsertContact(store.listId, grant.e, { agreed: true, explicit: true, clicks: entry.k === true, source: "free", at: new Date().toISOString(), sid: store.sid, fence: tokenKey(token) }, store).catch((error) => {
+    const added = await upsertContact(store.listId, grant.e, { agreed: true, explicit: true, clicks: entry.k === true, source: "free", at: new Date().toISOString(), sid: store.sid, fence: { key: tokenKey(token), seconds: CONFIRM_SECONDS } }, store).catch((error) => {
       console.error("could not add a waitlist address to a list", error);
       // An answer that is not known is not finished (CX-123 rule 24); a full list or room still confirms the spot.
       return error instanceof UnknownReplyError ? ({ gone: true } as const) : null;

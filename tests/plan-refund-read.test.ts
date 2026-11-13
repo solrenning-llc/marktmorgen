@@ -412,6 +412,28 @@ async function main() {
   for (let i = 0; i < 6; i += 1) pay(crowd, { at: NOW - 20 * DAY + i * DAY, amount: 1_000, total: 1_000, reason: "subscription_update" });
   is("more payments in the window than one refund gives back at once: unknown, for support", (await crowd.read()).refund, { kind: "unknown", reason: "too_many" });
 
+  part("An invoice's tax and a repeated paid invoice (#4257)");
+  // Stripe sends `tax: null` when there is none (API 2024-06-20, pinned in lib/plan-refund.ts). A field that is not
+  // there, or not a whole number of cents, is an unknown shape, never "no tax": the used months' tax would go back.
+  for (const [label, tax] of [["absent", undefined], ["a string", "10000"], ["not whole cents", 10_000.5], ["negative", -1]] as const) {
+    const yx = await shop("year");
+    const yxPaid = pay(yx, { at: start, cycle: "year", amount: 79_000, total: 79_000, tax: 10_000, fee: 2_031 });
+    const row = world.invoices.find((inv) => inv.id === yxPaid.inv)!;
+    if (tax === undefined) delete row.tax;
+    else row.tax = tax;
+    is(`an invoice's tax ${label}: unknown, never read as no tax`, (await yx.read()).refund, { kind: "unknown", reason: "unreadable" });
+  }
+  // The same paid invoice listed twice: never judged twice, never a guarantee above what the charge captured.
+  const twice = await shop();
+  const twicePaid = pay(twice, { at: NOW - 3 * DAY });
+  const twiceRow = world.invoices.find((inv) => inv.id === twicePaid.inv)!;
+  world.invoiceListReply = { object: "list", has_more: false, data: [twiceRow, twiceRow] };
+  is("a paid invoice listed twice: unknown, never the guarantee given twice", (await twice.read()).refund, { kind: "unknown", reason: "unreadable" });
+  world.invoiceListReply = { object: "list", has_more: false, data: [twiceRow, { ...twiceRow, id: `${twicePaid.inv}b` }] };
+  is("one charge named by two paid invoices: unknown", (await twice.read()).refund, { kind: "unknown", reason: "unreadable" });
+  world.invoiceListReply = undefined;
+  is("and listed once, the guarantee as before", (await twice.read()).refund, { kind: "guarantee", cents: 6_900 });
+
   part("Bounds");
   let most = 0;
   for (const shopOf of [a, g, h, y, many, again]) {

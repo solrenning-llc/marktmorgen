@@ -7,7 +7,9 @@
  * its way, for the creator to pay another way (the payout file carries it whole). The others are paid as before.
  * Synthetic records, PayPal and Redis stood in for.
  */
-import { connectPayPal, onTheirWay, payWithPayPal } from "@/lib/paypal-payouts";
+import { readFileSync } from "node:fs";
+import { batchTotal } from "@/lib/affiliate-payouts";
+import { connectPayPal, onTheirWay, payWithPayPal, paypalPayableLines } from "@/lib/paypal-payouts";
 import { readBook } from "@/lib/affiliates";
 import type { Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
@@ -60,6 +62,15 @@ async function main(): Promise<void> {
   ]);
   is("the app is connected", (await connectPayPal(store, CLIENT, SECRET)).ok, true);
   is("the long address is a real 130-character address, longer than PayPal takes", LONG.length, 130);
+
+  part("The studio's PayPal panel counts only whom the batch can pay (Codex X5 on #4318)");
+  {
+    const lines = paypalPayableLines(await readBook(store), await onTheirWay(store));
+    is("one person and $30 can go in a PayPal batch, not the affiliate with the long address", [lines.length, batchTotal(lines)], [1, 3000]);
+    const page = readFileSync("app/studio/affiliates/page.tsx", "utf8");
+    const panel = page.slice(page.indexOf("<PayPalPayouts"), page.indexOf("/>", page.indexOf("<PayPalPayouts")));
+    is("the panel's people and amount come from paypalPayableLines, the lines the batch sends", [/people=\{paypalPayableLines\(/.test(panel), /cents=\{batchTotal\(paypalPayableLines\(/.test(panel)], [true, true]);
+  }
 
   part("Paying with PayPal");
   const paid = await payWithPayPal(store);

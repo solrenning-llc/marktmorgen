@@ -30,7 +30,8 @@ import { classifySource } from "@/lib/source-rules";
 import { cameFrom } from "@/lib/came-from";
 import { addNote, readNotes, removeNote, noteDay } from "@/lib/stats-notes";
 import { readSpend, spendBy, spendWithin } from "@/lib/ad-spend-rules";
-import { addSpend, readSpends } from "@/lib/ad-spend";
+import { addSpend, readSpends, removeSpend } from "@/lib/ad-spend";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { heardOff, recordHeard, setHeardOff } from "@/lib/heard";
 import { checkQuiet, isQuiet } from "@/lib/quiet-sales";
 import { setWeeklyOff, summaryOf, weeklyMessage } from "@/lib/stats-report";
@@ -243,6 +244,36 @@ async function main(): Promise<void> {
   is("kept, the words as the numbers count them", added.ok ? added.spends.map((s) => [s.channel, s.campaign]) : null, [["instagram", "octoberreel"]]);
   const by = spendBy(await readSpends(notesStats), "2026-10-05", "2026-10-11");
   is("by channel and by post", [by.channels.get("instagram"), by.campaigns.get("octoberreel"), by.total], [3000, 3000, 3000]);
+
+  part("A removal is said only once the line is gone (#4434)");
+  {
+    const spendId = added.ok ? added.spends.find((spend) => spend.campaign === "octoberreel")?.id ?? "" : "";
+    const originalPipeline = redis.pipeline.bind(redis);
+    const isHdel = (commands: (string | number)[][]) => commands.some((command) => command[0] === "HDEL" && command[1] === `nl:stats:${notesStats}:spend`);
+    const tryRemove = async (): Promise<"removed" | "unknown"> => {
+      try {
+        await removeSpend(notesStats, spendId);
+        return "removed";
+      } catch (error) {
+        if (error instanceof UnknownReplyError) return "unknown";
+        throw error;
+      }
+    };
+    // Not applied, and its reply lost.
+    redis.pipeline = (async (commands: (string | number)[][]) => (isHdel(commands) ? (undefined as never) : originalPipeline(commands))) as typeof redis.pipeline;
+    const lost = await tryRemove();
+    redis.pipeline = originalPipeline;
+    is("a lost, unapplied HDEL is unknown, and the line remains", [lost, (await readSpends(notesStats)).some((spend) => spend.id === spendId)], ["unknown", true]);
+    // Applied, and its reply lost: the line is gone, so the removal is confirmed.
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      if (!isHdel(commands)) return originalPipeline(commands);
+      await originalPipeline(commands);
+      return undefined as never;
+    }) as typeof redis.pipeline;
+    const applied = await tryRemove();
+    redis.pipeline = originalPipeline;
+    is("an applied HDEL whose reply was lost is confirmed by reading the line gone", [applied, (await readSpends(notesStats)).some((spend) => spend.id === spendId)], ["removed", false]);
+  }
 
   part("Where did you hear about us?");
   await fresh();

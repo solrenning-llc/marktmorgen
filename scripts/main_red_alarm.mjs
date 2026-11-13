@@ -422,6 +422,16 @@ export async function alarm({ api, trigger, log = console.log }) {
     log(`#${issue.number}: ${fresh.length} new red run(s)`);
   } else if (decision.action === "close") {
     for (const issue of open.filter((i) => !closable(open).includes(i))) log(`#${issue.number} was opened by hand: left open`);
+    // Main may have moved while the runs, jobs and issues were paged (#4334): read the ref again right
+    // before saying MAIN VERDE. A newer head is not proven green, so nothing closes; its own run decides.
+    if (closable(open).length) {
+      const now = (await api("GET", "git/ref/heads/main"))?.object?.sha;
+      if (typeof now !== "string" || !SHA.test(now)) throw new Error("unreadable main head before closing: " + String(now));
+      if (now !== head) {
+        log(`main moved from ${head} to ${now} before closing: left open for the run of the new head`);
+        return decision;
+      }
+    }
     for (const issue of closable(open)) {
       await api("POST", `issues/${issue.number}/comments`, { body: greenComment(head, decision.queueGreen.length > 0) });
       await api("PATCH", `issues/${issue.number}`, { state: "closed", state_reason: "completed" });

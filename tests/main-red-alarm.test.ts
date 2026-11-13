@@ -391,8 +391,9 @@ async function endToEnd() {
   const cleanJobs = { total_count: 2, jobs: [job("verify", stopped), job("All checks (product-checks)", "failure")] };
   const redJobsReply = { total_count: 3, jobs: [job("verify", "success"), job("Mobile render (candidate)", "failure"), job("All checks (product-checks)", "failure")] };
   const github = (o: { head: string, headRuns: unknown[], older?: Record<string, unknown[][]>, issues?: unknown[], olderReply?: unknown, jobs?: Record<number, unknown>, defaultJobs?: unknown,
-    queueRuns?: unknown[], queueReply?: unknown, failOn?: RegExp }) => {
+    queueRuns?: unknown[], queueReply?: unknown, failOn?: RegExp, movedTo?: string }) => {
     const reads: string[] = [];
+    let refReads = 0;
     const writes: { method: string, path: string, body: unknown }[] = [];
     const api: Api = async (method, path, body, absentIsNull) => {
       if (method !== "GET") {
@@ -401,7 +402,8 @@ async function endToEnd() {
       }
       reads.push(path);
       if (o.failOn?.test(path)) throw new Error("GET " + path + ": HTTP 403");
-      if (path === "git/ref/heads/main") return { object: { sha: o.head } };
+      // movedTo: main advances after the first read of its ref, as a push landing mid-run does.
+      if (path === "git/ref/heads/main") return { object: { sha: refReads++ > 0 && o.movedTo !== undefined ? o.movedTo : o.head } };
       if (path === `actions/runs?head_sha=${o.head}&event=merge_group&per_page=100`) {
         return o.queueReply !== undefined ? o.queueReply : { total_count: (o.queueRuns ?? []).length, workflow_runs: o.queueRuns ?? [] };
       }
@@ -431,6 +433,25 @@ async function endToEnd() {
     await alarmRun({ api: gh.api, trigger: REAL, log: quiet });
     is("real-shaped greens: the bot's issue gets MAIN VERDE and is closed", gh.writes.map((w) => `${w.method} ${w.path}`), ["POST issues/7/comments", "PATCH issues/7"]);
     is("and no earlier head is read when all nine are green", gh.reads.filter((p) => p.startsWith("actions/workflows/")), []);
+  }
+  {
+    // #4334: main moved past the evaluated head while the run paged issues; MAIN VERDE is never said for it.
+    const moved = "b".repeat(40);
+    const gh = github({ head: REAL.head_sha, headRuns: greenReal, issues: [botIssue], movedTo: moved });
+    await alarmRun({ api: gh.api, trigger: REAL, log: quiet });
+    is("main moved past the green head before closing: no MAIN VERDE, the issue stays open", gh.writes.map((w) => `${w.method} ${w.path}`), []);
+    is("and the ref is read again just before closing", gh.reads.filter((p) => p === "git/ref/heads/main").length, 2);
+  }
+  {
+    const gh = github({ head: REAL.head_sha, headRuns: greenReal, issues: [botIssue], movedTo: REAL.head_sha });
+    await alarmRun({ api: gh.api, trigger: REAL, log: quiet });
+    is("main still at the green head when re-read: the issue is closed", gh.writes.map((w) => `${w.method} ${w.path}`), ["POST issues/7/comments", "PATCH issues/7"]);
+  }
+  {
+    const gh = github({ head: REAL.head_sha, headRuns: greenReal, issues: [botIssue], movedTo: "main" });
+    let threw = false;
+    try { await alarmRun({ api: gh.api, trigger: REAL, log: quiet }); } catch { threw = true; }
+    is("an unreadable re-read of main before closing: it throws and closes nothing", [threw, gh.writes], [true, []]);
   }
   {
     const gh = github({ head: REAL.head_sha, headRuns: redReal });

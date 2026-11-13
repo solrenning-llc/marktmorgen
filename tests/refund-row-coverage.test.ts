@@ -52,8 +52,9 @@ async function main() {
   is("succeeded with a negative amount: cashflow not complete", await complete(), false);
   refund = { status: "succeeded", amount: 2 ** 60 };
   is("succeeded with an amount past safe precision: cashflow not complete", await complete(), false);
+  // A pending refund is no money given back yet (#4369), with or without an amount, so it leaves the reading complete.
   refund = { status: "pending" };
-  is("pending without amount: cashflow not complete", await complete(), false);
+  is("pending without amount: no outflow yet, cashflow complete", await complete(), true);
   refund = { status: "requires_magic", amount: 1000 };
   is("unknown status: cashflow not complete", await complete(), false);
   refund = { amount: 1000 };

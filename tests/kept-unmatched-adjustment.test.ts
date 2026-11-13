@@ -60,12 +60,12 @@ async function main() {
   disputes = [];
   sessions = [];
   invoices = [{ id: "in_renew_1", object: "invoice", status: "paid", billing_reason: "subscription_cycle", amount_paid: 5000, currency: "usd",
-    created: NOW / 1000 - 3600, payment_intent: "pi_renewal", subscription_details: { metadata: { store: "cashflow", product: "club", channel: "newsletter" } } }];
+    created: NOW / 1000 - 3600, status_transitions: { paid_at: NOW / 1000 - 3600 }, payment_intent: "pi_renewal", subscription_details: { metadata: { store: "cashflow", product: "club", channel: "newsletter" } } }];
   refunds = [refund("pi_renewal", 1000)];
   const renewal = (await readSales(store, NOW))!;
   is("the renewal refund: $40 kept, known", usd(renewal)?.keptCents, 4000);
   invoices = [{ id: "in_other", object: "invoice", status: "paid", billing_reason: "subscription_cycle", amount_paid: 5000, currency: "usd",
-    created: NOW / 1000 - 3600, payment_intent: "pi_other_store_renewal", subscription_details: { metadata: { store: "someone-else", product: "club" } } }];
+    created: NOW / 1000 - 3600, status_transitions: { paid_at: NOW / 1000 - 3600 }, payment_intent: "pi_other_store_renewal", subscription_details: { metadata: { store: "someone-else", product: "club" } } }];
   refunds = [refund("pi_other_store_renewal", 1000)];
   const otherRenewal = (await readSales(store, NOW))!;
   is("a refund of another store's renewal is not confirmed as this store's", usd(otherRenewal)?.keptCents, null);

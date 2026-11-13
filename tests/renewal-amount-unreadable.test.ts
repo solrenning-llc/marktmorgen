@@ -16,7 +16,7 @@ globalThis.fetch = (async (input: string | URL | Request) => {
   if (url.pathname.endsWith("/invoices")) {
     const invoice: Record<string, unknown> = {
       id: "in_test_renewal0001", status: "paid", billing_reason: "subscription_cycle", currency: "jpy",
-      created: NOW / 1000 - 86400, subscription_details: { metadata: { store: "renewamt", channel: "direct" } },
+      created: NOW / 1000 - 86400, status_transitions: { paid_at: NOW / 1000 - 86400 }, subscription_details: { metadata: { store: "renewamt", channel: "direct" } },
     };
     if (invoiceAmount !== undefined) invoice.amount_paid = invoiceAmount;
     return list([invoice]);

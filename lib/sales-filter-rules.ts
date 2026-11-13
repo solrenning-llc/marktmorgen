@@ -45,7 +45,9 @@ type Query = { [key: string]: string | string[] | undefined };
 function field(query: Query, name: string): string {
   if (!Object.hasOwn(query, name)) return "";
   const value = query[name];
-  return typeof value === "string" ? value.trim().slice(0, FILTER_TEXT_MAX) : "";
+  // Cut by whole characters, then trimmed (Claude 1 cloud on #3460), so what is kept reads back the same from a saved
+  // link and no character is split in two.
+  return typeof value === "string" ? Array.from(value).slice(0, FILTER_TEXT_MAX).join("").trim() : "";
 }
 
 /** "YYYY-MM-DD" when it names a real day, else "". */
@@ -97,8 +99,9 @@ export function filterSales<T extends FilterableSale>(sales: readonly T[], filte
     (sale) =>
       (!product || sale.title.toLowerCase().includes(product)) &&
       (!email || (sale.email ?? "").toLowerCase().includes(email)) &&
-      sale.paidAt >= from &&
-      sale.paidAt < to &&
+      // A time that did not read cannot be placed on a day: it is kept, never silently dropped, and salesTotals then
+      // gives no totals for the list (Claude 1 cloud on #3460).
+      (!Number.isFinite(sale.paidAt) || (sale.paidAt >= from && sale.paidAt < to)) &&
       (filter.kind === "all" || kindOf(sale) === filter.kind),
   );
 }
@@ -106,18 +109,20 @@ export function filterSales<T extends FilterableSale>(sales: readonly T[], filte
 export type SalesTotal = { currency: string; orders: number; charged: number; totalCents: number; averageCents: number | null };
 
 /**
- * The total and average of the sales given, per currency (sorted by its code). Null when any amount or currency
- * is unknown: no total is better than one that is wrong.
+ * The total and average of the sales given, per currency (sorted by its code). Null when any amount, currency or
+ * time is unknown: no total is better than one that is wrong.
  */
 export function salesTotals(sales: readonly FilterableSale[]): SalesTotal[] | null {
   const by = new Map<string, { orders: number; charged: number; total: number }>();
   for (const sale of sales) {
-    const known = Number.isSafeInteger(sale.amount) && sale.amount >= 0 && /^[a-z]{3}$/i.test(sale.currency);
+    const known = Number.isSafeInteger(sale.amount) && sale.amount >= 0 && /^[a-z]{3}$/i.test(sale.currency) && Number.isFinite(sale.paidAt);
     if (!known) return null;
     const currency = sale.currency.toUpperCase();
     const sum = by.get(currency) ?? { orders: 0, charged: 0, total: 0 };
     sum.orders += 1;
-    if (!sale.trial) {
+    // An order that charged nothing (a trial, a 100% coupon) is an order, not a charge: only-free orders give no
+    // average, never 0 (Claude 1 cloud on #3460).
+    if (!sale.trial && sale.amount > 0) {
       sum.charged += 1;
       sum.total += sale.amount;
     }

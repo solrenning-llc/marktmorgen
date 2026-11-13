@@ -86,7 +86,10 @@ export const META_SPEND_UNREAD = "Ad spend from your Meta ad account could not b
  * cannot be read throw (UnknownReplyError).
  */
 export async function readSpendLines(statsId: string | null): Promise<SpendRead> {
-  if (!statsId || !isRedisConfigured()) return { spends: [], metaUnread: false };
+  if (!statsId) return { spends: [], metaUnread: false };
+  // Without Redis nothing can be read, so the spend is unknown, never an empty list taken for all of it (rule 24;
+  // Codex X5 on #2924): each caller then says so or leaves out the figures that use ad spend.
+  if (!isRedisConfigured()) throw new UnknownReplyError("ad spend lines: Redis is not configured");
   const [typed, meta] = await Promise.all([
     typedSpends(statsId),
     metaLines(statsId).catch((error: unknown) => {

@@ -39,8 +39,8 @@ const PRIMITIVE_INVENTORY: Record<string, PrimitiveEntry> = {
   "lib/ai-spend.ts#reserveAiSpend": { state: "sites", sites: { "lib/ai.ts#askModel": { state: "gated", calls: 1 } } },
   "lib/imports.ts#reserveMoved": { state: "sites", sites: {
     "lib/api-write.ts#giveAccess": { state: "gated", calls: 1 },
-    "lib/imports.ts#mailStep": { state: "pending", calls: 1, why: "A members import's move emails: the moves figure is taken without the cohort proof in this function." },
-    "lib/imports.ts#sendMoveReminders": { state: "pending", calls: 1, why: "The move reminders' job takes the moves figure without the cohort proof." },
+    "lib/imports.ts#mailStep": { state: "gated", calls: 1 },
+    "lib/imports.ts#sendMoveReminders": { state: "gated", calls: 1 },
   } },
   "lib/answers.ts#takeAnswer": { state: "sites", sites: {
     "lib/answers.ts#answerQuestion": { state: "pending", calls: 1, why: "An AI answer taken from the store's month before the model, without the cohort proof." },
@@ -162,7 +162,7 @@ const problems = audit(sources, PRIMITIVE_INVENTORY, CONTRACT_ADMISSION_COVERAGE
 for (const problem of problems) console.log(`        ${problem}`);
 is("no problem between sources, inventory and key", problems, []);
 is("all 15 primitives inventoried", Object.keys(PRIMITIVE_INVENTORY).length, 15);
-is("pending primitive calls on 13 November 2026", pendingCalls, 9);
+is("pending primitive calls on 13 November 2026", pendingCalls, 7);
 is("pending calls keep resourceAllocations false", pendingCalls > 0 && CONTRACT_ADMISSION_COVERAGE.resourceAllocations, false);
 
 part("The audit refuses what it is for (synthetic sources)");

@@ -1,4 +1,4 @@
-import { FlowWriteUnconfirmed, saveFlow, removeFlow, readFlows } from "@/lib/flows";
+import { FlowWriteUnconfirmed, FlowsBusy, saveFlow, removeFlow, readFlows } from "@/lib/flows";
 import { setUpStarters } from "@/lib/mail-starters";
 import { keepSending } from "@/lib/mail-reuse";
 import type { Store } from "@/lib/store";
@@ -84,6 +84,15 @@ async function main() {
     is("removal preserves remaining sequences", (await readFlows(listId)).length, 2);
     await original.call(redis, [["DEL", key]]);
     is("confirmed absent list permits creation", (await saveFlow(store, raw)).ok, true);
+    // Three saves in a row losing the compare-and-set wrote nothing: said as busy, never as "may already have happened"
+    // (Claude 1 cloud's LOW 2 on #1927); still a FlowWriteUnconfirmed, so every caller that handles it is unchanged.
+    const before = JSON.stringify([first, second]);
+    await original.call(redis, [["SET", key, before]]);
+    writeReply = [0];
+    let busy: unknown = null;
+    try { await saveFlow(store, raw); } catch (error) { busy = error; }
+    writeReply = normal;
+    is("three lost compare-and-sets: busy, nothing written", [typeof FlowsBusy === "function" && busy instanceof FlowsBusy, busy instanceof FlowWriteUnconfirmed, (await original.call(redis, [["GET", key]]))[0]], [true, true, before]);
   } finally { redis.pipeline = original; }
   done();
 }

@@ -155,6 +155,21 @@ export class MemoryRedis {
           }
           return null;
         }
+        // lib/quiz.ts KEEP_PASS: a try's record written, unless it failed and the record kept has passed.
+        if (key.startsWith("-- marktmorgen:quiz-keep-pass:v1\n") && args[0] === "1" && args.length === 4) {
+          const [, result, record, passed] = args;
+          if (passed !== "1") {
+            const kept = this.run(["GET", result]);
+            if (typeof kept === "string") {
+              try {
+                const value = JSON.parse(kept) as unknown;
+                if (value && typeof value === "object" && !Array.isArray(value) && (value as { passed?: unknown }).passed === true) return 0;
+              } catch {}
+            }
+          }
+          this.run(["SET", result, record]);
+          return 1;
+        }
         // lib/community.ts GIVE_BACK_HANDLE: a handle deleted only while it points at the member and their record does not carry it.
         if (key.startsWith("-- marktmorgen:community-handle-give-back:v1\n") && args[0] === "2" && args.length === 5) {
           const [, members, handles, handle, who] = args;

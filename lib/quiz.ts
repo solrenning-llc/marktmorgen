@@ -515,6 +515,22 @@ export async function attemptOf(courseId: string, lessonId: string, who: string)
   return parseAttempt(raw, used);
 }
 
+/**
+ * Writes a try's record (KEYS[1]: its result, ARGV[1]: the record, ARGV[2]: "1" when this try passed), in one step,
+ * unless this try failed and the record kept has passed: a pass is never undone by a try sent from another tab that
+ * read the quiz before it passed. Answers 1 when written, 0 when the pass was kept.
+ */
+export const KEEP_PASS = `-- marktmorgen:quiz-keep-pass:v1
+if ARGV[2] ~= '1' then
+  local kept = redis.call('GET', KEYS[1])
+  if kept then
+    local ok, value = pcall(cjson.decode, kept)
+    if ok and type(value) == 'table' and value.passed == true then return 0 end
+  end
+end
+redis.call('SET', KEYS[1], ARGV[1])
+return 1`;
+
 export type SubmitResult =
   | { ok: true; grade: Grade; attempt: Attempt }
   | { ok: false; reason: "no_tries" | "passed" | "usage_limit" | "unavailable" | "wait" | "stale" };
@@ -587,8 +603,10 @@ export async function submitQuiz(
     best: Math.max(before.best, grade.percent),
     passed: grade.passed,
   };
+  // A failing try never writes over a pass: another tab may have passed after this one read the quiz as not passed.
+  // KEEP_PASS writes the record only when the kept one has not passed; the tries themselves are counted apart.
   await redisPipeline([
-    ["SET", resultKey(courseId, lessonId, who), JSON.stringify(attempt)],
+    ["EVAL", KEEP_PASS, 1, resultKey(courseId, lessonId, who), JSON.stringify(attempt), grade.passed ? "1" : "0"],
     ...(grade.passed ? [["SADD", passedKey(courseId, who), lessonId]] : []),
   ]);
   return { ok: true, grade, attempt };

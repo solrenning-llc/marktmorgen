@@ -1,7 +1,7 @@
 "use client";
 
 import { useId } from "react";
-import { AI_DRAFT_BADGE, AI_DRAFT_CHECKS, reviewDone, sensitiveLabel, sensitiveWarning, type DraftTopics } from "@/lib/ai-draft-review";
+import { AI_DRAFT_BADGE, AI_DRAFT_CHECKS, ESTIMATE_BADGE, ESTIMATE_NOTE, reviewDone, sensitiveLabel, sensitiveWarning, type DraftTopics } from "@/lib/ai-draft-review";
 
 /**
  * The "AI draft" badge and the three checks drawn under every draft the
@@ -14,6 +14,7 @@ export function AiDraftReview({
   checks,
   onToggle,
   topics = [],
+  estimates = [],
 }: {
   checks: readonly boolean[];
   onToggle: (index: number, ticked: boolean) => void;
@@ -22,14 +23,19 @@ export function AiDraftReview({
    * or "unread" for a draft in a language the lists do not read (756 [STN3], unit 2).
    */
   topics?: DraftTopics;
+  /** Numbers in the draft that the creator did not give, each shown as an estimate (756 [STN3], unit 3). */
+  estimates?: readonly string[];
 }) {
   const base = useId();
   const done = reviewDone(checks);
   const warning = sensitiveWarning(topics);
   const warningId = `${base}-topic`;
+  const estimatesId = `${base}-estimates`;
+  // The warning and the numbers to check describe the group, so a screen reader reads them with the checks
+  // (Claude 6's reviews of #3436, LOW 5, and #3437, LOW 6).
+  const describedBy = [warning ? warningId : null, estimates.length ? estimatesId : null].filter(Boolean).join(" ") || undefined;
   return (
-    // The warning describes the group, so a screen reader reads it with the checks (Claude 6's review of #3436, LOW 5).
-    <fieldset className="rounded-xl border border-line bg-white p-3" data-ai-review aria-describedby={warning ? warningId : undefined}>
+    <fieldset className="rounded-xl border border-line bg-white p-3" data-ai-review aria-describedby={describedBy}>
       <legend className="flex flex-wrap items-center gap-2 px-1 text-sm font-semibold text-ink">
         <span className="rounded-full border border-ink px-2 py-0.5 text-xs font-bold uppercase tracking-wide text-ink">{AI_DRAFT_BADGE}</span>
         <span>Before you save it, check:</span>
@@ -38,6 +44,20 @@ export function AiDraftReview({
         <p id={warningId} className="mt-1 text-sm text-ink">
           <strong>{sensitiveLabel(topics)}</strong> {warning}
         </p>
+      ) : null}
+      {estimates.length ? (
+        <div id={estimatesId} className="mt-2 text-sm text-ink">
+          <p>{ESTIMATE_NOTE}</p>
+          <ul className="mt-1 flex flex-wrap gap-2" aria-label="Numbers to check">
+            {estimates.map((figure, index) => (
+              // Two figures can be written the same ("10m" minutes, "10m" millions): keyed by place, never by text.
+              <li key={index} className="inline-flex items-center gap-1">
+                <span className="rounded-full border border-ink px-2 py-0.5 text-xs font-bold uppercase tracking-wide text-ink">{ESTIMATE_BADGE}</span>
+                <span className="font-semibold">{figure}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
       ) : null}
       <ul className="mt-1 space-y-1">
         {AI_DRAFT_CHECKS.map((check, index) => (

@@ -130,9 +130,12 @@ export function SitePagesList({ pages, selected, sid }: { pages: SitePage[]; sel
               </div>
             </>
           ) : null}
-          <label className="mt-3 block px-1 text-xs font-semibold text-ink-soft">
+          <div className="mt-3 px-1 text-xs font-semibold text-ink-soft">
+          <label className="block" htmlFor="site-page-file">
             <span className="block">Or bring in a page from a file</span>
+          </label>
             <input
+              id="site-page-file"
               type="file"
               accept=".json,application/json"
               disabled={busy}
@@ -144,8 +147,9 @@ export function SitePagesList({ pages, selected, sid }: { pages: SitePage[]; sel
                 void bring(chosen);
               }}
             />
-            <span id="site-page-file-help" className="mt-1 block font-normal">{IMPORT_HELP}</span>
-          </label>
+            {/* A description only, outside the label, so the box's name is the label alone (LEVE on #3538). */}
+            <p id="site-page-file-help" className="mt-1 block font-normal">{IMPORT_HELP}</p>
+          </div>
           <form
             className="mt-3 flex gap-2 px-1"
             onSubmit={(e) => {

@@ -110,7 +110,8 @@ async function main(): Promise<void> {
   const longBody = { ...file, blocks: (file.blocks as PageBlock[]).map((b) => (b.kind === "text" ? { ...b, body: "y".repeat(100_000) } : b)) };
   is("a file edited so a block would be kept cut short is refused whole, never kept shortened (review of #3538)", [(await post({ action: "import", file: longHeading })).data.error, readPageFile(longBody).ok, await count()], ["file", false, before]);
   const pipeline = redis.pipeline;
-  redis.pipeline = async (commands) => (commands.some((c) => c[0] === "HEXISTS") ? [] : pipeline.call(redis, commands));
+  // The store's forms are read with one HKEYS (#3538): an empty answer to it is unread, never "no forms".
+  redis.pipeline = async (commands) => (commands.some((c) => c[0] === "HKEYS") ? [] : pipeline.call(redis, commands));
   let unread: Awaited<ReturnType<typeof post>>;
   try {
     unread = await post({ action: "import", file });

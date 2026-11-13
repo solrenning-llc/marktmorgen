@@ -8,7 +8,9 @@ import { EMPTY_PAGE, MAX_BLOCKS, emptyBlock, oversized, pageProblem, parsePage, 
 import { pageCopy } from "@/lib/site-page-copy";
 import { formsNamed, importedEntry, importedPage, pageFile, readPageFile } from "@/lib/site-page-file";
 import { redisPipeline } from "@/lib/redis";
-import { exactReplies, replyCount } from "@/lib/redis-exact";
+import { UnknownReplyError } from "@/lib/redis-reply";
+import { MAX_FORMS } from "@/lib/forms";
+import { exactReplies } from "@/lib/redis-exact";
 import { claimNewPictures, dropPage, picturesOfFailedDrop, readPage, readPageExact, releasePictures, writePage } from "@/lib/sales-page-store";
 import { del } from "@/lib/blob";
 import { ownsImagePath } from "@/lib/product-image";
@@ -204,9 +206,12 @@ export async function POST(request: NextRequest) {
         if (!store.statsId) forms = new Set();
         else {
           try {
-            // The key of the store's forms (lib/form-store.ts, formsKey).
-            const replies = exactReplies(await redisPipeline(named.map((id) => ["HEXISTS", `nl:forms:${store.statsId}`, id])), named.length, "the store's forms");
-            forms = new Set(named.filter((id, i) => replyCount(replies[i], "the store's forms") === 1));
+            // The key of the store's forms (lib/form-store.ts, formsKey): its ids in one exact read, at most MAX_FORMS, so
+            // a file naming many forms costs one command, inside the one studio request it took (Claude 1 cloud on #3538).
+            const [ids] = exactReplies(await redisPipeline([["HKEYS", `nl:forms:${store.statsId}`]]), 1, "the store's forms");
+            if (!Array.isArray(ids) || ids.length > MAX_FORMS || ids.some((id) => typeof id !== "string")) throw new UnknownReplyError("the store's forms");
+            const kept = new Set(ids as string[]);
+            forms = new Set(named.filter((id) => kept.has(id)));
           } catch (error) {
             console.error("reading a store's forms before bringing in a page failed", error);
             return refuse("forms_unread", 503);

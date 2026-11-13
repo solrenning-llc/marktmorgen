@@ -768,6 +768,11 @@ export class TaskRecordUnreadError extends Error {
  * student's own folder, and deleted with it. The deletion's receipt is
  * read too: a batch that does not answer a count for every command throws
  * UnknownReplyError, its files left to the daily job (Codex P on #2847).
+ * Every file it deletes is put on that job's list in the deletion batch
+ * itself (#4367): a reply lost after the batch applied leaves the retry with
+ * the submission gone and no file, so the cleanup is never left to the reply;
+ * with an exact receipt and every record read, they are taken off it again,
+ * as the erasure deletes them itself.
  */
 export async function forgetTasksPerson(courseId: string, lessonIds: string[], who: string, room: string | null): Promise<{ records: number; files: string[] }> {
   if (!lessonIds.length || !WHO.test(who) || !isRedisConfigured()) return { records: 0, files: [] };
@@ -795,8 +800,11 @@ export async function forgetTasksPerson(courseId: string, lessonIds: string[], w
     ["ZREM", allKey(courseId), ...members],
     // One HDEL per file: only a file this erasure removed has its bytes given back here (removedBytes).
     ...files.map((f) => ["HDEL", filesKey(courseId, f.lessonId), f.path]),
-    // Thrown below, the files it read would not reach the erasure: the daily job deletes them instead.
-    ...(unread && files.length ? [["ZADD", DOORS_KEY, ...files.flatMap((f) => [0, f.path])]] : []),
+    // Every file it deletes goes to the daily job that deletes uploads nobody kept, in the same write (#4367): a
+    // reply lost after the batch applied, or a throw below, never leaves a file stored with no cleanup, because the
+    // retry finds the submission gone and no file. Taken off again below once the receipt is exact and every record
+    // read, as the erasure then deletes the files itself.
+    ...(files.length ? [["ZADD", DOORS_KEY, ...files.flatMap((f) => [0, f.path])]] : []),
   ];
   // Every command answers a count (Codex P on #2847). Anything else may have applied all, part or none of the
   // batch: nothing is sent again on a guess and no room is given back, the files read go to the daily job that
@@ -810,5 +818,11 @@ export async function forgetTasksPerson(courseId: string, lessonIds: string[], w
   const bytes = files.length ? removedBytes(receipt.slice(3, 3 + files.length), files.map((f) => f.bytes)) : 0;
   if (room && bytes) await releaseBytes(room, bytes);
   if (unread) throw new TaskRecordUnreadError(unread, handed.length);
+  // Handed to the erasure, which deletes them now: off the daily job's list. A reply in another shape leaves them on
+  // it, and the job deletes them a second time, harmlessly (a file already gone is gone, lib/file-store.ts).
+  if (files.length) {
+    const off = await redisPipeline([["ZREM", DOORS_KEY, ...files.map((f) => f.path)]]).catch(() => null);
+    if (countOf(repliesFor(off, 1)?.[0]) === null) console.error("taking an erased student's files off the unused-uploads list: unknown reply; the daily job deletes them again");
+  }
   return { records: handed.length, files: files.map((f) => f.path) };
 }

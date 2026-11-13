@@ -95,7 +95,7 @@ export default function HelpPage() {
                             {paragraph}
                           </p>
                         ))}
-                        <CopyLink id={answerId(item.q)} />
+                        <CopyLink id={answerId(item.q)} about={item.q} />
                       </div>
                     </details>
                   ))}

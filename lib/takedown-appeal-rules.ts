@@ -284,7 +284,7 @@ export function moveAppeal(appeal: Appeal, to: AppealState, by: { role: "creator
  */
 export function movesLeadTo(state: unknown, moves: unknown): boolean {
   if (!Array.isArray(moves) || moves.length === 0 || moves.length > APPEAL_STATES.length) return false;
-  let at: AppealState | null = null;
+  let at = null as AppealState | null;
   for (const raw of moves) {
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) return false;
     const move = raw as Record<string, unknown>;

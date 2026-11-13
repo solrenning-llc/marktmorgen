@@ -26,10 +26,13 @@ import { paidPeriod } from "./billing-period-fixture";
 
 type Sent = { to: string[] | string; subject: string; text: string; key?: string };
 const sent: Sent[] = [];
+/** While true, the provider refuses the urgent email only (Claude 1 cloud rev-odd on #3587). */
+let urgentDown = false;
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   if (url.hostname === "api.resend.com") {
     const headers = new Headers(init?.headers);
+    if (urgentDown && /^URGENT/.test((JSON.parse(String(init?.body)) as Sent).subject)) return new Response(JSON.stringify({ message: "unavailable" }), { status: 500 });
     sent.push({ ...(JSON.parse(String(init?.body)) as Sent), key: headers.get("idempotency-key") ?? undefined });
     return new Response(JSON.stringify({ id: `email_${sent.length}` }));
   }
@@ -127,6 +130,26 @@ async function main(): Promise<void> {
   const blind = await reportRoute(new NextRequest("https://marktmorgen.com/api/report", { method: "POST", headers: { "content-type": "application/json", origin: "https://marktmorgen.com", host: "marktmorgen.com" }, body: JSON.stringify({ ...CHILD, url: `https://marktmorgen.com/@safetyshop/p/${store2.product.id}` }) }));
   redis.pipeline = reading;
   is("a store that cannot be read: the owner is told it could not be confirmed, never that the address names nothing", [blind.status, sent.some((mail) => /^URGENT/.test(mail.subject) && mail.text.includes("could not be confirmed"))], [200, true]);
+
+  // Claude 1 cloud rev-odd's MEDIUM on #3587: the notice email went out but the urgent one failed, and the route still
+  // answered 200, so the reporter was told it was received while nothing in the inbox named child safety or the
+  // 48-hour clock. The reporter is now asked to send it again; the hold is idempotent and the urgent key is per request.
+  part("An urgent email that fails is not answered as received");
+  {
+    const failing = await addProduct(owner, "Reported While The Urgent Email Fails", "On sale", "9", null);
+    if (!failing.ok) throw new Error("no product");
+    redis.run(["DEL", ...redis.keys().filter((key) => key.startsWith("nl:csa:"))]);
+    sent.length = 0;
+    urgentDown = true;
+    const unsent = await reportRoute(new NextRequest("https://marktmorgen.com/api/report", { method: "POST", headers: { "content-type": "application/json", origin: "https://marktmorgen.com", host: "marktmorgen.com" }, body: JSON.stringify({ ...CHILD, work: "", url: `https://marktmorgen.com/@safetyshop/p/${failing.product.id}` }) }));
+    urgentDown = false;
+    is("no urgent email reached the inbox", sent.some((mail) => /^URGENT/.test(mail.subject)), false);
+    is("the reporter is not told it was received", unsent.status !== 200, true);
+    is("and is asked to try again", [unsent.status, ((await unsent.json()) as { ok?: boolean }).ok], [503, false]);
+    const again = await reportRoute(new NextRequest("https://marktmorgen.com/api/report", { method: "POST", headers: { "content-type": "application/json", origin: "https://marktmorgen.com", host: "marktmorgen.com" }, body: JSON.stringify({ ...CHILD, work: "", url: `https://marktmorgen.com/@safetyshop/p/${failing.product.id}` }) }));
+    is("sent again, it is answered as received only if the urgent email went out", again.status === 200, sent.some((mail) => /^URGENT/.test(mail.subject)));
+    is("the product is off the store", (await readListing((await storeForEmail(owner))!, failing.product.id))?.hidden, true);
+  }
 
   part("A product that cannot be read is said as such, never as an address that names nothing");
   const many = [];

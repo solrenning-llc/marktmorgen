@@ -128,6 +128,8 @@ test('a renewal not yet paid, failed, past due or read in any other shape is nev
   ['another period',subscriptionOf({cycle:'month',...P2,created:P1.start}),{...paid,lines:lines({start:P2.start+1,end:P2.end})}],
   ['more lines than one page shows',subscriptionOf({cycle:'month',...P2,created:P1.start}),{...paid,lines:lines(P2,true)}],
   ['another amount',subscriptionOf({cycle:'month',...P2,created:P1.start}),{...paid,subtotal:6899}],
+  ['paid with nothing charged (a coupon)',subscriptionOf({cycle:'month',...P2,created:P1.start}),{...paid,amount_paid:0,total:0}],
+  ['paid in part from a credit balance',subscriptionOf({cycle:'month',...P2,created:P1.start}),{...paid,amount_paid:6800,total:6900,starting_balance:-100}],
   ['money still due',subscriptionOf({cycle:'month',...P2,created:P1.start}),{...paid,amount_remaining:1}],
   ['marked paid outside Stripe',subscriptionOf({cycle:'month',...P2,created:P1.start}),{...paid,paid_out_of_band:true}],
   ['another currency',subscriptionOf({cycle:'month',...P2,created:P1.start}),{...paid,currency:'eur'}],

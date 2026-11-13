@@ -225,7 +225,8 @@ export async function undoUnconfirmedCopy(store: DataStore, to: string, unconfir
   if (!statsId || !isRedisConfigured()) return;
   const after = normaliseEmail(to);
   const prior = unconfirmed.copy.prior;
-  const put = oneAnswer(await redisPipeline([prior ? ["HSET", accessKey(statsId), after, prior] : ["HDEL", accessKey(statsId), after]]));
+  // A stored empty record ("", opens nothing) is put back, never deleted into "no restriction" (Claude 7 on #2036).
+  const put = oneAnswer(await redisPipeline([prior !== null ? ["HSET", accessKey(statsId), after, prior] : ["HDEL", accessKey(statsId), after]]));
   if (put === null) throw new Error("putting back the new address's pipeline access could not be confirmed");
   if (unconfirmed.taken > 0) await giveData(store, [{ slot: ACCESS_SLOT, bytes: unconfirmed.taken }]);
 }

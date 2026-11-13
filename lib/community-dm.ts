@@ -281,7 +281,27 @@ export async function send(
     // The sender has read what they just wrote.
     ["HSET", readKey(id, pair), from, message.at],
   ]);
+  if (asking && (await acceptedMeanwhile(id, to, pair))) return { ok: true, asked: false };
   return { ok: true, asked: asking };
+}
+
+/**
+ * After a request's write: whether the recipient said yes while it was on its way (accept wrote the inbox line before
+ * taking the request line out). Then the request line this write put back with ZADD NX is a stray beside the accepted
+ * conversation, so it goes, and the message is in the conversation, not a request (Claude 6's note on #3266). Read
+ * exactly: anything but a score or none, or Redis failing, leaves the line where it is and says nothing was accepted;
+ * the message itself is written either way, and the trim and the thread already read a pair in the inbox as accepted.
+ */
+async function acceptedMeanwhile(id: string, to: string, pair: string): Promise<boolean> {
+  try {
+    const listed = repliesFor(await redisPipeline([["ZSCORE", inboxKey(id, to), pair]]), 1);
+    if (!listed || listed[0] === null || !scoreOrNone(listed[0])) return false;
+    await redisPipeline([["ZREM", askedKey(id, to), pair]]);
+    return true;
+  } catch (error) {
+    console.error("reading whether a request was accepted on its way failed", error);
+    return false;
+  }
 }
 
 /** A sorted-set score as Redis gives it (a number in text), or none (null). */
@@ -344,9 +364,12 @@ export async function accept(id: string, who: string, pair: string): Promise<boo
   if (!otherIn(pair, who)) return false;
   const [held] = await redisPipeline([["ZSCORE", askedKey(id, who), pair]]);
   if (held === null || held === undefined) return false;
+  // The inbox line goes in before the request line comes out. A follow-up request racing this yes writes its line back
+  // with ZADD NX and then reads the inbox (send): in either order of the two writers' commands, it either sees the
+  // pair in the inbox and takes its own stray line out, or its line is taken out here.
   await redisPipeline([
-    ["ZREM", askedKey(id, who), pair],
     ["ZADD", inboxKey(id, who), Number(held) || now(), pair],
+    ["ZREM", askedKey(id, who), pair],
   ]);
   return true;
 }

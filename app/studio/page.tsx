@@ -74,7 +74,7 @@ import { readRanges, recordSample } from "@/lib/benchmarks";
 import { compare, sampleFrom } from "@/lib/benchmark-rules";
 import { heardOff } from "@/lib/heard";
 import { weeklyTeam } from "@/lib/stats-report";
-import { NO_SETUP, SERVER_PLATFORMS, serverSetup } from "@/lib/ad-events";
+import { SERVER_PLATFORMS, serverSetup } from "@/lib/ad-events";
 import { claimPathsRead, laterWords, pathsStale, readPaths } from "@/lib/next-bought";
 import { BuyerPaths } from "@/components/buyer-paths";
 import { canBeBumped, isOneOff } from "@/lib/product-extras";
@@ -185,6 +185,7 @@ import {
   isConnectInTestMode,
 } from "@/lib/stripe-connect";
 import { ORDERS_PAGE_SIZE, canSell, listSales } from "@/lib/store-checkout";
+import { RECEIPT_BATCH_MAX, lastMonthDays } from "@/lib/receipt-batch-rules";
 import { DELIVERY_ALLOWANCE_BYTES, FREE_PAUSE_ABOVE_BYTES, bytesWords, deliveredThisMonth } from "@/lib/delivery";
 import { watchedForAdmission } from "@/lib/watch";
 import { hoursWords } from "@/lib/watch-rules";
@@ -1079,6 +1080,8 @@ export default async function StudioPage({
   // What each part below reads is only read for a role that is shown it
   // (lib/team-roles.ts), so nothing a role may not see reaches the page.
   const sold = planReads.sold ? await planReads.sold : null;
+  // The receipts download's form starts with last month (lib/receipt-batch-rules.ts).
+  const receiptDays = lastMonthDays(todayNow());
 
   const [delivery, watchedReading, trafficReading] = await planReads.usage;
   const watched = watchedReading ?? 0;
@@ -2066,7 +2069,9 @@ export default async function StudioPage({
                 {hasPixels(store.pixels) ? (async () => {
                   const before = serverWrite.done;
                   const setupRead = (async () => {
-                    const setup = await serverSetup(store.statsId).catch(() => NO_SETUP);
+                    // Not read: said so, never shown as an empty setup nor written on the store as none.
+                    const setup = await serverSetup(store.statsId).catch(() => null);
+                    if (!setup) return null;
                     // A token saved before the store kept its own list of platforms is written there now, once, after
                     // the cart link's write.
                     const on = SERVER_PLATFORMS.filter((p) => setup.on[p]);
@@ -2075,9 +2080,17 @@ export default async function StudioPage({
                   })();
                   // The writes after this one wait for the cart link's too, even when this part writes nothing.
                   serverWrite.done = Promise.all([before.catch(() => null), setupRead]);
+                  const setup = await setupRead;
+                  if (!setup) {
+                    return (
+                      <p className="text-ink-soft">
+                        Server-sent conversions could not be read just now. Nothing was changed; reload the page in a moment.
+                      </p>
+                    );
+                  }
                   return (
                   <ServerEventsEditor
-                    setup={await setupRead}
+                    setup={setup}
                     pixels={{
                       meta: Boolean(store.pixels.meta),
                       tiktok: Boolean(store.pixels.tiktok),
@@ -3449,6 +3462,27 @@ export default async function StudioPage({
                       Up to {ORDERS_PAGE_SIZE} matching recent orders. For the full
                       history, open your Stripe dashboard.
                     </p>
+                    {/* A month's receipts in one ZIP (lib/receipt-batch.ts, 601 [KB22] U3): counted before anything is made. */}
+                    <form method="get" action="/api/store/receipt-batch" className="mt-6 rounded-[var(--r-md)] bg-sand p-5" aria-labelledby="receipt-batch-title">
+                      <h3 id="receipt-batch-title" className="font-bold text-ink">Download receipts for several sales</h3>
+                      <p id="receipt-batch-help" className="mt-1 text-sm text-ink-soft">
+                        One ZIP file with a receipt (PDF) for each one-time sale paid in these days, up to {RECEIPT_BATCH_MAX} receipts.
+                        Both days must be in the same month. Dates are in UTC, as on the receipts. A sale without a receipt,
+                        such as one refunded in full, is named in a text file in the ZIP with the reason.
+                      </p>
+                      {store?.sid ? <input type="hidden" name="store" value={store.sid} /> : null}
+                      <div className="mt-3 flex flex-wrap items-end gap-3">
+                        <div>
+                          <label htmlFor="receipt-batch-from" className="block text-sm font-semibold text-ink">First day</label>
+                          <input id="receipt-batch-from" name="from" type="date" required defaultValue={receiptDays.from} aria-describedby="receipt-batch-help" className="field mt-1 min-h-11 min-w-0 max-w-full py-2" />
+                        </div>
+                        <div>
+                          <label htmlFor="receipt-batch-to" className="block text-sm font-semibold text-ink">Last day</label>
+                          <input id="receipt-batch-to" name="to" type="date" required defaultValue={receiptDays.to} aria-describedby="receipt-batch-help" className="field mt-1 min-h-11 min-w-0 max-w-full py-2" />
+                        </div>
+                        <button type="submit" className="btn btn-secondary inline-flex min-h-11 items-center">Download the receipts (ZIP)</button>
+                      </div>
+                    </form>
                   </>
                 )}
               </section>

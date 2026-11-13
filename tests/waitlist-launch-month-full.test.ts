@@ -96,7 +96,8 @@ async function main(): Promise<void> {
   const crowd = Array.from({ length: figure + 5 }, (_, i) => `reader${String(i).padStart(3, "0")}@example.com`);
   await setSoon(shop, small.id, true);
   for (const [i, email] of crowd.entries()) await redis.pipeline([["HSET", `nl:wl:${sid}:${small.id}`, email, JSON.stringify({ at: 1, ok: 1, c: false, t: String(i % 10).repeat(48) })]]);
-  is("launched for all of them", (await launch(shop, small, { note: "", address: ADDRESS })).total, crowd.length);
+  const launchedAll = await launch(shop, small, { note: "", address: ADDRESS });
+  is("launched for all of them", launchedAll.ok && launchedAll.total, crowd.length);
   // Nothing of this month used yet: its whole figure is free, and the batch would be larger than that.
   await monthTurns(shop);
   const before = sentTo().length;

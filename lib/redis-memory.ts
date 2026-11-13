@@ -191,6 +191,13 @@ export class MemoryRedis {
             return fields.removed ? "r" : "y";
           }).join("");
         }
+        // lib/learn.ts MARK_DONE_UNLESS_ERASED: a lesson marked done only while the student's address is not deleted.
+        if (key.startsWith("-- marktmorgen:mark-done:v1\n") && args[0] === "2" && args.length === 5) {
+          const [, done, erased, print, lesson] = args;
+          if (this.run(["HEXISTS", erased, print]) === 1) return 0;
+          this.run(["SADD", done, lesson]);
+          return 1;
+        }
         // lib/group-buy.ts PLACE_RELEASE: a place's opening hold deleted only while its token is still the open's own.
         if (key.startsWith("-- marktmorgen:group-place-release:v1\n") && args[0] === "1" && args.length === 3) {
           const [, hold, token] = args;

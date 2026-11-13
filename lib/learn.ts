@@ -33,6 +33,7 @@ import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, SESSION_COOKIE, emailForSession, norma
 import { NIMBUS_FROM, sendEmail, serviceMailKnownUnavailable } from "@/lib/email";
 import { coursesWords } from "@/lib/buyer-words/courses";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { suppressedKey, suppressionPrint } from "@/lib/suppression";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { type DataStore, giveData, needData, noteData, takeData } from "@/lib/store-data";
@@ -570,13 +571,43 @@ const DONE_SLOT = (courseId: string) => `cd:${courseId}`;
  * first (DataRoomError when it does not fit), unless `always`: what follows a
  * quiz passed or work handed in, which was taken already.
  */
-export async function markLesson(courseId: string, email: string, lessonId: string, done: boolean, room: DataStore, always = false): Promise<void> {
+/**
+ * A lesson marked done only while the student's address is not deleted from the store (the store's suppression
+ * print, lib/suppression.ts, written by lib/person-erasure.ts before their progress goes): 1 written, 0 refused. So a
+ * completion allowed before an erasure and written after it brings nothing back (issue #4435).
+ */
+export const MARK_DONE_UNLESS_ERASED = `-- marktmorgen:mark-done:v1
+if redis.call("HEXISTS", KEYS[2], ARGV[1]) == 1 then return 0 end
+redis.call("SADD", KEYS[1], ARGV[2])
+return 1`;
+
+export async function markLesson(
+  courseId: string,
+  email: string,
+  lessonId: string,
+  done: boolean,
+  room: DataStore,
+  always = false,
+  /** The store's list, when the student's erasure is to be checked with the write (issue #4435); null writes nothing. */
+  erased?: { listId: string | null },
+): Promise<void> {
   const bytes = dataBytes([lessonId], 1);
   if (done) {
+    if (erased && !erased.listId) return;
     const [held] = await redisPipeline([["SISMEMBER", doneKey(courseId, email), lessonId]]);
     if (Number(held) === 1) return;
     if (always) await noteData(room, [{ slot: DONE_SLOT(courseId), bytes }]);
     else await needData(room, [{ slot: DONE_SLOT(courseId), bytes }]);
+    if (erased?.listId) {
+      // Written only while they are not deleted, in the same step: an erasure that came first refuses it, and the room comes back.
+      const [kept] = await redisPipeline([["EVAL", MARK_DONE_UNLESS_ERASED, 2, doneKey(courseId, email), suppressedKey(erased.listId), suppressionPrint(erased.listId, email), lessonId]]);
+      if (kept === 0 || kept === "0") {
+        await giveData(room, [{ slot: DONE_SLOT(courseId), bytes }]);
+        return;
+      }
+      if (kept !== 1 && kept !== "1") throw new UnknownReplyError("a lesson marked done");
+      return;
+    }
     await redisPipeline([["SADD", doneKey(courseId, email), lessonId]]);
     return;
   }

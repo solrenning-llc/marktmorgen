@@ -5,7 +5,7 @@ import { DATA_FULL_BUYER_WORDS } from "@/lib/store-data-rules";
 import { cookies } from "next/headers";
 import { originFrom } from "@/lib/request-origin";
 import { fromAnotherSite } from "@/lib/studio-route";
-import { normaliseHandle, storeForHandle } from "@/lib/store";
+import { ensureListId, normaliseHandle, storeForHandle } from "@/lib/store";
 import { findLesson, isOpen, readCourse } from "@/lib/course";
 import { courseAccess, emailKey, markLesson } from "@/lib/learn";
 import { MAX_QUESTIONS, heldBack, passedForGate, readAnswers, readQuizFor, submitQuiz } from "@/lib/quiz";
@@ -70,7 +70,9 @@ export async function POST(request: NextRequest) {
   if (!result.ok && result.reason === "wait") return away(`${base}/${lessonId}#quiz`);
   if (!result.ok && result.reason === "stale") return away(`${base}/${lessonId}?quiz=stale#quiz`);
   if (result.ok && result.grade.passed) {
-    await markLesson(course.id, access.learner.email, lessonId, true, store, true);
+    // Checked with the write against the store's mark of who was deleted (issue #4435); the list made as the erasure makes it.
+    const listId = store.listId || ((await ensureListId(store.email))?.listId ?? null);
+    await markLesson(course.id, access.learner.email, lessonId, true, store, true, { listId });
     await noteIfFinished(store, product.id, course.id, access.learner.email);
   }
   return away(`${base}/${lessonId}?quiz=marked#quiz`);

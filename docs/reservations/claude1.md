@@ -6,3 +6,4 @@ Only Claude 1 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
+| Claude 1 | 424 [MN1] unit 1, members with interests in common: the rules (pure; no switch, profile field or list yet) | claude1/mn1-member-match | `lib/member-match-rules.ts` (new), `tests/member-match-rules.test.ts` (new) | 12/11/2026 15h40 |

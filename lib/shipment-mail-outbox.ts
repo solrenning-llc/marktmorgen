@@ -3,6 +3,7 @@
  * confirmed dispatch barrier is permanent until an explicit outcome/erasure.
  * A lease can recover preparation; it can never recover a submitted email.
  */
+import { exactKeys } from "@/lib/exact-keys";
 import { createHash, randomBytes } from "node:crypto";
 import { redisPipeline } from "@/lib/redis";
 import { canSeal, seal, unseal } from "@/lib/secret-box";
@@ -162,11 +163,14 @@ type Row = {
   sealed: string; fingerprint: string; bytes: number; created: number; authorizedAt: number; next: number;
   state: ShipmentMailState; owner: string; leaseUntil: number; checks: number; reviewId: string;
 };
+/** Every field of a row, checked against Row: a field added or renamed there fails to compile here. */
+const ROW_KEYS = exactKeys<Row>()(["id", "statsId", "session", "person", "sourceValue", "sealed", "fingerprint", "bytes", "created", "authorizedAt", "next", "state", "owner", "leaseUntil", "checks", "reviewId"]);
+const MESSAGE_KEYS = exactKeys<ShipmentMailMessage>()(["from", "to", "subject", "text", "replyTo"]);
 function parseRow(raw: unknown): Row | null {
   try {
     if (typeof raw !== "string" || Buffer.byteLength(raw) > SHIPMENT_MAIL_MAX_ROW_BYTES) return null;
     const r = data(JSON.parse(raw));
-    const keys = ["id", "statsId", "session", "person", "sourceValue", "sealed", "fingerprint", "bytes", "created", "authorizedAt", "next", "state", "owner", "leaseUntil", "checks", "reviewId"];
+    const keys = ROW_KEYS;
     if (!r || Object.keys(r).length !== keys.length || !keys.every(key => Object.hasOwn(r, key)) ||
         typeof r.id !== "string" || !HASH.test(r.id) || typeof r.statsId !== "string" || !STORE.test(r.statsId) ||
         typeof r.session !== "string" || !SESSION.test(r.session) || r.id !== shipmentMailId(r.statsId, r.session) ||
@@ -741,7 +745,7 @@ export async function runShipmentMail(deadline: number, dispatch: ShipmentMailDi
     if (opened.ok && digest(opened.value) === row.fingerprint) {
       try {
         const value = data(JSON.parse(opened.value));
-        if (value && Object.keys(value).length === 5 && ["from", "to", "subject", "text", "replyTo"].every(key => typeof value[key] === "string") && person(String(value.to)) === row.person) message = value as unknown as ShipmentMailMessage;
+        if (value && Object.keys(value).length === MESSAGE_KEYS.length && MESSAGE_KEYS.every(key => typeof value[key] === "string") && person(String(value.to)) === row.person) message = value as unknown as ShipmentMailMessage;
       } catch { /* Retain protected evidence; it cannot authorize sending. */ }
     }
     let barrier = false;

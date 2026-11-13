@@ -1,3 +1,5 @@
+import { exactKeys } from "@/lib/exact-keys";
+
 /**
  * Where a tax law makes Marktmorgen the supplier, or the collector, of what a
  * creator sells through a store, and whether that has been built and
@@ -79,7 +81,10 @@ const said = (value: unknown) => typeof value === "string" && value.trim().lengt
 
 /** A review is data, never inherited defaults or executable property reads.
  * Detach every field once before filtering or validating the same snapshot. */
-function ownTreatmentRecords(value: unknown): DeemedSupplierRecord[] | null {
+/** A record read back as own data: its jurisdiction known, every other field still to be checked (deemedSupplierProblems). */
+type UncheckedRecord = { [K in keyof DeemedSupplierRecord]: unknown } & Pick<DeemedSupplierRecord, "jurisdiction">;
+
+function ownTreatmentRecords(value: unknown): UncheckedRecord[] | null {
   try {
     if (!Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype) return null;
     const length = Object.getOwnPropertyDescriptor(value, "length")?.value;
@@ -87,8 +92,9 @@ function ownTreatmentRecords(value: unknown): DeemedSupplierRecord[] | null {
     // Reject larger arrays before enumerating keys or inspecting members.
     if (!Number.isSafeInteger(length) || length < 0 || length > DEEMED_SUPPLIER_JURISDICTIONS.length) return null;
     if (Reflect.ownKeys(value).length !== length + 1) return null;
-    const keys = ["jurisdiction", "treatment", "implementedIn", "recordedOn", "registration", "evidence"] as const;
-    const records: DeemedSupplierRecord[] = [];
+    // Checked against DeemedSupplierRecord, so a renamed or added field fails to compile instead of failing every review.
+    const keys = exactKeys<DeemedSupplierRecord>()(["jurisdiction", "treatment", "implementedIn", "recordedOn", "registration", "evidence"]);
+    const records: UncheckedRecord[] = [];
     for (let index = 0; index < length; index += 1) {
       const entry = Object.getOwnPropertyDescriptor(value, String(index));
       if (!entry || !Object.hasOwn(entry, "value")) return null;
@@ -105,8 +111,9 @@ function ownTreatmentRecords(value: unknown): DeemedSupplierRecord[] | null {
         if (!field || !Object.hasOwn(field, "value")) return null;
         data[key] = field.value;
       }
-      if (!(DEEMED_SUPPLIER_JURISDICTIONS as readonly unknown[]).includes(data.jurisdiction)) return null;
-      records.push(data as unknown as DeemedSupplierRecord);
+      const jurisdiction = DEEMED_SUPPLIER_JURISDICTIONS.find((known) => known === data.jurisdiction);
+      if (jurisdiction === undefined) return null;
+      records.push({ jurisdiction, treatment: data.treatment, implementedIn: data.implementedIn, recordedOn: data.recordedOn, registration: data.registration, evidence: data.evidence });
     }
     return records;
   } catch {

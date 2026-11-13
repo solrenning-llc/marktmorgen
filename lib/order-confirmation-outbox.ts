@@ -2,6 +2,7 @@
  * Confirmation and shipment are separate intentions with separate sources.
  * This module shares the existing bounded pool/Lua, never a provider quota.
  */
+import { exactKeys } from "@/lib/exact-keys";
 import { createHash, randomBytes } from "node:crypto";
 import { openCourseOriginBinding, type OpenedCourseOriginBinding } from "@/lib/course-origin-binding";
 import { performance } from "node:perf_hooks";
@@ -53,6 +54,10 @@ export type ConfirmationOrigin = {
   /** At most64 hashes, charged inside the original fixed row envelope. */
   erasedPeople: string; erasureSaturated: boolean;
 };
+/** Every field a physical row carries, checked against ConfirmationOrigin; course and digital rows add their own (parse). */
+const ORIGIN_ROW_KEYS = exactKeys<Omit<ConfirmationOrigin, "originKind" | "courseBindingFingerprint">>()(["kind", "id", "statsId", "nonce", "accountId", "bodyDigest", "intentFingerprint", "bindingFingerprint", "session", "person", "sourceValue", "sealed", "fingerprint", "bytes", "created", "authorizedAt", "next", "expiresAt", "state", "phase", "owner", "leaseUntil", "checks", "createAttempts", "reviewId", "recoveryCursor", "recoveryUpper", "erasedPeople", "erasureSaturated"]);
+/** The fields of a prepared confirmation email (preparedMessage). */
+const MESSAGE_KEYS = exactKeys<NonNullable<ConfirmationOriginPayload["message"]>>()(["from", "to", "subject", "text", "replyTo"]);
 export const confirmationOriginId = (statsId: string, nonce: string) => hash(`confirmation\n${statsId}\n${nonce}`);
 export function confirmationBodyDigest(body: string): string {
   const canonical = new URLSearchParams(body);
@@ -117,7 +122,7 @@ function parse(raw: unknown): ConfirmationOrigin | null {
   try {
     if (typeof raw !== "string" || Buffer.byteLength(raw) > SHIPMENT_MAIL_MAX_ROW_BYTES) return null;
     const row = data(JSON.parse(raw));
-    const fields = ["kind", "id", "statsId", "nonce", "accountId", "bodyDigest", "intentFingerprint", "bindingFingerprint", "session", "person", "sourceValue", "sealed", "fingerprint", "bytes", "created", "authorizedAt", "next", "expiresAt", "state", "phase", "owner", "leaseUntil", "checks", "createAttempts", "reviewId", "recoveryCursor", "recoveryUpper", "erasedPeople", "erasureSaturated"];
+    const fields: (keyof ConfirmationOrigin)[] = [...ORIGIN_ROW_KEYS];
     const course = row?.originKind === "course";
     const digital = row?.originKind === "single_digital";
     if (row?.originKind !== undefined && !course && !digital) return null;
@@ -668,7 +673,7 @@ function knownPhysicalPayment(session: ProviderSession): boolean {
 function preparedMessage(found: FoundOrigin): { message: NonNullable<ConfirmationOriginPayload["message"]>; settlementToken: string; paidCents: number } | null {
   const message = data(found.payload.message);
   const { settlementToken, paidCents } = found.payload;
-  if (!message || Object.keys(message).length !== 5 || !["from", "to", "subject", "text", "replyTo"].every(key => typeof message[key] === "string") ||
+  if (!message || Object.keys(message).length !== MESSAGE_KEYS.length || !MESSAGE_KEYS.every(key => typeof message[key] === "string") ||
       hash(String(message.to).trim().toLowerCase()) !== found.row.person || typeof paidCents !== "number" || !Number.isSafeInteger(paidCents) || paidCents < 0 ||
       !found.row.session || !settlementToken) return null;
   return { message: message as NonNullable<ConfirmationOriginPayload["message"]>, settlementToken, paidCents };

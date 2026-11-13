@@ -278,6 +278,30 @@ async function main(): Promise<void> {
   const afterLapse = await importHubSpotDeals(lapsed.store, { header: HEADER, rows: [row("7201", "One", "New", "Sales"), row("7202", "Two", "New", "Sales")] }, { write: true });
   is("a file that fits once last month's hold is let go is brought in, never refused as full", [afterLapse.ok, afterLapse.ok ? afterLapse.summary.written : afterLapse.reason], [true, true]);
 
+  // The room's own 64-byte field for each new slot is counted before the room is touched (Claude 1's MÉDIO on #2048
+  // @2739ee8068): a file whose growth fits only without those fields is refused by one read, never after the
+  // room's work for each of its deals.
+  const measured = await paidStore("hubsband1");
+  const bandBefore = (await dataUsed(measured.store))?.used ?? 0;
+  const banded = await importHubSpotDeals(measured.store, { header: HEADER, rows: bigFile }, { write: true });
+  const growth = ((await dataUsed(measured.store))?.used ?? 0) - bandBefore;
+  is("(a 60-deal file grows an empty store by its deals and their room fields)", [banded.ok, growth > 60 * 64], [true, true]);
+  const band = await paidStore("hubsband2");
+  const bandUsed = (await dataUsed(band.store))?.used ?? 0;
+  is("(a second store with one byte less than that growth free)", (await takeData(band.store, [{ slot: "filler", bytes: contentRoomFor(band.store) - bandUsed - growth + 1 - 64, set: true }])).ok, true);
+  is("(its free room is exactly growth - 1)", contentRoomFor(band.store) - ((await dataUsed(band.store))?.used ?? 0), growth - 1);
+  let bandWork = 0;
+  const bandReal = redis.pipeline.bind(redis);
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    for (const c of commands) if (c[0] === "EVAL" && c[1] === TAKE_DATA) bandWork += (c.length - 7) / 3;
+    return bandReal(commands);
+  }) as typeof redis.pipeline;
+  const bandSent: string[] = [];
+  try {
+    for (let i = 0; i < 3; i++) bandSent.push(String((await call({ action: "save", header: HEADER, rows: bigFile }, band.session)).body.error));
+  } finally { redis.pipeline = bandReal; }
+  is("the same file on it, sent three times: refused each time by the read, with no room work per deal", [bandSent, bandWork], [["store_full", "store_full", "store_full"], 0]);
+
   part("One import at a time");
   const held = await takeCrmLock(statsId);
   const started = Date.now();

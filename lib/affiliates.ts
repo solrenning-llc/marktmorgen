@@ -87,7 +87,7 @@ import { dataBytes } from "@/lib/store-data-rules";
 import { affiliatePromotionFrom, readAffiliatePromotion, type AffiliatePromotion } from "@/lib/affiliate-promotion";
 import { onAccount } from "@/lib/stripe-account";
 import { STRIPE_TIMEOUT_MS } from "@/lib/fetch-timeout";
-import { DISPUTE_TAKES } from "@/lib/retained-revenue";
+import { DISPUTE_SETTLED, DISPUTE_TAKES } from "@/lib/retained-revenue";
 import { isSettled } from "@/lib/instant-pay";
 import { SITE_URL } from "@/lib/site-url";
 import {
@@ -2903,10 +2903,16 @@ async function refundsSince(store: Store, since: number, deadline?: number): Pro
  * oldest sale on the book on: the disputed amount of every dispute the bank
  * is holding or the buyer won (DISPUTE_TAKES). Read beside the refunds, so a
  * sale charged back earns its affiliate nothing, as a sale refunded does.
+ * Beside it, for the refund mark only (AFFILIATE_REFUND_MARK): `settled`, what
+ * was taken in a state that never changes again (DISPUTE_SETTLED), and `open`,
+ * every payment with a dispute that can still change or whose state does not
+ * read, so a mark never keeps a dispute that may yet be won as if it were final.
  */
-export async function disputesSince(store: Store, since: number, deadline?: number): Promise<{ byIntent: Map<string, number>; complete: boolean }> {
+export async function disputesSince(store: Store, since: number, deadline?: number): Promise<{ byIntent: Map<string, number>; settled: Map<string, number>; open: Set<string>; complete: boolean }> {
   const byIntent = new Map<string, number>();
-  if (!store.stripeAccountId) return { byIntent, complete: false };
+  const settled = new Map<string, number>();
+  const open = new Set<string>();
+  if (!store.stripeAccountId) return { byIntent, settled, open, complete: false };
   let after = "";
   for (let page = 0; page < DISPUTE_PAGES; page += 1) {
     const wait = stripeWait(deadline);
@@ -2922,29 +2928,36 @@ export async function disputesSince(store: Store, since: number, deadline?: numb
     );
     const rows = Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : [];
     for (const dispute of rows) {
-      if (typeof dispute.status !== "string" || !DISPUTE_TAKES.has(dispute.status)) continue;
       const raw = dispute.payment_intent;
       const pi = typeof raw === "string" ? raw : raw && typeof raw === "object" && typeof (raw as { id?: unknown }).id === "string" ? (raw as { id: string }).id : "";
+      // A dispute that can still change, or whose state does not read, is never kept as final on its payment's mark.
+      if (pi && (typeof dispute.status !== "string" || !DISPUTE_SETTLED.has(dispute.status))) open.add(pi);
+      if (typeof dispute.status !== "string" || !DISPUTE_TAKES.has(dispute.status)) continue;
       const amount = typeof dispute.amount === "number" && dispute.amount > 0 ? dispute.amount : 0;
       if (pi && amount) byIntent.set(pi, (byIntent.get(pi) ?? 0) + amount);
+      if (pi && amount && DISPUTE_SETTLED.has(dispute.status)) settled.set(pi, (settled.get(pi) ?? 0) + amount);
     }
     const last = rows[rows.length - 1];
-    if (listed.has_more !== true || !last || typeof last.id !== "string") return { byIntent, complete: true };
+    if (listed.has_more !== true || !last || typeof last.id !== "string") return { byIntent, settled, open, complete: true };
     after = last.id;
   }
-  return { byIntent, complete: false };
+  return { byIntent, settled, open, complete: false };
 }
 
 /**
  * A refund read on the account a Stripe sale, a partner's share of it or a booked call's lead was paid into, kept on
  * its record, so it still counts once the creator moved to another account and it can no longer be read (readBook).
- * The mark is one field, `rf`: what was given back or disputed then, in cents, written in base 36 as a string
+ * The mark is one field, `rf`: what was refunded then, plus what disputes took in a state that never changes again
+ * (DISPUTE_SETTLED: lost, prevented), in cents, written in base 36 as a string
  * (REFUND_MARK_MAX_BYTES at the most, counted in an order's parts and a lead's room). The account it was read on is
  * the record's own `acct`, the account the line was paid into, written once with it and never changed: a mark is only
  * written while that `acct` is the store's account, into the same text, so it names exactly that account and can
  * never be taken for another one; a record without `acct` has no mark. Each record's field is written only over
  * exactly the text read (its SHA-1), with `rf` the larger of what was kept and what was read, so it only ever rises:
- * a record changed in between is left for the next reading. Never on a line, a file, a kept book or a person's copy.
+ * a record changed in between is left for the next reading. A dispute that can still change (an inquiry, one the bank
+ * holds, one whose state does not read) is not kept: while one is open on the payment the record keeps no mark, and a
+ * mark kept before it opened is taken off, so after a move the line is held (unchecked), never settled as if the
+ * dispute were lost or as if it never came. Never on a line, a file, a kept book or a person's copy.
  */
 export const AFFILIATE_REFUND_MARK = `-- marktmorgen:affiliate-refund-mark:v1
 local n = 0
@@ -3087,7 +3100,7 @@ export function stripeWait(deadline: number | undefined, now = Date.now()): numb
  * that rises first (one kept lower would be paid on after a move), then those never kept, newest first; the rest at
  * the next reading. A reading with none sends nothing.
  */
-async function markRefunds(account: string, marks: { key: string; field: string; raw: string; rf: number; at: number; rises: boolean }[]): Promise<void> {
+async function markRefunds(account: string, marks: { key: string; field: string; raw: string; rf: number | null; at: number; rises: boolean }[]): Promise<void> {
   if (!marks.length) return;
   const chosen = [...marks].sort((a, b) => Number(b.rises) - Number(a.rises) || b.at - a.at).slice(0, REFUND_MARKS_PER_READ);
   const byKey = new Map<string, (string | number)[]>();
@@ -3096,8 +3109,16 @@ async function markRefunds(account: string, marks: { key: string; field: string;
     try {
       const record = JSON.parse(m.raw) as Record<string, unknown>;
       // Only into a record that names this account as its own (the mark's account is its `acct`).
-      if (record.acct !== account || !Number.isSafeInteger(m.rf) || m.rf < 0) continue;
-      next = JSON.stringify({ ...record, rf: m.rf.toString(36) });
+      if (record.acct !== account) continue;
+      // `null` takes the mark off (a dispute that can still change opened since it was kept).
+      if (m.rf === null) {
+        const { rf: _taken, ...rest } = record;
+        void _taken;
+        next = JSON.stringify(rest);
+      } else {
+        if (!Number.isSafeInteger(m.rf) || m.rf < 0) continue;
+        next = JSON.stringify({ ...record, rf: m.rf.toString(36) });
+      }
     } catch {
       continue;
     }
@@ -3215,6 +3236,10 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
   // Whether Stripe's refunds and disputes were both read in full on the store's account: only then is a mark written.
   let stripeRefundsRead = false;
   let stripeDisputesRead = false;
+  // What a mark keeps (AFFILIATE_REFUND_MARK): Stripe's refunds, which only ever grow, and disputes taken in a state
+  // that never changes again; a payment with a dispute that can still change is kept with no mark at all.
+  let finalTaken = new Map<string, number>();
+  let disputeOpen = new Set<string>();
   // Lines on another account past the window, never read on their own (held: not payable), by ref; and what was kept
   // of those that were (their refund mark), by the line or lead.
   const unchecked = new Set<string>();
@@ -3224,6 +3249,7 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
     try {
       const read = store.stripeAccountId ? await refundsSince(store, since, limits.deadline) : { byIntent: new Map<string, number>(), complete: true };
       refunds = read.byIntent;
+      finalTaken = new Map(read.byIntent);
       refundsChecked = read.complete;
       stripeRefundsRead = Boolean(store.stripeAccountId) && read.complete;
       // PayPal's refunds in full, named by the payment as the book names it. One with no capture id never meets its
@@ -3261,6 +3287,8 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
       try {
         const disputed = await disputesSince(store, since, limits.deadline);
         for (const [pi, cents] of disputed.byIntent) refunds.set(pi, (refunds.get(pi) ?? 0) + cents);
+        for (const [pi, cents] of disputed.settled) finalTaken.set(pi, (finalTaken.get(pi) ?? 0) + cents);
+        disputeOpen = disputed.open;
         refundsChecked = refundsChecked && disputed.complete;
         stripeDisputesRead = disputed.complete;
       } catch (error) {
@@ -3309,8 +3337,11 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
         ].flatMap(({ r, cap }) => {
           const origin = origins.get(r);
           if (!origin || r.acct !== account || r.pi === "" || r.pi.startsWith("paypal:")) return [];
-          const read = Math.min(Math.max(0, refunds.get(r.pi) ?? 0), cap);
           const before = origin.mark && origin.mark.rfa === account ? origin.mark.rf : -1;
+          // A dispute that can still be won is not a refund: while one is open the record keeps no mark, so after a
+          // move it is held (unchecked), never settled on what the dispute took for now nor on a mark kept before it.
+          if (disputeOpen.has(r.pi)) return before >= 0 ? [{ ...origin, rf: null, at: r.at, rises: true }] : [];
+          const read = Math.min(Math.max(0, finalTaken.get(r.pi) ?? 0), cap);
           return read > before ? [{ ...origin, rf: read, at: r.at, rises: before >= 0 }] : [];
         }));
       } catch (error) {

@@ -90,7 +90,12 @@ async function main(): Promise<void> {
   await keep("s-noat", { value: numbers() });
   is("a copy without its time", await nextFactsOf(shop("s-noat"), { copy: keptMembersCopy, sells }), unknown);
   await keep("s-part", { at: AT, value: numbers({ complete: false }) });
-  is("a reading that did not read every membership counts too few: unknown", await nextFactsOf(shop("s-part"), { copy: keptMembersCopy, sells }), unknown);
+  // More memberships in the history than one reading counts (lib/membership-numbers.ts readMembers): a limit of the
+  // store, not a passing failure, so its counts are unknown and marked as part only (Claude 1 cloud on #3556, MÉDIO).
+  is("a reading that did not read every membership counts too few: unknown, and part only", await nextFactsOf(shop("s-part"), { copy: keptMembersCopy, sells }), {
+    failedPayments: { count: null, at: AT, partial: true },
+    formerMembers: { count: null, at: AT, partial: true },
+  });
   is("the database not answering", await nextFactsOf(shop("s-x"), { copy: async () => { throw new Error("down"); }, sells }), unknown);
   {
     const real = redis.pipeline.bind(redis);
@@ -139,6 +144,11 @@ async function main(): Promise<void> {
   const missingHtml = renderToStaticMarkup(createElement(NextActionsPanel, { view: missing }));
   is("numbers that could not be read are said", missingHtml.includes("Some numbers could not be read just now (failed payments and former members)"), true);
   is("and no action is drawn on them", /data-next-action=/.test(missingHtml), false);
+  const part0: NextView = nextActions(await nextFactsOf(shop("s-part"), { copy: keptMembersCopy, sells }), owner);
+  const partHtml = renderToStaticMarkup(createElement(NextActionsPanel, { view: part0 }));
+  is("a store past one reading's reach: never told to reload, which would read the same copy", [partHtml.includes("Reload"), partHtml.includes("just now")], [false, false]);
+  is("it is told the limit, naming the numbers it touches", partHtml.includes("more memberships than one reading counts, so these numbers cover only part of them (failed payments and memberships that ended)"), true);
+  is("and no action is drawn on a part", /data-next-action=/.test(partHtml), false);
   const zero = nextActions(await nextFactsOf(shop("s-zero-read"), { copy: async () => ({ at: AT, value: numbers({ atRisk: 0, ended30: 0 }) }), sells }), owner);
   is("all at zero: it says there is nothing to suggest", renderToStaticMarkup(createElement(NextActionsPanel, { view: zero })).includes("Nothing to suggest right now."), true);
   const quiet = nextActions({}, owner);

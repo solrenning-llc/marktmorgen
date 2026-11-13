@@ -17,7 +17,7 @@
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { platformKey } from "@/lib/stripe-account";
-import { isSenderConfigured, sendEmail } from "@/lib/email";
+import { isSenderConfigured, sendEmailOutcome } from "@/lib/email";
 import { type Store, storesAfter } from "@/lib/store";
 import { sellsMemberships } from "@/lib/membership-manage";
 import { fromLine, render } from "@/lib/mail";
@@ -72,6 +72,7 @@ export async function nudgeStore(store: Store, deadline: number, now = Date.now(
     const key = sentKey(statsId, member.sub, member.periodEnd);
     const [claimed] = await redisPipeline([["SET", key, String(now), "NX", "EX", KEEP_SECONDS]]);
     if (claimed === null) continue;
+    let asked = false;
     try {
       const mail = nudgeEmail({
         storeName: store.name,
@@ -82,7 +83,8 @@ export async function nudgeStore(store: Store, deadline: number, now = Date.now(
       });
       const withAddress = { ...store, mail: { fromName: store.mail?.fromName || store.name, address: store.nudge.address } };
       const rendered = render(withAddress, mail.subject, mail.body, unsub);
-      const ok = await sendEmail({ meter: { by: "store", store: store, kind: "email" },
+      asked = true;
+      const outcome = await sendEmailOutcome({ meter: { by: "store", store: store, kind: "email" },
         from: fromLine(withAddress),
         to: member.email,
         subject: rendered.subject,
@@ -91,18 +93,22 @@ export async function nudgeStore(store: Store, deadline: number, now = Date.now(
         headers: rendered.headers,
         idempotencyKey: `nimbus-nudge:${statsId}:${member.sub}:${member.periodEnd}`,
       });
-      if (ok) {
+      if (outcome === "sent") {
         sent += 1;
         const count = countKey(statsId, monthOf(now));
         await redisPipeline([
           ["INCR", count],
           ["EXPIRE", count, KEEP_SECONDS],
         ]);
-      } else {
+      } else if (outcome === "refused") {
+        // Known not sent: the period's mark goes, so the next run may try again. An answer not known keeps it
+        // (j-mail-5): the email may have gone, and the next daily run is past the senders' one-day dedupe.
         await redisPipeline([["DEL", key]]);
       }
     } catch (error) {
-      await redisPipeline([["DEL", key]]).catch(() => {});
+      // Thrown before the sender was asked: nothing went, so the mark goes. Thrown after (the count below, say):
+      // the email may have gone, so the mark stays, never a second email.
+      if (!asked) await redisPipeline([["DEL", key]]).catch(() => {});
       console.error("sending a come-back email failed", store.handle, error);
     }
   }

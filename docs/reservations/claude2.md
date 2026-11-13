@@ -7,3 +7,4 @@ Only Claude 2 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
 | Claude 2 | 655 [WG15], unit 2 (the studio's tax setting links to /studio/tax; stacked on #2735) | claude2/wg15-tax-link | `components/tax-editor.tsx`, `tests/wg15-tax-link.test.ts`, its row of `tests/test-config.mjs` | 07/11/2026 10h35 |
+| Claude 2 | AV1 step 3: inventory of every take from the monthly figures for `CONTRACT_ADMISSION_COVERAGE.resourceAllocations` (key stays false) | claude2/contract-coverage-resource-allocations | `tests/contract-resource-allocation-inventory.test.ts`, the comment above `CONTRACT_ADMISSION_COVERAGE` in `lib/contract-funding-rules.ts`, the dated update under group B item 2 of `docs/opening-readiness-status-2026-11-11.md` | 13/11/2026 13h21 |

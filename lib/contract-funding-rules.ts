@@ -9,6 +9,21 @@ import { fundedExposureDetails } from '@/lib/funded-exposure-rules';
 import type { CommercialMarginReview, MarginScenario } from '@/lib/commercial-margin';
 export const CONTRACT_KEYS=['creator_month','creator_year','pro_month','pro_year','scale_month','scale_year'] as const;
 export type ContractKey=typeof CONTRACT_KEYS[number];
+/** Which contract lifecycles the cash reserve covers before the obligation.
+ * AV1 step 3, re-read 13 November 2026: each of the three false core keys
+ * cannot start off at opening without breaking a subscription or a right
+ * (docs/opening-lifecycle-requirements.md), so each is built, never switched off:
+ * - resourceAllocations: the published allowances are the plan. Every take
+ *   from the monthly figures is inventoried in
+ *   tests/contract-resource-allocation-inventory.test.ts, which fails while
+ *   this is true with a take still pending or with cost primitives outside
+ *   the figures still uninventoried.
+ * - renewals: ordinary renewal is the subscription; a funded period gets no
+ *   inferred next allowance (lib/allowance-window.ts), so each renewal needs
+ *   its own reserve and activation before its term's rights.
+ * - settlementAndReserveReconciliation: refund, dispute and cash obligations
+ *   cannot be dropped; the reserve against the real balance is 306 [SY2].
+ * Each stays false until a test proves its complete coverage. */
 export const CONTRACT_ADMISSION_COVERAGE={checkout:true,planSwitch:true,pauseRestart:false,resourceAllocations:false,renewals:false,settlementAndReserveReconciliation:false} as const;
 /** AV3: disabled optional facilities do not certify coverage or block unrelated
  * core lifecycle work. Every core contract obligation remains mandatory. */

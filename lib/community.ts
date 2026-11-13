@@ -1042,12 +1042,16 @@ export async function postNumbers(
 }
 
 /** One like per member per post: a second press takes it back. */
-export async function toggleLike(id: string, post: string, who: string, room: DataStore): Promise<boolean> {
+export async function toggleLike(id: string, post: string, who: string, room: DataStore): Promise<boolean | null> {
   return toggleIn(id, likesKey(id, post), `l:${post}`, post, who, room);
 }
 
 /** Adds `who` to a set of likes, or takes them out when they were in it: its room is taken first and given back after. */
-async function toggleIn(id: string, key: string, ref: string, post: string, who: string, room: DataStore): Promise<boolean> {
+/**
+ * true: liked now; false: this press took the like back; null: it changed nothing (a press at the same moment took the
+ * like back first), so nothing is awarded or taken for it.
+ */
+async function toggleIn(id: string, key: string, ref: string, post: string, who: string, room: DataStore): Promise<boolean | null> {
   // Rule 24: each reply read exactly, 0 or 1; any other is unknown and throws
   // (the route answers "error" and awards nothing). Never "already liked" on a
   // reply that does not say so: that took the like away, gave its room back
@@ -1064,14 +1068,25 @@ async function toggleIn(id: string, key: string, ref: string, post: string, who:
   if (added === 1) return true;
   const removed = repliesFor(await redisPipeline([["SREM", key, who], ["SREM", traceKey(id, who), ref]]), 2);
   // Room is given back only once the removal is confirmed.
-  if (zeroOrOne(removed?.[0]) === null || zeroOrOne(removed?.[1]) === null) throw new UnknownReplyError("a like's SREM");
-  const times = held === 1 ? 1 : 2;
-  await giveData(room, [{ slot: POST_SLOT(post), bytes: times * SET_ENTRY_BYTES }, { ...TRACE_ENTRY, bytes: times * TRACE_ENTRY.bytes }]);
-  return false;
+  const like = zeroOrOne(removed?.[0]);
+  const traced = zeroOrOne(removed?.[1]);
+  if (like === null || traced === null) throw new UnknownReplyError("a like's SREM");
+  // Each entry's room only when this press removed it (a 0 is a press at the same moment that removed it first and
+  // gave it back), plus the room this press took itself when it found no like (Claude 1 on #3819).
+  const own = held === 1 ? 0 : 1;
+  const likeTimes = like + own;
+  const traceTimes = traced + own;
+  if (likeTimes || traceTimes) {
+    await giveData(room, [
+      ...(likeTimes ? [{ slot: POST_SLOT(post), bytes: likeTimes * SET_ENTRY_BYTES }] : []),
+      ...(traceTimes ? [{ ...TRACE_ENTRY, bytes: traceTimes * TRACE_ENTRY.bytes }] : []),
+    ]);
+  }
+  return like === 1 ? false : null;
 }
 
 /** The same for a comment: one like per member, a second press takes it back. */
-export async function toggleCommentLike(id: string, post: string, comment: string, who: string, room: DataStore): Promise<boolean> {
+export async function toggleCommentLike(id: string, post: string, comment: string, who: string, room: DataStore): Promise<boolean | null> {
   return toggleIn(id, commentLikesKey(id, post, comment), `lc:${post}:${comment}`, post, who, room);
 }
 

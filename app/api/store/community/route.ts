@@ -335,7 +335,8 @@ export async function POST(request: NextRequest) {
     if (action === "like") {
       if (!owner && !(await within(id, key, "like"))) return back(fromPage, "slow", `post-${post.id}`);
       const added = await toggleLike(id, post.id, key, store);
-      if (post.a !== key) await award(id, post.a, added ? 1 : -1, store);
+      // null: a press at the same moment took the like back first; nothing is awarded or taken for this one.
+      if (added !== null && post.a !== key) await award(id, post.a, added ? 1 : -1, store);
       return back(fromPage, "liked", `post-${post.id}`);
     }
 
@@ -344,7 +345,7 @@ export async function POST(request: NextRequest) {
       if (!comment || (comment.hid && !owner)) return back(postPage, "gone");
       if (!owner && !(await within(id, key, "like"))) return back(postPage, "slow", `comment-${comment.id}`);
       const added = await toggleCommentLike(id, post.id, comment.id, key, store);
-      if (comment.a !== key) await award(id, comment.a, added ? 1 : -1, store);
+      if (added !== null && comment.a !== key) await award(id, comment.a, added ? 1 : -1, store);
       return back(postPage, "liked", `comment-${comment.id}`);
     }
 

@@ -59,7 +59,7 @@ async function main(): Promise<void> {
   pages = Array.from({ length: DECLINE_PAGES }, (_, i) => ({ object: "list", has_more: true, data: [charge(`ch_p${i}`, {})] }));
   const many = await readDeclines({ stripeAccountId: ACCOUNT }, since);
   is(`at most ${DECLINE_PAGES} pages, then partial`, [many?.rows.length, many?.partial, asked.slice(-2)[1].searchParams.get("starting_after")], [DECLINE_PAGES, true, `ch_p${DECLINE_PAGES - 2}`]);
-  for (const bad of [{ data: null, has_more: false }, { data: [], has_more: "no" }, { data: [charge("ch_x", {}), charge("ch_x", {})], has_more: false }, { data: [null], has_more: false }]) {
+  for (const bad of [{ data: null, has_more: false }, { data: [], has_more: "no" }, { data: [charge("ch_x", {}), charge("ch_x", {})], has_more: false }, { data: [null], has_more: false }, { object: "charge", data: [], has_more: false }, { data: [], has_more: false }]) {
     pages = [bad];
     is(`unreadable, so unknown, never zero: ${JSON.stringify(bad).slice(0, 40)}`, await readDeclines({ stripeAccountId: ACCOUNT }, since), null);
   }

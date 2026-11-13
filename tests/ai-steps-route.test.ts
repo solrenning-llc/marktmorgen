@@ -14,14 +14,18 @@
  *   - a stop whose mark is not confirmed kept says so (503 "unconfirmed");
  *   - a page drafted from its PDF, stopped before it began: the reading runs
  *     and says so, the writing step never starts, and the result line says
- *     the stop and the one job given back, end to end through the route.
+ *     the stop and the one job given back, end to end through the route;
+ *   - a job that reads the PDF first, for a store whose month has fewer
+ *     jobs left than it takes, or whose balance reply is not one known, is
+ *     refused before the file is read (one read of the balance, nothing
+ *     reserved).
  */
 import { NextRequest } from "next/server";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { PDFDocument } from "pdf-lib";
 import { addProduct, claimHandle, ensureStatsId, setProductFile, setSubscription, storeForEmail } from "@/lib/store";
 import { READ_PDF_JOBS } from "@/lib/ai-rules";
-import { aiLeft } from "@/lib/ai";
+import { aiAllowance, aiLeft, aiMonthKey } from "@/lib/ai";
 import { AI_PER_MINUTE } from "@/lib/ai-rules";
 import { POST } from "@/app/api/store/ai/route";
 import { store as redis } from "./redis-stub";
@@ -162,6 +166,61 @@ async function main(): Promise<void> {
   is("the result says the stop, the one job given back and what is left", pdfLines[pdfLines.length - 1], { done: true, ok: false, error: "stopped", returned: 1, left: leftBefore - READ_PDF_JOBS });
   is("one model call: the reading", calls, 1);
   is("the stop pressed during the reading was taken", stopStatus, 200);
+
+  part("A job that reads the PDF first is refused before the file is read when it could not be admitted");
+  let fileReads = 0;
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    if (new URL(String(input)).hostname.endsWith(".r2.cloudflarestorage.com")) fileReads += 1;
+    return realFetch(input, init);
+  }) as typeof fetch;
+  const SMALL = "steps.route.small@example.com";
+  await claimHandle(SMALL, "stepsroutesmall", "Small Route", "");
+  await ensureStatsId(SMALL);
+  await setSubscription(SMALL, { customerId: "cus_StepsRt0002", subscriptionId: "sub_StepsRt0002", active: true, tier: "creator", trialEnds: 0, period: paidPeriod() });
+  const smallMade = await addProduct(SMALL, "Small Pack", "A small pack", "9", null);
+  if (!smallMade.ok) throw new Error("no small product");
+  await setProductFile(SMALL, smallMade.product.id, { pathname: `vault/${"b".repeat(32)}/${smallMade.product.id}/token0002/book.pdf`, name: "book.pdf", bytes: book.length, contentType: "application/pdf", addedAt: "2026-11-09" });
+  const smallSession = await openSession(SMALL);
+  const askSmall = (body: Record<string, unknown>) =>
+    POST(new NextRequest(`${ORIGIN}/api/store/ai`, { method: "POST", headers: { "content-type": "application/json", cookie: `${SESSION_COOKIE}=${smallSession}` }, body: JSON.stringify(body) }));
+  calls = 0;
+  is("a plan without enough writing jobs: refused as used", await json(await askSmall({ kind: "page", product: smallMade.product.id, steps: true, run: "routerunsmall001", readFile: true, notes: "" })), [400, { ok: false, error: "used" }]);
+  is("the same for a title and benefits from the PDF", await json(await askSmall({ kind: "product-pdf", product: smallMade.product.id, run: "routerunsmall002", notes: "" })), [400, { ok: false, error: "used" }]);
+  is("the file is never read for them, and nothing is asked", [fileReads, calls], [0, 0]);
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  delete process.env.ANTHROPIC_API_KEY;
+  is("no writing help on this deployment: refused as off", await json(await ask({ kind: "page", product: made.product.id, steps: true, run: "routerunoff00001", readFile: true, notes: "" })), [400, { ok: false, error: "off" }]);
+  is("the same for a title and benefits from the PDF", await json(await ask({ kind: "product-pdf", product: made.product.id, run: "routerunoff00002", notes: "" })), [400, { ok: false, error: "off" }]);
+  is("and the file is never read", fileReads, 0);
+  process.env.ANTHROPIC_API_KEY = apiKey;
+
+  // Focal review of #3447 (Claude 2, LEVE A): a plan with the writing help whose month is spent, or whose balance is not known.
+  const SPENT = "steps.route.spent@example.com";
+  await claimHandle(SPENT, "stepsroutespent", "Spent Route", "");
+  await ensureStatsId(SPENT);
+  await setSubscription(SPENT, { customerId: "cus_StepsRt0003", subscriptionId: "sub_StepsRt0003", active: true, tier: "scale", trialEnds: 0, period: paidPeriod() });
+  const spentMade = await addProduct(SPENT, "Spent Pack", "A spent pack", "9", null);
+  if (!spentMade.ok) throw new Error("no spent product");
+  await setProductFile(SPENT, spentMade.product.id, { pathname: `vault/${"c".repeat(32)}/${spentMade.product.id}/token0003/book.pdf`, name: "book.pdf", bytes: book.length, contentType: "application/pdf", addedAt: "2026-11-09" });
+  const spentStore = (await storeForEmail(SPENT))!;
+  const spentMonth = aiMonthKey(spentStore, new Date())!;
+  const spentSession = await openSession(SPENT);
+  const askSpent = (body: Record<string, unknown>) =>
+    POST(new NextRequest(`${ORIGIN}/api/store/ai`, { method: "POST", headers: { "content-type": "application/json", cookie: `${SESSION_COOKIE}=${spentSession}` }, body: JSON.stringify(body) }));
+  redis.run(["SET", spentMonth, String(aiAllowance(spentStore) - READ_PDF_JOBS)]);
+  calls = 0;
+  is("a month with fewer jobs left than reading and writing take: refused as used", await json(await askSpent({ kind: "page", product: spentMade.product.id, steps: true, run: "routerunspent001", readFile: true, notes: "" })), [400, { ok: false, error: "used" }]);
+  is("the same for a title and benefits from the PDF", await json(await askSpent({ kind: "product-pdf", product: spentMade.product.id, run: "routerunspent002", notes: "" })), [400, { ok: false, error: "used" }]);
+  is("the file is never read for it, and nothing is asked", [fileReads, calls], [0, 0]);
+  is("nothing was taken from the month", redis.run(["GET", spentMonth]), String(aiAllowance(spentStore) - READ_PDF_JOBS));
+  redis.run(["DEL", spentMonth]);
+  unknownFor = (c) => c[0] === "GET" && c[1] === spentMonth;
+  is("a balance reply that is not one known: refused, never taken as a full month", await json(await askSpent({ kind: "page", product: spentMade.product.id, steps: true, run: "routerunspent003", readFile: true, notes: "" })), [400, { ok: false, error: "off" }]);
+  is("the same for a title and benefits from the PDF", await json(await askSpent({ kind: "product-pdf", product: spentMade.product.id, run: "routerunspent004", notes: "" })), [400, { ok: false, error: "off" }]);
+  unknownFor = null;
+  is("and the file is never read for it, nor anything asked", [fileReads, calls], [0, 0]);
+  globalThis.fetch = realFetch;
 
   part("Without steps, one answer as before");
   calls = 0;

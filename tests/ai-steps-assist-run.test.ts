@@ -245,6 +245,31 @@ async function main(): Promise<void> {
     b.mounted.unmount();
   }
 
+  part("A box with its own words for a PDF with nothing to write from uses them");
+  {
+    const words = "We found nothing to suggest from in this PDF's first pages.";
+    const used: unknown[] = [];
+    const mounted = await mount(
+      AiStepsAssist<{ headline: string }>,
+      { title: "Suggest", hint: "From the PDF.", placeholder: "", payload: () => ({ kind: "product-pdf", product: "p1" }), steps: pageSteps(true), onResult: (v: { headline: string }) => used.push(v), done: DONE, allowEmpty: true, messages: { empty: words } },
+      new Map([[AiOn, { on: true, left: 30 }]]),
+    );
+    click(button(mounted.tree(), "Write a draft"));
+    await mounted.settle();
+    push({ pad: " ".repeat(1024) });
+    push({ step: "read", state: "started" });
+    push({ step: "read", state: "done" });
+    push({ done: true, ok: false, error: "empty", returned: 1, left: 20 });
+    close();
+    await mounted.settle();
+    await mounted.settle();
+    const said = alerts(mounted.tree()).join(" ");
+    is("its own words are said", said.startsWith(words), true);
+    is("not the page's", /page was not written|Add a few words/.test(said), false);
+    is("and what came back", said.includes("1 writing job given back, 20 left this month"), true);
+    mounted.unmount();
+  }
+
   part("A PDF with nothing to write from says so");
   {
     const b = await box();

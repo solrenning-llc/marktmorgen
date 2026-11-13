@@ -198,6 +198,15 @@ async function main() {
     return [isVaultPath(path), readVaultPath(path) !== null, ownsPath(path, FOLDER, "82f9fc6354")];
   }), dotted.map(() => [true, true, true]));
   is("an ellipsis becomes one dot", keyName("Chapter 1\u2026 Draft.pdf"), "Chapter-1.-Draft.pdf");
+  // Codex X5 on #4356: the last piece of a path is the 16-hex token, "-" and a name of up to 120 characters, so up to
+  // 137 characters; a name of 104 to 120 opened an upload that isVaultPath then refused, as dots in a row did.
+  const lengths = [103, 104, 119, 120, 200];
+  is("a name of any length the store keeps makes a path every rule takes", lengths.map((n) => {
+    const path = vaultPath(FOLDER, "82f9fc6354", "0011223344556677", "x".repeat(n - 4) + ".pdf");
+    return [isVaultPath(path), readVaultPath(path) !== null, ownsPath(path, FOLDER, "82f9fc6354")];
+  }), lengths.map(() => [true, true, true]));
+  is("a piece longer than a token and a whole name is still refused", isVaultPath(`vault/${FOLDER}/82f9fc6354/0011223344556677-${"x".repeat(121)}`), false);
+  is("so is a long piece without a token in front", isVaultPath(`vault/${FOLDER}/82f9fc6354/${"x".repeat(130)}`), false);
 
   part("How an upload is cut into pieces");
   is("a small file goes whole", [pieceCount(1), pieceCount(PIECE_BYTES)], [1, 1]);

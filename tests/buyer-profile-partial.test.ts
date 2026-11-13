@@ -23,7 +23,7 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import * as profiles from "@/lib/buyer-profile";
-import { addPersonNote, buyerProfile, readPersonNotes, removePersonNote } from "@/lib/buyer-profile";
+import { addPersonNote, buyerProfile, PersonNotesUnreadableError, readPersonNotes, removePersonNote } from "@/lib/buyer-profile";
 import { personKey } from "@/lib/person-key";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { ROOM } from "./data-room";
@@ -272,12 +272,13 @@ async function main(): Promise<void> {
   is("named, and the handed-over purchases make the reading partial", [unreadOf(notesAndCalls), notesAndCalls.partial], [["notes"], true]);
 
   part("Adding or removing a note when the notes cannot be read");
-  const added = await notesAnswer([["notes"]], () => addPersonNote(STATS, person, "owner@example.com", "Prefers email.", ROOM, (NOW + 5) * 1000).then(() => "read", (error) => (error instanceof UnknownReplyError ? "unknown" : String(error))));
-  is("adding: the note is written, and the notes as they are after are said not read, never a short list", added, "unknown");
+  // Claude 3 nuvem L on #3159: the notes are read before a save, so notes that do not read refuse it before writing.
+  const added = await notesAnswer([["notes"]], () => addPersonNote(STATS, person, "owner@example.com", "Prefers email.", ROOM, (NOW + 5) * 1000).then(() => "read", (error) => (error instanceof PersonNotesUnreadableError ? "refused before writing" : error instanceof UnknownReplyError ? "unknown" : String(error))));
+  is("adding: refused before writing, never a short list and never a note left behind", added, "refused before writing");
   const kept = await readPersonNotes(STATS, person);
-  is("the note added is kept beside the one before", kept.map((n) => n.text), ["Prefers email.", "Asked about the advanced course."]);
+  is("nothing was written: only the note before", kept.map((n) => n.text), ["Asked about the advanced course."]);
   const removed = await notesAnswer([["notes"]], () => removePersonNote(STATS, person, NOTE_ID, ROOM).then(() => "read", (error) => (error instanceof UnknownReplyError ? "unknown" : String(error))));
-  is("removing: said not read, and nothing is taken away", [removed, (await readPersonNotes(STATS, person)).length], ["unknown", 2]);
+  is("removing: said not read, and nothing is taken away", [removed, (await readPersonNotes(STATS, person)).length], ["unknown", 1]);
 
   part("What the page says");
   const words = (profiles as unknown as { profileUnreadWords?: (parts: string[]) => string }).profileUnreadWords;

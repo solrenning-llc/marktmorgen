@@ -4,7 +4,7 @@ import type { NextRequest } from "next/server";
 import { guardStoreWrite } from "@/lib/store-request";
 import { ensureStatsId } from "@/lib/store";
 import { studioPath } from "@/lib/studio-route";
-import { addPersonNote, addressForToken, findToken, forgetFindToken, readAddress, removePersonNote } from "@/lib/buyer-profile";
+import { addPersonNote, addressForToken, PersonNotesUnreadableError, findToken, forgetFindToken, readAddress, removePersonNote } from "@/lib/buyer-profile";
 import { erasePerson } from "@/lib/person-erasure";
 import { UnknownReplyError } from "@/lib/redis-reply";
 
@@ -72,6 +72,8 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     // What does not fit in the store's data room is not written (lib/store-data.ts).
     if (error instanceof StoreFullError) return Response.json({ ok: false, error: "store_full" }, { status: 409 });
+    // The notes did not read before the save: refused before writing anything (lib/buyer-profile.ts).
+    if (error instanceof PersonNotesUnreadableError) return Response.json({ ok: false, error: "notes_unreadable" }, { status: 503 });
     // The notes could not be read exactly (rule 24): a note may have been written before it, so never "did not save".
     if (error instanceof UnknownReplyError) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
     console.error("a buyer's page could not do that", error);

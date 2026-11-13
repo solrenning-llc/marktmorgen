@@ -12,7 +12,7 @@ function when(seconds: number): string {
 }
 
 /** The route's answers given before anything is written: only these prove a change did not save. */
-const REFUSED_BEFORE_WRITING = new Set(["invalid", "store_full"]);
+const REFUSED_BEFORE_WRITING = new Set(["invalid", "store_full", "notes_unreadable"]);
 
 /**
  * What the notes box says when a change was not confirmed (Codex G on #3159).

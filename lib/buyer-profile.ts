@@ -176,6 +176,14 @@ export async function readPersonNotes(statsId: string | null, person: string): P
   return parsePersonNotes(await redisPipeline([["HGETALL", notesKey(statsId, person)]]));
 }
 
+/** The notes could not be read before a save, so nothing was written and no room was taken (a refusal before writing). */
+export class PersonNotesUnreadableError extends Error {
+  constructor() {
+    super("a buyer's notes could not be read before saving; nothing was written");
+    this.name = "PersonNotesUnreadableError";
+  }
+}
+
 /**
  * Adds a note about one person, written by `by` (the signed-in address).
  * Each note is a field of its own, so two people writing at once both keep
@@ -186,6 +194,14 @@ export async function addPersonNote(statsId: string, person: string, by: string,
   if (!text || !PERSON_KEY.test(person) || !isRedisConfigured()) return null;
   const id = randomBytes(4).toString("hex");
   const json = JSON.stringify({ at: Math.floor(now / 1000), by: normaliseEmail(by), text });
+  // The notes read first (Claude 3 nuvem L on #3159): when they do not read exactly, the save is refused before
+  // taking room or writing, so a press that cannot be confirmed never leaves a note and its room behind.
+  try {
+    await readPersonNotes(statsId, person);
+  } catch (error) {
+    if (error instanceof UnknownReplyError) throw new PersonNotesUnreadableError();
+    throw error;
+  }
   // Its room in the store's data room first (DataRoomError when it does not fit), its person's place with it.
   await needData(room, [{ slot: NOTES_SLOT, bytes: dataBytes([id, json], 1) + dataBytes([person], 1) }]);
   // Each reply read exactly (rule 24; Codex X5 on #3159): HSET answers 1 for a new field, the two EXPIREs 1, SADD 0 or 1.

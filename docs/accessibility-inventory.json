@@ -1539,6 +1539,7 @@
     "components/print-button.tsx",
     "components/product-about-view.tsx",
     "components/product-editor.tsx",
+    "components/product-ideas.tsx",
     "components/product-image-editor.tsx",
     "components/product-update-box.tsx",
     "components/promotion-planner.tsx",

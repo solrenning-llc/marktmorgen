@@ -334,7 +334,13 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
   // Only their own field (leadOf): another person's lead that does not read never blocks this copy; theirs throws.
   "lib/affiliate-leads.ts": async (s) => {
     const lead = await leadOf(s.store, s.email);
-    return lead && lead.email && same(lead.email, s.email) ? [lead] : [];
+    if (!(lead && lead.email && same(lead.email, s.email))) return [];
+    // The creator's Stripe account a booking was paid into is the book's to read, never the person's copy.
+    const copy = { ...lead };
+    delete copy.acct;
+    // So is the refund the book kept on it (lib/affiliates.ts, AFFILIATE_REFUND_MARK).
+    delete copy.rf;
+    return [copy];
   },
   // Read whether or not the store still lets imported buyers in (importedFor asks that, and notes them as it reads).
   "lib/imported-purchases.ts": async (s) => importedFrom((await redisPipeline([["HGETALL", importedKey(s.statsId, s.email)]]))[0]),

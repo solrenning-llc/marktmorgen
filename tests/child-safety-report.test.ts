@@ -29,9 +29,12 @@ import { paidPeriod } from "./billing-period-fixture";
 
 type Sent = { to: string[] | string; subject: string; text: string; key?: string };
 const sent: Sent[] = [];
+/** When set, the provider answers the urgent email (subject starting with URGENT) with this status and takes the others. */
+let urgentDown: number | null = null;
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   if (url.hostname === "api.resend.com") {
+    if (urgentDown !== null && /^URGENT/.test(String((JSON.parse(String(init?.body)) as Sent).subject))) return new Response(JSON.stringify({ message: "down" }), { status: urgentDown });
     const headers = new Headers(init?.headers);
     sent.push({ ...(JSON.parse(String(init?.body)) as Sent), key: headers.get("idempotency-key") ?? undefined });
     return new Response(JSON.stringify({ id: `email_${sent.length}` }));
@@ -145,6 +148,25 @@ async function main(): Promise<void> {
   const blind = await reportRoute(new NextRequest("https://marktmorgen.com/api/report", { method: "POST", headers: { "content-type": "application/json", origin: "https://marktmorgen.com", host: "marktmorgen.com" }, body: JSON.stringify({ ...CHILD, url: `https://marktmorgen.com/@safetyshop/p/${store2.product.id}` }) }));
   redis.pipeline = reading;
   is("a store that cannot be read: the owner is told it could not be confirmed, never that the address names nothing", [blind.status, sent.some((mail) => /^URGENT/.test(mail.subject) && mail.text.includes("could not be confirmed"))], [200, true]);
+
+  part("Claude 1's MEDIUM on #3587: an urgent email that did not go is never answered as accepted");
+  const post = (productId: string) => reportRoute(new NextRequest("https://marktmorgen.com/api/report", { method: "POST", headers: { "content-type": "application/json", origin: "https://marktmorgen.com", host: "marktmorgen.com" }, body: JSON.stringify({ ...CHILD, work: "", url: `https://marktmorgen.com/@safetyshop/p/${productId}` }) }));
+  const urgentFails = await addProduct(owner, "Reported While The Urgent Email Is Refused", "On sale", "9", null);
+  if (!urgentFails.ok) throw new Error("no product");
+  sent.length = 0;
+  urgentDown = 422;
+  const refused = await post(urgentFails.product.id);
+  is("the urgent email certainly refused: the reporter is asked to try again (503), never told it was received", [refused.status, sent.some((mail) => /^URGENT/.test(mail.subject))], [503, false]);
+  urgentDown = null;
+  const tryAgain = await post(urgentFails.product.id);
+  is("the retry: accepted, and the urgent email reaches the inbox", [tryAgain.status, sent.filter((mail) => /^URGENT/.test(mail.subject)).length], [200, 1]);
+  // An answer that is not known (a 500, a lost reply) may have gone: counted as sent (rule 30), so a retry never
+  // sends it twice, and the reporter is not asked to try again for nothing.
+  const urgentUnsure = await addProduct(owner, "Reported While The Urgent Email Is Unsure", "On sale", "9", null);
+  if (!urgentUnsure.ok) throw new Error("no product");
+  urgentDown = 500;
+  is("an answer that is not known: accepted, as an email that may have gone", (await post(urgentUnsure.product.id)).status, 200);
+  urgentDown = null;
 
   part("A product that cannot be read is said as such, never as an address that names nothing");
   const many = [];

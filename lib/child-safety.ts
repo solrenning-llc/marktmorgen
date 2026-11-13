@@ -22,7 +22,7 @@
 import { createHash } from "node:crypto";
 import { redisPipeline } from "@/lib/redis";
 import { repliesFor } from "@/lib/redis-reply";
-import { NIMBUS_FROM, sendEmail } from "@/lib/email";
+import { NIMBUS_FROM, type SendOutcome, sendEmailOutcome } from "@/lib/email";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { type Store, setProductHidden, storeForHandle, storeRef } from "@/lib/store";
 import { productIdFromAddress, readListingExactly } from "@/lib/catalog";
@@ -154,7 +154,9 @@ export async function alertOwner(
           ? "The steps are in docs/incident-response.md. The request itself, with the person's signature, is in the notice email."
           : `The steps are in docs/incident-response.md. ${NOTICE_NOT_KEPT}`,
       ];
-  return sendEmail({
+  // False only when certainly refused: an answer that is not known may have gone, and counts as sent (rule 30), so
+  // the route never asks the reporter to try again for an email the guard would not send twice.
+  const delivery = await sendEmailOutcome({
     meter: { by: "company" },
     from: NIMBUS_FROM,
     to: SUPPORT_EMAIL,
@@ -163,10 +165,8 @@ export async function alertOwner(
     // One urgent email per request a day: a retry of the same request (address, sender, words) does not send it twice,
     // and a new request on the same address, by another person or about another image, still does.
     idempotencyKey: `report-urgent-${report.kind}-${createHash("sha256").update(`${report.url}\n${report.email ?? ""}\n${report.work ?? ""}`).digest("hex").slice(0, 24)}-${new Date(now).toISOString().slice(0, 10)}`,
-  })
-    .catch(() => false)
-    .then((sent) => {
-      if (!sent) console.error("the urgent report email was not sent", report.kind);
-      return sent;
-    });
+  }).catch((): SendOutcome => "refused");
+  if (delivery === "refused") console.error("the urgent report email was not sent", report.kind);
+  else if (delivery === "uncertain") console.error("the urgent report email may not have been sent", report.kind);
+  return delivery !== "refused";
 }

@@ -36,6 +36,7 @@
  *   nl:person:find:<token>             JSON { s: store id, e: address }, an hour
  */
 import { personKey } from "@/lib/person-key";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { readPaid } from "@/lib/paypal-sales";
 import { randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
@@ -657,11 +658,17 @@ export async function buyerProfile(store: Store, rawEmail: string): Promise<Buye
   };
 }
 
-/** Deletes the team's notes about one person (lib/person-erasure.ts). */
+/**
+ * Deletes the team's notes about one person (lib/person-erasure.ts), read exactly (issue #4384, rule 24): the
+ * DEL and the SREM each answer a count of 0 or 1. Anything else throws UnknownReplyError, so the erasure stays open
+ * and is run again, never reported complete while the notes or the person's place in the index remain.
+ */
 export async function forgetNotesPerson(statsId: string | null, person: string): Promise<number> {
   if (!statsId || !PERSON_KEY.test(person) || !isRedisConfigured()) return 0;
-  const [gone] = await redisPipeline([["DEL", notesKey(statsId, person)], ["SREM", whoKey(statsId), person]]);
-  return Number(gone) || 0;
+  const replies = repliesFor(await redisPipeline([["DEL", notesKey(statsId, person)], ["SREM", whoKey(statsId), person]]), 2);
+  const counts = replies ? replies.map(countOf) : null;
+  if (!counts || counts.some((n) => n !== 0 && n !== 1)) throw new UnknownReplyError("erasing the team's notes about a person");
+  return counts[0] as number;
 }
 
 /** Spends a search's token once the person it found is deleted (lib/person-erasure.ts). */

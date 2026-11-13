@@ -84,7 +84,7 @@ export function HandleForm({ another = false, initial = "" }: { another?: boolea
         <label htmlFor="store-handle" className="field-label">
           Your address
         </label>
-        <div className="card mt-2 flex items-center pl-4 transition focus-within:border-violet-brand">
+        <div className="card mt-2 flex items-center border-(--line-off)! pl-4 transition focus-within:border-violet-brand!">
           <span className="text-ink-soft">marktmorgen.com/@</span>
           <input
             id="store-handle"

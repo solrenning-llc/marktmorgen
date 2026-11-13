@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "@/components/toast";
+import { AddressPrefix } from "@/components/handle-form";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 import { MAX_ADDRESSES } from "@/lib/store-field-rules";
 
@@ -81,8 +82,8 @@ export function RenameForm({ current }: { current: string }) {
       <label htmlFor="new-handle" className="field-label">
         New address
       </label>
-      <div className="card flex items-center pl-4 transition focus-within:border-violet-brand">
-        <span className="text-ink-soft">marktmorgen.com/@</span>
+      <div className="card flex flex-wrap items-center pl-4 transition focus-within:border-violet-brand">
+        <AddressPrefix />
         <input
           id="new-handle"
           name="handle"
@@ -95,7 +96,7 @@ export function RenameForm({ current }: { current: string }) {
           disabled={state.kind === "saving"}
           onChange={(event) => setHandle(event.target.value)}
           placeholder={current}
-          className="min-w-0 flex-1 rounded-r-2xl bg-transparent px-1 py-3 text-ink outline-none placeholder:text-ink-soft/50"
+          className="min-w-0 flex-1 basis-36 rounded-r-2xl bg-transparent px-1 py-3 text-ink outline-none placeholder:text-ink-soft/50"
         />
       </div>
 

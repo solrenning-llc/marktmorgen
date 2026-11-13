@@ -31,6 +31,24 @@ const MESSAGES: Record<string, string> = {
  * typed twice (WCAG 3.3.7). It only fills the field: nothing is held until
  * this form is sent, and the creator can change it first.
  */
+/**
+ * "marktmorgen.com/@" in front of an address field. The studio page sets
+ * overflow-wrap: anywhere on its <main>, which drew this prefix as
+ * "marktmorge / n.com/@" on a phone (#4312; WCAG 1.4.10, 1.4.8). It keeps its
+ * words, never shrinks below its own width, never grows past its row, and
+ * breaks only after "marktmorgen.com/" when even the whole row is too narrow.
+ * Its row wraps, so the field goes under it when there is no room beside it.
+ */
+export function AddressPrefix() {
+  return (
+    <span className="max-w-full shrink-0 text-ink-soft [overflow-wrap:normal]">
+      <span className="whitespace-nowrap">marktmorgen.com/</span>
+      <wbr />
+      <span className="whitespace-nowrap">@</span>
+    </span>
+  );
+}
+
 export function HandleForm({ another = false, initial = "" }: { another?: boolean; initial?: string }) {
   const [handle, setHandle] = useState(initial);
   const [name, setName] = useState("");
@@ -84,8 +102,8 @@ export function HandleForm({ another = false, initial = "" }: { another?: boolea
         <label htmlFor="store-handle" className="field-label">
           Your address
         </label>
-        <div className="card mt-2 flex items-center pl-4 transition focus-within:border-violet-brand">
-          <span className="text-ink-soft">marktmorgen.com/@</span>
+        <div className="card mt-2 flex flex-wrap items-center pl-4 transition focus-within:border-violet-brand">
+          <AddressPrefix />
           <input
             id="store-handle"
             name="handle"
@@ -97,7 +115,7 @@ export function HandleForm({ another = false, initial = "" }: { another?: boolea
             value={handle}
             onChange={(event) => setHandle(event.target.value)}
             placeholder="yourname"
-            className="min-w-0 w-full rounded-r-2xl bg-transparent px-1 py-3.5 text-ink outline-none placeholder:text-ink-soft/60"
+            className="min-w-0 flex-1 basis-36 rounded-r-2xl bg-transparent px-1 py-3.5 text-ink outline-none placeholder:text-ink-soft/60"
           />
         </div>
         <p className="mt-2 text-sm text-ink-soft">

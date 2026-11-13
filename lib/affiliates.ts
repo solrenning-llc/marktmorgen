@@ -867,11 +867,21 @@ async function changeAffiliate(
   throw new LockBusyError("an affiliate's record kept changing while it was written");
 }
 
-/** The affiliate this store has under an address, or null. */
+/**
+ * The record the address index names, only when it is that index's own: the record's id is the id the field held and
+ * its address is the one looked up (Codex G's MEDIUM on #3573). An index that points an address at another
+ * affiliate's record (a partial write, old data) names nobody, so it never signs one person in to another's page.
+ */
+function ownRecord(affiliate: Affiliate | null, id: string, email: string): Affiliate | null {
+  if (!affiliate || affiliate.id !== id) return null;
+  return canonicalEmail(affiliate.email) === canonicalEmail(email) ? affiliate : null;
+}
+
+/** The affiliate this store has under an address, or null (also when the index names another affiliate's record). */
 export async function affiliateByEmail(store: Store, email: string): Promise<Affiliate | null> {
   if (!store.statsId || !isRedisConfigured()) return null;
   const [id] = await redisPipeline([["HGET", emailsKey(store.statsId), normaliseEmail(email)]]);
-  return typeof id === "string" && id ? readAffiliate(store, id) : null;
+  return typeof id === "string" && id ? ownRecord(await readAffiliate(store, id), id, email) : null;
 }
 
 /**
@@ -1230,7 +1240,11 @@ async function recordFromLink(store: Store, grant: LinkGrant, fence: { share: Pa
   let affiliate: Affiliate | null = null;
   let created = false;
   const [knownId] = await redisPipeline([["HGET", emailsKey(statsId), grant.e]]);
-  if (typeof knownId === "string") affiliate = await readAffiliate(store, knownId);
+  // Only the index's own record (ownRecord): one under another address is never this link's (Codex G on #3573).
+  if (typeof knownId === "string") {
+    affiliate = ownRecord(await readAffiliate(store, knownId), knownId, grant.e);
+    if (!affiliate && knownId) return { ok: false, reason: "expired" };
+  }
   if (fence) {
     // The people read paid for first, by whoever pays for this path (openAffiliateLink's `charge`), rule 30.
     const problem = await partnerShareProblem(store, fence.share, affiliate?.id ?? null, fence.charge);
@@ -1255,7 +1269,7 @@ async function recordFromLink(store: Store, grant: LinkGrant, fence: { share: Pa
     const [won] = await redisPipeline([["HSETNX", emailsKey(statsId), grant.e, id]]);
     if (Number(won) !== 1) {
       const [other] = await redisPipeline([["HGET", emailsKey(statsId), grant.e]]);
-      affiliate = typeof other === "string" ? await readAffiliate(store, other) : null;
+      affiliate = typeof other === "string" ? ownRecord(await readAffiliate(store, other), other, grant.e) : null;
       if (!affiliate) return { ok: false, reason: "expired" };
     } else {
       const code = await claimCode(store, grant.e, id);

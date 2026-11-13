@@ -26,6 +26,7 @@ import {
   noSecondStep,
   showTwoStepAsk,
   twoStepAskKey,
+  twoStepAskWords,
 } from "@/lib/two-step-ask-rules";
 import * as askServer from "@/lib/two-step-ask";
 import { claimValue } from "@/lib/claim-mark";
@@ -142,8 +143,8 @@ async function main() {
   is("storage that reads but cannot write: not shown", askShown(null, false), false);
 
   part("Nothing is drawn on the server, so it never guesses");
-  const markup = renderToStaticMarkup(createElement(TwoStepAsk, { sid: SID }));
-  is("server markup is only the empty status region", markup, '<div role="status"></div>');
+  const markup = renderToStaticMarkup(createElement(TwoStepAsk, { sid: SID, seesSales: true }));
+  is("server markup is only the empty status region, in its wrapper", markup, '<div><div role="status"></div></div>');
 
   part("Words: what to do and why, in plain US English");
   const w = TWO_STEP_ASK_WORDS;
@@ -160,9 +161,21 @@ async function main() {
   is("the link goes to Two-step login", TWO_STEP_ASK_HREF, "#two-step");
   is("Two-step login has that anchor", read("components/two-step-manager.tsx").includes('<section id="two-step"'), true);
 
+  // Review of #3511 (Claude 1, LOW; taken by Claude 3): a member who cannot see sales is never told about one.
+  part("A member who cannot see sales gets the same ask, without the sale");
+  is("one who sees sales gets the words above", twoStepAskWords(true), TWO_STEP_ASK_WORDS);
+  const other = twoStepAskWords(false);
+  is("one who does not is never told the store sold", /\b(sale|sold|selling|orders?)\b/i.test(Object.values(other).join(" ")), false);
+  is("and is still asked to turn it on, with the same link and dismissal", [/turn on two-step login/i.test(other.body), other.link, other.dismiss, other.dismissed], [true, w.link, w.dismiss, w.dismissed]);
+  is("short sentences there too", Object.values(other).flatMap((text) => text.split(/(?<=[.:])\s+/)).every((x) => x.split(/\s+/).length <= 25), true);
+
   part("Accessibility (AX274)");
   const component = read("components/two-step-ask.tsx");
   is("a status region, there from the first paint so its message is said", component.includes('role="status"'), true);
+  // Review of #3511 (Claude 1, LOW): the live region holds only the short line after dismissing, so the whole note
+  // is not read out on every studio load; the note is drawn outside it, before it.
+  is("the note is drawn outside the live region", component.indexOf("<section") > -1 && component.indexOf("<section") < component.indexOf('role="status"'), true);
+  is("the live region holds only the line after dismissing", /role="status">\s*\{dismissed \?/.test(component), true);
   is("named by its heading", component.includes('aria-labelledby="two-step-ask-title"') && component.includes('id="two-step-ask-title"'), true);
   is("the link is at least 44 px high", /href=\{TWO_STEP_ASK_HREF\}[^>]*min-h-11/.test(component), true);
   is("the dismiss button is at least 44 by 44 px", /type="button"[\s\S]*min-h-11 min-w-11/.test(component), true);
@@ -178,7 +191,7 @@ async function main() {
   is("the lock is read by lockKnown (null when unread), never lockedUntil(...).catch(() => 0)", [page.includes("lockKnown(cookieStore.get(SESSION_COOKIE)?.value)"), page.includes("lockedUntil(cookieStore.get(SESSION_COOKIE)?.value).catch(() => 0)")], [true, false]);
   is(
     "drawn only under the rule",
-    page.includes("{store && showTwoStepAsk({ firstSale: soldFirstAt, appOn: twoStepRead === null ? null : twoStep.on, passkeys: passkeysRead === null ? null : passkeysRead.length, locked: lockedRead === null ? null : lockedRead > 0 }) ? <TwoStepAsk sid={store.sid} /> : null}"),
+    page.includes("{store && showTwoStepAsk({ firstSale: soldFirstAt, appOn: twoStepRead === null ? null : twoStep.on, passkeys: passkeysRead === null ? null : passkeysRead.length, locked: lockedRead === null ? null : lockedRead > 0 }) ? <TwoStepAsk sid={store.sid} seesSales={may(\"orders\") || may(\"stats\")} /> : null}"),
     true,
   );
   is("drawn once on the page", page.split("<TwoStepAsk ").length - 1, 1);

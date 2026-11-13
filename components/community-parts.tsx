@@ -122,8 +122,8 @@ export function CommunityBar({
             </span>
           )}
           <span className="min-w-0">
-            <span className="block truncate text-[0.9375rem] font-bold leading-tight">{config.name}</span>
-            <span className="st-muted block truncate text-xs font-semibold">{w.byStore(store.name)}</span>
+            <span className="block text-[0.9375rem] font-bold leading-tight [overflow-wrap:anywhere]">{config.name}</span>
+            <span className="st-muted block text-xs font-semibold [overflow-wrap:anywhere]">{w.byStore(store.name)}</span>
           </span>
         </Link>
         {signedIn ? (

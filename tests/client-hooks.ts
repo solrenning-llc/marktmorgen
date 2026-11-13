@@ -18,11 +18,13 @@ const internals = (React as unknown as Record<string, Internals>).__CLIENT_INTER
 
 const same = (a?: unknown[], b?: unknown[]) => !!a && !!b && a.length === b.length && a.every((v, i) => Object.is(v, b[i]));
 
-export type Mounted = { tree: () => unknown; settle: () => Promise<void>; unmount: () => void };
+export type Mounted = { tree: () => unknown; settle: () => Promise<void>; unmount: () => void; rerender: (props: unknown) => Promise<void> };
 
 /** Renders `component(props)`, runs its effects, and re-renders on every state change. */
 export async function mount<P>(component: (props: P) => unknown, props: P): Promise<Mounted> {
   const slots: Slot[] = [];
+  // The props drawn now: new ones arrive as a server page's fresh reading would (rerender).
+  let current = props;
   let index = 0;
   let dirty = false;
   let last: unknown = null;
@@ -82,7 +84,7 @@ export async function mount<P>(component: (props: P) => unknown, props: P): Prom
     try {
       index = 0;
       dirty = false;
-      last = component(props);
+      last = component(current);
     } finally {
       internals.H = before;
     }
@@ -101,6 +103,11 @@ export async function mount<P>(component: (props: P) => unknown, props: P): Prom
     tree: () => last,
     settle,
     unmount: () => slots.forEach((s) => typeof s?.cleanup === "function" && s.cleanup()),
+    rerender: async (next: unknown) => {
+      current = next as P;
+      render();
+      await settle();
+    },
   };
 }
 

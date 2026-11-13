@@ -26,6 +26,10 @@ is("both funnels start from the page's count", before.map((e) => e?.left), [5, 5
 before[0]?.onLeft?.(4);
 await view.settle();
 is("an explanation under the first lowers the count under the second too", explains(view.tree()).map((e) => e?.left), [4, 4]);
+// Codex X5's LOW on #3508: the count kept on the page was matched by its number alone, so a fresh reading from the
+// server with the same number (a new month's allowance, back at 5) was hidden under the old lowered count.
+await view.rerender({ ...props, ai: { on: true, left: 5 } });
+is("a fresh reading from the server with the same number replaces the page's count", explains(view.tree()).map((e) => e?.left), [5, 5]);
 view.unmount();
 
 const unread = await mount(PageFunnelEditor as (p: typeof props) => unknown, { ...props, ai: { on: true, left: null } as never });

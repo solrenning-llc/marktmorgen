@@ -148,6 +148,53 @@ async function main(): Promise<void> {
   advance(150 * DAY * 1000);
   is("a step noted without an attempt keeps the run too", (await claimAttempts(FLOW, [noted], 1, "s2", "email", now + 900 * DAY)).claimed, [noted]);
 
+  part("A late write from an erased run never lands on the run the same person started again (Codex L's MEDIUM on #4234)");
+  // Run A claims a step, A is erased while the step is in flight, the same address enters the workflow again and run B
+  // claims its own step; then A's late outcome, note or wait arrives. Each carries A's generation (written by
+  // openRuns, read with the lease entry by lib/flows.ts) and, for an outcome, A's exact attempt: B is left as it is.
+  const gen = async (email: string) => (await redisPipeline([["HGET", run(email), "gen"]]))[0] as string | null;
+  for (const lateWrite of ["confirmed", "uncertain", "deferred", "note", "wait", "claim"] as const) {
+    const email = `again-${lateWrite}@example.com`;
+    await openRuns(FLOW, [email], now);
+    const genA = (await gen(email)) ?? "";
+    const claimA = await claimAttempts(FLOW, [email], 0, "s1", "email", now, new Map([[email, genA]]));
+    const openA = claimA.opens?.get(email) ?? "";
+    await redisPipeline(forgetPersonCommands(LIST, FLOW, personOf(email)));
+    await openRuns(FLOW, [email], now + 60);
+    const genB = (await gen(email)) ?? "";
+    is(`${lateWrite}: (setup) A and B are told apart`, [genA !== "", genB !== "", genA !== genB], [true, true, true]);
+    const claimB = await claimAttempts(FLOW, [email], 0, "s1", "email", now + 60, new Map([[email, genB]]));
+    is(`${lateWrite}: (setup) B claimed its own step`, claimB.claimed, [email]);
+    const before = await redisPipeline([["HGETALL", run(email)], ["LRANGE", log(email), 0, -1], ["ZSCORE", held, `${FLOW}|${personOf(email)}`]]);
+    if (lateWrite === "note") {
+      await noteRuns(FLOW, [{ email, index: 0, stepId: "s1", kind: "run", state: "ended", note: "A's late note.", to: -1, status: "ended", gen: genA }], now + 120);
+    } else if (lateWrite === "wait") {
+      is("wait: A's late wait is not counted on B", (await countWaits(FLOW, [email], 0, now + 120, new Map([[email, genA]]))).get(email), null);
+    } else if (lateWrite === "claim") {
+      const lateClaim = await claimAttempts(FLOW, [email], 0, "s1", "email", now + 120, new Map([[email, genA]]));
+      is("claim: A's late claim finds no run of its own", [lateClaim.claimed, lateClaim.open, lateClaim.gone], [[], [], [email]]);
+    } else {
+      await settleAttempts(LIST, FLOW, 0, "s1", "email", [{ email, state: lateWrite, note: "A's late outcome.", to: lateWrite === "confirmed" ? -1 : 0, gen: genA, open: openA }], now + 120);
+    }
+    const afterLate = await redisPipeline([["HGETALL", run(email)], ["LRANGE", log(email), 0, -1], ["ZSCORE", held, `${FLOW}|${personOf(email)}`]]);
+    is(`${lateWrite}: B's record, history and hold are exactly as they were`, afterLate, before);
+    // B's own outcome, with B's generation and attempt, is still written.
+    await settleAttempts(LIST, FLOW, 0, "s1", "email", [{ email, state: "confirmed", note: "", to: -1, gen: genB, open: claimB.opens?.get(email) ?? "" }], now + 180);
+    const [openNow, statusNow] = (await redisPipeline([["HGET", run(email), "open"], ["HGET", run(email), "status"]])) as [unknown, unknown];
+    is(`${lateWrite}: and B's own outcome is written`, [openNow, statusNow], [null, "done"]);
+  }
+
+  part("An attempt of the same run settled twice clears only its own attempt");
+  const twice = "twice@example.com";
+  await openRuns(FLOW, [twice], now);
+  const genT = (await gen(twice)) ?? "";
+  const first = await claimAttempts(FLOW, [twice], 0, "s1", "email", now, new Map([[twice, genT]]));
+  await settleAttempts(LIST, FLOW, 0, "s1", "email", [{ email: twice, state: "confirmed", note: "", to: 1, gen: genT, open: first.opens?.get(twice) ?? "" }], now);
+  const second = await claimAttempts(FLOW, [twice], 1, "s2", "email", now, new Map([[twice, genT]]));
+  is("(setup) the next step is claimed", second.claimed, [twice]);
+  await settleAttempts(LIST, FLOW, 0, "s1", "email", [{ email: twice, state: "confirmed", note: "", to: 1, gen: genT, open: first.opens?.get(twice) ?? "" }], now);
+  is("the first attempt's late repeat leaves the second attempt open", (await redisPipeline([["HGET", run(twice), "open"]]))[0], second.opens?.get(twice) ?? "(missing)");
+
   done();
 }
 

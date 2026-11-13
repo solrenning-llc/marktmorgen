@@ -57,12 +57,15 @@ const STATUSES = {
 
 /**
  * The store's public requests a stamped copy takes for what it spends beyond the download (lib/stamp-cost-rules.ts):
- * held from the buyer's share of the window at this moment, and given back from the same window.
+ * held from the buyer's share of the window at this moment, and given back from the same window. Held from the
+ * store's window alone (`shared`), never from the asking connection's share of the day: a big file's hold is more
+ * than that whole share, and a refused hold would stay on it and shut the buyer out of the store for the day.
+ * OPENS_PER_HOUR bounds how often one order asks.
  */
 function copyMeter(store: Store): CopyMeter {
   const now = Date.now();
   return {
-    take: (units) => holdPublicRequests(store, units, now, "buyer"),
+    take: (units) => holdPublicRequests(store, units, now, "buyer", { shared: true }),
     give: (units) => givePublicRequests(store, units, now),
   };
 }

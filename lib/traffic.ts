@@ -301,10 +301,12 @@ export async function takePublicRequest(store: Store, who: "public" | "buyer" = 
  * refused over the window is not left counted, since nothing was read for it. What the reading did not need is given
  * back after it (givePublicRequests), and what it read beyond them counted (forcePublicRequests). `who` is whose
  * share of the window it is: a buyer's download (lib/stamp-cost-rules.ts) holds from the whole of it, as
- * takePublicRequest does for a buyer.
+ * takePublicRequest does for a buyer. `shared`, as for takePublicRequest, holds from the store's window alone, not the
+ * asking connection's share of the day: a copy stamped on the fly is work for the order, whose link's opens an hour
+ * already bound it, and its hold can be larger than one connection's whole share (Claude 1 cloud's triage on #3899).
  */
-export async function holdPublicRequests(store: Store, units: number, now: number, who: "public" | "buyer" = "public"): Promise<boolean> {
-  return takePublic(store, who, now, units, false, true);
+export async function holdPublicRequests(store: Store, units: number, now: number, who: "public" | "buyer" = "public", from: { shared?: boolean } = {}): Promise<boolean> {
+  return takePublic(store, who, now, units, from.shared === true, true);
 }
 
 async function takePublic(store: Store, who: "public" | "buyer", now: number, units: number, shared: boolean, giveBack: boolean): Promise<boolean> {

@@ -36,12 +36,18 @@ const CLAIM_SECONDS = 40 * 86_400;
 /** A ceiling on one run, so a job that is behind still ends. */
 const MAX_STEPS = 10_000;
 /**
- * How many days after its payday a store the payday run did not finish is still caught up (webhooks/cron audit,
- * Claude 1, 12/11/2026). The job runs once a day (vercel.json, "0 13 * * *"): a store whose payday failed (a Redis
- * or PayPal read that threw, a claim answered unknown) or that the run's deadline never reached used to wait until
- * the same day next month, with its affiliates unpaid and the creator never told. A store the payday did handle
- * (an email sent, or nobody owed anything that day: both claim the month) is never caught up, so a sale that clears
- * after the payday still joins next month's batch, as before.
+ * How many days after its payday a store the payday run reached but did not finish is still caught up
+ * (webhooks/cron audit, Claude 1, 12/11/2026). The job runs once a day (vercel.json, "0 13 * * *"): a store whose
+ * payday failed (a Redis or PayPal read that threw, a claim answered unknown) used to wait until the same day next
+ * month, with its affiliates unpaid and the creator never told. A store the payday did handle (an email sent, or
+ * nobody owed anything that day: both claim the month) is never caught up, so a sale that clears after the payday
+ * still joins next month's batch, as before.
+ *
+ * Only a payday that was in force on its day is caught up (Claude 2 nuvem F/B on #4255): the day's run marks each
+ * store it reaches as due (dueKey) before reading its book, and a catch-up needs that mark. A payday moved onto a day
+ * that just passed, affiliates turned on after the day, or a store created after it, was never due, so nothing
+ * failed and nothing is sent until the next payday. A store the day's deadline never reached carries no mark either,
+ * and waits for next month as it did before this catch-up existed.
  */
 export const PAYDAY_CATCH_UP_DAYS = 3;
 
@@ -78,6 +84,19 @@ function claimKey(statsId: string, month: string): string {
   return `nl:aff:payday:${statsId}:${month}`;
 }
 
+/** Set by the payday's own run when it reaches the store, before its book is read: the payday was in force that day. */
+function dueKey(statsId: string, month: string): string {
+  return `nl:aff:payday:due:${statsId}:${month}`;
+}
+
+/**
+ * Marks the store's payday as reached by its own day's run. A mark that cannot be written only means no catch-up
+ * if this run fails too: the store then waits for next month, as before the catch-up.
+ */
+async function markDue(statsId: string, month: string): Promise<void> {
+  await redisPipeline([["SET", dueKey(statsId, month), "1", "NX", "EX", CLAIM_SECONDS]]).catch(() => undefined);
+}
+
 /**
  * The payday a run on `now` is for, if any: today's, or one up to PAYDAY_CATCH_UP_DAYS back (in its own month,
  * so a payday on the 28th caught up on the 1st is still the earlier month's), with how many days late it is.
@@ -91,14 +110,16 @@ export function paydayDue(payday: number, now: Date): { month: string; late: num
 }
 
 /**
- * Whether a missed-looking payday was in fact handled: the month claimed, by an email that went or by a payday that
- * found nobody owed. Read exactly (CX-123 rule 24): any answer but a count of 0 or 1 throws, and the store is
- * counted as failed this run and looked at again tomorrow, never paid on a guess.
+ * Whether a missed-looking payday is one to catch up: its own day's run reached the store (the due mark) and did not
+ * handle it (no claim on the month, which an email that went or a payday that found nobody owed both write). Read
+ * exactly (CX-123 rule 24): any answer but a count of 0 or 1 throws, and the store is counted as failed this run and
+ * looked at again tomorrow, never paid on a guess.
  */
-async function handled(statsId: string, month: string): Promise<boolean> {
-  const count = countOf(repliesFor(await redisPipeline([["EXISTS", claimKey(statsId, month)]]), 1)?.[0]);
-  if (count !== 0 && count !== 1) throw new UnknownReplyError("whether a store's payday was handled");
-  return count === 1;
+async function toCatchUp(statsId: string, month: string): Promise<boolean> {
+  const replies = repliesFor(await redisPipeline([["EXISTS", dueKey(statsId, month)], ["EXISTS", claimKey(statsId, month)]]), 2);
+  const [due, claimed] = [countOf(replies?.[0]), countOf(replies?.[1])];
+  if ((due !== 0 && due !== 1) || (claimed !== 0 && claimed !== 1)) throw new UnknownReplyError("whether a store's payday was handled");
+  return due === 1 && claimed === 0;
 }
 
 /** The message itself. Plain text, so every word is what arrives. */
@@ -115,6 +136,8 @@ export function paydayEmail(input: {
   leadsCents?: number;
   /** Days since the payday, when it is caught up after a run that did not finish it (PAYDAY_CATCH_UP_DAYS). */
   late?: number;
+  /** A caught-up payday of a store that pays by itself: nothing is paid late by us, and the email says so. */
+  autoSkipped?: boolean;
 }): { subject: string; text: string } {
   // What can be paid today, not what is owed in all: when a wait is set the
   // two differ, and a subject line that calls the smaller number "owed" tells
@@ -128,6 +151,9 @@ export function paydayEmail(input: {
     input.late
       ? `The ${ordinal(input.payday)}, ${daysAgo(input.late)}, was the day you told your affiliates you pay them. We could not finish this email that day, so here it is now. ${who} can be paid ${amount}.`
       : `Today is the ${ordinal(input.payday)}, the day you told your affiliates you pay them. ${who} can be paid ${amount}.`,
+    ...(input.autoSkipped
+      ? ["", "You asked us to pay them by ourselves on payday. That did not happen on the day, and we do not pay late by ourselves, in case you have paid them since. If you have not, pay them with one press on your affiliate page, or download the batch."]
+      : []),
     "",
     "Open your affiliate page, download the batch, and upload it to your own PayPal or Wise. The money goes straight from your account to theirs — it never passes through us, so there is nothing to wait for once you have sent it:",
     studio,
@@ -228,8 +254,11 @@ export function autoPayEmail(paid: Awaited<ReturnType<typeof payWithPayPal>>, cu
 async function payday(store: Store, month: string, late: number): Promise<boolean> {
   if (!affiliatesOn(store)) return false;
   if (!store.statsId || !store.email) return false;
-  // A payday caught up only when that day's run did not handle it: never twice, never for a store with nobody owed.
-  if (late > 0 && (await handled(store.statsId, month))) return false;
+  // On the payday itself, the store is marked as reached before anything can fail, so a run that fails here can be
+  // caught up. A payday caught up only when that day's run reached the store and did not handle it: never twice,
+  // never for a payday that was not in force on its day, never for a store with nobody owed.
+  if (late === 0) await markDue(store.statsId, month);
+  else if (!(await toCatchUp(store.statsId, month))) return false;
   const book = await readBook(store);
   // Anyone with a PayPal payment already on its way is not due again.
   const lines = payableLines(book, await onTheirWay(store));
@@ -247,7 +276,10 @@ async function payday(store: Store, month: string, late: number): Promise<boolea
   if (!(await claimMonth(store.statsId, month))) return false;
   // Paying by itself, from the creator's own PayPal (lib/paypal-payouts.ts):
   // the email then says what was sent, or why it could not be.
-  if (book.refundsChecked && (await paysAutomatically(store))) {
+  // Never late (Claude 1 cloud on #4255): a creator who saw nothing go on the day may have paid the batch by hand
+  // since, and a payment they made leaves no record here, so a late automatic payout could pay everyone twice.
+  const auto = await paysAutomatically(store);
+  if (late === 0 && book.refundsChecked && auto) {
     const paid = await payWithPayPal(store);
     const { subject, text } = autoPayEmail(paid, book.currency, late);
     return sendEmail({ meter: { by: "store", store: store, kind: "email" }, from: NIMBUS_FROM, to: store.email, subject, text, idempotencyKey: `aff-payday-${store.statsId}-${month}` });
@@ -263,6 +295,7 @@ async function payday(store: Store, month: string, late: number): Promise<boolea
     refundsChecked: book.refundsChecked,
     leadsCents: book.lines.filter((l) => l.how === "lead" && l.status !== "approved" && l.currency === book.currency).reduce((sum, l) => sum + l.commission, 0),
     late,
+    autoSkipped: late > 0 && auto,
   });
   return sendEmail({ meter: { by: "store", store: store, kind: "email" },
     from: NIMBUS_FROM,

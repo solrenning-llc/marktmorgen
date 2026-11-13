@@ -19,6 +19,9 @@ import {dataBytes} from '@/lib/store-data-rules';
 import {store as redis} from './redis-stub';
 import {paidPeriod} from './billing-period-fixture';
 import {ROOM} from './data-room';
+import { skipWaits } from './skip-waits';
+// The pauses between a held lock's tries and between list batches pass at once, the clock moved on by each (tests/skip-waits.ts).
+skipWaits(["takeLock", "paced"]);
 globalThis.fetch=(async()=>{throw Error('No external calls in this review');}) as typeof fetch;
 async function setup(){
  redis.clear();const owner='memory@example.com';

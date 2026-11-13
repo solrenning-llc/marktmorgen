@@ -29,6 +29,9 @@ import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 import { TEST_CONSENT } from "./digital-consent-fixture";
 import { consentMetaValue } from "@/lib/digital-consent";
+import { skipWaits } from "./skip-waits";
+// The pauses between a held lock's tries and between list batches pass at once, the clock moved on by each (tests/skip-waits.ts).
+skipWaits(["takeLock", "paced"]);
 
 const emails: { to: string | string[]; text: string; subject: string }[] = [];
 const calls: { method: string; path: string; body: URLSearchParams }[] = [];

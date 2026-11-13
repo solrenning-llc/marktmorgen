@@ -20,6 +20,9 @@ import { readBook } from "@/lib/affiliates";
 import type { Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import { skipWaits } from "./skip-waits";
+// The pauses between a held lock's tries and between list batches pass at once, the clock moved on by each (tests/skip-waits.ts).
+skipWaits(["takeLock", "paced"]);
 
 const STATS = "statsid1";
 const CLIENT = "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789";

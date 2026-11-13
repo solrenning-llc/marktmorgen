@@ -9,6 +9,9 @@ import {test} from 'node:test';import assert from 'node:assert/strict';
 import {keepNote,forgetMemory,readMemory} from '@/lib/assistant-memory-store';
 import {dataKey} from '@/lib/store-data';import {dataBytes} from '@/lib/store-data-rules';
 import {store as redis} from './redis-stub';import {ROOM} from './data-room';
+import { skipWaits } from './skip-waits';
+// The pauses between a held lock's tries and between list batches pass at once, the clock moved on by each (tests/skip-waits.ts).
+skipWaits(["takeLock", "paced"]);
 const stats='G2MemoryEvidence',room={...ROOM,sid:'g2-memory-room'},key=`nl:amem:${stats}`;
 // The record's write and delete as they are sent now: a SET or DEL, or the scripts that hold them (MEMORY_WRITE, MEMORY_FORGET).
 const sets=(c:(string|number)[])=>(c[0]==='SET'&&c[1]===key)||(c[0]==='EVAL'&&String(c[1]).startsWith('-- marktmorgen:amem-write:v1')&&c[4]===key&&c[6]!=='');

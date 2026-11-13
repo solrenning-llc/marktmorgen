@@ -21,6 +21,9 @@ import { createHash } from "node:crypto";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
+import { skipWaits } from "./skip-waits";
+// The pauses between a held lock's tries and between list batches pass at once, the clock moved on by each (tests/skip-waits.ts).
+skipWaits(["takeLock", "paced"]);
 
 process.env.RESEND_API_KEY = "re_test_partner_approve_only";
 process.env.STRIPE_SECRET_KEY = "sk_test_partner_approve_only";

@@ -23,6 +23,12 @@ for (const code of LANGUAGE_CODES) {
   is(`${code}: says it is not legal advice`, notAdvice(code).length > 60, true);
 }
 
+part("Translation gaps from Claude 1's LOW on #1824");
+const sentenceOf = (code: string, id: string, i: number) => policyFacts(all, code).find((s) => s.id === id)?.sentences[i] ?? "";
+is("de: whose PayPal account it is", sentenceOf("de", "seller", 2).includes("PayPal-Konto von Harbor Kitchen"), true);
+is("it: the store's own accounts, and no masculine-only 'da solo'", [sentenceOf("it", "seller", 2).includes("intestato a Harbor Kitchen"), sentenceOf("it", "memberships", 0).includes("da solo")], [true, false]);
+is("pt: the buyer cancels on their own", sentenceOf("pt", "memberships", 0).includes("por conta própria"), true);
+
 part("English stays exactly as unit 1 wrote it");
 is("the seller", policyFacts(all, "en")[0].sentences[0], "Harbor Kitchen is the seller. Each sale is a contract between Harbor Kitchen and the buyer.");
 is("the list joined with each language's own word", [policyFacts(all, "en")[3].sentences[0], policyFacts(all, "de")[3].sentences[0]], ["Harbor Kitchen measures its ads with Meta, Google and TikTok.", "Harbor Kitchen misst seine Werbung mit Meta, Google und TikTok."]);

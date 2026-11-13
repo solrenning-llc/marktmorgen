@@ -314,8 +314,9 @@ export default async function ProductPage({ params, searchParams }: Params) {
     ) : null;
   const [about, stock, noKeys, savedPage, summary, related, inside, soldCounts, courseFacts] = await Promise.all([
     product.about ? readAbout(store.statsId, product.id) : Promise.resolve(""),
-    stockLeft(store, product).catch(() => null),
-    outOfKeys(store, product).catch(() => false),
+    // A count that cannot be read is unknown, never "no limit" nor "keys left" (CX-123 rule 24), as on the store page.
+    stockLeft(store, product).catch(() => undefined),
+    outOfKeys(store, product).catch(() => null),
     pageOf(store, product),
     summaryOf(store.statsId, product.id).catch(() => null),
     // What its order bump offers, drawn in the same box as on the store page.
@@ -382,13 +383,15 @@ export default async function ProductPage({ params, searchParams }: Params) {
   // The reviews the creator picked to show first, on a page built from blocks (lib/sales-page.ts, ReviewsBlock).
   const pickedFirst = page.blocks.find((block) => block.kind === "reviews")?.first ?? [];
   const reviews = summary && summary.visible > 0 ? await visibleReviews(store.statsId, product.id, 0, REVIEWS_ON_PAGE, pickedFirst).catch(() => []) : [];
-  const count = noKeys ? 0 : stock;
+  // Its stock or its keys could not be read: no way to buy it is drawn, it is said so, and search is told of no offer.
+  const unread = stock === undefined || noKeys === null;
+  const count = unread ? null : noKeys ? 0 : (stock ?? null);
   const blocks = aboutBlocks(about);
   const remaining = count !== null && canSellProduct(store, product) ? count : null;
   // Bought for somebody else, where it can be: on sale, not coming soon, not sold out (lib/gift-rules.ts).
-  const giftable = selling && !soon && remaining !== 0 && bundleReady && canSellProduct(store, product) && canGift(product);
+  const giftable = selling && !soon && !unread && remaining !== 0 && bundleReady && canSellProduct(store, product) && canGift(product);
   // And for several people at once, where a gift can be and nothing is limited (lib/group-rules.ts).
-  const groupable = selling && !soon && bundleReady && canSellProduct(store, product) && canGroup(product);
+  const groupable = selling && !soon && !unread && bundleReady && canSellProduct(store, product) && canGroup(product);
   const plan = activePlan(product);
   const pwyw = activePwyw(product);
   const description = page.seoDescription || product.summary || aboutExcerpt(about) || product.title;
@@ -453,8 +456,12 @@ export default async function ProductPage({ params, searchParams }: Params) {
           </a>
         </p>
       ) : null}
-      <BuyBox store={store} product={product} related={related} remaining={remaining} writes={canWrite(store)} selling={selling} ready={bundleReady} soon={soon} preorder={preorder} bundleItems={inside} pickAgain={query.pick === "count"} consentAgain={consentAgain && !giftProblem && !groupProblem} embed={embedSite || embedReturn ? { site: embedSite, back: embedReturn } : null} chosenOption={linkedChoice} />
-      {cartOn && !soon && cartable(product) && remaining !== 0 ? <AddToCart handle={store.handle} productId={product.id} lang={store.language} deal={store.cartDeal.on ? store.cartDeal : null} /> : null}
+      {unread && selling && !soon ? (
+        <p role="status" className="st-muted mt-4 text-sm">{w.cardBuyUnread}</p>
+      ) : (
+        <BuyBox store={store} product={product} related={related} remaining={remaining} writes={canWrite(store)} selling={selling} ready={bundleReady} soon={soon} preorder={preorder} bundleItems={inside} pickAgain={query.pick === "count"} consentAgain={consentAgain && !giftProblem && !groupProblem} embed={embedSite || embedReturn ? { site: embedSite, back: embedReturn } : null} chosenOption={linkedChoice} />
+      )}
+      {cartOn && !soon && !unread && cartable(product) && remaining !== 0 ? <AddToCart handle={store.handle} productId={product.id} lang={store.language} deal={store.cartDeal.on ? store.cartDeal : null} /> : null}
       {/* A question before buying, answered from this page (lib/answers.ts): only where the creator switched it on. */}
       {selling && answersOn(store) ? (
         <AskBox
@@ -547,7 +554,8 @@ export default async function ProductPage({ params, searchParams }: Params) {
 
   // Where the buy box is and what its button says, for the page's own blocks
   // and for the bar held at the bottom of a phone's screen (components/sticky-buy.tsx).
-  const { action, label } = pageAction(store, product, remaining, selling, related, soon, preorder);
+  const { action, label } =
+    unread && selling && !soon ? { action: { kind: "none" as const, text: w.cardBuyUnread }, label: "" } : pageAction(store, product, remaining, selling, related, soon, preorder);
   const sticky =
     action.kind === "none" ? null : (
       <StickyBuy target={free ? "get" : "buy"} label={label} price={<PriceTag store={store} product={product} />} />
@@ -561,7 +569,12 @@ export default async function ProductPage({ params, searchParams }: Params) {
       className={`st-page st-theme-${store.look.theme} relative min-h-screen overflow-hidden`}
       style={lookStyle(store.look) as React.CSSProperties}
     >
-      <JsonLd data={productData(store, product, description, remaining === 0, summary, soon, Boolean(preorder), free ? canGiveProduct(store, product) : canSellProduct(store, product) || byPayPal)} />
+      {unread ? (
+        // A count that cannot be read: the product, with no offer for search engines (rule 24).
+        <JsonLd data={productData(store, product, description, false, summary, soon, Boolean(preorder), false)} />
+      ) : (
+        <JsonLd data={productData(store, product, description, remaining === 0, summary, soon, Boolean(preorder), free ? canGiveProduct(store, product) : canSellProduct(store, product) || byPayPal)} />
+      )}
       <JsonLd data={breadcrumbData({ name: store.name, url: `${SITE_URL}/@${store.handle}` }, { title: product.title, url: `${SITE_URL}${productPath(store, product)}` })} />
       {faq ? <JsonLd data={faq} /> : null}
       <ExitOfferSlot store={store} except={product.id} />

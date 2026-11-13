@@ -57,13 +57,15 @@ export async function POST(request: NextRequest) {
     const id = store.community.id;
     const event = await readEvent(id, eventId);
     if (!event) return back(`${home}/events`, "gone");
-    if (!(await mayAttend(store, viewer.config, event, { owner: false, email: viewer.email }))) return back(page, "eventlocked");
-    if (!(await within(id, viewer.key, "rsvp"))) return back(page, "slow");
-
+    // Giving a place back never asks whether the member may come: somebody who no longer holds what the event asks
+    // for (a refund, an ended membership) must still free the place they took, or it stays taken from those who can.
     if (field("action", 12) === "notgoing") {
+      if (!(await within(id, viewer.key, "rsvp"))) return back(page, "slow");
       await cancelRsvp(id, event, viewer.key, store);
       return back(page, "notgoing");
     }
+    if (!(await mayAttend(store, viewer.config, event, { owner: false, email: viewer.email }))) return back(page, "eventlocked");
+    if (!(await within(id, viewer.key, "rsvp"))) return back(page, "slow");
     const answer = await rsvp(id, event, viewer.key, store);
     if (answer === "full") return back(page, "eventfull");
     if (answer === "closed") return back(page, event.cancelled ? "eventcancelled" : "eventover");

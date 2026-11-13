@@ -149,6 +149,14 @@ export default async function CommunityEventPage({ params, searchParams }: Param
                 <p className="mt-1 text-sm">{w.productGone(store.name)}</p>
               )}
               <p className="mt-3 text-sm">{w.otherAddress}</p>
+              {/* A place taken while it was still theirs can always be given back (app/api/store/community/rsvp/route.ts). */}
+              {mine && !over && !event.cancelled ? (
+                <form action="/api/store/community/rsvp" method="post" className="mt-3">
+                  <Carry store={store} action="notgoing" from="feed" />
+                  <input type="hidden" name="event" value={event.id} />
+                  <button type="submit" className="cm-pill">{w.cancelRsvp}</button>
+                </form>
+              ) : null}
             </div>
           ) : event.cancelled ? (
             <p className="cm-flash cm-flash-warn mt-6">{w.canceledByCreator(store.name)}</p>

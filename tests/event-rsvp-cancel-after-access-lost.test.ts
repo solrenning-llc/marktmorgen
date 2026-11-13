@@ -12,6 +12,7 @@
  *
  * Real route over the in-memory Redis; synthetic records only.
  */
+import { readFileSync } from "node:fs";
 import { NextRequest } from "next/server";
 import { POST as rsvpPost } from "@/app/api/store/community/rsvp/route";
 import { freshConfig, memberKey, readConfig, saveConfig, type Member } from "@/lib/community";
@@ -98,6 +99,14 @@ async function main(): Promise<void> {
 
   part("Taking a place still asks for the workshop");
   is("Ana cannot take one back", (await act(ana, "going")).includes("n=eventlocked"), true);
+
+  part("The event's page offers the way to give the place back to a member it locks out");
+  {
+    const source = readFileSync("app/[handle]/community/events/[event]/page.tsx", "utf8");
+    const locked = source.slice(source.indexOf("{!allowed ? ("), source.indexOf(") : event.cancelled ? ("));
+    is("the locked note is found", locked.length > 0, true);
+    is("it carries a \"not going\" form for a member holding a place", /mine && !over && !event\.cancelled[\s\S]*action="notgoing"[\s\S]*w\.cancelRsvp/.test(locked), true);
+  }
   done();
 }
 

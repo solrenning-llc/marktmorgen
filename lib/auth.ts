@@ -867,6 +867,39 @@ export async function endAllSessions(email: string): Promise<number | null> {
   }
 }
 
+/**
+ * Closes every session this creator has open except `keep`, the one asking (757 [STN4], unit 1): the laptop left
+ * logged in is shut without logging this browser out too. `keep` stays logged in with its second-step mark and its
+ * place in the account's set. Returns how many were closed, or null when that is not known: `keep` not in a
+ * session's shape (never read as "keep none", which would close this browser too), the set unread, a delete
+ * answered in another shape, or a failure (CX-123 rule 24; tests/sign-out-others.test.ts). Never throws.
+ */
+export async function endOtherSessions(email: string, keep: string | undefined): Promise<number | null> {
+  if (!keep || !/^[0-9a-f]{64}$/.test(keep)) return null;
+  if (!isRedisConfigured()) return 0;
+  const owned = await sessionsKey(normaliseEmail(email));
+  try {
+    const kept = await sessionKey(keep);
+    const [members] = await redisPipeline([["SMEMBERS", owned]]);
+    // As endAllSessions: the set is the only way to the sessions, so an unread one closes nothing.
+    const keys = stringList(members);
+    if (!keys) throw new SessionsUnknownError("an account's sessions");
+    const others = keys.filter((key) => key !== kept);
+    if (!others.length) return 0;
+    const marks = await Promise.all(others.map((key) => secondKeyOf(key)));
+    const commands: (string | number)[][] = [
+      ...others.map((key) => ["DEL", key]),
+      ...marks.map((mark) => ["DEL", mark]),
+      ...others.map((key) => ["SREM", owned, key]),
+    ];
+    if (!removedEach(await redisPipeline(commands), commands.length)) throw new SessionsUnknownError("the logging out of an account's other sessions");
+    return others.length;
+  } catch (error) {
+    console.error("logging out the other devices failed", error);
+    return null;
+  }
+}
+
 export const SESSION_COOKIE_OPTIONS = {
   httpOnly: true,
   sameSite: "lax" as const,

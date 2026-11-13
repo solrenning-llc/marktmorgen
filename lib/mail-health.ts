@@ -369,9 +369,24 @@ export async function heardFromSender(notice: SenderNotice, now = Date.now()): P
   // Off the list first, and every time: this is the part that must not be
   // skipped because a count had already been made.
   if (HEALTH_ID.test(notice.list)) await stopWriting(notice.list, email, notice.kind);
-  const [first] = await redisPipeline([["SET", seenKey(notice.store, email), "1", "NX", "EX", MAIL_HEALTH_SEEN_SECONDS]]);
-  if (first === null) return "ignored";
-  await add(notice.store, notice.kind === "complained" ? "c" : "b", 1, now);
+  // Counted once (j-mail-9): the address is taken for a few seconds while its count is written, and marked counted
+  // for the week only once it is. Marked for the week first, a count that failed was never written: the notice sent
+  // again found the mark and was "ignored", and a bad list could stay under the pause line. Taken by another
+  // delivery still at work, or by a failure whose mark has not yet gone, it is a failure the sender tries again.
+  const seen = seenKey(notice.store, email);
+  const [first] = await redisPipeline([["SET", seen, "w", "NX", "EX", 15]]);
+  if (first === null) {
+    const [mark] = await redisPipeline([["GET", seen]]);
+    if (mark === "w") throw new Error("this address's notice is being counted by another delivery; tried again");
+    return "ignored";
+  }
+  try {
+    await add(notice.store, notice.kind === "complained" ? "c" : "b", 1, now);
+  } catch (error) {
+    await redisPipeline([["DEL", seen]]).catch(() => {});
+    throw error;
+  }
+  await redisPipeline([["SET", seen, "1", "EX", MAIL_HEALTH_SEEN_SECONDS]]).catch(() => {});
   return (await pauseIfOver(notice.store, now)) ? "paused" : "counted";
 }
 

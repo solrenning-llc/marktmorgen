@@ -12,7 +12,7 @@ import { readFileSync } from "node:fs";
 import { claimHandle, ensureStatsId, ensureStoreId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { readDraft, parseRequest, readOutside } from "@/lib/payment-request-rules";
 import { changeRequest, createRequest, requestOf } from "@/lib/payment-request-store";
-import { markPaidOutside } from "@/lib/payment-requests";
+import { markPaidOutside, openRequestCheckout } from "@/lib/payment-requests";
 import { requestWords } from "@/lib/buyer-words/requests";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -102,6 +102,23 @@ async function main(): Promise<void> {
   await withSession(reqC, "cs_test_sessionofC1", { status: "complete", payment_status: "paid", amount_total: 12000, payment_intent: "pi_test_ofDpaid1", created: Math.floor(day / 1000), metadata: { kind: "request", request: reqB, store: "outsideshop" } });
   const named = await markPaidOutside(store, reqC, { method: "cash", note: "", paidAt: day });
   is("its own checkout naming another request: a read error, left open", [named.ok ? "marked" : named.reason, (await requestOf(store, reqC))?.state], ["error", "open"]);
+
+  part("The buyer's path reads only its own checkout too (#4447, review of #4455)");
+  const reqD = await make();
+  await withSession(reqD, "cs_test_sessionofD1", { id: "cs_test_sessionofE1", status: "open", payment_status: "unpaid", url: "https://checkout.stripe.com/c/pay/cs_test_sessionofE1" });
+  const sent = await openRequestCheckout(store, reqD, "https://marktmorgen.com", day);
+  is("an open checkout of another session: a read error, the buyer is not sent to it", sent.ok ? sent.url : sent.reason, "error");
+  const reqF = await make();
+  const reqG = await make();
+  await withSession(reqF, "cs_test_sessionofF1", { status: "complete", payment_status: "paid", amount_total: 12000, payment_intent: "pi_test_ofGpaid1", created: Math.floor(day / 1000), metadata: { kind: "request", request: reqG, store: "outsideshop" } });
+  const paidOther = await openRequestCheckout(store, reqF, "https://marktmorgen.com", day);
+  const afterF = await requestOf(store, reqF);
+  is("its own checkout paid for another request: a read error", paidOther.ok ? "sent" : paidOther.reason, "error");
+  is("and the request stays open, with no payment of another's", [afterF?.state, afterF?.payment], ["open", ""]);
+  const reqH = await make();
+  await withSession(reqH, "cs_test_sessionofH1", { status: "open", payment_status: "unpaid", url: "https://checkout.stripe.com/c/pay/cs_test_sessionofH1" });
+  const own = await openRequestCheckout(store, reqH, "https://marktmorgen.com", day);
+  is("control: its own open checkout is the page again", own.ok ? own.url : own.reason, "https://checkout.stripe.com/c/pay/cs_test_sessionofH1");
 
   part("Kept and said");
   is("a mark reads only whole", [readOutside({ method: "cheque" }), readOutside({ method: "cash", note: "  a\\nb  " })], [null, { method: "cash", note: "a\\nb" }]);

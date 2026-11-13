@@ -886,10 +886,12 @@ export async function sweep(deadline: number, now = Date.now()): Promise<{ looke
     if (record?.state === "ready") counts.ready += 1;
     if (record?.state === "failed") counts.failed += 1;
   };
-  const [due] = await redisPipeline([["ZRANGEBYSCORE", DUE, 0, now, "LIMIT", 0, 40]]);
-  for (const id of Array.isArray(due) ? due : []) {
+  // Both queues are read exactly (#4287, Codex U): a reply that is not one list of strings is unknown, never "nothing
+  // to do", so it throws and the five-minute job answers that it failed.
+  const due = stringList(repliesFor(await redisPipeline([["ZRANGEBYSCORE", DUE, 0, now, "LIMIT", 0, 40]]), 1)?.[0]);
+  if (!due) throw new UnknownReplyError("the videos due to be looked at");
+  for (const id of due) {
     if (Date.now() > deadline) return counts;
-    if (typeof id !== "string") continue;
     await look(id);
   }
   // As many due videos past the unmoved ones as were lost to them, once: never a third page, and never more than 40
@@ -902,10 +904,10 @@ export async function sweep(deadline: number, now = Date.now()): Promise<{ looke
       await look(id);
     }
   }
-  const [gone] = await redisPipeline([["SMEMBERS", GONE]]);
-  for (const id of (Array.isArray(gone) ? gone : []).slice(0, 40)) {
+  const gone = stringList(repliesFor(await redisPipeline([["SMEMBERS", GONE]]), 1)?.[0]);
+  if (!gone) throw new UnknownReplyError("the videos still to be deleted");
+  for (const id of gone.slice(0, 40)) {
     if (Date.now() > deadline) return counts;
-    if (typeof id !== "string") continue;
     const answer = STREAM_ID_PATTERN.test(id) ? await ask(config, "DELETE", `/videos/${id}`) : { status: 404, data: null };
     if (answer.status === 200 || answer.status === 404) {
       await redisPipeline([["SREM", GONE, id]]);

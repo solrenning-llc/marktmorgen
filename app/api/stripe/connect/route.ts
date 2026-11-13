@@ -48,11 +48,7 @@ export async function POST(request: NextRequest) {
         country,
         displayName: store.name || store.handle,
       });
-      // Written only while the store still has no account (`expected` null): two first connects at once (a double
-      // click, two tabs) each open one at Stripe, and the second must not write over the first, or the creator would
-      // finish onboarding on an account the store no longer names. The one that loses writes nothing and is not sent
-      // into Stripe for its account; the creator's other tab carries on with the one kept.
-      const saved = await setStripeAccount(ref, accountId, false, null);
+      const saved = await setStripeAccount(ref, accountId);
       if (!saved.ok) return away(origin, studio("stripe=error"));
       // Where sales are paid is the setting worth stealing a session for, so
       // the creator is told at their sign-in address (lib/account-notice.ts).

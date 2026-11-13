@@ -22,8 +22,7 @@ export async function GET(request: NextRequest) {
   try {
     const state = await readAccount(store.stripeAccountId);
     // Said only once the record took it (CX-123 rule 24): that record opens the store's checkout.
-    // Only while the store still names the account read: one disconnected or replaced meanwhile is never put back.
-    const saved = await setStripeAccount(ref, store.stripeAccountId, state.chargesEnabled, store.stripeAccountId);
+    const saved = await setStripeAccount(ref, store.stripeAccountId, state.chargesEnabled);
     if (!saved.ok) return away(origin, studio("stripe=error"));
     return away(origin, studio(`stripe=${state.chargesEnabled ? "ready" : "pending"}`));
   } catch (error) {

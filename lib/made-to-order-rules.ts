@@ -49,6 +49,20 @@ export type MadeOrder = { paidAt: number; days: number; steps: OrderStep[] };
  */
 const MAX_SECONDS = 100_000_000_000;
 const isTime = (value: unknown): value is number => typeof value === "number" && Number.isInteger(value) && value > 0 && value < MAX_SECONDS;
+
+/** A clock that is not a time in seconds (R1 and Codex L on #3627): unknown, so nothing reads it as "not late". */
+export class UnknownClockError extends Error {
+  constructor(now: unknown) {
+    super(`the clock is not a time in seconds: ${String(now)}`);
+    this.name = "UnknownClockError";
+  }
+}
+
+/** `now` checked once for every reader that depends on it; throws UnknownClockError otherwise. */
+function clock(now: unknown): number {
+  if (!isTime(now)) throw new UnknownClockError(now);
+  return now;
+}
 const isStage = (value: unknown): value is OrderStage => typeof value === "string" && (STAGES as readonly string[]).includes(value);
 
 /**
@@ -64,8 +78,11 @@ export function parseProductionDays(raw: unknown): number | null {
 
 /** A paid order, received at its payment; null when the time or the days are not valid. */
 export function startOrder(input: { paidAt: number; days: number }): MadeOrder | null {
-  if (!isTime(input.paidAt) || parseProductionDays(input.days) === null) return null;
-  return { paidAt: input.paidAt, days: input.days, steps: [{ stage: "received", at: input.paidAt }] };
+  // A whole number of days only, the one stored (Codex L on #3627): typed text cast through the type boundary would
+  // be kept as text, which parseMadeOrder then refuses.
+  const days = typeof input.days === "number" ? parseProductionDays(input.days) : null;
+  if (!isTime(input.paidAt) || days === null) return null;
+  return { paidAt: input.paidAt, days, steps: [{ stage: "received", at: input.paidAt }] };
 }
 
 /** The second the order is due: the payment plus the days promised. */
@@ -124,7 +141,8 @@ export function moveStage(order: MadeOrder, next: OrderStage, now: number): Stag
 
 /** Past the date promised and not delivered. On the promised second itself it is not late yet. */
 export function isLate(order: MadeOrder, now: number): boolean {
-  return stageOf(order) !== "delivered" && now > promisedBy(order);
+  const at = clock(now);
+  return stageOf(order) !== "delivered" && at > promisedBy(order);
 }
 
 /** Whether it was delivered after the date promised; false while not delivered. */
@@ -138,8 +156,9 @@ export function deliveredLate(order: MadeOrder): boolean {
  * negative when late, also counted up; null once delivered.
  */
 export function daysLeft(order: MadeOrder, now: number): number | null {
+  const at = clock(now);
   if (stageOf(order) === "delivered") return null;
-  const remaining = promisedBy(order) - now;
+  const remaining = promisedBy(order) - at;
   return remaining >= 0 ? Math.ceil(remaining / DAY_SECONDS) : -Math.ceil(-remaining / DAY_SECONDS);
 }
 
@@ -166,6 +185,7 @@ export function sortQueue(orders: readonly MadeOrder[]): MadeOrder[] {
 
 /** How many orders are at each stage, and how many of those not delivered are late. */
 export function queueCounts(orders: readonly MadeOrder[], now: number): Record<OrderStage | "late", number> {
+  clock(now);
   const counts: Record<OrderStage | "late", number> = { received: 0, in_production: 0, delivered: 0, late: 0 };
   for (const order of orders) {
     counts[stageOf(order)] += 1;

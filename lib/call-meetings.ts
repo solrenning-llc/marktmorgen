@@ -57,7 +57,7 @@ import { isSenderConfigured } from "@/lib/email";
 import { StripeError, onAccount } from "@/lib/stripe-account";
 import { type LostRead, confirmLostRead, lostCursorKey, lostDisputesOrRetry, refundRowKnown, refundedInFull, rowGivesBack } from "@/lib/refunds";
 import { STRIPE_LIST_VERSION, StripeListUnreadable, ownField, plainObject, readStripePage, type StripePage } from "@/lib/stripe-list";
-import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { readListing } from "@/lib/catalog";
 import { markBookingsChanged, readMoves } from "@/lib/call-records";
 import { MEET_QUEUE, readRecord } from "@/lib/meet-records";
@@ -308,9 +308,14 @@ const CALLS_ID = /^[0-9a-f]{16,32}$/;
 async function readRefunds(storeFor: (handle: string) => Promise<Store | null>, deadline: number): Promise<number> {
   const now = Date.now();
   // Stores whose last meeting is over leave the list.
-  const [old] = await redisPipeline([["ZRANGEBYSCORE", MEET_STORES, 0, now - 86_400_000, "LIMIT", 0, 100]]);
-  const stale = Array.isArray(old) ? (old as unknown[]).map(String) : [];
-  if (stale.length) await redisPipeline([["ZREM", MEET_STORES, ...stale]]);
+  // Every reply about the list and the rotation is read exactly (Codex U on #3462, MEDIUM; Claude 3 cloud G, LOWs): one
+  // lost or in another shape fails this run's refund read, said in the log, never a pass that kept the turns moving.
+  const old = repliesFor(await redisPipeline([["ZRANGEBYSCORE", MEET_STORES, 0, now - 86_400_000, "LIMIT", 0, 100]]), 1)?.[0];
+  if (!Array.isArray(old) || !old.every((member) => typeof member === "string")) throw new UnknownReplyError("the stores whose meetings are over");
+  const stale = old as string[];
+  if (stale.length && countOf(repliesFor(await redisPipeline([["ZREM", MEET_STORES, ...stale]]), 1)?.[0]) === null) {
+    throw new UnknownReplyError("the stores whose meetings are over, taken off the list");
+  }
   // The rotation follows the list: a store new to it comes in at 0, one that left it goes out, and every other keeps
   // its time. A store new to it is then stamped with the time it came in (less NEVER_READ_MS), so the stores never read
   // go first, in the order they came in (pre-review of d0f4513887: by name, a later one could pass an earlier one).
@@ -323,9 +328,14 @@ async function readRefunds(storeFor: (handle: string) => Promise<Store | null>, 
     3,
   );
   const fresh = kept?.[2];
+  if (!kept || countOf(kept[0]) === null || countOf(kept[1]) === null) throw new UnknownReplyError("the rotation of stores whose refunds to read");
   if (!Array.isArray(fresh) || !fresh.every((member) => typeof member === "string")) throw new UnknownReplyError("the stores new to the rotation");
-  // XX GT: only a member still at 0 is stamped, never one read meanwhile, and none that left is brought back.
-  if (fresh.length) await redisPipeline([["ZADD", REFUND_TURNS, "XX", "GT", ...fresh.flatMap((member) => [now - NEVER_READ_MS, member as string])]]);
+  // XX GT: only a member still at 0 is stamped, never one read meanwhile, and none that left is brought back. XX without
+  // CH counts only members added, so 0 is a known answer: the shape is what is read, not the total.
+  if (fresh.length) {
+    const stamped = repliesFor(await redisPipeline([["ZADD", REFUND_TURNS, "XX", "GT", ...fresh.flatMap((member) => [now - NEVER_READ_MS, member as string])]]), 1);
+    if (countOf(stamped?.[0]) === null) throw new UnknownReplyError("the stamp of the stores new to the rotation");
+  }
   const [page] = await redisPipeline([["ZRANGEBYSCORE", REFUND_TURNS, "-inf", "+inf", "WITHSCORES", "LIMIT", 0, MEET_REFUND_STORES]]);
   if (!Array.isArray(page) || page.length % 2 !== 0) throw new UnknownReplyError("the stores whose refunds to read");
   const turns: { member: string; last: number }[] = [];
@@ -375,7 +385,13 @@ async function readRefunds(storeFor: (handle: string) => Promise<Store | null>, 
   }
   // XX: a store that left the list meanwhile is not brought back into the rotation.
   if (taken.length) writes.push(["ZADD", REFUND_TURNS, "XX", ...taken]);
-  if (writes.length) await redisPipeline(writes);
+  if (writes.length) {
+    // Each anchor's SET NX answers "OK" or nil, the rotation's ZADD XX a count: anything else, or a reply missing,
+    // fails the run (said in the log), so a rotation that did not move is never taken for one that did.
+    const replies = repliesFor(await redisPipeline(writes), writes.length);
+    const known = replies?.every((reply, i) => (writes[i][0] === "SET" ? reply === "OK" || reply === null : countOf(reply) !== null));
+    if (!known) throw new UnknownReplyError("the turns of the stores whose refunds were read");
+  }
   return handled;
 }
 

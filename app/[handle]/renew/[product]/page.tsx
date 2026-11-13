@@ -12,6 +12,7 @@ import { canManage } from "@/lib/membership-manage";
 import { canRecover } from "@/lib/buyer-orders";
 import { productPath } from "@/components/store-product";
 import { DigitalConsentBox } from "@/components/digital-consent-box";
+import { BillingCountryField } from "@/components/billing-country-field";
 import { consentKind, deliversDigitally } from "@/lib/digital-consent";
 import { readListing } from "@/lib/catalog";
 import { readWinBack } from "@/lib/winback-send";
@@ -166,6 +167,16 @@ export default async function RenewPage({ params, searchParams }: Params) {
                 <input type="hidden" name="product" value={product.id} />
                 {/* Sent back here, not to the product's page, when the box was not checked (app/api/store/checkout, `from`). */}
                 <input type="hidden" name="from" value="renew" />
+                {/* Where the buyer is buying from (EU VAT art. 9a, lib/eu-vat-gate.ts consumerGate), and why it was asked again. */}
+                {status === "abroad" || status === "country" ? (
+                  <div className="st-note mb-5" role="alert">
+                    <p className="font-bold">{say.w.notices[status].title}</p>
+                    <p className="mt-1 text-sm">{say.w.notices[status].body}</p>
+                  </div>
+                ) : null}
+                <div className="mb-5">
+                  <BillingCountryField id={`bc-renew-${product.id}`} locale={say.lang.locale} label={say.w.billingCountry} choose={say.w.chooseCountry} />
+                </div>
                 {deliversDigitally(product) ? <DigitalConsentBox id={`dc-renew-${product.id}`} kind={consentKind(product)} lang={store.language} refused={!back && query.consent === "needed"} className="mb-5" /> : null}
                 <button type="submit" className="btn st-btn btn-lg btn-block">
                   {price ? m.renewPrice(price) : m.renew}

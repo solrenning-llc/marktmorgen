@@ -157,6 +157,9 @@ export const fr: BuyerWords = {
   unitSaving: (percent) => `soit ${percent}\u00a0% d’économie`,
   chooseOptionFor: (title) => `Choisissez une option pour ${title}`,
   chooseOne: "Choisissez-en une",
+  /** The checkout's billing country field (EU VAT art. 9a, lib/eu-vat-gate.ts consumerGate). */
+  billingCountry: "Pays depuis lequel vous achetez",
+  chooseCountry: "Choisissez votre pays",
   optionFromLink: (label) => `Vous venez pour ${label}, cette option est donc choisie ci-dessous. Vous pouvez en choisir une autre.`,
   recommended: "Recommandé",
   recommendedAfter: " (recommandé)",
@@ -203,6 +206,8 @@ export const fr: BuyerWords = {
   notices: {
     soldout: { title: "Il vient d'être épuisé", body: "Le dernier est parti juste avant que vous cliquiez sur acheter. Rien n'a été débité." },
     busy: { title: "Quelqu'un est en train de l'acheter", body: "Rien n'a été débité. Cliquez de nouveau sur acheter dans un instant." },
+    abroad: { title: "Pas encore disponible depuis l'UE ni le Royaume-Uni", body: "Nous ne pouvons pas encore facturer la TVA que l'Union européenne et le Royaume-Uni exigent pour ce produit, donc rien n'a été débité. Si vous êtes en dehors de ces pays, choisissez votre pays et réessayez." },
+    country: { title: "Choisissez le pays depuis lequel vous achetez", body: "Rien n'a été débité. Choisissez votre pays à côté du bouton d'achat, puis cliquez de nouveau sur acheter." },
     slow: { title: "Beaucoup de tentatives en quelques minutes", body: "Rien n'a été débité. Patientez quelques minutes, puis cliquez de nouveau sur acheter." },
     error: { title: "La page de paiement n'a pas pu s'ouvrir", body: "Rien n'a été débité. Réessayez dans un instant." },
     nocharges: { title: "Cette boutique ne peut pas accepter de paiements par carte pour le moment", body: "Rien n'a été débité. Réessayer ne fonctionnera pas tant que la boutique n'aura pas réglé le problème." },

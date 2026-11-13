@@ -20,7 +20,7 @@ import { DEEMED_SUPPLIER_RECORDS, deemedSupplierReady } from "@/lib/deemed-suppl
 type P = Parameters<typeof euSupplyOf>[0];
 const base: P = { priceCents: 1000, file: null, link: null, keys: null, course: null, podcast: null, recurring: null, call: null, callPackage: null, bundle: null, shipping: null, pwyw: null };
 
-test("a file, a link, licence keys, a course, a private podcast and a membership are electronically supplied services", () => {
+test("a file, a link, license keys, a course, a private podcast and a membership are electronically supplied services", () => {
   const cases: Partial<P>[] = [
     { file: { name: "a.pdf" } as P["file"] },
     { link: "https://example.com/x" },

@@ -168,6 +168,9 @@ export const en = {
   unitSaving: (percent: number) => `save ${percent}%`,
   chooseOptionFor: (title: string) => `Choose an option for ${title}`,
   chooseOne: "Choose one",
+  /** The checkout's billing country field (EU VAT art. 9a, lib/eu-vat-gate.ts consumerGate). */
+  billingCountry: "Country you're buying from",
+  chooseCountry: "Choose your country",
   /** Above the price options, when a link named one and it is chosen for that reason (630 [HN6](27), lib/option-link-rules.ts). */
   optionFromLink: (label: string) => `You came here for ${label}, so it is chosen below. You can choose another.`,
   recommended: "Recommended",
@@ -225,6 +228,8 @@ export const en = {
   notices: {
     soldout: { title: "That one just sold out", body: "The last one went a moment before you pressed buy. Nothing was charged." },
     busy: { title: "Someone else is buying that right now", body: "Nothing was charged. Press buy again in a moment." },
+    abroad: { title: "This can't be bought from the EU or the UK yet", body: "We can't yet charge the VAT the European Union and the United Kingdom require on this product, so nothing was charged. If you are outside them, choose your country and try again." },
+    country: { title: "Choose the country you're buying from", body: "Nothing was charged. Pick your country next to the buy button, then press buy again." },
     slow: { title: "That was a lot of tries in a few minutes", body: "Nothing was charged. Wait a few minutes, then press buy again." },
     error: { title: "The payment page could not be opened", body: "Nothing was charged. Try again in a moment." },
     nocharges: { title: "This store can't take card payments right now", body: "Nothing was charged. Trying again won't work until the store fixes this." },

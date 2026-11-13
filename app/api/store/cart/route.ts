@@ -1,3 +1,4 @@
+import { consumerGate } from "@/lib/eu-vat-gate";
 import { type DigitalConsent, DigitalConsentMissing, consentFromForm } from "@/lib/digital-consent";
 import { withinStore } from "@/lib/metered-limits";
 import { type NextRequest, after } from "next/server";
@@ -274,8 +275,11 @@ export async function POST(request: NextRequest) {
   let remindVersion = "";
   // The box to start access at once, which loses the right to cancel once it starts (lib/digital-consent.ts).
   let digitalConsent: DigitalConsent | null = null;
+  // The form as sent, for the billing country the EU VAT gate reads (lib/eu-vat-gate.ts consumerGate).
+  let sent: FormData = new FormData();
   try {
     const form = await (await limited(request, 4_000)).formData();
+    sent = form;
     digitalConsent = consentFromForm(form);
     const h = form.get("handle");
     handle = typeof h === "string" ? normaliseHandle(h.slice(0, 40)) : "";
@@ -304,6 +308,12 @@ export async function POST(request: NextRequest) {
   // Read in part: a product outside what was read may be coming soon, so it is unknown and never sent to Stripe;
   // back to the cart to try again, nothing charged.
   if (products.some((p) => !knownNotSoon(coming, p.id))) return away(`/@${store.handle}?cart=error#cart`);
+  // EU VAT art. 9a (lib/eu-vat-gate.ts consumerGate), as for one product: before anything is held or charged, a cart
+  // with a paid product for the EU or the UK is refused, and one without the billing country asks for it.
+  for (const product of products) {
+    const gate = consumerGate({ product, headers: request.headers, form: sent });
+    if (!gate.ok) return away(`/@${store.handle}?cart=${gate.reason === "refused" ? "abroad" : "country"}#cart`);
+  }
   for (const product of products) {
     // A key count that cannot be read never sells (SG2, finding 12): back to the cart to try again, nothing charged.
     const out = await outOfKeys(store, product).catch(() => null);

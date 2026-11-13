@@ -10,7 +10,7 @@ import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import { BILLING_COUNTRY_NEEDED, EU_UK_REFUSED, REFUSED_PLACES, consumerGate } from "@/lib/eu-vat-gate";
 import { BILLING_COUNTRY_FIELD } from "@/lib/eu-vat-evidence";
-import { EU_VAT_COUNTRIES } from "@/lib/eu-vat-supply";
+import { EU_VAT_COUNTRIES, type EuSupplyFields } from "@/lib/eu-vat-supply";
 
 const download = { priceCents: 2900, file: "vault/x/y/z.pdf", link: null, keys: null, course: null, recurring: null, call: null, bundle: null, pwyw: null };
 const course = { ...download, file: null, course: "c1" };
@@ -79,7 +79,7 @@ test("a free product goes on wherever the buyer is, with or without a billing co
 
 test("a live service goes on; a bundle goes on as one only when every member is one", () => {
   assert.deepEqual(consumerGate({ product: call, ...at("DE", "DE") }), { ok: true });
-  const members = new Map([["c", call], ["d", download], ["c2", { ...call, priceCents: 0 }]]);
+  const members = new Map<string, EuSupplyFields>([["c", call], ["d", download], ["c2", { ...call, priceCents: 0 }]]);
   assert.deepEqual(consumerGate({ product: { ...download, file: null, bundle: ["c", "c2"] }, members, ...at("DE", "DE") }), { ok: true });
   assert.deepEqual(consumerGate({ product: { ...download, file: null, bundle: ["c", "d"] }, members, ...at("DE", "DE") }), refused);
 });

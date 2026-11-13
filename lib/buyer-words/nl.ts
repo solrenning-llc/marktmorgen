@@ -148,6 +148,9 @@ export const nl: BuyerWords = {
   unitSaving: (percent) => `je bespaart ${percent}%`,
   chooseOptionFor: (title) => `Kies een optie voor ${title}`,
   chooseOne: "Kies er een",
+  /** The checkout's billing country field (EU VAT art. 9a, lib/eu-vat-gate.ts consumerGate). */
+  billingCountry: "Land waaruit je koopt",
+  chooseCountry: "Kies je land",
   optionFromLink: (label) => `Je kwam hier voor ${label}, dus die optie is hieronder gekozen. Je kunt een andere kiezen.`,
   recommended: "Aanbevolen",
   recommendedAfter: " (aanbevolen)",
@@ -194,6 +197,8 @@ export const nl: BuyerWords = {
   notices: {
     soldout: { title: "Die is net uitverkocht", body: "De laatste ging vlak voordat je op kopen drukte. Er is niets afgeschreven." },
     busy: { title: "Iemand anders koopt dit op dit moment", body: "Er is niets afgeschreven. Druk zo meteen opnieuw op kopen." },
+    abroad: { title: "Nog niet te koop vanuit de EU of het Verenigd Koninkrijk", body: "We kunnen de btw die de Europese Unie en het Verenigd Koninkrijk voor dit product vragen nog niet berekenen, dus er is niets afgeschreven. Ben je daarbuiten, kies dan je land en probeer het opnieuw." },
+    country: { title: "Kies het land waaruit je koopt", body: "Er is niets afgeschreven. Kies je land naast de koopknop en druk dan opnieuw op kopen." },
     slow: { title: "Veel pogingen in een paar minuten", body: "Er is niets afgeschreven. Wacht een paar minuten en druk dan opnieuw op kopen." },
     error: { title: "De betaalpagina kon niet worden geopend", body: "Er is niets afgeschreven. Probeer het zo meteen opnieuw." },
     nocharges: { title: "Deze winkel kan nu geen kaartbetalingen ontvangen", body: "Er is niets afgeschreven. Opnieuw proberen werkt pas als de winkel dit heeft opgelost." },

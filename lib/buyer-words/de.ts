@@ -151,6 +151,9 @@ export const de: BuyerWords = {
   unitSaving: (percent) => `Sie sparen ${percent}\u00a0%`,
   chooseOptionFor: (title) => `Wählen Sie eine Option für ${title}`,
   chooseOne: "Bitte wählen",
+  /** The checkout's billing country field (EU VAT art. 9a, lib/eu-vat-gate.ts consumerGate). */
+  billingCountry: "Land, aus dem Sie kaufen",
+  chooseCountry: "Land auswählen",
   optionFromLink: (label) => `Sie sind wegen ${label} hier, deshalb ist diese Option unten gewählt. Sie können eine andere wählen.`,
   recommended: "Empfohlen",
   recommendedAfter: " (empfohlen)",
@@ -197,6 +200,8 @@ export const de: BuyerWords = {
   notices: {
     soldout: { title: "Das ist gerade ausverkauft", body: "Das letzte Exemplar ging kurz vor Ihrem Klick auf Kaufen weg. Es wurde nichts berechnet." },
     busy: { title: "Jemand anderes kauft das gerade", body: "Es wurde nichts berechnet. Klicken Sie gleich noch einmal auf Kaufen." },
+    abroad: { title: "Aus der EU und dem Vereinigten Königreich noch nicht erhältlich", body: "Wir können die Mehrwertsteuer, die die Europäische Union und das Vereinigte Königreich für dieses Produkt verlangen, noch nicht berechnen. Es wurde nichts berechnet. Wenn Sie sich außerhalb davon befinden, wählen Sie Ihr Land und versuchen Sie es erneut." },
+    country: { title: "Wählen Sie das Land, aus dem Sie kaufen", body: "Es wurde nichts berechnet. Wählen Sie Ihr Land neben der Kaufen-Schaltfläche und klicken Sie dann erneut auf Kaufen." },
     slow: { title: "Viele Versuche in wenigen Minuten", body: "Es wurde nichts berechnet. Warten Sie ein paar Minuten und klicken Sie dann erneut auf Kaufen." },
     error: { title: "Die Zahlungsseite konnte nicht geöffnet werden", body: "Es wurde nichts berechnet. Versuchen Sie es gleich noch einmal." },
     nocharges: { title: "Dieser Shop kann gerade keine Kartenzahlungen annehmen", body: "Es wurde nichts berechnet. Ein neuer Versuch klappt erst, wenn der Shop das behoben hat." },

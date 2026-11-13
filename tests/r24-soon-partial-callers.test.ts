@@ -62,7 +62,7 @@ async function made(title: string, price: string): Promise<string> {
 /** The cart checkout for these ids; where it sends the buyer and how many Stripe sessions it opened. */
 async function pay(ids: string[]): Promise<{ location: string; opened: number }> {
   const before = stripeSessions.length;
-  const form = withConsent(new URLSearchParams([["handle", HANDLE], ...ids.map((id) => ["id", id] as [string, string])]));
+  const form = withConsent(new URLSearchParams([["handle", HANDLE], ["billing_country", "US"], ...ids.map((id) => ["id", id] as [string, string])]));
   const response = await payCart(new NextRequest("https://marktmorgen.test/api/store/cart", {
     method: "POST",
     headers: { host: "marktmorgen.test", origin: "https://marktmorgen.test", "content-type": "application/x-www-form-urlencoded" },

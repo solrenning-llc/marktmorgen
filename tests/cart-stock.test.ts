@@ -370,7 +370,7 @@ async function main(): Promise<void> {
   }
   const owner = (await storeForEmail(OWNER))!;
   const pay = async (ids: string[], cookie = "") => {
-    const form = new URLSearchParams({ handle: "printshop", dc: "yes", dc_v: TEST_CONSENT.version });
+    const form = new URLSearchParams({ handle: "printshop", dc: "yes", dc_v: TEST_CONSENT.version, billing_country: "US" });
     for (const id of ids) form.append("id", id);
     const answer = await payCart(new NextRequest("https://marktmorgen.com/api/store/cart", { method: "POST", headers: { host: "marktmorgen.com", origin: "https://marktmorgen.com", "content-type": "application/x-www-form-urlencoded", ...(cookie ? { cookie } : {}) }, body: form.toString() }));
     const where = new URL(answer.headers.get("location") ?? "https://x/");

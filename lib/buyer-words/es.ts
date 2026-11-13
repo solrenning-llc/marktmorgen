@@ -154,6 +154,9 @@ export const es: BuyerWords = {
   unitSaving: (percent) => `ahorras un ${percent}\u00a0%`,
   chooseOptionFor: (title) => `Elige una opción de ${title}`,
   chooseOne: "Elige una",
+  /** The checkout's billing country field (EU VAT art. 9a, lib/eu-vat-gate.ts consumerGate). */
+  billingCountry: "País desde el que compras",
+  chooseCountry: "Elige tu país",
   optionFromLink: (label) => `Llegaste aquí por ${label}, así que está elegida abajo. Puedes elegir otra.`,
   recommended: "Recomendado",
   recommendedAfter: " (recomendado)",
@@ -200,6 +203,8 @@ export const es: BuyerWords = {
   notices: {
     soldout: { title: "Se acaba de agotar", body: "El último se vendió justo antes de que pulsaras comprar. No se ha cobrado nada." },
     busy: { title: "Alguien lo está comprando ahora mismo", body: "No se ha cobrado nada. Vuelve a pulsar comprar en un momento." },
+    abroad: { title: "Aún no se puede comprar desde la UE ni el Reino Unido", body: "Todavía no podemos cobrar el IVA que la Unión Europea y el Reino Unido exigen para este producto, así que no se ha cobrado nada. Si estás fuera de ellos, elige tu país y vuelve a intentarlo." },
+    country: { title: "Elige el país desde el que compras", body: "No se ha cobrado nada. Elige tu país junto al botón de compra y vuelve a pulsar comprar." },
     slow: { title: "Demasiados intentos en pocos minutos", body: "No se ha cobrado nada. Espera unos minutos y vuelve a pulsar comprar." },
     error: { title: "No se pudo abrir la página de pago", body: "No se ha cobrado nada. Vuelve a intentarlo en un momento." },
     nocharges: { title: "Esta tienda no puede aceptar pagos con tarjeta ahora mismo", body: "No se ha cobrado nada. Volver a intentarlo no funcionará hasta que la tienda lo solucione." },

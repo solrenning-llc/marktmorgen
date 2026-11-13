@@ -92,6 +92,7 @@ async function main(): Promise<void> {
   const buy = () => {
     const f = new FormData();
     f.set("handle", "keycountshop");
+    f.set("billing_country", "US");
     f.set("product", app.product.id);
     return withConsent(f);
   };
@@ -107,6 +108,7 @@ async function main(): Promise<void> {
     const before = sessions.length;
     const f = new FormData();
     f.set("handle", "keycountshop");
+    f.set("billing_country", "US");
     f.set("id", app.product.id);
     const response = await cartRoute(new NextRequest("https://marktmorgen.com/api/store/cart", {
       method: "POST",

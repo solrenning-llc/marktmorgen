@@ -22,11 +22,16 @@ const anchorKey = `nl:meet:rf:${CALLS}:since`;
 const seenKey = `nl:meet:rf:${CALLS}:seen`;
 let refunds: Record<string, unknown>[] = [];
 let sessionsData: unknown = [];
+/** The refunds' second page, when set: the first page then says it has more. */
+let secondPage: unknown = undefined;
 globalThis.fetch = (async (input: string | URL | Request) => {
   const url = new URL(String(input));
   const path = url.pathname.replace(/^\/v1/, "");
   const answer = (body: unknown) => new Response(JSON.stringify(body), { status: 200 });
-  if (path === "/refunds") return answer({ object: "list", data: refunds, has_more: false });
+  if (path === "/refunds") {
+    if (url.searchParams.get("starting_after")) return answer({ object: "list", data: secondPage, has_more: false });
+    return answer({ object: "list", data: refunds, has_more: secondPage !== undefined });
+  }
   if (path === "/checkout/sessions") return answer({ object: "list", data: sessionsData, has_more: false });
   return answer({ object: "list", data: [], has_more: false });
 }) as typeof fetch;
@@ -70,3 +75,69 @@ for (const [label, data] of [["a number", 7], ["an object", {}], ["text", "x"]] 
     assert.deepEqual(await pipeline([["SISMEMBER", seenKey, "re_CallRefund0001"]]), [0]);
   });
 }
+
+const refunded = (n: string) => ({ id: `re_CallRefund${n}`, object: "refund", created: NOW - 60, status: "succeeded", payment_intent: `pi_CallRefund${n}`, charge: { object: "charge", amount: 5000, amount_refunded: 5000, refunded: true } });
+
+for (const [label, data] of [["a list holding a number", [7]], ["a list holding null", [null]], ["a list holding a checkout with no id", [{ metadata: { kind: "call" } }]]] as [string, unknown][]) {
+  test(`the refunded payment's checkouts listed as ${label}: the refund is not taken as read`, async () => {
+    await seed();
+    refunds = [refunded("0001")];
+    sessionsData = data;
+    try {
+      await syncMeetings(find, Date.now() + 10_000, "https://marktmorgen.com").catch(() => null);
+    } finally {
+      sessionsData = [];
+    }
+    assert.deepEqual(await pipeline([["SISMEMBER", seenKey, "re_CallRefund0001"]]), [0]);
+  });
+}
+
+test("an empty list of checkouts is no call: the refund is read", async () => {
+  await seed();
+  refunds = [refunded("0001")];
+  sessionsData = [];
+  await syncMeetings(find, Date.now() + 10_000, "https://marktmorgen.com").catch(() => null);
+  assert.deepEqual(await pipeline([["SISMEMBER", seenKey, "re_CallRefund0001"]]), [1]);
+});
+
+for (const [label, page] of [["a number", 7], ["an object", {}], ["a list holding a number", [7]], ["a list holding null", [null]]] as [string, unknown][]) {
+  test(`a second refunds page read as ${label}: the older place is kept`, async () => {
+    await seed();
+    const older = String(NOW - 20 * 86_400);
+    await pipeline([["SET", anchorKey, older, "EX", 86_400 * 60]]);
+    refunds = [{ id: "re_CallRefund0002", object: "refund", created: NOW - 60, status: "succeeded", payment_intent: "", charge: { object: "charge", amount: 5000, amount_refunded: 5000, refunded: true } }];
+    secondPage = page;
+    try {
+      await syncMeetings(find, Date.now() + 10_000, "https://marktmorgen.com").catch(() => null);
+    } finally {
+      secondPage = undefined;
+    }
+    assert.deepEqual(await pipeline([["GET", anchorKey]]), [older]);
+  });
+}
+
+for (const [label, rows] of [["a number", [7]], ["null", [null]], ["a refund with no id", [{ object: "refund", created: NOW - 60 }]]] as [string, unknown[]][]) {
+  test(`a refunds page holding ${label}: the older place is kept`, async () => {
+    await seed();
+    const older = String(NOW - 20 * 86_400);
+    await pipeline([["SET", anchorKey, older, "EX", 86_400 * 60]]);
+    // Beside a healthy, newer refund the walk reads: the place must not move past the row it could not read.
+    refunds = [...rows, { id: "re_CallRefund0004", object: "refund", created: NOW - 60, status: "succeeded", payment_intent: "", charge: { object: "charge", amount: 5000, amount_refunded: 5000, refunded: true } }] as Record<string, unknown>[];
+    try {
+      await syncMeetings(find, Date.now() + 10_000, "https://marktmorgen.com").catch(() => null);
+    } finally {
+      refunds = [];
+    }
+    assert.deepEqual(await pipeline([["GET", anchorKey]]), [older]);
+  });
+}
+
+test("a healthy page read to its end moves the place", async () => {
+  await seed();
+  const older = String(NOW - 20 * 86_400);
+  await pipeline([["SET", anchorKey, older, "EX", 86_400 * 60]]);
+  refunds = [{ id: "re_CallRefund0003", object: "refund", created: NOW - 60, status: "succeeded", payment_intent: "", charge: { object: "charge", amount: 5000, amount_refunded: 5000, refunded: true } }];
+  await syncMeetings(find, Date.now() + 10_000, "https://marktmorgen.com").catch(() => null);
+  const [place] = await pipeline([["GET", anchorKey]]);
+  assert.notEqual(place, older);
+});

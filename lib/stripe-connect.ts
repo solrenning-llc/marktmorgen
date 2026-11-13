@@ -311,16 +311,60 @@ export type AccountState = {
   cardPayments: CardPaymentsStatus | null;
 };
 
+/** A JSON object, never null or an array. */
+function objectOf(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}
+
 const CARD_PAYMENTS_STATUSES = ["active", "pending", "restricted", "unsupported"] as const;
 export type CardPaymentsStatus = (typeof CARD_PAYMENTS_STATUSES)[number];
 
-type MerchantConfiguration = {
-  capabilities?: { card_payments?: { status?: unknown } };
-};
+/** Thrown where Stripe's account answer is not in its exact shape: nothing about the account is known. */
+function unknownShape(what: string): never {
+  throw new Error(`Stripe answered ${what} in an unknown shape`);
+}
 
-type Requirements = {
-  summary?: { minimum_deadline?: { status?: unknown } };
-};
+/**
+ * The card_payments status, read exactly: the account, configuration.merchant,
+ * its capabilities and card_payments are objects and the status one of
+ * CARD_STATUSES. A 200 that says less (the include ignored, a change of shape, a body
+ * that is not JSON) is unknown, never "card payments off" (CX-123 rule 24).
+ */
+// The statuses read as known, from Stripe's own generated v2 types for the pinned API version (stripe-node v22.6.0,
+// API 2026-08-26.dahlia, src/resources/V2/Core/Accounts.ts): card_payments is active | pending | restricted |
+// unsupported. Anything else (another value such as v1's "inactive", another letter case, blank) is unknown and
+// throws, so nothing is written on it (Codex Z and Codex U on #3311): a value Stripe adds later reads as "not
+// checked" until it is added here, never as "card payments off".
+const CARD_STATUSES: ReadonlySet<string> = new Set(CARD_PAYMENTS_STATUSES);
+// The statuses of a requirements deadline (same source): currently_due | eventually_due | past_due.
+const DEADLINE_STATUSES = new Set(["currently_due", "eventually_due", "past_due"]);
+
+function cardPaymentsStatus(account: unknown): string {
+  const configuration = objectOf(objectOf(account)?.configuration);
+  const merchant = objectOf(configuration?.merchant);
+  const cardPayments = objectOf(objectOf(merchant?.capabilities)?.card_payments);
+  const status = cardPayments?.status;
+  if (typeof status !== "string" || !CARD_STATUSES.has(status)) unknownShape("an account's card payments");
+  return status;
+}
+
+/**
+ * The status of the earliest requirements deadline, or null when Stripe says
+ * there is none: `requirements` or its `summary` null, or a summary without a
+ * minimum_deadline (or with it null). A missing `requirements` or `summary`, or
+ * any other shape, is unknown, never "nothing outstanding" (CX-123 rule 24).
+ */
+function deadlineStatus(account: unknown): string | null {
+  const raw = objectOf(account)?.requirements;
+  if (raw === null) return null;
+  const requirements = objectOf(raw) ?? unknownShape("an account's requirements");
+  if (requirements.summary === null) return null;
+  const summary = objectOf(requirements.summary) ?? unknownShape("an account's requirements summary");
+  if (summary.minimum_deadline === undefined || summary.minimum_deadline === null) return null;
+  const status = objectOf(summary.minimum_deadline)?.status;
+  if (typeof status !== "string" || !DEADLINE_STATUSES.has(status)) unknownShape("an account's requirements deadline");
+  return status;
+}
 
 /**
  * Asks Stripe what that account can actually do right now.
@@ -336,13 +380,10 @@ export async function readAccount(accountId: string): Promise<AccountState> {
       "?include=configuration.merchant&include=requirements",
   );
 
-  const configuration = account.configuration as
-    | { merchant?: MerchantConfiguration }
-    | undefined;
-  const status = configuration?.merchant?.capabilities?.card_payments?.status;
-
-  const requirements = account.requirements as Requirements | undefined;
-  const deadline = requirements?.summary?.minimum_deadline?.status;
+  // Read exactly (CX-123 rule 24): an unknown shape throws, so the studio routes
+  // answer "stripe=error" and write nothing, and the checkup says "not-checked".
+  const status = cardPaymentsStatus(account);
+  const deadline = deadlineStatus(account);
 
   return {
     chargesEnabled: status === "active",

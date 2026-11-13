@@ -35,6 +35,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { withinLimit } from "@/lib/request-guard";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { type Store, storeForHandle, storeForId } from "@/lib/store";
+import { storeForIdExactly } from "@/lib/store-exact";
 import { leadsKey } from "@/lib/contacts";
 import { storesKnownFor } from "@/lib/buyer-library";
 import { erasePerson } from "@/lib/person-erasure";
@@ -147,8 +148,12 @@ export async function askErasureLink(input: { email: string; ip: string; origin:
   afterAnswer(async () => {
     const stores: Store[] = [];
     for (const sid of (await storesKnownFor(email)).slice(0, MAX_ERASE_STORES)) {
-      const store = await storeForId(sid).catch(() => null);
-      if (store?.sid) stores.push(store);
+      // Read exactly (rule 24): a store that is gone (no record) is left out, but one whose record does not read
+      // stops the link (logged by afterAnswer). Left out, the person would be sent a link to part of the stores,
+      // told it was done, and that store would keep everything about them (readErasureLink refuses the same).
+      const store = await storeForIdExactly(sid);
+      if (store === "unknown") throw new Error(`a store that knows the address could not be read (store ${sid})`);
+      if (store !== "none" && store.sid) stores.push(store);
     }
     if (!stores.length) return;
     const answer = await emailLink(stores, email, input.origin);

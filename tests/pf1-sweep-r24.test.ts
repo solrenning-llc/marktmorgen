@@ -39,10 +39,18 @@ const sent: string[] = [];
 let paidList: unknown = { object: "list", data: [], has_more: false };
 /** An address the stand-in mail service refuses (the send-failed control). */
 let refuseMailTo = "";
+/**
+ * How it refuses. Rule 23 (#3377, Claude 2's HIGH, 9 November 2026): this was
+ * a 500, which sendEmailOutcome reads as an answer not known (the email may
+ * have gone), so the marks stay and no pass sends again; the control below
+ * asserts a certain refusal, now a 422 (same assertions), and the 500 is
+ * asserted on its own to keep the "sending" mark.
+ */
+let refuseWith = 422;
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   if (url.hostname === "api.resend.com" && refuseMailTo && String(init?.body).includes(refuseMailTo)) {
-    return Response.json({ name: "application_error", message: "a synthetic refusal" }, { status: 500 });
+    return Response.json({ name: refuseWith >= 500 ? "application_error" : "validation_error", message: "a synthetic refusal" }, { status: refuseWith });
   }
   if (url.hostname === "api.resend.com") {
     if (url.pathname === "/emails/batch") {
@@ -323,6 +331,24 @@ test("control: a send that failed leaves no claim behind, and the next pass send
   const before = sent.length;
   assert.equal(await remindAbandoned(store, left(id, email)), "sent");
   assert.deepEqual(sent.slice(before), [email]);
+});
+
+/** #3377: a 500 may follow acceptance, so its "sending" mark stays and the next pass leaves the checkout. */
+test("an answer not known (a 500) keeps the claim, and the next pass does not send again", async () => {
+  const store = await shop();
+  const { id, email } = fresh();
+  refuseMailTo = email;
+  refuseWith = 500;
+  try {
+    assert.equal(await remindAbandoned(store, left(id, email)), "failed");
+  } finally {
+    refuseMailTo = "";
+    refuseWith = 422;
+  }
+  assert.equal(await markOf(id), "sending", "the \"sending\" mark is kept on an answer not known");
+  const before = sent.length;
+  assert.equal(await remindAbandoned(store, left(id, email)), "skip");
+  assert.deepEqual(sent.slice(before), []);
 });
 
 test("an unknown stop link write leaves no claim behind, and the next pass sends", async (t) => {

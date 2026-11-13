@@ -516,9 +516,10 @@ export function StorePixels({
           form.requestSubmit(submitter as HTMLButtonElement | undefined);
         } finally {
           delete form.dataset.going;
+          // Coming back to this page, the button works again, and so it does when the submit threw (the button was
+          // replaced during the wait): the mark is always cleared, never left to hold every later press.
+          window.setTimeout(() => delete form.dataset.sent, 1000);
         }
-        // Coming back to this page, the button works again.
-        window.setTimeout(() => delete form.dataset.sent, 1000);
       }, 300);
     };
     document.addEventListener("submit", onSubmit, true);

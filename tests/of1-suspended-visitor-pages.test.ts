@@ -129,8 +129,12 @@ async function main(): Promise<void> {
     const drawn = await html(out);
     is(`${page.name} shows none of the store's products, prices or forms`, [titles.some((t) => drawn.includes(t)), drawn.includes("$29") || drawn.includes("$45"), drawn.includes("<form")], [false, false, false]);
     ask(page.path, {});
-    const title = String((await page.meta()).title ?? "");
+    const meta = await page.meta();
+    const title = String(meta.title ?? "");
     is(`${page.name}'s title names no product and not the store`, [titles.some((t) => title.includes(t)), title.includes("Glaze Works")], [false, false]);
+    // Its crawler rules answer 404 (store-robots), so no page of it may be indexed instead (Codex G on #3193).
+    const robotsMeta = meta.robots as { index?: boolean } | string | null | undefined;
+    is(`${page.name} is not indexed`, typeof robotsMeta === "object" && robotsMeta !== null && robotsMeta.index === false, true);
   }
   is("the store's app manifest is not given, kept by no cache", await file(manifest, "/manifest.webmanifest"), [404, "no-store"]);
   is("nor the rules for crawlers on its own domain", await file(robots, "/store-robots"), [404, "no-store"]);

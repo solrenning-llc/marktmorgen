@@ -138,7 +138,7 @@ async function main(): Promise<void> {
     status: "past_due",
     metadata: meta,
     customer: { id: "cus_Failing00001", email: "ana@example.com" },
-    latest_invoice: { id: "in_Failing000001", status: "open", amount_due: 2900, amount_remaining: 2900, currency: "usd", hosted_invoice_url: "https://invoice.stripe.com/i/failing", next_payment_attempt: 0 },
+    latest_invoice: { id: "in_Failing000001", subscription: "sub_Failing000001", customer: "cus_Failing00001", status: "open", amount_due: 2900, amount_remaining: 2900, currency: "usd", hosted_invoice_url: "https://invoice.stripe.com/i/failing", next_payment_attempt: 0 },
   };
   state.pastDue = [failing];
 
@@ -163,7 +163,7 @@ async function main(): Promise<void> {
   is("the third, seven days on, and then no more", mails.length, 3);
 
   part("Paid, it stops");
-  state.pastDue = [{ ...failing, id: "sub_Second0000001", customer: { id: "cus_Second000001", email: "ben@example.com" }, latest_invoice: { ...failing.latest_invoice, id: "in_Second0000001" } }];
+  state.pastDue = [{ ...failing, id: "sub_Second0000001", customer: { id: "cus_Second000001", email: "ben@example.com" }, latest_invoice: { ...failing.latest_invoice, id: "in_Second0000001", subscription: "sub_Second0000001", customer: "cus_Second000001" } }];
   await run();
   is("the first about another payment", [mails.at(-1)?.to].flat(), ["ben@example.com"]);
   state.pastDue = [];
@@ -173,7 +173,7 @@ async function main(): Promise<void> {
 
   part("An email from before reminders existed");
   await redis.pipeline([["SET", "nl:dun:acct_1TestHarbor0001:in_Legacy00000001", "1"]]);
-  state.pastDue = [{ ...failing, id: "sub_Legacy0000001", latest_invoice: { ...failing.latest_invoice, id: "in_Legacy00000001" } }];
+  state.pastDue = [{ ...failing, id: "sub_Legacy0000001", latest_invoice: { ...failing.latest_invoice, id: "in_Legacy00000001", subscription: "sub_Legacy0000001" } }];
   shift += 8 * DAY;
   await run();
   is("gets no reminder", mails.length, 4);

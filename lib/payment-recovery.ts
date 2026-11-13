@@ -85,9 +85,12 @@ type Sub = {
   id?: unknown;
   status?: unknown;
   metadata?: Record<string, string> | null;
-  customer?: { email?: unknown; deleted?: unknown } | string | null;
+  customer?: { id?: unknown; email?: unknown; deleted?: unknown } | string | null;
   latest_invoice?: {
     id?: unknown;
+    subscription?: unknown;
+    customer?: unknown;
+    parent?: unknown;
     status?: unknown;
     amount_due?: unknown;
     amount_remaining?: unknown;
@@ -96,6 +99,24 @@ type Sub = {
     next_payment_attempt?: unknown;
   } | string | null;
 };
+
+/** The id an expanded Stripe field names: the string itself, or the object's own `id`; "" otherwise. */
+const namedId = (raw: unknown): string =>
+  typeof raw === "string" ? raw : raw && typeof raw === "object" && typeof (raw as { id?: unknown }).id === "string" ? (raw as { id: string }).id : "";
+
+/**
+ * Whether a membership's expanded latest invoice is its own (rule 30, the #4449 class on the creator's members): it
+ * names this subscription (at the top level in older API versions, under parent.subscription_details in newer ones),
+ * none naming another, and this membership's customer. Another's invoice would give this member someone else's link
+ * and amount, so nothing is sent, claimed or changed on it.
+ */
+function ownInvoice(sub: Sub, invoice: Record<string, unknown>): boolean {
+  const subId = namedId(sub.id);
+  const customerId = namedId(sub.customer);
+  const parent = invoice.parent as { subscription_details?: { subscription?: unknown } | null } | null | undefined;
+  const named = [namedId(invoice.subscription), namedId(parent?.subscription_details?.subscription)].filter(Boolean);
+  return subId !== "" && customerId !== "" && named.length > 0 && named.every((one) => one === subId) && namedId(invoice.customer) === customerId;
+}
 
 /** What the email says, and nothing else: pure, so it can be read before it is sent. */
 export function failedPaymentEmail(input: {
@@ -226,7 +247,8 @@ async function remindFailed(store: Store, deadline: number): Promise<number> {
   for (const sub of mine) {
     if (Date.now() >= deadline || written >= PER_STORE) break;
     const subId = typeof sub.id === "string" && SUB_PATTERN.test(sub.id) ? sub.id : "";
-    const invoice = sub.latest_invoice && typeof sub.latest_invoice === "object" ? sub.latest_invoice : null;
+    const latest = sub.latest_invoice && typeof sub.latest_invoice === "object" ? sub.latest_invoice : null;
+    const invoice = latest && ownInvoice(sub, latest as Record<string, unknown>) ? latest : null;
     const invoiceId = typeof invoice?.id === "string" && INVOICE_PATTERN.test(invoice.id) ? invoice.id : "";
     const payUrl = typeof invoice?.hosted_invoice_url === "string" ? invoice.hosted_invoice_url : "";
     // What is left to pay, which is what the payment page asks for (#4419): an invoice paid in part owes its balance,

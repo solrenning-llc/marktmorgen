@@ -1,19 +1,29 @@
 "use client";
 
 import { useEffect } from "react";
+import { startBrowserCheck } from "@/lib/browser-check-client";
 import { sourceTag } from "@/lib/source-rules";
 
 // One count per page load, however many times React runs the effect.
 const sent = new Set<string>();
 
+// The host's browser check answers for every count this page sends but a link's (lib/bot-check.ts, browserProof). It
+// is set up once for the whole window, with the sign-in form's route too (lib/browser-check-client.ts): a second
+// initBotId in one window never gets the host's challenge, and its requests never settle.
 function beacon(payload: Record<string, string>) {
   const body = JSON.stringify(payload);
-  try {
-    if (navigator.sendBeacon && navigator.sendBeacon("/api/store/hit", new Blob([body], { type: "text/plain" }))) return;
-  } catch {
-    // Fall through to fetch.
+  if (payload.k === "l") {
+    // A link's count needs no check (app/api/store/hit), so it goes by sendBeacon, which outlives the page being
+    // left, and never waits on the challenge; with no sendBeacon, by the fetch from before the check wrapped it.
+    const queued = typeof navigator.sendBeacon === "function" && navigator.sendBeacon("/api/store/hit", new Blob([body], { type: "text/plain" }));
+    if (!queued) (startBrowserCheck() ?? fetch)("/api/store/hit", { method: "POST", body, keepalive: true, headers: { "Content-Type": "text/plain" } }).catch(() => {});
+    return;
   }
-  fetch("/api/store/hit", { method: "POST", body, keepalive: true, headers: { "Content-Type": "text/plain" } }).catch(() => {});
+  startBrowserCheck();
+  const send = (via: typeof fetch) => via("/api/store/hit", { method: "POST", body, keepalive: true, headers: { "Content-Type": "text/plain" } });
+  // A visit, a page or a funnel step goes by fetch, which the check signs. Without the check it counts as nothing
+  // (app/api/store/hit), so it is never sent again unsigned: that would only cost a request.
+  send(fetch).catch(() => {});
 }
 
 /**

@@ -481,7 +481,13 @@ async function unknownLook(id: string, pending: Pending, status: number, now: nu
   if (kept !== 1) throw new UnknownReplyError("keeping an AI captions request whose delivery is unknown");
   if (past > DELIVERY_LOOKS_MS) {
     console.error("which AI captions were delivered is still unknown after every automatic look; nothing refunded, the request kept for a person", id, status);
+    // The hook may have written a refund owed and queued it since this look began: the queue entry then stays.
     await redisPipeline([["ZREM", QUEUE, id]]);
+    // Read again after the ZREM: gone (settled) stays out; a refund owed, a record that does not read, or a read that
+    // does not read exactly (rule 24) goes back in (NX: an entry already back keeps its time).
+    const back = repliesFor(await redisPipeline([["GET", pendingKey(id)]]), 1);
+    const left = back && back[0] !== null ? parsePending(back[0]) : null;
+    if (!back || (back[0] !== null && (left === null || left.owed))) await redisPipeline([["ZADD", QUEUE, "NX", now, id]]);
     return "waiting";
   }
   console.error("which AI captions were delivered is unknown past the give-up; nothing refunded, the request kept and looked at again", id, status);

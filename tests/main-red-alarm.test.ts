@@ -391,7 +391,8 @@ async function endToEnd() {
   const cleanJobs = { total_count: 2, jobs: [job("verify", stopped), job("All checks (product-checks)", "failure")] };
   const redJobsReply = { total_count: 3, jobs: [job("verify", "success"), job("Mobile render (candidate)", "failure"), job("All checks (product-checks)", "failure")] };
   const github = (o: { head: string, headRuns: unknown[], older?: Record<string, unknown[][]>, issues?: unknown[], olderReply?: unknown, jobs?: Record<number, unknown>, defaultJobs?: unknown,
-    queueRuns?: unknown[], queueReply?: unknown, failOn?: RegExp }) => {
+    queueRuns?: unknown[], queueReply?: unknown, failOn?: RegExp, laterRefs?: unknown[] }) => {
+    let refReads = 0;
     const reads: string[] = [];
     const writes: { method: string, path: string, body: unknown }[] = [];
     const api: Api = async (method, path, body, absentIsNull) => {
@@ -401,7 +402,12 @@ async function endToEnd() {
       }
       reads.push(path);
       if (o.failOn?.test(path)) throw new Error("GET " + path + ": HTTP 403");
-      if (path === "git/ref/heads/main") return { object: { sha: o.head } };
+      if (path === "git/ref/heads/main") {
+        refReads += 1;
+        // A later read of main may answer another head (main moved on) or something unreadable.
+        if (refReads > 1 && o.laterRefs?.length) return o.laterRefs[Math.min(refReads - 2, o.laterRefs.length - 1)];
+        return { object: { sha: o.head } };
+      }
       if (path === `actions/runs?head_sha=${o.head}&event=merge_group&per_page=100`) {
         return o.queueReply !== undefined ? o.queueReply : { total_count: (o.queueRuns ?? []).length, workflow_runs: o.queueRuns ?? [] };
       }
@@ -634,6 +640,25 @@ async function endToEnd() {
       try { outcome = (await alarmRun({ api: gh.api, trigger: stoppedHead[0], log: quiet })).action; } catch { outcome = "threw"; }
       is("(d) head all canceled and an unreadable merge-queue reply: nothing closes, nothing opens", [outcome, gh.writes], ["none", []]);
     }
+  }
+  {
+    // #4334: main moves on (A to B) while the run pages its issues; A's greens never close for B.
+    const gh = github({ head: REAL.head_sha, headRuns: greenReal, issues: [botIssue], laterRefs: [{ object: { sha: "c".repeat(40) } }] });
+    let outcome = "";
+    try { outcome = (await alarmRun({ api: gh.api, trigger: REAL, log: quiet })).action; } catch { outcome = "threw"; }
+    is("main moved to another head before closing: nothing closes: no MAIN VERDE comment and no closing PATCH", [outcome, gh.writes], ["none", []]);
+    is("and main was read again just before closing", gh.reads.filter((p) => p === "git/ref/heads/main").length, 2);
+  }
+  {
+    const gh = github({ head: REAL.head_sha, headRuns: greenReal, issues: [botIssue], laterRefs: [{ object: {} }] });
+    let threw = false;
+    try { await alarmRun({ api: gh.api, trigger: REAL, log: quiet }); } catch { threw = true; }
+    is("main unreadable on the read before closing: refused, nothing written", [threw, gh.writes], [true, []]);
+  }
+  {
+    const gh = github({ head: REAL.head_sha, headRuns: greenReal, issues: [botIssue], laterRefs: [{ object: { sha: REAL.head_sha } }] });
+    await alarmRun({ api: gh.api, trigger: REAL, log: quiet });
+    is("main still on the evaluated head before closing: MAIN VERDE and closed", gh.writes.map((w) => `${w.method} ${w.path}`), ["POST issues/7/comments", "PATCH issues/7"]);
   }
   {
     const gh = github({ head: "main", headRuns: [] });

@@ -234,6 +234,41 @@ function grantsOf(session: Session, gift: Gift): { email: string; productId: str
 export type GiftOutcome = "given" | "already" | "skip";
 
 /**
+ * Takes back what this gift itself granted, as the refund pass does: its course first, then its purchase record, each
+ * write confirmed. Only a record this gift wrote (`job` gift:<id>): a purchase the recipient holds another way (a
+ * PayPal sale, another gift, a place) is never taken by this gift's refund. No record is nothing to take back; a
+ * record or a reply that does not read, or no way to take a course back, throws (CX-123 rule 24).
+ */
+async function takeBackOwnGrant(gift: Gift, items: string[] | null, dropStart?: (email: string, courseProductId: string) => Promise<void>): Promise<void> {
+  const held = repliesFor(await redisPipeline([["HGET", importedKey(gift.s, gift.to), gift.p]]), 1);
+  if (!held) throw new UnknownReplyError("a given-back gift's purchase record");
+  const raw = held[0];
+  if (raw === null) {
+    // No record: the purchase is gone; a course this gift dated may still be there, and taking it back is harmless.
+    if (dropStart) for (const productId of [gift.p, ...(items ?? [])]) await dropStart(gift.to, productId);
+    return;
+  }
+  if (typeof raw !== "string") throw new UnknownReplyError("a given-back gift's purchase record");
+  let record: unknown;
+  try {
+    record = JSON.parse(raw);
+  } catch {
+    throw new UnknownReplyError("a given-back gift's purchase record");
+  }
+  if (!record || typeof record !== "object" || Array.isArray(record)) throw new UnknownReplyError("a given-back gift's purchase record");
+  const job = (record as { job?: unknown }).job;
+  if (typeof job !== "string") throw new UnknownReplyError("a given-back gift's purchase record");
+  if (job !== `gift:${gift.id}`) return;
+  if (!dropStart) throw new UnknownReplyError("a given-back gift's course: nothing to take it back with");
+  const listed = (record as { items?: unknown }).items;
+  const recorded = Array.isArray(listed) ? listed.filter((item): item is string => typeof item === "string") : [];
+  for (const productId of [gift.p, ...new Set([...(items ?? []), ...recorded])]) await dropStart(gift.to, productId);
+  const removed = repliesFor(await redisPipeline([["HDEL", importedKey(gift.s, gift.to), gift.p]]), 1);
+  if (!oneWrite(removed?.[0])) throw new UnknownReplyError("taking a given-back gift's purchase away");
+}
+
+
+/**
  * Hands a paid gift over, once: writes it down under the recipient's address
  * (and a course's start date, so its modules open on time for them), emails
  * them, and emails the buyer their receipt. The caller has checked the
@@ -247,6 +282,11 @@ export async function deliverGift(input: {
   base: string;
   from: string;
   recordStart: (email: string, courseProductId: string, startSeconds: number) => Promise<void>;
+  /**
+   * Takes a course back (lib/learn.ts dropEnrollment): for a gift given back before it was confirmed, whose earlier
+   * run may have granted it already. Without it, such a gift throws, so nothing is marked and the next run tries again.
+   */
+  dropStart?: (email: string, courseProductId: string) => Promise<void>;
   ordersLink: (email: string) => Promise<string | null>;
 }): Promise<GiftOutcome> {
   const { store, session, product, base } = input;
@@ -271,32 +311,47 @@ export async function deliverGift(input: {
   const sessionId = typeof session.id === "string" ? session.id : "";
   const pi = typeof session.payment_intent === "string" ? session.payment_intent : "";
   const created = typeof session.created === "number" ? session.created : now();
-  // Refunded in full or lost to a dispute before it was first confirmed: the refund pass may have read that refund
-  // before this gift had a payment to meet (nl:gift:pi: is written below), so it would never take it back. Read the
-  // payment itself first (MM-E2E-RG-1); a read that fails or answers for another payment throws, nothing is given,
-  // no "sent" mark is kept and the next run reads it again.
+  const grant = grantsOf(session, gift);
+  // The payment's index first, before the payment is read, as a pre-order writes nl:pre:pi: before its read (review
+  // 6862531714 on #4408): a refund the pass meets from now on finds this gift, whether or not this run gets to the end.
+  // Each write answered exactly "OK", or nothing is read or given and the next run tries again.
+  if (pi) {
+    const indexed = repliesFor(await redisPipeline([["SET", piKey(pi), gift.id, "EX", GIFT_KEPT_SECONDS], ["SET", anyKey(gift.s), "1"]]), 2);
+    if (!indexed || indexed[0] !== "OK" || indexed[1] !== "OK") throw new UnknownReplyError("a gift's payment index");
+  }
+  // Refunded in full or lost to a dispute before it was first confirmed: read the payment itself (MM-E2E-RG-1); a read
+  // that fails or answers for another payment throws, nothing is given, no "sent" mark is kept and the next run reads
+  // it again. Given back, what an earlier run of this gift may have granted is taken back before it is marked revoked.
   if (pi && store.stripeAccountId) {
     const payment = await onAccount("GET", store.stripeAccountId, `/payment_intents/${encodeURIComponent(pi)}?expand[]=latest_charge`);
     if (!payment || typeof payment !== "object" || (payment as { id?: unknown }).id !== pi) throw new UnknownReplyError("a gift's payment");
     if (await givenBack(store.stripeAccountId, payment)) {
+      await takeBackOwnGrant(gift, grant.items, input.dropStart);
       if (!(await saveGift({ ...gift, session: sessionId, pi, revoked: now() }, GIFT_KEPT_SECONDS))) throw new UnknownReplyError("a gift given back");
       await releaseMark(mark, value);
       return "already";
     }
   }
-  const grant = grantsOf(session, gift);
   await grantImported(gift.s, `gift:${gift.id}`, [grant], created, store.sid);
   // The doors that read what an address was given are opened for this store.
   if (!store.pastBuyers) await setPastBuyers(storeRef(store));
   // A course, or a course inside a bundle, is dated from the day it was paid.
   for (const id of [gift.p, ...(grant.items ?? [])]) await input.recordStart(gift.to, id, created);
 
-  const given: Gift = { ...gift, session: sessionId, pi, given: now() };
+  // Read again before "given" is written: the refund pass may have taken this gift back meanwhile (it finds it through
+  // the index above), and "given" saved over its "revoked" would never be taken back again. A gift that does not
+  // read is unknown and throws; nothing is marked and the next run reads it again.
+  const latest = await readGift(id);
+  if (!latest) throw new UnknownReplyError("a gift read again before it is marked given");
+  if (latest.revoked) {
+    // Taken back while this run was giving: a course this run dated after the pass dropped it goes too (harmless twice).
+    await takeBackOwnGrant(latest, grant.items, input.dropStart);
+    await releaseMark(mark, value);
+    return "already";
+  }
+  const given: Gift = { ...latest, session: sessionId, pi, given: now() };
   await saveGift(given, GIFT_KEPT_SECONDS);
-  await redisPipeline([
-    ...(pi ? [["SET", piKey(pi), gift.id, "EX", GIFT_KEPT_SECONDS] as (string | number)[]] : []),
-    ["SET", anyKey(gift.s), "1"],
-  ]);
+  await redisPipeline([["SET", anyKey(gift.s), "1"]]);
   // Let go only while it still holds this run's value: one whose time ran out may be another run's now.
   await releaseMark(mark, value);
 

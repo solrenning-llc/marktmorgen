@@ -61,7 +61,7 @@ import { SITE_URL } from "@/lib/site-url";
 import { creatorAddress } from "@/lib/mail-from";
 import type { Listing, Store } from "@/lib/store";
 import { listingsNamed, readListing, recordListings } from "@/lib/catalog";
-import { recordEnrollment } from "@/lib/learn";
+import { dropEnrollment, recordEnrollment } from "@/lib/learn";
 import { type HandOverDeps, confirmPreorder, resendPreorder } from "@/lib/preorders";
 import { speechFor } from "@/lib/buyer-words";
 import { ordersWords } from "@/lib/buyer-words/orders";
@@ -668,6 +668,8 @@ async function confirmGift(store: Store, session: SessionRecord, key: string): P
       const course = productId === product.id ? product : await readListing(store, productId);
       if (course?.course) await recordEnrollment(store, email, productId, start);
     },
+    // A gift given back before it was confirmed takes back what an earlier run granted (lib/gifts.ts takeBackOwnGrant).
+    dropStart: (email, productId) => dropEnrollment(store, email, productId),
     ordersLink: (email) => ordersLinkFor(store, email, base),
   });
   if (outcome !== "skip") await redisPipeline([["SET", key, "sent", "EX", SENT_MARK_SECONDS]]);

@@ -37,7 +37,7 @@ export const EU_VAT_COUNTRIES: ReadonlySet<string> = new Set([
  * place is outside the EU but inside a Member State's VAT territory (Directive arts. 6 and 7). Until an item finer than
  * the country is built, a consumer placed there is unknown.
  */
-const TERRITORY_UNSETTLED: ReadonlySet<string> = new Set(["ES", "EA", "IC", "MC"]);
+export const TERRITORY_UNSETTLED: ReadonlySet<string> = new Set(["ES", "EA", "IC", "MC"]);
 
 /** Codes that are never a country: user-assigned ranges and the unknown markers proxies send (ISO 3166-1, 5.1). */
 const NOT_A_COUNTRY = /^(AA|Q[M-Z]|X[A-Z]|ZZ|T1)$/;

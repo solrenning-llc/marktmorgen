@@ -78,6 +78,16 @@ export function stringList(reply: unknown): string[] | null {
 }
 
 /**
+ * A list of any members (an EVAL that answers a list of numbers), as a fresh
+ * plain list read from the reply's own data slots, or null: a Proxy, a hole,
+ * an inherited member or a getter is refused (ownSlots). The caller checks
+ * each member's shape.
+ */
+export function replyList(reply: unknown): unknown[] | null {
+  return ownSlots(reply);
+}
+
+/**
  * A list's own data slots, whatever each holds, as a fresh plain list, or null for anything that is not a plain list
  * (a Proxy, a hole, an inherited slot or a getter). For a reply whose members are read one by one, so a member that
  * cannot be read is told apart from the ones that can; nothing of the reply is run.

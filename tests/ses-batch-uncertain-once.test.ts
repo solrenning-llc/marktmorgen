@@ -81,6 +81,29 @@ async function main(): Promise<void> {
     is("the next call sends the batch", next, "sent");
     is("once each", people.map(to), [1, 1, 1, 1, 1]);
   }
+
+  // Codex G on #4361: the repeat finds Amazon no longer set up and a Resend fallback open. The marks of the first run
+  // are read before any provider is chosen, so the fallback never gets the address SES may already have written to.
+  part("A provider change never releases an SES recipient with uncertain acceptance");
+  redis.clear();
+  mail.clearCaptured();
+  mail.configure();
+  // One a second: each email is its own wave, so the lost answer stops the run before the fourth and the fifth.
+  await mail.setReady(true, { max24: 50_000, rate: 1 });
+  mail.setSesOutcome(["ok", "ok", "lost", "ok", "ok"]);
+  const lost = await sendBatch(people.map(message), "upd:synthetic:switch:5", { by: "company" });
+  is("SES stopped at the lost answer: the fourth and the fifth were not handed to it", people.map(to), [1, 1, 1, 0, 0]);
+  is("the first run is not done", lost, "retry");
+  mail.disableSes();
+  process.env.RESEND_API_KEY = "re_test_a_stand_in_key_for_tests_only";
+  const toResend = (address: string) => mail.resendAttempts.filter((m) => m.to.includes(address)).length;
+  const switched = await sendBatch(people.map(message), "upd:synthetic:switch:5", { by: "company" });
+  is("the batch stays held: what became of the third is unknown", switched, "retry");
+  is("Resend never gets the address SES may have written to", toResend("three@example.com"), 0);
+  is("nor those SES took", [toResend("one@example.com"), toResend("two@example.com")], [0, 0]);
+  is("the rest of the batch goes by Resend, once each (the fallback is open)", [toResend("four@example.com"), toResend("five@example.com")], [1, 1]);
+  is("and SES is not asked again", people.map(to), [1, 1, 1, 0, 0]);
+  delete process.env.RESEND_API_KEY;
   done();
 }
 

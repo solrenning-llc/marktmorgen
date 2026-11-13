@@ -705,6 +705,20 @@ async function dispatchOnce(
   // What actually goes: a message with no address that can be written to is
   // left out below, and is not counted as sent either.
   let going = messages.slice(0, 100).filter((m) => oneAddress(m.to) !== null);
+  const all = going.length;
+  // Whoever Amazon already took under this key, in a batch that was then cut short and is being tried again, is not
+  // written to twice; nor is anybody whose email under this key SES may have taken with its answer lost (lib/ses.ts,
+  // maybeKey): left out, and the batch is held as uncertain (dispatchBatch above). Read before any provider is chosen
+  // or any allowance taken (Codex G on #4361): a repeat that finds Amazon no longer set up and goes by Resend must
+  // leave them out too. Unreadable evidence releases nobody to either provider.
+  if (going.length && isRedisConfigured()) {
+    const pending = await notYetTaken(batchKey, going);
+    if (pending === null) return "retry";
+    const sure = await notMaybeSent(batchKey, pending);
+    if (sure === null) return "retry";
+    if (sure.length < pending.length) held.maybe = true;
+    going = sure;
+  }
   const config = sesConfig();
   // Decide only a known unavailable selected route before taking its figure.
   // These synchronous observations grant no quota or provider permission.
@@ -728,18 +742,6 @@ async function dispatchOnce(
   }
   let idempotencyKey = batchKey;
   if (config && isSesConfigured() && only !== "resend") {
-    const all = going.length;
-    // Whoever Amazon already took under this key, in a batch that was then
-    // cut short and is being tried again, is not written to twice.
-    const pending = await notYetTaken(batchKey, going);
-    // Unreadable evidence must not release recipients to either provider.
-    if (pending === null) return "retry";
-    // Nor is anybody whose email under this key SES may have taken with its answer lost (lib/ses.ts, maybeKey):
-    // left out, and the batch is held as uncertain (dispatchBatch above). Unreadable evidence releases nobody.
-    const sure = await notMaybeSent(batchKey, pending);
-    if (sure === null) return "retry";
-    if (sure.length < pending.length) held.maybe = true;
-    going = sure;
     // And a batch whose rest was once handed to Resend goes back to Resend,
     // under the same key: if Resend took it and the answer was lost on the
     // way, only Resend can tell, and Amazon would write to them all again.
@@ -841,11 +843,11 @@ async function dispatchOnce(
         if (!acknowledgement || !("value" in acknowledgement) || acknowledgement.value !== "OK") return "retry";
       } catch { return "retry"; }
     }
-    // Resend answers a key it has seen with what it answered then, so a
-    // different set of people must not go under the same key.
-    if (going.length !== all) {
-      idempotencyKey = `${batchKey}:${createHash("sha256").update(going.map((m) => m.to).sort().join(",")).digest("hex").slice(0, 16)}`;
-    }
+  }
+  // Resend answers a key it has seen with what it answered then, so a
+  // different set of people must not go under the same key.
+  if (going.length !== all) {
+    idempotencyKey = `${batchKey}:${createHash("sha256").update(going.map((m) => m.to).sort().join(",")).digest("hex").slice(0, 16)}`;
   }
   // A batch is one store's, so one address it is all from.
   const usageCredential = usageKey() ?? "";

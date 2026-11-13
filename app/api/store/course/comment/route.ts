@@ -107,7 +107,11 @@ export async function POST(request: NextRequest) {
     if (error instanceof DataRoomError) return back("noroom");
     throw error;
   }
-  if (!result.ok) return back(result.reason);
+  // "gone": a person erasure of this course ran while it was on its way
+  // (#4406); nothing was written. Its word ("That comment is no longer
+  // there.") is about an existing comment, so it is sent back as an
+  // unconfirmed post, never as that sentence.
+  if (!result.ok) return back(result.reason === "gone" ? "unknown" : result.reason);
 
   await tellCreator(store, product, found.lesson.title, result.comment);
   if (result.parent) {

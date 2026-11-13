@@ -145,7 +145,8 @@ async function main(): Promise<void> {
     const made = await addComment({ room: ROOM, courseId: COURSE, lessonId: L1, by: replier, text: "Around 24 degrees.", parent: top.id });
     race.undo();
     is(`${who}: the erasure did run in between`, race.ran(), true);
-    is(`${who}: the answer is refused, its comment is gone`, made.ok ? "written" : made.reason, "parent");
+    // Refused by the erasure's own fence (#4406), before the parent is even looked at.
+    is(`${who}: the answer is refused, its comment is gone`, made.ok ? "written" : made.reason, "gone");
     is(`${who}: only Ben's comment is kept or listed`, (await lessonComments(COURSE, L1)).map((c) => c.id), [bens.id]);
     const [kept, newest, count] = await redisPipeline([
       ["HLEN", `nl:lc:${COURSE}:c`],

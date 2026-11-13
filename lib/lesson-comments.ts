@@ -7,6 +7,7 @@
  *   nl:lc:<course>:all          zset   the course's newest comments, for the studio
  *   nl:lc:<course>:r            hash   comment id → how many answers it has
  *   nl:lc:<course>:names        hash   a student's key → the name they chose
+ *   nl:lc:<course>:erase        string generation advanced by each person erasure
  *   nl:lc:<course>:off          string present when the creator switched comments off
  *   nl:lc:<course>:seen         string when the studio last showed the creator the comments
  */
@@ -33,6 +34,8 @@ const lessonKey = (course: string, lesson: string) => `nl:lc:${course}:l:${lesso
 const allKey = (course: string) => `nl:lc:${course}:all`;
 const repliesKey = (course: string) => `nl:lc:${course}:r`;
 const namesKey = (course: string) => `nl:lc:${course}:names`;
+// Never in dropComments' DEL list: a stale request holding the old generation must stay fenced.
+const eraseKey = (course: string) => `nl:lc:${course}:erase`;
 const offKey = (course: string) => `nl:lc:${course}:off`;
 const seenKey = (course: string) => `nl:lc:${course}:seen`;
 
@@ -94,13 +97,13 @@ function confirmedCommentWrite(reply: unknown, hasParent: boolean): boolean {
     && (hasParent ? values[4] >= 1 : values[4] === 0);
 }
 
-function confirmedCommentRefusal(reply: unknown): "parent" | "replies" | "full" | null {
+function confirmedCommentRefusal(reply: unknown): "parent" | "replies" | "full" | "gone" | null {
   if (!Array.isArray(reply) || reply.length !== 5) return null;
   try {
     const code = dataSlot(reply, 0);
-    if (![1, 2, 4].includes(typeof code === "number" ? code : 0)) return null;
+    if (![1, 2, 4, 5].includes(typeof code === "number" ? code : 0)) return null;
     for (let index = 1; index < 5; index += 1) if (dataSlot(reply, index) !== 0) return null;
-    return code === 1 ? "parent" : code === 2 ? "replies" : "full";
+    return code === 1 ? "parent" : code === 2 ? "replies" : code === 4 ? "full" : "gone";
   } catch {
     return null;
   }
@@ -111,9 +114,13 @@ function confirmedCommentRefusal(reply: unknown): "parent" | "replies" | "full" 
  * canonical root parent is still under this lesson and below its answer cap;
  * a root is admitted only while the lesson is below its own cap. Exact
  * positive refusal codes mean that nothing was written: 1 parent gone, 2
- * replies full, 4 lesson full. Every other non-write receipt is unknown.
+ * replies full, 4 lesson full, 5 a person erasure of this course ran since
+ * the request read its generation (#4406). Every other non-write receipt is
+ * unknown. The name the student typed (ARGV[10], for ARGV[9]) is written in
+ * this same turn, so it is never kept without the comment.
  */
-export const ADD_LESSON_COMMENT = `-- marktmorgen:lesson-comments-add:v2
+export const ADD_LESSON_COMMENT = `-- marktmorgen:lesson-comments-add:v3
+if (redis.call("GET", KEYS[6]) or "") ~= ARGV[11] then return {5, 0, 0, 0, 0} end
 local parentId = ARGV[1]
 local lessonId = ARGV[2]
 local replies = 0
@@ -132,6 +139,7 @@ else
   if not lessonCount or lessonCount < 0 or not mostLesson or mostLesson < 1 then return {3, 0, 0, 0, 0} end
   if lessonCount >= mostLesson then return {4, 0, 0, 0, 0} end
 end
+if ARGV[10] ~= "" then redis.call("HSET", KEYS[5], ARGV[9], ARGV[10]) end
 local kept = redis.call("HSET", KEYS[1], ARGV[3], ARGV[4])
 local lesson = redis.call("ZADD", KEYS[2], ARGV[5], ARGV[3])
 local newest = redis.call("ZADD", KEYS[3], ARGV[5], ARGV[3])
@@ -278,7 +286,7 @@ export async function readComment(courseId: string, id: string): Promise<LessonC
 
 export type AddResult =
   | { ok: true; comment: LessonComment; parent: LessonComment | null }
-  | { ok: false; reason: "empty" | "name" | "parent" | "replies" | "full" | "unknown" };
+  | { ok: false; reason: "empty" | "name" | "parent" | "replies" | "full" | "gone" | "unknown" };
 
 /**
  * Writes a comment. A student's name is the one they give now, or the one
@@ -298,16 +306,18 @@ export async function addComment(input: {
   const text = cleanText(input.text, MAX_LESSON_COMMENT);
   if (!text) return { ok: false, reason: "empty" };
   const now = input.now ?? Math.floor(Date.now() / 1000);
+  // Read before anything of the student's: an erasure that runs after this
+  // advances it, and the write below is then refused ("gone", #4406).
+  const generationRaw = oneReply(await redisPipeline([["GET", eraseKey(input.courseId)]]));
+  const generation = generationRaw === null ? "" : generationRaw;
+  if (typeof generation !== "string") return { ok: false, reason: "unknown" };
 
   let name = "";
+  let given = "";
   if (input.by !== CREATOR_AUTHOR) {
-    const given = cleanLine(input.name, MAX_COMMENTER_NAME);
+    given = cleanLine(input.name, MAX_COMMENTER_NAME);
     name = given || (await commenterName(input.courseId, input.by));
     if (!name) return { ok: false, reason: "name" };
-    if (given) {
-      await needData(input.room, [{ slot: COMMENTS_SLOT(input.courseId), bytes: dataBytes([input.by, given], 1) }]);
-      await redisPipeline([["HSET", namesKey(input.courseId), input.by, given]]);
-    }
   }
 
   let parent: LessonComment | null = null;
@@ -332,16 +342,22 @@ export async function addComment(input: {
     parent: parent ? parent.id : null,
     hidden: false,
   };
-  const charged = [{ slot: COMMENTS_SLOT(input.courseId), bytes: commentBytes(comment) }];
+  // The name typed with it is charged and written with the comment, in one turn.
+  const charged = [
+    ...(given ? [{ slot: COMMENTS_SLOT(input.courseId), bytes: dataBytes([input.by, given], 1) }] : []),
+    { slot: COMMENTS_SLOT(input.courseId), bytes: commentBytes(comment) },
+  ];
   await needData(input.room, charged);
   const written = oneReply(await redisPipeline([[
     "EVAL",
     ADD_LESSON_COMMENT,
-    4,
+    6,
     commentsKey(input.courseId),
     lessonKey(input.courseId, input.lessonId),
     allKey(input.courseId),
     repliesKey(input.courseId),
+    namesKey(input.courseId),
+    eraseKey(input.courseId),
     parent?.id ?? "",
     input.lessonId,
     comment.id,
@@ -350,6 +366,9 @@ export async function addComment(input: {
     MAX_REPLIES,
     RECENT_KEPT,
     LESSON_KEPT,
+    input.by,
+    given,
+    generation,
   ]]));
   const refusal = confirmedCommentRefusal(written);
   if (refusal) {
@@ -583,13 +602,16 @@ export async function dropLessonComments(courseId: string, lessonIds: string[], 
  * Takes one student's comments out of a course, on the Redis side, with the
  * answers under their own comments, as deleting a comment does, and the name
  * they chose. KEYS: the comments, the newest, the answer counts, the names,
+ * the erasure generation (advanced first, so a comment already on its way
+ * is refused, #4406),
  * then each lesson's comments; ARGV: the student's key, then each lesson's
  * id in the same order. Answers how many comments went.
  */
-export const FORGET_LESSON_COMMENTS = `-- marktmorgen:lesson-comments-forget:v2
+export const FORGET_LESSON_COMMENTS = `-- marktmorgen:lesson-comments-forget:v3
 local who = ARGV[1]
 local lessons = {}
-for i = 5, #KEYS do lessons[ARGV[i - 3]] = KEYS[i] end
+redis.call("INCR", KEYS[5])
+for i = 6, #KEYS do lessons[ARGV[i - 4]] = KEYS[i] end
 local flat = redis.call("HGETALL", KEYS[1])
 local all = {}
 local flat_raw = {}
@@ -633,7 +655,7 @@ export async function forgetLessonCommentsPerson(courseId: string, lessonIds: st
   const what = "the deletion of a student's lesson comments";
   const [reply] = exactReplies(
     await redisPipeline([
-      ["EVAL", FORGET_LESSON_COMMENTS, 4 + lessonIds.length, commentsKey(courseId), allKey(courseId), repliesKey(courseId), namesKey(courseId), ...lessonIds.map((l) => lessonKey(courseId, l)), who, ...lessonIds],
+      ["EVAL", FORGET_LESSON_COMMENTS, 5 + lessonIds.length, commentsKey(courseId), allKey(courseId), repliesKey(courseId), namesKey(courseId), eraseKey(courseId), ...lessonIds.map((l) => lessonKey(courseId, l)), who, ...lessonIds],
     ]),
     1,
     what,

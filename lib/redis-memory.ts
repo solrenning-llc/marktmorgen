@@ -1023,8 +1023,9 @@ export class MemoryRedis {
           this.data.set(args[1], String(n - 1));
           return n - 1;
         }
-        if (key.startsWith("-- marktmorgen:lesson-comments-add:v2\n") && args[0] === "4" && args.length === 13) {
-          const [, comments, lesson, all, replies, parentId, lessonId, id, raw, score, rawMost, rawRecent, rawLessonMost] = args;
+        if (key.startsWith("-- marktmorgen:lesson-comments-add:v3\n") && args[0] === "6" && args.length === 18) {
+          const [, comments, lesson, all, replies, names, erase, parentId, lessonId, id, raw, score, rawMost, rawRecent, rawLessonMost, by, given, generation] = args;
+          if ((this.run(["GET", erase]) ?? "") !== generation) return [5, 0, 0, 0, 0];
           let count = 0;
           if (parentId !== "") {
             const parentRaw = this.run(["HGET", comments, parentId]);
@@ -1042,6 +1043,7 @@ export class MemoryRedis {
             if (!Number.isSafeInteger(lessonCount) || lessonCount < 0 || !Number.isSafeInteger(most) || most < 1) return [3, 0, 0, 0, 0];
             if (lessonCount >= most) return [4, 0, 0, 0, 0];
           }
+          if (given !== "") this.run(["HSET", names, by, given]);
           const kept = this.run(["HSET", comments, id, raw]);
           const underLesson = this.run(["ZADD", lesson, score, id]);
           const newest = this.run(["ZADD", all, score, id]);
@@ -1092,13 +1094,14 @@ export class MemoryRedis {
           if (root.r !== null) this.run(["HINCRBY", replies, root.r, -1]);
           return [gone.length, freed];
         }
-        if (key.startsWith("-- marktmorgen:lesson-comments-forget:v2\n")) {
+        if (key.startsWith("-- marktmorgen:lesson-comments-forget:v3\n")) {
           const count = Number(args[0]);
           const keys = args.slice(1, 1 + count);
           const argv = args.slice(1 + count);
-          const [comments, all, replies, names, ...lessonKeys] = keys;
+          const [comments, all, replies, names, erase, ...lessonKeys] = keys;
           const who = argv[0];
           const lessons = new Map(lessonKeys.map((k, i) => [argv[1 + i], k]));
+          this.run(["INCR", erase]);
           for (const k of keys) this.live(k);
           const held = this.data.get(comments);
           const rows = new Map<string, { b?: string; r?: string | null; l?: string }>();

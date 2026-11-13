@@ -137,6 +137,30 @@ async function main(): Promise<void> {
     is("both presses answer done", kinds, ["done", "done"]);
     is("the paid answer is kept as paid", (await readUpsell(session, ""))?.state, "paid");
   }
+
+  // Claude 2 cloud A's MEDIUM on #3852: the mark answered in another shape AND its read-back lost. The press cannot
+  // tell whether it holds the offer and throws; the mark may have landed all the same. It must not stay behind as a
+  // "pending" record with nothing charged, which every later press read as "done".
+  part("The mark answered in another shape and its read-back lost: the next press still charges");
+  const session = "cs_test_claim0000000009";
+  sessions[session] = paidCheckout(session, front, browser.fingerprint);
+  const before = charges.length;
+  const recordKey = `nl:upsell:${session}`;
+  redis.pipeline = (async (batch: Batch) => {
+    if (batch.length === 1 && batch[0][0] === "GET" && batch[0][1] === recordKey) throw new Error("read-back lost");
+    const real = await pipeline(batch);
+    return onceMark(batch) ? [7] : real;
+  }) as typeof redis.pipeline;
+  let first: string;
+  try {
+    first = await take(session).then((r) => r.kind, () => "threw");
+  } finally {
+    redis.pipeline = pipeline;
+  }
+  is("the first press cannot tell and throws, charging nothing", [first, charges.length - before], ["threw", 0]);
+  const second = (await take(session)).kind;
+  is("the next press charges the offer once and answers done", [second, charges.length - before], ["done", 1]);
+  is("and the answer is kept as paid", (await readUpsell(session, ""))?.state, "paid");
 }
 
 main().then(done, (error) => {

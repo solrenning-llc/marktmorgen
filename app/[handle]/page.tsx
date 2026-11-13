@@ -1,4 +1,5 @@
 import { VisitUsBlock } from "@/components/visit-us-block";
+import { StoreTrustCard } from "@/components/store-trust-card";
 import { assistReminderShown } from "@/lib/assistant-reminder";
 import { withinStore } from "@/lib/metered-limits";
 import { StorePagesNav } from "@/components/store-pages-nav";
@@ -688,6 +689,8 @@ export default async function StorePage({ params, searchParams }: Params) {
 
           {/* "Visit us" (lib/visit-us.ts): the creator's address, hours and phone, as typed; no map, nothing looked up or tracked. */}
           {store.visitUs ? <VisitUsBlock visitUs={store.visitUs} language={store.language} /> : null}
+          {/* "About this store": facts worked out from the record, each shown only when the creator turns it on (lib/store-trust.ts). */}
+          <StoreTrustCard store={store} />
 
           <div className="mt-12 text-center">
             {/* The store's blog, once it has a post (lib/store-blog.ts): known from the record, with no read. */}

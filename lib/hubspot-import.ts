@@ -58,7 +58,7 @@
  * (lib/crm.ts, forgetCrmPerson).
  */
 import { createHash } from "node:crypto";
-import { CrmDealReadUnavailable, CrmDealWriteUnconfirmed, CrmDealsFull, CrmLockLost, CrmSchemaConflict, CrmSchemaReadUnavailable, CrmSchemaWriteUnconfirmed, importRoom, importSnapshot, readDealMarks, takeCrmLock, writeImport } from "@/lib/crm";
+import { CrmDealReadUnavailable, CrmDealWriteUnconfirmed, CrmDealsFull, CrmLockLost, CrmSchemaConflict, CrmSchemaReadUnavailable, CrmSchemaWriteUnconfirmed, dealSlot, importRoom, importSnapshot, readDealMarks, takeCrmLock, writeImport } from "@/lib/crm";
 import { type Deal, type Pipeline, type Stage, MAX_DEALS, MAX_PIPELINES, MAX_STAGES, allStages, newCrmId, parseDeal, parsePipelines, pipelineLimit } from "@/lib/crm-rules";
 import { HUBSPOT_LABELS, type HubSpotDealDraft, type HubSpotRefusal, STAGE_PAST_REASON, hubSpotDealColumns, hubSpotFileOf, oneLine, pipelineRoomReason, planHubSpotDeals, tooManyDealsSentence } from "@/lib/hubspot-csv";
 import { giveImportRows, takeImportRows } from "@/lib/imports";
@@ -70,6 +70,9 @@ import { repliesFor } from "@/lib/redis-reply";
 import { contentRoomFor, dataFullWords, dataRoomFor } from "@/lib/store-data-rules";
 import { largerPlanFor } from "@/lib/larger-plan";
 import type { Store } from "@/lib/store";
+
+/** The room's own field for each slot it starts, as TAKE_DATA counts it (lib/store-data.ts). */
+const ROOM_FIELD_BYTES = 64;
 
 /** The rows a file sent here may have, the header apart: twice what a store holds, for the rows refused or already there. */
 export const HUBSPOT_MAX_ROWS = MAX_DEALS * 2;
@@ -384,7 +387,11 @@ export async function importHubSpotDeals(store: Store, file: HubSpotFile, option
     // costs a read each time. A room that cannot be read is unknown, never empty: refused as unavailable. The
     // per-deal take below still decides, in one step; this only refuses what it would surely refuse.
     const room = importRoom(snapshot.raw, pipelines, deals);
-    const grows = room.take.reduce((sum, change) => sum + change.bytes, 0);
+    // TAKE_DATA also counts the room's own 64-byte field for each slot it starts (lib/store-data.ts): every imported
+    // deal has a new id, so each of its slots is new, and so is the pipelines slot when none was saved before (Claude
+    // 1's MÉDIO on #2048). Without them, a file in the band [grows, grows + 64 per new slot) passed this read and was
+    // refused only after the room's work for each deal.
+    const grows = room.take.reduce((sum, change) => sum + change.bytes + (change.slot.startsWith(dealSlot("")) || !snapshot.raw ? ROOM_FIELD_BYTES : 0), 0);
     const used = await liveDataUsed(store, now);
     if (used === null) return refuse("unavailable", HUBSPOT_IMPORT_WORDS.unavailable);
     if (grows > 0 && used + grows > contentRoomFor(store, nowSeconds)) return refuse("store_full", dataFullWords(used, dataRoomFor(store, nowSeconds), largerPlanFor(store, nowSeconds)));

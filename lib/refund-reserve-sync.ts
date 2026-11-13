@@ -207,7 +207,8 @@ export async function syncRefundReserve(nowSeconds: number, deadlineMs: number, 
   const tally = { stored: 0, newCharges: 0, eventPages: 0, rereads: 0, unclassified: 0 };
   const result = (why: Exclude<Why, null>): SyncReading => ({ reserve: { kind: "unknown", reason: "unreadable", index: -1 }, why, ...tally });
   if (!isBillingConfigured()) return result("billing_off");
-  if (!Number.isSafeInteger(nowSeconds) || nowSeconds <= LOOKBACK_DAYS * DAY_SECONDS || !Number.isFinite(deadlineMs) || limits.rereads < PAGE_SIZE) return result("unreadable");
+  if (!Number.isSafeInteger(nowSeconds) || nowSeconds <= LOOKBACK_DAYS * DAY_SECONDS || !Number.isFinite(deadlineMs) || limits.rereads < PAGE_SIZE || limits.newPages < 2 || limits.eventPages < 2) return result("unreadable");
+  // A page and the whole second it ends in are read together: fewer than two pages a run could never move past one.
   const deadline = Math.min(deadlineMs, Date.now() + SYNC_BUDGET_MS);
   const lock = claimValue();
   const claimed = await claimMark(SYNC_LOCK_KEY, SYNC_LOCK_SECONDS, lock);
@@ -319,9 +320,25 @@ export async function syncRefundReserve(nowSeconds: number, deadlineMs: number, 
         return chargePages >= limits.newPages ? result("building") : run(charges, backfill.events);
       }
       if (!page.lastId) throw new Unknown("unreadable");
+      // The page ends inside a second whose items Stripe may list in another order on the next request: that whole
+      // second is read before going past it (kept twice is harmless, missed is not). Without a page left for it,
+      // this run keeps what it read and the next one starts again from the same place.
+      const boundary = ownField(page.rows[page.rows.length - 1], "created") as number;
+      if (chargePages >= limits.newPages) {
+        await counted(["HSET", SYNC_KEY, ...fields(records)]);
+        return result("building");
+      }
+      for (const row of (await secondOf(boundary)).rows) records.push([row.id, await keptOf(row)]);
       after = page.lastId;
       await counted(["HSET", SYNC_KEY, ...fields(records), "backfill", JSON.stringify({ after, top, topAt, since: backfill.since, events: backfill.events })]);
     }
+  }
+
+  /** Every charge of one second, in one page (more than PAGE_SIZE in one second is unknown). */
+  async function secondOf(second: number, tie = false) {
+    const page = await chargePage(chargeQuery({ "created[gte]": String(second), "created[lte]": String(second) }), tie);
+    if (page.hasMore) throw new Unknown("too_many");
+    return page;
   }
 
   /** Steps 2 to 4. */
@@ -351,10 +368,11 @@ export async function syncRefundReserve(nowSeconds: number, deadlineMs: number, 
       if (cursor === "0") break;
     }
 
-    // 2b. The events since the cursor; each kept charge they name is reread once.
-    const reread = new Set<string>();
+    // 2b. The events since the cursor; each kept charge they name is reread.
+    type Row = Record<string, unknown> & { id: string };
+    const createdOf = (row: Row) => ownField(row, "created") as number;
     const eventPage = async (extra: Record<string, string>, tie = false) => {
-      // The tie page has its own GET, outside the page budget.
+      // The cursor's own second has its own GET, outside the page budget.
       if (!tie && tally.eventPages >= limits.eventPages) throw new Unknown("too_many");
       inTime();
       if (!tie) tally.eventPages += 1;
@@ -370,16 +388,29 @@ export async function syncRefundReserve(nowSeconds: number, deadlineMs: number, 
       if (page.unreadable > 0) throw new Unknown("unreadable");
       return page;
     };
-    /** Rereads the kept charges these events name, then writes them and the events cursor in one HSET. */
-    const apply = async (rows: (Record<string, unknown> & { id: string })[], next: Cursor, moved: boolean) => {
+    /** Every event of one second, in one page (more than PAGE_SIZE in one second is unknown). */
+    const eventsOf = async (second: number, tie = false) => {
+      const page = await eventPage({ "created[gte]": String(second), "created[lte]": String(second) }, tie);
+      if (page.hasMore) throw new Unknown("too_many");
+      return page.rows;
+    };
+    // Events already applied: those of the cursor's second from earlier runs, and every one of this run.
+    const applied = new Map<string, number>(eventsCursor.seen.map((id) => [id, eventsCursor.at]));
+    const rereadAt = new Map<string, number>();
+    const seenAt = (second: number) => [...applied].filter(([, at]) => at === second).map(([id]) => id).slice(-PAGE_SIZE);
+    /** Rereads the kept charges these events name, then writes them and the next events cursor in one HSET. */
+    const apply = async (rows: Row[], next: () => Cursor): Promise<Cursor> => {
+      const fresh = [...new Map(rows.filter((row) => !applied.has(row.id)).map((row) => [row.id, row])).values()];
       const ids = new Set<string>();
-      for (const event of rows) {
+      for (const event of fresh) {
         const object = ownField(ownField(event, "data") as Record<string, unknown>, "object");
         if (!plainObject(object)) throw new Unknown("unreadable");
         const id = ownField(object, "object") === "charge" ? ownField(object, "id") : ownField(object, "charge");
         if (typeof id !== "string" || !CHARGE_ID.test(id)) throw new Unknown("unreadable");
-        // A charge not kept is new (step 3 reads it as it is then) or older than the lookback.
-        if (kept.has(id) && !reread.has(id)) ids.add(id);
+        // A charge not kept is new (step 3 reads it as it is then) or older than the lookback. One reread in this run
+        // shows an event only if it was made after the event, with two seconds for the clocks.
+        const at = rereadAt.get(id);
+        if (kept.has(id) && !(at !== undefined && createdOf(event) + 2 < at)) ids.add(id);
       }
       if (tally.rereads + ids.size > limits.rereads) throw new Unknown("too_many");
       const records: [string, Kept][] = [];
@@ -391,100 +422,102 @@ export async function syncRefundReserve(nowSeconds: number, deadlineMs: number, 
         const row = await get(`/charges/${encodeURIComponent(id)}?${query}`);
         // Rule 30: the answer is this very charge, in its shape.
         if (!plainObject(row) || ownField(row, "id") !== id || !legibleCharge(row)) throw new Unknown("unreadable");
-        const reading = await keptOf(row as Record<string, unknown> & { id: string });
+        const reading = await keptOf(row as Row);
         records.push([id, reading]);
         kept.set(id, reading);
-        reread.add(id);
+        rereadAt.set(id, Math.floor(Date.now() / 1000));
       }
-      if (records.length || moved) await counted(["HSET", SYNC_KEY, ...fields(records), "cursor:events", JSON.stringify(next)]);
+      for (const event of fresh) applied.set(event.id, createdOf(event));
+      const cursor = next();
+      await counted(["HSET", SYNC_KEY, ...fields(records), "cursor:events", JSON.stringify(cursor)]);
+      return cursor;
     };
-    /** The cursor after a page (newest first): its newest row, and every id applied in that row's second. */
-    const after = (rows: (Record<string, unknown> & { id: string })[], from: Cursor): Cursor => {
-      const row = rows[0];
-      if (!row) return from;
-      const at = ownField(row, "created") as number;
-      const same = rows.filter((r) => ownField(r, "created") === at).map((r) => r.id);
-      const seen = [...new Set([...(at === from.at ? from.seen : []), ...same])].slice(-PAGE_SIZE);
-      return { id: row.id, since: from.since, at, seen, checked: from.checked };
-    };
-    /** Read to the end now: the cursor is as of now. */
-    const caughtUp = (from: Cursor): Cursor => ({ ...from, checked: nowSeconds });
+    /** The events cursor at a newest row: its id, its second and every event applied in that second. */
+    const eventsAt = (row: Row | undefined, from: Cursor, checked: number): Cursor =>
+      row ? { id: row.id, since: from.since, at: createdOf(row), seen: seenAt(createdOf(row)), checked } : { ...from, seen: seenAt(from.at), checked };
     let events = eventsCursor;
     if (events.id) {
       // The cursor's own second: an event Stripe lists beside it is not after it in the list.
-      const tie = await eventPage({ "created[gte]": String(events.at), "created[lte]": String(events.at) }, true);
-      if (tie.hasMore) throw new Unknown("too_many");
-      const unseen = tie.rows.filter((row) => !events.seen.includes(row.id));
-      if (unseen.length) {
-        const next = { ...events, seen: [...events.seen, ...unseen.map((row) => row.id)].slice(-PAGE_SIZE) };
-        await apply(unseen, next, true);
-        events = next;
-      }
+      const tie = await eventsOf(events.at, true);
+      if (tie.some((row) => !applied.has(row.id))) events = await apply(tie, () => eventsAt(undefined, events, events.checked));
       for (;;) {
         const page = await eventPage({ ending_before: events.id! });
-        const moved = after(page.rows, events);
-        const next = page.hasMore ? moved : caughtUp(moved);
-        await apply(page.rows, next, true);
-        events = next;
+        const newest = page.rows[0];
+        // The next page starts inside the newest row's second, which Stripe may order otherwise: read it whole.
+        const second = page.hasMore && newest ? await eventsOf(createdOf(newest)) : [];
+        const from = events;
+        events = await apply([...page.rows, ...second], () => eventsAt(newest, from, page.hasMore ? from.checked : nowSeconds));
         if (!page.hasMore) break;
       }
     } else {
-      // No event yet when building began: everything since, read whole (newest first), then applied at once.
-      const rows: (Record<string, unknown> & { id: string })[] = [];
+      // No event yet when building began: everything since, read whole (newest first, each page's last second read
+      // whole too), then applied at once.
+      const rows: Row[] = [];
       let from: string | null = null;
       for (;;) {
         const page = await eventPage({ "created[gte]": String(events.since), ...(from ? { starting_after: from } : {}) });
         rows.push(...page.rows);
         if (!page.hasMore) break;
         if (!page.lastId) throw new Unknown("unreadable");
+        rows.push(...(await eventsOf(createdOf(page.rows[page.rows.length - 1]))));
         from = page.lastId;
       }
-      const next = caughtUp(after(rows, events));
-      await apply(rows.filter((row) => !events.seen.includes(row.id)), next, true);
-      events = next;
+      const newest = rows.reduce<Row | undefined>((a, r) => (!a || createdOf(r) > createdOf(a) ? r : a), undefined);
+      const before = events;
+      events = await apply(rows, () => eventsAt(newest, before, nowSeconds));
     }
 
-    // 3. The charges newer than the charges cursor.
-    const keepAll = async (rows: (Record<string, unknown> & { id: string })[], next: Cursor | null) => {
-      const records: [string, Kept][] = [];
+    // 3. The charges newer than the charges cursor (each read once: a charge already kept is not read again here).
+    const keepAll = async (rows: Row[], next: Cursor | null) => {
+      // The callers pass only charges not kept; one read each, however many times a page and its second list it.
+      const records = new Map<string, Kept>();
       for (const row of rows) {
+        if (records.has(row.id)) continue;
         const reading = await keptOf(row);
-        records.push([row.id, reading]);
+        records.set(row.id, reading);
         kept.set(row.id, reading);
       }
-      tally.newCharges += records.length;
-      if (records.length || next) await counted(["HSET", SYNC_KEY, ...fields(records), ...(next ? ["cursor:charges", JSON.stringify(next)] : [])]);
+      tally.newCharges += records.size;
+      if (records.size || next) await counted(["HSET", SYNC_KEY, ...fields([...records]), ...(next ? ["cursor:charges", JSON.stringify(next)] : [])]);
     };
-    let charges = chargesCursor;
     const chargesBudget = () => {
       if (chargePages >= limits.newPages) throw new Unknown("too_many");
     };
+    const chargesAt = (row: Row | undefined, from: Cursor): Cursor => (row ? { id: row.id, since: from.since, at: createdOf(row), seen: [], checked: nowSeconds } : from);
+    let charges = chargesCursor;
     if (charges.id) {
       // The cursor's own second, for a charge Stripe lists beside it: its own GET, outside the page budget.
-      const tie = await chargePage(chargeQuery({ "created[gte]": String(charges.at), "created[lte]": String(charges.at) }), true);
-      if (tie.hasMore) throw new Unknown("too_many");
-      await keepAll(tie.rows.filter((row) => !kept.has(row.id)), null);
+      await keepAll((await secondOf(charges.at, true)).rows.filter((row) => !kept.has(row.id)), null);
       for (;;) {
         chargesBudget();
         const page = await chargePage(chargeQuery({ ending_before: charges.id! }));
-        const next = after(page.rows, charges);
-        await keepAll(page.rows, next !== charges ? next : null);
+        const newest = page.rows[0];
+        let second: Row[] = [];
+        if (page.hasMore && newest) {
+          chargesBudget();
+          second = (await secondOf(createdOf(newest))).rows;
+        }
+        const next = chargesAt(newest, charges);
+        await keepAll([...page.rows, ...second].filter((row) => !kept.has(row.id)), next !== charges ? next : null);
         charges = next;
         if (!page.hasMore) break;
       }
     } else {
-      const rows: (Record<string, unknown> & { id: string })[] = [];
+      const rows: Row[] = [];
       let from: string | null = null;
       for (;;) {
         chargesBudget();
         const page = await chargePage(chargeQuery({ "created[gte]": String(charges.since), ...(from ? { starting_after: from } : {}) }));
-        rows.push(...page.rows.filter((row) => !kept.has(row.id)));
+        rows.push(...page.rows);
         if (!page.hasMore) break;
         if (!page.lastId) throw new Unknown("unreadable");
+        chargesBudget();
+        rows.push(...(await secondOf(createdOf(page.rows[page.rows.length - 1]))).rows);
         from = page.lastId;
       }
-      const next = after(rows, charges);
-      await keepAll(rows, next !== charges ? next : null);
+      const newest = rows.reduce<Row | undefined>((a, r) => (!a || createdOf(r) > createdOf(a) ? r : a), undefined);
+      const next = chargesAt(newest, charges);
+      await keepAll(rows.filter((row) => !kept.has(row.id)), next !== charges ? next : null);
       charges = next;
     }
 

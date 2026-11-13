@@ -111,22 +111,23 @@ test('through a history of changes the incremental reserve equals the full readi
 
 test('the first state is built across runs and is unknown until it is done',async()=>{
  const now=START;fresh(now);history(250,now);
- const limits={...SYNC_LIMITS,newPages:1};
- // Three pages at one a run; the run that finishes building with no page left says so, and the next one counts.
- for(const run of [1,2,3]){
-  const reading=await syncRefundReserve(now,later(),limits);
-  assert.equal(reading.why,'building',`run ${run}`);assert.equal(reading.reserve.kind,'unknown');
- }
- const fourth=await syncRefundReserve(now,later(),limits);
- assert.equal(fourth.why,null);
- assert.deepEqual(fourth.reserve,(await readRefundReserve(now,later())).reserve);
+ // Two charge pages a run, the least that moves: a page and the whole second it ends in.
+ const limits={...SYNC_LIMITS,newPages:2};
+ const readings=[];
+ for(let run=0;run<6;run++){const reading=await syncRefundReserve(now,later(),limits);readings.push(reading);if(reading.why!=='building')break;}
+ assert.ok(readings.length>=3,'three pages of charges take more than one run');
+ for(const reading of readings.slice(0,-1)){assert.equal(reading.why,'building');assert.equal(reading.reserve.kind,'unknown');}
+ const last=readings[readings.length-1];
+ assert.equal(last.why,null);
+ assert.deepEqual(last.reserve,(await readRefundReserve(now,later())).reserve);
+ assert.equal((await syncRefundReserve(now,later(),{...SYNC_LIMITS,newPages:1})).why,'unreadable','fewer than two pages a run could never move');
 });
 
 test('a backlog past a run\'s ceilings is unknown, and the next runs converge',async()=>{
  const now=START;fresh(now);const ids=history(220,now);
  await built(now);
  for(const id of ids.slice(0,150))if(world.charges.get(id)!.json.status==='succeeded')refund(id,10,'pending');
- const limits={...SYNC_LIMITS,eventPages:1};
+ const limits={...SYNC_LIMITS,eventPages:2};
  const first=await syncRefundReserve(now,later(),limits);
  assert.equal(first.why,'too_many');assert.equal(first.reserve.kind,'unknown');
  let run=first;
@@ -262,11 +263,11 @@ test('many charges and events of one second, listed in another order at every re
  assert.equal(run.why,null);
  assert.equal(run.stored,ids.length,'every charge kept once');
  assert.deepEqual(run.reserve,await oracle(),'built through shuffled ties');
- // Forty refunds stamped in one second, then forty new charges in one second.
+ // Forty refunds stamped in one second, then 150 new charges in clusters of 30 a second, past a page boundary.
  world.frozen=world.clock+1;
  for(const id of ids.slice(0,40))refund(id,100,'pending');
  world.frozen=null;
- for(let i=0;i<40;i++)ids.push(addCharge({kind:'plan',amount:44900,paidAt:now}));
+ for(let c=0;c<5;c++)for(let i=0;i<30;i++)ids.push(addCharge({kind:'plan',amount:44900+c,paidAt:now-c}));
  run=await syncRefundReserve(now,later());
  assert.equal(run.why,null);
  assert.equal(run.rereads,40,'each refunded charge reread once');

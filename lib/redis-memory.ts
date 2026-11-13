@@ -155,6 +155,12 @@ export class MemoryRedis {
           }
           return null;
         }
+        // lib/community-mentions.ts FORGET_HANDLE: a handle deleted only while it still points at the member.
+        if (key.startsWith("-- marktmorgen:community-handle-forget:v1\n") && args[0] === "1" && args.length === 4) {
+          const [, handles, handle, who] = args;
+          if (this.run(["HGET", handles, handle]) !== who) return 0;
+          return this.run(["HDEL", handles, handle]);
+        }
         // lib/community.ts GIVE_BACK_HANDLE: a handle deleted only while it points at the member and their record does not carry it.
         if (key.startsWith("-- marktmorgen:community-handle-give-back:v1\n") && args[0] === "2" && args.length === 5) {
           const [, members, handles, handle, who] = args;

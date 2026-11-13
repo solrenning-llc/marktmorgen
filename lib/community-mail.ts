@@ -26,7 +26,7 @@
 import { randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
-import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { orderWrite } from "@/lib/order-data";
 import { type BatchMessage, sendBatch } from "@/lib/email";
 import { CHECKED_BATCH_SIZE, SENDER_WAIT_NOTE, canWrite, fromLine, monthlyAllowance, release, render, reserve } from "@/lib/mail";
@@ -495,6 +495,8 @@ export async function stopAnnouncements(token: string): Promise<boolean> {
 /** Deletes the record behind a deleted member's unsubscribe link (lib/community-erasure.ts). */
 export async function forgetCommunityUnsub(token: string): Promise<number> {
   if (!token || !isRedisConfigured()) return 0;
-  const [gone] = await redisPipeline([["DEL", unsubKey(token)]]);
-  return Number(gone) || 0;
+  const gone = countOf(repliesFor(await redisPipeline([["DEL", unsubKey(token)]]), 1)?.[0]);
+  // Never 0 removed on a reply of another shape (CX-123 rule 24): thrown, so the erasure is said as not finished.
+  if (gone === null || gone > 1) throw new UnknownReplyError("the deletion of a member's unsubscribe token");
+  return gone;
 }

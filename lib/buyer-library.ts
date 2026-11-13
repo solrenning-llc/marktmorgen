@@ -92,9 +92,10 @@ export async function storesKnownFor(email: string): Promise<string[]> {
 export async function forgetLibraryPerson(sid: string, email: string): Promise<number> {
   if (!STORE_ID.test(sid) || !isRedisConfigured()) return 0;
   const commands = [...libraryKeys(email), ...joinedKeys(email)].map((key) => ["SREM", key, sid]);
-  const replies = repliesFor(await redisPipeline(commands), commands.length);
-  const counts = replies?.map(countOf);
-  if (!counts || counts.some((n) => n === null || n > 1)) throw new UnknownReplyError("forgetting a library's store");
+  // One SREM of one member per quarter: each answers 0 or 1, and nothing else counts (CX-123 rule 24). Any other
+  // answer throws, so the erasure is said as not finished while the note may still be kept.
+  const counts = repliesFor(await redisPipeline(commands), commands.length)?.map(countOf);
+  if (!counts || counts.some((n) => n === null || n > 1)) throw new UnknownReplyError("the deletion of a person's library notes");
   return (counts as number[]).reduce((sum, n) => sum + n, 0);
 }
 

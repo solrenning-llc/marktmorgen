@@ -163,6 +163,13 @@ export type LeadRecord = {
    * which is all it is read for: never on a line or in a person's copy.
    */
   acct?: string;
+  /**
+   * A booking's refund as last read on that account, in cents, and the account (lib/affiliates.ts,
+   * AFFILIATE_REFUND_MARK), kept so it still counts after a move to another one; only ever raised. Like `acct`, read
+   * only by the book: never on a line or in a person's copy.
+   */
+  rf?: number;
+  rfa?: string;
 };
 
 export type LeadStatus =
@@ -223,6 +230,8 @@ export function parseLead(raw: unknown): LeadRecord | null {
       why: (LEAD_REASONS as readonly string[]).includes(String(v.why)) ? (v.why as LeadReason) : "",
       // Kept exactly as written, so a decision written back keeps it: any other value is still another account than the store's.
       ...(v.acct !== undefined ? { acct: typeof v.acct === "string" ? v.acct : "" } : {}),
+      // Kept whole when a decision is written back, so a refund once read is never lost; one not whole is not a mark.
+      ...(Number.isSafeInteger(v.rf) && (v.rf as number) >= 0 && typeof v.rfa === "string" && v.rfa !== "" ? { rf: v.rf, rfa: v.rfa } : {}),
     };
   } catch {
     return null;

@@ -28,9 +28,13 @@ const whole = (n: number) => (Number.isFinite(n) && n > 0 ? Math.ceil(n) : 0);
  * Working out the book, beside what scales: its fixed commands (the book
  * counted, its seven hashes, the PayPal refunds' set, two reads of
  * listings, the parts written back and the lock), the request itself held
- * while it works, and its counting.
+ * while it works, and its counting. Each record's refund kept on it
+ * (lib/affiliates.ts, AFFILIATE_REFUND_MARK: three scripts, at most
+ * REFUND_MARKS_PER_READ records a reading, REFUND_MARK_BYTES each) is held against
+ * these units in tests/plan-cost-registry.test.ts (affiliatePageRead).
  */
-export const AFFILIATE_PAGE_UNITS = 4;
+// 4 until 13 November 2026; one more for the refunds kept on the records (REFUND_MARKS_PER_READ at REFUND_MARK_BYTES).
+export const AFFILIATE_PAGE_UNITS = 5;
 /** Each page of the creator's Stripe account read for the book, its body up to a megabyte worked through: one request each. */
 export const AFFILIATE_STRIPE_PAGES_PER_UNIT = 1;
 /** Fields of the program's records (affiliates, clicks, sales, payouts, shares, paid clicks, leads), read in one go, per request. */

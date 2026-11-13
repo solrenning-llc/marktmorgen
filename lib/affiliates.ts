@@ -104,7 +104,7 @@ import {
 } from "@/lib/affiliate-setting";
 import { type Card, productIds, readCardsFor } from "@/lib/catalog";
 import type { HeldOne, HeldWhy } from "@/lib/affiliate-bulk-words";
-import type { BookSizes } from "@/lib/api-read-rules";
+import { type BookSizes, REFUND_MARKS_PER_READ } from "@/lib/api-read-rules";
 import { affiliateForCodes, codeOwners, promoCodesOn } from "@/lib/affiliate-codes";
 import { MAX_COMMITTED_SHARE, type PartnerShare, type ShareProblem, parsePartnerShare, shareOn, shareProblem } from "@/lib/partner-share";
 import { type Held, LockBusyError, holdLock, withLock } from "@/lib/redis-lock";
@@ -2775,6 +2775,12 @@ export type Line = Referral & {
   status: LineStatus;
   /** For a lead (how "lead"): which, what kind, whose address, and when it can be approved. */
   lead?: LeadView;
+  /**
+   * Its refunds could not be read: paid into another Stripe account than the store's (or while none is connected),
+   * past OTHER_ACCOUNT_DAYS, and never read on its own account before (readBook's refund mark). What it earns is not
+   * known, so it is never payable (Row.payable leaves it out), while the rest of the book still is.
+   */
+  unchecked?: true;
 };
 
 /** A lead as the book shows it (lib/affiliate-lead-rules.ts). The address is masked on an affiliate's own page. */
@@ -2929,6 +2935,38 @@ export async function disputesSince(store: Store, since: number, deadline?: numb
   return { byIntent, complete: false };
 }
 
+/**
+ * A refund read on the account a Stripe sale, a partner's share of it or a booked call's lead was paid into, kept on
+ * its record (`rf`, what was given back or disputed then, in cents; `rfa`, that account), so it still counts once the
+ * creator moved to another account and it can no longer be read (readBook). Each record's field is written only over
+ * exactly the text read (its SHA-1), with `rf` the larger of what was kept and what was read, so it only ever rises:
+ * a record changed in between is left for the next reading. Never on a line, a file, a kept book or a person's copy.
+ */
+export const AFFILIATE_REFUND_MARK = `-- marktmorgen:affiliate-refund-mark:v1
+local n = 0
+for i = 1, #ARGV, 3 do
+  local cur = redis.call('HGET', KEYS[1], ARGV[i])
+  if cur and redis.sha1hex(cur) == ARGV[i + 1] then
+    redis.call('HSET', KEYS[1], ARGV[i], ARGV[i + 2])
+    n = n + 1
+  end
+end
+return n`;
+
+type RefundMark = { rf: number; rfa: string };
+
+/** A record's kept refund (AFFILIATE_REFUND_MARK), read exactly: whole cents from 0 up and an account; else none. */
+function refundMarkOf(raw: string): RefundMark | null {
+  try {
+    const value = JSON.parse(raw) as Record<string, unknown>;
+    return Number.isSafeInteger(value.rf) && (value.rf as number) >= 0 && typeof value.rfa === "string" && value.rfa !== ""
+      ? { rf: value.rf as number, rfa: value.rfa }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 /** A sale without the account it was paid into (Referral.acct), which only readBook's check reads. */
 function withoutAccount(referral: Referral): Referral {
   if (referral.acct === undefined) return referral;
@@ -3038,6 +3076,32 @@ export function stripeWait(deadline: number | undefined, now = Date.now()): numb
 }
 
 /**
+ * Keeps each refund read on its own account on its record (AFFILIATE_REFUND_MARK): the record's text with `rf` and
+ * `rfa` set, written only over exactly the text read, one script per hash, all in one pipeline. Only records whose
+ * kept refund rises are sent, REFUND_MARKS_PER_READ at the most, so what a reading costs stays bounded: a kept refund
+ * that rises first (one kept lower would be paid on after a move), then those never kept, newest first; the rest at
+ * the next reading. A reading with none sends nothing.
+ */
+async function markRefunds(account: string, marks: { key: string; field: string; raw: string; rf: number; at: number; rises: boolean }[]): Promise<void> {
+  if (!marks.length) return;
+  const chosen = [...marks].sort((a, b) => Number(b.rises) - Number(a.rises) || b.at - a.at).slice(0, REFUND_MARKS_PER_READ);
+  const byKey = new Map<string, (string | number)[]>();
+  for (const m of chosen) {
+    let next: string;
+    try {
+      next = JSON.stringify({ ...(JSON.parse(m.raw) as Record<string, unknown>), rf: m.rf, rfa: account });
+    } catch {
+      continue;
+    }
+    const script = byKey.get(m.key) ?? ["EVAL", AFFILIATE_REFUND_MARK, 1, m.key];
+    script.push(m.field, createHash("sha1").update(m.raw).digest("hex"), next);
+    byKey.set(m.key, script);
+  }
+  const commands = [...byKey.values()];
+  if (commands.length) await redisPipeline(commands);
+}
+
+/**
  * The program's book, or one affiliate's (`only`). With `deadline` (epoch
  * milliseconds), Stripe is asked nothing past it, and what was not read is
  * marked incomplete (invoicesChecked, refundsChecked): the affiliate page's
@@ -3070,17 +3134,28 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
   const mine = (aff: string) => !only || aff === only || recruits.has(aff);
   const clickCount = new Map(pairs(clicks).map(([id, n]) => [id, Number(n) || 0]));
   const paidCount = new Map(pairs(paidClicks).map(([id, n]) => [id, Number(n) || 0]));
+  // Where each kept sale, partner share and lead was read from, for its refund mark (AFFILIATE_REFUND_MARK).
+  const origins = new Map<object, { key: string; field: string; raw: string; mark: RefundMark | null }>();
   const referrals = pairs(sales)
-    .map(([, raw]) => parseReferral(raw))
+    .map(([field, raw]) => {
+      const r = parseReferral(raw);
+      if (r) origins.set(r, { key: salesKey(statsId), field, raw, mark: refundMarkOf(raw) });
+      return r;
+    })
     .filter((r): r is Referral => r !== null && mine(r.aff));
   // A partner's standing share of a sale reads as one more Referral, credited
   // "partner" (lib/partner-share.ts). Keeping the shape means the payouts, the
   // batches, the spreadsheet and the partner's own page all work unchanged,
   // and one sale can produce several of these alongside a commission.
   const partnerLines: Referral[] = pairs(shares)
-    .map(([, raw]) => parsePartnerEarning(raw))
+    .map(([field, raw]) => {
+      const e = parsePartnerEarning(raw);
+      if (e) origins.set(e, { key: sharesKey(statsId), field, raw, mark: refundMarkOf(raw) });
+      return e;
+    })
     .filter((e): e is PartnerEarning => e !== null && (!only || e.aff === only))
-    .map((e) => ({
+    .map((e) => {
+      const line: Referral = {
       ref: `${e.ref}:${e.aff}`,
       pi: e.pi,
       aff: e.aff,
@@ -3094,7 +3169,11 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
       self: e.self,
       how: "partner" as const,
       ...(e.acct !== undefined ? { acct: e.acct } : {}),
-    }));
+      };
+      const origin = origins.get(e);
+      if (origin) origins.set(line, origin);
+      return line;
+    });
   const paid = pairs(payouts)
     .map(([, raw]) => parsePayout(raw))
     .filter((p): p is Payout => p !== null && (!only || p.aff === only))
@@ -3115,18 +3194,30 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
   }
   const everything = [...referrals, ...partnerLines, ...recurringLines];
   const leads = pairs(leadsReply)
-    .map(([, raw]) => parseLead(raw))
+    .map(([field, raw]) => {
+      const l = parseLead(raw);
+      if (l) origins.set(l, { key: leadsKey(statsId), field, raw, mark: refundMarkOf(raw) });
+      return l;
+    })
     .filter((l): l is NonNullable<typeof l> => l !== null);
   // A booking's lead is reversed by a refund in full of its booking, read with the sales' refunds.
   const bookings = leads.filter((l) => l.kind === "booking" && l.pi);
   let refunds = new Map<string, number>();
   let refundsChecked = true;
+  // Whether Stripe's refunds and disputes were both read in full on the store's account: only then is a mark written.
+  let stripeRefundsRead = false;
+  let stripeDisputesRead = false;
+  // Lines on another account past the window, never read on their own (held: not payable), by ref; and what was kept
+  // of those that were (their refund mark), by the line or lead.
+  const unchecked = new Set<string>();
+  const kept = new Map<object, number>();
   if (everything.length || bookings.length) {
     const since = Math.min(...[...everything, ...bookings].map((r) => r.at));
     try {
       const read = store.stripeAccountId ? await refundsSince(store, since, limits.deadline) : { byIntent: new Map<string, number>(), complete: true };
       refunds = read.byIntent;
       refundsChecked = read.complete;
+      stripeRefundsRead = Boolean(store.stripeAccountId) && read.complete;
       // PayPal's refunds in full, named by the payment as the book names it. One with no capture id never meets its
       // sale, one in another currency than its sale's means nothing in its cents, and one whose cents are not a
       // whole positive amount, or not its sale's whole amount (a PayPal refund here is in full), would count as a
@@ -3163,6 +3254,7 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
         const disputed = await disputesSince(store, since, limits.deadline);
         for (const [pi, cents] of disputed.byIntent) refunds.set(pi, (refunds.get(pi) ?? 0) + cents);
         refundsChecked = refundsChecked && disputed.complete;
+        stripeDisputesRead = disputed.complete;
       } catch (error) {
         console.error("reading disputes for the affiliate book failed", error);
         refundsChecked = false;
@@ -3181,9 +3273,47 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
     if (everything.some((r) => unread(r) && open(r.at)) || bookings.some((l) => unread(l) && (open(l.at) || open(Math.max(l.at, l.end))))) {
       refundsChecked = false;
     }
+    // A line on another account uses the refund kept when it was last read on its own (AFFILIATE_REFUND_MARK). Past
+    // the window, with that mark it is checked; without one, what it earns is not known: only that line is held, not
+    // payable, never read as a refund of nothing, and the rest of the book stays payable.
+    const markOf = (r: object & { acct?: string }) => {
+      const mark = origins.get(r)?.mark;
+      return mark && r.acct !== undefined && mark.rfa === r.acct ? mark : null;
+    };
+    for (const r of everything) {
+      if (!unread(r)) continue;
+      const mark = markOf(r);
+      if (mark) kept.set(r, mark.rf);
+      else if (!open(r.at)) unchecked.add(r.ref);
+    }
+    for (const l of bookings) {
+      if (!unread(l)) continue;
+      const mark = markOf(l);
+      if (mark) kept.set(l, mark.rf);
+      else if (!(open(l.at) || open(Math.max(l.at, l.end)))) unchecked.add(`lead:${l.id}`);
+    }
+    // Read in full on the account each was paid into: what was given back is kept on its record, rising only.
+    if (account && stripeRefundsRead && stripeDisputesRead) {
+      try {
+        await markRefunds(account, [
+          ...[...referrals, ...partnerLines].map((r) => ({ r, cap: r.total })),
+          ...bookings.map((l) => ({ r: l, cap: l.paid > 0 ? l.paid : Number.MAX_SAFE_INTEGER })),
+        ].flatMap(({ r, cap }) => {
+          const origin = origins.get(r);
+          if (!origin || r.acct !== account || r.pi === "" || r.pi.startsWith("paypal:")) return [];
+          const read = Math.min(Math.max(0, refunds.get(r.pi) ?? 0), cap);
+          const before = origin.mark && origin.mark.rfa === account ? origin.mark.rf : -1;
+          return read > before ? [{ ...origin, rf: read, at: r.at, rises: before >= 0 }] : [];
+        }));
+      } catch (error) {
+        // Not kept this time: the next reading on the same account writes it. Until then nothing is read from it.
+        console.error("keeping the affiliate book's refunds failed", error);
+      }
+    }
   }
   // The account a sale was paid into is for the check above only: never on a line, so no page, file or kept book shows it.
-  const settled = everything.map((r) => settleLine(withoutAccount(r), r.pi ? refunds.get(r.pi) ?? 0 : 0));
+  const refundOf = (r: Referral) => kept.get(r) ?? (r.pi ? refunds.get(r.pi) ?? 0 : 0);
+  const settled = everything.map((r) => ({ ...settleLine(withoutAccount(r), refundOf(r)), ...(unchecked.has(r.ref) ? { unchecked: true as const } : {}) }));
   // Each lead as it stands: the program's caps and budget counted across every affiliate's, then only the ones asked for.
   let ends = new Map<string, number>();
   const openBookings = leads.filter((l) => l.kind === "booking" && l.state === "open" && l.ref && mine(l.aff)).slice(0, 200);
@@ -3195,14 +3325,23 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
       ends = new Map();
     }
   }
-  const leadLines = settleLeads(leads, Math.floor(Date.now() / 1000), (pi) => refunds.get(pi) ?? 0, ends)
+  // A booking on another account is settled with its kept refund (by its payment, as settleLeads asks).
+  const keptByPayment = new Map(bookings.filter((l) => kept.has(l)).map((l) => [l.pi, kept.get(l) as number]));
+  const leadLines = settleLeads(leads, Math.floor(Date.now() / 1000), (pi) => keptByPayment.get(pi) ?? refunds.get(pi) ?? 0, ends)
     .filter((s) => !only || s.lead.aff === only)
-    .map(leadLine);
+    .map((s) => (unchecked.has(`lead:${s.lead.id}`) ? { ...leadLine(s), unchecked: true as const } : leadLine(s)));
   const flagsOf = holdFlags(store, everyone, paidCount);
   // A goal reached in a month adds its bonus, and a sale by somebody an
   // affiliate brought adds their second tier, both worked out from the sales
   // as they stand after refunds. Then only the one affiliate's, when it is one.
-  const lines = [...settled, ...bonusLines(store, settled), ...tierLines(everyone, settled, flagsOf), ...leadLines]
+  // A second tier on a held sale is held with it, and so is a bonus of a month with a held sale among its sales.
+  const heldMonths = new Set(settled.filter((l) => l.unchecked).map((l) => `${l.aff}:${new Date(l.at * 1000).toISOString().slice(0, 7)}:`));
+  const derived = [...bonusLines(store, settled), ...tierLines(everyone, settled, flagsOf)].map((l) =>
+    (l.how === "tier2" && unchecked.has(l.ref.slice("tier2:".length))) || (l.how === "bonus" && [...heldMonths].some((m) => l.ref.startsWith(`bonus:${m}`)))
+      ? { ...l, unchecked: true as const }
+      : l,
+  );
+  const lines = [...settled, ...derived, ...leadLines]
     .filter((l) => !only || l.aff === only)
     .sort((a, b) => b.at - a.at);
 
@@ -3217,9 +3356,11 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
       const out = paid.filter((p) => p.aff === affiliate.id && p.currency === store.currency).reduce((sum, p) => sum + p.cents, 0);
       // A lead waits until the creator approves it (lib/affiliate-leads.ts decideLeads); a sale, until the store's wait has passed.
       const waiting = own.filter((l) => (l.how === "lead" ? l.status !== "approved" : l.at > until)).reduce((sum, l) => sum + l.commission, 0);
+      // A held line (its refunds never read) is never paid, whether or not it is still waiting.
+      const holding = own.filter((l) => l.unchecked && !(l.how === "lead" ? l.status !== "approved" : l.at > until)).reduce((sum, l) => sum + Math.max(0, l.commission), 0);
       const owed = earned - out;
       const flags = flagsOf.get(affiliate.id) ?? [];
-      const payable = owed <= 0 ? owed : Math.max(0, Math.min(owed, earned - waiting - out));
+      const payable = owed <= 0 ? owed : Math.max(0, Math.min(owed, earned - waiting - holding - out));
       return {
         affiliate,
         clicks: clickCount.get(affiliate.id) ?? 0,

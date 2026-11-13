@@ -819,6 +819,19 @@ export class MemoryRedis {
           this.data.set(record, next);
           return 1;
         }
+        // lib/affiliates.ts AFFILIATE_REFUND_MARK: each record's refund mark written only over exactly the text read (its SHA-1).
+        if (key.startsWith("-- marktmorgen:affiliate-refund-mark:v1\n") && args[0] === "1" && args.length >= 5 && (args.length - 2) % 3 === 0) {
+          const target = args[1];
+          let n = 0;
+          for (let i = 2; i < args.length; i += 3) {
+            const current = this.run(["HGET", target, args[i]]);
+            if (typeof current === "string" && createHash("sha1").update(current).digest("hex") === args[i + 1]) {
+              this.run(["HSET", target, args[i], args[i + 2]]);
+              n += 1;
+            }
+          }
+          return n;
+        }
         // lib/affiliates.ts AFFILIATE_SWAP: one affiliate's record written only over exactly the text read.
         if (key.startsWith("-- marktmorgen:affiliate-swap:v1\n") && args[0] === "1" && args.length === 5) {
           const [, people, field, expected, next] = args;

@@ -11,7 +11,10 @@
 //
 // Synthetic store and affiliate, Stripe mocked by account; MemoryRedis (tests/redis-stub.ts).
 import { NO_AFFILIATES } from "@/lib/affiliate-setting";
-import { noteCharge, readBook } from "@/lib/affiliates";
+import { bookCsv, listAffiliates, noteCharge, readBook } from "@/lib/affiliates";
+import { owedLines } from "@/lib/affiliate-payouts";
+import { bookSlice, keptSlice } from "@/lib/affiliate-book-snapshot";
+import { COPIERS } from "@/lib/person-copy";
 import { decideLeads, readLeads, recordLead } from "@/lib/affiliate-leads";
 import { leadsKey } from "@/lib/affiliate-lead-rules";
 import { claimHandle, clearStripeAccount, ensureStatsId, setAffiliateSetting, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
@@ -200,6 +203,91 @@ async function main(): Promise<void> {
   await clearStripeAccount(WINDOW_OWNER);
   book = await readBook((await storeForEmail(WINDOW_OWNER))!);
   is("no account connected, a sale inside the window: not checked", book.refundsChecked, false);
+
+  part("a refund read on the sale's own account is remembered, so it still counts after a move past the window");
+  const MARK_OWNER = "book-switch-mark@example.com";
+  await claimHandle(MARK_OWNER, "bookmark", "Book Mark", "");
+  await ensureStatsId(MARK_OWNER);
+  is("old account connected", (await setStripeAccount(MARK_OWNER, OLD, true)).ok, true);
+  await setAffiliateSetting(MARK_OWNER, { ...NO_AFFILIATES, enabled: true, percent: 30 });
+  const markStats = (await storeForEmail(MARK_OWNER))!.statsId!;
+  await redis.pipeline([
+    ["HSET", `nl:aff:${markStats}:people`, ANA, JSON.stringify({ id: ANA, email: "ana@example.com", code: "ana", status: "approved", appliedAt: (NOW - 800 * 86_400) * 1000, decidedAt: 1, note: "" })],
+    ["HSET", `nl:aff:${markStats}:codes`, "ana", ANA],
+  ]);
+  // Paid into the old account 200 days ago and refunded there in full; a second sale there refunded 4,000 of 10,000.
+  refundsOn[OLD].push(
+    { id: "re_old_mark", object: "refund", status: "succeeded", payment_intent: "pi_1MarkRefunded", amount: 10_000 },
+    { id: "re_old_part", object: "refund", status: "succeeded", payment_intent: "pi_1MarkPart", amount: 4_000 },
+  );
+  for (const pi of ["pi_1MarkRefunded", "pi_1MarkPart"]) {
+    await noteCharge((await storeForEmail(MARK_OWNER))!, {
+      id: pi, status: "succeeded", amount: 10_000, currency: "usd", created: NOW - 200 * 86_400,
+      receipt_email: `${pi}@example.com`, metadata: { via: ANA, via_rate: "30", product: "prod01", title: "Bread course" },
+    });
+  }
+  const markOf = async (pi: string) => {
+    const [raw] = await redis.pipeline([["HGET", `nl:aff:${markStats}:sales`, pi]]);
+    const value = JSON.parse(String(raw)) as Record<string, unknown>;
+    return [value.rf, value.rfa];
+  };
+  book = await readBook((await storeForEmail(MARK_OWNER))!);
+  is("control: read on the old account, the refunded sale earns nothing", book.lines.find((l) => l.pi === "pi_1MarkRefunded")?.commission, 0);
+  is("the refund read on the sale's own account is kept on the sale, with the account", await markOf("pi_1MarkRefunded"), [10_000, OLD]);
+  is("a partial refund is kept as read", await markOf("pi_1MarkPart"), [4_000, OLD]);
+  is("the kept refund is never on a line", book.lines.some((line) => "rf" in line || "rfa" in line), false);
+  // A later smaller read never lowers what was kept; a larger one raises it.
+  refundsOn[OLD] = refundsOn[OLD].map((r) => (r.id === "re_old_part" ? { ...r, amount: 1_000 } : r));
+  await readBook((await storeForEmail(MARK_OWNER))!);
+  is("a later smaller read does not lower the kept refund", await markOf("pi_1MarkPart"), [4_000, OLD]);
+  refundsOn[OLD] = refundsOn[OLD].map((r) => (r.id === "re_old_part" ? { ...r, amount: 6_000 } : r));
+  await readBook((await storeForEmail(MARK_OWNER))!);
+  is("a later larger read raises it", await markOf("pi_1MarkPart"), [6_000, OLD]);
+  // The creator moves to the new account; the old sales are 200 days old, past the window.
+  await clearStripeAccount(MARK_OWNER);
+  is("new account connected", (await setStripeAccount(MARK_OWNER, NEW, true)).ok, true);
+  book = await readBook((await storeForEmail(MARK_OWNER))!);
+  is("refunded before the move, 200 days ago: it earns nothing after the move", book.lines.find((l) => l.pi === "pi_1MarkRefunded")?.commission, 0);
+  is("partly refunded before the move: it earns on what was kept", book.lines.find((l) => l.pi === "pi_1MarkPart")?.commission, 1_200);
+  is("both read before the move: the book is checked", book.refundsChecked, true);
+  is("neither line is held", book.lines.some((l) => l.unchecked === true), false);
+  is("the payout pays only what was kept", owedLines(book).map((l) => l.cents), [1_200]);
+  is("the kept refund is never on a line after the move", book.lines.some((line) => "rf" in line || "rfa" in line), false);
+  is("nor in the spreadsheet", /\brfa?\b|acct_/.test(bookCsv(book, await listAffiliates((await storeForEmail(MARK_OWNER))!))), false);
+  is("nor in a kept slice of the book", /"rfa?"|acct_/.test(JSON.stringify(keptSlice(bookSlice(book, ANA)))), false);
+
+  part("a sale on another account never read there, past the window: only that line is held");
+  const HELD_OWNER = "book-switch-held@example.com";
+  await claimHandle(HELD_OWNER, "bookheld", "Book Held", "");
+  await ensureStatsId(HELD_OWNER);
+  is("new account connected", (await setStripeAccount(HELD_OWNER, NEW, true)).ok, true);
+  await setAffiliateSetting(HELD_OWNER, { ...NO_AFFILIATES, enabled: true, percent: 30 });
+  const heldStats = (await storeForEmail(HELD_OWNER))!.statsId!;
+  await redis.pipeline([
+    ["HSET", `nl:aff:${heldStats}:people`, ANA, JSON.stringify({ id: ANA, email: "ana@example.com", code: "ana", status: "approved", appliedAt: (NOW - 800 * 86_400) * 1000, decidedAt: 1, note: "" })],
+    ["HSET", `nl:aff:${heldStats}:codes`, "ana", ANA],
+    // Paid into the old account 200 days ago and never read there: what it earns is not known.
+    ["HSET", `nl:aff:${heldStats}:sales`, "pi_1HeldOld", oldSale("pi_1HeldOld", NOW - 200 * 86_400)],
+  ]);
+  await noteCharge((await storeForEmail(HELD_OWNER))!, {
+    id: "pi_1HeldNew", status: "succeeded", amount: 10_000, currency: "usd", created: NOW - 3600,
+    receipt_email: "buyer3@example.com", metadata: { via: ANA, via_rate: "30", product: "prod01", title: "Bread course" },
+  });
+  book = await readBook((await storeForEmail(HELD_OWNER))!);
+  is("both sales on the book", book.lines.length, 2);
+  is("the book is not blocked by the one unread line", book.refundsChecked, true);
+  is("the unread line is held", book.lines.find((l) => l.pi === "pi_1HeldOld")?.unchecked, true);
+  is("the line on the store's account is not", book.lines.find((l) => l.pi === "pi_1HeldNew")?.unchecked, undefined);
+  is("what is payable leaves the held line out", book.rows[0]?.payable, 3_000);
+  is("the payout pays only the line that was checked", owedLines(book).map((l) => l.cents), [3_000]);
+  const [heldRaw] = await redis.pipeline([["HGET", `nl:aff:${heldStats}:sales`, "pi_1HeldOld"]]);
+  is("an unread line keeps no refund it was never read for", "rf" in (JSON.parse(String(heldRaw)) as Record<string, unknown>), false);
+
+  part("a booked call's kept refund never reaches the person's copy of their lead");
+  const leadCopy = (await COPIERS["lib/affiliate-leads.ts"]({ store: (await storeForEmail(LEAD_OWNER))!, email: "caller@example.com" } as unknown as Parameters<(typeof COPIERS)[string]>[0])) as Record<string, unknown>[];
+  const [leadRaw] = await redis.pipeline([["HGET", leadsKey(leadStats), String(leadCopy[0]?.id)]]);
+  is("the lead's refund read on its own account was kept", [(JSON.parse(String(leadRaw)) as Record<string, unknown>).rf, (JSON.parse(String(leadRaw)) as Record<string, unknown>).rfa], [5_000, OLD]);
+  is("the person's copy leaves it out", leadCopy.some((l) => "rf" in l || "rfa" in l || "acct" in l), false);
   done();
 }
 

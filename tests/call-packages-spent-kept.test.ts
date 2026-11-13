@@ -186,6 +186,25 @@ async function main(): Promise<void> {
     }
   }
 
+  part("A used-sessions record with a member outside its own shape is not known: an expired confirmed session stays spent (Codex G, MEDIUM on #3487)");
+  for (const [label, members] of [["text in another shape", ["junk"]], ["a member of the right shape that is none of the package's sessions", [`u${"f".repeat(15)}`]]] as const) {
+    const { store, product } = await setUp();
+    const PAID = checkoutId(label.length % 2 ? "f" : "g");
+    const bought = await buy(store, product, PAID, 0);
+    for (let i = 0; i < 3; i += 1) {
+      await holdSession(store, PAID, sessionId("f", i), nowSeconds() - 3_600);
+      await confirm(PAID, sessionId("f", i));
+    }
+    moveBothClocks(431 * DAY);
+    const used = redis.keys().filter((key) => key.endsWith(":used"));
+    is(`${label}: the package keeps one record of used sessions`, used.length, 1);
+    redis.run(["DEL", used[0]]);
+    redis.run(["SADD", used[0], ...members]);
+    is(`[CORRETO] ${label}: nothing comes back free`, (await packageState((await readBought(PAID))!)).left, 0);
+    const again = await prepareSession(store, bought.token, "https://marktmorgen.com");
+    is(`[CORRETO] ${label}: and nothing free is booked`, again.ok ? "prepared" : again.reason, "used");
+  }
+
   part("A package with a last day: what it spent is kept as long as the package, and deleted with it");
   {
     const { store, product } = await setUp();

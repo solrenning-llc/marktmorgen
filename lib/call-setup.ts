@@ -498,9 +498,18 @@ export function parseSetup(raw: unknown): CallSetup | null {
   return typeof read === "string" ? null : read;
 }
 
-/** The parts of a date as a clock in `tz` shows them at instant `ms`. */
-export function partsIn(ms: number, tz: string) {
-  const parts = new Intl.DateTimeFormat("en-US", {
+/**
+ * One formatter per time zone, made once: building an Intl.DateTimeFormat costs far more than formatting with it, and
+ * zonedToUtc reads three times per slot, so a booking window of months made tens of thousands of them
+ * (tests/call-series-rules.test.ts, "answers at once"). A zone the runtime refuses throws as before and is never kept.
+ * Bounded: the zones are the IANA names, a few hundred at most.
+ */
+const PARTS_FORMATS = new Map<string, Intl.DateTimeFormat>();
+const PARTS_FORMATS_MAX = 512;
+function partsFormat(tz: string): Intl.DateTimeFormat {
+  const kept = PARTS_FORMATS.get(tz);
+  if (kept) return kept;
+  const made = new Intl.DateTimeFormat("en-US", {
     timeZone: tz,
     hourCycle: "h23",
     year: "numeric",
@@ -509,7 +518,15 @@ export function partsIn(ms: number, tz: string) {
     hour: "2-digit",
     minute: "2-digit",
     weekday: "short",
-  }).formatToParts(new Date(ms));
+  });
+  if (PARTS_FORMATS.size >= PARTS_FORMATS_MAX) PARTS_FORMATS.clear();
+  PARTS_FORMATS.set(tz, made);
+  return made;
+}
+
+/** The parts of a date as a clock in `tz` shows them at instant `ms`. */
+export function partsIn(ms: number, tz: string) {
+  const parts = partsFormat(tz).formatToParts(new Date(ms));
   const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
   const weekday = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(get("weekday"));
   return {

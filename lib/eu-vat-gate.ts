@@ -22,7 +22,7 @@ export const EU_SALE_REFUSED = "This product can't be bought from a country in t
 
 export type EuGate =
   | { ok: true; vat: VatOnTop | null }
-  | { ok: false; reason: "place" | "goods" | "human" | "supply" | "record" | "treatment" | "rate"; message: string };
+  | { ok: false; reason: "place" | "goods" | "human" | "supply" | "record" | "treatment" | "rate" | "review" | "business"; message: string };
 
 export function euCheckoutGate(input: {
   product: EuSupplyFields;
@@ -39,6 +39,8 @@ export function euCheckoutGate(input: {
   const answer = euCheckout({ supply, priceCents: input.product.priceCents, items, rates: input.rates, records: input.records });
   if (answer.kind === "outside" || answer.kind === "free") return { ok: true, vat: null };
   if (answer.kind === "collect") return { ok: true, vat: answer.vat };
+  // This gate passes no business, so a reverse charge cannot come back; if it did, it is refused, never sold untaxed.
+  if (answer.kind === "reverse-charge") return { ok: false, reason: "business", message: EU_SALE_REFUSED };
   return { ok: false, reason: answer.reason, message: answer.reason === "place" ? EU_PLACE_REFUSED : EU_SALE_REFUSED };
 }
 

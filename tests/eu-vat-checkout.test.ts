@@ -35,7 +35,7 @@ test("a consumer whose place is unknown is refused", () => {
 });
 
 test("an EU consumer: an electronically supplied service with a sourced rate is collected on top", () => {
-  assert.deepEqual(euCheckout({ supply: "ess", priceCents: 1000, items: de, rates, records: collecting }), {
+  assert.deepEqual(euCheckout({ supply: "ess", priceCents: 1000, items: de, rates, records: collecting, reviewed: true }), {
     kind: "collect",
     vat: { priceCents: 1000, vatCents: 190, totalCents: 1190, basisPoints: 1900, country: "DE" },
     place: { kind: "eu", country: "DE", evidence: de },
@@ -50,11 +50,11 @@ test("an EU consumer: goods, a person's service, anything unknown and a country 
   assert.deepEqual(euCheckout({ supply: "goods", priceCents: 1000, items: de, rates }), { kind: "refuse", reason: "goods" });
   assert.deepEqual(euCheckout({ supply: "human", priceCents: 1000, items: de, rates }), { kind: "refuse", reason: "human" });
   assert.deepEqual(euCheckout({ supply: "unknown", priceCents: 1000, items: de, rates }), { kind: "refuse", reason: "supply" });
-  assert.deepEqual(euCheckout({ supply: "ess", priceCents: 1000, items: { ip: "FR", billing: "FR" }, rates, records: collecting }), { kind: "refuse", reason: "rate" });
+  assert.deepEqual(euCheckout({ supply: "ess", priceCents: 1000, items: { ip: "FR", billing: "FR" }, rates, records: collecting, reviewed: true }), { kind: "refuse", reason: "rate" });
   // The real records are empty: every EU sale is refused today. A collect record with no sourced rate is refused too
   // (the real table's own values and review date are held by tests/eu-vat-rates-table.test.ts).
   assert.deepEqual(euCheckout({ supply: "ess", priceCents: 1000, items: de }), { kind: "refuse", reason: "record" });
-  assert.deepEqual(euCheckout({ supply: "ess", priceCents: 1000, items: de, rates: [], records: collecting }), { kind: "refuse", reason: "rate" });
+  assert.deepEqual(euCheckout({ supply: "ess", priceCents: 1000, items: de, rates: [], records: collecting, reviewed: true }), { kind: "refuse", reason: "rate" });
 });
 
 /**
@@ -79,7 +79,7 @@ test("10b: under refuse-consumers an EU consumer of a paid service is refused, w
 });
 
 test("10b: only a complete collect record, with its registration, collects", () => {
-  assert.equal(euCheckout({ supply: "ess", priceCents: 1000, items: de, rates, records: collecting }).kind, "collect");
-  assert.deepEqual(euCheckout({ supply: "ess", priceCents: 1000, items: { ip: "FR", billing: "FR" }, rates, records: collecting }), { kind: "refuse", reason: "rate" });
+  assert.equal(euCheckout({ supply: "ess", priceCents: 1000, items: de, rates, records: collecting, reviewed: true }).kind, "collect");
+  assert.deepEqual(euCheckout({ supply: "ess", priceCents: 1000, items: { ip: "FR", billing: "FR" }, rates, records: collecting, reviewed: true }), { kind: "refuse", reason: "rate" });
   assert.deepEqual(euCheckout({ supply: "goods", priceCents: 1000, items: de, rates, records: collecting }), { kind: "refuse", reason: "goods" });
 });

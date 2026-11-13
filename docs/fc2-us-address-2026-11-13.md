@@ -23,17 +23,22 @@ Documents only. No account was created, no form was filled, no supplier or Strip
 
 | Option | Monthly / yearly price | Physical street address (not P.O. box; CMRA?) | USPS Form 1583 | Scan / forward | Stripe acceptance evidence | US bank acceptance (non-resident LLC) | Full mandatory cost | Result |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Stripe Atlas partner address offer | unknown | unknown | unknown | unknown | unknown | unknown | unknown | fails (unknown) |
-| Stable (usestable.com) | unknown | unknown | unknown | unknown | unknown | unknown | unknown | fails (unknown) |
+| Stripe Atlas partner address offer | not on stripe.com/atlas (13 Nov 2026: no address partner named; "You also don't need a US address or Social Security number to incorporate") | unknown | unknown | unknown | unknown | unknown | unknown | fails (unknown) |
+| Stable (usestable.com), Grow | $59/month billed monthly; $49/month billed yearly ($588/year). 50% off Grow "for businesses with under $1 million in annual revenue or those using a Stable address to incorporate" (duration of the discount not stated) | "Stable addresses are not PO boxes … all Stable addresses are real street addresses" (e.g. "5227 North 7th St ####, Phoenix, AZ 85014"). Whether it is a CMRA: **not stated** | **not stated** | scan, ship, shred included; auto-scan included; forwarding "anywhere in the world" at shipping cost; 30 pieces/month (monthly) or 360/year (yearly), then $3 a piece | **none on the page**; it recommends Stripe Atlas ("Stable customers get $200 off") and says the address can be used "when forming an LLC … in states like Delaware" | **none on the page** | at least $588/year (yearly) or $708/year (monthly), before any discount; registered agent +$25/month a state if bought there; Form 1583 and its cost unknown | fails (Stripe and bank acceptance unknown; CMRA/1583 unknown) |
 | iPostal1 | unknown | unknown | unknown | unknown | unknown | unknown | unknown | fails (unknown) |
 | Anytime Mailbox | unknown | unknown | unknown | unknown | unknown | unknown | unknown | fails (unknown) |
 | Earth Class Mail | unknown | unknown | unknown | unknown | unknown | unknown | unknown | fails (unknown) |
-| Opus Virtual Offices | unknown | unknown | unknown | unknown | unknown | unknown | unknown | fails (unknown) |
+| Opus Virtual Offices | banner on www.opusvirtualoffices.com, 13 Nov 2026: "only $99/mo. for a COMPLETE virtual office solution including a professional business address" (banner, not a plan page; fees and taxes unknown) | unknown | unknown | unknown | unknown | unknown | unknown | fails (unknown) |
 | Regus virtual office | unknown | unknown | unknown | unknown | unknown | unknown | unknown | fails (unknown) |
+
+## Sources read (13 Nov 2026)
+
+- https://www.usestable.com/pricing (plain request, 200): plan prices from the page's own data (`"monthly":"$59"`, `"yearly":"$49"` for Grow; `$99`/`$83` for Scale) and its FAQ ("What is the actual address? Is it a PO box?", "Can I use a Stable address for LLC incorporation in states like Delaware or Wyoming?").
+- https://stripe.com/atlas (200).
 
 ## Blocked sources
 
-Requests from this environment to these hosts failed (HTTP proxy 403 or no connection) on 13 Nov 2026: `support.stripe.com`, `usestable.com`, `www.ipostal1.com`, `www.anytimemailbox.com`, `www.earthclassmail.com`, `www.opusvirtualoffices.com`, `www.regus.com`, `faq.usps.com`. Finishing this study needs a session that can read them. The way in is the owner adding exactly these hosts to the environment's network allowlist (see "Next step"). Nothing here was guessed in their place.
+On 13 Nov 2026 the hosts were opened for this session, but: Stripe's support articles (support.stripe.com/questions/verifying-your-business-address, which-address-should-i-use-for-atlas-incorporation, connect-address-validation) are rendered by scripts from `b.stripecdn.com` and `js.stripe.com`, which the proxy refuses, so their text is empty even in a headless browser; `www.ipostal1.com` answers 403 to a plain request; a browser-like fetch of supplier pages was not permitted in this session. **Stripe's exact P.O. box / virtual-address policy is therefore still not read from an official page**; the requirement above is as the owner reported Stripe's e-mail (SR5). Finishing this study needs a session that can read them. The way in is the owner adding exactly these hosts to the environment's network allowlist (see "Next step"). Nothing here was guessed in their place.
 
 ## Next step
 

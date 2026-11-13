@@ -29,7 +29,7 @@ is("the card shows for a role that may change settings", /may\("settings"\)\s*\?
 const hooks = flat(read("lib/webhooks.ts"));
 const sendTest = hooks.slice(hooks.indexOf("export async function sendTest("), hooks.indexOf("export async function sendTest(") + 1500);
 is("no webhook deliveries without a plan or after it ended, some in a trial, and a test takes one", [NON_PAYING_ALLOWANCES.none.webhook, NON_PAYING_ALLOWANCES.ended.webhook, NON_PAYING_ALLOWANCES.trial.webhook > 0, /takeAllowance\(store, "webhook", 1/.test(sendTest)], [0, 0, true, true]);
-is("sales, memberships and refunds within about five minutes, as the card says", card.includes("sales, memberships and refunds within about five minutes, when Stripe is read"), true);
+is("sales, memberships and refunds within about five minutes, as the card says", card.includes("Sales, memberships and refunds go within about five minutes, when Stripe is read"), true);
 is("every kind of event the answer names is one the code sends", ["sale.completed", "refund.issued", "membership.started", "membership.canceled", "lead.captured", "list.joined", "call.booked", "sequence.step"].every((e) => hooks.includes(`"${e}"`)), true);
 is("no test while a plan payment is unpaid or disputed", /integrationPauseWord\(store\)/.test(read("app/api/store/webhooks/route.ts")), true);
 is("the page's own limit: no Marktmorgen app in Zapier's directory, use Catch Hook", JSON.stringify(findPage("platform", "webhooks")).includes("There is no Marktmorgen app in Zapier's directory. In Zapier, use its Webhooks by Zapier trigger, Catch Hook."), true);

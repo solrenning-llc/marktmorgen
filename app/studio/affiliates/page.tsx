@@ -109,9 +109,9 @@ export default async function StudioAffiliatesPage({ searchParams }: Params) {
         <h1 className="t-h2 mt-3">People who sell for you</h1>
         <p className="mt-3 max-w-2xl text-ink-soft">
           Anyone can apply on your affiliate page and you decide who is in, or you let everyone who buys from you take a link
-          without applying. Each affiliate gets their own link, and a one-time
-          purchase made through it within your window earns them the share you set, worked out from what the buyer paid
-          before tax and taken back if you refund the sale.
+          without applying. Each affiliate gets their own link. A one-time
+          purchase made through it within your window earns them the share you set. The share is worked out from what the
+          buyer paid before tax, and taken back if you refund the sale.
         </p>
 
         {!canSell(store) ? (

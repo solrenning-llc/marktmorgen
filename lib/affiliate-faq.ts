@@ -19,7 +19,7 @@ export function affiliateBeginnerQuestions(onSale = PLANS_ON_SALE, trialDays = T
   return [
     {
       q: "What is an affiliate program here?",
-      a: `People share their own link to your store, and a one-time purchase made through it within your window earns them the share you set, worked out from what the buyer paid before tax and taken back if you refund the sale. Memberships and payment plans earn only if you choose so under “${w.recurring}”. You choose who is in, or let buyers take a link without applying, and you pay them yourself.`,
+      a: `People share their own link to your store. A one-time purchase made through it within your window earns them the share you set. The share is worked out from what the buyer paid before tax, and taken back if you refund the sale. Memberships and payment plans earn only if you choose so under “${w.recurring}”. You choose who is in, or let buyers take a link without applying, and you pay them yourself.`,
     },
     {
       q: "How do I start an affiliate program?",

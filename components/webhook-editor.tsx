@@ -161,8 +161,8 @@ export function WebhookEditor({ view: initial }: { view: WebhooksView }) {
       </div>
       <p className="mt-2 text-ink-soft">
         Tell your other tools what happens in your store. Paste a Zapier &ldquo;Catch Hook&rdquo; address, a Make or n8n
-        webhook, or your own server&apos;s, choose the events, and each one is sent there as JSON the moment it happens
-        (sales, memberships and refunds within about five minutes, when Stripe is read).
+        webhook, or your own server&apos;s, and choose the events. Each one is sent there as JSON the moment it happens.
+        Sales, memberships and refunds go within about five minutes, when Stripe is read.
       </p>
 
       {secret ? (

@@ -69,7 +69,7 @@ export function searchCheck(store: Store): SearchCheck {
 /** What every store gets for search engines without the creator doing anything, in plain words. */
 export const SEARCH_DONE_FOR_YOU: readonly string[] = [
   "A map of your store's pages for search engines, updated as you add products.",
-  "Each product page tells search engines its name, its picture when it has one, and its price while it can be bought or picked up (a membership's schedule does not fit that format, so it is named without one).",
+  "Each product page tells search engines its name, and its picture when it has one. It also gives its price while it can be bought or picked up. A membership's schedule does not fit that format, so a membership is named without a price.",
   "Your store's questions and answers, and your blog posts, are marked so search engines can read them.",
   "On a domain of your own, search engines are told it is the main address of your store.",
 ];

@@ -1227,7 +1227,7 @@ function Captions({
         <ul className="mt-2 space-y-1 text-sm">
           {tracks.map((track) => (
             <li key={track.lang} className="flex flex-wrap items-center gap-x-4 gap-y-1">
-              <span className="text-ink">{track.label}</span>
+              <span className="text-ink" lang={track.lang}>{track.label}</span>
               <button
                 type="button"
                 className={`${small} font-bold`}
@@ -1257,7 +1257,7 @@ function Captions({
           <span className="sr-only">Captions language</span>
           <select id={selectId} className="field" value={lang} disabled={busy || working} onChange={(e) => setLang(e.target.value)}>
             {CAPTION_LANGUAGES.map((language) => (
-              <option key={language.code} value={language.code}>{language.label}</option>
+              <option key={language.code} value={language.code} lang={language.code}>{language.label}</option>
             ))}
           </select>
         </label>
@@ -1353,7 +1353,7 @@ function AutoCaptions({
             <span className="text-sm text-ink-soft">Language spoken in the video</span>
             <select className="field mt-1" value={spoken} disabled={busy || working} onChange={(e) => setSpoken(e.target.value)}>
               {free.map((language) => (
-                <option key={language.code} value={language.code}>{language.label}</option>
+                <option key={language.code} value={language.code} lang={language.code}>{language.label}</option>
               ))}
             </select>
           </label>
@@ -1372,7 +1372,7 @@ function AutoCaptions({
                         disabled={busy || working || (!checked && also.filter((code) => code !== spoken).length >= MAX_AUTO_LANGUAGES - 1)}
                         onChange={(e) => setAlso((now) => (e.target.checked ? [...now, language.code] : now.filter((code) => code !== language.code)))}
                       />
-                      <span>{language.label}</span>
+                      <span lang={language.code}>{language.label}</span>
                     </label>
                   );
                 })}

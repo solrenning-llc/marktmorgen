@@ -112,7 +112,7 @@ export function CommunityBar({
   return (
     <header className="cm-bar relative z-30 sm:sticky sm:top-0">
       <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
-        <Link href={`/@${store.handle}`} className="cm-home flex min-w-0 flex-1 items-center gap-3 rounded-xl">
+        <Link href={`/@${store.handle}`} className="cm-home flex min-h-11 min-w-0 flex-1 items-center gap-3 rounded-xl">
           {store.photoId ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={photoUrl(store.photoId)} alt="" width={40} height={40} className="st-avatar !mx-0 shrink-0" style={{ width: 40, height: 40 }} />
@@ -122,8 +122,8 @@ export function CommunityBar({
             </span>
           )}
           <span className="min-w-0">
-            <span className="block truncate text-[0.9375rem] font-bold leading-tight">{config.name}</span>
-            <span className="st-muted block truncate text-xs font-semibold">{w.byStore(store.name)}</span>
+            <span className="block break-words text-[0.9375rem] font-bold leading-tight">{config.name}</span>
+            <span className="st-muted block break-words text-xs font-semibold">{w.byStore(store.name)}</span>
           </span>
         </Link>
         {signedIn ? (

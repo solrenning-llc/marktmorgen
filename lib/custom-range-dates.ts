@@ -5,6 +5,8 @@ const day=(value:string):number|null=>{
  const at=Date.parse(value+"T00:00:00Z");
  return Number.isFinite(at)&&new Date(at).toISOString().slice(0,10)===value?at:null;
 };
+/** A period only when both ends are real days: before 0000-01-01, toISOString() writes "-000001-12-31" (input fuzz, Claude 7). */
+const real=(from:string,to:string):CustomDatePeriod|null=>day(from)!==null&&day(to)!==null?{from,to}:null;
 /** Shift an inclusive UTC period without clipping its duration or crossing retained dates. */
 export function adjacentCustomRange(period:CustomDatePeriod,direction:-1|1,today:string):CustomDatePeriod|null {
  const start=day(period.from),end=day(period.to),current=day(today);
@@ -14,7 +16,7 @@ export function adjacentCustomRange(period:CustomDatePeriod,direction:-1|1,today
  const shift=(end-start+DAY)*direction;
  const from=start+shift,to=end+shift;
  if(from<earliest||to>current)return null;
- return {from:new Date(from).toISOString().slice(0,10),to:new Date(to).toISOString().slice(0,10)};
+ return real(new Date(from).toISOString().slice(0,10),new Date(to).toISOString().slice(0,10));
 }
 
 export const CUSTOM_RANGE_PRESETS = [
@@ -33,15 +35,15 @@ export type CustomRangePreset = typeof CUSTOM_RANGE_PRESETS[number]["value"];
 export function presetCustomRange(preset:CustomRangePreset,today:string):CustomDatePeriod|null {
  const current=day(today);
  if(current===null)return null;
- if(preset==="yesterday"){const date=new Date(current-DAY).toISOString().slice(0,10);return {from:date,to:date};}
+ if(preset==="yesterday"){const date=new Date(current-DAY).toISOString().slice(0,10);return real(date,date);}
  if(preset==="last-month"){
   const end=new Date(Date.parse(today.slice(0,8)+"01T00:00:00Z")-DAY).toISOString().slice(0,10);
-  return {from:end.slice(0,8)+"01",to:end};
+  return real(end.slice(0,8)+"01",end);
  }
- if(preset==="month")return {from:today.slice(0,8)+"01",to:today};
+ if(preset==="month")return real(today.slice(0,8)+"01",today);
  const completedDays=preset==="7d-closed"?7:preset==="30d-closed"?30:preset==="90d-closed"?90:null;
- if(completedDays!==null)return {from:new Date(current-completedDays*DAY).toISOString().slice(0,10),to:new Date(current-DAY).toISOString().slice(0,10)};
+ if(completedDays!==null)return real(new Date(current-completedDays*DAY).toISOString().slice(0,10),new Date(current-DAY).toISOString().slice(0,10));
  const days=preset==="7d"?7:preset==="30d"?30:preset==="90d"?90:null;
  if(days===null)return null;
- return {from:new Date(current-(days-1)*DAY).toISOString().slice(0,10),to:today};
+ return real(new Date(current-(days-1)*DAY).toISOString().slice(0,10),today);
 }

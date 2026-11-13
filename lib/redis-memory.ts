@@ -174,6 +174,10 @@ export class MemoryRedis {
             this.run(["HSET", runK, "email", email, "status", status, "step", step, "note", note, "updatedAt", at]);
             this.run(["ZADD", heldK, at, member]);
             this.run(["ZADD", indexK, at, person]);
+            if (keep !== "") {
+              this.run(["EXPIRE", runK, keep]);
+              this.run(["EXPIRE", logK, keep]);
+            }
             return 1;
           }
           this.run(["HDEL", runK, "open"]);

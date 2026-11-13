@@ -68,7 +68,6 @@ import { MAX_RUN_EVENTS, MAX_STEPS, RUN_KEEP_SECONDS } from "@/lib/flow-limits";
 
 export type RunStatus = "running" | "waiting" | "held" | "done" | "goal" | "ended" | "left" | "failed";
 export const RUN_STATUSES: readonly RunStatus[] = ["running", "waiting", "held", "done", "goal", "ended", "left", "failed"];
-const TERMINAL = new Set<RunStatus>(["done", "goal", "ended", "left", "failed"]);
 
 export type RunEventState = "started" | "attempted" | "confirmed" | "failed" | "uncertain" | "skipped" | "goal" | "ended" | "resolved";
 export const RUN_EVENT_STATES: readonly RunEventState[] = ["started", "attempted", "confirmed", "failed", "uncertain", "skipped", "goal", "ended", "resolved"];
@@ -318,6 +317,10 @@ if ARGV[1] == "uncertain" then
   redis.call("HSET", KEYS[1], "email", ARGV[3], "status", ARGV[4], "step", ARGV[5], "note", ARGV[6], "updatedAt", ARGV[7])
   redis.call("ZADD", KEYS[3], ARGV[7], ARGV[8])
   redis.call("ZADD", KEYS[4], ARGV[7], ARGV[9])
+  if ARGV[10] ~= "" then
+    redis.call("EXPIRE", KEYS[1], ARGV[10])
+    redis.call("EXPIRE", KEYS[2], ARGV[10])
+  end
   return 1
 end
 redis.call("HDEL", KEYS[1], "open")
@@ -370,7 +373,9 @@ export async function settleAttempts(listId: string, flowId: string, index: numb
       nowSeconds,
       member,
       person,
-      TERMINAL.has(status) ? RUN_KEEP_SECONDS : "",
+      // Every write keeps a live run for RUN_KEEP_SECONDS more, not only its last (Claude 7's MEDIUM on #4234): a
+      // workflow may run past 400 days (MAX_FLOW_WAIT_HOURS a step), and a record that aged out would read as erased.
+      RUN_KEEP_SECONDS,
     ]);
   }
   await redisPipeline(commands);
@@ -390,7 +395,7 @@ export async function noteRuns(
     commands.push([
       "EVAL", NOTE_IF_RUN, 3, runKey(flowId, person), logKey(flowId, person), indexKey(flowId),
       event({ at: nowSeconds, step: e.index, stepId: e.stepId, kind: e.kind, state: e.state, note: e.note }),
-      normaliseEmail(e.email), e.status, e.to, nowSeconds, person, TERMINAL.has(e.status) ? RUN_KEEP_SECONDS : "",
+      normaliseEmail(e.email), e.status, e.to, nowSeconds, person, RUN_KEEP_SECONDS,
     ]);
   }
   await redisPipeline(commands);
@@ -512,7 +517,9 @@ export async function releaseHold(listId: string, flowId: string, person: string
     ["HSET", run, "status", status, "step", step, "note", "", "updatedAt", nowSeconds],
     ["ZREM", heldKey(listId), `${flowId}|${person}`],
     ["ZADD", indexKey(flowId), nowSeconds, person],
-    ...(TERMINAL.has(status) ? [["EXPIRE", run, RUN_KEEP_SECONDS], ["EXPIRE", logKey(flowId, person), RUN_KEEP_SECONDS]] : []),
+    // Kept for RUN_KEEP_SECONDS more at every write, live or ended (as settleAttempts and noteRuns).
+    ["EXPIRE", run, RUN_KEEP_SECONDS],
+    ["EXPIRE", logKey(flowId, person), RUN_KEEP_SECONDS],
   ]);
   return true;
 }

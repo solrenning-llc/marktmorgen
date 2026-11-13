@@ -13,14 +13,15 @@ import { EU_VAT_RATES, type EuVatRate, euVatRateProblems, vatOnTop } from "@/lib
 
 const sourced = (country: string, basisPoints: number): EuVatRate => ({ country, basisPoints, source: "https://example.invalid/official-rate-source", readOn: "2026-11-13" });
 
-test("the table starts empty: no rate is typed from memory", () => {
-  assert.equal(EU_VAT_RATES.length, 0);
-  assert.deepEqual(euVatRateProblems(), []);
+test("no rate is typed from memory: every record of the official table is sourced (tests/eu-vat-rates-table.test.ts holds its values)", () => {
+  assert.equal(EU_VAT_RATES.length, 27);
+  assert.deepEqual(euVatRateProblems(EU_VAT_RATES, new Date("2026-11-13T00:00:00Z")), []);
 });
 
 test("a country with no sourced rate is no sale, never a default rate", () => {
-  assert.equal(vatOnTop(1000, "DE"), null);
+  assert.equal(vatOnTop(1000, "DE", []), null);
   assert.equal(vatOnTop(1000, "DE", [sourced("FR", 2000)]), null);
+  assert.equal(vatOnTop(1000, "US"), null, "not a Member State");
 });
 
 test("VAT on top: the price times the rate, rounded half up, the price unchanged", () => {

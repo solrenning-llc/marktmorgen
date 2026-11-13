@@ -51,9 +51,10 @@ test("an EU consumer: goods, a person's service, anything unknown and a country 
   assert.deepEqual(euCheckout({ supply: "human", priceCents: 1000, items: de, rates }), { kind: "refuse", reason: "human" });
   assert.deepEqual(euCheckout({ supply: "unknown", priceCents: 1000, items: de, rates }), { kind: "refuse", reason: "supply" });
   assert.deepEqual(euCheckout({ supply: "ess", priceCents: 1000, items: { ip: "FR", billing: "FR" }, rates, records: collecting }), { kind: "refuse", reason: "rate" });
-  // The real records and the real table are empty: every EU sale is refused today.
+  // The real records are empty: every EU sale is refused today. A collect record with no sourced rate is refused too
+  // (the real table's own values and review date are held by tests/eu-vat-rates-table.test.ts).
   assert.deepEqual(euCheckout({ supply: "ess", priceCents: 1000, items: de }), { kind: "refuse", reason: "record" });
-  assert.deepEqual(euCheckout({ supply: "ess", priceCents: 1000, items: de, records: collecting }), { kind: "refuse", reason: "rate" });
+  assert.deepEqual(euCheckout({ supply: "ess", priceCents: 1000, items: de, rates: [], records: collecting }), { kind: "refuse", reason: "rate" });
 });
 
 /**

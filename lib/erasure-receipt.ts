@@ -31,3 +31,47 @@ export function readErasureReceipt(raw: unknown, token = "", now = Date.now()): 
     return { state: value.state, count: value.count };
   } catch { return null; }
 }
+
+/**
+ * A person's erasure from one store, as the studio's buyers page says it (issue #4400; fix by Codex L): signed by
+ * the server once the erasure succeeded, bound to the store and valid for ten minutes, with whether Discord kept
+ * roles inside it. A bare ?erased=1 or &discord=1 proves nothing and says nothing. Display evidence only.
+ */
+export type PersonErasureReceipt = { discord: boolean };
+const PERSON_LIFE_MS = 10 * 60 * 1000;
+const STORE_KEY = /^[A-Za-z0-9_-]{1,128}$/;
+function personSignature(payload: string): string {
+  const key = deriveKey("person-erasure-result/v1");
+  return key ? createHmac("sha256", key).update(payload).digest("base64url") : "";
+}
+export function makePersonErasureReceipt(store: string, discord: boolean, now = Date.now()): string {
+  if (!STORE_KEY.test(store) || typeof discord !== "boolean" || !Number.isSafeInteger(now) || now < 0) return "";
+  const payload = Buffer.from(JSON.stringify({ store, discord, at: now })).toString("base64url");
+  const sign = personSignature(payload);
+  return sign ? payload + "." + sign : "";
+}
+export function readPersonErasureReceipt(raw: unknown, store: string, now = Date.now()): PersonErasureReceipt | null {
+  if (typeof raw !== "string" || raw.length > 512 || !STORE_KEY.test(store) || !Number.isSafeInteger(now)) return null;
+  const parts = raw.split(".");
+  if (parts.length !== 2 || !/^[A-Za-z0-9_-]+$/.test(parts[0]) || !/^[A-Za-z0-9_-]{43}$/.test(parts[1])) return null;
+  const sign = personSignature(parts[0]);
+  if (!sign || !timingSafeEqual(Buffer.from(sign), Buffer.from(parts[1]))) return null;
+  try {
+    const value = JSON.parse(Buffer.from(parts[0], "base64url").toString("utf8"));
+    if (
+      !value ||
+      typeof value !== "object" ||
+      Object.keys(value).sort().join(",") !== "at,discord,store" ||
+      value.store !== store ||
+      typeof value.discord !== "boolean" ||
+      !Number.isSafeInteger(value.at) ||
+      value.at < 0 ||
+      value.at > now ||
+      now - value.at >= PERSON_LIFE_MS
+    )
+      return null;
+    return { discord: value.discord };
+  } catch {
+    return null;
+  }
+}

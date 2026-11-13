@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { readPersonErasureReceipt } from "@/lib/erasure-receipt";
 import Link from "next/link";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
@@ -132,7 +133,8 @@ export default async function StudioPeoplePage({ searchParams }: Params) {
   // Deleting the person needs the page's token, never the address in a link (lib/person-erasure.ts).
   const mayErase = can(view.role, "erase");
   const eraseToken = profile && email && mayErase ? (token || (await findToken(store, email).catch(() => null)) || "") : "";
-  const erased = query.erased === "1";
+  // Said only on a receipt the server signed after the erasure succeeded (issue #4400), never on ?erased=1.
+  const erased = readPersonErasureReceipt(query.erased, store.sid || store.handle);
 
   return (
     <div className="min-h-screen bg-paper text-ink">
@@ -153,7 +155,7 @@ export default async function StudioPeoplePage({ searchParams }: Params) {
               {erased ? (
                 <p className="notice notice-success mt-3" role="status">
                   That person was deleted from your store, and your store will not email them again. Their payments stay on your Stripe account.
-                  {query.discord === "1" ? " Discord would not take back every role it gave them: remove those in your server." : ""}
+                  {erased.discord ? " Discord would not take back every role it gave them: remove those in your server." : ""}
                 </p>
               ) : null}
               <h1 className="t-h2 mt-3">Everything one buyer has done with your store</h1>

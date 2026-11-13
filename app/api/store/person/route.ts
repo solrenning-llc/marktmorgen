@@ -6,6 +6,7 @@ import { ensureStatsId } from "@/lib/store";
 import { studioPath } from "@/lib/studio-route";
 import { addPersonNote, addressForToken, findToken, forgetFindToken, readAddress, removePersonNote } from "@/lib/buyer-profile";
 import { erasePerson } from "@/lib/person-erasure";
+import { makePersonErasureReceipt } from "@/lib/erasure-receipt";
 
 /** How many addresses one store may look up in an hour: each look reads Stripe. */
 const FINDS_PER_HOUR = 200;
@@ -46,8 +47,9 @@ export async function POST(request: NextRequest) {
       const result = await erasePerson(guarded.store, email, { kind: "team", who: guarded.email, role: guarded.role });
       if (result.ok) {
         await forgetFindToken(token);
-        const left = result.notes.includes("discord-roles") ? "&discord=1" : "";
-        return Response.json({ ok: true, records: result.records, notes: result.notes, href: studioPath(guarded.store, `erased=1${left}`, "people") }, noStore);
+        // A signed receipt, not a bare ?erased=1 (issue #4400): only it makes the buyers page say the person was deleted.
+        const receipt = makePersonErasureReceipt(guarded.store.sid || guarded.store.handle, result.notes.includes("discord-roles"));
+        return Response.json({ ok: true, records: result.records, notes: result.notes, href: studioPath(guarded.store, receipt ? `erased=${receipt}` : "", "people") }, noStore);
       }
       if (result.reason === "incomplete") return Response.json({ ok: false, error: "incomplete", failed: result.failed }, { status: 503 });
       if (result.reason === "limit") return Response.json({ ok: false, error: "limited", message: result.message }, { status: 429 });

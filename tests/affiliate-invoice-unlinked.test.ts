@@ -17,7 +17,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { AffiliateCommissionHistory } from "@/components/affiliate-commission-history";
-import { connectPayPal, payWithPayPal } from "@/lib/paypal-payouts";
+import { connectPayPal, payWithPayPal, unsettledBook } from "@/lib/paypal-payouts";
 import { readBook } from "@/lib/affiliates";
 import type { Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
@@ -126,9 +126,16 @@ async function main(): Promise<void> {
   const both = await readBook(store);
   is("one line, one unlinked, the book checked", [both.invoicesChecked, both.lines.length, unlinkedOf(both)], [true, 1, 1]);
   is("another affiliate's part counts none of Sara's", unlinkedOf(await readBook(store, "bbbbbbbbbbbb")), 0);
+  // Codex X5's and Claude 1 cloud's MEDIUM on #3378: an invoice left out with its commission unknown made the book
+  // look whole, and the payout went ahead without it, with nothing left to settle later. A book that leaves out a
+  // paid invoice is not one any payout is made from: nothing is sent and the creator is told to pay by hand.
   const before = created.length;
   const sent = await payWithPayPal(store);
-  is("the linked payment's commission is sent once", sent.ok ? [sent.people, sent.cents, created.length - before] : sent.reason, [1, 900, 1]);
+  is("nothing is sent while an invoice's commission is left out", [sent.ok ? "sent" : sent.reason, created.length - before], ["invoices_unlinked", 0]);
+  is("and no batch file is made from it either", unsettledBook(both), "invoices_unlinked");
+  invoicesBody = list(invoice());
+  const linkedOnly = await payWithPayPal(store);
+  is("with only the linked invoice, its commission is sent once", linkedOnly.ok ? [linkedOnly.people, linkedOnly.cents, created.length - before] : linkedOnly.reason, [1, 900, 1]);
 
   part("Controls: an invoice that cannot be read is still not checked, and not counted as unlinked");
   for (const [what, over] of [

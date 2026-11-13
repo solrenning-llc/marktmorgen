@@ -23,7 +23,7 @@ import { importedFor } from "@/lib/imported-purchases";
 import { confirmPreorder, queueRelease, readPreorder, revokeRefundedPreorders, runPreorderReleases, setExpectedDay, waitingCount } from "@/lib/preorders";
 import { disputeLost, purchaseRefunded } from "@/lib/refunds";
 import { isLive, membershipStatus } from "@/lib/membership-access";
-import { store as redis } from "./redis-stub";
+import { advance, store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 
@@ -47,6 +47,8 @@ const invoicePayments = new Map<string, { data: unknown[]; has_more: boolean }>(
 const subscriptions = new Map<string, Record<string, unknown>>();
 /** Payments whose reply names another payment (a reply that is not the object asked for). */
 const foreign = new Set<string>();
+/** Payments whose read fails (Stripe answers 500). */
+const unreadable = new Set<string>();
 const emails: { to: string; subject: string; key: string | null; text: string }[] = [];
 
 function charge(pi: string): Record<string, unknown> {
@@ -82,6 +84,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   }
   const intent = path.match(/^\/payment_intents\/(pi_\w+)$/)?.[1];
   if (intent) {
+    if (unreadable.has(intent)) return answer({ error: { message: "down" } }, 500);
     if (foreign.has(intent)) return answer({ id: "pi_someoneelse0001", object: "payment_intent", latest_charge: { object: "charge", id: "ch_someoneelse0001", refunded: true, amount: PRICE, amount_refunded: PRICE } });
     return answer({ id: intent, object: "payment_intent", amount: pays.get(intent)?.amount ?? PRICE, latest_charge: charge(intent) });
   }
@@ -366,6 +369,95 @@ async function redRefundedBeforeConfirm(store: Store, giftable: Listing, book: L
   is("a pre-order refunded in full is not held by its buyer", await holds(store, s.customer_details.email, book.id), 0);
 }
 
+/** Every Redis write whose command names `key` and carries `marker` answers in another shape (an unknown reply). */
+function unknownWrite(key: string, marker: string): () => void {
+  const real = redis.pipeline.bind(redis);
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    const replies = await real(commands);
+    return commands.some((c) => String(c[1]).startsWith(key) && c.some((part) => String(part).includes(marker)))
+      ? replies.map(() => ({ unexpected: true }))
+      : replies;
+  }) as typeof redis.pipeline;
+  return () => void (redis.pipeline = real);
+}
+
+/** The payment read made before handing a gift or an on-sale pre-order over (RG-1, RG-2), at each way it can go wrong. */
+async function paymentReadBeforeHanding(store: Store, giftable: Listing, book: Listing): Promise<void> {
+  const fiveMinutes = () => advance(301_000);
+
+  part("Gift: a payment read that fails gives nothing, and the next run gives it");
+  const a = await giveGift(store, giftable, 20);
+  unreadable.add(a.pi);
+  is("the read fails: thrown, nothing given", await a.deliver().then(() => "returned", () => "thrown"), "thrown");
+  is("not held", await holds(store, a.to, giftable.id), 0);
+  is("the gift is neither given nor revoked", [Boolean((await readGift(a.id))?.given), Boolean((await readGift(a.id))?.revoked)], [false, false]);
+  unreadable.delete(a.pi);
+  fiveMinutes();
+  is("read again once Stripe answers: given", await a.deliver(), "given");
+  is("held once", await holds(store, a.to, giftable.id), 1);
+
+  part("Gift: a reply for another payment is never read as this one");
+  const b = await giveGift(store, giftable, 21);
+  foreign.add(b.pi);
+  is("another payment's reply: thrown, nothing given", await b.deliver().then(() => "returned", () => "thrown"), "thrown");
+  is("not held, and not revoked on another payment's refund", [await holds(store, b.to, giftable.id), Boolean((await readGift(b.id))?.revoked)], [0, false]);
+  foreign.delete(b.pi);
+  fiveMinutes();
+  is("its own reply: given", await b.deliver(), "given");
+
+  part("Gift: a dispute lost before the first confirmation: never given");
+  const c = await giveGift(store, giftable, 22);
+  dispute(c.pi, "lost");
+  await runGifts(store);
+  is("confirmed after the loss: nothing given", await c.deliver(), "already");
+  is("not held, and marked revoked", [await holds(store, c.to, giftable.id), Boolean((await readGift(c.id))?.revoked)], [0, true]);
+
+  part("Gift: refunded, and the write of its revocation answers in another shape");
+  const d = await giveGift(store, giftable, 23);
+  refund(d.pi, PRICE);
+  const restore = unknownWrite(`nl:gift:${d.id}`, "revoked");
+  is("the write is unknown: thrown, never 'already'", await d.deliver().then((r) => r, () => "thrown"), "thrown");
+  restore();
+  is("not held", await holds(store, d.to, giftable.id), 0);
+  fiveMinutes();
+  is("the next run writes it: already, and revoked", [await d.deliver(), Boolean((await readGift(d.id))?.revoked)], ["already", true]);
+  is("still not held", await holds(store, d.to, giftable.id), 0);
+
+  part("Pre-order of a product on sale: a payment read that fails hands nothing over");
+  const p = preSession(book, 20);
+  unreadable.add(p.payment_intent);
+  is("the read fails: thrown", await confirmPreorder(store, p as never, book, deps).then(() => "returned", () => "thrown"), "thrown");
+  is("not held", await holds(store, p.customer_details.email, book.id), 0);
+  unreadable.delete(p.payment_intent);
+  is("read again: handed over", await confirmPreorder(store, p as never, book, deps), "given");
+  is("held once", await holds(store, p.customer_details.email, book.id), 1);
+
+  part("Pre-order: a reply for another payment is never read as this one");
+  const q = preSession(book, 21);
+  foreign.add(q.payment_intent);
+  is("another payment's reply: thrown", await confirmPreorder(store, q as never, book, deps).then(() => "returned", () => "thrown"), "thrown");
+  is("not held, not revoked", [await holds(store, q.customer_details.email, book.id), Boolean((await readPreorder(store, book.id, q.id))?.revoked)], [0, false]);
+  foreign.delete(q.payment_intent);
+  is("its own reply: handed over", await confirmPreorder(store, q as never, book, deps), "given");
+
+  part("Pre-order: a dispute lost before the first confirmation: never handed over");
+  const r = preSession(book, 22);
+  dispute(r.payment_intent, "lost");
+  await runPre(store);
+  is("confirmed after the loss: skip", await confirmPreorder(store, r as never, book, deps), "skip");
+  is("not held, and marked revoked", [await holds(store, r.customer_details.email, book.id), Boolean((await readPreorder(store, book.id, r.id))?.revoked)], [0, true]);
+
+  part("Pre-order: refunded, and the write of its revocation answers in another shape");
+  const t = preSession(book, 23);
+  refund(t.payment_intent, PRICE);
+  const back = unknownWrite(`nl:pre:${store.statsId}:${book.id}`, "revoked");
+  is("the write is unknown: thrown, never skip", await confirmPreorder(store, t as never, book, deps).then((x) => x, () => "thrown"), "thrown");
+  back();
+  is("not held", await holds(store, t.customer_details.email, book.id), 0);
+  is("the next run writes it: skip, and revoked", [await confirmPreorder(store, t as never, book, deps), Boolean((await readPreorder(store, book.id, t.id))?.revoked)], ["skip", true]);
+  is("still not held", await holds(store, t.customer_details.email, book.id), 0);
+}
+
 // MM-E2E-RG-3 (LEVE, not fixed here): the release job (lib/preorders.ts releaseJob) judges a pre-order by the payment
 // reply without checking it answers for the payment asked for; the same lines are being changed by open PR #4072, so
 // the own-reply check waits for it to merge.
@@ -377,6 +469,7 @@ async function main(): Promise<void> {
   await gifts(store, giftable);
   await preorders(store, book);
   await redRefundedBeforeConfirm((await storeForEmail(OWNER))!, giftable, book);
+  await paymentReadBeforeHanding((await storeForEmail(OWNER))!, giftable, book);
   done();
 }
 

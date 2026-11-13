@@ -75,7 +75,7 @@ async function main(): Promise<void> {
       await fresh();
       rows = [row];
       result = await syncAssistant((await storeForEmail(owner))!, undefined, now / 1000);
-      is("not cancelled, no dispute written, still on", [result.assistantPlan?.active, Boolean(result.assistantPlan?.disputedAt), cancelAttempts, (await storeForEmail(owner))?.assistantPlan], [true, false, 0, plan]);
+      is("not canceled, no dispute written, still on", [result.assistantPlan?.active, Boolean(result.assistantPlan?.disputedAt), cancelAttempts, (await storeForEmail(owner))?.assistantPlan], [true, false, 0, plan]);
     }
 
     part("An undisputed invoice of another subscription beside this add-on's own clean one: unknown, nothing written");
@@ -104,7 +104,7 @@ async function main(): Promise<void> {
     await fresh();
     rows = [{ id: "in_12", subscription: OWN, charge: { id: "ch_12", disputed: false } }, { id: "in_13", subscription: OWN, charge: null }];
     await syncAssistant({ ...(await storeForEmail(owner))!, subscriptionActive: false }, undefined, now / 1000);
-    is("not disputed: the stop is set, nothing cancelled", [stopWrites, cancelAttempts], [1, 0]);
+    is("not disputed: the stop is set, nothing canceled", [stopWrites, cancelAttempts], [1, 0]);
   } finally {
     globalThis.fetch = original;
   }

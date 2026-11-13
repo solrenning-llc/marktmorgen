@@ -828,6 +828,8 @@ function figureKind(folded: string, start: number, end: number): string {
   if (money) return rate ? `${money}/${rate}` : money;
   if (rate) return `money:?/${rate}`;
   const next = /^\s*(\p{L}+)/u.exec(tail)?.[1];
+  // A count of people, of sales or of places left: held only by a fact that counts the same word (kindHolds).
+  if (speaksOfSocialProof(sentenceOf(folded, start, end))) return `social:${next && !STORE_LANGUAGE_WORDS.has(next) ? next : ""}`;
   const priced = SENTENCE_MONEY.test(sentenceOf(folded, start, end)) || PRICE_BEFORE.test(folded.slice(Math.max(0, start - 8), start));
   // In a sentence about a price, a word that makes the figure the price ("14 total", "14 flat") keeps it one; any other
   // word it counts makes it a count ("count:lessons"), held only by a fact that is a count of the same value, never by
@@ -839,6 +841,46 @@ function figureKind(folded: string, start: number, end: number): string {
   if (next && !STORE_LANGUAGE_WORDS.has(next)) return priced ? `count:${next}` : `plain:${next}`;
   return priced ? "money:?" : "plain";
 }
+/**
+ * Words of social proof and of scarcity, folded, in the seven store languages: people, buyers, students, customers,
+ * members, joining, buying, enrolling, and places or spots left. A count in a sentence with one of them is a claim about
+ * how many bought or how few remain, and is held only by a fact that counts the same word (Claude 7's review of #3484
+ * at c36d308d29, MÉDIO: "12 people already bought this course." was shown on a fact of 12 video lessons). The word is
+ * compared, so such a count in another store language than the facts is refused: the buyer then sees the no-AI
+ * fallback, never an invented figure.
+ */
+const SOCIAL_PROOF_WORDS = new Set([
+  // English
+  // Plurals only: the facts' own label "What the buyer gets" and a reply's "once you buy" or "the student gets" speak of
+  // one person, never of how many.
+  "people", "persons", "students", "buyers", "customers", "members", "clients", "users", "subscribers", "learners",
+  "graduates", "fans", "followers", "joined", "join", "joining", "bought", "purchased", "enrolled", "signed", "sold",
+  "happy", "satisfied", "spots", "seats", "places", "remain", "remaining", "left",
+  // Spanish
+  "personas", "alumnos", "alumnas", "estudiantes", "compradores", "clientes", "miembros", "usuarios",
+  "compraron", "compro", "inscritos", "inscribieron", "unieron", "vendidos", "plazas", "quedan", "restan",
+  // French
+  "personnes", "eleves", "etudiants", "acheteurs", "membres", "utilisateurs", "achete", "achetes", "inscrits",
+  "rejoint", "vendus", "restent", "restantes",
+  // German
+  "leute", "menschen", "kunden", "schuler", "teilnehmer", "kaufer", "mitglieder", "nutzer", "gekauft", "angemeldet",
+  "beigetreten", "verkauft", "platze", "ubrig",
+  // Italian
+  "persone", "studenti", "allievi", "acquirenti", "membri", "utenti", "acquistato", "comprato", "iscritti", "venduti",
+  "posti", "rimasti", "restano",
+  // Dutch
+  "mensen", "studenten", "leerlingen", "kopers", "klanten", "leden", "gebruikers", "gekocht", "ingeschreven",
+  "verkocht", "plekken", "plaatsen",
+  // Portuguese
+  "pessoas", "alunos", "alunas", "estudantes", "compradores", "membros", "usuarios", "compraram", "comprou",
+  "inscritos", "matriculados", "vendidos", "vagas", "restam",
+]);
+/** Whether a figure's sentence speaks of how many bought, joined or remain (SOCIAL_PROOF_WORDS). */
+const speaksOfSocialProof = (sentence: string) => (sentence.match(/\p{L}+/gu) ?? []).some((word) => SOCIAL_PROOF_WORDS.has(word));
+/** A counted word without its plural ending, so "student" and "students" are the same word. */
+const countedStem = (word: string) => (word.length > 3 ? word.replace(/(?:es|en|e|s)$/u, "") : word);
+/** The word a counting kind names ("plain:lessons", "count:lessons", "social:students"), or "" when none. */
+const countedWord = (kind: string) => (kind.includes(":") ? kind.slice(kind.indexOf(":") + 1) : "");
 /** A count with nothing said of what it counts, or of the word after it outside a sentence about a price. */
 const isPlain = (kind: string) => kind === "plain" || kind.startsWith("plain:");
 /**
@@ -850,16 +892,24 @@ const isPlain = (kind: string) => kind === "plain" || kind.startsWith("plain:");
  * have ("$49 per lesson" for "$49").
  */
 function kindHolds(reply: string, fact: string): boolean {
+  // A count the store published beside a word of buyers or students ("300 students enrolled") is a count all the same.
+  const factCounts = isPlain(fact) || fact.startsWith("count:") || fact.startsWith("social:");
+  // A count of buyers, students or places left: only a fact that counts the same word (SOCIAL_PROOF_WORDS); a count
+  // that names nothing is never held.
+  if (reply.startsWith("social:")) {
+    const word = countedWord(reply);
+    return factCounts && word !== "" && countedStem(word) === countedStem(countedWord(fact));
+  }
   // A bare number, with no unit and nothing it counts after it ("It's 14.", "You will be charged 14."), is held only by
   // a fact that is a count: never by a day, a price or a percent, whatever word of paying the sentence used (Claude 1's
   // review 6799181835 of #3484: a word list cannot be complete, and the 14-day refund window let each of them through).
-  if (reply === "plain") return isPlain(fact) || fact.startsWith("count:");
+  if (reply === "plain") return factCounts;
   // A figure that names what it counts ("49 students", "14 lessons") is held only by a fact that counts too, never by a
   // price, a day or a percent of the same value (Claude 1 cloud's review of #3484 at 9288beabe7, MÉDIO: an invented count
   // of buyers or lessons was shown whenever a price or a refund window had its value).
-  if (isPlain(reply)) return isPlain(fact) || fact.startsWith("count:");
+  if (isPlain(reply)) return factCounts;
   // A count in a sentence about a price: only a fact that is a count too, never a price, a time or a percent.
-  if (reply.startsWith("count:")) return isPlain(fact) || fact.startsWith("count:");
+  if (reply.startsWith("count:")) return factCounts;
   const [replyBase, replyRate] = reply.split("/");
   const [factBase, factRate] = fact.split("/");
   if (replyRate !== undefined && replyRate !== factRate) return false;

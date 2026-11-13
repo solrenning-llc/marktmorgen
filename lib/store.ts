@@ -189,6 +189,7 @@ export type { CourseRef, Listing, Product };
  * inventing a different one for this store alone.
  */
 import { HANDLE_PATTERN } from "@/lib/store-handle-pattern";
+import { noteRemovedProduct } from "@/lib/removed-products";
 export { HANDLE_PATTERN } from "@/lib/store-handle-pattern";
 
 
@@ -3304,6 +3305,14 @@ export async function removeProduct(
     const product = await readProduct(store, id);
     if (!product) return { ok: false as const, reason: "unknown" as const };
     if (before && !(await before(product, store))) {
+      return { ok: false as const, reason: "unavailable" as const };
+    }
+    // Noted as removed before it leaves the catalog, so a person's data kept under it is still reached by their data
+    // copy and their erasure (lib/removed-products.ts); not confirmed, nothing is removed.
+    try {
+      await noteRemovedProduct(store.statsId, id);
+    } catch (error) {
+      console.error("could not note a removed product", error);
       return { ok: false as const, reason: "unavailable" as const };
     }
     // A bundle that held it holds it no more, in the same write, so no bundle

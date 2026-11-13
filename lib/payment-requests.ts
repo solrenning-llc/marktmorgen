@@ -562,7 +562,7 @@ export async function checkRequestRefunds(store: Store, id: string, now = Date.n
       console.error("reading one payment request's refunds failed", error);
       return not("stripe");
     }
-    if (!Array.isArray(listed.data) || typeof listed.has_more !== "boolean") return not("shape", r, false);
+    if (listed.object !== "list" || !Array.isArray(listed.data) || typeof listed.has_more !== "boolean") return not("shape", r, false);
     // More than a page on one payment reads the same next time: not checked, and no reload promised.
     if (listed.has_more) return not("more", r, false);
     let sum = 0;
@@ -572,6 +572,8 @@ export async function checkRequestRefunds(store: Store, id: string, now = Date.n
       const row = refundRow(item);
       // A row of another payment in this payment's own list, or the same refund twice, is a list in another shape.
       if (!row || row.intent !== r.payment || seen.has(row.id)) return not("shape", r, false);
+      // A refund in another currency (or none) is never added to this request's own, as on the list (readRefunds).
+      if (row.currency !== r.currency.toLowerCase()) return not("shape", r, false);
       seen.add(row.id);
       if (row.status === "succeeded") sum += row.amount;
       else if (REFUND_UNDER_WAY.has(row.status)) underWay = true;

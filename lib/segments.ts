@@ -29,6 +29,7 @@ import { randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { normaliseEmail } from "@/lib/auth";
+import { keepUnlessErased, suppressedAmong } from "@/lib/suppression";
 import { WHO, type Who, readTags } from "@/lib/contacts";
 import { MAX_PAID_BYTES, PAYPAL_REFUNDS_READ, paypalKept, paypalPaymentId, readPayPalRefundsWithCoverage } from "@/lib/paypal-sales";
 import { rfmGroup } from "@/lib/rfm-rules";
@@ -92,6 +93,12 @@ export const BUYER_LEDGER_UNITS = 8;
 export const LEDGER_BYTES_PER_UNIT = 1_000_000;
 /** The most one imported buyer weighs: its address and when it came, read, then written in the copy as a row. */
 export const IMPORTED_BUYER_BYTES = 2 * (254 + 64);
+/**
+ * What looking one buyer up among the store's deleted people moves, at its most, on a reading from Stripe (#4379):
+ * their print (32 bytes) and its answer, twice (once to leave the deleted out, once in the step that keeps the copy
+ * only when nobody it names was deleted since). Counted with the reading, by size, before either is sent.
+ */
+export const ERASED_CHECK_BYTES = 2 * (32 + 16);
 
 
 /**
@@ -276,9 +283,25 @@ export async function buyerLedger(store: Store, count?: (units: number) => Promi
   for (const email of (importedRead ?? new Map<string, number>()).keys()) {
     if (!out.buyers.has(email)) out.buyers.set(email, { cents: 0, last: 0, channel: IMPORTED_CHANNEL, orders: 0 });
   }
+  // A person deleted from the store stays in its order history, never in what is made from it (#4379): they are left
+  // out here, and the copy is kept only in one step that finds none of whom it names deleted since (KEEP_UNLESS_ERASED),
+  // so a reading under way when an erasure finishes never writes them back. The look-ups are counted first, by size.
+  const deletable = Boolean(store.listId && isRedisConfigured() && out.buyers.size);
+  if (deletable) {
+    if (!(await counted(ledgerUnits(out.buyers.size * ERASED_CHECK_BYTES, included)))) throw new LedgerNotCounted();
+    for (const email of await suppressedAmong(store.listId, [...out.buyers.keys()])) out.buyers.delete(email);
+  }
   if (store.statsId && isRedisConfigured() && !importedMissed) {
     const rows: Row[] = [...out.buyers].map(([e, r]) => [e, r.cents, r.last, r.channel, r.orders]);
-    await redisPipeline([["SET", ledgerKey(store.statsId), JSON.stringify({ c: store.currency, p: partial, r: rows, t: at, v: LEDGER_SHAPE }), "EX", LEDGER_SECONDS]]).catch(() => {});
+    const text = JSON.stringify({ c: store.currency, p: partial, r: rows, t: at, v: LEDGER_SHAPE });
+    if (deletable && store.listId && out.buyers.size) {
+      // Somebody deleted since the look-up: nothing is kept, and they are not shown by this reading either. A step that
+      // cannot run keeps nothing (keepUnlessErased throws), and what was read is still shown, without them.
+      const gone = await keepUnlessErased(ledgerKey(store.statsId), store.listId, text, LEDGER_SECONDS, [...out.buyers.keys()]).catch(() => null);
+      for (const email of gone ?? []) out.buyers.delete(email);
+    } else {
+      await redisPipeline([["SET", ledgerKey(store.statsId), text, "EX", LEDGER_SECONDS]]).catch(() => {});
+    }
   }
   return out;
 }

@@ -1054,6 +1054,18 @@ async function main(): Promise<void> {
   is("the list recipient never reaches Resend", resend.filter(m => m.to !== SUPPORT).length, 0);
   is("the owner notice does not claim the list mail was delivered",
     resend.filter(m => m.to === SUPPORT).map(m => m.subject), ["Amazon SES is not sending: check the account"]);
+  // j-mail-1 (Claude 3 cloud J audit): Amazon only asking to slow down (429, not a quota) takes nobody and is
+  // no uncertain acceptance, so a list batch is known waiting, as with a refusal and nobody taken. "retry" made
+  // lib/mail.ts hold every recipient as maybe sent and lib/broadcasts.ts stop the whole email for good.
+  redis.clear(); resendKeys.clear(); clear(); account = approved();
+  amazonSays = () => ({ status: 429, type: "TooManyRequestsException", message: "Maximum sending rate exceeded." });
+  is("a list batch Amazon only asked to slow down is known waiting, nobody taken",
+    [await sendListBatch([letter("list-slow@example.com")], "list:slow", { by: "monthly" }), amazon.length, resend.length],
+    ["waiting", 0, 0]);
+  amazonSays = () => ({ status: 200 });
+  is("and the same batch tried again goes out once",
+    [await sendListBatch([letter("list-slow@example.com")], "list:slow", { by: "monthly" }), amazon.map(m => m.to), resend.length],
+    ["sent", ["list-slow@example.com"], 0]);
   redis.clear(); resendKeys.clear(); clear(); account = approved();
   amazonSays = () => ({ status: 400, type: "BadRequestException", message: "Synthetic confirmed recipient refusal" });
   // Rule 23 (claude5/broadcast-refused-recipient): was "refused" for the whole batch; the first fix made it

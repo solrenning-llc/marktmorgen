@@ -44,6 +44,8 @@ export const UNMATCHED_RETRY_DAYS = 7;
  * always reached first and a run never spends its time on settled ones.
  */
 export const SEEN_KEY = "nl:plan-disputes:seen";
+/** The last old open dispute re-read by id, so the next run goes on from there round the ring (#4465). */
+export const REREAD_CURSOR_KEY = "nl:plan-disputes:reread-cursor";
 const SEEN_SECONDS = 400 * 24 * 60 * 60;
 const DISPUTE_ID = /^du_[A-Za-z0-9]+$/;
 const SUBSCRIPTION_ID = /^sub_[A-Za-z0-9]+$/;
@@ -123,7 +125,8 @@ function sameCustomer(customerId: string | null | undefined, subscription: Recor
 export async function syncPlanDisputes(deadline: number, nowSeconds = Math.floor(Date.now() / 1000)): Promise<DisputeCounts> {
   const counts: DisputeCounts = { seen: 0, recorded: 0, unmatched: 0, reread: 0, failed: 0, complete: false };
   if (!isRedisConfigured() || !isBillingConfigured()) return counts;
-  const [raw] = await redisPipeline([["HGETALL", SEEN_KEY]]);
+  const [raw, cursorRaw] = await redisPipeline([["HGETALL", SEEN_KEY], ["GET", REREAD_CURSOR_KEY]]);
+  const cursor = typeof cursorRaw === "string" ? cursorRaw : "";
   const seen = new Map<string, string>();
   if (Array.isArray(raw)) for (let i = 0; i + 1 < raw.length; i += 2) seen.set(String(raw[i]), String(raw[i + 1]));
   else if (raw && typeof raw === "object") for (const [key, value] of Object.entries(raw)) seen.set(key, String(value));
@@ -176,8 +179,13 @@ export async function syncPlanDisputes(deadline: number, nowSeconds = Math.floor
     }
   }
   if (!listDone) console.error("plan disputes: more than one run's pages; the oldest wait for the next run");
-  // Still open, and no longer in the list: asked by id.
-  const stale = [...seen].filter(([id, what]) => what.startsWith("open:") && !listed.has(id)).slice(0, MAX_REREADS);
+  // Still open, and no longer in the list: asked by id, at most MAX_REREADS a run. The ones not reached this run wait
+  // for the next: the list is read in a stable order and resumed from a circular cursor (the last id re-read), so with
+  // more than MAX_REREADS open the window moves on each run and every one is re-read in some run (#4465).
+  const openStale = [...seen].filter(([id, what]) => what.startsWith("open:") && !listed.has(id)).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  const start = cursor ? openStale.findIndex(([id]) => id > cursor) : 0;
+  const from = start < 0 ? 0 : start;
+  const stale = [...openStale.slice(from), ...openStale.slice(0, from)].slice(0, MAX_REREADS);
   for (const [id, what] of stale) {
     if (Date.now() > deadline) return counts;
     try {
@@ -191,6 +199,11 @@ export async function syncPlanDisputes(deadline: number, nowSeconds = Math.floor
       console.error(`re-reading plan dispute ${id} failed`, error);
     }
   }
+  // The next run goes on from the last one re-read this run (#4465). With MAX_REREADS or fewer open there is nothing
+  // left behind, so the cursor is cleared and the next run starts from the top.
+  const lastReread = stale.length > 0 ? stale[stale.length - 1][0] : "";
+  if (stale.length >= MAX_REREADS && lastReread) await redisPipeline([["SET", REREAD_CURSOR_KEY, lastReread, "EX", SEEN_SECONDS]]);
+  else if (cursor) await redisPipeline([["DEL", REREAD_CURSOR_KEY]]);
   counts.complete = listDone && readable && stale.length < MAX_REREADS;
   return counts;
 }

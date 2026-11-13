@@ -4,11 +4,14 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
+import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { affiliateLink, readBook } from "@/lib/affiliates";
 import { isSenderConfigured } from "@/lib/email";
 import { canSell } from "@/lib/store-checkout";
 import { AffiliateStudio } from "@/components/affiliate-studio";
+import { AffiliateSummary } from "@/components/affiliate-summary";
+import { SUMMARY_PERIODS, programSummary } from "@/lib/affiliate-summary";
 import { PayPalPayouts } from "@/components/paypal-payouts";
 import { onTheirWay, payableLines, paypalChecks, readPayPal, settlePayPal } from "@/lib/paypal-payouts";
 import { batchTotal } from "@/lib/affiliate-payouts";
@@ -106,7 +109,7 @@ export default async function StudioAffiliatesPage({ searchParams }: Params) {
       <StudioStorePin sid={store.sid}>
 
       <main id="content" className="container-page pb-20 pt-10 sm:pt-14">
-        <p className="eyebrow">Affiliates</p>
+        <StudioTrail store={store} here="Affiliates" />
         <h1 className="t-h2 mt-3">People who sell for you</h1>
         <p className="mt-3 max-w-2xl text-ink-soft">
           Anyone can apply on your affiliate page and you decide who is in, or you let everyone who buys from you take a link
@@ -134,6 +137,14 @@ export default async function StudioAffiliatesPage({ searchParams }: Params) {
           <p className="notice notice-error mt-6" role="alert">
             We could not read your affiliates just now. Nothing was changed. Try again in a moment.
           </p>
+        ) : null}
+
+        {book && book.rows.length ? (
+          // 532 [AF1]: the program's three numbers, worked out from the book read above; nothing is read again.
+          <AffiliateSummary
+            currency={store.currency}
+            summaries={Object.fromEntries(SUMMARY_PERIODS.map((period) => [period, programSummary(book, period)!])) as Parameters<typeof AffiliateSummary>[0]["summaries"]}
+          />
         ) : null}
 
         {offers === null ? (

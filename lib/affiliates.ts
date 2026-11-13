@@ -88,7 +88,7 @@ import { affiliatePromotionFrom, readAffiliatePromotion, type AffiliatePromotion
 import { onAccount } from "@/lib/stripe-account";
 import { hasOwnField, ownField, plainObject, readStripePage, StripeListUnreadable, type StripePage } from "@/lib/stripe-list";
 import { STRIPE_TIMEOUT_MS } from "@/lib/fetch-timeout";
-import { DISPUTE_TAKES } from "@/lib/retained-revenue";
+import { DISPUTE_TAKES, disputeTakes } from "@/lib/retained-revenue";
 import { isSettled } from "@/lib/instant-pay";
 import { SITE_URL } from "@/lib/site-url";
 import {
@@ -2996,7 +2996,12 @@ async function takenSince(
     }
     if (read.unreadable > 0) return incomplete;
     for (const row of read.rows) {
-      if (!takes.has(row.status as string)) continue;
+      // A prevented dispute takes the money only when its own balance transactions say it left and did not come back
+      // (disputeTakes, as every other reader asks it): a network block leaves it with the creator, and a resolution's
+      // money left through a Refund this reading already takes off. Money that cannot be read holds the book.
+      const counts = list === "disputes" ? disputeTakes(row) : takes.has(row.status as string);
+      if (counts === null) return incomplete;
+      if (!counts) continue;
       const pi = paymentOf(row);
       if (pi === undefined) return incomplete;
       if (pi !== null && !takenBack(byIntent, seen, row, pi, currencyOf)) return incomplete;

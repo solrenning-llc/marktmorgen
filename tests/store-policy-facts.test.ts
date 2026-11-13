@@ -21,6 +21,13 @@ is("memberships: their rule and how to cancel them", ids({ sellsDigital: false, 
 is("canceling ends at the end of the period paid for", text({ sellsMemberships: true }).includes("end of the period you already paid for"), true);
 is("neither: no 14-day section", ids({ sellsDigital: false, sellsMemberships: false }), ["seller", "contact"]);
 
+// Claude 1's LEVE on #1824: the membership emails give the cancel link only when the store can let a member manage
+// it (canManage, lib/purchase-email.ts); otherwise they say to reply. The page says the same as the emails.
+part("How a member cancels: as the store's emails say it");
+is("with the member's own cancel link: by themselves, from the link", text({ sellsMemberships: true, membersSelfCancel: true } as Partial<PolicyFactsInput>).includes("You can cancel a membership yourself"), true);
+is("without it: never the link promised", text({ sellsMemberships: true }).includes("from the link in any email about it"), false);
+is("without it: reply to any email about it", text({ sellsMemberships: true }).includes("reply to any email about it"), true);
+
 part("Ad measurement only with a pixel on");
 is("no pixel: no sentence", ids({}).includes("measurement"), false);
 is("pixels named, consent and Global Privacy Control said", [text({ pixels: ["Meta", "TikTok"] }).includes("with Meta and TikTok"), text({ pixels: ["Meta"] }).includes("Global Privacy Control")], [true, true]);

@@ -56,7 +56,7 @@ export default async function StudioBlogPage({ searchParams }: Params) {
         <main id="content" className="container-page pb-20 pt-10 sm:pt-14">
           <StudioTrail store={store} here="Blog" />
           <h1 className="t-h2 mt-3">Posts on your store&apos;s address</h1>
-          <p className="mt-3 max-w-2xl text-ink-soft">
+          <p className="mt-3 max-w-2xl text-ink-soft [overflow-wrap:anywhere]">
             {`What you know, at marktmorgen.com/@${store.handle}/blog, where search engines find it and a post can end on one of your products. Each has its own address, its own title and description for search, and the blog has a feed readers and newsletter tools can follow.`}
           </p>
 

@@ -145,7 +145,7 @@ async function main(): Promise<void> {
   const studioPage = source("app/studio/community/page.tsx");
   is("the studio page asks unlocksOf, paying in studio requests", [studioPage.includes("unlocksOf(store, config, "), studioPage.includes("countStudio(")], [true, true]);
   const lockedLib = source("lib/community-locked.ts");
-  is("the real page's list and the preview share lockedOf and unlocksOf", [lockedLib.includes("lockedOf(config, opened)"), lockedLib.includes("await unlocksOf(store, config, take)")], [true, true]);
+  is("the real page's list and the preview share lockedOf and unlocksOf", [lockedLib.includes("lockedOf(config, opened)"), lockedLib.includes("await unlocksOf(store, config, take, excluded)")], [true, true]);
   const memberPreview = source("components/community-member-preview.tsx");
   is("the preview draws the real page's LockedSpaces from previewLocked", [memberPreview.includes("<LockedSpaces"), memberPreview.includes("previewLocked(")], [true, true]);
   is("MemberPreview draws LockedPreview", memberPreview.includes("<LockedPreview"), true);

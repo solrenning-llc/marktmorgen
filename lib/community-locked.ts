@@ -113,8 +113,11 @@ export async function unlocksOf(
   store: Store,
   config: CommunityConfig,
   take: (units: number) => Promise<boolean>,
+  excluded: ReadonlySet<string> = new Set(),
 ): Promise<Record<string, Unlock> | null> {
-  const locked = lockedOf(config, new Set());
+  // Only the spaces shown as locked (Codex U on #3007): those let in or unchecked (`excluded`) are neither read nor
+  // paid for, so they cannot spend the allowance meant for the spaces really locked.
+  const locked = lockedOf(config, excluded);
   if (locked.length === 0) return {};
   // `read`: the spaces' products judged so far, the cap's count. `asked`: every id read, as a product or an item;
   // `known`: what those reads found (an id asked and not here is gone from the store). `items`: the items read, paid.
@@ -185,8 +188,9 @@ export async function lockedSpaces(
   const notChecked: LockedSpace[] = lockedOf(config, opened)
     .filter(({ space }) => unchecked.has(space.id))
     .map(({ space }) => ({ name: space.name, about: space.about, unlock: "unchecked" }));
-  const locked = lockedOf(config, new Set([...opened, ...unchecked]));
+  const excluded = new Set([...opened, ...unchecked]);
+  const locked = lockedOf(config, excluded);
   if (locked.length === 0) return notChecked;
-  const unlocks = await unlocksOf(store, config, take);
+  const unlocks = await unlocksOf(store, config, take, excluded);
   return unlocks === null ? null : [...lockedList(locked, unlocks), ...notChecked];
 }

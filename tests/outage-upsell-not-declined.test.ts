@@ -7,10 +7,9 @@
  * tests/upsell-journey.test.ts.
  */
 import { TEST_CONSENT } from "./digital-consent-fixture";
-import { addProduct, claimHandle, ensureStatsId, setProductFunnel, setProductLink, setStripeAccount, setSubscription, setTax, storeForEmail } from "@/lib/store";
+import { addProduct, claimHandle, ensureStatsId, setProductFunnel, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { readUpsell, settleUpsells, takeUpsell, newUpsellKey } from "@/lib/upsell";
 import { shownRef } from "./upsell-ref-fixture";
-import { NO_TAX } from "@/lib/tax";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -28,7 +27,7 @@ const charges: Charge[] = [];
 /** What the next POST /payment_intents answers. */
 let nextCharge: "succeeded" | "requires_action" | "declined" | "lost" | "ratelimited" | "inflight" = "succeeded";
 const made: Record<string, unknown>[] = [];
-let sessions: Record<string, Record<string, unknown>> = {};
+const sessions: Record<string, Record<string, unknown>> = {};
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
@@ -110,7 +109,7 @@ async function main(): Promise<void> {
     ],
   });
   is("the funnel is accepted: an upsell, and a downsell after a no", saved.ok, true);
-  let store = (await storeForEmail(OWNER))!;
+  const store = (await storeForEmail(OWNER))!;
   const origin = "https://marktmorgen.com";
   const browser = newUpsellKey();
 

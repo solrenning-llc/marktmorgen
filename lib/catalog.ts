@@ -1169,9 +1169,13 @@ export async function studioShelf(
   // command (readTitles). Only the fifty products actually shown are read.
   // This used to read every product in the store to find fifty.
   const titles = await readTitles(store);
+  // Folded as the store page's search folds words (searchWords: no accents, no case), so "creme brulee" finds
+  // "Crème brûlée class" here as it does for a buyer; a part of a word still finds it.
   const needle = query.toLowerCase();
+  const folded = searchWords(needle).join(" ");
   const ordered = productIds(store).filter((id) => titles.has(id));
-  const matches = needle ? ordered.filter((id) => (titles.get(id) ?? "").toLowerCase().includes(needle)) : ordered;
+  const has = (title: string) => (folded ? searchWords(title).join(" ").includes(folded) : title.toLowerCase().includes(needle));
+  const matches = needle ? ordered.filter((id) => has(titles.get(id) ?? "")) : ordered;
   const pages = Math.max(1, Math.ceil(matches.length / STUDIO_PAGE_SIZE));
   const page = Math.min(Math.max(1, asked), pages);
   const from = (page - 1) * STUDIO_PAGE_SIZE;

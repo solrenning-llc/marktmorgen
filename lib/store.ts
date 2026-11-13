@@ -188,7 +188,7 @@ export type { CourseRef, Listing, Product };
  * inventing a different one for this store alone.
  */
 import { HANDLE_PATTERN } from "@/lib/store-handle-pattern";
-import { type ExitNotice, exitHoldSeconds, readExitNotice, releasedValue } from "@/lib/exit-redirect-rules";
+import { type ExitDestination, type ExitNotice, exitDestination, exitHoldSeconds, mayChooseExit, readExitNotice, releasedValue } from "@/lib/exit-redirect-rules";
 export { HANDLE_PATTERN } from "@/lib/store-handle-pattern";
 
 
@@ -1913,8 +1913,10 @@ export async function closeStoreRecord(store: Store, extraKeys: string[] = []): 
   // addresses are held until it ends, never less than the quarantine
   // (lib/exit-redirect-rules.ts); with none, exactly as before.
   const now = Date.now();
-  const released = releasedValue(new Date(now), store.exitNotice ?? null);
-  const hold = store.exitNotice ? exitHoldSeconds(store.exitNotice.closedAt, now, RELEASE_QUARANTINE_DAYS) : RELEASE_QUARANTINE_DAYS * 24 * 60 * 60;
+  // A suspended store's old address carries no notice (review of #3730).
+  const notice = store.suspended ? null : store.exitNotice ?? null;
+  const released = releasedValue(new Date(now), notice);
+  const hold = notice ? exitHoldSeconds(notice.closedAt, now, RELEASE_QUARANTINE_DAYS) : RELEASE_QUARANTINE_DAYS * 24 * 60 * 60;
   const owner = await ownerKey(storeRef(store));
   await redisPipeline([
     ...[store.handle, ...store.previousHandles].map((handle) => ["SET", handleKey(handle), released, "EX", hold]),
@@ -1923,6 +1925,61 @@ export async function closeStoreRecord(store: Store, extraKeys: string[] = []): 
     ["ZREM", ENDED_INDEX, storeRef(store)],
     ["SREM", SHARING_INDEX, storeRef(store)],
   ]);
+}
+
+export type ExitChoice =
+  | { ok: true; store: Store }
+  | { ok: false; reason: "none" | "not_closing" | "suspended" | Exclude<ExitDestination, { ok: true }>["reason"] };
+
+/**
+ * Keeps, or takes away (an empty address), the new address a closing
+ * store's owner gives for its moved notice (97 [D2-OPEN-EXIT];
+ * lib/exit-redirect-rules.ts): only for a store that closes whole and only
+ * before its closing day (mayChooseExit), with that store's own closing day,
+ * under the store's lock. A refused choice changes nothing.
+ */
+export async function chooseExitNotice(
+  ref: string,
+  raw: unknown,
+  closing: { endedAt: number; day: number } | null,
+  now = Date.now(),
+): Promise<ExitChoice> {
+  const result = await withStore<ExitChoice>(ref, async (store, save) => {
+    // Taken away at any time before the closing day, even by a store no longer closing (review of #3730); from that
+    // day the old address may already carry it (closeStoreRecord), so it stays as the visitors see it.
+    if (raw === "" || raw === null || raw === undefined) {
+      if (!Number.isFinite(now) || (closing && now >= closing.day)) return { ok: false, reason: "not_closing" };
+      const { exitNotice: _gone, ...rest } = store;
+      void _gone;
+      return { ok: true, store: await save(rest) };
+    }
+    if (!closing || !mayChooseExit({ endedAt: closing.endedAt, closingDay: closing.day, now })) return { ok: false, reason: "not_closing" };
+    // A store switched off after notices about its content never sends its visitors elsewhere.
+    if (store.suspended) return { ok: false, reason: "suspended" };
+    const checked = exitDestination(raw);
+    if (!checked.ok) return { ok: false, reason: checked.reason };
+    return { ok: true, store: await save({ ...store, exitNotice: { to: checked.url, host: checked.host, closedAt: closing.day, setAt: now } }) };
+  });
+  return result ?? { ok: false, reason: "none" };
+}
+
+/**
+ * The closing day, once it has begun (lib/plan-closing.ts closingDay): a moved notice chosen before it is given the day
+ * the store really closed, so the copy its old address keeps (closeStoreRecord) counts its 90 days from that day, as
+ * the page does (Claude 1's MEDIUM 2 on #3730). Under the store's lock. true once kept, or when there is nothing to
+ * change (no notice, or that day already); false when the record could not be read or saved.
+ */
+export async function setExitNoticeDay(ref: string, day: number): Promise<boolean> {
+  if (!Number.isFinite(day) || day <= 0) return false;
+  const done = await withStore<boolean>(ref, async (store, save) => {
+    if (!store.exitNotice || store.exitNotice.closedAt === day) return true;
+    await save({ ...store, exitNotice: { ...store.exitNotice, closedAt: day } });
+    return true;
+  }).catch((error: unknown) => {
+    console.error("a moved notice could not be given the real closing day", error);
+    return null;
+  });
+  return done === true;
 }
 
 export type RenameResult =

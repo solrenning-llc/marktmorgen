@@ -5,6 +5,7 @@ import {PATH_WORDING_PRIVACY} from "@/lib/path-wording-rules";
 import {RETURN_PRIVACY_LINE} from "@/lib/path-return-rules";
 import { PAST_CALL_DAYS } from "@/lib/store-data-rules";
 import { CLOSING_DAYS, ERASE_WITHIN_DAYS } from "@/lib/plan-closing-rules";
+import { EXIT_NOTICE_DAYS } from "@/lib/exit-redirect-rules";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { LegalPage, LegalSection } from "@/components/legal-page";
@@ -2060,7 +2061,13 @@ export default function PrivacyPage() {
           for the store&apos;s plan and any fee we charged, in our billing
           records and on our own Stripe account, and a note of the dates the
           store ended and closed, kept for about a year. The store&apos;s
-          address is held back from anybody else for 30 days.
+          address is held back from anybody else for 30 days. If, before its
+          closing day, the creator gave the store&apos;s new address, that
+          address and the closing day are kept with the old one instead, for
+          {` ${EXIT_NOTICE_DAYS} `}days after the store closes, and shown to
+          anyone who opens the old address: nothing else, and never who the
+          creator is. The old address is held back from anybody else for as
+          long.
         </p>
         <p>
           A creator&apos;s list is kept for as long as their store exists, or

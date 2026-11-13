@@ -1,7 +1,10 @@
 import { MovedNotice } from "@/components/moved-notice";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteNav } from "@/components/site-nav";
-import { exitAnswerForValue } from "@/lib/exit-redirect-rules";
+import { exitAnswerForStore, exitAnswerForValue } from "@/lib/exit-redirect-rules";
+import { closingDayBegun } from "@/lib/plan-closing";
+import { standingOf } from "@/lib/plan-standing";
+import { cache } from "react";
 import { VisitUsBlock } from "@/components/visit-us-block";
 import { assistReminderShown } from "@/lib/assistant-reminder";
 import { withinStore } from "@/lib/metered-limits";
@@ -51,7 +54,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { headers } from "next/headers";
 import { notFound, permanentRedirect, redirect } from "next/navigation";
-import { type Listing, handleForPage, normaliseHandle, storeForPage } from "@/lib/store";
+import { type Listing, type Store, handleForPage, normaliseHandle, storeForPage, storeRef } from "@/lib/store";
 import { KIND, readPage, sellsAny, visibleCount } from "@/lib/catalog";
 import { groupBySection } from "@/lib/store-sections";
 import { offeredItems } from "@/lib/bundles";
@@ -110,6 +113,28 @@ async function load(raw: string) {
 }
 
 /**
+ * Whether a store's closing day has begun, read once a render for the page and its metadata (React cache, keyed by the
+ * store's ref): two commands (lib/plan-closing.ts closingDayBegun). An unknown read is "unknown", never "not begun".
+ */
+const closingBegun = cache((ref: string) => closingDayBegun(ref).catch(() => "unknown" as const));
+
+/**
+ * The moved notice of a store that has closed but whose record is not yet
+ * deleted: only once its closing day has really begun, its files removed or
+ * not (review of #3730), read only for a store with a notice that is not
+ * suspended and whose plan has ended, since a store that pays never closes,
+ * so its front page reads nothing more. A closing given up, moved later or
+ * not readable shows the store as always.
+ */
+async function closingNotice(store: Store) {
+  if (!store.exitNotice || store.suspended) return null;
+  if (standingOf(store, Date.now() / 1000) !== "ended") return null;
+  const closing = await closingBegun(storeRef(store));
+  const answer = exitAnswerForStore(store, closing, Date.now());
+  return answer.kind === "moved" ? answer : null;
+}
+
+/**
  * A closed store's moved notice at its old address (97 [D2-OPEN-EXIT]), read
  * from the same one read of the address the page already made
  * (handleForPage), never a second one.
@@ -131,6 +156,9 @@ export async function generateMetadata({ params, searchParams }: Params): Promis
     return { title: "Not found — Marktmorgen" };
   }
   const { store } = found;
+  // A closed store showing its moved notice is never indexed (review of #3730).
+  const closedNotice = await closingNotice(store);
+  if (closedNotice) return { title: "This store has moved — Marktmorgen", robots: { index: false, follow: false } };
 
   // A store on its own live domain names that as its address for search engines.
   const ownDomain = store.domain?.liveAt && canUseDomain(store) ? `https://${store.domain.name}/` : null;
@@ -207,6 +235,20 @@ export default async function StorePage({ params, searchParams }: Params) {
   // On the store's own domain the address in the bar is the domain, so there
   // is nothing to correct.
   if (asked !== store.handle && !reachedOn) permanentRedirect(`/@${store.handle}`);
+
+  // A store whose closing day has come, while its record is not yet deleted:
+  // the moved notice its owner chose, from the record already read
+  // (97 [D2-OPEN-EXIT]). Before that day, or with none, the store as always.
+  const closedNotice = await closingNotice(found.store);
+  if (closedNotice) {
+    return (
+      <div className="flex min-h-screen flex-col bg-paper text-ink">
+        <SiteNav />
+        <MovedNotice to={closedNotice.to} host={closedNotice.host} until={closedNotice.until} />
+        <SiteFooter />
+      </div>
+    );
+  }
 
   // A store rests until its window turns once the visits or the requests its
   // standing covers this window are used, or when they cannot be read

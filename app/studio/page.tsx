@@ -211,6 +211,7 @@ import { COMMISSION_LIVE, canUse, hasPro, PLAN_PRICES, PRO_MONTHLY_EMAILS, PRO_O
 import { ASSISTANT_ON_SALE, PLANS_ON_SALE } from "@/lib/opening";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { unusedSummary } from "@/lib/closing-refunds";
+import { EXIT_NOTICE_DAYS } from "@/lib/exit-redirect-rules";
 import { holdCounts } from "@/lib/closing-holds";
 import { CLOSING_CHECKOUT_SECONDS, lastPlanMoment } from "@/lib/closing-plan-guard";
 import { type Permission, type Role, ROLE_NAMES, ROLE_SUMMARIES, can } from "@/lib/team-roles";
@@ -2622,6 +2623,18 @@ export default async function StudioPage({
                     </p>
                   </div>
                 ) : null}
+                {closing.today ? null : (
+                  <div className="mt-4">
+                    <p className="text-ink">
+                      {`Moving your store somewhere else? Give its new address, and for ${EXIT_NOTICE_DAYS} days after it closes, anyone who opens its old address here sees a short notice with a link to it.`}
+                    </p>
+                    <p className="mt-3">
+                      <a href={studioPath(store!, "", "moved")} className="btn btn-secondary">
+                        {store!.exitNotice ? "Change your new address" : "Give your new address"}
+                      </a>
+                    </p>
+                  </div>
+                )}
                 <p className="mt-4 text-ink-soft">
                   {`We keep no copy of your sales: every sale, refund and payout is on your own Stripe account, and stays there. Your account and sign-in stay. Tell your students to download their course certificates before that day: they can until then, and not after. Starting a plan again before that day keeps your store: everything stays as it is, your members' payments go on as they were with nothing charged for the days in between, and nothing is refunded.`}
                 </p>

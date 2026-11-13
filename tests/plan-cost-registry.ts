@@ -1478,7 +1478,7 @@ export const PER_PAYMENT_LINES: CostLine[] = [
     monthlyUsd: () => MAX_ADDRESSES * (EXIT_RELEASED_MAX_BYTES + KEY_NAME_BYTES) * (EXIT_NOTICE_DAYS / 30) * DB_BYTE_MONTH,
     sources: [
       { file: "lib/exit-redirect-rules.ts", names: ["EXIT_NOTICE_DAYS", "EXIT_RELEASED_MAX_BYTES", "exitHoldSeconds", "releasedValue"] },
-      { file: "lib/store.ts", names: ["closeStoreRecord", "releasedValue(new Date(now), store.exitNotice ?? null)"] },
+      { file: "lib/store.ts", names: ["closeStoreRecord", "releasedValue(new Date(now), notice)"] },
       { file: "lib/store-field-rules.ts", names: ["MAX_ADDRESSES"] },
     ],
     basis: "Once for each store, so against each of its payments, like the closure: every address it can have (MAX_ADDRESSES, its own and the ones it used before) held for the whole EXIT_NOTICE_DAYS at the longest value a notice can make (EXIT_RELEASED_MAX_BYTES) and its name, at Upstash's storage rate. The addresses were already held RELEASE_QUARANTINE_DAYS with a short value; the whole is counted here again, not only the difference. Writing them is the closing's own SETs (closure), with no command more. A visit to an old address already reads its key, so the notice adds no command per visit (lib/exit-redirect-rules.ts).",

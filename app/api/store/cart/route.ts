@@ -140,7 +140,8 @@ export async function GET(request: NextRequest) {
     return listing ? [{ id: item.id, title: item.title, pairs: listing.pairs ?? [] }] : [];
   });
   // With the coming-soon reading unknown nothing is offered either: a suggestion or a bundle could be a product not out yet.
-  const suggest = coming ? await suggestions(store, inCart, ids, coming.soon, country, locale).catch(() => []) : [];
+  // The suggestions read what is left of a limited one only within the reads the cart's own lines left (MAX_CART in all).
+  const suggest = coming ? await suggestions(store, inCart, ids, coming.soon, country, locale, MAX_CART - left.size).catch(() => []) : [];
   const bundle = coming ? bundleSwap(store, payable, ids, coming.soon, country, locale) : null;
   return Response.json(
     {
@@ -211,6 +212,7 @@ async function suggestions(
   soon: Set<string>,
   country: string,
   locale: string,
+  stockReads: number,
 ): Promise<Suggestion[]> {
   if (inCart.length === 0 || ids.length >= MAX_CART || !canSell(store)) return [];
   const words = cartWords(store.language);
@@ -234,10 +236,19 @@ async function suggestions(
   if (wanted.length === 0) return [];
   const listed = await readListings(store, wanted.map((want) => want.id));
   const out: Suggestion[] = [];
+  let reads = stockReads;
   for (const want of wanted) {
     const product = listed.find((p) => p.id === want.id);
     if (!product || !cartable(product) || !canSellProduct(store, product)) continue;
     if (product.keys && (await outOfKeys(store, product).catch(() => true))) continue;
+    // A limited one with none left, or whose count cannot be read, is not offered: its line would only say "Sold out" (lib/stock.ts).
+    // Past the reads the cart's own lines left, a limited one is passed over unread, so the open cart reads at most MAX_CART counts.
+    if (product.stock !== null) {
+      if (reads <= 0) continue;
+      reads -= 1;
+      const left = await stockLeft(store, product).catch(() => undefined);
+      if (left !== null && !(typeof left === "number" && left > 0)) continue;
+    }
     out.push({
       id: want.id,
       title: product.title,

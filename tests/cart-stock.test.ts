@@ -29,7 +29,7 @@ import { cartable } from "@/lib/cart-rules";
 import { createCartCheckout, offersCart } from "@/lib/cart-checkout";
 import { KIND, parseProduct } from "@/lib/catalog";
 import { confirmCartStock, releaseCartStockHolds, stockLeft, withCartStockHolds } from "@/lib/stock";
-import { addProduct, claimHandle, ensureStatsId, setProductExtras, setProductKeys, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { addProduct, claimHandle, ensureStatsId, setProductExtras, setProductKeys, setProductLink, setProductPairs, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { StripeError, onAccount } from "@/lib/stripe-account";
 import { GET as readCart, POST as payCart } from "@/app/api/store/cart/route";
 import { NO_DEAL } from "@/lib/cart-rules";
@@ -404,6 +404,15 @@ async function main(): Promise<void> {
     is(`a key count answered ${JSON.stringify(reply)}: nothing opened, try again`, answer.to, "?cart=error");
   }
   is("no checkout was made on an unknown key count", opened, before);
+
+  part("The cart's suggestions never offer a sold out one, nor one whose count cannot be read");
+  const card = await addProduct(OWNER, "Card", "", "20", null);
+  if (!card.ok) throw new Error("no card");
+  await setProductLink(OWNER, card.product.id, "https://example.com/card");
+  const paired = await setProductPairs(OWNER, made.Guide, [made.Print, made.Poster, card.product.id]);
+  if (!paired.ok) throw new Error("no pairs on the guide");
+  const offered = (await (await readCart(new NextRequest(`https://marktmorgen.com/api/store/cart?handle=printshop&ids=${made.Guide}`))).json()) as { suggest: { id: string }[] };
+  is("the held print (none left) and the poster (count unread) are not suggested; the card is", offered.suggest.map((one) => one.id), [card.product.id]);
 
   part("Where else a sold out one is not offered");
   const { readFileSync } = await import("node:fs");

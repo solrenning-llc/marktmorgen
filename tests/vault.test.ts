@@ -198,6 +198,12 @@ async function main() {
     return [isVaultPath(path), readVaultPath(path) !== null, ownsPath(path, FOLDER, "82f9fc6354")];
   }), dotted.map(() => [true, true, true]));
   is("an ellipsis becomes one dot", keyName("Chapter 1\u2026 Draft.pdf"), "Chapter-1.-Draft.pdf");
+  // Codex X5's MEDIUM on #4356: a name kept at 104 to 120 characters makes a last piece of 121 to 137 (the token, a
+  // hyphen, the name), which opening accepted and isVaultPath refused, so the upload could never be signed or canceled.
+  const longest = ["x".repeat(99) + ".pdf", "x".repeat(116) + ".pdf", "y".repeat(200) + ".epub"].map((name) => vaultPath(FOLDER, "82f9fc6354", "0011223344556677", name));
+  is("a name at the length the store keeps still makes a path every rule takes", longest.map((path) => [isVaultPath(path), readVaultPath(path) !== null, ownsPath(path, FOLDER, "82f9fc6354")]), longest.map(() => [true, true, true]));
+  is("a last piece over the token and a name of 120 is still refused", isVaultPath(`vault/${FOLDER}/82f9fc6354/0011223344556677-${"z".repeat(121)}`), false);
+  is("and a long piece that is not the last is still refused", isVaultPath(`vault/${FOLDER}/${"q".repeat(121)}/0011223344556677-a.pdf`), false);
 
   part("How an upload is cut into pieces");
   is("a small file goes whole", [pieceCount(1), pieceCount(PIECE_BYTES)], [1, 1]);
@@ -235,6 +241,10 @@ async function main() {
   is("a file named with an ellipsis opens", ellipsis.ok, true);
   is("and its pieces can be signed, as any other's", ellipsis.ok ? (await signPieces(ellipsis.upload.pathname, [1, 2]))?.length : null, 2);
   if (ellipsis.ok) is("and it can be canceled at the store", await abortVaultUpload(ellipsis.upload.pathname), true);
+  const lengthy = await openVaultUpload({ folder: FOLDER, ownerId: "82f9fc6354", name: "x".repeat(116) + ".pdf", bytes: PIECE_BYTES + 1, type: "application/pdf" });
+  is("a file with a 120-character name opens", lengthy.ok, true);
+  is("and its pieces can be signed", lengthy.ok ? (await signPieces(lengthy.upload.pathname, [1, 2]))?.length : null, 2);
+  if (lengthy.ok) is("and it can be canceled at the store", await abortVaultUpload(lengthy.upload.pathname), true);
   const etags: string[] = [];
   for (const [i, address] of (addresses ?? []).entries()) etags.push((await send(address.url, big.slice(i * PIECE_BYTES, (i + 1) * PIECE_BYTES))) ?? "");
   is("closing it with a piece missing from the list is refused", await closeVaultUpload(pathname, etags.slice(0, 2)), { ok: false, reason: "invalid" });

@@ -4,12 +4,13 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
+import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { PaymentRequestsStudio, type Prefill } from "@/components/payment-requests-studio";
 import { can } from "@/lib/team-roles";
 import { readMoney, moneyField } from "@/lib/money";
 import { allowanceFor } from "@/lib/store-allowance-rules";
-import { allowanceUsed } from "@/lib/store-allowance";
+import { allowanceUsedExact } from "@/lib/store-allowance";
 import { shareOfSaleWords } from "@/lib/fee-words";
 import { MAX_LINE_TEXT, MAX_NAME, dueRange, requestLimitsFor } from "@/lib/payment-request-rules";
 import { listRequests, openCount } from "@/lib/payment-request-store";
@@ -40,7 +41,7 @@ export default async function StudioRequestsPage({ searchParams }: Params) {
   const { store } = view;
   const now = new Date().getTime();
   const listed = await listRequests(store, now);
-  const [requests, used, openNow] = await Promise.all([listed === null ? Promise.resolve([]) : refreshRefunds(store, listed, now), allowanceUsed(store, "email", now), openCount(store.sid, now).catch(() => null)]);
+  const [requests, used, openNow] = await Promise.all([listed === null ? Promise.resolve([]) : refreshRefunds(store, listed, now), allowanceUsedExact(store, "email", now), openCount(store.sid, now).catch(() => null)]);
   const open = requestsOpen(store);
   const read = (name: string, max: number) => (typeof query[name] === "string" ? (query[name] as string).slice(0, max) : "");
   const typed = read("amount", 20);
@@ -60,7 +61,7 @@ export default async function StudioRequestsPage({ searchParams }: Params) {
       />
       <StudioStorePin sid={store.sid}>
         <main id="content" className="container-page pb-20 pt-10 sm:pt-14">
-          <p className="eyebrow">Payment requests</p>
+          <StudioTrail store={store} here="Payment requests" />
           <h1 className="t-h2 mt-3">Ask one person to pay you, with a link</h1>
           <p className="mt-3 max-w-2xl text-ink-soft">
             A custom amount for work you agreed on, as an invoice with lines, a due date if you want one, and its receipt. Each is paid like any

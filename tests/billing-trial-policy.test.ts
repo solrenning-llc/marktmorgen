@@ -17,6 +17,9 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
       ? Response.json({ data: [{ id: "price_TrialPolicy0001", unit_amount: PLAN_PRICES[choice.tier][choice.cycle], currency: "usd", recurring: { interval: choice.cycle, interval_count: 1 } }] })
       : Response.json({ error: { message: "Synthetic catalog unavailable" } }, { status: 404 });
   }
+  // Once per person (R26): the address has no customer at Stripe yet; a customer named to the checkout no longer exists.
+  if (url.pathname === "/v1/customers/search" && (init?.method ?? "GET") === "GET") return Response.json({ object: "search_result", data: [], has_more: false, next_page: null });
+  if (url.pathname === "/v1/subscriptions" && (init?.method ?? "GET") === "GET") return Response.json({ error: { message: "No such customer" } }, { status: 400 });
   if (url.pathname !== "/v1/checkout/sessions" || init?.method !== "POST") throw new Error("Unexpected synthetic checkout operation");
   const body = new URLSearchParams(String(init.body ?? ""));
   sent.push({ body, headers: new Headers(init.headers) });
@@ -60,7 +63,8 @@ async function main(): Promise<void> {
   catalog = false; refusal = "customer"; sent.length = 0;
   await createBillingCheckout(fresh, origin, choice, "cus_TrialPolicy0001");
   is("missing customer uses the existing single fallback", sent.length, 2);
-  for (const request of sent) policy(request.body, true);
+  // A returning customer's history cannot be read (Stripe no longer has it): no trial, never a trial on a guess (R26).
+  for (const request of sent) policy(request.body, false);
   is("only the stale customer reference changes", [sent[0].body.get("customer"), sent[1].body.get("customer"), sent[1].body.get("customer_email")], ["cus_TrialPolicy0001", null, fresh.email]);
 
   part("No additional store or returning customer receives a new trial");

@@ -16,6 +16,7 @@ import { requestsOpen, settleFromReturn } from "@/lib/payment-requests";
 import { confirmPurchase } from "@/lib/purchase-email";
 import { PrintButton } from "@/components/print-button";
 import { StoreResting } from "@/components/store-resting";
+import { WhoAnswers } from "@/components/who-answers";
 
 type Params = {
   params: Promise<{ handle: string; request: string }>;
@@ -142,6 +143,7 @@ export default async function PaymentRequestPage({ params, searchParams }: Param
               <input type="hidden" name="request" value={request.id} />
               <button type="submit" className="btn st-btn w-full">{w.pay(total)}</button>
               <p className="st-muted mt-3 text-sm">{w.secure(store.name)}</p>
+              <WhoAnswers store={store} className="st-muted mt-1 text-sm" />
               {store.tax.enabled ? <p className="st-muted mt-1 text-sm">{w.tax}</p> : null}
               <p className="st-muted mt-1 text-sm">{w.until(said.date(request.expiresAt))}</p>
               {rehearsal ? <p className="st-muted mt-1 text-sm font-semibold">{w.testMode}</p> : null}

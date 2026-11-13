@@ -1,9 +1,11 @@
 import type { NextRequest } from "next/server";
-import { StoreFullError, setAffiliateSetting, storeForEmail, storeForId } from "@/lib/store";
+import { StoreFullError, setAffiliateSetting, storeForEmail, storeForId, storeIdGone } from "@/lib/store";
 import { readMoney } from "@/lib/money";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { guardStoreWrite, text } from "@/lib/store-request";
-import { MAX_COMMISSION, MIN_COMMISSION, commissionRate, parseAffiliateSetting, readBonuses } from "@/lib/affiliate-setting";
-import { parsePartnerShare, shareProblem } from "@/lib/partner-share";
+import { MAX_COMMISSION, MIN_COMMISSION, parseAffiliateSetting, readBonuses } from "@/lib/affiliate-setting";
+import { parsePartnerShare } from "@/lib/partner-share";
+import { LockBusyError, holdLock } from "@/lib/redis-lock";
 import { readListings } from "@/lib/catalog";
 import { answerInvite, waitingOne } from "@/lib/partner-invites";
 import {
@@ -18,13 +20,20 @@ import {
   undoMany,
   undoRates,
   invitePartner,
-  listPartners,
+  partnerShareProblem,
+  commissionProblem,
+  commissionRaised,
   readAffiliate,
   releaseHold,
   removePayout,
   setAffiliateRate,
   setPartnerShare,
+  ShareCapError,
+  StudioNotPaidError,
+  type Charge,
+  withPartnerLock,
 } from "@/lib/affiliates";
+import { holdStudio } from "@/lib/studio-route";
 import { PROMO_ID_PATTERN, giveCode, takeCodeBack } from "@/lib/affiliate-codes";
 import { leadProblem } from "@/lib/affiliate-lead-rules";
 import { planTerms, readNoticeDays } from "@/lib/affiliate-notice";
@@ -78,6 +87,14 @@ export async function POST(request: NextRequest) {
   const body = guarded.body;
   const action = text(body.action, 20);
   const fail = (error: string, status = 400) => Response.json({ ok: false, error }, { status });
+  // What reads the whole program (the 90% cap's checks, a change in bulk) takes, before each read, the studio
+  // requests it costs at its worst (lib/affiliates.ts bulkUnits), on top of the one this press took, and once read
+  // gives back what it did not need (rule 30; coordinator, 2026-11-07). Not taken: nothing read, the press refused
+  // (StudioNotPaidError, 429), or in bulk that part left out and named.
+  const charge: Charge = async (units) => {
+    const held = await holdStudio(guarded.store, units);
+    return held.ok ? { give: held.give, force: held.force } : null;
+  };
 
   try {
     if (action === "settings") {
@@ -103,22 +120,49 @@ export async function POST(request: NextRequest) {
       // Removing affiliates who bring nothing (630 [HN6](3)): 0, or 90 to 730 days, refused otherwise.
       const idleRefused = idleProblem(body.idle);
       if (idleRefused) return fail(idleRefused);
-      const before = (await storeForEmail(guarded.ref))?.affiliates ?? null;
+      // Read again for the terms as they are this moment. The guard found the store, so a read that comes back
+      // empty is not "no program yet": a cut would skip the notice its affiliates were promised. Nothing is saved.
+      const fresh = await storeForEmail(guarded.ref);
+      if (!fresh) return fail("unavailable", 503);
       const terms = (s: { percent: number; rates: Record<string, number>; days: number }) => ({ percent: s.percent, rates: s.rates, days: s.days });
-      // A cut waits the longer of the notice the program had, as its affiliates were told, and the one chosen now;
-      // and never ends before a notice already running.
-      const plan = before
-        ? planTerms(terms(before), terms(setting), Math.max(notice, before.notice ?? 0), Math.floor(Date.now() / 1000), before.pending ?? null)
-        : { current: terms(setting), pending: null };
-      // Not sent: kept as it was. Switched on or changed: a warning given before now is set aside (idleStep).
-      // Never while the program credits memberships, whose sales are not written down (idleRemovalAllowed).
-      const idle = !idleRemovalAllowed(setting) ? 0 : body.idle === undefined ? (before?.idle ?? 0) : readIdleDays(body.idle);
-      // Switched on, changed, or the program switched back on after a pause (when no link could earn): the count starts now.
-      const restart = idle !== (before?.idle ?? 0) || (setting.enabled && before?.enabled === false);
-      const idleOn = idle > 0 ? (restart ? Math.floor(Date.now() / 1000) : (before?.idleOn ?? 0)) : 0;
-      const result = await setAffiliateSetting(guarded.ref, { ...setting, ...plan.current, notice, pending: plan.pending, idle, idleOn });
-      if (!result.ok) return fail(result.reason);
-      return Response.json({ ok: true });
+      // What is saved, worked out from the store as read: the same whether it is read once, or again under the lock.
+      const nextOf = (now: NonNullable<typeof fresh>) => {
+        const before = now.affiliates;
+        // A cut waits the longer of the notice the program had, as its affiliates were told, and the one chosen now;
+        // and never ends before a notice already running.
+        const plan = before
+          ? planTerms(terms(before), terms(setting), Math.max(notice, before.notice ?? 0), Math.floor(Date.now() / 1000), before.pending ?? null)
+          : { current: terms(setting), pending: null };
+        // Not sent: kept as it was. Switched on or changed: a warning given before now is set aside (idleStep).
+        // Never while the program credits memberships, whose sales are not written down (idleRemovalAllowed).
+        const idle = !idleRemovalAllowed(setting) ? 0 : body.idle === undefined ? (before?.idle ?? 0) : readIdleDays(body.idle);
+        // Switched on, changed, or the program switched back on after a pause (when no link could earn): the count starts now.
+        const restart = idle !== (before?.idle ?? 0) || (setting.enabled && before?.enabled === false);
+        const idleOn = idle > 0 ? (restart ? Math.floor(Date.now() / 1000) : (before?.idleOn ?? 0)) : 0;
+        return { ...setting, ...plan.current, notice, pending: plan.pending, idle, idleOn };
+      };
+      const save = async (next: ReturnType<typeof nextOf>) => {
+        const result = await setAffiliateSetting(guarded.ref, next);
+        return result.ok ? Response.json({ ok: true }) : fail(result.reason);
+      };
+      // A program with no records yet has no partners to check, and nothing a partner could rely on.
+      if (!fresh.statsId) return save(nextOf(fresh));
+      // Every save is worked out and written under the program's partner lock, from the store read again exactly now
+      // (pre-review L3): judged against what the request read, a commission lowered meanwhile, and the room it left
+      // taken by a partner, would be put back by a save that "raises nothing". A commission that goes up anywhere (the
+      // program's, or a product's) over the terms as they are now is checked against the 90% cap on every product with
+      // partners, its people read exactly now (#2995 follow-up). Over it: 409, nothing saved.
+      return await withPartnerLock(fresh, async (held) => {
+        const now = await storeForEmail(guarded.ref);
+        if (!now || now.statsId !== fresh.statsId) return fail("unavailable", 503);
+        const again = nextOf(now);
+        if (commissionRaised(now.affiliates, again)) {
+          const problem = await commissionProblem(now, { terms: again }, charge);
+          if (problem) return fail(`share_${problem}`, 409);
+        }
+        if (!(await holdLock(held))) return fail("unavailable", 503);
+        return save(again);
+      });
     }
 
     const store = await storeForEmail(guarded.ref);
@@ -147,8 +191,9 @@ export async function POST(request: NextRequest) {
       if (action === "bulk") {
         const ids = Array.isArray(body.ids) ? body.ids.slice(0, MAX_BULK_DECISIONS).map((id) => text(id, 20)).filter(Boolean) : [];
         if (!ids.length) return fail("unknown");
-        const before = await decideMany(store, ids, decision);
-        return Response.json({ ok: true, before });
+        // Those left waiting (over the cap, or not checked just now) are named, so the studio can say who and why.
+        const { before, held } = await decideMany(store, ids, decision, charge);
+        return Response.json({ ok: true, before, held });
       }
       const sent = Array.isArray(body.before) ? body.before.slice(0, MAX_BULK_DECISIONS) : [];
       const before = sent.flatMap((raw: unknown) => {
@@ -158,8 +203,10 @@ export async function POST(request: NextRequest) {
         // Only a pending application goes back: nothing else was decided in bulk.
         return id && v.status === "pending" && Number.isSafeInteger(decidedAt) && decidedAt >= 0 ? [{ id, status: "pending" as const, decidedAt }] : [];
       });
-      const undone = await undoMany(store, before, decision);
-      return Response.json({ ok: true, undone });
+      // With the studio requests not taken nothing was put back: said as such (429), and the undo stays on the screen.
+      const undone = await undoMany(store, before, decision, Date.now(), charge);
+      if (undone.used) return fail("studio_used", 429);
+      return Response.json({ ok: true, undone: undone.undone, left: undone.left });
     }
     // The share of several affiliates at once, and its undo (630 [HN6](4) unit 2).
     if (action === "bulk-rate" || action === "bulk-rate-undo") {
@@ -168,8 +215,9 @@ export async function POST(request: NextRequest) {
       if (action === "bulk-rate") {
         const ids = Array.isArray(body.ids) ? body.ids.slice(0, MAX_BULK_DECISIONS).map((id) => text(id, 20)).filter(Boolean) : [];
         if (!ids.length) return fail("unknown");
-        const before = await setRatesMany(store, ids, rate);
-        return before ? Response.json({ ok: true, before }) : fail("rate");
+        // Those whose new share would pass the cap, or could not be checked just now, keep theirs and are named.
+        const changed = await setRatesMany(store, ids, rate, charge);
+        return changed ? Response.json({ ok: true, before: changed.before, refused: changed.refused }) : fail("rate");
       }
       const sent = Array.isArray(body.before) ? body.before.slice(0, MAX_BULK_DECISIONS) : [];
       const before = sent.flatMap((raw: unknown) => {
@@ -178,10 +226,17 @@ export async function POST(request: NextRequest) {
         const was = v.rate === null ? null : Number(v.rate);
         return id && (was === null || (Number.isInteger(was) && was >= MIN_COMMISSION && was <= MAX_COMMISSION)) ? [{ id, rate: was }] : [];
       });
-      return Response.json({ ok: true, undone: await undoRates(store, before, rate) });
+      const undone = await undoRates(store, before, rate, charge);
+      if (undone.used) return fail("studio_used", 429);
+      return Response.json({ ok: true, undone: undone.undone, left: undone.left });
     }
     if (action === "approve" || action === "decline" || action === "remove" || action === "restore") {
-      const done = await decide(store, text(body.id, 20), action);
+      // A share that would pass the cap once its holder is approved again: refused, nothing written (lib/affiliates.ts).
+      const done = await decide(store, text(body.id, 20), action, charge).catch((error: unknown) => {
+        if (error instanceof ShareCapError) return error;
+        throw error;
+      });
+      if (done instanceof ShareCapError) return fail(`share_${done.problem}`, 409);
       return done ? Response.json({ ok: true }) : fail("unknown");
     }
     if (action === "payout") {
@@ -203,7 +258,7 @@ export async function POST(request: NextRequest) {
       const rate = body.rate === null || body.rate === "" ? null : Number(body.rate);
       if (rate !== null && !Number.isInteger(rate)) return fail("rate");
       if (rate !== null && (rate < MIN_COMMISSION || rate > MAX_COMMISSION)) return fail("rate");
-      const done = await setAffiliateRate(store, text(body.id, 20), rate);
+      const done = await setAffiliateRate(store, text(body.id, 20), rate, charge);
       return done ? Response.json({ ok: true, rate: done.rate }) : fail("unknown");
     }
     if (action === "answer") {
@@ -216,12 +271,23 @@ export async function POST(request: NextRequest) {
         await answerInvite(guarded.email, invite.id);
         return Response.json({ ok: true, accepted: false });
       }
-      const from = await storeForId(invite.sid).catch(() => null);
+      // A store that could not be read is not gone: the offer is kept and the answer can be sent again. Only an
+      // exact answer that no store has this id takes the offer out.
+      const from = await storeForId(invite.sid).catch(() => undefined);
+      if (from === undefined) return fail("unavailable", 503);
       if (!from) {
+        if (!(await storeIdGone(invite.sid))) return fail("unavailable", 503);
         await answerInvite(guarded.email, invite.id);
         return fail("gone");
       }
-      const made = await acceptPartnership(from, guarded.email, invite.share);
+      // The cap is checked again at acceptance (lib/affiliates.ts recordFromLink): over it, refused with the offer kept,
+      // so it can be accepted once the store lowers a share. An unknown read or a busy lock throws: 503, offer kept.
+      // Reading the inviting program's people for the cap is paid from the answering creator's own studio requests
+      // (`charge`, guarded.store), taken at its worst first and given back down to what was read. Not taken: 429,
+      // nothing read or written, the offer kept.
+      const made = await acceptPartnership(from, guarded.email, invite.share, charge);
+      if (!made.ok && made.reason === "resting") return fail("studio_used", 429);
+      if (!made.ok && (made.reason === "committed" || made.reason === "crowded")) return fail(`offer_${made.reason}`, 409);
       if (!made.ok) return fail(made.reason === "full" ? "full" : "unavailable");
       await answerInvite(guarded.email, invite.id);
       return Response.json({ ok: true, accepted: true });
@@ -232,14 +298,8 @@ export async function POST(request: NextRequest) {
       // as any other share, before the email goes out.
       const share = parsePartnerShare({ percent: body.percent, products: body.products });
       if (!share) return fail(Array.isArray(body.products) && body.products.length ? "share_percent" : "share_products");
-      const others: Record<string, number[]> = {};
-      for (const other of await listPartners(store)) {
-        if (other.status !== "approved" || !other.share) continue;
-        for (const product of other.share.products) (others[product] ??= []).push(other.share.percent);
-      }
-      const affiliatePercent: Record<string, number> = {};
-      for (const product of share.products) affiliatePercent[product] = commissionRate(store.affiliates, product);
-      const problem = shareProblem({ percent: share.percent, products: share.products, others, affiliatePercent });
+      // Checked again, under the partner lock, when the invitation is accepted.
+      const problem = await partnerShareProblem(store, share, null, charge);
       if (problem) return fail(`share_${problem}`);
 
       // Only the products being shared in, never the whole catalogue: a store
@@ -270,20 +330,15 @@ export async function POST(request: NextRequest) {
 
       // The cap counts everything promised on each of these products at once:
       // the other partners' shares and the affiliate commission, which rides
-      // on the same sale (lib/partner-share.ts).
-      const others: Record<string, number[]> = {};
-      for (const other of await listPartners(store)) {
-        if (other.id === id || other.status !== "approved" || !other.share) continue;
-        for (const product of other.share.products) {
-          (others[product] ??= []).push(other.share.percent);
-        }
-      }
-      const affiliatePercent: Record<string, number> = {};
-      for (const product of share.products) affiliatePercent[product] = commissionRate(store.affiliates, product);
-
-      const problem = shareProblem({ percent: share.percent, products: share.products, others, affiliatePercent });
-      if (problem) return fail(`share_${problem}`);
-      return (await setPartnerShare(store, id, share)) ? Response.json({ ok: true }) : fail("unknown");
+      // on the same sale (lib/partner-share.ts). Checked and written under the
+      // program's partner lock, the same one an accepted partnership takes.
+      // Awaited here, so a busy lock or an unknown read reaches the catch below (503), not the framework.
+      return await withPartnerLock(store, async (held) => {
+        const problem = await partnerShareProblem(store, share, id, charge);
+        if (problem) return fail(`share_${problem}`);
+        if (!(await holdLock(held))) return fail("unavailable", 503);
+        return (await setPartnerShare(store, id, share)) ? Response.json({ ok: true }) : fail("unknown");
+      });
     }
     if (action === "code") {
       const promo = text(body.promo, 90);
@@ -302,6 +357,17 @@ export async function POST(request: NextRequest) {
     return fail("unknown");
   } catch (error) {
     if (error instanceof StoreFullError) return fail("store_full", 409);
+    // The studio requests a read of the whole program needs were not taken: nothing was read or saved.
+    if (error instanceof StudioNotPaidError) return fail("studio_used", 429);
+    // A reply that could not be read exactly (the program's people, for the partner-share cap): nothing was saved.
+    if (error instanceof UnknownReplyError) {
+      console.error("changing the affiliate programme stopped on an unknown reply", error);
+      return fail("unavailable", 503);
+    }
+    // The partner lock stayed taken, or was lost before a share was written: nothing was saved, an offer is kept.
+    if (error instanceof LockBusyError) return fail("unavailable", 503);
+    // A commission or a share that would pass the 90% cap once written (lib/affiliates.ts): nothing was saved.
+    if (error instanceof ShareCapError) return fail(`share_${error.problem}`, 409);
     console.error("changing the affiliate programme failed", error);
     return fail("server_error", 500);
   }

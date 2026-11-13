@@ -15,7 +15,7 @@
  */
 import { readFileSync } from "node:fs";
 import { addProduct, claimHandle, ensureStatsId, setProductCourse, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
-import { courseAccess, mintPass, passCookieName, recordEnrollment } from "@/lib/learn";
+import { courseAccess, emailKey, mintPass, passCookieName, recordEnrollment } from "@/lib/learn";
 import { closedDoor, forgetsOnDevice } from "@/lib/course-door";
 import { COURSES_WORDS } from "@/lib/buyer-words/courses";
 import { readListing } from "@/lib/catalog";
@@ -127,6 +127,18 @@ async function main(): Promise<void> {
   is("paid, thanks page never seen: unknown too (Stripe alone would have opened it)", tomas.state, "unknown");
   const stranger = await courseAccess(store, course, { get: () => undefined });
   is("a visitor is not asked about: closed, with the checkout", [stranger.state, closedDoor(stranger, true, true)], ["closed", "checkout"]);
+
+  part("Taken off the course by the creator: closed, Stripe's answer or not (Claude 1 cloud's LEVE on #3893)");
+  // Whether they were taken off is the store's own record, not Stripe's: it is known while Stripe is not, so the
+  // page says the course is closed to them, never that their access could not be checked.
+  sessions["tina@example.com"] = [paid("cs_test_tina00paid01", product)];
+  await recordEnrollment(store, "tina@example.com", product, NOW - 86_400);
+  await redis.pipeline([["SADD", `nl:course:${"c".repeat(32)}:blocked`, emailKey("tina@example.com")]]);
+  const tina = await courseAccess(store, course, await signedIn("tina@example.com"));
+  is("taken off, Stripe unknown: closed, not unknown", tina.state, "closed");
+  failing = false;
+  is("taken off, Stripe back: still closed", (await courseAccess(store, course, await signedIn("tina@example.com"))).state, "closed");
+  failing = true;
 
   part("Nothing unknown is kept: Stripe back, the next load opens it");
   failing = false;

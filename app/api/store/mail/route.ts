@@ -80,7 +80,7 @@ const MAIL_PERMISSIONS: Record<string, Permission> = {
 /**
  * Everything the studio does with email:
  *
- *   { action: "settings", fromName, address }
+ *   { action: "settings", fromName, address, onPolicies? }
  *   { action: "import", text, confirm: true }
  *   { action: "count", productId, notProductId, who, narrow? }   who: "all" | "buyers" | "leads";
  *                            narrow: { minSpent, channel, quietDays, group?, activeDays? } (lib/segments.ts); answers the
@@ -132,7 +132,8 @@ export async function POST(request: NextRequest) {
       const address = text(body.address, 1000).replace(/\s+/g, " ").trim().slice(0, MAX_MAIL_ADDRESS);
       if (!fromName) return fail("from_name");
       if (address.length < 10) return fail("address");
-      await setMailSettings(ref, { fromName, address });
+      // Shown on the public policies page only when the creator checked it, never by default (#1824).
+      await setMailSettings(ref, { fromName, address, ...(body.onPolicies === true ? { onPolicies: true as const } : {}) });
       return Response.json({ ok: true });
     }
 

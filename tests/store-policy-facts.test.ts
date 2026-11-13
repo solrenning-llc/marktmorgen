@@ -6,7 +6,7 @@
 import { NOT_ADVICE, type PolicyFactsInput, policyFacts, policyFingerprint } from "@/lib/store-policy-facts";
 import { done, is, part } from "./check";
 
-const base: PolicyFactsInput = { storeName: "Harbor Kitchen", sellsDigital: true, sellsMemberships: false, paypal: false, pixels: [], postalAddress: "1 Main St, Portland, OR 97201", selfCancel: true };
+const base: PolicyFactsInput = { storeName: "Harbor Kitchen", sellsDigital: true, sellsMemberships: false, paypal: false, pixels: [], postalAddress: "1 Main St, Portland, OR 97201", membersSelfCancel: true };
 const ids = (input: Partial<PolicyFactsInput>) => policyFacts({ ...base, ...input }).map((s) => s.id);
 const text = (input: Partial<PolicyFactsInput>) => policyFacts({ ...base, ...input }).flatMap((s) => s.sentences).join(" ");
 
@@ -43,6 +43,6 @@ is("a new address, a new one", policyFingerprint(policyFacts({ ...base, postalAd
 
 // Claude 1 on #1824: the cancel-from-a-link sentence only where membership emails carry that link (canManage).
 is("memberships with the link: they can cancel themselves", text({ sellsMemberships: true }).includes("cancel a membership yourself"), true);
-is("memberships without it: no promise of a link, the end of the period still said", [text({ sellsMemberships: true, selfCancel: false }).includes("cancel a membership yourself"), text({ sellsMemberships: true, selfCancel: false }).includes("end of the period you already paid for")], [false, true]);
+is("memberships without it: no promise of a link, the end of the period still said", [text({ sellsMemberships: true, membersSelfCancel: false }).includes("cancel a membership yourself"), text({ sellsMemberships: true, membersSelfCancel: false }).includes("end of the period you already paid for")], [false, true]);
 
 done();

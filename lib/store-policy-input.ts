@@ -8,7 +8,7 @@
  *     (deliversDigitally, not a membership) and memberships;
  *   - whether it takes PayPal right now (sellsThroughPayPal);
  *   - the ad pixels switched on, by their platforms' own names (PIXEL_INFO);
- *   - the postal address on its emails, when set.
+ *   - the postal address on its emails, when set and the creator chose to show it there too.
  */
 import type { Store } from "@/lib/store";
 import { type Listing, readListingsAll, visibleIds } from "@/lib/catalog";
@@ -31,8 +31,7 @@ type Sold = { priceCents?: number } & Partial<Record<Exclude<Read, "priceCents">
 const paid = (p: Sold) => (p.priceCents ?? 0) > 0 || Boolean(p.recurring) || Boolean(p.pwyw) || Boolean(p.plan);
 
 /** The input from products already read: kept apart so it can be checked without a store. */
-/** `selfCancel`: whether membership emails carry the cancel link (canManage), so the page says only what they do. */
-export function policyInputFrom(store: Pick<Store, "name" | "pixels" | "mail">, products: readonly Sold[], paypal: boolean, selfCancel: boolean): PolicyFactsInput {
+export function policyInputFrom(store: Pick<Store, "name" | "pixels" | "mail">, products: readonly Sold[], paypal: boolean, selfCancel = false): PolicyFactsInput {
   const sold = products.filter(paid);
   return {
     storeName: store.name,
@@ -40,8 +39,9 @@ export function policyInputFrom(store: Pick<Store, "name" | "pixels" | "mail">, 
     sellsMemberships: sold.some((p) => Boolean(p.recurring)),
     paypal,
     pixels: PIXEL_KINDS.filter((kind) => Boolean(store.pixels?.[kind])).map((kind) => PIXEL_INFO[kind].name),
-    postalAddress: store.mail?.address ?? "",
-    selfCancel,
+    // Only by the creator's own choice where the address is typed: the email footer's address is never public by default (#1824).
+    postalAddress: store.mail?.onPolicies === true ? store.mail.address : "",
+    membersSelfCancel: selfCancel,
   };
 }
 
@@ -50,6 +50,7 @@ export async function policyInput(store: Store): Promise<PolicyFactsInput> {
   // No catch, and every listed product read exactly (readListingsAll): a page that could not read one
   // must not quietly leave out the 14-day rules or the subscription terms (Codex G's review of #1824).
   const products = await readListingsAll(store, visibleIds(store));
+  // The same check the purchase email makes before it sends the /manage link (lib/purchase-email.ts).
   return policyInputFrom(store, products, sellsThroughPayPal(store), canManage(store));
 }
 

@@ -45,10 +45,11 @@ export type PolicyFactsInput = {
   /** The postal address on the store's emails, or "" when none is set. */
   postalAddress: string;
   /**
-   * Whether a buyer can cancel a membership from the link in its emails (canManage): when not, those emails ask the
-   * buyer to reply instead (lib/purchase-email.ts), so the page does not say they can cancel from a link.
+   * Whether the store's membership emails carry the link to cancel without asking anyone (canManage, as
+   * lib/purchase-email.ts decides it). Only true says so; otherwise the buyer cancels by reply and nothing promises
+   * otherwise (Claude 1's LOW on #1824).
    */
-  selfCancel: boolean;
+  membersSelfCancel?: boolean;
 };
 
 export type PolicySection = { id: "seller" | "cancel" | "memberships" | "measurement" | "contact"; title: string; sentences: string[] };
@@ -73,7 +74,7 @@ export function policyFacts(input: PolicyFactsInput, language: unknown = "en"): 
   if (input.sellsDigital) cancel.push(w.cancelDigital);
   if (input.sellsMemberships) cancel.push(w.cancelMembership);
   if (cancel.length) sections.push({ id: "cancel", title: w.titles.cancel, sentences: cancel });
-  if (input.sellsMemberships) sections.push({ id: "memberships", title: w.titles.memberships, sentences: input.selfCancel ? [w.membersCancel, w.membersEnd] : [w.membersEnd] });
+  if (input.sellsMemberships) sections.push({ id: "memberships", title: w.titles.memberships, sentences: input.membersSelfCancel === true ? [w.membersCancel, w.membersEnd] : [w.membersEnd] });
   const pixels = [...new Set(input.pixels.map((p) => p.trim()).filter(Boolean))];
   if (pixels.length) sections.push({ id: "measurement", title: w.titles.measurement, sentences: [w.measures(name, list(pixels, w.and)), w.askFirst, w.gpc] });
   // Only what is set: with no postal address there is no sentence, rather than one about a contact page the store may not have.

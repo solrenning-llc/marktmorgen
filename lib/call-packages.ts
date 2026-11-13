@@ -79,6 +79,8 @@ const tokenKey = (token: string) => `nl:pkg:t:${sha(token)}`;
 const usedKey = (token: string) => `${tokenKey(token)}:used`;
 /** A paid session in usedKey: "u", then 15 hex characters of its checkout, 16 in all. */
 const usedAs = (session: string) => `u${sha(session).slice(0, 15)}`;
+/** The shape usedAs gives: anything else in a package's record of paid sessions is not one of them. */
+const USED_MEMBER = /^u[0-9a-f]{15}$/;
 /**
  * The packages a store sold (added 18 October 2026): a package with no last
  * day is kept for as long as it can be used, and is named by its checkout,
@@ -141,7 +143,14 @@ export async function spent(bought: Bought, at = now()): Promise<number> {
   }
   if (!Array.isArray(answers) || answers.length !== past.length + 1) return bought.holds.length;
   const listed = answers[0];
-  const kept = Array.isArray(listed) && listed.every((id) => typeof id === "string") ? new Set<string>(listed) : null;
+  // Known only when every member is one usedAs makes for one of this package's own holds, and no more than it holds
+  // (Codex G, MEDIUM on #3487): a member in another shape, or of none of its sessions, makes the record unknown, and
+  // an expired confirmed session is then counted spent, never booked again for free.
+  const own = new Set(bought.holds.map((hold) => usedAs(hold.session)));
+  const kept =
+    Array.isArray(listed) && listed.length <= bought.total && listed.every((id) => typeof id === "string" && USED_MEMBER.test(id) && own.has(id))
+      ? new Set<string>(listed as string[])
+      : null;
   const seen: string[] = [];
   past.forEach((hold, i) => {
     const mark = answers[i + 1];

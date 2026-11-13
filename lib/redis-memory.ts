@@ -819,6 +819,22 @@ export class MemoryRedis {
           this.data.set(record, next);
           return 1;
         }
+        // lib/closed-store-data.ts BATCH_SWAP: one batch entry rewritten, or dropped when the new text is empty, only
+        // over exactly the text read.
+        if (key.startsWith("-- marktmorgen:closed-batch-swap:v1\n") && args[0] === "1" && args.length === 5) {
+          const [, batch, field, expected, next] = args;
+          if (this.run(["HGET", batch, field]) !== expected) return 0;
+          if (next === "") this.run(["HDEL", batch, field]);
+          else this.run(["HSET", batch, field, next]);
+          return 1;
+        }
+        // lib/store.ts DELETED_HOLD: an address held back with its quarantine only while it still leads to the deleted store.
+        if (key.startsWith("-- marktmorgen:deleted-handle-hold:v1\n") && args[0] === "1" && args.length === 5) {
+          const [, address, ref, released, seconds] = args;
+          if (this.run(["GET", address]) !== ref) return 0;
+          this.run(["SET", address, released, "EX", seconds]);
+          return 1;
+        }
         // lib/affiliates.ts AFFILIATE_SWAP: one affiliate's record written only over exactly the text read.
         if (key.startsWith("-- marktmorgen:affiliate-swap:v1\n") && args[0] === "1" && args.length === 5) {
           const [, people, field, expected, next] = args;

@@ -6,6 +6,10 @@
  * FORGET_TRIES times in all, FORGET_PER_RUN stores a run. What is still kept
  * after the last try stays in line, marked, and is counted every month for
  * the owner's report (storeForgetMonth): numbers only, no store, no person.
+ * The closing walk tries a deleted store once more when it admits it, its
+ * record read gone (lib/closed-store-data.ts, admitDeleted: a delete whose
+ * reply was lost may never have forgotten anything), and puts it in this
+ * line only when that try fails.
  *
  *   nl:forget:q                 hash  "<statsId>|<sid>" → { tries, first, last }: tried again daily
  *   nl:forget:kept              hash  the same, given up: never read by the daily run
@@ -28,8 +32,10 @@
  * lookup, and the list, its holds and its uses deleted) and forgetMemory (its
  * MEMORY_FORGET_COMMANDS: the assistant's notes, added 5 November 2026), plus at most four for
  * the line itself: FORGET_TRY_COMMANDS, its worst (review of #2556 at c6267d1ef). At most FORGET_TRIES tries
- * a deleted store, at most FORGET_PER_RUN stores a day, and only for a delete
- * whose first try failed (held in tests/sg2-unknown-replies.test.ts).
+ * a deleted store in each round, at most FORGET_PER_RUN stores a day, and only for a store
+ * whose try at the delete (held in tests/sg2-unknown-replies.test.ts) or at the walk's
+ * admission failed; another round starts only when a try at the walk's admission fails
+ * while the line no longer holds the store (each such try is the walk's: one a run).
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { countOf, repliesFor, stringList } from "@/lib/redis-reply";
@@ -95,7 +101,7 @@ export async function queueStoreForget(statsId: string | null, sid: string, now 
  * their room back to the store's data room, which outlives the store.
  */
 export type ForgetWork = (statsId: string | null, sid: string) => Promise<void>;
-const forgetBoth: ForgetWork = async (statsId, sid) => {
+export const forgetBoth: ForgetWork = async (statsId, sid) => {
   await forgetStoreWebhooks(statsId);
   await revokeAllKeys(sid);
   // A deleted store has no plan: its room is given back as a store without one.

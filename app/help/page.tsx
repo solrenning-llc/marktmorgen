@@ -8,7 +8,8 @@ import { HelpSearch } from "@/components/help-search";
 import { CopyLink } from "@/components/copy-link";
 import { HELP_SECTIONS, answerId } from "@/lib/help-content";
 import { HELP_AREAS } from "@/lib/help-areas";
-import { helpAnswerPath } from "@/lib/help-pages";
+import { datedAnswers, helpAnswerPath, helpDay, newestAnswers, recentlyUpdated } from "@/lib/help-pages";
+import { HELP_DATES } from "@/lib/help-dates";
 
 export const metadata: Metadata = {
   title: "Help center — Marktmorgen",
@@ -73,6 +74,30 @@ export default function HelpPage() {
             ))}
           </ul>
         </nav>
+
+        {/* What is new in the help center, and what changed (564 [HC1]): the dates come from lib/help-dates.ts, never from a guess. */}
+        <div className="container-page grid gap-8 pt-12 sm:grid-cols-2" data-help-recent>
+          {[
+            { id: "help-new-title", title: "New answers", rows: newestAnswers(datedAnswers(HELP_DATES)), day: "created" as const },
+            { id: "help-updated-title", title: "Recently updated", rows: recentlyUpdated(datedAnswers(HELP_DATES)), day: "updated" as const },
+          ].map((list) =>
+            list.rows.length ? (
+              <section key={list.id} aria-labelledby={list.id}>
+                <h2 id={list.id} className="t-section">{list.title}</h2>
+                <ul className="mt-3 space-y-1">
+                  {list.rows.map((row) => (
+                    <li key={row.id} className="flex flex-wrap items-baseline gap-x-3">
+                      <Link href={helpAnswerPath(row.section, row.id)} className="inline-flex min-h-11 items-center text-ink underline underline-offset-4 hover:text-violet-deep">
+                        {row.q}
+                      </Link>
+                      <time dateTime={row[list.day]} className="text-sm text-ink-soft">{helpDay(row[list.day])}</time>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            ) : null,
+          )}
+        </div>
 
         <div className="container-page grid gap-10 py-14 sm:py-20 lg:grid-cols-[15rem_1fr] lg:gap-16">
           <nav aria-label="Help sections" className="min-w-0 lg:sticky lg:top-24 lg:self-start">

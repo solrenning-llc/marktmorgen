@@ -6,7 +6,8 @@ import { SiteFooter } from "@/components/site-footer";
 import { SiteNav } from "@/components/site-nav";
 import { HelpTopics } from "@/components/help-topics";
 import { HelpAnswerTools } from "@/components/help-answer-tools";
-import { answerSummary, helpAnswer, helpAnswerPath, helpPagePaths, sectionNeighbors, helpTopics } from "@/lib/help-pages";
+import { answerSummary, helpAnswer, helpAnswerPath, helpDay, helpPagePaths, sectionNeighbors, helpTopics } from "@/lib/help-pages";
+import { HELP_DATES } from "@/lib/help-dates";
 
 /**
  * One answer of the help center on a page of its own (564 [HC1]): the trail
@@ -53,6 +54,15 @@ export default async function HelpAnswerPage({ params }: Params) {
         <Breadcrumb path={[{ label: "Help center", href: "/help" }, { label: found.section.title, href: `/help/${found.section.id}` }]} here={found.q} />
         <article className="mt-4 max-w-3xl">
           <h1 className="t-h2">{found.q}</h1>
+          {HELP_DATES[found.id] ? (
+            <p className="mt-3 text-sm text-ink-soft" data-help-dates>
+              {"Added "}
+              <time dateTime={HELP_DATES[found.id].created}>{helpDay(HELP_DATES[found.id].created)}</time>
+              {/* Always said, as HC1's complement asks: for an answer never changed since, the day it was added. */}
+              {" · Last updated "}
+              <time dateTime={HELP_DATES[found.id].updated}>{helpDay(HELP_DATES[found.id].updated)}</time>
+            </p>
+          ) : null}
           <div className="mt-6 space-y-4" data-help-answer>
             {found.a.map((paragraph) => (
               <p key={paragraph} className="max-w-[80ch] leading-relaxed text-ink-soft">

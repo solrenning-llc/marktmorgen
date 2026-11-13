@@ -346,9 +346,11 @@ export async function syncAssistant(store: Store, subscription?: Record<string, 
     let current = subscription ?? (await readSubscription(id));
     if (!isOwnReply(current, id)) throw new NotOwnReply(id);
     let disputedAt = store.assistantPlan?.disputedAt ?? "";
-    if (!disputedAt && current.status === "active" && (await disputed(id))) {
-      disputedAt = new Date(nowSeconds * 1000).toISOString();
-      await onPlatform("DELETE", `/subscriptions/${encodeURIComponent(id)}`).catch((error) => console.error("ending a disputed add-on failed", error));
+    if (!disputedAt && current.status === "active" && (await disputed(id))) disputedAt = new Date(nowSeconds * 1000).toISOString();
+    // A dispute written down is not the subscription cancelled (#4439): while Stripe still shows it able to charge,
+    // every sync asks again, so a cancellation that failed once never leaves the add-on charging with the assistant off.
+    if (disputedAt && current.status !== "canceled" && current.status !== "incomplete_expired") {
+      await onPlatform("DELETE", `/subscriptions/${encodeURIComponent(id)}`).catch((error) => console.error("ending a disputed add-on failed; asked again on the next sync", error));
     }
     if (!disputedAt && current.status === "active" && current.cancel_at_period_end !== true && standingOf(store, nowSeconds) !== "paid") {
       await setCancelAtPeriodEnd(id, true);

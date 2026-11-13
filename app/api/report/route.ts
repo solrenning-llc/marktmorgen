@@ -12,7 +12,8 @@ import { storeForHandle } from "@/lib/store";
  * whole is kept and sent to the support inbox. The sender is emailed nothing.
  * A child-safety report also takes the product it points at off the store at
  * once, and that and a request to remove an intimate image each send the
- * owner an urgent email with no content in it (lib/child-safety.ts).
+ * owner an urgent email with no content in it (lib/child-safety.ts); when that
+ * email cannot be sent, the report is answered as not received (503).
  */
 export async function POST(request: NextRequest) {
   if (fromAnotherSite(request)) return Response.json({ ok: false, error: "forbidden" }, { status: 403 });
@@ -35,7 +36,10 @@ export async function POST(request: NextRequest) {
       const store = read.report.kind === "child_safety" && handle ? await storeForHandle(handle).catch(() => undefined) : null;
       const outcome: HoldOutcome =
         read.report.kind !== "child_safety" ? "not_held" : store === undefined ? "unknown" : store ? await holdReported(read.report, store) : "no_product";
-      await alertOwner(read.report, outcome, Date.now(), result === "sent");
+      // The urgent email is the only thing that names the kind and its clock (Claude 1 cloud rev-odd on #3587): one that
+      // was not sent is not answered as received, so the reporter sends it again. The hold is idempotent and the urgent
+      // email's key is per request per day, so a retry costs one more notice email and never a second alert.
+      if (!(await alertOwner(read.report, outcome, Date.now(), result === "sent"))) return Response.json({ ok: false, error: "error" }, { status: 503 });
     }
     if (result === "sent") return Response.json({ ok: true });
     return Response.json({ ok: false, error: result }, { status: result === "limited" ? 429 : 503 });

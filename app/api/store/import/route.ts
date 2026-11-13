@@ -4,7 +4,7 @@ import { guardStoreWrite, text } from "@/lib/store-request";
 import { jsonAccess } from "@/lib/studio-route";
 import { contentDisposition, withinLimit, withinMonth } from "@/lib/request-guard";
 import { importAllowanceFor } from "@/lib/import-limits";
-import { costPauseCode } from "@/lib/plan-standing";
+import { newCostCode } from "@/lib/plan-standing";
 import {
   BATCH_BYTES,
   IMPORT_ID_PATTERN,
@@ -129,8 +129,10 @@ export async function POST(request: NextRequest) {
   // (lib/imports.ts runImport). An upload already under way may still send
   // its rows and finish, so it is queued rather than lost; they count against
   // the month's rows as always, and nothing is applied until it is paid.
-  // Canceling, reading where one stands and the report stay open.
-  const paused = action === "start" || action === "preview" || action === "step" ? costPauseCode(store) : null;
+  // Canceling, reading where one stands and the report stay open. The same
+  // once the plan has ended (232 [CA1], the original 4c, newCostCode): the
+  // store is on its way to closing and nobody pays for what an import costs.
+  const paused = action === "start" || action === "preview" || action === "step" ? newCostCode(store) : null;
   if (paused) return refuse(paused, 409);
 
   try {
@@ -187,8 +189,8 @@ export async function POST(request: NextRequest) {
       if (!done.ok) return refuse(done.reason, 409);
       // The first few seconds of work right away, so a small file is done
       // by the time the page shows it; past the month's steps the five-minute job does it.
-      // Queued and left while the plan's costs are paused: no step is spent on it (unit 4b2).
-      if (costPauseCode(store)) return Response.json({ ok: true, import: view(done.job) });
+      // Queued and left while the plan's costs are paused or it has ended: no step is spent on it (unit 4b2, the original 4c).
+      if (newCostCode(store)) return Response.json({ ok: true, import: view(done.job) });
       if (!(await withinMonth("import-step-month", store.sid || guarded.ref, importAllowanceFor(store).steps, windowId(store)))) return Response.json({ ok: true, import: view(done.job) });
       const after = await runImport(id, Date.now() + STEP_MS);
       return Response.json({ ok: true, import: view(after ?? done.job) });

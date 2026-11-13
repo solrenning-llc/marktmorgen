@@ -288,8 +288,14 @@ async function refundsOf(store: Store, callsId: string, deadline: number): Promi
       newest = Math.max(newest, created);
     }
     const last = refunds[refunds.length - 1];
-    if (listed.has_more !== true) {
+    // Only an exact false is the last page; anything but an exact true ("true", 1, null, missing) is unknown (rule 24):
+    // the place is held, never moved past a page it never read (Claude 2 nuvem I and Codex X5 on #3866).
+    if (listed.has_more === false) {
       complete = true;
+      break;
+    }
+    if (listed.has_more !== true) {
+      unsure = true;
       break;
     }
     // More pages and no last row to go on from: unknown, the place is held.

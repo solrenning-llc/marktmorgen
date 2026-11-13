@@ -183,9 +183,20 @@ export async function recoveryReport(store: Store, fresh = false, now = Date.now
   if (ours.length && isRedisConfigured()) {
     const found = await redisPipeline(ours.map((i) => ["EXISTS", sentKey(account, i.id as string)]));
     if (!Array.isArray(found) || found.length !== ours.length || found.some(value => value !== 0 && value !== 1)) throw unknownReport();
-    ours.forEach((i, n) => {
-      if (found[n] === 1) emailed.add(i.id as string);
-    });
+    // The mark is only proof the email went out; it is credited for the payment only when the time the mark starts
+    // with (lib/claim-mark.ts) comes before the invoice's paid_at (#4431). A legacy "1" gives no time, and a mark taken
+    // after the payment does not show the email came first: neither is credited, and the attempt count still decides.
+    const marked = ours.filter((_, n) => found[n] === 1);
+    if (marked.length) {
+      const values = await redisPipeline(marked.map((i) => ["GET", sentKey(account, i.id as string)]));
+      if (!Array.isArray(values) || values.length !== marked.length || values.some((value) => value !== null && typeof value !== "string")) throw unknownReport();
+      marked.forEach((i, n) => {
+        const value = values[n];
+        const at = typeof value === "string" && /^[0-9]{13,16}\.[0-9]+$/.test(value) ? Number(value) : NaN;
+        const paidAt = typeof i.status_transitions?.paid_at === "number" ? i.status_transitions.paid_at * 1000 : NaN;
+        if (Number.isFinite(at) && Number.isFinite(paidAt) && at < paidAt) emailed.add(i.id as string);
+      });
+    }
   }
   const month = { failed: 0, cards: 0 };
   if (isRedisConfigured()) {

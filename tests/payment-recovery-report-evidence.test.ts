@@ -78,7 +78,9 @@ async function main() {
   reset([page([])]);
   const zero = await recoveryReport(store, true, now);
   is("confirmed empty invoice list and absent counters mean zero", [zero?.recovered, zero?.cents, zero?.month, zero?.complete], [0, 0, { failed: 0, cards: 0 }, true]);
-  reset(); await original([["SET", sentKey(store.stripeAccountId!, "in_confirmed"), "1"], ["HSET", countKey(store.statsId!, monthOf(now)), "failed", "3", "cards", "2"]]);
+  // The reminder's mark as lib/claim-mark.ts writes it, taken before the payment (#4431: a legacy "1" has no time, so
+  // it is not credited to the email; tests/recovery-reminder-order.test.ts holds that).
+  reset(); await original([["SET", sentKey(store.stripeAccountId!, "in_confirmed"), `${now - 120_000}.123456789`], ["HSET", countKey(store.statsId!, monthOf(now)), "failed", "3", "cards", "2"]]);
   const known = await recoveryReport(store, true, now);
   is("confirmed amount, attribution and monthly counts", [known?.recovered, known?.cents, known?.afterEmail, known?.afterEmailCents, known?.month], [1, 1234, 1, 1234, { failed: 3, cards: 2 }]);
   const before = reads;

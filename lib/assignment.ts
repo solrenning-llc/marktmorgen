@@ -600,8 +600,12 @@ export async function noteTaskUpload(path: string, now = Date.now()): Promise<vo
 
 /** Whether this file was let in through the door and not handed in yet; it is then taken. */
 export async function takeTaskUpload(path: string): Promise<boolean> {
-  const [removed] = await redisPipeline([["ZREM", DOORS_KEY, path]]);
-  return Number(removed) === 1;
+  // Read exactly (#4287, Codex V): 1 is this hand-in's, 0 is taken already; any other reply is unknown and throws, so a
+  // hand-in never keeps a file the sweep may have taken and deleted too.
+  const removed = repliesFor(await redisPipeline([["ZREM", DOORS_KEY, path]]), 1)?.[0];
+  if (removed === 1) return true;
+  if (removed === 0) return false;
+  throw new UnknownReplyError("a task upload's door");
 }
 
 /**

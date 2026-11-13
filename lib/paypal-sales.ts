@@ -46,7 +46,7 @@ import { fairOff } from "@/lib/fair-price";
 import { admitOrders } from "@/lib/order-admission";
 import { countOrder } from "@/lib/orders";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { EMAIL_PATTERN } from "@/lib/auth";
 import { addressHash, grantImported, importedKey } from "@/lib/imported-purchases";
 import { plainAmount, formatMoney } from "@/lib/money";
@@ -1151,8 +1151,14 @@ export const MAX_PAID_BYTES = 20 * (40 + 6 + 6 * 200) + 2_000;
  */
 export async function paypalKept(statsId: string | null, refunds: boolean): Promise<{ sales: number; refunds: number }> {
   if (!statsId || !isRedisConfigured()) return { sales: 0, refunds: 0 };
-  const [sold, refunded] = await redisPipeline([["ZCARD", salesKey(statsId)], ...(refunds ? [["ZCARD", refundedKey(statsId)]] : [])]);
-  return { sales: Number(sold) || 0, refunds: refunds ? Number(refunded) || 0 : 0 };
+  const asked = refunds ? 2 : 1;
+  const replies = repliesFor(await redisPipeline([["ZCARD", salesKey(statsId)], ...(refunds ? [["ZCARD", refundedKey(statsId)]] : [])]), asked);
+  // ZCARD answers 0 for a key that is not there, never null: a count in any other shape, a reply cut short or one
+  // too many is unknown, never 0 (CX-123 rules 24 and 30). The refunds not asked for are 0, as before.
+  const sales = countOf(replies?.[0]);
+  const refunded = refunds ? countOf(replies?.[1]) : 0;
+  if (sales === null || refunded === null) throw new UnknownReplyError("the PayPal sales and refunds kept");
+  return { sales, refunds: refunded };
 }
 
 /**

@@ -327,7 +327,7 @@ export function LookEditor({
                 <label
                   key={option.hex}
                   title={option.label}
-                  className="relative grid h-11 w-11 cursor-pointer place-items-center rounded-full ring-offset-2 transition has-[:checked]:ring-2 has-[:checked]:ring-ink has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-violet-brand"
+                  className="relative grid h-11 w-11 cursor-pointer place-items-center rounded-full forced-color-adjust-none ring-offset-2 transition has-[:checked]:ring-2 has-[:checked]:ring-ink has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-violet-brand"
                   style={{ background: option.hex }}
                 >
                   <input
@@ -347,7 +347,7 @@ export function LookEditor({
                   preset ? "border-line-strong text-ink-soft" : "border-ink text-ink"
                 }`}
               >
-                <span aria-hidden="true" className="h-5 w-5 rounded-full ring-1 ring-line" style={{ background: accent }} />
+                <span aria-hidden="true" className="h-5 w-5 rounded-full ring-1 ring-line forced-color-adjust-none" style={{ background: accent }} />
                 Your own
                 <input
                   type="color"

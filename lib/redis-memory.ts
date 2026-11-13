@@ -913,17 +913,19 @@ export class MemoryRedis {
           return 1;
         }
         // lib/auth.ts CLEAR_BROKEN_MOVE: each record's place given back, then the records deleted.
-        if (key.startsWith("-- marktmorgen:move-broken-clear:v1\n") && args[0] === "3") {
-          const [, open, ...records] = args;
-          for (const target of records) {
+        if (key.startsWith("-- marktmorgen:move-broken-clear:v2\n") && args[0] === "3" && args.length === 5) {
+          const [, open, first, second, which] = args;
+          let gone = 0;
+          for (const target of [first, second]) {
             const held = this.run(["GET", target]);
             if (typeof held !== "string") continue;
             let record: unknown = null;
             try { record = JSON.parse(held); } catch { record = null; }
             const op = record && typeof record === "object" ? (record as { op?: unknown }).op : undefined;
-            if (typeof op === "string") this.run(["ZREM", open, op]);
+            if (held === which || op === which) gone += Number(this.run(["DEL", target]));
           }
-          return this.run(["DEL", ...records]);
+          this.run(["ZREM", open, which]);
+          return gone;
         }
         // lib/auth.ts NOTE_MOVE_COPY: a move's record written over only where it still carries that move's token.
         if (key.startsWith("-- marktmorgen:move-copy-note:v1\n")) {

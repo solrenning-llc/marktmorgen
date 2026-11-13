@@ -66,19 +66,20 @@ async function main(): Promise<void> {
   is("MAX_OPEN_BROKEN_MOVES is a positive whole number", typeof most === "number" && Number.isSafeInteger(most) && most > 0, true);
   const cap = typeof most === "number" && Number.isSafeInteger(most) && most > 0 && most <= 5_000 ? most : 3;
   // Every place held by moves left broken (or still running).
-  for (let i = 0; i < cap; i += 1) await mark(`held-${i}@example.com`, `held-${i}-to@example.com`);
+  const ops: string[] = [];
+  for (let i = 0; i < cap; i += 1) ops.push(String(await mark(`held-${i}@example.com`, `held-${i}-to@example.com`)));
   const held = brokenKeys().length;
   is("each open move holds its two records", held, 2 * cap);
   const refused = await mark("over-a@example.com", "over-b@example.com");
   is("with every place held, the next move's record is refused", refused, "full");
   is("and nothing of it is written", brokenKeys().length, held);
-  await auth.clearBrokenMove("held-0@example.com", "held-0-to@example.com");
+  await auth.clearBrokenMove("held-0@example.com", "held-0-to@example.com", ops[0]);
   const again = await mark("over-a@example.com", "over-b@example.com");
   is("clearing one gives its place back", typeof again === "string" && /^[A-Za-z0-9_-]{16,}$/.test(again), true);
-  await auth.clearBrokenMove("over-a@example.com", "over-b@example.com");
+  await auth.clearBrokenMove("over-a@example.com", "over-b@example.com", String(again));
 
   part("1b. the tap is refused before anything moves, and its running mark ends");
-  await mark("held-0@example.com", "held-0-to@example.com");
+  ops[0] = String(await mark("held-0@example.com", "held-0-to@example.com"));
   const F = "full-from@example.com";
   const T = "full-to@example.com";
   await claimHandle(F, "full-store", "Full", "");
@@ -98,7 +99,7 @@ async function main(): Promise<void> {
   is("no open item is the broken moves' stock any more", unknowns.some((line) => line.toLowerCase().startsWith("broken moves kept")), false);
   is("the registry prices the open places the code keeps", r.MOVE_BROKEN_OPEN_MOST, most);
 
-  for (let i = 0; i < cap; i += 1) await auth.clearBrokenMove(`held-${i}@example.com`, `held-${i}-to@example.com`);
+  for (let i = 0; i < cap; i += 1) await auth.clearBrokenMove(`held-${i}@example.com`, `held-${i}-to@example.com`, ops[i]);
   is("clearing every one leaves no record", brokenKeys().length, 0);
 
   part("2. LOW 1: a renewal that did not go through takes the others' room");

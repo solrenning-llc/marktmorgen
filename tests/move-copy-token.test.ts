@@ -24,22 +24,22 @@ async function main(): Promise<void> {
   is("a token, made for this move", /^[0-9a-f]{64}$/.test(own), true);
   await noteMoveCopy(A, B, COPY, own);
   is("noted on both", [(await readBrokenMove(A))?.copy, (await readBrokenMove(B))?.copy], [COPY, COPY]);
-  await clearBrokenMove(A, B);
+  await clearBrokenMove(A, B, own);
 
   part("Codex H's barrier: a late write of a cleared move never lands on the move that replaced it");
   const old = await markBrokenMove(A, B);
-  await clearBrokenMove(A, B);
+  await clearBrokenMove(A, B, old);
   const replaced = await markBrokenMove(A, C);
   await noteMoveCopy(A, B, COPY, old);
-  is("A's record is still A to C, with no copy", await readBrokenMove(A), { from: A, to: C });
+  is("A's record is still A to C, with no copy", await readBrokenMove(A), { from: A, to: C, which: replaced });
   is("and nothing is written for B, whose move was cleared", await readBrokenMove(B), null);
   await noteMoveCopy(A, C, OTHER, replaced);
   is("the move that replaced it notes its own copy", [(await readBrokenMove(A))?.copy, (await readBrokenMove(C))?.copy], [OTHER, OTHER]);
-  await clearBrokenMove(A, C);
+  await clearBrokenMove(A, C, replaced);
 
   part("The same two addresses moved again: the first move's late write does not land on the second");
   const first = await markBrokenMove(A, B);
-  await clearBrokenMove(A, B);
+  await clearBrokenMove(A, B, first);
   const second = await markBrokenMove(A, B);
   is("(a new token for the second)", first !== second, true);
   await noteMoveCopy(A, B, COPY, first);
@@ -48,7 +48,7 @@ async function main(): Promise<void> {
   is("its own write lands", [(await readBrokenMove(A))?.copy, (await readBrokenMove(B))?.copy], [OTHER, OTHER]);
 
   part("A move already cleared is never marked again");
-  await clearBrokenMove(A, B);
+  await clearBrokenMove(A, B, second);
   await noteMoveCopy(A, B, COPY, second);
   is("nothing written", [await readBrokenMove(A), await readBrokenMove(B)], [null, null]);
   done();

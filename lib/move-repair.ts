@@ -25,7 +25,7 @@ export async function repairMove(email: string): Promise<boolean> {
   const broken = await readBrokenMove(email).catch((error: unknown) => (console.error("reading a broken move failed", error), undefined));
   if (broken === undefined) return false;
   if (!broken) return true;
-  const { from, to, copy } = broken;
+  const { from, to, copy, which } = broken;
   try {
     if ((await moveRunning(from)) || (await moveRunning(to))) return false;
     const [atFrom, atTo] = await Promise.all([storeForEmail(from), storeForEmail(to)]);
@@ -45,7 +45,8 @@ export async function repairMove(email: string): Promise<boolean> {
     // An index a lost answer left on the other address is pointed back at the list's (C3-117).
     await repointPasskeys(home);
     await endAllSessions(away);
-    await clearBrokenMove(from, to);
+    // Only the move read above: a later move of these addresses, marked meanwhile, keeps its record (Codex X5 on #2271).
+    await clearBrokenMove(from, to, which);
     return true;
   } catch (error) {
     console.error("repairing a broken move failed", error);
@@ -67,7 +68,8 @@ export async function describeMove(email: string): Promise<Record<string, unknow
       moveRunning: await moveRunning(address),
     })),
   );
-  return { broken, addresses: each };
+  // The move's token (`which`) is for clearing it, not for the person looking.
+  return { broken: broken ? { from: broken.from, to: broken.to, ...(broken.copy ? { copy: broken.copy } : {}) } : null, addresses: each };
 }
 
 /**
@@ -89,7 +91,7 @@ export async function clearBrokenMoveByHand(email: string, confirm: string): Pro
   });
   const [a, b] = await Promise.all([holds(broken.from), holds(broken.to)]);
   if ((a.store && !a.ways && b.ways) || (b.store && !b.ways && a.ways)) return "split";
-  await clearBrokenMove(broken.from, broken.to);
+  await clearBrokenMove(broken.from, broken.to, broken.which);
   await endAllSessions(broken.from);
   await endAllSessions(broken.to);
   return "cleared";

@@ -925,7 +925,8 @@ async function main(): Promise<void> {
     if (rSeen === null && c && c[0] === "SET" && c.includes("NX") && c.includes(15)) {
       redis.pipeline = rPipe;
       // The ways in have left; the store has not. Were the process to die now, this is what would be left.
-      rSeen = [await readBrokenMove(RSD), (await listPasskeys(RSD)).length];
+      const seen = await readBrokenMove(RSD);
+      rSeen = [seen ? { from: seen.from, to: seen.to } : null, (await listPasskeys(RSD)).length];
     }
     return rPipe(commands);
   }) as typeof redis.pipeline;

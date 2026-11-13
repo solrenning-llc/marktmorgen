@@ -55,6 +55,13 @@ export const BLOB_SITES: Record<string, Record<string, Paid>> = {
   "app/[handle]/p/[product]/opengraph-image.tsx": { get: { open: "audit 4: the link preview reads the product picture from Blob, no store figure taken" } },
   "app/api/store/ai/route.ts": { get: { open: "audit 10: the picture read for its alt text; the AI call is priced by line ai, the Blob read is not" } },
   "lib/picture-r2-copy.ts": { get: { open: "audit 10: the picture copy to R2 (off today) reads the picture from Blob" } },
+  // A takedown moves a withdrawn picture and its thumbnail out of public reach (lib/picture-withdraw.ts, from #3008):
+  // the copy and its checks are Advanced Operations with every try, priced in no line yet; the deletes are free.
+  "lib/picture-withdraw.ts": {
+    copy: { open: "audit 11: a takedown copies the picture and its thumbnail to the withdrawn folder, priced in no line" },
+    head: { open: "audit 11: a takedown checks the copy and the original, priced in no line" },
+    del: DELETE_IS_FREE,
+  },
 
   // Community pictures and students' files: storage is priced, the operations are not (audit 7).
   "app/api/store/community/upload/route.ts": { issueSignedToken: TOKEN_OPEN, handleUploadPresigned: SIGNS_LOCALLY },
@@ -194,5 +201,5 @@ test("the open Blob costs are exactly the ones the audit names, so none is added
   const open = Object.entries(BLOB_SITES).flatMap(([file, ops]) => Object.entries(ops).filter(([, paid]) => "open" in paid).map(([op, paid]) => `${(paid as { open: string }).open.split(":")[0]} ${file} ${op}`));
   console.log(`open Blob costs (${open.length}):\n  ${open.sort().join("\n  ")}`);
   // Rule 23: this list only shrinks, as each audit unit prices its operations; a new entry needs Claude 4's decision.
-  assert.equal(open.length, 23);
+  assert.equal(open.length, 25);
 });

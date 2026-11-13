@@ -280,6 +280,21 @@ async function main(): Promise<void> {
     is("the failing store still sends nothing", told(`${first.handle}-due-0000@example.com`), 0);
   }
 
+  part("The store walk: a held store costs the next run one store, never a re-walk (M1 of the second rev-odd review on #3215)");
+  reset();
+  {
+    const [first, second, third] = await threeStores();
+    for (const s of [first, second, third]) pastDue.set(s.account, behind(s.handle, s.product, 1));
+    // The first never readable, the second taking all that is left of every run: the next run sweeps the held first
+    // store alone, then goes on from where this run stopped, so the third is reached as on main.
+    broken.add(first.account);
+    slow.add(second.account);
+    await run();
+    await run();
+    is("the third store's member is written to within two runs", told(`${third.handle}-due-0000@example.com`), 1);
+    is("the failing store still sends nothing", told(`${first.handle}-due-0000@example.com`), 0);
+  }
+
   part("The store walk: a store held at the end of the walk never keeps the stores before it waiting (Claude 6 on #3215)");
   reset();
   {

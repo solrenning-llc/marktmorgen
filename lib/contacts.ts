@@ -882,20 +882,35 @@ export async function readUnsubToken(
  * again", never "Unsubscribed." (app/api/mail/unsubscribe).
  */
 export async function unsubscribe(token: string): Promise<{ listId: string; email: string } | null> {
-  const found = await readUnsubToken(token);
-  if (!found) return null;
-  const { listId, email, contact } = found;
-  if (contact.unsub) return { listId, email };
-  // Leaving takes back the permission to see their link use as well.
-  const { clicks: _left, ...kept } = contact;
-  void _left;
-  const next: Contact = { ...kept, unsub: true, unsubAt: new Date().toISOString() };
-  const commands: (string | number)[][] = [["HSET", leadsKey(listId), email, JSON.stringify(next)]];
-  if (contact.agreed) commands.push(["INCR", unsubKey(listId)]);
-  const replies = repliesFor(await redisPipeline(commands), commands.length);
-  const written = replies ? countOf(replies[0]) : null;
-  if (written === null || written > 1) throw new UnknownReplyError("an unsubscribe's write");
-  return { listId, email };
+  // Written only while the row still holds what was read (casWrite, as stopWriting): a plain HSET wrote the whole
+  // row back over an erasure made between the read and the write, bringing the person's data back to the list
+  // after a confirmed erasure, and counted them as leaving after it (Claude 1 cloud on #4244). A row changed by
+  // another write is read again; one that is gone was erased, and nothing is written for it.
+  let last: { listId: string; email: string } | null = null;
+  for (let round = 0; round < 3; round += 1) {
+    const found = await readUnsubToken(token);
+    if (!found) {
+      // The link read its row on an earlier round, and the row (or its link) is gone since: an erasure took it.
+      // The person is off the list; nothing is written back.
+      return last;
+    }
+    const { listId, email, contact, row } = found;
+    last = { listId, email };
+    if (contact.unsub) return { listId, email };
+    // Leaving takes back the permission to see their link use as well.
+    const { clicks: _left, ...kept } = contact;
+    void _left;
+    const next: Contact = { ...kept, unsub: true, unsubAt: new Date().toISOString() };
+    const [written] = await casWrite(leadsKey(listId), [{ email, value: JSON.stringify(next), was: sha1(row) }]);
+    if (!written) continue;
+    if (contact.agreed) {
+      const counted = repliesFor(await redisPipeline([["INCR", unsubKey(listId)]]), 1);
+      if (!counted || countOf(counted[0]) === null) throw new UnknownReplyError("an unsubscribe's count");
+    }
+    return { listId, email };
+  }
+  // Changed by another write on every round: not known to be written, so the door says "try again".
+  throw new UnknownReplyError("an unsubscribe's write");
 }
 
 /**

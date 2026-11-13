@@ -63,7 +63,8 @@ async function intercept<T>(when: (commands: Commands) => boolean, answer: Answe
 }
 const isLinkRead = (c: Commands) => c.length === 1 && c[0]?.[0] === "GET" && String(c[0][1]).startsWith("nl:mail:unsub:");
 const isRowRead = (c: Commands) => c.length === 1 && c[0]?.[0] === "HGET" && String(c[0][1]).startsWith("nl:store:leads:");
-const isUnsubWrite = (c: Commands) => c[0]?.[0] === "HSET" && String(c[0][1]).startsWith("nl:store:leads:") && c.every((x) => x[0] === "HSET" || x[0] === "INCR");
+// The row's write is the checked script (casWrite, #4244): written only while the row still holds what was read.
+const isUnsubWrite = (c: Commands) => c.length === 1 && c[0]?.[0] === "EVAL" && String(c[0][1]).includes("contact-cas-hset") && String(c[0][3]).startsWith("nl:store:leads:");
 
 let listId = "";
 let handle = "";
@@ -223,11 +224,12 @@ test("U3: an unsubscribe whose HSET answers in another shape is unknown, never d
       assert.deepEqual(await unsubscribe(token), { listId, email }, "the next press, in shape, unsubscribes");
     });
   }
-  await t.test("a write that applied but whose reply was lost: unknown now, done on the next press", async () => {
+  await t.test("a write that applied but whose reply was lost: read back, so done on this press", async () => {
     const { email, token } = await reader("u3 applied lost");
-    await assert.rejects(intercept(isUnsubWrite, async (c, real) => (await real(c), [null]), () => unsubscribe(token)), UnknownReplyError);
+    // casWrite reads the row back: holding what was to be written, the script ran and only its answer was lost.
+    assert.deepEqual(await intercept(isUnsubWrite, async (c, real) => (await real(c), [null]), () => unsubscribe(token)), { listId, email });
     assert.equal(await isUnsub(email), true);
-    assert.deepEqual(await unsubscribe(token), { listId, email });
+    assert.deepEqual(await unsubscribe(token), { listId, email }, "and a second press is still done");
   });
 });
 

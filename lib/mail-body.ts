@@ -26,7 +26,7 @@
  * function that draws the email.
  */
 import { MAX_MAIL_PICTURES, readPicture, withoutPictures } from "@/lib/mail-picture-rules";
-import { readSentLinkTarget } from "@/lib/sent-link-rules";
+import { MAX_SENT_LINKS, readSentLinkTarget } from "@/lib/sent-link-rules";
 import { contrast, lookColours } from "@/lib/store-look";
 
 export const MAX_MAIL_HEADING = 120;
@@ -172,9 +172,13 @@ export type BodyPaint = { text: string; link: string; line: string; headFont: st
  * an address written in the text is the link's own words, and
  * words that say one address while the link goes to another are what mail
  * filters take for phishing, and would mislead the reader once changed.
+ * At most MAX_SENT_LINKS, the most the redirect signs (sentLinkPath): a later
+ * button goes to its own address and is not in the list (Claude 1 on #3715).
  */
 export function bodyButtons(body: string): string[] {
-  return parseMailBlocks(body).flatMap((block) => (block.kind === "button" && changeable(block.href) ? [block.href] : []));
+  return parseMailBlocks(body)
+    .flatMap((block) => (block.kind === "button" && changeable(block.href) ? [block.href] : []))
+    .slice(0, MAX_SENT_LINKS);
 }
 
 /**
@@ -215,7 +219,7 @@ export function bodyHtml(
       case "button": {
         // A changeable button signs the untagged address, the same original as the
         // text and the studio's list, so nothing of one reader is inside it (review of #3715).
-        const wrap = buttonTo !== undefined && changeable(block.href);
+        const wrap = buttonTo !== undefined && buttons < MAX_SENT_LINKS && changeable(block.href);
         const href = wrap ? buttonTo(block.href, buttons) : goesTo ? goesTo(block.href) : block.href;
         if (wrap) buttons += 1;
         out.push(
@@ -291,7 +295,7 @@ export function bodyText(body: string, buttonTo?: (href: string, n: number) => s
           case "heading":
             return block.text;
           case "button": {
-            const wrap = buttonTo !== undefined && changeable(block.href);
+            const wrap = buttonTo !== undefined && buttons < MAX_SENT_LINKS && changeable(block.href);
             const href = wrap ? buttonTo(block.href, buttons) : block.href;
             if (wrap) buttons += 1;
             return `${block.label}: ${href}`;

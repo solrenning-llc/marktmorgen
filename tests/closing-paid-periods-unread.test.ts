@@ -64,7 +64,7 @@ async function main() {
       const replies = await pipeline(commands);
       return commands.map((command, i) => (command[0] === "HGETALL" && command[1] === paidKey(folder) ? reply : replies[i]));
     }) as typeof redis.pipeline;
-    // paidPeriods itself (the rows owed, the closing day's refunds) is read exactly by #4442 (Fixes #4310),
+    // paidPeriods itself (the rows owed, the closing day's refunds) is read exactly by #4454 (Fixes #4310; it replaces the closed #4442),
     // with its own test, tests/closing-paid-periods-exact.test.ts; this file holds the member's copy.
     stripeCalls = 0;
     is("the member's copy is not made without their kept payment", await outcome(() => heldPaymentsOf(seller, "member@example.com")), "unknown");

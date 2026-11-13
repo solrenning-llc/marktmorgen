@@ -25,13 +25,14 @@ export const MAX_REMOVED_PRODUCTS = MAX_PRODUCTS;
 const removedKey = (statsId: string) => `nl:prodgone:${statsId}`;
 const PRODUCT = /^[A-Za-z0-9_-]{1,64}$/;
 
-/** Notes a product as removed, before it leaves the catalog; throws when that is not confirmed. */
+/** Notes a product as removed, at this time, before it leaves the catalog; throws when that is not confirmed. */
 export async function noteRemovedProduct(statsId: string | null, productId: string, now = Date.now()): Promise<void> {
   if (!statsId || !isRedisConfigured()) return;
   if (!PRODUCT.test(productId)) throw new UnknownReplyError("a removed product's id");
   const key = removedKey(statsId);
   const replies = repliesFor(await redisPipeline([
-    ["ZADD", key, "NX", now, productId],
+    // Its latest removal: one removed again is never trimmed before products removed since its first time.
+    ["ZADD", key, now, productId],
     ["ZREMRANGEBYRANK", key, 0, -(MAX_REMOVED_PRODUCTS + 1)],
   ]), 2);
   const added = replies ? countOf(replies[0]) : null;

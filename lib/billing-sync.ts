@@ -156,6 +156,9 @@ async function applyListed(subscription: Record<string, unknown>, counts: SyncCo
   // The one this store wrote down: Stripe's word stands.
   if (store.subscriptionId === id) {
     const state=stateOf(subscription);
+    // A row whose plan cannot be read (CX-123 rule 24) says nothing: the store is not in line with Stripe, so step 2
+    // asks about it on its own, and an answer that is still unknown there is counted as a failure.
+    if (state.state === "unknown") return false;
     if(state.state==='active'&&hasContractFunding(subscription)){
       const observed=await startedFromObservedSubscription(store,subscription);if(!observed)return false;
       state.period=observed.period;

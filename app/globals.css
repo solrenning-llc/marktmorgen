@@ -2434,6 +2434,13 @@ a.chip {
   border-color: var(--st-accent-text);
   color: var(--st-accent-text);
 }
+/* The page the buyer is on is underlined too, so it is never told by colour alone, and never looks like a link
+   under the pointer (WCAG 1.4.1, 2.4.8; forced colors keep the underline). */
+.st-pages-link[aria-current="page"] {
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 0.3em;
+}
 
 /* A heading over one of the store's sections. */
 .st-section-title {
@@ -4320,6 +4327,37 @@ fieldset:disabled .cm-poll-row {
   border-color: var(--st-accent);
   background: var(--st-accent);
   color: var(--st-on-accent);
+}
+/*
+ * Forced colors draw every tab, side link and chip alike: the fill, the tint and the inset bar that mark the
+ * current one are replaced or dropped. It takes the system's own colours for a selection instead, and no tab is
+ * faded, since opacity would still dim the system's text (WCAG 1.4.1, 1.4.11, 2.4.8; 274 [AX1]).
+ */
+@media (forced-colors: active) {
+  .cm-tab {
+    opacity: 1;
+  }
+  .cm-tab[aria-current="page"],
+  .st-theme-bold .cm-bar .cm-tab[aria-current="page"],
+  .cm-side[aria-current="page"],
+  .cm-chip[aria-current="page"] {
+    forced-color-adjust: none;
+    background: Highlight;
+    color: HighlightText;
+    border-color: HighlightText;
+    box-shadow: none;
+  }
+  .cm-tab[aria-current="page"] .cm-tab-n {
+    background: HighlightText;
+    color: Highlight;
+  }
+  /* The ring around the current one is the system's text colour, as on every other control. */
+  .cm-tab[aria-current="page"]:focus-visible,
+  .st-theme-bold .cm-bar .cm-tab[aria-current="page"]:focus-visible,
+  .cm-side[aria-current="page"]:focus-visible,
+  .cm-chip[aria-current="page"]:focus-visible {
+    outline-color: CanvasText;
+  }
 }
 .cm-face {
   display: inline-flex;

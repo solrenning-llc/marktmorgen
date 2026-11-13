@@ -19,6 +19,7 @@
  * the arithmetic below is the same for both.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { StripeError, onAccount } from "@/lib/stripe-account";
 import { type Interval, isInterval } from "@/lib/product-recurring";
 
@@ -29,7 +30,11 @@ const ACCOUNT_ID = /^acct_[A-Za-z0-9]{8,64}$/;
 /** Written down when a plan's checkout opens, so it is settled either way. */
 export async function rememberPlan(account: string, session: string): Promise<void> {
   if (!isRedisConfigured() || !ACCOUNT_ID.test(account) || !SESSION_ID.test(session)) return;
-  await redisPipeline([["SADD", PENDING, `${account}|${session}|${Math.floor(Date.now() / 1000)}`]]);
+  const replies = repliesFor(await redisPipeline([["SADD", PENDING, `${account}|${session}|${Math.floor(Date.now() / 1000)}`]]), 1);
+  // Only one reply of 0 or 1 says it is written down (#4287, item 15): anything else throws before
+  // the checkout's URL is handed out, so a plan is never left without the mark that gives it its end.
+  const added = replies ? countOf(replies[0]) : null;
+  if (added === null || added > 1) throw new UnknownReplyError("a payment plan's pending mark");
 }
 
 /**

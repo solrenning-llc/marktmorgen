@@ -26,7 +26,7 @@ async function main(): Promise<void> {
   part("Control: Redis answers the SADD");
   redis.clear();
   is("written down", await outcome(), "kept");
-  is("the pending set holds it", (await run([["SMEMBERS", "nl:plans:pending"]]))[0].length, 1);
+  is("the pending set holds it", ((await run([["SMEMBERS", "nl:plans:pending"]]))[0] as string[]).length, 1);
   is("written again: SADD answers 0, still written down", await outcome(), "kept");
 
   for (const [name, reply] of [

@@ -1261,6 +1261,16 @@ function invoiceMeta(invoice: Record<string, unknown>): Record<string, string> {
   return Object.fromEntries(Object.entries(meta).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
 }
 
+/** A money amount Stripe gives in whole minor units: a safe integer, zero or more. Anything else is unreadable (null), never zero. */
+function minorUnits(value: unknown): number | null {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
+
+/** Whether an invoice is a paid renewal of one of this store's subscriptions: the invoices renewalsFrom and renewalEntries count. */
+function isStoreRenewal(handles: Set<string>, invoice: Record<string, unknown>): boolean {
+  return invoice.status === "paid" && invoice.billing_reason === "subscription_cycle" && handles.has(invoiceMeta(invoice).store ?? "");
+}
+
 /**
  * The payments after the first of this store's memberships and payment plans
  * since `since` (seconds): paid invoices Stripe made because a period came
@@ -1288,8 +1298,9 @@ export function renewalsFrom(
     const meta = invoiceMeta(invoice);
     if (!handles.has(meta.store ?? "")) continue;
     if (currencyOf(invoice) !== currency) continue;
-    const cents = typeof invoice.amount_paid === "number" ? invoice.amount_paid : 0;
-    if (cents <= 0) continue;
+    // An amount that is not whole minor units is counted nowhere; readRenewals marks the reading partial for it.
+    const cents = minorUnits(invoice.amount_paid);
+    if (cents === null || cents === 0) continue;
     const day = dayKey((typeof invoice.created === "number" ? invoice.created : 0) * 1000);
     const windows: ("d7" | "d30" | "d90")[] = ["d90", ...(day >= cut30 ? (["d30"] as const) : []), ...(day >= cut7 ? (["d7"] as const) : [])];
     for (const w of windows) {
@@ -1325,8 +1336,9 @@ export function renewalEntries(store: Store, invoices: Record<string, unknown>[]
     if (invoice.status !== "paid" || invoice.billing_reason !== "subscription_cycle") continue;
     const meta = invoiceMeta(invoice);
     if (!handles.has(meta.store ?? "")) continue;
-    const cents = typeof invoice.amount_paid === "number" ? invoice.amount_paid : 0;
-    if (cents <= 0) continue;
+    // An unreadable amount is no entry here and makes readRenewals partial; a known zero is no cash entry.
+    const cents = minorUnits(invoice.amount_paid);
+    if (cents === null || cents === 0) continue;
     const source = "channel" in meta ? (meta.channel === "direct" ? "" : meta.channel) : meta.utm_source || UNRECORDED;
     out.push({ day: dayKey((typeof invoice.created === "number" ? invoice.created : 0) * 1000), cents, currency: currencyOf(invoice), source });
   }
@@ -1355,6 +1367,10 @@ async function readRenewals(store: Store, since: number, now: number, pages: num
   const entries = renewalEntries(store, invoices);
   // A renewal in a currency the answer does not name is in no total: the reading is incomplete.
   if (entries.some((entry) => !entry.currency)) partial = true;
+  // A paid renewal of this store whose amount is missing, negative, fractional or not a safe integer is in no total
+  // either: the reading is incomplete, never a renewal of zero (issue #4388).
+  const handles = saleHandles(store);
+  if (invoices.some((invoice) => isStoreRenewal(handles, invoice) && minorUnits(invoice.amount_paid) === null)) partial = true;
   return { ...renewalsFrom(store, invoices, now, store.currency), partial, entries, paymentIntents: renewalPaymentIntents(store, invoices) };
 }
 

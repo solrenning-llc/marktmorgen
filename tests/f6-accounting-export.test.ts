@@ -149,14 +149,14 @@ async function main(): Promise<void> {
   });
   const upsell = (id: string, over: Record<string, unknown> = {}) => ({ id, object: "payment_intent", status: "succeeded", amount: 1900, currency: "usd", created: from + 7200, metadata: { kind: "upsell", store: "harbor", product: "p2" }, ...over });
   const titles: Record<string, string> = { p1: "Sourdough Guide", p2: "Starter Jar" };
-  const world = (sessions: unknown[], intents: unknown[], paypal: Awaited<ReturnType<typeof readPayPalSalesExact>> = { sales: [], more: false }) => {
+  const world = (sessions: unknown[], intents: unknown[], paypal: Awaited<ReturnType<typeof readPayPalSalesExact>> = { sales: [], more: false }, invoices: unknown[] = [{ object: "list", data: [], has_more: false }]) => {
     const asked: string[] = [];
     return {
       asked,
       deps: {
         stripe: async (path: string) => {
           asked.push(path);
-          const pages = path.startsWith("/checkout/sessions") ? sessions : intents;
+          const pages = path.startsWith("/checkout/sessions") ? sessions : path.startsWith("/invoices") ? invoices : intents;
           const after = /starting_after=([^&]+)/.exec(path)?.[1];
           const at = after ? Number(after.split("_").pop()) : 0;
           return pages[at];
@@ -169,12 +169,12 @@ async function main(): Promise<void> {
   const page = (data: unknown[], hasMore: boolean) => ({ object: "list", data, has_more: hasMore });
 
   const happy = world(
-    [page([session("cs_a_0"), session("cs_b_0", { metadata: { store: "other", product: "x" } }), session("cs_c_0", { payment_status: "unpaid", amount_total: null, total_details: null }), session("cs_d_1", { metadata: { store: "old-harbor", product: "p1" }, amount_total: 4312, total_details: { amount_discount: 0, amount_shipping: 0, amount_tax: 392 } })], true), page([session("cs_e_1", { created: from + 90_000 })], false)],
+    [page([session("cs_a_0"), session("cs_b_0", { metadata: { store: "other", product: "x" } }), session("cs_c_0", { status: "expired", payment_status: "unpaid", amount_total: null, total_details: null }), session("cs_d_1", { metadata: { store: "old-harbor", product: "p1" }, amount_total: 4312, total_details: { amount_discount: 0, amount_shipping: 0, amount_tax: 392 } })], true), page([session("cs_e_1", { created: from + 90_000 })], false)],
     [page([upsell("pi_a_0"), upsell("pi_b_0", { metadata: { kind: "upsell", store: "harbor", product: "p2" }, status: "requires_payment_method", amount: null })], false)],
   );
   const read = await readAccountingSales(store, period, happy.deps);
   is(
-    "this store's paid sales under any of its names, with tax apart; other stores', unpaid and unfinished left out",
+    "this store's paid sales under any of its names, with tax apart; other stores', expired and failed left out",
     read.ok && read.sales.map((s) => [s.product, s.title, s.net, s.tax, s.currency]).sort(),
     [["p1", "Sourdough Guide", 3920, 392, "usd"], ["p1", "Sourdough Guide", 4900, 0, "usd"], ["p1", "Sourdough Guide", 4900, 0, "usd"], ["p2", "Starter Jar", 1900, 0, "usd"]],
   );
@@ -203,6 +203,46 @@ async function main(): Promise<void> {
   await refused("more PayPal sales than one file reads: no file", empty, empty, "too_many", { sales: [], more: true });
   const paypalStore = await readAccountingSales({ ...store, stripeAccountId: "" } as Store, period, world([], [], { sales: [{ store: "s1", order: "5O190127TN3647201", capture: "C", email: "b@example.com", product: "p1", cents: 3920, currency: "usd", at: from + 10 }], more: false }).deps);
   is("a PayPal sale counted, on a store with no Stripe, with no tax (PayPal orders carry none)", paypalStore.ok && paypalStore.sales.map((s) => [s.product, s.net, s.tax, s.at]), [["p1", 3920, 0, from + 10]]);
+
+  part("Renewals and later instalments are sales too (ALTO 1 of the money review on #2996)");
+  const invoice = (id: string, over: Record<string, unknown> = {}) => ({
+    id, object: "invoice", status: "paid", billing_reason: "subscription_cycle", amount_paid: 2000, currency: "usd", created: from + 5000, tax: 0,
+    subscription_details: { metadata: { store: "harbor", product: "p3" } }, ...over,
+  });
+  titles.p3 = "Bread Club";
+  const renewals = await readAccountingSales(store, period, world(empty, empty, undefined, [page([
+    invoice("in_a_0"),
+    invoice("in_b_0", { tax: null, total_taxes: [{ amount: 150 }, { amount: 50 }], amount_paid: 2200, subscription_details: null, parent: { subscription_details: { metadata: { store: "old-harbor", product: "p3" } } } }),
+    invoice("in_c_0", { billing_reason: "subscription_create" }),
+    invoice("in_d_0", { subscription_details: { metadata: { store: "other", product: "x" } } }),
+    invoice("in_e_0", { status: "void", amount_paid: 0 }),
+    invoice("in_f_0", { billing_reason: "manual" }),
+  ], false)]).deps);
+  is(
+    "each paid renewal of this store is a line, in its currency, net of its tax (either API version); a first invoice (its checkout is the sale), another store's, a void one and a manual one are not",
+    renewals.ok && renewals.sales.map((s) => [s.product, s.title, s.net, s.tax, s.currency]).sort(),
+    [["p3", "Bread Club", 2000, 0, "usd"], ["p3", "Bread Club", 2000, 200, "usd"]],
+  );
+  const renewalsAsked = world(empty, empty, undefined, [page([], false)]);
+  await readAccountingSales(store, period, renewalsAsked.deps);
+  is("the invoices are asked only for the period, a hundred at a time", renewalsAsked.asked.some((p) => p.startsWith("/invoices?limit=100&") && p.includes(`created[gte]=${from}`) && p.includes(`created[lt]=${to}`)), true);
+  const refusedInvoices = async (what: string, invoices: unknown[], reason: string) => {
+    const result = await readAccountingSales(store, period, world(empty, empty, undefined, invoices).deps).catch(() => ({ ok: false as const, reason: "threw" }));
+    is(what, result.ok ? "a file" : result.reason, reason);
+  };
+  await refusedInvoices("a renewal with no tax figure: no file (unknown is not zero)", [page([invoice("in_a_0", { tax: undefined })], false)], "unreadable");
+  await refusedInvoices("a renewal with no amount: no file", [page([invoice("in_a_0", { amount_paid: "20" })], false)], "unreadable");
+  await refusedInvoices("an invoice whose status cannot be read: no file", [page([invoice("in_a_0", { status: 7 })], false)], "unreadable");
+
+  part("A day with a payment not settled yet makes no file (MÉDIO 2 of the money review on #2996)");
+  // Its invoice number would come out again later with a larger total, and the accounting app refuses a number it has.
+  await refused("a checkout of the period still open: no file yet", [page([session("cs_a_0", { status: "open", payment_status: "unpaid", amount_total: 4900 })], false)], empty, "pending");
+  await refused("a checkout complete with its payment still processing: no file yet", [page([session("cs_a_0", { payment_status: "unpaid" })], false)], empty, "pending");
+  await refused("a one-click extra still processing: no file yet", empty, [page([upsell("pi_a_0", { status: "processing" })], false)], "pending");
+  await refusedInvoices("a renewal still a draft: no file yet", [page([invoice("in_a_0", { status: "draft", amount_paid: 0 })], false)], "pending");
+  await refusedInvoices("a renewal open, not paid yet: no file yet", [page([invoice("in_a_0", { status: "open", amount_paid: 0 })], false)], "pending");
+  await refusedInvoices("a renewal marked uncollectible, which can still be paid: no file yet", [page([invoice("in_a_0", { status: "uncollectible", amount_paid: 0 })], false)], "pending");
+  await refused("another store's open checkout does not hold this store's file", [page([session("cs_a_0", { status: "open", payment_status: "unpaid", metadata: { store: "other", product: "x" } })], false)], empty, "a file");
 
   part("PayPal's own records, read exactly");
   redis.clear();

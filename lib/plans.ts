@@ -119,7 +119,16 @@ export async function settlePlans(limit = 200): Promise<{ done: number; open: nu
   const counts = { done: 0, open: 0, dropped: 0, failed: 0 };
   if (!isRedisConfigured()) return counts;
   const [raw] = await redisPipeline([["SMEMBERS", PENDING]]);
-  const members = Array.isArray(raw) ? (raw as string[]).slice(0, limit) : [];
+  // Newest first (review LEVE on #3086): a plan that never settles stays pending, so taking the set's own order let
+  // a run's worth of stuck plans keep a plan opened today from ever getting its end. A new plan is the one whose
+  // next charge is soonest at stake; older ones are reached whenever fewer than `limit` are newer.
+  const opened = (member: string) => Number(member.split("|")[2]) || 0;
+  const members = Array.isArray(raw)
+    ? (raw as unknown[])
+        .filter((m): m is string => typeof m === "string")
+        .sort((a, b) => opened(b) - opened(a))
+        .slice(0, limit)
+    : [];
   const now = Math.floor(Date.now() / 1000);
   for (const member of members) {
     const [account, session, opened] = member.split("|");

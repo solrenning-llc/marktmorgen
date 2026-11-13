@@ -89,14 +89,27 @@ export async function dropForm(statsId: string, id: string, room: DataStore): Pr
 
 const ANSWERS_SLOT = (formId: string) => `fr:${formId}`;
 
-/** One response kept, the newest first, and the ones past ARGV[2] let go, answered: what was really let go. */
-export const KEEP_FORM_RESPONSE = `-- marktmorgen:form-keep:v1
-redis.call("LPUSH", KEYS[1], ARGV[1])
+/**
+ * One response kept, the newest first, and the ones past ARGV[3] let go, answered: what was really let go. Only while
+ * the form (ARGV[1]) is still in the store's forms (KEYS[1]); a form deleted meanwhile answers -1 and nothing is
+ * written (#4368), so no answer list outlives its form, out of reach of a person's erasure.
+ */
+export const KEEP_FORM_RESPONSE = `-- marktmorgen:form-keep:v2
+if redis.call("HEXISTS", KEYS[1], ARGV[1]) == 0 then return -1 end
+redis.call("LPUSH", KEYS[2], ARGV[2])
 local out = {}
-while redis.call("LLEN", KEYS[1]) > tonumber(ARGV[2]) do
-  table.insert(out, redis.call("RPOP", KEYS[1]))
+while redis.call("LLEN", KEYS[2]) > tonumber(ARGV[3]) do
+  table.insert(out, redis.call("RPOP", KEYS[2]))
 end
 return out`;
+
+/** Thrown by addResponse when the form was deleted before its answer was kept: nothing kept, the room given back. */
+export class FormGoneError extends Error {
+  constructor() {
+    super("The form was deleted before this answer was kept");
+    this.name = "FormGoneError";
+  }
+}
 
 /**
  * Keeps one response, the newest first, and lets the oldest go past
@@ -111,7 +124,13 @@ export async function addResponse(statsId: string, formId: string, response: For
   const guessed = Number(kept) >= KEPT_RESPONSES && typeof oldest === "string" ? dataBytes([oldest], 1) : 0;
   const charged = dataBytes([json], 1) - guessed;
   await needData(room, [{ slot: ANSWERS_SLOT(formId), bytes: charged }]);
-  const [gone] = await redisPipeline([["EVAL", KEEP_FORM_RESPONSE, 1, responsesKey(statsId, formId), json, KEPT_RESPONSES]]);
+  const [gone] = await redisPipeline([["EVAL", KEEP_FORM_RESPONSE, 2, formsKey(statsId), responsesKey(statsId, formId), formId, json, KEPT_RESPONSES]]);
+  if (gone === -1) {
+    // The form was deleted after the submission read it (#4368): nothing was written, so what was charged goes back.
+    if (charged > 0) await giveData(room, [{ slot: ANSWERS_SLOT(formId), bytes: charged }]);
+    else if (charged < 0) await noteData(room, [{ slot: ANSWERS_SLOT(formId), bytes: -charged }]);
+    throw new FormGoneError();
+  }
   const dropped = (Array.isArray(gone) ? gone : []).reduce<number>((sum, raw) => sum + (typeof raw === "string" ? dataBytes([raw], 1) : 0), 0);
   const off = dataBytes([json], 1) - dropped - charged;
   if (off > 0) await noteData(room, [{ slot: ANSWERS_SLOT(formId), bytes: off }]);

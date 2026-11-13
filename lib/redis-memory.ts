@@ -1208,13 +1208,16 @@ export class MemoryRedis {
           }
           return n;
         }
-        if (key.startsWith("-- marktmorgen:form-keep:v1\n") && args[0] === "1" && args.length === 4) {
-          const listKey = args[1];
+        if (key.startsWith("-- marktmorgen:form-keep:v2\n") && args[0] === "2" && args.length === 6) {
+          const [, formsKey, listKey, formId, json, max] = args;
+          this.live(formsKey);
+          const forms = this.data.get(formsKey);
+          if (!(forms instanceof Map) || !forms.has(formId)) return -1;
           this.live(listKey);
           const list = this.list(listKey);
-          list.unshift(args[2]);
+          list.unshift(json);
           const out: string[] = [];
-          while (list.length > Number(args[3])) out.push(list.pop()!);
+          while (list.length > Number(max)) out.push(list.pop()!);
           return out;
         }
         if (key.startsWith("-- marktmorgen:form-forget:v2\n")) {

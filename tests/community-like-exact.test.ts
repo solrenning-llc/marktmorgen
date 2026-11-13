@@ -9,8 +9,8 @@
  * room given back.
  */
 import { readFileSync } from "node:fs";
-import { toggleCommentLike, toggleLike } from "@/lib/community";
-import { dataUsed } from "@/lib/store-data";
+import { SET_ENTRY_BYTES, toggleCommentLike, toggleLike } from "@/lib/community";
+import { dataUsed, giveData } from "@/lib/store-data";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { ROOM } from "./data-room";
 import { store as redis } from "./redis-stub";
@@ -104,6 +104,19 @@ async function main(): Promise<void> {
   const route = readFileSync("app/api/store/community/route.ts", "utf8");
   is("the route awards nothing for a press that changed nothing", [route.includes("if (added !== null && post.a !== key)"), route.includes("if (added !== null && comment.a !== key)")], [true, true]);
   await real([["DEL", likes, trace, `nl:cm:${ID}:tr:${A}`]]);
+
+  part("Codex P on #3819: a like whose trace entry was already there gives back the trace room it took");
+  await real([["DEL", likes, trace]]);
+  is("setup: liked", await toggleLike(ID, POST, WHO, ROOM), true);
+  const complete = await used();
+  // An earlier attempt left only the trace entry: the like itself is gone (and its room given back), the trace stays.
+  await real([["SREM", likes, WHO]]);
+  await giveData(ROOM, [{ slot: `cm:p:${POST}`, bytes: SET_ENTRY_BYTES }]);
+  is("(only the trace entry is left)", await members(trace), [`l:${POST}`]);
+  is("liked again", await toggleLike(ID, POST, WHO, ROOM), true);
+  is("the room is a like and one trace entry, as before: the trace room taken again is given back", await used(), complete);
+  await toggleLike(ID, POST, WHO, ROOM);
+  await real([["DEL", likes, trace]]);
 
   part("The comment's like reads the same way (rule 30)");
   const clikes = `nl:cm:${ID}:lc:${POST}:k1`;

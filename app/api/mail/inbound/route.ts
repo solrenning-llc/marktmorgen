@@ -123,7 +123,11 @@ export async function POST(request: NextRequest) {
 
   const emailId = typeof notice.data?.email_id === "string" ? notice.data.email_id : "";
 
-  const result = await forwardInbound(emailId);
+  // A throw (a count that could not be read, rule 24) is a retry too: the mark is let go of, so Resend's retry is heard.
+  const result = await forwardInbound(emailId).catch((error: unknown) => {
+    console.error("an inbound message could not be sent on", error);
+    return "retry" as const;
+  });
   if (result === "retry") {
     await redisPipeline([["DEL", seenKey]]).catch(() => {});
     return Response.json({ ok: false }, { status: 500 });

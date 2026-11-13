@@ -42,12 +42,14 @@ export async function POST(request: NextRequest) {
   } catch {
     token = "";
   }
+  // A refund still being settled (a second press, a request that has not finished) is never told "nothing":
+  // not by the day's counter either, whose "unread" and "later" both say nothing was refunded.
+  const underway = () => refundUnderway(store.sid).catch(() => true);
   const room = await withinLimit("plan-refund", store.sid || store.handle, PER_DAY, 86_400).catch(unknownLimit);
+  if (room !== true && (await underway())) return told("busy");
   if (room === "unknown") return told("unread");
   if (!room) return told("later");
   // The pass is taken before anything else: a second click or an old tab has none.
-  // A refund still being settled (a second press, a request that has not finished) is never told "nothing".
-  const underway = () => refundUnderway(store.sid).catch(() => true);
   const shown = await takeReview(store.sid, token);
   if (shown === null) return told((await underway()) ? "busy" : "review");
 

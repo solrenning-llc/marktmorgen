@@ -1,5 +1,6 @@
 import { withinStore } from "@/lib/metered-limits";
 import { type DigitalConsent, consentFromForm } from "@/lib/digital-consent";
+import { membershipWords } from "@/lib/buyer-words/membership";
 import type { NextRequest } from "next/server";
 import { linkOrigin, originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
@@ -42,6 +43,13 @@ export async function POST(request: NextRequest) {
   if (room === "unknown") return back("refused");
   if (!room) return back("limited");
   const opened = await openWinBack(store, product, token, linkOrigin(request, store), consent);
+  // The link could not be read just now (CX-123 rule 24): 503 with the store's words, never sent back as "expired".
+  if (!opened.ok && opened.reason === "unknown") {
+    return new Response(membershipWords(store.language).offerNotices.unknown, {
+      status: 503,
+      headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store", "Retry-After": "30" },
+    });
+  }
   if (!opened.ok) return back(opened.reason);
   return new Response(null, { status: 303, headers: { Location: opened.url, "Cache-Control": "no-store" } });
 }

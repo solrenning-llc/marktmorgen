@@ -35,6 +35,29 @@ async function handedOver(statsId: string, order: string): Promise<void> {
 }
 
 /**
+ * A PayPal sale whose affiliate or partner credit failed after it was handed over (an unknown read of the affiliate,
+ * rule 24, or Redis trouble): kept in the same list as `credit:<order>`, so the sweep credits it again from the paid
+ * record (creditAgain), never by handing the order over or emailing the buyer twice. Its own read is the one the list
+ * already costs a sweep. Best effort, as the hand-over's own retry mark is.
+ */
+const CREDIT_PREFIX = "credit:";
+async function oweCredit(store: Store, order: string, error: unknown): Promise<void> {
+  console.error("crediting a PayPal sale failed; credited again at the next sweep", order, error);
+  if (store.statsId && isRedisConfigured()) await redisPipeline([["ZADD", handOverKey(store.statsId), dueNow(), `${CREDIT_PREFIX}${order}`]]).catch(() => undefined);
+}
+
+/** Credits again a sale kept by oweCredit; true once it is credited or there is nothing left to credit. Throws while unknown. */
+async function creditAgain(store: Store, order: string): Promise<boolean> {
+  const paid = await readPaidExact(order);
+  if (paid === "unknown") throw new UnknownReplyError("a PayPal order's paid record");
+  // Erased, or past its time: nothing left to credit from.
+  if (paid === null) return true;
+  const product = await readListing(store, paid.product);
+  await creditPayPalSale(store, paid, product?.title ?? "");
+  return true;
+}
+
+/**
  * Gives the buyer what they paid for and emails the receipt. False when the product is gone (Redis answered that
  * its record is not there). Everything it hands over is read first, a bundle's products too; a read that is
  * unknown throws before anything is handed over, and the order is kept for the sweep to hand over, never taken
@@ -70,7 +93,7 @@ export async function handOverPayPal(store: Store, paid: Paid): Promise<boolean>
     },
     ordersLink: (email) => ordersLinkFor(store, email, base),
   });
-  await creditPayPalSale(store, paid, product.title).catch((error) => console.error("crediting a PayPal sale failed", error));
+  await creditPayPalSale(store, paid, product.title).catch((error) => oweCredit(store, paid.order, error));
   await emitEvent(store, "sale.completed", `paypal:${paid.order}`, {
     paypal_order: paid.order,
     paypal_capture: paid.capture,
@@ -106,6 +129,15 @@ async function handOverAgain(store: Store, deadline: number): Promise<number> {
   let handed = 0;
   for (const order of orders) {
     if (Date.now() >= deadline) break;
+    if (order.startsWith(CREDIT_PREFIX)) {
+      try {
+        if (await creditAgain(store, order.slice(CREDIT_PREFIX.length))) await redisPipeline([["ZREM", key, order]]);
+      } catch (error) {
+        console.error("crediting a PayPal sale again failed; tried again at the next sweep", store.handle, order, error);
+        await redisPipeline([["ZADD", key, dueNow(), order]]).catch(() => undefined);
+      }
+      continue;
+    }
     try {
       const paid = await readPaidExact(order);
       if (paid === "unknown") throw new UnknownReplyError("a PayPal order's paid record");

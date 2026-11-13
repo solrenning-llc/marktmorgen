@@ -2383,11 +2383,14 @@ export async function creditPayPalSale(store: Store, paid: Paid, title: string):
     total: paid.cents,
     currency: readCurrencyCode(paid.currency),
   };
+  // The partners' shares do not wait on the affiliate's: an unknown read of the affiliate (readAffiliate, rule 24)
+  // throws below only after they are written, and the caller keeps the sale to credit it again (both writes are
+  // HSETNX, so crediting it again changes nothing that was written).
+  await notePartners(store, { ...sale, buyer: paid.email });
   if (paid.via && affiliatesOn(store) && paid.via.rate > 0) {
     await writeReferral(store, { ...sale, aff: paid.via.aff, rate: paid.via.rate, self: await isSelf(store, paid.via.aff, paid.email), promotion: affiliatePromotionFrom(paid.meta) ?? undefined, how: "click" });
     await rememberBuyer(store, paid.email, paid.via.aff, store.affiliates.rule).catch((error) => console.error("remembering an affiliate's buyer failed", error));
   }
-  await notePartners(store, { ...sale, buyer: paid.email });
 }
 
 async function isSelf(store: Store, aff: string, buyer: string): Promise<boolean> {

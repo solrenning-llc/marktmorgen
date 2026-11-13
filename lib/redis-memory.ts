@@ -1217,10 +1217,12 @@ export class MemoryRedis {
           while (list.length > Number(args[3])) out.push(list.pop()!);
           return out;
         }
-        if (key.startsWith("-- marktmorgen:form-forget:v2\n")) {
+        if (key.startsWith("-- marktmorgen:form-forget:v3\n")) {
           const count = Number(args[0]);
           const keys = args.slice(1, 1 + count);
           const address = args[1 + count];
+          // Each form's email questions, in order (lib/form-store.ts isResponderOf); none: any answer.
+          const fieldsOf = (k: number) => String(args[2 + count + k] ?? "").split(",").filter(Boolean);
           const out: (string | number)[] = [];
           keys.forEach((listKey, k) => {
             this.live(listKey);
@@ -1229,7 +1231,12 @@ export class MemoryRedis {
             const kept = this.list(listKey).filter((raw) => {
               try {
                 const value = JSON.parse(raw) as { answers?: Record<string, unknown> };
-                const hit = value && typeof value.answers === "object" && value.answers !== null && Object.values(value.answers).some((a) => typeof a === "string" && a.trim().toLowerCase() === address);
+                const answers = value && typeof value.answers === "object" && value.answers !== null ? value.answers : null;
+                const ids = fieldsOf(k);
+                const given = ids.map((id) => answers?.[id]).find((a) => typeof a === "string" && a.trim() !== "");
+                const hit = answers !== null && (ids.length
+                  ? typeof given === "string" && given.trim().toLowerCase() === address
+                  : Object.values(answers).some((a) => typeof a === "string" && a.trim().toLowerCase() === address));
                 if (hit) counts.set(raw, (counts.get(raw) ?? 0) + 1);
                 return !hit;
               } catch {

@@ -32,7 +32,7 @@ import { type ErasureScope } from "@/lib/erasure-rules";
 import { leadsKey, parseContact } from "@/lib/contacts";
 import { readDeals, readFields, readPersonTasks, readStages, readValues } from "@/lib/crm";
 import { readPersonNotes } from "@/lib/buyer-profile";
-import { readForms, readResponses } from "@/lib/form-store";
+import { isResponderOf, readForms, readResponses } from "@/lib/form-store";
 import { requestsOfPerson } from "@/lib/payment-request-store";
 import { listAgreements, readVersionExact } from "@/lib/agreement-store";
 import { doneLessons, studentDates } from "@/lib/learn";
@@ -249,8 +249,8 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
     for (const form of await readForms(s.statsId)) {
       const { responses } = await readResponses(s.statsId, form.id);
       for (const r of responses) {
-        // The same rule the erasure deletes by: an answer that is the address (lib/form-store.ts, FORGET_FORM_PERSON).
-        if (!Object.values(r.answers).some((a) => typeof a === "string" && same(a, s.email))) continue;
+        // The same rule the erasure deletes by: their own email answer, never a friend's (lib/form-store.ts, isResponderOf).
+        if (!isResponderOf(form, r.answers, s.email)) continue;
         const answers = Object.fromEntries(form.fields.map((f) => [f.label, r.answers[f.id] ?? ""]));
         out.push({ form: form.name, sent: iso(r.at), answers, ...(r.outcome ? { result: r.outcome } : {}), ...(typeof r.score === "number" ? { score: r.score } : {}) });
       }

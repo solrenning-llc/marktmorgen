@@ -14,6 +14,7 @@ import { confirmationBodyDigest, openConfirmationOrigin, reserveConfirmationOrig
 import { itemsHandedOver } from "@/lib/store-data-rules";
 import { ADMITTED_FIELD, OrdersPausedError, admitOrders } from "@/lib/order-admission";
 import { firstCharge } from "@/lib/move-rules";
+import { rememberPlan } from "@/lib/plans";
 import { currentMeta } from "@/lib/tier-rules";
 import { saleOff } from "@/lib/store-sale";
 import { fairOff } from "@/lib/fair-price";
@@ -840,6 +841,10 @@ export async function createCheckout(
   if (typeof session.url !== "string" || !session.url || typeof session.id !== "string") {
     throw new Error("Stripe did not return a checkout URL");
   }
+  // A payment plan, or a membership that ends after a set number of payments, is written down before the buyer
+  // leaves, so the plans job gives it its end whether or not they come back from paying: here, whichever door opened
+  // it (the buy button, the welcome offer, the come-back offer, the moved-members link), not only the buy button.
+  if ((plan || (membership && membership.payments > 0)) && store.stripeAccountId) await rememberPlan(store.stripeAccountId, session.id);
   return { url: session.url, id: session.id };
 }
 

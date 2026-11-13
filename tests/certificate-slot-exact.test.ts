@@ -62,7 +62,7 @@ async function main(): Promise<void> {
 
   part("Healthy and confirmed empty, as before");
   is("no slot: no certificate", await certificateOf(course.id, "ana"), null);
-  is("no certificate issued: an empty list", await certificatesFor(course.id), { list: [], total: 0 });
+  is("no certificate issued: an empty list", await certificatesFor(course.id), { list: [], total: 0, partial: false });
   const first = await press("ana");
   if (first === "refused") throw new Error("first press refused");
   is("issued, fresh", first.fresh, true);

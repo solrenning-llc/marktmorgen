@@ -54,7 +54,7 @@ async function main(): Promise<void> {
 
   part("The page says what it shows");
   const page = readFileSync("app/studio/course/[product]/page.tsx", "utf8");
-  is("certificates: \"Showing X of N\" when not all were read", /certificates\.partial[\s\S]{0,400}Showing \$\{certificates\.list\.length\} of \$\{certificates\.total\}/.test(page), true);
+  is("certificates: \"Showing X of N\" when not all were read", /certificates\??\.partial[\s\S]{0,400}Showing \$\{certificates\.list\.length\} of \$\{certificates\.total\}/.test(page), true);
   is("certificates: the issued count is never one over a partial read", /standing = certificates && !certificates\.partial/.test(page), true);
   is("students: \"Showing X of N\" when not all were read", /students\.length < total[\s\S]{0,400}Showing \$\{students\.length\} of \$\{total\}/.test(page), true);
 

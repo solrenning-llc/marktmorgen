@@ -356,21 +356,29 @@ async function claimSlot(courseId: string, who: string, id: string): Promise<Cer
  * record is itself malformed is skipped, as before, so one broken record
  * never hides the rest.
  */
-export async function certificatesFor(courseId: string): Promise<{ list: Certificate[]; total: number } | null> {
-  if (!isRedisConfigured()) return { list: [], total: 0 };
+/**
+ * A course's certificates for the studio, read with a ceiling (issue #4304): one SMEMBERS, then at most
+ * MAX_LISTED_CERTS records, never one GET per certificate however many there are. `total` is how many the set
+ * holds; `partial` says the records were not all read, so the page says "Showing X of N" and never counts what it
+ * read as all of them. Null when a reply is not exactly what was asked for (rule 24).
+ */
+export async function certificatesFor(courseId: string): Promise<{ list: Certificate[]; total: number; partial: boolean } | null> {
+  if (!isRedisConfigured()) return { list: [], total: 0, partial: false };
   const read = plainList(await redisPipeline([["SMEMBERS", allKey(courseId)]]));
   if (!read || read.length !== 1) return null;
   const members = plainList(read[0]);
   if (!members || members.some((id) => typeof id !== "string")) return null;
-  const valid = (members as string[]).filter((id) => CERT_ID_PATTERN.test(id));
-  if (valid.length === 0) return { list: [], total: 0 };
-  const rows = plainList(await redisPipeline(valid.map((id) => ["GET", certKey(id)])));
-  if (!rows || rows.length !== valid.length || rows.some((row) => row !== null && typeof row !== "string")) return null;
+  const valid = (members as string[]).filter((id) => CERT_ID_PATTERN.test(id)).sort();
+  if (valid.length === 0) return { list: [], total: 0, partial: false };
+  const reading = valid.slice(0, MAX_LISTED_CERTS);
+  const rows = plainList(await redisPipeline(reading.map((id) => ["GET", certKey(id)])));
+  if (!rows || rows.length !== reading.length || rows.some((row) => row !== null && typeof row !== "string")) return null;
   const list = rows
     .map(parseCertificate)
     .filter((c): c is Certificate => c !== null && c.courseId === courseId)
     .sort((a, b) => b.issuedAt - a.issuedAt);
-  return { list: list.slice(0, MAX_LISTED_CERTS), total: list.length };
+  const partial = valid.length > reading.length;
+  return { list, total: partial ? valid.length : list.length, partial };
 }
 
 /**

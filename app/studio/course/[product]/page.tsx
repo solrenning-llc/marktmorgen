@@ -98,7 +98,8 @@ export default async function StudioCoursePage({
   const quizLessons = lessonsInOrder(course).filter(({ lesson }) => lesson.quiz).map(({ lesson }) => lesson.id);
   const passed = quizLessons.length ? await passedFor(course.id, students.map((s) => emailKey(s.email))) : [];
   const certificates = await certificatesFor(course.id).catch(() => null);
-  const standing = certificates ? certificates.list.filter((c) => !c.withdrawnAt).length : null;
+  // Counted only over a complete read (issue #4304): over a partial one the page says "Showing X of N" instead.
+  const standing = certificates && !certificates.partial ? certificates.list.filter((c) => !c.withdrawnAt).length : null;
   // The newest comments under the lessons, marked new since this page last showed them.
   const [talking, recent] = await Promise.all([commentsOn(course.id), recentComments(course.id, 50)]);
   await markSeen(course.id);
@@ -286,6 +287,11 @@ export default async function StudioCoursePage({
           </div>
 
           <h3 className="mt-7 font-semibold text-ink">{standing === null ? "Completions" : `Completions \u00b7 ${standing} ${standing === 1 ? "certificate" : "certificates"} issued`}</h3>
+          {certificates?.partial ? (
+            <p className="mt-2 text-sm text-ink-soft">
+              {`Showing ${certificates.list.length} of ${certificates.total} certificates. This page reads up to ${certificates.list.length} at a time, so the count of certificates issued is not shown.`}
+            </p>
+          ) : null}
           {certificates === null ? (
             <p role="status" className="notice mt-3">
               The certificates could not be read just now. Reload this page in a moment; this does not mean none were issued.
@@ -361,6 +367,11 @@ export default async function StudioCoursePage({
               </div>
             </div>
           )}
+          {studentsRead !== null && students.length < total ? (
+            <p className="mt-3 text-sm text-ink-soft">
+              {`Showing ${students.length} of ${total} students, the most recently here first. The lessons finished above count only the students shown.`}
+            </p>
+          ) : null}
           {studentsRead === null ? (
             <p role="status" className="notice mt-5">
               The students could not be read just now. Reload this page in a moment; this does not mean nobody has opened the course.

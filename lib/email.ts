@@ -511,7 +511,10 @@ async function resendOutcome(message: OneMessage, originalIdempotencyKey: string
     ...(replyTo ? { reply_to: replyTo } : {}),
     ...(headers ? { headers } : {}),
   };
-  let tags = messageTags(message);
+  // No second request without the tags on a 400 or 422: cleanTags already
+  // sends only what Resend takes, and the guard does not read a refusal's
+  // body, so a refusal for the recipient would be asked twice a pass.
+  const tags = messageTags(message);
   const body = () => JSON.stringify({ from: fromLine(from), ...payload, ...(tags.length ? { tags } : {}) });
   let auth = key;
   // A sign-in link or a receipt must not be lost because the sender was busy
@@ -535,15 +538,6 @@ async function resendOutcome(message: OneMessage, originalIdempotencyKey: string
       }
       if (response.status === 429 && attempt < 2) {
         await pause(1_000 + attempt * 1_000);
-        continue;
-      }
-      if (tags.length && (response.status === 400 || response.status === 422) && attempt < 2) {
-        // The tags are for us, not for the reader (as in a batch, below): an
-        // email refused with them goes once more without them, under a key of
-        // its own because it is no longer the same request.
-        console.error("email refused with its tags; sending it without them", response.status);
-        tags = [];
-        under = under ? `${under}:plain` : under;
         continue;
       }
       const site = getKey();

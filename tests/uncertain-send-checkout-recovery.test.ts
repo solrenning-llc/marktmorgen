@@ -41,6 +41,8 @@ const PASSES = 4;
 
 /** Every recipient Resend was asked for, taken or not. */
 const resendAsked: string[] = [];
+/** Whether each of Resend's requests carried tags, in the order asked. */
+const resendTagged: { to: string; tagged: boolean }[] = [];
 /** Every recipient Amazon was asked for, taken or not. */
 const amazonAsked: string[] = [];
 /** How Resend answers one recipient, when not plainly yes. */
@@ -53,8 +55,11 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const method = init?.method ?? "GET";
   const answer = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
   if (url.hostname === "api.resend.com") {
-    const to = [(JSON.parse(String(init?.body)) as { to: string | string[] }).to].flat()[0] ?? "";
+    const sent = JSON.parse(String(init?.body)) as { to: string | string[]; tags?: unknown[] };
+    const to = [sent.to].flat()[0] ?? "";
     resendAsked.push(to);
+    const tagged = Array.isArray(sent.tags) && sent.tags.length > 0;
+    resendTagged.push({ to, tagged });
     const special = resendSays(to);
     if (special) return special();
     return answer({ id: `email_${resendAsked.length}` });
@@ -159,6 +164,9 @@ async function main(): Promise<void> {
   is("three emails taken from the store's figure, not one a pass", (await allowanceUsed(await load(), "email")) - used, 3);
   is("no stop link kept for an email that never went", links() - linksBefore, 0);
   is("another checkout of the same address and product is not held back a week", [await (async () => { resendSays = () => null; return remindAbandoned(await load(), left("cs_test_sal00000000002", "sal@example.com")); })(), resendOf("sal@example.com")], ["sent", 4]);
+
+  part("A store's reminder carries its list's tags, and a refusal is not asked again without them in the same pass");
+  is("each of the refused reminder's requests carried the tags, one a pass", resendTagged.filter((r) => r.to === "sal@example.com").map((r) => r.tagged), [true, true, true, true]);
 
   part("An error while the reminder is written: nothing sent, so the next pass sends it");
   const words = givingWords("en");

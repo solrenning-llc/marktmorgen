@@ -7,3 +7,4 @@ Only Claude 2 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
 | Claude 2 | 655 [WG15], unit 2 (the studio's tax setting links to /studio/tax; stacked on #2735) | claude2/wg15-tax-link | `components/tax-editor.tsx`, `tests/wg15-tax-link.test.ts`, its row of `tests/test-config.mjs` | 07/11/2026 10h35 |
+| Claude 2 | #4371 (a renewal counts on its payment day; stacked on claude2/fix-cashflow-refund-dispute-rows) | claude2/renewal-paid-day | `lib/stats.ts`, `tests/renewal-paid-day.test.ts` | 13/11/2026 04h25 |

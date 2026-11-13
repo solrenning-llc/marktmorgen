@@ -1921,6 +1921,7 @@
     "app/api/store/review/route.ts",
     "app/api/store/reviews/route.ts",
     "app/api/store/sale/route.ts",
+    "app/api/store/sales-filters/route.ts",
     "app/api/store/save-offer/route.ts",
     "app/api/store/saved-blocks/route.ts",
     "app/api/store/sections/route.ts",

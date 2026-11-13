@@ -7,7 +7,9 @@ import {
   nextApplication, parseApplication, purchaseWith,
 } from "@/lib/apply-first-rules";
 
-// Synthetic data only: example.invalid addresses, fixed clock.
+// Synthetic data only: example.invalid addresses, fixed clock, a synthetic deployment key.
+const SYNTHETIC_KEY = "synthetic-apply-first-key-0123456789abcdef";
+process.env.NIMBUS_DATA_KEY = SYNTHETIC_KEY;
 const DAY = 86_400_000;
 const now = 1_800_000_000_000;
 const id = "a".repeat(32);
@@ -48,6 +50,40 @@ test("the applicant digest is the trimmed lower-case address, never the address 
   assert.match(applicantDigest(email) ?? "", /^[0-9a-f]{64}$/);
   for (const bad of ["", "   ", "no-at-sign", "a@b", "x".repeat(250) + "@example.invalid", 7, null, undefined]) {
     assert.equal(applicantDigest(bad as unknown as string), null, String(bad));
+  }
+});
+
+test("the applicant digest is keyed: a copy of the record cannot confirm a guessed address offline", () => {
+  const plain = createHash("sha256").update("nimbus-apply-first-applicant:applicant@example.invalid").digest("hex");
+  const keyed = applicantDigest(email);
+  assert.match(keyed ?? "", /^[0-9a-f]{64}$/);
+  assert.notEqual(keyed, plain, "an unkeyed hash lets anyone holding the record test candidate addresses");
+  process.env.NIMBUS_DATA_KEY = "another-synthetic-key-fedcba9876543210";
+  try {
+    assert.notEqual(applicantDigest(email), keyed, "the digest depends on the deployment's key");
+  } finally {
+    process.env.NIMBUS_DATA_KEY = SYNTHETIC_KEY;
+  }
+  const saved = { data: process.env.NIMBUS_DATA_KEY, stripe: process.env.STRIPE_SECRET_KEY };
+  delete process.env.NIMBUS_DATA_KEY;
+  delete process.env.STRIPE_SECRET_KEY;
+  try {
+    // No key: unknown, never a plain hash (rule 24). Nothing is made and no purchase passes.
+    assert.equal(applicantDigest(email), null);
+    assert.equal(newApplication({ id, offer, email, now }), null);
+  } finally {
+    process.env.NIMBUS_DATA_KEY = saved.data;
+    if (saved.stripe !== undefined) process.env.STRIPE_SECRET_KEY = saved.stripe;
+  }
+  const app = approved();
+  delete process.env.NIMBUS_DATA_KEY;
+  delete process.env.STRIPE_SECRET_KEY;
+  try {
+    const answer = canPurchase(app, { token: tokenA, email, offer, now: now + 2_000 });
+    assert.deepEqual(answer, { ok: false, why: "unknown" }, "a missing key is unknown, never a wrong address");
+  } finally {
+    process.env.NIMBUS_DATA_KEY = SYNTHETIC_KEY;
+    if (saved.stripe !== undefined) process.env.STRIPE_SECRET_KEY = saved.stripe;
   }
 });
 

@@ -578,34 +578,51 @@ export async function advanceUpdates(load: (handle: string) => Promise<Store | n
   return touched;
 }
 
-/** Who a stop link belongs to, without acting on it. */
+/**
+ * Who a stop link belongs to, without acting on it. Null only when the link is confirmed not there (an exact nil) or
+ * its record is not a stop link's; a reply cut short or of another shape throws (CX-123 rule 24), and the unsubscribe
+ * page says it could not open the link just now, never that the link is unknown.
+ */
 export async function readUpdateStop(token: string): Promise<{ email: string; storeName: string; stopped: boolean; handle: string } | null> {
   if (!UPDATE_STOP.test(token) || !isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["GET", stopKey(token)]]);
-  if (typeof raw !== "string" || !raw) return null;
+  const read = repliesFor(await redisPipeline([["GET", stopKey(token)]]), 1);
+  if (!read || (read[0] !== null && typeof read[0] !== "string")) throw new UnknownReplyError("an update stop link");
+  const raw = read[0];
+  if (raw === null || !raw) return null;
+  let grant: { s?: unknown; e?: unknown; h?: unknown; n?: unknown };
   try {
-    const grant = JSON.parse(raw) as { s?: unknown; e?: unknown; h?: unknown; n?: unknown };
-    if (typeof grant.s !== "string" || typeof grant.e !== "string") return null;
-    const [off] = await redisPipeline([["EXISTS", offKey(grant.s, grant.e)]]);
-    return { email: grant.e, storeName: typeof grant.n === "string" ? grant.n : "", stopped: Number(off) === 1, handle: typeof grant.h === "string" ? grant.h : "" };
+    grant = JSON.parse(raw) as typeof grant;
   } catch {
     return null;
   }
+  if (!grant || typeof grant.s !== "string" || typeof grant.e !== "string") return null;
+  const off = repliesFor(await redisPipeline([["EXISTS", offKey(grant.s, grant.e)]]), 1)?.[0];
+  if (off !== 0 && off !== 1) throw new UnknownReplyError("whether an address stopped a store's update emails");
+  return { email: grant.e, storeName: typeof grant.n === "string" ? grant.n : "", stopped: off === 1, handle: typeof grant.h === "string" ? grant.h : "" };
 }
 
-/** Stops every update email from that store to that address, for good. Safe to press twice. */
+/**
+ * Stops every update email from that store to that address, for good. Safe to press twice. False only when the link is
+ * confirmed not there (an exact nil) or its record is not a stop link's; a reply cut short or of another shape, or a
+ * stop whose write is not confirmed, throws (CX-123 rule 24), and the unsubscribe route answers "try again", never
+ * "Not found.".
+ */
 export async function stopUpdates(token: string): Promise<boolean> {
   if (!UPDATE_STOP.test(token) || !isRedisConfigured()) return false;
-  const [raw] = await redisPipeline([["GET", stopKey(token)]]);
-  if (typeof raw !== "string" || !raw) return false;
+  const read = repliesFor(await redisPipeline([["GET", stopKey(token)]]), 1);
+  if (!read || (read[0] !== null && typeof read[0] !== "string")) throw new UnknownReplyError("an update stop link");
+  const raw = read[0];
+  if (raw === null || !raw) return false;
+  let grant: { s?: unknown; e?: unknown; h?: unknown };
   try {
-    const grant = JSON.parse(raw) as { s?: unknown; e?: unknown; h?: unknown };
-    if (typeof grant.s !== "string" || typeof grant.e !== "string") return false;
-    // Kept for good, so counted in the store's room at what it adds (lib/order-data.ts).
-    const store = typeof grant.h === "string" && grant.h ? await storeForHandle(grant.h).catch(() => null) : null;
-    await orderWrite(store && store.statsId === grant.s ? store : { statsId: grant.s }, [["SET", offKey(grant.s, grant.e), new Date().toISOString()]]);
-    return true;
+    grant = JSON.parse(raw) as typeof grant;
   } catch {
     return false;
   }
+  if (!grant || typeof grant.s !== "string" || typeof grant.e !== "string") return false;
+  // Kept for good, so counted in the store's room at what it adds (lib/order-data.ts).
+  const store = typeof grant.h === "string" && grant.h ? await storeForHandle(grant.h).catch(() => null) : null;
+  const written = repliesFor(await orderWrite(store && store.statsId === grant.s ? store : { statsId: grant.s }, [["SET", offKey(grant.s, grant.e), new Date().toISOString()]]), 1);
+  if (!written || written[0] !== "OK") throw new UnknownReplyError("an update stop's write");
+  return true;
 }

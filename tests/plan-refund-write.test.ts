@@ -40,6 +40,10 @@ const world = {
   slow: 0,
   /** Milliseconds the clock jumps when a charge's refunds are listed (a slow reading before it). */
   jump: 0,
+  /** The write's answer names another payment's charge and intent (#4420). */
+  wrongReceipt: false,
+  /** The write's answer leaves out its charge and intent (#4420). */
+  noReceiptIds: false,
 };
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -65,6 +69,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     charge.amount_refunded = Number(charge.amount_refunded) + amount;
     world.replies.set(key, JSON.stringify(refund));
     if (world.loseAnswer) throw new TypeError("fetch failed");
+    if (world.wrongReceipt) return json({ ...refund, charge: "ch_otherpayment1", payment_intent: "pi_otherpayment1" });
+    if (world.noReceiptIds) return json({ ...refund, charge: null, payment_intent: null });
     return json(refund);
   }
   if (method !== "GET") return json({ error: { message: "no" } }, 400);
@@ -170,6 +176,18 @@ async function main() {
   is("past the write's last moment: nothing made, failed, the lock released", [await refundPlanPayment(await late.store(), NOW), late.refunds().length, await lockOf(await late.store())], [{ ok: false, reason: "failed" }, 0, null]);
   world.jump = 0;
   is("asked again in time: made, once", [(await refundPlanPayment(await late.store(), NOW)).ok, late.refunds().length], [true, 1]);
+
+  part("A receipt for another payment (#4420)");
+  const w = await paidShop();
+  world.wrongReceipt = true;
+  is("a receipt naming another charge and payment intent is not accepted", await refundPlanPayment(await w.store(), NOW), { ok: false, reason: "failed" });
+  world.wrongReceipt = false;
+  const wn = await paidShop();
+  world.noReceiptIds = true;
+  is("a receipt naming no charge and no payment intent is not accepted", await refundPlanPayment(await wn.store(), NOW), { ok: false, reason: "failed" });
+  world.noReceiptIds = false;
+  // Stripe did refund this payment behind the odd receipt: asked again, the reading takes it off and nothing is made twice.
+  is("asked again: no second refund", [await refundPlanPayment(await w.store(), NOW), w.refunds().length], [{ ok: false, reason: "not_owed" }, 1]);
 
   part("Nothing owed, nothing made");
   const f = await paidShop({ disputed: true });

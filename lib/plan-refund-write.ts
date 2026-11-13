@@ -45,6 +45,9 @@ export const LOCK_SECONDS = Math.ceil((READ_BUDGET_MS + (1 + 2 * MAX_PARTS) * ST
 /** The last moment after taking the lock a write may start: it ends, time-out included, a minute before the lock expires. */
 export const WRITE_BY_MS = (LOCK_SECONDS - 60) * 1000 - STRIPE_TIMEOUT_MS;
 const REFUND_ID = /^re_[A-Za-z0-9]{6,128}$/;
+/** An id Stripe gives as a string or, expanded, as an object's own id; anything else reads as "". */
+const idOf = (value: unknown): string =>
+  typeof value === "string" ? value : value !== null && typeof value === "object" && typeof (value as { id?: unknown }).id === "string" ? (value as { id: string }).id : "";
 
 export type PlanRefundMade =
   | { ok: true; cents: number; currency: string; refundId: string; refundIds: string[]; status: "succeeded" | "pending" }
@@ -127,6 +130,9 @@ export async function refundPlanPayment(
         );
         const refundId = typeof refund.id === "string" ? refund.id : "";
         if (refund.object !== "refund" || !REFUND_ID.test(refundId) || refund.amount !== part.cents || refund.currency !== currency) return { ok: false, reason: "failed" };
+        // A receipt is this payment's only when it names this charge and this payment intent (rule 30, #4420): another
+        // payment's, or one naming none, is not taken as this refund, so the plan is not ended on it.
+        if (idOf(refund.charge) !== part.chargeId || idOf(refund.payment_intent) !== part.paymentIntent) return { ok: false, reason: "failed" };
         if (refund.status !== "succeeded" && refund.status !== "pending" && refund.status !== "requires_action") return { ok: false, reason: "failed" };
         made.push({ id: refundId, pending: refund.status !== "succeeded" });
       } catch (error) {

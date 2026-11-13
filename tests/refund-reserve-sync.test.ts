@@ -224,3 +224,28 @@ test('the ceilings are named, registered as the company\'s fixed reading cost, a
  assert.ok(world.requests.length<=RESERVE_SYNC_STRIPE_GETS_PER_DAY,String(world.requests.length));
  assert.ok(counted.commands<=RESERVE_SYNC_REDIS_COMMANDS_PER_DAY,String(counted.commands));
 });
+
+test('a charge or an event in the very second of the cursor, listed on the other side of it, is not missed',async()=>{
+ const now=START;fresh(now);history(60,now);await built(now);
+ const state=(await store.pipeline([['HMGET',SYNC_KEY,'cursor:charges','cursor:events']]))[0] as string[];
+ const charges=JSON.parse(state[0]) as {id:string;at:number},events=JSON.parse(state[1]) as {id:string;at:number};
+ // A charge of the cursor's second whose id sorts after the cursor's: Stripe lists it as older, so ending_before skips it.
+ const made=addCharge({kind:'plan',amount:44900,paidAt:charges.at});
+ const tied=world.charges.get(made)!;world.charges.delete(made);
+ const lowId='ch_Reserve000000000';tied.json={...tied.json,id:lowId};world.charges.set(lowId,tied);
+ world.events.pop();
+ let run=await syncRefundReserve(now,later());
+ assert.equal(run.why,null);
+ assert.deepEqual(run.reserve,(await readRefundReserve(now,later())).reserve,'the tied charge is counted');
+ // An event of the events cursor's second, on a kept charge, listed as older than the cursor.
+ const kept=[...world.charges.keys()].find(k=>k!==lowId&&world.charges.get(k)!.json.status==='succeeded'&&world.charges.get(k)!.refunds.length===0)!;
+ refund(kept,500,'pending');
+ const event=world.events.pop()!;
+ world.events.push({...event,id:'evt_Reserve000000000',created:events.at});
+ run=await syncRefundReserve(now,later());
+ assert.equal(run.why,null);
+ assert.equal(run.rereads,1,'the tied event\'s charge is reread once');
+ assert.deepEqual(run.reserve,(await readRefundReserve(now,later())).reserve,'the tied refund is counted');
+ const again=await syncRefundReserve(now,later());
+ assert.equal(again.rereads,0,'and not again');
+});

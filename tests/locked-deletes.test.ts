@@ -95,6 +95,8 @@ import { POST as rperson } from "@/app/api/store/person/route";
 import { POST as rperson_tasks } from "@/app/api/store/person-tasks/route";
 import { POST as rphoto } from "@/app/api/store/photo/route";
 import { POST as rpodcast } from "@/app/api/store/podcast/route";
+import { POST as rpodcastPublic } from "@/app/api/store/podcast/public-settings/route";
+import { readPublicShow } from "@/lib/podcast-public-show";
 import { POST as rproduct } from "@/app/api/store/product/route";
 import { POST as rreviews } from "@/app/api/store/reviews/route";
 import { POST as rsaved_blocks } from "@/app/api/store/saved-blocks/route";
@@ -149,6 +151,7 @@ const ROUTES: Record<string, Handler> = {
   "person-tasks": rperson_tasks as Handler,
   "photo": rphoto as Handler,
   "podcast": rpodcast as Handler,
+  "podcast/public-settings": rpodcastPublic as Handler,
   "product": rproduct as Handler,
   "reviews": rreviews as Handler,
   "saved-blocks": rsaved_blocks as Handler,
@@ -310,6 +313,12 @@ async function main(): Promise<void> {
   const episodeId = aired.podcast.episodes[0].id;
   is("removing an episode, with its audio, is refused", await answer(await podcastRoute(json("/api/store/podcast", locked, { action: "remove", id: cast.product.id, episode: episodeId }))), LOCKED);
   keeps("podcast", "and the episode is still there", (await readPodcast(podcastId))?.episodes.map((e) => e.id), [episodeId]);
+  const publicRoute = await route("podcast/public-settings");
+  const turnedOn = await answer(await publicRoute(json("/api/store/podcast/public-settings", full, { action: "on", id: cast.product.id, category: "Education", explicit: false, understood: true })));
+  is("a public feed turned on by the full session", turnedOn, [200, ""]);
+  is("turning the public feed off, with every episode's address in it, is refused", await answer(await publicRoute(json("/api/store/podcast/public-settings", locked, { action: "off", id: cast.product.id }))), LOCKED);
+  is("and the public feed is still there", (await readPublicShow(podcastId)) !== null, true);
+  is("putting an episode in it is not", (await answer(await publicRoute(json("/api/store/podcast/public-settings", locked, { action: "episode", id: cast.product.id, episode: episodeId, public: false }))))[1] !== "locked", true);
   const plainRoutes: [string, Record<string, unknown>][] = [
     ["product", { action: "remove", id: xid }],
     ["keys", { action: "clear", id: xid }],
@@ -464,6 +473,7 @@ async function main(): Promise<void> {
     "phone": ["not:a team member's own phone, added again at will"],
     "photo": ["act:page:remove", "lockedFor"],
     "podcast": ["act:products:remove"],
+    "podcast/public-settings": ["act:products:remove"],
     "product": ["act:products:remove", "lockedFor"],
     "review": ["not:a buyer deleting their own review, proved by their order"],
     "reviews": ["act:reviews:photo"],
@@ -594,6 +604,12 @@ async function main(): Promise<void> {
     "person-tasks": { add: "open:adds", done: "open:reversible", edit: "open:edits", remove: "act:orders" },
     "phone": "not:a team member's own phone, added again at will",
     "podcast": { add: "open:adds", disable: "open:only a podcast with no episode turns back into a product", edit: "open:edits", enable: "open:adds", remove: "act:products" },
+    "podcast/public-settings": {
+      episode: "open:one episode put in the public feed or taken out of it, with its address typed again at will",
+      off: "act:products:remove",
+      on: "open:adds",
+      read: "open:reads",
+    },
     "product": { add: "open:adds", edit: "open:edits", link: "lockedFor", remove: "act:products", unlink: "open:the link typed on a product taken off; typed again at will", visibility: "open:reversible" },
     "review": "not:a buyer deleting their own review, proved by their order",
     "reviews": { ask: "need:settings", hide: "open:reversible", photo: "act:reviews", reply: "open:adds", seen: "open:edits" },

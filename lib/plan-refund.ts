@@ -188,7 +188,12 @@ export async function readPlanRefund(store: Store, nowSeconds = Math.floor(Date.
       const price = obj(line?.price);
       const interval = obj(price?.recurring)?.interval;
       const cycle = interval === "year" ? "year" : interval === "month" ? "month" : planOf(sub).cycle;
-      const fee = obj(charge.balance_transaction);
+      // Stripe's fee is taken only from this charge's own balance transaction: its source is this charge and its type a
+      // charge's (or a payment's, for a py_ charge). One that belongs to another charge, or whose source cannot be read,
+      // would size the refund with a fee that is not this payment's: the fee is then unread, never another's or zero
+      // (rule 30, issue #4450).
+      const bt = obj(charge.balance_transaction);
+      const fee = bt && idOf(bt.source) === chargeId && (bt.type === "charge" || bt.type === "payment") ? bt : null;
       const paidAt = num(obj(invoice.status_transitions)?.paid_at);
       const input: PlanRefundCharge = {
         currency: typeof charge.currency === "string" ? charge.currency : "",

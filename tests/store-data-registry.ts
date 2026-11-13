@@ -941,7 +941,8 @@ export const FAMILIES: Record<string, Family> = {
       capped(ALL_TIME_PAGES * 100 * 512 + 64 * KB, "Sales cached ten minutes, and today's two minutes.", src("lib/stats.ts", "ALL_TIME_PAGES")),
     ],
   },
-  "nl:stock:@lib/stock.ts": { what: "Stock left, by product, and a sale's hold: counted with its product (PRODUCT_SIDE_BYTES)", room: ["lib/store.ts"] },
+  "nl:stock:@lib/stock.ts": { what: "Stock left, by product: a live hold a field each, and the units sold counted in one field (#sold); counted with its product (PRODUCT_SIDE_BYTES)", room: ["lib/store.ts"] },
+  "nl:stock:paid:@lib/stock.ts": { what: "One mark per checkout already counted sold, so a sale is never counted twice (STOCK_SELL): never read by a page, counted with its product (PRODUCT_SIDE_BYTES)", room: ["lib/store.ts"] },
   "nl:stock:lock:@lib/stock.ts": short("One count at a time", "request", 1, 128, REQ("checkout")),
   // R20 finding 3: the page a supporter comes back to asks Stripe only about a checkout this mark says the store opened.
   "nl:tip:co:@lib/store-tip-checkout.ts": short("A gift's checkout opened by the store's tip checkout, a hash of the store and the session (TIP_MARK_SECONDS, two days)", "request", 2, MARK, REQ("tip")),

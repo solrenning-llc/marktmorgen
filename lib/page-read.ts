@@ -42,12 +42,12 @@
  *     (readSampled), checked again there, so a call made by hand cannot
  *     pick itself in;
  *   - a token is good for READ_TOKEN_SECONDS after the page was drawn and
- *     for one reading: the route marks its nonce used (spendReadToken, one
- *     SET NX that expires two hours after the page was drawn) before
- *     anything else is asked, so the same token sent again costs that one
- *     command and counts nothing;
+ *     for one reading: the route marks its nonce used (admitReading, in the
+ *     same script that takes the window's count, a SET NX that expires two
+ *     hours after the page was drawn), so the same token sent again counts
+ *     nothing and takes only one of its window's readings;
  *   - a reading is counted in the store's own count of readings for its
- *     window (takeReading, nl:traffic:read:), never in the window of public
+ *     window (admitReading, nl:traffic:read:), never in the window of public
  *     requests its pages are drawn from (lib/traffic.ts): until 4 November
  *     2026 it was one of those requests, so readings made a Store plan's
  *     pages rest about 7% before its visits, a visible limit cut by stealth.
@@ -240,8 +240,8 @@ export type ReadPass = { statsId: string; nonce: string; issued: number; window:
 /**
  * What a token made for this page by this deployment says, when it was
  * drawn and is not older than READ_TOKEN_SECONDS; else null. No command:
- * whether it was used already is spendReadToken's, and whether its window
- * has room takeReading's.
+ * whether it was used already, and whether its window has room, are
+ * admitReading's.
  */
 export function readTokenPass(token: unknown, scope: string, now = Date.now()): ReadPass | null {
   if (typeof token !== "string" || token.length > READ_TOKEN_MAX || !SCOPE.test(scope)) return null;
@@ -267,29 +267,6 @@ export function readTokenStats(token: unknown, scope: string, now = Date.now()):
 /** A visit's token marked used, until it expires anyway (639 [GL7](25)). */
 const onceKey = (nonce: string) => `nl:read:once:${nonce}`;
 
-/**
- * Marks a good token's nonce used: true the first time, false when it was
- * used already or the mark cannot be made. One command, made before anything
- * else is asked, so a token sent again costs only this. The mark lasts until
- * the token could no longer pass anyway, counted from when its page was
- * drawn (`issued`, seconds), and a minute more: two hours after the page was
- * drawn, as the privacy policy says, never two hours after the reading.
- */
-export async function spendReadToken(nonce: string, issued: number, now = Date.now()): Promise<boolean> {
-  if (!NONCE.test(nonce) || !Number.isSafeInteger(issued)) return false;
-  // Spent here already: refused with no command (Claude 5 on #2571).
-  if (spentHere(nonce, now)) return false;
-  const until = issued + READ_TOKEN_SECONDS + CLOCK_SLACK_SECONDS;
-  const seconds = Math.max(1, until - Math.floor(now / 1000));
-  try {
-    const [reply] = await redisPipeline([["SET", onceKey(nonce), "1", "NX", "EX", seconds]]);
-    // Answered either way, the token is spent from now on: this server remembers it.
-    if (reply === "OK" || reply === null) noteSpent(nonce, until);
-    return reply === "OK";
-  } catch {
-    return false;
-  }
-}
 
 /**
  * The tokens this server spent or saw spent, by nonce, with the second after which they could no longer pass anyway:
@@ -353,56 +330,65 @@ export function forgetReadingsSeen(): void {
   spentSeen.clear();
 }
 
-/**
- * The window's count after this reading, from the answer to its pipeline
- * (the INCR and the EXPIRE sent together), only when the answer is exactly
- * that: two replies, the count a whole number of at least one and the expiry
- * set (1). Anything else is unknown, never a count. Pure.
- */
-function countedReceipt(reply: unknown): number | null {
-  if (!Array.isArray(reply) || reply.length !== 2) return null;
-  const [count, expiry] = reply;
-  return typeof count === "number" && Number.isSafeInteger(count) && count >= 1 && expiry === 1 ? count : null;
-}
 
 /**
- * One reading taken in its window's count: true while the count is within
- * the token's ceiling, false past it or when it cannot be counted. One
- * pipeline of two commands, the count and its expiry together, never a read
- * and then an add, so readings sent at once can never pass the ceiling
- * between them. Kept to the window's end and a day, as the window's other
- * counts are (lib/allowance-window.ts, keepSecondsFor).
- *
- * Past the ceiling the paid work stops (the review of #2571, 5 November
- * 2026): a window this server saw reach the token's ceiling (readingsFull)
- * is refused with no command. An answer that is not exactly the two replies
- * sent (countedReceipt), or no answer, counts nothing and lets nothing be
- * written: the count may have been added without its expiry, so the expiry
- * is set once more, and the reading is still refused.
+ * A reading admitted in one atomic step (Codex G's MEDIUM on #2571): the window's count taken one more and, past the
+ * token's ceiling, put back in the same script, so it never stands past the ceiling, even on a server that saw
+ * nothing; and the token's nonce marked used in the same script, so one token is counted exactly once across servers
+ * however many of its sends arrive at once. A token sent again (its mark already there) still takes one of the
+ * window's readings, so its sends stay inside the window's ceiling (Claude 5 on #2571). The count's expiry is set when
+ * the count is made: the window's end and a day (lib/allowance-window.ts, keepSecondsFor), never extended.
+ * KEYS: the nonce's mark, the window's count. ARGV: the ceiling, the mark's seconds, the count's seconds.
+ * Answers {1, n} counted, {-1, n} a token used already, {0, n} the window at its ceiling (nothing written).
+ * Modelled by lib/redis-memory.ts.
  */
-export async function takeReading(pass: ReadPass, now = Date.now()): Promise<boolean> {
+export const ADMIT_READING = `-- marktmorgen:read-admit:v1
+local n = redis.call('INCR', KEYS[2])
+if n == 1 then redis.call('EXPIRE', KEYS[2], ARGV[3]) end
+if n > tonumber(ARGV[1]) then
+  redis.call('DECR', KEYS[2])
+  return {0, n - 1}
+end
+if redis.call('SET', KEYS[1], '1', 'NX', 'EX', ARGV[2]) then return {1, n} end
+return {-1, n}`;
+
+/**
+ * One reading of a good token (readTokenPass) admitted (ADMIT_READING): true only when it is counted now. A window
+ * this server saw at the token's ceiling (readingsFull), or a token it spent, is refused with no command. An answer
+ * that is not exactly the script's pair (rule 24), or no answer, counts nothing and is refused: the script ran whole or
+ * not at all, so the count is never left without its expiry.
+ *
+ * The reading that reaches the ceiling marks the window, once (`:over`): from it on nothing more is counted, and the
+ * studio says the window is partial even if the plan grows later. It keeps the ceiling reached, so the studio says how
+ * many were counted, not how many came.
+ */
+export async function admitReading(pass: ReadPass, now = Date.now()): Promise<boolean> {
   if (!STATS_ID.test(pass.statsId) || !WINDOW_ID.test(pass.window) || !Number.isSafeInteger(pass.cap) || pass.cap < 1) return false;
-  if (readingsFull(pass, now)) return false;
+  if (!NONCE.test(pass.nonce) || !Number.isSafeInteger(pass.issued)) return false;
+  if (readingsFull(pass, now) || spentHere(pass.nonce, now)) return false;
   const key = readsKey(pass.statsId, pass.window);
   const keep = Math.max(86_400, pass.end - Math.floor(now / 1000) + 86_400);
+  // The mark lasts until the token could no longer pass anyway, counted from when its page was drawn (`issued`), and a
+  // minute more: two hours after the page was drawn, as the privacy policy says, never two hours after the reading.
+  const until = pass.issued + READ_TOKEN_SECONDS + CLOCK_SLACK_SECONDS;
+  const seconds = Math.max(1, until - Math.floor(now / 1000));
   let reply: unknown = null;
   try {
-    reply = await redisPipeline([["INCR", key], ["EXPIRE", key, keep]]);
+    reply = await redisPipeline([["EVAL", ADMIT_READING, 2, onceKey(pass.nonce), key, pass.cap, seconds, keep]]);
   } catch {
-    reply = null;
-  }
-  const n = countedReceipt(reply);
-  if (n === null) {
-    // Never a count: the count may stand with no expiry, so it is given one again, and nothing is confirmed.
-    await redisPipeline([["EXPIRE", key, keep]]).catch((error: unknown) => console.error("keeping a window's readings to its end failed", error));
     return false;
   }
+  const answer = Array.isArray(reply) && reply.length === 1 && Array.isArray(reply[0]) && reply[0].length === 2 ? (reply[0] as unknown[]) : null;
+  const [status, n] = answer ?? [];
+  if ((status !== 1 && status !== 0 && status !== -1) || typeof n !== "number" || !Number.isSafeInteger(n) || n < 0 || n > pass.cap) return false;
   noteReadings(key, n, pass.end);
-  // The reading that reaches the ceiling marks the window, once: from it on nothing more is counted, and the studio
-  // says the window is partial even if the plan grows later. It keeps the ceiling reached, so the studio says how many
-  // were counted, not how many came.
+  if (status === 0) return false;
+  // Counted or used already, the token is spent from now on: this server remembers it.
+  noteSpent(pass.nonce, until);
+  // Only a reading the admission took (INCR gives each count up to the ceiling once): a refusal at the ceiling, put back
+  // in the script, never marks again.
   if (n === pass.cap) await redisPipeline([["SET", `${key}:over`, String(pass.cap), "EX", keep]]).catch((error: unknown) => console.error("marking a window's readings partial failed", error));
-  return n <= pass.cap;
+  return status === 1;
 }
 
 /**

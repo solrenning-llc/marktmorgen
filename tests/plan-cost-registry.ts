@@ -1304,11 +1304,11 @@ export const COST_LINES: CostLine[] = [
     feature: "How a page was read: time on page, reading depth, the store page item by item (639 [GL7](25), 4 November 2026)",
     monthlyUsd: (tier) => readingsCost(REQUESTS_PER_VISIT * VISITS_INCLUDED[tier] + EXTRA_REQUESTS[tier]),
     sources: [
-      { file: "lib/page-read.ts", names: ["readCeiling", "publicVisitLimit(requestLimitFor(store, now / 1000)) / READ_SAMPLE", "readSlot", "slots: pending + (readSlot(window.id, place) ? 1 : 0)", "if (!window || window.slots < 1", "window.slots -= 1;", "if (spentHere(nonce, now)) return false;", "takeReading", "noteReadStore", "if (readingsFull(pass, now)) return false;", "countedReceipt(reply)"] },
-      { file: "app/api/store/read/route.ts", names: ["if (readingsFull(pass)) return done();", "spendReadToken(pass.nonce, pass.issued)", "takeReading(pass)"] },
+      { file: "lib/page-read.ts", names: ["readCeiling", "publicVisitLimit(requestLimitFor(store, now / 1000)) / READ_SAMPLE", "readSlot", "slots: pending + (readSlot(window.id, place) ? 1 : 0)", "if (!window || window.slots < 1", "window.slots -= 1;", "if (readingsFull(pass, now) || spentHere(pass.nonce, now)) return false;", "admitReading", "ADMIT_READING", "noteReadStore", "if n > tonumber(ARGV[1]) then"] },
+      { file: "app/api/store/read/route.ts", names: ["if (readingsFull(pass)) return done();", "if (spentHere(pass.nonce)) return done();", "admitReading(pass)"] },
       { file: "lib/traffic.ts", names: ["noteReadStore(store.statsId, resting || store.suspended ? null : store, now, at)", "return n <= limit ? n : 0;"] },
     ],
-    basis: "Readings have their own count in the store's window, apart from its public requests, so they never make its pages rest; it stops at one reading for every READ_SAMPLE requests the public pages may answer (readCeiling). The slot is reserved before a token is made (the review of #2571, 5 November 2026): a page gets a token only when its own request, counted by its page check, is the one place of its block of READ_SAMPLE drawn for readings (readSlot), and once for it, so a window's public requests carry at most its ceiling of tokens, every one priced here at readBeaconCost (tests/traffic-cost.ts, 10 commands at the worst, every billed command counted, the cost lane's CX-35), whether it is counted or refused, and none inside the visits line, with the window's ceiling mark once for each ceiling its tokens can carry (readCeilingMarksCost, #2571, the review at 5d245b24); held over a whole window, every page drawn, in tests/page-read-ceiling.test.ts. A token sent again costs no command on the server that spent it (spentHere) and, on another, its mark and one of the window's readings, after which that server asks nothing more of the window: sending one again anywhere, any number of times, stays inside the window's ceiling and one refusal a server (the review of #2571 at 59e575c0, tests/page-read-replay.test.ts).",
+    basis: "Readings have their own count in the store's window, apart from its public requests, so they never make its pages rest; it stops at one reading for every READ_SAMPLE requests the public pages may answer (readCeiling). The slot is reserved before a token is made (the review of #2571, 5 November 2026): a page gets a token only when its own request, counted by its page check, is the one place of its block of READ_SAMPLE drawn for readings (readSlot), and once for it, so a window's public requests carry at most its ceiling of tokens, every one priced here at readBeaconCost (tests/traffic-cost.ts, 10 commands at the worst, every billed command counted, the cost lane's CX-35; since Codex G's review of #2571 the mark and the count are one script, whose count's expiry is priced once a window), whether it is counted or refused, and none inside the visits line, with the window's ceiling mark once for each ceiling its tokens can carry (readCeilingMarksCost, #2571, the review at 5d245b24); held over a whole window, every page drawn, in tests/page-read-ceiling.test.ts. A token sent again costs no command on the server that spent it (spentHere) and, on another, its mark and one of the window's readings, after which that server asks nothing more of the window: sending one again anywhere, any number of times, stays inside the window's ceiling and one refusal a server (the review of #2571 at 59e575c0, tests/page-read-replay.test.ts).",
   },
   {
     id: "studio",
@@ -1705,12 +1705,15 @@ export function readingsAtCeiling(requests: number): number {
 
 /**
  * What a window of `requests` requests can cost in page readings: every
- * reading its ceiling allows at readBeaconCost, and the window's ceiling
+ * reading its ceiling allows at readBeaconCost, the window's ceiling
  * mark once for each ceiling its tokens can carry (tests/traffic-cost.ts,
- * readCeilingMarksCost; tests/page-read-worst-commands.test.ts).
+ * readCeilingMarksCost; tests/page-read-worst-commands.test.ts), and the
+ * window's count given its expiry once, by the admission that makes it
+ * (lib/page-read.ts ADMIT_READING, Codex G's review of #2571: one EXPIRE when
+ * INCR answers 1, which a window's count does once).
  */
 export function readingsCost(requests: number): number {
-  return readingsAtCeiling(requests) * readBeaconCost() + readCeilingMarksCost();
+  return readingsAtCeiling(requests) * readBeaconCost() + readCeilingMarksCost() + COMMAND;
 }
 
 /**

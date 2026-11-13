@@ -2,7 +2,7 @@ import type { NextRequest } from "next/server";
 import { isBot } from "@/lib/source-rules";
 import { fromAnotherSite, limited } from "@/lib/request-guard";
 import { countDepth, depthField } from "@/lib/page-depth";
-import { READ_TOKEN_MAX, STORE_SCOPE, reachField, readTokenPass, readingsFull, spendReadToken, spentHere, takeReading } from "@/lib/page-read";
+import { READ_TOKEN_MAX, STORE_SCOPE, admitReading, reachField, readTokenPass, readingsFull, spentHere } from "@/lib/page-read";
 import { countReach } from "@/lib/stats";
 
 const MAX_BODY_BYTES = 600;
@@ -23,9 +23,9 @@ const done = () => new Response(null, { status: 204, headers: { "Cache-Control":
  * that spent it (spentHere) and, on another, its mark and one of its window's
  * readings, so sending it again is bounded by the window's ceiling (Claude 5
  * on #2571); a reading past its window's ceiling that this
- * server had not seen costs that command, the count's two and, when the
- * count's answer is not exactly what was sent, its expiry again
- * (takeReading), and is not counted. The store is never
+ * server had not seen costs one script, whose count is put back in it, so the
+ * count never stands past the ceiling (admitReading, Codex G on #2571), and
+ * is not counted. The store is never
  * read and its window of public requests never touched: the token says which
  * window and ceiling the reading counts against, so readings never make a
  * store's pages rest. The answer is always empty.
@@ -64,16 +64,12 @@ export async function POST(request: NextRequest) {
   if (!count || !pass) return done();
   // A window this server saw at the token's ceiling: refused before anything is asked, even the token's mark.
   if (readingsFull(pass)) return done();
-  // Once a visit: the token's nonce is marked used before anything else is asked. A token spent already is refused,
-  // with no command on a server that spent it; one that reached the database takes one of its window's readings, so
-  // however often and wherever it is sent again, the window's ceiling bounds what it costs (Claude 5 on #2571).
+  // Once a visit, in one atomic step (lib/page-read.ts admitReading, Codex G on #2571): the window's count taken within
+  // its ceiling and the token's nonce marked used together. A token spent already is refused, with no command on a
+  // server that spent it; one that reached the database takes one of its window's readings, so however often and
+  // wherever it is sent again, the window's ceiling bounds what it costs (Claude 5 on #2571). Past the ceiling, nothing.
   if (spentHere(pass.nonce)) return done();
-  if (!(await spendReadToken(pass.nonce, pass.issued))) {
-    if (!readingsFull(pass)) await takeReading(pass).catch(() => false);
-    return done();
-  }
-  // One of the window's readings, counted and checked against its ceiling in one pipeline: past it, nothing more.
-  if (!(await takeReading(pass))) return done();
+  if (!(await admitReading(pass))) return done();
   await count(pass.statsId).catch(() => {});
   return done();
 }

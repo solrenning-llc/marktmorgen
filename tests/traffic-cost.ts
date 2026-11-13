@@ -126,7 +126,11 @@ export const COMMANDS = {
    * How a page was read (lib/page-read.ts), sent as a visitor leaves it by
    * one visitor in READ_SAMPLE, every command billed as Upstash bills it, a
    * script's inner calls too (tests/page-read-worst-commands.test.ts): the
-   * token's mark (1), the window's count of readings and its expiry (2), the
+   * admission, one script since Codex G's review of #2571 (lib/page-read.ts
+   * ADMIT_READING: EVAL, INCR, and the token's mark SET or, past the
+   * ceiling, the DECR that puts the count back: 3, as the token's mark and
+   * the window's count with its expiry were before; the count's EXPIRE runs
+   * only when INCR makes it, once a window, priced so in readingsCost), the
    * capped count of the blocks' record at its most (EVAL, HLEN, HMGET,
    * HINCRBY: 4) with the time's range counted beside it (HINCRBY 1: its
    * record only ever holds the TIME_RANGES names, so it is not capped) and,

@@ -50,7 +50,8 @@ import {
   readToken,
   readTokenPass,
   readingsPartial,
-  spendReadToken,
+  admitReading,
+  ADMIT_READING,
 } from "@/lib/page-read";
 import { readingsPartialWords } from "@/lib/page-read-sample";
 import { readDepth } from "@/lib/page-depth";
@@ -84,7 +85,7 @@ let answerCount: ((list: (string | number)[][]) => Promise<unknown[]>) | null = 
 (redis as unknown as { pipeline: typeof redis.pipeline }).pipeline = ((list: (string | number)[][]) => {
   commands += list.length;
   sent.push(...list);
-  if (answerCount && list.length === 2 && list[0][0] === "INCR" && list[1][0] === "EXPIRE") return answerCount(list);
+  if (answerCount && list.length === 1 && list[0][0] === "EVAL" && list[0][1] === ADMIT_READING) return answerCount(list);
   return real(list);
 }) as typeof redis.pipeline;
 async function counted(work: () => Promise<unknown>): Promise<number> {
@@ -233,22 +234,22 @@ async function main(): Promise<void> {
   const twice = await readDepth(statsId, PRODUCT);
   is("the same token again counts nothing, in either record", [twice.visitors, twice.stopped, twice.time], [1, { blok0001: 1 }, { "@t2": 1 }]);
   is("and costs no command at all on the server that spent it (Claude 5 on #2571)", [again, againSent], [0, []]);
-  // The most one reading counted sends, each a command of the stand-in's pipeline (a script is one): the mark;
-  // the window's count of readings and its expiry; the reading's count, the blocks' script and the time's HINCRBY
+  // The most one reading counted sends, each a command of the stand-in's pipeline (a script is one): the mark and
+  // the window's count of readings with its expiry, one script since Codex G's review of #2571 (ADMIT_READING); the reading's count, the blocks' script and the time's HINCRBY
   // beside it (two, since 11 November 2026: the time's record needs no capped count, so the script's HLEN and
   // HMGET for it are no longer billed, tests/page-read-worst-commands.test.ts), and each record's expiry the first
   // time it is written (two). No read of the store, no public request, no place in the month's free pool.
-  const MOST = 1 + 2 + 2 + 2;
+  const MOST = 1 + 2 + 2;
   const steady = await counted(() => sale(slotted(statsId, PRODUCT, store), "blok0001", 42));
   console.log(`  commands: first reading ${first}, a later one ${steady}, a repeat ${again}`);
-  is("a reading counted is bounded: the mark, the count of readings, the reading's count", [first <= MOST, steady <= 1 + 2 + 2, MOST <= COMMANDS.readBeacon], [true, true, true]);
-  is("and in that order: the mark, then the count with its expiry, then the reading", firstSent.slice(0, 3), ["SET", "INCR", "EXPIRE"]);
+  is("a reading counted is bounded: the mark with the count of readings, the reading's count", [first <= MOST, steady <= 1 + 2, MOST <= COMMANDS.readBeacon], [true, true, true]);
+  is("and in that order: the mark with the count in one script, then the reading", firstSent.slice(0, 1), ["EVAL"]);
   const mark = `nl:read:once:${readTokenPass(token, PRODUCT)!.nonce}`;
   const ttl = Number(redis.run(["TTL", mark]));
   is("the mark lasts until two hours after the page was drawn, not after the reading", ttl > READ_TOKEN_SECONDS - 60 && ttl <= READ_TOKEN_SECONDS + 60, true);
   const late = readTokenPass(slotted(statsId, PRODUCT, store, Date.now() - (READ_TOKEN_SECONDS - 600) * 1000), PRODUCT)!;
   noteReadStore(statsId, store);
-  await spendReadToken(late.nonce, late.issued);
+  await admitReading(late);
   const lateTtl = Number(redis.run(["TTL", `nl:read:once:${late.nonce}`]));
   is("a token used near its end is marked only for the minutes it has left", lateTtl > 0 && lateTtl <= 600 + 60, true);
 
@@ -312,11 +313,11 @@ async function main(): Promise<void> {
   forgetReadingsSeen();
   const overCost = await counted(() => sale(over, "blok0002", 30));
   const overSent = sent.map((c) => c[0]);
-  is("in one that had not: the mark and the count with its expiry, and nothing else", [overCost, overSent], [3, ["SET", "INCR", "EXPIRE"]]);
+  is("in one that had not: the admission alone, the mark and the count in one script, and nothing else", [overCost, overSent], [1, ["EVAL"]]);
   is("and counts nothing", [(await readDepth(shop.statsId, PRODUCT)).visitors, (await readDepth(shop.statsId, PRODUCT)).stopped.blok0002], [readings + 1, undefined]);
   is("which then knows: the same token again asks nothing", await counted(() => sale(over, "blok0002", 30)), 0);
   forgetReadingsSeen();
-  is("and in yet another server, the same token again takes one of its window's readings: the mark and the count with its expiry", [await counted(() => sale(over, "blok0002", 30)), sent.map((c) => c[0])], [3, ["SET", "INCR", "EXPIRE"]]);
+  is("and in yet another server, the same token again asks the admission once, and nothing else", [await counted(() => sale(over, "blok0002", 30)), sent.map((c) => c[0])], [1, ["EVAL"]]);
   is("after which that server knows the window is full: the same token again asks nothing", await counted(() => sale(over, "blok0002", 30)), 0);
 
   part("Readings sent all at once");
@@ -326,23 +327,25 @@ async function main(): Promise<void> {
   // Tokens made by hand for more slots than the window has: the route's own count still stops at the ceiling.
   const burst = Array.from({ length: racerCeiling + 20 }, () => slotted(racer.statsId!, PRODUCT, racer));
   await Promise.all(burst.map((t) => sale(t, "blok0001", 30)));
-  is("exactly the ceiling is counted, never more", [(await readDepth(racer.statsId, PRODUCT)).visitors, Number(redis.run(["GET", readsKey(racer.statsId!, allowanceWindow(racer)!.id)]))], [racerCeiling, racerCeiling + 20]);
+  // The window's count never stands past the ceiling: the admission puts back what went past it (Codex G on #2571).
+  is("exactly the ceiling is counted, never more, and the count stays at it", [(await readDepth(racer.statsId, PRODUCT)).visitors, Number(redis.run(["GET", readsKey(racer.statsId!, allowanceWindow(racer)!.id)]))], [racerCeiling, racerCeiling]);
 
   part("An answer that is not what was sent");
-  // The count is added and its expiry is not (a reply lost, cut short, of another type, or none at all): never a
-  // count, nothing written, and the count is given its expiry again so it never stays for good (the review of #2571).
+  // The admission ran and its answer does not read (cut short, of another type, one too many, or none at all): never a
+  // count and nothing written; the count was made in the script with its expiry, so it never stays for good (the
+  // review of #2571; one script since Codex G's review).
   const receipt = await paying("receipt@example.com", "receiptshop");
   const receiptKey = readsKey(receipt.statsId!, allowanceWindow(receipt)!.id);
   const answers: [string, (count: unknown) => unknown[]][] = [
-    ["one reply for two commands", (count) => [count]],
-    ["the expiry not set", (count) => [count, 0]],
-    ["the count as text", (count) => [String(count), 1]],
-    ["a reply too many", (count) => [count, 1, "OK"]],
+    ["a status alone", (pair) => [[(pair as unknown[])[0]]]],
+    ["a status not known", (pair) => [[2, (pair as unknown[])[1]]]],
+    ["the count as text", (pair) => [[(pair as unknown[])[0], String((pair as unknown[])[1])]]],
+    ["a reply too many", (pair) => [pair, "OK"]],
     ["no answer at all", () => { throw new Error("the database did not answer"); }],
   ];
   for (const [name, answer] of answers) {
     redis.run(["DEL", receiptKey]);
-    answerCount = async (list) => answer((await real([list[0]]))[0]);
+    answerCount = async (list) => answer((await real(list))[0]);
     let cost = 0;
     try {
       const t = slotted(receipt.statsId!, PRODUCT, receipt);
@@ -352,8 +355,8 @@ async function main(): Promise<void> {
     }
     const last = sent.at(-1)?.[0];
     const ttl = Number(redis.run(["TTL", receiptKey]));
-    // The mark, the count with its expiry, and the expiry again: within what every token is priced at, counted or not.
-    is(`${name}: nothing counted or written, the count kept to its end, within what a reading is priced at`, [(await readDepth(receipt.statsId, PRODUCT)).visitors, last, ttl > 0 && ttl <= Math.ceil((allowanceWindow(receipt)!.end - Date.now()) / 1000) + 86_400, cost, cost <= COMMANDS.readBeacon], [0, "EXPIRE", true, 4, true]);
+    // The admission alone: within what every token is priced at, counted or not.
+    is(`${name}: nothing counted or written, the count kept to its end, within what a reading is priced at`, [(await readDepth(receipt.statsId, PRODUCT)).visitors, last, ttl > 0 && ttl <= Math.ceil((allowanceWindow(receipt)!.end - Date.now()) / 1000) + 86_400, cost, cost <= COMMANDS.readBeacon], [0, "EVAL", true, 1, true]);
   }
   await sale(slotted(receipt.statsId!, PRODUCT, receipt), "blok0001", 30);
   is("and the next reading answered as sent counts", (await readDepth(receipt.statsId, PRODUCT)).visitors, 1);
@@ -437,6 +440,8 @@ async function main(): Promise<void> {
   // The plan grown since: its ceiling is now above what was counted, but the window still went past the old one.
   const grown = { ...shop, tier: "scale" as const };
   is("a plan grown later in the window still says the window is partial, with the readings counted then", readCeiling(grown) > shopCeiling && known(await readingsPartial(grown))?.counted === shopCeiling, true);
+  // A reading counted under the grown plan's ceiling: counting went on after the change.
+  await sale(slotted(shop.statsId!, PRODUCT, grown), "blok0001", 30);
   const grownPartial = known(await readingsPartial(grown));
   is("and that counting went on after the change, so the figure is the ceiling reached, not every visit counted", grownPartial?.resumed, true);
   const grownWords = readingsPartialWords(grownPartial!.counted, grownPartial!.opens, grownPartial!.resumed === true);

@@ -19,7 +19,7 @@
  * Synthetic only: the Redis stand-in, no network.
  */
 import { CAPPED_COUNT } from "@/lib/capped-count";
-import { READ_SAMPLE, forgetReadingsSeen, noteReadStore, readSlot, readToken, readTokenPass, readSampled } from "@/lib/page-read";
+import { ADMIT_READING, READ_SAMPLE, forgetReadingsSeen, noteReadStore, readSlot, readToken, readTokenPass, readSampled } from "@/lib/page-read";
 import { DEPTH_FIELDS_MAX } from "@/lib/page-depth-rules";
 import { claimHandle, ensureStatsId, storeForEmail } from "@/lib/store";
 import { allowanceWindow } from "@/lib/allowance-window";
@@ -45,6 +45,12 @@ const real = redis.pipeline.bind(redis);
   billed += list.length;
   let capped = false;
   for (const command of list) {
+    // The admission (ADMIT_READING): INCR, its EXPIRE when the count is new, then DECR past the ceiling or the mark's SET.
+    if (command[0] === "EVAL" && command[1] === ADMIT_READING) {
+      const n = Number(redis.run(["GET", String(command[4])]) ?? 0) + 1;
+      billed += 1 + (n === 1 ? 1 : 0) + 1;
+      continue;
+    }
     if (command[0] !== "EVAL" || command[1] !== CAPPED_COUNT) continue;
     capped = true;
     const n = Number(command[2]);
@@ -135,11 +141,26 @@ async function main(): Promise<void> {
   const worst = await measure(1, true);
   const unmarked = await measure(2, true);
   const answered = await measure(1, false);
-  console.log(`  billed: worst ${worst} (${unmarked} apart from the ceiling mark), with the count's answer read ${answered}`);
+  // The window's first reading: its count is made by the admission, with its expiry (Codex G's review of #2571).
+  const opening = async () => {
+    const token = slotted(statsId, store);
+    atTheMost(token);
+    const pass = readTokenPass(token, PRODUCT)!;
+    redis.run(["DEL", `nl:traffic:read:${statsId}:${pass.window}`]);
+    loseCount = true;
+    billed = 0;
+    await sale(token);
+    loseCount = false;
+    return billed;
+  };
+  const first = await opening();
+  console.log(`  billed: worst ${worst} (${unmarked} apart from the ceiling mark), with the count's answer read ${answered}, the window's first reading ${first}`);
   is("the worst path apart from the window's ceiling mark (both records at their most, the count's answer lost) is billed 10", unmarked, 10);
   is("the reading that reaches the ceiling marks the window: one more, 11", worst, unmarked + 1);
   is("the same reading with the count's answer read is billed 9", answered, 9);
-  is("COMMANDS.readBeacon prices every reading at that worst apart from the mark", unmarked <= COMMANDS.readBeacon, true);
+  // Once a window: INCR answers 1 once for its count, so its EXPIRE is priced once a window (readingsCost), as the mark is.
+  is("the window's first reading also gives its count an expiry: one more, once a window", first, unmarked + 1);
+  is("COMMANDS.readBeacon prices every reading at that worst apart from the once-a-window mark and expiry", unmarked <= COMMANDS.readBeacon, true);
 
   part("the window's ceiling mark, once a window for each ceiling its tokens can carry");
   {

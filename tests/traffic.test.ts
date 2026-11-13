@@ -372,8 +372,9 @@ async function main(): Promise<void> {
   const repeat = drawnToken(STORE_SCOPE);
   await readRequest({ t: repeat, k: "s", n: 2, b: `p:${product.id}`, c: "" });
   const repeatCount = await counted(() => readRequest({ t: repeat, k: "s", n: 2, b: `p:${product.id}`, c: "" }));
-  // More than the mark and the count of readings: none past them would mean nothing was counted, which would pass the model for the wrong reason.
-  is("and how a page was read is inside what a reading is priced at, with no public request", [depthCount > 3, depthCount <= COMMANDS.readBeacon, reachCount > 3, reachCount <= COMMANDS.readBeacon], [true, true, true, true]);
+  // More than the mark and the count of readings (one script since Codex G's review of #2571, lib/page-read.ts
+  // ADMIT_READING): none past it would mean nothing was counted, which would pass the model for the wrong reason.
+  is("and how a page was read is inside what a reading is priced at, with no public request", [depthCount > 1, depthCount <= COMMANDS.readBeacon, reachCount > 1, reachCount <= COMMANDS.readBeacon], [true, true, true, true]);
   is("and the same token again costs no command on the server that spent it (Claude 5 on #2571)", repeatCount, 0);
   is("the visit this is all worked out for is a heavy one", [PAGES_PER_VISIT, STATIC_FILES, visitCost() > 0.0002, visitCost() < 0.0003], [3, 13, true, true]);
 

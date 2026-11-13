@@ -3,7 +3,7 @@
  * the priced ceiling, and an incomplete admission receipt must not authorize
  * the detail write or leave its meter without the promised expiry.
  */
-import { takeReading, type ReadPass } from "@/lib/page-read";
+import { ADMIT_READING, admitReading, forgetReadingsSeen, type ReadPass } from "@/lib/page-read";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -11,9 +11,10 @@ const STATS = "readings01";
 const WINDOW = "2026-11";
 const meter = `nl:traffic:read:${STATS}:${WINDOW}`;
 
+let nonces = 0;
 const pass = (cap: number): ReadPass => ({
   statsId: STATS,
-  nonce: "review0000000001",
+  nonce: `review${String((nonces += 1)).padStart(10, "0")}`,
   issued: Math.floor(Date.now() / 1000),
   window: WINDOW,
   end: Math.floor(Date.now() / 1000) + 3_600,
@@ -31,26 +32,29 @@ async function main(): Promise<void> {
 
   try {
     part("Paid work past the priced ceiling");
-    is("the one priced reading is admitted", await takeReading(pass(1)), true);
+    is("the one priced reading is admitted", await admitReading(pass(1)), true);
     commands = 0;
-    is("the next reading is refused without another paid command", [await takeReading(pass(1)), commands], [false, 0]);
+    is("the next reading is refused without another paid command", [await admitReading(pass(1)), commands], [false, 0]);
+    forgetReadingsSeen();
+    is("a server that saw nothing is refused too, and the count stays at the ceiling", [await admitReading(pass(1)), redis.run(["GET", meter])], [false, "1"]);
 
     part("Incomplete admission receipt");
     redis.clear();
+    forgetReadingsSeen();
     commands = 0;
     let incomplete = true;
     redis.pipeline = async (list) => {
       commands += list.length;
-      if (incomplete && list.length === 2 && list[0]?.[0] === "INCR" && list[1]?.[0] === "EXPIRE") {
+      if (incomplete && list.length === 1 && list[0]?.[0] === "EVAL" && list[0]?.[1] === ADMIT_READING) {
         incomplete = false;
-        const [count] = await real([list[0]]);
-        return [count];
+        await real(list);
+        return [[1]];
       }
       return real(list);
     };
-    const accepted = await takeReading(pass(10));
+    const accepted = await admitReading(pass(10));
     const ttl = Number(redis.run(["TTL", meter]));
-    is("a partial INCR/EXPIRE receipt is unknown and the meter is repaired with a finite lifetime", [accepted, ttl > 0], [false, true]);
+    is("a partial admission receipt is unknown, and the count made in the script keeps its finite lifetime", [accepted, ttl > 0], [false, true]);
   } finally {
     redis.pipeline = real;
   }

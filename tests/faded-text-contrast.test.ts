@@ -10,12 +10,12 @@
  *     the decorative initial is faded now;
  *   - the store address field (components/handle-form.tsx), the first field
  *     a new creator meets, drew its "yourname" hint in --ink-soft at 60%:
- *     about 3.5:1 on white. It now uses --ink-mute, the colour every other
+ *     about 3.5:1 on white. It now uses --ink-mute, the color every other
  *     field's hint uses (.field::placeholder), 9.4:1.
  *
- * Both are rendered with the real components; the colours are read from
+ * Both are rendered with the real components; the colors are read from
  * app/globals.css and the ratios computed with the WCAG formula. Not checked
- * here: creator-chosen store colours (the store's own theme check covers
+ * here: creator-chosen store colors (the store's own theme check covers
  * them) and a real browser's rendering of the placeholder.
  */
 import { createElement } from "react";
@@ -29,7 +29,7 @@ import { done, is, part } from "./check";
 const css = readFileSync("app/globals.css", "utf8");
 const token = (name: string) => {
   const value = css.match(new RegExp(`--${name}:\\s*(#[0-9a-fA-F]{6})`))?.[1];
-  if (!value) throw new Error(`no colour token ${name}`);
+  if (!value) throw new Error(`no color token ${name}`);
   return value;
 };
 const luminance = (hex: string) => {
@@ -72,12 +72,12 @@ part("The store address field's hint");
   const field = classesOf(html, 'placeholder="yourname"');
   is("the field is found", Array.isArray(field), true);
   const hint = (field ?? []).filter((c) => c.startsWith("placeholder:text-"));
-  is("the hint has one colour, with no opacity on it", hint, ["placeholder:text-ink-mute"]);
+  is("the hint has one color, with no opacity on it", hint, ["placeholder:text-ink-mute"]);
   const ratio = contrast(token("ink-mute"), "#ffffff");
   is(`--ink-mute on white is at least 7:1 (${ratio.toFixed(2)})`, ratio >= 7, true);
   const before = contrast("#858b92", "#ffffff");
   is(`the old hint, --ink-soft at 60% on white, was under 4.5:1 (${before.toFixed(2)})`, before < 4.5, true);
-  is("--ink-soft at 60% over white is that grey", ((parseInt(token("ink-soft").slice(1, 3), 16) * 0.6 + 255 * 0.4) | 0).toString(16), "85");
+  is("--ink-soft at 60% over white is that gray", ((parseInt(token("ink-soft").slice(1, 3), 16) * 0.6 + 255 * 0.4) | 0).toString(16), "85");
 }
 
 done();

@@ -26,6 +26,8 @@ const CALLS = 40;
 const charges = new Map<string, { amount: number; refunded: number }>();
 /** Refunds made, as Stripe lists them for a payment. */
 const made: { id: string; pi: string; amount: number; inv: string }[] = [];
+/** A third paid row of the invoice that does not read as a payment intent (a charge-type payment). */
+let unreadRow = false;
 let posts: { pi: string; amount: number; ok: boolean; key: string }[] = [];
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -34,7 +36,9 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (path === "/balance") return Response.json({ object: "balance", available: [{ amount: 100_000, currency: "usd" }] });
   if (path === `/invoices/${INVOICE}`) return Response.json({ id: INVOICE, object: "invoice", payment_intent: null });
   if (path === "/invoice_payments") {
-    return Response.json({ object: "list", has_more: false, data: [A, B].map((pi, i) => ({ id: `inpay_closetwo${i}`, object: "invoice_payment", invoice: INVOICE, status: "paid", payment: { type: "payment_intent", payment_intent: pi } })) });
+    const rows = (unreadRow ? [A] : [A, B]).map((pi, i) => ({ id: `inpay_closetwo${i}`, object: "invoice_payment", invoice: INVOICE, status: "paid", payment: { type: "payment_intent", payment_intent: pi } }));
+    if (unreadRow) rows.push({ id: "inpay_closetwox", object: "invoice_payment", invoice: INVOICE, status: "paid", payment: { type: "charge", charge: "ch_closetwox" } as never });
+    return Response.json({ object: "list", has_more: false, data: rows });
   }
   if (path.startsWith("/payment_intents/")) {
     const id = decodeURIComponent(path.slice("/payment_intents/".length));
@@ -130,6 +134,23 @@ async function main() {
   await giveBackUnused(three.shop, DAY);
   is("no refund is POSTed", posts, []);
   is("settled done with $50 back", [(await saved(three.folder)).r, (await saved(three.folder)).back], ["done", 5000]);
+  part("A paid row that does not read, and the readable charge cannot give back all that is owed: tried again, never settled short");
+  redis.clear();
+  charges.clear();
+  made.length = 0;
+  posts = [];
+  unreadRow = true;
+  charges.set(A, { amount: 4000, refunded: 0 });
+  const four = await seller("four");
+  const partial = await giveBackUnused(four.shop, DAY);
+  const fourth = typeof partial === "object" ? partial : null;
+  is("what the readable charge can give is given, accepted", posts.map((p) => [p.pi, p.amount, p.ok]), [[A, 4000, true]]);
+  is("counted failed, not done", [fourth?.failed, fourth?.done.length], [1, 0]);
+  is("the member is not settled and is still listed", [(await saved(four.folder)).r ?? null, (await unusedRows(four.shop, DAY)).length], [null, 1]);
+  posts = [];
+  await giveBackUnused(four.shop, DAY);
+  is("the next run never asks that charge again", posts.filter((p) => p.pi === A), []);
+  unreadRow = false;
   done();
 }
 main().catch((error) => { console.error(error); process.exit(1); });

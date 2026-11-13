@@ -317,16 +317,20 @@ export async function readVersions(statsId: string | null, productId: string): P
   if (!Array.isArray(reply) || reply.length !== 1 || !Array.isArray(reply[0])) throw new Error("the page's versions could not be read");
   const list: unknown[] = reply[0];
   const out: PageVersion[] = [];
+  // Each kept version read exactly too (Claude 7's LEVE on #3805): one that is not text, has no time or does not
+  // parse is unknown, so the whole read throws rather than show part of the list as the whole.
   for (const entry of list) {
-    if (typeof entry !== "string") continue;
+    if (typeof entry !== "string") throw new Error("the page's versions could not be read");
     const cut = entry.indexOf("\n");
     const at = Number(entry.slice(0, cut));
-    if (cut < 1 || !Number.isFinite(at)) continue;
+    if (cut < 1 || !Number.isFinite(at)) throw new Error("the page's versions could not be read");
+    let page: PageVersion["page"];
     try {
-      out.push({ at, page: parsePage(JSON.parse(entry.slice(cut + 1))) });
+      page = parsePage(JSON.parse(entry.slice(cut + 1)));
     } catch {
-      // A version that cannot be read is left out, never shown half.
+      throw new Error("the page's versions could not be read");
     }
+    out.push({ at, page });
   }
   return out;
 }

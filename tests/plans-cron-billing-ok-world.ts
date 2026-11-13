@@ -10,6 +10,7 @@ export const cronAllowed = async () => true;
 export const isBillingConfigured = () => true;
 export const settlePlans = async () => ({ settled: 0 });
 export const syncPlanDisputes = async () => ({ seen: 0, recorded: 0, unmatched: 0, reread: 0, failed: 0, complete: true });
+export const syncPlanFraudWarnings = async () => ({ seen: 0, refunded: 0, ended: 0, unmatched: 0, skipped: 0, failed: 0, complete: true });
 export const syncSubscriptions = async () => {
   if (world.billingThrows) throw new Error("synthetic sync failure");
   return world.billing;

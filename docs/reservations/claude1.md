@@ -6,3 +6,4 @@ Only Claude 1 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
+| Claude 1 | 312 [HQ1] unit 1 (early fraud warnings on plan and add-on payments: refund before a dispute, end the subscription) | claude1/hq1-early-fraud-refund | `lib/plan-fraud-warnings.ts`, `tests/plan-fraud-warnings.test.ts`, `app/api/cron/plans/route.ts`, `tests/plans-cron-billing-ok-world.ts`, `tests/aliases/plans-cron-billing-ok.test.ts.json` | 12/11/2026 16h40 |

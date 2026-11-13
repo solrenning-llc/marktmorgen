@@ -477,7 +477,11 @@ export async function settlePayPal(store: Store): Promise<Settled> {
     try {
       for (let page = 1; page <= 10; page += 1) {
         const data = await call("GET", `/v1/payments/payouts/${encodeURIComponent(batch)}?page=${page}&page_size=1000&total_required=true`, auth);
-        batchStatus = String((data.batch_header as { batch_status?: unknown } | undefined)?.batch_status ?? "");
+        // Only a page whose header names the batch asked about is its answer (#4387): another batch's DENIED never
+        // releases this one's lines, and the batch is kept for the next read.
+        const header = data.batch_header as { batch_status?: unknown; payout_batch_id?: unknown } | undefined;
+        if (header?.payout_batch_id !== batch) throw new Error(`PayPal answered the read of batch ${batch} with another batch`);
+        batchStatus = String(header.batch_status ?? "");
         const items = Array.isArray(data.items) ? (data.items as Record<string, unknown>[]) : [];
         for (const item of items) {
           const detail = (item.payout_item ?? {}) as { sender_item_id?: unknown };

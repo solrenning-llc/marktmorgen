@@ -169,7 +169,10 @@ export async function saveSetupFor(data: DataStore, courseId: string, lessonId: 
     const read = readSubmissionSetup(setup);
     if (!read.ok || JSON.stringify(read.setup) !== json) throw new Error("submission_setup");
   }
-  // The slot is set to the setup's whole weight, never moved by a difference: two saves at once leave it right.
+  // The slot is set to the setup's whole weight, never moved by a difference, so it never drifts from save to save.
+  // The set and the write are two steps (review of #3571, Claude 1 cloud): when two saves of the same lesson cross,
+  // the slot can count the smaller setup while the larger one is kept, by at most one setup's weight (a few hundred
+  // bytes) and only until the next save of that lesson.
   const slot = SETUP_SLOT(courseId, lessonId);
   if (json !== null) await needData(data, [{ slot, bytes: dataBytes([key, json], 1), set: true }]);
   const written = repliesFor(await redisPipeline([json === null ? ["DEL", key] : ["SET", key, json]]), 1);

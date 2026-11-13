@@ -9,6 +9,7 @@ import type { HostCalendarView, HostSource, SyncState } from "@/lib/host-calenda
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 import { ProviderAccessNotice } from "@/components/meeting-connections";
 import { HOST_STALE_MINUTES, HOST_SYNC_MINUTES } from "@/lib/team-scheduling-rules";
+import { ConfirmAction } from "@/components/confirm-action";
 
 const MESSAGES: Record<string, string> = {
   ...STUDIO_MESSAGES,
@@ -248,10 +249,17 @@ export function HostCalendar({ view: first, pin, tz, hosting }: { view: HostCale
           {view.ics ? (
             <div className="mt-2 flex flex-wrap items-center justify-between gap-3 text-sm text-ink-soft">
               <span>{`${view.ics.provider} · added ${view.ics.addedAt ? when(Date.parse(view.ics.addedAt)) : ""}`}</span>
-              <button type="button" className="btn btn-ghost btn-sm" disabled={busy !== null} onClick={() => send("ics-remove", {}, "Calendar address removed.")}>
+              <ConfirmAction
+                disabled={busy !== null}
+                busy={busy === "ics-remove"}
+                question="Remove this calendar address? To use it again, you paste it again."
+                yes="Yes, remove"
+                onConfirm={() => send("ics-remove", {}, "Calendar address removed.")}
+                label="Remove the private iCal address"
+              >
                 <Icon name="trash" size={16} />
                 Remove
-              </button>
+              </ConfirmAction>
             </div>
           ) : (
             <form

@@ -11,6 +11,7 @@ import type { CalendarView } from "@/lib/calendar-sync";
 import { CALENDAR_CREDITS_PER_DAY, CALENDAR_POLLS_PER_HOUR, CALENDAR_REFUSED_PER_HOUR } from "@/lib/calendar-limits";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 import { LOOKAHEAD_DAYS, MAX_FEEDS } from "@/lib/calendar-limits";
+import { ConfirmAction } from "@/components/confirm-action";
 
 
 const MESSAGES: Record<string, string> = {
@@ -153,17 +154,17 @@ export function CalendarEditor({
                     </span>
                   </span>
                 </span>
-                <button
-                  type="button"
-                  onClick={() => send("remove", { id: feed.id })}
+                <ConfirmAction
                   disabled={busy !== null}
-                  aria-busy={busy === `remove:${feed.id}`}
-                  className="btn btn-ghost btn-sm"
-                  aria-label={`Remove ${feed.provider}`}
+                  busy={busy === `remove:${feed.id}`}
+                  question="Remove this calendar? Its busy times stop being read, and to use it again you connect it again."
+                  yes="Yes, remove"
+                  onConfirm={() => send("remove", { id: feed.id })}
+                  label={`Remove ${feed.provider}`}
                 >
                   <Icon name="trash" size={16} />
                   Remove
-                </button>
+                </ConfirmAction>
               </div>
               {feed.state === "error" && feed.message ? (
                 <p className="notice notice-error mt-3 text-sm">

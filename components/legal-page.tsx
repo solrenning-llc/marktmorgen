@@ -142,18 +142,20 @@ export function LegalPage({
                   {index}
                 </nav>
 
-                {/* Phones: folded away until it is asked for. */}
-                <details className="group card-flat px-5 py-4 lg:hidden">
-                  <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-4 font-semibold text-ink [&::-webkit-details-marker]:hidden">
-                    On this page
-                    <Icon
-                      name="chevron-down"
-                      size={18}
-                      className="shrink-0 text-violet-deep transition-transform duration-200 group-open:rotate-180"
-                    />
-                  </summary>
-                  <div className="mt-4">{index}</div>
-                </details>
+                {/* Phones: folded away until it is asked for, in a region named like the wide one (WCAG 1.3.1, 2.4.1). */}
+                <nav aria-label="On this page" className="lg:hidden">
+                  <details className="group card-flat px-5 py-4">
+                    <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-4 font-semibold text-ink [&::-webkit-details-marker]:hidden">
+                      On this page
+                      <Icon
+                        name="chevron-down"
+                        size={18}
+                        className="shrink-0 text-violet-deep transition-transform duration-200 group-open:rotate-180"
+                      />
+                    </summary>
+                    <div className="mt-4">{index}</div>
+                  </details>
+                </nav>
               </>
             ) : (
               <div className="hidden lg:block" />

@@ -24,7 +24,7 @@
  */
 import { createHash } from "node:crypto";
 import { rememberFolderOwner } from "@/lib/delivery";
-import { allowanceWindow, calendarWindow } from "@/lib/allowance-window";
+import { type BillingPeriod, allowanceWindow, calendarWindow } from "@/lib/allowance-window";
 import { shareBps } from "@/lib/platform-share";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type Store, storeFolder, storeRef } from "@/lib/store";
@@ -81,25 +81,46 @@ function preintentIdentity(value: unknown, session: boolean): OrderConfirmationS
   } catch {return null;}
 }
 
-function confirmationOwner(store: Store): string | null {
+/** What names a store's orders (storeRef): every field an order confirmation reads from its original store. */
+export type ConfirmationOwner = Pick<Store, "email" | "sid" | "extra">;
+/** A store as its checkout holds it, or its snapshot read back as plain data: read only as own data fields and checked whole here, never trusted by its type. */
+export type ConfirmationStoreSource = unknown;
+// Checked against Store, so a renamed field fails to compile instead of reading as missing and refusing every order.
+const OWNER_KEYS = ["email", "sid", "extra"] as const satisfies readonly (keyof ConfirmationOwner)[];
+const ORIGINAL_KEYS = [...OWNER_KEYS, "shared", "subscriptionActive", "subscriptionId", "trialEnds", "tier", "planEndedAt", "cycle", "period"] as const satisfies readonly (keyof Store)[];
+
+/** The owner fields, read as own data properties only (no getter runs); null when any is missing its exact shape. */
+function ownerOf(source: Record<string, unknown>): ConfirmationOwner | null {
+  const { email, sid, extra } = source;
+  if (typeof email !== "string" || !email || typeof sid !== "string" || (extra !== undefined && typeof extra !== "boolean")) return null;
+  return { email, sid, extra: extra === true };
+}
+
+/** The original store's owner fields out of a snapshot read back as plain data; null when they do not read whole. */
+export function confirmationOwnerOf(store: unknown): ConfirmationOwner | null {
   try {
     const source: Record<string,unknown>=Object.create(null);
-    for (const key of ["email","sid","extra"]) {
+    for (const key of OWNER_KEYS) {
       const d=Object.getOwnPropertyDescriptor(store,key);
       if(d && !("value" in d)) return null;
       if(d) source[key]=d.value;
     }
-    if(typeof source.email!=="string" || !source.email || source.email.length>320 || typeof source.sid!=="string" ||
-        (source.extra!==undefined && typeof source.extra!=="boolean")) return null;
-    return storeRef(source as unknown as Store).toLowerCase();
+    const owner = ownerOf(source);
+    return owner && owner.email.length <= 320 ? owner : null;
   } catch {return null;}
 }
 
-function originalStore(store: Store): Store | null {
+function confirmationOwner(store: unknown): string | null {
+  const owner = confirmationOwnerOf(store);
+  return owner ? storeRef(owner).toLowerCase() : null;
+}
+
+/** The original store checked whole, field by field; only its owner is handed on (storeRef, orderConfirmationAdmission). */
+function originalStore(store: unknown): ConfirmationOwner | null {
   try {
     if (!store || ![Object.prototype,null].includes(Object.getPrototypeOf(store))) return null;
     const out: Record<string,unknown> = Object.create(null);
-    for (const key of ["email","sid","extra","shared","subscriptionActive","subscriptionId","trialEnds","tier","planEndedAt","cycle","period"]) {
+    for (const key of ORIGINAL_KEYS) {
       const d = Object.getOwnPropertyDescriptor(store,key);
       if (d && !("value" in d)) return null;
       if (d) out[key]=d.value;
@@ -113,18 +134,18 @@ function originalStore(store: Store): Store | null {
       const value=out.period;
       if (!value || typeof value!=="object" || ![Object.prototype,null].includes(Object.getPrototypeOf(value))) return null;
       const period: Record<string,unknown>=Object.create(null);
-      for (const key of ["start","end","renews","funded"]) {
+      for (const key of ["start","end","renews","funded"] as const satisfies readonly (keyof BillingPeriod)[]) {
         const d=Object.getOwnPropertyDescriptor(value,key);
         if (d && !("value" in d)) return null;
         if (d) period[key]=d.value;
       }
       out.period=period;
     }
-    return out as unknown as Store;
+    return ownerOf(out);
   } catch { return null; }
 }
 
-async function captureConfirmationSnapshot(store: Store, reference: string, admission: Admission, now: number, accountId?:string): Promise<ConfirmationSnapshot | null> {
+async function captureConfirmationSnapshot(store: ConfirmationStoreSource, reference: string, admission: Admission, now: number, accountId?:string): Promise<ConfirmationSnapshot | null> {
   try {
     const source = originalStore(store);
     if (!source) return null;
@@ -142,7 +163,7 @@ async function captureConfirmationSnapshot(store: Store, reference: string, admi
 /** Same-process compatibility only; it cannot recover a lost create-session
  * response. New checkout integrations must prepare a preintent BEFORE POST.
  */
-export async function prepareOrderConfirmationSettlement(store: Store, reference: string, admission: Admission, runtime: Pick<OrderConfirmationRuntime, "now"> = {}): Promise<string | null> {
+export async function prepareOrderConfirmationSettlement(store: ConfirmationStoreSource, reference: string, admission: Admission, runtime: Pick<OrderConfirmationRuntime, "now"> = {}): Promise<string | null> {
   try {
     if (typeof reference!=="string" || !CHECKOUT_REFERENCE.test(reference) || !canSeal()) return null;
     const snapshot=await captureConfirmationSnapshot(store,reference,admission,(runtime.now??Date.now)());
@@ -157,7 +178,7 @@ export async function prepareOrderConfirmationSettlement(store: Store, reference
  * create ACK nor a new process may recreate admission/window/share from today.
  * This hook writes no key and grants no Stripe attempt or URL by itself.
  */
-export async function prepareOrderConfirmationPreintent(store: Store, admission: Admission, supplied: OrderConfirmationPreintentIdentity, runtime: Pick<OrderConfirmationRuntime,"now"> = {}): Promise<OrderConfirmationPreintent|null> {
+export async function prepareOrderConfirmationPreintent(store: ConfirmationStoreSource, admission: Admission, supplied: OrderConfirmationPreintentIdentity, runtime: Pick<OrderConfirmationRuntime,"now"> = {}): Promise<OrderConfirmationPreintent|null> {
   try {
     const identity=preintentIdentity(supplied,false);
     if(!identity || !canSeal()) return null;
@@ -185,7 +206,7 @@ export async function prepareOrderConfirmationPreintent(store: Store, admission:
  * only the source CAS can decide their immutable ownership. No parallel key or
  * storage funding is invented here. Original time/window/share stay untouched.
  */
-export async function bindOrderConfirmationPreintent(store: Store, intentToken: string, supplied: OrderConfirmationSessionIdentity, runtime: Pick<OrderConfirmationRuntime,"now"> = {}): Promise<OrderConfirmationSettlementCandidate|null> {
+export async function bindOrderConfirmationPreintent(store: ConfirmationStoreSource, intentToken: string, supplied: OrderConfirmationSessionIdentity, runtime: Pick<OrderConfirmationRuntime,"now"> = {}): Promise<OrderConfirmationSettlementCandidate|null> {
   try {
     const identity=preintentIdentity(supplied,true) as OrderConfirmationSessionIdentity|null;
     const now=(runtime.now??Date.now)();
@@ -298,7 +319,7 @@ function confirmationSnapshot(raw: string, reference: string): ConfirmationSnaps
  * extending durable work beyond it needs separately funded retention, not a
  * fresh timestamp or a reconstructed snapshot. No legacy mark is a checkpoint.
  */
-export async function commitOrderConfirmationSettlement(store: Store, reference: string, token: string, paidCents: number, runtime: OrderConfirmationRuntime = {}): Promise<"committed" | "already" | "unknown"> {
+export async function commitOrderConfirmationSettlement(store: ConfirmationStoreSource, reference: string, token: string, paidCents: number, runtime: OrderConfirmationRuntime = {}): Promise<"committed" | "already" | "unknown"> {
   try {
     const now = (runtime.now ?? Date.now)();
     if (!isRedisConfigured() || typeof reference!=="string" || !CHECKOUT_REFERENCE.test(reference) || typeof token !== "string" || token.length > 4_000 ||

@@ -42,7 +42,8 @@ import { type Store, storeFolder, storeRef } from "@/lib/store";
 import { paidOrdersLimitFor } from "@/lib/order-rules";
 import { dataKey } from "@/lib/store-data";
 import { dataRoomFor, orderDataBytes, MAX_ORDER_ITEMS } from "@/lib/store-data-rules";
-import { shareBps } from "@/lib/platform-share";
+import { type ShareStanding, shareBps } from "@/lib/platform-share";
+import { parseTier } from "@/lib/plan";
 
 /** Hours a checkout is held for: Stripe keeps a checkout open for a day at most, and one more for the hour it was opened in. */
 export const OPEN_HOURS = 25;
@@ -202,14 +203,17 @@ function confirmationEvidence(store: Store, window: { id: string; start: number;
   try {
     if (n !== 1 || !window || !Number.isSafeInteger(now) || now<=0 || now<window.start || now>=window.end || !Number.isSafeInteger(items) || items<1 || items>MAX_ORDER_ITEMS) return null;
     const source: Record<string,unknown> = Object.create(null);
-    for (const key of ["shared","subscriptionActive","trialEnds","tier"]) {
+    // Checked against ShareStanding, so a field renamed there fails to compile instead of refusing every confirmation.
+    for (const key of ["shared","subscriptionActive","trialEnds","tier"] as const satisfies readonly (keyof ShareStanding)[]) {
       const d=Object.getOwnPropertyDescriptor(store,key);
       if (!d || !("value" in d)) return null;
       source[key]=d.value;
     }
-    if (typeof source.shared!=="boolean" || typeof source.subscriptionActive!=="boolean" || !Number.isSafeInteger(source.trialEnds) ||
-        Number(source.trialEnds)<0 || typeof source.tier!=="string" || !["creator","pro","scale"].includes(source.tier)) return null;
-    const share=shareBps(source as unknown as Store,now/1000),owner=storeRef(store).toLowerCase();
+    const {shared,subscriptionActive,trialEnds}=source,tier=parseTier(source.tier);
+    if (typeof shared!=="boolean" || typeof subscriptionActive!=="boolean" || typeof trialEnds!=="number" || !Number.isSafeInteger(trialEnds) ||
+        trialEnds<0 || tier===null) return null;
+    const standing: ShareStanding={shared,subscriptionActive,trialEnds,tier};
+    const share=shareBps(standing,now/1000),owner=storeRef(store).toLowerCase();
     if (!owner || owner.length>320 || !Number.isSafeInteger(share) || share<0 || share>10_000) return null;
     const account=Object.getOwnPropertyDescriptor(store,"stripeAccountId");
     if(account && (!("value" in account) || (account.value!==null && (typeof account.value!=="string" || !/^acct_[A-Za-z0-9]{6,128}$/.test(account.value))))) return null;
@@ -223,7 +227,7 @@ function confirmationEvidence(store: Store, window: { id: string; start: number;
  * One admission can bind only one checkout. Group-place admissions need their
  * own per-place protocol and are intentionally not admitted by this hook.
  */
-export function orderConfirmationAdmission(store: Store, admission: Admission, reference: string, accountId?: string): ConfirmationAdmission | null {
+export function orderConfirmationAdmission(store: Pick<Store, "email" | "sid" | "extra">, admission: Admission, reference: string, accountId?: string): ConfirmationAdmission | null {
   try {
     const evidence=confirmationAdmissions.get(admission);
     if (!evidence || evidence.owner!==storeRef(store).toLowerCase() || (accountId!==undefined && evidence.accountId!==accountId) ||

@@ -488,7 +488,7 @@ async function readProviderSession(found: NonNullable<Awaited<ReturnType<typeof 
 async function bindVerifiedSession(found: NonNullable<Awaited<ReturnType<typeof readConfirmationOrigin>>>, session: ProviderSession, runtime: ConfirmationOriginRuntime): Promise<BoundConfirmationOrigin | null> {
   const originalStore = data(found.payload.snapshot.store);
   if (!originalStore) return null;
-  const candidate = await bindOrderConfirmationPreintent(originalStore as unknown as Store, found.payload.preintentToken,
+  const candidate = await bindOrderConfirmationPreintent(originalStore, found.payload.preintentToken,
     { sessionId: session.id, nonce: String(session.metadata.mm_order_intent), accountId: found.row.accountId, bodyDigest: String(session.metadata.mm_order_hash) }, { now: runtime.now });
   return candidate ? bindConfirmationOrigin(found.row.id, candidate, runtime) : null;
 }
@@ -664,12 +664,14 @@ function knownPhysicalPayment(session: ProviderSession): boolean {
     Number.isSafeInteger(charge.amount_refunded) && Number(charge.amount_refunded) >= 0 && Number(charge.amount_refunded) < Number(charge.amount) &&
     !refundedInFull(payment);
 }
-function preparedMessage(found: FoundOrigin): ConfirmationOriginPayload["message"] | null {
+/** A prepared row's email with the settlement it is sent under; null unless all three read whole. */
+function preparedMessage(found: FoundOrigin): { message: NonNullable<ConfirmationOriginPayload["message"]>; settlementToken: string; paidCents: number } | null {
   const message = data(found.payload.message);
+  const { settlementToken, paidCents } = found.payload;
   if (!message || Object.keys(message).length !== 5 || !["from", "to", "subject", "text", "replyTo"].every(key => typeof message[key] === "string") ||
-      hash(String(message.to).trim().toLowerCase()) !== found.row.person || !Number.isSafeInteger(found.payload.paidCents) || Number(found.payload.paidCents) < 0 ||
-      !found.row.session || !found.payload.settlementToken) return null;
-  return message as ConfirmationOriginPayload["message"];
+      hash(String(message.to).trim().toLowerCase()) !== found.row.person || typeof paidCents !== "number" || !Number.isSafeInteger(paidCents) || paidCents < 0 ||
+      !found.row.session || !settlementToken) return null;
+  return { message: message as NonNullable<ConfirmationOriginPayload["message"]>, settlementToken, paidCents };
 }
 async function confirmationMutation(op: string, found: FoundOrigin, p: ShipmentMailPolicy | null, runtime: ShipmentMailRuntime, owner = ""): Promise<unknown[] | null> {
   try {
@@ -768,8 +770,9 @@ export async function runOrderConfirmationMail(deadline: number, dispatch: Shipm
       if (receipt?.[0] !== "settlement") { counts.unknown++; continue; }
       found = await readConfirmationOrigin(String(id), runtime);
       if (!found || found.row.phase !== "accepted") { counts.unknown++; continue; }
-      const settled = preparedMessage(found) && await commitOrderConfirmationSettlement(found.payload.snapshot.store as Store,
-        `checkout:${found.row.session}`, found.payload.settlementToken!, found.payload.paidCents!, { now, pipeline });
+      const ready = preparedMessage(found);
+      const settled = ready && await commitOrderConfirmationSettlement(found.payload.snapshot.store,
+        `checkout:${found.row.session}`, ready.settlementToken, ready.paidCents, { now, pipeline });
       if (settled === "committed" || settled === "already") await confirmationMutation("cancel", found, null, runtime);
       counts.unknown++; continue;
     }
@@ -792,14 +795,15 @@ export async function runOrderConfirmationMail(deadline: number, dispatch: Shipm
       counts.waiting++; continue;
     }
     if (found.row.phase === "awaiting_payment") found = await preparePaid(found, p, runtime, owner);
-    if (!found || !preparedMessage(found)) {
+    const ready = found ? preparedMessage(found) : null;
+    if (!found || !ready) {
       const current = await readConfirmationOrigin(String(id), runtime);
       if (current?.row.owner === owner) await confirmationMutation("defer", current, p, runtime, owner);
       counts.waiting++; continue;
     }
-    const message = preparedMessage(found)!;
-    const settled = await commitOrderConfirmationSettlement(found.payload.snapshot.store as Store,
-      `checkout:${found.row.session}`, found.payload.settlementToken!, found.payload.paidCents!, { now, pipeline });
+    const { message } = ready;
+    const settled = await commitOrderConfirmationSettlement(found.payload.snapshot.store,
+      `checkout:${found.row.session}`, ready.settlementToken, ready.paidCents, { now, pipeline });
     let barrier = false;
     const beforePost = async () => {
       if (barrier || expired() || !confirmationOutboxPolicy(runtime, false)) return false;

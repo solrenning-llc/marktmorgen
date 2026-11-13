@@ -121,7 +121,7 @@ async function main(): Promise<void> {
   const course = await addProduct(OWNER, "Desk Course", "A short course.", "49", null);
   if (!course.ok) throw new Error("no course product");
   const courseId = "c0ffee00c0ffee00c0ffee00c0ffee00";
-  const outline = { id: courseId, certificate: true, startsAt: null, modules: [{ id: "all160module", title: "Start", dripDays: 0, lessons: [{ id: "all160lesson", title: "One" }] }] } as unknown as Course;
+  const outline = { id: courseId, certificate: true, startsAt: null, modules: [{ id: "all160module", title: "Start", dripDays: 0, lessons: [{ id: "all160lesson", title: "One", task: { prompt: "Hand in a sketch." } }] }] } as unknown as Course;
   await saveCourse(outline, store, true);
   await setProductCourse(OWNER, course.product.id, { id: courseId, lessons: 1 });
   redis.run(["HSET", `nl:course:${courseId}:students`, emailKey(STUDENT), JSON.stringify({ e: STUDENT, s: 1_760_000_000, l: 1_760_000_500 })]);
@@ -129,6 +129,10 @@ async function main(): Promise<void> {
   const certId = "abcdefgh12345678";
   redis.run(["SET", `nl:cert:${certId}`, JSON.stringify({ id: certId, name: "Ana Example", email: STUDENT, title: "Desk Course", store: "allonesixty", productId: course.product.id, courseId, issuedAt: 1_760_000_600, withdrawnAt: 0 })]);
   redis.run(["SADD", `nl:course:${courseId}:certs:all`, certId]);
+  // Work handed in, waiting for the creator (the course page's "work handed in" rows, CourseWorkStudio): the guard on
+  // their studentEmail reads is exercised only with one (Claude 1 cloud MEDIUM on #4233).
+  redis.run(["ZADD", `nl:course:${courseId}:tasks:waiting`, "1760000700", `all160lesson|${emailKey(STUDENT)}`]);
+  redis.run(["SET", `nl:course:${courseId}:task:all160lesson:sub:${emailKey(STUDENT)}`, JSON.stringify({ text: "my sketch", file: null, at: 1_760_000_700, state: "waiting", feedback: "", reviewedAt: 0, tries: 1 })]);
 
   const page = async (who: string): Promise<string[]> => {
     answering(new Request("https://marktmorgen.com/studio", { headers: { cookie: await cookie(who) } }));
@@ -142,6 +146,7 @@ async function main(): Promise<void> {
   part("Course page: an Editor sees the students' progress, never their addresses");
   const editorPage = await page(EDITOR);
   is("the page still draws the students and the certificates", [editorPage.includes("Students"), editorPage.includes("Ana Example"), editorPage.includes("1 of 1")], [true, true, true]);
+  is("(control) the work handed in is drawn for the editor", editorPage.some((s) => s.includes("my sketch")), true);
   is("the student's address is nowhere in the page, props included", editorPage.some((s) => s.includes(STUDENT)), false);
   is("the page says why, in plain words", editorPage.includes(MESSAGE), true);
 

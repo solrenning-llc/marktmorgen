@@ -539,7 +539,14 @@ export default async function StorePage({ params, searchParams }: Params) {
                     </>
                   ) : (
                     <p className="st-note mt-6 text-sm">
-                      <strong>{w.noPaymentsTitle}</strong> {w.noPaymentsBody(store.name)}
+                      <strong>{w.noPaymentsTitle}</strong> {w.noPaymentsBody}
+                      {/* Told to write only where there is a way to (#4306): the store's own contact form, below. */}
+                      {shown.contact ? (
+                        <>
+                          {" "}
+                          <a href="#contact" className="font-semibold underline underline-offset-4">{w.noPaymentsWrite(store.name)}</a>.
+                        </>
+                      ) : null}
                     </p>
                   )}
                 </>

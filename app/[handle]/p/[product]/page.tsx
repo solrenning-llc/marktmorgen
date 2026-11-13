@@ -30,6 +30,7 @@ import { AskBox } from "@/components/ask-box";
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import Link from "next/link";
+import { contactOpen } from "@/lib/store-contact";
 import { cookies, headers } from "next/headers";
 import { AB_COOKIE, count as countTest, expectedShareB, readBucket, readCounts, versionFor, winner } from "@/lib/headline-test";
 import { notFound, permanentRedirect, redirect } from "next/navigation";
@@ -428,7 +429,14 @@ export default async function ProductPage({ params, searchParams }: Params) {
     </>
   ) : (
     <p className="st-note mt-6 text-sm">
-      <strong>{w.noPaymentsTitle}</strong> {w.noPaymentsBodyOne(store.name)}
+      <strong>{w.noPaymentsTitle}</strong> {w.noPaymentsBodyOne}
+      {/* Told to write only where there is a way to (#4306): the contact form on the store's page. */}
+      {contactOpen(store) ? (
+        <>
+          {" "}
+          <a href={`/@${store.handle}#contact`} className="font-semibold underline underline-offset-4">{w.noPaymentsWrite(store.name)}</a>.
+        </>
+      ) : null}
     </p>
   );
 

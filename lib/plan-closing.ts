@@ -259,7 +259,11 @@ export async function closingOf(store: Store, now = Date.now()): Promise<{ ended
   // after the last buyer was told.
   const day = Math.max(removalDay(endedAt), (state.week ?? now) + WARN_WEEK_DAYS * DAY_MS);
   if (!tellsBuyers(endedAt)) return { endedAt, day };
-  const closes = afterBuyersTold(day, state.buyersDone);
+  // Buyers not all told yet are told today at the soonest: the job closes no
+  // sooner than BUYER_NOTICE_DAYS after that. Counted from the start of today
+  // (UTC), so the day read stays the same all day (the refunds' review mark,
+  // lib/closing-refunds.ts, is drawn from it) and is never later than the job's.
+  const closes = afterBuyersTold(day, state.buyersDone ?? Math.floor(now / DAY_MS) * DAY_MS);
   return { endedAt, day: closes, buyers: { by: state.buyersDone ?? closes - BUYER_NOTICE_DAYS * DAY_MS, done: Boolean(state.buyersDone), untold: state.untold ?? 0 } };
 }
 

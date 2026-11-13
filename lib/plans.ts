@@ -86,7 +86,6 @@ export async function finishPlan(account: string, session: string): Promise<Plan
   const subscription = await onAccount("GET", account, `/subscriptions/${encodeURIComponent(view.subscription)}`);
   // Read before cancel_at or status: another subscription's end is not this plan's.
   if (!isOwnReply(subscription, view.subscription)) return "unread";
-  if (typeof subscription.cancel_at === "number" && subscription.cancel_at > 0) return "done";
   if (subscription.status === "canceled") return "done";
   const payments = Number(isPlan ? meta.plan_payments : meta.ends_after);
   const named = isPlan ? meta.plan_interval : meta.ends_interval;
@@ -97,9 +96,14 @@ export async function finishPlan(account: string, session: string): Promise<Plan
   const cycle = typeof subscription.billing_cycle_anchor === "number" ? subscription.billing_cycle_anchor : 0;
   const trialEnd = typeof subscription.trial_end === "number" ? subscription.trial_end : 0;
   const anchor = Math.max(cycle, trialEnd);
-  if (!Number.isInteger(payments) || payments < 2 || !anchor) return "gone";
+  const set = typeof subscription.cancel_at === "number" && subscription.cancel_at > 0 ? subscription.cancel_at : 0;
+  // An end already set stands when the plan's own end cannot be worked out (as before), or when it comes at or before
+  // that end (ended sooner by the creator or the buyer). One set later is not this plan's end: the buyer would pay
+  // past the payments agreed, so it is set again (review LEVE on #3086).
+  if (!Number.isInteger(payments) || payments < 2 || !anchor) return set ? "done" : "gone";
 
   const cancelAt = addPeriods(anchor, interval, payments);
+  if (set && set <= cancelAt) return "done";
   const updated = await onAccount(
     "POST",
     account,

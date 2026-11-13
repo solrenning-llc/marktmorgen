@@ -130,6 +130,14 @@ export class MemoryRedis {
       }
       case "EVAL": {
         // lib/request-guard.ts ESSENTIAL_BELOW: one more on an essential counter only while fewer than ARGV[1] were taken.
+        // lib/domains.ts DOMAIN_RELEASE_IF_OWN: a domain's key deleted only while it names one of these handles, with or
+        // without the leading "?" of a claim not yet proven.
+        if (key.startsWith("-- marktmorgen:domain-release-if-own:v1\n") && args[0] === "1" && args.length >= 3) {
+          const [, domain, ...handles] = args;
+          const held = this.run(["GET", domain]);
+          if (typeof held !== "string") return 0;
+          return handles.includes(held.replace(/^\?/, "")) ? this.run(["DEL", domain]) : 0;
+        }
         if (key.startsWith("-- marktmorgen:essential-below:v1\n") && args[0] === "1" && args.length === 4) {
           const [, counter, below, window] = args;
           this.run(["SET", counter, "0", "EX", window, "NX"]);

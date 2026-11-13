@@ -62,7 +62,7 @@ import { readCourses } from "@/lib/course";
 import { readFlows } from "@/lib/flows";
 import { FINAL_INDEX } from "@/lib/closing-holds";
 import { type Store, accountStores, closeStoreRecord, saleHandles, storeFolder, storeForEmail, storeRef } from "@/lib/store";
-import { domainKey } from "@/lib/domains";
+import { releaseDomainIfOwn } from "@/lib/domains";
 import { dropTeam, memberStores, readTeam } from "@/lib/team";
 import { hostCalendarKeys } from "@/lib/host-calendar";
 import { revokeAllKeys } from "@/lib/api-keys";
@@ -244,7 +244,8 @@ export async function prepareStore(store: Store, now = Date.now()): Promise<Batc
   await forgetStorePhones(store.statsId);
   // The owner's path: their answers and the days they showed up (lib/path.ts).
   await forgetPath(store);
-  if (store.domain?.name) extra.push(domainKey(store.domain.name));
+  // Only while the domain's key is still this store's: another store may hold it since this one's lapsed (#4109).
+  if (store.domain?.name) await releaseDomainIfOwn(store.domain.name, [...saleHandles(store)]);
   await del(extra);
   // Out of the closing day's line before its record goes (queue item 307 [EC1]): a new store its owner opens
   // under the same key is never taken for this one. A plan paid under this store's addresses after this is

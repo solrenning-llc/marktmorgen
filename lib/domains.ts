@@ -19,6 +19,7 @@
 import { createHash } from "node:crypto";
 import { DOMAINS_TIMEOUT_MS, timed } from "@/lib/fetch-timeout";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { canUse } from "@/lib/plan";
 import { SITE_URL } from "@/lib/site-url";
 import type { Store } from "@/lib/store";
@@ -309,6 +310,34 @@ export async function verifyDomain(name: string): Promise<void> {
 }
 
 /** Takes a domain off a store. The marktmorgen.com address carries on as before. */
+/**
+ * Deletes a domain's key only while it still names one of `handles`, proven ("handle") or claimed ("?handle"), in one
+ * step: a key another store holds since is never touched (#4109). 1 deleted, 0 not this store's or not there.
+ * Modelled by lib/redis-memory.ts.
+ */
+export const DOMAIN_RELEASE_IF_OWN = `-- marktmorgen:domain-release-if-own:v1
+local held = redis.call('GET', KEYS[1])
+if not held then return 0 end
+local holder = (string.gsub(held, '^%?', ''))
+for i = 1, #ARGV do
+  if holder == ARGV[i] then return redis.call('DEL', KEYS[1]) end
+end
+return 0`;
+
+/**
+ * A closing store lets go of its domain's key, only while the key is still its own (#4109): true when deleted, false
+ * when another store holds it or nothing is there. An answer of another shape throws UnknownReplyError (rule 24), so
+ * the closing tries again later rather than guess.
+ */
+export async function releaseDomainIfOwn(name: string, handles: string[]): Promise<boolean> {
+  const own = handles.filter(Boolean);
+  if (!own.length) return false;
+  const reply = repliesFor(await redisPipeline([["EVAL", DOMAIN_RELEASE_IF_OWN, 1, domainKey(name), ...own]]), 1)?.[0];
+  if (reply !== 0 && reply !== 1) throw new UnknownReplyError("a closing store's domain release");
+  cache.delete(name);
+  return reply === 1;
+}
+
 export async function disconnectDomain(name: string, handles: string[]): Promise<boolean> {
   // A claim that lapsed and was taken by another store is theirs now: only
   // this store's side of it is let go of.

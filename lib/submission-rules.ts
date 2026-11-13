@@ -218,14 +218,18 @@ export type UploadDecision =
 
 const count = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 
+export type FileCheck =
+  | { ok: true; bytes: number; type: string; extension: string; name: string; limitBytes: number }
+  | { ok: false; reason: "type" | "size" | "plan" | "unknown" };
+
 /**
- * Decides, before any byte moves, whether the declared file may be uploaded,
- * and how many bytes to reserve against the plan's storage. The reservation
- * itself (lib/storage-reservations.ts, reserveStorage, with the same
- * arithmetic) and the monthly upload allowance (lib/upload-budget.ts) are
- * taken by the route; this says no first, for the reasons a buyer can be told.
+ * The part of the decision that needs no count: the declared type and size
+ * against the limits, and a paid plan. The upload route asks this first, then
+ * lets reserveStorage (lib/storage-reservations.ts) apply the room arithmetic
+ * below under its lock, with the store measured there, so the two never read
+ * different numbers.
  */
-export function preauthorizeSubmission(facts: UploadFacts): UploadDecision {
+export function checkSubmissionFile(facts: Omit<UploadFacts, "usedBytes" | "pendingBytes">): FileCheck {
   const { declared, limits } = facts;
   const types = submissionTypes(limits);
   const type = typeof declared.type === "string" && Object.hasOwn(types, declared.type) ? declared.type : null;
@@ -239,11 +243,23 @@ export function preauthorizeSubmission(facts: UploadFacts): UploadDecision {
   if (facts.standing !== "paid" || AUTOMATIC_UPLOAD_CAPS[facts.tier]?.opens === undefined || AUTOMATIC_UPLOAD_CAPS[facts.tier].opens <= 0) {
     return { ok: false, reason: "plan" };
   }
+  return { ok: true, bytes, type, extension: types[type], name: cleanFileName(declared.name), limitBytes: paidStorageBytes(facts.tier) };
+}
+
+/**
+ * Decides, before any byte moves, whether the declared file may be uploaded,
+ * and how many bytes to reserve against the plan's storage, with the same
+ * arithmetic as reserveStorage (lib/storage-reservations.ts): what is kept
+ * and what open uploads hold both count, and a refusal says which.
+ */
+export function preauthorizeSubmission(facts: UploadFacts): UploadDecision {
+  const file = checkSubmissionFile(facts);
+  if (!file.ok) return file;
   const { usedBytes: used, pendingBytes: pending } = facts;
   if (!count(used) || !count(pending) || !Number.isSafeInteger(used + pending)) return { ok: false, reason: "unknown" };
-  const limit = paidStorageBytes(facts.tier);
+  const { bytes, limitBytes: limit } = file;
   if (bytes > limit - used - pending) return { ok: false, reason: bytes <= limit - used ? "pending" : "room" };
-  return { ok: true, reserveBytes: bytes, type, extension: types[type], name: cleanFileName(declared.name), limitBytes: limit };
+  return { ok: true, reserveBytes: bytes, type: file.type, extension: file.extension, name: file.name, limitBytes: limit };
 }
 
 /** Where a submission stands. Reviewed and withdrawn are final. */
@@ -295,6 +311,20 @@ export type Submission = {
   /** When it was reviewed or withdrawn; 0 while it waits. */
   closedAt: number;
 };
+
+/**
+ * The most one kept record may weigh, as JSON in UTF-8: the buyer's note and
+ * the creator's reply at their longest, every character at its dearest
+ * escaped form (six bytes), with the names and the rest. A record past it is
+ * never written and never cut (lib/submission-store.ts).
+ */
+export const MAX_SUBMISSION_RECORD_BYTES = 6 * (MAX_SUBMISSION_NOTE + MAX_SUBMISSION_REPLY) + 6 * 2 * 120 + 4_096;
+
+/** The record as it is kept, or null when it would pass MAX_SUBMISSION_RECORD_BYTES. */
+export function submissionRecordJson(submission: Submission): string | null {
+  const json = JSON.stringify(submission);
+  return new TextEncoder().encode(json).length <= MAX_SUBMISSION_RECORD_BYTES ? json : null;
+}
 
 /** When a file sent now is deleted: the creator's days, never past the code's maximum. */
 export function submissionKeepUntil(atSeconds: number, keepDays: number): number {

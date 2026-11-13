@@ -18,17 +18,21 @@ import { done, is, part } from "./check";
 const NOW = Date.UTC(2026, 9, 11, 12);
 const at = (daysAgo: number) => Math.floor((NOW - daysAgo * 86_400_000) / 1000);
 let invoiceNumber = 0;
-const invoice = (over: Record<string, unknown>) => ({
-  id: `in_renewal_${++invoiceNumber}`,
-  object: "invoice",
-  status: "paid",
-  billing_reason: "subscription_cycle",
-  amount_paid: 2000,
-  currency: "usd",
-  created: at(1),
-  subscription_details: { metadata: { store: "harbor", product: "club01" } },
-  ...over,
-});
+const invoice = (over: Record<string, unknown>) => {
+  const made: Record<string, unknown> = {
+    id: `in_renewal_${++invoiceNumber}`,
+    object: "invoice",
+    status: "paid",
+    billing_reason: "subscription_cycle",
+    amount_paid: 2000,
+    currency: "usd",
+    created: at(1),
+    subscription_details: { metadata: { store: "harbor", product: "club01" } },
+    ...over,
+  };
+  // A paid invoice says when it was paid (status_transitions.paid_at); here, when it was made, unless a case says otherwise.
+  return "status_transitions" in over ? made : { ...made, status_transitions: { paid_at: made.created } };
+};
 
 let invoices: Record<string, unknown>[] = [];
 globalThis.fetch = (async (input: string | URL | Request) => {

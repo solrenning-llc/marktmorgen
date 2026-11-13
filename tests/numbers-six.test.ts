@@ -150,8 +150,8 @@ async function main(): Promise<void> {
   const renewals = renewalsFrom(
     store,
     [
-      { status: "paid", billing_reason: "subscription_cycle", currency: "usd", amount_paid: 900, created: Date.parse("2026-09-12T10:00:00Z") / 1000, parent: { subscription_details: { metadata: { store: "harbor", channel: "instagram" } } } },
-      { status: "paid", billing_reason: "subscription_cycle", currency: "usd", amount_paid: 900, created: Date.parse("2026-09-12T11:00:00Z") / 1000, parent: { subscription_details: { metadata: { store: "harbor", channel: "direct" } } } },
+      { status: "paid", billing_reason: "subscription_cycle", currency: "usd", amount_paid: 900, created: Date.parse("2026-09-12T10:00:00Z") / 1000, status_transitions: { paid_at: Date.parse("2026-09-12T10:00:00Z") / 1000 }, parent: { subscription_details: { metadata: { store: "harbor", channel: "instagram" } } } },
+      { status: "paid", billing_reason: "subscription_cycle", currency: "usd", amount_paid: 900, created: Date.parse("2026-09-12T11:00:00Z") / 1000, status_transitions: { paid_at: Date.parse("2026-09-12T11:00:00Z") / 1000 }, parent: { subscription_details: { metadata: { store: "harbor", channel: "direct" } } } },
     ],
     Date.parse("2026-09-30T00:00:00Z"),
     "usd",

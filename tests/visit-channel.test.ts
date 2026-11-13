@@ -141,6 +141,7 @@ async function main(): Promise<void> {
     amount_paid: amount,
     currency: "usd",
     created: at(3),
+    status_transitions: { paid_at: at(3) },
     subscription_details: { metadata: { store: "harbor", product: "club", ...meta } },
   });
   invoices = [invoice({ channel: "instagram" }, 900), invoice({ channel: "direct" }, 700), invoice({}, 500)];

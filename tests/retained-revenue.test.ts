@@ -76,7 +76,7 @@ globalThis.fetch = (async (input: string | URL | Request) => {
     session("cs_test_kept0003", 2500, "eur", "tiktok", "pi_kept3"),
   ]);
   if (url.pathname.endsWith("/refunds")) return list([{ id: "re_kept1", status: "succeeded", amount: 1000, currency: "usd", created: S, payment_intent: "pi_kept1" }]);
-  if (url.pathname.endsWith("/invoices")) return list([{ id: "in_kept1", status: "paid", billing_reason: "subscription_cycle", amount_paid: 1200, currency: "usd", created: S, subscription_details: { metadata: { store: "kept", channel: "youtube" } } }]);
+  if (url.pathname.endsWith("/invoices")) return list([{ id: "in_kept1", status: "paid", billing_reason: "subscription_cycle", amount_paid: 1200, currency: "usd", created: S, status_transitions: { paid_at: S }, subscription_details: { metadata: { store: "kept", channel: "youtube" } } }]);
   if (url.pathname.endsWith("/disputes")) {
     disputeCalls++;
     if (disputeMode === "failed") throw Error("dispute service unavailable");

@@ -695,22 +695,36 @@ export async function spendInvite(token: string): Promise<JoinResult> {
   if (email === normaliseEmail(store.email)) return { ok: false, reason: "owner" };
   const inviteId = claim.id;
 
-  const joined = await withTeam(store.sid, async (): Promise<{ ok: true; member: Member } | { ok: false; reason: "expired" | "full" }> => {
-    const team = await readTeam(store.sid);
-    const invite = team.invites.find((i) => i.id === inviteId && i.email === email);
-    if (!invite) return { ok: false, reason: "expired" };
-    const already = team.members.find((m) => m.email === email);
-    if (!already && team.members.length >= MAX_TEAM) return { ok: false, reason: "full" };
+  // Until the join is whole, the link is not spent (#4265): a failure in either write below puts it back for the rest of
+  // its time, so the person can tap it again; nothing is half done.
+  let validUntil = 0;
+  let joined: { ok: true; member: Member } | { ok: false; reason: "expired" | "full" };
+  try {
+    joined = await withTeam(store.sid, async (): Promise<{ ok: true; member: Member } | { ok: false; reason: "expired" | "full" }> => {
+      const team = await readTeam(store.sid);
+      const invite = team.invites.find((i) => i.id === inviteId && i.email === email);
+      if (!invite) return { ok: false, reason: "expired" };
+      const already = team.members.find((m) => m.email === email);
+      if (!already && team.members.length >= MAX_TEAM) return { ok: false, reason: "full" };
 
-    const member: Member = already ?? { email, role: invite.role, joinedAt: new Date().toISOString() };
-    await saveTeam(store.sid, {
-      members: already ? team.members : [...team.members, member],
-      invites: team.invites.filter((i) => i.id !== invite.id),
+      const member: Member = already ?? { email, role: invite.role, joinedAt: new Date().toISOString() };
+      validUntil = invite.expiresAt;
+      // The person's index first (#4265): memberStores already drops an index entry whose team does not name them
+      // (a join that stopped after this line), while a team naming someone whose index lacks the store could never be
+      // found from their address.
+      await redisPipeline([["SADD", indexKey(email), store.sid]]);
+      await saveTeam(store.sid, {
+        members: already ? team.members : [...team.members, member],
+        invites: team.invites.filter((i) => i.id !== invite.id),
+      });
+      return { ok: true, member };
     });
-    return { ok: true, member };
-  });
+  } catch (error) {
+    const left = validUntil - now();
+    if (left > 0) await redisPipeline([["SET", key, raw, "EX", left, "NX"]]).catch(() => {});
+    throw error;
+  }
   if (!joined.ok) return joined;
-  await redisPipeline([["SADD", indexKey(email), store.sid]]);
   return { ok: true, store, member: joined.member };
 }
 

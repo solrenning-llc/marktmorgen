@@ -59,6 +59,20 @@ async function main(): Promise<void> {
     is("not answered as ok", unread.body.ok === true, false);
     is("and never as an empty list", Array.isArray(unread.body.versions), false);
   }
+  // Claude 7's LEVE: a kept entry the list holds but that cannot be read (not text, no time, a page that does not
+  // parse) was skipped, so the editor showed part of the list as the whole. Each is unknown: the read throws.
+  const listKey = `nl:product:pages:${statsId}:${product}`;
+  for (const [mode, crooked] of [["a number", 7], ["text with no time", "{}"], ["a page that does not parse", `${Date.now()}\n{not json`]] as const) {
+    part(`One kept version is ${mode}: never left out of a list answered as whole`);
+    redis.pipeline = async (commands) => {
+      const reply = await original.call(redis, commands);
+      if (commands.length === 1 && commands[0][0] === "LRANGE" && commands[0][1] === listKey && Array.isArray(reply[0])) return [[...(reply[0] as unknown[]), crooked]];
+      return reply;
+    };
+    const partial = await ask();
+    redis.pipeline = original;
+    is("not answered as ok", partial.body.ok === true, false);
+  }
   console.error = quiet;
   done();
 }

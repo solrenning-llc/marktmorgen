@@ -310,9 +310,9 @@ const AUDIO_TYPES: ReadonlyMap<string, "audio/mpeg" | "audio/mp4"> = new Map(Obj
   "audio/x-m4a": "audio/mp4",
 } as const));
 
-/** A field's text, or undefined when it is missing or empty, so an empty <description/> never hides the summary. */
-function filled(text: string | undefined): string | undefined {
-  return text === undefined || text.trim() === "" ? undefined : text;
+/** A field's text, or undefined when it is missing (null) or empty, so an empty <description/> never hides the summary. */
+function filled(text: string | null): string | undefined {
+  return text === null || text.trim() === "" ? undefined : text;
 }
 
 function readEpisode(item: El, n: number): ImportedEpisode {

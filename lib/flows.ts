@@ -5,7 +5,7 @@ import { MAX_FLOWS, MAX_RETRIES_BY_YOU, MAX_STEPS, MAX_WAIT_DAYS_PER_STEP, RUN_K
 import { type WaitReason, nextTry, stopWaiting } from "@/lib/flow-retry";
 import { allowanceWindow } from "@/lib/allowance-window";
 import { END, afterIndex, checkRoutes, elseIndex } from "@/lib/flow-paths";
-import { RUN_EVENT_BYTES, RUN_RECORD_CHARS, type Settled, admitRuns, claimAttempts, countRetry, countWaits, forgetHeldCommand, giveBackRuns, forgetIndexCommand, forgetPersonCommands, noteRuns, openRuns, personOf, readRun, refuseRuns, releaseHold, runPeople, settleAttempts } from "@/lib/flow-runs";
+import { RUN_EVENT_BYTES, RUN_RECORD_CHARS, type Settled, admitRuns, claimAttempts, countRetry, countWaits, firstStepNeverQueued, forgetHeldCommand, giveBackRuns, forgetIndexCommand, forgetPersonCommands, noteRuns, openRuns, personOf, readRun, refuseRuns, releaseHold, runPeople, settleAttempts } from "@/lib/flow-runs";
 import { readTeam } from "@/lib/team";
 import { can } from "@/lib/team-roles";
 /**
@@ -636,17 +636,25 @@ async function startFlows(store: Store, flows: Flow[], addresses: string[]): Pro
     // The run's record first, so its first step always finds it.
     await openRuns(flow.id, fresh, now);
     // The first step's place in the queue, read exactly (CX-123 rule 24): each ZADD 0 or 1, the count a whole number.
-    // Not confirmed, the once-only start is given back with the day's place, so the same event starts it again;
-    // a mark kept here held the run "running" at step 0 for 400 days with nothing queued. Each member is the same
-    // text on a new try, so a ZADD that did land is never queued twice.
+    const member = (address: string) => `${store.listId}|${store.handle}|${flow.id}|0|${address}`;
     const queued = await redisPipeline([
-      ...fresh.map((address) => ["ZADD", QUEUE, now + flow.steps[0].delayHours * 3600, `${store.listId}|${store.handle}|${flow.id}|0|${address}`]),
+      ...fresh.map((address) => ["ZADD", QUEUE, now + flow.steps[0].delayHours * 3600, member(address)]),
       ["HINCRBY", statsKey(flow.id), "started", fresh.length],
     ]).then((replies) => repliesFor(replies, fresh.length + 1), () => null);
     if (!queued || !queued.slice(0, fresh.length).every((r) => r === 0 || r === 1) || countOf(queued[fresh.length]) === null) {
-      await redisPipeline(fresh.map((address) => ["DEL", enrolledKey(flow.id, address)])).catch(() => {});
-      await giveBackRuns(store.listId, fresh.length, now);
-      unknown = true;
+      // Not confirmed: the write may still have landed, its answer lost. The once-only start is given back, with the
+      // day's place, only where it is proven that nothing was queued and the run never moved (firstStepNeverQueued),
+      // so the same event starts it again; a mark kept with nothing queued would hold the run at step 0 for 400 days.
+      // Anywhere else the start stays: a start given back after its step went out would send that step twice
+      // (Codex X5 and Codex P on #4307).
+      const never = await firstStepNeverQueued(flow.id, QUEUE, fresh.map((address) => ({ email: address, member: member(address) })));
+      const back = fresh.filter((_, i) => never[i] === true);
+      if (back.length) {
+        await redisPipeline(back.map((address) => ["DEL", enrolledKey(flow.id, address)])).catch(() => {});
+        await giveBackRuns(store.listId, back.length, now);
+      }
+      started += never.filter((answer) => answer === false).length;
+      if (back.length || never.some((answer) => answer === null)) unknown = true;
       continue;
     }
     started += fresh.length;

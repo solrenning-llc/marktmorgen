@@ -17,9 +17,14 @@ process.env.STRIPE_SECRET_KEY = "sk_test_payday_catch_up_only";
 process.env.RESEND_API_KEY = "re_test_a_stand_in_key_for_tests_only";
 
 const sent: { to: string; subject: string; text: string }[] = [];
+let paypalCalls = 0;
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   const answer = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
+  if (url.hostname.endsWith("paypal.com")) {
+    paypalCalls += 1;
+    return answer({ error: "synthetic: no PayPal here" }, 500);
+  }
   if (url.hostname === "api.resend.com") {
     const body = JSON.parse(String(init?.body ?? "{}")) as { to?: string | string[]; subject?: string; text?: string };
     sent.push({ to: Array.isArray(body.to) ? body.to[0] : String(body.to), subject: String(body.subject), text: String(body.text) });
@@ -86,16 +91,27 @@ async function main(): Promise<void> {
   is("the owed store that read fine is written to", to(PAID), 1);
   is("and nothing to the store with nobody owed", to(QUIET), 0);
 
-  part("A store the payday never reached is caught up the day after");
+  part("A store that did not have this payday on its day is never caught up (Claude 2 nuvem F/B MEDIUM)");
   const LATE = "late@example.com";
   await seed(LATE, "lateshop", 5, true);
-  // The store was not there (or not reached) on the 5th: on the 6th it is one day late.
+  // The store (or its affiliates, or this payday) did not exist on the 5th: nothing failed, so nothing is caught up.
   const sixth = await sendPaydayEmails(Date.now() + 20_000, at("2026-11-06T13:00:00Z"));
-  is("the 6th catches up both missed paydays, and nothing again to the store handled on the 5th", [to(LATE), to(MISSED), to(PAID), sixth.sent], [1, 1, 1, 2]);
-  const lateMail = sent.filter((m) => m.to === LATE)[0];
-  is("its email never says today is the payday", [lateMail?.text.includes("Today is the"), lateMail?.text.includes("yesterday")], [false, true]);
+  is("the 6th catches up only the payday the 5th's run reached and did not finish", [to(LATE), to(MISSED), to(PAID), sixth.sent], [0, 1, 1, 1]);
+  const missedMail = sent.filter((m) => m.to === MISSED)[0];
+  is("its email never says today is the payday", [missedMail?.text.includes("Today is the"), missedMail?.text.includes("yesterday")], [false, true]);
   await sendPaydayEmails(Date.now() + 20_000, at("2026-11-07T13:00:00Z"));
-  is("the 7th sends nothing more", [to(LATE), to(MISSED), to(PAID)], [1, 1, 1]);
+  is("the 7th sends nothing more", [to(LATE), to(MISSED), to(PAID)], [0, 1, 1]);
+
+  part("A payday moved onto a day that just passed is not caught up (Claude 2 nuvem F/B MEDIUM)");
+  const MOVED = "moved@example.com";
+  await seed(MOVED, "movedshop", 20, true);
+  await sendPaydayEmails(Date.now() + 20_000, at("2026-11-12T13:00:00Z"));
+  is("(control) nothing on the 12th while its payday is the 20th", to(MOVED), 0);
+  await setAffiliateSetting(MOVED, parseAffiliateSetting({ ...NO_AFFILIATES, enabled: true, payday: 12 }));
+  await sendPaydayEmails(Date.now() + 20_000, at("2026-11-13T13:00:00Z"));
+  is("moving it to the 12th on the 13th sends nothing that day", to(MOVED), 0);
+  await sendPaydayEmails(Date.now() + 20_000, at("2026-11-15T13:00:00Z"));
+  is("nor on the last day a catch-up could reach", to(MOVED), 0);
 
   part("A payday with nobody owed is handled: a sale clearing after it waits for next month");
   await addSale(quietStats, "cs_after");
@@ -112,9 +128,29 @@ async function main(): Promise<void> {
   is("on December 5th the store fails and nothing is sent to it", [dec5.failed > 0, to(FAILED)], [true, 0]);
   await sendPaydayEmails(Date.now() + 20_000, at("2026-12-06T13:00:00Z"));
   is("on December 6th its payday is caught up", to(FAILED), 1);
-  is("the stores handled on December 5th are not written to again", [to(MISSED), to(PAID), to(LATE)], [2, 2, 2]);
+  is("the stores handled on December 5th are not written to again", [to(MISSED), to(PAID), to(LATE), to(MOVED)], [2, 2, 1, 0]);
   await sendPaydayEmails(Date.now() + 20_000, at("2026-12-07T13:00:00Z"));
   is("and only once", to(FAILED), 1);
+
+  part("A payday caught up never pays by itself through PayPal (Claude 1 cloud MEDIUM)");
+  const AUTO = "auto@example.com";
+  const autoStats = await seed(AUTO, "autoshop", 5, true);
+  await pipeline([["SET", `nl:pp:${autoStats}`, JSON.stringify({ client: "synthetic-client", secret: "synthetic-secret", at: T0, auto: true })]]);
+  failing.add(autoStats);
+  await sendPaydayEmails(Date.now() + 20_000, at("2027-01-05T13:00:00Z"));
+  failing.delete(autoStats);
+  is("(control) the 5th's run reached it and failed: nothing sent", to(AUTO), 0);
+  const before = paypalCalls;
+  await sendPaydayEmails(Date.now() + 20_000, at("2027-01-06T13:00:00Z"));
+  is("the 6th's catch-up never calls PayPal", paypalCalls - before, 0);
+  const autoMail = sent.filter((m) => m.to === AUTO).at(-1);
+  is("it sends the manual email instead, saying nothing was paid by itself", [to(AUTO), autoMail?.text.includes("we do not pay late by ourselves") ?? false, autoMail?.text.includes("Your affiliate payday was") ?? true], [1, true, false]);
+  const ONTIME = "ontime@example.com";
+  const onTimeStats = await seed(ONTIME, "ontimeshop", 9, true);
+  await pipeline([["SET", `nl:pp:${onTimeStats}`, JSON.stringify({ client: "synthetic-client", secret: "synthetic-secret", at: T0, auto: true })]]);
+  await sendPaydayEmails(Date.now() + 20_000, at("2027-02-09T13:00:00Z"));
+  const onTimeMail = sent.filter((m) => m.to === ONTIME).at(-1);
+  is("(control) on its own payday a store that pays by itself takes the automatic path", onTimeMail?.text.includes("It is your affiliate payday") ?? false, true);
 
   part("The words of a payday caught up");
   const manual = paydayEmail({ storeName: "S", payday: 5, people: 1, totalCents: 200, currency: "usd", waitingCents: 0, hold: 0, refundsChecked: true, late: 2 });

@@ -62,6 +62,10 @@ let subReplyId: string | null | undefined;
 let yearReplyAt = -1; // 1-based count of GET /invoices/YEAR answered with yearReplyId
 let yearReplyId: string | null | undefined;
 let yearReplyStatus: string | undefined; // the status that reply carries, when not the year's own
+/** Rule 30 on the move's own reply (POST): undefined answers as the membership; a string with another's id; null with no id. */
+let moveReplyId: string | null | undefined;
+/** The move's reply as the membership itself, but without the yearly invoice the move was written to replace. */
+let moveReplyUnwritten = false;
 const replyAs = (row: Record<string, unknown>, id: string | null | undefined, status?: string) => {
   if (id === undefined) return row;
   if (id === NULL_BODY) return null;
@@ -69,6 +73,15 @@ const replyAs = (row: Record<string, unknown>, id: string | null | undefined, st
   if (id === null) delete copy.id;
   else copy.id = id;
   return copy;
+};
+
+/** The move's reply, as moveReplyId and moveReplyUnwritten say; Stripe's state is changed as the mode says either way. */
+const moveReply = (row: Record<string, unknown>) => {
+  const copy = replyAs(row, moveReplyId);
+  if (!moveReplyUnwritten || copy === null) return copy;
+  const drop = (meta: unknown) => Object.fromEntries(Object.entries((meta ?? {}) as Record<string, string>).filter(([k]) => k !== "monthly_replaced"));
+  const pending = copy.pending_update as { metadata?: unknown } | null;
+  return { ...copy, metadata: drop(copy.metadata), pending_update: pending ? { ...pending, metadata: drop(pending.metadata) } : null };
 };
 
 const subJson = () => ({
@@ -144,19 +157,19 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
       st.month = { status: mode === "declined-paid-latest" ? "paid" : "open" };
       const latest =
         mode === "declined-unexpanded" ? MONTH : mode === "declined-latest-is-year" ? { id: YEAR, status: "open" } : { id: MONTH, status: st.month.status, amount_paid: 0, currency: "usd" };
-      return json({ ...subJson(), latest_invoice: latest });
+      return json(moveReply({ ...subJson(), latest_invoice: latest }));
     }
     if (mode === "applied-open") {
       applied();
       st.interval = "month";
       st.month = { status: "open" };
-      return json({ ...subJson(), latest_invoice: { id: MONTH, status: "open", amount_paid: 0, currency: "usd" } });
+      return json(moveReply({ ...subJson(), latest_invoice: { id: MONTH, status: "open", amount_paid: 0, currency: "usd" } }));
     }
     applied();
     st.interval = "month";
     st.pendingUpdate = false;
     st.month = { status: "paid" };
-    return json({ ...subJson(), latest_invoice: { id: MONTH, status: "paid", amount_paid: 2000, currency: "usd" } });
+    return json(moveReply({ ...subJson(), latest_invoice: { id: MONTH, status: "paid", amount_paid: 2000, currency: "usd" } }));
   }
   if (method === "POST" && path === `/invoices/${MONTH}/pay`) {
     // The member pays the month's invoice later: the pending update applies, and its metadata with it.
@@ -207,6 +220,8 @@ async function reset(): Promise<void> {
   yearReplyAt = -1;
   yearReplyId = undefined;
   yearReplyStatus = undefined;
+  moveReplyId = undefined;
+  moveReplyUnwritten = false;
   await redisPipeline([["DEL", FALLBACK_VOID_KEY, FALLBACK_CHECK_KEY, FALLBACK_BOTH_KEY, `nl:yearly:fallback:try:${YEAR}`]]);
 }
 /** The year is safe when it is either retried (auto_advance true and open) or recorded for the daily job. */
@@ -476,6 +491,47 @@ async function main(): Promise<void> {
         ["moved-paid", "open", [`${ACCOUNT}|${YEAR}|${MONTH}`], []],
       );
     }
+  }
+
+  // M. Rule 30 on the move's own reply (a POST): it decides only when it is this membership and carries the yearly
+  // invoice it was written to replace. Any other reply is no answer: the move may have been made, so the year stays
+  // with no automatic retry for the daily job, as when Stripe does not answer; nothing is voided on it.
+  const left = [`${ACCOUNT}|${SUB}|${YEAR}`];
+  for (const [label, id, unwritten] of [
+    ["another membership's id", "sub_Somebody0001", false],
+    ["no id", null, false],
+    ["its own id but not the yearly invoice it replaces", undefined, true],
+    ["a null body", NULL_BODY, false],
+  ] as const) {
+    part(`M. the move answered with ${label}`);
+    await reset();
+    moveReplyId = id;
+    moveReplyUnwritten = unwritten;
+    is(
+      `M1. paid, answered with ${label}: never taken as moved, the year never voided on it, left for the daily job with no retry`,
+      [reason(await move()), st.year.status, st.year.auto_advance, posts().filter((p) => p.endsWith("/void")), await members(FALLBACK_CHECK_KEY)],
+      ["unknown", "open", false, [], left],
+    );
+
+    await reset();
+    moveReplyId = id;
+    moveReplyUnwritten = unwritten;
+    updateMode = "declined";
+    is(
+      `M2. declined, answered with ${label}: no invoice voided on it, the year not turned back on, left for the daily job`,
+      [reason(await move()), posts().filter((p) => p.endsWith("/void")), st.year.auto_advance, await members(FALLBACK_CHECK_KEY)],
+      ["unknown", [], false, left],
+    );
+
+    await reset();
+    moveReplyId = id;
+    moveReplyUnwritten = unwritten;
+    updateMode = "applied-open";
+    is(
+      `M3. applied with the month open, answered with ${label}: never taken as moved, left for the daily job`,
+      [reason(await move()), st.year.status, st.year.auto_advance, await members(FALLBACK_CHECK_KEY)],
+      ["unknown", "open", false, left],
+    );
   }
 }
 

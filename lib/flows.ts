@@ -77,6 +77,8 @@ import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { SITE_URL } from "@/lib/site-url";
 import { usedLinkIn } from "@/lib/mail-clicks";
 import { courseProgress } from "@/lib/learn";
+// As a namespace, so it never clashes with a named import of the same helpers elsewhere in this file.
+import * as exactReply from "@/lib/redis-reply";
 
 export { MAX_FLOWS, MAX_STEPS };
 export const MAX_DELAY_HOURS = MAX_FLOW_WAIT_HOURS;
@@ -213,9 +215,9 @@ function cleanStep(raw: unknown, known: (productId: string) => boolean, isFlow: 
 /** How many bytes the store's sequences hold, before they are read (lib/mcp-tools.ts, emailsTool); null when it did not come back. */
 export async function flowsBytes(listId: string | null): Promise<number | null> {
   if (!listId || !isRedisConfigured()) return 0;
-  const [n] = await redisPipeline([["STRLEN", flowsKey(listId)]]);
-  const bytes = Number(n);
-  return Number.isSafeInteger(bytes) && bytes >= 0 ? bytes : null;
+  // Exactly one whole number from zero up (a list with none is 0); anything else did not come back (CX-123 rule 24).
+  const reply = exactReply.repliesFor(await redisPipeline([["STRLEN", flowsKey(listId)]]), 1);
+  return reply ? exactReply.countOf(reply[0]) : null;
 }
 
 export async function readFlows(listId: string | null): Promise<Flow[]> {
@@ -512,15 +514,25 @@ export type FlowCounts = {
   acted: number;
 };
 
-/** How many have started each sequence, how many of its emails went out, and how many ended it or skipped one. */
+/**
+ * How many have started each sequence, how many of its emails went out, and how many ended it or skipped one.
+ * Counts never written are 0 (an empty hash); a reply of any other shape throws UnknownReplyError, never zeros
+ * (CX-123 rule 24).
+ */
 export async function flowStats(flows: Flow[]): Promise<Map<string, FlowCounts>> {
   const out = new Map<string, FlowCounts>();
   if (!flows.length || !isRedisConfigured()) return out;
-  const rows = await redisPipeline(flows.map((f) => ["HGETALL", statsKey(f.id)]));
+  const rows = exactReply.repliesFor(await redisPipeline(flows.map((f) => ["HGETALL", statsKey(f.id)])), flows.length);
+  if (!rows) throw new exactReply.UnknownReplyError("the sequences' counts");
   flows.forEach((f, i) => {
-    const raw = rows[i];
+    const raw = exactReply.stringList(rows[i]);
+    if (!raw || raw.length % 2 !== 0) throw new exactReply.UnknownReplyError("a sequence's counts");
     const map = new Map<string, number>();
-    if (Array.isArray(raw)) for (let j = 0; j + 1 < raw.length; j += 2) map.set(String(raw[j]), Number(raw[j + 1]) || 0);
+    for (let j = 0; j < raw.length; j += 2) {
+      const count = /^\d+$/.test(raw[j + 1]) ? Number(raw[j + 1]) : NaN;
+      if (!Number.isSafeInteger(count)) throw new exactReply.UnknownReplyError("a sequence's counts");
+      map.set(raw[j], count);
+    }
     out.set(f.id, { started: map.get("started") ?? 0, sent: map.get("sent") ?? 0, reached: map.get("reached") ?? 0, skipped: map.get("skipped") ?? 0, acted: map.get("acted") ?? 0 });
   });
   return out;
@@ -534,8 +546,11 @@ export async function flowStats(flows: Flow[]): Promise<Map<string, FlowCounts>>
 export async function flowsStartedFor(flows: Flow[], email: string): Promise<string[]> {
   if (!flows.length) return [];
   const address = normaliseEmail(email);
-  const found = await redisPipeline(flows.map((f) => ["EXISTS", enrolledKey(f.id, address)]));
-  return flows.filter((_, i) => Number(found[i]) === 1).map((f) => f.id);
+  // Exactly 1 or 0 for each: anything else is unknown, never "not started" (CX-123 rule 24).
+  const found = exactReply.repliesFor(await redisPipeline(flows.map((f) => ["EXISTS", enrolledKey(f.id, address)])), flows.length);
+  const starts = found?.map(exactReply.countOf);
+  if (!starts || starts.some((n) => n !== 0 && n !== 1)) throw new exactReply.UnknownReplyError("a person's sequence starts");
+  return flows.filter((_, i) => starts[i] === 1).map((f) => f.id);
 }
 
 /**
@@ -544,12 +559,13 @@ export async function flowsStartedFor(flows: Flow[], email: string): Promise<str
  */
 export async function enroll(store: Store, email: string, event: { joined: boolean; signed?: boolean; paidRequest?: boolean; productId?: string; tag?: string; finished?: string; form?: string; formOutcome?: string; started?: string; abandoned?: string; stage?: string }): Promise<void> {
   try {
-    if (!store.listId || monthlyAllowance(store) === 0) return;
+    if (!store.listId || monthlyAllowance(store) === 0 || !isRedisConfigured()) return;
     // Whether what they just got is sold for money: the store's own index
     // knows, so "bought" costs no read.
     const paid = Boolean(event.productId) && idsOfKind(store, "paid").includes(event.productId as string);
-    // Only as many active workflows as the plan has start anybody (lib/flow-limits.ts).
-    const flows = startableFlows(await readFlows(store.listId), activeFlowLimit(store)).filter(
+    // Only as many active workflows as the plan has start anybody (lib/flow-limits.ts). Read exactly: a reply that is
+    // not exactly nil or a list of sequences throws, and is logged below, never read as "no sequences" (rule 24).
+    const flows = startableFlows(await readFlowListStrict(store.listId), activeFlowLimit(store)).filter(
       (f) =>
         f.active &&
         f.steps.length > 0 &&

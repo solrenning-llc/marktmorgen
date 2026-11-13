@@ -1,5 +1,6 @@
 "use client";
 
+import { ConfirmAction } from "@/components/confirm-action";
 import { ELSEWHERE_NOTE, MAX_REVIEW_URL, parseReviewElsewhere } from "@/lib/review-elsewhere";
 import { UrlField } from "@/components/url-field";
 import { checkWith } from "@/lib/url-check";
@@ -301,9 +302,16 @@ export function ReviewRow({ review }: { review: StudioReview }) {
               {busy === "reply" ? "Posting…" : "Post the reply"}
             </button>
             {review.reply ? (
-              <button type="button" className="btn btn-ghost btn-sm" disabled={busy !== null} onClick={() => act("reply", { action: "reply", text: "" }, "Reply removed.")}>
+              <ConfirmAction
+                className="btn btn-ghost btn-sm"
+                disabled={busy !== null}
+                busy={busy === "reply"}
+                question="Remove your reply? Its words cannot be brought back."
+                yes="Yes, remove"
+                onConfirm={() => act("reply", { action: "reply", text: "" }, "Reply removed.")}
+              >
                 Remove the reply
-              </button>
+              </ConfirmAction>
             ) : null}
             <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setReplying(false); setReply(review.reply); }}>
               Cancel

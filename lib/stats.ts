@@ -1505,8 +1505,13 @@ async function readDisputes(store: Store, since: number, pages = DISPUTE_PAGES):
   return { rows: out, partial };
 }
 
-/** One refund as Stripe lists it: when, how much, in what, and the payment it gave back. */
-export type RefundRow = { created: number; cents: number; currency: string; paymentIntent: string };
+/**
+ * One refund as Stripe lists it: when, how much, in what, and the payment it gave back.
+ * `pending` when Stripe has not given the money back yet (for example, waiting for balance):
+ * the numbers that say what was given back and kept leave it out (#4369); a reader that takes
+ * refunds off sales to be careful (lib/path-facts.ts, lib/segments.ts) still counts it.
+ */
+export type RefundRow = { created: number; cents: number; currency: string; paymentIntent: string; pending?: boolean };
 
 /** The refunds made on the creator's account since `since` (seconds) that went through; at most `pages` pages of a hundred. */
 async function readRefunds(store: Store, since: number, pages: number): Promise<{ rows: RefundRow[]; partial: boolean }> {
@@ -1530,6 +1535,7 @@ async function readRefunds(store: Store, since: number, pages: number): Promise<
         cents: typeof row.amount === "number" ? row.amount : 0,
         currency,
         paymentIntent: typeof row.payment_intent === "string" ? row.payment_intent : "",
+        ...(row.status === "pending" ? { pending: true } : {}),
       });
     }
     if (!list.has_more) break;
@@ -1591,7 +1597,8 @@ export async function readSales(store: Store, now = Date.now()): Promise<SalesSt
       const paypal = await readPayPalRefundsWithCoverage(store.statsId, since).catch(() => null);
       if (paypal === null) return null;
       return {
-        rows: [...stripe.rows, ...paypal.rows.map((r) => ({ created: r.at * 1000, cents: r.cents, currency: r.currency, paymentIntent: paypalPaymentId(r.capture) }))],
+        // Only money given back: a refund still pending is not out yet (#4369).
+        rows: [...stripe.rows.filter((r) => !r.pending), ...paypal.rows.map((r) => ({ created: r.at * 1000, cents: r.cents, currency: r.currency, paymentIntent: paypalPaymentId(r.capture) }))],
         partial: stripe.partial || paypal.partial,
       };
     })(),

@@ -18,10 +18,12 @@ const NOW = Date.parse("2026-10-13T12:00:00Z");
 let sessions: unknown[] = [];
 let refunds: unknown[] = [];
 let disputes: unknown[] = [];
+let invoices: unknown[] = [];
 globalThis.fetch = (async (input: string | URL | Request) => {
   const url = new URL(String(input));
   const list = (data: unknown[]) => new Response(JSON.stringify({ object: "list", data, has_more: false }), { status: 200 });
   if (url.pathname.endsWith("/checkout/sessions")) return list(sessions);
+  if (url.pathname.endsWith("/invoices")) return list(url.searchParams.get("status") === "paid" ? invoices : []);
   if (url.pathname.endsWith("/refunds")) return list(refunds);
   if (url.pathname.endsWith("/disputes")) return list(disputes);
   return list([]);
@@ -62,6 +64,20 @@ async function main(): Promise<void> {
   refunds = [];
   disputes = [dispute("pi_payment_link_external", 2000)];
   is("an unmatched $20 lost dispute: the kept total is not certified", await usd(), null);
+
+  // A guard for the fix: a refund of the store's own renewal is the store's.
+  // It lowers the kept total exactly, and does not make it unknown.
+  part("A refund of the store's own renewal");
+  sessions = [];
+  disputes = [];
+  invoices = [{
+    id: "in_renew_1", object: "invoice", status: "paid", billing_reason: "subscription_cycle", amount_paid: 5000, currency: "usd",
+    created: NOW / 1000 - 3600, payment_intent: "pi_renewal", subscription_details: { metadata: { store: "cashflow", product: "club", channel: "newsletter" } },
+  }];
+  refunds = [];
+  is("control: the $50 renewal kept", await usd(), 5000);
+  refunds = [refund("pi_renewal", 1000)];
+  is("a $10 refund of it: $40 kept, as a known value", await usd(), 4000);
 
   done();
 }

@@ -58,8 +58,9 @@ jobs:
     # Measured on 13 November 2026 over merge-queue runs: the javascript-typescript analysis took 31 to 55
     # minutes when it passed, and four runs in 36 hours were stopped at the 60-minute limit with nothing wrong
     # in the code; each stop removed the entry at the front of the merge queue and discarded the 11 to 17
-    # groups built behind it. The limit is a bound on a stuck job, not a check: the same queries run and a
-    # finding still fails the job. scripts/queue_health_report.mjs warns when the p90 passes 75% of this value.
+    # groups built behind it. The limit is a bound on a stuck job, not a check: the same queries run and their
+    # results go to code scanning as before. A finding never failed this job; an analysis or upload error
+    # does, and so does the limit. scripts/queue_health_report.mjs warns when the p90 passes 75% of this value.
     timeout-minutes: 120
     permissions:
       contents: read

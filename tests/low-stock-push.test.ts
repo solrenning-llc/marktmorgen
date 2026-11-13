@@ -32,7 +32,7 @@ async function main(): Promise<void> {
   redis.clear();
   await claimHandle(OWNER, "pushlow", "Push Goods", "");
   const store0 = (await ensureStatsId(OWNER))!;
-  await setStripeAccount(OWNER, "acct_1PushLow01", true);
+  await setStripeAccount(OWNER, "acct_1TestPushLw1", true);
   await setSubscription(OWNER, { customerId: "cus_pushlow", subscriptionId: "sub_pushlow", active: true, period: paidPeriod() });
   const added = await addDevice(store0, OWNER, "owner", { endpoint: "https://fcm.googleapis.com/fcm/send/synthetic", keys: { p256dh: "test", auth: "test" } }, [], "Test", Date.now() - 1000);
   if (!added.ok) throw new Error("synthetic device");

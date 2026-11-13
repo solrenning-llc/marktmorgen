@@ -7,6 +7,7 @@ import { done, is, part } from "./check";
 import { inboundSigned } from "@/lib/inbound-mail";
 import { readBatch } from "@/lib/imports";
 import { adjacentCustomRange, presetCustomRange } from "@/lib/custom-range-dates";
+import { UnknownReply, exactReplies, plainList, replyCount } from "@/lib/redis-exact";
 
 part("Resend: a signature is believed only in its exact base64");
 {
@@ -42,6 +43,22 @@ part("Custom ranges: never a day before the year 0000");
   is("the period before 0000-01-01..0000-01-02 is refused", adjacentCustomRange({ from: "0000-01-01", to: "0000-01-02" }, -1, "0000-03-01"), null);
   is("yesterday of 0000-01-02 still reads", presetCustomRange("yesterday", "0000-01-02"), { from: "0000-01-01", to: "0000-01-01" });
   is("an ordinary period still moves", adjacentCustomRange({ from: "2026-11-01", to: "2026-11-07" }, -1, "2026-11-13"), { from: "2026-10-25", to: "2026-10-31" });
+}
+
+part("Exact Redis replies: a Proxy is refused before any of its traps runs");
+{
+  let ran = 0;
+  const proxy = new Proxy(["a"], { getOwnPropertyDescriptor: (t, k) => ((ran += 1), Reflect.getOwnPropertyDescriptor(t, k)) });
+  is("plainList refuses a Proxy", plainList(proxy), null);
+  let refused = false;
+  try {
+    exactReplies(proxy, 1, "fuzz");
+  } catch (error) {
+    refused = error instanceof UnknownReply;
+  }
+  is("exactReplies refuses a Proxy as unknown", refused, true);
+  is("none of its traps ran", ran, 0);
+  is("a plain list still reads", plainList(["a", 1]), ["a", 1]);
 }
 
 done();

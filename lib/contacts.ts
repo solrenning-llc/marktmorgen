@@ -222,6 +222,20 @@ async function orderWriteCounted(owner: DataStore, before: Contact, next: Contac
   else if (grown < 0) await giveData(owner, [{ slot: CONTACTS_SLOT, bytes: -grown }]);
 }
 
+/**
+ * An order-counted row grown from `was` to `now` bytes: the room's order slot "o" takes what lib/order-data.ts
+ * ORDER_WRITE would have charged for that HSET (the growth, a quarter more, in steps of ORDER_CHARGE_STEP), and
+ * nothing when it did not grow, as ORDER_WRITE never gives back.
+ */
+async function noteOrderGrowth(owner: DataStore, was: number, now: number): Promise<void> {
+  const grown = now - was;
+  if (grown <= 0) return;
+  await noteData(owner, [{ slot: "o", bytes: Math.ceil((grown * 5) / 4 / ORDER_CHARGE_STEP) * ORDER_CHARGE_STEP }]);
+}
+
+/** ORDER_WRITE's STEP: what an order's write is charged in multiples of. */
+const ORDER_CHARGE_STEP = 16;
+
 export const leadsKey = (listId: string) => `nl:store:leads:${listId}`;
 export const agreedKey = (listId: string) => `nl:store:leads:${listId}:agreed`;
 export const unsubKey = (listId: string) => `nl:store:leads:${listId}:unsub`;
@@ -395,17 +409,14 @@ export async function noteProduct(listId: string, rawEmail: string, productId: s
     if (!before) return false;
     if (before.ids.includes(productId)) return mailable(before);
     const next = noted(before);
-    if (before.r !== "c") {
-      // An order's: counted at what the record grew by (lib/order-data.ts).
-      await orderWrite(order, [["HSET", leadsKey(listId), email, JSON.stringify(next)]]);
-      return mailable(before);
-    }
-    // A contact counted in the contacts' slot: written only over the row read, in one step (casWrite), so a label
-    // taken off meanwhile is never put back, and the slot follows what was written (Claude 1 cloud's LEVE on #2576).
-    // A row changed meanwhile is read again.
-    const [written] = await casWrite(leadsKey(listId), [{ email, value: JSON.stringify(next), was: sha1(String(raw)) }]);
+    // Written only over the row read, in one step (casWrite), whatever slot the row is counted in, so a label taken
+    // off or an unsubscribe made meanwhile is never written over (Claude 1 cloud's LEVE and Codex P's MEDIUM on
+    // #2576); a row changed meanwhile is read again. Its slot is counted only for what was written.
+    const value = JSON.stringify(next);
+    const [written] = await casWrite(leadsKey(listId), [{ email, value, was: sha1(String(raw)) }]);
     if (written) {
-      await orderWriteCounted(order, before, next, []);
+      if (before.r === "c") await orderWriteCounted(order, before, next, []);
+      else await noteOrderGrowth(order, Buffer.byteLength(String(raw)), Buffer.byteLength(value));
       return mailable(before);
     }
   }

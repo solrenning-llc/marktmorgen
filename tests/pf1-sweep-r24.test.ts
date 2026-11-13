@@ -188,6 +188,9 @@ test("F4: a list of checkouts of another shape is unknown, never 'not paid'", as
     [{ object: "list", data: "none", has_more: false }, "data as text"],
     [{ object: "list", data: {}, has_more: false }, "data as an object"],
     [{ object: "list", data: [], has_more: true }, "a page cut short"],
+    // #4425: only a boolean has_more: false says the list ended; absent or as text is not known to be whole.
+    [{ object: "list", data: [] }, "has_more absent"],
+    [{ object: "list", data: [], has_more: "false" }, "has_more as text"],
     [{ object: "list", data: [null], has_more: false }, "a null row"],
     [{ object: "list", data: ["cs_test_x"], has_more: false }, "a row as text"],
   ];

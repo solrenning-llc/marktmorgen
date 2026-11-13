@@ -7,3 +7,4 @@ Only Claude 1 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
 | Claude 1 | 391 [CX2] unit 1, the picture of a workflow (boxes and arrows drawn from the job's own routing) | claude1/cx2-flow-diagram | `lib/flow-map.ts` (new), `components/workflow-diagram.tsx` (new), `tests/flow-map.test.ts` (new), `components/workflow-tools.tsx` (WorkflowMap and stepLine only) | 12/11/2026 14h55 |
+| Claude 1 | 391 [CX2] unit 2, a step of the map opens in the editor (stacked on #4114) | claude1/cx2-edit-step | `components/workflow-tools.tsx` (WorkflowMap and mapEditId only), `components/workflow-diagram.tsx`, `tests/workflow-map-edit.test.ts` (new), `components/email-studio.tsx` (the WorkflowMap call, openAtStep and the editor step's id, tabIndex and title id only) | 12/11/2026 16h10 |

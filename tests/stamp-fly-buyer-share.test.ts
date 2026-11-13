@@ -74,6 +74,32 @@ async function main(): Promise<void> {
     answering(null);
   }
 
+  // Claude 2 nuvem I's focal MEDIUM on #3899: with the connection's share out of it, one order's link (240 opens an
+  // hour) could stamp copies until the store's whole window was spent, and every visitor after was refused. What a copy
+  // used counts on its connection's share of the day: once past it, that connection makes no more copies today, while
+  // the store's window stays open to everybody else.
+  part("One connection's copies made on the fly stop at its share of the day; the store stays open to others");
+  {
+    redis.clear();
+    await claimHandle(OWNER, HANDLE, "Fly Share", "");
+    await ensureStatsId(OWNER);
+    await setSubscription(OWNER, { customerId: "cus_flyshare01", subscriptionId: "sub_flyshare01", active: true, tier: "creator", period: paidPeriod() });
+    const fresh = (await storeForEmail(OWNER)) as Store;
+    const hold = flyHoldUnits(20 * MB);
+    const used = 80;
+    buyer();
+    let copies = 0;
+    while (copies < 200 && (await holdPublicRequests(fresh, hold, now, "buyer", { shared: true }))) {
+      await givePublicRequests(fresh, hold - used, now, { shared: true });
+      copies += 1;
+    }
+    is("one connection stops within its share of the day", copies > 0 && copies * used <= share + hold, true);
+    answering(new Request(`https://marktmorgen.com/@${HANDLE}/download`, { headers: { "x-forwarded-for": "198.51.100.23" } }));
+    is("and another visitor is still let in", await takePublicRequest(fresh, "buyer", now), true);
+    is("who can make a copy on the fly too", await holdPublicRequests(fresh, hold, now, "buyer", { shared: true }), true);
+    answering(null);
+  }
+
   part("The download route holds its copies made on the fly from the store's window alone");
   {
     const route = readFileSync("app/api/store/download/route.ts", "utf8");

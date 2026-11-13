@@ -12,7 +12,7 @@
 import { hideHeldProducts } from "@/lib/child-safety";
 import { keepKey } from "@/lib/child-safety-holds";
 import { readListing } from "@/lib/catalog";
-import { addProduct, claimHandle, ensureStatsId, ensureStoreId, setSubscription, storeForEmail, storeRef, type Store } from "@/lib/store";
+import { addProduct, claimHandle, ensureStatsId, ensureStoreId, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
 import { done, is, part } from "./check";
@@ -40,7 +40,7 @@ async function main(): Promise<void> {
   // Each product held and waiting to be taken off, as holdReported leaves it when the hide did not go through.
   for (const id of ids) {
     redis.run(["SET", keepKey(store, id), "1", "EX", 400 * 86_400]);
-    redis.run(["ZADD", QUEUE, queuedAt, JSON.stringify([storeRef(store), tag, id])]);
+    redis.run(["ZADD", QUEUE, queuedAt, JSON.stringify([store.sid, tag, id])]);
   }
   const owner = redis.keys().find((key) => key.startsWith("nl:store:owner:"));
   if (!owner) throw new Error("no owner key");

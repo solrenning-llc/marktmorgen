@@ -10,6 +10,7 @@ import { notFound, redirect } from "next/navigation";
 import { after } from "next/server";
 import { type Store, normaliseHandle, storeForPage } from "@/lib/store";
 import { SESSION_COOKIE } from "@/lib/auth";
+import { contentOpenTo } from "@/lib/child-safety";
 import { seesDrafts } from "@/lib/draft-view";
 import { lookStyle } from "@/lib/store-look";
 import { photoUrl } from "@/lib/photo-limits";
@@ -45,7 +46,10 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const store = decoded.startsWith("@") ? await storeForPage(normaliseHandle(decoded)).catch(() => null) : null;
   const product = (store ? await readListing(store, productId) : null);
   // A draft call's tab names nothing for whoever only knows its id (MM-SA-30): the same as an id that does not exist.
-  if (!store || !product?.call || (product.hidden && !(await seesDrafts(store, (await cookies()).get(SESSION_COOKIE)?.value)))) {
+  const session = (await cookies()).get(SESSION_COOKIE)?.value;
+  // A call held for a child-safety report, or whose mark cannot be read, names nothing to anyone but the store's owner,
+  // even before it is confirmed off the store (Codex T's MEDIUM on #3588): the same as a call that does not exist.
+  if (!store || !product?.call || (product.hidden && !(await seesDrafts(store, session))) || !(await contentOpenTo(store, product.id, session))) {
     return { title: "Book a call — Marktmorgen", robots: { index: false, follow: true } };
   }
   const { w } = speech(store);
@@ -62,6 +66,10 @@ export default async function BookPage({ params, searchParams }: Params) {
   if (!store) notFound();
   const product = await readListing(store, productId);
   if (!product || !isCallProduct(product)) redirect(`/@${store.handle}`);
+  // Held for a child-safety report, or its mark unread: its title, price and times are the owner's only, before any
+  // time is read (Codex T's MEDIUM on #3588; lib/child-safety.ts contentOpenTo). Anyone else goes where an id that does
+  // not exist goes.
+  if (!(await contentOpenTo(store, product.id, (await cookies()).get(SESSION_COOKIE)?.value))) redirect(`/@${store.handle}`);
 
   const query = await searchParams;
   const status = typeof query.status === "string" ? query.status : "";

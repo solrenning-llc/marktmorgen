@@ -19,9 +19,9 @@
  *
  *   nl:csa:held:<store>:<YYYY-MM-DD>   set      products held automatically that day, 2 days
  *   nl:csa:keep:<store>:<product>      "1"      preservation hold, 400 days (unit 2)
- *   nl:csa:hide                        zset     held products whose taking off the store is not confirmed yet, by
- *                                               when each is next tried (hideHeldProducts); KEEP_SECONDS from the
- *                                               last one added
+ *   nl:csa:hide                        zset     held products whose taking off the store is not confirmed yet
+ *                                               ([store id, tag, product id]), by when each is next tried
+ *                                               (hideHeldProducts); KEEP_SECONDS from the last one added
  *
  * Unit 2: the hold also marks the product for KEEP_SECONDS, before it is
  * taken off, and while the mark is there no studio route removes, edits,
@@ -56,7 +56,7 @@ import { redisPipeline } from "@/lib/redis";
 import { repliesFor } from "@/lib/redis-reply";
 import { NIMBUS_FROM, sendEmail } from "@/lib/email";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
-import { type Store, ensureStatsId, setProductHidden, storeForEmail, storeRef } from "@/lib/store";
+import { STORE_ID_PATTERN, type Store, ensureStatsId, ensureStoreId, setProductHidden, storeForId, storeRef } from "@/lib/store";
 import { productIdFromAddress, productIds, readListingExactly } from "@/lib/catalog";
 import { handleIn, type ReportKind } from "@/lib/takedown-rules";
 import { type Listing, productIdFor, readListings } from "@/lib/catalog";
@@ -253,14 +253,18 @@ export async function holdReported(report: { kind: ReportKind; url: string }, st
     }
     // The hold is keyed by the store's list id (lib/child-safety-holds.ts): an old store without one gets it first,
     // so the key never moves to another one later (Claude 3's LEVE 3 on #3471). No list id given is unknown.
-    const keyed = store.statsId ? store : await ensureStatsId(storeRef(store));
-    if (!keyed?.statsId) return "unknown";
+    const tagged = store.statsId ? store : await ensureStatsId(storeRef(store));
+    if (!tagged?.statsId) return "unknown";
+    // The queue below names the store by its id, never by its owner's address (Claude 2 cloud L's MEDIUM on #3588):
+    // an old store without one gets it first. No id given is unknown.
+    const keyed = STORE_ID_PATTERN.test(tagged.sid) ? tagged : await ensureStoreId(storeRef(tagged));
+    if (!keyed?.statsId || !STORE_ID_PATTERN.test(keyed.sid)) return "unknown";
     // Kept before it is taken off: a creator who acts in between can still not remove or change it.
     const kept = repliesFor(await redisPipeline([["SET", keepKey(keyed, product.id), "1", "EX", KEEP_SECONDS]]), 1);
     if (kept?.[0] !== "OK") return "unknown";
     // Waiting to be taken off before it is: should the hide below not go through, the hourly job takes it off
     // (hideHeldProducts). A queue write not confirmed does not stop the hide; the owner's email says what happened.
-    const member = hideMember(store, product.id);
+    const member = hideMember(keyed, product.id);
     await redisPipeline([["ZADD", HIDE_DUE, now, member], ["EXPIRE", HIDE_DUE, KEEP_SECONDS]]).catch(() => console.error("a held product could not be queued to be taken off"));
     const done = await setProductHidden(storeRef(store), product.id, true);
     if (!done.ok) return done.reason === "unknown" ? "unknown" : "failed";
@@ -294,8 +298,11 @@ export const HIDE_BUDGET_MS = 5_000;
 /** How long the step waits for a store's lock another write holds, against the write's own 8 s: a busy store is tried again an hour later. */
 export const HIDE_LOCK_WAIT_MS = 500;
 
-/** One waiting product: the store's ref (lib/store.ts storeRef), the tag its mark is kept under, and the product. */
-const hideMember = (store: Store, productId: string) => JSON.stringify([storeRef(store), storeTag(store), productId]);
+/**
+ * One waiting product: the store's id (never its owner's address, which no erasure of a company key reaches and which
+ * changes when the owner moves: Claude 2 cloud L on #3588), the tag its mark is kept under, and the product.
+ */
+const hideMember = (store: Store, productId: string) => JSON.stringify([store.sid, storeTag(store), productId]);
 
 /**
  * Takes one waiting product off its store, if it still has to be: "hidden" once it is confirmed off (it was, or the
@@ -313,13 +320,17 @@ async function hideOne(member: string, lockWaitMs: number): Promise<"hidden" | "
     console.error("a waiting child-safety hide is not one of ours; let go");
     return "gone";
   }
-  const [ref, tag, productId] = parsed as [string, string, string];
+  const [sid, tag, productId] = parsed as [string, string, string];
+  if (!STORE_ID_PATTERN.test(sid)) {
+    console.error("a waiting child-safety hide is not one of ours; let go");
+    return "gone";
+  }
   // The hold first, read exactly under the tag it was kept under: over is "gone", unknown is "waiting".
   const held = await heldIdsAmong({ statsId: tag, handle: "" }, [productId]).then((ids) => ids.has(productId), () => null);
   if (held === null) return "waiting";
   if (!held) return "gone";
-  const store = await storeForEmail(ref).catch(() => null);
-  // A store that cannot be read now, or under another tag (its record was written again under the same ref), is tried again.
+  const store = await storeForId(sid).catch(() => null);
+  // A store that cannot be read now, or under another tag (its record was written again under the same id), is tried again.
   if (!store || storeTag(store) !== tag) return "waiting";
   const listing = await readListingExactly(store, productId);
   if (listing === "unknown") return "waiting";

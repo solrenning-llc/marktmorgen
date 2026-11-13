@@ -68,6 +68,28 @@ async function main() {
   is("a refund that may have been made is never 'Nothing was refunded'", ["unsure", "error-stop", "busy", "review", "changed", "ending"].every((k) => !REFUND_DONE[k].title.startsWith("Nothing was refunded")), true);
   is("a pending refund is not called refunded", REFUND_DONE.ending.title, "Your refund is on its way");
   is("the days said are the daily job's", REFUND_CHECK_DAYS, GIVE_UP_DAYS);
+  part("#4399: an address alone never says a refund happened, nor hides the review");
+  redis.clear();
+  {
+    const c = await paidShop();
+    who.store = await c.store();
+    who.role = "owner";
+    const plain = await page();
+    is("control: a refund is owed and offered", plain.includes("and end the plan"), true);
+    await redisPipeline([["DEL", reviewKeyOf(who.store.sid)]]);
+    for (const claimed of ["refunded", "ending"]) {
+      const crafted = await page({ done: claimed });
+      is(`?done=${claimed} with no refund made: no success notice`, crafted.includes(REFUND_DONE[claimed].title), false);
+      is(`?done=${claimed} with no refund made: the review and offer remain`, crafted.includes("and end the plan"), true);
+    }
+    // What the refund route leaves for this store when it answers (lib/told-receipt.ts): the page says it then.
+    await redisPipeline([["SET", `nl:told:refund:${who.store.sid}`, "ending", "EX", 600]]);
+    const told = await page({ done: "ending" });
+    is("the route's own answer for this store: the notice is shown and no second offer", [told.includes(REFUND_DONE.ending.title), told.includes("and end the plan")], [true, false]);
+    is("another answer than the one the route gave is not shown", (await page({ done: "refunded" })).includes(REFUND_DONE.refunded.title), false);
+    is("a warning from the address is still said (it confirms nothing)", (await page({ done: "error" })).includes(REFUND_DONE.error.title), true);
+  }
+
   done();
 }
 

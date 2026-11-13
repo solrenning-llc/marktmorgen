@@ -45,7 +45,7 @@ is("the stop it makes has a name, in the page's language, and the browser never 
   renderToStaticMarkup(createElement(LessonText, { text: `${F}py\nx\n${F}`, codeLabel: coursesWords("pt").codeBlock })).includes('aria-label="Código: py"'),
   (["en", "es", "fr", "de", "it", "nl", "pt"] as const).every((l) => coursesWords(l).codeBlock.length > 0),
 ], [true, true, true]);
-is("the lesson page names it in the store's language", readFileSync("app/[handle]/course/[product]/[lesson]/page.tsx", "utf8").includes("<LessonText text={body} codeLabel={w.codeBlock} />"), true);
+is("the lesson page names it in the store's language", readFileSync("app/[handle]/course/[product]/[lesson]/page.tsx", "utf8").includes("<LessonText text={body} codeLabel={w.codeBlock} lang={said.lang.locale} />"), true);
 is("a web address outside code is still a link; inside code, it stays text", [html.includes('href="https://example.com/x"'), renderToStaticMarkup(createElement(LessonText, { text: `${F}\nhttps://example.com/y\n${F}` })).includes("href=")], [true, false]);
 
 done();

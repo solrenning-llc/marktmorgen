@@ -73,8 +73,14 @@ export function sanitizeLessonHtml(source: string): string {
   return out;
 }
 
-/** A complete, self-contained document. All CSS is fixed product code. */
-export function lessonHtmlDocument(source: string): string {
+/** A language tag such as "es-ES"; anything else is never written into the document. */
+const LANGUAGE_TAG = /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/;
+
+/**
+ * A complete, self-contained document. All CSS is fixed product code. `lang` is the store's language, marked on the
+ * document so a screen reader reads the creator's words in it (WCAG 3.1.1); English when none is given.
+ */
+export function lessonHtmlDocument(source: string, lang = "en-US"): string {
   const body = sanitizeLessonHtml(source);
-  return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"><meta name="referrer" content="no-referrer"><meta name="viewport" content="width=device-width"><style>html{color-scheme:light dark}body{box-sizing:border-box;margin:0;padding:16px;font:16px/1.6 system-ui,sans-serif;overflow-wrap:anywhere}h1,h2,h3,h4,h5,h6{line-height:1.25}pre{overflow:auto;padding:12px}a{color:LinkText;text-decoration:underline}</style></head><body>${body}</body></html>`;
+  return `<!doctype html><html lang="${LANGUAGE_TAG.test(lang) ? lang : "en-US"}"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"><meta name="referrer" content="no-referrer"><meta name="viewport" content="width=device-width"><style>html{color-scheme:light dark}body{box-sizing:border-box;margin:0;padding:16px;font:16px/1.6 system-ui,sans-serif;overflow-wrap:anywhere}h1,h2,h3,h4,h5,h6{line-height:1.25}pre{overflow:auto;padding:12px}a{color:LinkText;text-decoration:underline}</style></head><body>${body}</body></html>`;
 }

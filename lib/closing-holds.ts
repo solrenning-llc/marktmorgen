@@ -47,7 +47,7 @@ import { onAccount } from "@/lib/stripe-account";
 import { StripeListUnreadable } from "@/lib/stripe-list";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { signedOf } from "@/lib/redis-count";
-import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { type Store, saleHandles, storeFolder, storeForRefExact, storeRef } from "@/lib/store";
 import { standingOf } from "@/lib/plan-standing";
 import { normaliseEmail } from "@/lib/auth";
@@ -488,19 +488,41 @@ export async function releaseHolds(store: Store, until: number, nowSeconds = Mat
   return out;
 }
 
-/** The members' last payments a store has written down, by subscription. */
+/** One written-down payment, with every field the refunds and the notices read; null for anything else. */
+function paidRowOf(text: string): PaidPeriod | null {
+  let row: unknown;
+  try {
+    row = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  if (!row || typeof row !== "object" || Array.isArray(row)) return null;
+  const r = row as Record<string, unknown>;
+  const number = (v: unknown) => typeof v === "number" && Number.isFinite(v);
+  if (typeof r.inv !== "string" || !number(r.amt) || typeof r.cur !== "string" || !number(r.ps) || !number(r.pe) || typeof r.e !== "string") return null;
+  return row as PaidPeriod;
+}
+
+/**
+ * The members' last payments a store has written down, by subscription, read
+ * exactly (issue #4310, CX-123 rule 24): a reply that is not a list of
+ * subscription/row strings, or a row that does not read with its fields,
+ * throws UnknownReplyError. It is never "no members" or a member left out:
+ * the closing would then write its refunds done and delete this list, the
+ * only record of what each member paid for past the closing day. Its callers
+ * hold the closing and try again the next day.
+ */
 export async function paidPeriods(store: Store): Promise<Map<string, PaidPeriod>> {
   const out = new Map<string, PaidPeriod>();
   if (!isRedisConfigured()) return out;
-  const [raw] = await redisPipeline([["HGETALL", paidKey(await storeFolder(storeRef(store)))]]);
-  const flat = Array.isArray(raw) ? (raw as unknown[]).map(String) : [];
-  for (let i = 0; i + 1 < flat.length; i += 2) {
-    try {
-      const row = JSON.parse(flat[i + 1]) as PaidPeriod;
-      if (SUB_ID.test(flat[i]) && typeof row.amt === "number" && typeof row.inv === "string") out.set(flat[i], row);
-    } catch {
-      // A row that cannot be read is left out, never guessed at.
-    }
+  const what = "a closing's members' payments (HGETALL)";
+  const replies = repliesFor(await redisPipeline([["HGETALL", paidKey(await storeFolder(storeRef(store)))]]), 1);
+  const flat = replies ? stringList(replies[0]) : null;
+  if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError(what);
+  for (let i = 0; i < flat.length; i += 2) {
+    const row = paidRowOf(flat[i + 1]);
+    if (!SUB_ID.test(flat[i]) || !row) throw new UnknownReplyError(what);
+    out.set(flat[i], row);
   }
   return out;
 }

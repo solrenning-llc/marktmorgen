@@ -85,11 +85,11 @@ async function sales() {
   const undated = await noted(order({ created: undefined }));
   is("an undated sale is written at a whole second", Number.isInteger(undated?.at), true);
 
-  part("Products ticked at checkout");
-  is("with no subtotal, a ticked product cannot be weighed: the front share stands", (await noted(order({ amount_subtotal: 0 }, { bump: "addon", bump_cents: "5000", bump_rate: "40" })))?.rate, 20);
+  part("Products checked at checkout");
+  is("with no subtotal, a checked product cannot be weighed: the front share stands", (await noted(order({ amount_subtotal: 0 }, { bump: "addon", bump_cents: "5000", bump_rate: "40" })))?.rate, 20);
   is("with nothing paid, nothing is weighed", (await noted(order({ amount_total: 0, total_details: { amount_tax: 0 } }, { bump: "addon", bump_cents: "5000", bump_rate: "40" })))?.rate, 20);
-  // Two ticks that say more than the whole order: the second only weighs what is left (40%), never more.
-  is("ticked products never weigh more than the whole order", (await noted(order({}, { via_rate: "10", bump: "a1", bump_cents: "6000", bump_rate: "50", bump2: "a2", bump2_cents: "6000", bump2_rate: "30" })))?.rate, 42);
+  // Two checked products that say more than the whole order: the second only weighs what is left (40%), never more.
+  is("checked products never weigh more than the whole order", (await noted(order({}, { via_rate: "10", bump: "a1", bump_cents: "6000", bump_rate: "50", bump2: "a2", bump2_cents: "6000", bump2_rate: "30" })))?.rate, 42);
 
   part("A product added after paying");
   const charge = (over: Record<string, unknown> = {}) => ({ id: `pi_mutcharge${++orders}`, status: "succeeded", amount: 2_000, currency: "usd", created: 1_760_000_500, receipt_email: "buyer@example.com", metadata: { store: "harbor", product: "addon", title: "Add-on", via: AFF, via_rate: "25" }, ...over });

@@ -129,6 +129,14 @@ export class MemoryRedis {
         return to < from ? "" : new TextDecoder().decode(bytes.slice(from, to + 1));
       }
       case "EVAL": {
+        // lib/plan-refund-flow.ts TAKE_REVIEW: the review pass taken only while it was issued for this token.
+        if (key.startsWith("-- marktmorgen:plan-refund-take-review:v1\n") && args[0] === "1" && args.length === 3) {
+          const [, pass, token] = args;
+          const held = this.run(["GET", pass]);
+          if (typeof held !== "string" || !held.startsWith(`${token}:`)) return null;
+          this.run(["DEL", pass]);
+          return held;
+        }
         // lib/request-guard.ts ESSENTIAL_BELOW: one more on an essential counter only while fewer than ARGV[1] were taken.
         if (key.startsWith("-- marktmorgen:essential-below:v1\n") && args[0] === "1" && args.length === 4) {
           const [, counter, below, window] = args;

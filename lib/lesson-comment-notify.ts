@@ -11,8 +11,8 @@
  *     writing to each other never fill an inbox.
  */
 import { alertCreator } from "@/lib/phone-alerts";
-import { claimMark } from "@/lib/claim-mark";
-import { sendEmail } from "@/lib/email";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
+import { sendEmailOutcome } from "@/lib/email";
 import { courseSender, studentEmail } from "@/lib/learn";
 import { CREATOR_AUTHOR, type LessonComment } from "@/lib/lesson-comments-rules";
 import type { Listing, Store } from "@/lib/store";
@@ -55,11 +55,13 @@ export async function tellStudent(input: {
   const to = await studentEmail(courseId, parent.by);
   if (!to) return false;
   // One email a gap: ours only on OK or our own value read back (CX-123 rule 24, L9); anything else sends nothing.
-  if ((await claimMark(`nl:lc:${courseId}:mail:${parent.by}:${parent.lesson}`, MAIL_GAP_SECONDS)) !== "ours") return false;
+  const gap = `nl:lc:${courseId}:mail:${parent.by}:${parent.lesson}`;
+  const mine = claimValue();
+  if ((await claimMark(gap, MAIL_GAP_SECONDS, mine)) !== "ours") return false;
   const link = `${origin}/@${store.handle}/course/${product.id}/${parent.lesson}#c-${reply.id}`;
   // To the student, in the store's language (lib/buyer-words/courses.ts).
   const w = coursesWords(store.language);
-  return sendEmail({ meter: { by: "store", store: store, kind: "email" },
+  const outcome = await sendEmailOutcome({ meter: { by: "store", store: store, kind: "email" },
     from: courseSender(store),
     to,
     subject: w.answeredSubject(store.name).slice(0, 200),
@@ -76,4 +78,8 @@ export async function tellStudent(input: {
       w.sentBy(store.name),
     ].join("\n"),
   });
+  // A certain refusal sent nothing: the hour's mark goes (only while it is still ours), so the next answer can tell
+  // the student. An answer not known keeps it, so nobody is told twice (j-mail-3).
+  if (outcome === "refused") await releaseMark(gap, mine);
+  return outcome === "sent";
 }

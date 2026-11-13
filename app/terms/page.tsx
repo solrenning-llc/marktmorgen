@@ -441,7 +441,7 @@ export default function TermsPage() {
           {allowanceListWords("pro")}; and on {PLAN_TITLES.scale},{" "}
           {allowanceListWords("scale")}. A studio request is any page of your
           studio you open (each counts as {STUDIO_PAGE_UNITS}), any save, and
-          the studio&apos;s own refreshing, and a search in the studio counts as
+          the studio&apos;s own refreshing, and a search in the studio counts as{" "}
           {STUDIO_SEARCH_UNITS}; an API request is one made with
           one of your store&apos;s keys (a contact added or a product given
           counts as {API_WRITE_UNITS}, and a page of sales read counts as{" "}

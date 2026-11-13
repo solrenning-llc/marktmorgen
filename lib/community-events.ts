@@ -722,10 +722,16 @@ export async function rsvp(id: string, event: CommunityEvent, member: string, ro
     await giveData(room, [{ slot: EVENT_SLOT(event.id), bytes: RSVP_BYTES }], now);
     return "already";
   }
-  if (event.cap > 0 && Number(length) > event.cap) {
-    await redisPipeline([["HDEL", rsvpKey(id, event.id), member]]);
-    await giveData(room, [{ slot: EVENT_SLOT(event.id), bytes: RSVP_BYTES }], now);
-    return "full";
+  if (event.cap > 0) {
+    // The length in its exact shape (CX-123 rule 24): an unknown one is never "within the cap". The place is taken
+    // back, its room given back, and the request answered as not done, to try again.
+    const count = countOf(length);
+    if (count === null || count > event.cap) {
+      await redisPipeline([["HDEL", rsvpKey(id, event.id), member]]);
+      await giveData(room, [{ slot: EVENT_SLOT(event.id), bytes: RSVP_BYTES }], now);
+      if (count === null) throw new UnknownReplyError("how many are coming to an event");
+      return "full";
+    }
   }
   return "added";
 }

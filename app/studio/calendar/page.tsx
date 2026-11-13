@@ -6,6 +6,7 @@ import { redirect } from "next/navigation";
 import { ensureStatsId } from "@/lib/store";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
+import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { HostCalendar } from "@/components/host-calendar";
 import { ToastOnLoad } from "@/components/toast";
@@ -101,7 +102,7 @@ export default async function StudioCalendarPage({ searchParams }: Params) {
       />
       <StudioStorePin sid={store.sid}>
         <main id="content" className="container-page pb-20 pt-10 sm:pt-14">
-          <p className="eyebrow">Your calendar</p>
+          <StudioTrail store={store} here="Your calendar" />
           <h1 className="t-h2 mt-3">Your busy times, kept out of your team calls</h1>
           <p className="mt-3 max-w-2xl text-ink-soft">
             {`Signed in as ${email}. When you host a team call, on this store or any other, the times you are busy in your own calendar are not offered, and the bookings you host can be written into your Google Calendar with a Meet link.`}

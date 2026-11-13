@@ -1132,6 +1132,21 @@ export async function storeForRefExact(ref: string): Promise<Store | null> {
   return store;
 }
 
+/**
+ * Whether anything is kept under one ref's record key, read exactly (rule 24): "gone" only when Redis answers nil,
+ * "there" for any text (this store's record, or another's at the same key); any other answer throws UnknownReplyError.
+ * The closing walk reads it before it walks a store, so it never erases one whose record is still there (Codex L,
+ * Codex P and Claude 2 cloud L on #3643).
+ */
+export async function storeRecordAt(ref: string): Promise<"gone" | "there"> {
+  if (!isRedisConfigured()) throw new UnknownReplyError("a store's record (no Redis)");
+  const reply = repliesFor(await redisPipeline([["GET", await ownerKey(ref)]]), 1);
+  if (!reply) throw new UnknownReplyError("a store's record (GET)");
+  if (reply[0] === null) return "gone";
+  if (typeof reply[0] === "string") return "there";
+  throw new UnknownReplyError("a store's record (GET)");
+}
+
 /** One bounded read for the funded restart's final source check.
  * It cannot migrate, save, infer absence from an oversized/partial answer,
  * or turn a current-source observation into permission for another POST. */

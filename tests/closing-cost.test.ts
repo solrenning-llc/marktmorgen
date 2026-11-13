@@ -121,8 +121,13 @@ test("a closing's last steps pay for the record's going under the store's lock, 
   assert.match(close, /\["SREM", account, sid\]/);
   const hosts = (1 + MAX_TEAM) * (2 * 50 + 5);
   // The lock's tries, the GET, the entry's HSET again, the second account's SREM, the fenced delete's script (EVAL, GET,
-  // DEL) and the release's (EVAL, GET, DEL).
-  assert.ok(PREPARE_COMMANDS >= hosts + 100 + STORE_LOCK_TRIES + 1 + 1 + 1 + 3 + 3, `last steps priced at ${PREPARE_COMMANDS} commands`);
+  // DEL) and the release's (EVAL, GET, DEL), and the walk's own read of the record before it starts (one GET per entry,
+  // startableBatch: Codex L, Codex P and Claude 2 cloud L on #3643).
+  assert.ok(PREPARE_COMMANDS >= hosts + 100 + STORE_LOCK_TRIES + 1 + 1 + 1 + 3 + 3 + 1, `last steps priced at ${PREPARE_COMMANDS} commands`);
+  const walkStart = readFileSync(join(process.cwd(), "lib/closed-store-data.ts"), "utf8");
+  const startable = walkStart.slice(walkStart.indexOf("async function startableBatch"), walkStart.indexOf("async function moveBack"));
+  assert.match(startable, /storeRecordAt\(entry\.ref\)/);
+  assert.doesNotMatch(startable, /for \(let tries/);
 });
 
 test("an entry taken out, with another store at the key, costs no more than the record's going it replaces (Revisor 2 on #3643)", () => {

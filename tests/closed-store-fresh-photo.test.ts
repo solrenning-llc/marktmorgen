@@ -351,8 +351,11 @@ async function main(): Promise<void> {
     const first = await erase(T);
     is("no walk starts, and the run is not said done", [first.started, first.finished, first.done], [false, 0, false]);
     is("the record is still there, and its data", [(await storeForEmail(email))?.sid ?? null, redis.run(["GET", `nl:zz:${store.statsId}:data`])], [store.sid, "y"]);
+    // Since Codex L's MEDIUM on #3643 the preparation never takes its entry out after a step that failed (the record may
+    // be gone with its answer lost): it is moved back a walk like any store that could not be prepared, and the walk's
+    // own read of the record (startableBatch) keeps the entry from being walked while the record is there.
     const score = redis.run(["ZSCORE", DUE_KEY, email]);
-    is("it stays in line where it was, never moved back", score !== null && Number(score) < T, true);
+    is("it stays in line, moved back a walk", score !== null && Number(score) >= T + WALK_GAP_MS, true);
     const next = await erase(T + WALK_GAP_MS + 1);
     is("the next run prepares it again and then walks and finishes it", [next.stores, next.finished], [1, 1]);
     is("the record is gone then", await storeForEmail(email), null);

@@ -1967,13 +1967,18 @@ export class MemoryRedis {
         return gone;
       }
       case "ZREMRANGEBYSCORE": {
-        // Inclusive on both ends, as Redis is without "(".
+        // Inclusive on both ends unless the bound starts with "(", as in Redis. A bound that is
+        // not a float is refused before anything is touched, as Redis refuses it ("ERR min or
+        // max is not a float"), so a script sending "undefined" fails here as it would there.
         const z = this.zset(key);
-        const low = args[0] === "-inf" ? -Infinity : Number(args[0]);
-        const high = args[1] === "+inf" ? Infinity : Number(args[1]);
+        const low = scoreBound(args[0]);
+        const high = scoreBound(args[1]);
         let gone = 0;
         for (let i = z.length - 1; i >= 0; i -= 1) {
-          if (z[i].score >= low && z[i].score <= high) { z.splice(i, 1); gone += 1; }
+          const s = z[i].score;
+          const above = low.open ? s > low.value : s >= low.value;
+          const below = high.open ? s < high.value : s <= high.value;
+          if (above && below) { z.splice(i, 1); gone += 1; }
         }
         return gone;
       }
@@ -2590,4 +2595,17 @@ export class MemoryRedis {
 
   /** The shape lib/redis.ts exports: one reply per command, in order. */
   pipeline = async (commands: (string | number)[][]): Promise<unknown[]> => commands.map((one) => this.run(one));
+}
+
+/** A ZREMRANGEBYSCORE bound read as Redis reads it: "-inf", "+inf" or "inf", or a float, each optionally after "(". */
+function scoreBound(raw: unknown): { value: number; open: boolean } {
+  const text = String(raw ?? "");
+  const open = text.startsWith("(");
+  const body = open ? text.slice(1) : text;
+  const lower = body.toLowerCase();
+  if (lower === "-inf") return { value: -Infinity, open };
+  if (lower === "+inf" || lower === "inf") return { value: Infinity, open };
+  const value = body.trim() === body && body !== "" ? Number(body) : NaN;
+  if (!Number.isFinite(value)) throw new Error("ERR min or max is not a float");
+  return { value, open };
 }

@@ -103,7 +103,7 @@ export async function countConfirmedLead(store: { statsId?: string | null; listI
   const listId = store?.listId;
   if (!statsId || !listId || !email || !isRedisConfigured()) return "already";
   const mark = markKey(statsId, email);
-  const [[, notes, score, , cutoff], , [, , noteSeconds]] = noteForErasure(statsId, email, mark);
+  const [[, notes, score], [, , , cutoff], [, , noteSeconds]] = noteForErasure(statsId, email, mark);
   const [, life, field] = confirmedLeadCommand(statsId);
   const [reply] = repliesFor(await redisPipeline([[
     "EVAL", PATH_LEAD_COUNT, 4, String(notes), mark, String(life), suppressedKey(listId),

@@ -15,6 +15,9 @@ export type WelcomeWords = {
   offer: (percent: number, title: string) => string;
   until: (when: string) => string;
   left: string;
+  /** The button that stops the countdown changing, and the one that starts it again (WCAG 2.2.2). */
+  pause: string;
+  resume: string;
   button: (percent: number) => string;
   note: string;
   ended: (when: string) => string;
@@ -32,6 +35,8 @@ const en: WelcomeWords = {
   offer: (percent, title) => `${percent}% off ${title}`,
   until: (when) => `Yours until ${when}.`,
   left: "Ends in",
+  pause: "Pause countdown",
+  resume: "Resume countdown",
   button: (percent) => `Get ${percent}% off`,
   note: "Stripe takes the discount off at checkout, for the address you used here, on the first payment. When the time is up, the offer ends and is not made again.",
   ended: (when) => `Your welcome offer ended on ${when}.`,
@@ -54,6 +59,8 @@ const es: WelcomeWords = {
   offer: (percent, title) => `${percent}\u00a0% de descuento en ${title}`,
   until: (when) => `Es tuya hasta el ${when}.`,
   left: "Termina en",
+  pause: "Pausar la cuenta atrás",
+  resume: "Reanudar la cuenta atrás",
   button: (percent) => `Obtener un ${percent}\u00a0% de descuento`,
   note: "Stripe aplica el descuento en el pago, para la dirección que usaste aquí, en el primer cobro. Cuando se acaba el tiempo, la oferta termina y no se vuelve a hacer.",
   ended: (when) => `Tu oferta de bienvenida terminó el ${when}.`,
@@ -76,6 +83,8 @@ const fr: WelcomeWords = {
   offer: (percent, title) => `${percent}\u00a0% de réduction sur ${title}`,
   until: (when) => `À vous jusqu’au ${when}.`,
   left: "Se termine dans",
+  pause: "Mettre le compte à rebours en pause",
+  resume: "Reprendre le compte à rebours",
   button: (percent) => `Profiter de ${percent}\u00a0% de réduction`,
   note: "Stripe déduit la réduction au paiement, pour l’adresse utilisée ici, sur le premier paiement. Une fois le temps écoulé, l’offre prend fin et n’est pas refaite.",
   ended: (when) => `Votre offre de bienvenue a pris fin le ${when}.`,
@@ -98,6 +107,8 @@ const de: WelcomeWords = {
   offer: (percent, title) => `${percent}\u00a0% Rabatt auf ${title}`,
   until: (when) => `Für Sie bis ${when}.`,
   left: "Endet in",
+  pause: "Countdown anhalten",
+  resume: "Countdown fortsetzen",
   button: (percent) => `${percent}\u00a0% Rabatt sichern`,
   note: "Stripe zieht den Rabatt an der Kasse ab, für die hier verwendete Adresse, bei der ersten Zahlung. Wenn die Zeit um ist, endet das Angebot und wird nicht erneut gemacht.",
   ended: (when) => `Ihr Willkommensangebot endete am ${when}.`,
@@ -120,6 +131,8 @@ const it: WelcomeWords = {
   offer: (percent, title) => `${percent}% di sconto su ${title}`,
   until: (when) => `È tua fino al ${when}.`,
   left: "Termina tra",
+  pause: "Metti in pausa il conto alla rovescia",
+  resume: "Riprendi il conto alla rovescia",
   button: (percent) => `Ottieni il ${percent}% di sconto`,
   note: "Stripe applica lo sconto al pagamento, per l’indirizzo usato qui, sul primo pagamento. Quando il tempo finisce, l’offerta termina e non viene ripetuta.",
   ended: (when) => `La tua offerta di benvenuto è terminata il ${when}.`,
@@ -142,6 +155,8 @@ const nl: WelcomeWords = {
   offer: (percent, title) => `${percent}% korting op ${title}`,
   until: (when) => `Voor jou tot ${when}.`,
   left: "Eindigt over",
+  pause: "Aftellen pauzeren",
+  resume: "Aftellen hervatten",
   button: (percent) => `Neem ${percent}% korting`,
   note: "Stripe trekt de korting af bij het afrekenen, voor het adres dat je hier gebruikte, op de eerste betaling. Als de tijd om is, eindigt het aanbod en komt het niet terug.",
   ended: (when) => `Je welkomstaanbod eindigde op ${when}.`,
@@ -164,6 +179,8 @@ const pt: WelcomeWords = {
   offer: (percent, title) => `${percent}% de desconto em ${title}`,
   until: (when) => `É sua até ${when}.`,
   left: "Termina em",
+  pause: "Pausar a contagem decrescente",
+  resume: "Retomar a contagem decrescente",
   button: (percent) => `Obter ${percent}% de desconto`,
   note: "A Stripe aplica o desconto no pagamento, para o endereço que usou aqui, no primeiro pagamento. Quando o tempo acaba, a oferta termina e não volta a ser feita.",
   ended: (when) => `A sua oferta de boas-vindas terminou a ${when}.`,

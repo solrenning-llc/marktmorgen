@@ -84,11 +84,11 @@ export function AgentProposals({ waiting, history }: { waiting: ProposalRow[]; h
                 <div className="mt-3 grid gap-3 md:grid-cols-2">
                   <div>
                     <p className="field-label">Now</p>
-                    <div className="mt-1 max-h-72 overflow-auto whitespace-pre-wrap rounded-lg bg-sand/60 p-3 text-sm text-ink" tabIndex={0} aria-label="What is there now">{p.before || "(empty)"}</div>
+                    <div className="mt-1 max-h-72 overflow-auto whitespace-pre-wrap rounded-lg bg-sand/60 p-3 text-sm text-ink" tabIndex={0} role="group" aria-label="What is there now" aria-describedby={`proposal-${p.id}`}>{p.before || "(empty)"}</div>
                   </div>
                   <div>
                     <p className="field-label">Would become</p>
-                    <div className="mt-1 max-h-72 overflow-auto whitespace-pre-wrap rounded-lg bg-lilac/40 p-3 text-sm text-ink" tabIndex={0} aria-label="What it would become">{p.after || "(empty)"}</div>
+                    <div className="mt-1 max-h-72 overflow-auto whitespace-pre-wrap rounded-lg bg-lilac/40 p-3 text-sm text-ink" tabIndex={0} role="group" aria-label="What it would become" aria-describedby={`proposal-${p.id}`}>{p.after || "(empty)"}</div>
                   </div>
                 </div>
                 <div className="mt-3 flex flex-wrap gap-2">

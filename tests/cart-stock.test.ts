@@ -308,7 +308,9 @@ async function main(): Promise<void> {
   const nextTry = firstTry.ok ? firstTry : await withCartStockHolds(costly, refusedCart, async () => ({ id: "cs_test_cartstockcost0004" }));
   onGet = null;
   is("Stripe is never asked while a lock is held", underLock, 0);
-  is("the holds that ran out are asked about every product at once, at most MAX_CHECKS each", [mostInFlight, asked <= refusedCart.length * MAX_LAPSED], [refusedCart.length, true]);
+  // Each product's lapsed holds side by side too (Claude 3's performance audit, 13 November 2026,
+  // tests/stock-lapsed-checks-side-by-side.test.ts): the click waits on one CHECK_MS, not MAX_CHECKS in a row.
+  is("the holds that ran out are asked about all at once, every product and every hold, at most MAX_CHECKS each", [mostInFlight, asked <= refusedCart.length * MAX_LAPSED], [refusedCart.length * MAX_LAPSED, true]);
   is("so the stock work waits on Stripe at most its declared time", MAX_LAPSED * 2_000 <= CART_STOCK_STRIPE_WAIT_MS, true);
   is("and a cart refused for them costs no more, and opens on its next try", [refusedCost + refusedCart.length * (tries - 1) <= CART_STOCK_COMMANDS_MOST, nextTry.ok], [true, true]);
   // Claude 4's review of #1732 (6 November 2026): such a cart is never told "Sold out". One of four is told to press again,

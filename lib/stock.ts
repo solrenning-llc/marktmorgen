@@ -110,6 +110,7 @@ async function countStock(store: Store, product: Listing, now: number, ask: bool
   // counted here so a refusal is never decided on them (stockLeftKnown).
   let unknown = 0;
   const writes: (string | number)[][] = [];
+  const asking: string[] = [];
   for (const [session, entry] of entries) {
     if (entry.paid || entry.until > now) {
       used += 1;
@@ -130,23 +131,37 @@ async function countStock(store: Store, product: Listing, now: number, ask: bool
       continue;
     }
     checks += 1;
-    try {
-      const found = await onAccount("GET", store.stripeAccountId, `/checkout/sessions/${encodeURIComponent(session)}`, undefined, undefined, undefined, CHECK_MS);
-      if (isSettled(found)) {
-        writes.push(["HSET", stockKey(store.statsId, product.id), session, JSON.stringify({ until: 0, paid: true })]);
-        used += 1;
-      } else if (found.status === "expired") {
-        writes.push(["HDEL", stockKey(store.statsId, product.id), session]);
-      } else {
-        // An unknown or completed-but-unsettled response is not proof that
-        // this unit can be sold again. A checkout still open or completed is a
-        // known holder of the unit; any other answer is unknown.
-        used += 1;
-        if (found.status !== "open" && found.status !== "complete") unknown += 1;
-      }
-    } catch {
+    asking.push(session);
+  }
+  // Asked side by side (Claude 3's performance audit, 13 November 2026): a page
+  // or a click waits on one CHECK_MS for all of them, never MAX_CHECKS of them
+  // in a row. The same holds are asked about and counted the same way.
+  const { stripeAccountId } = store;
+  const answers = stripeAccountId
+    ? await Promise.all(
+        asking.map((session) =>
+          onAccount("GET", stripeAccountId, `/checkout/sessions/${encodeURIComponent(session)}`, undefined, undefined, undefined, CHECK_MS).then(
+            (found) => ({ session, found }),
+            () => ({ session, found: null }),
+          ),
+        ),
+      )
+    : [];
+  for (const { session, found } of answers) {
+    if (found === null) {
       used += 1;
       unknown += 1;
+    } else if (isSettled(found)) {
+      writes.push(["HSET", stockKey(store.statsId, product.id), session, JSON.stringify({ until: 0, paid: true })]);
+      used += 1;
+    } else if (found.status === "expired") {
+      writes.push(["HDEL", stockKey(store.statsId, product.id), session]);
+    } else {
+      // An unknown or completed-but-unsettled response is not proof that
+      // this unit can be sold again. A checkout still open or completed is a
+      // known holder of the unit; any other answer is unknown.
+      used += 1;
+      if (found.status !== "open" && found.status !== "complete") unknown += 1;
     }
   }
   if (writes.length) await redisPipeline(writes).catch(() => {});

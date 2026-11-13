@@ -1615,10 +1615,12 @@ export async function startedFromObservedSubscription(store:Store,subscription:R
  const items=subscription.items as {data?:{quantity?:unknown;price?:Record<string,unknown>}[]}|undefined;
  const price=items?.data?.[0]?.price;
  const recurring=price?.recurring as {interval?:unknown;interval_count?:unknown}|undefined;
- if(items?.data?.length!==1||items.data[0].quantity!==1||price?.currency!=="usd"||recurring?.interval!==state.cycle||recurring?.interval_count!==1||state.amountCents!==PUBLISHED_PLAN_PRICES[state.tier][state.cycle])return null;
+ if(items?.data?.length!==1||items.data[0].quantity!==1||price?.currency!=="usd"||recurring?.interval!==state.cycle||recurring?.interval_count!==1)return null;
  const began=state.trialing?subscription.trial_start:periodStart(subscription);
  const until=state.trialing?subscription.trial_end:periodEnd(subscription,false);
- if(!(await activateCheckoutContract({
+ // A checkout is funded only at today's published price; a later renewal is
+ // that subscription's own plan on whichever list planOf reads it from.
+ if(!(state.amountCents===PUBLISHED_PLAN_PRICES[state.tier][state.cycle]&&await activateCheckoutContract({
   statsId:store.statsId??"",grantId:meta.funding_grant,reviewId:meta.funding_review,
   subscriptionId:started.subscriptionId,tier:state.tier,cycle:state.cycle,createdSeconds:subscription.created as number,
   trialing:state.trialing,periodStartSeconds:began as number,periodEndSeconds:until as number,
@@ -1628,15 +1630,25 @@ export async function startedFromObservedSubscription(store:Store,subscription:R
 
 const INVOICE_ID=/^in_[A-Za-z0-9]{6,64}$/;
 /**
+ * Whether a renewing subscription's price is one planOf reads as its plan: on
+ * today's list or on a list published before (LEGACY_PLAN_PRICES), and never
+ * above today's published price, whose refund principal the renewal grant
+ * reserves. A price on no list is unknown, and the renewal is not read as paid.
+ */
+function renewalPlanPrice(tier:Tier,cycle:Cycle,amountCents:number):boolean{
+ return Number.isSafeInteger(amountCents)&&amountCents>0&&amountCents<=PUBLISHED_PLAN_PRICES[tier][cycle]&&
+  [PLAN_PRICES,PRICES_WITHOUT_COMMISSION,PUBLISHED_PLAN_PRICES,...LEGACY_PLAN_PRICES].some(list=>list[tier][cycle]===amountCents);
+}
+/**
  * Whether Stripe says the renewal now running was paid: the subscription's
  * latest invoice, read by its id, is this subscription's paid renewal
- * (`subscription_cycle`) of exactly this period, at the published price of
- * its plan, in dollars, with nothing left due and not marked paid outside
+ * (`subscription_cycle`) of exactly this period, at the subscription's own
+ * plan price (renewalPlanPrice), in dollars, with nothing left due and not marked paid outside
  * Stripe. Stripe moves a subscription into its next period about an hour
  * before it charges the renewal (a draft invoice), so an active subscription
  * alone never proves it. Anything else, or a read that fails, is not paid.
  */
-async function renewalInvoicePaid(subscription:Record<string,unknown>,tier:Tier,cycle:Cycle,start:number,end:number):Promise<boolean>{
+async function renewalInvoicePaid(subscription:Record<string,unknown>,amountCents:number,start:number,end:number):Promise<boolean>{
  try{
   const latest=ownDataField(subscription,'latest_invoice');
   const id=typeof latest==='string'?latest:plainRecord(latest)?ownDataField(latest,'id'):undefined;
@@ -1644,7 +1656,7 @@ async function renewalInvoicePaid(subscription:Record<string,unknown>,tier:Tier,
   const invoice:unknown=await onPlatform('GET',`/invoices/${encodeURIComponent(id)}`);
   if(!plainRecord(invoice)||ownDataField(invoice,'id')!==id||ownDataField(invoice,'status')!=='paid'||ownDataField(invoice,'billing_reason')!=='subscription_cycle'||ownDataField(invoice,'currency')!=='usd')return false;
   const paidAmount=ownDataField(invoice,'amount_paid'),outOfBand=ownDataField(invoice,'paid_out_of_band');
-  if(ownDataField(invoice,'subtotal')!==PUBLISHED_PLAN_PRICES[tier][cycle]||ownDataField(invoice,'amount_remaining')!==0||typeof paidAmount!=='number'||!Number.isSafeInteger(paidAmount)||paidAmount<0||(outOfBand!==undefined&&outOfBand!==false))return false;
+  if(ownDataField(invoice,'subtotal')!==amountCents||ownDataField(invoice,'amount_remaining')!==0||typeof paidAmount!=='number'||!Number.isSafeInteger(paidAmount)||paidAmount<0||(outOfBand!==undefined&&outOfBand!==false))return false;
   // Older API versions name the subscription on the invoice, newer ones under parent; every name given must be this one.
   const parent=ownDataField(invoice,'parent'),details=plainRecord(parent)?ownDataField(parent,'subscription_details'):undefined;
   const named=[ownDataField(invoice,'subscription'),plainRecord(details)?ownDataField(details,'subscription'):undefined].filter(value=>value!==undefined&&value!==null);
@@ -1675,9 +1687,12 @@ async function activateObservedRenewal(store:Store,subscription:Record<string,un
  if(typeof statsId!=='string'||typeof subscription.id!=='string'||!SUBSCRIPTION_PATTERN.test(subscription.id)||typeof created!=='number'||!Number.isSafeInteger(created)||typeof reviewId!=='string'||planDisputed(store))return false;
  const items=subscription.items as {data?:{quantity?:unknown;price?:Record<string,unknown>}[]}|undefined;
  const price=items?.data?.[0]?.price,recurring=price?.recurring as {interval?:unknown;interval_count?:unknown}|undefined;
- if(items?.data?.length!==1||items.data[0].quantity!==1||price?.currency!=='usd'||recurring?.interval!==state.cycle||recurring?.interval_count!==1||state.amountCents!==PUBLISHED_PLAN_PRICES[state.tier][state.cycle])return false;
+ if(items?.data?.length!==1||items.data[0].quantity!==1||price?.currency!=='usd'||recurring?.interval!==state.cycle||recurring?.interval_count!==1||!renewalPlanPrice(state.tier,state.cycle,state.amountCents))return false;
  const {start,end}=state.period,grantId=renewalContractNonce(statsId,subscription.id,start);
- if(grantId===null||!(await renewalInvoicePaid(subscription,state.tier,state.cycle,start,end)))return false;
+ if(grantId===null||!(await renewalInvoicePaid(subscription,state.amountCents,start,end)))return false;
+ // The first paid period after a trial also gets its own grant, although the
+ // checkout grant already covers a trial and one paid term: reserved twice,
+ // never too little. Reusing the checkout grant is for the commercial review.
  // A refusal here may only mean this very renewal is reserved already; the activation decides.
  await reserveRenewalContractFunding(statsId,subscription.id,state.tier,state.cycle,start);
  return activateRenewalContract({statsId,grantId,reviewId,subscriptionId:subscription.id,tier:state.tier,cycle:state.cycle,createdSeconds:created,trialing:false,periodStartSeconds:start,periodEndSeconds:end});

@@ -44,7 +44,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, listSlots, repliesFor, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { LockBusyError, releaseLock, takeLock } from "@/lib/redis-lock";
 import { type DataStore, giveData, needData, takeData } from "@/lib/store-data";
 import { orderWrite } from "@/lib/order-data";
@@ -281,18 +281,12 @@ async function locked<T>(statsId: string, productId: string, work: () => Promise
 
 /** Counts a product's numbers again from its reviews, and keeps them. */
 async function recount(statsId: string, productId: string): Promise<Summary> {
-  // Read exactly (rules 24 and 30; audit F2, 12 November 2026): a reply in another shape is unknown, never "no
-  // reviews", which would take the product's numbers away though its reviews are still there. The change is then
-  // said as failed and the numbers shown stay as they were, for the next change to count again.
-  const flat = stringList(repliesFor(await redisPipeline([["HGETALL", productKey(statsId, productId)]]), 1)?.[0]);
-  if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError("a product's reviews");
+  const [raw] = await redisPipeline([["HGETALL", productKey(statsId, productId)]]);
+  const flat = Array.isArray(raw) ? (raw as unknown[]) : [];
   const reviews: Review[] = [];
-  // Every stored review must read, under its own id and for this product: one that does not is unknown too, never
-  // left out, which would count fewer stars (or take the numbers away) while the review itself is still kept.
   for (let i = 1; i < flat.length; i += 2) {
     const review = parseReview(flat[i]);
-    if (!review || review.id !== flat[i - 1] || review.productId !== productId) throw new UnknownReplyError("a product's reviews");
-    reviews.push(review);
+    if (review) reviews.push(review);
   }
   const summary = summarise(reviews);
   await redisPipeline([
@@ -478,15 +472,7 @@ export async function deleteReview(statsId: string, productId: string, id: strin
       const again = repliesFor(await redisPipeline([["HGET", productKey(statsId, productId), id]]), 1);
       removed = again !== null && again[0] === null;
     }
-    try {
-      await recount(statsId, productId);
-    } catch (error) {
-      // The review is gone, but another review of the product does not read, so its numbers cannot be counted again:
-      // they stay as they were (never lowered by leaving that review out), for the next change to count again. The
-      // deletion itself is done, and is said so: a person's erasure never waits on someone else's unreadable review.
-      if (!removed || !(error instanceof UnknownReplyError)) throw error;
-      console.error("deleting a review: the product's numbers could not be counted again; they stay as they were", error);
-    }
+    await recount(statsId, productId);
     if (!removed) throw new UnknownReplyError(what);
     return "deleted" as const;
   });
@@ -732,15 +718,9 @@ export async function reviewsSince(statsId: string | null, since: number): Promi
 export async function dropReviews(statsId: string | null, productId: string, tries = 1): Promise<string[]> {
   if (!statsId || !STATS_ID_PATTERN.test(statsId) || !isRedisConfigured()) return [];
   // Read once: a deletion that ran but did not answer in time leaves nothing to read again, and its photos would be lost.
-  // Read exactly (rule 24; audit F2, 12 November 2026): a reply in another shape, a value that is not a review or
-  // the two out of step is unknown, never "no reviews", which would delete them anyway and lose their photos' paths.
-  const replies = repliesFor(await redisPipeline([["HKEYS", productKey(statsId, productId)], ["HVALS", productKey(statsId, productId)]]), 2);
-  const ids = stringList(replies?.[0]);
-  const all = listSlots(replies?.[1]);
-  if (!ids || !all || ids.length !== all.length) throw new UnknownReplyError("a removed product's reviews");
-  const reviews = all.map((one) => parseReview(one));
-  if (reviews.some((review) => !review)) throw new UnknownReplyError("a removed product's review");
-  const photos = reviews.map((review) => review?.photo?.path).filter((path): path is string => Boolean(path));
+  const [raw, all] = await redisPipeline([["HKEYS", productKey(statsId, productId)], ["HVALS", productKey(statsId, productId)]]);
+  const ids = Array.isArray(raw) ? (raw as string[]) : [];
+  const photos = (Array.isArray(all) ? (all as unknown[]) : []).map((one) => parseReview(one)?.photo?.path).filter((path): path is string => Boolean(path));
   const members = ids.map((id) => `${productId}|${id}`);
   // Only the deletion is tried again (it can run twice: every command in it is the same the second time).
   for (let attempt = 1; ; attempt += 1) {

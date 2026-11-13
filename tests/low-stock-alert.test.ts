@@ -69,8 +69,11 @@ async function main(): Promise<void> {
   part("Stopped with the numbers emails: no email");
   await setWeeklyOff(store.handle, true);
   await tellLowStock(store, product, 20, now + 2 * DAY);
-  is("crossed, with the emails stopped", await tellLowStock(store, product, 4, now + 2 * DAY), "told");
+  // No phone answered and the emails are stopped: nobody was told, so never "told" (cloud J's LOW on #3725); the
+  // crossing stays spent, since the stop is the creator's own choice.
+  is("crossed, with the emails stopped and no phone: not said as told", await tellLowStock(store, product, 4, now + 2 * DAY), "no");
   is("no email", emails.length, 2);
+  is("and the crossing is spent: not again the same day", await tellLowStock(store, product, 4, now + 2 * DAY), "no");
   await setWeeklyOff(store.handle, false);
 
   part("Unknown never sends");

@@ -393,9 +393,9 @@ export async function sendReviewRequests(
 
   for (const { store, ready } of groups.values()) {
     // Undone when nothing was sent: the first's mark goes, the reminder goes back on the list.
-    const unclaim = async (at: number | null) => {
-      const firsts = ready.filter((item) => item.stage === "first");
-      const agains = ready.filter((item) => item.stage === "again");
+    const unclaim = async (items: typeof ready, at: number | null) => {
+      const firsts = items.filter((item) => item.stage === "first");
+      const agains = items.filter((item) => item.stage === "again");
       // Only this run's own first marks are let go (releaseMark), never one another run holds now.
       for (const item of firsts) if (item.claim) await releaseMark(sentKey(item.entry.reference), item.claim);
       if (at !== null && agains.length) await redisPipeline(agains.map((item) => ["ZADD", ASK_DUE_KEY, at, item.member]));
@@ -404,26 +404,37 @@ export async function sendReviewRequests(
     };
     const reserved = await reserve(store, ready.length);
     if (reserved !== "ok") {
-      await unclaim(nowSeconds + RETRY_SECONDS.plan);
+      await unclaim(ready, nowSeconds + RETRY_SECONDS.plan);
       continue;
     }
-    const outcome = await sendBatch(
-      ready.map((item) => item.message),
-      `review-ask:${sha(ready.map((item) => item.entry.reference).join(","))}`, { by: "monthly" },
-    );
-    if (outcome !== "sent") {
-      await release(store, ready.length);
-      if (outcome === "refused") {
-        await unclaim(null);
-        for (const item of ready) await drop(item.member);
-      } else {
-        await unclaim(nowSeconds + RETRY_SECONDS.sender);
+    // One email per order, under that order's own key (j-mail-2): a retry after an answer that was lost (the
+    // provider may have taken it) goes under the same key whatever other orders come due meanwhile, so whoever
+    // the provider already took is not written to twice (lib/email.ts sendBatch, lib/ses.ts notYetTaken). The key
+    // was the hash of the whole run's batch, which another order of the store changed.
+    const sent: typeof ready = [];
+    for (let i = 0; i < ready.length; i++) {
+      const item = ready[i];
+      const outcome = await sendBatch([item.message], `review-ask:${item.entry.reference}:${item.stage}`, { by: "monthly" });
+      if (outcome === "sent") {
+        sent.push(item);
+        continue;
       }
-      continue;
+      // Not sent (or not known): this one and every one not tried yet are given back and wait, as the whole
+      // batch did before; a refusal drops them all, as before.
+      const rest = ready.slice(i);
+      await release(store, rest.length);
+      if (outcome === "refused") {
+        await unclaim(rest, null);
+        for (const left of rest) await drop(left.member);
+      } else {
+        await unclaim(rest, nowSeconds + RETRY_SECONDS.sender);
+      }
+      break;
     }
+    if (!sent.length) continue;
     // After the first, the order waits on the list for its one reminder, when the creator chose one.
-    await redisPipeline(afterSent(ready.map((item) => ({ reference: item.entry.reference, member: item.member, paidAt: item.entry.paidAt, stage: item.stage })), store.reviewAsk, nowSeconds));
-    counts.sent += ready.length;
+    await redisPipeline(afterSent(sent.map((item) => ({ reference: item.entry.reference, member: item.member, paidAt: item.entry.paidAt, stage: item.stage })), store.reviewAsk, nowSeconds));
+    counts.sent += sent.length;
   }
   return counts;
 }

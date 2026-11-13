@@ -32,6 +32,9 @@ const SAFE_ID = /^[A-Za-z0-9_-]{1,64}$/;
 /** Whether a product can go in a cart. Its checkout questions and whether it is coming soon are checked where it is paid for. */
 export function cartable(product: Listing): boolean {
   if (product.priceCents <= 0 || product.hidden) return false;
+  // A product that asks the buyer something at checkout is bought from its own page: the cart's checkout asks nothing
+  // and refuses it (#4350). A listing says so in `asks`; a product read in full, in its fields.
+  if (product.asks === true || ("fields" in product && Array.isArray((product as { fields?: unknown[] }).fields) && (product as { fields: unknown[] }).fields.length > 0)) return false;
   if (product.recurring || product.call || product.callPackage || product.podcast) return false;
   // A limited one goes in too (513 [PF1], unit 3): its checkout holds one of its units (lib/stock.ts, withCartStockHolds).
   if (product.options.length > 0 || product.pwyw) return false;

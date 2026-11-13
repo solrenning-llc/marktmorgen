@@ -192,6 +192,12 @@ export type Product = {
   /** Questions asked on Stripe's checkout, answered before paying. */
   fields: CheckoutField[];
   /**
+   * Whether it asks the buyer something at checkout (fields not empty), kept on the listing, which has no fields: a
+   * product that asks is bought from its own page, never through the cart, whose checkout asks nothing (#4350,
+   * lib/cart-rules.ts cartable). Read from the fields whenever they are there; absent on a listing written before.
+   */
+  asks?: boolean;
+  /**
    * The buyer chooses the price, from the product's own price up. Null is the
    * ordinary case: the price is the price.
    */
@@ -370,6 +376,7 @@ export function parseProduct(entry: unknown): Product | null {
   // Only an absent or explicitly unlimited stock field may read as unlimited.
   // Refuse malformed saved limits without rewriting the creator record.
   if (value.stock !== undefined && value.stock !== null && stock === null) return null;
+  const fields = parseFields(value.fields);
   const shipping = parseShipping(value.shipping);
   // An unreadable physical record must not become a digital product or free shipping.
   // Leave the stored creator record intact and refuse to offer this product.
@@ -398,7 +405,9 @@ export function parseProduct(entry: unknown): Product | null {
     callPackage: parseCallPackage(value.callPackage),
     image: parseProductImage(value.image),
     display: parseDisplay(value.display),
-    fields: parseFields(value.fields),
+    fields,
+    // A listing has no fields: what it says of them is kept (#4350); a product read in full says it from its fields.
+    ...(("fields" in value ? fields.length > 0 : (value as { asks?: unknown }).asks === true) ? { asks: true } : {}),
     pwyw: parsePwyw(value.pwyw),
     about: value.about === true,
     // Products written before keys and stamping existed have neither.
@@ -462,12 +471,18 @@ export function listingOf(product: Listing): Listing {
     note: product.note ?? false,
     shipping: product.shipping ?? null,
     hidden: product.hidden,
+    // Whether it asks something at checkout (#4350): from its fields when this is the product in full, else as listed.
+    ...(("fields" in product && Array.isArray((product as Partial<Product>).fields) ? (product as Product).fields.length > 0 : product.asks === true) ? { asks: true } : {}),
   };
 }
 
 function parseListing(entry: unknown): Listing | null {
   const product = parseProduct(entry);
-  return product ? listingOf(product) : null;
+  if (!product) return null;
+  // A listing record has no fields, so whether it asks something at checkout is what the record says (#4350), never
+  // the empty fields parseProduct fills in.
+  const { asks: _derived, ...listing } = listingOf(product);
+  return entry && typeof entry === "object" && (entry as { asks?: unknown }).asks === true ? { ...listing, asks: true } : listing;
 }
 
 /** The kind bits of a product. */

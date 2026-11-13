@@ -241,7 +241,7 @@ export function LessonComments({
               ) : null}
               {comment.hidden ? null : (
               <details className="cm-reply ml-[3.25rem]">
-                <summary className="st-footer-link inline-flex text-sm font-semibold">{w.answer}</summary>
+                <summary className="st-footer-link text-sm font-semibold">{w.answer}</summary>
                 <form action="/api/store/course/comment" method="post" className="mt-2 space-y-3">
                   <Fields where={hidden} action="post" />
                   <input type="hidden" name="parent" value={comment.id} />

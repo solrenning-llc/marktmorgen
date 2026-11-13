@@ -125,7 +125,7 @@ export default async function MovePage({ params, searchParams }: Params) {
             </form>
           ) : product && selling && !priceGone ? (
             <p className="mt-6 text-center text-sm">
-              <Link href={productPath(store, product)} className="st-footer-link font-semibold">
+              <Link href={productPath(store, product)} className="st-footer-link inline-flex min-h-11 items-center font-semibold">
                 {product.title}
               </Link>
             </p>

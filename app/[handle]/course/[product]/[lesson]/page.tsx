@@ -189,7 +189,7 @@ export default async function LessonPage({ params, searchParams }: Params) {
       <main id="content" className="relative mx-auto max-w-5xl px-4 py-8 sm:py-12">
         {lastPerson && lastPath ? <RememberLastLesson person={lastPerson} path={lastPath} courseId={course.id} lesson={lesson.title} course={product.title} store={store.name} /> : null}
         <p className="text-sm">
-          <Link href={base} className="st-footer-link font-semibold">{product.title}</Link>
+          <Link href={base} className="st-footer-link inline-flex min-h-11 items-center font-semibold">{product.title}</Link>
           <span className="st-muted">{w.crumb(moduleNumber, unit.title)}</span>
         </p>
 
@@ -395,7 +395,7 @@ export default async function LessonPage({ params, searchParams }: Params) {
                     <>
                       <span className="text-sm font-semibold" style={{ color: "var(--st-text)" }}>{w.doneMark}</span>
                       <input type="hidden" name="done" value="0" />
-                      <button type="submit" className="st-footer-link text-sm font-semibold">{w.markNotDone}</button>
+                      <button type="submit" className="st-footer-link inline-flex min-h-11 items-center text-sm font-semibold">{w.markNotDone}</button>
                     </>
                   ) : (
                     <>

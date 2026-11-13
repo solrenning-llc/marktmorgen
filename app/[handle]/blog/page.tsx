@@ -106,14 +106,14 @@ export default async function BlogPage({ params, searchParams }: Params) {
         {pages > 1 ? (
           <nav aria-label={w.blogAll} className="mt-8 flex items-center justify-between gap-3 text-sm font-semibold">
             {page > 1 ? (
-              <Link href={page === 2 ? base : `${base}?page=${page - 1}`} className="st-footer-link">
+              <Link href={page === 2 ? base : `${base}?page=${page - 1}`} className="st-footer-link inline-flex min-h-11 items-center">
                 {w.blogNewer}
               </Link>
             ) : (
               <span />
             )}
             {page < pages ? (
-              <Link href={`${base}?page=${page + 1}`} className="st-footer-link">
+              <Link href={`${base}?page=${page + 1}`} className="st-footer-link inline-flex min-h-11 items-center">
                 {w.blogOlder}
               </Link>
             ) : null}

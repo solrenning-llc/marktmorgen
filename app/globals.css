@@ -2549,14 +2549,19 @@ select.st-field:not([multiple]),
 }
 /* On the store front such a link mostly stands alone (the foot of the page, a search's way back, "Watch on ..."):
    a 44 px target (WCAG 2.5.5 AAA). Not a summary, which would lose its disclosure triangle (below), nor a link
-   inside a quote's caption, which breaks with its sentence (2.5.5 exempts a link in a sentence). */
+   inside a quote's caption, which breaks with its sentence (2.5.5 exempts a link in a sentence).
+   On every other page of a store (.st-page), one whose parent is a div is in a row of links ("Back to <store>",
+   "Your membership", "All letters"), never in running words: 44 px as well (tests/store-standalone-link-size.test.ts).
+   Elsewhere (alone in a p, in a nav or a form) the element carries its own min-h-11. */
+.st-page div > .st-footer-link:not(summary),
 [data-store-layout] .st-footer-link:not(summary, figcaption > *) {
   display: inline-flex;
   align-items: center;
   min-height: 2.75rem;
 }
-/* A summary drawn as such a link (the presale's "Or join the waitlist") opens from a 44 px row by its padding, so it
-   stays a list item with its triangle. The first padding is for a browser without the lh unit. */
+/* A summary drawn as such a link (the presale's "Or join the waitlist", a lesson comment's "Answer") opens from a
+   44 px row by its padding, on any store page, so it stays a list item with its triangle. The first padding is for a browser without the lh unit. */
+.st-page summary.st-footer-link,
 [data-store-layout] summary.st-footer-link {
   min-height: 2.75rem;
   padding-block: 0.625rem;

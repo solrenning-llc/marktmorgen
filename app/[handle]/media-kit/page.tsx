@@ -242,7 +242,7 @@ export default async function MediaKitPage({ params }: Params) {
         ) : null}
 
         <p className="kit-noprint mt-12 text-center">
-          <Link href={`/@${store.handle}`} className="st-footer-link text-sm font-semibold">{w.storeLink}</Link>
+          <Link href={`/@${store.handle}`} className="st-footer-link inline-flex min-h-11 items-center text-sm font-semibold">{w.storeLink}</Link>
         </p>
         <StoreTracking store={store} presence event={null} />
       </main>

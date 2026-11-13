@@ -479,7 +479,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
       {groupable ? <GroupBox store={store} product={product} problem={groupProblem} consentAgain={consentAgain} /> : null}
       {product.recurring && canManage(store) ? (
         <p className="mt-3 text-center text-sm">
-          <Link href={`/@${store.handle}/manage`} className="st-footer-link font-semibold">
+          <Link href={`/@${store.handle}/manage`} className="st-footer-link inline-flex min-h-11 items-center font-semibold">
             {w.memberManage}
           </Link>
         </p>

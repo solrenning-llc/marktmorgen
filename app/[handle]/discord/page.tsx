@@ -69,7 +69,7 @@ export default async function DiscordPage({ params, searchParams }: Params) {
             </>
           ) : null}
           <p className="mt-7 text-center text-sm">
-            <Link href={`/@${store.handle}`} className="st-footer-link font-semibold">{w.backToStore(store.name)}</Link>
+            <Link href={`/@${store.handle}`} className="st-footer-link inline-flex min-h-11 items-center font-semibold">{w.backToStore(store.name)}</Link>
           </p>
         </div>
       </main>

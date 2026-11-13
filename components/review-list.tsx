@@ -209,7 +209,7 @@ export function ReviewsSection({
       ) : null}
       {moreHref ? (
         <p className="mt-5">
-          <Link prefetch={false} href={moreHref} className="st-footer-link text-sm font-semibold underline underline-offset-4">
+          <Link prefetch={false} href={moreHref} className="st-footer-link inline-flex min-h-11 items-center text-sm font-semibold underline underline-offset-4">
             {w.seeAllReviews(num(summary.visible))}
           </Link>
         </p>

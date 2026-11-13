@@ -183,7 +183,7 @@ export function LessonTask({
                   ) : (
                     <span className="min-w-0 break-all font-semibold" style={{ color: "var(--st-text)" }}>{file.name}</span>
                   )}
-                  <button type="button" className="st-footer-link font-semibold" onClick={() => setFile(null)} disabled={sending}>{w.taskRemoveFile}</button>
+                  <button type="button" className="st-footer-link inline-flex min-h-11 items-center font-semibold" onClick={() => setFile(null)} disabled={sending}>{w.taskRemoveFile}</button>
                 </p>
               ) : (
                 <label className="block">

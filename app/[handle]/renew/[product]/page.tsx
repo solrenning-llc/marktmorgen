@@ -181,7 +181,7 @@ export default async function RenewPage({ params, searchParams }: Params) {
 
           {product && !priceGone ? (
             <p className="mt-4 text-center text-sm">
-              <Link href={productPath(store, product)} className="st-footer-link font-semibold">
+              <Link href={productPath(store, product)} className="st-footer-link inline-flex min-h-11 items-center font-semibold">
                 {m.see(product.title)}
               </Link>
             </p>

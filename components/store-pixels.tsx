@@ -566,7 +566,7 @@ export function StorePixels({
     <p lang={locale} className="mt-3 text-center">
       <button
         type="button"
-        className="st-footer-link text-xs font-semibold"
+        className="st-footer-link inline-flex min-h-11 items-center text-xs font-semibold"
         onClick={() => {
           if (state === "on") {
             writeChoice(handle, "no");

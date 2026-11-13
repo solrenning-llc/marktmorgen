@@ -508,7 +508,10 @@ export function setSendHooksForTests(hooks: SendHooks): void {
 async function attempt(delivery: Delivery, endpoint: Endpoint | undefined, store: Store | null | "taken", now = Date.now()): Promise<Delivery> {
   const next = { ...delivery, attempts: delivery.attempts + 1, lastAt: now };
   if (!endpoint) {
-    return { ...next, state: "failed", next: 0, lastStatus: 0, lastError: "The endpoint was removed." };
+    // Its endpoint removed, or the whole store's webhooks forgotten (its config deleted): the message is not kept
+    // past it. A delivery the log no longer names (older than LOG_SIZE) is not deleted by forgetStoreWebhooks, and
+    // this write would otherwise keep the buyers' data in it for DELIVERY_SECONDS more. Nothing can send it again.
+    return { ...next, state: "failed", next: 0, lastStatus: 0, lastError: "The endpoint was removed.", body: "", givenUp: true };
   }
   if (!store) return { ...delivery, state: "failed", next: 0, lastAt: now, lastStatus: 0, lastError: "The store could not be found." };
   // Its API key paused or revoked (owner C3-100), read now: nothing is sent, and nothing is counted.

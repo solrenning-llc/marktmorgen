@@ -6,3 +6,4 @@ Only Claude 1 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
+| Claude 1 cloud | Fixes #3942: a delivery whose endpoint is gone keeps no message | claude/blissful-carson-2v8k2m-hooks-forget-body | `lib/webhooks.ts`, `tests/webhooks-forget-queued.test.ts` | 12/11/2026 12h40 |

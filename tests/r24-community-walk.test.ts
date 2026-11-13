@@ -194,7 +194,9 @@ async function main(): Promise<void> {
   {
     const communityId = "a1b2c3d4e5f6a7b8c9d0e1f2";
     const path = `community/${communityFolder(communityId)}/${"d".repeat(32)}.jpg`;
-    const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 0x10, 0x4a, 0x46, 0x49, 0x46, 0, 1, 1, 0, 0, 1]);
+    // A JPEG's start, its JFIF block, and its frame (SOF0): height then width, here h × w.
+    const jpeg = (h: number, w: number) => new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 0x10, 0x4a, 0x46, 0x49, 0x46, 0, 1, 1, 0, 0, 1, 0, 1, 0, 0, 0xff, 0xc0, 0, 0x11, 8, h >> 8, h & 0xff, w >> 8, w & 0xff, 3, 1, 0x22, 0]);
+    const JPEG = jpeg(1200, 1600);
     const deleted: string[] = [];
     const files = (first: () => Promise<Uint8Array | null>): ImageStore => ({
       head: async () => ({ size: 50_000, contentType: "image/jpeg" }),
@@ -219,6 +221,18 @@ async function main(): Promise<void> {
       () => "threw",
     );
     is("the first bytes unread: not called a wrong type, nothing deleted", [unread === "type", deleted.length], [false, 0]);
+
+    // Its shape, read from its own header: what the member's browser shrank is at most IMAGE_LONG_SIDE (1600) on
+    // its long side; a file sent by hand may say 60,000 × 60,000 in one megabyte, which every member's browser
+    // showing the post would try to open at that size.
+    deleted.length = 0;
+    is("a picture 1600 pixels on its long side: ok", [await checkCommunityImage(path, communityId, files(async () => jpeg(1600, 900))), deleted.length], ["ok", 0]);
+    deleted.length = 0;
+    is("one that says it is 60,000 pixels a side: refused and deleted", [await checkCommunityImage(path, communityId, files(async () => jpeg(60_000, 60_000))), deleted], ["type", [path]]);
+    deleted.length = 0;
+    is("one wider than the long side by more than a pixel: refused", await checkCommunityImage(path, communityId, files(async () => jpeg(10, 1602))), "type");
+    deleted.length = 0;
+    is("a JPEG whose first bytes never say its shape: refused and deleted", [await checkCommunityImage(path, communityId, files(async () => jpeg(10, 10).subarray(0, 16))), deleted], ["type", [path]]);
   }
 
   clearAnswers();

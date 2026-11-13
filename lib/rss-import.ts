@@ -314,7 +314,8 @@ function readEpisode(item: El, n: number): ImportedEpisode {
   const title = field(item, "title", where) ?? "";
   if (title === "") refuse("no-title", `${where} has no title.`);
   capped(title, MAX_IMPORT_TITLE, `${where}'s title`);
-  const notes = field(item, "description", where) ?? field(item, "itunes:summary", where) ?? "";
+  // The first of the two with text: an empty <description/> never hides the summary beside it (Claude 1 cloud on #3456).
+  const notes = field(item, "description", where) || field(item, "itunes:summary", where) || "";
   capped(notes, MAX_IMPORT_NOTES, `${where}'s notes`);
 
   const enclosures = children(item, "enclosure");
@@ -325,7 +326,8 @@ function readEpisode(item: El, n: number): ImportedEpisode {
   if (!isHttpsAddress(url)) refuse("audio-not-https", `${where}'s audio address must be a public https:// address.`);
 
   const type = (enclosures[0].attrs.type ?? "").trim().toLowerCase();
-  const contentType = type === "" ? null : AUDIO_TYPES[type];
+  // The table's own keys only (Claude 1 cloud on #3456): a name of Object.prototype ("constructor", "__proto__") is not a type.
+  const contentType = type === "" ? null : Object.hasOwn(AUDIO_TYPES, type) ? AUDIO_TYPES[type] : undefined;
   if (contentType === undefined) refuse("audio-type", `${where} is not an MP3 or M4A audio file.`);
 
   const length = (enclosures[0].attrs.length ?? "").trim();
@@ -364,7 +366,7 @@ function readShow(root: El): ImportedShow {
   const title = field(channel, "title", "The show") ?? "";
   if (title === "") refuse("no-title", "The show has no title.");
   capped(title, MAX_IMPORT_SHOW_TITLE, "The show's title");
-  const description = field(channel, "description", "The show") ?? field(channel, "itunes:summary", "The show") ?? "";
+  const description = field(channel, "description", "The show") || field(channel, "itunes:summary", "The show") || "";
   capped(description, MAX_IMPORT_SHOW_DESCRIPTION, "The show's description");
   const language = (field(channel, "language", "The show") ?? "").toLowerCase();
   const author = field(channel, "itunes:author", "The show") ?? "";

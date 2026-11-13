@@ -40,7 +40,7 @@ const store = {
   previousHandles: [],
   releasedHandles: [],
   statsId: STATS,
-  stripeAccountId: "acct_1TestHarborLong1",
+  stripeAccountId: "acct_1TestHarbor",
   currency: "usd",
   affiliates: { enabled: true, percent: 30, days: 30, rates: {}, payday: 5, hold: 0 },
 } as unknown as Store;

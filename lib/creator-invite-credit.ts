@@ -56,6 +56,8 @@ const CURSOR_KEY = "nl:ref:cursor";
 const CUSTOMER_PATTERN = /^cus_[A-Za-z0-9]{6,64}$/;
 const INVOICE_PATTERN = /^in_[A-Za-z0-9]{6,64}$/;
 const CURRENCY_PATTERN = /^[a-z]{3}$/;
+// The statuses Stripe documents for a refund (#4424); any other is unknown, never "not refunded".
+const REFUND_STATUSES = new Set(["pending", "requires_action", "succeeded", "failed", "canceled"]);
 
 type Invoice = {
   id?: unknown;
@@ -132,14 +134,14 @@ async function refundedOn(invoice: Invoice): Promise<number> {
     query.set(type as string, ref);
     const list = await onPlatformAt(INVITE_STRIPE_VERSION, "GET", `/refunds?${query}`);
     // Read exactly (Codex C2 on #2722): a whole list, at most the hundred asked for, each refund with a whole
-    // non-negative amount and a status in words. Anything else is not "no refund": the store fails this run and no
+    // non-negative amount and one of the statuses Stripe documents. Anything else is not "no refund": the store fails this run and no
     // credit is written (earnFrom lets the error through).
     const rows = list && list.object === "list" && list.has_more === false && Array.isArray(list.data) && list.data.length <= 100 ? list.data : null;
     if (!rows) throw new UnknownReplyError("invite credits: the refunds of a payment");
     for (const refund of rows as unknown[]) {
       if (!refund || typeof refund !== "object") throw new UnknownReplyError("invite credits: a refund");
       const { amount, status } = refund as { amount?: unknown; status?: unknown };
-      if (typeof amount !== "number" || !Number.isSafeInteger(amount) || amount < 0 || typeof status !== "string") {
+      if (typeof amount !== "number" || !Number.isSafeInteger(amount) || amount < 0 || typeof status !== "string" || !REFUND_STATUSES.has(status)) {
         throw new UnknownReplyError("invite credits: a refund");
       }
       if (status === "succeeded" || status === "pending" || status === "requires_action") total += amount;

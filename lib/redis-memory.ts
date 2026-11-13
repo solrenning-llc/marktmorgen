@@ -1866,6 +1866,8 @@ export class MemoryRedis {
         const set = this.set(key);
         let gone = 0;
         for (const one of args) if (set.delete(one)) gone += 1;
+        // As redis-server: a set left empty is no longer a key (#4263's "log out of all devices" removes its members).
+        if (!set.size) this.data.delete(key);
         return gone;
       }
       case "SISMEMBER":

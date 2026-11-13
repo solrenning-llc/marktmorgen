@@ -32,7 +32,7 @@
  */
 import { MAX_PRODUCTS } from "@/lib/catalog-rules";
 import { MAX_STORE_BYTES } from "@/lib/store";
-import { DAY_FIELDS_MAX, KEPT_DAYS, LIFE_WRITE_MAX, STATS_DAYS } from "@/lib/stats";
+import { DAY_FIELDS_MAX, KEPT_DAYS, KEPT_MATCH_LOOKUPS, LIFE_WRITE_MAX, STATS_DAYS } from "@/lib/stats";
 import { CALENDAR_FILE_MAX_BYTES, CALENDAR_REFUSED_PER_HOUR } from "@/lib/calendar-sync";
 import { READING_COPY_MAX_BYTES } from "@/lib/store-readings";
 import { MAX_PAID_BYTES, PAYPAL_REFUNDS_READ } from "@/lib/paypal-sales";
@@ -216,7 +216,7 @@ export const ERASED_LOOKUP_BYTES = 10 * (64 + 64);
  */
 export const READING_COPY_EXTRA_COMMANDS = 2;
 export const SALES_READ_SHAPE: ReadShape = {
-  seconds: 2, cpu: 1, commands: 2 + (1 + TOTALS_PAYPAL_REFUNDS) + READING_COUNT_COMMANDS.heavy + 1 + READING_COPY_EXTRA_COMMANDS + LIST_TRY_COMMANDS, outBytes: 0, stripePages: 2 * 20 + 10 + 5 + 3,
+  seconds: 2, cpu: 1, commands: 2 + (1 + TOTALS_PAYPAL_REFUNDS) + READING_COUNT_COMMANDS.heavy + 1 + READING_COPY_EXTRA_COMMANDS + LIST_TRY_COMMANDS, outBytes: 0, stripePages: 2 * 20 + 10 + 5 + 3 + KEPT_MATCH_LOOKUPS,
   dbBytes: TOTALS_PAYPAL_SALES * (PAYPAL_SALE_BYTES + 64) + TOTALS_PAYPAL_REFUNDS * (PAYPAL_SALE_BYTES + 64) + READING_COPY_MAX_BYTES + 2 * ERASED_LOOKUP_BYTES,
 };
 /**

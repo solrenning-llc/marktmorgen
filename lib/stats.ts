@@ -1331,21 +1331,52 @@ export function renewalsFrom(
  * reconciled with its own renewals. Pure on what it is handed.
  */
 export function renewalEntries(store: Store, invoices: Record<string, unknown>[]): Entry[] {
-  const handles = saleHandles(store);
   const out: Entry[] = [];
   for (const invoice of invoices) {
-    if (invoice.status !== "paid" || invoice.billing_reason !== "subscription_cycle") continue;
-    const meta = invoiceMeta(invoice);
-    if (!handles.has(meta.store ?? "")) continue;
-    const cents = typeof invoice.amount_paid === "number" ? invoice.amount_paid : 0;
-    if (cents <= 0) continue;
-    const source = "channel" in meta ? (meta.channel === "direct" ? "" : meta.channel) : meta.utm_source || UNRECORDED;
-    out.push({ day: dayKey((typeof invoice.created === "number" ? invoice.created : 0) * 1000), cents, currency: currencyOf(invoice), source });
+    const source = renewalSource(store, invoice);
+    if (source === null) continue;
+    out.push({ day: dayKey((typeof invoice.created === "number" ? invoice.created : 0) * 1000), cents: invoice.amount_paid as number, currency: currencyOf(invoice), source });
   }
   return out;
 }
 
-async function readRenewals(store: Store, since: number, now: number, pages: number): Promise<SalesStats["renewals"] & { entries: Entry[] }> {
+/** The channel of one of this store's paid renewals ("" for direct, UNRECORDED when it says nothing), or null when the invoice is not one. */
+function renewalSource(store: Store, invoice: Record<string, unknown>, handles = saleHandles(store)): string | null {
+  if (invoice.status !== "paid" || invoice.billing_reason !== "subscription_cycle") return null;
+  const meta = invoiceMeta(invoice);
+  if (!handles.has(meta.store ?? "")) return null;
+  const cents = typeof invoice.amount_paid === "number" ? invoice.amount_paid : 0;
+  if (cents <= 0) return null;
+  return "channel" in meta ? (meta.channel === "direct" ? "" : meta.channel) : meta.utm_source || UNRECORDED;
+}
+
+/**
+ * The most payments readSales looks up to find the store's renewal a refund or dispute belongs to (#4376), one GET
+ * /invoice_payments each, only for those that match no one-off sale and no renewal naming its payment. Priced in
+ * lib/read-ceilings.ts SALES_READ_SHAPE (stripePages 58 + 5). With it, the first year given back costs $64.9792 against
+ * the owner's $65 ceiling (tests/read-ceilings.test.ts, C4-33): $0.0208 of room left, which any new heavy read must
+ * look at first. More than these to look up: none is made, and the kept total is not known.
+ */
+export const KEPT_MATCH_LOOKUPS = 5;
+
+/**
+ * The renewal of this store a payment paid, from Stripe's list of invoice payments filtered by the payment (GET
+ * /v1/invoice_payments, payment[type]=payment_intent), read exactly: its source when the one invoice it names is one of
+ * the store's renewals read, UNRECORDED when Stripe confirms none or another invoice, and null when the reply does not read.
+ */
+async function renewalOfPayment(store: Store, intent: string, renewals: ReadonlyMap<string, string>): Promise<string | null> {
+  const query = new URLSearchParams({ "payment[type]": "payment_intent", "payment[payment_intent]": intent, limit: "1" });
+  const listed = (await onAccount("GET", store.stripeAccountId as string, `/invoice_payments?${query}`).catch(() => null)) as { object?: unknown; data?: unknown; has_more?: unknown } | null;
+  if (!listed || listed.object !== "list" || !Array.isArray(listed.data) || listed.data.length > 1 || typeof listed.has_more !== "boolean") return null;
+  const row = listed.data[0] as { invoice?: unknown } | undefined;
+  if (row === undefined) return listed.has_more ? null : UNRECORDED;
+  if (!row || typeof row !== "object") return null;
+  const invoice = typeof row.invoice === "string" ? row.invoice : row.invoice && typeof row.invoice === "object" ? (row.invoice as { id?: unknown }).id : undefined;
+  if (typeof invoice !== "string" || !/^in_[A-Za-z0-9]+$/.test(invoice)) return null;
+  return renewals.get(invoice) ?? UNRECORDED;
+}
+
+async function readRenewals(store: Store, since: number, now: number, pages: number): Promise<SalesStats["renewals"] & { entries: Entry[]; byInvoice: Map<string, string>; byPayment: Map<string, string> }> {
   const invoices: Record<string, unknown>[] = [];
   let after = "";
   const seen = new Set<string>();
@@ -1367,7 +1398,18 @@ async function readRenewals(store: Store, since: number, now: number, pages: num
   const entries = renewalEntries(store, invoices);
   // A renewal in a currency the answer does not name is in no total: the reading is incomplete.
   if (entries.some((entry) => !entry.currency)) partial = true;
-  return { ...renewalsFrom(store, invoices, now, store.currency), partial, entries };
+  // Each of the store's renewals read, by its invoice and, where the invoice names it, by its payment: so a refund or
+  // dispute of one is the store's own (#4376).
+  const byInvoice = new Map<string, string>();
+  const byPayment = new Map<string, string>();
+  const handles = saleHandles(store);
+  for (const invoice of invoices) {
+    const source = renewalSource(store, invoice, handles);
+    if (source === null || typeof invoice.id !== "string") continue;
+    byInvoice.set(invoice.id, source);
+    if (typeof invoice.payment_intent === "string" && invoice.payment_intent) byPayment.set(invoice.payment_intent, source);
+  }
+  return { ...renewalsFrom(store, invoices, now, store.currency), partial, entries, byInvoice, byPayment };
 }
 
 /** One paid renewal of this store's memberships and payment plans, for the buyer ledger (lib/segments.ts, 270 [GR1] unit 2). */
@@ -1801,16 +1843,34 @@ export async function readSales(store: Store, now = Date.now()): Promise<SalesSt
   {
     // What each currency kept (lib/retained-revenue.ts): every reading as entries with its channel.
     const byPayment = new Map(read.filter((sale) => sale.paymentIntent).map((sale) => [sale.paymentIntent, sale]));
-    const placed = (paymentIntent: string) => (paymentIntent ? byPayment.get(paymentIntent)?.source : undefined) ?? UNRECORDED;
+    // A refund or dispute is the store's own when its payment is a one-off sale read or one of the store's renewals
+    // read (#4376); a renewal that does not name its payment is looked up, at most KEPT_MATCH_LOOKUPS of them.
+    const renewalPayments = new Map(renewalRead?.byPayment ?? []);
+    const unmatched = [...new Set([...(refundRead?.rows ?? []), ...(disputeRead?.rows ?? [])]
+      .map((row) => row.paymentIntent)
+      .filter((pi) => pi.startsWith("pi_") && !byPayment.has(pi) && !renewalPayments.has(pi)))];
+    if (renewalRead && unmatched.length > 0 && unmatched.length <= KEPT_MATCH_LOOKUPS) {
+      const found = await Promise.all(unmatched.map((pi) => renewalOfPayment(store, pi, renewalRead.byInvoice)));
+      unmatched.forEach((pi, i) => {
+        const source = found[i];
+        if (source !== null && source !== UNRECORDED) renewalPayments.set(pi, source);
+      });
+    }
+    const placed = (paymentIntent: string) => (paymentIntent ? byPayment.get(paymentIntent)?.source ?? renewalPayments.get(paymentIntent) : undefined) ?? UNRECORDED;
+    // A refund or dispute whose payment is no store sale or renewal read, for example a payment link made outside
+    // Marktmorgen on the same account: still shown as unrecorded, but its reading is not complete, so the kept total is
+    // never a known value taken from money that was not the store's (#4376).
+    const refundEntries = (refundRead?.rows ?? []).map((r) => ({ day: dayKey(r.created), cents: r.cents, currency: r.currency, source: placed(r.paymentIntent) }));
+    const disputeEntries = (disputeRead?.rows ?? []).map((d) => ({ day: dayKey(d.created), cents: d.cents, currency: d.currency, source: placed(d.paymentIntent) }));
     out.keptIn = keptByCurrency(
       {
         sales: { entries: sales.map((sale) => ({ day: dayKey(sale.created), cents: sale.cents, currency: sale.currency, source: sale.source })), complete: !readPartial },
         renewals: store.stripeAccountId ? { entries: renewalEntryRows, complete: Boolean(renewals && !renewals.partial) } : null,
         refunds: refundRead
-          ? { entries: refundRead.rows.map((r) => ({ day: dayKey(r.created), cents: r.cents, currency: r.currency, source: placed(r.paymentIntent) })), complete: !refundRead.partial }
+          ? { entries: refundEntries, complete: !refundRead.partial && refundEntries.every((entry) => entry.source !== UNRECORDED) }
           : null,
         disputes: disputeRead
-          ? { entries: disputeRead.rows.map((d) => ({ day: dayKey(d.created), cents: d.cents, currency: d.currency, source: placed(d.paymentIntent) })), complete: !disputeRead.partial }
+          ? { entries: disputeEntries, complete: !disputeRead.partial && disputeEntries.every((entry) => entry.source !== UNRECORDED) }
           : null,
       },
       dayKey(now),

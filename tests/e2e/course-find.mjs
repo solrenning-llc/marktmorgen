@@ -51,20 +51,23 @@ try {
   const box = tab.getByRole("searchbox", { name: "Find a lesson" });
   await box.waitFor().catch((e) => { console.log("page errors:", errors); throw e; });
   const lessons = () => tab.locator("[data-find]").evaluateAll((all) => all.filter((li) => li.offsetParent !== null).map((li) => li.textContent.replace(/^[✓○🔒]\s*/u, "").trim()));
+  // The count is said once typing pauses (FIND_SAY_AFTER_MS, 300 ms): read it after a longer pause.
+  const said = () => tab.waitForTimeout(450).then(() => tab.getByRole("status").textContent());
   const modules = () => tab.locator("[data-find-module]").evaluateAll((all) => all.filter((li) => li.offsetParent !== null).length);
   is("at first, the whole outline", [(await lessons()).length, await modules()], [8, 3]);
   await box.fill("welcome");
-  is("a word: the lessons that hold it, from any module", await lessons(), ["Welcome & setup", "Your welcome email"]);
-  is("said", await tab.getByRole("status").textContent(), "2 lessons match.");
+  is("a word: the lessons that hold it, from any module, at once", await lessons(), ["Welcome & setup", "Your welcome email"]);
+  is("nothing said in the middle of typing", await tab.getByRole("status").textContent(), "");
+  is("said once typing pauses", await said(), "2 lessons match.");
   is("a module with none left is hidden too", await modules(), 2);
   await box.fill("pricing");
   is("a module's title finds its lessons", await lessons(), ["Price anchors", "Discounts that work"]);
   await box.fill("lecon");
-  is("accents do not matter", [await lessons(), await tab.getByRole("status").textContent()], [["Leçon bonus"], "1 lesson matches."]);
+  is("accents do not matter", [await lessons(), await said()], [["Leçon bonus"], "1 lesson matches."]);
   await box.fill("zzz");
-  is("nothing: said, and the outline is empty", [await lessons(), await modules(), await tab.getByRole("status").textContent()], [[], 0, "No lesson matches “zzz”."]);
+  is("nothing: said, and the outline is empty", [await lessons(), await modules(), await said()], [[], 0, "No lesson matches “zzz”."]);
   await box.fill("");
-  is("emptied: all back, nothing said", [(await lessons()).length, await modules(), await tab.getByRole("status").textContent()], [8, 3, ""]);
+  is("emptied: all back, nothing said", [(await lessons()).length, await modules(), await said()], [8, 3, ""]);
   is("the box comes before every lesson link, so the keyboard reaches it first", await tab.evaluate(() => { const box = document.querySelector('input[type="search"]'); const first = document.querySelector("[data-find] a"); return Boolean(box && first && box.compareDocumentPosition(first) & Node.DOCUMENT_POSITION_FOLLOWING); }), true);
   is("at 320 px, no sideways scrolling", await tab.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
   is("no script error", errors, []);

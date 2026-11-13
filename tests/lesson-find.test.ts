@@ -26,6 +26,8 @@ part("Matching");
   const match = (q: string, title: string) => lessonMatches(queryWords(q), findKey(title));
   is("case, accents and punctuation do not matter", [match("lecon", "Leçon 2"), match("Q&A", "Live Q & A"), match("PRICING", "Your pricing page")], [true, true, true]);
   is("every word typed must be there", [match("pricing page", "Your pricing page"), match("pricing email", "Your pricing page")], [true, false]);
+  is("the lesson's and its module's titles are read together: a module word and a lesson word find it", lessonMatches(queryWords("beginner refund"), findKey("Refund policy Beginner basics")), true);
+  is("but a word in neither still does not", lessonMatches(queryWords("beginner shipping"), findKey("Refund policy Beginner basics")), false);
   is("each word as the start of a word, so a stub finds it while typing", [match("pri", "Your pricing page"), match("icing", "Your pricing page")], [true, false]);
   is("an empty query keeps everything", [match("", "Anything"), match("   ", "Anything")], [true, true]);
   is(`a query is read to ${FIND_MAX_CHARS} characters`, queryWords(`${"a".repeat(FIND_MAX_CHARS)} extra`).join(" ").length <= FIND_MAX_CHARS, true);

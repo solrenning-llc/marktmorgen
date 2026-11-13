@@ -1,7 +1,9 @@
 /**
  * "Find a lesson" on a course's page (291 [SQ2], unit 1; added 12 November
  * 2026): the student types and the course's outline keeps only the lessons
- * whose title, or whose module's title, holds every word typed. It reads only
+ * whose title and its module's title, read together, hold every word typed,
+ * so "pricing email" finds the lesson "Your welcome email" in the module
+ * "Pricing" (narrowing a long course by module and topic). It reads only
  * what the page already drew, so it costs no request and no index; titles are
  * already public on the course page. Pure rules, used by the outline (each
  * lesson's words) and by the box (the match).
@@ -13,6 +15,8 @@
 
 /** The box is offered from this many lessons: in a shorter course the outline is read at a glance. */
 export const FIND_MIN_LESSONS = 8;
+/** How long typing must pause before the count is said, in milliseconds. */
+export const FIND_SAY_AFTER_MS = 300;
 /** The longest query read; anything after it is ignored. */
 export const FIND_MAX_CHARS = 80;
 
@@ -29,7 +33,7 @@ export function findKey(text: string): string {
 /** The words of a query, at most FIND_MAX_CHARS of it. */
 export const queryWords = (query: string) => findKey(query.slice(0, FIND_MAX_CHARS)).split(" ").filter(Boolean);
 
-/** Whether a lesson's words (already findKey'd) hold every word of the query, each as the start of a word. */
+/** Whether a lesson's words (its title and its module's title together, already findKey'd) hold every word of the query, each as the start of a word. */
 export function lessonMatches(words: readonly string[], key: string): boolean {
   if (!words.length) return true;
   const parts = key.split(" ");

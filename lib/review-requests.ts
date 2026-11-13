@@ -28,6 +28,9 @@
  *
  *   nl:rev:ask:sent:<reference>    that order was asked ("sent:<seconds>", the time the first went out;
  *                                  "sent" alone before that time was kept), and reminded ("again"), 120 days
+ *   nl:rev:ask:sent:<reference>:again   a run's claim on that order's one reminder, stretched to 120 days
+ *                                  when the reminder goes and kept, so a reminder is never sent twice; a
+ *                                  second mark an order with a reminder holds, priced beside the first
  *   nl:rev:off:<statsId>:<hash>    that address pressed stop, kept for good
  *   nl:rev:stop:<token>            who a stop link belongs to, 400 days
  */

@@ -14,7 +14,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { gatherVoice, voicePrompt } from "@/lib/customer-voice";
 import { WAITLIST_VOICE_PRODUCTS, waitlistSizes } from "@/lib/waitlist";
-import { addProduct, claimHandle, ensureStatsId, storeForEmail } from "@/lib/store";
+import { addProduct, claimHandle, ensureStatsId, removeProduct, storeForEmail } from "@/lib/store";
 import * as voiceScreen from "@/components/customer-voice";
 import { store as redis } from "./redis-stub";
 
@@ -89,4 +89,16 @@ test("names that cannot be read leave the waitlists unread, never left out", asy
   const { store } = await soonStore("voice.waitnames@example.com", "voice-waitnames", { "Studio Lamp": 2 });
   const result = await withReply((c) => c[0] === "HGETALL" || c[0] === "HMGET" || (c[0] === "GET" && String(c[1]).includes(":titles")), () => { throw new Error("synthetic"); }, () => gatherVoice(store, Date.now()));
   assert.ok(result.unread.includes("waitlist"));
+});
+
+test("a product removed while people still wait on it leaves the waitlists unread, never left out (Codex T on #3731)", async () => {
+  const owner = "voice.removed@example.com";
+  const { store, ids } = await soonStore(owner, "voice-removed", { "Kiln Basics": 2, "Clay Primer": 1 });
+  // Removed through the studio's own path: its card goes, while its place on the coming-soon list and its waitlist stay.
+  const removed = await removeProduct(owner, ids["Kiln Basics"]);
+  assert.equal(removed.ok, true);
+  const { items, unread } = await gatherVoice((await storeForEmail(owner))!, Date.now());
+  assert.ok(unread.includes("waitlist"), "people waiting on a product whose name cannot be read: the waitlists are unread");
+  assert.deepEqual(items.filter((i) => i.source === "waitlist"), [], "no summary from part of the waitlists");
+  void store;
 });

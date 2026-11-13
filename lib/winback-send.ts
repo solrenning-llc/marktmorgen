@@ -508,7 +508,12 @@ export async function openWinBack(
     });
     if (!held.ok) return { ok: false, reason: "unavailable" };
     opened = held.value.url;
-    await keepCheckout(token, opened, holding ? OPEN_KEPT_HELD_SECONDS : OPEN_KEPT_SECONDS);
+    // Never longer than Stripe keeps it open: a checkout told to close sooner (the store's reminders ask for an hour;
+    // a held unit, CHECKOUT_OPEN_SECONDS) is kept until two minutes before that (Claude 7's review of #3482, MEDIUM).
+    const ceiling = holding ? OPEN_KEPT_HELD_SECONDS : OPEN_KEPT_SECONDS;
+    const closesAt = held.value.closesAt;
+    const left = closesAt === null ? ceiling : Math.min(ceiling, closesAt - Math.floor(Date.now() / 1000) - 120);
+    if (left > 0) await keepCheckout(token, opened, left);
     return { ok: true, url: opened };
   } catch (error) {
     // A coupon the creator deleted in their own dashboard, most likely: said

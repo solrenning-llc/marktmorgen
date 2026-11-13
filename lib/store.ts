@@ -1213,24 +1213,40 @@ export async function withRestartPublicationRecord<T>(
  finally{await releaseLockStrict(held);}
 }
 
+/**
+ * What a public address holds, read once: the store behind it, or, for a
+ * name that was let go, the value it is held with, in which a closed store's
+ * moved notice may be (lib/exit-redirect-rules.ts, exitAnswerForValue).
+ */
+export type HandleLookup = { store: Store | null; released: string | null };
+
+export async function handleLookup(handle: string): Promise<HandleLookup> {
+  const none: HandleLookup = { store: null, released: null };
+  if (!isRedisConfigured()) return none;
+  if (handleProblem(handle)) return none;
+  const [email] = await redisPipeline([["GET", handleKey(handle)]]);
+  if (typeof email !== "string" || !email) return none;
+  // A name that was let go is held, not owned: it leads nowhere on purpose.
+  if (email.startsWith(RELEASED_PREFIX)) return { store: null, released: email };
+  const [raw] = await redisPipeline([["GET", await ownerKey(email)]]);
+  return { store: parseStore(raw), released: null };
+}
+
 /** The store behind a public address, or null if that handle is free. */
 export async function storeForHandle(handle: string): Promise<Store | null> {
-  if (!isRedisConfigured()) return null;
-  if (handleProblem(handle)) return null;
-  const [email] = await redisPipeline([["GET", handleKey(handle)]]);
-  if (typeof email !== "string" || !email) return null;
-  // A name that was let go is held, not owned: it leads nowhere on purpose.
-  if (email.startsWith(RELEASED_PREFIX)) return null;
-  const [raw] = await redisPipeline([["GET", await ownerKey(email)]]);
-  return parseStore(raw);
+  return (await handleLookup(handle)).store;
 }
 
 /**
- * The store behind a public address, read once per page view: the layout,
- * the page's head and the page itself ask for it, and all three are given
- * the one answer. Only for pages; anything that writes reads afresh.
+ * What a public address holds, read once per page view: the layout, the
+ * page's head and the page itself ask for it, and all three are given the
+ * one answer; the moved notice of a closed store is read from it too, with
+ * no read more. Only for pages; anything that writes reads afresh.
  */
-export const storeForPage = cache(storeForHandle);
+export const handleForPage = cache(handleLookup);
+
+/** The store behind a public address, from that one read per page view. */
+export const storeForPage = cache(async (handle: string): Promise<Store | null> => (await handleForPage(handle)).store);
 
 /**
  * Whether Redis says, exactly, that no store has this id: the one EXISTS reply is 0. A reply missing, cut short or of

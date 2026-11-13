@@ -442,6 +442,9 @@ export function signedUser(raw: unknown): string | null {
   if (!sig || !payload) return null;
   const made = createHmac("sha256", secret).update(payload).digest();
   const given = Buffer.from(sig, "base64url");
+  // Node's decoder skips characters outside the alphabet, reads "+" and "/" and ignores "=", so a garbled
+  // signature could decode to the right bytes: only its exact canonical base64url is one (input fuzz, Claude 7).
+  if (given.toString("base64url") !== sig) return null;
   if (given.length !== made.length || !timingSafeEqual(given, made)) return null;
   try {
     const data = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as { algorithm?: string; user_id?: unknown };

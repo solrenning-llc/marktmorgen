@@ -7,6 +7,7 @@ import { done, is, part } from "./check";
 import { inboundSigned } from "@/lib/inbound-mail";
 import { readBatch } from "@/lib/imports";
 import { adjacentCustomRange, presetCustomRange } from "@/lib/custom-range-dates";
+import { signedUser } from "@/lib/meta-ads";
 import { UnknownReply, exactReplies, plainList, replyCount } from "@/lib/redis-exact";
 
 part("Resend: a signature is believed only in its exact base64");
@@ -73,6 +74,19 @@ part("Exact Redis replies: a count is a safe whole number");
   for (const garbled of [1e300, 2 ** 53, Number.MAX_VALUE]) is(`${garbled} is not a count`, count(garbled), "unknown");
   is("3 is a count", count(3), 3);
   is("the largest safe whole number is a count", count(Number.MAX_SAFE_INTEGER), Number.MAX_SAFE_INTEGER);
+}
+
+part("Meta: a signed_request is believed only with its exact base64url signature");
+{
+  process.env.META_APP_SECRET = "fuzz-meta-secret";
+  const payload = Buffer.from(JSON.stringify({ algorithm: "HMAC-SHA256", user_id: "123456" })).toString("base64url");
+  const good = createHmac("sha256", "fuzz-meta-secret").update(payload).digest("base64url");
+  is("the exact signature is believed", signedUser(`${good}.${payload}`), "123456");
+  // Node's decoder skips characters outside the alphabet, takes "+" and "/" for "-" and "_", and ignores padding.
+  const swapped = good.replace(/-/g, "+").replace(/_/g, "/");
+  for (const garbled of [`${good.slice(0, 9)}!${good.slice(9)}`, `${good}=`, `*${good}`, ...(swapped !== good ? [swapped] : [])]) {
+    is(`a garbled signature ${JSON.stringify(garbled.slice(-6))} is refused`, signedUser(`${garbled}.${payload}`), null);
+  }
 }
 
 done();

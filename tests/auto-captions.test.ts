@@ -50,7 +50,7 @@ const CHARGED = 12000;
 let cardPaid = CHARGED;
 const FOLDER = "a".repeat(32);
 /** The captions invoice as Stripe keeps it, for its list (the one invoice id the fake makes). */
-let invoiceState: { status: string; mark: string; customer: string } | null = null;
+let invoiceState: { status: string; mark: string; customer: string; total: number } | null = null;
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
@@ -73,10 +73,13 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     return json({ object: "list", has_more: false, data });
   }
   if (path === "/invoices") {
-    invoiceState = { status: "draft", mark: String(body.get("metadata[mark]")), customer: String(body.get("customer")) };
-    return json({ id: "in_Captions00001", status: "draft" });
+    invoiceState = { status: "draft", mark: String(body.get("metadata[mark]")), customer: String(body.get("customer")), total: 0 };
+    return json({ id: "in_Captions00001", status: "draft", customer: invoiceState.customer, metadata: { mark: invoiceState.mark } });
   }
-  if (path === "/invoiceitems") return json({ id: "ii_Captions0001" });
+  if (path === "/invoiceitems") {
+    if (invoiceState) invoiceState.total += Number(body.get("amount"));
+    return json({ id: "ii_Captions0001" });
+  }
   if (path.endsWith("/finalize")) {
     if (invoiceState) invoiceState.status = "open";
     return json({ id: "in_Captions00001", status: "open" });
@@ -86,7 +89,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     // An answer that is not a payment: the invoice stays open, as Stripe keeps it.
     if (paidReceipt !== undefined) return json(paidReceipt);
     if (invoiceState) invoiceState.status = "paid";
-    return json({ id: "in_Captions00001", status: "paid", payment_intent: "pi_Captions000001" });
+    // As Stripe answers: the invoice itself, its customer, its mark and its total.
+    return json({ id: "in_Captions00001", status: "paid", payment_intent: "pi_Captions000001", customer: invoiceState?.customer, metadata: { mark: invoiceState?.mark }, total: invoiceState?.total });
   }
   if (path.endsWith("/void")) {
     if (invoiceState?.status === "paid") return json({ error: { code: "invoice_not_voidable", message: "paid" } }, 400);

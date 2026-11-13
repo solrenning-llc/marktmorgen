@@ -2036,8 +2036,14 @@ export async function chargeNow(input: {
       }),
       { ...at, idempotencyKey: `${input.idempotencyKey}:invoice` },
     );
-    invoiceId = typeof invoice.id === "string" ? invoice.id : "";
-    if (!invoiceId) return { ok: false, reason: "error" };
+    // This charge's own invoice (rule 30): made for this customer under this charge's mark. Another one is never
+    // filled, paid or voided here; "error" sends the caller to Stripe's own list (lib/auto-captions.ts, orderCharge).
+    const made = typeof invoice.id === "string" ? invoice.id : "";
+    if (!made || invoice.customer !== input.customerId || (invoice.metadata as { mark?: unknown } | null | undefined)?.mark !== input.mark) {
+      console.error("charging a creator now: the invoice made is not this charge's own");
+      return { ok: false, reason: "error" };
+    }
+    invoiceId = made;
     await onPlatform(
       "POST",
       "/invoiceitems",
@@ -2053,6 +2059,12 @@ export async function chargeNow(input: {
     );
     await onPlatform("POST", `/invoices/${encodeURIComponent(invoiceId)}/finalize`, new URLSearchParams(), { ...at, idempotencyKey: `${input.idempotencyKey}:finalize` });
     const paid = await onPlatform("POST", `/invoices/${encodeURIComponent(invoiceId)}/pay`, new URLSearchParams(), { ...at, idempotencyKey: `${input.idempotencyKey}:pay` });
+    // The reply is this invoice's own (rule 30): its id, its customer, this charge's mark and amount. Another one's
+    // payment is never recorded as this charge's, so a later refund never goes to another payment.
+    const mark = (paid.metadata as { mark?: unknown } | null | undefined)?.mark;
+    if (paid.id !== invoiceId || paid.customer !== input.customerId || mark !== input.mark || paid.total !== input.cents) {
+      throw new Error("the invoice paid is not this charge's own");
+    }
     const intent = typeof paid.payment_intent === "string" ? paid.payment_intent : "";
     if (paid.status !== "paid" || !intent) throw new BillingError(402, "not_paid", "The invoice was not paid.");
     return { ok: true, invoiceId, paymentIntent: intent };

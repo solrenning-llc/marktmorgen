@@ -126,7 +126,10 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   }
   if (path === "/invoiceitems") {
     const invoice = invoiceOf(String(body.get("invoice")));
-    if (invoice) invoice.amount_due += Number(body.get("amount"));
+    if (invoice) {
+      invoice.amount_due += Number(body.get("amount"));
+      invoice.total = (invoice.total ?? 0) + Number(body.get("amount"));
+    }
     return answer({ id: `ii_${invoice?.id}` });
   }
   const action = /^\/invoices\/([^/]+)\/(finalize|pay|void)$/.exec(path);

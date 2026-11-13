@@ -22,6 +22,31 @@ import { execFileSync } from "node:child_process";
 // tests' Redis emulator, where each unit adds its own families or scripts; each agent adds or changes only its own entries and keeps both in a conflict.
 export const SHARED_FILES = new Set(["docs/codex-queue.md", "docs/reservations.md", "docs/accessibility-inventory.json", "lib/agent-coverage.ts", "app/privacy/page.tsx", "tests/plan-cost-registry.ts", "tests/test-config.mjs", "lib/data-families.ts", "tests/store-data-registry.ts", "lib/redis-memory.ts"]);
 
+/**
+ * Agents that only read the repository, each with the one agent that may release their rows (owner,
+ * 13/11/2026, Fortaleza): Codex reads only since 12/11/2026, so it can never remove its own rows.
+ * The coordinator (Claude 2) may remove rows from that agent's file, and only remove them: no row
+ * added or changed, the file never deleted. A file whose row the same pull request removes no longer
+ * blocks that pull request; every other agent still waits until the removal is on the base branch.
+ */
+export const READ_ONLY_AGENTS = new Map([["codex", "claude 2"]]);
+
+/** The lines of a text, without their line ends, trailing blanks or empty lines. */
+const linesOf = (text) => text.split(/\r?\n/).map((l) => l.trimEnd()).filter(Boolean);
+
+/** Whether `head` keeps only lines of `base`, each as many times at most: rows removed, none added or changed. */
+export function onlyRemoves(base, head) {
+  if (typeof base !== "string" || typeof head !== "string") return false;
+  const left = new Map();
+  for (const line of linesOf(base)) left.set(line, (left.get(line) ?? 0) + 1);
+  for (const line of linesOf(head)) {
+    const n = left.get(line) ?? 0;
+    if (!n) return false;
+    left.set(line, n - 1);
+  }
+  return true;
+}
+
 /** The folder of each agent's own reservations file. */
 export const RESERVATIONS_DIR = "docs/reservations/";
 
@@ -107,18 +132,38 @@ export function allReservations(text, agentFiles = []) {
  * PR may proceed.
  * @param {{ text: string, branch: string, changed: string[], agentFiles?: { path: string, text: string }[] }} input
  */
-export function conflicts({ text, branch, changed, agentFiles = [] }) {
+export function conflicts({ text, branch, changed, agentFiles = [], headFiles = {} }) {
   const lanes = lanePrefixes(text);
   const me = agentOfBranch(branch, lanes);
   if (!me) return { me, found: [] };
-  const held = allReservations(text, agentFiles).filter((r) => r.agent !== me && !SHARED_FILES.has(r.file));
+  // A read-only agent's file this PR only removes rows from, when this PR is that agent's releaser (READ_ONLY_AGENTS).
+  const released = new Set();
+  const freed = new Set();
+  for (const { path, text: before } of agentFiles) {
+    const owner = ownerOfReservationFile(path, lanes);
+    if (!owner || READ_ONLY_AGENTS.get(owner) !== me || !changed.includes(path) || !Object.hasOwn(headFiles, path)) continue;
+    const after = headFiles[path];
+    if (!onlyRemoves(before, after)) continue;
+    released.add(path);
+    const kept = new Set(reservations(after, owner).map((r) => r.file));
+    for (const r of reservations(before, owner)) if (!kept.has(r.file)) freed.add(r.file);
+  }
+  const held = allReservations(text, agentFiles).filter((r) => r.agent !== me && !SHARED_FILES.has(r.file) && !(READ_ONLY_AGENTS.get(r.agent) === me && freed.has(r.file)));
   const found = changed.filter((f) => !SHARED_FILES.has(f)).flatMap((f) => held.filter((r) => r.file === f));
   const existing = new Set(agentFiles.map((f) => f.path));
   for (const path of changed) {
     const owner = ownerOfReservationFile(path, lanes);
-    if (owner && owner !== me && existing.has(path)) found.push({ agent: owner, item: "its own reservations file", file: path });
+    if (owner && owner !== me && existing.has(path) && !released.has(path)) found.push({ agent: owner, item: "its own reservations file", file: path });
   }
   return { me, found };
+}
+
+/** The head's text of each changed reservations file; null when this PR deletes it. */
+export function headFilesOf(git, rev, changed) {
+  return Object.fromEntries(changed.filter((p) => p.startsWith(RESERVATIONS_DIR) && p.endsWith(".md")).map((path) => {
+    try { return [path, git(["show", `${rev}:${path}`])]; }
+    catch { return [path, null]; }
+  }));
 }
 
 /** The agents' reservations files as they are at `rev`, read through `git`. */
@@ -143,7 +188,7 @@ export function pullRequestInputs(git) {
   catch { git(["fetch", "--no-tags", "--quiet", "--depth=1", "origin", base]); }
   const text = git(["show", `${base}:docs/reservations.md`]);
   const changed = git(["diff", "--name-only", base, "HEAD"]).split("\n").filter(Boolean);
-  return { text, changed, agentFiles: agentFilesAt(git, base) };
+  return { text, changed, agentFiles: agentFilesAt(git, base), headFiles: headFilesOf(git, "HEAD", changed) };
 }
 
 export function report({ me, found }, branch, changedCount) {
@@ -165,7 +210,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   // The reservations as they are on the base branch: a PR cannot clear another agent's row for itself.
   const text = git(["show", `${base}:docs/reservations.md`]);
   const changed = git(["diff", "--name-only", `${base}...HEAD`]).split("\n").filter(Boolean);
-  const result = report(conflicts({ text, branch, changed, agentFiles: agentFilesAt(git, base) }), branch, changed.length);
+  const result = report(conflicts({ text, branch, changed, agentFiles: agentFilesAt(git, base), headFiles: headFilesOf(git, "HEAD", changed) }), branch, changed.length);
   for (const line of result.lines) console.log(line);
   process.exit(result.ok ? 0 : 1);
 }

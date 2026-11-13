@@ -62,7 +62,8 @@ export const metadata: Metadata = {
  */
 function Code({ children }: { children: string }) {
   return (
-    <pre className="overflow-x-auto rounded-[12px] bg-[#15112e] p-4 text-[0.8125rem] leading-relaxed text-[#ece9ff]">
+    // Wider than a phone, so it scrolls: it takes the keyboard's focus, and the arrow keys scroll it (2.1.1).
+    <pre tabIndex={0} className="overflow-x-auto rounded-[12px] bg-[#15112e] p-4 text-[0.8125rem] leading-relaxed text-[#ece9ff]">
       <code>{children}</code>
     </pre>
   );

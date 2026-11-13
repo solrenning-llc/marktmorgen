@@ -10,7 +10,7 @@
  *     text changes and its digest does not, this fails, so whoever changes it
  *     decides whether what it says changed (new "updated" day) or only a comma
  *     or a link (same day), and puts the new digest either way;
- *   - an answer's page says "Added" and, when it changed since, "Last updated",
+ *   - an answer's page says "Added" and "Last updated" (the same day when it never changed),
  *     each in a <time> element; /help lists the newest and the recently
  *     updated answers, at most 5 each, with their days.
  */
@@ -45,7 +45,12 @@ async function main(): Promise<void> {
     const d = HELP_DATES[a.id];
     const html = renderToStaticMarkup(await HelpAnswerPage({ params: Promise.resolve({ section: a.section, answer: a.id }) }));
     is("Added, in a time element, with the day in US English", html.includes(`Added <time dateTime="${d.created}">${helpDay(d.created)}</time>`), true);
-    is("Last updated only when it changed since", html.includes("Last updated"), d.updated > d.created);
+    is("Last updated, always, in a time element", html.includes(` · Last updated <time dateTime="${d.updated}">${helpDay(d.updated)}</time>`), true);
+    const never = answers.find((x) => HELP_DATES[x.id] && HELP_DATES[x.id].updated === HELP_DATES[x.id].created);
+    if (never) {
+      const page = renderToStaticMarkup(await HelpAnswerPage({ params: Promise.resolve({ section: never.section, answer: never.id }) }));
+      is("an answer never changed: Last updated is the day it was added", page.includes(` · Last updated <time dateTime="${HELP_DATES[never.id].created}">`), true);
+    }
     const list = datedAnswers(HELP_DATES);
     const help = renderToStaticMarkup(createElement(HelpPage)).replace(/&#x27;/g, "'").replace(/&amp;/g, "&");
     const newest = newestAnswers(list);
@@ -53,7 +58,8 @@ async function main(): Promise<void> {
     is("at most 5 of each", [newest.length <= 5, updated.length <= 5], [true, true]);
     is("the newest answers listed on /help, newest first, with their day", newest.every((r) => help.includes(r.q) && help.includes(`<time dateTime="${r.created}"`)) && newest.every((r, i) => i === 0 || newest[i - 1].created >= r.created), true);
     is("recently updated: only answers that changed after they were written, newest change first", updated.every((r, i) => r.updated > r.created && (i === 0 || updated[i - 1].updated >= r.updated)), true);
-    is("a day in US English", helpDay("2026-11-12"), "Nov 12, 2026");
+    is("a day in US English, the month in full", helpDay("2026-11-12"), "November 12, 2026");
+    is("/help claims no single \"checked\" day for every answer: each answer carries its own dates", /Checked against the product/i.test(help), false);
   }
   done();
 }

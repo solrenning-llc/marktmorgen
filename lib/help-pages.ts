@@ -71,8 +71,8 @@ export function helpTopics(): HelpTopic[] {
     });
 }
 
-/** A day kept as YYYY-MM-DD (UTC), in US English: "Nov 12, 2026". */
-export const helpDay = (day: string) => new Date(`${day}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+/** A day kept as YYYY-MM-DD (UTC), in US English with the month in full, never an abbreviation (3.1.4): "November 12, 2026". */
+export const helpDay = (day: string) => new Date(`${day}T12:00:00Z`).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
 
 export type DatedAnswer = { section: string; id: string; q: string; created: string; updated: string };
 

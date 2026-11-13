@@ -58,12 +58,9 @@ export default async function HelpAnswerPage({ params }: Params) {
             <p className="mt-3 text-sm text-ink-soft" data-help-dates>
               {"Added "}
               <time dateTime={HELP_DATES[found.id].created}>{helpDay(HELP_DATES[found.id].created)}</time>
-              {HELP_DATES[found.id].updated > HELP_DATES[found.id].created ? (
-                <>
-                  {" · Last updated "}
-                  <time dateTime={HELP_DATES[found.id].updated}>{helpDay(HELP_DATES[found.id].updated)}</time>
-                </>
-              ) : null}
+              {/* Always said, as HC1's complement asks: for an answer never changed since, the day it was added. */}
+              {" · Last updated "}
+              <time dateTime={HELP_DATES[found.id].updated}>{helpDay(HELP_DATES[found.id].updated)}</time>
             </p>
           ) : null}
           <div className="mt-6 space-y-4" data-help-answer>

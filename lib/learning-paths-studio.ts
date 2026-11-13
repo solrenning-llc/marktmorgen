@@ -21,7 +21,7 @@ export function pathsRefusal(problem: PathsProblem, index: number): string {
     case "courses":
       return `${which}choose ${MIN_PATH_COURSES} to ${MAX_PATH_COURSES} of your courses, each once.`;
     case "order":
-      return `${which}choose whether its courses open one after another or in any order.`;
+      return `${which}choose whether the path suggests its courses one after another or in no order.`;
     case "too_many":
       return `A store keeps up to ${MAX_PATHS} paths. Remove one before adding another.`;
     case "list":

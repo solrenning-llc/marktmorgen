@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { MAX_PATHS, MAX_PATH_COURSES, MAX_PATH_NAME, MIN_PATH_COURSES, type PathOrder, type StoredPath } from "@/lib/learning-path-rules";
 
 /**
@@ -24,6 +24,15 @@ export function LearningPathsEditor({ initial, courses }: { initial: StoredPath[
   const [picked, setPicked] = useState<Record<number, string>>({});
   const [busy, setBusy] = useState(false);
   const [said, setSaid] = useState<{ ok: boolean; text: string } | null>(null);
+  // Where the focus goes once an action took away the control that held it (WCAG 2.4.3, cloud J on #3723): the
+  // control that takes its place, focused after the page drew it.
+  const [focusTo, setFocusTo] = useState<string | null>(null);
+  useEffect(() => {
+    if (!focusTo) return;
+    const id = focusTo;
+    setFocusTo(null);
+    requestAnimationFrame(() => document.getElementById(id)?.focus());
+  }, [focusTo]);
 
   if (initial === null) {
     return <p className="notice notice-warn">Your paths could not be read just now. Nothing is shown here so nothing is saved over them; reload the page in a moment.</p>;
@@ -77,7 +86,7 @@ export function LearningPathsEditor({ initial, courses }: { initial: StoredPath[
         const left = courses.filter((c) => !path.courses.includes(c.id));
         return (
           <fieldset key={path.id ?? `new-${i}`} className="card space-y-4 p-5 sm:p-6">
-            <legend className="px-1 text-lg font-semibold text-ink">{`Path ${i + 1}`}</legend>
+            <legend id={`path-${i}-legend`} tabIndex={-1} className="px-1 text-lg font-semibold text-ink">{`Path ${i + 1}`}</legend>
             <div>
               <label htmlFor={`path-${i}-name`} className="field-label block">Name</label>
               <input id={`path-${i}-name`} className="field mt-1" value={path.name} maxLength={MAX_PATH_NAME} onChange={(event) => change(i, { name: event.target.value })} />
@@ -104,7 +113,20 @@ export function LearningPathsEditor({ initial, courses }: { initial: StoredPath[
                       <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{`${k + 1}. ${title}`}</span>
                       <button type="button" className={button} aria-label={`Move up: ${title}`} disabled={k === 0} onClick={() => move(i, k, -1)}>Move up</button>
                       <button type="button" className={button} aria-label={`Move down: ${title}`} disabled={k === path.courses.length - 1} onClick={() => move(i, k, 1)}>Move down</button>
-                      <button type="button" className={button} aria-label={`Take out: ${title}`} onClick={() => change(i, { courses: path.courses.filter((c) => c !== id) })}>Take out</button>
+                      <button
+                        type="button"
+                        id={`path-${i}-out-${id}`}
+                        className={button}
+                        aria-label={`Take out: ${title}`}
+                        onClick={() => {
+                          const rest = path.courses.filter((c) => c !== id);
+                          change(i, { courses: rest });
+                          // The course now in its place, else the box to add one.
+                          setFocusTo(rest[k] ? `path-${i}-out-${rest[k]}` : `path-${i}-add`);
+                        }}
+                      >
+                        Take out
+                      </button>
                     </li>
                   );
                 })}
@@ -146,6 +168,7 @@ export function LearningPathsEditor({ initial, courses }: { initial: StoredPath[
                 setRemoved((list) => [...list, { path, at: i }]);
                 setPicked({});
                 setPaths((list) => list.filter((_, j) => j !== i));
+                setFocusTo("paths-put-back");
               }}
             >
               {`Remove path ${i + 1}`}
@@ -158,12 +181,14 @@ export function LearningPathsEditor({ initial, courses }: { initial: StoredPath[
           <span>{`Removed "${removed[removed.length - 1].path.name || "a path"}"${removed.length > 1 ? ` and ${removed.length - 1} more` : ""}. Each is gone once you save.`}</span>
           <button
             type="button"
+            id="paths-put-back"
             className={button}
             onClick={() => {
               const last = removed[removed.length - 1];
               setPaths((list) => [...list.slice(0, last.at), last.path, ...list.slice(last.at)]);
               setRemoved((list) => list.slice(0, -1));
               setPicked({});
+              setFocusTo(`path-${last.at}-legend`);
             }}
           >
             Put it back
@@ -176,7 +201,7 @@ export function LearningPathsEditor({ initial, courses }: { initial: StoredPath[
             Add a path
           </button>
         ) : null}
-        <button type="submit" className="btn btn-primary min-h-11" aria-disabled={busy || undefined}>
+        <button type="submit" className="btn btn-primary inline-flex min-h-11 items-center justify-center" aria-disabled={busy || undefined}>
           {busy ? "Saving…" : "Save paths"}
         </button>
       </div>

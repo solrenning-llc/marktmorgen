@@ -17,6 +17,8 @@ import { ORDER_PROBLEM_REASONS } from "@/lib/order-problem-rules";
 import { orderProblemWords } from "@/lib/buyer-words/order-problem";
 import ProblemPage, { generateMetadata } from "@/app/[handle]/orders/problem/page";
 import OrdersPage from "@/app/[handle]/orders/page";
+import { POST as problemRoute } from "@/app/api/store/order-problem/route";
+import { NextRequest } from "next/server";
 
 const OWNER = "mara@example.com";
 const BUYER = "ana@example.com";
@@ -213,4 +215,21 @@ test("purchases this page does not list are said as such, never 'no orders' (rev
   assert.ok(page.includes("olderOf(opened.meter).count"), "the page reads how many older purchases the opening left");
   assert.ok(/older > 0 \? <p[^>]*>\{w\.olderNotListed\}/.test(page), "and says them when there are any");
   assert.ok(/choices\.length === 0 && older === 0/.test(page) || /!choices\.length && !older/.test(page), "'no orders' only when nothing waits either");
+});
+
+test("a report of this order already on its way is never 'nothing was sent', and shows no form to send it twice (review of #3838 at 76d74dd140, MÉDIO)", async () => {
+  const { store, product, token } = await shop();
+  sessions = [paid("onitsway", product, Math.floor(Date.now() / 1000) - DAY)];
+  const ref = sessions[0].id as string;
+  // A double click, or a retry inside the minutes the mark is kept after an answer not known: the mark is pending.
+  await redis.pipeline([["SET", `nl:oprob:${store.sid}:${ref}`, "pending", "EX", 300]]);
+  const answer = await problemRoute(new NextRequest(`${ORIGIN}/api/store/order-problem`, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ handle: "mara", token, ref, reason: "cannot_access", note: "" }).toString() }));
+  const state = new URL(answer.headers.get("location") ?? "https://x").searchParams.get("problem") ?? "";
+  const html = unescape(await render({ token, ref, problem: state }));
+  assert.ok(!/Nothing was sent/i.test(html), "never 'nothing was sent' while a report of it is on its way");
+  const pending = String((en as unknown as Record<string, unknown>).pendingNow ?? "");
+  assert.ok(pending.length > 20 && html.includes(pending), "said as a report already on its way");
+  assert.ok(!html.includes('action="/api/store/order-problem"'), "no form, so it is not sent twice");
+  const languages = ["en", "es", "fr", "de", "it", "nl", "pt"].map((code) => orderProblemWords(code) as unknown as Record<string, unknown>);
+  assert.ok(languages.every((one) => typeof one.pendingNow === "string" && (one.pendingNow as string).length > 20), "every language says it");
 });

@@ -23,7 +23,7 @@ export function BundleToggle({ product }: { product: Product }) {
           A buyer gets every product in it, each exactly as if they had bought it on its own: its download or link, its course and its license key.
         </p>
         <Link href={href} className="btn btn-primary btn-sm mt-3">
-          Choose what is in it
+          Choose what is in it<span className="sr-only">{`: ${product.title}`}</span>
         </Link>
       </div>
     );
@@ -32,7 +32,8 @@ export function BundleToggle({ product }: { product: Product }) {
   return (
     <p className="mt-3">
       <Link href={href} className="text-sm font-bold text-ink-soft underline underline-offset-4 transition hover:text-violet-deep">
-        Sell this as a bundle of your products
+        {/* Which product, for a screen reader's list of links (WCAG 2.4.9): each row has this link. */}
+        Sell this as a bundle of your products<span className="sr-only">{`: ${product.title}`}</span>
       </Link>
     </p>
   );

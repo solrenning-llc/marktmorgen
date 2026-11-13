@@ -233,13 +233,15 @@ export function CheckoutExtras({
               {`${product.funnel.steps.length === 1 ? "One offer" : `${product.funnel.steps.length} offers`} after paying`}
             </span>
             {" \u00b7 "}
-            <Link href={studioHref(`/studio/funnels?product=${product.id}`)} className={link}>Edit the funnel</Link>
+            <Link href={studioHref(`/studio/funnels?product=${product.id}`)} className={link}>Edit the funnel<span className="sr-only">{`: ${product.title}`}</span></Link>
           </p>
           <Quiet lines={notes?.funnel ?? []} />
         </div>
       ) : (
         <Link href={studioHref(`/studio/funnels?product=${product.id}`)} className={`block ${link}`}>
+          {/* Which product, for a screen reader's list of links (WCAG 2.4.9): each row has this link. */}
           Offer more after they pay
+          <span className="sr-only">{`: ${product.title}`}</span>
         </Link>
       )}
       {product.pwyw ? (

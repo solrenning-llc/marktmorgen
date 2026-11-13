@@ -266,7 +266,7 @@ async function main(): Promise<void> {
   part("The /developers example is the answer's own shape");
   const page = readFileSync(join(process.cwd(), "app/developers/page.tsx"), "utf8");
   const section = page.slice(page.indexOf('<Endpoint path="/api/v1/sales">'));
-  const example = JSON.parse(section.slice(section.indexOf("<Code>{`") + 8, section.indexOf("`}</Code>"))) as { data: Record<string, unknown>[] };
+  const example = JSON.parse(section.slice(section.indexOf("{`", section.search(/<Code[^>]*>\{`/)) + 2, section.indexOf("`}</Code>"))) as { data: Record<string, unknown>[] };
   const shape = (v: unknown): unknown => (Array.isArray(v) ? v.slice(0, 1).map(shape) : v && typeof v === "object" ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, shape(x)])) : null);
   pages = [{ object: "list", has_more: true, data: [session("cs_test_doc", {}, { bump: "p_extra", bundle: "p_x" })] }];
   const real = (await call()).body;

@@ -339,7 +339,6 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
     delete copy.acct;
     // So is the refund the book kept on it (lib/affiliates.ts, AFFILIATE_REFUND_MARK).
     delete copy.rf;
-    delete copy.rfa;
     return [copy];
   },
   // Read whether or not the store still lets imported buyers in (importedFor asks that, and notes them as it reads).

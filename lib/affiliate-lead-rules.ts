@@ -164,13 +164,26 @@ export type LeadRecord = {
    */
   acct?: string;
   /**
-   * A booking's refund as last read on that account, in cents, and the account (lib/affiliates.ts,
+   * A booking's refund as last read on its own account (`acct`), in cents written in base 36 (lib/affiliates.ts,
    * AFFILIATE_REFUND_MARK), kept so it still counts after a move to another one; only ever raised. Like `acct`, read
    * only by the book: never on a line or in a person's copy.
    */
-  rf?: number;
-  rfa?: string;
+  rf?: string;
 };
+
+/**
+ * The most a refund mark (lib/affiliates.ts, AFFILIATE_REFUND_MARK) adds to a record: `,"rf":"` (7), the largest safe
+ * whole number in base 36 (11, "2gosa7pa2gv") and the closing quote (1). Counted in an order's parts
+ * (tests/store-data-registry.ts) and in the room a lead takes when it is written (lib/affiliate-leads.ts).
+ */
+export const REFUND_MARK_MAX_BYTES = 7 + Number.MAX_SAFE_INTEGER.toString(36).length + 1;
+
+/** A refund mark's cents, read exactly: base 36 digits of a whole number from 0 up to the largest safe one; else null. */
+export function readRefundMark(text: string): number | null {
+  if (!/^(0|[1-9a-z][0-9a-z]{0,10})$/.test(text)) return null;
+  const n = parseInt(text, 36);
+  return Number.isSafeInteger(n) && n >= 0 && n.toString(36) === text ? n : null;
+}
 
 export type LeadStatus =
   | "waiting for the call"
@@ -231,7 +244,7 @@ export function parseLead(raw: unknown): LeadRecord | null {
       // Kept exactly as written, so a decision written back keeps it: any other value is still another account than the store's.
       ...(v.acct !== undefined ? { acct: typeof v.acct === "string" ? v.acct : "" } : {}),
       // Kept whole when a decision is written back, so a refund once read is never lost; one not whole is not a mark.
-      ...(Number.isSafeInteger(v.rf) && (v.rf as number) >= 0 && typeof v.rfa === "string" && v.rfa !== "" ? { rf: v.rf, rfa: v.rfa } : {}),
+      ...(typeof v.rf === "string" && readRefundMark(v.rf) !== null ? { rf: v.rf } : {}),
     };
   } catch {
     return null;

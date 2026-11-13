@@ -115,7 +115,7 @@ import { plainAmount } from "@/lib/money";
 import { alertCreator } from "@/lib/phone-alerts";
 import { bumpsFromMeta } from "@/lib/bundle-rules";
 import { affiliatesWords } from "@/lib/buyer-words/affiliates";
-import { type LeadKind, type LeadReason, type LeadStatus, type SettledLead, leadsKey, parseLead, settleLeads } from "@/lib/affiliate-lead-rules";
+import { type LeadKind, type LeadReason, type LeadStatus, type SettledLead, leadsKey, parseLead, readRefundMark, settleLeads } from "@/lib/affiliate-lead-rules";
 import { readMoves } from "@/lib/call-records";
 import { leadWords } from "@/lib/buyer-words/affiliate-leads";
 import { formatMoney } from "@/lib/money";
@@ -2937,8 +2937,12 @@ export async function disputesSince(store: Store, since: number, deadline?: numb
 
 /**
  * A refund read on the account a Stripe sale, a partner's share of it or a booked call's lead was paid into, kept on
- * its record (`rf`, what was given back or disputed then, in cents; `rfa`, that account), so it still counts once the
- * creator moved to another account and it can no longer be read (readBook). Each record's field is written only over
+ * its record, so it still counts once the creator moved to another account and it can no longer be read (readBook).
+ * The mark is one field, `rf`: what was given back or disputed then, in cents, written in base 36 as a string
+ * (REFUND_MARK_MAX_BYTES at the most, counted in an order's parts and a lead's room). The account it was read on is
+ * the record's own `acct`, the account the line was paid into, written once with it and never changed: a mark is only
+ * written while that `acct` is the store's account, into the same text, so it names exactly that account and can
+ * never be taken for another one; a record without `acct` has no mark. Each record's field is written only over
  * exactly the text read (its SHA-1), with `rf` the larger of what was kept and what was read, so it only ever rises:
  * a record changed in between is left for the next reading. Never on a line, a file, a kept book or a person's copy.
  */
@@ -2955,13 +2959,15 @@ return n`;
 
 type RefundMark = { rf: number; rfa: string };
 
-/** A record's kept refund (AFFILIATE_REFUND_MARK), read exactly: whole cents from 0 up and an account; else none. */
+/**
+ * A record's kept refund (AFFILIATE_REFUND_MARK), read exactly: whole cents from 0 up in base 36 and the record's own
+ * account (`acct`, a string that is not empty); else none.
+ */
 function refundMarkOf(raw: string): RefundMark | null {
   try {
     const value = JSON.parse(raw) as Record<string, unknown>;
-    return Number.isSafeInteger(value.rf) && (value.rf as number) >= 0 && typeof value.rfa === "string" && value.rfa !== ""
-      ? { rf: value.rf as number, rfa: value.rfa }
-      : null;
+    const rf = typeof value.rf === "string" ? readRefundMark(value.rf) : null;
+    return rf !== null && typeof value.acct === "string" && value.acct !== "" ? { rf, rfa: value.acct } : null;
   } catch {
     return null;
   }
@@ -3076,8 +3082,7 @@ export function stripeWait(deadline: number | undefined, now = Date.now()): numb
 }
 
 /**
- * Keeps each refund read on its own account on its record (AFFILIATE_REFUND_MARK): the record's text with `rf` and
- * `rfa` set, written only over exactly the text read, one script per hash, all in one pipeline. Only records whose
+ * Keeps each refund read on its own account on its record (AFFILIATE_REFUND_MARK): the record's text with `rf` set, written only over exactly the text read, one script per hash, all in one pipeline. Only records whose
  * kept refund rises are sent, REFUND_MARKS_PER_READ at the most, so what a reading costs stays bounded: a kept refund
  * that rises first (one kept lower would be paid on after a move), then those never kept, newest first; the rest at
  * the next reading. A reading with none sends nothing.
@@ -3089,7 +3094,10 @@ async function markRefunds(account: string, marks: { key: string; field: string;
   for (const m of chosen) {
     let next: string;
     try {
-      next = JSON.stringify({ ...(JSON.parse(m.raw) as Record<string, unknown>), rf: m.rf, rfa: account });
+      const record = JSON.parse(m.raw) as Record<string, unknown>;
+      // Only into a record that names this account as its own (the mark's account is its `acct`).
+      if (record.acct !== account || !Number.isSafeInteger(m.rf) || m.rf < 0) continue;
+      next = JSON.stringify({ ...record, rf: m.rf.toString(36) });
     } catch {
       continue;
     }

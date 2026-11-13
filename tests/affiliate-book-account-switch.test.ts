@@ -16,7 +16,7 @@ import { owedLines } from "@/lib/affiliate-payouts";
 import { bookSlice, keptSlice } from "@/lib/affiliate-book-snapshot";
 import { COPIERS } from "@/lib/person-copy";
 import { decideLeads, readLeads, recordLead } from "@/lib/affiliate-leads";
-import { leadsKey } from "@/lib/affiliate-lead-rules";
+import { REFUND_MARK_MAX_BYTES, leadsKey, readRefundMark } from "@/lib/affiliate-lead-rules";
 import { claimHandle, clearStripeAccount, ensureStatsId, setAffiliateSetting, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -229,13 +229,17 @@ async function main(): Promise<void> {
   const markOf = async (pi: string) => {
     const [raw] = await redis.pipeline([["HGET", `nl:aff:${markStats}:sales`, pi]]);
     const value = JSON.parse(String(raw)) as Record<string, unknown>;
-    return [value.rf, value.rfa];
+    // The mark is `rf` in base 36; the account it was read on is the record's own `acct`, never a field of its own.
+    return [typeof value.rf === "string" && /^[0-9a-z]+$/.test(value.rf) ? parseInt(value.rf, 36) : value.rf, "rfa" in value ? value.rfa : value.acct];
   };
   book = await readBook((await storeForEmail(MARK_OWNER))!);
   is("control: read on the old account, the refunded sale earns nothing", book.lines.find((l) => l.pi === "pi_1MarkRefunded")?.commission, 0);
   is("the refund read on the sale's own account is kept on the sale, with the account", await markOf("pi_1MarkRefunded"), [10_000, OLD]);
   is("a partial refund is kept as read", await markOf("pi_1MarkPart"), [4_000, OLD]);
   is("the kept refund is never on a line", book.lines.some((line) => "rf" in line || "rfa" in line), false);
+  is("the mark is within REFUND_MARK_MAX_BYTES of the record", (await redis.pipeline([["HGET", `nl:aff:${markStats}:sales`, "pi_1MarkRefunded"]]).then(([raw]) => String(raw).length)) - JSON.stringify({ ...JSON.parse(String((await redis.pipeline([["HGET", `nl:aff:${markStats}:sales`, "pi_1MarkRefunded"]]))[0])), rf: undefined }).length <= REFUND_MARK_MAX_BYTES, true);
+  is("the largest mark fits REFUND_MARK_MAX_BYTES", `,"rf":${JSON.stringify(Number.MAX_SAFE_INTEGER.toString(36))}`.length, REFUND_MARK_MAX_BYTES);
+  is("a mark not in exact base 36 is not a mark", [readRefundMark("00"), readRefundMark("-1"), readRefundMark("A"), readRefundMark("2gosa7pa2gw"), readRefundMark("7ps")], [null, null, null, null, 10_000]);
   // A later smaller read never lowers what was kept; a larger one raises it.
   refundsOn[OLD] = refundsOn[OLD].map((r) => (r.id === "re_old_part" ? { ...r, amount: 1_000 } : r));
   await readBook((await storeForEmail(MARK_OWNER))!);
@@ -286,7 +290,8 @@ async function main(): Promise<void> {
   part("a booked call's kept refund never reaches the person's copy of their lead");
   const leadCopy = (await COPIERS["lib/affiliate-leads.ts"]({ store: (await storeForEmail(LEAD_OWNER))!, email: "caller@example.com" } as unknown as Parameters<(typeof COPIERS)[string]>[0])) as Record<string, unknown>[];
   const [leadRaw] = await redis.pipeline([["HGET", leadsKey(leadStats), String(leadCopy[0]?.id)]]);
-  is("the lead's refund read on its own account was kept", [(JSON.parse(String(leadRaw)) as Record<string, unknown>).rf, (JSON.parse(String(leadRaw)) as Record<string, unknown>).rfa], [5_000, OLD]);
+  const leadKept = JSON.parse(String(leadRaw)) as Record<string, unknown>;
+  is("the lead's refund read on its own account was kept", [typeof leadKept.rf === "string" ? parseInt(leadKept.rf, 36) : leadKept.rf, "rfa" in leadKept ? leadKept.rfa : leadKept.acct], [5_000, OLD]);
   is("the person's copy leaves it out", leadCopy.some((l) => "rf" in l || "rfa" in l || "acct" in l), false);
   done();
 }

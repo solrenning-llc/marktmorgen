@@ -51,7 +51,7 @@
 import { createHash } from "node:crypto";
 import { onAccount, StripeError } from "@/lib/stripe-account";
 import { saleHandles, type Store } from "@/lib/store";
-import { claimMark } from "@/lib/claim-mark";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { logTeam } from "@/lib/team";
 import type { Role } from "@/lib/team-roles";
 import { formatMoney } from "@/lib/money";
@@ -242,8 +242,13 @@ async function settle(store: Store, who: { email: string; role: Role }, chargeId
           ? `Refund of ${money} on payment ${chargeId} refused by Stripe`
           : `Sent a refund of ${money} on payment ${chargeId}; Stripe's answer could not be read`;
   const toldFor = state === "unknown" ? key : String((record(reply) ?? {}).id);
-  if ((await claimMark(toldKey(toldFor), TOLD_DAYS * 86_400)) !== "taken" && store.sid) {
-    await logTeam(store.sid, { who: who.email, role: who.role, what });
+  // Marked as told first, so two answers at once write one line; a line not known written lets its own mark go, so the
+  // same form sent again (Stripe answers the first refund) writes it then (Codex G and Claude 1 on #3678).
+  const value = claimValue();
+  const claimed = await claimMark(toldKey(toldFor), TOLD_DAYS * 86_400, value);
+  if (claimed !== "taken" && store.sid) {
+    const logged = await logTeam(store.sid, { who: who.email, role: who.role, what });
+    if (!logged && claimed === "ours") await releaseMark(toldKey(toldFor), value).catch((error) => console.error("letting a refund's told mark go failed", error));
   }
   if (state === "unknown") return fail("unknown");
   if (state === "failed") return fail("refund_failed");

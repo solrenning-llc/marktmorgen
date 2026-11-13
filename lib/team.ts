@@ -355,16 +355,20 @@ export async function memberStores(email: string): Promise<{ store: Store; role:
 }
 
 /** Writes one line into a store's activity log. Never throws. */
-export async function logTeam(sid: string, line: Omit<LogLine, "at">): Promise<void> {
-  if (!STORE_ID_PATTERN.test(sid) || !isRedisConfigured()) return;
+export async function logTeam(sid: string, line: Omit<LogLine, "at">): Promise<boolean> {
+  if (!STORE_ID_PATTERN.test(sid) || !isRedisConfigured()) return false;
   const entry: LogLine = { at: new Date().toISOString(), who: normaliseEmail(line.who), role: line.role, what: line.what.slice(0, 200) };
+  // Whether the line is known written (its LPUSH answered a count of at least one): a caller that marks a line as told
+  // can let the mark go when it was not (lib/creator-refund.ts). Never throws, as before.
   try {
-    await redisPipeline([
+    const [pushed] = await redisPipeline([
       ["LPUSH", logKey(sid), JSON.stringify(entry)],
       ["LTRIM", logKey(sid), 0, LOG_LINES - 1],
     ]);
+    return typeof pushed === "number" && Number.isSafeInteger(pushed) && pushed >= 1;
   } catch (error) {
     console.error("writing the team log failed", error);
+    return false;
   }
 }
 

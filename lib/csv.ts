@@ -9,7 +9,9 @@
  *   - a byte-order mark at the start (Excel's "CSV UTF-8" writes one), which
  *     is dropped rather than read as part of the first column's name;
  *   - commas, semicolons (Excel in much of Europe) or tabs between cells —
- *     whichever the first line uses outside quotes;
+ *     whichever the first line uses outside quotes, unless the file starts
+ *     with Excel's "sep=;" line naming it, which is then dropped (it is not
+ *     the header, and not a row toward any limit);
  *   - cells in double quotes, holding the separator, line breaks, or a quote
  *     written twice ("") for one;
  *   - lines ending in \r\n, \n or \r, and blank lines, which are skipped.
@@ -62,15 +64,18 @@ export function detectSeparator(text: string): Separator {
  * that is longer says so with `truncated`.
  */
 export function parseCsv(input: string, maxRows = Number.POSITIVE_INFINITY): ParsedCsv {
-  const text = input.charCodeAt(0) === 0xfeff ? input.slice(1) : input;
-  const separator = detectSeparator(text);
+  const unmarked = input.charCodeAt(0) === 0xfeff ? input.slice(1) : input;
+  // Excel's "sep=;" first line names the separator; dropped, the file's own line numbers kept.
+  const hint = /^sep=([,;\t])(?:\r\n|\r|\n|$)/.exec(unmarked);
+  const text = hint ? unmarked.slice(hint[0].length) : unmarked;
+  const separator = hint ? (hint[1] as Separator) : detectSeparator(text);
   const all: string[][] = [];
   const lines: number[] = [];
   let row: string[] = [];
   let cell = "";
   let quoted = false;
-  let line = 1;
-  let rowLine = 1;
+  let line = hint ? 2 : 1;
+  let rowLine = line;
   let truncated = false;
   const endRow = () => {
     row.push(cell);

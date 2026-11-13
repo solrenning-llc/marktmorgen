@@ -37,8 +37,8 @@ async function main() {
  is("idempotent commission",book.lines.filter(l=>l.ref==="cs_post1").length,1);
  is("book parser preserves labels",book.lines.find(l=>l.ref==="cs_post1")?.promotion,{source:"instagram",campaign:"launch",content:"story-a"});
  const csv=bookCsv(book,[]);
- is("export headers",csv.split("\r\n")[0].endsWith("campaign_channel,campaign_name,post_variant"),true);
- is("export values",csv.includes("instagram,launch,story-a"),true);
+ is("export headers",csv.split("\r\n")[0].endsWith("\"campaign_channel\",\"campaign_name\",\"post_variant\""),true);
+ is("export values",csv.includes("\"instagram\",\"launch\",\"story-a\""),true);
  const grouped=affiliatePromotionRows(book.lines);
  is("groups actual purchases, not generated second-tier",grouped.map(g=>[g.paidRecords,g.commission]),[[3,4000]]);
  await redis.pipeline([["HSET","nl:aff:statsid1:sales","cs_legacy",JSON.stringify({ref:"cs_legacy",pi:"pi_legacy",aff:affiliate,at:1760000000,product:"course",title:"Course",base:1000,total:1000,currency:"usd",rate:20,self:false,how:"click"})]]);

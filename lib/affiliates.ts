@@ -73,6 +73,7 @@
  *   nl:aff:<id>:sales    hash  Stripe reference -> the sale
  *   nl:aff:<id>:payouts  hash  payout id -> what the creator says they paid
  */
+import { csvCell as sharedCsvCell } from "@/lib/csv";
 import { rememberAffiliate } from "@/lib/affiliate-hub";
 import { type Paid, paypalPaymentId, readPayPalRefundsWithCoverage, refundedKey as paypalRefundedKey } from "@/lib/paypal-sales";
 import { MAX_STORE_BYTES, saleHandles, storeForEmailSeen, storeForId, storeRef } from "@/lib/store";
@@ -3490,12 +3491,12 @@ export async function releaseHold(store: Store, id: string): Promise<Affiliate |
 /** What each kind of lead is called in the book's spreadsheet. */
 const LEAD_KIND_WORDS: Record<LeadKind, string> = { signup: "Lead: email sign-up", free: "Lead: free product claimed", booking: "Lead: call that took place" };
 
-const csvCell = (value: string | number) => {
-  const text = String(value);
-  // A cell a spreadsheet would read as a formula is written as text.
-  const safe = /^[=+\-@\t\r]/.test(text) ? `'${text}` : text;
-  return /[",\n\r]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
-};
+/**
+ * One cell of the book: the platform's one rule (lib/csv.ts csvCell), always quoted and never a formula, leading
+ * spaces included. Always quoted, because Excel set to ";" (Brazil, most of Europe) splits an unquoted
+ * "x;=HYPERLINK(…)" campaign name, typed by anyone in a link, into a cell that runs (R31, tests/csv-one-cell-rule.test.ts).
+ */
+const csvCell = (value: string | number) => sharedCsvCell(value);
 
 /** The whole book as a spreadsheet: every sale and every payout, one per line. */
 export function bookCsv(book: Book, all: Affiliate[]): string {

@@ -1,3 +1,4 @@
+import { csvCell as sharedCsvCell } from "@/lib/csv";
 import {measureSalesLevers,type LeverReading} from "@/lib/sales-levers";
 import { rangeTrafficCoverage, statsTrafficCoverage } from "@/lib/range-traffic-coverage";
 import { creativeRowsFrom } from "@/lib/creative-results";
@@ -2470,9 +2471,8 @@ export function studioStats(
  * is text somebody else typed and must never run on the creator's computer.
  */
 export function csvCell(value: string | number): string {
-  const text = String(value);
-  const safe = /^[=+\-@\t\r]/.test(text) ? `'${text}` : text;
-  return `"${safe.replace(/"/g, '""')}"`;
+  // The platform's one rule (lib/csv.ts), which also looks past leading spaces (" =HYPERLINK(…)").
+  return sharedCsvCell(value);
 }
 
 export function csvRow(values: (string | number)[]): string {

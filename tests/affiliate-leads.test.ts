@@ -210,7 +210,7 @@ async function main(): Promise<void> {
   book = await readBook(store);
   is("reversed: nothing owed, and the affiliate sees why", [leadLine().status, leadLine().lead?.why, row().owed], ["not genuine", "duplicate", 0]);
   is("undone, it waits for approval again", [await decideLeads(store, [kept[0].id], "reopen"), (book = await readBook(store), leadLine().status)], [{ ok: true, changed: 1 }, "needs approval"]);
-  is("in the spreadsheet as a lead", bookCsv(book, book.rows.map((r) => r.affiliate)).split("\r\n").some((line) => line.startsWith("lead,") && line.includes("Lead: email sign-up") && line.includes("needs approval")), true);
+  is("in the spreadsheet as a lead", bookCsv(book, book.rows.map((r) => r.affiliate)).split("\r\n").some((line) => line.startsWith("\"lead\",") && line.includes("Lead: email sign-up") && line.includes("needs approval")), true);
   const own = await readBook(store, ANA);
   is("Ana's own page has her lead", own.lines.filter((l) => l.how === "lead").length, 1);
   // A second affiliate sharing Ana's inbox holds what she is owed, leads included.

@@ -24,6 +24,9 @@ import { claimHandle, setStripeAccount, storeForEmail } from "@/lib/store";
 import { applyMemberDiscount, memberSubs } from "@/lib/member-discount";
 import { done, is, part } from "./check";
 
+/** The rows of a lookup, or null when it is not a list ("unreadable" or unreachable): an assertion on rows then fails. */
+const listed = <T,>(value: T[] | "unreadable" | null): T[] | null => (Array.isArray(value) ? value : null);
+
 process.env.STRIPE_SECRET_KEY = "sk_test_member_lists_cut_short";
 
 const posted: string[] = [];
@@ -39,6 +42,8 @@ const membership = (id: string, extra: Record<string, unknown> = {}) => ({
   status: "active",
   metadata: { store: "cutshortmember", product: "prod000001" },
   items: { data: [{ price: { unit_amount: 2900, currency: "usd", recurring: { interval: "month" } } }] },
+  // Stripe sends `discounts` on every subscription at this API version, empty when there is none (#2979: a missing one is not known).
+  discounts: [],
   ...extra,
 });
 
@@ -77,7 +82,7 @@ async function main(): Promise<void> {
   try {
     customersPage = { object: "list", data: [{ id: "cus_member0001" }], has_more: false };
     subscriptionPages = { "": { object: "list", data: [membership("sub_live000001")], has_more: false } };
-    is("a whole list: the membership is found", (await memberSubs(store, "member@example.com"))?.map((s) => s.id), ["sub_live000001"]);
+    is("a whole list: the membership is found", listed(await memberSubs(store, "member@example.com"))?.map((s) => s.id), ["sub_live000001"]);
     is("and the code goes on", await applyMemberDiscount(store, "member@example.com", "sub_live000001", "promo_active0001"), { ok: true });
     customersPage = { object: "list", data: [], has_more: false };
     is("nobody under that address, said so whole: none", await memberSubs(store, "nobody@example.com"), []);
@@ -88,13 +93,13 @@ async function main(): Promise<void> {
     part("Member discount: a list cut short or unreadable is unknown");
     posted.length = 0;
     customersPage = { object: "list", data: [{ id: "cus_member0001" }], has_more: true };
-    is("more customers under that address than were read: Stripe could not be read", await memberSubs(store, "member@example.com"), null);
+    is("more customers under that address than were read: Stripe could not be read", await memberSubs(store, "member@example.com"), "unreadable");
     customersPage = { object: "list", data: [{ id: "cus_member0001" }], has_more: false };
     subscriptionPages = {
       "": { object: "list", data: Array.from({ length: 100 }, (_, i) => membership(`sub_other${String(i).padStart(5, "0")}`, { status: "canceled" })), has_more: true },
       sub_other00099: { object: "list", data: [membership("sub_later000001")], has_more: false },
     };
-    is("a membership past the first page is found, not 'not a member'", (await memberSubs(store, "member@example.com"))?.map((s) => s.id), ["sub_later000001"]);
+    is("a membership past the first page is found, not 'not a member'", listed(await memberSubs(store, "member@example.com"))?.map((s) => s.id), ["sub_later000001"]);
     is("and the code goes on it", await applyMemberDiscount(store, "member@example.com", "sub_later000001", "promo_active0001"), { ok: true });
     posted.length = 0;
     subscriptionPages = {};
@@ -104,7 +109,7 @@ async function main(): Promise<void> {
       subscriptionPages[after] = { object: "list", data: rows, has_more: true };
       after = rows[rows.length - 1].id;
     }
-    is("more memberships than the bound of pages: Stripe could not be read, nothing is changed", [await memberSubs(store, "member@example.com"), await applyMemberDiscount(store, "member@example.com", "sub_live000001", "promo_active0001"), posted.length], [null, { ok: false, reason: "stripe" }, 0]);
+    is("more memberships than the bound of pages: Stripe could not be read, nothing is changed", [await memberSubs(store, "member@example.com"), await applyMemberDiscount(store, "member@example.com", "sub_live000001", "promo_active0001"), posted.length], ["unreadable", { ok: false, reason: "unavailable" }, 0]);
 
     part("Member discount: one find waits on no more Stripe pages than the base's worst (21)");
     const twenty = { object: "list", data: Array.from({ length: 20 }, (_, i) => ({ id: `cus_crowd${String(i).padStart(4, "0")}` })), has_more: false };
@@ -125,10 +130,10 @@ async function main(): Promise<void> {
     }
     posted.length = 0;
     gets = 0;
-    is("twenty customers of five pages each: Stripe could not be read whole", await memberSubs(store, "member@example.com"), null);
+    is("twenty customers of five pages each: Stripe could not be read whole", await memberSubs(store, "member@example.com"), "unreadable");
     is("and the find stopped within 21 pages", gets <= 21, true);
     gets = 0;
-    is("apply changes nothing on it", [await applyMemberDiscount(store, "member@example.com", "sub_live000001", "promo_active0001"), posted.length], [{ ok: false, reason: "stripe" }, 0]);
+    is("apply changes nothing on it", [await applyMemberDiscount(store, "member@example.com", "sub_live000001", "promo_active0001"), posted.length], [{ ok: false, reason: "unavailable" }, 0]);
     is("and its read stopped within 21 pages as well", gets <= 21, true);
     customersPage = { object: "list", data: [{ id: "cus_member0001" }], has_more: false };
     gets = 0;
@@ -140,7 +145,7 @@ async function main(): Promise<void> {
       ["no word on whether there is more", { object: "list", data: [] }],
     ] as const) {
       customersPage = page;
-      is(`customers, ${name}: Stripe could not be read, not 'nobody'`, await memberSubs(store, "member@example.com"), null);
+      is(`customers, ${name}: Stripe could not be read, not 'nobody'`, await memberSubs(store, "member@example.com"), "unreadable");
     }
     customersPage = { object: "list", data: [{ id: "cus_member0001" }], has_more: false };
     for (const [name, page] of [
@@ -148,10 +153,10 @@ async function main(): Promise<void> {
       ["no word on whether there is more", { object: "list", data: [membership("sub_live000001")] }],
     ] as const) {
       subscriptionPages = { "": page };
-      is(`memberships, ${name}: Stripe could not be read, not 'not a member'`, [await memberSubs(store, "member@example.com"), await applyMemberDiscount(store, "member@example.com", "sub_live000001", "promo_active0001")], [null, { ok: false, reason: "stripe" }]);
+      is(`memberships, ${name}: Stripe could not be read, not 'not a member'`, [await memberSubs(store, "member@example.com"), await applyMemberDiscount(store, "member@example.com", "sub_live000001", "promo_active0001")], ["unreadable", { ok: false, reason: "unavailable" }]);
     }
     customersPage = { object: "list", data: [{ id: 42 }], has_more: false };
-    is("a customer row with no id that can be read: Stripe could not be read", await memberSubs(store, "member@example.com"), null);
+    is("a customer row with no id that can be read: Stripe could not be read", await memberSubs(store, "member@example.com"), "unreadable");
   } finally {
     console.error = quiet;
   }

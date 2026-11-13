@@ -30,6 +30,7 @@ export async function POST(request: NextRequest) {
 
   if (action === "find") {
     const [subs, codes] = await Promise.all([memberSubs(store, email), listCodes(store.stripeAccountId)]);
+    if (subs === "unreadable") return refuse("unavailable", "Stripe's answer could not be read, so we could not check this member's memberships. Nothing was changed. Try again in a minute.", 503);
     if (subs === null || codes.state !== "ok") return refuse("stripe", "Your Stripe account could not be read just now. Try again in a minute.", 502);
     return Response.json({
       ok: true,
@@ -46,6 +47,7 @@ export async function POST(request: NextRequest) {
       code: ["That code is not active any more. Find the member again to see your active codes.", 409],
       refused: ["Stripe did not accept that code for this membership, by the code's own rules (for example a first order only, or a minimum). Nothing was changed.", 409],
       stripe: ["Your Stripe account could not be reached just now, so nothing was changed. Try again in a minute.", 502],
+      unavailable: ["Stripe's answer could not be read, so we could not check this membership. Nothing was changed. Try again in a minute.", 503],
     };
     return refuse(done.reason, words[done.reason][0], words[done.reason][1]);
   }

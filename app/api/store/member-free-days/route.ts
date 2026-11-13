@@ -30,6 +30,7 @@ export async function POST(request: NextRequest) {
 
   if (action === "find") {
     const subs = await freeDaysSubs(store, email);
+    if (subs === "unreadable") return refuse("unavailable", "Stripe's answer could not be read, so we could not check this member's memberships. Nothing was changed. Try again in a minute.", 503);
     if (subs === null) return refuse("stripe", "Your Stripe account could not be read just now. Try again in a minute.", 502);
     return Response.json({ ok: true, memberships: subs });
   }
@@ -45,6 +46,7 @@ export async function POST(request: NextRequest) {
       refused: ["Stripe did not accept the change, so nothing was changed.", 409],
       unknown: ["Stripe's answer could not be read, so this is not shown as done and the member was not emailed. Find the member again to see the next charge Stripe has before you try again.", 502],
       stripe: ["Your Stripe account could not be reached just now, so nothing was changed. Try again in a minute.", 502],
+      unavailable: ["Stripe's answer could not be read, so we could not check this membership. Nothing was changed. Try again in a minute.", 503],
     };
     const message = done.reason === "blocked" ? `That membership is ${BLOCK_WORDS[done.blocked]}. Nothing was changed.` : words[done.reason][0];
     return refuse(done.reason, message, words[done.reason][1]);

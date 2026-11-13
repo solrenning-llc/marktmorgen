@@ -20,6 +20,9 @@ import { applyMemberDiscount, memberSubs } from "@/lib/member-discount";
 import { store as redis } from "./redis-stub";
 import { done, is } from "./check";
 
+/** The rows of a lookup, or null when it is not a list ("unreadable" or unreachable): an assertion on rows then fails. */
+const listed = <T,>(value: T[] | "unreadable" | null): T[] | null => (Array.isArray(value) ? value : null);
+
 process.env.STRIPE_SECRET_KEY = "sk_test_synthetic_free_days_only";
 const now = 1_794_200_000;
 const next = now + 86_400;
@@ -57,31 +60,31 @@ async function main(): Promise<void> {
   const by = { who: owner, role: "owner" as const };
 
   // Codex S's nine probes, unchanged.
-  is("healthy member exists before injected response corruption", (await freeDaysSubs(store, "member@example.com", now))?.map((x) => x.id), [sub.id]);
+  is("healthy member exists before injected response corruption", listed(await freeDaysSubs(store, "member@example.com", now))?.map((x) => x.id), [sub.id]);
   for (mode of ["status whitespace", "status unknown"]) {
     const found = await freeDaysSubs(store, "member@example.com", now);
     const given = await giveFreeDays(store, "member@example.com", sub.id, 7, next, by, now);
-    is(`${mode}: lookup remains unknown, never an empty membership list`, found, null);
-    is(`${mode}: give reports unreadable Stripe, never confirmed not_member`, given, { ok: false, reason: "stripe" });
+    is(`${mode}: lookup remains unknown, never an empty membership list`, found, "unreadable");
+    is(`${mode}: give reports unreadable Stripe, never confirmed not_member`, given, { ok: false, reason: "unavailable" });
   }
   mode = "no customer";
   is("confirmed empty complete customer page stays empty", await freeDaysSubs(store, "member@example.com", now), []);
   mode = "canceled";
   is("confirmed canceled subscription stays excluded", await freeDaysSubs(store, "member@example.com", now), []);
   mode = "no page";
-  is("missing page data is unknown as already fixed", await freeDaysSubs(store, "member@example.com", now), null);
+  is("missing page data is unknown as already fixed", await freeDaysSubs(store, "member@example.com", now), "unreadable");
   is("no subscription write or email was attempted", posts, 0);
 
   // The sibling reader of the same rows: the discount's find and apply.
   mode = "status";
   for (status of [" ", "unknown_status", "Active", "active ", "cancelled", "ended"]) {
-    is(`${JSON.stringify(status)}: the discount's member list is unknown, not empty`, await memberSubs(store, "member@example.com"), null);
-    is(`${JSON.stringify(status)}: putting a code on it says Stripe could not be read`, await applyMemberDiscount(store, "member@example.com", sub.id, "promo_sreview0001"), { ok: false, reason: "stripe" });
-    is(`${JSON.stringify(status)}: free days lookup is unknown`, await freeDaysSubs(store, "member@example.com", now), null);
+    is(`${JSON.stringify(status)}: the discount's member list is unknown, not empty`, await memberSubs(store, "member@example.com"), "unreadable");
+    is(`${JSON.stringify(status)}: putting a code on it says Stripe could not be read`, await applyMemberDiscount(store, "member@example.com", sub.id, "promo_sreview0001"), { ok: false, reason: "unavailable" });
+    is(`${JSON.stringify(status)}: free days lookup is unknown`, await freeDaysSubs(store, "member@example.com", now), "unreadable");
   }
   // Every status Stripe documents for subscriptions (API 2025-09-30.clover) still reads: the running ones are found, the ended ones left out.
   for (status of ["active", "trialing", "past_due", "unpaid", "paused"]) {
-    is(`${status}: a running membership is still found`, (await memberSubs(store, "member@example.com"))?.map((x) => x.id), [sub.id]);
+    is(`${status}: a running membership is still found`, listed(await memberSubs(store, "member@example.com"))?.map((x) => x.id), [sub.id]);
   }
   for (status of ["canceled", "incomplete", "incomplete_expired"]) {
     is(`${status}: an ended or never-started membership is still left out, as confirmed`, await memberSubs(store, "member@example.com"), []);

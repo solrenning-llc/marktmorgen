@@ -47,6 +47,7 @@ const subscription = (id: string, extra: Record<string, unknown> = {}): Record<s
   status: "active",
   metadata: { store: "daysstore", product: "prod000001" },
   items: { data: [{ current_period_end: PERIOD_END, price: { unit_amount: 2900, currency: "usd", recurring: { interval: "month" } } }] },
+  discounts: [],
   ...extra,
 });
 const subs: Record<string, unknown>[] = [
@@ -135,7 +136,9 @@ async function main(): Promise<void> {
   is("a membership on a schedule of changes is left alone", freeDaysState(subscription("sub_sched00001", { schedule: "sub_sched_1" }), NOW).blocked, "scheduled");
 
   part("What the studio is shown");
-  const found = await freeDaysSubs(store, "member@example.com");
+  // "unreadable" is never a list of memberships: read as none found, so the checks below fail on it.
+  const read = await freeDaysSubs(store, "member@example.com");
+  const found = Array.isArray(read) ? read : null;
   is(
     "only this store's running memberships of that address, each with its next charge",
     found?.map((s) => [s.id, s.nextCharge, s.blocked]),
@@ -147,7 +150,7 @@ async function main(): Promise<void> {
       ["sub_behind0001", 0, "behind"],
     ],
   );
-  is("the discount's own reading still reads the same memberships (healthy control)", (await memberSubs(store, "member@example.com"))?.map((s) => s.id), ["sub_live000001", "sub_trial00001", "sub_ending0001", "sub_paused0001", "sub_behind0001"]);
+  is("the discount's own reading still reads the same memberships (healthy control)", await memberSubs(store, "member@example.com").then((read) => (Array.isArray(read) ? read.map((s) => s.id) : read)), ["sub_live000001", "sub_trial00001", "sub_ending0001", "sub_paused0001", "sub_behind0001"]);
 
   part("Refused before Stripe is asked");
   is("another store's membership", await giveFreeDays(store, "member@example.com", "sub_else000001", 7, PERIOD_END, by), { ok: false, reason: "not_member" });
@@ -157,8 +160,8 @@ async function main(): Promise<void> {
   is("no days, or more than the cap", [(await giveFreeDays(store, "member@example.com", "sub_live000001", 0, PERIOD_END, by)).ok, (await giveFreeDays(store, "member@example.com", "sub_live000001", 91, PERIOD_END, by)).ok], [false, false]);
   is("a next charge that is not the one the creator saw", await giveFreeDays(store, "member@example.com", "sub_live000001", 7, PERIOD_END - DAY, by), { ok: false, reason: "changed" });
   // A row Stripe could not have sent is unknown: the studio says Stripe could not be read and the route answers 502, never "no running membership" (Codex S second review of #2912).
-  is("a customer or subscription row that is not one: the studio is told Stripe could not be read", [await freeDaysSubs(store, "offrow@example.com"), await freeDaysSubs(store, "offsub@example.com")], [null, null]);
-  is("and giving days says Stripe, never not a member", [await giveFreeDays(store, "offrow@example.com", "sub_live000001", 7, PERIOD_END, by), await giveFreeDays(store, "offsub@example.com", "sub_live000001", 7, PERIOD_END, by)], [{ ok: false, reason: "stripe" }, { ok: false, reason: "stripe" }]);
+  is("a customer or subscription row that is not one: the studio is told Stripe could not be read", [await freeDaysSubs(store, "offrow@example.com"), await freeDaysSubs(store, "offsub@example.com")], ["unreadable", "unreadable"]);
+  is("and giving days says Stripe, never not a member", [await giveFreeDays(store, "offrow@example.com", "sub_live000001", 7, PERIOD_END, by), await giveFreeDays(store, "offsub@example.com", "sub_live000001", 7, PERIOD_END, by)], [{ ok: false, reason: "unavailable" }, { ok: false, reason: "unavailable" }]);
   is("nobody under that address is still none", await freeDaysSubs(store, "nobody@example.com"), []);
   is("nothing was sent to Stripe for any of them", posted.length, 0);
 

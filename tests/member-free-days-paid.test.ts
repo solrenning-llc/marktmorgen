@@ -15,7 +15,7 @@
  *   - free days given inside a real trial leave it a trial (it was never paid);
  *   - the yearly offer is not made while paid free days run, and the email
  *     that offers it counts the payments from the real start;
- *   - an answer from Stripe out of shape, or with more than one page, is "not
+ *   - an answer from Stripe out of shape, or with more pages than are read, is "not
  *     known", never "no running membership" (rule 24).
  *
  * Synthetic data only; no request leaves the process.
@@ -164,11 +164,13 @@ async function main(): Promise<void> {
   part("An answer from Stripe that cannot be read is not 'no membership' (rule 24)");
   subs = [subscription("sub_live000001")];
   mode = "healthy";
-  is("control: the member's running membership is found", (await freeDaysSubs(store, "member@example.com", NOW))?.map((s) => s.id), ["sub_live000001"]);
+  is("control: the member's running membership is found", await freeDaysSubs(store, "member@example.com", NOW).then((read) => (Array.isArray(read) ? read.map((s) => s.id) : read)), ["sub_live000001"]);
   for (const m of ["customers out of shape", "subscriptions out of shape", "no has_more", "more pages"] as const) {
     mode = m;
-    is(`${m}: not known, never "has no running membership"`, await freeDaysSubs(store, "member@example.com", NOW), null);
-    is(`${m}: giving says Stripe could not be read, never "not a membership of this member"`, await giveFreeDays(store, "member@example.com", "sub_live000001", 7, PERIOD_END, by, NOW), { ok: false, reason: "stripe" });
+    // Stripe answered, but not in a shape that can be read: "unreadable" and "unavailable" (lib/member-discount.ts,
+    // readWhole, #2979), apart from Stripe not reached (null, "stripe"); either way never "none".
+    is(`${m}: not known, never "has no running membership"`, await freeDaysSubs(store, "member@example.com", NOW), "unreadable");
+    is(`${m}: giving says Stripe could not be read, never "not a membership of this member"`, await giveFreeDays(store, "member@example.com", "sub_live000001", 7, PERIOD_END, by, NOW), { ok: false, reason: "unavailable" });
   }
   mode = "healthy";
   is("control: an address with no customer is a confirmed none", await freeDaysSubs(store, "nobody@example.com", NOW), []);

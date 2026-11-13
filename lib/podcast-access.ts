@@ -124,11 +124,30 @@ async function stillListed(store: Store, grant: FeedGrant, token: string): Promi
  */
 async function stillIndexed(grant: FeedGrant, token: string): Promise<boolean> {
   if ((await indexedToken(grant.s, grant.p, grant.e)) === token) return true;
-  const reply = repliesFor(await redisPipeline([["DEL", tokenKey(token)]]), 1);
-  const gone = reply ? countOf(reply[0]) : null;
-  if (gone === null || gone > 1) throw new UnknownReplyError("a podcast feed's grant written after its index was deleted");
+  // The index read and the cleanup in one step (Codex L, finding 1, and Codex P on #3473, MEDIUM): an erasure that ran
+  // between the index write and the grant write removed a list member not yet there, so the member written after it
+  // goes here with the grant. Only while no index is there: an index that leads to another token is a feed made since,
+  // whose own write listed the same member, and it stays listed. 1 still indexed; 0 cleaned up; anything else unknown.
+  const reply = repliesFor(await redisPipeline([[
+    "EVAL", FEED_UNPUBLISH, 3, byKey(grant.s, grant.p, grant.e), tokenKey(token), listenersKey(grant.s, grant.p), token, addressKey(grant.e),
+  ]]), 1)?.[0];
+  if (reply === 1) return true;
+  if (reply !== 0) throw new UnknownReplyError("a podcast feed's grant written after its index was deleted");
   return false;
 }
+
+/**
+ * A feed's grant taken back when its index no longer leads to it (stillIndexed): 1 when the index (KEYS[1]) holds the
+ * token (ARGV[1]) after all; otherwise the grant (KEYS[2]) is deleted and, while no index is there at all, the
+ * address-derived member (ARGV[2]) leaves the product's list of listeners (KEYS[3]); 0. Modeled step for step in
+ * lib/redis-memory.ts.
+ */
+export const FEED_UNPUBLISH = `-- marktmorgen:pod-feed-unpublish:v1
+local indexed = redis.call("GET", KEYS[1])
+if indexed == ARGV[1] then return 1 end
+redis.call("DEL", KEYS[2])
+if not indexed then redis.call("SREM", KEYS[3], ARGV[2]) end
+return 0`;
 
 /**
  * An indexed token, handed out only once its grant is there (finding by Claude 6): an index whose grant write failed

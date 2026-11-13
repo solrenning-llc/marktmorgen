@@ -89,7 +89,8 @@ test("a product's course: every assignment read before the product goes (Revisor
   const lookup = route.indexOf("before = await readListing(guarded.store, id);");
   const courseRead = route.indexOf("preparedCourse = await readCourseExact(before.course.id);");
   const read = route.indexOf("taskDrops = await readCourseTaskDrops(preparedCourse)");
-  const remove = route.indexOf("const removed = await removeProduct(ref, id");
+  // The removal itself (since #3473 it may run under the podcast's lock, as `removing`): still after the read.
+  const remove = route.indexOf("= () => removeProduct(ref, id");
   const confirm = route.indexOf("JSON.stringify(found) !== JSON.stringify(preparedCourse)", remove);
   assert.ok(
     lookup > 0 && courseRead > lookup && read > courseRead && remove > read && confirm > remove,

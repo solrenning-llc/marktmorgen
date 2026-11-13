@@ -412,18 +412,23 @@ export async function dropProductInvites(store: Pick<Store, "sid" | "statsId">, 
     if (!(await pay(1))) throw new InvitesUnpaidError();
     const page = scanPage(await redisPipeline([["HSCAN", key, cursor, "MATCH", `*${suffix}`, "COUNT", INVITES_PER_UNIT]]));
     if (!page || page.items.length % 2 !== 0) throw new UnknownReplyError("a page of a store's invitations");
-    const held: { field: string; token: string | null }[] = [];
+    const held: { field: string; token: string }[] = [];
     for (let i = 0; i < page.items.length; i += 2) {
       const field = page.items[i];
       if (!field.endsWith(suffix)) continue;
-      held.push({ field, token: parseInvite(page.items[i + 1])?.t ?? null });
+      // An invitation that does not read whole, or whose token is not one, is not "an invitation without a link"
+      // (Codex G, HIGH on #3473): its field is the only way back to a link that may hold the store and the address's
+      // field, so nothing on this page is deleted, and the next try finds it again (rule 24).
+      const token = parseInvite(page.items[i + 1])?.t;
+      if (typeof token !== "string" || !TOKEN_PATTERN.test(token)) throw new UnknownReplyError("a moved-member invitation");
+      held.push({ field, token });
     }
     if (held.length) {
-      const links = held.flatMap((h) => (h.token && TOKEN_PATTERN.test(h.token) ? [linkKey(h.token)] : []));
+      const links = held.map((h) => linkKey(h.token));
       const commands: (string | number)[][] = [
         ["HDEL", key, ...held.map((h) => h.field)],
         ["ZREM", DUE_KEY, ...held.map((h) => `${store.sid}|${h.field}`)],
-        ...(links.length ? [["DEL", ...links]] : []),
+        ["DEL", ...links],
       ];
       const replies = repliesFor(await redisPipeline(commands), commands.length);
       if (!replies || !replies.every((r) => countOf(r) !== null)) throw new UnknownReplyError("the deletion of a removed membership's invitations");

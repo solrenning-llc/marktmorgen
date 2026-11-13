@@ -363,7 +363,14 @@ export async function POST(request: NextRequest) {
         }
       }
       let course: Awaited<ReturnType<typeof readCourseExact>> = null;
-      const removed = await removeProduct(ref, id, async (going, store) => {
+      // A podcast's record is read again and deleted under its own lock, held across the product's removal (Codex L,
+      // finding 2 on #3473, MEDIUM): the studio's podcast route adds an episode only under that lock after reading the
+      // product again, so no episode is added between this read and the removal, and every audio file the record names
+      // is known before the record goes. That read not exact (rule 24), or the lock not taken: 503, nothing removed, and
+      // the same removal asked again reads it again. Never a record deleted on a read that is not known.
+      const lockedPodcastId = before?.podcast?.id ?? null;
+      let podcastAtRemoval: Podcast | null = null;
+      const removing = () => removeProduct(ref, id, async (going, store) => {
         if (!going.course) return true;
         try {
           const found = await readCourseExact(going.course.id);
@@ -380,6 +387,36 @@ export async function POST(request: NextRequest) {
           return false;
         }
       });
+      let removed: Awaited<ReturnType<typeof removing>>;
+      if (lockedPodcastId) {
+        let read = false;
+        try {
+          removed = await withLock(`nl:pod:${lockedPodcastId}:lock`, 60, 15_000, async () => {
+            podcastAtRemoval = await readPodcast(lockedPodcastId);
+            read = true;
+            const done = await removing();
+            if (done.ok && done.product.podcast?.id === lockedPodcastId) {
+              // Removed with the record read exactly above: the record goes now, its audio below. Not confirmed gone,
+              // it is said to the caller (cleanupPending); the record still names every file, so nothing is orphaned.
+              await dropPodcastRecord(lockedPodcastId).catch(
+                (error: unknown) => {
+                  console.error("could not delete a removed product's podcast", error);
+                  cleanupPending = true;
+                },
+              );
+            }
+            return done;
+          });
+        } catch (error) {
+          console.error("could not read a product's podcast under its lock before removing it", error);
+          // Thrown before the removal (the lock, or the record's read): nothing was removed. After it, the lock's own
+          // release failed: the removal stands, and what is left is said to the caller.
+          if (!read) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+          throw error;
+        }
+      } else {
+        removed = await removing();
+      }
       result = removed.ok ? { ok: true, product: null } : removed;
       // Asked again for a product already removed whose campaign landings were not confirmed gone then (Codex G,
       // #1947): they are deleted now; not confirmed again, it is said, and can be asked again.
@@ -442,19 +479,28 @@ export async function POST(request: NextRequest) {
         if (going.podcast) {
           const podcastId = going.podcast.id;
           const audio = new Set((podcastBefore?.episodes ?? []).map((episode) => episode.pathname));
-          try {
-            await withLock(`nl:pod:${podcastId}:lock`, 60, 15_000, async () => {
-              const now = await readPodcast(podcastId).catch((error: unknown) => {
-                console.error("could not read a removed product's podcast again", error);
-                cleanupPending = true;
-                return null;
+          if (podcastId === lockedPodcastId) {
+            // Read exactly and deleted under its lock with the removal (above): every file its record named goes.
+            const atRemoval = podcastAtRemoval as Podcast | null;
+            for (const episode of atRemoval?.episodes ?? []) audio.add(episode.pathname);
+          } else {
+            // A podcast made on it after the read before the removal: read again under its lock, and its record deleted
+            // only on an exact read (Codex L, finding 2 on #3473). Not known, the record and every file it names stay,
+            // and that is said to the caller.
+            let readNow = false;
+            try {
+              await withLock(`nl:pod:${podcastId}:lock`, 60, 15_000, async () => {
+                const now = await readPodcast(podcastId);
+                readNow = true;
+                for (const episode of now?.episodes ?? []) audio.add(episode.pathname);
+                await dropPodcastRecord(podcastId);
               });
-              for (const episode of now?.episodes ?? []) audio.add(episode.pathname);
-              await dropPodcastRecord(podcastId);
-            });
-          } catch (error) {
-            console.error("could not delete a removed product's podcast", error);
-            cleanupPending = true;
+            } catch (error) {
+              console.error("could not delete a removed product's podcast", error);
+              cleanupPending = true;
+              // Its record not read: it stays, so the files it may name stay with it.
+              if (!readNow) audio.clear();
+            }
           }
           const named = new Set(had.map((file) => file.pathname));
           had.push(...[...audio].filter((pathname) => !named.has(pathname)).map((pathname) => ({ pathname })));

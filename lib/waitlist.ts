@@ -266,6 +266,18 @@ export async function launch(store: Store, product: Listing, input: { note: unkn
       ? [["RPUSH", sendKey(sid, product.id), ...confirmed], ["EXPIRE", sendKey(sid, product.id), 30 * 86_400], ["SADD", JOBS, `${sid}|${product.id}`]]
       : [["DEL", listKey(sid, product.id)]]),
   ]);
+  // An erasure that ran between the read above and this write (forgetWaitlistPerson: HDEL, then blanking the send
+  // list) found no send list to blank, so the address it removed was just written here from the older read. Whoever
+  // the list no longer holds (an exact nil) is blanked now: either that erasure's blanking or this one removes it.
+  // runLaunches skips them at sending anyway; this keeps the address from staying stored after the erasure.
+  if (total) {
+    const places = repliesFor((await redisPipeline([["HMGET", listKey(sid, product.id), ...confirmed]]))[0], total);
+    if (!places) console.error("a waitlist launch could not re-read its list; runLaunches skips anyone gone at sending");
+    else for (const [i, place] of places.entries()) {
+      // The launch is made already: a blanking that is not confirmed is logged, never the launch's answer.
+      if (place === null) await blankInLists([sendKey(sid, product.id)], confirmed[i]).catch((error: unknown) => console.error("a waitlist launch could not blank a removed address", error));
+    }
+  }
   return { ok: true, total };
 }
 

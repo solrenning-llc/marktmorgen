@@ -1026,7 +1026,7 @@ async function main(): Promise<void> {
   await turnOnApp(RSF, "rsf-backup@example.org");
   const rsfRecord = `nl:2fa:${hex(`nimbus-2fa:${RSF}`).slice(0, 40)}`;
   const [rsfRaw] = await redis.pipeline([["GET", rsfRecord]]);
-  await redis.pipeline([["SET", rsfRecord, JSON.stringify({ ...JSON.parse(String(rsfRaw)), reset: Date.now() - 1_000 })]]);
+  await redis.pipeline([["SET", rsfRecord, JSON.stringify({ ...JSON.parse(String(rsfRaw)), since: Date.now() - (RESET_DAYS + 1) * 86_400_000, reset: Date.now() - 1_000 })]]);
   const rsfMark = await markMoving(RSF, "rsf-elsewhere@example.com");
   const tokenRsf = hex(String(Math.random()));
   await redis.pipeline([["SET", `nl:auth:link:${hex(`nimbus-auth-link:${tokenRsf}`).slice(0, 40)}`, RSF, "EX", 900]]);

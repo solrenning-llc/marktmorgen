@@ -7,7 +7,7 @@
  *   nl:lc:<course>:all          zset   the course's newest comments, for the studio
  *   nl:lc:<course>:r            hash   comment id → how many answers it has
  *   nl:lc:<course>:names        hash   a student's key → the name they chose
- *   nl:lc:<course>:erase        string generation advanced by each person erasure
+ *   nl:lcerase:<course>         string generation advanced by each person erasure, a day (LESSON_COMMENT_FENCE_SECONDS)
  *   nl:lc:<course>:off          string present when the creator switched comments off
  *   nl:lc:<course>:seen         string when the studio last showed the creator the comments
  */
@@ -25,6 +25,7 @@ import {
   MAX_LESSON_COMMENT,
   MAX_LESSON_THREADS,
   MAX_REPLIES,
+  LESSON_COMMENT_FENCE_SECONDS,
   parseComment,
   serializeComment,
 } from "@/lib/lesson-comments-rules";
@@ -34,8 +35,9 @@ const lessonKey = (course: string, lesson: string) => `nl:lc:${course}:l:${lesso
 const allKey = (course: string) => `nl:lc:${course}:all`;
 const repliesKey = (course: string) => `nl:lc:${course}:r`;
 const namesKey = (course: string) => `nl:lc:${course}:names`;
-// Never in dropComments' DEL list: a stale request holding the old generation must stay fenced.
-const eraseKey = (course: string) => `nl:lc:${course}:erase`;
+// A family of its own, never in dropComments' DEL list: a stale request holding the old generation must stay
+// fenced; it lapses LESSON_COMMENT_FENCE_SECONDS after the last erasure, far past any request on its way.
+const eraseKey = (course: string) => `nl:lcerase:${course}`;
 const offKey = (course: string) => `nl:lc:${course}:off`;
 const seenKey = (course: string) => `nl:lc:${course}:seen`;
 
@@ -611,6 +613,7 @@ export const FORGET_LESSON_COMMENTS = `-- marktmorgen:lesson-comments-forget:v3
 local who = ARGV[1]
 local lessons = {}
 redis.call("INCR", KEYS[5])
+redis.call("EXPIRE", KEYS[5], ${LESSON_COMMENT_FENCE_SECONDS})
 for i = 6, #KEYS do lessons[ARGV[i - 4]] = KEYS[i] end
 local flat = redis.call("HGETALL", KEYS[1])
 local all = {}

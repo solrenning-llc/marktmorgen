@@ -26,6 +26,13 @@ export const COMMENTS_PER_MINUTE = 5;
 export const COMMENTS_PER_DAY = 60;
 /** Answers one comment may gather. */
 export const MAX_REPLIES = 50;
+/**
+ * How long a course's erasure fence (lib/lesson-comments.ts, eraseKey) is kept after the last person erasure of the
+ * course (#4406): a day. A comment request can be on its way at most its function's maxDuration (300 s, the longest
+ * any route here sets) and the longest erasure fence elsewhere is ten minutes (lib/shipment-mail-outbox.ts,
+ * SHIPMENT_MAIL_ERASURE_FENCE_MS), so a day is far past both. Kept for ever it would be a cost with no ceiling.
+ */
+export const LESSON_COMMENT_FENCE_SECONDS = 86_400;
 /** Comments a lesson keeps; past it, the oldest thread goes first. */
 export const MAX_LESSON_THREADS = 500;
 /** Threads a lesson page shows, newest first. */

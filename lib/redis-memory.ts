@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { PATH_BOARD_ROOM_BYTES, readPathBoard, pathBoardMember } from "@/lib/path-board-rules";
+import { LESSON_COMMENT_FENCE_SECONDS } from "@/lib/lesson-comments-rules";
 
 /** lib/store-data.ts NOTES_TOTAL_FIELD: the room's one slot for every student's lesson notes (lib/lesson-notes.ts). */
 const NOTES_TOTAL_FIELD = "ln#";
@@ -1102,6 +1103,7 @@ export class MemoryRedis {
           const who = argv[0];
           const lessons = new Map(lessonKeys.map((k, i) => [argv[1 + i], k]));
           this.run(["INCR", erase]);
+          this.run(["EXPIRE", erase, String(LESSON_COMMENT_FENCE_SECONDS)]);
           for (const k of keys) this.live(k);
           const held = this.data.get(comments);
           const rows = new Map<string, { b?: string; r?: string | null; l?: string }>();

@@ -40,7 +40,7 @@ const ALLOWED: { pattern: RegExp; why: string }[] = [
   { pattern: /^nl:cm:[0-9a-f]+:pts:b:/, why: "a board worked out again when next read" },
   { pattern: /^nl:rev:(sum|stores):/, why: "a review summary worked out again" },
   { pattern: /^nl:lc:[^:]+:(seen|r)$/, why: "comment counts" },
-  { pattern: /^nl:lc:[^:]+:erase$/, why: "a course's count of person erasures, which refuses a comment already on its way (lib/lesson-comments.ts, #4406), never who" },
+  { pattern: /^nl:lcerase:[^:]+$/, why: "a course's count of person erasures, which refuses a comment already on its way (lib/lesson-comments.ts, #4406), never who" },
   { pattern: /^nl:wl:[^:]+:[^:]+:send$/, why: "a launch's list, with the deleted address written over (lib/erasure-lists.ts)" },
   { pattern: /^nl:store:leads:[^:]+:(agreed|unsub)$/, why: "the list's counts" },
   { pattern: /^nl:(health|stats:[0-9a-f]+:ledger)/, why: "short-lived copies (ten minutes, the buyers' an hour), worked out again when next read" },

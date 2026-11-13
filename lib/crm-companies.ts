@@ -8,6 +8,7 @@
  *
  *   nl:crm:co:<statsId>   hash: <company id> -> the company, as JSON
  *   nl:crm:co:lock:<statsId>   held for at most 10 seconds while one change is written
+ *   nl:crm:co:gone:<statsId>:<print>   a person deleted from the store, by a one-way print of their key, for GONE_SECONDS
  *
  * One change at a time (the lock): two people saving at once never write
  * over each other, and a person linked to two companies at once is never
@@ -30,12 +31,22 @@
  * is CompaniesUnreadable, never "no companies";
  * a person deleted from the store is taken off every company
  * (forgetCompanyPerson, from forgetCrmPerson in lib/crm.ts).
+ *
+ * A person deleted from the store is never put back on a company (Codex G2's
+ * MEDIUM 3 on #2574): the deletion marks them first (goneKey), before it
+ * takes the lock, and a change that links people (an undo, a link) reads the
+ * marks of those it would link under the lock, leaves out or refuses whoever
+ * is marked, and is written only while none of those it links is marked
+ * (WRITE_COMPANIES, in the same step): a deletion that began between the read
+ * and the write leaves the change unwritten ("erased"), never a link.
  */
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type Held, LockBusyError, releaseLock, takeLock } from "@/lib/redis-lock";
 import { type DataStore, giveData, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
+import { INDEX_SECONDS } from "@/lib/erasure-index";
+import { personKey } from "@/lib/person-key";
 import { type Company, type CompanyResult, MAX_COMPANIES, MAX_COMPANY_NAME, MAX_COMPANY_NOTE, MAX_COMPANY_PEOPLE, PERSON_KEY, parseCompany, unlinkPerson } from "@/lib/crm-companies-rules";
 
 export * from "@/lib/crm-companies-rules";
@@ -46,16 +57,40 @@ const companiesKey = (statsId: string) => `nl:crm:co:${statsId}`;
 const COMPANIES_SLOT = "crm:co";
 const lockKey = (statsId: string) => `nl:crm:co:lock:${statsId}`;
 const LOCK_SECONDS = 10;
+/**
+ * A person deleted from the store: no undo or link of a company puts them back while it is kept. Named by a one-way
+ * fingerprint of their key, never by the key itself, so nothing left after the deletion names them (as the
+ * suppression's print, lib/suppression.ts).
+ */
+const goneKey = (statsId: string, person: string) => `nl:crm:co:gone:${statsId}:${createHash("sha256").update(`nimbus-company-gone:${statsId}:${person}`).digest("hex").slice(0, 32)}`;
+/**
+ * How long a deletion's mark is kept: as long as the links a store emailed the person are noted for their deletion
+ * (lib/erasure-index.ts INDEX_SECONDS), far longer than a page holding an undo stays open.
+ */
+export const GONE_SECONDS = INDEX_SECONDS;
 
 /**
- * KEYS[1] the companies' lock, KEYS[2] their hash; ARGV[1] the token of the
- * change that took the lock, then (company id, record) two at a time, an
- * empty record deleting it. Writes only while the lock holds that token:
- * 1 when written, 0 (nothing written) when the lock ran out or went to
- * another change.
+ * Lifts the mark when the same address comes back with the person's own yes, in the same place the store's
+ * suppression of it is lifted (lib/contacts.ts upsertContact, liftCommand): the mark is the erased person's, not the
+ * returning person's, who can be put on a company again at once (Claude 7's MÉDIO 1 on #4026). A link, undo or
+ * restore asked before they came back is still refused or left out while the mark stood.
  */
-export const WRITE_COMPANIES = `-- marktmorgen:crm-companies-write:v1
+export function liftCompanyMarkCommand(statsId: string, email: string): (string | number)[] {
+  return ["DEL", goneKey(statsId, personKey(statsId, email))];
+}
+
+/**
+ * KEYS[1] the companies' lock, KEYS[2] their hash, then the deletion marks
+ * (goneKey) of the people the change links; ARGV[1] the token of the change
+ * that took the lock, then (company id, record) two at a time, an empty
+ * record deleting it. Writes only while the lock holds that token and none
+ * of those people is marked: 1 when written, 0 (nothing written) when the
+ * lock ran out or went to another change, 2 (nothing written) when one of
+ * them was deleted from the store meanwhile.
+ */
+export const WRITE_COMPANIES = `-- marktmorgen:crm-companies-write:v2
 if redis.call("GET", KEYS[1]) ~= ARGV[1] then return 0 end
+if #KEYS > 2 and redis.call("EXISTS", unpack(KEYS, 3)) > 0 then return 2 end
 for i = 2, #ARGV, 2 do
   if ARGV[i + 1] == "" then redis.call("HDEL", KEYS[2], ARGV[i]) else redis.call("HSET", KEYS[2], ARGV[i], ARGV[i + 1]) end
 end
@@ -87,9 +122,19 @@ async function oneReply(command: (string | number)[]): Promise<unknown> {
   return reply[0];
 }
 
+/**
+ * Whether every position of a reply holds one of `allowed`, holes included: `every` skips the missing positions of a
+ * sparse array, so a reply of the right length with a hole passed it and the hole was read as a value (Codex X5 on
+ * #4026). A hole is an unknown read.
+ */
+function wholeOf(raw: unknown[], allowed: (x: unknown) => boolean): boolean {
+  for (let i = 0; i < raw.length; i += 1) if (!Object.hasOwn(raw, i) || !allowed(raw[i])) return false;
+  return true;
+}
+
 /** The hash's (field, record) pairs: a flat list of texts, an even number of them; an empty one when there is no hash. */
 function pairsOf(raw: unknown): [string, string][] {
-  if (Array.isArray(raw) && raw.length % 2 === 0 && raw.every((x) => typeof x === "string")) {
+  if (Array.isArray(raw) && raw.length % 2 === 0 && wholeOf(raw, (x) => typeof x === "string")) {
     const pairs: [string, string][] = [];
     for (let i = 0; i < raw.length; i += 2) pairs.push([raw[i] as string, raw[i + 1] as string]);
     return pairs;
@@ -166,7 +211,7 @@ const total = (weights: Map<string, number>) => [...weights.values()].reduce((su
  * "refused" (the lock was lost, nothing written) on its exact 0; anything
  * else is "unconfirmed": it may have landed, so the room it took stays taken.
  */
-async function writeChanges(statsId: string, held: Held, stored: Stored, after: readonly Company[], room: DataStore | null, drop: readonly string[] = [], rewrite: ReadonlyMap<string, string> = new Map()): Promise<"written" | "refused" | "unconfirmed"> {
+async function writeChanges(statsId: string, held: Held, stored: Stored, after: readonly Company[], room: DataStore | null, drop: readonly string[] = [], rewrite: ReadonlyMap<string, string> = new Map(), linked: readonly string[] = []): Promise<"written" | "refused" | "erased" | "unconfirmed"> {
   const was = new Map(stored.companies.map((c) => [c.id, c]));
   const now = new Map(after.map((c) => [c.id, c]));
   const weights = new Map(stored.weights);
@@ -202,13 +247,15 @@ async function writeChanges(statsId: string, held: Held, stored: Stored, after: 
   // Room first, by what it grows: a change that does not fit throws DataRoomError and nothing is written.
   if (room && grown > 0) await needData(room, slot(grown));
   // A write that throws may or may not have landed: the room it took stays taken (never less than what is kept).
-  const reply = await redisPipeline([["EVAL", WRITE_COMPANIES, 2, lockKey(statsId), companiesKey(statsId), held.token, ...pairs]]);
-  // Only Redis's own answer to the one script counts (Codex G2, #2574): exactly 1 written, exactly 0 nothing written.
+  const marks = linked.map((person) => goneKey(statsId, person));
+  const reply = await redisPipeline([["EVAL", WRITE_COMPANIES, 2 + marks.length, lockKey(statsId), companiesKey(statsId), ...marks, held.token, ...pairs]]);
+  // Only Redis's own answer to the one script counts (Codex G2, #2574): exactly 1 written, exactly 0 or 2 nothing
+  // written (the lock was lost; one of the people it links was deleted from the store meanwhile).
   const answer = Array.isArray(reply) && reply.length === 1 ? reply[0] : undefined;
-  const outcome = answer === 1 ? "written" : answer === 0 ? "refused" : "unconfirmed";
+  const outcome = answer === 1 ? "written" : answer === 0 ? "refused" : answer === 2 ? "erased" : "unconfirmed";
   // Given back by difference, never set to a total read outside the lock, so another change's own room is never
   // undone: what a change that certainly did not land took (the lock was lost), or what a written one shrank by.
-  if (room && outcome === "refused" && grown > 0) await giveData(room, slot(grown));
+  if (room && (outcome === "refused" || outcome === "erased") && grown > 0) await giveData(room, slot(grown));
   if (room && outcome === "written" && grown < 0) await giveData(room, slot(-grown));
   return outcome;
 }
@@ -220,9 +267,38 @@ async function writeChanges(statsId: string, held: Held, stored: Stored, after: 
  * write landed ("busy"); a write Redis did not answer exactly is
  * "unconfirmed", and the room it took stays taken.
  */
-/** A change asked of the companies: given them and the ids of the unreadable records; it may delete some of those (`drop`). */
-export type CompanyChange = (companies: Company[], unreadable: readonly string[]) => CompanyResult | { ok: true; companies: Company[]; drop: string[] };
+/**
+ * A change asked of the companies: given them, the ids of the unreadable records (it may delete some of those,
+ * `drop`) and which of the people it would put on a company were deleted from the store (`erased`, read under the
+ * lock; empty the first time it is asked). It is asked again when that is not empty, so it must give the same
+ * answer for the same arguments.
+ */
+export type CompanyChange = (companies: Company[], unreadable: readonly string[], erased: ReadonlySet<string>) => CompanyResult | { ok: true; companies: Company[]; drop: string[] };
 
+/**
+ * Which of `people` were deleted from the store (goneKey), in one MGET; CompaniesUnreadable when Redis's answer is
+ * not one entry for each, nothing or text, a missing position included (wholeOf): an unknown mark is never "not
+ * deleted", and never "deleted" either.
+ */
+async function erasedAmong(statsId: string, people: readonly string[]): Promise<Set<string>> {
+  if (!people.length) return new Set();
+  const marks = await oneReply(["MGET", ...people.map((person) => goneKey(statsId, person))]);
+  if (!Array.isArray(marks) || marks.length !== people.length || !wholeOf(marks, (m) => m === null || typeof m === "string")) throw new CompaniesUnreadable("MGET");
+  return new Set(people.filter((_, i) => marks[i] !== null));
+}
+
+/** The people a change puts on a company they were not on (an undo, a link, a move): only they need checking. */
+function placed(before: readonly Company[], after: readonly Company[]): string[] {
+  const was = new Map(before.map((c) => [c.id, new Set(c.people)]));
+  return [...new Set(after.flatMap((c) => c.people.filter((p) => !was.get(c.id)?.has(p))))];
+}
+
+/**
+ * Every change, whatever its caller: the people it puts on a company they were not on have their deletion marks
+ * read under the lock (one MGET). When one was deleted from the store, the change is asked again knowing who
+ * (`erased`: an undo leaves them out, a link refuses), and refused ("erased") if it still puts one of them on a
+ * company. The write lands only while none of those it puts on is marked (WRITE_COMPANIES).
+ */
 export async function changeCompanies(statsId: string, room: DataStore, change: CompanyChange): Promise<CompanyResult> {
   let held: Held;
   try {
@@ -234,14 +310,21 @@ export async function changeCompanies(statsId: string, room: DataStore, change: 
   try {
     const stored = await readStored(statsId);
     const unreadable = unreadableOf(stored);
-    const asked = change(stored.companies, unreadable);
+    let asked = change(stored.companies, unreadable, new Set());
     if (!asked.ok) return asked;
+    const erased = await erasedAmong(statsId, placed(stored.companies, asked.companies));
+    if (erased.size) {
+      asked = change(stored.companies, unreadable, erased);
+      if (!asked.ok) return asked;
+    }
+    const linked = placed(stored.companies, asked.companies);
+    if (linked.some((p) => erased.has(p))) return { ok: false, error: "erased" };
     const drop = "drop" in asked ? asked.drop : [];
     // An unreadable record still takes its place: a change that adds a company counts them (round 3, L3).
     const left = unreadable.filter((id) => !drop.includes(id)).length;
     if (asked.companies.length > stored.companies.length && asked.companies.length + left > MAX_COMPANIES) return { ok: false, error: "full" };
-    const outcome = await writeChanges(statsId, held, stored, asked.companies, room, drop);
-    if (outcome !== "written") return { ok: false, error: outcome === "refused" ? "busy" : "unconfirmed" };
+    const outcome = await writeChanges(statsId, held, stored, asked.companies, room, drop, new Map(), linked);
+    if (outcome !== "written") return { ok: false, error: outcome === "refused" ? "busy" : outcome };
     return { ok: true, companies: asked.companies };
   } finally {
     await releaseLock(held);
@@ -261,6 +344,9 @@ export const newCompanyId = () => randomBytes(5).toString("hex");
  */
 export async function forgetCompanyPerson(statsId: string | null, person: string, waitMs = LOCK_SECONDS * 1_000, room: DataStore | null = null): Promise<number> {
   if (!statsId || !PERSON.test(person) || !isRedisConfigured()) return 0;
+  // First, before the lock: the person is marked as deleted, so no undo or link puts them back from now on, even
+  // one being written while this waits (Codex G2's MEDIUM 3 on #2574). Only Redis's exact OK counts.
+  if ((await oneReply(["SET", goneKey(statsId, person), "1", "EX", GONE_SECONDS])) !== "OK") throw new Error("the person's deletion could not be marked for the companies: the deletion is not done");
   let held: Held;
   try {
     held = await takeLock(lockKey(statsId), LOCK_SECONDS, waitMs);

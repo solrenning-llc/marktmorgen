@@ -127,7 +127,7 @@ import { MAX_EMAIL_LENGTH } from "@/lib/auth";
 import { MAX_PER_PERSON as REQUESTS_PER_PERSON } from "@/lib/payment-request-rules";
 import { WAITING_SHOWN } from "@/lib/buyer-waiting";
 import { MAX_PRODUCT_BYTES } from "@/lib/catalog";
-import { MAX_COMPANIES_BYTES, MAX_COMPANY_RECORD_BYTES, STUDIO_UNIT_SENT_BYTES } from "@/lib/crm-companies-rules";
+import { MAX_COMPANIES_BYTES, MAX_COMPANY_PEOPLE, MAX_COMPANY_RECORD_BYTES, STUDIO_UNIT_SENT_BYTES } from "@/lib/crm-companies-rules";
 import { type ReadShape, CALENDAR_BUILD_SHAPE, CALENDAR_FILE_BYTES, CALENDAR_POLL_SHAPE, CALENDAR_REFUSED_PRICED_PER_HOUR, CALENDAR_REFUSED_SHAPE, KEPT_READINGS_SHAPE, LIFE_FILL_SHAPE, LIST_MADE_SHAPE, MEMBERS_READ_SHAPE, SALES_READ_SHAPE, STATS_READ_SHAPE } from "@/lib/read-ceilings";
 import { CALENDAR_BUILDS_PER_DAY, CALENDAR_COPY_SECONDS, CALENDAR_CREDITS_PER_DAY, CALENDAR_POLLS_PER_HOUR } from "@/lib/calendar-sync";
 import { HEAVY_READINGS_PER_DAY, READING_COPY_MAX_BYTES, READING_KEEP_SECONDS, READING_KINDS, STORE_READINGS_PER_DAY } from "@/lib/store-readings";
@@ -696,10 +696,13 @@ export const PATH_BOARD_JOIN = request("heavy",70,30_000);
  * 639 [GL7](4)): every company read (MAX_COMPANIES_BYTES, about a megabyte), the
  * two records a link moves written back, the lock taken and let go, the room
  * taken and given back, its studio requests counted, and every company sent on
- * to the browser. Counted as COMPANIES_REQUEST_UNITS studio requests, taken
+ * to the browser; and the deletion marks of the people it puts on a company
+ * (Codex G2's MEDIUM 3 on #2574), read once (one MGET) and checked again in
+ * the write (one EXISTS inside it), up to MAX_COMPANY_PEOPLE keys of about
+ * 80 bytes each way. Counted as COMPANIES_REQUEST_UNITS studio requests, taken
  * before it reads (tests/plan-cost-registry.test.ts).
  */
-export const COMPANIES_REQUEST = request("heavy", 12 + 2 * TAKE_COMMANDS, MAX_COMPANIES_BYTES + 2 * MAX_COMPANY_RECORD_BYTES + 4_096) + MAX_COMPANIES_BYTES * ORIGIN_PER_BYTE;
+export const COMPANIES_REQUEST = request("heavy", 14 + 2 * TAKE_COMMANDS, MAX_COMPANIES_BYTES + 2 * MAX_COMPANY_RECORD_BYTES + 4_096 + 2 * MAX_COMPANY_PEOPLE * 80) + MAX_COMPANIES_BYTES * ORIGIN_PER_BYTE;
 /**
  * A page's reading of every company at the most (the companies page, a person's page; 639 [GL7](4)): about a
  * megabyte from the database and its studio requests counted. Counted as COMPANIES_READ_UNITS studio requests

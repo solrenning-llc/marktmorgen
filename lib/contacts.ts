@@ -39,6 +39,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { MAX_CONTACT_NAME, MAX_IMPORT, MAX_LEADS, readTags } from "@/lib/contact-rules";
 import { liftCommand, suppressedAmongCommand, suppressedCommand, wasSuppressed } from "@/lib/suppression";
+import { liftCompanyMarkCommand } from "@/lib/crm-companies";
 import { joinedCommands } from "@/lib/joined-stores";
 import { DataRoomError, type DataStore, giveData, needData } from "@/lib/store-data";
 import { type DataOwner, orderWrite } from "@/lib/order-data";
@@ -295,6 +296,13 @@ export async function upsertContact(
   if (resubscribe) commands.push(["DECR", unsubKey(listId)]);
   if (deleted && ownYes) commands.push(liftCommand(listId, email));
   if (input.sid) commands.push(...joinedCommands(input.sid, email));
+  // Their own yes also lifts the companies' mark of the deletion (lib/crm-companies.ts), with the suppression, in the
+  // same write: a company never takes them while the store still holds them as deleted, and the two never part. An
+  // order's write takes it too (a DEL is one of its commands, and a deletion takes no room): sent after the write on its
+  // own, a lift that failed was never sent again, because the next yes no longer finds them deleted, and its throw came
+  // after the sign-up was written (Claude 2 cloud C's and Claude 1 cloud's LOW on #4026).
+  const statsId = room && isOrderRoom(room) ? room.order.statsId : room?.statsId;
+  if (deleted && ownYes && statsId) commands.push(liftCompanyMarkCommand(statsId, email));
   if (room && isOrderRoom(room)) await orderWrite(room.order, commands);
   else await redisPipeline(commands);
   return { joined: mailable(next) && !wasMailable, gotProduct, full: false };

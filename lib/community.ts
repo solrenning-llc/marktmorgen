@@ -1246,15 +1246,34 @@ export async function deleteComment(id: string, post: string, comment: Comment, 
   const all = comment.parent ? [] : (await readComments(id, post)).filter((c) => c.parent === comment.id);
   const gone = [comment.id, ...all.map((c) => c.id)];
   const freed = [comment, ...all].reduce((sum, c) => sum + commentBytes(c), 0);
+  // Who liked and who reported each of them, for their trace entries and their room (as deletePost); an unknown
+  // read deletes nothing (rule 24).
+  const sets = repliesFor(
+    await redisPipeline(gone.flatMap((c) => [["SMEMBERS", commentLikesKey(id, post, c)], ["SMEMBERS", reportersKey(id, `c:${post}:${c}`)]])),
+    gone.length * 2,
+  )?.map(memberList);
+  if (!sets || sets.some((one) => one === null)) throw new UnknownReplyError("a deleted comment's likes or reporters");
+  const likers = gone.map((_, i) => sets[i * 2] as string[]);
+  const reporters = gone.map((_, i) => sets[i * 2 + 1] as string[]);
+  const entries: [string, string][] = [
+    ...[comment, ...all].filter((c) => c.a !== CREATOR).map((c): [string, string] => [c.a, `c:${post}:${c.id}`]),
+    ...gone.flatMap((c, i) => likers[i].map((who): [string, string] => [who, `lc:${post}:${c}`])),
+    ...gone.flatMap((c, i) => reporters[i].map((who): [string, string] => [who, `r:c:${post}:${c}`])),
+  ];
+  const likes = likers.reduce((sum, list) => sum + list.length, 0);
   await redisPipeline([
     ["HDEL", commentsKey(id, post), ...gone],
     ["DEL", ...gone.map((c) => commentLikesKey(id, post, c))],
     ["ZREM", reportsKey(id), ...gone.map((c) => `c:${post}:${c}`)],
     ...gone.map((c) => ["DEL", reportersKey(id, `c:${post}:${c}`)]),
-    ...[comment, ...all].filter((c) => c.a !== CREATOR).map((c) => ["SREM", traceKey(id, c.a), `c:${post}:${c.id}`]),
   ]);
-  const traced = [comment, ...all].filter((c) => c.a !== CREATOR).length;
-  await giveData(room, [{ slot: POST_SLOT(post), bytes: freed }, ...(traced ? [{ ...TRACE_ENTRY, bytes: traced * TRACE_ENTRY.bytes }] : [])]);
+  let left = 0;
+  for (let i = 0; i < entries.length; i += TRACE_BATCH) {
+    const out = await redisPipeline(entries.slice(i, i + TRACE_BATCH).map(([who, ref]) => ["SREM", traceKey(id, who), ref]));
+    left += out.filter((one) => Number(one) === 1).length;
+  }
+  // Each like took SET_ENTRY_BYTES of the post's slot (toggleIn): it comes back with the comment.
+  await giveData(room, [{ slot: POST_SLOT(post), bytes: freed + likes * SET_ENTRY_BYTES }, ...(left ? [{ ...TRACE_ENTRY, bytes: left * TRACE_ENTRY.bytes }] : [])]);
   await reindexComments(id, post);
 }
 

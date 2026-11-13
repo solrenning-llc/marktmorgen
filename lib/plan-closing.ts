@@ -1021,14 +1021,25 @@ async function closingDay(store: Store, key: string, state: State, endedAt: numb
     if (settled === null || settled === "busy") return { key, state: "held", note: "its members' unused time is not settled yet" };
     // Told for what happened: the balance did not cover it, or the closing's limit of calls did not reach it.
     for (const [why, r] of [["balance", "short"], ["limit", "over"]] as const) {
-      const left = [...(await paidPeriods(store))].filter(([, row]) => row.r === r && row.f === 1 && !row.m);
+      // The members' payments not read (rule 24) are never "nobody to tell": the day is held, its refunds not written down as settled.
+      const rows = await paidPeriods(store).catch((error) => {
+        console.error("reading a closing store's members' payments failed", error);
+        return null;
+      });
+      if (!rows) return { key, state: "held", note: "its members' payments could not be read" };
+      const left = [...rows].filter(([, row]) => row.r === r && row.f === 1 && !row.m);
       if (!left.length) continue;
       const told = await tellRefundShort(store, left.map(([, row]) => ({ email: row.e, amount: unusedOfRow(row, next.day ?? day), cur: row.cur })), endedAt, why);
       if (!told.ok) return { key, state: "held", note: "its members whose refund could not be made are not all told yet" };
       for (const [sub, row] of left) await savePaidPeriod(store, sub, { ...row, m: 1 });
       if (told.untold) console.error(`plan-closing: ${told.untold} members whose refund could not be made were not covered by the store's closing emails`);
     }
-    const left = (await unusedRows(store, next.day ?? day)).filter((row) => row.paid.r !== "pending");
+    const unsettled = await unusedRows(store, next.day ?? day).catch((error) => {
+      console.error("reading a closing store's members' payments failed", error);
+      return null;
+    });
+    if (!unsettled) return { key, state: "held", note: "its members' payments could not be read" };
+    const left = unsettled.filter((row) => row.paid.r !== "pending");
     if (settled !== "changed" && settled !== "unavailable" && (settled.failed > 0 || left.length > 0)) return { key, state: "held", note: "its members' unused time is not all settled yet" };
     next = { ...next, refunds: now };
     await save(next);

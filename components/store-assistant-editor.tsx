@@ -71,7 +71,8 @@ export function StoreAssistantEditor({
   onSale: boolean;
   canBill: boolean;
   refusal: string | null;
-  usage: { left: number; answered: number } | null;
+  /** "unknown": the month's pool could not be read just now (rule 24), said in words, never as a number. */
+  usage: { left: number; answered: number } | null | "unknown";
   missed: { question: string; at: number }[];
   notice: string;
   pin: string;
@@ -134,7 +135,9 @@ export function StoreAssistantEditor({
         {active && plan?.period ? (
           <>
             <p className="font-semibold text-ink">{plan.cancelsAtEnd ? `On until ${DATE.format(new Date(plan.period.end * 1000))}, then it stops` : `On. Renews ${DATE.format(new Date(plan.period.end * 1000))}`}</p>
-            {usage ? (
+            {usage === "unknown" ? (
+              <p className="mt-1 text-sm text-ink-soft">We could not read this month&apos;s replies just now. Reload the page to try again.</p>
+            ) : usage ? (
               <p className="mt-1 text-sm text-ink-soft">{`${usage.answered.toLocaleString("en-US")} replies this month; room for at least ${usage.left.toLocaleString("en-US")} more of the ${ASSISTANT_MESSAGES_MONTHLY.toLocaleString("en-US")}.`}</p>
             ) : null}
             {canBill ? (

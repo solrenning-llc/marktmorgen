@@ -2111,7 +2111,7 @@ export default async function StudioPage({
                             onSale={ASSISTANT_ON_SALE}
                             canBill={may("billing")}
                             refusal={assistantRefusal(own)}
-                            usage={await assistantLeft(own).catch(() => null)}
+                            usage={await assistantLeft(own).catch(() => "unknown" as const)}
                             missed={await missed}
                             notice={typeof params.assistant === "string" ? params.assistant : ""}
                             pin={pin}

@@ -6,3 +6,4 @@ Only Claude 1 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
+| Claude 1 | 274 [AX1] audit 12/11: no text faded under 7:1 (hidden lesson comment, store address hint; WCAG 1.4.6) | claude/tender-curie-w4hw92-contrast | `components/lesson-comments.tsx`, `components/handle-form.tsx`, `tests/faded-text-contrast.test.ts` | 12/11/2026 10h07 |

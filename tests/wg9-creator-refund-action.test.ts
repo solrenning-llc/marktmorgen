@@ -256,6 +256,29 @@ async function main(): Promise<void> {
   const signedOut = await POST(new NextRequest("https://marktmorgen.com/api/store/person-refund", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ charge: CHARGE, token: T1, full: true }) }));
   is("signed out: 401, nothing asked", [signedOut.status, stripe.calls.length], [401, 0]);
 
+  part("The team's log line lost when the refund went out: the same form again writes it, once (Codex G and Claude 1 on #3678)");
+  reset();
+  const T9 = "9".repeat(32);
+  const logBefore = (await logLines(store)).length;
+  const realPipeline = redis.pipeline.bind(redis);
+  let dropped = 0;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (!dropped && commands[0]?.[0] === "LPUSH" && String(commands[0][1]).startsWith("nl:team:log:")) {
+      dropped += 1;
+      throw new Error("synthetic: the team log's write was lost");
+    }
+    return realPipeline(commands);
+  }) as typeof redis.pipeline;
+  const lostLine = await post({ charge: CHARGE, token: T9, amount: "1.00", reason: "requested_by_customer" });
+  redis.pipeline = realPipeline;
+  is("the refund is said done", [lostLine.status, lostLine.body.state], [200, "done"]);
+  is("its log line was not written", (await logLines(store)).length, logBefore);
+  await post({ charge: CHARGE, token: T9, amount: "1.00", reason: "requested_by_customer" });
+  is("the same form again: Stripe answers the first refund, and its line is written now", (await logLines(store)).length, logBefore + 1);
+  await post({ charge: CHARGE, token: T9, amount: "1.00", reason: "requested_by_customer" });
+  is("and only once", (await logLines(store)).length, logBefore + 1);
+  is("one refund given back in all", refundPosts().filter((c) => new URLSearchParams(c.body ?? "").get("amount") === "100").length >= 1 && stripe.charge.refunded, 100);
+
   part("What is kept: one mark per refund told, for as long as Stripe keeps a key");
   is("two days, past Stripe's 24 hours", TOLD_DAYS, 2);
   const marks = redis.keys().filter((k) => k.startsWith("nl:crefund:"));

@@ -376,7 +376,11 @@ export async function POST(request: NextRequest) {
     if (action === "report") {
       if (owner) return back(fromPage, "forbidden");
       const commentId = field("comment", 12);
-      if (commentId && !(await readComment(id, post.id, commentId))) return back(postPage, "gone");
+      // A comment the creator hid is gone for a member, as a hidden post is: already dealt with, never queued again.
+      if (commentId) {
+        const reported = await readComment(id, post.id, commentId);
+        if (!reported || reported.hid) return back(postPage, "gone");
+      }
       if (!(await within(id, key, "report"))) return back(fromPage, "slow");
       const target = commentId ? ({ kind: "comment", post: post.id, comment: commentId } as const) : ({ kind: "post", post: post.id } as const);
       const added = await report(id, target, key, store);

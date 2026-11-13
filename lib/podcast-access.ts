@@ -36,7 +36,7 @@ import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { orderWrite } from "@/lib/order-data";
-import { holdsProducts } from "@/lib/community-access";
+import { holdsProducts, holdsProductsOrThrow } from "@/lib/community-access";
 import { MAX_MOVED_INTO, movedAwayTo, readMovedIndex } from "@/lib/purchase-move-index";
 import { takePublicRequest } from "@/lib/traffic";
 import { sendEmail } from "@/lib/email";
@@ -147,9 +147,18 @@ export async function readFeedToken(token: string): Promise<FeedGrant | null> {
  * itself is, after one more of the store's public requests is taken for it
  * (no room throws, so the feed answers an error its app asks again after,
  * never "ended"). Move evidence that cannot be read throws too: never
- * listening given back to an address that moved away, never a definite no.
+ * listening given back to an address that moved away, never a definite no;
+ * so does an old address whose purchases cannot be read (holdsProductsOrThrow,
+ * as holdsLetter asks them).
+ *
+ * `shared` is for the feed and the episodes: they are asked by the podcast
+ * app maker's servers, which many subscribers share, so the requests taken
+ * here count against the store's window only, as the feed route's own
+ * reading does (isResting with `shared`), never against that server's share
+ * of the day; FEED_READS_A_DAY still bounds each feed. The form keeps the
+ * asking connection's share (Claude 1 and Codex H2 on #3717).
  */
-export async function mayListen(store: Store, productId: string, email: string): Promise<boolean> {
+export async function mayListen(store: Store, productId: string, email: string, from: { shared?: boolean } = {}): Promise<boolean> {
   if (!store.statsId) return false;
   if (normaliseEmail(email) === normaliseEmail(store.email)) return true;
   const statsId = store.statsId;
@@ -164,14 +173,16 @@ export async function mayListen(store: Store, productId: string, email: string):
   if (await holds(email)) return true;
   // The index read for an address that does not hold the product is paid with one of the store's public requests
   // first, as the old addresses' readings are (Claude 1 on #3717, cost note): no room is unknown.
-  if (!(await takePublicRequest(store, "buyer", Date.now(), 1))) throw new UnknownReplyError("the store's room to read moved purchases");
+  const shared = { shared: from.shared === true };
+  if (!(await takePublicRequest(store, "buyer", Date.now(), 1, shared))) throw new UnknownReplyError("the store's room to read moved purchases");
   const moved = await readMovedIndex(sid, email);
   if (moved.movedFrom.length > MAX_MOVED_INTO) throw new UnknownReplyError("too many moved addresses to read completely");
   const olds = moved.movedFrom;
   if (!olds.length) return false;
   // Each old address is one more reading, paid before it is made: no room is unknown, never "holds none".
-  if (!(await takePublicRequest(store, "buyer", Date.now(), olds.length))) throw new UnknownReplyError("the store's room to read moved purchases");
-  for (const old of olds) if (await holds(old)) return true;
+  if (!(await takePublicRequest(store, "buyer", Date.now(), olds.length, shared))) throw new UnknownReplyError("the store's room to read moved purchases");
+  // Strict for the old addresses (Claude 1 and Codex H2 on #3717, LEVE): a reading that fails is unknown, never "holds none".
+  for (const old of olds) if (await holdsProductsOrThrow(store, [productId], old, okKey(statsId, productId, old), "1")) return true;
   return false;
 }
 
@@ -222,7 +233,11 @@ export type LinkResult = "sent" | "email" | "limited" | "error";
 
 /**
  * Emails an address the page with its own feed, if it holds the product.
- * "sent" either way, so the form tells nobody who bought what.
+ * "sent" either way, so the form tells nobody who bought what: a holder and
+ * a stranger take different readings (only a non-holder's moved purchases
+ * are read, and paid for), so a reading that cannot be made, the store's
+ * room included, answers "sent" too and is logged, never an "error" only a
+ * stranger gets (Claude 1 and Codex H2 on #3717).
  */
 export async function sendFeedLink(input: { store: Store; product: Listing; email: string; ip: string; base: string; from: string }): Promise<LinkResult> {
   const raw = input.email.trim();
@@ -230,7 +245,14 @@ export async function sendFeedLink(input: { store: Store; product: Listing; emai
   const { store, product } = input;
   if (!(await withinStore("podcast-link-ip", `${store.handle}:${input.ip}`, 10, 3_600, store, "buyer"))) return "limited";
   if (!(await withinLimit("podcast-link-address", sha(normaliseEmail(raw)), 5, 3_600))) return "limited";
-  if (!(await mayListen(store, product.id, raw))) return "sent";
+  let listens: boolean;
+  try {
+    listens = await mayListen(store, product.id, raw);
+  } catch (error) {
+    console.error("a podcast link form could not read whether the address holds the podcast", error);
+    return "sent";
+  }
+  if (!listens) return "sent";
   const token = await feedToken(store, product.id, raw);
   if (!token) return "error";
   // In the store's language (lib/buyer-words/courses.ts).

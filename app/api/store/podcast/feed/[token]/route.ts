@@ -42,7 +42,7 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
   const store = await storeForHandle(grant.h);
   const product = store && store.statsId === grant.s ? await readListing(store, grant.p) : null;
   if (!store || !product?.podcast) return new Response("This podcast is no longer here.", { status: 410, headers: { "Cache-Control": "no-store" } });
-  const allowed = await mayListen(store, product.id, grant.e);
+  const allowed = await mayListen(store, product.id, grant.e, { shared: true });
   const own = normaliseEmail(grant.e) === normaliseEmail(store.email);
   // Once the store has used the whole month's visits, a subscriber's feed rests like the
   // store's other buyer pages (lib/traffic-rules.ts): the app is told to come back later,

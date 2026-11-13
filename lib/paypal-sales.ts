@@ -46,6 +46,7 @@ import { fairOff } from "@/lib/fair-price";
 import { admitOrders } from "@/lib/order-admission";
 import { countOrder } from "@/lib/orders";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { MAX_BUNDLE_ITEMS } from "@/lib/bundle-rules";
 import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { EMAIL_PATTERN } from "@/lib/auth";
 import { addressHash, grantImported, importedKey } from "@/lib/imported-purchases";
@@ -402,6 +403,8 @@ type Opened = {
   via?: { aff: string; rate: number };
   off?: number;
   sale?: number;
+  /** A bundle's products when the order opened (#4351): what the buyer pays for, as a Stripe checkout's bundleMeta. */
+  b?: string[];
 };
 
 /** What a visit carried into an order, read by the checkout route. */
@@ -463,6 +466,8 @@ export async function openOrder(store: Store, product: Listing, origin: string, 
       meta: cleanMeta(digital && extras.digitalConsent ? { [CONSENT_META]: consentMetaValue(extras.digitalConsent, "digital"), ...fairNote, ...extras.meta } : { ...fairNote, ...extras.meta }),
       ...(extras.via && /^[a-z0-9]{12}$/.test(extras.via.aff) ? { via: { aff: extras.via.aff, rate: Math.max(0, Math.min(100, Number(extras.via.rate) || 0)) } } : {}),
       ...(salePercent > 0 ? { off: Math.max(0, product.priceCents - cents), sale: salePercent } : fairPercent > 0 ? { off: Math.max(0, product.priceCents - cents) } : {}),
+      // The bundle's products as offered (#4351): the hand-over gives these, whatever the creator changes after.
+      ...(product.bundle?.length ? { b: [...product.bundle] } : {}),
     };
     // Confirmed before the buyer is sent to approve (#4354): the capture finds the order only by this record, so an
     // approval with no record here is a payment the site cannot complete. Only SET's exact "OK" is a write; any other
@@ -496,6 +501,8 @@ export type Paid = {
   via?: { aff: string; rate: number };
   off?: number;
   sale?: number;
+  /** Added 13 November 2026 (#4351); absent on orders opened before: a bundle's products when the order opened. */
+  b?: string[];
 };
 export type CaptureResult = { ok: true; paid: Paid; fresh: boolean } | { ok: false; reason: "unknown" | "pending" | "declined" | "mismatch" | "error" };
 
@@ -646,6 +653,11 @@ async function watchFirst(order: string, opened: Opened): Promise<boolean> {
   return added[0] === 1;
 }
 
+/** A bundle's products kept with an order: a short list of product ids, or nothing (an older order, or not a bundle). */
+export function paidItems(items: unknown): items is string[] {
+  return Array.isArray(items) && items.length > 0 && items.length <= MAX_BUNDLE_ITEMS && items.every((id) => typeof id === "string" && PAID_PRODUCT_ID.test(id));
+}
+
 /** Writes a completed payment down, once. Returns it, and whether this call wrote it. */
 async function settle(order: string, opened: Opened, captureId: string, email: string): Promise<{ paid: Paid; fresh: boolean }> {
   const paid: Paid = {
@@ -661,6 +673,7 @@ async function settle(order: string, opened: Opened, captureId: string, email: s
     ...(opened.meta ? { meta: opened.meta } : {}),
     ...(opened.via ? { via: opened.via } : {}),
     ...(opened.off ? { off: opened.off, sale: opened.sale } : {}),
+    ...(paidItems(opened.b) ? { b: opened.b } : {}),
   };
   // The record and every list it belongs in, written in one step (PAYPAL_SETTLE): a paid order is never written down
   // and left in no list, whatever reaches Redis or comes back from it. The answer read exactly (rule 24): 1 written
@@ -1146,9 +1159,11 @@ export const PAYPAL_REFUNDS_READ = 500;
  * The most one PayPal sale's record weighs as kept, in bytes: its twenty
  * fields of what the visit carried (cleanMeta: a name of 40 letters and a
  * value of 200 characters, each written as a six-byte escape at the worst),
- * and the order, payment, address, product and amounts beside them.
+ * and the order, payment, address, product and amounts beside them; and a
+ * bundle's products as paid for (#4351, Paid.b: at most MAX_BUNDLE_ITEMS ids
+ * of 64 characters, each quoted and comma-separated).
  */
-export const MAX_PAID_BYTES = 20 * (40 + 6 + 6 * 200) + 2_000;
+export const MAX_PAID_BYTES = 20 * (40 + 6 + 6 * 200) + 2_000 + MAX_BUNDLE_ITEMS * (64 + 3);
 
 /**
  * How many PayPal sales the store keeps, and its refunds when `refunds` (ZCARD):

@@ -10,7 +10,7 @@ import { createHmac } from "node:crypto";
 import { ordersLinkWithToken } from "@/lib/buyer-orders";
 import { type Listing, readListing, readListings } from "@/lib/catalog";
 import { dropEnrollment, recordEnrollment } from "@/lib/learn";
-import { type Paid, type PayPalReceipt, deliverPayPal, handOverKey, readPaidExact, refundSeen, watchPayPal } from "@/lib/paypal-sales";
+import { type Paid, type PayPalReceipt, deliverPayPal, handOverKey, paidItems, readPaidExact, refundSeen, watchPayPal } from "@/lib/paypal-sales";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { fromStore, storeBase } from "@/lib/purchase-email";
@@ -242,7 +242,10 @@ async function handOver(store: Store, paid: Paid): Promise<"handed" | "gone" | "
   let product: Listing | null;
   let bundled: Map<string, Listing>;
   try {
-    product = await readListing(store, paid.product);
+    const listed = await readListing(store, paid.product);
+    // A bundle hands over the products the buyer paid for (#4351), kept with the order when it opened; an order opened
+    // before they were kept, or not a bundle, follows the product as it is.
+    product = listed && paidItems(paid.b) ? { ...listed, bundle: [...paid.b] } : listed;
     bundled = new Map(product?.bundle?.length ? (await readListings(store, product.bundle)).map((listing) => [listing.id, listing]) : []);
   } catch (error) {
     // Already in the list since it was written down (settle): this only makes it due at the next sweep (XX: one a

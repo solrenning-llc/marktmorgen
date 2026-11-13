@@ -178,6 +178,8 @@ async function apiKeyed(
 }
 
 const count = (n: number) => n.toLocaleString("en-US");
+/** A funded period whose paid cohort cannot be proved: the door's own words for it (apiKeyed). */
+const cohortUnknown = () => apiError(429, "unavailable", "The store could not answer just now. Try again in a moment.");
 
 /**
  * Takes `more` of the store's API requests, beyond the one the request already
@@ -191,11 +193,14 @@ const count = (n: number) => n.toLocaleString("en-US");
  * is a later step of it (a kept copy gone since it was measured, a page that
  * came back larger than was set aside): the refusal then says the whole count
  * and that what was read so far is not shown, and what was already taken
- * stays counted. A first step passes nothing.
+ * stays counted. A first step passes nothing. `removal`: the take is for
+ * switching something off, which never waits on the paid cohort.
  */
-export async function takeMoreApi(store: Store, more: number, taken = 0): Promise<Response | null> {
+export async function takeMoreApi(store: Store, more: number, taken = 0, removal?: "removal"): Promise<Response | null> {
   if (more === 0) return null;
   if (!Number.isSafeInteger(more) || more < 0) return apiError(502, "unavailable", "This could not be read just now. Try again in a moment.");
+  // A funded period's further work needs its paid cohort first (resourceAllocations); a removal never waits on it.
+  if (removal !== "removal" && store.period?.funded === true && !(await reservePaidResourceWindow(store))) return cohortUnknown();
   const took = await takeAllowance(store, "api", more);
   if (took.ok) return null;
   if (took.reason === "used") {
@@ -229,6 +234,7 @@ export async function holdMoreApi(store: Store, most: number): Promise<Response 
   if (!Number.isSafeInteger(most) || most < 0) return apiError(502, "unavailable", "This could not be read just now. Try again in a moment.");
   const now = Date.now();
   if (most > 0) {
+    if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return cohortUnknown();
     const took = await takeAllowance(store, "api", most, now);
     if (!took.ok) {
       return took.reason === "used"

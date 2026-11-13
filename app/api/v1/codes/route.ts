@@ -73,7 +73,8 @@ export async function DELETE(request: Request) {
   if (!/^promo_[A-Za-z0-9]{1,200}$/.test(id)) return apiError(400, "id", "Give the code's id, from GET /api/v1/codes.");
   // The codes read to find it, the call that switches it off and the codes read again and sent, at their most,
   // taken before Stripe is asked (lib/api-read-rules.ts, codeStopWork).
-  const refused = await takeMoreApi(store, apiReadUnits(codeStopWork()));
+  // Switching a code off is a removal: it never waits on the paid cohort (resourceAllocations).
+  const refused = await takeMoreApi(store, apiReadUnits(codeStopWork()), 0, "removal");
   if (refused) return refused;
   try {
     const account = store.stripeAccountId as string;

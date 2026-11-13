@@ -251,9 +251,9 @@ export async function deliverGift(input: {
 }): Promise<GiftOutcome> {
   const { store, session, product, base } = input;
   const id = session.metadata?.gift ?? "";
-  const gift = await readGift(id);
-  if (!gift || gift.s !== store.statsId || gift.p !== product.id) return "skip";
-  if (gift.given) return "already";
+  const seen = await readGift(id);
+  if (!seen || seen.s !== store.statsId || seen.p !== product.id) return "skip";
+  if (seen.given) return "already";
   // The mark read exactly (lib/claim-mark.ts; CX-123 rules 24 and 25): somebody else's is "already"; an unknown one
   // gives nothing and says so, as when Redis does not answer, so no "sent" mark is kept and the next run tries again.
   const mark = `${giftKey(id)}:giving`;
@@ -267,6 +267,28 @@ export async function deliverGift(input: {
     throw new Error("another run is giving this gift right now");
   }
   if (claimed === "unknown") throw new UnknownReplyError("a gift's giving mark");
+  // Read again now that the mark is ours, as handOverPreorder does (Claude 7's race hunt): a run that read the gift
+  // before another run gave it, and took the mark once that run let it go, must not give it again from its old copy.
+  // A refund taken back in between would be undone: the purchase granted again, {...gift, given} written over the
+  // revoked mark, and the refund, already read, never read again. Read exactly (CX-123 rule 24): unknown throws.
+  let kept: Gift | null;
+  try {
+    const reply = repliesFor(await redisPipeline([["GET", giftKey(id)]]), 1)?.[0];
+    if (reply === undefined || (reply !== null && typeof reply !== "string")) throw new UnknownReplyError("a gift");
+    kept = typeof reply === "string" ? parseKeptGift(reply, id) : null;
+  } catch (error) {
+    await releaseMark(mark, value);
+    throw error;
+  }
+  if (!kept || kept.s !== store.statsId || kept.p !== product.id) {
+    await releaseMark(mark, value);
+    return "skip";
+  }
+  if (kept.given || kept.revoked) {
+    await releaseMark(mark, value);
+    return "already";
+  }
+  const gift = kept;
 
   const sessionId = typeof session.id === "string" ? session.id : "";
   const pi = typeof session.payment_intent === "string" ? session.payment_intent : "";

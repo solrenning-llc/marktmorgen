@@ -52,6 +52,7 @@ import {
   plainRead,
 } from "@/lib/contacts";
 import { noteForErasure } from "@/lib/erasure-index";
+import { contactOpen } from "@/lib/store-contact";
 
 export { MAX_LEADS };
 
@@ -257,6 +258,9 @@ export async function requestCopy(input: {
       "",
       g.freeIgnore,
       "",
+      // Replies do not reach the store, and its own address is never handed to whoever typed one: when its page has
+      // the contact form open (lib/store-contact.ts), this is how to write to it (755 [STN2]).
+      ...(contactOpen(store) ? [g.freeContact(name, `${origin}/@${store.handle}#contact`), ""] : []),
       g.freeSentBy(name),
     ].join("\n"),
   });

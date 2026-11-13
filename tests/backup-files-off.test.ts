@@ -10,6 +10,7 @@ import { join } from "node:path";
 import * as reviews from "@/lib/backup-files-review";
 import { BACKUP_FILES_ROUTE_REVIEW } from "@/lib/backup-files-review";
 import { deletionRecordsOn, recordDeletions } from "@/lib/backup-deletions";
+import { keptLines, linesOf } from "@/lib/person-data";
 import { blobWorld, resetBlobWorld } from "./backup-files-world";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -36,6 +37,12 @@ async function main(): Promise<void> {
   is("BACKUP_DELETION_RECORDS_REVIEW exists and is null on main", records, null);
   const privacy = readFileSync(join(process.cwd(), "app/privacy/page.tsx"), "utf8");
   is("it is filled only once the privacy page says what the backup keeps after a deletion", records === null || /backup/i.test(privacy), true);
+
+  part("while the records are off, no creator or person is told about them (Claude 1 and Claude 1 cloud, MEDIUM on #3349, VR item 2)");
+  const aboutBackup = (text: string) => /backup/i.test(text);
+  const shown = [...keptLines(), ...keptLines("team"), ...keptLines("person")].map((l) => `${l.what} ${l.why}`);
+  is("no kept line in \"Delete this person\" speaks of the backup while its review is null", records === null ? shown.some(aboutBackup) : true, records === null ? false : true);
+  is("no line says \"Built but off\"", (["erased", "kept", "expires", "none", "open", "suppression"] as const).flatMap((how) => linesOf(how)).some((line) => /built but off/i.test(line)) || shown.some((line) => /built but off/i.test(line)), false);
   done();
 }
 

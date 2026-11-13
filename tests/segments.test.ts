@@ -218,6 +218,29 @@ async function main(): Promise<void> {
   const parts = await buyerLedger({ ...store, statsId: "v".repeat(32) } as Store);
   is("an invoice paid in parts: each part's refund is taken off", parts.buyers.get("rae@example.com")?.cents, 1500);
 
+  // #4410: a renewal paid in two parts, both on the invoice and in the account's invoice payments; the second part's
+  // $40 was refunded. Every confirmed part's refund is taken off: $60 kept, not the first part's alone.
+  {
+    const two = { ...renewal("two1", "tess@example.com", 3, 10000), payments: { data: [
+      { status: "paid", payment: { payment_intent: "pi_twopart100000" } },
+      { status: "paid", payment: { payment_intent: "pi_twopart200000" } },
+    ] } };
+    const before = { invoices, refunds, invoicePayments };
+    invoices = [two];
+    invoicePayments = [
+      { id: "inpay_two1", invoice: "in_two1", status: "paid", payment: { type: "payment_intent", payment_intent: "pi_twopart100000" } },
+      { id: "inpay_two2", invoice: "in_two1", status: "paid", payment: { type: "payment_intent", payment_intent: "pi_twopart200000" } },
+      // Pam's first payment, through checkout, still needs its invoice's payment (above).
+      { id: "inpay_1", object: "invoice_payment", invoice: "in_pamfirst", status: "paid", payment: { type: "payment_intent", payment_intent: "pi_pamfirst00000" } },
+    ];
+    refunds = [{ id: "re_two2", status: "succeeded", amount: 4000, currency: "usd", created: now - 2 * DAY, payment_intent: "pi_twopart200000" }];
+    const split = await buyerLedger({ ...store, statsId: "q".repeat(32) } as Store);
+    is("a renewal paid in two parts: the second part's refund is taken off", [split.buyers.get("tess@example.com")?.cents, split.partial], [6000, false]);
+    invoices = before.invoices;
+    refunds = before.refunds;
+    invoicePayments = before.invoicePayments;
+  }
+
   // A member of a year: one checkout and eleven monthly payments, the last ten days ago, is a best customer, not a new one.
   sessions.push(session("sam1", "sam@example.com", 340, 1000));
   invoices = Array.from({ length: 11 }, (_, i) => ({ ...renewal(`sam${String(i).padStart(2, "0")}`, "sam@example.com", 10 + i * 30, 1000), payments: undefined, payment_intent: `pi_sam${i}` }));

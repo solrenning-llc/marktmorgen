@@ -226,8 +226,11 @@ export default function RefundsPage() {
           payment in full, automatically, from the creator&rsquo;s own Stripe
           account, and email you once to say so. If the creator&rsquo;s balance
           does not cover it, or Stripe refuses the refund, we try again every
-          day and tell the creator. Marktmorgen does not hold that money and
-          never pays it.
+          day and tell the creator. We can do this only while the
+          creator&rsquo;s Stripe account still lets us act on it. If it does
+          not, we cannot end the plan or refund the payment from here: ask the
+          creator, or your bank or card company. Marktmorgen does not hold that
+          money and never pays it.
         </p>
         <p>
           If you cannot reach them, write to us at{" "}

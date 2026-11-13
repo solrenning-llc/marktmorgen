@@ -90,6 +90,9 @@ export function refundsSettled(list: unknown, intent: string): "done" | "pending
 const refusedForGood = (error: unknown): error is StripeError =>
   error instanceof StripeError && error.status >= 400 && error.status < 500 && error.status !== 401 && error.status !== 403 && error.status !== 429;
 
+/** Stripe's dispute statuses while the bank has not decided (docs.stripe.com/api/disputes/object, status). */
+const OPEN_DISPUTE: ReadonlySet<string> = new Set(["warning_needs_response", "warning_under_review", "needs_response", "under_review"]);
+
 /**
  * "done": every payment taken at or after `end` is given back (or disputed, or had nothing left to give);
  * "owed": one is still to be given back (the balance did not cover it, Stripe refused it, or more than one try
@@ -103,6 +106,8 @@ export async function refundLatePayments(account: string, subscription: string, 
   query.append("expand[]", "data.charge.balance_transaction");
   // Its refunds too, so a payment refunded in full is known settled (every refund succeeded) without a read of its own.
   query.append("expand[]", "data.charge.refunds");
+  // Its dispute too: `disputed` stays true after a dispute closes, and only one the buyer won gave the money back.
+  query.append("expand[]", "data.charge.dispute");
   const list = objectOf(await onAccount("GET", account, `/invoices?${query}`, undefined, AT));
   if (!list || list.object !== "list" || !Array.isArray(list.data) || list.has_more !== false) throw new Error("a plan's late invoices could not be read whole");
   const owed: Owed[] = [];
@@ -131,10 +136,21 @@ export async function refundLatePayments(account: string, subscription: string, 
       throw new Error("a plan's late payment's charge did not read");
     }
     if (typeof charge.currency !== "string" || !CURRENCY.test(charge.currency)) throw new Error("a plan's late payment's currency did not read");
-    // Disputed: the bank gives it back; never a second time from here.
+    // Disputed (Codex X5's MEDIUM at 52e9c7a1ed): `disputed` stays true after the dispute closes. Lost, the bank gave it
+    // back: never a second time from here. Still open: tried again, never settled as given back. Won by the creator (or
+    // closed without a chargeback, or prevented), the creator kept a payment taken after the end: refunded as any other.
     if (charge.disputed) {
-      disputed += 1;
-      continue;
+      const dispute = objectOf(charge.dispute);
+      const status = dispute && dispute.object === "dispute" && (dispute.charge === undefined || idOf(dispute.charge) === charge.id) ? dispute.status : undefined;
+      if (status === "lost") {
+        disputed += 1;
+        continue;
+      }
+      if (typeof status === "string" && OPEN_DISPUTE.has(status)) {
+        left = true;
+        continue;
+      }
+      if (status !== "won" && status !== "warning_closed" && status !== "prevented") throw new Error("a plan's late payment's dispute did not read");
     }
     const email = typeof row.customer_email === "string" ? row.customer_email : null;
     const paid: Given = { invoice: row.id, email, amount: charge.amount, currency: charge.currency, paidAt: row.created };
@@ -197,7 +213,8 @@ export async function refundLatePayments(account: string, subscription: string, 
         continue;
       }
       if (error instanceof StripeError && (error.code === "charge_disputed" || error.code === "refund_disputed_payment")) {
-        disputed += 1;
+        // A dispute opened since it was read: decided by its status on the next try, never settled from here.
+        left = true;
         continue;
       }
       if (error instanceof StripeError && error.code === "charge_already_refunded") {

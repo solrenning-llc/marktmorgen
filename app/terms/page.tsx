@@ -174,8 +174,9 @@ export default function TermsPage() {
           balance, and email the buyer once to say so. If your balance does not
           cover it, or Stripe refuses the refund, we try again every day; if
           it is still owed 3 days later, we email you once with what to
-          refund. Marktmorgen never
-          pays these refunds and never takes any part of them.
+          refund. We can do this only while your Stripe account still lets us
+          act on it; if it does not, you must refund it yourself. Marktmorgen
+          never pays these refunds and never takes any part of them.
         </p>
         <p id="instant-access" className="scroll-mt-24">
           <strong className="text-black">Starting before the 14 days end.</strong>{" "}

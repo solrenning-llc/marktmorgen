@@ -1063,10 +1063,21 @@ async function toggleIn(id: string, key: string, ref: string, post: string, who:
   if (added === null || zeroOrOne(adds?.[1]) === null) throw new UnknownReplyError("a like's SADD");
   if (added === 1) return true;
   const removed = repliesFor(await redisPipeline([["SREM", key, who], ["SREM", traceKey(id, who), ref]]), 2);
-  // Room is given back only once the removal is confirmed.
-  if (zeroOrOne(removed?.[0]) === null || zeroOrOne(removed?.[1]) === null) throw new UnknownReplyError("a like's SREM");
-  const times = held === 1 ? 1 : 2;
-  await giveData(room, [{ slot: POST_SLOT(post), bytes: times * SET_ENTRY_BYTES }, { ...TRACE_ENTRY, bytes: times * TRACE_ENTRY.bytes }]);
+  // Room is given back only once the removal is confirmed, and only for what this run removed (Claude 1's MEDIUM on
+  // #3819): an SREM answering 0 removed nothing (another press took it first), so it gives nothing of the like's room
+  // back. The room this run took above, for a like it then did not add, is given back either way.
+  const like = zeroOrOne(removed?.[0]);
+  const traced = zeroOrOne(removed?.[1]);
+  if (like === null || traced === null) throw new UnknownReplyError("a like's SREM");
+  const took = held === 1 ? 0 : 1;
+  const likeTimes = like + took;
+  const traceTimes = traced + took;
+  if (likeTimes || traceTimes) {
+    await giveData(room, [
+      { slot: POST_SLOT(post), bytes: likeTimes * SET_ENTRY_BYTES },
+      { ...TRACE_ENTRY, bytes: traceTimes * TRACE_ENTRY.bytes },
+    ]);
+  }
   return false;
 }
 

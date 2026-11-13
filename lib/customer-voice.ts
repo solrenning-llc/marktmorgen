@@ -51,6 +51,7 @@
  */
 import { answerModel, askModel, counted, jsonIn } from "@/lib/ai";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { membershipNumbers } from "@/lib/membership-numbers";
 import { sellsMemberships } from "@/lib/membership-manage";
 import { STORE_PAGE, missedQuestions } from "@/lib/answers";
@@ -311,11 +312,20 @@ function parseSummary(raw: unknown): VoiceSummary | null {
  */
 export async function forgetVoicePerson(statsId: string | null, now = Date.now()): Promise<number> {
   if (!statsId || !isRedisConfigured()) return 0;
-  const [, gone] = await redisPipeline([
-    ["DEL", lockKey(statsId)],
-    ["DEL", ...keptMonths(now).map((month) => voiceKey(statsId, month))],
-  ]);
-  return Number(gone) || 0;
+  const months = keptMonths(now);
+  const replies = repliesFor(
+    await redisPipeline([
+      ["DEL", lockKey(statsId)],
+      ["DEL", ...months.map((month) => voiceKey(statsId, month))],
+    ]),
+    2,
+  );
+  // Read exactly (issue #4382, rule 24): each count within what its DEL could delete; anything else is unknown,
+  // so the erasure stays open and is run again, never done while a summary may keep the person's review texts.
+  const lock = replies ? countOf(replies[0]) : null;
+  const gone = replies ? countOf(replies[1]) : null;
+  if (lock === null || lock > 1 || gone === null || gone > months.length) throw new UnknownReplyError("erasing a store's customer voice summaries");
+  return gone;
 }
 
 /** This month's summary, or last month's while this month has none yet. */

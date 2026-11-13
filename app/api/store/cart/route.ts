@@ -39,7 +39,8 @@ import { cartItemOf, cartShipping, shipsWithOnline } from "@/lib/cart-shipping";
 import { SHIP_REGIONS, activeShipping, shipsToWords } from "@/lib/shipping";
 import { shippingWords } from "@/lib/buyer-words/shipping";
 import { deliversDigitally } from "@/lib/digital-consent";
-import { releaseCartStockHolds, stockLeft, withCartStockHolds } from "@/lib/stock";
+import { holdAdmission, releaseCartStockHolds, stockLeft, withCartStockHolds } from "@/lib/stock";
+import { limitedStock } from "@/lib/product-extras";
 import { HOLD_SECONDS } from "@/lib/stripe-account";
 
 /** The cart's checkout last opened in this browser, whose held units are handed back when it pays for a cart again (lib/stock.ts). */
@@ -309,6 +310,13 @@ export async function POST(request: NextRequest) {
     const out = await outOfKeys(store, product).catch(() => null);
     if (out === null) return away(`/@${store.handle}?cart=error#cart`);
     if (out) return away(`/@${store.handle}?cart=changed#cart`);
+  }
+  // A cart with a limited product holds a unit of it for the checkout's whole life: the same per-connection bound as
+  // the one-product checkout (lib/stock.ts, HOLDS_PER_ADDRESS), charged before anything is held; unknown holds nothing.
+  if (products.some((p) => limitedStock(p) !== null)) {
+    const admitted = await holdAdmission(store, clientAddress(request));
+    if (admitted === "unknown") return away(`/@${store.handle}?cart=error#cart`);
+    if (admitted === "exceeded") return away(`/@${store.handle}?status=slow`);
   }
 
   try {

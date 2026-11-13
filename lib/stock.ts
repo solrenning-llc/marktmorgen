@@ -18,6 +18,7 @@ import { type Held, LockBusyError, releaseLock, takeLock } from "@/lib/redis-loc
 import { OrdersPausedError } from "@/lib/order-admission";
 import { DigitalConsentMissing } from "@/lib/digital-consent";
 import type { Listing, Store } from "@/lib/store";
+import { type LimitState, essentialLimitState } from "@/lib/request-guard";
 
 const HOLD_MS = HOLD_SECONDS * 1000;
 const MAX_CHECKS = 5;
@@ -151,6 +152,23 @@ async function countStock(store: Store, product: Listing, now: number, ask: bool
   }
   if (writes.length) await redisPipeline(writes).catch(() => {});
   return { left: Math.max(0, limit - used), unresolved, unknown };
+}
+
+/**
+ * The holds one connection may start on a store's limited products within one hold's time (HOLD_SECONDS). The shared
+ * "checkout" limit (20 a connection and store in ten minutes) let a connection that never pays hold about 60 units at
+ * once, every unit of a small drop, and real buyers saw "Sold out" until the holds ran out. A buyer who goes back and
+ * presses again hands back the unit they held first (the hold cookie), so a few is far past any real buyer.
+ * tests/checkout-stock-hold-per-address.test.ts.
+ */
+export const HOLDS_PER_ADDRESS = 4;
+
+/**
+ * Charged before a checkout that holds a unit opens, for an order with a limited product: "within" holds, "exceeded"
+ * is sent back as too fast, and "unknown" (a count that could not be read) holds nothing (rule 24).
+ */
+export function holdAdmission(store: Store, address: string): Promise<LimitState> {
+  return essentialLimitState("stock-hold", `${address}|${store.handle}`, HOLDS_PER_ADDRESS, HOLD_SECONDS);
 }
 
 export type StockHold<T> = { ok: true; value: T } | { ok: false; reason: "soldout" | "busy" };

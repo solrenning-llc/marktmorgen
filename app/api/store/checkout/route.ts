@@ -7,8 +7,8 @@ import { linkOrigin, originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle, syncTakesBuyer } from "@/lib/store";
 import { canSellProduct, createCheckout } from "@/lib/store-checkout";
 import { countHit } from "@/lib/visit";
-import { releaseStockHold, withStockHold } from "@/lib/stock";
-import { activePlan } from "@/lib/product-extras";
+import { holdAdmission, releaseStockHold, withStockHold } from "@/lib/stock";
+import { activePlan, limitedStock } from "@/lib/product-extras";
 import { activeFunnel, funnelProductIds } from "@/lib/funnel";
 import { affiliateCookieName, attributionFor } from "@/lib/affiliates";
 import { viaCookieName } from "@/lib/affiliate-setting";
@@ -155,6 +155,13 @@ export async function POST(request: NextRequest) {
   // every unit to keep real buyers out.
   if (!(await withinLimit("checkout", `${clientAddress(request)}|${store.handle}`, 20, 600))) {
     return away(`/@${store.handle}?status=slow`);
+  }
+  // A limited unit is held for the checkout's whole life, so holding has its own, smaller bound per connection
+  // (lib/stock.ts, HOLDS_PER_ADDRESS), charged before anything is held; a count that cannot be read holds nothing.
+  if (limitedStock(product) !== null) {
+    const admitted = await holdAdmission(store, clientAddress(request));
+    if (admitted === "unknown") return away(`/@${store.handle}?status=error`);
+    if (admitted === "exceeded") return away(`/@${store.handle}?status=slow`);
   }
 
   // Coming soon: its page takes a waitlist sign-up, and no checkout opens

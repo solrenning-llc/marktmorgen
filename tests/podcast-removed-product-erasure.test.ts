@@ -7,15 +7,14 @@
  * over the products still in the catalog: the erasure answered done with the address kept, while the feed itself
  * answered "no longer here" (410) to everyone.
  *
- * Now each grant also notes its product in the store's set (nl:pod:pids:<sid>) and its listener in the product's
- * holders (nl:pod:h:<sid>:<pid>), in the same counted write. A person's deletion goes over the catalog and that
- * set, read exactly (unreadable: the deletion is not finished). Removing a product deletes its grants through its
- * holders, and takes the product out of the set only once they are gone. Grants made before this change for a
- * product removed before it are reached only by the walk at store closing (known limit).
+ * Now each new grant also notes its product in the store's set (nl:pod:pids:<sid>), in the same counted write as
+ * its index, and a person's deletion (and the copy of their data) goes over the catalog and that set, read exactly
+ * (unreadable: the deletion is not finished). A removed product stays in the set, so its feeds stay within reach
+ * of every deletion and of the walk at store closing. Grants made before this change for a product removed before
+ * it are reached only by that walk (known limit).
  */
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
 import test from "node:test";
 import { erasePerson } from "@/lib/person-erasure";
 import * as access from "@/lib/podcast-access";
@@ -62,7 +61,7 @@ test("a feed of a product removed before is still reached by a person's deletion
   assert.equal(result.ok, true);
   assert.equal(redis.run(["GET", grantKey(mine)]), null, "the person's grant, with their address, is gone");
   assert.notEqual(redis.run(["GET", grantKey(theirs)]), null, "another listener's grant stays");
-  assert.equal(redis.run(["SCARD", `nl:pod:h:${sid}:${pid}`]), 1, "and only the other listener is left in the product's holders");
+  assert.equal(redis.run(["SISMEMBER", `nl:pod:pids:${sid}`, pid]), 1, "the removed product stays noted for the next deletion");
 }));
 
 test("an unreadable set of podcast products leaves the deletion unfinished, never done", () => quietly(async () => {
@@ -81,24 +80,8 @@ test("an unreadable set of podcast products leaves the deletion unfinished, neve
   } finally { redis.pipeline = original; }
 }));
 
-test("removing a product deletes every feed of it, then takes it out of the store's set", () => quietly(async () => {
-  const { sid, pid, mine, theirs } = await world();
-  const drop = (access as Record<string, unknown>).dropPodcastFeeds;
-  assert.equal(typeof drop, "function", "lib/podcast-access.ts has dropPodcastFeeds");
-  await (drop as (sid: string, pid: string) => Promise<void>)(sid, pid);
-  for (const token of [mine, theirs]) assert.equal(redis.run(["GET", grantKey(token)]), null);
-  assert.equal(redis.run(["EXISTS", `nl:pod:h:${sid}:${pid}`]), 0);
-  assert.equal(redis.run(["SISMEMBER", `nl:pod:pids:${sid}`, pid]), 0);
-  const left = (redis.run(["KEYS", `nl:pod:by:${sid}:${pid}:*`]) as string[]) ?? [];
-  assert.deepEqual(left, [], "no index is left");
-}));
-
-test("the product route drops the feeds when it removes a product", () => {
-  assert.match(readFileSync("app/api/store/product/route.ts", "utf8"), /dropPodcastFeeds\(removed\.store\.statsId, id\)/);
-});
-
-test("the two new families are counted and erased when a store closes", () => {
-  for (const family of ["nl:pod:pids:", "nl:pod:h:"]) {
+test("the new family is counted and erased when a store closes", () => {
+  for (const family of ["nl:pod:pids:"]) {
     assert.ok(COUNTED_FAMILIES.includes(family), `${family} is counted`);
     assert.deepEqual(CLOSING[family], { how: "erase" }, `${family} is erased at closing`);
   }

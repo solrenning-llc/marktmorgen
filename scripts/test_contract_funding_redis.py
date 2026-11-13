@@ -1782,6 +1782,193 @@ def main():
         assert redis.command('GETRANGE', prefix + ':missing-bounded-source', 0, 1000000) == ''
         print('PASS:bounded restart source GETRANGE returns at most1000001raw bytes in1command;UTF8 and missing observations stay explicit;commands=' + json.dumps(bounded_counts, sort_keys=True))
 
+        # Renewals (CONTRACT_ADMISSION_COVERAGE.renewals): a paid next period of
+        # the same funded subscription gets its own full grant and moves the
+        # active proof only after the provider's paid observation. Every prior
+        # receipt and cent stays; a repeat never reserves or activates twice.
+        renewal_keys = [prefix + 'renewal:' + str(i) for i in range(24)]
+        keys.extend(renewal_keys)
+        month, year = 30 * 86400, 365 * 86400
+        month_span, year_span = 31 * 86400, 12 * 31 * 86400
+        def renewal_source(key, choice='creator_month', length=month, slots=1, funded=2):
+            """A checkout grant activated for [instant, instant+length], 50 reserved."""
+            redis.command('HSET', key, 'review', 'review', 'policy', 'binding', 'reserved', 50, 'carried', 0,
+                          'slots:creator_month', 2, 'slots:creator_year', 2, 'slots:pro_month', 0, 'slots:pro_year', 0, 'slots:scale_month', 0, 'slots:scale_year', 0)
+            redis.command('HSET', key, 'slots:' + choice, slots)
+            receipt = '|'.join(map(str, ['review', 'one', choice, 'checkout', 50, instant+300, instant+3600, instant+86400, 2000000000000]))
+            binding = '|'.join(map(str, ['ctr_one', 'sub_Activation001', choice, instant, 'paid', instant, instant+length]))
+            redis.command('HSET', key, 'grant:ctr_one', receipt, 'activated:ctr_one', binding, 'active:one', binding)
+            return binding
+        def reserve(client, key, action, nonce, now, choice='creator_month', subscription='sub_Activation001', charge=50, limit=100, funded=2, extra=()):
+            receipt = '|'.join(map(str, ['review', 'one', choice, action, charge, now+300, now+3600, now+86400, 2000000000000]))
+            return client.command('EVAL', script, 1, key, 'binding', 'review', 'one', choice, charge, limit, 0, funded, nonce, receipt, action, subscription, now, *extra)
+        def renew_take(client, key, now, start, nonce='ctr_rn_one', **args):
+            return reserve(client, key, 'renewal', nonce, now, extra=(start,), **args)
+        renewed_at = instant + month + 3600
+        seed_binding = renewal_source(renewal_keys[0])
+        before = snapshot(renewal_keys[0])
+        measured_ack, renewal_changes = measured_command(redis, lambda: renew_take(redis, renewal_keys[0], renewed_at, instant+month))
+        assert measured_ack == 1, 'A paid renewal of the active funded subscription reserves its own full grant'
+        renewal_changes = {name: count for name, count in renewal_changes.items() if count}
+        assert renewal_changes.get('eval') == 1, renewal_changes
+        print('MEASURED renewal reservation commands:', sum(renewal_changes.values()), sorted(renewal_changes.items()))
+        assert redis.command('HGET', renewal_keys[0], 'grant:ctr_rn_one').split('|')[-1] == 'ctr_one'
+        assert redis.command('HGET', renewal_keys[0], 'grant:ctr_rn_one').split('|')[3] == 'renewal'
+        assert redis.command('HGET', renewal_keys[0], 'pending:one') == 'ctr_rn_one'
+        assert redis.command('HGET', renewal_keys[0], 'reserved') == '100'
+        assert redis.command('HGET', renewal_keys[0], 'slots:creator_month') == '0'
+        assert redis.command('HGET', renewal_keys[0], 'active:one') == seed_binding, 'Reserving never moves the active proof'
+        renewal_match = re.search(r'export const ACTIVATE_RENEWAL_CONTRACT = `([^`]+)`;', source)
+        if not renewal_match or '$' + '{' in renewal_match.group(1):
+            raise RuntimeError('Expected static renewal activation Lua')
+        renewal_script = renewal_match.group(1)
+        def renew_activate(client, key, now, start, finish, nonce='ctr_rn_one', choice='creator_month', subscription='sub_Activation001', created=instant, limit=100, funded=2, span=month_span):
+            return client.command('EVAL', renewal_script, 1, key, 'binding', 'review', 'one', choice, nonce, subscription, created, now, 50, limit, 0, funded, start, finish, span)
+        new_binding = '|'.join(map(str, ['ctr_rn_one', 'sub_Activation001', 'creator_month', instant, 'paid', instant+month, instant+2*month]))
+        measured_ack, renewal_activation = measured_command(redis, lambda: renew_activate(redis, renewal_keys[0], renewed_at+1, instant+month, instant+2*month))
+        assert measured_ack == [1, renewed_at+86400], measured_ack
+        renewal_activation = {name: count for name, count in renewal_activation.items() if count}
+        assert renewal_activation.get('eval') == 1, renewal_activation
+        print('MEASURED renewal activation commands:', sum(renewal_activation.values()), sorted(renewal_activation.items()))
+        assert redis.command('HGET', renewal_keys[0], 'active:one') == new_binding
+        assert redis.command('HGET', renewal_keys[0], 'activated:ctr_rn_one') == new_binding
+        assert redis.command('HGET', renewal_keys[0], 'activated:ctr_one') == seed_binding
+        assert redis.command('HGET', renewal_keys[0], 'pending:one') is None
+        assert redis.command('HGET', renewal_keys[0], 'reserved') == '100', 'Activation retains both principals'
+        assert redis.command('HGET', renewal_keys[0], 'slots:creator_month') == '0'
+        print('PASS: a paid renewal reserves a new full grant, then moves the active proof to the contiguous paid period, retaining every receipt and cent')
+        before = snapshot(renewal_keys[0])
+        assert renew_activate(redis, renewal_keys[0], renewed_at+2*86400, instant+month, instant+2*month) == [2, instant+2*month], 'An identical observation of the committed renewal answers without a write'
+        assert renew_take(redis, renewal_keys[0], renewed_at+5, instant+month) == 0, 'The same renewal event cannot reserve twice'
+        assert renew_take(redis, renewal_keys[0], renewed_at+5, instant+month, nonce='ctr_rn_other') == 0, 'The renewed term has not ended: no second renewal'
+        assert renew_activate(redis, renewal_keys[0], renewed_at+3, instant+month, instant+2*month+1) == 0
+        assert snapshot(renewal_keys[0]) == before
+        print('PASS: the same renewal observed again or reserved again changes nothing')
+        renewal_source(renewal_keys[1])
+        def parallel_renewal(i, nonce=None):
+            client = Redis()
+            try:
+                return renew_take(client, renewal_keys[1 if nonce else 2], renewed_at, instant+month, nonce=nonce or 'ctr_rn_' + str(i))
+            finally:
+                client.close()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=16) as pool:
+            results = list(pool.map(lambda i: parallel_renewal(i, 'ctr_rn_one'), range(64)))
+        assert sum(results) == 1
+        renewal_source(renewal_keys[2])
+        with concurrent.futures.ThreadPoolExecutor(max_workers=16) as pool:
+            results = list(pool.map(parallel_renewal, range(64)))
+        assert sum(results) == 1
+        for key in renewal_keys[1:3]:
+            assert redis.command('HGET', key, 'reserved') == '100'
+            assert redis.command('HGET', key, 'slots:creator_month') == '0'
+        def parallel_renewal_activation(_):
+            client = Redis()
+            try:
+                return renew_activate(client, renewal_keys[1], renewed_at+1, instant+month, instant+2*month)
+            finally:
+                client.close()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=16) as pool:
+            results = list(pool.map(parallel_renewal_activation, range(64)))
+        assert sum(value == [1, renewed_at+86400] for value in results) == 1
+        assert all(value in ([1, renewed_at+86400], [2, instant+2*month]) for value in results)
+        print('PASS: 64 concurrent renewal events reserve one grant and 64 observations share one activation')
+        # Reservation refusals: nothing written in any field.
+        refusals = [
+            ('the paid term has not ended', dict(now=instant+month-1, start=instant+month)),
+            ('the new period does not begin where the paid one ended', dict(now=renewed_at, start=instant+month+1)),
+            ('another subscription', dict(now=renewed_at, start=instant+month, subscription='sub_Other0000001')),
+            ('another plan or interval', dict(now=renewed_at, start=instant+month, choice='creator_year')),
+            ('later than a whole next term', dict(now=instant+month+month_span, start=instant+month)),
+            ('no cash left', dict(now=renewed_at, start=instant+month, limit=50)),
+            ('no slot left', dict(now=renewed_at, start=instant+month, slots=0)),
+        ]
+        for what, args in refusals:
+            renewal_source(renewal_keys[3], slots=args.pop('slots', 1))
+            redis.command('HDEL', renewal_keys[3], 'grant:ctr_rn_one', 'pending:one')
+            before = snapshot(renewal_keys[3])
+            assert renew_take(redis, renewal_keys[3], args.pop('now'), args.pop('start'), **args) == 0, what
+            assert snapshot(renewal_keys[3]) == before, what
+        for field, value in [('active:one', None), ('pending:one', 'ctr_elsewhere'), ('activated:ctr_one', 'different'), ('grant:ctr_one', 'missing')]:
+            renewal_source(renewal_keys[4])
+            if value is None:
+                redis.command('HDEL', renewal_keys[4], field)
+            else:
+                redis.command('HSET', renewal_keys[4], field, value)
+            before = snapshot(renewal_keys[4])
+            assert renew_take(redis, renewal_keys[4], renewed_at, instant+month) == 0, field
+            assert snapshot(renewal_keys[4]) == before, field
+        # A restart from a renewed proof stays closed until its own lineage accepts one.
+        renewal_source(renewal_keys[5])
+        assert renew_take(redis, renewal_keys[5], renewed_at, instant+month) == 1
+        assert renew_activate(redis, renewal_keys[5], renewed_at+1, instant+month, instant+2*month) == [1, renewed_at+86400]
+        redis.command('HINCRBY', renewal_keys[5], 'slots:creator_month', 1)
+        before = snapshot(renewal_keys[5])
+        assert reserve(redis, renewal_keys[5], 'restart', 'ctr_restart_renewed', instant+2*month+10, limit=200, funded=3, extra=(300,)) == 0
+        assert snapshot(renewal_keys[5]) == before
+        print('PASS: an unended, discontiguous, foreign, late, unfunded or corrupt source reserves no renewal')
+        # Activation refusals, each on a fresh reserved renewal; nothing written.
+        activation_refusals = [
+            ('the period does not begin where the paid one ended', dict(start=instant+month+1, finish=instant+2*month)),
+            ('longer than one term', dict(start=instant+month, finish=instant+month+month_span+1)),
+            ('already over', dict(now=instant+2*month, start=instant+month, finish=instant+2*month)),
+            ('not begun', dict(now=instant+month-1, start=instant+month, finish=instant+2*month)),
+            ('another subscription', dict(start=instant+month, finish=instant+2*month, subscription='sub_Other0000001')),
+            ('another creation identity', dict(start=instant+month, finish=instant+2*month, created=instant+1)),
+            ('after the activation deadline', dict(now=renewed_at+86401, start=instant+month, finish=instant+2*month)),
+            ('another nonce', dict(start=instant+month, finish=instant+2*month, nonce='ctr_rn_missing')),
+            ('another plan', dict(start=instant+month, finish=instant+2*month, choice='creator_year')),
+        ]
+        for what, args in activation_refusals:
+            renewal_source(renewal_keys[6])
+            redis.command('HDEL', renewal_keys[6], 'grant:ctr_rn_one', 'pending:one')
+            assert renew_take(redis, renewal_keys[6], renewed_at, instant+month) == 1, what
+            before = snapshot(renewal_keys[6])
+            assert renew_activate(redis, renewal_keys[6], args.pop('now', renewed_at+1), args.pop('start'), args.pop('finish'), **args) == 0, what
+            assert snapshot(renewal_keys[6]) == before, what
+        for field, value in [('active:one', 'moved'), ('pending:one', 'ctr_other'), ('reserved', 50), ('activated:ctr_one', 'different'), ('grant:ctr_rn_one', 'review|one|creator_month|switch|50|1|2|3|2000000000000|ctr_one')]:
+            renewal_source(renewal_keys[7])
+            redis.command('HDEL', renewal_keys[7], 'grant:ctr_rn_one', 'pending:one')
+            assert renew_take(redis, renewal_keys[7], renewed_at, instant+month) == 1
+            redis.command('HSET', renewal_keys[7], field, value)
+            before = snapshot(renewal_keys[7])
+            assert renew_activate(redis, renewal_keys[7], renewed_at+1, instant+month, instant+2*month) == 0, field
+            assert snapshot(renewal_keys[7]) == before, field
+        print('PASS: discontiguous, long, expired, early, foreign, late, moved, uncovered or non-renewal observations activate nothing')
+        # Yearly: the next year is one term of twelve months on its own grant.
+        year_binding = renewal_source(renewal_keys[8], choice='creator_year', length=year)
+        year_at = instant + year + 3600
+        assert renew_take(redis, renewal_keys[8], year_at, instant+year, choice='creator_year') == 1
+        assert renew_activate(redis, renewal_keys[8], year_at+1, instant+year, instant+year+year_span+1, choice='creator_year', span=year_span) == 0
+        assert renew_activate(redis, renewal_keys[8], year_at+1, instant+year, instant+2*year, choice='creator_year', span=year_span) == [1, year_at+86400]
+        assert redis.command('HGET', renewal_keys[8], 'activated:ctr_one') == year_binding
+        assert redis.command('HGET', renewal_keys[8], 'reserved') == '100'
+        print('PASS: a yearly renewal funds and activates the whole next year on its own grant')
+        # A renewal of a renewal, then a switch from the renewed proof.
+        chained_at = instant + 2*month + 3600
+        redis.command('HINCRBY', renewal_keys[0], 'slots:creator_month', 2)
+        assert renew_take(redis, renewal_keys[0], chained_at, instant+2*month, nonce='ctr_rn_two', limit=200, funded=4) == 1
+        assert redis.command('HGET', renewal_keys[0], 'grant:ctr_rn_two').split('|')[-1] == 'ctr_rn_one'
+        assert renew_activate(redis, renewal_keys[0], chained_at+1, instant+2*month, instant+3*month, nonce='ctr_rn_two', limit=200, funded=4) == [1, chained_at+86400]
+        assert redis.command('HGET', renewal_keys[0], 'activated:ctr_rn_one') == new_binding
+        assert redis.command('HGET', renewal_keys[0], 'reserved') == '150'
+        assert reserve(redis, renewal_keys[0], 'switch', 'ctr_switch_renewed', chained_at+10, limit=200, funded=4) == 1
+        assert redis.command('HGET', renewal_keys[0], 'grant:ctr_switch_renewed').split('|')[-1] == 'ctr_rn_two'
+        switched = redis.command('EVAL', switch_script, 1, renewal_keys[0], 'binding', 'review', 'one', 'creator_month', 'ctr_switch_renewed', 'sub_Activation001', instant, chained_at+20, 50, 200, 0, 300, 4, 'paid', chained_at+20, chained_at+20+month, month_span)
+        assert switched == [1, chained_at+10+86400], switched
+        assert redis.command('HGET', renewal_keys[0], 'reserved') == '200'
+        print('PASS: a renewed proof renews again and switches plan, each on its own grant, retaining every principal')
+        # The renewed proof opens its paid resource window.
+        renewal_source(renewal_keys[9], slots=1)
+        assert renew_take(redis, renewal_keys[9], renewed_at, instant+month) == 1
+        assert renew_activate(redis, renewal_keys[9], renewed_at+1, instant+month, instant+2*month) == [1, renewed_at+86400]
+        redis.command('HSET', renewal_keys[9], 'slots:creator_year', 0)
+        from_ms, until_ms = (instant+month)*1000, (instant+2*month)*1000
+        window = redis.command('EVAL', resource_script, 1, renewal_keys[9], 'binding', 'review', 'one', 'sub_Activation001', 'creator_month',
+                               instant+month, instant+2*month, from_ms, until_ms, (renewed_at+2)*1000, 0, 1, 50, 100, 0, 2, 2, 50, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1)
+        assert window == [1, until_ms], window
+        assert redis.command('HGET', renewal_keys[9], 'reserved') == '100'
+        print('PASS: the renewed paid proof opens its resource window without new principal')
+
 
     finally:
         allowed_joint={'nl:contract-reserve:v1','nl:plan:ended','nl:plan:paying','nl:share:stores'}

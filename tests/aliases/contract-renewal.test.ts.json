@@ -1,0 +1,4 @@
+{
+ "@/lib/contract-funding": "contract-renewal-funding.ts",
+ "@/lib/contract-funding-rules": "contract-renewal-rules.ts"
+}

@@ -41,6 +41,7 @@
  */
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { countOf, repliesFor } from "@/lib/redis-reply";
 import { type Store, ensureListId, ensureStatsId, storeRef } from "@/lib/store";
 import { readKindExact } from "@/lib/catalog";
 import { readCoursesExact } from "@/lib/course";
@@ -305,7 +306,11 @@ export async function erasePerson(
   }
 
   // First, and on its own: whatever happens next, they are never written to again. Its second is Redis's (ERASED_PRINT).
-  await redisPipeline([suppressCommand(scope.listId as string, email)]);
+  // Only an exact reply counts (rule 24, #4269): one integer, HSET's 0 or 1. Anything else is unknown, so no eraser
+  // runs and the erasure is not reported as done; the person stays as they were, for a retry.
+  const printed = repliesFor(await redisPipeline([suppressCommand(scope.listId as string, email)]), 1);
+  const said = printed ? countOf(printed[0]) : null;
+  if (said === null || said > 1) return { ok: false, reason: "unavailable" };
 
   const parts: ErasedPart[] = [];
   const failed: string[] = [];

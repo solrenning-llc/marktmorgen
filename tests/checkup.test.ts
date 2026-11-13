@@ -186,7 +186,7 @@ async function main(): Promise<void> {
   part("The page");
   const page = read("app/studio/checkup/page.tsx");
   is("read with the settings permission, the role's own permissions passed on", page.includes('studioView(await cookies(), typeof query.store === "string" ? query.store : undefined, "settings")') && page.includes("runCheckup(store, (permission) => can(view.role, permission), checkedAt, undefined, isBillingConfigured())"), true);
-  is("where you are is shown", page.includes('<nav aria-label="Breadcrumb"') && page.includes('<li aria-current="page">'), true);
+  is("where you are is shown, by the studio's shared trail", page.includes('<StudioTrail store={store} here="Something not working?" />'), true);
   is("the page changes nothing", /fetch\(|method: "POST"|<form/.test(page), false);
   world = { ...world, stripe: "off" };
   const shown = await run(with_({ renewalUnpaidSince: 1 }));

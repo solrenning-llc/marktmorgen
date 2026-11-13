@@ -461,8 +461,18 @@ type ChargeOutcome = { settled: boolean; returned: number; disputed: number; cur
 async function giveBack(id: string, key: string, intent: string, least = 1): Promise<ChargeOutcome | null> {
   if (!OBJECT_ID.test(intent)) return { settled: false, returned: 0, disputed: 0, currency: "" };
   const pi = await onPlatform("GET", `/payment_intents/${encodeURIComponent(intent)}?expand[]=latest_charge`, undefined, { version: AT });
+  // Only this payment's own reply, and its own charge, decide what is refunded (rules 24 and 30, #4423): an answer
+  // for another payment, or a charge naming another payment, throws before any refund is read or asked for, and
+  // settleOne keeps the plan in line, never sized, refunded or reported from someone else's charge. A charge
+  // expanded with no payment_intent is read as before (the same check as lib/closing-refunds.ts, #3120).
+  if (!pi || typeof pi !== "object" || !Object.hasOwn(pi, "id") || (pi as { id?: unknown }).id !== intent) throw new Error("Stripe answered for another payment");
   const charge = pi.latest_charge as Record<string, unknown> | null | undefined;
   if (!charge || typeof charge.id !== "string" || !OBJECT_ID.test(charge.id)) return { settled: false, returned: 0, disputed: 0, currency: "" };
+  if (Object.hasOwn(charge, "payment_intent")) {
+    const named = charge.payment_intent;
+    const namedId = named !== null && typeof named === "object" ? (named as { id?: unknown }).id : named;
+    if (namedId !== intent) throw new Error("Stripe answered with another payment's charge");
+  }
   // Each field the refund is decided by, in its exact shape (CX-123 rule 24): one that does not read throws, and
   // settleOne keeps the plan in line, never settled as refunded with nothing given back.
   const amount = ownField(charge, "amount");

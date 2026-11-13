@@ -163,8 +163,8 @@ async function main() {
 
   part("The read of payment A answers for payment B");
   for (const [name, answer] of [
-    ["another id, B unrefunded", (a: string) => ({ id: "pi_foreignb", latest_charge: charge("pi_foreignb", 12_000) })],
-    ["another id, B already refunded", (a: string) => ({ id: "pi_foreignb", latest_charge: charge("pi_foreignb", 12_000, { amount_refunded: 12_000 }) })],
+    ["another id, B unrefunded", () => ({ id: "pi_foreignb", latest_charge: charge("pi_foreignb", 12_000) })],
+    ["another id, B already refunded", () => ({ id: "pi_foreignb", latest_charge: charge("pi_foreignb", 12_000, { amount_refunded: 12_000 }) })],
     ["its own id, a charge naming B", (a: string) => ({ id: a, latest_charge: charge("pi_foreignb", 12_000, { payment_intent: "pi_foreignb" }) })],
     ["no id at all", (a: string) => ({ latest_charge: charge(a, 4_000) })],
   ] as [string, (a: string) => unknown][]) {

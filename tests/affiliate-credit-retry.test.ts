@@ -22,7 +22,7 @@ process.env.STRIPE_SECRET_KEY = "sk_test_credit_retry_only";
 process.env.RESEND_API_KEY = "re_test_credit_retry_only";
 
 const OWNER = "owner@example.com";
-const ACCOUNT = "acct_1TestCreditRetry1";
+const ACCOUNT = "acct_1CreditRetry01";
 const AFF = "aaaaaaaaaaaa";
 const PARTNER = "bbbbbbbbbbbb";
 const SESSION = "cs_test_CreditRetry0000000001";

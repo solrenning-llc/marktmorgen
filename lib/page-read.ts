@@ -341,15 +341,17 @@ export function forgetReadingsSeen(): void {
  * KEYS: the nonce's mark, the window's count. ARGV: the ceiling, the mark's seconds, the count's seconds.
  * Answers {1, n} counted, {-1, n} a token used already, {0, n} the window at its ceiling (nothing written). A token
  * used already is read before anything is counted, so a replay never takes another place in the window (v2; Codex X2's
- * MEDIUM on #2571: v1 counted first and left each replay's place taken).
+ * MEDIUM on #2571: v1 counted first and left each replay's place taken). A token refused at the ceiling is marked in
+ * the same step (v3, Codex X5's MEDIUM on #2571), so its retries on any server cost what a used token's cost.
  * Modelled by lib/redis-memory.ts.
  */
-export const ADMIT_READING = `-- marktmorgen:read-admit:v2
+export const ADMIT_READING = `-- marktmorgen:read-admit:v3
 if redis.call('EXISTS', KEYS[1]) == 1 then return {-1, tonumber(redis.call('GET', KEYS[2]) or '0')} end
 local n = redis.call('INCR', KEYS[2])
 if n == 1 then redis.call('EXPIRE', KEYS[2], ARGV[3]) end
 if n > tonumber(ARGV[1]) then
   redis.call('DECR', KEYS[2])
+  redis.call('SET', KEYS[1], '1', 'EX', ARGV[2])
   return {0, n - 1}
 end
 redis.call('SET', KEYS[1], '1', 'EX', ARGV[2])
@@ -385,9 +387,10 @@ export async function admitReading(pass: ReadPass, now = Date.now()): Promise<bo
   const [status, n] = answer ?? [];
   if ((status !== 1 && status !== 0 && status !== -1) || typeof n !== "number" || !Number.isSafeInteger(n) || n < 0 || n > pass.cap) return false;
   noteReadings(key, n, pass.end);
-  if (status === 0) return false;
-  // Counted or used already, the token is spent from now on: this server remembers it.
+  // Refused at the ceiling, counted, or used already: the token is spent everywhere from now on (the script marked it),
+  // and this server remembers it.
   noteSpent(pass.nonce, until);
+  if (status === 0) return false;
   // Only a reading the admission took (INCR gives each count up to the ceiling once): a refusal at the ceiling, put back
   // in the script, never marks again.
   if (n === pass.cap) await redisPipeline([["SET", `${key}:over`, String(pass.cap), "EX", keep]]).catch((error: unknown) => console.error("marking a window's readings partial failed", error));

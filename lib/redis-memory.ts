@@ -840,13 +840,14 @@ export class MemoryRedis {
           return taken;
         }
         // lib/page-read.ts ADMIT_READING: the window's count within the token's ceiling and its nonce's mark, together.
-        if (key.startsWith("-- marktmorgen:read-admit:v2\n") && args[0] === "2" && args.length === 6) {
+        if (key.startsWith("-- marktmorgen:read-admit:v3\n") && args[0] === "2" && args.length === 6) {
           const [, mark, count, cap, markSeconds, countSeconds] = args;
           if (this.run(["EXISTS", mark]) === 1) return [-1, Number(this.run(["GET", count]) ?? 0)];
           const n = Number(this.run(["INCR", count]));
           if (n === 1) this.run(["EXPIRE", count, countSeconds]);
           if (n > Number(cap)) {
             this.run(["DECR", count]);
+            this.run(["SET", mark, "1", "EX", markSeconds]);
             return [0, n - 1];
           }
           this.run(["SET", mark, "1", "EX", markSeconds]);

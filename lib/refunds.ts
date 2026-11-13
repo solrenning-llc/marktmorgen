@@ -394,7 +394,10 @@ export async function lostDisputesSince(
       });
     }
     const last = events[events.length - 1];
-    if (listed.has_more !== true || !last || typeof last.id !== "string") return leave(true);
+    if (listed.has_more !== true) return leave(true);
+    // More, but no last row to go on from (an empty or unreadable page): not the end of the list (rule 24), so the
+    // place is not moved and the next run reads again.
+    if (!last || typeof last.id !== "string") return leave(false);
     after = last.id;
   }
   return leave(false);

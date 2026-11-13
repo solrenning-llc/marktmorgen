@@ -83,13 +83,24 @@ export function stringToSign(m: SnsMessage): string {
 /** Amazon's certificates, by address. They change every few years; a function instance lives minutes. */
 const certificates = new Map<string, KeyObject>();
 
-async function certificate(url: URL): Promise<KeyObject | null> {
+/**
+ * Amazon's certificate, or "unreachable" when its host did not answer with it (a lost answer, a timeout, a status
+ * that is not OK): not known, so the announcement is answered as a failure Amazon tries again (j-mail-8), never as
+ * one that is not Amazon's. Null only for a certificate that came back and does not read as one.
+ */
+async function certificate(url: URL): Promise<KeyObject | "unreachable" | null> {
   const held = certificates.get(url.href);
   if (held) return held;
+  let pem: string;
   try {
     const response = await timed(SES_TIMEOUT_MS, (signal) => fetch(url.href, { cache: "no-store", signal }));
-    if (!response.ok) return null;
-    const pem = (await response.text()).slice(0, 20_000);
+    if (!response.ok) return "unreachable";
+    pem = (await response.text()).slice(0, 20_000);
+  } catch (error) {
+    console.error("Amazon's signing certificate could not be read", error);
+    return "unreachable";
+  }
+  try {
     const key = createPublicKey(pem);
     if (certificates.size > 20) certificates.clear();
     certificates.set(url.href, key);
@@ -100,7 +111,7 @@ async function certificate(url: URL): Promise<KeyObject | null> {
   }
 }
 
-export type SnsVerdict = "ok" | "topic" | "old" | "certificate" | "signature";
+export type SnsVerdict = "ok" | "topic" | "old" | "certificate" | "unreachable" | "signature";
 
 /** Whether the announcement is Amazon's, from our topic, and recent. */
 export async function verifySns(m: SnsMessage, config: SesConfig, now = Date.now()): Promise<SnsVerdict> {
@@ -111,6 +122,7 @@ export async function verifySns(m: SnsMessage, config: SesConfig, now = Date.now
   const url = snsUrl(m.SigningCertURL, config.region);
   if (!algorithm || !url || !url.pathname.endsWith(".pem")) return "certificate";
   const key = await certificate(url);
+  if (key === "unreachable") return "unreachable";
   if (!key) return "certificate";
   try {
     return createVerify(algorithm).update(stringToSign(m), "utf8").verify(key, m.Signature, "base64") ? "ok" : "signature";

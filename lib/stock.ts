@@ -49,14 +49,6 @@ const RECOUNT_MOST = 2;
 type Entry = { until: number; paid?: boolean };
 
 const stockKey = (id: string, productId: string) => `nl:stock:${id}:${productId}`;
-/**
- * The checkouts already counted as sold, one mark each, never read by a page
- * (Claude 3's performance audit, 13 November 2026): it only keeps a sale from
- * being counted twice (STOCK_SELL). Before, each sold unit stayed a field of
- * the product's stock record, which every page showing the product read whole,
- * so the record and each reading grew with every sale.
- */
-const soldKey = (id: string, productId: string) => `nl:stock:paid:${id}:${productId}`;
 /** The field of a stock record that counts its units sold: never a checkout id (cs_) nor a provisional hold (p_). */
 const SOLD = "#sold";
 /**
@@ -68,23 +60,26 @@ const FOLD_MOST = 200;
 
 /**
  * A unit sold, counted once (Claude 3's performance audit, 13 November 2026),
- * in one step on the Redis side: the checkout's mark is set only if it was not
- * there, and only then is SOLD raised by one; the checkout's field (a hold, or
- * a sale written the old way) is let go either way. The count of units used is
- * the same before and after for a checkout already held or written as sold,
- * one more for a checkout counted for the first time, and unchanged for one
- * already counted, however many times it is told.
- * KEYS: the product's stock record, its sold marks; ARGV: the checkout's id.
- * Returns 1 when counted now, 0 when it already was.
+ * in one step on the Redis side: the checkout's own field (its hold, or a sale
+ * written the old way) is let go, and only when it was there is SOLD raised by
+ * one. The count of units used is the same before and after, and a checkout
+ * told again, a minute or a year later, finds no field and changes nothing,
+ * so nothing is kept per sale. Every checkout of a limited product holds a
+ * unit before the buyer can pay (withCartStockHolds, before the checkout is
+ * handed over), and a hold is let go only once Stripe says its checkout
+ * expired or once it is counted here, so a paid checkout always has its field
+ * until it is counted.
+ * KEYS: the product's stock record; ARGV: the checkout's id. Returns 1 when counted now, 0 when there was nothing to count.
  */
 export const STOCK_SELL = `-- marktmorgen:stock-sell:v1
-if #KEYS ~= 2 or #ARGV ~= 1 then return -1 end
-local fresh = redis.call("HSETNX", KEYS[2], ARGV[1], "1")
-redis.call("HDEL", KEYS[1], ARGV[1])
-if fresh == 1 then redis.call("HINCRBY", KEYS[1], "#sold", 1) end
-return fresh`;
+if #KEYS ~= 1 or #ARGV ~= 1 then return -1 end
+if redis.call("HDEL", KEYS[1], ARGV[1]) == 1 then
+  redis.call("HINCRBY", KEYS[1], "#sold", 1)
+  return 1
+end
+return 0`;
 
-const sellCommand = (statsId: string, productId: string, session: string): (string | number)[] => ["EVAL", STOCK_SELL, 2, stockKey(statsId, productId), soldKey(statsId, productId), session];
+const sellCommand = (statsId: string, productId: string, session: string): (string | number)[] => ["EVAL", STOCK_SELL, 1, stockKey(statsId, productId), session];
 const lockKey = (id: string, productId: string) => `nl:stock:lock:${id}:${productId}`;
 
 /** A field's value as a hold or a sale written the old way, read in its exact shape; anything else throws. */

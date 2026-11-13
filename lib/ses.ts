@@ -56,6 +56,7 @@ import { createHash } from "node:crypto";
 import { type AwsKey, signV4 } from "@/lib/aws-sign";
 import { SES_TIMEOUT_MS, timed } from "@/lib/fetch-timeout";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { repliesFor } from "@/lib/redis-reply";
 
 export type SesConfig = {
   /** The only identity allowed to send: a role borrowed with the host token. */
@@ -546,6 +547,34 @@ export async function sesSend(config: SesConfig, message: SesMessage): Promise<{
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const didKey = (batchKey: string, to: string) => `nl:ses:did:${createHash("sha256").update(`${batchKey}\n${to}`).digest("hex").slice(0, 40)}`;
 const DID_SECONDS = 2 * 86_400;
+/**
+ * A recipient whose acceptance was lost on the way back (sesSend's `uncertain`): Amazon may already have taken the
+ * email. Kept apart from the `did` mark, which only a confirmed acceptance earns, and read by the sender before a
+ * retry of the same batch, so a batch tried again never writes to that person twice, as one email alone is never
+ * sent again once its answer was lost (lib/email.ts, viaAmazon). Outage drill, 13 November 2026.
+ */
+const maybeKey = (batchKey: string, to: string) => `nl:ses:maybe:${createHash("sha256").update(`${batchKey}\n${to}`).digest("hex").slice(0, 40)}`;
+
+/**
+ * The messages whose acceptance under this key was never lost on the way back; null when that cannot be read, never
+ * permission to send.
+ */
+export async function notMaybeTaken<T extends { to: string }>(batchKey: string, messages: T[]): Promise<T[] | null> {
+  if (!messages.length) return messages;
+  if (messages.length > 100) return null;
+  try {
+    const found = repliesFor(await redisPipeline(messages.map((m) => ["GET", maybeKey(batchKey, m.to)])), messages.length);
+    if (!found) return null;
+    const clear: T[] = [];
+    for (let i = 0; i < messages.length; i += 1) {
+      if (found[i] === null) clear.push(messages[i]);
+      else if (found[i] !== "1") return null;
+    }
+    return clear;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Recipients whose existing marker explicitly confirms absence. A known
@@ -614,8 +643,10 @@ export async function sesBatch<T extends SesMessage>(
       const wave = queue.slice(i, i + perSecond);
       const results = await Promise.all(wave.map((m) => sesSend(config, m)));
       const done: T[] = [];
+      const unsure: T[] = [];
       results.forEach((result, j) => {
         if (result.uncertain === true) {
+          unsure.push(wave[j]);
           // A provider may have accepted this email before losing its reply.
           // Keep it unresolved, with no second attempt in this call.
           uncertain = true;
@@ -635,6 +666,8 @@ export async function sesBatch<T extends SesMessage>(
         // leaves these people out.
         await redisPipeline(done.map((m) => ["SET", didKey(batchKey, m.to), "1", "EX", DID_SECONDS])).catch(() => {});
       }
+      // Written down at once too: whoever may have been taken is left out of a retry of this batch (notMaybeTaken).
+      if (unsure.length) await redisPipeline(unsure.map((m) => ["SET", maybeKey(batchKey, m.to), "1", "NX", "EX", DID_SECONDS])).catch(() => {});
       if (down || uncertain) again.push(...queue.slice(i + perSecond));
       else if (i + perSecond < queue.length) await pause(Math.max(0, 1_000 - (Date.now() - waveStarted)));
     }

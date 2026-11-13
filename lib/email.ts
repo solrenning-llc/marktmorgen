@@ -22,7 +22,7 @@ import { currentResendFallbackProofIsMissing, guardedResendPost, type ResendTran
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { atSiteAddress, creatorDomain, domainOf } from "@/lib/mail-from";
-import { countSesSent, isSesConfigured, notYetTaken, sesBatch, sesBulkRoom, sesConfig, sesDown, sesReady, sesSend } from "@/lib/ses";
+import { countSesSent, isSesConfigured, notMaybeTaken, notYetTaken, sesBatch, sesBulkRoom, sesConfig, sesDown, sesReady, sesSend } from "@/lib/ses";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { type AllowanceStore, takeAllowance } from "@/lib/store-allowance";
 import { allowanceWindow } from "@/lib/allowance-window";
@@ -717,7 +717,10 @@ async function dispatchBatch(
     const pending = await notYetTaken(batchKey, going);
     // Unreadable evidence must not release recipients to either provider.
     if (pending === null) return "retry";
-    going = pending;
+    // Nor whoever Amazon may have taken when its answer was lost: a batch tried again never writes to them twice.
+    const clear = await notMaybeTaken(batchKey, pending);
+    if (clear === null) return "retry";
+    going = clear;
     // And a batch whose rest was once handed to Resend goes back to Resend,
     // under the same key: if Resend took it and the answer was lost on the
     // way, only Resend can tell, and Amazon would write to them all again.

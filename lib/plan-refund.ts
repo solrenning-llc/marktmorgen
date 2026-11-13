@@ -172,8 +172,15 @@ export async function readPlanRefund(store: Store, nowSeconds = Math.floor(Date.
         if (!disputes) return { refund: { kind: "unknown", reason: "unreadable" } };
         // More than one, or none listed although the charge says disputed: not decided here.
         if (disputes.length !== 1) return { refund: { kind: "unknown", reason: "unreadable" } };
-        disputeStatus = typeof disputes[0].status === "string" ? disputes[0].status : "unknown";
-        disputedCents = num(disputes[0].amount);
+        // The one row must prove it is this charge's own dispute (#4468, rule 30): the list's filter is not proof, and
+        // another payment's lost or won dispute would hide or allow this refund. Its payment intent, when given, must match too.
+        const dispute = disputes[0];
+        const intent = dispute.payment_intent;
+        if (idOf(dispute.charge) !== chargeId || (intent != null && idOf(intent) !== idOf(charge.payment_intent))) {
+          return { refund: { kind: "unknown", reason: "unreadable" } };
+        }
+        disputeStatus = typeof dispute.status === "string" ? dispute.status : "unknown";
+        disputedCents = num(dispute.amount);
       }
       const lines = embedded(invoice.lines);
       if (!lines) return { refund: { kind: "unknown", reason: "unreadable" } };

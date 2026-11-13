@@ -43,6 +43,8 @@ const world = {
   invoiceByIdReply: new Map<string, unknown>(),
   /** A customer's Stripe balance (negative: a credit), 0 when not set. */
   balance: new Map<string, number>(),
+  /** An exact stand-in answer for the /disputes list; undefined keeps the normal filtered list. */
+  disputeListReply: undefined as unknown | undefined,
   calls: 0,
   writes: 0,
 };
@@ -106,6 +108,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     const email = (q.get("query") ?? "").match(/email:"([^"]+)"/)?.[1];
     return searchPage([...world.customers].filter(([, e]) => e === email).map(([id, e]) => ({ id, email: e })));
   }
+  if (path === "/disputes" && world.disputeListReply !== undefined) return json(world.disputeListReply);
   if (path === "/disputes") return page(world.disputes.filter((d) => d.charge === q.get("charge")));
   return json({ error: { message: `no stand-in for ${method} ${path}` } }, 404);
 }) as typeof fetch;
@@ -411,6 +414,26 @@ async function main() {
   pay(crowd, { at: NOW - 25 * DAY });
   for (let i = 0; i < 6; i += 1) pay(crowd, { at: NOW - 20 * DAY + i * DAY, amount: 1_000, total: 1_000, reason: "subscription_update" });
   is("more payments in the window than one refund gives back at once: unknown, for support", (await crowd.read()).refund, { kind: "unknown", reason: "too_many" });
+
+  part("A dispute row for another charge (#4468)");
+  const disputeList = (rows: unknown[]) => ({ object: "list", data: rows, has_more: false });
+  for (const status of ["lost", "won"]) {
+    const m = await shop();
+    pay(m, { at: NOW - 3 * DAY, disputed: true });
+    world.disputeListReply = disputeList([{ id: "du_foreign", charge: "ch_another0001", status, amount: 6_900 }]);
+    is(`a ${status} dispute row of another charge is unreadable, never applied`, (await m.read()).refund, { kind: "unknown", reason: "unreadable" });
+    world.disputeListReply = disputeList([{ id: "du_foreign", charge: { id: "ch_another0001", object: "charge" }, status, amount: 6_900 }]);
+    is(`a ${status} dispute row of another charge, expanded, is unreadable`, (await m.read()).refund, { kind: "unknown", reason: "unreadable" });
+    world.disputeListReply = disputeList([{ id: "du_foreign", status, amount: 6_900 }]);
+    is(`a ${status} dispute row with no charge is unreadable`, (await m.read()).refund, { kind: "unknown", reason: "unreadable" });
+  }
+  const mp = await shop();
+  const mpPaid = pay(mp, { at: NOW - 3 * DAY, disputed: true });
+  world.disputeListReply = disputeList([{ id: "du_otherpi", charge: mpPaid.id, payment_intent: "pi_another0001", status: "won", amount: 6_900 }]);
+  is("this charge but another payment intent: unreadable", (await mp.read()).refund, { kind: "unknown", reason: "unreadable" });
+  world.disputeListReply = disputeList([{ id: "du_ownwon", charge: { id: mpPaid.id, object: "charge" }, payment_intent: mpPaid.pi, status: "won", amount: 6_900 }]);
+  is("its own won dispute, charge expanded: the guarantee applies again", (await mp.read()).refund, { kind: "guarantee", cents: 6_900 });
+  world.disputeListReply = undefined;
 
   part("Bounds");
   let most = 0;

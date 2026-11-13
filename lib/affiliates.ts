@@ -2804,6 +2804,18 @@ export type Book = {
 };
 
 /**
+ * A refund's or dispute's payment (rule 24): its id (a string, or an object with a string id when expanded), "" when
+ * Stripe says it has none (exact null: a charge made outside PaymentIntents, which no book line names), or null when
+ * it is in another shape, which leaves what is owed unknown.
+ */
+function intentOf(raw: unknown): string | null {
+  if (raw === null) return "";
+  if (typeof raw === "string") return raw;
+  if (raw && typeof raw === "object" && typeof (raw as { id?: unknown }).id === "string") return (raw as { id: string }).id;
+  return null;
+}
+
+/**
  * What has been refunded, by payment, on the creator's account, from the
  * oldest sale on the book on. Pending refunds count: the creator already
  * gave the money back.
@@ -2824,15 +2836,22 @@ async function refundsSince(store: Store, since: number, deadline?: number): Pro
       undefined,
       wait,
     );
-    const rows = Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : [];
+    // Read exactly (rule 24): a list with no data array or a has_more that is not a boolean, a refund that takes money
+    // with no whole amount, or more listed after a row with no id leave what is owed unknown (complete false), never
+    // "read to the end, nothing refunded", which kept a refunded sale's commission payable.
+    if (!Array.isArray(listed.data) || typeof listed.has_more !== "boolean") return { byIntent, complete: false };
+    const rows = listed.data as Record<string, unknown>[];
     for (const refund of rows) {
+      if (typeof refund.status !== "string") return { byIntent, complete: false };
       if (refund.status !== "succeeded" && refund.status !== "pending") continue;
-      const pi = typeof refund.payment_intent === "string" ? refund.payment_intent : "";
-      const amount = typeof refund.amount === "number" ? refund.amount : 0;
-      if (pi) byIntent.set(pi, (byIntent.get(pi) ?? 0) + amount);
+      const pi = intentOf(refund.payment_intent);
+      if (pi === null) return { byIntent, complete: false };
+      if (typeof refund.amount !== "number" || !Number.isSafeInteger(refund.amount) || refund.amount < 0) return { byIntent, complete: false };
+      if (pi) byIntent.set(pi, (byIntent.get(pi) ?? 0) + refund.amount);
     }
+    if (!listed.has_more) return { byIntent, complete: true };
     const last = rows[rows.length - 1];
-    if (listed.has_more !== true || !last || typeof last.id !== "string") return { byIntent, complete: true };
+    if (!last || typeof last.id !== "string") return { byIntent, complete: false };
     after = last.id;
   }
   return { byIntent, complete: false };
@@ -2860,16 +2879,21 @@ export async function disputesSince(store: Store, since: number, deadline?: numb
       undefined,
       wait,
     );
-    const rows = Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : [];
+    // Read exactly (rule 24), as the refunds: a list of another shape, a dispute that takes money with no whole positive
+    // amount, or more listed after a row with no id leave what is owed unknown, never "no chargeback".
+    if (!Array.isArray(listed.data) || typeof listed.has_more !== "boolean") return { byIntent, complete: false };
+    const rows = listed.data as Record<string, unknown>[];
     for (const dispute of rows) {
-      if (typeof dispute.status !== "string" || !DISPUTE_TAKES.has(dispute.status)) continue;
-      const raw = dispute.payment_intent;
-      const pi = typeof raw === "string" ? raw : raw && typeof raw === "object" && typeof (raw as { id?: unknown }).id === "string" ? (raw as { id: string }).id : "";
-      const amount = typeof dispute.amount === "number" && dispute.amount > 0 ? dispute.amount : 0;
-      if (pi && amount) byIntent.set(pi, (byIntent.get(pi) ?? 0) + amount);
+      if (typeof dispute.status !== "string") return { byIntent, complete: false };
+      if (!DISPUTE_TAKES.has(dispute.status)) continue;
+      const pi = intentOf(dispute.payment_intent);
+      if (pi === null) return { byIntent, complete: false };
+      if (typeof dispute.amount !== "number" || !Number.isSafeInteger(dispute.amount) || dispute.amount <= 0) return { byIntent, complete: false };
+      if (pi) byIntent.set(pi, (byIntent.get(pi) ?? 0) + dispute.amount);
     }
+    if (!listed.has_more) return { byIntent, complete: true };
     const last = rows[rows.length - 1];
-    if (listed.has_more !== true || !last || typeof last.id !== "string") return { byIntent, complete: true };
+    if (!last || typeof last.id !== "string") return { byIntent, complete: false };
     after = last.id;
   }
   return { byIntent, complete: false };

@@ -250,6 +250,44 @@ async function main() {
       mailWorld.restore();
     }
 
+    part("Tried again under one key, the notice stays with the sender that took it (MEDIUM, Claude 1 cloud rev-odd at 9e2832b605)");
+    // sendEmail falls over from a refusing Amazon to Resend inside one call; if Resend took it and the answer was
+    // lost, the retry an hour later went back to Amazon, which never saw the key, and the creator got it twice.
+    // sendEmailPinned keeps the sender for the key, as the PayPal receipt does (lib/email.ts).
+    const { createHash } = await import("node:crypto");
+    const pinOf = (key: string) => `nl:mail:pin:${createHash("sha256").update(key).digest("hex").slice(0, 40)}`;
+    const savedResendKey = process.env.RESEND_API_KEY;
+    process.env.RESEND_API_KEY = "re_test_ck3u2_only";
+    let loseResend = true;
+    const pinWorld = installSesMailFixture({
+      onResend: () => {
+        if (loseResend) throw new TypeError("synthetic Resend reply lost after acceptance");
+        return undefined;
+      },
+    });
+    try {
+      pinWorld.configure();
+      await pinWorld.setReady(true, { max24: 50_000, rate: 100 });
+      const pinned = { id: "promo_PINNED", code: "PINNED", start, end, tries: 3, failed: true };
+      const key = `dsched-notice:${STATS}:${pinned.id}`;
+      pinWorld.setSesOutcome("refused");
+      const first = await notice.tellActivationFailed(shop as never, pinned, start + 900);
+      is("Amazon refuses, Resend takes it and its answer is lost: not known to have gone", first, false);
+      loseResend = false;
+      pinWorld.setSesOutcome("ok");
+      await notice.tellActivationFailed(shop as never, pinned, start + 900 + NOTICE_RETRY_SECONDS);
+      await notice.tellActivationFailed(shop as never, pinned, start + 900 + 2 * NOTICE_RETRY_SECONDS);
+      // What may have reached the creator: every Resend request (its answer lost may have been an acceptance) and
+      // every email Amazon accepted. Amazon's confirmed refusal reached nobody.
+      const copies = [...pinWorld.resendAttempts, ...pinWorld.ses].filter((m) => m.to.includes(shop.email)).length;
+      is("across both senders, the creator is sent one copy at most", copies, 1);
+      is("the key is kept for the sender that took it", (await redis.pipeline([["GET", pinOf(key)]]))[0], "resend");
+    } finally {
+      pinWorld.restore();
+      if (savedResendKey === undefined) delete process.env.RESEND_API_KEY;
+      else process.env.RESEND_API_KEY = savedResendKey;
+    }
+
     part("The studio's list: Stripe's first page, said plainly when there are more");
     const { readCodePage, listCodes, MAX_CODES } = await import("@/lib/discount");
     const row = (i: number) => ({ id: `promo_row${i}`, code: `ROW${i}`, active: true, times_redeemed: 0, promotion: { coupon: { percent_off: 10, duration: "once" } } });

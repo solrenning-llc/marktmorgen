@@ -1812,7 +1812,10 @@ export async function readSales(store: Store, now = Date.now()): Promise<SalesSt
   out.hours = hoursOfWeek(own.filter((sale) => !sale.upsell));
   out.discounts = {
     rows: discountImpact(read, new Set((refundRows ?? []).map((r) => r.paymentIntent).filter(Boolean)), store.currency, now, STATS_DAYS),
-    refundsRead: refundRows !== null,
+    // A partial refund reading (a page limit hit, or PayPal read in part) may
+    // have missed the refund of a discounted sale, so the Refunded share is
+    // only offered when every refund page was read (#4372).
+    refundsRead: refundRead !== null && !refundRead.partial,
   };
   out.previous = {
     d7: stretch(dayKey(now - 13 * 86400_000), cut7),

@@ -24,6 +24,7 @@
 import { createHash } from "node:crypto";
 import { normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, replyList, repliesFor } from "@/lib/redis-reply";
 
 type Command = (string | number)[];
 
@@ -68,16 +69,27 @@ export function suppressedCommand(listId: string | null | undefined, email: stri
   return listId ? ["HEXISTS", suppressedKey(listId), suppressionPrint(listId, email)] : ["EXISTS", "nl:none"];
 }
 
-/** Whether a reply to suppressedCommand says the address was deleted. */
+/**
+ * Whether a reply to suppressedCommand says the address was deleted, read
+ * only in its exact shape (sweep A6 F1, CX-123 rule 24): HEXISTS (and the
+ * EXISTS of a store with no list) answers the integer 1 or 0. Anything else
+ * (no reply, a pipeline cut short, text, another number) is unknown and
+ * throws UnknownReplyError, never "not deleted": the caller then neither
+ * writes the person back on a list nor emails them, as
+ * lib/review-requests.ts reviewRecipientState already does.
+ */
 export function wasSuppressed(reply: unknown): boolean {
-  return Number(reply) === 1;
+  if (reply === 1) return true;
+  if (reply === 0) return false;
+  throw new UnknownReplyError("the check of a deleted address");
 }
 
-/** Whether this address was deleted from this store. */
+/** Whether this address was deleted from this store. Throws UnknownReplyError when Redis's answer is not exactly one 0 or 1. */
 export async function isSuppressed(listId: string | null | undefined, email: string): Promise<boolean> {
   if (!listId || !isRedisConfigured()) return false;
-  const [reply] = await redisPipeline([suppressedCommand(listId, email)]);
-  return wasSuppressed(reply);
+  const replies = repliesFor(await redisPipeline([suppressedCommand(listId, email)]), 1);
+  if (!replies) throw new UnknownReplyError("the check of a deleted address");
+  return wasSuppressed(replies[0]);
 }
 
 /** One command whose answer has, for each address in order, a value when it was deleted from this store and null when not. */
@@ -88,14 +100,18 @@ export function suppressedAmongCommand(listId: string, emails: string[]): Comman
 /**
  * A reply to suppressedAmongCommand, read only when it is whole: a list of
  * exactly one entry for each address, each nothing (not deleted), text or a
- * number (deleted). Anything else throws, so a print where nothing came back
- * is never read as "not deleted" (Codex E on #2111): the caller fails closed.
+ * number (deleted). Anything else throws UnknownReplyError, so a print where
+ * nothing came back is never read as "not deleted" (Codex E on #2111): the
+ * caller fails closed.
  */
 export function wholeErasedReply(reply: unknown, addresses: number): (string | number | null)[] {
-  if (!Array.isArray(reply) || reply.length !== addresses || !reply.every((v) => v === null || typeof v === "string" || typeof v === "number")) {
-    throw new Error("the store's deleted people could not be read whole");
+  // Read from the reply's own slots (lib/redis-reply.ts): a hole, an inherited
+  // or a getter slot is not an answer, where Array#every would skip a hole.
+  const slots = repliesFor(reply, addresses);
+  if (!slots || !slots.every((v) => v === null || typeof v === "string" || typeof v === "number")) {
+    throw new UnknownReplyError("the store's deleted people");
   }
-  return reply as (string | number | null)[];
+  return slots as (string | number | null)[];
 }
 
 /**
@@ -130,20 +146,21 @@ return gone`;
 export async function keepUnlessErased(key: string, listId: string, text: string, seconds: number, emails: string[]): Promise<Set<string>> {
   const names = [...new Set(emails)];
   if (!names.length) throw new Error("nobody to look up");
-  const replies = await redisPipeline([["EVAL", KEEP_UNLESS_ERASED, 2, key, suppressedKey(listId), text, seconds, ...names.map((e) => suppressionPrint(listId, e))]]);
-  const reply: unknown = Array.isArray(replies) && replies.length === 1 ? replies[0] : null;
-  if (!Array.isArray(reply) || !reply.every((i) => Number.isInteger(i) && (i as number) >= 1 && (i as number) <= names.length)) {
-    throw new Error("the copy could not be checked where it is kept");
+  const replies = repliesFor(await redisPipeline([["EVAL", KEEP_UNLESS_ERASED, 2, key, suppressedKey(listId), text, seconds, ...names.map((e) => suppressionPrint(listId, e))]]), 1);
+  // Each place read from the list's own slots: a hole is not a place (Array#every would skip it).
+  const places = replies ? replyList(replies[0]) : null;
+  if (!places || !places.every((i) => Number.isSafeInteger(i) && (i as number) >= 1 && (i as number) <= names.length)) {
+    throw new UnknownReplyError("the check of a copy where it is kept");
   }
-  return new Set((reply as number[]).map((i) => names[i - 1]));
+  return new Set((places as number[]).map((i) => names[i - 1]));
 }
 
 /** Which of these addresses were deleted from this store, in one command. Throws when the reply is not whole (wholeErasedReply). */
 export async function suppressedAmong(listId: string | null | undefined, emails: string[]): Promise<Set<string>> {
   const out = new Set<string>();
   if (!listId || !emails.length || !isRedisConfigured()) return out;
-  const replies = await redisPipeline([suppressedAmongCommand(listId, emails)]);
-  if (!Array.isArray(replies) || replies.length !== 1) throw new Error("the store's deleted people could not be read whole");
+  const replies = repliesFor(await redisPipeline([suppressedAmongCommand(listId, emails)]), 1);
+  if (!replies) throw new UnknownReplyError("the store's deleted people");
   const list = wholeErasedReply(replies[0], emails.length);
   emails.forEach((email, i) => {
     if (list[i] !== null) out.add(email);

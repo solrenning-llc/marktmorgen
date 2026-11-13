@@ -3,7 +3,22 @@ import { guardStoreWrite, text } from "@/lib/store-request";
 import { ensureStoreId } from "@/lib/store";
 import { DRAFT_PROBLEMS, ID_PATTERN, readDraft, readOutside } from "@/lib/payment-request-rules";
 import { cancelRequest, createRequest, deleteRequest } from "@/lib/payment-request-store";
-import { markPaidOutside, remindNow, requestsOpen, sendRequestEmail } from "@/lib/payment-requests";
+import { type RefundCheckWhy, checkRequestRefunds, markPaidOutside, remindNow, requestsOpen, sendRequestEmail } from "@/lib/payment-requests";
+
+/** What the studio says when one request's refunds could not be checked, by why (lib/payment-requests.ts, RefundCheckWhy). */
+const REFUND_CHECK_WORDS: Record<RefundCheckWhy, string> = {
+  "": "",
+  limit: "Refunds were not checked: this store checked several payments in the last minute. Try again in a minute.",
+  unavailable: "Refunds were not checked: they could not be looked up just now. Try again in a minute, or look the payment up in your Stripe dashboard.",
+  used: "Refunds were not checked: your studio's requests for this month are used. Look the payment up in your Stripe dashboard.",
+  stripe: "Refunds were not checked: Stripe could not be read just now. Try again in a minute, or look the payment up in your Stripe dashboard.",
+  more: "Refunds were not checked: this payment has more refunds than can be read here. Look it up in your Stripe dashboard.",
+  shape: "Refunds were not checked: Stripe answered in a way we could not read. Look the payment up in your Stripe dashboard.",
+  under_way: "Refunds were not checked: a refund of this payment is still being processed. Try again once it is done.",
+  unsaved: "Refunds were read but could not be saved just now. Try again in a minute.",
+  short: "Refunds were not checked: Stripe now shows less refunded than this request recorded. Look the payment up in your Stripe dashboard.",
+  none: "Refunds can't be checked here: there is no Stripe payment to look up. Look it up in your Stripe dashboard.",
+};
 
 /**
  * The studio's payment requests (lib/payment-request-rules.ts), for a role
@@ -12,13 +27,16 @@ import { markPaidOutside, remindNow, requestsOpen, sendRequestEmail } from "@/li
  *   { action: "create", email, name, lines: [{ text, quantity, amount }], note, dueDate, autoReminders, consent }
  *   { action: "remind" | "cancel" | "delete", id }
  *   { action: "outside", id, method: "cash" | "transfer" | "other", date: "2026-11-02", note }   paid outside Stripe (639 [GL7](30))
+ *   { action: "refunds", id }   one request's refunds read on their own, for a role that may read orders
+ *                               (lib/payment-requests.ts, checkRequestRefunds): `{ ok, checked, state, refunded, message? }`
  *
  * Creating keeps the request within every count and emails it at once, from
  * the store's emails for the month. Answers `{ ok, sent? }` or `{ ok: false,
  * error, message }` with a sentence to show.
  */
 export async function POST(request: NextRequest) {
-  const guarded = await guardStoreWrite(request, "send", 16_000);
+  // Reading one request's refunds is reading orders, as the studio's list is; everything else emails or changes requests.
+  const guarded = await guardStoreWrite(request, (body) => (body.action === "refunds" ? "orders" : "send"), 16_000);
   if (!guarded.ok) return guarded.response;
   const { body } = guarded;
   let store = guarded.store;
@@ -37,6 +55,12 @@ export async function POST(request: NextRequest) {
     }
     const id = text(body.id, 40);
     if (!ID_PATTERN.test(id)) return refuse("invalid", "That request is not one of this store's. Reload the page.");
+    if (action === "refunds") {
+      const checked = await checkRequestRefunds(store, id);
+      if (!checked) return refuse("gone", "That request is gone. Reload the page.", 404);
+      const { request: shown, why } = checked;
+      return Response.json({ ok: true, checked: shown.refundsChecked, state: shown.state, refunded: shown.refunded, ...(shown.refundsChecked ? {} : { message: REFUND_CHECK_WORDS[why] }) });
+    }
     if (action === "remind") {
       if (!requestsOpen(store)) return refuse("closed", "Your store can't take payments right now, so nothing was sent.", 409);
       const done = await remindNow(store, id);

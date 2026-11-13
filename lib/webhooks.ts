@@ -80,6 +80,7 @@ import { allowanceUsedWords, allowancesUsedStrict, takeAllowance } from "@/lib/s
 import { WEBHOOK_ADD_PAUSED_WORDS, WEBHOOK_PAUSED_COUNTED, WEBHOOK_PAUSED_NOT_SENT_WORDS, WEBHOOK_TEST_PAUSED_WORDS, integrationPauseWord } from "@/lib/integration-pause";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { readListing } from "@/lib/catalog";
+import { forgetRefundCheck } from "@/lib/payment-request-refund-cache";
 import { keyStates } from "@/lib/api-keys";
 import { SITE_URL } from "@/lib/site-url";
 import { type BundleSlot, bumpsFromMeta, bundleFromMeta } from "@/lib/bundle-rules";
@@ -1576,6 +1577,11 @@ async function fromStripe(store: Store, event: StripeEvent, lookups: Lookups, he
     const charge = str(object.id);
     if (!charge) return true;
     const intent = str(object.payment_intent);
+    // A payment request's refunds kept for a minute (lib/payment-request-refund-cache.ts) are forgotten here,
+    // whether or not an endpoint listens for refunds. This job only reads stores whose endpoints want Stripe events,
+    // every five minutes, so the minute the reading is kept is what bounds it; this forget only helps sometimes.
+    // One command a refunded charge read; a forget that fails leaves the kept reading to go by itself.
+    if (intent && store.sid) await forgetRefundCheck(store.sid, intent).catch((error) => console.error("a payment request's kept refund check could not be forgotten; it goes by itself within a minute", error));
     // A charge made by a checkout carries the store in its own metadata; one
     // that does not is asked about through its payment and, for a
     // membership's or a payment plan's charge, the invoice it paid

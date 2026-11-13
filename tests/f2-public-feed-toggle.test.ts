@@ -214,6 +214,37 @@ async function main(): Promise<void> {
     is("and their room given back", redis.run(["HGET", room, `pod:${POD2}:public`]), null);
   }
 
+  // Review of #3544 (MEDIUM, taken by Claude 3): the remove path's drop takes the podcast's lock, the one the
+  // settings route writes under, so a settings write that read the listing before the removal cannot land after
+  // the drop and leave an orphan record with its room counted.
+  part("Removing the product waits for a settings write in progress, then deletes what it wrote");
+  {
+    const POD3 = "e".repeat(32);
+    const KEY3 = `nl:pod:${POD3}:public`;
+    const LOCK3 = `nl:pod:${POD3}:lock`;
+    const racing = await addProduct(OWNER, "A show in a race", "", "9", null);
+    if (!racing.ok) throw new Error("no product");
+    if (!(await setProductPodcast(OWNER, racing.product.id, { id: POD3, episodes: 3 })).ok) throw new Error("no podcast");
+    await savePodcast(podcast(POD3));
+    await post({ action: "on", id: racing.product.id, category: "Education", explicit: false, understood: true });
+    is("control: on, with its record", redis.run(["EXISTS", KEY3]), 1);
+    // The settings route holds the lock: it read the listing before the removal and is about to write.
+    redis.run(["SET", LOCK3, "settings-write-in-progress", "EX", 60]);
+    const removing = productRoute(
+      new NextRequest(`${ORIGIN}/api/store/product`, { method: "POST", headers: { "content-type": "application/json", "x-nimbus-store": store.sid!, cookie: `${SESSION_COOKIE}=${session}` }, body: JSON.stringify({ action: "remove", id: racing.product.id }) }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    is("while the settings write holds the lock, the removal does not delete under it", redis.run(["EXISTS", KEY3]), 1);
+    // The settings write lands (it read the listing before the removal), then lets the lock go.
+    redis.run(["SET", KEY3, JSON.stringify({ category: "Arts", explicit: false, episodes: {} })]);
+    redis.run(["DEL", LOCK3]);
+    const removed = await removing;
+    is("the product is removed", [removed.status, ((await removed.json()) as { ok?: boolean }).ok], [200, true]);
+    is("what the settings write left is deleted after it, not orphaned", redis.run(["EXISTS", KEY3]), 0);
+    is("and its room given back", redis.run(["HGET", room, `pod:${POD3}:public`]), null);
+    is("the lock is not left held", redis.run(["EXISTS", LOCK3]), 0);
+  }
+
   part("The store's closing erases it, by the podcast's id; another store's stays");
   await claimHandle(OTHER, "shorecast", "Shore", "");
   await ensureStatsId(OTHER);

@@ -24,6 +24,8 @@ import { paidPeriod } from "./billing-period-fixture";
 const emails: { to: string[]; text: string }[] = [];
 const posts: { path: string; body: URLSearchParams; headers: Headers }[] = [];
 let refunded = false;
+/** When set, the checkout read answers this other session, not the one asked for (rule 30). */
+let foreign: string | null = null;
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   if (url.hostname === "api.resend.com") {
@@ -38,7 +40,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     if (path === "/coupons") return new Response(JSON.stringify({ id: `co_Session${posts.length}` }));
   }
   if (path.startsWith("/checkout/sessions/")) {
-    return new Response(JSON.stringify({ id: PAID, status: "complete", payment_status: "paid", payment_intent: { latest_charge: { refunded, amount: 50000, amount_refunded: refunded ? 50000 : 0 } } }));
+    const asked = decodeURIComponent(path.slice("/checkout/sessions/".length).split("?")[0]);
+    return new Response(JSON.stringify({ id: foreign ?? asked, status: "complete", payment_status: "paid", payment_intent: { latest_charge: { refunded, amount: 50000, amount_refunded: refunded ? 50000 : 0 } } }));
   }
   return new Response(JSON.stringify({ error: { message: `no stand-in for ${method} ${path}` } }), { status: 404 });
 }) as typeof fetch;
@@ -129,6 +132,17 @@ async function main(): Promise<void> {
   refunded = true;
   const back = await prepareSession(store, fresh!.token, "https://marktmorgen.com");
   is("refunded in full", back.ok ? "prepared" : back.reason, "refunded");
+
+  part("A checkout read that answers another session (rule 30)");
+  // The refunded package's own checkout is asked for; the reply is another, unrefunded session.
+  const coupons = posts.filter((p) => p.path === "/coupons").length;
+  foreign = PAID;
+  refunded = false;
+  const notOwn = await prepareSession(store, fresh!.token, "https://marktmorgen.com");
+  foreign = null;
+  refunded = true;
+  is("never prepared on another session's reply", notOwn.ok ? "prepared" : "refused", "refused");
+  is("no coupon is made for it", posts.filter((p) => p.path === "/coupons").length, coupons);
 
   done();
 }

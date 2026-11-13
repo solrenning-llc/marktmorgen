@@ -20,7 +20,8 @@ export function AnswersEditor({
   missed,
 }: {
   setting: AnswersSetting;
-  used: number;
+  /** null when the month's count could not be read: said so, never "0 used" (rule 24). */
+  used: number | null;
   allowance: number;
   /** The newest questions a page did not answer: what was asked, of which product, on which day. */
   missed: { title: string; question: string; at: number }[];
@@ -98,7 +99,7 @@ export function AnswersEditor({
         <button type="button" className="btn btn-primary" onClick={() => void post({ on, facts: facts.trim() }, "save", on ? "Saved. The box is on your product pages." : "Saved. The box is off.")} disabled={busy !== null || !changed} aria-busy={busy === "save"}>
           {busy === "save" ? "Saving…" : "Save"}
         </button>
-        <p className="text-sm text-ink-soft">{`${used.toLocaleString("en-US")} of ${allowance.toLocaleString("en-US")} AI attempts used this month. Failed or timed-out requests count; cached replies do not. At the limit, new requests pause until next month. No per-answer overage is charged.`}</p>
+        <p className="text-sm text-ink-soft">{`${used === null ? "We could not read how many AI attempts were used this month just now; reload the page in a minute to try again." : `${used.toLocaleString("en-US")} of ${allowance.toLocaleString("en-US")} AI attempts used this month.`} Failed or timed-out requests count; cached replies do not. At the limit, new requests pause until next month. No per-answer overage is charged.`}</p>
       </div>
       {error ? (
         <p className="notice notice-error mt-3" role="alert">

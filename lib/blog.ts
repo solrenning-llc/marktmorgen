@@ -999,11 +999,6 @@ export function postBySlug(slug: string): BlogPost | undefined {
   return BLOG_POSTS.find((post) => post.slug === slug);
 }
 
-export function formatPostDate(date: string): string {
-  return new Date(`${date}T12:00:00Z`).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    timeZone: "UTC",
-  });
-}
+// A post's date as the blog shows it, kept in lib/post-date.ts so the blog's browser filter reads it
+// without this file's posts (tests/blog-browser-bundle.test.ts).
+export { formatPostDate } from "@/lib/post-date";

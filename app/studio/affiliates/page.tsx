@@ -4,6 +4,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
+import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { affiliateLink, readBook } from "@/lib/affiliates";
 import { isSenderConfigured } from "@/lib/email";
@@ -104,7 +105,7 @@ export default async function StudioAffiliatesPage({ searchParams }: Params) {
       <StudioStorePin sid={store.sid}>
 
       <main id="content" className="container-page pb-20 pt-10 sm:pt-14">
-        <p className="eyebrow">Affiliates</p>
+        <StudioTrail store={store} here="Affiliates" />
         <h1 className="t-h2 mt-3">People who sell for you</h1>
         <p className="mt-3 max-w-2xl text-ink-soft">
           Anyone can apply on your affiliate page and you decide who is in, or you let everyone who buys from you take a link

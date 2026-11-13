@@ -11,7 +11,7 @@
  * more and throws, so it is tried again. Synthetic data only; the moment is
  * made by writing the row just before the function's write runs.
  */
-import { leadsKey, mailable, noteProduct, orderRoom, parseContact, tokensFor, upsertContact } from "@/lib/contacts";
+import { forgetContactPerson, leadsKey, mailable, noteProduct, orderRoom, parseContact, tokensFor, unsubscribe, upsertContact } from "@/lib/contacts";
 import { stopCounting } from "@/lib/mail-clicks";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { claimHandle, ensureListId, ensureStatsId, setSubscription, storeForEmail } from "@/lib/store";
@@ -136,6 +136,29 @@ async function main(): Promise<void> {
   garble = false;
   is("each throws UnknownReplyError", answers, ["unknown", "unknown", "unknown"]);
   is("and the rows are as they were", [await raw("fay@example.com"), await raw("gil@example.com")], [fayWas, gilWas]);
+
+  part("unsubscribe: an erasure in the moment between stays done (Claude 1 cloud MEDIUM on #4244)");
+  await upsertContact(listId, "ivy@example.com", { agreed: true, explicit: true, source: "free" }, ROOM);
+  const ivyToken = (await tokensFor(listId, ["ivy@example.com"], store.handle)).get("ivy@example.com")!;
+  const unsubBefore = Number((await real([["GET", `${key}:unsub`]]))[0] ?? 0);
+  between = async () => {
+    await forgetContactPerson(listId, "ivy@example.com");
+  };
+  const left = await unsubscribe(ivyToken);
+  is("(control) the erasure ran inside the unsubscribe", between, null);
+  is("the erased contact is not written back", await raw("ivy@example.com"), null);
+  is("and the list's count of those who left is not raised for them", Number((await real([["GET", `${key}:unsub`]]))[0] ?? 0), unsubBefore);
+  is("the person is told they are off the list", left?.email, "ivy@example.com");
+
+  part("unsubscribe: another write in the moment between is kept, and the unsubscribe still stands");
+  await upsertContact(listId, "jon@example.com", { agreed: true, explicit: true, source: "free" }, ROOM);
+  const jonToken = (await tokensFor(listId, ["jon@example.com"], store.handle)).get("jon@example.com")!;
+  between = async () => {
+    await noteProduct(listId, "jon@example.com", "p-jon", "Guide", store);
+  };
+  await unsubscribe(jonToken);
+  const jon = await row("jon@example.com");
+  is("unsubscribed, and the product noted meanwhile kept", [jon?.unsub, jon?.ids.includes("p-jon")], [true, true]);
 
   part("Without anything in between, each writes as before");
   await upsertContact(listId, "hal@example.com", { agreed: true, explicit: true, clicks: true, source: "free" }, ROOM);

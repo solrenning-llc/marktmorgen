@@ -34,7 +34,7 @@
 import { createHash } from "node:crypto";
 import { stampLine } from "@/lib/pdf-stamp-line";
 import { PDFDocument, StandardFonts, degrees, rgb } from "pdf-lib";
-import { deleteFile, listFiles, readFileWhole, writeFileWhole } from "@/lib/file-store";
+import { deleteFile, headFile, listFiles, readFileWhole, writeFileWhole } from "@/lib/file-store";
 import { VAULT_PREFIX, isVaultPath, keyName } from "@/lib/vault-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
@@ -165,6 +165,16 @@ export function copyFolder(file: Pick<ProductFile, "pathname">): string {
 }
 
 /**
+ * Keeps a copy's record only while the store's data room has space for it (lib/store-data.ts): without it the buyer
+ * still gets the copy, and the next download asks the file store for it again (one HEAD) before stamping another.
+ */
+async function keepRecord(store: DataStore, key: string, copy: ProductFile): Promise<void> {
+  if (isRedisConfigured() && (await keepFor(store, COPY_RECORD_BYTES, COPY_RECORD_SECONDS))) {
+    await redisPipeline([["SET", key, JSON.stringify(copy), "EX", COPY_RECORD_SECONDS]]);
+  }
+}
+
+/**
  * The buyer's stamped copy of a PDF or an EPUB, made on the first download of a sale and
  * reused after. Null means hand over the original: stamping does not apply,
  * or it could not be done, and the reason is kept for the creator to see.
@@ -197,6 +207,19 @@ export async function stampedCopy(
       // failed read is noted as one too.
       if (epub && (noted === "signed" || noted === "encrypted" || noted === "unreadable")) return null;
     }
+    // The copy's path is made from the sale and the file alone, so with no record (the data room had no space for it,
+    // or it expired) a copy made before may still be there: it is asked about first, one HEAD, and handed over as it
+    // is, instead of reading the whole original again, stamping it and writing it over the same path (#4237, item 3).
+    // Only a copy that is not there, or one that cannot be asked about, is made again.
+    const contentType = epub ? "application/epub+zip" : "application/pdf";
+    const last = isVaultPath(file.pathname) ? keyName(file.name) : file.name;
+    const pathname = `${copyFolder(file)}${sha(`${sale.reference}|${file.addedAt}`).slice(0, 24)}/${last}`;
+    const found = await headFile(pathname).catch(() => null);
+    if (found && found.size > 0 && found.contentType === contentType) {
+      const kept: ProductFile = { pathname, name: file.name, bytes: found.size, contentType, addedAt: new Date().toISOString() };
+      await keepRecord(store, key, kept);
+      return kept;
+    }
     const original = await readWhole(file.pathname, MAX_STAMP_BYTES);
     if (!original) {
       await noteProblem(file.pathname, "too_big");
@@ -221,12 +244,9 @@ export async function stampedCopy(
         return null;
       }
     }
-    const contentType = epub ? "application/epub+zip" : "application/pdf";
     // In the store that charges nothing to send, a path is plain characters
     // only (lib/vault-rules.ts); the name the buyer saves it under is kept
-    // beside the path, as it is for the original.
-    const last = isVaultPath(file.pathname) ? keyName(file.name) : file.name;
-    const pathname = `${copyFolder(file)}${sha(`${sale.reference}|${file.addedAt}`).slice(0, 24)}/${last}`;
+    // beside the path, as it is for the original (`last` and `pathname` above).
     await writeFileWhole(pathname, stamped, contentType);
     const copy: ProductFile = {
       pathname,
@@ -235,12 +255,7 @@ export async function stampedCopy(
       contentType,
       addedAt: new Date().toISOString(),
     };
-    // Its record is kept only while the store's data room has space for it
-    // (lib/store-data.ts): without it the buyer still gets this copy, and the
-    // next download stamps another.
-    if (isRedisConfigured() && (await keepFor(store, COPY_RECORD_BYTES, COPY_RECORD_SECONDS))) {
-      await redisPipeline([["SET", key, JSON.stringify(copy), "EX", COPY_RECORD_SECONDS]]);
-    }
+    await keepRecord(store, key, copy);
     // Copies left over by a removal the file store failed are tried again here too, a few at a time; the buyer's
     // copy is already made, and a failure leaves them on the list for the next try. This file's own folder is kept
     // for a later try: emptying it now would delete the copy handed over below.

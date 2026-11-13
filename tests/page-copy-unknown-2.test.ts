@@ -161,9 +161,10 @@ test("a funnel's file is never collected from an unknown page read", async () =>
     try {
       await assert.rejects(() => collectBundle(first, "funnel0001", "own"), label);
       const cloned = await funnel({ action: "clone", funnel: "funnel0001" });
-      assert.deepEqual([cloned.status, cloned.body.error], [500, "server_error"], `${label}: a clone is refused`);
+      // #2880: an unreadable part is said (503 funnel_unread), never a server error or "gone".
+      assert.deepEqual([cloned.status, cloned.body.error], [503, "funnel_unread"], `${label}: a clone is refused, and said unreadable`);
       const shared = await funnel({ action: "share", funnel: "funnel0001" });
-      assert.deepEqual([shared.status, shared.body.error], [500, "server_error"], `${label}: a share is refused`);
+      assert.deepEqual([shared.status, shared.body.error], [503, "funnel_unread_counted"], `${label}: a share is refused, said unreadable, its try counted`);
     } finally { bad = null; }
     assert.equal((await readPageFunnels(first.statsId)).length, funnelsBefore, `${label}: no funnel is made`);
     assert.equal((await storeForEmail(OWNER))!.sitePages.length, pagesBefore, `${label}: no page is made`);

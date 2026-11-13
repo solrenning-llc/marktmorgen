@@ -120,7 +120,7 @@ const INVOICE_ID = /^in_[A-Za-z0-9]+$/;
 /** A Stripe list as the pages describe it, or null. */
 function list(value: unknown): { data: unknown[]; hasMore: boolean } | null {
   const v = record(value);
-  if (!v || v.object !== "list" || !Array.isArray(v.data) || typeof v.has_more !== "boolean") return null;
+  if (!v || v.object !== "list" || !Array.isArray(v.data) || v.data.length > PAGE_LIMIT || typeof v.has_more !== "boolean") return null;
   return { data: v.data, hasMore: v.has_more };
 }
 
@@ -142,6 +142,19 @@ async function wholeLines(
 ): Promise<{ lines: unknown[] } | { reason: string }> {
   const first = list(invoice.lines);
   if (!first) return { reason: "lines_unreadable" };
+  // A repeated provider row is not evidence of a second charge. The
+  // decision counts periods, so never hand it duplicate (or unnamed) lines
+  // as a complete invoice, within one page or across several pages.
+  const seen = new Set<string>();
+  const take = (data: unknown[]) => {
+    for (const raw of data) {
+      const id = lineId(raw);
+      if (!id || seen.has(id)) return false;
+      seen.add(id);
+    }
+    return true;
+  };
+  if (!take(first.data)) return { reason: "lines_unreadable" };
   const lines = [...first.data];
   if (!first.hasMore) return { lines };
   const url = record(invoice.lines)?.url;
@@ -161,6 +174,7 @@ async function wholeLines(
     }
     if (!next) return { reason: "lines_unreadable" };
     if (next.hasMore && next.data.length === 0) return { reason: "lines_unreadable" };
+    if (!take(next.data)) return { reason: "lines_unreadable" };
     lines.push(...next.data);
     more = next.hasMore;
   }

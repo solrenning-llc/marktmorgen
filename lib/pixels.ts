@@ -169,11 +169,11 @@ export function hasPixels(pixels: Pixels): boolean {
   return PIXEL_KINDS.some((kind) => pixels[kind] !== null);
 }
 
-/** "Meta, Google and TikTok". */
-export function pixelNames(pixels: Pixels): string {
+/** "Meta, Google and TikTok"; `and` in the store's language (lib/buyer-words/tracking-consent.ts). */
+export function pixelNames(pixels: Pixels, and = "and"): string {
   const names = PIXEL_KINDS.filter((kind) => pixels[kind]).map((kind) => PIXEL_INFO[kind].name);
   if (names.length <= 1) return names.join("");
-  return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+  return `${names.slice(0, -1).join(", ")} ${and} ${names[names.length - 1]}`;
 }
 
 /**

@@ -29,10 +29,11 @@
  * Every reply is read exactly (CX-123 rule 24): a reply out of shape throws
  * UnknownReplyError, never "none", "zero" or "done".
  */
-import { randomBytes } from "node:crypto";
+import { createHmac, randomBytes } from "node:crypto";
+import { deriveKey } from "@/lib/secret-box";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
-import { type DataStore, giveData, needData, takeData } from "@/lib/store-data";
+import { type DataStore, giveData, needData, noteData, takeData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { UPLOAD_SECONDS, readVaultPath } from "@/lib/vault-rules";
 import { reserveStoreUpload, reserveUploadControl, type UploadStore } from "@/lib/upload-budget";
@@ -71,15 +72,17 @@ const LIVE_SECONDS = MAX_SUBMISSION_KEEP_DAYS * DAY + SUBMISSION_SWEEP_GRACE_SEC
  * tests/submission-store.test.ts. Each is far inside the hundred a buyer
  * action is priced at (tests/plan-cost-registry.ts, UNIT_COST.buyer).
  */
+// Closing and giving up each read the buyer's places twice and set their room slot (settleBuyerRoom): 6 commands at
+// the most, added to their own (review of #3568).
 export const SUBMISSION_STEP_COMMANDS = {
   open: 14,
   sign: 1,
-  done: 14,
-  abort: 5,
+  done: 20,
+  abort: 11,
   /** The buyer's list (unit 5): their index, then a record and, for one not kept, its open upload, for each of their entries. */
   mine: 1 + 2 * MAX_SUBMISSIONS_PER_PERSON,
-  /** A withdrawal (unit 5): the lock, the record, its growth in the data room, the write, and the lock let go. */
-  withdraw: 12,
+  /** A withdrawal (unit 5): the lock, the record, its growth in the data room, the write, the buyer's room slot set (settleBuyerRoom, 6), and the lock let go. */
+  withdraw: 18,
 } as const;
 /** Kept files the daily sweep deletes at most in one run; the rest wait for the next. */
 export const SUBMISSION_SWEEP_PER_RUN = 200;
@@ -121,6 +124,21 @@ function readEntry(raw: unknown): { courseId: string; lessonId: string; id: stri
 const recordKey = (folder: string, id: string) => `nl:sub:rec:${part(folder)}:${part(id)}`;
 /** The data room's slot of one lesson's setup. */
 const SETUP_SLOT = (courseId: string, lessonId: string) => `sb:${courseId}:${lessonId}`;
+/**
+ * The data room's slot of one buyer's places, entries and open uploads on one
+ * lesson (review of #3568, Claude 6 and Claude 1): set, never added to, so
+ * trying again never grows it, and given back to what is still held once an
+ * upload is refused, given up or closed, and emptied with the person
+ * (forgetSubmissionsPerson). Named by an HMAC under the deployment's own key
+ * (lib/secret-box.ts), never by the buyer's key in the clear, so the store's
+ * room names nobody and a copy of it cannot be matched to a guessed address.
+ * null when there is no key: nothing is opened then.
+ */
+export function buyerSlotFor(folder: string, courseId: string, lessonId: string, who: string): string | null {
+  const key = deriveKey("submission-buyer-slot/v1");
+  if (!key) return null;
+  return `sbl:${createHmac("sha256", key).update([part(folder), part(courseId), part(lessonId), part(who)].join("|")).digest("hex").slice(0, 32)}`;
+}
 
 /** The owner id a submission's file is kept under in the vault: never a product's, an option's or a lesson's. */
 export const submissionOwnerId = (id: string) => `sub_${id}`;
@@ -192,6 +210,51 @@ export async function liveCount(folder: string, courseId: string, lessonId: stri
 }
 
 type Place = { folder: string; courseId: string; lessonId: string; who: string; id: string };
+
+/** Where a buyer's places on one lesson are counted: their set, and their room slot. */
+type Spot = Omit<Place, "id">;
+/** What one place weighs in the room: its member in the lesson's set, its entry in the store's (with a path at its longest), and its line on the course's list to review. */
+const placeBytes = (at: Spot) =>
+  dataBytes([liveKey(at.folder, at.courseId, at.lessonId, at.who), "0".repeat(32)], 1) +
+  dataBytes([whoKey(at.folder, at.who), entryOf(at.courseId, at.lessonId, "0".repeat(32), "v".repeat(MAX_PATH_CHARS))], 1) +
+  dataBytes([listKey(at.folder, at.courseId), listMember(at.lessonId, "0".repeat(32))], 1);
+/** What one open upload weighs in the room: its door, at the largest a door is ever written. */
+const doorBytes = (at: Spot) => dataBytes([doorKey(at.folder, "0".repeat(32))], 1) + MAX_DOOR_BYTES;
+/** The most one buyer's places and open uploads on one lesson ever weigh: every place an open upload. */
+const buyerMost = (at: Spot) => MAX_WAITING_PER_BUYER * (placeBytes(at) + doorBytes(at));
+
+/** The buyer's places held now on the lesson, and of them the ones that can still be an open upload; null when not read exactly. */
+async function heldNow(at: Spot, nowSeconds: number): Promise<{ places: number; doors: number } | null> {
+  const live = liveKey(at.folder, at.courseId, at.lessonId, at.who);
+  const replies = await redisPipeline([["ZCOUNT", live, `(${nowSeconds}`, "+inf"], ["ZCOUNT", live, `(${nowSeconds}`, nowSeconds + UPLOAD_SECONDS]]).then(
+    (answer) => repliesFor(answer, 2),
+    () => null,
+  );
+  const places = countOf(replies?.[0]);
+  const doors = countOf(replies?.[1]);
+  return replies && places !== null && doors !== null ? { places, doors } : null;
+}
+
+/**
+ * Sets the buyer's slot to what they still hold: every place with its entry,
+ * and every place an upload can still be open on (a place whose time ends
+ * within an upload's day; a kept record about to end is counted as one too,
+ * which only makes the room look fuller). Not read exactly, the slot is left
+ * as it was, never emptier. Read again after: a place taken meanwhile by
+ * another open puts the slot back at its most, so an open is never left
+ * uncounted.
+ */
+async function settleBuyerRoom(data: DataStore, at: Spot, nowSeconds: number): Promise<void> {
+  const before = await heldNow(at, nowSeconds);
+  if (!before) return;
+  const slot = buyerSlotFor(at.folder, at.courseId, at.lessonId, at.who);
+  if (!slot) return;
+  const most = buyerMost(at);
+  const bytes = Math.min(most, before.places * placeBytes(at) + before.doors * doorBytes(at));
+  await giveData(data, [{ slot, bytes, set: true }], nowSeconds * 1000);
+  const after = await heldNow(at, nowSeconds);
+  if (!after || after.places > before.places || after.doors > before.doors) await noteData(data, [{ slot, bytes: most, set: true }], nowSeconds * 1000);
+}
 
 /**
  * Takes one of the buyer's places on this lesson, and one of their entries
@@ -339,30 +402,32 @@ export type DoorOpened =
 export async function openSubmissionDoor(ask: DoorAsk, steps: DoorSteps = VAULT_STEPS): Promise<DoorOpened> {
   const place: Place = { folder: ask.folder, courseId: ask.courseId, lessonId: ask.lessonId, who: ask.who, id: randomBytes(16).toString("hex") };
   const until = ask.nowSeconds + UPLOAD_SECONDS;
-  // The place and the entry (with a path at its longest), for as long as either can be kept, and the door, for its
-  // day, are counted in the store's data room before any is written; the door at MAX_DOOR_BYTES, which a door never
-  // passes (it is not written past it).
-  const kept =
-    dataBytes([liveKey(place.folder, place.courseId, place.lessonId, place.who), place.id], 1) +
-    dataBytes([whoKey(place.folder, place.who), entryOf(place.courseId, place.lessonId, place.id, "v".repeat(MAX_PATH_CHARS))], 1) +
-    dataBytes([listKey(place.folder, place.courseId), listMember(place.lessonId, place.id)], 1);
-  const room = await takeData(
-    ask.data,
-    [
-      { until: (ask.nowSeconds + LIVE_SECONDS) * 1000, bytes: kept },
-      { until: (ask.nowSeconds + UPLOAD_SECONDS) * 1000, bytes: dataBytes([doorKey(place.folder, place.id)], 1) + MAX_DOOR_BYTES },
-    ],
-    ask.nowSeconds * 1000,
-  );
+  const slot = buyerSlotFor(place.folder, place.courseId, place.lessonId, place.who);
+  if (!slot) throw new UnknownReplyError("the store's data room (no key to name a buyer's slot)");
+  // A place first: a buyer whose places are all held is refused before the room is touched (review of #3568).
+  if (!(await takePlace(place, until, ask.nowSeconds))) return { ok: false, reason: "busy" };
+  // Then the room, before the door is written: the buyer's one slot on the lesson set to the most their places,
+  // entries (with a path at its longest) and open uploads can weigh (each door at MAX_DOOR_BYTES, which a door never
+  // passes). Set, never added to, so another try takes nothing more; given back to what is still held whenever an
+  // upload is refused, given up or closed.
+  const giveBack = () => settleBuyerRoom(ask.data, place, ask.nowSeconds);
+  let room: Awaited<ReturnType<typeof takeData>>;
+  try {
+    room = await takeData(ask.data, [{ slot, bytes: buyerMost(place), set: true }], ask.nowSeconds * 1000);
+  } catch (error) {
+    await givePlace(place).catch(() => undefined);
+    throw error;
+  }
   if (!room.ok) {
+    await givePlace(place);
     if (room.reason === "full") return { ok: false, reason: "full" };
     throw new UnknownReplyError("the store's data room");
   }
-  if (!(await takePlace(place, until, ask.nowSeconds))) return { ok: false, reason: "busy" };
   let opened: Awaited<ReturnType<typeof openReservedVault>> | null = null;
   try {
     if (!(await steps.reserveStoreUpload(ask.store, ask.file.bytes, "r2"))) {
       await givePlace(place);
+      await giveBack();
       return { ok: false, reason: "budget" };
     }
     try {
@@ -374,12 +439,14 @@ export async function openSubmissionDoor(ask: DoorAsk, steps: DoorSteps = VAULT_
       const message = error instanceof Error ? error.message : "";
       if (message === "storage_limit" || message === "storage_pending" || message === "storage_busy") {
         await givePlace(place);
+        await giveBack();
         return { ok: false, reason: message === "storage_limit" ? "room" : "pending" };
       }
       throw error;
     }
     if (!opened.ok) {
       await givePlace(place);
+      await giveBack();
       return { ok: false, reason: opened.reason };
     }
     const pathname = opened.upload.pathname;
@@ -415,7 +482,7 @@ export async function openSubmissionDoor(ask: DoorAsk, steps: DoorSteps = VAULT_
   } catch (error) {
     // Nothing has reached the browser: the provider's session is cancelled and the place given back.
     if (opened?.ok) await steps.abortReservedVault(opened.upload.pathname).catch(() => false);
-    await givePlace(place, opened?.ok ? opened.upload.pathname : undefined).catch(() => undefined);
+    await givePlace(place, opened?.ok ? opened.upload.pathname : undefined).then(giveBack, () => undefined);
     throw error;
   }
 }
@@ -508,9 +575,10 @@ export async function closeSubmissionDoor(
     return { ok: false, reason: closed.reason };
   }
   const place: Place = { folder: door.folder, courseId: door.courseId, lessonId: door.lessonId, who: door.who, id: door.id };
+  const settle = () => settleBuyerRoom(where.data, place, nowSeconds);
   const drop = async () => {
     const gone = await steps.deleteVault([pathname]).catch(() => false);
-    if (gone) await givePlace(place, pathname).catch(() => undefined);
+    if (gone) await givePlace(place, pathname).then(settle, () => undefined);
   };
   if (closed.file.bytes !== door.bytes || closed.file.contentType !== door.type) {
     await drop();
@@ -591,17 +659,27 @@ export async function closeSubmissionDoor(
     if (back && back[0] === null) await drop();
     throw new UnknownReplyError("a submission record's write");
   }
+  // The upload is closed: the buyer's slot comes down to the places they still hold.
+  await settle();
   return { ok: true, submission: kept };
 }
 
 /** Gives the buyer's own open upload up: the provider's session cancelled, then the place, the entry and the door let go. */
-export async function abortSubmissionDoor(where: DoorWhere, pathname: string, steps: DoorSteps = VAULT_STEPS): Promise<"done" | "unknown" | "unavailable"> {
+export async function abortSubmissionDoor(
+  where: DoorWhere & { data: DataStore },
+  pathname: string,
+  steps: DoorSteps = VAULT_STEPS,
+  nowSeconds = Math.floor(Date.now() / 1000),
+): Promise<"done" | "unknown" | "unavailable"> {
   const door = await ownDoor(pathname, where.folder, where.courseId, where.lessonId, where.who);
   if (!door) return "unknown";
   if (!(await steps.abortReservedVault(pathname))) return "unavailable";
-  await givePlace({ folder: door.folder, courseId: door.courseId, lessonId: door.lessonId, who: door.who, id: door.id }, pathname);
+  const place: Place = { folder: door.folder, courseId: door.courseId, lessonId: door.lessonId, who: door.who, id: door.id };
+  await givePlace(place, pathname);
   const replies = repliesFor(await redisPipeline([["DEL", doorKey(door.folder, door.id)]]), 1);
   if (!replies || countOf(replies[0]) === null) throw new UnknownReplyError("a submission upload given up");
+  // Given up: the buyer's slot comes down to the places they still hold (review of #3568).
+  await settleBuyerRoom(where.data, place, nowSeconds);
   return "done";
 }
 
@@ -711,7 +789,13 @@ async function entriesOf(folder: string, who: string): Promise<NonNullable<Retur
  * submissions went. A step whose answer is unknown throws: the erasure says it
  * is not finished, and pressing again finishes it.
  */
-export async function forgetSubmissionsPerson(folder: string, who: string, files: string[], steps: Pick<DoorSteps, "abortReservedVault"> = VAULT_STEPS): Promise<number> {
+export async function forgetSubmissionsPerson(
+  folder: string,
+  who: string,
+  files: string[],
+  steps: Pick<DoorSteps, "abortReservedVault"> = VAULT_STEPS,
+  data?: DataStore,
+): Promise<number> {
   const entries = await entriesOf(folder, who);
   let gone = 0;
   const lessons = new Set<string>();
@@ -736,6 +820,17 @@ export async function forgetSubmissionsPerson(folder: string, who: string, files
   const keys = [whoKey(folder, who), ...[...lessons].map((at) => { const [courseId, lessonId] = at.split("|"); return liveKey(folder, courseId, lessonId, who); })];
   const replies = repliesFor(await redisPipeline(keys.map((key) => ["DEL", key])), keys.length);
   if (!replies || replies.some((reply) => countOf(reply) === null)) throw new UnknownReplyError("a buyer's submission places deleted");
+  // And their room slots (buyerSlotFor), emptied in one step so the store's room keeps nothing of them; a step not
+  // known to be done leaves the erasure unfinished, to be pressed again.
+  const slots = [...lessons].flatMap((at) => {
+    const [courseId, lessonId] = at.split("|");
+    const slot = buyerSlotFor(folder, courseId, lessonId, who);
+    return slot ? [{ slot, bytes: 0, set: true }] : [];
+  });
+  if (data && slots.length > 0) {
+    const emptied = await takeData(data, slots);
+    if (!emptied.ok) throw new UnknownReplyError("a buyer's submission room slots emptied");
+  }
   return gone;
 }
 
@@ -1108,6 +1203,8 @@ export async function withdrawSubmission(
     if (landed === "gone") return { ok: false, reason: "gone" };
     // Changed by the next holder (a reply): nothing was written, and the file is not touched.
     if (landed === "changed") return { ok: false, reason: "state" };
+    // The place is let go: the buyer's room slot comes down to what they still hold (review of #3568).
+    await settleBuyerRoom(input.data, { folder: input.folder, courseId: kept.target.courseId, lessonId: kept.target.lessonId, who: kept.who }, nowSeconds);
     // Then the file: said deleted only when the vault confirmed it, and off the sweep's list only then.
     const deleted = await steps.deleteVault([kept.path]).catch(() => false);
     if (deleted) {

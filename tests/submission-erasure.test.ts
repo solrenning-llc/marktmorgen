@@ -26,6 +26,7 @@ import {
   SUBMISSION_SWEEP_PER_RUN,
   SUBMISSION_SWEEP_RETRY_SECONDS,
   type DoorSteps,
+  buyerSlotFor,
   closeSubmissionDoor,
   forgetSubmissionsPerson,
   liveCount,
@@ -35,7 +36,7 @@ import {
   sweepSubmissions,
 } from "@/lib/submission-store";
 import { ERASE_SUBMISSIONS } from "@/lib/erasure-rules";
-import type { DataStore } from "@/lib/store-data";
+import { type DataStore, dataKey } from "@/lib/store-data";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -127,7 +128,7 @@ async function main(): Promise<void> {
     is("one more, on a lesson with room, is refused", over, { ok: false, reason: "busy" });
     is("and holds no place there", await liveCount(FOLDER, COURSE, lesson(199), who, NOW), 0);
     const files: string[] = [];
-    const measured = await commandsOf(() => forgetSubmissionsPerson(FOLDER, who, files, steps));
+    const measured = await commandsOf(() => forgetSubmissionsPerson(FOLDER, who, files, steps, SHOP));
     is("deleting a person at the cap deletes every one", measured.value, MAX_SUBMISSIONS_PER_PERSON);
     // Each open upload given up at the real vault reads and deletes its record and gives its reservation back: eight at most.
     is("and stays inside what the erasure counts for it, every one an open upload at its worst", measured.commands + 8 * MAX_SUBMISSIONS_PER_PERSON <= ERASE_SUBMISSIONS[0], true);
@@ -144,13 +145,17 @@ async function main(): Promise<void> {
     const bobs = await send(BOB, lesson(1), steps);
     calls.length = 0;
     const files: string[] = [];
-    const gone = await forgetSubmissionsPerson(FOLDER, ANA, files, steps);
+    const slotOf = async (who: string, at: string) => (await redis.pipeline([["HGET", dataKey(SHOP) ?? "", buyerSlotFor(FOLDER, COURSE, at, who) ?? ""]]))[0];
+    is("control: their room slots are there before", (await Promise.all([1, 2, 3].map((n) => slotOf(ANA, lesson(n))))).every((v) => v !== null), true);
+    const gone = await forgetSubmissionsPerson(FOLDER, ANA, files, steps, SHOP);
     is("their two records go", gone, 2);
     is("their open upload is given up at the vault", calls, [`abort ${open.path}`]);
     is("every file of theirs goes to the erasure to be deleted", [...files].sort(), [first.path, second.path, open.path].sort());
     is("their records are gone", [await readSubmission(FOLDER, first.id), await readSubmission(FOLDER, second.id)], [null, null]);
     is("their files are off the sweep's list", (await due()).filter((p) => p !== bobs.path), []);
     is("their places are let go", await liveCount(FOLDER, COURSE, lesson(1), ANA, NOW), 0);
+    is("their room slots are emptied, so the store's room keeps nothing of them", await Promise.all([1, 2, 3].map((n) => slotOf(ANA, lesson(n)))), [null, null, null]);
+    is("another buyer's slot stays", (await slotOf(BOB, lesson(1))) !== null, true);
     is("another buyer's record stays", (await readSubmission(FOLDER, bobs.id))?.path, bobs.path);
     is("and is still on the list", (await due()).includes(bobs.path), true);
     is("deleted again, nothing more goes", await forgetSubmissionsPerson(FOLDER, ANA, [], steps), 0);

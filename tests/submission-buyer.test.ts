@@ -36,6 +36,7 @@ import { POST } from "@/app/api/store/course/submission/route";
 import {
   SUBMISSION_STEP_COMMANDS,
   type DoorSteps,
+  buyerSlotFor,
   buyerSubmissionsFor,
   closeSubmissionDoor,
   liveCount,
@@ -50,7 +51,7 @@ import { MAX_SUBMISSIONS_PER_PERSON, MAX_SUBMISSION_RECORD_BYTES, type Submissio
 import { checkChosenFile, sendSubmission } from "@/lib/submission-upload";
 import { SUBMISSIONS_WORDS } from "@/lib/buyer-words/submissions";
 import { LessonSubmission } from "@/components/lesson-submission";
-import type { DataStore } from "@/lib/store-data";
+import { type DataStore, dataKey } from "@/lib/store-data";
 import { advance, store as redis } from "./redis-stub";
 import { mount, texts } from "./client-hooks";
 import { COURSE, FOLDER, LESSON, resetWorld, state } from "./submission-upload-world";
@@ -292,11 +293,14 @@ async function main(): Promise<void> {
     is("kept as withdrawn", (await readSubmission(FOLDER, stuck.id))?.state, "withdrawn");
     is("and due on the sweep's list from now", Number((await redis.pipeline([["ZSCORE", "nl:sub:due", `${FOLDER}|${stuck.path}`]]))[0]), NOW + 600);
     const places = await liveCount(FOLDER, COURSE, "lesson0002ab", ANA, NOW + 600);
+    const slotOf = async () => Number((await redis.pipeline([["HGET", dataKey(SHOP) ?? "", buyerSlotFor(FOLDER, COURSE, "lesson0002ab", ANA) ?? ""]]))[0] ?? 0);
+    const slotBefore = await slotOf();
     const done1 = await commandsOf(() => withdrawSubmission({ ...lesson2, id: third.id }, NOW + 600, steps));
     is("withdrawn", done1.value.ok ? { state: done1.value.submission.state, closedAt: done1.value.submission.closedAt, deleted: done1.value.deleted } : done1.value, { state: "withdrawn", closedAt: NOW + 600, deleted: true });
     is("its file deleted first", calls, [`vault:delete:${third.path}`]);
     is("kept as withdrawn", (await readSubmission(FOLDER, third.id))?.state, "withdrawn");
     is("its place on the lesson let go", await liveCount(FOLDER, COURSE, "lesson0002ab", ANA, NOW + 600), places - 1);
+    is("and the buyer's room slot comes down with it (review of #3568)", (await slotOf()) < slotBefore, true);
     is("off the sweep's list", (await redis.pipeline([["ZSCORE", "nl:sub:due", `${FOLDER}|${third.path}`]]))[0], null);
     is("inside its commands", done1.commands <= SUBMISSION_STEP_COMMANDS.withdraw, true);
     is("once only", await withdrawSubmission({ ...lesson2, id: third.id }, NOW + 700, steps), { ok: false, reason: "state" });

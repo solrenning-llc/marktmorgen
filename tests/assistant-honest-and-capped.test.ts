@@ -30,7 +30,7 @@
  */
 import { readFileSync } from "node:fs";
 import { addProduct, claimHandle, ensureStatsId, setAssistant, setAssistantPlan, setSubscription, storeForEmail } from "@/lib/store";
-import { askAssistant } from "@/lib/store-assistant";
+import { askAssistant, assistantMissed } from "@/lib/store-assistant";
 import { assistantMessageExtraMicroUsd, assistantWindow, heldToFacts } from "@/lib/store-assistant-rules";
 import { AI_CALL_INFRA_MICRO_USD } from "@/lib/spend-cost-table";
 import { neutralLine } from "@/lib/assistant-reminder-rules";
@@ -275,6 +275,25 @@ async function main(): Promise<void> {
   is("the creator's list keeps the question", kept.includes("Lisbon"), true);
   is("but not the typed address", kept.includes("jane.doe@example.com"), false);
   is("nor the typed phone", kept.includes("912 345 678"), false);
+
+  part("B2. The creator's list shows nothing past its window, nor a row kept raw before this change (#4118)");
+  const missedKey = `nl:assist:missed:${statsId}`;
+  const nowSec = Math.floor(now / 1000);
+  await redis.pipeline([["DEL", missedKey]]);
+  await redis.pipeline([
+    ["RPUSH", missedKey,
+      JSON.stringify({ q: "Is there a gluten-free week?", at: nowSec }),
+      JSON.stringify({ q: "Do you ship to Porto? Write to old.buyer@example.com or \u002B351 912 000 111", at: nowSec - 3600 }),
+      JSON.stringify({ q: "Is it in Spanish?", at: nowSec - 121 * 86_400 }),
+      JSON.stringify({ q: "A row with no day, kept by an older build" })],
+  ]);
+  const shown = await assistantMissed(store);
+  const shownText = shown.map((m) => m.question).join(" ");
+  is("a question past the window the privacy policy states is not shown", shownText.includes("Spanish"), false);
+  is("nor a row whose day is not known", shownText.includes("no day"), false);
+  is("a row kept raw before this change shows no address", shownText.includes("old.buyer@example.com"), false);
+  is("nor the phone", shownText.includes("912 000 111"), false);
+  is("the questions inside the window are still shown", shown.map((m) => m.question.slice(0, 18)), ["Is there a gluten-", "Do you ship to Por"]);
 
   part("C. A model call refused by the provider keeps what the facts read cost");
   await redis.pipeline([["DEL", poolKey]]);

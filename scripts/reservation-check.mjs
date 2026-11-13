@@ -145,6 +145,8 @@ export function conflicts({ text, branch, changed, agentFiles = [], headFiles = 
     const after = headFiles[path];
     if (!onlyRemoves(before, after)) continue;
     released.add(path);
+    // A row naming this reservations file itself protects no code: the release that only removes rows is what it is for.
+    freed.add(path);
     const kept = new Set(reservations(after, owner).map((r) => r.file));
     for (const r of reservations(before, owner)) if (!kept.has(r.file)) freed.add(r.file);
   }

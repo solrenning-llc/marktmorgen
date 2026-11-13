@@ -91,3 +91,15 @@ test("the CI inputs carry the head's text of each changed reservations file, and
   const inputs = pullRequestInputs(git);
   assert.deepEqual(inputs.headFiles, { "docs/reservations/codex.md": own("Codex", live), "docs/reservations/claude3.md": null });
 });
+
+test("a kept row that names the read-only agent's reservations file itself does not stop its release", () => {
+  const selfRow = "| Codex H | open unit | codex/h-open | `lib/mail-health.ts`, `docs/reservations/codex.md` | 05/11/2026 |\n";
+  const files = [{ path: "docs/reservations/codex.md", text: own("Codex", stale + selfRow) }];
+  const ok = conflicts({ text: lanes, branch: "claude2/release", changed: ["docs/reservations/codex.md"], agentFiles: files, headFiles: headCodex(selfRow) });
+  assert.deepEqual(ok.found, []);
+  // Its other file still blocks, and a change that adds a row is still refused.
+  const other = conflicts({ text: lanes, branch: "claude2/release", changed: ["docs/reservations/codex.md", "lib/mail-health.ts"], agentFiles: files, headFiles: headCodex(selfRow) }).found;
+  assert.deepEqual(other.map((r: { file: string }) => r.file), ["lib/mail-health.ts"]);
+  const added = conflicts({ text: lanes, branch: "claude2/release", changed: ["docs/reservations/codex.md"], agentFiles: files, headFiles: headCodex(stale + selfRow + live) }).found;
+  assert.deepEqual(added.map((r: { file: string }) => r.file).sort(), ["docs/reservations/codex.md", "docs/reservations/codex.md"]);
+});

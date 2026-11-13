@@ -730,13 +730,21 @@ export class MemoryRedis {
           this.run(["SET", copy, value, "EX", seconds]);
           return 1;
         }
-        // lib/path-lead.ts PATH_LEAD_COUNT: a Path lead's mark taken only with its count, in one step; -1 when the record
-        // is not a hash, having written nothing.
-        if (key.startsWith("-- marktmorgen:path-lead-count:v1\n") && args[0] === "2" && args.length === 5) {
-          const [, mark, life, seconds, field] = args;
+        // lib/path-lead.ts PATH_LEAD_COUNT: nothing for an address deleted from the store (-2); otherwise the erasure
+        // note, then the mark, and the count only with the mark; -1 when the record or the notes are of another type.
+        if (key.startsWith("-- marktmorgen:path-lead-count:v2\n") && args[0] === "4" && args.length === 11) {
+          const [, notes, mark, life, erased, score, cutoff, noteSeconds, seconds, field, print] = args;
           this.scriptCalls += 1;
+          if (this.run(["HEXISTS", erased, print]) === 1) return -2;
+          this.scriptCalls += 2;
           const held = this.run(["TYPE", life]);
           if (held !== "none" && held !== "hash") return -1;
+          const kind = this.run(["TYPE", notes]);
+          if (kind !== "none" && kind !== "zset") return -1;
+          this.scriptCalls += 3;
+          this.run(["ZADD", notes, score, mark]);
+          this.run(["ZREMRANGEBYSCORE", notes, "-inf", cutoff]);
+          this.run(["EXPIRE", notes, noteSeconds]);
           this.scriptCalls += 1;
           if (this.run(["SET", mark, "1", "NX", "EX", seconds]) === null) return 0;
           this.scriptCalls += 1;

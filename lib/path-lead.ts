@@ -32,14 +32,16 @@
  *
  * Privacy. The mark holds a one-way fingerprint of the store's id and the
  * normalized address, never the address. It is noted for the person's
- * deletion (lib/erasure-index.ts) first, and the note's replies are read
- * exactly before the mark can be set (Codex X8 on #3591), so deleting the
- * person deletes it; a closing store's walk deletes it by the
- * store's id (lib/data-families.ts); otherwise it runs out by itself.
+ * deletion (lib/erasure-index.ts) in the same script, before the mark (Codex X8
+ * on #3591), so deleting the person deletes it; and an address already deleted
+ * from the store writes nothing at all (Codex T on #3591), so a confirmation
+ * that resumes after the erasure never makes its mark or note again. A closing
+ * store's walk deletes it by the store's id (lib/data-families.ts); otherwise
+ * it runs out by itself.
  *
  * Cost (review M2). PATH_LEAD_COMMANDS at the most, as Upstash bills them:
- * the note (three), the script's EVAL and, inside it, the record's TYPE and the
- * mark on every call, and the count once for an address. No public request
+ * the script's EVAL and, inside it, the deletion check, two TYPEs, the note
+ * (three) and the mark on every call, and the count once for an address. No public request
  * is taken: the routes that call it take none. Priced with what carried the
  * link (tests/plan-cost-registry.ts: a join or waitlist link is an access
  * email, a free copy's link is an order) and held in
@@ -51,55 +53,63 @@ import { noteForErasure } from "@/lib/erasure-index";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { confirmedLeadCommand } from "@/lib/stats";
+import { suppressedKey, suppressionPrint } from "@/lib/suppression";
 
 /** How long an address stays counted for a store: under the erasure index's own 401 days, so the note outlives the mark. */
 export const PATH_LEAD_DAYS = 400;
 /**
- * The most commands one call is billed (Upstash bills each command a script runs beside the EVAL): the note (3),
- * then the EVAL of PATH_LEAD_COUNT and the three it runs (the life record's TYPE, the mark, the count).
+ * The most commands one call is billed (Upstash bills each command a script runs beside the EVAL): the EVAL of
+ * PATH_LEAD_COUNT and the eight it runs (the deletion check, the record's and the notes' TYPE, the note's three, the
+ * mark, the count).
  */
-export const PATH_LEAD_COMMANDS = 7;
+export const PATH_LEAD_COMMANDS = 9;
 
 /**
- * The mark and the count in one step (Codex X5 and X8 on #3591): the mark is taken only when the count is applied with
- * it, so a failure between them can no longer leave an address marked and never counted. KEYS: the mark, the store's
- * all-time record. ARGV: the mark's seconds, the count's field. Answers the count after one more (counted), 0 when the
- * mark was already there (counted before), or -1, having written nothing, when the record is not a hash.
+ * The deletion check, the erasure note, the mark and the count in one step. KEYS: the erasure notes (lib/erasure-index.ts,
+ * noteForErasure), the mark, the store's all-time record, the store's deleted prints (lib/suppression.ts). ARGV: the
+ * note's score and cutoff, the notes' seconds, the mark's seconds, the count's field, the address's print.
+ *
+ * - An address deleted from the store (its print present) writes nothing and answers -2 (Codex T on #3591): a
+ *   confirmation that resumes after the erasure never makes the person's mark or note again.
+ * - A record or notes of another type write nothing and answer -1.
+ * - Otherwise the note is written first, so a mark never stands without it (Codex X8), then the mark, and the count
+ *   only when the mark was taken, so a mark never stands without its count (Codex X5): 0 when it was there already,
+ *   else the count after one more.
  */
-export const PATH_LEAD_COUNT = `-- marktmorgen:path-lead-count:v1
-local held = redis.call('TYPE', KEYS[2]).ok
+export const PATH_LEAD_COUNT = `-- marktmorgen:path-lead-count:v2
+if redis.call('HEXISTS', KEYS[4], ARGV[6]) == 1 then return -2 end
+local held = redis.call('TYPE', KEYS[3]).ok
 if held ~= 'none' and held ~= 'hash' then return -1 end
-if not redis.call('SET', KEYS[1], '1', 'NX', 'EX', ARGV[1]) then return 0 end
-return redis.call('HINCRBY', KEYS[2], ARGV[2], 1)`;
+local notes = redis.call('TYPE', KEYS[1]).ok
+if notes ~= 'none' and notes ~= 'zset' then return -1 end
+redis.call('ZADD', KEYS[1], ARGV[1], KEYS[2])
+redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', ARGV[2])
+redis.call('EXPIRE', KEYS[1], ARGV[3])
+if not redis.call('SET', KEYS[2], '1', 'NX', 'EX', ARGV[4]) then return 0 end
+return redis.call('HINCRBY', KEYS[3], ARGV[5], 1)`;
 
 const markKey = (statsId: string, email: string) =>
   `nl:pathlead:${statsId}:${createHash("sha256").update(`marktmorgen-path-lead:${statsId}:${normaliseEmail(email)}`).digest("hex").slice(0, 32)}`;
 
-/** The note's three replies, exactly: ZADD 0 or 1, ZREMRANGEBYSCORE a count, EXPIRE 1. */
-function notedExactly(replies: unknown[] | null): boolean {
-  if (!replies || replies.length !== 3) return false;
-  const [added, trimmed, kept] = replies;
-  return (added === 0 || added === 1) && countOf(trimmed) !== null && kept === 1;
-}
-
 /**
  * Counts one confirmed address as a Path lead, once for the store. "counted"
- * when this call counted it, "already" when it was counted before (or no
- * store numbers exist). Throws when an answer is not in its exact shape.
- *
- * The erasure note is written and read back first, on its own: a note missing
- * or unconfirmed throws before any mark exists (Codex X8 on #3591), so no mark
- * is ever left that deleting the person could not find. Then the mark and the
- * count go together in one script.
+ * when this call counted it, "already" when it was counted before, when the
+ * address was deleted from the store, or when the store keeps no numbers or no
+ * list (a store with no list has nowhere to note a deletion, so nothing is
+ * kept). Throws when the answer is not in its exact shape.
  */
-export async function countConfirmedLead(statsId: string | null | undefined, email: string): Promise<"counted" | "already"> {
-  if (!statsId || !email || !isRedisConfigured()) return "already";
+export async function countConfirmedLead(store: { statsId?: string | null; listId?: string | null } | null | undefined, email: string): Promise<"counted" | "already"> {
+  const statsId = store?.statsId;
+  const listId = store?.listId;
+  if (!statsId || !listId || !email || !isRedisConfigured()) return "already";
   const mark = markKey(statsId, email);
-  const noted = noteForErasure(statsId, email, mark);
-  if (!notedExactly(repliesFor(await redisPipeline(noted), noted.length))) throw new UnknownReplyError("a Path lead's erasure note");
+  const [[, notes, score, , cutoff], , [, , noteSeconds]] = noteForErasure(statsId, email, mark);
   const [, life, field] = confirmedLeadCommand(statsId);
-  const [reply] = repliesFor(await redisPipeline([["EVAL", PATH_LEAD_COUNT, 2, mark, String(life), PATH_LEAD_DAYS * 86_400, String(field)]]), 1) ?? [undefined];
-  if (reply === 0) return "already";
+  const [reply] = repliesFor(await redisPipeline([[
+    "EVAL", PATH_LEAD_COUNT, 4, String(notes), mark, String(life), suppressedKey(listId),
+    Number(score), String(cutoff), Number(noteSeconds), PATH_LEAD_DAYS * 86_400, String(field), suppressionPrint(listId, email),
+  ]]), 1) ?? [undefined];
+  if (reply === 0 || reply === -2) return "already";
   if ((countOf(reply) ?? 0) < 1) throw new UnknownReplyError("a Path lead's mark and count");
   return "counted";
 }

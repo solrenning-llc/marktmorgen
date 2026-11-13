@@ -339,7 +339,7 @@
     "storage": 152,
     "orders": 505,
     "store-email": 82,
-    "transactional-email": 168,
+    "transactional-email": 169,
     "list-email": 0,
     "visits": 1076
    }
@@ -2242,7 +2242,7 @@
     "storage": 206,
     "orders": 95,
     "store-email": 27,
-    "transactional-email": 37,
+    "transactional-email": 38,
     "list-email": 630,
     "visits": 264
    },
@@ -2252,7 +2252,7 @@
     "storage": 1217,
     "orders": 1135,
     "store-email": 326,
-    "transactional-email": 448,
+    "transactional-email": 450,
     "list-email": 7560,
     "visits": 3165
    }
@@ -6475,7 +6475,7 @@
     "storage": 2435,
     "orders": 3786,
     "store-email": 872,
-    "transactional-email": 1121,
+    "transactional-email": 1126,
     "list-email": 10800,
     "visits": 12661
    }

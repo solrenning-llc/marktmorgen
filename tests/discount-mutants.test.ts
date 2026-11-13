@@ -73,10 +73,13 @@ async function main() {
     is("an amount written as text: unknown", await codesMayTakeOff(ACCOUNT, "usd"), [{ kind: "unknown" }]);
 
     part("What a listed code reads as");
-    const one = async (row: Record<string, unknown>) => {
+    const listed = (row: Record<string, unknown>) => {
       body = { data: [{ id: "promo_one", code: "ONE", active: true, ...row }] };
-      const list = await listCodes(ACCOUNT);
-      return list.state === "ok" ? list.codes[0] : list;
+      return listCodes(ACCOUNT);
+    };
+    const one = async (row: Record<string, unknown>) => {
+      const list = await listed(row);
+      return list.state === "ok" ? list.codes[0] : undefined;
     };
     is("an amount in euros keeps its currency", (await one({ promotion: { coupon: { amount_off: 500, currency: "eur" } } }))?.off, { kind: "amount", cents: 500, currency: "eur" });
     is("an amount with an empty currency is the dollar", (await one({ promotion: { coupon: { amount_off: 500, currency: "" } } }))?.off, { kind: "amount", cents: 500, currency: "usd" });
@@ -86,8 +89,8 @@ async function main() {
     is("a zero minimum is not a minimum, and is said as another rule", [zeroMinimum?.minimum, zeroMinimum?.otherRules], [null, true]);
     is("empty currency options are no other rule", (await one({ restrictions: { currency_options: {} } }))?.otherRules, false);
     is("an expiry is read", (await one({ expires_at: 1_800_000_000 }))?.expiresAt, 1_800_000_000);
-    is("an id that is not text refuses the list", await one({ id: 5 }), { state: "error" });
-    is("a code that is not text refuses the list", await one({ code: 5 }), { state: "error" });
+    is("an id that is not text refuses the list", await listed({ id: 5 }), { state: "error" });
+    is("a code that is not text refuses the list", await listed({ code: 5 }), { state: "error" });
 
     part("A code from a link");
     body = { data: [{ id: "promo_live", code: "LAUNCH20", active: true }] };

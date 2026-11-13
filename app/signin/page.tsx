@@ -14,6 +14,7 @@ import { PLANS_ON_SALE } from "@/lib/opening";
 import { formatMoney } from "@/lib/money";
 import { INVITE_PROGRAM_OPEN, INVITE_BONUS_CENTS, INVITE_HOLD_DAYS } from "@/lib/creator-invite-rules";
 import { newAddressProblem, normaliseHandle } from "@/lib/store";
+import { ForgetInboxDrafts } from "@/components/forget-inbox-drafts";
 
 /** Somebody who came back to a store they have: by Log in, or sent here to log in again. */
 const RETURNING_STATUSES = new Set(["reauth", "out", "out-everywhere", "out-everywhere-unknown", "login-unknown"]);
@@ -65,6 +66,12 @@ const NOTICES: Record<string, { title: string; body: string; tone?: "success" }>
   "move-taken": {
     title: "That address already has a store",
     body: "An account cannot be moved on top of another one. Nothing was changed.",
+  },
+  // A store in its closing, with a break set or on one (its pause is kept under its address) or whose plan just started
+  // again with its members still held keeps its address until that is over (lib/store.ts closingUnderway).
+  "move-closing": {
+    title: "This store keeps its address for now",
+    body: "Your store is closing, has a break set or is on a break, or its plan just started again and its members' payments are still on hold. Until that is over, its sign-in address cannot change. Nothing was changed. To move it, take the break back or start its plan again in your studio, before its closing day if it is closing. If you just started it again, try again tomorrow.",
   },
   "move-busy": {
     title: "Your account is in the middle of a move",
@@ -308,6 +315,8 @@ export default async function SignInPage({
           ) : null}
 
           {confirmation ? <ToastOnLoad message={confirmation} param="status" /> : null}
+          {/* Every log-out and every ended session lands here: the unsent inbox answers kept on this device go (lib/inbox-drafts.ts). */}
+          <ForgetInboxDrafts />
           {notice ? (
             <div className={`notice ${notice.tone === "success" ? "notice-success" : "notice-warn"} mt-6`} role="status">
               <p className="font-semibold">{notice.title}</p>

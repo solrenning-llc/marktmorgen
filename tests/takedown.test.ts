@@ -202,6 +202,43 @@ async function main(): Promise<void> {
   is("the old link no longer opens", await readDraftPreview(fromDraft.code), null);
   is("one email to the creator says the product was unpublished", [sent.length - emailsBefore, sent.slice(emailsBefore).some((m) => m.text.includes('The product "Once Pack", now unpublished'))], [1, true]);
   is("a third press finds nothing more to do", await takeDown(report, await store(), onceAction, "https://marktmorgen.com"), null);
+
+  // Codex L's MEDIUM 2 on #3597: a hidden draft with a live preview, its mark written and the pointer's read failing right
+  // after. The mark alone closes the preview, so a retry must not read "nothing to do" before the takedown is recorded:
+  // it answers in its words once, with one email to the creator, and only then finds nothing more to do.
+  part("A draft's takedown whose preview cleanup fails after the mark landed is still recorded on a press again (Codex L on #3597)");
+  const halfway = await addProduct(owner, "Halfway Draft", "", "9", null);
+  if (!halfway.ok) throw new Error("setup");
+  await setProductHidden(owner, halfway.product.id, true);
+  const halfLink = await makeDraftPreview(await store(), halfway.product.id);
+  const halfNotice = { ...report, url: `https://marktmorgen.com/@noticeshop/preview/${halfLink.code}` };
+  const halfAction = { type: "product", id: halfway.product.id } as const;
+  let markLanded = false;
+  let failPointer = true;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (commands.some((c) => String(c[0]).toUpperCase() === "SET" && String(c[1]).startsWith("nl:dpv:down:"))) {
+      const answer = await pipeline(commands);
+      markLanded = true;
+      return answer;
+    }
+    if (markLanded && failPointer && commands.some((c) => String(c[1]).startsWith("nl:dpv:p:"))) {
+      failPointer = false;
+      throw new Error("a transient 500 on the preview pointer");
+    }
+    return pipeline(commands);
+  }) as typeof redis.pipeline;
+  const halfThrown = await takeDown(halfNotice, await store(), halfAction, "https://marktmorgen.com").then(() => false, () => true);
+  redis.pipeline = pipeline;
+  is("the first press throws on the failed cleanup, with the mark landed", [halfThrown, markLanded, await isTakenDown(await store(), halfway.product.id)], [true, true, true]);
+  is("the link no longer opens", await readDraftPreview(halfLink.code), null);
+  const halfEmails = sent.length;
+  is(
+    "a press again records the takedown, in its words",
+    await takeDown(halfNotice, await store(), halfAction, "https://marktmorgen.com"),
+    'The preview link of the draft product "Halfway Draft", now closed',
+  );
+  is("one email to the creator says so", sent.length - halfEmails, 1);
+  is("a third press finds nothing more to do", await takeDown(halfNotice, await store(), halfAction, "https://marktmorgen.com"), null);
   done();
 }
 

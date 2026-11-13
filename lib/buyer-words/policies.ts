@@ -106,7 +106,7 @@ export const POLICY_WORDS: Record<LanguageCode, PolicyWords> = {
     titles: { seller: "Wer verkauft", cancel: "Widerruf innerhalb von 14 Tagen", memberships: "Mitgliedschaften", measurement: "Messung von Werbung", contact: "Kontakt" },
     sellerIs: (n) => `${n} ist der Verkäufer. Jeder Verkauf ist ein Vertrag zwischen ${n} und der kaufenden Person.`,
     notParty: "Marktmorgen stellt den Shop und die Kasse bereit. Marktmorgen ist nicht Partei des Verkaufs und tritt nicht als Händler auf.",
-    payments: (n, paypal) => `Zahlungen gehen auf das eigene Stripe-Konto von ${n}${paypal ? " oder, wenn Sie mit PayPal zahlen, auf das eigene PayPal-Konto" : ""}.`,
+    payments: (n, paypal) => `Zahlungen gehen auf das eigene Stripe-Konto von ${n}${paypal ? ` oder, wenn Sie mit PayPal zahlen, auf das eigene PayPal-Konto von ${n}` : ""}.`,
     cancelIntro: "In der Europäischen Union, im Vereinigten Königreich und an einigen anderen Orten haben Verbraucher beim Online-Kauf in der Regel 14 Tage Zeit für einen Widerruf.",
     cancelDigital:
       "Bei digitalen Inhalten wie einer Datei, einem Link, einem Kurs oder einem privaten Podcast erlischt dieses Recht mit Beginn des Zugangs nur, wenn Sie an der Kasse zugestimmt haben, dass er innerhalb der 14 Tage beginnt, erklärt haben, dass Sie wissen, dass Sie das Recht dadurch verlieren, und eine Bestätigung von beidem erhalten haben.",
@@ -128,13 +128,13 @@ export const POLICY_WORDS: Record<LanguageCode, PolicyWords> = {
     titles: { seller: "Chi vende", cancel: "Recesso entro 14 giorni", memberships: "Abbonamenti", measurement: "Misurazione degli annunci", contact: "Contatti" },
     sellerIs: (n) => `${n} è il venditore. Ogni vendita è un contratto tra ${n} e chi acquista.`,
     notParty: "Marktmorgen fornisce il negozio e il pagamento. Non è parte della vendita e non agisce come venditore registrato.",
-    payments: (n, paypal) => `I pagamenti vanno sul conto Stripe di ${n}${paypal ? ", oppure sul suo conto PayPal quando paghi con PayPal" : ""}.`,
+    payments: (n, paypal) => `I pagamenti vanno sul conto Stripe intestato a ${n}${paypal ? `, oppure sul conto PayPal intestato a ${n} quando paghi con PayPal` : ""}.`,
     cancelIntro: "Nell'Unione europea, nel Regno Unito e in alcuni altri luoghi, chi acquista online come consumatore di solito ha 14 giorni per recedere.",
     cancelDigital:
       "Per i contenuti digitali, come un file, un link, un corso o un podcast privato, questo diritto termina all'inizio dell'accesso solo se al pagamento hai accettato che iniziasse entro i 14 giorni, hai dichiarato di capire che avresti perso il diritto e hai ricevuto una conferma di entrambe le cose.",
     cancelMembership:
       "Un abbonamento è almeno in parte un servizio: al pagamento chiedi che inizi subito, conservi il diritto di recedere entro i 14 giorni e, se lo fai, ti può essere chiesto di pagare ciò che hai già ricevuto.",
-    membersCancel: "Puoi disdire un abbonamento da solo in qualsiasi momento, dal link in qualsiasi email che lo riguarda, senza contattare nessuno.",
+    membersCancel: "Puoi disdire un abbonamento in autonomia in qualsiasi momento, dal link in qualsiasi email che lo riguarda, senza contattare nessuno.",
     membersEnd: "Con la disdetta, l'abbonamento termina alla fine del periodo già pagato.",
     and: "e",
     measures: (n, p) => `${n} misura i suoi annunci con ${p}.`,
@@ -178,7 +178,7 @@ export const POLICY_WORDS: Record<LanguageCode, PolicyWords> = {
       "Para conteúdo digital, como um ficheiro, uma ligação, um curso ou um podcast privado, esse direito termina quando o acesso começa apenas se, no pagamento, aceitou que começasse dentro dos 14 dias, declarou compreender que perderia o direito e recebeu uma confirmação de ambos.",
     cancelMembership:
       "Uma subscrição é, pelo menos em parte, um serviço: no pagamento pede que comece de imediato, mantém o direito de cancelar dentro dos 14 dias e, se o fizer, pode ter de pagar o que já recebeu.",
-    membersCancel: "Pode cancelar uma subscrição a qualquer momento, pela ligação em qualquer e-mail sobre ela, sem contactar ninguém.",
+    membersCancel: "Pode cancelar uma subscrição por conta própria a qualquer momento, pela ligação em qualquer e-mail sobre ela, sem contactar ninguém.",
     membersEnd: "Ao cancelar, a subscrição termina no fim do período já pago.",
     and: "e",
     measures: (n, p) => `${n} mede os seus anúncios com ${p}.`,

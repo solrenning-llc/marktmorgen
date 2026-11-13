@@ -34,7 +34,11 @@ export const EU_VAT_RATES: readonly EuVatRate[] = [];
 /** The highest standard rate any Member State may set is far below this; anything above is a typing error. */
 const MAX_BASIS_POINTS = 3500;
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
-const realDay = (value: string) => DAY.test(value) && new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value;
+const realDay = (value: string) => {
+  if (!DAY.test(value)) return false;
+  const date = new Date(`${value}T00:00:00Z`);
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value;
+};
 
 function recordProblems(record: EuVatRate): string[] {
   const out: string[] = [];

@@ -42,6 +42,7 @@ test("a rate record without its source, its day or a sane rate is a problem, and
   const bad: EuVatRate[] = [
     { ...sourced("DE", 1900), source: "" },
     { ...sourced("FR", 2000), readOn: "2026-02-31" },
+    { ...sourced("BE", 2100), readOn: "2026-13-01" },
     { ...sourced("IT", 22000), basisPoints: 22000 },
     { ...sourced("XX", 2000) },
     sourced("AT", 2000),
@@ -50,8 +51,9 @@ test("a rate record without its source, its day or a sane rate is a problem, and
   const problems = euVatRateProblems(bad);
   assert.ok(problems.some((p) => p.startsWith("DE")), problems.join("; "));
   assert.ok(problems.some((p) => p.startsWith("FR")));
+  assert.ok(problems.some((p) => p.startsWith("BE")));
   assert.ok(problems.some((p) => p.startsWith("IT")));
   assert.ok(problems.some((p) => p.startsWith("XX")));
   assert.ok(problems.some((p) => p.startsWith("AT")));
-  for (const country of ["DE", "FR", "IT", "XX", "AT"]) assert.equal(vatOnTop(1000, country, bad), null, country);
+  for (const country of ["DE", "FR", "BE", "IT", "XX", "AT"]) assert.equal(vatOnTop(1000, country, bad), null, country);
 });

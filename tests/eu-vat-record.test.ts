@@ -54,6 +54,7 @@ test("a sale missing any field, or whose parts disagree, makes no record", () =>
     { ...sale, supply: "goods" as never },
     { ...sale, currency: "euro" },
     { ...sale, at: Number.NaN },
+    { ...sale, at: Number.MAX_SAFE_INTEGER },
     { ...sale, vat: null as never },
     { ...sale, vat: { ...sale.vat, totalCents: 1191 } },
     { ...sale, vat: { ...sale.vat, country: "FR" } },

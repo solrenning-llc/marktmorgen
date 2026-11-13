@@ -59,8 +59,9 @@ export type EuVatSale = {
 
 const text = (value: unknown, most = 500) => typeof value === "string" && value.trim().length > 0 && value.length <= most;
 const whole = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value);
+/** The UTC day of a moment in seconds; null for anything that is not a moment a Date can hold. */
 const dayOf = (seconds: number): string | null =>
-  whole(seconds) && seconds > 0 ? new Date(seconds * 1000).toISOString().slice(0, 10) : null;
+  whole(seconds) && seconds > 0 && seconds <= 8_640_000_000_000 ? new Date(seconds * 1000).toISOString().slice(0, 10) : null;
 
 /** The record of one sale, or null when anything art. 63c asks is missing or the parts disagree. */
 export function euVatRecord(sale: EuVatSale): EuVatRecord | null {

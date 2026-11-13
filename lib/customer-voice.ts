@@ -241,8 +241,10 @@ export async function gatherVoice(store: Store, now = Date.now()): Promise<{ ite
 
   // Products coming soon that people joined the waitlist for (95 [D2-DEMAND-RADAR]): the name and how many, never who.
   // The product's name is the text: names that could not be read leave the waitlists unread, never left out.
+  // A product people wait on with no name in the titles read (removed from the catalog while its waitlist stays,
+  // Codex T on #3731) is demand that cannot be named: the waitlists are unread, never a summary that leaves it out.
   const sizes = await waitlistSizes(store).catch(failed("waitlist"));
-  if (sizes && !titlesRead && sizes.some((w) => w.people > 0)) unread.push("waitlist");
+  if (sizes && sizes.some((w) => w.people > 0 && (!titlesRead || !titles.get(w.productId)))) unread.push("waitlist");
   else for (const w of sizes ?? []) {
     const title = titles.get(w.productId);
     if (w.people > 0 && title) items.push({ source: "waitlist", text: title, n: w.people });

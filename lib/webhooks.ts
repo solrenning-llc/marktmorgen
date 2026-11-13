@@ -78,6 +78,7 @@ import { SafeFetchError, checkUrl, problemWords, safeFetch } from "@/lib/safe-fe
 import { type Store, storeForHandle, saleHandles } from "@/lib/store";
 import { allowanceUsedWords, allowancesUsedStrict, takeAllowance } from "@/lib/store-allowance";
 import { WEBHOOK_ADD_PAUSED_WORDS, WEBHOOK_PAUSED_COUNTED, WEBHOOK_PAUSED_NOT_SENT_WORDS, WEBHOOK_TEST_PAUSED_WORDS, integrationPauseWord } from "@/lib/integration-pause";
+import { namesAddress } from "@/lib/address-match";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { readListing } from "@/lib/catalog";
 import { keyStates } from "@/lib/api-keys";
@@ -992,7 +993,6 @@ export async function recentMessages(store: Store, type: WebhookEvent, limit = 3
   return (await recentMessagesOf(store, type, ids, ids.map(() => Number.MAX_SAFE_INTEGER), recentLimit(limit))).messages;
 }
 
-/** Whether a word is one of the events an endpoint can hear. */
 /** One delivery of the store's webhooks that carried an address, for the person's copy. */
 export type DeliveryTrace = { event: string; made: string; state: Delivery["state"]; sent: unknown };
 
@@ -1024,7 +1024,8 @@ export async function deliveriesAbout(store: Store, email: string, now = Date.no
       continue;
     }
     oldest = Math.min(oldest, Number(delivery.createdAt) || 0);
-    if (!delivery.body.toLowerCase().includes(address)) continue;
+    // The body's addresses compared whole: never a delivery about a longer address that only contains theirs (Codex G).
+    if (!namesAddress(delivery.body, address)) continue;
     let sent: unknown = delivery.body;
     try {
       sent = JSON.parse(delivery.body);
@@ -1037,6 +1038,7 @@ export async function deliveriesAbout(store: Store, email: string, now = Date.no
   return { records, unread };
 }
 
+/** Whether a word is one of the events an endpoint can hear. */
 export function isWebhookEvent(value: unknown): value is WebhookEvent {
   return isEvent(value);
 }

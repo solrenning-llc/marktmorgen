@@ -54,7 +54,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   }
 }) as typeof fetch;
 
-const creator = { statsId: "q".repeat(32), stripeAccountId: "acct_1TestSideBySide" } as Store;
+const creator = { statsId: "q".repeat(32), stripeAccountId: "acct_test_sidebyside" } as Store;
 const limited = (id: string, stock: number) => parseProduct({ id, title: `Print ${id}`, summary: "", priceCents: 2000, stock, link: `https://example.com/${id}` }) as Listing;
 const key = (id: string) => `nl:stock:${creator.statsId}:${id}`;
 

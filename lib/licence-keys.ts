@@ -55,6 +55,7 @@ import { MAX_UPLOAD_KEYS, MAX_POOL_KEYS, MIN_KEY_LENGTH, MAX_KEY_LENGTH, KEY_ALP
 export { MAX_UPLOAD_KEYS, MAX_POOL_KEYS, MIN_KEY_LENGTH, MAX_KEY_LENGTH, KEY_ALPHABET, MAX_KEY_FILE_BYTES, sampleKey, type IssuedKey, type KeyCounts } from "@/lib/licence-key-rules";
 import { saleHandles } from "@/lib/store";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { orderWrite } from "@/lib/order-data";
 import { giveData, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
@@ -190,6 +191,19 @@ const warnedKey = (store: Store, product: Pick<Listing, "id">) => `${base(store,
 
 /** Keys go to Redis in batches this size, well under any request limit. */
 const BATCH = 1_000;
+
+/**
+ * Pushes new keys onto a product's pool while it is under its bound, in one step (Claude 7's race hunt): the room is
+ * read and taken with the push, so two uploads at once never both take the same room and pass MAX_POOL_KEYS. KEYS[1]
+ * the pool; ARGV[1] the bound; ARGV[2..] the keys, in order. Answers how many it pushed: always the first ones.
+ */
+export const POOL_PUSH = `-- marktmorgen:license-pool-push:v1
+local n = #ARGV - 1
+local room = tonumber(ARGV[1]) - redis.call('LLEN', KEYS[1])
+if room < n then n = room end
+if n <= 0 then return 0 end
+for i = 2, n + 1 do redis.call('RPUSH', KEYS[1], ARGV[i]) end
+return n`;
 
 
 
@@ -351,8 +365,6 @@ export type UploadResult = {
  */
 export async function addKeys(store: Store, product: Listing, keys: string[], origin: string = SITE_URL): Promise<UploadResult> {
   if (!store.statsId || !isRedisConfigured()) throw new Error("keys cannot be stored");
-  const [length] = await redisPipeline([["LLEN", poolKey(store, product)]]);
-  let room = Math.max(0, MAX_POOL_KEYS - (Number(length) || 0));
   let added = 0;
   let known = 0;
   let overflow = 0;
@@ -367,28 +379,28 @@ export async function addKeys(store: Store, product: Listing, keys: string[], or
     const batch = keys.slice(i, i + BATCH);
     // One key at a time into the set, so the answer says which ones are new.
     const fresh = await redisPipeline(batch.map((key) => ["SADD", allKey(store, product), key]));
-    const take: string[] = [];
-    const giveBack: string[] = [];
+    const offered: string[] = [];
     batch.forEach((key, j) => {
       if (Number(fresh[j]) !== 1) {
         known += 1;
         notKept.push(key);
         return;
       }
-      if (room > 0) {
-        take.push(key);
-        room -= 1;
-      } else {
-        overflow += 1;
-        giveBack.push(key);
-        notKept.push(key);
-      }
+      offered.push(key);
     });
-    const writes: (string | number)[][] = [];
-    if (take.length) writes.push(["RPUSH", poolKey(store, product), ...take]);
-    if (giveBack.length) writes.push(["SREM", allKey(store, product), ...giveBack]);
-    if (writes.length) await redisPipeline(writes);
-    added += take.length;
+    if (!offered.length) continue;
+    // The room is taken with the push (POOL_PUSH): what did not fit is left out. Read exactly (CX-123 rule 24): an
+    // answer that is not a count of the keys offered throws, never "all of them fitted" or "none did".
+    const [pushedReply] = await redisPipeline([["EVAL", POOL_PUSH, 1, poolKey(store, product), MAX_POOL_KEYS, ...offered]]);
+    const pushed = typeof pushedReply === "number" && Number.isSafeInteger(pushedReply) && pushedReply >= 0 && pushedReply <= offered.length ? pushedReply : null;
+    if (pushed === null) throw new UnknownReplyError("the key pool's room");
+    const giveBack = offered.slice(pushed);
+    if (giveBack.length) {
+      overflow += giveBack.length;
+      notKept.push(...giveBack);
+      await redisPipeline([["SREM", allKey(store, product), ...giveBack]]);
+    }
+    added += pushed;
   }
   if (notKept.length) await giveData(store, [{ slot, bytes: weigh(notKept) }]);
   // A top-up means the next low pool is worth another warning.

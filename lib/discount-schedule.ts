@@ -15,7 +15,9 @@
  * holds the rest from then), or when the creator cancels it, or with the
  * store. A try is confirmed only by Stripe's exact answer (active true, this
  * code); anything else is tried again at the next run, ACTIVATION_TRIES times
- * in all, then kept as failed for the studio to say so, the code still off.
+ * in all, then kept as failed for the studio to say so, the code still off:
+ * a code Stripe confirmed live at the last try is switched off first, and a
+ * stop Stripe does not confirm keeps it due, never failed while it may be live.
  * Every Redis reply is read in its exact shape (lib/redis-reply.ts): an
  * unreadable one acts on nothing and leaves the entry for the next run. A
  * kept record that cannot be parsed reads the same at every run, so it
@@ -280,6 +282,25 @@ async function missed(shop: Shop, statsId: string, entry: ScheduleEntry, nowSeco
   return kept ? "retried" : "unknown";
 }
 
+/**
+ * The last try left a code Stripe confirmed live while the checkout's code box
+ * was never confirmed on (issue #4466): it is switched off before the failure
+ * is final, so a schedule kept as failed never leaves a code a link can still
+ * apply. A stop Stripe does not confirm may not have happened, so it is never
+ * taken for one: the try is counted and the schedule stays due, and the next
+ * run asks Stripe to switch it off again (activateOne), until its end, when
+ * Stripe's own expiry stops it.
+ */
+async function offThenFailed(shop: Shop, account: string, statsId: string, entry: ScheduleEntry, nowSeconds: number): Promise<Outcome> {
+  // Asked twice, as in scheduleCode: a stop Stripe answers in an unclear way is tried once more at once.
+  if ((await stopCode(account, entry.id)) || (await stopCode(account, entry.id))) return missed(shop, statsId, entry, nowSeconds, true);
+  await counted([
+    ["HSET", scheduleKey(statsId), entry.id, writeRecord({ ...entry, tries: entry.tries + 1 })],
+    ["ZADD", DUE_KEY, nowSeconds + RETRY_SECONDS, memberOf(shop.sid, statsId, entry.id)],
+  ]);
+  return "unknown";
+}
+
 async function activateOne<S extends Shop>(shop: S, statsId: string, id: string, nowSeconds: number, deps: Deps<S>): Promise<Outcome> {
   const member = memberOf(shop.sid, statsId, id);
   const result = await holding<Outcome>(statsId, async () => {
@@ -313,6 +334,9 @@ async function activateOne<S extends Shop>(shop: S, statsId: string, id: string,
     // Its end came before any try could: shown as failed, Stripe not asked.
     if (nowSeconds >= entry.end) return missed(shop, statsId, entry, nowSeconds, true);
     if (!shop.stripeAccountId) return missed(shop, statsId, entry, nowSeconds);
+    // Every try used and not yet failed: only a stop that was not confirmed leaves it so. The code may be
+    // live, so it is switched off before the failure is final, never switched on again.
+    if (entry.tries >= ACTIVATION_TRIES) return offThenFailed(shop, shop.stripeAccountId, statsId, entry, nowSeconds);
     // One key a try: a repeat of the same try is answered, not done again; the next try is a new request.
     const live = await activateCode(shop.stripeAccountId, id, `dsched:${id}:${entry.start}:${entry.tries}`);
     if (!live) return missed(shop, statsId, entry, nowSeconds);
@@ -326,6 +350,8 @@ async function activateOne<S extends Shop>(shop: S, statsId: string, id: string,
       console.error("switching the checkout's code box on failed", error);
     }
     if (!boxOn(box)) {
+      // The last try: the code is live on Stripe, so it is switched off before it is kept as failed.
+      if (entry.tries + 1 >= ACTIVATION_TRIES) return offThenFailed(shop, shop.stripeAccountId, statsId, entry, nowSeconds);
       await missed(shop, statsId, entry, nowSeconds);
       return "unknown";
     }

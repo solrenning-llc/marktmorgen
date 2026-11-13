@@ -123,9 +123,13 @@ is("already on it", replies[1], { valid: true, activated: true, reason: "already
 is("full", replies[2], { valid: true, activated: false, reason: "device_limit", used: 2, limit: 2 });
 is("revoked", replies[3], { valid: false, activated: false, reason: "revoked" });
 is("never given", replies[4], { valid: false, activated: false, reason: "unknown_key" });
-is("limit off", replies[5], { valid: true, activated: false, reason: "no_limit" });
-is("bad device", replies[6], { valid: false, activated: false, reason: "bad_device" });
-is("could not be read: never a yes", replies[7], { valid: false, activated: false, reason: "unavailable" });
+// Changed on #3622 (Claude 3, adopting; Claude 1's and Claude 7's LEVE): with no limit every device runs, "exactly as
+// today", so the reply says it may (it said `activated: false` before).
+is("limit off: every device may run", replies[5], { valid: true, activated: true, reason: "no_limit" });
+// Changed on #3622 (Claude 7's MÉDIO, Claude 1's LEVE): both are reached only after the key was judged good, so the key
+// stays `valid: true`; the device is still never let in (`activated: false`). They said `valid: false` before.
+is("bad device: the key is still good, the device not let in", replies[6], { valid: true, activated: false, reason: "bad_device" });
+is("could not be read: the key is still good, never a yes for the device", replies[7], { valid: true, activated: false, reason: "unavailable" });
 is("no reply carries an email, an order or a record", replies.every((r) => !/@|cs_|pi_|devices|record|email/.test(JSON.stringify(r))), true);
 
 done();

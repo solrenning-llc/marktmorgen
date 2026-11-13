@@ -268,6 +268,15 @@ export async function sendReviewRequests(
     counts.waiting += 1;
     await redisPipeline([["ZADD", ASK_DUE_KEY, "XX", at, member]]);
   };
+  // What a claim's TTL says, read exactly (Codex X8, X5 and U on #4360). 0 to CLAIM_SECONDS: a short claim still alive
+  // (Redis rounds TTL to seconds, so its last fraction reads 0), and the order waits for it, never dropped while the run
+  // that holds it can still finish without sending. Longer, or no expiry (-1): stretched just before a batch went, so
+  // the email may have gone, and it is done. Gone (-2) or anything else: left in line for the next run.
+  const byClaimTtl = async (member: string, ttl: unknown) => {
+    if (typeof ttl !== "number" || !Number.isSafeInteger(ttl)) return;
+    if (ttl > CLAIM_SECONDS || ttl === -1) await drop(member);
+    else if (ttl >= 0) await later(member, nowSeconds + ttl + 1);
+  };
 
   for (const member of members) {
     if (Date.now() >= deadline) break;
@@ -312,8 +321,7 @@ export async function sendReviewRequests(
     // A first being sent, or a claim a run could not let go of (Codex T on #4360): still short, it lapses on its own
     // and the order waits for it; stretched (taken just before a batch went), the email may have gone and it is done.
     if (typeof mark === "string" && mark.startsWith("sending:")) {
-      if (read[1] > 0 && read[1] <= CLAIM_SECONDS) await later(member, nowSeconds + read[1] + 1);
-      else if (read[1] !== -2) await drop(member);
+      await byClaimTtl(member, read[1]);
       continue;
     }
     const stage = askStage(mark, store.reviewAsk.again);
@@ -375,7 +383,9 @@ export async function sendReviewRequests(
     if (claim) {
       const claimed = await claimMark(sentKey(entry.reference), CLAIM_SECONDS, claim);
       if (claimed === "taken") {
-        await drop(member);
+        // Another run's: it may still let go without sending (a failed preparation, a refused allowance), so the order
+        // stays in line and waits for that claim, as a reminder's does (Codex X5 and U on #4360).
+        await byClaimTtl(member, repliesFor(await redisPipeline([["TTL", sentKey(entry.reference)]]), 1)?.[0]);
         continue;
       }
       if (claimed === "unknown") {
@@ -397,9 +407,7 @@ export async function sendReviewRequests(
       }
       if (claimed === "taken") {
         // Another run's, still short: it waits for that run; stretched, it may have gone, and is done.
-        const ttl = repliesFor(await redisPipeline([["TTL", againKey(entry.reference)]]), 1)?.[0];
-        if (typeof ttl === "number" && ttl > CLAIM_SECONDS) await drop(member);
-        else if (typeof ttl === "number" && ttl > 0) await later(member, nowSeconds + ttl + 1);
+        await byClaimTtl(member, repliesFor(await redisPipeline([["TTL", againKey(entry.reference)]]), 1)?.[0]);
         continue;
       }
       held = { key: againKey(entry.reference), claim: mine };
@@ -447,9 +455,11 @@ export async function sendReviewRequests(
       for (const item of items) await releaseMark(claimKeyOf(item.stage, item.entry.reference), item.claim);
       if (at !== null) for (const item of items) await later(item.member, at);
     };
-    // A throw before the batch's outcome is known (the reservation, the sender) undoes the group's claims, as a
-    // batch not sent does, so the next run asks again; one after the batch went keeps them (it was sent).
-    let decided = false;
+    // A throw before the batch went (the reservation, the stretch, the sender, or the undo of a batch not sent) undoes
+    // the group's claims, so the next run asks again; one after the batch went keeps them (it was sent). Two flags, not
+    // one (Claude 7 on #4360): an undo that threw part-way is finished by the catch, a finished one never runs twice.
+    let sent = false;
+    let undone = false;
     let ready: Ready[] = prepared;
     let unheld = 0;
     try {
@@ -457,8 +467,8 @@ export async function sendReviewRequests(
     // before the claims are stretched, leaves claims that lapse in CLAIM_SECONDS, so the order is asked again.
     const reserved = await reserve(store, prepared.length);
     if (reserved !== "ok") {
-      decided = true;
       await unclaim(prepared, nowSeconds + RETRY_SECONDS.plan);
+      undone = true;
       continue;
     }
     // Each claim stretched to SENT_MARK_SECONDS, confirmed, just before its batch goes (Codex T on #4360): from here
@@ -477,14 +487,13 @@ export async function sendReviewRequests(
       await later(item.member, nowSeconds + RETRY_SECONDS.sender).catch(() => undefined);
     }
     if (!ready.length) {
-      decided = true;
+      undone = true;
       continue;
     }
     const outcome = await sendBatch(
       ready.map((item) => item.message),
       `review-ask:${sha(ready.map((item) => item.entry.reference).join(","))}`, { by: "monthly" },
     );
-    decided = true;
     if (outcome !== "sent") {
       await release(store, ready.length);
       if (outcome === "refused") {
@@ -493,14 +502,16 @@ export async function sendReviewRequests(
       } else {
         await unclaim(ready, nowSeconds + RETRY_SECONDS.sender);
       }
+      undone = true;
       continue;
     }
+    sent = true;
     counts.sent += ready.length;
     // After the first, the order waits on the list for its one reminder, when the creator chose one.
     await redisPipeline(afterSent(ready.map((item) => ({ reference: item.entry.reference, member: item.member, paidAt: item.entry.paidAt, stage: item.stage })), store.reviewAsk, nowSeconds));
     } catch (error) {
       console.error("sending a store's review requests failed", error);
-      if (!decided) await unclaim(ready, nowSeconds + RETRY_SECONDS.sender).catch(() => undefined);
+      if (!sent && !undone) await unclaim(ready, nowSeconds + RETRY_SECONDS.sender).catch(() => undefined);
     } finally {
       // Nothing went for the claims not stretched: their share of the allowance is given back, best effort (a give-back
       // that fails only leaves the month counted higher, never an email sent past it).

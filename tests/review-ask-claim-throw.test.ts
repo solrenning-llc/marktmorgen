@@ -255,3 +255,95 @@ test("a claim that cannot be stretched after the reservation gives its allowance
     assert.equal(r.batches.flat().length, 1, "once");
   } finally { redis.pipeline = r.base; globalThis.fetch = oldFetch; }
 });
+
+// Codex X8 on #4360: a short claim in its last fraction of a second reads TTL 0 (Redis rounds to seconds). It is still
+// a short claim: the order waits for it, never dropped as if its email may have gone.
+test("a first review claim in its last fraction of a second stays due", async () => {
+  const oldFetch = globalThis.fetch;
+  const r = await setup();
+  try {
+    redis.run(["SET", SENT, "sending:synthetic-other-run", "EX", 30]);
+    redis.pipeline = async (commands) => {
+      const replies = await r.original(commands);
+      return commands.map((c, i) => (c[0] === "TTL" && c[1] === SENT ? 0 : replies[i]));
+    };
+    const run = await sendReviewRequests(storeForHandle, Date.now() + 20000, r.now);
+    redis.pipeline = r.original;
+    assert.deepEqual([run.sent, run.dropped], [0, 0], "nothing sent, nothing dropped");
+    assert.notEqual(redis.run(["ZSCORE", ASK_DUE_KEY, r.member]), null, "the order is still due");
+    redis.run(["DEL", SENT]); // the claim lapses
+    const after = await sendReviewRequests(storeForHandle, Date.now() + 20000, r.now + 60);
+    assert.equal(after.sent, 1, "then it is sent");
+    assert.equal(r.batches.flat().length, 1, "once");
+  } finally { redis.pipeline = r.base; globalThis.fetch = oldFetch; }
+});
+
+// Codex X5 and Codex U on #4360: a run read the order before another run's short claim landed, and then found the
+// claim taken. That other run may still let go without sending, so the order stays in line, never dropped.
+test("a stale reader that finds the first's claim taken never drops the order", async () => {
+  const oldFetch = globalThis.fetch;
+  const r = await setup();
+  try {
+    redis.run(["SET", SENT, "sending:synthetic-run-a", "EX", 3600]); // run A's short claim
+    let staleRead = true;
+    redis.pipeline = async (commands) => {
+      const replies = await r.original(commands);
+      // Run B's first read came before A's claim: no mark yet.
+      if (staleRead && commands.length === 2 && commands[0][0] === "GET" && commands[0][1] === SENT && commands[1][0] === "TTL") {
+        staleRead = false;
+        return [null, -2];
+      }
+      return replies;
+    };
+    const oldLog = console.error;
+    console.error = () => {};
+    const b = await sendReviewRequests(storeForHandle, Date.now() + 20000, r.now);
+    console.error = oldLog;
+    redis.pipeline = r.original;
+    assert.equal(staleRead, false, "B read the order before A's claim (diagnostic)");
+    assert.deepEqual([b.sent, b.dropped], [0, 0], "B sends nothing and drops nothing");
+    assert.notEqual(redis.run(["ZSCORE", ASK_DUE_KEY, r.member]), null, "the order stays in line");
+    redis.run(["DEL", SENT]); // A failed before sending and let its claim go
+    const after = await sendReviewRequests(storeForHandle, Date.now() + 20000, r.now + 3601);
+    assert.equal(after.sent, 1, "a later run sends it");
+    assert.equal(r.batches.flat().length, 1, "once");
+  } finally { redis.pipeline = r.base; globalThis.fetch = oldFetch; }
+});
+
+// Claude 7 on #4360: the batch did not go, and giving its allowance back threw once. The undo is finished by the
+// catch, so the stretched claims are let go and the order is asked again, never stuck.
+test("a batch that did not go and whose give-back throws still lets its claims go", async () => {
+  const oldFetch = globalThis.fetch;
+  const r = await setup();
+  try {
+    const realFetch = globalThis.fetch;
+    let refusedOnce = false;
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input));
+      if (!refusedOnce && url.hostname === "api.resend.com") {
+        refusedOnce = true;
+        return new Response("synthetic outage", { status: 500 });
+      }
+      return realFetch(input, init);
+    }) as typeof fetch;
+    let threw = false;
+    redis.pipeline = async (commands) => {
+      if (refusedOnce && !threw && commands.some((c) => c[0] === "DECRBY" && String(c[1]).startsWith("nl:mail:used:"))) {
+        threw = true;
+        throw new Error("synthetic Redis timeout");
+      }
+      return r.original(commands);
+    };
+    const oldLog = console.error;
+    console.error = () => {};
+    const run = await sendReviewRequests(storeForHandle, Date.now() + 20000, r.now);
+    console.error = oldLog;
+    redis.pipeline = r.original;
+    assert.deepEqual([refusedOnce, threw], [true, true], "the send failed and the give-back threw (diagnostic)");
+    assert.equal(run.sent, 0, "nothing went");
+    assert.equal(redis.run(["GET", SENT]), null, "the claim is let go");
+    assert.notEqual(redis.run(["ZSCORE", ASK_DUE_KEY, r.member]), null, "the order is still due");
+    const after = await sendReviewRequests(storeForHandle, Date.now() + 20000, r.now + 1800 + 60);
+    assert.equal(after.sent, 1, "the next run sends it");
+  } finally { redis.pipeline = r.base; globalThis.fetch = oldFetch; }
+});

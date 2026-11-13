@@ -12,7 +12,7 @@
  * Runs the real admitOrders and sweepCheckouts on the in-memory Redis, with a
  * stand-in for Stripe's list of Checkout Sessions. Synthetic data only.
  */
-import { ADMITTED_FIELD, admitOrders } from "@/lib/order-admission";
+import { ADMITTED_FIELD, OPEN_HOURS, admitOrders } from "@/lib/order-admission";
 import { ORDERS_INCLUDED } from "@/lib/order-rules";
 import { sweepCheckouts } from "@/lib/checkout-sweep";
 import { addProduct, claimHandle, ensureStatsId, setMailSettings, setProductLink, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
@@ -131,7 +131,9 @@ async function main(): Promise<void> {
 
   part("A checkout left at Stripe's default, closed a day after it opened, still gives its place back");
   store = await freshStore();
-  const dayAgo = Date.now() - (24 * 3600 + 600) * 1000;
+  // The oldest hour still in the window, plus a minute: anchored to the hour, so the part passes at any minute
+  // (it failed during the first ten minutes of every hour when written as "now less 24 h 10 min": reviews on #4232).
+  const dayAgo = (Math.floor(Date.now() / 3_600_000) - (OPEN_HOURS - 1)) * 3_600_000 + 60_000;
   hour = await fill(store, 1, dayAgo);
   await fill(store, limit - 1);
   is("every place is held", await admitOrders(store, 1), { ok: false, reason: "paused" });

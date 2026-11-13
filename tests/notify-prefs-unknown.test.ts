@@ -10,7 +10,8 @@ import { OPTIONAL_EVENTS, keptOff, wantsAlertEmail } from "@/lib/notify-prefs-ru
 import { done, is, part } from "./check";
 
 part("A stored value that is not a list (Codex X2, #3013)");
-for (const [name, value] of [["an object", { refunds: true }], ["a string", "refunds"], ["a number", 3], ["true", true]] as const) {
+// A stored null is a present value that is not a list (Codex X2's focal on #3013): unknown too, never "nothing off".
+for (const [name, value] of [["an object", { refunds: true }], ["a string", "refunds"], ["a number", 3], ["true", true], ["a stored null", null]] as const) {
   const read = keptOff(value);
   is(`[CORRETO] ${name}: read as unknown`, read, null);
   is(`[CORRETO] ${name}: no optional alert is emailed`, OPTIONAL_EVENTS.every((event) => !wantsAlertEmail(read, event)), true);
@@ -18,7 +19,6 @@ for (const [name, value] of [["an object", { refunds: true }], ["a string", "ref
 
 part("What stays as it was");
 is("no field (a store saved before the choice): every alert on", keptOff(undefined), []);
-is("a stored null (no choice written): every alert on", keptOff(null), []);
 is("a valid empty list: every alert on", OPTIONAL_EVENTS.every((event) => wantsAlertEmail(keptOff([]), event)), true);
 is("a valid list keeps filtering events retired since", keptOff(["refunds", "retired-kind", "traffic"]), ["traffic", "refunds"]);
 done();

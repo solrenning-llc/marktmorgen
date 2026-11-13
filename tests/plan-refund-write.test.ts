@@ -37,6 +37,8 @@ const world = {
   refundStatus: "succeeded",
   /** Every refund write answers 500 before doing anything. */
   writesDown: false,
+  /** The POST answers with another payment's identities, while every other field looks valid. */
+  wrongReceipt: false,
   slow: 0,
   /** Milliseconds the clock jumps when a charge's refunds are listed (a slow reading before it). */
   jump: 0,
@@ -63,9 +65,10 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     const refund: Refund = { id: `re_made${world.refunds.length + 1}x`, object: "refund", charge: String(charge.id), payment_intent: String(charge.payment_intent), amount, currency: "usd", status: world.refundStatus };
     world.refunds.push(refund);
     charge.amount_refunded = Number(charge.amount_refunded) + amount;
-    world.replies.set(key, JSON.stringify(refund));
+    const receipt = world.wrongReceipt ? { ...refund, charge: "ch_otherpayment1", payment_intent: "pi_otherpayment1" } : refund;
+    world.replies.set(key, JSON.stringify(receipt));
     if (world.loseAnswer) throw new TypeError("fetch failed");
-    return json(refund);
+    return json(receipt);
   }
   if (method !== "GET") return json({ error: { message: "no" } }, 400);
   const sub = path.match(/^\/subscriptions\/(sub_\w+)$/);
@@ -115,6 +118,14 @@ async function main() {
   is("a second click gives nothing more", (await refundPlanPayment(await a.store(), NOW)), { ok: false, reason: "not_owed" });
   is("one refund at Stripe, for the policy's amount", a.refunds().map((r) => r.amount), [6_900]);
   is("the lock is gone", await lockOf(await a.store()), null);
+
+  // Issue #4420 (fix by Codex L): the POST's receipt must name the payment it was asked to refund.
+  part("The POST receipt belongs to the payment requested");
+  const receipt = await paidShop();
+  world.wrongReceipt = true;
+  is("another charge and payment intent are not accepted", await refundPlanPayment(await receipt.store(), NOW), { ok: false, reason: "failed" });
+  world.wrongReceipt = false;
+  is("the lock is released after the mismatched receipt", await lockOf(await receipt.store()), null);
 
   part("Two requests at once");
   const b = await paidShop();

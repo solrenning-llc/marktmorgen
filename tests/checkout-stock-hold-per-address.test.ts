@@ -34,6 +34,13 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     sessions.set(id, session);
     return answer(session);
   }
+  const expiring = /^\/checkout\/sessions\/([^/]+)\/expire$/.exec(path);
+  if (expiring && method === "POST") {
+    const found = sessions.get(decodeURIComponent(expiring[1]));
+    if (!found) return answer({ error: { message: "No such checkout" } }, 404);
+    found.status = "expired";
+    return answer(found);
+  }
   if (path.startsWith("/checkout/sessions/") && method === "GET") {
     const found = sessions.get(decodeURIComponent(path.slice("/checkout/sessions/".length)));
     return found ? answer(found) : answer({ error: { message: "No such checkout" } }, 404);
@@ -72,31 +79,43 @@ async function main(): Promise<void> {
   const dropId = await add("Signed print", STOCK);
   const cartDropId = await add("Second signed print", STOCK);
   const openId = await add("Open edition", null);
-  const store = (await storeForEmail(owner))!;
-  const left = async (id: string) => stockLeft(store, (await readListing(store, id))!);
+  const left = async (id: string) => {
+    const now = (await storeForEmail(owner))!;
+    return stockLeft(now, (await readListing(now, id))!);
+  };
 
   const headers = (ip: string) => ({ host: "marktmorgen.com", origin: "https://marktmorgen.com", "x-forwarded-for": ip });
-  const press = async (id: string, ip: string): Promise<[string | null, number]> => {
+  /** The hold cookie a press set, as the browser would send it back. */
+  const holdOf = (response: Response) => /nl_stock_hold=([^;]+)/.exec(response.headers.get("set-cookie") ?? "")?.[1] ?? "";
+  const pressWith = async (id: string, ip: string, { consent = true, cookie = "" } = {}) => {
     const form = new FormData();
     form.set("handle", "stockholdshop");
     form.set("product", id);
     const before = made;
-    const response = await checkoutRoute(new NextRequest("https://marktmorgen.com/api/store/checkout", { method: "POST", body: withConsent(form), headers: headers(ip) }));
-    return [response.headers.get("location"), made - before];
+    const response = await checkoutRoute(new NextRequest("https://marktmorgen.com/api/store/checkout", {
+      method: "POST",
+      body: consent ? withConsent(form) : form,
+      headers: { ...headers(ip), ...(cookie ? { cookie: `nl_stock_hold=${cookie}` } : {}) },
+    }));
+    return { where: response.headers.get("location"), opened: made - before, hold: holdOf(response) };
   };
-  const pressCart = async (id: string, ip: string): Promise<number> => {
+  const press = async (id: string, ip: string): Promise<[string | null, number]> => {
+    const { where, opened } = await pressWith(id, ip);
+    return [where, opened];
+  };
+  const pressCart = async (id: string, ip: string, consent = true): Promise<number> => {
     const form = new FormData();
     form.set("handle", "stockholdshop");
     form.set("id", id);
     const before = made;
-    await cartRoute(new NextRequest("https://marktmorgen.com/api/store/cart", { method: "POST", body: withConsent(form), headers: headers(ip) }));
+    await cartRoute(new NextRequest("https://marktmorgen.com/api/store/cart", { method: "POST", body: consent ? withConsent(form) : form, headers: headers(ip) }));
     return made - before;
   };
 
   part("One connection that never pays cannot hold a limited drop");
   for (let i = 0; i < 20; i += 1) await press(dropId, "198.51.100.7");
   const heldByOne = STOCK - ((await left(dropId)) ?? 0);
-  is("a connection's presses hold at most a few units at once", heldByOne <= 6, true);
+  is("a connection's presses hold at most ten units at once", heldByOne <= 10, true);
   is("and at least one, a real buyer's checkout opens", heldByOne >= 1, true);
 
   part("Another connection still buys");
@@ -106,12 +125,61 @@ async function main(): Promise<void> {
   part("The cart is bounded the same way");
   for (let i = 0; i < 20; i += 1) await pressCart(cartDropId, "198.51.100.8");
   const heldByCart = STOCK - ((await left(cartDropId)) ?? 0);
-  is("a connection's carts hold at most a few units at once", heldByCart <= 6, true);
+  is("a connection's carts hold at most ten units at once", heldByCart <= 10, true);
 
   part("A product with no limit is never counted");
   let opened = 0;
   for (let i = 0; i < 10; i += 1) opened += (await press(openId, "198.51.100.10"))[1];
   is("ten presses for an open edition open ten checkouts", opened, 10);
+
+  part("Presses that hold nothing are never counted (review of #4409)");
+  const consentDrop = await add("Third signed print", STOCK);
+  for (let i = 0; i < 4; i += 1) {
+    const refused = await pressWith(consentDrop, "198.51.100.20", { consent: false });
+    is(`press ${i + 1} without the box opens nothing`, refused.opened, 0);
+  }
+  const withBox = await pressWith(consentDrop, "198.51.100.20");
+  is("the fifth press, with the box, opens the checkout", withBox.opened, 1);
+  is("and is not sent back as too fast", (withBox.where ?? "").includes("status=slow"), false);
+
+  const cartConsentDrop = await add("Fifth signed print", STOCK);
+  let cartRefused = 0;
+  for (let i = 0; i < 4; i += 1) cartRefused += await pressCart(cartConsentDrop, "198.51.100.22", false);
+  is("four carts without the box open nothing", cartRefused, 0);
+  is("and hold nothing", STOCK - ((await left(cartConsentDrop)) ?? 0), 0);
+  is("the fifth cart, with the box, opens the checkout", await pressCart(cartConsentDrop, "198.51.100.22"), 1);
+
+  part("Going back from Stripe and pressing again hands back the unit and is not counted");
+  const backDrop = await add("Fourth signed print", STOCK);
+  let cookie = "";
+  let reopened = 0;
+  for (let i = 0; i < 8; i += 1) {
+    const again = await pressWith(backDrop, "198.51.100.21", { cookie });
+    reopened += again.opened;
+    if (again.hold) cookie = again.hold;
+  }
+  is("eight presses, each handing back the last, open eight checkouts", reopened, 8);
+  is("and hold one unit, the last", STOCK - ((await left(backDrop)) ?? 0), 1);
+
+  part("Presses on a sold-out product are never counted (second review of #4409)");
+  const lastOne = await add("Last signed print", 1);
+  is("another buyer holds the only unit", (await pressWith(lastOne, "203.0.113.30")).opened, 1);
+  for (let i = 0; i < 12; i += 1) {
+    const sold = await pressWith(lastOne, "198.51.100.23");
+    is(`press ${i + 1} on the sold-out product opens nothing`, sold.opened, 0);
+  }
+  // The unit comes back: the other buyer's checkout ran out and was let go.
+  const statsId = (await storeForEmail(owner))!.statsId;
+  await redis.pipeline([["DEL", `nl:stock:${statsId}:${lastOne}`]]);
+  const back = await pressWith(lastOne, "198.51.100.23");
+  is("once the unit is back, the waiting buyer's press opens it", back.opened, 1);
+  is("and is not sent back as too fast", (back.where ?? "").includes("status=slow"), false);
+
+  part("Several buyers behind one shared address each buy (second review of #4409)");
+  const officeDrop = await add("Sixth signed print", STOCK);
+  let office = 0;
+  for (let person = 0; person < 5; person += 1) office += (await pressWith(officeDrop, "198.51.100.40")).opened;
+  is("five people on one address, one press each, open five checkouts", office, 5);
 
   part("A hold count that cannot be read holds nothing (rule 24)");
   const before = await left(dropId);

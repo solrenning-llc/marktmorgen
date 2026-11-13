@@ -17,6 +17,7 @@ import { forgetPath } from "@/lib/path";
 import { queueStoreForget } from "@/lib/store-forget-retry";
 import { forgetStoreCalendar } from "@/lib/calendar-sync";
 import { forgetMemory } from "@/lib/assistant-memory-store";
+import { removeDeletedStoreFiles } from "@/lib/deleted-store-files";
 
 /**
  * The studio's switcher, and the door out for a store.
@@ -80,6 +81,9 @@ export async function POST(request: NextRequest) {
         await forgetStoreWebhooks(result.store.statsId);
         await revokeAllKeys(result.store.sid);
         await forgetMemory(result.store.statsId ?? null, result.store);
+        // Its files: an empty store still keeps pictures (links, pages, emails, its community's posts) that
+        // app/api/image hands to anybody with the address; its record is gone now, so only this and the line find them.
+        await removeDeletedStoreFiles(result.store.sid, result.store.community?.id ?? null);
       };
       await Promise.all([
         Promise.all([forgetStoreSync(result.store.statsId), forgetStorePhones(result.store.statsId), forgetPersonNotes(result.store.statsId), forgetCrm(result.store.statsId), forgetRecentSales(result.store.statsId), forgetStoreWorkflows(result.store), forgetPath(result.store), forgetStoreCalendar(result.store.statsId), forgetStoreReadings(result.store.statsId)]).catch((error: unknown) =>
@@ -87,7 +91,7 @@ export async function POST(request: NextRequest) {
         ),
         forgetHooksAndKeys().catch(async (error: unknown) => {
           console.error("forgetting a deleted store's webhooks, keys and assistant notes failed; put in line to try again", error);
-          await queueStoreForget(result.store.statsId ?? null, result.store.sid).catch((queued: unknown) =>
+          await queueStoreForget(result.store.statsId ?? null, result.store.sid, Date.now(), result.store.community?.id ?? null).catch((queued: unknown) =>
             console.error("putting a deleted store's webhooks, keys and assistant notes in line failed", queued),
           );
         }),

@@ -16,6 +16,10 @@ import type { EuVatRate } from "@/lib/eu-vat-amount";
 
 const rates: EuVatRate[] = [{ country: "DE", basisPoints: 1900, source: "https://example.invalid/de", readOn: "2026-11-13" }];
 const de = { ip: "DE", billing: "DE" };
+const record = (treatment: string, registration = "") => ({
+  jurisdiction: "EU", treatment, implementedIn: "lib/eu-vat-checkout.ts", recordedOn: "2026-11-13", registration, evidence: "tests/eu-vat-checkout.test.ts",
+});
+const collecting = [record("collect", "IE OSS, 2026-11-13, EU000000000")];
 
 test("a consumer outside the EU carries no EU VAT", () => {
   assert.deepEqual(euCheckout({ supply: "ess", priceCents: 1000, items: { ip: "US", billing: "US" }, rates }), { kind: "outside", country: "US" });
@@ -31,7 +35,7 @@ test("a consumer whose place is unknown is refused", () => {
 });
 
 test("an EU consumer: an electronically supplied service with a sourced rate is collected on top", () => {
-  assert.deepEqual(euCheckout({ supply: "ess", priceCents: 1000, items: de, rates }), {
+  assert.deepEqual(euCheckout({ supply: "ess", priceCents: 1000, items: de, rates, records: collecting }), {
     kind: "collect",
     vat: { priceCents: 1000, vatCents: 190, totalCents: 1190, basisPoints: 1900, country: "DE" },
     place: { kind: "eu", country: "DE", evidence: de },
@@ -46,9 +50,10 @@ test("an EU consumer: goods, a person's service, anything unknown and a country 
   assert.deepEqual(euCheckout({ supply: "goods", priceCents: 1000, items: de, rates }), { kind: "refuse", reason: "goods" });
   assert.deepEqual(euCheckout({ supply: "human", priceCents: 1000, items: de, rates }), { kind: "refuse", reason: "human" });
   assert.deepEqual(euCheckout({ supply: "unknown", priceCents: 1000, items: de, rates }), { kind: "refuse", reason: "supply" });
-  assert.deepEqual(euCheckout({ supply: "ess", priceCents: 1000, items: { ip: "FR", billing: "FR" }, rates }), { kind: "refuse", reason: "rate" });
-  // The real table is empty: every EU sale is refused today.
-  assert.deepEqual(euCheckout({ supply: "ess", priceCents: 1000, items: de }), { kind: "refuse", reason: "rate" });
+  assert.deepEqual(euCheckout({ supply: "ess", priceCents: 1000, items: { ip: "FR", billing: "FR" }, rates, records: collecting }), { kind: "refuse", reason: "rate" });
+  // The real records and the real table are empty: every EU sale is refused today.
+  assert.deepEqual(euCheckout({ supply: "ess", priceCents: 1000, items: de }), { kind: "refuse", reason: "record" });
+  assert.deepEqual(euCheckout({ supply: "ess", priceCents: 1000, items: de, records: collecting }), { kind: "refuse", reason: "rate" });
 });
 
 /**
@@ -58,11 +63,6 @@ test("an EU consumer: goods, a person's service, anything unknown and a country 
  * "collect" record; with no complete EU record, or under "refuse-consumers", that sale is refused. A consumer
  * outside the EU and a free product are not EU supplies for consideration and are unchanged.
  */
-const record = (treatment: string, registration = "") => ({
-  jurisdiction: "EU", treatment, implementedIn: "lib/eu-vat-checkout.ts", recordedOn: "2026-11-13", registration, evidence: "tests/eu-vat-checkout.test.ts",
-});
-const collecting = [record("collect", "IE OSS, 2026-11-13, EU000000000")];
-
 test("10b: an EU sale is refused while there is no complete EU record (the real list is empty)", () => {
   for (const records of [undefined, [], [record("collect")], [{ ...record("collect", "x"), recordedOn: "2026-13-01" }], "nonsense", [record("refuse-consumers"), record("collect", "x")]]) {
     assert.deepEqual(euCheckout({ supply: "ess", priceCents: 1000, items: de, rates, records }), { kind: "refuse", reason: "record" }, JSON.stringify(records));

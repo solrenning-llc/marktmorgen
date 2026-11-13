@@ -4,7 +4,7 @@
 // cancel_at set, or status canceled, ends the work as "done" without giving the
 // requested payment plan its end (cancel_at), so its charges are never capped.
 // Expected RED on 69d41c18f.
-import { finishPlan } from "@/lib/plans";
+import { addPeriods, finishPlan } from "@/lib/plans";
 import { done, is } from "./check";
 const account = "acct_ProbeFinish0001";
 const session = "cs_test_ProbeFinish0001";
@@ -37,6 +37,15 @@ async function main() {
     // be "done" without the cancel_at POST (it should stay unsettled or throw).
     is(`${name}: not settled as done without capping the plan`, state === "done" && posts.length === 0, false);
   }
+  // Review LEVE on #3086 (lib/plans.ts cancel_at > 0): an end already set but LATER than the plan's own end is not
+  // this plan's end; the buyer would be charged past the payments agreed. It is set again to the plan's end. An end
+  // at or before the plan's own (the creator or the buyer ended it sooner) is left as it is.
+  const anchor = 1_800_000_000;
+  const end = addPeriods(anchor, "month", 3);
+  posts.length = 0; subBody = { id: sub, status: "active", billing_cycle_anchor: anchor, cancel_at: end + 30 * 86_400 };
+  is("own reply, end set later than the plan's: set again to the plan's end", [await finishPlan(account, session), posts.length], ["done", 1]);
+  posts.length = 0; subBody = { id: sub, status: "active", billing_cycle_anchor: anchor, cancel_at: end - 86_400 };
+  is("own reply, end set sooner than the plan's: left as it is", [await finishPlan(account, session), posts.length], ["done", 0]);
   done();
 }
 main().catch(e => { console.error(e); process.exit(1); });

@@ -534,13 +534,21 @@ export async function releaseHolds(store: Store, until: number, nowSeconds = Mat
   return out;
 }
 
-/**
- * The members' last payments a store has written down, by subscription. Throws when the reply or any row of it cannot
- * be read (rule 24): the closing day's refunds and the members' notices then wait, never "nobody paid past the day".
- */
+/** The members' last payments a store has written down, by subscription. */
 export async function paidPeriods(store: Store): Promise<Map<string, PaidPeriod>> {
-  if (!isRedisConfigured()) return new Map();
-  return new Map(await paidRows(await storeFolder(storeRef(store)), true));
+  const out = new Map<string, PaidPeriod>();
+  if (!isRedisConfigured()) return out;
+  const [raw] = await redisPipeline([["HGETALL", paidKey(await storeFolder(storeRef(store)))]]);
+  const flat = Array.isArray(raw) ? (raw as unknown[]).map(String) : [];
+  for (let i = 0; i + 1 < flat.length; i += 2) {
+    try {
+      const row = JSON.parse(flat[i + 1]) as PaidPeriod;
+      if (SUB_ID.test(flat[i]) && typeof row.amt === "number" && typeof row.inv === "string") out.set(flat[i], row);
+    } catch {
+      // A row that cannot be read is left out, never guessed at.
+    }
+  }
+  return out;
 }
 
 /** Writes back what became of one member's refund. */

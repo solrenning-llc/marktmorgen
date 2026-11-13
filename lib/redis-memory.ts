@@ -262,6 +262,13 @@ export class MemoryRedis {
           if (due !== "") this.run(["ZADD", queue, due, member]);
           return 1;
         }
+        // lib/email-sync.ts FLY_IF_READ: a try marked in flight only while the job record holds what was read.
+        if (key.startsWith("-- marktmorgen:esync-fly-if-read:v1\n") && args[0] === "2" && args.length === 5) {
+          const [, job, fly, expected, ms] = args;
+          if (this.run(["GET", job]) !== expected) return 0;
+          this.run(["SET", fly, "1", "PX", ms]);
+          return 1;
+        }
         // lib/product-about.ts WRITE_ABOUT_IF: the description written only over the one it was read as.
         if (key.startsWith("-- marktmorgen:about-write-if:v1\n") && args[0] === "1" && args.length === 4) {
           const [, about, expected, text] = args;

@@ -243,6 +243,34 @@ async function main() {
   is("Month 1 is announced within its window, once", outage, [subject("Month 1")]);
   stripe.fail = false;
 
+  // Claude 7's MEDIUM on #3369 at 43cc9cabb7: the strict read the job asks for was strict for Stripe only; an imported
+  // purchase or a course earned in the community whose reply did not read was taken as none, "shut" kept the mark for
+  // 400 days, and the module's email was lost for good. Not read is unknown: nothing that run, sent on the next.
+  part("A course brought over by an import, its reply unreadable once: sent on the next run, never lost (Claude 7 on #3369)");
+  await fresh([]);
+  (store as { pastBuyers?: boolean }).pastBuyers = true;
+  await redis.pipeline([["HSET", `nl:imp:buy:${store.statsId}:${(await import("@/lib/imported-purchases")).addressHash(buyer)}`, product.id, JSON.stringify({ at: first, job: "imp_synthetic1" })]]);
+  await openedOn(first);
+  odd = { match: (c) => c[0] === "HGETALL" && String(c[1]).startsWith("nl:imp:buy:"), reply: "bare" };
+  is("not read: nothing that run", await run(first + 30 * DAY), []);
+  is("read the next day: Month 1 goes", await run(first + 31 * DAY), [subject("Month 1")]);
+  (store as { pastBuyers?: boolean }).pastBuyers = false;
+
+  part("A course earned in the community, its reply unreadable once: sent on the next run, never lost (Claude 7 on #3369)");
+  await fresh([]);
+  const community = "c".repeat(32);
+  (store as { community?: unknown }).community = { id: community, on: true };
+  const member = emailKey(buyer);
+  await redis.pipeline([
+    ["HSET", `nl:cm:${community}:m`, member, JSON.stringify({ k: member, removed: false })],
+    ["HSET", `nl:cm:${community}:unl:${member}`, product.id, first],
+  ]);
+  await openedOn(first);
+  odd = { match: (c) => c[0] === "HGETALL" && String(c[1]) === `nl:cm:${community}:unl:${member}`, reply: "bare" };
+  is("not read: nothing that run", await run(first + 30 * DAY), []);
+  is("read the next day: Month 1 goes", await run(first + 31 * DAY), [subject("Month 1")]);
+  (store as { community?: unknown }).community = undefined;
+
   part("One purchase, written down on its thanks page (unchanged)");
   await fresh([session("cs_test_once", first, false)]);
   await recordEnrollment(store, buyer, product.id, first);

@@ -40,7 +40,10 @@ export const BACKUP_MAX_BYTES = 4 * 1024 * 1024;
 const SCAN_COUNT = 500;
 /** What one row adds to the sealed JSON besides its key and its value: the field names, quotes and its end. */
 const ROW_OVERHEAD = 64;
-const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+// Linear (9 November 2026): the quad-grouped pattern overflows V8's regexp stack past about 5 million characters,
+// which a key in chunks reaches (a DUMP of 8 MB is 10.7 million); the length and the round trip do the rest.
+const BASE64_CHARS = /^[A-Za-z0-9+/]*={0,2}$/;
+const BASE64 = { test: (text: string) => text.length % 4 === 0 && BASE64_CHARS.test(text) };
 
 export type ExportLimits = {
   /** The most keys to copy; more is a refusal. */

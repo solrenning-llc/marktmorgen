@@ -97,7 +97,9 @@ async function main(): Promise<void> {
   redis.run(["SET", "nl:bk:test:big", "z".repeat(5_000)]);
   const big = await copyInParts(limits, key, store);
   redis.run(["DEL", "nl:bk:test:big"]);
-  is("a value larger than a part: the run refused, never a set without it", [big.ok, big.ok === false && big.reason], [false, "too_big"]);
+  // Since 9 November 2026 (the key-size inventory): a key larger than a part spans consecutive parts as chunks
+  // (tests/bk1-key-chunks.test.ts), never a refusal of the whole run.
+  is("a value larger than a part: copied in chunks, the run not refused", [big.ok, big.ok && big.keys], [true, 22]);
   redis.run(["SET", `nl:bk:test:${"é".repeat(600)}`, "x"]);
   const longKey = await copyInParts(limits, key, store);
   redis.run(["DEL", `nl:bk:test:${"é".repeat(600)}`]);

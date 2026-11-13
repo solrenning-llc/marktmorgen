@@ -110,3 +110,35 @@ test("a store given its id by the forms route keeps a page added at the same tim
   assert.ok(store.statsId);
   assert.deepEqual(store.sitePages.map((p) => p.title).sort(), ["About", "Page 1"]);
 });
+
+/**
+ * #4253 MEDIUM (Claude 2 nuvem F, confirmed by Claude 1 cloud): a save whose page is removed after the save read the
+ * list but before it wrote wrote the page's blocks back under a key no list names (the room charged for good, nothing
+ * can free it) and answered "saved". The removal now wins: what the save wrote is dropped, and it answers 404.
+ */
+test("a save of a page removed while it was saving keeps nothing and says it is gone", async () => {
+  const post = await start([page(1), page(2)]);
+  const statsId = (await storeForEmail(OWNER))!.statsId!;
+  const real = redis.pipeline.bind(redis);
+  let removing = false;
+  // The save reads the page it will write (readPage, a GET of its key) after it read the list: the removal lands then.
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (!removing && commands.some((c) => c[0] === "GET" && String(c[1]).endsWith(`site-${page(1).id}`))) {
+      removing = true;
+      redis.pipeline = real;
+      const removed = await post({ action: "remove", id: page(1).id });
+      assert.equal(removed.status, 200, "(control) the removal went through");
+    }
+    return real(commands);
+  }) as typeof redis.pipeline;
+  let answer: Response;
+  try {
+    answer = await post({ action: "save", id: page(1).id, page: { blocks: [{ ...emptyBlock("hero"), headline: "Hello" }], style: "plain", hidden: false } });
+  } finally {
+    redis.pipeline = real;
+  }
+  assert.equal(removing, true, "(control) the removal ran inside the save");
+  assert.deepEqual((await pages()).map((p) => p.id), [page(2).id], "the page stays removed");
+  assert.equal(redis.run(["EXISTS", `nl:product:page:${statsId}:site-${page(1).id}`]), 0, "nothing of the removed page is written back under its key");
+  assert.equal(answer.status, 404, "the save says the page is gone, never saved");
+});

@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
 import { cronAllowed } from "@/lib/request-guard";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
@@ -71,6 +72,9 @@ async function foldersOfTwoMonths(read: (month: string) => Promise<string[]>): P
 export const maxDuration = 60;
 
 const TOLD = "nl:usage-watch:told";
+/** One run at a time; kept past the function's time limit (maxDuration) and let go at the end. */
+const LOCK = "nl:usage-watch:lock";
+const LOCK_SECONDS = 120;
 
 type VideoRun = { stores: number; billed: number; cents: number; paused: number; failed: number; told: number };
 
@@ -230,7 +234,22 @@ export async function GET(request: NextRequest) {
   if (!isRedisConfigured()) {
     return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
   }
+  // One run at a time, on an exact claim (lib/claim-mark.ts, CX-123 rule 24), as the other scheduled jobs (Claude 7's
+  // cron hunt): two runs at once (a retried invocation, a manual run beside the scheduled one) both read nobody told
+  // and both wrote to every owner past the allowance. Held by another run is busy; an unknown answer runs nothing.
+  // The lock outlives the function's time limit and is let go only while it still holds this run's own value.
+  const lock = claimValue();
+  const got = await claimMark(LOCK, LOCK_SECONDS, lock);
+  if (got === "taken") return Response.json({ ok: true, busy: true }, { headers: { "Cache-Control": "no-store" } });
+  if (got !== "ours") return Response.json({ ok: false, error: "lock_unknown" }, { status: 503, headers: { "Cache-Control": "no-store" } });
+  try {
+    return await watchUsage();
+  } finally {
+    await releaseMark(LOCK, lock);
+  }
+}
 
+async function watchUsage(): Promise<Response> {
   const video = await videoRun();
   const visits = await visitsRun();
   const orders = await ordersRun();
@@ -297,6 +316,9 @@ export async function GET(request: NextRequest) {
   // Only a notice that went out is recorded as given: a refused send, a store left because no sender is configured,
   // or an ownerless store support could not be told about stays off the told list and is tried again next run.
   const given: string[] = [];
+  // Kept as each notice goes out, not only at the end (Claude 7's cron hunt): a run stopped partway (the function's
+  // time limit, a crash) wrote to some owners and recorded none, so the next day wrote to them again. Under the lock.
+  const record = () => redisPipeline([["SET", TOLD, JSON.stringify([...new Set([...seen, ...given])]), "EX", 40 * 86_400]]);
 
   for (let i = 0; i < fresh.length; i += 1) {
     const store = fresh[i];
@@ -348,6 +370,7 @@ export async function GET(request: NextRequest) {
     if (sent === true) {
       told += 1;
       given.push(store.folder);
+      await record();
     }
   }
 
@@ -377,9 +400,7 @@ export async function GET(request: NextRequest) {
   }
 
 
-  await redisPipeline([
-    ["SET", TOLD, JSON.stringify([...new Set([...seen, ...given])]), "EX", 40 * 86_400],
-  ]);
+  await record();
 
   if (unreadOwners > 0) {
     console.error(`usage-watch: ${unreadOwners} store(s) over the delivery allowance have an owner that could not be read today; they were not written to and are tried again next run`);

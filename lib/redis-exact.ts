@@ -12,6 +12,8 @@
  * again, with nothing taken for gone and no room given back for it.
  */
 
+import { listSlots } from "@/lib/redis-reply";
+
 /** A reply that is not exactly what was asked for: what the command did is unknown. */
 export class UnknownReply extends Error {
   constructor(what: string) {
@@ -25,16 +27,9 @@ export class UnknownReply extends Error {
  * plain value, read without running a getter; null for anything else.
  */
 export function plainList(raw: unknown): unknown[] | null {
-  if (!Array.isArray(raw)) return null;
-  const length = Object.getOwnPropertyDescriptor(raw, "length")?.value;
-  if (typeof length !== "number") return null;
-  const out: unknown[] = [];
-  for (let i = 0; i < length; i++) {
-    const place = Object.getOwnPropertyDescriptor(raw, String(i));
-    if (!place || !("value" in place)) return null;
-    out.push(place.value);
-  }
-  return out;
+  // listSlots refuses a Proxy before any reflection, so none of its traps runs (input fuzz, Claude 7): reading its
+  // descriptors here ran getOwnPropertyDescriptor, which could answer differently from what a later read sees.
+  return listSlots(raw);
 }
 
 /** The pipeline's replies, exactly `count` of them, each a plain value, or UnknownReply. */

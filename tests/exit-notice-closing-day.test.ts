@@ -37,7 +37,7 @@ is("not suspended (\"\"): the notice", exitAnswerForStore({ exitNotice: notice, 
 is("a suspended store: never the notice", exitAnswerForStore({ exitNotice: notice, suspended: "2026-11-01" }, today, closedAt + DAY), { kind: "none" });
 
 const page = readFileSync(join(process.cwd(), "app/[handle]/page.tsx"), "utf8");
-is("the page reads the closing only for a store with a notice that is not suspended", /if \(!store\.exitNotice \|\| store\.suspended\) return null;\s*const closing = await closingOf\(store\)/.test(page), true);
+is("the page reads the closing only for a store with a notice that is not suspended and whose plan has ended", /if \(!store\.exitNotice \|\| store\.suspended\) return null;\s*if \(standingOf\(store, Date\.now\(\) \/ 1000\) !== "ended"\) return null;\s*const closing = await closingBegun\(storeRef\(store\)\)/.test(page), true);
 is("the notice page is never indexed", /closedNotice[\s\S]{0,200}robots: \{ index: false, follow: false \}/.test(page), true);
 
 done();

@@ -84,7 +84,7 @@ import { onBreak, pauseView } from "@/lib/plan-pause";
 import { withLock } from "@/lib/redis-lock";
 import { SITE_URL } from "@/lib/site-url";
 import { storageUsed, storageWords } from "@/lib/storage-quota";
-import { type Store, setPodcastEpisodes, setProductFile, setSubscription, storeFolder, storeForEmail, storeRef } from "@/lib/store";
+import { type Store, setExitNoticeDay, setPodcastEpisodes, setProductFile, setSubscription, storeFolder, storeForEmail, storeRef } from "@/lib/store";
 import { dropAllStreams, dropStream } from "@/lib/stream";
 import { readStreamPath } from "@/lib/stream-rules";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
@@ -262,6 +262,19 @@ export async function closingOf(store: Store, now = Date.now()): Promise<{ ended
   if (!tellsBuyers(endedAt)) return { endedAt, day };
   const closes = afterBuyersTold(day, state.buyersDone);
   return { endedAt, day: closes, buyers: { by: state.buyersDone ?? closes - BUYER_NOTICE_DAYS * DAY_MS, done: Boolean(state.buyersDone), untold: state.untold ?? 0 } };
+}
+
+/**
+ * For the store page's moved notice (97 [D2-OPEN-EXIT]; Claude 1's review of #3730): whether the store's closing day
+ * has begun, as long as it is in the final line, its files removed by the walk or not, until its records are deleted.
+ * The real closing day kept in its state, or `now` when the walk has not written it yet; null when it is not in the
+ * line. Two commands, read exactly: an unknown reply throws (rule 24), never "not begun".
+ */
+export async function closingDayBegun(ref: string, now = Date.now()): Promise<{ day: number; today: true } | null> {
+  if (!isRedisConfigured()) return null;
+  const [finalScore, raw] = exactly(await redisPipeline([["ZSCORE", FINAL_INDEX, ref], ["GET", stateKey(ref)]]), 2, "a store's closing");
+  if (finalScoreOf(finalScore) === null) return null;
+  return { day: readState(raw).day ?? now, today: true };
 }
 
 /** Which notice is the one for today: the first, the one two weeks before, or the last. */
@@ -980,6 +993,12 @@ async function closingDay(store: Store, key: string, state: State, endedAt: numb
     if (!next.day) {
       next = { ...next, day };
       await save(next);
+    }
+    // A moved notice chosen before carries the day the store really closed, so its released copy counts its 90 days
+    // from it, as the page does (Claude 1's MEDIUM 2 on #3730). Not confirmed written: held, tried again next run.
+    const realDay = next.day ?? day;
+    if (store.exitNotice && store.exitNotice.closedAt !== realDay && !(await setExitNoticeDay(storeRef(store), realDay))) {
+      return { key, state: "held", note: "its moved notice could not be given the real closing day yet" };
     }
     // No plan can be paid for it from here: its open plan checkouts are
     // expired, and its address is marked for after its records are gone.

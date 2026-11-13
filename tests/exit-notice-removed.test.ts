@@ -65,7 +65,7 @@ async function main(): Promise<void> {
   const page = readFileSync(join(process.cwd(), "app/[handle]/page.tsx"), "utf8");
   is("the page reads closingDayBegun, never closingOf", [/closingDayBegun/.test(page), /closingOf\(/.test(page)], [true, false]);
   is("once a render (React cache)", /cache\(/.test(page), true);
-  is("and only for a store whose plan has ended", /standingOf\([^)]*\) !== "ended"/.test(page), true);
+  is("and only for a store whose plan has ended", /standingOf\(store, Date\.now\(\) \/ 1000\) !== "ended"/.test(page), true);
   done();
 }
 

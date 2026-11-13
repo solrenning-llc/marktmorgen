@@ -1963,6 +1963,25 @@ export async function chooseExitNotice(
   return result ?? { ok: false, reason: "none" };
 }
 
+/**
+ * The closing day, once it has begun (lib/plan-closing.ts closingDay): a moved notice chosen before it is given the day
+ * the store really closed, so the copy its old address keeps (closeStoreRecord) counts its 90 days from that day, as
+ * the page does (Claude 1's MEDIUM 2 on #3730). Under the store's lock. true once kept, or when there is nothing to
+ * change (no notice, or that day already); false when the record could not be read or saved.
+ */
+export async function setExitNoticeDay(ref: string, day: number): Promise<boolean> {
+  if (!Number.isFinite(day) || day <= 0) return false;
+  const done = await withStore<boolean>(ref, async (store, save) => {
+    if (!store.exitNotice || store.exitNotice.closedAt === day) return true;
+    await save({ ...store, exitNotice: { ...store.exitNotice, closedAt: day } });
+    return true;
+  }).catch((error: unknown) => {
+    console.error("a moved notice could not be given the real closing day", error);
+    return null;
+  });
+  return done === true;
+}
+
 export type RenameResult =
   | { ok: true; store: Store }
   | {

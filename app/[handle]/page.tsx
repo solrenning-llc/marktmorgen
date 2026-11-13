@@ -2,7 +2,9 @@ import { MovedNotice } from "@/components/moved-notice";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteNav } from "@/components/site-nav";
 import { exitAnswerForStore, exitAnswerForValue } from "@/lib/exit-redirect-rules";
-import { closingOf } from "@/lib/plan-closing";
+import { closingDayBegun } from "@/lib/plan-closing";
+import { standingOf } from "@/lib/plan-standing";
+import { cache } from "react";
 import { VisitUsBlock } from "@/components/visit-us-block";
 import { assistReminderShown } from "@/lib/assistant-reminder";
 import { withinStore } from "@/lib/metered-limits";
@@ -52,7 +54,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { headers } from "next/headers";
 import { notFound, permanentRedirect, redirect } from "next/navigation";
-import { type Listing, type Store, handleForPage, normaliseHandle, storeForPage } from "@/lib/store";
+import { type Listing, type Store, handleForPage, normaliseHandle, storeForPage, storeRef } from "@/lib/store";
 import { KIND, readPage, sellsAny, visibleCount } from "@/lib/catalog";
 import { groupBySection } from "@/lib/store-sections";
 import { offeredItems } from "@/lib/bundles";
@@ -111,15 +113,23 @@ async function load(raw: string) {
 }
 
 /**
+ * Whether a store's closing day has begun, read once a render for the page and its metadata (React cache, keyed by the
+ * store's ref): two commands (lib/plan-closing.ts closingDayBegun). An unknown read is "unknown", never "not begun".
+ */
+const closingBegun = cache((ref: string) => closingDayBegun(ref).catch(() => "unknown" as const));
+
+/**
  * The moved notice of a store that has closed but whose record is not yet
- * deleted: only once its closing day has really begun, read from its closing
- * (two commands, and only for a store with a notice that is not suspended).
- * A closing given up, moved later or not readable shows the store as always
- * (review of #3730).
+ * deleted: only once its closing day has really begun, its files removed or
+ * not (review of #3730), read only for a store with a notice that is not
+ * suspended and whose plan has ended, since a store that pays never closes,
+ * so its front page reads nothing more. A closing given up, moved later or
+ * not readable shows the store as always.
  */
 async function closingNotice(store: Store) {
   if (!store.exitNotice || store.suspended) return null;
-  const closing = await closingOf(store).catch(() => "unknown" as const);
+  if (standingOf(store, Date.now() / 1000) !== "ended") return null;
+  const closing = await closingBegun(storeRef(store));
   const answer = exitAnswerForStore(store, closing, Date.now());
   return answer.kind === "moved" ? answer : null;
 }

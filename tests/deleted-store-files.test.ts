@@ -14,6 +14,7 @@ import { picturesKept, takePicturePlace } from "@/lib/community-files";
 import { type FolderHands, deletedStoreFolders, removeDeletedStoreFiles } from "@/lib/deleted-store-files";
 import { queueStoreForget, retryStoreForgets } from "@/lib/store-forget-retry";
 import { store as redis } from "./redis-stub";
+import * as blobWorld from "./deleted-store-files-world";
 import { done, is, part } from "./check";
 
 async function rejects(run: () => Promise<unknown>): Promise<boolean> {
@@ -93,6 +94,69 @@ async function main(): Promise<void> {
     route.includes("queueStoreForget(result.store.statsId ?? null, result.store.sid, Date.now(), result.store.community?.id ?? null)"),
   ], [true, true]);
   is("and the daily line's own work deletes them too", readFileSync("lib/store-forget-retry.ts", "utf8").includes("await removeDeletedStoreFiles(sid, community);"), true);
+
+  // Review of #4348 (Claude 7), MÉDIO 1: Blob was taken as set up only from BLOB_READ_WRITE_TOKEN, and its folders were
+  // passed over otherwise. @vercel/blob 2.8.0 also signs in with an OIDC token (from the environment or the request)
+  // and BLOB_STORE_ID, tried first: a deployment set up that way deleted nothing, said 0, and never put it in line.
+  part("Blob is asked however it is set up, and a Blob that cannot be asked fails the try");
+  const env = { rw: process.env.BLOB_READ_WRITE_TOKEN, oidc: process.env.VERCEL_OIDC_TOKEN, storeId: process.env.BLOB_STORE_ID };
+  const setEnv = (name: string, value: string | undefined) => {
+    if (value === undefined) delete process.env[name];
+    else process.env[name] = value;
+  };
+  setEnv("BLOB_READ_WRITE_TOKEN", undefined);
+  setEnv("VERCEL_OIDC_TOKEN", "oidc-test-not-a-token");
+  setEnv("BLOB_STORE_ID", "store_test");
+  blobWorld.files.add(`images/${pictures}/${"e".repeat(32)}.webp`);
+  blobWorld.files.add(`stores/${folder}/p1/left.pdf`);
+  is("signed in by OIDC and a store id, with no read-write token: its pictures and files are deleted", [await removeDeletedStoreFiles(spare.sid, null), [...blobWorld.files]], [2, []]);
+  setEnv("VERCEL_OIDC_TOKEN", undefined);
+  setEnv("BLOB_STORE_ID", undefined);
+  blobWorld.files.add(`images/${pictures}/${"f".repeat(32)}.webp`);
+  is("with no Blob credentials in sight, the try fails (so the line tries again), never reads as nothing there", await rejects(() => removeDeletedStoreFiles(spare.sid, null)), true);
+  is("and the picture is still counted as there, not as deleted", [...blobWorld.files], [`images/${pictures}/${"f".repeat(32)}.webp`]);
+  setEnv("BLOB_READ_WRITE_TOKEN", "vercel_blob_rw_test_token");
+  is("with a read-write token it goes", [await removeDeletedStoreFiles(spare.sid, null), [...blobWorld.files]], [1, []]);
+
+  // MÉDIO 2: the daily line checked its deadline only before each store; a slow Blob ran one store's folders past it,
+  // into the closing job's own time, and a pass the job cut off was counted as a failed try, until it was given up.
+  part("A slow Blob stops at the line's deadline, and a pass cut off by it is not a try");
+  let slowListed = 0;
+  const slowHands: FolderHands = {
+    list: async (prefix) => {
+      slowListed += 1;
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      return [...kept.keys()].filter((path) => path.startsWith(prefix));
+    },
+    remove: async (paths) => {
+      for (const path of paths) kept.delete(path);
+    },
+    vault: () => true,
+  };
+  kept.set(`community/${cf}/${"g".repeat(16)}.jpg`, 1);
+  const cutOff = await removeDeletedStoreFiles(spare.sid, communityId, slowHands, Date.now() + 30).then(() => "seen through", (error: unknown) => (error instanceof Error && /out of time/.test(error.message) ? "out of time" : String(error)));
+  is("past its deadline it stops before the next folder and says it ran out of time", [cutOff, slowListed, kept.has(`community/${cf}/${"g".repeat(16)}.jpg`)], ["out of time", 1, true]);
+
+  blobWorld.files.add(`stores/${folder}/p2/late.pdf`);
+  blobWorld.files.add(`images/${pictures}/${"h".repeat(32)}.webp`);
+  blobWorld.files.add(`community/${cf}/${"i".repeat(16)}.jpg`);
+  await queueStoreForget(null, spare.sid, Date.now(), communityId);
+  const line = async () => {
+    const [flat] = (await redis.pipeline([["HGETALL", "nl:forget:q"]])) as [string[]];
+    const at = flat.indexOf(`-|${spare.sid}`);
+    return at < 0 ? null : (JSON.parse(flat[at + 1]) as { tries: number });
+  };
+  blobWorld.world.waitMs = 40;
+  const late = await retryStoreForgets(Date.now() + 30);
+  is("the daily line, on a slow Blob, stops at its deadline: the store is left for the next run, not failed", late, { done: 0, failed: 0, gaveUp: 0, left: 1 });
+  is("it stays in line with its tries as they were", (await line())?.tries, 1);
+  is("and what was not reached is still there", blobWorld.files.has(`community/${cf}/${"i".repeat(16)}.jpg`), true);
+  blobWorld.world.waitMs = 0;
+  const next = await retryStoreForgets(Date.now() + 10_000);
+  is("the next run, in time, sees it through", [next, await line(), [...blobWorld.files]], [{ done: 1, failed: 0, gaveUp: 0, left: 0 }, null, []]);
+  setEnv("BLOB_READ_WRITE_TOKEN", env.rw);
+  setEnv("VERCEL_OIDC_TOKEN", env.oidc);
+  setEnv("BLOB_STORE_ID", env.storeId);
 
   done();
 }

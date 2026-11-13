@@ -90,6 +90,7 @@ type Sub = {
     id?: unknown;
     status?: unknown;
     amount_due?: unknown;
+    amount_remaining?: unknown;
     currency?: unknown;
     hosted_invoice_url?: unknown;
     next_payment_attempt?: unknown;
@@ -228,7 +229,12 @@ async function remindFailed(store: Store, deadline: number): Promise<number> {
     const invoice = sub.latest_invoice && typeof sub.latest_invoice === "object" ? sub.latest_invoice : null;
     const invoiceId = typeof invoice?.id === "string" && INVOICE_PATTERN.test(invoice.id) ? invoice.id : "";
     const payUrl = typeof invoice?.hosted_invoice_url === "string" ? invoice.hosted_invoice_url : "";
-    const amount = typeof invoice?.amount_due === "number" ? invoice.amount_due : 0;
+    // What is left to pay, which is what the payment page asks for (#4419): an invoice paid in part owes its balance,
+    // not its total. Read exactly: a balance that is not a whole number from 0 is unknown, and nothing is claimed,
+    // changed or sent on it; a balance of 0 needs no email.
+    const remaining = invoice?.amount_remaining;
+    if (invoice && (typeof remaining !== "number" || !Number.isSafeInteger(remaining) || remaining < 0)) continue;
+    const amount = typeof remaining === "number" ? remaining : 0;
     const customer = sub.customer && typeof sub.customer === "object" ? sub.customer : null;
     const to = typeof customer?.email === "string" ? customer.email.trim() : "";
     // Only an invoice still open, with money on it, a page to pay it on and an

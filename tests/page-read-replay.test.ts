@@ -69,8 +69,8 @@ async function main(): Promise<void> {
   is("(the reading itself stays inside its priced commands)", first <= COMMANDS.readBeacon, true);
 
   part("Sent again on other servers");
-  // Five servers, each sent the token again three times the window's ceiling: on each, the sends that reach the
-  // database take the window's readings, and once that server saw the ceiling reached it asks nothing more.
+  // Five servers, each sent the token again three times the window's ceiling: on each, the first send asks only the
+  // token's mark, finds it spent and takes no reading (Codex G on #2571); that server then asks nothing more for it.
   const SERVERS = 5;
   commands = 0;
   for (let server = 0; server < SERVERS; server += 1) {
@@ -78,7 +78,7 @@ async function main(): Promise<void> {
     for (let i = 0; i < cap * 3; i += 1) await sale(one);
   }
   const [count] = (await real([["GET", `nl:traffic:read:${store.statsId}:${window}`]])) as string[];
-  is("once a server, then never again there: one send a server reached the database and took one of the window's readings", Number(count), 1 + SERVERS);
+  is("once a server, then never again there: a send spent already takes none of the window's readings", Number(count), 1);
   // Every place of the ceiling is priced at a reading's commands (COMMANDS.readBeacon); a server that had not seen it
   // full pays one refusal more: the token's mark and the count's two, and the count's expiry again.
   const REFUSAL = 4;

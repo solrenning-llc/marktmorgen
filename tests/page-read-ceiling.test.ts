@@ -226,6 +226,7 @@ async function main(): Promise<void> {
   const token = slotted(statsId, PRODUCT, store);
   const first = await counted(() => sale(token));
   const firstSent = sent.map((c) => String(c[0]));
+  const firstScript = String(sent[1]?.[1] ?? "");
   const after = await readDepth(statsId, PRODUCT);
   is("a drawn, good reading counts once in both records", [after.visitors, after.stopped, after.time], [1, { blok0001: 1 }, { "@t2": 1 }]);
   const again = await counted(() => sale(token, "blok0002", 400));
@@ -242,7 +243,7 @@ async function main(): Promise<void> {
   const steady = await counted(() => sale(slotted(statsId, PRODUCT, store), "blok0001", 42));
   console.log(`  commands: first reading ${first}, a later one ${steady}, a repeat ${again}`);
   is("a reading counted is bounded: the mark, the count of readings, the reading's count", [first <= MOST, steady <= 1 + 2 + 2, MOST <= COMMANDS.readBeacon], [true, true, true]);
-  is("and in that order: the mark, then the count with its expiry, then the reading", firstSent.slice(0, 3), ["SET", "INCR", "EXPIRE"]);
+  is("and in that order: the mark, then the count's one script, then the reading", [firstSent.slice(0, 2), firstScript.startsWith("-- marktmorgen:take-reading:")], [["SET", "EVAL"], true]);
   const mark = `nl:read:once:${readTokenPass(token, PRODUCT)!.nonce}`;
   const ttl = Number(redis.run(["TTL", mark]));
   is("the mark lasts until two hours after the page was drawn, not after the reading", ttl > READ_TOKEN_SECONDS - 60 && ttl <= READ_TOKEN_SECONDS + 60, true);
@@ -371,7 +372,7 @@ async function main(): Promise<void> {
     const last = sent.at(-1)?.[0];
     const ttl = Number(redis.run(["TTL", receiptKey]));
     // The mark, the count's script, and the expiry again: within what every token is priced at, counted or not.
-    is(`${name}: nothing counted or written, the count kept to its end, within what a reading is priced at`, [(await readDepth(receipt.statsId, PRODUCT)).visitors, last, ttl > 0 && ttl <= Math.ceil((allowanceWindow(receipt)!.end - Date.now()) / 1000) + 86_400, cost, cost <= COMMANDS.readBeacon], [0, "EXPIRE", true, 4, true]);
+    is(`${name}: nothing counted or written, the count kept to its end, within what a reading is priced at`, [(await readDepth(receipt.statsId, PRODUCT)).visitors, last, ttl > 0 && ttl <= Math.ceil((allowanceWindow(receipt)!.end - Date.now()) / 1000) + 86_400, cost, cost <= COMMANDS.readBeacon], [0, "EXPIRE", true, 3, true]);
   }
   await sale(slotted(receipt.statsId!, PRODUCT, receipt), "blok0001", 30);
   is("and the next reading answered as sent counts", (await readDepth(receipt.statsId, PRODUCT)).visitors, 1);
@@ -454,6 +455,9 @@ async function main(): Promise<void> {
   is("the window is marked once it went past, with the ceiling it passed", redis.run(["GET", `${readsKey(shop.statsId!, shopWindow.id)}:over`]), String(shopCeiling));
   // The plan grown since: its ceiling is now above what was counted, but the window still went past the old one.
   const grown = { ...shop, tier: "scale" as const };
+  // One reading counted under the grown plan's higher ceiling: counting went on after the change (the count itself
+  // never passes a ceiling since Codex G on #2571, so only a reading made after the change can show it).
+  await sale(slotted(shop.statsId!, PRODUCT, grown), "blok0001", 30);
   is("a plan grown later in the window still says the window is partial, with the readings counted then", readCeiling(grown) > shopCeiling && known(await readingsPartial(grown))?.counted === shopCeiling, true);
   const grownPartial = known(await readingsPartial(grown));
   is("and that counting went on after the change, so the figure is the ceiling reached, not every visit counted", grownPartial?.resumed, true);

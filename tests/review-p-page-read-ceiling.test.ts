@@ -41,16 +41,17 @@ async function main(): Promise<void> {
     let incomplete = true;
     redis.pipeline = async (list) => {
       commands += list.length;
-      if (incomplete && list.length === 2 && list[0]?.[0] === "INCR" && list[1]?.[0] === "EXPIRE") {
+      // The count's one script (TAKE_READING, Codex G on #2571), answered without its count.
+      if (incomplete && list.length === 1 && list[0]?.[0] === "EVAL" && String(list[0][1]).startsWith("-- marktmorgen:take-reading:")) {
         incomplete = false;
-        const [count] = await real([list[0]]);
-        return [count];
+        const [pair] = await real(list);
+        return [[(pair as unknown[])[0]]];
       }
       return real(list);
     };
     const accepted = await takeReading(pass(10));
     const ttl = Number(redis.run(["TTL", meter]));
-    is("a partial INCR/EXPIRE receipt is unknown and the meter is repaired with a finite lifetime", [accepted, ttl > 0], [false, true]);
+    is("a partial receipt of the count's script is unknown and the meter is repaired with a finite lifetime", [accepted, ttl > 0], [false, true]);
   } finally {
     redis.pipeline = real;
   }

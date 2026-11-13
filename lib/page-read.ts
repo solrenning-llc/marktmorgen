@@ -354,23 +354,41 @@ export function forgetReadingsSeen(): void {
 }
 
 /**
- * The window's count after this reading, from the answer to its pipeline
- * (the INCR and the EXPIRE sent together), only when the answer is exactly
- * that: two replies, the count a whole number of at least one and the expiry
- * set (1). Anything else is unknown, never a count. Pure.
+ * A window's reading taken in one step (Codex G on #2571): the count is read and, only while it is below the ceiling,
+ * added to; its expiry is set either way. Answers {1, the count after} when taken, {0, the count} when the window was
+ * already at its ceiling, so the count never goes past it, however many servers ask at once, whatever they remember.
+ * KEYS: the window's count; ARGV: the ceiling, the seconds to keep it.
  */
-function countedReceipt(reply: unknown): number | null {
-  if (!Array.isArray(reply) || reply.length !== 2) return null;
-  const [count, expiry] = reply;
-  return typeof count === "number" && Number.isSafeInteger(count) && count >= 1 && expiry === 1 ? count : null;
+export const TAKE_READING = `-- marktmorgen:take-reading:v1
+local n = tonumber(redis.call('GET', KEYS[1]) or '0') or 0
+local cap = tonumber(ARGV[1])
+if n >= cap then
+  redis.call('EXPIRE', KEYS[1], ARGV[2])
+  return {0, n}
+end
+n = redis.call('INCR', KEYS[1])
+redis.call('EXPIRE', KEYS[1], ARGV[2])
+return {1, n}`;
+
+/**
+ * What the pipeline's one TAKE_READING answered, only in its exact shape: one reply, a pair of 1 or 0 and a whole
+ * count, at least one when taken. Anything else is unknown, never a count. Pure.
+ */
+function countedReceipt(reply: unknown): { taken: boolean; count: number } | null {
+  if (!Array.isArray(reply) || reply.length !== 1) return null;
+  const pair = reply[0];
+  if (!Array.isArray(pair) || pair.length !== 2) return null;
+  const [taken, count] = pair;
+  if ((taken !== 0 && taken !== 1) || typeof count !== "number" || !Number.isSafeInteger(count) || count < taken) return null;
+  return { taken: taken === 1, count };
 }
 
 /**
- * One reading taken in its window's count: true while the count is within
- * the token's ceiling, false past it or when it cannot be counted. One
- * pipeline of two commands, the count and its expiry together, never a read
- * and then an add, so readings sent at once can never pass the ceiling
- * between them. Kept to the window's end and a day, as the window's other
+ * One reading taken in its window's count: true while the count is below
+ * the token's ceiling, false at it or when it cannot be counted. One script
+ * (TAKE_READING) reads, adds only below the ceiling and sets the expiry in
+ * one step, so readings sent at once, from any server, never take the count
+ * past the ceiling (Codex G on #2571). Kept to the window's end and a day, as the window's other
  * counts are (lib/allowance-window.ts, keepSecondsFor).
  *
  * Past the ceiling the paid work stops (the review of #2571, 5 November
@@ -387,22 +405,23 @@ export async function takeReading(pass: ReadPass, now = Date.now()): Promise<boo
   const keep = Math.max(86_400, pass.end - Math.floor(now / 1000) + 86_400);
   let reply: unknown = null;
   try {
-    reply = await redisPipeline([["INCR", key], ["EXPIRE", key, keep]]);
+    reply = await redisPipeline([["EVAL", TAKE_READING, 1, key, pass.cap, keep]]);
   } catch {
     reply = null;
   }
-  const n = countedReceipt(reply);
-  if (n === null) {
+  const receipt = countedReceipt(reply);
+  if (receipt === null) {
     // Never a count: the count may stand with no expiry, so it is given one again, and nothing is confirmed.
     await redisPipeline([["EXPIRE", key, keep]]).catch((error: unknown) => console.error("keeping a window's readings to its end failed", error));
     return false;
   }
-  noteReadings(key, n, pass.end);
+  noteReadings(key, receipt.count, pass.end);
+  if (!receipt.taken) return false;
   // The reading that reaches the ceiling marks the window, once: from it on nothing more is counted, and the studio
   // says the window is partial even if the plan grows later. It keeps the ceiling reached, so the studio says how many
   // were counted, not how many came.
-  if (n === pass.cap) await redisPipeline([["SET", `${key}:over`, String(pass.cap), "EX", keep]]).catch((error: unknown) => console.error("marking a window's readings partial failed", error));
-  return n <= pass.cap;
+  if (receipt.count === pass.cap) await redisPipeline([["SET", `${key}:over`, String(pass.cap), "EX", keep]]).catch((error: unknown) => console.error("marking a window's readings partial failed", error));
+  return true;
 }
 
 /**

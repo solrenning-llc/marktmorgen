@@ -5,16 +5,17 @@
  * from the window's ceiling mark, which the line prices once for every ceiling a window's tokens can carry.
  *
  * The worst path, through the real route (app/api/store/read/route.ts), on a sales page with a time:
- *   the token's mark (SET NX, 1); the window's count and its expiry (INCR, EXPIRE, 2); the capped count of the blocks'
+ *   the token's mark (SET NX, 1); the window's count, one script that adds only below the ceiling and sets its expiry
+ *   (TAKE_READING, EVAL 1, since Codex G on #2571); the capped count of the blocks'
  *   record at its most (EVAL 1, HLEN 1, HMGET 1, HINCRBY 1, so 4) with the time's range counted beside it (HINCRBY 1:
  *   its record only ever holds the TIME_RANGES names, so it needs no cap); and an answer to that pipeline that does not
- *   read, after which both records are given their expiry again (EXPIRE 2). 1 + 2 + 5 + 2 = 10.
- * The reading that reaches the window's ceiling also marks it (SET, 1): 11. That happens once for each value n of the
- * window's count (INCR gives each n once), only where n is the token's ceiling, so at most once a window for each
+ *   read, after which both records are given their expiry again (EXPIRE 2). 1 + 1 + 5 + 2 = 9.
+ * The reading that reaches the window's ceiling also marks it (SET, 1): 10. That happens once for each value n of the
+ * window's count (the script gives each n once, never past the ceiling), only where n is the token's ceiling, so at most once a window for each
  * ceiling its tokens can carry (a store's standing, setup or trial, or one of its tiers): priced once a window each
  * (#2571, the review at 5d245b24, MEDIUM 1), not on every reading.
  * With an answer that reads, a record either is at its most (HMGET) or gets its first count's expiry, never both, so
- * the reading that marks the window is billed 9.
+ * the reading that marks the window is billed 8.
  *
  * Synthetic only: the Redis stand-in, no network.
  */
@@ -136,9 +137,9 @@ async function main(): Promise<void> {
   const unmarked = await measure(2, true);
   const answered = await measure(1, false);
   console.log(`  billed: worst ${worst} (${unmarked} apart from the ceiling mark), with the count's answer read ${answered}`);
-  is("the worst path apart from the window's ceiling mark (both records at their most, the count's answer lost) is billed 10", unmarked, 10);
-  is("the reading that reaches the ceiling marks the window: one more, 11", worst, unmarked + 1);
-  is("the same reading with the count's answer read is billed 9", answered, 9);
+  is("the worst path apart from the window's ceiling mark (both records at their most, the count's answer lost) is billed 9", unmarked, 9);
+  is("the reading that reaches the ceiling marks the window: one more, 10", worst, unmarked + 1);
+  is("the same reading with the count's answer read is billed 8", answered, 8);
   is("COMMANDS.readBeacon prices every reading at that worst apart from the mark", unmarked <= COMMANDS.readBeacon, true);
 
   part("the window's ceiling mark, once a window for each ceiling its tokens can carry");

@@ -253,6 +253,18 @@ export class MemoryRedis {
           return 1;
         }
         // lib/product-about.ts WRITE_ABOUT_IF: the description written only over the one it was read as.
+        // lib/page-read.ts TAKE_READING: a window's reading added only below its ceiling, its expiry set either way.
+        if (key.startsWith("-- marktmorgen:take-reading:v1\n") && args[0] === "1" && args.length === 4) {
+          const [, count, cap, keep] = args;
+          const now = Number(this.run(["GET", count]) ?? 0) || 0;
+          if (now >= Number(cap)) {
+            this.run(["EXPIRE", count, keep]);
+            return [0, now];
+          }
+          const n = this.run(["INCR", count]);
+          this.run(["EXPIRE", count, keep]);
+          return [1, n];
+        }
         if (key.startsWith("-- marktmorgen:about-write-if:v1\n") && args[0] === "1" && args.length === 4) {
           const [, about, expected, text] = args;
           const now = this.run(["GET", about]);

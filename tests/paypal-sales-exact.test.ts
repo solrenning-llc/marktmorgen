@@ -81,7 +81,9 @@ async function withReply<T>(match: (command: (string | number)[]) => boolean, re
 const is = (name: string, prefix: string) => (c: (string | number)[]) => c[0] === name && String(c[1]).startsWith(prefix);
 const GET_OPENED = is("GET", "nl:ppsell:o:");
 const GET_PAID = is("GET", "nl:ppsell:paid:");
-const SET_PAID = is("SET", "nl:ppsell:paid:");
+// The payment is written down by one EVAL (PAYPAL_SETTLE) whose first key is the paid record; main's design since
+// 17bc961d7. Its reply is replaced whole here, so the script never runs: the order stays exactly as it was.
+const SETTLE_PAID = (c: (string | number)[]) => c[0] === "EVAL" && String(c[3]).startsWith("nl:ppsell:paid:");
 const pendingScore = async (order: string) => (await redis.pipeline([["ZSCORE", `nl:ppsell:pending:${sid}`, order]]))[0];
 const putOpened = (order: string) => redis.pipeline([["SET", `nl:ppsell:o:${order}`, JSON.stringify(opened()), "EX", 86_400]]);
 const putPending = (order: string) => redis.pipeline([["ZADD", `nl:ppsell:pending:${sid}`, String(now()), order]]);
@@ -129,11 +131,12 @@ for (const [label, reply] of [["a missing envelope", () => []], ["text that is n
   });
 }
 
+// PAYPAL_SETTLE answers 1 (written here) or 0 (written before), in one slot; anything else is unknown.
 const setReplies: [string, () => unknown[]][] = [
   ["a missing envelope", () => []],
-  ["another word than OK", () => ["QUEUED"]],
-  ["a number", () => [1]],
-  ["a slot too many", () => ["OK", "extra"]],
+  ["a word (the old SET's OK)", () => ["OK"]],
+  ["a number other than 0 or 1", () => [2]],
+  ["a slot too many", () => [1, "extra"]],
 ];
 for (const [label, reply] of setReplies) {
   test(`the sweep hands nothing over when writing the payment down answers ${label}`, async () => {
@@ -142,7 +145,7 @@ for (const [label, reply] of setReplies) {
     await putOpened(order);
     await putPending(order);
     const handed: Paid[] = [];
-    await withReply(SET_PAID, reply, () => sweep(handed));
+    await withReply(SETTLE_PAID, reply, () => sweep(handed));
     assert.deepEqual(handed, []);
     assert.notEqual(await pendingScore(order), null, "still pending, asked again");
   });
@@ -150,7 +153,7 @@ for (const [label, reply] of setReplies) {
     redis.clear();
     const order = nextOrder();
     await putOpened(order);
-    const result = await withReply(SET_PAID, reply, () => captureOrder(shop, order));
+    const result = await withReply(SETTLE_PAID, reply, () => captureOrder(shop, order));
     assert.deepEqual(result, { ok: false, reason: "error" });
     assert.notEqual(await pendingScore(order), null, "watched, for the sweep to settle");
   });

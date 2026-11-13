@@ -24,12 +24,20 @@ const en = {
   /** What a page that found no paid order says, by what was found instead. */
   notices: {
     unpaid: {
-      title: "This order has not been paid",
-      body: "If you closed the payment page before finishing, nothing was charged. You can start again from the store.",
+      title: "You were not charged",
+      body: "The payment was not finished, so nothing was charged. You can start again from the store.",
+    },
+    declined: {
+      title: "Your payment did not go through",
+      body: "Your bank or card turned it down, so nothing was charged. You can start again from the store and pay another way.",
+    },
+    checking: {
+      title: "We are checking your payment",
+      body: "Do not pay again. If it went through, your confirmation email comes within a few minutes, and this page shows your order when you open it again.",
     },
     processing: {
       title: "Your payment is on its way",
-      body: "Your bank is still confirming it, which can take a few days. Nothing more is needed from you: when it clears, open this page again, or choose “Get it again” at the bottom of the store with the address you paid with.",
+      body: "Your bank is still confirming it, which can take a few days. Nothing more is needed from you: when it clears, open this page again, or choose “Get it again” at the bottom of the store with the address you paid with. Do not pay again.",
     },
     expired: {
       title: "This link has expired",
@@ -63,6 +71,7 @@ const en = {
     failed: "That offer was not charged.",
     checking: "We are still hearing back from Stripe about that offer. Open this page again in a minute: it is charged once at most.",
     unavailable: "That offer is no longer open, so nothing was charged for it.",
+    changed: "That offer was changed while you were reading it, so nothing was charged. Below is the offer as it is now, so you can decide again.",
   } as Record<string, string>,
   remindDayHour: ", and reminders follow a day and an hour before",
   remindHour: ", and a reminder follows an hour before",
@@ -187,7 +196,7 @@ const en = {
   oneMoreThing: "One more thing",
   titleFor: (title: string, price: string) => `${title} for ${price}`,
   onItsOwn: (price: string) => `${price} on its own`,
-  yesAdd: (price: string) => `Yes, add it for ${price}`,
+  yesAdd: (price: string) => `Yes, buy now for ${price}`,
   noThanks: "No thanks",
   offerNote: (store: string) =>
     `Yes charges the card you just used, once, on ${store}'s own account. No thanks charges nothing. You can also simply leave this page.`,
@@ -241,12 +250,20 @@ const es: ThanksWords = {
   paymentReceived: "Pago recibido",
   notices: {
     unpaid: {
-      title: "Este pedido no se ha pagado",
-      body: "Si cerraste la página de pago antes de terminar, no se cobró nada. Puedes empezar de nuevo desde la tienda.",
+      title: "No se te cobró nada",
+      body: "El pago no se completó, así que no se cobró nada. Puedes empezar de nuevo desde la tienda.",
+    },
+    declined: {
+      title: "Tu pago no se completó",
+      body: "Tu banco o tu tarjeta lo rechazó, así que no se cobró nada. Puedes empezar de nuevo desde la tienda y pagar de otra forma.",
+    },
+    checking: {
+      title: "Estamos comprobando tu pago",
+      body: "No vuelvas a pagar. Si el pago se completó, el email de confirmación llega en unos minutos, y esta página muestra tu pedido cuando la vuelvas a abrir.",
     },
     processing: {
       title: "Tu pago está en camino",
-      body: "Tu banco todavía lo está confirmando, lo que puede tardar unos días. No necesitas hacer nada más: cuando se confirme, vuelve a abrir esta página o elige «Volver a recibirlo» al final de la tienda con la dirección con la que pagaste.",
+      body: "Tu banco todavía lo está confirmando, lo que puede tardar unos días. No necesitas hacer nada más: cuando se confirme, vuelve a abrir esta página o elige «Volver a recibirlo» al final de la tienda con la dirección con la que pagaste. No vuelvas a pagar.",
     },
     expired: {
       title: "Este enlace ha caducado",
@@ -279,6 +296,7 @@ const es: ThanksWords = {
     failed: "Esa oferta no se cobró.",
     checking: "Seguimos esperando la respuesta de Stripe sobre esa oferta. Vuelve a abrir esta página en un minuto: como mucho se cobra una vez.",
     unavailable: "Esa oferta ya no está disponible, así que no se cobró nada por ella.",
+    changed: "Esa oferta cambió mientras la leías, así que no se cobró nada. Abajo está la oferta tal como es ahora, por si quieres decidir de nuevo.",
   },
   remindDayHour: ", y recibirás recordatorios un día y una hora antes",
   remindHour: ", y recibirás un recordatorio una hora antes",
@@ -394,7 +412,7 @@ const es: ThanksWords = {
   oneMoreThing: "Una cosa más",
   titleFor: (title, price) => `${title} por ${price}`,
   onItsOwn: (price) => `${price} por separado`,
-  yesAdd: (price) => `Sí, añadirlo por ${price}`,
+  yesAdd: (price) => `Sí, comprar ahora por ${price}`,
   noThanks: "No, gracias",
   offerNote: (store) =>
     `Sí cobra una vez en la tarjeta que acabas de usar, en la cuenta propia de ${store}. No, gracias no cobra nada. También puedes simplemente salir de esta página.`,
@@ -444,12 +462,20 @@ const fr: ThanksWords = {
   paymentReceived: "Paiement reçu",
   notices: {
     unpaid: {
-      title: "Cette commande n'a pas été payée",
-      body: "Si vous avez fermé la page de paiement avant la fin, rien n'a été débité. Vous pouvez recommencer depuis la boutique.",
+      title: "Rien ne vous a été débité",
+      body: "Le paiement n'a pas été terminé, donc rien n'a été débité. Vous pouvez recommencer depuis la boutique.",
+    },
+    declined: {
+      title: "Votre paiement n'est pas passé",
+      body: "Votre banque ou votre carte l'a refusé, donc rien n'a été débité. Vous pouvez recommencer depuis la boutique et payer autrement.",
+    },
+    checking: {
+      title: "Nous vérifions votre paiement",
+      body: "Ne payez pas une deuxième fois. Si le paiement est passé, l'e-mail de confirmation arrive dans quelques minutes, et cette page affiche votre commande quand vous la rouvrez.",
     },
     processing: {
       title: "Votre paiement est en cours",
-      body: `Votre banque le confirme encore, ce qui peut prendre quelques jours. Vous n'avez rien d'autre à faire${S}: une fois confirmé, rouvrez cette page, ou choisissez «${S}Le recevoir à nouveau${S}» en bas de la boutique avec l'adresse utilisée pour payer.`,
+      body: `Votre banque le confirme encore, ce qui peut prendre quelques jours. Vous n'avez rien d'autre à faire${S}: une fois confirmé, rouvrez cette page, ou choisissez «${S}Le recevoir à nouveau${S}» en bas de la boutique avec l'adresse utilisée pour payer. Ne payez pas une deuxième fois.`,
     },
     expired: {
       title: "Ce lien a expiré",
@@ -482,6 +508,7 @@ const fr: ThanksWords = {
     failed: "Cette offre n'a pas été débitée.",
     checking: `Nous attendons encore la réponse de Stripe pour cette offre. Rouvrez cette page dans une minute${S}: elle n'est débitée qu'une fois au plus.`,
     unavailable: "Cette offre n'est plus disponible, rien n'a donc été débité pour elle.",
+    changed: "Cette offre a changé pendant que vous la lisiez, rien n'a donc été débité. Elle est présentée ci-dessous telle qu'elle est maintenant, pour que vous puissiez décider à nouveau.",
   },
   remindDayHour: ", et des rappels suivront un jour et une heure avant",
   remindHour: ", et un rappel suivra une heure avant",
@@ -597,7 +624,7 @@ const fr: ThanksWords = {
   oneMoreThing: "Encore une chose",
   titleFor: (title, price) => `${title} pour ${price}`,
   onItsOwn: (price) => `${price} seul`,
-  yesAdd: (price) => `Oui, l'ajouter pour ${price}`,
+  yesAdd: (price) => `Oui, acheter maintenant pour ${price}`,
   noThanks: "Non merci",
   offerNote: (store) =>
     `Oui débite une fois la carte que vous venez d'utiliser, sur le compte de ${store}. Non merci ne débite rien. Vous pouvez aussi simplement quitter cette page.`,
@@ -648,12 +675,20 @@ const de: ThanksWords = {
   paymentReceived: "Zahlung erhalten",
   notices: {
     unpaid: {
-      title: "Diese Bestellung wurde nicht bezahlt",
-      body: "Wenn Sie die Zahlungsseite vor dem Abschluss geschlossen haben, wurde nichts belastet. Sie können im Shop neu beginnen.",
+      title: "Ihnen wurde nichts berechnet",
+      body: "Die Zahlung wurde nicht abgeschlossen, daher wurde nichts belastet. Sie können im Shop neu beginnen.",
+    },
+    declined: {
+      title: "Ihre Zahlung ist nicht durchgegangen",
+      body: "Ihre Bank oder Karte hat sie abgelehnt, daher wurde nichts belastet. Sie können im Shop neu beginnen und anders bezahlen.",
+    },
+    checking: {
+      title: "Wir prüfen Ihre Zahlung",
+      body: "Bitte nicht noch einmal bezahlen. Wenn die Zahlung durchgegangen ist, kommt die Bestätigungs-E-Mail in wenigen Minuten, und diese Seite zeigt Ihre Bestellung, wenn Sie sie erneut öffnen.",
     },
     processing: {
       title: "Ihre Zahlung ist unterwegs",
-      body: "Ihre Bank bestätigt sie noch, was einige Tage dauern kann. Sie müssen nichts weiter tun: Sobald sie bestätigt ist, öffnen Sie diese Seite erneut oder wählen Sie unten im Shop „Erneut erhalten“ mit der Adresse, mit der Sie bezahlt haben.",
+      body: "Ihre Bank bestätigt sie noch, was einige Tage dauern kann. Sie müssen nichts weiter tun: Sobald sie bestätigt ist, öffnen Sie diese Seite erneut oder wählen Sie unten im Shop „Erneut erhalten“ mit der Adresse, mit der Sie bezahlt haben. Bitte nicht noch einmal bezahlen.",
     },
     expired: {
       title: "Dieser Link ist abgelaufen",
@@ -686,6 +721,7 @@ const de: ThanksWords = {
     failed: "Dieses Angebot wurde nicht belastet.",
     checking: "Wir warten noch auf die Antwort von Stripe zu diesem Angebot. Öffnen Sie diese Seite in einer Minute erneut: Es wird höchstens einmal belastet.",
     unavailable: "Dieses Angebot gilt nicht mehr, daher wurde dafür nichts belastet.",
+    changed: "Dieses Angebot wurde geändert, während Sie es gelesen haben, daher wurde nichts belastet. Unten sehen Sie das Angebot, wie es jetzt ist, damit Sie neu entscheiden können.",
   },
   remindDayHour: ", und Erinnerungen folgen einen Tag und eine Stunde vorher",
   remindHour: ", und eine Erinnerung folgt eine Stunde vorher",
@@ -801,7 +837,7 @@ const de: ThanksWords = {
   oneMoreThing: "Noch etwas",
   titleFor: (title, price) => `${title} für ${price}`,
   onItsOwn: (price) => `${price} einzeln`,
-  yesAdd: (price) => `Ja, für ${price} hinzufügen`,
+  yesAdd: (price) => `Ja, jetzt für ${price} kaufen`,
   noThanks: "Nein danke",
   offerNote: (store) =>
     `Ja belastet die Karte, die Sie gerade benutzt haben, einmal, auf dem eigenen Konto von ${store}. Nein danke belastet nichts. Sie können diese Seite auch einfach verlassen.`,
@@ -852,12 +888,20 @@ const it: ThanksWords = {
   paymentReceived: "Pagamento ricevuto",
   notices: {
     unpaid: {
-      title: "Questo ordine non è stato pagato",
-      body: "Se hai chiuso la pagina di pagamento prima di finire, non è stato addebitato nulla. Puoi ricominciare dal negozio.",
+      title: "Non ti è stato addebitato nulla",
+      body: "Il pagamento non è stato completato, quindi non è stato addebitato nulla. Puoi ricominciare dal negozio.",
+    },
+    declined: {
+      title: "Il tuo pagamento non è andato a buon fine",
+      body: "La tua banca o la tua carta lo ha rifiutato, quindi non è stato addebitato nulla. Puoi ricominciare dal negozio e pagare in un altro modo.",
+    },
+    checking: {
+      title: "Stiamo verificando il tuo pagamento",
+      body: "Non pagare di nuovo. Se il pagamento è andato a buon fine, l'email di conferma arriva entro pochi minuti, e questa pagina mostra il tuo ordine quando la riapri.",
     },
     processing: {
       title: "Il tuo pagamento è in arrivo",
-      body: "La tua banca lo sta ancora confermando, e possono volerci alcuni giorni. Non devi fare altro: quando sarà confermato, riapri questa pagina, oppure scegli «Ricevilo di nuovo» in fondo al negozio con l'indirizzo con cui hai pagato.",
+      body: "La tua banca lo sta ancora confermando, e possono volerci alcuni giorni. Non devi fare altro: quando sarà confermato, riapri questa pagina, oppure scegli «Ricevilo di nuovo» in fondo al negozio con l'indirizzo con cui hai pagato. Non pagare di nuovo.",
     },
     expired: {
       title: "Questo link è scaduto",
@@ -890,6 +934,7 @@ const it: ThanksWords = {
     failed: "Quell'offerta non è stata addebitata.",
     checking: "Stiamo ancora aspettando la risposta di Stripe su quell'offerta. Riapri questa pagina tra un minuto: viene addebitata al massimo una volta.",
     unavailable: "Quell'offerta non è più disponibile, quindi non è stato addebitato nulla.",
+    changed: "Quell'offerta è cambiata mentre la leggevi, quindi non è stato addebitato nulla. Qui sotto trovi l'offerta com'è ora, così puoi decidere di nuovo.",
   },
   remindDayHour: ", e seguiranno promemoria un giorno e un'ora prima",
   remindHour: ", e seguirà un promemoria un'ora prima",
@@ -1005,7 +1050,7 @@ const it: ThanksWords = {
   oneMoreThing: "Un'ultima cosa",
   titleFor: (title, price) => `${title} a ${price}`,
   onItsOwn: (price) => `${price} da solo`,
-  yesAdd: (price) => `Sì, aggiungilo a ${price}`,
+  yesAdd: (price) => `Sì, acquista ora a ${price}`,
   noThanks: "No grazie",
   offerNote: (store) =>
     `Sì addebita una volta la carta che hai appena usato, sul conto di ${store}. No grazie non addebita nulla. Puoi anche semplicemente lasciare questa pagina.`,
@@ -1056,12 +1101,20 @@ const nl: ThanksWords = {
   paymentReceived: "Betaling ontvangen",
   notices: {
     unpaid: {
-      title: "Deze bestelling is niet betaald",
-      body: "Als je de betaalpagina sloot voordat je klaar was, is er niets afgeschreven. Je kunt opnieuw beginnen vanuit de winkel.",
+      title: "Er is niets afgeschreven",
+      body: "De betaling is niet afgerond, dus er is niets afgeschreven. Je kunt opnieuw beginnen vanuit de winkel.",
+    },
+    declined: {
+      title: "Je betaling is niet gelukt",
+      body: "Je bank of kaart heeft hem geweigerd, dus er is niets afgeschreven. Je kunt opnieuw beginnen vanuit de winkel en op een andere manier betalen.",
+    },
+    checking: {
+      title: "We controleren je betaling",
+      body: "Betaal niet opnieuw. Als de betaling gelukt is, komt de bevestigingsmail binnen een paar minuten, en deze pagina toont je bestelling als je hem opnieuw opent.",
     },
     processing: {
       title: "Je betaling is onderweg",
-      body: "Je bank bevestigt hem nog, wat een paar dagen kan duren. Je hoeft verder niets te doen: zodra hij rond is, open je deze pagina opnieuw, of kies je onderaan de winkel ‘Opnieuw ontvangen’ met het adres waarmee je betaalde.",
+      body: "Je bank bevestigt hem nog, wat een paar dagen kan duren. Je hoeft verder niets te doen: zodra hij rond is, open je deze pagina opnieuw, of kies je onderaan de winkel ‘Opnieuw ontvangen’ met het adres waarmee je betaalde. Betaal niet opnieuw.",
     },
     expired: {
       title: "Deze link is verlopen",
@@ -1094,6 +1147,7 @@ const nl: ThanksWords = {
     failed: "Dat aanbod is niet afgeschreven.",
     checking: "We wachten nog op antwoord van Stripe over dat aanbod. Open deze pagina over een minuut opnieuw: het wordt hooguit één keer afgeschreven.",
     unavailable: "Dat aanbod geldt niet meer, dus er is niets voor afgeschreven.",
+    changed: "Dat aanbod is veranderd terwijl je het las, dus er is niets afgeschreven. Hieronder staat het aanbod zoals het nu is, zodat je opnieuw kunt beslissen.",
   },
   remindDayHour: ", en herinneringen volgen een dag en een uur vooraf",
   remindHour: ", en een herinnering volgt een uur vooraf",
@@ -1209,7 +1263,7 @@ const nl: ThanksWords = {
   oneMoreThing: "Nog één ding",
   titleFor: (title, price) => `${title} voor ${price}`,
   onItsOwn: (price) => `${price} los`,
-  yesAdd: (price) => `Ja, voeg toe voor ${price}`,
+  yesAdd: (price) => `Ja, nu kopen voor ${price}`,
   noThanks: "Nee bedankt",
   offerNote: (store) =>
     `Ja schrijft één keer af van de kaart die je net gebruikte, op de eigen rekening van ${store}. Nee bedankt schrijft niets af. Je kunt deze pagina ook gewoon verlaten.`,
@@ -1260,12 +1314,20 @@ const pt: ThanksWords = {
   paymentReceived: "Pagamento recebido",
   notices: {
     unpaid: {
-      title: "Esta encomenda não foi paga",
-      body: "Se fechou a página de pagamento antes de terminar, nada foi cobrado. Pode recomeçar a partir da loja.",
+      title: "Não lhe foi cobrado nada",
+      body: "O pagamento não foi concluído, por isso nada foi cobrado. Pode recomeçar a partir da loja.",
+    },
+    declined: {
+      title: "O seu pagamento não foi aceite",
+      body: "O seu banco ou cartão recusou-o, por isso nada foi cobrado. Pode recomeçar a partir da loja e pagar de outra forma.",
+    },
+    checking: {
+      title: "Estamos a verificar o seu pagamento",
+      body: "Não pague novamente. Se o pagamento foi concluído, o email de confirmação chega dentro de alguns minutos, e esta página mostra a sua encomenda quando a abrir novamente.",
     },
     processing: {
       title: "O seu pagamento está a caminho",
-      body: "O seu banco ainda o está a confirmar, o que pode demorar alguns dias. Não precisa de fazer mais nada: quando for confirmado, abra novamente esta página, ou escolha «Receber de novo» no fundo da loja com o endereço com que pagou.",
+      body: "O seu banco ainda o está a confirmar, o que pode demorar alguns dias. Não precisa de fazer mais nada: quando for confirmado, abra novamente esta página, ou escolha «Receber de novo» no fundo da loja com o endereço com que pagou. Não pague novamente.",
     },
     expired: {
       title: "Esta ligação expirou",
@@ -1298,6 +1360,7 @@ const pt: ThanksWords = {
     failed: "Essa oferta não foi cobrada.",
     checking: "Ainda estamos a aguardar a resposta da Stripe sobre essa oferta. Abra esta página novamente daqui a um minuto: é cobrada no máximo uma vez.",
     unavailable: "Essa oferta já não está disponível, por isso nada foi cobrado por ela.",
+    changed: "Essa oferta foi alterada enquanto a lia, por isso nada foi cobrado. Abaixo está a oferta tal como é agora, para que possa decidir de novo.",
   },
   remindDayHour: ", e seguem-se lembretes um dia e uma hora antes",
   remindHour: ", e segue-se um lembrete uma hora antes",
@@ -1413,7 +1476,7 @@ const pt: ThanksWords = {
   oneMoreThing: "Só mais uma coisa",
   titleFor: (title, price) => `${title} por ${price}`,
   onItsOwn: (price) => `${price} em separado`,
-  yesAdd: (price) => `Sim, acrescentar por ${price}`,
+  yesAdd: (price) => `Sim, comprar agora por ${price}`,
   noThanks: "Não, obrigado",
   offerNote: (store) =>
     `Sim cobra uma vez o cartão que acabou de usar, na conta própria de ${store}. Não, obrigado não cobra nada. Também pode simplesmente sair desta página.`,

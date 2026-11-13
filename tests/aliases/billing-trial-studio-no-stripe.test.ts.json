@@ -1,0 +1,6 @@
+{
+  "next/headers": "security/next-headers.ts",
+  "next/navigation": "studio-today-navigation.ts",
+  "next/server": "studio-today-next-server.ts",
+  "@/lib/opening": "billing-trial-studio-opening.ts"
+}

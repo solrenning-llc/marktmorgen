@@ -22,6 +22,7 @@ import { type Listing, ensureStoreId, normaliseHandle, storeForPage, storeRef } 
 import { formatMoney, toMajor } from "@/lib/money";
 import { linkHost } from "@/lib/product-link";
 import { DOWNLOAD_WINDOW_SECONDS, type Order, readOrder } from "@/lib/store-checkout";
+import { unpaidNotice } from "@/lib/checkout-return";
 import { noteKept } from "@/lib/move-members";
 import { lookStyle } from "@/lib/store-look";
 import { canManage } from "@/lib/membership-manage";
@@ -115,6 +116,7 @@ const UPSELL_NOTES: Record<string, { always: boolean }> = {
   failed: { always: false },
   checking: { always: false },
   unavailable: { always: true },
+  changed: { always: true },
 };
 
 /**
@@ -740,7 +742,8 @@ export default async function ThanksPage({ params, searchParams }: Params) {
   const downloadAt = (extra: Record<string, string>) => (id: string) =>
     `/api/store/download?${new URLSearchParams({ handle: store.handle, session_id: sessionId ?? "", ...extra, pid: id })}`;
 
-  const notice = order.state !== "paid" ? t.notices[order.state] : null;
+  // An unpaid checkout is said "not charged" only with proof in the session (648 [WG8], lib/checkout-return.ts).
+  const notice = order.state !== "paid" ? t.notices[order.state === "unpaid" ? unpaidNotice(order.proof) : order.state] : null;
   // Asked once a paid order is shown, unless the creator switched it off.
   const askHeard = order.state === "paid" && Boolean(sessionId) && !booked && !(await heardOff(store.handle).catch(() => true));
   const upsellAnswer = typeof query.upsell === "string" && Object.hasOwn(UPSELL_NOTES, query.upsell) ? UPSELL_NOTES[query.upsell] : null;
@@ -1228,7 +1231,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
                   <form action="/api/store/upsell" method="post" className="px-5 py-5 sm:px-6">
                     <input type="hidden" name="handle" value={store.handle} />
                     <input type="hidden" name="session_id" value={sessionId} />
-                    <input type="hidden" name="step" value={offer.step.id} />
+                    <input type="hidden" name="step" value={offer.ref} />
                     <p className="st-label">{offer.afterNo ? t.beforeYouGo : t.oneMoreThing}</p>
                     <h2 id="offer-title" className="mt-1 text-xl font-semibold leading-snug tracking-[-0.01em]">
                       {offer.step.headline || t.titleFor(offer.target.title, money(offer.step.priceCents, store.currency))}
@@ -1308,7 +1311,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
               <h1 className="font-display text-3xl font-semibold leading-tight sm:text-4xl">
                 {notice?.title ?? t.notices.invalid.title}
               </h1>
-              <p className="st-muted mt-4 text-lg">
+              <p className="st-muted mt-4 text-lg" role="status">
                 {notice?.body ?? t.checkLink}
               </p>
               {order.state === "expired" && canRecover(store) ? (

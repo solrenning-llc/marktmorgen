@@ -70,6 +70,13 @@ export type Review = {
    */
   photo: ReviewPhoto | null;
   /**
+   * How many new photos this review has been granted over its whole life
+   * (C4-20261106-2720-C5-160), at most MAX_REVIEW_PHOTOS: each is a paid put
+   * to the file store, granted by the review's own write before the put is
+   * made. Absent from reviews written before it was kept, which have had none.
+   */
+  photoPuts?: number;
+  /**
    * When its order was paid, in seconds (606 [WP5]): kept when the review is
    * first written, so the page can say how long after purchase it was
    * written. Absent from reviews written before it was kept.
@@ -83,6 +90,13 @@ export type ReviewPhoto = { path: string; width: number; height: number };
 export const MAX_REVIEW_PHOTO_BYTES = 400_000;
 /** And its long side, in pixels. */
 export const REVIEW_PHOTO_SIDE = 1200;
+/**
+ * The most new photos one review takes over its whole life, a replacement
+ * included (C4-20261106-2720-C5-160): each is a paid put to the file store, so
+ * the ceiling is counted on the review's own record before the put is made.
+ * Taking a photo off needs no put and takes none of them.
+ */
+export const MAX_REVIEW_PHOTOS = 3;
 
 /** The numbers a product's page and its card show, kept up to date on every change. */
 export type Summary = {

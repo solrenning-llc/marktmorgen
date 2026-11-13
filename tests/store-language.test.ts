@@ -22,6 +22,7 @@ import { COURSES_WORDS } from "@/lib/buyer-words/courses";
 import { MEMBERSHIP_WORDS } from "@/lib/buyer-words/membership";
 import { GIVING_WORDS } from "@/lib/buyer-words/giving";
 import { AFFILIATES_WORDS } from "@/lib/buyer-words/affiliates";
+import { AFFILIATE_TOOL_WORDS } from "@/lib/buyer-words/affiliate-tools";
 import { COMMUNITY_WORDS } from "@/lib/buyer-words/community";
 import { THANKS_WORDS } from "@/lib/buyer-words/thanks";
 import { BLOCK_WORDS } from "@/lib/buyer-words/blocks";
@@ -94,6 +95,8 @@ const SAME: Record<string, Record<string, string[]>> = {
   // "Label: link".
   // "Product" is the Dutch word too.
   affiliates: { es: ["doorText"], de: ["doorText"], it: ["doorText"], nl: ["doorText", "kit.product"], pt: ["doorText"] },
+  // "Commission" is the French word too, and "Product" the Dutch one.
+  "affiliate tools": { fr: ["commission"], nl: ["product"] },
   // Words the languages took from English: Community, Feed, Level, Post, Messages, likes, studio; "7 h 7 min", "7 pts".
   community: {
     es: ["lengthHoursMinutes", "pts"],
@@ -173,6 +176,7 @@ async function main(): Promise<void> {
     ["membership", (code) => MEMBERSHIP_WORDS[code]],
     ["giving", (code) => GIVING_WORDS[code]],
     ["affiliates", (code) => AFFILIATES_WORDS[code]],
+    ["affiliate tools", (code) => AFFILIATE_TOOL_WORDS[code]],
     ["community", (code) => COMMUNITY_WORDS[code]],
     ["thanks", (code) => THANKS_WORDS[code]],
     ["page blocks", (code) => BLOCK_WORDS[code]],

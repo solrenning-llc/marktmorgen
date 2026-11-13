@@ -105,6 +105,9 @@ async function check(job: Job, base: number): Promise<void> {
   part(`${job.name}: a later page in another shape is unknown, never "no more refunds"`);
   const near = await job.make(3);
   refunds = list(`${job.name}c`, 120, base + 1200, 5, near.pi);
+  // The stand-in's list is replaced whole here, which Stripe never does: the pass kept over the old list (the run
+  // above stopped at the bound) is let go, so this run starts from the newest page (tests/gift-preorder-refunds-cursor.test.ts).
+  await redis.pipeline([["DEL", `${job.anchor}:pass`]]);
   brokenPage = 1;
   refundCalls.length = 0;
   is(`${job.name}: the refund on the readable first page is still taken back`, await job.run(), 1);

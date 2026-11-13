@@ -16,6 +16,7 @@
  * and the day, for the creator to read. Never who asked.
  */
 import { placeLine } from "@/lib/call-place";
+import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { listedLengths } from "@/lib/call-lengths";
 import { windowId } from "@/lib/allowance-window";
 import { SHIP_REGIONS, activeShipping } from "@/lib/shipping";
@@ -413,6 +414,8 @@ export async function answerQuestion(input: {
 export async function takeAnswer(store: Store, now = Date.now()): Promise<boolean> {
   const key = monthKey(store, new Date(now));
   if (!store.statsId || !key) return false;
+  // A funded period's answer needs its paid cohort first (resourceAllocations): nothing is taken without it.
+  if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return false;
   const [used, expires] = await redisPipeline([["INCR", key], ["EXPIRE", key, 40 * 86_400]]);
   const count = typeof used === "number" ? used : typeof used === "string" && /^[1-9]\d*$/.test(used) ? Number(used) : NaN;
   if (!Number.isSafeInteger(count) || count < 1 || (expires !== 1 && expires !== "1")) return false;

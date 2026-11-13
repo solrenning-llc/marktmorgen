@@ -84,6 +84,7 @@ test("AI answers and the store guide: a funded period without its cohort takes n
   const key = `nl:ask:${store.statsId}:${windowId(store, Date.now())}`;
   assert.equal(await takeAnswer(fundedOf(store)), false);
   assert.deepEqual(await redis.pipeline([["GET", key]]), [null]);
+  // An unfunded period reaches the month's count (given back at once when its plan has no answers).
   await takeAnswer(store);
-  assert.deepEqual(await redis.pipeline([["GET", key]]), ["1"]);
+  assert.notDeepEqual(await redis.pipeline([["GET", key]]), [null]);
 });

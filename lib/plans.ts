@@ -65,6 +65,9 @@ export async function finishPlan(account: string, session: string): Promise<Plan
     if (error instanceof StripeError && error.status === 404) return "gone";
     throw error;
   }
+  // A 200 that is not the checkout asked for (an empty object, another one) is unknown, never "nothing to do": the
+  // plan stays pending and the next run asks again (outage drill, 13 November 2026).
+  if (view.id !== session || (view.object !== undefined && view.object !== "checkout.session")) throw new Error("Stripe answered a checkout that is not the one asked for");
   const meta = (view.metadata ?? {}) as Record<string, string>;
   const isPlan = meta.kind === "plan";
   if (!isPlan && !meta.ends_after) return "gone";
@@ -72,6 +75,9 @@ export async function finishPlan(account: string, session: string): Promise<Plan
   if (view.status !== "complete" || typeof view.subscription !== "string") return "gone";
 
   const subscription = await onAccount("GET", account, `/subscriptions/${encodeURIComponent(view.subscription)}`);
+  if (subscription.id !== view.subscription || (subscription.object !== undefined && subscription.object !== "subscription")) {
+    throw new Error("Stripe answered a subscription that is not the one asked for");
+  }
   if (typeof subscription.cancel_at === "number" && subscription.cancel_at > 0) return "done";
   if (subscription.status === "canceled") return "done";
   const payments = Number(isPlan ? meta.plan_payments : meta.ends_after);
@@ -83,7 +89,9 @@ export async function finishPlan(account: string, session: string): Promise<Plan
   const cycle = typeof subscription.billing_cycle_anchor === "number" ? subscription.billing_cycle_anchor : 0;
   const trialEnd = typeof subscription.trial_end === "number" ? subscription.trial_end : 0;
   const anchor = Math.max(cycle, trialEnd);
-  if (!Number.isInteger(payments) || payments < 2 || !anchor) return "gone";
+  if (!Number.isInteger(payments) || payments < 2) return "gone";
+  // Every subscription has its cycle's anchor: one read without it cannot say when the plan ends.
+  if (!anchor) throw new Error("Stripe answered a subscription without its billing anchor");
 
   await onAccount(
     "POST",

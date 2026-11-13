@@ -82,9 +82,22 @@ const keptMonthKey = (month: string) => `nl:stream:autokept:month:${month}`;
 const KEPT_KINDS = ["delivery", "order", "refund"] as const;
 type KeptKind = (typeof KEPT_KINDS)[number];
 /** Counts one case kept for a person in the month it was kept (lib/paypal-payouts.ts countUnknown keeps its counts the same way). */
-const countKept = (kind: KeptKind, now: number): (string | number)[][] => {
+/**
+ * Counts a case kept for a person once (Codex P's MEDIUM at f830b9f4d0): KEYS[1] the month's counts, KEYS[2] this case's
+ * own mark, set with NX; ARGV[1] the kind, ARGV[2] the seconds both are kept. The count moves only on the absent-to-
+ * present transition of the mark, so a retry after a lost reply, applied or not, never counts the same case again.
+ */
+const COUNT_KEPT_ONCE = `-- marktmorgen:auto-captions-count-kept:v1
+if redis.call('SET', KEYS[2], '1', 'NX', 'EX', ARGV[2]) then
+  redis.call('HINCRBY', KEYS[1], ARGV[1], 1)
+  redis.call('EXPIRE', KEYS[1], ARGV[2])
+  return 1
+end
+return 0`;
+/** One case: the video and the time its order or request was written, so a later order for the same video is its own case. */
+const countKept = (kind: KeptKind, now: number, id: string, at: number): (string | number)[][] => {
   const key = keptMonthKey(new Date(now).toISOString().slice(0, 7));
-  return [["HINCRBY", key, kind, 1], ["EXPIRE", key, REFUND_KEEP_SECONDS]];
+  return [["EVAL", COUNT_KEPT_ONCE, 2, key, `nl:stream:autokeptcase:${kind}:${id}:${at}`, kind, REFUND_KEEP_SECONDS]];
 };
 /** The API version chargeNow writes its invoices with (lib/billing.ts, CHARGE_VERSION), where an invoice names its payment. */
 const CHARGE_READ_VERSION = "2024-06-20";
@@ -399,7 +412,7 @@ async function settleOrder(id: string, raw: string, order: Order, now: number): 
     console.error("a captions charge could not be settled from Stripe after every automatic look; kept for a person", id);
     const left = repliesFor(await redisPipeline([["ZREM", QUEUE, id]]), 1);
     // Counted the first time it leaves the queue; a reply that does not say it was not queued is counted too, so a charge kept for a person is never left out of the owner's report.
-    if (!left || left[0] !== 0) await redisPipeline(countKept("order", now));
+    if (!left || left[0] !== 0) await redisPipeline(countKept("order", now, id, order.at));
     return "kept";
   }
   await redisPipeline([["ZADD", QUEUE, now + Math.min(REFUND_LOOK_MAX_MS, Math.max(LOOK_AGAIN_MS, age / 4)), id]]);
@@ -525,11 +538,11 @@ async function unknownLook(id: string, pending: Pending, raw: string, status: nu
       if (marked === 0) return "waiting";
       if (marked !== 1) {
         // The mark may have landed: counted, so a case kept for a person is never left out of the owner's report.
-        await redisPipeline(countKept("delivery", now));
+        await redisPipeline(countKept("delivery", now, id, pending.at));
         throw new UnknownReplyError("marking an AI captions request kept for a person");
       }
     }
-    await redisPipeline([["ZREM", QUEUE, id], ...keepListed(pending), ...(first ? countKept("delivery", now) : [])]);
+    await redisPipeline([["ZREM", QUEUE, id], ...keepListed(pending), ...(first ? countKept("delivery", now, id, pending.at) : [])]);
     // The hook may have written a refund owed and queued it since the mark: read again after the ZREM. Gone (settled)
     // stays out; a refund owed, a record that does not read, or a read that does not read exactly (rule 24) goes back
     // in (NX: an entry already back keeps its time).
@@ -716,7 +729,7 @@ async function collectRefund(id: string, pending: Pending, owed: Owed, now: numb
       ["ZREM", QUEUE, id],
       ...keepListed(pending),
       // Once: a stuck refund is never looked at again (above).
-      ...countKept("refund", now),
+      ...countKept("refund", now, id, pending.at),
     ]);
     return "waiting";
   }
@@ -820,7 +833,10 @@ export async function autoCaptionsMoney(folder: string): Promise<{ owed: { id: s
   const listed = repliesFor(await redisPipeline([["SMEMBERS", owedKey(folder)]]), 1);
   const members = listed ? stringList(listed[0]) : null;
   if (!members) throw new UnknownReplyError("the store's AI captions money not settled");
-  const ids = members.filter((m) => STREAM_ID_PATTERN.test(m)).sort().slice(0, 100);
+  // Every member a video id exactly (Codex G's MEDIUM at f830b9f4d0): any other string makes the whole list unknown,
+  // never left out, so a list that holds only such members is never "nothing owed".
+  if (!members.every((m) => STREAM_ID_PATTERN.test(m))) throw new UnknownReplyError("the store's AI captions money not settled");
+  const ids = [...members].sort().slice(0, 100);
   if (!ids.length) return out;
   const rows = repliesFor(await redisPipeline(ids.map((id) => ["GET", pendingKey(id)])), ids.length);
   if (!rows) throw new UnknownReplyError("the store's AI captions money not settled");

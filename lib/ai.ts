@@ -312,14 +312,29 @@ export const MAX_DESCRIBED_BYTES = 3_500_000;
  * carries (lib/sales-page.ts, Picture.alt), in the store's language. Only
  * what can be seen: no guess at a brand, a person's name or a result, and
  * any words in the picture only as written. One of the month's jobs.
+ *
+ * `bytes` may be the picture itself or how to read it (6 November 2026): a
+ * picture read from the file store is read only once the job is taken, so a
+ * store with no allowance left (Creator's is 0) never spends a paid read on a
+ * request that is refused. A picture that cannot be read then, or is empty or
+ * too large, gives the job back, since nothing was asked of the model: the
+ * same release `counted` makes for a job over the allowance.
  */
 export async function describePicture(
   store: Store,
-  input: { bytes: Uint8Array; mediaType: "image/webp" | "image/jpeg"; productTitle: string; language: string },
+  input: { bytes: Uint8Array | (() => Promise<Uint8Array | null>); mediaType: "image/webp" | "image/jpeg"; productTitle: string; language: string },
   now = Date.now(),
-): Promise<AiResult<string>> {
-  if (input.bytes.length === 0 || input.bytes.length > MAX_DESCRIBED_BYTES) return { ok: false, reason: "notes" };
-  return counted(store, now, async () => {
+): Promise<AiResult<string> | { ok: false; reason: "invalid" }> {
+  const fits = (bytes: Uint8Array) => bytes.length > 0 && bytes.length <= MAX_DESCRIBED_BYTES;
+  if (typeof input.bytes !== "function" && !fits(input.bytes)) return { ok: false, reason: "notes" };
+  const read = input.bytes;
+  const unread: { reason: "invalid" | "notes" | null } = { reason: null };
+  const done = await counted(store, now, async () => {
+    const bytes = typeof read === "function" ? await read().catch(() => null) : read;
+    if (!bytes || !fits(bytes)) {
+      unread.reason = bytes ? "notes" : "invalid";
+      return null;
+    }
     const system = [
       "You describe a picture on a creator's sales page for someone who cannot see it.",
       `Write in ${input.language}. One plain sentence of at most twenty words. Begin with what is shown, not with 'An image of' or 'A picture of'.`,
@@ -327,13 +342,17 @@ export async function describePicture(
       "Return only the sentence.",
     ].join("\n\n");
     const content = [
-      { type: "image", source: { type: "base64", media_type: input.mediaType, data: Buffer.from(input.bytes).toString("base64") } },
+      { type: "image", source: { type: "base64", media_type: input.mediaType, data: Buffer.from(bytes).toString("base64") } },
       { type: "text", text: `The product this picture is on the page of: ${input.productTitle}` },
     ];
     const answer = await askModel(store, system, content, 200, model());
     const sentence = answer ? line(answer.replace(/^["“]|["”]$/g, ""), 150) : "";
     return sentence || null;
   });
+  // The job is given back by counted itself, once: no call reached the provider (the merge of main into #2975:
+  // giving it back here as well took it back twice).
+  if (unread.reason === null) return done;
+  return { ok: false, reason: unread.reason };
 }
 
 /** The JSON object in an answer, whatever the model put around it. */
@@ -1391,16 +1410,25 @@ async function readPdfFacts(store: Store, pdf: Uint8Array, seen?: { answered: bo
 
 export async function writePage(
   store: Store,
-  input: { title: string; price: string; kind: ProductKind | "free"; summary: string; about: string; notes: string; pdf?: Uint8Array | null },
+  input: {
+    title: string;
+    price: string;
+    kind: ProductKind | "free";
+    summary: string;
+    about: string;
+    notes: string;
+    pdf?: Uint8Array | null | (() => Promise<Uint8Array | null>);
+  },
   now = Date.now(),
   steps?: AiStepsRun,
-): Promise<AiResult<PageDraft> | AiStopped | AiDraftedGiven<PageDraft>> {
+): Promise<AiResult<PageDraft> | AiStopped | AiDraftedGiven<PageDraft> | { ok: false; reason: "file" }> {
   // A run told in steps is named by the page; one that is not a run is refused before anything is taken.
   if (steps && !AI_RUN_ID.test(steps.run)) return { ok: false, reason: "off" };
   const notes = block(input.notes, MAX_AI_NOTES);
   const about = block(input.about, MAX_ABOUT_LENGTH);
   const summary = line(input.summary, MAX_SUMMARY_LENGTH);
-  const pdf = input.pdf && input.pdf.length > 0 ? input.pdf : null;
+  const given = input.pdf;
+  const pdf = typeof given === "function" ? given : given && given.length > 0 ? given : null;
   // Something has to be said about the product, by the creator or by its own file.
   if (!notes && !about && !summary && !pdf) return { ok: false, reason: "notes" };
   // Said to the page as each step starts and ends; never allowed to stop the job.
@@ -1412,7 +1440,12 @@ export async function writePage(
     }
   };
   const unrun: Unrun = { jobs: 0, asked: false };
-  return countedRun(store, now, async () => {
+  // The file may be given as how to read it (6 November 2026): it is read only once the jobs are taken, so a store
+  // with no allowance left (Creator's is 0) never spends a paid file-store read on a request that is refused. A file
+  // that cannot be read then gives every job back (countedRun does it, once: no call reached the model), and the
+  // answer says the file, not a failed step.
+  const unread = { file: false };
+  const done = await countedRun(store, now, async () => {
     // A stepped run marks itself live before its first step, so the page's Stop (offered only once a step is said)
     // finds it; a stop is written over nothing else. Only once the month's allowance is reserved: a refused
     // request writes nothing (cloud O's LOW on #3435).
@@ -1432,8 +1465,13 @@ export async function writePage(
     const reading = { answered: false };
     if (pdf) {
       say("read", "started");
+      const pages = typeof pdf === "function" ? await pdf().catch(() => null) : pdf;
+      if (!pages || pages.length === 0) {
+        unread.file = true;
+        return null;
+      }
       const before = sent();
-      fileFacts = await readPdfFacts(store, pdf, reading);
+      fileFacts = await readPdfFacts(store, pages, reading);
       read = reached(before);
       if (read) say("read", "done");
       else unrun.jobs += READ_PDF_JOBS;
@@ -1528,6 +1566,9 @@ export async function writePage(
     };
     return draft.headline && draft.benefits.length ? draft : null;
   }, pdf ? 1 + READ_PDF_JOBS : 1, unrun);
+  // Every job is given back by countedRun itself, once: nothing was asked of the model (the merge of main into #2975).
+  if (!unread.file) return done;
+  return { ok: false, reason: "file" };
 }
 
 /**

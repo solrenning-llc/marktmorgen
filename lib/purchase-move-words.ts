@@ -65,6 +65,10 @@ export const moveWords = {
       title: "Both addresses are confirmed, but the move isn't finished",
       body: "We could not finish moving your purchases just now. Open this link again in a few minutes to finish it. Nothing is lost.",
     },
+    limit: {
+      title: "These purchases can't be moved here",
+      body: "One of these addresses has already moved its purchases or holds purchases moved from other addresses, so this move can't be made. Nothing moved. If you need help, write to the store.",
+    },
     full: {
       title: "Both addresses are confirmed, but this store has no room to finish the move",
       body: "This store has used all the room it has to keep records, so your purchases have not moved yet. Nothing is lost. Write to the store and ask them to make room, then open this link again.",

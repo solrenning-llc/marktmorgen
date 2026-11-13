@@ -45,13 +45,15 @@ import type { MoveRequest } from "@/lib/purchase-move-rules";
 import { claimPurchaseMove, readPurchaseMove } from "@/lib/purchase-moves";
 import { type Told, tellCreatorOfMove } from "@/lib/purchase-move-notice";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { dataBytes } from "@/lib/store-data-rules";
 import { giveData, takeData } from "@/lib/store-data";
 import type { Store } from "@/lib/store";
 import { suppressedAmong } from "@/lib/suppression";
 
 const ID = /^[0-9a-f]{32}$/;
+/** Existing one-step reader capacity; moves never increase this bound. */
+export const MAX_MOVED_INTO = 5;
 const print = (sid: string, address: string) => createHash("sha256").update(`nimbus-pm-moved:${sid}:${normaliseEmail(address)}`).digest("hex").slice(0, 32);
 const movedKey = (sid: string, address: string) => `nl:pm:moved:${sid}:${print(sid, address)}`;
 const intoKey = (sid: string, address: string) => `nl:pm:into:${sid}:${print(sid, address)}`;
@@ -69,15 +71,23 @@ const roomOf = (sid: string, from: string, id: string, at: number) =>
  * The old address's mark and the new address's line, in one step, as Redis runs a script whole: "moved" when written
  * now or by an earlier try of the same move (its mark already there with the same value), "elsewhere" when the old
  * address's mark is another move's, and nothing written then. The line goes first: a line on a key that is not a hash
- * stops the script before anything is written, and a SET on a string cannot fail. Billed as four commands (the EVAL,
- * GET, HSET and SET). lib/redis-memory.ts models it for the tests.
+ * stops the script before anything is written. Destination movement, source holdings and the existing destination
+ * capacity are rechecked in that same atomic step. At most eight commands including EVAL, both GETs, both HLENs,
+ * HGET, HSET and SET; an idempotent retry verifies the matching line. lib/redis-memory.ts models it for tests.
  */
-export const MOVE_APPLY = `-- marktmorgen:purchase-move-apply:v1
+export const MOVE_APPLY = `-- marktmorgen:purchase-move-apply:v2
 local held = redis.call('GET', KEYS[1])
 if held then
-  if held == ARGV[1] then return 'moved' end
-  return 'elsewhere'
+  if held ~= ARGV[1] then return 'elsewhere' end
+  if redis.call('HGET', KEYS[2], ARGV[2]) == ARGV[3] then return 'moved' end
+  return 'unknown'
 end
+if redis.call('GET', KEYS[4]) then return 'destination-moved' end
+if redis.call('HLEN', KEYS[3]) > 0 then return 'holds-moved' end
+local total = redis.call('HLEN', KEYS[2])
+local line = redis.call('HGET', KEYS[2], ARGV[2])
+if line and line ~= ARGV[3] then return 'unknown' end
+if not line and total >= tonumber(ARGV[4]) then return 'too-many' end
 redis.call('HSET', KEYS[2], ARGV[2], ARGV[3])
 redis.call('SET', KEYS[1], ARGV[1])
 return 'moved'`;
@@ -135,6 +145,7 @@ export async function readMovedIndex(sid: string, raw: string): Promise<{ movedT
   const mark = markOf(first[0], what);
   const lines = linesOf(first[1], what);
   const olds = [...lines.keys()];
+  if (olds.length > MAX_MOVED_INTO) throw new UnknownReplyError(what);
   const asks: (string | number)[][] = [...(mark ? [["HGET", intoKey(sid, mark.to), address]] : []), ...olds.map((old) => ["GET", movedKey(sid, old)])];
   if (!asks.length) return { movedTo: null, movedFrom: [] };
   const second = repliesFor(await redisPipeline(asks), asks.length);
@@ -144,7 +155,10 @@ export async function readMovedIndex(sid: string, raw: string): Promise<{ movedT
     const back = second[0];
     // A line is a move's id: anything else is unknown, never "not moved" (Claude 3 on #3625, LOW 4).
     if (back !== null && (typeof back !== "string" || !ID.test(back))) throw new UnknownReplyError(what);
-    if (back === mark.id) movedTo = mark.to;
+    // A valid mark whose line back is missing or names another move is incomplete evidence (Codex H2 on #3626):
+    // unknown, never "not moved", which would give the old address what it moved away.
+    if (back !== mark.id) throw new UnknownReplyError(what);
+    movedTo = mark.to;
   }
   const movedFrom = olds.filter((old, i) => {
     const theirs = markOf(second[(mark ? 1 : 0) + i], what);
@@ -155,7 +169,7 @@ export async function readMovedIndex(sid: string, raw: string): Promise<{ movedT
 
 export type MoveApplied =
   | { state: "moved"; told: Told }
-  | { state: "not-ready" | "expired" | "gone" | "deleted" | "already-moved" | "full" | "unknown"; told: null };
+  | { state: "not-ready" | "expired" | "gone" | "deleted" | "already-moved" | "destination-moved" | "too-many" | "holds-moved" | "full" | "unknown"; told: null };
 
 const stop = (state: Exclude<MoveApplied["state"], "moved">): MoveApplied => ({ state, told: null });
 
@@ -207,10 +221,27 @@ export async function applyPurchaseMove(store: Store, id: string, now = Date.now
   const text = markText(mark);
   try {
     // An address that already moved, by another request, is not moved again: nothing is taken or written.
-    const held = repliesFor(await redisPipeline([["GET", movedKey(store.sid, from)]]), 1);
+    const held = repliesFor(await redisPipeline([
+      ["GET", movedKey(store.sid, from)], ["GET", movedKey(store.sid, to)],
+      ["HLEN", intoKey(store.sid, from)], ["HLEN", intoKey(store.sid, to)],
+      ["HGET", intoKey(store.sid, to), from],
+    ]), 5);
     if (!held) return stop("unknown");
     const before = markOf(held[0], "a moved address's mark");
     if (before && before.id !== id) return stop("already-moved");
+    const destination = markOf(held[1], "the destination's moved-address mark");
+    const holding = countOf(held[2]);
+    const total = countOf(held[3]);
+    const line = held[4];
+    if (holding === null || total === null || (line !== null && (typeof line !== "string" || !ID.test(line)))) return stop("unknown");
+    // Early refusals avoid taking data room unnecessarily. The script repeats
+    // every guard atomically, so a competing move cannot invalidate this ask.
+    if (!before) {
+      if (destination) return stop("destination-moved");
+      if (holding > 0) return stop("holds-moved");
+      if (line !== null && line !== id) return stop("unknown");
+      if (line === null && total >= MAX_MOVED_INTO) return stop("too-many");
+    }
 
     // The room first: what the two lines keep, for as long as they are kept. Set, not added, and the same for every
     // request from this address, so a second try, or a later request after one that stopped, takes nothing more.
@@ -220,7 +251,7 @@ export async function applyPurchaseMove(store: Store, id: string, now = Date.now
     // The mark and the line in one step: the purchases switch there, and nothing is ever left half written.
     let written: unknown;
     try {
-      const reply = repliesFor(await redisPipeline([["EVAL", MOVE_APPLY, 2, movedKey(store.sid, from), intoKey(store.sid, to), text, from, id]]), 1);
+      const reply = repliesFor(await redisPipeline([["EVAL", MOVE_APPLY, 4, movedKey(store.sid, from), intoKey(store.sid, to), intoKey(store.sid, from), movedKey(store.sid, to), text, from, id, MAX_MOVED_INTO]]), 1);
       written = reply ? reply[0] : undefined;
     } catch {
       // Whether it ran is not known: unknown, and the next try finishes it or finds it done.
@@ -228,6 +259,7 @@ export async function applyPurchaseMove(store: Store, id: string, now = Date.now
     }
     // Another move of this address got there first. Its room is this same slot, so it stays.
     if (written === "elsewhere") return stop("already-moved");
+    if (written === "destination-moved" || written === "holds-moved" || written === "too-many") return stop(written);
     if (written !== "moved") return stop("unknown");
   } catch (error) {
     if (error instanceof UnknownReplyError) return stop("unknown");

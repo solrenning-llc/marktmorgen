@@ -13,7 +13,7 @@
 import { claimAttempts, countRetry, countWaits, forgetPersonCommands, noteRuns, openRuns, personOf, settleAttempts, type Settled } from "@/lib/flow-runs";
 import { RUN_KEEP_SECONDS } from "@/lib/flow-limits";
 import { redisPipeline } from "@/lib/redis";
-import { store as redis } from "./redis-stub";
+import { advance, store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
 const LIST = "l".repeat(16);
@@ -127,6 +127,26 @@ async function main(): Promise<void> {
   const [retries] = (await redisPipeline([["HGET", run(deferred), "retries"]])) as [unknown];
   is("the refused one taken back", retries, "1");
   is("history noted on a run that is there is written as before", [endedStatus, (await state(kept)).history], ["ended", 4]);
+
+  part("A live run outlasts the 400 days a record is kept: each step keeps it (Claude 7's MEDIUM on #4234)");
+  // A workflow may wait up to 365 days a step over up to 20 steps: a run alive past RUN_KEEP_SECONDS must still be
+  // claimed, never read as erased. Every write to a live run keeps its record and history for RUN_KEEP_SECONDS more.
+  const long = "long@example.com";
+  const DAY = 86_400;
+  await openRuns(FLOW, [long], now);
+  await claimAttempts(FLOW, [long], 0, "s1", "email", now);
+  advance(300 * DAY * 1000);
+  await settleAttempts(LIST, FLOW, 0, "s1", "email", [{ email: long, state: "confirmed", note: "", to: 1 }], now + 300 * DAY);
+  is("(setup) the run is live, on its second step", (await redisPipeline([["HGET", run(long), "status"]]))[0], "running");
+  advance(150 * DAY * 1000);
+  const later = await claimAttempts(FLOW, [long], 1, "s2", "email", now + 450 * DAY);
+  is("450 days after it started, its next step is claimed, never taken for an erased run", [later.claimed, later.gone], [[long], []]);
+  const noted = "long-noted@example.com";
+  await openRuns(FLOW, [noted], now + 450 * DAY);
+  advance(300 * DAY * 1000);
+  await noteRuns(FLOW, [{ email: noted, index: 0, stepId: "s1", kind: "run", state: "skipped", note: "Not met.", to: 1, status: "running" }], now + 750 * DAY);
+  advance(150 * DAY * 1000);
+  is("a step noted without an attempt keeps the run too", (await claimAttempts(FLOW, [noted], 1, "s2", "email", now + 900 * DAY)).claimed, [noted]);
 
   done();
 }

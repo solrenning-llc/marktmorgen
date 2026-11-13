@@ -102,13 +102,16 @@ export async function POST(request: NextRequest) {
                 ? "download"
                 : "link";
     // The product's own PDF, its first pages only, when the creator asked for it to be read (lib/ai.ts, readPdfFacts).
-    let pdf: Uint8Array | null = null;
+    // Read only once the month's jobs are taken (lib/ai.ts, writePage): a store with no allowance left never spends a
+    // paid file-store read on a request it is then refused.
+    let pdf: (() => Promise<Uint8Array | null>) | null = null;
     if (body.readFile === true) {
-      // Nothing is read from storage for a job that could not be admitted, this month's balance included (read only, nothing reserved).
-      const refused = await aiJobRefusal(store, 1 + READ_PDF_JOBS);
-      if (refused) return fail(refused);
-      pdf = await pdfPagesOf(product);
-      if (!pdf) return fail("file");
+      const file = readableFile(product);
+      if (!file) return fail("file");
+      pdf = async () => {
+        const bytes = await readFileWhole(file.pathname, MAX_STAMP_BYTES);
+        return bytes ? firstPages(bytes, READ_PDF_PAGES) : null;
+      };
     }
     const input: Parameters<typeof writePage>[1] = {
       title: product.title,
@@ -218,10 +221,13 @@ export async function POST(request: NextRequest) {
     const path = text(body.path, 200);
     const folder = await imageFolder(guarded.ref);
     if (!path || !ownsImagePath(path, folder)) return fail("invalid");
-    const found = await get(path, { access: "private" }).catch(() => null);
-    if (!found || found.statusCode !== 200 || !found.stream) return fail("invalid");
-    const bytes = new Uint8Array(await new Response(found.stream).arrayBuffer());
-    return answer(describePicture(store, { bytes, mediaType: imageType(path), productTitle: product.title, language: LANGUAGES[store.language].english }));
+    // Read only once the month's job is taken (lib/ai.ts, describePicture): a store with no allowance left never
+    // spends a paid file-store read on a request it is then refused.
+    const read = async () => {
+      const found = await get(path, { access: "private" });
+      return found && found.statusCode === 200 && found.stream ? new Uint8Array(await new Response(found.stream).arrayBuffer()) : null;
+    };
+    return answer(describePicture(store, { bytes: read, mediaType: imageType(path), productTitle: product.title, language: LANGUAGES[store.language].english }));
   }
   if (body.kind === "translate") {
     // The page as it stands in the editor, every word of it into one of the
@@ -391,7 +397,7 @@ async function pdfPagesOf(product: Parameters<typeof readableFile>[0]): Promise<
  * ends, then the result, so the studio can say what is running and offer to
  * stop. The first line is padding some browsers wait for.
  */
-function inSteps<T>(job: (onStep: (step: AiStepId, state: AiStepState) => void) => Promise<AiResult<T> | AiStopped | AiDraftedGiven<T>>, failure: string): Response {
+function inSteps<T>(job: (onStep: (step: AiStepId, state: AiStepState) => void) => Promise<AiResult<T> | AiStopped | AiDraftedGiven<T> | { ok: false; reason: "file" }>, failure: string): Response {
   const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {

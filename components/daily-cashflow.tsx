@@ -4,7 +4,7 @@ import { dailyCashflowRows } from "@/lib/daily-cashflow";
 import { dailyCashflowReport } from "@/lib/channel-reports";
 import { formatMoney } from "@/lib/money";
 import { ReportDownload } from "@/components/report-download";
-export function DailyCashflowPanel({ data, range, spends }: { data: StatsData; range: "d7" | "d30" | "d90"; spends: AdSpend[] }) {
+export function DailyCashflowPanel({ data, range, spends }: { data: StatsData; range: "d7" | "d30" | "d90"; spends: AdSpend[] | undefined }) {
   const rows = dailyCashflowRows(data, range, spends);
   if (!rows.length) return null;
   const money = (amount: number | null) => amount === null ? "—" : formatMoney(amount, data.currency);

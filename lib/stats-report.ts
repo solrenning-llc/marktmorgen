@@ -408,7 +408,8 @@ const CHANNEL_WORDS: Record<string, string> = {
 const channelWord = (source: string) => (Object.hasOwn(CHANNEL_WORDS, source) ? CHANNEL_WORDS[source] : source);
 
 /** The week's email, in words. Null when the store had no visitors in the week: nothing to say. */
-export function weeklyMessage(store: Store, data: StatsData, stopUrl: string, spends: AdSpend[] = [], goal = 0): { subject: string; text: string } | null {
+/** spends null: the ad spend could not be read; the email says so instead of leaving it out as if there were none. */
+export function weeklyMessage(store: Store, data: StatsData, stopUrl: string, spends: AdSpend[] | null = [], goal = 0): { subject: string; text: string } | null {
   const week = data.totals.d7;
   if (week.visitors === 0) return null;
   const known = paidFiguresComplete(data);
@@ -460,11 +461,12 @@ export function weeklyMessage(store: Store, data: StatsData, stopUrl: string, sp
     }
   }
 
-  const worth = insightsFrom(data, "d7", spends, 3);
+  const worth = insightsFrom(data, "d7", spends ?? [], 3);
   if (worth.length) {
     lines.push("", "Worth knowing:");
     for (const item of worth) lines.push(`- ${item.text}`);
   }
+  if (spends === null) lines.push("", "Ad spend could not be read this time, so nothing here is set against it.");
 
   lines.push("", `Everything, day by day and channel by channel, is in your studio: ${SITE_URL}/studio`);
   lines.push("", `You get this every Monday while your store has visitors. To stop it: ${stopUrl}`);

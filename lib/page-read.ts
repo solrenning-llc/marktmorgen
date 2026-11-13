@@ -339,18 +339,21 @@ export function forgetReadingsSeen(): void {
  * window's readings, so its sends stay inside the window's ceiling (Claude 5 on #2571). The count's expiry is set when
  * the count is made: the window's end and a day (lib/allowance-window.ts, keepSecondsFor), never extended.
  * KEYS: the nonce's mark, the window's count. ARGV: the ceiling, the mark's seconds, the count's seconds.
- * Answers {1, n} counted, {-1, n} a token used already, {0, n} the window at its ceiling (nothing written).
+ * Answers {1, n} counted, {-1, n} a token used already, {0, n} the window at its ceiling (nothing written). A token
+ * used already is read before anything is counted, so a replay never takes another place in the window (v2; Codex X2's
+ * MEDIUM on #2571: v1 counted first and left each replay's place taken).
  * Modelled by lib/redis-memory.ts.
  */
-export const ADMIT_READING = `-- marktmorgen:read-admit:v1
+export const ADMIT_READING = `-- marktmorgen:read-admit:v2
+if redis.call('EXISTS', KEYS[1]) == 1 then return {-1, tonumber(redis.call('GET', KEYS[2]) or '0')} end
 local n = redis.call('INCR', KEYS[2])
 if n == 1 then redis.call('EXPIRE', KEYS[2], ARGV[3]) end
 if n > tonumber(ARGV[1]) then
   redis.call('DECR', KEYS[2])
   return {0, n - 1}
 end
-if redis.call('SET', KEYS[1], '1', 'NX', 'EX', ARGV[2]) then return {1, n} end
-return {-1, n}`;
+redis.call('SET', KEYS[1], '1', 'EX', ARGV[2])
+return {1, n}`;
 
 /**
  * One reading of a good token (readTokenPass) admitted (ADMIT_READING): true only when it is counted now. A window

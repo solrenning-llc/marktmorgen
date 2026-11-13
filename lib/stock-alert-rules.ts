@@ -40,11 +40,22 @@ function isLeft(value: unknown): value is number | null {
   return value === null || isCount(value);
 }
 
-/** An optional whole number from 1 to `max`: 0 when left empty or 0 (off), null when it is anything else. */
+/**
+ * An optional whole number from 1 to `max`: 0 (off) when left empty, never stored (a product saved before the
+ * setting existed keeps selling as before) or all zeros; null when it is anything else. Typed text is digits only:
+ * Number() would read "0x10" as 16 and "1e1" as 10 (Claude 2 nuvem I and Claude 1 on #3607).
+ */
 function optional(raw: unknown, max: number): number | null {
-  if (raw === "" || raw === 0 || raw === "0") return 0;
-  const n = typeof raw === "string" && raw.trim() ? Number(raw.trim()) : raw;
-  return typeof n === "number" && Number.isInteger(n) && n >= 1 && n <= max ? n : null;
+  if (raw === undefined || raw === 0) return 0;
+  if (typeof raw === "string") {
+    const typed = raw.trim();
+    if (!typed) return 0;
+    if (!/^[0-9]{1,12}$/.test(typed)) return null;
+    const n = Number(typed);
+    if (n === 0) return 0;
+    return n <= max ? n : null;
+  }
+  return typeof raw === "number" && Number.isInteger(raw) && raw >= 1 && raw <= max ? raw : null;
 }
 
 /** Whether the back-in-stock box is offered: only on a sold-out limited product, while its list has room. */

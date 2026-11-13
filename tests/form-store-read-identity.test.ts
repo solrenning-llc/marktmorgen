@@ -26,8 +26,8 @@ async function main() {
     redis.pipeline = async batch => batch.length === 1 && batch[0][0] === 'HGET' && batch[0][2] === a.id ? [JSON.stringify(b)] : native(batch);
     is('HGET for A answered with B is unknown, never B', await outcome(() => readForm(stats, a.id)), 'unknown');
 
-    redis.pipeline = async batch => batch.length === 1 && batch[0][0] === 'HVALS' && batch[0][1] === key ? [[JSON.stringify(a), JSON.stringify(a)]] : native(batch);
-    is('HVALS with the same form twice is unknown, never a duplicate list', await outcome(() => readForms(stats)), 'unknown');
+    redis.pipeline = async batch => batch.length === 1 && batch[0][0] === 'HGETALL' && batch[0][1] === key ? [[a.id, JSON.stringify(a), a.id, JSON.stringify(a)]] : native(batch);
+    is('the form list with the same form twice is unknown, never a duplicate list', await outcome(() => readForms(stats)), 'unknown');
   } finally {
     redis.pipeline = native;
   }

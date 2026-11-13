@@ -67,8 +67,8 @@ async function main() {
       redis.pipeline = async batch => {
         if (commands + batch.length > 60) throw Error('Sixty application commands per export pair is the ceiling');
         commands += batch.length;
-        if (mode !== 'canonical' && batch.length === 1 && batch[0][0] === 'HVALS' && batch[0][1] === formKey) {
-          injectedHvals++; return [[supplied]];
+        if (mode !== 'canonical' && batch.length === 1 && batch[0][0] === 'HGETALL' && batch[0][1] === formKey) {
+          injectedHvals++; return [[canonical.id, supplied]];
         }
         if (mode !== 'canonical' && batch.length === 1 && batch[0][0] === 'HGET' && batch[0][1] === formKey && batch[0][2] === canonical.id) {
           injectedHget++; return [supplied];
@@ -87,7 +87,7 @@ async function main() {
         exportedFields: json.forms?.[0]?.form.fields, exportedAnswers: json.forms?.[0]?.answers,
         unreadPart4: json.unreadPart4, csvStatus: csv.status, attachment: csv.headers.get('content-disposition'), csv: text,
       }));
-      is(`${mode}: selected HVALS substitution count`, injectedHvals, mode === 'canonical' ? 0 : 1);
+      is(`${mode}: selected form-list substitution count`, injectedHvals, mode === 'canonical' ? 0 : 1);
       is(`${mode}: selected HGET substitution count`, injectedHget, mode === 'canonical' ? 0 : 1);
       is(`${mode}: original two-question record stays byte-identical`, storedForm, JSON.stringify(canonical));
       is(`${mode}: original saved answer stays byte-identical`, storedAnswers, [JSON.stringify(answer)]);

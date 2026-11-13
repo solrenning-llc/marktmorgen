@@ -17,7 +17,7 @@ async function main() {
   const pipeline = redis.pipeline.bind(redis);
   const stats = 'sibling-shapes', key = `nl:form:r:${stats}:${form.id}`;
   const cases = [
-    { name: 'inventory', call: () => readForms(stats), command: 'HVALS', replies: [[], [null], [[] , 0], [[false]], [['not json']], [[JSON.stringify({})]]] },
+    { name: 'inventory', call: () => readForms(stats), command: 'HGETALL', replies: [[], [null], [[] , 0], [[form.id, false]], [[form.id, 'not json']], [[form.id, JSON.stringify({})]], [[form.id]]] },
     { name: 'single form', call: () => readForm(stats, form.id), command: 'HGET', replies: [[], [false], ['not json'], [JSON.stringify({})], [null, 0]] },
     { name: 'counts', call: () => responseCounts(stats, [form.id]), command: 'LLEN', replies: [[], [null], ['1'], [-1], [1.5], [0, 0]] },
     { name: 'keep preflight', call: () => addResponse(stats, form.id, responses[0], ROOM), command: 'LLEN', replies: [[], [null, null], ['1', null], [1, false], [1, null], [0, JSON.stringify(responses[0])]] },
@@ -56,7 +56,7 @@ async function main() {
     redis.pipeline = async batch => {
       if (commands + batch.length > 300) throw Error('Three hundred application commands is the export/copy ceiling');
       commands += batch.length;
-      if (unknown && batch[0][0] === 'HVALS' && batch[0][1] === `nl:forms:${shop.statsId}`) { injections++; return [null]; }
+      if (unknown && batch[0][0] === 'HGETALL' && batch[0][1] === `nl:forms:${shop.statsId}`) { injections++; return [null]; }
       return pipeline(batch);
     };
     try {

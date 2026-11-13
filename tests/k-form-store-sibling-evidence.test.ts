@@ -8,7 +8,7 @@ import {done,is,part} from './check';
 async function main(){
  const pipeline=redis.pipeline.bind(redis),stats='sibling-fixture',key=`nl:form:r:${stats}:${form.id}`;
  const helpers=[
-  {name:'readForms',call:()=>readForms(stats),match:(b:(string|number)[][])=>b[0][0]==='HVALS',reply:[null]},
+  {name:'readForms',call:()=>readForms(stats),match:(b:(string|number)[][])=>b[0][0]==='HGETALL',reply:[null]},
   {name:'readForm',call:()=>readForm(stats,form.id),match:(b:(string|number)[][])=>b[0][0]==='HGET',reply:[false]},
   {name:'responseCounts',call:()=>responseCounts(stats,[form.id]),match:(b:(string|number)[][])=>b[0][0]==='LLEN',reply:[null]},
   {name:'addResponse',call:()=>addResponse(stats,form.id,responses[0],ROOM),match:(b:(string|number)[][])=>b[0][0]==='EVAL'&&String(b[0][1]).startsWith('-- marktmorgen:form-keep:'),reply:[null]},

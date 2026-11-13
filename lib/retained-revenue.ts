@@ -118,8 +118,14 @@ export const DISPUTE_NOTE =
 export type Window = "d7" | "d30" | "d90";
 export const WINDOWS: readonly Window[] = ["d7", "d30", "d90"];
 
-/** One amount in the smallest unit of its currency, with the day (UTC) it was recorded and the channel it is under. */
-export type Entry = { day: string; cents: number; currency: string; source: string };
+/**
+ * One amount in the smallest unit of its currency, with the day (UTC) it was
+ * recorded and the channel it is under. `unconfirmed` marks a refund or
+ * dispute whose payment is not among the store's own payments read: it may
+ * belong to a payment made outside the store (a payment link, another
+ * store), so it is neither taken off the kept total nor left out of it.
+ */
+export type Entry = { day: string; cents: number; currency: string; source: string; unconfirmed?: boolean };
 
 export type Readings = {
   /** Checkouts and one-click extras. Complete when every page was read. */
@@ -175,12 +181,15 @@ const DAY_SHAPE = /^\d{4}-\d{2}-\d{2}$/;
  * of the smallest unit or a currency that is not named. A refund, renewal or
  * dispute is never for nothing, so a zero there is an amount not read too.
  * Such an entry makes the reading incomplete: left out, the money would make
- * the kept figure look exactly like a real one.
+ * the kept figure look exactly like a real one. So does a refund or dispute
+ * in the window marked `unconfirmed`.
  */
 function holdsUnread(entries: Entry[], from: string, positive: boolean): boolean {
   return entries.some((e) => {
     if (typeof e.day !== "string" || !DAY_SHAPE.test(e.day)) return true;
     if (e.day < from) return false;
+    // An adjustment whose origin in the store is not confirmed leaves the kept figure unknown (X8-2325).
+    if (e.unconfirmed) return true;
     return !Number.isSafeInteger(e.cents) || e.cents < (positive ? 1 : 0) || typeof e.currency !== "string" || !e.currency;
   });
 }

@@ -1333,7 +1333,7 @@ export function renewalEntries(store: Store, invoices: Record<string, unknown>[]
   return out;
 }
 
-async function readRenewals(store: Store, since: number, now: number, pages: number): Promise<SalesStats["renewals"] & { entries: Entry[] }> {
+async function readRenewals(store: Store, since: number, now: number, pages: number): Promise<SalesStats["renewals"] & { entries: Entry[]; paymentIntents: Set<string> }> {
   const invoices: Record<string, unknown>[] = [];
   let after = "";
   const seen = new Set<string>();
@@ -1355,7 +1355,31 @@ async function readRenewals(store: Store, since: number, now: number, pages: num
   const entries = renewalEntries(store, invoices);
   // A renewal in a currency the answer does not name is in no total: the reading is incomplete.
   if (entries.some((entry) => !entry.currency)) partial = true;
-  return { ...renewalsFrom(store, invoices, now, store.currency), partial, entries };
+  return { ...renewalsFrom(store, invoices, now, store.currency), partial, entries, paymentIntents: renewalPaymentIntents(store, invoices) };
+}
+
+/**
+ * The payments of this store's paid renewals that the invoices name (the
+ * same invoices renewalEntries counts): on the invoice itself in older API
+ * versions, or among its payments when they come with it. A refund or dispute
+ * of one of them is confirmed as the store's (X8-2325). Pure.
+ */
+export function renewalPaymentIntents(store: Store, invoices: Record<string, unknown>[]): Set<string> {
+  const handles = saleHandles(store);
+  const out = new Set<string>();
+  for (const invoice of invoices) {
+    if (invoice.status !== "paid" || invoice.billing_reason !== "subscription_cycle") continue;
+    if (!handles.has(invoiceMeta(invoice).store ?? "")) continue;
+    if (typeof invoice.payment_intent === "string" && invoice.payment_intent) out.add(invoice.payment_intent);
+    const payments = (invoice.payments as { data?: unknown } | null | undefined)?.data;
+    for (const p of Array.isArray(payments) ? payments : []) {
+      const intent = (p as { status?: unknown; payment?: { payment_intent?: unknown } | null } | null)?.status === "paid"
+        ? (p as { payment?: { payment_intent?: unknown } | null }).payment?.payment_intent
+        : undefined;
+      if (typeof intent === "string" && intent) out.add(intent);
+    }
+  }
+  return out;
 }
 
 /** One paid renewal of this store's memberships and payment plans, for the buyer ledger (lib/segments.ts, 270 [GR1] unit 2). */
@@ -1805,15 +1829,25 @@ export async function readSales(store: Store, now = Date.now()): Promise<SalesSt
     // What each currency kept (lib/retained-revenue.ts): every reading as entries with its channel.
     const byPayment = new Map(read.filter((sale) => sale.paymentIntent).map((sale) => [sale.paymentIntent, sale]));
     const placed = (paymentIntent: string) => (paymentIntent ? byPayment.get(paymentIntent)?.source : undefined) ?? UNRECORDED;
+    // Only a refund or dispute of a payment confirmed as the store's (a sale or
+    // a renewal read) is taken off its kept total. Any other one may be a
+    // payment made outside the store, such as a payment link, so the kept
+    // total is left unknown rather than reduced by it (X8-2325).
+    const renewalPayments = renewalRead?.paymentIntents ?? new Set<string>();
+    const adjustment = (row: { created: number; cents: number; currency: string; paymentIntent: string }): Entry => {
+      const entry: Entry = { day: dayKey(row.created), cents: row.cents, currency: row.currency, source: placed(row.paymentIntent) };
+      const confirmed = Boolean(row.paymentIntent) && (byPayment.has(row.paymentIntent) || renewalPayments.has(row.paymentIntent));
+      return confirmed ? entry : { ...entry, unconfirmed: true };
+    };
     out.keptIn = keptByCurrency(
       {
         sales: { entries: sales.map((sale) => ({ day: dayKey(sale.created), cents: sale.cents, currency: sale.currency, source: sale.source })), complete: !readPartial },
         renewals: store.stripeAccountId ? { entries: renewalEntryRows, complete: Boolean(renewals && !renewals.partial) } : null,
         refunds: refundRead
-          ? { entries: refundRead.rows.map((r) => ({ day: dayKey(r.created), cents: r.cents, currency: r.currency, source: placed(r.paymentIntent) })), complete: !refundRead.partial }
+          ? { entries: refundRead.rows.map(adjustment), complete: !refundRead.partial }
           : null,
         disputes: disputeRead
-          ? { entries: disputeRead.rows.map((d) => ({ day: dayKey(d.created), cents: d.cents, currency: d.currency, source: placed(d.paymentIntent) })), complete: !disputeRead.partial }
+          ? { entries: disputeRead.rows.map(adjustment), complete: !disputeRead.partial }
           : null,
       },
       dayKey(now),

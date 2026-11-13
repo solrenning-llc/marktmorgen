@@ -606,6 +606,36 @@ export async function notYetTaken<T extends { to: string }>(batchKey: string, me
   }
 }
 
+/**
+ * Marks each message of a wave as possibly taken, before it is handed to Amazon: true only when every mark is
+ * confirmed new. Otherwise the marks this call may have written are taken off (best effort) and nothing is sent.
+ */
+async function markMaybe(batchKey: string, wave: { to: string }[]): Promise<boolean> {
+  const keys = wave.map((m) => maybeKey(batchKey, m.to));
+  try {
+    const replies = repliesFor(await redisPipeline(keys.map((key) => ["SET", key, "1", "NX", "EX", DID_SECONDS])), keys.length);
+    if (replies && replies.every((reply) => reply === "OK")) return true;
+    // Taken off only where this call wrote, or may have: an existing mark (null) is somebody else's evidence.
+    const ours = replies ? keys.filter((_, i) => replies[i] === "OK") : keys;
+    if (ours.length) await redisPipeline(ours.map((key) => ["DEL", key])).catch(() => {});
+    return false;
+  } catch {
+    // Unknown whether any landed: take them off, as none was there when the batch read them (notMaybeTaken).
+    await redisPipeline(keys.map((key) => ["DEL", key])).catch(() => {});
+    return false;
+  }
+}
+
+/** Takes off the marks of messages Amazon said for certain it did not take; one that cannot be confirmed is logged. */
+async function unmarkMaybe(batchKey: string, messages: { to: string }[]): Promise<void> {
+  try {
+    const replies = repliesFor(await redisPipeline(messages.map((m) => ["DEL", maybeKey(batchKey, m.to)])), messages.length);
+    if (!replies || replies.some((reply) => reply !== 1)) console.error("an email Amazon did not take could not be confirmed unmarked");
+  } catch (error) {
+    console.error("an email Amazon did not take could not be unmarked", error);
+  }
+}
+
 /** The longest one batch may take here; what is left after it goes by the other sender. */
 const BATCH_MS = 9_000;
 
@@ -626,29 +656,38 @@ export async function sesBatch<T extends SesMessage>(
   batchKey: string,
   /** Whether whoever may have been taken is marked for notMaybeTaken: a plain batch's, never a list batch's (lib/email.ts). */
   options: { maybeMarks?: boolean } = {},
-): Promise<{ taken: T[]; left: T[]; refused: { message: T; why: string }[]; down: string; uncertain?: true }> {
+): Promise<{ taken: T[]; left: T[]; refused: { message: T; why: string }[]; down: string; uncertain?: true; stalled?: true }> {
   const taken: T[] = [];
   const refused = new Map<T, string>();
   const perSecond = Math.max(1, Math.floor(state.rate || 1));
   const started = Date.now();
   let down = "";
   let uncertain = false;
+  let stalled = false;
   let queue = [...messages];
-  for (let round = 0; round < 2 && queue.length && !down && !uncertain; round += 1) {
+  for (let round = 0; round < 2 && queue.length && !down && !uncertain && !stalled; round += 1) {
     const again: T[] = [];
-    for (let i = 0; i < queue.length && !down && !uncertain; i += perSecond) {
+    for (let i = 0; i < queue.length && !down && !uncertain && !stalled; i += perSecond) {
       if (Date.now() - started > BATCH_MS) {
         again.push(...queue.slice(i));
         break;
       }
       const waveStarted = Date.now();
       const wave = queue.slice(i, i + perSecond);
+      // Written down before Amazon is asked (notMaybeTaken): if its answer is then lost, a retry of this batch leaves
+      // these people out even when Redis cannot be written afterwards. A mark that is not confirmed sends nothing of
+      // the wave: the rest waits, and nothing is left marked that was not asked (outage drill, 13 November 2026).
+      if (options.maybeMarks === true && !(await markMaybe(batchKey, wave))) {
+        again.push(...queue.slice(i));
+        stalled = true;
+        break;
+      }
       const results = await Promise.all(wave.map((m) => sesSend(config, m)));
       const done: T[] = [];
-      const unsure: T[] = [];
+      const notTaken: T[] = [];
       results.forEach((result, j) => {
+        if (result.outcome !== "sent" && result.uncertain !== true) notTaken.push(wave[j]);
         if (result.uncertain === true) {
-          unsure.push(wave[j]);
           // A provider may have accepted this email before losing its reply.
           // Keep it unresolved, with no second attempt in this call.
           uncertain = true;
@@ -668,13 +707,14 @@ export async function sesBatch<T extends SesMessage>(
         // leaves these people out.
         await redisPipeline(done.map((m) => ["SET", didKey(batchKey, m.to), "1", "EX", DID_SECONDS])).catch(() => {});
       }
-      // Written down at once too: whoever may have been taken is left out of a retry of this batch (notMaybeTaken).
-      if (unsure.length && options.maybeMarks === true) await redisPipeline(unsure.map((m) => ["SET", maybeKey(batchKey, m.to), "1", "NX", "EX", DID_SECONDS])).catch(() => {});
+      // Amazon said for certain it did not take these: their marks go, so a retry may send them. One that cannot be
+      // taken off leaves that person out of a retry, as an answer that was lost does.
+      if (notTaken.length && options.maybeMarks === true) await unmarkMaybe(batchKey, notTaken);
       if (down || uncertain) again.push(...queue.slice(i + perSecond));
       else if (i + perSecond < queue.length) await pause(Math.max(0, 1_000 - (Date.now() - waveStarted)));
     }
     queue = again;
-    if (queue.length && !down && !uncertain && round === 0) {
+    if (queue.length && !down && !uncertain && !stalled && round === 0) {
       if (Date.now() - started > BATCH_MS) break;
       await pause(1_000);
     }
@@ -685,5 +725,8 @@ export async function sesBatch<T extends SesMessage>(
     refused: [...refused].map(([message, why]) => ({ message, why })),
     down,
     ...(uncertain ? { uncertain: true as const } : {}),
+    // Our own Redis could not write down who may be taken: Amazon was not asked for the rest, and it is not
+    // Amazon's doing, so the rest waits for Amazon rather than going to the other sender.
+    ...(stalled ? { stalled: true as const } : {}),
   };
 }

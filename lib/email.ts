@@ -778,6 +778,9 @@ async function dispatchBatch(
       // its caller without another SES wave or a switch to Resend. A durable
       // caller checkpoint is still needed before a later invocation.
       if (result.uncertain === true) return "retry";
+      // Nor one whose marks could not be written: nothing more was asked of Amazon, and it is not Amazon's doing,
+      // so the rest waits for it, never handed to Resend for good (lib/ses.ts, markMaybe).
+      if (result.stalled === true) return "retry";
       // SES excludes definitively refused recipients from both accepted and
       // pending lists. Missing recipients cannot establish a completed list.
       if (listOnly && result.taken.length + result.left.length < going.length) {

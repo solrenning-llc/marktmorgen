@@ -72,6 +72,28 @@ async function main(): Promise<void> {
     is(`${kind}: the rest of the batch is not stuck behind it`, posted.filter((t) => t === "later@example.com").length, 1);
     is(`${kind}: the confirmed one is not written to again`, posted.filter((t) => t === "ok@example.com").length, 1);
   }
+  part("Redis cannot write down who may have been taken, while SES loses an answer");
+  {
+    posted.length = 0;
+    lossKind = "throw";
+    loseReplyFor = "unknown@example.com";
+    const key = "upd:probe-marks-down:0:3";
+    const batch = [letter("ok@example.com"), letter("unknown@example.com"), letter("later@example.com")];
+    const pipeline = redis.pipeline.bind(redis);
+    let marksDown = true;
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      if (marksDown && commands.some((c) => String(c[1] ?? "").startsWith("nl:ses:maybe:") && c[0] === "SET")) throw new Error("Redis request timed out");
+      return pipeline(commands);
+    }) as typeof redis.pipeline;
+    is("marks down: the batch is not reported sent", await sendBatch(batch, key, { by: "company" }), "retry");
+    marksDown = false;
+    loseReplyFor = null;
+    await sendBatch(batch, key, { by: "company" });
+    redis.pipeline = pipeline;
+    for (const to of ["ok@example.com", "unknown@example.com", "later@example.com"]) {
+      is(`marks down: ${to} is written to exactly once`, posted.filter((t) => t === to).length, 1);
+    }
+  }
   done();
 }
 

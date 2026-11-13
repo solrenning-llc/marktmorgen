@@ -1632,9 +1632,11 @@ const INVOICE_ID=/^in_[A-Za-z0-9]{6,64}$/;
  * latest invoice, read by its id, is this subscription's paid renewal
  * (`subscription_cycle`) of exactly this period, at the published price of
  * its plan, in dollars, with nothing left due and not marked paid outside
- * Stripe. Stripe moves a subscription into its next period about an hour
- * before it charges the renewal (a draft invoice), so an active subscription
- * alone never proves it. Anything else, or a read that fails, is not paid.
+ * Stripe, and at least that price charged in money: an invoice a coupon or a
+ * credit balance paid in whole or in part funds no full period. Stripe
+ * moves a subscription into its next period about an hour before it charges
+ * the renewal (a draft invoice), so an active subscription alone never
+ * proves it. Anything else, or a read that fails, is not paid.
  */
 async function renewalInvoicePaid(subscription:Record<string,unknown>,tier:Tier,cycle:Cycle,start:number,end:number):Promise<boolean>{
  try{
@@ -1644,7 +1646,7 @@ async function renewalInvoicePaid(subscription:Record<string,unknown>,tier:Tier,
   const invoice:unknown=await onPlatform('GET',`/invoices/${encodeURIComponent(id)}`);
   if(!plainRecord(invoice)||ownDataField(invoice,'id')!==id||ownDataField(invoice,'status')!=='paid'||ownDataField(invoice,'billing_reason')!=='subscription_cycle'||ownDataField(invoice,'currency')!=='usd')return false;
   const paidAmount=ownDataField(invoice,'amount_paid'),outOfBand=ownDataField(invoice,'paid_out_of_band');
-  if(ownDataField(invoice,'subtotal')!==PUBLISHED_PLAN_PRICES[tier][cycle]||ownDataField(invoice,'amount_remaining')!==0||typeof paidAmount!=='number'||!Number.isSafeInteger(paidAmount)||paidAmount<0||(outOfBand!==undefined&&outOfBand!==false))return false;
+  if(ownDataField(invoice,'subtotal')!==PUBLISHED_PLAN_PRICES[tier][cycle]||ownDataField(invoice,'amount_remaining')!==0||typeof paidAmount!=='number'||!Number.isSafeInteger(paidAmount)||paidAmount<PUBLISHED_PLAN_PRICES[tier][cycle]||(outOfBand!==undefined&&outOfBand!==false))return false;
   // Older API versions name the subscription on the invoice, newer ones under parent; every name given must be this one.
   const parent=ownDataField(invoice,'parent'),details=plainRecord(parent)?ownDataField(parent,'subscription_details'):undefined;
   const named=[ownDataField(invoice,'subscription'),plainRecord(details)?ownDataField(details,'subscription'):undefined].filter(value=>value!==undefined&&value!==null);

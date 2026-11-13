@@ -15,7 +15,7 @@ import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
 const person = "review-person@example.test";
 const reference = "cs_test_ReviewProof001";
-async function setup() {
+async function setup(again = 0) {
   redis.clear();
   const owner = "review-owner@example.test";
   const batches: { to: string | string[] }[][] = [];
@@ -45,7 +45,7 @@ async function setup() {
   await setStripeAccount(owner, "acct_1TestHarbor0001", true);
   await setSubscription(owner, { customerId: "cus_ReviewProof", subscriptionId: "sub_ReviewProof", active: true, tier: "pro", period: paidPeriod() });
   await setMailSettings(owner, { fromName: "Review Proof", address: "1 Example St, Example City" });
-  await setReviewAsk(owner, { days: 7 });
+  await setReviewAsk(owner, again ? { days: 7, again } : { days: 7 });
   const made = await addProduct(owner, "Review evidence", "", "27", null);
   assert.ok(made.ok); productId = made.product.id;
   await setProductLink(owner, productId, "https://example.com/review");
@@ -93,5 +93,71 @@ test("a throw after the first email's claim never drops the order unsent", async
     const second = await sendReviewRequests(storeForHandle, Date.now() + 20000, r.now);
     assert.deepEqual(second, { sent: 1, dropped: 0, waiting: 0 }, "the next run sends it, never drops it");
     assert.equal(r.batches.flat().length, 1, "once");
+  } finally { redis.pipeline = r.base; globalThis.fetch = oldFetch; }
+});
+
+// Codex T on #4360: the undo itself fails too. A claim is written short (an hour) and stretched only just before its
+// batch goes, so one a run could not let go of lapses on its own: the order waits, and is sent once after it lapses.
+const SENT = `nl:rev:ask:sent:${reference}`;
+const AGAIN = `${SENT}:again`;
+
+test("a first whose claim cannot be let go of waits for it to lapse, never dropped", async () => {
+  const oldFetch = globalThis.fetch;
+  const r = await setup();
+  try {
+    let claimed = false, failures = 0;
+    redis.pipeline = async (commands) => {
+      // The review link's write fails, and then the release of the claim fails too.
+      if (claimed && failures < 2) { failures += 1; throw new Error("synthetic Redis timeout"); }
+      const out = await r.original(commands);
+      if (commands[0]?.[0] === "SET" && commands[0]?.[1] === SENT && String(commands[0]?.[2]).startsWith("sending:")) claimed = true;
+      return out;
+    };
+    const oldLog = console.error;
+    console.error = () => {};
+    await sendReviewRequests(storeForHandle, Date.now() + 20000, r.now);
+    console.error = oldLog;
+    redis.pipeline = r.original;
+    assert.equal(failures, 2, "both the preparation and the release failed");
+    const ttl = Number(redis.run(["TTL", SENT]));
+    assert.ok(ttl > 0 && ttl <= 3600, "the claim left behind lapses within the hour");
+    const waiting = await sendReviewRequests(storeForHandle, Date.now() + 20000, r.now);
+    assert.equal(waiting.dropped, 0, "the next run does not drop the order on the stuck claim");
+    assert.notEqual(redis.run(["ZSCORE", ASK_DUE_KEY, r.member]), null, "the order is still due");
+    redis.run(["DEL", SENT]); // the claim lapses
+    const after = await sendReviewRequests(storeForHandle, Date.now() + 20000, r.now + 3601);
+    assert.equal(after.sent, 1, "once it lapsed, the order is sent");
+    assert.equal(r.batches.flat().length, 1, "once");
+  } finally { redis.pipeline = r.base; globalThis.fetch = oldFetch; }
+});
+
+test("a reminder whose claim cannot be let go of stays on the list and is sent once it lapses", async () => {
+  const oldFetch = globalThis.fetch;
+  const r = await setup(3);
+  try {
+    const first = await sendReviewRequests(storeForHandle, Date.now() + 20000, r.now);
+    assert.equal(first.sent, 1, "the first goes");
+    const later = r.now + 3 * 86400 + 60;
+    let claimed = false, failures = 0;
+    redis.pipeline = async (commands) => {
+      if (claimed && failures < 2) { failures += 1; throw new Error("synthetic Redis timeout"); }
+      const out = await r.original(commands);
+      if (commands[0]?.[0] === "SET" && commands[0]?.[1] === AGAIN) claimed = true;
+      return out;
+    };
+    const oldLog = console.error;
+    console.error = () => {};
+    await sendReviewRequests(storeForHandle, Date.now() + 20000, later);
+    console.error = oldLog;
+    redis.pipeline = r.original;
+    assert.equal(failures, 2, "both the preparation and the release failed");
+    assert.equal(r.batches.flat().length, 1, "nothing more was sent on that run");
+    assert.notEqual(redis.run(["ZSCORE", ASK_DUE_KEY, r.member]), null, "the reminder is still on the list");
+    const ttl = Number(redis.run(["TTL", AGAIN]));
+    assert.ok(ttl > 0 && ttl <= 3600, "its claim lapses within the hour");
+    redis.run(["DEL", AGAIN]); // the claim lapses
+    const after = await sendReviewRequests(storeForHandle, Date.now() + 20000, later + 3601);
+    assert.equal(after.sent, 1, "the reminder is sent");
+    assert.equal(r.batches.flat().length, 2, "once");
   } finally { redis.pipeline = r.base; globalThis.fetch = oldFetch; }
 });

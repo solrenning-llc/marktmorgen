@@ -36,8 +36,9 @@ import { deriveKey } from "@/lib/secret-box";
 import { normaliseEmail } from "@/lib/auth";
 import { type BatchMessage, sendBatch } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { countOf, repliesFor } from "@/lib/redis-reply";
+import { repliesFor } from "@/lib/redis-reply";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
+import { holdLock } from "@/lib/redis-lock";
 import { canWrite, fromLine, release, render, reserve } from "@/lib/mail";
 import { leadsKey, parseContact } from "@/lib/contacts";
 import { storeBase } from "@/lib/purchase-email";
@@ -63,11 +64,20 @@ export const LATE_SECONDS = 14 * 86_400;
 /** How long a waiting order waits before it is looked at again. */
 const RETRY_SECONDS = { plan: 6 * 3600, stripe: 3600, sender: 1800 };
 const SENT_MARK_SECONDS = 120 * 86_400;
+/**
+ * How long a run's claim on an order lasts before it is sent (Codex T on #4360): a claim is written this short and
+ * stretched to SENT_MARK_SECONDS, confirmed, only just before its batch goes. A run that stops, or fails to let go of a
+ * claim it took, leaves a claim that lapses on its own, so the order is asked again, never dropped by a stuck mark; a
+ * claim found stretched may have gone, and is never sent again.
+ */
+const CLAIM_SECONDS = 3600;
 const STOP_LINK_SECONDS = 400 * 86_400;
 export const REVIEW_STOP = /^[0-9a-f]{40}$/;
 
 const sha = (value: string) => createHash("sha256").update(value).digest("hex");
 const sentKey = (reference: string) => `nl:rev:ask:sent:${reference}`;
+/** A run's claim on an order's one reminder (CLAIM_SECONDS, stretched before it goes), kept beside its first's mark. */
+const againKey = (reference: string) => `${sentKey(reference)}:again`;
 const offKey = (statsId: string, email: string) => `nl:rev:off:${statsId}:${sha(`nimbus-review-off:${normaliseEmail(email)}`).slice(0, 32)}`;
 const stopKey = (token: string) => `nl:rev:stop:${token}`;
 
@@ -230,7 +240,9 @@ export function afterSent(
   ];
 }
 
-type Ready = { entry: AskEntry; member: string; message: BatchMessage; stage: "first" | "again"; claim?: string };
+type Ready = { entry: AskEntry; member: string; message: BatchMessage; stage: "first" | "again"; claim: string };
+/** Where a ready order's claim is kept: the first's mark, or its reminder's own claim. */
+const claimKeyOf = (stage: "first" | "again", reference: string) => (stage === "first" ? sentKey(reference) : againKey(reference));
 
 /**
  * Sends the review requests that are due, until the deadline or fifty
@@ -263,7 +275,7 @@ export async function sendReviewRequests(
     // list. A throw before the email is ready (a Redis read, the review link, the stop link) undoes it below, so the
     // order is asked again by the next run, never dropped by its own stuck mark (webhooks/cron audit, Claude 1,
     // 12/11/2026).
-    let held: { reference: string; claim?: string; again?: true } | null = null;
+    let held: { key: string; claim: string } | null = null;
     try {
     const entry = readAskMember(member);
     if (!entry) {
@@ -294,9 +306,16 @@ export async function sendReviewRequests(
     }
     // Asked already: only the one reminder may follow, when the creator chose it; anything else is done.
     // Read exactly (CX-123 rule 24, L9): one reply, nil or text. Anything else is unknown and waits, never "not asked".
-    const read = repliesFor(await redisPipeline([["GET", sentKey(entry.reference)]]), 1);
-    if (!read || (read[0] !== null && typeof read[0] !== "string")) continue;
+    const read = repliesFor(await redisPipeline([["GET", sentKey(entry.reference)], ["TTL", sentKey(entry.reference)]]), 2);
+    if (!read || (read[0] !== null && typeof read[0] !== "string") || typeof read[1] !== "number") continue;
     const mark = read[0];
+    // A first being sent, or a claim a run could not let go of (Codex T on #4360): still short, it lapses on its own
+    // and the order waits for it; stretched (taken just before a batch went), the email may have gone and it is done.
+    if (typeof mark === "string" && mark.startsWith("sending:")) {
+      if (read[1] > 0 && read[1] <= CLAIM_SECONDS) await later(member, nowSeconds + read[1] + 1);
+      else if (read[1] !== -2) await drop(member);
+      continue;
+    }
     const stage = askStage(mark, store.reviewAsk.again);
     if (!stage) {
       await drop(member);
@@ -354,7 +373,7 @@ export async function sendReviewRequests(
     // askStage. Taken by another run: dropped as before. Not known: let go if ours, left for the next run, nothing sent.
     const claim = stage === "first" ? `sending:${claimValue()}` : undefined;
     if (claim) {
-      const claimed = await claimMark(sentKey(entry.reference), SENT_MARK_SECONDS, claim);
+      const claimed = await claimMark(sentKey(entry.reference), CLAIM_SECONDS, claim);
       if (claimed === "taken") {
         await drop(member);
         continue;
@@ -366,12 +385,26 @@ export async function sendReviewRequests(
         await releaseMark(sentKey(entry.reference), claim);
         continue;
       }
-      held = { reference: entry.reference, claim };
+      held = { key: sentKey(entry.reference), claim };
     } else {
-      const taken = repliesFor(await redisPipeline([["ZREM", ASK_DUE_KEY, member]]), 1);
-      if (!taken || countOf(taken[0]) !== 1) continue;
-      held = { reference: entry.reference, again: true };
+      // The reminder is claimed as the first is, and stays on the list until it is sent (Codex T on #4360): taking it
+      // off before sending lost it whenever putting it back failed too.
+      const mine = claimValue();
+      const claimed = await claimMark(againKey(entry.reference), CLAIM_SECONDS, mine);
+      if (claimed === "unknown") {
+        await releaseMark(againKey(entry.reference), mine);
+        continue;
+      }
+      if (claimed === "taken") {
+        // Another run's, still short: it waits for that run; stretched, it may have gone, and is done.
+        const ttl = repliesFor(await redisPipeline([["TTL", againKey(entry.reference)]]), 1)?.[0];
+        if (typeof ttl === "number" && ttl > CLAIM_SECONDS) await drop(member);
+        else if (typeof ttl === "number" && ttl > 0) await later(member, nowSeconds + ttl + 1);
+        continue;
+      }
+      held = { key: againKey(entry.reference), claim: mine };
     }
+    const claimNow = held.claim;
     const token = await mintReviewLink(store, entry.reference, email);
     const stop = await stopLink(store, email);
     const fromName = store.mail?.fromName || store.name;
@@ -393,28 +426,41 @@ export async function sendReviewRequests(
       entry,
       member,
       stage,
-      claim,
+      claim: claimNow,
       message: { from: fromLine(store), to: email, subject: r.subject, text: r.text, html: r.html, replyTo: store.email, headers: r.headers },
     });
     groups.set(entry.handle, group);
     } catch (error) {
       console.error("preparing a review request failed; it is asked again by the next run", error);
-      if (held?.claim) await releaseMark(sentKey(held.reference), held.claim);
-      if (held?.again) await redisPipeline([["ZADD", ASK_DUE_KEY, nowSeconds + RETRY_SECONDS.sender, member]]).catch(() => undefined);
-      if (held) counts.waiting += 1;
+      // Its own claim let go, still on the list; a release that fails leaves a claim that lapses in CLAIM_SECONDS.
+      if (held) {
+        await releaseMark(held.key, held.claim);
+        counts.waiting += 1;
+      }
     }
   }
 
-  for (const { store, ready } of groups.values()) {
+  for (const { store, ready: prepared } of groups.values()) {
+    // Each claim stretched to SENT_MARK_SECONDS, confirmed, just before its batch goes (Codex T on #4360): from here
+    // on the email may have gone, and a claim found stretched is never sent again. One not stretched (another run's
+    // by now, or a reply not read) goes back to waiting, its own claim let go, and is not sent on this run.
+    const ready: Ready[] = [];
+    for (const item of prepared) {
+      const key = claimKeyOf(item.stage, item.entry.reference);
+      if (await holdLock({ key, token: item.claim, ttlSeconds: SENT_MARK_SECONDS }).catch(() => false)) {
+        ready.push(item);
+        continue;
+      }
+      await releaseMark(key, item.claim);
+      await later(item.member, nowSeconds + RETRY_SECONDS.sender).catch(() => undefined);
+    }
+    if (!ready.length) continue;
     // Undone when nothing was sent: the first's mark goes, the reminder goes back on the list.
     const unclaim = async (at: number | null) => {
-      const firsts = ready.filter((item) => item.stage === "first");
-      const agains = ready.filter((item) => item.stage === "again");
-      // Only this run's own first marks are let go (releaseMark), never one another run holds now.
-      for (const item of firsts) if (item.claim) await releaseMark(sentKey(item.entry.reference), item.claim);
-      if (at !== null && agains.length) await redisPipeline(agains.map((item) => ["ZADD", ASK_DUE_KEY, at, item.member]));
-      if (at !== null) for (const item of firsts) await later(item.member, at);
-      counts.waiting += at === null ? 0 : agains.length;
+      // Only this run's own claims are let go (releaseMark), never one another run holds now; every order is still on
+      // the list, and waits there.
+      for (const item of ready) await releaseMark(claimKeyOf(item.stage, item.entry.reference), item.claim);
+      if (at !== null) for (const item of ready) await later(item.member, at);
     };
     // A throw before the batch's outcome is known (the reservation, the sender) undoes the group's claims, as a
     // batch not sent does, so the next run asks again; one after the batch went keeps them (it was sent).

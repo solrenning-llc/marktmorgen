@@ -56,8 +56,8 @@ export const MAX_PAGES = 20;
 export const MAX_DISPUTE_READS = 50;
 
 const DAY_SECONDS = 86_400;
-const EXPAND = ["data.invoice", "data.invoice.subscription", "data.balance_transaction", "data.refunds"];
-const CHARGE_ID = /^(ch|py)_[A-Za-z0-9]{6,64}$/;
+export const EXPAND = ["data.invoice", "data.invoice.subscription", "data.balance_transaction", "data.refunds"];
+export const CHARGE_ID = /^(ch|py)_[A-Za-z0-9]{6,64}$/;
 const DISPUTE_ID = /^(dp|du)_[A-Za-z0-9]{6,64}$/;
 
 export type ReserveReading = {
@@ -86,7 +86,7 @@ function embedded(value: unknown): { rows: unknown[]; whole: boolean } | null {
 }
 
 /** A charge row in the shape this reading needs: the invoice and subscription expanded, never just an id. */
-function legibleCharge(row: Row): boolean {
+export function legibleCharge(row: Row): boolean {
   const invoice = ownField(row, "invoice");
   if (!plainOrNull(invoice) || !plainOrNull(ownField(row, "balance_transaction")) || !embedded(ownField(row, "refunds"))) return false;
   if (typeof ownField(row, "status") !== "string" || typeof ownField(row, "currency") !== "string" || typeof ownField(row, "disputed") !== "boolean") return false;
@@ -99,7 +99,7 @@ function legibleCharge(row: Row): boolean {
 }
 
 /** The dispute on a charge, read by charge: exactly one, in its shape. */
-async function disputeOf(chargeId: string): Promise<{ status: string; amount: number } | null> {
+export async function disputeOf(chargeId: string): Promise<{ status: string; amount: number } | null> {
   const page = readStripePage(
     await onPlatformAt(READ_VERSION, "GET", `/disputes?${new URLSearchParams({ charge: chargeId, limit: "10" })}`),
     (row) => ownField(row, "charge") === chargeId && typeof ownField(row, "status") === "string" && whole(ownField(row, "amount")),
@@ -110,7 +110,7 @@ async function disputeOf(chargeId: string): Promise<{ status: string; amount: nu
 }
 
 /** What one read charge is for the rule, and whether it had no known kind. */
-function readOf(row: Row, dispute: { status: string; amount: number } | null): { read: ReserveRead; unclassified: boolean } {
+export function readOf(row: Row, dispute: { status: string; amount: number } | null): { read: ReserveRead; unclassified: boolean } {
   const invoice = ownField(row, "invoice");
   const status = text(ownField(row, "status"));
   const created = ownField(row, "created") as number;
@@ -170,7 +170,7 @@ function readOf(row: Row, dispute: { status: string; amount: number } | null): {
 }
 
 /** The ceiling of a charge of no known kind: the whole payment left. */
-function atCeiling(counted: ReserveCharge, charge: PlanRefundCharge): ReserveCharge {
+export function atCeiling(counted: ReserveCharge, charge: PlanRefundCharge): ReserveCharge {
   if (counted.refund.kind === "unknown") return counted;
   const left = charge.amountCents - charge.refundedCents;
   if (!whole(left)) return { ...counted, refund: { kind: "unknown", reason: "unreadable" } };

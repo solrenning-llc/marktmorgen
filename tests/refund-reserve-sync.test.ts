@@ -90,28 +90,36 @@ test('through a history of changes the incremental reserve equals the full readi
  assert.equal(world.requests.filter(r=>/^\/v1\/charges\/ch_/.test(r.path)).length,1);
  assert.deepEqual(run.reserve,(await readRefundReserve(now,later())).reserve);
 
- // Time passes with no change at Stripe: windows close, the total follows, charges past both windows are pruned.
+ // Time passes with no change at Stripe, a run every 20 days: windows close, the total follows, charges that left
+ // the lookback are let go.
  const storedBefore=run.stored;
- for(const days of [40,200,300]){
+ for(let days=20;days<=300;days+=20){
   now=START+days*DAY;world.clock=Math.max(world.clock,now);
   ({run,full}=await both(now));
   assert.equal(run.why,null,String(days));
   assert.deepEqual(run.reserve,full.reserve,`after ${days} days`);
  }
- assert.ok(run.stored<storedBefore,'charges past both windows are no longer kept');
+ assert.ok(run.stored<storedBefore,'charges that left the lookback are no longer kept');
+ // No run for longer than Stripe keeps events: unknown, built again, then equal.
+ now=START+340*DAY;world.clock=Math.max(world.clock,now);
+ const gap=await syncRefundReserve(now,later());
+ assert.equal(gap.why,'stale');assert.equal(gap.reserve.kind,'unknown');
+ run=await built(now);
+ assert.deepEqual(run.reserve,(await readRefundReserve(now,later())).reserve,'after the gap');
  assert.ok(world.requests.every(r=>r.method==='GET'),'GET only');
 });
 
 test('the first state is built across runs and is unknown until it is done',async()=>{
  const now=START;fresh(now);history(250,now);
  const limits={...SYNC_LIMITS,newPages:1};
- const first=await syncRefundReserve(now,later(),limits);
- assert.equal(first.why,'building');assert.equal(first.reserve.kind,'unknown');
- const second=await syncRefundReserve(now,later(),limits);
- assert.equal(second.why,'building');
- const third=await syncRefundReserve(now,later(),limits);
- assert.equal(third.why,null);
- assert.deepEqual(third.reserve,(await readRefundReserve(now,later())).reserve);
+ // Three pages at one a run; the run that finishes building with no page left says so, and the next one counts.
+ for(const run of [1,2,3]){
+  const reading=await syncRefundReserve(now,later(),limits);
+  assert.equal(reading.why,'building',`run ${run}`);assert.equal(reading.reserve.kind,'unknown');
+ }
+ const fourth=await syncRefundReserve(now,later(),limits);
+ assert.equal(fourth.why,null);
+ assert.deepEqual(fourth.reserve,(await readRefundReserve(now,later())).reserve);
 });
 
 test('a backlog past a run\'s ceilings is unknown, and the next runs converge',async()=>{
@@ -182,7 +190,9 @@ test('Redis and Stripe answers in another shape are unknown, never empty',async(
   ['an events page that is not a list',(path:string)=>path==='/v1/events'?{object:'list',data:'x',has_more:false}:undefined],
   ['a reread of another charge',(path:string)=>/^\/v1\/charges\/ch_/.test(path)?{id:'ch_Other00000001',object:'charge'}:undefined],
  ] as const){
-  const id=addCharge({kind:'plan',amount:6900,paidAt:now});refund(id,100,'pending');
+  // A kept charge, so its refund is reread.
+  const id=[...world.charges.keys()].find(k=>world.charges.get(k)!.json.status==='succeeded'&&world.charges.get(k)!.refunds.length===0)!;
+  refund(id,100,'pending');
   world.fail=answer;
   const run=await syncRefundReserve(now,later());
   world.fail=null;
@@ -194,7 +204,8 @@ test('Redis and Stripe answers in another shape are unknown, never empty',async(
 
 test('the ceilings are named, registered as the company\'s fixed reading cost, and the lock outlives the run',async()=>{
  assert.deepEqual(SYNC_LIMITS,{newPages:20,eventPages:10,rereads:200,disputes:50,stored:50_000,scanCount:1000,recordBytes:400,eventRetentionDays:29});
- assert.equal(RESERVE_SYNC_STRIPE_GETS_PER_DAY,280);
+ // 280 page and read GETs, and one tie page each of charges and events.
+ assert.equal(RESERVE_SYNC_STRIPE_GETS_PER_DAY,282);
  assert.equal(RESERVE_SYNC_STORED_BYTES,20_000_000);
  for(const [name,value] of [['RESERVE_SYNC_STRIPE_GETS_PER_DAY',RESERVE_SYNC_STRIPE_GETS_PER_DAY],['RESERVE_SYNC_REDIS_COMMANDS_PER_DAY',RESERVE_SYNC_REDIS_COMMANDS_PER_DAY],['RESERVE_SYNC_STORED_BYTES',RESERVE_SYNC_STORED_BYTES]] as const){
   assert.ok(NOT_A_COST[name],name+' is registered');

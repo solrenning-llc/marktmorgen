@@ -107,8 +107,8 @@ export function dispute(id: string, status: string): void {
 /** Newest first, then by id descending, as Stripe lists. */
 function page<T extends { id: string; created: number }>(all: T[], query: URLSearchParams): { data: T[]; has_more: boolean } {
   const sorted = [...all].sort((a, b) => b.created - a.created || (a.id < b.id ? 1 : -1));
-  const gte = query.get("created[gte]");
-  const filtered = gte === null ? sorted : sorted.filter((row) => row.created >= Number(gte));
+  const gte = query.get("created[gte]"), lte = query.get("created[lte]");
+  const filtered = sorted.filter((row) => (gte === null || row.created >= Number(gte)) && (lte === null || row.created <= Number(lte)));
   const limit = Number(query.get("limit") ?? 10);
   const after = query.get("starting_after"), before = query.get("ending_before");
   if (after) {

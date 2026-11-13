@@ -32,8 +32,12 @@ const ORIGIN = "https://marktmorgen.com";
 const form = (fields: Record<string, string>) =>
   new NextRequest(`${ORIGIN}/api/auth/move`, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams(fields) });
 const noteSent = () => sent.some((command) => command[0] === "EVAL" && String(command[1]).startsWith("-- marktmorgen:move-copy-note:v1"));
-/** What one tap of a store with no other stores sends, measured here: 76 commands, 12 of them EVALs, about 13 KB. */
-const MOVE_TAP_COMMANDS = 80;
+/**
+ * What one tap of a store with no other stores sends, measured here: 81 commands since the broken-move stock of #2271
+ * (markBrokenMove's EVAL and the exact read of the account's stores; 76 before). The registry prices a tap at
+ * MOVE_TAP_COMMANDS_UNCONTENDED (tests/plan-cost-registry.ts, 232), which holds it.
+ */
+const MOVE_TAP_COMMANDS = 84;
 const where = (location: string) => location.replace(/^.*[?&](status|address)=/, "");
 
 /**

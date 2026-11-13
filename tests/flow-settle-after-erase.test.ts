@@ -105,7 +105,8 @@ async function main(): Promise<void> {
   await settleAttempts(LIST, FLOW, 0, "s1", "email", [{ email: waiting, state: "uncertain", note: "Not confirmed.", to: 0 }], now);
   const heldRun = await state(waiting);
   const [stillOpen, heldStatus] = (await redisPipeline([["HGET", run(waiting), "open"], ["HGET", run(waiting), "status"]])) as [unknown, unknown];
-  is("uncertain: held, the attempt left open, in both indexes, still expiring", [stillOpen, heldStatus, heldRun.held, heldRun.indexed, heldRun.ttl > 0], ["0:s1", "held", true, true, true]);
+  // The attempt's value is "index:stepId:token" since each attempt has its own (Codex L's MEDIUM on #4234).
+  is("uncertain: held, the attempt left open, in both indexes, still expiring", [/^0:s1:[0-9a-f]{32}$/.test(String(stillOpen)), heldStatus, heldRun.held, heldRun.indexed, heldRun.ttl > 0], [true, "held", true, true, true]);
 
   const deferred = "deferred-kept@example.com";
   await openRuns(FLOW, [deferred], now);

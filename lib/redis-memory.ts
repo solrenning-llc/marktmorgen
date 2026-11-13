@@ -130,16 +130,24 @@ export class MemoryRedis {
       }
       case "EVAL": {
         // lib/flow-runs.ts CLAIM_IF_RUN, WAIT_IF_RUN, RETRY_IF_RUN and NOTE_IF_RUN: a run's writes only while the run is there.
-        if (key.startsWith("-- marktmorgen:flow-claim:v1\n") && args[0] === "2" && args.length === 5) {
-          const [, runK, logK, open, attempted] = args;
-          if (this.run(["EXISTS", runK]) !== 1) return -1;
+        const genOk = (runK: string, want: string) => want === "*" || ((this.run(["HGET", runK, "gen"]) as string | null) ?? "") === want;
+        // lib/flow-runs.ts LEASE_AND_GEN: a step's lease entry and its run's generation, in one command.
+        if (key.startsWith("-- marktmorgen:flow-lease-gen:v1\n") && args[0] === "2" && args.length === 4) {
+          const [, leaseK, runK, member] = args;
+          const score = this.run(["ZSCORE", leaseK, member]);
+          const gen = this.run(["EXISTS", runK]) === 1 ? this.run(["HGET", runK, "gen"]) : null;
+          return [score ?? null, gen ?? null];
+        }
+        if (key.startsWith("-- marktmorgen:flow-claim:v2\n") && args[0] === "2" && args.length === 6) {
+          const [, runK, logK, open, attempted, gen] = args;
+          if (this.run(["EXISTS", runK]) !== 1 || !genOk(runK, gen)) return -1;
           if (this.run(["HSETNX", runK, "open", open]) !== 1) return 0;
           this.run(["RPUSH", logK, attempted]);
           return 1;
         }
-        if (key.startsWith("-- marktmorgen:flow-wait:v1\n") && args[0] === "1" && args.length === 4) {
-          const [, runK, step, now] = args;
-          if (this.run(["EXISTS", runK]) !== 1) return [-1];
+        if (key.startsWith("-- marktmorgen:flow-wait:v2\n") && args[0] === "1" && args.length === 5) {
+          const [, runK, step, now, gen] = args;
+          if (this.run(["EXISTS", runK]) !== 1 || !genOk(runK, gen)) return [-1];
           const waits = this.run(["HINCRBY", runK, "waits", 1]);
           const at = this.run(["HGET", runK, "waitAt"]);
           const found = typeof at === "string" ? /^(-?\d+):(\d+)$/.exec(at) : null;
@@ -152,9 +160,9 @@ export class MemoryRedis {
           if (this.run(["EXISTS", runK]) !== 1) return -1;
           return this.run(["HINCRBY", runK, "retries", by]);
         }
-        if (key.startsWith("-- marktmorgen:flow-note:v1\n") && args[0] === "3" && args.length === 11) {
-          const [, runK, logK, indexK, noted, email, status, step, at, person, keep] = args;
-          if (this.run(["EXISTS", runK]) !== 1) return 0;
+        if (key.startsWith("-- marktmorgen:flow-note:v2\n") && args[0] === "3" && args.length === 12) {
+          const [, runK, logK, indexK, noted, email, status, step, at, person, keep, gen] = args;
+          if (this.run(["EXISTS", runK]) !== 1 || !genOk(runK, gen)) return 0;
           this.run(["RPUSH", logK, noted]);
           this.run(["HSET", runK, "email", email, "status", status, "step", step, "note", "", "updatedAt", at]);
           this.run(["ZADD", indexK, at, person]);
@@ -165,10 +173,11 @@ export class MemoryRedis {
           return 1;
         }
         // lib/flow-runs.ts SETTLE_IF_OPEN: a workflow step's outcome written only while its run still holds an open attempt.
-        if (key.startsWith("-- marktmorgen:flow-settle:v1\n") && args[0] === "4" && args.length === 15) {
-          const [, runK, logK, heldK, indexK, mode, pushed, email, status, step, note, at, member, person, keep] = args;
+        if (key.startsWith("-- marktmorgen:flow-settle:v2\n") && args[0] === "4" && args.length === 17) {
+          const [, runK, logK, heldK, indexK, mode, pushed, email, status, step, note, at, member, person, keep, gen, wantOpen] = args;
           // EXISTS first: this model's HEXISTS makes an empty hash of a missing key, which Redis never does.
           if (this.run(["EXISTS", runK]) !== 1 || this.run(["HEXISTS", runK, "open"]) !== 1) return 0;
+          if (!genOk(runK, gen) || (wantOpen !== "*" && this.run(["HGET", runK, "open"]) !== wantOpen)) return 0;
           if (mode === "uncertain") {
             this.run(["RPUSH", logK, pushed]);
             this.run(["HSET", runK, "email", email, "status", status, "step", step, "note", note, "updatedAt", at]);

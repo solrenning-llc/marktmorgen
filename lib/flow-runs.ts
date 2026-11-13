@@ -59,7 +59,7 @@
  * (lib/flow-limits.ts), so a workflow keeps at most MAX_RUNS_KEPT_PER_FLOW
  * runs, each charged to the store's data room before it starts.
  */
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { stringList } from "@/lib/redis-reply";
@@ -175,7 +175,40 @@ export async function runsToday(listId: string | null, nowSeconds = Math.floor(D
   }
 }
 
-/** Opens a fresh run for each of these people, at the first step. */
+/**
+ * Which run a late write belongs to (Codex L's MEDIUM on #4234). openRuns gives every run an unpredictable generation;
+ * lib/flows.ts reads it with the lease entry (leaseAndGenCommand) when it takes a step, and the claim, the outcome, the
+ * note and the wait it writes later compare it before writing. A person erased while their step was in flight and
+ * started again has a new run with another generation, so the old step's late write leaves the new run as it is.
+ * ANY_GEN skips the check, for a caller that is not a step taken from the queue (a stop step of another workflow, the
+ * creator's choice on a held run); "" is a run started before generations existed, which has none.
+ */
+export const ANY_GEN = "*";
+const newToken = () => randomBytes(16).toString("hex");
+const GEN = /^[0-9a-f]{32}$/;
+
+/**
+ * A step's lease entry and its run's generation, read together in one command (it replaces the lease entry's ZSCORE,
+ * so a step costs what it did: QUEUE_COMMANDS_PER_STEP in lib/flow-limits.ts). KEYS: the lease, the run's record;
+ * ARGV: the lease member. Answers {score or nil, generation or nil}. Modelled by lib/redis-memory.ts.
+ */
+export const LEASE_AND_GEN = `-- marktmorgen:flow-lease-gen:v1
+return {redis.call("ZSCORE", KEYS[1], ARGV[1]), redis.call("HGET", KEYS[2], "gen")}`;
+
+export function leaseAndGenCommand(lease: string, member: string, flowId: string, email: string): (string | number)[] {
+  return ["EVAL", LEASE_AND_GEN, 2, lease, runKey(flowId, personOf(email)), member];
+}
+
+/**
+ * The generation read with a lease entry: a string of exactly 32 hex characters, or nil for a run with none (started
+ * before generations, or not there: either way "" is what the later writes compare). Anything else is unknown (null).
+ */
+export function genOf(raw: unknown): string | null {
+  if (raw === null) return "";
+  return typeof raw === "string" && GEN.test(raw) ? raw : null;
+}
+
+/** Opens a fresh run for each of these people, at the first step, each with a generation of its own. */
 export async function openRuns(flowId: string, emails: string[], nowSeconds = Math.floor(Date.now() / 1000)): Promise<void> {
   if (!emails.length) return;
   const commands: (string | number)[][] = [];
@@ -183,7 +216,7 @@ export async function openRuns(flowId: string, emails: string[], nowSeconds = Ma
     const person = personOf(email);
     commands.push(
       ["DEL", runKey(flowId, person), logKey(flowId, person)],
-      ["HSET", runKey(flowId, person), "email", normaliseEmail(email), "status", "running", "step", 0, "note", "", "startedAt", nowSeconds, "updatedAt", nowSeconds],
+      ["HSET", runKey(flowId, person), "email", normaliseEmail(email), "status", "running", "step", 0, "note", "", "startedAt", nowSeconds, "updatedAt", nowSeconds, "gen", newToken()],
       ["EXPIRE", runKey(flowId, person), RUN_KEEP_SECONDS],
       ["RPUSH", logKey(flowId, person), event({ at: nowSeconds, step: -1, stepId: "", kind: "run", state: "started", note: "Started." })],
       ["EXPIRE", logKey(flowId, person), RUN_KEEP_SECONDS],
@@ -197,12 +230,14 @@ export async function openRuns(flowId: string, emails: string[], nowSeconds = Ma
 
 /**
  * One person's attempt claimed only while their run is there (KEYS: the run's record, its history; ARGV: the open
- * attempt, the "attempted" event). -1 when the run is gone (erased, forgetPersonCommands, or aged out), 0 when an
+ * attempt, the "attempted" event, the run's generation or ANY_GEN). -1 when the run is gone (erased,
+ * forgetPersonCommands, or aged out) or is another run than the step was taken for (another generation), 0 when an
  * attempt is already open, 1 when claimed, with its event written in the same step: a step taken from the queue just
  * before an erasure makes no record or history again (Defect 4083). Modelled by lib/redis-memory.ts.
  */
-export const CLAIM_IF_RUN = `-- marktmorgen:flow-claim:v1
+export const CLAIM_IF_RUN = `-- marktmorgen:flow-claim:v2
 if redis.call("EXISTS", KEYS[1]) == 0 then return -1 end
+if ARGV[3] ~= "*" and (redis.call("HGET", KEYS[1], "gen") or "") ~= ARGV[3] then return -1 end
 if redis.call("HSETNX", KEYS[1], "open", ARGV[1]) == 0 then return 0 end
 redis.call("RPUSH", KEYS[2], ARGV[2])
 return 1`;
@@ -211,15 +246,18 @@ return 1`;
  * Claims an attempt of step `index` for each person, before anything is done
  * for them. `claimed` may go ahead; `open` already had an attempt with no
  * known outcome and must not be tried again; `gone` has no run any more (erased
- * meanwhile) and is not tried. Throws when the claim cannot be confirmed, so
- * nothing is attempted on an unknown claim.
+ * meanwhile, or started again as another run) and is not tried. Throws when the claim cannot be confirmed, so
+ * nothing is attempted on an unknown claim. `gens`: each person's run generation read with the step's lease entry
+ * (ANY_GEN when absent). `opens`: each claimed attempt's own value, "index:stepId:token", which its outcome must
+ * match (settleAttempts), so a late repeat of one attempt never clears the next.
  */
-export async function claimAttempts(flowId: string, emails: string[], index: number, stepId: string, kind: string, nowSeconds = Math.floor(Date.now() / 1000)): Promise<{ claimed: string[]; open: string[]; gone: string[] }> {
-  if (!emails.length) return { claimed: [], open: [], gone: [] };
+export async function claimAttempts(flowId: string, emails: string[], index: number, stepId: string, kind: string, nowSeconds = Math.floor(Date.now() / 1000), gens?: Map<string, string>): Promise<{ claimed: string[]; open: string[]; gone: string[]; opens: Map<string, string> }> {
+  if (!emails.length) return { claimed: [], open: [], gone: [], opens: new Map() };
   const attempted = event({ at: nowSeconds, step: index, stepId, kind, state: "attempted", note: "" });
+  const values = emails.map(() => `${index}:${stepId}:${newToken()}`);
   let reply: unknown;
   try {
-    reply = await redisPipeline(emails.map((email) => ["EVAL", CLAIM_IF_RUN, 2, runKey(flowId, personOf(email)), logKey(flowId, personOf(email)), `${index}:${stepId}`, attempted]));
+    reply = await redisPipeline(emails.map((email, i) => ["EVAL", CLAIM_IF_RUN, 2, runKey(flowId, personOf(email)), logKey(flowId, personOf(email)), values[i], attempted, gens?.get(email) ?? ANY_GEN]));
   } catch {
     throw new FlowRunUnavailable("A workflow step's attempt could not be recorded");
   }
@@ -228,6 +266,7 @@ export async function claimAttempts(flowId: string, emails: string[], index: num
     claimed: emails.filter((_, i) => reply[i] === 1),
     open: emails.filter((_, i) => reply[i] === 0),
     gone: emails.filter((_, i) => reply[i] === -1),
+    opens: new Map(emails.flatMap((email, i) => (reply[i] === 1 ? [[email, values[i]] as [string, string]] : []))),
   };
 }
 
@@ -237,10 +276,10 @@ export async function claimAttempts(flowId: string, emails: string[], index: num
  * been waiting (lib/flow-retry.ts decides). Null for anyone whose count could
  * not be read: an unknown count is not room for one more wait.
  */
-export async function countWaits(flowId: string, emails: string[], index: number, nowSeconds = Math.floor(Date.now() / 1000)): Promise<Map<string, { waits: number; since: number } | null>> {
+export async function countWaits(flowId: string, emails: string[], index: number, nowSeconds = Math.floor(Date.now() / 1000), gens?: Map<string, string>): Promise<Map<string, { waits: number; since: number } | null>> {
   const out = new Map<string, { waits: number; since: number } | null>();
   if (!emails.length) return out;
-  const reply = await redisPipeline(emails.map((email) => ["EVAL", WAIT_IF_RUN, 1, runKey(flowId, personOf(email)), index, nowSeconds])).catch(() => null);
+  const reply = await redisPipeline(emails.map((email) => ["EVAL", WAIT_IF_RUN, 1, runKey(flowId, personOf(email)), index, nowSeconds, gens?.get(email) ?? ANY_GEN])).catch(() => null);
   emails.forEach((email, i) => {
     const one = Array.isArray(reply) && reply.length === emails.length ? reply[i] : null;
     const [waits, since] = Array.isArray(one) && one.length === 2 ? one : [null, null];
@@ -255,12 +294,14 @@ export async function countWaits(flowId: string, emails: string[], index: number
 }
 
 /**
- * One more wait counted on one run, only while the run is there (KEYS: the run's record; ARGV: the step, now):
- * {waits, since}, the step's clock started now on its first wait; {-1} when the run is gone, so a wait counted
- * after an erasure makes no record again (Defect 4083). Modelled by lib/redis-memory.ts.
+ * One more wait counted on one run, only while the run is there (KEYS: the run's record; ARGV: the step, now, the
+ * run's generation or ANY_GEN): {waits, since}, the step's clock started now on its first wait; {-1} when the run is
+ * gone or is another run (another generation), so a wait counted after an erasure makes no record again (Defect
+ * 4083) and never counts on the run the person started again (Codex L on #4234). Modelled by lib/redis-memory.ts.
  */
-export const WAIT_IF_RUN = `-- marktmorgen:flow-wait:v1
+export const WAIT_IF_RUN = `-- marktmorgen:flow-wait:v2
 if redis.call("EXISTS", KEYS[1]) == 0 then return {-1} end
+if ARGV[3] ~= "*" and (redis.call("HGET", KEYS[1], "gen") or "") ~= ARGV[3] then return {-1} end
 local waits = redis.call("HINCRBY", KEYS[1], "waits", 1)
 local at = redis.call("HGET", KEYS[1], "waitAt") or ""
 local step, since = string.match(at, "^(%-?%d+):(%d+)$")
@@ -297,6 +338,10 @@ export type Settled = {
   to: number;
   /** The run's status after this; "held" is implied by "uncertain". */
   status?: RunStatus;
+  /** The run's generation the step was taken for (ANY_GEN or absent: not checked). */
+  gen?: string;
+  /** The exact attempt this outcome belongs to, from claimAttempts' `opens` (absent: any open attempt). */
+  open?: string;
 };
 
 /**
@@ -307,11 +352,17 @@ export type Settled = {
  * record with no expiry (Codex L's HIGH, Defect 4083). Answers 1 when written, 0 when the run was gone. ARGV:
  * the mode ("uncertain", "deferred" or "settle"), the event (pushed, or for "deferred" the attempt's event taken
  * back out), the address, the status, the step, the note, the time, the held index's member, the person, and the
- * seconds the record and history are kept for ("" to leave their expiry as it is). Lua returns are one script, one
+ * seconds the record and history are kept for ("" to leave their expiry as it is), the run's generation or ANY_GEN,
+ * and the exact open attempt or "*". Another generation or another attempt is 0, nothing written: a late outcome of
+ * an erased run never lands on the run the person started again, nor a late repeat on the next attempt (Codex L's
+ * MEDIUM on #4234). Lua returns are one script, one
  * command, as QUEUE_IF_LEASED in lib/flows.ts is counted (lib/flow-limits.ts). Modelled by lib/redis-memory.ts.
  */
-export const SETTLE_IF_OPEN = `-- marktmorgen:flow-settle:v1
-if redis.call("HEXISTS", KEYS[1], "open") == 0 then return 0 end
+export const SETTLE_IF_OPEN = `-- marktmorgen:flow-settle:v2
+local open = redis.call("HGET", KEYS[1], "open")
+if not open then return 0 end
+if ARGV[11] ~= "*" and (redis.call("HGET", KEYS[1], "gen") or "") ~= ARGV[11] then return 0 end
+if ARGV[12] ~= "*" and open ~= ARGV[12] then return 0 end
 if ARGV[1] == "uncertain" then
   redis.call("RPUSH", KEYS[2], ARGV[2])
   redis.call("HSET", KEYS[1], "email", ARGV[3], "status", ARGV[4], "step", ARGV[5], "note", ARGV[6], "updatedAt", ARGV[7])
@@ -352,7 +403,7 @@ export async function settleAttempts(listId: string, flowId: string, index: numb
     const member = `${flowId}|${person}`;
     if (o.state === "uncertain") {
       const pushed = event({ at: nowSeconds, step: index, stepId, kind, state: "uncertain", note: o.note });
-      commands.push(["EVAL", SETTLE_IF_OPEN, keys.length, ...keys, "uncertain", pushed, normaliseEmail(o.email), "held", index, o.note.slice(0, 300), nowSeconds, member, person, ""]);
+      commands.push(["EVAL", SETTLE_IF_OPEN, keys.length, ...keys, "uncertain", pushed, normaliseEmail(o.email), "held", index, o.note.slice(0, 300), nowSeconds, member, person, "", o.gen ?? ANY_GEN, o.open ?? "*"]);
       continue;
     }
     const status: RunStatus = o.status ?? (o.state === "deferred" ? "waiting" : o.to < 0 ? (o.state === "failed" ? "failed" : "done") : "running");
@@ -376,6 +427,8 @@ export async function settleAttempts(listId: string, flowId: string, index: numb
       // Every write keeps a live run for RUN_KEEP_SECONDS more, not only its last (Claude 7's MEDIUM on #4234): a
       // workflow may run past 400 days (MAX_FLOW_WAIT_HOURS a step), and a record that aged out would read as erased.
       RUN_KEEP_SECONDS,
+      o.gen ?? ANY_GEN,
+      o.open ?? "*",
     ]);
   }
   await redisPipeline(commands);
@@ -384,7 +437,7 @@ export async function settleAttempts(listId: string, flowId: string, index: numb
 /** What happened at a step without an attempt: a condition that did not hold, the goal reached, the run ended. */
 export async function noteRuns(
   flowId: string,
-  entries: { email: string; index: number; stepId: string; kind: string; state: Extract<RunEventState, "skipped" | "goal" | "ended">; note: string; to: number; status: RunStatus }[],
+  entries: { email: string; index: number; stepId: string; kind: string; state: Extract<RunEventState, "skipped" | "goal" | "ended">; note: string; to: number; status: RunStatus; gen?: string }[],
   nowSeconds = Math.floor(Date.now() / 1000),
 ): Promise<void> {
   if (!entries.length) return;
@@ -395,7 +448,7 @@ export async function noteRuns(
     commands.push([
       "EVAL", NOTE_IF_RUN, 3, runKey(flowId, person), logKey(flowId, person), indexKey(flowId),
       event({ at: nowSeconds, step: e.index, stepId: e.stepId, kind: e.kind, state: e.state, note: e.note }),
-      normaliseEmail(e.email), e.status, e.to, nowSeconds, person, RUN_KEEP_SECONDS,
+      normaliseEmail(e.email), e.status, e.to, nowSeconds, person, RUN_KEEP_SECONDS, e.gen ?? ANY_GEN,
     ]);
   }
   await redisPipeline(commands);
@@ -404,10 +457,12 @@ export async function noteRuns(
 /**
  * A step without an attempt written down only while the run is there (KEYS: the run's record, its history, the
  * workflow's run index; ARGV: the event, the address, the status, the step, the time, the person, the seconds kept or
- * ""). 1 when written, 0 when the run was gone (Defect 4083). Modelled by lib/redis-memory.ts.
+ * "", the run's generation or ANY_GEN). 1 when written, 0 when the run was gone (Defect 4083) or is another run
+ * (another generation: Codex L's MEDIUM on #4234). Modelled by lib/redis-memory.ts.
  */
-export const NOTE_IF_RUN = `-- marktmorgen:flow-note:v1
+export const NOTE_IF_RUN = `-- marktmorgen:flow-note:v2
 if redis.call("EXISTS", KEYS[1]) == 0 then return 0 end
+if ARGV[8] ~= "*" and (redis.call("HGET", KEYS[1], "gen") or "") ~= ARGV[8] then return 0 end
 redis.call("RPUSH", KEYS[2], ARGV[1])
 redis.call("HSET", KEYS[1], "email", ARGV[2], "status", ARGV[3], "step", ARGV[4], "note", "", "updatedAt", ARGV[5])
 redis.call("ZADD", KEYS[3], ARGV[5], ARGV[6])

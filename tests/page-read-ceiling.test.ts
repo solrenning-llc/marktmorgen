@@ -84,7 +84,7 @@ let answerCount: ((list: (string | number)[][]) => Promise<unknown[]>) | null = 
 (redis as unknown as { pipeline: typeof redis.pipeline }).pipeline = ((list: (string | number)[][]) => {
   commands += list.length;
   sent.push(...list);
-  if (answerCount && list.length === 2 && list[0][0] === "INCR" && list[1][0] === "EXPIRE") return answerCount(list);
+  if (answerCount && list.length === 1 && list[0][0] === "EVAL" && String(list[0][1]).startsWith("-- marktmorgen:take-reading:")) return answerCount(list);
   return real(list);
 }) as typeof redis.pipeline;
 async function counted(work: () => Promise<unknown>): Promise<number> {
@@ -312,11 +312,13 @@ async function main(): Promise<void> {
   forgetReadingsSeen();
   const overCost = await counted(() => sale(over, "blok0002", 30));
   const overSent = sent.map((c) => c[0]);
-  is("in one that had not: the mark and the count with its expiry, and nothing else", [overCost, overSent], [3, ["SET", "INCR", "EXPIRE"]]);
+  // The count is one script that adds nothing at the ceiling (Codex G on #2571): the mark and that script, nothing else.
+  is("in one that had not: the mark and the count's one script, and nothing else", [overCost, overSent], [2, ["SET", "EVAL"]]);
   is("and counts nothing", [(await readDepth(shop.statsId, PRODUCT)).visitors, (await readDepth(shop.statsId, PRODUCT)).stopped.blok0002], [readings + 1, undefined]);
   is("which then knows: the same token again asks nothing", await counted(() => sale(over, "blok0002", 30)), 0);
   forgetReadingsSeen();
-  is("and in yet another server, the same token again takes one of its window's readings: the mark and the count with its expiry", [await counted(() => sale(over, "blok0002", 30)), sent.map((c) => c[0])], [3, ["SET", "INCR", "EXPIRE"]]);
+  // A token spent already is refused at its mark and takes no reading (Codex G on #2571): only the mark is asked.
+  is("and in yet another server, the same token again asks only its mark, and takes no reading", [await counted(() => sale(over, "blok0002", 30)), sent.map((c) => c[0])], [1, ["SET"]]);
   is("after which that server knows the window is full: the same token again asks nothing", await counted(() => sale(over, "blok0002", 30)), 0);
 
   part("Readings sent all at once");
@@ -326,23 +328,39 @@ async function main(): Promise<void> {
   // Tokens made by hand for more slots than the window has: the route's own count still stops at the ceiling.
   const burst = Array.from({ length: racerCeiling + 20 }, () => slotted(racer.statsId!, PRODUCT, racer));
   await Promise.all(burst.map((t) => sale(t, "blok0001", 30)));
-  is("exactly the ceiling is counted, never more", [(await readDepth(racer.statsId, PRODUCT)).visitors, Number(redis.run(["GET", readsKey(racer.statsId!, allowanceWindow(racer)!.id)]))], [racerCeiling, racerCeiling + 20]);
+  // The count itself never goes past the ceiling, however many arrive (Codex G on #2571): it adds only below it.
+  is("exactly the ceiling is counted, never more, and the count stops at it", [(await readDepth(racer.statsId, PRODUCT)).visitors, Number(redis.run(["GET", readsKey(racer.statsId!, allowanceWindow(racer)!.id)]))], [racerCeiling, racerCeiling]);
+  // A server just started, its own memory empty, sent fresh tokens past the ceiling: the count stays at it.
+  for (let i = 0; i < 20; i += 1) {
+    forgetReadingsSeen();
+    await sale(slotted(racer.statsId!, PRODUCT, racer), "blok0001", 30);
+  }
+  is("twenty more from servers that had seen nothing: the count stays exactly at the ceiling", [(await readDepth(racer.statsId, PRODUCT)).visitors, Number(redis.run(["GET", readsKey(racer.statsId!, allowanceWindow(racer)!.id)]))], [racerCeiling, racerCeiling]);
+
+  part("The same token sent many times at once");
+  const twin = await paying("twin@example.com", "twinshop");
+  await isResting(twin);
+  forgetReadingsSeen();
+  const one = slotted(twin.statsId!, PRODUCT, twin);
+  await Promise.all(Array.from({ length: 200 }, () => sale(one, "blok0001", 30)));
+  is("two hundred at once: one reading admitted, one counted", [(await readDepth(twin.statsId, PRODUCT)).visitors, Number(redis.run(["GET", readsKey(twin.statsId!, allowanceWindow(twin)!.id)]))], [1, 1]);
 
   part("An answer that is not what was sent");
   // The count is added and its expiry is not (a reply lost, cut short, of another type, or none at all): never a
   // count, nothing written, and the count is given its expiry again so it never stays for good (the review of #2571).
   const receipt = await paying("receipt@example.com", "receiptshop");
   const receiptKey = readsKey(receipt.statsId!, allowanceWindow(receipt)!.id);
-  const answers: [string, (count: unknown) => unknown[]][] = [
-    ["one reply for two commands", (count) => [count]],
-    ["the expiry not set", (count) => [count, 0]],
-    ["the count as text", (count) => [String(count), 1]],
-    ["a reply too many", (count) => [count, 1, "OK"]],
+  // The count's one script answers [1 or 0, the count]; anything else is unknown (Codex G on #2571).
+  const answers: [string, (reply: unknown) => unknown[]][] = [
+    ["the count missing", (reply) => [[(reply as unknown[])[0]]]],
+    ["the count as text", (reply) => [[1, String((reply as unknown[])[1])]]],
+    ["an admission that is not 1 or 0", (reply) => [[2, (reply as unknown[])[1]]]],
+    ["a reply too many", (reply) => [reply, "OK"]],
     ["no answer at all", () => { throw new Error("the database did not answer"); }],
   ];
   for (const [name, answer] of answers) {
     redis.run(["DEL", receiptKey]);
-    answerCount = async (list) => answer((await real([list[0]]))[0]);
+    answerCount = async (list) => answer((await real(list))[0]);
     let cost = 0;
     try {
       const t = slotted(receipt.statsId!, PRODUCT, receipt);
@@ -352,7 +370,7 @@ async function main(): Promise<void> {
     }
     const last = sent.at(-1)?.[0];
     const ttl = Number(redis.run(["TTL", receiptKey]));
-    // The mark, the count with its expiry, and the expiry again: within what every token is priced at, counted or not.
+    // The mark, the count's script, and the expiry again: within what every token is priced at, counted or not.
     is(`${name}: nothing counted or written, the count kept to its end, within what a reading is priced at`, [(await readDepth(receipt.statsId, PRODUCT)).visitors, last, ttl > 0 && ttl <= Math.ceil((allowanceWindow(receipt)!.end - Date.now()) / 1000) + 86_400, cost, cost <= COMMANDS.readBeacon], [0, "EXPIRE", true, 4, true]);
   }
   await sale(slotted(receipt.statsId!, PRODUCT, receipt), "blok0001", 30);

@@ -278,6 +278,12 @@ export class MemoryRedis {
           this.run(["HDEL", imported, field]);
           return 1;
         }
+        // lib/paypal-payouts.ts DROP_IF_EMPTY: the store off the payout index only while its open-batch hash is empty.
+        if (key.startsWith("-- marktmorgen:paypal-index-drop:v1\n") && args[0] === "2" && args.length === 4) {
+          const [, open, index, sid] = args;
+          if (Number(this.run(["HLEN", open])) !== 0) return -1;
+          return this.run(["SREM", index, sid]);
+        }
         // lib/paypal-sales.ts PAYPAL_SETTLE: a completed payment written down, once, with every list it belongs in, in one step.
         if (key.startsWith("-- marktmorgen:paypal-settle:v1\n") && args[0] === "6" && args.length === 14) {
           const [, paid, handOver, watch, own, pending, sales, record, life, order, at, look, floor, salesLife] = args;

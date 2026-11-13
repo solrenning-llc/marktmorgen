@@ -219,6 +219,20 @@ export async function setAutoPay(store: Store, on: boolean): Promise<boolean> {
   return true;
 }
 
+/**
+ * The store taken off the daily job's index only while it has no open batch, in one step (#4395): a batch that
+ * payWithPayPal writes between the settling's read and this removal keeps the store where settleAllPayPal reads it.
+ * Replies the SREM count, or -1 when a batch is open and the store stays.
+ */
+const DROP_IF_EMPTY = `-- marktmorgen:paypal-index-drop:v1
+if redis.call('HLEN', KEYS[1]) == 0 then return redis.call('SREM', KEYS[2], ARGV[1]) end
+return -1`;
+
+async function dropFromIndexIfEmpty(statsId: string, sid: string): Promise<void> {
+  // Whatever the answer, a store left in the index is only looked at again by the daily job: never a loss.
+  await redisPipeline([["EVAL", DROP_IF_EMPTY, 2, openKey(statsId), STORES, sid]]);
+}
+
 async function readOpen(statsId: string): Promise<Map<string, OpenBatch>> {
   return readPendingPayoutBatches(await redisPipeline([["HGETALL", openKey(statsId)]]));
 }
@@ -458,7 +472,7 @@ export async function settlePayPal(store: Store): Promise<Settled> {
   const statsId = store.statsId;
   const open = await readOpen(statsId);
   if (!open.size) {
-    await redisPipeline([["SREM", STORES, store.sid]]);
+    await dropFromIndexIfEmpty(statsId, store.sid);
     return out;
   }
   const auth = await bearer(store).catch(() => null);
@@ -528,7 +542,7 @@ export async function settlePayPal(store: Store): Promise<Settled> {
       await redisPipeline([["HDEL", openKey(statsId), batch]]);
     }
   }
-  if (!out.waiting) await redisPipeline([["SREM", STORES, store.sid]]);
+  if (!out.waiting) await dropFromIndexIfEmpty(statsId, store.sid);
   return out;
 }
 

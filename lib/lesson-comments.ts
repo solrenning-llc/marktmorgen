@@ -302,11 +302,27 @@ export async function addComment(input: {
   let name = "";
   if (input.by !== CREATOR_AUTHOR) {
     const given = cleanLine(input.name, MAX_COMMENTER_NAME);
-    name = given || (await commenterName(input.courseId, input.by));
+    const kept = await commenterName(input.courseId, input.by);
+    name = given || kept;
     if (!name) return { ok: false, reason: "name" };
-    if (given) {
-      await needData(input.room, [{ slot: COMMENTS_SLOT(input.courseId), bytes: dataBytes([input.by, given], 1) }]);
-      await redisPipeline([["HSET", namesKey(input.courseId), input.by, given]]);
+    // The record holds one name a student: a name sent again (a second tab, a form sent twice) takes no more room,
+    // and a changed one takes or gives back only the difference.
+    if (given && given !== kept) {
+      const weigh = (one: string) => (one ? dataBytes([input.by, one], 1) : 0);
+      const grown = weigh(given) - weigh(kept);
+      const change = [{ slot: COMMENTS_SLOT(input.courseId), bytes: Math.abs(grown) }];
+      if (grown > 0) await needData(input.room, change);
+      if (kept) {
+        await redisPipeline([["HSET", namesKey(input.courseId), input.by, given]]);
+        if (grown < 0) await giveData(input.room, change);
+      } else {
+        // Written only if still absent: when another tab chose a name first, its room goes back and theirs stands.
+        const [added] = await redisPipeline([["HSETNX", namesKey(input.courseId), input.by, given]]);
+        if (added === 0) {
+          await giveData(input.room, change);
+          name = await commenterName(input.courseId, input.by) || given;
+        }
+      }
     }
   }
 

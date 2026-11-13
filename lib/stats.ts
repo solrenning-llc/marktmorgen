@@ -1140,7 +1140,12 @@ const currencyOf = (row: { currency?: unknown }) => (typeof row.currency === "st
  * ("stripe-pages"), or a Stripe sale whose currency was not named, kept with
  * its currency blank ("currency").
  */
-export type SalesGap = "paypal" | "stripe-pages" | "currency";
+export type SalesGap = "paypal" | "stripe-pages" | "currency" | "amount";
+
+/** An amount in the currency's smallest unit, read exactly: a whole safe number, 0 included; anything else is unknown (#4386). */
+function amountCents(value: unknown): number | null {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
 
 /**
  * Every paid sale of this store since `since` (seconds), newest first, read
@@ -1212,6 +1217,13 @@ export async function readPaidSales(store: Store, since: number, pages: number):
     const meta = row.metadata ?? {};
     if (!handles.has(meta.store ?? "")) return;
     if (row.status !== "complete" || row.payment_status !== "paid") return;
+    // A paid sale whose amount does not read is never a sale of $0: it is left out and the reading is partial.
+    const cents = amountCents(row.amount_total);
+    if (cents === null) {
+      partial = true;
+      gaps.add("amount");
+      return;
+    }
     const details = (raw.customer_details ?? {}) as { address?: { country?: unknown } | null };
     const country = typeof details.address?.country === "string" && /^[A-Z]{2}$/.test(details.address.country) ? details.address.country : "";
     const currency = currencyOf(row);
@@ -1223,7 +1235,7 @@ export async function readPaidSales(store: Store, since: number, pages: number):
     sales.push({
       created: typeof row.created === "number" ? row.created * 1000 : Date.now(),
       product: meta.product ?? "",
-      cents: typeof row.amount_total === "number" ? row.amount_total : 0,
+      cents,
       currency,
       row: raw,
       upsell: false,
@@ -1236,6 +1248,12 @@ export async function readPaidSales(store: Store, since: number, pages: number):
   const extras = walk("/payment_intents?limit=100", (pi) => {
     const meta = (pi.metadata ?? {}) as Record<string, string>;
     if (meta.kind !== "upsell" || !handles.has(meta.store ?? "") || pi.status !== "succeeded") return;
+    const upsellCents = amountCents(pi.amount);
+    if (upsellCents === null) {
+      partial = true;
+      gaps.add("amount");
+      return;
+    }
     if (!currencyOf(pi)) {
       partial = true;
       gaps.add("currency");
@@ -1243,7 +1261,7 @@ export async function readPaidSales(store: Store, since: number, pages: number):
     sales.push({
       created: typeof pi.created === "number" ? pi.created * 1000 : Date.now(),
       product: meta.product ?? "",
-      cents: typeof pi.amount === "number" ? pi.amount : 0,
+      cents: upsellCents,
       currency: currencyOf(pi),
       row: pi,
       upsell: true,

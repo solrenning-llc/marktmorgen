@@ -59,6 +59,9 @@ let refunds: Record<string, unknown>[] = [];
 let disputes: Record<string, unknown>[] = [];
 let invoicePayments: Record<string, unknown>[] = [];
 let invoicePaymentsFail = false;
+/** #4396: the account's invoice payments say there are more on every page, so the list is read only in part. */
+let invoicePaymentsMore = false;
+let invoicePaymentsPage = 0;
 
 globalThis.fetch = (async (input: string | URL | Request) => {
   const url = new URL(String(input));
@@ -69,6 +72,11 @@ globalThis.fetch = (async (input: string | URL | Request) => {
   if (url.pathname === "/v1/invoices") return new Response(JSON.stringify({ data: invoices, has_more: false }));
   if (url.pathname === "/v1/refunds") return new Response(JSON.stringify({ data: refunds, has_more: false }));
   if (url.pathname === "/v1/disputes") return new Response(JSON.stringify({ data: disputes, has_more: false }));
+  if (url.pathname === "/v1/invoice_payments" && invoicePaymentsMore) {
+    invoicePaymentsPage += 1;
+    const page = invoicePaymentsPage === 1 ? invoicePayments : [{ id: `inpay_more${invoicePaymentsPage}`, invoice: `in_other${invoicePaymentsPage}`, status: "paid", payment: { type: "payment_intent", payment_intent: `pi_othr${invoicePaymentsPage}0000000` } }];
+    return new Response(JSON.stringify({ data: page, has_more: true }));
+  }
   if (url.pathname === "/v1/invoice_payments") return invoicePaymentsFail ? new Response("{}", { status: 500 }) : new Response(JSON.stringify({ data: invoicePayments, has_more: false }));
   return new Response(JSON.stringify({ data: [], has_more: false }));
 }) as typeof fetch;
@@ -217,6 +225,25 @@ async function main(): Promise<void> {
   ];
   const parts = await buyerLedger({ ...store, statsId: "v".repeat(32) } as Store);
   is("an invoice paid in parts: each part's refund is taken off", parts.buyers.get("rae@example.com")?.cents, 1500);
+
+  // #4396: the account's invoice payments are read only in part (more after the last page). Ivy's invoice was paid in
+  // two parts; only the first is on the pages read, and a refund of $40 is on the second. The ledger is partial, never
+  // a whole count of $100.
+  invoices = [{ ...renewal("ivy1", "ivy@example.com", 3, 10000), payments: undefined }];
+  invoicePayments = [
+    // Pam's first payment, through checkout, still needs its invoice's payment (above): it is on the first page too.
+    { id: "inpay_1", object: "invoice_payment", invoice: "in_pamfirst", status: "paid", payment: { type: "payment_intent", payment_intent: "pi_pamfirst00000" } },
+    { id: "inpay_ivy1", invoice: "in_ivy1", status: "paid", payment: { type: "payment_intent", payment_intent: "pi_ivypart100000" } },
+  ];
+  refunds = [{ id: "re_ivy2", status: "succeeded", amount: 4000, currency: "usd", created: now - 2 * DAY, payment_intent: "pi_ivypart200000" }];
+  invoicePaymentsMore = true;
+  invoicePaymentsPage = 0;
+  const cut = await buyerLedger({ ...store, statsId: "y".repeat(32) } as Store);
+  invoicePaymentsMore = false;
+  is("invoice payments read only in part: the ledger is partial", cut.partial, true);
+  // The control: the same list read whole is not partial.
+  const whole = await buyerLedger({ ...store, statsId: "z".repeat(32) } as Store);
+  is("the same list read whole: not partial", whole.partial, false);
 
   // A member of a year: one checkout and eleven monthly payments, the last ten days ago, is a best customer, not a new one.
   sessions.push(session("sam1", "sam@example.com", 340, 1000));

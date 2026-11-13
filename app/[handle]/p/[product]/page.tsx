@@ -1,3 +1,4 @@
+import { OPTION_PARAM, linkedOption } from "@/lib/option-link-rules";
 import { absoluteImageUrl, servedImageUrl, servedSrcSet } from "@/lib/picture-served";
 import { listedLengths } from "@/lib/call-lengths";
 import { assistReminderShown } from "@/lib/assistant-reminder";
@@ -35,7 +36,9 @@ import { notFound, permanentRedirect, redirect } from "next/navigation";
 import { cache } from "react";
 import { type Listing, type Store, isFree, normaliseHandle, storeForPage } from "@/lib/store";
 import { moneyField } from "@/lib/money";
-import { productIdFromAddress, readListing, readListings } from "@/lib/catalog";
+import { productIdFromAddress, readListing, readListings, readProductLegal } from "@/lib/catalog";
+import { activeShipping } from "@/lib/shipping";
+import { ProductSafetyFacts } from "@/components/product-safety-facts";
 import { canSell, canSellProduct, sellableOptions } from "@/lib/store-checkout";
 import { canGiveProduct } from "@/lib/free";
 import { lookStyle } from "@/lib/store-look";
@@ -291,6 +294,8 @@ export default async function ProductPage({ params, searchParams }: Params) {
   // Sent from a card on one of the creator's listed sites (app/embed): the site and the way back, carried to the
   // checkout, which checks both against the store's list again; anything else is ignored there.
   const embedSite = typeof query.site === "string" ? query.site.slice(0, 300) : "";
+  // A link to one price option opens the page with it chosen (630 [HN6](27)): only one the page offers now.
+  const linkedChoice = linkedOption(query[OPTION_PARAM], sellableOptions(product));
   const embedReturn = typeof query.return === "string" ? query.return.slice(0, 700) : "";
   // A reminder asked for below the buy box, and what came of it (lib/checkout-ask.ts).
   const remindAsked = typeof query.asked === "string" ? query.asked.slice(0, 20) : "";
@@ -309,7 +314,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
         </Link>
       </p>
     ) : null;
-  const [about, stock, noKeys, savedPage, summary, related, inside, soldCounts, courseFacts] = await Promise.all([
+  const [about, stock, noKeys, savedPage, summary, related, inside, soldCounts, courseFacts, legal] = await Promise.all([
     product.about ? readAbout(store.statsId, product.id) : Promise.resolve(""),
     stockLeft(store, product).catch(() => null),
     outOfKeys(store, product).catch(() => false),
@@ -323,6 +328,8 @@ export default async function ProductPage({ params, searchParams }: Params) {
     readSoldCounts(store).catch(() => null),
     // A course's video total, from what the video service measured (292 [SQ3], lib/course-facts.ts).
     product.course ? readCourse(product.course.id).then((course) => (course ? readCourseFacts(course) : null)).catch(() => null) : Promise.resolve(null),
+    // The legal information of a product the creator ships (618 [SZ2]): one read of its own record, only then.
+    activeShipping(product) ? readProductLegal(store, product.id).catch(() => null) : Promise.resolve(null),
   ]);
   // Its page could not be read: said so, with no buy box, as a blog post that cannot be read is (unit B).
   if (savedPage === "unread") {
@@ -337,6 +344,9 @@ export default async function ProductPage({ params, searchParams }: Params) {
     );
   }
   const videoLine = courseFacts?.videoSeconds != null ? videoTotalLine(courseFacts.videoSeconds, store.language) : null;
+  // What was read goes with the product to its buy box, so the countries it says it ships to are the ones
+  // its checkout offers (lib/physical-legal-ship.ts); a record not read is not filled.
+  const shippedNow = activeShipping(product) ? { ...product, legal } : product;
   // The version of a page test this visitor reads (lib/headline-test.ts),
   // before anything is drawn from the page, so all of it is one version.
   const page = await shownVersion(store, product.id, savedPage, product.priceCents > 0);
@@ -450,7 +460,9 @@ export default async function ProductPage({ params, searchParams }: Params) {
           </a>
         </p>
       ) : null}
-      <BuyBox store={store} product={product} related={related} remaining={remaining} writes={canWrite(store)} selling={selling} ready={bundleReady} soon={soon} preorder={preorder} bundleItems={inside} pickAgain={query.pick === "count"} consentAgain={consentAgain && !giftProblem && !groupProblem} embed={embedSite || embedReturn ? { site: embedSite, back: embedReturn } : null} />
+      {/* 618 [SZ2]: what the creator filled on a physical product, before the buy button (components/product-safety-facts.tsx). */}
+      <ProductSafetyFacts store={store} product={product} legal={legal} />
+      <BuyBox store={store} product={shippedNow} related={related} remaining={remaining} writes={canWrite(store)} selling={selling} ready={bundleReady} soon={soon} preorder={preorder} bundleItems={inside} pickAgain={query.pick === "count"} consentAgain={consentAgain && !giftProblem && !groupProblem} embed={embedSite || embedReturn ? { site: embedSite, back: embedReturn } : null} chosenOption={linkedChoice} />
       {cartOn && !soon && cartable(product) && remaining !== 0 ? <AddToCart handle={store.handle} productId={product.id} lang={store.language} deal={store.cartDeal.on ? store.cartDeal : null} /> : null}
       {/* A question before buying, answered from this page (lib/answers.ts): only where the creator switched it on. */}
       {selling && answersOn(store) ? (

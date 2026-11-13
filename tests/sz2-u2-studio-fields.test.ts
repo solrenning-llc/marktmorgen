@@ -12,7 +12,7 @@
  *   - the route answers with the saved product; the studio confirms the save only
  *     when that answer carries exactly what it sent (an unknown answer is not a save);
  *   - the studio block has visible labels, field-named errors and the gaps summary;
- *     nothing is shown to buyers and no checkout country changes yet (unit 3).
+ *     what buyers see and the checkout countries are unit 3's (tests/sz2-u3-display.test.ts).
  */
 import { readFileSync } from "node:fs";
 import { NextRequest } from "next/server";
@@ -157,9 +157,9 @@ async function main(): Promise<void> {
   const editor = readFileSync("components/product-editor.tsx", "utf8");
   is("shown on a shipped product, after the shipping block", /<ShippingEditor product=\{product\} \/>\s*\{product\.shipping \? <PhysicalLegalEditor product=\{product\} \/> : null\}/.test(editor), true);
 
-  part("Not yet shown to buyers or used by checkout (unit 3)");
+  part("Shown to buyers and used by checkout since unit 3 (tests/sz2-u3-display.test.ts)");
   for (const file of ["app/[handle]/p/[product]/page.tsx", "lib/store-checkout.ts", "lib/cart-shipping.ts"]) {
-    is(`${file} does not read it yet`, /physical-legal|\.legal\b/.test(readFileSync(file, "utf8")), false);
+    is(`${file} reads it`, /physical-legal/.test(readFileSync(file, "utf8")), true);
   }
 
   done();

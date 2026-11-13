@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { ensureStatsId } from "@/lib/store";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
+import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { aiAvailableFor, aiLeft, aiOffReason } from "@/lib/ai";
 import { listPitches, readSender } from "@/lib/outreach";
@@ -55,7 +56,7 @@ export default async function StudioOutreachPage({ searchParams }: Params) {
       />
       <StudioStorePin sid={store.sid}>
         <main id="content" className="container-page pb-20 pt-10 sm:pt-14">
-          <p className="eyebrow">Outreach</p>
+          <StudioTrail store={store} here="Outreach" />
           <h1 className="t-h2 mt-3">Write to a business that could pay you</h1>
           <p className="mt-3 max-w-2xl text-ink-soft">
             Name a business. We read its website for the address it asks to be written at, write a short email from what you

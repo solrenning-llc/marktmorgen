@@ -12,7 +12,8 @@ import { isFree, syncTakesBuyer, type Listing, type Store } from "@/lib/store";
 import { canSellProduct, fromPriceCents, sellableOptions } from "@/lib/store-checkout";
 import { canGiveProduct } from "@/lib/free";
 import { activeBumps, activePlan, planFor } from "@/lib/product-extras";
-import { activeShipping, shipsToWords } from "@/lib/shipping";
+import { shipsToWords } from "@/lib/shipping";
+import { shippingNow } from "@/lib/physical-legal-ship";
 import { shippingWords } from "@/lib/buyer-words/shipping";
 import { activePwyw } from "@/lib/pay-what-you-want";
 import { IMAGE_SIZES } from "@/lib/product-image";
@@ -570,6 +571,7 @@ export function BuyBox({
   consentAgain = false,
   embed = null,
   stepped = false,
+  chosenOption = null,
 }: {
   store: Store;
   product: Listing;
@@ -614,6 +616,11 @@ export function BuyBox({
    * C4-20261106-0520-TODOS-19), not repeated on every card.
    */
   stepped?: boolean;
+  /**
+   * The price option a link to this page named (630 [HN6](27), lib/option-link-rules.ts linkedOption): drawn chosen,
+   * and said so above the options, because the buyer clicked a link for it. Null chooses nothing, as always (487 [IT4]).
+   */
+  chosenOption?: string | null;
 }) {
   // The card's way to the buy step: the words the product page's own buttons use (pageAction), and its name for a
   // screen reader, so the link says on its own what it is for (WCAG 2.4.9).
@@ -628,6 +635,8 @@ export function BuyBox({
   if (soon && !isFree(product)) return preorder ? <PreorderForm store={store} product={product} day={preorder} writes={writes} consentAgain={consentAgain} /> : <WaitlistForm store={store} product={product} writes={writes} />;
   const { w, money } = speech(store);
   const options = sellableOptions(product);
+  // Only an option this box offers right now can be the one the link chose.
+  const linked = chosenOption && options.some((option) => option.id === chosenOption) ? options.find((option) => option.id === chosenOption)! : null;
   const every = product.recurring ? ` ${w.every(product.recurring.interval)}` : "";
   // What one costs in each option whose name says how many (lib/option-units.ts); not for a membership's price.
   const units = product.recurring ? new Map<string, UnitLine>() : unitLines(options);
@@ -643,7 +652,8 @@ export function BuyBox({
   };
   const pwyw = activePwyw(product);
   // Shipped by the creator (lib/shipping.ts): said under the button.
-  const shipping = activeShipping(product);
+  // Where it ships now: without the EU/EEA while its safety fields are not filled (618 [SZ2], lib/physical-legal-ship.ts).
+  const shipping = shippingNow(product);
   const sw = shippingWords(store.language);
   const trial = product.recurring && product.recurring.trialDays > 0 ? product.recurring.trialDays : 0;
   // A membership's introductory price (lib/intro-price.ts): what the button and the line under it say.
@@ -786,7 +796,8 @@ export function BuyBox({
         */
         <div className="mb-4">
           <label htmlFor={`os-${product.id}`} className="st-label">{w.chooseOptionFor(product.title)}</label>
-          <select id={`os-${product.id}`} name="option" required defaultValue="" className="st-field mt-2">
+          {linked ? <p className="st-muted mt-1 text-sm" data-option-from-link="">{w.optionFromLink(linked.label)}</p> : null}
+          <select id={`os-${product.id}`} name="option" required defaultValue={linked ? linked.id : ""} className="st-field mt-2">
             <option value="" disabled>
               {w.chooseOne}
             </option>
@@ -800,6 +811,7 @@ export function BuyBox({
       ) : options.length > 0 ? (
         <fieldset className="mb-4">
           <legend className="sr-only">{w.chooseOptionFor(product.title)}</legend>
+          {linked ? <p className="st-muted mb-2 text-sm" data-option-from-link="">{w.optionFromLink(linked.label)}</p> : null}
           {/*
             With what each includes written down, the cards stand side by side
             on a wide screen so the buyer can compare them; on a phone they
@@ -818,6 +830,7 @@ export function BuyBox({
                     name="option"
                     value={option.id}
                     required
+                    defaultChecked={linked?.id === option.id}
                     className="h-4 w-4"
                   />
                   <span className="font-bold">{option.label}</span>
@@ -966,7 +979,7 @@ export function BuyBox({
           );
         })}
       </button>
-      {shipping ? (
+      {shipping && shipping.countries.length > 0 ? (
         /* A product the creator ships (lib/shipping.ts): what shipping costs and where it goes, before anybody pays. */
         <p className="st-muted mt-2 text-center text-xs" data-shipping="">
           {[

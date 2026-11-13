@@ -80,9 +80,14 @@ not ship to the EU/EEA countries (those countries are taken out of the
 checkout's shipping countries, with the reason in the studio), and the rest of
 its countries keep selling. Area used: EU 27 plus Iceland, Liechtenstein and
 Norway (GPSR is marked "text with EEA relevance"; whether it is already in the
-EEA Agreement was not read, so the stricter inclusion is used). Northern
-Ireland ships under `GB` and cannot be told apart by country code: not covered;
-"Depende do dono".
+EEA Agreement was not read, so the stricter inclusion is used). The parts of
+the Union that Stripe names with their own code are in the area too: Åland
+(`AX`, TFEU art. 355(4)) and the French outermost regions (`GF`, `GP`, `MF`,
+`MQ`, `RE`, `YT`; arts. 349 and 355(1), OJ C 202, 7.6.2016). `SJ` (Svalbard,
+outside the EEA, and Jan Mayen, inside it) is closed while a gap remains but
+does not count as inside the area for a manufacturer (review of #3029).
+Northern Ireland ships under `GB` and cannot be told apart by country code:
+not covered; "Depende do dono".
 
 ### California: Proposition 65 (27 CCR §§ 25600.2, 25602(b), 25603)
 
@@ -238,7 +243,25 @@ rest of the studio. This unit has no interface: 0 → 0 steps and decisions.
 2. Product page and checkout path: show the fields, the unit price and the
    Prop 65 text before the buy button; take the GPSR-closed countries out of
    the checkout's shipping countries (`lib/store-checkout.ts`,
-   `lib/cart-shipping.ts`), with the studio saying why.
+   `lib/cart-shipping.ts`), with the studio saying why. **Built in unit 3**
+   (tests/sz2-u3-display.test.ts): `lib/physical-legal-ship.ts`
+   (`shippingNow`, `shipsNowhere`) is the one rule for where a product ships
+   now, read by the single checkout, the cart, the buy box's shipping line and
+   the store's answers; a full product is judged only from its own legal
+   record (unreadable is not filled), a listing only from the mark
+   `safetyFilled` that `listingOf` computes when the product is saved (only
+   exactly `true` counts). A product shipped only to the EU/EEA with a gap is
+   not sold (`canSellProduct`) and its checkout is refused before Stripe. The
+   page of a shipped product reads its legal record with one GET of the
+   product's own record, in parallel with its other reads, and nothing for any
+   other product (`readProductLegal`); `components/product-safety-facts.tsx`
+   draws it before the buy button, words in `lib/buyer-words/product-safety.ts`
+   (7 languages). The unit price is shown for each price sold, from the price
+   charged now (store sale or fair price), above the block. The studio's
+   summary (`safetySummary`, unit 2) lists what is needed and, from the same
+   rule (`safetyClosed`), says in a warning notice: "Until these details are
+   complete, buyers in the EU and EEA can't buy this product." (or, for a
+   product shipped only there, that no one can buy it).
 3. Confirmation email: the GPSR fields and the Prop 65 text.
 4. Price history written when a price or a sale changes; the EU/EEA prior
    price on the store sale (`lib/store-sale.ts`) and the percentage from it.

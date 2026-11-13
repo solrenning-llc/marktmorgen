@@ -30,6 +30,7 @@
  */
 import { MAX_SHIPPING_CENTS, type ShipCandidate, type Shipping, activeShipping } from "@/lib/shipping";
 import { shippingWords } from "@/lib/buyer-words/shipping";
+import { type SafetyCandidate, shippingNow } from "@/lib/physical-legal-ship";
 import type { Store } from "@/lib/store";
 
 /**
@@ -84,9 +85,15 @@ export function cartShipping(items: CartItem[], buyerCountry?: string): CartShip
   return { kind: "apart", to, apart: shipped.filter((item) => !item.countries.includes(to)).map(({ id, title }) => ({ id, title })) };
 }
 
-/** A product as the cart reads it: physical when it ships today, as on its own checkout (lib/shipping.ts, activeShipping). */
-export function cartItemOf(product: ShipCandidate & { id: string; title: string; shipping?: Shipping | null }): CartItem {
-  const shipping = activeShipping(product);
+/**
+ * A product as the cart reads it: physical when it ships today, as on its own
+ * checkout (lib/shipping.ts, activeShipping), to the countries it ships to now:
+ * without the EU/EEA while its safety fields are not filled (618 [SZ2],
+ * lib/physical-legal-ship.ts). One that ships nowhere now has no country and
+ * cannot be paid for in a cart.
+ */
+export function cartItemOf(product: SafetyCandidate & { id: string; title: string }): CartItem {
+  const shipping = shippingNow(product);
   return { id: product.id, title: product.title, physical: shipping !== null, shipping };
 }
 

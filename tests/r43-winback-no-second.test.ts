@@ -9,7 +9,7 @@
  */
 import { renderToStaticMarkup } from "react-dom/server";
 import { TEST_CONSENT } from "./digital-consent-fixture";
-import { addProduct, claimHandle, ensureStatsId, setProductLink, setStripeAccount, setSubscription, setWinBack, storeForEmail } from "@/lib/store";
+import { addProduct, claimHandle, ensureStatsId, setProductLink, setRecovery, setStripeAccount, setSubscription, setWinBack, storeForEmail } from "@/lib/store";
 import { openWinBack } from "@/lib/winback-send";
 import { membershipWords } from "@/lib/buyer-words/membership";
 import RenewPage, { generateMetadata } from "@/app/[handle]/renew/[product]/page";
@@ -244,6 +244,22 @@ async function main(): Promise<void> {
     const retry = await page({ back: zoeLink, status });
     is(`the page after "${status}" shows the offer's button again, with its words`, [retry.includes('action="/api/store/come-back/open"'), retry.includes(m.offerNotices[status] ?? "\u0000")], [true, true]);
   }
+  // Claude 7's review of #3482 at 06202c4d3e, MEDIUM: with the store's checkout reminders on, the checkout closes an
+  // hour after it opens (expires_at, lib/recovery-setting.ts), and a link that kept it for 23 hours handed back a
+  // checkout Stripe had already closed for the rest of the day.
+  part("A store with checkout reminders on: the open checkout is handed back no longer than Stripe keeps it open");
+  process.env.RESEND_API_KEY ??= "re_SYNTHETIC_TEST_ONLY";
+  await setRecovery(OWNER, { enabled: true, address: "1 Main St, Portland, OR 97201", asks: true });
+  const reminding = (await storeForEmail(OWNER))!;
+  customerEmail.set("cus_VicOld000001", "vic@example.com");
+  subsBody.set("cus_VicOld000001", sub("sub_VicEnded0001", "canceled"));
+  const vicLink = await comeBackLink(statsId, "vic@example.com");
+  const vic = await openWinBack(reminding, product, vicLink, "https://marktmorgen.com", TEST_CONSENT);
+  is("Vic: the checkout opens", vic.ok, true);
+  const closes = Number(checkouts.at(-1)?.get("expires_at") ?? NaN);
+  const [vicTtl] = await redisPipeline([["TTL", `nl:wb:open:${vicLink}`]]);
+  is("Vic: the checkout was told to close (reminders on)", Number.isFinite(closes), true);
+  is("[CORRETO] Vic: kept no longer than Stripe keeps it open", Number(vicTtl) > 0 && Number(vicTtl) <= closes - Math.floor(Date.now() / 1000), true);
   done();
 }
 

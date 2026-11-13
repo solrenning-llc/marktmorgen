@@ -42,10 +42,10 @@ import {
 } from "@/lib/waitlist-rules";
 import { cleanText, cleanLine } from "@/lib/community-text";
 import { productSegment } from "@/lib/product-slug";
+import { soonKey, soonProducts } from "@/lib/coming-soon-set";
 import { noteForErasure } from "@/lib/erasure-index";
 import { blankInLists } from "@/lib/erasure-lists";
 
-const soonKey = (sid: string) => `nl:wl:${sid}:soon`;
 const listKey = (sid: string, pid: string) => `nl:wl:${sid}:${pid}`;
 const jobKey = (sid: string, pid: string) => `nl:wl:${sid}:${pid}:job`;
 const sendKey = (sid: string, pid: string) => `nl:wl:${sid}:${pid}:send`;
@@ -64,18 +64,8 @@ function sender(store: Store): string {
 
 // ------------------------------------------------------------------ coming soon
 
-/**
- * The products of a store that are coming soon, for its pages. A reply that is
- * not exactly a list of text (none, another shape, a hole, a lost pipeline) is
- * unknown, never an empty set: it throws, so no caller can take a product whose
- * state could not be read for one already on sale (rule 24).
- */
-export async function soonProducts(store: Store): Promise<Set<string>> {
-  if (!store.statsId || !isRedisConfigured()) return new Set();
-  const members = stringList(repliesFor(await redisPipeline([["SMEMBERS", soonKey(store.statsId)]]), 1)?.[0]);
-  if (!members) throw new UnknownReplyError("the products coming soon");
-  return new Set(members);
-}
+/** The products of a store that are coming soon (lib/coming-soon-set.ts, read there so the checkouts need none of this file). */
+export { soonProducts };
 
 /** Whether one product is coming soon: 0 or 1 only, as lib/preorders.ts reads it; anything else throws as unknown (rule 24). */
 export async function isSoon(store: Store, productId: string): Promise<boolean> {

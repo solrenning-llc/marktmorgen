@@ -27,7 +27,7 @@
 import type { Listing, Store } from "@/lib/store";
 import { readListings } from "@/lib/catalog";
 import { deliverableItems } from "@/lib/bundle-rules";
-import { soonProducts } from "@/lib/waitlist";
+import { soonProducts } from "@/lib/coming-soon-set";
 import { outOfKeys } from "@/lib/licence-keys";
 
 /**

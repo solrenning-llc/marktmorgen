@@ -1023,6 +1023,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:vault:up:@lib/vault.ts": short("A vault upload in progress", "upload", 1, 512),
   "nl:verified:@lib/verified-numbers.ts": { what: "The store's verified numbers, cached", parts: [capped(16 * KB, "One a store.")] },
   "nl:verified:cursor@lib/verified-numbers.ts": company("Where the verification job stopped", "One key, the company's job."),
+  "nl:wl:@lib/coming-soon-set.ts": { what: "Products coming soon, the set lib/waitlist.ts keeps, read by the checkouts (lib/bundle-available.ts): counted with its product (PRODUCT_SIDE_BYTES)", room: ["lib/store.ts"] },
   "nl:wl:@lib/waitlist.ts": { what: "Waitlists: who is waiting, launches", room: ["lib/waitlist.ts", "lib/store.ts"], parts: [per("store", 120, KEY, "A launch's record and each address's place in it.", MAIL("launch"))] },
   "nl:wl:jobs@lib/waitlist.ts": company("Launches still sending", "One set, members gone when done."),
   "nl:wl:t:@lib/waitlist-tokens.ts": { what: "A waitlist's confirm and leave links", room: ["lib/waitlist.ts"], parts: [per("store", 7, LINK_BYTES, "A confirm link, seven days.", MAIL("waitlist"))] },

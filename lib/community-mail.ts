@@ -423,7 +423,8 @@ export async function advanceAnnouncement(
         if (outcome !== "sent") {
           await release(store, recipients.length);
           const failures = job.failures + 1;
-          job = failures >= 5
+          // Only a refusal ends it: a provider that is down keeps the email waiting, never abandoned (outage drill).
+          job = outcome === "refused"
             ? { ...job, status: "failed", failures, note: "The email service would not take it. Nothing more was sent." }
             : { ...job, failures, note: "Paused for a moment: the email service asked us to slow down." };
           break;

@@ -755,7 +755,8 @@ export async function advanceEventJob(
         const outcome = await sendBatch(messages, `cmev:${id}:${job.done}:${keys.length}`, { by: "store", store, kind: "email" });
         if (outcome !== "sent") {
           const failures = job.failures + 1;
-          if (outcome === "refused" || failures >= 5) return await finish("failed", "The email service would not take it. Nothing more was sent.");
+          // Only a refusal ends it: a provider that is down keeps the notice waiting, never abandoned (outage drill).
+          if (outcome === "refused") return await finish("failed", "The email service would not take it. Nothing more was sent.");
           job = { ...job, failures, note: "Paused for a moment: the email service asked us to slow down." };
           break;
         }

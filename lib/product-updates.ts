@@ -451,7 +451,9 @@ export async function advanceUpdate(id: string, load: (handle: string) => Promis
           await release(store, recipients.length);
           const failures = job.failures + 1;
           job =
-            failures >= 5 || outcome === "refused"
+            // Only a refusal ends it: a provider that is down or slow keeps the update waiting in the queue, never
+            // abandoned, and the next run goes on with it (outage drill, 13 November 2026).
+            outcome === "refused"
               ? { ...job, status: "failed", failures, note: "The email service would not take it. Nothing more was sent." }
               : { ...job, failures, note: "Paused for a moment: the email service asked us to slow down." };
           break;

@@ -46,7 +46,7 @@
 import { admitOrders, settleAdmitted } from "@/lib/order-admission";
 import { createHash, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { claimMark, claimValue } from "@/lib/claim-mark";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { StripeError, onAccount } from "@/lib/stripe-account";
 import {
@@ -367,12 +367,15 @@ export async function takeUpsell(input: {
   // Once, however many times the button is pressed. Only "OK" makes this press the one that answers (claimMark): a
   // reply cut short or of another shape is read back, never taken as ours, so two presses at the same moment never
   // both count the order and send the payment (rule 24). The claim's own random value tells the two apart.
-  const claimed = await claimMark(
-    recordKey(session, slot),
-    RECORD_SECONDS,
-    JSON.stringify({ state: "pending", product: target.id, ...extra, at: Date.now(), claim: claimValue() }),
-  );
-  if (claimed === "unknown") throw new UnknownReplyError("an offer's answer mark");
+  const mark = JSON.stringify({ state: "pending", product: target.id, ...extra, at: Date.now(), claim: claimValue() });
+  const claimed = await claimMark(recordKey(session, slot), RECORD_SECONDS, mark);
+  if (claimed === "unknown") {
+    // The mark may have landed although this press cannot tell. Let go of it with this press's own value (compare and
+    // delete), so it never stays behind as a "pending" answer with nothing charged that every later press reads as
+    // done: the next press claims the offer afresh (Claude 2 cloud A's MEDIUM on #3852).
+    await releaseMark(recordKey(session, slot), mark).catch(() => undefined);
+    throw new UnknownReplyError("an offer's answer mark");
+  }
   if (claimed === "taken") {
     const existing = await readUpsell(session, slot);
     return existing?.state === "failed" ? { kind: "failed" } : existing?.state === "declined" ? { kind: "declined" } : { kind: "done" };

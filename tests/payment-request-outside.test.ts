@@ -89,6 +89,19 @@ async function main(): Promise<void> {
   await withSession(pending, "cs_test_slowone1234", { status: "complete", payment_status: "unpaid" });
   is("still being paid: refused, left open", [(await markPaidOutside(store, pending, { method: "cash", note: "", paidAt: day })).ok, (await requestOf(store, pending))?.state], [false, "open"]);
 
+  part("Another request's paid checkout answers for this one (#4447)");
+  const reqA = await make();
+  const reqB = await make();
+  await withSession(reqA, "cs_test_sessionofA1", { id: "cs_test_sessionofB1", status: "complete", payment_status: "paid", amount_total: 12000, payment_intent: "pi_test_ofBpaid1", created: Math.floor(day / 1000), metadata: { kind: "request", request: reqB, store: "outsideshop" } });
+  const crossed = await markPaidOutside(store, reqA, { method: "cash", note: "", paidAt: day });
+  const afterA = await requestOf(store, reqA);
+  is("the answer for another checkout is a read error", crossed.ok ? "marked" : crossed.reason, "error");
+  is("request A stays open, with its own session and no payment of B's", [afterA?.state, afterA?.session, afterA?.payment], ["open", "cs_test_sessionofA1", ""]);
+  const reqC = await make();
+  await withSession(reqC, "cs_test_sessionofC1", { status: "complete", payment_status: "paid", amount_total: 12000, payment_intent: "pi_test_ofDpaid1", created: Math.floor(day / 1000), metadata: { kind: "request", request: reqB, store: "outsideshop" } });
+  const named = await markPaidOutside(store, reqC, { method: "cash", note: "", paidAt: day });
+  is("its own checkout naming another request: a read error, left open", [named.ok ? "marked" : named.reason, (await requestOf(store, reqC))?.state], ["error", "open"]);
+
   part("Kept and said");
   is("a mark reads only whole", [readOutside({ method: "cheque" }), readOutside({ method: "cash", note: "  a\\nb  " })], [null, { method: "cash", note: "a\\nb" }]);
   is("an open request never carries a mark", parseRequest({ ...read, state: "open" })?.outside, undefined);

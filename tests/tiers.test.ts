@@ -64,6 +64,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
           items: { data: [{ id: "si_Member0001", price: { unit_amount: 1000, currency: paidIn, metadata: priceMeta, recurring: { interval: "month", interval_count: 1 } } }] },
         },
       ],
+      // Altered 2026-11-09 (rule 23): a Stripe list carries has_more, and subsOf now reads the page in its exact shape (readStripePage).
+      has_more: false,
     });
   }
   if (method === "POST" && path === "/prices") return json({ id: "price_Tier00000001" });

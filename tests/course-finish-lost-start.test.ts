@@ -1,6 +1,6 @@
 import { noteIfFinished, noteIfOpened } from "@/lib/course-finish";
 import { editCourse, emptyCourse, saveCourse } from "@/lib/course";
-import { markLesson } from "@/lib/learn";
+import { emailKey, markLesson } from "@/lib/learn";
 import { upsertContact } from "@/lib/contacts";
 import { readFlows, saveFlow } from "@/lib/flows";
 import { addProduct, claimHandle, ensureListId, ensureStatsId, setMailSettings, setProductCourse, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
@@ -73,6 +73,41 @@ async function main() {
       // The same moment again (a lesson opened again; a lesson marked done again): the sequence starts now.
       await note(store, product.id, course.id, email);
       is(`${kind}: the student's sequence starts once the failure has passed, never lost for 400 days`, await queuedFor(), 1);
+      await note(store, product.id, course.id, email);
+      is(`${kind}: and never twice`, await queuedFor(), 1);
+    }
+    for (const kind of ["open", "fin"] as const) {
+      part(`${kind}: starting fails and the cleanup DEL answers in a shape that is not its own`);
+      const note = kind === "open" ? noteIfOpened : noteIfFinished;
+      const email = `lostdel${serial++}@example.com`;
+      const mark = `nl:course:${course.id}:${kind}:${emailKey(email)}`;
+      await upsertContact(store.listId!, email, { agreed: true, explicit: true, productId: product.id, title: product.title, source: "buyer" }, ROOM);
+      if (kind === "fin") await markLesson(course.id, email, lesson, true, ROOM);
+      let failed = false, lostDel = false;
+      redis.pipeline = async (commands) => {
+        if (!failed && commands.some((c) => c[0] === "GET" && String(c[1]).startsWith("nl:mail:flows:"))) {
+          failed = true;
+          return [42] as never;
+        }
+        // The DEL never reaches Redis and its reply is lost: the mark stays.
+        if (!lostDel && commands.length === 1 && commands[0][0] === "DEL" && commands[0][1] === mark) {
+          lostDel = true;
+          return [] as never;
+        }
+        return original(commands);
+      };
+      await note(store, product.id, course.id, email);
+      redis.pipeline = original;
+      is(`${kind}: both failures were injected`, [failed, lostDel], [true, true]);
+      const ttl = (await original([["TTL", mark]]))[0] as number;
+      // A mark left behind by an unconfirmed cleanup holds the moment for an hour at the most, never 400 days.
+      is(`${kind}: the mark left by the lost cleanup lives an hour at the most`, ttl > 0 && ttl <= 3600, true);
+      await original([["DEL", mark]]); // the hour passes
+      const queuedFor = async () => ((await original([["ZRANGEBYSCORE", "nl:mail:flowq", "-inf", "+inf"]]))[0] as string[]).filter((item) => item.endsWith(`|${email}`)).length;
+      await note(store, product.id, course.id, email);
+      is(`${kind}: after that hour the sequence starts`, await queuedFor(), 1);
+      const kept = (await original([["TTL", mark]]))[0] as number;
+      is(`${kind}: a start that went through keeps the mark 400 days`, kept > 399 * 86_400, true);
       await note(store, product.id, course.id, email);
       is(`${kind}: and never twice`, await queuedFor(), 1);
     }

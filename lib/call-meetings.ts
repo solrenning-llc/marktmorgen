@@ -212,7 +212,14 @@ async function refundsOf(store: Store, callsId: string, deadline: number): Promi
     query.append("expand[]", "data.charge");
     if (after) query.set("starting_after", after);
     const listed = await onAccount("GET", account, `/refunds?${query}`);
-    const refunds = Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : [];
+    // A page in another shape, or holding a row that is not a refund with its id, is unknown (rule 24): the walk stops
+    // there and the place is held, never read as an empty page that moves the place past refunds it never read.
+    const plain = (row: unknown): row is Record<string, unknown> => row !== null && typeof row === "object" && !Array.isArray(row) && typeof (row as { id?: unknown }).id === "string" && Boolean((row as { id: string }).id);
+    if (!Array.isArray(listed.data) || !listed.data.every(plain)) {
+      unsure = true;
+      break;
+    }
+    const refunds = listed.data as Record<string, unknown>[];
     // A dispute closed as lost ends the booking's meeting
     // as a full refund does (lib/refunds.ts, queue 388 [TB14]): read once,
     // with the first page, from Stripe's closing events (kept thirty days).
@@ -248,8 +255,9 @@ async function refundsOf(store: Store, callsId: string, deadline: number): Promi
       if (lookups <= 0) continue;
       lookups -= 1;
       const sessions = await onAccount("GET", account, `/checkout/sessions?${new URLSearchParams({ payment_intent: intent, limit: "1" })}`);
-      // A list in another shape is unknown (rule 24): the refund stays unread and the place held, never "no call".
-      if (!Array.isArray(sessions.data)) {
+      // A list in another shape, or a first row that is not a checkout with its id, is unknown (rule 24): the refund
+      // stays unread and the place held, never "no call". Only an empty list is "no checkout, so no call".
+      if (!Array.isArray(sessions.data) || (sessions.data.length > 0 && !plain(sessions.data[0]))) {
         unsure = true;
         continue;
       }
@@ -280,11 +288,17 @@ async function refundsOf(store: Store, callsId: string, deadline: number): Promi
       newest = Math.max(newest, created);
     }
     const last = refunds[refunds.length - 1];
-    if (listed.has_more !== true || !last || typeof last.id !== "string") {
+    if (listed.has_more !== true) {
       complete = true;
       break;
     }
-    after = last.id;
+    // More pages and no last row to go on from: unknown, the place is held.
+    if (!last) {
+      unsure = true;
+      break;
+    }
+    // Every row of the page was checked above to be a refund with a string id.
+    after = last.id as string;
   }
   // The lost disputes' place moves only once every one read was handled (lib/refunds.ts, confirmLostRead); a sweep
   // that went on from a kept place moves the job no further than the newest closing it read, so a dispute closed

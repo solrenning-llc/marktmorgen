@@ -269,6 +269,29 @@ test('a re-prototyped Node transferable whose clone runs an Object.prototype get
   assert.deepStrictEqual(after, before);
 });
 
+for (const kind of ['Map', 'Set'] as const) {
+  test(`a re-prototyped ${kind} whose clone runs an entry's getter is refused as before, with the same effects`, () => {
+    // structuredClone walks a Map's or Set's entries, which the copy pass never sees.
+    const run = (capture: (value: unknown) => CustomerTaxInput | null) => {
+      const log: string[] = [];
+      const root = {taxReview: {evidence: null as unknown}, taxContext: {iof: 0}};
+      const entry = {get late() {
+        log.push('entry getter');
+        // Rewrites a branch the detach has not reached yet.
+        Object.defineProperty(root.taxContext, 'iof', {configurable: true, enumerable: true, get() { log.push('iof getter'); return 380; }});
+        return 1;
+      }};
+      const box = kind === 'Map' ? new Map([['k', entry]]) : new Set([entry]);
+      Object.setPrototypeOf(box, Object.prototype);
+      root.taxReview.evidence = box;
+      return {result: capture(root), log};
+    };
+    const before = run(referenceCapture), after = run(captureCustomerTaxInput);
+    assert.equal(before.result, null, 'the reference refuses');
+    assert.deepStrictEqual(after, before);
+  });
+}
+
 test('real review fixtures detach identically through both implementations', () => {
   const row = txCustomerFixture();
   const pair = {taxReview: row.taxReview, taxContext: row.taxContext};

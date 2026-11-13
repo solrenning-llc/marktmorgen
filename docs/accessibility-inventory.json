@@ -1441,6 +1441,7 @@
     "components/leave-editor.tsx",
     "components/legal-page.tsx",
     "components/lesson-comments.tsx",
+    "components/lesson-focus.tsx",
     "components/lesson-notes-kept.tsx",
     "components/lesson-notes.tsx",
     "components/lesson-player.tsx",

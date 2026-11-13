@@ -172,6 +172,25 @@ export class MemoryRedis {
           }
           return this.run(["HDEL", handles, handle]);
         }
+        // lib/community-push.ts STILL_IN: one mark per member key, "y" in, "r" taken out, "n" no record, "?" any other shape.
+        if (key.startsWith("-- marktmorgen:community-still-in:v1\n") && args[0] === "1" && args.length >= 3) {
+          const [, members, ...keys] = args;
+          const rows = this.run(["HMGET", members, ...keys]) as (string | null)[];
+          return keys.map((who, i) => {
+            const raw = rows[i];
+            if (raw === null) return "n";
+            let record: unknown;
+            try {
+              record = JSON.parse(raw);
+            } catch {
+              return "?";
+            }
+            if (!record || typeof record !== "object") return "?";
+            const fields = record as { k?: unknown; removed?: unknown; muted?: unknown };
+            if (fields.k !== who || typeof fields.removed !== "boolean" || typeof fields.muted !== "boolean") return "?";
+            return fields.removed ? "r" : "y";
+          }).join("");
+        }
         // lib/group-buy.ts PLACE_RELEASE: a place's opening hold deleted only while its token is still the open's own.
         if (key.startsWith("-- marktmorgen:group-place-release:v1\n") && args[0] === "1" && args.length === 3) {
           const [, hold, token] = args;
@@ -710,6 +729,25 @@ export class MemoryRedis {
           this.scriptCalls += 1;
           this.run(["SET", copy, value, "EX", seconds]);
           return 1;
+        }
+        // lib/discord-store.ts FORGET_PEOPLE: a server's people read, each deleted only while their row is the one read,
+        // each address link only while it points at them; the people and links deleted and the people left.
+        if (key.startsWith("-- marktmorgen:discord-forget-people:v1\n") && Number(args[0]) >= 2 && args.length === 1 + Number(args[0]) + 1 + 2 * (Number(args[0]) - 2)) {
+          const n = Number(args[0]);
+          const [members, due, ...links] = args.slice(1, 1 + n);
+          const [sid, ...pairs] = args.slice(1 + n);
+          this.scriptCalls += 1;
+          let gone = 0;
+          let unlinked = 0;
+          links.forEach((link, i) => {
+            const [id, row] = [pairs[2 * i], pairs[2 * i + 1]];
+            if (this.run(["GET", link]) === id) unlinked += this.run(["DEL", link]) as number;
+            if (this.run(["HGET", members, id]) === row) {
+              gone += this.run(["HDEL", members, id]) as number;
+              this.run(["ZREM", due, `${sid}|${id}`]);
+            }
+          });
+          return [gone, unlinked, this.run(["HLEN", members])];
         }
         // lib/suppression.ts ERASED_PRINT: a deleted person's print, at the second on Redis's clock (this stand-in's).
         if (key.startsWith("-- marktmorgen:erased-print:v1\n") && args[0] === "1" && args.length === 3) {
@@ -1498,6 +1536,18 @@ export class MemoryRedis {
           for (const k of keys) this.run(["HDEL", k, argv[1]]);
           return 1;
         }
+        // lib/calls.ts CONFIRM_STEP: a booking's confirmation mark moved on only from a stage named, read and written in one step.
+        if (key.startsWith("-- marktmorgen:call-confirm-step:v1\n") && args[0] === "1") {
+          const held = this.run(["GET", args[1]]);
+          if (typeof held !== "string") return [0];
+          for (let i = 3; i + 1 < args.length; i += 2) {
+            if (held === args[i]) {
+              this.run(["SET", args[1], args[i + 1], "XX", "EX", args[2]]);
+              return [1, held];
+            }
+          }
+          return [0, held];
+        }
         // lib/closing-holds.ts CALL_BUDGET_ONCE: a closing's call budget, set once per ending, step for step (Codex S on #3309).
         if (key.startsWith("-- marktmorgen:closing-call-budget:v1\n") && args[0] === "1" && args.length === 4) {
           const [, work, calls, ending] = args;
@@ -1513,6 +1563,15 @@ export class MemoryRedis {
         }
         if (key.startsWith("-- marktmorgen:store-data:v1\n") && args[0] === "1") return this.storeData(args.slice(1));
         if (key.startsWith("-- marktmorgen:order-write:v1\n")) return this.orderWrite(args);
+        // lib/order-data.ts ORDER_WRITE_ONCE: ORDER_WRITE behind a once-only mark (KEYS[2]), read first; a mark there
+        // writes nothing, and a command refused inside takes the mark back out.
+        if (key.startsWith("-- marktmorgen:order-write-once:v1\n") && Number(args[0]) >= 2) {
+          const held = this.run(["GET", args[2]]);
+          if (typeof held === "string") return [-2, held];
+          const out = this.orderWrite(args);
+          if (Array.isArray(out) && out.slice(1).some((r) => typeof r === "string" && r.startsWith("\u0000order-write-error:"))) this.run(["DEL", args[2]]);
+          return out;
+        }
         if (key.startsWith("-- marktmorgen:recount-page:v1\n") && args[0] === "2") {
           const [state, sums, from, next, ...pairs] = args.slice(1);
           if (pairs.length % 2 !== 0) return -1;

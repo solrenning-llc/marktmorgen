@@ -795,7 +795,10 @@ export function searchRead(size: { room: boolean; conversations: number }): numb
  * answers the door, the spaces, the events and the lessons of a page (the pre-review of 9 November 2026, P1). It was
  * priced at three calls of 64 KB while it read up to twelve pages; then at 24 KB a checkout with nothing holding a page
  * to it; then for ten customers of 300 KB each, all side by side (round 2 of that pre-review: forty of 60 KB, four
- * groups, cost the same within a hundredth of a request).
+ * groups, cost the same within a hundredth of a request). A door whose products that reading ran out of refund questions
+ * for (lib/community-access.ts, doorAnswer) reads them on its own, at most one more such reading a door, kept under the
+ * door's own key: paid as one more check (checkUnits(1)) on the search, and on the community's own page as each door's
+ * reading was before the shared one (Claude 1 cloud's review of #3395).
  */
 export const ACCESS_CHECK_READ = 4 * COMMAND + TICKET_STRIPE_WAITS * EXPORT_PAGE_SECONDS * MEMORY_SECOND
   + searchBodyWork(2 * TICKET_SESSION_PAGES * TICKET_SESSION_PAGE_BYTES)

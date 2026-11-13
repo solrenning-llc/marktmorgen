@@ -168,7 +168,8 @@ export default async function CommunitySearchPage({ params, searchParams }: Para
   const checks = tab === "lesson" ? lessonProducts.length : tab === "event" ? page.posts.length : 0;
   const holdings = owner || !checks ? viewer.holdings : await holdingsOf(store, config, email, lessonProducts, () => takePublicRequest(store, "buyer", undefined, checkUnits(checks)));
   if (holdings === "refused") redirect(`/@${store.handle}/resting`);
-  const gate = { owner, email, key, holdings };
+  // A door whose products the shared reading ran out of refund questions for reads them on its own, paid as one more check.
+  const gate = { owner, email, key, holdings, pay: () => takePublicRequest(store, "buyer", undefined, checkUnits(1)) };
   const lessonsRead = tab === "lesson" ? await lessonsFound(store, config, page.posts, gate) : { found: [], unchecked: 0, lasting: false };
   const eventsRead = tab === "event" ? await eventsFound(store, config, page.posts, gate) : { found: [], unchecked: 0, lasting: false };
   const lessons = lessonsRead.found;

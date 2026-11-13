@@ -35,7 +35,7 @@ import { readListings } from "@/lib/catalog";
 import { type Course, findLesson, readCourse } from "@/lib/course";
 import { type CommunityConfig, type Member, readMembers } from "@/lib/community";
 import { type CommunityEvent, isOver, mayAttend, readEvents } from "@/lib/community-events";
-import { type Holdings, heldAnswer, holdingsOf, unknownForGood } from "@/lib/community-access";
+import { type Holdings, courseDoorKey, doorAnswer, holdingsOf, unknownForGood } from "@/lib/community-access";
 import { readLessonRef } from "@/lib/community-index";
 
 export type FoundLesson = {
@@ -52,6 +52,11 @@ export type Viewer = {
   key: string;
   /** What the reader holds, read once for the page (holdingsOf, with the lessons' products); read here when absent. */
   holdings?: Holdings | null;
+  /**
+   * Pays one more check, when a door's own reading is needed (doorAnswer: the shared reading ran out of refund
+   * questions for its products): refused, that door stays not known.
+   */
+  pay?: () => Promise<boolean>;
 };
 
 /**
@@ -89,7 +94,8 @@ export async function lessonsFound(
   const allowed = new Set<string>();
   const unknown = new Set<string>();
   for (const productId of withCourse) {
-    const answer = holdings ? heldAnswer(holdings, [productId]) : true;
+    // The course's own key when the shared reading ran out of refund questions for it (doorAnswer).
+    const answer = holdings ? await doorAnswer(store, holdings, [productId], viewer.email, courseDoorKey(communityId, productId, viewer.email), String(config.v), viewer.pay) : true;
     if (answer === true) allowed.add(productId);
     else if (answer === "unknown") unknown.add(productId);
   }
@@ -153,7 +159,7 @@ export async function eventsFound(
   for (const id of ids) {
     const event = byId.get(id);
     if (!event) continue;
-    const answer = await mayAttend(store, config, event, { owner: viewer.owner, email: viewer.email, holdings }).catch((): "unknown" => "unknown");
+    const answer = await mayAttend(store, config, event, { owner: viewer.owner, email: viewer.email, holdings, pay: viewer.pay }).catch((): "unknown" => "unknown");
     if (answer === "unknown") unchecked += 1;
     if (answer !== true) continue;
     kept.push({ event, state: event.cancelled ? "cancelled" : isOver(event, now) ? "over" : "upcoming" });

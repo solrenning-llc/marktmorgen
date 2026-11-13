@@ -65,7 +65,7 @@ import { type MeetProvider, cleanRoom, isMeetProvider, isTimeZone, partsIn, read
 import { isVideoRoom, newVideoRoom } from "@/lib/call-rooms";
 import { type Video, parseVideo, readVideo } from "@/lib/sales-page";
 import { fold, icsText, icsTime } from "@/lib/ics-write";
-import { type Holdings, type Ticket, heldAnswer, holdingsOf, holdsAnyOf } from "@/lib/community-access";
+import { type Holdings, type Ticket, doorAnswer, holdingsOf, holdsAnyOf } from "@/lib/community-access";
 import { type CommunityConfig, newItemId } from "@/lib/community";
 import { LockBusyError, setIfHeld, withLock } from "@/lib/redis-lock";
 import { indexEvent, unindexEvent } from "@/lib/community-index";
@@ -645,21 +645,21 @@ export async function mayAttend(
   store: Store,
   config: CommunityConfig,
   event: CommunityEvent,
-  viewer: { owner: boolean; email: string; holdings?: Holdings | null },
+  viewer: { owner: boolean; email: string; holdings?: Holdings | null; pay?: () => Promise<boolean> },
   options: { strict: true },
 ): Promise<boolean>;
 export async function mayAttend(
   store: Store,
   config: CommunityConfig,
   event: CommunityEvent,
-  viewer: { owner: boolean; email: string; holdings?: Holdings | null },
+  viewer: { owner: boolean; email: string; holdings?: Holdings | null; pay?: () => Promise<boolean> },
   options?: { strict?: false },
 ): Promise<Ticket>;
 export async function mayAttend(
   store: Store,
   config: CommunityConfig,
   event: CommunityEvent,
-  viewer: { owner: boolean; email: string; holdings?: Holdings | null },
+  viewer: { owner: boolean; email: string; holdings?: Holdings | null; pay?: () => Promise<boolean> },
   options: { strict?: boolean } = {},
 ): Promise<Ticket> {
   if (viewer.owner) return true;
@@ -668,7 +668,9 @@ export async function mayAttend(
   if (!ids.length) return false;
   const id = store.community?.id as string;
   if (options.strict) return holdsAnyOf(store, ids, viewer.email, accessKey(id, event.id, viewer.email), `${config.v}.${event.v}`, options);
-  return heldAnswer(viewer.holdings ?? (await holdingsOf(store, config, viewer.email)), ids);
+  // The event's own key when the shared reading ran out of refund questions for its products (doorAnswer).
+  const holdings = viewer.holdings ?? (await holdingsOf(store, config, viewer.email));
+  return doorAnswer(store, holdings, ids, viewer.email, accessKey(id, event.id, viewer.email), `${config.v}.${event.v}`, viewer.pay);
 }
 
 export type JoinWindow = {

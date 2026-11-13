@@ -334,6 +334,22 @@ async function main(): Promise<void> {
     is("the next try finds it and the deleted address is kept nowhere in the index", indexState().some((line) => line.includes(OLD)), false);
   }
 
+  part("An address erased after a move that stopped before its lines were written gives its room back (Claude 1 on #3625)");
+  {
+    const OLD = "room.old@example.com";
+    const NEW = "room.new@example.com";
+    const request = await asked(OLD, NEW);
+    // The room is taken, then the write answers out of shape: no line names the address, but its room is held.
+    odd = { command: "EVAL", prefix: "-- marktmorgen:purchase-move-apply", reply: "not a state", times: 1 };
+    const stopped = await applyPurchaseMove(moss, request.id);
+    odd = null;
+    is("the move stopped unknown", stopped.state, "unknown");
+    is("its room is held", roomField(OLD), true);
+    is("no line names the address", indexState().some((line) => line.includes(OLD)), false);
+    is("the erasure finds no line", await forgetMovedPerson(moss, OLD), 0);
+    is("and the room is given back all the same", roomField(OLD), false);
+  }
+
   part("An address deleted between the move's check and its write is never left in the index (Claude 1 on #3625)");
   {
     const OLD = "race.old@example.com";

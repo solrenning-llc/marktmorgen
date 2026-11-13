@@ -94,3 +94,5 @@ export async function readTeamMembers() {
 export async function readTeam() {
   return { members: members(), invites: [] };
 }
+// The owner's email goes through sendEmailPinned (lib/email.ts, #3297): in this one-sender world it is the same stand-in.
+export const sendEmailPinned = (message: Parameters<typeof sendEmail>[0]) => sendEmail(message);

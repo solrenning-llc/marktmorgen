@@ -409,10 +409,11 @@ export type SummaryPart = "emailed" | "posted";
 export type PartSend = boolean | "sent" | "refused" | "unknown";
 
 /**
- * How long a try of the owner's email stays covered by its idempotency key, with an hour to spare: SES's once-key
- * (lib/email.ts) and Resend's idempotency each hold the key 24 hours. Inside it, another try under the same key does
- * not deliver an email whose answer was lost; past it, nothing would stop it, so an email whose first try is older
- * is not tried again (rule 24: a false may be an unknown, and an unknown is never sent blind).
+ * How long a try of the owner's email stays covered by its idempotency key, with an hour to spare: the email is sent
+ * with sendEmailPinned (lib/email.ts), which keeps its sender for the key PINNED_SENDER_SECONDS (24 hours), and SES's
+ * once-key and Resend's idempotency each hold it 24 hours. Inside it, another try under the same key goes to the same
+ * sender and does not deliver an email whose answer was lost; past it, nothing would stop it, so an email whose first
+ * try is older is not tried again (rule 24: a false may be an unknown, and an unknown is never sent blind).
  */
 export const EMAIL_KEY_HOLDS_MS = 23 * 3_600_000;
 
@@ -440,7 +441,8 @@ async function firstTried(period: SummaryPeriod, part: SummaryPart, now: number)
  * it may have gone (an unknown answer, a throw), and then the mark is kept, so no later try sends it blind.
  *
  * With `keyHoldsMs` (the owner's email, EMAIL_KEY_HOLDS_MS), a false is let go only while the first try is that
- * recent, since a try under the same key cannot deliver it twice; once the first try is older, the part is not
+ * recent, since a try under the same key, sent with its sender kept (sendEmailPinned), cannot deliver it twice; once
+ * the first try is older, the part is not
  * tried again and is "unconfirmed". Without it, a false is "unconfirmed". Never throws.
  */
 export async function sendPart(

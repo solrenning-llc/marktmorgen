@@ -2,7 +2,7 @@ import type { NextRequest } from "next/server";
 import { cronAllowed } from "@/lib/request-guard";
 import { isRedisConfigured } from "@/lib/redis";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
-import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
+import { NIMBUS_FROM, isSenderConfigured, sendEmailPinned } from "@/lib/email";
 import { visitedFolders } from "@/lib/traffic";
 import { monthKey } from "@/lib/delivery";
 import { storeOf } from "@/lib/usage-billing";
@@ -103,13 +103,14 @@ export async function GET(request: NextRequest) {
         if (post === "unconfirmed") unconfirmed = true;
       }
       if (!emailOff) {
-        const email = await sendPart(period, "emailed", () => sendEmail({ meter: { by: "company" },
+        const email = await sendPart(period, "emailed", () => sendEmailPinned({ meter: { by: "company" },
           from: NIMBUS_FROM,
           to: store.email,
           subject: message.subject,
           text: message.text,
           headers: { "List-Unsubscribe": `<${stopUrl}>` },
-          // One key for the period, so a try that the sender could not confirm is not sent again by a later try.
+          // One key for the period, kept with its sender (sendEmailPinned): a try whose answer was lost is never sent
+          // again by a later try, by the same sender or by the other one, which never saw the key (#3297).
           idempotencyKey: `numbers-summary:${period.key}`,
         }), { keyHoldsMs: EMAIL_KEY_HOLDS_MS });
         if (email === "sent") out.sent += 1;

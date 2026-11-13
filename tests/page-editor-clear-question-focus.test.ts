@@ -21,7 +21,10 @@ const askAt = editor.indexOf("Back to the plain page?");
 const question = editor.slice(editor.lastIndexOf("confirmClear ? (", askAt), editor.indexOf("Clear the page\n", askAt));
 
 is("the question is drawn where it was", askAt > 0 && question.length > 0, true);
-is("it is a group named by its own words", /role="group" aria-labelledby="clear-question"/.test(question) && /id="clear-question"[^>]*>\s*Back to the plain page\?/.test(question), true);
+is("it is a group named by its own words", /role="group" aria-labelledby=\{clearQuestionId\}/.test(question) && /id=\{clearQuestionId\}[^>]*>\s*Back to the plain page\?/.test(question), true);
+// Review of #3770 (Claude 3, nuvem N), LEVE: a fixed id would repeat if two editors were on one screen, and the second
+// group would be named by the first one's question. The id comes from useId, unique per editor.
+is("the question's id is the editor's own (useId), never a fixed text", /const clearQuestionId = useId\(\);/.test(editor) && !/id="clear-question"/.test(editor), true);
 const keepAt = question.indexOf("Keep it\n");
 is("Keep it holds a ref, so the focus can go to it", keepAt > 0 && question.slice(question.lastIndexOf("<button", keepAt), keepAt).includes("ref={clearKeep}"), true);
 is("Keep it marks that the focus goes back, then closes the question", /onClick=\{\(\) => \{\s*clearBack\.current = true;\s*setConfirmClear\(false\);\s*\}\}/.test(question), true);

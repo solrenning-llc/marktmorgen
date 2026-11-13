@@ -36,6 +36,7 @@ import { dataKey, dataUsed, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { allowanceFor } from "@/lib/store-allowance-rules";
 import { allowanceUsedExact, takeAllowance } from "@/lib/store-allowance";
+import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import {
   COPY_COMMANDS,
   COPY_KEEP_SECONDS,
@@ -252,6 +253,8 @@ export type StepAnswer =
 
 /** Takes the studio requests a part of a step is charged, on top of the one its request took at the door. */
 async function charge(to: Store, units: number): Promise<{ ok: true } | { ok: false; message: string }> {
+  // A funded period's copy work needs its paid cohort first (resourceAllocations).
+  if (to.period?.funded === true && !(await reservePaidResourceWindow(to))) return { ok: false, message: "This can't be counted right now. Try again in a minute." };
   const taken = await takeAllowance(to, "studio", Math.max(1, units));
   return taken.ok ? { ok: true } : { ok: false, message: taken.message };
 }

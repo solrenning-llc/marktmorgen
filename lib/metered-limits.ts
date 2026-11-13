@@ -14,6 +14,7 @@
  * The registry finds every scope used with either, so a public path or a
  * call out cannot be added without a figure.
  */
+import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { withinEssentialLimit, withinLimit } from "@/lib/request-guard";
 import type { Store } from "@/lib/store";
 import { takeAllowance } from "@/lib/store-allowance";
@@ -34,6 +35,9 @@ export async function withinServiceWhy(scope: string, who: string, limit: number
   // A confirmed monthly allowance cannot repair an unknown short-window
   // counter. Refuse before taking that allowance or calling the provider.
   if (!(await withinEssentialLimit(scope, who, limit, windowSeconds))) return { reason: "tries" };
+  // A funded period's call to another service needs its paid cohort first (resourceAllocations);
+  // a removal or disconnection is let through by its route before this is asked.
+  if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return { reason: "unknown", message: "This can't be counted right now. Try again in a minute." };
   const taken = await takeAllowance(store, "integration");
   return taken.ok ? null : { reason: taken.reason, message: taken.message };
 }

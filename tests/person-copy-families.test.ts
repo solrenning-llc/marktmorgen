@@ -77,16 +77,24 @@ async function main(): Promise<void> {
   const job = { id: importId, kind: "purchases", sid, by: OWNER, at: Date.now(), state: "mailing", file: "buyers.csv", expected: 3, total: 3, done: 1, cursor: { batch: 0, row: 0 }, counts: { added: 1, already: 0, skipped: 0, errors: 1, mailed: 0, unmailed: 0, contacts: 0, stopped: 0 }, options: { agreed: false, consentColumn: false, tags: [], email: true, dateOrder: "", source: "csv" }, finishedAt: 0 };
   redis.run(["SET", `nl:import:${importId}`, JSON.stringify(job), "EX", 14 * 86_400]);
   redis.run(["LPUSH", `nl:imports:list:${sid}`, importId]);
-  redis.run(["RPUSH", `nl:import:${importId}:rows`, JSON.stringify([["2", "Nina@Example.com", "Nina", "prod1"], ["3", OTHER, "Otto", "prod1"]])]);
-  redis.run(["RPUSH", `nl:import:${importId}:errors`, JSON.stringify([4, "email", "Not a product here", PERSON]), JSON.stringify([5, "email", "Not a product here", OTHER])]);
+  // Addresses that only contain theirs (Codex G on #4321): a longer domain, and a longer local part.
+  const LONGER = `${PERSON}.au`, PREFIXED = `x${PERSON}`;
+  redis.run(["RPUSH", `nl:import:${importId}:rows`, JSON.stringify([["2", "Nina@Example.com", "Nina", "prod1"], ["3", OTHER, "Otto", "prod1"], ["7", LONGER, "Nia", "prod1"], ["8", PREFIXED, "Xenia", "prod1"]])]);
+  redis.run(["RPUSH", `nl:import:${importId}:errors`, JSON.stringify([4, "email", "Not a product here", PERSON]), JSON.stringify([5, "email", "Not a product here", OTHER]), JSON.stringify([9, "email", "Not a product here", LONGER])]);
   redis.run(["HSET", `nl:import:${importId}:seen`, `p:${PERSON}|prod1`, "2", `p:${OTHER}|prod1`, "3", `p:${PERSON}.au|prod1`, "6"]);
   redis.run(["SADD", `nl:import:${importId}:mail`, PERSON, OTHER]);
+  // A second import whose only email waiting is to a longer address than theirs: nothing of it is about them.
+  const otherImport = "b2".repeat(12);
+  redis.run(["SET", `nl:import:${otherImport}`, JSON.stringify({ ...job, id: otherImport, file: "others.csv" }), "EX", 14 * 86_400]);
+  redis.run(["LPUSH", `nl:imports:list:${sid}`, otherImport]);
+  redis.run(["SADD", `nl:import:${otherImport}:mail`, LONGER, PREFIXED]);
   // A webhook delivery about them, and one about somebody else.
   const delivery = (id: string, email: string) => JSON.stringify({ id, statsId, endpoint: "ep_1", eventId: "evt_1", type: "order.paid", body: JSON.stringify({ type: "order.paid", data: { email, product: "prod1" } }), attempts: 1, state: "delivered", next: 0, lastStatus: 200, lastError: "", lastAt: Date.now(), createdAt: Date.now() });
-  const mine = `dlv_${"1".repeat(24)}`, theirs = `dlv_${"2".repeat(24)}`;
+  const mine = `dlv_${"1".repeat(24)}`, theirs = `dlv_${"2".repeat(24)}`, longer = `dlv_${"3".repeat(24)}`;
   redis.run(["SET", `nl:hooks:d:${mine}`, delivery(mine, PERSON), "EX", 7 * 86_400]);
   redis.run(["SET", `nl:hooks:d:${theirs}`, delivery(theirs, OTHER), "EX", 7 * 86_400]);
-  redis.run(["LPUSH", `nl:hooks:log:${statsId}`, mine, theirs]);
+  redis.run(["SET", `nl:hooks:d:${longer}`, delivery(longer, LONGER), "EX", 7 * 86_400]);
+  redis.run(["LPUSH", `nl:hooks:log:${statsId}`, mine, theirs, longer]);
 
   const scope = (await erasureScope(store, PERSON))!;
   const copy = await copyPerson(scope, Date.now());
@@ -97,7 +105,7 @@ async function main(): Promise<void> {
     { yourNo: "Stopped review requests", since: "2026-11-01T10:00:00.000Z" },
     { yourNo: "Stopped checkout reminders", since: "2026-11-01T10:00:00.000Z" },
   ]);
-  const imported = section("lib/imports.ts")[0] as Record<string, unknown> | undefined;
+  const imported = section("lib/imports.ts").find((r) => r.import === "buyers.csv") as Record<string, unknown> | undefined;
   is("the imported file's row waiting that names them, and only theirs", imported?.rowsWaiting, [["2", "Nina@Example.com", "Nina", "prod1"]]);
   is("the row not brought in that names them", imported?.notBroughtIn, [{ row: 4, column: "email", problem: "Not a product here", value: PERSON }]);
   is("the note of which row they were seen on, not a longer address that starts with theirs", imported?.rowsSeen, [{ key: `${PERSON}|prod1`, row: "2" }]);
@@ -105,6 +113,8 @@ async function main(): Promise<void> {
   const hooked = section("lib/webhooks.ts");
   is("the webhook delivery about them, as the endpoint received it, and not the other", hooked.map((h) => [h.event, h.state, (h.sent as { data: { email: string } }).data.email]), [["order.paid", "delivered", PERSON]]);
   is("nobody else's address is anywhere in it", JSON.stringify(copy).includes(OTHER), false);
+  is("nor an address that only contains theirs (rows, report, mail queue, webhook body)", [JSON.stringify(copy).includes(LONGER), JSON.stringify(copy).includes(PREFIXED)], [false, false]);
+  is("an import whose only email waiting is to another address is not in it", section("lib/imports.ts").map((r) => r.import), ["buyers.csv"]);
   is("what is held only while a job is done is said, with how long", Array.isArray(copy.passing) && copy.passing.some((p) => p.includes("sending list") && p.includes("at most 60 days")), true);
   is("everything was read: the copy is complete", [copy.complete, copy.notComplete], [true, []]);
 
@@ -117,6 +127,16 @@ async function main(): Promise<void> {
   redis.run(["LTRIM", `nl:hooks:log:${statsId}`, 0, 49]);
   const full = await copyPerson((await erasureScope(store, PERSON))!, Date.now());
   is("a full log of this week's deliveries may hide older ones still kept: said, not left out", [full.complete, full.notComplete.some((line) => line.includes("webhooks") && line.includes("could not be read"))], [false, true]);
+
+  part("An import on the store's list kept in a shape that cannot be read is said, not left out (Codex U on #4321)");
+  // One whose record names another store, and one that is not JSON: both kept on the list, neither readable as its import.
+  const elsewhere = "c3".repeat(12), garbled = "d4".repeat(12);
+  redis.run(["SET", `nl:import:${elsewhere}`, JSON.stringify({ ...job, id: elsewhere, sid: `${sid}-other` }), "EX", 14 * 86_400]);
+  redis.run(["SET", `nl:import:${garbled}`, "{not json", "EX", 14 * 86_400]);
+  redis.run(["LPUSH", `nl:imports:list:${sid}`, elsewhere, garbled]);
+  redis.run(["DEL", `nl:hooks:log:${statsId}`]);
+  const unreadable = await copyPerson((await erasureScope(store, PERSON))!, Date.now());
+  is("the copy says it is not complete, naming the imports", [unreadable.complete, unreadable.notComplete.some((line) => /import/i.test(line) && line.includes("could not be read"))], [false, true]);
 
   part("An unknown answer fails the copy rather than leave their no out");
   const real = redis.pipeline.bind(redis);

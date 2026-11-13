@@ -65,6 +65,7 @@ import { forgetClicksPerson } from "@/lib/mail-clicks";
 import { forgetHealthPerson } from "@/lib/mail-health";
 import { forgetWorkflowPerson } from "@/lib/flows";
 import { forgetCrmPerson } from "@/lib/crm";
+import { forgetCompanyPerson } from "@/lib/crm-companies";
 import { forgetNotesPerson } from "@/lib/buyer-profile";
 import { forgetFormsPerson } from "@/lib/form-store";
 import { forgetFinishPerson } from "@/lib/course-finish";
@@ -109,7 +110,7 @@ import { forgetOrderConfirmationMail } from "@/lib/order-confirmation-outbox";
  * (the FTC's rule on consumer reviews forbids suppressing them, lib/reviews.ts),
  * nor take away what an import gave a buyer for a purchase made elsewhere.
  */
-type Eraser = { module: string; only?: ErasureBy; run: (scope: ErasureScope, files: string[], notes: Set<ErasureNote>) => Promise<number> };
+type Eraser = { module: string; only?: ErasureBy; after?: string[]; run: (scope: ErasureScope, files: string[], notes: Set<ErasureNote>) => Promise<number> };
 
 /** Something the creator should know, said with the result. */
 export type ErasureNote = "discord-roles" | "email-platform";
@@ -126,6 +127,8 @@ export const ERASERS: Eraser[] = [
   { module: "lib/mail-clicks.ts", run: (s) => forgetClicksPerson(s.listId, s.email) },
   { module: "lib/mail-health.ts", run: (s) => forgetHealthPerson(s.store, s.email) },
   { module: "lib/crm.ts", run: (s) => forgetCrmPerson(s.statsId, s.person, s.email, s.store) },
+  // Taken off any company they were linked to, the room it took given back (639 [GL7](4)).
+  { module: "lib/crm-companies.ts", run: (s) => forgetCompanyPerson(s.statsId, s.person, undefined, s.store) },
   { module: "lib/payment-request-store.ts", run: (s) => forgetRequestsPerson(s.sid, s.email) },
   { module: "lib/agreement-store.ts", run: (s) => forgetAgreementsPerson(s.sid, s.email) },
   { module: "lib/buyer-profile.ts", run: (s) => forgetNotesPerson(s.statsId, s.person) },
@@ -211,7 +214,7 @@ export const ERASERS: Eraser[] = [
   { module: "lib/customer-voice.ts", run: (s) => forgetVoicePerson(s.statsId) },
   { module: "lib/buyer-library.ts", run: (s) => forgetLibraryPerson(s.sid, s.email) },
   { module: "lib/erasure-index.ts", run: (s) => forgetNoted(s.statsId, s.email) },
-  { module: "lib/contacts.ts", run: (s) => forgetContactPerson(s.listId, s.email) },
+  { module: "lib/contacts.ts", after: ["lib/mail-clicks.ts"], run: (s) => forgetContactPerson(s.listId, s.email) },
 ];
 
 export type ErasureResult =
@@ -310,6 +313,10 @@ export async function erasePerson(
   const notes = new Set<ErasureNote>();
   for (const eraser of ERASERS) {
     if (eraser.only && eraser.only !== by.kind) continue;
+    if (eraser.after?.some((module) => failed.includes(module))) {
+      failed.push(eraser.module);
+      continue;
+    }
     try {
       parts.push({ module: eraser.module, records: await eraser.run(scope, files, notes) });
     } catch (error) {

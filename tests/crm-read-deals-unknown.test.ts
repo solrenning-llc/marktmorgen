@@ -31,9 +31,12 @@ const PIPES = [{ id: "sales0", name: "Coaching", stages: [{ id: OPEN, name: "Qua
 /** The HVALS of the deals key answered by `reply` while set; everything else answers truthfully. */
 let hvals: ((values: unknown) => unknown) | null = null;
 let dealsKey = "";
+/** The whole pipeline reply for the HVALS of the deals key, while set: one reply too few or too many (a test gap Claude 1 noted on #3810). */
+let whole: ((answers: unknown[]) => unknown[]) | null = null;
 const original = redis.pipeline.bind(redis);
 redis.pipeline = (async (commands: (string | number)[][]) => {
   const answers = await original(commands);
+  if (whole && commands.length === 1 && commands[0][0] === "HVALS" && commands[0][1] === dealsKey) return whole(answers);
   return hvals ? answers.map((answer, i) => (commands[i][0] === "HVALS" && commands[i][1] === dealsKey ? hvals!(answer) : answer)) : answers;
 }) as typeof redis.pipeline;
 
@@ -51,6 +54,9 @@ const CROOKED: [string, (values: unknown) => unknown][] = [
   ["a number", () => 3],
   ["a list with a number in it", (values) => [...(values as unknown[]), 7]],
   ["a list with an object in it", (values) => [...(values as unknown[]), { id: "x" }]],
+  // The LEVE of Claude 1 and Codex L on #3810: a kept deal that does not parse was dropped as if it were not there.
+  ["a list with a deal that does not parse", (values) => [...(values as unknown[]), "{not json"]],
+  ["a list with a deal that is not a record", (values) => [...(values as unknown[]), "7"]],
 ];
 
 async function main(): Promise<void> {
@@ -81,6 +87,16 @@ async function main(): Promise<void> {
     is(`HVALS answered ${what}: unknown, never no deals`, await outcome(() => readDeals(sid, stages)), "CrmDealReadUnavailable");
     hvals = null;
   }
+
+  for (const [what, answers] of [["no reply", () => []], ["one reply too many", (a: unknown[]) => [...a, []]]] as const) {
+    whole = answers as (answers: unknown[]) => unknown[];
+    is(`the pipeline answered ${what}: unknown, never no deals`, await outcome(() => readDeals(sid, stages)), "CrmDealReadUnavailable");
+    whole = null;
+  }
+  await original([["HSET", dealsKey, "gonedeal01", JSON.stringify({ id: "gonedeal01", title: "Old", email: "", cents: 0, stage: "stgold", note: "", createdAt: 1, updatedAt: 1 })]]);
+  is("control: a deal in a stage the store no longer has is still left off the board, as documented", await anaDeals(), [["anadeal001", OPEN]]);
+  is("control: and the board still reads", (await readDeals(sid, stages)).length, 1);
+  await original([["HDEL", dealsKey, "gonedeal01"]]);
 
   part("A workflow's deal step never makes a second deal on an unknown board");
   const joined = await saveFlow(store, { name: "Joined: deal", trigger: "joined", active: true, steps: [{ delayHours: 0, subject: "", body: "", action: { do: "deal", stage: WON, title: "Joined" } }] }, { activate: true });

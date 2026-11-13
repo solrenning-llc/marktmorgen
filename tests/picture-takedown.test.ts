@@ -322,6 +322,24 @@ async function main(): Promise<void> {
   is("the published product keeps its picture's address", (await now(back.id)).listing.image?.path, back.image.path);
   is("which is still served", servedYear(await fetchPicture(back.image.path)), year);
 
+
+  part("A picture with its 240 px thumbnail (#2801): the thumbnail's old address answers not found too (Claude 1's HIGH)");
+  {
+    const thumbed = await pictured("Thumb cover pack", 61);
+    const folder = await imageFolder(OWNER);
+    const thumb = `images/${folder}/${hex(61 + 2000, 32)}.jpg`;
+    kept.set(thumb, new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 61, 7]));
+    const withThumb: ProductImage = { ...thumbed.image, thumb: { path: thumb, width: 240, bytes: 6 } } as ProductImage;
+    const set = await setProductImage(OWNER, thumbed.id, withThumb);
+    if (!set.ok) throw new Error("no thumbnail");
+    is("control: the thumbnail is served and kept a year", servedYear(await fetchPicture(thumb)), year);
+    is("the takedown says the product is unpublished", await press(report, thumbed.id), 'The product "Thumb cover pack", now unpublished');
+    is("the thumbnail's old address answers not found, kept by nobody", servedYear(await fetchPicture(thumb)), gone);
+    const after = (await now(thumbed.id)).listing.image as (ProductImage & { thumb?: { path: string; width: number } | null }) | null;
+    is("the record's thumbnail is under a new name in the same folder, with its width", [after?.thumb?.path !== thumb, after?.thumb?.path.slice(0, after.thumb.path.lastIndexOf("/")), after?.thumb?.width], [true, thumb.slice(0, thumb.lastIndexOf("/")), 240]);
+    is("the copy holds the thumbnail's bytes", after?.thumb ? (await fetchPicture(after.thumb.path))[2] : "", "ffd8ffe03d07");
+  }
+
   done();
 }
 

@@ -59,10 +59,13 @@ async function copyTo(from: string, to: string): Promise<"copied" | "absent"> {
   }
 }
 
-/** The files of one picture: the picture and its smaller copy, when it has one. */
-export type PictureNames = { path: string; small: string | null };
+/**
+ * The files of one picture: the picture, its smaller copy and its thumbnail copy (#2801), each when it has one. A
+ * takedown's names kept before the thumbnail existed have no `thumb`: none.
+ */
+export type PictureNames = { path: string; small: string | null; thumb?: string | null };
 
-const namesOf = (picture: PictureNames): string[] => [picture.path, ...(picture.small ? [picture.small] : [])];
+const namesOf = (picture: PictureNames): string[] => [picture.path, ...(picture.small ? [picture.small] : []), ...(picture.thumb ? [picture.thumb] : [])];
 
 /**
  * Moves the picture of a product that is off the store to new names. "none" when there is nothing to move (no
@@ -107,26 +110,29 @@ async function withdrawOnce(
   if (!product || !product.hidden || !product.image) return "none";
   const key = deriveKey("picture-withdraw");
   if (!key) throw new Error("there is no key to name a moved picture with");
-  const shown = namesOf({ path: product.image.path, small: product.image.small?.path ?? null });
+  const shown = namesOf({ path: product.image.path, small: product.image.small?.path ?? null, thumb: product.image.thumb?.path ?? null });
   if (before && product.image.path === movedName(key, before.path)) {
     // An earlier press pointed the record at the copies and its delete of the old files was not confirmed.
     await del(namesOf(before).filter((name) => !shown.includes(name)));
     return "moved";
   }
-  const from = { path: product.image.path, small: product.image.small?.path ?? null };
-  const to = { path: movedName(key, from.path), small: from.small ? movedName(key, from.small) : null };
+  // Every file of the picture moves, its thumbnail copy too (Claude 1's HIGH on #2801): one left at its old name
+  // would stay served after the notice.
+  const from = { path: product.image.path, small: product.image.small?.path ?? null, thumb: product.image.thumb?.path ?? null };
+  const to = { path: movedName(key, from.path), small: from.small ? movedName(key, from.small) : null, thumb: from.thumb ? movedName(key, from.thumb) : null };
 
   const main = await copyTo(from.path, to.path);
   const small = from.small && to.small ? await copyTo(from.small, to.small) : "absent";
-  const olds = [from.path, ...(from.small ? [from.small] : [])];
-  const made = [...(main === "copied" ? [to.path] : []), ...(small === "copied" && to.small ? [to.small] : [])];
+  const thumb = from.thumb && to.thumb ? await copyTo(from.thumb, to.thumb) : "absent";
+  const olds = namesOf(from);
+  const made = [...(main === "copied" ? [to.path] : []), ...(small === "copied" && to.small ? [to.small] : []), ...(thumb === "copied" && to.thumb ? [to.thumb] : [])];
   if (main === "absent") {
     // Its old address already answers "not found", and there is nothing to show it from: the record is left.
     if (made.length) await del([...olds, ...made]);
     return "none";
   }
   await remember(from);
-  const moved = await moveProductImage(ref, id, from, { path: to.path, small: small === "copied" ? to.small : null });
+  const moved = await moveProductImage(ref, id, from, { path: to.path, small: small === "copied" ? to.small : null, thumb: thumb === "copied" ? to.thumb : null });
   if (!moved.ok && moved.reason !== "changed") {
     // The record could not be read or written: the originals and the copies stay, and the next press finishes.
     throw new Error("the product's record could not be confirmed");

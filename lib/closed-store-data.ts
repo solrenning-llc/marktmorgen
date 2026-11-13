@@ -302,10 +302,26 @@ export function ownerOfKey(key: string, rule: Closing, owners: Owners): string |
   return null;
 }
 
+/**
+ * The texts of a member written as a JSON array (lib/checkout-ask.ts askMember: `["<statsId>","<handle>",…]`), or
+ * none. Split at [:|,] such a member's pieces keep their quotes and brackets, so it never named its store and a
+ * closed store's asks, each with a buyer's address, stayed until they fell due (nuvem I privacy audit, 13 November 2026).
+ */
+function jsonTexts(member: string): string[] {
+  if (!member.startsWith("[")) return [];
+  try {
+    const value = JSON.parse(member) as unknown;
+    return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
 /** Whether a member of a company list names a closing store. */
 function namesStore(member: string, owners: Owners): boolean {
   if (owners.byRef.has(member)) return true;
-  return pieces(member).some((part) => owners.byMark.has(part) || owners.byRef.has(part));
+  const named = (part: string) => owners.byMark.has(part) || owners.byRef.has(part);
+  return pieces(member).some(named) || jsonTexts(member).some(named);
 }
 
 /**

@@ -84,12 +84,12 @@ export async function holdReported(report: { kind: ReportKind; url: string }, st
 
 const WHAT_HAPPENED: Record<HoldOutcome, string> = {
   held: "The product it points at was taken off the store at once (unpublished), so visitors can no longer see or buy it. Nothing was deleted: its files and records are kept as they are. People who bought it before may still reach its files: switching that off is not automatic yet.",
-  no_product: "The address does not name a product of a store, so nothing was taken off automatically. Act on it by hand, as docs/incident-response.md section 8 says.",
-  not_held: "Nothing was taken off automatically. Act on it by hand, as docs/incident-response.md section 8 says.",
-  outside: "The address is not a Marktmorgen address, so nothing was taken off automatically, even if its path looks like a store's. Act on it by hand, as docs/incident-response.md section 8 says.",
-  capped: `This store already had ${CHILD_SAFETY_HOLDS_PER_DAY} products taken off automatically today, so nothing more was. Act on it by hand, as docs/incident-response.md section 8 says.`,
-  unknown: "Taking it off the store could not be confirmed. Act on it now by hand, as docs/incident-response.md section 8 says.",
-  failed: "Taking it off the store did not work. Act on it now by hand, as docs/incident-response.md section 8 says.",
+  no_product: "The address does not name a product of a store, so nothing was taken off automatically. Act on it by hand, as docs/incident-response.md section 9 says.",
+  not_held: "Nothing was taken off automatically. Act on it by hand, as docs/incident-response.md section 9 says.",
+  outside: "The address is not a Marktmorgen address, so nothing was taken off automatically, even if its path looks like a store's. Act on it by hand, as docs/incident-response.md section 9 says.",
+  capped: `This store already had ${CHILD_SAFETY_HOLDS_PER_DAY} products taken off automatically today, so nothing more was. Act on it by hand, as docs/incident-response.md section 9 says.`,
+  unknown: "Taking it off the store could not be confirmed. Act on it now by hand, as docs/incident-response.md section 9 says.",
+  failed: "Taking it off the store did not work. Act on it now by hand, as docs/incident-response.md section 9 says.",
 };
 
 const NOTICE_NOT_KEPT = "The notice itself could not be confirmed as kept, and the person was told to try again: if no notice email with this address reaches the support inbox, act on this email alone.";

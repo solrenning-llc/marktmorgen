@@ -22,7 +22,7 @@ import { openSession, SESSION_COOKIE } from "@/lib/auth";
 import * as limits from "@/lib/calendar-limits";
 import { claimHandle, ensureStatsId } from "@/lib/store";
 import { advance, store as redis } from "./redis-stub";
-import { state } from "./calendar-add-limit-world";
+import { BUSY_SENTENCE, state } from "./calendar-add-limit-world";
 
 globalThis.fetch = (async () => {
   throw Error("Unexpected external request in synthetic route test");
@@ -199,4 +199,19 @@ test("a spent IPv6 /48 refuses its other addresses; another /48 and an old-kind 
   assert.equal((await call(third, "2001:db8:2:2::3", "add")).status, 200);
   assert.equal((await call(third, "198.51.100.7", "add")).status, 200);
   assert.equal(state.adds, 2 * PER_STORE + 2);
+});
+
+test("a removal or a new address that lost every try to another change answers 'busy' (503), with its sentence", async () => {
+  const token = await signedIn("calendar-limit-busy@example.com", "calendarlimitbusy");
+  state.busy = true;
+  try {
+    for (const action of ["remove", "rotate"]) {
+      const response = await call(token, "198.51.100.9", action, { id: "abc" });
+      const body = (await response.json()) as { ok?: boolean; error?: string; message?: string };
+      assert.equal(response.status, 503, action);
+      assert.deepEqual([body.ok, body.error, body.message], [false, "busy", BUSY_SENTENCE], action);
+    }
+  } finally {
+    state.busy = false;
+  }
 });

@@ -298,6 +298,14 @@ async function main(): Promise<void> {
     /creator's own Stripe account/.test(refundsPart),
     /email you/.test(refundsPart),
   ], [true, true, true, true]);
+  // Codex X5's MEDIUM at 52e9c7a1ed (adopted by Claude 3, nuvem E): the refund needs the creator's Stripe account to let
+  // us act on it (a refused account waits in nl:plans:retry). The pages promised it with no condition.
+  is("both pages say the refund needs the creator's Stripe account to let us act on it, and what to do when it does not", [
+    /only while the creator's Stripe account still lets us act on it/.test(refundsPart),
+    /ask the creator, or your bank or card company/.test(refundsPart),
+    /only while your Stripe account still lets us act on it/.test(termsPart),
+    /you must refund it yourself/.test(termsPart),
+  ], [true, true, true, true]);
 
   part("A try stays within the registry's figures");
   const declared = (registry as Record<string, unknown>).PLAN_SETTLE_RUN as Record<string, number>;

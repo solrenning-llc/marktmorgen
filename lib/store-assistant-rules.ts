@@ -865,7 +865,15 @@ function figureKind(folded: string, start: number, end: number): string {
   // The word itself is not matched: the facts may be in one store language and the reply in another ("10 lessons",
   // "zehn Lektionen").
   if (priced && next && PRICE_TAIL.has(next)) return "money:?";
-  if (next && !STORE_LANGUAGE_WORDS.has(next)) return priced ? `count:${next}` : `plain:${next}`;
+  if (next && !STORE_LANGUAGE_WORDS.has(next)) {
+    // And the word after it, when it is one, so "12 video lessons" counts lessons as well as videos (countedWords).
+    const second = /^\s*\p{L}+\s+(\p{L}+)/u.exec(tail)?.[1];
+    const named = second && !STORE_LANGUAGE_WORDS.has(second) ? `${next}+${second}` : next;
+    return priced ? `count:${named}` : `plain:${named}`;
+  }
+  // A figure under a label of what it counts ("Lessons: 12"): the label names it.
+  const label = /(\p{L}+)\s*:\s*$/u.exec(folded.slice(Math.max(0, start - 40), start))?.[1];
+  if (!priced && label && !STORE_LANGUAGE_WORDS.has(label)) return `plain:${label}`;
   return priced ? "money:?" : "plain";
 }
 /**
@@ -906,8 +914,45 @@ const SOCIAL_PROOF_WORDS = new Set([
 const speaksOfSocialProof = (sentence: string) => (sentence.match(/\p{L}+/gu) ?? []).some((word) => SOCIAL_PROOF_WORDS.has(word));
 /** A counted word without its plural ending, so "student" and "students" are the same word. */
 const countedStem = (word: string) => (word.length > 3 ? word.replace(/(?:es|en|e|s)$/u, "") : word);
-/** The word a counting kind names ("plain:lessons", "count:lessons", "social:students"), or "" when none. */
-const countedWord = (kind: string) => (kind.includes(":") ? kind.slice(kind.indexOf(":") + 1) : "");
+/** The words a counting kind names ("plain:lessons", "plain:video+lessons", "social:students"), none when it names none. */
+const countedWords = (kind: string) => (kind.includes(":") ? kind.slice(kind.indexOf(":") + 1).split("+").filter(Boolean) : []);
+/**
+ * Things a store counts, each in the seven store languages, folded, singular and plural (kept by countedStem): two
+ * words of one group count the same thing, so a reply in the buyer's language is held by the facts in the store's
+ * ("10 lessons", "zehn Lektionen"). A word in no group is the same thing only as itself.
+ */
+const COUNTED_THINGS: string[][] = [
+  ["lesson", "lessons", "leccion", "lecciones", "lektion", "lektionen", "lezione", "lezioni", "lecon", "lecons", "les", "lessen",
+    "aula", "aulas", "licao", "licoes", "class", "classes", "clase", "clases"],
+  ["video", "videos", "clip", "clips"],
+  ["module", "modules", "modulo", "modulos", "modul", "moduln", "moduli"],
+  ["workbook", "workbooks", "cuaderno", "cuadernos", "arbeitsheft", "arbeitshefte", "quaderno", "quaderni", "werkboek",
+    "werkboeken", "caderno", "cadernos", "cahier", "cahiers"],
+  ["recipe", "recipes", "receta", "recetas", "rezept", "rezepte", "ricetta", "ricette", "recette", "recettes", "recept",
+    "recepten", "receita", "receitas"],
+  ["chapter", "chapters", "capitulo", "capitulos", "kapitel", "capitolo", "capitoli", "chapitre", "chapitres", "hoofdstuk",
+    "hoofdstukken"],
+  ["template", "templates", "plantilla", "plantillas", "vorlage", "vorlagen", "modello", "modelli", "modele", "modeles",
+    "sjabloon", "sjablonen", "modelo", "modelos"],
+  ["download", "downloads", "descarga", "descargas", "telechargement", "telechargements", "scaricamento", "scaricamenti"],
+  ["session", "sessions", "sesion", "sesiones", "sitzung", "sitzungen", "sessione", "sessioni", "sessie", "sessies", "sessao",
+    "sessoes"],
+  ["page", "pages", "pagina", "paginas", "seite", "seiten", "pagine"],
+  ["exercise", "exercises", "ejercicio", "ejercicios", "ubung", "ubungen", "esercizio", "esercizi", "exercice", "exercices",
+    "oefening", "oefeningen", "exercicio", "exercicios"],
+];
+const COUNTED_THING = new Map(COUNTED_THINGS.flatMap((group, i) => group.map((word) => [countedStem(word), i] as const)));
+/** Whether two counted words count the same thing: the same word, or two words of one group (COUNTED_THINGS). */
+function sameThing(a: string, b: string): boolean {
+  const x = countedStem(a);
+  const y = countedStem(b);
+  if (x === y) return true;
+  const group = COUNTED_THING.get(x);
+  return group !== undefined && group === COUNTED_THING.get(y);
+}
+/** Whether a reply's counting kind and a fact's name one same thing (sameThing), each by any of its words. */
+const countsSameThing = (reply: string, fact: string) =>
+  countedWords(reply).some((said) => countedWords(fact).some((published) => sameThing(said, published)));
 /** A count with nothing said of what it counts, or of the word after it outside a sentence about a price. */
 const isPlain = (kind: string) => kind === "plain" || kind.startsWith("plain:");
 /**
@@ -924,8 +969,7 @@ function kindHolds(reply: string, fact: string): boolean {
   // A count of buyers, students or places left: only a fact that counts the same word (SOCIAL_PROOF_WORDS); a count
   // that names nothing is never held.
   if (reply.startsWith("social:")) {
-    const word = countedWord(reply);
-    return factCounts && word !== "" && countedStem(word) === countedStem(countedWord(fact));
+    return factCounts && countedWords(reply).some((word) => countedWords(fact).some((other) => countedStem(word) === countedStem(other)));
   }
   // A bare number, with no unit and nothing it counts after it ("It's 14.", "You will be charged 14."), is held only by
   // a fact that is a count: never by a day, a price or a percent, whatever word of paying the sentence used (Claude 1's
@@ -934,9 +978,10 @@ function kindHolds(reply: string, fact: string): boolean {
   // A figure that names what it counts ("49 students", "14 lessons") is held only by a fact that counts too, never by a
   // price, a day or a percent of the same value (Claude 1 cloud's review of #3484 at 9288beabe7, MÉDIO: an invented count
   // of buyers or lessons was shown whenever a price or a refund window had its value).
-  if (isPlain(reply)) return factCounts;
-  // A count in a sentence about a price: only a fact that is a count too, never a price, a time or a percent.
-  if (reply.startsWith("count:")) return factCounts;
+  // And only by a count of the same thing (Codex G, MEDIUM on #3484 at 743f1dad0d): "12 recipes" is never held by
+  // "12 video lessons", nor by a fact's 12 that names nothing. A thing in another language is the same only when
+  // COUNTED_THINGS says so; otherwise the reply is refused, and the buyer sees the no-AI answer, never an invented count.
+  if (isPlain(reply) || reply.startsWith("count:")) return factCounts && countsSameThing(reply, fact);
   const [replyBase, replyRate] = reply.split("/");
   const [factBase, factRate] = fact.split("/");
   if (replyRate !== undefined && replyRate !== factRate) return false;

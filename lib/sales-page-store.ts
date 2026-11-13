@@ -106,10 +106,19 @@ export async function claimPictures(statsId: string, productId: string, paths: s
  *
  * Those taken from the door are claimed even when another is refused, so the
  * creator's save tried again still finds them; nothing is deleted here.
+ * `check` is given the ones this call took from the door, before any of them is
+ * written down as this page's, and answers which are pictures (MR audit gap 1:
+ * each is asked about in the file store once, when taken). Only those become
+ * the page's, so being this page's always means checked (Codex Z on #2843): a
+ * take whose check never finished, a lost reply or a crash, leaves a picture
+ * neither in the door nor owned, refused by every later save, never put on
+ * unchecked.
  * A take from the door that cannot be confirmed throws (takePictureDoor), so
  * the page is refused with server_error before it is written.
  */
-export async function claimNewPictures(statsId: string, pageId: string, paths: string[]): Promise<boolean> {
+export async function claimNewPictures(
+  statsId: string, pageId: string, paths: string[], check?: (taken: ReadonlyMap<string, number>) => Promise<{ good: string[]; unknown: string[] }>,
+): Promise<boolean> {
   const unique = [...new Set(paths)];
   if (unique.length === 0) return true;
   // Not known is ours to say, never "add the picture again" (Claude 4 on #2156): it throws, and the route answers
@@ -123,14 +132,23 @@ export async function claimNewPictures(statsId: string, pageId: string, paths: s
   if (unique.some((_, i) => typeof list[i] === "string" && list[i] !== "" && list[i] !== pageId)) return false;
   const unclaimed = unique.filter((_, i) => list[i] !== pageId);
   const taken = await takePictureDoor(unclaimed);
-  const fresh = unclaimed.filter((path) => taken.has(path));
+  const tookNow = unclaimed.filter((path) => taken.has(path));
+  // Checked before they are written down as this page's, and only those that are pictures are (Codex Z on #2843).
+  // A check that did not finish puts its picture back on the door (lib/picture-check.ts), and the save throws, so the
+  // route answers server_error and the creator's save tried again checks it again (Claude 2 on #2843, 6750890970); the
+  // pictures that passed are written down first, so that save does not check them again.
+  const checks = check && tookNow.length ? await check(new Map(tookNow.map((path) => [path, taken.get(path) as number]))) : { good: tookNow, unknown: [] };
+  const checked = new Set(checks.good);
+  const fresh = tookNow.filter((path) => checked.has(path));
+  let held = true;
   if (fresh.length) {
     await redisPipeline(fresh.map((path) => ["HSETNX", picsKey(statsId), path, pageId]));
     const [after] = await redisPipeline([["HMGET", picsKey(statsId), ...fresh]]);
     const now = Array.isArray(after) ? after : [];
-    if (fresh.some((_, i) => now[i] !== pageId)) return false;
+    held = !fresh.some((_, i) => now[i] !== pageId);
   }
-  return fresh.length === unclaimed.length;
+  if (checks.unknown.length) throw new Error("page pictures: a check of the file store did not finish");
+  return held && fresh.length === unclaimed.length;
 }
 
 /**

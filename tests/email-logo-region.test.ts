@@ -73,8 +73,12 @@ part("A refunded first year stays under the owner's US$65 with the logo at the d
   const kept = (paidStorageBytes(tier) / GB) * STORAGE_PER_GB * ((CLOSING_DAYS + WARN_WEEK_DAYS) / 30);
   const year = worstCost(tier) + providerFeeUsd(PRICES_WITHOUT_COMMISSION[tier].year) + kept;
   const extra = Math.max(0, floorFor(tier) - (line ? line.monthlyUsd(tier) : 0));
-  is(`a refunded Store first year, repriced at the dearest region, is under US$65 (now ${year.toFixed(4)}, repriced ${(year + extra).toFixed(4)})`,
-    year + extra < 65, true);
+  // Rule 23 (C4-20261106-2640-DONO-156, as tests/read-ceilings.test.ts and tests/plan-margin.test.ts hold it): the owner's
+  // ceiling is US$ 66 since 6 November 2026, the dollar over US$ 65 room for the studio pictures' Blob operations only
+  // (the studio-blob line, #2843). So the year with that line stays under US$ 66, and without it, under US$ 65 as before.
+  const blob = COST_LINES.find((l) => l.id === "studio-blob")?.monthlyUsd(tier) ?? 0;
+  is(`a refunded Store first year, repriced at the dearest region, is under US$65 without the studio pictures' line and US$66 with it (now ${year.toFixed(4)}, repriced ${(year + extra).toFixed(4)}, that line ${blob.toFixed(4)})`,
+    year + extra - blob < 65 && year + extra < 66, true);
 }
 
 done();

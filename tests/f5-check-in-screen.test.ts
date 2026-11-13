@@ -89,6 +89,19 @@ async function main(): Promise<void> {
   const again = await post({ event, code });
   is("the same code again is already used", [again.status, again.body.outcome, again.body.message], [200, "used", CHECK_IN_REFUSALS.used]);
 
+  // Claude 1 and Claude 1 cloud, MEDIUM on #3498: the door retries after a lost answer with the same attempt.
+  const retried = codeFor(event, "retryretry234567");
+  const attempt = "0123456789abcdef0123456789abcdef";
+  is("an attempt admits a good code", (await post({ event, code: retried, attempt })).body.outcome, "admitted");
+  const retry = await post({ event, code: retried, attempt });
+  is("the same attempt again, after its answer was lost, still admits (it is the same check-in)", [retry.status, retry.body.outcome], [200, "admitted"]);
+  is("another attempt on that ticket is already used", (await post({ event, code: retried, attempt: "f".repeat(32) })).body.outcome, "used");
+  is("an attempt that is not 32 hex characters is not read as one", (await post({ event, code: retried, attempt: "not-an-attempt" })).body.outcome, "used");
+  const screen = readFileSync("components/ticket-check-in.tsx", "utf8");
+  is("the screen sends one attempt per typed code, made again only when the code changes", [/attempt/.test(screen), /JSON\.stringify\(\{ event, code: typed, attempt/.test(screen)], [true, true]);
+  is("a mistyped code stays in the field, cleared only after admitted, used or expired (3.3.6)", /setCode\(""\)/.test(screen) && !/next\.outcome !== "unknown"\) setCode/.test(screen), true);
+  is("signed out or not allowed says so, never \"try again\" forever", [/Sign in again/.test(screen), /cannot check people in/.test(screen)], [true, true]);
+
   const typed = codeFor(event, "typedtyped234567");
   const fromHand = await post({ event, code: ` ${typed.toUpperCase()} ` });
   is("a code typed with capitals and spaces is read", fromHand.body.outcome, "admitted");

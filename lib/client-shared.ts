@@ -94,6 +94,9 @@ function owners(calls: readonly SharedCallIn[]): Map<string, { owner: string | n
     if (!raw || typeof raw !== "object") return null;
     const { session, email, start, end, title } = raw as Record<string, unknown>;
     if (typeof session !== "string" || (email !== null && typeof email !== "string") || !finite(start) || !finite(end) || typeof title !== "string") return null;
+    // lib/calls.ts callFromRow turns a booking's id it cannot read into "": that booking did not read, so the list is
+    // unknown (Claude 1 cloud on #3453). A reference of another shape is not a booking, as before.
+    if (session === "") return null;
     if (!SESSION.test(session)) continue;
     const owner = address(email);
     const seen = out.get(session);
@@ -138,7 +141,9 @@ export function sharedWithClient(input: {
   for (const raw of input.notes) {
     if (!raw || typeof raw !== "object" || !visible(raw, client, own)) continue;
     if (typeof raw.id !== "string" || !NOTE_ID.test(raw.id) || typeof raw.text !== "string" || !raw.text.trim()) continue;
-    notes.push({ id: raw.id, session: raw.session as string, at: finite(raw.at) ? raw.at : 0, text: raw.text });
+    // A shared note's time that is not a number did not read: unknown, never shown dated 1 January 1970.
+    if (!finite(raw.at)) return { ok: false, reason: "unreadable" };
+    notes.push({ id: raw.id, session: raw.session as string, at: raw.at, text: raw.text });
   }
   notes.sort((a, b) => b.at - a.at || a.id.localeCompare(b.id));
 

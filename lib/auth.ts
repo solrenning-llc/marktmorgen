@@ -80,6 +80,25 @@ export function normaliseEmail(email: string): string {
   return email.trim().toLowerCase();
 }
 
+/**
+ * One inbox however it is written: lower case, without a "+" tag, and for
+ * Gmail without its dots, which Gmail itself ignores. Two addresses that
+ * come out the same here reach the same person. Moved here from
+ * lib/affiliates.ts (which re-exports it) so a sign-in path can count an
+ * inbox without importing the affiliate program (MM-SA-35, #3897).
+ */
+export function canonicalEmail(raw: string): string {
+  const email = normaliseEmail(raw);
+  const at = email.lastIndexOf("@");
+  if (at < 1) return email;
+  let name = email.slice(0, at).split("+")[0];
+  // "example.com." is the same domain as "example.com".
+  let domain = email.slice(at + 1).replace(/\.+$/, "");
+  if (domain === "googlemail.com") domain = "gmail.com";
+  if (domain === "gmail.com") name = name.replace(/\./g, "");
+  return `${name}@${domain}`;
+}
+
 function randomToken(): string {
   const bytes = new Uint8Array(32);
   crypto.getRandomValues(bytes);

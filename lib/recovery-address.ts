@@ -29,7 +29,7 @@
  *   nl:auth:rec:until:<hash>  until when logins through the recovery address are locked
  */
 import { createHash, randomBytes, randomInt } from "node:crypto";
-import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
+import { canonicalEmail, EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
@@ -105,9 +105,10 @@ export async function startRecoveryAddress(email: string, session: string, raw: 
   if (address === normaliseEmail(email)) return "same";
   if (!(await withinLimit("recovery-address", normaliseEmail(email), 5, 60 * 60))) return "limited";
   // Per inbox as well as per account: any number of accounts asking for the same address still send it at most
-  // five codes an hour, so this form is never a way to fill a stranger's inbox from our domain (MM-SA-35). Hashed,
-  // so the counter's name never holds the address.
-  if (!(await withinLimit("recovery-address-to", sha(`nimbus-rec-to:${address}`), 5, 60 * 60))) return "limited";
+  // five codes an hour, so this form is never a way to fill a stranger's inbox from our domain (MM-SA-35). Counted
+  // on the inbox, not the spelling (canonicalEmail: a "+" tag, Gmail's dots and googlemail.com reach the same one),
+  // while the code still goes to the address as typed. Hashed, so the counter's name never holds the address.
+  if (!(await withinLimit("recovery-address-to", sha(`nimbus-rec-to:${canonicalEmail(address)}`), 5, 60 * 60))) return "limited";
   const code = String(randomInt(1_000_000)).padStart(6, "0");
   // The code is only worth sending once it is kept: the pending record is written first, and only a SET answered
   // exactly "OK" lets the email go (CX-123 rule 24). Any other reply sends nothing and answers "unsent", so the form

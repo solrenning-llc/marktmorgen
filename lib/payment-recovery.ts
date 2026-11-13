@@ -620,13 +620,51 @@ export async function recoverFailedPayments(deadline: number): Promise<{ stores:
   if (!isRedisConfigured() || !platformKey() || !isSenderConfigured()) return counts;
 
   const [saved] = await redisPipeline([["GET", CURSOR_KEY]]);
-  // "cursor|done|held": where the walk stopped, and how many runs in a row it has started at that store (HOLD_RUNS).
-  const [savedCursor, savedDone, savedHeld] = typeof saved === "string" ? saved.split("|") : ["0", "0", "0"];
-  let cursor = /^\d+$/.test(savedCursor ?? "") ? savedCursor : "0";
-  let skip = Number(savedDone) || 0;
-  const start = { cursor, skip, held: /^\d+$/.test(savedHeld ?? "") ? Number(savedHeld) : 0 };
-  // The first store not finished this run, where the next run starts (HOLD_RUNS), or null when none.
+  // "cursor|done|held" where the walk stopped, and how many runs in a row it has started at that store (HOLD_RUNS);
+  // with a store held, "cursor|done|held|frontierCursor|frontierDone", where the run that held it actually stopped.
+  const parts = typeof saved === "string" ? saved.split("|") : [];
+  const digits = (value: string | undefined) => /^\d+$/.test(value ?? "");
+  const savedPos = { cursor: digits(parts[0]) ? parts[0] : "0", skip: Number(parts[1]) || 0, held: digits(parts[2]) ? Number(parts[2]) : 0 };
+  const frontier = parts.length >= 5 && digits(parts[3]) && digits(parts[4]) ? { cursor: parts[3], skip: Number(parts[4]) } : null;
+  // The first store not finished this run, where the next run sweeps first (HOLD_RUNS), or null when none.
   let hold: string | null = null;
+
+  /** Sweeps one store, counted; true when it handled all it read (a sweep that threw is not done: rule 24). */
+  const sweepOne = async (store: Store): Promise<boolean> => {
+    counts.stores += 1;
+    try {
+      const swept = await sweepStore(store, deadline);
+      counts.sent += swept.sent;
+      return swept.complete;
+    } catch (error) {
+      console.error("reading a store's failed renewals failed", store.handle, error);
+      return false;
+    }
+  };
+  /** Holds a store not finished, the run's first, for the next run (at most HOLD_RUNS runs in a row). */
+  const holdAt = (cursor: string, done: number, held: number, handle: string) => {
+    if (hold !== null) return;
+    if (held < HOLD_RUNS) hold = `${cursor}|${done}|${held}`;
+    else console.error(`a store's failed renewals were not finished in ${HOLD_RUNS} runs in a row: read again on the next walk round`, handle);
+  };
+  /** Where the next run starts: the held store with this run's frontier behind it, or the frontier itself. */
+  const save = (cursor: string, done: number) => redisPipeline([["SET", CURSOR_KEY, hold === null ? `${cursor}|${done}` : `${hold}|${cursor}|${done}`]]);
+
+  // A store held by the last run is swept first, alone, and the walk then goes on from where that run stopped (its
+  // frontier): a store that keeps failing costs each run one store, never a re-walk of the stores already done
+  // (M1 of the second rev-odd review on #3215).
+  let start = { cursor: savedPos.cursor, skip: savedPos.skip, held: savedPos.held };
+  // The held store swept first is not swept again when the walk comes round to it in the same run.
+  let sweptFirst: { cursor: string; skip: number } | null = null;
+  if (frontier) {
+    sweptFirst = { cursor: savedPos.cursor, skip: savedPos.skip };
+    const { stores } = await storesAfter(savedPos.cursor);
+    const store = stores[savedPos.skip];
+    if (store && worthAsking(store) && Date.now() < deadline && !(await sweepOne(store))) holdAt(savedPos.cursor, savedPos.skip, savedPos.held + 1, store.handle);
+    start = { cursor: frontier.cursor, skip: frontier.skip, held: 0 };
+  }
+  let cursor = start.cursor;
+  let skip = start.skip;
   // A run that did not start at the top comes round to it, and stops where it started: a store held near the end
   // of the walk never keeps the stores before it waiting (Claude 6 on #3215).
   const fromTop = start.cursor === "0" && start.skip === 0;
@@ -643,27 +681,17 @@ export async function recoverFailedPayments(deadline: number): Promise<{ stores:
       // Come round to where this run started: the walk is whole.
       if (wrapped && cursor === start.cursor && done >= start.skip) break;
       if (Date.now() >= deadline) break;
-      if (worthAsking(store)) {
-        counts.stores += 1;
-        // A sweep that threw is not done (rule 24, R24 crons item 6): only one that handled all it read is.
-        let complete = false;
-        try {
-          const swept = await sweepStore(store, deadline);
-          counts.sent += swept.sent;
-          complete = swept.complete;
-        } catch (error) {
-          console.error("reading a store's failed renewals failed", store.handle, error);
-        }
-        if (!complete && hold === null) {
-          const held = cursor === start.cursor && done === start.skip ? start.held + 1 : 1;
-          if (held < HOLD_RUNS) hold = `${cursor}|${done}|${held}`;
-          else console.error(`a store's failed renewals were not finished in ${HOLD_RUNS} runs in a row: read again on the next walk round`, store.handle);
-        }
+      if (sweptFirst && cursor === sweptFirst.cursor && done === sweptFirst.skip) {
+        done += 1;
+        continue;
+      }
+      if (worthAsking(store) && !(await sweepOne(store))) {
+        holdAt(cursor, done, cursor === start.cursor && done === start.skip ? start.held + 1 : 1, store.handle);
       }
       done += 1;
     }
     if (done < stores.length) {
-      await redisPipeline([["SET", CURSOR_KEY, hold ?? `${cursor}|${done}`]]);
+      await save(cursor, done);
       return counts;
     }
     skip = 0;
@@ -675,6 +703,6 @@ export async function recoverFailedPayments(deadline: number): Promise<{ stores:
       wrapped = true;
     }
   }
-  await redisPipeline([["SET", CURSOR_KEY, hold ?? `${cursor}|0`]]);
+  await save(cursor, 0);
   return counts;
 }

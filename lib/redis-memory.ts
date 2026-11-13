@@ -222,6 +222,44 @@ export class MemoryRedis {
           this.run(["SET", book, json]);
           return 1;
         }
+        // lib/contacts.ts FENCED_CONTACT_WRITE: a contact written, its counts and joined-stores note with it, only while its
+        // fence exists, no print appeared since the read, and a print to lift is older than the fence (its second, on this clock).
+        if (key.startsWith("-- marktmorgen:contact-fenced-write:v2\n") && ((args[0] === "5" && args.length === 14) || (args[0] === "6" && args.length === 17))) {
+          const n = Number(args[0]);
+          const [fence, list, prints, agreedCount, unsubCount] = args.slice(1, 6);
+          const joinedSet = n === 6 ? args[6] : undefined;
+          const [email, row, print, seen, liftAsked, lifetime, incr, decr, sid, endsAt] = args.slice(1 + n);
+          const left = this.run(["PTTL", fence]) as number;
+          this.scriptCalls += 2;
+          if (left === -2) return 0;
+          const printed = this.run(["HGET", prints, print]);
+          if (printed !== null && seen !== "1") return 0;
+          const lift = printed !== null && liftAsked === "1";
+          if (lift) {
+            const at = Number(printed);
+            if (left < 0 || typeof printed !== "string" || !/^\d+$/.test(printed)) return 0;
+            this.scriptCalls += 1;
+            if ((at + 1) * 1000 > this.now() - (Number(lifetime) - left)) return 0;
+          }
+          this.run(["HSET", list, email, row]);
+          this.scriptCalls += 1;
+          if (lift) { this.run(["HDEL", prints, print]); this.scriptCalls += 1; }
+          if (incr === "1") { this.run(["INCR", agreedCount]); this.scriptCalls += 1; }
+          if (decr === "1") { this.run(["DECR", unsubCount]); this.scriptCalls += 1; }
+          if (joinedSet) { this.run(["SADD", joinedSet, sid]); this.run(["EXPIREAT", joinedSet, endsAt]); this.scriptCalls += 2; }
+          return 1;
+        }
+        // lib/waitlist.ts WAIT_CONFIRM: a waitlist entry written back only while its confirmation link and the entry still exist.
+        if (key.startsWith("-- marktmorgen:waitlist-confirm:v1\n") && args[0] === "2" && args.length === 5) {
+          const [, link, list, email, entry] = args;
+          this.scriptCalls += 1;
+          if (this.run(["EXISTS", link]) === 0) return 0;
+          this.scriptCalls += 1;
+          if (this.run(["HEXISTS", list, email]) === 0) return 0;
+          this.run(["HSET", list, email, entry]);
+          this.scriptCalls += 1;
+          return 1;
+        }
         // lib/contacts.ts CAS_HSET: each contact set only while it still holds what was read (its SHA-1, "" for none), in one step.
         if (key.startsWith("-- marktmorgen:contact-cas-hset:v1\n") && args[0] === "1" && args.length >= 5 && (args.length - 2) % 3 === 0) {
           const target = args[1];

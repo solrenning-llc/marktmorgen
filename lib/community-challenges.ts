@@ -90,6 +90,20 @@ const writesKey = (id: string) => `${base(id)}:chw`;
 
 const KEEP_MS = CHALLENGE_KEEP_DAYS * CHALLENGE_DAY_MS;
 const field = (member: string, day: number) => `${member}|${day}`;
+
+/**
+ * A member's day and the creator's counts, written in one step: the day's field only when it is not there, and the
+ * counts only by the call that wrote it, so a failure leaves neither and the next press counts it once (Claude 2 nuvem
+ * I's LOW on #3452: with the counts in a call of their own, a lost call left them one short for good). Answers 1 when
+ * it wrote the day, 0 when the day was there.
+ */
+export const CHECK_IN_SCRIPT = `-- marktmorgen:challenge-check-in:v1
+if redis.call('HSETNX', KEYS[1], ARGV[1], '1') == 0 then return 0 end
+redis.call('EXPIREAT', KEYS[1], ARGV[3])
+redis.call('HINCRBY', KEYS[2], 'all', 1)
+redis.call('HINCRBY', KEYS[2], ARGV[2], 1)
+redis.call('EXPIREAT', KEYS[2], ARGV[3])
+return 1`;
 /** When a challenge's keys go by themselves: its keep after the end, in seconds. */
 const expiresAt = (c: Challenge) => Math.ceil((c.end + KEEP_MS) / 1000);
 
@@ -374,21 +388,15 @@ export async function checkIn(id: string, c: Challenge, member: string, room: Da
   if (done !== 0 && done !== 1) throw new UnknownReplyError("whether a member checked in");
   if (done === 1) return "already";
   await needData(room, [{ slot: slotOf(c.id), bytes: checkInBytes(member, day) }], now);
+  // The day and its counts in one step (CHECK_IN_SCRIPT): counted only by the press that wrote the day, never lost.
   const [added] = repliesFor(await redisPipeline([
-    ["HSETNX", checkKey(id, c.id), field(member, day), "1"],
-    ["EXPIREAT", checkKey(id, c.id), expiresAt(c)],
-  ]), 2) ?? [undefined];
+    ["EVAL", CHECK_IN_SCRIPT, 2, checkKey(id, c.id), countKey(id, c.id), field(member, day), `d${day}`, expiresAt(c)],
+  ]), 1) ?? [undefined];
   if (added !== 0 && added !== 1) throw new UnknownReplyError("a member checking in");
   if (added === 0) {
     await giveData(room, [{ slot: slotOf(c.id), bytes: checkInBytes(member, day) }], now);
     return "already";
   }
-  // Counted only by the press that wrote the day: the field is the record, the count follows it.
-  await redisPipeline([
-    ["HINCRBY", countKey(id, c.id), "all", 1],
-    ["HINCRBY", countKey(id, c.id), `d${day}`, 1],
-    ["EXPIREAT", countKey(id, c.id), expiresAt(c)],
-  ]);
   if (await overtaken(id, c.id, room, now)) return "gone";
   return "checked";
 }

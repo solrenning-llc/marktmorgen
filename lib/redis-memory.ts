@@ -1528,6 +1528,16 @@ export class MemoryRedis {
           }
           return 1;
         }
+        // lib/community-challenges.ts CHECK_IN_SCRIPT: the day's field only when absent, and its counts only then.
+        if (key.startsWith("-- marktmorgen:challenge-check-in:v1\n") && args[0] === "2" && args.length === 6) {
+          const [, check, count, day, dayCount, at] = args;
+          if (this.run(["HSETNX", check, day, "1"]) === 0) return 0;
+          this.run(["EXPIREAT", check, at]);
+          this.run(["HINCRBY", count, "all", "1"]);
+          this.run(["HINCRBY", count, dayCount, "1"]);
+          this.run(["EXPIREAT", count, at]);
+          return 1;
+        }
         if (key.startsWith("-- marktmorgen:capped-count:v2\n")) return this.cappedCount(args);
         if (key.startsWith("-- marktmorgen:assistant-pool:v1\n")) return this.assistantPool(args);
         if (key.startsWith("-- marktmorgen:studio-demo-door:v2\n")) return this.studioDemo("door", args);

@@ -270,7 +270,8 @@ async function main(): Promise<void> {
   const dan = "dankey00000000000000000000000004";
   let armed = "";
   redis.pipeline = (async (commands: (string | number)[][]) => {
-    if (armed && commands.some((cmd) => cmd[0] === "HSETNX" && String(cmd[1]) === armed)) {
+    // The check-in's write: since the LOW on #3452 it is one EVAL (CHECK_IN_SCRIPT) whose first key is the day's hash.
+    if (armed && commands.some((cmd) => (cmd[0] === "HSETNX" || cmd[0] === "EVAL") && String(cmd[cmd[0] === "EVAL" ? 3 : 1]) === armed)) {
       armed = "";
       await deleteChallenge(again, ch2.id);
     }

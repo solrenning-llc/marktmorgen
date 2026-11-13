@@ -30,7 +30,8 @@ is("normal, elevated and highest are read as they are", [riskLevelOf(charge("nor
 is("not assessed or unknown by Stripe: not available, never normal", [riskLevelOf(charge("not_assessed")), riskLevelOf(charge("unknown"))], ["not_available", "not_available"]);
 is("a value Stripe does not send (low, a number, a different case): not available", [riskLevelOf(charge("low")), riskLevelOf(charge(12)), riskLevelOf(charge("Normal"))], ["not_available", "not_available", "not_available"]);
 is("no outcome, no charge, a bare id or another object: not available", [riskLevelOf({ id: "ch_1", object: "charge" }), riskLevelOf(null), riskLevelOf("ch_1"), riskLevelOf({ id: "pi_1", object: "payment_intent", outcome: { risk_level: "normal" } }), riskLevelOf({ id: "ch_1", object: "charge", outcome: "normal" })], ["not_available", "not_available", "not_available", "not_available", "not_available"]);
-is("the words on the sales list and the order", RISK_WORDS, { normal: "Risk: normal", elevated: "Risk: elevated", highest: "Risk: highest", in_review: "Risk: in review by Stripe", not_available: "Risk: not available" });
+// Changed on #3633 (Claude 7): the review is the creator's (a Radar rule of theirs), not Stripe's; it read "in review by Stripe".
+is("the words on the sales list and the order", RISK_WORDS, { normal: "Risk: normal", elevated: "Risk: elevated", highest: "Risk: highest", in_review: "Risk: in review", not_available: "Risk: not available" });
 is("no word says low and none is a score", Object.values(RISK_WORDS).some((w) => /\blow\b|\d/.test(w)), false);
 
 part(`A store's simple rules: at most ${MAX_RULES}, each kind once, read back whole or not at all`);
@@ -82,7 +83,16 @@ is("unknown rules on something not shipped hold nothing", shippingDecision({ rul
 
 part("A charge Stripe put in manual review is held, never shipped (Claude 3 review of #3633, LEVE 1)");
 const reviewed = { id: "ch_1", object: "charge", outcome: { type: "manual_review", risk_level: "normal" }, review: "prv_1" };
-is("outcome type manual_review, or an open review on the charge: in review", [riskLevelOf(reviewed), riskLevelOf({ ...reviewed, outcome: { type: "manual_review", risk_level: "normal" }, review: null }), riskLevelOf({ ...reviewed, outcome: { type: "authorized", risk_level: "normal" }, review: { id: "prv_1", object: "review" } })], ["in_review", "in_review", "in_review"]);
+// Changed on #3633 (Claude 3, adopting; Claude 1's and Claude 7's LEVE): charge.review keeps the review after it closes
+// and outcome.type never changes, so only an expanded review's `open` says it is still open. A review whose state was
+// not read (a bare id, no `open`, or manual_review with no review) is "not available", still held, never "normal".
+// All three read "in_review" before.
+is("a review whose state was not read: not available, never normal", [riskLevelOf(reviewed), riskLevelOf({ ...reviewed, outcome: { type: "manual_review", risk_level: "normal" }, review: null }), riskLevelOf({ ...reviewed, outcome: { type: "authorized", risk_level: "normal" }, review: { id: "prv_1", object: "review" } })], ["not_available", "not_available", "not_available"]);
+is("an open review: in review", riskLevelOf({ ...reviewed, review: { id: "prv_1", object: "review", open: true } }), "in_review");
+const approved = { id: "ch_1", object: "charge", outcome: { type: "manual_review", risk_level: "normal" }, review: { id: "prv_1", object: "review", open: false, closed_reason: "approved" } };
+is("a review the creator closed: the risk Stripe gave, never in review for good", riskLevelOf(approved), "normal");
+is("so the order ships under the hold rule", shippingDecision({ rules: hold, physical: true, risk: riskLevelOf(approved) }), "ship");
+is("a review whose state was not read is never shipped clean under the rule", shippingDecision({ rules: hold, physical: true, risk: riskLevelOf(reviewed) }), "risk_not_available");
 is("no review: the risk Stripe gave", riskLevelOf({ ...reviewed, outcome: { type: "authorized", risk_level: "normal" }, review: null }), "normal");
 is("in review under the rule: held", shippingDecision({ rules: hold, physical: true, risk: "in_review" }), "hold");
 

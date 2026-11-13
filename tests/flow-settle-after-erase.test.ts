@@ -196,6 +196,26 @@ async function main(): Promise<void> {
   await settleAttempts(LIST, FLOW, 0, "s1", "email", [{ email: twice, state: "confirmed", note: "", to: 1, gen: genT, open: first.opens?.get(twice) ?? "" }], now);
   is("the first attempt's late repeat leaves the second attempt open", (await redisPipeline([["HGET", run(twice), "open"]]))[0], second.opens?.get(twice) ?? "(missing)");
 
+  part("A held run and a waiting run keep their record too (Claude 7's LEVE on #4234)");
+  // A step that comes due 365 days after the last write and is then held (its outcome unknown) or waits (a suspended
+  // store, the month's emails run out) must still be there for the creator's choice or its next try: the hold and each
+  // counted wait keep the run for RUN_KEEP_SECONDS more, as every other write does.
+  const DAYS = 86_400;
+  const heldLong = "held-long@example.com";
+  await openRuns(FLOW, [heldLong], now + 1000 * DAYS);
+  await claimAttempts(FLOW, [heldLong], 0, "s1", "email", now + 1000 * DAYS);
+  advance(365 * DAYS * 1000);
+  await settleAttempts(LIST, FLOW, 0, "s1", "email", [{ email: heldLong, state: "uncertain", note: "Not confirmed.", to: 0 }], now + 1365 * DAYS);
+  advance(100 * DAYS * 1000);
+  const heldThen = (await redisPipeline([["HGET", run(heldLong), "status"]]))[0];
+  is("held 365 days after it started, it is still there 100 days later, for the creator's choice", heldThen, "held");
+  const waitLong = "wait-long@example.com";
+  await openRuns(FLOW, [waitLong], now + 1465 * DAYS);
+  advance(365 * DAYS * 1000);
+  is("(setup) a wait counted 365 days after it started", (await countWaits(FLOW, [waitLong], 0, now + 1830 * DAYS)).get(waitLong)?.waits, 1);
+  advance(100 * DAYS * 1000);
+  is("it is still there 100 days later, for its next try", (await countWaits(FLOW, [waitLong], 0, now + 1930 * DAYS)).get(waitLong)?.waits, 2);
+
   done();
 }
 

@@ -29,7 +29,8 @@ import { del } from "@/lib/blob";
 import { withLock } from "@/lib/redis-lock";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { type Listing, productIdFromAddress, readListing } from "@/lib/catalog";
-import { type ReportInput, handleIn } from "@/lib/takedown-rules";
+import { type ReportInput, type ReportKind, handleIn, noticeTitle } from "@/lib/takedown-rules";
+import { TAKE_IT_DOWN_HOURS } from "@/lib/child-safety";
 import { type PictureNames, withdrawProductPicture } from "@/lib/picture-withdraw";
 
 const REPORT_SECONDS = 400 * 86_400;
@@ -44,6 +45,14 @@ export type Report = ReportInput & { id: string; at: string; handle: string };
 
 export type FileResult = "sent" | "limited" | "error";
 
+/** The first line of the notice email, by kind: never a DSA notice for a child-safety or intimate-image report. */
+const LEAD: Record<ReportKind, string> = {
+  copyright: "copyright notice (DMCA, 17 U.S.C. § 512(c)(3))",
+  other: "notice of illegal content (EU Digital Services Act, Art. 16)",
+  child_safety: "report of child sexual exploitation",
+  intimate_image: `request to remove an intimate image shared without consent (TAKE IT DOWN Act: remove it within ${TAKE_IT_DOWN_HOURS} hours)`,
+};
+
 /** Keeps a notice and sends it to the support inbox with the link that acts on it. */
 export async function fileReport(input: ReportInput, ip: string, origin: string): Promise<FileResult> {
   if (!isRedisConfigured() || !isSenderConfigured()) return "error";
@@ -55,25 +64,34 @@ export async function fileReport(input: ReportInput, ip: string, origin: string)
     ["SET", reportKey(id), JSON.stringify(report), "EX", REPORT_SECONDS],
     ["SET", tokenKey(token), id, "EX", TOKEN_SECONDS],
   ]);
+  const child = report.kind === "child_safety";
+  const intimate = report.kind === "intimate_image";
   const sent = await sendEmail({ meter: { by: "company" },
     from: NIMBUS_FROM,
     to: SUPPORT_EMAIL,
     replyTo: report.email,
-    subject: `${report.kind === "copyright" ? "Copyright notice" : "Notice of illegal content"}${report.handle ? ` about @${report.handle}` : ""}`.slice(0, 200),
+    subject: `${noticeTitle(report.kind)}${report.handle ? ` about @${report.handle}` : ""}`.slice(0, 200),
     text: [
-      `A ${report.kind === "copyright" ? "copyright notice (DMCA, 17 U.S.C. § 512(c)(3))" : "notice of illegal content (EU Digital Services Act, Art. 16)"} was sent from ${origin}/report.`,
+      `A ${LEAD[report.kind]} was sent from ${origin}/report.`,
+      child || intimate ? "Do not open, download, forward or describe the reported content, and do not ask any AI agent to look at it. The steps are in docs/incident-response.md." : "",
       "",
       `Where: ${report.url}`,
       report.handle ? `Store: @${report.handle}` : "Store: not named in the address; check it by hand.",
       "",
-      report.kind === "copyright" ? "The work, as they describe it:" : "Why it is illegal, as they say:",
+      report.work ? (report.kind === "copyright" ? "The work, as they describe it:" : child ? "What they say, if anything:" : intimate ? "What they say about the image:" : "Why it is illegal, as they say:") : "",
       report.work,
       report.original ? `\nWhere the original is: ${report.original}` : "",
       "",
-      `From: ${report.name} <${report.email}>`,
+      child ? `Reply to: ${report.email}` : `From: ${report.name} <${report.email}>`,
       report.contact ? `Address or telephone: ${report.contact}` : "",
-      `Signed: ${report.signature}`,
-      "They stated, in good faith, that the use is not authorized, and that the notice is accurate and, under penalty of perjury, that they are authorized to act.",
+      // A child-safety report is signed by no one and states nothing under penalty of perjury; an intimate-image request
+      // is signed by the person, with the statement that it is shared without consent (review of #3587).
+      child ? "" : `Signed: ${report.signature}`,
+      child
+        ? ""
+        : intimate
+          ? "They stated, in good faith, that the image is of them and is shared without their consent."
+          : "They stated, in good faith, that the use is not authorized, and that the notice is accurate and, under penalty of perjury, that they are authorized to act.",
       "",
       "Open it to act on it (the link works for 60 days):",
       `${origin}/takedown/${token}`,

@@ -35,7 +35,10 @@ export async function POST(request: NextRequest) {
       const store = read.report.kind === "child_safety" && handle ? await storeForHandle(handle).catch(() => undefined) : null;
       const outcome: HoldOutcome =
         read.report.kind !== "child_safety" ? "not_held" : store === undefined ? "unknown" : store ? await holdReported(read.report, store) : "no_product";
-      await alertOwner(read.report, outcome, Date.now(), result === "sent");
+      // The urgent email is the only message that names the kind and its clock: when it was not sent, the report is
+      // not accepted, so the reporter sends it again. A retry sends no second alert (one idempotency key a request a
+      // day) and holds nothing twice (holdReported is idempotent); it costs one more notice (review of #3587).
+      if (!(await alertOwner(read.report, outcome, Date.now(), result === "sent"))) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
     }
     if (result === "sent") return Response.json({ ok: true });
     return Response.json({ ok: false, error: result }, { status: result === "limited" ? 429 : 503 });

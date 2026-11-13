@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { LegalPage, LegalSection } from "@/components/legal-page";
 import { TakedownButton } from "@/components/takedown-actions";
 import { openReport, reportedProduct, unsentNotices } from "@/lib/takedown";
+import { noticeTitle } from "@/lib/takedown-rules";
 import { NewTab } from "@/components/new-tab";
 
 export const metadata: Metadata = { title: "A notice — Marktmorgen", robots: { index: false, follow: false } };
@@ -37,13 +38,17 @@ export default async function TakedownPage({ params }: Params) {
     }
   }
   return (
-    <LegalPage title={report.kind === "copyright" ? "Copyright notice" : "Notice of illegal content"} eyebrow={`Notice ${report.id}`} effective={null} legalNav={false} lastUpdated={new Date(report.at).toLocaleString("en-US", { dateStyle: "long", timeStyle: "short", timeZone: "UTC" }) + " UTC"}>
+    <LegalPage title={noticeTitle(report.kind)} eyebrow={`Notice ${report.id}`} effective={null} legalNav={false} lastUpdated={new Date(report.at).toLocaleString("en-US", { dateStyle: "long", timeStyle: "short", timeZone: "UTC" }) + " UTC"}>
       <LegalSection title="What it says">
         <p><strong className="text-black">Where:</strong> <a href={report.url} target="_blank" rel="noopener noreferrer nofollow" className="underline underline-offset-2 [overflow-wrap:anywhere]">{report.url}<NewTab /></a></p>
         <p className="whitespace-pre-line [overflow-wrap:anywhere]"><strong className="text-black">{report.kind === "copyright" ? "The work:" : "Why:"}</strong> {report.work}</p>
         {report.original ? <p className="[overflow-wrap:anywhere]"><strong className="text-black">Original:</strong> {report.original}</p> : null}
         <p><strong className="text-black">From:</strong> {report.name} &lt;{report.email}&gt;{report.contact ? `, ${report.contact}` : ""}</p>
-        <p><strong className="text-black">Signed:</strong> {report.signature}, with both statements confirmed.</p>
+        {report.kind === "child_safety" ? (
+          <p>Not signed: a child-safety report asks for no name, signature or sworn statement. Do not open the reported content; the steps are in the incident procedure.</p>
+        ) : (
+          <p><strong className="text-black">Signed:</strong> {report.signature}, with {report.kind === "intimate_image" ? "the statement that the image is shared without consent" : "both statements"} confirmed.</p>
+        )}
       </LegalSection>
       {store ? (
         <LegalSection title={`The store @${store.handle}`}>

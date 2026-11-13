@@ -100,3 +100,16 @@ export const REPORT_PROBLEMS: Record<ReportProblem, string> = {
   signature: "Type your full name as your signature.",
   statements: "Both statements have to be confirmed for us to act on a notice.",
 };
+
+/**
+ * What a notice is called, by its kind, in the support inbox and on the takedown page: a child-safety report and a
+ * request to remove an intimate image are never called a DSA notice, so the owner never acts on one as such (review
+ * of #3587).
+ */
+export function noticeTitle(kind: ReportKind): string {
+  if (kind === "copyright") return "Copyright notice";
+  if (kind === "child_safety") return "Child safety report";
+  if (kind === "intimate_image") return "Request to remove an intimate image";
+  return "Notice of illegal content";
+}
+

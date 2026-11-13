@@ -8,7 +8,7 @@
  *     (deliversDigitally, not a membership) and memberships;
  *   - whether it takes PayPal right now (sellsThroughPayPal);
  *   - the ad pixels switched on, by their platforms' own names (PIXEL_INFO);
- *   - the postal address on its emails, when set.
+ *   - the postal address on its emails, when set and the creator chose to show it there too.
  */
 import type { Store } from "@/lib/store";
 import { type Listing, readListingsAll, visibleIds } from "@/lib/catalog";
@@ -38,7 +38,8 @@ export function policyInputFrom(store: Pick<Store, "name" | "pixels" | "mail">, 
     sellsMemberships: sold.some((p) => Boolean(p.recurring)),
     paypal,
     pixels: PIXEL_KINDS.filter((kind) => Boolean(store.pixels?.[kind])).map((kind) => PIXEL_INFO[kind].name),
-    postalAddress: store.mail?.address ?? "",
+    // Only by the creator's own choice where the address is typed: the email footer's address is never public by default (#1824).
+    postalAddress: store.mail?.onPolicies === true ? store.mail.address : "",
   };
 }
 

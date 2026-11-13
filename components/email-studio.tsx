@@ -563,6 +563,7 @@ function Settings({ name, mail }: { name: string; mail: MailSettings | null }) {
   const router = useRouter();
   const [fromName, setFromName] = useState(mail?.fromName ?? name);
   const [address, setAddress] = useState(mail?.address ?? "");
+  const [onPolicies, setOnPolicies] = useState(mail?.onPolicies === true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   return (
@@ -572,7 +573,7 @@ function Settings({ name, mail }: { name: string; mail: MailSettings | null }) {
         e.preventDefault();
         setBusy(true);
         setError(null);
-        const a = await call({ action: "settings", fromName, address });
+        const a = await call({ action: "settings", fromName, address, onPolicies });
         setBusy(false);
         if (a.ok) {
           toast("Email settings saved.");
@@ -587,6 +588,13 @@ function Settings({ name, mail }: { name: string; mail: MailSettings | null }) {
       <label className="block">
         <span className="field-label">Postal address at the bottom of each email</span>
         <input className="field mt-2" maxLength={200} placeholder="Street, city, ZIP or postal code, country — or a PO box" value={address} onChange={(e) => setAddress(e.target.value)} />
+      </label>
+      <label className="flex min-h-11 items-start gap-3">
+        <input type="checkbox" className="mt-1 h-5 w-5 shrink-0" checked={onPolicies} onChange={(e) => setOnPolicies(e.target.checked)} />
+        <span>
+          {"Also show this address on my store's policies page"}
+          <span className="block text-sm text-ink-soft">Anyone can see that page. Leave this off to keep the address in your emails only.</span>
+        </span>
       </label>
       <p className="text-sm text-ink-soft">
         Replies go to the email address the store&apos;s owner logs in with. The postal address is required by the CAN-SPAM Act for emails

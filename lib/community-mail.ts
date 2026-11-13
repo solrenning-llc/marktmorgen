@@ -29,7 +29,7 @@ import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { orderWrite } from "@/lib/order-data";
 import { type BatchMessage, sendBatch } from "@/lib/email";
-import { CHECKED_BATCH_SIZE, SENDER_WAIT_NOTE, canWrite, fromLine, monthlyAllowance, release, render, reserve } from "@/lib/mail";
+import { CHECKED_BATCH_SIZE, SENDER_RETRY_NOTE, SENDER_WAIT_NOTE, canWrite, fromLine, monthlyAllowance, release, render, reserve } from "@/lib/mail";
 import { SITE_URL } from "@/lib/site-url";
 import type { Store } from "@/lib/store";
 import {
@@ -425,7 +425,7 @@ export async function advanceAnnouncement(
           const failures = job.failures + 1;
           job = failures >= 5
             ? { ...job, status: "failed", failures, note: "The email service would not take it. Nothing more was sent." }
-            : { ...job, failures, note: "Paused for a moment: the email service asked us to slow down." };
+            : { ...job, failures, note: SENDER_RETRY_NOTE };
           break;
         }
       }

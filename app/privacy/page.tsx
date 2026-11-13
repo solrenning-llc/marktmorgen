@@ -195,8 +195,8 @@ export default function PrivacyPage() {
         <p>
           So a creator can see how many people are on their store page right
           now, the first ten characters of that day&apos;s fingerprint are kept
-          for up to half an hour, beside the site the visitor came from, and
-          then deleted; they cannot be turned back into an address, and the
+          for up to about a day, beside the site the visitor came from, and
+          then deleted (the creator is shown only the last few minutes); they cannot be turned back into an address, and the
           creator sees only a count.
         </p>
         <p>
@@ -738,8 +738,8 @@ export default function PrivacyPage() {
           bought something, which stores it bought from: the store&apos;s id
           only, under a one-way hash of the address. Not what you bought, when
           or for how much; each store&apos;s list is read from that
-          creator&apos;s own payment records when you open it. It is kept for
-          three years after your last purchase. When you ask for your library,
+          creator&apos;s own payment records when you open it. It is kept
+          until three years after the end of the quarter of your last purchase. When you ask for your library,
           we email a link that opens it for 24 hours, only if that address
           bought something, and the page says the same either way. The
           creators do not see it.
@@ -855,7 +855,7 @@ export default function PrivacyPage() {
           published. A short note about what was not published is kept for its
           author for at most another {TOLD_DAYS} days. Deleting a member deletes
           what they had waiting too.
-          Who reported something is kept for 90 days, so each member&apos;s
+          Who reported something is kept for 90 days after the latest report of it, so each member&apos;s
           report counts once. The answer about whether someone may come in is
           kept for up to five minutes, a record of each announcement emailed
           and who it went to for up to 60 days, the code in a member&apos;s
@@ -1076,7 +1076,7 @@ export default function PrivacyPage() {
           with a recent purchase: which product, how long ago, and the country
           the card was billed in, as Stripe gives it. For that, we keep the
           product, the time, the country and the payment&apos;s reference of
-          the store&apos;s 20 latest purchases for up to 8 days, and use the
+          the store&apos;s 20 latest purchases until 8 days after its latest one, and use the
           reference only to leave out a refunded one. Nothing about who bought
           is kept for it or shown: no name, address, email, city or picture.
         </p>

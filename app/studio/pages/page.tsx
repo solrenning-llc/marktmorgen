@@ -5,12 +5,14 @@ import Link from "next/link";
 import { readableFile } from "@/lib/product-file";
 import { ThanksNoteEditor } from "@/components/thanks-note-editor";
 import { readThanksNote } from "@/lib/thanks-note-store";
+import { NOTE_UNREAD } from "@/lib/thanks-note";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { imageFolder, isFree } from "@/lib/store";
 import { readCards, readListing, readListings } from "@/lib/catalog";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
+import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { canSell } from "@/lib/store-checkout";
 import { imageUrl } from "@/lib/product-image";
@@ -22,6 +24,7 @@ import { summaryOf, visibleReviews } from "@/lib/reviews";
 import { bumpTargets } from "@/lib/product-extras";
 import { pageAction, pricePill, productPath } from "@/components/store-product";
 import { PageEditor } from "@/components/page-editor";
+import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 import { readPageFacts } from "@/lib/page-facts-read";
 import { readStats } from "@/lib/stats";
 import { readCourse } from "@/lib/course";
@@ -82,13 +85,17 @@ export default async function StudioPagesPage({ searchParams }: Params) {
   if (chosen && !listed.some((p) => p.id === chosen.id)) listed.unshift(chosen);
   // What the selected product offers in the box at checkout, for where its buttons lead.
   const related = selected?.bumps.length ? await readListings(store, bumpTargets(selected)) : [];
-  const [page, about, summary] = selected
+  const [read, about, summary] = selected
     ? await Promise.all([
-        selected.page ? readPage(store.statsId, selected.id) : Promise.resolve({ ...EMPTY_PAGE, blocks: [] }),
+        // A read whose answer is not known is said so, and no editor or template draft is drawn from it: an empty one
+        // could be saved over the page (C4-20261106-2610-C6-153, unit B). No page saved yet is read as empty, as before.
+        selected.page ? readPage(store.statsId, selected.id).catch(() => "unread" as const) : Promise.resolve({ ...EMPTY_PAGE, blocks: [] }),
         selected.about ? readAbout(store.statsId, selected.id) : Promise.resolve(""),
         summaryOf(store.statsId, selected.id).catch(() => null),
       ])
     : [null, "", null];
+  const unread = read === "unread";
+  const page = unread ? null : read;
   // Library intents only seed an unsaved empty page. Saved creator content wins.
   const template = typeof query.template === "string" ? PAGE_TEMPLATES.find(item => item.id === query.template) : undefined;
   const sectionId = typeof query.sectionTemplate === "string" && /^[a-zA-Z0-9_-]{10}$/.test(query.sectionTemplate) ? query.sectionTemplate : "";
@@ -139,14 +146,14 @@ export default async function StudioPagesPage({ searchParams }: Params) {
       <StudioStorePin sid={store.sid}>
       {/* Wider than the rest of the studio on a wide screen: the page is drawn beside its blocks. */}
       <main id="content" className="container-page pb-20 pt-10 sm:pt-14 xl:!max-w-[92rem]">
-        <p className="eyebrow">Sales pages</p>
+        <StudioTrail store={store} here="Sales pages" />
         <h1 className="t-h2 mt-3">A page that sells each product</h1>
         <p className="mt-3 max-w-2xl text-ink-soft">
           {`Build each product's own page from up to ${MAX_BLOCKS} blocks: a hero with its picture or a video, text, benefits, what's inside, about you, questions, your guarantee, buttons to the checkout and your buyers' verified reviews. Something free gets a landing page with the sign-up form, to send ads to. Pages follow your store's look, and a product without blocks keeps the page it has.`}
         </p>
 
         {templateNotice ? <p role="status" className="card mt-6 p-5 text-sm text-ink-soft">{templateNotice}</p> : null}
-        {products.length === 0 || !selected || !page || !action ? (
+        {products.length === 0 || !selected || (!page && !unread) || !action ? (
           <div className="card mt-8 p-6 sm:p-8">
             <p className="text-lg font-semibold tracking-[-0.02em] text-ink">Nothing to build a page for yet</p>
             <p className="mt-2 text-ink-soft">Add a product in the studio and its page can be built here.</p>
@@ -203,6 +210,13 @@ export default async function StudioPagesPage({ searchParams }: Params) {
             </nav>
 
             <div className="min-w-0">
+            {/* A page whose read is not known is said so in place of its editor only: the list beside it and the note
+                after paying, read on their own, stay, so the creator can choose another product (#2832, review). */}
+            {!page ? (
+              <div className="card p-6 sm:p-8">
+                <p role="status" className="text-lg font-semibold tracking-[-0.02em] text-ink">{STUDIO_MESSAGES.page_unread}</p>
+              </div>
+            ) : (
             <AiOn value={aiAvailableFor(store) ? { on: true, left: await aiLeft(store).catch(() => 0) } : { on: false, left: 0 }}>
             <PageEditor
               // One editor per product: a save keeps the editor as it is, with the
@@ -238,7 +252,7 @@ export default async function StudioPagesPage({ searchParams }: Params) {
               summary={summary && summary.visible + summary.hidden > 0 ? summary : null}
               reviews={reviews}
               lang={store.language}
-              facts={await readPageFacts(store, selected)}
+              {...(await readPageFacts(store, selected))}
               outline={
                 selected.course
                   ? ((await readCourse(selected.course.id).catch(() => null))?.modules ?? []).map((m) => ({ title: m.title, lessons: m.lessons.map((l) => l.title) }))
@@ -254,16 +268,9 @@ export default async function StudioPagesPage({ searchParams }: Params) {
                 .catch(() => null)}
             />
             </AiOn>
+            )}
             {/* What a buyer reads after paying (lib/thanks-note.ts). Something free has its own page after a sign-up. */}
-            {!isFree(selected) ? (
-              <ThanksNoteEditor
-                key={`note-${selected.id}`}
-                productId={selected.id}
-                productTitle={selected.title}
-                storeName={store.name}
-                initial={selected.note ? await readThanksNote(store.statsId, selected.id).catch(() => null) : null}
-              />
-            ) : null}
+            {!isFree(selected) ? await afterPaying(store.statsId, selected, store.name) : null}
             </div>
           </div>
         )}
@@ -271,4 +278,22 @@ export default async function StudioPagesPage({ searchParams }: Params) {
       </StudioStorePin>
     </div>
   );
+}
+
+/**
+ * The note after paying (lib/thanks-note.ts) in its editor; or, when its read did not come back in a known shape
+ * (readThanksNote throws), the words that say so and no editor, so nothing typed can be saved over the note that is
+ * kept (CX-123 rule 24; C4-20261106-2610-C6-153, unit B). No note marked on the product is no note, as before.
+ */
+async function afterPaying(statsId: string | null, product: { id: string; title: string; note?: boolean }, storeName: string) {
+  const note = product.note ? await readThanksNote(statsId, product.id).catch(() => "unread" as const) : null;
+  if (note === "unread") {
+    return (
+      <section id="after-paying" aria-labelledby="after-paying-title" className="card mt-6 scroll-mt-32 p-6 sm:p-8">
+        <h2 id="after-paying-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">After paying: a note from you</h2>
+        <p role="status" className="notice notice-warn mt-4">{NOTE_UNREAD}</p>
+      </section>
+    );
+  }
+  return <ThanksNoteEditor key={`note-${product.id}`} productId={product.id} productTitle={product.title} storeName={storeName} initial={note} />;
 }

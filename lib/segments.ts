@@ -13,10 +13,11 @@
  *
  * None of the three is written down about anybody. Each is worked out from
  * the store's own sales on the creator's Stripe account (lib/stats.ts,
- * readPaidSales), only when an email asks for one, and the answer is kept ten
- * minutes so a creator changing the boxes does not ask Stripe each time:
+ * readPaidSales), only when an email asks for one, and the answer is kept an
+ * hour (owner, C3-80 (b)) so a creator changing the boxes does not ask Stripe
+ * each time; every count shown from it says when it was read (`at`):
  *
- *   nl:stats:<statsId>:ledger   JSON { c: currency, p: partial, v: 4, r: [[address, cents, last ms, channel, orders], …] }, ten minutes
+ *   nl:stats:<statsId>:ledger   JSON { c: currency, p: partial, t: read at ms, v: 4, r: [[address, cents, last ms, channel, orders], …] }, an hour
  *   nl:mail:segs:<listId>       hash: <id> → JSON Segment, the store's saved groups
  *
  * A group is a name over the choices the composer already has: who, one
@@ -26,12 +27,12 @@ import { importedBuyers, importedWhoKey } from "@/lib/imported-purchases";
 import { IMPORTED_CHANNEL } from "@/lib/channel-names";
 import { randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { normaliseEmail } from "@/lib/auth";
 import { WHO, type Who, readTags } from "@/lib/contacts";
 import { MAX_PAID_BYTES, PAYPAL_REFUNDS_READ, paypalKept, paypalPaymentId, readPayPalRefundsWithCoverage } from "@/lib/paypal-sales";
 import { rfmGroup } from "@/lib/rfm-rules";
-import { PAGE_INCLUDED_BYTES } from "@/lib/sent-bytes";
+import { IncludedBytes } from "@/lib/sent-bytes";
 import { ALL_TIME_PAGES, readInvoicePayments, readPaidSales, readRenewalPayments, readStoreDisputes, readStoreRefunds, readsSales } from "@/lib/stats";
 import { hasProduct } from "@/lib/catalog";
 import type { Store } from "@/lib/store";
@@ -39,7 +40,8 @@ import { MAX_SEGMENTS, MAX_SEGMENT_NAME, type Narrow, type Segment, isNarrowed, 
 
 export { type Narrow, NO_NARROW, QUIET_DAYS, ACTIVE_DAYS, MAX_SEGMENTS, MAX_SEGMENT_NAME, type Segment, readNarrow, isNarrowed } from "@/lib/segments-rules";
 
-const LEDGER_SECONDS = 600;
+/** How long the copy of the store's buyers is kept (owner, C3-80 (b), 4 November 2026: an hour; ten minutes before). */
+export const LEDGER_SECONDS = 3_600;
 const SEGMENT_ID = /^[0-9a-f]{12}$/;
 
 const ledgerKey = (statsId: string) => `nl:stats:${statsId}:ledger`;
@@ -51,7 +53,8 @@ const segmentsKey = (listId: string) => `nl:mail:segs:${listId}`;
  * checkout once, an offer taken after paying not counted again (270 [GR1]).
  */
 export type LedgerEntry = { cents: number; last: number; channel: string; orders: number };
-export type Ledger = { buyers: Map<string, LedgerEntry>; partial: boolean };
+/** `at`: when it was read (ms), from its copy or from Stripe; what the studio shows from it says "as of" that time. */
+export type Ledger = { buyers: Map<string, LedgerEntry>; partial: boolean; at?: number };
 
 type Row = [string, number, number, string, number];
 /** The cached rows' shape; a reading kept in an older one is read again (3: a sale in another currency counts as a purchase; 4: renewals, refunds and disputes; 5: invoices' payments; 6: each renewal counted as a time they bought). */
@@ -80,7 +83,7 @@ export class LedgerNotCounted extends Error {
 
 /**
  * Studio requests one reading of the buyers from Stripe costs at the most,
- * when its ten-minute copy ran out (tests/plan-cost-registry.ts,
+ * when its one-hour copy ran out (tests/plan-cost-registry.ts,
  * BUYER_LEDGER), besides what it reads and writes by size (below): for a
  * caller that counts them (`count`, below).
  */
@@ -91,8 +94,13 @@ export const LEDGER_BYTES_PER_UNIT = 1_000_000;
 export const IMPORTED_BUYER_BYTES = 2 * (254 + 64);
 
 
-/** Studio requests reading (or writing) `bytes` of the buyers costs, by size: none within PAGE_INCLUDED_BYTES. */
-export const ledgerUnits = (bytes: number) => (bytes <= PAGE_INCLUDED_BYTES ? 0 : Math.ceil(bytes / LEDGER_BYTES_PER_UNIT));
+/**
+ * Studio requests reading (or writing) `bytes` of the buyers costs, by size:
+ * none within what is left of the request's included bytes (`included`, one
+ * for the whole request, lib/sent-bytes.ts IncludedBytes; C3-112 (2)), then
+ * one a megabyte. A fresh one when the reading is the request's only part.
+ */
+export const ledgerUnits = (bytes: number, included: IncludedBytes = new IncludedBytes()) => included.take(bytes, LEDGER_BYTES_PER_UNIT).units;
 
 /**
  * What a reading of the buyers moves besides Stripe's pages, from what is
@@ -109,7 +117,7 @@ export const readsBuyers = (store: Store): boolean => readsSales(store) || Boole
 
 /**
  * The studio requests one reading of the buyers (buyerLedger, below) costs at
- * the most, as what is kept is measured now: its ten-minute copy by size, and,
+ * the most, as what is kept is measured now: its one-hour copy by size, and,
  * should that copy be gone or unusable, the reading from Stripe with the
  * imported buyers and the PayPal sales and refunds by how many are kept, each
  * counted exactly as buyerLedger counts it. What a narrowed email the
@@ -121,46 +129,50 @@ export async function ledgerReadingUnits(store: Store): Promise<number> {
   if (!readsBuyers(store)) return 0;
   let copy = 0;
   let imported = 0;
+  // The copy and the rest share one reading's included bytes, as buyerLedger counts them (C3-112 (2)).
+  const included = new IncludedBytes();
   if (store.statsId && isRedisConfigured()) {
     const replies = repliesFor(await redisPipeline([["STRLEN", ledgerKey(store.statsId)], ["HLEN", importedWhoKey(store.statsId)]]).catch(() => null), 2);
     // STRLEN and HLEN answer 0 for a key that is not there, never null: any other shape is unknown (CX-123 rule 24).
     const size = countOf(replies?.[0]);
     const who = countOf(replies?.[1]);
     if (size === null || who === null) throw new LedgerNotCounted();
-    copy = size > 0 ? ledgerUnits(size) : 0;
+    copy = size > 0 ? ledgerUnits(size, included) : 0;
     imported = who;
   }
   const paypal = readsSales(store) ? await paypalKept(store.statsId, Boolean(store.paypalSeller)).catch(() => null) : { sales: 0, refunds: 0 };
   if (!paypal) throw new LedgerNotCounted();
-  return copy + (store.stripeAccountId ? BUYER_LEDGER_UNITS : 0) + ledgerUnits(ledgerReadBytes({ imported, paypalSales: paypal.sales, paypalRefunds: paypal.refunds }));
+  return copy + (store.stripeAccountId ? BUYER_LEDGER_UNITS : 0) + ledgerUnits(ledgerReadBytes({ imported, paypalSales: paypal.sales, paypalRefunds: paypal.refunds }), included);
 }
 
 /**
  * `count`, when given, is asked before anything big is read, with the studio
  * requests it costs, and answers whether they were counted; when they were
- * not, nothing more is read and LedgerNotCounted is thrown. The ten-minute
+ * not, nothing more is read and LedgerNotCounted is thrown. The one-hour
  * copy is counted by its size (measured first, STRLEN, then read no further
  * than counted, GETRANGE), and a reading from Stripe as BUYER_LEDGER_UNITS,
  * with the imported buyers and the PayPal sales and refunds by how many are
  * kept (ledgerReadBytes), before any is read.
  */
-export async function buyerLedger(store: Store, count?: (units: number) => Promise<boolean>): Promise<Ledger> {
-  if (!readsBuyers(store)) return { buyers: new Map(), partial: false };
+export async function buyerLedger(store: Store, count?: (units: number) => Promise<boolean>, included: IncludedBytes = new IncludedBytes()): Promise<Ledger> {
+  if (!readsBuyers(store)) return { buyers: new Map(), partial: false, at: Date.now() };
   const counted = async (units: number) => !count || units <= 0 || (await count(units).catch(() => false));
   if (store.statsId && isRedisConfigured()) {
     // STRLEN answers 0 for a copy that is not there, never null: a size in any other shape is unknown (CX-123
-    // rule 24), so it is neither read as no copy nor counted as 0 units.
-    const size = countOf(repliesFor(await redisPipeline([["STRLEN", ledgerKey(store.statsId)]]), 1)?.[0]);
-    if (size === null) throw new LedgerNotCounted();
-    const units = ledgerUnits(size);
-    if (size > 0 && !(await counted(units))) throw new LedgerNotCounted();
+    // rule 24; Codex J on #2270), so it is neither read as no copy nor counted as 0 units, and nothing more is read.
+    const bytes = countOf(repliesFor(await redisPipeline([["STRLEN", ledgerKey(store.statsId)]]), 1)?.[0]);
+    if (bytes === null) throw new LedgerNotCounted();
+    // The copy is taken from the request's included bytes (`included`, shared with the page's other parts), or counted.
+    const taken = bytes > 0 ? included.take(bytes, LEDGER_BYTES_PER_UNIT) : { units: 0, covers: 0 };
+    if (bytes > 0 && !(await counted(taken.units))) throw new LedgerNotCounted();
     // Never more than was counted: a copy grown since is read cut, cannot be parsed, and is read again below, counted.
-    const [cached] = size > 0 ? await redisPipeline([["GETRANGE", ledgerKey(store.statsId), 0, Math.max(units * LEDGER_BYTES_PER_UNIT, PAGE_INCLUDED_BYTES) - 1]]) : [null];
+    const [cached] = bytes > 0 ? await redisPipeline([["GETRANGE", ledgerKey(store.statsId), 0, taken.covers - 1]]) : [null];
     if (typeof cached === "string" && cached) {
       try {
-        const kept = JSON.parse(cached) as { c?: string; p?: boolean; r?: Row[]; v?: number };
-        if (kept.c === store.currency && kept.v === LEDGER_SHAPE && Array.isArray(kept.r)) {
-          return { buyers: new Map(kept.r.map(([e, cents, last, channel, orders]) => [e, { cents, last, channel, orders }])), partial: kept.p === true };
+        const kept = JSON.parse(cached) as { c?: string; p?: boolean; r?: Row[]; t?: number; v?: number };
+        // A copy without the time it was read (written before it was kept an hour) is read again: what is shown says when.
+        if (kept.c === store.currency && kept.v === LEDGER_SHAPE && Array.isArray(kept.r) && Number.isSafeInteger(kept.t) && (kept.t as number) > 0) {
+          return { buyers: new Map(kept.r.map(([e, cents, last, channel, orders]) => [e, { cents, last, channel, orders }])), partial: kept.p === true, at: kept.t };
         }
       } catch {
         // Read again below.
@@ -177,7 +189,9 @@ export async function buyerLedger(store: Store, count?: (units: number) => Promi
   // A store that reads no sales (no Stripe, no PayPal: imported buyers only) reads none of them (round 7, M1).
   const paypal = readsSales(store) ? await paypalKept(store.statsId, Boolean(store.paypalSeller)) : { sales: 0, refunds: 0 };
   const moved = ledgerReadBytes({ imported, paypalSales: paypal.sales, paypalRefunds: paypal.refunds });
-  if (!(await counted((store.stripeAccountId ? BUYER_LEDGER_UNITS : 0) + ledgerUnits(moved)))) throw new LedgerNotCounted();
+  // When this reading began: anything paid after it may be missing from what it found.
+  const at = Date.now();
+  if (!(await counted((store.stripeAccountId ? BUYER_LEDGER_UNITS : 0) + ledgerUnits(moved, included)))) throw new LedgerNotCounted();
   // Checkouts and offers after paying; and, on a Stripe account, the renewals
   // of memberships and payment plans, and what refunds and disputes took back
   // (270 [GR1], unit 2): a member who pays every month is not quiet since they
@@ -250,15 +264,21 @@ export async function buyerLedger(store: Store, count?: (units: number) => Promi
   }
   // Partial when any list was cut short or unread, or when an invoice's payment was needed and not found.
   const partial = readPartial || missed;
-  const out: Ledger = { buyers: new Map([...buyers].map(([e, r]) => [e, { cents: r.cents, last: r.last, channel: r.channel, orders: r.orders }])), partial };
   // Buyers brought over from another platform (lib/imported-purchases.ts): history, never a sale.
-  // Nothing spent here and no purchase date here; they first came "imported".
-  for (const email of (await importedBuyers(store.statsId).catch(() => new Map<string, number>())).keys()) {
+  // Nothing spent here and no purchase date here; they first came "imported". Read unread or fewer than the HLEN
+  // counted before: the reading is partial, and no hour-long copy is kept without them (sweep A6, CX-123 rule 24).
+  const importedRead = await importedBuyers(store.statsId).catch((error: unknown) => {
+    console.error("reading a store's imported buyers failed", error);
+    return null;
+  });
+  const importedMissed = !importedRead || importedRead.size < imported;
+  const out: Ledger = { buyers: new Map([...buyers].map(([e, r]) => [e, { cents: r.cents, last: r.last, channel: r.channel, orders: r.orders }])), partial: partial || importedMissed, at };
+  for (const email of (importedRead ?? new Map<string, number>()).keys()) {
     if (!out.buyers.has(email)) out.buyers.set(email, { cents: 0, last: 0, channel: IMPORTED_CHANNEL, orders: 0 });
   }
-  if (store.statsId && isRedisConfigured()) {
+  if (store.statsId && isRedisConfigured() && !importedMissed) {
     const rows: Row[] = [...out.buyers].map(([e, r]) => [e, r.cents, r.last, r.channel, r.orders]);
-    await redisPipeline([["SET", ledgerKey(store.statsId), JSON.stringify({ c: store.currency, p: partial, r: rows, v: LEDGER_SHAPE }), "EX", LEDGER_SECONDS]]).catch(() => {});
+    await redisPipeline([["SET", ledgerKey(store.statsId), JSON.stringify({ c: store.currency, p: partial, r: rows, t: at, v: LEDGER_SHAPE }), "EX", LEDGER_SECONDS]]).catch(() => {});
   }
   return out;
 }
@@ -316,14 +336,37 @@ function parseSegment(raw: unknown): Segment | null {
   }
 }
 
-/** The store's saved groups, by name. */
+const byName = (a: Segment, b: Segment) => a.name.localeCompare(b.name);
+
+/**
+ * The store's saved groups, by name. HVALS answers an empty list when there
+ * are none, never another shape: a reply missing, of another shape or with a
+ * member that is not a string is unknown and throws UnknownReplyError
+ * (CX-123 rule 24), so neither MAX_SEGMENTS nor the id of a group saved again
+ * is decided on it (saveSegment).
+ */
 export async function listSegments(listId: string | null): Promise<Segment[]> {
   if (!listId || !isRedisConfigured()) return [];
-  const [raw] = await redisPipeline([["HVALS", segmentsKey(listId)]]);
-  return (Array.isArray(raw) ? raw : []).map(parseSegment).filter((s): s is Segment => s !== null).sort((a, b) => a.name.localeCompare(b.name));
+  const raw = stringList(repliesFor(await redisPipeline([["HVALS", segmentsKey(listId)]]), 1)?.[0]);
+  if (!raw) throw new UnknownReplyError("a store's saved groups");
+  const segments = raw.map((value) => {
+    const segment = parseSegment(value);
+    // An unreadable kept member is unknown, never an absent group for the cap or name lookup.
+    if (!segment) throw new UnknownReplyError("a store's saved group");
+    return segment;
+  });
+  return segments.sort(byName);
 }
 
-export type SegmentResult = { ok: true; segments: Segment[] } | { ok: false; reason: "name" | "empty" | "product" | "full" | "setup" };
+/** listSegments, with null for a reply in an unknown shape; any other failure is thrown as it was. */
+async function listSegmentsKnown(listId: string | null): Promise<Segment[] | null> {
+  return listSegments(listId).catch((error: unknown) => {
+    if (error instanceof UnknownReplyError) return null;
+    throw error;
+  });
+}
+
+export type SegmentResult = { ok: true; segments: Segment[] } | { ok: false; reason: "name" | "empty" | "product" | "full" | "setup" | "unavailable" };
 
 /** Saves a group under a name; the same name again replaces it. */
 export async function saveSegment(store: Store, raw: Record<string, unknown>): Promise<SegmentResult> {
@@ -337,12 +380,22 @@ export async function saveSegment(store: Store, raw: Record<string, unknown>): P
   const narrow = readNarrow(raw.narrow);
   const label = typeof raw.label === "string" ? readTags([raw.label])[0] ?? "" : "";
   if (who === "all" && !productId && !notProductId && !label && !isNarrowed(narrow)) return { ok: false, reason: "empty" };
-  const existing = await listSegments(store.listId);
+  // Unknown is never "no groups": neither the cap nor the id of a name saved again is chosen on it (CX-123 rule 30).
+  const existing = await listSegmentsKnown(store.listId);
+  if (!existing) return { ok: false, reason: "unavailable" };
   const same = existing.find((s) => s.name.toLowerCase() === name.toLowerCase());
   if (!same && existing.length >= MAX_SEGMENTS) return { ok: false, reason: "full" };
   const segment: Segment = { id: same?.id ?? randomBytes(6).toString("hex"), name, who, productId, notProductId, label, ...narrow };
-  await redisPipeline([["HSET", segmentsKey(store.listId), segment.id, JSON.stringify(segment)]]);
-  return { ok: true, segments: await listSegments(store.listId) };
+  const written = countOf(repliesFor(await redisPipeline([["HSET", segmentsKey(store.listId), segment.id, JSON.stringify(segment)]]), 1)?.[0]);
+  // HSET answers how many fields it added: any other reply is unknown, never "saved". The group read before is put back
+  // (or a new one taken back), so "not saved" stays true (Claude 6 on #2892, CX-123 rule 24).
+  if (written === null) {
+    await redisPipeline([same ? ["HSET", segmentsKey(store.listId), same.id, JSON.stringify(same)] : ["HDEL", segmentsKey(store.listId), segment.id]]);
+    return { ok: false, reason: "unavailable" };
+  }
+  // The groups as they are after; when they cannot be read, those read before with this one in its place.
+  const after = await listSegmentsKnown(store.listId);
+  return { ok: true, segments: after ?? [...existing.filter((s) => s.id !== segment.id), segment].sort(byName) };
 }
 
 export async function removeSegment(store: Store, id: unknown): Promise<Segment[]> {
@@ -353,7 +406,7 @@ export async function removeSegment(store: Store, id: unknown): Promise<Segment[
 }
 
 /**
- * Lets the ten-minute copy of the store's buyers go (lib/person-erasure.ts),
+ * Lets the one-hour copy of the store's buyers go (lib/person-erasure.ts),
  * so a deleted person is not in it: it is read again from Stripe when next
  * needed, without them in the list's own records.
  */

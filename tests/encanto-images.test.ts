@@ -40,7 +40,7 @@ part("A card's cover is described at the width it is drawn");
 is("the store's grid: two to a row from 1024 px, the phone's own width below", IMAGE_SIZES.grid, "(min-width: 64rem) 25rem, (max-width: 36rem) calc(100vw - 2rem), 34rem");
 is("a one-column list keeps the column's width", IMAGE_SIZES.cover, "(max-width: 36rem) calc(100vw - 2rem), 34rem");
 const card = read("components/store-product.tsx");
-is("a card says the grid's width only when it stands in the grid", /sizes=\{image\.small \? \(style === "preview" \? \(grid \? IMAGE_SIZES\.grid : IMAGE_SIZES\.cover\) : IMAGE_SIZES\.thumb\) : undefined\}/.test(card), true);
+is("a card says the grid's width only when it stands in the grid", /sizes=\{smallerCopies\(image\)\.length \? \(style === "preview" \? \(grid \? IMAGE_SIZES\.grid : IMAGE_SIZES\.cover\) : IMAGE_SIZES\.thumb\) : undefined\}/.test(card), true);
 is("the store page's cards stand in the grid", /<ProductCard[\s\S]*?\bgrid\b[\s\S]*?\/>/.test(store), true);
 is("a collection's do not", /<ProductCard[\s\S]*?\bgrid\b[\s\S]*?\/>/.test(collection), false);
 

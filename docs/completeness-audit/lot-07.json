@@ -1,0 +1,709 @@
+{
+ "lote": 7,
+ "main": "d7bbf9d35 (docs/codex-queue.md idêntico ao main 6725b5c97 em que o lote foi gravado)",
+ "pedido": "C1-20261105-1919-C4-1 / C4-20261105-1925-C5-3",
+ "itens": [
+  {
+   "n": 554,
+   "etiqueta": "DS1",
+   "estado": "em andamento",
+   "prova_do_estado": "queue.md:19549 'Andamento (Claude 2, 02/11/2026): unidade 2 ... conferida antes de implementar, nada construído' e 'Decisão do dono (02/11/2026, 16h15 Fortaleza): aceito o desenho com o código e o e-mail digitados no site'; queue.md:19553 'unidade 1 testada num PR (ramo claude2/ds1-code-rules)'; o GitHub mostra o PR #1603 'DS1 unit 1: a minimum order on a discount code, checked by Stripe' incorporado. A linha queue.md:19551 ainda diz 'Estado: na fila.'",
+   "linha_estado": "Estado: na fila. Ordem de chegada após553[DB1],subordinada àAV1,sem interromper unidade iniciada.",
+   "correcao_estado": "PR #1603, commit 9c7ae03b48afaf7b5568237366c31a28b11bf8af, 01/11/2026 12h02 Fortaleza (unidade 1, valor mínimo pelo Stripe, incorporada; a nota 'testada num PR' também está desatualizada). Fica 'em andamento': unidade 2 (código só para quem já comprou, desenho aprovado pelo dono em 02/11/2026 16h15) ainda não construída; os PRs #1502 e #1491 de que ela dependia já foram incorporados (#1491 em 02/11/2026 20h11 e #1502 em 04/11/2026 18h06 Fortaleza), então a unidade pode começar; a duração nas assinaturas também segue prevista.",
+   "pedidos": [
+    {
+     "o_que": "(h) conferir campos na documentação oficial do Stripe com data, na versão de API fixada",
+     "situacao": "presente",
+     "prova": "queue.md:19553 (leitura de 01/11/2026 registrada); lib/discount.ts:25 e lib/discount.ts:36 (API_VERSION = \"2025-09-30.clover\")",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(c) valor mínimo do pedido pelo Stripe (restrictions[minimum_amount] e minimum_amount_currency), opcional, na moeda da loja",
+     "situacao": "presente",
+     "prova": "lib/discount.ts:341-342; app/api/store/discount/route.ts:49-51; components/discount-editor.tsx:336-354; tests/discount-rules.test.ts:42-72",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(c) o checkout diz em texto quanto falta quando o código não vale pelo mínimo",
+     "situacao": "incerto",
+     "prova": "O checkout é a página do próprio Stripe; o estúdio explica o mínimo (components/discount-editor.tsx:353-354) e lib/discount.ts:83 (minimumProblem) é erro do editor, não do checkout. Não achei mensagem do Marktmorgen no checkout; a unidade 1 não registra se o Stripe mostra o valor que falta.",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(a) só para certos produtos (applies_to), produto sem correspondência não selecionável, com explicação",
+     "situacao": "presente",
+     "prova": "Limitação real registrada (queue.md:19553: os produtos vão ao checkout como price_data sem produto do Stripe); a explicação no editor está em components/discount-editor.tsx:360",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(b) só primeira compra (first_time_transaction), explicada pelo histórico do Stripe",
+     "situacao": "presente",
+     "prova": "Limitação real registrada (queue.md:19553: códigos de primeira compra são aceitos em checkout sem cliente); a regra é só lida de volta dos códigos do painel e explicada: lib/discount.ts:141, lib/discount.ts:211-222, lib/discount.ts:154-160",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(d) duração nas assinaturas (first payment only, 1–24 meses, forever) e página/e-mail dizendo duração e preço depois",
+     "situacao": "prevista",
+     "prova": "Hoje só é lida (lib/discount.ts:196-204) e criada como \"once\" (lib/discount.ts:309); queue.md:19553 registra que 'fica para a unidade em que a página e a confirmação digam a duração e o preço depois'",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(e) só combinações aceitas pelo Stripe e erro do Stripe em texto",
+     "situacao": "presente",
+     "prova": "lib/discount.ts:356 (lê de volta o que o Stripe gravou); components/discount-editor.tsx:46 (problema em texto). Combinações com produtos/duração ainda não existem porque essas regras não são oferecidas.",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(f) data de término real, sem 'ends today', contador ou de/por inventado",
+     "situacao": "presente",
+     "prova": "components/discount-editor.tsx:189 (a frase usa o prazo real); nenhuma ocorrência de 'ends today'/'last chance' em lib/discount.ts nem components/discount-editor.tsx",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(g) MAX_CODES 20 e códigos antigos sem mudança",
+     "situacao": "presente",
+     "prova": "lib/discount.ts:48 (MAX_CODES = 20); tests/discount-rules.test.ts:72 (código sem mínimo enviado como antes)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Complemento 19h57: regra 'Only for people who bought from me' (ou de um produto escolhido), conferida no servidor, código e e-mail digitados no site (decisão do dono de 02/11/2026 16h15), com e-mail apagado ao fechar o checkout e registro em lib/person-data.ts e na privacidade",
+     "situacao": "prevista",
+     "prova": "queue.md:19549 (decisão do dono; 'a unidade começa assim que eles [#1502 e #1491] forem incorporados'); buscas por 'Only for people who bought', 'buyersOnly', 'boughtBefore' em lib/app/components sem resultado; nenhum PR aberto achado",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Complemento 19h57: mensagem de recusa em texto junto ao campo, anunciada, sem revelar compradores",
+     "situacao": "prevista",
+     "prova": "Parte da unidade 2 acima, ainda não construída",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Complemento 19h57: no envio avulso para compradores, link com o código e a data de término real",
+     "situacao": "prevista",
+     "prova": "Parte da unidade 2 acima, ainda não construída",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Complemento 19h57: uma leitura de compras por checkout com o código, com cache e teto, testes sintéticos de elegibilidade",
+     "situacao": "prevista",
+     "prova": "Parte da unidade 2 acima, ainda não construída",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Pendências da revisão para a próxima unidade: testar a rota com pedidos sintéticos (mínimo inválido, ienes com centavos, fora da faixa), código de link abaixo do mínimo, conferir se o mínimo é antes ou depois do imposto, aria-invalid/aria-describedby do erro do campo",
+     "situacao": "prevista",
+     "prova": "queue.md:19553 'Para a próxima unidade, pela revisão: ...'; components/discount-editor.tsx:348 só tem aria-describedby para a ajuda",
+     "onde_deveria_estar": ""
+    }
+   ],
+   "complemento": ""
+  },
+  {
+   "n": 567,
+   "etiqueta": "GD1",
+   "estado": "em andamento",
+   "prova_do_estado": "queue.md:20798 (parte (d)) 'Em andamento pelo Claude 2 (31/10/2026 23h20 Fortaleza), parte (d), unidade 1, ramo claude2/gd1d-fast-money-block'; queue.md:323-325 'Incorporados ... #1521, #1523, #1525 (567 [GD1] (d)/(e))', '#1543 (567 [GD1] (d) 3)'. A linha queue.md:20772 ainda diz '**Estado:** na fila.'",
+   "linha_estado": "**Estado:** na fila.",
+   "correcao_estado": "PR #1543, commit c888ac004769c7bbe6f53e37139265a7b818605e, 01/11/2026 02h03 Fortaleza (último incorporado); antes: #1519 b31b1a3e65882a1d1aa91f38c62aab6e1ca0d92e (31/10/2026 23h24), #1521 cfa6ce3f7c9e0b8375501327c4600d345e25ee5c (01/11/2026 00h14), #1523 893af1469c51cfb5699ffa89881a8e372d0a5531 (01/11/2026 00h35), #1525 5e0db56f30c49ac5e20f1da8a410d7e08df42b8f (01/11/2026 00h36). Fica 'em andamento': (e) entregue; (d) unidades 1–3 entregues (a nota 'Em andamento pelo Claude 2 ... unidade 1' está desatualizada); (a), (b), (c), (f), (g), (h) e o restante de (d) ainda não feitos.",
+   "pedidos": [
+    {
+     "o_que": "(a) botão 'Report a problem with this order' no recibo e na área do comprador, prazo de 7 dias na caixa do criador, contato e reembolso ao comprador, pausa automática de vendas novas acima de um limite",
+     "situacao": "prevista",
+     "prova": "Busca por 'Report a problem with this order' em lib/app/components sem resultado; parte ainda não iniciada do item aberto",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(b) taxas de contestação e reembolso de 30 e 90 dias da conta Stripe do criador, limites oficiais Visa/Mastercard/Stripe, aviso e pausa automática",
+     "situacao": "prevista",
+     "prova": "Busca por 'dispute rate'/'disputeRate' sem resultado; parte ainda não iniciada",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(c) resumo de provas para contestação enviado ao Stripe com um clique do criador",
+     "situacao": "prevista",
+     "prova": "Parte não iniciada; o próprio item manda reutilizar 492 [DE1] (queue.md:20774); existe lib/dispute-evidence-rules.ts de outro trabalho",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(d) unidade 1: promessa de dinheiro rápido/fácil bloqueia publicação do produto, com trecho, motivo e correção",
+     "situacao": "presente",
+     "prova": "lib/terms-check-rules.ts:44 e :51 (fast_money em BLOCKING_KINDS); app/api/store/product/route.ts:181; tests/fast-money-block.test.ts",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(d) unidade 2: a mesma promessa na página de venda publicada é recusada",
+     "situacao": "presente",
+     "prova": "app/api/store/page/route.ts:72 (fastMoneyOnPage); tests/fast-money-page.test.ts",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(d) unidade 3: nome e linhas de uma opção de preço",
+     "situacao": "presente",
+     "prova": "app/api/store/option/route.ts:67; tests/fast-money-option.test.ts",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(d) promessas de ganho, contagem regressiva/escassez falsas como aviso",
+     "situacao": "presente",
+     "prova": "lib/terms-check-rules.ts:44 (earnings_claim, false_urgency) e :279-298; components/terms-check-panel.tsx",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(d) restante: e-mails, campos de SEO, depoimentos sem a indicação exigida, conferência da regra da FTC (16 CFR 465) em fonte oficial",
+     "situacao": "prevista",
+     "prova": "queue.md:20798 lista como 'Fora desta unidade'; fontes oficiais recusadas pela rede em 31/10/2026",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(e) só comprador verificado avalia, com 'Verified purchase', criador não edita o texto, esconder só pelas regras, igual para todas as notas",
+     "situacao": "presente",
+     "prova": "lib/reviews.ts:1-30 (regras); lib/reviews.ts:491-493 (setHidden exige HIDE_REASONS); lib/buyer-words/en.ts:272; components/review-list.tsx:85; tests/review-hide-reasons.test.ts; tests/review-photo-reason.test.ts",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(f) bloqueio de comprador abusivo na loja e histórico de reembolso/contestação só naquela loja",
+     "situacao": "prevista",
+     "prova": "Parte ainda não iniciada; nada encontrado por 'blockBuyer'/'blocked buyer'",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(g) afiliados: verificar e completar (sem comissão própria, retenção até o prazo de reembolso, estorno em contestação, leads confirmados)",
+     "situacao": "prevista",
+     "prova": "Muito já existe em lib/affiliates.ts:28-57 e :229, mas a verificação desta parte não foi feita/registrada; parte ainda não iniciada",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(h) estudo do agente designado da DMCA em 'Depende do dono', conferência dos Termos e página pública 'Trust and safety'",
+     "situacao": "prevista",
+     "prova": "Busca por 'Trust and safety'/'designated agent' sem resultado; parte não iniciada; sobreposição com 247 [SP4] registrada em queue.md:1577",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Seção Acessibilidade e custo com teto em cada PR",
+     "situacao": "presente",
+     "prova": "Exigência de processo dos PRs incorporados #1519, #1521, #1523, #1525, #1543 (não conferido o corpo de cada PR)",
+     "onde_deveria_estar": ""
+    }
+   ],
+   "complemento": ""
+  },
+  {
+   "n": 568,
+   "etiqueta": "GD2",
+   "estado": "em andamento",
+   "prova_do_estado": "queue.md:20862 'Estado de (k) (Claude 2, 1/11/2026): testado num PR ... docs/incident-response.md'; queue.md:323-325 'Incorporados ... #1534 e #1535 (568 [GD2] (c))', '#1533 (568 [GD2] (j))', '#1536 e #1544 (568 [GD2] (h))'. A linha queue.md:20822 ainda diz '**Estado:** na fila.'",
+   "linha_estado": "**Estado:** na fila.",
+   "correcao_estado": "PR #1544, commit eeae966f9ec100b5cc48cd325e7ddd486bb09227, 01/11/2026 04h09 Fortaleza (último incorporado); antes: #1534 42cb12b564b3535182abe24ec09a1c9599211abd (01/11/2026 01h27), #1535 d1c1cc590cabc3bb83e389b6abe09667faf0bc1d (01h30), #1533 293a4fbdf25b3ad2ec542408280a95861c2eeb40 (01h59), #1536 a5a13bf4eb3dc7434a3367642fce5d7144f4a57a (02h25), #1556 a8785eef339604358e563c3a7d152954b07da0ad (03h00, parte (k); a linha 'Estado de (k) ... testado num PR' também está desatualizada). Fica 'em andamento': (c) formulários, (h) confirmação e (j) endereços reservados entregues em parte; (k) incorporado; (a), (b), (d), (e), (f), (g), (i), (l) e o restante de (c), (h) e (j) ainda não feitos.",
+   "pedidos": [
+    {
+     "o_que": "(a) estudo INFORM Consumers Act e art. 30 do DSA, coleta e pausa se aplicável",
+     "situacao": "prevista",
+     "prova": "Busca por 'INFORM' sem PR nem código; parte não iniciada",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(b) produto proibido: regras sem IA contra a lista dos Termos e do Stripe",
+     "situacao": "prevista",
+     "prova": "Parte não iniciada; nada encontrado além da checagem de dinheiro rápido do 567",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(c) formulários do criador não aceitam campos de senha, cartão, código de segurança ou documento",
+     "situacao": "presente",
+     "prova": "lib/form-sensitive.ts:12-33; tests/form-sensitive.test.ts; tests/funnel-form-sensitive.test.ts (PRs #1534, #1535)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(c) páginas que imitam login/checkout/marca do Marktmorgen não publicam; estudo de listas públicas de endereços maliciosos",
+     "situacao": "prevista",
+     "prova": "Parte de (c) ainda não feita; nenhum PR achado",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(d) verificação de vírus nos arquivos enviados, com teto ou registro em 'Depende do dono'",
+     "situacao": "prevista",
+     "prova": "Busca por 'virus' sem PR nem código; parte não iniciada",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(e) pausa de envios de lista por taxa de reclamação/devolução e declaração de consentimento em lista importada",
+     "situacao": "prevista",
+     "prova": "Parte não iniciada neste item (reutilizar 362 [AP2] e 374 [SU7], queue.md:20824)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(f) limite de tentativas recusadas por checkout contra teste de cartões",
+     "situacao": "prevista",
+     "prova": "Parte não iniciada; nenhum PR 'card testing' do item",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(g) links de download que expiram e limite de sessões simultâneas em cursos/membros",
+     "situacao": "prevista",
+     "prova": "Parte não iniciada",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(h) confirmação antes de toda ação que não pode ser desfeita",
+     "situacao": "presente",
+     "prova": "components/confirm-action.tsx; tests/confirm-irreversible.test.ts (PRs #1536, #1544)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(h) verificar e completar o registro de quem fez o quê nas ações de dinheiro, dados e exclusão",
+     "situacao": "incerto",
+     "prova": "Existe um registro da equipe (lib/team.ts:2, :17, :109-113), mas não achei registro da verificação/complemento desta parte",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(i) idade mínima nos Termos, proibição de lojas para menores de 13 (COPPA) e caixa desmarcada no cadastro",
+     "situacao": "prevista",
+     "prova": "Parte não iniciada",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(j) nomes de loja e endereços reservados (marktmorgen, support, help, admin, official, security, billing)",
+     "situacao": "presente",
+     "prova": "lib/store.ts:195 (RESERVED), :229 ('support'), :837-846 (IMPERSONATING); tests/reserved-handles.test.ts (PR #1533)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(j) motivo 'Impersonation' na página de denúncia, no mesmo mecanismo de advertências",
+     "situacao": "prevista",
+     "prova": "components/report-form.tsx:82 só tem 'copyright' e 'other'; parte de (j) ainda não feita",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(k) plano de resposta a incidentes em docs/ com modelos de aviso e o que o código faz sozinho",
+     "situacao": "presente",
+     "prova": "docs/incident-response.md:1, :7, :28, :43, :77, :101 (PR #1556); prazos legais não conferidos por recusa da rede, registrados na seção 6",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(l) estudo do custo de seguro empresarial em 'Depende do dono'",
+     "situacao": "prevista",
+     "prova": "Parte não iniciada",
+     "onde_deveria_estar": ""
+    }
+   ],
+   "complemento": ""
+  },
+  {
+   "n": 569,
+   "etiqueta": "NC1",
+   "estado": "em andamento",
+   "prova_do_estado": "queue.md:20902-20906: 'unidade 1 incorporada e publicada (PRs #1343, #1344, #1345 ...)', 'PR #1347 ... incorporado em 30/10/2026, 21h37', 'PR #1368 ... merge 3d8bac67... Estado: incorporado', 'Liberado pelo Claude: 31/10/2026, 02h30' (a terceira parte da unidade 5 depende do registro do preço vendido). A linha queue.md:20898 ainda diz '**Estado:** na fila.'",
+   "linha_estado": "**Estado:** na fila.",
+   "correcao_estado": "PR #1368, commit 3d8bac674faa850f4c9ca4ba150ab66b3c05ece8, 30/10/2026 23h54 Fortaleza (último incorporado); antes: #1343 2e2585c27c30379b88048f63c2bc9cd1011e59b9 (20h57), #1344 da9a2e0f0b839750b4b80a2fda119e58e5bcc965 (20h58), #1345 6f87208101c0a195be0515ac9ad3bd4960c1702f (20h59), #1346 b694acb9898fd7553975ad5f75193ccaa953c555 (21h00), #1347 30b52a39a39e1cf9185d1bcde8d8fe745872c900 (21h37). Fica 'em andamento' (liberado pelo Claude em 31/10/2026 02h30, sem dono no momento): unidade 1 e as duas primeiras partes da unidade 5 incorporadas e desligadas; unidades 2–4, o restante da 5, 6 e 7 e os complementos (a)–(h) de 02/11/2026 ainda não feitos.",
+   "pedidos": [
+    {
+     "o_que": "Unidade 1: inventário de todo caminho que cobra em docs/billing-correctness.md (quem, conta, quando, quanto, consentimento, teste, lacunas)",
+     "situacao": "presente",
+     "prova": "docs/billing-correctness.md:1, :36, :54, :73 (PRs #1343–#1345)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Desenho das unidades 5 e 6 a partir das páginas do Stripe",
+     "situacao": "presente",
+     "prova": "docs/billing-correctness.md:121 (PR #1346)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Unidade 2: valor = preço publicado, líquido de cupons, com teste",
+     "situacao": "incerto",
+     "prova": "queue.md:20902 diz que a regra antes da cobrança 'já é coberta por testes existentes' (PR #1345); não reconferi cada teste; a conferência depois da cobrança segue nas unidades 5–6",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Regra: nada cobrado sem consentimento registrado com versão e horário",
+     "situacao": "prevista",
+     "prova": "Unidades ainda não construídas; lacunas listadas em docs/billing-correctness.md:73",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Unidade 3: chave de idempotência em toda escrita ao Stripe, com teste",
+     "situacao": "prevista",
+     "prova": "docs/billing-correctness.md:42 ('No key on any of its writes' em switchPlan); queue.md:20906 diz que toca arquivos do Codex e fica como pedido ao Codex",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Unidade 4: nada cobrado após cancelamento, encerramento, pausa ou fim de teste; troca de plano conferida; fim de teste e preço novo só com aviso do 414",
+     "situacao": "prevista",
+     "prova": "Não construída; depende também de 414 [KX1] (PR #1296 aberto)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Unidade 5 parte 1: decisão pura sobre uma fatura paga",
+     "situacao": "presente",
+     "prova": "lib/charge-check.ts:81 (decideCharge); tests/charge-check.test.ts (PR #1347; nada a chama ainda)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Unidade 5 parte 2: leitura das faturas pagas das últimas 48 horas, com teto e cursor",
+     "situacao": "presente",
+     "prova": "lib/charge-check-read.ts:175 e :310; tests/charge-check-read.test.ts (PR #1368; desligado)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Unidade 5 parte 3: rodada diária (cron) só leitura com decisão guardada e relatório; registro do preço vendido por assinatura",
+     "situacao": "prevista",
+     "prova": "queue.md:20906 'Liberado ... depende de um registro que ainda não existe: o preço por que cada assinatura foi vendida'; nenhuma rota/cron chama lib/charge-check (busca em app/lib)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Unidade 6: devolução automática com idempotência e e-mail honesto; autorização prévia do criador nos Termos para vendas das lojas",
+     "situacao": "prevista",
+     "prova": "Não construída",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Unidade 7: Termos, Reembolsos, Privacidade e relatório mensal MR (465) com as contagens",
+     "situacao": "prevista",
+     "prova": "Não construída",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Complemento 01h03 (a)–(d): compra repetida 'You already have this', preço digitado errado, devolução quando o criador não entrega, página 'não reconheço esta cobrança'",
+     "situacao": "prevista",
+     "prova": "Gravados em 02/11/2026 (PR #1671); nenhuma implementação achada (busca por 'You already have this' sem resultado); (d) ligada a 624 [SZ8](49) e 607 [WP6]",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Complemento 01h06 (e)–(h): regra única de devoluções, troca do destino de recebimento com espera, conferência das faturas dos fornecedores, calendário de obrigações da LLC",
+     "situacao": "prevista",
+     "prova": "Gravados em 02/11/2026 (PR #1673); nada construído sob este item; há trabalho relacionado em outros itens (232 [CA1] unidade 6 #1408, 305 [SY1] #1498) e um PR aberto 'Compare bounded supplier invoice evidence' (#2636) que não cita o NC1",
+     "onde_deveria_estar": ""
+    }
+   ],
+   "complemento": ""
+  },
+  {
+   "n": 571,
+   "etiqueta": "VS1",
+   "estado": "em andamento",
+   "prova_do_estado": "queue.md:20984 \"Estado: em andamento pelo Claude. Unidade 1 (nova página inicial ...) incorporada pelo PR #1334 ... Próximas unidades: 2) /signin e /pricing ...; 3) estúdio\"; queue.md:252 (AV6: o Claude 1 fica com 571 [VS1]); decisão do dono de 01/11/2026 15h16 (estúdio primeiro, uma tela por vez com aprovação por amostra). Observação: a unidade 2 (/signin e /pricing no visual da manhã) já foi incorporada pelo PR #1457 (merge 61c3d315842cb1fc601e6f4dcb6240465b1f3a44, 31/10/2026 14h45 Fortaleza), mas a linha de estado ainda a lista como próxima e diz que /signin e /pricing estão 'escuro/roxo'; como o estado continua 'em andamento' e o item não está inteiro, não preenchi correcao_estado.",
+   "linha_estado": "",
+   "correcao_estado": "Linha \"Estado atual\" acrescentada: a unidade 2 (/signin e /pricing) foi incorporada no PR #1457, commit 61c3d315842cb1fc601e6f4dcb6240465b1f3a44, 31/10/2026 14h45 Fortaleza; o item segue em andamento.",
+   "pedidos": [
+    {
+     "o_que": "Unidade 1: nova página inicial, com cartões dos planos e chave mensal/anual levados para /pricing#plans",
+     "situacao": "presente",
+     "prova": "app/page.tsx:194 (link /pricing#plans); app/pricing/page.tsx:46 (section id=plans); PR #1334, merge 175b3a26bb17874d7d180f8d435b528fe1c82e2c",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Endereço digitado na página inicial levado preenchido até o passo do endereço (WCAG 3.3.7)",
+     "situacao": "presente",
+     "prova": "components/home-claim.tsx:71; app/signin/page.tsx:202, :267, :295",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Unidade 2: /signin e /pricing no mesmo visual claro da página inicial",
+     "situacao": "presente",
+     "prova": "app/signin/layout.tsx:4,10 (MORNING_FONTS, hm-page); app/pricing/page.tsx:9-10,27 (MorningHeader); PR #1457, merge 61c3d315842cb1fc601e6f4dcb6240465b1f3a44, 31/10/2026 14h45 Fortaleza",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Texto confuso corrigido: um botão principal no topo e um no fim, sem termos internos ('isolated fictional fixtures'), sem 'See the live demo' repetido, sem 'Explore all 14 tools'",
+     "situacao": "presente",
+     "prova": "grep sem resultados em app/page.tsx e components/home-*.tsx; app/page.tsx:112 (HeroClaim) e :240 (ClaimForm final)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Menu com só Pricing, Log in e o início",
+     "situacao": "presente",
+     "prova": "components/morning-header.tsx:25, :45-46",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Liderar pelo teste: 'Free to set up. When plans open: 14 days free, then $69 a month.', botão 'Start free', só o plano Store com Studio e Scale num link",
+     "situacao": "presente",
+     "prova": "app/page.tsx:57-59 (OFFER_LINE de lib/plan.ts e lib/opening.ts), :194, :209",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Seção do programa de indicação mostrada só enquanto INVITE_PROGRAM_OPEN for true",
+     "situacao": "presente",
+     "prova": "app/page.tsx:184",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Unidade 3: estúdio (barra lateral fixa com ícones, Today como primeira tela, números em cartões coloridos, cada configuração na sua página, boas-vindas com metas e funis prontos, redes sociais)",
+     "situacao": "prevista",
+     "prova": "Próxima unidade registrada na linha de estado (queue.md:20984) e decisão do dono de 01/11/2026 15h16 (estúdio primeiro, tela por tela com aprovação). Não há barra lateral em components/ (ls sem sidebar); Today existe por 484 [IT1] (components/today-panel.tsx, app/studio/page.tsx:146)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Sistema visual único (paleta champanhe, vinho e dourado sem preto, tipografia serifada nos títulos, ícones, movimento desligável, escuro e forced-colors) no estúdio e no site",
+     "situacao": "prevista",
+     "prova": "Decisões do dono de 01/11/2026 10h18 e 10h37-10h43 registradas no item; implementação depende da aprovação por amostra, tela por tela (decisão 15h16)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Site público na forma e organização do Kajabi, título 'Build the business your passion deserves.', títulos de seção curtos, 'Ten tools that work as one.' só depois das quatro condições",
+     "situacao": "prevista",
+     "prova": "Decisões de 01/11/2026 10h02-12h35 no item; decisão 15h16 põe o site público depois do estúdio; app/page.tsx:34 ainda com o título da unidade 1, coerente com o adiamento",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Assistente de boas-vindas em 3 etapas (objetivo, modelo pronto, começar), miniaturas reais nos cartões de modelo, tela de criação com progresso real, mapa do funil, visita guiada, abas do funil e cartão de início, passo opcional de redes, etapa de plano",
+     "situacao": "prevista",
+     "prova": "Regra do dono de 30/10/2026 22h10: toda tela copiada de concorrente só é construída depois de prévia aprovada pelo dono; parte da unidade 3 (estúdio). A etapa de plano só quando PLANS_ON_SALE for true",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Conferência ao digitar se o endereço marktmorgen.com/@ está livre, com teto de consultas, em texto e região ao vivo",
+     "situacao": "prevista",
+     "prova": "Tela copiada do Stan, sujeita à aprovação da prévia (regra 22h10); app/page.tsx:234 ainda diz 'Pick your name today.', como o item manda até a construção",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Acrescentar Apple Podcasts, Etsy e Vimeo em lib/store-socials.ts, pelas mesmas regras, com teste para cada um (o Marktmorgen passa a 22)",
+     "situacao": "falta",
+     "prova": "lib/store-socials.ts:16-35 e :41-61 ainda com 19 redes (sem apple podcasts, etsy, vimeo; esses domínios só aparecem nos ícones de link genérico, :165-169); nenhum PR aberto ou item da fila carrega (busca 'Vimeo Etsy' e 'socials' nos PRs; grep na fila)",
+     "onde_deveria_estar": "lib/store-socials.ts (SocialNetwork, SOCIALS) e tests/store-socials.test.ts"
+    },
+    {
+     "o_que": "Defeito 1 do editor de redes: endereço https de site próprio colado com a rede padrão não passa a 'Website' sozinho, embora o texto prometa 'the network is picked for you'",
+     "situacao": "falta",
+     "prova": "lib/store-socials.ts:128-142 (networkFor devolve null para host desconhecido); components/socials-editor.tsx:101-104 e :189 (texto inalterado); sem PR que o corrija",
+     "onde_deveria_estar": "lib/store-socials.ts (networkFor) ou o texto de components/socials-editor.tsx:189, com teste"
+    },
+    {
+     "o_que": "Defeito 2: gramática 'This is not a ${name} handle' gera 'a Instagram'",
+     "situacao": "falta",
+     "prova": "components/socials-editor.tsx:49 inalterado",
+     "onde_deveria_estar": "components/socials-editor.tsx:49, com teste"
+    },
+    {
+     "o_que": "Defeito 3: a frase de erro quebra palavra no meio da linha (quebra forçada)",
+     "situacao": "falta",
+     "prova": "components/socials-editor.tsx:243 ainda usa a classe break-all no parágrafo da nota/erro",
+     "onde_deveria_estar": "components/socials-editor.tsx:243 (trocar a quebra forçada no texto do erro), com teste"
+    },
+    {
+     "o_que": "Defeito: botão 'See the journey and what you need' sai para fora do cartão em 'Start with a campaign'; corrigir com teste de largura de 320 px a 1440 px",
+     "situacao": "falta",
+     "prova": "components/funnel-starter-gallery.tsx:50 usa btn btn-sm sem btn-wrap; app/globals.css:723 (.btn white-space: nowrap; só quebra abaixo de 479 px, :820-829); grade passou a lg:grid-cols-3 no 242 [CF5] (cartões mais estreitos); tests/e2e/store-copy.mjs:598-605 mede só a rolagem lateral do documento em 320 e 768 px, não o cartão",
+     "onde_deveria_estar": "components/funnel-starter-gallery.tsx:50 (ou classe btn-wrap) e teste de largura 320–1440 px em tests/e2e/store-copy.mjs"
+    },
+    {
+     "o_que": "Pesquisa visual datada com capturas de tela guardadas em docs/visual-benchmark-2026.md (concorrentes por dentro e por fora, referências de painel, o que copiar e por quê)",
+     "situacao": "falta",
+     "prova": "ls docs: arquivo inexistente; grep 'visual-benchmark' só na linha do próprio item (queue.md:20993); a pesquisa feita está só em texto na fila",
+     "onde_deveria_estar": "docs/visual-benchmark-2026.md"
+    },
+    {
+     "o_que": "Prévias no artefato de desenho aprovadas pelo dono antes de cada tela",
+     "situacao": "fora do escopo",
+     "prova": "Depende de aprovação visual do dono; não verificável no repositório",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Matriz visual e de acessibilidade (Chromium, Firefox, WebKit) passando em cada tela redesenhada",
+     "situacao": "presente",
+     "prova": "tests/e2e/accessibility-public-matrix.mjs e tests/e2e/morning-grounds.mjs alterados no PR #1457",
+     "onde_deveria_estar": ""
+    }
+   ],
+   "complemento": "Complemento de completude (05/11/2026, C1-20261105-1919-C4-1): falta o que este item manda corrigir ou acrescentar já, fora das telas que esperam prévia aprovada: (1) Apple Podcasts, Etsy e Vimeo em lib/store-socials.ts, pelas mesmas regras das outras redes, com um teste para cada um em tests/store-socials.test.ts (hoje SOCIALS tem 19 redes, não 22); (2) os três defeitos do editor de redes vistos em 30/10/2026, 23h00, cada um com teste: um endereço https que não é de rede conhecida passa a \"Website\" sozinho, ou o texto de components/socials-editor.tsx:189 (\"the network is picked for you\") diz exatamente o que é reconhecido (hoje networkFor, em lib/store-socials.ts:127-142, devolve null e o editor, na linha 103, mantém a rede anterior); a frase \"This is not a ${name} handle or a ${name} address\" de components/socials-editor.tsx:49, que sai \"a Instagram\"; e a quebra de palavra forçada (break-all) no texto de erro de components/socials-editor.tsx:243; (3) o botão \"See the journey and what you need\" de components/funnel-starter-gallery.tsx:50, que continua com white-space: nowrap acima de 479 px (app/globals.css:723) e pode sair do cartão, com teste do próprio cartão de 320 px a 1440 px (o teste atual em tests/e2e/store-copy.mjs mede só a rolagem lateral da página); (4) o arquivo docs/visual-benchmark-2026.md com a pesquisa visual datada e as capturas pedidas no passo 1, que não existe (a pesquisa está só em texto na fila)."
+  },
+  {
+   "n": 576,
+   "etiqueta": "FT8",
+   "estado": "não iniciado",
+   "prova_do_estado": "queue.md:363 \"572 [FT4] ... 576 [FT8], na fila, Grupo B, logo depois de 530 [FT3]\"; queue.md:1018 tabela de ordem \"576 [FT8] | B | Dono 30/10/2026, 21h47\"; queue.md:369 ordem vigente do Grupo B inclui 576 [FT8]. Nenhuma linha de estado, reserva, unidade ou PR para FT8 em queue.md, docs/reservations*, docs/agent-inbox.md; busca no GitHub por 'FT8' só acha o #1353 (registro documental na fila). No main, lib/funnel-types.ts não tem tipo de funil de pacote (ids: lead-magnet, training, challenge, launch, book, first-purchase, application, quiz).",
+   "linha_estado": "",
+   "correcao_estado": "",
+   "pedidos": [],
+   "complemento": ""
+  },
+  {
+   "n": 579,
+   "etiqueta": "CV1-dup",
+   "estado": "duplicado",
+   "prova_do_estado": "queue.md:21494 \"## CV — Custo da visita menor... — DUPLICADO de 313 [CV1]\"; queue.md:21498 \"579. [CV1-dup] **Duplicado do item 313 [CV1]; não executar** (Pedidos repetidos, passo 6; registrado por engano do Claude em 31/10/2026 16h53 e corrigido em seguida)\". O item válido é 313 [CV1] (queue.md:9034 \"313. [CV1] Visitas às lojas mais baratas...\"; prioridade do dono em queue.md:255). Duplicado não recebe complemento.",
+   "linha_estado": "",
+   "correcao_estado": "",
+   "pedidos": [],
+   "complemento": ""
+  },
+  {
+   "n": 601,
+   "etiqueta": "KB22",
+   "estado": "não iniciado",
+   "prova_do_estado": "queue.md:21583 (seção KB, itens 580–601) \"Estado inicial: na fila.\"; queue.md:21655 \"601. [KB22] Conferir e construir o que faltar\" sem linha de estado própria. Nenhuma reserva, unidade ou PR do KB22 em queue.md, docs/reservations*, docs/agent-inbox.md; busca no GitHub por 'KB22' só acha o #1580 (registro documental). Complementos posteriores que citam o 601 continuam sem construção: queue.md:21952 (item 21 de outra auditoria, documentos imprimíveis do pedido físico) e queue.md:22047 (item 12, assinatura 'tudo incluído', \"Estado (C3-23, 03/11/2026): ... espera o #1502 e a faixa do Codex, sem construir antes\"). A linha 'Estado: em andamento pela Claude 2' dentro do bloco de items/601.md pertence ao EL3, não a este item.",
+   "linha_estado": "",
+   "correcao_estado": "",
+   "pedidos": [],
+   "complemento": ""
+  },
+  {
+   "n": 616,
+   "etiqueta": "WP15",
+   "estado": "em andamento",
+   "prova_do_estado": "O item não tem linha de estado própria; vale a da seção WP (queue.md:21820, 'Estado inicial: na fila.'). A fila não registra nenhum andamento do 616, mas o GitHub prova o merge do subponto (8) pelo PR #1832 ('616 [WP15](8): put a creator's discount code on one member's membership from the studio', ramo claude3/wp15-member-discount). Os subpontos (24) e (25) passaram ao 631 [AA1] (queue.md:351, :22101), e o (6) virou o 642 [WG2] (queue.md:22307).",
+   "linha_estado": "Estado inicial: na fila. (linha da seção WP, que vale para todos os itens dela; por isso a correção entra como linha \"Estado atual\" logo abaixo do título do 616)",
+   "correcao_estado": "PR #1832, commit e24e194e15bc117a1deaf5077eddab844248e952, 02/11/2026 23h50 Fortaleza: subponto (8) incorporado; o item fica em andamento, com os demais subpontos na fila ((6) agora no 642 [WG2]; (24) entregue dentro do 631 [AA1] unidade 6, PR #1753, commit 79f0756a7e7a6b4a216baccd3ab35e44e5263d72, 02/11/2026 17h32 Fortaleza; (25) no 631 [AA1]).",
+   "pedidos": [
+    {
+     "o_que": "(1) Imagem e vídeo de compartilhamento enviados pelo criador por página",
+     "situacao": "prevista",
+     "prova": "Subponto do próprio item, guardado no fim do Grupo B (queue.md:21869), sem código no main; busca 'og:video|shareImage' sem resultado",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(2) Produto ou preço protegido por senha",
+     "situacao": "prevista",
+     "prova": "Subponto do próprio item, guardado no fim do Grupo B (queue.md:21869), sem código no main; busca 'password-protected|productPassword' só acha lib/pdf-stamp.ts",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(3) Nome interno do produto, visível só no estúdio",
+     "situacao": "prevista",
+     "prova": "Subponto do próprio item, guardado no fim do Grupo B (queue.md:21869), sem código no main; busca 'internalName|internal name' sem resultado em produto",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(4) Limite real de vagas num produto grátis, sem escassez falsa",
+     "situacao": "prevista",
+     "prova": "Subponto do próprio item, guardado no fim do Grupo B (queue.md:21869), sem código no main",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(5) E-mail e nome preenchidos por token de uso único vindo dos e-mails da loja",
+     "situacao": "prevista",
+     "prova": "Subponto do próprio item, guardado no fim do Grupo B (queue.md:21869), sem código no main; há complemento em outro item (queue.md:22061)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(6) Arquivar uma opção de preço mantendo quem já assina",
+     "situacao": "prevista",
+     "prova": "Virou unidade própria no 642 [WG2] (queue.md:22307: 'hoje só existe como subitem de 616 [WP15] (6); vira unidade própria'), na fila",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(7) Escolher por produto quais formas de pagamento aparecem",
+     "situacao": "prevista",
+     "prova": "Subponto do próprio item, guardado no fim do Grupo B (queue.md:21869), sem código no main; lib/payment-methods.ts só lê e mostra as formas ligadas no Stripe; não escolhe por produto",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(8) Aplicar um cupom a uma assinatura existente pelo estúdio",
+     "situacao": "presente",
+     "prova": "lib/member-discount.ts:1-14; app/api/store/member-discount/route.ts; components/member-discount.tsx; app/studio/memberships/page.tsx:9, :529-530; tests/member-discount.test.ts; lib/agent-coverage.ts:142; PR #1832",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(9) Reembolso automático opcional abaixo de um valor, mostrado na política de reembolso",
+     "situacao": "prevista",
+     "prova": "Subponto do próprio item, guardado no fim do Grupo B (queue.md:21869), sem código no main",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(10) Sinal para reservar agendamento, com o restante cobrado depois",
+     "situacao": "prevista",
+     "prova": "Subponto do próprio item, guardado no fim do Grupo B (queue.md:21869), sem código no main; lib/call-deposit.ts (520 [LB1]) cobra só o sinal de atendimento presencial, com o restante pago em pessoa, não cobrado depois",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(11) Posts pagos avulsos na comunidade e na newsletter",
+     "situacao": "prevista",
+     "prova": "Subponto do próprio item, guardado no fim do Grupo B (queue.md:21869), sem código no main",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(12) Mensagens em grupo pequenas na comunidade, com moderação e limite",
+     "situacao": "prevista",
+     "prova": "Subponto do próprio item, guardado no fim do Grupo B (queue.md:21869), sem código no main",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(13) Mural de sugestões dos membros com votos",
+     "situacao": "prevista",
+     "prova": "Subponto do próprio item, guardado no fim do Grupo B (queue.md:21869), sem código no main",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(14) Painel inicial com blocos reordenáveis, com alternativa por botões",
+     "situacao": "prevista",
+     "prova": "Subponto do próprio item, guardado no fim do Grupo B (queue.md:21869), sem código no main",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(15) Transferir a loja para outro dono com troca da conta Stripe",
+     "situacao": "prevista",
+     "prova": "Subponto do próprio item, guardado no fim do Grupo B (queue.md:21869), sem código no main; busca 'storeTransfer|transferStore' sem resultado",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(16) Texto do botão de compra escolhido dentro de opções que digam o que faz",
+     "situacao": "prevista",
+     "prova": "Subponto do próprio item, guardado no fim do Grupo B (queue.md:21869), sem código no main; existe texto livre só no botão incorporável (lib/embed-rules.ts:94) e nos blocos de página, não a escolha por opções no botão de compra do produto",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(17) 'Listen': áudio dos posts do blog e da newsletter, com teto de custo",
+     "situacao": "prevista",
+     "prova": "Subponto do próprio item, guardado no fim do Grupo B (queue.md:21869), sem código no main",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(18) Sincronização de pedidos com a Shopify (complemento de 513–519)",
+     "situacao": "prevista",
+     "prova": "Subponto do próprio item, guardado no fim do Grupo B (queue.md:21869), sem código no main",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(19) Integrações nativas com HubSpot e GoHighLevel",
+     "situacao": "prevista",
+     "prova": "Subponto do próprio item, guardado no fim do Grupo B (queue.md:21869), sem código no main; HubSpot só aparece na importação de sequências (lib/sequence-import.ts)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(20) Integrações com Hyros, Triple Whale e Cometly pelo envio de conversões",
+     "situacao": "prevista",
+     "prova": "Subponto do próprio item, guardado no fim do Grupo B (queue.md:21869), sem código no main",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(21) Versão fixa da API e chaves de idempotência nas escritas, quando a API crescer",
+     "situacao": "prevista",
+     "prova": "Subponto do próprio item, guardado no fim do Grupo B (queue.md:21869), sem código no main; há complemento em outro item (queue.md:22081)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(22) 'Entre com Marktmorgen' (OAuth) para aplicativos de terceiros, quando houver aplicativos",
+     "situacao": "prevista",
+     "prova": "Subponto do próprio item, guardado no fim do Grupo B (queue.md:21869), sem código no main",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(23) Elementos de chat incorporáveis em sites de terceiros",
+     "situacao": "prevista",
+     "prova": "Subponto do próprio item, guardado no fim do Grupo B (queue.md:21869), sem código no main",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(24) Linha de comando própria sobre a mesma API e o mesmo MCP",
+     "situacao": "presente",
+     "prova": "Passou ao 631 [AA1] (queue.md:351); cli/marktmorgen.mjs, cli/package.json, cli/README.md; PR #1753 ('631 [AA1] unit 6: command line over the MCP server')",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(25) Listagem do conector nos diretórios de plugins do Claude, do Cursor e do Grok",
+     "situacao": "fora do escopo",
+     "prova": "Passou ao 631 [AA1] (queue.md:351); cada publicação depende de conta e termos de terceiros, do dono",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(26) Cores de nome por nível na comunidade, com contraste de 7:1",
+     "situacao": "prevista",
+     "prova": "Subponto do próprio item, guardado no fim do Grupo B (queue.md:21869), sem código no main",
+     "onde_deveria_estar": ""
+    }
+   ],
+   "complemento": ""
+  }
+ ]
+}

@@ -165,9 +165,9 @@ test('every file in tests/run.mjs runs under the limit, generous over the slowes
   const limit = (runner as Record<string, unknown>).TEST_FILE_TIMEOUT_MS;
   assert.equal(typeof limit, 'number');
   // Slowest file in two full CI verify logs (#2790 job 127891038519, #2721 job 127943351314): contract-admission-ack,
-  // 53.9 s and 100.8 s. The verify job itself is cancelled at 50 minutes (.github/workflows/product-checks.yml).
+  // 53.9 s and 100.8 s. Each behavior-regressions share is cancelled at 30 minutes (.github/workflows/product-checks.yml).
   assert.ok((limit as number) >= 5 * 100_800, 'at least five times the slowest file measured');
-  assert.ok((limit as number) <= 15 * 60_000, 'well under the job\'s 50 minutes, so a stuck file is named, not cancelled');
+  assert.ok((limit as number) <= 15 * 60_000, 'well under the job\'s 30 minutes, so a stuck file is named, not cancelled');
   const run = readFileSync('tests/run.mjs', 'utf8');
   // Rule 23 (C4-20261106-2600-C5-152): the compilation of each file is under the same limit, and a timeout's line says
   // whether the next compilation had settled; the per-file limit itself is unchanged.
@@ -251,10 +251,13 @@ const running = (pid: number) => {
   try { process.kill(pid, 0); } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false; throw error; }
   try { return !/^State:\s*Z/m.test(readFileSync(`/proc/${pid}/status`, 'utf8')); } catch { return true; }
 };
-async function gone(pid: number, ms = 3000): Promise<boolean> {
+async function gone(pid: number, ms = 3000, isRunning: (pid: number) => boolean = running): Promise<boolean> {
   const until = Date.now() + ms;
-  while (running(pid) && Date.now() < until) await new Promise(done => setTimeout(done, 10));
-  return !running(pid);
+  while (Date.now() < until) {
+    if (!isRunning(pid)) return true;
+    await new Promise(done => setTimeout(done, 10));
+  }
+  return !isRunning(pid);
 }
 
 test('a timed-out file\'s descendants in its process group go with it, a throwing diagnose still counts the failure, and the next file runs', async () => {
@@ -283,6 +286,21 @@ test('a timed-out file\'s descendants in its process group go with it, a throwin
     for (const pid of owned) { try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ } }
     rmSync(directory, {recursive: true, force: true});
   }
+});
+
+test('a confirmed terminal observation is retained instead of probing the numeric PID again', async () => {
+  let observations = 0;
+  assert.equal(await gone(123456, 500, () => {
+    observations += 1;
+    // A confirmed zombie/absent PID can be followed by an unreadable /proc entry or a reused PID.
+    return observations > 1;
+  }), true, 'the original descendant was confirmed gone');
+  assert.equal(observations, 1, 'no second observation can reverse a confirmed terminal state');
+});
+
+test('an unconfirmed live or unreadable process is not reported gone at the deadline', async () => {
+  // running() deliberately returns true when /proc cannot be read. Keep that conservative result.
+  assert.equal(await gone(123456, 0, () => true), false);
 });
 
 test('once the runner has finished, nothing it started holds its output open', async () => {
@@ -342,4 +360,30 @@ test('a timeout says the file\'s process group was ended, and no test file start
   const files = readdirSync('tests').filter(name => name.endsWith('.test.ts') && name !== 'test-runner.test.ts');
   const starting = files.filter(name => /detached\s*:\s*true|\bsetsid\b/.test(readFileSync(join('tests', name), 'utf8')));
   assert.deepEqual(starting, [], 'no test file starts a process in a group of its own');
+});
+
+test('TEST_SHARD deals the sorted files out by position: disjoint shares that together are every file', () => {
+  const {parseShard, shardFiles} = runner as unknown as {
+    parseShard: (spec: string | undefined) => {index: number, total: number} | null,
+    shardFiles: (files: string[], shard: {index: number, total: number} | null) => string[],
+  };
+  assert.equal(parseShard(undefined), null);
+  assert.equal(parseShard(''), null);
+  assert.deepEqual(parseShard('3/4'), {index: 3, total: 4});
+  for (const bad of ['0/4', '5/4', '1/0', '1', '1/4/2', ' 1/4', '1/4 ', 'a/4', '-1/4', '01/4', '1.5/4']) {
+    assert.throws(() => parseShard(bad), /TEST_SHARD/, bad);
+  }
+  const files = readdirSync('tests').filter(name => name.endsWith('.test.ts')).sort();
+  assert.deepEqual(shardFiles(files, null), files);
+  for (const total of [1, 2, 3, 4, 7]) {
+    const shares = Array.from({length: total}, (_, index) => shardFiles(files, {index: index + 1, total}));
+    assert.deepEqual(shares.flat().sort(), files, `the ${total} shares hold every file once`);
+    assert.equal(new Set(shares.flat()).size, files.length);
+    for (const share of shares) assert.deepEqual(share, [...share].sort(), 'each share keeps the sorted order');
+  }
+  assert.deepEqual(shardFiles(['a', 'b', 'c', 'd', 'e'], {index: 2, total: 2}), ['b', 'd']);
+  // The CI split (.github/workflows/product-checks.yml) is four shares of tests/run.mjs.
+  const workflow = readFileSync('.github/workflows/product-checks.yml', 'utf8');
+  assert.match(workflow, /\n {8}shard: \[1, 2, 3, 4\]\n/);
+  assert.match(workflow, /\n {6}TEST_SHARD: \$\{\{ matrix\.shard \}\}\/4\n/);
 });

@@ -49,7 +49,15 @@ export async function GET(request: NextRequest) {
     }
     const version = /^\d$/.test(n) ? versions[Number(n)] : undefined;
     if (!version) return Response.json({ ok: false, error: "unknown" }, { status: 404 });
-    const kept = new Set(picturePaths(await readPage(store.statsId, id)));
+    // The pictures the page shows now decide which of the version's are kept: never from an empty page that was not.
+    let current;
+    try {
+      current = await readPage(store.statsId, id);
+    } catch (error) {
+      console.error("reading a page before bringing back a version failed", error);
+      return Response.json({ ok: false, error: "page_unread" }, { status: 503, headers });
+    }
+    const kept = new Set(picturePaths(current));
     const { page, dropped } = keepPictures(version.page, kept);
     return Response.json({ ok: true, at: version.at, page, dropped }, { headers });
   } catch (error) {

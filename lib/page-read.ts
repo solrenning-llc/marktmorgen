@@ -391,9 +391,9 @@ export async function admitReading(pass: ReadPass, now = Date.now()): Promise<bo
   // and this server remembers it.
   noteSpent(pass.nonce, until);
   if (status === 0) return false;
-  // Only a reading the admission took (INCR gives each count up to the ceiling once): a refusal at the ceiling, put back
-  // in the script, never marks again.
-  if (n === pass.cap) await redisPipeline([["SET", `${key}:over`, String(pass.cap), "EX", keep]]).catch((error: unknown) => console.error("marking a window's readings partial failed", error));
+  // Only the reading counted at the ceiling marks it (status 1): a token used already answers the count as it is, and
+  // marking again for it would be a write per server it is replayed on.
+  if (status === 1 && n === pass.cap) await redisPipeline([["SET", `${key}:over`, String(pass.cap), "EX", keep]]).catch((error: unknown) => console.error("marking a window's readings partial failed", error));
   return status === 1;
 }
 

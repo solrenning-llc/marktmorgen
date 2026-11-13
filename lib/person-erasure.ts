@@ -150,7 +150,7 @@ export const ERASERS: Eraser[] = [
     },
   },
   // Files they sent for review (750 [CD1]): open uploads given up, records deleted, files deleted with the rest below.
-  { module: "lib/submission-store.ts", run: async (s, files) => forgetSubmissionsPerson(await storeFolder(storeRef(s.store)), s.learner, files) },
+  { module: "lib/submission-store.ts", run: async (s, files) => forgetSubmissionsPerson(await storeFolder(storeRef(s.store)), s.learner, files, undefined, s.store) },
   { module: "lib/certificate.ts", run: (s) => forgetCertificatesPerson(s.courses.map((c) => c.courseId), s.email, s.store) },
   {
     module: "lib/lesson-comments.ts",

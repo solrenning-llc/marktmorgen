@@ -33,7 +33,9 @@
  */
 import { createHash } from "node:crypto";
 import { stampLine } from "@/lib/pdf-stamp-line";
-import { PDFDocument, PDFName, PDFOperator, PDFOperatorNames, StandardFonts, degrees, rgb } from "pdf-lib";
+import { PDFDocument, PDFName, PDFOperator, PDFOperatorNames, degrees, rgb } from "pdf-lib";
+import fontkit from "@pdf-lib/fontkit";
+import { loadFonts } from "@/lib/certificate-pdf";
 import { deleteFile, listFiles, readFileWhole, writeFileWhole } from "@/lib/file-store";
 import { VAULT_PREFIX, isVaultPath, keyName } from "@/lib/vault-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
@@ -95,7 +97,10 @@ function writable(text: string): string {
  */
 export async function stampPdf(bytes: Uint8Array, line: string): Promise<Uint8Array> {
   const doc = await PDFDocument.load(bytes, { updateMetadata: false });
-  const font = await doc.embedFont(StandardFonts.Helvetica);
+  // The project's own Noto Sans, embedded as a subset (PDF/UA, ISO 14289-1 7.21.4.1: every font used to draw is in
+  // the file, an artifact's included), as the receipt and the certificate are (review of #3761, Claude 3 nuvem P).
+  doc.registerFontkit(fontkit);
+  const font = await doc.embedFont((await loadFonts()).sans, { subset: true });
   const text = writable(line);
   const margin = 14;
   for (const page of doc.getPages()) {

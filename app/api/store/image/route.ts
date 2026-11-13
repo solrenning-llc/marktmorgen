@@ -14,6 +14,7 @@ import { guardStoreWrite, text } from "@/lib/store-request";
 import { readListing } from "@/lib/catalog";
 import { refusedJson } from "@/lib/studio-route";
 import { lockedFor } from "@/lib/two-step";
+import { heldRefusal } from "@/lib/child-safety";
 import {
   IMAGE_CONTENT_TYPES,
   MAX_ALT_LENGTH,
@@ -57,6 +58,11 @@ export async function POST(request: NextRequest) {
   const action = text(body.action, 10);
   const id = text(body.id, 40);
   if (!ACTIONS.has(action) || !id) return Response.json({ ok: false, error: "invalid" }, { status: 400 });
+
+  // A product kept for a child-safety report (lib/child-safety.ts) keeps its picture as it is: not replaced, removed,
+  // described again or drawn another way while the hold lasts; a hold that cannot be read refuses too.
+  const held = await heldRefusal(guarded.store, id);
+  if (held) return held;
 
   const alt = text(body.alt, MAX_ALT_LENGTH * 2).replace(/\s+/g, " ").trim().slice(0, MAX_ALT_LENGTH);
 

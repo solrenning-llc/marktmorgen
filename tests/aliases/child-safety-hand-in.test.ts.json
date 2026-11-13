@@ -1,0 +1,4 @@
+{
+  "@/lib/blob": "buyer-actions-blob.ts",
+  "next/headers": "security/next-headers.ts"
+}

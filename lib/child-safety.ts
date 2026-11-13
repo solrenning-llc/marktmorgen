@@ -18,25 +18,114 @@
  * forwards or describes the content.
  *
  *   nl:csa:held:<store>:<YYYY-MM-DD>   set      products held automatically that day, 2 days
+ *   nl:csa:keep:<store>:<product>      "1"      preservation hold, 400 days (unit 2)
+ *
+ * Unit 2: the hold also marks the product for KEEP_SECONDS, before it is
+ * taken off, and while the mark is there no studio route removes, edits,
+ * publishes it or changes or deletes any of its files, options, picture,
+ * page, episodes, lessons, lesson captions, license keys, bundle list,
+ * waitlist or buyers' reviews, and no bundle takes it in (heldRefusal,
+ * heldRefusalAmong). Nor is it sold through another product: a bundle
+ * holding it is not offered or sold, and a checkout box offering it, or a
+ * bundle holding it, is not shown or charged (lib/child-safety-holds.ts,
+ * heldInSale): the law asks for what was reported to
+ * be kept for a year from the report (18 U.S.C. § 2258A(h), as the REPORT Act
+ * amended it), and a creator could otherwise delete it from the studio.
  */
 import { createHash } from "node:crypto";
 import { redisPipeline } from "@/lib/redis";
 import { repliesFor } from "@/lib/redis-reply";
 import { NIMBUS_FROM, type SendOutcome, sendEmailOutcome } from "@/lib/email";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
-import { type Store, setProductHidden, storeRef } from "@/lib/store";
+import { type Store, ensureStatsId, setProductHidden, storeRef } from "@/lib/store";
 import { productIdFromAddress, readListingExactly } from "@/lib/catalog";
 import { handleIn, type ReportKind } from "@/lib/takedown-rules";
+import { type Listing, productIdFor, readListings } from "@/lib/catalog";
+import { heldIdsAmong, isHeldForReport, keepKey, touchesHeld } from "@/lib/child-safety-holds";
+import { activeBumps, bumpTargets } from "@/lib/product-extras";
 
 /** Automatic holds a store takes from child-safety reports in one UTC day; past them the owner decides. */
 export const CHILD_SAFETY_HOLDS_PER_DAY = 3;
 /** The time the TAKE IT DOWN Act gives to remove an intimate image once a valid request is received. */
 export const TAKE_IT_DOWN_HOURS = 48;
 const COUNT_SECONDS = 2 * 86_400;
+/** How long a reported product is kept from removal, editing and publishing: a year from the report and a margin. */
+export const KEEP_SECONDS = 400 * 86_400;
 
 export type HoldOutcome = "held" | "no_product" | "not_held" | "capped" | "unknown" | "failed";
 
-const countKey = (store: Pick<Store, "statsId" | "handle">, day: string) => `nl:csa:held:${store.statsId || `h:${store.handle}`}:${day}`;
+const storeTag = (store: Pick<Store, "statsId" | "handle">) => store.statsId || `h:${store.handle}`;
+const countKey = (store: Pick<Store, "statsId" | "handle">, day: string) => `nl:csa:held:${storeTag(store)}:${day}`;
+export { isHeldForReport } from "@/lib/child-safety-holds";
+
+/**
+ * The answer a studio route gives instead of changing or deleting anything of
+ * a product kept for a report, or null to go on: 409 `on_hold` while it is
+ * held, 503 when the hold cannot be read, never the change. The id may name
+ * the product or one of its price options, whose product is the one held; an
+ * id the store does not have reads nothing, since nothing of it can change.
+ */
+export async function heldRefusal(store: Store, id: string): Promise<Response | null> {
+  const productId = productIdFor(store, id);
+  if (!productId) return null;
+  try {
+    if (await isHeldForReport(store, productId)) return Response.json({ ok: false, error: "on_hold" }, { status: 409 });
+    return null;
+  } catch (error) {
+    console.error("a preservation hold could not be read", error instanceof Error ? error.message : "unknown");
+    return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+  }
+}
+
+/**
+ * The same answer for a change that names several products at once, such as
+ * the list of a bundle: 409 `on_hold` when any of them is held, 503 when any
+ * hold cannot be read, null to go on. One read for all of them.
+ */
+export async function heldRefusalAmong(store: Store, ids: readonly string[]): Promise<Response | null> {
+  const productIds = [...new Set(ids.map((id) => productIdFor(store, id)).filter((id): id is string => id !== null))];
+  if (productIds.length === 0) return null;
+  try {
+    const held = (await heldIdsAmong(store, productIds)).size > 0;
+    return held ? Response.json({ ok: false, error: "on_hold" }, { status: 409 }) : null;
+  } catch (error) {
+    console.error("a preservation hold could not be read", error instanceof Error ? error.message : "unknown");
+    return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+  }
+}
+
+/**
+ * Whether a checkout for this product would hand over a product kept for a
+ * report, read by app/api/store/checkout/route.ts before the checkout is built
+ * (lib/store-checkout.ts writes a bundle's list and the ticked boxes onto the
+ * order as they stand): "held" when the product itself carries the keep mark
+ * (its hidden write may not have landed: holdReported writes the mark first,
+ * Claude 6's MEDIUM on #3471), "bundle" when the product is a bundle holding one,
+ * "box" when a ticked box's product is held or is a bundle holding one,
+ * "unavailable" when a hold cannot be read, null to go on. `bumps` is what the
+ * form sent: the ticked boxes' product ids, or "yes" for the first box shown.
+ * One read of the boxes' products, only when one is ticked, and one of holds,
+ * always (the product's own mark at least).
+ */
+export async function heldInSale(store: Store, product: Listing, bumps: readonly string[]): Promise<"held" | "bundle" | "box" | "unavailable" | null> {
+  try {
+    const inBundle = product.bundle ?? [];
+    let ticked: Listing[] = [];
+    if (bumps.length > 0 && product.bumps.length > 0) {
+      const shown = activeBumps(await readListings(store, bumpTargets(product)), product);
+      ticked = shown.filter((offer, at) => bumps.includes(offer.target.id) || (at === 0 && bumps.includes("yes"))).map((offer) => offer.target);
+    }
+    const asked = [...new Set([product.id, ...inBundle, ...ticked.flatMap((target) => [target.id, ...(target.bundle ?? [])])])];
+    const held = await heldIdsAmong(store, asked);
+    if (held.has(product.id)) return "held";
+    if (inBundle.some((id) => held.has(id))) return "bundle";
+    if (ticked.some((target) => touchesHeld(target, held))) return "box";
+    return null;
+  } catch (error) {
+    console.error("a preservation hold could not be read", error instanceof Error ? error.message : "unknown");
+    return "unavailable";
+  }
+}
 
 /**
  * Takes the product a child-safety report points at off the store, without
@@ -71,6 +160,13 @@ export async function holdReported(report: { kind: ReportKind; url: string }, st
       if (added === 1) await redisPipeline([["SREM", key, product.id]]).catch(() => console.error("a capped child-safety hold could not be taken out of the day's count"));
       return "capped";
     }
+    // The hold is keyed by the store's list id (lib/child-safety-holds.ts): an old store without one gets it first,
+    // so the key never moves to another one later (Claude 3's LEVE 3 on #3471). No list id given is unknown.
+    const keyed = store.statsId ? store : await ensureStatsId(storeRef(store));
+    if (!keyed?.statsId) return "unknown";
+    // Kept before it is taken off: a creator who acts in between can still not remove or change it.
+    const kept = repliesFor(await redisPipeline([["SET", keepKey(keyed, product.id), "1", "EX", KEEP_SECONDS]]), 1);
+    if (kept?.[0] !== "OK") return "unknown";
     const done = await setProductHidden(storeRef(store), product.id, true);
     return done.ok ? "held" : done.reason === "unknown" ? "unknown" : "failed";
   } catch (error) {
@@ -80,7 +176,7 @@ export async function holdReported(report: { kind: ReportKind; url: string }, st
 }
 
 const WHAT_HAPPENED: Record<HoldOutcome, string> = {
-  held: "The product it points at was taken off the store at once (unpublished), so visitors can no longer see or buy it. Nothing was deleted: its files and records are kept as they are. People who bought it before may still reach its files: switching that off is not automatic yet.",
+  held: "The product it points at was taken off the store at once (unpublished), so visitors can no longer see or buy it. Nothing was deleted: its files and records are kept as they are. For 400 days the creator cannot remove it, change it or publish it again, nor replace or delete its files, price options, picture, page, podcast episodes, course lessons, lesson captions, license keys, bundle list, waitlist, pre-orders, call setup or package, offer after paying, description or buyers' reviews, from the studio or the AI agent, and it goes into no bundle. A bundle that already held it is not sold, and a checkout box that offered it, or such a bundle, is not shown or charged. People who bought it before may still reach its files: switching that off is not automatic yet. Closing the store, or its plan ending, still deletes it, and so does erasing the creator's data: to keep it, suspend the store instead of closing it.",
   no_product: "The address does not name a product of a store, so nothing was taken off automatically. Act on it by hand, as docs/incident-response.md section 8 says.",
   not_held: "Nothing was taken off automatically. Act on it by hand, as docs/incident-response.md section 8 says.",
   capped: `This store already had ${CHILD_SAFETY_HOLDS_PER_DAY} products taken off automatically today, so nothing more was. Act on it by hand, as docs/incident-response.md section 8 says.`,

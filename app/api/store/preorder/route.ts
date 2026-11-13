@@ -3,6 +3,7 @@ import { guardStoreWrite } from "@/lib/store-request";
 import { readListing } from "@/lib/catalog";
 import { preorderViews, setExpectedDay, soonOne } from "@/lib/preorders";
 import { preorderProblem, readExpectedDay } from "@/lib/preorder-rules";
+import { heldRefusal } from "@/lib/child-safety";
 
 /**
  * The studio's pre-order switch (lib/preorders.ts), for a product marked
@@ -23,6 +24,9 @@ export async function POST(request: NextRequest) {
   const product = id ? await readListing(store, id) : null;
   if (!product) return Response.json({ ok: false, error: "unknown" }, { status: 404 });
   if (!store.statsId) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+  // A product kept for a report keeps its pre-orders as they are (lib/child-safety.ts).
+  const held = await heldRefusal(store, product.id);
+  if (held) return held;
 
   try {
     if (body.day === null) {

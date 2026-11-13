@@ -34,6 +34,9 @@ export const MIN_BUNDLE_ITEMS = 2;
 /** The most. Enough for a creator's whole shelf of guides; short enough to read on a phone. */
 export const MAX_BUNDLE_ITEMS = 20;
 
+/** No product held: what a caller that read no hold passes. */
+const NONE_HELD: ReadonlySet<string> = new Set();
+
 /** What a product id may look like: every id this site has ever made fits. */
 const SAFE_ID = /^[A-Za-z0-9_-]{1,64}$/;
 
@@ -132,9 +135,12 @@ export function itemsProblem(items: string[], listings: Listing[], ownerId = "")
 /**
  * What a bundle holds that can be handed over right now, in its order: the
  * products still listed and still whole. What was removed or changed since
- * is left out rather than sold.
+ * is left out rather than sold. `held` names products kept for a child-safety
+ * report (lib/child-safety-holds.ts): a bundle holding one hands over nothing
+ * at all, so it is not sold, rather than sold at its price without it.
  */
-export function deliverableItems(bundle: Pick<Listing, "bundle">, listings: Listing[]): Listing[] {
+export function deliverableItems(bundle: Pick<Listing, "bundle">, listings: Listing[], held: ReadonlySet<string> = NONE_HELD): Listing[] {
+  if ((bundle.bundle ?? []).some((id) => held.has(id))) return [];
   const byId = new Map(listings.map((p) => [p.id, p]));
   return (bundle.bundle ?? []).map((id) => byId.get(id)).filter((p): p is Listing => Boolean(p && canBeInBundle(p)));
 }

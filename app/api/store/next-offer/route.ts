@@ -3,6 +3,7 @@ import { randomBytes } from "node:crypto";
 import { StoreFullError, setProductFunnel } from "@/lib/store";
 import { readListing, readProduct } from "@/lib/catalog";
 import { guardStoreWrite, text } from "@/lib/store-request";
+import { heldRefusalAmong } from "@/lib/child-safety";
 
 /**
  * One press from "What buyers get next" (lib/next-bought.ts): the product its
@@ -24,6 +25,9 @@ export async function POST(request: NextRequest) {
     const store = guarded.store;
     const [owner, offered] = await Promise.all([readProduct(store, from), readListing(store, to)]);
     if (!owner || !offered) return Response.json({ ok: false, error: "unknown" }, { status: 404 });
+    // Neither a product kept for a report nor an offer of one (lib/child-safety.ts): its funnel stays as it is.
+    const held = await heldRefusalAmong(store, [owner.id, offered.id]);
+    if (held) return held;
     if (owner.funnel) return Response.json({ ok: false, error: "has_funnel" }, { status: 409 });
     const step = {
       id: randomBytes(4).toString("hex"),

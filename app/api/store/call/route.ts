@@ -7,6 +7,7 @@ import { usableProviders } from "@/lib/meet-connect";
 import { readTeams, writeTeam } from "@/lib/team-booking";
 import { readCallLengths, shorterRow } from "@/lib/call-lengths";
 import { readProduct } from "@/lib/catalog";
+import { heldRefusal } from "@/lib/child-safety";
 import { toMajor } from "@/lib/money";
 
 /**
@@ -26,6 +27,9 @@ export async function POST(request: NextRequest) {
 
   const id = text(guarded.body.id, 40);
   if (!id) return Response.json({ ok: false, error: "unknown" }, { status: 400 });
+  // A product kept for a report stays the call it was, or not one (lib/child-safety.ts).
+  const held = await heldRefusal(guarded.store, id);
+  if (held) return held;
 
   let setup: CallSetup | null = null;
   if (guarded.body.remove !== true) {

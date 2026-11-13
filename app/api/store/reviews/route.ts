@@ -8,6 +8,7 @@ import { dropReviewPhoto } from "@/lib/review-photo";
 import { MAX_ASK_DAYS, MIN_ASK_DAYS, readAgain } from "@/lib/review-ask";
 import { parseReviewElsewhere } from "@/lib/review-elsewhere";
 import { canWrite } from "@/lib/mail";
+import { heldRefusal } from "@/lib/child-safety";
 
 const PRODUCT_ID = /^[a-z0-9]{6,40}$/;
 
@@ -82,6 +83,10 @@ export async function POST(request: NextRequest) {
     const productId = text(body.product, 40);
     const id = text(body.id, 24);
     if (!PRODUCT_ID.test(productId) || !REVIEW_ID_PATTERN.test(id)) return Response.json({ ok: false, error: "missing" }, { status: 400 });
+    // The reviews of a product held for a child-safety report (lib/child-safety.ts) stay as they are: no photo
+    // deleted, none hidden, no answer written. A hold that cannot be read is not a yes.
+    const held = await heldRefusal(store, productId);
+    if (held) return held;
 
     if (action === "photo") {
       // A buyer's photo is taken off only for one of the review rules, as a review is hidden (567 [GD1] (e)).

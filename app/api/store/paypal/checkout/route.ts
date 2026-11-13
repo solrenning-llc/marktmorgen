@@ -4,6 +4,7 @@ import { linkOrigin, originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { readListings, readProduct } from "@/lib/catalog";
 import { MIN_BUNDLE_ITEMS, deliverableItems } from "@/lib/bundle-rules";
+import { heldIdsAmong } from "@/lib/child-safety-holds";
 import { clientAddress, fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
 import { isComingSoon } from "@/lib/preorders";
 import { countHit } from "@/lib/visit";
@@ -51,9 +52,12 @@ export async function POST(request: NextRequest) {
   const comingSoon = await isComingSoon(store, product.id).catch(() => null);
   if (comingSoon === null) return away(`/@${store.handle}?status=error`);
   if (comingSoon) return away(`/@${store.handle}/p/${product.id}#waitlist`);
-  if (product.bundle && deliverableItems(product, await readListings(store, product.bundle)).length < MIN_BUNDLE_ITEMS) {
-    return away(`/@${store.handle}`);
-  }
+  // Nothing kept for a child-safety report is sold: the product's own mark (its hidden write may not have landed,
+  // Claude 6's MEDIUM on #3471) and, for a bundle, its items'. A hold that cannot be read refuses.
+  const held = await heldIdsAmong(store, [...new Set([product.id, ...(product.bundle ?? [])])]).catch(() => null);
+  if (!held) return away(`/@${store.handle}?status=error`);
+  if (held.has(product.id)) return away(`/@${store.handle}`);
+  if (product.bundle && deliverableItems(product, await readListings(store, product.bundle), held).length < MIN_BUNDLE_ITEMS) return away(`/@${store.handle}`);
   // What the visit carried, as a Stripe checkout carries it: the channel this
   // sale is credited to (lib/visit-channel.ts) and the affiliate who sent the
   // buyer, if one did (lib/affiliates.ts). A lookup that fails never stops the sale.

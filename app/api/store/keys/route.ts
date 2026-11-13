@@ -17,6 +17,7 @@ import {
   setRevoked,
 } from "@/lib/licence-keys";
 import { readListing } from "@/lib/catalog";
+import { heldRefusal } from "@/lib/child-safety";
 
 /**
  * A product's license keys, for the creator who sells it.
@@ -68,6 +69,10 @@ export async function POST(request: NextRequest) {
     const store = await storeForEmail(ref);
     const product = store ? await readListing(store, id) : null;
     if (!store || !product) return Response.json({ ok: false, error: "unknown" }, { status: 404 });
+    // A product held for a child-safety report (lib/child-safety.ts) keeps its keys as they are: none set up,
+    // switched off, added, cleared or revoked. A hold that cannot be read is not a yes.
+    const held = await heldRefusal(store, product.id);
+    if (held) return held;
 
     if (action === "setup") {
       const setup = readKeySetup(body);

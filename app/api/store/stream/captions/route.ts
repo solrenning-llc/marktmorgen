@@ -9,6 +9,7 @@ import { dropCaption, isStreamConfigured } from "@/lib/stream";
 import { addStoreCaption } from "@/lib/store-caption";
 import { readStreamPath } from "@/lib/stream-rules";
 import { autoQuote, requestAutoCaptions } from "@/lib/auto-captions";
+import { heldRefusal } from "@/lib/child-safety";
 
 /** Changes to captions one store may make in an hour: a long course, in several languages, in one sitting. */
 const CHANGES_PER_HOUR = 600;
@@ -51,12 +52,18 @@ export async function POST(request: NextRequest) {
   try {
     const store = await storeForEmail(ref);
     if (!store) return Response.json({ ok: false, error: "none" }, { status: 400 });
-    const courseIds = (await readKind(store, "course")).flatMap((p) => (p.course ? [p.course.id] : []));
-    const courses = await readCourses(courseIds);
-    const found = [...courses.values()].map((course) => findLesson(course, lessonId)).find((hit) => hit !== null);
+    const courseProducts = (await readKind(store, "course")).flatMap((p) => (p.course ? [{ product: p.id, course: p.course.id }] : []));
+    const courses = await readCourses(courseProducts.map((entry) => entry.course));
+    const hit = [...courses.values()].map((course) => ({ course, found: findLesson(course, lessonId) })).find((entry) => entry.found !== null);
+    const found = hit?.found ?? null;
     const pathname = found?.lesson.video?.pathname ?? "";
     const folder = await storeFolder(ref);
     if (readStreamPath(pathname)?.folder !== folder) return Response.json({ ok: false, error: "unknown" }, { status: 404 });
+    // A lesson of a course held for a child-safety report (lib/child-safety.ts) keeps its captions as they are,
+    // and its video is sent to nobody to be captioned. A hold that cannot be read is not a yes.
+    const owner = courseProducts.find((entry) => entry.course === hit?.course.id)?.product ?? "";
+    const held = await heldRefusal(store, owner);
+    if (held) return held;
     const refused = await withinServiceWhy("stream-captions", folder, CHANGES_PER_HOUR, 3600, store);
     if (refused) return serviceRefusedJson(refused, "slow_down");
 

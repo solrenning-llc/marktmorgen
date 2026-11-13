@@ -6,6 +6,7 @@ import { ownsPath } from "@/lib/product-file";
 import { readListing } from "@/lib/catalog";
 import { LockBusyError, withLock } from "@/lib/redis-lock";
 import { UnknownReplyError } from "@/lib/redis-reply";
+import { heldRefusal } from "@/lib/child-safety";
 import { dropPodcast, editPodcast, newPodcastId, readPodcast, savePodcast, type PodcastEdit } from "@/lib/podcast";
 
 /**
@@ -29,6 +30,10 @@ export async function POST(request: NextRequest) {
     if (!store) return fail("none");
     const product = id ? await readListing(store, id) : null;
     if (!product) return fail("unknown", 404);
+    // A product kept for a child-safety report (lib/child-safety.ts) keeps its podcast as it is: no episode added,
+    // changed or removed with its audio while the hold lasts; a hold that cannot be read refuses too.
+    const held = await heldRefusal(store, id);
+    if (held) return held;
 
     if (action === "enable") {
       if (product.podcast) return Response.json({ ok: true, podcastId: product.podcast.id });

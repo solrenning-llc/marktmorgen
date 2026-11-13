@@ -2050,7 +2050,9 @@ async function watchStore(store: Store, statsId: string, config: Config, now = D
     }
     if (!reachedEnd) {
       // More than one run reads: walk on next run from the oldest read, nothing sent and no anchor moved.
-      await redisPipeline([["SET", backKey(statsId), older, "EX", ANCHOR_SECONDS]]);
+      // Read exactly (rule 24): a write that cannot be confirmed throws, and the next run walks from the cursor it had.
+      const kept = repliesFor(await redisPipeline([["SET", backKey(statsId), older, "EX", ANCHOR_SECONDS]]), 1);
+      if (!kept || kept[0] !== "OK") throw new UnknownReplyError("a Stripe read's cursor");
       await settle();
       return handled;
     }
@@ -2072,7 +2074,13 @@ async function watchStore(store: Store, statsId: string, config: Config, now = D
     }
     if (!pages.length) return 0;
     for (const rows of [...pages].reverse()) if (!(await send(rows, true))) break;
-    if (last) await redisPipeline([["SET", anchorKey(statsId), last, "EX", ANCHOR_SECONDS], ["DEL", backKey(statsId)]]);
+    if (last) {
+      // The anchor first, confirmed, and only then the cursor let go of (Codex P on #4362): a refused or unread anchor
+      // write keeps the cursor, so the walk is never left with neither and read again from the newest pages.
+      const anchored = repliesFor(await redisPipeline([["SET", anchorKey(statsId), last, "EX", ANCHOR_SECONDS]]), 1);
+      if (!anchored || anchored[0] !== "OK") throw new UnknownReplyError("a Stripe read's anchor");
+      await redisPipeline([["DEL", backKey(statsId)]]);
+    }
     await settle();
     return handled;
   }

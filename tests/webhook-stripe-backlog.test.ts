@@ -115,6 +115,30 @@ async function main() {
   console.error = log;
   is("every event is still handled once", restarted.total, 1100);
   is("the stale cursor is gone", (await redis.pipeline([["GET", `${key}:back`]]))[0], null);
+
+  part("E: the anchor's write refused when the walk ends: the cursor is kept, never both lost (Codex P on #4362)");
+  key = await setup("backlog-e@example.com", null);
+  const cursor = ids[999];
+  await redis.pipeline([["SET", `${key}:back`, cursor]]);
+  // Upstash answers a refused command inside a pipeline and runs the rest: the anchor's SET refused, anything else in
+  // the same pipeline applied, then the call throws, as lib/redis.ts does on an error reply.
+  const plain = redis.pipeline.bind(redis);
+  let refused = 0;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (commands.some((c) => c[0] === "SET" && c[1] === key)) {
+      refused += 1;
+      const rest = commands.filter((c) => !(c[0] === "SET" && c[1] === key));
+      if (rest.length) await plain(rest);
+      throw new Error("ERR synthetic refusal of the anchor's SET");
+    }
+    return plain(commands);
+  }) as typeof redis.pipeline;
+  console.error = () => {};
+  await watchStripe(Date.now() + 60_000).catch(() => undefined);
+  console.error = log;
+  redis.pipeline = plain;
+  is("the anchor's write was refused (diagnostic)", refused > 0, true);
+  is("the cursor is still there, to walk on from", (await redis.pipeline([["GET", `${key}:back`]]))[0], cursor);
   done();
 }
 main().catch((error) => { console.error(error); process.exit(1); });

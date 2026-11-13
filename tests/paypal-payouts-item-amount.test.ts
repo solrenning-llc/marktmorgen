@@ -6,9 +6,7 @@
  * at all, keeps the line on its way for the next reading; nothing is booked.
  * Synthetic PayPal and Stripe stand-ins only (the reconcile test's fixture).
  */
-import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
-import { connectPayPal, onTheirWay, payWithPayPal, payoutUnknownMonth, settlePayPal } from "@/lib/paypal-payouts";
+import { connectPayPal, payWithPayPal, settlePayPal } from "@/lib/paypal-payouts";
 import { readBook } from "@/lib/affiliates";
 import type { Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
@@ -18,7 +16,6 @@ const STATS = "statsrec01";
 const OPEN = `nl:pp:open:${STATS}`;
 const CLIENT = "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789";
 const SECRET = "EFGHijklMNOPqrstUVWXyz0123456789abcd";
-const DAY = 86_400_000;
 
 /** What the stand-in does with the next POST. */
 type Next = "make" | "make-then-drop" | "drop-before" | "server" | "garbled" | "forget-key";
@@ -29,8 +26,7 @@ const byKey = new Map<string, { status: number; body: unknown }>();
 const bySender = new Map<string, string>();
 let batches = 0;
 /** Stripe's refunds as readBook reads them (review of Codex G on #2681, second GRAVE). */
-let stripeState: "normal" | "down" | "refunded" = "normal";
-let posts = 0;
+const stripeState = "normal" as "normal" | "down" | "refunded";
 /** The receivers of each POST, in order (review of Codex H2 on #2681). */
 let receivers: string[][] = [];
 const items = new Map<string, string>();
@@ -51,7 +47,6 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (url.pathname === "/v1/oauth2/token") return json({ access_token: "A21AAtoken", token_type: "Bearer", scope: "https://uri.paypal.com/payments/payouts", expires_in: 32400 });
   const headers = new Headers(init?.headers);
   if (url.pathname === "/v1/payments/payouts" && init?.method === "POST") {
-    posts += 1;
     const mode = next;
     const key = headers.get("paypal-request-id") ?? "";
     const body = JSON.parse(String(init.body)) as { sender_batch_header: { sender_batch_id: string }; items: { sender_item_id: string; receiver: string; amount: { value: string; currency: string } }[] };
@@ -114,7 +109,6 @@ async function seed(store: Store): Promise<void> {
   bySender.clear();
   items.clear();
   batches = 0;
-  posts = 0;
   receivers = [];
   duplicateLink = true;
   const at = Math.floor(Date.now() / 1000) - 86_400;
@@ -136,27 +130,7 @@ async function fields(): Promise<string[]> {
   return (raw as string[]).map((f) => (f.startsWith("?") ? "?" : f)).sort();
 }
 
-/** Moves every unknown entry's clock back by `ms`, as if that long had passed. */
-async function age(field: "at" | "t", ms: number): Promise<void> {
-  const [raw] = await redis.pipeline([["HGETALL", OPEN]]);
-  const flat = raw as string[];
-  for (let i = 0; i < flat.length; i += 2) {
-    if (!flat[i].startsWith("?")) continue;
-    const entry = JSON.parse(flat[i + 1]) as Record<string, unknown>;
-    if (typeof entry[field] === "number") entry[field] = (entry[field] as number) - ms;
-    await redis.pipeline([["HSET", OPEN, flat[i], JSON.stringify(entry)]]);
-  }
-}
-
 const paidCents = async (store: Store) => (await readBook(store)).rows.reduce((n, r) => n + r.paid, 0);
-const month = () => new Date().toISOString().slice(0, 7);
-const counts = async () => {
-  const [raw] = await redis.pipeline([["HGETALL", `nl:pp:unk:month:${month()}`]]);
-  const flat = (raw ?? []) as string[];
-  const out: Record<string, number> = {};
-  for (let i = 0; i < flat.length; i += 2) out[flat[i]] = Number(flat[i + 1]);
-  return out;
-};
 
 async function main(): Promise<void> {
   process.env.STRIPE_SECRET_KEY = "sk_test_paypal_item_amount_only";

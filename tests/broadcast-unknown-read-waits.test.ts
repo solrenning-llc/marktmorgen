@@ -51,7 +51,7 @@ async function main() {
     part("Redis is well again: the next run sends it, once");
     unwell = false;
     is("sent", (await advance())?.status, "sent");
-    is("both readers got it once", mail.ses.map((m) => m.to).sort(), emails);
+    is("both readers got it once", mail.ses.flatMap((m) => m.to).sort(), emails);
   } finally { redis.pipeline = original; }
   done();
 }

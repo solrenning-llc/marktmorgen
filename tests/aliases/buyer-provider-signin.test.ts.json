@@ -1,0 +1,4 @@
+{
+  "@/lib/apple-signin-policy": "apple-signin-policy-fixture.ts",
+  "@/lib/discord-signin-policy": "discord-signin-policy-fixture.ts"
+}

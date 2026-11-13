@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { isStoreEvent } from "@/lib/ticket-door";
+import { StudioTrail } from "@/components/breadcrumb";
 import { StudioHeader } from "@/components/studio-header";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { TicketCheckIn } from "@/components/ticket-check-in";
@@ -37,7 +38,7 @@ export default async function StudioCheckInPage({ searchParams }: Params) {
       <StudioHeader current={store} role={view.role} stores={view.stores} owned={view.owned} action={{ href: studioPath(store), label: "Back to the studio", short: "Studio" }} />
       <StudioStorePin sid={store.sid}>
         <main id="content" className="container-page max-w-2xl pb-20 pt-10 sm:pt-14">
-          <p className="eyebrow">In-person event</p>
+          <StudioTrail store={store} here="In-person event" />
           <h1 className="t-h2 mt-3">Check people in</h1>
           {open ? (
             <>

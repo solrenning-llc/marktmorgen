@@ -445,6 +445,10 @@ export async function touchStudent(courseId: string, email: string, startSeconds
   const key = studentsKey(courseId);
   const field = emailKey(email);
   const [raw] = await redisPipeline([["HGET", key, field]]);
+  // Null is a student never seen; any other reply than a kept row is unknown (CX-123 rule 24), never "new": written
+  // over, the row would lose when they began (what the drip schedule counts from) and take its room a second time.
+  // The row is what the studio shows, not their access, so the course opens all the same.
+  if (raw !== null && typeof raw !== "string") return;
   let row: StudentRow = { e: normaliseEmail(email), s: Math.floor(startSeconds), l: 0 };
   if (typeof raw === "string") {
     try {
@@ -454,8 +458,16 @@ export async function touchStudent(courseId: string, email: string, startSeconds
   }
   row.l = Math.floor(Date.now() / 1000);
   const json = JSON.stringify(row);
-  if (typeof raw !== "string" && !(await takeData(room, [{ slot: DONE_SLOT(courseId), bytes: dataBytes([field, json, "0000000000"], 1) }])).ok) return;
-  await redisPipeline([["HSET", key, field, json]]);
+  const change = { slot: DONE_SLOT(courseId), bytes: dataBytes([field, json, "0000000000"], 1) };
+  if (typeof raw === "string") {
+    await redisPipeline([["HSET", key, field, json]]);
+    return;
+  }
+  if (!(await takeData(room, [change])).ok) return;
+  // Written only if still absent: when another tab wrote it first, HSETNX answers 0 and the room just taken goes
+  // back, so the row is counted once. Any other reply keeps it counted (rule 24).
+  const [added] = await redisPipeline([["HSETNX", key, field, json]]);
+  if (added === 0) await giveData(room, [change]);
 }
 
 /**

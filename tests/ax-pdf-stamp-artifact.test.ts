@@ -43,6 +43,23 @@ function textPlaces(stream: string): { tagged: number; artifact: number; loose: 
   return counts;
 }
 
+/** The fonts a page's resources name, by resource name: the dictionary each one points to. */
+function pageFonts(doc: PDFDocument, index: number): Map<string, PDFDict> {
+  const resources = doc.getPages()[index].node.Resources();
+  const fonts = resources?.lookup(PDFName.of("Font"));
+  const out = new Map<string, PDFDict>();
+  if (fonts instanceof PDFDict) for (const [name, ref] of fonts.entries()) out.set(name.toString(), doc.context.lookup(ref, PDFDict));
+  return out;
+}
+
+/** Whether a font's program is in the file (PDF/UA, ISO 14289-1 7.21.4.1): FontFile, FontFile2 or FontFile3 on its descriptor, or on its descendant's (Type0). */
+function embedded(doc: PDFDocument, font: PDFDict): boolean {
+  const descendants = font.lookup(PDFName.of("DescendantFonts"));
+  if (descendants instanceof PDFArray) return descendants.asArray().every((ref) => embedded(doc, doc.context.lookup(ref, PDFDict)));
+  const descriptor = font.lookup(PDFName.of("FontDescriptor"));
+  return descriptor instanceof PDFDict && ["FontFile", "FontFile2", "FontFile3"].some((key) => descriptor.get(PDFName.of(key)) !== undefined);
+}
+
 async function taggedBook(): Promise<Uint8Array> {
   const pdf = await PDFDocument.create();
   const font = await pdf.embedFont(StandardFonts.Helvetica);
@@ -68,6 +85,11 @@ async function main(): Promise<void> {
   is("the buyer's line adds no loose text to any page (ISO 14289-1 7.1)", pages.map((p) => p.loose), [0, 0]);
   is("the buyer's line is drawn as an artifact on every page", pages.map((p) => p.artifact >= 1), [true, true]);
   is("the book's own text stays tagged", pages.map((p) => p.tagged), [2, 1]);
+  // Review of #3761 (Claude 3, nuvem P), PDF/UA 7.21.4.1: every font used to draw, an artifact's included, is embedded.
+  // The book's own fonts are the creator's; the font the stamp adds to each page must be in the file.
+  const added = [0, 1].map((i) => [...pageFonts(stamped, i)].filter(([name]) => !pageFonts(before, i).has(name)).map(([, font]) => font));
+  is("the stamp adds one font to each page", added.map((fonts) => fonts.length >= 1), [true, true]);
+  is("every font the stamp adds is embedded in the file (ISO 14289-1 7.21.4.1)", added.map((fonts) => fonts.every((font) => embedded(stamped, font))), [true, true]);
   is("the structure tree, language and marking survive the stamp", [
     stamped.catalog.get(PDFName.of("StructTreeRoot")) !== undefined,
     stamped.catalog.lookup(PDFName.of("MarkInfo"), PDFDict).get(PDFName.of("Marked"))?.toString(),

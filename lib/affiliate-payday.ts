@@ -79,6 +79,8 @@ export function paydayEmail(input: {
   invoicesChecked: boolean;
   /** And not because of a passing failure: past what the book can keep (Book.invoicesPastCeiling), reloading will not help. */
   invoicesPastCeiling?: boolean;
+  /** Paid invoices left out with their commission not known (Book.unlinkedInvoices): no batch file, pay by hand. */
+  unlinkedInvoices?: number;
   /** Of what is waiting, the leads in hold or waiting for the creator's approval (lib/affiliate-leads.ts). */
   leadsCents?: number;
 }): { subject: string; text: string } {
@@ -94,7 +96,8 @@ export function paydayEmail(input: {
     `Today is the ${ordinal(input.payday)}, the day you told your affiliates you pay them. ${who} can be paid ${amount}.`,
     "",
     // Past the ceiling no batch file is made (unsettledBook): never told to download one (review of #3378 by Claude 2).
-    ...(input.invoicesPastCeiling && !input.invoicesChecked
+    // Nor with a paid invoice left out with its commission not known (Codex X5 and Claude 1 cloud on #3378).
+    ...((input.invoicesPastCeiling && !input.invoicesChecked) || (input.unlinkedInvoices ?? 0) > 0
       ? [
           "Open your affiliate page and pay each affiliate from your own PayPal, Wise or bank. The money goes straight from your account to theirs — it never passes through us:",
           studio,
@@ -125,6 +128,12 @@ export function paydayEmail(input: {
     lines.push(
       "",
       "One thing first: we could not check every refund on your Stripe account just now, so these figures are not settled. Open the page and look before you pay — it will have checked again by then.",
+    );
+  }
+  if (input.invoicesChecked && (input.unlinkedInvoices ?? 0) > 0) {
+    lines.push(
+      "",
+      "Some membership or plan payments from affiliate links were paid in parts or outside Stripe, so their commission cannot be worked out here and an affiliate may be owed more than these figures show. Check those payments in your Stripe dashboard before you pay.",
     );
   }
   if (!input.invoicesChecked) {
@@ -183,6 +192,7 @@ export function autoPayEmail(paid: Awaited<ReturnType<typeof payWithPayPal>>, cu
     refunds: "we could not check every refund on your Stripe account just now",
     invoices: "we could not check every membership and plan payment on your Stripe account just now, so what your affiliates are owed is not known",
     invoices_ceiling: "your store has more membership and plan payments from affiliate links than we can keep track of, so what your affiliates are owed is not known",
+    invoices_unlinked: "some membership or plan payments from affiliate links were paid in parts or outside Stripe, so their commission cannot be worked out here",
     nothing: "nobody is owed anything that has cleared",
     error: "PayPal could not be reached",
   };
@@ -194,7 +204,7 @@ export function autoPayEmail(paid: Awaited<ReturnType<typeof payWithPayPal>>, cu
       `It is your affiliate payday, and nothing was sent: ${why[paid.reason] ?? why.error}. Nothing left your PayPal.`,
       "",
       // No batch is offered on a book its confirmation would refuse (unsettledBook, review of #3378 by Claude 2, HIGH).
-      paid.reason === "invoices_ceiling"
+      paid.reason === "invoices_ceiling" || paid.reason === "invoices_unlinked"
         ? "Reloading the page will not change that, and batch files are off. Open your affiliate page to pay each affiliate yourself and write it down with Mark as paid:"
         : paid.reason === "refunds" || paid.reason === "invoices"
           ? "Open your affiliate page: once it has read them, pay with one press or download the batch for PayPal or Wise:"
@@ -240,6 +250,7 @@ async function payday(store: Store, month: string, dayOfMonth: number): Promise<
     refundsChecked: book.refundsChecked,
     invoicesChecked: book.invoicesChecked,
     invoicesPastCeiling: book.invoicesPastCeiling ?? false,
+    unlinkedInvoices: book.unlinkedInvoices ?? 0,
     leadsCents: book.lines.filter((l) => l.how === "lead" && l.status !== "approved" && l.currency === book.currency).reduce((sum, l) => sum + l.commission, 0),
   });
   return sendEmail({ meter: { by: "store", store: store, kind: "email" },

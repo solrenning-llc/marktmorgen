@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { AffiliateCommissionHistory, INVOICES_CEILING_TEXT } from "@/components/affiliate-commission-history";
+import { AffiliateCommissionHistory, INVOICES_CEILING_TEXT, INVOICES_UNLINKED_TEXT } from "@/components/affiliate-commission-history";
 import type { AffiliateCommissionLine as LineView } from "@/lib/affiliate-commission-view";
 
 import { useState } from "react";
@@ -80,6 +80,7 @@ const MESSAGES: Record<string, string> = {
   invoices:
     "Not every membership and plan payment could be read from Stripe just now, so what is owed is not settled. Try again in a moment rather than record a payout against a guess.",
   invoices_ceiling: INVOICES_CEILING_TEXT,
+  invoices_unlinked: INVOICES_UNLINKED_TEXT,
   unknown: "That affiliate or payout is no longer on record. Reload the page.",
   none: "This account has no store yet.",
   signed_out: "Your session ended. Log in again.",
@@ -257,7 +258,8 @@ export function AffiliateStudio({
   // anything is clearing.
   // Never on a book the batch's confirmation would refuse (app/api/store/affiliates/payout-batch, unsettledBook): a
   // file paid and then not recorded would come back with the same lines and be paid twice (review of #3378, HIGH).
-  const settled = refundsChecked && invoicesChecked;
+  // Nor with a paid invoice left out with its commission not known (Codex X5 and Claude 1 cloud on #3378).
+  const settled = refundsChecked && invoicesChecked && unlinkedInvoices === 0;
   const owedNow = pendingPayoutsChecked && settled ? rows.filter((r) => r.payable > 0 && r.affiliate.status === "approved" && !away.includes(r.affiliate.id)) : [];
   const batchTotal = owedNow.reduce((sum, r) => sum + r.payable, 0);
   const waitingTotal = rows.reduce((sum, r) => sum + r.waiting, 0);
@@ -371,7 +373,9 @@ export function AffiliateStudio({
             <p className="notice notice-warn mt-5" role="status">
               {!refundsChecked
                 ? "Stripe could not be asked about every refund just now, so what is owed is not settled. Batch files are off until it is: reload in a moment."
-                : invoicesPastCeiling
+                : invoicesChecked && unlinkedInvoices > 0
+                  ? INVOICES_UNLINKED_TEXT
+                  : invoicesPastCeiling
                   ? INVOICES_CEILING_TEXT
                   : "Not every membership and plan payment could be read from Stripe yet, so what is owed is not settled. Batch files are off until they are: reload in a moment."}
             </p>

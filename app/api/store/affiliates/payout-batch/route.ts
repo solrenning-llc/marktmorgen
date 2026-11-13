@@ -19,6 +19,8 @@ const UNSETTLED_TEXT: Record<NonNullable<ReturnType<typeof unsettledBook>>, stri
     "Not every membership and plan payment could be read from Stripe just now, so what is owed is not settled and no batch file was made. Try again in a moment rather than pay against a guess.",
   invoices_ceiling:
     "Your store has more membership and plan payments from affiliate links than this page can keep track of, so the amounts owed here may be short and no batch file was made. Reloading will not change that. You can still pay each affiliate yourself and write it down with Mark as paid; check their membership payments in your Stripe dashboard first.",
+  invoices_unlinked:
+    "Some membership or plan payments from affiliate links were paid in parts or outside Stripe, so their commission cannot be worked out here and no batch file was made. Reloading will not change that. Pay each affiliate yourself and write it down with Mark as paid; check those payments in your Stripe dashboard first.",
 };
 
 /**

@@ -238,9 +238,13 @@ export async function onTheirWay(store: Store): Promise<Set<string>> {
  * the PayPal press and payday (review of #3378 by Claude 2, HIGH: a file handed out that its confirmation would refuse
  * could be paid twice).
  */
-export function unsettledBook(book: Pick<Book, "refundsChecked" | "invoicesChecked" | "invoicesPastCeiling">): "refunds" | "invoices" | "invoices_ceiling" | null {
+export function unsettledBook(book: Pick<Book, "refundsChecked" | "invoicesChecked" | "invoicesPastCeiling" | "unlinkedInvoices">): "refunds" | "invoices" | "invoices_ceiling" | "invoices_unlinked" | null {
   if (!book.refundsChecked) return "refunds";
   if (!book.invoicesChecked) return book.invoicesPastCeiling ? "invoices_ceiling" : "invoices";
+  // A paid invoice left out with no one payment to link it to (Book.unlinkedInvoices): its commission is not known,
+  // so no payout is made from a book that leaves it out (Codex X5's and Claude 1 cloud's MEDIUM on #3378). Reloading
+  // gives the same: the creator pays by hand, as past the ceiling.
+  if ((book.unlinkedInvoices ?? 0) > 0) return "invoices_unlinked";
   return null;
 }
 
@@ -289,9 +293,10 @@ export type PayResult =
   /**
    * "refunds": refunds and disputes not all read from Stripe; "invoices": the membership and plan payments not all
    * read (audit A1): either way what is owed is not known, so nothing is sent. "invoices_ceiling": those are past
-   * what the book can keep (unsettledBook), which reloading does not change.
+   * what the book can keep (unsettledBook), which reloading does not change. "invoices_unlinked": a paid invoice is left
+   * out with its commission not known (Book.unlinkedInvoices), which reloading does not change either.
    */
-  | { ok: false; reason: "not-connected" | "reconnect" | "nothing" | "refunds" | "invoices" | "invoices_ceiling" | "funds" | "refused" | "busy" | "error" | "unknown" };
+  | { ok: false; reason: "not-connected" | "reconnect" | "nothing" | "refunds" | "invoices" | "invoices_ceiling" | "invoices_unlinked" | "funds" | "refused" | "busy" | "error" | "unknown" };
 
 /**
  * Whether PayPal's answer to a batch says it was not made: a 4xx (other than
@@ -588,7 +593,7 @@ async function settleUnknown(store: Store, field: string, seen: OpenBatch, auth:
     // approved), or a store whose currency changed: it cannot be told whether the first request paid it, so it is
     // left for the creator's own check and never sent.
     const book = await readBook(store);
-    if (!book.refundsChecked || !book.invoicesChecked) return "waiting";
+    if (unsettledBook(book)) return "waiting";
     const rows = new Map(book.rows.map((row) => [row.affiliate.id, row]));
     const lines: BatchLine[] = [];
     for (const line of sent.lines) {

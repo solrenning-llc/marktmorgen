@@ -23,6 +23,10 @@ export function unlinkedInvoicesText(count: number): string {
  * The store has more membership and plan payments than the book can keep between readings (Book.invoicesPastCeiling):
  * said plainly, with no reload promised, and what still works (review of #3378 by Claude 2, MEDIUM).
  */
+/** Why no payout is made while a paid invoice is left out (unsettledBook "invoices_unlinked"): pay by hand, as past the ceiling (Codex X5 and Claude 1 cloud on #3378). */
+export const INVOICES_UNLINKED_TEXT =
+  "Some membership or plan payments from affiliate links were paid in parts or outside Stripe, so their commission cannot be worked out here and batch files are off. Reloading will not change that. Pay each affiliate yourself and write it down with Mark as paid; check those payments in your Stripe dashboard first.";
+
 export const INVOICES_CEILING_TEXT =
   "Your store has more membership and plan payments from affiliate links than this page can keep track of, so some are not listed and the amounts owed may be short. Reloading will not change that. Batch files and automatic PayPal payouts are off; you can still pay each affiliate yourself and write it down with Mark as paid.";
 export function AffiliateCommissionHistory({ lines, total, who, refundsChecked, invoicesChecked, invoicesPastCeiling = false, unlinkedInvoices = 0 }: {

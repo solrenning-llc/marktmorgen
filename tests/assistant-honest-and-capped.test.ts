@@ -68,6 +68,27 @@ part("A. Figures and deals in words are held to the facts, and a figure to what 
     is("a count is never held by a price or a day of the same value", invented.filter((said) => heldToFacts(said, store)), []);
     is("a count the store published is still held", heldToFacts("It has 12 video lessons.", store), true);
   }
+  // Claude 7's review of #3484 at c36d308d29 (MÉDIO): a count beside a word of buyers, students or joining was held by
+  // any count of the same value the store published ("12 video lessons"), so an invented number of buyers was shown. A
+  // count of people, of sales or of places left is held only by a fact that counts the same word.
+  {
+    const store = "Price: $49 a month. What it is: 12 video lessons on sourdough. Email me within 14 days and I refund you in full.";
+    const invented = [
+      "12 people already bought this course.",
+      "Over 12 students joined this week.",
+      "Join 12 happy bakers.",
+      "Twelve buyers already joined.",
+      "Doce alumnos ya compraron.",
+      "Ganz 12 Kunden haben gekauft.",
+      "Plus de 12 élèves.",
+      "Only 12 spots remain.",
+    ];
+    is("an invented count of buyers or places is never held by a count of lessons", invented.filter((said) => heldToFacts(said, store)), []);
+    is("the lessons the store published are still held", heldToFacts("It has 12 video lessons.", store), true);
+    const proof = "Price: $49 a month. 300 students enrolled so far.";
+    is("a count of students the store published is held", heldToFacts("300 students have enrolled.", proof), true);
+    is("but not as buyers", heldToFacts("300 buyers have enrolled.", proof), false);
+  }
   // Claude 4's focal (6798863884) and Claude 1's review (6799181835) at 94a7cc36: "total" before the number, a bare
   // number after a word of paying the vocabulary did not list, a currency in slang, and Spanish and Italian forms of
   // "pay" (Claude 3's LOW) were still shown, held by the 14 days or the 12 lessons. A bare number is held only by a

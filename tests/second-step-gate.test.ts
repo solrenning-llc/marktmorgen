@@ -1296,6 +1296,27 @@ async function main(): Promise<void> {
   is("the broken-move record (the lock on both addresses) is kept", [(await readBrokenMove(REA)) !== null, await isMoving(REA), await isMoving(REB)], [true, true, true]);
   is("a later try whose logout is confirmed repairs it", [await repairMove(REA), await emailForSession(reaSession), await readBrokenMove(REA), await isMoving(REA), await isMoving(REB)], [true, null, null, false, false]);
 
+  part("Clearing a broken move by hand whose logout of one address is unknown keeps the record");
+  const HCA = "hand-a@example.com";
+  const HCB = "hand-b@example.com";
+  const hcaSession = await openSession(HCA);
+  const hcbSession = await openSession(HCB);
+  await markBrokenMove(HCA, HCB);
+  const hcbSet = `nl:auth:sessions:${hex(`nimbus-auth-sessions:${HCB}`).slice(0, 40)}`;
+  const beforeHand = redis.pipeline.bind(redis);
+  redis.pipeline = (async (commands: (string | number)[][]) =>
+    commands[0]?.[0] === "SMEMBERS" && commands[0]?.[1] === hcbSet ? [42] : beforeHand(commands)) as typeof redis.pipeline;
+  const hcCleared = await clearBrokenMoveByHand(HCA, HCA);
+  redis.pipeline = beforeHand;
+  is("control: the old session on the address whose logout was unknown is still open", await emailForSession(hcbSession), HCB);
+  is("it does not report cleared while an address was not logged out", hcCleared, "logout");
+  is("the broken-move record (the lock on both addresses) is kept", [(await readBrokenMove(HCA)) !== null, await isMoving(HCA), await isMoving(HCB)], [true, true, true]);
+  is(
+    "a later try whose logouts are confirmed clears it",
+    [await clearBrokenMoveByHand(HCA, HCA), await emailForSession(hcaSession), await emailForSession(hcbSession), await readBrokenMove(HCA), await isMoving(HCA), await isMoving(HCB)],
+    ["cleared", null, null, null, false, false],
+  );
+
   done();
 }
 

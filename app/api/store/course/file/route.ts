@@ -11,6 +11,7 @@ import { takePublicRequest } from "@/lib/traffic";
 import { speech } from "@/lib/buyer-words";
 import { SESSION_COOKIE } from "@/lib/auth";
 import { seesDrafts } from "@/lib/draft-view";
+import { holdState } from "@/lib/child-safety";
 
 /**
  * A lesson's download: a worksheet, the slides. Handed over only to someone
@@ -21,6 +22,11 @@ export async function GET(request: NextRequest) {
   const store = await storeForHandle(normaliseHandle(q.get("h") ?? ""));
   const product = await readCourseListing(store, q.get("p"));
   if (!store || !product?.course) return plain(404, "Not found.");
+  // A course held for a child-safety report (lib/child-safety.ts) hands out none of its files, to anyone: its
+  // owner works on it from the studio. A hold that cannot be read is not a yes.
+  const hold = await holdState(store, product.id);
+  if (hold === "held") return plain(404, "Not found.");
+  if (hold === "unknown") return plain(503, "Try again in a moment.");
   // A draft's lessons, its free preview included, hand out nothing to whoever
   // only knows its id: only to its students and the store's owner and team,
   // signed in (MM-SA-30). Anyone else gets what an id that does not exist gets.

@@ -8,11 +8,11 @@ export const state = {
   override: false, reply: undefined as unknown, throws: false,
   storeFound: true, publicAllowed: true, authorized: true,
   commands: [] as (string | number)[][], lookups: 0, publicCalls: 0,
-  listings: 0, copies: 0, serves: 0, settings: 0,
+  listings: 0, copies: 0, serves: 0, settings: 0, holds: 0,
 };
 export function reset() {
   redis.clear();
-  Object.assign(state, { override: false, reply: undefined, throws: false, storeFound: true, publicAllowed: true, authorized: true, commands: [], lookups: 0, publicCalls: 0, listings: 0, copies: 0, serves: 0, settings: 0 });
+  Object.assign(state, { override: false, reply: undefined, throws: false, storeFound: true, publicAllowed: true, authorized: true, commands: [], lookups: 0, publicCalls: 0, listings: 0, copies: 0, serves: 0, settings: 0, holds: 0 });
 }
 export const isRedisConfigured = () => true;
 export async function redisPipeline(commands: (string | number)[][]): Promise<unknown[]> {
@@ -26,6 +26,8 @@ export async function storeForHandle() { state.lookups += 1; return state.storeF
 export async function takePublicRequest() { state.publicCalls += 1; return state.publicAllowed; }
 export async function readListing() { state.listings += 1; return { id: "p1234", hidden: false, preview: 3, file: { pathname: "synthetic.pdf" } }; }
 export const MAX_PREVIEW_PAGES = 10;
+/** The child-safety hold (lib/child-safety.ts, tests/child-safety-access.test.ts holds the real one): never held here. */
+export async function holdState() { state.holds += 1; return "free" as const; }
 export async function previewCopy() { state.copies += 1; return { pathname: "synthetic-preview.pdf" }; }
 export function plain(status: number, body: string) { return new Response(body, { status }); }
 export async function serveFile(_file: unknown, options: { paid: boolean }) {

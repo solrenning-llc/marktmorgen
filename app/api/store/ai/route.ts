@@ -34,8 +34,12 @@ import { findLesson, readBody, readCourse } from "@/lib/course";
 import { DEFAULT_QUIZ_DRAFT, QUIZ_DRAFT_COUNTS } from "@/lib/quiz-draft";
 import { funnelType } from "@/lib/funnel-types";
 import { readFunnelAsk, readFunnelFacts, writeFunnelDraft, writeFunnelResearch } from "@/lib/funnel-ai";
+import { heldPictureRefusal, heldRefusal, heldRefusalAmong } from "@/lib/child-safety";
 
 const KINDS: ProductKind[] = ["download", "link", "course", "membership", "call", "bundle"];
+
+/** The kinds of writing help that read a product named by `product` (quiz and feedback name it by `id`). */
+const HELD_KINDS = new Set(["page", "review", "block", "headline", "fill", "alt", "translate", "posts", "reply"]);
 
 /**
  * The writing help (lib/ai.ts): `{ kind: "product" | "page" | "review" | "block" | "fill" | "alt" | "translate" | "bio" | "faq" | "kit" | "setup" | "reply" | "posts" | "blog" | "outline" | "email" | "quiz" | "feedback" | "sequence" | "funnel" | "funnel-research", … }`.
@@ -54,6 +58,15 @@ export async function POST(request: NextRequest) {
   const fail = (error: string, status = 400) => Response.json({ ok: false, error }, { status });
   if (!(await withinEssentialLimit("ai", store.sid || store.handle, AI_PER_MINUTE, 60))) return fail("slow", 429);
   const notes = text(body.notes, MAX_AI_NOTES + 100);
+
+  // Nothing of a product held for a child-safety report (lib/child-safety.ts) goes to an AI provider: not its
+  // file, page, lessons or reviews, for anyone, its owner included. Checked before anything of it is read; a
+  // hold that cannot be read is not a yes.
+  const named = body.kind === "quiz" || body.kind === "feedback" ? text(body.id, 40) : HELD_KINDS.has(String(body.kind)) ? text(body.product, 40) : "";
+  if (named) {
+    const held = await heldRefusal(store, named);
+    if (held) return held;
+  }
 
   const answer = async <T,>(result: Promise<{ ok: true; value: T; left: number } | { ok: false; reason: string }>) => {
     const done = await result;
@@ -184,6 +197,10 @@ export async function POST(request: NextRequest) {
     const product = sitePage ? { title: sitePage.title } : await readListing(store, text(body.product, 40));
     if (!product) return fail("unknown", 404);
     const path = text(body.path, 200);
+    // A held product's picture, or one on its sales page, goes to no AI provider, whichever product or page names it
+    // (lib/child-safety.ts, heldPictureRefusal); a hold that cannot be read is not a yes.
+    const heldPicture = path ? await heldPictureRefusal(store, path) : null;
+    if (heldPicture) return heldPicture;
     const folder = await imageFolder(guarded.ref);
     if (!path || !ownsImagePath(path, folder)) return fail("invalid");
     const found = await get(path, { access: "private" }).catch(() => null);
@@ -307,6 +324,9 @@ export async function POST(request: NextRequest) {
     const facts = (p: (typeof listings)[number]) => ({ title: p.title, summary: p.summary, price: priceWords(p, store.currency, store.tiers), link: productLink(store, p.id) });
     let followed: ReturnType<typeof facts> | null = null;
     if (trigger === "product" || trigger === "finished") {
+      // A product held for a child-safety report goes to no AI provider (lib/child-safety.ts).
+      const onHold = await heldRefusal(store, text(body.productId, 40));
+      if (onHold) return onHold;
       const chosen = await readListing(store, text(body.productId, 40));
       if (!chosen) return fail("unknown", 404);
       followed = facts(chosen);
@@ -333,6 +353,10 @@ export async function POST(request: NextRequest) {
     // guided setup checks them; nothing is saved here.
     const type = funnelType(text(body.type, 40));
     if (!type) return fail("type");
+    // A chosen product held for a child-safety report goes to no AI provider (lib/child-safety.ts).
+    const chosen = body.products && typeof body.products === "object" && !Array.isArray(body.products) ? Object.values(body.products as Record<string, unknown>).map((id) => text(id, 40)).filter(Boolean) : [];
+    const onHold = await heldRefusalAmong(store, chosen);
+    if (onHold) return onHold;
     const read = await readFunnelFacts(store, type, body.products && typeof body.products === "object" && !Array.isArray(body.products) ? (body.products as Record<string, unknown>) : {});
     if (!read.ok) return Response.json({ ok: false, error: read.error, slot: read.slot }, { status: 400 });
     const ask = readFunnelAsk(body);

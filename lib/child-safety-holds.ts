@@ -43,6 +43,35 @@ export async function heldIdsAmong(store: Pick<Store, "statsId" | "handle">, ids
   return held;
 }
 
+/** How many marks one read asks for: a whole catalog (MAX_PRODUCTS, 2,000) in two MGETs. */
+const MARKS_PER_READ = 1_000;
+
+/**
+ * Which of a store's products are kept for a report, for a reader that must
+ * look at the whole catalog (the picture description, heldPictureRefusal in
+ * lib/child-safety.ts): one MGET per MARKS_PER_READ ids, so a large catalog
+ * costs two commands, not one per product. Throws, as heldIdsAmong does, when
+ * a reply is not one list holding Redis's null or the mark's "1" per id.
+ */
+export async function heldInCatalog(store: Pick<Store, "statsId" | "handle">, ids: readonly string[]): Promise<Set<string>> {
+  const asked = [...new Set(ids)];
+  const held = new Set<string>();
+  if (asked.length === 0) return held;
+  const lots: string[][] = [];
+  for (let at = 0; at < asked.length; at += MARKS_PER_READ) lots.push(asked.slice(at, at + MARKS_PER_READ));
+  const replies = repliesFor(await redisPipeline(lots.map((lot) => ["MGET", ...lot.map((id) => keepKey(store, id))])), lots.length);
+  if (!replies) throw new Error("A preservation hold could not be read");
+  lots.forEach((lot, n) => {
+    const values = replies[n];
+    if (!Array.isArray(values) || values.length !== lot.length) throw new Error("A preservation hold could not be read");
+    values.forEach((value, i) => {
+      if (value === "1") held.add(lot[i]);
+      else if (value !== null) throw new Error("A preservation hold could not be read");
+    });
+  });
+  return held;
+}
+
 /**
  * heldIdsAmong for a page, which must not fail for it: a hold that cannot be
  * read counts every id asked as held, so nothing that may be held is shown.

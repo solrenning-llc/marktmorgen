@@ -536,34 +536,44 @@ export const SECTION_BYTES = (MAX_SECTION_BYTES + MAX_SECTION_NAME + 256) * 3;
 /** What an answer's own fields send besides what it read: names, ids, notes. */
 export const TOOL_NOTE_BYTES = 2_048;
 
+/**
+ * What reading a product's preservation hold takes (lib/child-safety.ts, heldRefusal): one GET of its mark, "1" or
+ * nothing, in a round trip of its own, read by every MCP tool that reads a product's content before reading it, so
+ * nothing of a product held for a child-safety report goes to an AI client (Revisor 2 on #3588).
+ */
+export const HOLD_MARK_BYTES = 64;
+export function holdMarkWork(): ReadWork {
+  return { commands: 1, bytes: HOLD_MARK_BYTES, sent: 0, stripePages: 0, roundTrips: 1 };
+}
+
 /** get_product_description: the listing (listingsWork) and then the description. */
 export function productTextWork(): ReadWork {
-  return { commands: 1, bytes: ABOUT_BYTES, sent: ABOUT_BYTES + TOOL_NOTE_BYTES, stripePages: 0, roundTrips: 1 };
+  return addWork(holdMarkWork(), { commands: 1, bytes: ABOUT_BYTES, sent: ABOUT_BYTES + TOOL_NOTE_BYTES, stripePages: 0, roundTrips: 1 });
 }
 
 /** get_sales_page: the listing and then the page, sent block by block. */
 export function salesPageWork(): ReadWork {
-  return { commands: 1, bytes: PAGE_BYTES, sent: PAGE_BYTES + TOOL_NOTE_BYTES, stripePages: 0, roundTrips: 1 };
+  return addWork(holdMarkWork(), { commands: 1, bytes: PAGE_BYTES, sent: PAGE_BYTES + TOOL_NOTE_BYTES, stripePages: 0, roundTrips: 1 });
 }
 
 /** get_course_outline: the listing and then the course's record, its outline sent. */
 export function courseOutlineWork(): ReadWork {
-  return { commands: 1, bytes: COURSE_BYTES, sent: COURSE_BYTES + TOOL_NOTE_BYTES, stripePages: 0, roundTrips: 1 };
+  return addWork(holdMarkWork(), { commands: 1, bytes: COURSE_BYTES, sent: COURSE_BYTES + TOOL_NOTE_BYTES, stripePages: 0, roundTrips: 1 });
 }
 
 /** get_lesson: the listing, the course's record, then the lesson's text, quiz and task in one go. */
 export function lessonWork(): ReadWork {
-  return { commands: 4, bytes: COURSE_BYTES + BODY_BYTES + QUIZ_BYTES + TASK_BYTES, sent: BODY_BYTES + QUIZ_BYTES + TASK_BYTES + TOOL_NOTE_BYTES, stripePages: 0, roundTrips: 2 };
+  return addWork(holdMarkWork(), { commands: 4, bytes: COURSE_BYTES + BODY_BYTES + QUIZ_BYTES + TASK_BYTES, sent: BODY_BYTES + QUIZ_BYTES + TASK_BYTES + TOOL_NOTE_BYTES, stripePages: 0, roundTrips: 2 });
 }
 
 /** get_page_test: the listing, the page, then the test's counts. */
 export function pageTestWork(): ReadWork {
-  return { commands: 2, bytes: PAGE_BYTES + TEST_COUNTS_BYTES, sent: TEST_SENT_BYTES + TOOL_NOTE_BYTES, stripePages: 0, roundTrips: 2 };
+  return addWork(holdMarkWork(), { commands: 2, bytes: PAGE_BYTES + TEST_COUNTS_BYTES, sent: TEST_SENT_BYTES + TOOL_NOTE_BYTES, stripePages: 0, roundTrips: 2 });
 }
 
 /** get_page_reading: the listing, then the page and its depth record in one go. */
 export function pageReadingWork(): ReadWork {
-  return { commands: 2, bytes: PAGE_BYTES + DEPTH_RECORD_BYTES, sent: READING_SENT_BYTES + TOOL_NOTE_BYTES, stripePages: 0, roundTrips: 1 };
+  return addWork(holdMarkWork(), { commands: 2, bytes: PAGE_BYTES + DEPTH_RECORD_BYTES, sent: READING_SENT_BYTES + TOOL_NOTE_BYTES, stripePages: 0, roundTrips: 1 });
 }
 
 /** get_page_versions: the listing, how many versions are kept (LLEN), then those versions; one sent whole, or the list. */
@@ -572,7 +582,7 @@ export const COUNT_REPLY_BYTES = 32;
 
 export function pageVersionsWork(versions: number, one: boolean): ReadWork {
   const n = Math.min(Math.max(versions, 0), MAX_VERSIONS);
-  return { commands: 2, bytes: COUNT_REPLY_BYTES + n * PAGE_VERSION_BYTES, sent: (one ? PAGE_BYTES : n * 256) + TOOL_NOTE_BYTES, stripePages: 0, roundTrips: 2 };
+  return addWork(holdMarkWork(), { commands: 2, bytes: COUNT_REPLY_BYTES + n * PAGE_VERSION_BYTES, sent: (one ? PAGE_BYTES : n * 256) + TOOL_NOTE_BYTES, stripePages: 0, roundTrips: 2 });
 }
 
 /** list_saved_blocks: how many sections the library holds (HLEN), then those sections, read and sent. */

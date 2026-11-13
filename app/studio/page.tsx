@@ -697,6 +697,14 @@ const TEAM_NOTICES: Record<string, { title: string; body: string }> = {
     title: "Your role on this store does not include that",
     body: "Nothing was changed. The store's owner decides each person's role, on the Team page.",
   },
+  held: {
+    title: "That product is on hold",
+    body: "Only the store's owner can open it for now. To ask about it, write to support@marktmorgen.com.",
+  },
+  unchecked: {
+    title: "That product could not be opened just now",
+    body: "Nothing was changed. Try again in a moment.",
+  },
   gone: {
     title: "That store is not one you can open",
     body: "It was deleted, or you are no longer on its team. Here is a store you can open.",

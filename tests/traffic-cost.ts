@@ -117,6 +117,10 @@ export const COMMANDS = {
    * Drawing another page of the store, and saying it was opened. On a
    * product's own page that also counts the page's view (lib/stats.ts, added
    * 8 October 2026): two commands more, measured, and a third once a day.
+   * Since November 11, 2026 a product's own page also reads its own mark of a
+   * child-safety hold (app/[handle]/p/[product]/page.tsx, Revisor 2 on
+   * #3588): one GET, inside what tests/traffic.test.ts measures under this
+   * figure.
    */
   laterPage: 10,
   laterCount: 8,
@@ -142,10 +146,12 @@ export const COMMANDS = {
    * code under both): the day's first time, which also writes the day's
    * visit and starts the day's count of it, and each time after. The day's
    * count sends its expiry with every count since November 7, 2026 (finding
-   * L1 on #2888), one command more each time after the first.
+   * L1 on #2888), one command more each time after the first. Since
+   * November 9, 2026 one more each time: whether the podcast is held for a
+   * child-safety report (lib/child-safety.ts, holdState).
    */
-  feedFirst: 13,
-  feed: 10,
+  feedFirst: 14,
+  feed: 11,
 };
 
 /** Answering one page and its count: two calls, a tenth of a second of work, and memory held while the database is waited on. */

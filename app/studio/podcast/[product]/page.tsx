@@ -9,6 +9,7 @@ import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { canSellProduct } from "@/lib/store-checkout";
 import { readListing } from "@/lib/catalog";
+import { holdState } from "@/lib/child-safety";
 import { readPodcast } from "@/lib/podcast";
 import { PodcastEditor } from "@/components/podcast-editor";
 
@@ -36,6 +37,13 @@ export default async function StudioPodcastPage({
   const { store } = view;
   const product = await readListing(store, productId);
   if (!product?.podcast) redirect(studioPath(store));
+  // A product held for a child-safety report is the store's owner's only (lib/child-safety.ts), as the studio's course
+  // route already answers (Revisor 2 on #3588): nobody else on the team reads what it holds. A hold that cannot be read
+  // is not a yes; the studio says which it was.
+  if (view.role !== "owner") {
+    const hold = await holdState(store, product.id);
+    if (hold !== "free") redirect(studioPath(store, hold === "held" ? "team=held" : "team=unchecked"));
+  }
   const podcast = (await readPodcast(product.podcast.id)) ?? { id: product.podcast.id, episodes: [] };
   const folder = await storeFolder(view.ref);
   const selling = canSellProduct(store, product);

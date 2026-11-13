@@ -34,6 +34,7 @@ import { rememberBuyers } from "@/lib/buyer-library";
 import { createHash } from "node:crypto";
 import { normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { type DataStore, needData } from "@/lib/store-data";
 import { orderWrite } from "@/lib/order-data";
 import { dataBytes } from "@/lib/store-data-rules";
@@ -169,6 +170,21 @@ function parse(productId: string, raw: unknown): ImportedPurchase | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * The same, read exactly (CX-123 rule 24), for a caller that waits on unknown (the drip job, lib/learn.ts): nothing
+ * there (nil, an empty list) is none; a reply of another shape, a list that does not pair up or a purchase that does
+ * not read throws UnknownReplyError, never "nothing was brought over" (Claude 7's MEDIUM on #3369).
+ */
+export function importedFromExact(raw: unknown): ImportedPurchase[] {
+  if (raw === null || raw === undefined) return [];
+  const isList = Array.isArray(raw);
+  if (isList ? raw.length % 2 !== 0 : !raw || typeof raw !== "object") throw new UnknownReplyError("an address's imported purchases");
+  const all = pairs(raw);
+  const read = all.map(([id, value]) => parse(id, value));
+  if (read.some((p) => p === null)) throw new UnknownReplyError("an address's imported purchases");
+  return read as ImportedPurchase[];
 }
 
 /** Reads a hash as Redis returns it, a flat list or an object. */

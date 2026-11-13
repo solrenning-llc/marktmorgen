@@ -55,7 +55,7 @@ import { idsOfKind, readKind, readListing } from "@/lib/catalog";
 import { type Course, type CourseModule, lessonsInOrder, opensAt, readCourse } from "@/lib/course";
 import { BLOCKED_READ_MAX } from "@/lib/api-read-rules";
 import { deliveredIds } from "@/lib/bundle-rules";
-import { importedFrom, importedRead } from "@/lib/imported-purchases";
+import { importedFrom, importedFromExact, importedRead } from "@/lib/imported-purchases";
 import { dripStartUnits } from "@/lib/drip-start-rules";
 import { takeDripStartUnits } from "@/lib/drip-start";
 
@@ -377,7 +377,9 @@ async function courseLedger(store: Store, email: string, strict = false): Promis
   // bundle that was. Nothing was paid through Stripe, so nothing there can
   // take it back; the creator can still take a student off (setBlocked).
   const given = new Map<string, number>();
-  for (const purchase of importedFrom(broughtOver)) {
+  // Read exactly for the drip job (strict): an unreadable reply is unknown, never "nothing was brought over" (Claude 7's
+  // MEDIUM on #3369), so the module's email waits for the next run instead of being lost under a "shut".
+  for (const purchase of strict && imported ? importedFromExact(broughtOver) : importedFrom(broughtOver)) {
     for (const id of [purchase.productId, ...(purchase.items ?? [])]) {
       if (!given.has(id)) given.set(id, purchase.at);
     }
@@ -401,12 +403,14 @@ async function courseLedger(store: Store, email: string, strict = false): Promis
   // new is handed over, and what already was stays.
   if (store.community?.id) {
     try {
-      const earned = await earnedCourses(store.community.id, emailKey(email), Date.now(), store.community.on, store);
+      const earned = await earnedCourses(store.community.id, emailKey(email), Date.now(), store.community.on, store, strict);
       for (const product of courses) {
         const at = earned.get(product.id);
         if (product.course && !result.has(product.id) && at !== undefined) result.set(product.id, at);
       }
     } catch (error) {
+      // Unknown, not none, where the caller can wait (Claude 7's MEDIUM on #3369).
+      if (strict) throw error;
       console.error("reading courses earned by level failed", error);
     }
   }

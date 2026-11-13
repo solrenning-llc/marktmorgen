@@ -258,12 +258,16 @@ async function main() {
 
   part("A course earned in the community, its reply unreadable once: sent on the next run, never lost (Claude 7 on #3369)");
   await fresh([]);
+  // A product id a community reward can hold (lib/community-levels.ts PRODUCT: lowercase letters and digits).
+  const earnedProduct = { ...product, id: "dripmailearned1" } as unknown as Listing;
+  catalog.listings = [earnedProduct];
+  await registerDrip(store, earnedProduct, current);
   const community = "c".repeat(32);
   (store as { community?: unknown }).community = { id: community, on: true };
   const member = emailKey(buyer);
   await redis.pipeline([
     ["HSET", `nl:cm:${community}:m`, member, JSON.stringify({ k: member, removed: false })],
-    ["HSET", `nl:cm:${community}:unl:${member}`, product.id, first],
+    ["HSET", `nl:cm:${community}:unl:${member}`, earnedProduct.id, first],
   ]);
   await openedOn(first);
   odd = { match: (c) => c[0] === "HGETALL" && String(c[1]) === `nl:cm:${community}:unl:${member}`, reply: "bare" };

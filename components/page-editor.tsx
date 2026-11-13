@@ -2514,7 +2514,7 @@ export function PageEditor({
                       className="flex min-h-[44px] min-w-[9rem] flex-1 flex-col items-start justify-center text-left"
                     >
                       <span className="text-sm font-semibold text-ink">{`${index + 1}. ${kindLabel(block.kind)}`}</span>
-                      <span className="w-full truncate text-xs text-ink-soft">
+                      <span className="w-full break-words text-xs text-ink-soft">
                         {block.saved ? "Saved section · " : ""}
                         {block.screens === "phone" ? "Phones only · " : block.screens === "computer" ? "Computers and tablets only · " : ""}
                         {summaryLine(block)}

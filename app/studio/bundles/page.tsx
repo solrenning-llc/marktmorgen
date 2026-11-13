@@ -111,7 +111,7 @@ export default async function StudioBundlesPage({ searchParams }: Params) {
                           on ? "bg-lilac text-violet-ink" : "text-ink-soft hover:bg-paper hover:text-ink"
                         }`}
                       >
-                        <span className="max-w-[14rem] truncate font-semibold">{b.title}</span>
+                        <span className="min-w-0 max-w-[14rem] break-words font-semibold">{b.title}</span>
                         <span className="shrink-0 rounded-full bg-mint-soft px-2 py-0.5 text-xs font-bold text-mint-deep">
                           {`${b.bundle?.length ?? 0} in it`}
                         </span>

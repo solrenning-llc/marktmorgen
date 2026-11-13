@@ -170,7 +170,10 @@ export type ActivationReply = { valid: boolean; activated: boolean; reason: Acti
  * What the creator's software is told. `valid` is whether the key is good;
  * `activated` whether this device may run on it. Nothing about the buyer,
  * the sale or the other devices; a record that could not be read is never a
- * yes.
+ * yes. A bad device id and a record or limit that could not be read are
+ * reached only once the key was judged good, so the key stays valid and the
+ * device is not let in (Claude 7 and Claude 1 on #3622); with no limit
+ * every device runs, as before limits existed.
  */
 export function activationReply(decision: ActivationDecision): ActivationReply {
   switch (decision.outcome) {
@@ -181,11 +184,12 @@ export function activationReply(decision: ActivationDecision): ActivationReply {
     case "full":
       return { valid: true, activated: false, reason: "device_limit", used: decision.used, limit: decision.limit };
     case "off":
-      return { valid: true, activated: false, reason: "no_limit" };
-    case "revoked":
-    case "unknown_key":
+      return { valid: true, activated: true, reason: "no_limit" };
     case "bad_device":
     case "unavailable":
+      return { valid: true, activated: false, reason: decision.outcome };
+    case "revoked":
+    case "unknown_key":
       return { valid: false, activated: false, reason: decision.outcome };
   }
 }

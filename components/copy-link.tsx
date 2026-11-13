@@ -6,8 +6,10 @@ import { Icon } from "@/components/icons";
 /**
  * A link to one answer. It works as a plain link without scripts; with them,
  * pressing it also copies the full address, so it can be pasted to someone.
+ * `about` is the answer's question, said after the visible words to a screen
+ * reader, so each such link names where it leads (WCAG 2.4.9).
  */
-export function CopyLink({ id }: { id: string }) {
+export function CopyLink({ id, about }: { id: string; about?: string }) {
   const [copied, setCopied] = useState(false);
   return (
     <a
@@ -30,6 +32,7 @@ export function CopyLink({ id }: { id: string }) {
     >
       <Icon name={copied ? "check" : "link"} size={15} />
       <span aria-live="polite">{copied ? "Link copied" : "Copy a link to this answer"}</span>
+      {about ? <span className="sr-only">{`: ${about}`}</span> : null}
     </a>
   );
 }

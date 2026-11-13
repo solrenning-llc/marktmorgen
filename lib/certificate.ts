@@ -314,9 +314,11 @@ export async function issueCertificate(input: {
     throw error;
   }
   if (existing) {
-    // This press made nothing that stands: its record goes, the standing one is the answer.
-    await redisPipeline([["DEL", certKey(id)]]);
-    await giveData(input.room, [{ slot: CERTS_SLOT(input.course.id), bytes }]);
+    // This press made nothing that stands: its record goes, the standing one is the answer. Its room comes back
+    // only on an exact 1 (#4287, item 13), as in the branch above: any other reply is unknown, so the room stays taken.
+    const replies = plainList(await redisPipeline([["DEL", certKey(id)]]));
+    if (replies?.length === 1 && replies[0] === 1) await giveData(input.room, [{ slot: CERTS_SLOT(input.course.id), bytes }]);
+    else console.error("a certificate's provisional record: DEL answered in an unknown shape; its room is kept", id);
     return { ok: true, certificate: existing, fresh: false };
   }
   await redisPipeline([["SADD", allKey(input.course.id), id], ["SADD", byKey(input.course.id, input.who), id]]);

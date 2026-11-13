@@ -326,6 +326,18 @@ export class MemoryRedis {
           }
           return [1, out];
         }
+        // lib/made-to-order.ts LIST_IF_ROOM: a record listed only while its store's list has room, in one step.
+        if (key.startsWith("-- marktmorgen:mto-list-if-room:v1\n") && args[0] === "1" && args.length === 7) {
+          const [, list, now, cap, score, member, seconds] = args;
+          if (Array.isArray(this.data.get(list)) && (this.data.get(list) as unknown[]).length === 0) this.data.delete(list);
+          if (!["none", "zset"].includes(this.run(["TYPE", list]) as string)) return -1;
+          this.run(["ZREMRANGEBYSCORE", list, "-inf", now]);
+          if (this.run(["ZSCORE", list, member]) !== null) return 2;
+          if ((this.run(["ZCARD", list]) as number) >= Number(cap)) return 0;
+          this.run(["ZADD", list, score, member]);
+          this.run(["EXPIRE", list, seconds]);
+          return 1;
+        }
         if (key.startsWith("-- marktmorgen:held-state:v1\n") && args[0] === "2" && args.length === 6) {
           const [, index, month, held, ref, due] = args;
           if (Array.isArray(this.data.get(index)) && (this.data.get(index) as unknown[]).length === 0) this.data.delete(index);

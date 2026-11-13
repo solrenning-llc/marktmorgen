@@ -19,6 +19,7 @@
  * the arithmetic below is the same for both.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { StripeError, onAccount } from "@/lib/stripe-account";
 import { type Interval, isInterval } from "@/lib/product-recurring";
 
@@ -26,10 +27,19 @@ const PENDING = "nl:plans:pending";
 const SESSION_ID = /^cs_(test|live)_[A-Za-z0-9]{10,200}$/;
 const ACCOUNT_ID = /^acct_[A-Za-z0-9]{8,64}$/;
 
-/** Written down when a plan's checkout opens, so it is settled either way. */
+/**
+ * Written down when a plan's checkout opens, so it is settled either way. Confirmed before the buyer is sent to pay
+ * (#4352): only SADD's exact 1 or 0 is a write; any other answer (an empty or odd reply, a failed request) is checked
+ * with an exact read of the very entry, and an entry not there throws UnknownReplyError, so the checkout is refused and
+ * no plan is paid that the scheduled job cannot end.
+ */
 export async function rememberPlan(account: string, session: string): Promise<void> {
   if (!isRedisConfigured() || !ACCOUNT_ID.test(account) || !SESSION_ID.test(session)) return;
-  await redisPipeline([["SADD", PENDING, `${account}|${session}|${Math.floor(Date.now() / 1000)}`]]);
+  const entry = `${account}|${session}|${Math.floor(Date.now() / 1000)}`;
+  const added = await redisPipeline([["SADD", PENDING, entry]]).then((reply) => repliesFor(reply, 1)?.[0], () => undefined);
+  if (added === 1 || added === 0) return;
+  const held = repliesFor(await redisPipeline([["SISMEMBER", PENDING, entry]]), 1)?.[0];
+  if (held !== 1) throw new UnknownReplyError("a payment plan's place in the pending queue");
 }
 
 /**

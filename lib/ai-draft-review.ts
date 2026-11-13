@@ -179,12 +179,27 @@ const notAFigureAfter = (text: string, at: number) => (sticky(ORDINAL, text, at)
 
 /**
  * Digits right after one of these words number a part of the draft, they claim nothing: "Week 1: Getting
- * started", "Step 2. Rest", "Module 3" (Claude 1's LOW on #3437). Read in English only; another language's
- * labels stay listed, on the side of a prompt to check, never a refusal. Singular only: a plural before digits
- * ("12 lessons 40 minutes", "30 days 500 students") is a count followed by a figure, which stays listed.
+ * started", "Step 2. Rest", "Module 3 — Practice" (Claude 1's LOW on #3437). Only in the shape of a heading or a
+ * list item, read on both sides (Codex L's MEDIUM on #3437): the word opens its line or its sentence, with at
+ * most list or heading marks before it, and the digits end the line or are followed by ":", ".", ")" or a dash.
+ * Anything else is a claim in a sentence ("Each lesson 45 minutes", "by day 30") and stays listed. Read in
+ * English only; another language's labels stay listed, on the side of a prompt to check, never a refusal.
+ * Singular only: a plural before digits ("12 lessons 40 minutes", "30 days 500 students") is a count followed by
+ * a figure, which stays listed.
  */
 const PART_LABEL = /(?<![\p{L}\p{N}])(?:week|day|step|module|lesson|part|chapter|email|session)\s*#?\s*$/iu;
-const labelsAPart = (text: string, at: number) => PART_LABEL.test(text.slice(Math.max(0, at - 24), at));
+/** What may come before a label on its line: list or heading marks only, or the end of the sentence before it. */
+const LABEL_LEAD = /^(?:[\s#*>•_-]|\d+[.)])*$|[.!?:]\s+[\s#*>•_-]*$/u;
+/** What may follow a label's digits on its line: nothing, or ":", ".", ")" or a dash. */
+const LABEL_TAIL = /^[ \t]*(?:$|[:.)]|[-–—](?:\s|$))/u;
+function labelsAPart(text: string, at: number, end: number): boolean {
+  const lineStart = text.lastIndexOf("\n", at - 1) + 1;
+  const before = text.slice(lineStart, at);
+  const label = PART_LABEL.exec(before);
+  if (!label || !LABEL_LEAD.test(before.slice(0, label.index))) return false;
+  const lineEnd = text.indexOf("\n", end);
+  return LABEL_TAIL.test(text.slice(end, lineEnd < 0 ? undefined : lineEnd));
+}
 
 /**
  * A lowercase "m" is minutes or meters ("a 10m call"), but before a count of
@@ -291,7 +306,7 @@ function numbersIn(original: string, codes: readonly string[]): { written: strin
   for (const match of text.matchAll(DIGITS)) {
     const written = match[0].replace(/[.,]+$/, "");
     const after = (match.index ?? 0) + match[0].length;
-    if (notAFigureAfter(text, after) || labelsAPart(text, match.index ?? 0)) continue;
+    if (notAFigureAfter(text, after) || labelsAPart(text, match.index ?? 0, (match.index ?? 0) + written.length)) continue;
     const millions = /\dm$/.test(written) && sticky(AUDIENCE, text, after);
     found.push({ written, key: digitsKey(millions ? `${written.slice(0, -1)}M` : written), at: match.index ?? 0 });
   }

@@ -13,8 +13,12 @@ import { done, is } from "./check";
 const outline = "Week 1: Getting started\nWeek 2: Your first loaf\nWeek 3: Shaping";
 is("week labels are not estimates", unsourcedNumbers([outline], "A course on sourdough", "en"), []);
 is("step labels are not estimates", unsourcedNumbers(["Step 1. Mix\nStep 2. Rest"], "", "en"), []);
-is("lesson, module, day, part, chapter, email and session labels are not estimates",
-  unsourcedNumbers(["Lesson 4 covers it. Module 2 starts. Day 7 recap. Part 3. Chapter 9. Email 5 of the sequence. Session 6."], "", "en"), []);
+is("part, chapter and session labels that end their sentence are not estimates",
+  unsourcedNumbers(["Part 3. Chapter 9. Session 6."], "", "en"), []);
+// Since Codex L's MEDIUM: a label followed by more words in its sentence is read as a claim and listed, on the
+// side of a prompt to check ("Lesson 4 covers it" is listed as "Each lesson 45 minutes" must be).
+is("a label followed by words in the same sentence is listed for the creator to check",
+  unsourcedNumbers(["Lesson 4 covers it. Module 2 starts. Day 7 recap. Email 5 of the sequence."], "", "en"), ["4", "2", "7", "5"]);
 is("control: a figure beside a label is still listed", unsourcedNumbers(["Week 1: lose 10 pounds"], "", "en"), ["10"]);
 is("control: a figure with no label is still listed", unsourcedNumbers(["Join 5,000 bakers"], "", "en"), ["5,000"]);
 is("control: a number before the word is a figure ('3 weeks')", unsourcedNumbers(["Done in 3 weeks"], "", "en"), ["3"]);

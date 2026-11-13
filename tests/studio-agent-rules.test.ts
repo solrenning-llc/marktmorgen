@@ -44,11 +44,16 @@ part("Each person gets what their role may do in the studio");
 const owner = studioAgentTools(as("owner"));
 is("the owner: every named tool the server serves, in its order", owner, served.filter((n) => rows.includes(n)));
 is("an admin: the same as the owner (numbers, products, page, emails)", studioAgentTools(as("admin")), owner);
+// The affiliate programme and its payouts are an Admin's (lib/team-roles.ts): the studio opens them under "settings"
+// (app/studio/affiliates/page.tsx, the affiliate routes), so an editor's assistant never reads them either (review of
+// #3551 @dc49f73020, MEDIUM).
 is(
-  "an editor: the same too (an editor has stats, products, page and draft)",
+  "an editor: the same, except the affiliate programme (an editor has stats, products, page and draft, not settings)",
   studioAgentTools(as("editor")),
-  owner,
+  owner.filter((n) => n !== "get_affiliates"),
 );
+is("an admin's assistant reads the affiliate programme; an editor's never does", [studioAgentTools(as("admin")).includes("get_affiliates"), studioAgentTools(as("editor")).includes("get_affiliates")], [true, false]);
+is("each affiliate row needs the permission its studio screen asks for", STUDIO_AGENT_TOOLS.get_affiliates.needs, ["settings"]);
 is("support (orders, community, reviews): only which store this is", studioAgentTools(as("support")), ["get_store"]);
 const noStats = (p: Parameters<typeof can>[1]) => p !== "stats" && can("owner", p);
 is("a role without the numbers gets no numbers tool", studioAgentTools(noStats).filter((n) => STUDIO_AGENT_TOOLS[n].needs.includes("stats")), []);

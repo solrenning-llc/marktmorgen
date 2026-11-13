@@ -175,7 +175,8 @@ export function crmUrl(raw: unknown): string | null {
   if (typeof raw !== "string") return null;
   const typed = raw.trim();
   if (!typed || typed.length > MAX_FIELD_VALUE || /\s/.test(typed)) return null;
-  const withScheme = /^[a-z][a-z0-9+.-]*:/i.test(typed) ? typed : `https://${typed}`;
+  // A scheme is a word and a colon not followed by a port number: "example.com:8080" is a host and its port, read as https.
+  const withScheme = /^[a-z][a-z0-9+.-]*:(?!\d+(?:[/?#]|$))/i.test(typed) ? typed : `https://${typed}`;
   let url: URL;
   try {
     url = new URL(withScheme);
@@ -184,8 +185,9 @@ export function crmUrl(raw: unknown): string | null {
   }
   if (url.protocol !== "https:" && url.protocol !== "http:") return null;
   if (url.username || url.password) return null;
-  // A host with a dot and letters in its last part (example.com), not a bare word or an address by numbers.
-  if (!/\.[a-z]{2,}$/i.test(url.hostname.replace(/\.$/, ""))) return null;
+  // A host with a dot and letters in its last part (example.com, or a last part in another script, such as .рф,
+  // which the browser reads as xn--p1ai), not a bare word or an address by numbers.
+  if (!/\.(?:[a-z]{2,}|xn--[a-z0-9-]{2,})$/i.test(url.hostname.replace(/\.$/, ""))) return null;
   const kept = url.toString();
   return kept.length <= MAX_FIELD_VALUE ? kept : null;
 }

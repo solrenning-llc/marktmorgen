@@ -11,7 +11,8 @@ import { NextRequest } from "next/server";
 import { POST as productRoute } from "@/app/api/store/product/route";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { addProduct, claimHandle, ensureListId, ensureStatsId, ensureStoreId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
-import { inviteMembers, readInvite } from "@/lib/move-members";
+import { dropProductInvites, inviteMembers, readInvite } from "@/lib/move-members";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { erasePerson } from "@/lib/person-erasure";
 import { paidPeriod } from "./billing-period-fixture";
 import { done, is, part } from "./check";
@@ -78,6 +79,25 @@ async function main(): Promise<void> {
   is("the erasure says it finished", erased.ok, true);
   const values = (await redis.pipeline([["HVALS", invitesKey]]))[0] as string[];
   is("[CORRETO] nothing kept names him", values.filter((v) => v.includes(BEN)).length, 0);
+
+  part("An invitation that does not read whole is never deleted while its link is left without a reference (Codex G, HIGH on #3473)");
+  // Its value holds a valid token but not the rest (no address, product or renewal): the removal cannot prove
+  // what it would leave behind, so it fails closed and keeps both the field and the link for the next try.
+  const kept = await addProduct(OWNER, "Kept Circle", "", "9", { interval: "month", trialDays: 0, payments: 0 });
+  if (!kept.ok) throw new Error("no product");
+  const token = "a".repeat(40);
+  const field = `${"b".repeat(64)}:${kept.product.id}`;
+  await redis.pipeline([
+    ["HSET", invitesKey, field, JSON.stringify({ t: token })],
+    ["SET", `nl:mv:link:${token}`, JSON.stringify({ s: store.statsId, f: field })],
+  ]);
+  const thrown = await dropProductInvites(store, kept.product.id, async () => true).then(
+    () => "finished",
+    (error: unknown) => (error instanceof UnknownReplyError ? "unknown" : String(error)),
+  );
+  is("[CORRETO] the removal of its invitations fails as unknown", thrown, "unknown");
+  is("[CORRETO] the field is kept", (await redis.pipeline([["HGET", invitesKey, field]]))[0] !== null, true);
+  is("[CORRETO] its link is kept, still reachable from the field", (await redis.pipeline([["GET", `nl:mv:link:${token}`]]))[0] !== null, true);
   done();
 }
 

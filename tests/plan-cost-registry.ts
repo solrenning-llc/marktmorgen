@@ -1350,7 +1350,7 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/stamp-cost-rules.ts", names: ["MEASURE_LIST_PAGES", "STORAGE_MEASURE_UNITS", "NO_ROOM_NOTE_SECONDS", "FLY_HOLD_SECONDS", "FLY_BASE_UNITS", "FLY_CPU_MS_PER_UNIT", "FLY_CPU_PER_WALL_MS", "FLY_BYTES_PER_UNIT", "FLY_MAX_BYTES", "flyUnits", "flyHoldUnits"] },
       { file: "lib/pdf-stamp.ts", names: ["meter.take(STORAGE_MEASURE_UNITS)", "noRoomKey(folder)", "NO_ROOM_NOTE_SECONDS", "if (!(await roomNotedOut(file)))", "const held = flyHoldUnits(file.bytes);", "await meter.take(held)", "meter.give(held - used)", "meter.take(used - held)", "meter.take(flyUnits(0, stamped.bytes.byteLength))"] },
       { file: "lib/pdf-preview.ts", names: ["if (await roomNotedOut(file)) return null;", "writeWithinStorage(file, pathname, bytes, \"application/pdf\", store, meter)"] },
-      { file: "app/api/store/download/route.ts", names: ["export const maxDuration = 60;", "holdPublicRequests(store, units, now, \"buyer\", { shared: true })", "givePublicRequests(store, units, now)", "copyMeter(store)"] },
+      { file: "app/api/store/download/route.ts", names: ["export const maxDuration = 60;", "holdPublicRequests(store, units, now, \"buyer\", { shared: true })", "givePublicRequests(store, units, now, { shared: true })", "copyMeter(store)"] },
       { file: "app/api/store/preview/route.ts", names: ["export const maxDuration = 60;", "holdPublicRequests(store, units, now)", "givePublicRequests(store, units, now)"] },
       { file: "lib/file-store.ts", names: ["for (let page = 0; page < 20; page += 1)"] },
       { file: "lib/vault.ts", names: ["for (let page = 0; page < 20; page += 1)"] },

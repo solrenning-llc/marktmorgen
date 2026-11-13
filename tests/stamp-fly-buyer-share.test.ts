@@ -57,7 +57,7 @@ async function main(): Promise<void> {
     is("the 45 MB hold passes", await holdPublicRequests(store, big, now, "buyer", { shared: true }), true);
     is("the window counts it", await count(), big);
     is("the same connection still gets its next request", await takePublicRequest(store, "buyer", now), true);
-    await givePublicRequests(store, big - 20, now);
+    await givePublicRequests(store, big - 20, now, { shared: true });
     const small = flyHoldUnits(20 * MB);
     is("a second copy on the fly the same day is held too", await holdPublicRequests(store, small, now, "buyer", { shared: true }), true);
     is("and a third", await holdPublicRequests(store, small, now, "buyer", { shared: true }), true);
@@ -94,6 +94,7 @@ async function main(): Promise<void> {
       copies += 1;
     }
     is("one connection stops within its share of the day", copies > 0 && copies * used <= share + hold, true);
+    is("and its pages are still let in: the copies' share is its own (the triage's MEDIUM stays fixed)", await takePublicRequest(fresh, "buyer", now), true);
     answering(new Request(`https://marktmorgen.com/@${HANDLE}/download`, { headers: { "x-forwarded-for": "198.51.100.23" } }));
     is("and another visitor is still let in", await takePublicRequest(fresh, "buyer", now), true);
     is("who can make a copy on the fly too", await holdPublicRequests(fresh, hold, now, "buyer", { shared: true }), true);

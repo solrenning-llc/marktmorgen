@@ -66,7 +66,7 @@ function copyMeter(store: Store): CopyMeter {
   const now = Date.now();
   return {
     take: (units) => holdPublicRequests(store, units, now, "buyer", { shared: true }),
-    give: (units) => givePublicRequests(store, units, now),
+    give: (units) => givePublicRequests(store, units, now, { shared: true }),
   };
 }
 

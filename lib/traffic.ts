@@ -306,7 +306,56 @@ export async function takePublicRequest(store: Store, who: "public" | "buyer" = 
  * already bound it, and its hold can be larger than one connection's whole share (Claude 1 cloud's triage on #3899).
  */
 export async function holdPublicRequests(store: Store, units: number, now: number, who: "public" | "buyer" = "public", from: { shared?: boolean } = {}): Promise<boolean> {
-  return takePublic(store, who, now, units, from.shared === true, true);
+  if (from.shared !== true) return takePublic(store, who, now, units, false, true);
+  // Held from the store's window alone, never from the connection's share of the day for pages (a big copy would shut
+  // the buyer out of the store, the triage's MEDIUM on #3899), but counted on the asking connection's own share of
+  // copies made on the fly (Claude 2 nuvem I's focal on #3899): a connection whose copies today already used that share
+  // is refused before anything is held; what is held is added to it and what was not used given back with the rest
+  // (givePublicRequests). One order's link can then never spend the store's whole window, while a big copy that fits
+  // the window is still made once, and the buyer's pages are never refused for it.
+  const share = await connectionShare(store, now);
+  if (share === "unknown" || (share !== null && share.spent)) return false;
+  if (!(await takePublic(store, who, now, units, true, true))) return false;
+  if (share !== null) await moveShare(share, units).catch(() => {});
+  return true;
+}
+
+/**
+ * The asking connection's share of the day for copies made on the fly in this store's window, read now (the same size
+ * as its share for pages, clientDayShare): null outside a request; "unknown" when it cannot be read.
+ */
+type ConnectionShare = { key: string; field: string; keep: number; spent: boolean };
+
+async function connectionShare(store: Store, now: number): Promise<ConnectionShare | null | "unknown"> {
+  if (!isRedisConfigured()) return "unknown";
+  try {
+    const window = allowanceWindow(store, now);
+    if (!window) return "unknown";
+    const client = await askingConnection();
+    if (!client) return null;
+    const folder = await storeFolder(storeRef(store));
+    if (!FOLDER_PATTERN.test(folder)) return "unknown";
+    const day = new Date(now).toISOString().slice(0, 10);
+    // Its own field beside the connection's share for pages, in the same hash and with its expiry: "f:" for copies.
+    const field = `${day}:f:${fingerprint(`${day}|${folder}|fly|${client}`)}`;
+    const key = shareKey(folder, window.id);
+    const replies = await redisPipeline([["HGET", key, field]]);
+    const raw = Array.isArray(replies) && replies.length === 1 ? replies[0] : undefined;
+    if (raw !== null && (typeof raw !== "string" || !/^-?\d{1,15}$/.test(raw))) return "unknown";
+    const spent = (raw === null ? 0 : Number(raw)) >= clientDayShare(requestLimitFor(store, now / 1000));
+    return { key, field, keep: keepSecondsFor(window, now), spent };
+  } catch {
+    return "unknown";
+  }
+}
+
+/** One HINCRBY on a connection's share (a give-back below zero), with the share's expiry. Best effort. */
+async function moveShare(share: ConnectionShare, by: number): Promise<void> {
+  if (!Number.isSafeInteger(by) || by === 0) return;
+  await redisPipeline([
+    ["HINCRBY", share.key, share.field, by],
+    ["EXPIRE", share.key, share.keep],
+  ]);
 }
 
 async function takePublic(store: Store, who: "public" | "buyer", now: number, units: number, shared: boolean, giveBack: boolean): Promise<boolean> {
@@ -327,8 +376,13 @@ async function takePublic(store: Store, who: "public" | "buyer", now: number, un
  * partnership by its emailed link). One DECRBY on the window's count; its connection's share of the day is not given
  * back. Best effort: a give-back that fails leaves the count higher, never lower.
  */
-export async function givePublicRequests(store: Store, units: number, now: number): Promise<void> {
+export async function givePublicRequests(store: Store, units: number, now: number, from: { shared?: boolean } = {}): Promise<void> {
   await movePublicRequests(store, -units, now);
+  // A shared hold (holdPublicRequests) also gives back from the connection's share what it did not use.
+  if (from.shared === true && Number.isSafeInteger(units) && units > 0) {
+    const share = await connectionShare(store, now);
+    if (share !== null && share !== "unknown") await moveShare(share, -units).catch(() => {});
+  }
 }
 
 /**

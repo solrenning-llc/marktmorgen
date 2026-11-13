@@ -464,7 +464,15 @@ export async function openOrder(store: Store, product: Listing, origin: string, 
       ...(extras.via && /^[a-z0-9]{12}$/.test(extras.via.aff) ? { via: { aff: extras.via.aff, rate: Math.max(0, Math.min(100, Number(extras.via.rate) || 0)) } } : {}),
       ...(salePercent > 0 ? { off: Math.max(0, product.priceCents - cents), sale: salePercent } : fairPercent > 0 ? { off: Math.max(0, product.priceCents - cents) } : {}),
     };
-    await redisPipeline([["SET", orderKey(order), JSON.stringify(opened), "EX", 3 * 86_400]]);
+    // Confirmed before the buyer is sent to approve (#4354): the capture finds the order only by this record, so an
+    // approval with no record here is a payment the site cannot complete. Only SET's exact "OK" is a write; any other
+    // answer (an empty or odd reply, a failed request) is checked by reading the very record back.
+    const record = JSON.stringify(opened);
+    const set = await redisPipeline([["SET", orderKey(order), record, "EX", 3 * 86_400]]).then((reply) => repliesFor(reply, 1)?.[0], () => undefined);
+    if (set !== "OK") {
+      const back = repliesFor(await redisPipeline([["GET", orderKey(order)]]), 1)?.[0];
+      if (back !== record) throw new UnknownReplyError("a PayPal order's local record");
+    }
     return { ok: true, url: approve.href, order };
   } catch (error) {
     console.error("opening a PayPal order failed", error);

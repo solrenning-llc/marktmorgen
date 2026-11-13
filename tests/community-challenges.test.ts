@@ -135,6 +135,37 @@ async function main(): Promise<void> {
   const counts = (await challengeCounts(id, [c], day3)).get(c.id);
   is("the creator's counts: joined, check-ins, today", counts && [counts.joined, counts.checkIns, counts.today], [2, 4, 1]);
 
+  part("A check-in whose count was not written is counted on the next press (Claude 2 nuvem I's LEVE on #3452)");
+  {
+    // The call that would count her day fails before Redis applies it; the day and its counts go together or not at all,
+    // so the press after it counts her once, and the creator's figures are not one short for good.
+    const eri = "erikey00000000000000000000000005";
+    const real = redis.pipeline.bind(redis);
+    let failed = false;
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      if (!failed && commands.some((cmd) => cmd.some((part) => String(part) === `nl:cm:${id}:ch:${c.id}:n`))) {
+        failed = true;
+        throw new Error("synthetic: the counting call failed before Redis applied it");
+      }
+      return real(commands);
+    }) as typeof redis.pipeline;
+    let first: string;
+    try {
+      first = await checkIn(id, c, eri, store, day3);
+    } catch {
+      first = "error";
+    } finally {
+      redis.pipeline = real;
+    }
+    is("(the first press failed on the count)", [failed, first], [true, "error"]);
+    is("the next press counts her", await checkIn(id, c, eri, store, day3 + 60_000), "checked");
+    const healed = (await challengeCounts(id, [c], day3)).get(c.id);
+    is("the creator's counts include her day once", healed && [healed.joined, healed.checkIns, healed.today], [3, 5, 2]);
+    await forgetChallengesPerson(id, eri, store);
+    const back = (await challengeCounts(id, [c], day3)).get(c.id);
+    is("(she is deleted again, so the rest of this test reads as before)", back && [back.joined, back.checkIns, back.today], [2, 4, 1]);
+  }
+
   part("Over: no more joining or checking in");
   const after = start + 7 * DAY;
   is("checking in after the last day", await checkIn(id, c, ada, store, after), "ended");

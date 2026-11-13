@@ -94,21 +94,24 @@ export default async function ProblemPage({ params, searchParams }: Params) {
     note: w.errorNote,
     order: w.errorOrder,
   };
-  // A refused field is said at the field itself (components/order-problem-form.tsx), which takes the focus: not again here.
-  const notice = state === "reason" || state === "note"
-    ? ""
-    : state
-    ? sentences[state]
-    : trouble === "busy"
-      ? w.busyNow
-      : trouble === "error"
-        ? w.errorUnavailable
-        : !found && !choices
-          ? w.errorOrder
-          : "";
   // No form while a report may already be in the inbox, so the same report is not sent twice (review of #3838).
   const done = state === "filed" || state === "already" || state === "unknown";
   const showForm = Boolean(found && !trouble && !done);
+  const pageSentence = trouble === "busy"
+    ? w.busyNow
+    : trouble === "error"
+      ? w.errorUnavailable
+      : !found && !choices
+        ? w.errorOrder
+        : "";
+  // A refused field is said at the field itself (components/order-problem-form.tsx), which takes the focus: not again
+  // here while the form is shown. Without the form, the page says why there is none instead (review of #3838).
+  const fieldState = state === "reason" || state === "note";
+  const notice = fieldState
+    ? showForm ? "" : pageSentence || sentences[state]
+    : state
+      ? sentences[state]
+      : pageSentence;
 
   return (
     <div lang={said.lang.locale} className={`st-page st-theme-${store.look.theme} relative min-h-screen overflow-hidden`} style={lookStyle(store.look) as React.CSSProperties}>

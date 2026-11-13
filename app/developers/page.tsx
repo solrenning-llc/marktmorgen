@@ -117,15 +117,15 @@ export default function DevelopersPage() {
           Every answer is JSON. A list comes as <code className="font-mono">data</code>, and a long list comes a page at a
           time with <code className="font-mono">next</code>: send it back as <code className="font-mono">?cursor=</code> for
           the next page, until it is <code className="font-mono">null</code>.
-          {` A page holds about ${API_PAGE} rows. Products never has more; your list, your members and a course's students can have a few more on a page, and a page can come back empty before the last one, so keep asking until next is null. Times are ISO 8601, in UTC. Amounts are in the currency's smallest unit — cents for dollars.`}
+          {` A page holds about ${API_PAGE} rows. Products never has more. Your list, your members and a course's students can have a few more on a page. A page can also come back empty before the last one, so keep asking until next is null. Times are ISO 8601, in UTC. Amounts are in the currency's smallest unit — cents for dollars.`}
         </p>
         <p>
           To get only some fields of each row, add <code className="font-mono">?fields=</code> with their names,
           separated by commas, for example <code className="font-mono">/api/v1/leads?fields=email,agreed</code>. The paging
           fields beside <code className="font-mono">data</code> always stay. A field no row has is answered 400{" "}
-          <code className="font-mono">unknown_field</code>, with its name, and a name that cannot be a field (a field name is
-          lowercase letters, digits and underscores, starting with a letter, up to {FIELD_NAME_MAX} characters) or more than{" "}
-          {MAX_FIELDS_ASKED} names is answered 400 <code className="font-mono">fields</code>. Both are
+          <code className="font-mono">unknown_field</code>, with its name. A name that cannot be a field (a field name is
+          lowercase letters, digits and underscores, starting with a letter, up to {FIELD_NAME_MAX} characters), or more than{" "}
+          {MAX_FIELDS_ASKED} names, is answered 400 <code className="font-mono">fields</code>. Both are
           answered before anything is read, so they count as one request. This works on every list above, on
           Store, on Bookings, on Discount codes and on Sales.
         </p>
@@ -160,17 +160,17 @@ export default function DevelopersPage() {
           A key made by a team member who logged in without a second step is paused when the store&apos;s owner starts
           asking the team for one. Every request with it is answered 403 <code className="font-mono">key_paused</code>{" "}
           until whoever made it logs in with a passkey or an authenticator app&apos;s code and turns it back on under API
-          keys in the studio. A key made by someone who then leaves the team is paused too, and can only be revoked;
-          one made by someone whose role no longer allows it waits for the store&apos;s owner to turn it back on.
+          keys in the studio. A key made by someone who then leaves the team is paused too, and can only be revoked.
+          A key made by someone whose role no longer allows it waits for the store&apos;s owner to turn it back on.
           A paused key is never deleted. The webhook endpoints a key added are sent nothing while it is paused, start
           again when it is turned back on, and stop for good when it is revoked.
         </p>
         <p>
           {"While the store's plan renewal is unpaid, reads answer 409 "}
           <code className="font-mono">paused_unpaid</code>
-          {" (or "}
+          {". While a payment for the plan is disputed, they answer 409 "}
           <code className="font-mono">paused_disputed</code>
-          {" while a payment for the plan is disputed, and for the period that payment covered if the dispute is decided for the store, while the plan runs), before the request counts toward the month. Adding a lead, adding labels, giving a product and adding a webhook endpoint get the same 409, also before they count; its message starts \"Nothing was changed\". Removing labels, taking back access and removing a webhook endpoint are not paused: they still work and count as API requests as usual."}
+          {" instead. If the dispute is decided for the store, that goes on for the period that payment covered, while the plan runs. Both answers come before the request counts toward the month. Adding a lead, adding labels, giving a product and adding a webhook endpoint get the same 409, also before they count; its message starts \"Nothing was changed\". Removing labels, taking back access and removing a webhook endpoint are not paused: they still work and count as API requests as usual."}
         </p>
       </LegalSection>
 
@@ -267,7 +267,7 @@ export default function DevelopersPage() {
           <code className="font-mono">total</code> is how many students the course has in all.
         </Endpoint>
         <p>
-          {`Changed on November 4, 2026: students now come a page at a time, about ${n(API_PAGE)} a page in no set order, and no longer as the 500 most recently active. If the course changes while you page through it, a student can show up twice, or a page can come back empty before the last one, so the rows you add up may not match total.`}
+          {`Changed on November 4, 2026: students now come a page at a time, about ${n(API_PAGE)} a page in no set order, and no longer as the 500 most recently active. If the course changes while you page through it, a student can show up twice, or a page can come back empty before the last one. So the rows you add up may not match total.`}
         </p>
         <p>
           {`Each page reads every student's progress, so a full page of ${n(API_PAGE)} counts as ${n(STUDENTS_PAGE_COUNTS)} of your API requests (${n(STUDENTS_PAGE_COUNTS_MOST)} when more than ${n(BLOCKED_READ_MAX)} students of the course are blocked). A smaller page counts as fewer.`}
@@ -293,7 +293,7 @@ export default function DevelopersPage() {
           Your numbers for the last 7, 30 and 90 days, the same ones your studio shows: visitors, checkouts, sales and
           revenue, each channel from visit to sale, and page views by country and by device.
         </Endpoint>
-        <p>{`Read anew, it reads 180 days of counts and, with your Stripe account connected, every page of your sales, renewals, refunds and disputes it may need, so it counts as ${n(NUMBERS_COUNT)} of your API requests (${n(NUMBERS_COUNT_NO_SALES)} for a store with no sales to read), and more when you have PayPal sales or refunds. A copy of the numbers is then kept for an hour: within that hour, a read comes from the copy and counts only for reading it and its answer, as few as ${n(NUMBERS_KEPT_LEAST)} and at most ${n(NUMBERS_KEPT_MOST)}. `}<code className="font-mono">asOf</code>{" says when the numbers were read, in ISO 8601 (UTC), so a number up to an hour old is never taken for one of this minute."}</p>
+        <p>{`Read anew, it reads 180 days of counts and, with your Stripe account connected, every page of your sales, renewals, refunds and disputes it may need. So it counts as ${n(NUMBERS_COUNT)} of your API requests (${n(NUMBERS_COUNT_NO_SALES)} for a store with no sales to read), and more when you have PayPal sales or refunds. A copy of the numbers is then kept for an hour. Within that hour, a read comes from the copy and counts only for reading it and its answer, as few as ${n(NUMBERS_KEPT_LEAST)} and at most ${n(NUMBERS_KEPT_MOST)}. `}<code className="font-mono">asOf</code>{" says when the numbers were read, in ISO 8601 (UTC), so a number up to an hour old is never taken for one of this minute."}</p>
         <Code>{`{
   "data": {
     "currency": "usd",
@@ -444,7 +444,7 @@ export default function DevelopersPage() {
 
       <LegalSection title="Ask your AI assistant">
         <p>
-          Marktmorgen is also an MCP server, so an assistant that speaks the Model Context Protocol — Claude, ChatGPT,
+          Marktmorgen is also an MCP server. An assistant that speaks the Model Context Protocol — Claude, ChatGPT,
           Cursor and others — can answer questions like &quot;which channel made me money this month?&quot; from your own
           numbers. Add it as a remote server at <code className="font-mono">https://marktmorgen.com/api/mcp</code>, with
           the header <code className="font-mono">Authorization: Bearer nl_live_…</code> and one of your keys.
@@ -459,8 +459,8 @@ export default function DevelopersPage() {
           and its sales page block by block (testimonials counted, never quoted), a course&apos;s outline and each lesson&apos;s
           text, quiz and task (files named, never located), how a product&apos;s page test is going, how far down its
           sales page visitors read and its earlier versions, the sections you saved to reuse, and which store the key belongs to. Most of the ones about a stretch of time take <code className="font-mono">days</code>: 7, 30 or 90.
-          It changes nothing, and it does not read anybody&apos;s name or address, buyers&apos;, members&apos;,
-          subscribers&apos; or affiliates&apos;: what an assistant reads is kept by whoever runs the assistant,
+          It changes nothing, and it does not read anybody&apos;s name or address: buyers&apos;, members&apos;,
+          subscribers&apos; or affiliates&apos;. What an assistant reads is kept by whoever runs the assistant,
           and the people on your list did not agree to that. The endpoints above are where your own tools read them.
         </p>
         <p>
@@ -583,7 +583,7 @@ export default function DevelopersPage() {
         <Endpoint method="POST" path="/api/v1/access">
           Gives a product to an address with no payment, as an import of past buyers does: a file, a link, a course, a
           podcast or a bundle, by its id or its exact name. They open it from your store&apos;s list of purchases with
-          that address, where it shows as given by your store, not as a sale; it is not counted in your numbers, sent to
+          that address, where it shows as given by your store, not as a sale. It is not counted in your numbers, sent to
           webhooks or credited to an affiliate. Send <code className="font-mono">notify: true</code> and they get one email
           from your store&apos;s name saying so, in your store&apos;s language, while your plan is running. Somebody
           deleted from your store is never given anything again or emailed.
@@ -640,7 +640,7 @@ export default function DevelopersPage() {
 }`}</Code>
         <p>
           <code className="font-mono">amount_cents</code> is what the buyer paid at checkout, products checked at checkout
-          included, in the currency&apos;s smallest unit, as Stripe counts it: cents for dollars, but whole yen for{" "}
+          included. It is in the currency&apos;s smallest unit, as Stripe counts it: cents for dollars, but whole yen for{" "}
           <code className="font-mono">jpy</code> and whole units for the other currencies Stripe has without decimals,
           such as <code className="font-mono">krw</code>. So 4900 is $49.00 in <code className="font-mono">usd</code> and
           ¥4,900 in <code className="font-mono">jpy</code>. <code className="font-mono">discount_cents</code> is in the same
@@ -648,8 +648,8 @@ export default function DevelopersPage() {
         </p>
         <p>
           <code className="font-mono">paid_at</code> is when the buyer paid: the charge, or for a membership or
-          payment plan, when its first invoice was paid (with a free trial, that invoice is for $0, so this is when the
-          trial began). It is not when the checkout page was opened. It is{" "}
+          payment plan, when its first invoice was paid. With a free trial, that invoice is for $0, so this is when the
+          trial began. It is not when the checkout page was opened. It is{" "}
           <code className="font-mono">null</code> when nothing was charged at checkout, such as a free order.{" "}
           <code className="font-mono">currency</code> is always the three-letter code Stripe gave: if Stripe did not
           give one for a sale, the answer is 502 <code className="font-mono">unavailable</code>, never a guessed{" "}
@@ -657,19 +657,19 @@ export default function DevelopersPage() {
         </p>
         <p>
           Products checked at checkout are in <code className="font-mono">order_bumps</code>, in the order of their boxes,
-          and the first is also in <code className="font-mono">order_bump</code>; a bundle&apos;s products are in{" "}
+          and the first is also in <code className="font-mono">order_bump</code>. A bundle&apos;s products are in{" "}
           <code className="font-mono">bundle_items</code>, which is <code className="font-mono">null</code> when there is
           no bundle. A product&apos;s <code className="font-mono">title</code> is{" "}
           <code className="font-mono">null</code> when the product is no longer in your store
           {`, or, on a page naming more than ${SALES_TITLE_IDS} different products, for those past the ${SALES_TITLE_IDS}th. `}
           A one-click extra taken after the checkout (an upsell) is its own payment, not a checkout, so it is not on this
-          list: the <code className="font-mono">sale.completed</code> webhook with{" "}
+          list. The <code className="font-mono">sale.completed</code> webhook with{" "}
           <code className="font-mono">&quot;kind&quot;: &quot;upsell&quot;</code> tells you of each one.
         </p>
         <p>
           <code className="font-mono">refunded_cents</code> and <code className="font-mono">disputed</code> are not in the
           webhook, which is sent when the sale is made. For a one-time payment they are read from its charge when you
-          call: how much of it was refunded so far, in the same unit as <code className="font-mono">amount_cents</code>, and
+          call. They say how much of it was refunded so far, in the same unit as <code className="font-mono">amount_cents</code>, and
           whether the buyer disputed it. For a membership or payment plan, and when nothing was charged, both are{" "}
           <code className="font-mono">null</code>: not read here, which is not the same as none. Add the{" "}
           <code className="font-mono">refund.issued</code> and <code className="font-mono">dispute.opened</code> webhooks in
@@ -680,13 +680,13 @@ export default function DevelopersPage() {
           <code className="font-mono">opened_at</code>, when the checkout page was opened, not by{" "}
           <code className="font-mono">paid_at</code>. A buyer can open a checkout and pay later, and some payment methods,
           such as bank debits, settle days after that, so a sale can appear below sales you already read. To keep a copy
-          in step, read again from the top each time and go on until a sale&apos;s{" "}
+          in step, read again from the top each time. Go on until a sale&apos;s{" "}
           <code className="font-mono">opened_at</code> is earlier than your last read, less a margin: at least 24 hours,
           and a week or more if your store takes payment methods that settle later. Use{" "}
           <code className="font-mono">checkout_session</code> to skip a sale you already have.
         </p>
         <p>
-          {`Texts are cut to a fixed length, so a page stays small: a product's title from the checkout to ${SALE_TEXT_LIMITS.title} characters, the buyer's name to ${SALE_TEXT_LIMITS.name}, each utm tag to ${SALE_TEXT_LIMITS.utm} and the site to ${SALE_TEXT_LIMITS.site}, with control characters left out. Lengths are counted in UTF-16 code units, as JavaScript counts them, so an emoji counts as 2. An email address longer than ${SALE_TEXT_LIMITS.email} characters is not a real one, so it is null rather than cut, and so is one holding a control character.`}{" "}
+          {`Texts are cut to a fixed length, so a page stays small. A product's title from the checkout is cut to ${SALE_TEXT_LIMITS.title} characters, the buyer's name to ${SALE_TEXT_LIMITS.name}, each utm tag to ${SALE_TEXT_LIMITS.utm} and the site to ${SALE_TEXT_LIMITS.site}, with control characters left out. Lengths are counted in UTF-16 code units, as JavaScript counts them, so an emoji counts as 2. An email address longer than ${SALE_TEXT_LIMITS.email} characters is not a real one, so it is null rather than cut, and so is one holding a control character.`}{" "}
           <code className="font-mono">product.id</code> and <code className="font-mono">option</code> are{" "}
           <code className="font-mono">null</code> when the id stored on the checkout is not shaped like an id (letters,
           digits, hyphens and underscores, up to 64).
@@ -701,12 +701,12 @@ export default function DevelopersPage() {
 
       <LegalSection title="Checkout on your own website">
         <p>
-          To sell from your own site, no key is needed or allowed in a web page: the{" "}
+          To sell from your own site, no key is needed or allowed in a web page. The{" "}
           <Link href="/developers/checkout-script" className="text-black underline underline-offset-2 hover:no-underline">
             checkout script
           </Link>{" "}
           opens a product&apos;s card or your sign-up form over your page, by a link that names only your store and the
-          product, and tells your page and your webhooks what happened.
+          product. It tells your page and your webhooks what happened.
         </p>
       </LegalSection>
     </LegalPage>

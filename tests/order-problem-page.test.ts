@@ -214,3 +214,28 @@ test("purchases this page does not list are said as such, never 'no orders' (rev
   assert.ok(/older > 0 \? <p[^>]*>\{w\.olderNotListed\}/.test(page), "and says them when there are any");
   assert.ok(/choices\.length === 0 && older === 0/.test(page) || /!choices\.length && !older/.test(page), "'no orders' only when nothing waits either");
 });
+
+test("'busy' never says nothing was sent, in any language: a pending mark is answered busy while the report may be on its way (review of #3838, MÉDIO)", () => {
+  const sentPhrases: Record<string, RegExp> = {
+    en: /nothing was sent/i,
+    es: /no se envi[oó] nada/i,
+    fr: /rien n'a été envoyé/i,
+    de: /nichts gesendet/i,
+    it: /non è stato inviato nulla/i,
+    nl: /niets verstuurd/i,
+    pt: /nada foi enviado/i,
+  };
+  for (const [code, phrase] of Object.entries(sentPhrases)) {
+    const busy = orderProblemWords(code).busyNow;
+    assert.ok(!phrase.test(busy), `${code}: busy does not claim nothing was sent`);
+    assert.ok(busy.length > 10, `${code}: busy still says something`);
+  }
+});
+
+test("a refused field with no form on the page still says why there is no form (review of #3838, LEVE)", async () => {
+  const { token } = await shop();
+  sessions = [];
+  const html = unescape(await render({ token, ref: "cs_test_nosuchorder", problem: "reason" }));
+  assert.ok(!html.includes('action="/api/store/order-problem"'), "no form for an order not found");
+  assert.ok(new RegExp(`role="(status|alert)"[^>]*>[\\s\\S]*${en.errorOrder.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`).test(html), "the order not found is said, not an empty status");
+});

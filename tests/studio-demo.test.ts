@@ -428,7 +428,8 @@ async function run(): Promise<void> {
   is("and still acts", (await officeAct()).ok, true);
 
   part("Its first drafts, and what the module may reach");
-  const seedFile = readFileSync("lib/demo-seed.ts", "utf8");
+  // The demo store's seed and the product and call data it seeds from (lib/demo-catalog.ts).
+  const seedFile = readFileSync("lib/demo-seed.ts", "utf8") + readFileSync("lib/demo-catalog.ts", "utf8");
   is("the product, the page and the offer are the demo store's own words", [
     STUDIO_DEMO_SEED.product.title, STUDIO_DEMO_SEED.product.summary, STUDIO_DEMO_SEED.page.blocks[0].headline, STUDIO_DEMO_SEED.page.blocks[0].sub, STUDIO_DEMO_SEED.offer.product,
   ].map((words) => seedFile.includes(`"${words}"`)), [true, true, true, true, true]);

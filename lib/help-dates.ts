@@ -94,6 +94,7 @@ export const HELP_DATES: Readonly<Record<string, HelpDates>> = {
   "can-i-put-a-label-on-many-contacts-at-once": { created: "2026-11-12", updated: "2026-11-12", digest: "f70944fc6353" },
   "can-i-publish-an-email-i-sent-on-my-store": { created: "2026-10-18", updated: "2026-10-18", digest: "13fff935382b" },
   "can-i-send-my-list-to-mailchimp-kit-beehiiv-or-mailerlite": { created: "2026-09-27", updated: "2026-09-28", digest: "93c31964c4fd" },
+  "how-do-i-tell-zapier-make-or-my-own-server-when-something-happens-in-my-store": { created: "2026-11-12", updated: "2026-11-12", digest: "eb5c2cc30fcf" },
   "can-buyers-leave-reviews": { created: "2026-09-27", updated: "2026-11-01", digest: "09cbf4e74ab5" },
   "can-i-build-a-sales-page-or-a-landing-page": { created: "2026-09-27", updated: "2026-10-29", digest: "2fa8ebdc354b" },
   "how-do-i-build-a-funnel": { created: "2026-11-12", updated: "2026-11-12", digest: "5e96733f475e" },

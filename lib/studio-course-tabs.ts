@@ -15,14 +15,16 @@ import { emailKey, studentEmail, studentsPage } from "@/lib/learn";
 import { passedFor } from "@/lib/quiz";
 import { isUnreadSubmission, submissionsOf, waitingWork } from "@/lib/assignment";
 import { recentComments } from "@/lib/lesson-comments";
+import { readCardsOnly, visibleIds } from "@/lib/catalog";
+import type { Store } from "@/lib/store";
 import { streamCaptions, streamStates } from "@/lib/stream";
 import { autoWriting } from "@/lib/auto-captions";
 
-export const COURSE_TABS = ["course", "videos", "work", "comments", "students", "certificates"] as const;
+export const COURSE_TABS = ["course", "videos", "shelf", "work", "comments", "students", "certificates"] as const;
 export type CourseTab = (typeof COURSE_TABS)[number];
 
 /** How many rows a tab shows at a time, each sized so the tab's worst case fits the page's reads. */
-export const COURSE_TAB_PAGE: Record<Exclude<CourseTab, "course" | "videos">, number> = {
+export const COURSE_TAB_PAGE: Record<Exclude<CourseTab, "course" | "videos" | "shelf">, number> = {
   // A piece of work can hold MAX_ANSWER_TEXT and MAX_FEEDBACK characters (up to ~44 KB): three fit the page's
   // bytes with the ids of every page before it (MAX_WORK_PAGES).
   work: 3,
@@ -105,4 +107,23 @@ export async function videosTab(course: Course, pageAsked: number) {
   } catch {
     return null;
   }
+}
+
+/** Products the Shelf tab offers at a time (unit E): their cards in one HMGET, with the six already chosen. */
+export const SHELF_PAGE = 25;
+
+/**
+ * One page of the store's products to put on the course's "More from" shelf, in the creator's order, read from
+ * their cards only (never healed from a listing on a load): `options` this page's products but the course, `saved`
+ * the shelf as chosen, and `unnamed` how many asked had no card to read, said on the page as such.
+ */
+export async function shelfTab(store: Store, course: Course, productId: string, pageAsked: number) {
+  const all = visibleIds(store).filter((pid) => pid !== productId);
+  const pages = Math.max(1, Math.ceil(all.length / SHELF_PAGE));
+  const page = Math.min(Math.max(1, pageAsked), pages);
+  const shown = all.slice((page - 1) * SHELF_PAGE, page * SHELF_PAGE);
+  const chosen = (course.shelf ?? []).slice(0, 6);
+  const read = await readCardsOnly(store, [...shown, ...chosen]);
+  const pick = (pid: string) => (read.found.has(pid) ? [{ id: pid, title: read.found.get(pid)!.title }] : []);
+  return { page, pages, total: all.length, options: shown.flatMap(pick), saved: chosen.flatMap(pick), unnamed: shown.filter((pid) => !read.found.has(pid)).length };
 }

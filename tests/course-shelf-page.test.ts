@@ -112,7 +112,9 @@ async function main(): Promise<void> {
   const route = read("app/api/store/course/route.ts");
   is("the studio's action keeps only ids the store has, and saves through the course's own edit", /action === "shelf"[\s\S]{0,400}hasProduct\(store, p\)[\s\S]{0,300}op: "shelf", products: asked, courseProductId: product\.id/.test(route), true);
   const studio = read("app/studio/course/[product]/page.tsx");
-  is("the studio offers the store's listed products, the course left out, and says so when they cannot be read", [studio.includes("<CourseShelfStudio"), /visibleIds\(store\)\.filter\(\(pid\) => pid !== product\.id/.test(studio), studio.includes("Your products could not be read just now")], [true, true, true]);
+  // Since #4304 unit E the offer is the Shelf tab's, a page of products at a time (lib/studio-course-tabs.ts).
+  const tabs = read("lib/studio-course-tabs.ts");
+  is("the studio offers the store's listed products, the course left out, and says so when they cannot be read", [studio.includes("<CourseShelfStudio"), /visibleIds\(store\)\.filter\(\(pid\) => pid !== productId\)/.test(tabs), studio.includes("Your products could not be read just now")], [true, true, true]);
   const editor = read("components/course-shelf-studio.tsx");
   is("the editor moves with buttons, never by dragging, and only saves when asked", [editor.includes("draggable"), editor.includes("Move ${p.title} up"), editor.includes("Undo changes"), editor.includes('action: "shelf"')], [false, true, true, true]);
   // The focus after each action of the editor (WCAG 2.4.3, independent review of ca3c397): never left on a button that went away or became disabled.

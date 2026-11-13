@@ -1088,6 +1088,46 @@ export async function readCardsFor(store: Store, ids: Iterable<string>): Promise
   return found;
 }
 
+/**
+ * The cards of these products only, as readCardsFor reads them, but never healed from their listings (issue #4304,
+ * unit E): a listing can hold MAX_PRODUCT_BYTES, more than a studio page's whole figure, so a page that shows a
+ * few products' names reads their cards only. `missing` are the asked products without a card in its shape: the
+ * page says their name is not read yet, never guesses it. Throws UnknownReplyError on a reply of another shape.
+ */
+export async function readCardsOnly(store: Store, ids: Iterable<string>): Promise<{ found: Map<string, Card>; missing: string[] }> {
+  const asked = wanted(store, ids);
+  const catalog = store.catalog;
+  const cardOf = (p: Listing): Card => ({ id: p.id, title: p.title, priceCents: p.priceCents, page: p.page });
+  const found = new Map<string, Card>();
+  if (catalog.inline) {
+    const byId = new Map(catalog.inline.map((p) => [p.id, p]));
+    for (const id of asked) {
+      const product = byId.get(id);
+      if (product) found.set(id, cardOf(product));
+    }
+    return { found, missing: asked.filter((id) => !found.has(id)) };
+  }
+  const head = new Map(catalog.head.map((listing) => [listing.id, listing]));
+  for (const id of asked) {
+    const listing = head.get(id);
+    if (listing) found.set(id, cardOf(listing));
+  }
+  const rest = asked.filter((id) => !head.has(id));
+  if (!rest.length || !catalog.id || !isRedisConfigured()) return { found, missing: rest };
+  const replies = redisReply.repliesFor(await redisPipeline([["HMGET", titlesKey(catalog.id), ...rest]]), 1);
+  const slots = replies ? redisReply.repliesFor(replies[0], rest.length) : null;
+  if (!slots) throw new redisReply.UnknownReplyError("the products' cards");
+  const missing: string[] = [];
+  rest.forEach((id, i) => {
+    const raw = slots[i];
+    if (raw !== null && typeof raw !== "string") throw new redisReply.UnknownReplyError("a product's card");
+    const card = raw === null ? null : parseCard(id, raw);
+    if (card) found.set(id, card);
+    else missing.push(id);
+  });
+  return { found, missing };
+}
+
 /** When the studio's list is one page of a longer one, as the studio page read it. */
 export type ProductPaging = {
   page: number;

@@ -40,12 +40,14 @@ async function main(): Promise<void> {
       bytes += Buffer.byteLength(JSON.stringify(replies));
       return replies;
     };
-    const read = await shelfTab(store, course, "p000000000", 999).catch((error) => error);
+    const read = await shelfTab(store, course, "p000000000", 1).catch((error) => error);
     redis.pipeline = realPipeline;
+    const last = await shelfTab(store, course, "p000000000", 999).catch((error) => error);
     console.log(`  ${what}: ${commands} commands, ${bytes} bytes`);
     is(`${what}: within ${COMMANDS} commands and ${BYTES} bytes`, commands <= COMMANDS && bytes <= BYTES, true);
     is(`${what}: no listing read to heal a card`, commands <= 1, true);
     if (what.startsWith("no card")) is("the products without a card are said as such", (read as { unnamed?: number })?.unnamed, SHELF_PAGE);
+    is(`${what}: past the last page, the last one`, (last as { page?: number; pages?: number })?.page === (last as { pages?: number })?.pages, true);
   }
 
   part("The lessons tab names the six chosen, never every product's card");

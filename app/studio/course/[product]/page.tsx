@@ -17,7 +17,7 @@ import { lessonCount, lessonsInOrder, readCourse } from "@/lib/course";
 import { captionsAnchor, lessonCaptionCheck } from "@/lib/course-access-check";
 import { CourseAccessCheck } from "@/components/course-access-check";
 import { canSellProduct } from "@/lib/store-checkout";
-import { COURSE_TAB_PAGE, MAX_TAB_PAGES, MAX_WORK_PAGES, type CourseTab, VIDEO_BLOCK, certificatesTab, commentsTab, courseTab, studentsTab, tabCursor, tabPage, videosTab, workTab } from "@/lib/studio-course-tabs";
+import { COURSE_TAB_PAGE, MAX_TAB_PAGES, MAX_WORK_PAGES, type CourseTab, SHELF_PAGE, VIDEO_BLOCK, certificatesTab, commentsTab, courseTab, studentsTab, tabCursor, shelfTab, tabPage, videosTab, workTab } from "@/lib/studio-course-tabs";
 import { CertificateValidity } from "@/components/certificate-validity";
 import {
   CertificateSwitch, CourseStart,
@@ -26,7 +26,7 @@ import {
   StudentAccess,
   WithdrawCertificate,
 } from "@/components/course-editor";
-import { readListing, readTitles, visibleIds } from "@/lib/catalog";
+import { readCardsOnly, readListing } from "@/lib/catalog";
 import { CourseShelfStudio } from "@/components/course-shelf-studio";
 import { templateById } from "@/lib/course-templates";
 import { isStreamConfigured } from "@/lib/stream";
@@ -48,6 +48,7 @@ export const metadata: Metadata = {
 const COURSE_TAB_LINKS: [CourseTab, string][] = [
   ["course", "Lessons"],
   ["videos", "Videos"],
+  ["shelf", "Shelf"],
   ["work", "Work handed in"],
   ["comments", "Comments"],
   ["students", "Students"],
@@ -156,9 +157,10 @@ export default async function StudioCoursePage({
   const aiState = (onCourse || tab === "work") && aiAvailableFor(store) ? { on: true, left: await aiLeft(store).catch(() => 0) } : { on: false, left: 0 };
   // The "More from" shelf (628 [HN4](b)): the store's listed products to pick from, the course left out, by name.
   // Null when the names could not be read: the section says so instead of an empty list (rule 24).
-  const shelfTitles = onCourse ? await readTitles(store).catch(() => null) : null;
-  const shelfOptions = shelfTitles ? visibleIds(store).filter((pid) => pid !== product.id && shelfTitles.has(pid)).map((pid) => ({ id: pid, title: shelfTitles.get(pid)! })) : [];
-  const shelfSaved = shelfTitles ? (course.shelf ?? []).filter((pid) => shelfTitles.has(pid)).map((pid) => ({ id: pid, title: shelfTitles.get(pid)! })) : [];
+  // Unit E: the lessons tab names the six chosen (their cards only); the Shelf tab offers a page of products.
+  const chosenCards = onCourse && (course.shelf ?? []).length ? await readCardsOnly(store, (course.shelf ?? []).slice(0, 6)).catch(() => null) : { found: new Map(), missing: [] };
+  const shelfNames = chosenCards ? (course.shelf ?? []).slice(0, 6).map((pid) => chosenCards.found.get(pid)?.title ?? null) : null;
+  const shelf = tab === "shelf" ? await shelfTab(store, course, product.id, page).catch(() => null) : null;
 
   // Students: a page of them; null when they could not be read (rule 24), never "No students yet" or counts of 0.
   // By cursor (unit C): HSCAN has no order, so a page is sorted within itself and the page says so.
@@ -310,21 +312,22 @@ export default async function StudioCoursePage({
 
         <section className="card mt-8 p-6 sm:p-8" aria-labelledby="shelf-title">
           <h2 id="shelf-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">More from your store</h2>
-          <p className="mt-2 max-w-2xl text-ink-soft">
-            Pick up to six of your other products to show your students on this course&apos;s front page, under the
-            lessons. Each one shows its name, its short description and the price on its card, and links to its page.
-            A student never sees what they already have from you, and sees nothing at all when that cannot be checked.
-            Nothing shows inside a lesson.
-          </p>
-          {shelfTitles === null ? (
+          {shelfNames === null ? (
             <p role="status" className="notice mt-3">
-              Your products could not be read just now. Reload this page in a moment; your shelf is unchanged.
+              Your shelf could not be read just now. Reload this page in a moment; it is unchanged.
             </p>
-          ) : shelfOptions.length === 0 && shelfSaved.length === 0 ? (
-            <p className="mt-3 text-sm text-ink-soft">Publish another product first; then you can add it here.</p>
+          ) : shelfNames.length === 0 ? (
+            <p className="mt-2 text-ink-soft">No products on this course&apos;s shelf yet.</p>
           ) : (
-            <CourseShelfStudio productId={product.id} saved={shelfSaved} options={shelfOptions} />
+            <ol className="mt-3 list-decimal space-y-1 pl-5 text-ink">
+              {shelfNames.map((name, i) => (
+                <li key={i}>{name ?? "A product whose name is not read yet"}</li>
+              ))}
+            </ol>
           )}
+          <Link href={tabHref("shelf")} className="mt-3 inline-block min-h-11 py-3 text-sm font-bold text-ink-soft underline underline-offset-4 hover:text-violet-deep">
+            Choose the products on the shelf
+          </Link>
         </section>
 
           </>
@@ -351,6 +354,36 @@ export default async function StudioCoursePage({
               </>
             )}
           </>
+        ) : null}
+        {tab === "shelf" ? (
+          <section className="card mt-8 p-6 sm:p-8" aria-labelledby="shelf-pick-title">
+            <h2 id="shelf-pick-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">Choose the products on the shelf</h2>
+            <p className="mt-2 max-w-2xl text-ink-soft">
+              Pick up to six of your other products to show your students on this course&apos;s front page, under the
+              lessons. Each one shows its name, its short description and the price on its card, and links to its page.
+              A student never sees what they already have from you, and sees nothing at all when that cannot be checked.
+              Nothing shows inside a lesson. Save before you go to another page of products.
+            </p>
+            {shelf === null ? (
+              <p role="status" className="notice mt-3">
+                Your products could not be read just now. Reload this page in a moment; your shelf is unchanged.
+              </p>
+            ) : shelf.total === 0 ? (
+              <p className="mt-3 text-sm text-ink-soft">Publish another product first; then you can add it here.</p>
+            ) : (
+              <>
+                {shelf.unnamed ? (
+                  <p role="status" className="notice mt-3">
+                    {shelf.unnamed === 1
+                      ? "One product on this page is not listed here: its name could not be read just now."
+                      : `${shelf.unnamed} products on this page are not listed here: their names could not be read just now.`}
+                  </p>
+                ) : null}
+                <CourseShelfStudio productId={product.id} saved={shelf.saved} options={shelf.options} />
+                <TabPager label="Pages of your products" noun="products" page={shelf.page} size={SHELF_PAGE} shown={Math.min(SHELF_PAGE, shelf.total - (shelf.page - 1) * SHELF_PAGE)} total={shelf.total} maxPages={shelf.pages} href={(at) => tabHref("shelf", at)} />
+              </>
+            )}
+          </section>
         ) : null}
         {tab === "work" ? (
           <>

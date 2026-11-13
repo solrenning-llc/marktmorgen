@@ -35,6 +35,7 @@ export function ConfirmAction({
   // as the browser's own dialog did, never to the top of the page.
   const trigger = useRef<HTMLButtonElement>(null);
   const wasAsking = useRef(false);
+  const pending = useRef(false);
   useEffect(() => {
     if (wasAsking.current && !asking) trigger.current?.focus();
     wasAsking.current = asking;
@@ -49,13 +50,21 @@ export function ConfirmAction({
   return (
     <span role="group" aria-label={question} className="flex flex-wrap items-center gap-2 text-sm" data-confirm-action onKeyDown={(e) => { if (e.key === "Escape") setAsking(false); }}>
       <span className="font-semibold text-ink">{question}</span>
+      {/* Unavailable while it waits, but never disabled: a disabled button cannot keep the focus, and the browser
+          would drop it to the top of the page (2.4.3). aria-disabled says so, and a press then does nothing. */}
       <button
         type="button"
         className="btn btn-danger btn-sm"
-        disabled={disabled || busy}
+        aria-disabled={disabled || busy || undefined}
         aria-busy={busy}
         onClick={async () => {
-          await onConfirm();
+          if (disabled || busy || pending.current) return;
+          pending.current = true;
+          try {
+            await onConfirm();
+          } finally {
+            pending.current = false;
+          }
           setAsking(false);
         }}
       >

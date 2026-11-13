@@ -1517,6 +1517,18 @@ export class MemoryRedis {
           for (const k of keys) this.run(["HDEL", k, argv[1]]);
           return 1;
         }
+        // lib/calls.ts CONFIRM_STEP: a booking's confirmation mark moved on only from a stage named, read and written in one step.
+        if (key.startsWith("-- marktmorgen:call-confirm-step:v1\n") && args[0] === "1") {
+          const held = this.run(["GET", args[1]]);
+          if (typeof held !== "string") return [0];
+          for (let i = 3; i + 1 < args.length; i += 2) {
+            if (held === args[i]) {
+              this.run(["SET", args[1], args[i + 1], "XX", "EX", args[2]]);
+              return [1, held];
+            }
+          }
+          return [0, held];
+        }
         // lib/closing-holds.ts CALL_BUDGET_ONCE: a closing's call budget, set once per ending, step for step (Codex S on #3309).
         if (key.startsWith("-- marktmorgen:closing-call-budget:v1\n") && args[0] === "1" && args.length === 4) {
           const [, work, calls, ending] = args;
@@ -1532,6 +1544,15 @@ export class MemoryRedis {
         }
         if (key.startsWith("-- marktmorgen:store-data:v1\n") && args[0] === "1") return this.storeData(args.slice(1));
         if (key.startsWith("-- marktmorgen:order-write:v1\n")) return this.orderWrite(args);
+        // lib/order-data.ts ORDER_WRITE_ONCE: ORDER_WRITE behind a once-only mark (KEYS[2]), read first; a mark there
+        // writes nothing, and a command refused inside takes the mark back out.
+        if (key.startsWith("-- marktmorgen:order-write-once:v1\n") && Number(args[0]) >= 2) {
+          const held = this.run(["GET", args[2]]);
+          if (typeof held === "string") return [-2, held];
+          const out = this.orderWrite(args);
+          if (Array.isArray(out) && out.slice(1).some((r) => typeof r === "string" && r.startsWith("\u0000order-write-error:"))) this.run(["DEL", args[2]]);
+          return out;
+        }
         if (key.startsWith("-- marktmorgen:recount-page:v1\n") && args[0] === "2") {
           const [state, sums, from, next, ...pairs] = args.slice(1);
           if (pairs.length % 2 !== 0) return -1;

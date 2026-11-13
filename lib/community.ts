@@ -867,6 +867,12 @@ export type NewPost = {
   img: CommunityImage | null;
   kind: "post" | "announcement";
   poll: Poll | null;
+  /**
+   * The post's id, when it is fixed beforehand: a held post is published
+   * under its own item's id (lib/community-approval.ts, 543 [CM2]), so a
+   * write whose reply was lost can be found, and never made twice.
+   */
+  id?: string;
 };
 
 /** Writes a post. The caller has checked who may, and cleaned what it says. */
@@ -879,7 +885,7 @@ export async function createPost(id: string, input: NewPost, room: DataStore): P
   const n = countOf(repliesFor(await redisPipeline([["INCR", seqKey(id)]]), 1)?.[0]);
   if (n === null || n < 1) throw new UnknownReplyError("INCR of a community's post sequence");
   const post: Post = {
-    id: newItemId(),
+    id: input.id && ITEM_ID.test(input.id) ? input.id : newItemId(),
     n,
     sp: input.space,
     a: input.author,
@@ -1149,7 +1155,7 @@ export async function readComment(id: string, post: string, comment: string): Pr
 export async function addComment(
   id: string,
   post: string,
-  input: { parent: string; author: string; text: string },
+  input: { parent: string; author: string; text: string; id?: string },
   room: DataStore,
 ): Promise<{ ok: true; comment: Comment } | { ok: false; reason: "full" | "parent" }> {
   // An unreadable count is unknown, never under the cap (rule 24): nothing is written on it.
@@ -1162,7 +1168,8 @@ export async function addComment(
     if (!above) return { ok: false, reason: "parent" };
     parent = above.parent || above.id;
   }
-  const comment: Comment = { id: newItemId(), parent, a: input.author, text: input.text, at: now(), hid: false, ed: 0 };
+  // A fixed id: a held comment is published under its item's id (543 [CM2]), as a held post is.
+  const comment: Comment = { id: input.id && ITEM_ID.test(input.id) ? input.id : newItemId(), parent, a: input.author, text: input.text, at: now(), hid: false, ed: 0 };
   const traced = comment.a !== CREATOR;
   await needData(room, [{ slot: POST_SLOT(post), bytes: commentBytes(comment) }, ...(traced ? [TRACE_ENTRY] : [])]);
   await redisPipeline([["HSET", commentsKey(id, post), comment.id, JSON.stringify(comment)], ...(traced ? [["SADD", traceKey(id, comment.a), `c:${post}:${comment.id}`]] : [])]);

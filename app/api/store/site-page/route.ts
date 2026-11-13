@@ -9,7 +9,7 @@ import { claimNewPictures, dropPage, picturesOfFailedDrop, readPage, releasePict
 import { del } from "@/lib/blob";
 import { ownsImagePath } from "@/lib/product-image";
 import { isStoredPicture } from "@/lib/picture-check";
-import { hasPlaceholder } from "@/lib/mail-body";
+import { templateLeft } from "@/lib/template-text";
 import { MAX_SITE_PAGES, SITE_KINDS, SITE_PAGE_ID, SITE_STARTERS, type SitePage, outFrom, siteKey, siteTitle, slugFrom, slugProblem } from "@/lib/site-page-rules";
 
 /** Thirty full blocks as JSON, with room to spare; a page is held to MAX_PAGE_BYTES. */
@@ -106,9 +106,11 @@ export async function POST(request: NextRequest) {
       if (problem) return refuse(problem);
       if (page.blocks.some((block) => !SITE_KINDS.includes(block.kind))) return refuse("kind");
       if (oversized(page)) return refuse("too_big");
-      // A part left ⟦like this⟧ for the creator to write (lib/funnel-ai-rules.ts) is a
-      // direction, never words shown to visitors: kept while hidden, refused once shown or scheduled.
-      if (outFrom(page) !== -1 && hasPlaceholder(JSON.stringify(page.blocks))) return refuse("placeholder");
+      // A part left ⟦like this⟧ for the creator to write (lib/funnel-ai-rules.ts), or a campaign's own part in
+      // [brackets] (lib/funnel-starters.ts), is a direction, never words shown to visitors: kept while hidden,
+      // refused once shown or scheduled, saying the block and the part (754 [STN1], unit 1).
+      const left = outFrom(page) !== -1 ? templateLeft(page) : null;
+      if (left) return Response.json({ ok: false, error: "placeholder", ...left }, { status: 400 });
       if (!store.statsId) {
         // A store written before it had one is given its id with the list.
         const marked = await setSitePages(ref, pages);

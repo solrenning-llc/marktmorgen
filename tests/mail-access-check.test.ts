@@ -60,6 +60,20 @@ part("A bare web address");
 
 part("In order, as the email reads");
 is("order", kinds(["[More](https://example.com/b)", pictureLine("", pic(3)), "Go to https://example.com/c"].join("\n\n")), ["button", "picture", "address"]);
+{
+  // Windows line ends (a text pasted or sent as a form): the email splits paragraphs after turning them into \n,
+  // so a blank line made of \r\n still ends a paragraph here, and the place found is still the one checked.
+  const crlf = ["Hello", "[Click here](https://example.com/b)", "See https://example.com/c"].join("\r\n\r\n");
+  is("\\r\\n paragraphs: each block read", kinds(crlf), ["button", "address"]);
+  const button = mailAccessNotes(crlf)[0];
+  is("\\r\\n paragraphs: the button's place is its own text", crlf.slice(button.start, button.end), "[Click here](https://example.com/b)");
+  // A picture on its own line inside a paragraph, with \r\n inside the paragraph too.
+  const inner = ["Look:", pictureLine("", pic(4)), "More at https://example.com/d"].join("\r\n");
+  const notes = mailAccessNotes(inner);
+  is("\\r\\n lines: picture and address read", notes.map((n) => n.kind), ["picture", "address"]);
+  is("\\r\\n lines: the picture's place is its own line", inner.slice(notes[0].start, notes[0].end), pictureLine("", pic(4)));
+  is("\\r\\n lines: the address's place", inner.slice(notes[1].start, notes[1].end), "https://example.com/d");
+}
 
 part("Fixes use only the creator's words");
 {

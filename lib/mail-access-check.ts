@@ -32,8 +32,8 @@ export type MailAccessNote =
 /** The same addresses lib/mail-body.ts makes links of, and the sentence's full stop it leaves out. */
 const ADDRESS = /https:\/\/[^\s<>"')\]]+/g;
 const TRAILING = /[.,;:!?]+$/;
-/** A paragraph: lines with no blank line between them, as parseMailBlocks splits them. */
-const PARAGRAPH = /[^\n]+(?:\n[^\n]+)*/g;
+/** A paragraph: lines with no blank line between them, as parseMailBlocks splits them (after it turns \r\n into \n). */
+const PARAGRAPH = /[^\r\n]+(?:\r?\n[^\r\n]+)*/g;
 
 /** What a reader cannot use in this email, in the order it reads. */
 export function mailAccessNotes(body: string): MailAccessNote[] {

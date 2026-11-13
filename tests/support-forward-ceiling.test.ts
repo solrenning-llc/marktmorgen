@@ -32,6 +32,8 @@ import { done, is, part } from "./check";
 import { essentialLimitState } from "@/lib/request-guard";
 import * as registry from "./plan-cost-registry";
 import { CURRENT_LLC_FIXED_COST_CEILINGS, FIXED_COST_SOURCE_OBSERVATIONS, LLC_FIXED_COST_IDS } from "@/lib/llc-fixed-costs";
+import { claimHandle, setSubscription } from "@/lib/store";
+import { paidPeriod } from "./billing-period-fixture";
 
 process.env.RESEND_API_KEY = "re_SYNTHETIC_TEST_ONLY";
 process.env.RESEND_WEBHOOK_SECRET = `whsec_${Buffer.from("a-stand-in-secret-for-tests-only").toString("base64")}`;
@@ -464,6 +466,20 @@ const notices = () => fixture.ses.filter((m) => m.subject !== "hello");
   for (let i = 0; i < HOURLY + 1; i++) await forward(message("loud@example.com"), NOON);
   const words = notices()[0]?.text ?? "";
   is("no 'with no store here'; 'paid plan' and the creator ceiling are named", [/no store here/.test(words), /paid plan/.test(words), words.includes(`${CREATOR_SENDER_DAILY} times in a day`)], [false, true, true]);
+
+  // Claude 7's review of #3481 at 325c8979a1, MEDIUM 1: the pre-read count decided "support or store" from the
+  // announcement's `to` alone, so a store's mail announced without the store's address (on Cc or Bcc, through an
+  // alias, or with no `to`) took the public share and, under a flood of public announcements, was held unread for good.
+  part("a store's mail announced without the store's address is still read and sent to the creator under a flood");
+  fresh();
+  await claimHandle("ana@example.org", "harborkitchen", "Harbor Kitchen", "");
+  await setSubscription("ana@example.org", { customerId: "cus_Harbor0001", subscriptionId: "sub_Harbor0001", active: true, period: paidPeriod() });
+  for (let i = 0; i < ANNOUNCED; i++) await forward(message(`flood${i}@made${i}.example`), NOON, "support@marktmorgen.com");
+  const readsBeforeStore = mailReads;
+  const storeMail = () => message("Lee <lee@example.org>", [], [], "harborkitchen@mail.marktmorgen.com");
+  const shown = [await forward(storeMail(), NOON, ["y"]), await forward(storeMail(), NOON)];
+  is("[CORRETO] both are read and sent on, never held", [shown, mailReads - readsBeforeStore], [["sent", "sent"], 2]);
+  is("[CORRETO] support mail the announcement shows written to support@ is still held unread", await forward(message("late@made.example"), NOON, "support@marktmorgen.com"), "held");
 
   globalThis.fetch = originalFetch;
   fixture.restore();

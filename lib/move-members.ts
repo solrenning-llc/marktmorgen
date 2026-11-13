@@ -18,6 +18,7 @@ import { OrdersPausedError } from "@/lib/order-admission";
 import { randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, listSlots, repliesFor } from "@/lib/redis-reply";
 import type { Listing, Product, Store } from "@/lib/store";
 import { readListing, readProduct } from "@/lib/catalog";
 import { addressHash } from "@/lib/imported-purchases";
@@ -365,16 +366,26 @@ export async function forgetInvitesPerson(store: Pick<Store, "sid" | "statsId">,
   if (!store.statsId || !productIds.length || !isRedisConfigured()) return 0;
   const statsId = store.statsId;
   const fields = productIds.map((p) => inviteField(email, p));
-  const [rows] = await redisPipeline([["HMGET", invitesKey(statsId), ...fields]]);
-  const held = fields.flatMap((field, i) => {
-    const invite = parseInvite(Array.isArray(rows) ? rows[i] : null);
-    return invite ? [{ field, invite }] : [];
+  // Read exactly (unknown is never zero): a reply in another shape, or a kept invite that does not read, may still
+  // hold the address and its reminder, so it is never said to be forgotten. It throws, and the erasure reports this
+  // part as not done and tries again (lib/person-erasure.ts), the way forgetLeadPerson does.
+  const what = "a person's membership move invitations";
+  const replies = repliesFor(await redisPipeline([["HMGET", invitesKey(statsId), ...fields]]), 1);
+  const rows = replies ? listSlots(replies[0]) : null;
+  if (!rows || rows.length !== fields.length) throw new UnknownReplyError(what);
+  const held: { field: string; invite: Invite }[] = [];
+  fields.forEach((field, i) => {
+    if (rows[i] === null) return;
+    const invite = parseInvite(rows[i]);
+    if (!invite) throw new UnknownReplyError(what);
+    held.push({ field, invite });
   });
   if (!held.length) return 0;
-  await redisPipeline([
+  const gone = repliesFor(await redisPipeline([
     ["HDEL", invitesKey(statsId), ...held.map((h) => h.field)],
     ["DEL", ...held.map((h) => linkKey(h.invite.t))],
     ["ZREM", DUE_KEY, ...held.map((h) => `${store.sid}|${h.field}`)],
-  ]);
+  ]), 3);
+  if (!gone || gone.some((n) => { const c = countOf(n); return c === null || c > held.length; })) throw new UnknownReplyError(what);
   return held.length;
 }

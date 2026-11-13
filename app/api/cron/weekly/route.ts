@@ -96,7 +96,8 @@ export async function GET(request: NextRequest) {
       await recordSample(store, data);
       const token = weeklyToken(store.handle);
       const stopUrl = `${SITE_URL}/api/store/weekly?h=${encodeURIComponent(store.handle)}&t=${encodeURIComponent(token)}`;
-      const spends = await readSpends(store.statsId).catch(() => []);
+      // Not read is never "no spend" (review of #4027): the email says so.
+      const spends = await readSpends(store.statsId).catch(() => null);
       const goal = (await readSalesGoal(store.statsId, store.currency).catch(() => ({ cents: UNKNOWN_SALES_GOAL_CENTS }))).cents;
       const message = withGoalAvailability(token ? weeklyMessage(store, data, stopUrl, spends, goal) : null, goal);
       if (!message) {

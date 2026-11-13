@@ -242,14 +242,31 @@ async function readConnection(statsId: string): Promise<Connection | null> {
   return parseConnection(raw);
 }
 
+/** Whether kept Meta lines read as a list at all (parseLines then keeps the lines that read). */
+function keptList(raw: string): boolean {
+  try {
+    return Array.isArray(JSON.parse(raw));
+  } catch {
+    return false;
+  }
+}
+
 /**
  * The lines read from Meta, for lib/ad-spend.ts: only while the store is
  * still connected, so nothing read from an account outlives its connection.
  */
 export async function metaLines(statsId: string): Promise<AdSpend[]> {
   if (!isRedisConfigured()) return [];
-  const [conn, raw] = await redisPipeline([["EXISTS", connKey(statsId)], ["GET", linesKey(statsId)]]);
-  return Number(conn) ? parseLines(raw) : [];
+  // Read exactly (unknown is never zero): every figure that uses spend adds these lines to the typed ones, so a
+  // reply in another shape, or kept lines that do not read, throws; it is never "no Meta spend".
+  const replies = repliesFor(await redisPipeline([["EXISTS", connKey(statsId)], ["GET", linesKey(statsId)]]), 2);
+  const conn = replies ? countOf(replies[0]) : null;
+  if (!replies || conn === null || conn > 1) throw new UnknownReplyError("a store's Meta ad spend");
+  if (conn === 0) return [];
+  const raw = replies[1];
+  if (raw === null) return [];
+  if (typeof raw !== "string" || !keptList(raw)) throw new UnknownReplyError("a store's Meta ad spend");
+  return parseLines(raw);
 }
 
 /** What the studio shows; null while the deployment has no Meta app, so nothing about it is shown. */

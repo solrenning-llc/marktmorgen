@@ -50,7 +50,9 @@ async function typedSpends(statsId: string): Promise<AdSpend[]> {
 /** Every line: the typed ones, then those read from Meta while the store is connected. */
 export async function readSpends(statsId: string | null): Promise<AdSpend[]> {
   if (!statsId || !isRedisConfigured()) return [];
-  const [typed, meta] = await Promise.all([typedSpends(statsId), metaLines(statsId).catch(() => [])]);
+  // A Meta read that fails is not "no Meta spend": it throws, so a caller shows the spend as not read rather than
+  // the typed lines alone as if they were all of it (lib/numbers-ask.ts tells the AI it is missing, never zero).
+  const [typed, meta] = await Promise.all([typedSpends(statsId), metaLines(statsId)]);
   return [...typed, ...meta];
 }
 
@@ -62,6 +64,9 @@ export async function addSpend(
   const read = readSpend(input, now);
   if (!read.ok) return read;
   if (!isRedisConfigured()) return { ok: false, reason: "unavailable" };
+  // The Meta lines are read, exactly, before anything is written (review of #4027): a read that fails throws here and
+  // keeps nothing, so a creator told the add failed and adding it again never keeps the line twice.
+  const meta = await metaLines(statsId);
   const id = randomBytes(4).toString("hex");
   await redisPipeline([
     ["HSET", key(statsId), id, JSON.stringify(read.spend)],
@@ -75,10 +80,13 @@ export async function addSpend(
     const drop = (Array.isArray(all) ? (all as unknown[]).map(String) : []).filter((field) => !keep.has(field));
     if (drop.length) await redisPipeline([["HDEL", key(statsId), ...drop]]);
   }
-  return { ok: true, spends: await readSpends(statsId) };
+  return { ok: true, spends: [...(await typedSpends(statsId)), ...meta] };
 }
 
 export async function removeSpend(statsId: string, id: unknown): Promise<AdSpend[]> {
-  if (typeof id === "string" && ID.test(id) && isRedisConfigured()) await redisPipeline([["HDEL", key(statsId), id]]);
-  return readSpends(statsId);
+  if (!isRedisConfigured()) return [];
+  // Read first, as addSpend does: a removal is never told as failed after it was done.
+  const meta = await metaLines(statsId);
+  if (typeof id === "string" && ID.test(id)) await redisPipeline([["HDEL", key(statsId), id]]);
+  return [...(await typedSpends(statsId)), ...meta];
 }

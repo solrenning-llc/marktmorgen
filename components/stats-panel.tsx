@@ -487,7 +487,8 @@ export function StatsPanel({
   reading?: NumbersReading | null;
   canExport?: boolean;
   notes?: StatsNote[];
-  spends?: AdSpend[];
+  /** The ad spend lines; null when they could not be read (shown as not read, never as no spend). */
+  spends?: AdSpend[] | null;
   /** Whether buyers are asked where they heard of the store (lib/heard.ts). */
   askHeard?: boolean;
   /** Whether this person may switch that question on or off. */
@@ -526,7 +527,8 @@ export function StatsPanel({
   const [range, setRange] = useState<RangeKey>("d7");
   const [pickDates, setPickDates] = useState(false);
   const [notes, setNotes] = useState(notesGiven);
-  const [spends, setSpends] = useState(spendsGiven);
+  // undefined: not read. Every figure after ads then reads "—" (lib/daily-cashflow.ts, lib/campaign-results.ts).
+  const [spends, setSpends] = useState<AdSpend[] | undefined>(spendsGiven ?? undefined);
   const [all, setAll] = useState<{ state: "idle" | "loading" | "error" } | { state: "ok"; sales: AllTimeSales }>({ state: "idle" });
   const salesKnown = data.sales === "ok";
 
@@ -615,7 +617,7 @@ export function StatsPanel({
   const disputes90 = new Map((data.disputesComplete ? data.disputes?.d90 ?? [] : []).map((row) => [row.source || "direct", row]));
   const withDisputeColumn = disputes90.size > 0;
   // The few things worth acting on, in words (lib/insights.ts).
-  const insights = range === "all" ? [] : insightsFrom(data, range, spends, 4, insightContext);
+  const insights = range === "all" ? [] : insightsFrom(data, range, spends ?? [], 4, insightContext);
   const sid = useStudioStore();
   // A studio screen for the store being looked at, when the person runs several.
   const studioHref = (href: string) => {
@@ -630,7 +632,7 @@ export function StatsPanel({
   const marksOn = new Map<string, AutoMark[]>();
   for (const mark of marks) marksOn.set(mark.day, [...(marksOn.get(mark.day) ?? []), mark]);
   // What was spent on ads inside the days shown (lib/ad-spend-rules.ts); none for "all".
-  const spent = range === "all" || !days.length ? null : spendBy(spends, days[0].date, days[days.length - 1].date);
+  const spent = range === "all" || !days.length || spends === undefined ? null : spendBy(spends, days[0].date, days[days.length - 1].date);
   const withSpend = Boolean(spent && spent.total > 0);
   const cashflows = range === "all" || !days.length ? [] : channelCashflows(data, range, data.channels?.[range] ?? [], spent?.channels ?? new Map(), days[0].date, days[days.length - 1].date);
   // Each channel for the range chosen; "all" has none, because sales are read for 90 days.
@@ -1096,7 +1098,7 @@ export function StatsPanel({
                       const cost = spent?.channels.get(row.source) ?? 0;
                       const left = row.cents - cost;
                       const cash = cashflows.find((c) => c.source === row.source);
-                      const payback = salesHere && ledgerPaymentsComplete(data) && cost ? paybackOf(spends, row.source, data.channelDays?.[row.source], days[0].date, days[days.length - 1].date) : null;
+                      const payback = salesHere && ledgerPaymentsComplete(data) && cost ? paybackOf(spends ?? [], row.source, data.channelDays?.[row.source], days[0].date, days[days.length - 1].date) : null;
                       return (
                         <>
                           <td className="py-1 pl-3 text-right tabular-nums">{cost ? money(cost) : "—"}</td>
@@ -1147,7 +1149,12 @@ export function StatsPanel({
         <BuyerChannelsPanel window={data.buyerChannels[range]} currency={data.currency} historyPartial={data.buyerChannels.historyPartial} period={{ from: days[0].date, to: days[days.length - 1].date }} />
       ) : null}
       {salesHere && data.buyerChannels?.weekly ? <WeeklyCohortsPanel cohorts={data.buyerChannels.weekly} historyPartial={data.buyerChannels.historyPartial} /> : null}
-      {range !== "all" ? (
+      {range !== "all" && spends === undefined ? (
+        <p className="mt-6 text-sm text-ink-soft" role="status">
+          Ad spend could not be read just now, so the figures after ads show &ldquo;&mdash;&rdquo; instead of a guess. Reload the page to try again.
+        </p>
+      ) : null}
+      {range !== "all" && spends !== undefined ? (
         <AdSpendEditor
           spends={spends}
           onChange={setSpends}

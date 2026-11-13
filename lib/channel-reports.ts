@@ -27,7 +27,8 @@ const line = (cells: Cell[]) => cells.map((value) => typeof value === "number"
 const csv = (rows: Cell[][]) => "\uFEFF" + rows.map(line).join("\r\n") + "\r\n";
 const amount = (value: number | null, currency: string) => value === null ? null : toMajor(value, currency);
 
-export function cashflowReport(rows: ChannelCashflow[], period: ReportPeriod): string {
+/** Rows whose ad spend was not read carry adSpend null (components/revenue-quality.tsx): blank in the file, never 0. */
+export function cashflowReport(rows: (Omit<ChannelCashflow, "adSpend"> & { adSpend: number | null })[], period: ReportPeriod): string {
   const note = "Recorded payments include renewals; refunds include pending refunds in the days recorded. Before fees, tax, commissions and other costs; not profit or causal advertising lift. Blank payments or result mean incomplete or unavailable payment coverage; refunds and results also wait for complete refund coverage.";
   return csv([
     ["From (UTC)", "To (UTC)", "Currency", "Channel", "Payments received", "Refunds recorded", "Ad spend recorded", "After refunds", "After refunds and ads", "Payment and refund coverage", "Definition"],

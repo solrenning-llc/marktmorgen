@@ -287,11 +287,21 @@ export async function daysCounts(statsId: string, from: string, to: string): Pro
     if (day > to) break;
     dates.push(day);
   }
-  const replies = await redisPipeline(dates.map((d) => ["HMGET", countsKey(statsId, d), "v", "c"]));
+  // Read exactly (unknown is never zero): the quiet-sales email says what these mean ("Nobody has visited"), so a
+  // day in another shape throws, and the email goes without the numbers rather than with wrong ones.
+  const what = "a store's visits and checkouts by day";
+  const replies = repliesFor(await redisPipeline(dates.map((d) => ["HMGET", countsKey(statsId, d), "v", "c"])), dates.length);
+  if (!replies) throw new UnknownReplyError(what);
+  const kept = (raw: unknown): number => {
+    if (raw === null) return 0;
+    if (typeof raw !== "string" || !/^(0|[1-9]\d{0,14})$/.test(raw)) throw new UnknownReplyError(what);
+    return Number(raw);
+  };
   for (const reply of replies) {
-    if (!Array.isArray(reply)) continue;
-    out.views += Number(reply[0]) || 0;
-    out.checkouts += Number(reply[1]) || 0;
+    const pair = repliesFor(reply, 2);
+    if (!pair) throw new UnknownReplyError(what);
+    out.views += kept(pair[0]);
+    out.checkouts += kept(pair[1]);
   }
   return out;
 }

@@ -1775,6 +1775,14 @@ export class MemoryRedis {
       }
       case "LLEN":
         return this.data.has(key) ? this.list(key).length : 0;
+      case "LPOP": {
+        // LPOP key, one at a time as lib/licence-keys.ts takes a key from its pool: nil on an empty list, which goes.
+        if (!this.data.has(key)) return null;
+        const list = this.list(key);
+        const first = list.shift() ?? null;
+        if (!list.length) this.data.delete(key);
+        return first;
+      }
       case "LINDEX": {
         if (!this.data.has(key)) return null;
         const list = this.list(key);

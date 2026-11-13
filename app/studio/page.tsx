@@ -1011,7 +1011,8 @@ export default async function StudioPage({
             )
           : Promise.resolve({ state: "none" as const, value: null, at: null, used: false, failed: false, unnamed: false }),
         readNotes(current.statsId).catch(() => []),
-        readSpends(current.statsId).catch(() => []),
+        // Not read is never "no spend" (review of #4027): the numbers show it as not read.
+        readSpends(current.statsId).catch(() => null),
         heardOff(current.handle).catch(() => false),
         readTrouble(current.statsId).catch(() => ({ week: 0, last: null })),
         // What the store recorded on its own: emails sent, products added, sales (lib/auto-marks.ts).

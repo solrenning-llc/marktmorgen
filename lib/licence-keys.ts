@@ -55,6 +55,7 @@ import { MAX_UPLOAD_KEYS, MAX_POOL_KEYS, MIN_KEY_LENGTH, MAX_KEY_LENGTH, KEY_ALP
 export { MAX_UPLOAD_KEYS, MAX_POOL_KEYS, MIN_KEY_LENGTH, MAX_KEY_LENGTH, KEY_ALPHABET, MAX_KEY_FILE_BYTES, sampleKey, type IssuedKey, type KeyCounts } from "@/lib/licence-key-rules";
 import { saleHandles } from "@/lib/store";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { orderWrite } from "@/lib/order-data";
 import { giveData, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
@@ -302,13 +303,17 @@ async function settle(store: Store, product: Listing, reference: string, email: 
 
 export async function keyCounts(store: Store, product: Listing): Promise<KeyCounts> {
   if (!store.statsId || !isRedisConfigured()) return { left: 0, issued: 0, revoked: 0, waiting: 0 };
-  const [left, issued, waiting] = await redisPipeline([
+  // Read exactly (unknown is never zero): the studio shows these as real, so a count in another shape throws and
+  // the keys route answers an error, never "0 keys left".
+  const replies = repliesFor(await redisPipeline([
     ["LLEN", poolKey(store, product)],
     ["HLEN", saleKey(store, product)],
     ["HLEN", waitingKey(store, product)],
-  ]);
+  ]), 3);
+  const [left, issued, waiting] = (replies ?? [null, null, null]).map(countOf);
+  if (left === null || issued === null || waiting === null) throw new UnknownReplyError("a product's license key counts");
   const list = await issuedKeys(store, product, "", 0);
-  return { left: Number(left) || 0, issued: Number(issued) || 0, revoked: list.revoked, waiting: Number(waiting) || 0 };
+  return { left, issued, revoked: list.revoked, waiting };
 }
 
 /**
@@ -728,8 +733,13 @@ function senderAddress(): string {
 async function warnIfLow(store: Store, product: Listing): Promise<void> {
   const setup = activeKeys(product);
   if (!setup || setup.source !== "pool") return;
-  const [left] = await redisPipeline([["LLEN", poolKey(store, product)]]);
-  const count = Number(left) || 0;
+  // Read exactly (unknown is never zero): a count in another shape is not "none left". It would email the creator
+  // about a full pool and take the 90-day mark, so the real warning would never come. Nothing is sent or marked.
+  const count = countOf(repliesFor(await redisPipeline([["LLEN", poolKey(store, product)]]), 1)?.[0]);
+  if (count === null) {
+    console.error("the license key pool's count could not be read; no low-keys warning this time", product.id);
+    return;
+  }
   if (count > setup.lowAt) return;
   const [claimed] = await redisPipeline([["SET", warnedKey(store, product), "1", "NX", "EX", 90 * 86_400]]);
   if (claimed === null) return;

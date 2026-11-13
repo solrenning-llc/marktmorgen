@@ -180,7 +180,10 @@ export async function saveSetupFor(data: DataStore, courseId: string, lessonId: 
     const read = readSubmissionSetup(setup);
     if (!read.ok || JSON.stringify(read.setup) !== json) throw new Error("submission_setup");
   }
-  // The slot is set to the setup's whole weight, never moved by a difference: two saves at once leave it right.
+  // The slot is set to the setup's whole weight, never moved by a difference, so it never drifts from save to save.
+  // The set and the write are two steps (review of #3571, Claude 1 cloud): when two saves of the same lesson cross,
+  // the slot can count the smaller setup while the larger one is kept, by at most one setup's weight (a few hundred
+  // bytes) and only until the next save of that lesson.
   const slot = SETUP_SLOT(courseId, lessonId);
   if (json !== null) await needData(data, [{ slot, bytes: dataBytes([key, json], 1), set: true }]);
   const written = repliesFor(await redisPipeline([json === null ? ["DEL", key] : ["SET", key, json]]), 1);
@@ -480,8 +483,10 @@ export async function openSubmissionDoor(ask: DoorAsk, steps: DoorSteps = VAULT_
     if (written?.[0] !== "OK" || countOf(written[1]) !== 1 || countOf(written[2]) !== 1) throw new UnknownReplyError("a submission upload's write");
     return { ok: true, upload: opened.upload };
   } catch (error) {
-    // Nothing has reached the browser: the provider's session is cancelled and the place given back.
+    // Nothing has reached the browser: the provider's session is cancelled, the door taken back (it carries the buyer's
+    // address, review of #3570, Claude 1 cloud) and the place given back.
     if (opened?.ok) await steps.abortReservedVault(opened.upload.pathname).catch(() => false);
+    if (opened?.ok) await redisPipeline([["DEL", doorKey(ask.folder, place.id)]]).catch(() => null);
     await givePlace(place, opened?.ok ? opened.upload.pathname : undefined).then(giveBack, () => undefined);
     throw error;
   }
@@ -578,7 +583,14 @@ export async function closeSubmissionDoor(
   const settle = () => settleBuyerRoom(where.data, place, nowSeconds);
   const drop = async () => {
     const gone = await steps.deleteVault([pathname]).catch(() => false);
-    if (gone) await givePlace(place, pathname).then(settle, () => undefined);
+    if (gone) {
+      await givePlace(place, pathname).then(settle, () => undefined);
+      return;
+    }
+    // Not confirmed deleted (review of #3570, Claude 1 cloud): the file goes back on the sweep's list, due now, so it
+    // is deleted even when an erasure ran meanwhile and took it off; nothing else would ever delete it.
+    const due = await redisPipeline([["ZADD", DUE_KEY, nowSeconds, dueMember(door.folder, pathname)]]).then((answer) => repliesFor(answer, 1), () => null);
+    if (!due || countOf(due[0]) === null) console.error("a submission file not deleted could not be put back on the sweep's list");
   };
   if (closed.file.bytes !== door.bytes || closed.file.contentType !== door.type) {
     await drop();
@@ -673,11 +685,24 @@ export async function abortSubmissionDoor(
 ): Promise<"done" | "unknown" | "unavailable"> {
   const door = await ownDoor(pathname, where.folder, where.courseId, where.lessonId, where.who);
   if (!door) return "unknown";
-  if (!(await steps.abortReservedVault(pathname))) return "unavailable";
+  // The door is taken off Redis in one step before the vault is asked, as a close takes it (review of #3570, Claude 1
+  // cloud): of an abort and a close of the same upload only one ever owns it, so an abort never lets go of the place
+  // and the index entry of a record a close has written, and an erasure never misses that record.
+  const taken = repliesFor(await redisPipeline([["GETDEL", doorKey(door.folder, door.id)]]), 1);
+  if (!taken) throw new UnknownReplyError("a submission upload taken to give up");
+  if (taken[0] === null) return "unknown";
+  if (typeof taken[0] !== "string" || !taken[0].includes(`"id":"${door.id}"`)) throw new UnknownReplyError("a submission upload taken to give up");
+  if (!(await steps.abortReservedVault(pathname))) {
+    // Not given up at the vault: the door is put back for the rest of its day, so the buyer can try again.
+    const left = door.at + UPLOAD_SECONDS - nowSeconds;
+    if (left > 0) {
+      const back = repliesFor(await redisPipeline([["SET", doorKey(door.folder, door.id), JSON.stringify(door), "EX", left, "NX"]]), 1);
+      if (!back || (back[0] !== "OK" && back[0] !== null)) throw new UnknownReplyError("a submission upload put back");
+    }
+    return "unavailable";
+  }
   const place: Place = { folder: door.folder, courseId: door.courseId, lessonId: door.lessonId, who: door.who, id: door.id };
   await givePlace(place, pathname);
-  const replies = repliesFor(await redisPipeline([["DEL", doorKey(door.folder, door.id)]]), 1);
-  if (!replies || countOf(replies[0]) === null) throw new UnknownReplyError("a submission upload given up");
   // Given up: the buyer's slot comes down to the places they still hold (review of #3568).
   await settleBuyerRoom(where.data, place, nowSeconds);
   return "done";

@@ -466,16 +466,25 @@ export async function handToCreator(input: { store: Store; token?: unknown; emai
   return { ok: true, thread: null };
 }
 
-/** The newest questions the assistant could not answer, for the studio; never who asked. */
-export async function assistantMissed(store: Store, limit = 20): Promise<{ question: string; at: number }[]> {
+/**
+ * The newest questions the assistant could not answer, for the studio; never who asked. Only those asked within
+ * ASSISTANT_MISSED_SECONDS, the window the privacy policy states: the key's expiry is renewed by each new question, so
+ * in a quiet store an old row would otherwise outlive it; a row with no readable day is not shown. Each question goes
+ * through forAi again, so a row kept as typed by an older build shows no address, phone or link (#4118).
+ */
+export async function assistantMissed(store: Store, limit = 20, now = Date.now()): Promise<{ question: string; at: number }[]> {
   if (!store.statsId || !isRedisConfigured()) return [];
-  const [rows] = await redisPipeline([["LRANGE", missedKey(store.statsId), 0, Math.max(0, limit - 1)]]);
+  const [rows] = await redisPipeline([["LRANGE", missedKey(store.statsId), 0, ASSISTANT_MISSED_KEPT - 1]]);
+  const since = Math.floor(now / 1000) - ASSISTANT_MISSED_SECONDS;
   const out: { question: string; at: number }[] = [];
   for (const row of Array.isArray(rows) ? rows : []) {
+    if (out.length >= limit) break;
     try {
       const value = JSON.parse(String(row)) as { q?: unknown; at?: unknown };
-      const question = readAssistantText(value.q);
-      if (question) out.push({ question, at: typeof value.at === "number" ? value.at : 0 });
+      if (typeof value.at !== "number" || !Number.isFinite(value.at) || value.at <= since) continue;
+      const typed = readAssistantText(value.q);
+      const question = typed ? forAi(typed, 600) : "";
+      if (question) out.push({ question, at: value.at });
     } catch {}
   }
   return out;

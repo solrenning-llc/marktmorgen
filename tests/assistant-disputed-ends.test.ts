@@ -44,7 +44,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (one && method === "POST") return Response.json({ id: one[1], status: status.get(one[1]) ?? "active", cancel_at_period_end: true });
   if (method === "GET" && url.pathname === "/v1/invoices") {
     const disputed = url.searchParams.get("subscription") === "sub_DisputedFirst01";
-    return Response.json({ object: "list", data: [{ id: "in_DisputedEnds01", charge: { id: "ch_DisputedEnds01", disputed } }], has_more: false });
+    // Each invoice names its own subscription, as Stripe's list does (and as #4443 requires before a dispute counts).
+    return Response.json({ object: "list", data: [{ id: "in_DisputedEnds01", subscription: url.searchParams.get("subscription"), charge: { id: "ch_DisputedEnds01", disputed } }], has_more: false });
   }
   throw new Error(`Unexpected synthetic Stripe request: ${method} ${url.pathname}`);
 }) as typeof fetch;

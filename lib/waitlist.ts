@@ -363,7 +363,21 @@ export async function runLaunches(load: (handle: string) => Promise<Store | null
     );
     const sender = { ...store, mail: { fromName: store.mail?.fromName || store.name, address: job.address } };
     while (job.cursor < job.total && Date.now() <= deadline) {
-      const [slice] = await redisPipeline([["LRANGE", sendKey(sid, pid), job.cursor, job.cursor + LAUNCH_BATCH - 1]]);
+      // The store's month first (j-mail-4): a batch is never larger than what its email figure can still take, so a
+      // month whose whole figure is smaller than a batch (Store's, a trial's) still goes out, a month's figure at a
+      // time (Claude 2 on #4473). With no room, or a figure that cannot be read, the batch waits for the next run (the
+      // month turning, or the read coming back), never passed over: left to the meter inside sendBatch, it came back
+      // "refused" like an email the sender will not take, the cursor moved past these people and the launch finished,
+      // deleting the list. While it waits, the send list is kept as long as the launch's record (Claude 2 on #4473),
+      // so a wait for the month to turn never outlives it.
+      const month = await allowancesUsedStrict(store, ["email"]);
+      const room = month ? month[0].figure - month[0].used : null;
+      if (room === null || room <= 0) {
+        if (room === null) console.error("sending a waitlist launch: the store's email figure could not be read, so the batch waits", new UnknownReplyError("a launch batch's email figure"));
+        await redisPipeline([["EXPIRE", sendKey(sid, pid), 120 * 86_400]]).catch(() => {});
+        break;
+      }
+      const [slice] = await redisPipeline([["LRANGE", sendKey(sid, pid), job.cursor, job.cursor + Math.min(LAUNCH_BATCH, room) - 1]]);
       const emails = Array.isArray(slice) ? (slice as string[]) : [];
       if (!emails.length) break;
       const [rows] = await redisPipeline([["HMGET", listKey(sid, pid), ...emails]]);
@@ -389,18 +403,6 @@ export async function runLaunches(load: (handle: string) => Promise<Store | null
       if (unknown) {
         console.error("sending a waitlist launch: its places were read in an unknown shape, so the batch waits", new UnknownReplyError("a launch batch's waitlist places"));
         break;
-      }
-      // The store's month next (j-mail-4): a batch its email figure cannot take, or a figure that cannot be read,
-      // waits for the next run (the month turning, or the read coming back), never passed over. Left to the meter
-      // inside sendBatch, it came back "refused" like an email the sender will not take, the cursor moved past
-      // these people and the launch finished, deleting the list, so they never got the email they confirmed for.
-      if (chunk.length) {
-        const month = await allowancesUsedStrict(store, ["email"]);
-        if (!month) {
-          console.error("sending a waitlist launch: the store's email figure could not be read, so the batch waits", new UnknownReplyError("a launch batch's email figure"));
-          break;
-        }
-        if (month[0].used + chunk.length > month[0].figure) break;
       }
       if (!(await reserveDay(chunk.length))) break;
       const messages = chunk.map(([email, entry]) => {

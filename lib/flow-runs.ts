@@ -279,7 +279,7 @@ export async function claimAttempts(flowId: string, emails: string[], index: num
 export async function countWaits(flowId: string, emails: string[], index: number, nowSeconds = Math.floor(Date.now() / 1000), gens?: Map<string, string>): Promise<Map<string, { waits: number; since: number } | null>> {
   const out = new Map<string, { waits: number; since: number } | null>();
   if (!emails.length) return out;
-  const reply = await redisPipeline(emails.map((email) => ["EVAL", WAIT_IF_RUN, 1, runKey(flowId, personOf(email)), index, nowSeconds, gens?.get(email) ?? ANY_GEN])).catch(() => null);
+  const reply = await redisPipeline(emails.map((email) => ["EVAL", WAIT_IF_RUN, 2, runKey(flowId, personOf(email)), logKey(flowId, personOf(email)), index, nowSeconds, gens?.get(email) ?? ANY_GEN, RUN_KEEP_SECONDS])).catch(() => null);
   emails.forEach((email, i) => {
     const one = Array.isArray(reply) && reply.length === emails.length ? reply[i] : null;
     const [waits, since] = Array.isArray(one) && one.length === 2 ? one : [null, null];
@@ -294,14 +294,18 @@ export async function countWaits(flowId: string, emails: string[], index: number
 }
 
 /**
- * One more wait counted on one run, only while the run is there (KEYS: the run's record; ARGV: the step, now, the
- * run's generation or ANY_GEN): {waits, since}, the step's clock started now on its first wait; {-1} when the run is
+ * One more wait counted on one run, only while the run is there (KEYS: the run's record, its history; ARGV: the
+ * step, now, the run's generation or ANY_GEN, the seconds both are kept for from now: a run that waits is live, so
+ * each counted wait keeps it as every other write does, Claude 7's LEVE on #4234): {waits, since}, the step's clock
+ * started now on its first wait; {-1} when the run is
  * gone or is another run (another generation), so a wait counted after an erasure makes no record again (Defect
  * 4083) and never counts on the run the person started again (Codex L on #4234). Modelled by lib/redis-memory.ts.
  */
-export const WAIT_IF_RUN = `-- marktmorgen:flow-wait:v2
+export const WAIT_IF_RUN = `-- marktmorgen:flow-wait:v3
 if redis.call("EXISTS", KEYS[1]) == 0 then return {-1} end
 if ARGV[3] ~= "*" and (redis.call("HGET", KEYS[1], "gen") or "") ~= ARGV[3] then return {-1} end
+redis.call("EXPIRE", KEYS[1], ARGV[4])
+redis.call("EXPIRE", KEYS[2], ARGV[4])
 local waits = redis.call("HINCRBY", KEYS[1], "waits", 1)
 local at = redis.call("HGET", KEYS[1], "waitAt") or ""
 local step, since = string.match(at, "^(%-?%d+):(%d+)$")
@@ -403,7 +407,7 @@ export async function settleAttempts(listId: string, flowId: string, index: numb
     const member = `${flowId}|${person}`;
     if (o.state === "uncertain") {
       const pushed = event({ at: nowSeconds, step: index, stepId, kind, state: "uncertain", note: o.note });
-      commands.push(["EVAL", SETTLE_IF_OPEN, keys.length, ...keys, "uncertain", pushed, normaliseEmail(o.email), "held", index, o.note.slice(0, 300), nowSeconds, member, person, "", o.gen ?? ANY_GEN, o.open ?? "*"]);
+      commands.push(["EVAL", SETTLE_IF_OPEN, keys.length, ...keys, "uncertain", pushed, normaliseEmail(o.email), "held", index, o.note.slice(0, 300), nowSeconds, member, person, RUN_KEEP_SECONDS, o.gen ?? ANY_GEN, o.open ?? "*"]);
       continue;
     }
     const status: RunStatus = o.status ?? (o.state === "deferred" ? "waiting" : o.to < 0 ? (o.state === "failed" ? "failed" : "done") : "running");

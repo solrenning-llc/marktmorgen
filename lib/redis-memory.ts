@@ -145,9 +145,11 @@ export class MemoryRedis {
           this.run(["RPUSH", logK, attempted]);
           return 1;
         }
-        if (key.startsWith("-- marktmorgen:flow-wait:v2\n") && args[0] === "1" && args.length === 5) {
-          const [, runK, step, now, gen] = args;
+        if (key.startsWith("-- marktmorgen:flow-wait:v3\n") && args[0] === "2" && args.length === 7) {
+          const [, runK, logK, step, now, gen, keep] = args;
           if (this.run(["EXISTS", runK]) !== 1 || !genOk(runK, gen)) return [-1];
+          this.run(["EXPIRE", runK, keep]);
+          this.run(["EXPIRE", logK, keep]);
           const waits = this.run(["HINCRBY", runK, "waits", 1]);
           const at = this.run(["HGET", runK, "waitAt"]);
           const found = typeof at === "string" ? /^(-?\d+):(\d+)$/.exec(at) : null;

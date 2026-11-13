@@ -8,7 +8,8 @@
  * route came after mayAttend, so "not going" answered "eventlocked" and the
  * place stayed taken by somebody who can no longer come: the event read
  * "every place taken" to members who could. Giving a place back now never
- * asks whether the member may come; taking one still does.
+ * asks whether the member may come; taking one still does. The page's
+ * "You're going" badge is drawn only for a member the event still lets in.
  *
  * Real route over the in-memory Redis; synthetic records only.
  */
@@ -105,6 +106,7 @@ async function main(): Promise<void> {
     const source = readFileSync("app/[handle]/community/events/[event]/page.tsx", "utf8");
     const locked = source.slice(source.indexOf("{!allowed ? ("), source.indexOf(") : event.cancelled ? ("));
     is("the locked note is found", locked.length > 0, true);
+    is("the \"You're going\" badge is drawn only for a member the event lets in", /\{mine && allowed && !over && !event\.cancelled \? <span className="cm-badge cm-badge-accent">\{w\.youAreGoing\}/.test(source) && !/\{mine && !over && !event\.cancelled \? <span className="cm-badge/.test(source), true);
     is("it carries a \"not going\" form for a member holding a place", /mine && !over && !event\.cancelled[\s\S]*action="notgoing"[\s\S]*w\.cancelRsvp/.test(locked), true);
   }
   done();

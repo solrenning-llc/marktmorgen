@@ -191,6 +191,16 @@ export class MemoryRedis {
             return fields.removed ? "r" : "y";
           }).join("");
         }
+        // lib/buyer-profile.ts KEEP_NOTE_UNLESS_ERASED: a note written only while its person's address is not deleted.
+        if (key.startsWith("-- marktmorgen:person-note-unless-erased:v1\n") && args[0] === "3" && args.length === 9) {
+          const [, notes, who, erased, print, id, json, seconds, person] = args;
+          if (this.run(["HEXISTS", erased, print]) === 1) return 0;
+          this.run(["HSET", notes, id, json]);
+          this.run(["EXPIRE", notes, seconds]);
+          this.run(["SADD", who, person]);
+          this.run(["EXPIRE", who, seconds]);
+          return 1;
+        }
         // lib/group-buy.ts PLACE_RELEASE: a place's opening hold deleted only while its token is still the open's own.
         if (key.startsWith("-- marktmorgen:group-place-release:v1\n") && args[0] === "1" && args.length === 3) {
           const [, hold, token] = args;

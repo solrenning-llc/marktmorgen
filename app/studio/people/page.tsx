@@ -129,9 +129,11 @@ export default async function StudioPeoplePage({ searchParams }: Params) {
   const companies = companyRead?.state === "ok" ? companyRead.companies : null;
   // Null when the team could not be read: the screen then says so, and leaves a teammate to the server to decide.
   const assignees = team ? taskAssignees(store.email, team.members) : null;
-  // Deleting the person needs the page's token, never the address in a link (lib/person-erasure.ts).
+  // Deleting the person, and writing a note about them, need the page's token, never the address in a link
+  // (lib/person-erasure.ts; a note is refused once they are deleted, issue #4385).
   const mayErase = can(view.role, "erase");
-  const eraseToken = profile && email && mayErase ? (token || (await findToken(store, email).catch(() => null)) || "") : "";
+  const pageToken = profile && email ? (token || (await findToken(store, email).catch(() => null)) || "") : "";
+  const eraseToken = mayErase ? pageToken : "";
   const erased = query.erased === "1";
 
   return (
@@ -147,7 +149,7 @@ export default async function StudioPeoplePage({ searchParams }: Params) {
         <main id="content" className="container-page pb-20 pt-10 sm:pt-14">
           <StudioTrail store={store} {...(profile ? { path: [{ label: "Buyers", href: studioPath(store, "", "people") }], here: profile.name || profile.email || "One buyer" } : { here: "Buyers" })} />
           {profile ? (
-            <Profile store={store} profile={profile} fields={fields} values={values} eraseToken={eraseToken} tasks={tasks} assignees={assignees} companies={companies} companiesRefusal={companyRead?.state === "refused" ? companyRead.message : ""} />
+            <Profile store={store} profile={profile} fields={fields} values={values} eraseToken={eraseToken} noteToken={pageToken} tasks={tasks} assignees={assignees} companies={companies} companiesRefusal={companyRead?.state === "refused" ? companyRead.message : ""} />
           ) : (
             <>
               {erased ? (
@@ -295,7 +297,7 @@ async function LatestBuyers({ store }: { store: Store }) {
   );
 }
 
-function Profile({ store, profile, fields, values, eraseToken, tasks, assignees, companies, companiesRefusal }: { store: Store; profile: BuyerProfile; fields: CrmField[]; values: Record<string, string>; eraseToken: string; tasks: PersonTask[] | null; assignees: string[] | null; companies: Company[] | null; /** The studio's own sentence when its requests are used up (round 4, L1). */ companiesRefusal: string }) {
+function Profile({ store, profile, fields, values, eraseToken, noteToken, tasks, assignees, companies, companiesRefusal }: { store: Store; profile: BuyerProfile; fields: CrmField[]; values: Record<string, string>; eraseToken: string; noteToken: string; tasks: PersonTask[] | null; assignees: string[] | null; companies: Company[] | null; /** The studio's own sentence when its requests are used up (round 4, L1). */ companiesRefusal: string }) {
   const money = (cents: number, currency = profile.currency) => formatMoney(cents, currency);
   const net = profile.paid - profile.refunded;
   const others = Object.entries(profile.otherCurrencies).filter(([, cents]) => cents !== 0);
@@ -511,7 +513,7 @@ function Profile({ store, profile, fields, values, eraseToken, tasks, assignees,
       <section aria-labelledby="notes-title" className="card mt-8 p-6 sm:p-8">
         <h2 id="notes-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">Notes</h2>
         <p className="mt-1 text-sm text-ink-soft">For you and your team only. The buyer never sees them.</p>
-        {profile.person ? <PersonNotes person={profile.person} initial={profile.notes} /> : null}
+        {profile.person ? <PersonNotes person={profile.person} token={noteToken} initial={profile.notes} /> : null}
       </section>
 
       {eraseToken ? (

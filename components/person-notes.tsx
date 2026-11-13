@@ -15,7 +15,7 @@ function when(seconds: number): string {
  * Your team's notes about one buyer (lib/buyer-profile.ts): what they asked,
  * what was promised, what they like. Seen only by whoever may read orders.
  */
-export function PersonNotes({ person, initial }: { person: string; initial: PersonNote[] }) {
+export function PersonNotes({ person, token, initial }: { person: string; token: string; initial: PersonNote[] }) {
   const [notes, setNotes] = useState(initial);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
@@ -26,15 +26,15 @@ export function PersonNotes({ person, initial }: { person: string; initial: Pers
       const response = await fetch("/api/store/person", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...body, person }),
+        body: JSON.stringify({ ...body, person, token }),
       });
-      const answer = (await response.json().catch(() => ({}))) as { ok?: boolean; notes?: PersonNote[] };
+      const answer = (await response.json().catch(() => ({}))) as { ok?: boolean; notes?: PersonNote[]; error?: string };
       if (answer.ok && answer.notes) {
         setNotes(answer.notes);
         toast(done);
         return true;
       }
-      toast("That did not save. Try again in a moment.");
+      toast(answer.error === "expired" ? "This page has been open too long. Reload it, then add the note again." : "That did not save. Try again in a moment.");
     } catch {
       toast("That did not save. Check your connection and try again.");
     } finally {

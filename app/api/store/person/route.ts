@@ -2,10 +2,11 @@ import { serviceRefusedJson, withinServiceWhy } from "@/lib/metered-limits";
 import { StoreFullError } from "@/lib/store-full";
 import type { NextRequest } from "next/server";
 import { guardStoreWrite } from "@/lib/store-request";
-import { ensureStatsId } from "@/lib/store";
+import { ensureListId, ensureStatsId } from "@/lib/store";
 import { studioPath } from "@/lib/studio-route";
 import { addPersonNote, addressForToken, findToken, forgetFindToken, readAddress, removePersonNote } from "@/lib/buyer-profile";
 import { erasePerson } from "@/lib/person-erasure";
+import { personKey } from "@/lib/person-key";
 
 /** How many addresses one store may look up in an hour: each look reads Stripe. */
 const FINDS_PER_HOUR = 200;
@@ -60,7 +61,15 @@ export async function POST(request: NextRequest) {
     if (!store?.statsId) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
     const person = typeof body.person === "string" ? body.person : "";
     if (body.action === "note") {
-      const notes = await addPersonNote(store.statsId, person, guarded.email, body.text, store);
+      // The page's token says whose page it is: their address, checked against the person, so a note about someone
+      // deleted since is refused in the same step that would write it (lib/buyer-profile.ts, issue #4385).
+      const email = await addressForToken(guarded.store, typeof body.token === "string" ? body.token : "");
+      if (!email) return Response.json({ ok: false, error: "expired" }, { status: 410 });
+      if (personKey(store.statsId, email) !== person) return Response.json({ ok: false, error: "invalid" }, { status: 400 });
+      // The store's list holds the mark of who was deleted (lib/suppression.ts); made here as the erasure would make it.
+      const listId = store.listId || (await ensureListId(guarded.store.email))?.listId;
+      if (!listId) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+      const notes = await addPersonNote(store.statsId, person, guarded.email, body.text, store, Date.now(), { listId, email });
       if (!notes) return Response.json({ ok: false, error: "invalid" }, { status: 400 });
       return Response.json({ ok: true, notes }, noStore);
     }

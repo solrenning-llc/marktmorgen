@@ -40,6 +40,7 @@ import { readPaid } from "@/lib/paypal-sales";
 import { randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { suppressedKey, suppressionPrint } from "@/lib/suppression";
 import { type DataStore, giveData, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { onAccount } from "@/lib/stripe-account";
@@ -72,6 +73,19 @@ const NOTE_ID = /^[0-9a-f]{8}$/;
 const CUSTOMER = /^cus_[A-Za-z0-9]{6,64}$/;
 /** Kept as long as a store keeps anything about its buyers' visits, from the last note. */
 const NOTES_SECONDS = 3 * 365 * 86_400;
+
+/**
+ * A note written only while its person's address is not deleted from the store (the store's suppression print,
+ * lib/suppression.ts, written by lib/person-erasure.ts before their notes go, lifted by their own yes again): 1
+ * written, 0 refused. So a note on its way when they were deleted brings nothing back (issue #4385).
+ */
+export const KEEP_NOTE_UNLESS_ERASED = `-- marktmorgen:person-note-unless-erased:v1
+if redis.call("HEXISTS", KEYS[3], ARGV[1]) == 1 then return 0 end
+redis.call("HSET", KEYS[1], ARGV[2], ARGV[3])
+redis.call("EXPIRE", KEYS[1], ARGV[4])
+redis.call("SADD", KEYS[2], ARGV[5])
+redis.call("EXPIRE", KEYS[2], ARGV[4])
+return 1`;
 
 const findKey = (token: string) => `nl:person:find:${token}`;
 const whoKey = (statsId: string) => `nl:person:${statsId}:who`;
@@ -166,21 +180,47 @@ export async function readPersonNotes(statsId: string | null, person: string): P
 /**
  * Adds a note about one person, written by `by` (the signed-in address).
  * Each note is a field of its own, so two people writing at once both keep
- * theirs. Over MAX_PERSON_NOTES, the oldest go. Null when the words are empty.
+ * theirs. Over MAX_PERSON_NOTES, the oldest go. Null when the words are empty,
+ * and when `erased` says whose address it is and it was deleted from the store
+ * (or the store has no list to tell): the note is then not written and its room
+ * comes back.
  */
-export async function addPersonNote(statsId: string, person: string, by: string, textRaw: unknown, room: DataStore, now = Date.now()): Promise<PersonNote[] | null> {
+export async function addPersonNote(
+  statsId: string,
+  person: string,
+  by: string,
+  textRaw: unknown,
+  room: DataStore,
+  now = Date.now(),
+  erased?: { listId: string | null; email: string },
+): Promise<PersonNote[] | null> {
   const text = personNoteText(textRaw);
   if (!text || !PERSON_KEY.test(person) || !isRedisConfigured()) return null;
+  if (erased && !erased.listId) return null;
   const id = randomBytes(4).toString("hex");
   const json = JSON.stringify({ at: Math.floor(now / 1000), by: normaliseEmail(by), text });
   // Its room in the store's data room first (DataRoomError when it does not fit), its person's place with it.
-  await needData(room, [{ slot: NOTES_SLOT, bytes: dataBytes([id, json], 1) + dataBytes([person], 1) }]);
-  await redisPipeline([
-    ["HSET", notesKey(statsId, person), id, json],
-    ["EXPIRE", notesKey(statsId, person), NOTES_SECONDS],
-    ["SADD", whoKey(statsId), person],
-    ["EXPIRE", whoKey(statsId), NOTES_SECONDS],
-  ]);
+  const bytes = dataBytes([id, json], 1) + dataBytes([person], 1);
+  await needData(room, [{ slot: NOTES_SLOT, bytes }]);
+  if (erased?.listId) {
+    // Written only while they are not deleted, in the same step: an erasure that came first refuses it.
+    const [kept] = await redisPipeline([
+      ["EVAL", KEEP_NOTE_UNLESS_ERASED, 3, notesKey(statsId, person), whoKey(statsId), suppressedKey(erased.listId), suppressionPrint(erased.listId, erased.email), id, json, NOTES_SECONDS, person],
+    ]);
+    if (kept === 0 || kept === "0") {
+      await giveData(room, [{ slot: NOTES_SLOT, bytes }]);
+      return null;
+    }
+    // Any other answer is not known to have written it or not: its room stays taken, and the caller says so.
+    if (kept !== 1 && kept !== "1") throw new Error("a person's note: unknown answer");
+  } else {
+    await redisPipeline([
+      ["HSET", notesKey(statsId, person), id, json],
+      ["EXPIRE", notesKey(statsId, person), NOTES_SECONDS],
+      ["SADD", whoKey(statsId), person],
+      ["EXPIRE", whoKey(statsId), NOTES_SECONDS],
+    ]);
+  }
   const notes = await readPersonNotes(statsId, person);
   if (notes.length > MAX_PERSON_NOTES) {
     const dropped = notes.slice(MAX_PERSON_NOTES);

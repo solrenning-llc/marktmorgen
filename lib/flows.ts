@@ -834,7 +834,7 @@ async function actOnPeople(
     const out: Acted[] = [];
     for (const email of emails) {
       try {
-        const kept = await addPersonNote(statsId, personKey(statsId, email), "sequence", `${action.text} (Sequence “${at.flow.name}”, step ${at.index + 1}.)`, store);
+        const kept = await addPersonNote(statsId, personKey(statsId, email), "sequence", `${action.text} (Sequence “${at.flow.name}”, step ${at.index + 1}.)`, store, Date.now(), { listId: store.listId ?? null, email });
         out.push(kept ? { email, state: "confirmed", changed: true, note: "Note written on their page." } : { email, state: "failed", note: "The note could not be written." });
       } catch (error) {
         // Nothing was written past the store's data room (lib/store-data.ts).

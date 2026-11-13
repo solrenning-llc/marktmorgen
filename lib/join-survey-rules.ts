@@ -115,8 +115,11 @@ const LINK = /\b(?:https?:\/\/|www\.)\S+/gi;
 const EMAIL = /[^\s@]+@[^\s@]+\.[^\s@]+/g;
 /** A phone number, as lib/inbox-rules.ts forAi reads one: eight or more digits with spaces, dots, hyphens or brackets. */
 const PHONE = /\+?\(?\d[\d\s().-]{7,}\d/g;
-/** A social handle: "@" and a name, with no dot after it (an address is taken out above). */
-const HANDLE = /(^|\s)@[A-Za-z0-9_.]+/g;
+/**
+ * A social handle: "@" and a name (an address is taken out above), also glued to punctuation such as "ig:@name" or
+ * "(@name)" (Claude 3 nuvem M on #3652); never after a letter, a digit, "@" or "." ("5@ each" stays).
+ */
+const HANDLE = /(^|[^\w@.])@[A-Za-z0-9_.]+/g;
 /**
  * The most of a comment the link and address patterns read: far more than is kept (MAX_JOIN_COMMENT), so the
  * patterns never run over an unbounded text (a long one with no spaces took seconds; Claude 3 and Codex G on #3652).

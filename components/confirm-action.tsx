@@ -1,6 +1,10 @@
 "use client";
 
+import { browserFrames, focusWhenDrawn } from "@/lib/focus-when-drawn";
 import { useEffect, useRef, useState, type ReactNode } from "react";
+
+/** What can take the focus in the item beside a removed one. */
+const FOCUSABLE = 'button:not([disabled]), a[href], input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 /**
  * A button for something that cannot be undone (568 [GD2] (h); WCAG 3.3.4 and, at AAA, 3.3.6): the first press
@@ -57,8 +61,13 @@ export function ConfirmAction({
         className="btn btn-danger btn-sm"
         aria-disabled={disabled || busy || undefined}
         aria-busy={busy}
-        onClick={async () => {
+        onClick={async (event) => {
           if (disabled || busy || pending.current) return;
+          // The item this question sits in, and the ones beside it: when "Yes" takes the item away, the question
+          // goes with it, so the focus moves to the item now after it, or the one before (2.4.3).
+          const row = event.currentTarget.closest("li");
+          const after = row?.nextElementSibling ?? null;
+          const before = row?.previousElementSibling ?? null;
           pending.current = true;
           try {
             await onConfirm();
@@ -66,6 +75,15 @@ export function ConfirmAction({
             pending.current = false;
           }
           setAsking(false);
+          if (row) {
+            focusWhenDrawn(() => {
+              if (row.isConnected) return null;
+              const lost = !document.activeElement || document.activeElement === document.body;
+              if (!lost) return null;
+              const place = after?.isConnected ? after : before?.isConnected ? before : null;
+              return place?.querySelector<HTMLElement>(FOCUSABLE) ?? null;
+            }, browserFrames());
+          }
         }}
       >
         {yes}

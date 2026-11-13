@@ -422,7 +422,9 @@ async function giveBack(statsId: string, c: Connection): Promise<void> {
 
 /** Disconnects: gives the permission back to Meta, then forgets the connection and every line read. */
 export async function disconnectMeta(statsId: string): Promise<MetaAccount | null | false> {
-  if (!isRedisConfigured()) return false;
+  // Redis not configured is not "not connected" (Codex U on #2924): the route would say "disconnected" with the
+  // sealed token, the connection and its lines still stored, so it is unknown and the studio is told it failed.
+  if (!isRedisConfigured()) throw new UnknownReplyError("a Meta connection: Redis is not configured");
   // Read exactly (Claude 5 on #2924, rule 24): false only when the store is confirmed not connected; an unknown
   // reply, or a deletion not answered in its shape, throws, so the studio is told it could not be done, never
   // "disconnected" with the connection, its token and its lines still kept.

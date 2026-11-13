@@ -46,7 +46,7 @@ import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { dataBytes } from "@/lib/store-data-rules";
 import { StoreFullError } from "@/lib/store-full";
 import { type ProductFile, parseProductFile } from "@/lib/product-file";
-import { type ProductOption, parseOptions } from "@/lib/product-option";
+import { MAX_OPTION_LABEL_LENGTH, MAX_OPTIONS, MAX_STORE_OPTIONS, OPTION_ID, type ProductOption, parseOptions } from "@/lib/product-option";
 import { MAX_LINK_LENGTH } from "@/lib/product-link";
 import { type Recurring, parseRecurring } from "@/lib/product-recurring";
 import { type Intro, parseIntro } from "@/lib/intro-price";
@@ -355,6 +355,54 @@ function parseCard(id: string, raw: string): Card | null {
   }
 }
 const extrasKey = (catalog: string, product: string) => `nl:catalog:${catalog}:x:${product}`;
+
+/**
+ * Every product's name and its options' labels, in one hash, for the sales
+ * file (lib/stats.ts salesCsv; Claude 4's option D, candidate 1c, 7 November
+ * 2026): a product's record can weigh MAX_PRODUCT_BYTES and the file shows only
+ * its title and the label of the option sold. Written and taken away with the
+ * product (productWrites, productDrops), as its card is; a product saved before
+ * it existed has none, and its record is read instead (listingNamesById), until
+ * scripts/sales-file-fill.mjs fills it (fillProductNames).
+ */
+const namesKey = (catalog: string) => `nl:catalog:${catalog}:n`;
+
+/** What the sales file shows of a product: its title and its options' labels. */
+export type ListingNames = { title: string; options: { id: string; label: string }[] };
+
+/** A product's names as stored: its title, then each option's id and label. */
+function namesValue(listing: ListingNames): string {
+  return JSON.stringify([listing.title, ...listing.options.flatMap((option) => [option.id, option.label])]);
+}
+
+/** Names read back, or null when they are not a product's names in their exact shape (then its record is read). */
+function parseNames(raw: string): ListingNames | null {
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(value) || value.length % 2 !== 1 || value.some((part) => typeof part !== "string")) return null;
+  const [title, ...rest] = value as string[];
+  if (title.length > MAX_TITLE_LENGTH) return null;
+  const options: { id: string; label: string }[] = [];
+  for (let i = 0; i < rest.length; i += 2) {
+    const [id, label] = [rest[i], rest[i + 1]];
+    if (!OPTION_ID.test(id) || !label || label.length > MAX_OPTION_LABEL_LENGTH) return null;
+    options.push({ id, label });
+  }
+  return { title, options };
+}
+
+/**
+ * The most bytes a store's names take: every product's title of
+ * MAX_TITLE_LENGTH units and every option of the store (MAX_STORE_OPTIONS) with
+ * an id of 24 and a label of MAX_OPTION_LABEL_LENGTH units, each unit at six
+ * bytes (a control character as JSON writes it), with each product's field,
+ * quotes and commas. The sales file reads at most this; the store keeps it.
+ */
+export const MAX_STORE_NAMES_BYTES = MAX_PRODUCTS * (64 + 4 + 6 * MAX_TITLE_LENGTH) + MAX_STORE_OPTIONS * (2 * 3 + 24 + 6 * MAX_OPTION_LABEL_LENGTH);
 
 type Command = (string | number)[];
 
@@ -852,6 +900,20 @@ export const LISTING_MGET_KEYS = Math.max(1, Math.floor(LISTING_MGET_ANSWER_BYTE
 export const LISTING_MGET_PARALLEL = 4;
 
 /**
+ * What one product's names (namesValue) can weigh at the worst: the brackets, a title of MAX_TITLE_LENGTH units and
+ * MAX_OPTIONS options, each with an id of 24 (OPTION_ID) and a label of MAX_OPTION_LABEL_LENGTH units, every unit at
+ * six bytes (a control character as JSON writes it), with their quotes and commas. Bounded by the writer's ceilings.
+ */
+const NAMES_VALUE_WORST_BYTES = 2 + (3 + 6 * MAX_TITLE_LENGTH) + MAX_OPTIONS * (3 + 24 + (3 + 6 * MAX_OPTION_LABEL_LENGTH));
+
+/**
+ * The most names one HMGET of listingNamesById asks for: as many as fit LISTING_MGET_ANSWER_BYTES at the worst, each
+ * value escaped once more in the reply (six bytes a byte) with its quotes and comma (Claude 5's MEDIUM on #3129: the
+ * names were sliced by a whole record's batch, LISTING_MGET_KEYS, 400 HMGETs for 2,000 products, all at once).
+ */
+export const NAMES_HMGET_FIELDS = Math.max(1, Math.floor(LISTING_MGET_ANSWER_BYTES / (6 * NAMES_VALUE_WORST_BYTES + 3)));
+
+/**
  * The listings these ids name, by id, read before a walk through sales that
  * each name some (the sales file, lib/stats.ts salesCsv): whatever the store
  * record holds is not read again, and the rest is read in MGETs of at most
@@ -904,6 +966,104 @@ export async function listingsById(store: Store, ids: Iterable<string>): Promise
     });
   });
   return found;
+}
+
+/**
+ * The names (title, options' labels) of the products these ids name, by id,
+ * for the sales file (lib/stats.ts salesCsv): what the store record holds is
+ * not read again; the rest from the catalog's names (namesKey) in HMGETs of at
+ * most NAMES_HMGET_FIELDS fields, LISTING_MGET_PARALLEL of them side by side
+ * (2,000 products: 22 commands in 6 waits); a product whose names are
+ * missing or do not read has its record read instead (listingsById), so a name
+ * is never blank for a want of its copy. Ids the store does not have, and
+ * products whose record Redis answers is not there, are left out. A reply that
+ * is not one string or nil for each field asked throws UnknownReplyError
+ * (CX-123 rule 24).
+ */
+export async function listingNamesById(store: Store, ids: Iterable<string>): Promise<Map<string, ListingNames>> {
+  const asked = wanted(store, ids);
+  const catalog = store.catalog;
+  if (catalog.inline || !catalog.id || !isRedisConfigured()) return listingsById(store, asked);
+  const found = new Map<string, ListingNames>();
+  const head = new Map(catalog.head.map((listing) => [listing.id, listing]));
+  const missing: string[] = [];
+  for (const id of asked) {
+    const listing = head.get(id);
+    if (listing) found.set(id, listing);
+    else missing.push(id);
+  }
+  if (!missing.length) return found;
+  const read = await namesOf(catalog.id, missing);
+  const unread = missing.filter((id) => {
+    const names = read.get(id);
+    if (names) found.set(id, names);
+    return !names;
+  });
+  if (unread.length) for (const [id, listing] of await listingsById(store, unread)) found.set(id, listing);
+  return found;
+}
+
+/** The names kept for these products, read exactly: those that read, by id; a missing or unreadable one is not in it. */
+async function namesOf(catalog: string, ids: string[]): Promise<Map<string, ListingNames>> {
+  const chunks: string[][] = [];
+  for (let i = 0; i < ids.length; i += NAMES_HMGET_FIELDS) chunks.push(ids.slice(i, i + NAMES_HMGET_FIELDS));
+  const readChunk = async (chunk: string[]): Promise<(string | null)[]> => {
+    const [reply] = repliesFor(await redisPipeline([["HMGET", namesKey(catalog), ...chunk]]), 1) ?? [undefined];
+    const raws = repliesFor(reply, chunk.length);
+    if (!raws || raws.some((raw) => raw !== null && typeof raw !== "string")) throw new UnknownReplyError("a store's product names");
+    return raws as (string | null)[];
+  };
+  // At most LISTING_MGET_PARALLEL in flight at once, as listingsById's own MGETs.
+  const answers: (string | null)[][] = [];
+  for (let c = 0; c < chunks.length; c += LISTING_MGET_PARALLEL) answers.push(...(await Promise.all(chunks.slice(c, c + LISTING_MGET_PARALLEL).map(readChunk))));
+  const out = new Map<string, ListingNames>();
+  chunks.forEach((chunk, c) =>
+    chunk.forEach((id, i) => {
+      const names = answers[c][i] === null ? null : parseNames(answers[c][i] as string);
+      if (names) out.set(id, names);
+    }),
+  );
+  return out;
+}
+
+/** What a filling of a store's names found and did. */
+export type NamesFill = { products: number; without: number; written: number; commands: number; bytes: number };
+
+/**
+ * Writes the names of every product of the store that has none (the one-time
+ * filling, scripts/sales-file-fill.mjs), NAMES_HMGET_FIELDS products a step:
+ * the names' HMGET, the records' MGET for those without (listingsById), and
+ * one HSETNX each, so a product saved meanwhile keeps the names it was saved
+ * with. Only counts when `write` is false. A reply or a record that does not
+ * read throws UnknownReplyError. Safe to run again. The names it writes count
+ * in the store's data room at the product's next save (productBytes).
+ */
+export async function fillProductNames(store: Store, write: boolean): Promise<NamesFill> {
+  const out: NamesFill = { products: 0, without: 0, written: 0, commands: 0, bytes: 0 };
+  const catalog = store.catalog;
+  if (catalog.inline || !catalog.id || !isRedisConfigured()) return out;
+  const ids = productIds(store);
+  out.products = ids.length;
+  for (let i = 0; i < ids.length; i += NAMES_HMGET_FIELDS) {
+    const chunk = ids.slice(i, i + NAMES_HMGET_FIELDS);
+    const read = await namesOf(catalog.id, chunk);
+    out.commands += 1;
+    out.bytes += [...read.values()].reduce((n, names) => n + byteLength(namesValue(names)), 0);
+    const without = chunk.filter((id) => !read.has(id));
+    if (!without.length) continue;
+    const listings = await listingsById({ ...store, catalog: { ...catalog, head: [] } }, without);
+    out.commands += Math.ceil(without.length / LISTING_MGET_KEYS);
+    out.bytes += [...listings.values()].reduce((n, listing) => n + byteLength(JSON.stringify(listing)), 0);
+    out.without += listings.size;
+    if (!write || !listings.size) continue;
+    const writes = [...listings].map(([id, listing]) => ["HSETNX", namesKey(catalog.id!), id, namesValue(listing)]);
+    const answers = repliesFor(await redisPipeline(writes), writes.length);
+    if (!answers || answers.some((answer) => answer !== 0 && answer !== 1)) throw new UnknownReplyError("writing a store's product names");
+    out.commands += writes.length;
+    out.bytes += writes.reduce((n, w) => n + byteLength(String(w[3])), 0);
+    out.written += answers.filter((answer) => answer === 1).length;
+  }
+  return out;
 }
 
 /** Listings of every product of one kind, in the creator's order. */
@@ -1282,7 +1442,8 @@ function byteLength(text: string): number {
 /** The writes that put one product in its records. Refuses one past the ceiling. */
 export function productWrites(catalog: string, product: Product): Command[] {
   if (!SAFE_ID.test(product.id)) throw new Error("product id");
-  const listing = JSON.stringify(listingOf(product));
+  const shown = listingOf(product);
+  const listing = JSON.stringify(shown);
   const heavy = product.fields.length > 0 || product.funnel !== null;
   const extras = heavy ? JSON.stringify({ fields: product.fields, funnel: product.funnel }) : "";
   if (byteLength(listing) + byteLength(extras) > MAX_PRODUCT_BYTES) throw new StoreFullError();
@@ -1290,6 +1451,7 @@ export function productWrites(catalog: string, product: Product): Command[] {
     ["SET", listingKey(catalog, product.id), listing],
     heavy ? ["SET", extrasKey(catalog, product.id), extras] : ["DEL", extrasKey(catalog, product.id)],
     ["HSET", titlesKey(catalog), product.id, cardValue(product)],
+    ["HSET", namesKey(catalog), product.id, namesValue(shown)],
   ];
 }
 
@@ -1302,13 +1464,13 @@ export function productBytes(product: Product): number {
   const heavy = product.fields.length > 0 || product.funnel !== null;
   const listing = JSON.stringify(listingOf(product));
   const extras = heavy ? JSON.stringify({ fields: product.fields, funnel: product.funnel }) : "";
-  return dataBytes([listing, extras, product.id, cardValue(product)], heavy ? 3 : 2);
+  return dataBytes([listing, extras, product.id, cardValue(product), product.id, namesValue(listingOf(product))], heavy ? 4 : 3);
 }
 
 /** The writes that forget one product's records. */
 export function productDrops(catalog: string, id: string): Command[] {
   if (!SAFE_ID.test(id)) return [];
-  return [["DEL", listingKey(catalog, id), extrasKey(catalog, id)], ["HDEL", titlesKey(catalog), id]];
+  return [["DEL", listingKey(catalog, id), extrasKey(catalog, id)], ["HDEL", titlesKey(catalog), id], ["HDEL", namesKey(catalog), id]];
 }
 
 /**

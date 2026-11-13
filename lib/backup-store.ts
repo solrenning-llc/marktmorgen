@@ -109,7 +109,8 @@ function single(xml: string, name: string): string | null {
 
 /**
  * One listing page read whole, or a throw: the backup's own objects with their write times, and the token to go on.
- * A field missing, repeated or out of shape, a count that does not match, or a truncated page with no token throws.
+ * A field missing, repeated or out of shape, a name listed twice, a count that does not match, or a truncated page
+ * with no token throws.
  */
 export function readListing(xml: string): { objects: { id: string; writtenAt: number; bytes: number }[]; next: string | null } {
   if (!xml.includes("<ListBucketResult") || !xml.includes("</ListBucketResult>")) throw new Error("Invalid backup listing");
@@ -120,6 +121,7 @@ export function readListing(xml: string): { objects: { id: string; writtenAt: nu
   if (entries.length > BACKUP_LIST_PAGE_KEYS || opened !== entries.length) throw new Error("Invalid backup listing");
   if (/<(?:[A-Za-z_][A-Za-z0-9_.-]*:)?KeyCount[^A-Za-z0-9_.:-]/.test(xml) && single(xml, "KeyCount") !== String(entries.length)) throw new Error("Invalid backup listing");
   const objects: { id: string; writtenAt: number; bytes: number }[] = [];
+  const names = new Set<string>();
   for (const entry of entries) {
     const name = single(entry, "Key");
     const when = single(entry, "LastModified");
@@ -127,6 +129,9 @@ export function readListing(xml: string): { objects: { id: string; writtenAt: nu
     const size = single(entry, "Size");
     const bytes = size !== null && /^\d{1,15}$/.test(size) ? Number(size) : NaN;
     if (name === null || !name.startsWith(PREFIX) || !Number.isSafeInteger(writtenAt) || !Number.isSafeInteger(bytes)) throw new Error("Invalid backup listing entry");
+    // A listing names each object once: one named twice would be counted twice and push the run to delete copies.
+    if (names.has(name)) throw new Error("Invalid backup listing entry");
+    names.add(name);
     // Only what this store writes is offered; any other name under the prefix is left alone.
     const id = OBJECT_NAME.exec(name)?.[1];
     if (id) objects.push({ id, writtenAt, bytes });

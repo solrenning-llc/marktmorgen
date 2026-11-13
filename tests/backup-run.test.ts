@@ -588,7 +588,7 @@ async function main(): Promise<void> {
         return store.putNew(id, bytes);
       },
     };
-    is("the run's cutoff: 700 s, under a day (the retention's proof needs it) and under the route's 800 s (inbox C4-36)", BACKUP_RUN_CUTOFF_MS, 700_000);
+    is("the run's cutoff: 240 s, under a day (the retention's proof needs it) and inside the route's 300 s with what runs outside it (inbox C4-36, C2-20261113-1415-ADOTAR-5)", BACKUP_RUN_CUTOFF_MS, 240_000);
     const late = await runBackup({ now: clock, review, store: slow, key, cutoffMs: 200 });
     is("past the cutoff: refused as such, its part left unreferenced, no manifest written", [late, objects.size, (await backupLastFailure())?.reason], [{ ok: false, reason: "export_cutoff" }, 1, "export_cutoff"]);
   }

@@ -145,7 +145,13 @@ export const BACKUP_RUN_COMMANDS = 10;
  * given up by then and none is sent after it (lib/fetch-timeout.ts, withCutoff), and the walk, each part and the
  * manifest are refused once it has passed. The outcome is written after it, outside it.
  */
-export const BACKUP_RUN_CUTOFF_MS = 700_000;
+export const BACKUP_RUN_CUTOFF_MS = 240_000;
+/**
+ * Database requests a run sends outside its cutoff, each given up after REDIS_TIMEOUT_MS: the lock and the day's count
+ * before it, the outcome and the lock let go after it. With the cutoff and the alarm, they end inside the route's
+ * maxDuration with 30 s to spare (tests/bk1-backup-route.test.ts).
+ */
+export const BACKUP_REQUESTS_OUTSIDE_CUTOFF = 4;
 /**
  * Days the owner's bucket lock on backups/ keeps an object from deletion (proposal, inbox C4-35; the owner sets the
  * lock on the bucket). The run never asks to delete an object younger than this and LOCK_CLOCK_ROOM_MS.
@@ -458,9 +464,10 @@ export async function runBackup(options: BackupRunOptions = {}): Promise<BackupR
   return result;
 }
 
-/** Every object of the backup's own, read whole within backupListPages pages; null when the listing is longer. */
+/** Every object of the backup's own, read whole within backupListPages pages, each once; null when the listing is longer. */
 async function listAll(review: BackupCostReview, store: BackupBucket): Promise<BackupListedObject[] | null> {
   const all: BackupListedObject[] = [];
+  const seen = new Set<string>();
   let next: string | null = null;
   for (let page = 0; page < backupListPages(review); page += 1) {
     if (timeLeft() <= 0) throw new RangeError("cutoff");
@@ -468,6 +475,9 @@ async function listAll(review: BackupCostReview, store: BackupBucket): Promise<B
     if (!answer || !Array.isArray(answer.objects) || (answer.next !== null && typeof answer.next !== "string")) throw new Error("Invalid listing");
     for (const object of answer.objects) {
       if (!object || typeof object.id !== "string" || !Number.isSafeInteger(object.writtenAt) || !Number.isSafeInteger(object.bytes) || object.bytes < 0) throw new Error("Invalid listing");
+      // Named again on a later page: counted twice, it would make room by deleting copies the ceiling never asked for.
+      if (seen.has(object.id)) throw new Error("Invalid listing");
+      seen.add(object.id);
       all.push(object);
     }
     if (answer.next === null) return all;

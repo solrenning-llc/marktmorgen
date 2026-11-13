@@ -89,14 +89,14 @@ const GB = 1_000_000_000;
  * it; tests/bk1-backup-route.test.ts holds the two equal). A review is priced at this duration (Claude 5's LOW,
  * 9 November 2026), never at a shorter one assumed.
  */
-export const BACKUP_ROUTE_SECONDS = 800;
+export const BACKUP_ROUTE_SECONDS = 300;
 
 /**
  * What the code cannot bound, each an open item of docs/backup-cost-2026-11-04.md
  * (sections 5 and 5d): while any is here, the fixed-cost line is not reviewed.
  */
 export const BACKUP_COST_UNKNOWNS = [
-  "vercel-route: the route's maxDuration of 800 s (BACKUP_ROUTE_SECONDS) needs Fluid compute, and no deployment has accepted it yet",
+  "vercel-route: no deployment has run the route at its maxDuration of 300 s (BACKUP_ROUTE_SECONDS) yet",
   "vercel-rates: the Vercel rates were read on 7 October 2026 and not since",
   "vercel-transfer: whether Vercel bills the function's bytes sent to R2 and Upstash",
   "upstash-overshoot: the last batch of DUMPs is read before the cap refuses it, and a key's size is not capped by the backup",

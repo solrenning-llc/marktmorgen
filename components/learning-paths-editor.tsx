@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { MAX_PATHS, MAX_PATH_COURSES, MAX_PATH_NAME, MIN_PATH_COURSES, type PathOrder, type StoredPath } from "@/lib/learning-path-rules";
 
 /**
@@ -13,6 +13,12 @@ import { MAX_PATHS, MAX_PATH_COURSES, MAX_PATH_NAME, MIN_PATH_COURSES, type Path
  * kept list could not be read, so no editor is drawn over it (rule 24).
  */
 
+/**
+ * Where the focus goes once an action took away the control that held it (WCAG 2.4.3, cloud J on #3723): the control
+ * that takes its place, focused on the next frame, once the page has drawn it.
+ */
+const focusSoon = (id: string) => requestAnimationFrame(() => document.getElementById(id)?.focus());
+
 type Draft = { id?: string; name: string; courses: string[]; order: PathOrder };
 type Course = { id: string; title: string };
 
@@ -24,15 +30,6 @@ export function LearningPathsEditor({ initial, courses }: { initial: StoredPath[
   const [picked, setPicked] = useState<Record<number, string>>({});
   const [busy, setBusy] = useState(false);
   const [said, setSaid] = useState<{ ok: boolean; text: string } | null>(null);
-  // Where the focus goes once an action took away the control that held it (WCAG 2.4.3, cloud J on #3723): the
-  // control that takes its place, focused after the page drew it.
-  const [focusTo, setFocusTo] = useState<string | null>(null);
-  useEffect(() => {
-    if (!focusTo) return;
-    const id = focusTo;
-    setFocusTo(null);
-    requestAnimationFrame(() => document.getElementById(id)?.focus());
-  }, [focusTo]);
 
   if (initial === null) {
     return <p className="notice notice-warn">Your paths could not be read just now. Nothing is shown here so nothing is saved over them; reload the page in a moment.</p>;
@@ -122,7 +119,7 @@ export function LearningPathsEditor({ initial, courses }: { initial: StoredPath[
                           const rest = path.courses.filter((c) => c !== id);
                           change(i, { courses: rest });
                           // The course now in its place, else the box to add one.
-                          setFocusTo(rest[k] ? `path-${i}-out-${rest[k]}` : `path-${i}-add`);
+                          focusSoon(rest[k] ? `path-${i}-out-${rest[k]}` : `path-${i}-add`);
                         }}
                       >
                         Take out
@@ -168,7 +165,7 @@ export function LearningPathsEditor({ initial, courses }: { initial: StoredPath[
                 setRemoved((list) => [...list, { path, at: i }]);
                 setPicked({});
                 setPaths((list) => list.filter((_, j) => j !== i));
-                setFocusTo("paths-put-back");
+                focusSoon("paths-put-back");
               }}
             >
               {`Remove path ${i + 1}`}
@@ -188,7 +185,7 @@ export function LearningPathsEditor({ initial, courses }: { initial: StoredPath[
               setPaths((list) => [...list.slice(0, last.at), last.path, ...list.slice(last.at)]);
               setRemoved((list) => list.slice(0, -1));
               setPicked({});
-              setFocusTo(`path-${last.at}-legend`);
+              focusSoon(`path-${last.at}-legend`);
             }}
           >
             Put it back

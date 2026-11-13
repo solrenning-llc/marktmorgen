@@ -27,6 +27,7 @@ const SELF = "tests/contract-resource-allocation-inventory.test.ts";
 const PRIMITIVES = ["takeAllowance", "holdAllowanceAt", "forceAllowance"] as const;
 const GATE = "reservePaidResourceWindow(";
 
+type CallerEntry = { state: "gated"; calls: number; note?: string } | { state: "kept-right"; calls: number; why: string } | { state: "pending"; calls: number; why: string };
 type Entry =
   /** reservePaidResourceWindow( is written in the same top-level function before every take. */
   | { state: "gated"; calls: number; note?: string }
@@ -34,6 +35,8 @@ type Entry =
   | { state: "gated-by-callers"; calls: number; guard: string }
   /** takeAllowance itself proves the cohort for this kind (lib/store-allowance.ts). */
   | { state: "gated-in-primitive"; calls: number; kind: "webhook" }
+  /** A generic door that also serves removal, leaving, paying and downloads: not gated itself; every caller is classified in `callers` instead. */
+  | { state: "door"; calls: number; callers: Record<string, CallerEntry> }
   /** Only settles what `after` (an inventoried, gated site) admitted earlier in the same function: never a new admission. */
   | { state: "settles"; calls: number; after: string }
   /** A right that is never refused for the cohort; its cost stays inside the plan's own figure. Needs the reviewer's acceptance. */
@@ -62,8 +65,31 @@ const ALLOWANCE_TAKE_INVENTORY: Record<string, Entry> = {
   "lib/metered-limits.ts#withinServiceWhy": { state: "gated", calls: 1, note: "Removals skip it at their callers (host-calendar removing, email-sync disconnect)." },
   "lib/person-erasure.ts#erasePerson": { state: "kept-right", calls: 2, why: "Erasing a person is their right and the store's legal duty; never refused because a period's cash proof is missing." },
   "lib/store-copy.ts#charge": { state: "gated", calls: 1 },
-  "lib/studio-route.ts#countStudio": { state: "pending", calls: 1, why: "The generic studio door also serves removal and disconnection: gating it here refused Discord role removal and disconnect (tests/discord.test.ts, 13 November 2026). Each caller that starts new work needs the gate itself, as cart-link now does." },
-  "lib/studio-route.ts#holdStudio": { state: "pending", calls: 2, why: "Held for list downloads (the store's own data taken away) and the affiliates page; gating here would refuse a download, so each new-work caller needs its own gate." },
+  // The generic studio door also serves removal and disconnection: gating it here refused Discord role removal and
+  // disconnect (tests/discord.test.ts, 13 November 2026). Each caller that starts new work proves the cohort itself.
+  "lib/studio-route.ts#countStudio": { state: "door", calls: 1, callers: {
+    "lib/studio-route.ts#studioAccess": { state: "kept-right", calls: 1, why: "The door of every studio request: removing, leaving, paying, disconnecting and downloading pass here. The new work behind it proves the cohort where it takes or spends (the takes above, the primitives of part 2, the Discord, calendar and meeting routes)." },
+    "lib/studio-route.ts#studioView": { state: "kept-right", calls: 1, why: "Drawing a studio page is how the owner reaches paying, leaving, removing and downloading; refusing it would shut them out." },
+    "lib/cart-link-products.ts#cartLinkProducts": { state: "gated", calls: 1 },
+    "lib/deal-stage-trigger.ts#dealEnteredStage": { state: "gated", calls: 1 },
+    "lib/path.ts#chargeStudio": { state: "gated", calls: 1 },
+    "lib/person-agenda-read.ts#countUnits": { state: "gated", calls: 1 },
+    "app/api/store/discount/route.ts#POST": { state: "gated", calls: 1 },
+    "app/api/store/funnel-explain/route.ts#POST": { state: "gated", calls: 1 },
+    "app/api/store/funnel-share/route.ts#otherOwnStore": { state: "gated", calls: 1 },
+    "app/api/store/path/route.ts#POST": { state: "gated", calls: 1, note: "Joining the board only; leaving it never counts." },
+    "app/api/store/person-tasks/route.ts#GET": { state: "gated", calls: 1 },
+    "app/api/store/person-tasks/route.ts#POST": { state: "gated", calls: 1, note: "Skipped for removing a task and marking it done." },
+    "app/api/store/store-copy/route.ts#POST": { state: "gated", calls: 1 },
+    "app/studio/totals/page.tsx#readStore": { state: "gated", calls: 1 },
+    "app/api/store/receipt-pdf/route.ts#GET": { state: "kept-right", calls: 1, why: "A receipt for a payment already made is owed to whoever paid; it is a record, not new work." },
+    "app/studio/invoices/page.tsx#StudioInvoicesPage": { state: "kept-right", calls: 1, why: "The owner's own invoices from us: paying and its records are never refused." },
+    "app/studio/path/privacy/page.tsx#PathBoardPrivacyPage": { state: "kept-right", calls: 1, why: "Counted under the \"delete\" need, which leaving and deleting use; never refused for the cohort." },
+  } },
+  "lib/studio-route.ts#holdStudio": { state: "door", calls: 2, callers: {
+    "lib/list-download.ts#holdListDownload": { state: "kept-right", calls: 2, why: "Downloading the store's lists is taking its own data away (studioAccess keeps that open)." },
+    "app/api/store/affiliates/route.ts#POST": { state: "gated", calls: 1, note: "Skipped for removing, declining, restoring and undoing." },
+  } },
   "lib/webhooks.ts#attempt": { state: "gated-in-primitive", calls: 1, kind: "webhook" },
   "lib/webhooks.ts#resendDelivery": { state: "gated", calls: 1 },
   "lib/webhooks.ts#sendTest": { state: "gated", calls: 1 },
@@ -162,6 +188,37 @@ function audit(sources: Map<string, string>, inventory: Record<string, Entry>, u
       });
       for (const [other, source] of sources) if (other !== file && new RegExp(`\\b${fn}\\b`).test(source) && source.includes(`from "@/${file.replace(/\.ts$/, "")}"`)) problems.push(`${key}: used outside its file in ${other}`);
     }
+    if (entry.state === "door") {
+      const [file, fn] = key.split("#");
+      const modulePath = file.replace(/\.tsx?$/, "");
+      const callers = new Map<string, { line: number; before: string }[]>();
+      for (const [other, source] of sources) {
+        if (other !== file && !source.includes(`"@/${modulePath}"`)) continue;
+        const lines = source.split("\n");
+        const decls = declarations(lines);
+        lines.forEach((text, line) => {
+          if (COMMENT.test(text)) return;
+          for (const m of text.matchAll(new RegExp(`(?<![.\\w$])${fn}\\(`, "g"))) {
+            if (/function\s+$/.test(text.slice(0, m.index))) continue;
+            const decl = enclosing(decls, line);
+            const at = `${other}#${decl?.name ?? "(top)"}`;
+            const before = lines.slice(decl?.line ?? 0, line).join("\n") + "\n" + text.slice(0, m.index);
+            callers.set(at, [...(callers.get(at) ?? []), { line: line + 1, before }]);
+          }
+        });
+      }
+      for (const [at, calls] of callers) {
+        const caller = entry.callers[at];
+        if (!caller) {
+          problems.push(`${key}: unclassified caller ${at} (line ${calls[0].line})`);
+          continue;
+        }
+        if (caller.calls !== calls.length) problems.push(`${key}: ${at} has ${calls.length} calls, ${caller.calls} inventoried`);
+        if (caller.state === "gated") for (const call of calls) if (!call.before.includes(GATE)) problems.push(`${key}: ${at} claimed gated, but no ${GATE} before line ${call.line}`);
+        if (caller.state !== "gated" && !caller.why.trim()) problems.push(`${key}: ${at} needs its reason`);
+      }
+      for (const at of Object.keys(entry.callers)) if (!callers.has(at)) problems.push(`${key}: stale caller ${at}`);
+    }
     if (entry.state === "settles") {
       const admitted = inventory[entry.after];
       const fn = entry.after.split("#")[1];
@@ -171,7 +228,7 @@ function audit(sources: Map<string, string>, inventory: Record<string, Entry>, u
     if ((entry.state === "pending" || entry.state === "kept-right") && !entry.why.trim()) problems.push(`${key}: needs its reason`);
   }
   for (const key of Object.keys(inventory)) if (!byKey.has(key)) problems.push(`stale inventory entry: ${key} has no take any more`);
-  const pending = Object.entries(inventory).filter(([, e]) => e.state === "pending").map(([k]) => k);
+  const pending = Object.entries(inventory).flatMap(([k, e]) => e.state === "pending" ? [k] : e.state === "door" ? Object.entries(e.callers).filter(([, c]) => c.state === "pending").map(([at]) => `${k} <- ${at}`) : []);
   if (keyTrue && pending.length) problems.push(`resourceAllocations is true with ${pending.length} pending takes: ${pending.join(", ")}`);
   if (keyTrue && uninventoried.length) problems.push(`resourceAllocations is true with ${uninventoried.length} cost primitives not inventoried`);
   return problems;
@@ -198,10 +255,9 @@ const problems = audit(sources, ALLOWANCE_TAKE_INVENTORY, UNINVENTORIED_COST_PRI
 for (const problem of problems) console.log(`        ${problem}`);
 is("no problem between sources, inventory and key", problems, []);
 is("the scan finds every take (29 on 13 November 2026)", allowanceSites(sources).length, Object.values(ALLOWANCE_TAKE_INVENTORY).reduce((n, e) => n + e.calls, 0));
-const pending = Object.values(ALLOWANCE_TAKE_INVENTORY).filter((e) => e.state === "pending").length;
-const pendingCalls = Object.values(ALLOWANCE_TAKE_INVENTORY).filter((e) => e.state === "pending").reduce((n, e) => n + e.calls, 0);
-is("pending takes, down from 11 (part 1): the 3 left are the generic studio door", pendingCalls, 3);
-is("pending takes keep resourceAllocations false", pending > 0 && CONTRACT_ADMISSION_COVERAGE.resourceAllocations, false);
+const pendingCalls = Object.values(ALLOWANCE_TAKE_INVENTORY).reduce((n, e) => n + (e.state === "pending" ? e.calls : e.state === "door" ? Object.values(e.callers).filter((c) => c.state === "pending").reduce((m, c) => m + c.calls, 0) : 0), 0);
+is("pending takes and door callers, down from 11 (part 1) to 0", pendingCalls, 0);
+is("pending takes keep resourceAllocations false", pendingCalls > 0 && CONTRACT_ADMISSION_COVERAGE.resourceAllocations, false);
 is("part 2 exists, so no primitive outside the figures is left uninventoried", readFileSync(join(root, PART_2), "utf8").includes("PRIMITIVE_INVENTORY"), true);
 is("the other two core keys are untouched", [CONTRACT_ADMISSION_COVERAGE.renewals, CONTRACT_ADMISSION_COVERAGE.settlementAndReserveReconciliation], [false, false]);
 

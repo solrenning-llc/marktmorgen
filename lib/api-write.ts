@@ -43,6 +43,7 @@ import { takeAllowance } from "@/lib/store-allowance";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { API_WRITE_UNITS } from "@/lib/store-allowance-rules";
 import { DataRoomError } from "@/lib/store-data";
+import { emailDocument } from "@/lib/email-document";
 
 export const ADDS_PER_DAY = 2_000;
 export const GIVES_PER_DAY = 1_000;
@@ -184,6 +185,23 @@ function senderAddress(): string {
 }
 
 /**
+ * The access email's HTML: a paragraph for each blank line of its text, a
+ * whole page in the store's language (WCAG 3.1.1) with its subject as the
+ * title (2.4.2; lib/email-document.ts).
+ */
+export function accessLetterHtml(store: Pick<Store, "language">, text: string, subject: string): string {
+  const lang = LANGUAGES[parseLanguage(store.language)].locale;
+  return emailDocument({
+    lang,
+    title: subject,
+    body: `<div lang="${lang}" style="font-family:system-ui,sans-serif;line-height:1.5">${text
+      .split("\n\n")
+      .map((para) => `<p>${escapeHtml(para).replace(/\n/g, "<br>")}</p>`)
+      .join("")}</div>`,
+  });
+}
+
+/**
  * Gives a product to an address, with no payment, as an import gives one.
  * "already" when that address has it given already; the email, when asked
  * for, goes only with a new one.
@@ -258,10 +276,7 @@ export async function giveAccess(
         to: email,
         subject: a.subject(product.title, store.name).slice(0, 200),
         text,
-        html: `<div lang="${LANGUAGES[parseLanguage(store.language)].locale}" style="font-family:system-ui,sans-serif;line-height:1.5">${text
-          .split("\n\n")
-          .map((para) => `<p>${escapeHtml(para).replace(/\n/g, "<br>")}</p>`)
-          .join("")}</div>`,
+        html: accessLetterHtml(store, text, a.subject(product.title, store.name).slice(0, 200)),
         replyTo: store.email,
       });
     }

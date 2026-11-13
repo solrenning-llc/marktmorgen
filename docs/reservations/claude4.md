@@ -6,6 +6,7 @@ Only Claude 4 edits this file (owner decision 04/11/2026, inbox C4-1). Add a row
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
+| Claude 4 (nuvem Q) | AX274 Part A item 5: the API access email is a whole page with its title and language (WCAG 2.4.2, 3.1.1); only its HTML, after Codex N releases it | claude4/ax-mail-api-access | `lib/api-write.ts`, `tests/ax-mail-api-access.test.ts`, `tests/buyer-email-language.test.ts` | 11/11/2026 16h03 |
 | Claude 4 (nuvem Q) | AX274 Part A item 5: every HTML service email is a whole page with its title and language (WCAG 2.4.2, 3.1.1) | claude4/ax-mail-title | `lib/email-document.ts`, `lib/closing-buyers-rules.ts`, `lib/closing-buyers.ts`, `lib/imports.ts`, `tests/ax-mail-title.test.ts` | 11/11/2026 15h35 |
 | Claude 4 (nuvem Q) | AX274 Part A item 5: the emails and generated PDFs audit, recorded with its gaps | claude4/ax-mail-pdf-audit | `docs/accessibility-email-pdf-audit-2026-11-11.md` | 11/11/2026 15h46 |
 | Claude 4 | 375 [TB1] unit 5 (a video in a window behind a button; PR after #2077, which merged) | claude4/tb1-video-window | `components/side-panel-switch.tsx`, `tests/e2e/block-picker-wide.mjs`, `tests/e2e/us-english-composer.mjs` (waits for the editor to hydrate before opening the picker), `components/video-window.tsx`, `lib/buyer-words/blocks.ts`, `lib/row-edit-rules.ts`, `tests/row-editor.test.ts`, `tests/store-language.test.ts` | 04/11/2026 07h20 |

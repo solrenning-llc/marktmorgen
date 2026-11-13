@@ -55,6 +55,8 @@ export const INVITE_STRIPE_VERSION = "2026-08-26.dahlia";
 const CURSOR_KEY = "nl:ref:cursor";
 const CUSTOMER_PATTERN = /^cus_[A-Za-z0-9]{6,64}$/;
 const INVOICE_PATTERN = /^in_[A-Za-z0-9]{6,64}$/;
+// Only an id in this shape is a receipt that Stripe made the credit (#4422).
+const BALANCE_TXN_PATTERN = /^cbtxn_[A-Za-z0-9]{6,64}$/;
 const CURRENCY_PATTERN = /^[a-z]{3}$/;
 
 type Invoice = {
@@ -406,7 +408,12 @@ async function putOnPlan(id: string, history: Map<string, Map<string, string>>, 
       "metadata[nimbus_invite_credit]": id,
     });
     const made = await onPlatformAt(INVITE_STRIPE_VERSION, "POST", `/customers/${customer}/balance_transactions`, body, `nimbus-invite-${id}`);
-    txn = typeof made.id === "string" ? made.id : "";
+    // No exact receipt: unknown, never done. The credit stays owed and listed;
+    // the next run reads the history again and, if still needed, posts again
+    // under the same idempotency key.
+    const madeId = made && typeof made === "object" && !Array.isArray(made) && typeof made.id === "string" && BALANCE_TXN_PATTERN.test(made.id) ? made.id : null;
+    if (!madeId) throw new UnknownReplyError(`invite credits: the balance transaction receipt for ${id}`);
+    txn = madeId;
     known.set(id, txn);
   }
   await redisPipeline([

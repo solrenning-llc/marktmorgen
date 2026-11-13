@@ -280,7 +280,9 @@ export function assistantPlanOf(subscription: Record<string, unknown>, disputedA
   const cancelAt = typeof subscription.cancel_at === "number" ? subscription.cancel_at : 0;
   const cancelsAtEnd = subscription.cancel_at_period_end === true || cancelAt > 0;
   const period = typeof start === "number" && typeof end === "number" && end > start ? { start, end: cancelAt && cancelAt < end ? cancelAt : end, renews: !cancelsAtEnd } : null;
-  return { subscriptionId: id, active: subscription.status === "active" && !disputedAt, period, cancelsAtEnd, disputedAt };
+  // Only Stripe's own final statuses say it ended; any other status, or none, may still be charged.
+  const ended = subscription.status === "canceled" || subscription.status === "incomplete_expired";
+  return { subscriptionId: id, active: subscription.status === "active" && !disputedAt, period, cancelsAtEnd, disputedAt, ...(ended ? { ended: true as const } : {}) };
 }
 
 /** Reads a returning checkout session: it must be an add-on for this very store, on this store's own customer. */
@@ -359,7 +361,8 @@ export async function syncAssistant(store: Store, subscription?: Record<string, 
     return (await setAssistantPlan(storeRef(store), plan)) ?? store;
   } catch (error) {
     if (error instanceof BillingError && error.status === 404) {
-      return (await setAssistantPlan(storeRef(store), { ...store.assistantPlan!, active: false })) ?? store;
+      // Stripe no longer knows the subscription: nothing more can be charged on it.
+      return (await setAssistantPlan(storeRef(store), { ...store.assistantPlan!, active: false, ended: true })) ?? store;
     }
     console.error("reading a store's add-on failed", error);
     return store;

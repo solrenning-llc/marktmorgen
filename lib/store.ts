@@ -1865,9 +1865,11 @@ export async function deleteStore(email: string): Promise<DeleteResult> {
     if (store.assistantPlan?.active && !store.assistantPlan.cancelsAtEnd) return { ok: false, reason: "assistant" };
     // Not active is not "stopped": a past_due or unpaid add-on (lib/assistant-billing.ts assistantPlanOf) is written
     // down as not active while Stripe may still charge it, and once the store is gone nothing finds it again. It holds
-    // the store until it is known to stop: set to stop at the end of its month, or that month (its period) over.
+    // the store until it is known to stop: set to stop at the end of its month, or ended by Stripe's own word
+    // (plan.ended). Neither a missing period nor a recorded period that is over proves it: a past_due subscription
+    // renews into its next period, and a snapshot can come without one (Claude 3 and Claude 2 nuvem F on #4202).
     const plan = store.assistantPlan;
-    if (plan?.subscriptionId && !plan.active && !plan.cancelsAtEnd && plan.period && plan.period.end > Date.now() / 1000) return { ok: false, reason: "assistant_due" };
+    if (plan?.subscriptionId && !plan.active && !plan.cancelsAtEnd && !plan.ended) return { ok: false, reason: "assistant_due" };
     if (store.domain) return { ok: false, reason: "domain" };
 
     const released = `${RELEASED_PREFIX}${new Date().toISOString()}`;

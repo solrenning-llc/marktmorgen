@@ -125,9 +125,13 @@ async function main(): Promise<void> {
     const store = await extraStore("assist-gone@example.com", "assistgonefirst", "assistgoneextra");
     await setAssistantPlan(storeRef(store), { subscriptionId: "sub_assistantgone1", active: false, period: MONTH, cancelsAtEnd: false, disputedAt: "" });
     const realFetch = globalThis.fetch;
+    const realKey = process.env.STRIPE_SECRET_KEY;
+    process.env.STRIPE_SECRET_KEY = "sk_test_store_delete_assistant_only";
     globalThis.fetch = (async () => new Response(JSON.stringify({ error: { type: "invalid_request_error", message: "No such subscription" } }), { status: 404 })) as typeof fetch;
     const synced = await syncAssistant((await storeForId(store.sid))!);
     globalThis.fetch = realFetch;
+    if (realKey === undefined) delete process.env.STRIPE_SECRET_KEY;
+    else process.env.STRIPE_SECRET_KEY = realKey;
     is("the add-on is written down as ended", [synced.assistantPlan?.active, synced.assistantPlan?.ended], [false, true]);
     const result = await deleteStore(storeRef(store));
     is("deleting it goes through", result.ok ? "deleted" : result.reason, "deleted");

@@ -176,6 +176,11 @@ export type AssistantPlan = {
   cancelsAtEnd: boolean;
   /** The day a payment of it was disputed: it is ended then, and not sold to this store again. */
   disputedAt: string;
+  /**
+   * Stripe said the subscription is over (canceled, incomplete_expired, or no longer found): nothing more is charged.
+   * Absent means not known to have ended, which is not the same as "not active" (a past_due add-on can still be charged).
+   */
+  ended?: true;
 };
 
 const SUBSCRIPTION = /^sub_[A-Za-z0-9]{6,64}$/;
@@ -195,6 +200,7 @@ export function parseAssistantPlan(raw: unknown): AssistantPlan | null {
     period,
     cancelsAtEnd: value.cancelsAtEnd === true,
     disputedAt: typeof value.disputedAt === "string" && /^\d{4}-\d{2}-\d{2}/.test(value.disputedAt) ? value.disputedAt.slice(0, 40) : "",
+    ...(value.ended === true ? { ended: true as const } : {}),
   };
 }
 

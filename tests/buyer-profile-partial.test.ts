@@ -324,7 +324,11 @@ async function main(): Promise<void> {
   const route = readFileSync("app/api/store/person/route.ts", "utf8");
   is("the notes route answers 503, not \"did not save\", when the notes could not be read", /error instanceof UnknownReplyError\)\s*return Response\.json\(\{ ok: false, error: "unavailable" \}, \{ status: 503 \}\)/.test(route), true);
   const box = readFileSync("components/person-notes.tsx", "utf8");
-  is("and the notes box says so, without saying it did not save", /answer\.error === "unavailable"[\s\S]{0,120}toast\("Your notes could not be loaded just now\. Open this page again in a moment to see whether that saved\."\)/.test(box), true);
+  is(
+    "and the notes box says so, without saying it did not save",
+    [/if \(error === "unavailable"\) return "Your notes could not be loaded just now\. Open this page again in a moment to see whether that saved\.";/.test(box), /toast\(personNoteFailureWords\(answer\)\)/.test(box)],
+    [true, true],
+  );
 
   done();
 }

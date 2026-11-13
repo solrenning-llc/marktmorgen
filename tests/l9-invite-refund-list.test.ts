@@ -72,6 +72,9 @@ async function main() {
   const cases = [
     { handle: "unknown-refund", customer: "cus_Unknown001", invoice: "in_Unknown001", payment: "pi_unknown", refunds: { object: "list", has_more: false } },
     { handle: "known-refund", customer: "cus_Refunded01", invoice: "in_Refunded01", payment: "pi_refunded", refunds: { object: "list", data: [{ amount: 2_900, status: "succeeded" }], has_more: false } },
+    // #4424: a refund row whose status is not one Stripe documents is unknown, never "nothing refunded".
+    { handle: "unknown-status", customer: "cus_Mystery001", invoice: "in_Mystery001", payment: "pi_mystery", refunds: { object: "list", data: [{ amount: 2_900, status: "mystery_state" }], has_more: false } },
+    { handle: "empty-status", customer: "cus_NoStatus01", invoice: "in_NoStatus01", payment: "pi_nostatus", refunds: { object: "list", data: [{ amount: 2_900, status: "" }], has_more: false } },
     { handle: "clean-payment", customer: "cus_Clean0001", invoice: "in_Clean0001", payment: "pi_clean", refunds: { object: "list", data: [], has_more: false } },
     // Revisor 1 and Codex C2 on #2722: the invoice's own list of payments must be read whole too.
     { handle: "no-payments", customer: "cus_NoPay0001", invoice: "in_NoPay0001", payment: "pi_nopay", refunds: { object: "list", data: [], has_more: false }, payments: null },
@@ -109,6 +112,10 @@ async function main() {
     is(`${id}: a payment whose refunds cannot be read earns nothing and is not posted`, [redis.run(["GET", creditKey(id)]), postedCredits.includes(id)], [null, false]);
   }
   is("and the run fails each of those stores", run.failed >= 6, true);
+  for (const id of ["in_Mystery001", "in_NoStatus01"]) {
+    is(`${id}: a refund whose status is unknown earns no credit and is not posted`, [redis.run(["GET", creditKey(id)]), postedCredits.includes(id)], [null, false]);
+  }
+  is("and the run fails those stores too", [run.failed >= 8, run.complete], [true, false]);
   is("a confirmed full refund earns nothing", [refunded.state, postedCredits.includes("in_Refunded01")], ["none", false]);
   is("a confirmed empty refund list earns its clean payment once", [clean.state, postedCredits.filter((id) => id === "in_Clean0001").length], ["done", 1]);
   done();

@@ -18,6 +18,7 @@ import { NextRequest } from "next/server";
 import { addProduct, claimHandle, ensureStatsId, ensureStoreId, setAffiliateSetting, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { AFFILIATE_RECORD_MAX_BYTES, MAX_NOTE_LENGTH, bulkUnits, readAffiliate } from "@/lib/affiliates";
+import { MAX_TERM_HISTORY } from "@/lib/partner-terms-rules";
 import { MAX_EMAIL_LENGTH } from "@/lib/auth";
 import { parseAffiliateSetting } from "@/lib/affiliate-setting";
 import { allowanceUsed } from "@/lib/store-allowance";
@@ -90,16 +91,22 @@ async function main(): Promise<void> {
     note: "\u0001".repeat(MAX_NOTE_LENGTH),
     rate: 90,
     paypal: `${wide}@example.org`,
-    share: { percent: 80, products: Array.from({ length: 200 }, (_, i) => `${"q".repeat(36)}${String(i).padStart(4, "0")}`) },
+    share: { percent: 80, products: Array.from({ length: 200 }, (_, i) => `${"q".repeat(36)}${String(i).padStart(4, "0")}`), until: Number.MAX_SAFE_INTEGER },
     cleared: { paid: Number.MAX_SAFE_INTEGER, with: Array.from({ length: 50 }, (_, i) => i.toString(16).padStart(12, "a")) },
     by: { id: "fffffffffff1", percent: 90 },
     warned: Number.MAX_SAFE_INTEGER,
+    // 630 [HN6](39): a change waiting for the partner, as wide as a share, and the longest history kept.
+    terms: {
+      change: { share: { percent: 80, products: Array.from({ length: 200 }, (_, i) => `${"r".repeat(36)}${String(i).padStart(4, "0")}`), until: Number.MAX_SAFE_INTEGER }, asked: Number.MAX_SAFE_INTEGER },
+      history: Array.from({ length: MAX_TERM_HISTORY }, () => ({ at: Number.MAX_SAFE_INTEGER, by: "creator", kind: "withdrawn", percent: 80, products: 200, until: Number.MAX_SAFE_INTEGER })),
+    },
   };
   await real([["HSET", people, widest.id, JSON.stringify(widest)]]);
   const kept = await readAffiliate(await store(), widest.id);
   const keptBytes = Buffer.byteLength(JSON.stringify({ ...kept, decidedAt: Number.MAX_SAFE_INTEGER }));
   console.log(`  the widest record: ${keptBytes} bytes`);
   is("read back whole (its share, its addresses)", [kept?.share?.products.length, kept?.cleared?.with.length, kept?.email.length], [200, 50, MAX_EMAIL_LENGTH]);
+  is("and its terms whole (the change waiting, the history)", [kept?.terms?.change?.share?.products.length, kept?.terms?.history.length], [200, MAX_TERM_HISTORY]);
   is("no more than AFFILIATE_RECORD_MAX_BYTES as written", keptBytes <= AFFILIATE_RECORD_MAX_BYTES, true);
   await real([["HDEL", people, widest.id]]);
 

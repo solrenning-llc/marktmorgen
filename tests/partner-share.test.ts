@@ -224,7 +224,7 @@ test("a sale already made keeps the share it was made at", () => {
   const aff = readFileSync(join(process.cwd(), "lib/affiliates.ts"), "utf8");
   const at = aff.indexOf("export async function notePartners");
   const body = aff.slice(at, aff.indexOf("async function isSelf"));
-  assert.match(body, /percent: shareOn\(partner\.share, sale\.product\)/, "the percentage is frozen onto the line");
+  assert.match(body, /percent: shareOn\(partner\.share, sale\.product, sale\.at\)/, "the percentage is frozen onto the line, read at the sale's own time");
   assert.match(
     aff,
     /Shares already earned are untouched by a change here/,

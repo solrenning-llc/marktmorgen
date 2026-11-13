@@ -103,11 +103,25 @@ import {
   RECURRING_ALWAYS,
   readViaCookie,
 } from "@/lib/affiliate-setting";
-import { type Card, productIds, readCardsFor } from "@/lib/catalog";
+import { type Card, productIds, readCardsFor, readListings } from "@/lib/catalog";
 import type { HeldOne, HeldWhy } from "@/lib/affiliate-bulk-words";
 import type { BookSizes } from "@/lib/api-read-rules";
 import { affiliateForCodes, codeOwners, promoCodesOn } from "@/lib/affiliate-codes";
-import { MAX_COMMITTED_SHARE, type PartnerShare, type ShareProblem, parsePartnerShare, shareOn, shareProblem } from "@/lib/partner-share";
+import { MAX_COMMITTED_SHARE, type PartnerShare, type ShareProblem, parsePartnerShare, shareOn, shareProblem, shareReadsExactly } from "@/lib/partner-share";
+import {
+  NO_TERMS,
+  type PartnerTerms,
+  type WaitingChange,
+  changeNeeds,
+  changeOpen,
+  endedAt,
+  lastDaySeconds,
+  readTerms,
+  settleTerms,
+  shareRunning,
+  stepOf,
+  withStep,
+} from "@/lib/partner-terms-rules";
 import { type Held, LockBusyError, holdLock, withLock } from "@/lib/redis-lock";
 import { bondFor, rememberBuyer } from "@/lib/affiliate-bond";
 import { offerPartnership } from "@/lib/partner-invites";
@@ -211,6 +225,12 @@ export type Affiliate = {
    * sale and no lead (630 [HN6](3), idleSweep), in seconds; 0 if never.
    */
   warned?: number;
+  /**
+   * A change to `share` waiting for the partner's yes, and the agreement's
+   * history (630 [HN6](39); lib/partner-terms-rules.ts). Absent when there is
+   * neither, which is everybody before that item.
+   */
+  terms?: PartnerTerms;
 };
 
 /**
@@ -360,6 +380,10 @@ function parseAffiliate(raw: unknown): Affiliate | null {
         return Number.isInteger(percent) && percent >= 1 && percent <= MAX_COMMISSION ? { id: by.id, percent } : null;
       })(),
       warned: Number.isInteger(value.warned) && Number(value.warned) > 0 ? Number(value.warned) : 0,
+      ...(() => {
+        const terms = readTerms(value.terms);
+        return terms.change || terms.history.length ? { terms } : {};
+      })(),
     };
   } catch {
     return null;
@@ -421,9 +445,261 @@ export async function setPartnerShare(store: Store, id: string, share: PartnerSh
   return (await changeAffiliate(store, id, (affiliate) => ({ ...affiliate, share })))?.next ?? null;
 }
 
-/** Everybody in this programme who holds a standing share of something. */
+// ---- A partnership's term: an end date or until revoked (630 [HN6](39)) ----
+
+export type ShareProposal =
+  | { ok: true; state: "started" | "same" | "applied" | "waiting" }
+  | { ok: false; reason: "unknown" }
+  /** The share asked for does not fit what its products already promise (lib/partner-share.ts shareProblem). */
+  | { ok: false; reason: "cap"; problem: ShareProblem };
+
+/** Whether two reads of one record hold the same agreement: its status, its share and its terms. */
+function sameCommitment(a: Affiliate, b: Affiliate): boolean {
+  return a.status === b.status && JSON.stringify(a.share) === JSON.stringify(b.share) && JSON.stringify(a.terms ?? null) === JSON.stringify(b.terms ?? null);
+}
+
+/** A record with these terms, or without the field when there is nothing to keep. */
+function withTerms(affiliate: Affiliate, terms: PartnerTerms): Affiliate {
+  const { terms: _old, ...rest } = affiliate;
+  void _old;
+  return terms.change || terms.history.length ? { ...rest, terms } : rest;
+}
+
+/** What a proposal makes of the record as it stands (proposePartnerShare). Pure. */
+function proposed(affiliate: Affiliate, next: PartnerShare | null, nowSeconds: number): { next: Affiliate; state: "started" | "same" | "applied" | "waiting" } {
+  const terms = settleTerms(affiliate.terms ?? NO_TERMS, nowSeconds);
+  const current = affiliate.share;
+  const withdrawn = (): PartnerTerms =>
+    terms.change ? { change: null, history: withStep(terms.history, stepOf("withdrawn", "creator", terms.change.share, nowSeconds)) } : terms;
+  let share = current;
+  let kept: PartnerTerms;
+  let state: "started" | "same" | "applied" | "waiting";
+  if (current === null || !shareRunning(current, nowSeconds)) {
+    // Nothing runs (no share, or one over by its date or ended by the store): a new share starts at once, as it
+    // always has for somebody with none; the one over stays on the record as it ended.
+    if (next === null) {
+      kept = withdrawn();
+      state = "same";
+    } else {
+      share = next;
+      kept = { change: null, history: withStep(terms.history, stepOf("started", "creator", next, nowSeconds)) };
+      state = "started";
+    }
+  } else {
+    const needs = changeNeeds(current, next, nowSeconds);
+    if (needs === "same") {
+      kept = withdrawn();
+      state = "same";
+    } else if (needs === "now") {
+      // Only ending a share until revoked gets here while it runs: it ends now, its end kept, so a sale paid before
+      // this moment and written down later still earns ("What was already earned is still paid").
+      share = next === null ? endedAt(current, nowSeconds) : next;
+      kept = { change: null, history: withStep(terms.history, stepOf(next === null ? "revoked" : "changed", "creator", next, nowSeconds)) };
+      state = "applied";
+    } else {
+      kept = { change: { share: next, asked: nowSeconds }, history: withStep(terms.history, stepOf("asked", "creator", next, nowSeconds)) };
+      state = "waiting";
+    }
+  }
+  return { next: withTerms({ ...affiliate, share }, kept), state };
+}
+
+/**
+ * The creator setting, changing or ending a partner's share under the rules of lib/partner-terms-rules.ts (630
+ * [HN6](39)): a new share starts at once; ending one that runs until revoked applies at once (it ends now, its end
+ * kept); every other change waits for the partner's yes (answerShareChange) and the share in force stays as it is
+ * until then. Saving the share in force again withdraws a waiting change.
+ *
+ * Under the program's partner lock (withPartnerLock), like every write of a standing share: the share asked for is
+ * checked against what its products already promise (partnerShareProblem, this partner's own replaced), the lock
+ * confirmed, and the record written over exactly the record read (changeAffiliate), only while its agreement is
+ * still the one decided on. Over the cap: "cap", nothing written. The record changed meanwhile, or the lock lost:
+ * LockBusyError; an unknown reply: UnknownReplyError; nothing written either way (a lost swap answer is
+ * UnknownReplyError: it may have landed). `nowSeconds` is the time of the save.
+ */
+export async function proposePartnerShare(
+  store: Store,
+  id: string,
+  next: PartnerShare | null,
+  nowSeconds: number = Math.floor(Date.now() / 1000),
+  charge: Charge = PAID,
+): Promise<ShareProposal> {
+  if (!store.statsId || !isRedisConfigured() || !AFFILIATE_ID_PATTERN.test(id)) return { ok: false, reason: "unknown" };
+  return withPartnerLock(store, async (held) => {
+    const found = await readAffiliateExact(store, id);
+    if (!found) return { ok: false, reason: "unknown" };
+    const plan = proposed(found, next, nowSeconds);
+    // What is asked for is checked now, whether it starts at once or waits for a yes (and checked again at the yes).
+    if (next !== null && plan.state !== "same") {
+      const problem = await partnerShareProblem(store, next, id, charge, nowSeconds);
+      if (problem) return { ok: false, reason: "cap", problem };
+      if (!(await holdLock(held))) throw new LockBusyError("the partner lock was lost before a partner's share was written");
+    }
+    const changed = await changeAffiliate(store, id, (now) => {
+      if (!sameCommitment(now, found)) throw new LockBusyError("a partner's agreement changed while it was decided");
+      const again = proposed(now, next, nowSeconds).next;
+      return JSON.stringify(again) === JSON.stringify(now) ? null : again;
+    });
+    if (!changed) return { ok: false, reason: "unknown" };
+    return { ok: true, state: plan.state };
+  });
+}
+
+/** "cap": a yes the cap no longer allows; "none": nothing (or not the change read) waits for this partner. */
+export type ShareAnswer = { ok: true; state: "changed" | "declined" } | { ok: false; reason: "none" | "cap" };
+
+/**
+ * Which waiting change a partner read: a digest of the share it proposes and when it was asked. The partner's page
+ * sends it with the answer, so a yes (or a no) only ever applies to the very change the partner was shown, never to
+ * one the store put in its place after the page was opened.
+ */
+export function changeIdentity(change: WaitingChange): string {
+  const share = change.share ? { percent: change.share.percent, products: [...change.share.products].sort(), until: change.share.until ?? null } : null;
+  return createHash("sha256").update(JSON.stringify({ asked: change.asked, share })).digest("hex").slice(0, 32);
+}
+
+/**
+ * The partner answering a change the creator asked for. Yes applies it, after `allowed` checks the cap again with what
+ * the product promises today (a change asked weeks ago may no longer fit); a yes to ending it ends the share now, its
+ * end kept. No keeps the share in force. `seen` is the changeIdentity of the change the partner read: when the change
+ * waiting now is another one, nothing is applied and the answer is "none". Nothing already earned moves either way.
+ *
+ * Under the program's partner lock, written over exactly the record read and only while its agreement is the one
+ * answered (changeAffiliate): the store changing it meanwhile (a removal needs no lock) means nothing is written and
+ * LockBusyError; an unknown reply, UnknownReplyError (the write may have landed).
+ */
+export async function answerShareChange(
+  store: Store,
+  id: string,
+  yes: boolean,
+  seen: string,
+  nowSeconds: number,
+  allowed: (share: PartnerShare) => Promise<boolean>,
+): Promise<ShareAnswer> {
+  const none: ShareAnswer = { ok: false, reason: "none" };
+  if (!store.statsId || !isRedisConfigured() || !AFFILIATE_ID_PATTERN.test(id)) return none;
+  return withPartnerLock(store, async (held) => {
+    const found = await readAffiliateExact(store, id);
+    // Only a partner still in the program answers; someone removed has nothing left to agree to.
+    if (!found || found.status !== "approved") return none;
+    const terms = settleTerms(found.terms ?? NO_TERMS, nowSeconds);
+    const change = terms.change;
+    if (change === null) {
+      // A change left unanswered past its wait is written down as lapsed, once.
+      if (found.terms?.change) {
+        await changeAffiliate(store, id, (now) => (sameCommitment(now, found) ? withTerms(now, settleTerms(now.terms ?? NO_TERMS, nowSeconds)) : null));
+      }
+      return none;
+    }
+    if (seen !== changeIdentity(change)) return none;
+    let apply: (now: Affiliate) => Affiliate;
+    if (!yes) {
+      apply = (now) => withTerms(now, { change: null, history: withStep(terms.history, stepOf("declined", "partner", change.share, nowSeconds)) });
+    } else {
+      if (change.share !== null && !(await allowed(change.share))) return { ok: false, reason: "cap" };
+      if (!(await holdLock(held))) throw new LockBusyError("the partner lock was lost before a partner's answer was written");
+      const share = change.share ?? (found.share ? endedAt(found.share, nowSeconds) : null);
+      apply = (now) => withTerms({ ...now, share }, { change: null, history: withStep(terms.history, stepOf("changed", "partner", change.share, nowSeconds)) });
+    }
+    const changed = await changeAffiliate(store, id, (now) => {
+      // The partner's own check ran on what was read; it is never applied over something else behind their back.
+      if (!sameCommitment(now, found)) throw new LockBusyError("a partner's agreement changed while they answered");
+      return apply(now);
+    });
+    if (!changed?.next) return none;
+    return { ok: true, state: yes ? "changed" : "declined" };
+  });
+}
+
+/**
+ * For the partner's own page: the time it is read at, the change to their share still waiting for their answer (null
+ * when none, or when it lapsed), and that change's products by name.
+ */
+export async function partnerChangeFor(
+  store: Store,
+  affiliate: Affiliate | null,
+): Promise<{ nowSeconds: number; change: WaitingChange | null; titles: string[] }> {
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  const waiting = affiliate?.terms?.change ?? null;
+  const change = waiting && changeOpen(waiting, nowSeconds) ? waiting : null;
+  const titles = change?.share ? (await readListings(store, change.share.products)).filter((p) => p.priceCents > 0).map((p) => p.title) : [];
+  return { nowSeconds, change, titles };
+}
+
+/**
+ * Whether this partner's share runs to a set end date and still earns. Such a partnership is not ended by the store
+ * alone (lib/partner-terms-rules.ts): the store asks for the change, which the partner must accept, or waits for the
+ * end date. Only a share "until revoked", or one already over, can be.
+ */
+export function heldByTerm(affiliate: Pick<Affiliate, "share">, nowSeconds: number): boolean {
+  return affiliate.share !== null && affiliate.share.until !== undefined && shareRunning(affiliate.share, nowSeconds);
+}
+
+/**
+ * Somebody declined or removed by the store. Their share stays on the record as it is: somebody removed earns nothing
+ * (notePartners credits only those approved), and letting them back in counts it again against the cap (decide), as
+ * it always has on main. A change still waiting for their answer is taken back, and that is written in the history.
+ * Pure; never called on a dated share in force (heldByTerm), which the caller refuses first.
+ */
+function takenOut(affiliate: Affiliate, status: AffiliateStatus, nowSeconds: number): Affiliate {
+  const next: Affiliate = { ...affiliate, status, decidedAt: Date.now() };
+  if (!affiliate.terms) return next;
+  const terms = settleTerms(affiliate.terms, nowSeconds);
+  const history = terms.change ? withStep(terms.history, stepOf("withdrawn", "creator", terms.change.share, nowSeconds)) : terms.history;
+  return withTerms(next, { change: null, history });
+}
+
+/** A share the partner accepted from an invitation, written as the start of its history; any change waiting is replaced. */
+function startedBy(terms: PartnerTerms, share: PartnerShare): PartnerTerms {
+  return { change: null, history: withStep(terms.history, stepOf("started", "partner", share, Math.floor(Date.now() / 1000))) };
+}
+
+/** The last day a share earns on, in the store's language. */
+function lastDayIn(store: Store, until: number): string {
+  return new Date(lastDaySeconds(until) * 1000).toLocaleDateString(LANGUAGES[parseLanguage(store.language)].locale, {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+}
+
+/**
+ * Everybody in this programme who holds a standing share of something, read exactly, for the sales it earns on
+ * (notePartners). A record whose share does not read exactly (commitmentReads: parseAffiliate would keep the rest of
+ * such a share and drop an end it cannot read, which would earn on sales after the agreement really ended; Codex M on
+ * #1924) is unknown, never "no end": UnknownReplyError, so nothing is credited on this read and the sweep keeps the
+ * order for its next run, as for any reply it cannot read.
+ */
 export async function listPartners(store: Store): Promise<Affiliate[]> {
-  return (await listAffiliates(store)).filter((a) => a.share !== null);
+  return [...commitmentsExact(await peopleExact(store)).values()]
+    .map((one) => one.affiliate)
+    .filter((a) => a.share !== null)
+    .sort((a, b) => b.appliedAt - a.appliedAt);
+}
+
+/**
+ * Whether the fields of a stored record that the cap and the earnings read are exact (Codex G on #1924): its share
+ * (lib/partner-share.ts shareReadsExactly) and, when it holds one, its status. parseAffiliate makes a share that does
+ * not read null, drops an end it cannot read, and makes an unknown status "pending": each would drop a running
+ * commitment from the cap, or make an ended one earn. Records from before shares existed have no share and still read.
+ */
+function commitmentReads(raw: string): boolean {
+  try {
+    const value: unknown = JSON.parse(raw);
+    if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+    const { share, status } = value as { share?: unknown; status?: unknown };
+    if (!shareReadsExactly(share)) return false;
+    return share === undefined || share === null || status === "pending" || status === "approved" || status === "declined" || status === "removed";
+  } catch {
+    return false;
+  }
+}
+
+/** The people as read, or UnknownReplyError when one of them holds a commitment that does not read exactly. */
+function commitmentsExact(people: Map<string, Read>): Map<string, Read> {
+  for (const one of people.values()) if (!commitmentReads(one.raw)) throw new UnknownReplyError("a partner's share");
+  return people;
 }
 
 /** The program's partner lock: every write of a standing share takes it, so the cap is checked against what is there. */
@@ -447,18 +723,33 @@ export async function withPartnerLock<T>(store: Store, work: (held: Held) => Pro
  * (lib/partner-share.ts shareProblem). `self`'s own current share is replaced, not added. Throws UnknownReplyError
  * when the people could not be read exactly: never "nobody".
  */
-export async function partnerShareProblem(store: Store, share: PartnerShare, self: string | null, charge: Charge = PAID): Promise<ShareProblem | null> {
+export async function partnerShareProblem(
+  store: Store,
+  share: PartnerShare,
+  self: string | null,
+  charge: Charge = PAID,
+  atSeconds: number = Math.floor(Date.now() / 1000),
+): Promise<ShareProblem | null> {
   // The commission as it is now, not as the request read it before the lock: a raise saved meanwhile counts.
   const now = await storeNow(store);
   // The people read paid for first at their worst and settled at what was read (paidPeople, rule 30).
-  return shareProblemAmong(now.affiliates, await paidPeople(now, charge), share, self);
+  return shareProblemAmong(now.affiliates, await paidPeople(now, charge), share, self, atSeconds);
 }
 
-/** partnerShareProblem against `people` and `terms` already read (a batch checks many against one read). */
-function shareProblemAmong(terms: CommissionTerms, people: readonly Affiliate[], share: PartnerShare, self: string | null): ShareProblem | null {
+/**
+ * partnerShareProblem against `people` and `terms` already read (a batch checks many against one read). Only shares
+ * still running at `atSeconds` count (lib/partner-terms-rules.ts shareRunning): one past its end earns nothing more.
+ */
+function shareProblemAmong(
+  terms: CommissionTerms,
+  people: readonly Affiliate[],
+  share: PartnerShare,
+  self: string | null,
+  atSeconds: number = Math.floor(Date.now() / 1000),
+): ShareProblem | null {
   const others: Record<string, number[]> = {};
   for (const other of people) {
-    if (other.id === self || other.status !== "approved" || !other.share) continue;
+    if (other.id === self || other.status !== "approved" || !other.share || !shareRunning(other.share, atSeconds)) continue;
     for (const product of other.share.products) (others[product] ??= []).push(other.share.percent);
   }
   // The most an affiliate can earn on each product: the program's, the product's, or one affiliate's own (rule 30).
@@ -521,10 +812,13 @@ export function commissionCapProblem(input: {
   people: Affiliate[];
   nextTerms: CommissionTerms;
   nextPeople: Affiliate[];
+  /** When the change is saved, in seconds: a share past its end promises nothing more. */
+  at?: number;
 }): ShareProblem | null {
+  const at = input.at ?? Math.floor(Date.now() / 1000);
   const partners = new Map<string, number>();
   for (const person of input.nextPeople) {
-    if (person.status !== "approved" || !person.share) continue;
+    if (person.status !== "approved" || !person.share || !shareRunning(person.share, at)) continue;
     for (const product of person.share.products) partners.set(product, (partners.get(product) ?? 0) + person.share.percent);
   }
   for (const [product, shared] of partners) {
@@ -776,6 +1070,13 @@ async function writeNewAffiliate(store: Store, affiliate: Affiliate): Promise<vo
 }
 
 /**
+ * The swap of a record was answered in a shape that cannot be read: the write may or may not have landed. An
+ * UnknownReplyError like any other (nothing is decided on it), told apart so a caller can say "could not confirm"
+ * rather than "nothing was saved" (review of #1924).
+ */
+export class UnknownWriteError extends UnknownReplyError {}
+
+/**
  * Writes one affiliate's record only when it is still exactly the text read, in one script: a compare-and-set.
  * Modelled by lib/redis-memory.ts. 1 written, 0 not (changed or gone meanwhile).
  */
@@ -832,7 +1133,7 @@ async function changeAffiliate(
       }
       return { before, next };
     }
-    if (written !== 0) throw new UnknownReplyError("an affiliate's record swap");
+    if (written !== 0) throw new UnknownWriteError("an affiliate's record swap");
     const there = repliesFor(await piped(meter, [["HEXISTS", key, id]]), 1);
     const exists = there ? countOf(there[0]) : null;
     if (exists === 0) return null;
@@ -854,7 +1155,7 @@ async function changeAffiliate(
       await rememberAffiliate(store.sid, next.email);
       return { before, next };
     }
-    if (written !== 0) throw new UnknownReplyError("an affiliate's record swap");
+    if (written !== 0) throw new UnknownWriteError("an affiliate's record swap");
   }
   throw new LockBusyError("an affiliate's record kept changing while it was written");
 }
@@ -1088,6 +1389,8 @@ export async function invitePartner(input: {
         "",
         ...listed.map((title) => `  • ${title}`),
         "",
+        a.partnerRuns(share.until === undefined ? null : lastDayIn(store, share.until)),
+        "",
         a.partnerInStudio,
         "",
         `${SITE_URL}/studio/affiliates`,
@@ -1112,6 +1415,8 @@ export async function invitePartner(input: {
       ...listed.map((title) => `  • ${title}`),
       "",
       a.partnerTerms(share.percent),
+      // How long it runs, which they agree to by opening it (630 [HN6](39)).
+      a.partnerRuns(share.until === undefined ? null : lastDayIn(store, share.until)),
       "",
       a.partnerOpen,
       "",
@@ -1217,7 +1522,11 @@ async function recordFromLink(store: Store, grant: LinkGrant, fence: { share: Pa
   // them is the creator changing their mind, in their own words.
   if (affiliate && grant.k === 1) {
     // Only the decision and the share are changed, over exactly the record read: an address set meanwhile is kept.
-    const changed = await changeAffiliate(store, affiliate.id, (now) => ({ ...now, status: "approved", decidedAt: Date.now(), share: grant.p ?? now.share }));
+    // The partner said yes to the share the email stated: that is where its history starts (630 [HN6](39)).
+    const changed = await changeAffiliate(store, affiliate.id, (now) => {
+      const next: Affiliate = { ...now, status: "approved", decidedAt: Date.now(), share: grant.p ?? now.share };
+      return grant.p ? withTerms(next, startedBy(now.terms ?? NO_TERMS, grant.p)) : next;
+    });
     if (!changed?.next) return { ok: false, reason: "expired" };
     affiliate = changed.next;
   }
@@ -1254,6 +1563,7 @@ async function recordFromLink(store: Store, grant: LinkGrant, fence: { share: Pa
         share: invited ? grant.p ?? null : null,
         cleared: null,
         by,
+        ...(invited && grant.p ? { terms: startedBy(NO_TERMS, grant.p) } : {}),
       };
       await writeNewAffiliate(store, affiliate);
       created = true;
@@ -1531,13 +1841,69 @@ export class ShareCapError extends Error {
  * share count again, so the cap is checked again first, under the program's partner lock, against the partners read
  * exactly now (#2995, rule 30). Over it: ShareCapError, nothing written. Unknown reply: UnknownReplyError; the lock
  * not held: LockBusyError; nothing written either way.
+ *
+ * Declining or removing somebody whose dated share still runs is refused (heldByTerm, 630 [HN6](39)): taken out, they
+ * would earn nothing before the end both agreed to. Checked on the record as it is written: null here, "term" from
+ * decideWhy. Anybody else is taken out with their share kept as it is and a waiting change taken back (takenOut).
+ * `nowSeconds` is the time of the decision.
  */
-export async function decide(store: Store, id: string, decision: Decision, charge: Charge = PAID): Promise<Affiliate | null> {
+export async function decide(
+  store: Store,
+  id: string,
+  decision: Decision,
+  charge: Charge = PAID,
+  nowSeconds: number = Math.floor(Date.now() / 1000),
+): Promise<Affiliate | null> {
+  try {
+    return await decideOn(store, id, decision, charge, nowSeconds);
+  } catch (error) {
+    if (error instanceof TermHeldError) return null;
+    throw error;
+  }
+}
+
+/** Thrown inside a decision on a partner whose dated share still runs: nothing is written. */
+class TermHeldError extends Error {
+  constructor() {
+    super("a partner's dated share still runs");
+    this.name = "TermHeldError";
+  }
+}
+
+export type DecideResult =
+  | { ok: true; affiliate: Affiliate }
+  /** "term": their dated share still runs (heldByTerm), so the store does not take them out alone. */
+  | { ok: false; reason: "unknown" | "term" }
+  /** Letting back in somebody whose share still runs, when it no longer fits what its products promise. */
+  | { ok: false; reason: "cap"; problem: ShareProblem };
+
+/** As decide, saying why nothing was done. UnknownReplyError and LockBusyError are still thrown: nothing written. */
+export async function decideWhy(
+  store: Store,
+  id: string,
+  decision: Decision,
+  nowSeconds: number = Math.floor(Date.now() / 1000),
+  charge: Charge = PAID,
+): Promise<DecideResult> {
+  try {
+    const affiliate = await decideOn(store, id, decision, charge, nowSeconds);
+    return affiliate ? { ok: true, affiliate } : { ok: false, reason: "unknown" };
+  } catch (error) {
+    if (error instanceof TermHeldError) return { ok: false, reason: "term" };
+    if (error instanceof ShareCapError) return { ok: false, reason: "cap", problem: error.problem };
+    throw error;
+  }
+}
+
+async function decideOn(store: Store, id: string, decision: Decision, charge: Charge, nowSeconds: number): Promise<Affiliate | null> {
   const found = await readAffiliate(store, id);
   if (!found) return null;
   const status: AffiliateStatus =
     decision === "approve" || decision === "restore" ? "approved" : decision === "decline" ? "declined" : "removed";
-  const counts = (a: Affiliate) => status === "approved" && a.status !== "approved" && a.share !== null;
+  const takesOut = status !== "approved";
+  if (takesOut && heldByTerm(found, nowSeconds)) throw new TermHeldError();
+  // Only a share still running counts again (lib/partner-terms-rules.ts): one past its end promises nothing more.
+  const counts = (a: Affiliate) => status === "approved" && a.status !== "approved" && shareRunning(a.share, nowSeconds);
   // Only the decision is changed, over exactly the record read (changeAffiliate): a share, a rate or an address
   // written meanwhile is kept. `checked` is the share the cap was checked with: when the record now holds another
   // (it can only change under the partner lock this decision holds), nothing is written. With no lock (`checked`
@@ -1549,7 +1915,9 @@ export async function decide(store: Store, id: string, decision: Decision, charg
       if (checked !== undefined && JSON.stringify(now.share) !== JSON.stringify(checked)) {
         throw new LockBusyError("a partner's share changed while the decision was written");
       }
-      return { ...now, status, decidedAt: Date.now() };
+      // Read again as it is written: a dated share given meanwhile is never taken out by this decision.
+      if (takesOut && heldByTerm(now, nowSeconds)) throw new TermHeldError();
+      return takesOut ? takenOut(now, status, nowSeconds) : { ...now, status, decidedAt: Date.now() };
     });
     return changed?.next ? { affiliate: changed.before, next: changed.next } : null;
   };
@@ -1559,7 +1927,7 @@ export async function decide(store: Store, id: string, decision: Decision, charg
       const now = await readAffiliate(store, id);
       if (!now) return null;
       if (counts(now) && now.share) {
-        const problem = await partnerShareProblem(store, now.share, now.id, charge);
+        const problem = await partnerShareProblem(store, now.share, now.id, charge, nowSeconds);
         if (problem) throw new ShareCapError(problem);
         if (!(await holdLock(held))) throw new LockBusyError("the partner lock was lost before the decision was written");
       }
@@ -1646,10 +2014,11 @@ export const STUDIO_UNIT_BYTES = 1_000_000;
 /**
  * The most bytes one affiliate's record can take as JSON, by the caps it is written and read with (parseAffiliate):
  * two addresses of MAX_EMAIL_LENGTH and a note of MAX_NOTE_LENGTH characters, each character at its widest (a control
- * character, six bytes escaped), a share of 200 product ids of 40 characters, 50 ids let through and the rest.
- * tests/affiliate-bulk-cost.test.ts holds the widest record under it.
+ * character, six bytes escaped), a share of 200 product ids of 40 characters, 50 ids let through and the rest, and
+ * a partner's terms (630 [HN6](39)): a change waiting as wide as a share, and MAX_TERM_HISTORY steps of history.
+ * tests/affiliate-bulk-cost.test.ts holds the widest record under it (28,091 bytes when this was set).
  */
-export const AFFILIATE_RECORD_MAX_BYTES = 16_000;
+export const AFFILIATE_RECORD_MAX_BYTES = 32_000;
 
 /**
  * Commands the partner lock takes at the most: a try every 20 ms, doubling up to 250 ms, for PARTNER_LOCK_WAIT_MS;
@@ -1764,14 +2133,17 @@ export class StudioNotPaidError extends Error {
  * UnknownReplyError as listAffiliates. A caller that pays nothing (PAID) reads as listAffiliates does.
  */
 async function paidPeople(store: Store, charge: Charge): Promise<Affiliate[]> {
-  if (charge === PAID || !store.statsId || !isRedisConfigured()) return listAffiliates(store);
+  // A share that does not read exactly is unknown to the cap, never "no share" (commitmentsExact, Codex G on #1924).
+  if (charge === PAID || !store.statsId || !isRedisConfigured()) {
+    return [...commitmentsExact(await peopleExact(store)).values()].map((one) => one.affiliate).sort((a, b) => b.appliedAt - a.appliedAt);
+  }
   const meter = meterOf();
   const count = await peopleCount(store, meter);
   const taken = await take(charge, 2, readBytes(count));
   if (!taken) throw new StudioNotPaidError();
   const people = await peopleExact(store, meter);
   await settle(taken, meter);
-  return [...people.values()].map((one) => one.affiliate).sort((a, b) => b.appliedAt - a.appliedAt);
+  return [...commitmentsExact(people).values()].map((one) => one.affiliate).sort((a, b) => b.appliedAt - a.appliedAt);
 }
 
 type BatchWrite = { id: string; raw: string; change: (now: Affiliate) => Affiliate | null };
@@ -1867,7 +2239,8 @@ async function batchPeople(now: Store, charge: Charge): Promise<Map<string, Read
   if (!taken) return "used";
   const people = await peopleExact(now, meter);
   await settle(taken, meter);
-  return people;
+  // A share that does not read exactly is unknown to the cap (commitmentsExact): the batch leaves those it checks out.
+  return commitmentsExact(people);
 }
 
 /**
@@ -1912,7 +2285,9 @@ export async function decideMany(
 
   const plain: BatchWrite[] = [];
   const shared: string[] = [];
-  const decided = (now: Affiliate) => ({ ...now, status, decidedAt: Date.now() });
+  const atSeconds = Math.floor(Date.now() / 1000);
+  // A decline takes back a change waiting for their answer (takenOut, 630 [HN6](39)).
+  const decided = (now: Affiliate): Affiliate => (status === "approved" ? { ...now, status, decidedAt: Date.now() } : takenOut(now, status, atSeconds));
   for (const id of valid) {
     const read = records.get(id);
     if (!read) {
@@ -1921,8 +2296,13 @@ export async function decideMany(
     }
     email.set(id, read.affiliate.email);
     if (read.affiliate.status !== "pending") continue;
-    // Over exactly the record read (its share was null then): one given a share meanwhile is not written.
-    if (status === "approved" && read.affiliate.share) shared.push(id);
+    // Somebody waiting whose dated share still runs is not declined by the store alone: named, nothing written.
+    if (status !== "approved" && heldByTerm(read.affiliate, atSeconds)) {
+      outcome.set(id, "term");
+      continue;
+    }
+    // Over exactly the record read (no running share then): one given a share meanwhile is not written.
+    if (status === "approved" && shareRunning(read.affiliate.share, atSeconds)) shared.push(id);
     else plain.push({ id, raw: read.raw, change: (now) => (now.status === "pending" ? decided(now) : null) });
   }
   const writing = plain.reduce((sum, one) => sum + writeBytes(utf8(one.raw), utf8(one.raw) + 64), 0) + shared.length * writeBytes(AFFILIATE_RECORD_MAX_BYTES, AFFILIATE_RECORD_MAX_BYTES);
@@ -1950,7 +2330,7 @@ export async function decideMany(
           if (read.affiliate.status !== "pending") continue;
           if (share) {
             // Against the partners as they stand with those approved before it in this batch.
-            const problem = shareProblemAmong(now.affiliates, people, share, id);
+            const problem = shareProblemAmong(now.affiliates, people, share, id, atSeconds);
             if (problem) {
               outcome.set(id, problem === "crowded" ? "crowded" : "cap");
               continue;
@@ -2007,7 +2387,11 @@ export async function undoMany(store: Store, before: Before[], decision: "approv
       change: (affiliate) =>
         affiliate.status !== left || now - affiliate.decidedAt > BULK_UNDO_MS || affiliate.decidedAt < entry.decidedAt
           ? null
-          : { ...affiliate, status: entry.status, decidedAt: entry.decidedAt },
+          : // Somebody given a share (or asked about one) since the approval is a partner now: sending them back to
+            // waiting would end it with no step in its history, so the undo leaves them as they are (630 [HN6](39)).
+            affiliate.share !== null || affiliate.terms?.change
+            ? null
+            : { ...affiliate, status: entry.status, decidedAt: entry.decidedAt },
     });
   }
   const taken = await takeOrWhy(charge, WRITE_COMMANDS * writes.length, writes.reduce((sum, one) => sum + writeBytes(utf8(one.raw), utf8(one.raw) + 64), 0));
@@ -2392,7 +2776,10 @@ async function writeReferral(store: Store, referral: Referral): Promise<void> {
  *
  * A sale of a product nobody shares in writes nothing and costs one read of
  * the programme's people, which is why the caller passes `partners` in when it
- * is looking at a page of sales at a time.
+ * is looking at a page of sales at a time (from listPartners: a share that does
+ * not read exactly is unknown, never "no end"). A share with an end earns on a
+ * sale paid before it (`sale.at`, in seconds), never on one paid at or after it,
+ * however late the sale is written down (630 [HN6](39)).
  */
 export async function notePartners(
   store: Store,
@@ -2400,8 +2787,8 @@ export async function notePartners(
   partners?: Affiliate[],
 ): Promise<void> {
   if (!store.statsId || !isRedisConfigured() || !sale.ref || !sale.product) return;
-  const holders = (partners ?? (await listAffiliates(store))).filter(
-    (a) => a.status === "approved" && shareOn(a.share, sale.product) > 0,
+  const holders = (partners ?? (await listPartners(store))).filter(
+    (a) => a.status === "approved" && shareOn(a.share, sale.product, sale.at) > 0,
   );
   if (!holders.length) return;
   const buyer = sale.buyer ? normaliseEmail(sale.buyer) : "";
@@ -2417,7 +2804,7 @@ export async function notePartners(
       base: sale.base,
       total: sale.total,
       currency: readCurrencyCode(sale.currency),
-      percent: shareOn(partner.share, sale.product),
+      percent: shareOn(partner.share, sale.product, sale.at),
       // A 50% partner buying their own product at 50% off is not a sale.
       self: Boolean(buyer) && normaliseEmail(partner.email) === buyer,
     };
@@ -2521,6 +2908,43 @@ function bumpCents(value: unknown): number {
 }
 
 /**
+ * When the buyer paid, for a partner's end (630 [HN6](39)): the time of the payment's settled charge
+ * (`payment_intent.latest_charge`, expanded by the sweep), succeeded and paid. Neither the intent's own `created` (made
+ * before the buyer pays) nor the checkout's opening is a payment time (Codex G on #1924): without a settled charge's
+ * time this is null, not known. A sale's own `at` stays the checkout's, as it always was.
+ */
+function paidAtOf(session: SessionLike): number | null {
+  const intent = session.payment_intent && typeof session.payment_intent === "object" ? (session.payment_intent as { latest_charge?: unknown }) : null;
+  const charge = intent?.latest_charge && typeof intent.latest_charge === "object" ? (intent.latest_charge as { status?: unknown; paid?: unknown; balance_transaction?: unknown }) : null;
+  if (!charge || charge.status !== "succeeded" || charge.paid !== true) return null;
+  // The settlement is the charge's balance transaction, made when the charge succeeds; the charge object's own
+  // `created` comes first for a payment that settles later (Codex T on #1924).
+  const settled = charge.balance_transaction && typeof charge.balance_transaction === "object" ? (charge.balance_transaction as { created?: unknown }).created : undefined;
+  return typeof settled === "number" && Number.isSafeInteger(settled) && settled > 0 ? settled : null;
+}
+
+/** A Stripe time in whole seconds, or null when it is missing or not one. */
+const exactSeconds = (value: unknown): number | null => (typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : null);
+
+/**
+ * The time a partner's dated end is compared with (Codex G on #1924): the settled charge's (paidAtOf). Without it, a
+ * partner whose share of this product ends after the checkout opened may have been paid for after the end, so the
+ * sale is not known: UnknownReplyError, and the sweep leaves it for the next run (failOrder), never credited on the
+ * checkout's time. A checkout opened after every such end was paid after it too, so the checkout's time serves.
+ */
+async function paidForPartners(store: Store, session: SessionLike, opened: number | null, fallback: number, base: number, product: string, partners?: Affiliate[]): Promise<number> {
+  const proven = paidAtOf(session);
+  if (proven !== null) return proven;
+  if (base > 0 && product) {
+    const listed = partners ?? (await listPartners(store));
+    // A checkout with no exact opening time is never taken as opened after an end (Codex G on #1924).
+    const straddles = listed.some((a) => a.status === "approved" && a.share?.until !== undefined && a.share.products.includes(product) && (opened === null || opened < a.share.until));
+    if (straddles) throw new UnknownReplyError("when a sale near a partner's end was paid");
+  }
+  return opened ?? fallback;
+}
+
+/**
  * Writes down a settled checkout that came through an affiliate's link.
  * Anything else is left alone, so it is safe to call on every checkout.
  *
@@ -2553,7 +2977,9 @@ export async function noteSession(
         : "";
   const buyer = typeof session.customer_details?.email === "string" ? session.customer_details.email : "";
   const base = Math.max(0, total - tax);
-  const at = typeof session.created === "number" ? session.created : Math.floor(Date.now() / 1000);
+  const opened = exactSeconds(session.created);
+  const at = opened ?? Math.floor(Date.now() / 1000);
+  const paidAt = await paidForPartners(store, session, opened, at, base, meta.product ?? "", partners);
   const currency = readCurrencyCode(session.currency);
 
   // Partners first, and whatever happens next. A partner shares in the
@@ -2562,7 +2988,7 @@ export async function noteSession(
   // most of them (lib/partner-share.ts).
   await notePartners(
     store,
-    { ref: session.id, pi, at, product: meta.product ?? "", title: meta.title ?? "", base, total, currency, buyer },
+    { ref: session.id, pi, at: paidAt, product: meta.product ?? "", title: meta.title ?? "", base, total, currency, buyer },
     partners,
   ).catch((error) => console.error("noting a partner's share failed", error));
 

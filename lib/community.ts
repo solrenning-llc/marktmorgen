@@ -528,20 +528,48 @@ const CAS_MEMBER = [
  * link say "Unsubscribed." with the emails still on, and a mute say done
  * with nothing written.
  */
-async function patchMember(id: string, key: string, change: (member: Member) => Partial<Member>): Promise<Member | null> {
+/**
+ * What a change adds to the store's data room, worked out on each try from the record as read (`raw`, `before`) and
+ * as it would be written (`next`): never from a snapshot the caller held before (rule 30 on the MEDIUM of Codex Z,
+ * Claude 1 and Claude 3 on #3024). The member's name also takes its index entry.
+ */
+function profileGrowth(raw: string, before: Member, next: Member): number {
+  const named = (name: string) => (name ? indexBytes([name]) + SET_ENTRY_BYTES : 0);
+  return dataBytes([JSON.stringify(next)]) - dataBytes([raw]) + named(next.n) - named(before.n);
+}
+
+async function patchMember(
+  id: string,
+  key: string,
+  change: (member: Member) => Partial<Member>,
+  /**
+   * When given, each try takes from the store's data room what it adds before its compare-and-set writes, gives it
+   * back when the set did not go in (the record changed since it was read), keeps it when the answer is not known,
+   * and gives back what the written record freed only once the set went in.
+   */
+  room?: DataStore,
+): Promise<Member | null> {
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const read = await readMemberExact(id, key);
     if (!read) return null;
     const { raw, member } = read;
     const next: Member = { ...member, ...change(member), k: member.k };
+    const grown = room ? profileGrowth(raw, member, next) : 0;
+    if (room && grown > 0) await needData(room, [{ slot: MEMBERS_SLOT, bytes: grown }]);
     const listed = next.dir && next.n && !next.removed ? "1" : "0";
     const replies = repliesFor(await redisPipeline([
       ["EVAL", CAS_MEMBER, 2, membersKey(id), dirKey(id), key, raw, JSON.stringify(next), listed, next.at],
     ]), 1);
     // 1 written, 0 changed since it was read (read again); anything else is not known to be either.
     const written = replies?.[0];
-    if (written === 0) continue;
+    if (written === 0) {
+      // Nothing of this try was written: what it took is given back before the record is read again.
+      if (room && grown > 0) await giveData(room, [{ slot: MEMBERS_SLOT, bytes: grown }]);
+      continue;
+    }
+    // Not known to have gone in or not: what was taken stays taken, and nothing is given back.
     if (written !== 1) throw new UnknownReplyError("a change to a community member record");
+    if (room && grown < 0) await giveData(room, [{ slot: MEMBERS_SLOT, bytes: -grown }]);
     // The search index follows the very same switch the directory does, from
     // the very same place, so the two can never come to disagree about who is
     // findable. Somebody who took themselves off the list is taken out of the
@@ -591,17 +619,14 @@ export async function setProfile(
   room: DataStore,
 ): Promise<Member> {
   const name = cleanLine(change.name, MAX_DISPLAY_NAME);
-  // What the member adds to their record takes room before it is written:
-  // the name and the answers, the handle they are mentioned by and the words
-  // their name is found by. A record that shrinks gives it back.
-  const answers = change.answers && change.questions ? answersFor(change.answers, change.questions, member.qa) : {};
   // The links go through the rule a stored record is read back by, so what
   // is written is exactly what the directory may show.
   const links = change.links ? { s: parseMemberLinks(change.links) } : {};
-  const after = JSON.stringify({ ...member, n: name, h: name.slice(0, 40), dir: change.dir && Boolean(name), mail: change.mail, ...answers, ...links });
-  const grown = dataBytes([after]) - dataBytes([JSON.stringify(member)]) + (name ? indexBytes([name]) + SET_ENTRY_BYTES : 0) - (member.n ? indexBytes([member.n]) + SET_ENTRY_BYTES : 0);
-  if (grown > 0) await needData(room, [{ slot: MEMBERS_SLOT, bytes: grown }]);
-  else if (grown < 0) await giveData(room, [{ slot: MEMBERS_SLOT, bytes: -grown }]);
+  // What the member adds to their record (the name and the answers, the
+  // handle they are mentioned by and the words their name is found by) takes
+  // room before it is written, and a record that shrinks gives it back; both
+  // are worked out by patchMember on each try, from the record it writes over
+  // (profileGrowth), never from the `member` snapshot this call was given.
   // The handle is taken before the name is written, so a member is never left
   // named but unmentionable. Claiming gives back what they ended up with,
   // which may carry a number when somebody already held the plain one. It
@@ -624,7 +649,7 @@ export async function setProfile(
         ...(change.answers && change.questions ? answersFor(change.answers, change.questions, now.qa) : {}),
         ...links,
       };
-    });
+    }, room);
   } catch (error) {
     // The read or the write after the claim answered in no known shape, so
     // whether the record took the new handle is not known: a lost answer may

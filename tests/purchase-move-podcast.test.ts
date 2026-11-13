@@ -13,7 +13,9 @@
  * MAX_MOVED_INTO old addresses are asked about. The creator always listens.
  */
 import { addProduct, claimHandle, ensureListId, ensureStatsId, ensureStoreId, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
-import { mayListen } from "@/lib/podcast-access";
+import { mayListen, sendFeedLink } from "@/lib/podcast-access";
+import { takePublicRequest } from "@/lib/traffic";
+import { answering } from "./security/next-headers";
 import { askPurchaseMove, confirmPurchaseMove } from "@/lib/purchase-moves";
 import { MAX_MOVED_INTO, applyPurchaseMove, forgetMovedPerson } from "@/lib/purchase-move-index";
 import { paidPeriod } from "./billing-period-fixture";
@@ -31,6 +33,8 @@ const NOW = Math.floor(Date.now() / 1000);
 const sessions: Record<string, Record<string, unknown>[]> = {};
 /** The addresses Stripe was asked about. */
 const asked: string[] = [];
+/** Addresses whose Stripe reading fails. */
+const failing = new Set<string>();
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input instanceof Request ? input.url : input));
   const answer = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
@@ -40,6 +44,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (path === "/checkout/sessions") {
     const email = url.searchParams.get("customer_details[email]") ?? "";
     asked.push(email);
+    if (failing.has(email)) return answer({ error: { message: "a stand-in outage" } }, 500);
     return answer({ object: "list", data: sessions[email] ?? [], has_more: false });
   }
   return answer({ object: "list", data: [], has_more: false });
@@ -59,8 +64,15 @@ const paid = (id: string, product: string) => ({
 
 /** Answers `reply` to `command` on keys starting with `prefix`, the next `times` times. */
 let odd: { command: string; prefix: string; reply: unknown; times: number } | null = null;
+/** From the `after`-th INCRBY on the store's request count on, the count answers far over any window. */
+let fullAfter: number | null = null;
+let takes = 0;
 const run = redis.run.bind(redis);
 redis.run = (c: (string | number)[]) => {
+  if (fullAfter !== null && String(c[0]).toUpperCase() === "INCRBY" && String(c[1]).startsWith("nl:traffic:r:")) {
+    takes += 1;
+    if (takes >= fullAfter) return 1_000_000_000;
+  }
   if (odd && odd.times > 0 && String(c[0]).toUpperCase() === odd.command && String(c[1]).startsWith(odd.prefix)) {
     odd.times -= 1;
     return odd.reply;
@@ -141,6 +153,51 @@ async function main(): Promise<void> {
   for (const key of redis.keys().filter((k) => k.startsWith("nl:pod:ok:"))) redis.run(["DEL", key]);
   await listens(into);
   is("Stripe is asked about the new address and its old ones only", asked.length <= MAX_MOVED_INTO + 1, true);
+
+  part("A feed and an episode are asked by the app maker's servers: the store's shared room, never one connection's share (Claude 1 and Codex H2 on #3717)");
+  sessions["dee.old@example.com"] = [paid("3", show.product.id)];
+  is("dee moved", (await applyPurchaseMove(store, await move("dee.old@example.com", "dee.new@example.com"))).state, "moved");
+  const app = new Request("https://example.com/feed", { headers: { "x-forwarded-for": "198.51.100.7" } });
+  answering(app);
+  // The app server's share of the day used up: its own requests are refused from here on.
+  odd = { command: "HINCRBY", prefix: "nl:traffic:c:", reply: 1_000_000_000, times: 1_000 };
+  let spent = false;
+  for (let i = 0; i < 2_000 && !spent; i += 1) spent = !(await takePublicRequest(store, "buyer", Date.now(), 1));
+  odd = null;
+  is("the app server's own share is spent", spent, true);
+  for (const key of redis.keys().filter((k) => k.startsWith("nl:pod:ok:"))) redis.run(["DEL", key]);
+  let feed: boolean | "unknown";
+  try {
+    feed = await mayListen(store, show.product.id, "dee.new@example.com", { shared: true });
+  } catch {
+    feed = "unknown";
+  }
+  is("the moved buyer's feed through that server still lists the podcast", feed, true);
+  answering(null);
+
+  part("The \"send me the link\" form answers the same for a buyer and a stranger when the room runs out (Claude 1 and Codex H2 on #3717)");
+  sessions["eve@example.com"] = [paid("4", show.product.id)];
+  const form = async (email: string, ip: string) => {
+    for (const key of redis.keys().filter((k) => k.startsWith("nl:pod:ok:"))) redis.run(["DEL", key]);
+    takes = 0;
+    fullAfter = 2;
+    try {
+      return await sendFeedLink({ store, product: show.product, email, ip, base: "https://movecast.example", from: "Move Cast <hello@example.com>" }).catch(() => "error");
+    } finally {
+      fullAfter = null;
+    }
+  };
+  is("a buyer: sent", await form("eve@example.com", "203.0.113.1"), "sent");
+  is("a stranger: sent too, never an answer that tells them apart", await form("stranger@example.com", "203.0.113.2"), "sent");
+
+  part("An old address whose purchases cannot be read is unknown, never \"holds none\" (Claude 1 and Codex H2 on #3717, LEVE)");
+  sessions["fay.old@example.com"] = [paid("5", show.product.id)];
+  is("fay moved", (await applyPurchaseMove(store, await move("fay.old@example.com", "fay.new@example.com"))).state, "moved");
+  for (const key of redis.keys().filter((k) => k.startsWith("nl:pod:ok:"))) redis.run(["DEL", key]);
+  failing.add("fay.old@example.com");
+  is("Stripe failing for the old address: unknown", await listens("fay.new@example.com"), "unknown");
+  failing.delete("fay.old@example.com");
+  is("and once it answers, the new address listens", await listens("fay.new@example.com"), true);
 
   done();
 }

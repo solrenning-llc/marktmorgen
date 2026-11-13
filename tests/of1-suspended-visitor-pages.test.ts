@@ -8,6 +8,7 @@
  * a person already has (taking an address off a waitlist, moving a paid
  * booking) stay open. Through the real pages and routes, on a synthetic store.
  */
+import { createHash } from "node:crypto";
 import { NextRequest } from "next/server";
 import { renderToReadableStream } from "react-dom/server";
 import BookPage, { generateMetadata as bookMeta } from "@/app/[handle]/book/[product]/page";
@@ -103,7 +104,7 @@ async function main(): Promise<void> {
   const titles = ["Glaze Workshop Replay", "Free Glaze Guide", "Studio Call With Ana"];
 
   const ask = (path: string, query: Query) => answering(new NextRequest(`https://marktmorgen.com/${handle}${path}${Object.keys(query).length ? `?${new URLSearchParams(query)}` : ""}`));
-  const pages: { name: string; path: string; query: Query; run: (query: Query) => Promise<unknown>; meta: () => Promise<{ title?: unknown }> }[] = [
+  const pages: { name: string; path: string; query: Query; run: (query: Query) => Promise<unknown>; meta: () => Promise<{ title?: unknown; robots?: unknown }> }[] = [
     { name: "the booking page of a call", path: `/book/${call.product.id}`, query: {}, run: (q) => BookPage({ params: Promise.resolve({ handle, product: call.product.id }), searchParams: Promise.resolve(q) }), meta: () => bookMeta({ params: Promise.resolve({ handle, product: call.product.id }), searchParams: Promise.resolve({}) }) },
     { name: "the free copy's page", path: "/free", query: { status: "sent", product: free.product.id }, run: (q) => FreePage({ params: Promise.resolve({ handle }), searchParams: Promise.resolve(q) }), meta: () => freeMeta({ params: Promise.resolve({ handle }), searchParams: Promise.resolve({}) }) },
     { name: "the sign-up box's page", path: "/join", query: { status: "sent" }, run: (q) => JoinPage({ params: Promise.resolve({ handle }), searchParams: Promise.resolve(q) }), meta: () => joinMeta({ params: Promise.resolve({ handle }), searchParams: Promise.resolve({}) }) },
@@ -131,6 +132,8 @@ async function main(): Promise<void> {
     ask(page.path, {});
     const title = String((await page.meta()).title ?? "");
     is(`${page.name}'s title names no product and not the store`, [titles.some((t) => title.includes(t)), title.includes("Glaze Works")], [false, false]);
+    // Not indexed, as the store's own page and its robots file say (Codex G on #3193).
+    is(`${page.name} is not indexed`, ((await page.meta()).robots as { index?: unknown } | undefined)?.index, false);
   }
   is("the store's app manifest is not given, kept by no cache", await file(manifest, "/manifest.webmanifest"), [404, "no-store"]);
   is("nor the rules for crawlers on its own domain", await file(robots, "/store-robots"), [404, "no-store"]);
@@ -163,6 +166,19 @@ async function main(): Promise<void> {
   // Nothing of the creator's ad pixels or the visit count runs on what stays open.
   is("the waitlist's open pages carry no ad pixels or visit count", [await tracks((left as { node: unknown }).node), await tracks((badLeave as { node: unknown }).node), await tracks((expired as { node: unknown }).node), await tracks((realLeave as { node: unknown }).node)], [false, false, false, false]);
   is("nor does moving a booking, even from a link that is not one", await tracks((await open(pages[0], { move: "cs_test_of1move000000" }) as { node: unknown }).node), false);
+
+  // A package bought for the call keeps its way in only while it can still book (Codex G on #3193): one that ran out
+  // or passed its last day opens nothing of a store switched off, its form and times included.
+  const bought = (token: string, until: number) => ({ s: stats, h: "glazeworks", p: call.product.id, e: "buyer@example.test", total: 3, at: 1_700_000_000, until, token, holds: [] });
+  const keep = async (token: string, checkout: string, until: number) =>
+    redis.pipeline([["SET", `nl:pkg:${checkout}`, JSON.stringify(bought(token, until))], ["SET", `nl:pkg:t:${createHash("sha256").update(token).digest("hex")}`, checkout]]);
+  const spentPkg = "c".repeat(48);
+  await keep(spentPkg, "cs_test_of1pkgexpired01", 1_700_000_100);
+  const spentOut = await open(pages[0], { pkg: spentPkg });
+  is("a package past its last day opens nothing of the booking page", [suspendedPage(spentOut), (await html(spentOut)).includes("<form")], [true, false]);
+  const livePkg = "d".repeat(48);
+  await keep(livePkg, "cs_test_of1pkglive00001", 0);
+  is("one with sessions left still books, the buyer's own", suspendedPage(await open(pages[0], { pkg: livePkg })), false);
 
   part("Switched back on, every page is as it was");
   await noteTakedown(owner, null, false);

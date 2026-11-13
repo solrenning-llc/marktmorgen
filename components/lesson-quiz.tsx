@@ -1,4 +1,4 @@
-import type { Attempt, Quiz } from "@/lib/quiz";
+import type { Answers, Attempt, Quiz } from "@/lib/quiz";
 import { questionsPerTry, triesLeft } from "@/lib/quiz";
 import { coursesWords } from "@/lib/buyer-words/courses";
 import type { LanguageCode } from "@/lib/store-language";
@@ -16,6 +16,12 @@ import type { LanguageCode } from "@/lib/store-language";
  * student's try draws, and a student who must wait between tries sees how
  * long, with the form shut, so the wait never shows the next questions.
  *
+ * A try sent with a question left blank comes back here unmarked (the route
+ * checks it first, so no try is used): `unanswered` names those questions in
+ * a summary the address lands on, each linked and marked where it is, and
+ * `kept` holds what the student had picked, still picked (WCAG 2.2 3.3.1,
+ * 3.3.3, 3.3.4, 3.3.7; 274 [AX1]).
+ *
  * Said in the store's `language` (lib/buyer-words/courses.ts), English
  * unless given.
  */
@@ -29,6 +35,8 @@ export function LessonQuiz({
   justMarked,
   waitSeconds = 0,
   stale = false,
+  unanswered = [],
+  kept = null,
   language = "en",
 }: {
   quiz: Quiz;
@@ -44,6 +52,10 @@ export function LessonQuiz({
   waitSeconds?: number;
   /** Came back because the questions sent were no longer this try's: nothing was counted. */
   stale?: boolean;
+  /** Came back because these questions had no answer: nothing was counted. */
+  unanswered?: string[];
+  /** What the student had picked on the try that came back unanswered. */
+  kept?: Answers | null;
   language?: LanguageCode;
 }) {
   const w = coursesWords(language);
@@ -75,6 +87,8 @@ export function LessonQuiz({
   const canAnswer = mode === "student" && !passed && left !== 0 && !waiting;
   // A bank's next try draws other questions: the marks above them are the last try's.
   const fresh = Boolean(quiz.draw);
+  // Only the questions on this page, and only while the student can still answer them.
+  const blank = canAnswer ? unanswered.filter((id) => quiz.questions.some((q) => q.id === id)) : [];
   const waitLine = waiting ? w.waitAgain(w.span(Math.max(1, Math.ceil(waitSeconds / 60)))) : null;
   const bank = mode === "owner"
     ? [
@@ -87,6 +101,21 @@ export function LessonQuiz({
   return (
     <section id="quiz" className="mt-8 scroll-mt-6 rounded-2xl px-5 py-5 sm:px-6" style={{ border: "1px solid var(--st-line-strong)" }} aria-labelledby="quiz-title">
       {heading}
+
+      {blank.length ? (
+        <div id="quiz-unanswered" role="alert" tabIndex={-1} className="st-note mt-3 scroll-mt-6 text-sm">
+          <p className="font-semibold">{w.unansweredTry(blank.length)}</p>
+          <ul className="mt-1 flex flex-wrap gap-x-4">
+            {blank.map((id) => (
+              <li key={id}>
+                <a href={`#q-${id}`} className="st-footer-link inline-flex min-h-11 items-center underline underline-offset-2">
+                  {w.questionN(quiz.questions.findIndex((q) => q.id === id) + 1)}
+                </a>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
 
       {stale && mode === "student" ? (
         <p className="st-note mt-3 text-sm" role="status">{w.staleTry}</p>
@@ -131,17 +160,21 @@ export function LessonQuiz({
         {canAnswer ? <input type="hidden" name="shown" value={quiz.questions.map((q) => q.id).join(",")} /> : null}
         <ol className="space-y-6">
           {quiz.questions.map((question, qi) => {
-            const picked = last?.answers[question.id] ?? [];
+            const picked = (kept ? kept[question.id] : last?.answers[question.id]) ?? [];
+            const missing = blank.includes(question.id);
             const mark = mode === "student" && last ? last.grade.marks[question.id] : undefined;
             const showWhy = reveal || mark === true;
             return (
               <li key={question.id}>
-                <fieldset>
+                <fieldset id={`q-${question.id}`} className="scroll-mt-6" aria-describedby={missing ? `q-${question.id}-blank` : undefined}>
                   <legend className="font-semibold leading-snug" style={{ color: "var(--st-text)" }}>
                     <span className="st-muted mr-1 tabular-nums">{`${qi + 1}.`}</span>
                     <span className="whitespace-pre-line">{question.text}</span>
                     {question.kind === "multiple" ? <span className="st-muted mt-1 block text-sm font-normal">{w.chooseEvery}</span> : null}
                   </legend>
+                  {missing ? (
+                    <p id={`q-${question.id}-blank`} className="mt-2 text-sm font-semibold" style={{ color: "var(--st-text)" }}>{w.answerThis}</p>
+                  ) : null}
                   <div className="mt-3 space-y-2">
                     {question.choices.map((choice, ci) => {
                       const right = question.correct.includes(ci);

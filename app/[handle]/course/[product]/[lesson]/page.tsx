@@ -13,7 +13,7 @@ import { linkHost } from "@/lib/product-link";
 import { readableSize } from "@/lib/product-file";
 import { findLesson, isOpen, lessonsInOrder, readBody, readCourse } from "@/lib/course";
 import { courseAccess, doneLessonsOrUnknown, emailKey, lessonVideo } from "@/lib/learn";
-import { type Attempt, attemptOf, heldBack, passedForGate, readQuizFor, studentQuiz } from "@/lib/quiz";
+import { type Attempt, attemptOf, heldBack, passedForGate, readPicked, readQuizFor, studentQuiz, unansweredIds } from "@/lib/quiz";
 import { CourseOutline } from "@/components/course-outline";
 import { LessonText } from "@/components/lesson-text";
 import { LessonQuiz } from "@/components/lesson-quiz";
@@ -346,6 +346,15 @@ export default async function LessonPage({ params, searchParams }: Params) {
             {quiz ? (
               <LessonQuiz
                 quiz={asked?.quiz ?? quiz}
+                {...(query.quiz === "unanswered"
+                  ? (() => {
+                      // Came back from a try with a question left blank: what was picked is
+                      // read back against this page's questions, and the blank ones named.
+                      const shownQuestions = (asked?.quiz ?? quiz).questions;
+                      const kept = readPicked(query.picked, shownQuestions);
+                      return { kept, unanswered: unansweredIds(shownQuestions, kept) };
+                    })()
+                  : {})}
                 attempt={attempt}
                 waitSeconds={asked?.wait ?? 0}
                 stale={query.quiz === "stale"}

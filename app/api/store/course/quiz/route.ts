@@ -8,7 +8,7 @@ import { fromAnotherSite } from "@/lib/studio-route";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { findLesson, isOpen, readCourse } from "@/lib/course";
 import { courseAccess, emailKey, markLesson } from "@/lib/learn";
-import { MAX_QUESTIONS, heldBack, passedForGate, readAnswers, readQuizFor, submitQuiz } from "@/lib/quiz";
+import { MAX_QUESTIONS, heldBack, passedForGate, pickedParam, readAnswers, readQuizFor, submitQuiz, unansweredIds } from "@/lib/quiz";
 import { limited } from "@/lib/request-guard";
 import { readCourseListing } from "@/lib/catalog";
 import { noteIfFinished } from "@/lib/course-finish";
@@ -53,11 +53,21 @@ export async function POST(request: NextRequest) {
   const quiz = await readQuizFor(course.id, lessonId);
   if (!quiz || !found.lesson.quiz) return away(`${base}/${lessonId}`);
 
+  // The question ids the page showed, so a try drawn from a bank is marked on those (lib/quiz.ts).
+  const shown = String(form.get("shown") ?? "").split(",").filter(Boolean).slice(0, MAX_QUESTIONS);
+  const answers = readAnswers(quiz, form);
+  // A question left blank is checked before anything is marked or counted: the
+  // student goes back to it with what they picked still picked, and no try is
+  // used (WCAG 2.2 3.3.4, "submit user test responses"; 3.3.7; 274 [AX1]).
+  const asked = shown.length ? quiz.questions.filter((q) => shown.includes(q.id)) : quiz.questions;
+  if (unansweredIds(asked, answers).length > 0) {
+    const back = new URLSearchParams({ quiz: "unanswered", picked: pickedParam(asked, answers) });
+    return away(`${base}/${lessonId}?${back.toString()}#quiz-unanswered`);
+  }
+
   let result: Awaited<ReturnType<typeof submitQuiz>>;
   try {
-    // The question ids the page showed, so a try drawn from a bank is marked on those (lib/quiz.ts).
-    const shown = String(form.get("shown") ?? "").split(",").filter(Boolean).slice(0, MAX_QUESTIONS);
-    result = await submitQuiz(course.id, lessonId, who, quiz, readAnswers(quiz, form), store.sid, windowId(store), store, shown);
+    result = await submitQuiz(course.id, lessonId, who, quiz, answers, store.sid, windowId(store), store, shown);
   } catch (error) {
     // No room in the store's data room: the try was not counted (lib/store-data.ts).
     if (error instanceof DataRoomError) return new Response(DATA_FULL_BUYER_WORDS, { status: 409, headers: { "Cache-Control": "no-store" } });

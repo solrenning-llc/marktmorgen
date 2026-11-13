@@ -226,6 +226,11 @@ const en = {
   bankWait: (span: string) => `Students wait ${span} between tries.`,
   waitAgain: (span: string) => `You can try again in ${span}. Come back to this page then.`,
   staleTry: "Your questions changed since you opened this page, so nothing was checked and no try was used. Here are your questions now.",
+  /** A try sent with a question left blank (app/api/store/course/quiz): not checked, no try used, every pick kept. */
+  unansweredTry: (count: number) =>
+    `${count === 1 ? "One question has" : `${count} questions have`} no answer yet, so nothing was checked and no try was used. Anything you picked is still picked.`,
+  questionN: (n: number) => `Question ${n}`,
+  answerThis: "Choose an answer to this question.",
 
   // ---- A lesson's comments ------------------------------------------------------------
   commentNotices: {
@@ -541,6 +546,10 @@ const es: CoursesWords = {
   bankWait: (span) => `Los estudiantes esperan ${span} entre intentos.`,
   waitAgain: (span) => `Puedes volver a intentarlo dentro de ${span}. Vuelve a esta página entonces.`,
   staleTry: "Tus preguntas cambiaron desde que abriste esta página, así que no se comprobó nada y no se usó ningún intento. Estas son tus preguntas ahora.",
+  unansweredTry: (count: number) =>
+    `${count === 1 ? "Una pregunta todavía no tiene" : `${count} preguntas todavía no tienen`} respuesta, así que no se comprobó nada y no se usó ningún intento. Lo que elegiste sigue elegido.`,
+  questionN: (n: number) => `Pregunta ${n}`,
+  answerThis: "Elige una respuesta para esta pregunta.",
 
   commentNotices: {
     posted: "Publicado.",
@@ -848,6 +857,10 @@ const fr: CoursesWords = {
   bankWait: (span) => `Les participants attendent ${span} entre deux tentatives.`,
   waitAgain: (span) => `Vous pourrez réessayer dans ${span}. Revenez sur cette page à ce moment-là.`,
   staleTry: `Vos questions ont changé depuis l'ouverture de cette page${S}: rien n'a été vérifié et aucune tentative n'a été utilisée. Voici vos questions maintenant.`,
+  unansweredTry: (count: number) =>
+    `${count === 1 ? "Une question n'a pas encore" : `${count} questions n'ont pas encore`} de réponse${S}: rien n'a été vérifié et aucune tentative n'a été utilisée. Ce que vous avez choisi reste choisi.`,
+  questionN: (n: number) => `Question ${n}`,
+  answerThis: "Choisissez une réponse à cette question.",
 
   commentNotices: {
     posted: "Publié.",
@@ -1149,6 +1162,10 @@ const de: CoursesWords = {
   bankWait: (span) => `Zwischen zwei Versuchen warten Teilnehmende ${span}.`,
   waitAgain: (span) => `Sie können es in ${span} erneut versuchen. Kommen Sie dann auf diese Seite zurück.`,
   staleTry: "Ihre Fragen haben sich geändert, seit Sie diese Seite geöffnet haben. Deshalb wurde nichts geprüft und kein Versuch verbraucht. Hier sind Ihre Fragen jetzt.",
+  unansweredTry: (count: number) =>
+    `${count === 1 ? "Eine Frage hat" : `${count} Fragen haben`} noch keine Antwort. Deshalb wurde nichts geprüft und kein Versuch verbraucht. Was Sie gewählt haben, bleibt gewählt.`,
+  questionN: (n: number) => `Frage ${n}`,
+  answerThis: "Wählen Sie eine Antwort auf diese Frage.",
 
   commentNotices: {
     posted: "Veröffentlicht.",
@@ -1452,6 +1469,10 @@ const it: CoursesWords = {
   bankWait: (span) => `Gli studenti aspettano ${span} tra un tentativo e l'altro.`,
   waitAgain: (span) => `Puoi riprovare tra ${span}. Torna su questa pagina allora.`,
   staleTry: "Le tue domande sono cambiate da quando hai aperto questa pagina, quindi non è stato controllato nulla e non hai usato nessun tentativo. Ecco le tue domande adesso.",
+  unansweredTry: (count: number) =>
+    `${count === 1 ? "Una domanda non ha" : `${count} domande non hanno`} ancora una risposta, quindi non è stato controllato nulla e non hai usato nessun tentativo. Quello che hai scelto resta scelto.`,
+  questionN: (n: number) => `Domanda ${n}`,
+  answerThis: "Scegli una risposta a questa domanda.",
 
   commentNotices: {
     posted: "Pubblicato.",
@@ -1756,6 +1777,10 @@ const nl: CoursesWords = {
   bankWait: (span) => `Cursisten wachten ${span} tussen twee pogingen.`,
   waitAgain: (span) => `Je kunt het over ${span} opnieuw proberen. Kom dan terug naar deze pagina.`,
   staleTry: "Je vragen zijn veranderd sinds je deze pagina opende, dus er is niets gecontroleerd en geen poging gebruikt. Dit zijn nu je vragen.",
+  unansweredTry: (count: number) =>
+    `${count === 1 ? "Eén vraag heeft" : `${count} vragen hebben`} nog geen antwoord, dus er is niets gecontroleerd en geen poging gebruikt. Wat je hebt gekozen, blijft gekozen.`,
+  questionN: (n: number) => `Vraag ${n}`,
+  answerThis: "Kies een antwoord op deze vraag.",
 
   commentNotices: {
     posted: "Geplaatst.",
@@ -2060,6 +2085,10 @@ const pt: CoursesWords = {
   bankWait: (span) => `Os alunos esperam ${span} entre tentativas.`,
   waitAgain: (span) => `Pode tentar novamente dentro de ${span}. Volte a esta página nessa altura.`,
   staleTry: "As suas perguntas mudaram desde que abriu esta página, por isso nada foi verificado e nenhuma tentativa foi usada. Estas são agora as suas perguntas.",
+  unansweredTry: (count: number) =>
+    `${count === 1 ? "Uma pergunta ainda não tem" : `${count} perguntas ainda não têm`} resposta, por isso nada foi verificado e nenhuma tentativa foi usada. O que escolheu continua escolhido.`,
+  questionN: (n: number) => `Pergunta ${n}`,
+  answerThis: "Escolha uma resposta para esta pergunta.",
 
   commentNotices: {
     posted: "Publicado.",

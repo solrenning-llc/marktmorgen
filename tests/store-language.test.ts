@@ -82,10 +82,10 @@ const SAME: Record<string, Record<string, string[]>> = {
     nl: ["ordersFrom", "startTitleAt", "keyIssued", "storeAt"],
     pt: ["ordersFrom", "keyIssued", "storeAt"],
   },
-  // Words the languages share with English: video, quiz, module, downloads, bytes.
+  // Words the languages share with English: video, quiz, module, downloads, bytes, and French "Question".
   courses: {
     es: ["video", "bytes"],
-    fr: ["module", "quiz", "codeBlock"],
+    fr: ["module", "quiz", "codeBlock", "questionN"],
     de: ["quiz", "downloads", "codeBlock"],
     it: ["video", "quiz"],
     nl: ["module", "video", "quiz", "crumb", "openSite", "downloads", "bytes", "codeBlock"],

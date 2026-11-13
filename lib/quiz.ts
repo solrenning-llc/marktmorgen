@@ -259,6 +259,49 @@ export function readAnswers(quiz: Quiz, form: { getAll(name: string): unknown[] 
   return answers;
 }
 
+/**
+ * The questions with no choice picked, in their order: a try is checked for
+ * these before it is marked, so a missed button never spends a try (WCAG 2.2
+ * 3.3.4 names "submit user test responses"; 274 [AX1]).
+ */
+export function unansweredIds(questions: Question[], answers: Answers): string[] {
+  return questions.filter((q) => (answers[q.id] ?? []).length === 0).map((q) => q.id);
+}
+
+/** The longest `picked` value read back from an address; anything longer is not ours. */
+const PICKED_MAX = 4_000;
+
+/**
+ * What a student picked, written into the address the lesson comes back on
+ * when a try was refused for a blank question, so nothing is chosen again
+ * (3.3.7): `<id>-<choice>-<choice>_<id>-<choice>`, only [a-z0-9_-].
+ */
+export function pickedParam(questions: Question[], answers: Answers): string {
+  return questions
+    .filter((q) => (answers[q.id] ?? []).length > 0)
+    .map((q) => [q.id, ...(answers[q.id] ?? [])].join("-"))
+    .join("_");
+}
+
+/** Reads `pickedParam` back against the questions shown; anything not theirs is dropped. */
+export function readPicked(raw: unknown, questions: Question[]): Answers {
+  const answers: Answers = Object.fromEntries(questions.map((q) => [q.id, [] as number[]]));
+  if (typeof raw !== "string" || raw.length > PICKED_MAX) return answers;
+  const byId = new Map(questions.map((q) => [q.id, q]));
+  for (const part of raw.split("_")) {
+    const [id, ...rest] = part.split("-");
+    const question = byId.get(id);
+    if (!question || !ITEM_ID_PATTERN.test(id)) continue;
+    const picked = rest
+      .filter((v) => /^\d{1,2}$/.test(v))
+      .map(Number)
+      .filter((i) => i < question.choices.length);
+    const unique = [...new Set(picked)].sort((a, b) => a - b);
+    answers[id] = question.kind === "single" ? unique.slice(0, 1) : unique;
+  }
+  return answers;
+}
+
 export type Grade = {
   right: number;
   total: number;

@@ -36,9 +36,9 @@ export type ContentTest = {
   share: number;
   hours: number;
   by: TestBy;
-  /** How many got each version. */
-  a: number;
-  b: number;
+  /** How many got each version; null when a stored count does not read (rule 24), never 0. */
+  a: number | null;
+  b: number | null;
   endsAt: number;
   winner: Variant | "";
   visits: Counted;
@@ -104,8 +104,10 @@ export function parseContentTest(raw: unknown): ContentTest | null {
   return {
     bodyB: value.bodyB,
     ...choices(value),
-    a: whole(value.a),
-    b: whole(value.b),
+    // Read exactly, as pair() reads the counts: a count of sends that does not read is unknown, never 0 or cut down
+    // (Claude 3 nuvem K on #3654).
+    a: count(value.a) ? value.a : null,
+    b: count(value.b) ? value.b : null,
     endsAt: whole(value.endsAt),
     winner: value.winner === "a" || value.winner === "b" ? value.winner : "",
     visits: pair(value.visits),
@@ -123,7 +125,13 @@ const times = (count: number, one: string, many: string) => `${n(count)} ${count
  * with the counts it was decided on. The decision is chooseSubject's; only
  * the words differ.
  */
-export function chooseContent(test: Pick<ContentTest, "a" | "b" | "by">, visits: Counted, sales: Counted): { winner: Variant; why: string } {
+export function chooseContent(sized: Pick<ContentTest, "a" | "b" | "by">, visits: Counted, sales: Counted): { winner: Variant; why: string } {
+  // Sends per version that do not read decide nothing: the first version, said as counts that could not be read,
+  // never as a tie (Claude 3 nuvem K on #3654).
+  if (sized.a === null || sized.b === null) {
+    return { winner: "a", why: "The counts could not be read when the time was up, so the rest got the first version. It was not chosen on merit." };
+  }
+  const test = { a: sized.a, b: sized.b, by: sized.by };
   const { winner } = chooseSubject(test, visits, sales);
   const other = (v: Variant): Variant => (v === "a" ? "b" : "a");
   const name = (v: Variant) => (v === "a" ? "The first version" : "The second version");

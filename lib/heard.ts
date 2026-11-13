@@ -88,6 +88,14 @@ export async function recordHeard(store: Store, sessionId: unknown, answer: unkn
   const created = typeof session.created === "number" ? session.created : 0;
   const paid = session.status === "complete" && (session.payment_status === "paid" || session.payment_status === "no_payment_required");
   if (!paid || !saleHandles(store).has(meta.store ?? "") || created < now / 1000 - ANSWER_WITHIN_SECONDS) return "invalid";
+  // The sale's money is read before its mark is taken (#4389): a total that is not a whole number from zero up, or a
+  // currency that is not named, is unknown, never a confirmed zero, so nothing is counted and the buyer can try again.
+  const total = session.amount_total;
+  const currency = typeof session.currency === "string" ? session.currency.toLowerCase() : "";
+  if (typeof total !== "number" || !Number.isSafeInteger(total) || total < 0 || !currency) {
+    console.error("heard: a paid sale's total or currency could not be read; the answer is not counted now", sessionId);
+    return "unavailable";
+  }
   // Read exactly (CX-123 rule 24): counted only on a mark that is ours; one that cannot be read is not counted now.
   const mine = claimValue();
   const claimed = await claimMark(doneKey(sessionId), ANSWER_WITHIN_SECONDS, mine);
@@ -98,8 +106,8 @@ export async function recordHeard(store: Store, sessionId: unknown, answer: unkn
     await releaseMark(doneKey(sessionId), mine);
     return "unavailable";
   }
-  const currency = typeof session.currency === "string" ? session.currency.toLowerCase() : "";
-  const cents = currency === store.currency && typeof session.amount_total === "number" ? session.amount_total : 0;
+  // A sale in another currency counts no money here, as before: it is not in the store currency's sum.
+  const cents = currency === store.currency ? total : 0;
   // With no channel on the sale, the answer is the only trace of where it came from (lib/attribution-rules.ts).
   await countHeard(store.statsId, answer, cents, now, !saleChannel(meta).source);
   return "counted";

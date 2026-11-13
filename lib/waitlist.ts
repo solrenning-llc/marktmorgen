@@ -21,6 +21,7 @@ import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, sendBatch, sendEmail } from "@/lib/email";
 import { withinLimit } from "@/lib/request-guard";
 import { fromLine, releaseDay, render, reserveDay } from "@/lib/mail";
+import { allowancesUsedStrict } from "@/lib/store-allowance";
 import { upsertContact } from "@/lib/contacts";
 import { SITE_URL } from "@/lib/site-url";
 import { handleLeadsToStore, storeHandleKey, type Listing, type Store } from "@/lib/store";
@@ -388,6 +389,18 @@ export async function runLaunches(load: (handle: string) => Promise<Store | null
       if (unknown) {
         console.error("sending a waitlist launch: its places were read in an unknown shape, so the batch waits", new UnknownReplyError("a launch batch's waitlist places"));
         break;
+      }
+      // The store's month next (j-mail-4): a batch its email figure cannot take, or a figure that cannot be read,
+      // waits for the next run (the month turning, or the read coming back), never passed over. Left to the meter
+      // inside sendBatch, it came back "refused" like an email the sender will not take, the cursor moved past
+      // these people and the launch finished, deleting the list, so they never got the email they confirmed for.
+      if (chunk.length) {
+        const month = await allowancesUsedStrict(store, ["email"]);
+        if (!month) {
+          console.error("sending a waitlist launch: the store's email figure could not be read, so the batch waits", new UnknownReplyError("a launch batch's email figure"));
+          break;
+        }
+        if (month[0].used + chunk.length > month[0].figure) break;
       }
       if (!(await reserveDay(chunk.length))) break;
       const messages = chunk.map(([email, entry]) => {

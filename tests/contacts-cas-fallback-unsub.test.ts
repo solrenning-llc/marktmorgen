@@ -16,7 +16,9 @@ async function main(){
  const token=(await tokensFor(list,[email],handle)).get(email);
  if(!token||!(await readUnsubToken(token)))throw Error("G valid initial token setup");
  redis.pipeline=async commands=>{
-  if(commands.length===1&&commands[0][0]==="EVAL"&&String(commands[0][1]).includes("redis.sha1hex")){
+  // Only the label update's own script fails: the unsubscribe made during its read-back writes through the same checked
+  // script (#4244), and must run for real.
+  if(!failedEval&&commands.length===1&&commands[0][0]==="EVAL"&&String(commands[0][1]).includes("redis.sha1hex")){
    failedEval=true;throw Error("G synthetic CAS request failed before application");
   }
   if(failedEval&&!readBack&&commands.length===1&&commands[0][0]==="HMGET"&&commands[0][1]===leadsKey(list)){

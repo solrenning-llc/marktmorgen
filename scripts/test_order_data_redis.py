@@ -4,6 +4,7 @@ Every charge is held at or above what Redis itself says the write made it keep
 (MEMORY USAGE, every sample), key by key and over many writes at once.
 No application credentials or production host configuration are read.
 """
+import hashlib
 import os
 from pathlib import Path
 import re
@@ -133,6 +134,19 @@ def main():
             reply = run(("HSET", k7, "f", "x" * size), ("SET", k7 + ":s", "y" * size))
             assert reply[0] >= usage(k7, k7 + ":s"), (size, reply[0], usage(k7, k7 + ":s"))
         print("PASS: values of every size class are charged at least what Redis allocates for them")
+
+        k8 = base + ":checked"
+        redis.command("HSET", k8, "buyer@example.com", "v1")
+        made.add(k8)
+        sha = hashlib.sha1(b"v1").hexdigest()
+        reply = run(("HCHECK", k8, "buyer@example.com", sha), ("HSET", k8, "buyer@example.com", "v2"), ("INCR", k8 + ":n"))
+        assert len(reply) == 3 and reply[1] == 0 and reply[2] == 1 and redis.command("HGET", k8, "buyer@example.com") == "v2", reply
+        o_before = held()
+        assert run(("HCHECK", k8, "buyer@example.com", sha), ("HSET", k8, "buyer@example.com", "v3"), ("INCR", k8 + ":n")) == [-2]
+        assert redis.command("HGET", k8, "buyer@example.com") == "v2" and redis.command("GET", k8 + ":n") == "1" and held() == o_before
+        assert run(("HCHECK", k8, "nobody@example.com", ""), ("HSET", k8, "nobody@example.com", "new"))[1] == 1
+        assert run(("HCHECK", k8, "f"), ("HSET", k8, "f", "x")) == [-1]
+        print("PASS: a checked write runs only while the field holds what was read, and otherwise writes and charges nothing")
 
         assert run(("GET", k1)) == [-1]
         assert run(("HSET", k4, "f", "v"))[1].startswith("\x00order-write-error:")

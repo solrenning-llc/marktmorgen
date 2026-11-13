@@ -2111,11 +2111,22 @@ export class MemoryRedis {
       const name = argv[i];
       const k = Number(argv[i + 1]);
       const argc = Number(argv[i + 2]);
-      if (!allowed.has(name) || !Number.isInteger(k) || k < 2 || !keys[k - 1] || !Number.isInteger(argc) || argc < 0 || i + 2 + argc > argv.length - 1) return [-1];
+      if (!(allowed.has(name) || name === "HCHECK") || !Number.isInteger(k) || k < 2 || !keys[k - 1] || !Number.isInteger(argc) || argc < 0 || i + 2 + argc > argv.length - 1) return [-1];
+      if (name === "HCHECK" && argc !== 2) return [-1];
       plan.push({ name, key: keys[k - 1], args: argv.slice(i + 3, i + 3 + argc) });
       i += 3 + argc;
     }
     if (i !== argv.length) return [-1];
+    // HCHECK: each field still holds what was read (its SHA-1, "" for none), or nothing is written and the answer is {-2}.
+    for (const { name, key, args: rest } of plan) {
+      if (name !== "HCHECK") continue;
+      const t = this.typeOf(key);
+      if (t !== "hash" && t !== "none") return [-2];
+      const current = t === "hash" ? (this.data.get(key) as Map<string, string>).get(rest[0]) : undefined;
+      const seen = typeof current === "string" ? createHash("sha1").update(current).digest("hex") : "";
+      if (seen !== rest[1]) return [-2];
+    }
+    plan.splice(0, plan.length, ...plan.filter((p) => p.name !== "HCHECK"));
     const bytes = (text: string) => Buffer.byteLength(text, "utf8");
     const existed = new Map<string, boolean>();
     let grown = 0;

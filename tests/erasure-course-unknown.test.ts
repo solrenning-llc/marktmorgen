@@ -21,6 +21,7 @@ import { makeWorld, seedPerson, snapshot } from "./erasure-world";
 import { erasePerson, erasureScope } from "@/lib/person-erasure";
 import { normaliseEmail } from "@/lib/auth";
 import { emailKey } from "@/lib/learn";
+import { noteIfOpened } from "@/lib/course-finish";
 
 globalThis.fetch = (async (input: string | URL | Request) => {
   const url = new URL(String(input instanceof Request ? input.url : input));
@@ -75,6 +76,24 @@ async function main(): Promise<void> {
   const again = await erasePerson(world.store, tess, { kind: "person" });
   is("done", again.ok, true);
   is("and none of their course records is kept", await courseRecords(), 0);
+
+  // #4418: the course page defers noteIfOpened until after its answer; one
+  // authorized before the erasure must not bring the opening marker back.
+  part("A deferred course-open callback after erasure");
+  const hasOpen = async (who = learner) =>
+    [...(await snapshot())].some(([key]) => key === `nl:course:${world.courseId}:open:${who}`);
+  is("the erased learner's opening marker is absent", await hasOpen(), false);
+  is(
+    "the stale callback is refused and cannot restore it",
+    [await noteIfOpened(world.store, world.courseProduct, world.courseId, tess), await hasOpen()],
+    [false, false],
+  );
+  const fresh = normaliseEmail("fresh@example.com");
+  is(
+    "a fresh learner still claims the first opening",
+    [await noteIfOpened(world.store, world.courseProduct, world.courseId, fresh), await hasOpen(emailKey(fresh))],
+    [true, true],
+  );
 
   part("A course Redis confirms is not there");
   await real([["DEL", `nl:course:${world.courseId}`]]);

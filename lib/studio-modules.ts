@@ -113,6 +113,7 @@ export const NOT_MODULES: Readonly<Record<string, string>> = {
   invoices: "The invoices of the store's own Marktmorgen plan, opened from the plan card on the studio home.",
   tax: "The tax registrations active on the store's Stripe account, read from Stripe: a report for the owner, not a part of the store.",
   companies: "The companies your buyers work at, a part of Buyers opened from its page rather than a part of the store on its own.",
+  "first-product": "A first product written from an outline and downloaded as a PDF, opened from Products, where the file is then added to a product (490 [PP1]).",
 };
 
 /** What the page knows about the person, the store and the deployment. */

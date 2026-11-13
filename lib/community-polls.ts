@@ -257,10 +257,14 @@ export async function votesOf(id: string, who: string, postIds: string[]): Promi
   const out: { post: string; picked: string[] }[] = [];
   for (let i = 0; i < postIds.length; i += 500) {
     const batch = postIds.slice(i, i + 500);
-    const replies = await redisPipeline(batch.map((post) => ["HGET", votesKey(id, post), who]));
+    // Read exactly (rule 24; Claude 1's LEVE on #3820): this feeds the person's data copy, so a reply in another
+    // shape is unknown and the copy fails whole, never handed over with a vote left out. null or "" is no vote.
+    const replies = repliesFor(await redisPipeline(batch.map((post) => ["HGET", votesKey(id, post), who])), batch.length);
+    if (!replies) throw new UnknownReplyError("a member's votes for their data copy");
     batch.forEach((post, k) => {
       const raw = replies[k];
-      if (typeof raw === "string" && raw) out.push({ post, picked: raw.split(",").filter(Boolean) });
+      if (raw !== null && typeof raw !== "string") throw new UnknownReplyError("a member's vote for their data copy");
+      if (raw) out.push({ post, picked: raw.split(",").filter(Boolean) });
     });
   }
   return out;

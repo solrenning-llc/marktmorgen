@@ -30,6 +30,8 @@ import {
 } from "@/lib/community";
 import { communityViewer, maySeeSpace } from "@/lib/community-access";
 import { MAX_POLL_DAYS, parsePoll, vote } from "@/lib/community-polls";
+import { LockBusyError } from "@/lib/redis-lock";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { mentionsIn, whoIs } from "@/lib/community-mentions";
 import { tell } from "@/lib/community-notify";
 import { communityWords } from "@/lib/buyer-words/community";
@@ -326,7 +328,15 @@ export async function POST(request: NextRequest) {
       if (!post.poll) return back(fromPage, "gone", `post-${post.id}`);
       if (!owner && !(await within(id, key, "like"))) return back(fromPage, "slow", `post-${post.id}`);
       const picked = form.getAll("choice").map((one) => String(one));
-      const cast = await vote(id, post.id, post.poll, key, picked, store);
+      let cast: boolean;
+      try {
+        cast = await vote(id, post.id, post.poll, key, picked, store);
+      } catch (error) {
+        // Another vote of theirs in the same moment (LockBusyError) or a reply not proven (UnknownReplyError): the
+        // member is told their vote could not be confirmed, not the generic error (Claude 1 cloud's LEVE on #3820).
+        if (error instanceof LockBusyError || error instanceof UnknownReplyError) return back(fromPage, "votebusy", `post-${post.id}`);
+        throw error;
+      }
       return back(fromPage, cast ? "voted" : "pollclosed", `post-${post.id}`);
     }
 

@@ -55,6 +55,7 @@ import { TRIAL_DAILY_RUNS } from "@/lib/flow-limits";
 import { PAID_STORES_PER_FREE_STORE } from "@/lib/free-pool-rules";
 import { CERTIFICATE_PDF_MAX_BYTES } from "@/lib/certificate-pdf";
 import { monthlyEmails, type Tier } from "@/lib/plan";
+import { SALE_FEES_READINGS_PER_DAY, SALE_FEES_READ_SHAPE } from "@/lib/sale-fees-reading";
 import { FREE_PAUSE_ABOVE_BYTES } from "@/lib/delivery";
 import { PAID_VIDEO_HOURS } from "@/lib/video-admission-rules";
 import { TOP_HEIGHT, viewingBytes } from "@/lib/stream-rules";
@@ -1247,6 +1248,15 @@ export const COST_LINES: CostLine[] = [
       { file: "app/studio/totals/page.tsx", names: ["countStudio(store, null, STUDIO_PAGE_UNITS)"] },
     ],
     basis: "Every studio request of the window at the studio shape; a page drawn takes STUDIO_PAGE_UNITS of them, more than a heavy read costs (held below). Past the figure the studio shows one page, drawn at most PAUSED_PER_DAY times a day; changing or canceling the plan, deleting the store and downloading its sales take a small daily figure instead. What a page reads of the store's numbers past that is the store's own readings (line store-readings), never more of these.",
+  },
+  {
+    id: "sale-fees-reading",
+    feature: "Fees and what you keep (282 [HG1], 11 November 2026): the store's readings of its own Stripe balance transactions, kept for the studio page and its download",
+    monthlyUsd: () => DAY_WINDOWS * SALE_FEES_READINGS_PER_DAY * readShapeCost(SALE_FEES_READ_SHAPE),
+    sources: [
+      { file: "lib/sale-fees-reading.ts", names: ["SALE_FEES_READINGS_PER_DAY", "SALE_FEES_PAGES", "SALE_FEES_COPY_MAX_BYTES", "SALE_FEES_READ_SHAPE", "takeReading", "if (!(await takeReading(statsId, now)))"] },
+    ],
+    basis: "At most SALE_FEES_READINGS_PER_DAY readings a UTC day, each taken before Stripe is called and kept counted once it was; each at its worst shape: SALE_FEES_PAGES pages of the creator's account waited on one after another, the copy read and written at its largest and the day's count. The page and the download are counted in the studio's requests as every page and route; the copy's day is in the data room (nl:salefees:copy:).",
   },
   {
     id: "store-readings",

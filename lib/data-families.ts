@@ -97,7 +97,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:rl:aff:click:", "nl:rl:aff:ip:", "nl:rl:cm:addr:", "nl:rl:cm:ev:", "nl:rl:cm:ip:", "nl:rl:creators:",
   "nl:rl:export:", "nl:rl:free:addr:", "nl:rl:free:ip:", "nl:rl:hooks:test:", "nl:rl:licence:",
   "nl:rl:manage:addr:", "nl:rl:manage:ip:", "nl:rl:orders:addr:", "nl:rl:orders:ip:", "nl:rl:phone:quiet:",
-  "nl:rl:phone:test:", "nl:rl:signin:", "nl:rl:team-invite:", "nl:rlm:", "nl:sale:told:", "nl:sblocks:",
+  "nl:rl:phone:test:", "nl:rl:signin:", "nl:rl:team-invite:", "nl:rlm:", "nl:sale:told:", "nl:salefees:copy:", "nl:salefees:day:", "nl:sblocks:",
   "nl:sdemo:", "nl:sdemo:{<session>}:<family>[:<part>]", "nl:sender:", "nl:ses:did:", "nl:ses:h:", "nl:ses:once:", "nl:ses:rest:", "nl:ses:state", "nl:ses:told:",
   "nl:share:applied", "nl:share:lock", "nl:share:read-until", "nl:share:stores", "nl:ship:done:",
   "nl:ship:mail:all", "nl:ship:mail:closed:", "nl:ship:mail:due", "nl:ship:mail:erased:",
@@ -387,6 +387,8 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:rl:phone:quiet:": E, "nl:rl:phone:test:": E, "nl:rl:team-invite:": E,
   "nl:rlm:": er(62),
   "nl:sale:told:": X(40),
+  // The store's reading of its fees (282 [HG1], lib/sale-fees-reading.ts): a day, and the day's count two.
+  "nl:salefees:copy:": X(1), "nl:salefees:day:": X(2),
   "nl:save:": E,
   "nl:sblock:uses:": E, "nl:sblocks:": E,
   "nl:sender:": C,

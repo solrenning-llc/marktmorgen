@@ -61,6 +61,24 @@ async function main(): Promise<void> {
   }
   is("the count stays exactly at the ceiling", count(), pass.cap);
 
+  part("A token refused at the ceiling is spent everywhere, at once (Codex X5's MEDIUM on #2571)");
+  {
+    // Its first refusal marks it in the same step, so a server that saw nothing finds it used before any count, and the
+    // Redis work its retries can cost is the used token's, never a count and a take-back each time.
+    redis.run(["SET", meter, String(pass.cap)]);
+    forgetReadingsSeen();
+    const late = token();
+    const nonce = readTokenPass(late, PRODUCT)!.nonce;
+    await sale(late);
+    is("refused at the ceiling, and marked used in Redis", [count(), redis.run(["EXISTS", `nl:read:once:${nonce}`])], [pass.cap, 1]);
+    redis.run(["SET", meter, "0"]);
+    for (let i = 0; i < 20; i += 1) {
+      forgetReadingsSeen();
+      await sale(late);
+    }
+    is("sent again on servers that saw nothing, with room in the window now: never counted", count(), 0);
+  }
+
   part("One token sent 200 times at once is admitted once");
   redis.run(["DEL", meter]);
   forgetReadingsSeen();

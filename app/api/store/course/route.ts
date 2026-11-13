@@ -31,7 +31,7 @@ import {
   saveCourse,
 } from "@/lib/course";
 import { emailKey, registerDrip, setBlocked, storeKey, studentEmail } from "@/lib/learn";
-import { type TaskDrop, applyTaskDrop, readTaskDrop, readTaskFor, review, saveTask } from "@/lib/assignment";
+import { type TaskDrop, applyTaskDrop, readTaskDrop, readTaskDrops, readTaskFor, review, saveTask } from "@/lib/assignment";
 import { readTask } from "@/lib/assignment-rules";
 import { tellStudentOfReview } from "@/lib/assignment-notify";
 import { EMAIL_PATTERN } from "@/lib/auth";
@@ -493,12 +493,11 @@ export async function POST(request: NextRequest) {
       const taskDrops: TaskDrop[] = [];
       if (edit.op === "lesson-remove" || edit.op === "module-remove") {
         const keptNow = new Set(lessonsInOrder(result.course).map(({ lesson }) => lesson.id));
-        for (const { lesson } of lessonsInOrder(course)) {
-          if (keptNow.has(lesson.id) || !lesson.task) continue;
-          const drop = await readTaskDrop(course.id, lesson.id).catch((error: unknown) => (console.error("could not read the work handed in for a lesson's assignment", error), null));
-          if (!drop) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
-          taskDrops.push(drop);
-        }
+        const going = lessonsInOrder(course).filter(({ lesson }) => !keptNow.has(lesson.id) && lesson.task).map(({ lesson }) => lesson.id);
+        // The course's list of work handed in read once for all of them (readTaskDrops), not once an assignment.
+        const drops = await readTaskDrops(course.id, going).catch((error: unknown) => (console.error("could not read the work handed in for a lesson's assignment", error), null));
+        if (!drops) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+        for (const drop of drops) taskDrops.push(drop);
       }
       await save(result.course);
       const lessons = lessonCount(result.course);

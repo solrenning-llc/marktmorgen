@@ -11,7 +11,7 @@
  * times. Checked with Redis stubbed: the index is read once, and each drop
  * still holds its own lesson's work only.
  */
-import { readCourseTaskDrops } from "@/lib/assignment";
+import { readCourseTaskDrops, readTaskDrops } from "@/lib/assignment";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -39,6 +39,11 @@ async function main(): Promise<void> {
     is("the course's list of work is read once, not once per assignment", indexReads, 1);
     is("each assignment still holds only its own lesson's work", drops.map((d) => [d.lessonId, d.gone]), [["lsn_a", ["lsn_a|who1", "lsn_a|who2"]], ["lsn_b", []], ["lsn_c", ["lsn_c|who3"]], ["lsn_d", []]]);
 
+    part("Removing a module's assignments");
+    indexReads = 0;
+    const some = await readTaskDrops(COURSE, ["lsn_c", "lsn_a"]);
+    is("read once for the module, too", indexReads, 1);
+    is("in the order asked", some.map((d) => d.lessonId), ["lsn_c", "lsn_a"]);
   } finally {
     redis.pipeline = original;
   }

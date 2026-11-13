@@ -139,13 +139,30 @@ function handedFilesOf(flat: unknown): { path: string; bytes: number }[] {
  * takes the assignment out of the course (Revisor 1 on #2810), so a read that fails leaves everything findable.
  */
 export async function readTaskDrop(courseId: string, lessonId: string): Promise<TaskDrop> {
+  return (await readTaskDrops(courseId, [lessonId]))[0];
+}
+
+/**
+ * readTaskDrop for several assignments of one course, in the order asked, with the course's list of all the work
+ * handed in read once for all of them (Claude 3's studio performance audit, 13 November 2026): it holds every
+ * lesson's work, so reading it once per assignment read the same list as many times.
+ */
+export async function readTaskDrops(courseId: string, lessonIds: string[]): Promise<TaskDrop[]> {
+  if (lessonIds.length === 0) return [];
+  // Each student's own record, found by the list of all the work handed in.
+  const waiting = stringList(repliesFor(await redisPipeline([["ZRANGEBYSCORE", allKey(courseId), "-inf", "+inf"]]), 1)?.[0]);
+  if (!waiting) throw new UnknownReplyError("the work handed in for a course");
+  const drops: TaskDrop[] = [];
+  for (const lessonId of lessonIds) drops.push(await taskDropFrom(courseId, lessonId, waiting));
+  return drops;
+}
+
+/** One assignment's part of readTaskDrops, from the course's list of work already read. */
+async function taskDropFrom(courseId: string, lessonId: string, waiting: string[]): Promise<TaskDrop> {
   const listed = handedFilesOf(repliesFor(await redisPipeline([["HGETALL", filesKey(courseId, lessonId)]]), 1)?.[0]);
   const files = listed.map((f) => f.path);
   const sizes = listed.map((f) => f.bytes);
   const bytes = listed.reduce((sum, f) => sum + f.bytes, 0);
-  // Each student's own record, found by the list of all the work handed in.
-  const waiting = stringList(repliesFor(await redisPipeline([["ZRANGEBYSCORE", allKey(courseId), "-inf", "+inf"]]), 1)?.[0]);
-  if (!waiting) throw new UnknownReplyError("the work handed in for a course");
   const gone = waiting.filter((m) => m.startsWith(`${lessonId}|`));
   // What the prompt and the work weighed comes back to the store's data room.
   const held = repliesFor(
@@ -695,7 +712,8 @@ type CourseTasks = { id: string; modules: { lessons: { id: string; task?: unknow
 export async function readCourseTaskDrops(course: CourseTasks): Promise<TaskDrop[]> {
   const drops: TaskDrop[] = [];
   if (!isRedisConfigured()) return drops;
-  for (const unit of course.modules) for (const lesson of unit.lessons) if (lesson.task) drops.push(await readTaskDrop(course.id, lesson.id));
+  const tasks = course.modules.flatMap((unit) => unit.lessons.filter((lesson) => lesson.task).map((lesson) => lesson.id));
+  drops.push(...(await readTaskDrops(course.id, tasks)));
   return drops;
 }
 

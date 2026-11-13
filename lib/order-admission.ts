@@ -21,8 +21,10 @@
  * orderDataBytes, the most each of them can take): an order's records are written whatever happens once it
  * is paid, so their room is held here, before anybody pays. When its
  * order is counted, its hour gives it back (settleAdmitted), so a busy day
- * is not counted twice. A checkout nobody pays falls out of the window by
- * itself after a day. What a month counts can therefore never pass the
+ * is not counted twice. A checkout nobody pays gives its place back when
+ * Stripe closes it unpaid and the five-minute sweep reads it closed
+ * (releaseExpiredHolds, #3970), and falls out of the window by itself after
+ * a day in any case. What a month counts can therefore never pass the
  * figure through a checkout opened here; a buyer who is already paying is
  * never refused, because the refusal happens before Stripe's page opens.
  *
@@ -311,6 +313,80 @@ export async function settleAdmitted(store: Store, hour: unknown, n = 1, items =
     await redisPipeline([["EVAL", SETTLE_ADMITTED, 2, openKey(folder), heldKey(folder), String(at), n, n * orderDataBytes(items)]]);
   } catch (error) {
     console.error("could not settle an admitted order", error);
+  }
+}
+
+/**
+ * Where a checkout that closed unpaid is marked as having given its place back (#3970, decision ALL-160), so a
+ * page of expired checkouts read again never gives a place back twice: the hour's places are shared by every
+ * checkout of the store, so a second give-back would take another checkout's place. Kept until the checkout's hour
+ * has left the window (OPEN_HOURS), after which there is nothing of it left to give back.
+ */
+const freedKey = (session: string) => `nl:orders:freed:${session}`;
+const CHECKOUT_SESSION = /^cs_(?:test|live)_[A-Za-z0-9]{10,200}$/;
+
+/** What releaseExpiredHolds reads of one Checkout Session, as Stripe lists it on the creator's own account. */
+export type ClosedCheckout = { id?: unknown; status?: unknown; payment_status?: unknown; metadata?: Record<string, string> | null };
+
+/**
+ * Gives back the place a checkout held when Stripe closed it unpaid (#3970, decision ALL-160: a place held by an
+ * unpaid checkout is released when that checkout expires, never kept past it; a paid one is never released here).
+ * `rows` are the store's checkouts as its own Stripe account lists them with `status=expired` (the five-minute
+ * sweep, lib/checkout-sweep.ts; there is no incoming Stripe webhook), `handles` the store's own handles: a checkout
+ * of another store on the same account is never given back from this one's places.
+ *
+ * Gives back one order and the room of one product: the least any admitted checkout held, so it never gives back
+ * more than the checkout held (a purchase for several people, or a bundle, keeps the rest until its hour leaves
+ * the window, as before). Each checkout at most once (freedKey, taken with SET NX before its place is given back:
+ * a lost reply leaves the place held until its hour leaves the window, never given back twice). An answer that
+ * does not read gives nothing back. A checkout whose hour has left the window costs no command.
+ *
+ * Commands: one MGET a call when any row qualifies, then for each checkout not given back yet one SET NX and, when
+ * it was taken, one EVAL of SETTLE_ADMITTED. Answers how many places were given back. Never throws.
+ */
+export async function releaseExpiredHolds(store: Store, rows: readonly ClosedCheckout[], handles: ReadonlySet<string>, now = Date.now()): Promise<number> {
+  try {
+    if (!isRedisConfigured()) return 0;
+    const current = hourOf(now);
+    const due: { id: string; hour: number }[] = [];
+    const seen = new Set<string>();
+    for (const row of rows) {
+      if (!row || typeof row.id !== "string" || !CHECKOUT_SESSION.test(row.id) || seen.has(row.id)) continue;
+      if (row.status !== "expired" || row.payment_status === "paid") continue;
+      const meta = row.metadata;
+      if (!meta || typeof meta !== "object") continue;
+      const owner = Object.hasOwn(meta, "store") ? meta.store : undefined;
+      const raw = Object.hasOwn(meta, ADMITTED_FIELD) ? meta[ADMITTED_FIELD] : undefined;
+      if (typeof owner !== "string" || !handles.has(owner) || typeof raw !== "string" || !/^\d{1,9}$/.test(raw)) continue;
+      const hour = Number(raw);
+      // Its hour already left the window (ADMIT_ORDERS no longer counts it), or is not a past hour: nothing to give.
+      if (hour < current - (OPEN_HOURS - 1) || hour > current) continue;
+      seen.add(row.id);
+      due.push({ id: row.id, hour });
+    }
+    if (!due.length) return 0;
+    const [marks] = repliesFor(await redisPipeline([["MGET", ...due.map((row) => freedKey(row.id))]]), 1) ?? [undefined];
+    const read = Array.isArray(marks) && marks.length === due.length && marks.every((mark) => mark === null || typeof mark === "string") ? (marks as (string | null)[]) : null;
+    if (!read) return 0;
+    const fresh = due.filter((_, i) => read[i] === null);
+    if (!fresh.length) return 0;
+    const nowSeconds = Math.floor(now / 1000);
+    const taken = repliesFor(
+      await redisPipeline(fresh.map((row) => ["SET", freedKey(row.id), "1", "NX", "EX", Math.max(60, (row.hour + OPEN_HOURS + 1) * 3_600 - nowSeconds)])),
+      fresh.length,
+    );
+    if (!taken) return 0;
+    const giving = fresh.filter((_, i) => taken[i] === "OK");
+    if (!giving.length) return 0;
+    const folder = await storeFolder(storeRef(store));
+    const given = repliesFor(
+      await redisPipeline(giving.map((row) => ["EVAL", SETTLE_ADMITTED, 2, openKey(folder), heldKey(folder), String(row.hour), 1, orderDataBytes(1)])),
+      giving.length,
+    );
+    return given ? given.filter((answer) => answer === 1).length : 0;
+  } catch (error) {
+    console.error("could not give back the places of checkouts that closed unpaid", error);
+    return 0;
   }
 }
 

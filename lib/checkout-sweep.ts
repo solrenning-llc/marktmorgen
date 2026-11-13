@@ -73,6 +73,8 @@ import { settleStoreList, storesWithRequests } from "@/lib/payment-request-store
 import { createHash } from "node:crypto";
 import { TAKE_DATA, dataKey, monthOf, type DataStore } from "@/lib/store-data";
 import { contentRoomFor } from "@/lib/store-data-rules";
+import { OPEN_HOURS, releaseExpiredHolds } from "@/lib/order-admission";
+import { paidOrdersLimitFor } from "@/lib/order-rules";
 
 const CURSOR_KEY = "nl:sweep:cursor";
 
@@ -319,7 +321,7 @@ export async function observeCheckoutTaxPage(store: Store, rows: unknown, value:
 }
 /**
  * At most this many pages of a hundred checkouts are read per store per pass in each of its two walks (walkDay):
- * the completed ones, and the expired ones on a store with reminders or a list. So at most 2 x 3 = 6 list calls each
+ * the completed ones, and the expired ones on a store with reminders, a list or counted orders. So at most 2 x 3 = 6 list calls each
  * time a store is swept, 288 runs a UTC day (tests/plan-cost-registry.ts, NOT_A_COST.MAX_PAGES_PER_STORE).
  */
 export const MAX_PAGES_PER_STORE = 3;
@@ -689,9 +691,15 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
     }
   });
 
-  // The day's expired checkouts, walked the same way, for what an abandoned checkout starts: a reminder and the
-  // workflows. Only on a store that has either; open checkouts are never read, there is nothing to do with them yet.
-  if (reminding || store.listId) await walkDay(store, "expired", since, deadline, counts, async (rows) => {
+  // The expired checkouts, walked the same way, for what an abandoned checkout starts: a reminder and the
+  // workflows, and the order place it held given back (#3970, lib/order-admission.ts, releaseExpiredHolds). Only on a
+  // store that has reminders or workflows, or whose orders are counted; open checkouts are never read, there is
+  // nothing to do with them yet. Read back OPEN_HOURS, not a day: a checkout left at Stripe's default closes a day
+  // after it opened, and still holds its place for the hour after that. Reminders and workflows keep to the day's.
+  const holding = paidOrdersLimitFor(store, now) !== null;
+  if (reminding || store.listId || holding) await walkDay(store, "expired", now - OPEN_HOURS * 3_600, deadline, counts, async (all) => {
+    if (holding) await releaseExpiredHolds(store, all, saleHandles(store));
+    const rows = all.filter((row) => typeof row.created === "number" && row.created >= since);
     if (reminding) {
       for (const row of rows) {
         if (Date.now() >= deadline) break;

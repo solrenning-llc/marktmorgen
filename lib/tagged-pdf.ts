@@ -153,6 +153,9 @@ export class PageTagger {
     const documentRef = context.nextRef();
     // Each drawn piece's element, kept by leaf, for the parent tree below.
     const leafRefs = new Map<Leaf, PDFRef>();
+    // A group with nothing drawn in it (an empty list, a row with no cell) is not written: a reader would announce an
+    // empty list, and PDF/UA checkers flag an empty structure element (review of #3772).
+    const drawn = (node: Node): boolean => node.kind === "leaf" || node.children.some(drawn);
     const write = (node: Node, parent: PDFRef): PDFRef => {
       const ref = context.nextRef();
       if (node.kind === "leaf") {
@@ -170,12 +173,12 @@ export class PageTagger {
           }),
         );
       } else {
-        const children = node.children.map((child) => write(child, ref));
+        const children = node.children.filter(drawn).map((child) => write(child, ref));
         context.assign(ref, context.obj({ Type: "StructElem", S: node.role, P: parent, K: children }));
       }
       return ref;
     };
-    const elements: PDFRef[] = this.top.map((node) => write(node, documentRef));
+    const elements: PDFRef[] = this.top.filter(drawn).map((node) => write(node, documentRef));
     context.assign(documentRef, context.obj({ Type: "StructElem", S: "Document", P: rootRef, Lang: PDFString.of(meta.lang), K: elements }));
     // Each page's marked content, by its number: page i's elements in the order of their MCIDs.
     const nums = this.pages.flatMap((_, i) => [

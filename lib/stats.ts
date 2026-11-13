@@ -1273,6 +1273,12 @@ function invoiceMeta(invoice: Record<string, unknown>): Record<string, string> {
   return Object.fromEntries(Object.entries(meta).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
 }
 
+/** A renewal's amount_paid in the currency's smallest unit, read exactly: a whole safe number, 0 included; else null (#4388). */
+function validRenewalAmount(invoice: Record<string, unknown>): number | null {
+  const amount = invoice.amount_paid;
+  return typeof amount === "number" && Number.isSafeInteger(amount) && amount >= 0 ? amount : null;
+}
+
 /**
  * The payments after the first of this store's memberships and payment plans
  * since `since` (seconds): paid invoices Stripe made because a period came
@@ -1300,8 +1306,8 @@ export function renewalsFrom(
     const meta = invoiceMeta(invoice);
     if (!handles.has(meta.store ?? "")) continue;
     if (currencyOf(invoice) !== currency) continue;
-    const cents = typeof invoice.amount_paid === "number" ? invoice.amount_paid : 0;
-    if (cents <= 0) continue;
+    const cents = validRenewalAmount(invoice);
+    if (cents === null || cents === 0) continue;
     const day = dayKey((typeof invoice.created === "number" ? invoice.created : 0) * 1000);
     const windows: ("d7" | "d30" | "d90")[] = ["d90", ...(day >= cut30 ? (["d30"] as const) : []), ...(day >= cut7 ? (["d7"] as const) : [])];
     for (const w of windows) {
@@ -1337,8 +1343,8 @@ export function renewalEntries(store: Store, invoices: Record<string, unknown>[]
     if (invoice.status !== "paid" || invoice.billing_reason !== "subscription_cycle") continue;
     const meta = invoiceMeta(invoice);
     if (!handles.has(meta.store ?? "")) continue;
-    const cents = typeof invoice.amount_paid === "number" ? invoice.amount_paid : 0;
-    if (cents <= 0) continue;
+    const cents = validRenewalAmount(invoice);
+    if (cents === null || cents === 0) continue;
     const source = "channel" in meta ? (meta.channel === "direct" ? "" : meta.channel) : meta.utm_source || UNRECORDED;
     out.push({ day: dayKey((typeof invoice.created === "number" ? invoice.created : 0) * 1000), cents, currency: currencyOf(invoice), source });
   }
@@ -1367,6 +1373,9 @@ async function readRenewals(store: Store, since: number, now: number, pages: num
   const entries = renewalEntries(store, invoices);
   // A renewal in a currency the answer does not name is in no total: the reading is incomplete.
   if (entries.some((entry) => !entry.currency)) partial = true;
+  // A renewal of the store whose amount does not read is in no total either, never $0 (#4388).
+  const handles = saleHandles(store);
+  if (invoices.some((invoice) => invoice.status === "paid" && invoice.billing_reason === "subscription_cycle" && handles.has(invoiceMeta(invoice).store ?? "") && validRenewalAmount(invoice) === null)) partial = true;
   return { ...renewalsFrom(store, invoices, now, store.currency), partial, entries };
 }
 
@@ -1443,9 +1452,14 @@ export async function readRenewalPayments(store: Store, since: number, pages: nu
     for (const invoice of rows) {
       if (invoice.status !== "paid" || invoice.billing_reason !== "subscription_cycle") continue;
       if (!handles.has(invoiceMeta(invoice).store ?? "")) continue;
-      const cents = typeof invoice.amount_paid === "number" ? invoice.amount_paid : 0;
+      const cents = validRenewalAmount(invoice);
+      // An amount that does not read is never $0 in the ledger: left out, and the reading is partial (#4388).
+      if (cents === null) {
+        partial = true;
+        continue;
+      }
       const email = typeof invoice.customer_email === "string" ? invoice.customer_email.trim() : "";
-      if (cents <= 0 || !email) continue;
+      if (cents === 0 || !email) continue;
       const meta = invoiceMeta(invoice);
       const listedPayment = ((invoice.payments as { data?: { status?: unknown; payment?: { payment_intent?: unknown } | null }[] } | null | undefined)?.data ?? []).find((p) => p.status === "paid")?.payment?.payment_intent;
       const paymentIntent = typeof invoice.payment_intent === "string" ? invoice.payment_intent : typeof listedPayment === "string" ? listedPayment : "";

@@ -49,6 +49,6 @@ is("unlimited list has no cap warning",render({...limited,channelsTruncated:fals
 is("missing totals are not invented",render({...limited,channelsTotal:undefined,productsTotal:undefined}).includes("Showing 1 of"),false);
 is("limited list offers expansion",limitedHtml.includes("Show all channels and products"),true);
 is("full list has no expansion button",render({...limited,channelsTruncated:false,productsTruncated:false}).includes("Show all channels and products"),false);
-is("loading expansion is disabled",render(limited,true).includes('disabled="" aria-busy="true"'),true);
+is("loading expansion is disabled",render(limited,true).includes('aria-disabled="true" aria-busy="true"'),true);
 is("loading expansion has readable status",render(limited,true).includes("Reading…"),true);
 done();

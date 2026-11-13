@@ -29,6 +29,6 @@ const render=(busy=false)=>renderToStaticMarkup(createElement(CustomRangePresets
 const html=render();
 for(const days of [7,30,90])is("completed shortcut label "+days,html.includes("Last "+days+" completed days"),true);
 is("completed UTC policy visible",html.includes("completed-day shortcuts exclude today and use completed UTC dates"),true);
-is("all nine controls disabled during a reading",(render(true).match(/disabled=""/g)??[]).length,9);
+is("all nine controls disabled during a reading",(render(true).match(/aria-disabled="true"/g)??[]).length,9);
 is("all controls remain non-submitting",(html.match(/type="button"/g)??[]).length,9);
 done();

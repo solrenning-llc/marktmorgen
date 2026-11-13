@@ -30,7 +30,7 @@ const app=await build({stdin:{contents:[
  '  React.createElement(BusyButton,{busy,className:"btn",onClick:async()=>{window.__calls++;setBusy(true);await new Promise(r=>{window.__release=r;});setBusy(false);}},busy?"Saving…":"Save"),',
  '  React.createElement("form",{onSubmit:(e)=>{e.preventDefault();window.__submits++;setSending(true);}},',
  '   React.createElement("input",{"aria-label":"Name"}),',
- '   React.createElement(BusyButton,{type:"submit",busy:sending,className:"btn"},sending?"Sending…":"Send")));',
+ '   React.createElement(BusyButton,{type:"submit",busy:sending,announce:false,className:"btn"},sending?"Sending…":"Send")));',
  '}',
  'createRoot(document.getElementById("root")).render(React.createElement(Host));'
 ].join('\n'),loader:'tsx',resolveDir:root},bundle:true,platform:'browser',write:false,alias:{'@':root},define:{'process.env':JSON.stringify({NODE_ENV:'production'})},logLevel:'error'});
@@ -67,6 +67,7 @@ try{
  await page.keyboard.press('Enter');
  await page.waitForTimeout(50);
  out.sendWaiting=await focused();
+ out.quiet=await page.evaluate(()=>[...document.querySelectorAll('[role=status]')].map(s=>(s.textContent||'').trim()).filter(Boolean));
  await page.keyboard.press('Enter');
  await page.getByLabel('Name').focus();
  await page.keyboard.press('Enter');
@@ -84,6 +85,7 @@ const result = JSON.parse(execFileSync(process.execPath, ["--input-type=module",
   calls: number;
   after: Focus;
   sendWaiting: Focus;
+  quiet: string[];
   submits: number;
 };
 
@@ -94,4 +96,5 @@ is("Enter and a click while it waits do nothing more", result.calls, 1);
 is("when it is done, it is back as it was, with the focus", result.after, { tag: "BUTTON", text: "Save", busy: null, off: null, disabled: false });
 is("a submit button keeps the focus while its form is sent", [result.sendWaiting?.text, result.sendWaiting?.disabled], ["Sending…", false]);
 is("and the form is not sent again by Enter on the button or in a field", result.submits, 1);
+is("announce={false}: a page that says it already is not said twice", result.quiet, []);
 done();

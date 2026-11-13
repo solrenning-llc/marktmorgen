@@ -301,20 +301,26 @@ function isHttpsAddress(address: string): boolean {
   );
 }
 
-const AUDIO_TYPES: Record<string, "audio/mpeg" | "audio/mp4"> = {
+// A map, so a type named after an object's own member ("constructor", "__proto__") is never read as a known one (rule 24).
+const AUDIO_TYPES: ReadonlyMap<string, "audio/mpeg" | "audio/mp4"> = new Map(Object.entries({
   "audio/mpeg": "audio/mpeg",
   "audio/mp3": "audio/mpeg",
   "audio/mp4": "audio/mp4",
   "audio/m4a": "audio/mp4",
   "audio/x-m4a": "audio/mp4",
-};
+} as const));
+
+/** A field's text, or undefined when it is missing or empty, so an empty <description/> never hides the summary. */
+function filled(text: string | undefined): string | undefined {
+  return text === undefined || text.trim() === "" ? undefined : text;
+}
 
 function readEpisode(item: El, n: number): ImportedEpisode {
   const where = `Episode ${n}`;
   const title = field(item, "title", where) ?? "";
   if (title === "") refuse("no-title", `${where} has no title.`);
   capped(title, MAX_IMPORT_TITLE, `${where}'s title`);
-  const notes = field(item, "description", where) ?? field(item, "itunes:summary", where) ?? "";
+  const notes = filled(field(item, "description", where)) ?? filled(field(item, "itunes:summary", where)) ?? "";
   capped(notes, MAX_IMPORT_NOTES, `${where}'s notes`);
 
   const enclosures = children(item, "enclosure");
@@ -325,7 +331,7 @@ function readEpisode(item: El, n: number): ImportedEpisode {
   if (!isHttpsAddress(url)) refuse("audio-not-https", `${where}'s audio address must be a public https:// address.`);
 
   const type = (enclosures[0].attrs.type ?? "").trim().toLowerCase();
-  const contentType = type === "" ? null : AUDIO_TYPES[type];
+  const contentType = type === "" ? null : AUDIO_TYPES.get(type);
   if (contentType === undefined) refuse("audio-type", `${where} is not an MP3 or M4A audio file.`);
 
   const length = (enclosures[0].attrs.length ?? "").trim();
@@ -364,7 +370,7 @@ function readShow(root: El): ImportedShow {
   const title = field(channel, "title", "The show") ?? "";
   if (title === "") refuse("no-title", "The show has no title.");
   capped(title, MAX_IMPORT_SHOW_TITLE, "The show's title");
-  const description = field(channel, "description", "The show") ?? field(channel, "itunes:summary", "The show") ?? "";
+  const description = filled(field(channel, "description", "The show")) ?? filled(field(channel, "itunes:summary", "The show")) ?? "";
   capped(description, MAX_IMPORT_SHOW_DESCRIPTION, "The show's description");
   const language = (field(channel, "language", "The show") ?? "").toLowerCase();
   const author = field(channel, "itunes:author", "The show") ?? "";
@@ -379,7 +385,8 @@ function readShow(root: El): ImportedShow {
   return {
     title,
     description,
-    language: /^[a-z]{2,3}(-[a-z0-9]{2,8})*$/.test(language) ? language : null,
+    // At most one subtag, as the public feed takes (lib/podcast-public-feed.ts LANGUAGE): one it would refuse is not kept.
+    language: /^[a-z]{2,3}(-[a-z0-9]{2,8})?$/.test(language) ? language : null,
     author: author === "" ? null : author,
     image: coverOk ? cover : null,
     imageRefused: cover !== "" && !coverOk,

@@ -119,9 +119,11 @@ const load = cache(async (raw: string, id: string): Promise<{ store: Store; prod
   return product && !product.hidden ? { store, product, asked } : null;
 });
 
-async function pageOf(store: Store, product: Listing): Promise<SalesPage> {
-  // A page kept from visitors while the creator works on it shows as none (lib/sales-page.ts, livePage).
-  return product.page ? readPage(store.statsId, product.id).then((page) => livePage(page, saleClock())).catch(() => ({ ...EMPTY_PAGE, blocks: [] })) : { ...EMPTY_PAGE, blocks: [] };
+async function pageOf(store: Store, product: Listing): Promise<SalesPage | "unread"> {
+  // A page kept from visitors while the creator works on it shows as none (lib/sales-page.ts, livePage). One whose
+  // read is not known is "unread": said so, out of search, never shown as the product with no page
+  // (C4-20261106-2610-C6-153, unit B).
+  return product.page ? readPage(store.statsId, product.id).then((page) => livePage(page, saleClock())).catch(() => "unread" as const) : { ...EMPTY_PAGE, blocks: [] };
 }
 
 /**
@@ -150,6 +152,7 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
   if (!found) return { title: "Not found — Marktmorgen" };
   const { store, product } = found;
   const [about, page] = await Promise.all([product.about ? readAbout(store.statsId, product.id) : Promise.resolve(""), pageOf(store, product)]);
+  if (page === "unread") return { title: `${speech(store).w.notAvailable} — ${store.name}`, robots: { index: false, follow: true } };
   const description =
     page.seoDescription || product.summary || aboutExcerpt(about) || speech(store).w.productDescription(product.title, store.name);
   const title = page.seoTitle || `${product.title} — ${store.name}`;
@@ -325,6 +328,18 @@ export default async function ProductPage({ params, searchParams }: Params) {
     // The legal information of a product the creator ships (618 [SZ2]): one read of its own record, only then.
     activeShipping(product) ? readProductLegal(store, product.id).catch(() => null) : Promise.resolve(null),
   ]);
+  // Its page could not be read: said so, with no buy box, as a blog post that cannot be read is (unit B).
+  if (savedPage === "unread") {
+    return (
+      <div lang={speech(store).lang.locale} className={`st-page st-theme-${store.look.theme} relative min-h-screen`} style={lookStyle(store.look) as React.CSSProperties}>
+        <main id="content" className="relative mx-auto max-w-2xl px-4 pb-16 pt-10 sm:pt-14">
+          <h1 className="font-display text-3xl font-semibold leading-tight">{product.title}</h1>
+          <p role="status" className="st-muted mt-4">{w.notAvailable}</p>
+          <Link href={`/@${store.handle}`} className="st-footer-link mt-6 inline-block rounded-lg py-3 text-sm font-semibold">{w.backTo(store.name)}</Link>
+        </main>
+      </div>
+    );
+  }
   const videoLine = courseFacts?.videoSeconds != null ? videoTotalLine(courseFacts.videoSeconds, store.language) : null;
   // What was read goes with the product to its buy box, so the countries it says it ships to are the ones
   // its checkout offers (lib/physical-legal-ship.ts); a record not read is not filled.

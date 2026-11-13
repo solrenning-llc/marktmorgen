@@ -1,5 +1,6 @@
 "use client";
 
+import { Abbr } from "@/components/abbr";
 import { useState } from "react";
 import { answerText, isScored, responsesCsv, type FormDef, type FormResponse } from "@/lib/forms";
 import { filterFormResponses, NO_CURRENT_FORM_RESULT, type FormOpportunityFilter } from "@/lib/form-response-filter";
@@ -98,7 +99,7 @@ export function FormAnswers({ form, latest, total, canReview, blocked, existingD
                     <td className="py-2 pr-4">
                       {response.id ? (
                         <a className="btn btn-secondary btn-sm whitespace-nowrap" href={`${pdfBase}${encodeURIComponent(form.id)}&response=${encodeURIComponent(response.id)}`} download>
-                          Download as PDF<span className="sr-only">{`: the answer sent ${new Date(response.at * 1000).toLocaleString("en-US", { month: "long", day: "numeric", hour: "numeric", minute: "2-digit" })}`}</span>
+                          Download as <Abbr of="PDF" /><span className="sr-only">{`: the answer sent ${new Date(response.at * 1000).toLocaleString("en-US", { month: "long", day: "numeric", hour: "numeric", minute: "2-digit" })}`}</span>
                         </a>
                       ) : (
                         <span className="text-ink-soft">Not available for this older answer</span>

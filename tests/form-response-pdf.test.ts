@@ -104,7 +104,7 @@ async function main(): Promise<void> {
   const ok = await get(`id=${saved.id}&response=${kept.id}`);
   is("the file, made on request, kept nowhere", [ok.status, ok.headers.get("content-type"), ok.headers.get("cache-control"), (await PDFDocument.load(new Uint8Array(await ok.arrayBuffer()))).getPageCount()], [200, "application/pdf", "private, no-store", 1]);
   const studio = readFileSync("components/form-answers.tsx", "utf8");
-  is("each answer in the studio has its download, named by when it was sent", studio.includes("Download as PDF<span className=\"sr-only\">") && studio.includes("the answer sent"), true);
+  is("each answer in the studio has its download, named by when it was sent", studio.includes("Download as <Abbr of=\"PDF\" /><span className=\"sr-only\">") && studio.includes("the answer sent"), true);
 
   done();
 }

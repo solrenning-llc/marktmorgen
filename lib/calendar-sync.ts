@@ -43,7 +43,7 @@ import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { createHash, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
-import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { suppressedAmong, suppressedKey, suppressionPrint } from "@/lib/suppression";
 import { type Busy, isTimeZone, roomFor, seatsAt } from "@/lib/call-setup";
 import { SafeFetchError, checkUrl, problemWords, safeFetch } from "@/lib/safe-fetch";
@@ -793,9 +793,12 @@ export type FeedAnswer = { state: "copy" | "made"; ics: string } | { state: "pac
  */
 export async function forgetFeedCopyPerson(statsId: string | null, now = Date.now()): Promise<number> {
   if (!statsId || !isRedisConfigured()) return 0;
-  const [gone] = await redisPipeline([["DEL", outKey(statsId)]]);
-  if (Number(gone) > 0) await giveCounted(buildsKey(statsId, new Date(now).toISOString().slice(0, 10)), 2 * 86_400);
-  return Number(gone) || 0;
+  // Read exactly (#4477, Codex L): a reply that is not one count of 0 or 1 says nothing about whether the copy that
+  // names buyers is gone, so the erasure stays pending (rule 24), and no making is given back for it.
+  const gone = countOf(repliesFor(await redisPipeline([["DEL", outKey(statsId)]]), 1)?.[0]);
+  if (gone === null || gone > 1) throw new UnknownReplyError("a person's calendar feed copy deletion");
+  if (gone === 1) await giveCounted(buildsKey(statsId, new Date(now).toISOString().slice(0, 10)), 2 * 86_400);
+  return gone;
 }
 
 export async function forgetStoreCalendar(statsId: string | null | undefined): Promise<void> {

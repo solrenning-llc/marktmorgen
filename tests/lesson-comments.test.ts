@@ -17,9 +17,11 @@ import { claimHandle, ensureStatsId, storeForEmail } from "@/lib/store";
 import { emailKey, touchStudent } from "@/lib/learn";
 import {
   addComment,
+  commenterName,
   commentsOn,
   deleteComment,
   dropLessonComments,
+  forgetLessonCommentsPerson,
   freshCounts,
   lessonComments,
   markSeen,
@@ -146,6 +148,41 @@ async function main(): Promise<void> {
   is("counted for the list of courses too", (await freshCounts([COURSE])).get(COURSE), 1);
   await markSeen(COURSE, 400);
   is("none once seen", (await recentComments(COURSE)).fresh, 0);
+
+  // #4406: a comment already on its way when the student's erasure runs is
+  // never written after it, and neither is the name they typed with it.
+  part("An erasure fences a comment already in flight");
+  {
+    const real = redis.pipeline.bind(redis);
+    let release: () => void = () => {};
+    const gate = new Promise<void>((open) => { release = open; });
+    let paused: () => void = () => {};
+    const reached = new Promise<void>((open) => { paused = open; });
+    let held = false;
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      // Held at its first write of the student's data: the name, or the comment.
+      const first = commands[0] ?? [];
+      const writesName = first[0] === "HSET" && String(first[1] ?? "").endsWith(":names");
+      const writesComment = first[0] === "EVAL" && String(first[1] ?? "").startsWith("-- marktmorgen:lesson-comments-add:");
+      if (!held && (writesName || writesComment)) {
+        held = true;
+        paused();
+        await gate;
+      }
+      return real(commands);
+    }) as typeof redis.pipeline;
+    const posting = addComment({ room: ROOM, courseId: COURSE, lessonId: L1, by: dana, name: "Dana", text: "A comment sent before the erasure.", now: 415 });
+    await reached;
+    await forgetLessonCommentsPerson(COURSE, [L1], dana, ROOM);
+    release();
+    const result = await posting;
+    redis.pipeline = real;
+    is("the stale request is refused conclusively", result.ok ? "posted" : result.reason, "gone");
+    is("the student's chosen name is not restored", await commenterName(COURSE, dana), "");
+    is("the stale comment is not visible", (await lessonComments(COURSE, L1)).some((c) => c.by === dana), false);
+    const after = await addComment({ room: ROOM, courseId: COURSE, lessonId: L1, by: hal, name: "Hal", text: "After the erasure.", now: 416 });
+    is("a new request after the erasure can post", after.ok, true);
+  }
 
   done();
 }

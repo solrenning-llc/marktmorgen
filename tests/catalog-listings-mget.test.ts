@@ -3,7 +3,8 @@
  * readProductsStrict, buildHead) in shared MGETs, LISTINGS_PER_MGET keys at
  * one, not one GET a key (calendar-feed room, option B, 10 November 2026): a
  * calendar feed's making reads every call listing, up to MAX_PRODUCTS (2,000),
- * which was 2,000 commands and is now twenty. Read only whole (CX-123 rule 24):
+ * which was 2,000 commands and is now a thousand: LISTINGS_PER_MGET is 2, sized so one reply stays within 1 MiB at the
+ * most a record can be written at (tests/mget-reply-bound.test.ts; review of #3079, Codex Z M1). Read only whole (CX-123 rule 24):
  * one reply per MGET, one value per key, each a string or nothing; any other
  * answer throws UnknownReplyError, never a product taken to be missing.
  * Synthetic stores only.
@@ -65,18 +66,18 @@ async function main(): Promise<void> {
 
   part("Every product of a store of 2,000, read in MGETs of LISTINGS_PER_MGET keys, not one GET a key");
   {
-    is("a lot is a hundred keys", LISTINGS_PER_MGET, 100);
+    is("a lot is two keys: 2 x 2 x MAX_PRODUCT_BYTES within 1 MiB", LISTINGS_PER_MGET, 2);
     const read = await measured(() => readListings(store));
     const listings = Array.isArray(read.value) ? read.value : [];
     is(`every listing comes back, in the creator's order (${listings.length})`, [listings.length, listings[0]?.id, listings[N - 1]?.id], [N, idOf(0), idOf(N - 1)]);
-    is(`${N} listings in ${read.commands} commands, within ${N / 100} MGETs`, [read.commands <= Math.ceil(N / 100), read.keys], [true, N]);
+    is(`${N} listings in ${read.commands} commands, within ${N / LISTINGS_PER_MGET} MGETs`, [read.commands <= Math.ceil(N / LISTINGS_PER_MGET), read.keys], [true, N]);
     is("listingReads counts what readListings sends", listingReads(N), read.commands);
-    is("listingReads: nothing for nothing, one MGET for one to a hundred, one more past it", [listingReads(0), listingReads(1), listingReads(100), listingReads(101)], [0, 1, 1, 2]);
+    is("listingReads: nothing for nothing, one MGET for one or two, one more past it", [listingReads(0), listingReads(1), listingReads(2), listingReads(3), listingReads(N)], [0, 1, 1, 2, N / 2]);
     is("a count that is not a number is never priced low", [listingReads(Number.NaN), listingReads(Number.POSITIVE_INFINITY)], [Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY]);
     const products = await measured(() => readProducts(store));
-    is(`readProducts: ${N} products (record and extras) in ${products.commands} commands, within ${(2 * N) / 100}`, [Array.isArray(products.value) ? products.value.length : products.value, products.commands <= Math.ceil((2 * N) / 100)], [N, true]);
+    is(`readProducts: ${N} products (record and extras) in ${products.commands} commands, within ${(2 * N) / LISTINGS_PER_MGET}`, [Array.isArray(products.value) ? products.value.length : products.value, products.commands <= Math.ceil((2 * N) / LISTINGS_PER_MGET)], [N, true]);
     const strict = await measured(() => readProductsStrict(store, [idOf(5), idOf(7)]));
-    is("readProductsStrict: two products in one MGET", [Array.isArray(strict.value) ? strict.value.map((p) => p.id) : strict.value, strict.commands], [[idOf(5), idOf(7)], 1]);
+    is("readProductsStrict: two products (a record and its extras each) in two MGETs", [Array.isArray(strict.value) ? strict.value.map((p) => p.id) : strict.value, strict.commands], [[idOf(5), idOf(7)], 2]);
   }
 
   part("Rule 24: an MGET answered off its shape is unknown and throws, never a product taken to be missing");

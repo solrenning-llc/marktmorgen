@@ -30,7 +30,8 @@
  * when its units cost less than it. Commands are counted from the code, read
  * by read; sizes no code caps are review ceilings, said so where they are set.
  */
-import { MAX_PRODUCTS, listingReads } from "@/lib/catalog-rules";
+import { MAX_PRODUCTS } from "@/lib/catalog-rules";
+import { listingReads } from "@/lib/catalog";
 import { MAX_STORE_BYTES } from "@/lib/store";
 import { DAY_FIELDS_MAX, KEPT_DAYS, LIFE_WRITE_MAX, STATS_DAYS } from "@/lib/stats";
 import { CALENDAR_FILE_MAX_BYTES, CALENDAR_REFUSED_PER_HOUR } from "@/lib/calendar-sync";
@@ -98,12 +99,14 @@ export const CALENDAR_POLL_SHAPE: ReadShape = {
  * 3 when the copy's step found a deleted person instead, a making that did not fail); the store (its handle and its record: 2 GET) and its settings
  * written again when it was renamed (lib/calendar-sync.ts, ensureFeedToken:
  * GET and SET, 2); its Stripe pages; every call listing (up to MAX_PRODUCTS,
- * the catalog's head aside, read LISTINGS_PER_MGET at one MGET: lib/catalog.ts,
- * getMany, listingReads; one GET each until 10 November 2026); the bookings' moves
+ * the catalog's head aside, read LISTINGS_PER_MGET at one MGET, sized so one
+ * reply stays within 1 MiB at the written ceiling: lib/catalog.ts, getMany,
+ * listingReads; one GET each until 10 November 2026); the bookings' moves
  * (lib/call-records.ts, readMoves: MOVES_PER_MGET a command); the four keys
- * of each booking's room (lib/call-rooms.ts, roomsFor: ROOM_KEYS_PER_MGET a
- * command, roomReads) and, for a video room not made yet, its making (SET NX
- * and GET, 2 a booking); the copy kept (lib/calendar-sync.ts,
+ * of each booking's room (lib/call-rooms.ts, roomsFor, roomReads: its two
+ * room keys ROOM_KEYS_PER_MGET at one MGET, its two meeting records a GET
+ * each, since a record has no byte cap where it is written) and, for a video
+ * room not made yet, its making (SET NX and GET, 2 a booking); the copy kept (lib/calendar-sync.ts,
  * KEEP_COPY: the EVAL and the EXISTS, the HMGET of the bookers' prints among
  * the store's deleted people and the SET or DEL it runs, billed one by one: 4);
  * and the store kept in the list whose refunds are read (ZSCORE and ZADD: 2,
@@ -113,8 +116,9 @@ export const CALENDAR_POLL_SHAPE: ReadShape = {
 export const LIST_TRY_COMMANDS = 1;
 /**
  * Commands one booking adds to a making by itself: its room's making (SET NX and GET). Its moves and its room's four
- * keys are read in MGETs shared with other bookings (moveReads, roomReads), priced apart in calendarBuildCommands
- * (calendar-feed room, 10 November 2026; until then one GET a booking for its moves and four for its room, 7).
+ * keys (two room keys in MGETs shared with other bookings, two meeting records a GET each) are priced apart in
+ * calendarBuildCommands (moveReads, roomReads; calendar-feed room, 10 November 2026; until then one GET a booking for
+ * its moves and four for its room, 7).
  */
 export const CALENDAR_BUILD_PER_BOOKING = 2;
 /** Commands of a making for a store of `listings` call listings and `calls` bookings (tests/read-ceilings.test.ts measures it). */

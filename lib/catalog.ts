@@ -35,14 +35,15 @@
  * store record replaced, in one write. Until that write lands the old record
  * is the store, complete, and doing it again writes the same records.
  */
-import { LISTINGS_PER_MGET, MAX_PRODUCTS, MAX_TITLE_LENGTH, MAX_SUMMARY_LENGTH } from "@/lib/catalog-rules";
-export { LISTINGS_PER_MGET, MAX_PRODUCTS, MAX_TITLE_LENGTH, MAX_SUMMARY_LENGTH, listingReads } from "@/lib/catalog-rules";
+import { MAX_PRODUCTS, MAX_TITLE_LENGTH, MAX_SUMMARY_LENGTH } from "@/lib/catalog-rules";
+export { MAX_PRODUCTS, MAX_TITLE_LENGTH, MAX_SUMMARY_LENGTH } from "@/lib/catalog-rules";
 import { type Shipping, parseShipping } from "@/lib/shipping";
 import { idInSegment } from "@/lib/product-slug";
 import { type CallPackage, parseCallPackage } from "@/lib/call-package-rules";
 import { type PodcastRef, parsePodcastRef } from "@/lib/podcast-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, listSlots, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
+import { mgetCommands, mgetLotFor, mgetWhole } from "@/lib/redis-mget";
 import { dataBytes } from "@/lib/store-data-rules";
 import { StoreFullError } from "@/lib/store-full";
 import { type ProductFile, parseProductFile } from "@/lib/product-file";
@@ -103,6 +104,21 @@ export const HEAD_BYTES = 120_000;
 
 /** The most one product's two records may weigh together. */
 export const MAX_PRODUCT_BYTES = 256_000;
+
+/**
+ * A store's product records read at one MGET at the most (getMany): sized from the most a record can be written at,
+ * not from the bytes a reading is priced at. A record is written up to MAX_PRODUCT_BYTES (with its extras), and its
+ * JSON text can double in the REST answer (lib/redis-mget.ts, REPLY_ESCAPE_FACTOR), so one MGET of these keys answers
+ * at most LISTINGS_PER_MGET x 2 x 256,000 bytes, within MGET_REPLY_BYTES (1 MiB): 2 records, 1,024,000 bytes (review
+ * of #3079, Codex Z M1: a valid call listing of 29,538 bytes put 50 at about 1.52 MB; applied to this shared reader,
+ * 11 November 2026, where it had been 100). tests/mget-reply-bound.test.ts holds it.
+ */
+export const LISTINGS_PER_MGET = mgetLotFor(MAX_PRODUCT_BYTES);
+
+/** The commands one read of this many product records sends (getMany); a count that is not a number is never priced low. */
+export function listingReads(keys: number): number {
+  return mgetCommands(keys, LISTINGS_PER_MGET);
+}
 
 /** Thrown by a write that would take a record past its ceiling (lib/store-full.ts). */
 export { StoreFullError };
@@ -648,35 +664,14 @@ export async function listingsNamed(store: Store, meta: Record<string, string | 
 
 // ---- Reading ----------------------------------------------------------------
 
-/** MGETs in one pipeline at the most: the same few hundred keys a request as the GETs before, sent side by side. */
-const MGETS_PER_PIPELINE = 4;
-
 /**
- * Many records, LISTINGS_PER_MGET at one MGET, MGETS_PER_PIPELINE MGETs a pipeline, the pipelines sent side by side.
- * Read only whole (CX-123 rule 24): one reply for each MGET and, in each, one value for each key, a string or Redis's
- * own nil; anything else throws UnknownReplyError, never a list cut short whose missing replies would read as "no
- * record", nor a value of another type taken for none.
+ * Many records, LISTINGS_PER_MGET at one MGET, each MGET its own trip, MGET_CONCURRENCY trips at a time
+ * (lib/redis-mget.ts, mgetWhole). Read only whole (CX-123 rule 24): one reply for each MGET and, in each, one value for
+ * each key, a string or Redis's own nil; anything else throws UnreadableMget, an UnknownReplyError, never a list cut
+ * short whose missing replies would read as "no record", nor a value of another type taken for none.
  */
 async function getMany(keys: string[]): Promise<(string | null)[]> {
-  if (keys.length === 0) return [];
-  const lots: string[][] = [];
-  for (let i = 0; i < keys.length; i += LISTINGS_PER_MGET) lots.push(keys.slice(i, i + LISTINGS_PER_MGET));
-  const trips: string[][][] = [];
-  for (let i = 0; i < lots.length; i += MGETS_PER_PIPELINE) trips.push(lots.slice(i, i + MGETS_PER_PIPELINE));
-  const answers = await Promise.all(
-    trips.map(async (trip) => {
-      const replies = repliesFor(await redisPipeline(trip.map((lot) => ["MGET", ...lot])), trip.length);
-      if (!replies) throw new UnknownReplyError("a store's product records");
-      return trip.flatMap((lot, l) => {
-        const values = listSlots(replies[l]);
-        if (!values || values.length !== lot.length || !values.every((v) => v === null || typeof v === "string")) {
-          throw new UnknownReplyError("a store's product records");
-        }
-        return values as (string | null)[];
-      });
-    }),
-  );
-  return answers.flat();
+  return mgetWhole(keys, LISTINGS_PER_MGET);
 }
 
 /**

@@ -178,6 +178,19 @@ async function main(): Promise<void> {
   const signing = await measured(() => post(openRoute, "open", { handle: HANDLE, token: back }));
   is("an emailed link of an affiliate the store already has still signs them in, as they were", [signing.location, signing.signedIn, await status("partner@example.test")], [`${PAGE}?status=welcome`, true, "pending"]);
 
+  // Codex G's MEDIUM on #3573: the address index pointing an outside address at another affiliate's id (a partial write,
+  // old data) must never sign the outside address in to that record. The record found must be the field's own id and
+  // the link's own address; anything else opens nothing.
+  part("A link whose address the index points at another affiliate's record signs nobody in (Codex G on #3573)");
+  await real([["HSET", `nl:aff:${statsId}:emails`, "outsider@example.test", opened.affiliate.id]]);
+  const crossed = await emailed("outsider@example.test");
+  const crossedOpen = await openAffiliateLink(await load(), crossed);
+  is("the link is refused as unavailable, with no session", [crossedOpen.ok, crossedOpen.ok ? "" : crossedOpen.reason], [false, "unavailable"]);
+  is("and the address is not taken for that affiliate", (await affiliateByEmail(await load(), "outsider@example.test"))?.id ?? null, null);
+  const crossedPost = await measured(() => post(openRoute, "open", { handle: HANDLE, token: crossed }));
+  is("the route sends the browser back as unavailable, signed in to nothing", [crossedPost.location, crossedPost.signedIn], [REFUSED, false]);
+  await real([["HDEL", `nl:aff:${statsId}:emails`, "outsider@example.test"]]);
+
   part("app/api/store/affiliates, action invite: the creator invites no new partner");
   const studioCookie = `${SESSION_COOKIE}=${await openSession(owner)}`;
   const inviting = async () => {

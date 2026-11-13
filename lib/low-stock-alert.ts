@@ -130,5 +130,8 @@ export async function tellLowStock(store: Store, product: { id: string; title: s
     await redisPipeline([["DECR", storeDayKey(store.statsId, day)]]).catch(() => {});
     return "unknown";
   }
+  // Nobody was told (no phone answered, and the creator stopped the emails or sending is off): the crossing stays
+  // spent, the creator's own choice, but it is never said as told (cloud J's LOW on #3725).
+  if (pushed < 1 && !emailed) return "no";
   return "told";
 }

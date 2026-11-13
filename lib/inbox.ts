@@ -34,6 +34,7 @@ import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { DataRoomError, monthOf, needData, noteData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { withinLimit } from "@/lib/request-guard";
+import { alertCreator, messageEpisodeKey, messageEpisodeSeed } from "@/lib/phone-alerts";
 import { SITE_URL } from "@/lib/site-url";
 import { LANGUAGES, parseLanguage } from "@/lib/store-language";
 import { chatWords } from "@/lib/buyer-words/chat";
@@ -143,6 +144,8 @@ async function write(store: Store, statsId: string, handle: string, conversation
   }
   commands.push(["EXPIRE", msgKey(statsId, conversation.id), KEEP]);
   if (conversation.token) commands.push(["SET", tokenKey(conversation.token), `${statsId}|${conversation.id}|${handle}`, "EX", KEEP]);
+  // Read (or answered, or closed): the unread episode ends in this same write, so the next message tells the phones again.
+  if (conversation.unread === 0) commands.push(["DEL", messageEpisodeKey(statsId, conversation.id)]);
   await redisPipeline(commands);
   return conversation;
 }
@@ -228,16 +231,21 @@ export async function startChat(input: { store: Store; email: unknown; name: unk
   });
   if (!made.ok) return made;
   await tellTeam(store, made.conversation, made.messages[0].text).catch((error) => console.error("telling a store of a chat failed", error));
+  await tellPhones(store, made.conversation, 0, made.conversation.startedAt);
   return { ok: true, thread: forVisitor(made.conversation, made.messages) };
 }
 
-/** A message sent with the store's contact form, filed in the inbox too. Nothing more is sent: the form already emailed the creator. */
+/**
+ * A message sent with the store's contact form, filed in the inbox too. No email more is sent: the form already
+ * emailed the creator. The installed studios that asked to hear of messages are told, as for a chat.
+ */
 export async function fileContact(input: { store: Store; email: string; name: string; text: string; now?: number }): Promise<boolean> {
   if (!input.store.statsId || !isRedisConfigured()) return false;
   const made = await open({ ...input, source: "contact" }).catch((error) => {
     if (error instanceof DataRoomError) return { ok: false as const };
     throw error;
   });
+  if (made.ok) await tellPhones(input.store, made.conversation, 0, made.conversation.startedAt);
   return made.ok;
 }
 
@@ -257,6 +265,7 @@ export async function handOver(input: { store: Store; email: unknown; name: unkn
   });
   if (!made.ok) return made;
   await tellTeam(store, made.conversation, made.messages[0].text).catch((error) => console.error("telling a store of a handed-over question failed", error));
+  await tellPhones(store, made.conversation, 0, made.conversation.startedAt);
   return { ok: true, thread: forVisitor(made.conversation, made.messages) };
 }
 
@@ -314,6 +323,7 @@ export async function visitorSend(
     throw error;
   }
   await tellTeam(store, next, text).catch((error) => console.error("telling a store of a chat failed", error));
+  await tellPhones(store, next, conversation.unread, now);
   return { ok: true, thread: forVisitor(next, await readMessages(found.statsId, found.id)) };
 }
 
@@ -374,6 +384,25 @@ async function giveBack(store: Store, id: string, stale: string): Promise<void> 
 }
 
 /** One email to whoever has the conversation (the owner when nobody does), at most every half hour for one conversation. */
+/**
+ * Tells the store's installed studios that asked for "message" (lib/phone-alerts.ts, 451 [AP3] complement): once
+ * while a conversation is unread, so a buyer writing five times before anyone reads is one notification, and again
+ * only after it was read. The once is atomic: the seed is the conversation's unread episode, not the message, so
+ * two messages written at the same moment by two workers make one claim (alertCreator's SET NX), and the write
+ * that marks it read deletes that claim. An unknown claim answer sends nothing, and the message is kept anyway. Says "New message from a buyer": never their words, name or address, which a lock screen
+ * would show; the tap opens the conversation. A failure is written down, never the visitor's message lost.
+ */
+async function tellPhones(store: Store, conversation: Kept, unreadBefore: number, at: number): Promise<void> {
+  if (unreadBefore !== 0) return;
+  const sid = store.sid ? `store=${encodeURIComponent(store.sid)}&` : "";
+  await alertCreator(
+    store,
+    "message",
+    { title: "New message from a buyer", body: `In ${store.name}'s inbox. Open it to read and answer.`, url: `/studio/inbox?${sid}c=${conversation.id}` },
+    { seed: messageEpisodeSeed(conversation.id), at },
+  ).catch((error) => console.error("telling a store's phones of a message failed", error));
+}
+
 async function tellTeam(store: Store, conversation: Kept, text: string): Promise<void> {
   if (!isSenderConfigured() || !store.statsId) return;
   if (!(await withinLimit("inbox-tell", `${store.statsId}:${conversation.id}`, 1, 1_800))) return;

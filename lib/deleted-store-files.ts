@@ -12,8 +12,15 @@
  * the privacy policy says a store's files go with it. Every folder is read to its end (lib/file-store.ts listFiles
  * throws on a page in any other shape), and a file that cannot be deleted throws, so the line tries again.
  *
- * A file store this deployment is not set up for (no vault settings, no Blob token) cannot hold anything it wrote,
- * so its folders are passed over rather than failing every try; one that is set up and does not answer fails.
+ * The file store that charges nothing for a download (lib/vault.ts) is set up from this deployment's own settings
+ * alone, so one not set up cannot hold anything it wrote, and its folder is passed over rather than failing every
+ * try. Blob is never passed over: @vercel/blob signs in with a read-write token or with an OIDC token (from the
+ * environment or the request) and a store id, which only the SDK can tell, so its folders are always asked, and
+ * a Blob that cannot be asked (no credentials, no answer) fails the try, never reads as an empty folder (review of
+ * #4348, MÉDIO 1).
+ *
+ * Past `until` (the daily line's deadline) it stops before the next folder or batch and throws OutOfTime: what was
+ * not reached is not a failure, and the line keeps the store for its next run without counting a try (MÉDIO 2).
  *
  * Its cost: one listing per folder page and one delete per hundred files, at the supplier's paid operation prices,
  * bounded by what the store kept (its storage brake) and run at most FORGET_TRIES times a deleted store.
@@ -28,21 +35,27 @@ import { isVaultConfigured } from "@/lib/vault";
 /** Files deleted in one call. */
 const DELETE_BATCH = 100;
 
+/** A deletion stopped at its deadline before every folder was seen to: not a failure, tried again whole next time. */
+export class OutOfTime extends Error {
+  constructor() {
+    super("out of time: a deleted store's files were not all reached before the deadline");
+    this.name = "OutOfTime";
+  }
+}
+
 export type FolderHands = {
   /** Every path under a prefix. Throws when it cannot be read to its end. */
   list: (prefix: string) => Promise<string[]>;
   /** Deletes files. Throws when one could not be. */
   remove: (pathnames: string[]) => Promise<void>;
-  /** Which file stores this deployment is set up for. */
+  /** Whether the file store that charges nothing for a download is set up here. Blob is always asked. */
   vault: () => boolean;
-  blob: () => boolean;
 };
 
 const HANDS: FolderHands = {
   list: listFiles,
   remove: deleteFile,
   vault: isVaultConfigured,
-  blob: () => Boolean((process.env.BLOB_READ_WRITE_TOKEN ?? "").trim()),
 };
 
 /** The key one of an account's other stores is kept under (lib/store.ts storeRef), from which its folders are made. */
@@ -64,16 +77,26 @@ export async function deletedStoreFolders(sid: string, communityId: string | nul
 
 /**
  * Deletes every file of a deleted store, and its community's picture count. Returns how many were deleted; throws
- * when a folder could not be read to its end or a file could not be deleted, after trying every folder.
+ * when a folder could not be read to its end or a file could not be deleted, after trying every folder, and
+ * OutOfTime when `until` passed before every folder was seen to and nothing else failed.
  */
-export async function removeDeletedStoreFiles(sid: string, communityId: string | null, hands: FolderHands = HANDS): Promise<number> {
+export async function removeDeletedStoreFiles(sid: string, communityId: string | null, hands: FolderHands = HANDS, until = Number.POSITIVE_INFINITY): Promise<number> {
   let removed = 0;
   const failures: unknown[] = [];
+  let late = false;
   for (const { prefix, store } of await deletedStoreFolders(sid, communityId)) {
-    if (store === "vault" ? !hands.vault() : !hands.blob()) continue;
+    if (store === "vault" && !hands.vault()) continue;
+    if (Date.now() > until) {
+      late = true;
+      break;
+    }
     try {
       const paths = await hands.list(prefix);
       for (let at = 0; at < paths.length; at += DELETE_BATCH) {
+        if (Date.now() > until) {
+          late = true;
+          break;
+        }
         const some = paths.slice(at, at + DELETE_BATCH);
         await hands.remove(some);
         removed += some.length;
@@ -83,6 +106,7 @@ export async function removeDeletedStoreFiles(sid: string, communityId: string |
     }
   }
   if (failures.length) throw new AggregateError(failures, "a deleted store's files could not all be deleted");
+  if (late) throw new OutOfTime();
   if (communityId && COMMUNITY_ID.test(communityId)) await forgetPictures(communityFolder(communityId));
   return removed;
 }

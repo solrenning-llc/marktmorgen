@@ -37,7 +37,7 @@ import { LOG_SIZE, forgetStoreWebhooks } from "@/lib/webhooks";
 import { MAX_ENDPOINTS } from "@/lib/webhook-limits";
 import { MAX_KEYS, revokeAllKeys } from "@/lib/api-keys";
 import { MEMORY_FORGET_COMMANDS, forgetMemory } from "@/lib/assistant-memory-store";
-import { removeDeletedStoreFiles } from "@/lib/deleted-store-files";
+import { OutOfTime, removeDeletedStoreFiles } from "@/lib/deleted-store-files";
 import { COMMUNITY_ID } from "@/lib/community-text";
 
 /** Tries in all, the first one at the delete included: a week of daily runs and one more. */
@@ -99,20 +99,23 @@ export async function queueStoreForget(statsId: string | null, sid: string, now 
  * lib/api-keys.ts, lib/assistant-memory-store.ts). The assistant's notes give
  * their room back to the store's data room, which outlives the store.
  */
-export type ForgetWork = (statsId: string | null, sid: string, community: string | null) => Promise<void>;
-const forgetBoth: ForgetWork = async (statsId, sid, community) => {
+export type ForgetWork = (statsId: string | null, sid: string, community: string | null, until: number) => Promise<void>;
+const forgetBoth: ForgetWork = async (statsId, sid, community, until) => {
   await forgetStoreWebhooks(statsId);
   await revokeAllKeys(sid);
   // A deleted store has no plan: its room is given back as a store without one.
   await forgetMemory(statsId, { sid, statsId, subscriptionActive: false, subscriptionId: null, trialEnds: 0, planEndedAt: "" });
-  // And its files: pictures, community pictures, anything left in its folders (lib/deleted-store-files.ts).
-  await removeDeletedStoreFiles(sid, community);
+  // And its files: pictures, community pictures, anything left in its folders (lib/deleted-store-files.ts), stopped
+  // at the line's deadline (OutOfTime) so a slow file store cannot run into the closing job's own time.
+  await removeDeletedStoreFiles(sid, community, undefined, until);
 };
 
 /**
  * The closing job's pass (until `deadline`, ms): each store in line not given
  * up is tried again; done, it leaves the line; failed, its count goes up, and
- * at FORGET_TRIES it is marked given up and counted for the month. A line read
+ * at FORGET_TRIES it is marked given up and counted for the month. A try the
+ * work stopped at the deadline (OutOfTime) is not a failure: the store stays
+ * in line as it was, counted as left, and no try is spent. A line read
  * in another shape throws: the job says so, and runs again tomorrow.
  */
 export async function retryStoreForgets(deadline: number, now = Date.now(), work: ForgetWork = forgetBoth): Promise<{ done: number; failed: number; gaveUp: number; left: number }> {
@@ -136,10 +139,15 @@ export async function retryStoreForgets(deadline: number, now = Date.now(), work
     const known = entry !== null && sid !== undefined && fieldOf(statsId, sid) === field;
     try {
       if (!known) throw new Error("an entry in an unknown shape");
-      await work(statsId, sid, entry?.community ?? null);
+      await work(statsId, sid, entry?.community ?? null, deadline);
       await redisPipeline([["HDEL", QUEUE, field], ["HINCRBY", monthKey(monthOf(now)), "done", 1], ["EXPIRE", monthKey(monthOf(now)), MONTH_SECONDS]]);
       out.done += 1;
     } catch (error) {
+      if (known && error instanceof OutOfTime) {
+        // Cut off by the deadline, not failed: left for the next run, its tries untouched (review of #4348, MÉDIO 2).
+        out.left += 1;
+        continue;
+      }
       const tries = (entry?.tries ?? FORGET_TRIES - 1) + 1;
       const gaveUp = !known || tries >= FORGET_TRIES;
       console.error(gaveUp ? "forgetting a deleted store's webhooks, keys and assistant notes was given up" : "forgetting a deleted store's webhooks, keys and assistant notes failed again", error);

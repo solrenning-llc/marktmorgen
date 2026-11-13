@@ -52,7 +52,7 @@ async function main(): Promise<void> {
   ]);
   const listed: string[] = [];
   let failOn = "";
-  const hands = (vault = true, blob = true): FolderHands => ({
+  const hands = (vault = true): FolderHands => ({
     list: async (prefix) => {
       listed.push(prefix);
       return [...kept.keys()].filter((path) => path.startsWith(prefix));
@@ -62,7 +62,6 @@ async function main(): Promise<void> {
       for (const path of paths) kept.delete(path);
     },
     vault: () => vault,
-    blob: () => blob,
   });
 
   part("Which folders are a deleted store's");
@@ -81,7 +80,7 @@ async function main(): Promise<void> {
   is("nothing of the deleted store is left, and the first store keeps everything", [...kept.keys()].sort(), [`images/${homePictures}/${"d".repeat(32)}.webp`, `vault/${homeFolder}/p2/0011223344556677-guide.pdf`].sort());
   is("its community's picture count is forgotten", await picturesKept(cf), 0);
   listed.length = 0;
-  is("a file store this deployment is not set up for is not asked", [await removeDeletedStoreFiles(spare.sid, null, hands(false, true)), listed.some((prefix) => prefix.startsWith("vault/"))], [0, false]);
+  is("a file store this deployment is not set up for is not asked", [await removeDeletedStoreFiles(spare.sid, null, hands(false)), listed.some((prefix) => prefix.startsWith("vault/"))], [0, false]);
 
   part("The line remembers the community, and the route does both");
   await queueStoreForget(null, spare.sid, Date.now(), communityId);
@@ -93,7 +92,7 @@ async function main(): Promise<void> {
     route.includes("await removeDeletedStoreFiles(result.store.sid, result.store.community?.id ?? null);"),
     route.includes("queueStoreForget(result.store.statsId ?? null, result.store.sid, Date.now(), result.store.community?.id ?? null)"),
   ], [true, true]);
-  is("and the daily line's own work deletes them too", readFileSync("lib/store-forget-retry.ts", "utf8").includes("await removeDeletedStoreFiles(sid, community);"), true);
+  is("and the daily line's own work deletes them too", readFileSync("lib/store-forget-retry.ts", "utf8").includes("await removeDeletedStoreFiles(sid, community, undefined, until);"), true);
 
   // Review of #4348 (Claude 7), MÉDIO 1: Blob was taken as set up only from BLOB_READ_WRITE_TOKEN, and its folders were
   // passed over otherwise. @vercel/blob 2.8.0 also signs in with an OIDC token (from the environment or the request)

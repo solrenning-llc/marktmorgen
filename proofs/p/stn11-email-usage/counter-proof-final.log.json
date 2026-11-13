@@ -1,0 +1,6 @@
+{
+  "encoding": "utf-8",
+  "bytes": 381,
+  "sha256": "e8418ca4364ee2faf6b4f70fd87d3bcfc1fa570413f7b6b6331590c73330bca4",
+  "content": "{\"assertions\":18,\"calls\":13,\"realNetwork\":0,\"boundary\":\"actual mail reader; synthetic pipeline replies\"}\n(node:14) ExperimentalWarning: stripTypeScriptTypes is an experimental feature and might change at any time\n(Use `node --trace-warnings ...` to show where the warning was created)\nP_STN_METRICS {\"fetch\":0,\"run\":0,\"pipeline\":0,\"network\":0,\"sourceBytes\":4581822,\"capped\":false}\n"
+}

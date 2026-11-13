@@ -1,0 +1,6 @@
+{
+  "encoding": "utf-8",
+  "bytes": 197,
+  "sha256": "0172e3550fa83778c60110c73a6977068987df5f4e35d5f59e042e5e2024020e",
+  "content": "Warning: React version was set to \"detect\" in eslint-plugin-react settings, but the \"react\" package is not installed. Assuming latest React version for linting.\n{\"errors\":0,\"warnings\":0,\"files\":8}\n"
+}

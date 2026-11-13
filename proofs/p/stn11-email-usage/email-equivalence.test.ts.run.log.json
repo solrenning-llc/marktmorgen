@@ -1,0 +1,6 @@
+{
+  "encoding": "utf-8",
+  "bytes": 417,
+  "sha256": "100e29b093d9aaad69bdeaf09fd76a92c4c859e91748ee035cf9d2f61b99addf",
+  "content": "✔ a weekly email reaches the allowance divided by the longest month's five sends, never more (5.574813ms)\n✔ each plan's sentence follows its own limit, so a changed limit changes the sentence (11.949146ms)\n✔ the studio shows the sentence from the code, and nobody types one by hand (77.205368ms)\nℹ tests 3\nℹ suites 0\nℹ pass 3\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 100.438206\n"
+}

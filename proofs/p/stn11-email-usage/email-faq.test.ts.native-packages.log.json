@@ -1,0 +1,6 @@
+{
+  "encoding": "utf-8",
+  "bytes": 1133,
+  "sha256": "f74464952e664e16fb6a1e66e597c0c8e2d8b5152b2704d9c8989d954f50d40c",
+  "content": "P_STN_METRICS {\"fetch\":0,\"run\":0,\"pipeline\":0,\"network\":0,\"sourceBytes\":8603689,\"capped\":false}\nnode:fs:483\n    return binding.readFileUtf8(path, stringToFlags(options.flag));\n                   ^\n\nError: ENOENT: no such file or directory, open '/workspace/scratch/452ffd7d3d6c/p-stn11-email-usage/stream'\n    at Object.readFileSync (node:fs:483:20)\n    at defaultLoadImpl (node:internal/modules/cjs/loader:1243:17)\n    at defaultLoad (node:internal/modules/cjs/loader:1264:20)\n    at nextStep (node:internal/modules/customization_hooks:189:26)\n    at load (file:///workspace/scratch/452ffd7d3d6c/p-stn11-email-usage/proofs/p/stn11-email-usage/native-linked.mjs:34:34)\n    at nextStep (node:internal/modules/customization_hooks:189:26)\n    at loadWithHooks (node:internal/modules/customization_hooks:374:18)\n    at loadSource (node:internal/modules/cjs/loader:1964:22)\n    at Object..js (node:internal/modules/cjs/loader:2053:44)\n    at Module.load (node:internal/modules/cjs/loader:1651:32) {\n  errno: -2,\n  code: 'ENOENT',\n  syscall: 'open',\n  path: '/workspace/scratch/452ffd7d3d6c/p-stn11-email-usage/stream'\n}\n\nNode.js v24.22.1\n"
+}

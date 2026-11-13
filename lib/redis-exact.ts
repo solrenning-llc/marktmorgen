@@ -41,6 +41,7 @@ export function exactReplies(replies: unknown, count: number, what: string): unk
 
 /** A count Redis answered (DEL, HDEL, SREM and the like): a whole number from zero, or UnknownReply. */
 export function replyCount(raw: unknown, what: string): number {
-  if (typeof raw !== "number" || !Number.isInteger(raw) || raw < 0) throw new UnknownReply(what);
+  // Number.isInteger(1e300) is true: past the safe range a count is not exact (input fuzz, Claude 7), as countOf reads it.
+  if (typeof raw !== "number" || !Number.isSafeInteger(raw) || raw < 0) throw new UnknownReply(what);
   return raw;
 }

@@ -61,4 +61,18 @@ part("Exact Redis replies: a Proxy is refused before any of its traps runs");
   is("a plain list still reads", plainList(["a", 1]), ["a", 1]);
 }
 
+part("Exact Redis replies: a count is a safe whole number");
+{
+  const count = (raw: unknown) => {
+    try {
+      return replyCount(raw, "fuzz");
+    } catch (error) {
+      return error instanceof UnknownReply ? "unknown" : String(error);
+    }
+  };
+  for (const garbled of [1e300, 2 ** 53, Number.MAX_VALUE]) is(`${garbled} is not a count`, count(garbled), "unknown");
+  is("3 is a count", count(3), 3);
+  is("the largest safe whole number is a count", count(Number.MAX_SAFE_INTEGER), Number.MAX_SAFE_INTEGER);
+}
+
 done();

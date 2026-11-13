@@ -89,6 +89,7 @@ export const PERSON_DATA: PersonData[] = [
   { file: "lib/buyer-profile.ts", how: "expires", days: 1, what: "A search for their page in the studio works for an hour" },
   { file: "lib/form-store.ts", how: "erased", what: "Every answer they gave to your forms, with each quiz result and score kept with it" },
   { file: "lib/waitlist.ts", how: "erased", what: "Their place on every waitlist, and in any launch email still going out" },
+  { file: "lib/stock-alerts.ts", how: "erased", what: "Their place on the back-in-stock list of any product, with when they asked and confirmed; the links to confirm or leave go with their other links" },
   { file: "lib/affiliate-bond.ts", how: "erased", what: "Which affiliate they belong to" },
   { file: "lib/affiliate-leads.ts", how: "erased", what: "Their address on a lead an affiliate was credited for (a sign-up, a free product claimed or a call booked); the lead stays without it, as the affiliate's money record" },
   { file: "lib/affiliate-book-snapshot.ts", how: "erased", via: "lib/affiliate-leads.ts", what: "The copy of your affiliate program's figures, shown for a day and kept for up to eight days, where a lead's address shows only masked (its first letter and its domain): deleted whole, with any copy being written, and worked out again without them" },

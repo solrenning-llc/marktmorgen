@@ -25,6 +25,7 @@ export const dynamic = "force-dynamic";
  *
  *   GET /api/backup/files?source=blob&store=<folder>[&cursor=<cursor>]
  *   GET /api/backup/files?page=deletions
+ *   GET /api/backup/files?page=stores
  *   Authorization: Bearer <BACKUP_FILES_ROUTE_SECRET>
  *
  * A 404, with nothing listed and nothing counted, while its own secret is
@@ -50,6 +51,11 @@ export async function GET(request: Request): Promise<Response> {
     // No deletion record is kept by the site yet (docs/backup-costs-2026-11-08.md, section 7a, items 2 and 6):
     // an empty page would read as "nothing was deleted", which is not known.
     return refuse(503, "deletions_unavailable");
+  }
+  if (params.get("page") === "stores" && names.length === 1) {
+    // The stores to copy, each with the room R of its plan (docs/backup-costs-2026-11-08.md, 5b), are not listed by the
+    // site yet: an empty page would read as "no store to copy", which is not known.
+    return refuse(503, "stores_unavailable");
   }
   if (!names.every((name) => ["source", "store", "cursor"].includes(name))) return refuse(400, "bad_request");
   const source = params.get("source") ?? "";

@@ -604,9 +604,11 @@ async function main(): Promise<void> {
   const gate = page.indexOf("const admission = await admitAffiliatePage(store, affiliate);");
   is("the page asks before it reads listings or codes, never works the book out itself, and says when its figures are from", [gate > 0, gate < page.indexOf("await readListings("), gate < page.indexOf("await codeOwners("), page.includes("await readBook("), page.includes("a.figuresAsOf(asOf)"), page.includes("a.figuresSoon")], [true, true, true, false, true, true]);
 
-  part("Only the affiliate book and the community archive's walk are counted outside a connection's share");
+  part("Only the affiliate book, the community archive's walk and the pasted card's copy are counted outside a connection's share");
   // The walk of a community's archive is done once for everybody who searches it (C3-83 (d), app/[handle]/community/search/page.tsx).
-  is("a closed list: the work done for everybody", sharedCallers(sourcesUnder("lib", "app")).sort(), ["app/[handle]/community/search/page.tsx", "lib/affiliate-page-admission.ts"]);
+  // The pasted card's copy is made once a window for everybody its CDN copy is shown to, and Next hands it no request
+  // to read a connection from (DONO-20261113-DEC-2, app/embed/[handle]/[product]/card/[view]/page.tsx).
+  is("a closed list: the work done for everybody", sharedCallers(sourcesUnder("lib", "app")).sort(), ["app/[handle]/community/search/page.tsx", "app/embed/[handle]/[product]/card/[view]/page.tsx", "lib/affiliate-page-admission.ts"]);
   const tricks = [
     { file: "multi-line.ts", text: "await takePublicRequest(\n  store,\n  \"buyer\",\n  now,\n  units,\n  { shared: true },\n);" },
     { file: "variable.ts", text: "const shared = true;\nawait takePublicRequest(store, \"buyer\", now, units, { shared });" },

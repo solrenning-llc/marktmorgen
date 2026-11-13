@@ -36,7 +36,7 @@ import { type Book, addPayoutOnce, payAddress, payoutIdForItem, payoutReference,
 import { type BatchLine, batchTotal, owedLines, payoutNote } from "@/lib/affiliate-payouts";
 import { plainAmount } from "@/lib/money";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
-import { LockBusyError, withLock } from "@/lib/redis-lock";
+import { LockBusyError, holdLock, withLock } from "@/lib/redis-lock";
 import { readPendingPayoutBatches, type PendingPayoutBatch } from "@/lib/pending-payouts";
 import { type Store, storeForId, storeIdGone } from "@/lib/store";
 
@@ -374,7 +374,7 @@ export async function payWithPayPal(store: Store): Promise<PayResult> {
   const link = await readLink(store);
   if (!link) return { ok: false, reason: "not-connected" };
   try {
-    return await withLock(`nl:pp:${statsId}:lock`, 120, 5_000, async (): Promise<PayResult> => {
+    return await withLock(`nl:pp:${statsId}:lock`, 120, 5_000, async (lock): Promise<PayResult> => {
       const book = await readBook(store);
       // What is owed is not known while refunds could not be read from Stripe.
       if (!book.refundsChecked) return { ok: false, reason: "refunds" };
@@ -390,6 +390,10 @@ export async function payWithPayPal(store: Store): Promise<PayResult> {
       // Written down as on its way BEFORE the creator's money is asked for (CX-123 rule 24): whatever PayPal answers,
       // or if it never answers, nobody in it can be put in another batch or payout file. Redis must say it holds it.
       const unknownField = `${UNKNOWN_BATCH_PREFIX}${senderBatchId}`;
+      // The book read above has no deadline and may outlast the lock: held again a full term, only while still this
+      // press's own, before anyone is marked on their way. Taken by another press or payday since, that one may have
+      // read the same book and sent it, so this one sends nothing.
+      if (!(await holdLock(lock))) return { ok: false, reason: "busy" };
       const held: unknown = await redisPipeline([
         ["HSET", openKey(statsId), unknownField, JSON.stringify(open)],
         ["SADD", STORES, store.sid],

@@ -43,15 +43,36 @@ export type ParsedCsv = {
   truncated: boolean;
 };
 
-/** The separator a file uses: the one its first line has most of, outside quotes. */
-export function detectSeparator(text: string): Separator {
-  const counts: Record<Separator, number> = { ",": 0, ";": 0, "\t": 0 };
+/** How many of each separator each of a file's first `most` lines has, outside quotes. */
+function separatorCounts(text: string, most: number): Record<Separator, number>[] {
+  const lines: Record<Separator, number>[] = [];
+  let counts: Record<Separator, number> = { ",": 0, ";": 0, "\t": 0 };
   let quoted = false;
-  for (let i = 0; i < text.length; i += 1) {
+  for (let i = 0; i < text.length && lines.length < most; i += 1) {
     const c = text[i];
     if (c === '"') quoted = !quoted;
-    else if (!quoted && (c === "\n" || c === "\r")) break;
-    else if (!quoted && (c === "," || c === ";" || c === "\t")) counts[c] += 1;
+    else if (!quoted && (c === "\n" || c === "\r")) {
+      if (c === "\r" && text[i + 1] === "\n") i += 1;
+      if (counts[","] + counts[";"] + counts["\t"] > 0 || lines.length === 0) lines.push(counts);
+      counts = { ",": 0, ";": 0, "\t": 0 };
+    } else if (!quoted && (c === "," || c === ";" || c === "\t")) counts[c] += 1;
+  }
+  if (lines.length < most && (counts[","] + counts[";"] + counts["\t"] > 0 || lines.length === 0)) lines.push(counts);
+  return lines;
+}
+
+/**
+ * The separator a file uses: the one its first line has most of, outside
+ * quotes. A tie between ";" and "," (a header such as "Email;Name, as typed")
+ * is settled by the lines below: the one that gives as many cells on them as
+ * on the first line, and a comma when they cannot tell.
+ */
+export function detectSeparator(text: string): Separator {
+  const [first, ...below] = separatorCounts(text, 6);
+  const counts = first ?? { ",": 0, ";": 0, "\t": 0 };
+  if (counts[";"] > 0 && counts[";"] === counts[","] && counts[";"] >= counts["\t"] && below.length) {
+    const steady = (sep: Separator) => below.filter((line) => line[sep] === counts[sep]).length;
+    if (steady(";") > steady(",")) return ";";
   }
   if (counts[";"] > counts[","] && counts[";"] >= counts["\t"]) return ";";
   if (counts["\t"] > counts[","] && counts["\t"] > counts[";"]) return "\t";

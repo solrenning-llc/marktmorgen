@@ -422,11 +422,13 @@ async function courseLedger(store: Store, email: string): Promise<Ledger & { und
   }
 
   // Shut only for want of Stripe's answer: Stripe alone might have opened it (a membership, a one-off bought, or written
-  // down on the thanks page and perhaps refunded since). Known before anyone is taken off below, which stays "closed".
+  // down on the thanks page and perhaps refunded since).
   const undecided = new Set(unknown ? courses.filter((p) => p.course && !result.has(p.id)).map((p) => p.id) : []);
 
-  // A student the creator took off the course stays off it.
-  const withCourse = [...result.keys()]
+  // A student the creator took off the course stays off it. That is the store's own record, known while Stripe's answer
+  // is not, so a course they were taken off is "closed" to them, never "could not be checked" (Claude 1 cloud's LEVE on
+  // #3893): asked for every course that is open or undecided, in the same pipeline.
+  const withCourse = [...new Set([...result.keys(), ...undecided])]
     .map((id) => courses.find((p) => p.id === id))
     .filter((p): p is Listing => Boolean(p?.course));
   if (withCourse.length) {
@@ -436,7 +438,9 @@ async function courseLedger(store: Store, email: string): Promise<Ledger & { und
     const taken = flags?.map(countOf);
     if (!taken || taken.some((n) => n === null || n > 1)) throw new UnknownReplyError("whether a student was taken off a course");
     withCourse.forEach((p, i) => {
-      if (taken[i] === 1) result.delete(p.id);
+      if (taken[i] !== 1) return;
+      result.delete(p.id);
+      undecided.delete(p.id);
     });
   }
   return { paid: result, ended: asked.ended, refunded: asked.refunded, undecided, unknown };

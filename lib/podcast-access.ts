@@ -45,7 +45,8 @@ import { sendEmail } from "@/lib/email";
 import { withinLimit } from "@/lib/request-guard";
 import { FEED_TOKEN } from "@/lib/podcast-rules";
 import { coursesWords } from "@/lib/buyer-words/courses";
-import type { Listing, Store } from "@/lib/store";
+import { type Listing, type Store, storeForEmail, storeRef } from "@/lib/store";
+import { readListingExactly } from "@/lib/catalog";
 
 const sha = (value: string) => createHash("sha256").update(value).digest("hex");
 const addressKey = (email: string) => sha(`nimbus-podcast:${normaliseEmail(email)}`).slice(0, 32);
@@ -88,7 +89,30 @@ export async function feedToken(store: Store, productId: string, email: string):
   // Only "OK" wrote the grant: on any other reply no link is given to a feed that may not open.
   // Listed with its product in the same write (audit A1), so removing the product finds this feed and deletes it.
   const [made] = await orderWrite(store, [["SET", tokenKey(token), JSON.stringify(grant)], ["SADD", listenersKey(sid, productId), addressKey(email)]]);
-  return made === "OK" && (await stillIndexed(grant, token)) ? token : null;
+  return made === "OK" && (await stillIndexed(grant, token)) && (await stillListed(store, grant, token)) ? token : null;
+}
+
+/**
+ * After a grant is written and still indexed, whether its product is still in the store (Claude 7 on #3473, MEDIUM): a
+ * feed asked for with a store read before the product's whole removal reaches here after it, and would leave an index,
+ * a grant holding the address and a list entry of a removed product that no removal pass, note in goneKey or erasure
+ * reaches. The store's record and the product are read again exactly. Gone, or unknown (rule 24), the index, the grant,
+ * the kept answer and the list entry are deleted and no link is given; a deletion not confirmed throws
+ * UnknownReplyError. Still there, a removal that commits after this read runs its pass after the list entry above was
+ * written, and so finds the feed.
+ */
+async function stillListed(store: Store, grant: FeedGrant, token: string): Promise<boolean> {
+  const fresh = await storeForEmail(storeRef(store));
+  const listing = fresh && fresh.statsId === grant.s ? await readListingExactly(fresh, grant.p) : null;
+  if (listing && listing !== "unknown") return true;
+  const reply = repliesFor(await redisPipeline([
+    ["DEL", byKey(grant.s, grant.p, grant.e), okKey(grant.s, grant.p, grant.e), tokenKey(token)],
+    ["SREM", listenersKey(grant.s, grant.p), addressKey(grant.e)],
+  ]), 2);
+  const gone = reply ? countOf(reply[0]) : null;
+  const unlisted = reply ? countOf(reply[1]) : null;
+  if (gone === null || gone > 3 || unlisted === null || unlisted > 1) throw new UnknownReplyError("a podcast feed made after its product was removed");
+  return false;
 }
 
 /**
@@ -117,7 +141,7 @@ async function withGrant(store: Store, token: string, grant: FeedGrant): Promise
   if (held === undefined) return null;
   if (held !== null) return sameGrant(held, grant) ? token : null;
   const [made] = await orderWrite(store, [["SET", tokenKey(token), JSON.stringify(grant), "NX"], ["SADD", listenersKey(grant.s, grant.p), addressKey(grant.e)]]);
-  if (made === "OK") return (await stillIndexed(grant, token)) ? token : null;
+  if (made === "OK") return (await stillIndexed(grant, token)) && (await stillListed(store, grant, token)) ? token : null;
   if (made !== null) return null;
   // null: another call wrote it first; hand it out only if it is this address's grant.
   const again = await grantOf(token);
@@ -419,22 +443,24 @@ export async function dropListeners(
       // (cloud J's review of #3473, MEDIUM).
       if (addresses.length && !(await options.pay(Math.ceil(addresses.length / LISTENERS_PER_UNIT)))) throw new ListenersUnpaidError();
       if (listed.length) {
-        const taken = repliesFor(await redisPipeline([["SREM", key, ...listed]]), 1);
-        if ((taken ? countOf(taken[0]) : null) === null) throw new UnknownReplyError("a podcast's list of listeners");
-      }
-      if (addresses.length) {
         try {
-          const indexes = addresses.map((address) => `nl:pod:by:${sid}:${productId}:${address}`);
-          const tokens = repliesFor(await redisPipeline([["MGET", ...indexes]]), 1);
-          const held = listSlots(tokens?.[0]);
-          if (!held || held.length !== addresses.length || !held.every((t) => t === null || typeof t === "string")) {
-            throw new UnknownReplyError("a podcast's listeners' feeds");
+          // Inside the try (Claude 1 cloud's triage of #3473, MEDIUM): an SREM that ran but whose answer was lost lists
+          // the page again below, so the next try still finds those feeds.
+          const taken = repliesFor(await redisPipeline([["SREM", key, ...listed]]), 1);
+          if ((taken ? countOf(taken[0]) : null) === null) throw new UnknownReplyError("a podcast's list of listeners");
+          if (addresses.length) {
+            const indexes = addresses.map((address) => `nl:pod:by:${sid}:${productId}:${address}`);
+            const tokens = repliesFor(await redisPipeline([["MGET", ...indexes]]), 1);
+            const held = listSlots(tokens?.[0]);
+            if (!held || held.length !== addresses.length || !held.every((t) => t === null || typeof t === "string")) {
+              throw new UnknownReplyError("a podcast's listeners' feeds");
+            }
+            const grants = (held as (string | null)[]).filter((t): t is string => t !== null && FEED_TOKEN.test(t)).map(tokenKey);
+            const answers = addresses.map((address) => `nl:pod:ok:${sid}:${productId}:${address}`);
+            const reply = repliesFor(await redisPipeline([["DEL", ...indexes, ...answers, ...grants]]), 1);
+            const gone = reply ? countOf(reply[0]) : null;
+            if (gone === null) throw new UnknownReplyError("the deletion of a podcast's listeners' feeds");
           }
-          const grants = (held as (string | null)[]).filter((t): t is string => t !== null && FEED_TOKEN.test(t)).map(tokenKey);
-          const answers = addresses.map((address) => `nl:pod:ok:${sid}:${productId}:${address}`);
-          const reply = repliesFor(await redisPipeline([["DEL", ...indexes, ...answers, ...grants]]), 1);
-          const gone = reply ? countOf(reply[0]) : null;
-          if (gone === null) throw new UnknownReplyError("the deletion of a podcast's listeners' feeds");
         } catch (error) {
           // Read or deleted short after the page left the list: it is listed again before the removal answers, so the
           // next try finds those feeds (cloud J's review of #3473, MEDIUM). Listing an address whose feed is already

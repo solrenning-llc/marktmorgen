@@ -116,7 +116,7 @@ async function main(): Promise<void> {
   is("[CORRETO] no feed is handed out for the removed product", await feedToken(before, late.id, BUYER), null);
   is("[CORRETO] no grant holds the address", holdingAddress(BUYER), 0);
   is("[CORRETO] no index of it is left", feedKeys().length, 0);
-  is("[CORRETO] and the removed product lists no listener", redis.keys().filter((k) => k.startsWith("nl:pod:ls:")).length, 0);
+  is("[CORRETO] and the removed product lists no listener", redis.keys().filter((k) => k.startsWith("nl:pod:ls:") && Number(redis.run(["SCARD", k])) > 0).length, 0);
   done();
 }
 

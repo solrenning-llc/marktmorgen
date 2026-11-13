@@ -129,6 +129,7 @@ export function CommunityStudio({
   canSettings = true,
   isOwner = true,
   events = null,
+  approval = null,
   rewards = [],
   courses = [],
 }: {
@@ -152,6 +153,8 @@ export function CommunityStudio({
   isOwner?: boolean;
   /** The live events section (components/community-events-studio.tsx), drawn after the basics. */
   events?: React.ReactNode;
+  /** Approval before publishing and what waits for it (components/community-approval-studio.tsx), drawn beside the reports. */
+  approval?: React.ReactNode;
   /** Which course each level hands over (lib/community-points.ts). */
   rewards?: Reward[];
   /** The store's courses: what a level can hand over. */
@@ -229,6 +232,7 @@ export function CommunityStudio({
         ) : (
           events
         )}
+        {approval}
         <Queue queue={queue} busy={busy} run={run} problem={problem} isOwner={isOwner} />
         <Members members={members} total={totals.members} busy={busy} run={run} problem={problem} />
       </div>

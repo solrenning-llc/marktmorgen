@@ -5,6 +5,7 @@ import { isFree, type Listing, type Store } from "@/lib/store";
 import { speech } from "@/lib/buyer-words";
 import { communityWords, pollWhenIn, whenIn } from "@/lib/buyer-words/community";
 import { communityUnreadWords } from "@/lib/buyer-words/community-unread";
+import { APPROVAL_WARN, approvalWords } from "@/lib/buyer-words/community-approval";
 import { LANGUAGES } from "@/lib/store-language";
 import { CREATOR, type CommunityConfig, type Member, type Post } from "@/lib/community";
 import { communityImageFile } from "@/lib/community-image";
@@ -38,9 +39,10 @@ const WARN = new Set([
 /** What happened after a button, in the store's language (lib/buyer-words/community.ts). */
 export function communityNotices(language: unknown): Record<string, { text: string; tone?: "warn" }> {
   const w = communityWords(language);
-  // A post that went up while who asked for its email could not be read (lib/buyer-words/community-unread.ts).
-  const notices = { ...w.notices, notemailed: communityUnreadWords(language).notEmailed };
-  return Object.fromEntries(Object.entries(notices).map(([key, text]) => [key, WARN.has(key) ? { text, tone: "warn" as const } : { text }]));
+  // A post that went up while who asked for its email could not be read (lib/buyer-words/community-unread.ts), and
+  // what waits for the creator's approval (543 [CM2], lib/buyer-words/community-approval.ts).
+  const all: Record<string, string> = { ...w.notices, notemailed: communityUnreadWords(language).notEmailed, ...approvalWords(language).notices };
+  return Object.fromEntries(Object.entries(all).map(([key, text]) => [key, WARN.has(key) || APPROVAL_WARN.has(key) ? { text, tone: "warn" as const } : { text }]));
 }
 
 /** After asking for a link to come in, in the store's language. */

@@ -51,15 +51,12 @@ redis.pipeline = (async (batch: Command[]) => {
     await real(batch);
     return garble.reply;
   }
-  const naming =
-    failCustomerWrite && one && String(one[1]).startsWith(`nl:upsell:${failCustomerWrite}`) && !one.includes("NX") && String(one[2]).includes('"pending"') && String(one[2]).includes('"customer"');
-  if (naming) throw new Error("Redis request failed with status 503");
-  const dropped =
-    dropCustomerWrite && one && String(one[1]).startsWith(`nl:upsell:${dropCustomerWrite}`) && !one.includes("NX") && String(one[2]).includes('"pending"') && String(one[2]).includes('"customer"');
-  if (dropped) return [];
-  const landed =
-    loseCustomerReply && one && String(one[1]).startsWith(`nl:upsell:${loseCustomerReply}`) && !one.includes("NX") && String(one[2]).includes('"pending"') && String(one[2]).includes('"customer"');
-  if (landed) {
+  // The write naming the customer (lib/upsell.ts NAME_CUSTOMER, a compare-and-set over this press's own claim).
+  const namingCall = batch.length === 1 && batch[0][0] === "EVAL" && String(batch[0][1]).includes("upsell-name-customer") ? batch[0] : null;
+  const names = (session: string | null) => !!session && !!namingCall && String(namingCall[3]).startsWith(`nl:upsell:${session}`) && String(namingCall[5]).includes('"customer"');
+  if (names(failCustomerWrite)) throw new Error("Redis request failed with status 503");
+  if (names(dropCustomerWrite)) return [];
+  if (names(loseCustomerReply)) {
     await real(batch);
     return [];
   }

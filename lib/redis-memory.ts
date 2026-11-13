@@ -182,6 +182,16 @@ export class MemoryRedis {
           const [, record, read] = args;
           return this.run(["GET", record]) === read ? this.run(["DEL", record]) : 0;
         }
+        // lib/upsell.ts NAME_CUSTOMER: the record naming the customer written only over this press's own claim.
+        if (key.startsWith("-- marktmorgen:upsell-name-customer:v1\n") && args[0] === "1" && args.length === 5) {
+          const [, record, claim, payload, seconds] = args;
+          const now = this.run(["GET", record]);
+          if (now === claim) {
+            this.run(["SET", record, payload, "EX", seconds]);
+            return 1;
+          }
+          return now === payload ? 1 : 0;
+        }
         // lib/group-buy.ts PLACE_DONE: a place marked done once, and said so only to the open that did it.
         if (key.startsWith("-- marktmorgen:group-place-done:v1\n") && args[0] === "1" && args.length === 4) {
           const [, members, field, json] = args;

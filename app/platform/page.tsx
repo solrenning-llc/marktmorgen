@@ -71,7 +71,7 @@ export default function PlatformIndex() {
             <p className="mt-5 max-w-3xl text-ink-soft">Choose the tools your work needs, with the limits and conditions shown before you commit. {PLANS_ON_SALE ? "The live demo shows the buyer experience." : "Paid selling remains closed; the live demo shows the buyer experience."}</p>
             <ul className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {HOME_MODULES.map(capability=><li key={capability.name} className="rounded-2xl border border-line bg-white p-6">
-                <h3 className="text-xl font-semibold"><Link href={capability.href} prefetch={false} className="inline-flex min-h-11 items-center underline decoration-line underline-offset-4">{capability.name}</Link></h3>
+                <h3 className="text-xl font-semibold"><Link href={capability.href} prefetch={false} className="inline-flex min-h-11 min-w-11 items-center underline decoration-line underline-offset-4">{capability.name}</Link></h3>
                 <p className="mt-3 text-ink-soft">{capability.body}</p>
               </li>)}
             </ul>

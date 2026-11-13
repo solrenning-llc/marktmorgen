@@ -1329,12 +1329,13 @@ a.chip {
    details element on a narrow one, and the current section is marked by a
    bar rather than by colour alone. */
 
-/* Each entry is a target of at least 44 by 44 px (WCAG 2.5.5, AAA) and its words keep a line height of 1.5
-   (1.4.8): before, an entry was 30 px tall. Held by tests/e2e/accessibility-public-pages.mjs. */
+/* Each entry is a target of at least 44 by 44 px (WCAG 2.5.5, AAA), wide as well as tall, and its words keep a
+   line height of 1.5 (1.4.8): before, an entry was 30 px tall. Held by tests/e2e/accessibility-public-pages.mjs. */
 .toc-link {
   display: flex;
   align-items: center;
   min-height: 2.75rem;
+  min-width: 2.75rem;
   border-left: 2px solid var(--line);
   padding: 0.3rem 0 0.3rem 0.85rem;
   color: var(--ink-mute);

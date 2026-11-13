@@ -207,7 +207,7 @@ export function DiscountEditor({ selling, currency = "usd", address = "" }: { se
 
   return (
     <div className="card mt-8 p-6 sm:p-8">
-      <p className="text-lg font-semibold tracking-[-0.02em] text-ink">Discount codes</p>
+      <h2 className="text-lg font-semibold tracking-[-0.02em] text-ink">Discount codes</h2>
 
       {!selling ? (
         <p className="mt-2 text-ink-soft">

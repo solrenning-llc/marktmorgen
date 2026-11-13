@@ -2253,9 +2253,9 @@ export default async function StudioPage({
 
             {list && (givesAway || list.total > 0) ? (
               <div className="card mt-8 p-6 sm:p-8">
-                <p className="text-lg font-semibold tracking-[-0.02em] text-ink">
+                <h2 className="text-lg font-semibold tracking-[-0.02em] text-ink">
                   Your list
-                </p>
+                </h2>
                 <p className="mt-2 text-ink-soft">
                   {`${list.total.toLocaleString("en-US")} ${
                     list.total === 1 ? "address" : "addresses"
@@ -2319,7 +2319,7 @@ export default async function StudioPage({
             {domainsOn && may("settings") ? (
               <div id="domain" className="card mt-8 scroll-mt-32 p-6 sm:p-8">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="text-lg font-semibold tracking-[-0.02em] text-ink">Your own domain</p>
+                  <h2 className="text-lg font-semibold tracking-[-0.02em] text-ink">Your own domain</h2>
                   <span className="tag tag-brand">Pro</span>
                 </div>
                 {paid && hasPro(tier) ? (
@@ -2355,7 +2355,7 @@ export default async function StudioPage({
             {PRO_ON_SALE && may("draft") ? (
               <div className="card mt-8 p-6 sm:p-8">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="text-lg font-semibold tracking-[-0.02em] text-ink">Email your list</p>
+                  <h2 className="text-lg font-semibold tracking-[-0.02em] text-ink">Email your list</h2>
                   <span className="tag tag-brand">Pro</span>
                 </div>
                 <p className="mt-2 text-ink-soft">
@@ -2373,9 +2373,9 @@ export default async function StudioPage({
             <div className="min-w-0">
             {may("payments") ? (
             <div id="stripe" className="card mt-8 scroll-mt-32 p-6 sm:p-8">
-              <p className="text-lg font-semibold tracking-[-0.02em] text-ink">
+              <h2 className="text-lg font-semibold tracking-[-0.02em] text-ink">
                 Where the money goes
-              </p>
+              </h2>
               <p className="mt-2 text-ink-soft">
                 Buyers pay into a Stripe account that is yours, not ours. You
                 sign Stripe&apos;s agreement, you log into their dashboard, and
@@ -2511,9 +2511,9 @@ export default async function StudioPage({
 
             {may("payments") && paypalSalesConfigured() ? (
             <div id="paypal" className="card mt-8 scroll-mt-32 p-6 sm:p-8">
-              <p className="text-lg font-semibold tracking-[-0.02em] text-ink">
+              <h2 className="text-lg font-semibold tracking-[-0.02em] text-ink">
                 Sell with PayPal too
-              </p>
+              </h2>
               <p className="mt-2 text-ink-soft">
                 Buyers who would rather pay with PayPal pay your own PayPal
                 Business account directly, alongside Stripe or without it. You
@@ -2571,7 +2571,7 @@ export default async function StudioPage({
 
             {!closing && may("export") && standing !== "ended" && standing !== "none" ? (
               <div id="store-data-export" tabIndex={-1} className="card mt-8 scroll-mt-32 p-6 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ink sm:p-8">
-                <p className="text-lg font-semibold tracking-[-0.02em] text-ink">Your store&rsquo;s main data, as one file</p>
+                <h2 className="text-lg font-semibold tracking-[-0.02em] text-ink">Your store&rsquo;s main data, as one file</h2>
                 <p className="mt-2 text-ink-soft">
                   Your store&rsquo;s address, name, bio, links, currency and the date it was created, your products and their pages, thank-you notes, posts, courses with every lesson&rsquo;s text, forms and their answers,
                   contacts and a summary of your orders. It is counted from your studio&rsquo;s requests by its size.
@@ -2589,9 +2589,9 @@ export default async function StudioPage({
 
             {closing && closing.whole ? (
               <div id="closing" className="card mt-8 scroll-mt-32 p-6 sm:p-8">
-                <p className="text-lg font-semibold tracking-[-0.02em] text-ink">
+                <h2 className="text-lg font-semibold tracking-[-0.02em] text-ink">
                   {closing.today ? "Your store is closing today" : `Your plan has ended, and your store closes on ${dayWords(closing.day)}`}
-                </p>
+                </h2>
                 {closing.today ? (
                   <p className="mt-4 notice notice-warn">
                     Its closing day has begun: every membership and payment plan sold through it has ended, and it is being removed. A plan can no longer be started for it, and nothing will be charged for one. You can open a new store from your account.
@@ -2661,9 +2661,9 @@ export default async function StudioPage({
               </div>
             ) : closing ? (
               <div id="closing" className="card mt-8 scroll-mt-32 p-6 sm:p-8">
-                <p className="text-lg font-semibold tracking-[-0.02em] text-ink">
+                <h2 className="text-lg font-semibold tracking-[-0.02em] text-ink">
                   Your plan has ended, and what your store keeps has a date
-                </p>
+                </h2>
                 <p className="mt-4 notice notice-warn">
                   {closing.room > 0
                     ? `Your plan ended on ${dayWords(closing.endedAt)}. Your store keeps ${
@@ -2690,9 +2690,9 @@ export default async function StudioPage({
 
             {delivery ? (
               <div className="card mt-8 p-6 sm:p-8">
-                <p className="text-lg font-semibold tracking-[-0.02em] text-ink">
+                <h2 className="text-lg font-semibold tracking-[-0.02em] text-ink">
                   What you have sent out this month
-                </p>
+                </h2>
                 <p className="mt-2 text-ink-soft">
                   {`${readableSize(delivery.bytes)} of the ${readableSize(
                     delivery.allowance,
@@ -2937,9 +2937,9 @@ export default async function StudioPage({
 
             {billingReady && may("billing") ? (
               <div id="billing" className="card mt-8 scroll-mt-32 p-6 sm:p-8">
-                <p className="text-lg font-semibold tracking-[-0.02em] text-ink">
+                <h2 className="text-lg font-semibold tracking-[-0.02em] text-ink">
                   What you pay us
-                </p>
+                </h2>
                 <p className="mt-2 text-ink-soft">
                   {feeWords(COMMISSION_LIVE && store.shared).studioPay} Visits and lesson video have finite monthly thresholds, shown above. Public pages and new video playback pause at their respective thresholds.
                 </p>
@@ -3465,9 +3465,9 @@ export default async function StudioPage({
             ) : null}
 
             <div id="account" className="card mt-8 scroll-mt-32 p-6 sm:p-8">
-              <p className="text-lg font-semibold tracking-[-0.02em] text-ink">
+              <h2 className="text-lg font-semibold tracking-[-0.02em] text-ink">
                 The email that logs you in
-              </p>
+              </h2>
               {view && view.owned === 0 ? (
                 <p className="mt-2 text-ink-soft">
                   {"You log in as "}
@@ -3628,9 +3628,9 @@ export default async function StudioPage({
           </section>
         ) : (
           <div className="card mt-8 p-6 sm:p-8">
-            <p className="text-lg font-semibold tracking-[-0.02em] text-ink">
+            <h2 className="text-lg font-semibold tracking-[-0.02em] text-ink">
               Take your address
-            </p>
+            </h2>
             <p className="mt-2 mb-6 text-ink-soft">
               This is the link you put in your bio. Pick one now without
               agonizing over it: you can change it later, and the old address
@@ -3642,9 +3642,9 @@ export default async function StudioPage({
 
         {NEXT.length > 0 && role === "owner" ? (
         <div className="card mt-8 p-6 sm:p-8">
-          <p className="text-lg font-semibold tracking-[-0.02em] text-ink">
+          <h2 className="text-lg font-semibold tracking-[-0.02em] text-ink">
             What is not switched on here yet
-          </p>
+          </h2>
           <p className="mt-2 text-ink-soft">
             These pieces are not switched on for your store yet:
           </p>

@@ -2125,9 +2125,9 @@ export function ProductEditor({
     <AiOn value={ai}>
     <div data-product-editor className="card mt-8 p-6 sm:p-8">
       <div className="flex flex-wrap items-baseline justify-between gap-3">
-        <p className="text-lg font-semibold tracking-[-0.02em] text-ink">
+        <h2 className="text-lg font-semibold tracking-[-0.02em] text-ink">
           What you are selling
-        </p>
+        </h2>
         <p className="text-sm text-ink-soft">
           {total === 1 ? "1 product" : `${total.toLocaleString("en-US")} products`}
         </p>

@@ -79,7 +79,7 @@ export function BuyButtonEditor({
   if (!product) {
     return (
       <div className="card min-w-0 p-6 sm:p-8">
-        <p className="text-lg font-semibold tracking-[-0.02em] text-ink">Sell from your own website</p>
+        <h2 className="text-lg font-semibold tracking-[-0.02em] text-ink">Sell from your own website</h2>
         <p className="mt-2 text-ink-soft">Add a product and you can put a card or a buy button for it on any website of yours.</p>
       </div>
     );
@@ -106,7 +106,7 @@ export function BuyButtonEditor({
 
   return (
     <div className="card min-w-0 p-6 sm:p-8" id="buy-button">
-      <p className="text-lg font-semibold tracking-[-0.02em] text-ink">Sell from your own website</p>
+      <h2 className="text-lg font-semibold tracking-[-0.02em] text-ink">Sell from your own website</h2>
       <p className="mt-2 text-ink-soft">
         Put one of your products on your blog, portfolio or any other site: a card with its picture, price and buy button, or a plain button
         in your color. Paste the code into a block that takes HTML, called Embed, Code or Custom HTML in most website builders.

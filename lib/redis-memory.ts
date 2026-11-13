@@ -191,6 +191,15 @@ export class MemoryRedis {
             return fields.removed ? "r" : "y";
           }).join("");
         }
+        // lib/course-finish.ts CLAIM_FINISH_UNLESS_ERASED: the finishing mark claimed only while the address is not deleted.
+        if (key.startsWith("-- marktmorgen:course-finish-claim:v1\n") && args[0] === "2" && args.length === 5) {
+          const [, mark, erased, print, seconds] = args;
+          if (this.run(["HEXISTS", erased, print]) === 1) {
+            this.run(["DEL", mark]);
+            return null;
+          }
+          return this.run(["SET", mark, "1", "NX", "EX", seconds]);
+        }
         // lib/group-buy.ts PLACE_RELEASE: a place's opening hold deleted only while its token is still the open's own.
         if (key.startsWith("-- marktmorgen:group-place-release:v1\n") && args[0] === "1" && args.length === 3) {
           const [, hold, token] = args;

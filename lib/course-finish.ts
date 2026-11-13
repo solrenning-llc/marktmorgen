@@ -23,10 +23,25 @@ import { doneLessons, emailKey } from "@/lib/learn";
 import { lessonsInOrder, readCourse } from "@/lib/course";
 import { enroll } from "@/lib/flows";
 import { exactReplies, UnknownReply } from "@/lib/redis-exact";
-import type { Store } from "@/lib/store";
+import { type Store, ensureListId } from "@/lib/store";
+import { suppressedKey, suppressionPrint } from "@/lib/suppression";
 
 const finishedKey = (courseId: string, email: string) => `nl:course:${courseId}:fin:${emailKey(email)}`;
 const openedKey = (courseId: string, email: string) => `nl:course:${courseId}:open:${emailKey(email)}`;
+
+/**
+ * The finishing mark claimed only while the student's address is not deleted from the store (the store's suppression
+ * print, lib/suppression.ts, written by lib/person-erasure.ts before their marks go): KEYS[1] the mark, KEYS[2] the
+ * store's prints; ARGV[1] the address's print, ARGV[2] its seconds. Deleted, any mark left is removed and nothing is
+ * claimed (no reply "OK"); otherwise the same SET NX EX as before. So a finish read before an erasure and claimed after
+ * it brings nothing back (issue #4467).
+ */
+export const CLAIM_FINISH_UNLESS_ERASED = `-- marktmorgen:course-finish-claim:v1
+if redis.call("HEXISTS", KEYS[2], ARGV[1]) == 1 then
+  redis.call("DEL", KEYS[1])
+  return false
+end
+return redis.call("SET", KEYS[1], "1", "NX", "EX", ARGV[2])`;
 
 /** Only a complete, own acknowledgement confirms this invocation took the claim. */
 function confirmedClaim(reply: unknown): boolean {
@@ -66,7 +81,11 @@ export async function noteIfFinished(store: Store, productId: string, courseId: 
     if (!lessons.length) return false;
     const done = await doneLessons(courseId, email);
     if (!lessons.every((id) => done.has(id))) return false;
-    const claim = await redisPipeline([["SET", finishedKey(courseId, email), "1", "NX", "EX", 400 * 86_400]]);
+    // Claimed in one step with the check that the student is not deleted from the store (issue #4467); the list made as
+    // the erasure makes it, so a store that never had one is checked too.
+    const listId = store.listId || (await ensureListId(store.email))?.listId;
+    if (!listId) return false;
+    const claim = await redisPipeline([["EVAL", CLAIM_FINISH_UNLESS_ERASED, 2, finishedKey(courseId, email), suppressedKey(listId), suppressionPrint(listId, email), 400 * 86_400]]);
     if (!confirmedClaim(claim)) return false;
     await enroll(store, email, { joined: false, finished: productId });
     return true;

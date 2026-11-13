@@ -865,6 +865,27 @@ export class MemoryRedis {
           this.hash(target).set(args[2], args[3]);
           return 1;
         }
+        if (key.startsWith("-- marktmorgen:crm-companies-write:v1\n") && args[0] === "2" && args.length >= 4 && (args.length - 4) % 2 === 0) {
+          // lib/crm-companies.ts WRITE_COMPANIES: written only while the lock still holds this change's token. It differs
+          // from Redis only on keys of the wrong type: a lock key that is not a string reads here as not ours (0), where
+          // Redis's GET would fail the script; a hash key that is not a hash fails in both.
+          const [lock, target, token] = [args[1], args[2], args[3]];
+          this.live(lock);
+          this.live(target);
+          if (this.data.get(lock) !== token) return 0;
+          const held = this.data.get(target);
+          if (held !== undefined && !(held instanceof Map)) throw new Error("WRONGTYPE");
+          const hash = this.hash(target);
+          for (let i = 4; i < args.length; i += 2) {
+            if (args[i + 1] === "") hash.delete(args[i]);
+            else hash.set(args[i], args[i + 1]);
+          }
+          if (hash.size === 0) {
+            this.data.delete(target);
+            this.until.delete(target);
+          }
+          return 1;
+        }
         if (key.startsWith("-- marktmorgen:crm-tasks-write:v1\n") && args[0] === "1" && args.length === 8) {
           // lib/crm.ts WRITE_PERSON_TASKS: a person's tasks and the store's count, in one step.
           const [, target, person, read, value, added, start, field] = args;

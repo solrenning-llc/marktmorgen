@@ -84,7 +84,9 @@ export default async function BookPage({ params, searchParams }: Params) {
   const found = pkgToken ? await boughtByToken(pkgToken) : null;
   const pkg = found && found.bought.s === store.statsId && found.bought.p === product.id ? found : null;
   // Switched off after notices about its content (lib/takedown.ts), as the store's own page; a booking
-  // already paid (moved above) and a package already bought are the buyer's, and keep their way in.
+  // already paid (moved above) keeps its way in, and a package already bought keeps its page, which says what is
+  // left of it. Nothing can be booked from it while the store is off: canSellProduct is false, so no times or form are
+  // drawn, the page says the calendar is unavailable, and the booking route refuses it the same way (Codex G on #3193).
   if (store.suspended && !pkg) return <StoreResting store={store} suspended />;
   // A draft call is left off the store (lib/catalog.ts): its title, price and
   // times are for the store's owner and team, signed in, and for a package

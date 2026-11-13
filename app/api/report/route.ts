@@ -35,7 +35,10 @@ export async function POST(request: NextRequest) {
       const store = read.report.kind === "child_safety" && handle ? await storeForHandle(handle).catch(() => undefined) : null;
       const outcome: HoldOutcome =
         read.report.kind !== "child_safety" ? "not_held" : store === undefined ? "unknown" : store ? await holdReported(read.report, store) : "no_product";
-      await alertOwner(read.report, outcome, Date.now(), result === "sent");
+      // The urgent email not sent: the reporter is told it was not received, so it is sent again, never "We got it"
+      // while nothing names the kind or the 48-hour clock to the owner (Claude 1 cloud's MEDIUM on #3587).
+      const alerted = await alertOwner(read.report, outcome, Date.now(), result === "sent");
+      if (!alerted && result === "sent") return Response.json({ ok: false, error: "error" }, { status: 503 });
     }
     if (result === "sent") return Response.json({ ok: true });
     return Response.json({ ok: false, error: result }, { status: result === "limited" ? 429 : 503 });

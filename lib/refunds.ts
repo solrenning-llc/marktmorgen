@@ -446,13 +446,20 @@ const isOwnReply = (reply: unknown, id: string): boolean =>
   reply !== null && typeof reply === "object" && Object.hasOwn(reply, "id") && (reply as { id?: unknown }).id === id;
 
 /**
+ * The invoice-payment statuses that prove a row was not paid: Stripe documents an invoice payment's status as one of
+ * "open", "paid" or "canceled" (https://docs.stripe.com/api/invoice-payment/object). Anything else is unknown,
+ * including a missing, null or undocumented one.
+ */
+const KNOWN_UNPAID: ReadonlySet<unknown> = new Set(["open", "canceled"]);
+
+/**
  * Whether a payment plan's purchase was given back in full: a plan runs as a
  * subscription, so its checkout carries no payment of its own, and the one
  * that counts is its first invoice's. Read from Stripe; any answer it does
  * not give counts as not refunded, as everywhere else. So does an answer that
  * is not the object asked for (rule 30): another invoice's reply or one with
  * no id, another invoice's listed payment, a paid payment whose intent does
- * not read, a list of payments not said to be whole, and another payment's
+ * not read, a listed payment whose status is not one Stripe documents, a list of payments not said to be whole, and another payment's
  * reply or charge would judge this purchase by someone else's money or by part
  * of its own, and close the doors on a buyer who paid. Each throws, and the
  * purchase reads as not refunded until Stripe answers for it.
@@ -477,7 +484,14 @@ async function planRefundedInFull(account: string, session: SessionLike): Promis
       for (const row of (listed as { data: unknown[] }).data) {
         if (row === null || typeof row !== "object" || Array.isArray(row)) throw new Error("a payment listed for this invoice could not be read");
         if (Object.hasOwn(row, "invoice") && idOf((row as { invoice?: unknown }).invoice) !== invoice) throw new Error("Stripe listed another invoice's payment");
-        if ((row as { status?: unknown }).status !== "paid") continue;
+        const status = (row as { status?: unknown }).status;
+        // Only "paid" decides paid and only a documented unpaid status decides not paid (the same reading as
+        // lib/closing-refunds.ts): a second payment whose status does not read may be money kept, so the first
+        // charge alone cannot say "all of it given back" (#4432).
+        if (status !== "paid") {
+          if (!KNOWN_UNPAID.has(status)) throw new Error("a payment of this invoice has a status that does not read as paid or not paid");
+          continue;
+        }
         const payment = (row as { payment?: unknown }).payment;
         const pi = idOf(payment && typeof payment === "object" ? (payment as { payment_intent?: unknown }).payment_intent : undefined);
         // A paid payment whose intent does not read is not "paid by nothing": the others alone cannot say "all of it".

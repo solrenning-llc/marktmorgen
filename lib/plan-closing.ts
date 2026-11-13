@@ -1012,6 +1012,16 @@ async function closingDay(store: Store, key: string, state: State, endedAt: numb
       return null;
     });
     if (settled === null || settled === "busy") return { key, state: "held", note: "its members' unused time is not settled yet" };
+    // No Stripe account to give it back from (the creator disconnected it during the closing window): never read as
+    // nothing owed. Each member still owed time is settled as not made automatically, final, so the notice below
+    // tells them, with what is left to give and the creator's contact, before the closing goes on and their paid
+    // periods are deleted (Claude 2 nuvem A's hunt of the closing day, 13/11/2026).
+    if (settled === "unavailable") {
+      for (const row of await unusedRows(store, next.day ?? day)) {
+        if (row.paid.r === "pending") continue;
+        await savePaidPeriod(store, row.sub, { ...row.paid, r: "over", f: 1, want: stillToGive(row.unused, row.paid.back ?? 0) });
+      }
+    }
     // Told for what happened: the balance did not cover it, or the closing's limit of calls did not reach it.
     for (const [why, r] of [["balance", "short"], ["limit", "over"]] as const) {
       const left = [...(await paidPeriods(store))].filter(([, row]) => row.r === r && row.f === 1 && !row.m);

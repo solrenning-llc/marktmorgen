@@ -16,7 +16,7 @@
  * belongs with the notices that say buyers cannot use something the creator
  * set up.
  */
-import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
+import { NIMBUS_FROM, isSenderConfigured, sendEmailPinned } from "@/lib/email";
 import type { ScheduleEntry } from "@/lib/discount-schedule-rules";
 import { SITE_URL } from "@/lib/site-url";
 import type { Store } from "@/lib/store";
@@ -93,13 +93,16 @@ export function failureNotice(
  * reply is answered without sending the email again (Resend keeps the key a
  * day, lib/email.ts keeps the same promise on Amazon), and NOTICE_TRIES tries
  * NOTICE_RETRY_SECONDS apart all fall inside that day.
+ * Sent with sendEmailPinned: the key keeps the sender that took it, so a retry
+ * after Resend took it (Amazon having refused) never goes to Amazon, which has
+ * not seen the key, and the creator is never sent two copies.
  */
 export async function tellActivationFailed(store: Store, entry: ScheduleEntry, nowSeconds: number): Promise<boolean> {
   // No stats id, no stable key: never sent on a key that could repeat.
   if (!isSenderConfigured() || !store.email || !store.statsId) return false;
   const { subject, text } = failureNotice(store, entry, nowSeconds);
   try {
-    return await sendEmail({
+    return await sendEmailPinned({
       meter: { by: "store", store, kind: "email" },
       from: NIMBUS_FROM,
       to: store.email,

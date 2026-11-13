@@ -61,12 +61,14 @@ const feedKeys = () => redis.keys().filter((k) => k.startsWith("nl:pod:t:") || k
 const holdingAddress = (email: string) => redis.keys().filter((k) => k.startsWith("nl:pod:t:")).filter((k) => String(redis.run(["GET", k])).includes(email)).length;
 
 /** Fails, once, the first command that `match` picks after the page was taken off the list: thrown or an unknown reply. */
-async function failingOnce<T>(match: (c: (string | number)[]) => boolean, how: "throw" | "unknown", run: () => Promise<T>): Promise<T> {
+async function failingOnce<T>(match: (c: (string | number)[]) => boolean, how: "throw" | "unknown" | "lost", run: () => Promise<T>): Promise<T> {
   let armed = true;
   redis.pipeline = (async (commands: (string | number)[][]) => {
     if (armed && commands.some(match)) {
       armed = false;
       if (how === "throw") throw new Error("Redis request failed with status 503");
+      // "lost": the commands reach Redis and run, and only their answer is lost on the way back.
+      if (how === "lost") await original(commands);
       return [{ error: "unknown" }];
     }
     return original(commands);
@@ -79,7 +81,9 @@ async function failingOnce<T>(match: (c: (string | number)[]) => boolean, how: "
 }
 
 async function main(): Promise<void> {
-  const cases: [string, (c: (string | number)[]) => boolean, "throw" | "unknown"][] = [
+  const cases: [string, (c: (string | number)[]) => boolean, "throw" | "unknown" | "lost"][] = [
+    // Claude 1 cloud's triage of #3473, MEDIUM: the SREM ran and its answer was lost, so nothing listed the page again.
+    ["the answer of taking the page off the list is lost", (c) => c[0] === "SREM" && String(c[1]).startsWith("nl:pod:ls:"), "lost"],
     ["the read of the listeners' indexes fails", (c) => c[0] === "MGET" && String(c[1]).startsWith("nl:pod:by:"), "throw"],
     ["the deletion of the listeners' feeds answers in an unknown shape", (c) => c[0] === "DEL" && c.slice(1).some((k) => String(k).startsWith("nl:pod:by:")), "unknown"],
   ];
@@ -102,6 +106,17 @@ async function main(): Promise<void> {
     is("[CORRETO] nor after the person's erasure", holdingAddress(BUYER), 0);
     is("the episodes' audio is deleted once the removal finished", radio.audio.every((path) => deleted.includes(path)), true);
   }
+  part("A feed asked for with a store read before the product's whole removal (Claude 7 on #3473, MEDIUM)");
+  await setUp();
+  const late = await podcastProduct("Late Radio");
+  is("its feeds are listed from the start", await markListedFromStart((await storeForEmail(OWNER))!, late.id), true);
+  const before = (await storeForEmail(OWNER))!;
+  const removed = await remove(late.id);
+  is("the removal answers ok", [removed.status, removed.body.ok], [200, true]);
+  is("[CORRETO] no feed is handed out for the removed product", await feedToken(before, late.id, BUYER), null);
+  is("[CORRETO] no grant holds the address", holdingAddress(BUYER), 0);
+  is("[CORRETO] no index of it is left", feedKeys().length, 0);
+  is("[CORRETO] and the removed product lists no listener", redis.keys().filter((k) => k.startsWith("nl:pod:ls:")).length, 0);
   done();
 }
 

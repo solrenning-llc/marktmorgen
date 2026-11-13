@@ -272,6 +272,9 @@ export async function prepareSession(store: Store, token: string, origin: string
   if (state.left <= 0) return { ok: false, reason: "used" };
   try {
     const session = await onAccount("GET", store.stripeAccountId, `/checkout/sessions/${encodeURIComponent(found.checkout)}?expand[]=payment_intent.latest_charge`);
+    // The package's own checkout (rule 30): a reply for another session never decides whether this one was paid or
+    // refunded, and no coupon is made on it.
+    if (session.id !== found.checkout) return { ok: false, reason: "error" };
     if (!isSettled(session)) return { ok: false, reason: "gone" };
     if (await purchaseRefunded(store.stripeAccountId, session)) return { ok: false, reason: "refunded" };
     const coupon = await onAccount("POST", store.stripeAccountId, "/coupons", sessionCouponBody(found.checkout, store.language));

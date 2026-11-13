@@ -349,12 +349,18 @@ export async function refreshRefunds(store: Store, requests: PaymentRequest[], n
   if (!paid.length || !store.stripeAccountId) return requests;
   const since = Math.floor(Math.min(...paid.map((r) => r.paidAt)) / 1000) - 60;
   const back = new Map<string, number>();
+  // Each refund is added once, by its own id (#4433): one the list hands back again on a later page is the same refund.
+  const counted = new Set<string>();
   try {
     let after = "";
     for (let page = 0; page < 3; page += 1) {
       const listed = await onAccount("GET", store.stripeAccountId, `/refunds?limit=100&created[gte]=${since}${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`);
       const rows = Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : [];
       for (const row of rows) {
+        // A row with no id cannot be told from one already counted: nothing is written from this read.
+        if (typeof row.id !== "string" || !row.id) throw new Error("a refund row with no id");
+        if (counted.has(row.id)) continue;
+        counted.add(row.id);
         const intent = typeof row.payment_intent === "string" ? row.payment_intent : "";
         if (intent && row.status === "succeeded" && typeof row.amount === "number") back.set(intent, (back.get(intent) ?? 0) + row.amount);
       }

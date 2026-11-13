@@ -34,4 +34,20 @@ is("the studio's own line says the same", /kept for 14 days after the import's l
 part("A team's notes about a person: three years from the latest note");
 is("the code keeps them three years, renewed by each note", /NOTES_SECONDS = 3 \* 365 \* 86_400/.test(source("lib/buyer-profile.ts")), true);
 is("the policy says it", /notes, kept three years after the team's latest note about you/.test(policy), true);
+part("Who is on the store now: kept until about a day, not half an hour");
+is("the code lets go of earlier visitors only with the day's first view, and the set lasts a day", /ZREMRANGEBYSCORE", liveKey\(store\.statsId\), 0, now - 30 \* 60_000\], \["EXPIRE", liveKey\(store\.statsId\), 86400\]/.test(source("lib/stats.ts")), true);
+is("the policy no longer says half an hour", /fingerprint are kept for up to half an hour/.test(policy), false);
+is("it says up to about a day", /fingerprint are kept for up to about a day/.test(policy), true);
+
+part("A store's latest purchases: the 20 latest, until 8 days after the latest one");
+is("the code keeps 20 and renews 8 days with each purchase", [/const KEPT = 20;/.test(source("lib/recent-sales.ts")), /\(RECENT_DAYS \+ 1\) \* 86_400/.test(source("lib/recent-sales.ts"))], [true, true]);
+is("the policy says until 8 days after the store's latest purchase", /20 latest purchases until 8 days after its latest one/.test(policy), true);
+
+part("The library: three years after the end of the quarter of the last purchase");
+is("the code ends a quarter's record 13 quarters on", /QUARTERS_KEPT = 13;/.test(source("lib/joined-stores.ts")), true);
+is("the policy says it", /kept until three years after the end of the quarter of your last purchase/.test(policy), true);
+
+part("Who reported something: 90 days after the latest report of it");
+is("the code renews the reporters' 90 days with each report", /const REPORTERS_SECONDS = 90 \* 86_400;/.test(source("lib/community.ts")) && /\["EXPIRE", reportersKey\(id, key\), REPORTERS_SECONDS\]/.test(source("lib/community.ts")), true);
+is("the policy says it", /Who reported something is kept for 90 days after the latest report of it/.test(policy), true);
 done();

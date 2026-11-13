@@ -157,6 +157,12 @@ export type LeadRecord = {
   d: number;
   /** Why it was reversed; empty otherwise. */
   why: LeadReason | "";
+  /**
+   * The connected Stripe account a booking was paid into, written with the lead since 13 November 2026; absent on
+   * other leads, PayPal bookings and older records. Its refunds can only be read there (lib/affiliates.ts readBook),
+   * which is all it is read for: never on a line or in a person's copy.
+   */
+  acct?: string;
 };
 
 export type LeadStatus =
@@ -215,6 +221,8 @@ export function parseLead(raw: unknown): LeadRecord | null {
       state: v.state === "approved" || v.state === "reversed" ? v.state : "open",
       d: n(v.d),
       why: (LEAD_REASONS as readonly string[]).includes(String(v.why)) ? (v.why as LeadReason) : "",
+      // Kept exactly as written, so a decision written back keeps it: any other value is still another account than the store's.
+      ...(v.acct !== undefined ? { acct: typeof v.acct === "string" ? v.acct : "" } : {}),
     };
   } catch {
     return null;

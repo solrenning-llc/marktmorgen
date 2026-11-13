@@ -3163,8 +3163,9 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
     // Refunds and disputes are read on the account the store names now. A Stripe sale paid into another one (the
     // creator disconnected it or moved to a new one since), or any Stripe sale while none is connected, cannot be
     // judged there: what it earns is not known (refundsChecked), so no payout is made on a refund nobody read.
+    // A booking's lead is reversed by its refund in the same way (settleLeads), so it is judged with the sales.
     const account = store.stripeAccountId;
-    if (everything.some((r) => r.pi !== "" && !r.pi.startsWith("paypal:") && (!account || (r.acct !== undefined && r.acct !== account)))) {
+    if ([...everything, ...bookings].some((r) => r.pi !== "" && !r.pi.startsWith("paypal:") && (!account || (r.acct !== undefined && r.acct !== account)))) {
       refundsChecked = false;
     }
   }

@@ -12,9 +12,11 @@
 // Synthetic store and affiliate, Stripe mocked by account; MemoryRedis (tests/redis-stub.ts).
 import { NO_AFFILIATES } from "@/lib/affiliate-setting";
 import { noteCharge, readBook } from "@/lib/affiliates";
-import { claimHandle, clearStripeAccount, ensureStatsId, setAffiliateSetting, setStripeAccount, storeForEmail } from "@/lib/store";
+import { decideLeads, readLeads, recordLead } from "@/lib/affiliate-leads";
+import { claimHandle, clearStripeAccount, ensureStatsId, setAffiliateSetting, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import { paidPeriod } from "./billing-period-fixture";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_affiliate_account_switch_only";
 process.env.RESEND_API_KEY = "re_test_affiliate_account_switch_only";
@@ -27,7 +29,10 @@ const NOW = Math.floor(Date.now() / 1000);
 
 /** Refunds by account: only the old account holds the refund of the sale paid into it. */
 const refundsOn: Record<string, Record<string, unknown>[]> = {
-  [OLD]: [{ id: "re_old1", object: "refund", status: "succeeded", payment_intent: "pi_1BookSale", amount: 10_000 }],
+  [OLD]: [
+    { id: "re_old1", object: "refund", status: "succeeded", payment_intent: "pi_1BookSale", amount: 10_000 },
+    { id: "re_old2", object: "refund", status: "succeeded", payment_intent: "pi_1BookCall", amount: 5_000 },
+  ],
   [NEW]: [],
 };
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -111,6 +116,30 @@ async function main(): Promise<void> {
   is("new account connected", (await setStripeAccount(PARTNER_OWNER, NEW, true)).ok, true);
   book = await readBook((await storeForEmail(PARTNER_OWNER))!);
   is("partner share paid into the old account: not checked", book.refundsChecked, false);
+
+  part("a booked call's lead refunded on the old account, after a move to another one");
+  const LEAD_OWNER = "book-switch-lead@example.com";
+  await claimHandle(LEAD_OWNER, "booklead", "Book Lead", "");
+  await ensureStatsId(LEAD_OWNER);
+  await setSubscription(LEAD_OWNER, { customerId: "cus_BookLead0001", subscriptionId: "sub_BookLead0001", active: true, tier: "creator", trialEnds: 0, period: paidPeriod() });
+  is("old account connected", (await setStripeAccount(LEAD_OWNER, OLD, true)).ok, true);
+  await setAffiliateSetting(LEAD_OWNER, { ...NO_AFFILIATES, enabled: true, percent: 30, lead: { kind: "booking", cents: 1_500, hold: 7, daily: 10, budget: 50_000 } });
+  const leadStats = (await storeForEmail(LEAD_OWNER))!.statsId!;
+  await redis.pipeline([["HSET", `nl:aff:${leadStats}:people`, ANA, JSON.stringify({ id: ANA, email: "ana@example.com", code: "ana", status: "approved", appliedAt: (NOW - 60 * 86_400) * 1000, decidedAt: 1, note: "" })]]);
+  // A call booked through Ana's link 40 days ago, paid 5,000 into the old account, its call long over, through the real writer.
+  is("the booking's lead is written", await recordLead((await storeForEmail(LEAD_OWNER))!, {
+    aff: ANA, kind: "booking", email: "caller@example.com", at: NOW - 40 * 86_400, end: NOW - 39 * 86_400, ref: "cs_test_bookleadcall01", pi: "pi_1BookCall", paid: 5_000, title: "Bread call",
+  }), "recorded");
+  const [kept] = await readLeads((await storeForEmail(LEAD_OWNER))!);
+  is("the creator approves it", await decideLeads((await storeForEmail(LEAD_OWNER))!, [kept!.id], "approve"), { ok: true, changed: 1 });
+  book = await readBook((await storeForEmail(LEAD_OWNER))!);
+  is("control: refunded on its own account, the lead earns nothing", [book.lines.map((l) => [l.how, l.status, l.commission]), book.refundsChecked], [[["lead", "refunded", 0]], true]);
+  is("the account a lead was paid into is never on a line", book.lines.some((line) => "acct" in line || "acct" in (line.lead ?? {})), false);
+  await clearStripeAccount(LEAD_OWNER);
+  is("new account connected", (await setStripeAccount(LEAD_OWNER, NEW, true)).ok, true);
+  book = await readBook((await storeForEmail(LEAD_OWNER))!);
+  is("lead refunded on the old account: it earns nothing, or the book is not checked", book.refundsChecked === false || book.lines.every((l) => l.commission === 0), true);
+  is("lead paid into the old account: not checked", book.refundsChecked, false);
   done();
 }
 

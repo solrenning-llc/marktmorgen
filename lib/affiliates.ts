@@ -1299,12 +1299,16 @@ export async function openAffiliateLink(store: Store, token: string, charge: Cha
 
   // Somebody who joined before their page across every store existed is found from their next sign-in.
   await rememberAffiliate(store.sid, affiliate.email);
+  // Spent: an emailed link signs in once. Only the press whose DEL removed it gets a session (security audit, K): two
+  // presses at the same moment (a double click, a mail scanner and the browser) both read the link above, and before,
+  // both got a 30-day session. The other press is told the link expired; what it recorded is the same record.
+  // A reply that is not a count is unknown, never "spent" (rule 24): nothing is signed in on it.
+  const spent = repliesFor(await redisPipeline([["DEL", linkKey(token)]]), 1);
+  const removed = spent ? countOf(spent[0]) : null;
+  if (removed === null || removed > 1) throw new UnknownReplyError("whether an affiliate link was spent");
+  if (removed === 0) return { ok: false, reason: "expired" };
   const session = randomBytes(32).toString("hex");
-  await redisPipeline([
-    ["SET", sessionKey(session), JSON.stringify({ s: statsId, a: affiliate.id }), "EX", AFFILIATE_SESSION_SECONDS],
-    // Spent: an emailed link signs in once.
-    ["DEL", linkKey(token)],
-  ]);
+  await redisPipeline([["SET", sessionKey(session), JSON.stringify({ s: statsId, a: affiliate.id }), "EX", AFFILIATE_SESSION_SECONDS]]);
 
   // Approved at once when the creator chose it (624 [SZ8](35)): through the same decision as by hand, so the
   // approval email with their link goes as usual. Only a new application; someone declined or removed stays out,

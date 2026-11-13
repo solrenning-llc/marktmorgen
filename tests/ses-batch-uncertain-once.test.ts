@@ -50,6 +50,37 @@ async function main(): Promise<void> {
   const third = await sendBatch(people.map(message), "upd:synthetic:0:5", { by: "company" });
   is("still held, never answered sent", third, "retry");
   is("nobody is written to a second time", people.map(to), [1, 1, 1, 1, 1]);
+
+  // Codex T on #4361: the "may have gone" mark is written before an email is handed to SES, and confirmed. A mark
+  // that is refused, or answered in another shape, sends nothing: no email can go without its mark, so none can be
+  // written to twice by a later call.
+  for (const [what, fail] of [
+    ["refused", async () => { throw new Error("ERR synthetic refusal of the mark"); }],
+    ["answered in another shape", async () => []],
+  ] as const) {
+    part(`A mark ${what} before the wave: nothing is sent`);
+    redis.clear();
+    mail.clearCaptured();
+    await mail.setReady(true, { max24: 50_000, rate: 100 });
+    mail.setSesOutcome("ok");
+    const plain = redis.pipeline.bind(redis);
+    let failed = 0;
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      if (!failed && commands.some((c) => c[0] === "SET" && String(c[1]).startsWith("nl:ses:maybe:"))) {
+        failed += 1;
+        return fail();
+      }
+      return plain(commands);
+    }) as typeof redis.pipeline;
+    const held = await sendBatch(people.map(message), `upd:synthetic:mark:${what}`, { by: "company" });
+    redis.pipeline = plain;
+    is("the mark's write failed (diagnostic)", failed, 1);
+    is("the batch is not done", held === "sent", false);
+    is("no email was handed to SES", people.map(to), [0, 0, 0, 0, 0]);
+    const next = await sendBatch(people.map(message), `upd:synthetic:mark:${what}`, { by: "company" });
+    is("the next call sends the batch", next, "sent");
+    is("once each", people.map(to), [1, 1, 1, 1, 1]);
+  }
   done();
 }
 

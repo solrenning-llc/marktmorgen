@@ -793,6 +793,10 @@ async function dispatchOnce(
       // its caller without another SES wave or a switch to Resend. A durable
       // caller checkpoint is still needed before a later invocation.
       if (result.uncertain === true) return "retry";
+      // A wave whose "may have gone" marks could not be written was never sent (lib/ses.ts, markMaybe): Redis, not
+      // SES, failed, so nothing is handed to another provider. The batch waits under the same key; whoever SES took
+      // before is left out by their own marks.
+      if (result.unmarked === true) return listOnly && result.taken.length === 0 ? "waiting" : "retry";
       // SES excludes definitively refused recipients from both accepted and
       // pending lists. Missing recipients cannot establish a completed list.
       if (listOnly && result.taken.length + result.left.length < going.length) {

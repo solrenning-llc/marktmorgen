@@ -42,6 +42,11 @@ const OWNER_PATTERN = /^[A-Za-z0-9_-]{1,40}$/;
 const TOKEN_PATTERN = /^[0-9a-f]{16}$/;
 /** A name the store keeps a file under: plain characters only, so its address never needs escaping. */
 const KEY_NAME_PATTERN = /^[A-Za-z0-9._-]{1,120}$/;
+/**
+ * The last piece of a file's path: its token, a hyphen and its name, each read in its own limit (vaultPath). Up to
+ * 137 characters, past the 120 of any other piece (Codex X5's MEDIUM on #4356).
+ */
+const FILE_PIECE_PATTERN = /^[0-9a-f]{16}-[A-Za-z0-9._-]{1,120}$/;
 
 /**
  * A file's name as the store keeps it. What the creator called the file is
@@ -89,7 +94,13 @@ export function readVaultPath(pathname: unknown): { folder: string; ownerId: str
 export function isVaultPath(pathname: unknown): boolean {
   if (typeof pathname !== "string" || pathname.includes("..") || pathname.includes("//")) return false;
   const parts = pathname.split("/");
-  return parts.length >= 4 && parts[0] === VAULT_PREFIX && FOLDER_PATTERN.test(parts[1]) && parts.slice(2).every((piece) => KEY_NAME_PATTERN.test(piece));
+  // Every piece a plain name of at most 120; the last may also be a file's token and name, as vaultPath makes it.
+  return (
+    parts.length >= 4 &&
+    parts[0] === VAULT_PREFIX &&
+    FOLDER_PATTERN.test(parts[1]) &&
+    parts.slice(2).every((piece, i, pieces) => KEY_NAME_PATTERN.test(piece) || (i === pieces.length - 1 && FILE_PIECE_PATTERN.test(piece)))
+  );
 }
 
 /** Whether a path is a file of this store, on this product, option or lesson. */

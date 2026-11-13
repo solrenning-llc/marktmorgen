@@ -138,6 +138,17 @@ export const QUEUE_KEY = "nl:esync:q";
 const seenKey = (statsId: string, seed: string) =>
   `nl:esync:seen:${createHash("sha256").update(`${statsId}|${seed}`).digest("hex").slice(0, 40)}`;
 
+/**
+ * The tries of one person's jobs in flight at the platform (#4266, review of #4392): a set of job ids, one member a
+ * try, added by FLY_IF_READ atomically with the check that the job still holds what was read, right before the
+ * platform is asked; each try takes out only its own member when its request is over (two jobs of one person, one a
+ * checkout, can be in flight at once), and the set is gone by itself a lease after its last try at the most. Named
+ * by the store and the address, hashed: the person's erasure (forgetSyncPerson) finds it whether or not a job is
+ * left, and says "not finished" while it holds any member.
+ */
+const flyKey = (statsId: string, email: string) =>
+  `nl:esync:fly:${createHash("sha256").update(`${statsId}|${normaliseEmail(email)}`).digest("hex").slice(0, 40)}`;
+
 const JOB_ID = /^esj_[0-9a-f]{24}$/;
 const PRODUCT_ID = /^[A-Za-z0-9_-]{1,40}$/;
 
@@ -383,10 +394,18 @@ export async function queuePerson(store: Store, person: Person, now = Date.now()
 
 // ---- Sending ------------------------------------------------------------------------
 
-/** One try of one job. Returns the job as it stands after it. */
-async function attempt(job: Job, now: number, budget: number): Promise<Job> {
+/**
+ * One try of one job, read as `raw`. Returns the job as it stands after it, or null when its record no longer holds
+ * what was read (the person's erasure deleted it, #4266): then nothing is tried and nothing is to be written. The
+ * record is read again with the settings, right before the platform is asked, so a job erased since it was read is
+ * never sent; an erasure landing during the platform's answer is caught where the outcome is written (WRITE_IF_READ).
+ */
+async function attempt(job: Job, raw: string, now: number, budget: number): Promise<Job | null> {
   const next: Job = { ...job, attempts: job.attempts + 1, lastAt: now };
-  const config = await readConfig(job.statsId);
+  const read = repliesFor(await redisPipeline([["GET", cfgKey(job.statsId)], ["GET", jobKey(job.id)]]), 2);
+  if (!read) throw new UnknownReplyError("an email platform job and its settings");
+  if (read[1] !== raw) return null;
+  const config = parseConfig(read[0]);
   if (!config || !config.target) {
     return { ...next, state: "failed", next: 0, lastError: "The email platform was disconnected before this could be sent." };
   }
@@ -399,6 +418,14 @@ async function attempt(job: Job, now: number, budget: number): Promise<Job> {
     return again(opened.message);
   }
   const tags = cleanTags(job.products.flatMap((id) => config.tags[id] ?? [])).slice(0, MAX_TAGS_PER_PRODUCT * 2);
+  // The try is marked in flight only while the job still holds what was read (#4266, review of #4392): an erasure
+  // that deleted it since the read above refuses the mark, and the platform is never asked; one landing after the
+  // mark, during the request, says "not finished" until the request is over (forgetSyncPerson).
+  const fly = flyKey(job.statsId, job.email);
+  const marked = repliesFor(await redisPipeline([["EVAL", FLY_IF_READ, 2, jobKey(job.id), fly, raw, LEASE_MS, job.id]]), 1);
+  const mark = marked ? countOf(marked[0]) : null;
+  if (mark === null) throw new UnknownReplyError("marking an email platform try in flight");
+  if (mark !== 1) return null;
   try {
     const note = await addContact(
       config.provider,
@@ -423,8 +450,24 @@ async function attempt(job: Job, now: number, budget: number): Promise<Job> {
     }
     if (!problem.retry) return { ...next, state: "failed", next: 0, lastError: problem.message };
     return again(problem.message);
+  } finally {
+    // This try's request is over: only its own member leaves (another try of the same person may still be in flight).
+    // If this does not answer, the member ends with the set's lease.
+    await redisPipeline([["SREM", fly, job.id]]).catch(() => undefined);
   }
 }
+
+/**
+ * Marks a try in flight (#4266): KEYS[1] the job, KEYS[2] the person's in-flight set; ARGV[1] the record as read,
+ * ARGV[2] the set's milliseconds, ARGV[3] the job id. Answers 1 when marked, 0 when the record is gone or holds
+ * something else; then nothing is set.
+ * lib/redis-memory.ts runs it the same way.
+ */
+export const FLY_IF_READ = `-- marktmorgen:esync-fly-if-read:v2
+if redis.call("GET", KEYS[1]) ~= ARGV[1] then return 0 end
+redis.call("SADD", KEYS[2], ARGV[3])
+redis.call("PEXPIRE", KEYS[2], ARGV[2])
+return 1`;
 
 /** Tries a job this caller has claimed, writes down how it went, and queues its next try. */
 async function runClaimed(statsId: string, id: string, budget: number, now = Date.now()): Promise<Job | null> {
@@ -440,12 +483,51 @@ async function runClaimed(statsId: string, id: string, budget: number, now = Dat
     await retire(statsId, id, now);
     return job;
   }
-  const done = await attempt(job, now, budget);
-  const record: (string | number)[] = ["SET", jobKey(id), JSON.stringify(done), "EX", JOB_SECONDS];
-  if (done.state === "retrying") await redisPipeline([record, ["ZADD", QUEUE_KEY, done.next, `${statsId}|${id}`]]);
-  else await retire(statsId, id, now, [record]);
+  // A job parses only from text (parseJob), so here the record as read is that text.
+  const read = String(raw);
+  const done = await attempt(job, read, now, budget);
+  // Erased (or rewritten by another holder) since it was read: nothing is written back and nothing queued (#4266).
+  if (!done) return unlessRewritten(statsId, id, now);
+  const member = `${statsId}|${id}`;
+  // Written only over the record as it was read (#4266): a job the person's erasure deleted during the try is not
+  // written back with their address, nor queued for another try. A reply in another shape throws; the job stays on
+  // the queue under its lease and comes back, read afresh, when it ends.
+  const written = repliesFor(
+    await redisPipeline([["EVAL", WRITE_IF_READ, 2, jobKey(id), QUEUE_KEY, read, JSON.stringify(done), JOB_SECONDS, done.state === "retrying" ? done.next : "", member]]),
+    1,
+  );
+  const outcome = written ? countOf(written[0]) : null;
+  if (outcome === null && written?.[0] !== -1) throw new UnknownReplyError("writing how an email platform job went");
+  if (outcome !== 1) return unlessRewritten(statsId, id, now);
+  if (done.state !== "retrying") await retire(statsId, id, now);
   return done;
 }
+
+/**
+ * A claimed job whose record no longer holds what was read. Gone (the person's erasure, or its week ended): taken off
+ * the queue as a finished one is (retire), with nothing written. Rewritten instead: left to whoever wrote it.
+ */
+async function unlessRewritten(statsId: string, id: string, now: number): Promise<null> {
+  const replies = repliesFor(await redisPipeline([["EXISTS", jobKey(id)]]), 1);
+  const exists = replies ? countOf(replies[0]) : null;
+  if (exists === null) throw new UnknownReplyError("the record of an email platform job");
+  if (exists === 0) await retire(statsId, id, now);
+  return null;
+}
+
+/**
+ * How a try went, written only over the job's record as it was read (#4266): KEYS[1] the job, KEYS[2] the queue;
+ * ARGV[1] the record as read, ARGV[2] the new record, ARGV[3] its seconds, ARGV[4] when the next try is due (empty
+ * when there is none), ARGV[5] the queue member. Answers 1 when written (and queued), 0 when the record is gone, -1
+ * when it holds something else; then nothing is written. lib/redis-memory.ts runs it the same way.
+ */
+export const WRITE_IF_READ = `-- marktmorgen:esync-write-if-read:v1
+local held = redis.call("GET", KEYS[1])
+if not held then return 0 end
+if held ~= ARGV[1] then return -1 end
+redis.call("SET", KEYS[1], ARGV[2], "EX", ARGV[3])
+if ARGV[4] ~= "" then redis.call("ZADD", KEYS[2], ARGV[4], ARGV[5]) end
+return 1`;
 
 /**
  * Every job record, which holds a buyer's address for a week, stays where a
@@ -509,8 +591,8 @@ async function forgetFinished(log: string, ids: string[]): Promise<void> {
 }
 
 /**
- * Takes a job that is done off the queue, after the commands that write how it
- * went, and deletes its record when it is no longer in the store's log, so no
+ * Takes a job that is done off the queue, once how it went is written (or its
+ * record is gone), and deletes its record when it is no longer in the store's log, so no
  * record holding an address is left where neither the log nor the queue finds
  * it (dropOverflow). The job leaves the queue only once its record is known to
  * be in the log or gone (Claude 4 on #2860): the log is read first, with the
@@ -522,11 +604,10 @@ async function forgetFinished(log: string, ids: string[]): Promise<void> {
  * the queue, to be retired again when its lease would have ended, and throws
  * (CX-123 rule 24); before that, the job is still there.
  */
-async function retire(statsId: string, id: string, now: number, first: (string | number)[][] = []): Promise<void> {
+async function retire(statsId: string, id: string, now: number): Promise<void> {
   const member = `${statsId}|${id}`;
   const log = logKey(statsId);
-  const commands = [...first, ["LRANGE", log, 0, -1]];
-  const logged = stringList(repliesFor(await redisPipeline(commands), commands.length)?.[commands.length - 1]);
+  const logged = stringList(repliesFor(await redisPipeline([["LRANGE", log, 0, -1]]), 1)?.[0]);
   if (!logged) throw new UnknownReplyError("a store's email platform job log, retiring a job");
   if (!logged.includes(id)) {
     if (!countsFor(await redisPipeline([["DEL", jobKey(id)]]), 1)) throw new UnknownReplyError("the record of an email platform job, retiring it");
@@ -972,11 +1053,25 @@ export async function forgetSyncPerson(statsId: string | null, email: string): P
   const address = normaliseEmail(email);
   const { jobs, logLength } = await loggedJobsWithLog(statsId);
   const theirs = jobs.filter(({ job }) => job && normaliseEmail(job.email) === address).map(({ id }) => id);
-  if (!theirs.length) return 0;
+  // A try of theirs in flight at the platform (#4266, review of #4392): its request may still carry the address, so
+  // the part is not finished. Read after the jobs are deleted (below), so a try that had not marked itself yet finds
+  // its job gone and never asks the platform.
+  const fly = ["SCARD", flyKey(statsId, address)];
+  if (!theirs.length) {
+    const read = repliesFor(await redisPipeline([fly]), 1);
+    const flying = read ? countOf(read[0]) : null;
+    if (flying === null) throw new UnknownReplyError("an email platform try in flight, erasing a person");
+    if (flying > 0) throw new UnknownReplyError("an email platform try still in flight, erasing a person");
+    return 0;
+  }
   // Each delete answers a count (CX-123 rule 24): DEL and ZREM at most the jobs named, LREM at most the log's length.
   // Another shape throws, so the erasure is said as not finished and a retry finds what is left.
-  const commands: (string | number)[][] = [["DEL", ...theirs.map(jobKey)], ...theirs.map((id) => ["LREM", logKey(statsId), 0, id]), ["ZREM", QUEUE_KEY, ...theirs.map((id) => `${statsId}|${id}`)]];
-  const replies = repliesFor(await redisPipeline(commands), commands.length);
+  const commands: (string | number)[][] = [["DEL", ...theirs.map(jobKey)], ...theirs.map((id) => ["LREM", logKey(statsId), 0, id]), ["ZREM", QUEUE_KEY, ...theirs.map((id) => `${statsId}|${id}`)], fly];
+  const all = repliesFor(await redisPipeline(commands), commands.length);
+  const flying = all ? countOf(all[all.length - 1]) : null;
+  if (flying === null) throw new UnknownReplyError("an email platform try in flight, erasing a person");
+  if (flying > 0) throw new UnknownReplyError("an email platform try still in flight, erasing a person");
+  const replies = all ? all.slice(0, -1) : null;
   const within = (reply: unknown, most: number) => {
     const n = countOf(reply);
     return n !== null && n <= most;

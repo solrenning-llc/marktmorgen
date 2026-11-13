@@ -780,6 +780,17 @@ export const HELP_SECTIONS: HelpSection[] = [
         ],
       },
       {
+        // 564 [HC1] item 2: making a sequence and switching it on, step by step in the editor's own words
+        // (components/email-studio.tsx, "Sequences and workflows"); the limits are lib/flow-limits.ts's own sentence.
+        q: "How do I make an email sequence and switch it on?",
+        a: [
+          `On ${PLAN_TITLES.pro} and ${PLAN_TITLES.scale}. In your studio, open Email. Under \u201cSequences and workflows\u201d, press \u201cNew sequence\u201d. Give it a name under \u201cName, for you\u201d (it starts as \u201cWelcome\u201d), and choose under \u201cStarts when\u201d what starts it, such as \u201cSomeone joins your list\u201d.`,
+          "The first email is already there: write its \u201cSubject\u201d and its words. Under \u201cWait after it starts\u201d, choose how many hours or days after the start it goes out (0 hours sends it at once). Press \u201cAdd a step\u201d for the next email; its wait, \u201cWait after the one before\u201d, counts from the email before it.",
+          "Press \u201cSave the sequence\u201d. It is saved paused, so nothing is sent yet. On its card, press \u201cPreview and switch on\u201d: under \u201cPreview a path\u201d, describe someone, or start from someone on your list, and see which steps they would get, with nothing sent. Then press \u201cSwitch it on now\u201d. Only people who agreed to hear from you are written to, each goes through a sequence once, and an unsubscribe stops it for them at once.",
+          `To stop it, press \u201cPause\u201d on its card: nobody new starts it, and those already in it get none of its steps still to come. ${workflowLimitWords()} Every email counts in your monthly emails.`,
+        ],
+      },
+      {
         q: "Can I put a label on many contacts at once?",
         a: [
           `Yes. On \u201cMoving from another platform\u201d in your studio, next to bringing contacts in, choose \u201cLabel several contacts at once\u201d. Paste their addresses, one per line or separated by commas, up to ${MAX_BULK_ADDRESSES.toLocaleString("en-US")} at a time, type the label (up to ${MAX_TAG_LENGTH} characters), choose \u201cAdd the label\u201d or \u201cTake the label off\u201d, then \u201cReview the change\u201d.`,

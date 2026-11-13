@@ -30,6 +30,26 @@ async function call(payload: Record<string, unknown>): Promise<{ ok?: boolean; e
   }
 }
 
+/** Said in the recovery section when the address could not be read just now (rule 24): unknown is not none. */
+export const RECOVERY_UNREAD = "Your recovery address could not be read just now. Nothing was changed; reload the page in a moment.";
+
+/**
+ * Where the manager would be when the recovery address could not be read just
+ * now: the section, its heading and its #account-recovery anchor stay (the
+ * links to it still land), and nothing is offered on a guess.
+ */
+export function RecoveryAddressUnread() {
+  return (
+    <section id="account-recovery" aria-labelledby="account-recovery-title" className="mt-8 scroll-mt-32 border-t border-line pt-6">
+      <h3 id="account-recovery-title" className="flex items-center gap-2 font-semibold text-ink">
+        <Icon name="mail" size={18} className="text-violet-deep" />
+        Recovery address
+      </h3>
+      <p className="mt-2 text-sm text-ink-soft">{RECOVERY_UNREAD}</p>
+    </section>
+  );
+}
+
 /**
  * The person's recovery address (lib/recovery-address.ts), in the studio's
  * Account part: the way back in when they can no longer open the inbox they

@@ -5,6 +5,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
+import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { formatMoney } from "@/lib/money";
 import { SITE_URL } from "@/lib/site-url";
@@ -96,8 +97,11 @@ export default async function StudioCommunityPage({ searchParams }: Params) {
     const now = eventClock();
     const [soon, past] = await Promise.all([upcomingEvents(id, now), pastEvents(id, null, PAST_SHOWN, now)]);
     const shownEvents = [...soon, ...past.events];
-    const lists = await Promise.all(shownEvents.map((e) => rsvpList(id, e.id)));
-    const people = await readMembers(id, lists.flatMap((l) => l.slice(0, PEOPLE_SHOWN).map((r) => r.key)));
+    // Who is coming is everyone or not known (rsvpList, rule 30): a list that
+    // does not read is null for its event alone, shown as not known, never as
+    // 0 or a short list, and the rest of the page is drawn as usual.
+    const lists = await Promise.all(shownEvents.map((e) => rsvpList(id, e.id).catch(() => null)));
+    const people = await readMembers(id, lists.flatMap((l) => (l ?? []).slice(0, PEOPLE_SHOWN).map((r) => r.key)));
     // What was made on Google or Zoom for the events that use them (lib/event-meetings.ts).
     const meetings = await eventMeetings(store, shownEvents).catch(() => null);
     const shape = (e: CommunityEvent, i: number): StudioEvent => ({
@@ -125,8 +129,8 @@ export default async function StudioCommunityPage({ searchParams }: Params) {
       started: e.start <= now,
       when: eventTime(e),
       length: lengthWords(e.minutes),
-      going: lists[i].length,
-      people: lists[i].slice(0, PEOPLE_SHOWN).flatMap((r) => {
+      going: lists[i]?.length ?? null,
+      people: (lists[i] ?? []).slice(0, PEOPLE_SHOWN).flatMap((r) => {
         const m = people.get(r.key);
         return m ? [{ name: m.n, email: m.e, at: r.at }] : [];
       }),
@@ -228,7 +232,7 @@ export default async function StudioCommunityPage({ searchParams }: Params) {
       <StudioStorePin sid={store.sid}>
 
       <main id="content" className="container-page pb-20 pt-10 sm:pt-14">
-        <p className="eyebrow">Community</p>
+        <StudioTrail store={store} here="Community" />
         <h1 className="t-h2 mt-3">A place for your buyers</h1>
         <p className="mt-3 max-w-2xl text-ink-soft">
           Posts, comments and likes in spaces you set up, live events members RSVP to and join from the page, a

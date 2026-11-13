@@ -4,9 +4,14 @@
  * any other change waits for the partner, who says yes (cap checked again)
  * or no; an unanswered change lapses after 30 days; saving the share in force
  * withdraws a waiting change; every step is in the history. Synthetic store.
+ *
+ * Ported onto main's write path (#1924 port): every change is a compare-and-swap of one record under the program's
+ * partner lock. A share the store ends keeps its end on the record (`until`, the moment it ended) rather than being
+ * cleared, so a sale paid before it and noted later still earns ("What was already earned is still paid").
  */
 import { claimHandle, ensureStatsId, ensureStoreId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
-import { answerShareChange, changeIdentity, decide, decideMany, decideWhy, proposePartnerShare, readAffiliate, undoMany } from "@/lib/affiliates";
+import { answerShareChange, changeIdentity, decideMany, decideWhy, proposePartnerShare, readAffiliate, undoMany } from "@/lib/affiliates";
+import { LockBusyError } from "@/lib/redis-lock";
 import { CHANGE_WAITS_SECONDS } from "@/lib/partner-terms-rules";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -44,7 +49,7 @@ async function main(): Promise<void> {
   is("saving it again changes nothing", await proposePartnerShare(await store(), p, { percent: 30, products: [A] }, NOW + 1), { ok: true, state: "same" });
   is("ending it applies at once", await proposePartnerShare(await store(), p, null, NOW + 2), { ok: true, state: "applied" });
   const ended = await read(p);
-  is("no share, and the history says started then ended", [ended.share, ended.terms?.history.map((s) => `${s.kind}:${s.by}`)], [null, ["started:creator", "revoked:creator"]]);
+  is("it ends now, its end kept, and the history says started then ended", [ended.share, ended.terms?.history.map((s) => `${s.kind}:${s.by}`)], [{ percent: 30, products: [A], until: NOW + 2 }, ["started:creator", "revoked:creator"]]);
 
   part("A change waits for the partner");
   const until = NOW + 200 * DAY;
@@ -61,7 +66,7 @@ async function main(): Promise<void> {
   is("ending it waits", await proposePartnerShare(await store(), q, null, NOW + 30), { ok: true, state: "waiting" });
   is("still in force meanwhile", (await read(q)).share?.percent, 40);
   is("yes ends it", await answerShareChange(await store(), q, true, await seen(q), NOW + 40, yes), { ok: true, state: "changed" });
-  is("ended", (await read(q)).share, null);
+  is("ended at the yes, its end kept", (await read(q)).share, { percent: 40, products: [A, B], until: NOW + 40 });
   await proposePartnerShare(await store(), q, { percent: 10, products: [A] }, NOW + 50);
   await proposePartnerShare(await store(), q, { percent: 60, products: [A] }, NOW + 60);
   is("a yes the cap no longer allows is refused, and the change stays", [await answerShareChange(await store(), q, true, await seen(q), NOW + 70, async () => false), (await read(q)).share?.percent, Boolean((await read(q)).terms?.change)], [{ ok: false, reason: "cap" }, 10, true]);
@@ -94,21 +99,25 @@ async function main(): Promise<void> {
   await proposePartnerShare(await store(), d, { percent: 20, products: [A], until: T + 60 * DAY }, T);
   await proposePartnerShare(await store(), u, { percent: 20, products: [B] }, T);
   await proposePartnerShare(await store(), x, { percent: 20, products: [B], until: T + 60 * DAY }, T);
-  is("remove is refused", await decide(await store(), d, "remove", T + 1), null);
-  is("decline is refused too", await decide(await store(), d, "decline", T + 1), null);
+  is("remove is refused", await decideWhy(await store(), d, "remove", T + 1), { ok: false, reason: "term" });
+  is("decline is refused too", await decideWhy(await store(), d, "decline", T + 1), { ok: false, reason: "term" });
   is("they stay approved, with their share and no new step", [(await read(d)).status, (await read(d)).share?.percent, (await read(d)).terms?.history.length], ["approved", 20, 1]);
-  is("in bulk it is never touched either", [await decideMany(await store(), [d], "decline"), (await read(d)).status], [[], "approved"]);
-  const untilRevoked = await decide(await store(), u, "remove", T + 2);
-  is("a share until revoked can be removed", [untilRevoked?.status, untilRevoked?.share], ["removed", null]);
-  is("and the history says the store ended it", (await read(u)).terms?.history.map((s) => `${s.kind}:${s.by}`), ["started:creator", "revoked:creator"]);
-  const after = await decide(await store(), x, "remove", T + 61 * DAY);
-  is("after the end date it can be removed, the share left as it ended", [after?.status, after?.share?.until], ["removed", T + 60 * DAY]);
+  is("in bulk it is never touched either", [await decideMany(await store(), [d], "decline"), (await read(d)).status], [{ before: [], held: [] }, "approved"]);
+  // On main, somebody removed keeps their share on the record (they earn nothing while removed, and letting them back
+  // in counts it against the cap again): removing is not ending it, so no step says the store ended it.
+  const untilRevoked = await decideWhy(await store(), u, "remove", T + 2);
+  is("a share until revoked does not stop a removal, and is kept as it is", [untilRevoked.ok && untilRevoked.affiliate.status, untilRevoked.ok && untilRevoked.affiliate.share], ["removed", { percent: 20, products: [B] }]);
+  is("and the history is unchanged", (await read(u)).terms?.history.map((s) => `${s.kind}:${s.by}`), ["started:creator"]);
+  const after = await decideWhy(await store(), x, "remove", T + 61 * DAY);
+  is("after the end date it can be removed, the share left as it ended", [after.ok && after.affiliate.status, after.ok && after.affiliate.share?.until], ["removed", T + 60 * DAY]);
   is("with no step saying the store ended it: it ended on its date", (await read(x)).terms?.history.map((s) => s.kind), ["started"]);
 
   part("Refused under the lock, with its own reason, whatever the status");
   const w = "abababababab";
   await redis.pipeline([["HSET", `nl:aff:${statsId}:people`, w, JSON.stringify({ ...person(w), status: "pending", share: { percent: 10, products: [A], until: T + 30 * DAY } })]]);
   is("somebody waiting who holds a dated share in force is not declined", await decideWhy(await store(), w, "decline", T + 1), { ok: false, reason: "term" });
+  is("nor in bulk: named, with why", await decideMany(await store(), [w], "decline"), { before: [], held: [{ id: w, email: `${w}@example.com`, why: "term" }] });
+  is("still waiting", (await read(w)).status, "pending");
   is("the dated partner's removal says why", await decideWhy(await store(), d, "remove", T + 1), { ok: false, reason: "term" });
   is("an unknown one says unknown", await decideWhy(await store(), "acacacacacac", "remove", T + 1), { ok: false, reason: "unknown" });
 
@@ -118,12 +127,12 @@ async function main(): Promise<void> {
   const before = await decideMany(await store(), [v], "approve");
   is("approved in bulk", (await read(v)).status, "approved");
   await proposePartnerShare(await store(), v, { percent: 15, products: [A], until: T + 60 * DAY }, T + 3);
-  is("the undo leaves a partner given a dated share since as they are", [await undoMany(await store(), before, "approve"), (await read(v)).status], [0, "approved"]);
+  is("the undo leaves a partner given a dated share since as they are", [(await undoMany(await store(), before.before, "approve")).undone, (await read(v)).status], [0, "approved"]);
   is("so they cannot then be declined around their term", await decideWhy(await store(), v, "decline", T + 4), { ok: false, reason: "term" });
   const v2 = "cdcdcdcdcdcd";
   await redis.pipeline([["HSET", `nl:aff:${statsId}:people`, v2, JSON.stringify({ ...person(v2), status: "pending", decidedAt: 0 })]]);
   const before2 = await decideMany(await store(), [v2], "approve");
-  is("an approval with nothing given since is still undone", [await undoMany(await store(), before2, "approve"), (await read(v2)).status], [1, "pending"]);
+  is("an approval with nothing given since is still undone", [(await undoMany(await store(), before2.before, "approve")).undone, (await read(v2)).status], [1, "pending"]);
 
   part("Someone removed has nothing left to answer");
   const z = "dededededede";
@@ -151,7 +160,7 @@ async function main(): Promise<void> {
     proposePartnerShare(shop, c, { percent: 50, products: [B], until: T + 60 * DAY }, T + 2),
   ]);
   const cNow = await read(c);
-  is("both done, one after the other", [answered.ok, asked.ok], [true, true]);
+  is("both done, one after the other, under the program's partner lock", [answered.ok, asked.ok], [true, true]);
   is("the new request is still waiting, not dropped by the yes", cNow.terms?.change?.share?.percent, 50);
   is("and the yes took 30%", cNow.share?.percent, 30);
   // A share until revoked, a raise waiting, and the store removing them while they say yes.
@@ -160,10 +169,20 @@ async function main(): Promise<void> {
   await proposePartnerShare(await store(), e, { percent: 10, products: [B] }, T);
   await proposePartnerShare(await store(), e, { percent: 40, products: [B] }, T + 1);
   const eSeen = await seen(e);
-  await Promise.all([answerShareChange(shop, e, true, eSeen, T + 2, slowYes), decide(shop, e, "remove", T + 2)]);
+  // The yes holds the partner lock while its check runs; the removal is written meanwhile (it raises nothing, so it
+  // needs no lock), taking the waiting change back. The yes then finds the record moved and writes nothing: busy
+  // (LockBusyError), never over it.
+  const [late] = await Promise.all([
+    answerShareChange(shop, e, true, eSeen, T + 2, slowYes).then(
+      () => "written",
+      (error: unknown) => (error instanceof LockBusyError ? "busy" : String(error)),
+    ),
+    decideWhy(shop, e, "remove", T + 2),
+  ]);
   const eEnd = await read(e);
-  is("a removal racing a yes is never undone by it: removed, with no share left", [eEnd.status, eEnd.share], ["removed", null]);
-  is("and the history ends with the store ending it", eEnd.terms?.history.at(-1)?.kind, "revoked");
+  is("the yes that lost the race says busy", late, "busy");
+  is("a removal racing a yes is never undone by it: removed, the share as it was", [eEnd.status, eEnd.share], ["removed", { percent: 10, products: [B] }]);
+  is("and the history ends with the store taking its request back", [eEnd.terms?.history.at(-1)?.kind, eEnd.terms?.change], ["withdrawn", null]);
   done();
 }
 

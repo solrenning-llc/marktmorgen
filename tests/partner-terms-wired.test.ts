@@ -5,6 +5,9 @@
  * bad end is refused; the partner says no, then yes, from their own page; a
  * yes the cap no longer allows is refused; the studio and the partner's page
  * say what waits and what it means.
+ *
+ * Ported onto main (#1924 port): a share the store ends keeps its end on the record (`until`) instead of being cleared,
+ * so "ended" below reads as a share whose end has come, not as no share.
  */
 import { createHash, randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -76,6 +79,11 @@ async function main(): Promise<void> {
   };
   const read = async (id: string) => (await readAffiliate((await storeForEmail(owner))!, id))!;
   const future = (days: number) => new Date(Date.now() + days * 86400 * 1000).toISOString().slice(0, 10);
+  // A share the store ended: still on the record, with an end that has come.
+  const endedNow = async (id: string) => {
+    const share = (await read(id)).share;
+    return share !== null && typeof share.until === "number" && share.until <= Math.floor(Date.now() / 1000);
+  };
 
   part("The studio's route");
   is("an end that is not after today is refused", (await post({ action: "share", id: p, percent: 30, products: [A], ends: "2020-01-01" })).error, "share_ends");
@@ -95,7 +103,7 @@ async function main(): Promise<void> {
   is("another partner takes room on the same product", await post({ action: "share", id: q, percent: 35, products: [A] }), { ok: true, state: "started" });
   is("a yes the cap no longer allows is refused", [await answer("yes"), (await read(p)).share?.percent], ["https://marktmorgen.com/@termswired/affiliates?status=partner-cap#partner", 30]);
   await post({ action: "share", id: q, percent: null });
-  is("ending a share that runs until revoked applied at once", (await read(q)).share, null);
+  is("ending a share that runs until revoked applied at once", await endedNow(q), true);
   is("with room again, yes applies it", [await answer("yes"), (await read(p)).share?.percent], ["https://marktmorgen.com/@termswired/affiliates?status=partner-yes#partner", 40]);
   is("the history has every step", (await read(p)).terms?.history.map((s) => `${s.kind}:${s.by}`), [
     "started:creator", "asked:creator", "asked:creator", "declined:partner", "asked:creator", "changed:partner",
@@ -118,21 +126,23 @@ async function main(): Promise<void> {
   is("decline is refused the same way", (await post({ action: "decline", id: p })).error, "share_term_held");
   is("they stay approved with their share", [(await read(p)).status, (await read(p)).share?.percent], ["approved", 5]);
   is("a share until revoked", await post({ action: "share", id: q, percent: 10, products: [A] }), { ok: true, state: "started" });
-  is("can be removed", [await post({ action: "remove", id: q }), (await read(q)).status, (await read(q)).share], [{ ok: true }, "removed", null]);
-  is("and the step is in its history", (await read(q)).terms?.history.at(-1)?.kind, "revoked");
+  // Removed, the share stays on the record as on main (restoring counts it against the cap again); no step ends it.
+  is("can be removed, the share kept as it is", [await post({ action: "remove", id: q }), (await read(q)).status, await endedNow(q), (await read(q)).share?.percent], [{ ok: true }, "removed", false, 10]);
+  is("and no step says the store ended it", (await read(q)).terms?.history.at(-1)?.kind, "started");
 
-  part("A share only for someone approved");
+  part("A share for somebody waiting, as main allows it: it counts once they are approved");
+  // On main a share may be set on somebody still waiting (tests/affiliate-bulk-held.test.ts): approving them checks it
+  // against the cap then (decideMany, decide). The term rules apply to it the same way.
   const w = "cccccccccccc";
-  for (const status of ["pending", "declined", "removed"]) {
-    await redis.pipeline([["HSET", `nl:aff:${statsId}:people`, w, JSON.stringify({ id: w, email: `${w}@example.com`, code: `c${w}`, status, appliedAt: 1, decidedAt: 5, note: "", rate: null, paypal: "", share: null, cleared: null, by: null })]]);
-    is(`refused for somebody ${status}`, (await post({ action: "share", id: w, percent: 10, products: [A], ends: future(30) })).error, "share_not_approved");
-    is(`and nothing is written for somebody ${status}`, [(await read(w)).share, (await read(w)).terms], [null, undefined]);
-  }
+  await redis.pipeline([["HSET", `nl:aff:${statsId}:people`, w, JSON.stringify({ id: w, email: `${w}@example.com`, code: `c${w}`, status: "pending", appliedAt: 1, decidedAt: 5, note: "", rate: null, paypal: "", share: null, cleared: null, by: null })]]);
+  is("a share for somebody waiting starts", await post({ action: "share", id: w, percent: 5, products: [A], ends: future(30) }), { ok: true, state: "started" });
+  is("and its start is in the history", (await read(w)).terms?.history.map((s) => s.kind), ["started"]);
+  is("declining them with that dated share in force is refused", (await post({ action: "decline", id: w })).error, "share_term_held");
 
   part("The partner hears what became of their answer even after the share ended");
   await post({ action: "share", id: p, percent: null });
   is("the store asks to end the dated share", (await read(p)).terms?.change?.share, null);
-  is("the partner's yes ends it", [await answer("yes"), (await read(p)).share], ["https://marktmorgen.com/@termswired/affiliates?status=partner-yes#partner", null]);
+  is("the partner's yes ends it", [await answer("yes"), await endedNow(p)], ["https://marktmorgen.com/@termswired/affiliates?status=partner-yes#partner", true]);
 
   part("An invitation says how long it runs");
   // The program switched on, which an invitation needs (lib/affiliates.ts affiliatesOn).
@@ -144,7 +154,9 @@ async function main(): Promise<void> {
   is("sent, and the email states the last day", [invited.ok, /It runs through [A-Z][a-z]+ \d{1,2}, \d{4}\./.test(mail?.text ?? "")], [true, true]);
   const open = await post({ action: "invite", email: "openpartner@example.com", percent: 10, products: [A] });
   const openMail = mails.find((m) => m.to === "openpartner@example.com");
-  is("without one, it says it runs until either side ends it", [open.ok, (openMail?.text ?? "").includes("It runs until you or the store end it.")], [true, true]);
+  // The partner cannot end it alone: the store ends it, or they ask it to (reviewer finding 1, #1924).
+  is("without one, it says who ends it", [open.ok, (openMail?.text ?? "").includes("It runs until the store ends it, or you ask it to.")], [true, true]);
+  is("and never that the partner ends it themselves", (openMail?.text ?? "").includes("you or the store end it"), false);
   is("a creator already here reads the same in their studio", offerWords({ id: "a1b2c3d4e5f6", sid: "s", storeName: "Terms Wired", handle: "termswired", share: { percent: 10, products: [A], until: Date.UTC(2027, 2, 5) / 1000 }, titles: ["Book"], at: 0 }).endsWith("It runs through March 4, 2027."), true);
 
   part("The screens");
@@ -159,7 +171,14 @@ async function main(): Promise<void> {
   is("the form sends which change it showed", page.includes('name="change" value={changeIdentity(askedChange)}'), true);
   is("the answer's notice is outside the share, so it shows when none is left", page.includes("{affiliate.share || partnerNotice ? (") && page.indexOf("{partnerNotice ? (") > page.indexOf("{affiliate.share ? (\n                      <>"), true);
   is("a store change at the same moment is said, not hidden", page.includes('status === "partner-busy" ? "busy"') && Object.values(AFFILIATES_WORDS).every((words) => words.partnerAnswered.busy.length > 40), true);
-  is("the studio says a share is only for someone approved", studio.includes("Only someone approved in your program can have a partner share."), true);
+  // A write whose answer was lost may have landed: never "Nothing changed" then (reviewer finding 4, #1924).
+  is("an answer whose outcome is unknown is said as such", page.includes('status === "partner-unsure" ? "unsure"'), true);
+  for (const [lang, words] of Object.entries(AFFILIATES_WORDS)) {
+    is(`${lang}: the partner's share is ended by the store, or on their asking`, [words.partnerRuns(null) !== AFFILIATES_WORDS.en.partnerRuns(null) || lang === "en", words.partnerRuns(null).length > 20], [true, true]);
+    is(`${lang}: an unknown outcome is not said to have changed nothing`, words.partnerAnswered.unsure !== words.partnerAnswered.busy && words.partnerAnswered.unsure.length > 40, true);
+  }
+  is("en: who ends a share until revoked", AFFILIATES_WORDS.en.partnerRuns(null), "It runs until the store ends it, or you ask it to.");
+  is("en: an unknown outcome", AFFILIATES_WORDS.en.partnerAnswered.unsure.includes("Nothing changed"), false);
   is("a refused removal says what to do instead, in the row's alert", studio.includes("their share runs to a set end date") && studio.includes("press End the partnership; it ends once they accept. Or wait until the end date, then remove them.") && studio.includes('role="alert"'), true);
   const en = AFFILIATES_WORDS.en;
   is("the words say the share stays until the answer", en.partnerAskedKeep("Dec 3, 2026"), "Until you answer, your share stays exactly as it is. If you have not answered by Dec 3, 2026, nothing changes.");

@@ -3,12 +3,13 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
+import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { AgreementsStudio } from "@/components/agreements-studio";
 import { can } from "@/lib/team-roles";
 import { formatMoney } from "@/lib/money";
 import { allowanceFor } from "@/lib/store-allowance-rules";
-import { allowanceUsed } from "@/lib/store-allowance";
+import { allowanceUsedExact } from "@/lib/store-allowance";
 import { agreementsAllowed } from "@/lib/agreement-rules";
 import { listAgreements } from "@/lib/agreement-store";
 import { agreementLink } from "@/lib/agreements";
@@ -38,7 +39,7 @@ export default async function StudioAgreementsPage({ searchParams }: Params) {
   const { view } = found;
   const { store } = view;
   const now = new Date().getTime();
-  const [rows, used, requests] = await Promise.all([listAgreements(store), allowanceUsed(store, "email", now), listRequests(store, now)]);
+  const [rows, used, requests] = await Promise.all([listAgreements(store), allowanceUsedExact(store, "email", now), listRequests(store, now)]);
   const payChoices = (requests ?? [])
     .filter((r) => requestStatus(r, now) === "open")
     .slice(0, 50)
@@ -55,7 +56,7 @@ export default async function StudioAgreementsPage({ searchParams }: Params) {
       />
       <StudioStorePin sid={store.sid}>
         <main id="content" className="container-page pb-20 pt-10 sm:pt-14">
-          <p className="eyebrow">Agreements</p>
+          <StudioTrail store={store} here="Agreements" />
           <h1 className="t-h2 mt-3">Proposals and agreements, signed with a link</h1>
           <p className="mt-3 max-w-2xl text-ink-soft">
             Write the terms in plain text, with lines and amounts if you want them, and send them to one person to sign. Marktmorgen records the

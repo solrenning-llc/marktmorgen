@@ -29,7 +29,11 @@ import { priceBounds, readMoney } from "@/lib/money";
 import { MAX_ABOUT_LENGTH, cleanAbout, dropAbout, readAbout, writeAbout } from "@/lib/product-about";
 import { jsonAccess, refusedJson } from "@/lib/studio-route";
 import { lockedFor } from "@/lib/two-step";
-import { dropPage } from "@/lib/sales-page-store";
+import { dropPage, picturesOfFailedDrop } from "@/lib/sales-page-store";
+import { finishLandingsDrop } from "@/lib/campaign-landing-store";
+
+/** A product's id, as the catalog makes it (lib/sales-page.ts PRODUCT_ID_PATTERN). */
+const PRODUCT_ID = /^[a-z0-9]{6,40}$/;
 import { dropThanksNote } from "@/lib/thanks-note-store";
 import { dropReviews } from "@/lib/reviews";
 import { guardStoreWrite, text } from "@/lib/store-request";
@@ -240,6 +244,8 @@ export async function POST(request: NextRequest) {
 
   try {
     let result: Outcome;
+    // A removal whose campaign landings could not be confirmed gone (lib/sales-page-store.ts PageDropIncomplete).
+    let cleanupPending = false;
     if (action === "add" || action === "edit") {
       const done =
         action === "add"
@@ -275,7 +281,15 @@ export async function POST(request: NextRequest) {
     } else if (action === "remove") {
       // Paid pre-orders wait for it (lib/preorders.ts): it stays until they
       // are handed over or refunded, so nobody paid for something deleted.
-      if ((await waitingCount(guarded.store, id)) > 0) {
+      // A count that cannot be read is unknown, never "nobody waits" (sweep APP3): 503, and the product is kept.
+      let waiting: number;
+      try {
+        waiting = await waitingCount(guarded.store, id);
+      } catch (error) {
+        console.error("could not read a product's pre-orders before removing it", error);
+        return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+      }
+      if (waiting > 0) {
         return Response.json({ ok: false, error: "preorders" }, { status: 409 });
       }
       // The product comes back as it was, so the storage its files used can
@@ -315,6 +329,14 @@ export async function POST(request: NextRequest) {
         }
       });
       result = removed.ok ? { ok: true, product: null } : removed;
+      // Asked again for a product already removed whose campaign landings were not confirmed gone then (Codex G,
+      // #1947): they are deleted now; not confirmed again, it is said, and can be asked again.
+      // Only a product's own id (never "<product>:gone" or any other key of the family: Codex G, #1947).
+      if (!removed.ok && removed.reason === "unknown" && id && PRODUCT_ID.test(id)) {
+        const finished = await finishLandingsDrop(guarded.store.statsId, id, guarded.store).catch(() => null);
+        if (finished === null) return Response.json({ ok: false, error: "unavailable", cleanupPending: true }, { status: 503 });
+        if (finished === "dropped") result = { ok: true, product: null };
+      }
       if (removed.ok) {
         const going = removed.product;
         const removedCourse = course as Awaited<ReturnType<typeof readCourseExact>>;
@@ -332,10 +354,17 @@ export async function POST(request: NextRequest) {
         }
         if (going.about) await dropAbout(removed.store.statsId, id, removed.store).catch(() => {});
         if (going.note) await dropThanksNote(removed.store.statsId, id, removed.store).catch(() => {});
-        // Its page of blocks, and the reviews of a product nobody can buy any more.
-        if (going.page) {
+        // Its page of blocks, and the reviews of a product nobody can buy any more. Dropped whether or not the
+        // product still shows a page: one emptied first keeps its versions and its campaigns' landings, which are
+        // kept by the product, not by its page (Claude 5 on #1947).
+        {
           // And the pictures on that page (lib/sales-page-store.ts).
-          const pictures = await dropPage(removed.store.statsId, id, removed.store).catch(() => [] as string[]);
+          // Anything not confirmed gone is said to the caller (cleanupPending), never a removal finished: the same
+          // removal asked again finishes its landings (finishLandingsDrop below), and a closed store's walk erases them.
+          const pictures = await dropPage(removed.store.statsId, id, removed.store).catch((error: unknown) => {
+            cleanupPending = true;
+            return picturesOfFailedDrop(error);
+          });
           had.push(...pictures.map((pathname) => ({ pathname })));
         }
         // And the photos buyers added to them (lib/reviews.ts).
@@ -426,7 +455,7 @@ export async function POST(request: NextRequest) {
     // everything that offered it does).
     const quiet =
       (action === "edit" || action === "visibility" || action === "remove") && id ? await silenced(ref, id) : [];
-    return Response.json({ ok: true, product: result.product, quiet: quiet.length ? quiet : undefined });
+    return Response.json({ ok: true, product: result.product, quiet: quiet.length ? quiet : undefined, cleanupPending: cleanupPending || undefined });
   } catch (error) {
     if (error instanceof StoreFullError) {
       return Response.json({ ok: false, error: "store_full" }, { status: 409 });

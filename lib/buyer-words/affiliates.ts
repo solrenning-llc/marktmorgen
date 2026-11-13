@@ -51,6 +51,7 @@ const en = {
       body: "The share it offers no longer fits what the store already promises on those products, so nothing was changed. Ask the store to send you a new one.",
     },
     error: { title: "Something went wrong on our side", body: "Nothing was changed. Try again in a moment." },
+    resting: { title: "This store can't take this right now", body: "Accepting checks the store's partners first, and the store can't take that many requests right now. Nothing was changed. Try again later, or write to the store." },
     expired: {
       title: "This link has expired",
       body: "An emailed link works once, within 24 hours. Ask for a new one below; it takes a few seconds.",
@@ -64,6 +65,7 @@ const en = {
       body: "This store decided on this address before. Write to the store if you think that should change.",
     },
     signedout: { title: "You are signed out on this browser", body: "To see your affiliate page again, ask for a new link below." },
+    "signedout-unknown": { title: "Your session may still be open on our side", body: "This browser is signed out, but we could not close your session on our side just now. It closes by itself within 30 days." },
   } as Record<string, { title: string; body: string }>,
 
   // ---- Applying -----------------------------------------------------------------
@@ -123,12 +125,12 @@ const en = {
     `${percent}% of what a buyer pays before tax on every sale of ${products} — whoever brought the buyer, and whether or not they came through your link. A refunded sale earns nothing, a partly refunded one earns on what was kept, and your own purchases never earn.`,
   sharedFallback: "the products you share in",
   /** How long the share runs: `until` is its last day, already written, or null for "until ended" (630 [HN6](39)). */
-  partnerRuns: (until: string | null) => (until === null ? "It runs until you or the store end it." : `It runs through ${until}.`),
+  partnerRuns: (until: string | null) => (until === null ? "It runs until the store ends it, or you ask it to." : `It runs through ${until}.`),
   /** A change the store asked for: `percent` null is ending it; `products` the titles, already joined. */
   partnerAsked: (store: string, percent: number | null, products: string, until: string | null) =>
     percent === null
       ? `${store} asks to end your partner share.`
-      : `${store} asks to change your partner share to ${percent}% of every sale of ${products}, ${until === null ? "until either of you ends it" : `through ${until}`}.`,
+      : `${store} asks to change your partner share to ${percent}% of every sale of ${products}, ${until === null ? "until the store ends it, or you ask it to" : `through ${until}`}.`,
   partnerAskedKeep: (by: string) => `Until you answer, your share stays exactly as it is. If you have not answered by ${by}, nothing changes.`,
   /** A share whose end has passed: `last` is its last day, already written. */
   partnerEnded: (last: string) => `Your partner share ended after ${last}. What you earned until then is still paid.`,
@@ -140,6 +142,7 @@ const en = {
     cap: "This change no longer fits what the store already promises on that product, so it was not applied. Your share stays as it was.",
     none: "That request is no longer open. The store may have changed it or taken it back. Nothing changed, and any new request is shown on this page.",
     busy: "Your answer was not saved, because the store was changing this at the same moment. Nothing changed. Read what this page shows now and answer again.",
+    unsure: "We could not confirm whether your answer was saved. Read what this page shows now: it shows your share as it stands, and any request still waiting for you.",
   },
   yourRate: (store: string, percent: number) =>
     `${store} set your share at ${percent}% of what a buyer pays before tax, on every one-time purchase through your link, except any product they took out of the program.`,
@@ -377,6 +380,9 @@ const en = {
   stopReviews: "Stop review requests",
   /** Said on the stop page when the last press was not saved; the button is offered again. */
   reviewsNotSaved: "We could not save that just now. Please try again.",
+  /** Said on a community stop page whose link could not be read just now (CX-123 rule 24): never "unknown", never stopped. */
+  linkNotReadTitle: "We could not open this link just now",
+  linkNotReadBody: "Please try again in a minute.",
 };
 
 export type AffiliatesWords = typeof en;
@@ -401,6 +407,7 @@ const es: AffiliatesWords = {
       body: "La participación que ofrece ya no cabe en lo que la tienda ya promete sobre esos productos, así que no se cambió nada. Pide a la tienda que te envíe una nueva.",
     },
     error: { title: "Algo salió mal por nuestra parte", body: "No se cambió nada. Inténtalo de nuevo en un momento." },
+    resting: { title: "Esta tienda no puede atender esto ahora", body: "Para aceptar, primero se comprueban los socios de la tienda, y la tienda no puede atender tantas solicitudes en este momento. No se cambió nada. Inténtalo más tarde o escribe a la tienda." },
     expired: {
       title: "Este enlace ha caducado",
       body: "Un enlace enviado por email funciona una sola vez, dentro de las 24 horas. Pide uno nuevo abajo; solo tarda unos segundos.",
@@ -414,6 +421,7 @@ const es: AffiliatesWords = {
       body: "Esta tienda ya tomó una decisión sobre esta dirección. Escribe a la tienda si crees que debería cambiar.",
     },
     signedout: { title: "Has cerrado sesión en este navegador", body: "Para volver a ver tu página de afiliado, pide un enlace nuevo abajo." },
+    "signedout-unknown": { title: "Puede que tu sesión siga abierta de nuestro lado", body: "Este navegador ha cerrado sesión, pero no pudimos cerrar tu sesión de nuestro lado ahora mismo. Se cierra sola en un plazo de 30 días." },
   },
 
   whereShare: "Dónde lo compartirías",
@@ -468,11 +476,11 @@ const es: AffiliatesWords = {
   partnerShare: (percent, products) =>
     `${percent}${S}% de lo que paga un comprador antes de impuestos en cada venta de ${products} — sin importar quién trajo al comprador, ni si llegó o no por tu enlace. Una venta reembolsada no genera nada, una reembolsada en parte genera sobre lo que se conservó, y tus propias compras nunca generan nada.`,
   sharedFallback: "los productos en los que participas",
-  partnerRuns: (until) => (until === null ? "Dura hasta que tú o la tienda la terminen." : `Dura hasta el ${until}, inclusive.`),
+  partnerRuns: (until) => (until === null ? "Dura hasta que la tienda la termine, o se lo pidas." : `Dura hasta el ${until}, inclusive.`),
   partnerAsked: (store, percent, products, until) =>
     percent === null
       ? `${store} pide terminar tu participación como socio.`
-      : `${store} pide cambiar tu participación como socio a ${percent}${S}% de cada venta de ${products}, ${until === null ? "hasta que uno de los dos la termine" : `hasta el ${until}, inclusive`}.`,
+      : `${store} pide cambiar tu participación como socio a ${percent}${S}% de cada venta de ${products}, ${until === null ? "hasta que la tienda la termine, o se lo pidas" : `hasta el ${until}, inclusive`}.`,
   partnerAskedKeep: (by) => `Hasta que respondas, tu participación sigue exactamente igual. Si no has respondido antes del ${by}, nada cambia.`,
   partnerEnded: (last) => `Tu participación como socio terminó después del ${last}. Lo que ganaste hasta entonces se sigue pagando.`,
   partnerAccept: "Aceptar el cambio",
@@ -483,6 +491,7 @@ const es: AffiliatesWords = {
     cap: "Este cambio ya no cabe en lo que la tienda ya promete sobre ese producto, así que no se aplicó. Tu participación sigue como estaba.",
     none: "Esa solicitud ya no está abierta. Puede que la tienda la haya cambiado o retirado. No cambió nada, y cualquier solicitud nueva aparece en esta página.",
     busy: "Tu respuesta no se guardó, porque la tienda estaba cambiando esto en ese mismo momento. No cambió nada. Lee lo que muestra esta página ahora y responde de nuevo.",
+    unsure: "No pudimos confirmar si tu respuesta se guardó. Lee lo que muestra esta página ahora: muestra tu participación tal como está y cualquier solicitud que siga esperándote.",
   },
   yourRate: (store, percent) =>
     `${store} fijó tu parte en el ${percent}${S}% de lo que paga un comprador antes de impuestos, en cada compra única hecha a través de tu enlace, excepto los productos que haya retirado del programa.`,
@@ -684,6 +693,8 @@ const es: AffiliatesWords = {
   reviewsFor: (email) => `Para ${email}. Con una sola pulsación dejan de llegar para siempre. Una reseña que ya escribiste se queda como está.`,
   stopReviews: "Dejar de recibir solicitudes de reseña",
   reviewsNotSaved: "No pudimos guardarlo ahora. Inténtalo de nuevo.",
+  linkNotReadTitle: "No pudimos abrir este enlace ahora",
+  linkNotReadBody: "Inténtalo de nuevo en un minuto.",
 };
 
 // ---- French ------------------------------------------------------------------------------------------
@@ -706,6 +717,7 @@ const fr: AffiliatesWords = {
       body: "La part qu'elle propose ne tient plus dans ce que la boutique promet déjà sur ces produits, rien n'a donc été modifié. Demandez à la boutique de vous en envoyer une nouvelle.",
     },
     error: { title: "Un problème est survenu de notre côté", body: "Rien n'a été modifié. Réessayez dans un instant." },
+    resting: { title: "Cette boutique ne peut pas traiter cela pour le moment", body: "Accepter vérifie d'abord les partenaires de la boutique, et la boutique ne peut pas traiter autant de requêtes pour le moment. Rien n'a été modifié. Réessayez plus tard ou écrivez à la boutique." },
     expired: {
       title: "Ce lien a expiré",
       body: `Un lien envoyé par e-mail ne fonctionne qu'une fois, dans les 24${S}heures. Demandez-en un nouveau ci-dessous${S}; cela ne prend que quelques secondes.`,
@@ -719,6 +731,7 @@ const fr: AffiliatesWords = {
       body: "Cette boutique a déjà pris une décision sur cette adresse. Écrivez à la boutique si vous pensez que cela devrait changer.",
     },
     signedout: { title: "Vous êtes déconnecté sur ce navigateur", body: "Pour revoir votre page d'affilié, demandez un nouveau lien ci-dessous." },
+    "signedout-unknown": { title: "Votre session est peut-être encore ouverte de notre côté", body: "Ce navigateur est déconnecté, mais nous n'avons pas pu fermer votre session de notre côté pour l'instant. Elle se ferme d'elle-même sous 30 jours." },
   },
 
   whereShare: "Où vous le partageriez",
@@ -772,11 +785,11 @@ const fr: AffiliatesWords = {
   partnerShare: (percent, products) =>
     `${percent}${S}% de ce qu'un acheteur paie hors taxes sur chaque vente de ${products} — quelle que soit la personne qui a amené l'acheteur, et qu'il soit passé ou non par votre lien. Une vente remboursée ne rapporte rien, une vente partiellement remboursée rapporte sur ce qui a été conservé, et vos propres achats ne rapportent jamais rien.`,
   sharedFallback: "les produits dont vous partagez les ventes",
-  partnerRuns: (until) => (until === null ? "Elle court jusqu'à ce que vous ou la boutique y mettiez fin." : `Elle court jusqu'au ${until} inclus.`),
+  partnerRuns: (until) => (until === null ? "Elle court jusqu'à ce que la boutique y mette fin, ou que vous le lui demandiez." : `Elle court jusqu'au ${until} inclus.`),
   partnerAsked: (store, percent, products, until) =>
     percent === null
       ? `${store} demande de mettre fin à votre part de partenaire.`
-      : `${store} demande de passer votre part de partenaire à ${percent}${S}% de chaque vente de ${products}, ${until === null ? "jusqu'à ce que l'un de vous deux y mette fin" : `jusqu'au ${until} inclus`}.`,
+      : `${store} demande de passer votre part de partenaire à ${percent}${S}% de chaque vente de ${products}, ${until === null ? "jusqu'à ce que la boutique y mette fin, ou que vous le lui demandiez" : `jusqu'au ${until} inclus`}.`,
   partnerAskedKeep: (by) => `Tant que vous n'avez pas répondu, votre part reste exactement la même. Sans réponse de votre part avant le ${by}, rien ne change.`,
   partnerEnded: (last) => `Votre part de partenaire a pris fin après le ${last}. Ce que vous avez gagné jusque-là reste payé.`,
   partnerAccept: "Accepter la modification",
@@ -787,6 +800,7 @@ const fr: AffiliatesWords = {
     cap: "Cette modification ne tient plus dans ce que la boutique promet déjà sur ce produit, elle n'a donc pas été appliquée. Votre part reste telle qu'elle était.",
     none: "Cette demande n'est plus ouverte. La boutique l'a peut-être modifiée ou retirée. Rien n'a changé, et toute nouvelle demande s'affiche sur cette page.",
     busy: "Votre réponse n'a pas été enregistrée, car la boutique modifiait cela au même moment. Rien n'a changé. Lisez ce que cette page affiche maintenant et répondez à nouveau.",
+    unsure: `Nous n'avons pas pu confirmer si votre réponse a été enregistrée. Lisez ce que cette page affiche maintenant${S}: votre part telle qu'elle est, et toute demande qui vous attend encore.`,
   },
   yourRate: (store, percent) =>
     `${store} a fixé votre part à ${percent}${S}% de ce qu'un acheteur paie hors taxes, sur chaque achat unique effectué via votre lien, sauf pour les produits retirés du programme.`,
@@ -989,6 +1003,8 @@ const fr: AffiliatesWords = {
   reviewsFor: (email) => `Pour ${email}. Une seule pression les arrête définitivement. Un avis que vous avez déjà écrit reste tel quel.`,
   stopReviews: "Arrêter les demandes d'avis",
   reviewsNotSaved: "Nous n'avons pas pu l'enregistrer pour le moment. Veuillez réessayer.",
+  linkNotReadTitle: "Nous n'avons pas pu ouvrir ce lien pour le moment",
+  linkNotReadBody: "Veuillez réessayer dans une minute.",
 };
 
 // ---- German ------------------------------------------------------------------------------------------
@@ -1011,6 +1027,7 @@ const de: AffiliatesWords = {
       body: "Die angebotene Beteiligung passt nicht mehr zu dem, was der Shop für diese Produkte schon zugesagt hat, deshalb wurde nichts geändert. Bitten Sie den Shop um eine neue Einladung.",
     },
     error: { title: "Bei uns ist etwas schiefgelaufen", body: "Es wurde nichts geändert. Versuchen Sie es gleich noch einmal." },
+    resting: { title: "Dieser Shop kann das gerade nicht bearbeiten", body: "Beim Annehmen werden zuerst die Partner des Shops geprüft, und der Shop kann gerade nicht so viele Anfragen bearbeiten. Es wurde nichts geändert. Versuchen Sie es später erneut oder schreiben Sie dem Shop." },
     expired: {
       title: "Dieser Link ist abgelaufen",
       body: "Ein per E-Mail gesendeter Link funktioniert einmal, innerhalb von 24 Stunden. Fordern Sie unten einen neuen an; das dauert nur ein paar Sekunden.",
@@ -1024,6 +1041,7 @@ const de: AffiliatesWords = {
       body: "Dieser Shop hat über diese Adresse bereits entschieden. Schreiben Sie dem Shop, wenn Sie meinen, dass sich das ändern sollte.",
     },
     signedout: { title: "Sie sind in diesem Browser abgemeldet", body: "Um Ihre Affiliate-Seite wieder zu sehen, fordern Sie unten einen neuen Link an." },
+    "signedout-unknown": { title: "Ihre Sitzung ist auf unserer Seite möglicherweise noch offen", body: "Dieser Browser ist abgemeldet, aber wir konnten Ihre Sitzung auf unserer Seite gerade nicht beenden. Sie endet von selbst innerhalb von 30 Tagen." },
   },
 
   whereShare: "Wo Sie es teilen würden",
@@ -1079,11 +1097,11 @@ const de: AffiliatesWords = {
   partnerShare: (percent, products) =>
     `${percent}${S}% dessen, was ein Käufer vor Steuern zahlt, bei jedem Verkauf von ${products} — egal, wer den Käufer gebracht hat und ob er über Ihren Link kam oder nicht. Ein erstatteter Verkauf bringt nichts ein, ein teilweise erstatteter bringt auf das ein, was behalten wurde, und Ihre eigenen Käufe bringen nie etwas ein.`,
   sharedFallback: "die Produkte, an denen Sie beteiligt sind",
-  partnerRuns: (until) => (until === null ? "Sie gilt, bis Sie oder der Shop sie beenden." : `Sie gilt bis einschließlich ${until}.`),
+  partnerRuns: (until) => (until === null ? "Sie gilt, bis der Shop sie beendet oder Sie ihn darum bitten." : `Sie gilt bis einschließlich ${until}.`),
   partnerAsked: (store, percent, products, until) =>
     percent === null
       ? `${store} bittet darum, Ihre Partnerbeteiligung zu beenden.`
-      : `${store} bittet darum, Ihre Partnerbeteiligung auf ${percent}${S}% jedes Verkaufs von ${products} zu ändern, ${until === null ? "bis einer von Ihnen beiden sie beendet" : `bis einschließlich ${until}`}.`,
+      : `${store} bittet darum, Ihre Partnerbeteiligung auf ${percent}${S}% jedes Verkaufs von ${products} zu ändern, ${until === null ? "bis der Shop sie beendet oder Sie ihn darum bitten" : `bis einschließlich ${until}`}.`,
   partnerAskedKeep: (by) => `Bis Sie antworten, bleibt Ihre Beteiligung genau so, wie sie ist. Wenn Sie bis zum ${by} nicht geantwortet haben, ändert sich nichts.`,
   partnerEnded: (last) => `Ihre Partnerbeteiligung endete nach dem ${last}. Was Sie bis dahin verdient haben, wird weiter ausgezahlt.`,
   partnerAccept: "Änderung annehmen",
@@ -1094,6 +1112,7 @@ const de: AffiliatesWords = {
     cap: "Diese Änderung passt nicht mehr zu dem, was der Shop für dieses Produkt schon zugesagt hat, deshalb wurde sie nicht übernommen. Ihre Beteiligung bleibt, wie sie war.",
     none: "Diese Anfrage ist nicht mehr offen. Der Shop hat sie vielleicht geändert oder zurückgenommen. Es hat sich nichts geändert, und eine neue Anfrage erscheint auf dieser Seite.",
     busy: "Ihre Antwort wurde nicht gespeichert, weil der Shop dies im selben Moment geändert hat. Es hat sich nichts geändert. Lesen Sie, was diese Seite jetzt zeigt, und antworten Sie erneut.",
+    unsure: "Wir konnten nicht bestätigen, ob Ihre Antwort gespeichert wurde. Lesen Sie, was diese Seite jetzt zeigt: Ihre Beteiligung, wie sie gerade ist, und jede Anfrage, die noch auf Sie wartet.",
   },
   yourRate: (store, percent) =>
     `${store} hat Ihren Anteil auf ${percent}${S}% dessen festgelegt, was ein Käufer vor Steuern zahlt, bei jedem Einmalkauf über Ihren Link, außer bei Produkten, die aus dem Programm genommen wurden.`,
@@ -1302,6 +1321,8 @@ const de: AffiliatesWords = {
     `Für ${email}. Ein Klick beendet sie endgültig. Eine Bewertung, die Sie bereits geschrieben haben, bleibt, wie sie ist.`,
   stopReviews: "Bewertungsanfragen stoppen",
   reviewsNotSaved: "Das konnten wir gerade nicht speichern. Bitte versuchen Sie es erneut.",
+  linkNotReadTitle: "Wir konnten diesen Link gerade nicht öffnen",
+  linkNotReadBody: "Bitte versuchen Sie es in einer Minute erneut.",
 };
 
 // ---- Italian -----------------------------------------------------------------------------------------
@@ -1324,6 +1345,7 @@ const it: AffiliatesWords = {
       body: "La quota che offre non rientra più in quanto il negozio promette già su quei prodotti, quindi non è stato cambiato nulla. Chiedi al negozio di inviartene uno nuovo.",
     },
     error: { title: "Qualcosa è andato storto da parte nostra", body: "Non è stato cambiato nulla. Riprova tra un momento." },
+    resting: { title: "Questo negozio non può gestirlo in questo momento", body: "Per accettare si controllano prima i partner del negozio, e il negozio non può gestire così tante richieste in questo momento. Non è stato cambiato nulla. Riprova più tardi o scrivi al negozio." },
     expired: {
       title: "Questo link è scaduto",
       body: "Un link inviato per email funziona una sola volta, entro 24 ore. Chiedine uno nuovo qui sotto; ci vogliono pochi secondi.",
@@ -1337,6 +1359,7 @@ const it: AffiliatesWords = {
       body: "Questo negozio ha già deciso su questo indirizzo. Scrivi al negozio se pensi che debba cambiare.",
     },
     signedout: { title: "Sei disconnesso su questo browser", body: "Per rivedere la tua pagina di affiliato, chiedi un nuovo link qui sotto." },
+    "signedout-unknown": { title: "La tua sessione potrebbe essere ancora aperta da parte nostra", body: "Questo browser è disconnesso, ma non siamo riusciti a chiudere la tua sessione da parte nostra in questo momento. Si chiude da sola entro 30 giorni." },
   },
 
   whereShare: "Dove lo condivideresti",
@@ -1390,11 +1413,11 @@ const it: AffiliatesWords = {
   partnerShare: (percent, products) =>
     `${percent}${S}% di quanto un acquirente paga al netto delle tasse su ogni vendita di ${products} — chiunque abbia portato l'acquirente, e che sia arrivato o no tramite il tuo link. Una vendita rimborsata non fa guadagnare nulla, una rimborsata in parte fa guadagnare su quanto è stato trattenuto, e i tuoi acquisti non fanno mai guadagnare.`,
   sharedFallback: "i prodotti a cui partecipi",
-  partnerRuns: (until) => (until === null ? "Dura finché tu o il negozio non la terminate." : `Dura fino al ${until} incluso.`),
+  partnerRuns: (until) => (until === null ? "Dura finché il negozio non la termina, o finché non glielo chiedi tu." : `Dura fino al ${until} incluso.`),
   partnerAsked: (store, percent, products, until) =>
     percent === null
       ? `${store} chiede di terminare la tua quota da partner.`
-      : `${store} chiede di cambiare la tua quota da partner in ${percent}${S}% di ogni vendita di ${products}, ${until === null ? "finché uno dei due non la termina" : `fino al ${until} incluso`}.`,
+      : `${store} chiede di cambiare la tua quota da partner in ${percent}${S}% di ogni vendita di ${products}, ${until === null ? "finché il negozio non la termina, o finché non glielo chiedi tu" : `fino al ${until} incluso`}.`,
   partnerAskedKeep: (by) => `Finché non rispondi, la tua quota resta esattamente com'è. Se non hai risposto entro il ${by}, non cambia nulla.`,
   partnerEnded: (last) => `La tua quota da partner è terminata dopo il ${last}. Quanto hai guadagnato fino ad allora viene comunque pagato.`,
   partnerAccept: "Accetta la modifica",
@@ -1405,6 +1428,7 @@ const it: AffiliatesWords = {
     cap: "Questa modifica non rientra più in quanto il negozio promette già su quel prodotto, quindi non è stata applicata. La tua quota resta com'era.",
     none: "Quella richiesta non è più aperta. Il negozio potrebbe averla modificata o ritirata. Non è cambiato nulla, e un'eventuale nuova richiesta compare in questa pagina.",
     busy: "La tua risposta non è stata salvata, perché il negozio stava modificando questo nello stesso momento. Non è cambiato nulla. Leggi cosa mostra ora questa pagina e rispondi di nuovo.",
+    unsure: "Non siamo riusciti a confermare se la tua risposta è stata salvata. Leggi cosa mostra ora questa pagina: la tua quota com'è adesso, e ogni richiesta che ti aspetta ancora.",
   },
   yourRate: (store, percent) =>
     `${store} ha fissato la tua quota al ${percent}${S}% di quanto un acquirente paga al netto delle tasse, su ogni acquisto singolo fatto tramite il tuo link, tranne i prodotti che ha escluso dal programma.`,
@@ -1609,6 +1633,8 @@ const it: AffiliatesWords = {
   reviewsFor: (email) => `Per ${email}. Basta un clic per fermarle per sempre. Una recensione che hai già scritto resta com'è.`,
   stopReviews: "Interrompi le richieste di recensione",
   reviewsNotSaved: "Non siamo riusciti a salvarlo ora. Riprova.",
+  linkNotReadTitle: "Non siamo riusciti ad aprire questo link ora",
+  linkNotReadBody: "Riprova tra un minuto.",
 };
 
 // ---- Dutch -------------------------------------------------------------------------------------------
@@ -1631,6 +1657,7 @@ const nl: AffiliatesWords = {
       body: "Het aandeel dat ze aanbiedt past niet meer bij wat de winkel al toezegt op die producten, dus er is niets gewijzigd. Vraag de winkel om een nieuwe uitnodiging.",
     },
     error: { title: "Er ging iets mis aan onze kant", body: "Er is niets gewijzigd. Probeer het zo meteen opnieuw." },
+    resting: { title: "Deze winkel kan dit nu niet verwerken", body: "Bij het accepteren worden eerst de partners van de winkel gecontroleerd, en de winkel kan nu niet zoveel aanvragen verwerken. Er is niets gewijzigd. Probeer het later opnieuw of schrijf de winkel." },
     expired: {
       title: "Deze link is verlopen",
       body: "Een gemailde link werkt één keer, binnen 24 uur. Vraag hieronder een nieuwe aan; dat duurt een paar seconden.",
@@ -1644,6 +1671,7 @@ const nl: AffiliatesWords = {
       body: "Deze winkel heeft eerder over dit adres beslist. Schrijf de winkel als je vindt dat dat moet veranderen.",
     },
     signedout: { title: "Je bent uitgelogd in deze browser", body: "Vraag hieronder een nieuwe link aan om je affiliatepagina weer te zien." },
+    "signedout-unknown": { title: "Je sessie staat aan onze kant mogelijk nog open", body: "Deze browser is uitgelogd, maar we konden je sessie aan onze kant nu niet sluiten. Hij sluit vanzelf binnen 30 dagen." },
   },
 
   whereShare: "Waar je het zou delen",
@@ -1697,11 +1725,11 @@ const nl: AffiliatesWords = {
   partnerShare: (percent, products) =>
     `${percent}${S}% van wat een koper vóór belasting betaalt, bij elke verkoop van ${products} — wie de koper ook heeft gebracht, en of die nu via je link kwam of niet. Een terugbetaalde verkoop levert niets op, een gedeeltelijk terugbetaalde levert op over wat is behouden, en je eigen aankopen leveren nooit iets op.`,
   sharedFallback: "de producten waarin je deelt",
-  partnerRuns: (until) => (until === null ? "Het loopt tot jij of de winkel het beëindigt." : `Het loopt tot en met ${until}.`),
+  partnerRuns: (until) => (until === null ? "Het loopt tot de winkel het beëindigt, of jij de winkel daarom vraagt." : `Het loopt tot en met ${until}.`),
   partnerAsked: (store, percent, products, until) =>
     percent === null
       ? `${store} vraagt je partneraandeel te beëindigen.`
-      : `${store} vraagt je partneraandeel te wijzigen in ${percent}${S}% van elke verkoop van ${products}, ${until === null ? "tot een van jullie het beëindigt" : `tot en met ${until}`}.`,
+      : `${store} vraagt je partneraandeel te wijzigen in ${percent}${S}% van elke verkoop van ${products}, ${until === null ? "tot de winkel het beëindigt, of jij de winkel daarom vraagt" : `tot en met ${until}`}.`,
   partnerAskedKeep: (by) => `Tot je antwoordt, blijft je aandeel precies zoals het is. Heb je op ${by} nog niet geantwoord, dan verandert er niets.`,
   partnerEnded: (last) => `Je partneraandeel is geëindigd na ${last}. Wat je tot dan verdiende, wordt nog steeds betaald.`,
   partnerAccept: "De wijziging accepteren",
@@ -1712,6 +1740,7 @@ const nl: AffiliatesWords = {
     cap: "Deze wijziging past niet meer bij wat de winkel al toezegt op dat product, dus is ze niet toegepast. Je aandeel blijft zoals het was.",
     none: "Dat verzoek staat niet meer open. De winkel heeft het misschien gewijzigd of ingetrokken. Er is niets veranderd, en een nieuw verzoek zie je op deze pagina.",
     busy: "Je antwoord is niet opgeslagen, omdat de winkel dit op hetzelfde moment wijzigde. Er is niets veranderd. Lees wat deze pagina nu toont en antwoord opnieuw.",
+    unsure: "We konden niet bevestigen of je antwoord is opgeslagen. Lees wat deze pagina nu toont: je aandeel zoals het nu is, en elk verzoek dat nog op je wacht.",
   },
   yourRate: (store, percent) =>
     `${store} heeft je aandeel vastgesteld op ${percent}${S}% van wat een koper vóór belasting betaalt, bij elke eenmalige aankoop via je link, behalve producten die uit het programma zijn gehaald.`,
@@ -1917,6 +1946,8 @@ const nl: AffiliatesWords = {
   reviewsFor: (email) => `Voor ${email}. Eén klik stopt ze voorgoed. Een beoordeling die je al hebt geschreven, blijft zoals hij is.`,
   stopReviews: "Stop de beoordelingsverzoeken",
   reviewsNotSaved: "We konden dat nu niet opslaan. Probeer het opnieuw.",
+  linkNotReadTitle: "We konden deze link nu niet openen",
+  linkNotReadBody: "Probeer het over een minuut opnieuw.",
 };
 
 // ---- European Portuguese -------------------------------------------------------------------------------
@@ -1943,6 +1974,7 @@ const pt: AffiliatesWords = {
       body: "A participação que oferece já não cabe no que a loja já promete sobre esses produtos, por isso nada foi alterado. Peça à loja um novo convite.",
     },
     error: { title: "Algo correu mal do nosso lado", body: "Nada foi alterado. Tente novamente daqui a pouco." },
+    resting: { title: "Esta loja não pode tratar disto agora", body: "Para aceitar, verificam-se primeiro os parceiros da loja, e a loja não consegue tratar tantos pedidos neste momento. Nada foi alterado. Tente novamente mais tarde ou escreva à loja." },
     expired: {
       title: "Esta ligação expirou",
       body: "Uma ligação enviada por email funciona uma vez, no prazo de 24 horas. Peça uma nova abaixo; demora poucos segundos.",
@@ -1956,6 +1988,7 @@ const pt: AffiliatesWords = {
       body: "Esta loja já decidiu sobre este endereço. Escreva à loja se achar que isso deve mudar.",
     },
     signedout: { title: "Terminou a sessão neste navegador", body: "Para voltar a ver a sua página de afiliado, peça uma nova ligação abaixo." },
+    "signedout-unknown": { title: "A sua sessão pode ainda estar aberta do nosso lado", body: "Este navegador terminou a sessão, mas não conseguimos fechar a sua sessão do nosso lado neste momento. Fecha-se sozinha no prazo de 30 dias." },
   },
 
   whereShare: "Onde o partilharia",
@@ -2010,11 +2043,11 @@ const pt: AffiliatesWords = {
   partnerShare: (percent, products) =>
     `${percent}${S}% do que um comprador paga antes de impostos em cada venda de ${products} — seja quem for que trouxe o comprador, e quer tenha vindo ou não pela sua ligação. Uma venda reembolsada não gera nada, uma parcialmente reembolsada gera sobre o que foi mantido, e as suas próprias compras nunca geram nada.`,
   sharedFallback: "os produtos em que participa",
-  partnerRuns: (until) => (until === null ? "Dura até que uma das partes lhe ponha fim." : `Dura até ${until}, inclusive.`),
+  partnerRuns: (until) => (until === null ? "Dura até que a loja lhe ponha fim, ou que lho peça." : `Dura até ${until}, inclusive.`),
   partnerAsked: (store, percent, products, until) =>
     percent === null
       ? `${store} pede para terminar a sua participação como parceiro.`
-      : `${store} pede para mudar a sua participação como parceiro para ${percent}${S}% de cada venda de ${products}, ${until === null ? "até que um dos dois lhe ponha fim" : `até ${until}, inclusive`}.`,
+      : `${store} pede para mudar a sua participação como parceiro para ${percent}${S}% de cada venda de ${products}, ${until === null ? "até que a loja lhe ponha fim, ou que lho peça" : `até ${until}, inclusive`}.`,
   partnerAskedKeep: (by) => `Até responder, a sua participação fica exatamente como está. Se não tiver respondido até ${by}, nada muda.`,
   partnerEnded: (last) => `A sua participação como parceiro terminou depois de ${last}. O que ganhou até lá continua a ser pago.`,
   partnerAccept: "Aceitar a alteração",
@@ -2025,6 +2058,7 @@ const pt: AffiliatesWords = {
     cap: "Esta alteração já não cabe no que a loja já promete sobre esse produto, por isso não foi aplicada. A sua participação fica como estava.",
     none: "Esse pedido já não está aberto. A loja pode tê-lo alterado ou retirado. Nada mudou, e qualquer pedido novo aparece nesta página.",
     busy: "A sua resposta não foi guardada, porque a loja estava a alterar isto no mesmo momento. Nada mudou. Leia o que esta página mostra agora e responda de novo.",
+    unsure: "Não conseguimos confirmar se a sua resposta foi guardada. Leia o que esta página mostra agora: a sua participação tal como está, e qualquer pedido que ainda espere por si.",
   },
   yourRate: (store, percent) =>
     `${store} fixou a sua parte em ${percent}${S}% do que um comprador paga antes de impostos, em cada compra única feita através da sua ligação, exceto os produtos que retirou do programa.`,
@@ -2229,6 +2263,8 @@ const pt: AffiliatesWords = {
   reviewsFor: (email) => `Para ${email}. Basta um clique para os parar de vez. Uma avaliação que já escreveu fica como está.`,
   stopReviews: "Parar os pedidos de avaliação",
   reviewsNotSaved: "Não conseguimos guardar isso agora. Tente novamente.",
+  linkNotReadTitle: "Não conseguimos abrir este link agora",
+  linkNotReadBody: "Tente novamente daqui a um minuto.",
 };
 
 export const AFFILIATES_WORDS: Record<LanguageCode, AffiliatesWords> = { en, es, fr, de, it, nl, pt };

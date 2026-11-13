@@ -6,18 +6,22 @@
  * percentage, other products or another end waits for the partner's yes,
  * and a share that runs to a date cannot be ended before it without that yes
  * either. Only a share "until revoked" can be ended by the creator alone,
- * because that is what both agreed to. Either way, what was already earned is
- * never touched: each earning keeps the percentage it was made at.
+ * because that is what both agreed to; the partner cannot end it alone, they
+ * ask the store to. Either way, what was already earned is never touched:
+ * each earning keeps the percentage it was made at, and a share the store
+ * ends keeps that moment as its end (`until`) rather than being cleared, so a
+ * sale paid before it and written down later still earns.
  *
  * Every step is kept in a short history both of them can read: started,
  * changed, ended, revoked, a change the store took back, and a change the
  * partner declined or that expired unanswered.
  *
- * Pure and browser-safe. Unit 2 keeps the waiting change and the history on
- * the partner's record (lib/affiliates.ts proposePartnerShare and
- * answerShareChange), checking the cap again when the partner says yes;
- * unit 3 wires the studio's route and screen and asks the partner on their
- * own page, together, so no screen says "saved" while a change waits.
+ * Pure and browser-safe. lib/affiliates.ts proposePartnerShare and
+ * answerShareChange keep the waiting change and the history on the partner's
+ * record, under the program's partner lock, each write a compare-and-swap of
+ * the record read; the cap is checked again when the partner says yes. The
+ * studio's route and screen and the partner's own page are wired together,
+ * so no screen says "saved" while a change waits.
  */
 import { type PartnerShare, parsePartnerShare } from "@/lib/partner-share";
 
@@ -36,8 +40,13 @@ const DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
  * (YYYY-MM-DD, from a date field) means the share earns through that whole
  * day, so it ends at the start of the next one, in UTC. The date has to be
  * after today and at most MAX_TERM_DAYS away; anything else is refused.
+ *
+ * `keep` is the end of the share in force, when it has one: that very end is
+ * accepted while it still runs, even on its own last day, so the creator can
+ * save the share as it stands (which withdraws a waiting change) without
+ * being told to pick another date (review of #1924).
  */
-export function readTermEnd(raw: unknown, nowSeconds: number): { ok: true; until: number | null } | { ok: false } {
+export function readTermEnd(raw: unknown, nowSeconds: number, keep?: number | null): { ok: true; until: number | null } | { ok: false } {
   if (raw === undefined || raw === null || raw === "" || raw === "revoked") return { ok: true, until: null };
   if (typeof raw !== "string") return { ok: false };
   const m = DATE.exec(raw.trim());
@@ -48,6 +57,7 @@ export function readTermEnd(raw: unknown, nowSeconds: number): { ok: true; until
   // 2027-02-30 is not a day; Date would quietly make it March 2.
   if (back.getUTCFullYear() !== y || back.getUTCMonth() !== mo - 1 || back.getUTCDate() !== d) return { ok: false };
   const until = start / 1000 + DAY;
+  if (typeof keep === "number" && until === keep && keep > nowSeconds) return { ok: true, until };
   if (until <= nowSeconds + DAY) return { ok: false };
   if (until > nowSeconds + (MAX_TERM_DAYS + 1) * DAY) return { ok: false };
   return { ok: true, until };
@@ -64,6 +74,11 @@ function sameProducts(a: string[], b: string[]): boolean {
   return b.every((id) => set.has(id));
 }
 
+/** The share ended at this moment, its percentage and products kept; one already over keeps its own end. */
+export function endedAt(share: PartnerShare, atSeconds: number): PartnerShare {
+  return { ...share, until: share.until === undefined ? atSeconds : Math.min(share.until, atSeconds) };
+}
+
 /** Whether two shares are the same agreement: percentage, products and end. */
 export function sameShare(a: PartnerShare, b: PartnerShare): boolean {
   return a.percent === b.percent && sameProducts(a.products, b.products) && (a.until ?? null) === (b.until ?? null);
@@ -72,11 +87,12 @@ export function sameShare(a: PartnerShare, b: PartnerShare): boolean {
 /**
  * What a creator's save does to an agreed share. `next` null is ending it.
  * - "same": nothing changes;
- * - "now": applies at once (ending a share "until revoked", or one already over);
+ * - "now": applies at once (ending a share "until revoked", or anything on a
+ *   share already over, which binds nobody any more: as for no share at all);
  * - "ask": waits for the partner's yes.
  */
 export function changeNeeds(current: PartnerShare, next: PartnerShare | null, nowSeconds: number): "same" | "now" | "ask" {
-  if (!shareRunning(current, nowSeconds)) return next === null ? "now" : "ask";
+  if (!shareRunning(current, nowSeconds)) return "now";
   if (next === null) return current.until === undefined ? "now" : "ask";
   return sameShare(current, next) ? "same" : "ask";
 }
@@ -133,14 +149,23 @@ export function readHistory(raw: unknown): TermStep[] {
 const longDate = (seconds: number) =>
   new Date(seconds * 1000).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
 
-/** The last day a share earns on, in words: the day before `until`. */
-export function lastDayWords(until: number): string {
-  return longDate(until - DAY);
+/**
+ * The last day a share earns on: the day of the last second before `until`.
+ * A date picked in the studio ends at the start of the next day, so this is
+ * that date; a share the store ended mid-day earned on part of that day.
+ */
+export function lastDaySeconds(until: number): number {
+  return until - 1;
 }
 
-/** How long a share runs, in a few plain words. */
+/** The last day a share earns on, in words. */
+export function lastDayWords(until: number): string {
+  return longDate(lastDaySeconds(until));
+}
+
+/** How long a share runs, in a few plain words, for the creator: only the store ends it (the partner asks the store to). */
 export function termWords(share: PartnerShare, nowSeconds: number): string {
-  if (share.until === undefined) return "Until you or they end it";
+  if (share.until === undefined) return "Until you end it";
   return nowSeconds < share.until ? `Through ${lastDayWords(share.until)}` : `Ended after ${lastDayWords(share.until)}`;
 }
 

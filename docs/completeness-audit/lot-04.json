@@ -1,0 +1,1142 @@
+{
+ "lote": 4,
+ "main": "d7bbf9d35",
+ "pedido": "C1-20261105-1919-C4-1 / C4-20261105-1925-C5-3",
+ "itens": [
+  {
+   "n": 192,
+   "etiqueta": "HT12",
+   "estado": "feito",
+   "prova_do_estado": "queue.md:4958 'Estado: Publicado; verificação integral e READY/domínio/SHA confirmados abaixo'; queue.md:5170 'Item192/PR722 incorporado em2026-10-20 15:13:26 de Fortaleza ... READY ... marktmorgen.com' (Publicação funcional 117); queue.md:634 'MQ1(b): já concluído/publicado'. GitHub: PR #722 incorporado em 2026-10-20T18:13:26Z, merge ea82a992a5f531b7a1e2c6a352a50681163b2bb3.",
+   "correcao_estado": "",
+   "pedidos": [
+    {
+     "o_que": "Cluster de guias evergreen em inglês: cursos, memberships, sessões pagas e afiliados, mais o guia de arquivo digital preservado e aprofundado (5 guias)",
+     "situacao": "presente",
+     "prova": "lib/evergreen-guides.ts:572 (CREATOR_GUIDE_SLUGS com os 5 slugs); lib/blog.ts:981 (guia de arquivo digital estendido mantendo a URL)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "FAQ visível com 3 perguntas por guia e FAQPage nos dados estruturados com exatamente as mesmas perguntas/respostas, junto do BlogPosting",
+     "situacao": "presente",
+     "prova": "app/blog/[slug]/page.tsx:199-201 (seção data-article-faq); components/structured-data.tsx:136 (FAQPage a partir de post.faq); tests/e2e/evergreen-guides.mjs (schema igual ao texto visível)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Links internos para as páginas de recurso e interligação do cluster",
+     "situacao": "presente",
+     "prova": "app/blog/[slug]/page.tsx:204 (nav 'More creator guides'); tests/evergreen-guides.test.ts (links /platform/ resolvidos por findPage)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Índice do blog que facilita encontrar o cluster",
+     "situacao": "presente",
+     "prova": "app/blog/page.tsx:56-59 (seção data-creator-guides)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "CTA existente para começar, respeitando vendas fechadas (PLANS_ON_SALE=false)",
+     "situacao": "presente",
+     "prova": "app/blog/[slug]/page.tsx:2 e :212 ('Paid plans and paid selling remain closed.')",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Uso/leitura de lib/learn.ts sem alterar acesso, idiomas ou identificadores",
+     "situacao": "presente",
+     "prova": "docs/ht12-evergreen-guides.md:6 (learn.ts inspecionado; nada alterado)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Testes unitários (URLs únicas, conteúdo substantivo, FAQ, links) e de navegador 390/1280 (FAQ visível = schema, CTA, aviso fechado, axe, largura, zero write)",
+     "situacao": "presente",
+     "prova": "tests/evergreen-guides.test.ts; tests/e2e/evergreen-guides.mjs, chamado em tests/e2e/store-copy.mjs:887",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Documentação do item",
+     "situacao": "presente",
+     "prova": "docs/ht12-evergreen-guides.md",
+     "onde_deveria_estar": ""
+    }
+   ],
+   "complemento": ""
+  },
+  {
+   "n": 193,
+   "etiqueta": "[HT15]",
+   "estado": "feito",
+   "prova_do_estado": "queue.md:4989 'Estado: Publicado; verificação integral e READY/domínio/SHA confirmados'; queue.md:5209 'Item193/PR723 incorporado em2026-10-20 15:38:25 de Fortaleza ... READY 2026-10-20T18:39:46Z'; queue.md:635 'MQ1(b): já concluído/publicado'.",
+   "correcao_estado": "",
+   "pedidos": [
+    {
+     "o_que": "Biblioteca privada em Growth reunindo páginas, funnel-starters, mail-starters/layouts de e-mail, sequências e saved-blocks (e, depois, estruturas de curso)",
+     "situacao": "presente",
+     "prova": "lib/template-library.ts:11-18; components/template-library.tsx:6-31; app/studio/growth/page.tsx:92-98",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Filtros por objetivo, tipo e texto",
+     "situacao": "presente",
+     "prova": "components/template-library.tsx:15-17 (Goal, library-type, type=search); tests/template-library.test.ts:11",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Prévias locais sem pedido ao servidor",
+     "situacao": "presente",
+     "prova": "components/template-library.tsx:26 (details 'Preview'); :20 ('Browsing public templates and filtering make no request')",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Seções salvas lidas só por botão explícito; falha mostrada como não confirmada, nunca vazia; sem identificador não lê",
+     "situacao": "presente",
+     "prova": "components/template-library.tsx:10 (loadSaved, mensagem 'could not be confirmed. This does not mean the library is empty'); :20",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "'Usar' abre rascunho não salvo / sequência pausada / prévia de setup, sem gravar, publicar ou enviar",
+     "situacao": "presente",
+     "prova": "components/template-library.tsx:13, :27 (libraryDestination); lib/template-library.ts:18 ('opens an unsaved paused draft and sends nothing')",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Testes de catálogo/filtros e de navegador 390/1280 sem escrita",
+     "situacao": "presente",
+     "prova": "tests/template-library.test.ts:11-64; tests/e2e/template-library.mjs; docs/ht15-template-library.md",
+     "onde_deveria_estar": ""
+    }
+   ],
+   "complemento": ""
+  },
+  {
+   "n": 194,
+   "etiqueta": "HT16",
+   "estado": "feito",
+   "prova_do_estado": "queue.md:5005 'Estado: Publicado; verificação integral e READY/domínio/SHA confirmados abaixo'; queue.md:5220 'Item194/PR724 incorporado em2026-10-20 15:40:40 de Fortaleza ... Móvel no head exato: 9 amostras, LCPmáx832ms/CLS0/interaçãomáx88ms' (Publicação funcional 119); queue.md:636 'MQ1(b): já concluído/publicado'. GitHub: PR #724 incorporado em 2026-10-20T18:40:40Z, merge 3ebd1dfb83e04740cdaf0f3dfa04b13da28dc144.",
+   "correcao_estado": "",
+   "pedidos": [
+    {
+     "o_que": "Duas capturas reais e distintas do próprio app (fixture fictícia, data e legenda honesta), com benefício, prova e CTA agrupados",
+     "situacao": "presente",
+     "prova": "components/studio-screens.tsx:17 (legenda 'Synthetic demo · actual interface · October 20, 2026'); app/platform/page.tsx:65; tests/e2e/public-trust-design.mjs:20-23; tests/e2e/home-studio-capture.mjs",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Home com cards limpos e conteúdo visível desde o início (sem entrada por opacidade); sinais de confiança na home",
+     "situacao": "presente",
+     "prova": "A home foi refeita pela decisão do dono VS1 (item 571, maquete aprovada em 30/10/2026, app/page.tsx:20-31); tests/e2e/public-trust-design.mjs:5-11 confere leitura sem fade e os links legais no rodapé da home; os quatro sinais de confiança ficaram em preços e recursos por essa decisão registrada",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Sinais de confiança verdadeiros (conta Stripe própria, exportação, cancelamento, política de reembolso) em preços e páginas de recurso, com links reais",
+     "situacao": "presente",
+     "prova": "components/trust-checks.tsx:10-13; app/pricing/page.tsx:70; components/topic-page.tsx:633; tests/e2e/public-trust-design.mjs:13-18",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Medição móvel antes/depois (LCP<2,5 s, interação<200 ms, CLS<0,1) com baseline publicado e candidato",
+     "situacao": "presente",
+     "prova": ".github/workflows/product-checks.yml:225-260 (job mobile-render, tests/e2e/mobile-render.mjs); tests/fixtures/mobile-render-before.json (baseline); resultado final registrado na fila queue.md:5224 (9 amostras, LCP máx. 832 ms, CLS 0, interação máx. 88 ms)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Documento do item com os resultados de depois da medição",
+     "situacao": "falta",
+     "prova": "docs/ht16-public-design.md:9 ainda diz 'Results pending; append measured evidence after complete new-head CI.' e :18 'Completion still awaits the final head's complete checks'; grep por '832' e '88' no documento não acha o resultado final, que só está na fila (Publicação funcional 119, queue.md:5224) e nos PRs #724/#728",
+     "onde_deveria_estar": "docs/ht16-public-design.md (linhas 9 e 18)"
+    }
+   ],
+   "complemento": "Complemento de completude (05/11/2026, C1-20261105-1919-C4-1): falta atualizar docs/ht16-public-design.md, que nas linhas 9 ('Results pending; append measured evidence after complete new-head CI.') e 18 ('Completion still awaits the final head's complete checks') ainda trata como pendente a medição móvel já feita; registrar ali o resultado do head publicado do PR #724 (merge 3ebd1dfb83e04740cdaf0f3dfa04b13da28dc144, 20/10/2026 15h40 Fortaleza): 9 amostras, LCP máx. 832 ms, CLS 0, interação máx. 88 ms, prova sintética de laboratório e não INP real, e dizer que a home desse documento foi depois substituída pela VS1 (item 571), com os sinais de confiança mantidos em /pricing e nas páginas de recurso."
+  },
+  {
+   "n": 195,
+   "etiqueta": "[HT17]",
+   "estado": "feito",
+   "prova_do_estado": "queue.md:5017 'Estado: Publicado; verificação integral e READY/domínio/SHA confirmados'; queue.md:5231 'Item195/PR725 incorporado em2026-10-20 15:45:07 de Fortaleza ... READY 2026-10-20T18:46:30Z'; queue.md:637 'já concluído/publicado'.",
+   "correcao_estado": "",
+   "pedidos": [
+    {
+     "o_que": "STUDIO_MESSAGES revisado com próximo passo claro, mantendo os códigos de erro",
+     "situacao": "presente",
+     "prova": "lib/studio-messages.ts:11; lib/option-confirmation.ts:22; tests/partner-copy.test.ts",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Página de erro global com referência e nova tentativa, sem prometer 'shortly'",
+     "situacao": "presente",
+     "prova": "app/error.tsx:22-30 (Reference: digest, 'Try again', 'Home page')",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "404 pede conferir o endereço e oferece Home/Help, sem inventar motivo",
+     "situacao": "presente",
+     "prova": "app/not-found.tsx:28-41",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Teste de navegador 390/1280 no 404 e documentação",
+     "situacao": "presente",
+     "prova": "tests/e2e/partner-copy.mjs; docs/ht17-partner-copy.md",
+     "onde_deveria_estar": ""
+    }
+   ],
+   "complemento": ""
+  },
+  {
+   "n": 196,
+   "etiqueta": "[HT10]",
+   "estado": "feito",
+   "prova_do_estado": "queue.md:5033 'Estado: implementado e absorvido na versão179; reconciliação documental23/10/2026 ... READY/domínio/SHAexato/5rotas comprovados na entrega179'.",
+   "correcao_estado": "",
+   "pedidos": [
+    {
+     "o_que": "Revisão de custo antes do código (delta zero)",
+     "situacao": "presente",
+     "prova": "docs/ht10-cost-review.md:25-29 (status histórico já reconciliado na linha 29)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Navegação entre pixels e atribuição com explicação visível de consentimento/GPC",
+     "situacao": "presente",
+     "prova": "components/pixel-editor.tsx:98 ('Global Privacy Control signal prevents advertising pixels. Attribution is a separate reading...'); components/attribution-table.tsx",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Confirmação estrita do retorno das duas gravações, rascunho preservado",
+     "situacao": "presente",
+     "prova": "tests/e2e/pixel-attribution-center.mjs:1-5 (respostas interceptadas, 390/1280); tests/e2e/store-copy.mjs:883",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "GPC prevalece sobre 'yes' antigo, no navegador e no servidor (allowedBy recusa Sec-GPC:1)",
+     "situacao": "presente",
+     "prova": "lib/ad-events.ts:476-477; lib/ad-consent.ts",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Documentação",
+     "situacao": "presente",
+     "prova": "docs/ht10-pixels-attribution.md",
+     "onde_deveria_estar": ""
+    }
+   ],
+   "complemento": ""
+  },
+  {
+   "n": 197,
+   "etiqueta": "HT11",
+   "estado": "em andamento",
+   "prova_do_estado": "queue.md:5064 'Estado: Avaliação concluída; reprovado por custo desconhecido; não implementado; aguardando dono para escopo/teto/reserva de operação'; queue.md:5312-5314 'HT11/HT13 — registro de custo incorporado, sem implantação das funcionalidades' (PR727, 20/10/2026 16h38 Fortaleza, conferido no GitHub: merge 9446c5c42209cc5038c984eaafe6e5b51aa762f4); queue.md:639 '197 [HT11] | B | MQ1(d): restante abaixo'; 197 segue na ordem vigente do Grupo B (queue.md:369 e 1583). A tabela LQ (queue.md:17062) que o dava como concluído foi desfeita pelo dono (LQ17, 28/10/2026 23h37). A avaliação está feita; a comunidade por estágio fica no Grupo B, dependendo de teto/escopo do dono.",
+   "correcao_estado": "",
+   "pedidos": [
+    {
+     "o_que": "Avaliar o custo de um espaço de comunidade para os criadores clientes, por estágio (Starting, First sales, Growing), pelo método de dimensionamento do Store assistant, nos 6 cenários plano/intervalo",
+     "situacao": "presente",
+     "prova": "docs/ht11-community-cost-review.md:3 (decisão de não abrir), :9-14 (Store/Studio/Scale mensal e anual: custo desconhecido, 'fail'), :16 (método: 100% dos direitos, pior mês, 12 janelas anuais, maior taxa, reservas)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Reaproveitar a comunidade e o acesso ao Discord existentes (verificar se servem a um espaço do Marktmorgen)",
+     "situacao": "presente",
+     "prova": "docs/ht11-community-cost-review.md:3 conclui que lib/community.ts e /studio/discord pertencem à comunidade do próprio criador e que não há destino do Marktmorgen nem mapa de papéis por estágio",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Implementar o espaço por estágio somente se a margem permitir, com custo zero ou limitado",
+     "situacao": "fora do escopo",
+     "prova": "Reprovado por custo de operação/moderação/teto desconhecido (docs/ht11-community-cost-review.md:9-16); depende de escopo, teto e reserva definidos pelo dono (queue.md:5064, 5314); fica no Grupo B (queue.md:639)",
+     "onde_deveria_estar": ""
+    }
+   ],
+   "complemento": ""
+  },
+  {
+   "n": 198,
+   "etiqueta": "HT13",
+   "estado": "duplicado",
+   "prova_do_estado": "queue.md:5075 'Duplicado do item 18 [E1]; não executar — todo o conteúdo a mais foi levado ao item 18 [E1] em 30/10/2026 (MQ3)'; queue.md:640 'MQ3(30/10/2026,13h45): Duplicado do item 18; não executar'; queue.md:1547 '198 [HT13] → 18 [E1]'; queue.md:17208 (LQ6). O item 18 recebeu as cláusulas (1)–(10) do 198 em queue.md:2352-2362.",
+   "correcao_estado": "",
+   "pedidos": [
+    {
+     "o_que": "Avaliação de custo do tutor de aluno (reprovada; tutor não implementado)",
+     "situacao": "presente",
+     "prova": "docs/ht13-student-tutor-cost-review.md; PR #727 incorporado em 2026-10-20T19:38:48Z (merge 9446c5c42209cc5038c984eaafe6e5b51aa762f4)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Restante (tutor futuro, só depois de nova avaliação de custo aprovada) absorvido pelo item 18 [E1]",
+     "situacao": "presente",
+     "prova": "queue.md:2352-2362 (complemento MQ3 no item 18 com as cláusulas (1)–(10) do 198)",
+     "onde_deveria_estar": ""
+    }
+   ],
+   "complemento": ""
+  },
+  {
+   "n": 199,
+   "etiqueta": "HT14",
+   "estado": "feito",
+   "prova_do_estado": "queue.md:5092 'Estado: implementado e absorvido na versão179; reconciliação documental23/10/2026'; queue.md:5296 'Item199/PR728 incorporado em2026-10-20 16:39:39 de Fortaleza ... READY' (Publicação funcional 122); queue.md:641 'MQ1(b): já concluído/publicado'. GitHub: PR #728 incorporado em 2026-10-20T19:39:39Z, merge 7002c8835a12a4fee76780d1cf31b5bacec68240.",
+   "correcao_estado": "",
+   "pedidos": [
+    {
+     "o_que": "Cálculo de custo próprio antes do código (custo incremental zero nos 6 cenários)",
+     "situacao": "presente",
+     "prova": "docs/ht14-cost-review.md (commit 413a2b67 anterior à implementação; linha 18 marca a redação pendente como histórica)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Planejador determinístico local de preço pela categoria da própria loja, com regra, amostra e faixa visíveis, sem projeções de venda/lucro",
+     "situacao": "presente",
+     "prova": "lib/offer-planning.ts:2-5 (proposeOfferPlan); docs/ht14-offer-planning.md",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Sugestão de estrutura de oferta (oferta extra só quando candidatos e Stripe/tax permitem), com condições indisponíveis explícitas",
+     "situacao": "presente",
+     "prova": "lib/offer-planning.ts; docs/ht14-offer-planning.md:7",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Aceitar/recusar como plano local editável não salvo, no editor de funis existente, protegido pelo leave guard, sem IA nem gravação",
+     "situacao": "presente",
+     "prova": "components/offer-planning.tsx; app/studio/funnels/page.tsx:1 e :205",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Testes unitários e de navegador 390/1280 (aceita/recusa/edita/descarta, regra, axe, zero POST/IA)",
+     "situacao": "presente",
+     "prova": "tests/offer-planning.test.ts; tests/e2e/offer-planning.mjs (chamado em tests/e2e/store-copy.mjs)",
+     "onde_deveria_estar": ""
+    }
+   ],
+   "complemento": ""
+  },
+  {
+   "n": 200,
+   "etiqueta": "B2-200",
+   "estado": "feito",
+   "prova_do_estado": "queue.md:5249 'Estado: concluído; PR729 incorporado em20/10/2026 17:25:41 de Fortaleza, publicação123 confirmada'; queue.md:642 'MQ1(b): já concluído/publicado'. Conferido no GitHub: PR #729 merge 3e56a89c3943f4545aae004c75a63820f42beb46 em 2026-10-20T20:25:41Z (17h25 Fortaleza).",
+   "correcao_estado": "",
+   "pedidos": [
+    {
+     "o_que": "O editor conserva o rascunho quando o título sugerido não é confirmado",
+     "situacao": "presente",
+     "prova": "components/page-editor.tsx:150 (HEADLINE_UNCONFIRMED_NOTE: 'Your current draft was kept'), :363-371 (o rascunho só muda com data.ok && data.value)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Explicar que tentativas iniciadas contam na franquia, sem prometer uso gratuito",
+     "situacao": "presente",
+     "prova": "components/page-editor.tsx:149-150 'Started attempts count toward your monthly writing allowance. Check your allowance before trying again.'",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Mensagem anunciada por status acessível",
+     "situacao": "presente",
+     "prova": "components/page-editor.tsx:1373-1374 (<p role=\"status\" aria-atomic=\"true\"> com testNote)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Remover a afirmação incorreta 'nothing was counted' do fluxo de título",
+     "situacao": "presente",
+     "prova": "grep 'nothing was counted' em components/page-editor.tsx: nenhuma ocorrência; as que restam (outreach-studio, numbers-ask, webhooks, quiz) são de outros fluxos",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Mesma chamada, reserva, tetos e tratamento de respostas (sem custo novo)",
+     "situacao": "presente",
+     "prova": "components/page-editor.tsx:358-362 (mesmo POST /api/store/ai kind headline)",
+     "onde_deveria_estar": ""
+    }
+   ],
+   "complemento": ""
+  },
+  {
+   "n": 201,
+   "etiqueta": "P0-BROWSERS-DEVICES",
+   "estado": "em andamento",
+   "prova_do_estado": "queue.md:5259 'Estado: em andamento; lacuna automatizada de criação inicial/publicação reconciliada no PR828 ... Lacunas manuais/aparelhos/AT/zoom real400%/BotID e incompletos axe continuam abertas, aguardando o dono'; queue.md:643 'MQ1(b): andamento/posição protegidos'. PR #828 conferido: merge 253c41a69398cf5719d46d935e75a417ec7ec5c0 em 2026-10-23T07:24:43Z.",
+   "correcao_estado": "",
+   "pedidos": [
+    {
+     "o_que": "Acrescentar Firefox e WebKit aos testes Playwright existentes, sem serviço pago, reprovando sem cair no Chromium",
+     "situacao": "presente",
+     "prova": ".github/workflows/product-checks.yml:274-277 (browser: [firefox, webkit], E2E_BROWSER); .github/workflows/accessibility-public-matrix.yml:55, accessibility-studio-matrix.yml:55, accessibility-signup-actions.yml:55, accessibility-product-actions.yml:55, accessibility-buyer-actions.yml:55 (chromium, firefox, webkit)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Jornadas home, preços, cadastro, criação de produto, publicação da loja, página da loja, checkout e área do comprador",
+     "situacao": "presente",
+     "prova": "tests/e2e/accessibility-public-matrix.mjs:20 (/, /pricing, /signin); tests/e2e/accessibility-signup-actions.mjs:138-189 (cadastro, primeira loja criada e recarregada anônima); tests/e2e/accessibility-product-actions.mjs (criar/publicar produto); tests/e2e/accessibility-buyer-actions.mjs:121-162 (checkout, recibo, biblioteca, pedidos do comprador)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Larguras 320, 390, 768, 1280 e 1920 px com modos espaçamento 1.4.12, movimento reduzido, alto contraste e reflow",
+     "situacao": "presente",
+     "prova": "tests/e2e/accessibility-buyer-actions.mjs:59, accessibility-signup-actions.mjs:59, accessibility-product-actions.mjs:54, accessibility-public-matrix.mjs:20, accessibility-studio-matrix.mjs:48 (baseline, text-spacing, reduced-motion, forced-colors, reflow-320)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "axe incluindo regras AAA e teclado",
+     "situacao": "presente",
+     "prova": "tests/e2e/accessibility-public-matrix.mjs:106, accessibility-product-actions.mjs:179, accessibility-studio-matrix.mjs:92 (tags wcag2aaa/wcag21aaa/wcag22aaa); accessibility-buyer-actions.mjs:101 e accessibility-signup-actions.mjs:127 (color-contrast-enhanced ligado); Tab em todas as matrizes e tests/e2e/accessibility-public-keyboard.mjs:115",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Zoom real de 400%, aparelhos reais (iPhone, Android, Windows/Edge, tablets), tecnologias assistivas e BotID de produção",
+     "situacao": "fora do escopo",
+     "prova": "Exigem aparelhos físicos/pessoas/serviço pago; registrados como lacuna aguardando o dono em docs/accessibility-browsers-devices.md:21-23,33 e queue.md:5259",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Corrigir falhas em PRs pequenos com prova antes e depois",
+     "situacao": "presente",
+     "prova": "queue.md:5323-5360 (falhas Firefox/WebKit registradas e corrigidas: autocomplete=off, hidratação, serviceWorkers:block, foco de 4px, selects)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Inventariar lacunas de aparelhos reais e custos de BrowserStack/Sauce Labs com fonte oficial e data, sem contratar",
+     "situacao": "presente",
+     "prova": "docs/accessibility-browsers-devices.md:19-28",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Calcular minutos de CI e outros custos",
+     "situacao": "presente",
+     "prova": "docs/accessibility-browsers-devices.md:11-15",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Inventário do item atualizado com a cobertura automatizada que já existe",
+     "situacao": "falta",
+     "prova": "docs/accessibility-browsers-devices.md:9 ainda diz que 'A matriz completa exigida (home, preços, cadastro, criação de produto, publicação da loja, página da loja, checkout, comprador;320/390/768/1280/1920px;...) ainda precisa ser acrescentada e verificada'; a seção de 23/10 (:30-36) só reconcilia accessibility-signup-actions. grep 'buyer-actions|product-actions|studio-matrix|public-matrix|public-keyboard' no documento: zero ocorrências, embora as cinco matrizes estejam no main",
+     "onde_deveria_estar": "docs/accessibility-browsers-devices.md (linha 9 e seção de reconciliação)"
+    },
+    {
+     "o_que": "Registro final de conclusão (data/hora Fortaleza, commits, testes, publicação, lacunas)",
+     "situacao": "prevista",
+     "prova": "O item segue em andamento com lacunas manuais aguardando o dono (queue.md:5259); o registro final vem com o encerramento",
+     "onde_deveria_estar": ""
+    }
+   ],
+   "complemento": "Complemento de completude (05/11/2026, C1-20261105-1919-C4-1): falta atualizar docs/accessibility-browsers-devices.md, cuja linha 9 ainda diz que a matriz completa (home, preços, cadastro, criação de produto, publicação da loja, página da loja, checkout e comprador, nas cinco larguras e nos modos AAA) 'ainda precisa ser acrescentada', embora o main já tenha as cinco matrizes nos três motores (tests/e2e/accessibility-public-matrix.mjs, accessibility-studio-matrix.mjs, accessibility-signup-actions.mjs, accessibility-product-actions.mjs e accessibility-buyer-actions.mjs, com os workflows .github/workflows/accessibility-*.yml); o documento deve listar essas matrizes e o que cada uma cobre, e manter abertas só as lacunas manuais (aparelhos reais, tecnologias assistivas, zoom real de 400% e BotID)."
+  },
+  {
+   "n": 232,
+   "etiqueta": "CA1",
+   "estado": "em andamento",
+   "prova_do_estado": "queue.md:5967 'Estado: na fila' (cabeçalho antigo), seguido das linhas de andamento queue.md:5969-6020: unidades 1, 2, 3, 4a, 4b1, 4b2, 4b3, 4b4a, 4b4b1, 4b4b2, 4b4c, 5 e 6 incorporadas; unidade de custo de contestação perdida do Codex concluída (queue.md:5995, PR #1463); última linha queue.md:6020 'Em andamento pelo Claude 2: 31/10/2026 16h33 Fortaleza, unidade 4c (escritas que acrescentam pela chave de API...)'. O GitHub confirma PR #1480 (unidade 4c, escritas da API) incorporado em 2026-10-31T20:21:52Z, merge c97ea3115fd411e8c04f0ad13c15387442b2a6c1, e PR #1299 (unidade 1) incorporado em 2026-10-30T20:03:20Z, merge 9ce9fe509214b9959ab99d5c3f19882aa999a094. Continua em andamento porque os prazos do escopo 5 (suspensão do painel e fechamento da loja, a 'unidade 4c' original de queue.md:5979) e pendências registradas da 4b não foram feitos.",
+   "correcao_estado": "",
+   "pedidos": [
+    {
+     "o_que": "Escopo 1: teste que falhe se lib/stripe-connect.ts deixar de criar contas com dashboard full, fees_collector stripe e losses_collector stripe; confirmação com fontes e data em docs/no-creator-default.md",
+     "situacao": "presente",
+     "prova": "tests/connect-configuration.test.ts:26-49; docs/no-creator-default.md:7-13 (PR #836, fonte Stripe lida em 23/10/2026)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Escopo 1: teste que falhe se qualquer cobrança de venda deixar de ser cobrança direta na conta do criador",
+     "situacao": "incerto",
+     "prova": "Há provas por jornada (Stripe-Account do criador, sem application_fee/transfer_data/on_behalf_of): tests/store-tips.test.ts, tests/call-packages.test.ts, tests/payment-requests.test.ts, tests/checkout-tax-journey.test.ts, tests/team-scheduling.test.ts, tests/subscription-checkout-version.test.ts:55 (docs/no-creator-default.md:15-27). grep por transfer_data/on_behalf_of em lib/ e app/ não acha nenhum uso, mas não há teste estrutural que cubra todos os caminhos de venda (lib/upsell.ts, lib/next-offer.ts, lib/call-series-billing.ts, lib/community-access.ts etc.), e docs/no-creator-default.md:45 diz que a prova exaustiva por todo caminho de venda/recuperação está incompleta; não foi possível confirmar se os testes próprios desses caminhos já conferem o cabeçalho Stripe-Account",
+     "onde_deveria_estar": "tests/ (teste estrutural de cobrança direta) — só se a conferência dos testes por caminho mostrar lacuna"
+    },
+    {
+     "o_que": "Escopo 2 (unidade 2): inventário de toda cobrança ao criador, antes ou depois do uso",
+     "situacao": "presente",
+     "prova": "docs/no-creator-default.md:100-120 (PR #1376, merge bb6965f2279cc15d911da17bdddaebf0d833a4b7)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Escopo 3 (unidade 3): nenhum uso pago depois; addToNextInvoice sem uso; teste que falha se um medidor voltar a dever",
+     "situacao": "presente",
+     "prova": "lib/watch-billing.ts:29-35 (owed: () => 0); tests/watch.test.ts (guarda de addToNextInvoice); docs/no-creator-default.md:124-126 (PR #1385, merge 02b86dca1ce14eec0c9f7a7f964e840b99536323); Termos sem a cobrança antiga",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Escopo 4: teste grátis exige cartão na Stripe no início e custo máximo dentro do teto de exposição revisado",
+     "situacao": "presente",
+     "prova": "lib/billing.ts:321 (payment_method_collection always) e :347 (missing_payment_method cancel); tests/billing-trial-policy.test.ts (PR #857, merge 6001673d); docs/funded-exposure-review.md:72-74 (escopo de exposição 'trial' com teto por ocorrência). Os valores revisados da exposição continuam nulos e a revisão comercial mantém as vendas fechadas (construído e fechado pela trava); a recalculação das exposições é do 465 [MR2]",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Escopo 5 (unidade 4a): no primeiro dia de renovação recusada, IA, e-mails, vídeo, envios, fotos, entregas e checkout param; loja no ar, nada apagado, aviso claro ao criador, Termos",
+     "situacao": "presente",
+     "prova": "lib/plan-standing.ts:43-72 (renewalUnpaid, costsPaused, costPauseCode) e :54 (costStandingOf); lib/plan.ts:260; components/renewal-unpaid-notice.tsx; lib/renewal-unpaid-words.ts; app/terms/page.tsx:774 (#renewal-unpaid); tests/renewal-unpaid.test.ts (PR #1392, merge d1cec40043e60181b20ccbb7488bf6e53956f13f)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Escopo 5 (unidade 4b): o que ainda roda nos números do plano — foto de avaliação, importações, integrações, ferramentas da agenda, webhooks, leituras e escritas da API/MCP",
+     "situacao": "presente",
+     "prova": "tests/review-photo-paused.test.ts (PR #1414); tests/import-paused.test.ts (PR #1421); lib/integration-pause.ts e tests/integrations-paused.test.ts (PR #1426); tests/host-tools-paused.test.ts (PR #1433); tests/webhook-test-paused.test.ts (PR #1437); tests/webhook-wait-paused.test.ts (PR #1442); tests/api-reads-paused.test.ts (PR #1451); lib/api-guard.ts:74 (apiAdder) e tests/api-writes-paused.test.ts (PR #1480); docs/no-creator-default.md:164-218",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Pendências registradas da 4b: loja com plano encerrado ainda aceita foto nova de avaliação; foto da página do criador (app/api/store/photo/route.ts) sem pausa; loja com plano encerrado ainda importa com os números da Store",
+     "situacao": "prevista",
+     "prova": "Registradas como próximas em queue.md:6001 ('Registrado para as próximas partes do 4b...') e queue.md:6003 ('para a 4c'); docs/no-creator-default.md:170 e :182 ('Recorded, not closed here'). grep de costsPaused/costPauseCode/standingOf em app/api/store/photo/route.ts: nenhum resultado",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Escopo 5 (unidade 4c original): prazos, definidos pelos custos, até a suspensão do painel e o fechamento da loja quando a Stripe mantiver o plano em past_due ou o encerrar, preservando exportação e exclusão",
+     "situacao": "prevista",
+     "prova": "Planejada em queue.md:5979 ('4c) prazos definidos pelos custos até a suspensão do painel e o fechamento da loja') e docs/no-creator-default.md:152 ('the deadlines ... unit 4c'). Não implementada: grep em lib/ e app/ por renewalUnpaidSince com prazo, 'UNPAID.*DAYS', 'suspend', 'closeAfterUnpaid' não acha regra de prazo; renewalUnpaidSince só alimenta a pausa (lib/plan-standing.ts:43-44, lib/billing-sync.ts:77-123)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Registro na fila de que a 4c original (prazos) continua pendente, já que o rótulo '4c' foi usado pelas escritas da API (PR #1480)",
+     "situacao": "falta",
+     "prova": "queue.md:6020 usa 'unidade 4c' para as escritas da API, e nenhuma linha posterior da fila diz que os prazos de suspensão/fechamento (a 4c de queue.md:5979) seguem por fazer; grep por 'suspensão do painel', 'fechamento da loja' e '4c)' na fila só acha queue.md:5979 e o texto do escopo em :6037. Sem esse registro, a conclusão da '4c' pode ser lida como fim do escopo 5",
+     "onde_deveria_estar": "docs/codex-queue.md, bloco do item 232 [CA1] (depois de queue.md:6020)"
+    },
+    {
+     "o_que": "Linhas de estado das unidades 1 e 4c na fila",
+     "situacao": "falta",
+     "prova": "queue.md:5971 diz que a unidade 1 (PR #1299) aguarda 'CI completo no head ... antes da fusão', mas o PR #1299 foi incorporado em 2026-10-30T20:03:20Z (17h03 Fortaleza), merge 9ce9fe509214b9959ab99d5c3f19882aa999a094; queue.md:6020 diz 'Em andamento pelo Claude 2' na 4c, mas o PR #1480 foi incorporado em 2026-10-31T20:21:52Z (17h21 Fortaleza), merge c97ea3115fd411e8c04f0ad13c15387442b2a6c1 (só citado de passagem em queue.md:250)",
+     "onde_deveria_estar": "docs/codex-queue.md, linhas 5971 e 6020 (bloco do item 232)"
+    },
+    {
+     "o_que": "Escopo 6 (unidade 5): contestação do pagamento pelo criador suspende os recursos cobertos e registra o caso; nunca revende o complemento contestado",
+     "situacao": "presente",
+     "prova": "lib/plan-dispute-rules.ts:36-124; lib/plan-disputes.ts e app/api/cron/plans/route.ts:8,84 (leitura diária); app/terms/page.tsx:783 (#plan-disputed); lib/assistant-billing.ts:34-35 (complemento contestado nunca revendido); tests/plan-dispute.test.ts (PR #1403, merge 2162a83519309955e96e482e58da0aedbae5f4f0)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Escopo 6: contestação perdida pelo Marktmorgen entra como custo no pior caso",
+     "situacao": "presente",
+     "prova": "lib/plan-payment-dispute-cost-rules.ts:4; tests/plan-payment-dispute-cost.test.ts (PR #1463, merge 980bcf27e99519cd8c7d3302b1f6e47f885bd0ac; queue.md:5995)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Escopo 7 (unidade 6): reembolso da garantia nunca devolve mais do que foi pago; custo consumido dentro do teto de exposição",
+     "situacao": "presente",
+     "prova": "lib/plan-refund-rules.ts:134 (planRefund) e tests/plan-refund-rules.test.ts (PR #1408, merge cdbddb76144d3b3cd7ce168cc676b31960b35abf); docs/funded-exposure-review.md:72 (escopo 'full refunds'). A regra ainda não é chamada: o botão de reembolso pertence ao 305 [SY1] (queue.md:5999-6000)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Unidade 1: reembolso de legendas não confirmado pela Stripe fica guardado, é conferido de novo, nunca em dobro",
+     "situacao": "presente",
+     "prova": "lib/auto-captions.ts; tests/auto-captions.test.ts; tests/refund-receipt.test.ts; docs/no-creator-default.md:83-97 (PR #1299, merge 9ce9fe509214b9959ab99d5c3f19882aa999a094)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Escopo 8: testes com Stripe simulada que falham se custo ocorrer antes do pagamento, se recurso com custo seguir ativo após cobrança recusada ou contestada, ou se uso for cobrado depois",
+     "situacao": "presente",
+     "prova": "tests/renewal-unpaid.test.ts, tests/plan-dispute.test.ts, tests/watch.test.ts, tests/*-paused.test.ts (sete arquivos citados acima), tests/billing-trial-policy.test.ts",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Atualizar Termos e textos ao criador junto do comportamento",
+     "situacao": "presente",
+     "prova": "app/terms/page.tsx:8-9, :774, :783 (RENEWAL_*_WORDS e DISPUTE_*_WORDS); docs/no-creator-default.md:210-216 (avisos, e-mail, Termos e página de desenvolvedores)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Pedido do Claude ao Codex: conferir se uma retomada de pausa pode aplicar mudança de plano pendente sem pagamento",
+     "situacao": "incerto",
+     "prova": "Não há resposta registrada na fila (grep 'Pending updates'/'pending update' só acha queue.md:5974 e docs/no-creator-default.md:120). No código, a pausa é recusada quando há mudança pendente (lib/plan-pause.ts:259, 'pending') e switchPlan recusa assinatura com pending_update (lib/billing.ts:1189); a retomada parece criar assinatura nova (restartPlan, lib/billing.ts:770-825), mas isso não foi conferido de ponta a ponta",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Documento do item sem afirmar como pendente o que já foi entregue",
+     "situacao": "falta",
+     "prova": "docs/no-creator-default.md:45 ('Remaining scope', de 23/10/2026) ainda diz que 'the complete creator-charge inventory, paid-before-use credit admission, ... first-failure suspension, disputes and guarantee exposure remain incomplete', mas o inventário (unidade 2, :100), a ausência de cobrança depois do uso (unidade 3, :124), a parada na primeira falha (unidade 4a, :128), as contestações (unidade 5, :154) e o teto do reembolso (unidade 6) já foram entregues",
+     "onde_deveria_estar": "docs/no-creator-default.md:43-45"
+    }
+   ],
+   "complemento": "Complemento de completude (05/11/2026, C1-20261105-1919-C4-1): falta (1) em docs/codex-queue.md, no bloco do item 232 [CA1], uma linha dizendo que a 'unidade 4c' original da linha 'Unidade 4 dividida pelo Claude (31/10/2026 02h10 Fortaleza)' (prazos, definidos pelos custos, até a suspensão do painel e o fechamento da loja quando a Stripe mantiver o plano em past_due ou o encerrar, preservando exportação e exclusão, junto com as pendências da loja de plano encerrado que ainda aceita foto nova de avaliação e importa com os números da Store, e a foto da página do criador em app/api/store/photo/route.ts sem pausa) continua por fazer, porque o rótulo '4c' foi usado pelas escritas da API do PR #1480; (2) atualizar em docs/codex-queue.md a linha 'Unidade 1: pronta e desligada, aguardando a abertura (vendas fechadas): PR #1299' (unidade 1: PR #1299 incorporado em 30/10/2026 17h03 Fortaleza, merge 9ce9fe509214b9959ab99d5c3f19882aa999a094) e a linha 'Em andamento pelo Claude 2: 31/10/2026 16h33 Fortaleza, unidade 4c' (unidade 4c, escritas da API: PR #1480 incorporado em 31/10/2026 17h21 Fortaleza, merge c97ea3115fd411e8c04f0ad13c15387442b2a6c1), que ainda dizem aguardando fusão e em andamento; (3) atualizar a seção 'Remaining scope' de docs/no-creator-default.md:43-45, que ainda dá como incompletos o inventário de cobranças, a ausência de cobrança depois do uso, a parada na primeira falha, as contestações e o teto do reembolso, já entregues pelas unidades 2, 3, 4a, 5 e 6; deixar ali só o que de fato falta (prazos de suspensão/fechamento, financiamento revisado do teste grátis e prova exaustiva de cobrança direta)."
+  },
+  {
+   "n": 243,
+   "etiqueta": "[CF6]",
+   "estado": "feito",
+   "prova_do_estado": "queue.md:6204 'Estado: OR: após o Bloco A...' (só posição); queue.md:6226 'Em andamento pelo Claude 2: 31/10/2026 23h40 ... ramo claude2/cf6-pricing-first-screen'; queue.md:323/325 '#1526 (243 [CF6]) aberto com incorporação automática'. GitHub: PR #1526 'CF6 complement: the plans on the first screen, each figure once per card, the terms once under the three cards' incorporado em 2026-11-01T05:47:33Z. A parte original (economia anual) já estava no código.",
+   "correcao_estado": "PR #1526, commit a19ba567b1fabc4a044f6c68cd83daeb32efd694, 01/11/2026 02h47 Fortaleza",
+   "pedidos": [
+    {
+     "o_que": "Economia exata do anual em relação a doze mensalidades, por plano, a partir de lib/plan.ts",
+     "situacao": "presente",
+     "prova": "components/home-parts.tsx:269, :311-312 ('... which is $X less: two months free'); lib/plan.ts:108, :143 (publishedYearSaving/yearSaving); components/pricing-cycle-controls.tsx:35",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Plano mais indicado destacado com o rótulo 'Recommended', nunca 'Most Popular'",
+     "situacao": "incerto",
+     "prova": "components/home-parts.tsx:285-288 destaca o plano com o rótulo 'Where to start' (comentário em :281 'The recommended plan is marked once'); 'Most Popular' não aparece em app/ nem components/. Buscas: 'Recommended', 'Most Popular', 'Where to start' em app/pricing, components/, lib/, tests/, docs/ e na fila; nenhuma decisão registrada troca o rótulo pedido por 'Where to start'. O espírito (rótulo honesto, sem popularidade inventada) está cumprido, mas o texto literal difere; decidir se vale como cumprido.",
+     "onde_deveria_estar": "components/home-parts.tsx:287"
+    },
+    {
+     "o_que": "Complemento 31/10 (1): planos com preço e limites na primeira tela; ferramentas e comparação abaixo",
+     "situacao": "presente",
+     "prova": "tests/e2e/pricing.mjs:59-71 (1280x720, planos e preços acima de 720 px); tests/pricing-card-repeats.test.ts:16 ('plans no longer first')",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Complemento (2): 'not open yet' só na faixa do topo e numa linha junto dos planos",
+     "situacao": "presente",
+     "prova": "tests/pricing-card-repeats.test.ts:13-14 e verificação 'no \"not open\" line' por cartão",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Complemento (3): cada número uma só vez por cartão",
+     "situacao": "presente",
+     "prova": "tests/pricing-card-repeats.test.ts:47-52; tests/e2e/pricing.mjs:74",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Complemento (4): Store sem marcação de incluído para recursos só de Studio/Scale",
+     "situacao": "presente",
+     "prova": "tests/pricing-card-repeats.test.ts:57-60 ('Store marks as included only what it has')",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Complemento (5): parágrafos técnicos de upload, armazenamento e data room dentro do expansor",
+     "situacao": "presente",
+     "prova": "tests/pricing-card-repeats.test.ts:51 ('upload, storage and data-room details are in its itemized list')",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Complemento (6): condições uma só vez abaixo dos três planos",
+     "situacao": "presente",
+     "prova": "tests/e2e/pricing.mjs:75 ('[data-plan-terms]' count 1); tests/pricing-card-repeats.test.ts:50",
+     "onde_deveria_estar": ""
+    }
+   ],
+   "complemento": ""
+  },
+  {
+   "n": 269,
+   "etiqueta": "KT3",
+   "estado": "não iniciado",
+   "prova_do_estado": "queue.md:6492 'Estado: OR: após o Bloco A ... Registro de posição'; queue.md:6462 '267[KT1],268[KT2],269[KT3]: **na fila**'; queue.md:711 e :1227 (Grupo B, posição 14, MQ2); queue.md:6226 (complemento do 243 [CF6], 31/10/2026: 'Coordenado com 224 [HL5] e 269 [KT3] sem refazê-los'). Nenhuma linha de andamento, PR ou ramo: busca no GitHub por 'KT3' e 'creator stage' não acha PR deste item.",
+   "correcao_estado": "",
+   "pedidos": [
+    {
+     "o_que": "Descrever cada plano pelo estágio do criador (Store para quem começa, Studio para quem cresce, Scale para quem amplia), com os limites reais de lib/plan.ts ao lado, sem prometer resultado, na página de preços e na do 245 [SP2]",
+     "situacao": "incerto",
+     "prova": "Item não iniciado. Já existe uma linha 'bestFor' por plano em components/home-parts.tsx:400, :408 e :416, mas só a do Scale fala em estágio ('For an established business...'); as do Store e do Studio descrevem o uso, não o estágio. grep por 'stage', 'starting out', 'just starting', 'growing' em lib/plan.ts, components/home-parts.tsx e app/pricing/page.tsx não acha a descrição por estágio pedida",
+     "onde_deveria_estar": ""
+    }
+   ],
+   "complemento": ""
+  },
+  {
+   "n": 270,
+   "etiqueta": "[GR1]",
+   "estado": "em andamento",
+   "prova_do_estado": "queue.md:6760 'Andamento (Claude 2, 01/11/2026): unidade 1 ... incorporada em 01/11/2026 (#1592)... Unidades 2, 3a, 3b-i, 3b-ii, 3c testadas num PR ... Próxima: os tipos nas automações'; queue.md:6763 'Estado: na fila. Posição vigente...' (desatualizado). GitHub confirma incorporados: #1592 (30435285e09683a9eef4ff581d45006717956e6b, 01/11 10h07), #1721 (c2058ba986b9bb18508b105d63811080123fa65c, 02/11 09h45), #1722 (1a3f42d1f6fd215bf8ebe3f6960f44cd67a4fe89, 02/11 10h23), #1723 (9bad8bfb4eccd942685cf152c8750c97fb87fd42, 02/11 14h40), #1724 (24fe4dfdeca75fa4f4799d2e2d2642c9dfcc0c5c, 02/11 14h44), #1725 (9dd12496430d49218a0245e2e47b0c7eeac7571c, 02/11 14h48), horários de Fortaleza; a linha de andamento ainda diz 'testada num PR' para 2–3c. Item continua em andamento (automações e complemento de 30/10 pendentes).",
+   "correcao_estado": "PR #1592 e PRs #1721 a #1725 (unidades 1, 2, 3a, 3b-i, 3b-ii e 3c); o item continua em andamento",
+   "pedidos": [
+    {
+     "o_que": "Recência, frequência e valor por comprador, do Stripe do criador e das compras importadas",
+     "situacao": "presente",
+     "prova": "lib/rfm-rules.ts:1-30; lib/segments.ts:44 (livro nl:stats:<id>:ledger); lib/stats.ts:1271, :1305, :1342 (faturas, renovações, contestações)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Grupos prontos explicados em linguagem simples, com o critério visível e contagem por grupo",
+     "situacao": "presente",
+     "prova": "lib/rfm-rules.ts:24 (seis grupos); components/email-studio.tsx:742, :791-793 (contagem kinds); tests/rfm-rules.test.ts:17-38; tests/rfm-audience.test.ts:16-27",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Usar cada grupo como segmento nos e-mails em massa",
+     "situacao": "presente",
+     "prova": "lib/segments-rules.ts:21, :51, :74-76 (campo group, sameNarrow); components/email-studio.tsx:102, :159",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Usar cada grupo nas automações já existentes",
+     "situacao": "prevista",
+     "prova": "queue.md:6760 'Próxima: os tipos nas automações'; hoje a sequência recusa esse filtro (components/email-studio.tsx:102, :269)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Somente para quem aceitou contato",
+     "situacao": "presente",
+     "prova": "o filtro só estreita o público da lista já consentida (lib/segments.ts; tests/segments.test.ts); queue.md:6760 descreve revisão independente de que nenhum caminho amplia o público",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Custo de leitura e armazenamento em lotes com teto automático",
+     "situacao": "presente",
+     "prova": "tests/store-data-registry.ts:837 ('Buyers ledger, cached ten minutes', teto ALL_TIME_PAGES); lib/segments.ts:124-155 (leitura limitada por GETRANGE)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Complemento 30/10 (1): filtros 'Bought between', 'at least/at most N times', 'Spent between', 'Buys about every N days'",
+     "situacao": "prevista",
+     "prova": "Ausentes no código: busca por boughtBetween, maxSpent, minOrders, maxOrders, 'Buys about every', 'Spent between' em lib/, components/, app/ sem resultado; lib/segments-rules.ts:17-28 tem só minSpent, channel, quietDays, group, activeDays. Registrados no próprio item (complemento GR de 30/10, queue.md:6768-6790) como trabalho deste item em andamento.",
+     "onde_deveria_estar": "lib/segments-rules.ts, lib/segments.ts, components/email-studio.tsx"
+    },
+    {
+     "o_que": "Complemento (1): 'Last bought within' 30–365 dias",
+     "situacao": "presente",
+     "prova": "lib/segments-rules.ts:22-27, :34 (activeDays 30/60/90/180, entregue pelo 461 [EL5], PR #1781); o valor 365 do complemento não está em ACTIVE_DAYS (fica com o EL5/GR1)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Complemento (1): 'Clicked an email within'",
+     "situacao": "prevista",
+     "prova": "queue.md:12712 (461 [EL5]): a parte dos cliques fica para depois do PR #1491, porque lib/mail-clicks.ts não guarda a data de cada clique",
+     "onde_deveria_estar": "lib/segments-rules.ts"
+    },
+    {
+     "o_que": "Complemento (2)-(3): botão 'Pick the best contacts for this email', nota sem IA, motivos, 'only the best N'/'above this score' limitado à cota",
+     "situacao": "prevista",
+     "prova": "Busca por 'Pick the best', 'best contacts', score de contato em components/ e lib/ sem resultado; lib/interest-score.ts (268 [KT2]) existe como base. Registrado no complemento do item (queue.md:6779-6786).",
+     "onde_deveria_estar": "components/email-studio.tsx, lib/segments.ts"
+    },
+    {
+     "o_que": "Complemento (5): frase na tela explicando que abertura não é usada",
+     "situacao": "prevista",
+     "prova": "depende do botão do item (2); registrado no complemento",
+     "onde_deveria_estar": "components/email-studio.tsx"
+    },
+    {
+     "o_que": "Complemento (6): IA só pelo 372 [SU5]",
+     "situacao": "fora do escopo",
+     "prova": "pertence ao item 372 [SU5]",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Complemento (7): política de privacidade descreve a nota e a escolha de público pelas compras",
+     "situacao": "prevista",
+     "prova": "app/privacy/page.tsx sem menção a 'kind of buyer'/segmentação por compras; queue.md:6760 registra como achado para decisão do dono (texto jurídico, junto do 268 [KT2])",
+     "onde_deveria_estar": "app/privacy/page.tsx"
+    }
+   ],
+   "complemento": ""
+  },
+  {
+   "n": 273,
+   "etiqueta": "BK1",
+   "estado": "em andamento",
+   "prova_do_estado": "queue.md:6880 'Estado (MQ3, 30/10/2026, 13h45): iniciado — PR #785 ... e PR #786 ... incorporados'; queue.md:6883 'Incorporado pelo Claude 2 em 31/10/2026 20h00 Fortaleza, PR #1507 ... Estado: incorporado e desligado ... Falta: escritor real da restauração, formato em partes acima de 4 MiB, rotina diária, retenção, aviso de duas falhas, pacotes dos repositórios, cópia dos arquivos e o teto de custo revisado'. O registro da fila está atrasado: depois dele o GitHub mostra incorporados #1511 (rotina diária desligada, absorveu #1508; 2581c2d7dce6fa783d4bf09090e028ec7d9acd3d, 31/10/2026 21h39 Fortaleza), #1516 (escritor da restauração; b9b432b3d3d5119fb0950a0656b6d5ba921d3362, 31/10/2026 23h20), #2219 (cópia em partes; af812a61bc448dcd86c56611dcb9692f02a763c9, 04/11/2026 16h42) e #2175 (custo no pior caso e tetos da rotina; 48608a85e8bf9b10c95e6ad0451a9eb7b03925b1, 05/11/2026 07h46). Continua em andamento: BACKUP_COST_REVIEW é null, nada agenda a rotina, faltam pacotes git, cópia dos arquivos e entrega do aviso.",
+   "correcao_estado": "",
+   "pedidos": [
+    {
+     "o_que": "1. Inventário em docs/backup.md (Redis, R2/Blob, SES em infra/, repositórios marktmorgen/kudobox/solrenning), dizendo se há cópia e o que falta",
+     "situacao": "presente",
+     "prova": "docs/backup.md:4-11",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "1. Lista dos NOMES das variáveis de ambiente da Vercel no inventário",
+     "situacao": "falta",
+     "prova": "docs/backup.md:11 registra só 'Source references only | Names-only authenticated inventory not yet completed'; nenhum arquivo do repositório lista esses nomes (busca em docs/, .env*, docs com 'variable names', 'names-only'); a lista do que falta (queue.md:6883 e docs/backup.md:56) não a inclui como próxima unidade",
+     "onde_deveria_estar": "docs/backup.md (tabela do inventário, linha 'Vercel variable names')"
+    },
+    {
+     "o_que": "2. Exportar todas as chaves do Marktmorgen em lotes com teto de comandos",
+     "situacao": "presente",
+     "prova": "lib/backup-export.ts (exportSnapshot: SCAN MATCH nl:*, DUMP base64, PEXPIRETIME, maxCommands antes de qualquer DUMP); tests/backup-export.test.ts; docs/backup.md:47-56",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "2. Comprimir e criptografar com chave guardada só em variável de ambiente",
+     "situacao": "presente",
+     "prova": "lib/backup-codec.ts (gzip + AES-256-GCM); lib/backup-run.ts:230 (backupKey, BACKUP_ENCRYPTION_KEY); docs/backup.md:24-27,68",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "2. Gravar num bucket R2 separado do dos arquivos vendidos",
+     "situacao": "presente",
+     "prova": "lib/backup-store.ts (BACKUP_R2_* recusando R2_BUCKET/R2_ACCESS_KEY_ID; gravação só de criação If-None-Match); docs/backup.md:57-58",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "2. Conferir depois de gravar que abre, descriptografa e tem o número de chaves; em falha, registrar e tentar de novo sem apagar o backup anterior",
+     "situacao": "presente",
+     "prova": "lib/backup-roundtrip.ts (leitura de volta e comparação); lib/backup-run.ts:31-60, 314-318 (dia com falha não apaga nada; última cópia boa mantida); tests/backup-run.test.ts, tests/backup-roundtrip.test.ts",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "2. Formato em partes para banco acima de 4 MiB",
+     "situacao": "presente",
+     "prova": "lib/backup-parts.ts; lib/backup-run.ts:68 (copyInParts, manifestBound); tests/backup-parts.test.ts (PR #2219)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "2. Execução diária por cron da Vercel (sem minutos do GitHub Actions), pronta e desligada até as variáveis existirem",
+     "situacao": "prevista",
+     "prova": "A rotina existe e está desligada (lib/backup-run.ts:97 BACKUP_COST_REVIEW = null), mas nenhuma rota nem vercel.json a agenda (docs/backup.md:70); 'rotina diária' consta como próxima em queue.md:6883",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "3. Conferência diária de cópia dos arquivos vendidos/enviados, ou registro de que a durabilidade do fornecedor basta",
+     "situacao": "prevista",
+     "prova": "Nada construído (busca por backup de arquivos/vault em lib/backup-*.ts); listado como falta em queue.md:6883 ('cópia dos arquivos') e docs/backup.md:56",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "4. Pacote git bundle diário de marktmorgen, kudobox e solrenning no bucket de backup",
+     "situacao": "prevista",
+     "prova": "Nada construído (busca 'bundle' em lib/backup-*.ts); listado em queue.md:6883 ('pacotes dos repositórios') e docs/backup.md:56",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "5. Retenção com apagamento automático",
+     "situacao": "presente",
+     "prova": "lib/backup-run.ts:31-60, 135-159 (a rotina apaga as cópias além de retentionDays; regra de ciclo de vida como rede de segurança). A retenção de 30 dias diários, sem os semanais de 3 meses, foi aprovada pelo dono (docs/agent-inbox.md:1004-1005, C4-27), o que o item permite ('Ajuste esses prazos')",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "6. Privacidade: backups criptografados e de acesso restrito, e texto da política de privacidade sobre retenção e exclusão, em vigor junto com o recurso",
+     "situacao": "prevista",
+     "prova": "Criptografia e bucket próprio presentes (lib/backup-codec.ts, lib/backup-store.ts); a política ainda não fala de backup (grep 'backup' em app/privacy: nada), corretamente, porque o texto deve entrar junto com a ativação (docs/backup.md:36, pré-requisito 7)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "7. Teste automatizado que restaura um backup sintético num banco simulado e confere que os dados voltam iguais",
+     "situacao": "presente",
+     "prova": "tests/backup-export.test.ts (restoreSnapshot num banco vazio simulado, tipos/valores/fim iguais); tests/backup-codec.test.ts; tests/backup-restore-target.test.ts; lib/backup-restore-target.ts",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "7. Passo a passo de restauração completa em docs/backup.md",
+     "situacao": "prevista",
+     "prova": "docs/backup.md:38-40 (roteiro marcado como pré-requisito, não operacional) e :72-78 (escritor da restauração); a restauração dos arquivos e dos repositórios depende das unidades 3 e 4 ainda previstas e do ensaio real (docs/backup.md:78)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "8. Aviso automático de duas falhas seguidas no relatório de verificações diárias",
+     "situacao": "prevista",
+     "prova": "A verificação existe (lib/backup-run.ts:505 backupStale), mas nada a usa fora do arquivo e 'the report's delivery' não foi construída (docs/backup.md:56,70); listado em queue.md:6883 ('aviso de duas falhas')",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "9. Custo máximo mensal de cada parte, teto automático em cada uma e prova da regra de margem",
+     "situacao": "prevista",
+     "prova": "docs/backup-cost-2026-11-04.md (revisão preparada, 'not admitted'); lib/backup-cost.ts; lib/llc-fixed-costs.ts:31 (approvedCeiling: false); tetos da rotina em lib/backup-run.ts (PR #2175). Falta a revisão admitida: listado em queue.md:6883 ('teto de custo revisado')",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Passo a passo do que o dono precisa fazer, sem criar contas/buckets/chaves pelo agente",
+     "situacao": "presente",
+     "prova": "docs/backup.md:29-37 (pré-requisitos do dono); docs/agent-inbox.md:998-1000 (C4-25: bucket e chave já criados pelo dono)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Documento sem dizer pendente o que já foi entregue",
+     "situacao": "falta",
+     "prova": "docs/backup.md:56 ('Still missing, in order: ... the format in parts for a database over 4 MiB') e docs/backup.md:70 ('Not done: ... the format in parts for a database over 4 MiB') continuam dizendo que o formato em partes falta, mas o PR #2219 (incorporado em 04/11/2026 16h42 Fortaleza) entregou lib/backup-parts.ts, já usado por lib/backup-run.ts:68",
+     "onde_deveria_estar": "docs/backup.md:56 e docs/backup.md:70"
+    }
+   ],
+   "complemento": "Complemento de completude (05/11/2026, C1-20261105-1919-C4-1): falta (1) a lista dos NOMES (nunca os valores) das variáveis de ambiente da Vercel no inventário de docs/backup.md, cuja linha 11 só diz 'Names-only authenticated inventory not yet completed' sem que essa unidade conste entre as próximas, e (2) atualizar docs/backup.md:56, que ainda diz que o formato em partes para banco acima de 4 MiB não foi feito, embora o PR #2219 (04/11/2026 16h42 Fortaleza) tenha entregado lib/backup-parts.ts, já ligado em lib/backup-run.ts:68."
+  },
+  {
+   "n": 274,
+   "etiqueta": "AX1",
+   "estado": "em andamento",
+   "prova_do_estado": "queue.md:7041 'Estado: Parte A em vigor a partir da inclusão (regra gravada em AGENTS.md); Partes B e C na fila ... Posição vigente: OR: ... Partes B e C por último, após todo o Bloco B'; queue.md:6961 (Parte C passou ao 310 [AX2]); queue.md:6959 'Andamento (Claude 2, 01/11/2026)' do texto cinza a 7:1 'testado num PR' — no GitHub o PR #1635 já foi incorporado (fa614fd3cc24652064767abb870a75ed418b3f8a, 01/11/2026 16h47 Fortaleza); DA1 entregue no #1509 (2b1dfd493eaa642247bdef8ebd90a7801554df66, 31/10/2026 21h13); propósito dos links no #1528 (cb433d4c21c50d1c8418131fd4f7caa562c05362, 01/11/2026 00h42) e #1532 (6006e444a079f2c41d4d32ef7981a32329ec69c6, 01/11/2026 01h23). Partes B.1 e B.3 seguem na fila.",
+   "correcao_estado": "",
+   "pedidos": [
+    {
+     "o_que": "Parte A: regra permanente gravada em AGENTS.md (AAA, normas extras, seção Acessibilidade em todo PR, critérios explícitos, abrangência total)",
+     "situacao": "presente",
+     "prova": "AGENTS.md, seção 'AX274 — Permanent owner accessibility requirement (22 October 2026)' (Parte A itens 1-7 transcritos); conformidade página a página é provada pelo 310 [AX2]",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Parte A item 1: casos AAA impossíveis registrados com motivo e alternativa em docs/accessibility-programme.md",
+     "situacao": "presente",
+     "prova": "docs/accessibility-programme.md:134-143 (links nas faixas a 4,5:1 registrados como lacuna com motivo)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Andamento 01/11: texto cinza das lojas a 7:1 em todo tema, faixas e destaque suave",
+     "situacao": "presente",
+     "prova": "lib/store-look.ts:199-200 (sand #4f4538, 7,98:1), :339-346 (faixas e destaque a 7:1 para texto cinza); tests/page-style.test.ts; PR #1635 incorporado",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Escolha de desenho dos links nas faixas coloridas (opções a/b/c)",
+     "situacao": "fora do escopo",
+     "prova": "Depende do dono (queue.md:6959); lacuna registrada em docs/accessibility-programme.md:141",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Parte A item 6: aviso antes de publicar de imagem sem texto alternativo, com correção",
+     "situacao": "presente",
+     "prova": "lib/store-access-check.ts:44-58 (pictures.missing); components/store-access-check.tsx; tests/store-access-check.test.ts",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Parte A item 6: aviso de link sem propósito claro",
+     "situacao": "presente",
+     "prova": "lib/store-access-check.ts:35-49 (links.vague, lib/link-purpose.ts vagueLinkTitle); PR #1532 (botões da página de venda no page coach)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Parte A item 6: aviso de vídeo sem legenda ou transcrição",
+     "situacao": "presente",
+     "prova": "lib/course-access-check.ts:1-40 (aulas sem legenda, com link para corrigir); vídeos das páginas de venda e imagens da comunidade previstos como próximas unidades do 98 (queue.md:2344 'Seguintes: legendas das aulas sem legenda, imagens das páginas de venda e da comunidade')",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Parte A item 6: contraste abaixo de 7:1 nos temas do criador",
+     "situacao": "presente",
+     "prova": "lib/store-look.ts:8 e :299-346 (cores ajustadas automaticamente até 7:1; exceção dos links nas faixas depende do dono)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Parte A item 6: aviso de título fora de ordem",
+     "situacao": "incerto",
+     "prova": "Buscas 'heading order', 'out of order', 'heading level', 'headingLevel' em lib/ e components/: nenhum aviso; também não achei bloco em que o criador escolha o nível do título (os níveis parecem fixados pelo código, o que tornaria o aviso desnecessário), sem prova conclusiva",
+     "onde_deveria_estar": "lib/store-access-check.ts (se houver título de nível escolhido pelo criador)"
+    },
+    {
+     "o_que": "Parte A item 7: nenhum widget/overlay e nenhuma alegação proibida",
+     "situacao": "presente",
+     "prova": "grep equalweb/accessibe/userway/audioeye em app, components, lib, package.json: nada; tests/accessibility-statement.test.ts:61 recusa 'fully accessible', 'ADA compliant', 'WCAG AAA certified' etc.",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Parte A item 7: verificar com fonte oficial datada a decisão da FTC sobre a accessiBe",
+     "situacao": "falta",
+     "prova": "grep -i 'accessibe' e 'FTC' em docs/accessibility-*.md, app/accessibility/page.tsx, lib/ e app/: só aparece no texto do pedido em docs/codex-queue.md:6978; nenhum documento registra a fonte oficial datada; a Parte B.1 (matriz legal) não a lista",
+     "onde_deveria_estar": "docs/accessibility-programme.md (ou docs/accessibility-legal-matrix.md quando existir)"
+    },
+    {
+     "o_que": "Parte B.1: docs/accessibility-legal-matrix.md com uma linha por regulação (EUA, UE/EAA, Reino Unido, Canadá, Brasil, Austrália, Japão, Israel)",
+     "situacao": "prevista",
+     "prova": "Arquivo inexistente (ls docs | grep access; grep 'Unruh|BFSG|2019/882|AODA|NBR 17225' em docs/app/lib: só a fila); a Parte B está registrada na fila para depois do Bloco B (queue.md:7041, 7651, 7671)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Parte B.2 + DA1 (a)-(h): página pública /accessibility honesta, listas geradas dos registros, teste de evidência e data, contato sem prazo, sem overlay, seção das lojas, link no rodapé completo e slim, sem alegações proibidas, a própria página com glossário",
+     "situacao": "presente",
+     "prova": "app/accessibility/page.tsx:30-114 (seções 1-7, glossário); lib/accessibility-statement.ts; tests/accessibility-statement.test.ts:45-77 (evidência, data, termos proibidos, rodapé, sitemap); components/site-footer.tsx:102,131 (LEGAL_LINKS no rodapé completo e no slim); docs/accessibility-inventory.json:633-635",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Parte B.2: cumprir o que o European Accessibility Act exige sobre a informação de acessibilidade do serviço (Anexo V)",
+     "situacao": "incerto",
+     "prova": "A página não cita o EAA nem o Anexo V (grep 'Annex V|2019/882' em app/accessibility/page.tsx: nada); a conferência do que o Anexo V exige depende da matriz legal B.1, ainda na fila",
+     "onde_deveria_estar": "app/accessibility/page.tsx"
+    },
+    {
+     "o_que": "Parte B.3: texto alternativo assistido, verificação de contraste do tema, aviso de vídeo sem legenda, legendas/transcrições com teto",
+     "situacao": "presente",
+     "prova": "lib/ai.ts e app/api/store/ai/route.ts:179 (kind 'alt'); lib/store-look.ts (contraste); lib/course-access-check.ts; lib/auto-captions.ts, lib/auto-captions-rules.ts",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Parte B.3: orientação para PDF/EPUB acessíveis e modelo de declaração de acessibilidade da loja do criador",
+     "situacao": "prevista",
+     "prova": "grep 'accessible pdf|accessible epub|EPUB Accessibility|accessibility statement' em lib/components/app: só app/accessibility/page.tsx (a do Marktmorgen); Parte B na fila (queue.md:7041)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Parte C (prova e testes em 100% das páginas, leitores de tela reais)",
+     "situacao": "presente",
+     "prova": "Transferida ao 310 [AX2] por decisão do dono de 23/10/2026 20h03 (queue.md:6961); o 310 pede inventário de rotas, axe A/AA/AAA, três motores, leitores reais (queue.md:8856-8875)",
+     "onde_deveria_estar": ""
+    }
+   ],
+   "complemento": "Complemento de completude (05/11/2026, C1-20261105-1919-C4-1): falta registrar, com fonte oficial datada, a decisão da FTC sobre a accessiBe que a Parte A, item 7, manda verificar; hoje ela só aparece no texto do pedido em docs/codex-queue.md e deveria estar em docs/accessibility-programme.md (ou na futura docs/accessibility-legal-matrix.md da Parte B.1)."
+  },
+  {
+   "n": 275,
+   "etiqueta": "[FX1]",
+   "estado": "em andamento",
+   "prova_do_estado": "queue.md:7064 'Estado vigente —30/10/2026,21:27:36Fortaleza: implementação do inventário integral e gate mensal/anual publicada em1339/20deaa35; remanescente financeiro aguardando o dono por evidência de contratos, tetos e reserva reais. Não é conclusão de275'; queue.md:7086 'atribuição100% implementada e publicada (PR795); nova base mínima: não estabelecida'; queue.md:14746.",
+   "correcao_estado": "",
+   "pedidos": [
+    {
+     "o_que": "(1) AGENTS.md, CLAUDE.md e docs/cross-product-handoff.md com a decisão 100% Marktmorgen, preservando o histórico",
+     "situacao": "presente",
+     "prova": "AGENTS.md:224; CLAUDE.md:68; docs/cross-product-handoff.md:130 (seções FX275; o texto 50/50 antigo em docs/cross-product-handoff.md:50 e :121 fica como histórico, superado em :137)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(2) Código, testes e documentos sem divisão 50/50; cada custo fixo inteiro no Marktmorgen",
+     "situacao": "presente",
+     "prova": "lib/llc-fixed-costs.ts:11 (marktmorgenBps 10000, hazelsongBps 0), :19 (lista com delaware, california-tax/fee, registered-agent, owner-inss, domains, tools, us-mailbox, eu-gdpr/eu-dsa/uk-gdpr-representative); lib/commercial-margin.ts:82, :230; docs/tax-uncertainty.md:163; busca por '50/50', 'hazelsongBps', 'share' em lib/scripts/tests sem divisão ativa",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(2) Custo de cada linha por fonte oficial datada (Stable, Prighter, Delaware, Califórnia, INSS); sem preço oficial, desconhecido reprova",
+     "situacao": "presente",
+     "prova": "lib/llc-fixed-costs.ts:23-39 (FIXED_COST_SOURCE_OBSERVATIONS); docs/llc-fixed-costs-2026-10-22.md:75-93; lib/llc-fixed-costs.ts:44 (tetos null = desconhecido)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(2) Tetos mensais/anuais aprovados, reserva e contratos reais de cada linha",
+     "situacao": "fora do escopo",
+     "prova": "queue.md:7064 e :7089: aguardando o dono por evidência de contratos, faturas e reserva reais; exige contas/contratos/contato externo, proibidos ao agente",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(3) Recalcular e registrar a nova base mínima e a margem consolidada nos documentos gerados",
+     "situacao": "presente",
+     "prova": "docs/margin-alignment-2026-10-18.md:33, :62 ('Minimum paying customer base: not established. Consolidated net margin: not approved'), gerado por scripts/margin-alignment.mjs e preso pelo teste de documento desatualizado; o número final depende das evidências reais do item anterior (fora do escopo)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(4) Testes que falham se voltar a dividir custos com a Hazelsong",
+     "situacao": "presente",
+     "prova": "tests/llc-fixed-costs.test.ts:5-9, :126; tests/llc-fixed-approved-policy.ts",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Complemento TX4: retirar o INSS sem pró-labore e incluir Form 5472/1120, IRPF, CBE, Delaware e OSS",
+     "situacao": "prevista",
+     "prova": "pertence ao 474 [TX4] (queue.md:1850-1852, em andamento; PR #2299 com evidência federal); lib/llc-fixed-costs.ts:15-18 já lista LLC_COMPLIANCE_COST_IDS; 'owner-inss' ainda na lista :19",
+     "onde_deveria_estar": ""
+    }
+   ],
+   "complemento": ""
+  },
+  {
+   "n": 286,
+   "etiqueta": "SX2",
+   "estado": "não iniciado",
+   "prova_do_estado": "queue.md:7816 'Estado: na fila.'; queue.md:728 'FIM1: cauda vigente ... MQ2: FIM1#29'; queue.md:1465 'FIM1 | 29 | 286 [SX2]'. Nenhum PR além do de inclusão (#820, 'Append SX1–SX2 as items285–286'); nenhum código de sugestões de temas (grep 'post idea|topic idea|suggested topics|topic suggestions' em lib/components/app: nada).",
+   "correcao_estado": "",
+   "pedidos": [],
+   "complemento": ""
+  },
+  {
+   "n": 305,
+   "etiqueta": "[SY1]",
+   "estado": "em andamento",
+   "prova_do_estado": "queue.md:8351-8352 'Estado: na fila. Em andamento pelo Claude ... Unidade 1 incorporada (#1449) ... 2a (#1452) ... 2b1 (#1466) ... código no ramo claude/sy1-guarantee-window (2c) e textos no ramo claude/sy1-refund-texts'; queue.md:327 'texto no ramo claude/sy1-refund-texts (Política de reembolso, Termos e missão já escritos; falta lib/help-content.ts, depois do #1471)'. GitHub: #1472 (2b2, 754d9a5331f3b86ce5a0b02e9ab8965d45422890, 31/10 18h27), #1498 (2c, e7163424b178e3a485308833992beec035c625cf, 31/10 23h20), #1499 ('unit 3 (part)', 2b4f8d2fcf838eeb7355fa1ac417c4478364bdab, 31/10 23h44), horários de Fortaleza; o #1499 só alterou app/refunds, app/terms e app/mission; a Ajuda ficou de fora.",
+   "correcao_estado": "",
+   "pedidos": [
+    {
+     "o_que": "(1) 'Refund my payment' no cartão de cobrança do estúdio, só para o dono, com valor exato e data",
+     "situacao": "presente",
+     "prova": "app/studio/page.tsx:918-929 (link só para owner de plano pago no prazo ou anual); app/studio/refund/page.tsx (valor exato lido antes de qualquer mudança)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(2) Tela de revisão com valor, efeito na loja e nos dados, botão de voltar, sem motivo obrigatório",
+     "situacao": "presente",
+     "prova": "app/studio/refund/page.tsx:40, :116, :125; lib/plan-refund-words.ts:15-30 (regras de lib/plan-closing-rules.ts)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(3) Reembolso no Stripe, fim da assinatura, regras de encerramento, e-mail de confirmação, idempotência",
+     "situacao": "presente",
+     "prova": "lib/plan-refund-write.ts; lib/plan-refund-flow.ts:245, :283-299 (e-mail com chave de idempotência); app/api/billing/refund/route.ts; tests/plan-refund-write.test.ts:110-173",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(4) Uma vez por pessoa (e-mail, conta, impressão digital do cartão, loja); fora da regra explica o motivo",
+     "situacao": "presente",
+     "prova": "lib/plan-refund.ts:10-14, :221-223 (fingerprint); tests/plan-refund-page.test.ts:54 ('Not owed')",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(5) Complemento do assistente segue a própria política",
+     "situacao": "presente",
+     "prova": "lib/plan-refund-flow.ts:23, :46, :257-260 (syncAssistant)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(6) Sem botão durante contestação aberta",
+     "situacao": "presente",
+     "prova": "lib/plan-refund.ts:99 (contestações conhecidas pela leitura diária); queue.md:8352 (garantia 'none' por contestação aberta)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Decisão do dono 31/10 15h41: garantia cobre todo pagamento de plano em até 30 dias do primeiro",
+     "situacao": "presente",
+     "prova": "lib/plan-refund-rules.ts; app/refunds/page.tsx:11, :47-56 (PR #1498/#1499)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Custos dentro da exposição revisada (docs/funded-exposure-review.md), com a reserva do 306 [SY2]",
+     "situacao": "presente",
+     "prova": "docs/funded-exposure-review.md:10-22; SY2 unidade 1 (PR #1468)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Textos: política de reembolso e Termos dizem que o pedido é feito no estúdio, com o e-mail como alternativa",
+     "situacao": "presente",
+     "prova": "app/refunds/page.tsx:107-126 ('In your studio... Refund my payment' e 'By email'); app/terms/page.tsx e app/mission/page.tsx alterados no PR #1499",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Textos: Ajuda (lib/help-content.ts) diz que o pedido é feito no estúdio e repete a garantia decidida",
+     "situacao": "falta",
+     "prova": "lib/help-content.ts:331-334 ('What about refunds on the Marktmorgen subscription itself?') ainda diz só 'Your first payment to us is refunded in full if you ask within 30 days', sem 'Refund my payment' no estúdio, sem o e-mail como alternativa e sem a garantia sobre todo pagamento de plano nos 30 dias do primeiro (decisão de 31/10 15h41, já em app/refunds/page.tsx:49-56). Buscas por 'Refund my payment', 'studio/refund', 'money-back' em lib/, app/ e components/ acham só a política, a página de revisão e o estúdio. O PR #1499 ('unit 3 (part)') não alterou lib/help-content.ts; a única menção é a passagem de turno de 31/10 (queue.md:327 'falta lib/help-content.ts'), sem ramo, PR aberto ou linha posterior que a carregue.",
+     "onde_deveria_estar": "lib/help-content.ts:331-334"
+    },
+    {
+     "o_que": "Testes: valor diferente da política, segundo pedido, botão fora do prazo/após reembolso/em contestação, reembolso sem tela de revisão",
+     "situacao": "presente",
+     "prova": "tests/plan-refund-route.test.ts:38-74 ('Only from the review page', 'Another amount', 'Pressed twice'); tests/plan-refund-page.test.ts:30-67; tests/plan-refund-rules.test.ts; tests/plan-refund-write.test.ts:110-173",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Registrar o estado final 'pronto e desligado, aguardando o dono' com commit, suíte e publicação",
+     "situacao": "prevista",
+     "prova": "pedido do próprio item (queue.md:8374) para quando a unidade 3 terminar",
+     "onde_deveria_estar": ""
+    }
+   ],
+   "complemento": "Complemento de completude (05/11/2026, C1-20261105-1919-C4-1): falta a parte da Ajuda da unidade 3 (textos): em lib/help-content.ts, na pergunta \"What about refunds on the Marktmorgen subscription itself?\" (linhas 331-334), dizer que o dono pede o reembolso no estúdio, em \"What you pay us\" > \"Refund my payment\", com a tela de revisão antes de qualquer mudança, mantendo o e-mail support@marktmorgen.com como alternativa para quem não conseguir usar o botão, e trocar \"Your first payment to us is refunded in full\" pela garantia decidida pelo dono em 31/10/2026 15h41 (todo pagamento de plano feito em até 30 dias do primeiro, uma vez por pessoa, nunca acima do que foi pago), com as mesmas palavras de app/refunds/page.tsx e um teste que prenda a frase da Ajuda à política (por exemplo, em tests/plan-refund-rules.test.ts); o PR #1499 cobriu só app/refunds, app/terms e app/mission. Depois disso, registrar o 305 como \"pronto e desligado, aguardando o dono\"."
+  },
+  {
+   "n": 306,
+   "etiqueta": "SY2",
+   "estado": "em andamento",
+   "prova_do_estado": "queue.md:8389 'Em andamento pelo Claude ... unidade 1 ... Atualização 31/10/2026 17h50 Fortaleza: unidade 1 incorporada, PR #1468, merge 38fb04885735b5cd70bc10e4e12365665dc6aec6 ... publicada e desligada ... Próxima: leitura das cobranças de plano'; queue.md:748 'MQ1(a–b): AV1/abertura/vínculo vigente mantido'. Só a unidade 1 existe no main.",
+   "correcao_estado": "",
+   "pedidos": [
+    {
+     "o_que": "1. Regra da reserva: primeiros pagamentos dentro de REFUND_DAYS e meses não iniciados dos anuais pela política publicada, mais contestação (maior entre 1% e uma contestação inteira na maior cobrança, decisão DR de 31/10/2026 15h41), 120 dias; desconhecido torna a reserva desconhecida",
+     "situacao": "presente",
+     "prova": "lib/refund-reserve-rules.ts:49-128 (DISPUTE_DAYS, refundReserve, fullDisputeCents, payoutAbove, reserveCovered); tests/refund-reserve-rules.test.ts:21-72",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "1. Cálculo a cada venda, reembolso e renovação, a partir das cobranças reais de plano (incluindo complemento de US$ 69 e legendas)",
+     "situacao": "prevista",
+     "prova": "Nada chama lib/refund-reserve-rules.ts (grep: só o teste); 'Próxima: leitura das cobranças de plano' em queue.md:8389",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "1. Política de reserva das faturas anuais registrada por escrito na revisão comercial (FX275)",
+     "situacao": "prevista",
+     "prova": "lib/commercial-margin.ts não cita a reserva de reembolso; a condição a mais para vendas está entre as 'Seguintes' (queue.md:8389)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "2. Repasse diário pela API só do saldo acima da reserva, com modo manual conferido pela API e fonte oficial datada",
+     "situacao": "prevista",
+     "prova": "payoutAbove existe (lib/refund-reserve-rules.ts:121) mas nenhuma rotina de repasse (grep '/v1/payouts|payout_schedule' em lib: nada); 'repasse diário do excedente' nas 'Seguintes' (queue.md:8389)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "3. Trava: saldo abaixo da reserva recusa assinaturas novas e upgrades, como condição a mais de PLANS_ON_SALE/revisão comercial",
+     "situacao": "prevista",
+     "prova": "reserveCovered existe (lib/refund-reserve-rules.ts:128) sem uso; CONTRACT_ADMISSION_COVERAGE.settlementAndReserveReconciliation segue false (lib/contract-funding-rules.ts:12); 'condição a mais para vendas' nas 'Seguintes' (queue.md:8389)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "4. 'Refund pending' no estúdio e conferência diária, nunca segundo reembolso",
+     "situacao": "prevista",
+     "prova": "grep 'Refund pending' em app/components/lib: nada; nas 'Seguintes' (queue.md:8389)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "5. Passo exato do painel do Stripe (repasse manual) em 'Depende do dono'",
+     "situacao": "prevista",
+     "prova": "Não encontrado em docs/ (grep 'manual payout|repasse manual'); previsto junto do repasse diário ('passo do painel em \"Depende do dono\"', queue.md:8389)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Testes com Stripe simulado: repasse não deixa saldo abaixo da reserva; venda recusada abaixo da reserva; reserva igual à política; reembolso pendente sem segundo reembolso",
+     "situacao": "prevista",
+     "prova": "Os dois primeiros já existem na regra pura (tests/refund-reserve-rules.test.ts:67-72); os de rotina real, de política publicada contra cobranças reais e de reembolso pendente vêm com as unidades seguintes (queue.md:8389)",
+     "onde_deveria_estar": ""
+    }
+   ],
+   "complemento": ""
+  }
+ ]
+}

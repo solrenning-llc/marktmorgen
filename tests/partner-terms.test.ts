@@ -49,6 +49,17 @@ test("an end is a real date after today, through that whole day; empty is until 
   assert.equal(readTermEnd(tooFar, NOW).ok, false);
 });
 
+test("the share in force can be saved again on its own last day (reviewer, #1924)", () => {
+  // Its last day is today, 3 November: it ends at the start of the 4th.
+  const current = Date.UTC(2026, 10, 4) / 1000;
+  assert.deepEqual(readTermEnd("2026-11-03", NOW), { ok: false }, "a new end of today is still refused");
+  assert.deepEqual(readTermEnd("2026-11-03", NOW, current), { ok: true, until: current }, "the end already agreed is not");
+  // Only that very end: another day near it is not let through by it.
+  assert.deepEqual(readTermEnd("2026-11-02", NOW, current), { ok: false });
+  // An end already passed is never re-saved as if it still ran.
+  assert.deepEqual(readTermEnd("2026-11-02", NOW, Date.UTC(2026, 10, 3) / 1000), { ok: false });
+});
+
 test("a share with an end earns nothing on a sale paid at or after it", () => {
   const until = Date.UTC(2027, 2, 5) / 1000;
   const share = parsePartnerShare({ percent: 30, products: [A], until });
@@ -87,9 +98,11 @@ test("the creator cannot change an agreed share alone, except ending one that ru
   // Ending: at once when it runs until revoked, asked when it has a date.
   assert.equal(changeNeeds(open, null, NOW), "now");
   assert.equal(changeNeeds(dated, null, NOW), "ask");
-  // Over already: clearing it is tidying up; starting it again is a new agreement.
+  // Over already (by its date, or ended by the store): nothing runs, so clearing it or starting a new one applies at
+  // once, as for somebody with no share at all; a share already ended keeps its end on the record (until), so a sale
+  // paid before it and noted later still earns.
   assert.equal(changeNeeds(dated, null, dated.until), "now");
-  assert.equal(changeNeeds(dated, { percent: 30, products: [A, B], until: NOW + 400 * DAY }, dated.until), "ask");
+  assert.equal(changeNeeds(dated, { percent: 30, products: [A, B], until: NOW + 400 * DAY }, dated.until), "now");
   assert.equal(sameShare(dated, { ...dated }), true);
   assert.equal(sameShare(dated, open), false);
 });
@@ -129,7 +142,11 @@ test("every step reads as a plain US English sentence", () => {
   assert.equal(stepWords(stepOf("withdrawn", "creator", null, at)), "November 3, 2026: the store took back its request. The terms before it still hold.");
   assert.match(stepWords(stepOf("lapsed", "creator", null, at)), /not answered in 30 days/);
   assert.match(stepWords(stepOf("revoked", "creator", null, at)), /the store ended it\. What was already earned is still paid\.$/);
-  assert.equal(termWords({ percent: 5, products: [A] }, NOW), "Until you or they end it");
+  // The partner cannot end it on their own: the store ends it, or they ask the store to (reviewer, #1924).
+  assert.equal(termWords({ percent: 5, products: [A] }, NOW), "Until you end it");
   assert.equal(termWords({ percent: 5, products: [A], until }, NOW), "Through March 4, 2027");
   assert.equal(termWords({ percent: 5, products: [A], until }, until), "Ended after March 4, 2027");
+  // An end at any moment of a day (a share the store ended) names that day as its last.
+  assert.equal(lastDayWords(NOW), "November 3, 2026");
+  assert.equal(termWords({ percent: 5, products: [A], until: NOW }, NOW + 1), "Ended after November 3, 2026");
 });

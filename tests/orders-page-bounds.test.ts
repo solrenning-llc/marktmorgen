@@ -84,7 +84,7 @@ import { MAX_ROOM_LENGTH, readSetup } from "@/lib/call-setup";
 import { MAX_GROUPS, MAX_GROUP_LENGTH, MAX_PREFIX_LENGTH } from "@/lib/key-setup";
 import { MAX_KEY_LENGTH } from "@/lib/licence-keys";
 import { MAX_TITLE as MAX_AGREEMENT_TITLE, readDraft as readAgreementDraft } from "@/lib/agreement-rules";
-import { createAgreement, saveAgreement } from "@/lib/agreement-store";
+import { changeAgreement, createAgreement } from "@/lib/agreement-store";
 import { createRequest, changeRequest } from "@/lib/payment-request-store";
 import { readDraft as readRequestDraft } from "@/lib/payment-request-rules";
 import { requestsIn } from "@/lib/traffic";
@@ -110,6 +110,7 @@ import {
   storeFolder,
   storeForEmail,
 } from "@/lib/store";
+import { saveCourse } from "@/lib/course";
 
 const OWNER = "bounds-owner@example.test";
 const BUYER = "buyer@example.test";
@@ -288,13 +289,18 @@ async function listKey(id: string, index: number): Promise<void> {
 }
 
 /**
- * Makes a product the richest card of a shape: a course (its button, and "also in"), a private podcast (its feed's button,
+ * Makes a product the richest card of a shape: a course (its button, "also in" and how far the buyer is in its one lesson,
+ * 560 [AS1]), a private podcast (its feed's button,
  * "also in" and a key) or a plain product (a key), each sold at a price option with the longest label (said on the card)
  * whose own link is what that price adds. Returns the option's id, which the checkout names.
  */
 async function richMain(id: string, index: number, link: string, shape: CardShape = "course"): Promise<string> {
   const hex = createHash("sha256").update(id).digest("hex").slice(0, 32);
-  if (shape === "course") assert.ok((await setProductCourse(OWNER, id, { id: hex, lessons: 1 })).ok);
+  if (shape === "course") {
+    assert.ok((await setProductCourse(OWNER, id, { id: hex, lessons: 1 })).ok);
+    const lesson = { id: "lesson000001", title: "Lesson 1", preview: false, video: null, files: [], link: null, hasBody: false, quiz: null };
+    await saveCourse({ id: hex, modules: [{ id: "module000001", title: "Module 1", dripDays: 0, lessons: [lesson] }], certificate: false, startsAt: null }, (await storeForEmail(OWNER))!, true);
+  }
   if (shape === "podcast") assert.ok((await setProductPodcast(OWNER, id, { id: hex, episodes: 1 })).ok);
   assert.ok((await addOption(OWNER, id, "&".repeat(MAX_OPTION_LABEL_LENGTH), "10")).ok);
   const option = (await readProduct((await storeForEmail(OWNER))!, id))!.options[0].id;
@@ -691,7 +697,7 @@ async function everyLimit(shape: CardShape): Promise<string[]> {
     assert.ok(draft.ok);
     const made = await createAgreement(full, draft.draft);
     assert.ok(made.ok);
-    await saveAgreement({ ...made.agreement, sent: [Date.now()] });
+    await changeAgreement(full, made.agreement.id, (current) => ({ ...current, sent: [Date.now()] }));
   }
   const ids = drafts.ids;
   checkouts = [
@@ -747,6 +753,8 @@ test("a page drawn at every limit the store has stays under ORDERS_PAGE_BYTES, w
         for (let i = 0; i < MAX_LISTED * 4; i++) assert.equal(count(`href="${escaped(costlyLink(i))}"`), 1, `${at}: link ${i}`);
         assert.equal(count(`>${escaped(words.openTitle(`1`.padEnd(MAX_TITLE_LENGTH, "&")))}<`), 1, `${at}: the button named by the product it opens`);
         assert.equal(count(escaped(words.alsoIn("&".repeat(MAX_OPTION_LABEL_LENGTH)))), shape === "plain" ? 0 : MAX_LISTED, `${at}: a course or podcast at a price option`);
+        // Each course says how far the buyer is, in words and a bar (560 [AS1]), measured with the rest.
+        assert.equal(count(`>${escaped(words.lessonsDone(0, 1))}</p>`), shape === "course" ? MAX_LISTED : 0, `${at}: each course's progress`);
         assert.equal(count('<input type="hidden" name="bundle"'), MAX_LISTED * 4, `${at}: and a bundle under each`);
         assert.equal(count(`>${escaped(words.addToCalendar)}<`), MAX_LISTED, `${at}: forty calls`);
         // Each key from the list whole, once as text, never split into a group by hyphen (components/licence-key-box.tsx).

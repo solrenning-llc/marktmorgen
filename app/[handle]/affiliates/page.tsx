@@ -17,7 +17,7 @@ import { codeOwners } from "@/lib/affiliate-codes";
 import { listCodes } from "@/lib/discount";
 import { speech } from "@/lib/buyer-words";
 import { affiliatesWords } from "@/lib/buyer-words/affiliates";
-import { CHANGE_WAITS_SECONDS, shareRunning } from "@/lib/partner-terms-rules";
+import { CHANGE_WAITS_SECONDS, lastDaySeconds, shareRunning } from "@/lib/partner-terms-rules";
 import {
   MAX_NOTE_LENGTH,
   affiliateCookieName,
@@ -29,7 +29,6 @@ import {
   changeIdentity,
   linkEmail,
   partnerChangeFor,
-  readBook,
   recruitLink,
 } from "@/lib/affiliates";
 import { AFFILIATE_CODE_PATTERN } from "@/lib/affiliate-setting";
@@ -133,9 +132,9 @@ export default async function AffiliatesPage({ params, searchParams }: Params) {
   const { nowSeconds, change: askedChange, titles: askedTitles } = await partnerChangeFor(store, affiliate);
   // What became of the partner's answer, said even when no share is left to show (they agreed to end it).
   const partnerNotice =
-    status === "partner-yes" ? "yes" : status === "partner-no" ? "no" : status === "partner-cap" ? "cap" : status === "partner-none" ? "none" : status === "partner-busy" ? "busy" : null;
-  /** The last day a share earns on, in the store's language: the day before its end. */
-  const lastDay = (until: number) => day(until - 24 * 60 * 60);
+    status === "partner-yes" ? "yes" : status === "partner-no" ? "no" : status === "partner-cap" ? "cap" : status === "partner-none" ? "none" : status === "partner-busy" ? "busy" : status === "partner-unsure" ? "unsure" : null;
+  /** The last day a share earns on, in the store's language (lib/partner-terms-rules.ts lastDaySeconds). */
+  const lastDay = (until: number) => day(lastDaySeconds(until));
   // Codes of the store's own that this affiliate was given, which earn with no
   // click at all (lib/affiliate-codes.ts). Only asked for once they are in.
   const myCodes =
@@ -293,7 +292,7 @@ export default async function AffiliatesPage({ params, searchParams }: Params) {
                       <p className="st-muted mt-2 text-sm">{a.recruitNote(store.affiliates.secondTier, store.name)}</p>
                     </>
                   ) : null}
-                  <AffiliateCampaignLinks products={promotionProducts} />
+                  <AffiliateCampaignLinks products={promotionProducts} language={store.language} />
                   <AffiliateKit handle={store.handle} language={store.language} products={aiAvailableFor(store) ? kitProducts : []} />
                   {/*
                     A code of the store's own, given to this affiliate
@@ -441,7 +440,7 @@ export default async function AffiliatesPage({ params, searchParams }: Params) {
                     </p>
                   ) : null}
 
-                  <AffiliatePromotionResults book={book} />
+                  <AffiliatePromotionResults book={book} language={store.language} />
                   {/* Each lead with where it stands (lib/affiliate-lead-rules.ts), the person's address masked. */}
                   {book.lines.some((line) => line.how === "lead") ? (
                     <>

@@ -49,6 +49,8 @@ let posts = 0;
 /** The receivers of each POST, in order (review of Codex H2 on #2681). */
 let receivers: string[][] = [];
 const items = new Map<string, string>();
+/** What each item was sent for (its body's amount), which PayPal reports back on the item (payout_item.amount, #4417). */
+const sentAmounts = new Map<string, unknown>();
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
@@ -65,7 +67,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     posts += 1;
     const mode = next;
     const key = headers.get("paypal-request-id") ?? "";
-    const body = JSON.parse(String(init.body)) as { sender_batch_header: { sender_batch_id: string }; items: { sender_item_id: string; receiver: string }[] };
+    const body = JSON.parse(String(init.body)) as { sender_batch_header: { sender_batch_id: string }; items: { sender_item_id: string; receiver: string; amount: unknown }[] };
     receivers.push(body.items.map((item) => item.receiver));
     const sender = body.sender_batch_header.sender_batch_id;
     if (mode === "drop-before") throw new TypeError("fetch failed: before PayPal");
@@ -83,7 +85,10 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     batches += 1;
     const id = `BATCH${batches}REC`;
     bySender.set(sender, id);
-    for (const item of body.items) items.set(`${id}:${item.sender_item_id}`, "SUCCESS");
+    for (const item of body.items) {
+      items.set(`${id}:${item.sender_item_id}`, "SUCCESS");
+      sentAmounts.set(`${id}:${item.sender_item_id}`, item.amount);
+    }
     const made = { status: 201, body: { batch_header: { payout_batch_id: id, batch_status: "PENDING", sender_batch_header: body.sender_batch_header } } };
     byKey.set(key, made);
     if (mode === "make-then-drop") throw new TypeError("fetch failed: the answer was lost");
@@ -95,7 +100,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     return json({
       batch_header: { payout_batch_id: batch, batch_status: "SUCCESS" },
       total_pages: 1,
-      items: mine.map(([k, status], i) => ({ payout_item_id: `ITEM${batch}${i}`, payout_batch_id: batch, transaction_status: status, payout_item: { sender_item_id: k.split(":")[1] } })),
+      items: mine.map(([k, status], i) => ({ payout_item_id: `ITEM${batch}${i}`, payout_batch_id: batch, transaction_status: status, payout_item: { sender_item_id: k.split(":")[1], amount: sentAmounts.get(k) } })),
     });
   }
   return json({ name: "RESOURCE_NOT_FOUND" }, 404);

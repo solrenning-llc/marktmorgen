@@ -34,7 +34,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { canSeal, deriveKey, seal, unseal } from "@/lib/secret-box";
 import { type Book, addPayoutOnce, payAddress, payoutIdForItem, payoutReference, payoutReferences, readBook } from "@/lib/affiliates";
 import { type BatchLine, batchTotal, owedLines, payoutNote } from "@/lib/affiliate-payouts";
-import { plainAmount } from "@/lib/money";
+import { decimalsOf, plainAmount } from "@/lib/money";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { LockBusyError, withLock } from "@/lib/redis-lock";
 import { readPendingPayoutBatches, type PendingPayoutBatch } from "@/lib/pending-payouts";
@@ -246,6 +246,24 @@ const RECEIVER_PRINT_LABEL = "paypal-payout-receiver/v1";
 function receiverPrint(address: string): string {
   const key = deriveKey(RECEIVER_PRINT_LABEL);
   return key ? createHmac("sha256", key).update(address).digest("hex") : "";
+}
+
+/**
+ * Whether a payout item's `amount` ({ value, currency }) is exactly `cents` of `currency`: the value read as a plain
+ * decimal into the currency's minor units, with no floating point; extra decimals only when they are zeros. Anything
+ * else (missing, another currency, another shape) is not a confirmation (#4417).
+ */
+export function paidAsSent(amount: unknown, cents: number, currency: string): boolean {
+  if (!amount || typeof amount !== "object") return false;
+  const { value, currency: code } = amount as { value?: unknown; currency?: unknown };
+  if (typeof code !== "string" || code.toUpperCase() !== currency.toUpperCase() || typeof value !== "string") return false;
+  const match = /^(\d{1,15})(?:\.(\d{1,10}))?$/.exec(value);
+  if (!match) return false;
+  const digits = decimalsOf(currency);
+  const fraction = match[2] ?? "";
+  if (fraction.length > digits && /[1-9]/.test(fraction.slice(digits))) return false;
+  const minor = Number(match[1]) * 10 ** digits + Number((fraction.slice(0, digits) || "0").padEnd(digits, "0") || "0");
+  return Number.isSafeInteger(minor) && minor === cents;
 }
 
 /** The body PayPal is sent for one batch (payments_payouts_batch_v1, create_payout_request). */
@@ -472,7 +490,7 @@ export async function settlePayPal(store: Store): Promise<Settled> {
       out.waiting += sent.lines.length;
       continue;
     }
-    const statusOf = new Map<string, { status: string; item: string }>();
+    const statusOf = new Map<string, { status: string; item: string; amount: unknown }>();
     let batchStatus = "";
     try {
       for (let page = 1; page <= 10; page += 1) {
@@ -484,9 +502,9 @@ export async function settlePayPal(store: Store): Promise<Settled> {
         batchStatus = String(header.batch_status ?? "");
         const items = Array.isArray(data.items) ? (data.items as Record<string, unknown>[]) : [];
         for (const item of items) {
-          const detail = (item.payout_item ?? {}) as { sender_item_id?: unknown };
+          const detail = (item.payout_item ?? {}) as { sender_item_id?: unknown; amount?: unknown };
           const aff = typeof detail.sender_item_id === "string" ? detail.sender_item_id : "";
-          if (aff) statusOf.set(aff, { status: String(item.transaction_status ?? ""), item: String(item.payout_item_id ?? "") });
+          if (aff) statusOf.set(aff, { status: String(item.transaction_status ?? ""), item: String(item.payout_item_id ?? ""), amount: detail.amount });
         }
         const pages = Number(data.total_pages) || 1;
         if (page >= pages) break;
@@ -501,7 +519,12 @@ export async function settlePayPal(store: Store): Promise<Settled> {
     for (const line of sent.lines) {
       const got = statusOf.get(line.a);
       const status = batchStatus === "DENIED" || batchStatus === "CANCELED" ? "FAILED" : got?.status ?? "PENDING";
-      if (status === PAID && got?.item) {
+      // PAID only when the item says it paid what this line sent, in its currency (#4417): any other amount, another
+      // currency or none keeps the line on its way, read again next time, never booked from the line's own figures.
+      if (status === PAID && got?.item && !paidAsSent(got.amount, line.c, sent.currency)) {
+        console.error("a PayPal SUCCESS item does not confirm the amount sent; it stays on its way");
+        still.push(line);
+      } else if (status === PAID && got?.item) {
         // The line leaves the open batch only when the book is confirmed to hold its payout (Claude 2 on #3272,
         // finding 1): a line dropped with nothing in the book is owed again, and the next payday pays it twice.
         // Anything not known (a reply of another shape, an outage, a full data room) keeps it on its way: never sent

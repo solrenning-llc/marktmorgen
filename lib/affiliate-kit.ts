@@ -19,7 +19,7 @@ import { commissionRate } from "@/lib/affiliate-setting";
 import { readListing, type Listing } from "@/lib/catalog";
 import { readAbout } from "@/lib/product-about";
 import { readPage } from "@/lib/sales-page-store";
-import { pageShown } from "@/lib/sales-page";
+import { pageShown, type SalesPage } from "@/lib/sales-page";
 import { factsFor } from "@/lib/answers";
 import { aiAllowance, aiAvailableFor, aiMonthKey, writeAffiliatePosts } from "@/lib/ai";
 import { storeBase } from "@/lib/purchase-email";
@@ -56,6 +56,20 @@ export function productAffiliateLink(store: Store, product: Pick<Listing, "id" |
 
 export type KitResult = { ok: true; posts: AffiliatePosts; left: number } | { ok: false; reason: "off" | "unknown" | "day" | "month" | "failed" | "unavailable" };
 
+/**
+ * The page a kit is written from: the page as visitors see it, null when it keeps nothing from them, or "unread" when
+ * its read's answer is not known, so no post is drafted from facts with the page left out (C4-20261106-2610-C6-153,
+ * unit B). The same one read as before.
+ */
+export async function kitPageRead(store: Store, product: Listing): Promise<SalesPage | null | "unread"> {
+  try {
+    const page = await readPage(store.statsId, product.id);
+    return pageShown(page) ? page : null;
+  } catch {
+    return "unread";
+  }
+}
+
 /** Drafts one affiliate's three posts about one product, within the limits. */
 export async function draftKit(store: Store, affiliate: Affiliate, productId: string, rawNote: string, now = new Date()): Promise<KitResult> {
   if (!aiAvailableFor(store) || !isRedisConfigured() || !store.statsId || !affiliatesOn(store) || !store.affiliates.kit || affiliate.status !== "approved") return { ok: false, reason: "off" };
@@ -88,11 +102,18 @@ export async function draftKit(store: Store, affiliate: Affiliate, productId: st
     return { ok: false, reason: "month" };
   }
   let posts: AffiliatePosts | null = null;
+  let unread = false;
   try {
-    const [about, page] = await Promise.all([readAbout(store.statsId, product.id).catch(() => ""), readPage(store.statsId, product.id).catch(() => null)]);
-    posts = await writeAffiliatePosts(store, { facts: factsFor(store, product, about, page && pageShown(page) ? page : null), note });
+    const [about, page] = await Promise.all([readAbout(store.statsId, product.id).catch(() => ""), kitPageRead(store, product)]);
+    if (page === "unread") unread = true;
+    else posts = await writeAffiliatePosts(store, { facts: factsFor(store, product, about, page), note });
   } catch (error) {
     console.error("drafting an affiliate's posts failed", error);
+  }
+  // The page could not be read: nothing was drafted or spent, so the day's and the month's counts go back.
+  if (unread) {
+    await giveBack();
+    return { ok: false, reason: "unavailable" };
   }
   // Started work may be billed even when no usable text comes back.
   if (!posts) return { ok: false, reason: "failed" };

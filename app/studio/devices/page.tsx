@@ -22,7 +22,7 @@ const RESULT: Record<string, { tone: "notice-success" | "notice-warn"; words: st
   },
   "out-others-reauth": {
     tone: "notice-warn",
-    words: "For your safety, log in again to log out your other devices. Nothing was logged out. This needs a login from the last 15 minutes.",
+    words: "For your safety, log in again to log out your other devices. Nothing was logged out. This needs a login from the last 15 minutes. After you log in, your studio opens. Choose “Log out of other devices” there again.",
   },
   "out-others-unknown": {
     tone: "notice-warn",

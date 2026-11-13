@@ -438,4 +438,22 @@ await t.test("a creator's cancel between our read and our take-back is never tol
   if (creator === "done") assert.equal(shop.sub().cancel_at_period_end, true, "a cancel the creator was told is done stands");
   else assert.equal(shop.sub().cancel_at_period_end, false, "refused: our stop is taken back, and the creator was told to try again");
 });
+// Claude 7 on #3740: a take-back whose read outlived the stop's lock posts nothing: another writer may hold it now.
+await t.test("a take-back whose lock lapsed during its read sends nothing", async () => {
+  await reset();
+  const shop = await paidShop();
+  world.refundsDown = true;
+  await refundAndEndPlan(await shop.store(), NOW);
+  world.refundsDown = false;
+  const id = String(shop.sub().id);
+  world.afterSubscriptionGet = async () => {
+    await redisPipeline([["DEL", `nl:lock:plan-stop:${id}`]]);
+  };
+  const callsBefore = world.calls.length;
+  const quiet = console.error;
+  console.error = () => {};
+  try { await finishPlanRefunds(Date.now() + 10_000, NOW + 601); } finally { console.error = quiet; world.afterSubscriptionGet = null; }
+  assert.equal(world.calls.slice(callsBefore).filter((call) => call.startsWith(`POST /subscriptions/${id}`)).length, 0, "no update is posted without the lock");
+  assert.equal(shop.sub().cancel_at_period_end, true, "our stop stays for the next run");
+});
 });

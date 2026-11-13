@@ -7,6 +7,7 @@ import type { AskSection, AskWindow, NumbersAnswer } from "@/lib/numbers-ask";
 const MESSAGES: Record<string, string> = {
   ...STUDIO_MESSAGES,
   notes: "Ask a question of a few words or more.",
+  unavailable: "Your AI jobs for this month could not be read just now. Nothing was counted. Try again in a moment.",
   used: "This month's AI jobs are used up. They come back with your next billing month.",
   off: "Asking your numbers is not available right now.",
   numbers: "Your numbers could not be read just now. Try again in a moment.",

@@ -408,8 +408,9 @@ export async function noteProduct(listId: string, rawEmail: string, productId: s
       return mailable(before);
     }
   }
-  // Changed under it every time: the product is not noted this time; whether they may be written to is read afresh.
-  return isMailable(listId, email);
+  // Changed under it every time: the product is not noted, and that is never answered as noted (Claude 1 cloud's MEDIUM
+  // on #2576). putOnList (lib/buyer-list.ts) then answers "failed" and lets its claim go, so the next run notes it once.
+  throw new UnknownReplyError("a product noted on a contact that kept changing");
 }
 
 /** Whether this address may be written to now. */

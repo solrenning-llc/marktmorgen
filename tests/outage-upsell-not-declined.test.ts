@@ -1,8 +1,9 @@
 /**
  * Outage drill (Claude 7, 13 November 2026; synthetic only): Stripe answers the buyer's yes to an offer after paying
  * with a 429 (too many requests: nothing done, nothing said of the card) or a 409 (a request under the same key still
- * being worked on). Neither is a declined card: the offer is not written down as failed, its watch is kept, and it is
- * settled from what Stripe says (settleUpsells), never charged twice. The stand-in for Stripe is the one of
+ * being worked on). Neither is a declined card. After a 409 the offer stays pending and is settled from what Stripe
+ * says (settleUpsells), never charged twice; after a 429 the offer is let go of and the buyer can answer it again,
+ * under the same idempotency key, so it is charged once at most. The stand-in for Stripe is the one of
  * tests/upsell-journey.test.ts.
  */
 import { TEST_CONSENT } from "./digital-consent-fixture";
@@ -117,21 +118,40 @@ async function main(): Promise<void> {
     takeUpsell({ store, session, secret: browser.secret, origin, step: await shownRef(store, step), answer, consent: TEST_CONSENT });
 
   let order = 20;
-  for (const [what, kind] of [["429 (rate limited)", "ratelimited"], ["409 (same key in progress)", "inflight"]] as const) {
-    part(`Stripe answers ${what} to the buyer's yes`);
+  {
+    // A 429 is too many requests, not a word about the card. The offer is let go of, the buyer is told Stripe was busy,
+    // and the same yes can be answered again: always under the same idempotency key, so it is charged once at most.
+    part("Stripe answers 429 (rate limited) to the buyer's yes");
     order += 1;
     const session = `cs_test_order00000000${order}`;
     sessions[session] = paidCheckout(session, front, browser.fingerprint);
-    nextCharge = kind;
+    nextCharge = "ratelimited";
     const before = charges.length;
     const first = await take(session, "kit001", "yes");
-    is(`${kind}: not told as a declined card`, first.kind, "checking");
-    is(`${kind}: kept pending, never written down as failed`, (await readUpsell(session))?.state, "pending");
+    is("429: told Stripe was busy, never as a declined card", first.kind, "busy");
+    is("429: nothing is kept for the offer, so it can be answered again", await readUpsell(session), null);
     nextCharge = "succeeded";
     const again = await take(session, "kit001", "yes");
-    is(`${kind}: a second press is not a decline and charges nothing more`, [again.kind !== "failed", charges.length - before], [true, 1]);
+    is("429: the yes answered again is charged, once, under the same key", [again.kind, charges.length - before, charges[charges.length - 1].key === charges[before].key], ["done", 2, true]);
+    is("429: and it is paid", (await readUpsell(session))?.state, "paid");
+    const third = await take(session, "kit001", "yes");
+    is("429: a third press charges nothing more", [third.kind, charges.length - before], ["done", 2]);
+  }
+  {
+    part("Stripe answers 409 (same key in progress) to the buyer's yes");
+    order += 1;
+    const session = `cs_test_order00000000${order}`;
+    sessions[session] = paidCheckout(session, front, browser.fingerprint);
+    nextCharge = "inflight";
+    const before = charges.length;
+    const first = await take(session, "kit001", "yes");
+    is("409: not told as a declined card", first.kind, "checking");
+    is("409: kept pending, never written down as failed", (await readUpsell(session))?.state, "pending");
+    nextCharge = "succeeded";
+    const again = await take(session, "kit001", "yes");
+    is("409: a second press is not a decline and charges nothing more", [again.kind !== "failed", charges.length - before], [true, 1]);
     await settleUpsells(store, session);
-    is(`${kind}: settled from what Stripe says, still never as declined on a guess`, (await readUpsell(session))?.state, "pending");
+    is("409: settled from what Stripe says, still never as declined on a guess", (await readUpsell(session))?.state, "pending");
   }
   void downsell;
   done();

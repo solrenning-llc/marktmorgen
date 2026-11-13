@@ -114,6 +114,7 @@ const UPSELL_NOTES: Record<string, { always: boolean }> = {
   declined: { always: true },
   failed: { always: false },
   checking: { always: false },
+  busy: { always: true },
   unavailable: { always: true },
   changed: { always: true },
 };

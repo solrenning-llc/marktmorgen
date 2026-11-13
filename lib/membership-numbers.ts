@@ -641,6 +641,9 @@ async function readMemberships(
   if (beforeStripe && !(await beforeStripe())) return "refused";
   const handles = saleHandles(store);
   const subs: Sub[] = [];
+  // Every membership's id as listed: one listed twice, on a page or across pages, is not two members, and a cursor
+  // read that repeats is not known to have covered the list (#4421). Its id read exactly, as the cursor reads it.
+  const seen = new Set<string>();
   let after = "";
   let complete = false;
   for (let page = 0; page < MAX_PAGES; page += 1) {
@@ -655,6 +658,10 @@ async function readMemberships(
     if (typeof listed.has_more !== "boolean") throw new Error("Stripe gave whether there are more memberships in a shape that cannot be read");
     const rows = listed.data as Raw[];
     for (const raw of rows) {
+      const id = raw && typeof raw === "object" ? (raw as { id?: unknown }).id : undefined;
+      if (typeof id !== "string" || !id) throw new Error("Stripe gave a membership with no id to tell it apart");
+      if (seen.has(id)) throw new Error("Stripe listed the same membership twice, so the list is not known to be whole");
+      seen.add(id);
       const sub = readSub(raw, handles);
       if (sub) subs.push(sub);
     }

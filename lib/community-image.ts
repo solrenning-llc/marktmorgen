@@ -18,8 +18,16 @@
  * nothing about another's, or about where a store's paid files are kept.
  */
 import { createHash } from "node:crypto";
-import { IMAGE_CONTENT_TYPES, MAX_IMAGE_BYTES } from "@/lib/product-image";
+import { IMAGE_CONTENT_TYPES, IMAGE_LONG_SIDE, MAX_IMAGE_BYTES } from "@/lib/product-image";
+import { imageSize } from "@/lib/image-size";
 import { sniffPhotoType } from "@/lib/store-photo";
+
+/**
+ * The most of a picture read to learn its shape (lib/image-size.ts). A picture the member's browser shrank
+ * (components/shrink-image.ts) says it in its first few dozen bytes; a JPEG with a long header block before its
+ * frame says it later, and one that does not say it within this much is not one we keep.
+ */
+export const COMMUNITY_HEAD_BYTES = 64 * 1024;
 
 export const COMMUNITY_FOLDER_PATTERN = /^[0-9a-f]{24}$/;
 export const COMMUNITY_FILE_PATTERN = /^[0-9a-f]{32}\.(webp|jpg)$/;
@@ -47,6 +55,7 @@ export function communityImageType(file: string): "image/webp" | "image/jpeg" {
 /** What the file store is asked, so the checks can be run against a stand-in. */
 export type ImageStore = {
   head(path: string): Promise<{ size: number; contentType: string }>;
+  /** The first bytes, enough to read what the picture is and its shape (lib/image-size.ts), never more than COMMUNITY_HEAD_BYTES. */
   firstBytes(path: string): Promise<Uint8Array | null>;
   del(path: string): Promise<void>;
 };
@@ -55,9 +64,10 @@ export type ImageCheck = "ok" | "path" | "too_big" | "type" | "missing";
 
 /**
  * Checks an uploaded picture before a post may point at it: in this
- * community's folder, no bigger than a megabyte, and a JPEG or a WebP by its
- * first bytes, matching what the upload said it was. Anything that fails is
- * deleted, so nothing unchecked stays in the store.
+ * community's folder, no bigger than a megabyte, a JPEG or a WebP by its
+ * first bytes, matching what the upload said it was, and no more than
+ * IMAGE_LONG_SIDE pixels on its long side by its own header. Anything that
+ * fails is deleted, so nothing unchecked stays in the store.
  */
 export async function checkCommunityImage(path: string, communityId: string, files: ImageStore): Promise<ImageCheck> {
   if (!ownsCommunityImage(path, communityId)) return "path";
@@ -77,6 +87,14 @@ export async function checkCommunityImage(path: string, communityId: string, fil
   const kind = bytes ? sniffPhotoType(bytes) : null;
   const expected = communityImageType(path);
   if (!kind || !(IMAGE_CONTENT_TYPES as readonly string[]).includes(kind) || kind !== found.contentType || kind !== expected) {
+    await files.del(path).catch(() => {});
+    return "type";
+  }
+  // Its shape, from its own bytes: a member's browser shrinks every picture to IMAGE_LONG_SIDE, but a file sent by
+  // hand can say it is 65,535 pixels a side in one megabyte, and every member's browser that shows the post would
+  // try to open it at that size (a decompression bomb). One that does not say its shape is not kept either.
+  const size = bytes ? imageSize(bytes) : null;
+  if (!size || size.width < 1 || size.height < 1 || Math.max(size.width, size.height) > IMAGE_LONG_SIDE + 1) {
     await files.del(path).catch(() => {});
     return "type";
   }

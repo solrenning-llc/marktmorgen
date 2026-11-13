@@ -65,10 +65,12 @@ export function CustomerVoice({ initial }: { initial: VoiceSummary | null }) {
     setError(null);
     try {
       const response = await fetch("/api/store/voice", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
-      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; summary?: VoiceSummary; unread?: VoiceSource[] | null };
+      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; message?: string; summary?: VoiceSummary; unread?: VoiceSource[] | null };
       if (data.ok && data.summary) setSummary(data.summary);
       else {
-        const message = MESSAGES[data.error ?? ""] ?? MESSAGES.server_error;
+        // The studio's requests used up, or not countable: their own words, never "AI jobs" (review of #3731).
+        const own = (data.error === "studio_used" || data.error === "unavailable") && typeof data.message === "string" && data.message ? data.message : "";
+        const message = own || (MESSAGES[data.error ?? ""] ?? MESSAGES.server_error);
         const named = data.error === "unread" && Array.isArray(data.unread) ? unreadWords(data.unread) : "";
         setError(named ? `${message} Not read: ${named}.` : message);
       }

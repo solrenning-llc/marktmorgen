@@ -365,13 +365,18 @@ export async function readVoice(store: Store, now = Date.now()): Promise<VoiceSu
 
 export type VoiceResult =
   | { ok: true; summary: VoiceSummary; fresh: boolean; left: number | null }
-  | { ok: false; reason: "few" | "unread" | "busy" | "off" | "used" | "failed" | "changed" | "late"; texts?: number; unread?: VoiceSource[] };
+  | { ok: false; reason: "few" | "unread" | "busy" | "off" | "used" | "failed" | "changed" | "late"; texts?: number; unread?: VoiceSource[] }
+  // The studio requests the lists' reads are paid with could not be taken: their own refusal and words (review of #3731).
+  | { ok: false; reason: "studio"; refused: string; message: string };
+
+/** Takes what the lists' reads cost (the route's countStudio), just before they are read. */
+export type VoicePay = () => Promise<{ ok: true } | { ok: false; reason: string; message: string }>;
 
 /**
  * This month's summary: the one already made, or, when there is none and
  * enough to sort, made now as one of the month's AI jobs.
  */
-export async function makeVoice(store: Store, now = Date.now()): Promise<VoiceResult> {
+export async function makeVoice(store: Store, now = Date.now(), pay?: VoicePay): Promise<VoiceResult> {
   if (!store.statsId || !isRedisConfigured()) return { ok: false, reason: "off" };
   const month = monthOf(now);
   const [kept] = await redisPipeline([["GET", voiceKey(store.statsId, month)]]);
@@ -383,6 +388,12 @@ export async function makeVoice(store: Store, now = Date.now()): Promise<VoiceRe
   });
   if (!held) return { ok: false, reason: "busy" };
   try {
+    // The lists' reads are paid for just before they are read: never for a summary already kept this month, nor
+    // while another reading holds the lock (MR; Claude 1's LOW on #3731). Refused: nothing is read.
+    if (pay) {
+      const paid = await pay();
+      if (!paid.ok) return { ok: false, reason: "studio", refused: paid.reason, message: paid.message };
+    }
     const { items, unread } = await gatherVoice(store, now);
     // A list unread: no summary from part of what customers said, since it would stand for the whole month, and
     // too few is then not known to be few. Nothing is asked or counted, so the creator can try again.

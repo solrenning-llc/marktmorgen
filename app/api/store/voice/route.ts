@@ -4,6 +4,7 @@ import { withinEssentialLimit } from "@/lib/request-guard";
 import { AI_PER_MINUTE } from "@/lib/ai-rules";
 import { VOICE_EXTRA_STUDIO_UNITS, makeVoice } from "@/lib/customer-voice";
 import { countStudio } from "@/lib/studio-route";
+import { studioRefusal } from "@/lib/person-tasks";
 import { withCutoff } from "@/lib/fetch-timeout";
 
 /**
@@ -30,11 +31,14 @@ export async function POST(request: NextRequest) {
   if (!guarded.ok) return guarded.response;
   const { store } = guarded;
   if (!(await withinEssentialLimit("ai", store.sid || store.handle, AI_PER_MINUTE, 60))) return Response.json({ ok: false, error: "slow" }, { status: 429 });
-  // What the waitlists and the assistant's questions read is paid for before it is read (MR; review of #3731).
-  const extra = await countStudio(store, "stats", VOICE_EXTRA_STUDIO_UNITS);
-  if (!extra.ok) return Response.json({ ok: false, error: extra.reason === "unknown" ? "unread" : "used", message: extra.message }, { status: extra.reason === "unknown" ? 503 : 429 });
   try {
-    const done = await withCutoff(cutoff, () => makeVoice(store));
+    // What the waitlists and the assistant's questions read is paid for just before it is read (MR; reviews of #3731).
+    const done = await withCutoff(cutoff, () => makeVoice(store, Date.now(), () => countStudio(store, "stats", VOICE_EXTRA_STUDIO_UNITS)));
+    // The studio's requests, not AI jobs, were what ran out: said in their own words (Claude 1's MEDIUM on #3731).
+    if (!done.ok && done.reason === "studio") {
+      const refused = studioRefusal(done.refused, done.message);
+      return Response.json(refused.body, { status: refused.status });
+    }
     // "unread": a list could not be read just now, so too few texts is not known to be few (rule 24); nothing was counted.
     if (!done.ok) return Response.json({ ok: false, error: done.reason, texts: done.texts ?? null, unread: done.unread ?? null }, { status: done.reason === "failed" ? 502 : done.reason === "busy" || done.reason === "changed" ? 409 : done.reason === "late" || done.reason === "unread" ? 503 : 400 });
     return Response.json({ ok: true, summary: done.summary, fresh: done.fresh, left: done.left });

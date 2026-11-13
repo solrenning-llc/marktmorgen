@@ -23,7 +23,10 @@ is("a studio unit is priced at twenty commands and fifty kilobytes", /studio: re
 is("the extra units cover every command the new lists read", VOICE_EXTRA_STUDIO_UNITS * 20 >= 1 + WAITLIST_VOICE_PRODUCTS + 1, true);
 // Each kept question at its longest, written as a row with its time and quoting, at most a kilobyte.
 is("and every byte", VOICE_EXTRA_STUDIO_UNITS * 50_000 >= ASSISTANT_MISSED_KEPT * Math.max(1_024, MAX_ASSISTANT_QUESTION * 2), true);
-is("the route takes them before the summary reads anything", /countStudio\(store, "stats", VOICE_EXTRA_STUDIO_UNITS\)[\s\S]*makeVoice\(/.test(route), true);
-is("and refuses with nothing read when they are not there", /if \(!extra\.ok\) return Response\.json/.test(route), true);
+const voice = readFileSync("lib/customer-voice.ts", "utf8");
+is("the route pays them through makeVoice", /makeVoice\(store, Date\.now\(\), \(\) => countStudio\(store, "stats", VOICE_EXTRA_STUDIO_UNITS\)\)/.test(route), true);
+// Taken just before the lists are read: after the kept summary and the lock (review of #3731), before gatherVoice.
+is("makeVoice takes them after the kept summary and the lock, before any list is read", /if \(already\) return[\s\S]*if \(!held\) return[\s\S]*const paid = await pay\(\);[\s\S]*await gatherVoice\(/.test(voice), true);
+is("and refuses with nothing read when they are not there", /if \(!paid\.ok\) return \{ ok: false, reason: "studio"/.test(voice), true);
 
 done();

@@ -125,6 +125,7 @@ function centralAliases(file,root,here){
  if(file==='digital-consent.test.ts'||file==='checkout-key-count.test.ts'||file==='checkout-ab-page-unknown.test.ts'||file==='r30-event-notice-unread.test.ts')aliases['next/server']=join(here,'next-server-after-world.ts');
  if(file==='cart-physical.test.ts'||file==='cart-soon-unknown.test.ts'||file==='cart-soon-get.test.ts'||file==='r24-waitlist-soon-unknown.test.ts')aliases['next/server']=join(here,'next-server-after-world.ts');
  if(file==='provider-deletion-complete.test.ts')aliases['next/server']=join(here,'next-server-after-world.ts');
+ if(file==='stripe-connect-first-race.test.ts')aliases['next/server']=join(here,'next-server-after-world.ts');
  if(file==='cart-stock.test.ts')aliases['next/server']=join(here,'next-server-after-world.ts');
  if(file==='waitlist-join-suspended.test.ts')aliases['next/server']=join(here,'next-server-after-world.ts');
  if(file==='review-photo-paused.test.ts')aliases['next/server']=join(here,'next-server-after-world.ts');

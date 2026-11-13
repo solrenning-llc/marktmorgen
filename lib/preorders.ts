@@ -524,6 +524,22 @@ export async function confirmPreorder(store: Store, session: Session, product: L
   await recordPreorder(store, read);
   const { soon, day } = await soonOne(store, product.id);
   if (!soon) {
+    // Refunded in full or lost to a dispute before it was first confirmed: the refund pass may have read that refund
+    // before this pre-order was written down to meet it (nl:pre:pi:), so it would never take it back. Read the payment
+    // itself first, as the release does (MM-E2E-RG-2); a read that fails or answers for another payment throws and the
+    // confirmation is tried again.
+    if (read.pi && store.stripeAccountId) {
+      const payment = await onAccount("GET", store.stripeAccountId, `/payment_intents/${encodeURIComponent(read.pi)}?expand[]=latest_charge`);
+      if (!payment || typeof payment !== "object" || (payment as { id?: unknown }).id !== read.pi) throw new UnknownReplyError("a pre-order's payment");
+      if (await givenBack(store.stripeAccountId, payment)) {
+        const current = await readPreorderExact(store.statsId, product.id, read.id);
+        if (current && !current.given && !current.revoked) {
+          const wrote = repliesFor(await redisPipeline([["HSET", entriesKey(store.statsId, product.id), read.id, JSON.stringify({ ...current, revoked: now() } satisfies Preorder)], keep(store.statsId, product.id)]), 2)?.[0];
+          if (typeof wrote !== "number") throw new UnknownReplyError("a pre-order given back");
+        }
+        return "skip";
+      }
+    }
     const outcome = await handOverPreorder(store, product, read.id, deps);
     return outcome === "skip" ? "skip" : "given";
   }

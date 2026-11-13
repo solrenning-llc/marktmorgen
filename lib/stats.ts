@@ -1161,10 +1161,11 @@ const currencyOf = (row: { currency?: unknown }) => (typeof row.currency === "st
  * Why a reading of paid sales is partial, so what says so names the source
  * truly (lib/store-export.ts, its orders' note): the PayPal sales not all read
  * ("paypal"), more pages on the Stripe account than were read
- * ("stripe-pages"), or a Stripe sale whose currency was not named, kept with
- * its currency blank ("currency").
+ * ("stripe-pages"), a Stripe sale whose currency was not named, kept with
+ * its currency blank ("currency"), or a paid Stripe sale whose amount or date
+ * did not read, left out of every amount ("unread", MM-E2E-OT-3).
  */
-export type SalesGap = "paypal" | "stripe-pages" | "currency";
+export type SalesGap = "paypal" | "stripe-pages" | "currency" | "unread";
 
 /**
  * Every paid sale of this store since `since` (seconds), newest first, read
@@ -1236,6 +1237,12 @@ export async function readPaidSales(store: Store, since: number, pages: number):
     const meta = row.metadata ?? {};
     if (!handles.has(meta.store ?? "")) return;
     if (row.status !== "complete" || row.payment_status !== "paid") return;
+    // A paid sale whose amount or date does not read is never 0 cents nor today: left out, the reading partial.
+    if (!Number.isSafeInteger(row.amount_total) || (row.amount_total as number) < 0 || !Number.isSafeInteger(row.created) || (row.created as number) < 0) {
+      partial = true;
+      gaps.add("unread");
+      return;
+    }
     const details = (raw.customer_details ?? {}) as { address?: { country?: unknown } | null };
     const country = typeof details.address?.country === "string" && /^[A-Z]{2}$/.test(details.address.country) ? details.address.country : "";
     const currency = currencyOf(row);
@@ -1245,9 +1252,9 @@ export async function readPaidSales(store: Store, since: number, pages: number):
       gaps.add("currency");
     }
     sales.push({
-      created: typeof row.created === "number" ? row.created * 1000 : Date.now(),
+      created: (row.created as number) * 1000,
       product: meta.product ?? "",
-      cents: typeof row.amount_total === "number" ? row.amount_total : 0,
+      cents: row.amount_total as number,
       currency,
       row: raw,
       upsell: false,
@@ -1260,14 +1267,19 @@ export async function readPaidSales(store: Store, since: number, pages: number):
   const extras = walk("/payment_intents?limit=100", (pi) => {
     const meta = (pi.metadata ?? {}) as Record<string, string>;
     if (meta.kind !== "upsell" || !handles.has(meta.store ?? "") || pi.status !== "succeeded") return;
+    if (!Number.isSafeInteger(pi.amount) || (pi.amount as number) < 0 || !Number.isSafeInteger(pi.created) || (pi.created as number) < 0) {
+      partial = true;
+      gaps.add("unread");
+      return;
+    }
     if (!currencyOf(pi)) {
       partial = true;
       gaps.add("currency");
     }
     sales.push({
-      created: typeof pi.created === "number" ? pi.created * 1000 : Date.now(),
+      created: (pi.created as number) * 1000,
       product: meta.product ?? "",
-      cents: typeof pi.amount === "number" ? pi.amount : 0,
+      cents: pi.amount as number,
       currency: currencyOf(pi),
       row: pi,
       upsell: true,
@@ -1526,11 +1538,16 @@ async function readDisputes(store: Store, since: number, pages = DISPUTE_PAGES):
       if (takes !== true) continue;
       const raw = row.payment_intent;
       const pi = typeof raw === "string" ? raw : raw && typeof raw === "object" && typeof (raw as { id?: unknown }).id === "string" ? (raw as { id: string }).id : "";
-      const cents = typeof row.amount === "number" && row.amount > 0 ? row.amount : 0;
-      if (!cents) continue;
+      // A dispute that takes money but whose amount or date does not read is never dropped as
+      // nothing taken: the reading is partial (rule 24, MM-E2E-OT-2).
+      if (!Number.isSafeInteger(row.amount) || (row.amount as number) <= 0 || !Number.isSafeInteger(row.created) || (row.created as number) < 0) {
+        partial = true;
+        continue;
+      }
+      const cents = row.amount as number;
       const currency = currencyOf(row);
       if (!currency) partial = true;
-      out.push({ created: typeof row.created === "number" ? row.created * 1000 : 0, cents, currency, paymentIntent: pi });
+      out.push({ created: (row.created as number) * 1000, cents, currency, paymentIntent: pi });
     }
     if (!list.has_more) break;
     const last = rows[rows.length - 1];
@@ -1559,11 +1576,17 @@ async function readRefunds(store: Store, since: number, pages: number): Promise<
     const rows = financialPage(list, seen);
     for (const row of rows) {
       if (row.status !== "succeeded" && row.status !== "pending") continue;
+      // A refund whose date or amount does not read cannot be placed in any window nor
+      // subtracted: the reading is partial, never "no refund" (rule 24, MM-E2E-OT-1).
+      if (!Number.isSafeInteger(row.created) || (row.created as number) < 0 || !Number.isSafeInteger(row.amount) || (row.amount as number) < 0) {
+        partial = true;
+        continue;
+      }
       const currency = currencyOf(row);
       if (!currency) partial = true;
       out.push({
-        created: typeof row.created === "number" ? row.created * 1000 : 0,
-        cents: typeof row.amount === "number" ? row.amount : 0,
+        created: (row.created as number) * 1000,
+        cents: row.amount as number,
         currency,
         paymentIntent: typeof row.payment_intent === "string" ? row.payment_intent : "",
       });

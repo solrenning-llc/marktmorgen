@@ -23,7 +23,7 @@ import { grantImported, importedKey } from "@/lib/imported-purchases";
 import { bundleFromMeta } from "@/lib/bundle-rules";
 import { onAccount } from "@/lib/stripe-account";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
-import { confirmLostRead, lostCursorKey, lostDisputesOrRetry, refundRowKnown, rowGivesBack } from "@/lib/refunds";
+import { confirmLostRead, givenBack, lostCursorKey, lostDisputesOrRetry, refundRowKnown, rowGivesBack } from "@/lib/refunds";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { formatMoney } from "@/lib/money";
 import { type Listing, type Store, setPastBuyers, storeRef } from "@/lib/store";
@@ -253,7 +253,7 @@ export async function deliverGift(input: {
   const id = session.metadata?.gift ?? "";
   const gift = await readGift(id);
   if (!gift || gift.s !== store.statsId || gift.p !== product.id) return "skip";
-  if (gift.given) return "already";
+  if (gift.given || gift.revoked) return "already";
   // The mark read exactly (lib/claim-mark.ts; CX-123 rules 24 and 25): somebody else's is "already"; an unknown one
   // gives nothing and says so, as when Redis does not answer, so no "sent" mark is kept and the next run tries again.
   const mark = `${giftKey(id)}:giving`;
@@ -271,6 +271,19 @@ export async function deliverGift(input: {
   const sessionId = typeof session.id === "string" ? session.id : "";
   const pi = typeof session.payment_intent === "string" ? session.payment_intent : "";
   const created = typeof session.created === "number" ? session.created : now();
+  // Refunded in full or lost to a dispute before it was first confirmed: the refund pass may have read that refund
+  // before this gift had a payment to meet (nl:gift:pi: is written below), so it would never take it back. Read the
+  // payment itself first (MM-E2E-RG-1); a read that fails or answers for another payment throws, nothing is given,
+  // no "sent" mark is kept and the next run reads it again.
+  if (pi && store.stripeAccountId) {
+    const payment = await onAccount("GET", store.stripeAccountId, `/payment_intents/${encodeURIComponent(pi)}?expand[]=latest_charge`);
+    if (!payment || typeof payment !== "object" || (payment as { id?: unknown }).id !== pi) throw new UnknownReplyError("a gift's payment");
+    if (await givenBack(store.stripeAccountId, payment)) {
+      if (!(await saveGift({ ...gift, session: sessionId, pi, revoked: now() }, GIFT_KEPT_SECONDS))) throw new UnknownReplyError("a gift given back");
+      await releaseMark(mark, value);
+      return "already";
+    }
+  }
   const grant = grantsOf(session, gift);
   await grantImported(gift.s, `gift:${gift.id}`, [grant], created, store.sid);
   // The doors that read what an address was given are opened for this store.

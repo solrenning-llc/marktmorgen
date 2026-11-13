@@ -2519,6 +2519,16 @@ function bumpCents(value: unknown): number {
 }
 
 /**
+ * A paid order whose payment does not read is never written for good (HSETNX) with no payment: no refund or dispute
+ * could ever meet it, so its commission would stand on money given back (AFF-E2E-3). Only a checkout Stripe says
+ * took no payment (payment_intent null, nothing charged) has none. Throws UnknownReplyError, and the sweep keeps the
+ * order for its next run (failOrder).
+ */
+function paymentRead(raw: unknown, pi: string, total: number): void {
+  if (!pi && !(raw === null && total === 0)) throw new UnknownReplyError("an order's payment");
+}
+
+/**
  * Writes down a settled checkout that came through an affiliate's link.
  * Anything else is left alone, so it is safe to call on every checkout.
  *
@@ -2549,6 +2559,7 @@ export async function noteSession(
       : session.payment_intent && typeof session.payment_intent === "object" && typeof (session.payment_intent as { id?: unknown }).id === "string"
         ? ((session.payment_intent as { id: string }).id)
         : "";
+  paymentRead(session.payment_intent, pi, total);
   const buyer = typeof session.customer_details?.email === "string" ? session.customer_details.email : "";
   const base = Math.max(0, total - tax);
   const at = typeof session.created === "number" ? session.created : Math.floor(Date.now() / 1000);

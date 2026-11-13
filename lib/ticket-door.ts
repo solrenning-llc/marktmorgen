@@ -73,12 +73,12 @@ export const NOT_YOUR_EVENT = "This check-in page is not for one of your events.
  * says why in the door's words; "could not check" answers 503 so nothing on
  * the way reads it as a success.
  */
-export async function checkInAtDoor(store: { sid?: string | null }, event: unknown, typed: unknown, now = Date.now()): Promise<DoorReply> {
+export async function checkInAtDoor(store: { sid?: string | null }, event: unknown, typed: unknown, now = Date.now(), attempt?: unknown): Promise<DoorReply> {
   if (!isStoreEvent(store, event)) return { status: 400, body: { ok: false, error: "event", message: NOT_YOUR_EVENT } };
   const code = cleanCode(typed);
   // Only the last characters, so the screen can say which code it read without showing it whole.
   const ending = code.slice(-6);
-  const result: CheckIn = await checkIn(code, { event, now });
+  const result: CheckIn = await checkIn(code, { event, now, attempt });
   if (result.ok) return { status: 200, body: { ok: true, outcome: "admitted", ending } };
   const outcome = doorOutcome(result.reason);
   return { status: outcome === "unknown" ? 503 : 200, body: { ok: outcome !== "unknown", outcome, message: CHECK_IN_REFUSALS[result.reason], ending } };

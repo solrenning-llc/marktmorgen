@@ -26,7 +26,9 @@
  * never for good; after that the code itself is refused as expired.
  */
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import { claimMark } from "@/lib/claim-mark";
+import { claimMark, claimValue } from "@/lib/claim-mark";
+import { redisPipeline } from "@/lib/redis";
+import { repliesFor } from "@/lib/redis-reply";
 import { deriveKey } from "@/lib/secret-box";
 
 const VERSION = "t1";
@@ -113,14 +115,34 @@ export const CHECK_IN_REFUSALS: Readonly<Record<CheckInRefusal, string>> = {
  * forged or expired code, a code for another event, a code already used, and
  * any answer that cannot be read. A refused code takes no mark.
  */
-export async function checkIn(code: unknown, door: { event: string; now?: number }): Promise<CheckIn> {
+export async function checkIn(code: unknown, door: { event: string; now?: number; attempt?: unknown }): Promise<CheckIn> {
   const now = door.now ?? Date.now();
   const read = readTicketCode(code, now);
   if (!read.ok) return read;
   if (read.event !== door.event) return { ok: false, reason: "wrong_event" };
   const seconds = read.expiresAt - Math.floor(now / 1000) + CHECK_IN_KEEP_SECONDS;
-  const mark = await claimMark(checkInKey(read.event, read.ticket), seconds);
+  const key = checkInKey(read.event, read.ticket);
+  // The door's own attempt (one per typed code, kept while it is retried) is the mark's value, so a retry after a lost
+  // answer finds its own mark and is the same check-in, never "already used" (Claude 1 on #3498). Without one, a value
+  // only this call writes.
+  const attempt = typeof door.attempt === "string" && ATTEMPT.test(door.attempt) ? `door:${door.attempt}` : null;
+  const mark = await claimMark(key, seconds, attempt ?? claimValue(now));
   if (mark === "ours") return { ok: true, ticket: read.ticket };
-  if (mark === "taken") return { ok: false, reason: "used" };
+  if (mark === "taken") {
+    if (!attempt) return { ok: false, reason: "used" };
+    // Read exactly (rule 24): our own attempt is admitted again, another value is used, anything else is unknown.
+    let held: unknown[] | null = null;
+    try {
+      held = repliesFor(await redisPipeline([["GET", key]]), 1);
+    } catch {
+      held = null;
+    }
+    if (held && held[0] === attempt) return { ok: true, ticket: read.ticket };
+    if (held && typeof held[0] === "string") return { ok: false, reason: "used" };
+    return { ok: false, reason: "unknown" };
+  }
   return { ok: false, reason: "unknown" };
 }
+
+/** A door's attempt: 32 lowercase hex characters, made by the check-in screen for each code typed. */
+const ATTEMPT = /^[0-9a-f]{32}$/;

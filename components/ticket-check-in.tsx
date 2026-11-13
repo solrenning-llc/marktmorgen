@@ -24,6 +24,17 @@ export const DOOR_HEADLINES: Readonly<Record<DoorOutcome, string>> = {
 
 /** When the answer did not come back at all. */
 const NO_ANSWER = "We could not reach Marktmorgen. Try again in a moment.";
+/** Signed out while at the door: the code stays typed, so nothing is typed again after signing in (2.2.5, 3.3.7). */
+const SIGNED_OUT = "Sign in again in another tab, then press Check in. The code stays here.";
+/** A role without check-in: no retry fixes it. */
+const NOT_ALLOWED = "You cannot check people in for this store. Ask the owner or an admin.";
+
+/** One attempt id for a typed code: a retry of the same code after a lost answer is the same check-in. */
+function newAttempt(): string {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
 
 const OUTCOMES: readonly DoorOutcome[] = ["admitted", "used", "invalid", "expired", "unknown"];
 
@@ -43,6 +54,8 @@ export function TicketCheckIn({ event }: { event: string }) {
   const [empty, setEmpty] = useState(false);
   const [result, setResult] = useState<Result | null>(null);
   const field = useRef<HTMLInputElement>(null);
+  // Made again only when the typed code changes, so Enter on the same code retries the same attempt.
+  const attempt = useRef<{ code: string; id: string } | null>(null);
 
   async function check(formEvent: FormEvent<HTMLFormElement>) {
     formEvent.preventDefault();
@@ -57,19 +70,25 @@ export function TicketCheckIn({ event }: { event: string }) {
     setBusy(true);
     let next: Result;
     try {
-      const response = await fetch("/api/store/check-in", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ event, code: typed }) });
+      if (attempt.current?.code !== typed) attempt.current = { code: typed, id: newAttempt() };
+      const response = await fetch("/api/store/check-in", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ event, code: typed, attempt: attempt.current.id }) });
       const answer = (await response.json().catch(() => ({}))) as { outcome?: unknown; message?: unknown; ending?: unknown };
       const outcome = OUTCOMES.find((o) => o === answer.outcome);
       // Only an answer that says "admitted" in so many words admits; anything else is "could not check".
+      const fallback = response.status === 401 ? SIGNED_OUT : response.status === 403 ? NOT_ALLOWED : typeof answer.message === "string" ? answer.message : NO_ANSWER;
       next = outcome
         ? { outcome, message: typeof answer.message === "string" ? answer.message : "", ending: typeof answer.ending === "string" ? answer.ending : "" }
-        : { outcome: "unknown", message: typeof answer.message === "string" ? answer.message : NO_ANSWER, ending: "" };
+        : { outcome: "unknown", message: fallback, ending: "" };
     } catch {
       next = { outcome: "unknown", message: NO_ANSWER, ending: "" };
     }
     setResult(next);
-    // Ready for the next person; a code that could not be checked stays, so Enter tries it again.
-    if (next.outcome !== "unknown") setCode("");
+    // Ready for the next person once the door decided; a code that could not be checked, or was mistyped, stays,
+    // so Enter tries it again or one character can be fixed (3.3.6).
+    if (next.outcome === "admitted" || next.outcome === "used" || next.outcome === "expired") {
+      setCode("");
+      attempt.current = null;
+    }
     setBusy(false);
     field.current?.focus();
   }

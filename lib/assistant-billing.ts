@@ -316,15 +316,21 @@ export async function readAssistantReturn(store: Store, sessionId: string | unde
  */
 async function disputed(subscriptionId: string): Promise<boolean> {
   const chargeOf = (row: Record<string, unknown>) => ownField(row, "charge");
+  // An invoice is the add-on's only when it names the add-on's subscription (#4440): a row of another subscription, or
+  // one naming none, does not prove the link, so it is unreadable and never cancels the add-on or writes a dispute.
+  const ownInvoice = (row: Record<string, unknown>) => {
+    const named = ownField(row, "subscription");
+    return (typeof named === "string" ? named : plainObject(named) ? ownField(named, "id") : null) === subscriptionId;
+  };
   const read = readStripePage(
     await onPlatformAt(INVOICE_VERSION, "GET", `/invoices?${new URLSearchParams({ subscription: subscriptionId, limit: "3", "expand[]": "data.charge" })}`),
     (row) => {
-      if (!hasOwnField(row, "charge")) return false;
+      if (!ownInvoice(row) || !hasOwnField(row, "charge")) return false;
       const charge = chargeOf(row);
       return charge === null || (plainObject(charge) && typeof ownField(charge, "disputed") === "boolean");
     },
   );
-  if (read.rows.some((row) => { const charge = chargeOf(row); return plainObject(charge) && ownField(charge, "disputed") === true; })) return true;
+  if (read.rows.some((row) => { const charge = chargeOf(row); return ownInvoice(row) && plainObject(charge) && ownField(charge, "disputed") === true; })) return true;
   if (read.unreadable) throw new StripeListUnreadable("an add-on invoice not readable");
   return false;
 }

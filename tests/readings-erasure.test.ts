@@ -97,7 +97,43 @@ async function erasedDuring<T>(store: Store, email: string, work: () => Promise<
   }
 }
 
+/**
+ * The file's clock, kept inside one UTC day: it runs at its real pace from noon of the day the file started. The day's
+ * keys the checks name (the day's readings, the list's one try a day, the feed's makings) are read by the code at
+ * each call (Date.now(), or the `now` passed); a real midnight passing mid-file moved the code to the next day's keys
+ * while the checks still named the first day's (the feed's list tries read [0,0,0,0]). Time still passes, so a busy
+ * lock still gives up at its deadline (lib/redis-lock.ts, takeLock). Restored at the end.
+ */
+function withinOneDay(): () => void {
+  const RealDate = Date;
+  const started = RealDate.now();
+  const noon = Math.floor(started / 86_400_000) * 86_400_000 + 43_200_000;
+  const now = () => noon + (RealDate.now() - started);
+  class OneDay extends RealDate {
+    constructor(...args: unknown[]) {
+      if (args.length) super(...(args as [number]));
+      else super(now());
+    }
+    static now(): number {
+      return now();
+    }
+  }
+  globalThis.Date = OneDay as DateConstructor;
+  return () => {
+    globalThis.Date = RealDate;
+  };
+}
+
 async function main(): Promise<void> {
+  const realClock = withinOneDay();
+  try {
+    await checks();
+  } finally {
+    realClock();
+  }
+}
+
+async function checks(): Promise<void> {
   redis.clear();
   const world = await makeWorld("readings-erasure");
   const person = normaliseEmail("rhea.reader@example.com");

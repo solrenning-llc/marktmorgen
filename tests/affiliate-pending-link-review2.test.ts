@@ -162,7 +162,7 @@ async function main(): Promise<void> {
   is("credited at confirmation, with the invoice's payment", [(await sale("in_1PrerevA01"))?.aff, (await sale("in_1PrerevA01"))?.pi], [ANA, "pi_firstA"]);
   invoiceList = [{ id: "in_1PrerevA01", status: "paid", amount_paid: 5_000, currency: "usd", created: NOW - 300, status_transitions: { paid_at: NOW - 300 },
     parent: { subscription_details: { metadata: { store: "oven", product: "prod01" } } }, payments: { data: [{ payment: { payment_intent: "pi_firstA" } }] } }];
-  refunds = [{ id: "re_A", status: "succeeded", payment_intent: "pi_firstA", amount: 5_000 }];
+  refunds = [{ id: "re_A", object: "refund", status: "succeeded", payment_intent: "pi_firstA", amount: 5_000, currency: "usd" }];
   is("refunded in full: the first payment earns nothing", (await readBook(store, ANA)).lines.filter((l) => l.ref === "in_1PrerevA01").map((l) => l.commission), [0]);
   refunds = [];
   invoiceList = [{ ...invoiceList[0], parent: { subscription_details: { metadata: { store: "oven", product: "prod01", ...(subs.get("sub_1PrerevA01") ?? {}) } } } }];

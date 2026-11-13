@@ -64,6 +64,9 @@ export async function addSpend(
   const read = readSpend(input, now);
   if (!read.ok) return read;
   if (!isRedisConfigured()) return { ok: false, reason: "unavailable" };
+  // The Meta lines are read, exactly, before anything is written (review of #4027): a read that fails throws here and
+  // keeps nothing, so a creator told the add failed and adding it again never keeps the line twice.
+  const meta = await metaLines(statsId);
   const id = randomBytes(4).toString("hex");
   await redisPipeline([
     ["HSET", key(statsId), id, JSON.stringify(read.spend)],
@@ -77,10 +80,13 @@ export async function addSpend(
     const drop = (Array.isArray(all) ? (all as unknown[]).map(String) : []).filter((field) => !keep.has(field));
     if (drop.length) await redisPipeline([["HDEL", key(statsId), ...drop]]);
   }
-  return { ok: true, spends: await readSpends(statsId) };
+  return { ok: true, spends: [...(await typedSpends(statsId)), ...meta] };
 }
 
 export async function removeSpend(statsId: string, id: unknown): Promise<AdSpend[]> {
-  if (typeof id === "string" && ID.test(id) && isRedisConfigured()) await redisPipeline([["HDEL", key(statsId), id]]);
-  return readSpends(statsId);
+  if (!isRedisConfigured()) return [];
+  // Read first, as addSpend does: a removal is never told as failed after it was done.
+  const meta = await metaLines(statsId);
+  if (typeof id === "string" && ID.test(id)) await redisPipeline([["HDEL", key(statsId), id]]);
+  return [...(await typedSpends(statsId)), ...meta];
 }

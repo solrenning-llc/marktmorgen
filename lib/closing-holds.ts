@@ -224,10 +224,14 @@ export async function takeCalls(folder: string, n: number, from: "calls" | "rcal
 /** A member's last paid invoice, as its membership line says, with the payment it was paid by. */
 export function paidPeriodOf(invoice: Record<string, unknown>, email: string, intent = ""): PaidPeriod | null {
   // The payment it was paid by: on the invoice in older API versions, among its payments (expanded) in newer ones.
+  // Only as the invoice's one payment (money review on #4428): exactly one paid among them, from a list that says no
+  // more follow. An invoice paid in more than one charge keeps none here, so the refund at closing reads every one
+  // of its payments (lib/closing-refunds.ts intentsOf) and gives back over all of them (#4411), never from the first.
   if (!intent) {
-    const payments = (invoice.payments as { data?: { status?: unknown; payment?: { payment_intent?: unknown } | null }[] } | undefined)?.data ?? [];
-    const found = payments.find((p) => p.status === "paid")?.payment?.payment_intent;
-    const id = typeof found === "string" ? found : (found as { id?: unknown } | null)?.id;
+    const list = invoice.payments as { has_more?: unknown; data?: { status?: unknown; payment?: { payment_intent?: unknown } | null }[] } | undefined;
+    const paidOnes = Array.isArray(list?.data) ? list.data.filter((p) => p?.status === "paid") : [];
+    const found = list?.has_more === false && paidOnes.length === 1 ? paidOnes[0].payment?.payment_intent : undefined;
+    const id = typeof found === "string" ? found : (found as { id?: unknown } | null | undefined)?.id;
     if (typeof id === "string") intent = id;
   }
   if (invoice.status !== "paid" || typeof invoice.id !== "string" || !INVOICE_ID.test(invoice.id)) return null;

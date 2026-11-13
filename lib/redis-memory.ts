@@ -191,6 +191,13 @@ export class MemoryRedis {
             return fields.removed ? "r" : "y";
           }).join("");
         }
+        // lib/learn.ts TOUCH_UNLESS_ERASED: a student's row written only while their address is not deleted from the store.
+        if (key.startsWith("-- marktmorgen:touch-student:v1\n") && args[0] === "2" && args.length === 6) {
+          const [, students, erased, print, field, row] = args;
+          if (this.run(["HEXISTS", erased, print]) === 1) return 0;
+          this.run(["HSET", students, field, row]);
+          return 1;
+        }
         // lib/group-buy.ts PLACE_RELEASE: a place's opening hold deleted only while its token is still the open's own.
         if (key.startsWith("-- marktmorgen:group-place-release:v1\n") && args[0] === "1" && args.length === 3) {
           const [, hold, token] = args;

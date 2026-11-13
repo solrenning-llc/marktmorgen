@@ -69,7 +69,7 @@ export async function POST(request: NextRequest) {
   await recordEnrollment(store, order.email, product.id, order.created);
   const secret = request.cookies.get(BUYER_COOKIE)?.value ?? "";
   if (secret && order.buyerKey && buyerFingerprint(secret) === order.buyerKey) {
-    await touchStudent(course.id, order.email, order.created, store);
+    await touchStudent(course.id, order.email, order.created, store, { listId: store.listId });
     const token = await mintPass(store, order.email, [course.id]);
     return away(path, passCookie(store, token, origin.startsWith("https://")));
   }

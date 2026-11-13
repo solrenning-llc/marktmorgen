@@ -36,6 +36,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { type DataStore, giveData, needData, noteData, takeData } from "@/lib/store-data";
+import { suppressedKey, suppressionPrint } from "@/lib/suppression";
 import { dataBytes } from "@/lib/store-data-rules";
 import { orderWrite } from "@/lib/order-data";
 import { earnedCourses } from "@/lib/community-points";
@@ -440,8 +441,26 @@ type StudentRow = { e: string; s: number; l: number };
  * (lib/store-data.ts); when there is none it is not written, and the course
  * opens all the same: the row is what the studio shows, not their access.
  */
-export async function touchStudent(courseId: string, email: string, startSeconds: number, room: DataStore): Promise<void> {
+/**
+ * A student's row written only while their address is not deleted from the store, in one step (issue #4393): KEYS[1]
+ * the course's students, KEYS[2] the store's deleted prints (lib/suppression.ts); ARGV[1] the address's print, ARGV[2]
+ * the row's field, ARGV[3] the row. 1 when written, 0 when the address was deleted (nothing written). A visit
+ * authorised before an erasure, whose write runs after it (the course page defers it with after()), writes nothing.
+ * lib/redis-memory.ts runs it the same way.
+ */
+export const TOUCH_UNLESS_ERASED = `-- marktmorgen:touch-student:v1
+if redis.call("HEXISTS", KEYS[2], ARGV[1]) == 1 then return 0 end
+redis.call("HSET", KEYS[1], ARGV[2], ARGV[3])
+return 1`;
+
+/**
+ * `erased`: the store's list, where its deleted addresses are kept (lib/suppression.ts). Given, the row is written only
+ * while the address is not deleted, in the same step (TOUCH_UNLESS_ERASED); a store with no list cannot be checked, so
+ * nothing is written. The routes always give it; a caller that leaves it out writes the row unchecked.
+ */
+export async function touchStudent(courseId: string, email: string, startSeconds: number, room: DataStore, erased?: { listId: string | null }): Promise<void> {
   if (!isRedisConfigured()) return;
+  if (erased && !erased.listId) return;
   const key = studentsKey(courseId);
   const field = emailKey(email);
   const [raw] = await redisPipeline([["HGET", key, field]]);
@@ -454,8 +473,18 @@ export async function touchStudent(courseId: string, email: string, startSeconds
   }
   row.l = Math.floor(Date.now() / 1000);
   const json = JSON.stringify(row);
-  if (typeof raw !== "string" && !(await takeData(room, [{ slot: DONE_SLOT(courseId), bytes: dataBytes([field, json, "0000000000"], 1) }])).ok) return;
-  await redisPipeline([["HSET", key, field, json]]);
+  const taken = typeof raw !== "string" ? [{ slot: DONE_SLOT(courseId), bytes: dataBytes([field, json, "0000000000"], 1) }] : [];
+  if (taken.length && !(await takeData(room, taken)).ok) return;
+  if (!erased?.listId) {
+    await redisPipeline([["HSET", key, field, json]]);
+    return;
+  }
+  const listId = erased.listId;
+  const written = repliesFor(await redisPipeline([["EVAL", TOUCH_UNLESS_ERASED, 2, key, suppressedKey(listId), suppressionPrint(listId, email), field, json]]), 1)?.[0];
+  // Refused because the address was deleted: the room this new row took goes back. Any other answer keeps it (it may
+  // have been written) and is said in the log.
+  if (written === 0 && taken.length) await giveData(room, taken);
+  else if (written !== 1 && written !== 0) console.error("a student's row answered in no known shape", courseId);
 }
 
 /**

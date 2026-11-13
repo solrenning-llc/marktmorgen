@@ -56,8 +56,8 @@ export async function readDeclines(store: Pick<Store, "stripeAccountId">, since:
       // The first page unanswered is unknown; a later one leaves the older charges unread.
       return page === 0 ? null : result(true);
     }
-    // An unreadable page is unknown, never "no declines".
-    if (!list || !Array.isArray(list.data) || typeof list.has_more !== "boolean") return null;
+    // An unreadable page is unknown, never "no declines": only Stripe's list envelope counts (Claude 1 on #1913).
+    if (!list || list.object !== "list" || !Array.isArray(list.data) || typeof list.has_more !== "boolean") return null;
     const data = list.data as unknown[];
     for (const raw of data) {
       if (!raw || typeof raw !== "object") return null;

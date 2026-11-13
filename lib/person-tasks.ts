@@ -220,3 +220,6 @@ export function dayIn(nowMs: number, timeZone: string): string {
   const get = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
   return `${get("year")}-${get("month")}-${get("day")}`;
 }
+
+/** The same one-line reading and drawn-character check, for the store's own task list (lib/business-tasks-rules.ts). */
+export { line as taskLine, seen as taskSeen };

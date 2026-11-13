@@ -133,7 +133,7 @@ async function main(): Promise<void> {
     invoice("in_Elsewhere001", NOW - 5 * DAY, 3000, { ...terms, store: "another" }),
     invoice("in_Nobody000001", NOW - 5 * DAY, 3000, { product: club.product.id }),
   ];
-  refunds = [{ status: "succeeded", payment_intent: "pi_in_Month0000002", amount: 1000 }];
+  refunds = [{ id: "re_Month0000002", object: "refund", status: "succeeded", payment_intent: "pi_in_Month0000002", amount: 1000, currency: "usd" }];
   let book = await readBook(store);
   is("renewals retain the original subscription promotion", book.lines.find(line => line.ref === "in_Month0000002")?.promotion, {source:"instagram",campaign:"launch",content:"story-a"});
   const lines = (aff: string) => book.lines.filter((l) => l.aff === aff && l.how !== "bonus").map((l) => [l.ref, l.commission, l.status]);
@@ -148,10 +148,13 @@ async function main(): Promise<void> {
 
   part("A bonus for each goal reached in a month");
   // Both sales inside the month that is running: an hour or two before now fell in the
-  // month before during a month's first hours (seen on 1 November 2026, 01:00 UTC).
+  // month before during a month's first hours (seen on 1 November 2026, 01:00 UTC), and never after now: in a
+  // month's first two seconds, monthStart + 1 and + 2 were sales still to come, and nothing was payable after the release.
+  // The second sale stays one second after the first whenever now allows it, so "dated at the second" still tells the
+  // two sales apart during a month's first hour (only in its very first second do they share one).
   const monthStart = Date.UTC(new Date(NOW * 1000).getUTCFullYear(), new Date(NOW * 1000).getUTCMonth(), 1) / 1000;
-  const firstSale = Math.max(NOW - 2 * 3600, monthStart + 1);
-  const secondSale = Math.max(NOW - 3600, monthStart + 2);
+  const firstSale = Math.max(NOW - 2 * 3600, monthStart);
+  const secondSale = Math.max(NOW - 3600, Math.min(monthStart + 1, NOW));
   invoices = [
     invoice("in_Bonus0000001", firstSale, 2000, { ...terms, via_at: String(NOW - 3 * DAY) }),
     invoice("in_Bonus0000002", secondSale, 2000, { ...terms, via_at: String(NOW - 3 * DAY) }, { customer_email: "other@example.com" }),
@@ -161,7 +164,7 @@ async function main(): Promise<void> {
   const bonus = book.lines.find((l) => l.how === "bonus");
   is("two sales that earn in this month: the bonus once, dated at the second", [bonus?.commission, bonus?.at, bonus?.aff], [5000, secondSale, SARA]);
   is("not counted as a sale", book.rows.find((r) => r.affiliate.id === SARA)?.sales, 2);
-  refunds = [{ status: "succeeded", payment_intent: "pi_in_Bonus0000002", amount: 2000 }];
+  refunds = [{ id: "re_Bonus0000002", object: "refund", status: "succeeded", payment_intent: "pi_in_Bonus0000002", amount: 2000, currency: "usd" }];
   book = await readBook(store);
   is("a refund that takes the month under the goal takes it back", book.lines.some((l) => l.how === "bonus"), false);
   refunds = [];

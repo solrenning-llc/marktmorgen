@@ -1836,7 +1836,7 @@ export async function createStore(
 
 export type DeleteResult =
   | { ok: true; store: Store }
-  | { ok: false; reason: "none" | "first" | "products" | "paying" | "assistant" | "domain" };
+  | { ok: false; reason: "none" | "first" | "products" | "paying" | "assistant" | "assistant_due" | "domain" };
 
 /**
  * Deletes one of an account's other stores, while there is nothing in it to
@@ -1863,6 +1863,11 @@ export async function deleteStore(email: string): Promise<DeleteResult> {
     if (productCount(store) > 0) return { ok: false, reason: "products" };
     if (store.subscriptionActive) return { ok: false, reason: "paying" };
     if (store.assistantPlan?.active && !store.assistantPlan.cancelsAtEnd) return { ok: false, reason: "assistant" };
+    // Not active is not "stopped": a past_due or unpaid add-on (lib/assistant-billing.ts assistantPlanOf) is written
+    // down as not active while Stripe may still charge it, and once the store is gone nothing finds it again. It holds
+    // the store until it is known to stop: set to stop at the end of its month, or that month (its period) over.
+    const plan = store.assistantPlan;
+    if (plan?.subscriptionId && !plan.active && !plan.cancelsAtEnd && plan.period && plan.period.end > Date.now() / 1000) return { ok: false, reason: "assistant_due" };
     if (store.domain) return { ok: false, reason: "domain" };
 
     const released = `${RELEASED_PREFIX}${new Date().toISOString()}`;

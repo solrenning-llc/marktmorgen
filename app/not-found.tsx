@@ -18,9 +18,7 @@ export const metadata: Metadata = {
 export default function NotFound() {
   return (
     <div className="flex min-h-screen flex-col bg-paper text-ink">
-      <header>
-        <SiteNav />
-      </header>
+      <SiteNav />
       <main id="content" className="flex-1">
         <section className="container-narrow py-20 sm:py-28">
           <p className="eyebrow">Page not found</p>

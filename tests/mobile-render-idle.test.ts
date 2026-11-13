@@ -25,22 +25,23 @@ test("mobile interaction timing waits for the control to stop moving", () => {
     "readiness is an observed browser event, never a fixed delay");
 });
 
-test("every measured path is first opened once, unmeasured, in a throwaway context", () => {
+test("the browser is first warmed once, unmeasured, in a throwaway context", () => {
   // On a fresh CI runner only the first sample used to pay the browser's own
   // cold start ("/" sample 1 alone failed, samples 2 and 3 passed: jobs
   // 130411049774, 130644246553, 130347815266). Removing this visit brings that
-  // run-order penalty back.
-  const warmLoop = runner.indexOf("for(const path of PATHS){");
+  // run-order penalty back. Only "/" is warmed, never a measured route's first
+  // server render (#3900 review; tests/mobile-render-warm-browser-only.test.ts).
+  const warmStart = runner.indexOf('const WARM_PATH="/";');
   const measuredLoop = runner.indexOf("for(const path of PATHS)for(let sample=1;sample<=3;sample++)");
-  assert.ok(warmLoop >= 0, "the warm-up visit of every measured path remains");
-  assert.ok(measuredLoop > warmLoop, "the warm-up comes before the first measured sample");
-  assert.equal(runner.indexOf("for(const path of PATHS){", warmLoop + 1), -1, "a single warm-up pass");
+  assert.ok(warmStart >= 0, "the warm-up visit of the browser remains");
+  assert.ok(measuredLoop > warmStart, "the warm-up comes before the first measured sample");
+  assert.equal(runner.indexOf('const WARM_PATH="/";', warmStart + 1), -1, "a single warm-up visit");
 
-  const warm = runner.slice(warmLoop, measuredLoop);
+  const warm = runner.slice(warmStart, measuredLoop);
   assert.match(warm, /browser\.newContext\(PHONE\)/, "its own context, on the measured phone");
   assert.match(warm, /finally\{await context\.close\(\);\}/, "the throwaway context is closed before measuring");
-  assert.match(warm, /openPhone\(context,path,/, "same network, CPU, cold cache, request policy and observers");
-  assert.match(warm, /loadAndSettle\(page,path\)/, "same load and settling as a measured sample");
+  assert.match(warm, /openPhone\(context,WARM_PATH,/, "same network, CPU, cold cache, request policy and observers");
+  assert.match(warm, /loadAndSettle\(page,WARM_PATH\)/, "same load and settling as a measured sample");
   assert.match(warm, /for\(let tap=1;tap<=3;tap\+\+\)\{await waitUntilControlSettles\(page,control\);await control\.click\(\)/,
     "the same three taps on the same control");
   assert.doesNotMatch(warm, /MOBILE_RENDER_MEASUREMENT|results\.push|failed=|targets|metrics\(/,
@@ -51,7 +52,7 @@ test("every measured path is first opened once, unmeasured, in a throwaway conte
     "every measured sample still starts in a new context");
   assert.match(measured, /openPhone\(context,path,counts\)/);
   assert.match(measured, /loadAndSettle\(page,path\)/);
-  assert.match(measured, /page\.locator\(CONTROL\)/, "the measured control is the warmed one");
+  assert.match(measured, /page\.locator\(CONTROL\)/, "the measured control is the same selector as the warmed one");
 
   const phone = runner.slice(runner.indexOf("async function openPhone"), runner.indexOf("async function loadAndSettle"));
   assert.match(phone, /setCPUThrottlingRate",\{rate:4\}/);

@@ -93,17 +93,21 @@ try{
  // time: "/" sample 1 alone failed (first tap 200-450 ms with no script in its
  // long animation frame, LCP 2-3.4 s, the hero painted half-parsed, CLS 0.57)
  // while samples 2 and 3 in the same run passed (jobs 130411049774,
- // 130644246553, 130347815266 and others). Each path is therefore opened once,
- // in its own throwaway context, on the same phone and network, with the same
- // three taps, before its measured samples. Nothing from these visits is
- // recorded or judged, and every measured sample still gets a new context with
- // the HTTP cache disabled: what each sample measures stays a cold page load,
- // not a cold browser binary. Thresholds, samples and taps are unchanged.
- for(const path of PATHS){
+ // 130644246553, 130347815266 and others). So the browser, and only the
+ // browser, is warmed first: one visit of "/", in its own throwaway context,
+ // on the same phone and network, with the same three taps. "/" is the page the
+ // readiness loop above already asked the server for, so this warms no route
+ // that was cold before; every other path, the dynamic product page above all,
+ // keeps its first server render inside its own first measured sample, where a
+ // regression in it is seen (#3900 review). Nothing from this visit is recorded
+ // or judged, and every measured sample still gets a new context with the HTTP
+ // cache disabled. Thresholds, samples and taps are unchanged.
+ const WARM_PATH="/";
+ {
   const context=await browser.newContext(PHONE);
   try{
-   const {page}=await openPhone(context,path,{writes:0,visitBeacons:0});
-   await loadAndSettle(page,path);
+   const {page}=await openPhone(context,WARM_PATH,{writes:0,visitBeacons:0});
+   await loadAndSettle(page,WARM_PATH);
    const control=page.locator(CONTROL).first();
    if(await control.count())for(let tap=1;tap<=3;tap++){await waitUntilControlSettles(page,control);await control.click();await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));}
   }finally{await context.close();}

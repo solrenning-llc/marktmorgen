@@ -21,7 +21,7 @@
  */
 import { redisPipeline } from "@/lib/redis";
 import { traceKey } from "@/lib/community-trace";
-import { forgetMemberRecord, readConfig } from "@/lib/community";
+import { DamagedConfigError, forgetMemberRecord, readConfigExact } from "@/lib/community";
 import { forgetHandle } from "@/lib/community-mentions";
 import { forgetCommunityUnsub } from "@/lib/community-mail";
 import { forgetPointsPerson } from "@/lib/community-points";
@@ -36,7 +36,17 @@ import { unindexMember } from "@/lib/community-index";
 
 /** Deletes one person from one community. Answers how many records went. */
 export async function forgetCommunityPerson(id: string, who: string, email: string, productIds: string[]): Promise<number> {
-  const config = await readConfig(id).catch(() => null);
+  // Not swallowed (CX-123 rule 24): read as none, every space's record of
+  // the person below would be skipped while the erasure said it was done.
+  // Except a setup stored damaged (review of #3091 by Claude 2), which asking
+  // again never mends: while it cannot be read the community is off for
+  // everyone (communityViewer), so no space's answer about them is read or
+  // written, and those written before expire on their own within five
+  // minutes (lib/community-access.ts, OPEN_SECONDS). Everything else goes now.
+  const config = await readConfigExact(id).catch((error: unknown) => {
+    if (error instanceof DamagedConfigError) return null;
+    throw error;
+  });
   const member = await forgetMemberRecord(id, who);
   let records = member ? 1 : 0;
   if (member?.h) records += await forgetHandle(id, member.h, who);

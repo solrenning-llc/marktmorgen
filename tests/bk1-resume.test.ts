@@ -150,8 +150,10 @@ async function main(): Promise<void> {
   const old = "00000000-0000-4000-8000-000000000001";
   objects.set(old, new Uint8Array([1, 2, 3]));
   writtenAt.set(old, D - 40 * DAY);
-  // 20 s a request: the deadline comes after about 25 of the 30 keys.
-  latency = 20_000;
+  // The deadline over 28 a request (20 s at the 560 s deadline before the route's 300 s, C2-20261113-1415-ADOTAR-5):
+  // the deadline comes after about 25 of the 30 keys, whatever the cutoff.
+  const pauseLatency = Math.floor((C.BACKUP_COPY_DEADLINE_MS as number) / 28);
+  latency = pauseLatency;
   dumps = 0;
   const first = await runBackup({ now: D, review, store, key });
   latency = 0;
@@ -191,7 +193,7 @@ async function main(): Promise<void> {
 
   part("The set window is the UTC day of the copy's first run: a later day starts a new copy");
   reset(D + 10 * DAY);
-  latency = 20_000;
+  latency = pauseLatency;
   const paused = await runBackup({ now: D + 10 * DAY, review, store, key });
   latency = 0;
   const pausedParts = [...objects.keys()];
@@ -207,7 +209,7 @@ async function main(): Promise<void> {
 
   part("Keys that change between the runs: before the cursor as they were copied, after it as they are");
   reset(D + 20 * DAY);
-  latency = 20_000;
+  latency = pauseLatency;
   const before = await runBackup({ now: D + 20 * DAY, review, store, key });
   latency = 0;
   is("paused past k06 and before k28", [reasonOf(before), keysOf(before) > 9 && keysOf(before) < 28], ["copy_incomplete", true]);
@@ -230,7 +232,7 @@ async function main(): Promise<void> {
 
   part("A progress whose parts are gone is never resumed: the run copies afresh");
   reset(D + 30 * DAY);
-  latency = 20_000;
+  latency = pauseLatency;
   await runBackup({ now: D + 30 * DAY, review, store, key });
   latency = 0;
   const gone = [...objects.keys()][0];
@@ -257,7 +259,7 @@ async function main(): Promise<void> {
 
   part("A pause needs a part left for the rest of the copy");
   reset(D + 60 * DAY);
-  latency = 20_000;
+  latency = pauseLatency;
   const onePart = await runBackup({ now: D + 60 * DAY, review: { ...review, maxParts: 1, maxStoredBytes: 35 * 1_131_232 }, store, key });
   latency = 0;
   is("with one part allowed, the deadline ends the copy as too many parts, and no progress is kept", [reasonOf(onePart), (await real([["GET", PROGRESS]]))[0]], ["export_too_many_parts", null]);
@@ -282,7 +284,8 @@ async function main(): Promise<void> {
     const runs: { keys: number; seconds: number; cpuMs: number; reason: string }[] = [];
     let closed: BackupRunResult | null = null;
     let copied = 0;
-    for (let run = 0; run < 10 && !closed; run += 1) {
+    // Enough runs for the copy to close at the deadline's length (about 400 keys a run at the 240 s cutoff).
+    for (let run = 0; run < 60 && !closed; run += 1) {
       // Every run on the same day, the day's count cleared: how many runs the copy takes, whatever the day allows.
       await real([["DEL", `nl:backup:ran:${new Date(T).toISOString().slice(0, 10)}`]]);
       at(T + run * HOUR);

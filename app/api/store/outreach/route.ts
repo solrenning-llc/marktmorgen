@@ -6,6 +6,7 @@ import { ensureStatsId, storeRef } from "@/lib/store";
 import { AI_PER_MINUTE, MAX_AI_NOTES } from "@/lib/ai-rules";
 import { dropPitch, editPitch, readStoreSite, saveSender, setPitchStatus, startPitch } from "@/lib/outreach";
 import { MAX_PITCH_BODY, MAX_PITCH_SUBJECT, PITCH_STATUSES, type PitchStatus, isGoal } from "@/lib/outreach-rules";
+import { UnknownReplyError } from "@/lib/redis-reply";
 
 /** Reading somebody else's website and asking the model can each take seconds. */
 export const maxDuration = 60;
@@ -85,6 +86,8 @@ export async function POST(request: NextRequest) {
     return fail("invalid");
   } catch (error) {
     console.error("outreach failed", error);
+    // A read or a receipt not known (rule 24): said as nothing known to have changed, never done.
+    if (error instanceof UnknownReplyError) return fail("unavailable", 503);
     return fail("server_error", 500);
   }
 }

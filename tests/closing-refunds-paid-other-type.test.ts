@@ -14,10 +14,10 @@ let listed: unknown[] = [];
 let posts = 0;
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const path = new URL(String(input)).pathname;
-  if (path === "/v1/balance") return Response.json({ available: [{ amount: 100000, currency: "usd" }] });
+  if (path === "/v1/balance") return Response.json({ object: "balance", available: [{ amount: 100000, currency: "usd" }] });
   if (path === `/v1/invoices/${INV}`) return Response.json({ id: INV, payment_intent: null });
   if (path === "/v1/invoice_payments") return Response.json({ object: "list", has_more: false, data: listed });
-  if (path === `/v1/payment_intents/${PI}`) return Response.json({ id: PI, latest_charge: { id: "ch_GOtherType01", amount: 1000, currency: "usd", amount_refunded: 0, disputed: false } });
+  if (path === `/v1/payment_intents/${PI}`) return Response.json({ id: PI, latest_charge: { id: "ch_GOtherType01", amount: 1000, currency: "usd", amount_refunded: 0, disputed: false, balance_transaction: null } });
   if (path === "/v1/refunds" && init?.method === "POST") {
     posts++;
     const b = new URLSearchParams(String(init.body));

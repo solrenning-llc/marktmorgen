@@ -391,7 +391,8 @@ export async function askAssistant(input: { store: Store; token?: unknown; text:
   // Not known, or not shown. When the model said it did not know, the creator sees the question; never who asked.
   if (json && json.status === "unknown") {
     await redisPipeline([
-      ["LPUSH", missedKey(store.statsId), JSON.stringify({ q: text, at: Math.floor(now / 1000) })],
+      // As the conversation keeps it (forAi: addresses, phones and links removed), never what the buyer typed (#4118).
+      ["LPUSH", missedKey(store.statsId), JSON.stringify({ q: forAi(text, 600), at: Math.floor(now / 1000) })],
       ["LTRIM", missedKey(store.statsId), 0, ASSISTANT_MISSED_KEPT - 1],
       ["EXPIRE", missedKey(store.statsId), ASSISTANT_MISSED_SECONDS],
     ]).catch((error) => console.error("keeping an unanswered question failed", error));
@@ -446,15 +447,19 @@ export async function handToCreator(input: { store: Store; token?: unknown; emai
 }
 
 /** The newest questions the assistant could not answer, for the studio; never who asked. */
-export async function assistantMissed(store: Store, limit = 20): Promise<{ question: string; at: number }[]> {
+export async function assistantMissed(store: Store, limit = 20, now = Date.now()): Promise<{ question: string; at: number }[]> {
   if (!store.statsId || !isRedisConfigured()) return [];
   const [rows] = await redisPipeline([["LRANGE", missedKey(store.statsId), 0, Math.max(0, limit - 1)]]);
   const out: { question: string; at: number }[] = [];
+  // Only within the window the privacy policy states (#4118): the list's EXPIRE is renewed at each new question, so an
+  // older item, or one with no day, is never shown. A question kept before forAi was applied is cleaned on its way out.
+  const oldest = Math.floor(now / 1000) - Math.floor(ASSISTANT_MISSED_SECONDS);
   for (const row of Array.isArray(rows) ? rows : []) {
     try {
       const value = JSON.parse(String(row)) as { q?: unknown; at?: unknown };
-      const question = readAssistantText(value.q);
-      if (question) out.push({ question, at: typeof value.at === "number" ? value.at : 0 });
+      if (typeof value.at !== "number" || value.at < oldest) continue;
+      const question = forAi(readAssistantText(value.q), 600);
+      if (question) out.push({ question, at: value.at });
     } catch {}
   }
   return out;

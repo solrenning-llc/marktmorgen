@@ -416,7 +416,14 @@ export async function markPaidOutside(
         if (error instanceof StripeError && error.status === 404) return {};
         throw error;
       })) as Record<string, unknown>;
+      // The checkout read must be this request's own (#4447): Stripe answering with another session, or a paid one
+      // that names another request or store, is a read error, so this request is never written down with another's
+      // payment, nor its checkout closed or marked on that answer. A session Stripe no longer has ({} on a 404) is not one.
+      const gone = Object.keys(known).length === 0;
+      if (!gone && known.id !== request.session) return { ok: false, reason: "error" };
       if (isSettled(known)) {
+        const meta = (known.metadata ?? {}) as Record<string, string>;
+        if (meta.kind !== "request" || meta.request !== request.id || !saleHandles(store).has(meta.store ?? "")) return { ok: false, reason: "error" };
         await markPaid(store, request.id, known, now);
         return { ok: false, reason: "paid_online" };
       }

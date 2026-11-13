@@ -80,7 +80,8 @@ async function main(): Promise<void> {
 
   part("Already paid online: written down as such, the mark refused");
   const online = await make();
-  await withSession(online, "cs_test_paidone1234", { status: "complete", payment_status: "paid", amount_total: 12000, payment_intent: "pi_test_paid12345", created: Math.floor(day / 1000) });
+  // The request's own checkout, as Stripe keeps it: its metadata names the request and the store (lib/payment-requests.ts).
+  await withSession(online, "cs_test_paidone1234", { status: "complete", payment_status: "paid", amount_total: 12000, payment_intent: "pi_test_paid12345", created: Math.floor(day / 1000), metadata: { kind: "request", request: online, store: "outsideshop" } });
   const refused = await markPaidOutside(store, online, { method: "cash", note: "", paidAt: day });
   const after = await requestOf(store, online);
   is("refused as paid online", refused.ok ? "marked" : refused.reason, "paid_online");

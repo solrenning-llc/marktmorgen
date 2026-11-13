@@ -21,6 +21,8 @@ import { deriveKey } from "@/lib/secret-box";
 import { createHash } from "node:crypto";
 import { noteForErasure } from "@/lib/erasure-index";
 import { suppressedKey, suppressionPrint } from "@/lib/suppression";
+import { erasePerson } from "@/lib/person-erasure";
+import { importedKey } from "@/lib/imported-purchases";
 
 /**
  * Where lib/email.ts keeps the sender of a key's email (its pinKey), written just before the first request made under
@@ -238,7 +240,7 @@ export async function handOverPayPal(store: Store, paid: Paid): Promise<boolean>
 }
 
 /** handOverPayPal, saying whether the order left the list handed over, its product gone, or its receipt still owed. */
-async function handOver(store: Store, paid: Paid): Promise<"handed" | "gone" | "receipt owed"> {
+async function handOver(store: Store, paid: Paid, retry = false): Promise<"handed" | "gone" | "receipt owed"> {
   let product: Listing | null;
   let bundled: Map<string, Listing>;
   try {
@@ -283,6 +285,18 @@ async function handOver(store: Store, paid: Paid): Promise<"handed" | "gone" | "
       return null;
     },
   });
+  // A retry read the person's deletion print before it handed over (handOverAgain, #4140); a deletion that landed since
+  // (Codex G on #4163) is read again here, before the sale is credited or told to the webhooks: deleted at or after the
+  // payment, what the hand-over wrote is deleted again with the person (erasePerson, which deletes everything of theirs
+  // and can run again), nothing is credited or told, and the order leaves the list. A print that does not read throws,
+  // and the retry keeps the order (rule 24). The receipt itself is refused by KEEP_RECEIPT in the same step it is kept.
+  if (retry && (await erasedSincePaid(store, paid))) {
+    console.error("a PayPal purchase's person was deleted from the store while it was handed over again; deleted again, nothing told", store.handle, paid.order);
+    const again = await erasePerson(store, paid.email, { kind: "person" }, { allowance: false });
+    if (!again.ok) throw new Error("deleting a PayPal purchase's person again after a hand-over raced their deletion did not finish");
+    if (store.statsId) await handedOver(store.statsId, paid.order);
+    return "gone";
+  }
   await creditPayPalSale(store, paid, product.title).catch((error) => console.error("crediting a PayPal sale failed", error));
   await emitEvent(store, "sale.completed", `paypal:${paid.order}`, {
     paypal_order: paid.order,
@@ -314,6 +328,33 @@ async function handOver(store: Store, paid: Paid): Promise<"handed" | "gone" | "
     return "receipt owed";
   }
   return "handed";
+}
+
+/**
+ * Whether the person who paid was deleted from the store at or after the payment: their print in the store's list of
+ * deleted people (lib/suppression.ts, written by erasePerson before it deletes anything, in seconds) at or after
+ * paid.at, read as KEEP_RECEIPT reads it. A store with no list has deleted nobody (an erasure gives the store its list
+ * first, lib/person-erasure.ts erasureScope). A reply that is neither absent nor a number of seconds is unknown and
+ * throws UnknownReplyError (rule 24).
+ */
+async function erasedSincePaid(store: Store, paid: Paid): Promise<boolean> {
+  if (!store.listId) return false;
+  const read = repliesFor(await redisPipeline([["HGET", suppressedKey(store.listId), suppressionPrint(store.listId, paid.email)]]), 1);
+  const at = read?.[0];
+  if (!read || (at !== null && (typeof at !== "string" || !/^\d{1,12}$/.test(at)))) throw new UnknownReplyError("a PayPal order's person in the store's deletions");
+  return at !== null && Number(at) >= paid.at;
+}
+
+/**
+ * Whether this order's own grant is still written for its buyer (lib/imported-purchases.ts, the product's field), read
+ * exactly: absent or a string. Anything else throws UnknownReplyError (rule 24), and the order is kept.
+ */
+async function grantLeft(store: Store, paid: Paid): Promise<boolean> {
+  if (!store.statsId) return false;
+  const read = repliesFor(await redisPipeline([["HGET", importedKey(store.statsId, paid.email), paid.product]]), 1);
+  const value = read?.[0];
+  if (!read || (value !== null && typeof value !== "string")) throw new UnknownReplyError("a PayPal order's grant");
+  return value !== null;
 }
 
 /**
@@ -349,9 +390,24 @@ async function handOverAgain(store: Store, deadline: number): Promise<number> {
         await redisPipeline([["ZREM", key, order]]);
         continue;
       }
+      // Deleted from the store at or after this payment (#4140): nothing about them is written again, not the grant, the
+      // enrolment, the sale's credit or its webhook. The order leaves the list. Read before anything else is, in its
+      // exact shape; unknown throws below and it is kept. One HGET an order tried. A person deleted before paying again
+      // is handed what they paid for, as the receipt's own check (KEEP_RECEIPT) reads it.
+      if (await erasedSincePaid(store, paid)) {
+        // A grant still there for them was written by a retry whose deletion again did not finish (Claude 7 on #4163): the
+        // deletion is redone first, off the creator's allowance, and the order stays until it is done.
+        if (await grantLeft(store, paid)) {
+          const again = await erasePerson(store, paid.email, { kind: "person" }, { allowance: false });
+          if (!again.ok) throw new Error("deleting a PayPal order's person again did not finish; the order is kept");
+        }
+        console.error("a PayPal order waiting to be handed over belongs to a person deleted from the store since; nothing handed over", store.handle, order);
+        await redisPipeline([["ZREM", key, order]]);
+        continue;
+      }
       // Handed over with its receipt accepted, or its product gone: handOver takes it out of the list. Its receipt
       // not accepted: kept and tried again later, inside RECEIPT_RETRY_SECONDS, and not counted as handed over yet.
-      if ((await handOver(store, paid)) === "handed") handed += 1;
+      if ((await handOver(store, paid, true)) === "handed") handed += 1;
     } catch (error) {
       // Still unknown: kept, moved behind the others, tried at the next sweep (XX: one a concurrent run took out is not
       // put back). A receipt is still sent only inside its window (receiptMayGo), whenever it is tried.

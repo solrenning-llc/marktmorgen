@@ -6,3 +6,4 @@ Only Claude 1 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
+| Claude 1 | 367 [EZ4] unit 1, 9:00 in each reader's time zone: the rules (pure; no zone kept, option or sending yet) | claude1/ez4-reader-time | `lib/reader-time.ts` (new), `tests/reader-time.test.ts` (new) | 12/11/2026 14h58 |

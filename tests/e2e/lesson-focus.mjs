@@ -93,8 +93,12 @@ try {
   is("at 320 px, no sideways scrolling", await tab.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
   is("the button is a 44 px target", (await tab.getByRole("button", { name: "Leave focus mode" }).boundingBox()).height >= 44, true);
   // The reply link in a comment email (lib/lesson-comment-notify.ts) points at #c-<id>, inside the comments focus mode hides.
-  await tab.evaluate(() => localStorage.setItem("mm:lesson-focus", "on"));
+  await tab.evaluate(() => { localStorage.setItem("mm:lesson-focus", "on"); window.previousVisit = true; });
+  // From another page, as from the email: a goto that changes only the #fragment would stay in the same document
+  // (a fragment navigation), and the bundle added again would draw a second copy of the lesson into it.
+  await tab.goto("about:blank");
   await tab.goto("https://lesson.test/#c-x");
+  is("the link opens a fresh page, not the same document with a second copy of the lesson", await tab.evaluate(() => window.previousVisit === undefined), true);
   await tab.addScriptTag({ content: bundle.outputFiles[0].text });
   await tab.getByRole("button", { name: /focus mode/i }).waitFor();
   is("a link to a hidden reply opens with focus mode off for that visit, the reply shown", [await tab.locator("#c-x").isVisible(), await tab.getByRole("button", { name: /focus mode/i }).textContent()], [true, "Focus mode"]);

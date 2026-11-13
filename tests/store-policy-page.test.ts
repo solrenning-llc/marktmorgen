@@ -48,6 +48,13 @@ is("the choice is made where the address is typed, unchecked until the creator c
 is("the settings route saves the choice only when it is exactly yes", readFileSync("app/api/store/mail/route.ts", "utf8").includes("body.onPolicies === true"), true);
 is("the privacy page says the address is public only by that choice", /postal address[\s\S]{0,200}policies page/.test(readFileSync("app/privacy/page.tsx", "utf8")), true);
 
+part("Self-cancel is promised only where the store's emails carry the link (Claude 1's LOW on #1824)");
+// lib/purchase-email.ts sends the /manage link only when canManage(store); otherwise the buyer cancels by reply.
+const membersOf = (selfCancel: boolean) => policyFacts(policyInputFrom(store, [club], false, selfCancel), "en").find((s) => s.id === "memberships")?.sentences ?? [];
+is("emails carry the cancel link: said", membersOf(true).some((t) => t.includes("cancel a membership yourself")), true);
+is("they do not: never promised, the end of the paid period still said", [membersOf(false).some((t) => t.includes("yourself")), membersOf(false).some((t) => t.includes("end of the period"))], [false, true]);
+is("read from the same check the purchase email uses", readFileSync("lib/store-policy-input.ts", "utf8").includes("canManage(store)"), true);
+
 part("The page");
 const page = readFileSync("app/[handle]/policies/page.tsx", "utf8");
 // Read through the paid reader since Claude 1's MEDIUM on #1824 (tests/store-policy-paid-read.test.ts): still built from the store as it is now.

@@ -144,10 +144,12 @@ test('pages are followed to the end, and a list longer than MAX_PAGES leaves the
  const reading=await readRefundReserve(NOW,LATER());
  assert.equal(reading.why,null);
  assert.deepEqual(reading.reserve,expectedOf(all));
- assert.equal(reading.pages,3);
+ // Three pages, and each page boundary's whole second read before going past it.
+ assert.equal(reading.pages,5);
  assert.equal(reading.charges,250);
- const after=seen.filter(s=>s.path==='/v1/charges').map(s=>s.query.get('starting_after'));
- assert.deepEqual(after.slice(1),[[...all].sort((a,b)=>Number(b.json.created)-Number(a.json.created))[99].json.id,[...all].sort((a,b)=>Number(b.json.created)-Number(a.json.created))[199].json.id]);
+ const after=seen.filter(s=>s.path==='/v1/charges'&&s.query.get('starting_after')!==null).map(s=>s.query.get('starting_after'));
+ assert.equal(seen.filter(s=>s.path==='/v1/charges'&&s.query.get('created[lte]')!==null).length,2);
+ assert.deepEqual(after,[[...all].sort((a,b)=>Number(b.json.created)-Number(a.json.created))[99].json.id,[...all].sort((a,b)=>Number(b.json.created)-Number(a.json.created))[199].json.id]);
 
  assert.equal(MAX_PAGES,20,'2,000 charges in the lookback: past that, unit 3 needs an incremental reading before the sales lock');
  const many=Array.from({length:MAX_PAGES*2+1},(_,i)=>charge({kind:'plan',amount:6900,paidDaysAgo:1+(i%60)}));

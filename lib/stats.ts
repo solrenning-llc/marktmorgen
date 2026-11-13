@@ -1522,12 +1522,22 @@ async function readRefunds(store: Store, since: number, pages: number): Promise<
     )) as { data?: unknown; has_more?: unknown };
     const rows = financialPage(list, seen);
     for (const row of rows) {
-      if (row.status !== "succeeded" && row.status !== "pending") continue;
+      // Stripe's documented refund states (https://docs.stripe.com/api/refunds/object).
+      // A status outside them is unknown, never "nothing given back", so the
+      // reading is partial (CX-123 rule 24, #4370). Failed, canceled and
+      // requires_action give nothing back and are skipped as before.
+      if (row.status === "failed" || row.status === "canceled" || row.status === "requires_action") continue;
+      if (row.status !== "succeeded" && row.status !== "pending") { partial = true; continue; }
       const currency = currencyOf(row);
       if (!currency) partial = true;
+      // Money given back needs a positive whole number of cents; without one
+      // the row is kept (the refund and its sale are known) but its amount is
+      // not, so the reading is partial rather than a confirmed $0 (#4370).
+      const amountRead = typeof row.amount === "number" && Number.isSafeInteger(row.amount) && row.amount > 0;
+      if (!amountRead) partial = true;
       out.push({
         created: typeof row.created === "number" ? row.created * 1000 : 0,
-        cents: typeof row.amount === "number" ? row.amount : 0,
+        cents: amountRead ? (row.amount as number) : 0,
         currency,
         paymentIntent: typeof row.payment_intent === "string" ? row.payment_intent : "",
       });

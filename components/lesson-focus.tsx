@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useSyncExternalStore, type ReactNode } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 
 /**
  * "Focus mode" on a lesson's page (295 [SQ6]; added 12 November 2026). One
@@ -15,7 +15,27 @@ import { useState, useSyncExternalStore, type ReactNode } from "react";
  * reduce. The choice is kept only in this browser (localStorage, or in memory
  * when the browser refuses), never sent anywhere. Before scripts run, or
  * without them, the button is not offered, because it could not work (VR 2).
+ *
+ * A link to something focus mode hides (the reply link in a comment email,
+ * #c-<id>, review of #4323) opens the lesson with focus mode off for that
+ * visit and scrolls to it, so the link is never a blank page; the remembered
+ * choice is left as it was until the student presses the button.
  */
+/** Whatever focus mode hides carries this in its class (group-data-[focus=on]/focus:hidden). */
+export const HIDDEN_IN_FOCUS = '[class*="group-data-[focus=on]/focus:hidden"]';
+
+/** Whether the address's #target is an element that focus mode hides inside `area`. */
+export function hashHiddenInFocus(area: { contains: (node: Element) => boolean } | null, hash: string, byId: (id: string) => Element | null): Element | null {
+  if (!area || hash.length < 2) return null;
+  let id: string;
+  try {
+    id = decodeURIComponent(hash.slice(1));
+  } catch {
+    return null;
+  }
+  const target = byId(id);
+  return target && area.contains(target) && target.closest(HIDDEN_IN_FOCUS) ? target : null;
+}
 export const FOCUS_KEY = "mm:lesson-focus";
 
 export type FocusWords = { focusOn: string; focusOff: string; focusOnSaid: string; focusOffSaid: string };
@@ -63,11 +83,33 @@ const onServer = () => false;
 
 export function LessonFocus({ words, children }: { words: FocusWords; children?: ReactNode }) {
   const ready = useSyncExternalStore(noStore, onClient, onServer);
-  const on = useSyncExternalStore(subscribe, stored, onServer);
+  const remembered = useSyncExternalStore(subscribe, stored, onServer);
+  // Off for this visit, whatever is remembered, while the address points at something focus mode hides.
+  const [visitOff, setVisitOff] = useState(false);
+  const on = remembered && !visitOff;
   // Said only after a press, so a screen reader hears the change, never on the first draw.
   const [said, setSaid] = useState("");
+  const area = useRef<HTMLDivElement>(null);
+  const goTo = useRef<Element | null>(null);
+  useEffect(() => {
+    const check = () => {
+      const target = hashHiddenInFocus(area.current, window.location.hash, (id) => document.getElementById(id));
+      if (!target) return;
+      goTo.current = target;
+      setVisitOff(true);
+    };
+    check();
+    window.addEventListener("hashchange", check);
+    return () => window.removeEventListener("hashchange", check);
+  }, []);
+  useEffect(() => {
+    // Once shown, the target the browser could not reach while hidden is brought into view.
+    if (!visitOff || !goTo.current) return;
+    goTo.current.scrollIntoView();
+    goTo.current = null;
+  }, [visitOff]);
   return (
-    <div data-focus={on ? "on" : "off"} className="group/focus">
+    <div ref={area} data-focus={on ? "on" : "off"} className="group/focus">
       {ready ? (
         <div className="mb-4 flex flex-wrap items-center gap-3">
           <button
@@ -75,6 +117,7 @@ export function LessonFocus({ words, children }: { words: FocusWords; children?:
             className="st-footer-link inline-flex min-h-11 items-center text-sm font-semibold"
             onClick={() => {
               setSaid(on ? words.focusOffSaid : words.focusOnSaid);
+              setVisitOff(false);
               setFocus(!on);
             }}
           >

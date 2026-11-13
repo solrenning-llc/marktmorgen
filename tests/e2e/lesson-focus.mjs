@@ -36,6 +36,7 @@ const bundle = await build({
             <button id="done">Mark as done</button>
             <span className="group-data-[focus=on]/focus:hidden" id="next"><a href="#n">Next lesson</a></span>
           </article>
+          <div className="group-data-[focus=on]/focus:hidden" id="comments"><p id="c-x">A reply to your comment</p></div>
           <aside className=${JSON.stringify(aside)} id="outline">In this course</aside>
         </div>
       </LessonFocus>
@@ -91,6 +92,18 @@ try {
   await tab.getByRole("button", { name: "Focus mode" }).click();
   is("at 320 px, no sideways scrolling", await tab.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
   is("the button is a 44 px target", (await tab.getByRole("button", { name: "Leave focus mode" }).boundingBox()).height >= 44, true);
+  // The reply link in a comment email (lib/lesson-comment-notify.ts) points at #c-<id>, inside the comments focus mode hides.
+  await tab.evaluate(() => localStorage.setItem("mm:lesson-focus", "on"));
+  await tab.goto("https://lesson.test/#c-x");
+  await tab.addScriptTag({ content: bundle.outputFiles[0].text });
+  await tab.getByRole("button", { name: /focus mode/i }).waitFor();
+  is("a link to a hidden reply opens with focus mode off for that visit, the reply shown", [await tab.locator("#c-x").isVisible(), await tab.getByRole("button", { name: /focus mode/i }).textContent()], [true, "Focus mode"]);
+  is("brought into view", await tab.locator("#c-x").evaluate((el) => { const r = el.getBoundingClientRect(); return r.top >= 0 && r.top < window.innerHeight; }), true);
+  is("the remembered choice is left as it was", await tab.evaluate(() => localStorage.getItem("mm:lesson-focus")), "on");
+  await tab.goto("https://lesson.test/");
+  await tab.addScriptTag({ content: bundle.outputFiles[0].text });
+  await tab.getByRole("button", { name: /focus mode/i }).waitFor();
+  is("the next lesson without such a link opens in focus mode again", await tab.locator("#outline").isVisible(), false);
   is("no script error", errors, []);
 } finally {
   await browser.close();

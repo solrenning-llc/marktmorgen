@@ -18,7 +18,7 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { FOCUS_KEY, LessonFocus, setFocus } from "@/components/lesson-focus";
+import { FOCUS_KEY, HIDDEN_IN_FOCUS, LessonFocus, hashHiddenInFocus, setFocus } from "@/components/lesson-focus";
 import { COURSES_WORDS } from "@/lib/buyer-words/courses";
 import { find, mount, texts } from "./client-hooks";
 import { done, is, part } from "./check";
@@ -35,6 +35,7 @@ function browser(store: Store | "refuses"): void {
       getItem: (k: string) => { if (store === "refuses") throw new Error("denied"); return store.get(k) ?? null; },
       setItem: (k: string, v: string) => { if (store === "refuses") throw new Error("denied"); store.set(k, v); },
     },
+    location: { hash: "" },
     addEventListener: (_: string, l: (e: { key: string }) => void) => listeners.push(l),
     removeEventListener: () => {},
   };
@@ -106,6 +107,21 @@ async function main(): Promise<void> {
     is("the link to the lesson before is hidden", hiddenAround(/\{w\.previousLesson\}/), true);
     is("the lesson itself never is", /<article className="[^"]*hidden/.test(page) || /<h1[^>]*hidden/.test(page), false);
     is("the outline's column closes, so the lesson takes the width", page.includes("group-data-[focus=on]/focus:lg:grid-cols-1"), true);
+  }
+
+  part("A link to something focus mode hides opens it (review of #4323)");
+  {
+    // A tiny tree: the area holds a hidden comment #c-x and a visible lesson #lesson.
+    const hiddenBox = { hidden: true };
+    const el = (id: string, inHidden: boolean) => ({ id, closest: (sel: string) => (sel === HIDDEN_IN_FOCUS && inHidden ? hiddenBox : null) }) as unknown as Element;
+    const comment = el("c-x", true), lesson = el("lesson", false), outside = el("elsewhere", true);
+    const area = { contains: (n: Element) => n === comment || n === lesson };
+    const byId = (id: string) => ({ "c-x": comment, lesson, elsewhere: outside } as Record<string, Element>)[id] ?? null;
+    is("a reply link to a hidden comment: found", hashHiddenInFocus(area, "#c-x", byId), comment);
+    is("a link to what stays shown, to something outside, or no link: nothing to do", [hashHiddenInFocus(area, "#lesson", byId), hashHiddenInFocus(area, "#elsewhere", byId), hashHiddenInFocus(area, "", byId), hashHiddenInFocus(area, "#", byId), hashHiddenInFocus(null, "#c-x", byId)], [null, null, null, null, null]);
+    is("a malformed address is ignored, never thrown", hashHiddenInFocus(area, "#%E0%A4%A", byId), null);
+    const page = readFileSync("app/[handle]/course/[product]/[lesson]/page.tsx", "utf8");
+    is("the comments, where the emailed reply links point, are among what it hides", /<div className="[^"]*group-data-\[focus=on\]\/focus:hidden">\s*<LessonComments/.test(page), true);
   }
 
   part("The compiled CSS");

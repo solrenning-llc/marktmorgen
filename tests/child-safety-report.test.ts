@@ -26,9 +26,12 @@ import { paidPeriod } from "./billing-period-fixture";
 
 type Sent = { to: string[] | string; subject: string; text: string; key?: string };
 const sent: Sent[] = [];
+/** When set, the email service refuses the urgent email only (Claude 1 cloud's MEDIUM on #3587). */
+let refuseUrgent = false;
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   if (url.hostname === "api.resend.com") {
+    if (refuseUrgent && /^URGENT/.test((JSON.parse(String(init?.body)) as Sent).subject)) return new Response("{}", { status: 500 });
     const headers = new Headers(init?.headers);
     sent.push({ ...(JSON.parse(String(init?.body)) as Sent), key: headers.get("idempotency-key") ?? undefined });
     return new Response(JSON.stringify({ id: `email_${sent.length}` }));
@@ -161,6 +164,20 @@ async function main(): Promise<void> {
   sent.length = 0;
   await alertOwner({ kind: "intimate_image", url, work: INTIMATE.work }, "not_held", Date.UTC(2026, 10, 9, 18), false);
   is("a notice that was not kept is said, not pointed to", [sent.at(-1)?.text.includes("could not be confirmed as kept"), sent.at(-1)?.text.includes("is in the notice email")], [true, false]);
+
+  part("The urgent email refused: the reporter is told to try again, never that it was received (Claude 1 cloud on #3587)");
+  const lost = await addProduct(owner, "Reported While The Urgent Email Fails", "On sale", "9", null);
+  if (!lost.ok) throw new Error("no product");
+  {
+    const held = redis.keys().filter((key) => key.startsWith("nl:csa:"));
+    if (held.length) redis.run(["DEL", ...held]);
+  }
+  sent.length = 0;
+  refuseUrgent = true;
+  const unalerted = await reportRoute(new NextRequest("https://marktmorgen.com/api/report", { method: "POST", headers: { "content-type": "application/json", origin: "https://marktmorgen.com", host: "marktmorgen.com" }, body: JSON.stringify({ ...CHILD, work: "", url: `https://marktmorgen.com/@safetyshop/p/${lost.product.id}` }) }));
+  refuseUrgent = false;
+  is("(control) no urgent email reached the inbox", sent.some((mail) => /^URGENT/.test(mail.subject)), false);
+  is("the form is answered as not received, so it is sent again", unalerted.status === 200, false);
 
   part("Where people read it");
   const page = readFileSync("app/report/page.tsx", "utf8") + readFileSync("components/report-form.tsx", "utf8");

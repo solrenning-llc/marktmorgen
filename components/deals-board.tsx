@@ -15,7 +15,7 @@ import { Icon } from "@/components/icons";
 import { toast } from "@/components/toast";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 import { formatMoney, moneyField, readMoney, type Currency } from "@/lib/money";
-import { closeWords, closesDeal, dealCount } from "@/lib/deal-close";
+import { closeWords, closesDeal, dealCount, editorQuestionStands } from "@/lib/deal-close";
 import {
   type CrmField,
   type Deal,
@@ -151,8 +151,9 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
   // A move into a stage that closes the deal (won or lost), waiting for its second press (553 [DB1], 3.3.6).
   const [closing, setClosing] = useState<{ id: string; from: string; to: string } | null>(null);
   // The same question in the deal editor: the stage the editor would save the deal into, waiting for its second press.
-  const [saveClosing, setSaveClosing] = useState<string | null>(null);
-  const clearMessages = () => { setError(null); setInvalid(null); setLost(null); setConfirming(null); };
+  // The editor's closing question, with the deal it was asked for (editorQuestionStands): cleared whenever the editor closes or opens a deal.
+  const [saveClosing, setSaveClosing] = useState<{ id: string; stage: string } | null>(null);
+  const clearMessages = () => { setError(null); setInvalid(null); setLost(null); setConfirming(null); setSaveClosing(null); };
   const openDraft = (deal: Deal, from: string) => { opener.current = from; const base = draftFromDeal(deal, currency); clearMessages(); setDraft({ ...base, base, version: versions[deal.id] ?? "", conflicts: [] }); };
   const dealNameInput = useRef<HTMLInputElement>(null);
   const activeDealId = draft?.id;
@@ -315,6 +316,7 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
     setDraft(null);
     setError(null);
     setInvalid(null);
+    setSaveClosing(null);
     focusLater(opener.current, "deal-new", "deals-title");
   };
   const dealInvalidFor = (error: string) => { const id = dealErrorField(error); return id ? [id] : []; };
@@ -325,7 +327,7 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
     // A saved deal moved by the editor into a won or lost stage asks first, as on the board (553 [DB1]).
     if (!closeConfirmed && opened.id && opened.stage !== opened.base.stage && closesDeal(kindOf(opened.base.stage), kindOf(opened.stage))) {
       setError(null);
-      setSaveClosing(opened.stage);
+      setSaveClosing({ id: opened.id, stage: opened.stage });
       moveFocus("deal-save-close");
       return;
     }
@@ -705,7 +707,7 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
               </button>
             </div>
             {/* Stands only while the editor still has that stage chosen (553 [DB1]); the safer choice first (3.3.6). */}
-            {saveClosing !== null && draft.id && draft.stage === saveClosing ? (
+            {editorQuestionStands(saveClosing, draft) ? (
               <div id="deal-save-close" role="group" tabIndex={-1} aria-labelledby="deal-save-close-title" aria-describedby="deal-save-close-text" className="mt-3 rounded-xl bg-sand p-3" onKeyDown={e => { if (e.key === "Escape" && !locked) keepEditing(); }}>
                 <p id="deal-save-close-title" className="font-semibold text-ink [overflow-wrap:anywhere]">{editorClosingWords(draft).question}</p>
                 <p id="deal-save-close-text" className="mt-1 text-ink-soft">{editorClosingWords(draft).text}</p>

@@ -29,3 +29,16 @@ export function closeWords(input: { kind: "won" | "lost"; title: string; stage: 
 
 /** How many deals a column holds, in words: "1 deal", "12 deals". */
 export const dealCount = (n: number) => `${n.toLocaleString("en-US")} ${n === 1 ? "deal" : "deals"}`;
+
+/**
+ * Whether the deal editor's closing question (components/deals-board.tsx) still stands: it was asked for this very
+ * deal (`question.id`), the deal still has that stage chosen, and that stage still differs from the saved one. A
+ * question asked for another deal, or for a stage chosen no more, is never drawn, so a deal opened later is never
+ * shown a question nobody asked about it (#4164 review; WCAG 3.2.5, 3.3.6).
+ */
+export function editorQuestionStands(
+  question: { id: string; stage: string } | null,
+  draft: { id: string; stage: string; base: { stage: string } } | null,
+): boolean {
+  return question !== null && draft !== null && Boolean(draft.id) && draft.id === question.id && draft.stage === question.stage && draft.base.stage !== draft.stage;
+}

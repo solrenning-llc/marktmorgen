@@ -182,6 +182,10 @@ export function receiptFrom(seller: Seller, reference: string, session: unknown,
   }
   if (page.hasMore || page.rows.length + page.unreadable > RECEIPT_MAX_LINES) return refuse("too_many_lines");
   if (page.unreadable > 0 || page.rows.length === 0) return refuse("unreadable");
+  // Each line once (#4445): a page that repeats one line's id in place of another does not show what was bought,
+  // even when its amounts add up to the subtotal.
+  const lineIds = page.rows.map((row) => ownField(row, "id"));
+  if (lineIds.some((id) => typeof id !== "string") || new Set(lineIds).size !== lineIds.length) return refuse("unreadable");
   const lines = page.rows.map((row) => ({
     description: (ownField(row, "description") as string).trim(),
     quantity: ownField(row, "quantity") as number,

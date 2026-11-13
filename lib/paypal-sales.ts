@@ -278,11 +278,17 @@ export async function onboardingUrl(store: Store, returnUrl: string): Promise<st
  */
 export const ONBOARDING_SECONDS = 86_400;
 const onboardingKey = (statsId: string) => `nl:ppsell:start:${statsId}`;
-const ATTEMPT = /^[0-9a-f]{32}$/;
+/** An attempt's token: the moment it began (milliseconds, 13 digits) and 32 random hex characters. */
+const ATTEMPT = /^(\d{13})-[0-9a-f]{32}$/;
+/** When an attempt began, from its token; 0 for one that is not a token. */
+export function attemptStartedAt(attempt: string): number {
+  const m = ATTEMPT.exec(attempt);
+  return m ? Number(m[1]) : 0;
+}
 
 /** Writes a new attempt's mark before the creator is sent to PayPal; throws when the write is not confirmed (rule 24). */
 export async function markOnboarding(statsId: string): Promise<string> {
-  const attempt = randomBytes(16).toString("hex");
+  const attempt = `${String(Date.now()).padStart(13, "0")}-${randomBytes(16).toString("hex")}`;
   const set = repliesFor(await redisPipeline([["SET", onboardingKey(statsId), attempt, "EX", ONBOARDING_SECONDS]]), 1);
   if (!set || set[0] !== "OK") throw new UnknownReplyError("a PayPal connect's start");
   return attempt;

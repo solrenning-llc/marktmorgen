@@ -13,12 +13,13 @@ export async function POST(request: NextRequest) {
   const creator = await creatorFrom(request, "payments");
   if (creator instanceof Response) return creator;
   const { ref, store, origin, studio } = creator;
-  // A connect started before this is ended first, so its way back, even one already asking PayPal, finds no connect
-  // under the store's write lock and writes nothing (lib/store.ts connectPayPalSellerIf). The seller is cleared even
-  // when that end is not confirmed, and the creator is then told something went wrong, so they try again.
-  const ended = store.statsId ? await stopOnboarding(store.statsId) : true;
+  // The seller is cleared with the moment of this disconnect, in one locked write (lib/store.ts setPayPalSeller): a
+  // connect started before it is never finished by its way back, even one already asking PayPal, whatever ending its
+  // mark below comes back as (Codex X4 and X5 on #4345). The mark is then ended too, so an old way back is not even
+  // asked of PayPal; a mark that could not be ended runs out within a day and stays refused meanwhile.
   const saved = await setPayPalSeller(ref, null);
-  if (!saved || !ended) return away(origin, studio("paypal=error#paypal"));
+  if (!saved) return away(origin, studio("paypal=error#paypal"));
+  if (store.statsId && !(await stopOnboarding(store.statsId))) console.error("a PayPal connect's mark could not be ended; the disconnect stands");
   if (store.paypalSeller) after(() => noticeCreator(store, { kind: "paypal-disconnected" }));
   return away(origin, studio("paypal=forgotten#paypal"));
 }

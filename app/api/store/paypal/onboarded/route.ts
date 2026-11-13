@@ -1,7 +1,7 @@
 import { type NextRequest, after } from "next/server";
 import { noticeCreator } from "@/lib/account-notice";
 import { away, creatorFrom } from "@/lib/studio-route";
-import { checkSeller, endOnboarding, onboardingStarted, onboardingStill, paypalSalesConfigured } from "@/lib/paypal-sales";
+import { attemptStartedAt, checkSeller, endOnboarding, onboardingStarted, onboardingStill, paypalSalesConfigured } from "@/lib/paypal-sales";
 import { connectPayPalSellerIf } from "@/lib/store";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 
@@ -30,7 +30,8 @@ export async function GET(request: NextRequest) {
   // Written only while this same connect is still the store's current one, read again under the store's write lock:
   // a disconnect, or a newer connect, made while PayPal was being asked wins (lib/store.ts connectPayPalSellerIf).
   const statsId = store.statsId;
-  const saved = await connectPayPalSellerIf(ref, checked.merchant, () => onboardingStill(statsId, started));
+  // And never when a disconnect was written at or after this connect began (Codex X5 on #4345).
+  const saved = await connectPayPalSellerIf(ref, checked.merchant, () => onboardingStill(statsId, started), attemptStartedAt(started));
   if (saved === "stale") return away(origin, studio("#paypal"));
   if (!saved) return away(origin, studio("paypal=error#paypal"));
   await endOnboarding(store.statsId);

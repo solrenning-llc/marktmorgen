@@ -22,7 +22,7 @@ import { currentResendFallbackProofIsMissing, guardedResendPost, type ResendTran
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { atSiteAddress, creatorDomain, domainOf } from "@/lib/mail-from";
-import { countSesSent, isSesConfigured, notYetTaken, sesBatch, sesBulkRoom, sesConfig, sesDown, sesReady, sesSend } from "@/lib/ses";
+import { countSesSent, isSesConfigured, notMaybeSent, notYetTaken, sesBatch, sesBulkRoom, sesConfig, sesDown, sesReady, sesSend } from "@/lib/ses";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { type AllowanceStore, takeAllowance } from "@/lib/store-allowance";
 import { allowanceWindow } from "@/lib/allowance-window";
@@ -679,9 +679,26 @@ export async function sendListBatch(
   return dispatchBatch(messages, batchKey, meter, "amazon", true);
 }
 
+/**
+ * A batch tried again under the same key never writes a second time to anybody whose email under that key SES may
+ * have taken with its answer lost (lib/ses.ts, notMaybeSent; rule 30; #4252). Those recipients are left out, and the
+ * batch is never answered "sent" (nor a list batch's `{ refused }`) while any was left out: what became of them is
+ * still unknown, so the caller keeps holding the batch as it does for an uncertain answer, and nobody gets it twice.
+ */
 async function dispatchBatch(
   messages: BatchMessage[], batchKey: string, meter: EmailMeter,
   only: "resend" | "amazon" | undefined, listOnly: boolean, runtime: ResendTransportRuntime = {},
+): Promise<ListBatchOutcome> {
+  const held = { maybe: false };
+  const outcome = await dispatchOnce(messages, batchKey, meter, only, listOnly, runtime, held);
+  if (held.maybe && (outcome === "sent" || typeof outcome === "object")) return "retry";
+  return outcome;
+}
+
+async function dispatchOnce(
+  messages: BatchMessage[], batchKey: string, meter: EmailMeter,
+  only: "resend" | "amazon" | undefined, listOnly: boolean, runtime: ResendTransportRuntime,
+  held: { maybe: boolean },
 ): Promise<ListBatchOutcome> {
   if (!isSenderConfigured()) return listOnly ? "waiting" : "retry";
   if (messages.length === 0) return "sent";
@@ -717,7 +734,12 @@ async function dispatchBatch(
     const pending = await notYetTaken(batchKey, going);
     // Unreadable evidence must not release recipients to either provider.
     if (pending === null) return "retry";
-    going = pending;
+    // Nor is anybody whose email under this key SES may have taken with its answer lost (lib/ses.ts, maybeKey):
+    // left out, and the batch is held as uncertain (dispatchBatch above). Unreadable evidence releases nobody.
+    const sure = await notMaybeSent(batchKey, pending);
+    if (sure === null) return "retry";
+    if (sure.length < pending.length) held.maybe = true;
+    going = sure;
     // And a batch whose rest was once handed to Resend goes back to Resend,
     // under the same key: if Resend took it and the answer was lost on the
     // way, only Resend can tell, and Amazon would write to them all again.

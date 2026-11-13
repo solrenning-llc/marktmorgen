@@ -546,6 +546,38 @@ export async function sesSend(config: SesConfig, message: SesMessage): Promise<{
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const didKey = (batchKey: string, to: string) => `nl:ses:did:${createHash("sha256").update(`${batchKey}\n${to}`).digest("hex").slice(0, 40)}`;
 const DID_SECONDS = 2 * 86_400;
+/**
+ * An email of a batch whose answer was lost (a 5xx, a reply that never came): it may have gone. Not a completion
+ * marker (didKey stays for confirmed acceptance only); the durable checkpoint a caller's retry under the same key
+ * reads (lib/email.ts, dispatchBatch, notMaybeSent), so it is never written to a second time (rule 30;
+ * webhooks/cron audit, Claude 1, 12/11/2026).
+ */
+const maybeKey = (batchKey: string, to: string) => `nl:ses:maybe:${createHash("sha256").update(`${batchKey}\n${to}`).digest("hex").slice(0, 40)}`;
+
+/**
+ * Of these recipients, those whose email under this batch key was never handed to SES with its answer lost.
+ * Read exactly, as notYetTaken: null is evidence unavailable, never permission to send.
+ */
+export async function notMaybeSent<T extends { to: string }>(batchKey: string, messages: T[]): Promise<T[] | null> {
+  if (!messages.length) return messages;
+  if (messages.length > 100) return null;
+  try {
+    const found: unknown = await redisPipeline(messages.map((m) => ["GET", maybeKey(batchKey, m.to)]));
+    if (!Array.isArray(found)) return null;
+    const length = Object.getOwnPropertyDescriptor(found, "length");
+    if (!length || !("value" in length) || length.value !== messages.length) return null;
+    const pending: T[] = [];
+    for (let i = 0; i < messages.length; i += 1) {
+      const item = Object.getOwnPropertyDescriptor(found, String(i));
+      if (!item || !("value" in item)) return null;
+      if (item.value === null) pending.push(messages[i]);
+      else if (item.value !== "1") return null;
+    }
+    return pending;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Recipients whose existing marker explicitly confirms absence. A known
@@ -614,12 +646,14 @@ export async function sesBatch<T extends SesMessage>(
       const wave = queue.slice(i, i + perSecond);
       const results = await Promise.all(wave.map((m) => sesSend(config, m)));
       const done: T[] = [];
+      const maybe: T[] = [];
       results.forEach((result, j) => {
         if (result.uncertain === true) {
           // A provider may have accepted this email before losing its reply.
           // Keep it unresolved, with no second attempt in this call.
           uncertain = true;
           again.push(wave[j]);
+          maybe.push(wave[j]);
         } else if (result.outcome === "sent") done.push(wave[j]);
         else if (result.outcome === "refused") {
           refused.set(wave[j], result.why);
@@ -635,6 +669,8 @@ export async function sesBatch<T extends SesMessage>(
         // leaves these people out.
         await redisPipeline(done.map((m) => ["SET", didKey(batchKey, m.to), "1", "EX", DID_SECONDS])).catch(() => {});
       }
+      // And the ones whose answer was lost, apart (maybeKey): a later call under the same key leaves them out.
+      if (maybe.length) await redisPipeline(maybe.map((m) => ["SET", maybeKey(batchKey, m.to), "1", "EX", DID_SECONDS])).catch(() => {});
       if (down || uncertain) again.push(...queue.slice(i + perSecond));
       else if (i + perSecond < queue.length) await pause(Math.max(0, 1_000 - (Date.now() - waveStarted)));
     }

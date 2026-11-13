@@ -111,7 +111,7 @@ export default async function StudioBlogPage({ searchParams }: Params) {
                 </AiOn>
               ) : (
                 <div className="text-ink-soft">
-                  <p className="text-lg font-semibold text-ink">Write a post</p>
+                  <h2 className="text-lg font-semibold text-ink">Write a post</h2>
                   <p className="mt-2">{posts === null ? "Your post list is unavailable. You can still start a new post." : "Pick a post on the left to change it, or start a new one. AI can draft one from a few words about the topic."}</p>
                   <Link href={`${back}${back.includes("?") ? "&" : "?"}edit=new`} className="btn btn-primary mt-4">
                     New post

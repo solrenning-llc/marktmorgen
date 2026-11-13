@@ -150,7 +150,7 @@ export default async function StudioBundlesPage({ searchParams }: Params) {
 
               {refused ? (
                 <div className="card p-6 sm:p-8">
-                  <p className="text-lg font-semibold tracking-[-0.02em] text-ink">{`${target?.title} cannot be a bundle as it is`}</p>
+                  <h2 className="text-lg font-semibold tracking-[-0.02em] text-ink">{`${target?.title} cannot be a bundle as it is`}</h2>
                   <p className="mt-2 text-ink-soft">
                     A bundle is a one-off paid product with one price and nothing of its own to hand over. Make a new bundle instead,
                     and put this product in it.

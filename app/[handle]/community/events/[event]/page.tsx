@@ -117,7 +117,7 @@ export default async function CommunityEventPage({ params, searchParams }: Param
                 <span className={`cm-badge ${!event.cancelled && !over && event.start <= now ? "cm-badge-creator ev-live" : event.cancelled ? "cm-badge-warn" : "cm-badge-accent"}`}>
                   {eventWhenIn(store, event, now)}
                 </span>
-                {mine && !over && !event.cancelled ? <span className="cm-badge cm-badge-accent">{w.youAreGoing}</span> : null}
+                {mine && allowed && !over && !event.cancelled ? <span className="cm-badge cm-badge-accent">{w.youAreGoing}</span> : null}
               </p>
               <h1 id={labelId} className="font-display mt-2 break-words text-2xl font-semibold leading-tight tracking-[-0.02em] sm:text-3xl">{event.title}</h1>
               <p className="mt-2 font-semibold">

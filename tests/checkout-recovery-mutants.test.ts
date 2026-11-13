@@ -4,7 +4,7 @@
  * about a checkout left unpaid goes out up to exactly six hours after it
  * closed, never before it closed, to the address the buyer typed or the one
  * the checkout carried, and never to somebody who paid for it since in this
- * store (as the product or as a box ticked beside another). A product hidden
+ * store (as the product or as a box checked beside another). A product hidden
  * since, or a checkout still open, is never written about.
  *
  * Synthetic only: Stripe and the sender are stand-ins for fetch, Redis is
@@ -99,7 +99,7 @@ async function main(): Promise<void> {
   paid = [bought({})];
   is("paid for it here since: not", (await remind(left()))[0], "skip");
   paid = [bought({ metadata: { store: "printworks", product: other.product.id, bump: print } })];
-  is("paid for it as a box ticked beside another: not", (await remind(left()))[0], "skip");
+  is("paid for it as a box checked beside another: not", (await remind(left()))[0], "skip");
   paid = [bought({ metadata: { store: "elsewhere", product: print } })];
   is("paid for something of the same id in another store: still sent", (await remind(left()))[0], "sent");
   paid = [bought({ payment_status: "unpaid" })];

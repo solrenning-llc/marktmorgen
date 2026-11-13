@@ -169,8 +169,8 @@ async function main(): Promise<void> {
   is("the same path under the images' origin", pictureR2Url(config, path), `https://images.marktmorgen.example/${path}`);
   is("a path that is not a picture's has none", (() => { try { return pictureR2Url(config, "images/../secret"); } catch { return "refused"; } })(), "refused");
 
-  part("Only the copy on attach (unit 4b) and the served address (unit 4c) use it");
-  const users = [...sources("app"), ...sources("lib"), ...sources("components"), ...sources("scripts")].filter((file) => file !== join("lib", "picture-r2.ts") && file !== join("lib", "picture-r2-copy.ts") && file !== join("lib", "picture-served.ts") && /(?:@\/lib\/|\.\/|\.\.\/)picture-r2["']/.test(readFileSync(file, "utf8")));
+  part("Only the copy on attach (unit 4b), the served address (unit 4c) and the file store's deletion (lib/blob.ts, #4237 item 4) use it");
+  const users = [...sources("app"), ...sources("lib"), ...sources("components"), ...sources("scripts")].filter((file) => file !== join("lib", "picture-r2.ts") && file !== join("lib", "picture-r2-copy.ts") && file !== join("lib", "picture-served.ts") && file !== join("lib", "blob.ts") && /(?:@\/lib\/|\.\/|\.\.\/)picture-r2["']/.test(readFileSync(file, "utf8")));
   is("no other file of the app imports it", users, []);
   done();
 }

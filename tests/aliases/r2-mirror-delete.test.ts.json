@@ -1,0 +1,4 @@
+{
+  "@vercel/blob": "r2-mirror-blob-world.ts",
+  "@/lib/picture-r2": "r2-mirror-config-world.ts"
+}

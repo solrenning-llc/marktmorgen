@@ -17,6 +17,7 @@
  */
 import * as sdk from "@vercel/blob";
 import { BLOB_TIMEOUT_MS, BLOB_WRITE_TIMEOUT_MS, timed } from "@/lib/fetch-timeout";
+import { deletePictureFromR2, isPicturePath, pictureR2Config } from "@/lib/picture-r2";
 
 type Options<F extends (...args: never[]) => unknown, I extends number> = NonNullable<Parameters<F>[I]>;
 
@@ -28,8 +29,19 @@ export function head(pathname: string, options: Options<typeof sdk.head, 1> = {}
   return timed(BLOB_TIMEOUT_MS, (abortSignal) => sdk.head(pathname, { ...options, abortSignal }));
 }
 
-export function del(pathnames: string | string[], options: Options<typeof sdk.del, 1> = {}): ReturnType<typeof sdk.del> {
-  return timed(BLOB_TIMEOUT_MS, (abortSignal) => sdk.del(pathnames, { ...options, abortSignal }));
+/**
+ * Deletes from the file store, then, while the pictures' own R2 bucket is on (lib/picture-r2.ts, pictureR2Config),
+ * the R2 copy of each picture among them: every deletion of a picture (replaced, withdrawn, taken off a page, its
+ * product removed, its store closed) comes through here, so none leaves a public, billed copy behind (#4237 item 4).
+ * Off, as today, nothing more is sent. A copy R2 would not delete makes this fail, as a file store failure does.
+ */
+export async function del(pathnames: string | string[], options: Options<typeof sdk.del, 1> = {}): ReturnType<typeof sdk.del> {
+  await timed(BLOB_TIMEOUT_MS, (abortSignal) => sdk.del(pathnames, { ...options, abortSignal }));
+  const pictures = (typeof pathnames === "string" ? [pathnames] : pathnames).filter(isPicturePath);
+  if (!pictures.length) return;
+  const config = pictureR2Config();
+  if (!config) return;
+  for (const path of pictures) await deletePictureFromR2(config, path);
 }
 
 /** A copy made inside the file store (nothing passes through us), BLOB_TIMEOUT_MS to an answer. */

@@ -32,7 +32,9 @@
  * an object under that name is already there (not checked to be this very
  * picture: no other writer may use the bucket), and is billed as a Class A
  * operation (https://developers.cloudflare.com/r2/pricing/). Storage is
- * $0.015 a GB-month on the same page. No delete and no read here.
+ * $0.015 a GB-month on the same page. No read here. A picture deleted from the
+ * file store is deleted here too (deletePictureFromR2, called by lib/blob.ts del;
+ * #4237 item 4): DeleteObject, which R2 does not bill.
  *
  * The key check compares key ids only: the owner's token must be scoped to
  * the pictures' bucket alone. A PutObject keeps Cache-Control and
@@ -153,4 +155,40 @@ export async function copyPictureToR2(config: PictureR2Config, path: string, byt
 export function pictureR2Url(config: PictureR2Config, path: string): string {
   const { folder, file } = pictureParts(path);
   return `${config.origin}/images/${folder}/${file}`;
+}
+
+/** True for a name the picture folder holds ("images/<folder>/<file>"), the only names ever copied to R2. */
+export function isPicturePath(path: string): boolean {
+  try {
+    pictureParts(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Deletes one picture's copy from the pictures' bucket. Gone already (404) is done; any other answer but 200/204
+ * throws, so the deletion that asked fails and is logged by its caller as a file store failure is (#4237 item 4).
+ */
+export async function deletePictureFromR2(config: PictureR2Config, path: string): Promise<void> {
+  const { folder, file } = pictureParts(path);
+  const url = `${config.endpoint}/${config.bucket}/images/${folder}/${file}`;
+  const payloadHash = hashOf(new Uint8Array(0));
+  const headers = signV4({
+    method: "DELETE",
+    url,
+    headers: { "x-amz-content-sha256": payloadHash },
+    payloadHash,
+    region: REGION,
+    service: SERVICE,
+    key: config.key,
+  });
+  const status = await timed(TIMEOUT_MS, async (signal) => {
+    // A redirect is refused, never followed.
+    const response = await fetch(url, { method: "DELETE", headers, signal, cache: "no-store", redirect: "error" });
+    await response.body?.cancel().catch(() => {});
+    return response.status;
+  });
+  if (status !== 200 && status !== 204 && status !== 404) throw new Error(`Picture copy deletion failed with status ${status}`);
 }

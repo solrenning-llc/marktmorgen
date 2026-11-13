@@ -45,7 +45,8 @@ export type OrderProblemWords = {
   backToList: string;
   /** This order already has an open report. */
   alreadyOpen: string;
-  /** A report of this order is being sent right now, or the store is busy. */
+  /** A report of this order is being sent right now, or the store is busy: never "nothing was sent", since in the first
+   * case the report may have reached the creator (Claude 1's MEDIUM on #3838). */
   busyNow: string;
   /** The store has no room to take it. */
   storeFull: string;
@@ -109,7 +110,7 @@ const WORDS: Record<LanguageCode, OrderProblemWords> = {
     orderLabel: "Order",
     backToList: "Back to your purchases",
     alreadyOpen: `This order already has an open report. The creator has ${D} days to answer it.`,
-    busyNow: "This is busy right now. Nothing was sent. Try again in a minute.",
+    busyNow: "This is busy right now. If you already pressed “Send to the creator”, your report may have reached them. Wait a few minutes before you send it again.",
     storeFull: "The store cannot take messages right now. Nothing was sent. Try again later or use the store's contact page.",
     notConfirmed: "We could not confirm that your report reached the creator. It may have. Wait 10 minutes before you send it again.",
     olderNotListed: "Only your newest purchases are listed here, so an older one cannot be chosen on this page yet.",
@@ -137,7 +138,7 @@ const WORDS: Record<LanguageCode, OrderProblemWords> = {
     orderLabel: "Pedido",
     backToList: "Volver a tus compras",
     alreadyOpen: `Este pedido ya tiene un aviso abierto. El creador tiene ${D} días para responderlo.`,
-    busyNow: "Ahora mismo está ocupado. No se envió nada. Inténtalo de nuevo en un minuto.",
+    busyNow: "Ahora mismo está ocupado. Si ya pulsaste «Enviar al creador», puede que tu aviso ya le haya llegado. Espera unos minutos antes de enviarlo de nuevo.",
     storeFull: "La tienda no puede recibir mensajes ahora. No se envió nada. Inténtalo más tarde o usa la página de contacto de la tienda.",
     notConfirmed: "No pudimos confirmar que tu aviso llegó al creador. Puede que sí. Espera 10 minutos antes de enviarlo de nuevo.",
     olderNotListed: "Aquí solo aparecen tus compras más recientes, así que una más antigua todavía no se puede elegir en esta página.",
@@ -165,7 +166,7 @@ const WORDS: Record<LanguageCode, OrderProblemWords> = {
     orderLabel: "Commande",
     backToList: "Retour à vos achats",
     alreadyOpen: `Cette commande a déjà un signalement ouvert. Le créateur a ${D} jours pour y répondre.`,
-    busyNow: "C'est occupé pour le moment. Rien n'a été envoyé. Réessayez dans une minute.",
+    busyNow: "C'est occupé pour le moment. Si vous avez déjà appuyé sur « Envoyer au créateur », votre signalement lui est peut-être déjà parvenu. Attendez quelques minutes avant de l'envoyer à nouveau.",
     storeFull: "La boutique ne peut pas recevoir de messages pour le moment. Rien n'a été envoyé. Réessayez plus tard ou utilisez la page de contact de la boutique.",
     notConfirmed: "Nous n'avons pas pu confirmer que votre signalement est arrivé au créateur. Il est peut-être arrivé. Attendez 10 minutes avant de l'envoyer à nouveau.",
     olderNotListed: "Seuls vos achats les plus récents sont listés ici : un achat plus ancien ne peut pas encore être choisi sur cette page.",
@@ -193,7 +194,7 @@ const WORDS: Record<LanguageCode, OrderProblemWords> = {
     orderLabel: "Bestellung",
     backToList: "Zurück zu Ihren Käufen",
     alreadyOpen: `Für diese Bestellung gibt es schon eine offene Meldung. Der Creator hat ${D} Tage Zeit, darauf zu antworten.`,
-    busyNow: "Gerade ist es belegt. Es wurde nichts gesendet. Versuchen Sie es in einer Minute noch einmal.",
+    busyNow: "Gerade ist es belegt. Wenn Sie schon auf „An den Creator senden“ gedrückt haben, ist Ihre Meldung vielleicht schon angekommen. Warten Sie ein paar Minuten, bevor Sie sie erneut senden.",
     storeFull: "Der Shop kann gerade keine Nachrichten annehmen. Es wurde nichts gesendet. Versuchen Sie es später noch einmal oder nutzen Sie die Kontaktseite des Shops.",
     notConfirmed: "Wir konnten nicht bestätigen, dass Ihre Meldung beim Ersteller angekommen ist. Vielleicht ist sie angekommen. Warten Sie 10 Minuten, bevor Sie sie erneut senden.",
     olderNotListed: "Hier stehen nur Ihre neuesten Käufe, daher kann ein älterer Kauf auf dieser Seite noch nicht gewählt werden.",
@@ -221,7 +222,7 @@ const WORDS: Record<LanguageCode, OrderProblemWords> = {
     orderLabel: "Ordine",
     backToList: "Torna ai tuoi acquisti",
     alreadyOpen: `Questo ordine ha già una segnalazione aperta. Il creatore ha ${D} giorni per rispondere.`,
-    busyNow: "Al momento è occupato. Non è stato inviato nulla. Riprova tra un minuto.",
+    busyNow: "Al momento è occupato. Se hai già premuto «Invia al creatore», la tua segnalazione potrebbe essere già arrivata. Aspetta qualche minuto prima di inviarla di nuovo.",
     storeFull: "Il negozio non può ricevere messaggi in questo momento. Non è stato inviato nulla. Riprova più tardi o usa la pagina dei contatti del negozio.",
     notConfirmed: "Non abbiamo potuto confermare che la tua segnalazione sia arrivata al creatore. Potrebbe essere arrivata. Aspetta 10 minuti prima di inviarla di nuovo.",
     olderNotListed: "Qui sono elencati solo i tuoi acquisti più recenti, quindi uno più vecchio non si può ancora scegliere in questa pagina.",
@@ -249,7 +250,7 @@ const WORDS: Record<LanguageCode, OrderProblemWords> = {
     orderLabel: "Bestelling",
     backToList: "Terug naar je aankopen",
     alreadyOpen: `Voor deze bestelling is al een melding open. De maker heeft ${D} dagen om die te beantwoorden.`,
-    busyNow: "Het is nu even druk. Er is niets verstuurd. Probeer het over een minuut opnieuw.",
+    busyNow: "Het is nu even druk. Als je al op “Naar de maker sturen” hebt gedrukt, is je melding misschien al aangekomen. Wacht een paar minuten voordat je hem opnieuw stuurt.",
     storeFull: "De winkel kan nu geen berichten ontvangen. Er is niets verstuurd. Probeer het later opnieuw of gebruik de contactpagina van de winkel.",
     notConfirmed: "We konden niet bevestigen dat je melding bij de maker is aangekomen. Misschien wel. Wacht 10 minuten voordat je hem opnieuw stuurt.",
     olderNotListed: "Hier staan alleen je nieuwste aankopen, dus een oudere kun je op deze pagina nog niet kiezen.",
@@ -277,7 +278,7 @@ const WORDS: Record<LanguageCode, OrderProblemWords> = {
     orderLabel: "Pedido",
     backToList: "Voltar às suas compras",
     alreadyOpen: `Este pedido já tem um aviso aberto. O criador tem ${D} dias para responder.`,
-    busyNow: "Está ocupado agora. Nada foi enviado. Tente de novo em um minuto.",
+    busyNow: "Está ocupado agora. Se você já tocou em “Enviar ao criador”, seu aviso pode já ter chegado. Espere alguns minutos antes de enviá-lo de novo.",
     storeFull: "A loja não pode receber mensagens agora. Nada foi enviado. Tente mais tarde ou use a página de contato da loja.",
     notConfirmed: "Não conseguimos confirmar que seu aviso chegou ao criador. Pode ter chegado. Espere 10 minutos antes de enviá-lo de novo.",
     olderNotListed: "Aqui aparecem só as suas compras mais recentes, então uma mais antiga ainda não pode ser escolhida nesta página.",

@@ -119,6 +119,29 @@ is("late first, then by the date promised, then delivered, newest first", queue.
 is("sorting keeps the list it was given", [doneOld, later].map((o) => o.paidAt), [doneOld.paidAt, later.paidAt]);
 is("counts by stage, with late apart", queueCounts([doneOld, later, doneNew, soon, late], NOW), { received: 2, in_production: 1, delivered: 2, late: 1 });
 
+part("A clock that is not a time is unknown, never 'not late' (R1 and Codex L on #3627)");
+{
+  const open = startOrder({ paidAt: PAID, days: 2 })!;
+  const unknownOf = (work: () => unknown) => {
+    try {
+      const value = work();
+      return `answered ${JSON.stringify(value)}`;
+    } catch (error) {
+      return error instanceof Error && error.name === "UnknownClockError" ? "unknown" : `other: ${String(error)}`;
+    }
+  };
+  for (const [name, now] of [["NaN", Number.NaN], ["a fraction", PAID + 0.5], ["zero", 0], ["a time in milliseconds", PAID * 1000], ["Infinity", Number.POSITIVE_INFINITY]] as [string, number][]) {
+    is(`${name}: isLate is unknown`, unknownOf(() => isLate(open, now)), "unknown");
+    is(`${name}: refundOffered is unknown`, unknownOf(() => refundOffered(open, now)), "unknown");
+    is(`${name}: daysLeft is unknown`, unknownOf(() => daysLeft(open, now)), "unknown");
+    is(`${name}: queueCounts is unknown`, unknownOf(() => queueCounts([open], now)), "unknown");
+  }
+  is("control: a real time still answers", [isLate(open, PAID + 3 * DAY), daysLeft(open, PAID + DAY)], [true, 1]);
+  const typed = startOrder({ paidAt: PAID, days: " 5 " as unknown as number });
+  is("startOrder never stores days given as text", typed === null || typeof typed.days === "number", true);
+  is("and what it stores reads back as an order", typed === null || parseMadeOrder(JSON.parse(JSON.stringify(typed))) !== null, true);
+}
+
 part("Stages in words, never by color alone");
 is("each stage has its words", STAGE_LABELS, { received: "Received", in_production: "In production", delivered: "Delivered" });
 

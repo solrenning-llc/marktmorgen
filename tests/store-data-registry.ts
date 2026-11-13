@@ -788,6 +788,11 @@ export const FAMILIES: Record<string, Family> = {
   "nl:ppsell:sales:@lib/paypal-sales.ts": short("Every paid order", "order", 400, MARK, KIND("paypal")),
   "nl:ppsell:watch:@lib/paypal-sales.ts": short("Paid orders inside PayPal's refund window", "order", 180, MARK, KIND("paypal")),
   "nl:ppsell:handover:@lib/paypal-sales.ts": short("Paid orders still owed their hand-over, from being written down until handed over (lib/paypal-delivery.ts)", "order", 400, MARK, KIND("paypal")),
+  // CANCELED_KEPT_SECONDS of lib/paypal-sales.ts: what a canceled order's notices and its page say (store, handle,
+  // product, price, the buyer's PayPal address, what was taken), written once (SET NX) when PayPal never confirmed it.
+  "nl:ppsell:canceled:@lib/paypal-sales.ts": short("A PayPal order canceled because PayPal never confirmed its payment, for its notices and the page its buyer comes back to, thirty days", "order", 30, KB, KIND("paypal")),
+  // CANCEL_NOTICE_EVERY_SECONDS and CANCEL_NOTICE_BATCH of lib/paypal-sales.ts: two members a canceled order (its buyer's notice, its creator's), each gone once sent or when its mark ends.
+  "nl:ppsell:tell@lib/paypal-sales.ts": short("Canceled PayPal orders whose notices the sender refused, until each is sent or thirty days pass", "order", 30, 2 * MARK, KIND("paypal")),
   "nl:ppsell:receipt:@lib/paypal-delivery.ts": short("When a paid order's receipt was first tried, a week", "order", 7, MARK, KIND("paypal")),
   // RECEIPT_MAIL_BYTES and RECEIPT_MAIL_SECONDS of lib/paypal-delivery.ts (held by tests/paypal-receipt-once.test.ts, part J).
   "nl:ppsell:mail:@lib/paypal-delivery.ts": short("A paid order's receipt as first made, so every try sends the same email, a day", "order", 1, 8 * KB, KIND("paypal")),

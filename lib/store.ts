@@ -777,6 +777,14 @@ export type Store = {
    * directly. Null when PayPal is not connected.
    */
   paypalSeller: PayPalSeller | null;
+  /**
+   * The PayPal account the store sold through until the creator disconnected it, and when (`at`, in milliseconds),
+   * kept so the sweep can still ask PayPal about the orders it took: a pending payment that completes is handed over,
+   * a refund takes the purchase back (lib/paypal-sales.ts, paypalMerchant). Kept at most PAYPAL_PAST_SECONDS after the
+   * disconnection, and cleared as soon as no order of the store is left waiting on PayPal. Absent on stores written
+   * before 12 November 2026, and on stores that never disconnected one.
+   */
+  paypalPast?: PayPalSeller | null;
 };
 
 /** A PayPal account a store sells through: PayPal's id for it, and when it was connected. */
@@ -1076,6 +1084,7 @@ function parseStore(raw: unknown): Store | null {
       pastBuyers: value.pastBuyers === true,
       // Stores written before PayPal selling existed sell through Stripe only.
       paypalSeller: parsePayPalSeller(value.paypalSeller),
+      paypalPast: parsePayPalSeller(value.paypalPast),
     };
   } catch {
     return null;
@@ -4396,6 +4405,23 @@ export async function setPayPalSeller(email: string, merchant: string | null): P
   const seller = merchant ? parsePayPalSeller({ merchant, at: Date.now() }) : null;
   if (merchant && !seller) return null;
   return patchStore(email, () => ({ paypalSeller: seller }));
+}
+
+/**
+ * Stops selling through the creator's PayPal (app/api/store/paypal/disconnect) and keeps the account it sold through
+ * as paypalPast, so the orders PayPal still holds are answered: handed over when a pending payment completes, taken
+ * back when refunded, cancelled with a notice when never confirmed (lib/paypal-sales.ts, watchPayPal).
+ */
+export async function disconnectPayPalSeller(email: string): Promise<Store | null> {
+  return patchStore(email, (store) => ({
+    paypalSeller: null,
+    paypalPast: store.paypalSeller && store.paypalSeller.merchant ? { merchant: store.paypalSeller.merchant, at: Date.now() } : (store.paypalPast ?? null),
+  }));
+}
+
+/** Forgets the disconnected PayPal account once nothing of it is left to ask about; only the one written at `at`. */
+export async function forgetPayPalPast(email: string, at: number): Promise<Store | null> {
+  return patchStore(email, (store) => (store.paypalPast && store.paypalPast.at === at ? { paypalPast: null } : null));
 }
 
 export type ExitOfferResult = { ok: true; store: Store } | { ok: false; reason: "none" | "unknown" | "not_free" };

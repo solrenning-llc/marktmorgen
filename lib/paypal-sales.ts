@@ -119,6 +119,38 @@ const CAPTURE_ID = /^[A-Za-z0-9-]{1,64}$/;
 const MERCHANT_ID = /^[A-Z0-9]{8,20}$/;
 /** How long a refund on PayPal is watched for, after the sale. PayPal allows refunds for 180 days. */
 const WATCH_SECONDS = 180 * 86_400;
+/**
+ * How long after a creator disconnects PayPal the store's orders are still asked about (paypalMerchant): PayPal's
+ * refund window, the same 180 days a paid order is watched for (nextLook). Past it, or as soon as no order of the
+ * store is left on its lists (lib/paypal-delivery.ts, sweepPayPal), the store is no longer swept for PayPal.
+ */
+export const PAYPAL_PAST_SECONDS = WATCH_SECONDS;
+/**
+ * How long after its order was opened a payment PayPal has not confirmed is canceled (watchPayPal): 29 days. A
+ * pending order's record is kept 30 days from its capture (watchLater), which comes after its opening, so the
+ * cancellation always runs while the record still says which store, product and price it was, one day before the
+ * existing handling would have let it go without a word. PayPal clears an eCheck in about a week; 29 days leaves
+ * every slower review its time.
+ */
+export const PENDING_GIVE_UP_SECONDS = 29 * 86_400;
+/**
+ * How long a canceled order's mark is kept (canceledKey): 30 days. It holds what the notices say (store, product,
+ * price, the buyer's PayPal address, whether anything was taken) and is what the page a buyer comes back to reads
+ * (canceledFor), so a buyer PayPal gave no address for still finds out there.
+ */
+export const CANCELED_KEPT_SECONDS = 30 * 86_400;
+/** How long after a buyer's notice the sender refused it is tried again (retryCancelNotices): six hours. */
+export const CANCEL_NOTICE_EVERY_SECONDS = 6 * 3600;
+/**
+ * The most times a buyer's notice is tried: the first, at the cancellation, then once every CANCEL_NOTICE_EVERY_SECONDS
+ * while the sender refuses it, for as long as the order's mark is kept. Never given up while the mark is kept: the
+ * buyer is never left without a word because a sender refused it once.
+ */
+export const CANCEL_NOTICE_TRIES = 1 + CANCELED_KEPT_SECONDS / CANCEL_NOTICE_EVERY_SECONDS;
+/** The buyers' notices one run of the job tries again, at most (retryCancelNotices). */
+export const CANCEL_NOTICE_BATCH = 25;
+/** PayPal's order statuses (checkout_orders_v2) under which nothing was charged: no capture was made. */
+const NOT_CHARGED = new Set(["CREATED", "SAVED", "APPROVED", "PAYER_ACTION_REQUIRED"]);
 const PAID_KEPT_SECONDS = 400 * 86_400;
 
 const orderKey = (order: string) => `nl:ppsell:o:${order}`;
@@ -126,6 +158,13 @@ const paidKey = (order: string) => `nl:ppsell:paid:${order}`;
 const watchKey = (statsId: string) => `nl:ppsell:watch:${statsId}`;
 /** Orders whose payment PayPal holds as pending, scored by when they were taken. */
 const pendingKey = (statsId: string) => `nl:ppsell:pending:${statsId}`;
+/** An order canceled because PayPal never confirmed its payment (cancelOrder): what its notices and its page say. */
+const canceledKey = (order: string) => `nl:ppsell:canceled:${order}`;
+/**
+ * Canceled orders whose notices the sender refused, scored by when each is tried again (retryCancelNotices): the
+ * order's id for its buyer's notice, "c:" and the id for its creator's.
+ */
+const CANCEL_NOTICE_QUEUE = "nl:ppsell:tell";
 /**
  * Paid orders still owed their hand-over (lib/paypal-delivery.ts), scored by when they were written down or last
  * tried: settle adds each one with the writes that take it off pending, a hand-over takes it out.
@@ -324,6 +363,100 @@ export const PAYPAL_CURRENCIES: ReadonlySet<string> = new Set(["aud", "cad", "cz
 /** Whether this store takes PayPal right now, for what PayPal can sell. */
 export function sellsThroughPayPal(store: Store): boolean {
   return paypalSalesConfigured() && Boolean(store.paypalSeller) && isPaidUp(store) && PAYPAL_CURRENCIES.has(store.currency) && !store.suspended;
+}
+
+/**
+ * The PayPal account to ask about this store's orders: the connected one, or the one the creator disconnected within
+ * PAYPAL_PAST_SECONDS of the disconnection (lib/store.ts, paypalPast). Null when there is neither.
+ */
+export function paypalMerchant(store: Pick<Store, "paypalSeller" | "paypalPast">, nowMs = Date.now()): string | null {
+  if (store.paypalSeller) return store.paypalSeller.merchant;
+  return paypalPastWatched(store, nowMs) ? (store.paypalPast?.merchant ?? null) : null;
+}
+
+/** Whether PayPal is disconnected but its orders are still asked about (paypalMerchant). */
+export function paypalPastWatched(store: Pick<Store, "paypalSeller" | "paypalPast">, nowMs = Date.now()): boolean {
+  const past = store.paypalPast;
+  return !store.paypalSeller && Boolean(past) && nowMs >= (past?.at ?? 0) && nowMs < (past?.at ?? 0) + PAYPAL_PAST_SECONDS * 1000;
+}
+
+/**
+ * How many orders of a store with PayPal disconnected still wait on PayPal to confirm the payment, for the studio's
+ * notice: one ZCARD, read exactly. Null when PayPal is connected, past its window, or the answer is not a count.
+ */
+export async function paypalOrdersWaiting(store: Pick<Store, "statsId" | "paypalSeller" | "paypalPast">): Promise<number | null> {
+  if (!store.statsId || !paypalPastWatched(store) || !isRedisConfigured()) return null;
+  const read = repliesFor(await redisPipeline([["ZCARD", pendingKey(store.statsId)]]), 1);
+  return read && typeof read[0] === "number" && Number.isSafeInteger(read[0]) && read[0] >= 0 ? read[0] : null;
+}
+
+/**
+ * How many orders a store has left on its three PayPal lists (pending payments, paid orders watched for a refund,
+ * paid orders owed their hand-over): three ZCARD in one round trip, read exactly. Null when any answer is not a count.
+ */
+export async function paypalOrdersLeft(statsId: string): Promise<number | null> {
+  const read = repliesFor(await redisPipeline([["ZCARD", pendingKey(statsId)], ["ZCARD", watchKey(statsId)], ["ZCARD", handOverKey(statsId)]]), 3);
+  if (!read || !read.every((n) => typeof n === "number" && Number.isSafeInteger(n) && n >= 0)) return null;
+  return (read as number[]).reduce((a, b) => a + b, 0);
+}
+
+/** An order canceled because PayPal never confirmed its payment (watchPayPal), as its notices say it. */
+export type CanceledOrder = {
+  order: string;
+  /** The store's stats id and handle, when it was canceled. */
+  store: string;
+  handle: string;
+  product: string;
+  cents: number;
+  currency: string;
+  /** The buyer's PayPal address, as PayPal's order gave it; null when it gave none. */
+  email: string | null;
+  /** "pending": PayPal still held the payment as pending; "none": no payment was taken. */
+  charged: "pending" | "none";
+  /** When it was canceled, in seconds. */
+  at: number;
+};
+
+/**
+ * What telling a buyer came to: the sender's own outcome (lib/email.ts, SendOutcome), or "none" when there is no one to
+ * write to. Only "refused" (certainly not sent) is tried again; "uncertain" may have gone, so it is never sent twice.
+ */
+export type TellOutcome = "sent" | "refused" | "uncertain" | "none";
+/** Who a notice of a canceled order is for: both at the cancellation, then each on its own while refused. */
+export type TellWho = "both" | "buyer" | "creator";
+/** What telling came to, for each side; "none" for a side not asked this time. */
+export type TellOutcomes = { buyer: TellOutcome; creator: TellOutcome };
+
+/** A canceled order's mark, read exactly (CX-123 rule 24): null when there is none; throws when it does not read. */
+async function readCanceled(order: string): Promise<CanceledOrder | null> {
+  const read = repliesFor(await redisPipeline([["GET", canceledKey(order)]]), 1);
+  if (!read || (read[0] !== null && typeof read[0] !== "string")) throw new UnknownReplyError("a canceled PayPal order");
+  if (read[0] === null) return null;
+  let v: unknown;
+  try {
+    v = JSON.parse(read[0]);
+  } catch {
+    throw new UnknownReplyError("a canceled PayPal order");
+  }
+  const c = v as Partial<CanceledOrder>;
+  if (
+    !c || typeof c !== "object" || c.order !== order || typeof c.store !== "string" || typeof c.handle !== "string" || typeof c.product !== "string" ||
+    !Number.isSafeInteger(c.cents) || typeof c.currency !== "string" || (c.email !== null && typeof c.email !== "string") ||
+    (c.charged !== "pending" && c.charged !== "none") || !Number.isSafeInteger(c.at)
+  ) {
+    throw new UnknownReplyError("a canceled PayPal order");
+  }
+  return c as CanceledOrder;
+}
+
+/**
+ * Whether this store's PayPal order was canceled because PayPal never confirmed its payment, for the page its buyer
+ * comes back to (app/[handle]/thanks/page.tsx): what was taken, or null. One GET; throws when it does not read.
+ */
+export async function canceledFor(store: Pick<Store, "statsId">, order: string): Promise<{ charged: CanceledOrder["charged"] } | null> {
+  if (!ORDER_ID.test(order) || !store.statsId || !isRedisConfigured()) return null;
+  const c = await readCanceled(order);
+  return c && c.store === store.statsId ? { charged: c.charged } : null;
 }
 
 /** Who takes the payment, in the words the store's pages use. */
@@ -816,6 +949,91 @@ export async function deliverPayPal(input: {
 }
 
 /**
+ * Cancels an order PayPal never confirmed (watchPayPal, PENDING_GIVE_UP_SECONDS), once:
+ *
+ *   1. its mark (canceledKey, SET NX, kept CANCELED_KEPT_SECONDS) and its two places on the notice queue, the
+ *      buyer's and the creator's (ZADD NX, due CANCEL_NOTICE_EVERY_SECONDS later), in one round trip read exactly
+ *      (CX-123 rule 24): anything unknown tells nobody and leaves the order for the next run;
+ *   2. the order taken off the pending list and its record let go, so a buyer coming back from PayPal's page later
+ *      cannot capture it (captureOrder finds no record) and the page says it was canceled (canceledFor);
+ *   3. only by the run whose SET wrote the mark: the buyer and the creator told (`tell`, "both"). A notice the sender
+ *      did not refuse leaves the queue; one it refused stays there, tried again by retryCancelNotices, so neither the
+ *      buyer nor the creator is left without a word because a sender refused it once.
+ */
+async function cancelOrder(
+  statsId: string,
+  order: string,
+  opened: Opened,
+  email: string,
+  charged: CanceledOrder["charged"],
+  tell: ((order: CanceledOrder, who: TellWho) => Promise<TellOutcomes>) | undefined,
+): Promise<void> {
+  if (!tell) return;
+  const at = Math.floor(Date.now() / 1000);
+  const canceled: CanceledOrder = { order, store: statsId, handle: opened.h, product: opened.p, cents: opened.c, currency: opened.cur, email: email || null, charged, at };
+  const wrote = repliesFor(
+    await redisPipeline([
+      ["SET", canceledKey(order), JSON.stringify(canceled), "NX", "EX", CANCELED_KEPT_SECONDS],
+      ["ZADD", CANCEL_NOTICE_QUEUE, "NX", String(at + CANCEL_NOTICE_EVERY_SECONDS), order, String(at + CANCEL_NOTICE_EVERY_SECONDS), `c:${order}`],
+    ]),
+    2,
+  );
+  if (!wrote || (wrote[0] !== "OK" && wrote[0] !== null) || (wrote[1] !== 0 && wrote[1] !== 1 && wrote[1] !== 2)) return;
+  await redisPipeline([["ZREM", pendingKey(statsId), order], ["DEL", orderKey(order)]]);
+  // Already canceled by an earlier run, whose notices were sent then or wait on the queue.
+  if (wrote[0] === null) return;
+  const told: TellOutcomes = await tell(canceled, "both").catch((error) => {
+    console.error("telling of a canceled PayPal order failed", error);
+    return { buyer: "refused", creator: "refused" } as const;
+  });
+  const done = [...(told.buyer !== "refused" ? [order] : []), ...(told.creator !== "refused" ? [`c:${order}`] : [])];
+  if (done.length) await redisPipeline([["ZREM", CANCEL_NOTICE_QUEUE, ...done]]).catch(() => undefined);
+}
+
+/**
+ * Tries again the buyers' notices the sender refused (cancelOrder), for every store, once a run of the five-minute job
+ * (lib/checkout-sweep.ts): one ZRANGEBYSCORE of the due ones, at most CANCEL_NOTICE_BATCH, then for each its mark
+ * (one GET) and one try. A notice the sender took, or may have taken ("uncertain"), leaves the queue; one it refused
+ * again is due CANCEL_NOTICE_EVERY_SECONDS later; one whose mark ended (CANCELED_KEPT_SECONDS) leaves it. A mark that
+ * does not read stays, asked again next run, never taken for "told". Returns the notices sent.
+ */
+export async function retryCancelNotices(deadline: number, tell: (order: CanceledOrder, who: TellWho) => Promise<TellOutcomes>): Promise<number> {
+  if (!isRedisConfigured()) return 0;
+  const now = Math.floor(Date.now() / 1000);
+  const [due] = await redisPipeline([["ZRANGEBYSCORE", CANCEL_NOTICE_QUEUE, "0", String(now), "LIMIT", "0", String(CANCEL_NOTICE_BATCH)]]);
+  let sent = 0;
+  for (const member of Array.isArray(due) ? (due as unknown[]) : []) {
+    if (Date.now() >= deadline) break;
+    const named = typeof member === "string" ? /^(c:)?([A-Z0-9]{10,36})$/.exec(member) : null;
+    if (!named) {
+      await redisPipeline([["ZREM", CANCEL_NOTICE_QUEUE, String(member)]]);
+      continue;
+    }
+    const who: TellWho = named[1] ? "creator" : "buyer";
+    const order = named[2];
+    let canceled: CanceledOrder | null;
+    try {
+      canceled = await readCanceled(order);
+    } catch (error) {
+      console.error("reading a canceled PayPal order failed; asked again", error);
+      continue;
+    }
+    if (!canceled || now >= canceled.at + CANCELED_KEPT_SECONDS) {
+      await redisPipeline([["ZREM", CANCEL_NOTICE_QUEUE, member as string]]);
+      continue;
+    }
+    const told = await tell(canceled, who).catch((error) => {
+      console.error("telling of a canceled PayPal order failed", error);
+      return { buyer: "refused", creator: "refused" } as const;
+    });
+    const outcome = who === "creator" ? told.creator : told.buyer;
+    if (outcome === "sent") sent += 1;
+    await redisPipeline([outcome === "refused" ? ["ZADD", CANCEL_NOTICE_QUEUE, "XX", String(now + CANCEL_NOTICE_EVERY_SECONDS), member as string] : ["ZREM", CANCEL_NOTICE_QUEUE, member as string]]);
+  }
+  return sent;
+}
+
+/**
  * When a paid order is next asked about: often while refunds are likely, then
  * less and less, until PayPal's refund window closes.
  */
@@ -850,10 +1068,19 @@ export async function watchPayPal(
     refunded?: (paid: Paid) => Promise<void>;
     /** Puts a course back for a payment that keeps the purchase (an HSETNX: nothing for one still there, no email). */
     restoreStart?: (email: string, productId: string, startSeconds: number) => Promise<void>;
+    /**
+     * Tells the buyer and the creator that an order PayPal never confirmed is canceled (PENDING_GIVE_UP_SECONDS).
+     * Asked for "both" at the cancellation; a side whose notice was "refused" is tried again on its own by
+     * retryCancelNotices. Without it, such an order is asked about until its record ends, as before.
+     */
+    canceled?: (order: CanceledOrder, who: TellWho) => Promise<TellOutcomes>;
   },
 ): Promise<{ cleared: number; revoked: number }> {
   const result = { cleared: 0, revoked: 0 };
-  if (!paypalSalesConfigured() || !store.statsId || !store.paypalSeller || !isRedisConfigured()) return result;
+  // The connected account, or the one disconnected within PAYPAL_PAST_SECONDS: what PayPal already holds is still
+  // answered after the creator stops selling with PayPal (Claude 7, 12 November 2026).
+  const merchant = paypalMerchant(store);
+  if (!paypalSalesConfigured() || !store.statsId || !merchant || !isRedisConfigured()) return result;
   const statsId = store.statsId;
   const now = Math.floor(Date.now() / 1000);
 
@@ -874,14 +1101,23 @@ export async function watchPayPal(
       continue;
     }
     const { capture, payee, email } = captureIn(done);
+    // Not confirmed PENDING_GIVE_UP_SECONDS after it was opened: canceled, and the buyer and the creator told, only on
+    // PayPal's readable word that nothing was taken or that the payment is still pending; never on an answer that
+    // fails or cannot be read, which is asked about again (CX-123 rule 24).
+    const overdue = Boolean(on.canceled) && now >= opened.at + PENDING_GIVE_UP_SECONDS;
     // No capture in the answer. Only PayPal's word that the order was voided means nothing will be charged; any
     // other answer (approved, created, saved, completed without its captures, no status) is kept and asked again
     // (CX-123 rule 24; review of Codex G on #2681). A kept order is let go when its record ends (30 days).
     if (!capture) {
       if (done.status === "VOIDED") await redisPipeline([["ZREM", pendingKey(statsId), order]]);
+      else if (overdue && typeof done.status === "string" && NOT_CHARGED.has(done.status)) await cancelOrder(statsId, order, opened, email, "none", on.canceled);
       continue;
     }
-    if (capture.status === "PENDING" || typeof capture.status !== "string") continue;
+    if (capture.status === "PENDING") {
+      if (overdue) await cancelOrder(statsId, order, opened, email, "pending", on.canceled);
+      continue;
+    }
+    if (typeof capture.status !== "string") continue;
     // Completed and what was asked, but without the buyer's address or the capture's id: paid, not yet readable.
     if (capture.status === "COMPLETED" && matches(opened, capture, payee) && (!email || typeof capture.id !== "string")) continue;
     if (capture.status === "COMPLETED" && matches(opened, capture, payee) && email && typeof capture.id === "string") {
@@ -913,7 +1149,7 @@ export async function watchPayPal(
     }
     let status = "";
     try {
-      const capture = await call("GET", `/v2/payments/captures/${encodeURIComponent(paid.capture)}`, { merchant: store.paypalSeller.merchant });
+      const capture = await call("GET", `/v2/payments/captures/${encodeURIComponent(paid.capture)}`, { merchant });
       // Without PayPal's own status it is not known whether it was refunded: asked again in an hour, never taken for
       // "not refunded", and moved back so it cannot hold the place of the orders behind it.
       if (typeof capture.status !== "string" || !capture.status) {

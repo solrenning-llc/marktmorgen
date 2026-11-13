@@ -20,6 +20,7 @@ import { breakRunning, pauseView } from "@/lib/plan-pause";
 import { PLAN_BREAKS_ENABLED, PAID_MONTHS_BEFORE_PAUSE, PAUSE_MONTHS, PAUSE_EVERY_DAYS } from "@/lib/plan-pause-rules";
 import { MarkShipped } from "@/components/mark-shipped";
 import { paypalSalesConfigured } from "@/lib/paypal-sales";
+import { PayPalWaiting } from "@/components/paypal-waiting-notice";
 import { lowestPriceCents } from "@/lib/product-option";
 import { SaleEditor } from "@/components/sale-editor";
 import { FairPriceEditor } from "@/components/fair-price-editor";
@@ -2547,6 +2548,8 @@ export default async function StudioPage({
                   </details>
                 </>
               ) : (
+                <>
+                <PayPalWaiting store={store} />
                 <form action={`/api/store/paypal/connect${pin}`} method="post" className="mt-5">
                   <button type="submit" className="btn btn-primary">
                     Connect your PayPal account
@@ -2556,6 +2559,7 @@ export default async function StudioPage({
                     one, and to confirm what Marktmorgen may do. Then it sends you back here.
                   </p>
                 </form>
+                </>
               )}
             </div>
             ) : null}

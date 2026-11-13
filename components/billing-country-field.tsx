@@ -28,13 +28,18 @@ export function billingCountries(locale: string): { code: string; name: string }
   return list;
 }
 
-export function BillingCountryField({ id, locale, label, choose }: { id: string; locale: string; label: string; choose: string }) {
+/**
+ * `problem` is the id of the notice that says why the last try was refused (no country chosen, or one in the EU or the
+ * UK): the field is then marked invalid and described by it (WCAG 3.3.1, 3.3.3), so a screen reader names the error
+ * on reaching the field.
+ */
+export function BillingCountryField({ id, locale, label, choose, problem }: { id: string; locale: string; label: string; choose: string; problem?: string }) {
   return (
     <div className="block">
       <label htmlFor={id} className="st-label">
         {label}
       </label>
-      <select id={id} name={BILLING_COUNTRY_FIELD} required defaultValue="" autoComplete="country" className="st-field mt-2">
+      <select id={id} name={BILLING_COUNTRY_FIELD} required defaultValue="" autoComplete="country" className="st-field mt-2" aria-invalid={problem ? true : undefined} aria-describedby={problem || undefined}>
         <option value="" disabled>
           {choose}
         </option>

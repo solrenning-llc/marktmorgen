@@ -575,6 +575,7 @@ export function BuyBox({
   embed = null,
   stepped = false,
   chosenOption = null,
+  countryProblem = false,
 }: {
   store: Store;
   product: Listing;
@@ -624,6 +625,8 @@ export function BuyBox({
    * and said so above the options, because the buyer clicked a link for it. Null chooses nothing, as always (487 [IT4]).
    */
   chosenOption?: string | null;
+  /** The product page shows the refused-country notice (#country-notice): the main form's field points to it. */
+  countryProblem?: boolean;
 }) {
   // The card's way to the buy step: the words the product page's own buttons use (pageAction), and its name for a
   // screen reader, so the link says on its own what it is for (WCAG 2.4.9).
@@ -935,7 +938,7 @@ export function BuyBox({
       ) : null}
       {/* Starts unchecked: one reminder if this checkout is left unpaid, only when asked for here (lib/assistant-reminder.ts). */}
       {assistReminderOffered(store, product) ? <AssistReminderBox id={`r-${place}${product.id}`} lang={store.language} store={store.name} className="mb-4" /> : null}
-      <CountryAsk store={store} product={product} id={`bc-${place}${product.id}`} className="mb-4" />
+      <CountryAsk store={store} product={product} id={`bc-${place}${product.id}`} className="mb-4" problem={countryProblem && !place ? "country-notice" : undefined} />
       {digitalHere || digitalAdded ? <DigitalConsentBox id={`dc-${place}${product.id}`} kind={consentKind(product)} lang={store.language} refused={consentAgain} required={digitalHere} className="mb-4" /> : <WithdrawalWhere lang={store.language} className="mb-4" />}
       <button type="submit" className="btn st-btn btn-block">
         <span className="bump-off">
@@ -1029,12 +1032,12 @@ export function BuyBox({
  * refuses a paid sale to the EU or the UK until the VAT there is collected). Nothing for a free product, which is
  * no sale and goes on wherever the buyer is.
  */
-function CountryAsk({ store, product, id, className = "" }: { store: Store; product: Listing; id: string; className?: string }) {
+function CountryAsk({ store, product, id, className = "", problem }: { store: Store; product: Listing; id: string; className?: string; problem?: string }) {
   if (product.priceCents === 0 && !product.pwyw) return null;
   const { w, lang } = speech(store);
   return (
     <div className={className}>
-      <BillingCountryField id={id} locale={lang.locale} label={w.billingCountry} choose={w.chooseCountry} />
+      <BillingCountryField id={id} locale={lang.locale} label={w.billingCountry} choose={w.chooseCountry} problem={problem} />
     </div>
   );
 }

@@ -460,9 +460,12 @@ export default async function ProductPage({ params, searchParams }: Params) {
         <div className="st-note mb-4" role="alert" id="country-notice">
           <p className="font-bold" style={{ color: "var(--st-text)" }}>{w.notices[countryStatus].title}</p>
           <p className="mt-1 text-sm">{w.notices[countryStatus].body}</p>
+          <p className="mt-2 text-sm">
+            <a href={`#bc-${product.id}`} className="underline">{w.chooseCountry}</a>
+          </p>
         </div>
       ) : null}
-      <BuyBox store={store} product={product} related={related} remaining={remaining} writes={canWrite(store)} selling={selling} ready={bundleReady} soon={soon} preorder={preorder} bundleItems={inside} pickAgain={query.pick === "count"} consentAgain={consentAgain && !giftProblem && !groupProblem} embed={embedSite || embedReturn ? { site: embedSite, back: embedReturn } : null} chosenOption={linkedChoice} />
+      <BuyBox store={store} product={product} related={related} remaining={remaining} writes={canWrite(store)} selling={selling} ready={bundleReady} soon={soon} preorder={preorder} bundleItems={inside} pickAgain={query.pick === "count"} consentAgain={consentAgain && !giftProblem && !groupProblem} embed={embedSite || embedReturn ? { site: embedSite, back: embedReturn } : null} chosenOption={linkedChoice} countryProblem={!!countryStatus} />
       {cartOn && !soon && cartable(product) && remaining !== 0 ? <AddToCart handle={store.handle} productId={product.id} lang={store.language} deal={store.cartDeal.on ? store.cartDeal : null} /> : null}
       {/* A question before buying, answered from this page (lib/answers.ts): only where the creator switched it on. */}
       {selling && answersOn(store) ? (

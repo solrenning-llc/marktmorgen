@@ -30,7 +30,7 @@ type Sold = { priceCents?: number } & Partial<Record<Exclude<Read, "priceCents">
 const paid = (p: Sold) => (p.priceCents ?? 0) > 0 || Boolean(p.recurring) || Boolean(p.pwyw) || Boolean(p.plan);
 
 /** The input from products already read: kept apart so it can be checked without a store. */
-export function policyInputFrom(store: Pick<Store, "name" | "pixels" | "mail">, products: readonly Sold[], paypal: boolean): PolicyFactsInput {
+export function policyInputFrom(store: Pick<Store, "name" | "pixels">, products: readonly Sold[], paypal: boolean): PolicyFactsInput {
   const sold = products.filter(paid);
   return {
     storeName: store.name,
@@ -38,7 +38,10 @@ export function policyInputFrom(store: Pick<Store, "name" | "pixels" | "mail">, 
     sellsMemberships: sold.some((p) => Boolean(p.recurring)),
     paypal,
     pixels: PIXEL_KINDS.filter((kind) => Boolean(store.pixels?.[kind])).map((kind) => PIXEL_INFO[kind].name),
-    postalAddress: store.mail?.address ?? "",
+    // Never the email footer's postal address (Claude 1's MEDIUM on #1824): the studio collects it for the footer only,
+    // often a creator's home, and this page is public at a predictable address. Published here only once the creator
+    // chooses to, which does not exist yet; until then the page has no contact section.
+    postalAddress: "",
   };
 }
 

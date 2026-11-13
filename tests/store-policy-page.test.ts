@@ -1,7 +1,7 @@
 /**
  * 617 [SZ1], unit 3: a store's policy page is built from what the store is
  * now (lib/store-policy-input.ts): what it sells, PayPal, the pixels switched
- * on, the postal address; it changes with them; the address is kept from a
+ * on (never the email footer's postal address); it changes with them; the address is kept from a
  * creator's own page names. Synthetic store values; the page's markup is read
  * from its source, as other store page checks do.
  */

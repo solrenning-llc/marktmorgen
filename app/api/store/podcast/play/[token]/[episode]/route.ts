@@ -19,7 +19,16 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
   if (!(await feedAllowed(token))) return new Response("Too many requests.", { status: 429, headers: { "Retry-After": "600" } });
   const store = await storeForHandle(grant.h);
   const product = store && store.statsId === grant.s ? await readListing(store, grant.p) : null;
-  if (!store || !product?.podcast || !(await mayListen(store, product.id, grant.e))) return new Response("Not available.", { status: 403 });
+  if (!store || !product?.podcast) return new Response("Not available.", { status: 403 });
+  let allowed: boolean;
+  try {
+    allowed = await mayListen(store, product.id, grant.e, { shared: true });
+  } catch (error) {
+    // Unknown, never a "no" and never a bare 500: the app is told to come back (Claude 3 nuvem L on #3717).
+    console.error("a podcast episode could not read whether its buyer may listen", error);
+    return new Response("Try again later.", { status: 503, headers: { "Retry-After": "600", "Cache-Control": "no-store" } });
+  }
+  if (!allowed) return new Response("Not available.", { status: 403 });
   // One of the store's public requests on the buyers' side (lib/buyer-actions.ts).
   if (!(await takeBuyerRead(store))) return new Response("Try again later.", { status: 503, headers: { "Retry-After": "3600" } });
   const podcast = await readPodcast(product.podcast.id);

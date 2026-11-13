@@ -42,7 +42,15 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
   const store = await storeForHandle(grant.h);
   const product = store && store.statsId === grant.s ? await readListing(store, grant.p) : null;
   if (!store || !product?.podcast) return new Response("This podcast is no longer here.", { status: 410, headers: { "Cache-Control": "no-store" } });
-  const allowed = await mayListen(store, product.id, grant.e);
+  let allowed: boolean;
+  try {
+    allowed = await mayListen(store, product.id, grant.e, { shared: true });
+  } catch (error) {
+    // Whether this buyer may listen could not be read (move evidence, the store's room, a Stripe reading): the app is
+    // told to come back, kept by nobody, never "ended" and never a bare 500 (Claude 3 nuvem L on #3717).
+    console.error("a podcast feed could not read whether its buyer may listen", error);
+    return new Response("Try again later.", { status: 503, headers: { "Retry-After": "600", "Cache-Control": "no-store" } });
+  }
   const own = normaliseEmail(grant.e) === normaliseEmail(store.email);
   // Once the store has used the whole month's visits, a subscriber's feed rests like the
   // store's other buyer pages (lib/traffic-rules.ts): the app is told to come back later,

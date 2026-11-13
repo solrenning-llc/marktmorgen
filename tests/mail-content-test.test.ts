@@ -52,7 +52,8 @@ is("the smallest list a test needs is the subject test's", MIN_TEST_REACH, 100);
 part("Read back as stored");
 is("what was stored", parseContentTest({ ...(made as object), a: 60, b: 60, endsAt: 1_800_000_000, winner: "b", visits: { a: 3, b: 9 } }), { ...(made as object), a: 60, b: 60, endsAt: 1_800_000_000, winner: "b", visits: { a: 3, b: 9 } });
 is("nothing usable is no test", [parseContentTest(null), parseContentTest({ bodyB: "" }), parseContentTest({ share: 20 })], [null, null, null]);
-is("counts that are not whole numbers are not read as more", parseContentTest({ bodyB: B, a: -4, b: "9", visits: { a: 1.7, b: -1 } }), { bodyB: B, share: 20, hours: 4, by: "visits", a: 0, b: 0, endsAt: 0, winner: "", visits: null, sales: null, why: "", skipped: false });
+// Changed on #3654 (Claude 3, adopting; nuvem K's LEVE): sends that do not read are unknown (null), never 0; they read 0 before.
+is("counts that are not whole numbers are not read as more", parseContentTest({ bodyB: B, a: -4, b: "9", visits: { a: 1.7, b: -1 } }), { bodyB: B, share: 20, hours: 4, by: "visits", a: null, b: null, endsAt: 0, winner: "", visits: null, sales: null, why: "", skipped: false });
 // A stored pair with a count that does not read is unknown, never an invented 0 or a count cut down (rule 24; Claude 3
 // and Codex G on #3654).
 is("a pair with one count that does not read is unknown", [parseContentTest({ bodyB: B, sales: { a: "x", b: 5 } })?.sales, parseContentTest({ bodyB: B, visits: { a: 1.7, b: 3 } })?.visits], [null, null]);
@@ -90,5 +91,12 @@ for (const size of sizes) for (const by of ["visits", "sales"] as const) for (co
   if (chooseContent({ ...size, by }, v, s).winner !== chooseSubject({ ...size, by }, v, s).winner) same = false;
 }
 is("the winner is always the one the subject test would pick", same, true);
+
+part("Sends per version that do not read are unknown, never a tie (Claude 3 nuvem K on #3654, LEVE)");
+const unread = parseContentTest({ bodyB: "The second one", a: "lost", b: 50, by: "visits", share: TEST_SHARES[0], hours: TEST_HOURS[1] });
+is("an unreadable count of sends is unknown, never 0", unread ? [unread.a, unread.b] : null, [null, 50]);
+is("a fraction or a negative count of sends is unknown too", [parseContentTest({ bodyB: "x", a: 1.5, b: 2 })?.a, parseContentTest({ bodyB: "x", a: 3, b: -1 })?.b], [null, null]);
+const said = unread ? chooseContent(unread, { a: 30, b: 2 }, null) : null;
+is("the rest get the first version, said as counts that could not be read, never as a tie", said, { winner: "a", why: "The counts could not be read when the time was up, so the rest got the first version. It was not chosen on merit." });
 
 done();

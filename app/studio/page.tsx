@@ -1,3 +1,4 @@
+import { urlNoticeHolds } from "@/lib/told-receipt";
 import { serviceAllowanceWords } from "@/lib/store-allowance";
 import { placeLine } from "@/lib/call-place";
 import { planAboveSold } from "@/lib/larger-plan";
@@ -889,15 +890,22 @@ export default async function StudioPage({
   const pin = store?.sid ? `?store=${store.sid}` : "";
   // The writing help, and what is left of it this month: read once for the whole studio page.
   const ai = store && aiAvailableFor(store) ? { on: true, left: firstReads.aiLeft ? await firstReads.aiLeft : 0 } : { on: false, left: 0 };
+  // A notice that says an account is ready or a subscription changed is shown only when the store's record or the
+  // billing route's own answer says so, never on the address's word alone (#4399).
+  const said = (value: unknown) => (typeof value === "string" ? value : "");
+  const stripeSaid = (await urlNoticeHolds("stripe", said(params.stripe), store)) ? said(params.stripe) : "";
+  const paypalSaid = (await urlNoticeHolds("paypal", said(params.paypal), store)) ? said(params.paypal) : "";
+  const billingAsked = BILLING_ALIASES[String(params.billing)] ?? said(params.billing);
+  const billingSaid = (await urlNoticeHolds("billing", billingAsked, store)) ? billingAsked : "";
   const notice =
     ADDRESS_NOTICES[typeof params.address === "string" ? params.address : ""] ??
-    STRIPE_NOTICES[typeof params.stripe === "string" ? params.stripe : ""] ??
+    STRIPE_NOTICES[stripeSaid] ??
     // A call to PayPal or Meta refused for the store's calls to connected services (lib/metered-limits.ts).
     (store && typeof params.paypal === "string" && serviceAllowanceWords(store, params.paypal) ? { title: "PayPal can't be connected just now", body: serviceAllowanceWords(store, params.paypal) ?? "" } : undefined) ??
     (store && typeof params.metaads === "string" && serviceAllowanceWords(store, params.metaads) ? { title: "Meta can't be connected just now", body: serviceAllowanceWords(store, params.metaads) ?? "" } : undefined) ??
-    PAYPAL_NOTICES[typeof params.paypal === "string" ? params.paypal : ""] ??
+    PAYPAL_NOTICES[paypalSaid] ??
     META_NOTICES[typeof params.metaads === "string" ? params.metaads : ""] ??
-    BILLING_NOTICES[BILLING_ALIASES[String(params.billing)] ?? (typeof params.billing === "string" ? params.billing : "")] ??
+    BILLING_NOTICES[billingSaid] ??
     TEAM_NOTICES[typeof params.team === "string" ? params.team : ""] ??
     STORES_NOTICES[typeof params.stores === "string" ? params.stores : ""] ??
     (found.ok && found.fellBack ? TEAM_NOTICES.gone : undefined);

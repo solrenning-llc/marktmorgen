@@ -7,6 +7,7 @@ import {
   setCancelAtPeriodEnd,
 } from "@/lib/billing";
 import { setSubscription } from "@/lib/store";
+import { tell } from "@/lib/told-receipt";
 import { limited } from "@/lib/request-guard";
 import { dropPause, pauseView, undoPause } from "@/lib/plan-pause";
 import { PLAN_BREAKS_ENABLED } from "@/lib/plan-pause-rules";
@@ -48,7 +49,10 @@ export async function POST(request: NextRequest) {
         if (observation.kind === "known") return away(origin, studio("billing=pause-unavailable"));
       }
       const done = PLAN_BREAKS_ENABLED ? await undoPause(store) : "none";
-      if (done !== "none") return away(origin, studio(done === "kept" ? "billing=resumed" : "billing=ended"));
+      if (done !== "none") {
+        if (done === "kept") await tell(store.sid, "billing", "resumed");
+        return away(origin, studio(done === "kept" ? "billing=resumed" : "billing=ended"));
+      }
     }
     const state = await setCancelAtPeriodEnd(store.subscriptionId, intent === "cancel");
     // Leaving outright: a break that was set has nothing left to start again.
@@ -59,6 +63,8 @@ export async function POST(request: NextRequest) {
       const written = await setSubscription(ref, { active: false });
       return away(origin, studio(written ? "billing=ended" : "billing=cancel-error"));
     }
+    // Left for the studio, which says it only for this store's own answer (#4399).
+    await tell(store.sid, "billing", intent === "cancel" ? "canceling" : "resumed");
     return away(origin, studio(intent === "cancel" ? "billing=canceling" : "billing=resumed"));
   } catch (error) {
     // Stripe refuses to change a subscription that is already over. Ask what

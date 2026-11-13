@@ -14,6 +14,7 @@ import { readPlanRefund } from "@/lib/plan-refund";
 import { issueReview } from "@/lib/plan-refund-flow";
 import { refundUnderway } from "@/lib/plan-refund-underway";
 import { REFUND_DONE, SUPPORT_ADDRESS, moneyOf, refundEffects, refusalWords } from "@/lib/plan-refund-words";
+import { REFUND_CONFIRMS, wasTold } from "@/lib/told-receipt";
 import { PLAN_NAMES } from "@/lib/plan";
 import { PLAN_WITHDRAW_ACK_SENDS, PLAN_WITHDRAW_SUPPORT_TRIES, planWithdrawWindow, planWithdrawal } from "@/lib/plan-withdrawal";
 import { PLAN_WITHDRAW_WORDS as W } from "@/lib/plan-withdrawal-words";
@@ -70,8 +71,11 @@ export default async function StudioRefundPage({ searchParams }: Params) {
   const name = store.name || store.handle;
   const back = `${studioPath(store)}#billing`;
   const owner = view.role === "owner";
-  const done = !owner ? REFUND_DONE.owner : typeof query.done === "string" ? REFUND_DONE[query.done] : undefined;
-  const finished = query.done === "refunded" || query.done === "ending";
+  // An answer saying money moved is the route's own for this store, never the address's word (#4399); the rest confirm nothing.
+  const claimed = typeof query.done === "string" ? query.done : "";
+  const confirmed = owner && REFUND_CONFIRMS.has(claimed) ? await wasTold(store.sid, "refund", claimed) : true;
+  const done = !owner ? REFUND_DONE.owner : claimed && confirmed && Object.hasOwn(REFUND_DONE, claimed) ? REFUND_DONE[claimed] : undefined;
+  const finished = confirmed && REFUND_CONFIRMS.has(claimed);
   // A refund still being settled: no new confirmation until it is decided.
   const underway = owner && !finished ? await refundUnderway(store.sid).catch(() => true) : false;
   const settling = underway && !done ? REFUND_DONE.busy : null;

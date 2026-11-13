@@ -3,6 +3,7 @@ import { away, creatorFrom, studioPath } from "@/lib/studio-route";
 import { limited, withinLimit } from "@/lib/request-guard";
 import { refundAndEndPlan, takeReview } from "@/lib/plan-refund-flow";
 import { refundUnderway } from "@/lib/plan-refund-underway";
+import { REFUND_CONFIRMS, tell } from "@/lib/told-receipt";
 
 /**
  * Up to the subscription's reading and stop, the refund's reading and write
@@ -32,7 +33,11 @@ export async function POST(request: NextRequest) {
   if (creator instanceof Response) return creator;
   const { store, origin, role } = creator;
   // Every answer is told on the review page, which says what happened and what to do next.
-  const told = (done: string) => away(origin, studioPath(store, `done=${done}`, "refund"));
+  // An answer that says money moved is also left for this store, so the page never takes the address's word for it (#4399).
+  const told = async (done: string) => {
+    if (REFUND_CONFIRMS.has(done)) await tell(store.sid, "refund", done);
+    return away(origin, studioPath(store, `done=${done}`, "refund"));
+  };
   if (role !== "owner") return told("owner");
 
   let token = "";

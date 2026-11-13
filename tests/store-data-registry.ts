@@ -238,6 +238,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:meet:zoomseen:@app/api/integrations/zoom/deauthorize/route.ts": company("Zoom's notices already handled", "Zoom's own notices, kept a day: the company's."),
   "nl:inbound:seen:@app/api/mail/inbound/route.ts": company("Inbound mail already handled", "The email provider's notices, kept a few days: the company's."),
   "nl:sns:seen:@app/api/mail/ses/route.ts": company("Amazon's notices already handled", "The email provider's notices, kept a few days: the company's."),
+  "nl:told:@lib/told-receipt.ts": short("A money route's last answer for its page, so an address alone never says a refund, a cancel or a resume happened (#4399)", "studio", 1),
   "nl:course:@app/api/store/course/route.ts": short("A course's lock while the studio changes it", "studio", 1),
   "nl:rl:export:@app/api/store/export/route.ts": { what: "Downloads of a store's files: counted ten minutes at a time, and its whole exports since its plan ended", parts: [per("studio", 1, KEY, "Downloads counted ten minutes at a time."), capped(() => KEY, "One count of whole exports since the plan ended, sixty days.")] },
   "nl:rl:export:@lib/list-download.ts": { what: "A store's list downloads since its plan ended", parts: [capped(() => KEY, "One count of list downloads since the plan ended, sixty days.")] },

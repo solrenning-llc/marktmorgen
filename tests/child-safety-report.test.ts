@@ -26,9 +26,11 @@ import { paidPeriod } from "./billing-period-fixture";
 
 type Sent = { to: string[] | string; subject: string; text: string; key?: string };
 const sent: Sent[] = [];
+let failUrgent = false;
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   if (url.hostname === "api.resend.com") {
+    if (failUrgent && /^URGENT/.test(String((JSON.parse(String(init?.body)) as Sent).subject))) return new Response("{}", { status: 500 });
     const headers = new Headers(init?.headers);
     sent.push({ ...(JSON.parse(String(init?.body)) as Sent), key: headers.get("idempotency-key") ?? undefined });
     return new Response(JSON.stringify({ id: `email_${sent.length}` }));
@@ -127,6 +129,21 @@ async function main(): Promise<void> {
   const blind = await reportRoute(new NextRequest("https://marktmorgen.com/api/report", { method: "POST", headers: { "content-type": "application/json", origin: "https://marktmorgen.com", host: "marktmorgen.com" }, body: JSON.stringify({ ...CHILD, url: `https://marktmorgen.com/@safetyshop/p/${store2.product.id}` }) }));
   redis.pipeline = reading;
   is("a store that cannot be read: the owner is told it could not be confirmed, never that the address names nothing", [blind.status, sent.some((mail) => /^URGENT/.test(mail.subject) && mail.text.includes("could not be confirmed"))], [200, true]);
+
+  part("The urgent email not sent: never a 200, so the reporter tries again (review of #3587, MÉDIO)");
+  const unsent = await addProduct(owner, "Reported While The Urgent Email Fails", "On sale", "9", null);
+  if (!unsent.ok) throw new Error("no product");
+  redis.run(["DEL", ...redis.keys().filter((key) => key.startsWith("nl:csa:"))]);
+  sent.length = 0;
+  failUrgent = true;
+  const quiet = await reportRoute(new NextRequest("https://marktmorgen.com/api/report", { method: "POST", headers: { "content-type": "application/json", origin: "https://marktmorgen.com", host: "marktmorgen.com" }, body: JSON.stringify({ ...CHILD, work: "", url: `https://marktmorgen.com/@safetyshop/p/${unsent.product.id}` }) }));
+  failUrgent = false;
+  is("the urgent email failed: not accepted, so the reporter sends it again", [quiet.status === 200, sent.some((mail) => /^URGENT/.test(mail.subject))], [false, false]);
+  // A retry after an answer that may have been accepted (a 5xx) is not sent again (lib/email.ts, uncertain); so the notice
+  // itself names the kind, and never reads as a signed DSA notice (option (b) of the review).
+  const notice = sent.find((mail) => !/^URGENT/.test(mail.subject));
+  is("the notice that did go names a child-safety report, not a DSA notice", [notice?.subject.startsWith("Child safety report about @safetyshop"), notice?.text.includes("report of child sexual exploitation"), notice?.text.includes("Digital Services Act")], [true, true, false]);
+  is("…with no signature line and no statement under penalty of perjury that the reporter never made", [notice?.text.includes("Signed:"), notice?.text.includes("penalty of perjury")], [false, false]);
 
   part("A product that cannot be read is said as such, never as an address that names nothing");
   const many = [];

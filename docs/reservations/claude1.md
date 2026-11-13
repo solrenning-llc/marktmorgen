@@ -6,3 +6,4 @@ Only Claude 1 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
+| Claude 1 | 274 [AX1] audit 12/11: the "someone bought" card stays while the pointer or the focus is on it (WCAG 2.2.1, 2.2.3) | claude/tender-curie-w4hw92-recent-sales | `components/recent-sales.tsx`, `tests/recent-sales-card-held.test.ts` | 12/11/2026 10h06 |

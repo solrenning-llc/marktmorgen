@@ -7,7 +7,7 @@ import { fromAnotherSite } from "@/lib/studio-route";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { readCourse } from "@/lib/course";
 import { courseAccess, doneLessons, emailKey, storeKey } from "@/lib/learn";
-import { passedForGate } from "@/lib/quiz";
+import { passedQuizzes } from "@/lib/quiz";
 import { hasFinished, issueCertificate } from "@/lib/certificate";
 import { limited } from "@/lib/request-guard";
 import { readCourseListing } from "@/lib/catalog";
@@ -51,9 +51,10 @@ export async function POST(request: NextRequest) {
   let done: Set<string>;
   let passed: Set<string>;
   try {
-    [done, passed] = await Promise.all([doneLessons(course.id, access.learner.email), passedForGate(course.id, who)]);
+    [done, passed] = await Promise.all([doneLessons(course.id, access.learner.email), passedQuizzes(course.id, who)]);
   } catch (error) {
-    // Progress that could not be read is unknown, never "unfinished": said as it is, in the store's language (rule 24).
+    // Progress, or the passes, that could not be read is unknown, never "unfinished" (passedQuizzes throws where
+    // passedForGate, the door's reader, would read nothing passed): said as it is, in the store's language (rule 24).
     if (error instanceof UnknownReplyError) return new Response(coursesWords(store.language).certProgressUnknown, { status: 503, headers: { "Cache-Control": "no-store" } });
     throw error;
   }

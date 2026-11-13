@@ -152,6 +152,13 @@ for (const label of [
   "Common password for all your accounts",
   // the same review (LEVE, open since rev-pares 6834285977): four words before the secret.
   "What's your current Gmail account password?",
+  // the same reviewer @53f041d509 (MEDIUM): "pass code" in two words is a passcode, never an event pass.
+  "Username and pass code",
+  "Email or pass code",
+  "Login / pass code",
+  // the same review (LOW): a reassurance before the secret excuses the ask no more than after it.
+  "Secure Instagram password for our team",
+  "Safe Gmail password for setup",
 ] as const) {
   is(`refused: ${label}`, sensitiveKindOf(label), "password");
   const field = { id: "field1", type: "short" as const, label, required: true, options: [] };

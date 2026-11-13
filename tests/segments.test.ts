@@ -234,7 +234,7 @@ async function main(): Promise<void> {
     refunds = [];
     disputes = [];
     invoicePayments = [];
-    const unplugged = await buyerLedger({ ...store, statsId: ps, paypalSeller: undefined } as Store);
+    const unplugged = await buyerLedger({ ...store, statsId: ps, paypalSeller: undefined } as unknown as Store);
     is("a PayPal sale refunded in full stays out after PayPal is disconnected", unplugged.buyers.get("pat@example.com")?.cents ?? 0, 0);
     sessions.push(...before.sessions);
     invoices = before.invoices;

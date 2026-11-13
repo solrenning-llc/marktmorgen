@@ -286,6 +286,8 @@ export const nl: BuyerWords = {
   openFullSize: "Open deze afbeelding op volledige grootte",
   countdownUnits: { days: "dagen", hours: "uur", min: "min", sec: "sec" },
   until: (when) => `Tot ${when}`,
+  countdownPause: "Aftellen pauzeren",
+  countdownResume: "Aftellen hervatten",
 
   restingTitle: "Deze pagina rust even",
   restingBody: (store) =>

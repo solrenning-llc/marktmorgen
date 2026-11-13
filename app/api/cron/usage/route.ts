@@ -7,6 +7,7 @@ import {
   DELIVERY_ALLOWANCE_BYTES,
   FREE_PAUSE_ABOVE_BYTES,
   bytesWords,
+  monthKey,
   ownersOf,
   storesOverAllowance,
 } from "@/lib/delivery";
@@ -70,7 +71,14 @@ async function foldersOfTwoMonths(read: (month: string) => Promise<string[]>): P
  */
 export const maxDuration = 60;
 
-const TOLD = "nl:usage-watch:told";
+/**
+ * Who was told about the delivery allowance, one list per calendar month (TOLD followed by the month, YYYY-MM, the month of the
+ * over list it answers, lib/delivery.ts overKey). It was one key for all months, rewritten with every notice and its
+ * expiry renewed each time, so a store told in one month was not told the next while another store was told within
+ * 40 days (webhooks/cron audit, Claude 1, 12/11/2026).
+ */
+const TOLD = "nl:usage-watch:told:";
+const toldKey = (month: string) => `${TOLD}${month}`;
 
 type VideoRun = { stores: number; billed: number; cents: number; paused: number; failed: number; told: number };
 
@@ -238,9 +246,12 @@ export async function GET(request: NextRequest) {
   // The delivery part on its own: a list or total Redis answered in an unknown shape (CX-123 rule 24) is never
   // "nobody is over". It is said as unknown, nobody is written to on it and its told list is left as it was; the
   // other parts above have run whatever it does, and the run answers an error only here, at the end.
+  // One date for the month's over list and the month's told list, so a run across midnight UTC reads both alike.
+  const today = new Date();
+  const toldList = toldKey(monthKey(today));
   let over: Awaited<ReturnType<typeof storesOverAllowance>>;
   try {
-    over = await storesOverAllowance();
+    over = await storesOverAllowance(today);
   } catch (error) {
     console.error("usage-watch: the stores over the delivery allowance are unknown today; nobody was written to about it", error);
     return Response.json(
@@ -261,7 +272,7 @@ export async function GET(request: NextRequest) {
   // was, and the part is said as unknown, as above.
   let seen: Set<string>;
   try {
-    seen = await readTold();
+    seen = await readTold(toldList);
   } catch (error) {
     console.error("usage-watch: who was already told about the delivery allowance is unknown today; nobody was written to about it", error);
     return Response.json(
@@ -378,7 +389,7 @@ export async function GET(request: NextRequest) {
 
 
   await redisPipeline([
-    ["SET", TOLD, JSON.stringify([...new Set([...seen, ...given])]), "EX", 40 * 86_400],
+    ["SET", toldList, JSON.stringify([...new Set([...seen, ...given])]), "EX", 40 * 86_400],
   ]);
 
   if (unreadOwners > 0) {
@@ -392,8 +403,8 @@ export async function GET(request: NextRequest) {
 }
 
 /** The stores already told about the delivery allowance this month: nil is none; any other shape throws. */
-async function readTold(): Promise<Set<string>> {
-  const replies = repliesFor(await redisPipeline([["GET", TOLD]]), 1);
+async function readTold(key: string): Promise<Set<string>> {
+  const replies = repliesFor(await redisPipeline([["GET", key]]), 1);
   if (!replies) throw new UnknownReplyError("the stores told about the delivery allowance");
   const raw = replies[0];
   if (raw === null) return new Set();

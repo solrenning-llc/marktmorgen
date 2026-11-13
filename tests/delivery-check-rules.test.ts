@@ -72,7 +72,8 @@ is("storage not asked: not checked", fileVerdict("guide.pdf", 1200, null).state,
 
 part("An address");
 const say = (answer: Parameters<typeof addressVerdict>[2]) => addressVerdict("Your link", "https://example.com/vault", answer).state;
-is("it answers, or answers with something long: fine", [say({ status: 200 }), say({ status: 302 }), say({ problem: "too_big" })], ["ok", "ok", "ok"]);
+is("it answers: fine", [say({ status: 200 }), say({ status: 302 })], ["ok", "ok"]);
+is("something too long to read whole, its status unknown: not checked, never fine (Codex C2 on #3623)", say({ problem: "too_big" }), "not-checked");
 is("gone, not https, or inside a private network: a problem", [say({ status: 404 }), say({ status: 410 }), say({ problem: "scheme" }), say({ problem: "private" })], Array(4).fill("problem"));
 is(
   "asks to sign in, did not answer, redirected too often, or answered oddly: not checked, never fine and never broken",

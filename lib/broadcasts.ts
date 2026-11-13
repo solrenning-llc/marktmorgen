@@ -833,6 +833,14 @@ export async function advanceBroadcast(
         b = { ...b, status: "failed", finishedAt: now, note: REFUSED_EMAIL_NOTE };
         break;
       }
+      if (result.stopped === "retry") {
+        // Not the email service (its "retry" may have sent, and is held as uncertain above): one of our own reads
+        // came back in an unknown shape (lib/mail.ts sendTo: the store's pause, the month's room, who may still be
+        // written to) and nothing was sent. Unknown is never an end (rule 24): it waits for the next run, however
+        // long that takes, and is not counted toward the email service refusing it (j-mail-7).
+        b = { ...b, status: "waiting", note: "Paused for a moment: something could not be checked. Nothing more was sent. It continues by itself." };
+        break;
+      }
       if (result.stopped) {
         const failures = b.failures + 1;
         b = failures >= 5

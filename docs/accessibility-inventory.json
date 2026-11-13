@@ -1930,6 +1930,7 @@
     "app/api/store/product-update/route.ts",
     "app/api/store/product/route.ts",
     "app/api/store/read/route.ts",
+    "app/api/store/receipt-pdf/route.ts",
     "app/api/store/recent-sales/route.ts",
     "app/api/store/recovery/route.ts",
     "app/api/store/release/route.ts",

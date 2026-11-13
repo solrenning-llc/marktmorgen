@@ -355,7 +355,7 @@ async function main(): Promise<void> {
   // The card pasted into other sites (lib/embed-rules.ts) opens a new tab
   // instead: some page builders hold pasted code in a frame that may not
   // move the page, and every one of them lets it open a tab.
-  const EMBED = "app/embed/[handle]/[product]/page.tsx";
+  const EMBED = "components/embed-card.tsx";
   // So does the time picker's form when it is drawn inside that frame (637 [GL5] unit 6, its newTab), and only there.
   const PICKER = "components/slot-picker.tsx";
   const leaves = (file: string, tag: string) => /target="_top"/.test(tag) || ((file.endsWith(EMBED) || file.endsWith(PICKER)) && /target="_blank"/.test(tag));

@@ -14,7 +14,7 @@ import { isEmbedPage } from "@/lib/csp";
 import { BOOKING_WORDS } from "@/lib/buyer-words/booking";
 import { done, is, part } from "./check";
 
-const card = readFileSync("app/embed/[handle]/[product]/page.tsx", "utf8");
+const card = readFileSync("components/embed-card.tsx", "utf8");
 
 part("Only where the creator allows it");
 is("only a call the script opened in a frame, on a listed site, while it may sell, with no affiliate's code, not coming soon, whose button leads to its booking page, in weekly hours", card.includes('!plain && open?.mode === "overlay" && open.live && Boolean(open.site) && !open.via && !soon &&\n    action.kind === "link" && action.href === `/@${store.handle}/book/${product.id}` &&\n    product.call?.kind === "weekly" && canSellProduct(store, product);'), true);

@@ -299,7 +299,7 @@ async function main(): Promise<void> {
 
   part("The embedded card's pages, where a buyer starts paying");
   // Read from the source: the card's pages need the creator's listed site and the checkout script to open.
-  const embed = readFileSync("app/embed/[handle]/[product]/page.tsx", "utf8");
+  const embed = readFileSync("components/embed-card.tsx", "utf8");
   const times = embed.slice(embed.indexOf('query.view === "times"'), embed.indexOf("const testMode = selling"));
   is("the call's times, drawn in the frame", times.includes("<WhoAnswers store={store}"), true);
   const asPage = embed.slice(embed.indexOf('if (open?.mode === "page") {\n    return'));

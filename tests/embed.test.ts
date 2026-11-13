@@ -60,11 +60,12 @@ async function main(): Promise<void> {
   is("the proxy gives it the framing policy", /embed: isEmbedPage\(path\)/.test(read("proxy.ts")), true);
 
   part("The card page");
-  const page = read("app/embed/[handle]/[product]/page.tsx");
+  // The card page and the card it draws (components/embed-card.tsx, shared with its cached copy).
+  const page = read("app/embed/[handle]/[product]/page.tsx") + read("components/embed-card.tsx");
   is("counts no visit, sets no cookie, reads no session", /countHit|cookies\(|setCookie|readSession|currentUser/.test(page), false);
   // Opened by the checkout script (?mm=, tests/embed-sdk.test.ts) it is counted
   // as a visit by lib/embed-open.ts; pasted as a frame, it still counts nothing.
-  is("only an open by the checkout script is counted, and elsewhere", /const open: ScriptOpen \| null = mode && store \? await readScriptOpen\(store, mode, query\) : null;/.test(page), true);
+  is("only an open by the checkout script is counted, and elsewhere", /const open: ScriptOpen \| null = mode && store \? await readScriptOpen\(store, mode, query, \{ admitted: true \}\) : null;/.test(page), true);
   const links = page.match(/<a\s[^>]*>/g) ?? [];
   // A call's own calendar in the frame (637 [GL5] unit 6) is the one exception: its links go to this same card's address (here()), which the frame may show.
   is("every link opens a new tab in a frame, and stays in the tab only as a page", links.length > 0 && links.every((tag) => /\{\.\.\.aside\}/.test(tag) || /href=\{here\(/.test(tag)), true);

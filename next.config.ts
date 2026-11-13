@@ -4,6 +4,15 @@ import { staticPolicy } from "./lib/csp";
 
 const nextConfig: NextConfig = {
   /**
+   * How long a page kept by the CDN may still be served stale while it is
+   * made again: twice its own window. The one such page is the pasted card's
+   * copy (app/embed/[handle]/[product]/card/[view], revalidate 300,
+   * lib/embed-card-view.ts), so a copy seen after a quiet hour is made afresh
+   * rather than shown from a day ago (Next's default is a year). Its header is
+   * then s-maxage=300, stale-while-revalidate=300.
+   */
+  expireTime: 600,
+  /**
    * Whether this build runs on the host whose browser check the server reads
    * (lib/bot-check.ts, browserProof: only when VERCEL is "1"). The client
    * starts the check only then (lib/browser-check-client.ts): anywhere else

@@ -177,10 +177,15 @@ export function isStorePage(pathname: string): boolean {
   return /^\/(?:@|%40)/i.test(pathname);
 }
 
-/** The policy for a page built ahead of time, which has no nonce to carry. */
-export function staticPolicy(): string {
+/**
+ * The policy for a page built ahead of time, which has no nonce to carry.
+ * `embed` is the pasted card's copy kept by the CDN (lib/embed-card-view.ts):
+ * built ahead of its displays, and framed by any site as the card page is.
+ */
+export function staticPolicy(options: { embed?: boolean } = {}): string {
   return join({
     ...shared(),
+    ...(options.embed ? { "frame-ancestors": ["*"] } : {}),
     "script-src": ["'self'", "'unsafe-inline'", ...(dev() ? ["'unsafe-eval'"] : [])],
     "connect-src": ["'self'"],
     "frame-src": ["'self'"],

@@ -66,6 +66,6 @@ const framed = renderToStaticMarkup(createElement(SlotPicker, { starts, creatorT
 const moving = renderToStaticMarkup(createElement(SlotPicker, { starts, creatorTz: NY, handle: "lena", productId: "p1", move: "cs_test_x", embed: { site: "https://lena.example", back: null }, words }));
 is("the site and the way back go with the time", [framed.includes('name="site" value="https://lena.example"'), framed.includes('name="return" value="https://lena.example/thanks"')], [true, true]);
 is("never with a move, which pays nothing", moving.includes('name="site"'), false);
-is("the embedded calendar hands its open's site and way back to its form", readFileSync("app/embed/[handle]/[product]/page.tsx", "utf8").includes("embed={open.site ? { site: open.site, back: open.back ?? null } : null}"), true);
+is("the embedded calendar hands its open's site and way back to its form", readFileSync("components/embed-card.tsx", "utf8").includes("embed={open.site ? { site: open.site, back: open.back ?? null } : null}"), true);
 
 done();

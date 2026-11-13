@@ -14,9 +14,11 @@
  * without a script of ours running on the creator's site:
  *
  *   - a card: a frame holding the product's picture, title, price, its
- *     buyers' rating and the buy button. It is drawn by this site on every
- *     visit, so a price changed in the studio, a sale or a sell-out shows on
- *     the creator's site at once. The button opens Stripe's checkout in a new
+ *     buyers' rating and the buy button. It is drawn by this site and kept
+ *     by the CDN for CARD_FRESH_SECONDS (lib/embed-card-view.ts,
+ *     DONO-20261113-DEC-2), so a price changed in the studio, a sale or a
+ *     sell-out shows on the creator's site within about two such windows;
+ *     the checkout reads them again when the button is pressed. The button opens Stripe's checkout in a new
  *     tab: Stripe will not be drawn inside a frame, and a new tab is the one
  *     way out of a frame that every page builder allows (several hold pasted
  *     code inside a frame of their own that may not move the page).

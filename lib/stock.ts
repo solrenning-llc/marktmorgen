@@ -82,6 +82,17 @@ export async function stockLeft(store: Store, product: Listing, now = Date.now()
 }
 
 /**
+ * stockLeft without asking Stripe: a hold that ran out and is not settled yet
+ * counts as used, the safe way to be wrong. Only for what is shown and never
+ * sold on: the pasted card's copy the CDN keeps (lib/embed-card-view.ts), whose
+ * button is checked again by the checkout, so making a copy waits on no other
+ * service.
+ */
+export async function stockLeftUnasked(store: Store, product: Listing, now = Date.now()): Promise<number | null> {
+  return (await countStock(store, product, now, false))?.left ?? null;
+}
+
+/**
  * stockLeft, but null when any lapsed hold's checkout could not be read
  * (Stripe failed, or answered something that is neither settled nor expired):
  * the count is then a guess on the safe side, never proof of "Sold out"

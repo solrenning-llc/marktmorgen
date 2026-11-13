@@ -13,11 +13,12 @@
 import { readFileSync } from "node:fs";
 import { done, is, part } from "./check";
 
-const card = readFileSync("app/embed/[handle]/[product]/page.tsx", "utf8");
+// The card is drawn by components/embed-card.tsx for the card page and its cached copy (DONO-20261113-DEC-2).
+const card = readFileSync("app/embed/[handle]/[product]/page.tsx", "utf8") + readFileSync("components/embed-card.tsx", "utf8");
 
 part("No failed read is taken for \"on sale\"");
 is("coming soon: a failed read is unknown (null), not \"not soon\"", card.includes("soonOne(store, product.id).catch(() => null)"), true);
-is("stock: a failed read is its own mark, never \"no limit\" (null)", card.includes("stockLeft(store, product).catch(() => UNREAD)"), true);
+is("stock: a failed read is its own mark, never \"no limit\" (null)", card.includes("(cached ? stockLeftUnasked : stockLeft)(store, product).catch(() => UNREAD)"), true);
 is("keys: a failed read is unknown (null), not \"keys left\"", card.includes("outOfKeys(store, product).catch(() => null)"), true);
 is("none of the old fallbacks is left", [/soonOne\([^)]*\)\.catch\(\(\) => \(\{ soon: false/, /stockLeft\([^)]*\)\.catch\(\(\) => null\)/, /outOfKeys\([^)]*\)\.catch\(\(\) => false\)/].some((old) => old.test(card)), false);
 

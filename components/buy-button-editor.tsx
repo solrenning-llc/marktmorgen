@@ -149,7 +149,7 @@ export function BuyButtonEditor({
         <div className="mt-2 grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
           {(
             [
-              ["card", "A card", "Picture, price, rating and the buy button. A new price, a sale or a sell-out shows on your site at once."],
+              ["card", "A card", "Picture, price, rating and the buy button. A new price, a sale or a sell-out shows on your site within about 10 minutes. The checkout always uses the current price and stock."],
               ["button", "A button", "One link in your color to the product's page, for a site that does not take cards."],
             ] as const
           ).map(([value, title, body]) => (

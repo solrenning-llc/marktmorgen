@@ -3,7 +3,8 @@ import { handleForDomain } from "@/lib/domains";
 import { SITE_URL } from "@/lib/site-url";
 import { AFFILIATE_CODE_PATTERN, VIA_COOKIE_SECONDS, viaCookieName, viaCookieValue } from "@/lib/affiliate-setting";
 import { needsConsent } from "@/lib/pixels";
-import { dynamicPolicy, isDynamicPage, isEmbedPage, isEventRoomPage, isStorePage, newNonce, roomPermissions } from "@/lib/csp";
+import { dynamicPolicy, isDynamicPage, isEmbedPage, isEventRoomPage, isStorePage, newNonce, roomPermissions, staticPolicy } from "@/lib/csp";
+import { cardCopyPath, isCardCopyPage } from "@/lib/embed-card-view";
 import { fromAnotherSite } from "@/lib/request-guard";
 import { isPlatformHost, requestHost } from "@/lib/request-origin";
 import { ZOOM_ARRIVAL_COOKIE, ZOOM_ARRIVAL_SECONDS, arrivedForZoom } from "@/lib/zoom-arrival";
@@ -273,6 +274,18 @@ export async function proxy(request: NextRequest) {
       url.pathname = request.nextUrl.pathname.replace(/\/sitemap\.xml$/i, "/store-sitemap");
       return NextResponse.rewrite(url);
     }
+    // The card pasted into a creator's own site: each display goes to its copy kept by the CDN, which reads
+    // nothing from the database (lib/embed-card-view.ts, DONO-20261113-DEC-2). The copy is built without a
+    // nonce, so it gets the policy of a page built ahead of time, framed by any site as the card is.
+    const method = request.method.toUpperCase();
+    const copy = method === "GET" || method === "HEAD" ? cardCopyPath(request.nextUrl.pathname, request.nextUrl.searchParams, request.headers.get("referer")) : null;
+    if (copy) {
+      const url = request.nextUrl.clone();
+      url.pathname = copy;
+      url.search = "";
+      return answer(NextResponse.rewrite(url), { csp: staticPolicy({ embed: true }), room: false });
+    }
+    if (isCardCopyPage(request.nextUrl.pathname)) return answer(NextResponse.next(), { csp: staticPolicy({ embed: true }), room: false });
     const params = request.nextUrl.searchParams;
     const store = params.has("via") || params.has("code") ? handleInPath(request.nextUrl.pathname) : "";
     // The header is ours to set; one sent by a visitor is dropped.

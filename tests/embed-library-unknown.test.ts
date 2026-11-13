@@ -107,8 +107,12 @@ async function main(): Promise<void> {
   if (!fromHead || !ownRecord || store.catalog.inline) throw new Error("catalog fixture: a product in the head and one read from its own record");
   const listing = (await readListing(store, fromHead))!;
   const w = wordsIn(store.language);
+  // Each view from its own connection: the card page holds one connection to OPENS_PER_TEN_MINUTES a store before it reads
+  // (lib/embed-open.ts admitOpen, DONO-20261113-DEC-2), and this file draws the card far more often than that.
+  let connection = 0;
   const card = async (handle: string, product: string) => {
-    answering(new NextRequest(`https://marktmorgen.com/embed/${handle}/${product}`));
+    connection += 1;
+    answering(new NextRequest(`https://marktmorgen.com/embed/${handle}/${product}`, { headers: { "x-forwarded-for": `198.51.${Math.floor(connection / 250)}.${connection % 250}` } }));
     return text(await html((await EmbedCard({ params: Promise.resolve({ handle, product }), searchParams: Promise.resolve({}) } as never)) as React.ReactElement));
   };
 
@@ -340,7 +344,9 @@ async function main(): Promise<void> {
   const libraryRead = log;
   log = null;
   is("a card view reads the store's address key once", cardRead.filter(handleKeyOf).length, 1);
-  is("a card view sends at most 5 commands", cardRead.length <= 5 ? "at most 5" : `${cardRead.length}: ${cardRead.map((c) => c[0]).join(", ")}`, "at most 5");
+  // Its two first are the connection's counter (SET NX, INCR), taken before anything is read (admitOpen).
+  is("a card view sends its counter first", cardRead.slice(0, 2).map((c) => c[0]), ["SET", "INCR"]);
+  is("and at most 5 commands besides", cardRead.length - 2 <= 5 ? "at most 5" : `${cardRead.length - 2}: ${cardRead.slice(2).map((c) => c[0]).join(", ")}`, "at most 5");
   is("a sign-up form view reads the store's address key once", joinRead.filter(handleKeyOf).length, 1);
   is("a sign-up form view sends at most 7 commands", joinRead.length <= 7 ? "at most 7" : `${joinRead.length}: ${joinRead.map((c) => c[0]).join(", ")}`, "at most 7");
   is("a library view reads each store's id key once", libraryRead.filter(getOf(`nl:store:id:${store.sid}`)).length, 1);

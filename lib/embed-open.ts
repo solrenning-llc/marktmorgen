@@ -18,7 +18,7 @@
  *     creator listed (lib/embed-sites.ts), read from the Referer.
  */
 import { headers } from "next/headers";
-import { type Store } from "@/lib/store";
+import { type Store, normaliseHandle } from "@/lib/store";
 import { clientAddress, withinLimit } from "@/lib/request-guard";
 import { isResting } from "@/lib/traffic";
 import { SITE_URL } from "@/lib/site-url";
@@ -51,8 +51,29 @@ function fromThisSite(referer: string | null, host: string | null): boolean {
   }
 }
 
-/** Reads the open and says what the page may show; the page counts the visit itself (components/store-beacon.tsx). Never throws. */
-export async function readScriptOpen(store: Store, mode: ScriptMode, query: Record<string, unknown>): Promise<ScriptOpen> {
+/**
+ * Whether this connection may still open a card of this store, taking one
+ * of its OPENS_PER_TEN_MINUTES: asked by the card page before the store or
+ * the product is read (DONO-20261113-DEC-2), from the handle in its address,
+ * normalised as the store's own. Two commands, the counter's.
+ */
+export async function admitOpen(rawHandle: string): Promise<boolean> {
+  let handle = "";
+  try {
+    handle = normaliseHandle(decodeURIComponent(rawHandle).replace(/^@/, ""));
+  } catch {
+    // An address that does not decode reads nothing anyway (components/embed-card.tsx loadCard).
+    return true;
+  }
+  const ip = clientAddress({ headers: await headers() });
+  return withinLimit("embed-open", `${ip}|${handle}`, OPENS_PER_TEN_MINUTES, 600);
+}
+
+/**
+ * Reads the open and says what the page may show; the page counts the visit itself (components/store-beacon.tsx). Never throws.
+ * With `admitted`, the connection was already held to its opens (admitOpen) before the store was read, and is not counted again.
+ */
+export async function readScriptOpen(store: Store, mode: ScriptMode, query: Record<string, unknown>, given: { admitted?: boolean } = {}): Promise<ScriptOpen> {
   const asked = await headers();
   const ip = clientAddress({ headers: asked });
   const referer = asked.get("referer");
@@ -72,7 +93,7 @@ export async function readScriptOpen(store: Store, mode: ScriptMode, query: Reco
   // (components/store-beacon.tsx, on the card and the sign-up form opened by the script).
   // A frame on a site the creator did not list shows the plain link and asks nothing more.
   if (mode === "overlay" && !site) return { ...base, live: false, reason: "site" };
-  if (!(await withinLimit("embed-open", `${ip}|${store.handle}`, OPENS_PER_TEN_MINUTES, 600))) return { ...base, live: false, reason: "limited" };
+  if (given.admitted === undefined ? !(await withinLimit("embed-open", `${ip}|${store.handle}`, OPENS_PER_TEN_MINUTES, 600)) : !given.admitted) return { ...base, live: false, reason: "limited" };
   if (await isResting(store).catch(() => true)) return { ...base, live: false, reason: "resting" };
   return { ...base, live: true, reason: "" };
 }

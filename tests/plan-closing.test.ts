@@ -46,7 +46,7 @@ import { ENDED_INDEX, SETUP_STORAGE_BYTES } from "@/lib/plan-standing";
 import { readPodcast, savePodcast } from "@/lib/podcast";
 import type { ProductFile } from "@/lib/product-file";
 import { storageWords } from "@/lib/storage-quota";
-import { addOption, addProduct, claimHandle, setCommunity, setProductCourse, setProductFile, setProductPodcast, setSubscription, storeFolder, storeForEmail } from "@/lib/store";
+import { addOption, addProduct, claimHandle, imageFolder, setCommunity, setProductCourse, setProductFile, setProductPodcast, setSubscription, storeFolder, storeForEmail } from "@/lib/store";
 import { STREAM_API_ORIGIN, streamPath } from "@/lib/stream-rules";
 import { vaultPath } from "@/lib/vault-rules";
 import { store as redis } from "./redis-stub";
@@ -204,10 +204,15 @@ const hands: Hands = {
     for (const video of videos.values()) if (video.collectionId === collection) bytes += video.storageSize;
     return bytes;
   },
-  // Nothing here is kept in the host's own file store.
-  list: async (prefix) => (prefix.startsWith("stores/") ? [] : listFiles(prefix)),
-  remove: deleteFile,
+  // Nothing here is kept in the host's own file store but the stores' pictures (images/), held in `images`.
+  list: async (prefix) => (prefix.startsWith("stores/") ? [] : prefix.startsWith("images/") ? [...images.keys()].filter((path) => path.startsWith(prefix)) : listFiles(prefix)),
+  remove: async (paths) => {
+    const others = paths.filter((path) => !(path.startsWith("images/") && images.delete(path)));
+    if (others.length) await deleteFile(others);
+  },
 };
+/** The stores' pictures (product, link and page pictures, email pictures, buyers' review photos): images/<imageFolder>/. */
+const images = new Map<string, number>();
 
 /** The day a store's plan ended, as written on it. */
 const endedAt = async (email: string) => Date.parse((await storeForEmail(email))?.planEndedAt ?? "");
@@ -402,6 +407,9 @@ async function main(): Promise<void> {
 
   part("The day: what is removed, and what stays");
   const storeBefore = (await storeForEmail(ana.email))!;
+  // A store that stays (its plan ended before October 18, 2026) still shows its pictures: none of them is removed.
+  const anaPicture = `images/${await imageFolder(ana.email)}/${"a".repeat(32)}.webp`;
+  images.set(anaPicture, 50_000);
   const listed = (await readAllListings(storeBefore)).map((listing) => [listing.title, listing.priceCents]);
   const removed = await closeOne(ana.email, A + C * DAY, hands);
   is("with no plan at Stripe, what the store kept is removed", [removed.state, removed.note], ["removed", "6 files"]);
@@ -417,6 +425,7 @@ async function main(): Promise<void> {
   is("nothing of hers is left in the file store, the copy no record named among it", [...objects.keys()].filter((path) => path.startsWith(`vault/${ana.folder}/`)), []);
   is("nor at the video service, the video no lesson named among them", [...videos.values()].filter((video) => video.collectionId === ana.collection), []);
   is("what other stores keep is where it was", [[...objects.keys()].filter((path) => path.startsWith(`vault/${ben.folder}/`)).length, [...objects.keys()].filter((path) => path.startsWith(`vault/${eve.folder}/`)).length], [1, 1]);
+  is("and its pictures stay, for the store that stays", images.has(anaPicture), true);
   is("the store is still hers: its address, its name, every product and every price", [after.handle, after.name, now.map((listing) => [listing.title, listing.priceCents]), now.length], [storeBefore.handle, storeBefore.name, listed, 4]);
   const last = mailTo(ana.email)[3];
   is("she is told, once, what was removed and what was not", [mailTo(ana.email).length, last.subject, last.text.includes("have now been removed"), last.text.includes("Your store is still yours"), last.text.includes("Start\na plan again and you can put a file back on each product")], [4, "The files Ana Studio kept have been removed", true, true, true]);
@@ -583,6 +592,10 @@ async function main(): Promise<void> {
       if (others.length) await hands.remove(others);
     },
   };
+  // Its pictures: a product's, and a buyer's review photo, both under its images folder (lib/review-photo.ts).
+  const zoeImages = await imageFolder(zoe.email);
+  const zoePictures = [`images/${zoeImages}/${"b".repeat(32)}.webp`, `images/${zoeImages}/${"c".repeat(24)}.jpg`];
+  for (const path of zoePictures) images.set(path, 80_000);
   await endPlan(zoe.email);
   const Z = await endedAt(zoe.email);
   is("it ended on that day or after", Z >= KEEP_NOTHING_FROM, true);
@@ -600,6 +613,9 @@ async function main(): Promise<void> {
   await closeOne(zoe.email, Z + W * DAY, zoeHands);
   const zoeGone = await closeOne(zoe.email, Z + (C + 1) * DAY, zoeHands);
   is("on its day its files go, its community's pictures with them, and the store closes", [zoeGone.state, [...objects.keys()].filter((path) => path.startsWith(`vault/${zoe.folder}/`)).length, pictures.size, await picturesKept(cf)], ["removed", 0, 0, 0]);
+  // The privacy policy (#closed-stores) says a closing store's files go that day; its pictures, a buyer's review photo
+  // among them, are files, and app/api/image serves them to anybody with the address.
+  is("its pictures go that day too, a buyer's review photo among them, and nobody else's", [zoePictures.map((path) => images.has(path)), images.has(anaPicture)], [[false, false], true]);
   is("nothing it sold is charged again: it had no Stripe account to stop", stripeAsked.filter((asked) => asked.startsWith("POST")).length, 0);
   const told = mailTo(zoe.email).length;
   const walked = await eraseClosed(Date.now() + 20_000, finishClosed, Z + (C + 1) * DAY + 3_600_000);

@@ -615,7 +615,9 @@ export function readBatch(kind: ImportKind, raw: unknown): string[][] | null {
   for (const entry of raw) {
     // A page loaded before a kind gained a column sends one cell fewer: the missing ones read as empty.
     if (!Array.isArray(entry) || entry.length < 2 || entry.length > caps.length + 1) return null;
-    const line = Number(entry[0]);
+    // The page sends String(line); Number() would also read true, "1e1", "0x10", " 3" or [5] as one (input fuzz, Claude 7).
+    const first: unknown = entry[0];
+    const line = typeof first === "number" ? first : typeof first === "string" && /^[1-9][0-9]{0,7}$/.test(first) ? Number(first) : NaN;
     if (!Number.isInteger(line) || line < 1 || line > 10_000_000) return null;
     const cells: string[] = [String(line)];
     for (let i = 0; i < caps.length; i += 1) {

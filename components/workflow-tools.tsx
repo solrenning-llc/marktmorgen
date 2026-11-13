@@ -307,6 +307,7 @@ const RUN_ERRORS: Record<string, string> = {
   run_paused: "Switch the workflow on first: a paused workflow sends nothing, so continuing would only end the run.",
   unknown: "That run is not there any more. Reload the page.",
   flow_write_unconfirmed: "Your choice could not be confirmed. Reload this run's history before choosing again.",
+  flow_write_busy: "Someone else changed this workflow at the same time, so your choice was not saved. Try again.",
   run_retry_limit: `This run has been tried again ${MAX_RETRIES_BY_YOU} times, the most one run may. Choose whether it went through, or end it.`,
 };
 

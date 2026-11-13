@@ -18,7 +18,7 @@ import { healthId, startRamp } from "@/lib/mail-health";
 import { BroadcastCancellationUnconfirmed, BroadcastWriteUnconfirmed, BroadcastsUnreadable, advanceBroadcast, cancelBroadcast, createBroadcast, whoOf } from "@/lib/broadcasts";
 import { LedgerNotCounted, buyerLedger, isNarrowed, keeps, ledgerChannels, readNarrow, removeSegment, saveSegment } from "@/lib/segments";
 import { NOT_COUNTED, countLedger } from "@/lib/person-agenda-read";
-import { FLOW_ID, FlowWriteUnconfirmed, RESOLVE_CHOICES, type ResolveChoice, forgetWorkflowPerson, removeFlow, resolveHeldRun, restoreFlowVersion, saveFlow, setFlowActive } from "@/lib/flows";
+import { FLOW_ID, FlowWriteUnconfirmed, FlowsBusy, RESOLVE_CHOICES, type ResolveChoice, forgetWorkflowPerson, removeFlow, resolveHeldRun, restoreFlowVersion, saveFlow, setFlowActive } from "@/lib/flows";
 import { FlowHistoryNotPaid, FlowVersionsUnavailable, flowHistorySize, payFlowHistory, readFlowVersions } from "@/lib/flow-versions";
 import { listVersionsBytes } from "@/lib/flow-versions-rules";
 import { studioRefusal } from "@/lib/person-tasks";
@@ -427,6 +427,7 @@ export async function POST(request: NextRequest) {
     if (error instanceof BroadcastWriteUnconfirmed) return fail("broadcast_write_unconfirmed", 502);
     // An email's record that could not be read (rule 24): nothing was changed, never "not there".
     if (error instanceof BroadcastsUnreadable) return fail("broadcast_read_unavailable", 503);
+    if (error instanceof FlowsBusy) return fail("flow_write_busy", 409);
     if (error instanceof FlowWriteUnconfirmed) return fail("flow_write_unconfirmed", 502);
     if (error instanceof FlowRunUnavailable) return fail("flow_runs_unavailable", 503);
     if (error instanceof FlowVersionsUnavailable) return fail("flow_versions_unavailable", 503);

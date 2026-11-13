@@ -293,6 +293,18 @@ end
 redis.call('SET', KEYS[1], ARGV[3])
 return 1`;
 
+/**
+ * Three saves in a row lost to other changes of the same workflows: nothing was written (Claude 1 cloud's LOW 2 on
+ * #1927). A FlowWriteUnconfirmed, so every caller that handles one is unchanged; the mail route says it as busy.
+ */
+export class FlowsBusy extends FlowWriteUnconfirmed {
+  constructor() {
+    super();
+    this.message = "The workflows kept changing while this was being saved; nothing was saved";
+    this.name = "FlowsBusy";
+  }
+}
+
 /** The workflows changed between their read and this write: nothing was written. */
 class FlowsChanged extends Error {
   constructor() {
@@ -346,7 +358,7 @@ async function changing<T>(run: () => Promise<T>): Promise<T> {
       return await run();
     } catch (error) {
       if (!(error instanceof FlowsChanged)) throw error;
-      if (tries >= 3) throw new FlowWriteUnconfirmed();
+      if (tries >= 3) throw new FlowsBusy();
     }
   }
 }

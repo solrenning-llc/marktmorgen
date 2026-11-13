@@ -97,6 +97,7 @@ const MESSAGES: Record<string, string> = {
   draft_write_unconfirmed: "The draft save could not be confirmed. Your text is still here. Check your saved drafts before saving again; the draft may already exist.",
   history_unconfirmed: "The sequence was removed, but its earlier versions could not be confirmed deleted just now. They are kept listed and are deleted with your store's data.",
   flow_write_unconfirmed: "The sequence change could not be confirmed. Reload the saved sequences and check the result before trying again. The change may already have happened.",
+  flow_write_busy: "Someone else changed these sequences at the same time, so nothing was saved. Try again.",
   starters_nothing: "Your store already has a sequence for each of those moments. They are under Sequences.",
   keep_unsent: "Only an email that has finished going out can be kept sending.",
   keep_excludes:

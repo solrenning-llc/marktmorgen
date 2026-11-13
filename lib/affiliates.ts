@@ -263,6 +263,12 @@ export type Referral = {
   how: Credit;
   /** Optional campaign labels recorded at checkout; absent on older records. */
   promotion?: AffiliatePromotion | null;
+  /**
+   * The connected Stripe account a Stripe sale was paid into, written with the
+   * sale since 13 November 2026; absent on PayPal sales and older records. Its
+   * refunds and disputes can only be read there (readBook).
+   */
+  acct?: string;
 };
 
 /**
@@ -295,6 +301,8 @@ export type PartnerEarning = {
   percent: number;
   /** Bought by the partner themselves: written down, earns nothing. */
   self: boolean;
+  /** The connected Stripe account the sale was paid into, as on Referral; absent on PayPal sales and older records. */
+  acct?: string;
 };
 
 export type Payout = {
@@ -604,6 +612,8 @@ function parseReferral(raw: unknown): Referral | null {
       rate: n(value.rate),
       self: value.self === true,
       ...(readAffiliatePromotion(value.promotion) ? { promotion: readAffiliatePromotion(value.promotion) } : {}),
+      // Kept exactly as written: any other value is still another account than the store's, never "the same one".
+      ...(value.acct !== undefined ? { acct: typeof value.acct === "string" ? value.acct : "" } : {}),
       // Sales written down before a code or a bond could credit anybody have
       // neither field, and every one of those came from a click. `byCode` is
       // read for the ones written in between.
@@ -637,6 +647,7 @@ function parsePartnerEarning(raw: unknown): PartnerEarning | null {
       currency: readCurrencyCode(value.currency),
       percent: n(value.percent),
       self: value.self === true,
+      ...(value.acct !== undefined ? { acct: typeof value.acct === "string" ? value.acct : "" } : {}),
     };
   } catch {
     return null;
@@ -2377,7 +2388,9 @@ async function writeReferral(store: Store, referral: Referral): Promise<void> {
   if (!store.statsId || !isRedisConfigured()) return;
   // Once per sale, whichever of the thanks page and the five-minute job is
   // first, counted in the store's room at what it really adds (lib/order-data.ts).
-  await orderWrite(store, [["HSETNX", salesKey(store.statsId), referral.ref, JSON.stringify(referral)]]);
+  // A Stripe sale names the account it was paid into, so its refunds are never looked for on another one (readBook).
+  const paidInto = !referral.pi.startsWith("paypal:") && store.stripeAccountId ? { acct: store.stripeAccountId } : {};
+  await orderWrite(store, [["HSETNX", salesKey(store.statsId), referral.ref, JSON.stringify({ ...referral, ...paidInto })]]);
 }
 
 /**
@@ -2419,6 +2432,8 @@ export async function notePartners(
       percent: shareOn(partner.share, sale.product),
       // A 50% partner buying their own product at 50% off is not a sale.
       self: Boolean(buyer) && normaliseEmail(partner.email) === buyer,
+      // The account a Stripe sale was paid into, as writeReferral writes it (readBook).
+      ...(!sale.pi.startsWith("paypal:") && store.stripeAccountId ? { acct: store.stripeAccountId } : {}),
     };
     commands.push(["HSETNX", sharesKey(store.statsId), `${sale.ref}:${partner.id}`, JSON.stringify(earning)]);
   }
@@ -2906,6 +2921,14 @@ export async function disputesSince(store: Store, since: number, deadline?: numb
   return { byIntent, complete: false };
 }
 
+/** A sale without the account it was paid into (Referral.acct), which only readBook's check reads. */
+function withoutAccount(referral: Referral): Referral {
+  if (referral.acct === undefined) return referral;
+  const line = { ...referral };
+  delete line.acct;
+  return line;
+}
+
 /** A sale as it stands today, after any refund. */
 export function settleLine(referral: Referral, refunded: number): Line {
   const back = Math.min(Math.max(0, refunded), referral.total);
@@ -3062,6 +3085,7 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
       rate: e.percent,
       self: e.self,
       how: "partner" as const,
+      ...(e.acct !== undefined ? { acct: e.acct } : {}),
     }));
   const paid = pairs(payouts)
     .map(([, raw]) => parsePayout(raw))
@@ -3136,8 +3160,16 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
         refundsChecked = false;
       }
     }
+    // Refunds and disputes are read on the account the store names now. A Stripe sale paid into another one (the
+    // creator disconnected it or moved to a new one since), or any Stripe sale while none is connected, cannot be
+    // judged there: what it earns is not known (refundsChecked), so no payout is made on a refund nobody read.
+    const account = store.stripeAccountId;
+    if (everything.some((r) => r.pi !== "" && !r.pi.startsWith("paypal:") && (!account || (r.acct !== undefined && r.acct !== account)))) {
+      refundsChecked = false;
+    }
   }
-  const settled = everything.map((r) => settleLine(r, r.pi ? refunds.get(r.pi) ?? 0 : 0));
+  // The account a sale was paid into is for the check above only: never on a line, so no page, file or kept book shows it.
+  const settled = everything.map((r) => settleLine(withoutAccount(r), r.pi ? refunds.get(r.pi) ?? 0 : 0));
   // Each lead as it stands: the program's caps and budget counted across every affiliate's, then only the ones asked for.
   let ends = new Map<string, number>();
   const openBookings = leads.filter((l) => l.kind === "booking" && l.state === "open" && l.ref && mine(l.aff)).slice(0, 200);

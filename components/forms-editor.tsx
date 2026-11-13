@@ -1,5 +1,6 @@
 "use client";
 
+import { ConfirmAction } from "@/components/confirm-action";
 import { StudioEmptyState } from "@/components/empty-state";
 import { FORM_STARTERS } from "@/lib/form-starters";
 import { canCopy, formCopy } from "@/lib/form-copy";
@@ -89,7 +90,6 @@ export function FormsEditor({ saved, products, exportBase, dealStages = [], sid 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
-  const [removing, setRemoving] = useState<string | null>(null);
   /** The name of the form the open draft was copied from (582 [KB3]), or null. */
   const [copiedFrom, setCopiedFrom] = useState<string | null>(null);
   useLeaveGuard(draft !== null && !busy);
@@ -125,7 +125,6 @@ export function FormsEditor({ saved, products, exportBase, dealStages = [], sid 
       if (data.ok) {
         toast(done);
         setDraft(null);
-        setRemoving(null);
         router.refresh();
         return;
       }
@@ -274,20 +273,16 @@ export function FormsEditor({ saved, products, exportBase, dealStages = [], sid 
                     Make a copy
                   </button>
                 ) : null}
-                {removing === form.id ? (
-                  <>
-                    <button type="button" className="btn btn-danger btn-sm" onClick={() => void send({ action: "remove", id: form.id }, "Form removed.")} disabled={busy}>
-                      Remove it and its answers
-                    </button>
-                    <button type="button" className="btn btn-secondary btn-sm" onClick={() => setRemoving(null)}>
-                      Keep it
-                    </button>
-                  </>
-                ) : (
-                  <button type="button" className="btn btn-secondary btn-sm" onClick={() => setRemoving(form.id)} disabled={draft !== null}>
-                    Remove
-                  </button>
-                )}
+                <ConfirmAction
+                  className="btn btn-secondary btn-sm"
+                  disabled={draft !== null || busy}
+                  busy={busy}
+                  question="Remove this form and its answers?"
+                  yes="Remove it and its answers"
+                  onConfirm={() => send({ action: "remove", id: form.id }, "Form removed.")}
+                >
+                  Remove
+                </ConfirmAction>
               </div>
             </div>
             {open === form.id && total !== null ? (

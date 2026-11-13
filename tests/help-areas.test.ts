@@ -88,10 +88,13 @@ part("The help page lists every area");
 {
   const html = renderToStaticMarkup(createElement(HelpPage));
   const nav = html.slice(html.indexOf("data-help-areas"), html.indexOf("</nav>", html.indexOf("data-help-areas")));
-  const links = [...nav.matchAll(/<a href="#([^"]+)"[^>]*><span[^>]*>([^<]+)<\/span><span[^>]*>([^<]+)<\/span><\/a>/g)];
+  const links = [...nav.matchAll(/<a href="#([^"]+)"[^>]*>(<svg[\s\S]*?<\/svg>)<span[^>]*><span[^>]*>([^<]+)<\/span><span[^>]*>([^<]+)<\/span><\/span><\/a>/g)].map((m) => [m[0], m[1], m[3], m[4], m[2]]);
   is("one link per area", links.length, HELP_AREAS.length);
   is("every link goes to an answer on the page", links.filter((l) => !html.includes(`id="${l[1]}"`)).map((l) => l[1]), []);
   is("every link says its area and a question", links.every((l) => l[2].length > 2 && l[3].endsWith("?")), true);
+  is("each icon is decorative, the name says it all", links.every((l) => /aria-hidden="true"/.test(l[4]) && !/<title/.test(l[4])), true);
+  is("no two areas share an icon (HC1: no repeated image)", HELP_AREAS.map((a) => a.icon).filter((icon, i, all) => all.indexOf(icon) !== i), []);
+  is("no two cards draw the same picture", links.map((l) => l[4].replace(/class="[^"]*"/, "")).filter((svg, i, all) => all.indexOf(svg) !== i).length, 0);
   is("the list has its own heading", /<h2 id="help-areas-title"[^>]*>Help for each part of your studio<\/h2>/.test(html), true);
 }
 

@@ -21,7 +21,8 @@
  * Every reply is read exactly (CX-123 rule 24): a reply out of shape throws
  * UnknownReplyError, never "none", "zero" or "done".
  */
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, createHmac, randomBytes } from "node:crypto";
+import { deriveKey } from "@/lib/secret-box";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { type DataStore, giveData, needData, noteData, takeData } from "@/lib/store-data";
@@ -78,9 +79,16 @@ const SETUP_SLOT = (courseId: string, lessonId: string) => `sb:${courseId}:${les
  * The data room's slot of one buyer's places and open uploads on one lesson
  * (review of #3568, Claude 6 and Claude 1): set, never added to, so trying
  * again never grows it, and given back to what is still held once an upload
- * is refused, given up or closed.
+ * is refused, given up or closed. Named by an HMAC under the deployment's
+ * own key (lib/secret-box.ts), never by the buyer's key in the clear, so the
+ * store's room names nobody and a copy of it cannot be matched to a guessed
+ * address. null when there is no key: nothing is opened then.
  */
-const BUYER_SLOT = (courseId: string, lessonId: string, who: string) => `sbl:${part(courseId)}:${part(lessonId)}:${part(who)}`;
+export function buyerSlotFor(folder: string, courseId: string, lessonId: string, who: string): string | null {
+  const key = deriveKey("submission-buyer-slot/v1");
+  if (!key) return null;
+  return `sbl:${createHmac("sha256", key).update([part(folder), part(courseId), part(lessonId), part(who)].join("|")).digest("hex").slice(0, 32)}`;
+}
 
 /** The owner id a submission's file is kept under in the vault: never a product's, an option's or a lesson's. */
 export const submissionOwnerId = (id: string) => `sub_${id}`;
@@ -300,7 +308,8 @@ export type DoorOpened =
 export async function openSubmissionDoor(ask: DoorAsk, steps: DoorSteps = VAULT_STEPS): Promise<DoorOpened> {
   const id = randomBytes(16).toString("hex");
   const live = liveKey(ask.folder, ask.courseId, ask.lessonId, ask.who);
-  const slot = BUYER_SLOT(ask.courseId, ask.lessonId, ask.who);
+  const slot = buyerSlotFor(ask.folder, ask.courseId, ask.lessonId, ask.who);
+  if (!slot) throw new UnknownReplyError("the store's data room (no key to name a buyer's slot)");
   // A place first: a buyer whose places are all held is refused before the room is touched (review of #3568).
   if (!(await takePlace(live, id, ask.nowSeconds + UPLOAD_SECONDS, ask.nowSeconds))) return { ok: false, reason: "busy" };
   // Then the room, before the door is written: the buyer's one slot set to the most their places and open uploads
@@ -442,7 +451,10 @@ export async function closeSubmissionDoor(
     return { ok: false, reason: closed.reason };
   }
   const live = liveKey(door.folder, door.courseId, door.lessonId, door.who);
-  const settle = () => settleBuyerRoom(where.data, live, BUYER_SLOT(door.courseId, door.lessonId, door.who), nowSeconds);
+  const slot = buyerSlotFor(door.folder, door.courseId, door.lessonId, door.who);
+  const settle = async () => {
+    if (slot) await settleBuyerRoom(where.data, live, slot, nowSeconds);
+  };
   const drop = async () => {
     const gone = await steps.deleteVault([pathname]).catch(() => false);
     if (gone) await givePlace(live, door.id).then(settle, () => undefined);
@@ -523,7 +535,8 @@ export async function abortSubmissionDoor(
   const replies = repliesFor(await redisPipeline([["DEL", doorKey(pathname)]]), 1);
   if (!replies || countOf(replies[0]) === null) throw new UnknownReplyError("a submission upload given up");
   // Given up: the buyer's slot comes down to the places they still hold (review of #3568).
-  await settleBuyerRoom(where.data, live, BUYER_SLOT(door.courseId, door.lessonId, door.who), nowSeconds);
+  const slot = buyerSlotFor(door.folder, door.courseId, door.lessonId, door.who);
+  if (slot) await settleBuyerRoom(where.data, live, slot, nowSeconds);
   return "done";
 }
 

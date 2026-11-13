@@ -20,6 +20,7 @@
 import { MAX_SUBMISSION_NOTE, MAX_WAITING_PER_BUYER, type SubmissionSetup } from "@/lib/submission-rules";
 import {
   SUBMISSION_STEP_COMMANDS,
+  buyerSlotFor,
   SUBMISSION_SWEEP_GRACE_SECONDS,
   type DoorSteps,
   abortSubmissionDoor,
@@ -271,7 +272,7 @@ async function main(): Promise<void> {
       const month = new Date(((kept?.keepUntil ?? 0) + SUBMISSION_SWEEP_GRACE_SECONDS) * 1000).toISOString().slice(0, 7);
       const timed = Number((await redis.pipeline([["HGET", room, `~${month}`]]))[0] ?? 0);
       is("its record's bytes are counted in the data room until it expires", timed >= dataBytes([recKey, recJson], 1), true);
-      const slot = Number((await redis.pipeline([["HGET", room, `sbl:${COURSE}:${lesson}:${ANA}`]]))[0] ?? -1);
+      const slot = Number((await redis.pipeline([["HGET", room, buyerSlotFor(FOLDER, COURSE, lesson, ANA) ?? ""]]))[0] ?? -1);
       is("the buyer's slot holds the one place, not the upload's door", slot, dataBytes([`nl:sub:live:${FOLDER}:${COURSE}:${lesson}:${ANA}`, "0".repeat(32)], 1));
       is("so the room is lighter than with the upload open", ((await dataUsed(SHOP))?.used ?? -1) < usedBefore + dataBytes([recKey, recJson], 1), true);
     }
@@ -451,7 +452,7 @@ async function main(): Promise<void> {
     is("the buyer gives it up", given.value, "done");
     is("inside its commands", given.commands <= SUBMISSION_STEP_COMMANDS.abort, true);
     is("its place comes back", await liveCount(FOLDER, COURSE, lesson, ANA, NOW), 0);
-    is("and its room: the buyer's slot holds nothing", Number((await redis.pipeline([["HGET", dataKey(SHOP) ?? "", `sbl:${COURSE}:${lesson}:${ANA}`]]))[0] ?? 0), 0);
+    is("and its room: the buyer's slot holds nothing", Number((await redis.pipeline([["HGET", dataKey(SHOP) ?? "", buyerSlotFor(FOLDER, COURSE, lesson, ANA) ?? ""]]))[0] ?? 0), 0);
     is("and its door is gone", await signSubmissionDoor(at, path, [1], w.steps), { ok: false, reason: "unknown" });
   }
 
@@ -486,6 +487,9 @@ async function main(): Promise<void> {
     const broke = world({ reserveStoreUpload: async () => false });
     for (let i = 0; i < 10; i += 1) await openSubmissionDoor({ ...ask(DAN), lessonId: lesson }, broke.steps);
     is("ten refusals for the allowance leave no room taken", await used(), base);
+    // The slot is named by a keyed digest: the room never carries the buyer's key in the clear.
+    const named = buyerSlotFor(FOLDER, COURSE, lesson, DAN) ?? "";
+    is("the slot's name holds neither the buyer, the course nor the lesson", /^sbl:[0-9a-f]{32}$/.test(named) && !named.includes(DAN) && !named.includes(lesson), true);
     // An open that takes its place while a give-back is between its two reads is never left uncounted.
     const racing = await openSubmissionDoor({ ...ask(DAN), lessonId: lesson }, w.steps);
     const live = `nl:sub:live:${FOLDER}:${COURSE}:${lesson}:${DAN}`;
@@ -503,7 +507,7 @@ async function main(): Promise<void> {
     } finally {
       redis.pipeline = original;
     }
-    const slot = Number((await redis.pipeline([["HGET", dataKey(SHOP) ?? "", `sbl:${COURSE}:${lesson}:${DAN}`]]))[0] ?? 0);
+    const slot = Number((await redis.pipeline([["HGET", dataKey(SHOP) ?? "", buyerSlotFor(FOLDER, COURSE, lesson, DAN) ?? ""]]))[0] ?? 0);
     is("a place taken between the two reads leaves the slot at its most", racing.ok && slot > 0 && (await used()) > base, true);
   }
 }

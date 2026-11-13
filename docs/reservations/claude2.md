@@ -7,4 +7,4 @@ Only Claude 2 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
 | Claude 2 | 655 [WG15], unit 2 (the studio's tax setting links to /studio/tax; stacked on #2735) | claude2/wg15-tax-link | `components/tax-editor.tsx`, `tests/wg15-tax-link.test.ts`, its row of `tests/test-config.mjs` | 07/11/2026 10h35 |
-| Claude 2 | #4369 and #4370 (cash-flow refunds: only succeeded counted; unplaceable rows make the reading partial) | claude2/refund-status-cashflow | `lib/stats.ts`, `tests/refund-status-cashflow.test.ts` | 13/11/2026 00h05 |
+| Claude 2 | #4369, #4370 and #4371 (cash-flow refunds and renewal days) | claude2/refund-status-cashflow | `lib/stats.ts`, `tests/refund-status-cashflow.test.ts`, `tests/renewal-paid-day.test.ts` | 13/11/2026 00h05 |

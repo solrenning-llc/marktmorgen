@@ -10,6 +10,7 @@
 import { redisPipeline } from "@/lib/redis";
 import { StripeError, onAccount } from "@/lib/stripe-account";
 import { fairCouponId } from "@/lib/fair-price";
+import { type CouponFields, stillThere } from "@/lib/coupon-check";
 
 const madeKey = (account: string, percent: number) => `nl:fair:c:${account}:${percent}`;
 
@@ -17,7 +18,12 @@ const madeKey = (account: string, percent: number) => `nl:fair:c:${account}:${pe
 export async function fairCoupon(account: string, percent: number): Promise<string> {
   const id = fairCouponId(percent);
   const [known] = await redisPipeline([["GET", madeKey(account, percent)]]).catch(() => [null]);
-  if (known === "1") return id;
+  // Noted as made: checked at Stripe before it is handed to a checkout (#4377), since a coupon the creator deleted
+  // there is no longer accepted. Gone, or no longer what it should be, the note goes and the coupon is made again.
+  if (known === "1") {
+    if (await stillThere(account, id, (found) => sameFair(found, percent))) return id;
+    await redisPipeline([["DEL", madeKey(account, percent)]]).catch(() => undefined);
+  }
   try {
     await onAccount(
       "POST",
@@ -36,9 +42,14 @@ export async function fairCoupon(account: string, percent: number): Promise<stri
     // Made already, by an earlier checkout whose note was lost: it is used only
     // if it takes off what this one should.
     if (!(error instanceof StripeError) || error.code !== "resource_already_exists") throw error;
-    const found = (await onAccount("GET", account, `/coupons/${encodeURIComponent(id)}`)) as { percent_off?: unknown; valid?: unknown };
-    if (Number(found.percent_off) !== percent || found.valid === false) throw new Error(`coupon ${id} is not the fair price it should be`);
+    const found = (await onAccount("GET", account, `/coupons/${encodeURIComponent(id)}`)) as CouponFields;
+    if (!sameFair(found, percent)) throw new Error(`coupon ${id} is not the fair price it should be`);
   }
   await redisPipeline([["SET", madeKey(account, percent), "1"]]).catch(() => undefined);
   return id;
+}
+
+/** Whether a coupon at Stripe takes off this fair price's percentage and is still valid. */
+function sameFair(found: CouponFields, percent: number): boolean {
+  return Number(found.percent_off) === percent && found.valid !== false;
 }

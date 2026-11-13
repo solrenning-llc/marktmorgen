@@ -11,6 +11,7 @@
 import { redisPipeline } from "@/lib/redis";
 import { StripeError, onAccount } from "@/lib/stripe-account";
 import { introCouponId } from "@/lib/intro-price";
+import { type CouponFields, stillThere } from "@/lib/coupon-check";
 
 const madeKey = (account: string, id: string) => `nl:intro:c:${account}:${id}`;
 
@@ -18,7 +19,12 @@ const madeKey = (account: string, id: string) => `nl:intro:c:${account}:${id}`;
 export async function introCoupon(account: string, currency: string, offCents: number, count: number): Promise<string> {
   const id = introCouponId(currency, offCents, count);
   const [known] = await redisPipeline([["GET", madeKey(account, id)]]).catch(() => [null]);
-  if (known === "1") return id;
+  // Noted as made: checked at Stripe before it is handed to a checkout (#4377), since a coupon the creator deleted
+  // there is no longer accepted. Gone, or no longer what it should be, the note goes and the coupon is made again.
+  if (known === "1") {
+    if (await stillThere(account, id, (found) => sameIntro(found, currency, offCents, count))) return id;
+    await redisPipeline([["DEL", madeKey(account, id)]]).catch(() => undefined);
+  }
   try {
     await onAccount(
       "POST",
@@ -40,21 +46,21 @@ export async function introCoupon(account: string, currency: string, offCents: n
     // Made already, by an earlier checkout whose note was lost: it is used only
     // if it takes off what this one should, for as long.
     if (!(error instanceof StripeError) || error.code !== "resource_already_exists") throw error;
-    const found = (await onAccount("GET", account, `/coupons/${encodeURIComponent(id)}`)) as {
-      amount_off?: unknown;
-      currency?: unknown;
-      duration?: unknown;
-      duration_in_months?: unknown;
-      valid?: unknown;
-    };
-    const same =
-      Number(found.amount_off) === offCents &&
-      String(found.currency).toLowerCase() === currency.toLowerCase() &&
-      found.duration === (count > 1 ? "repeating" : "once") &&
-      (count > 1 ? Number(found.duration_in_months) === count : true) &&
-      found.valid !== false;
+    const found = (await onAccount("GET", account, `/coupons/${encodeURIComponent(id)}`)) as CouponFields;
+    const same = sameIntro(found, currency, offCents, count);
     if (!same) throw new Error(`coupon ${id} is not the introductory price it should be`);
   }
   await redisPipeline([["SET", madeKey(account, id), "1"]]).catch(() => undefined);
   return id;
+}
+
+/** Whether a coupon at Stripe takes off what this introductory price should, for as long, and is still valid. */
+function sameIntro(found: CouponFields, currency: string, offCents: number, count: number): boolean {
+  return (
+    Number(found.amount_off) === offCents &&
+    String(found.currency).toLowerCase() === currency.toLowerCase() &&
+    found.duration === (count > 1 ? "repeating" : "once") &&
+    (count > 1 ? Number(found.duration_in_months) === count : true) &&
+    found.valid !== false
+  );
 }

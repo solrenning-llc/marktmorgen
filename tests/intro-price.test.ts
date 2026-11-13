@@ -44,6 +44,13 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     coupons.push(body);
     return answer({ id: body.get("id"), amount_off: Number(body.get("amount_off")) });
   }
+  // A coupon made here is there when it is checked (lib/coupon-check.ts, #4377); the latest one made under its id.
+  const coupon = /^\/coupons\/(.+)$/.exec(path);
+  if (coupon && method === "GET") {
+    const id = decodeURIComponent(coupon[1]);
+    const made = [...coupons].reverse().find((body) => body.get("id") === id);
+    return made ? answer({ id, valid: true, amount_off: Number(made.get("amount_off")), currency: made.get("currency"), duration: made.get("duration"), duration_in_months: Number(made.get("duration_in_months")) || undefined }) : answer({ error: { code: "resource_missing", message: "No such coupon" } }, 404);
+  }
   if (method === "GET") return answer({ object: "list", data: [], has_more: false });
   return answer({ error: { message: `no stand-in for ${method} ${path}` } }, 404);
 }) as typeof fetch;

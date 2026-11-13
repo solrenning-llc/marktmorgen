@@ -1,7 +1,7 @@
 "use client";
 
 import { useHydrated } from "@/components/use-hydrated";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "@/components/toast";
 import { FaqFromInbox } from "@/components/faq-from-inbox";
 import { randomLetters } from "@/lib/random-letters";
@@ -19,6 +19,8 @@ import {
 
 type Thread = { conversation: Conversation; messages: Message[] };
 type Filter = "open" | "mine" | "closed" | "all";
+/** The filters, in the order the tabs show them. */
+const FILTERS: readonly Filter[] = ["open", "mine", "closed", "all"];
 
 const REASONS: Record<string, string> = {
   short: "Write a little more before sending.",
@@ -98,6 +100,7 @@ export function InboxStudio({
   const [list, setList] = useState(initial);
   const [thread, setThread] = useState<Thread | null>(first);
   const [filter, setFilter] = useState<Filter>("open");
+  const filterTabs = useRef<(HTMLButtonElement | null)[]>([]);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [left, setLeft] = useState(ai.left);
@@ -280,13 +283,42 @@ export function InboxStudio({
     <div className="space-y-10">
       <div className="grid gap-6 lg:grid-cols-[20rem_minmax(0,1fr)]">
         <section aria-label="Conversations" className="card p-3">
-          <div className="flex flex-wrap gap-1" role="tablist" aria-label="Which conversations">
-            {(["open", "mine", "closed", "all"] as const).map((f) => (
+          {/* Tabs as the WAI-ARIA Authoring Practices draw them: one Tab stop, the arrow keys, Home and End move
+              between them, and the list below is the panel they control (as components/buyer-path.tsx). */}
+          <div
+            className="flex flex-wrap gap-1"
+            role="tablist"
+            aria-label="Which conversations"
+            onKeyDown={(event) => {
+              const at = FILTERS.indexOf(filter);
+              const to =
+                event.key === "ArrowRight" || event.key === "ArrowDown"
+                  ? (at === FILTERS.length - 1 ? 0 : at + 1)
+                  : event.key === "ArrowLeft" || event.key === "ArrowUp"
+                    ? (at === 0 ? FILTERS.length - 1 : at - 1)
+                    : event.key === "Home"
+                      ? 0
+                      : event.key === "End"
+                        ? FILTERS.length - 1
+                        : -1;
+              if (to < 0) return;
+              event.preventDefault();
+              setFilter(FILTERS[to]);
+              filterTabs.current[to]?.focus();
+            }}
+          >
+            {FILTERS.map((f, i) => (
               <button
                 key={f}
+                ref={(el) => {
+                  filterTabs.current[i] = el;
+                }}
+                id={`inbox-filter-${f}`}
                 type="button"
                 role="tab"
                 aria-selected={filter === f}
+                aria-controls="inbox-filter-panel"
+                tabIndex={filter === f ? 0 : -1}
                 onClick={() => setFilter(f)}
                 className={`btn btn-sm ${filter === f ? "btn-primary" : "btn-ghost ring-1 ring-line"}`}
               >
@@ -294,6 +326,7 @@ export function InboxStudio({
               </button>
             ))}
           </div>
+          <div id="inbox-filter-panel" role="tabpanel" aria-labelledby={`inbox-filter-${filter}`}>
           {shown.length ? (
             <ul className="mt-3 space-y-1" data-inbox-list>
               {shown.map((x) => (
@@ -326,6 +359,7 @@ export function InboxStudio({
               {filter === "open" ? "Nothing waiting. Messages from your chat and your contact form land here." : "Nothing here."}
             </p>
           )}
+          </div>
           <button type="button" className="btn btn-ghost btn-sm mt-3 ring-1 ring-line" onClick={() => void refresh(true)}>
             Check for new messages
           </button>

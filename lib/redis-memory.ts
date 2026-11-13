@@ -26,10 +26,30 @@ const NOTES_TOTAL_FIELD = "ln#";
 
 type Entry = string | string[] | Map<string, string> | Set<string> | { score: number; member: string }[];
 
+/**
+ * The keys, whose removal also takes their expiry away, as on Redis: a key deleted (DEL, GETDEL, an emptied hash, a
+ * script's own delete) and made again later has no expiry until one is set. Before, the expiry outlived the key, so a
+ * counter made again by INCR or DECRBY after a DEL inherited the old one here and had none on Redis: a test could not
+ * see a key left with no expiry (Claude 7, Redis race hunt; lib/store-allowance.ts giveAllowance).
+ */
+class Keyspace extends Map<string, Entry> {
+  constructor(private readonly ends: Map<string, number>) {
+    super();
+  }
+  override delete(key: string): boolean {
+    this.ends.delete(key);
+    return super.delete(key);
+  }
+  override clear(): void {
+    this.ends.clear();
+    super.clear();
+  }
+}
+
 export class MemoryRedis {
-  private data = new Map<string, Entry>();
   /** When a key stops existing, in ms since the epoch. */
   private until = new Map<string, number>();
+  private data: Map<string, Entry> = new Keyspace(this.until);
   /**
    * The clock, so a test can move time rather than wait for it. A cooldown
    * measured in minutes is not a thing to sit through.
@@ -97,6 +117,35 @@ export class MemoryRedis {
     return made;
   }
 
+  /**
+   * EXPIRE, PEXPIRE and EXPIREAT as Redis 7 answers them (redis.io/docs/latest/commands/expire): NX sets an expiry only
+   * on a key that has none, XX only on one that has one, GT only when the new one is later (no expiry counts as never,
+   * so never later) and LT only when it is earlier (so always, on a key with none); 0 and nothing changed otherwise. A
+   * time already past deletes the key and answers 1. Before, every option was ignored and the expiry always moved, so a
+   * fixed window kept with EXPIRE NX (lib/podcast-access.ts, lib/store-readings.ts, lib/calendar-sync.ts,
+   * lib/plan-withdrawal.ts) slid forward on every use here, never on Redis (Claude 7, Redis race hunt).
+   */
+  private expireAt(key: string, ends: number, options: string[]): number {
+    const flags = options.map((o) => o.toUpperCase());
+    if (flags.some((f) => !["NX", "XX", "GT", "LT"].includes(f))) throw new Error("ERR Unsupported option " + options.join(" "));
+    if (flags.includes("NX") && flags.length > 1) throw new Error("ERR NX and XX, GT or LT options at the same time are not compatible");
+    if (flags.includes("GT") && flags.includes("LT")) throw new Error("ERR GT and LT options at the same time are not compatible");
+    if (!Number.isFinite(ends)) throw new Error("ERR value is not an integer or out of range");
+    if (!this.data.has(key)) return 0;
+    const current = this.until.get(key);
+    if (flags.includes("NX") && current !== undefined) return 0;
+    if (flags.includes("XX") && current === undefined) return 0;
+    if (flags.includes("GT") && (current === undefined || ends <= current)) return 0;
+    if (flags.includes("LT") && current !== undefined && ends >= current) return 0;
+    if (ends <= this.now()) {
+      this.data.delete(key);
+      this.until.delete(key);
+      return 1;
+    }
+    this.until.set(key, ends);
+    return 1;
+  }
+
   /** Runs one command, the way redisPipeline runs each of its own. */
   run(command: (string | number)[]): unknown {
     const [rawName, ...rest] = command;
@@ -140,6 +189,15 @@ export class MemoryRedis {
           return this.run(["INCR", counter]);
         }
         // lib/form-store.ts FIND_FORM_RESPONSE: the first kept response written with this id, as its text, or nil.
+        // lib/store-allowance.ts GIVE_ALLOWANCE_BACK: a missing counter left missing, one never below zero, its expiry kept.
+        if (key.startsWith("-- marktmorgen:allowance-give-back:v1\n") && args[0] === "1" && args.length === 3) {
+          const [, counter, n] = args;
+          if (Number(this.run(["EXISTS", counter])) === 0) return -1;
+          const after = Number(this.run(["DECRBY", counter, n]));
+          if (after >= 0) return after;
+          this.run(["INCRBY", counter, String(-after)]);
+          return 0;
+        }
         if (key.startsWith("-- marktmorgen:form-find:v1\n") && args[0] === "1" && args.length === 4) {
           const [, listKey, id, kept] = args;
           this.live(listKey);
@@ -1629,9 +1687,7 @@ export class MemoryRedis {
         return "OK";
       }
       case "EXPIRE":
-        if (!this.data.has(key)) return 0;
-        this.until.set(key, this.now() + Number(args[0]) * 1000);
-        return 1;
+        return this.expireAt(key, this.now() + Number(args[0]) * 1000, args.slice(1));
       case "TTL": {
         if (!this.data.has(key)) return -2;
         const ends = this.until.get(key);
@@ -1639,13 +1695,9 @@ export class MemoryRedis {
         return Math.max(0, Math.ceil((ends - this.now()) / 1000));
       }
       case "PEXPIRE":
-        if (!this.data.has(key)) return 0;
-        this.until.set(key, this.now() + Number(args[0]));
-        return 1;
+        return this.expireAt(key, this.now() + Number(args[0]), args.slice(1));
       case "EXPIREAT":
-        if (!this.data.has(key)) return 0;
-        this.until.set(key, Number(args[0]) * 1000);
-        return 1;
+        return this.expireAt(key, Number(args[0]) * 1000, args.slice(1));
       case "PEXPIRETIME": {
         // When the key ends, in ms since the epoch: -1 for none, -2 for a key that is not there (lib/backup-export.ts).
         if (!this.data.has(key)) return -2;

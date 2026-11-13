@@ -639,7 +639,22 @@ async function releaseJob(
         const payment = await onAccount("GET", store.stripeAccountId, `/payment_intents/${encodeURIComponent(entry.pi)}?expand[]=latest_charge`);
         // Refunded in full or lost to a dispute (lib/refunds.ts): never handed over.
         if (await givenBack(store.stripeAccountId, payment)) {
-          await redisPipeline([["HSET", entriesKey(sid, pid), session, JSON.stringify({ ...entry, revoked: now() } satisfies Preorder)], keep(sid, pid)]);
+          // Under the giving mark, as the refund pass writes it (revokeRefundedPreorders): another run handing this one
+          // over holds it, and its `given` write would land over this one; left for the next run, which reads it again.
+          const value = claimValue();
+          if ((await claimMark(giveKey(session), 300, value)) !== "ours") {
+            left += 1;
+            continue;
+          }
+          try {
+            const current = await readPreorderExact(sid, pid, session);
+            if (current && !current.given && !current.revoked) {
+              await redisPipeline([["HSET", entriesKey(sid, pid), session, JSON.stringify({ ...current, revoked: now() } satisfies Preorder)], keep(sid, pid)]);
+            }
+            // Handed over since it was read: the refund pass (revokeRefundedPreorders) takes back what was given.
+          } finally {
+            await releaseMark(giveKey(session), value);
+          }
           continue;
         }
       }
@@ -714,46 +729,57 @@ export async function revokeRefundedPreorders(
     if (handled === 1) return true;
     const [foundSid, productId, session] = typeof found === "string" ? found.split("|") : [];
     if (foundSid === sid && productId && session) {
-      const raw = repliesFor(await redisPipeline([["HGET", entriesKey(sid, productId), session]]), 1)?.[0];
-      if (raw !== null && typeof raw !== "string") return false;
-      const entry = parsePreorder(raw);
-      if (entry && !entry.revoked) {
-        if (entry.given) {
-          // Only what this pre-order gave: a purchase of the same product given another way stays.
-          const given = repliesFor(await redisPipeline([["HGET", importedKey(sid, entry.to), productId]]), 1)?.[0];
-          if (given !== null && typeof given !== "string") return false;
-          // No record: nothing of this pre-order is held as a purchase any more (null). A record that does not read,
-          // or whose job is not text, is unknown, never "given another way" (rule 30, Claude 4 on #2781).
-          let job = "";
-          if (typeof given === "string") {
-            let v: unknown;
-            try {
-              v = JSON.parse(given);
-            } catch {
-              v = undefined;
+      // Under the hand-over's own giving mark (handOverPreorder): a hand-over that read this entry before the revoked
+      // write and wrote `given` after it would undo it, the grant would stand, and this refund, marked read, would never
+      // be read again (Claude 7, Redis race hunt). While a hand-over holds the mark, the row is left unread and the next
+      // run takes back what it gave.
+      const value = claimValue();
+      const claimed = await claimMark(giveKey(session), 300, value);
+      if (claimed !== "ours") return false;
+      try {
+        const raw = repliesFor(await redisPipeline([["HGET", entriesKey(sid, productId), session]]), 1)?.[0];
+        if (raw !== null && typeof raw !== "string") return false;
+        const entry = parsePreorder(raw);
+        if (entry && !entry.revoked) {
+          if (entry.given) {
+            // Only what this pre-order gave: a purchase of the same product given another way stays.
+            const given = repliesFor(await redisPipeline([["HGET", importedKey(sid, entry.to), productId]]), 1)?.[0];
+            if (given !== null && typeof given !== "string") return false;
+            // No record: nothing of this pre-order is held as a purchase any more (null). A record that does not read,
+            // or whose job is not text, is unknown, never "given another way" (rule 30, Claude 4 on #2781).
+            let job = "";
+            if (typeof given === "string") {
+              let v: unknown;
+              try {
+                v = JSON.parse(given);
+              } catch {
+                v = undefined;
+              }
+              const named = v && typeof v === "object" && !Array.isArray(v) ? (v as { job?: unknown }).job : undefined;
+              if (typeof named !== "string") return false;
+              job = named;
             }
-            const named = v && typeof v === "object" && !Array.isArray(v) ? (v as { job?: unknown }).job : undefined;
-            if (typeof named !== "string") return false;
-            job = named;
-          }
-          if (readPreorderJob(job)?.checkout === session) {
-            // The course first, then the purchase (Codex G on #2781; rule 30): a course removal that fails keeps the
-            // purchase, so the next run takes both away again; taking a course away twice is harmless.
-            try {
-              await dropStart(entry.to, productId);
-            } catch (error) {
-              console.error("taking a refunded pre-order's course away failed; tried again next run", error);
-              return false;
+            if (readPreorderJob(job)?.checkout === session) {
+              // The course first, then the purchase (Codex G on #2781; rule 30): a course removal that fails keeps the
+              // purchase, so the next run takes both away again; taking a course away twice is harmless.
+              try {
+                await dropStart(entry.to, productId);
+              } catch (error) {
+                console.error("taking a refunded pre-order's course away failed; tried again next run", error);
+                return false;
+              }
+              // Each write confirmed in its exact shape before the next (Codex Z, review 5794703899; CX-123 rule 24):
+              // a write left unknown marks nothing taken back or read and keeps the anchor, so the next run does it again.
+              const removed = repliesFor(await redisPipeline([["HDEL", importedKey(sid, entry.to), productId]]), 1);
+              if (!oneWrite(removed?.[0])) return false;
             }
-            // Each write confirmed in its exact shape before the next (Codex Z, review 5794703899; CX-123 rule 24):
-            // a write left unknown marks nothing taken back or read and keeps the anchor, so the next run does it again.
-            const removed = repliesFor(await redisPipeline([["HDEL", importedKey(sid, entry.to), productId]]), 1);
-            if (!oneWrite(removed?.[0])) return false;
           }
+          const saved = repliesFor(await redisPipeline([["HSET", entriesKey(sid, productId), session, JSON.stringify({ ...entry, revoked: now() } satisfies Preorder)], keep(sid, productId)]), 2);
+          if (!oneWrite(saved?.[0]) || !oneWrite(saved?.[1])) return false;
+          revoked += 1;
         }
-        const saved = repliesFor(await redisPipeline([["HSET", entriesKey(sid, productId), session, JSON.stringify({ ...entry, revoked: now() } satisfies Preorder)], keep(sid, productId)]), 2);
-        if (!oneWrite(saved?.[0]) || !oneWrite(saved?.[1])) return false;
-        revoked += 1;
+      } finally {
+        await releaseMark(giveKey(session), value);
       }
     }
     // Marked read once handled: a run that stops halfway leaves it to the next, which does the same again.

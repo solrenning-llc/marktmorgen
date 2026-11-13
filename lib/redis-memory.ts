@@ -397,6 +397,22 @@ export class MemoryRedis {
           const [, lock, token, seconds] = args;
           return this.run(["GET", lock]) === token ? this.run(["EXPIRE", lock, seconds]) : 0;
         }
+        // lib/auto-captions.ts COUNT_KEPT_ONCE: a case kept for a person counted only when its own mark is new.
+        if (key.startsWith("-- marktmorgen:auto-captions-count-kept:v1\n") && args[0] === "2" && args.length === 5) {
+          const [, counts, mark, kind, seconds] = args;
+          if (this.run(["SET", mark, "1", "NX", "EX", seconds]) === null) return 0;
+          this.run(["HINCRBY", counts, kind, 1]);
+          this.run(["EXPIRE", counts, seconds]);
+          return 1;
+        }
+        // lib/auto-captions.ts MARK_KEPT: a request marked kept only while its record is still the one read, keeping its time to live.
+        if (key.startsWith("-- marktmorgen:auto-captions-kept:v1\n") && args[0] === "1" && args.length === 4) {
+          const [, record, expected, next] = args;
+          if (this.run(["GET", record]) !== expected) return 0;
+          // Match SET KEEPTTL: no expiry extension or removal.
+          this.data.set(record, next);
+          return 1;
+        }
         // lib/calls.ts: a call lock's value swapped (take-over, renewal), and a hold written, only while the lock holds the value given.
         if (key.startsWith("-- marktmorgen:call-lock-swap:v1\n") && args[0] === "1" && args.length === 5) {
           const [, lock, from, to, seconds] = args;

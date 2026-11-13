@@ -13,6 +13,7 @@
  * MAX_MOVED_INTO old addresses are asked about. The creator always listens.
  */
 import { addProduct, claimHandle, ensureListId, ensureStatsId, ensureStoreId, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
+import { createHash } from "node:crypto";
 import { mayListen, sendFeedLink } from "@/lib/podcast-access";
 import { takePublicRequest } from "@/lib/traffic";
 import { answering } from "./security/next-headers";
@@ -198,6 +199,15 @@ async function main(): Promise<void> {
   is("Stripe failing for the old address: unknown", await listens("fay.new@example.com"), "unknown");
   failing.delete("fay.old@example.com");
   is("and once it answers, the new address listens", await listens("fay.new@example.com"), true);
+
+  part("A moved mark whose line back is missing or names another move is unknown, never \"not moved\" (Codex H2 on #3626, the same reading as readMovedIndex)");
+  sessions["gus.old@example.com"] = [paid("6", show.product.id)];
+  is("gus moved", (await applyPurchaseMove(store, await move("gus.old@example.com", "gus.new@example.com"))).state, "moved");
+  const gusLine = `nl:pm:into:${store.sid}:${createHash("sha256").update(`nimbus-pm-moved:${store.sid}:gus.new@example.com`).digest("hex").slice(0, 32)}`;
+  redis.run(["HDEL", gusLine, "gus.old@example.com"]);
+  is("the line back missing: the old address is unknown, never its listening back", await listens("gus.old@example.com"), "unknown");
+  redis.run(["HSET", gusLine, "gus.old@example.com", "e".repeat(32)]);
+  is("the line back naming another move: unknown too", await listens("gus.old@example.com"), "unknown");
 
   done();
 }

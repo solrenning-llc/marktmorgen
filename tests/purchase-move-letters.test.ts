@@ -192,6 +192,31 @@ async function main(): Promise<void> {
   is("the reader refuses to guess from a truncated set", await reads(into), "unknown");
   is("no old address is queried after overflow is known", asked.length, 0);
 
+  part("A moved mark whose line back is missing or names another move is unknown, never \"not moved\" (Codex H2 on #3626)");
+  sessions["cal.old@example.com"] = [paid("9", club.product.id)];
+  const calId = await move("cal.old@example.com", "cal.new@example.com");
+  is("cal moved", (await applyPurchaseMove(store, calId)).state, "moved");
+  const calLine = `nl:pm:into:${store.sid}:${print("cal.new@example.com")}`;
+  redis.run(["HDEL", calLine, "cal.old@example.com"]);
+  is("the line back missing: the old address is unknown, never its reading back", await reads("cal.old@example.com"), "unknown");
+  redis.run(["HSET", calLine, "cal.old@example.com", "e".repeat(32)]);
+  is("the line back naming another move: unknown too", await reads("cal.old@example.com"), "unknown");
+
+  part("The store deleting the new address is finished on a later try when it stops midway (Codex H2 on #3626)");
+  sessions["dan.old@example.com"] = [paid("10", club.product.id)];
+  is("dan moved", (await applyPurchaseMove(store, await move("dan.old@example.com", "dan.new@example.com"))).state, "moved");
+  odd = { command: "DEL", prefix: "nl:pm:moved:", reply: "QUEUED", times: 1 };
+  let stopped = false;
+  try {
+    await forgetMovedPerson(store, "dan.new@example.com");
+  } catch {
+    stopped = true;
+  }
+  odd = null;
+  is("stopped midway", stopped, true);
+  await forgetMovedPerson(store, "dan.new@example.com");
+  is("finished on the next try: the old address reads again", await reads("dan.old@example.com"), true);
+
   done();
 }
 

@@ -4247,7 +4247,8 @@ fieldset:disabled .cm-poll-row {
   width: 100%;
   min-height:44px;
   border-radius: 999px;
-  border: 1px solid color-mix(in srgb, currentColor 22%, transparent);
+  /* Known only by its edge, so 3:1 against the bar (1.4.11): 4.74:1 on Paper, 4.02:1 on Sand, 6.67:1 on Night. */
+  border: 1px solid color-mix(in srgb, currentColor 60%, transparent);
   background: color-mix(in srgb, currentColor 8%, transparent);
   padding: 0 0.9rem;
   font-size: 0.9375rem;
@@ -4474,7 +4475,8 @@ fieldset:disabled .cm-poll-row {
   background: var(--st-item);
 }
 .cm-danger {
-  color: var(--danger, #b42318);
+  /* Small text, so 7:1 (1.4.6 AAA): 7.07:1 on the sand page, 8.3:1 on white; the site's red is 5.85:1. */
+  color: #9a1a13;
 }
 .st-theme-night .cm-danger {
   color: #ff8a80;

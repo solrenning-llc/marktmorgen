@@ -73,6 +73,7 @@
  */
 import { createHash } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { stopWriting } from "@/lib/contacts";
 import { normaliseEmail } from "@/lib/auth";
 import type { Store } from "@/lib/store";
@@ -369,8 +370,11 @@ export async function heardFromSender(notice: SenderNotice, now = Date.now()): P
   // Off the list first, and every time: this is the part that must not be
   // skipped because a count had already been made.
   if (HEALTH_ID.test(notice.list)) await stopWriting(notice.list, email, notice.kind);
-  const [first] = await redisPipeline([["SET", seenKey(notice.store, email), "1", "NX", "EX", MAIL_HEALTH_SEEN_SECONDS]]);
+  // Read exactly (#4287, item 9): "OK" is a first sighting, null one already counted; any other reply is unknown and
+  // throws, so the notice is retried and the same address is never counted twice toward a pause.
+  const first = repliesFor(await redisPipeline([["SET", seenKey(notice.store, email), "1", "NX", "EX", MAIL_HEALTH_SEEN_SECONDS]]), 1)?.[0];
   if (first === null) return "ignored";
+  if (first !== "OK") throw new UnknownReplyError("a sender's notice already counted");
   await add(notice.store, notice.kind === "complained" ? "c" : "b", 1, now);
   return (await pauseIfOver(notice.store, now)) ? "paused" : "counted";
 }

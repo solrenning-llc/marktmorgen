@@ -52,7 +52,7 @@ async function main(): Promise<void> {
     ["a list holding a number", [[1]]],
     ["two replies", [[session], [session]]],
   ] as const) {
-    const r = await run({ command: "SMEMBERS", reply: reply as unknown[] });
+    const r = await run({ command: "SMEMBERS", reply: reply as unknown as unknown[] });
     is(`${what}: rejected`, r.outcome, "rejected");
   }
 
@@ -62,7 +62,7 @@ async function main(): Promise<void> {
     ["more than it was sent", [9]],
     ["no reply", []],
   ] as const) {
-    const r = await run({ command: "DEL", reply: reply as unknown[] });
+    const r = await run({ command: "DEL", reply: reply as unknown as unknown[] });
     is(`${what}: rejected`, r.outcome, "rejected");
   }
 

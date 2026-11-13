@@ -19,6 +19,7 @@
  */
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { isSenderConfigured } from "@/lib/email";
 import { withinLimit } from "@/lib/request-guard";
 import { createHash } from "node:crypto";
@@ -155,10 +156,16 @@ export async function keepAssistReminder(input: { store: Store; session: string;
 export async function forgetAssistReminderPerson(statsId: string | null, email: string): Promise<number> {
   if (!statsId || !email || !isRedisConfigured()) return 0;
   const who = whoKey(statsId, email);
-  const [members] = await redisPipeline([["SMEMBERS", who]]);
-  const sessions = (Array.isArray(members) ? members : []).map(String).filter((s) => SESSION.test(s));
-  const [gone] = await redisPipeline([["DEL", who, ...sessions.map(assistRemindKey)]]);
-  return Number(gone) || 0;
+  // Read exactly (issue #4380, rule 24): an unreadable list is unknown, never "no reminders", so the erasure stays
+  // open and is run again instead of leaving a consent that holds the erased address for the queue to send to.
+  const read = repliesFor(await redisPipeline([["SMEMBERS", who]]), 1);
+  const members = read ? stringList(read[0]) : null;
+  if (!members) throw new UnknownReplyError("a person's checkout reminders");
+  const sessions = members.filter((s) => SESSION.test(s));
+  const deleted = repliesFor(await redisPipeline([["DEL", who, ...sessions.map(assistRemindKey)]]), 1);
+  const gone = deleted ? countOf(deleted[0]) : null;
+  if (gone === null || gone > sessions.length + 1) throw new UnknownReplyError("erasing a person's checkout reminders");
+  return gone;
 }
 
 /**

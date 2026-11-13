@@ -801,6 +801,8 @@ export async function readListingsAll(store: Store, ids: readonly string[]): Pro
         // Only an absent or null `recurring` is none (Codex G's review of #1824).
         const recurring = (raw as { recurring?: unknown }).recurring;
         if (recurring !== undefined && recurring !== null && !listing.recurring) throw new UnknownReplyError("a listing read with a membership schedule unreadable");
+        // As for the head: a record with no schedule whose item says a membership is a contradiction, never "not a membership".
+        if (!listing.recurring && ((kinds.get(id) ?? 0) & KIND.recurring) !== 0) throw new UnknownReplyError("a listing read whose record says no schedule while its item says a membership");
         found.set(id, listing);
       });
     });

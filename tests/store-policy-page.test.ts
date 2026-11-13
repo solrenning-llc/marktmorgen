@@ -23,18 +23,18 @@ const club = { priceCents: 900, recurring: { interval: "month" } };
 const call = { priceCents: 9900, call: { minutes: 30 } };
 
 part("What the store sells, counting only what is paid for");
-is("an ebook: digital", policyInputFrom(store, [ebook], false).sellsDigital, true);
-is("a free download alone: nothing sold", [policyInputFrom(store, [free], false).sellsDigital, policyInputFrom(store, [free], false).sellsMemberships], [false, false]);
-is("a membership: memberships, not digital content", [policyInputFrom(store, [club], false).sellsMemberships, policyInputFrom(store, [club], false).sellsDigital], [true, false]);
-is("a call: neither", [policyInputFrom(store, [call], false).sellsDigital, policyInputFrom(store, [call], false).sellsMemberships], [false, false]);
+is("an ebook: digital", policyInputFrom(store, [ebook], false, true).sellsDigital, true);
+is("a free download alone: nothing sold", [policyInputFrom(store, [free], false, true).sellsDigital, policyInputFrom(store, [free], false, true).sellsMemberships], [false, false]);
+is("a membership: memberships, not digital content", [policyInputFrom(store, [club], false, true).sellsMemberships, policyInputFrom(store, [club], false, true).sellsDigital], [true, false]);
+is("a call: neither", [policyInputFrom(store, [call], false, true).sellsDigital, policyInputFrom(store, [call], false, true).sellsMemberships], [false, false]);
 
 part("Settings flow into the page, and change it");
-const before = policyFacts(policyInputFrom(store, [ebook], false), "en");
-const withPixel = policyFacts(policyInputFrom({ ...store, pixels: { ...NO_PIXELS, meta: "123456789012345" } } as typeof store, [ebook], false), "en");
+const before = policyFacts(policyInputFrom(store, [ebook], false, true), "en");
+const withPixel = policyFacts(policyInputFrom({ ...store, pixels: { ...NO_PIXELS, meta: "123456789012345" } } as typeof store, [ebook], false, true), "en");
 is("a pixel switched on: the measurement section, named by its platform", withPixel.find((s) => s.id === "measurement")?.sentences[0], "Harbor Kitchen measures its ads with Meta.");
 is("and a new version", policyFingerprint(withPixel) === policyFingerprint(before), false);
-is("PayPal taken: said", policyFacts(policyInputFrom(store, [ebook], true), "en")[0].sentences[2].includes("PayPal"), true);
-is("no postal address: no contact section", policyFacts(policyInputFrom({ ...store, mail: null } as typeof store, [ebook], false), "en").some((s) => s.id === "contact"), false);
+is("PayPal taken: said", policyFacts(policyInputFrom(store, [ebook], true, true), "en")[0].sentences[2].includes("PayPal"), true);
+is("no postal address: no contact section", policyFacts(policyInputFrom({ ...store, mail: null } as typeof store, [ebook], false, true), "en").some((s) => s.id === "contact"), false);
 
 part("The page");
 const page = readFileSync("app/[handle]/policies/page.tsx", "utf8");
@@ -92,8 +92,10 @@ async function storedSchedule() {
   ] as const) {
     is(`${what}: unknown, the page not built`, await stored(recurring), "unknown");
   }
-  is("null: not a membership", await stored(null), { memberships: false });
-  is("no recurring field at all: not a membership", await stored(undefined, true), { memberships: false });
+  // The item says a membership, so a record with no schedule contradicts it: unknown, as in the head, never "not a
+  // membership" (Claude 1 cloud's LEVE on #1824 @670cc68c43; it read "not a membership" before).
+  is("null while its item says a membership: unknown", await stored(null), "unknown");
+  is("no recurring field at all while its item says a membership: unknown", await stored(undefined, true), "unknown");
   is("the readable schedule back: memberships again", await stored(JSON.parse(original).recurring), { memberships: true });
 }
 
@@ -103,7 +105,7 @@ part("The postal address is told as public where it is typed and in the privacy 
   // creator is told at the field, and the privacy policy says it, before it is ever shown there.
   const studio = readFileSync("components/email-studio.tsx", "utf8");
   const note = studio.slice(studio.indexOf("Postal address at the bottom of each email"), studio.indexOf('type="submit"', studio.indexOf("Postal address at the bottom of each email")));
-  is("the field says it is also shown on the store's policies page", /also shown on your store.s public policies page/.test(note), true);
+  is("the field says it is also shown on the store's policies page", /also shown on your store(?:&apos;|')s public policies page/.test(note), true);
   const privacy = readFileSync("app/privacy/page.tsx", "utf8").replace(/\s+/g, " ");
   const creator = privacy.slice(privacy.indexOf("What a creator puts in a store."), privacy.indexOf("Buyer information."));
   is("the privacy policy says the postal address is public on the policies page", /postal address[^.]*policies page/.test(creator), true);

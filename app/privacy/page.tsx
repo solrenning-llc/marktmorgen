@@ -74,7 +74,9 @@ export default function PrivacyPage() {
           you put on the page, and the files you upload for delivery to your
           buyers. Your photo is shrunk on your own device before it is sent, is
           shown publicly on your store page and in previews of links to it, and
-          is deleted from our storage when you remove or replace it.
+          is deleted from our storage when you remove or replace it. The
+          postal address you set for your store&apos;s emails is also shown
+          publicly on your store&apos;s policies page.
         </p>
         <p>
           <strong className="text-black">Buyer information.</strong> When

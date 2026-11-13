@@ -9,7 +9,7 @@ import { POLICY_WORDS } from "@/lib/buyer-words/policies";
 import { type PolicyFactsInput, notAdvice, policyFacts, policyFingerprint } from "@/lib/store-policy-facts";
 import { done, is, part } from "./check";
 
-const all: PolicyFactsInput = { storeName: "Harbor Kitchen", sellsDigital: true, sellsMemberships: true, paypal: true, pixels: ["Meta", "Google", "TikTok"], postalAddress: "1 Main St, Portland, OR 97201" };
+const all: PolicyFactsInput = { storeName: "Harbor Kitchen", sellsDigital: true, sellsMemberships: true, paypal: true, pixels: ["Meta", "Google", "TikTok"], postalAddress: "1 Main St, Portland, OR 97201", membersSelfCancel: true };
 
 part("Every language says every part");
 for (const code of LANGUAGE_CODES) {
@@ -21,6 +21,12 @@ for (const code of LANGUAGE_CODES) {
   is(`${code}: titles all set`, sections.every((s) => s.title.trim().length > 2), true);
   is(`${code}: no word left in English where another language is spoken`, code === "en" ? true : !/\b(the seller|membership|checkout|nothing is measured)\b/i.test(text), true);
   is(`${code}: says it is not legal advice`, notAdvice(code).length > 60, true);
+}
+
+part("A store whose emails ask for a reply: every language says to reply, never the link (review of #1824)");
+for (const code of LANGUAGE_CODES) {
+  const sentence = policyFacts({ ...all, membersSelfCancel: false }, code).find((s) => s.id === "memberships")!.sentences[0];
+  is(`${code}: the reply sentence, not the link one`, [sentence === POLICY_WORDS[code].membersCancelByReply, sentence === POLICY_WORDS[code].membersCancel], [true, false]);
 }
 
 part("English stays exactly as unit 1 wrote it");

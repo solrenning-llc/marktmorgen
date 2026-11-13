@@ -85,8 +85,8 @@ export default async function CoursePage({ params, searchParams }: Params) {
   // A signed-in student whose access is not open: their places in this course's videos go from their device (650 [WG10]).
   // Not while Stripe could not be read: that student may well still have the course.
   const forgetKey = access.state !== "open" && access.state !== "unknown" && access.learner && !access.learner.owner ? devicePlaceKey(course.id, access.learner.email) : null;
-  // And the last lesson kept for their library, when it is in this course (650 [WG10], unit 2).
-  const forgetPerson = access.state !== "open" && access.learner && !access.learner.owner ? deviceLastKey(access.learner.email) : null;
+  // And the last lesson kept for their library, when it is in this course (650 [WG10], unit 2); not while unknown either.
+  const forgetPerson = access.state !== "open" && access.state !== "unknown" && access.learner && !access.learner.owner ? deviceLastKey(access.learner.email) : null;
   const open = access.state === "open";
   // A draft is left off the store and its own page (lib/catalog.ts): its front
   // door, title, price and outline are for its students and for the store's

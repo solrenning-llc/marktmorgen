@@ -172,6 +172,11 @@ export class MemoryRedis {
           }
           return this.run(["HDEL", handles, handle]);
         }
+        // lib/learn.ts TAKE_OFF_IF: a refunded course taken off a ledger only while its entry is still the value read.
+        if (key.startsWith("-- marktmorgen:learn-take-off-if:v1\n") && args[0] === "1" && args.length === 4) {
+          const [, ledger, field, held] = args;
+          return this.run(["HGET", ledger, field]) === held ? this.run(["HDEL", ledger, field]) : 0;
+        }
         // lib/community-push.ts STILL_IN: one mark per member key, "y" in, "r" taken out, "n" no record, "?" any other shape.
         if (key.startsWith("-- marktmorgen:community-still-in:v1\n") && args[0] === "1" && args.length >= 3) {
           const [, members, ...keys] = args;

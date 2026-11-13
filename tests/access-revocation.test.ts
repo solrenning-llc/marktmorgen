@@ -42,6 +42,7 @@ const intents: Record<string, Record<string, unknown>[]> = {};
 const invoices: Record<string, Record<string, unknown>> = {};
 const invoicePayments: Record<string, Record<string, unknown>[]> = {};
 const paymentIntents: Record<string, Record<string, unknown>> = {};
+const refundRows: Record<string, Record<string, unknown>[]> = {};
 let stripeDown = false;
 globalThis.fetch = (async (input: string | URL | Request) => {
   const url = new URL(String(input));
@@ -53,6 +54,8 @@ globalThis.fetch = (async (input: string | URL | Request) => {
   const invoice = /^\/invoices\/(in_[A-Za-z0-9]+)$/.exec(path);
   if (invoice) return answer(invoices[invoice[1]] ?? {});
   if (path === "/invoice_payments") return answer({ object: "list", data: invoicePayments[url.searchParams.get("invoice") ?? ""] ?? [], has_more: false });
+  // A payment's refunds, in Stripe's shape (its charge an id): what lib/learn.ts reads to confirm a refund succeeded.
+  if (path === "/refunds") return answer({ object: "list", data: refundRows[url.searchParams.get("payment_intent") ?? ""] ?? [], has_more: false });
   const pi = /^\/payment_intents\/(pi_[A-Za-z0-9]+)$/.exec(path);
   if (pi) return answer(paymentIntents[pi[1]] ?? {});
   return answer({ object: "list", data: [], has_more: false });
@@ -116,7 +119,13 @@ async function main(): Promise<void> {
   sessions["ana@example.com"] = [paid("cs_test_ana000000001", once)];
   await recordEnrollment(store, "ana@example.com", once, NOW - 86_400, "stripe");
   is("opens", await open("ana@example.com"), [once]);
-  sessions["ben@example.com"] = [paid("cs_test_ben000000001", once, { payment_intent: { id: "pi_ben01", latest_charge: charge(4900, 4900) } })];
+  // Rule 23, a fixture only (owner decision 18, C1-20261109-1054-C5-54; #3376): a course written down is taken
+  // away only once its refund succeeded, so Ben's refund is listed as succeeded, in Stripe's shape (a PaymentIntent
+  // id of Stripe's length, its refund row with its charge as an id). The assertion is unchanged.
+  refundRows.pi_ben000000001 = [
+    { id: "re_ben000000001", object: "refund", status: "succeeded", amount: 4900, created: NOW - 3_600, payment_intent: "pi_ben000000001", charge: "ch_ben000000001" },
+  ];
+  sessions["ben@example.com"] = [paid("cs_test_ben000000001", once, { payment_intent: { id: "pi_ben000000001", latest_charge: charge(4900, 4900) } })];
   await recordEnrollment(store, "ben@example.com", once, NOW - 86_400, "stripe");
   is("refunded in full: shut, though the thanks page wrote it down", await open("ben@example.com"), []);
   sessions["cy@example.com"] = [paid("cs_test_cy0000000001", once, { payment_intent: { id: "pi_cy01", latest_charge: charge(4900, 2000) } })];

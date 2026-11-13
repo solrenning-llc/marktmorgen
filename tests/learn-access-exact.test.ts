@@ -26,6 +26,7 @@ import { LANGUAGE_CODES } from "@/lib/store-language";
 import { readListing } from "@/lib/catalog";
 import { readFileSync } from "node:fs";
 import { store as redis } from "./redis-stub";
+import { installSesMailFixture } from "./ses-mail-fixture";
 import { done, is, part } from "./check";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_learn_access_exact";
@@ -67,6 +68,19 @@ globalThis.fetch = (async (input: string | URL | Request) => {
     const from = after ? all.findIndex((row) => row.id === after) + 1 : 0;
     const data = all.slice(from, from + pageSize);
     return answer({ object: "list", data, has_more: from + pageSize < all.length, url: "/v1/checkout/sessions" });
+  }
+  if (path === "/refunds") {
+    // Rule 23, a fixture only (owner decision 18, C1-20261109-1054-C5-54): a charge refunded in full here has its
+    // refund succeeded, its row in Stripe's real shape (its charge an id), so the course is taken off the ledger
+    // and stays shut while Stripe cannot be read. Without a succeeded refund (pending) it would stay written down
+    // and open (tests/learn-refund-confirmed.test.ts).
+    const intent = url.searchParams.get("payment_intent") ?? "";
+    const paid = Object.values(sessions).flat().find((row) => (row?.payment_intent as { id?: unknown } | null)?.id === intent);
+    const charge = (paid?.payment_intent as { latest_charge?: { refunded?: unknown; amount?: unknown } } | undefined)?.latest_charge;
+    const data = charge?.refunded === true
+      ? [{ id: `re_${intent.slice(3)}`, object: "refund", status: "succeeded", amount: charge.amount, created: NOW - 3_600, payment_intent: intent, charge: `ch_${intent.slice(3)}` }]
+      : [];
+    return answer({ object: "list", data, has_more: false, url: "/v1/refunds" });
   }
   return answer({ object: "list", data: [], has_more: false, url: path });
 }) as typeof fetch;
@@ -161,12 +175,14 @@ async function main(): Promise<void> {
     is(`${label}: read again, still shut`, await stateOf("ref@example.com", one), "closed");
   }
 
-  part("A one-off written down on the thanks page waits for Stripe to say it was not refunded");
+  part("A one-off written down on the thanks page stays open while Stripe cannot be read (owner decision 18)");
   await forgetPaid(store, "leo@example.com");
   // The stranger's whole answer from the controls is kept ten minutes and rightly decides: ask again.
   await forgetPaid(store, "nobody@example.com");
   garble = GARBLED[0][1];
-  is("a one-off written down, refund not readable: unknown, not open", await stateOf("leo@example.com", one), "unknown");
+  // Rule 23: expected "unknown" until owner decision 18 (C1-20261109-1029-C5-52; C1-20261109-1054-C5-54): the entry is
+  // proof of payment, and only a refund Stripe confirms takes it off the ledger (tests/learn-refund-confirmed.test.ts).
+  is("a one-off written down, refund not readable: open (owner decision 18)", await stateOf("leo@example.com", one), "open");
   is("a stranger is not confirmed either: nothing tells the two apart, and nothing opens", await stateOf("nobody@example.com", one), "unknown");
   garble = null;
   await forgetPaid(store, "leo@example.com");
@@ -190,7 +206,8 @@ async function main(): Promise<void> {
   is("a member beside a row that does not read: open", await stateOf("amy@example.com", member), "open");
   sessions["ted@example.com"] = [{ id: "cs_test_ted000000001", metadata: "garbled" }, filler(6)];
   await recordEnrollment(store, "ted@example.com", one.id, START, "stripe");
-  is("a course written down, its refund maybe on the unreadable row: unknown, not open", await stateOf("ted@example.com", one), "unknown");
+  // Rule 23: expected "unknown" until owner decision 18 (as above): what cannot be read keeps what was written down.
+  is("a course written down, its refund maybe on the unreadable row: open (owner decision 18)", await stateOf("ted@example.com", one), "open");
 
   part("A kept answer in another shape is asked again, never read as 'nothing refunded'");
   const cacheKey = `nl:learn:paid:${storeKey(store)}:${emailKey("ref@example.com")}`;
@@ -212,6 +229,24 @@ async function main(): Promise<void> {
   is("unknown: 'try again', not 'sent'", asked, "error");
   is("and nothing was sent", sends, 0);
   garble = null;
+
+  part("While Stripe cannot be read, the link form gives every address the same answer (Claude 7's MEDIUM on #3376)");
+  await forgetPaid(store, "rec@example.com");
+  await forgetPaid(store, "nob@example.com");
+  await recordEnrollment(store, "rec@example.com", one.id, START, "stripe");
+  // Email that goes out, so a buyer's link is really sent: the leak is a "sent" only a buyer gets.
+  const mail = installSesMailFixture({ fallback: globalThis.fetch });
+  mail.configure();
+  const mailedTo = (address: string) => mail.sent.filter((message) => message.to.includes(address)).length;
+  garble = GARBLED[0][1];
+  const recordedBuyer = await requestCourseLink({ store, product: one, email: "rec@example.com", ip: "203.0.113.10", origin: "https://marktmorgen.com" });
+  const nonBuyer = await requestCourseLink({ store, product: one, email: "nob@example.com", ip: "203.0.113.11", origin: "https://marktmorgen.com" });
+  garble = null;
+  mail.restore();
+  is("a recorded buyer and an address that bought nothing get the same answer", recordedBuyer, nonBuyer);
+  is("and that answer is 'try again', never a 'sent' that only a buyer gets", nonBuyer, "error");
+  is("the recorded buyer is still emailed the link", mailedTo("rec@example.com"), 1);
+  is("the address that bought nothing is emailed nothing", mailedTo("nob@example.com"), 0);
 
   part("The course page says it, in every store language, and sells nothing to the member");
   for (const code of LANGUAGE_CODES) {

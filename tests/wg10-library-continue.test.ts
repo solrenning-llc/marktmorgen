@@ -74,7 +74,10 @@ const page = readFileSync("app/[handle]/course/[product]/[lesson]/page.tsx", "ut
 is("the key is made for the signed-in student only (never the creator or a visitor)", /const lastPerson = student \? deviceLastKey\(student\.email\) : null;/.test(page), true);
 is("and the lesson's own address, titles and course are handed over", /\{lastPerson && lastPath \? <RememberLastLesson person=\{lastPerson\} path=\{lastPath\} courseId=\{course\.id\} lesson=\{lesson\.title\} course=\{product\.title\} store=\{store\.name\} \/> : null\}/.test(page), true);
 const coursePage = readFileSync("app/[handle]/course/[product]/page.tsx", "utf8");
-is("the course page forgets it whenever it opens without confirming access", /const forgetPerson = access\.state !== "open" && access\.learner && !access\.learner\.owner \? deviceLastKey\(access\.learner\.email\) : null;/.test(coursePage) && /\{forgetPerson \? <ForgetLastLesson courseId=\{course\.id\} person=\{forgetPerson\} \/> : null\}/.test(coursePage), true);
+// Regra 23 (merge of main into claude5/learn-access-exact): as for forgetKey (tests/wg10-lesson-position.test.ts), the
+// condition also leaves out "unknown" (Stripe could not be read), so a paying student's last lesson is not wiped on a
+// failed read; every state that is really not open still forgets it.
+is("the course page forgets it whenever it opens without confirming access, never while Stripe could not be read", /const forgetPerson = access\.state !== "open" && access\.state !== "unknown" && access\.learner && !access\.learner\.owner \? deviceLastKey\(access\.learner\.email\) : null;/.test(coursePage) && /\{forgetPerson \? <ForgetLastLesson courseId=\{course\.id\} person=\{forgetPerson\} \/> : null\}/.test(coursePage), true);
 
 part("The library: nothing drawn before the browser is read");
 is("server markup is empty, so nothing shows that is not there", renderToStaticMarkup(createElement(LibraryContinue, { person: ADA, open: ["ada-studio"] })), "");

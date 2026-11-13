@@ -155,6 +155,18 @@ export class MemoryRedis {
           }
           return null;
         }
+        // lib/community-polls.ts CAST_VOTE: a vote cast and its tally moved, only while the vote kept is the one read.
+        if (key.startsWith("-- marktmorgen:community-poll-vote:v1\n") && args[0] === "3" && args.length >= 9) {
+          const [, votes, tally, trace, who, read, next, ref, goneCount, ...answers] = args;
+          const kept = this.run(["HGET", votes, who]);
+          if ((typeof kept === "string" ? kept : "") !== read) return 0;
+          const gone = Number(goneCount);
+          answers.forEach((answer, i) => this.run(["HINCRBY", tally, answer, i < gone ? -1 : 1]));
+          this.run(next === "" ? ["HDEL", votes, who] : ["HSET", votes, who, next]);
+          if (read === "" && next !== "") this.run(["SADD", trace, ref]);
+          if (read !== "" && next === "") this.run(["SREM", trace, ref]);
+          return 1;
+        }
         // lib/community.ts GIVE_BACK_HANDLE: a handle deleted only while it points at the member and their record does not carry it.
         if (key.startsWith("-- marktmorgen:community-handle-give-back:v1\n") && args[0] === "2" && args.length === 5) {
           const [, members, handles, handle, who] = args;

@@ -37,6 +37,7 @@
  * moves the count off the old option and on to the new one in the same call.
  */
 import { redisPipeline } from "@/lib/redis";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { type DataStore, giveData, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { cleanLine } from "@/lib/community-text";
@@ -134,31 +135,62 @@ export async function vote(
 ): Promise<boolean> {
   if (pollClosed(poll)) return false;
   const picked = cleanChoice(poll, choice);
-  const [raw] = await redisPipeline([["HGET", votesKey(id, post), who]]);
-  const before = typeof raw === "string" && raw ? raw.split(",").filter(Boolean) : [];
-  const gone = before.filter((one) => !picked.includes(one));
-  const added = picked.filter((one) => !before.includes(one));
-  if (!gone.length && !added.length) return true;
-  // A vote is counted in its post's slot of the store's data room (lib/community.ts):
-  // a new one takes room first (DataRoomError when it does not fit), one taken back gives it.
-  const weight = (list: string[]) => (list.length ? dataBytes([list.join(",")], 1) : 0);
-  const grown = weight(picked) - weight(before);
-  // A first vote also writes its entry in the member's trace (lib/community.ts, traceKey); taking every pick back removes it.
-  const traceIn = picked.length > 0 && before.length === 0;
-  const traceOut = picked.length === 0 && before.length > 0;
-  if (grown > 0 || traceIn) await needData(room, [...(grown > 0 ? [{ slot: `cm:p:${post}`, bytes: grown }] : []), ...(traceIn ? [TRACE_ENTRY] : [])]);
-  await redisPipeline([
-    ...gone.map((one) => ["HINCRBY", tallyKey(id, post), one, -1]),
-    ...added.map((one) => ["HINCRBY", tallyKey(id, post), one, 1]),
-    picked.length
-      ? ["HSET", votesKey(id, post), who, picked.join(",")]
-      : ["HDEL", votesKey(id, post), who],
-    ...(traceIn ? [["SADD", traceKey(id, who), `v:${post}`]] : []),
-    ...(traceOut ? [["SREM", traceKey(id, who), `v:${post}`]] : []),
-  ]);
-  if (grown < 0 || traceOut) await giveData(room, [...(grown < 0 ? [{ slot: `cm:p:${post}`, bytes: -grown }] : []), ...(traceOut ? [TRACE_ENTRY] : [])]);
-  return true;
+  // Another tab may vote between the read and the write: the write lands only while the vote kept is still the one
+  // read (CAST_VOTE), and otherwise everything is read and worked out again, a few times at most.
+  for (let attempt = 0; attempt < VOTE_TRIES; attempt += 1) {
+    const [raw] = await redisPipeline([["HGET", votesKey(id, post), who]]);
+    // Null is no vote yet; any other reply than the kept vote is unknown (CX-123 rule 24), never "no vote yet": the
+    // tally would count this person's vote a second time.
+    if (raw !== null && typeof raw !== "string") throw new UnknownReplyError("a member's vote in a poll");
+    const before = typeof raw === "string" && raw ? raw.split(",").filter(Boolean) : [];
+    const gone = before.filter((one) => !picked.includes(one));
+    const added = picked.filter((one) => !before.includes(one));
+    if (!gone.length && !added.length) return true;
+    // A vote is counted in its post's slot of the store's data room (lib/community.ts):
+    // a new one takes room first (DataRoomError when it does not fit), one taken back gives it.
+    const weight = (list: string[]) => (list.length ? dataBytes([list.join(",")], 1) : 0);
+    const grown = weight(picked) - weight(before);
+    // A first vote also writes its entry in the member's trace (lib/community.ts, traceKey); taking every pick back removes it.
+    const traceIn = picked.length > 0 && before.length === 0;
+    const traceOut = picked.length === 0 && before.length > 0;
+    const taken = [...(grown > 0 ? [{ slot: `cm:p:${post}`, bytes: grown }] : []), ...(traceIn ? [TRACE_ENTRY] : [])];
+    if (taken.length) await needData(room, taken);
+    const [cast] = await redisPipeline([
+      ["EVAL", CAST_VOTE, 3, votesKey(id, post), tallyKey(id, post), traceKey(id, who), who, typeof raw === "string" ? raw : "", picked.join(","), `v:${post}`, gone.length, ...gone, ...added],
+    ]);
+    if (cast === 0) {
+      // Not written: another tab changed the vote first. What was taken for this try goes back, and it is tried again.
+      if (taken.length) await giveData(room, taken);
+      continue;
+    }
+    // Any other reply than 1 may have landed: the room stays taken and the request answers as not done.
+    if (cast !== 1) throw new UnknownReplyError("a vote cast in a poll");
+    if (grown < 0 || traceOut) await giveData(room, [...(grown < 0 ? [{ slot: `cm:p:${post}`, bytes: -grown }] : []), ...(traceOut ? [TRACE_ENTRY] : [])]);
+    return true;
+  }
+  throw new UnknownReplyError("a vote changed by another tab while it was cast");
 }
+
+/** How many times a vote is read and cast again when another tab changed it in between. */
+const VOTE_TRIES = 3;
+
+/**
+ * Casts one person's vote and moves the tally with it in one step, only while the vote kept is still the one read.
+ * KEYS: the votes, the tally, the member's trace. ARGV: who, the vote read ("" for none), the new vote ("" takes it
+ * back), the trace's entry, how many answers go, those answers, then the answers added. 1 when cast, 0 when the vote
+ * kept was no longer the one read, and nothing was written.
+ */
+export const CAST_VOTE = `-- marktmorgen:community-poll-vote:v1
+local kept = redis.call('HGET', KEYS[1], ARGV[1])
+if kept == false then kept = '' end
+if kept ~= ARGV[2] then return 0 end
+local gone = tonumber(ARGV[5])
+for i = 6, 5 + gone do redis.call('HINCRBY', KEYS[2], ARGV[i], -1) end
+for i = 6 + gone, #ARGV do redis.call('HINCRBY', KEYS[2], ARGV[i], 1) end
+if ARGV[3] == '' then redis.call('HDEL', KEYS[1], ARGV[1]) else redis.call('HSET', KEYS[1], ARGV[1], ARGV[3]) end
+if ARGV[2] == '' and ARGV[3] ~= '' then redis.call('SADD', KEYS[3], ARGV[4]) end
+if ARGV[2] ~= '' and ARGV[3] == '' then redis.call('SREM', KEYS[3], ARGV[4]) end
+return 1`;
 
 /** The poll as this person should see it right now. */
 export async function pollView(

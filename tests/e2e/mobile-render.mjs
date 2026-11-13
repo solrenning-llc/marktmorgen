@@ -1,4 +1,5 @@
 import {createRequire} from "node:module";
+import {sampleFailures} from "./mobile-render-verdict.mjs";
 import {spawn} from "node:child_process";
 import {resolve,join} from "node:path";
 const appRoot=resolve(process.argv[2]??".");
@@ -107,8 +108,9 @@ try{
    }
    result.targets={lcp:typeof before.lcp==="number"&&before.lcp<2500,cls:before.cls<0.1,interaction:interactionMs!==null&&interactionMs<200};
    console.log("MOBILE_RENDER_MEASUREMENT:"+JSON.stringify(result));results.push(result);
-   if(writes||!Number.isFinite(before.lcp)||!Number.isFinite(before.cls)||interactionMs===null)failed=true;
-   if(label==="candidate"&&Object.values(result.targets).some(value=>!value))failed=true;
+   // The same rule as before, now said: a failed sample names its page, sample and every reason (tests/e2e/mobile-render-verdict.mjs).
+   const reasons=sampleFailures({writes,lcp:before.lcp,cls:before.cls,interactionMs,targets:result.targets},label);
+   if(reasons.length){failed=true;console.error("MOBILE_RENDER_FAILURE:"+JSON.stringify({label,path,sample,reasons}));}
    // After preserving every cold performance measurement, exercise the real
    // cycle slots and native disclosure. No warm-up or threshold changes.
    if(path==="/"&&sample===1){

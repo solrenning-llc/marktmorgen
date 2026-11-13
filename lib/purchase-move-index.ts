@@ -179,7 +179,10 @@ export async function readMovedIndex(sid: string, raw: string): Promise<{ movedT
     const back = second[0];
     // A line is a move's id: anything else is unknown, never "not moved" (Claude 3 on #3625, LOW 4).
     if (back !== null && (typeof back !== "string" || !ID.test(back))) throw new UnknownReplyError(what);
-    if (back === mark.id) movedTo = mark.to;
+    // A valid mark whose line back is missing or names another move is incomplete evidence (Codex H2 on #3626):
+    // unknown, never "not moved", which would give the old address what it moved away.
+    if (back !== mark.id) throw new UnknownReplyError(what);
+    movedTo = mark.to;
   }
   const movedFrom = olds.filter((old, i) => {
     const theirs = markOf(second[(mark ? 1 : 0) + i], what);
@@ -317,16 +320,20 @@ export async function forgetMovedPerson(store: Store, raw: string): Promise<numb
     commands.push(["DEL", movedKey(sid, address)], ["HDEL", intoKey(sid, mark.to), address]);
     olds.add(address);
   }
-  if (lines.size) {
-    commands.push(["DEL", intoKey(sid, address)]);
-    for (const old of lines.keys()) {
-      commands.push(["DEL", movedKey(sid, old)]);
-      olds.add(old);
-    }
+  // The old addresses' marks go first, and the index only once they are gone (Codex H2 on #3626): a mark left without
+  // its line is unknown to the readers, and the index is the only way back to it, so a deletion stopped midway keeps
+  // the index for the next try to finish.
+  for (const old of lines.keys()) {
+    commands.push(["DEL", movedKey(sid, old)]);
+    olds.add(old);
   }
   if (!commands.length) return 0;
   const done = repliesFor(await redisPipeline(commands), commands.length);
   if (!done || done.some((reply) => typeof reply !== "number")) throw new UnknownReplyError(what);
+  if (lines.size) {
+    const gone = repliesFor(await redisPipeline([["DEL", intoKey(sid, address)]]), 1);
+    if (!gone || typeof gone[0] !== "number") throw new UnknownReplyError(what);
+  }
   await giveData(store, [...olds].map((old) => ({ slot: movedRoomSlot(sid, old), bytes: 0, set: true })));
   return (mark ? 2 : 0) + (lines.size ? 1 + lines.size : 0);
 }

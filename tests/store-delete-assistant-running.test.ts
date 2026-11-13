@@ -13,6 +13,7 @@ import { NextRequest } from "next/server";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { claimHandle, createStore, deleteStore, setAssistantPlan, storeForId, storeRef } from "@/lib/store";
 import { POST as storesRoute } from "@/app/api/store/stores/route";
+import { assistantPlanOf, syncAssistant } from "@/lib/assistant-billing";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -76,7 +77,11 @@ async function main(): Promise<void> {
   part("An add-on that has ended does not hold the store");
   {
     const store = await extraStore("assist-ended@example.com", "assistendedfirst", "assistendedextra");
-    await setAssistantPlan(storeRef(store), { subscriptionId: "sub_assistantended1", active: false, period: null, cancelsAtEnd: false, disputedAt: "" });
+    const ended = assistantPlanOf({ id: "sub_assistantended1", status: "canceled", cancel_at_period_end: false, items: { data: [{}] } });
+    is("Stripe's canceled subscription is written down as ended", ended?.ended ?? null, true);
+    is("and so is one that expired before its first payment", assistantPlanOf({ id: "sub_assistantexpired1", status: "incomplete_expired", items: { data: [{}] } })?.ended ?? null, true);
+    const saved = await setAssistantPlan(storeRef(store), ended!);
+    is("the store keeps that it ended", saved?.assistantPlan?.ended ?? null, true);
     const result = await deleteStore(storeRef(store));
     is("deleting it goes through", result.ok ? "deleted" : result.reason, "deleted");
   }
@@ -95,10 +100,35 @@ async function main(): Promise<void> {
     is("which names no button the assistant's card does not show while its payment is failing", /press|Stop at the end/i.test(notice?.[2] ?? "press"), false);
   }
 
-  part("An add-on whose paid period is over charges nothing more: the store can go");
+  part("A past_due add-on whose snapshot came without a period still holds the store (Claude 3 on #4202)");
+  {
+    // "Ended" and "not known" must not have the same shape: no period read is not proof that it stopped.
+    const plan = assistantPlanOf({ id: "sub_assistantnoperiod1", status: "past_due", cancel_at_period_end: false, items: { data: [{}] } });
+    is("Stripe's past_due reply without a period is written down as not active, no period, not ended", [plan?.active, plan?.period, plan?.ended ?? false], [false, null, false]);
+    const store = await extraStore("assist-noperiod@example.com", "assistnoperiodfirst", "assistnoperiodextra");
+    await setAssistantPlan(storeRef(store), plan!);
+    const result = await deleteStore(storeRef(store));
+    is("deleting it is refused", result.ok ? "deleted" : result.reason, "assistant_due");
+    is("the store is still there", (await storeForId(store.sid))?.handle ?? null, "assistnoperiodextra");
+  }
+
+  part("A past_due add-on whose recorded period is over may have renewed into the next one: it still holds the store (nuvem F LEVE 2)");
   {
     const store = await extraStore("assist-over@example.com", "assistoverfirst", "assistoverextra");
     await setAssistantPlan(storeRef(store), { subscriptionId: "sub_assistantover1", active: false, period: { start: NOW - 40 * 86_400, end: NOW - 10 * 86_400, renews: true }, cancelsAtEnd: false, disputedAt: "" });
+    const result = await deleteStore(storeRef(store));
+    is("deleting it is refused until Stripe says it ended", result.ok ? "deleted" : result.reason, "assistant_due");
+  }
+
+  part("An add-on Stripe no longer knows (404) is written down as ended, and the store can go");
+  {
+    const store = await extraStore("assist-gone@example.com", "assistgonefirst", "assistgoneextra");
+    await setAssistantPlan(storeRef(store), { subscriptionId: "sub_assistantgone1", active: false, period: MONTH, cancelsAtEnd: false, disputedAt: "" });
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async () => new Response(JSON.stringify({ error: { type: "invalid_request_error", message: "No such subscription" } }), { status: 404 })) as typeof fetch;
+    const synced = await syncAssistant((await storeForId(store.sid))!);
+    globalThis.fetch = realFetch;
+    is("the add-on is written down as ended", [synced.assistantPlan?.active, synced.assistantPlan?.ended], [false, true]);
     const result = await deleteStore(storeRef(store));
     is("deleting it goes through", result.ok ? "deleted" : result.reason, "deleted");
   }

@@ -54,4 +54,10 @@ test("a membership that cannot be read neither reopens a refunded course nor shu
   assert.equal(open.includes(once), false, "the course refunded in full stays shut");
   assert.equal(open.includes(clubB), true, "the live membership's course stays open");
   assert.equal(open.includes(clubA), false, "the membership that cannot be read opens nothing");
+  assert.deepEqual(redis.keys().filter((k) => k.startsWith("nl:learn:paid:")), [], "the answer with a membership not read is not kept");
+  // The next good read decides, and is kept.
+  sessions["zed@example.com"][2] = member("cs_test_zed000000003", clubA, "active");
+  const again = [...(await paidCourses(store, "zed@example.com")).keys()];
+  assert.deepEqual([again.includes(once), again.includes(clubB), again.includes(clubA)], [false, true, true], "a good read opens the membership");
+  assert.equal(redis.keys().filter((k) => k.startsWith("nl:learn:paid:")).length, 1, "a whole answer is kept");
 });

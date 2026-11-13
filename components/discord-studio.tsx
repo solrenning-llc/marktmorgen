@@ -1,5 +1,6 @@
 "use client";
 
+import { ConfirmAction } from "@/components/confirm-action";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "@/components/toast";
@@ -125,7 +126,6 @@ export function DiscordStudio({
   const [newRole, setNewRole] = useState("");
   const [making, setMaking] = useState(false);
   const [kick, setKick] = useState(server?.kick ?? false);
-  const [leaving, setLeaving] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const names = new Map(allRoles.map((r) => [r.id, r.name]));
@@ -265,31 +265,23 @@ export function DiscordStudio({
       </section>
 
       <section className="mt-8 border-t border-line pt-6">
-        {leaving ? (
-          <div className="flex flex-wrap items-center gap-3 text-sm">
-            <span className="text-ink-soft">Disconnect the server? The bot leaves it. Roles already given stay as they are, and nobody new can join from your store.</span>
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
-              disabled={busy}
-              onClick={async () => {
-                setBusy(true);
-                const answer = await send({ action: "disconnect" });
-                setBusy(false);
-                if (!answer.ok) return setError(errorText(answer.error));
-                toast("Disconnected.");
-                router.refresh();
-              }}
-            >
-              Yes, disconnect
-            </button>
-            <button type="button" className="text-sm font-bold text-ink-soft underline underline-offset-4" onClick={() => setLeaving(false)}>Keep it</button>
-          </div>
-        ) : (
-          <button type="button" className="text-sm font-bold text-ink-soft underline underline-offset-4 hover:text-danger" onClick={() => setLeaving(true)}>
-            Disconnect the server
-          </button>
-        )}
+        <ConfirmAction
+          className="text-sm font-bold text-ink-soft underline underline-offset-4 hover:text-danger"
+          disabled={busy}
+          busy={busy}
+          question="Disconnect the server? The bot leaves it. Roles already given stay as they are, and nobody new can join from your store."
+          yes="Yes, disconnect"
+          onConfirm={async () => {
+            setBusy(true);
+            const answer = await send({ action: "disconnect" });
+            setBusy(false);
+            if (!answer.ok) return setError(errorText(answer.error));
+            toast("Disconnected.");
+            router.refresh();
+          }}
+        >
+          Disconnect the server
+        </ConfirmAction>
       </section>
     </>
   );

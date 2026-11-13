@@ -27,7 +27,8 @@ test("a closed store's checkout asks, JSON members with an address each, are tak
   redis.run(["ZADD", "nl:recover:asks", 1, theirs, 2, others]);
   const { pruned } = await walkPage(["nl:recover:asks"], new Map(), owners);
   assert.equal(pruned, 1, "one member named the closing store");
-  assert.deepEqual(redis.run(["ZRANGE", "nl:recover:asks", 0, -1]), [others], "only the other store's ask is left");
+  assert.equal(redis.run(["ZSCORE", "nl:recover:asks", theirs]), null, "the closing store's ask, with its buyer's address, is gone");
+  assert.notEqual(redis.run(["ZSCORE", "nl:recover:asks", others]), null, "the other store's ask is left");
 });
 
 test("a member that only looks like JSON, or holds a mark inside a longer text, is never taken for the store's", async () => {

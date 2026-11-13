@@ -25,7 +25,7 @@ export async function repairMove(email: string): Promise<boolean> {
   const broken = await readBrokenMove(email).catch((error: unknown) => (console.error("reading a broken move failed", error), undefined));
   if (broken === undefined) return false;
   if (!broken) return true;
-  const { from, to, copy } = broken;
+  const { from, to, copy, op } = broken;
   try {
     if ((await moveRunning(from)) || (await moveRunning(to))) return false;
     const [atFrom, atTo] = await Promise.all([storeForEmail(from), storeForEmail(to)]);
@@ -45,7 +45,8 @@ export async function repairMove(email: string): Promise<boolean> {
     // An index a lost answer left on the other address is pointed back at the list's (C3-117).
     await repointPasskeys(home);
     await endAllSessions(away);
-    await clearBrokenMove(from, to);
+    // Only the move read here: one that replaced it since is never cleared by this late repair (Codex X5 on #2271).
+    await clearBrokenMove(from, to, op ?? null);
     return true;
   } catch (error) {
     console.error("repairing a broken move failed", error);
@@ -55,7 +56,9 @@ export async function repairMove(email: string): Promise<boolean> {
 
 /** What a person looking at a broken move needs to see (scripts/move-repair.mjs). */
 export async function describeMove(email: string): Promise<Record<string, unknown>> {
-  const broken = await readBrokenMove(email);
+  const read = await readBrokenMove(email);
+  // The move's token is for its own clear only, never shown (Codex X5 on #2271).
+  const broken = read ? { from: read.from, to: read.to, ...(read.copy ? { copy: read.copy } : {}) } : read;
   const addresses = broken ? [broken.from, broken.to] : [email];
   const each = await Promise.all(
     addresses.map(async (address) => ({
@@ -89,7 +92,7 @@ export async function clearBrokenMoveByHand(email: string, confirm: string): Pro
   });
   const [a, b] = await Promise.all([holds(broken.from), holds(broken.to)]);
   if ((a.store && !a.ways && b.ways) || (b.store && !b.ways && a.ways)) return "split";
-  await clearBrokenMove(broken.from, broken.to);
+  await clearBrokenMove(broken.from, broken.to, broken.op ?? null);
   await endAllSessions(broken.from);
   await endAllSessions(broken.to);
   return "cleared";

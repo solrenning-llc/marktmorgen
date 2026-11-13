@@ -9,6 +9,7 @@ import {captureCourseConfirmationCandidate,resolveCourseDoorCandidate, type Cour
 import {confirmationBodyDigest} from "@/lib/order-confirmation-outbox";
 import {prepareOrderConfirmationPreintent, type OrderConfirmationPreintent} from "@/lib/orders";
 import type {Admission} from "@/lib/order-admission";
+import type {Product} from "@/lib/catalog";
 import type {Store} from "@/lib/store";
 import {canSeal, seal, unseal} from "@/lib/secret-box";
 
@@ -54,7 +55,7 @@ function frozen<T>(value:T):T{
  return Object.freeze(value);
 }
 function storeSnapshot(value:unknown):Data|null{
- const store=select(value,["sid","statsId","stripeAccountId","handle","name","email","currency","language","extra","shared","subscriptionActive","subscriptionId","trialEnds","tier","planEndedAt","cycle","period"]);
+ const store=select(value,["sid","statsId","stripeAccountId","handle","name","email","currency","language","extra","shared","subscriptionActive","subscriptionId","trialEnds","tier","planEndedAt","cycle","period"] satisfies (keyof Store)[]);
  if(!store)return null;
  for(const [key,max]of Object.entries({sid:32,statsId:32,stripeAccountId:128,handle:128,name:300,email:320,currency:3,language:12,subscriptionId:128,tier:16,planEndedAt:64,cycle:5})){
   if(typeof store[key]==="string"&&(store[key] as string).length>max)return null;
@@ -63,7 +64,7 @@ function storeSnapshot(value:unknown):Data|null{
  return Object.freeze(store);
 }
 function productSnapshot(value:unknown):Data|null{
- const product=select(value,["id","title","priceCents","course","call","podcast","recurring","bundle","keys","file","link","plan","pwyw","callPackage","shipping","note","options","fields"]);
+ const product=select(value,["id","title","priceCents","course","call","podcast","recurring","bundle","keys","file","link","plan","pwyw","callPackage","shipping","note","options","fields"] satisfies (keyof Product)[]);
  if(!product)return null;
  if(typeof product.id==="string"&&product.id.length>128||typeof product.title==="string"&&product.title.length>1000)return null;
  const course=select(product.course,["id","lessons"]);if(!course)return null;product.course=Object.freeze(course);

@@ -1147,7 +1147,8 @@ export const MAX_PAID_BYTES = 20 * (40 + 6 + 6 * 200) + 2_000;
  * what a reading of them all (readPayPalSales, readPayPalRefundsWithCoverage)
  * moves is counted from these before it reads (lib/segments.ts, buyerLedger).
  * The sales are read whenever the store's sales are (lib/stats.ts,
- * readPaidSales), PayPal connected or not; the refunds only while it is.
+ * readPaidSales), PayPal connected or not; the buyer ledger reads their
+ * refunds with them, connected or not (#4398).
  */
 export async function paypalKept(statsId: string | null, refunds: boolean): Promise<{ sales: number; refunds: number }> {
   if (!statsId || !isRedisConfigured()) return { sales: 0, refunds: 0 };

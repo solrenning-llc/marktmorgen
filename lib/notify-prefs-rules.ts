@@ -113,12 +113,14 @@ export function parseOff(value: unknown): OptionalEvent[] | null {
  * once each, in the catalog's order. Lenient where parseOff is strict, because
  * this reads what the store already saved: an event retired since is dropped
  * and the rest of the creator's choice kept. No value (a store saved before the
- * choice existed) is nothing off; a value that is not a list is unknown, null,
- * never "nothing off" (Codex X2's review of #3013), so optional alerts are not
+ * choice existed) is nothing off; a value that is not a list, a stored null
+ * included, is unknown, null, never "nothing off" (Codex X2's review of #3013), so optional alerts are not
  * emailed until the owner saves the choice again.
  */
 export function keptOff(value: unknown): OptionalEvent[] | null {
-  if (value === undefined || value === null) return [];
+  // Only no field (undefined) is a store from before the choice; any present value that is not a list, null included
+  // (Codex X2's focal on #3013), is unknown.
+  if (value === undefined) return [];
   if (!Array.isArray(value)) return null;
   const seen = new Set(value.filter(isOptionalEvent));
   return OPTIONAL_EVENTS.filter((event) => seen.has(event));

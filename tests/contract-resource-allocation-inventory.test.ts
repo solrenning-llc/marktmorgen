@@ -59,9 +59,9 @@ const ALLOWANCE_TAKE_INVENTORY: Record<string, Entry> = {
   "lib/inbox.ts#open": { state: "gated", calls: 1 },
   "lib/inbox.ts#visitorSend": { state: "gated", calls: 1 },
   "lib/inbox.ts#writeToAffiliate": { state: "gated", calls: 1 },
-  "lib/metered-limits.ts#withinServiceWhy": { state: "pending", calls: 1, why: "The generic \"integration\" figure; each calling service gates on its own or not, and its callers are not inventoried yet." },
+  "lib/metered-limits.ts#withinServiceWhy": { state: "gated", calls: 1, note: "Removals skip it at their callers (host-calendar removing, email-sync disconnect)." },
   "lib/person-erasure.ts#erasePerson": { state: "kept-right", calls: 2, why: "Erasing a person is their right and the store's legal duty; never refused because a period's cash proof is missing." },
-  "lib/store-copy.ts#charge": { state: "pending", calls: 1, why: "Studio units for copying a store; no cohort proof before the take." },
+  "lib/store-copy.ts#charge": { state: "gated", calls: 1 },
   "lib/studio-route.ts#countStudio": { state: "gated", calls: 1, note: "After the essential needs (billing, delete, export, member), which take their own daily figure and stay open." },
   "lib/studio-route.ts#holdStudio": { state: "gated", calls: 2 },
   "lib/webhooks.ts#attempt": { state: "gated-in-primitive", calls: 1, kind: "webhook" },
@@ -215,7 +215,7 @@ is("no problem between sources, inventory and key", problems, []);
 is("the scan finds every take (29 on 13 November 2026)", allowanceSites(sources).length, Object.values(ALLOWANCE_TAKE_INVENTORY).reduce((n, e) => n + e.calls, 0));
 const pending = Object.values(ALLOWANCE_TAKE_INVENTORY).filter((e) => e.state === "pending").length;
 const pendingCalls = Object.values(ALLOWANCE_TAKE_INVENTORY).filter((e) => e.state === "pending").reduce((n, e) => n + e.calls, 0);
-is("pending takes, down from 11 (part 1) as part 1b gates them", pendingCalls, 5);
+is("pending takes, down from 11 (part 1) as part 1b gates them", pendingCalls, 3);
 is("pending takes keep resourceAllocations false", pending > 0 && CONTRACT_ADMISSION_COVERAGE.resourceAllocations, false);
 is("the other two core keys are untouched", [CONTRACT_ADMISSION_COVERAGE.renewals, CONTRACT_ADMISSION_COVERAGE.settlementAndReserveReconciliation], [false, false]);
 

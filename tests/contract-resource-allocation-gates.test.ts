@@ -15,6 +15,7 @@ import { paidPeriod } from "./billing-period-fixture";
 import { allowanceUsed } from "@/lib/store-allowance";
 import { countStudio, holdStudio } from "@/lib/studio-route";
 import { holdMoreApi, takeMoreApi } from "@/lib/api-guard";
+import { withinServiceWhy } from "@/lib/metered-limits";
 import { claimHandle, ensureStatsId, setSubscription, storeForEmail, type Store } from "@/lib/store";
 
 beforeEach(() => {
@@ -72,4 +73,13 @@ test("API follow-on units: an unfunded paid period is untouched", async () => {
   assert.equal(await takeMoreApi(store, 2), null);
   assert.equal(typeof (await holdMoreApi(store, 3)), "function");
   assert.equal(await allowanceUsed(store, "api"), 5);
+});
+
+test("calls to connected services: a funded period without its cohort is refused before the take", async () => {
+  const store = await payingStore("gatesservice");
+  const refused = await withinServiceWhy("gates-test", "who", 5, 60, fundedOf(store));
+  assert.equal(refused?.reason, "unknown");
+  assert.equal(await allowanceUsed(store, "integration"), 0);
+  assert.equal(await withinServiceWhy("gates-test", "plain", 5, 60, store), null);
+  assert.equal(await allowanceUsed(store, "integration"), 1);
 });

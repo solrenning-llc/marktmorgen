@@ -28,6 +28,10 @@ const NOW = Math.floor(Date.now() / 1000);
 
 type Mail = { to: string[] | string; subject: string; text: string };
 const mails: Mail[] = [];
+/** Amazon SES, only for the lost-answer part below (synthetic): who it took, and whether it loses its answer. */
+const REGION = "us-east-1";
+const amazon: string[] = [];
+let amazonLosesReply = false;
 let subs: Record<string, unknown>[] = [];
 const originalRun = redis.run.bind(redis);
 let syntheticCommands = 0;
@@ -40,6 +44,18 @@ redis.run = (command) => {
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   const answer = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
+  if (url.hostname === `sts.${REGION}.amazonaws.com`) {
+    return answer({ AssumeRoleWithWebIdentityResponse: { AssumeRoleWithWebIdentityResult: { Credentials: { AccessKeyId: "ASIAEXAMPLENUDGE0001", SecretAccessKey: "lent-for-an-hour-and-never-stored-0000000", SessionToken: "session-token-nudge", Expiration: Math.floor(Date.now() / 1000) + 3_600 } } } });
+  }
+  if (url.hostname === `email.${REGION}.amazonaws.com`) {
+    if (url.pathname === "/v2/email/account") return answer({ ProductionAccessEnabled: true, SendingEnabled: true, EnforcementStatus: "HEALTHY", SendQuota: { Max24HourSend: 50_000, MaxSendRate: 100, SentLast24Hours: 0 } });
+    if (url.pathname === "/v2/email/outbound-emails") {
+      amazon.push((JSON.parse(String(init?.body)) as { Destination: { ToAddresses: string[] } }).Destination.ToAddresses[0]);
+      if (amazonLosesReply) throw new TypeError("synthetic response lost after SES acceptance");
+      return answer({ MessageId: `m-${amazon.length}` });
+    }
+    return answer({}, 404);
+  }
   if (url.hostname === "api.resend.com") {
     mails.push(JSON.parse(String(init?.body)) as Mail);
     return answer({ id: `email_${mails.length}` });
@@ -168,6 +184,25 @@ async function main(): Promise<void> {
   ], ["Weeknight Club is still here for you", true, true, true]);
   await nudgeStore(store, Date.now() + 20_000);
   is("once per period they pay for", [mails.length, await nudgesThisMonth(store)], [1, 1]);
+  // j-mail-5 (Claude 3 cloud J audit): a come-back email whose answer was lost may have gone. Its once-a-period
+  // mark stays, so the next day's run does not send it again: sendEmail's false was read as "not sent", the mark
+  // deleted, and the next daily run, past SES's one-day once-mark, nudged the member again in the same period.
+  const beforeLoss = subs;
+  subs = subs.map((s) => s.id === "sub_Ana000000001"
+    ? { ...s, items: { data: [{ quantity: 1, current_period_end: NOW + 40 * DAY, price: { unit_amount: 2000, recurring: { interval: "month", interval_count: 1 } } }] } }
+    : s);
+  const sesEnv = { AWS_SES_REGION: REGION, AWS_SES_CONFIGURATION_SET: "marktmorgen", AWS_SES_TOPIC_ARN: `arn:aws:sns:${REGION}:123456789012:marktmorgen-email`, AWS_SES_ROLE_ARN: "arn:aws:iam::123456789012:role/synthetic-baseline", VERCEL_OIDC_TOKEN: "aGVhZGVy.cGF5bG9hZA.c2lnbmF0dXJl" };
+  Object.assign(process.env, sesEnv);
+  amazonLosesReply = true;
+  await nudgeStore(store, Date.now() + 20_000);
+  amazonLosesReply = false;
+  // The next daily run, a day later: past the one-day once-mark of the same key.
+  redis.advance(25 * 3_600_000);
+  await nudgeStore(store, Date.now() + 20_000);
+  redis.now = () => Date.now();
+  is("an email whose answer was lost is never sent again in the same period", amazon.filter((to) => to === "ana@example.com").length, 1);
+  for (const name of Object.keys(sesEnv)) delete process.env[name];
+  subs = beforeLoss;
   is("the words in the store's language", nudgeEmail({ storeName: "Harbor", title: "Club", courseUrl: "u", communityUrl: "", language: "de" }).subject, "Club ist weiter für Sie da");
 
   part("Unknown community activity cannot certify a report or send a comeback email");

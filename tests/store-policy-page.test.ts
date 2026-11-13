@@ -37,7 +37,7 @@ is("PayPal taken: said", policyFacts(policyInputFrom(store, [ebook], true, true)
 is("no postal address: no contact section", policyFacts(policyInputFrom({ ...store, mail: null } as typeof store, [ebook], false, true), "en").some((s) => s.id === "contact"), false);
 
 part("The email footer's postal address is on the page only by the creator's own choice (Claude 1's MEDIUM on #1824)");
-// Typed for the footer of list emails (CAN-SPAM), often a home address: never published on a public page unless the
+// Typed for the footer of list emails (CAN-SPAM), often where the creator lives, so it is never published on a public page unless the
 // creator chose it, where they type it.
 const footerOnly = { ...store, mail: { fromName: "Harbor Kitchen", address: "12 Elm St, Apt 3, Leeds" } } as typeof store;
 const chosen = { ...store, mail: { fromName: "Harbor Kitchen", address: "12 Elm St, Apt 3, Leeds", onPolicies: true } } as typeof store;

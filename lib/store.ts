@@ -299,7 +299,7 @@ export type MailSettings = {
   address: string;
   /**
    * The creator chose to show the address on the store's public policies page too (#1824). Typed for the footer
-   * of list emails, it is often a home address: never public by default, only when this is exactly true.
+   * of list emails, it is often where the creator lives, so it is never public by default, only when this is exactly true.
    */
   onPolicies?: true;
 };

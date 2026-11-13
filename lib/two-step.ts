@@ -666,13 +666,18 @@ async function endLocked(email: string, now = Date.now()): Promise<boolean> {
  * or pressed Cancel. The locked sessions are logged out: true. "kept-locked"
  * when they could not be read, so they were not logged out and stay locked
  * until they end (endLocked); whoever says so to the owner never says they
- * were logged out (review of #2556).
+ * were logged out (review of #2556). False only when nothing waits. A write
+ * of the call-off that is not confirmed throws (UnknownReplyError, #4355):
+ * the wait may still be set, so no caller may take it as called off.
  */
 export async function cancelReset(email: string, why: "login" | "studio"): Promise<boolean | "kept-locked"> {
   const called = await withTwoStep(email, async (held) => {
     const record = await read(email);
     if (!record || record.reset === 0) return false;
-    return writeHeld(held, email, { ...record, reset: 0 });
+    // A write that is not confirmed is not "nothing to call off" (#4355, CX-123 rule 24): the wait may still be set,
+    // and would turn two-step login off behind a login that proved the second step. It throws, so the caller refuses.
+    if (!(await writeHeld(held, email, { ...record, reset: 0 }))) throw new UnknownReplyError("calling off the two-step reset");
+    return true;
   });
   if (!called) return false;
   const ended = await endLocked(email);

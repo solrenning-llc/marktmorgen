@@ -94,10 +94,18 @@ export async function POST(request: NextRequest) {
       // Checked again under the account's lock, held while it runs (lib/passkeys.ts unlessSetToGo).
       const doomed = signed.doomed || waiting?.ids.includes(signed.id) === true;
       if (!doomed) {
-        await unlessSetToGo(email, signed.id, async () => {
-          await cancelReset(email, "login").catch((error) => console.error("calling off a two-step reset failed", error));
-          await endRecoveryAccess(email).catch((error) => console.error("closing a recovery login failed", error));
-        }).catch((error) => console.error("calling off a two-step reset failed", error));
+        // Calling the wait off must be confirmed before this login succeeds (#4355): a failure, or a lock that could
+        // not be held, closes the session just opened and answers the error below with no session cookie, so a
+        // pending reset never turns two-step login off behind a login that proved the passkey. A new try calls it off.
+        try {
+          await unlessSetToGo(email, signed.id, async () => {
+            await cancelReset(email, "login");
+            await endRecoveryAccess(email).catch((error) => console.error("closing a recovery login failed", error));
+          });
+        } catch (error) {
+          await endSession(id).catch((ended) => console.error("closing a passkey session whose reset was not called off failed", ended));
+          throw error;
+        }
       }
       const response = Response.json({ ok: true, next: "/studio" });
       response.headers.append("Set-Cookie", sessionCookie(id));

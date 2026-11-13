@@ -2492,6 +2492,36 @@ type SessionLike = {
   discounts?: unknown;
 };
 
+/** Stripe's answer about a paid order in a shape not known: asking again later reads it whole. */
+class UnknownStripeAmount extends Error {
+  constructor(what: string) {
+    super(`Stripe gave ${what} in an unknown shape`);
+    this.name = "UnknownStripeAmount";
+  }
+}
+/**
+ * What Stripe says a paid order or charge was, in its exact shape: whole cents
+ * from 0, and its money as three lower-case letters. Anything else, missing
+ * included, is not known and throws UnknownStripeAmount: never $0, never untaxed
+ * and never dollars, which writeReferral and notePartners would keep for good
+ * (HSETNX). The sweep keeps the order for its next run.
+ */
+function paidCents(value: unknown, what: string): number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) throw new UnknownStripeAmount(what);
+  return value;
+}
+function paidCurrency(value: unknown, what: string): string {
+  if (typeof value !== "string" || !/^[a-z]{3}$/.test(value)) throw new UnknownStripeAmount(what);
+  return value;
+}
+/** A paid checkout's amount, its tax (Stripe's `total_details.amount_tax`, 0 only when Stripe says 0) and its money. */
+function paidOrder(session: SessionLike): { total: number; tax: number; currency: string } {
+  const total = paidCents(session.amount_total, "a paid order's amount");
+  const tax = paidCents(session.total_details?.amount_tax, "a paid order's tax");
+  if (tax > total) throw new UnknownStripeAmount("a paid order's tax");
+  return { total, tax, currency: paidCurrency(session.currency, "a paid order's money") };
+}
+
 /**
  * The share an order carries for the affiliate whose link it came through
  * (`metadata[via_rate]`), as every writer sets it beside `via`: `String(rate)`,
@@ -2540,8 +2570,8 @@ export async function noteSession(
   const handles = saleHandles(store);
   if (!handles.has(meta.store ?? "")) return;
 
-  const total = typeof session.amount_total === "number" ? session.amount_total : 0;
-  const tax = typeof session.total_details?.amount_tax === "number" ? session.total_details.amount_tax : 0;
+  // Read before anything is written (rule 24): never set down at $0, untaxed or in dollars for good (paidOrder).
+  const { total, tax, currency } = paidOrder(session);
   const pi =
     typeof session.payment_intent === "string"
       ? session.payment_intent
@@ -2551,7 +2581,6 @@ export async function noteSession(
   const buyer = typeof session.customer_details?.email === "string" ? session.customer_details.email : "";
   const base = Math.max(0, total - tax);
   const at = typeof session.created === "number" ? session.created : Math.floor(Date.now() / 1000);
-  const currency = readCurrencyCode(session.currency);
 
   // Partners first, and whatever happens next. A partner shares in the
   // product, so how the buyer arrived is beside the point — and this is the
@@ -2666,7 +2695,9 @@ export async function noteSession(
 export async function noteCharge(store: Store, pi: Record<string, unknown>): Promise<void> {
   const meta = (pi.metadata ?? {}) as Record<string, string>;
   if (pi.status !== "succeeded" || typeof pi.id !== "string") return;
-  const amount = typeof pi.amount === "number" ? pi.amount : 0;
+  // Read before anything is written (rule 24): never a $0 or a dollars sale set down for good (paidCents).
+  const amount = paidCents(pi.amount, "a paid offer's amount");
+  const currency = paidCurrency(pi.currency, "a paid offer's money");
   const buyer = typeof pi.receipt_email === "string" ? pi.receipt_email : "";
   const at = typeof pi.created === "number" ? pi.created : Math.floor(Date.now() / 1000);
 
@@ -2681,7 +2712,7 @@ export async function noteCharge(store: Store, pi: Record<string, unknown>): Pro
     // A one-click charge never carries tax: the whole amount is the base.
     base: amount,
     total: amount,
-    currency: readCurrencyCode(pi.currency),
+    currency,
     buyer,
   }).catch((error) => console.error("noting a partner's share failed", error));
 
@@ -2699,7 +2730,7 @@ export async function noteCharge(store: Store, pi: Record<string, unknown>): Pro
     // A one-click charge never carries tax: the whole amount is the base.
     base: amount,
     total: amount,
-    currency: readCurrencyCode(pi.currency),
+    currency,
     rate,
     self: await isSelf(store, aff, buyer),
     promotion: affiliatePromotionFrom(meta) ?? undefined,

@@ -1279,6 +1279,24 @@ async function main(): Promise<void> {
   is("logging in with the passkey meanwhile", [busyIn.status, ((await busyIn.json()) as { error?: string }).error], [503, "busy"]);
   await releaseLock(blocking);
 
+  part("Issue #4364: cancelling a reset keeps a session whose logout was not confirmed locked");
+  const ZEDA = "zeda-locked@example.com";
+  await turnOnApp(ZEDA, "zeda-backup@example.org");
+  const tokenZeda = hex(String(Math.random()));
+  await redis.pipeline([["SET", `nl:auth:link:${hex(`nimbus-auth-link:${tokenZeda}`).slice(0, 40)}`, ZEDA, "EX", 900]]);
+  const heldZeda = await callback(form(`${ORIGIN}/api/auth/callback`, { token: tokenZeda }));
+  const lockedZeda = cookieOf(await codeRoute(form(`${ORIGIN}/api/auth/code`, { action: "reset" }, `nl_2fa=${cookieOf(heldZeda, "nl_2fa")}`)), "nl_session");
+  is("control: the session is locked", (await lockedUntil(lockedZeda)) > Date.now(), true);
+  const realPipeline = redis.pipeline.bind(redis);
+  // endSession's delete (DEL session, DEL its mark, SREM) answers in an unknown shape: its logout is not confirmed.
+  redis.pipeline = (async (commands: (string | number)[][]) =>
+    commands.length === 3 && commands[0][0] === "DEL" && commands[2][0] === "SREM" ? [] : realPipeline(commands)) as typeof redis.pipeline;
+  const cancelled = await cancelReset(ZEDA, "login");
+  redis.pipeline = realPipeline;
+  is("the session itself is still there (its logout did not happen)", await emailForSession(lockedZeda), ZEDA);
+  is("cancelReset reports the locked sessions as kept", cancelled, "kept-locked");
+  is("the session whose logout was not confirmed stays locked", (await lockedUntil(lockedZeda)) > 0, true);
+
   done();
 }
 

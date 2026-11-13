@@ -2519,6 +2519,25 @@ function bumpCents(value: unknown): number {
 }
 
 /**
+ * When a one-time sale was paid, in seconds: the creator's hold ("payable N days after it is made") counts from it.
+ * The charge's own time when the checkout carries it (this payment's, rule 30); otherwise the time it is noted, which is
+ * always at or after the payment, never the checkout's opening, which can be a day or more before a card or a bank
+ * payment lands (Claude 3 nuvem E's money audit, 13/11/2026). Recurring lines already use the invoice's paid time.
+ */
+function paidTimeOf(session: { created?: unknown; payment_intent?: unknown }, pi: string): number {
+  const now = Math.floor(Date.now() / 1000);
+  const opened = typeof session.created === "number" ? session.created : 0;
+  const intent = session.payment_intent;
+  const charge = intent && typeof intent === "object" ? (intent as { latest_charge?: unknown }).latest_charge : null;
+  if (charge && typeof charge === "object") {
+    const { created, payment_intent: owner } = charge as { created?: unknown; payment_intent?: unknown };
+    const own = owner === undefined || owner === pi || (owner && typeof owner === "object" && (owner as { id?: unknown }).id === pi);
+    if (own && typeof created === "number" && Number.isSafeInteger(created) && created >= opened && created <= now + 300) return created;
+  }
+  return Math.max(opened, now);
+}
+
+/**
  * Writes down a settled checkout that came through an affiliate's link.
  * Anything else is left alone, so it is safe to call on every checkout.
  *
@@ -2551,7 +2570,7 @@ export async function noteSession(
         : "";
   const buyer = typeof session.customer_details?.email === "string" ? session.customer_details.email : "";
   const base = Math.max(0, total - tax);
-  const at = typeof session.created === "number" ? session.created : Math.floor(Date.now() / 1000);
+  const at = paidTimeOf(session, pi);
   const currency = readCurrencyCode(session.currency);
 
   // Partners first, and whatever happens next. A partner shares in the

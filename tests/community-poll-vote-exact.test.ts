@@ -6,7 +6,9 @@
  * nobody cast. Now such a reply throws UnknownReplyError (the community
  * route answers "error"), with the tally and the vote untouched.
  */
-import { vote } from "@/lib/community-polls";
+import { vote, votesOf } from "@/lib/community-polls";
+import { COMMUNITY_WORDS } from "@/lib/buyer-words/community";
+import { readFileSync } from "node:fs";
 import type { Poll } from "@/lib/community-polls";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { ROOM } from "./data-room";
@@ -81,6 +83,32 @@ async function main(): Promise<void> {
   await real([["HSET", votes, WHO, ""], ["DEL", tally]]);
   is("a vote over an empty record counts once", await vote(ID, POST, POLL, WHO, ["0"], ROOM), true);
   is("tally: one Yes", await counts(), ["0", "1"]);
+
+  part("votesOf, which feeds the person's data copy, reads each vote exactly (Claude 1's LEVE on #3820)");
+  await real([["DEL", votes], ["DEL", tally]]);
+  is("control: a cast vote is in the copy", (await vote(ID, POST, POLL, WHO, ["1"], ROOM), await votesOf(ID, WHO, [POST])), [{ post: POST, picked: ["1"] }]);
+  is("control: no vote is no entry", await votesOf(ID, WHO, ["p2"]), []);
+  for (const [what, reply] of [["a number", 7], ["an object", { a: 1 }], ["true", true]] as [string, unknown][]) {
+    bend = reply;
+    bending = true;
+    const got = await outcome(() => votesOf(ID, WHO, [POST]));
+    bending = false;
+    is(`HGET answered ${what}: unknown, never left out of the copy`, got, "unknown");
+  }
+  const whole = redis.pipeline;
+  redis.pipeline = (async (batch: Command[]) => (batch[0]?.[0] === "HGET" && batch[0][1] === votes ? [] : real(batch))) as typeof redis.pipeline;
+  const short = await outcome(() => votesOf(ID, WHO, [POST]));
+  redis.pipeline = whole;
+  is("a pipeline with no reply for it: unknown", short, "unknown");
+
+  part("A busy or unconfirmed vote tells the member so (Claude 1 cloud's LEVE on #3820)");
+  const route = readFileSync("app/api/store/community/route.ts", "utf8");
+  const voting = route.slice(route.indexOf('if (action === "vote")'), route.indexOf('if (action === "vote")') + 900);
+  is("the vote's busy and unknown answers come back as their own notice", /LockBusyError[\s\S]*UnknownReplyError[\s\S]*"votebusy"/.test(voting), true);
+  for (const [language, words] of Object.entries(COMMUNITY_WORDS)) {
+    const notice = (words as { notices?: Record<string, string> }).notices?.votebusy ?? "";
+    is(`${language}: the notice has words`, notice.length > 20, true);
+  }
 
   done();
 }

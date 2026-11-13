@@ -41,6 +41,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     invoiceReads.push(url.search);
     return answer(invoiceReply(url.searchParams.get("starting_after"), invoiceReads.length));
   }
+  // The disputes of each paid invoice's payment, read beside its refunds (lib/creator-invite-credit.ts disputedOn): none here.
+  if (method === "GET" && path === "/disputes") return answer({ object: "list", data: [], has_more: false });
   if (method === "GET" && path === "/refunds") return answer({ object: "list", data: [], has_more: false });
   if (method === "GET" && /^\/customers\/cus_[A-Za-z0-9]+\/balance_transactions$/.test(path)) {
     return answer({ object: "list", data: [], has_more: false });

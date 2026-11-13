@@ -77,6 +77,8 @@ async function inviteWorld(history: (customer: string, rows: Txn[]) => unknown) 
     const method = init?.method ?? "GET";
     const answer = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
     if (method === "GET" && path === "/invoices") return answer({ object: "list", data: invoices.get(url.searchParams.get("customer") ?? "") ?? [], has_more: false });
+    // The disputes of each paid invoice's payment, read beside its refunds (lib/creator-invite-credit.ts disputedOn): none here.
+    if (method === "GET" && path === "/disputes") return answer({ object: "list", data: [], has_more: false });
     if (method === "GET" && path === "/refunds") return answer({ object: "list", data: [], has_more: false });
     const txns = path.match(/^\/customers\/(cus_[A-Za-z0-9]+)\/balance_transactions$/);
     if (txns && method === "GET") return answer(history(txns[1], [...(balance.get(txns[1]) ?? [])].reverse()));

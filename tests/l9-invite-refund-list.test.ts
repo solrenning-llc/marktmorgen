@@ -28,6 +28,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     const row = invoiceByCustomer.get(url.searchParams.get("customer") ?? "");
     return answer({ object: "list", data: row ? [row] : [], has_more: false });
   }
+  // The disputes of each paid invoice's payment, read beside its refunds (lib/creator-invite-credit.ts disputedOn): none here.
+  if (method === "GET" && path === "/disputes") return answer({ object: "list", data: [], has_more: false });
   if (method === "GET" && path === "/refunds") {
     const payment = url.searchParams.get("payment_intent") ?? url.searchParams.get("charge") ?? "";
     return answer(refundAnswerByPayment.get(payment));

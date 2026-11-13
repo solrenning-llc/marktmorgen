@@ -8,7 +8,8 @@
  *      pays us from are read. Each one paid at least INVITE_HOLD_DAYS ago —
  *      past the window in which our Refund Policy gives the money back — earns
  *      whoever invited it INVITE_SHARE_PERCENT of what was actually paid,
- *      less anything refunded or credited back. The first one that earns
+ *      less anything refunded, credited back or taken back by a dispute (one
+ *      whose dispute is not decided yet earns nothing until it is). The first one that earns
  *      also earns the invited creator INVITE_BONUS_CENTS on their own plan.
  *      An account that had paid us before it was invited earns nothing: it
  *      was not brought to us.
@@ -49,6 +50,7 @@ import {
   parseCredit,
 } from "@/lib/creator-invites";
 import { INVITE_HOLD_DAYS, inviteShare, readInviteTerms } from "@/lib/creator-invite-rules";
+import { disputeTakes } from "@/lib/retained-revenue";
 
 export const INVITE_STRIPE_VERSION = "2026-08-26.dahlia";
 
@@ -110,9 +112,50 @@ async function customerFor(store: Store): Promise<string | null> {
   return first?.stripeCustomerId && CUSTOMER_PATTERN.test(first.stripeCustomerId) ? first.stripeCustomerId : null;
 }
 
-/** What was given back on one invoice's payments: refunds made or on their way. */
-async function refundedOn(invoice: Invoice): Promise<number> {
+/** Every state Stripe gives a dispute (stripe-node v22.6.0 Dispute.Status, and the legacy `charge_refunded`). */
+const DISPUTE_STATES = new Set(["warning_needs_response", "warning_under_review", "warning_closed", "needs_response", "under_review", "won", "lost", "prevented", "charge_refunded"]);
+/** A dispute or an inquiry not decided yet: the money it may take is not known, so the payment earns nothing yet. */
+const DISPUTE_OPEN = new Set(["warning_needs_response", "warning_under_review", "needs_response", "under_review"]);
+
+/**
+ * The disputes on one payment of an invoice, read exactly: the amount they took back, or "open" while one is not
+ * decided. A plan invoice stays `paid` after its charge is disputed, so its refunds alone do not say what the
+ * platform kept. A dispute takes its amount when disputeTakes says so (lost; prevented only when its own money left,
+ * a resolution's Refund being read with the refunds). Anything that does not read throws: the store fails this run
+ * and no credit is written.
+ */
+async function disputedOn(type: "payment_intent" | "charge", ref: string): Promise<number | "open"> {
+  const query = new URLSearchParams({ limit: "100" });
+  query.set(type, ref);
+  const list = await onPlatformAt(INVITE_STRIPE_VERSION, "GET", `/disputes?${query}`);
+  const rows = list && list.object === "list" && list.has_more === false && Array.isArray(list.data) && list.data.length <= 100 ? list.data : null;
+  if (!rows) throw new UnknownReplyError("invite credits: the disputes of a payment");
   let total = 0;
+  let open = false;
+  for (const dispute of rows as unknown[]) {
+    if (!dispute || typeof dispute !== "object" || Array.isArray(dispute)) throw new UnknownReplyError("invite credits: a dispute");
+    const { object, amount, status } = dispute as { object?: unknown; amount?: unknown; status?: unknown };
+    if (object !== "dispute" || typeof amount !== "number" || !Number.isSafeInteger(amount) || amount < 0 || typeof status !== "string" || !DISPUTE_STATES.has(status)) {
+      throw new UnknownReplyError("invite credits: a dispute");
+    }
+    if (DISPUTE_OPEN.has(status)) {
+      open = true;
+      continue;
+    }
+    const takes = disputeTakes(dispute as { status?: unknown; balance_transactions?: unknown });
+    if (takes === null) throw new UnknownReplyError("invite credits: a prevented dispute's money");
+    if (takes) total += amount;
+  }
+  return open ? "open" : total;
+}
+
+/**
+ * What was given back on one invoice's payments: refunds made or on their way, and disputes that took the money;
+ * "open" while a dispute on one of them is not decided, so the invoice earns nothing this run and is read again.
+ */
+async function takenBackOn(invoice: Invoice): Promise<number | "open"> {
+  let total = 0;
+  let open = false;
   // The invoice's own payments read whole first (Revisor 1 and Codex C2 on #2722): Stripe's list with every row, each
   // a payment of a known shape. Missing, cut short or odd is not "no payment": the store fails this run.
   const payments = invoice.payments as unknown;
@@ -144,8 +187,11 @@ async function refundedOn(invoice: Invoice): Promise<number> {
       }
       if (status === "succeeded" || status === "pending" || status === "requires_action") total += amount;
     }
+    const disputed = await disputedOn(type as "payment_intent" | "charge", ref);
+    if (disputed === "open") open = true;
+    else total += disputed;
   }
-  return total;
+  return open ? "open" : total;
 }
 
 /**
@@ -298,7 +344,10 @@ async function earnFrom(sid: string, nowSeconds: number): Promise<number> {
     const id = inv.id;
     const paidAt = inv.status_transitions.paid_at;
     const cur = inv.currency;
-    const paid = inv.amount_paid > 0 ? paidOn(inv, await refundedOn(inv)) : 0;
+    const taken = inv.amount_paid > 0 ? await takenBackOn(inv) : 0;
+    // A dispute not decided yet: nothing is written, so the invoice is read again on a later run.
+    if (taken === "open") continue;
+    const paid = inv.amount_paid > 0 ? paidOn(inv, taken) : 0;
     const cents = inviteShare(paid, terms);
     const share: Credit = { id, kind: "share", to: by.r, from: sid, cents, cur, at: paidAt, state: cents > 0 ? "owed" : "none" };
     // Written once, for good: ours only on OK or this record read back (CX-123 rule 24, L9). Not known (it may have

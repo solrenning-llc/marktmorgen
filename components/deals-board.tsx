@@ -14,7 +14,7 @@ import { useRouter } from "next/navigation";
 import { Icon } from "@/components/icons";
 import { toast } from "@/components/toast";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
-import { formatMoney, moneyField, readMoney, type Currency } from "@/lib/money";
+import { formatMoney, readMoney, type Currency } from "@/lib/money";
 import {
   type CrmField,
   type Deal,
@@ -736,7 +736,7 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
                         {requestHref && deal.email ? (
                           <a
                             className="btn btn-secondary btn-sm"
-                            href={`${requestHref}${requestHref.includes("?") ? "&" : "?"}${new URLSearchParams({ email: deal.email, for: deal.title, ...(deal.cents ? { amount: moneyField(deal.cents, currency) } : {}) }).toString()}`}
+                            href={`${requestHref}${requestHref.includes("?") ? "&" : "?"}${new URLSearchParams({ deal: deal.id }).toString()}`}
                           >
                             <Icon name="receipt" size={16} /> Request payment
                           </a>

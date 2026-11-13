@@ -24,7 +24,7 @@ is("totals say they are recorded values, nothing forecast", html.includes("Nothi
 is("the store's number is shown", html.includes("You have 2 of the 5 pipelines your store can keep"), true);
 is("a deal moves to a stage of any pipeline", html.includes('<optgroup label="Coaching">') && html.includes("Intro call"), true);
 is("only the chosen pipeline's deals are on its board", html.includes("Deal d000000001") && !html.includes("Deal d000000003"), true);
-is("a deal with a person still links to a payment request, filled in", html.includes("/studio/requests?store=s1&amp;email=dana%40example.com&amp;for=Deal+d000000001&amp;amount=1500"), true);
+is("a deal with a person still links to a payment request, by its id only (#4407)", [html.includes("/studio/requests?store=s1&amp;deal=d000000001"), html.includes("dana%40example.com")], [true, false]);
 is("a new pipeline can be added below the plan's number", html.includes("New pipeline"), true);
 is("the alert region is always there, empty and visually hidden without an error, so a message put in it is announced", html.includes('class="sr-only" role="alert"></p>'), true);
 // Drawn only after a refused save (state the server render cannot reach), so read from the source (635 [GL3], review round 2).

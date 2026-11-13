@@ -8,11 +8,12 @@ import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { PaymentRequestsStudio, type Prefill } from "@/components/payment-requests-studio";
 import { can } from "@/lib/team-roles";
-import { readMoney, moneyField } from "@/lib/money";
+import { moneyField } from "@/lib/money";
+import { dealRequestPrefill } from "@/lib/deal-request-prefill";
 import { allowanceFor } from "@/lib/store-allowance-rules";
 import { allowanceUsedExact } from "@/lib/store-allowance";
 import { shareOfSaleWords } from "@/lib/fee-words";
-import { MAX_LINE_TEXT, MAX_NAME, dueRange, requestLimitsFor } from "@/lib/payment-request-rules";
+import { MAX_LINE_TEXT, dueRange, requestLimitsFor } from "@/lib/payment-request-rules";
 import { listRequests, openCount } from "@/lib/payment-request-store";
 import { refreshRefunds, requestLink, requestsOpen } from "@/lib/payment-requests";
 
@@ -28,7 +29,8 @@ type Params = { searchParams: Promise<{ [key: string]: string | string[] | undef
  * a role that may read orders with buyers' addresses ("orders"); sending,
  * reminding, canceling and deleting are for a role that may email people
  * for the store ("send"). A deal's "Request payment" opens this page with
- * its person and amount filled in (?email=&name=&for=&amount=).
+ * its person, text and amount filled in, read here from the deal's opaque id
+ * (?deal=), never from the URL (#4407, lib/deal-request-prefill.ts).
  */
 export default async function StudioRequestsPage({ searchParams }: Params) {
   const query = await searchParams;
@@ -43,10 +45,8 @@ export default async function StudioRequestsPage({ searchParams }: Params) {
   const listed = await listRequests(store, now);
   const [requests, used, openNow] = await Promise.all([listed === null ? Promise.resolve([]) : refreshRefunds(store, listed, now), allowanceUsedExact(store, "email", now), openCount(store.sid, now).catch(() => null)]);
   const open = requestsOpen(store);
-  const read = (name: string, max: number) => (typeof query[name] === "string" ? (query[name] as string).slice(0, max) : "");
-  const typed = read("amount", 20);
-  const cents = typed ? readMoney(typed, store.currency) : null;
-  const prefill: Prefill = { email: read("email", 254), name: read("name", MAX_NAME), text: read("for", MAX_LINE_TEXT), amount: cents ? moneyField(cents, store.currency) : "" };
+  const fromDeal = typeof query.deal === "string" ? await dealRequestPrefill(store.statsId, view.role, query.deal) : null;
+  const prefill: Prefill = { email: fromDeal?.email.slice(0, 254) ?? "", name: "", text: fromDeal?.text.slice(0, MAX_LINE_TEXT) ?? "", amount: fromDeal?.cents ? moneyField(fromDeal.cents, store.currency) : "" };
   const { first, last } = dueRange(now);
   const share = shareOfSaleWords(store.tier);
 

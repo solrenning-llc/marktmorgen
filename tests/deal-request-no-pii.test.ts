@@ -18,7 +18,7 @@ const deal: Deal = { id: "d000000001", title: "Synthetic coaching", email: "pers
 async function main(): Promise<void> {
   part("Codex X4's reproduction: the Request payment link");
   const html = renderToStaticMarkup(createElement(DealsBoard, { deals: [deal], stages: DEFAULT_STAGES, pipelines, pipelineMax: 5, fields: [], currency: "usd", assignees: ["owner@example.com"], today: "2026-10-17", requestHref: "/studio/requests?store=s1" }));
-  const link = html.match(/<a[^>]*href="([^"]*)"[^>]*>(?:(?!<\/a>).)*Request payment/s)?.[1]?.replace(/&amp;/g, "&") ?? "";
+  const link = html.match(/<a[^>]*href="([^"]*)"[^>]*>(?:(?!<\/a>)[\s\S])*Request payment/)?.[1]?.replace(/&amp;/g, "&") ?? "";
   const url = decodeURIComponent(link.replace(/\+/g, " "));
   is("control: the link was found and points to the payment requests page", link.startsWith("/studio/requests?store=s1"), true);
   is("the buyer's email is not in the URL", url.includes("person@example.test"), false);

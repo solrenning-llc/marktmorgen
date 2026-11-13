@@ -41,7 +41,7 @@ async function main(): Promise<void> {
   redis.clear();
   const real = redis.pipeline.bind(redis);
   redis.pipeline = (async (commands: (string | number)[][]) => {
-    if (commands.length === 1 && commands[0][0] === "HEXISTS" && commands[0][1] === suppressedKey(LIST) && commands[0][2] === suppressionPrint(LIST, WHO)) return ["QUEUED"];
+    if (commands.length === 1 && (commands[0][0] === "HEXISTS" || commands[0][0] === "HGET") && commands[0][1] === suppressedKey(LIST) && commands[0][2] === suppressionPrint(LIST, WHO)) return ["QUEUED"];
     return real(commands);
   }) as typeof redis.pipeline;
   await rememberBuyer(store(), WHO, AFF, "first");

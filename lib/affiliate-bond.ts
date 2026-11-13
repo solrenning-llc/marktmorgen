@@ -39,7 +39,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { countOf, repliesFor } from "@/lib/redis-reply";
 import type { AttributionRule } from "@/lib/affiliate-setting";
 import { orderWrite } from "@/lib/order-data";
-import { suppressedCommand } from "@/lib/suppression";
+import { suppressedKey, suppressionPrint } from "@/lib/suppression";
 import type { Store } from "@/lib/store";
 
 /**
@@ -94,22 +94,50 @@ export async function bondFor(store: Store, email: string): Promise<string> {
  * that could not be written costs a future commission, while a sale that could
  * not be written down costs one that has already been earned.
  */
-export async function rememberBuyer(store: Store, email: string, affiliateId: string, rule: AttributionRule): Promise<void> {
+export async function rememberBuyer(store: Store, email: string, affiliateId: string, rule: AttributionRule, paidAt?: number): Promise<void> {
   if (!bondsBuyers(store) || !email || !/^[0-9a-f]{12}$/.test(affiliateId)) return;
-  // A buyer deleted from this store is never tied to an affiliate again: the thank-you page re-runs this on every
-  // load, so the page of an order paid before the deletion would write back the bond the deletion removed. Read
-  // exactly (CX-123 rule 24): only 0 is "not deleted"; any other answer writes nothing (a bond is never what makes a
-  // sale). A store with no list has deleted nobody.
-  if (store.listId) {
-    const deleted = countOf(repliesFor(await redisPipeline([suppressedCommand(store.listId, email)]), 1)?.[0]);
-    if (deleted !== 0) return;
-  }
+  // A buyer deleted from this store at or after this sale is never tied to an affiliate by it: the thank-you page
+  // re-runs this on every load, so the page of an order paid before the deletion would write back the bond the
+  // deletion removed. A purchase made after an older deletion is a new tie and is bonded (as KEEP_RECEIPT in
+  // lib/paypal-delivery.ts refuses only a print at or after the payment). A store with no list has deleted nobody.
+  if (store.listId && !(await bondAllowed(store.listId, email, paidAt))) return;
   const key = bondKey(store.statsId as string);
   const field = buyerHash(store.statsId as string, email);
+  const wrote = await writeBond(store, key, field, affiliateId, rule);
+  // An erasure that landed between the read above and the write writes its print before it forgets the bond
+  // (lib/person-erasure.ts), so reading the print again after the write and taking off the bond this call wrote when
+  // the print now blocks this sale leaves no bond for an erased buyer in any order of the two (Claude 1 cloud on
+  // #3927). A bond this call did not write is the erasure's own to forget.
+  if (wrote && store.listId && !(await bondAllowed(store.listId, email, paidAt))) {
+    await redisPipeline([["HDEL", key, field]]);
+  }
+}
+
+/**
+ * Whether the store's deletion print lets this sale bond its buyer, read exactly (CX-123 rule 24): no print, or a
+ * print whose second is before the sale's (`paidAt`, seconds). A print at or after it, a print with no sale time to
+ * compare, a print whose time does not read and a reply of another shape all write nothing: a bond is never what
+ * makes a sale, so an unknown answer costs at most a future commission, never a tie the deletion removed.
+ */
+async function bondAllowed(listId: string, email: string, paidAt?: number): Promise<boolean> {
+  const reply = repliesFor(await redisPipeline([["HGET", suppressedKey(listId), suppressionPrint(listId, email)]]), 1);
+  if (!reply) return false;
+  const print: unknown = reply[0];
+  if (print === null) return true;
+  if (typeof print !== "string" || !/^(0|[1-9][0-9]{0,15})$/.test(print)) return false;
+  const deletedAt = Number(print);
+  return Number.isSafeInteger(paidAt) && (paidAt as number) > 0 && Number.isSafeInteger(deletedAt) && deletedAt < (paidAt as number);
+}
+
+/**
+ * The bond's write itself, under the store's rule about which of two affiliates keeps the buyer. Answers whether it
+ * may have written: false only when it surely did not (HSETNX answered 0, or no room), true for an answer it cannot read.
+ */
+async function writeBond(store: Store, key: string, field: string, affiliateId: string, rule: AttributionRule): Promise<boolean> {
   if (rule === "first") {
     // Only if nobody has this buyer yet.
-    await orderWrite(store, [["HSETNX", key, field, affiliateId]]);
-    return;
+    const [set] = await orderWrite(store, [["HSETNX", key, field, affiliateId]]);
+    return countOf(set) !== 0;
   }
   // On last click a known buyer moves to the affiliate who brought them back;
   // an unknown one is only added while there is room under the cap.
@@ -119,12 +147,13 @@ export async function rememberBuyer(store: Store, email: string, affiliateId: st
   const known = countOf(repliesFor(await redisPipeline([["HEXISTS", key, field]]), 1)?.[0]);
   if (known === 1) {
     await orderWrite(store, [["HSET", key, field, affiliateId]]);
-    return;
+    return true;
   }
   const count = countOf(repliesFor(await redisPipeline([["HLEN", key]]), 1)?.[0]);
-  if (count === null || count >= MAX_BONDS) return;
+  if (count === null || count >= MAX_BONDS) return false;
   // Counted in the store's room as what the order that made it really adds (lib/order-data.ts).
   await orderWrite(store, [["HSET", key, field, affiliateId]]);
+  return true;
 }
 
 /** How many buyers this store has bonded, for the creator's own screen. */

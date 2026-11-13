@@ -56,6 +56,7 @@ import {
   knownNumbers,
   placeholdersIn,
   readFunnelBlockCopy,
+  withoutButtonPrice,
   readResearch,
   withoutInventedNumbers,
 } from "@/lib/funnel-ai-rules";
@@ -375,7 +376,7 @@ export function readPagesAnswer(json: Record<string, unknown> | null, facts: Fun
     }
     if (has("cta")) {
       // A button never states a price (lib/sales-page.ts) and is never a direction.
-      const cta = words(page.cta, MAX_CTA_LABEL).replace(/\s*\b(?:for|at|only)?\s*[$€£¥]\s*\d[\d.,]*/gi, "").trim();
+      const cta = withoutButtonPrice(words(page.cta, MAX_CTA_LABEL));
       if (cta && !placeholdersIn(cta).length) copy.cta = cta;
     }
     if (Object.keys(copy).length) blockCopy[slot.key] = copy;

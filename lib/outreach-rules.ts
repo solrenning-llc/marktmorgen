@@ -44,6 +44,8 @@
  * rules in the browser that the server holds a pitch to.
  */
 
+import { htmlToPlainText, withoutTags } from "@/lib/plain-text";
+
 export type OutreachGoal = "sponsor" | "partner" | "business";
 
 export const OUTREACH_GOALS: { id: OutreachGoal; label: string; hint: string }[] = [
@@ -202,14 +204,15 @@ function decodeEntities(text: string): string {
 
 /** A page's HTML as the words a reader sees, with what a mailto: link points at kept beside it. */
 export function pageText(html: string): string {
-  const stripped = html
-    .replace(/<script\b[\s\S]*?<\/script>/gi, " ")
-    .replace(/<style\b[\s\S]*?<\/style>/gi, " ")
-    .replace(/<!--[\s\S]*?-->/g, " ")
+  const marked = html
+    // A script or a style ends where a browser ends it: "</script >" and "</script foo>" too.
+    .replace(/<script\b[\s\S]*?(?:<\/script\b[^>]*>|$)/gi, " ")
+    .replace(/<style\b[\s\S]*?(?:<\/style\b[^>]*>|$)/gi, " ")
+    // A comment ends at "-->" or "--!>", as in a browser.
+    .replace(/<!--[\s\S]*?(?:--!?>|$)/g, " ")
     // The whole opening tag gives way to the address, or it would go with the tag.
-    .replace(/<a\b[^>]*\bhref\s*=\s*["']mailto:([^"'?]+)[^"']*["'][^>]*>/gi, (_, to: string) => ` ${to.replace(/%40/gi, "@")} `)
-    .replace(/<[^>]+>/g, " ");
-  return decodeEntities(stripped).replace(/\s+/g, " ").trim();
+    .replace(/<a\b[^>]*\bhref\s*=\s*["']mailto:([^"'?]+)[^"']*["'][^>]*>/gi, (_, to: string) => ` ${to.replace(/%40/gi, "@")} `);
+  return htmlToPlainText(marked, { gap: " ", decode: decodeEntities }).replace(/\s+/g, " ").trim();
 }
 
 /**
@@ -277,7 +280,7 @@ export function contactPages(html: string, base: string): string[] {
     }
     if (url.protocol !== "https:" || siteDomain(url.hostname) !== siteDomain(home.hostname)) continue;
     if (NOT_A_CONTACT_PAGE.test(url.pathname)) continue;
-    const text = match[2].replace(/<(script|style)\b[\s\S]*?<\/\1>/gi, " ").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().toLowerCase().slice(0, 80);
+    const text = withoutTags(match[2].replace(/<(script|style)\b[\s\S]*?(?:<\/\1\b[^>]*>|$)/gi, " "), " ").replace(/\s+/g, " ").trim().toLowerCase().slice(0, 80);
     const rank = contactRank(url.pathname.toLowerCase(), text);
     if (rank === 0) continue;
     const key = `${url.origin}${url.pathname}`;

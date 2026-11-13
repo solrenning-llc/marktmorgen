@@ -39,6 +39,7 @@
  * and returns findings; nothing is fetched, run or published here.
  */
 import { type SensitiveKind, SENSITIVE_WHY, sensitiveKindOf } from "@/lib/form-sensitive";
+import { htmlToPlainText } from "@/lib/plain-text";
 
 export type GeneratedCode = { html: string; css: string; js: string };
 
@@ -224,7 +225,7 @@ const IMITATION = /\bmarkt\s*morgen\b|\bnimbus\s*labs\b|\b(?:secure\s+checkout|p
 const MOTION_CSS = /@keyframes\b|\banimation(?:-name)?\s*:|\btransition\s*:|\bscroll-behavior\s*:\s*smooth/i;
 const REDUCED = /prefers-reduced-motion/i;
 
-const textOf = (html: string) => decodeEntities(html.replace(/<script\b[\s\S]*?(?:<\/script\b[^>]*>|$)|<style\b[\s\S]*?(?:<\/style\b[^>]*>|$)/gi, " ").replace(/<[^>]+>/g, " "));
+const textOf = (html: string) => htmlToPlainText(html.replace(/<script\b[\s\S]*?(?:<\/script\b[^>]*>|$)|<style\b[\s\S]*?(?:<\/style\b[^>]*>|$)/gi, " "), { gap: " ", decode: decodeEntities });
 
 /** Checks generated code; `allowedHosts` are the only other addresses it may load from or talk to (none by default). */
 export function checkGeneratedCode(code: GeneratedCode, options: { allowedHosts?: readonly string[] } = {}): CodeCheck {

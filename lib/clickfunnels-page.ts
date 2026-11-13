@@ -139,12 +139,22 @@ export type PageDraft = {
  */
 export function trimSavedPage(html: string): string {
   return html
-    .replace(/<!--[\s\S]*?-->/g, "")
-    .replace(/<(script|style|svg|noscript|template)\b([^>]*)>[\s\S]*?<\/\1\s*>/gi, (_, name: string, attrs: string) => `<${name}${attrs}></${name}>`)
+    // A comment ends at "-->" or "--!>", as in a browser and in the reader below (commentEnd).
+    .replace(/<!--[\s\S]*?--!?>/g, "")
+    // A block ends at "</name" and its next ">", as the reader below ends one: "</script foo>" too.
+    .replace(/<(script|style|svg|noscript|template)\b([^>]*)>[\s\S]*?<\/\1[^>]*>/gi, (_, name: string, attrs: string) => `<${name}${attrs}></${name}>`)
     .replace(/data:[a-z0-9.+-]+\/[a-z0-9.+-]+(;[a-z0-9=._-]+)*,[A-Za-z0-9+/=%._-]{64,}/gi, "data:");
 }
 
 // ---- Reading the file ----------------------------------------------------------
+
+/** Where a comment opened before `from` ends: just after the first "-->" or "--!>", as in a browser; the end of the page if neither comes. */
+function commentEnd(html: string, from: number): number {
+  const close = /--!?>/g;
+  close.lastIndex = from;
+  const end = close.exec(html);
+  return end ? end.index + end[0].length : html.length;
+}
 
 type Token =
   | { t: "open"; name: string; attrs: Record<string, string>; self: boolean }
@@ -200,8 +210,7 @@ function tokenize(html: string): Token[] {
     }
     if (lt > i) out.push({ t: "text", value: html.slice(i, lt) });
     if (html.startsWith("<!--", lt)) {
-      const end = html.indexOf("-->", lt + 4);
-      i = end < 0 ? html.length : end + 3;
+      i = commentEnd(html, lt + 4);
       continue;
     }
     if (html[lt + 1] === "!" || html[lt + 1] === "?") {

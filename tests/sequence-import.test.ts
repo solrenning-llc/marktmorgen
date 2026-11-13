@@ -127,7 +127,7 @@ const source = readFileSync("lib/sequence-import.ts", "utf8");
 is(
   "this file only reads, from pure modules: no email, store, Redis or network",
   [...source.matchAll(/^import .* from "([^"]+)";$/gm)].map((m) => m[1]),
-  ["@/lib/csv", "@/lib/flow-limits", "@/lib/flow-rules", "@/lib/sequence-template"],
+  ["@/lib/csv", "@/lib/flow-limits", "@/lib/flow-rules", "@/lib/sequence-template", "@/lib/plain-text"],
 );
 is("and the limits it reads are the mail's own", [SEQUENCE_SUBJECT_MAX, SEQUENCE_BODY_MAX], [MAX_SUBJECT, MAX_MAIL_BODY]);
 

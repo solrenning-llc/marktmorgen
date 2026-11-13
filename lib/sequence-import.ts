@@ -40,6 +40,7 @@ import { parseCsv } from "@/lib/csv";
 import { MAX_STEPS } from "@/lib/flow-limits";
 import { MAX_FLOW_WAIT_HOURS } from "@/lib/flow-rules";
 import { MAX_SEQUENCE_FILE_BYTES, SEQUENCE_BODY_MAX, SEQUENCE_SUBJECT_MAX, SEQUENCE_TEMPLATE } from "@/lib/sequence-template";
+import { htmlToPlainText } from "@/lib/plain-text";
 
 export { MAX_SEQUENCE_FILE_BYTES, SEQUENCE_TEMPLATE };
 
@@ -263,7 +264,7 @@ export function plainBody(raw: string): { body: string } & Taken {
 
 /** A subject as one plain line: no markup, references read, nothing unseen; another service's variables taken out. */
 function plainSubject(raw: string, taken: Taken): string {
-  const text = decode(raw.replace(/<[^<>]{0,200}>/g, ""));
+  const text = htmlToPlainText(raw, { decode });
   return withoutVariables(text, taken).replace(UNSEEN, "").replace(/\s+/g, " ").trim();
 }
 

@@ -97,6 +97,7 @@ import { canSell, canSellProduct } from "@/lib/store-checkout";
 import { inviteEmail, inviteMembers, keptAlready, noteKept, dueReminders, remindLater, reminderEmail, readInvite } from "@/lib/move-members";
 import { type DateOrder, MAX_AHEAD_DAYS, MAX_MOVED_MEMBERS, readRenewal } from "@/lib/move-rules";
 import { type ContactConsent, consentFrom, readClickFunnelsStatus, readOrderStatus } from "@/lib/clickfunnels-csv";
+import { htmlToPlainText } from "@/lib/plain-text";
 
 export type ImportKind = "contacts" | "products" | "purchases" | "members";
 /** Where the file came from: any platform's spreadsheet, or ClickFunnels' own exports (lib/clickfunnels-csv.ts). */
@@ -926,15 +927,14 @@ function priceText(raw: string): string {
   return raw.trim().replace(/^(?:[A-Za-z]{1,3}\s?)?[$€£¥₹]?\s*/, "").replace(/\s*(?:[A-Za-z]{3})$/, "");
 }
 
-/** A description as another platform may export it, HTML and all, as plain text. */
+/** A description as another platform may export it, HTML and all, as plain text (lib/plain-text.ts: no tag survives). */
 function plainText(raw: string): string {
   const entities: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', "#39": "'", apos: "'", nbsp: " " };
-  return raw
+  const lined = raw
     .replace(/<\s*br\s*\/?>/gi, "\n")
     .replace(/<\s*\/\s*(p|div|li|h[1-6])\s*>/gi, "\n\n")
-    .replace(/<\s*li[^>]*>/gi, "- ")
-    .replace(/<[^>]*>/g, "")
-    .replace(/&(amp|lt|gt|quot|#39|apos|nbsp);/g, (_, name: string) => entities[name] ?? "");
+    .replace(/<\s*li[^>]*>/gi, "- ");
+  return htmlToPlainText(lined, { decode: (text) => text.replace(/&(amp|lt|gt|quot|#39|apos|nbsp);/g, (_, name: string) => entities[name] ?? "") });
 }
 
 /** The first sentences of a long description that fit the card, cut at a word. */

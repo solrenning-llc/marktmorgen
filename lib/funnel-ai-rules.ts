@@ -34,6 +34,7 @@ import { type FunnelPageCopy, readFunnelPageCopy } from "@/lib/funnel-page-copy"
 import { type FunnelFormDraft, readFunnelFormDrafts } from "@/lib/funnel-form-draft";
 import { MAX_ANSWER, MAX_CTA_LABEL, MAX_FIT_ITEMS, MAX_HEADING, MAX_ITEM, MAX_ITEM_DETAIL, MAX_QUESTION, MAX_STEPS, MAX_SUBHEADLINE, MAX_TEXT } from "@/lib/sales-page";
 import { numbersIn } from "@/lib/block-rewrite-rules";
+import { replaceUntilStable } from "@/lib/plain-text";
 import { isAiSequenceDraft } from "@/lib/ai-response";
 import type { DraftedStep } from "@/lib/sequence-draft";
 import { WRITING_JOB_MICRO_USD, WRITING_JOB_REFERENCE, aiRequestHoldMicroUsd } from "@/lib/spend-cost-table";
@@ -368,4 +369,16 @@ export function isFunnelResearch(value: unknown): value is FunnelResearch {
   }
   if (!Array.isArray(value.claims) || value.claims.length > MAX_RESEARCH_CLAIMS || !value.claims.every((c) => record(c) && str(c.text, MAX_CLAIM_TEXT) && typeof c.source === "string" && ids.has(c.source))) return false;
   return textList(value.uncertainty, 8, 400);
+}
+
+/** A price in a button's words, with the "for", "at" or "only" before it. */
+const BUTTON_PRICE = /\s*\b(?:for|at|only)?\s*[$€£¥]\s*\d[\d.,]*/gi;
+
+/**
+ * A button's words without a price (a button never states one: lib/sales-page.ts).
+ * Taken out until none is left, so a price that taking another out puts back
+ * together ("Get it$5.$9" leaves "Get it$9" after one pass) goes too.
+ */
+export function withoutButtonPrice(label: string): string {
+  return replaceUntilStable(label, BUTTON_PRICE, "").trim();
 }

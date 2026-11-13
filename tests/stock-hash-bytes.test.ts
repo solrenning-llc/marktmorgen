@@ -13,7 +13,8 @@
  * model does not hold (custo desconhecido reprova).
  *
  * Checked with Redis stubbed, nothing real: a product with 1,000 units, each
- * sold through confirmStock with a checkout id in Stripe's live shape.
+ * held as STOCK_BIND holds it before the buyer can pay, then sold through
+ * confirmStock with a checkout id in Stripe's live shape.
  */
 import { parseProduct } from "@/lib/catalog";
 import { confirmStock, stockLeft } from "@/lib/stock";
@@ -29,6 +30,12 @@ const key = `nl:stock:${creator.statsId}:${product.id}`;
 /** A live checkout id as Stripe writes it: cs_live_ and 58 more characters. */
 const session = (i: number) => `cs_live_a1${String(i).padStart(56, "0")}`;
 
+/** Held (as every paid checkout of a limited product is, before its buyer can pay), then confirmed. */
+async function sell(i: number): Promise<void> {
+  await redis.pipeline([["HSET", key, session(i), JSON.stringify({ until: Date.now() + 30 * 60_000 })]]);
+  await confirmStock(creator, product, session(i));
+}
+
 async function storedBytes(): Promise<number> {
   const [raw] = (await redis.pipeline([["HGETALL", key]])) as unknown[];
   const flat = Array.isArray(raw) ? (raw as string[]) : [];
@@ -40,14 +47,14 @@ async function main(): Promise<void> {
   process.env.STRIPE_SECRET_KEY = "sk_test_only";
 
   part("A sold-out run of a limited product");
-  for (let i = 0; i < UNITS; i += 1) await confirmStock(creator, product, session(i));
+  for (let i = 0; i < UNITS; i += 1) await sell(i);
   is("every unit is sold", await stockLeft(creator, product), 0);
   const bytes = await storedBytes();
   is("its stock record stays inside the room counted beside a product", bytes <= PRODUCT_SIDE_BYTES, true);
 
   part("Control: a run of a few units");
   redis.clear();
-  for (let i = 0; i < 5; i += 1) await confirmStock(creator, product, session(i));
+  for (let i = 0; i < 5; i += 1) await sell(i);
   is("five sold leave the rest", await stockLeft(creator, product), UNITS - 5);
   is("and weigh little", (await storedBytes()) <= PRODUCT_SIDE_BYTES, true);
 

@@ -115,17 +115,6 @@ async function inLine(name: string, invoices: InvoiceRow[]) {
   return { id, to };
 }
 
-/** An invoice's payment as Stripe lists it at the current API version. */
-const paidPart = (invoice: string, intent: string, amount: number, paidAt: number): Payment => ({
-  id: `inpay_${intent.slice(3)}`,
-  object: "invoice_payment",
-  invoice,
-  status: "paid",
-  amount_paid: amount,
-  amount_requested: amount,
-  payment: { type: "payment_intent", payment_intent: intent },
-  status_transitions: { paid_at: paidAt, canceled_at: null },
-});
 const invoiceRow = (id: string, status: string, amountPaid: unknown, extra: Record<string, unknown> = {}): InvoiceRow => ({
   id,
   status,

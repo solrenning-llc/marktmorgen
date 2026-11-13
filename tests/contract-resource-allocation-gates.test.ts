@@ -19,6 +19,7 @@ import { chargeStudio } from "@/lib/path";
 import { takeAnswer } from "@/lib/answers";
 import { windowId } from "@/lib/allowance-window";
 import { ReadingsUsed, keptReading } from "@/lib/store-readings";
+import { takeImportRows } from "@/lib/imports";
 import { claimHandle, ensureStatsId, setSubscription, storeForEmail, type Store } from "@/lib/store";
 
 beforeEach(() => {
@@ -97,4 +98,14 @@ test("kept readings: a funded period without its cohort reads nothing new", asyn
   assert.equal(reads, 0);
   assert.equal((await keptReading(store, "stats", async () => { reads += 1; return 1; }))?.value, 1);
   assert.equal(reads, 1);
+});
+
+test("import rows: a funded period without its cohort takes no rows", async () => {
+  const store = await payingStore("gatesimports");
+  const key = `nl:imports:rows:${store.sid}:${windowId(store, Date.now())}`;
+  const refused = await takeImportRows(fundedOf(store), 5);
+  assert.equal(refused.ok ? "" : refused.reason, "unavailable");
+  assert.deepEqual(await redis.pipeline([["GET", key]]), [null]);
+  assert.equal((await takeImportRows(store, 5)).ok, true);
+  assert.notDeepEqual(await redis.pipeline([["GET", key]]), [null]);
 });

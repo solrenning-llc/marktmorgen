@@ -51,7 +51,7 @@ const PRIMITIVE_INVENTORY: Record<string, PrimitiveEntry> = {
   "lib/resend-fallback-budget.ts#reserveResendFallback": { state: "sites", sites: { "lib/resend-fallback-transport.ts#guardedResendPost": { state: "pending", calls: 1, why: "The fallback sender's budget is reserved per send; the store meter's proof before it (lib/email.ts) is not shown here." } } },
   "lib/store-readings.ts#takeStoreReading": { state: "sites", sites: { "lib/store-readings.ts#keptReading": { state: "gated", calls: 1, note: "Refused as a day with no reading left: the last one kept is shown, stale." } } },
   "lib/storage-reservations.ts#reserveStorage": { state: "sites", sites: { "lib/vault-storage.ts#openReservedVault": { state: "gated-by-callers", calls: 1, guard: "reserveStoreUpload" } } },
-  "lib/imports.ts#takeImportRows": { state: "sites", sites: { "app/api/store/import/route.ts#POST": { state: "pending", calls: 1, why: "Import rows are taken after guardStoreWrite, whose studio count is gated except for essential needs; not proven for this site." } } },
+  "lib/imports.ts#takeImportRows": { state: "self-gated", via: "takeImportRows" },
 };
 
 type Decl = { name: string; exported: boolean; line: number };
@@ -171,7 +171,7 @@ const problems = audit(sources, PRIMITIVE_INVENTORY, CONTRACT_ADMISSION_COVERAGE
 for (const problem of problems) console.log(`        ${problem}`);
 is("no problem between sources, inventory and key", problems, []);
 is("all 15 primitives inventoried", Object.keys(PRIMITIVE_INVENTORY).length, 15);
-is("pending primitive calls on 13 November 2026", pendingCalls, 3);
+is("pending primitive calls on 13 November 2026", pendingCalls, 2);
 is("pending calls keep resourceAllocations false", pendingCalls > 0 && CONTRACT_ADMISSION_COVERAGE.resourceAllocations, false);
 
 part("The audit refuses what it is for (synthetic sources)");

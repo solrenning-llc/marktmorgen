@@ -1219,7 +1219,9 @@ export const COST_LINES: CostLine[] = [
     // commands instead of 4, about US$0.0008 more a call at US$2.00 a million, not yet measured.
     // With each PayPal sale read from its short line (lib/paypal-sale-summary.ts, PAYPAL_SUMMARY_BYTES = 1,038 bytes, not MAX_PAID_BYTES) and product
     // names from the catalog's names (lib/catalog.ts, MAX_STORE_NAMES_BYTES = 2,176,000 bytes read and kept at most),
-    // it is about US$0.0063 a call (tests/sales-file-summary.test.ts). That lower figure holds only once no sale and no
+    // it is about US$0.0063 a call (tests/sales-file-summary.test.ts); the names are read in their own batches
+    // (NAMES_HMGET_FIELDS, 95 at the worst: 2,000 products are 22 HMGETs, LISTING_MGET_PARALLEL at once, held in
+    // tests/sales-file-names-batches.test.ts), not by a record's batch. That lower figure holds only once no sale and no
     // product lacks its copy: a sale or a product without one is read whole, at the US$0.0159 figure. So the honest
     // price may drop to it only after scripts/sales-file-fill.mjs, counting, reads every store and finds none left
     // (lib/sales-file-fill.ts nothingLeft). Pricing it honestly here waits for the owner's decision on the first-year
@@ -1228,14 +1230,14 @@ export const COST_LINES: CostLine[] = [
     // (lib/catalog.ts productWrites, productDrops), inside the studio request's own commands (UNIT_COST.studio); the
     // names' bytes are taken from the data room with the product (productBytes), at most MAX_STORE_NAMES_BYTES a store.
     // The one-time filling (scripts/sales-file-fill.mjs, lib/sales-file-fill.ts) is the company's, never a store's: run
-    // by hand, FILL_STORES_PER_STEP stores a step and FILL_BATCH sales or LISTING_MGET_KEYS products a command, only
+    // by hand, FILL_STORES_PER_STEP stores a step and FILL_BATCH sales or NAMES_HMGET_FIELDS products a step, only
     // counting unless --write --yes-production, and it prints its own commands and bytes at Upstash's paid rates.
     monthlyUsd: (tier) => figureCost(STORE_ALLOWANCES[tier], "studio") + ESSENTIAL_PER_DAY * DAY_WINDOWS * request("heavy", 40, 200_000) + PAUSED_PER_DAY * DAY_WINDOWS * request("light", 8),
     sources: [
       { file: "lib/store-allowance-rules.ts", names: ["STORE_ALLOWANCES", "studio"] },
       { file: "lib/studio-allowance-rules.ts", names: ["STUDIO_PAGE_UNITS", "ESSENTIAL_PER_DAY", "ESSENTIAL_NEEDS"] },
       { file: "lib/studio-route.ts", names: ["countStudio", "studio-essential"] },
-      { file: "lib/catalog.ts", names: ["namesKey", "MAX_STORE_NAMES_BYTES", "productBytes", "LISTING_MGET_KEYS"] },
+      { file: "lib/catalog.ts", names: ["namesKey", "MAX_STORE_NAMES_BYTES", "productBytes", "LISTING_MGET_KEYS", "NAMES_HMGET_FIELDS"] },
       { file: "lib/sales-file-fill.ts", names: ["FILL_STORES_PER_STEP", "fillSalesFileStep"] },
       { file: "lib/paypal-sale-summary.ts", names: ["FILL_BATCH", "fillSaleSummaries"] },
       // An active store may clear its assistant notes repeatedly: settings admission takes one studio request first.

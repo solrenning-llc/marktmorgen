@@ -46,7 +46,7 @@ import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { dataBytes } from "@/lib/store-data-rules";
 import { StoreFullError } from "@/lib/store-full";
 import { type ProductFile, parseProductFile } from "@/lib/product-file";
-import { MAX_OPTION_LABEL_LENGTH, MAX_STORE_OPTIONS, OPTION_ID, type ProductOption, parseOptions } from "@/lib/product-option";
+import { MAX_OPTION_LABEL_LENGTH, MAX_OPTIONS, MAX_STORE_OPTIONS, OPTION_ID, type ProductOption, parseOptions } from "@/lib/product-option";
 import { MAX_LINK_LENGTH } from "@/lib/product-link";
 import { type Recurring, parseRecurring } from "@/lib/product-recurring";
 import { type Intro, parseIntro } from "@/lib/intro-price";
@@ -900,6 +900,20 @@ export const LISTING_MGET_KEYS = Math.max(1, Math.floor(LISTING_MGET_ANSWER_BYTE
 export const LISTING_MGET_PARALLEL = 4;
 
 /**
+ * What one product's names (namesValue) can weigh at the worst: the brackets, a title of MAX_TITLE_LENGTH units and
+ * MAX_OPTIONS options, each with an id of 24 (OPTION_ID) and a label of MAX_OPTION_LABEL_LENGTH units, every unit at
+ * six bytes (a control character as JSON writes it), with their quotes and commas. Bounded by the writer's ceilings.
+ */
+const NAMES_VALUE_WORST_BYTES = 2 + (3 + 6 * MAX_TITLE_LENGTH) + MAX_OPTIONS * (3 + 24 + (3 + 6 * MAX_OPTION_LABEL_LENGTH));
+
+/**
+ * The most names one HMGET of listingNamesById asks for: as many as fit LISTING_MGET_ANSWER_BYTES at the worst, each
+ * value escaped once more in the reply (six bytes a byte) with its quotes and comma (Claude 5's MEDIUM on #3129: the
+ * names were sliced by a whole record's batch, LISTING_MGET_KEYS, 400 HMGETs for 2,000 products, all at once).
+ */
+export const NAMES_HMGET_FIELDS = Math.max(1, Math.floor(LISTING_MGET_ANSWER_BYTES / (6 * NAMES_VALUE_WORST_BYTES + 3)));
+
+/**
  * The listings these ids name, by id, read before a walk through sales that
  * each name some (the sales file, lib/stats.ts salesCsv): whatever the store
  * record holds is not read again, and the rest is read in MGETs of at most
@@ -958,7 +972,8 @@ export async function listingsById(store: Store, ids: Iterable<string>): Promise
  * The names (title, options' labels) of the products these ids name, by id,
  * for the sales file (lib/stats.ts salesCsv): what the store record holds is
  * not read again; the rest from the catalog's names (namesKey) in HMGETs of at
- * most LISTING_MGET_KEYS fields sent side by side; a product whose names are
+ * most NAMES_HMGET_FIELDS fields, LISTING_MGET_PARALLEL of them side by side
+ * (2,000 products: 22 commands in 6 waits); a product whose names are
  * missing or do not read has its record read instead (listingsById), so a name
  * is never blank for a want of its copy. Ids the store does not have, and
  * products whose record Redis answers is not there, are left out. A reply that
@@ -991,15 +1006,16 @@ export async function listingNamesById(store: Store, ids: Iterable<string>): Pro
 /** The names kept for these products, read exactly: those that read, by id; a missing or unreadable one is not in it. */
 async function namesOf(catalog: string, ids: string[]): Promise<Map<string, ListingNames>> {
   const chunks: string[][] = [];
-  for (let i = 0; i < ids.length; i += LISTING_MGET_KEYS) chunks.push(ids.slice(i, i + LISTING_MGET_KEYS));
-  const answers = await Promise.all(
-    chunks.map(async (chunk) => {
-      const [reply] = repliesFor(await redisPipeline([["HMGET", namesKey(catalog), ...chunk]]), 1) ?? [undefined];
-      const raws = repliesFor(reply, chunk.length);
-      if (!raws || raws.some((raw) => raw !== null && typeof raw !== "string")) throw new UnknownReplyError("a store's product names");
-      return raws as (string | null)[];
-    }),
-  );
+  for (let i = 0; i < ids.length; i += NAMES_HMGET_FIELDS) chunks.push(ids.slice(i, i + NAMES_HMGET_FIELDS));
+  const readChunk = async (chunk: string[]): Promise<(string | null)[]> => {
+    const [reply] = repliesFor(await redisPipeline([["HMGET", namesKey(catalog), ...chunk]]), 1) ?? [undefined];
+    const raws = repliesFor(reply, chunk.length);
+    if (!raws || raws.some((raw) => raw !== null && typeof raw !== "string")) throw new UnknownReplyError("a store's product names");
+    return raws as (string | null)[];
+  };
+  // At most LISTING_MGET_PARALLEL in flight at once, as listingsById's own MGETs.
+  const answers: (string | null)[][] = [];
+  for (let c = 0; c < chunks.length; c += LISTING_MGET_PARALLEL) answers.push(...(await Promise.all(chunks.slice(c, c + LISTING_MGET_PARALLEL).map(readChunk))));
   const out = new Map<string, ListingNames>();
   chunks.forEach((chunk, c) =>
     chunk.forEach((id, i) => {
@@ -1015,7 +1031,7 @@ export type NamesFill = { products: number; without: number; written: number; co
 
 /**
  * Writes the names of every product of the store that has none (the one-time
- * filling, scripts/sales-file-fill.mjs), LISTING_MGET_KEYS products a step:
+ * filling, scripts/sales-file-fill.mjs), NAMES_HMGET_FIELDS products a step:
  * the names' HMGET, the records' MGET for those without (listingsById), and
  * one HSETNX each, so a product saved meanwhile keeps the names it was saved
  * with. Only counts when `write` is false. A reply or a record that does not
@@ -1028,8 +1044,8 @@ export async function fillProductNames(store: Store, write: boolean): Promise<Na
   if (catalog.inline || !catalog.id || !isRedisConfigured()) return out;
   const ids = productIds(store);
   out.products = ids.length;
-  for (let i = 0; i < ids.length; i += LISTING_MGET_KEYS) {
-    const chunk = ids.slice(i, i + LISTING_MGET_KEYS);
+  for (let i = 0; i < ids.length; i += NAMES_HMGET_FIELDS) {
+    const chunk = ids.slice(i, i + NAMES_HMGET_FIELDS);
     const read = await namesOf(catalog.id, chunk);
     out.commands += 1;
     out.bytes += [...read.values()].reduce((n, names) => n + byteLength(namesValue(names)), 0);

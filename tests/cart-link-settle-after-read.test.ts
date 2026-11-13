@@ -7,7 +7,8 @@
  * opening is then refused as usual.
  */
 import { cartLinkProducts, cartLinkUnits, CART_LINK_UNIT_BYTES } from "@/lib/cart-link-products";
-import { KIND, productIds } from "@/lib/catalog";
+import { KIND, MAX_PRODUCT_BYTES, listingSizes, productIds } from "@/lib/catalog";
+import { dataKey } from "@/lib/store-data";
 import { addDraftProducts, claimHandle, ensureStatsId, setProductFile, setProductHidden, setSubscription, storeForEmail } from "@/lib/store";
 import { allowanceUsed, takeAllowance } from "@/lib/store-allowance";
 import { allowanceFor } from "@/lib/store-allowance-rules";
@@ -36,10 +37,17 @@ async function main(): Promise<void> {
   shop = (await storeForEmail(owner))!;
   const paidIds = shop.catalog.items.filter((p) => (p.kind & KIND.paid) !== 0).map((p) => p.id);
 
-  // The month's studio requests nearly all used: what the read is charged before it fits, and nothing more.
+  // The month's studio requests nearly all used: what the read is charged before it fits, and nothing more. That charge
+  // is worked out as the builder works it out (each product's data-room weight, raised to its record's size): the
+  // names kept for the sales file weigh with the product (lib/catalog.ts productBytes, #3129), on purpose, so a fixed
+  // 10 no longer fits (Claude 1's MEDIUM (b) on #3129, the over-charge kept and said in the PR).
   const figure = allowanceFor(shop, "studio");
   const used = await allowanceUsed(shop, "studio");
-  const spare = figure - used - 10;
+  const weights = (await redis.pipeline([["HMGET", dataKey(shop)!, ...paidIds.map((id) => `p:${id}`)]]))[0] as (string | null)[];
+  const sizes = (await listingSizes(shop, paidIds))!;
+  const before = cartLinkUnits(2 * paidIds.length, paidIds.reduce((sum, _id, i) => sum + Math.min(MAX_PRODUCT_BYTES, Math.max(Number(weights[i]), sizes[i])), 0));
+  is("the fixture: every paid product weighed and measured", [paidIds.length, weights.every((w) => Number(w) > 0), sizes.length], [24, true, 24]);
+  const spare = figure - used - before;
   if (spare > 0) await takeAllowance(shop, "studio", spare);
   const base = redis.pipeline.bind(redis);
   const debits: number[] = [];

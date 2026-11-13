@@ -5,7 +5,7 @@ import { clientAddress, fromAnotherSite, limited, essentialLimitState } from "@/
 import { readListings, visibleIds } from "@/lib/catalog";
 import { ASKS_PER_DAY, ASKS_PER_TEN_MINUTES, STORE_ASKS_PER_MINUTE } from "@/lib/answers-rules";
 import { GUIDE_PRODUCTS, guideVisitor } from "@/lib/store-guide";
-import { pricePill, productPath } from "@/components/store-product";
+import { productPath, salePill } from "@/components/store-product";
 
 /** The model is given twenty seconds; the route a little more. */
 export const maxDuration = 30;
@@ -52,7 +52,7 @@ export async function POST(request: NextRequest) {
     const byId = new Map(products.map((p) => [p.id, p]));
     const picks = result.picks.flatMap((pick) => {
       const product = byId.get(pick.id);
-      return product ? [{ title: product.title, href: productPath(store, product), price: pricePill(store, product), why: pick.why }] : [];
+      return product ? [{ title: product.title, href: productPath(store, product), price: salePill(store, product), why: pick.why }] : [];
     });
     return Response.json({ ok: true, picks }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {

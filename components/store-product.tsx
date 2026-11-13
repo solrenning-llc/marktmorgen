@@ -101,6 +101,16 @@ export function offNow(store: Store, product: Listing): number {
 }
 
 /**
+ * The price pill as the checkout charges it now while a store-wide sale covers the product, with no old price beside
+ * it: for words that cannot cross a price out (a shared link's picture, the store guide's picks). Never a fair price
+ * for a country, which is the visitor's own; a sale is the same for everybody (lib/store-sale.ts).
+ */
+export function salePill(store: Store, product: Listing): string {
+  const off = saleNow(store, product);
+  return off ? speech(store).money(salePrice(product.priceCents, off)) : pricePill(store, product);
+}
+
+/**
  * The price pill, with the old price crossed out while a sale covers the
  * product. What is crossed out is the product's price, never a made-up one.
  */

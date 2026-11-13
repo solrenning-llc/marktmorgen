@@ -36,6 +36,7 @@ export const visibleIds = () => ["p_fixture", "p_second"];
 export const readListings = async () => read([product, { ...product, id: "p_second" }]);
 export const GUIDE_PRODUCTS = 60;
 export const pricePill = () => "$1";
+export const salePill = () => "$1";
 export const productPath = () => "/synthetic-product";
 export async function answerQuestion() { state.models++; return { ok: true as const, answer: "Synthetic answer", known: true }; }
 export async function guideVisitor() { state.models++; return { ok: true as const, picks: [{ id: product.id, why: "Synthetic choice" }] }; }

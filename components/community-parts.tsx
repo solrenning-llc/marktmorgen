@@ -112,7 +112,7 @@ export function CommunityBar({
   return (
     <header className="cm-bar relative z-30 sm:sticky sm:top-0">
       <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
-        <Link href={`/@${store.handle}`} className="cm-home flex min-w-0 flex-1 items-center gap-3 rounded-xl">
+        <Link href={`/@${store.handle}`} className="cm-home flex min-h-11 min-w-0 flex-1 items-center gap-3 rounded-xl">
           {store.photoId ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={photoUrl(store.photoId)} alt="" width={40} height={40} className="st-avatar !mx-0 shrink-0" style={{ width: 40, height: 40 }} />
@@ -511,7 +511,7 @@ export function PostCard({
       ) : null}
 
       <h2 id={labelId} className={`font-display mt-3 break-words text-lg font-semibold leading-snug tracking-[-0.01em] sm:text-xl ${post.title ? "" : "sr-only"}`}>
-        {full ? post.title || w.postBy(name) : <Link href={link} className="st-title-link">{post.title || w.postBy(name)}</Link>}
+        {full ? post.title || w.postBy(name) : <Link href={link} className="st-title-link inline-flex min-h-11 items-center">{post.title || w.postBy(name)}</Link>}
       </h2>
       {shown ? <PostText text={shown} className="mt-2" named={named} store={store} /> : null}
       {long ? (

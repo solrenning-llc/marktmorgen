@@ -224,11 +224,11 @@ export function CommunityComposer({
             <p className="st-muted mt-2 text-xs">{words.mostAnswers}</p>
           )}
           <div className="mt-3 grid gap-2 sm:grid-cols-2">
-            <label className="flex items-center gap-2 text-sm">
+            <label className="flex min-h-11 items-center gap-2 text-sm">
               <input type="checkbox" name="poll_multi" value="1" checked={multi} onChange={(e) => setMulti(e.target.checked)} className="h-4 w-4" />
               <span>{words.pickMoreThanOne}</span>
             </label>
-            <label className="flex items-center gap-2 text-sm">
+            <label className="flex min-h-11 items-center gap-2 text-sm">
               <input type="checkbox" name="poll_quiet" value="1" checked={quiet} onChange={(e) => setQuiet(e.target.checked)} className="h-4 w-4" />
               <span>{words.hideCount}</span>
             </label>
@@ -316,7 +316,7 @@ export function CommunityComposer({
         ) : (
           <span />
         )}
-        <label className="flex items-center gap-2 text-sm font-semibold">
+        <label className="flex min-h-11 items-center gap-2 text-sm font-semibold">
           <input type="checkbox" name="poll" value="1" checked={poll} onChange={(e) => setPoll(e.target.checked)} className="h-4 w-4" />
           <span>{words.askPoll}</span>
         </label>

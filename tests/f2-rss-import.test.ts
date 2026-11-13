@@ -233,6 +233,11 @@ function main(): void {
   is("no enclosure", audio(null), "audio-missing");
   is("an enclosure with no address", audio('<enclosure type="audio/mpeg"/>'), "audio-missing");
   is("video is not an episode the podcast keeps", audio('<enclosure url="https://cdn.example.com/1.mp4" type="video/mp4"/>'), "audio-type");
+  // Claude 1 cloud on #3456 at 259dc4a517 (MEDIUM): the type table is looked up by its own keys only, so a name of
+  // Object.prototype is not taken for a known audio type.
+  for (const odd of ["constructor", "Constructor", "__proto__", "toString", "hasOwnProperty"]) {
+    is(`an enclosure typed "${odd}" is not MP3 or M4A`, audio(`<enclosure url="https://cdn.example.com/1.mp3" length="10" type="${odd}"/>`), "audio-type");
+  }
   is("two enclosures in one episode", audio('<enclosure url="https://a.example/1.mp3"/><enclosure url="https://a.example/2.mp3"/>'), "malformed");
   is("a show image that is not https is left out and flagged, the audio rules unchanged", (() => {
     const r = parseRssImport(feed([item(1)]).replace("https://cdn.example.com/show/cover.jpg", "http://cdn.example.com/show/cover.jpg"));
@@ -247,6 +252,16 @@ function main(): void {
   const many = parseRssImport(slow);
   const took = performance.now() - started;
   is("300 such episodes parse well under 400 ms", [many.ok, took < 400], [true, true]);
+  part("An empty description never hides the summary beside it (Claude 1 cloud on #3456, LOW)");
+  const summaryItem = `<item><title>E</title><description></description><itunes:summary>Real notes</itunes:summary><enclosure url="https://cdn.example.com/1.mp3" type="audio/mpeg"/></item>`;
+  const withSummary = parseRssImport(feed([summaryItem]));
+  is("an episode's notes come from its summary", withSummary.ok ? withSummary.show.episodes[0].notes : withSummary.reason, "Real notes");
+  const showSummary = parseRssImport(
+    feed([item(1)], "<itunes:summary>The real show summary</itunes:summary>").replace(/<description><!\[CDATA\[A show about <b>bread<\/b> & rye\.\]\]><\/description>/, "<description/>"),
+  );
+  is("the show's description comes from its summary", showSummary.ok ? showSummary.show.description : showSummary.reason, "The real show summary");
+  const both = parseRssImport(feed([item(1, { description: "Kept notes" })], "<itunes:summary>Other</itunes:summary>"));
+  is("control: a description with text is kept as it is", both.ok ? [both.show.episodes[0].notes, both.show.description] : both.reason, ["Kept notes", "A show about <b>bread</b> & rye."]);
   is("no request was made by any of it", fetched, 0);
 }
 

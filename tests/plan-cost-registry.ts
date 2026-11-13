@@ -89,6 +89,7 @@ import { ORDER_KEY_BYTES } from "@/lib/order-data";
 import { PERSON_RECORD_MONTHS } from "@/lib/joined-stores";
 import { FOLLOWED_FAMILIES } from "@/lib/data-families";
 import { MAX_PRODUCTS } from "@/lib/catalog-rules";
+import { ERASE_FUNDED_COMMANDS, ERASE_FUNDED_KEEP_SECONDS, ERASE_WORST_UNITS } from "@/lib/erasure-funded";
 import { SALE_TEXT_LIMITS, SALES_ID_LENGTH, SALES_PAGE, SALES_SAFE_ID_LENGTH, SALES_TITLE_IDS } from "@/lib/api-sales";
 import { BUMP_KEYS, MAX_BUNDLE_ITEMS } from "@/lib/bundle-rules";
 import { MAX_TITLE_LENGTH as SALES_LISTING_TITLE } from "@/lib/catalog-rules";
@@ -902,6 +903,35 @@ export function heldStoreMonthlyExposure(tier: Tier) {
   const retentionUsd = fileBytes / GB * STORAGE_PER_GB * 31 / 30 + databaseBytes * DB_BYTE_MONTH * 31 / 30;
   const retryUsd = heldRecheckMemoryUsd() + HELD_EXPOSURE.retryCommands * COMMAND + HELD_EXPOSURE.retryReplyBytes * DB_BYTE;
   return { fileBytes, databaseBytes, retentionUsd, retryUsd, modeledMonthlyUsd: retentionUsd + 31 * retryUsd, completeMonthlyUsd: null };
+}
+/**
+ * The company's funded exposure `erasure_overflow` (owner's decision DONO-20261113-DEC-1, 13 November 2026, option (a);
+ * lib/erasure-funded.ts): a person's erasure in a store whose plan ended is never refused for its cost, and what the
+ * store's studio window does not hold is the company's. Its automatic ceiling is per case: the largest erasure there
+ * can be (ERASE_WORST_SIZE: every product of MAX_PRODUCTS a course of MAX_LESSONS lessons, every count at its own cap),
+ * ERASE_WORST_UNITS studio units at UNIT_COST.studio, which tests/person-erasure.test.ts holds above what an erasure of
+ * that size sends; and its case's count in the company's month (ERASE_FUNDED_COMMANDS). Not in any paid plan's
+ * COST_LINES: a company exposure, in the fixed costs and the minimum paid base (docs/funded-exposure-review.md). The
+ * reviewed monthly case cap is null until the exposure review is filled: unknown, never zero, and a month counted
+ * above it makes the financed company total unknown, never a refused erasure.
+ */
+export const ERASURE_OVERFLOW = {
+  unitsPerCase: ERASE_WORST_UNITS,
+  ledgerCommandsPerCase: ERASE_FUNDED_COMMANDS,
+  /** One month's hash (two counts), alive ERASE_FUNDED_KEEP_SECONDS: at most 14 alive at once. */
+  monthlyKeyBytes: 256,
+  keysAlive: Math.ceil(ERASE_FUNDED_KEEP_SECONDS / (28 * 86_400)),
+  reviewedMonthlyCaseCap: null,
+  completeMonthlyCostUsd: null,
+} as const;
+/** One case at its ceiling, in dollars: the whole erasure paid by the company, as if the store's window held nothing. */
+export function erasureOverflowCaseUsd(): number {
+  return ERASURE_OVERFLOW.unitsPerCase * UNIT_COST.studio + ERASURE_OVERFLOW.ledgerCommandsPerCase * COMMAND;
+}
+/** A month of it for a reviewed case cap; null (unknown, never zero) without one or with more cases counted than it allows. */
+export function erasureOverflowMonthlyUsd(caseCap: number | null, observed: number | null): number | null {
+  if (caseCap === null || observed === null || !Number.isSafeInteger(caseCap) || !Number.isSafeInteger(observed) || caseCap < 0 || observed < 0 || observed > caseCap) return null;
+  return caseCap * erasureOverflowCaseUsd() + ERASURE_OVERFLOW.keysAlive * ERASURE_OVERFLOW.monthlyKeyBytes * DB_BYTE_MONTH;
 }
 /** Explicit reviewed finite case cap, never inferred from missing data. Existing
  * over-cap obligations stay counted and invalidate a financed company total. */
@@ -1796,6 +1826,8 @@ export const OPEN: OpenItem[] = [];
 
 /** Exported limit or cost constants that are not a per-store monthly cost, and why. */
 export const NOT_A_COST: Record<string, string> = {
+  ERASE_WORST_SIZE: "lib/erasure-funded.ts: the largest erasure there can be, each count at its own module's cap (every product a course of MAX_LESSONS lessons, MAX_DEALS, both conversation caps, MAX_CHAT_KEPT, MAX_KEPT_EVENTS, LEGACY_SCAN certificates a course). A company exposure (erasure_overflow, owner's decision DONO-20261113-DEC-1), not a per-store monthly cost: priced per case in ERASURE_OVERFLOW / erasureOverflowCaseUsd and carried in docs/funded-exposure-review.md; its reviewed monthly case cap is null, never zero.",
+  ERASE_WORST_UNITS: "lib/erasure-funded.ts: the automatic ceiling of one erasure the company pays for in a store whose plan ended (erasureUnits(ERASE_WORST_SIZE)); a size past it is unknown and answers unavailable. Company exposure erasure_overflow (DONO-20261113-DEC-1), priced per case in ERASURE_OVERFLOW, outside every paid plan's COST_LINES.",
   MEMORY_FORGET_COMMANDS: "lib/assistant-memory-store.ts forgetMemory is shared by three direct callers, not exclusively a company obligation. app/api/store/assistant-memory/route.ts POST forget belongs to an active store: guardStoreWrite(settings) reaches studioAccess/countStudio and takes one studio request before the operation; this caller and constant are cited by COST_LINES studio. app/api/store/stores/route.ts first attempts store-deletion cleanup after its essential delete admission. lib/store-forget-retry.ts later retries that deleted store as a company obligation, not as another active-store request. The constant bounds outer dispatches only: the measured lock path is eleven SET attempts plus three EVAL dispatches, deleting at most MAX_STORED_MEMORY_BYTES (55,264 bytes) without reading the note payload. Its 87-byte sample is a JSON-serialized stub reply, not RESP, wire or billed bytes. Lua-internal calls and expired data-room month cleanup are additional; sixteen is not a complete supplier invoice ceiling. The studio source citation records existing admission, not proof that its full command or function-time budget covers the lock wait. Complete active-store and company runtime, Lua and funding remain unknown, never zero; this shared exported constant is not a separate monthly allowance or margin approval.",
   FORGET_TRY_COMMANDS: "lib/store-forget-retry.ts forgetBoth adds assistant-note deletion to webhook and API-key cleanup. This is a company obligation after the original essential deletion request, not a per-plan allowance. The declared formula includes MEMORY_FORGET_COMMANDS but does not certify Lua-internal command costs, bytes, runtime or retention; its complete fixed-cost ceiling remains unknown and cannot approve a finite company base.",
   FORGET_TRIES: "lib/store-forget-retry.ts permits eight total attempts per deleted store, including the original deletion. Up to seven later company attempts can repeat assistant-note cleanup. This bounded work count is not a funded global case/retention or read-byte ceiling; costs remain unknown, never zero.",

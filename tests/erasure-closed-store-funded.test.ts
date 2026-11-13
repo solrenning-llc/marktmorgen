@@ -26,6 +26,7 @@ import { erasureUnits } from "@/lib/erasure-rules";
 import { NON_PAYING_ALLOWANCES } from "@/lib/store-allowance-rules";
 import { takeAllowance } from "@/lib/store-allowance";
 import { standingOf } from "@/lib/plan-standing";
+import { erasureFundedMonth } from "@/lib/erasure-funded";
 
 globalThis.fetch = (async (input: string | URL | Request) => {
   const url = new URL(String(input instanceof Request ? input.url : input));
@@ -90,6 +91,12 @@ async function main(): Promise<void> {
   is("the person's own erasure, with the window already spent, is not refused either", byPerson.ok ? "ok" : byPerson.reason, "ok");
   is("and takes nothing more from the store's window", await studioUsed(), NON_PAYING_ALLOWANCES.ended.studio);
   is("the store's other studio work is still refused past its window", (await takeAllowance(store, "studio", 1)).ok, false);
+  const month = new Date().toISOString().slice(0, 7);
+  is("the company's month counts both erasures, and only what the window did not hold", await erasureFundedMonth(month), {
+    month,
+    cases: 2,
+    units: needed - NON_PAYING_ALLOWANCES.ended.studio + needed,
+  });
 
   part("A store whose window had room for part of it");
   redis.clear();
@@ -99,6 +106,23 @@ async function main(): Promise<void> {
   const mid = await erasePerson(part59, "cy@example.com", { kind: "team", who: "part-owner@example.com", role: "owner" });
   is("its erasure is made", mid.ok ? "ok" : mid.reason, "ok");
   is("what was left of its window was used, never more", await studioUsed(), NON_PAYING_ALLOWANCES.ended.studio);
+
+  part("A store on a running plan still pays its own erasure");
+  redis.clear();
+  await claimHandle("paid-owner@example.com", "paid-many", "paid-many", "");
+  await ensureStoreId("paid-owner@example.com");
+  await ensureStatsId("paid-owner@example.com");
+  await ensureListId("paid-owner@example.com");
+  const second = Math.floor(Date.now() / 1000);
+  await setSubscription("paid-owner@example.com", { customerId: "cus_paidmany", subscriptionId: "sub_paidmany", active: true, tier: "creator", period: { start: second - 86_400, end: second + 29 * 86_400, renews: true } });
+  const paid = await storeForEmail("paid-owner@example.com");
+  if (!paid) throw new Error("no store");
+  is("its plan is running", standingOf(paid), "paid");
+  const window = await takeAllowance(paid, "studio", 2_000);
+  is("its whole window is used", window.ok, true);
+  const refused = await erasePerson(paid, "eve@example.com", { kind: "team", who: "paid-owner@example.com", role: "owner" });
+  is("its erasure past its window answers as before", refused.ok ? "ok" : refused.reason, "limit");
+  is("nothing is counted for the company", await erasureFundedMonth(new Date().toISOString().slice(0, 7)), { month: new Date().toISOString().slice(0, 7), cases: 0, units: 0 });
 
   part("An unknown count of the company's part never makes it done");
   redis.clear();

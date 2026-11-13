@@ -38,6 +38,10 @@
  * part its record says (products, courses) before anything is read, the rest
  * once the courses are read and a few counts taken (lib/erasure-rules.ts,
  * erasureUnits), sized in tests/person-erasure.test.ts to cover what it sends.
+ * In a store whose plan ended it is never refused for its cost (owner's
+ * decision DONO-20261113-DEC-1, 13 November 2026): what its window does not
+ * hold is paid by the company's funded exposure for it, up to the largest
+ * erasure there can be (lib/erasure-funded.ts).
  */
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
@@ -47,7 +51,7 @@ import { readCoursesExact } from "@/lib/course";
 import { emailKey, forgetLearnerPerson, storeKey } from "@/lib/learn";
 import { personKey } from "@/lib/person-key";
 import { suppressCommand } from "@/lib/suppression";
-import { takeAllowance } from "@/lib/store-allowance";
+import { takeErasureUnits } from "@/lib/erasure-funded";
 import { logTeam } from "@/lib/team";
 import type { Role } from "@/lib/team-roles";
 import { deleteFile } from "@/lib/file-store";
@@ -290,18 +294,20 @@ export async function erasePerson(
   if (!email || email.length > MAX_EMAIL_LENGTH || !EMAIL_PATTERN.test(email)) return { ok: false, reason: "email" };
   if (!isRedisConfigured()) return { ok: false, reason: "unavailable" };
   // What the store's record says, before anything is read.
+  // In a store whose plan ended, what its window does not hold is the company's (DONO-20261113-DEC-1), never a refusal.
   const first = erasureUnits({ products: store.catalog.items.length, courses: idsOfKind(store, "course").length });
-  const taken = await takeAllowance(store, "studio", first);
-  if (!taken.ok) return { ok: false, reason: taken.reason === "used" ? "limit" : "unavailable", message: taken.message };
+  const taken = await takeErasureUnits(store, first, first, true);
+  if (!taken.ok) return taken.message === undefined ? { ok: false, reason: taken.reason } : { ok: false, reason: taken.reason, message: taken.message };
   const scope = await erasureScope(store, email).catch(() => null);
   if (!scope) return { ok: false, reason: "unavailable" };
   // Then the rest, once the courses are read and the counts taken.
   const size = await erasureSize(scope).catch(() => null);
   if (!size) return { ok: false, reason: "unavailable" };
-  const rest = erasureUnits(size) - first;
+  const total = erasureUnits(size);
+  const rest = total - first;
   if (rest > 0) {
-    const more = await takeAllowance(store, "studio", rest);
-    if (!more.ok) return { ok: false, reason: more.reason === "used" ? "limit" : "unavailable", message: more.message };
+    const more = await takeErasureUnits(store, rest, total, taken.fromCompany === 0);
+    if (!more.ok) return more.message === undefined ? { ok: false, reason: more.reason } : { ok: false, reason: more.reason, message: more.message };
   }
 
   // First, and on its own: whatever happens next, they are never written to again. Its second is Redis's (ERASED_PRINT).

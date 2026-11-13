@@ -206,7 +206,7 @@ export const allKey = (courseId: string) => `nl:course:${courseId}:certs:all`;
 /** Every certificate one student was ever issued for a course, withdrawn ones too (added 17 October 2026), so deleting them finds each. */
 const byKey = (courseId: string, who: string) => `nl:course:${courseId}:certs:by:${who}`;
 /** How many certificates of a course deleting a person looks through for ones issued before byKey was kept. */
-const LEGACY_SCAN = 500;
+export const LEGACY_SCAN = 500;
 
 export async function readCertificate(id: string): Promise<Certificate | null> {
   if (!isRedisConfigured() || !CERT_ID_PATTERN.test(id)) return null;

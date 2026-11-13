@@ -1,6 +1,7 @@
 import { customerTaxReviewFields } from './customer-tax-review';
 import { customerCostSnapshot, CUSTOMER_COST_CATEGORIES, type CustomerWorstCase } from '@/lib/net-margin-rules';
-export const EXPOSURE_SCOPES = ['trial','setup','full_refund','non_payment','post_cancellation','paused','legacy_credits','platform_waitlist'] as const;
+// erasure_overflow: a closed store's erasure past its studio window, paid by the company (owner's decision DONO-20261113-DEC-1, lib/erasure-funded.ts).
+export const EXPOSURE_SCOPES = ['trial','setup','full_refund','non_payment','post_cancellation','paused','legacy_credits','platform_waitlist','erasure_overflow'] as const;
 export const FUNDED_EXPOSURE_RULES = {schema:1,period:'worst-recognized-month',offsets:'none-no-future-conversions',fixedTaxShield:'none',scopes:EXPOSURE_SCOPES} as const;
 export type ExposureScope = typeof EXPOSURE_SCOPES[number];
 export type FundedExposureReview = {month:string; evidence:string; admissionLimitsEnforced:boolean; monthlyBudgetCents:number|null; cases:Record<ExposureScope,{maximumMonthlyCases:number|null;worstCase:CustomerWorstCase|null}>};

@@ -1,5 +1,6 @@
 "use client";
 
+import { handFocusOnAfterRemoval } from "@/lib/focus-when-drawn";
 import { type ImportReportLine, type ImportedStep, SequenceImportBox, reportWords } from "@/components/sequence-import-box";
 import type { LibraryEmailDraft, LibrarySequenceDraft } from "@/lib/template-library-intents";
 import { AiAssist, AiOn } from "@/components/ai-assist";
@@ -3045,7 +3046,8 @@ function Flows({
                   <button
                     type="button"
                     className="mt-2 inline-flex min-h-11 items-center text-sm font-bold text-ink-soft underline underline-offset-4 hover:text-danger"
-                    onClick={() =>
+                    data-list-remove="flow-step"
+                    onClick={() => {
                       setDraft(current => current ? {
                         ...current,
                         // The email that becomes the first has no email before it to read,
@@ -3055,8 +3057,9 @@ function Flows({
                           ...(step.otherwise === "jump" && step.jump === s.id ? { otherwise: "skip" as const, jump: "" } : {}),
                           ...(step.next && step.next === s.id ? { next: "" } : {}),
                         }))),
-                      } : current)
-                    }
+                      } : current);
+                      handFocusOnAfterRemoval("flow-step", i, draft.steps.length, "flow-step-add");
+                    }}
                   >
                     {s.kind === "email" ? "Remove this email" : "Remove this step"}
                   </button>
@@ -3066,6 +3069,7 @@ function Flows({
           </ol>
           {draft.steps.length < MAX_STEPS ? (
             <button
+              id="flow-step-add"
               type="button"
               className="btn btn-secondary btn-sm"
               onClick={() => setDraft({ ...draft, steps: [...draft.steps, blankStep("2", "days", products[0]?.id ?? "")] })}

@@ -64,7 +64,8 @@ export const STUDIO_AGENT_TOOLS: Readonly<Record<string, StudioAgentTool>> = {
   get_buyers: { reach: "read", needs: ["stats"] },
   get_worth_knowing: { reach: "read", needs: ["stats"] },
   get_memberships: { reach: "read", needs: ["stats"] },
-  get_affiliates: { reach: "read", needs: ["stats"] },
+  // The affiliate programme and its payouts are opened under "settings" (app/studio/affiliates/page.tsx, the affiliate routes).
+  get_affiliates: { reach: "read", needs: ["settings"] },
   get_page_test: { reach: "read", needs: ["stats"] },
   get_page_reading: { reach: "read", needs: ["stats"] },
   list_products: { reach: "read", needs: ["products"] },

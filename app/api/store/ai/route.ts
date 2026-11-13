@@ -106,6 +106,10 @@ export async function POST(request: NextRequest) {
     // paid file-store read on a request it is then refused.
     let pdf: (() => Promise<Uint8Array | null>) | null = null;
     if (body.readFile === true) {
+      // Nothing is read from storage for a job that could not be admitted, this month's balance included (read only,
+      // nothing reserved); what is admitted is then read only once its jobs are taken (lib/ai.ts, writePage).
+      const refused = await aiJobRefusal(store, 1 + READ_PDF_JOBS);
+      if (refused) return fail(refused);
       const file = readableFile(product);
       if (!file) return fail("file");
       pdf = async () => {

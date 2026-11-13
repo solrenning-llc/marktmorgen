@@ -31,6 +31,19 @@ view.unmount();
 const unread = await mount(PageFunnelEditor as (p: typeof props) => unknown, { ...props, ai: { on: true, left: null } as never });
 is("an allowance that could not be read stays unknown under every funnel", explains(unread.tree()).map((e) => e?.left), [null, null]);
 unread.unmount();
+
+part("A renewed allowance with the same number replaces the local count (Codex X5's LOW on #3508)");
+const live = { ...props, ai: { on: true, left: 5 } };
+const month = await mount(PageFunnelEditor as (p: typeof props) => unknown, live);
+const stale = explains(month.tree());
+stale[0]?.onLeft?.(0);
+await month.settle();
+is("the allowance spent in the month shows as spent", explains(month.tree()).map((e) => e?.left), [0, 0]);
+live.ai = { on: true, left: 5 };
+stale[0]?.onLeft?.(0);
+await month.settle();
+is("a fresh reading with the same number is the new reading, not the old spent count", explains(month.tree()).map((e) => e?.left), [5, 5]);
+month.unmount();
   done();
 }
 main().catch((error) => { console.error(error); process.exit(1); });

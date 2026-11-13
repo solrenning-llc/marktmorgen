@@ -41,6 +41,11 @@ export type ParsedCsv = {
   lines: number[];
   /** Whether rows past `maxRows` were left unread. */
   truncated: boolean;
+  /**
+   * The file's line where a quoted cell opened and never closed, or null. Such a
+   * cell holds the rest of the file, so its rows are not whole: a caller refuses it.
+   */
+  unclosedQuote: number | null;
 };
 
 /** How many of each separator each of a file's first `most` lines has, outside quotes. */
@@ -98,6 +103,7 @@ export function parseCsv(input: string, maxRows = Number.POSITIVE_INFINITY): Par
   let line = hint ? 2 : 1;
   let rowLine = line;
   let truncated = false;
+  let quoteLine = 0;
   const endRow = () => {
     row.push(cell);
     cell = "";
@@ -127,6 +133,7 @@ export function parseCsv(input: string, maxRows = Number.POSITIVE_INFINITY): Par
       // A quote opens a cell only at its start; spaces before it are dropped.
       cell = "";
       quoted = true;
+      quoteLine = line;
     } else if (c === separator) {
       row.push(cell);
       cell = "";
@@ -149,7 +156,9 @@ export function parseCsv(input: string, maxRows = Number.POSITIVE_INFINITY): Par
   }
   const [header = [], ...rows] = all;
   const [, ...rowLines] = lines;
-  return { header: header.map((h) => h.trim()), rows, separator, lines: rowLines, truncated };
+  // Still in quotes at the end of the text read: the rest of the file went into one cell.
+  const unclosedQuote = quoted ? quoteLine : null;
+  return { header: header.map((h) => h.trim()), rows, separator, lines: rowLines, truncated, unclosedQuote };
 }
 
 /** One cell as a spreadsheet will read it back: quoted, and never a formula. */

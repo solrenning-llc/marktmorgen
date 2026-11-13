@@ -66,7 +66,7 @@ export type ReportLine = {
 
 export type SequenceImport =
   | { ok: true; steps: SequenceStep[]; report: ReportLine[] }
-  | { ok: false; why: "size" | "empty" | "columns"; report: ReportLine[] };
+  | { ok: false; why: "size" | "empty" | "columns" | "quote"; report: ReportLine[] };
 
 /**
  * Click trackers of the services people move from, by host: a link through
@@ -300,6 +300,9 @@ export function readSequenceCsv(text: string, bytes: number = new TextEncoder().
     return { ok: false, why: "size", report: [{ line: 0, column: "file", reason: `The file is larger than ${MAX_SEQUENCE_FILE_BYTES / 1000} KB. Split it into two sequences, or keep the emails' text only.` }] };
   }
   const parsed = parseCsv(text, MAX_STEPS * 5);
+  if (parsed.unclosedQuote !== null) {
+    return { ok: false, why: "quote", report: [{ line: parsed.unclosedQuote, column: "file", reason: `This line opens a quote (") that never closes, so the emails after it cannot be read. Fix the line and save the file again as CSV.` }] };
+  }
   const columns = columnsOf(parsed.header);
   const missing = (["subject", "body"] as const).filter((column) => columns[column] === undefined);
   if (missing.length) {

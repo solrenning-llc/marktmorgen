@@ -127,6 +127,14 @@ export async function pointsOf(id: string, keys: string[]): Promise<Map<string, 
 export type Standing = { key: string; points: number };
 
 /**
+ * The board as members see it: a member the creator removed is left off, the others in their order (Claude 7,
+ * 13 November 2026). A member whose record was not found is still shown, unnamed, as before.
+ */
+export function boardShown<T extends { key: string }>(top: T[], members: Map<string, { removed: boolean }>): T[] {
+  return top.filter((s) => members.get(s.key)?.removed !== true);
+}
+
+/**
  * The top of the board for a period, most points first, and where this
  * member stands on it. Members with no points in the period are left off.
  */

@@ -126,7 +126,17 @@ export async function refundPlanPayment(
           `plan-refund:${part.chargeId}:${turnedDown[i]}`,
         );
         const refundId = typeof refund.id === "string" ? refund.id : "";
-        if (refund.object !== "refund" || !REFUND_ID.test(refundId) || refund.amount !== part.cents || refund.currency !== currency) return { ok: false, reason: "failed" };
+        // The receipt names the payment asked to be refunded (issue #4420, fix by Codex L): another charge or payment
+        // intent, or none, is not this refund's, and fails as "failed" so the recovery note reconciles it.
+        if (
+          refund.object !== "refund" ||
+          !REFUND_ID.test(refundId) ||
+          refund.charge !== part.chargeId ||
+          refund.payment_intent !== part.paymentIntent ||
+          refund.amount !== part.cents ||
+          refund.currency !== currency
+        )
+          return { ok: false, reason: "failed" };
         if (refund.status !== "succeeded" && refund.status !== "pending" && refund.status !== "requires_action") return { ok: false, reason: "failed" };
         made.push({ id: refundId, pending: refund.status !== "succeeded" });
       } catch (error) {

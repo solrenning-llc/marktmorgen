@@ -111,7 +111,8 @@ async function planRefunds(): Promise<void> {
     handler = (method, path, q) => {
       if (method === "POST" && path === "/refunds") {
         made.push(handle);
-        return Response.json({ id: `re_${handle}made`, object: "refund", amount: 6_900, currency: "usd", status: "succeeded" });
+        // As Stripe answers: the refund names the charge and payment it refunds (#4420: another's is not accepted).
+        return Response.json({ id: `re_${handle}made`, object: "refund", charge, payment_intent: `pi_${handle}x1`, amount: 6_900, currency: "usd", status: "succeeded" });
       }
       if (method !== "GET") return null;
       if (path === `/subscriptions/${sub}`) return Response.json({ id: sub, customer: { id: customer, email, balance: 0 }, metadata: { store: handle } });

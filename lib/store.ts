@@ -2329,7 +2329,9 @@ export async function moveAccount(
           for (const done of written) {
             await setIfHeld(done.lock, await ownerKey(storeRef(done.before)), recordJson(done.before)).catch(() => false);
           }
-          await redisPipeline([["DEL", await ownerKey(to)]]).catch(() => {});
+          // Only this move's own copy is taken back (#4343): a compare-and-delete on the exact record it wrote, so
+          // whatever another writer put at the new address since is left as it is (lib/redis-lock.ts RELEASE).
+          await releaseLock({ key: await ownerKey(to), token: recordJson(next), ttlSeconds: 1 });
           throw new StoreBusyError();
         }
         written.push(one);

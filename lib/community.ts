@@ -15,6 +15,7 @@
  *   nl:cm:<id>:c:<post>       the comments under one post (hash)
  *   nl:cm:<id>:l:<post>       who liked one post (set of member keys)
  *   nl:cm:<id>:lc:<post>:<c>  who liked one comment (set of member keys)
+ *   nl:cm:<id>:likelock:<post>[:<c>]:<member>  held while one member's press on one like runs (pressLike)
  *   nl:cm:<id>:m              everyone who has come in: key -> Member (hash)
  *   nl:cm:<id>:dir            those who chose to be listed, by joining time
  *   nl:cm:<id>:rep            reported posts and comments, newest first
@@ -77,6 +78,8 @@ import { MAX_ALT_LENGTH } from "@/lib/product-image";
 import { indexBytes, indexPost, partsOf, unindexPost } from "@/lib/community-search";
 import { TRACED_SINCE, TRACE_ENTRY, traceKey } from "@/lib/community-trace";
 import { type DataStore, needData, giveData } from "@/lib/store-data";
+import { withLock } from "@/lib/redis-lock";
+import { award } from "@/lib/community-points";
 import { dataBytes } from "@/lib/store-data-rules";
 import { indexMember } from "@/lib/community-index";
 import { type Poll, parsePoll, pollKeys } from "@/lib/community-polls";
@@ -217,6 +220,7 @@ const spaceKey = (id: string, space: string) => `${base(id)}:sp:${space}`;
 const commentsKey = (id: string, post: string) => `${base(id)}:c:${post}`;
 const likesKey = (id: string, post: string) => `${base(id)}:l:${post}`;
 const commentLikesKey = (id: string, post: string, comment: string) => `${base(id)}:lc:${post}:${comment}`;
+const likeLockKey = (id: string, post: string, comment: string | null, who: string) => `${base(id)}:likelock:${post}${comment ? `:${comment}` : ""}:${who}`;
 const membersKey = (id: string) => `${base(id)}:m`;
 const dirKey = (id: string) => `${base(id)}:dir`;
 const handlesKey = (id: string) => `${base(id)}:h`;
@@ -1089,6 +1093,29 @@ async function toggleIn(id: string, key: string, ref: string, post: string, who:
     ]);
   }
   return like === 1 ? false : null;
+}
+
+/**
+ * One member's press on a post's or a comment's like, with the author's point, under one lock per member and liked
+ * thing (Codex T and Codex U on #3819): two presses at once of the same member run one after the other, so a point
+ * never stays for a like that is gone, and a like is never written again without its room. A lock not had in time
+ * throws LockBusyError before anything is read or written (the route answers "error": nothing was changed, try again).
+ * The author is given or loses a point only when this press changed the like, never for their own like.
+ */
+export async function pressLike(
+  id: string,
+  post: string,
+  comment: string | null,
+  who: string,
+  author: string,
+  room: DataStore,
+  owner: DataOwner,
+): Promise<boolean | null> {
+  return withLock(likeLockKey(id, post, comment, who), 20, 5_000, async () => {
+    const added = comment ? await toggleCommentLike(id, post, comment, who, room) : await toggleLike(id, post, who, room);
+    if (added !== null && author !== who) await award(id, author, added ? 1 : -1, owner);
+    return added;
+  });
 }
 
 /** The same for a comment: one like per member, a second press takes it back. */

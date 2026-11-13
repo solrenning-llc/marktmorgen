@@ -966,18 +966,78 @@ export async function editPost(id: string, post: Post, input: { title: string; t
   return next;
 }
 
-/** Takes a post away for good, with its comments, likes and reports, and gives back its room. */
+/** A set's or a hash's keys as Redis lists them: member keys, or null when the answer is in another shape. */
+function memberList(raw: unknown): string[] | null {
+  if (raw === null || raw === undefined) return [];
+  if (!Array.isArray(raw) || raw.some((one) => typeof one !== "string")) return null;
+  return raw as string[];
+}
+
+/**
+ * A post's comments as HGETALL lists them, flat or as an object: every id, and each comment that reads. A comment
+ * that does not read is still deleted with its post (moderation never waits on it); only its author's trace entry
+ * stays. Null when the answer as a whole is in another shape.
+ */
+function commentRows(raw: unknown): { ids: string[]; comments: Comment[] } | null {
+  if (raw === null || raw === undefined) return { ids: [], comments: [] };
+  let pairs: [unknown, unknown][];
+  if (Array.isArray(raw)) {
+    if (raw.length % 2 !== 0) return null;
+    pairs = [];
+    for (let n = 0; n < raw.length; n += 2) pairs.push([raw[n], raw[n + 1]]);
+  } else if (typeof raw === "object") pairs = Object.entries(raw as Record<string, unknown>);
+  else return null;
+  if (pairs.some(([field]) => typeof field !== "string" || !ITEM_ID.test(field))) return null;
+  const comments = pairs.flatMap(([field, value]) => {
+    const comment = parseComment(value);
+    return comment && comment.id === field ? [comment] : [];
+  });
+  return { ids: pairs.map(([field]) => field as string), comments };
+}
+
+/** Takes a post away for good, with its comments, likes, votes and reports, every member's trace of them, and gives back its room. */
 export async function deletePost(id: string, post: Post, room: DataStore): Promise<void> {
-  const [raw] = await redisPipeline([["HKEYS", commentsKey(id, post.id)]]);
-  const commentIds = Array.isArray(raw) ? (raw as string[]) : [];
+  // Everything done under the post is in its member's trace (lib/community-trace.ts), each entry with its
+  // TRACE_ENTRY of the store's data room: read who did what first, so each entry goes, and its room comes back,
+  // with the post. A read in an unknown shape deletes nothing (rule 24): the entries would stay, their room taken.
+  const [rawComments, rawLikers, rawVoters] = repliesFor(
+    await redisPipeline([["HGETALL", commentsKey(id, post.id)], ["SMEMBERS", likesKey(id, post.id)], ["HKEYS", pollKeys(id, post.id)[0]]]),
+    3,
+  ) ?? [];
+  const rows = commentRows(rawComments);
+  const likers = memberList(rawLikers);
+  const voters = memberList(rawVoters);
+  if (!rows || !likers || !voters) throw new UnknownReplyError("a deleted post's comments, likes or votes");
+  const { ids: commentIds, comments } = rows;
+  const targets = [`p:${post.id}`, ...commentIds.map((c) => `c:${post.id}:${c}`)];
+  const sets = repliesFor(
+    await redisPipeline([...commentIds.map((c) => ["SMEMBERS", commentLikesKey(id, post.id, c)]), ...targets.map((t) => ["SMEMBERS", reportersKey(id, t)])]),
+    commentIds.length + targets.length,
+  )?.map(memberList);
+  if (!sets || sets.some((one) => one === null)) throw new UnknownReplyError("a deleted post's comment likes or reporters");
+  const commentLikers = sets.slice(0, commentIds.length) as string[][];
+  const reporters = sets.slice(commentIds.length) as string[][];
+  const entries: [string, string][] = [
+    ...(post.a !== CREATOR ? [[post.a, `p:${post.id}`] as [string, string]] : []),
+    ...comments.filter((c) => c.a !== CREATOR).map((c): [string, string] => [c.a, `c:${post.id}:${c.id}`]),
+    ...likers.map((who): [string, string] => [who, `l:${post.id}`]),
+    ...voters.map((who): [string, string] => [who, `v:${post.id}`]),
+    ...commentIds.flatMap((c, i) => commentLikers[i].map((who): [string, string] => [who, `lc:${post.id}:${c}`])),
+    ...targets.flatMap((t, i) => reporters[i].map((who): [string, string] => [who, `r:${t}`])),
+  ];
   await redisPipeline([
-    ["DEL", postKey(id, post.id), commentsKey(id, post.id), likesKey(id, post.id), reportersKey(id, `p:${post.id}`), ...pollKeys(id, post.id), ...commentIds.map((c) => commentLikesKey(id, post.id, c))],
+    ["DEL", postKey(id, post.id), commentsKey(id, post.id), likesKey(id, post.id), ...pollKeys(id, post.id), ...commentIds.map((c) => commentLikesKey(id, post.id, c)), ...targets.map((t) => reportersKey(id, t))],
     ["ZREM", feedKey(id), post.id],
     ["ZREM", spaceKey(id, post.sp), post.id],
-    ["ZREM", reportsKey(id), `p:${post.id}`, ...commentIds.map((c) => `c:${post.id}:${c}`)],
-    ...(post.a !== CREATOR ? [["SREM", traceKey(id, post.a), `p:${post.id}`]] : []),
+    ["ZREM", reportsKey(id), ...targets],
   ]);
-  if (post.a !== CREATOR) await giveData(room, [TRACE_ENTRY]);
+  // Only what really left a trace gives its room back, in batches a request carries.
+  let left = 0;
+  for (let i = 0; i < entries.length; i += TRACE_BATCH) {
+    const gone = await redisPipeline(entries.slice(i, i + TRACE_BATCH).map(([who, ref]) => ["SREM", traceKey(id, who), ref]));
+    left += gone.filter((one) => Number(one) === 1).length;
+  }
+  if (left) await giveData(room, [{ ...TRACE_ENTRY, bytes: left * TRACE_ENTRY.bytes }]);
   await unindexPost(id, post.id).catch((error) => {
     console.error("taking a deleted post out of the search index failed", error);
   });

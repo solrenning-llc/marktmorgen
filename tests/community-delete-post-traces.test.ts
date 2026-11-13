@@ -85,6 +85,19 @@ async function main(): Promise<void> {
 
   part("The store's data room");
   is("every byte the two posts and what was done under them took is given back", await used(), before);
+
+  part("A comment that does not read never keeps a post from being deleted");
+  {
+    const kept = await createPost(cid, { space: general, author: ana, title: "", text: "Something to take down", img: null, kind: "post", poll: null }, club);
+    if (!kept.ok) throw new Error("no post");
+    const fine = await addComment(cid, kept.post.id, { parent: "", author: ben, text: "Fine" }, club);
+    if (!fine.ok) throw new Error("no comment");
+    await redis.pipeline([["HSET", `nl:cm:${cid}:c:${kept.post.id}`, "aaaaaaaaaaaa", "{not json"]]);
+    await deletePost(cid, kept.post, club);
+    is("the post is gone", (await redis.pipeline([["EXISTS", `nl:cm:${cid}:p:${kept.post.id}`]]))[0], 0);
+    is("its comments, the damaged one too, are gone", (await redis.pipeline([["EXISTS", `nl:cm:${cid}:c:${kept.post.id}`]]))[0], 0);
+    is("the readable comment's entry left Ben's trace", (await trace(ben)).filter((ref) => ref.includes(kept.post.id)), []);
+  }
   done();
 }
 

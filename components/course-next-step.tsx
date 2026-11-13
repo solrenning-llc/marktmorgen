@@ -57,6 +57,8 @@ export function CourseNextStep({
         setError(data.error === "next_step" && data.message ? data.message : "That could not be saved just now. Try again in a moment.");
         return;
       }
+      // "None" saves no line: the one typed for the old product goes too, so the form is not dirty again at once (Codex X5 on #3530, LEVE).
+      if (!picked) setLine("");
       toast(picked ? "Saved. Students see this next step on the course's page." : "Saved. No next step is shown.");
       router.refresh();
     } catch {
@@ -80,6 +82,7 @@ export function CourseNextStep({
         </select>
         <span id={`${id}-product-help`} className="mt-1 block text-sm text-ink-soft">
           Students who already have it never see it, nor those who said &quot;No thanks&quot; in the browser they use. Nobody sees it while it is a draft or sold out.
+          Products with a limited number, free products and bundles the student builds are never shown, so they cannot be saved here.
         </span>
       </label>
       {picked ? (

@@ -21,6 +21,7 @@ import type { Listing, Store } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
 import { canSellProduct } from "@/lib/store-checkout";
 import { offerable } from "@/lib/next-offer-rules";
+import { MIN_BUNDLE_ITEMS } from "@/lib/bundle-rules";
 import { ownedBeforeCart } from "@/lib/cart-offers";
 import { nextStepShown } from "@/lib/course-next-step-rules";
 import { ownKey } from "@/lib/paypal-sales";
@@ -32,6 +33,18 @@ export const NEXT_STEP_NO_SECONDS = 365 * 86_400;
 
 /** The cookie a "No thanks" is kept under, one for each course; it holds only "1". */
 export const nextStepCookie = (courseId: string) => `nl_ns_${courseId}`;
+
+/**
+ * Whether a product is never shown as a next step, whatever the student has (review of #3530, MEDIUM): what
+ * offerable (lib/next-offer-rules.ts) always refuses for its shape, not for the moment. A limited number (its remaining
+ * count is never said on the card), a free product (never sold), and a bundle the student builds or one with fewer
+ * products than a bundle holds. A draft, a sold-out product or a store not selling today are moments: they may be
+ * saved, and the studio says nobody sees them while they last.
+ */
+export function neverNextStep(product: Pick<Listing, "stock" | "priceCents" | "bundle" | "pick">): boolean {
+  if (product.stock !== null || product.priceCents === 0) return true;
+  return Boolean(product.bundle && (product.pick || product.bundle.length < MIN_BUNDLE_ITEMS));
+}
 
 /** The product to show as the course's next step to this student, or null for none. */
 export async function nextStepFor(input: {

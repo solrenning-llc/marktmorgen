@@ -48,7 +48,7 @@ import { productPromptsLeft } from "@/lib/product-outline";
 import { pageWords } from "@/lib/page-translate";
 import { readPage } from "@/lib/sales-page-store";
 import { quietedBy } from "@/lib/extras-notes";
-import { clearTakenDown } from "@/lib/draft-preview";
+import { clearTakenDown, takenDownMark } from "@/lib/draft-preview";
 
 const ACTIONS = new Set(["add", "edit", "remove", "move", "link", "unlink", "visibility"]);
 
@@ -433,12 +433,15 @@ export async function POST(request: NextRequest) {
           }
         }
       }
+      // The takedown mark as it was before this publish: only that one is cleared after it, so a takedown that lands in
+      // between keeps its own (Codex L's MEDIUM 1 on #3597). A mark that cannot be read is never cleared (null).
+      const seenMark = body.hidden === false && !guarded.store.suspended ? await takenDownMark(guarded.store, id).catch(() => null) : null;
       const done = await setProductHidden(ref, id, body.hidden);
       result = done.ok ? { ok: true, product: done.product } : done;
       // Published again: a mark from a takedown no longer holds its previews back (lib/draft-preview.ts). A clear
       // that fails keeps the mark, which only refuses preview links: never a wrong opening.
       // A store switched off after notices never clears it this way (Claude 6 on #3439, LOW 2).
-      if (done.ok && body.hidden === false && !guarded.store.suspended) await clearTakenDown(guarded.store, id).catch((error) => console.error("preview mark not cleared", error));
+      if (done.ok && body.hidden === false && !guarded.store.suspended) await clearTakenDown(guarded.store, id, seenMark).catch((error) => console.error("preview mark not cleared", error));
     } else if (action === "unlink") {
       const cleared = await setProductLink(ref, id, null);
       result = cleared.ok ? { ok: true, product: null } : { ok: false, reason: asProductReason(cleared.reason) };

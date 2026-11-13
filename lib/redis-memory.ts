@@ -393,6 +393,11 @@ export class MemoryRedis {
           const [, lock, token] = args;
           return this.run(["GET", lock]) === token ? this.run(["DEL", lock]) : 0;
         }
+        // lib/draft-preview.ts clearTakenDown: a taken-down mark deleted only while it holds the value the publish read.
+        if (key.startsWith("-- marktmorgen:dpv-clear-down:v1\n") && args[0] === "1" && args.length === 3) {
+          const [, mark, seen] = args;
+          return this.run(["GET", mark]) === seen ? this.run(["DEL", mark]) : 0;
+        }
         if (key.startsWith("-- marktmorgen:extend:v1\n") && args[0] === "1" && args.length === 4) {
           const [, lock, token, seconds] = args;
           return this.run(["GET", lock]) === token ? this.run(["EXPIRE", lock, seconds]) : 0;

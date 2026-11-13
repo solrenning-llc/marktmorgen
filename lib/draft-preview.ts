@@ -92,7 +92,8 @@ export async function revokeDraftPreview(store: Owner, productId: string): Promi
  */
 export async function markTakenDown(store: Owner, productId: string): Promise<void> {
   const statsId = statsOf(store);
-  const replies = await exactly([["SET", downKey(statsId, productId), "1", "EX", TAKEN_DOWN_SECONDS]]);
+  // A value of its own for each takedown, so a publish clears only the mark it read (clearTakenDown; Codex L on #3597).
+  const replies = await exactly([["SET", downKey(statsId, productId), randomBytes(12).toString("hex"), "EX", TAKEN_DOWN_SECONDS]]);
   if (replies[0] !== "OK") throw new Error("A taken-down mark could not be written");
   await revokeDraftPreview(store, productId);
 }
@@ -126,9 +127,23 @@ export async function isTakenDown(store: Owner, productId: string): Promise<bool
   return mark !== null;
 }
 
-/** The product is published again: previews may be made for it once it is a draft again. */
-export async function clearTakenDown(store: Owner, productId: string): Promise<void> {
-  await exactly([["DEL", downKey(statsOf(store), productId)]]);
+/** The taken-down mark as it is now (its own value), or null when there is none; a reply that cannot be read throws. */
+export async function takenDownMark(store: Owner, productId: string): Promise<string | null> {
+  return stringOrNull((await exactly([["GET", downKey(statsOf(store), productId)]]))[0], "taken-down mark");
+}
+
+/** Deletes the key only while it still holds the value given; answers 1 when deleted, 0 when it held anything else. */
+const CLEAR_DOWN = '-- marktmorgen:dpv-clear-down:v1\nif redis.call("GET", KEYS[1]) == ARGV[1] then return redis.call("DEL", KEYS[1]) else return 0 end';
+
+/**
+ * The product is published again: previews may be made for it once it is a draft again. Only the mark read before the
+ * publish (`seen`, takenDownMark) is cleared, in one step: a takedown that landed since wrote a mark of its own, which
+ * stays (Codex L's MEDIUM 1 on #3597). No mark read, nothing to clear. A reply that cannot be read throws.
+ */
+export async function clearTakenDown(store: Owner, productId: string, seen: string | null): Promise<void> {
+  if (seen === null) return;
+  const [reply] = await exactly([["EVAL", CLEAR_DOWN, 1, downKey(statsOf(store), productId), seen]]);
+  if (reply !== 0 && reply !== 1) throw new Error("A taken-down mark's clearing could not be read");
 }
 
 /**

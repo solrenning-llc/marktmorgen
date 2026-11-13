@@ -40,6 +40,8 @@ const world = {
   slow: 0,
   /** Milliseconds the clock jumps when a charge's refunds are listed (a slow reading before it). */
   jump: 0,
+  /** An exact stand-in answer for GET /refunds?charge=…; undefined keeps the normal filtered list. */
+  refundListReply: undefined as unknown | undefined,
 };
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -80,6 +82,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (path === "/charges/search" || path === "/customers/search") return searchPage([]);
   if (path === "/disputes") return page([{ charge: q.get("charge"), status: "needs_response", amount: 6_900 }]);
   if (path === "/refunds" && world.jump) clock += world.jump;
+  if (path === "/refunds" && world.refundListReply !== undefined) return json(world.refundListReply);
   if (path === "/refunds") return page(world.refunds.filter((r) => r.charge === q.get("charge")));
   return json({ error: { message: `no stand-in for ${path}` } }, 404);
 }) as typeof fetch;
@@ -182,6 +185,27 @@ async function main() {
   const h = await paidShop();
   await redisPipeline([["SET", lockKeyOf((await h.store()).sid), "someone-else", "EX", 60]]);
   is("another request holds the lock: busy, and its lock is left alone", [await refundPlanPayment(await h.store(), NOW), await lockOf(await h.store())], [{ ok: false, reason: "busy" }, "someone-else"]);
+  part("A refund row for another charge (#4474)");
+  const listOf = (rows: unknown[]) => ({ object: "list", data: rows, has_more: false });
+  const foreign = { id: "re_foreignrow1", object: "refund", charge: "ch_anotherone0x1", payment_intent: "pi_anotherone0x1", amount: 6_900, currency: "usd" };
+  for (const status of ["failed", "pending"]) {
+    const fr = await paidShop();
+    world.refundListReply = listOf([{ ...foreign, status }]);
+    is(`a ${status} refund row of another charge: the read fails closed, nothing posted`, [await refundPlanPayment(await fr.store(), NOW), fr.refunds().length], [{ ok: false, reason: "failed" }, 0]);
+  }
+  const fx = await paidShop();
+  world.refundListReply = listOf([{ ...foreign, charge: { id: "ch_anotherone0x1", object: "charge" }, status: "failed" }]);
+  is("an expanded charge of another payment: fails closed, nothing posted", [await refundPlanPayment(await fx.store(), NOW), fx.refunds().length], [{ ok: false, reason: "failed" }, 0]);
+  const fn = await paidShop();
+  world.refundListReply = listOf([{ ...foreign, charge: undefined, status: "failed" }]);
+  is("a refund row with no charge: fails closed, nothing posted", [await refundPlanPayment(await fn.store(), NOW), fn.refunds().length], [{ ok: false, reason: "failed" }, 0]);
+  const fp = await paidShop();
+  world.refundListReply = listOf([{ ...foreign, charge: fp.id, status: "failed" }]);
+  is("this charge but another payment intent: fails closed, nothing posted", [await refundPlanPayment(await fp.store(), NOW), fp.refunds().length], [{ ok: false, reason: "failed" }, 0]);
+  const own = await paidShop();
+  world.refundListReply = listOf([{ ...foreign, id: "re_ownfailed01", charge: { id: own.id, object: "charge" }, payment_intent: `pi_${own.id.slice(3, -2)}x1`, status: "failed" }]);
+  is("its own turned-down refund, charge expanded: counted, and the refund is made", (await refundPlanPayment(await own.store(), NOW)).ok, true);
+  world.refundListReply = undefined;
   done();
 }
 

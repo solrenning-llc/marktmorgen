@@ -71,7 +71,9 @@ async function main(): Promise<void> {
   const times = new Map<string, number>();
   for (const to of amazon) times.set(to, (times.get(to) ?? 0) + 1);
   const twice = [...times].filter(([, n]) => n > 1).map(([to]) => to);
-  is("every member was written to", times.size, 150);
+  // The rest open in later portions (lib/mail-health.ts rampRoom); the first portion is what this is about.
+  is("the first portion went out, counted once: 100 people, 100 emailed", [times.size, job?.counts.mailed], [100, 100]);
+  is("asked of Amazon 101 times: the 100, and the one whose answer was lost asked once more", amazon.length, 101);
   is("nobody Amazon took is written to twice (only the one whose answer was lost may be asked again)", twice.length <= 1, true);
   done();
 }

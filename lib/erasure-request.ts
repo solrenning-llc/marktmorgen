@@ -32,6 +32,7 @@ import { after } from "next/server";
 import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { withinLimit } from "@/lib/request-guard";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { type Store, storeForHandle, storeForId } from "@/lib/store";
@@ -56,6 +57,33 @@ const STORE_ID = /^[0-9a-f]{32}$/;
 const PRESS_MS = 40_000;
 
 type Grant = { e: string; s: string[] };
+
+/**
+ * The stores a press left, written over the grant only while it is still exactly the one that press read, under the
+ * grant's own expiry (#4281, Codex L): another press that finished the link meanwhile, or the link's end, is never
+ * undone. 1 written, 0 not (the grant changed or is gone).
+ */
+export const GRANT_LATER = [
+  "-- marktmorgen:erase-grant-later:v1",
+  "if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end",
+  "redis.call('SET', KEYS[1], ARGV[2], 'KEEPTTL')",
+  "return 1",
+].join("\n");
+
+/** The grant deleted only while it is still exactly the one this press read (#4281). 1 deleted, 0 not. */
+export const GRANT_DONE = [
+  "-- marktmorgen:erase-grant-done:v1",
+  "if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end",
+  "redis.call('DEL', KEYS[1])",
+  "return 1",
+].join("\n");
+
+/** One of GRANT_LATER or GRANT_DONE on the link's key, its exact 0 or 1 (rule 24); anything else throws. */
+async function onGrantAsRead(script: string, key: string, read: string, ...rest: string[]): Promise<boolean> {
+  const replies = repliesFor(await redisPipeline([["EVAL", script, 1, key, read, ...rest]]), 1);
+  if (!replies || (replies[0] !== 0 && replies[0] !== 1)) throw new UnknownReplyError("an erasure link's grant write");
+  return replies[0] === 1;
+}
 
 /** "full": asked from one store, it has no room in its share for a visitor's address (askedCeiling). Never asked for every store. */
 export type EraseAsk = "sent" | "email" | "limited" | "error" | "full";
@@ -319,12 +347,28 @@ export async function confirmErasure(token: string, now = Date.now()): Promise<E
     deleted.push(store.name);
     await tellOwner(store, grant.e).catch((error: unknown) => console.error("telling a store's owner about a deletion failed", error));
   }
+  // Written or deleted only over the grant as this press read it (#4281). Changed meanwhile, another press of this link
+  // wrote or finished it: what is pending is what the link says now, read again, never this press's stale list.
   if (later.length) {
-    await redisPipeline([["SET", key, JSON.stringify({ e: grant.e, s: later } satisfies Grant), "EX", Math.max(60, ttl)]]);
-    return { state: "more", deleted, later };
+    if (await onGrantAsRead(GRANT_LATER, key, raw as string, JSON.stringify({ e: grant.e, s: later } satisfies Grant))) return { state: "more", deleted, later };
+    return afterAnotherPress(key, deleted);
   }
-  await redisPipeline([["DEL", key]]);
+  await onGrantAsRead(GRANT_DONE, key, raw as string);
+  // Every store of the grant this press read is done by it, whatever another press wrote meanwhile.
   return { state: "done", deleted, later };
+}
+
+/**
+ * What a press says when its grant changed under it (#4281): the link as it is now. Gone (used by the other press, or
+ * run out): "gone", as for a link already used, even when this press deleted some stores, since it cannot tell which
+ * of the others are done. Still there: "more", with the stores the link now holds. Unknown: "more", nothing written.
+ */
+async function afterAnotherPress(key: string, deleted: string[]): Promise<EraseDone> {
+  const reply = await redisPipeline([["GET", key]]);
+  if (!exactGrantReply(reply, 1)) return { state: "more", deleted, later: [] };
+  if (reply[0] === null) return { state: "gone", deleted, later: [] };
+  const now = parseGrant(reply[0]);
+  return { state: "more", deleted, later: now ? now.s : [] };
 }
 
 /** The owner's note: done, not asked. One of the store's own emails (lib/store-allowance-rules.ts, "email"). */

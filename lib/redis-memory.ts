@@ -252,6 +252,19 @@ export class MemoryRedis {
           this.run(["ZADD", all, at, member]);
           return 1;
         }
+        // lib/erasure-request.ts GRANT_LATER / GRANT_DONE: an erasure link's grant written or deleted only over the one read.
+        if ((key.startsWith("-- marktmorgen:erase-grant-later:v1\n") && args[0] === "1" && args.length === 4) ||
+            (key.startsWith("-- marktmorgen:erase-grant-done:v1\n") && args[0] === "1" && args.length === 3)) {
+          const [, target, expected, next] = args;
+          this.live(target);
+          const current = this.data.get(target);
+          if (current !== undefined && typeof current !== "string") throw new Error("WRONGTYPE");
+          if (current !== expected) return 0;
+          // As SET KEEPTTL: the expiry stays as it was.
+          if (next !== undefined) this.data.set(target, next);
+          else this.run(["DEL", target]);
+          return 1;
+        }
         // lib/product-about.ts WRITE_ABOUT_IF: the description written only over the one it was read as.
         if (key.startsWith("-- marktmorgen:about-write-if:v1\n") && args[0] === "1" && args.length === 4) {
           const [, about, expected, text] = args;

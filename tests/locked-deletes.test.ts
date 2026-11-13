@@ -429,6 +429,7 @@ async function main(): Promise<void> {
     "assistant-settings": ["act:page:clear"],
     "blog": ["act:page:delete"],
     "call": ["act:products:remove"],
+    "call-team": ["act:products:remove"],
     "bundle": ["act:products:clear", "not:a bundle made in the same request is taken back when its pictures fail"],
     "calendar": ["need:settings"],
     "community": ["lockedFor"],
@@ -487,7 +488,7 @@ async function main(): Promise<void> {
   };
   // What deletes, and what sends or starts sending (an email, a batch, a queue that a job sends).
   const DELETES =
-    /\bdel\(|dropStream\(|dropTask\(|removeProduct\(|deletePost\(|deleteComment\(|\bdrop[A-Z][A-Za-z]*\(|remove[A-Z][A-Za-z]*\(|delete[A-Z][A-Za-z]*\(|clear[A-Z][A-Za-z]*\(|\bforget[A-Z][A-Za-z]*\(|\brevoke[A-Z][A-Za-z]*\(|\bcancel[A-Z][A-Za-z]*\(|\["DEL"|\bqueue[A-Z][A-Za-z]*\(|\blaunch\(|\bsendBatch\(|\bresend[A-Z][A-Za-z]*\(|\badvance[A-Z][A-Za-z]*\(|\bsetProductCall\(/;
+    /\bdel\(|dropStream\(|dropTask\(|removeProduct\(|deletePost\(|deleteComment\(|\bdrop[A-Z][A-Za-z]*\(|remove[A-Z][A-Za-z]*\(|delete[A-Z][A-Za-z]*\(|clear[A-Z][A-Za-z]*\(|\bforget[A-Z][A-Za-z]*\(|\brevoke[A-Z][A-Za-z]*\(|\bcancel[A-Z][A-Za-z]*\(|\["DEL"|\bqueue[A-Z][A-Za-z]*\(|\blaunch\(|\bsendBatch\(|\bresend[A-Z][A-Za-z]*\(|\badvance[A-Z][A-Za-z]*\(|\bsetProductCall\(|\bwriteTeam\(/;
   const walk = (dir: string): string[] =>
     readdirSync(dir).flatMap((name) => {
       const at = join(dir, name);

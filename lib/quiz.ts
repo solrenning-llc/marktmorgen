@@ -568,17 +568,23 @@ export async function submitQuiz(
   const last = await redisPipeline([["GET", resultKey(courseId, lessonId, who)]]);
   const draft = JSON.stringify({ used: 9_999, last: { answers: mine, grade: gradeQuiz(asked, mine), at: Math.floor(Date.now() / 1000) }, best: 100, passed: true });
   const grown = dataBytes([draft], 1) - kept(last[0]) + (before.used ? 0 : dataBytes(["9999"], 1)) + dataBytes([lessonId], 1);
-  if (grown > 0) await needData(room, [{ slot: TRIES_SLOT(courseId), bytes: grown }]);
+  const taken = [{ slot: TRIES_SLOT(courseId), bytes: grown }];
+  if (grown > 0) await needData(room, taken);
+  // A try refused from here on writes nothing, so the room it took goes back (never on an INCR that may have landed).
+  const refused = async (reason: "usage_limit" | "unavailable" | "no_tries"): Promise<SubmitResult> => {
+    if (grown > 0) await giveData(room, taken);
+    return { ok: false, reason };
+  };
   if (quiz.usagePolicy === QUIZ_USAGE_POLICY) {
     const reserved = await reserveQuizSubmission(storeSid ?? "", Date.now(), window);
-    if (reserved !== "ok") return { ok: false, reason: reserved };
+    if (reserved !== "ok") return refused(reserved);
   }
   const [count] = await redisPipeline([["INCR", triesKey(courseId, lessonId, who)]]);
   if (typeof count !== "number" || !Number.isSafeInteger(count) || count < 1) return { ok: false, reason: "unavailable" };
   const used = count;
   if (quiz.attempts > 0 && used > quiz.attempts) {
     await redisPipeline([["DECR", triesKey(courseId, lessonId, who)]]);
-    return { ok: false, reason: "no_tries" };
+    return refused("no_tries");
   }
   const grade = gradeQuiz(asked, mine);
   const attempt: Attempt = {

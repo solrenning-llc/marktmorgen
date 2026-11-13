@@ -34,6 +34,7 @@ async function main(): Promise<void> {
     return { ics: `BEGIN:VCALENDAR\r\nX-MADE:${makings}\r\nEND:VCALENDAR`, listId: null, named: [] };
   };
   const t = Date.UTC(2031, 3, 1, 9, 0);
+  const day = new Date(t).toISOString().slice(0, 10);
   const at = async (now: number, mark: string | null) => {
     redis.run(["DEL", `nl:cal:pace:${owner.statsId}`]);
     if (mark === null) redis.run(["DEL", bookingsChangedKey(CALLS)]);
@@ -49,6 +50,8 @@ async function main(): Promise<void> {
 
   for (const bad of ["abc", "-5", "1.5", " 3"]) {
     part(`The changed mark reads ${JSON.stringify(bad)}`);
+    // A fresh day's ceilings, so what is checked is the copy's freshness, not the day's makings running out.
+    redis.run(["DEL", `nl:cal:builds:${owner.statsId}:${day}`, `nl:cal:builds:${owner.statsId}:${day}:a`]);
     is("unknown, never \"nothing changed\": the young copy is not answered as current", await at(t + 240_000 + bad.length * 1_000, bad), "made");
   }
   done();

@@ -29,6 +29,8 @@ const made: { id: string; pi: string; amount: number; inv: string }[] = [];
 /** A third paid row of the invoice that does not read as a payment intent (a charge-type payment). */
 let unreadRow = false;
 let posts: { pi: string; amount: number; ok: boolean; key: string }[] = [];
+/** Once, before a refund POST is taken: the creator refunds that whole charge elsewhere first (Codex P on #4428). */
+let refundedElsewhereFirst: string | null = null;
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input instanceof Request ? input.url : input));
@@ -52,6 +54,12 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     const amount = Number(body.get("amount"));
     const key = new Headers(init.headers).get("idempotency-key") ?? "";
     const c = charges.get(pi)!;
+    if (refundedElsewhereFirst === pi) {
+      refundedElsewhereFirst = null;
+      c.refunded = c.amount;
+      posts.push({ pi, amount, ok: false, key });
+      return Response.json({ error: { type: "invalid_request_error", code: "charge_already_refunded", message: "Charge has already been refunded." } }, { status: 400 });
+    }
     if (amount > c.amount - c.refunded) {
       posts.push({ pi, amount, ok: false, key });
       return Response.json({ error: { type: "invalid_request_error", code: "charge_exceeds_refundable", message: "Refund amount is greater than unrefunded amount on charge" } }, { status: 400 });
@@ -151,6 +159,24 @@ async function main() {
   await giveBackUnused(four.shop, DAY);
   is("the next run never asks that charge again", posts.filter((p) => p.pi === A), []);
   unreadRow = false;
+
+  part("The first charge is refunded whole elsewhere between the read and the POST (Codex P on #4428): nothing goes through the second on the old figures");
+  redis.clear();
+  charges.clear();
+  made.length = 0;
+  posts = [];
+  charges.set(A, { amount: 4000, refunded: 0 });
+  charges.set(B, { amount: 6000, refunded: 0 });
+  refundedElsewhereFirst = A;
+  const five = await seller("five");
+  const raced = await giveBackUnused(five.shop, DAY);
+  const fifth = typeof raced === "object" ? raced : null;
+  is("nothing is asked of the second charge on the figures read before", posts.filter((p) => p.pi === B), []);
+  is("counted failed, the member not settled", [fifth?.failed, (await saved(five.folder)).r ?? null], [1, null]);
+  posts = [];
+  await giveBackUnused(five.shop, DAY);
+  is("the next run reads again and gives only the rest: $10 through the second", posts.map((p) => [p.pi, p.amount, p.ok]), [[B, 1000, true]]);
+  is("$50 back in all, never $90", [...charges.values()].reduce((sum, c) => sum + c.refunded, 0), 5000);
   done();
 }
 main().catch((error) => { console.error(error); process.exit(1); });

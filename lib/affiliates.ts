@@ -759,6 +759,19 @@ export async function readAffiliate(store: Store, id: string): Promise<Affiliate
 }
 
 /**
+ * An affiliate's record read exactly (rule 24): null only when Redis confirms there is none; a reply of another shape,
+ * or text that does not read as a record, throws UnknownReplyError. For a caller whose "none" moves money.
+ */
+async function readAffiliateExact(store: Store, id: string): Promise<Affiliate | null> {
+  if (!store.statsId || !AFFILIATE_ID_PATTERN.test(id)) throw new Error("an affiliate's record needs a store and an affiliate id");
+  const reply = repliesFor(await redisPipeline([["HGET", peopleKey(store.statsId), id]]), 1);
+  if (reply && reply[0] === null) return null;
+  const affiliate = reply ? parseAffiliate(reply[0]) : null;
+  if (!affiliate) throw new UnknownReplyError("an affiliate's record");
+  return affiliate;
+}
+
+/**
  * Writes a record just made, under an id nobody else has (a fresh random id, after its address was claimed with
  * HSETNX). Every change to a record already there goes through changeAffiliate instead.
  */
@@ -2167,20 +2180,20 @@ export async function undoRates(store: Store, before: RateBefore[], rate: number
   return { undone: done.length, left, used: done.length === 0 && held.some((one) => one.why === "used") };
 }
 
-export async function addPayout(
-  store: Store,
-  input: { aff: string; cents: number; currency: string; date: string; reference: string },
-): Promise<Payout | null> {
+type PayoutInput = { aff: string; cents: number; currency: string; date: string; reference: string };
+
+/** A payout's reference as it is written down: spaces folded, at most MAX_REFERENCE_LENGTH characters. */
+export function payoutReference(text: string): string {
+  return text.replace(/\s+/g, " ").trim().slice(0, MAX_REFERENCE_LENGTH);
+}
+
+function payoutOf(input: PayoutInput, id: string): Payout {
+  return { id, aff: input.aff, cents: input.cents, currency: input.currency, date: input.date, reference: payoutReference(input.reference), at: Date.now() };
+}
+
+export async function addPayout(store: Store, input: PayoutInput): Promise<Payout | null> {
   if (!(await readAffiliate(store, input.aff))) return null;
-  const payout: Payout = {
-    id: randomBytes(6).toString("hex"),
-    aff: input.aff,
-    cents: input.cents,
-    currency: input.currency,
-    date: input.date,
-    reference: input.reference.replace(/\s+/g, " ").trim().slice(0, MAX_REFERENCE_LENGTH),
-    at: Date.now(),
-  };
+  const payout = payoutOf(input, randomBytes(6).toString("hex"));
   // What the creator writes down takes room in the store's data room first (DataRoomError when it does not fit).
   const json = JSON.stringify(payout);
   await needData(store, [{ slot: PAYOUTS_SLOT, bytes: dataBytes([payout.id, json], 1) }]);
@@ -2190,6 +2203,60 @@ export async function addPayout(
   const reply = repliesFor(await redisPipeline([["HSET", payoutsKey(store.statsId as string), payout.id, json]]), 1);
   if (!reply || reply[0] !== 1) throw new UnknownReplyError("a payout written down");
   return payout;
+}
+
+/**
+ * The id of the payout that writes down one PayPal payout item (lib/paypal-payouts.ts, settlePayPal): the same item
+ * gives the same id, 12 hex characters like any payout's, so the creator can still remove it (removePayout).
+ */
+export function payoutIdForItem(item: string): string {
+  return createHash("sha256").update(`paypal-payout-item|${item}`).digest("hex").slice(0, 12);
+}
+
+/**
+ * Writes down a payout under an id that names what it pays (payoutIdForItem), once (Claude 2 on #3272, finding 1):
+ * HSETNX, read exactly. 1 is "written"; 0 is "held", that payout in the book already, and the room taken for this
+ * copy is given back; "gone" only when Redis confirms the affiliate has no record (Claude 5 on #3272, finding 1: a
+ * record read in another shape throws, it is never "gone"). A payout already in the book (HEXISTS, read exactly) is
+ * "held" before any room is taken, so a full data room never keeps it waiting (finding 2). Any other answer may have
+ * written it or not, so UnknownReplyError is thrown, as DataRoomError is when the store's data room is full: the
+ * caller keeps what it pays waiting and asks again, and an answer of 0 then says it was written.
+ */
+export async function addPayoutOnce(store: Store, input: PayoutInput & { id: string }): Promise<"written" | "held" | "gone"> {
+  if (!store.statsId || !/^[0-9a-f]{12}$/.test(input.id)) throw new Error("a payout written once needs a store and a 12-hex id");
+  if (!(await readAffiliateExact(store, input.aff))) return "gone";
+  const there = repliesFor(await redisPipeline([["HEXISTS", payoutsKey(store.statsId), input.id]]), 1);
+  if (there && there[0] === 1) return "held";
+  if (!there || there[0] !== 0) throw new UnknownReplyError("whether a payout is written down");
+  const payout = payoutOf(input, input.id);
+  const json = JSON.stringify(payout);
+  const room = [{ slot: PAYOUTS_SLOT, bytes: dataBytes([payout.id, json], 1) }];
+  await needData(store, room);
+  const reply = repliesFor(await redisPipeline([["HSETNX", payoutsKey(store.statsId), payout.id, json]]), 1);
+  if (reply && reply[0] === 1) return "written";
+  if (reply && reply[0] === 0) {
+    await giveData(store, room);
+    return "held";
+  }
+  throw new UnknownReplyError("a payout written down once");
+}
+
+/**
+ * The references of every payout written in the store's book, read exactly; UnknownReplyError when the reply is not
+ * a list of field and value pairs. A value that does not read as a payout is not counted in the book (readBook), so
+ * it is left out here too.
+ */
+export async function payoutReferences(store: Store): Promise<Set<string>> {
+  if (!store.statsId) throw new Error("a store's payouts need its statsId");
+  const reply = repliesFor(await redisPipeline([["HGETALL", payoutsKey(store.statsId)]]), 1);
+  const flat = reply ? stringList(reply[0]) : null;
+  if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError("the payouts written down");
+  const references = new Set<string>();
+  for (let i = 1; i < flat.length; i += 2) {
+    const payout = parsePayout(flat[i]);
+    if (payout) references.add(payout.reference);
+  }
+  return references;
 }
 
 export async function removePayout(store: Store, id: string): Promise<boolean> {
@@ -3531,10 +3598,72 @@ function exactPairs(reply: unknown, what: string): [string, string][] {
   return out;
 }
 
+/** Whole cents from `least` up, held exactly (`1e999` parses to Infinity, `2 ** 53` is past exact). */
+const wholeCents = (value: unknown, least: number): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= least;
+
+/** A share as its writers store it: 0 (`Number(meta.via_rate) || 0`) to MAX_COMMISSION, two decimals when blended. */
+const exactShare = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= MAX_COMMISSION;
+
+/** How a sale found its affiliate, as writeReferral writes it; absent on older records (then `byCode`, or a click). */
+const STORED_HOW = new Set<unknown>(["click", "code", "buyer", "partner", "contact"]);
+
+/** A total of the public numbers, or UnknownReplyError when it is not a whole number held exactly (never "$∞" or "$0"). */
+function exactTotal(total: number, what: string): number {
+  if (!Number.isSafeInteger(total) || total < 0) throw new UnknownReplyError(what);
+  return total;
+}
+
+/** Absent (older records, in US dollars) or a three-letter code as Stripe writes it; anything else is of an unknown shape. */
+const exactCurrency = (value: unknown): boolean => value === undefined || (typeof value === "string" && /^[a-z]{3}$/.test(value));
+
 /**
- * Throws UnknownReplyError when a reply is not in its exact shape, so the
- * directory shows the program without numbers, never with zeros
- * (lib/affiliate-directory.ts, readDirectory).
+ * One record of a program's public numbers, read exactly: what the shared
+ * parser reads, or UnknownReplyError. The shared parsers drop a record they
+ * cannot read and default a missing number to 0, which their other callers
+ * rely on; the public numbers never show such a record as nothing or as 0.
+ */
+function exactAffiliate(raw: string): Affiliate {
+  const affiliate = parseAffiliate(raw);
+  if (!affiliate) throw new UnknownReplyError("a program's affiliate");
+  return affiliate;
+}
+
+/**
+ * A sale, read exactly as writeReferral writes it: its base in whole cents
+ * from 0 up, its share from 0 to MAX_COMMISSION, its currency absent or
+ * Stripe's code, `self` absent or true/false, `how` absent or one it writes
+ * (`byCode` absent or true/false on older records).
+ */
+function exactReferral(raw: string): Referral {
+  const referral = parseReferral(raw);
+  const value = referral ? (JSON.parse(raw) as Record<string, unknown>) : null;
+  if (
+    !referral ||
+    !value ||
+    !wholeCents(value.base, 0) ||
+    !exactShare(value.rate) ||
+    !exactCurrency(value.currency) ||
+    (value.self !== undefined && typeof value.self !== "boolean") ||
+    (value.how !== undefined && !STORED_HOW.has(value.how)) ||
+    (value.byCode !== undefined && typeof value.byCode !== "boolean")
+  ) {
+    throw new UnknownReplyError("a program's sale");
+  }
+  return referral;
+}
+
+/** A payment the creator wrote down, read exactly as addPayout writes it: whole cents from 1 up, its currency absent or Stripe's code. */
+function exactPayout(raw: string): Payout {
+  const payout = parsePayout(raw);
+  const value = payout ? (JSON.parse(raw) as Record<string, unknown>) : null;
+  if (!payout || !value || !wholeCents(payout.cents, 1) || !exactCurrency(value.currency)) throw new UnknownReplyError("a program's payment");
+  return payout;
+}
+
+/**
+ * Throws UnknownReplyError when a reply, or a record inside it, is not in its
+ * exact shape, so the directory shows the program without numbers, never
+ * with zeros (lib/affiliate-directory.ts, readDirectory).
  */
 export async function programNumbers(store: Store): Promise<ProgramNumbers | null> {
   if (!store.statsId || !isRedisConfigured()) return null;
@@ -3558,26 +3687,33 @@ export async function programNumbers(store: Store): Promise<ProgramNumbers | nul
   });
   const sales = exactPairs(replies[2], "a program's sales");
   const payouts = exactPairs(replies[3], "a program's payments");
-  const approved = people
-    .map(([, raw]) => parseAffiliate(raw))
-    .filter((a): a is Affiliate => a !== null && a.status === "approved");
+  const approved = people.map(([, raw]) => exactAffiliate(raw)).filter((a) => a.status === "approved");
   const currency = store.currency.toLowerCase();
   const referrals = sales
-    .map(([, raw]) => parseReferral(raw))
-    .filter((r): r is Referral => r !== null && !r.self && (r.currency || "usd").toLowerCase() === currency);
-  const earned = (r: Referral) => commissionOn(r.base, r.rate);
+    .map(([, raw]) => exactReferral(raw))
+    .filter((r) => !r.self && (r.currency || "usd").toLowerCase() === currency);
+  // Every sum is checked as it grows: once past exact, adding more can never bring it back.
+  const total = (values: number[], what: string) => values.reduce((sum, n) => exactTotal(sum + exactTotal(n, what), what), 0);
+  // commissionOn multiplies before it divides: past exact, the product rounds, and so would the commission.
+  const earned = (r: Referral) => {
+    if (!(r.base * r.rate <= Number.MAX_SAFE_INTEGER)) throw new UnknownReplyError("a program's earnings");
+    return commissionOn(r.base, r.rate);
+  };
   const byClick = referrals.filter((r) => r.how === "click");
   return {
     affiliates: approved.length,
-    clicks: clicks.reduce((sum, n) => sum + n, 0),
+    clicks: total(clicks, "a program's clicks"),
     clickSales: byClick.length,
-    clickEarnedCents: byClick.reduce((sum, r) => sum + earned(r), 0),
+    clickEarnedCents: total(byClick.map(earned), "a program's earnings"),
     sales: referrals.length,
-    earnedCents: referrals.reduce((sum, r) => sum + earned(r), 0),
-    paidCents: payouts
-      .map(([, raw]) => parsePayout(raw))
-      .filter((p): p is Payout => p !== null && (p.currency || "usd").toLowerCase() === currency)
-      .reduce((sum, p) => sum + p.cents, 0),
+    earnedCents: total(referrals.map(earned), "a program's earnings"),
+    paidCents: total(
+      payouts
+        .map(([, raw]) => exactPayout(raw))
+        .filter((p) => (p.currency || "usd").toLowerCase() === currency)
+        .map((p) => p.cents),
+      "a program's payments",
+    ),
     since: approved.reduce((first, a) => (first === 0 || (a.decidedAt > 0 && a.decidedAt < first) ? a.decidedAt : first), 0),
   };
 }

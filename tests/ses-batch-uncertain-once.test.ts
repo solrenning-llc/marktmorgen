@@ -41,15 +41,40 @@ async function main(): Promise<void> {
   part("Five minutes on, the same batch under the same key");
   mail.setSesOutcome("ok");
   const second = await sendBatch(people.map(message), "upd:synthetic:0:5", { by: "company" });
-  is("the batch is still held: what became of the third is unknown", second, "retry");
+  is("the batch is finished: the third counts as gone, never resent (rule 30; Claude 7 on #4361)", second, "sent");
   is("the address whose answer was lost is never written to a second time", to("three@example.com"), 1);
   is("those SES took are not written to again", [to("one@example.com"), to("two@example.com")], [1, 1]);
   is("and the rest of the batch goes, once each", [to("four@example.com"), to("five@example.com")], [1, 1]);
 
-  part("And again: the held batch still writes to nobody twice");
+  part("And again: a caller that tries the same key once more writes to nobody twice");
   const third = await sendBatch(people.map(message), "upd:synthetic:0:5", { by: "company" });
-  is("still held, never answered sent", third, "retry");
+  is("finished, nothing left to send", third, "sent");
   is("nobody is written to a second time", people.map(to), [1, 1, 1, 1, 1]);
+
+  // Claude 7 on #4361: a batch held as "retry" until its marks ran out (two days, together with the "taken" ones) was
+  // then sent to everybody in it a second time. Now it finishes on the next call, and the "may have gone" mark is kept
+  // longer than the "taken" ones, so even a caller still trying the key after two days never writes to that address.
+  part("Six more tries five minutes apart, then two days on: nobody gets the batch twice");
+  redis.clear();
+  mail.clearCaptured();
+  mail.configure();
+  await mail.setReady(true, { max24: 50_000, rate: 100 });
+  const three = ["six@example.com", "seven@example.com", "eight@example.com"];
+  mail.setSesOutcome(["ok", "lost", "ok"]);
+  const outcomes = [await sendBatch(three.map(message), "upd:synthetic:long:3", { by: "company" })];
+  mail.setSesOutcome("ok");
+  for (let i = 0; i < 6; i += 1) {
+    redis.advance(5 * 60_000);
+    outcomes.push(await sendBatch(three.map(message), "upd:synthetic:long:3", { by: "company" }));
+  }
+  is("the call that lost the answer is held; the next one finishes the batch", [outcomes[0], outcomes[1]], ["retry", "sent"]);
+  is("and every later try is finished too", outcomes.slice(2).every((o) => o === "sent"), true);
+  is("seven tries, and each address was handed over once", three.map(to), [1, 1, 1]);
+  // A caller has no reason to try a finished batch again; even one that does, past the two days of the "taken" marks,
+  // never writes again to the address whose answer was lost: its mark is kept fourteen days.
+  redis.advance(2 * 86_400_000 + 60_000);
+  await sendBatch(three.map(message), "upd:synthetic:long:3", { by: "company" });
+  is("two days on, the address whose answer was lost is still never written to again", three.map(to)[1], 1);
 
   // Codex T on #4361: the "may have gone" mark is written before an email is handed to SES, and confirmed. A mark
   // that is refused, or answered in another shape, sends nothing: no email can go without its mark, so none can be
@@ -98,7 +123,7 @@ async function main(): Promise<void> {
   process.env.RESEND_API_KEY = "re_test_a_stand_in_key_for_tests_only";
   const toResend = (address: string) => mail.resendAttempts.filter((m) => m.to.includes(address)).length;
   const switched = await sendBatch(people.map(message), "upd:synthetic:switch:5", { by: "company" });
-  is("the batch stays held: what became of the third is unknown", switched, "retry");
+  is("the batch is finished: the third counts as gone (rule 30)", switched, "sent");
   is("Resend never gets the address SES may have written to", toResend("three@example.com"), 0);
   is("nor those SES took", [toResend("one@example.com"), toResend("two@example.com")], [0, 0]);
   is("the rest of the batch goes by Resend, once each (the fallback is open)", [toResend("four@example.com"), toResend("five@example.com")], [1, 1]);

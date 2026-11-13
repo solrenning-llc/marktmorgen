@@ -681,24 +681,21 @@ export async function sendListBatch(
 
 /**
  * A batch tried again under the same key never writes a second time to anybody whose email under that key SES may
- * have taken with its answer lost (lib/ses.ts, notMaybeSent; rule 30; #4252). Those recipients are left out, and the
- * batch is never answered "sent" (nor a list batch's `{ refused }`) while any was left out: what became of them is
- * still unknown, so the caller keeps holding the batch as it does for an uncertain answer, and nobody gets it twice.
+ * have taken with its answer lost (lib/ses.ts, notMaybeSent; rule 30; #4252). Those recipients are left out and
+ * count as gone: the call that lost the answer is answered "retry", and the next one, once everybody else has gone,
+ * finishes the batch ("sent"), so the caller moves on, keeps the allowance taken for them and never resends
+ * (Claude 7 on #4361: a batch held as "retry" until its marks expired was then sent to everybody a second time).
  */
 async function dispatchBatch(
   messages: BatchMessage[], batchKey: string, meter: EmailMeter,
   only: "resend" | "amazon" | undefined, listOnly: boolean, runtime: ResendTransportRuntime = {},
 ): Promise<ListBatchOutcome> {
-  const held = { maybe: false };
-  const outcome = await dispatchOnce(messages, batchKey, meter, only, listOnly, runtime, held);
-  if (held.maybe && (outcome === "sent" || typeof outcome === "object")) return "retry";
-  return outcome;
+  return dispatchOnce(messages, batchKey, meter, only, listOnly, runtime);
 }
 
 async function dispatchOnce(
   messages: BatchMessage[], batchKey: string, meter: EmailMeter,
   only: "resend" | "amazon" | undefined, listOnly: boolean, runtime: ResendTransportRuntime,
-  held: { maybe: boolean },
 ): Promise<ListBatchOutcome> {
   if (!isSenderConfigured()) return listOnly ? "waiting" : "retry";
   if (messages.length === 0) return "sent";
@@ -708,7 +705,7 @@ async function dispatchOnce(
   const all = going.length;
   // Whoever Amazon already took under this key, in a batch that was then cut short and is being tried again, is not
   // written to twice; nor is anybody whose email under this key SES may have taken with its answer lost (lib/ses.ts,
-  // maybeKey): left out, and the batch is held as uncertain (dispatchBatch above). Read before any provider is chosen
+  // maybeKey): left out, and counted as gone (dispatchBatch above). Read before any provider is chosen
   // or any allowance taken (Codex G on #4361): a repeat that finds Amazon no longer set up and goes by Resend must
   // leave them out too. Unreadable evidence releases nobody to either provider.
   if (going.length && isRedisConfigured()) {
@@ -716,7 +713,6 @@ async function dispatchOnce(
     if (pending === null) return "retry";
     const sure = await notMaybeSent(batchKey, pending);
     if (sure === null) return "retry";
-    if (sure.length < pending.length) held.maybe = true;
     going = sure;
   }
   const config = sesConfig();

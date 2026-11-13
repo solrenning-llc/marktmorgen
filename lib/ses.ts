@@ -553,13 +553,18 @@ const DID_SECONDS = 2 * 86_400;
  * reads (lib/email.ts, dispatchBatch, notMaybeSent), so it is never written to a second time (rule 30;
  * webhooks/cron audit, Claude 1, 12/11/2026).
  */
+/**
+ * How long a "may have gone" mark is kept: on its own clock, longer than the "taken" marks it backs up (Claude 7 on
+ * #4361), so a caller still retrying the same key well after the two days never writes to that address again.
+ */
+const MAYBE_SECONDS = 14 * 86_400;
 const maybeKey = (batchKey: string, to: string) => `nl:ses:maybe:${createHash("sha256").update(`${batchKey}\n${to}`).digest("hex").slice(0, 40)}`;
 
 /** Writes a wave's "may have gone" marks before it is sent; true only when every write is confirmed "OK". */
 async function markMaybe(batchKey: string, wave: { to: string }[]): Promise<boolean> {
   if (!wave.length) return true;
   try {
-    const read = repliesFor(await redisPipeline(wave.map((m) => ["SET", maybeKey(batchKey, m.to), "1", "EX", DID_SECONDS])), wave.length);
+    const read = repliesFor(await redisPipeline(wave.map((m) => ["SET", maybeKey(batchKey, m.to), "1", "EX", MAYBE_SECONDS])), wave.length);
     return read !== null && read.every((reply) => reply === "OK");
   } catch {
     return false;

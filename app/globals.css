@@ -260,9 +260,11 @@ body {
  * indicator has to clear — so on the dark surfaces the ring turns white. The
  * dark halo outside it is there because those sections also hold white cards,
  * and a white ring on a white card is no ring at all; the halo gives it an
- * edge on either background without changing its shape.
+ * edge on either background without changing its shape. The line about the
+ * site today (components/site-nav.tsx) sits on the same near-black.
  */
 .on-dark :is(:focus-visible, input[type="radio"]:focus),
+.bg-ink[data-preview-bar] :is(:focus-visible, input[type="radio"]:focus),
 .surface-night :is(:focus-visible, input[type="radio"]:focus),
 .surface-daybreak :is(:focus-visible, input[type="radio"]:focus),
 .surface-navy :is(:focus-visible, input[type="radio"]:focus),

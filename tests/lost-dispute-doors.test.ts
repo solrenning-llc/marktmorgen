@@ -151,7 +151,9 @@ async function main(): Promise<void> {
   const given = await keyForSale(store, app, "cs_test_keyrefund0001", "buyer@example.com");
   if (given?.state !== "issued") throw new Error("no key");
   sessionsByPayment.pi_TestKeyRefund1 = [{ id: "cs_test_keyrefund0001", metadata: { store: "kilnworks", product: tool.product.id } }];
-  refunds = [{ id: "re_TestKeyRefund1", object: "refund", created: NOW - 30, status: "succeeded", payment_intent: "pi_TestKeyRefund1", charge: { object: "charge", amount: 2900, amount_refunded: 2900, refunded: true } }];
+  // Regra 23: the row now carries its own amount, as every refund Stripe sends does: a refund of the whole charge is whole
+  // on its own. Without it the job reads the charge's refunds first (Claude 2's focal money review of #2868, HIGH).
+  refunds = [{ id: "re_TestKeyRefund1", object: "refund", amount: 2900, created: NOW - 30, status: "succeeded", payment_intent: "pi_TestKeyRefund1", charge: { object: "charge", amount: 2900, amount_refunded: 2900, refunded: true } }];
   eventsStatus = 403;
   const ran = await revokeRefunded(store, Date.now() + 10_000).then((n) => n, () => "stopped");
   is("a full refund still revokes its key", [ran, await checkKey(store, app, given.key)], [1, "revoked"]);

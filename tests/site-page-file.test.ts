@@ -21,6 +21,7 @@ import { PAGE_FILE_FORMAT, PAGE_FILE_VERSION, importedEntry, pageFileName, readP
 import { EXPORT_HELP, IMPORT_HELP, MESSAGES, exportDoneWords, importDoneWords } from "@/components/site-pages-editor";
 import { POST as sitePage } from "@/app/api/store/site-page/route";
 import { store as redis } from "./redis-stub";
+import { UNIT_COST, request } from "./plan-cost-registry";
 import { done, is, part } from "./check";
 
 const OWNER = "page-file@example.com";
@@ -81,6 +82,24 @@ async function main(): Promise<void> {
   is("what this store does not have is left out and counted", [other.status, other.data.left?.refs, otherPage?.blocks.some((b) => (b.kind === "product" && (b as { product: string }).product === "notmine001") || (b.kind === "form" && (b as { form: string }).form === "notmine002"))], [200, 2, false]);
   is("the address is numbered when taken", other.data.pages?.find((p) => p.id === other.data.id)?.slug, "bake-bread-2");
 
+  part("An import naming many forms stays inside the one studio request it takes (Claude 1 cloud's MEDIUM on #3538)");
+  // A hero and 29 form blocks, each naming a different form: the most blocks a page holds, as one file.
+  const manyForms = { ...file, blocks: [hero, ...Array.from({ length: 29 }, (_, i) => ({ ...formBlock, id: `fb${String(i).padStart(4, "0")}`, form: `formzz${String(i).padStart(4, "0")}` }))] };
+  const real = redis.pipeline.bind(redis);
+  let commands = 0;
+  let bytes = 0;
+  redis.pipeline = (async (batch: (string | number)[][]) => {
+    const replies = await real(batch);
+    commands += batch.length;
+    bytes += JSON.stringify(batch).length + JSON.stringify(replies ?? null).length;
+    return replies;
+  }) as typeof redis.pipeline;
+  const many = await post({ action: "import", file: manyForms });
+  redis.pipeline = real;
+  console.log(`  import of 29 forms: ${commands} commands, ${bytes} bytes`);
+  is("brought in", [many.status, many.data.ok], [200, true]);
+  is("every command and byte inside the one studio request it takes", request("studio", commands, bytes) <= UNIT_COST.studio, true);
+
   part("Refused, and nothing added");
   const count = async () => (await storeForEmail(OWNER))!.sitePages.length;
   const before = await count();
@@ -131,6 +150,10 @@ async function main(): Promise<void> {
     "Page brought in and opened, hidden from visitors. Left out: a picture, 2 products, forms or calls this store does not have, the reviews picked to show first.",
   ]);
   const editor = readFileSync("components/site-pages-editor.tsx", "utf8").replace(/\s+/g, " ");
+  // The help is a description only, outside the label, so the file box's name is the label alone (LEVE on #3538).
+  const editorHtml = readFileSync("components/site-pages-editor.tsx", "utf8");
+  const fileLabel = /<label\b[^>]*>[\s\S]*?Or bring in a page from a file[\s\S]*?<\/label>/.exec(editorHtml)?.[0] ?? "";
+  is("the file box's help is not inside its label", fileLabel.includes('id="site-page-file-help"'), false);
   is("the file box has a visible label and its help; the download button has its own", [editor.includes('<span className="block">Or bring in a page from a file</span>'), editor.includes('aria-describedby="site-page-file-help"'), editor.includes('aria-describedby="site-page-export-help" onClick={() => void download()}> Download as a file </button>')], [true, true, true]);
   done();
 }

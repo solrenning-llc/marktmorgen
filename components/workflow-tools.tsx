@@ -89,6 +89,18 @@ export const stepLine = (step: MapStep, i: number, conditionText: (when: StepCon
  */
 export const mapEditId = (flowId: string, stepId: string) => `flow-map-edit-${flowId}-${stepId}`;
 
+/**
+ * What the sequence editor does with the focus at each change of being open or locked (review of #4124):
+ * "open" when it has just opened; "wait" when it has closed but the sequences are still being refreshed (every button
+ * is disabled then); "restore" once it is closed and unlocked, so the button that opened it, or the fallback, can take
+ * the focus; "none" otherwise.
+ */
+export function editorFocusPhase({ editing, wasEditing, closing, locked }: { editing: boolean; wasEditing: boolean; closing: boolean; locked: boolean }): "open" | "wait" | "restore" | "none" {
+  if (editing) return wasEditing ? "none" : "open";
+  if (!wasEditing && !closing) return "none";
+  return locked ? "wait" : "restore";
+}
+
 /** What focusBack needs of a page: its elements by id, and which one has the focus. */
 export type FocusDoc = { getElementById: (id: string) => { focus: () => void; disabled?: boolean } | null; activeElement: unknown };
 
@@ -119,12 +131,15 @@ export function WorkflowMap({
   steps,
   conditionText,
   flowId,
+  flowName,
   onEdit,
   editDisabled = false,
 }: {
   steps: readonly MapStep[];
   conditionText: (when: StepCondition) => string;
   flowId?: string;
+  /** The sequence's name, said after "Edit step N" to a screen reader, so the buttons of two sequences differ (review of #4124). */
+  flowName?: string;
   onEdit?: (index: number) => void;
   editDisabled?: boolean;
 }) {
@@ -148,6 +163,7 @@ export function WorkflowMap({
               onClick={() => onEdit(i)}
             >
               {`Edit step ${i + 1}`}
+              {flowName ? <span className="sr-only">{` of \u201c${flowName}\u201d`}</span> : null}
             </button>
           ) : null}
         </li>

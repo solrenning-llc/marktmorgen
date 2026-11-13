@@ -19,7 +19,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { readFileSync } from "node:fs";
-import { type FocusDoc, WorkflowMap, focusBack, mapEditId } from "@/components/workflow-tools";
+import { type FocusDoc, WorkflowMap, editorFocusPhase, focusBack, mapEditId } from "@/components/workflow-tools";
 import { WorkflowDiagram } from "@/components/workflow-diagram";
 import { flowMapLayout } from "@/lib/flow-map";
 import type { StepCondition } from "@/lib/flow-rules";
@@ -87,7 +87,7 @@ async function main(): Promise<void> {
     is("and the editor's closing uses both", /const back = opener\.current;\s*const fallback = openerFallback\.current;[\s\S]{0,120}if \(back\) focusBack\(document, \[back, fallback\]\);/.test(studio), true);
     is("opening focuses that step, and only once", /const step = openAtStep\.current;\s*openAtStep\.current = null;\s*if \(step !== null && document\.getElementById\(`flow-step-\$\{step\}`\)\) document\.getElementById\(`flow-step-\$\{step\}`\)\?\.focus\(\);\s*else if \(opener\.current\) document\.getElementById\("flow-name"\)\?\.focus\(\);/.test(studio), true);
     const item = studio.match(/<li key=\{s\.editorKey\}[^>]*>/)?.[0] ?? "";
-    is("each step of the editor can take the focus, is named by its title, and shows a ring", [/id=\{`flow-step-\$\{i\}`\}/.test(item), /tabIndex=\{-1\}/.test(item), /aria-labelledby=\{`flow-step-\$\{i\}-title`\}/.test(item), /focus:\[outline:3px_solid_var\(--focus\)\]/.test(item)], [true, true, true, true]);
+    is("each step of the editor can take the focus, is named by its title, and shows a ring for the keyboard (focus-visible)", [/id=\{`flow-step-\$\{i\}`\}/.test(item), /tabIndex=\{-1\}/.test(item), /aria-labelledby=\{`flow-step-\$\{i\}-title`\}/.test(item), /focus-visible:\[outline:3px_solid_var\(--focus\)\]/.test(item)], [true, true, true, true]);
     is("the title it is named by exists", /<p id=\{`flow-step-\$\{i\}-title`\}/.test(studio), true);
   }
   part("The focus comes back to the same step, whatever the editor did (review of #4124)");
@@ -113,6 +113,29 @@ async function main(): Promise<void> {
     is("its map folded (the button cannot take the focus): the sequence's Edit button", focusBack(page({ [editC]: { hidden: true }, [sequence]: {} }), [editC, sequence]), sequence);
     is("a disabled button is passed over", focusBack(page({ [editC]: { disabled: true }, [sequence]: {} }), [editC, sequence]), sequence);
     is("nothing to take it: nothing claimed", focusBack(page({}), [editC, sequence]), null);
+  }
+
+  part("After Save the focus waits for the refresh, then comes back (review of #4124)");
+  {
+    // The editor's life as the studio sees it, one render after another.
+    const run = (states: { editing: boolean; locked: boolean }[]) => {
+      let wasEditing = false, closing = false;
+      return states.map(({ editing, locked }) => {
+        const phase = editorFocusPhase({ editing, wasEditing, closing, locked });
+        if (phase === "open") wasEditing = true;
+        if (phase === "wait") { wasEditing = false; closing = true; }
+        if (phase === "restore") { wasEditing = false; closing = false; }
+        return phase;
+      });
+    };
+    is("opened, then Save: closed while the sequences refresh (locked), then unlocked: the focus waits, then is given back once", run([{ editing: true, locked: false }, { editing: false, locked: true }, { editing: false, locked: true }, { editing: false, locked: false }, { editing: false, locked: false }]), ["open", "wait", "wait", "restore", "none"]);
+    is("closed without a refresh (Close): given back at once", run([{ editing: true, locked: false }, { editing: false, locked: false }]), ["open", "restore"]);
+    is("locked while open (AI busy): the focus is not moved again", run([{ editing: true, locked: false }, { editing: true, locked: true }, { editing: true, locked: false }]), ["open", "none", "none"]);
+    const studio = readFileSync("components/email-studio.tsx", "utf8");
+    is("the studio runs it on both the editor's state and its lock", /editorFocusPhase\(\{ editing, wasEditing: wasEditing\.current, closing: closing\.current, locked \}\)[\s\S]{0,1600}\}, \[editing, locked\]\);/.test(studio), true);
+    is("and gives the focus back only in the restore phase", /if \(phase !== "restore"\) return;[\s\S]{0,300}if \(back\) focusBack\(document, \[back, fallback\]\);/.test(studio), true);
+    const named = find(WorkflowMap({ steps, conditionText, flowId: "f1", flowName: "Welcome", onEdit: () => {} }), (n) => n.type === "button");
+    is("each Edit step button says its sequence to a screen reader, so two sequences' buttons differ", texts(named[0]).join(""), "Edit step 1 of \u201cWelcome\u201d");
   }
 
   done();

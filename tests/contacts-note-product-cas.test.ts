@@ -43,6 +43,26 @@ async function main(): Promise<void> {
   const after = parseContact(((await pipeline([["HGET", key, email]])) as string[])[0])!;
   is("the label taken off stays off", after.tags, ["early"]);
   is("and the product is noted on the row as it now stands", after.ids, ["prod000777"]);
+
+  // Codex X5's MEDIUM and Claude 1 cloud rev-pares's MÉDIO on #2576: changed under it on every try, the product was
+  // not written but noteProduct answered as if it had been, so lib/buyer-list.ts putOnList marked the checkout done
+  // and no later run noted it. It must say the write is not confirmed, so the claim is let go and tried again.
+  part("Changed under it on every try: never answered as noted, and noted once on the next try");
+  let changes = 0;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    const answer = await pipeline(commands);
+    if (commands.length === 1 && commands[0][0] === "HGET" && commands[0][1] === key) {
+      changes += 1;
+      await pipeline([["HSET", key, email, row(["early", `busy${changes}`])]]);
+    }
+    return answer;
+  }) as typeof redis.pipeline;
+  const busy = await noteProduct(list, email, "prod000888", "Recipe Box", store).then(() => "answered", (error: unknown) => (error instanceof Error ? error.name : "threw"));
+  redis.pipeline = pipeline;
+  is("the write is said not confirmed, never noted", busy, "UnknownReplyError");
+  is("and the product is not on the row", parseContact(((await pipeline([["HGET", key, email]])) as string[])[0])!.ids.includes("prod000888"), false);
+  is("the next try notes it", await noteProduct(list, email, "prod000888", "Recipe Box", store), true);
+  is("once", parseContact(((await pipeline([["HGET", key, email]])) as string[])[0])!.ids.filter((id) => id === "prod000888"), ["prod000888"]);
   done();
 }
 void main();

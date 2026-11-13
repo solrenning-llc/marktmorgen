@@ -15,6 +15,8 @@ export default function PageError({ error, reset }: { error: Error & { digest?: 
 
   return (
     <main id="content" className="flex min-h-screen items-center bg-paper px-4 py-20 text-ink">
+      {/* A client error boundary cannot export metadata: React's <title> names the tab and the page for what it is (WCAG 2.4.2). */}
+      <title>This page did not load — Marktmorgen</title>
       <div className="card mx-auto w-full max-w-lg p-7 sm:p-9">
         <p className="eyebrow">Something went wrong</p>
         <h1 className="t-h3 mt-3">This page did not load</h1>

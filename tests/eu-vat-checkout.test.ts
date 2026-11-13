@@ -50,3 +50,35 @@ test("an EU consumer: goods, a person's service, anything unknown and a country 
   // The real table is empty: every EU sale is refused today.
   assert.deepEqual(euCheckout({ supply: "ess", priceCents: 1000, items: de }), { kind: "refuse", reason: "rate" });
 });
+
+/**
+ * Unit 10b: the EU treatment comes from the EU record in lib/deemed-supplier.ts (docs/art9a-sources-and-build-spec,
+ * 2.4: with no application fee there is no way today to move the VAT to the LLC, so the only buildable record is
+ * "refuse-consumers"). An EU consumer of a paid electronically supplied service is collected only under a complete
+ * "collect" record; with no complete EU record, or under "refuse-consumers", that sale is refused. A consumer
+ * outside the EU and a free product are not EU supplies for consideration and are unchanged.
+ */
+const record = (treatment: string, registration = "") => ({
+  jurisdiction: "EU", treatment, implementedIn: "lib/eu-vat-checkout.ts", recordedOn: "2026-11-13", registration, evidence: "tests/eu-vat-checkout.test.ts",
+});
+const collecting = [record("collect", "IE OSS, 2026-11-13, EU000000000")];
+
+test("10b: an EU sale is refused while there is no complete EU record (the real list is empty)", () => {
+  for (const records of [undefined, [], [record("collect")], [{ ...record("collect", "x"), recordedOn: "2026-13-01" }], "nonsense", [record("refuse-consumers"), record("collect", "x")]]) {
+    assert.deepEqual(euCheckout({ supply: "ess", priceCents: 1000, items: de, rates, records }), { kind: "refuse", reason: "record" }, JSON.stringify(records));
+  }
+});
+
+test("10b: under refuse-consumers an EU consumer of a paid service is refused, while outside and free are unchanged", () => {
+  const records = [record("refuse-consumers")];
+  assert.deepEqual(euCheckout({ supply: "ess", priceCents: 1000, items: de, rates, records }), { kind: "refuse", reason: "treatment" });
+  assert.deepEqual(euCheckout({ supply: "ess", priceCents: 1000, items: { ip: "US", billing: "US" }, rates, records }), { kind: "outside", country: "US" });
+  assert.deepEqual(euCheckout({ supply: "free", priceCents: 0, items: de, rates, records }), { kind: "free", country: "DE" });
+  assert.deepEqual(euCheckout({ supply: "ess", priceCents: 1000, items: { ip: "DE", billing: "US" }, rates, records }), { kind: "refuse", reason: "place" });
+});
+
+test("10b: only a complete collect record, with its registration, collects", () => {
+  assert.equal(euCheckout({ supply: "ess", priceCents: 1000, items: de, rates, records: collecting }).kind, "collect");
+  assert.deepEqual(euCheckout({ supply: "ess", priceCents: 1000, items: { ip: "FR", billing: "FR" }, rates, records: collecting }), { kind: "refuse", reason: "rate" });
+  assert.deepEqual(euCheckout({ supply: "goods", priceCents: 1000, items: de, rates, records: collecting }), { kind: "refuse", reason: "goods" });
+});

@@ -24,6 +24,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {renewalLedger,resetRenewalLedger} from './contract-renewal-funding';
 import {readSubscription} from '@/lib/billing';
+import {LEGACY_PLAN_PRICES} from '@/lib/plan';
 import {recordState} from '@/lib/billing-sync';
 import {allowanceWindow} from '@/lib/allowance-window';
 import {claimHandle,ensureStatsId,recordPlanDispute,setSubscription,storeForEmail,storeRef,type Store} from '@/lib/store';
@@ -36,13 +37,13 @@ const day=(seconds:number)=>new Date(seconds*1000).toISOString().slice(0,10);
 
 type Cycle='month'|'year';
 const PRICE={month:6900,year:69000} as const;
-function subscriptionOf(o:{cycle:Cycle;start:number;end:number;created:number;status?:string;metadata?:Record<string,unknown>;latest?:unknown}):Record<string,unknown>{
+function subscriptionOf(o:{cycle:Cycle;start:number;end:number;created:number;status?:string;metadata?:Record<string,unknown>;latest?:unknown;amount?:number}):Record<string,unknown>{
  return {id:SUB,object:'subscription',customer:CUSTOMER,created:o.created,status:o.status??'active',cancel_at:null,cancel_at_period_end:false,
   latest_invoice:o.latest===undefined?INVOICE:o.latest,metadata:o.metadata??{store:'renewal',funding_grant:'ctr_checkout_one',funding_review:'test_only'},
-  items:{data:[{id:'si_Renewal00001',quantity:1,current_period_start:o.start,current_period_end:o.end,price:{lookup_key:`nimbus_creator_${o.cycle}`,unit_amount:PRICE[o.cycle],currency:'usd',recurring:{interval:o.cycle,interval_count:1}}}]}};
+  items:{data:[{id:'si_Renewal00001',quantity:1,current_period_start:o.start,current_period_end:o.end,price:{lookup_key:`nimbus_creator_${o.cycle}`,unit_amount:o.amount??PRICE[o.cycle],currency:'usd',recurring:{interval:o.cycle,interval_count:1}}}]}};
 }
-function invoiceOf(o:{cycle:Cycle;start:number;end:number}):Record<string,unknown>{
- return {id:INVOICE,object:'invoice',status:'paid',billing_reason:'subscription_cycle',currency:'usd',customer:CUSTOMER,subtotal:PRICE[o.cycle],amount_paid:PRICE[o.cycle],amount_remaining:0,
+function invoiceOf(o:{cycle:Cycle;start:number;end:number;amount?:number}):Record<string,unknown>{
+ return {id:INVOICE,object:'invoice',status:'paid',billing_reason:'subscription_cycle',currency:'usd',customer:CUSTOMER,subtotal:o.amount??PRICE[o.cycle],amount_paid:o.amount??PRICE[o.cycle],amount_remaining:0,
   parent:{type:'subscription_details',subscription_details:{subscription:SUB}},
   lines:{object:'list',has_more:false,data:[{id:'il_Renewal00001',period:{start:o.start,end:o.end}}]}};
 }
@@ -217,4 +218,31 @@ test('the contract ledger exposes the renewal reservation and activation',async(
  const real=await import('../lib/contract-funding') as Record<string,unknown>;
  for(const name of ['reserveRenewalContractFunding','activateRenewalContract','renewalContractNonce','ACTIVATE_RENEWAL_CONTRACT'])assert.ok(name in real,name);
  assert.match(String(real.RESERVE_CONTRACT),/'renewal'/,'RESERVE_CONTRACT names the renewal action');
+});
+
+test('a subscription on a price list published before keeps its rights when it renews; a price no list has stays unknown',async()=>{
+ // planOf still reads a subscription on LEGACY_PLAN_PRICES as its plan: its paid renewal is the same plan's renewal.
+ for(const amount of LEGACY_PLAN_PRICES.map(list=>list.creator.month)){
+  const store=await fundedStore('month',P1);
+  stripe(subscriptionOf({cycle:'month',...P2,created:P1.start,amount}),invoiceOf({cycle:'month',...P2,amount}));
+  const {state,after}=await observe(store);
+  assert.equal(state.state,'active',String(amount));
+  assert.deepEqual(after.period,{start:P2.start,end:P2.end,renews:true,funded:true},String(amount));
+  assert.ok(allowanceWindow(after,Date.now())?.billing,String(amount));
+  assert.equal(renewalLedger.reserves.length,1,String(amount));
+ }
+ // The invoice must charge the subscription's own price, never another list's.
+ let store=await fundedStore('month',P1);
+ stripe(subscriptionOf({cycle:'month',...P2,created:P1.start,amount:LEGACY_PLAN_PRICES[0].creator.month}),invoiceOf({cycle:'month',...P2}));
+ let seen=await observe(store);
+ assert.equal(seen.wrote,false);
+ assert.equal(renewalLedger.reserves.length,0);
+ // A price on no list Marktmorgen ever published is unknown: nothing read as paid, nothing reserved.
+ store=await fundedStore('month',P1);
+ stripe(subscriptionOf({cycle:'month',...P2,created:P1.start,amount:3000}),invoiceOf({cycle:'month',...P2,amount:3000}));
+ seen=await observe(store);
+ assert.equal(seen.wrote,false);
+ assert.deepEqual(seen.after.period,{start:P1.start,end:P1.end,renews:true,funded:true});
+ assert.equal(renewalLedger.reserves.length,0);
+ assert.equal(reads.invoices,0,'an unknown price reads no invoice');
 });

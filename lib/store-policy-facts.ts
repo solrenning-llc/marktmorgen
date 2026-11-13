@@ -38,6 +38,8 @@ export type PolicyFactsInput = {
   sellsDigital: boolean;
   /** Memberships (subscriptions). */
   sellsMemberships: boolean;
+  /** Whether a member gets their own cancel link in the store's emails (canManage); otherwise they are told to reply. */
+  membersSelfCancel?: boolean;
   /** Whether the store has its PayPal connected for checkout. */
   paypal: boolean;
   /** The ad pixels switched on, by their platform names ("Meta", "Google"…). */
@@ -68,7 +70,7 @@ export function policyFacts(input: PolicyFactsInput, language: unknown = "en"): 
   if (input.sellsDigital) cancel.push(w.cancelDigital);
   if (input.sellsMemberships) cancel.push(w.cancelMembership);
   if (cancel.length) sections.push({ id: "cancel", title: w.titles.cancel, sentences: cancel });
-  if (input.sellsMemberships) sections.push({ id: "memberships", title: w.titles.memberships, sentences: [w.membersCancel, w.membersEnd] });
+  if (input.sellsMemberships) sections.push({ id: "memberships", title: w.titles.memberships, sentences: [input.membersSelfCancel ? w.membersCancel : w.membersCancelByReply(name), w.membersEnd] });
   const pixels = [...new Set(input.pixels.map((p) => p.trim()).filter(Boolean))];
   if (pixels.length) sections.push({ id: "measurement", title: w.titles.measurement, sentences: [w.measures(name, list(pixels, w.and)), w.askFirst, w.gpc] });
   // Only what is set: with no postal address there is no sentence, rather than one about a contact page the store may not have.

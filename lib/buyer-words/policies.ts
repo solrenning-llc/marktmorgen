@@ -21,6 +21,8 @@ export type PolicyWords = {
   cancelDigital: string;
   cancelMembership: string;
   membersCancel: string;
+  /** When the store's emails say to reply to cancel (no member's own cancel link, canManage false). */
+  membersCancelByReply: (store: string) => string;
   membersEnd: string;
   /** The word that joins the last two of a list ("Meta, Google and TikTok"). */
   and: string;
@@ -48,6 +50,7 @@ export const POLICY_WORDS: Record<LanguageCode, PolicyWords> = {
     cancelMembership:
       "A membership is at least partly a service: at checkout you ask for it to start now, you keep the right to cancel within the 14 days, and if you do, you may be asked to pay for what you already received.",
     membersCancel: "You can cancel a membership yourself at any time, from the link in any email about it, without contacting anyone.",
+    membersCancelByReply: (n) => `To cancel a membership, reply to any email about it; your message reaches ${n}.`,
     membersEnd: "Canceling ends the membership at the end of the period you already paid for.",
     and: "and",
     measures: (n, p) => `${n} measures its ads with ${p}.`,
@@ -70,6 +73,7 @@ export const POLICY_WORDS: Record<LanguageCode, PolicyWords> = {
     cancelMembership:
       "Una membresía es, al menos en parte, un servicio: al pagar pides que empiece ya, conservas el derecho a cancelar dentro de los 14 días y, si lo haces, se te puede pedir que pagues lo que ya recibiste.",
     membersCancel: "Puedes cancelar una membresía por tu cuenta en cualquier momento, desde el enlace de cualquier correo sobre ella, sin contactar con nadie.",
+    membersCancelByReply: (n) => `Para cancelar una membresía, responde a cualquier correo sobre ella; tu mensaje le llegará a ${n}.`,
     membersEnd: "Al cancelar, la membresía termina al final del período que ya pagaste.",
     and: "y",
     measures: (n, p) => `${n} mide sus anuncios con ${p}.`,
@@ -91,6 +95,7 @@ export const POLICY_WORDS: Record<LanguageCode, PolicyWords> = {
       "Pour un contenu numérique, comme un fichier, un lien, une formation ou un podcast privé, ce droit prend fin au début de l'accès seulement si vous avez accepté au paiement qu'il commence dans les 14 jours, déclaré comprendre que vous perdriez ce droit et reçu une confirmation des deux.",
     cancelMembership: `Un abonnement est au moins en partie un service${S}: au paiement, vous demandez qu'il commence tout de suite, vous gardez le droit de vous rétracter dans les 14 jours et, si vous le faites, il peut vous être demandé de payer ce que vous avez déjà reçu.`,
     membersCancel: "Vous pouvez résilier un abonnement vous-même à tout moment, depuis le lien de n'importe quel e-mail à son sujet, sans contacter personne.",
+    membersCancelByReply: (n) => `Pour résilier un abonnement, répondez à n'importe quel e-mail à son sujet ; votre message parviendra à ${n}.`,
     membersEnd: "La résiliation met fin à l'abonnement à la fin de la période déjà payée.",
     and: "et",
     measures: (n, p) => `${n} mesure ses publicités avec ${p}.`,
@@ -113,6 +118,7 @@ export const POLICY_WORDS: Record<LanguageCode, PolicyWords> = {
     cancelMembership:
       "Eine Mitgliedschaft ist zumindest teilweise eine Dienstleistung: An der Kasse verlangen Sie, dass sie sofort beginnt, Sie behalten das Recht, innerhalb der 14 Tage zu widerrufen, und wenn Sie das tun, kann von Ihnen verlangt werden, für bereits Erhaltenes zu zahlen.",
     membersCancel: "Sie können eine Mitgliedschaft jederzeit selbst kündigen, über den Link in jeder E-Mail dazu, ohne jemanden kontaktieren zu müssen.",
+    membersCancelByReply: (n) => `Um eine Mitgliedschaft zu kündigen, antworten Sie auf eine E-Mail dazu; Ihre Nachricht erreicht ${n}.`,
     membersEnd: "Mit der Kündigung endet die Mitgliedschaft am Ende des bereits bezahlten Zeitraums.",
     and: "und",
     measures: (n, p) => `${n} misst seine Werbung mit ${p}.`,
@@ -135,6 +141,7 @@ export const POLICY_WORDS: Record<LanguageCode, PolicyWords> = {
     cancelMembership:
       "Un abbonamento è almeno in parte un servizio: al pagamento chiedi che inizi subito, conservi il diritto di recedere entro i 14 giorni e, se lo fai, ti può essere chiesto di pagare ciò che hai già ricevuto.",
     membersCancel: "Puoi disdire un abbonamento da solo in qualsiasi momento, dal link in qualsiasi email che lo riguarda, senza contattare nessuno.",
+    membersCancelByReply: (n) => `Per disdire un abbonamento, rispondi a una qualsiasi email che lo riguarda; il tuo messaggio arriverà a ${n}.`,
     membersEnd: "Con la disdetta, l'abbonamento termina alla fine del periodo già pagato.",
     and: "e",
     measures: (n, p) => `${n} misura i suoi annunci con ${p}.`,
@@ -157,6 +164,7 @@ export const POLICY_WORDS: Record<LanguageCode, PolicyWords> = {
     cancelMembership:
       "Een lidmaatschap is ten minste gedeeltelijk een dienst: bij het afrekenen vraag je om het meteen te laten beginnen, je houdt het recht om binnen de 14 dagen te annuleren en als je dat doet, kan je gevraagd worden te betalen voor wat je al hebt gekregen.",
     membersCancel: "Je kunt een lidmaatschap op elk moment zelf opzeggen, via de link in elke e-mail erover, zonder contact op te nemen.",
+    membersCancelByReply: (n) => `Om een lidmaatschap op te zeggen, beantwoord je een e-mail erover; je bericht komt bij ${n} aan.`,
     membersEnd: "Opzeggen beëindigt het lidmaatschap aan het einde van de periode die je al hebt betaald.",
     and: "en",
     measures: (n, p) => `${n} meet zijn advertenties met ${p}.`,
@@ -179,6 +187,7 @@ export const POLICY_WORDS: Record<LanguageCode, PolicyWords> = {
     cancelMembership:
       "Uma subscrição é, pelo menos em parte, um serviço: no pagamento pede que comece de imediato, mantém o direito de cancelar dentro dos 14 dias e, se o fizer, pode ter de pagar o que já recebeu.",
     membersCancel: "Pode cancelar uma subscrição a qualquer momento, pela ligação em qualquer e-mail sobre ela, sem contactar ninguém.",
+    membersCancelByReply: (n) => `Para cancelar uma subscrição, responda a qualquer e-mail sobre ela; a sua mensagem chega a ${n}.`,
     membersEnd: "Ao cancelar, a subscrição termina no fim do período já pago.",
     and: "e",
     measures: (n, p) => `${n} mede os seus anúncios com ${p}.`,

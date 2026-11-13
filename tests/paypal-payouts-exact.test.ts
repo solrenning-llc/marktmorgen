@@ -4,8 +4,8 @@
  *
  *   - settling: the HSETNX that books a paid item answering anything but 0
  *     or 1 is not "booked", so the affiliate book is never counted twice,
- *     and the item stays on its way for the next run (no separate item mark
- *     is kept since Claude 5's LEVE 3 on #2844);
+ *     and the item stays on its way for the next run (main's per-line catch
+ *     since #3272: the settle answers, the line is kept, booked once later);
  *   - the daily job: a store whose record could not be read stays in the
  *     settle set (only a confirmed absent store leaves it);
  *   - the creator's PayPal link: an unknown answer is not "not connected"
@@ -13,7 +13,7 @@
  *
  * Synthetic only: a stand-in for PayPal's API on api-m.paypal.com, the Redis stub.
  */
-import { connectPayPal, onTheirWay, payWithPayPal, paysAutomatically, readPayPal, setAutoPay, settleAllPayPal, settlePayPal } from "@/lib/paypal-payouts";
+import { connectPayPal, disconnectPayPal, onTheirWay, payWithPayPal, paysAutomatically, readPayPal, setAutoPay, settleAllPayPal, settlePayPal } from "@/lib/paypal-payouts";
 import { addPayout, readBook } from "@/lib/affiliates";
 import type { Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
@@ -29,7 +29,7 @@ const created: Record<string, unknown>[] = [];
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status });
-  if (url.hostname === "api.stripe.com") return json({ data: [], has_more: false });
+  if (url.hostname === "api.stripe.com") return json({ object: "list", data: [], has_more: false });
   if (url.hostname !== "api-m.paypal.com") return json({ error: "unexpected" }, 404);
   if (url.pathname === "/v1/oauth2/token") return json({ access_token: "A21AAtoken", token_type: "Bearer", scope: SCOPE, expires_in: 32400 });
   if (url.pathname === "/v1/payments/payouts" && init?.method === "POST") {
@@ -119,14 +119,17 @@ async function main(): Promise<void> {
     itemStatus = { aaaaaaaaaaaa: "SUCCESS" };
   };
 
-  part("Revisor 1, repro 1 (the mark is gone since Claude 5's LEVE 3): the booking is written and its answer is lost");
+  // Since #3272 a line whose booking is not known is caught per line and kept on its way: the settle answers, says
+  // nothing was paid, and the line waits for the next run (it never rejects, so one line never stops the others).
+  const keptOnItsWay = { paid: 0, released: 0, waiting: 1 };
+  part("Revisor 1, repro 1: the booking is written and its answer is lost");
   await sentAndPaid();
-  is("that settle is not said as done", await intercepted(booking, async (c) => { await real(c); return [undefined]; }, () => rejects(() => settlePayPal(store))), true);
+  is("that settle is not said as done: kept on its way", await intercepted(booking, async (c) => { await real(c); return [undefined]; }, () => settlePayPal(store)), keptOnItsWay);
   await sentOnce();
 
   part("Revisor 1, repro 2: writing the payout into the book fails (a full data room)");
   await sentAndPaid();
-  is("that settle is not said as done", await intercepted(payoutsWrite, async () => { throw new Error("Synthetic DataRoomError: the store's data room is full"); }, () => rejects(() => settlePayPal(store))), true);
+  is("that settle is not said as done: kept on its way", await intercepted(payoutsWrite, async () => { throw new Error("Synthetic DataRoomError: the store's data room is full"); }, () => settlePayPal(store)), keptOnItsWay);
   is("nothing is in the book yet", await paidTo(store), 0);
   is("and it is still on its way, never owed", [...(await onTheirWay(store))], ["aaaaaaaaaaaa"]);
   await sentOnce();
@@ -146,14 +149,14 @@ async function main(): Promise<void> {
   for (const [label, reply] of malformedNx) {
     part(`The booking is written and its answer is ${label}: booked once, never twice`);
     await sentAndPaid();
-    is("settling does not say it settled", await intercepted(booking, async (c) => { await real(c); return reply(); }, () => rejects(() => settlePayPal(store))), true);
+    is("settling does not say it settled: kept on its way", await intercepted(booking, async (c) => { await real(c); return reply(); }, () => settlePayPal(store)), keptOnItsWay);
     is("in the book once", await paidTo(store), 3000);
     is("and still on its way, never owed", [...(await onTheirWay(store))], ["aaaaaaaaaaaa"]);
     await sentOnce();
 
     part(`The booking is not written and its answer is ${label}: booked once, by the next settle`);
     await sentAndPaid();
-    is("settling does not say it settled", await intercepted(booking, async () => reply(), () => rejects(() => settlePayPal(store))), true);
+    is("settling does not say it settled: kept on its way", await intercepted(booking, async () => reply(), () => settlePayPal(store)), keptOnItsWay);
     is("nothing is in the book yet", await paidTo(store), 0);
     is("and still on its way, never owed", [...(await onTheirWay(store))], ["aaaaaaaaaaaa"]);
     await sentOnce();
@@ -211,10 +214,32 @@ async function main(): Promise<void> {
     const answer = async () => [...reply];
     is("the studio view rejects", await intercepted(linkRead, answer, () => rejects(() => readPayPal(store))), true);
     is("payday's auto-pay question rejects", await intercepted(linkRead, answer, () => rejects(() => paysAutomatically(store))), true);
+    // An unreadable link is answered as an error (nothing sent), never thrown and never "not connected".
     const pressed = await intercepted(linkRead, answer, () => payWithPayPal(store).then((r) => (r.ok ? "sent" : r.reason), () => "rejected"));
-    is("a press is never told 'not connected'", pressed, "rejected");
+    is("a press is never told 'not connected'", pressed, "error");
     is("turning auto-pay off is not refused as 'not connected'", await intercepted(linkRead, answer, () => setAutoPay(store, false).then(String, () => "rejected")), "rejected");
     is("nothing sent", created.length, 0);
+  }
+
+  part("A way out of a link in an unknown shape: connecting again replaces it with auto-pay off; Disconnect deletes it");
+  for (const stored of ["{", JSON.stringify({ client: CLIENT, secret: "x", at: 1, auto: "true" })]) {
+    await seed(store);
+    await real([["SET", `nl:pp:${STATS}`, stored]]);
+    is("the stored link is unreadable", await rejects(() => readPayPal(store)), true);
+    is("connecting again is not refused", await connectPayPal(store, CLIENT, SECRET), { ok: true });
+    is("and an unknown switch is never carried over as on", [(await readPayPal(store))?.client, await paysAutomatically(store)], ["AbCdEf…6789", false]);
+    await real([["SET", `nl:pp:${STATS}`, stored]]);
+    await disconnectPayPal(store);
+    is("Disconnect deletes it whatever it held", [await readPayPal(store), await paysAutomatically(store)], [null, false]);
+    is("nothing sent", created.length, 0);
+  }
+  {
+    const { readFileSync } = await import("node:fs");
+    const page = readFileSync("app/studio/affiliates/page.tsx", "utf8");
+    const panel = readFileSync("components/paypal-payouts.tsx", "utf8");
+    const unread = panel.slice(panel.indexOf("export function PayPalUnread"));
+    is("the studio shows the unread notice, not the connect form, when the link cannot be read", /paypal === undefined \? \(\s*<PayPalUnread \/>/.test(page), true);
+    is("and that notice offers Disconnect", [unread.includes('op: "disconnect"'), unread.includes("Disconnect PayPal")], [true, true]);
   }
 
   part("Controls: a healthy link and a confirmed absent one");

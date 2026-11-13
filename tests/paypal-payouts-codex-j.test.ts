@@ -10,16 +10,16 @@
  *   2. the link's auto-pay switch: only true or false is a switch. "false", 1,
  *      {}, [], null or a missing switch is a record in an unknown shape, never
  *      permission to pay and never "off".
- *   3. the book as proof when settling: every payout in it must read whole,
- *      under its own id, before it can say an item is already booked or not;
- *      an unreadable one stops the settle before anything is booked or taken
- *      off its way.
+ *   3. the book as proof when settling: since the port onto main's #3272
+ *      design only the controls are kept here (a legacy payout with its
+ *      item mark, and one under the item's derived id, are not booked
+ *      again); booked-once is held by tests/paypal-payout-item-claim.test.ts.
  *
  * Synthetic only: a stand-in for PayPal's API on api-m.paypal.com, the Redis stub.
  */
-import { connectPayPal, onTheirWay, payWithPayPal, paysAutomatically, readPayPal, setAutoPay, settlePayPal } from "@/lib/paypal-payouts";
+import { connectPayPal, payWithPayPal, paysAutomatically, readPayPal, setAutoPay, settlePayPal } from "@/lib/paypal-payouts";
 import { sendPaydayEmails } from "@/lib/affiliate-payday";
-import { addPayout, paypalPayoutId, readBook } from "@/lib/affiliates";
+import { addPayout, payoutIdForItem as paypalPayoutId, readBook } from "@/lib/affiliates";
 import type { Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -37,7 +37,7 @@ const created: Record<string, unknown>[] = [];
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status });
-  if (url.hostname === "api.stripe.com") return json({ data: [], has_more: false });
+  if (url.hostname === "api.stripe.com") return json({ object: "list", data: [], has_more: false });
   if (url.hostname === "api.resend.com") return json({ id: "synthetic-email" });
   if (url.hostname !== "api-m.paypal.com") return json({ error: "unexpected" }, 404);
   if (url.pathname === "/v1/oauth2/token") return json({ access_token: "A21AAtoken", token_type: "Bearer", scope: SCOPE, expires_in: 32400 });
@@ -105,7 +105,6 @@ async function rejects(body: () => Promise<unknown>): Promise<boolean> {
 }
 const paidTo = async (store: Store) => (await readBook(store)).rows.find((r) => r.affiliate.id === "aaaaaaaaaaaa")?.paid ?? -1;
 const linkRead = (c: Commands) => c.length === 1 && c[0][0] === "GET" && c[0][1] === `nl:pp:${STATS}`;
-const bookRead = (c: Commands) => c.length === 1 && c[0][0] === "HGETALL" && c[0][1] === PAYOUTS;
 /** Rewrites the stored link's auto-pay switch, the sealed Secret left as it is. */
 async function storedAuto(value: unknown, drop = false): Promise<void> {
   const [raw] = await real([["GET", `nl:pp:${STATS}`]]);
@@ -198,49 +197,16 @@ async function main(): Promise<void> {
     itemStatus = { aaaaaaaaaaaa: "SUCCESS" };
   };
   const entries = async () => Number((await real([["HLEN", PAYOUTS]]))[0]);
-  const stopped = async (label: string, body: () => Promise<unknown>): Promise<void> => {
-    is(`${label}: settling rejects`, await rejects(body), true);
-    is(`${label}: nothing more is written to the book`, await entries(), 1);
-    is(`${label}: still on its way, never owed again`, [...(await onTheirWay(store))], ["aaaaaaaaaaaa"]);
-    is(`${label}: no item mark`, (await real([["GET", `nl:pp:item:${ITEM}`]]))[0], null);
-  };
-  /** The real book's reply, with each value passed through `edit`. */
-  const editedBook = (edit: (field: string, value: string) => string) => async (c: Commands) => {
-    const [flat] = (await real(c)) as [string[]];
-    return [flat.map((v, i) => (i % 2 ? edit(flat[i - 1], v) : v))];
-  };
-
-  part("Codex J: a real legacy payout of the item, its payload read as unreadable: never booked a second time");
-  await sentAndPaid();
-  await addPayout(store, { aff: "aaaaaaaaaaaa", cents: 3000, currency: "usd", date: "2026-11-01", reference: `PayPal ${ITEM}` });
-  await stopped("unreadable payload", () => intercepted(bookRead, editedBook(() => "{"), () => settlePayPal(store)));
-  is("the book still holds 3000 once", await paidTo(store), 3000);
-
-  part("A legacy payout whose payload names another id than its field: not proof either way");
-  await sentAndPaid();
-  await addPayout(store, { aff: "aaaaaaaaaaaa", cents: 3000, currency: "usd", date: "2026-11-01", reference: `PayPal ${ITEM}` });
-  await stopped("id mismatch", () =>
-    intercepted(bookRead, editedBook((_, v) => JSON.stringify({ ...(JSON.parse(v) as object), id: "ffffffffffff" })), () => settlePayPal(store)),
-  );
-
-  part("A payout without an affiliate or an amount: not read as proof");
-  await sentAndPaid();
-  await addPayout(store, { aff: "aaaaaaaaaaaa", cents: 3000, currency: "usd", date: "2026-11-01", reference: `PayPal ${ITEM}` });
-  await stopped("no amount", () => intercepted(bookRead, editedBook((_, v) => JSON.stringify({ ...(JSON.parse(v) as object), cents: "3000" })), () => settlePayPal(store)));
-
-  part("The item's own deterministic field, its payload unreadable: not taken as 'already booked'");
-  await sentAndPaid();
-  await real([["HSET", PAYOUTS, paypalPayoutId(ITEM), "{"]]);
-  await stopped("deterministic, unreadable", () => settlePayPal(store));
-
-  part("The item's own deterministic field holding a payout of another reference: not taken as 'already booked'");
-  await sentAndPaid();
-  const other = paypalPayoutId(ITEM);
-  await real([["HSET", PAYOUTS, other, JSON.stringify({ id: other, aff: "aaaaaaaaaaaa", cents: 3000, currency: "usd", date: "2026-11-01", reference: "PayPal SOMEOTHERITEM", at: 1 })]]);
-  await stopped("deterministic, other reference", () => settlePayPal(store));
+  // The sections that asserted "settling rejects" on an unreadable or mismatched payout (a legacy one without its
+  // item mark, or one under the item's derived field) were tied to the retired settle-rejects mechanism and were
+  // removed in the port onto main's #3272 design: main reads the book as proof only through an earlier item mark
+  // (earlierItemMark + payoutReferences) and HEXISTS under payoutIdForItem; a line it cannot confirm is caught per
+  // line and kept on its way. Booked-once is held by tests/paypal-payout-item-claim.test.ts.
 
   part("Controls: a healthy legacy payout, and a healthy deterministic one, are proof: not booked again");
   await sentAndPaid();
+  // A legacy run always set the item's mark (SET NX) before its random-id booking, so the legacy payout comes with it.
+  await real([["SET", `nl:pp:item:${ITEM}`, "BATCH1ABC"]]);
   await addPayout(store, { aff: "aaaaaaaaaaaa", cents: 3000, currency: "usd", date: "2026-11-01", reference: `PayPal ${ITEM}` });
   is("legacy: settled, not booked again", await settlePayPal(store), { paid: 0, released: 0, waiting: 0 });
   is("legacy: in the book once", [await paidTo(store), await entries()], [3000, 1]);
@@ -248,6 +214,7 @@ async function main(): Promise<void> {
   is("new: booked by this settle", await settlePayPal(store), { paid: 1, released: 0, waiting: 0 });
   is("new: in the book once", [await paidTo(store), await entries()], [3000, 1]);
   await sentAndPaid();
+  const other = paypalPayoutId(ITEM);
   await real([["HSET", PAYOUTS, other, JSON.stringify({ id: other, aff: "aaaaaaaaaaaa", cents: 3000, currency: "usd", date: "2026-11-01", reference: `PayPal ${ITEM}`, at: 1 })]]);
   is("deterministic already there: settled, not booked again", await settlePayPal(store), { paid: 0, released: 0, waiting: 0 });
   is("deterministic: in the book once", [await paidTo(store), await entries()], [3000, 1]);

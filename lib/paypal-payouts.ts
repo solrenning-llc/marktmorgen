@@ -66,16 +66,25 @@ export type PayPalView = { client: string; at: number; auto: boolean; broken: bo
 type OpenBatch = PendingPayoutBatch;
 type Sent = OpenBatch["lines"][number];
 
+/** The creator's link: null only when Redis confirms there is none; an answer in any other shape throws (rule 24). */
 async function readLink(store: Store): Promise<Link | null> {
   if (!store.statsId || !isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["GET", linkKey(store.statsId)]]);
-  if (typeof raw !== "string") return null;
+  const reply = repliesFor(await redisPipeline([["GET", linkKey(store.statsId)]]), 1);
+  if (!reply) throw new UnknownReplyError("the PayPal link");
+  const [raw] = reply;
+  if (raw === null) return null;
+  let v: unknown;
   try {
-    const v = JSON.parse(raw) as Link;
-    return typeof v.client === "string" && typeof v.secret === "string" ? v : null;
+    v = typeof raw === "string" ? JSON.parse(raw) : undefined;
   } catch {
-    return null;
+    v = undefined;
   }
+  // The auto-pay switch is true or false, written so since the link existed: "false", 1, null or a missing switch is a
+  // record in an unknown shape, neither permission to pay nor "off" (Codex J's MEDIUM on 7b1baef6).
+  if (!record(v) || typeof v.client !== "string" || typeof v.secret !== "string" || typeof v.auto !== "boolean") {
+    throw new UnknownReplyError("the PayPal link");
+  }
+  return v as Link;
 }
 
 /** What the studio shows: never the Secret. */
@@ -201,8 +210,13 @@ export async function connectPayPal(store: Store, client: string, secret: string
     console.error("checking a PayPal app failed", error);
     return { ok: false, reason: "error" };
   }
-  const before = await readLink(store);
-  const link: Link = { client, secret: seal(secret, context(store.statsId)), at: Date.now(), auto: before?.auto ?? false };
+  // A previous link that cannot be read is replaced, with paying by itself off: connecting again is the creator's way
+  // out of a link in an unknown shape, and an unknown switch is never carried over as "on" (rule 24).
+  const before = await readLink(store).catch((error) => {
+    console.error("the previous PayPal link could not be read; it is replaced with auto-pay off", error);
+    return null;
+  });
+  const link: Link = { client, secret: seal(secret, context(store.statsId)), at: Date.now(), auto: before?.auto === true };
   await redisPipeline([["SET", linkKey(store.statsId), JSON.stringify(link)]]);
   return { ok: true };
 }
@@ -371,7 +385,15 @@ export const UNKNOWN_BATCH_PREFIX = "?";
 export async function payWithPayPal(store: Store): Promise<PayResult> {
   if (!store.statsId || !isRedisConfigured()) return { ok: false, reason: "error" };
   const statsId = store.statsId;
-  const link = await readLink(store);
+  // A link that cannot be read pays nothing and says so as an error, never thrown past this function (payday and the
+  // route both get an answer); bearer() reads it again inside the lock, under the same catch.
+  let link: Link | null;
+  try {
+    link = await readLink(store);
+  } catch (error) {
+    console.error("reading the PayPal link before paying failed; nothing was sent", error);
+    return { ok: false, reason: "error" };
+  }
   if (!link) return { ok: false, reason: "not-connected" };
   try {
     return await withLock(`nl:pp:${statsId}:lock`, 120, 5_000, async (): Promise<PayResult> => {
@@ -631,6 +653,7 @@ export async function settleAllPayPal(deadline: number): Promise<number> {
 }
 
 /** Whether this store pays by itself on payday. */
+/** Throws when the link cannot be read: an unknown switch is neither "on" nor "off" (rule 24). */
 export async function paysAutomatically(store: Store): Promise<boolean> {
-  return Boolean((await readLink(store))?.auto);
+  return (await readLink(store))?.auto === true;
 }

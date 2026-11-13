@@ -12,7 +12,7 @@ import { canSell } from "@/lib/store-checkout";
 import { AffiliateStudio } from "@/components/affiliate-studio";
 import { AffiliateSummary } from "@/components/affiliate-summary";
 import { SUMMARY_PERIODS, programSummary } from "@/lib/affiliate-summary";
-import { PayPalPayouts } from "@/components/paypal-payouts";
+import { PayPalPayouts, PayPalUnread } from "@/components/paypal-payouts";
 import { onTheirWay, payableLines, paypalChecks, readPayPal, settlePayPal } from "@/lib/paypal-payouts";
 import { batchTotal } from "@/lib/affiliate-payouts";
 import { codeOwners } from "@/lib/affiliate-codes";
@@ -209,7 +209,7 @@ export default async function StudioAffiliatesPage({ searchParams }: Params) {
           codeOwners={Object.fromEntries(owners)}
           payPanel={
             paypal === undefined ? (
-              <p className="notice notice-warn mt-5" role="alert">Your PayPal connection could not be read just now, so paying from PayPal is unavailable here. Nothing was changed. Reload the page to try again.</p>
+              <PayPalUnread />
             ) : book && away !== null && checks !== null ? (
               <PayPalPayouts
                 initial={paypal}

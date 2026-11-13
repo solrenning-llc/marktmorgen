@@ -91,3 +91,20 @@ test("confirmed absence: no record, nothing to delete, done with 0", async () =>
   redis.clear();
   assert.equal(await forgetCommunityPerson(community, member, email, []), 0);
 });
+
+// Codex X5 on #3095 (MEDIUM): the trace's DEL of one key was taken as exact on any whole number, so a reply of 2, which
+// one key cannot give, was counted and the erasure said finished.
+test("a trace deletion answered with a count one key cannot give is never a finished erasure", async () => {
+  await seed();
+  const trace = `nl:cm:${community}:tr:${member}`;
+  await call([["SADD", trace, "p:1"]]);
+  redis.pipeline = (async (commands: Command[]) => {
+    if (commands.length === 1 && commands[0][0] === "DEL" && commands[0][1] === trace && commands[0].length === 2) return [2];
+    return call(commands);
+  }) as typeof redis.pipeline;
+  try {
+    await assert.rejects(() => forgetCommunityPerson(community, member, email, []), { name: "UnknownReplyError" });
+  } finally {
+    redis.pipeline = original;
+  }
+});

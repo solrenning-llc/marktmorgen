@@ -109,6 +109,18 @@ void (async () => {
   const [consent] = await redis.pipeline([["GET", assistRemindKey(SESSION)]]);
   is("forgetAssistReminderPerson: the consent is gone", consent, null);
 
+  // Codex X5 on #3095 (MEDIUM): a member of the index that is not a session reference was dropped before the index, the
+  // only way back to its consent, was deleted, and the erasure was said finished with that consent kept.
+  replies = {};
+  sent.length = 0;
+  const odd = "cs_test_short";
+  await redis.pipeline([["SADD", whoKey(STATS, EMAIL), SESSION, odd], ["SET", assistRemindKey(SESSION), "{}"], ["SET", assistRemindKey(odd), "{}"]]);
+  is("forgetAssistReminderPerson, an index member that is not a session: never a finished count", rejected(await outcome(() => forgetAssistReminderPerson(STATS, EMAIL))), true);
+  is("forgetAssistReminderPerson, an index member that is not a session: nothing deleted", sent.includes("DEL"), false);
+  const [stillIndexed] = await redis.pipeline([["SCARD", whoKey(STATS, EMAIL)]]);
+  is("forgetAssistReminderPerson, an index member that is not a session: the index, the way back, is kept", stillIndexed, 2);
+  await redis.pipeline([["DEL", whoKey(STATS, EMAIL), assistRemindKey(SESSION), assistRemindKey(odd)]]);
+
   // forgetLibraryPerson: one SREM per quarter, each 0 or 1.
   const each = (n: number) => (commands: (string | number)[][]) => commands.map(() => n);
   for (const [label, make] of [

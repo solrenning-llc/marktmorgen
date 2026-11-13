@@ -16,7 +16,11 @@ import { done, is, part } from "./check";
 const root = process.cwd();
 const GATE = "reservePaidResourceWindow(";
 
-type SiteEntry = { state: "gated"; calls: number } | { state: "pending"; calls: number; why: string };
+type SiteEntry =
+  | { state: "gated"; calls: number; note?: string }
+  /** Every call of the site's own function follows `guard`, a self-gated primitive of this inventory, in the caller's function. */
+  | { state: "gated-by-callers"; calls: number; guard: string }
+  | { state: "pending"; calls: number; why: string };
 type PrimitiveEntry =
   /** The primitive's body, or the helper `via` of its own file that the body calls, holds the gate. */
   | { state: "self-gated"; via: string }
@@ -46,7 +50,7 @@ const PRIMITIVE_INVENTORY: Record<string, PrimitiveEntry> = {
   "lib/quiz-usage.ts#reserveQuizSubmission": { state: "sites", sites: { "lib/quiz.ts#submitQuiz": { state: "pending", calls: 1, why: "A quiz submission is reserved without the cohort proof." } } },
   "lib/resend-fallback-budget.ts#reserveResendFallback": { state: "sites", sites: { "lib/resend-fallback-transport.ts#guardedResendPost": { state: "pending", calls: 1, why: "The fallback sender's budget is reserved per send; the store meter's proof before it (lib/email.ts) is not shown here." } } },
   "lib/store-readings.ts#takeStoreReading": { state: "sites", sites: { "lib/store-readings.ts#keptReading": { state: "gated", calls: 1, note: "Refused as a day with no reading left: the last one kept is shown, stale." } } },
-  "lib/storage-reservations.ts#reserveStorage": { state: "sites", sites: { "lib/vault-storage.ts#openReservedVault": { state: "pending", calls: 1, why: "Vault storage is reserved without the cohort proof here; its route's withinServiceWhy is not in this function." } } },
+  "lib/storage-reservations.ts#reserveStorage": { state: "sites", sites: { "lib/vault-storage.ts#openReservedVault": { state: "gated-by-callers", calls: 1, guard: "reserveStoreUpload" } } },
   "lib/imports.ts#takeImportRows": { state: "sites", sites: { "app/api/store/import/route.ts#POST": { state: "pending", calls: 1, why: "Import rows are taken after guardStoreWrite, whose studio count is gated except for essential needs; not proven for this site." } } },
 };
 
@@ -125,6 +129,14 @@ function audit(sources: Map<string, string>, inventory: Record<string, Primitive
         }
         if (classified.calls !== calls.length) problems.push(`${key}: ${site} has ${calls.length} calls, ${classified.calls} inventoried`);
         if (classified.state === "gated") for (const call of calls) if (!call.before.includes(GATE)) problems.push(`${key}: ${site} claimed gated, but no ${GATE} before line ${call.line}`);
+        if (classified.state === "gated-by-callers") {
+          const [siteFile, siteFn] = site.split("#");
+          const guardEntry = Object.entries(inventory).find(([k]) => k.endsWith(`#${classified.guard}`))?.[1];
+          if (guardEntry?.state !== "self-gated") problems.push(`${key}: ${site} guard ${classified.guard} is not a self-gated primitive here`);
+          const users = callSites(sources, siteFile, siteFn);
+          if (users.size === 0) problems.push(`${key}: ${site} has no caller to prove its guard`);
+          for (const [user, uses] of users) for (const use of uses) if (!use.before.includes(`${classified.guard}(`)) problems.push(`${key}: ${site} is called in ${user} (line ${use.line}) without ${classified.guard} before it`);
+        }
         if (classified.state === "pending") {
           if (!classified.why.trim()) problems.push(`${key}: ${site} needs its reason`);
           pending += classified.calls;
@@ -159,7 +171,7 @@ const problems = audit(sources, PRIMITIVE_INVENTORY, CONTRACT_ADMISSION_COVERAGE
 for (const problem of problems) console.log(`        ${problem}`);
 is("no problem between sources, inventory and key", problems, []);
 is("all 15 primitives inventoried", Object.keys(PRIMITIVE_INVENTORY).length, 15);
-is("pending primitive calls on 13 November 2026", pendingCalls, 4);
+is("pending primitive calls on 13 November 2026", pendingCalls, 3);
 is("pending calls keep resourceAllocations false", pendingCalls > 0 && CONTRACT_ADMISSION_COVERAGE.resourceAllocations, false);
 
 part("The audit refuses what it is for (synthetic sources)");
@@ -177,5 +189,12 @@ const selfEntry: Record<string, PrimitiveEntry> = { "lib/x.ts#reserveY": { state
 is("a primitive gated by its own helper passes", audit(new Map([["lib/x.ts", selfDef]]), selfEntry, false), []);
 is("a helper that lost its gate fails", audit(new Map([["lib/x.ts", selfDef.replace("reservePaidResourceWindow(store)", "true")]]), selfEntry, false), ["lib/x.ts#reserveY: helper does not hold reservePaidResourceWindow("]);
 is("a primitive that stopped calling its helper fails", audit(new Map([["lib/x.ts", selfDef.replace("await helper(store)", "true")]]), selfEntry, false), ["lib/x.ts#reserveY: does not call helper"]);
+const vault = 'export async function openIt(x) {\n  return reserveX(x);\n}\n';
+const route = 'import { openIt } from "@/lib/y";\nimport { reserveZ } from "@/lib/z";\nexport async function POST(s) {\n  if (!(await reserveZ(s))) return null;\n  return openIt(s);\n}\n';
+const zDef = 'export async function reserveZ(store) {\n  return !(store.period?.funded === true && !(await reservePaidResourceWindow(store)));\n}\n';
+const byCallers: Record<string, PrimitiveEntry> = { "lib/z.ts#reserveZ": { state: "self-gated", via: "reserveZ" }, "lib/x.ts#reserveX": { state: "sites", sites: { "lib/y.ts#openIt": { state: "gated-by-callers", calls: 1, guard: "reserveZ" } } } };
+const withVault = (r: string) => new Map([["lib/x.ts", def], ["lib/y.ts", 'import { reserveX } from "@/lib/x";\n' + vault], ["lib/z.ts", zDef], ["app/r.ts", r]]);
+is("a site gated by every caller's guard passes", audit(withVault(route), byCallers, false), []);
+is("a caller that skips the guard fails", audit(withVault(route.replace("if (!(await reserveZ(s))) return null;\n", "")), byCallers, false), ["lib/x.ts#reserveX: lib/y.ts#openIt is called in app/r.ts#POST (line 4) without reserveZ before it"]);
 is("a primitive that is gone fails", audit(new Map([["lib/x.ts", "export const n = 1;\n"]]), selfEntry, false), ["lib/x.ts#reserveY: the primitive is not declared there any more"]);
 done();

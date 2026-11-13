@@ -66,17 +66,20 @@ const targetsUnder44=(page,scope="body")=>page.evaluate(scope=>{
 // and a block of more than 80 characters is no wider than 80 of its own "0" glyphs (the platform caps its words below
 // that, docs/accessibility-programme.md). Only blocks a buyer reads in main; a box drawn as a row (p.flex, p.grid) keeps
 // its width, as in app/globals.css.
+// The preview bar above the site's menu is scanned too (its line spacing; #3997 review): it is on every buyer page.
 const blocksOff148=page=>page.evaluate(()=>{
  const out=[];
- for(const n of document.querySelectorAll("main :is(p,li,dd,blockquote,figcaption)")){
+ for(const n of document.querySelectorAll("main :is(p,li,dd,blockquote,figcaption), [data-preview-bar] p")){
   const text=(n.textContent||"").trim();
   if(!n.getClientRects().length||n.closest(".sr-only,[hidden],[inert]")||text.length<41)continue;
   const s=getComputedStyle(n),size=parseFloat(s.fontSize),line=s.lineHeight==="normal"?size*1.2:parseFloat(s.lineHeight);
   const name=n.tagName+":"+text.slice(0,50);
   if(line/size<1.49)out.push({name,lineHeight:Math.round(line/size*100)/100});
   if(s.textAlign==="justify")out.push({name,justified:true});
-  if(n.matches("li,p.flex,p.grid")||text.length<=80)continue;
-  const probe=document.createElement("span");probe.textContent="0".repeat(80);probe.style.cssText="position:absolute;visibility:hidden;white-space:nowrap;font:inherit;letter-spacing:inherit;word-spacing:inherit";
+  if(n.matches("li,p.flex,p.grid,[data-preview-bar] p")||text.length<=80)continue;
+  // 80 of the block's own characters, not 80 "0" glyphs: in a proportional font the average letter and space is
+  // narrower than a "0", so a width of 80 zeros let about 95 real characters through (#3997 review).
+  const probe=document.createElement("span");probe.textContent=text.replace(/\s+/g," ").slice(0,80);probe.style.cssText="position:absolute;visibility:hidden;white-space:nowrap;font:inherit;letter-spacing:inherit;word-spacing:inherit";
   n.appendChild(probe);const eighty=probe.getBoundingClientRect().width;probe.remove();
   const width=n.getBoundingClientRect().width-parseFloat(s.paddingLeft)-parseFloat(s.paddingRight);
   if(width>eighty*1.02)out.push({name,characters:Math.round(width/(eighty/80))});
@@ -250,6 +253,10 @@ try{
    await page.addScriptTag({content:axe});
    const result=await page.evaluate(async()=>{const root=document.documentElement,run=await window.axe.run(document,{rules:{"color-contrast-enhanced":{enabled:true}}});return {scroll:root.scrollWidth,client:root.clientWidth,violations:run.violations.map(v=>({id:v.id,targets:v.nodes.map(n=>n.target).slice(0,6)})),incomplete:run.incomplete.map(v=>v.id)};});
    const small=await targetsUnder44(page),off=await blocksOff148(page);
+   // The site's menu stays on screen when the page scrolls (#3997 review): a page that wraps <SiteNav /> in its own
+   // <header> lets the sticky menu scroll away with that short wrapper. Only where the page is long enough to scroll.
+   const menuTop=await page.evaluate(async()=>{const nav=document.querySelector('nav[aria-label="Main"]');if(!nav)return null;const room=document.documentElement.scrollHeight-innerHeight;if(room<200)return 0;scrollTo(0,Math.min(1500,room));await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));const top=Math.round(nav.getBoundingClientRect().top);scrollTo(0,0);return top;});
+   if(menuTop!==0)throw Error("The site menu does not stay on screen when "+path+" scrolls: its top is "+menuTop);
    audits++;console.log("MISSING_PAGE_AUDIT:"+JSON.stringify({engine,width,path,small,off,...result}));
    if(result.scroll>result.client||result.violations.length||small.length||off.length||errors.length)throw Error("Missing-page accessibility failure "+JSON.stringify({violations:result.violations,small,off,errors}));
    if(result.incomplete.length)gaps.push({width,mode:"baseline",state:"missing "+path,manualReview:result.incomplete});

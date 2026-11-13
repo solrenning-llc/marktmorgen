@@ -95,7 +95,7 @@ export async function POST(request: NextRequest) {
     // Giving an upload up is always let through for the buyer who opened it.
     if (action === "abort") {
       if (!who) return no("signed_out", 401);
-      const given = await abortSubmissionDoor(where, text(body.pathname, 400));
+      const given = await abortSubmissionDoor({ ...where, data: store }, text(body.pathname, 400), undefined, now);
       return given === "done" ? yes({}) : given === "unknown" ? no("unknown", 404) : no("files_unavailable", 503);
     }
 

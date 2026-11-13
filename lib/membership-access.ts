@@ -54,22 +54,30 @@ export function isLive(status: unknown): boolean {
 
 /**
  * What the doors call a membership that is past due with no attempt at its
- * latest invoice scheduled, or whose latest invoice was not read: ended.
+ * latest invoice scheduled: ended. One whose latest invoice was not read is
+ * unknown (retryScheduled), never this.
  */
 export const PAST_DUE_NO_RETRY = "past_due_no_retry";
 
 /**
  * Whether Stripe has another attempt at a past-due membership's latest
  * invoice scheduled. The subscription carries no retry date of its own; its
- * latest invoice does (`next_payment_attempt`, null once none is scheduled),
- * so every door reads the membership with that invoice expanded. An invoice
- * not expanded, or any other shape, is not a retry.
+ * latest invoice does (`next_payment_attempt`: a date while an attempt is
+ * scheduled, an explicit null once none is), so every door reads the
+ * membership with that invoice expanded. An invoice not expanded (still its
+ * id), one without that field, or a field that is not a date says nothing
+ * about the retry: an answer not understood (rule 24), never an ended
+ * membership (Codex X8 on #3889).
  */
 function retryScheduled(sub: object): boolean {
   const invoice = (sub as { latest_invoice?: unknown }).latest_invoice;
-  if (!invoice || typeof invoice !== "object" || Array.isArray(invoice)) return false;
+  if (!invoice || typeof invoice !== "object" || Array.isArray(invoice) || !Object.hasOwn(invoice, "next_payment_attempt")) {
+    throw new UnknownReplyError("a past-due membership's latest invoice");
+  }
   const next = (invoice as { next_payment_attempt?: unknown }).next_payment_attempt;
-  return typeof next === "number" && Number.isSafeInteger(next) && next > 0;
+  if (next === null) return false;
+  if (typeof next === "number" && Number.isSafeInteger(next) && next > 0) return true;
+  throw new UnknownReplyError("a past-due membership's next payment attempt");
 }
 
 /**
@@ -130,8 +138,8 @@ export function soldAMembership(product: Listing, session: { mode?: unknown; met
  * when Stripe cannot say, which callers treat as ended: a door that cannot
  * check whether someone still pays stays shut rather than open. Its one
  * caller (lib/store-checkout.ts, readOrder) hands it the subscription with
- * its latest invoice expanded; read by its id alone, without that invoice, a
- * past-due membership is ended by the same rule (memberState).
+ * its latest invoice expanded; read by its id alone, it asks Stripe for that
+ * invoice too, since a past-due membership without it is unknown (memberState).
  */
 export async function membershipStatus(store: Store, subscription: unknown): Promise<string | null> {
   if (subscription && typeof subscription === "object") return memberState(subscription);
@@ -141,7 +149,7 @@ export async function membershipStatus(store: Store, subscription: unknown): Pro
     const [cached] = await redisPipeline([["GET", statusKey(account, subscription)]]);
     if (typeof cached === "string" && cached) return cached;
   }
-  const sub = await onAccount("GET", account, `/subscriptions/${encodeURIComponent(subscription)}`);
+  const sub = await onAccount("GET", account, `/subscriptions/${encodeURIComponent(subscription)}?expand[]=latest_invoice`);
   const status = memberState(sub);
   if (status && isRedisConfigured()) {
     await redisPipeline([["SET", statusKey(account, subscription), status, "EX", STATUS_SECONDS]]);

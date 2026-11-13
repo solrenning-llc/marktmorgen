@@ -26,7 +26,7 @@
 import { readFileSync } from "node:fs";
 import { NextRequest } from "next/server";
 import { POST } from "@/app/api/store/community/manage/route";
-import { addProduct, claimHandle, ensureStatsId, setCommunity, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { addProduct, claimHandle, ensureListId, ensureStatsId, setCommunity, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { createPost, freshConfig, readConfig, saveConfig, setPostHidden } from "@/lib/community";
 import { NO_ABOUT_PAGE, parseAboutSetting } from "@/lib/community-about-setting";
@@ -112,6 +112,24 @@ async function main(): Promise<void> {
   store = (await setCommunity(OWNER, false))!;
   is("the community switched off: not found", (await aboutPage(store)).state, "none");
   store = (await setCommunity(OWNER, true))!;
+
+  part("7. A free product that lets people in is a way in too (Claude 1 cloud's MEDIUM on #3016)");
+  // canSellProduct is false for a free product, so the page said "No way in is on sale right now" while the
+  // community's own door listed it as Free. A free product the store can give now (lib/free.ts canGiveProduct)
+  // is listed, with "Free", linked to its page, where its own door is.
+  process.env.RESEND_API_KEY ??= "re_test_sk1_free_only_a_stand_in";
+  await ensureListId(OWNER);
+  const free = await addProduct(OWNER, "Free Starter Guide", "", "0", null);
+  if (!free.ok) throw new Error("no free product");
+  await setProductLink(OWNER, free.product.id, "https://example.com/free");
+  store = (await storeForEmail(OWNER))!;
+  await saveConfig(id, { ...(await readConfig(id))!, access: [paid.product.id, draft.product.id, free.product.id], page: { on: true, counts: false } });
+  const withFree = await aboutPage(store);
+  if (withFree.state !== "shown") throw new Error(`not shown: ${withFree.state}`);
+  is("the free product is listed beside the paid one, the draft still left out", withFree.page.ways.map((w) => w.title).sort(), ["Bread Club Membership", "Free Starter Guide"]);
+  is("said as Free, as the community's door says it", withFree.page.ways.find((w) => w.title === "Free Starter Guide")?.kind, "Free");
+  is("linked to its own page, where its door is", withFree.page.ways.find((w) => w.title === "Free Starter Guide")?.href.startsWith("/@sk1about/p/"), true);
+  await saveConfig(id, { ...(await readConfig(id))!, access: [paid.product.id, draft.product.id] });
 
   part("3. With counts");
   await saveConfig(id, { ...(await readConfig(id))!, page: { on: true, counts: true } });

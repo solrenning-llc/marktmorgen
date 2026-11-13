@@ -122,9 +122,19 @@ async function oneReply(command: (string | number)[]): Promise<unknown> {
   return reply[0];
 }
 
+/**
+ * Whether every position of a reply holds one of `allowed`, holes included: `every` skips the missing positions of a
+ * sparse array, so a reply of the right length with a hole passed it and the hole was read as a value (Codex X5 on
+ * #4026). A hole is an unknown read.
+ */
+function wholeOf(raw: unknown[], allowed: (x: unknown) => boolean): boolean {
+  for (let i = 0; i < raw.length; i += 1) if (!Object.hasOwn(raw, i) || !allowed(raw[i])) return false;
+  return true;
+}
+
 /** The hash's (field, record) pairs: a flat list of texts, an even number of them; an empty one when there is no hash. */
 function pairsOf(raw: unknown): [string, string][] {
-  if (Array.isArray(raw) && raw.length % 2 === 0 && raw.every((x) => typeof x === "string")) {
+  if (Array.isArray(raw) && raw.length % 2 === 0 && wholeOf(raw, (x) => typeof x === "string")) {
     const pairs: [string, string][] = [];
     for (let i = 0; i < raw.length; i += 2) pairs.push([raw[i] as string, raw[i + 1] as string]);
     return pairs;
@@ -267,12 +277,13 @@ export type CompanyChange = (companies: Company[], unreadable: readonly string[]
 
 /**
  * Which of `people` were deleted from the store (goneKey), in one MGET; CompaniesUnreadable when Redis's answer is
- * not one entry for each, nothing or text: an unknown mark is never "not deleted".
+ * not one entry for each, nothing or text, a missing position included (wholeOf): an unknown mark is never "not
+ * deleted", and never "deleted" either.
  */
 async function erasedAmong(statsId: string, people: readonly string[]): Promise<Set<string>> {
   if (!people.length) return new Set();
   const marks = await oneReply(["MGET", ...people.map((person) => goneKey(statsId, person))]);
-  if (!Array.isArray(marks) || marks.length !== people.length || !marks.every((m) => m === null || typeof m === "string")) throw new CompaniesUnreadable("MGET");
+  if (!Array.isArray(marks) || marks.length !== people.length || !wholeOf(marks, (m) => m === null || typeof m === "string")) throw new CompaniesUnreadable("MGET");
   return new Set(people.filter((_, i) => marks[i] !== null));
 }
 

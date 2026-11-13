@@ -328,7 +328,8 @@ export async function deliverGift(input: {
         g.orderRef(sessionId),
         ...consentEmailLines(store, session.metadata),
         "",
-        g.weEmailed(gift.to, Boolean(gift.message)),
+        // Only what went (#4316): with no name typed, the recipient read "Someone" (who, above), not the buyer's name.
+        g.weEmailed(gift.to, Boolean(gift.from), Boolean(gift.message)),
         "",
         g.chargedBy(store.name),
       ].join("\n"),

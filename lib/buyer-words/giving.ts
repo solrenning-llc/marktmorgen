@@ -21,6 +21,12 @@ const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);
 const pluralFr = (n: number, one: string, many: string) => (n < 2 ? one : many);
 /** A non-breaking space, before the signs French spaces from the word before them. */
 const S = " ";
+/**
+ * What a gift's email carried, ahead of its link: only the parts that went
+ * (a gift's name and message are both optional), then the link. "a, b and c".
+ */
+const carried = (parts: (string | false)[], and: string, link: string) =>
+  [...parts.filter((p): p is string => Boolean(p)), link].reduce((all, part, i, list) => (i === 0 ? part : `${all}${i === list.length - 1 ? and : ", "}${part}`), "");
 
 type Notice = { title: string; body: string };
 
@@ -250,8 +256,9 @@ const en = {
   giftReceiptSubject: (title: string) => `Your gift is on its way: ${title}`,
   aGift: (title: string) => `A gift: ${title}`,
   giftFor: (email: string) => `For: ${email}`,
-  weEmailed: (email: string, withMessage: boolean) =>
-    `We emailed ${email} just now, with your name${withMessage ? " and your message" : ""} and a link to open it. It is theirs, on their address; you do not get a copy.`,
+  /** Says only what the recipient's email carried: the name and the message are both optional. */
+  weEmailed: (email: string, withName: boolean, withMessage: boolean) =>
+    `We emailed ${email} just now, with ${carried([withName && "your name", withMessage && "your message"], " and ", "a link to open it")}. It is theirs, on their address; you do not get a copy.`,
 
   // ---- Leaving a review: its page --------------------------------------------------------------
   reviewMetaTitle: "Your review",
@@ -593,8 +600,8 @@ const es: GivingWords = {
   giftReceiptSubject: (title) => `Tu regalo va en camino: ${title}`,
   aGift: (title) => `Un regalo: ${title}`,
   giftFor: (email) => `Para: ${email}`,
-  weEmailed: (email, withMessage) =>
-    `Acabamos de enviar un email a ${email} con tu nombre${withMessage ? ", tu mensaje" : ""} y un enlace para abrirlo. Es suyo, en su dirección; tú no recibes una copia.`,
+  weEmailed: (email, withName, withMessage) =>
+    `Acabamos de enviar un email a ${email} con ${carried([withName && "tu nombre", withMessage && "tu mensaje"], " y ", "un enlace para abrirlo")}. Es suyo, en su dirección; tú no recibes una copia.`,
 
   reviewMetaTitle: "Tu reseña",
   orderRefundedTitle: "Este pedido se reembolsó",
@@ -919,8 +926,8 @@ const fr: GivingWords = {
   giftReceiptSubject: (title) => `Votre cadeau est en route${S}: ${title}`,
   aGift: (title) => `Un cadeau${S}: ${title}`,
   giftFor: (email) => `Pour${S}: ${email}`,
-  weEmailed: (email, withMessage) =>
-    `Nous venons d'envoyer un e-mail à ${email}, avec votre nom${withMessage ? ", votre message" : ""} et un lien pour l'ouvrir. C'est à cette personne, sur son adresse${S}; vous ne recevez pas de copie.`,
+  weEmailed: (email, withName, withMessage) =>
+    `Nous venons d'envoyer un e-mail à ${email}, avec ${carried([withName && "votre nom", withMessage && "votre message"], " et ", "un lien pour l'ouvrir")}. C'est à cette personne, sur son adresse${S}; vous ne recevez pas de copie.`,
 
   reviewMetaTitle: "Votre avis",
   orderRefundedTitle: "Cette commande a été remboursée",
@@ -1244,8 +1251,8 @@ const de: GivingWords = {
   giftReceiptSubject: (title) => `Ihr Geschenk ist unterwegs: ${title}`,
   aGift: (title) => `Ein Geschenk: ${title}`,
   giftFor: (email) => `Für: ${email}`,
-  weEmailed: (email, withMessage) =>
-    `Wir haben ${email} soeben eine E-Mail geschickt, mit Ihrem Namen${withMessage ? ", Ihrer Nachricht" : ""} und einem Link zum Öffnen. Es gehört der beschenkten Person, unter ihrer Adresse; Sie erhalten keine Kopie.`,
+  weEmailed: (email, withName, withMessage) =>
+    `Wir haben ${email} soeben eine E-Mail geschickt, mit ${carried([withName && "Ihrem Namen", withMessage && "Ihrer Nachricht"], " und ", "einem Link zum Öffnen")}. Es gehört der beschenkten Person, unter ihrer Adresse; Sie erhalten keine Kopie.`,
 
   reviewMetaTitle: "Ihre Bewertung",
   orderRefundedTitle: "Diese Bestellung wurde erstattet",
@@ -1572,8 +1579,8 @@ const it: GivingWords = {
   giftReceiptSubject: (title) => `Il tuo regalo è in arrivo: ${title}`,
   aGift: (title) => `Un regalo: ${title}`,
   giftFor: (email) => `Per: ${email}`,
-  weEmailed: (email, withMessage) =>
-    `Abbiamo appena inviato un'email a ${email}, con il tuo nome${withMessage ? ", il tuo messaggio" : ""} e un link per aprirlo. È suo, sul suo indirizzo; tu non ne ricevi una copia.`,
+  weEmailed: (email, withName, withMessage) =>
+    `Abbiamo appena inviato un'email a ${email}, con ${carried([withName && "il tuo nome", withMessage && "il tuo messaggio"], " e ", "un link per aprirlo")}. È suo, sul suo indirizzo; tu non ne ricevi una copia.`,
 
   reviewMetaTitle: "La tua recensione",
   orderRefundedTitle: "Questo ordine è stato rimborsato",
@@ -1895,8 +1902,8 @@ const nl: GivingWords = {
   giftReceiptSubject: (title) => `Je cadeau is onderweg: ${title}`,
   aGift: (title) => `Een cadeau: ${title}`,
   giftFor: (email) => `Voor: ${email}`,
-  weEmailed: (email, withMessage) =>
-    `We hebben ${email} zojuist gemaild, met je naam${withMessage ? ", je bericht" : ""} en een link om het te openen. Het is van de ontvanger, op diens adres; jij krijgt geen kopie.`,
+  weEmailed: (email, withName, withMessage) =>
+    `We hebben ${email} zojuist gemaild, met ${carried([withName && "je naam", withMessage && "je bericht"], " en ", "een link om het te openen")}. Het is van de ontvanger, op diens adres; jij krijgt geen kopie.`,
 
   reviewMetaTitle: "Je beoordeling",
   orderRefundedTitle: "Deze bestelling is terugbetaald",
@@ -2223,8 +2230,8 @@ const pt: GivingWords = {
   giftReceiptSubject: (title) => `O seu presente está a caminho: ${title}`,
   aGift: (title) => `Um presente: ${title}`,
   giftFor: (email) => `Para: ${email}`,
-  weEmailed: (email, withMessage) =>
-    `Acabámos de enviar um email para ${email}, com o seu nome${withMessage ? ", a sua mensagem" : ""} e uma ligação para o abrir. É da pessoa, no endereço dela; não recebe uma cópia.`,
+  weEmailed: (email, withName, withMessage) =>
+    `Acabámos de enviar um email para ${email}, com ${carried([withName && "o seu nome", withMessage && "a sua mensagem"], " e ", "uma ligação para o abrir")}. É da pessoa, no endereço dela; não recebe uma cópia.`,
 
   reviewMetaTitle: "A sua avaliação",
   orderRefundedTitle: "Esta encomenda foi reembolsada",

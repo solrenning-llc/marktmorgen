@@ -2999,7 +2999,7 @@ async function takenSince(
       // A prevented dispute takes the money only when its own balance transactions say it left and did not come back
       // (disputeTakes, as every other reader asks it): a network block leaves it with the creator, and a resolution's
       // money left through a Refund this reading already takes off. Money that cannot be read holds the book.
-      const counts = list === "disputes" ? disputeTakes(row) : takes.has(row.status as string);
+      const counts = list === "disputes" ? disputeTakes(row as { status?: unknown; balance_transactions?: unknown }) : takes.has(row.status as string);
       if (counts === null) return incomplete;
       if (!counts) continue;
       const pi = paymentOf(row);

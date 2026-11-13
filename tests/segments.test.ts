@@ -59,6 +59,8 @@ let refunds: Record<string, unknown>[] = [];
 let disputes: Record<string, unknown>[] = [];
 let invoicePayments: Record<string, unknown>[] = [];
 let invoicePaymentsFail = false;
+// The list of invoice payments cut short (#4396): the first page as given, then pages of other invoices, always "more".
+let invoicePaymentsCut = false;
 
 globalThis.fetch = (async (input: string | URL | Request) => {
   const url = new URL(String(input));
@@ -69,6 +71,11 @@ globalThis.fetch = (async (input: string | URL | Request) => {
   if (url.pathname === "/v1/invoices") return new Response(JSON.stringify({ data: invoices, has_more: false }));
   if (url.pathname === "/v1/refunds") return new Response(JSON.stringify({ data: refunds, has_more: false }));
   if (url.pathname === "/v1/disputes") return new Response(JSON.stringify({ data: disputes, has_more: false }));
+  if (url.pathname === "/v1/invoice_payments" && invoicePaymentsCut) {
+    const after = url.searchParams.get("starting_after");
+    const data = after ? [{ id: `${after}x`, invoice: `in_other${after.length}`, status: "paid", payment: { type: "payment_intent", payment_intent: `pi_other${after.length}` } }] : invoicePayments;
+    return new Response(JSON.stringify({ data, has_more: true }));
+  }
   if (url.pathname === "/v1/invoice_payments") return invoicePaymentsFail ? new Response("{}", { status: 500 }) : new Response(JSON.stringify({ data: invoicePayments, has_more: false }));
   return new Response(JSON.stringify({ data: [], has_more: false }));
 }) as typeof fetch;
@@ -232,6 +239,25 @@ async function main(): Promise<void> {
   const unread = await buyerLedger({ ...store, statsId: "w".repeat(32) } as Store);
   is("an unread list of invoice payments, when one was needed, makes the reading partial", unread.partial, true);
   invoicePaymentsFail = false;
+
+  // #4396: a $100 membership checkout paid in two parts, the second ($40) refunded. The list of invoice payments is cut
+  // short after the first part: a part found in a cut list does not show all of the invoice's parts were read.
+  sessions.push({ ...session("ivy1", "ivy@example.com", 20, 10000), payment_intent: null, mode: "subscription", invoice: "in_ivy" } as unknown as ReturnType<typeof session>);
+  invoices = [];
+  // The membership sold earlier through checkout (pam) is still read: its payment is listed too.
+  invoicePayments = [
+    { id: "inpay_pam", invoice: "in_pamfirst", status: "paid", payment: { type: "payment_intent", payment_intent: "pi_pamfirst00000" } },
+    { id: "inpay_ivy1", invoice: "in_ivy", status: "paid", payment: { type: "payment_intent", payment_intent: "pi_ivypart100000" } },
+    { id: "inpay_ivy2", invoice: "in_ivy", status: "paid", payment: { type: "payment_intent", payment_intent: "pi_ivypart200000" } },
+  ];
+  refunds = [{ id: "re_ivy2", status: "succeeded", amount: 4000, currency: "usd", created: now - 2 * DAY, payment_intent: "pi_ivypart200000" }];
+  const whole = await buyerLedger({ ...store, statsId: "y".repeat(32) } as Store);
+  is("both parts read: the $40 refund is taken off, and the reading is complete", [whole.buyers.get("ivy@example.com")?.cents, whole.partial], [6000, false]);
+  invoicePaymentsCut = true;
+  invoicePayments = invoicePayments.slice(0, 2);
+  const cut = await buyerLedger({ ...store, statsId: "q".repeat(32) } as Store);
+  is("a list of invoice payments cut short, when one was needed, makes the reading partial (#4396)", cut.partial, true);
+  invoicePaymentsCut = false;
   invoicePayments = [];
   invoices = [];
   refunds = [];

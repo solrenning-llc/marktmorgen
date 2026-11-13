@@ -218,7 +218,9 @@ export async function buyerLedger(store: Store, count?: (units: number) => Promi
   const paymentsOfInvoice = (invoice: unknown): string[] => {
     if (typeof invoice !== "string" || !invoice) return [];
     const found = invoicePayments?.byInvoice.get(invoice) ?? [];
-    if (!found.length || found.some((intent) => !intent)) missed = true;
+    // A list cut short may hold only some of an invoice's payments (one paid in parts): a part found there does not
+    // show that every part was read, so its refunds may be unmatched (#4396).
+    if (!found.length || found.some((intent) => !intent) || invoicePayments?.partial !== false) missed = true;
     return found.filter(Boolean);
   };
   // What was given back of each payment, by the payment: refunds (Stripe's and PayPal's), and disputes that took or hold the money.

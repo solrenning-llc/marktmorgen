@@ -32,6 +32,7 @@ import { NewTab } from "@/components/new-tab";
 import { StampedPlayer } from "@/components/video-stamp";
 import { LessonPlayer } from "@/components/lesson-player";
 import { deviceLastKey, devicePlaceKey } from "@/lib/lesson-position";
+import { deviceQuizKey } from "@/lib/quiz-keep-key";
 import { RememberLastLesson } from "@/components/remember-last-lesson";
 import { lessonPath } from "@/lib/lesson-position-rules";
 import { resumeWordsOf } from "@/lib/lesson-position-rules";
@@ -172,6 +173,8 @@ export default async function LessonPage({ params, searchParams }: Params) {
   // Where the student stopped, kept on their device and offered back (650 [WG10], components/lesson-player.tsx),
   // under a key only the server can make (lib/lesson-position.ts); never for the creator or a visitor.
   const placeKey = student ? devicePlaceKey(course.id, student.email) : null;
+  // 297 [SQ8]: the code this student's quiz drafts are kept under in their own browser, so no one else's comes back.
+  const quizKeeper = student ? deviceQuizKey(course.id, student.email) : null;
   // This lesson kept on the student's device as the last one they opened, offered back in their library (650 [WG10],
   // unit 2, components/library-continue.tsx), under a key made from their address alone; never for the creator or a visitor.
   const lastPerson = student ? deviceLastKey(student.email) : null;
@@ -355,6 +358,7 @@ export default async function LessonPage({ params, searchParams }: Params) {
                 storeName={store.name}
                 justMarked={query.quiz === "marked"}
                 language={store.language}
+                keeper={quizKeeper}
               />
             ) : null}
 

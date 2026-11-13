@@ -75,6 +75,8 @@ jobs:
       - run: npm ci
       - name: Verify the package matches the preinstalled browser image
         run: node -e "if (require('playwright-core/package.json').version !== '1.56.1') process.exit(1)"
+      - name: Quiz answers kept in the student's browser, put back, cleared and forgotten when sent (synthetic, no server)
+        run: node tests/e2e/quiz-keep.mjs
       - name: Deals board focus, confirmed removal, Move only on its button, errors tied to fields and one status region (synthetic, no server)
         run: node tests/e2e/deals-board-focus.mjs
       - name: Page editor arrows keep focus at an edge, moves and removals said, no icon button animated in forced colors (synthetic, no server)

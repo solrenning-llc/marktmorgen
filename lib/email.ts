@@ -24,7 +24,7 @@ import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { atSiteAddress, creatorDomain, domainOf } from "@/lib/mail-from";
 import { countSesSent, isSesConfigured, notMaybeTaken, notYetTaken, sesBatch, sesBulkRoom, sesConfig, sesDown, sesReady, sesSend } from "@/lib/ses";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
-import { type AllowanceStore, takeAllowance } from "@/lib/store-allowance";
+import { type AllowanceStore, giveAllowance, takeAllowance } from "@/lib/store-allowance";
 import { allowanceWindow } from "@/lib/allowance-window";
 import type { ShipmentMailDispatch } from "@/lib/shipment-mail-outbox";
 import { repliesFor } from "@/lib/redis-reply";
@@ -697,6 +697,15 @@ async function dispatchBatch(
     : serviceMailKnownUnavailable(runtime))) return "retry";
   const resendSelected = only === "resend" || !(config && isSesConfigured());
   let authorization: MeterAuthorization | undefined;
+  // What this call took from a store's own figure up front (metered, the Amazon path), given back when the batch then
+  // answers "retry" or "waiting" with nothing handed to Amazon: a list sender tries such a batch again each run, and an
+  // outage must never spend the store's emails on mail that never went (outage drill, 14 November 2026).
+  let debited = 0;
+  const nothingSent = async <T>(answer: T): Promise<T> => {
+    if (debited > 0 && meter.by === "store") await giveAllowance(meter.store, meter.kind, debited);
+    debited = 0;
+    return answer;
+  };
   if (going.length) {
     if (resendSelected) {
       // Keep the same recipients/content through tags/domain variants and
@@ -708,6 +717,7 @@ async function dispatchBatch(
       authorization = lazyMeter(meter, going.length);
       if (!(await authorization.preflight())) return "refused";
     } else if (!(await metered(meter, going.length))) return "refused";
+    else if (meter.by === "store") debited = going.length;
   }
   let idempotencyKey = batchKey;
   if (config && isSesConfigured() && only !== "resend") {
@@ -716,13 +726,13 @@ async function dispatchBatch(
     // cut short and is being tried again, is not written to twice.
     const pending = await notYetTaken(batchKey, going);
     // Unreadable evidence must not release recipients to either provider.
-    if (pending === null) return "retry";
+    if (pending === null) return nothingSent("retry");
     // Nor whoever Amazon may have taken when its answer was lost: a batch tried again never writes to them twice.
     // A list batch is left out of this: it hands each uncertain address back to its caller (ListBatchOutcome), which
     // keeps it and lets the creator choose, a retry included (lib/flows.ts, held runs); a mark would turn that
     // chosen retry into "sent" with nothing sent.
     const clear = listOnly ? pending : await notMaybeTaken(batchKey, pending);
-    if (clear === null) return "retry";
+    if (clear === null) return nothingSent("retry");
     going = clear;
     // And a batch whose rest was once handed to Resend goes back to Resend,
     // under the same key: if Resend took it and the answer was lost on the
@@ -731,27 +741,27 @@ async function dispatchBatch(
     let toResend = false;
     try {
       const reply: unknown = await redisPipeline([["GET", handed]]);
-      if (!Array.isArray(reply)) return "retry";
+      if (!Array.isArray(reply)) return nothingSent("retry");
       const length = Object.getOwnPropertyDescriptor(reply, "length");
-      if (!length || !("value" in length) || length.value !== 1) return "retry";
+      if (!length || !("value" in length) || length.value !== 1) return nothingSent("retry");
       const marker = Object.getOwnPropertyDescriptor(reply, "0");
       // Only explicit absence or our own handoff marker can select a sender.
       // A lost or malformed read must not turn into another provider attempt.
-      if (!marker || !("value" in marker)) return "retry";
+      if (!marker || !("value" in marker)) return nothingSent("retry");
       if (marker.value === "1") toResend = true;
-      else if (marker.value !== null) return "retry";
+      else if (marker.value !== null) return nothingSent("retry");
     } catch {
-      return "retry";
+      return nothingSent("retry");
     }
-    if (listOnly && toResend && going.length) return "retry"; // A prior provider handoff needs reconciliation, not another sender.
+    if (listOnly && toResend && going.length) return nothingSent("retry"); // A prior provider handoff needs reconciliation, not another sender.
     const state = going.length && !toResend ? await sesReady() : null;
     // Many at a time use Amazon's day only up to a share of it; past that
     // they go through Resend, and the rest of the day is kept for the
     // emails that go one at a time (lib/ses.ts).
     const room = state ? await sesBulkRoom(state) : null;
     // Unknown usage cannot authorize SES or a fallback provider attempt.
-    if (state && room === null) return listOnly ? "waiting" : "retry";
-    if (listOnly && going.length && (!state || room === null || room < going.length)) return "waiting";
+    if (state && room === null) return nothingSent(listOnly ? "waiting" : "retry");
+    if (listOnly && going.length && (!state || room === null || room < going.length)) return nothingSent("waiting");
     if (state && room !== null && room >= going.length) {
       const result = await sesBatch(
         config,
@@ -780,7 +790,7 @@ async function dispatchBatch(
       if (result.uncertain === true) return "retry";
       // Nor one whose marks could not be written: nothing more was asked of Amazon, and it is not Amazon's doing,
       // so the rest waits for it, never handed to Resend for good (lib/ses.ts, markMaybe).
-      if (result.stalled === true) return "retry";
+      if (result.stalled === true) return result.taken.length === 0 ? nothingSent("retry") : "retry";
       // SES excludes definitively refused recipients from both accepted and
       // pending lists. Missing recipients cannot establish a completed list.
       if (listOnly && result.taken.length + result.left.length < going.length) {

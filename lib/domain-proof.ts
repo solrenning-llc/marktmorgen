@@ -5,6 +5,7 @@
  */
 import { resolveTxt } from "node:dns/promises";
 import { redisPipeline } from "@/lib/redis";
+import { repliesFor } from "@/lib/redis-reply";
 import { claimMark } from "@/lib/claim-mark";
 import { UNPROVED, UNPROVED_SECONDS, domainHolder, domainKey, proofRecord } from "@/lib/domains";
 import type { Store } from "@/lib/store";
@@ -51,6 +52,19 @@ async function hasProof(store: Pick<Store, "sid">, name: string): Promise<boolea
   return found.some((value) => value.trim() === proof.value);
 }
 
+/**
+ * Swaps the domain's key from `from` to `to` only while it still holds `from` (one script), and says whether it now
+ * holds `to`. Read exactly (MÉDIO of Codex V on #4248): an exact 1 is a swap done and an exact 0 a race lost; any
+ * other reply is settled by reading the key again exactly (domainHolder throws when that cannot be told), never by
+ * coercing a boolean or a text to a number.
+ */
+async function swapped(name: string, script: string, from: string, to: string): Promise<boolean> {
+  const replies = repliesFor(await redisPipeline([["EVAL", script, 1, domainKey(name), from, to]]), 1);
+  if (replies && replies[0] === 1) return true;
+  if (replies && replies[0] === 0) return false;
+  return (await domainHolder(name)) === to;
+}
+
 export type ProofResult = "proved" | "waiting" | "taken";
 
 /**
@@ -68,14 +82,12 @@ export async function proveDomain(store: Pick<Store, "sid" | "handle" | "previou
     // Another store's claim. A proved one is theirs. One not proved serves nothing and keeps nobody out (#4108):
     // the store whose TXT record is there takes it, only while the key still holds that same claim.
     if (!held.startsWith(UNPROVED) || !(await hasProof(store, name))) return "taken";
-    const [won] = await redisPipeline([["EVAL", SWAP, 1, domainKey(name), held, store.handle]]);
-    return Number(won) === 1 ? "proved" : "waiting";
+    return (await swapped(name, SWAP, held, store.handle)) ? "proved" : "waiting";
   }
   // Held under an older address of this same store: moved to the current one.
   if (held && holder !== store.handle) {
     const now = held.startsWith(UNPROVED) ? `${UNPROVED}${store.handle}` : store.handle;
-    const [moved] = await redisPipeline([["EVAL", SWAP_KEEPING_TTL, 1, domainKey(name), held, now]]);
-    if (Number(moved) !== 1) return "waiting";
+    if (!(await swapped(name, SWAP_KEEPING_TTL, held, now))) return "waiting";
     held = now;
   }
   if (held === store.handle) return "proved";
@@ -89,6 +101,5 @@ export async function proveDomain(store: Pick<Store, "sid" | "handle" | "previou
   if (!(await hasProof(store, name))) return "waiting";
   // Only while the claim is still this store's: it may have lapsed and been
   // taken while the DNS was asked.
-  const [set] = await redisPipeline([["EVAL", SWAP, 1, domainKey(name), `${UNPROVED}${store.handle}`, store.handle]]);
-  return Number(set) === 1 ? "proved" : "waiting";
+  return (await swapped(name, SWAP, `${UNPROVED}${store.handle}`, store.handle)) ? "proved" : "waiting";
 }

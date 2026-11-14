@@ -152,12 +152,22 @@ export function FunnelEditor({
   }
 
   function remove(index: number) {
+    const left = steps.length - 1;
     setSteps((all) => {
       const gone = all[index].id;
       return all
         .filter((_, i) => i !== index)
         .map((s) => ({ ...s, yes: s.yes === gone ? "" : s.yes, no: s.no === gone ? "" : s.no }));
     });
+    // The Remove button goes with its offer: the focus moves to the offer that took its place, or the one before,
+    // or the button that adds one, never to the top of the page (2.4.3, as the page editor's remove).
+    const next = left === 0 ? null : Math.min(index, left - 1) + 1;
+    requestAnimationFrame(() =>
+      (next === null
+        ? document.getElementById("funnel-add-offer")
+        : document.querySelector<HTMLElement>(`button[aria-label="Remove offer ${next}"]`)
+      )?.focus(),
+    );
   }
 
   async function send(funnel: unknown, confirmation: string) {
@@ -395,6 +405,7 @@ export function FunnelEditor({
       <div className="mt-4">
         {steps.length < MAX_FUNNEL_STEPS ? (
           <button
+            id="funnel-add-offer"
             type="button"
             onClick={add}
             disabled={offerable.length === 0}

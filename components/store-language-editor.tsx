@@ -75,7 +75,7 @@ export function StoreLanguageEditor({ language, handle }: { language: LanguageCo
           className="field max-w-xs"
         >
           {LANGUAGE_CODES.map((code) => (
-            <option key={code} value={code}>
+            <option key={code} value={code} lang={code}>
               {code === "en" ? "English" : `${LANGUAGES[code].name} — ${LANGUAGES[code].english}`}
             </option>
           ))}

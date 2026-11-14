@@ -1,5 +1,6 @@
 "use client";
 
+import { scrollBehavior } from "@/lib/scroll-motion";
 import { useEffect, useRef, useState } from "react";
 
 import type { AllTimeSales, Ranked, RangeKey, StatsData, Today } from "@/lib/stats";
@@ -762,7 +763,7 @@ export function StatsPanel({
           onShow={(chosen, section) => {
             choose(chosen);
             // After the panel is drawn for that window: to the part that shows the figures.
-            setTimeout(() => document.getElementById(`numbers-${section || "title"}`)?.scrollIntoView({ behavior: "smooth", block: "start" }), 60);
+            setTimeout(() => document.getElementById(`numbers-${section || "title"}`)?.scrollIntoView({ behavior: scrollBehavior(), block: "start" }), 60);
           }}
         />
       ) : null}
@@ -805,7 +806,7 @@ export function StatsPanel({
                         type="button"
                         className="inline-flex min-h-11 items-center text-sm font-semibold text-violet-deep underline underline-offset-4"
                         data-insight-action
-                        onClick={() => document.getElementById(`numbers-${(item.action as { section: string }).section}`)?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                        onClick={() => document.getElementById(`numbers-${(item.action as { section: string }).section}`)?.scrollIntoView({ behavior: scrollBehavior(), block: "start" })}
                       >
                         {item.action.label}
                       </button>

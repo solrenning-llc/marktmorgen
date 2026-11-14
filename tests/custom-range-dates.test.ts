@@ -29,9 +29,9 @@ const render=(canPrevious:boolean,canNext:boolean,busy=false)=>renderToStaticMar
 const enabled=render(true,true);const blocked=render(false,false);const loading=render(true,true,true);
 is("navigation group labeled",enabled.includes('role="group" aria-label="Move between periods"'),true);
 is("both navigation buttons available",enabled.includes("Previous period")&&enabled.includes("Next period"),true);
-is("unavailable navigation disabled",(blocked.match(/<button[^>]*disabled=""/g)??[]).length,2);
-is("navigation disabled while reading",(loading.match(/<button[^>]*disabled=""/g)??[]).length,2);
-is("available navigation enabled",/<button[^>]*disabled=""/.test(enabled),false);
+is("unavailable navigation disabled",(blocked.match(/<button[^>]*aria-disabled="true"/g)??[]).length,2);
+is("navigation disabled while reading",(loading.match(/<button[^>]*aria-disabled="true"/g)??[]).length,2);
+is("available navigation enabled",/<button[^>]*aria-disabled="true"/.test(enabled),false);
 part("Quick date ranges include today and follow the UTC calendar");
 is("seven days includes today",presetCustomRange("7d",today),{from:"2026-10-09",to:today});
 is("thirty days includes today",presetCustomRange("30d",today),{from:"2026-09-16",to:today});
@@ -47,9 +47,9 @@ const quick=shortcuts();
 is("shortcuts form a labeled group",quick.includes('role="group" aria-label="Quick date ranges"'),true);
 is("all nine shortcuts visible",["Yesterday","Last 7 days","Last 30 days","Last 90 days","This month","Last month","Last 7 completed days","Last 30 completed days","Last 90 completed days"].every(label=>quick.includes(label)),true);
 is("shortcuts explicitly avoid form submission",(quick.match(/type="button"/g)??[]).length,9);
-is("shortcuts enabled when idle",quick.includes('disabled=""'),false);
-is("all shortcuts disabled while reading",(shortcuts(true).match(/disabled=""/g)??[]).length,9);
-is("invalid calendar disables all shortcuts",(shortcuts(false,"bad").match(/disabled=""/g)??[]).length,9);
+is("shortcuts enabled when idle",quick.includes('aria-disabled="true"'),false);
+is("all shortcuts disabled while reading",(shortcuts(true).match(/aria-disabled="true"/g)??[]).length,9);
+is("invalid calendar disables all shortcuts",(shortcuts(false,"bad").match(/aria-disabled="true"/g)??[]).length,9);
 is("unfinished current day disclosed",quick.includes("include today in UTC")&&quick.includes("may still grow"),true);
 is("shortcuts included in actual report form",renderToStaticMarkup(createElement(CustomRange,{today,currency:"usd"})).includes('aria-label="Quick date ranges"'),true);
 

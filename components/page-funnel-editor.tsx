@@ -16,6 +16,8 @@ import { readFunnelMutationResult, type FunnelMutation } from "@/lib/funnel-muta
 import { funnelReachRatioMetric, funnelStepMetrics } from "@/lib/funnel-metrics";
 import { DIAGNOSIS_NOTE, funnelFindings } from "@/lib/funnel-diagnosis";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
+import { focusAfterRemoval } from "@/lib/block-insert";
+import { browserFrames, focusWhenDrawn } from "@/lib/focus-when-drawn";
 import {
   MAX_FUNNEL_NAME,
   MAX_FUNNEL_PAGES,
@@ -124,6 +126,20 @@ export function PageFunnelEditor({
       [steps[index], steps[to]] = [steps[to], steps[index]];
       return { ...d, steps };
     });
+  }
+
+  // The Remove button goes with its step: the focus moves to the step now in its place, or the one before, or to
+  // "Add a step" once none is left, never out of the list (2.4.3, the page editor's rule).
+  function removeStep(index: number) {
+    if (!draft) return;
+    const before = draft.steps.length;
+    const next = focusAfterRemoval(index, before - 1);
+    patch({ steps: draft.steps.filter((_, i) => i !== index) });
+    const removes = () => document.querySelectorAll<HTMLElement>("button[data-remove-step]");
+    focusWhenDrawn(() => {
+      if (removes().length >= before) return null;
+      return next === null ? document.getElementById("funnel-add-step") : removes()[next];
+    }, browserFrames());
   }
 
   function addStep() {
@@ -468,9 +484,10 @@ export function PageFunnelEditor({
                 </button>
                 <button
                   type="button"
-                  onClick={() => patch({ steps: draft.steps.filter((_, i) => i !== index) })}
+                  onClick={() => removeStep(index)}
                   className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-ink-soft hover:bg-danger-soft hover:text-danger"
                   aria-label={`Remove step ${index + 1}`}
+                  data-remove-step
                 >
                   <Icon name="trash" size={18} />
                 </button>
@@ -479,6 +496,7 @@ export function PageFunnelEditor({
           </ol>
           {draft.steps.length < MAX_FUNNEL_PAGES && draft.steps.length < choices.length ? (
             <button
+              id="funnel-add-step"
               type="button"
               onClick={addStep}
               className="mt-3 flex min-h-[48px] w-full items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-line-strong text-sm font-bold text-ink-soft transition-colors hover:border-violet-brand hover:text-violet-deep"

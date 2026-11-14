@@ -5,6 +5,7 @@ import { SiteData } from "@/components/structured-data";
 import { Toaster } from "@/components/toast";
 import { SITE_URL } from "@/lib/site-url";
 import { SITE_OG_IMAGE } from "@/lib/site-og";
+import { COLOR_SCHEME_SCRIPT } from "@/lib/color-scheme";
 import { REVEAL_ON, REVEAL_WATCH } from "@/lib/reveal-scripts";
 import { feeWords } from "@/lib/fee-words";
 import { PLANS_ON_SALE, PREVIEW_LINE } from "@/lib/opening";
@@ -111,6 +112,19 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       className={`${geist.variable} ${accent.variable} ${STORE_FONTS} h-full antialiased`}
       suppressHydrationWarning
     >
+      {/*
+        The reader's light or dark choice, applied before the first paint
+        (lib/color-scheme.ts). With nothing chosen it reads one key and does
+        nothing, so the page is drawn exactly as before; data-color-scheme is
+        the other attribute React is told to expect on <html>.
+      */}
+      <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: COLOR_SCHEME_SCRIPT,
+          }}
+        />
+      </head>
       {/*
         The photographs come from one other host, and a browser cannot start
         fetching from it until it has looked the name up, opened a connection

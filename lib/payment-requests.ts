@@ -257,13 +257,25 @@ export async function openRequestCheckout(store: Store, id: string, origin: stri
       }
     }
     const opened = await createRequestCheckout(store, request, origin, now);
-    // Kept only on a request still open: one paid or canceled while Stripe
-    // was opening this checkout keeps what it became, and the checkout just
-    // opened is closed again so nobody can pay it twice (MM-SA-02).
-    const kept = await changeRequest(store, request.id, (current) => (statusOf(current, now) === "open" ? { next: { ...current, session: opened.id, sessionAt: now }, answer: true } : { next: null, answer: false }), now);
-    if (!kept?.answer) {
-      await onAccount("POST", store.stripeAccountId, `/checkout/sessions/${encodeURIComponent(opened.id)}/expire`, new URLSearchParams()).catch((error: unknown) => console.error("closing a checkout opened for a request that was paid meanwhile failed", error));
-      return { ok: false, reason: "gone" };
+    // Kept only on a request still open and still naming the checkout this press read: one paid or canceled while
+    // Stripe was opening this checkout keeps what it became (MM-SA-02), and one where another press wrote its own
+    // checkout meanwhile keeps that one. The hold lasts 60 seconds, and the Stripe calls above can take longer, so a
+    // second press may have taken it (review of #4532, Claude 1 cloud R). Either way the checkout just opened is
+    // closed again, so nobody can pay the request twice.
+    const kept = await changeRequest(
+      store,
+      request.id,
+      (current) =>
+        statusOf(current, now) !== "open"
+          ? { next: null, answer: "gone" as const }
+          : current.session !== request.session || current.sessionAt !== request.sessionAt
+            ? { next: null, answer: "busy" as const }
+            : { next: { ...current, session: opened.id, sessionAt: now }, answer: "kept" as const },
+      now,
+    );
+    if (kept?.answer !== "kept") {
+      await onAccount("POST", store.stripeAccountId, `/checkout/sessions/${encodeURIComponent(opened.id)}/expire`, new URLSearchParams()).catch((error: unknown) => console.error("closing a checkout opened for a request that was paid or given another checkout meanwhile failed", error));
+      return { ok: false, reason: kept?.answer === "busy" ? "busy" : "gone" };
     }
     return { ok: true, url: opened.url };
   } catch (error) {
@@ -457,14 +469,19 @@ export async function markPaidOutside(
       request.id,
       (current) =>
         current.state !== "open"
-          ? { next: null, answer: false }
-          : {
-              next: { ...current, state: "paid", paidAt: Math.min(now, mark.paidAt), amountPaid: current.total, payment: "", failed: "", closedAt: now, outside: { method: mark.method, note: mark.note } },
-              answer: true,
-            },
+          ? { next: null, answer: "gone" as const }
+          : // A checkout another press opened while the hold had run out (review of #4532, Claude 1 cloud R) can still be
+            // paid: never marked paid over it, so the request is paid once.
+            current.session !== request.session || current.sessionAt !== request.sessionAt
+            ? { next: null, answer: "busy" as const }
+            : {
+                next: { ...current, state: "paid", paidAt: Math.min(now, mark.paidAt), amountPaid: current.total, payment: "", failed: "", closedAt: now, outside: { method: mark.method, note: mark.note } },
+                answer: "marked" as const,
+              },
       now,
     );
-    return done?.answer ? { ok: true, request: done.request } : { ok: false, reason: "gone" };
+    if (done?.answer === "marked") return { ok: true, request: done.request };
+    return { ok: false, reason: done?.answer === "busy" ? "busy" : "gone" };
   } catch (error) {
     console.error("marking a payment request paid outside Stripe failed", error);
     return { ok: false, reason: "error" };

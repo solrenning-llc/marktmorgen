@@ -124,6 +124,9 @@ export function inboundSigned(
       const [version, value] = one.split(",");
       if (version !== "v1" || !value) return false;
       const given = Buffer.from(value, "base64");
+      // Node's decoder skips characters outside the alphabet and missing padding, so a garbled value could decode
+      // to the right bytes: only the exact canonical base64 of those bytes is a signature (input fuzz, Claude 7).
+      if (given.toString("base64") !== value) return false;
       return given.length === expected.length && timingSafeEqual(given, expected);
     });
 }

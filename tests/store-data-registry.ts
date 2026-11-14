@@ -402,6 +402,8 @@ export const FAMILIES: Record<string, Family> = {
   "nl:ppsell:sales:@lib/closed-store-data.ts": follower("nl:ppsell:sales:"),
   "nl:slink:store:@lib/closed-store-data.ts": follower("nl:slink:store:"),
   "nl:store:leads:@lib/closed-store-data.ts": follower("nl:store:leads:"),
+  // Only the key's builder lives here (no imports), for readers such as lib/community-mail.ts; lib/contacts.ts holds it.
+  "nl:store:leads:@lib/contact-rules.ts": follower("nl:store:leads:"),
   "nl:@lib/closed-store-data.ts": company("Not a key: the start of every key a follower may delete", "Read only, to check what is deleted."),
   "nl:call:remindq@lib/call-records.ts": company("Call reminders due", "One sorted set for every store, members gone when sent: each a booked call's, an order's."),
   "nl:call:creator-reminded:@lib/call-reminders.ts": short("The creator reminded of a call", "call", 430, 2 * MARK),

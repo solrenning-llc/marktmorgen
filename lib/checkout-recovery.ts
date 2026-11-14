@@ -515,9 +515,8 @@ async function deliver(
   // reminder is their email.
   // A contact text that does not read as a contact is unknown (rule 24), never "has not left the list"
   // (tests/recovery-marks-exact.test.ts), as the review requests and product updates read it.
-  const listed = store.listId && typeof contact === "string" ? contactExact(contact) : null;
-  if (store.listId && typeof contact === "string" && !listed) throw new UnknownReplyError("the list contact for the checkout reminder");
-  if (listed?.unsub) return "skip";
+  if (store.listId && typeof contact === "string" && contactExact(contact) === null) throw new UnknownReplyError("the list contact for the checkout reminder");
+  if (store.listId && parseContact(contact)?.unsub) return "skip";
 
   if (await paidSince(store, email, ids, how.since)) {
     await redisPipeline([["SET", sentKey(id), "paid", "EX", ONCE_PER_SECONDS]]);

@@ -17,7 +17,7 @@ import { readUpsell, settlePendingOffers, takeUpsell, newUpsellKey } from "@/lib
 import { shownRef } from "./upsell-ref-fixture";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
-import { COMMAND, LATE_OFFER_LOOK_COMMANDS_MOST, LATE_OFFER_LOOKS_MOST, LATE_OFFER_SHARE_OF_ORDER_COMPUTE, OFFER_WATCH_LOOK_COMMANDS_MOST, OFFER_WATCH_LOOKS_MOST, OFFER_WATCH_SHARE_OF_ORDER_COMPUTE, ORDER_COMPUTE } from "./plan-cost-registry";
+import { COMMAND, OFFER_WATCH_LOOK_COMMANDS_MOST, OFFER_WATCH_LOOKS_MOST, OFFER_WATCH_SHARE_OF_ORDER_COMPUTE, ORDER_COMPUTE } from "./plan-cost-registry";
 import { paidPeriod } from "./billing-period-fixture";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_upsell_settle_late_only";
@@ -166,18 +166,13 @@ async function main(): Promise<void> {
   };
   await settlePendingOffers(storeForHandle, Date.now() + 60_000);
   redis.pipeline = plain;
-  is("one late look, with the store's record read and the run's read of the list, is within its declared commands", commands <= LATE_OFFER_LOOK_COMMANDS_MOST, true);
+  is("one late look, with the store's record read and the run's read of the list, is within its declared commands", commands <= OFFER_WATCH_LOOK_COMMANDS_MOST, true);
   const id = String(made[made.length - 1].id);
   const looksBefore = stripeReads.filter((path) => path.endsWith(id)).length;
   for (ahead = 3 * DAY; ahead <= 8 * DAY; ahead += 60 * 60 * 1000) await job();
   const looks = stripeReads.filter((path) => path.endsWith(id)).length - looksBefore + 1;
-  is("still processing all week: looked at no more than its declared number of times after the second day", looks <= LATE_OFFER_LOOKS_MOST, true);
+  is("still processing all week: looked at no more than its declared number of times after the second day", looks <= OFFER_WATCH_LOOKS_MOST, true);
   is("and let go by the eighth day", await listed("cs_test_settlelate000004"), null);
-  is(
-    "every late look of one offer inside its declared share of an order's compute",
-    LATE_OFFER_LOOKS_MOST * LATE_OFFER_LOOK_COMMANDS_MOST * COMMAND <= LATE_OFFER_SHARE_OF_ORDER_COMPUTE * ORDER_COMPUTE,
-    true,
-  );
 
   part("RED: every look at one waiting offer, from its first minute to its last day, inside a declared cost");
   ahead = 0;

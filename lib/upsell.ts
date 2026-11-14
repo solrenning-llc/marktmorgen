@@ -115,11 +115,26 @@ const PENDING_WATCH_MS = 2 * 24 * 60 * 60 * 1000;
  * PENDING_WATCH_MS: it is looked at again every PROCESSING_RECHECK_MS, until it settles or PROCESSING_WATCH_MS
  * have passed, so a late success still gets its confirmation, count and commission (afterPaid). Seven days covers
  * a US bank debit (Link paid from a bank account, lib/instant-pay.ts) and stays inside the record's own
- * RECORD_SECONDS, so nothing is kept longer than before. Once a day, so at most LATE_OFFER_LOOKS_MOST looks an
- * offer, each inside LATE_OFFER_LOOK_COMMANDS_MOST commands (tests/plan-cost-registry.ts, line "orders").
+ * RECORD_SECONDS, so nothing is kept longer than before. Once a day, inside OFFER_WATCH_LOOKS_MOST looks an offer in all
+ * (tests/plan-cost-registry.ts, line "orders").
  */
 const PROCESSING_WATCH_MS = 7 * 24 * 60 * 60 * 1000;
 const PROCESSING_RECHECK_MS = 24 * 60 * 60 * 1000;
+/**
+ * When the job looks at a waiting offer again, by how long after it began: its first look comes a minute after it
+ * began (settlePendingOffers' grace), then once its lost answer can be told apart (LOST_ANSWER_MS), after an hour,
+ * six hours, a day, and at the end of PENDING_WATCH_MS. The buyer's own thanks page settles it at once whenever it is
+ * opened (settleUpsells), so this is only the job's catch-up: six looks over two days instead of one every five
+ * minutes, at most OFFER_WATCH_LOOKS_MOST with the daily looks of a payment still processing
+ * (tests/plan-cost-registry.ts, line "orders").
+ */
+const WATCH_AFTER_MS = [LOST_ANSWER_MS + 60_000, 60 * 60 * 1000, 6 * 60 * 60 * 1000, 24 * 60 * 60 * 1000, PENDING_WATCH_MS + 60_000];
+
+/** When an offer that began at `at` is next looked at, or null once its watch is over. */
+function nextLook(at: number, now: number): number | null {
+  for (const after of WATCH_AFTER_MS) if (at + after > now) return at + after;
+  return null;
+}
 const pendingMember = (handle: string, session: string, slot: string) => `${handle}|${session}|${slot}`;
 
 /**
@@ -647,7 +662,8 @@ export async function settleUpsells(store: Store, session: string): Promise<void
  * gets its confirmation email and its affiliate credit without waiting for
  * the buyer to come back, and one the bank never confirmed is let go after
  * two days (seven while Stripe still says it is processing, looked at once a
- * day after the second). Nothing is ever charged here. `storeFor` is passed in, as the
+ * day after the second). Each is looked at less often the longer it waits
+ * (WATCH_AFTER_MS). Nothing is ever charged here. `storeFor` is passed in, as the
  * other jobs do, so this file does not depend on the store record's.
  */
 export async function settlePendingOffers(
@@ -677,7 +693,9 @@ export async function settlePendingOffers(
       }
       const store = await storeFor(handle);
       if (!store || !store.stripeAccountId) {
-        if (Date.now() - record.at > PENDING_WATCH_MS) await drop();
+        const next = nextLook(record.at, Date.now());
+        if (next === null) await drop();
+        else await redisPipeline([["ZADD", PENDING_KEY, next, pendingMember(handle, session, slot)]]);
         continue;
       }
       const status = await settleOne(store, session, slot, record, OFFER_PAGES_IN_JOB);
@@ -685,9 +703,13 @@ export async function settlePendingOffers(
       if (!after || after.state !== "pending") {
         counts.settled += 1;
         await drop();
-      } else if (Date.now() - after.at > PENDING_WATCH_MS) {
-        // Still clearing at the bank: looked at again later, so a late success is handed over in full.
-        if (status === "processing" && Date.now() - after.at <= PROCESSING_WATCH_MS) {
+      } else {
+        // Looked at again later, less often the longer it waits (WATCH_AFTER_MS); past its watch, a payment still
+        // clearing at the bank is looked at once a day, so a late success is handed over in full.
+        const next = nextLook(after.at, Date.now());
+        if (next !== null) {
+          await redisPipeline([["ZADD", PENDING_KEY, next, pendingMember(handle, session, slot)]]);
+        } else if (status === "processing" && Date.now() - after.at <= PROCESSING_WATCH_MS) {
           await redisPipeline([["ZADD", PENDING_KEY, Date.now() + PROCESSING_RECHECK_MS, pendingMember(handle, session, slot)]]);
         } else {
           await drop();

@@ -155,7 +155,7 @@ export function AiAssist<T>({
         <p className="text-sm text-ink-soft">{hint}</p>
         {extra}
         <label className="block">
-          <span className="sr-only">What it should say</span>
+          <span className="field-label mb-1 text-sm">What it should say</span>
           <textarea
             className="field"
             rows={4}

@@ -47,7 +47,7 @@ import { importedFrom, importedKey } from "@/lib/imported-purchases";
 import { inviteField, inviteForCopy } from "@/lib/move-members";
 import { openConversation, readInbox } from "@/lib/inbox";
 import { accountOf, readMember as readDiscordMember } from "@/lib/discord-store";
-import { readReview, reviewId } from "@/lib/reviews";
+import { reviewForCopy, reviewId } from "@/lib/reviews";
 import { storesKnownFor } from "@/lib/buyer-library";
 import { readFlows, flowsStartedFor } from "@/lib/flows";
 import { personOf, readRun } from "@/lib/flow-runs";
@@ -371,7 +371,7 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
   "lib/reviews.ts": async (s) => {
     const out: unknown[] = [];
     for (const productId of s.productIds) {
-      const review = await readReview(s.statsId, productId, reviewId(s.statsId, productId, s.email));
+      const review = await reviewForCopy(s.statsId, productId, reviewId(s.statsId, productId, s.email));
       if (review) out.push({ product: productId, ...review });
     }
     return out;

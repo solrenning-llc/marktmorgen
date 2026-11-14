@@ -282,6 +282,21 @@ export async function readReview(statsId: string, productId: string, id: string)
 }
 
 /**
+ * One person's review of a product, for the copy of their data (619 [SZ3], lib/person-copy.ts), read as the erasure
+ * reads it (rules 24 and 30): null only when confirmed absent; a reply of another shape, a kept review that does not
+ * read, or one that is not the review asked for throws, so the copy is never given as complete without it.
+ */
+export async function reviewForCopy(statsId: string, productId: string, id: string): Promise<Review | null> {
+  if (!REVIEW_ID_PATTERN.test(id) || !PRODUCT_ID_PATTERN.test(productId) || !isRedisConfigured()) return null;
+  const what = "a person's review, for their copy";
+  const one = repliesFor(await redisPipeline([["HGET", productKey(statsId, productId), id]]), 1);
+  if (!one) throw new UnknownReplyError(what);
+  const review = storedReview(one[0], what);
+  if (review && (review.id !== id || review.productId !== productId)) throw new UnknownReplyError(what);
+  return review;
+}
+
+/**
  * Runs `work` holding the product's lock, so two changes at once cannot count
  * the numbers from two different moments. "busy" when it could not be had.
  */

@@ -66,18 +66,38 @@ function separatorCounts(text: string, most: number): Record<Separator, number>[
   return lines;
 }
 
+/** A column named for email addresses: "Email", "E-mail", "Email address" (any case). */
+const EMAIL_HEADER = /^e-?mail(?:[ _-]?address)?$/i;
+/** A cell holding one email address and nothing else, as a row of a contact list does. */
+const ADDRESS_CELL = /^[^\s@,;"]+@[^\s@,;"]+\.[^\s@,;"]+$/;
+
+/**
+ * How strongly a candidate separator reads a file's first lines as a contact list: its header names an email column,
+ * and each of its first rows holds an address in a cell of its own. The wrong one of ";" and "," glues the address to
+ * the next cell ("ana@example.test;Doe"), so it finds neither.
+ */
+function emailColumnScore(text: string, separator: Separator): number {
+  const { header, rows } = parseCsv(`sep=${separator}\n${text}`, 5);
+  const named = header.some((cell) => EMAIL_HEADER.test(cell.trim())) ? 1 : 0;
+  return named + rows.filter((row) => row.some((cell) => ADDRESS_CELL.test(cell.trim()))).length;
+}
+
 /**
  * The separator a file uses: the one its first line has most of, outside
  * quotes. A tie between ";" and "," (a header such as "Email;Name, as typed")
  * is settled by the lines below: the one that gives as many cells on them as
- * on the first line, and a comma when they cannot tell.
+ * on the first line. When they cannot tell either (every row with one of each,
+ * "ana@example.test;Doe, Ana"), by the columns: the one under which the header
+ * names an email column and the rows hold an address in a cell of their own
+ * (Codex X3 on #4436). A comma only when nothing tells them apart.
  */
 export function detectSeparator(text: string): Separator {
   const [first, ...below] = separatorCounts(text, 6);
   const counts = first ?? { ",": 0, ";": 0, "\t": 0 };
-  if (counts[";"] > 0 && counts[";"] === counts[","] && counts[";"] >= counts["\t"] && below.length) {
+  if (counts[";"] > 0 && counts[";"] === counts[","] && counts[";"] >= counts["\t"]) {
     const steady = (sep: Separator) => below.filter((line) => line[sep] === counts[sep]).length;
     if (steady(";") > steady(",")) return ";";
+    if (steady(";") === steady(",") && emailColumnScore(text, ";") > emailColumnScore(text, ",")) return ";";
   }
   if (counts[";"] > counts[","] && counts[";"] >= counts["\t"]) return ";";
   if (counts["\t"] > counts[","] && counts["\t"] > counts[";"]) return "\t";

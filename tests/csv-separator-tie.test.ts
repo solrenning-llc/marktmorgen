@@ -19,4 +19,14 @@ is("a comma file is a comma file", detectSeparator("email,name\na@x.com,Ann\n"),
 is("one line only, a tie stays a comma", detectSeparator("a;b,c"), ",");
 is("quotes on the rows are not counted", detectSeparator("Email;Name, as typed\n\"x;y@z.com\";\"Ann, Lee\"\nb@x.com;Bo\n"), ";");
 
+// Every row with one of each, so the rows cannot tell (Codex X3 on #4436): the columns do. The candidate whose
+// header names an email column, and whose rows hold an address in a cell of their own, is the file's separator.
+const even = "Email;Name, as typed\nana@example.test;Doe, Ana\nbo@example.test;Lee, Bo\n";
+is("rows that cannot tell: settled by the email column", detectSeparator(even), ";");
+is("so the header reads", parseCsv(even).header, ["Email", "Name, as typed"]);
+is("and every row", parseCsv(even).rows, [["ana@example.test", "Doe, Ana"], ["bo@example.test", "Lee, Bo"]]);
+is("the same the other way round", detectSeparator("Email,Name; as typed\nana@example.test,Doe; Ana\nbo@example.test,Lee; Bo\n"), ",");
+is("an address column named otherwise is still found by its rows", detectSeparator("Contact;Name, as typed\nana@example.test;Doe, Ana\n"), ";");
+is("the header alone settles it on a file with no rows yet", detectSeparator("E-mail;Name, as typed"), ";");
+
 done();

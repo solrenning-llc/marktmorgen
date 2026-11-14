@@ -48,7 +48,7 @@ import { StripeListUnreadable } from "@/lib/stripe-list";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { signedOf } from "@/lib/redis-count";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
-import { type Store, saleHandles, storeFolder, storeForEmail, storeRef } from "@/lib/store";
+import { type Store, saleHandles, storeFolder, storeForRefExact, storeRef } from "@/lib/store";
 import { standingOf } from "@/lib/plan-standing";
 import { normaliseEmail } from "@/lib/auth";
 import { forgetCredit } from "@/lib/closing-credit";
@@ -538,7 +538,17 @@ export async function releaseRestarted(deadline: number, staysOpen: (store: Stor
     if (Date.now() > deadline) break;
     const key = flat[i];
     const endedAt = Number(flat[i + 1]);
-    const store = await storeForEmail(key).catch(() => null);
+    // Only a record Redis says is not there (nil) is gone. One that does not read (a failed request, a record that
+    // does not parse, or one under that key for another owner) is unknown (rule 24): the store stays in the line, its
+    // members held and its address kept (closingUnderway, lib/store.ts), and is read again the next day.
+    let store: Store | null;
+    try {
+      store = await storeForRefExact(key);
+    } catch (error) {
+      console.error("a held store's record could not be read; it stays held and is read again tomorrow", error);
+      out.push({ key, state: "held" });
+      continue;
+    }
     if (!store) {
       await redisPipeline([["ZREM", HELD_INDEX, key]]);
       out.push({ key, state: "gone" });

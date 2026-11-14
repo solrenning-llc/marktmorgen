@@ -61,7 +61,7 @@ import { readAllListings } from "@/lib/catalog";
 import { readCourses } from "@/lib/course";
 import { readFlows } from "@/lib/flows";
 import { FINAL_INDEX } from "@/lib/closing-holds";
-import { type Store, accountStores, closeStoreRecord, saleHandles, storeFolder, storeForEmail, storeRef } from "@/lib/store";
+import { type Store, accountStores, closeStoreRecord, saleHandles, storeFolder, storeForRefExact, storeRef } from "@/lib/store";
 import { domainKey } from "@/lib/domains";
 import { dropTeam, memberStores, readTeam } from "@/lib/team";
 import { hostCalendarKeys } from "@/lib/host-calendar";
@@ -718,10 +718,11 @@ export async function eraseClosed(deadline: number, finish: Finisher, now = Date
       if (Date.now() > deadline) break;
       let store: Store | null;
       try {
-        store = await storeForEmail(ref);
+        store = await storeForRefExact(ref);
       } catch (error) {
-        // Not read (rule 24): never "no store". It stays in line, moved back a walk so it does not hold the head of
-        // the line, and is prepared once its record reads; only a store Redis says is gone (nil) leaves the line.
+        // Not read (rule 24): a failed request, a record that does not parse or one under that key for another owner
+        // (storeForRefExact, lib/store.ts) is never "no store". It stays in line, moved back a walk so it does not hold
+        // the head of the line, and is prepared once its record reads; only a store Redis says is gone (nil) leaves it.
         console.error("a closed store's record could not be read; it waits for the next walk", error);
         if (!(await moveBack(ref, now))) unsure = true;
         continue;

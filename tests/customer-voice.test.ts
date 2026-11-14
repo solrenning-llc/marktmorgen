@@ -113,6 +113,29 @@ async function main(): Promise<void> {
   await countSearchMiss(statsId, ["printable"]);
   await countSearchMiss(statsId, ["printable"]);
   const { items: gathered } = await gatherVoice(store, now);
+
+  part("Provider errors are not copied into server logs (through the real reads)");
+  {
+    // Every Redis read fails with customers' words in its error (Claude 3 M LEVE on #3733: the
+    // check now drives gatherVoice instead of calling logVoiceFailure directly).
+    const realPipeline = redis.pipeline.bind(redis);
+    const originalConsoleError = console.error;
+    const logged: unknown[][] = [];
+    redis.pipeline = (async () => { throw new Error("buyer@example.test wrote private health details"); }) as typeof redis.pipeline;
+    console.error = (...args: unknown[]) => { logged.push(args); };
+    let failedReads: string[] = [];
+    try {
+      failedReads = (await gatherVoice(store, now)).unread;
+    } finally {
+      redis.pipeline = realPipeline;
+      console.error = originalConsoleError;
+    }
+    const text = logged.flat().map((value) => (value instanceof Error ? `${value.message}\n${value.stack}` : String(value))).join("\n");
+    is("the failed lists are named", failedReads.length > 0, true);
+    is("something was logged for them", logged.length > 0, true);
+    is("the log never carries what customers wrote", text.includes("buyer@example.test") || text.includes("health details"), false);
+    is("every line is a fixed label alone", logged.every((args) => args.length === 1 && typeof args[0] === "string"), true);
+  }
   is("questions, reviews and searches, never the old question", gathered.map((g) => `${g.source}|${g.text}|${g.n}`).sort(), [
     "question|Can I print the planner?|1",
     "question|Does it work in metric?|1",

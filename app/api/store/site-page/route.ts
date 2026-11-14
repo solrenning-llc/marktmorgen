@@ -1,16 +1,17 @@
 import { randomBytes } from "node:crypto";
 import type { NextRequest } from "next/server";
-import { StoreFullError, changeSitePages, ensureStatsId, imageFolder } from "@/lib/store";
+import { type Store, StoreFullError, appendSitePages, changeSitePages, ensureStatsId, imageFolder, storeForEmailSeen } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { refusedJson } from "@/lib/studio-route";
 import { lockedFor } from "@/lib/two-step";
-import { MAX_BLOCKS, emptyBlock, oversized, pageProblem, parsePage, picturePaths, type PageBlock } from "@/lib/sales-page";
-import { claimNewPictures, dropPage, picturesOfFailedDrop, readPage, releasePictures, writePage } from "@/lib/sales-page-store";
+import { EMPTY_PAGE, MAX_BLOCKS, emptyBlock, oversized, pageProblem, parsePage, picturePaths, type PageBlock, type SalesPage } from "@/lib/sales-page";
+import { pageCopy } from "@/lib/site-page-copy";
+import { claimNewPictures, dropPage, picturesOfFailedDrop, readPage, readPageExact, releasePictures, writePage } from "@/lib/sales-page-store";
 import { del } from "@/lib/blob";
 import { ownsImagePath } from "@/lib/product-image";
 import { isStoredPicture } from "@/lib/picture-check";
 import { templateLeft } from "@/lib/template-text";
-import { MAX_SITE_PAGES, SITE_KINDS, SITE_PAGE_ID, SITE_STARTERS, type SitePage, outFrom, siteKey, siteTitle, slugFrom, slugProblem } from "@/lib/site-page-rules";
+import { MAX_SITE_PAGES, SITE_KINDS, SITE_PAGE_ID, SITE_STARTERS, type SitePage, outFrom, parseSitePages, siteKey, siteTitle, slugFrom, slugProblem } from "@/lib/site-page-rules";
 
 /** Thirty full blocks as JSON, with room to spare; a page is held to MAX_PAGE_BYTES. */
 const MAX_BODY_BYTES = 200_000;
@@ -18,10 +19,92 @@ const MAX_BODY_BYTES = 200_000;
 const refuse = (error: string, status = 400) => Response.json({ ok: false, error }, { status });
 
 /**
+ * Whether a page is on the store's list, read again after a lost answer: "listed" with the store as read, "absent"
+ * only when the list was read whole (an array, every entry kept by parseSitePages, none of them this page in any
+ * shape), and "unknown" otherwise. A list out of shape parses to fewer pages, or none, so it never confirms that a
+ * page is not there (Codex U on #3531): its blocks are then never taken back.
+ */
+async function listedAgain(ref: string, id: string): Promise<{ state: "listed"; store: Store } | { state: "absent" | "unknown" }> {
+  let raw: unknown;
+  const now = await storeForEmailSeen(ref, (_commands, reply) => {
+    raw = Array.isArray(reply) && reply.length === 1 ? reply[0] : undefined;
+  }).catch(() => null);
+  if (!now) return { state: "unknown" };
+  if (now.sitePages.some((held) => held.id === id)) return { state: "listed", store: now };
+  let pages: unknown;
+  try {
+    pages = typeof raw === "string" ? (JSON.parse(raw) as { sitePages?: unknown }).sitePages : undefined;
+  } catch {
+    return { state: "unknown" };
+  }
+  if (pages === undefined) return now.sitePages.length === 0 && raw !== undefined ? { state: "absent" } : { state: "unknown" };
+  if (!Array.isArray(pages) || parseSitePages(pages).length !== pages.length) return { state: "unknown" };
+  if (pages.some((entry) => entry && typeof entry === "object" && (entry as { id?: unknown }).id === id)) return { state: "unknown" };
+  return { state: "absent" };
+}
+
+/**
+ * A new page made whole, or not at all (582 [KB3], copy and import): its blocks are written first, under the new
+ * page's own key, which takes the store's room before anything is listed, so a store with no room for them refuses
+ * with nothing added; only then is its place appended to the list under the store's lock. When the list refuses (a
+ * newer list, the most pages, an address taken since), the blocks just written are taken back, so a refusal leaves the
+ * store as it was. The page holds no picture (left out by copyOfPage), so there is none to claim or release.
+ *
+ * A page with no blocks is refused before anything is written (Claude 1's LOW on #3531): writePage keeps no record
+ * for an empty page, so nothing would hold it back from visitors, and its first save from the editor would put it out.
+ * A take-back that fails is tried once more (dropPage only deletes and sets the room to zero, so a second try is safe),
+ * so a passing failure leaves no blocks under a key that no list names.
+ */
+async function placeNewPage(ref: string, store: Store, entry: SitePage, page: SalesPage): Promise<{ ok: true; store: Store } | { ok: false; error: string; status: number }> {
+  const statsId = store.statsId;
+  if (page.blocks.length === 0) return { ok: false, error: "copy_empty", status: 400 };
+  if (!statsId) return { ok: false, error: "copy_failed", status: 500 };
+  const takeBack = async () => {
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      try {
+        await dropPage(statsId, siteKey(entry.id), store);
+        return;
+      } catch (error) {
+        console.error(`taking back a new page's blocks failed (try ${attempt} of 2)`, error);
+      }
+    }
+  };
+  try {
+    await writePage(statsId, siteKey(entry.id), page, store);
+  } catch (error) {
+    if (error instanceof StoreFullError) return { ok: false, error: "copy_full", status: 409 };
+    console.error("writing a new store page's blocks failed", error);
+    await takeBack();
+    return { ok: false, error: "copy_failed", status: 500 };
+  }
+  let saved: Awaited<ReturnType<typeof appendSitePages>>;
+  try {
+    saved = await appendSitePages(ref, [entry]);
+  } catch (error) {
+    console.error("listing a new store page failed", error);
+    // The write may have been applied with only its answer lost (Codex U on #3531): the list is read again before
+    // anything is taken back. Listed: the page was made. Confirmed not listed: the blocks are taken back, never left
+    // unlisted. Not known: nothing is taken back, so a listed page never loses its blocks, and the creator is told.
+    // A list read again out of shape is not known either (listedAgain).
+    const again = await listedAgain(ref, entry.id);
+    if (again.state === "listed") return { ok: true, store: again.store };
+    if (again.state === "unknown") return { ok: false, error: "copy_unknown", status: 503 };
+    await takeBack();
+    return { ok: false, error: "copy_failed", status: 500 };
+  }
+  if (!saved.ok) {
+    await takeBack();
+    return saved.reason === "none" ? { ok: false, error: "unknown", status: 404 } : { ok: false, error: "copy_conflict", status: 409 };
+  }
+  return { ok: true, store: saved.store };
+}
+
+/**
  * A store's own pages (lib/site-page-rules.ts): part of the public page, so
  * what the "page" role may change (lib/team-roles.ts).
  *
  *   { action: "add", title, slug?, starter? }   a new page, empty or from a starter's blocks
+ *   { action: "copy", id }                      a copy of one, kept back, without its pictures (lib/site-page-copy.ts)
  *   { action: "meta", id, title, slug, nav, target }
  *   { action: "order", ids }
  *   { action: "remove", id }                    the page, its blocks and the pictures only it showed
@@ -71,6 +154,29 @@ export async function POST(request: NextRequest) {
         await writePage(saved.store.statsId, siteKey(page.id), { ...parsePage({}), blocks, hidden: true }, saved.store);
       }
       return Response.json({ ok: true, pages: saved.store.sitePages, id: page.id });
+    }
+
+    if (action === "copy") {
+      // 582 [KB3]: the same blocks and words on a new page, kept back from visitors and out of the menu.
+      if (!found || !SITE_PAGE_ID.test(found.id)) return refuse("unknown", 404);
+      if (pages.length >= MAX_SITE_PAGES) return refuse("too_many");
+      // The original read exactly: an answer nobody can read is never copied as an empty page.
+      let held = { ...EMPTY_PAGE, blocks: [] as PageBlock[] };
+      if (store.statsId) {
+        try {
+          held = (await readPageExact(store.statsId, siteKey(found.id))).page ?? held;
+        } catch (error) {
+          console.error("reading a store page before copying it failed", error);
+          return refuse("page_unread", 503);
+        }
+      }
+      const made = pageCopy(found, held, pages, randomBytes(5).toString("hex"));
+      if (!made) return refuse("taken");
+      // A product its buttons led to that the store no longer has is not carried: the copy's buttons lead to the store.
+      if (made.entry.target && !store.catalog.items.some((item) => item.id === made.entry.target)) made.entry.target = "";
+      const placed = await placeNewPage(ref, store, made.entry, made.page);
+      if (!placed.ok) return refuse(placed.error, placed.status);
+      return Response.json({ ok: true, pages: placed.store.sitePages, id: made.entry.id, pictures: made.pictures });
     }
 
     if (action === "meta") {

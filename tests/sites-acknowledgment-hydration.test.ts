@@ -13,7 +13,9 @@ function is(name: string, actual: unknown, expected: unknown) {
 
 const source = readFileSync("tests/e2e/sites-acknowledgment.mjs", "utf8");
 const helper = readFileSync("tests/e2e/react-hydration.mjs", "utf8");
-const imported = source.indexOf('import {waitForReactChangeHandler} from "./react-hydration.mjs";');
+// The import may name other helpers from the same module beside it (#3901 adds waitForReactHydrated).
+const importLine = /^import \{[^}]*\bwaitForReactChangeHandler\b[^}]*\} from "\.\/react-hydration\.mjs";$/m.exec(source);
+const imported = importLine ? importLine.index : -1;
 const field = source.indexOf('const field=section.locator("textarea").first()');
 const observed = source.indexOf("await waitForReactChangeHandler(page,field);");
 const firstFill = source.indexOf("await field.fill(raw)");

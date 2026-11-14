@@ -66,6 +66,7 @@ async function main(): Promise<void> {
   await setSubscription(CLUB, { customerId: "cus_MemberRead1", subscriptionId: "sub_MemberRead1", active: true, tier: "creator", period: paidPeriod() });
   const ticket = await addProduct(CLUB, "Club pass", "", "0", null);
   if (!ticket.ok) throw new Error("no product");
+  const ticketId = ticket.product.id;
   await setCommunity(CLUB, true);
   const club: Store = (await storeForEmail(CLUB))!;
   const cid = club.community!.id;
@@ -75,6 +76,9 @@ async function main(): Promise<void> {
   /** A ticket holder with a pass cookie, as the gate keeps their answer. */
   async function holder(email: string) {
     await redis.pipeline([["SET", `nl:cm:${cid}:ok:${emailKey(email)}`, JSON.stringify({ v: 1, ok: true })]]);
+    // Rule 23 (the pre-review of 9 November 2026, P1): the gate now reads the one kept reading of what the address
+    // holds (lib/community-access.ts holdingsOf, nl:cm:<id>:h:<address key>), so the holder is kept there too.
+    await redis.pipeline([["SET", `nl:cm:${cid}:h:${emailKey(email)}`, JSON.stringify({ v: 1, ids: [ticketId], held: [ticketId] })]]);
     const pass = await mintPass(club, email, "all");
     const cookies = { get: (name: string) => (name === passCookieName(club) ? { value: pass } : undefined) } as never;
     return () => communityViewer(club, cookies);

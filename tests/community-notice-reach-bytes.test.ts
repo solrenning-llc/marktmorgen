@@ -151,6 +151,9 @@ async function main(): Promise<void> {
   part("Let in while the community is full: no record, so no device is kept for them");
   const LATE = "late@noticebytes.example";
   await redis.pipeline([["SET", `nl:cm:${ID}:ok:${emailKey(LATE)}`, JSON.stringify({ v: 1, ok: true })]]);
+  // #3395 (rule 23, the pre-review of 9 November 2026, P1): the gate reads the one kept reading of what the address
+  // holds (lib/community-access.ts holdingsOf, nl:cm:<id>:h:<address key>), so the holder is kept there too.
+  await redis.pipeline([["SET", `nl:cm:${ID}:h:${emailKey(LATE)}`, JSON.stringify({ v: 1, ids: [ticket.product.id], held: [ticket.product.id] })]]);
   const pass = await mintPass(club, LATE, "all");
   const fullCount = (commands: Command[]) => commands.length === 1 && commands[0][0] === "HLEN" && commands[0][1] === members;
   odd = { match: fullCount, reply: [MAX_MEMBERS] };

@@ -23,6 +23,7 @@
  *   after them was emailed, ever. Now such a member is left out of the batch, counted as skipped (never as sent), and
  *   the others go on; a member Stripe keeps failing to answer for is treated so after MEMBER_TRIES tries in a row.
  */
+import { TICKET_CUSTOMERS } from "@/lib/community-read-rules";
 import { createHash } from "node:crypto";
 import { freshConfig, saveConfig, touchMember, type Member, type Post } from "@/lib/community";
 import { KIND } from "@/lib/catalog";
@@ -451,11 +452,14 @@ async function main(): Promise<void> {
     payment_status: "paid",
     mode: "payment",
     customer: `cus_Synth${String(n).padStart(6, "0")}`,
-    metadata: { store: store.handle, product: "otherproduct" },
+    // Rule 23 (the pre-review of 9 November 2026, round 2): each checkout carried the offers after paying (upsell_key),
+    // since only such a checkout's customer can hold a one-click addition and is read.
+    metadata: { store: store.handle, product: "otherproduct", upsell_key: `offers${n}` },
   });
   const unresolvable: [string, (path: string) => { status: number; body: unknown }][] = [
     ["more than one page of checkouts", (path) => (path.startsWith("/checkout/sessions") ? list([], true) : list([]))],
-    ["more than ten customers", (path) => (path.startsWith("/checkout/sessions") ? list(Array.from({ length: 11 }, (_, n) => session(n))) : list([]))],
+    // Rule 23: was eleven customers past ten; the ceiling is TICKET_CUSTOMERS since round 2 of the pre-review.
+    ["more than ten customers", (path) => (path.startsWith("/checkout/sessions") ? list(Array.from({ length: TICKET_CUSTOMERS + 1 }, (_, n) => session(n))) : list([]))],
     [
       "a disconnected Stripe account",
       () => ({ status: 403, body: { error: { type: "invalid_request_error", code: "account_invalid", message: "The provided key does not have access to account (synthetic)." } } }),
@@ -474,7 +478,7 @@ async function main(): Promise<void> {
       await advance(job);
       await advance(job);
       if (what === "more than ten customers") {
-        is(`${what}: the ten customers read are asked of, no more`, asked.filter((p) => p.startsWith("/payment_intents")).length, 10);
+        is(`${what}: the ${TICKET_CUSTOMERS} customers read are asked of, no more`, asked.filter((p) => p.startsWith("/payment_intents")).length, TICKET_CUSTOMERS);
       }
       is(`${what}: the others are emailed once, the send is done`, [to(title), ...(await announcement(job)), await inMailq(job)], [[everyone[0]], true, 2, 2, false]);
       is(`${what}: that member is counted skipped, never sent`, [await sentOf(job), await skippedOf(job)], [1, 1]);

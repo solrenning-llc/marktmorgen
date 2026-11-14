@@ -46,6 +46,64 @@ export function previewSpaces<S extends GatedSpace>(spaces: readonly S[], access
   return spaces.filter((space) => seesSpace(space, access, holdings));
 }
 
+/**
+ * How a locked space can be opened: by buying a product, not now, or not known (542 [CM1]); "unchecked" when the
+ * member's own access to it could not be checked just now, so no product is offered to somebody who may hold one
+ * (CX-123 rule 24); "uncheckedLasting" when asking again will not tell either (more purchases than are read), so the
+ * member is pointed to the creator instead of to the reload button (the pre-review of 9 November 2026, round 2).
+ */
+export type Unlock = { title: string; href: string } | "none" | "unknown" | "unchecked" | "uncheckedLasting";
+
+/** All a page draws of one locked space: never its id, address or anything from inside it. */
+export type LockedSpace = { name: string; about: string; unlock: Unlock };
+
+/**
+ * The kept spaces shown locked that a member was not let into, in the
+ * creator's order, each with the products that would open it (542 [CM1]).
+ * `opened` is the ids of the spaces the member was let into: maySeeSpace's
+ * answers on the real page, previewSpaces' in the studio's preview.
+ */
+export function lockedOf<S extends GatedSpace & { shown?: true }>(config: { spaces: readonly S[]; access: readonly string[] }, opened: ReadonlySet<string>): { space: S; needs: string[] }[] {
+  return config.spaces.flatMap((space) => {
+    if (space.shown !== true || opened.has(space.id)) return [];
+    const gate = spaceGate(space, config.access);
+    return gate.open ? [] : [{ space, needs: gate.needs }];
+  });
+}
+
+/**
+ * What the page draws of them, with each one's way in (unlocksOf, lib/community-locked.ts); not read, or not there, is
+ * "unknown". `lasting`: the unchecked ones stay so however often they are asked (spaceChecks).
+ */
+export function lockedList(
+  locked: readonly { space: { id: string; name: string; about: string } }[],
+  unlocks: Readonly<Record<string, Unlock>> | null,
+  unchecked: ReadonlySet<string> = new Set(),
+  lasting = false,
+): LockedSpace[] {
+  return locked.map(({ space }) => ({
+    name: space.name,
+    about: space.about,
+    unlock: unchecked.has(space.id) ? (lasting ? "uncheckedLasting" : "unchecked") : unlocks?.[space.id] ?? "unknown",
+  }));
+}
+
+/**
+ * What "View as a member" shows locked: the list the real page draws for a
+ * member holding exactly the products chosen. An empty choice is nobody
+ * let in, so nothing is drawn.
+ */
+export function previewLocked<S extends GatedSpace & { name: string; about: string; shown?: true }>(
+  spaces: readonly S[],
+  access: readonly string[],
+  chosen: readonly string[],
+  unlocks: Readonly<Record<string, Unlock>> | null,
+): LockedSpace[] {
+  if (!chosen.some((id) => access.includes(id))) return [];
+  const opened = new Set(previewSpaces(spaces, access, chosen).map((space) => space.id));
+  return lockedList(lockedOf({ spaces, access }, opened), unlocks);
+}
+
 /** The line under "Which spaces a member sees": how many of the spaces; the list itself is drawn under it. */
 export function previewLine(chosenCount: number, shownCount: number, total: number): string {
   // Nobody gets into the community without one of its products, so nothing checked is not a member.

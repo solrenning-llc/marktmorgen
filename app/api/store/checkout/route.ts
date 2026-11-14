@@ -7,7 +7,7 @@ import { linkOrigin, originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle, syncTakesBuyer } from "@/lib/store";
 import { ReturningCodeRefused, canSellProduct, createCheckout } from "@/lib/store-checkout";
 import { RETURNING_TRIES, RETURNING_TRIES_SECONDS, otherDiscountWins, redeemReturningLink, releaseReturningLink, requestReturningLink, spendReturningLink } from "@/lib/returning-code";
-import type { ReturningCode } from "@/lib/returning-code-rules";
+import { type ReturningCode, readTypedCode } from "@/lib/returning-code-rules";
 import { countHit } from "@/lib/visit";
 import { releaseStockHold, withStockHold } from "@/lib/stock";
 import { activePlan } from "@/lib/product-extras";
@@ -212,7 +212,9 @@ export async function POST(request: NextRequest) {
   // goes back to the field with its reason; nothing is charged, and the
   // buyer can still buy without it.
   let returning: { code: ReturningCode; email: string } | null = null;
-  const backToField = (status: string) => away(`/@${store.handle}/p/${product.id}?returning=${status}#returning`);
+  // A typed code goes back with the answer, so the field is filled in again (WCAG 3.3.7); the email never goes in an address.
+  const again = readTypedCode(typedCode);
+  const backToField = (status: string) => away(`/@${store.handle}/p/${product.id}?returning=${status}${again ? `&rc=${again}` : ""}#returning`);
   if (linkToken || typedCode) {
     // Another discount wins this checkout (a sale across the store, a fair price here, an introductory price or a
     // price the buyer names): the code could never go on, so nothing is read, held or emailed for it.

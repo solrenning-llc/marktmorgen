@@ -31,6 +31,8 @@ const FIELDS: [string, string[]][] = [
   ["components/store-contact-box.tsx", ["email"]],
   ["components/store-product.tsx", ["gift_to", "email", "email", "email"]],
   ["components/assistant-reminder-box.tsx", ["remind_email"]],
+  // A code only for people who bought here before, with the email of their earlier order (554 [DS1], unit 2).
+  ["components/returning-code-box.tsx", ["remail"]],
 ];
 
 function main(): void {

@@ -70,7 +70,7 @@ for (const file of [...walk("app"), ...walk("components")]) {
 }
 // 308 [TC1], unit 3, moved 10 of the audit's 25 inputs to EmailField (4) and EmailInput (6), and EmailInput has one of its own.
 // 588 [KB9] added an EmailField for the confirmation's address on a buyer's withdrawal (app/[handle]/orders/withdraw/page.tsx).
-is("the email fields the audit counted: 16 inputs (two with a type chosen in code), 23 EmailFields (the twenty-second: a buyer's withdrawal, 588 [KB9]; the twenty-third: a creator's withdrawal from their plan, 588 [KB9] unit 3) and 7 EmailInputs (the seventh: a member's address for a discount, 616 [WP15](8))", [inputs, components, controlled], [16, 23, 7]);
+is("the email fields the audit counted: 16 inputs (two with a type chosen in code), 24 EmailFields (the twenty-second: a buyer's withdrawal, 588 [KB9]; the twenty-third: a creator's withdrawal from their plan, 588 [KB9] unit 3; the twenty-fourth: the email of an earlier order with a code for returning buyers, 554 [DS1] unit 2) and 7 EmailInputs (the seventh: a member's address for a discount, 616 [WP15](8))", [inputs, components, controlled], [16, 24, 7]);
 is("every one says whose address it is (autocomplete)", missing, []);
 is("someone else's address is not offered the creator's own", ["components/form-response-deal.tsx", "components/deals-board.tsx", "components/workflow-tools.tsx"].every((f) => /type="email" autoComplete="off"/.test(readFileSync(f, "utf8"))), true);
 is("nor is the address a store moves to (\"Move to\")", /type="email"\s+name="email"\s+autoComplete="off"/.test(readFileSync("app/studio/page.tsx", "utf8")), true);

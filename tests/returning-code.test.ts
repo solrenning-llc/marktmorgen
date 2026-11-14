@@ -191,7 +191,10 @@ async function main(): Promise<void> {
     // The field's own button asks for the link; the buy button never does.
     if (fields.rcode !== undefined && fields.buy !== "yes") f.set("rask", "1");
     const response = await checkoutRoute(new NextRequest("https://marktmorgen.com/api/store/checkout", { method: "POST", body: withConsent(f), headers: { host: "marktmorgen.com", "x-forwarded-for": ip } }));
-    const location = response.headers.get("location") ?? "";
+    const raw = response.headers.get("location") ?? "";
+    // The typed code rides back in the address for the field (checked below); compared without it.
+    if (fields.rcode) is(`the typed code goes back with the answer (${fields.rcode})`, raw.includes(`&rc=${fields.rcode.trim().toUpperCase()}#`) || !raw.includes("?returning="), true);
+    const location = raw.replace(/&rc=[A-Z0-9-]+#/, "#");
     const writesBefore = linkWrites;
     await runAfter();
     return { location, session: opened.length > before ? opened.at(-1)! : null, reads: reads - readsBefore, link: linkWrites > writesBefore };
@@ -218,7 +221,7 @@ async function main(): Promise<void> {
   bare.set("rask", "1");
   const asked = await checkoutRoute(new NextRequest("https://marktmorgen.com/api/store/checkout", { method: "POST", body: bare, headers: { host: "marktmorgen.com", "x-forwarded-for": "198.51.100.50" } }));
   await runAfter();
-  is("'sent', not sent back for the consent box", asked.headers.get("location"), back("sent"));
+  is("'sent', not sent back for the consent box", asked.headers.get("location"), back("sent").replace("#", "&rc=THANKYOU#"));
 
   part("A code left in the field never stops the buy button");
   r = await post({ rcode: "THANKYOU", remail: PAST, buy: "yes" }, "198.51.100.51");

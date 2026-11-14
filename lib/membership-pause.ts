@@ -15,7 +15,7 @@ import { onAccount, StripeError } from "@/lib/stripe-account";
 import { withLock } from "@/lib/redis-lock";
 import { redisPipeline } from "@/lib/redis";
 import { repliesFor } from "@/lib/redis-reply";
-import { grantOf, subsOf, type SubRow } from "@/lib/membership-manage";
+import { grantOf, ownedSub, type SubRow } from "@/lib/membership-manage";
 import { forgetStatus } from "@/lib/membership-access";
 import { productOfSub } from "@/lib/tier-rules";
 import { readListings } from "@/lib/catalog";
@@ -233,8 +233,9 @@ async function memberSub(store: Store, token: string, subscription: string): Pro
   if (!SUB_PATTERN.test(subscription)) return null;
   const grant = await grantOf(store, token);
   if (!grant) return "expired";
-  const sub = (await subsOf(store, grant)).find((s) => s.id === subscription);
-  return sub ? { sub: sub as SubRow & PauseSub, account: grant.a, customer: grant.c } : null;
+  // Among every customer the link manages, with the one who holds it (R43 F1 on #2985).
+  const owned = await ownedSub(store, grant, subscription);
+  return owned ? { sub: owned.sub as SubRow & PauseSub, account: owned.grant.a, customer: owned.grant.c } : null;
 }
 
 /** The date a member reads, in the store's language. */

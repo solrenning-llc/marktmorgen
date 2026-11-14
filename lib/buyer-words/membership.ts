@@ -108,6 +108,8 @@ const en = {
   exactFirst: "You see the exact amount before anything is charged.",
   cannotList:
     "Stripe could not list your memberships just now. The button below opens them all on Stripe's own page, where you can cancel.",
+  mayBeMore:
+    "This list may not show every membership of this address: it has more purchases than one link can hold. If one you have is missing, write to the store and they will help you cancel or change it.",
   changeCard: "Change card or see receipts",
   openMembership: "Open my membership",
   pause: {
@@ -472,6 +474,8 @@ const es: MembershipWords = {
   exactFirst: "Ves el importe exacto antes de que se cobre nada.",
   cannotList:
     "Stripe no pudo mostrar tus membresías en este momento. El botón de abajo las abre todas en la propia página de Stripe, donde puedes cancelar.",
+  mayBeMore:
+    "Es posible que esta lista no muestre todas las membresías de esta dirección: tiene más compras de las que caben en un enlace. Si falta alguna tuya, escribe a la tienda y te ayudarán a cancelarla o cambiarla.",
   changeCard: "Cambiar tarjeta o ver recibos",
   openMembership: "Abrir mi membresía",
   pause: {
@@ -824,6 +828,8 @@ const fr: MembershipWords = {
   exactFirst: "Vous voyez le montant exact avant tout débit.",
   cannotList:
     "Stripe n'a pas pu afficher vos abonnements pour le moment. Le bouton ci-dessous les ouvre tous sur la page de Stripe, où vous pouvez annuler.",
+  mayBeMore:
+    "Cette liste peut ne pas montrer tous les abonnements de cette adresse : elle compte plus d'achats qu'un lien ne peut en contenir. S'il vous en manque un, écrivez à la boutique, qui vous aidera à l'annuler ou à le modifier.",
   changeCard: "Changer de carte ou voir les reçus",
   openMembership: "Ouvrir mon abonnement",
   pause: {
@@ -1177,6 +1183,8 @@ const de: MembershipWords = {
   exactFirst: "Sie sehen den genauen Betrag, bevor etwas berechnet wird.",
   cannotList:
     "Stripe konnte Ihre Mitgliedschaften gerade nicht auflisten. Die Schaltfläche unten öffnet sie alle auf der Seite von Stripe, wo Sie kündigen können.",
+  mayBeMore:
+    "Diese Liste zeigt möglicherweise nicht alle Mitgliedschaften dieser Adresse: Sie hat mehr Käufe, als ein Link fassen kann. Fehlt eine Ihrer Mitgliedschaften, schreiben Sie dem Shop, der Ihnen beim Kündigen oder Ändern hilft.",
   changeCard: "Karte ändern oder Quittungen ansehen",
   openMembership: "Meine Mitgliedschaft öffnen",
   pause: {
@@ -1545,6 +1553,8 @@ const it: MembershipWords = {
   exactFirst: "Vedi l'importo esatto prima di qualsiasi addebito.",
   cannotList:
     "Stripe non è riuscito a elencare i tuoi abbonamenti in questo momento. Il pulsante qui sotto li apre tutti sulla pagina di Stripe, dove puoi annullarli.",
+  mayBeMore:
+    "Questo elenco potrebbe non mostrare tutti gli abbonamenti di questo indirizzo: ha più acquisti di quanti ne possa contenere un link. Se ne manca uno tuo, scrivi al negozio, che ti aiuterà ad annullarlo o modificarlo.",
   changeCard: "Cambia carta o vedi le ricevute",
   openMembership: "Apri il mio abbonamento",
   pause: {
@@ -1897,6 +1907,8 @@ const nl: MembershipWords = {
   exactFirst: "Je ziet het precieze bedrag voordat er iets wordt afgeschreven.",
   cannotList:
     "Stripe kon je lidmaatschappen nu niet tonen. De knop hieronder opent ze allemaal op de pagina van Stripe zelf, waar je kunt opzeggen.",
+  mayBeMore:
+    "Deze lijst toont misschien niet alle lidmaatschappen van dit adres: er zijn meer aankopen dan één link kan bevatten. Mist er een van jou, schrijf dan de winkel, die je helpt om het op te zeggen of te wijzigen.",
   changeCard: "Kaart wijzigen of ontvangstbewijzen bekijken",
   openMembership: "Mijn lidmaatschap openen",
   pause: {
@@ -2247,6 +2259,8 @@ const pt: MembershipWords = {
   exactFirst: "Vê o valor exato antes de qualquer cobrança.",
   cannotList:
     "A Stripe não conseguiu listar as suas subscrições neste momento. O botão abaixo abre-as todas na própria página da Stripe, onde pode cancelar.",
+  mayBeMore:
+    "Esta lista pode não mostrar todas as subscrições deste endereço: tem mais compras do que uma ligação consegue conter. Se faltar uma das suas, escreva à loja, que o ajudará a cancelá-la ou alterá-la.",
   changeCard: "Alterar cartão ou ver recibos",
   openMembership: "Abrir a minha subscrição",
   pause: {

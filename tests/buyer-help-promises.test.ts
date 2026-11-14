@@ -27,7 +27,8 @@ async function main(): Promise<void> {
     const url = new URL(String(input));
     if (url.hostname === "api.stripe.com") {
       if (url.pathname.endsWith("/customers")) return Response.json({ data: [{ id: "cus_Member000001", created: 1 }], has_more: false });
-      if (url.pathname.endsWith("/subscriptions")) return Response.json({ data: [{ status: "active", metadata: { store: "help-promise0" }, created: 1 }], has_more: false });
+      // Each row with its id, as Stripe gives it (rule 23: fixture only; findMember reads lists exactly since sweep APP2).
+      if (url.pathname.endsWith("/subscriptions")) return Response.json({ data: [{ id: "sub_Member0000001", status: "active", metadata: { store: "help-promise0" }, created: 1 }], has_more: false });
     }
     if (url.hostname === "api.resend.com") {
       captured = JSON.parse(String(init?.body));

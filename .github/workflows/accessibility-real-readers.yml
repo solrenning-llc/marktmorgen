@@ -54,7 +54,11 @@ jobs:
     timeout-minutes: 25
     strategy:
       fail-fast: false
-      max-parallel: 1
+      # No max-parallel: the Windows (NVDA/Chromium) and macOS (VoiceOver/WebKit) legs share
+      # nothing (no artifact, cache, account or service) and run on separate disposable runners,
+      # so serializing them only added the Windows leg's ~5 min to every run. Each run still
+      # starts at most one macOS and one Windows job, so per-OS concurrency is unchanged, and
+      # total runner minutes are the same (the 25-minute cap per leg stays).
       matrix:
         os: [windows-latest, macos-latest]
     env:

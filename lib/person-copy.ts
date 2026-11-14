@@ -265,9 +265,10 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
     const list = await listRequests(s.store);
     if (list === null) throw new Error("the payment requests could not be read");
     // The request's id is the secret in its pay link, a key, left out: they have it in the email that sent it. So are
-    // the store's own id and the last checkout opened for it; what was asked, paid and refunded stays.
-    return list.filter((r) => same(r.email, s.email)).map(({ id: _id, sid: _sid, session: _session, ...kept }) => {
-      void [_id, _sid, _session];
+    // the store's own id, the last checkout opened for it and the internal reason an email failed (as for agreements);
+    // what was asked, paid and refunded stays.
+    return list.filter((r) => same(r.email, s.email)).map(({ id: _id, sid: _sid, session: _session, failed: _failed, ...kept }) => {
+      void [_id, _sid, _session, _failed];
       return kept;
     });
   },
@@ -356,7 +357,12 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
     for (const productId of s.productIds) {
       const invite = await inviteForCopy(s.statsId, inviteField(s.email, productId));
       if (invite === "unknown") throw new UnknownReplyError("an invitation to keep a membership");
-      if (invite) out.push({ product: productId, ...invite });
+      if (!invite) continue;
+      // The token of the "Keep my membership" link is a key, left out: it opens the invitation and a checkout under
+      // their address (readMove). They have it in the email that sent it.
+      const { t: _token, ...kept } = invite;
+      void _token;
+      out.push({ product: productId, ...kept });
     }
     return out;
   },

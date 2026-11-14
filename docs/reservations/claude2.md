@@ -7,4 +7,3 @@ Only Claude 2 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
 | Claude 2 | 655 [WG15], unit 2 (the studio's tax setting links to /studio/tax; stacked on #2735) | claude2/wg15-tax-link | `components/tax-editor.tsx`, `tests/wg15-tax-link.test.ts`, its row of `tests/test-config.mjs` | 07/11/2026 10h35 |
-| Claude 2 | #4267 (a workflow step settled after the person's erasure recreates the erased run) | claude2/fix-4267-settle-after-erasure | `lib/flow-runs.ts`, `lib/redis-memory.ts` (the SETTLE_IF_OPEN case only), `tests/flow-settle-after-erasure.test.ts` | 13/11/2026 13h30 |

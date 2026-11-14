@@ -49,11 +49,16 @@ jobs:
           CI_BASE: ${{ github.event.pull_request.base.sha }}
           CI_HEAD: ${{ github.event.pull_request.head.sha }}
         run: python3 scripts/ci_documentation_scope.py
+  # The former single verify job ran lint, npm test, the build and the two browser files one after another
+  # (about 39 minutes in the merge queue). The same steps now run in parallel jobs: verify keeps lint, the build,
+  # the runtime dependency check and the agreements file; behavior-regressions runs every tests/*.test.ts, dealt
+  # out by sorted position into four shares (tests/test-runner.mjs shardFiles); store-copy runs tests/e2e/store-copy.mjs
+  # in three contiguous parts (tests/e2e/store-copy-parts.mjs). Nothing was removed; all-checks reads every job.
   verify:
     needs: documentation-scope
     if: ${{ !cancelled() && needs.documentation-scope.outputs.full != 'false' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    timeout-minutes: 30
     env:
       NEXT_TELEMETRY_DISABLED: "1"
       AX2_KEYBOARD_PUBLIC_STANDARD: ${{ (github.repository_id == '1334793724' || github.repository == 'viniciussucupira/marktmorgen') && github.event.repository.private == false && github.event.repository.visibility == 'public' }}
@@ -68,8 +73,6 @@ jobs:
       - run: npm ci
       - name: Lint
         run: npm run lint
-      - name: Behavior regressions
-        run: npm test
       - name: Production build and route types
         run: node scripts/ci-build.mjs
       - name: Verify reviewed development dependencies stay outside runtime
@@ -78,6 +81,62 @@ jobs:
       # on the build above, against the stand-in database and email sender of tests/e2e/services.mjs.
       - name: Agreements signed with a link, in a browser
         run: node tests/e2e/agreements.mjs --no-build
+
+  behavior-regressions:
+    needs: documentation-scope
+    if: ${{ !cancelled() && needs.documentation-scope.outputs.full != 'false' }}
+    name: Behavior regressions (${{ matrix.shard }}/4)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+      AX2_KEYBOARD_PUBLIC_STANDARD: ${{ (github.repository_id == '1334793724' || github.repository == 'viniciussucupira/marktmorgen') && github.event.repository.private == false && github.event.repository.visibility == 'public' }}
+      TEST_SHARD: ${{ matrix.shard }}/4
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci
+      # Share i of 4 of every tests/*.test.ts (file n goes to share n mod 4 + 1 by sorted name); share 1 also checks
+      # the browser bundles. The log's TEST_SHARD line says how many files this share ran out of all of them.
+      - name: Behavior regressions
+        run: npm test
+
+  store-copy:
+    needs: documentation-scope
+    if: ${{ !cancelled() && needs.documentation-scope.outputs.full != 'false' }}
+    name: Copying a whole store (chromium ${{ matrix.part }}/3)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [1, 2, 3]
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+      AX2_KEYBOARD_PUBLIC_STANDARD: ${{ (github.repository_id == '1334793724' || github.repository == 'viniciussucupira/marktmorgen') && github.event.repository.private == false && github.event.repository.visibility == 'public' }}
+      STORE_COPY_PART: ${{ matrix.part }}/3
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci
+      - name: Production build and route types
+        run: node scripts/ci-build.mjs
+      # The runner's own Chrome through playwright-core, as before in verify; the log's STORE_COPY_PART line names
+      # every step this part ran.
       - name: Copying a whole store, in a browser
         run: node tests/e2e/store-copy.mjs --no-build
 
@@ -268,19 +327,21 @@ jobs:
   cross-browser:
     needs: documentation-scope
     if: ${{ !cancelled() && needs.documentation-scope.outputs.full != 'false' }}
-    name: Cross-browser (${{ matrix.browser }})
+    name: Cross-browser (${{ matrix.browser }} ${{ matrix.part }}/3)
     runs-on: ubuntu-latest
     container:
       image: mcr.microsoft.com/playwright:v1.56.1-noble
       options: --init --ipc=host --user pwuser
-    timeout-minutes: 45
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         browser: [firefox, webkit]
+        part: [1, 2, 3]
     env:
       NEXT_TELEMETRY_DISABLED: "1"
       E2E_BROWSER: ${{ matrix.browser }}
+      STORE_COPY_PART: ${{ matrix.part }}/3
       AX2_KEYBOARD_PUBLIC_STANDARD: ${{ (github.repository_id == '1334793724' || github.repository == 'viniciussucupira/marktmorgen') && github.event.repository.private == false && github.event.repository.visibility == 'public' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -301,7 +362,7 @@ jobs:
     # The one check GitHub requires before main (scripts/ci_all_checks.py): it always runs and
     # passes only when every job above passed, or was skipped for a documentation-only change.
     name: All checks (product-checks)
-    needs: [cross-browser, documentation-scope, form-opportunity-redis, mobile-render, verify]
+    needs: [behavior-regressions, cross-browser, documentation-scope, form-opportunity-redis, mobile-render, store-copy, verify]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5

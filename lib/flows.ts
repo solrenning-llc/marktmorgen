@@ -5,7 +5,7 @@ import { MAX_FLOWS, MAX_RETRIES_BY_YOU, MAX_STEPS, MAX_WAIT_DAYS_PER_STEP, RUN_K
 import { type WaitReason, nextTry, stopWaiting } from "@/lib/flow-retry";
 import { allowanceWindow } from "@/lib/allowance-window";
 import { END, afterIndex, checkRoutes, elseIndex } from "@/lib/flow-paths";
-import { RUN_EVENT_BYTES, RUN_RECORD_CHARS, type Settled, admitRuns, claimAttempts, countRetry, countWaits, forgetHeldCommand, forgetIndexCommand, forgetPersonCommands, noteRuns, openRuns, personOf, readRun, refuseRuns, releaseHold, runPeople, settleAttempts } from "@/lib/flow-runs";
+import { RUN_EVENT_BYTES, RUN_RECORD_CHARS, type Settled, admitRuns, claimAttempts, countRetry, countWaits, firstStepNeverQueued, forgetHeldCommand, giveBackRuns, forgetIndexCommand, forgetPersonCommands, noteRuns, openRuns, personOf, readRun, refuseRuns, releaseHold, runPeople, settleAttempts } from "@/lib/flow-runs";
 import { readTeam } from "@/lib/team";
 import { can } from "@/lib/team-roles";
 /**
@@ -635,10 +635,28 @@ async function startFlows(store: Store, flows: Flow[], addresses: string[]): Pro
     }
     // The run's record first, so its first step always finds it.
     await openRuns(flow.id, fresh, now);
-    await redisPipeline([
-      ...fresh.map((address) => ["ZADD", QUEUE, now + flow.steps[0].delayHours * 3600, `${store.listId}|${store.handle}|${flow.id}|0|${address}`]),
+    // The first step's place in the queue, read exactly (CX-123 rule 24): each ZADD 0 or 1, the count a whole number.
+    const member = (address: string) => `${store.listId}|${store.handle}|${flow.id}|0|${address}`;
+    const queued = await redisPipeline([
+      ...fresh.map((address) => ["ZADD", QUEUE, now + flow.steps[0].delayHours * 3600, member(address)]),
       ["HINCRBY", statsKey(flow.id), "started", fresh.length],
-    ]);
+    ]).then((replies) => repliesFor(replies, fresh.length + 1), () => null);
+    if (!queued || !queued.slice(0, fresh.length).every((r) => r === 0 || r === 1) || countOf(queued[fresh.length]) === null) {
+      // Not confirmed: the write may still have landed, its answer lost. The once-only start is given back, with the
+      // day's place, only where it is proven that nothing was queued and the run never moved (firstStepNeverQueued),
+      // so the same event starts it again; a mark kept with nothing queued would hold the run at step 0 for 400 days.
+      // Anywhere else the start stays: a start given back after its step went out would send that step twice
+      // (Codex X5 and Codex P on #4307).
+      const never = await firstStepNeverQueued(flow.id, QUEUE, fresh.map((address) => ({ email: address, member: member(address) })));
+      const back = fresh.filter((_, i) => never[i] === true);
+      if (back.length) {
+        await redisPipeline(back.map((address) => ["DEL", enrolledKey(flow.id, address)])).catch(() => {});
+        await giveBackRuns(store.listId, back.length, now);
+      }
+      started += never.filter((answer) => answer === false).length;
+      if (back.length || never.some((answer) => answer === null)) unknown = true;
+      continue;
+    }
     started += fresh.length;
   }
   if (unknown) throw new UnknownReplyError("a sequence's once-only start");
@@ -1421,6 +1439,15 @@ export async function sendDueSteps(
         ...[...uncertain].map((email) => ({ email, state: "uncertain" as const, note: "The sender's answer was lost: this email may or may not have gone out, so it is not sent again by itself.", to: index })),
         ...refused,
       ];
+      // Whoever the sender left out because they left the list after sendGroup read them (sendTo reads each row again:
+      // unsubscribed, bounced, removed) is in none of its lists: nothing went to them, and their run ends as left, so
+      // no attempt stays open for good (Claude 2 (nuvem D) bug hunt).
+      const accounted = new Set([...result.done, ...result.rest, ...uncertain]);
+      const gone = going.filter((email) => !accounted.has(email));
+      if (gone.length) {
+        counts.dropped += gone.length;
+        outcomes.push(...gone.map((email) => ({ email, state: "failed" as const, note: "No longer on your list: they unsubscribed, an email to them bounced, or they were removed.", to: -1, status: "left" as const })));
+      }
       if (waiting) {
         const later = waiting.queue.filter((c) => !out.has(personIn(c))).length;
         outcomes.push(...endedIfTakenOut(waiting.outcomes, stay));

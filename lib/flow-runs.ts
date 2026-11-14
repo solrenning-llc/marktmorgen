@@ -62,7 +62,7 @@
 import { createHash } from "node:crypto";
 import { normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { stringList } from "@/lib/redis-reply";
+import { repliesFor, stringList } from "@/lib/redis-reply";
 import { dataBytes } from "@/lib/store-data-rules";
 import { MAX_RUN_EVENTS, MAX_STEPS, RUN_KEEP_SECONDS } from "@/lib/flow-limits";
 
@@ -156,6 +156,15 @@ export async function admitRuns(listId: string, limit: number, wanted: number, n
   return admitted;
 }
 
+/**
+ * Gives back `n` places in today's runs taken by admitRuns for starts that were not confirmed queued (lib/flows.ts,
+ * startFlows): not refused, so not counted as such; their start may come again today.
+ */
+export async function giveBackRuns(listId: string, n: number, nowSeconds = Math.floor(Date.now() / 1000)): Promise<void> {
+  if (n <= 0) return;
+  await redisPipeline([["HINCRBY", dayKey(listId, nowSeconds), "started", -n]]).catch(() => {});
+}
+
 /** Moves runs admitted today to refused: the ones that could not start after all (no room for them, lib/flows.ts). */
 export async function refuseRuns(listId: string, n: number, nowSeconds = Math.floor(Date.now() / 1000)): Promise<void> {
   if (n <= 0) return;
@@ -174,6 +183,31 @@ export async function runsToday(listId: string | null, nowSeconds = Math.floor(D
   } catch {
     return null;
   }
+}
+
+/**
+ * After a first-step queue write whose answer was lost (lib/flows.ts, startFlows), for each person: true only when it
+ * is proven that nothing was queued and the run never moved (no such member in the queue, and the run still at step 0
+ * with no attempt open); false when the step is in the queue or the run moved on, or has no record at all; null when
+ * that cannot be read exactly (CX-123 rule 24). Only true may give the once-only start back: the write may have
+ * landed, and a start given back after its step went out would send that step again (Codex X5 and Codex P on #4307).
+ */
+export async function firstStepNeverQueued(flowId: string, queueKey: string, entries: { email: string; member: string }[]): Promise<(boolean | null)[]> {
+  if (!entries.length) return [];
+  const reply = await redisPipeline(
+    entries.flatMap(({ email, member }) => [["ZSCORE", queueKey, member], ["HMGET", runKey(flowId, personOf(email)), "step", "open"]]),
+  ).catch(() => null);
+  const each = repliesFor(reply, entries.length * 2);
+  return entries.map((_, i) => {
+    if (!each) return null;
+    const score = each[2 * i];
+    const fields = each[2 * i + 1];
+    if (score !== null && typeof score !== "string" && typeof score !== "number") return null;
+    if (!Array.isArray(fields) || fields.length !== 2 || fields.some((value) => value !== null && typeof value !== "string")) return null;
+    if (score !== null) return false;
+    const [step, open] = fields as (string | null)[];
+    return step === "0" && open === null;
+  });
 }
 
 /** Opens a fresh run for each of these people, at the first step. */

@@ -25,7 +25,7 @@ const ratio = (a: string, b: string) => {
   return (x + 0.05) / (y + 0.05);
 };
 
-part("The mint text colour is a class, at 7:1 on mint");
+part("The mint text color is a class, at 7:1 on mint");
 is("the theme maps text-mint-text to --mint-text", /--color-mint-text:\s*var\(--mint-text\)/.test(css), true);
 const t = token("mint-text"), s = token("mint-soft");
 is(`--mint-text on --mint-soft is at least 7:1 (now ${t && s ? ratio(t, s).toFixed(2) : "?"})`, t !== null && s !== null && ratio(t, s) >= 7, true);

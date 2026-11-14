@@ -40,10 +40,18 @@ type Cmd = (string | number)[];
 const original = redis.pipeline.bind(redis);
 /** Fails the next write of a webhook delivery (nl:hooks:d:) once, as a Redis timeout would. */
 let failDeliveryWrites = 0;
+/** Applies the next write that keeps an event in the outbox, then loses its answer, as a cut connection would (Codex G). */
+let loseAdmission = 0;
+const keepsAnEvent = (c: Cmd) => (c[0] === "ZADD" && c[1] === "nl:hookout:due") || (c[0] === "EVAL" && c.includes("nl:hookout:due"));
 redis.pipeline = (async (commands: Cmd[]) => {
   if (failDeliveryWrites > 0 && commands.some((c) => c[0] === "SET" && String(c[1]).startsWith("nl:hooks:d:"))) {
     failDeliveryWrites -= 1;
     throw new Error("synthetic: Redis request timed out");
+  }
+  if (loseAdmission > 0 && commands.some(keepsAnEvent)) {
+    loseAdmission -= 1;
+    await original(commands);
+    throw new Error("synthetic: the answer was lost after Redis applied the write");
   }
   return original(commands);
 }) as typeof redis.pipeline;
@@ -159,7 +167,22 @@ async function main(): Promise<void> {
   failDeliveryWrites = 1;
   is("said as lost, never as kept", await quietly(() => emitOrKeep(store, "lead.captured", "ceiling-seed", { email: "jo@example.com" })), "lost");
   is("still at the ceiling", Number((await original([["ZCARD", "nl:hookout:due"]]))[0]), CAP);
+
+  part("The admission's answer lost after Redis applied it: the ceiling still holds (Codex G on #4319)");
+  failDeliveryWrites = 1;
+  loseAdmission = 1;
+  is("said as lost", await quietly(() => emitOrKeep(store, "lead.captured", "lost-answer-full", { email: "kim@example.com" })), "lost");
+  is("the line never passes the ceiling, whatever Redis did", Number((await original([["ZCARD", "nl:hookout:due"]]))[0]), CAP);
+  is("and no record written past it", (await original([["SCAN", 0, "MATCH", "nl:hookout:evt_*", "COUNT", 1000]]))[0], ["0", []]);
   await original([["DEL", "nl:hookout:due"]]);
+  failDeliveryWrites = 1;
+  loseAdmission = 1;
+  is("with room, a lost answer is said as lost", await quietly(() => emitOrKeep(store, "lead.captured", "lost-answer-room", { email: "lou@example.com" })), "lost");
+  is("the event is in line once, with its record", [Number((await original([["ZCARD", "nl:hookout:due"]]))[0]), ((await original([["SCAN", 0, "MATCH", "nl:hookout:evt_*", "COUNT", 1000]]))[0] as [string, string[]])[1].length], [1, 1]);
+  failDeliveryWrites = 1;
+  is("the same event kept again is kept, never a second place in line", [await quietly(() => emitOrKeep(store, "lead.captured", "lost-answer-room", { email: "lou@example.com" })), Number((await original([["ZCARD", "nl:hookout:due"]]))[0])], ["kept", 1]);
+  await original([["DEL", "nl:hookout:due"]]);
+  for (const key of ((await original([["SCAN", 0, "MATCH", "nl:hookout:evt_*", "COUNT", 1000]]))[0] as [string, string[]])[1]) await original([["DEL", key]]);
 
   part("Control: with no failure the event is queued at once and nothing is kept");
   await press(await freeLink("hal@example.com"));

@@ -18,7 +18,7 @@
  * read tries again later, never sends on a guess.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { countOf, repliesFor } from "@/lib/redis-reply";
+import { repliesFor } from "@/lib/redis-reply";
 import { type Store } from "@/lib/store";
 import { storeForIdExactly } from "@/lib/store-exact";
 import { suppressedAmongCommand, wholeErasedReply } from "@/lib/suppression";
@@ -31,10 +31,23 @@ export const OUTBOX_RECORD_MAX_BYTES = 4_096;
 /**
  * The most kept events the whole site holds at once, a company ceiling (Codex X5 on #4319): at most
  * OUTBOX_MAX_KEPT x OUTBOX_RECORD_MAX_BYTES (4 MB) of records and as many members in line, whatever the traffic.
- * Counted in the same write that keeps an event: past it, what that write added is taken back and the event is
- * lost (said in the log), never kept beyond the ceiling.
+ * Counted in the same script that keeps an event (OUTBOX_ADMIT): at it, nothing is written and the event is lost
+ * (said in the log), never kept beyond the ceiling.
  */
 export const OUTBOX_MAX_KEPT = 1_000;
+/**
+ * Keeps one event in the outbox only while the line has room, in one script (Codex G on #4319): the line is counted,
+ * and the record and its place written, together, so the ceiling holds even when the answer is lost after Redis ran
+ * it. 0 when the event is in line already (an earlier try of the same event; its time and record are left as they
+ * are), 1 when it was put in line now, -1 when the line is full and nothing was written.
+ * KEYS[1] the record, KEYS[2] the line; ARGV: the event id, the record, its seconds, its due time, the ceiling.
+ */
+export const OUTBOX_ADMIT = `-- marktmorgen:hookout-admit:v1
+if redis.call("ZSCORE", KEYS[2], ARGV[1]) then return 0 end
+if redis.call("ZCARD", KEYS[2]) >= tonumber(ARGV[5]) then return -1 end
+redis.call("SET", KEYS[1], ARGV[2], "NX", "EX", ARGV[3])
+redis.call("ZADD", KEYS[2], ARGV[4], ARGV[1])
+return 1`;
 /** Kept events one run of the job tries, at the most. */
 export const OUTBOX_PER_RUN = 50;
 /** The first wait before a kept event is tried again; each later try waits twice as long, never past a day. */
@@ -91,21 +104,14 @@ export async function emitOrKeep(store: Store, type: WebhookEvent, seed: string,
   }
   try {
     const replies = repliesFor(
-      await redisPipeline([
-        ["SET", recordKey(eventId), record, "NX", "EX", OUTBOX_KEEP_SECONDS],
-        ["ZADD", DUE, Math.floor(now / 1000) + OUTBOX_FIRST_WAIT_SECONDS, eventId],
-        ["ZCARD", DUE],
-      ]),
-      3,
+      await redisPipeline([["EVAL", OUTBOX_ADMIT, 2, recordKey(eventId), DUE, eventId, record, OUTBOX_KEEP_SECONDS, Math.floor(now / 1000) + OUTBOX_FIRST_WAIT_SECONDS, OUTBOX_MAX_KEPT]]),
+      1,
     );
-    const added = replies ? countOf(replies[1]) : null;
-    const inLine = replies ? countOf(replies[2]) : null;
-    // Kept when the record is written (or already was, by an earlier try of the same event), the date is in and the
-    // line, counted after it, is within the ceiling. Every write that finds the line past it takes back what it
-    // added, so the events kept never pass OUTBOX_MAX_KEPT.
-    if (replies && (replies[0] === "OK" || replies[0] === null) && (added === 0 || added === 1) && typeof inLine === "number") {
-      if (inLine <= OUTBOX_MAX_KEPT || added === 0) return "kept";
-      await redisPipeline([["ZREM", DUE, eventId], ...(replies[0] === "OK" ? [["DEL", recordKey(eventId)] as (string | number)[]] : [])]);
+    // Read exactly (rule 24): 1 or 0 is kept, -1 is a full line with nothing written; anything else is not known, and
+    // the event is said as lost (the line, counted inside the script, never passes the ceiling either way).
+    const answer = replies ? replies[0] : undefined;
+    if (answer === 1 || answer === 0) return "kept";
+    if (answer === -1) {
       console.error(`a ${type} webhook could not be queued and the outbox is full (${OUTBOX_MAX_KEPT}); it is not sent`);
       return "lost";
     }

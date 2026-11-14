@@ -40,6 +40,7 @@ import { readPaid } from "@/lib/paypal-sales";
 import { randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { type DataStore, giveData, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { onAccount } from "@/lib/stripe-account";
@@ -660,8 +661,10 @@ export async function buyerProfile(store: Store, rawEmail: string): Promise<Buye
 /** Deletes the team's notes about one person (lib/person-erasure.ts). */
 export async function forgetNotesPerson(statsId: string | null, person: string): Promise<number> {
   if (!statsId || !PERSON_KEY.test(person) || !isRedisConfigured()) return 0;
-  const [gone] = await redisPipeline([["DEL", notesKey(statsId, person)], ["SREM", whoKey(statsId), person]]);
-  return Number(gone) || 0;
+  // Each reply a count (CX-123 rule 24): another shape throws, so the erasure says this part did not finish.
+  const counted = repliesFor(await redisPipeline([["DEL", notesKey(statsId, person)], ["SREM", whoKey(statsId), person]]), 2)?.map(countOf);
+  if (!counted || counted.some((n) => n === null || n > 1)) throw new UnknownReplyError("the deletion of the team's notes about a person");
+  return counted[0] as number;
 }
 
 /** Spends a search's token once the person it found is deleted (lib/person-erasure.ts). */

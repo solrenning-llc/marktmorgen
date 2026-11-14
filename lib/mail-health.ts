@@ -73,6 +73,7 @@
  */
 import { createHash } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { stopWriting } from "@/lib/contacts";
 import { normaliseEmail } from "@/lib/auth";
 import type { Store } from "@/lib/store";
@@ -406,6 +407,8 @@ export function pauseNote(pause: Pause): string {
 export async function forgetHealthPerson(store: Pick<Store, "sid" | "listId">, email: string): Promise<number> {
   const id = healthId(store);
   if (!id || !isRedisConfigured()) return 0;
-  const [gone] = await redisPipeline([["DEL", seenKey(id, normaliseEmail(email))]]);
-  return Number(gone) || 0;
+  // A count of 0 or 1 (CX-123 rule 24): another shape throws, so the erasure says this part did not finish.
+  const gone = countOf(repliesFor(await redisPipeline([["DEL", seenKey(id, normaliseEmail(email))]]), 1)?.[0]);
+  if (gone === null || gone > 1) throw new UnknownReplyError("the deletion of a person's delivery-check mark");
+  return gone;
 }

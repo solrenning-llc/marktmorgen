@@ -42,7 +42,7 @@ const parts: [string, () => Promise<unknown>][] = [
   ["the team's notes about the person", () => forgetNotesPerson(STATS, "a".repeat(32))],
   ["the person's affiliate bond", () => forgetBondPerson(STATS, EMAIL)],
   ["the store's calendar feed copy", () => forgetFeedCopyPerson(STATS)],
-  ["the person's delivery-check mark", () => forgetHealthPerson({ sid: "sid_fc", listId: "list_fc_1" }, EMAIL)],
+  ["the person's delivery-check mark", () => forgetHealthPerson({ sid: "b".repeat(32), listId: "list_fc_1" }, EMAIL)],
   ["the person's waitlist places", () => forgetWaitlistPerson("sid_fc", ["prod_fc_1"], EMAIL)],
 ];
 

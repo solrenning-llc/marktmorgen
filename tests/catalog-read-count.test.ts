@@ -53,9 +53,19 @@ async function main(): Promise<void> {
     ["ids asked twice", [ids[3], ids[3], ids[1], ids[3], ids[1]]],
     ["nothing", []],
   ];
+  const expected: Record<string, number[]> = {
+    "with a head": [3, 2, 1, 1, 0],
+    "without a head": [5, 3, 1, 2, 0],
+    "inline": [0, 0, 0, 0, 0],
+    "with no catalog to read from": [0, 0, 0, 0, 0],
+  };
   for (const [name, store] of stores) {
     part(`A store ${name}`);
-    for (const [what, asked] of asks) is(`${what}: counted as read`, listingsToRead(store, asked), await readCount(store, asked));
+    for (const [index, [what, asked]] of asks.entries()) {
+      const want = expected[name][index];
+      is(`${what}: cost estimator matches the independent count`, listingsToRead(store, asked), want);
+      is(`${what}: real database reads match the independent count`, await readCount(store, asked), want);
+    }
   }
   is("the head is not read again", listingsToRead(stores[0][1]), ids.length - 2);
   is("an inline store reads none", listingsToRead(stores[2][1]), 0);

@@ -5262,6 +5262,7 @@ html:has([data-product-editor]) {
   --violet-ink: var(--link);
   --violet: var(--action-bg);
   --surface: var(--sand-deep);
+  --focus: var(--focus-ring);
   --background: var(--paper);
   --foreground: var(--ink);
 }

@@ -131,6 +131,9 @@ export const LEGACY_TOKENS: Record<string, DarkToken> = {
   violet: "action-bg",
   // Stage 3: the roles that were a fixed white in the light palette (app/globals.css :root).
   surface: "sand-deep",
+  // The ring every control draws (outline: 3px solid var(--focus)); without it the ring stayed the light indigo
+  // (MEDIUM on #3557 @de8c262ae7).
+  focus: "focus-ring",
 };
 
 /**

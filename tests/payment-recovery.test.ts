@@ -22,6 +22,7 @@
 import { cardLapsesBefore, cardNoticeDue, parseDunning, reminderDue } from "@/lib/dunning-rules";
 import { cardNoticeEmail, failedPaymentEmail, recoverFailedPayments } from "@/lib/payment-recovery";
 import { cardGrant, cardView, finishCardUpdate, openCardUpdate } from "@/lib/card-update";
+import { membershipWords } from "@/lib/buyer-words/membership";
 import { recoveredFrom, recoveryReport } from "@/lib/payment-recovery-report";
 import { addProduct, claimHandle, ensureListId, ensureStatsId, setDunning, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { store as redis } from "./redis-stub";
@@ -45,6 +46,13 @@ const state = {
   subs: new Map<string, Record<string, unknown>>(),
   invoices: [] as Record<string, unknown>[],
   payDeclines: false,
+  /** When set, what Stripe answers the POST that sets the card (else the membership with the card asked for). */
+  setReply: undefined as unknown,
+  /** The HTTP status of the POST that sets the card (with `setReply`); 200 unless a test asks otherwise. */
+  setStatus: 200,
+  /** When set, what Stripe answers the invoice's pay (else the invoice paid); `payStatus` its HTTP status. */
+  payReply: undefined as unknown,
+  payStatus: 200,
 };
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -63,7 +71,10 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   }
   const sub = path.match(/^\/subscriptions\/(sub_\w+)$/);
   if (sub && method === "GET") return state.subs.has(sub[1]) ? answer(state.subs.get(sub[1])) : answer({ error: { message: "no such" } }, 404);
-  if (sub && method === "POST") return answer({ id: sub[1] });
+  if (sub && method === "POST") {
+    const body = new URLSearchParams(String(init?.body ?? ""));
+    return state.setReply !== undefined ? answer(state.setReply, state.setStatus) : answer({ id: sub[1], default_payment_method: body.get("default_payment_method") });
+  }
   if (path === "/checkout/sessions" && method === "POST") {
     const id = `cs_test_${"c".repeat(20)}${state.sessions.size}`;
     state.sessions.set(id, { id, mode: "setup", status: "open", customer: "cus_Member000001", metadata: Object.fromEntries([...new URLSearchParams(String(init?.body))].filter(([k]) => k.startsWith("metadata[")).map(([k, v]) => [k.slice(9, -1), v])) });
@@ -72,7 +83,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const session = path.match(/^\/checkout\/sessions\/(cs_test_\w+)$/);
   if (session) return answer(state.sessions.has(session[1]) ? state.sessions.get(session[1]) : {});
   const pay = path.match(/^\/invoices\/(in_\w+)\/pay$/);
-  if (pay) return state.payDeclines ? answer({ error: { code: "card_declined", message: "Your card was declined." } }, 402) : answer({ id: pay[1], status: "paid" });
+  if (pay) return state.payDeclines ? answer({ error: { code: "card_declined", message: "Your card was declined." } }, 402) : state.payReply !== undefined ? answer(state.payReply, state.payStatus) : answer({ id: pay[1], status: "paid" });
   if (path === "/invoices" && method === "GET") return answer({ object: "list", data: state.invoices, has_more: false });
   return answer({ error: { message: `no stand-in for ${method} ${path}` } }, 404);
 }) as typeof fetch;
@@ -271,6 +282,90 @@ async function main(): Promise<void> {
     is(`${label}: the page does not show it`, await cardView(store, grant!), null);
     is(`${label}: no card is set from it`, [await finishCardUpdate(store, sessionId), touched(before)], ["error", []]);
   }
+  state.subs.set("sub_Running000001", { ...running, customer: "cus_Member000001", latest_invoice: null });
+
+  part("Rules 24 and 30: what Stripe answers the card's setting and the payment decides only when it is read");
+  // The card is set, but Stripe's answer to it is not its own membership with that card: the page never says it is
+  // set, nothing is paid with it, and the page stays open for the daily job to finish it.
+  const owedHere = { ...running, status: "past_due", customer: "cus_Member000001", latest_invoice: { id: "in_Owed00000000001", status: "open", amount_due: 2900 } };
+  state.subs.set("sub_Running000001", owedHere);
+  for (const [label, reply] of [
+    ["another membership's id", { id: "sub_Another0000001", default_payment_method: "pm_NewCard0000001" }],
+    ["no id", { default_payment_method: "pm_NewCard0000001" }],
+    ["another card", { id: "sub_Running000001", default_payment_method: "pm_OldCard0000001" }],
+    ["no card", { id: "sub_Running000001" }],
+    ["a null body", null],
+  ] as const) {
+    state.setReply = reply;
+    const before = posts.length;
+    is(`the card's setting answered with ${label}: not said set, nothing paid`, [await finishCardUpdate(store, sessionId), touched(before)], ["unsure", ["/subscriptions/sub_Running000001"]]);
+  }
+  state.setReply = undefined;
+  // The payment: "paid" only from the invoice's own reply saying paid.
+  for (const [label, reply] of [
+    ["another invoice's id", { id: "in_OtherOwed00001", status: "paid" }],
+    ["no id", { status: "paid" }],
+    ["still open", { id: "in_Owed00000000001", status: "open" }],
+    ["no status", { id: "in_Owed00000000001" }],
+    ["a null body", null],
+  ] as const) {
+    state.payReply = reply;
+    is(`the payment answered with ${label}: the card is set, the payment is not said made`, await finishCardUpdate(store, sessionId), "updated");
+  }
+  // A request Stripe refuses (400: the invoice no longer payable, a bad request) is not the card declined.
+  state.payReply = { error: { type: "invalid_request_error", message: "Invoice is already paid" } };
+  state.payStatus = 400;
+  is("a refused request is not told as a declined card", await finishCardUpdate(store, sessionId), "updated");
+  state.payReply = undefined;
+  state.payStatus = 200;
+  is("control: its own invoice paid is paid", await finishCardUpdate(store, sessionId), "paid");
+  state.subs.set("sub_Running000001", { ...running, customer: "cus_Member000001", latest_invoice: null });
+  is("the page has words for it", typeof membershipWords("en").cardNotices.unsure?.title, "string");
+
+  part("Claude 6 on #3644: a set or a pay that throws is told by what is known");
+  // A set Stripe answers with a 5xx (or that times out) may have landed: unsure, as an unread 2xx, never "nothing changed".
+  state.subs.set("sub_Running000001", owedHere);
+  state.setReply = { error: { type: "api_error", message: "An unknown error occurred" } };
+  state.setStatus = 500;
+  let before = posts.length;
+  is("a set answered 500: unsure, and nothing is paid", [await finishCardUpdate(store, sessionId), touched(before)], ["unsure", ["/subscriptions/sub_Running000001"]]);
+  // A 4xx is Stripe refusing the set: nothing was changed, which the page may say.
+  state.setReply = { error: { type: "invalid_request_error", message: "No such PaymentMethod" } };
+  state.setStatus = 400;
+  is("a set refused with a 400: nothing was changed", await finishCardUpdate(store, sessionId), "error");
+  state.setReply = undefined;
+  state.setStatus = 200;
+  // The card confirmed set, then the pay throws (409, 5xx): the card is set, the payment not said made.
+  for (const status of [409, 500]) {
+    state.payReply = { error: { type: status === 409 ? "idempotency_error" : "api_error", message: "try later" } };
+    state.payStatus = status;
+    is(`a pay answered ${status} after the card was set: updated, never "nothing changed"`, await finishCardUpdate(store, sessionId), "updated");
+  }
+  state.payReply = undefined;
+  state.payStatus = 200;
+  state.subs.set("sub_Running000001", { ...running, customer: "cus_Member000001", latest_invoice: null });
+
+  part("Unsure is never a notice on a guess: the daily job neither says the card is set nor asks for a new one");
+  // Another expiring card on the same membership, so the daily job would tell about it if it took the page for done.
+  const expiring = { ...running, default_payment_method: { ...running.default_payment_method, id: "pm_OldCard0000002" } };
+  state.active = [expiring];
+  state.subs.set("sub_Running000001", { ...expiring, customer: "cus_Member000001", latest_invoice: null });
+  for (const [label, status] of [["an unread set reply", 200], ["a set answered 500", 500]] as const) {
+    await redis.pipeline([["DEL", "nl:card:open:acct_1TestHarbor0001:sub_Running000001"]]);
+    const reopened = await openCardUpdate(store, token, "https://marktmorgen.com");
+    const pending = [...state.sessions.keys()].at(-1)!;
+    state.sessions.set(pending, { ...state.sessions.get(pending), status: "complete", setup_intent: { status: "succeeded", payment_method: "pm_NewCard0000002", metadata: { subscription: "sub_Running000001" } } });
+    state.setReply = status === 200 ? { id: "sub_Running000001" } : { error: { type: "api_error", message: "An unknown error occurred" } };
+    state.setStatus = status;
+    const sentBefore = mails.length;
+    before = posts.length;
+    await run();
+    const open = await redis.pipeline([["GET", "nl:card:open:acct_1TestHarbor0001:sub_Running000001"]]);
+    is(`${label} in the daily job: no notice, nothing paid, the page kept open`, [reopened.ok, mails.length - sentBefore, touched(before).filter((p) => p.includes("/pay")), open[0]], [true, 0, [], pending]);
+  }
+  state.setReply = undefined;
+  state.setStatus = 200;
+  state.active = [];
   state.subs.set("sub_Running000001", { ...running, customer: "cus_Member000001", latest_invoice: null });
 
   part("What came back");

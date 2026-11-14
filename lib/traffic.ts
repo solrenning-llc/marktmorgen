@@ -316,7 +316,13 @@ export async function holdPublicRequests(store: Store, units: number, now: numbe
   const share = await connectionShare(store, now);
   if (share === "unknown" || (share !== null && share.spent)) return false;
   if (!(await takePublic(store, who, now, units, true, true))) return false;
-  if (share !== null) await moveShare(share, units).catch(() => {});
+  // The copy goes ahead only once its share holds it too, read in its exact shape (Codex X8's MEDIUM on #3899): an add
+  // refused or answered otherwise gives the window's hold back and refuses, so no give-back later subtracts from a
+  // share that never held it, and no credit below zero is left for the next copies.
+  if (share !== null && !(await moveShare(share, units).catch(() => false))) {
+    await movePublicRequests(store, -units, now);
+    return false;
+  }
   return true;
 }
 
@@ -349,13 +355,21 @@ async function connectionShare(store: Store, now: number): Promise<ConnectionSha
   }
 }
 
-/** One HINCRBY on a connection's share (a give-back below zero), with the share's expiry. Best effort. */
-async function moveShare(share: ConnectionShare, by: number): Promise<void> {
-  if (!Number.isSafeInteger(by) || by === 0) return;
-  await redisPipeline([
+/**
+ * One HINCRBY on a connection's share (a give-back below zero), with the share's expiry. True only when both answered
+ * in their exact shape: a whole count, at least `by` for an add, and 1 for the expiry (CX-123 rule 24).
+ */
+async function moveShare(share: ConnectionShare, by: number): Promise<boolean> {
+  if (!Number.isSafeInteger(by) || by === 0) return true;
+  const replies = await redisPipeline([
     ["HINCRBY", share.key, share.field, by],
     ["EXPIRE", share.key, share.keep],
   ]);
+  if (!Array.isArray(replies) || replies.length !== 2) return false;
+  const whole = (reply: unknown): number | null =>
+    typeof reply === "number" && Number.isSafeInteger(reply) ? reply : typeof reply === "string" && /^-?\d{1,15}$/.test(reply) ? Number(reply) : null;
+  const count = whole(replies[0]);
+  return count !== null && (by < 0 || count >= by) && whole(replies[1]) === 1;
 }
 
 async function takePublic(store: Store, who: "public" | "buyer", now: number, units: number, shared: boolean, giveBack: boolean): Promise<boolean> {

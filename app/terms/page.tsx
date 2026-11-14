@@ -9,7 +9,7 @@ import { DISPUTE_KEPT_WORDS, DISPUTE_OUTCOME_WORDS, DISPUTE_PAUSED_WORDS } from 
 import { RENEWAL_KEPT_WORDS, RENEWAL_PAUSED_WORDS, RENEWAL_RESUME_WORDS } from "@/lib/renewal-unpaid-words";
 import { isDomainsConfigured } from "@/lib/domains";
 import { formatMoney } from "@/lib/money";
-import { PRO_MONTHLY_EMAILS, REFUND_DAYS, SCALE_MONTHLY_EMAILS, TRIAL_MONTHLY_EMAILS, PLAN_TITLES } from "@/lib/plan";
+import { PRO_MONTHLY_EMAILS, REFUND_DAYS, SCALE_MONTHLY_EMAILS, TRIAL_DAYS, TRIAL_MONTHLY_EMAILS, PLAN_TITLES } from "@/lib/plan";
 import { healthRuleWords } from "@/lib/mail-health-rules";
 import { DELIVERY_ALLOWANCE_BYTES, FREE_PAUSE_ABOVE_BYTES, bytesWords } from "@/lib/delivery";
 import { hoursWords } from "@/lib/watch-rules";
@@ -115,7 +115,7 @@ export default function TermsPage() {
           Creator stores are open. Taking a store address, building the page and
           connecting a Stripe account are free. Taking a card on that page
           requires a paid subscription, which, on an account&apos;s first
-          store, begins with a free trial of 14 days, and which renews every month or every year, whichever you chose,
+          store, begins with a free trial of {TRIAL_DAYS} days, and which renews every month or every year, whichever you chose,
           at the price shown on the home page until it is canceled. The price
           and the payment provider are shown before any card is asked for, and
           these Terms apply to that subscription. We email you at least seven

@@ -103,7 +103,7 @@ part("the terms read the trial's length from the code");
 {
   const terms = read(TERMS);
   is("no trial length typed by hand", /free trial of \d+ days/.test(terms), false);
-  is("the trial's length is TRIAL_DAYS", /free trial of \$\{TRIAL_DAYS\} days/.test(terms), true);
+  is("the trial's length is TRIAL_DAYS", /free trial of \$?\{TRIAL_DAYS\} days/.test(terms), true);
   is("which is what the plan gives", TRIAL_DAYS > 0, true);
 }
 

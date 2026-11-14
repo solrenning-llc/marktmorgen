@@ -26,6 +26,7 @@
  * function that draws the email.
  */
 import { MAX_MAIL_PICTURES, readPicture, withoutPictures } from "@/lib/mail-picture-rules";
+import { MAX_SENT_LINKS, readSentLinkTarget } from "@/lib/sent-link-rules";
 import { contrast, lookColours } from "@/lib/store-look";
 
 export const MAX_MAIL_HEADING = 120;
@@ -164,25 +165,63 @@ function buttonColours(accent: string): { fill: string; ink: string } {
 export type BodyPaint = { text: string; link: string; line: string; headFont: string; button: { fill: string; ink: string } };
 
 /**
+ * The address of each button of an email, in order, one a button: what
+ * `buttonTo` numbers them by, in the HTML, in the text and in the studio's
+ * list of links that can be changed after sending (124 [F2-EDIT-SENT-LINKS]).
+ * Only buttons, and only those whose address can be changed (`changeable`):
+ * an address written in the text is the link's own words, and
+ * words that say one address while the link goes to another are what mail
+ * filters take for phishing, and would mislead the reader once changed.
+ * At most MAX_SENT_LINKS, the most the redirect signs (sentLinkPath): a later
+ * button goes to its own address and is not in the list (Claude 1 on #3715).
+ */
+export function bodyButtons(body: string): string[] {
+  return parseMailBlocks(body)
+    .flatMap((block) => (block.kind === "button" && changeable(block.href) ? [block.href] : []))
+    .slice(0, MAX_SENT_LINKS);
+}
+
+/**
+ * A button that can be changed after sending: its address is one the redirect
+ * accepts (readSentLinkTarget), so never one with no public host nor one that
+ * is already our own /r/ link, which would chain two redirects (review of #3715).
+ */
+function changeable(href: string): boolean {
+  return readSentLinkTarget(href).ok;
+}
+
+/**
  * The creator's text as HTML: headings, paragraphs, lists, links, buttons,
  * lines across and the pictures kept for it, nothing else. `accent` is the
  * starting colour of a button, adjusted only when its text cannot reach 7:1;
  * `paint`, when given, draws it in the store's email colors instead.
  */
-export function bodyHtml(body: string, goesTo?: (href: string) => string, accent = "#4c1d95", paint?: BodyPaint): string {
+export function bodyHtml(
+  body: string,
+  goesTo?: (href: string) => string,
+  accent = "#4c1d95",
+  paint?: BodyPaint,
+  /** Where button `n` goes when its link can be changed after sending (lib/sent-link-rules.ts), from the address it would go to. */
+  buttonTo?: (href: string, n: number) => string,
+): string {
   const colors = paint ? paint.button : buttonColours(accent);
   const link = paint?.link ?? "#4c1d95";
   const headingStyle = paint ? `color:${paint.text};font-family:${paint.headFont}` : "color:#1c1917";
   const lineColor = paint?.line ?? "#e7e5e4";
   const out: string[] = [];
   let pictures = 0;
+  let buttons = 0;
   for (const block of parseMailBlocks(body)) {
     switch (block.kind) {
       case "heading":
         out.push(`<h2 style="margin:0 0 12px;font-size:22px;line-height:1.3;font-weight:700;${headingStyle}">${escape(block.text)}</h2>`);
         break;
       case "button": {
-        const href = goesTo ? goesTo(block.href) : block.href;
+        // A changeable button signs the untagged address, the same original as the
+        // text and the studio's list, so nothing of one reader is inside it (review of #3715).
+        const wrap = buttonTo !== undefined && buttons < MAX_SENT_LINKS && changeable(block.href);
+        const href = wrap ? buttonTo(block.href, buttons) : goesTo ? goesTo(block.href) : block.href;
+        if (wrap) buttons += 1;
         out.push(
           `<p style="margin:8px 0 24px"><a href="${escape(href)}" style="display:inline-block;padding:12px 22px;border-radius:999px;background:${colors.fill};color:${colors.ink};font-weight:700;text-decoration:none">${escape(block.label)}</a></p>`,
         );
@@ -247,15 +286,20 @@ export function bodyHtml(body: string, goesTo?: (href: string) => string, accent
  * HTML: a heading as its words, a button as its words and its address, a
  * line across as a dash, a picture as its description.
  */
-export function bodyText(body: string): string {
+export function bodyText(body: string, buttonTo?: (href: string, n: number) => string): string {
+  let buttons = 0;
   return withoutPictures(
     parseMailBlocks(body)
       .map((block) => {
         switch (block.kind) {
           case "heading":
             return block.text;
-          case "button":
-            return `${block.label}: ${block.href}`;
+          case "button": {
+            const wrap = buttonTo !== undefined && buttons < MAX_SENT_LINKS && changeable(block.href);
+            const href = wrap ? buttonTo(block.href, buttons) : block.href;
+            if (wrap) buttons += 1;
+            return `${block.label}: ${href}`;
+          }
           case "divider":
             return "—";
           case "picture":

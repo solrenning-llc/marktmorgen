@@ -85,13 +85,16 @@ export async function POST(request: NextRequest) {
                 ? "download"
                 : "link";
     // The product's own PDF, its first pages only, when the creator asked for it to be read (lib/ai.ts, readPdfFacts).
-    let pdf: Uint8Array | null = null;
+    // Read only once the month's jobs are taken (lib/ai.ts, writePage): a store with no allowance left never spends a
+    // paid file-store read on a request it is then refused.
+    let pdf: (() => Promise<Uint8Array | null>) | null = null;
     if (body.readFile === true) {
       const file = readableFile(product);
       if (!file) return fail("file");
-      const bytes = await readFileWhole(file.pathname, MAX_STAMP_BYTES).catch(() => null);
-      pdf = bytes ? await firstPages(bytes, READ_PDF_PAGES).catch(() => null) : null;
-      if (!pdf) return fail("file");
+      pdf = async () => {
+        const bytes = await readFileWhole(file.pathname, MAX_STAMP_BYTES);
+        return bytes ? firstPages(bytes, READ_PDF_PAGES) : null;
+      };
     }
     return answer(
       writePage(store, {
@@ -186,10 +189,13 @@ export async function POST(request: NextRequest) {
     const path = text(body.path, 200);
     const folder = await imageFolder(guarded.ref);
     if (!path || !ownsImagePath(path, folder)) return fail("invalid");
-    const found = await get(path, { access: "private" }).catch(() => null);
-    if (!found || found.statusCode !== 200 || !found.stream) return fail("invalid");
-    const bytes = new Uint8Array(await new Response(found.stream).arrayBuffer());
-    return answer(describePicture(store, { bytes, mediaType: imageType(path), productTitle: product.title, language: LANGUAGES[store.language].english }));
+    // Read only once the month's job is taken (lib/ai.ts, describePicture): a store with no allowance left never
+    // spends a paid file-store read on a request it is then refused.
+    const read = async () => {
+      const found = await get(path, { access: "private" });
+      return found && found.statusCode === 200 && found.stream ? new Uint8Array(await new Response(found.stream).arrayBuffer()) : null;
+    };
+    return answer(describePicture(store, { bytes: read, mediaType: imageType(path), productTitle: product.title, language: LANGUAGES[store.language].english }));
   }
   if (body.kind === "translate") {
     // The page as it stands in the editor, every word of it into one of the

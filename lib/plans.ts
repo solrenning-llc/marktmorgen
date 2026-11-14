@@ -83,7 +83,10 @@ export async function finishPlan(account: string, session: string): Promise<Plan
   const cycle = typeof subscription.billing_cycle_anchor === "number" ? subscription.billing_cycle_anchor : 0;
   const trialEnd = typeof subscription.trial_end === "number" ? subscription.trial_end : 0;
   const anchor = Math.max(cycle, trialEnd);
-  if (!Number.isInteger(payments) || payments < 2 || !anchor) return "gone";
+  if (!Number.isInteger(payments) || payments < 2) return "gone";
+  // A reply that does not say where the payments start is unknown, never "gone" (rule 24): thrown, so settlePlans
+  // counts it as failed and keeps the plan pending, instead of letting go of a plan that would then never end.
+  if (!anchor) throw new Error("A payment plan's subscription did not say where its payments start");
 
   await onAccount(
     "POST",

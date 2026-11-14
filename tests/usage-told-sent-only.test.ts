@@ -27,7 +27,7 @@
  *
  * Synthetic only: the Redis stub and the SES mail fixture, no real IO.
  */
-import { recordDelivery, rememberFolderOwner, DELIVERY_ALLOWANCE_BYTES } from "@/lib/delivery";
+import { recordDelivery, rememberFolderOwner, DELIVERY_ALLOWANCE_BYTES, monthKey } from "@/lib/delivery";
 import { GET } from "@/app/api/cron/usage/route";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { store as redis } from "./redis-stub";
@@ -73,7 +73,7 @@ async function run(): Promise<{ status: number; told: unknown; emails: string[];
 }
 
 async function toldList(): Promise<string[]> {
-  const [raw] = await redis.pipeline([["GET", "nl:usage-watch:told"]]);
+  const [raw] = await redis.pipeline([["GET", `nl:usage-watch:told:${monthKey()}`]]);
   return typeof raw === "string" ? (JSON.parse(raw) as string[]) : [];
 }
 

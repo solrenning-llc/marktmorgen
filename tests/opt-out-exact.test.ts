@@ -25,7 +25,7 @@
 import { mock } from "node:test";
 import { MAX_PAYDAY, NO_AFFILIATES, parseAffiliateSetting } from "@/lib/affiliate-setting";
 import { sendPaydayEmails } from "@/lib/affiliate-payday";
-import { recordDelivery, rememberFolderOwner, DELIVERY_ALLOWANCE_BYTES } from "@/lib/delivery";
+import { recordDelivery, rememberFolderOwner, DELIVERY_ALLOWANCE_BYTES, monthKey } from "@/lib/delivery";
 import { claimHandle, ensureStatsId, setAffiliateSetting, setStripeAccount, storeForEmail } from "@/lib/store";
 import { GET as usage } from "@/app/api/cron/usage/route";
 import { BUSY_FLOOR, claimMonth, claimWeek, maybeBusyAlert, setWeeklyOff, weeklyOff } from "@/lib/stats-report";
@@ -134,7 +134,7 @@ async function told(): Promise<void> {
   const owner = "heavy@example.com";
   await rememberFolderOwner(folder, owner);
   await recordDelivery(`stores/${folder}/prod01/file.zip`, DELIVERY_ALLOWANCE_BYTES + 1024);
-  const TOLD = "nl:usage-watch:told";
+  const TOLD = `nl:usage-watch:told:${monthKey()}`;
   const isTold = (c: (string | number)[]) => c[0] === "GET" && c[1] === TOLD;
   const toldWrites: unknown[] = [];
   const run = async () => {

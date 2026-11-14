@@ -28,7 +28,7 @@ export function securityBeginnerQuestions(): { q: string; a: string }[] {
   return [
     {
       q: "What do I need to do to keep my account safe?",
-      a: `Protect your email inbox first: the link we send there is how you log in. Then, in your studio under “${w.account}”, you can turn on two-step login, which asks for a code from your phone after that link, and add a passkey or a recovery address, which are ways back in if you ever lose that inbox. Each is optional. Pick a recovery address only you can open: a link sent there lets you in too.`,
+      a: `Protect your email inbox first: the link we send there is how you log in. Then, in your studio under “${w.account}”, you can turn on two-step login, which asks for a code from your phone after that link. You can also add a passkey or a recovery address, which are ways back in if you ever lose that inbox. Each is optional. Pick a recovery address only you can open: a link sent there lets you in too.`,
     },
     {
       q: "How do I turn on two-step login?",

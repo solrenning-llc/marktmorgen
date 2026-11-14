@@ -25,7 +25,7 @@ export function webhookBeginnerQuestions(onSale = PLANS_ON_SALE, trialDays = TRI
   return [
     {
       q: "What are webhooks here?",
-      a: `An address in another tool, such as a Zapier Catch Hook, a Make scenario or your own server, that your store tells when something you pick happens: a sale, a refund, a membership starting or ending, a lead, an email-list sign-up, a booking or a sequence step. Each message is JSON, a format other tools read, signed so they can tell it came from us. Most are sent at once; sales, memberships and refunds, read from your Stripe account, within about five minutes. Up to ${MAX_ENDPOINTS} addresses per store.`,
+      a: `An address in another tool, such as a Zapier Catch Hook, a Make scenario or your own server, that your store tells when something you pick happens. That can be a sale, a refund, a membership starting or ending, a lead, an email-list sign-up, a booking or a sequence step. Each message is JSON, a format other tools read, signed so they can tell it came from us. Most are sent at once; sales, memberships and refunds, read from your Stripe account, within about five minutes. Up to ${MAX_ENDPOINTS} addresses per store.`,
     },
     {
       q: "How do I add a webhook?",

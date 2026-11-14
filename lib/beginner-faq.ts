@@ -29,10 +29,10 @@ export function uploadsWait(scope: "setup" | "trial"): string {
  * plan. Past either, the work that needs it pauses. Not every refusal says
  * which of the two it was yet (recorded in docs/codex-queue.md, FQ1 unit 28).
  */
-export const UNPAID_ROOM = "Until a plan is paid, your store has smaller limits, for the whole trial or each month without a plan, and only so many stores without a paid plan can run each month, so some of its work can pause for a while.";
+export const UNPAID_ROOM = "Until a plan is paid, your store has smaller limits, for the whole trial or each month without a plan. Only so many stores without a paid plan can run each month, so some of its work can pause for a while.";
 
 export function tryBeforePaying(thing: string, setUp: string, onSale = PLANS_ON_SALE, trialDays = TRIAL_DAYS): string {
   return onSale
     ? `Yes. An eligible first store can start a ${trialDays}-day trial when it picks a plan: your card is taken when the trial starts and first charged when it ends, and canceling inside it means it is never charged. ${thing} can be set up during the trial, and the trial leaves out paid AI writing. ${uploadsWait("trial")} ${UNPAID_ROOM}`.replace(/ {2,}/g, " ").trim()
-    : `Yes. Paid plans are not on sale yet, so there is nothing to pay for now, and you can set up ${setUp} in your own store's studio with no card. ${uploadsWait("setup")} ${UNPAID_ROOM} To see a store working, open the live demo store from the link at the end of this page: a made-up store, marked as a demo.`.replace(/ {2,}/g, " ");
+    : `Yes. Paid plans are not on sale yet, so there is nothing to pay for now. You can set up ${setUp} in your own store's studio with no card. ${uploadsWait("setup")} ${UNPAID_ROOM} To see a store working, open the live demo store from the link at the end of this page: a made-up store, marked as a demo.`.replace(/ {2,}/g, " ");
 }

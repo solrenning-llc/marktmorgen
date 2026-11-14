@@ -20,7 +20,7 @@ export function aiWritingBeginnerQuestions(onSale = PLANS_ON_SALE): { q: string;
   return [
     {
       q: "Where do I find the writing help?",
-      a: `In your studio, next to what it writes. On a paid-up ${plans} plan (your studio calls the ${PLAN_TITLES.pro} plan “${w.studioPlan}”), while the writing help is available for your store, editors show buttons such as “${w.draft}”, and panels such as “${w.panel}”, where you press “${w.write}”; and “${w.help}” is a box on your studio's home page. Otherwise none of these are shown.`,
+      a: `In your studio, next to what it writes. On a paid-up ${plans} plan (your studio calls the ${PLAN_TITLES.pro} plan “${w.studioPlan}”), while the writing help is available for your store, editors show buttons such as “${w.draft}”. Panels such as “${w.panel}” have “${w.write}” to press. And “${w.help}” is a box on your studio's home page. Otherwise none of these are shown.`,
     },
     {
       q: "Can I try the writing help before paying?",

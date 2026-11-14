@@ -21,7 +21,7 @@ export function phoneBeginnerQuestions(onSale = PLANS_ON_SALE, trialDays = TRIAL
   return [
     {
       q: "What are phone notifications here?",
-      a: `Your studio can notify your phone, tablet or computer the moment something happens, such as a sale, a booking, a report in your community, an affiliate application, a live event about to start or a comment under a lesson. You can use up to ${MAX_DEVICES} devices of your own, and choose for each one what it tells you. Each person on your team hears only what their role may see.`,
+      a: `Your studio can notify your phone, tablet or computer the moment something happens. That is a sale, a booking, a report in your community, an affiliate application, a live event about to start or a comment under a lesson. You can use up to ${MAX_DEVICES} devices of your own, and choose for each one what it tells you. Each person on your team hears only what their role may see.`,
     },
     {
       q: "How do I turn on phone notifications?",

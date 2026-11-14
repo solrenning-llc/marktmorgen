@@ -1,12 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 
 type State =
   | { kind: "idle" }
   | { kind: "saving" }
-  | { kind: "error"; message: string };
+  | { kind: "error"; message: string; field: boolean };
 
 const MESSAGES: Record<string, string> = {
   ...STUDIO_MESSAGES,
@@ -22,6 +22,9 @@ const MESSAGES: Record<string, string> = {
   server_error: "We could not confirm whether your store was created. Check the studio before trying again.",
 };
 
+/** The refusals that are about the address typed, so the address field is marked and gets the keyboard back (3.3.1). */
+const ADDRESS_ERRORS = new Set(["shape", "reserved", "taken"]);
+
 /**
  * Taking an address and making a store under it: the account's first, or,
  * with `another`, one more (app/api/store/claim). The studio opens on it.
@@ -36,6 +39,14 @@ export function HandleForm({ another = false, initial = "" }: { another?: boolea
   const [name, setName] = useState("");
   const [bio, setBio] = useState("");
   const [state, setState] = useState<State>({ kind: "idle" });
+  const handleRef = useRef<HTMLInputElement>(null);
+  const submitRef = useRef<HTMLButtonElement>(null);
+  // After a refusal the keyboard goes back where it can act: the address field when the address is the problem, else the button
+  // (it was on the button, which was busy, so it would otherwise be left on nothing; 2.4.3).
+  useEffect(() => {
+    if (state.kind !== "error") return;
+    (state.field ? handleRef.current : submitRef.current)?.focus();
+  }, [state]);
 
   const preview = handle.trim().replace(/^@+/, "").toLowerCase();
 
@@ -67,13 +78,10 @@ export function HandleForm({ another = false, initial = "" }: { another?: boolea
         window.location.assign(destination.href);
         return;
       }
-      setState({
-        kind: "error",
-        message: typeof data.error === "string" && Object.hasOwn(MESSAGES, data.error)
-          ? MESSAGES[data.error] : MESSAGES.server_error,
-      });
+      const known = typeof data.error === "string" && Object.hasOwn(MESSAGES, data.error) ? data.error : "server_error";
+      setState({ kind: "error", message: MESSAGES[known], field: ADDRESS_ERRORS.has(known) });
     } catch {
-      setState({ kind: "error", message: MESSAGES.server_error });
+      setState({ kind: "error", message: MESSAGES.server_error, field: false });
     }
   }
 
@@ -87,6 +95,7 @@ export function HandleForm({ another = false, initial = "" }: { another?: boolea
         <div className="card mt-2 flex items-center border-(--line-off)! pl-4 transition focus-within:border-violet-brand!">
           <span className="text-ink-soft">marktmorgen.com/@</span>
           <input
+            ref={handleRef}
             id="store-handle"
             name="handle"
             type="text"
@@ -97,6 +106,8 @@ export function HandleForm({ another = false, initial = "" }: { another?: boolea
             value={handle}
             onChange={(event) => setHandle(event.target.value)}
             placeholder="yourname"
+            aria-invalid={state.kind === "error" && state.field ? true : undefined}
+            aria-describedby={state.kind === "error" && state.field ? "store-handle-error" : undefined}
             className="min-w-0 w-full rounded-r-2xl bg-transparent px-1 py-3.5 text-ink outline-none placeholder:text-ink-soft/60"
           />
         </div>
@@ -142,6 +153,7 @@ export function HandleForm({ another = false, initial = "" }: { another?: boolea
 
       {state.kind === "error" ? (
         <p
+          id="store-handle-error"
           className="notice notice-error "
           role="alert"
         >
@@ -150,6 +162,7 @@ export function HandleForm({ another = false, initial = "" }: { another?: boolea
       ) : null}
 
       <button
+        ref={submitRef}
         type="submit"
         disabled={state.kind === "saving"}
         className="btn btn-primary btn-lg btn-block"

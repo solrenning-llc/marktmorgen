@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
 import { creatorFrom } from "@/lib/studio-route";
+import { ListDownloadRefused, holdListDownload } from "@/lib/list-download";
 import { ListNotWholeError, listAsCsv } from "@/lib/free";
 
 /**
@@ -21,12 +22,18 @@ export async function GET(request: NextRequest) {
 
   const onlyAgreed = request.nextUrl.searchParams.get("who") === "agreed";
 
+  // The whole list is read and sent, so its size is counted first and its units taken from the studio figure
+  // before any of it is read (lib/list-download.ts, R31); refused, with nothing read, when either cannot be done.
+  const held = await holdListDownload(store);
+  if (!held.ok) return new Response(held.message, { status: held.status, headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" } });
+
   try {
+    // Each read held before it is made and counted at what it moved; the file held before it is sent.
     // Contacts kept but unreadable (rule 24): the readable ones are handed over, and the file's name says it is not the
     // whole list and how many were left out ("-partial", as the sales file says it, then "-3-contacts-not-read"),
     // never a file given as the list without a word. The count is in the name, not in the file, so every email tool
     // still imports the file as it is.
-    const read = await listAsCsv(store, onlyAgreed).then(
+    const read = await listAsCsv(store, onlyAgreed, held.read).then(
       (csv) => ({ csv, unreadable: 0 }),
       (error: unknown) => {
         if (error instanceof ListNotWholeError) return { csv: error.csv, unreadable: Math.max(1, error.unreadable) };
@@ -40,6 +47,8 @@ export async function GET(request: NextRequest) {
     // The byte-order mark makes Excel read the file as UTF-8, so a name with
     // an accent arrives with its accent. Every email tool ignores it.
     const body = `\uFEFF${csv}`;
+    await held.send(new TextEncoder().encode(body).length);
+    await held.settle();
     return new Response(body, {
       headers: {
         "Content-Type": "text/csv; charset=utf-8",
@@ -50,6 +59,9 @@ export async function GET(request: NextRequest) {
       },
     });
   } catch (error) {
+    // What was read is paid for, the rest given back; a read or the file the figure could not hold is said as such.
+    await held.settle();
+    if (error instanceof ListDownloadRefused) return new Response(error.message, { status: error.status, headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" } });
     console.error("exporting a list failed", error);
     return new Response("We could not read your list right now. Try again in a moment.", {
       status: 502,

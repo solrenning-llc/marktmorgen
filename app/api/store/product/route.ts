@@ -1,5 +1,6 @@
 import { runningSubscriptions } from "@/lib/payment-methods";
 import { applyCourseTaskDrops, readCourseTaskDrops } from "@/lib/assignment";
+import { handsOver, takesLastDelivery } from "@/lib/product-option";
 import { storeKey } from "@/lib/learn";
 import { imagePaths } from "@/lib/product-image";
 import { waitingCount } from "@/lib/preorders";
@@ -282,7 +283,15 @@ export async function POST(request: NextRequest) {
     } else if (action === "remove") {
       // Paid pre-orders wait for it (lib/preorders.ts): it stays until they
       // are handed over or refunded, so nobody paid for something deleted.
-      if ((await waitingCount(guarded.store, id)) > 0) {
+      // A count that cannot be read is unknown, never "nobody waits" (sweep APP3): 503, and the product is kept.
+      let waiting: number;
+      try {
+        waiting = await waitingCount(guarded.store, id);
+      } catch (error) {
+        console.error("could not read a product's pre-orders before removing it", error);
+        return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+      }
+      if (waiting > 0) {
         return Response.json({ ok: false, error: "preorders" }, { status: 409 });
       }
       // The product comes back as it was, so the storage its files used can
@@ -431,11 +440,17 @@ export async function POST(request: NextRequest) {
             if (!course) return Response.json({ ok: false, error: "unknown" }, { status: 404 });
             if (exampleTitlesLeft(course) > 0) return Response.json({ ok: false, error: "course_examples" }, { status: 409 });
           }
+          // Published only once it hands something over by the checkout's own rule (754 [STN1]).
+          if (!handsOver(draft)) return Response.json({ ok: false, error: "nothing_to_hand_over", product: draft.title }, { status: 409 });
         }
       }
       const done = await setProductHidden(ref, id, body.hidden);
       result = done.ok ? { ok: true, product: done.product } : done;
     } else if (action === "unlink") {
+      // The last thing a product on the store hands over is not taken off: it is replaced, or the product unpublished
+      // first (754 [STN1]; Claude 6 on #3432). Read like the publish check above, from the store record the guard loaded.
+      const found = await readDelivery(guarded.store, id);
+      if (found && takesLastDelivery(found.product, id, "link")) return Response.json({ ok: false, error: "last_delivery", product: found.product.title }, { status: 409 });
       const cleared = await setProductLink(ref, id, null);
       result = cleared.ok ? { ok: true, product: null } : { ok: false, reason: asProductReason(cleared.reason) };
     } else {

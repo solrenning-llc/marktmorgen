@@ -432,17 +432,24 @@ export async function markPaidOutside(
     if (SESSION_ID.test(request.session) && now - request.sessionAt < CHECKOUT_LIFE_MS) {
       if (!store.stripeAccountId) return { ok: false, reason: "error" };
       const known = (await onAccount("GET", store.stripeAccountId, `/checkout/sessions/${encodeURIComponent(request.session)}`).catch((error: unknown) => {
-        if (error instanceof StripeError && error.status === 404) return {};
+        // A checkout Stripe no longer has is no checkout: the mark goes ahead.
+        if (error instanceof StripeError && error.status === 404) return null;
         throw error;
-      })) as Record<string, unknown>;
-      if (isSettled(known)) {
-        await markPaid(store, request.id, known, now);
-        return { ok: false, reason: "paid_online" };
-      }
-      if (known.status === "complete") return { ok: false, reason: "processing" };
-      if (known.status === "open") {
-        const closed = (await onAccount("POST", store.stripeAccountId, `/checkout/sessions/${encodeURIComponent(request.session)}/expire`, new URLSearchParams())) as Record<string, unknown>;
-        if (closed.status !== "expired") return { ok: false, reason: "error" };
+      })) as Record<string, unknown> | null;
+      // Read only from a reply about this very checkout in a state Stripe documents: any other 200 reply (no status, a
+      // status not known here, another checkout's id) says nothing about whether it is still payable or paid, so nothing
+      // is marked, closed or written down (Claude 7, 14 November 2026).
+      if (known && (known.id !== request.session || !CHECKOUT_STATES.has(String(known.status)))) return { ok: false, reason: "error" };
+      if (known) {
+        if (isSettled(known)) {
+          await markPaid(store, request.id, known, now);
+          return { ok: false, reason: "paid_online" };
+        }
+        if (known.status === "complete") return { ok: false, reason: "processing" };
+        if (known.status === "open") {
+          const closed = (await onAccount("POST", store.stripeAccountId, `/checkout/sessions/${encodeURIComponent(request.session)}/expire`, new URLSearchParams())) as Record<string, unknown>;
+          if (closed.status !== "expired") return { ok: false, reason: "error" };
+        }
       }
     }
     const done = await changeRequest(

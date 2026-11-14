@@ -860,7 +860,16 @@ export default async function StudioPage({
     aiLeft: store && aiAvailableFor(store) ? early(aiLeft(store).catch(() => 0)) : null,
     live: store?.subscriptionId && isBillingConfigured() ? early(readSubscription(store.subscriptionId)) : null,
     pause: store && isBillingConfigured() ? early(pauseView(store)) : null,
-    list: store && may("export") ? early(listSize(store)) : null,
+    // A size that could not be read is "unread" here, inside the early read, so the joint wait for the kept readings
+    // below (`answered`) still resolves and the visits and sales are shown (Claude 4, LEVE on #2862).
+    list: store && may("export")
+      ? early(
+          listSize(store).catch((error: unknown) => {
+            console.error("could not read a list's size", error);
+            return "unread" as const;
+          }),
+        )
+      : null,
     callProducts: store ? early(readKind(store, "call")) : null,
     meet: store && meetOn && (may("products") || may("orders")) ? early(meetView(store.statsId, store, arrivedZoom).catch(() => null)) : null,
     shelf: store ? early(studioShelf(store, params)) : null,
@@ -2251,7 +2260,17 @@ export default async function StudioPage({
                 people who may take the list away as a file may hand one out. */}
             {apiKeys ? <ApiKeyEditor keys={apiKeys} /> : null}
 
-            {list && (givesAway || list.total > 0) ? (
+            {list === "unread" ? (
+              <div className="card mt-8 p-6 sm:p-8">
+                <p className="text-lg font-semibold tracking-[-0.02em] text-ink">
+                  Your list
+                </p>
+                <p className="mt-2 text-ink-soft">
+                  We could not count your list just now. Reload this page in a
+                  moment to see it and download it.
+                </p>
+              </div>
+            ) : list && (givesAway || list.total > 0) ? (
               <div className="card mt-8 p-6 sm:p-8">
                 <p className="text-lg font-semibold tracking-[-0.02em] text-ink">
                   Your list
@@ -2796,7 +2815,7 @@ export default async function StudioPage({
                 <p className="mt-4 rounded-[12px] bg-paper px-4 py-3 text-sm text-ink-soft ring-1 ring-line">
                   {usageWindow
                     ? usageWindow.billing
-                      ? `Your billing month: ${windowDay(usageWindow.start)} to ${windowDay(usageWindow.end)} (UTC). Every figure here is counted in it and starts again on ${windowDay(usageWindow.end)}, with your plan\u2019s next month.`
+                      ? `Your billing month: ${windowDay(usageWindow.start)} to ${windowDay(usageWindow.end)} (UTC). Every figure here is counted in it and starts again on ${windowDay(usageWindow.end)}, when your next billing month begins.`
                       : standing === "trial"
                         ? `Your free trial: ${windowDay(usageWindow.start)} to ${windowDay(usageWindow.end)} (UTC). Every figure here is counted for the whole trial.`
                         : `This calendar month: ${windowDay(usageWindow.start)} to ${windowDay(usageWindow.end)} (UTC). Every figure here starts again on the 1st.`

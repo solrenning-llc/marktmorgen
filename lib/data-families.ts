@@ -291,6 +291,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   // The studio demo without sign-up (256 [KJ1], lib/studio-demo-rules.ts): the company's day and its sessions, no store's; each session ends 21 hours after it opened.
   "nl:sdemo:": C, "nl:sdemo:{<session>}:<family>[:<part>]": C,
   "nl:join:t:": T("nl:erase:ix:", 7),
+  // License keys (lib/licence-keys.ts): a product's pool, keys, sales (with the mark of a sale refunded before it had a key, or whose full refund is still pending), records and buyers waiting.
   "nl:keys:": E,
   "nl:lc:": E,
   // A student's private lesson notes (290 [SQ1], lib/lesson-notes.ts), named by the store's statsId.

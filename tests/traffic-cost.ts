@@ -67,6 +67,7 @@
  */
 import { STORE_PAGE_SIZE } from "@/lib/catalog";
 import { READ_SAMPLE } from "@/lib/page-read-sample";
+import { INVITE_BADGE_LINK_ON } from "@/lib/badge-link";
 
 export const CDN_PER_REQUEST = 2.0 / 1_000_000;
 export const COMMAND = 2.0 / 1_000_000;
@@ -90,8 +91,12 @@ const PICTURES_ON_A_LATER_PAGE = 4;
  * allows for, which tests/traffic.test.ts holds the code under.
  */
 export const COMMANDS = {
-  /** Drawing the front page of a store that pays. */
-  frontPage: 4,
+  /**
+   * Drawing the front page of a store that pays, and one GET more while the
+   * badge's link may carry the creator's invite code (lib/badge-link.ts,
+   * INVITE_BADGE_LINK_ON, off while the invite programme or sales are closed).
+   */
+  frontPage: 4 + (INVITE_BADGE_LINK_ON ? 1 : 0),
   /**
    * Counting it: the store's stats and the visit. Since October 11, 2026 the
    * view also counts its country and kind of device on the day's record

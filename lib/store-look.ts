@@ -72,7 +72,7 @@ export const BACKDROPS = [
   { id: "glow", label: "Glow", description: "A soft light of your color at the top." },
   { id: "dots", label: "Dots", description: "Fine dots, like good notebook paper." },
   { id: "grid", label: "Grid", description: "A light grid, neat and technical." },
-  { id: "aurora", label: "Aurora", description: "Your color drifting slowly behind everything." },
+  { id: "aurora", label: "Aurora", description: "A soft glow of your color that settles behind everything." },
 ] as const;
 
 export type BackdropId = (typeof BACKDROPS)[number]["id"];

@@ -2012,7 +2012,8 @@ a.chip {
   /* The creator's backdrop (lib/store-look.ts, backdropStyle); none for Plain. */
   background-image: var(--st-backdrop, none);
   background-size: var(--st-backdrop-size, auto);
-  animation: st-aurora 40s ease-in-out infinite alternate;
+  /* Aurora settles: one slow move as the page opens, over within five seconds, then still (WCAG 2.2.2). */
+  animation: st-aurora 4.5s ease-out 1 forwards;
   animation-play-state: var(--st-backdrop-play, paused);
   color: var(--st-text);
   font-family: var(--st-font-body, var(--font-body)), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Arial, sans-serif;

@@ -26,6 +26,8 @@ const emails: { to: string[]; subject: string; text: string; html?: string }[] =
 let captureWith: (order: string) => Record<string, unknown> = () => ({});
 let made = 0;
 let paypalCalls = 0;
+/** The PayPal-Auth-Assertion of every capture read (the refund watch's): whose account it was asked as. */
+const captureReads: string[] = [];
 
 const orderId = (n: number) => `9D190127TN36471${String(n).padStart(2, "0")}`;
 
@@ -69,7 +71,10 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     return orders.has(read) ? json(orders.get(read)) : json({ name: "RESOURCE_NOT_FOUND" }, 404);
   }
   const cap = /^\/v2\/payments\/captures\/([A-Za-z0-9]+)$/.exec(url.pathname)?.[1];
-  if (cap && method === "GET") return json({ id: cap, status: captures.get(cap) ?? "COMPLETED" });
+  if (cap && method === "GET") {
+    captureReads.push(new Headers(init?.headers).get("paypal-auth-assertion") ?? "");
+    return json({ id: cap, status: captures.get(cap) ?? "COMPLETED" });
+  }
   return json({ name: "RESOURCE_NOT_FOUND" }, 404);
 }) as typeof fetch;
 
@@ -116,6 +121,19 @@ async function main(): Promise<void> {
   is("written down as paid", (await readPaid(order))?.email ?? null, "late@example.com");
   is("theirs on the store", (await importedFor(store, "late@example.com")).map((p) => p.job), [`paypal:${order}`]);
   is("no longer waited on", await stillPending(store, order), false);
+
+  part("A paid record from before the account was kept with it, while disconnected: asked as the kept account");
+  // Records written before paid.m existed fall back to the store's account; disconnected, that is the kept one, never
+  // a crash on the missing connection (the merge of #3924 with main: store.paypalSeller is null here).
+  const paidAt = `nl:ppsell:paid:${order}`;
+  const [rawPaid] = await redis.pipeline([["GET", paidAt]]);
+  const legacy = JSON.parse(String(rawPaid)) as Record<string, unknown>;
+  delete legacy.m;
+  await redis.pipeline([["SET", paidAt, JSON.stringify(legacy), "KEEPTTL"], ["ZADD", `nl:ppsell:watch:${store.statsId}`, "0", order]]);
+  captureReads.length = 0;
+  await sweepCheckouts(Date.now() + 20_000);
+  is("its capture is read once", captureReads.length, 1);
+  is("as the disconnected account", captureReads.map((a) => Buffer.from(a.split(".")[1] ?? "", "base64url").toString().includes(SELLER)), [true]);
 
   part("Nothing left and no order that can still be paid: the account is forgotten");
   // Past the time an order opened before the disconnection can still be approved (its record's three days).

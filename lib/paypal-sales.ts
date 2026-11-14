@@ -1093,6 +1093,7 @@ export async function watchPayPal(
   // answered after the creator stops selling with PayPal (Claude 7, 12 November 2026).
   const merchant = paypalMerchant(store);
   if (!paypalSalesConfigured() || !store.statsId || !merchant || !isRedisConfigured()) return result;
+  const storeMerchant = merchant;
   const statsId = store.statsId;
   const now = Math.floor(Date.now() / 1000);
 
@@ -1160,8 +1161,9 @@ export async function watchPayPal(
       continue;
     }
     // The account the order was paid to, whatever account the store has connected since (C7, 12 November 2026); a
-    // record from before it was kept falls back to the account connected now.
-    const merchant = typeof paid.m === "string" && MERCHANT_ID.test(paid.m) ? paid.m : store.paypalSeller.merchant;
+    // record from before it was kept falls back to the store's account now: the connected one, or, while PayPal is
+    // disconnected, the one kept (paypalMerchant), never a read of a connection that is not there.
+    const merchant = typeof paid.m === "string" && MERCHANT_ID.test(paid.m) ? paid.m : storeMerchant;
     let status = "";
     try {
       const capture = await call("GET", `/v2/payments/captures/${encodeURIComponent(paid.capture)}`, { merchant });

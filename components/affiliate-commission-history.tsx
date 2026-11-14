@@ -35,7 +35,7 @@ export function AffiliateCommissionHistory({ lines, total, who, refundsChecked, 
           <span className="block text-xs text-ink-soft [overflow-wrap:anywhere]">{line.how === "bonus" ? `${day(line.at)} · ${who.get(line.aff)?.email ?? "A removed affiliate"} · ${CREDIT_WORDS.bonus}` : `${day(line.at)} · ${who.get(line.aff)?.email ?? "A removed affiliate"} · ${money(line.base,line.currency)} before tax · ${line.rate}% · ${CREDIT_WORDS[line.how]}`}{line.refunded ? ` · ${money(line.refunded,line.currency)} refunded` : ""}</span>
           <span className="mt-1 block text-xs text-ink-soft [overflow-wrap:anywhere]">{tags ? `Source: ${tags.source || "Not recorded"} · Campaign: ${tags.campaign || "Not recorded"} · Variant: ${tags.content || "Not recorded"}` : "No campaign labels recorded"}</span>
         </span>
-        <span className="text-right"><span className="block font-semibold tabular-nums text-ink">{money(line.commission,line.currency)}</span>{line.status !== "earned" ? <span className="block text-xs font-semibold text-ink-soft">{line.status === "own purchase" ? "Their own purchase" : line.status === "refunded" ? "Refunded" : "Partly refunded"}</span> : null}</span>
+        <span className="text-right"><span className="block font-semibold tabular-nums text-ink">{money(line.commission,line.currency)}</span>{line.status !== "earned" ? <span className="block text-xs font-semibold text-ink-soft">{line.status === "own purchase" ? "Their own purchase" : line.status === "refunded" ? "Refunded" : line.status === "buyer not confirmed" ? "Buyer not confirmed: waiting" : "Partly refunded"}</span> : null}</span>
       </li>;
     })}</ul>}
   </section>;

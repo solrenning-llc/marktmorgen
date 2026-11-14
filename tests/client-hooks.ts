@@ -20,8 +20,11 @@ const same = (a?: unknown[], b?: unknown[]) => !!a && !!b && a.length === b.leng
 
 export type Mounted = { tree: () => unknown; settle: () => Promise<void>; unmount: () => void };
 
-/** Renders `component(props)`, runs its effects, and re-renders on every state change. */
-export async function mount<P>(component: (props: P) => unknown, props: P): Promise<Mounted> {
+/**
+ * Renders `component(props)`, runs its effects, and re-renders on every state change. `beforeEffects`, when given, is
+ * called with each render's tree before its effects run, as React attaches refs before it runs effects.
+ */
+export async function mount<P>(component: (props: P) => unknown, props: P, options: { beforeEffects?: (tree: unknown) => void } = {}): Promise<Mounted> {
   const slots: Slot[] = [];
   let index = 0;
   let dirty = false;
@@ -86,6 +89,7 @@ export async function mount<P>(component: (props: P) => unknown, props: P): Prom
     } finally {
       internals.H = before;
     }
+    options.beforeEffects?.(last);
     while (pending.length) pending.shift()!();
   };
   const settle = async () => {

@@ -6,7 +6,7 @@ import { studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
 import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
-import { affiliateLink, readBook } from "@/lib/affiliates";
+import { UNCONFIRMED_DAYS, affiliateLink, readBook } from "@/lib/affiliates";
 import { isSenderConfigured } from "@/lib/email";
 import { canSell } from "@/lib/store-checkout";
 import { AffiliateStudio } from "@/components/affiliate-studio";
@@ -193,6 +193,22 @@ export default async function StudioAffiliatesPage({ searchParams }: Params) {
             why: line.lead!.why,
           }))}
           leadsTotal={book ? book.lines.filter((line) => line.how === "lead").length : 0}
+          unconfirmed={(book?.lines ?? [])
+            .filter((line) => line.how === "tier2" && line.status === "buyer not confirmed")
+            .sort((a, b) => b.at - a.at)
+            .slice(0, 50)
+            .map((line) => ({
+              ref: line.ref,
+              at: line.at,
+              title: line.title || titles.get(line.product) || "A product that is no longer listed",
+              aff: line.aff,
+              base: line.base,
+              rate: line.rate,
+              commission: line.commission,
+              currency: line.currency,
+            }))}
+          unconfirmedTotal={book?.unconfirmed ?? 0}
+          unconfirmedDays={UNCONFIRMED_DAYS}
           payouts={book?.payouts ?? []}
           refundsChecked={book?.refundsChecked ?? true}
           invoicesChecked={book?.invoicesChecked ?? true}

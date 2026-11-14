@@ -17,7 +17,7 @@ const en = {
   message: "Your message",
   button: "Send the message",
   pageTitle: "Message",
-  card: { pageTitle: "Contact card", save: "Save contact", saveHint: "Adds this card to the contacts on your phone or computer.", email: "Email", phone: "Phone", website: "Website", store: (store: string) => `Visit ${store}` },
+  card: { pageTitle: "Contact card", back: "Back to the contact card", save: "Save contact", saveHint: "Adds this card to the contacts on your phone or computer.", email: "Email", phone: "Phone", website: "Website", store: (store: string) => `Visit ${store}` },
   sentTitle: "Your message was accepted for sending",
   sentBody: (store: string) => `The message was accepted for sending to ${store}'s email. If ${store} replies, the answer goes to the address you gave. Nothing else is sent to you.`,
   notices: {
@@ -39,7 +39,7 @@ const es: ContactWords = {
   message: "Tu mensaje",
   button: "Enviar el mensaje",
   pageTitle: "Mensaje",
-  card: { pageTitle: "Tarjeta de contacto", save: "Guardar contacto", saveHint: "Añade esta tarjeta a los contactos de tu teléfono o tu ordenador.", email: "Correo electrónico", phone: "Teléfono", website: "Sitio web", store: (store) => `Visitar ${store}` },
+  card: { pageTitle: "Tarjeta de contacto", back: "Volver a la tarjeta de contacto", save: "Guardar contacto", saveHint: "Añade esta tarjeta a los contactos de tu teléfono o tu ordenador.", email: "Correo electrónico", phone: "Teléfono", website: "Sitio web", store: (store) => `Visitar ${store}` },
   sentTitle: "Tu mensaje fue aceptado para el envío",
   sentBody: (store) => `El mensaje fue aceptado para enviarlo al email de ${store}. Si ${store} responde, la respuesta llega a la dirección que diste. No se te envía nada más.`,
   notices: {
@@ -59,7 +59,7 @@ const fr: ContactWords = {
   message: "Votre message",
   button: "Envoyer le message",
   pageTitle: "Votre message",
-  card: { pageTitle: "Carte de contact", save: "Enregistrer le contact", saveHint: "Ajoute cette carte aux contacts de votre téléphone ou de votre ordinateur.", email: "E-mail", phone: "Téléphone", website: "Site web", store: (store) => `Visiter ${store}` },
+  card: { pageTitle: "Carte de contact", back: "Retour à la carte de contact", save: "Enregistrer le contact", saveHint: "Ajoute cette carte aux contacts de votre téléphone ou de votre ordinateur.", email: "E-mail", phone: "Téléphone", website: "Site web", store: (store) => `Visiter ${store}` },
   sentTitle: "Votre message a été accepté pour envoi",
   sentBody: (store) => `Le message a été accepté pour être envoyé à l'adresse e-mail de ${store}. Si ${store} répond, la réponse arrive à l'adresse indiquée. Rien d'autre ne vous est envoyé.`,
   notices: {
@@ -79,7 +79,7 @@ const de: ContactWords = {
   message: "Deine Nachricht",
   button: "Nachricht senden",
   pageTitle: "Nachricht",
-  card: { pageTitle: "Kontaktkarte", save: "Kontakt speichern", saveHint: "Fügt diese Karte den Kontakten auf deinem Telefon oder Computer hinzu.", email: "E-Mail", phone: "Telefon", website: "Webseite", store: (store) => `${store} besuchen` },
+  card: { pageTitle: "Kontaktkarte", back: "Zurück zur Kontaktkarte", save: "Kontakt speichern", saveHint: "Fügt diese Karte den Kontakten auf deinem Telefon oder Computer hinzu.", email: "E-Mail", phone: "Telefon", website: "Webseite", store: (store) => `${store} besuchen` },
   sentTitle: "Deine Nachricht wurde zum Senden angenommen",
   sentBody: (store) => `Die Nachricht wurde zum Senden an die E-Mail-Adresse von ${store} angenommen. Wenn ${store} antwortet, geht die Antwort an die von dir angegebene Adresse. Sonst wird dir nichts geschickt.`,
   notices: {
@@ -99,7 +99,7 @@ const it: ContactWords = {
   message: "Il tuo messaggio",
   button: "Invia il messaggio",
   pageTitle: "Messaggio",
-  card: { pageTitle: "Biglietto da visita", save: "Salva il contatto", saveHint: "Aggiunge questo biglietto ai contatti del tuo telefono o computer.", email: "Indirizzo email", phone: "Telefono", website: "Sito web", store: (store) => `Visita ${store}` },
+  card: { pageTitle: "Biglietto da visita", back: "Torna al biglietto da visita", save: "Salva il contatto", saveHint: "Aggiunge questo biglietto ai contatti del tuo telefono o computer.", email: "Indirizzo email", phone: "Telefono", website: "Sito web", store: (store) => `Visita ${store}` },
   sentTitle: "Il tuo messaggio è stato accettato per l'invio",
   sentBody: (store) => `Il messaggio è stato accettato per essere inviato all'email di ${store}. Se ${store} risponde, la risposta arriva all'indirizzo che hai dato. Non ti viene inviato nient'altro.`,
   notices: {
@@ -119,7 +119,7 @@ const nl: ContactWords = {
   message: "Je bericht",
   button: "Bericht versturen",
   pageTitle: "Bericht",
-  card: { pageTitle: "Contactkaart", save: "Contact opslaan", saveHint: "Voegt deze kaart toe aan de contacten op je telefoon of computer.", email: "E-mail", phone: "Telefoon", website: "Internetsite", store: (store) => `Bezoek ${store}` },
+  card: { pageTitle: "Contactkaart", back: "Terug naar de contactkaart", save: "Contact opslaan", saveHint: "Voegt deze kaart toe aan de contacten op je telefoon of computer.", email: "E-mail", phone: "Telefoon", website: "Internetsite", store: (store) => `Bezoek ${store}` },
   sentTitle: "Je bericht is geaccepteerd voor verzending",
   sentBody: (store) => `Het bericht is geaccepteerd om naar het e-mailadres van ${store} te worden verstuurd. Als ${store} antwoordt, gaat het antwoord naar het adres dat je opgaf. Verder wordt er niets naar je gestuurd.`,
   notices: {
@@ -140,7 +140,7 @@ const pt: ContactWords = {
   message: "A sua mensagem",
   button: "Enviar a mensagem",
   pageTitle: "Mensagem",
-  card: { pageTitle: "Cartão de contacto", save: "Guardar o contacto", saveHint: "Adiciona este cartão aos contactos do seu telemóvel ou computador.", email: "Endereço de email", phone: "Telefone", website: "Site", store: (store) => `Visitar ${store}` },
+  card: { pageTitle: "Cartão de contacto", back: "Voltar ao cartão de contacto", save: "Guardar o contacto", saveHint: "Adiciona este cartão aos contactos do seu telemóvel ou computador.", email: "Endereço de email", phone: "Telefone", website: "Site", store: (store) => `Visitar ${store}` },
   sentTitle: "A sua mensagem foi aceite para envio",
   sentBody: (store) => `A mensagem foi aceite para envio para o endereço de email de ${store}. Se ${store} responder, a resposta segue para o endereço que indicou. Não lhe é enviado mais nada.`,
   notices: {

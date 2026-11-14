@@ -1066,14 +1066,22 @@ export async function forgetLearnerPerson(
 ): Promise<number> {
   if (!isRedisConfigured()) return 0;
   const email = normaliseEmail(rawEmail);
+  // A store first given its statsId after its buyers' records were written (the erasure itself gives it one, as do
+  // some settings) kept them under the key made from its address (storeKey): read and deleted under both, so the
+  // person's passes and ledger never outlive the erasure (14 November 2026).
+  const fallback = sha(`nimbus-learn-store:${store.email}`).slice(0, 32);
+  const storeKeys = [...new Set([storeKey(store), fallback])];
+  const who = emailKey(email);
   // The passes in their exact shape (CX-123 rules 24 and 28): read as none, their records would stay after the person.
-  const held = stringList(repliesFor(await redisPipeline([["SMEMBERS", passesKey(store, email)]]), 1)?.[0]);
-  if (held === null) throw new UnknownReplyError("the passes of a person being deleted");
-  const passes = held.filter((h) => /^[0-9a-f]{64}$/.test(h));
+  const held: string[] = [];
+  for (const key of storeKeys) {
+    const list = stringList(repliesFor(await redisPipeline([["SMEMBERS", `nl:learn:passes:${key}:${who}`]]), 1)?.[0]);
+    if (list === null) throw new UnknownReplyError("the passes of a person being deleted");
+    held.push(...list);
+  }
+  const passes = [...new Set(held)].filter((h) => /^[0-9a-f]{64}$/.test(h));
   const keys = [
-    ledgerKey(store, email),
-    paidCacheKey(store, email),
-    passesKey(store, email),
+    ...storeKeys.flatMap((key) => [`nl:learn:enr:${key}:${who}`, `nl:learn:paid:${key}:${who}`, `nl:learn:passes:${key}:${who}`]),
     ...passes.map((hash) => `nl:learn:pass:${hash}`),
     ...courses.flatMap((c) => [doneKey(c.courseId, email), ...c.moduleIds.map((m) => dripMailKey(c.courseId, email, m))]),
   ];

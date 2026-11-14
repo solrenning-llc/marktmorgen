@@ -307,6 +307,19 @@ export function doorFields(door: Door): Record<string, string> {
   return { ask: door.token };
 }
 
+/**
+ * The page a review form sends the buyer back to, with a word on what happened (`status`) and the part of the
+ * page to open on: the thanks page when the order was proven by its checkout session, else the review page with
+ * whatever proved the order. One rule for the route's answers and for the links the form draws itself ("Keep my
+ * review"), so both land on the same page. `fields` are the door's fields (doorFields).
+ */
+export function reviewPagePath(handle: string, back: "thanks" | "review", fields: Record<string, string>, productId: string, status: string, fragment = `r-${productId}`): string {
+  if (back === "thanks" && fields.session_id) {
+    return `/@${handle}/thanks?${new URLSearchParams({ session_id: fields.session_id, review: status, product: productId })}#${fragment}`;
+  }
+  return `/@${handle}/review?${new URLSearchParams({ ...fields, status, product: productId })}#${fragment}`;
+}
+
 export function readDoor(get: (name: string) => string): Door | null {
   const ask = get("ask").slice(0, 60);
   if (REVIEW_LINK_PATTERN.test(ask)) return { via: "ask", token: ask };

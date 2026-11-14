@@ -89,6 +89,30 @@ export function priorRefund(list: unknown, intent: string, invoice: string, curr
   return null;
 }
 
+/**
+ * What the disputes of a payment Stripe marks disputed say, from Stripe's list read exactly: "won" when every one of
+ * them was won by the creator (the money stayed with them: lib/retained-revenue.ts, DISPUTE_TAKES), "disputed" when
+ * any other status is there; "unknown" for a list that is not whole, that holds none, or a row that is not a dispute
+ * of this payment (rule 30) with a status. Stripe keeps a charge's `disputed` true after its dispute is won.
+ */
+export function disputesVerdict(list: unknown, intent: string, charge: unknown): "won" | "disputed" | "unknown" {
+  if (!list || typeof list !== "object" || Array.isArray(list)) return "unknown";
+  const field = (value: unknown, key: string): unknown =>
+    value && typeof value === "object" && !Array.isArray(value) ? Object.getOwnPropertyDescriptor(value, key)?.value : undefined;
+  const rows = field(list, "data");
+  if (field(list, "object") !== "list" || !Array.isArray(rows) || field(list, "has_more") !== false || rows.length === 0) return "unknown";
+  let won = true;
+  for (const row of rows) {
+    if (!row || typeof row !== "object" || Array.isArray(row) || field(row, "object") !== "dispute") return "unknown";
+    if (idOf(field(row, "payment_intent")) !== intent) return "unknown";
+    if (typeof charge === "string" && idOf(field(row, "charge")) !== charge) return "unknown";
+    const status = field(row, "status");
+    if (typeof status !== "string" || !status) return "unknown";
+    if (status !== "won") won = false;
+  }
+  return won ? "won" : "disputed";
+}
+
 export function refundState(refund: unknown, intent: string, amount: number, currency: string): "done" | "pending" | "failed" | "unknown" {
   if (!refund || typeof refund !== "object" || Array.isArray(refund)) return "unknown";
   const own = (key: string): unknown => Object.getOwnPropertyDescriptor(refund, key)?.value;
@@ -346,17 +370,22 @@ export async function giveBackUnused(
         await giveCallsBack().catch((failed) => console.error("giving back a closing's calls failed; not tried again", failed));
         throw error;
       }
-      if (!have) {
-        await giveCallsBack();
-        // On the closing day it is final, and its member is told honestly that it was not made automatically (not
-        // that the balance did not cover it), with what is left to give and the creator's contact.
+      // On the closing day it is final, and its member is told honestly that it was not made automatically (not
+      // that the balance did not cover it), with what is left to give and the creator's contact.
+      const notMade = async () => {
         if (options.final) {
           const amount = stillToGive(row.unused, row.paid.back ?? 0);
           await settle("over", amount);
           out.unmade.push({ sub: row.sub, amount, cur: row.paid.cur, email: row.paid.e });
         } else out.over += 1;
+      };
+      if (!have) {
+        await giveCallsBack();
+        await notMade();
         continue;
       }
+      // Set when every dispute of this payment was won: the refund is then made as any other's.
+      let won = false;
       try {
         const intent = row.paid.pi ?? (await intentOf(account, row.paid.inv, count));
         if (!intent) {
@@ -383,9 +412,24 @@ export async function giveBackUnused(
           throw new Error("what this payment's charge gave back could not be read");
         }
         if (charge.disputed) {
-          await settle("disputed");
-          out.disputed += 1;
-          continue;
+          // Stripe keeps `disputed` true after the creator won the dispute, and a won dispute left the money with
+          // them: the member is then owed the unused part as anyone is. One more call reads the payment's disputes,
+          // from the closing's budget; none left is not made, told as one past the budget is. A list that does not
+          // read throws, so the member is tried again, never settled on a guess (rules 24 and 30).
+          if (!(await take("calls", 1))) {
+            await notMade();
+            continue;
+          }
+          count();
+          const listed = await onAccount("GET", account, `/disputes?${new URLSearchParams({ payment_intent: intent, limit: "100" })}`);
+          const verdict = disputesVerdict(listed, intent, idOf(charge.id));
+          if (verdict === "unknown") throw new Error("the disputes of this payment could not be read whole");
+          if (verdict === "disputed") {
+            await settle("disputed");
+            out.disputed += 1;
+            continue;
+          }
+          won = true;
         }
         // One made here before, under this invoice: never a second.
         count();
@@ -427,6 +471,17 @@ export async function giveBackUnused(
         } catch (error) {
           if (error instanceof StripeError && error.code === "balance_insufficient") {
             await short(give);
+            continue;
+          }
+          if (won && error instanceof StripeError && (error.code === "charge_disputed" || error.code === "refund_disputed_payment")) {
+            // Taken here as a hypothesis, not read in Stripe's documentation: that Stripe takes a refund of a charge
+            // whose dispute was won. When it refuses, the member is never settled in silence: before the closing day
+            // it is tried again; on the closing day it is final and told, as a refund Stripe refused is.
+            if (options.final) await notMade();
+            else {
+              console.error("a closing refund of a payment whose dispute was won was refused by Stripe; tried again");
+              out.failed += 1;
+            }
             continue;
           }
           if (error instanceof StripeError && (error.code === "charge_disputed" || error.code === "refund_disputed_payment")) {

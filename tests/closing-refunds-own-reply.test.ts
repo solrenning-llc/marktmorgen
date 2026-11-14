@@ -48,6 +48,11 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     return Response.json({ id: "re_closeown1", object: "refund", amount: Number(body.get("amount")), currency: "usd", payment_intent: pi, status: "succeeded" });
   }
   if (path === "/refunds") return Response.json({ object: "list", data: [], has_more: false });
+  // A disputed charge has its disputes read (lib/closing-refunds.ts, disputesVerdict): this payment's own, lost.
+  if (path === "/disputes") {
+    const pi = String(url.searchParams.get("payment_intent"));
+    return Response.json({ object: "list", data: [{ id: "dp_closeown1", object: "dispute", status: "lost", charge: "ch_closeown1", payment_intent: pi }], has_more: false });
+  }
   return Response.json({ error: { message: "unexpected synthetic request" } }, { status: 404 });
 }) as typeof fetch;
 
@@ -173,7 +178,7 @@ async function main() {
   part("This payment's charge is not expanded (only its id)");
   await triedAgain("chargeid", true, { invoice: ownInvoice, listed: null, intent: (id) => ({ id, object: "payment_intent", latest_charge: "ch_closeown1" }) }, 1);
 
-  part("Control: this payment's own disputed charge still settles the member disputed, with nothing POSTed");
+  part("Control: this payment's own disputed charge, its dispute lost, still settles the member disputed, with nothing POSTed");
   const disputed = await run("owndisputed", true, { invoice: ownInvoice, listed: null, intent: (id) => ({ id, object: "payment_intent", latest_charge: charge({ payment_intent: id, disputed: true }) }) });
   is("nothing POSTed", posts, []);
   is("settled disputed", [disputed.settled, disputed.result?.disputed], ["disputed", 1]);

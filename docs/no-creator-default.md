@@ -42,9 +42,23 @@ No refund completion, loss elimination or automatic recovery is claimed from thi
 
 ## Remaining scope
 
-Account configuration and the listed checkout transport journeys now have regression evidence. Exhaustive proof for every sales/recovery path, the complete creator-charge inventory, paid-before-use credit admission, trial funding, first-failure suspension, disputes and guarantee exposure remain incomplete.
+Updated 11 November 2026 (Claude 1, complement C1-20261105-1919-C4-1 of 232 [CA1]). Account configuration and the listed checkout transport journeys have regression evidence. These were delivered by later units of 232 [CA1], merged and off until opening:
 
-Existing review found `addToNextInvoice` in `lib/billing.ts` called by `lib/usage-billing.ts`. Historical video invoice allowances and unfinished invoice records must be distinguished from current tier playback admission; their presence alone does not prove every current playback creates a postpaid charge. Raw-file access, player-token lifetime and physical supplier-byte costs require their separate lifecycle review. Preserve creator records and purchased buyer access.
+- the inventory of every charge to a creator, paid before or after use: unit 2 (PR #1376);
+- no charge after use (the usage cron puts nothing on an invoice): unit 3 (PR #1385);
+- the stop of every costly feature on the first day a renewal is declined (past_due): unit 4a (PR #1392);
+- a creator's dispute suspends the covered features and the disputed add-on is never sold again: unit 5 (PR #1403);
+- a refund never above what was paid (guarantee and unstarted yearly months): unit 6 (PR #1408).
+
+Still incomplete:
+
+- deadlines, set by costs, up to the studio's suspension and the store's closing while Stripe keeps a plan past_due or ends it, with export and deletion kept (the original unit 4c; the label 4c was reused for the API writes of PR #1480), together with a closed-plan store that still accepts a new review photo and imports at the Store plan's numbers, and the creator page photo in `app/api/store/photo/route.ts` without a pause;
+- reviewed funding of the free trial;
+- exhaustive proof that every sales and recovery path is a direct charge.
+
+Raw-file access, player-token lifetime and physical supplier-byte costs require their separate lifecycle review. Preserve creator records and purchased buyer access.
+
+History, before 11 November 2026: this section listed the creator-charge inventory, paid-before-use credit admission, trial funding, first-failure suspension, disputes and guarantee exposure as incomplete, and noted `addToNextInvoice` in `lib/billing.ts` called by `lib/usage-billing.ts`, whose historical video invoice allowances had to be told apart from current playback admission.
 
 ## Cost envelope before the regression
 

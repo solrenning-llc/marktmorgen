@@ -1,9 +1,9 @@
 /**
- * In forced colors the system paints every background in its own Canvas colour, so a bar, a meter's fill or a
- * day's mark drawn only as a coloured box became Canvas on Canvas and vanished: the studio's charts of visits and
+ * In forced colors the system paints every background in its own Canvas color, so a bar, a meter's fill or a
+ * day's mark drawn only as a colored box became Canvas on Canvas and vanished: the studio's charts of visits and
  * buying hours, its progress and usage meters, and the share bars of a store's reviews (WCAG 1.4.11 Non-text
  * Contrast; AX274 item 4, forced colors). app/globals.css now draws them, in forced colors only, in CanvasText,
- * the colour the person's theme gives to text: a fill marked .meter-fill, and .rv-bar's fill. Checked in local
+ * the color the person's theme gives to text: a fill marked .meter-fill, and .rv-bar's fill. Checked in local
  * Chromium with the real stylesheet; the marks are read from the components' source.
  */
 import { execFileSync } from "node:child_process";
@@ -47,11 +47,11 @@ try{
 type Colors = { canvas: string; text: string; fill: string; review: string; plain: string };
 const result = JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e", browserScript], { encoding: "utf8", timeout: 90_000, maxBuffer: 2_000_000 })) as Record<"active" | "none", Colors>;
 
-part("In forced colors, the fills are drawn in the text colour, not lost in the page's");
+part("In forced colors, the fills are drawn in the text color, not lost in the page's");
 is("a .meter-fill is drawn in CanvasText", result.active.fill, result.active.text);
 is("a review share bar is drawn in CanvasText", result.active.review, result.active.text);
-is("(a box with no mark still takes the page's colour, as the system decides)", result.active.plain !== result.active.text, true);
-is("outside forced colors a fill keeps its own colour", result.none.fill, "rgb(91, 79, 224)");
+is("(a box with no mark still takes the page's color, as the system decides)", result.active.plain !== result.active.text, true);
+is("outside forced colors a fill keeps its own color", result.none.fill, "rgb(91, 79, 224)");
 
 part("The studio's bars, meters and marks carry .meter-fill");
 for (const [file, least] of [

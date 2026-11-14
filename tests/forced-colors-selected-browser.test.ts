@@ -1,10 +1,10 @@
 /**
  * In forced colors (Windows High Contrast and the like), the system repaints every background with its own Canvas
- * colour, so a choice shown as chosen only by being a filled button (.btn-primary beside .btn-ghost or
+ * color, so a choice shown as chosen only by being a filled button (.btn-primary beside .btn-ghost or
  * .btn-secondary) looked exactly like the others: the inbox's filter tabs, and every toggle, segmented choice and
  * "you are here" button drawn that way (WCAG 1.4.1, 1.4.11; AX274 item 4, forced colors). The state is still in
  * aria-selected, aria-pressed or aria-current, so app/globals.css now draws those, in forced colors only, in the
- * system's Highlight colours, which the person's own theme chose to stand out. Checked in local Chromium with the
+ * system's Highlight colors, which the person's own theme chose to stand out. Checked in local Chromium with the
  * real stylesheet; outside forced colors nothing changes.
  */
 import { execFileSync } from "node:child_process";
@@ -53,6 +53,6 @@ const forced = result.active;
 is("forced colors: the selected tab does not look like the others", forced["tab-on"] !== forced["tab-off"], true);
 is("forced colors: a pressed button does not look like the others", forced["press-on"] !== forced["press-off"], true);
 is("forced colors: the page you are on does not look like the others", forced["here"] !== forced["there"], true);
-is("forced colors: the three are drawn alike, in the system's own colours for it", forced["tab-on"] === forced["press-on"] && forced["press-on"] === forced["here"], true);
+is("forced colors: the three are drawn alike, in the system's own colors for it", forced["tab-on"] === forced["press-on"] && forced["press-on"] === forced["here"], true);
 is("outside forced colors, the selected tab is drawn as before (a filled button, unlike the others)", result.none["tab-on"] !== result.none["tab-off"], true);
 done();

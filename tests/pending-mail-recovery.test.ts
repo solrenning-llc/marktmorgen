@@ -7,6 +7,7 @@ import { createCheckout } from '@/lib/store-checkout';
 import { readConfirmationOrigin, runOrderConfirmationMail, confirmationOriginRowKey } from '@/lib/order-confirmation-outbox';
 import { COMMIT_ORDER_CONFIRMATION } from '@/lib/orders';
 import {createLocalRedisPool} from './redis-connection-pool';
+import {withUpperHalfOrigin,UPPER_HALF} from './upper-half-origin';
 
 const now = 1_800_000_000_000;
 const recovery = () => ({
@@ -501,12 +502,14 @@ test('small funded successor grants compose both normal workers through an unsup
   try{
    Date.now=()=>started-73*3600000;
    f=await physicalPaidFixture();
-   const checkout=await createCheckout(f.store,f.product,'https://example.test',undefined,{},f.runtime);
+   // The origin id must have a preceding candidate below; see tests/upper-half-origin.ts.
+   const checkout=await withUpperHalfOrigin(f.store.statsId!,()=>createCheckout(f.store,f.product,'https://example.test',undefined,{},f.runtime));
    const session=f.sessions.get(checkout.id)!;
    Object.assign(session,{status:'complete',payment_status:'paid',amount_total:4000,customer_details:{email:'buyer@example.test'},
     payment_intent:{object:'payment_intent',status:'succeeded',amount_received:4000,currency:'usd',latest_charge:{object:'charge',paid:true,amount:4000,amount_refunded:0,currency:'usd',refunded:false,disputed:false}},
     shipping_details:{name:'Original Buyer',address:{line1:'1 Original Street',city:'Test City',country:'US'}}});
    id=originId();
+   assert.ok(id>=UPPER_HALF,'the original confirmation id is in the upper half');
   }finally{Object.defineProperty(Date,'now',descriptor);assert.deepEqual(Object.getOwnPropertyDescriptor(Date,'now'),descriptor);}
   const found=await readConfirmationOrigin(id,f.runtime);assert.ok(found);
   const row=found.row,keys=[confirmationOriginRowKey(id),`nl:order-confirmation:source:${id}`,'nl:order-confirmation:due',

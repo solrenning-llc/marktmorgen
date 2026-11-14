@@ -46,6 +46,18 @@ const subKey = (courseId: string, lessonId: string, who: string) => `nl:course:$
 const filesKey = (courseId: string, lessonId: string) => `nl:course:${courseId}:task:${lessonId}:files`;
 const waitingKey = (courseId: string) => `nl:course:${courseId}:tasks:waiting`;
 const allKey = (courseId: string) => `nl:course:${courseId}:tasks:all`;
+/**
+ * How many erasures of a student ran on a lesson's work lately (forgetTasksPerson), read by a hand-in before the work
+ * and checked at its write (#4271). A count for the lesson, never who: no key or value is left that names the erased
+ * student (tests/erasure-journey.ts).
+ */
+const erasedKey = (courseId: string, lessonId: string) => `nl:course:${courseId}:task:${lessonId}:erased`;
+/**
+ * How long the count is kept after the last erasure: far past the longest a hand-in may take from its read to its
+ * write (HAND_IN_LOCK_SECONDS, checked before the write), so a hand-in that read before an erasure always finds the
+ * count changed. It then goes by itself.
+ */
+const ERASED_MARK_SECONDS = 3_600;
 const bytesKey = (room: string) => `nl:tasks:bytes:${room}`;
 const takenKey = (path: string) => `nl:tasks:taken:${createHash("sha256").update(path).digest("hex").slice(0, 40)}`;
 /** How long a file's mark of the room it took is kept: long enough for the route to give it back at once. */
@@ -241,6 +253,15 @@ export async function submissionOf(courseId: string, lessonId: string, who: stri
   return (await readSubmission(courseId, lessonId, who)).found;
 }
 
+/** The lesson's count of erasures as read, "" for none, for a hand-in's write (HAND_IN_WRITE_IF). */
+async function readErasedMark(courseId: string, lessonId: string): Promise<string> {
+  if (!isRedisConfigured() || !ITEM_ID_PATTERN.test(lessonId)) return "";
+  const reply = repliesFor(await redisPipeline([["GET", erasedKey(courseId, lessonId)]]), 1)?.[0];
+  if (reply === null) return "";
+  if (typeof reply !== "string" || !/^[1-9]\d{0,15}$/.test(reply)) throw new UnknownReplyError("the count of erasures on an assignment");
+  return reply;
+}
+
 /** The work as read, and its exact text ("" for none), for a write made only over that same text (HAND_IN_WRITE_IF). */
 async function readSubmission(courseId: string, lessonId: string, who: string): Promise<{ found: Submission | null; raw: string }> {
   if (!isRedisConfigured() || !WHO.test(who) || !ITEM_ID_PATTERN.test(lessonId)) return { found: null, raw: "" };
@@ -410,7 +431,8 @@ export type HandIn = { state: TaskState; replaced: HandedFile | null; freedBytes
 
 /**
  * Another hand-in of the same work was written between this one's read and its write (its lease ran out while it
- * waited; Codex P and Codex N on #3135): nothing of this one was written, and the work keeps the other's.
+ * waited; Codex P and Codex N on #3135), a student's work on the lesson was erased in between (#4271), or the
+ * hand-in took longer than its lock from its read to its write: nothing of this one was written.
  */
 export class HandInChangedError extends Error {
   constructor() {
@@ -429,13 +451,19 @@ export class HandInClosedError extends Error {
 
 /**
  * The work written only over the one it was read as (KEYS: the work, the lesson's files, the course's waiting list,
- * its list of all work; ARGV: the work as read or "" for none, the new work, the file's path or "", its bytes, "1"
- * when a person reads it, when, the lists' member). 1 when written, 0 when the work changed since and nothing was
- * written; so the file it replaced is answered, deleted and given back by one hand-in only.
+ * its list of all work, the lesson's count of erasures; ARGV: the work as read or "" for none, the new work, the
+ * file's path or "", its bytes, "1" when a person reads it, when, the lists' member, the count as read or ""
+ * for none). 1 when written, 0 when the work or the count changed since and nothing was written; so the file it
+ * replaced is answered, deleted and given back by one hand-in only, and a hand-in read before a student's erasure
+ * never brings their work back after it (another student's erasure on the lesson in between refuses it too; they
+ * hand in again), even a first one, whose "no work yet" reads the same after the erasure
+ * (#4271).
  */
-export const HAND_IN_WRITE_IF = `-- marktmorgen:hand-in-write-if:v1
+export const HAND_IN_WRITE_IF = `-- marktmorgen:hand-in-write-if:v2
 local now = redis.call('GET', KEYS[1]) or ''
 if now ~= ARGV[1] then return 0 end
+local gone = redis.call('GET', KEYS[5]) or ''
+if gone ~= ARGV[8] then return 0 end
 redis.call('SET', KEYS[1], ARGV[2])
 if ARGV[3] ~= '' then redis.call('HSET', KEYS[2], ARGV[3], ARGV[4]) end
 if ARGV[5] == '1' then redis.call('ZADD', KEYS[3], ARGV[6], ARGV[7]) else redis.call('ZREM', KEYS[3], ARGV[7]) end
@@ -466,6 +494,9 @@ export async function handIn(input: {
 }): Promise<HandIn> {
   const { courseId, lessonId, who, task } = input;
   const at = input.now ?? Math.floor(Date.now() / 1000);
+  // The count of erasures first, then the work: an erasure between the two leaves the count changed at the write (#4271).
+  const readAt = Date.now();
+  const gone = await readErasedMark(courseId, lessonId);
   const read = await readSubmission(courseId, lessonId, who);
   const before = read.found;
   // Use the same snapshot as the conditional write: the route's earlier read may predate an approval.
@@ -487,6 +518,8 @@ export async function handIn(input: {
   const newEntry = Boolean(input.file) && input.file?.path !== before?.file?.path;
   const grown = recordBytes(JSON.stringify(kept), 3) - (before ? recordBytes(JSON.stringify(before), 3) : 0) + (newEntry ? ENTRY_BYTES : 0);
   if (grown > 0) await needData(input.data, [{ slot: TASKS_SLOT(courseId), bytes: grown }]);
+  // Never written past its lock's time since the read: the count of erasures is kept far longer than that (ERASED_MARK_SECONDS).
+  if (Date.now() - readAt > HAND_IN_LOCK_SECONDS * 1000) throw new HandInChangedError();
   input.writing?.();
   // Written only over the work read above (HAND_IN_WRITE_IF): a hand-in whose lease ran out while another replaced the
   // work writes nothing, so the earlier file is answered as replaced, deleted and given back by one hand-in only, and
@@ -496,11 +529,12 @@ export async function handIn(input: {
       [
         "EVAL",
         HAND_IN_WRITE_IF,
-        4,
+        5,
         subKey(courseId, lessonId, who),
         filesKey(courseId, lessonId),
         waitingKey(courseId),
         allKey(courseId),
+        erasedKey(courseId, lessonId),
         read.raw,
         JSON.stringify(kept),
         input.file?.path ?? "",
@@ -508,6 +542,7 @@ export async function handIn(input: {
         task.review ? "1" : "0",
         at,
         member,
+        gone,
       ],
     ]),
     1,
@@ -911,6 +946,15 @@ export async function forgetTasksPerson(
   beforeDeleteFiles?: (paths: string[]) => Promise<void>,
 ): Promise<{ records: number; files: string[] }> {
   if (!lessonIds.length || !WHO.test(who) || !isRedisConfigured()) return { records: 0, files: [] };
+  // Counted first, on every lesson, even where nothing is handed in yet: a hand-in that read before this finds the count
+  // changed at its write and writes nothing (HAND_IN_WRITE_IF, #4271). A count not confirmed is an erasure not finished.
+  const marks = repliesFor(
+    await redisPipeline(lessonIds.flatMap((l) => [["INCR", erasedKey(courseId, l)], ["EXPIRE", erasedKey(courseId, l), ERASED_MARK_SECONDS]])),
+    lessonIds.length * 2,
+  );
+  if (!marks || !marks.every((reply, i) => (i % 2 === 0 ? (countOf(reply) ?? 0) > 0 : reply === 1))) {
+    throw new UnknownReplyError("the counts of erasures on a course's assignments");
+  }
   const raws = repliesFor(await redisPipeline(lessonIds.map((l) => ["GET", subKey(courseId, l, who)])), lessonIds.length);
   if (!raws || !raws.every((raw) => raw === null || typeof raw === "string")) throw new UnknownReplyError("a student's work on a course's assignments");
   const handed = lessonIds.flatMap((lessonId, i) => (typeof raws[i] === "string" ? [{ lessonId, file: fileOfRecord(raws[i] as string) }] : []));

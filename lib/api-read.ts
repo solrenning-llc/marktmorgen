@@ -237,10 +237,15 @@ async function scanLeads(store: Store, cursor: string | null, onlyAgreed: boolea
  * page at its most set aside before the scan, settled at what it read and
  * sends before anything is sent, as the list's.
  */
-export async function members(store: Store, cursor: string | null, hold: Hold): Promise<Page<Record<string, unknown>> | Response> {
+export async function members(store: Store, cursor: string | null, hold: Hold): Promise<(Page<Record<string, unknown>> & { unreadable?: number }) | Response> {
+  // A cursor this list never gave ("undefined", "null", text, a sign or a space) is refused, never read as the start of
+  // the list again, which a sync would take for new members (Claude 7's hunt C7, ALTO). No cursor begins at the start.
+  if (cursor !== null && cursor !== "" && !/^\d{1,20}$/.test(cursor)) {
+    return apiError(400, "invalid_cursor", "This cursor is not one this list gave. Send the next value of the page before, or leave cursor out to start from the beginning.");
+  }
   const id = store.community?.id;
   if (!id) return { data: [], next: null };
-  const start = cursor && /^\d{1,20}$/.test(cursor) ? cursor : "0";
+  const start = cursor || "0";
   return scannedPage(hold, listPageMost("members", API_PAGE), async () => {
     const page = await memberPage(id, start, API_PAGE);
     const out = {
@@ -256,6 +261,8 @@ export async function members(store: Store, cursor: string | null, hold: Hold): 
         last_seen_at: isoFromSeconds(m.seen),
       })),
       next: page.next === "0" ? null : page.next,
+      // How many members on this page could not be read, only when there are any, as the leads say (Claude 7's hunt C7).
+      ...(page.unreadable ? { unreadable: page.unreadable } : {}),
     };
     return { out, work: scannedPageWork(2, page.bytes, sentBytes(out)) };
   });

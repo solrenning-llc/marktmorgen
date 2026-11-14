@@ -752,7 +752,7 @@ export async function directorySize(id: string): Promise<number> {
  * Everyone who has come in, for the creator's list: a page at a time, in the
  * order Redis keeps them. `cursor` is Redis's own, "0" to begin.
  */
-export async function memberPage(id: string, cursor: string, count = 200): Promise<{ members: Member[]; next: string; total: number; bytes: number }> {
+export async function memberPage(id: string, cursor: string, count = 200): Promise<{ members: Member[]; next: string; total: number; bytes: number; unreadable: number }> {
   const both = repliesFor(
     await redisPipeline([
       ["HSCAN", membersKey(id), cursor, "COUNT", count],
@@ -769,13 +769,16 @@ export async function memberPage(id: string, cursor: string, count = 200): Promi
   const total = countOf(both?.[1]);
   if (next === null || !flat || flat.length % 2 !== 0 || total === null) throw new UnknownReplyError("a page of a community's members");
   const members: Member[] = [];
+  // A member whose record does not read is counted, never left out without a word (rule 24; Claude 7's hunt C7).
+  let unreadable = 0;
   for (let i = 0; i + 1 < flat.length; i += 2) {
     const member = parseMember(flat[i + 1]);
     if (member) members.push(member);
+    else unreadable += 1;
   }
   // The bytes the scan answered with, for a reading that pays for them (lib/api-read.ts, members).
   const bytes = flat.reduce((n, v) => n + Buffer.byteLength(v), 0);
-  return { members, next, total, bytes };
+  return { members, next, total, bytes, unreadable };
 }
 
 /** Every member who asked for announcement emails and is still here. */

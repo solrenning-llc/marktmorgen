@@ -271,7 +271,9 @@ async function tell(store: Store, decision: StoreDecision, kept: KeptAppeal, ori
   const sent = await sendEmail({ meter: { by: "company" },
     from: NIMBUS_FROM,
     to: SUPPORT_EMAIL,
-    replyTo: store.email,
+    // No Reply-To outside the company: this email carries the notice's link, which decides this request and shows the
+    // notifier's details, and a Reply quotes it to whoever the Reply-To names (HIGH on #3612 @0e070fb08).
+    replyTo: SUPPORT_EMAIL,
     subject: `Request to look again ${appeal.number} from @${store.handle}`.slice(0, 200),
     text: [
       `@${store.handle} asks us to look again at a decision (request ${appeal.number}, sent ${appeal.at}).`,
@@ -284,9 +286,10 @@ async function tell(store: Store, decision: StoreDecision, kept: KeptAppeal, ori
       "",
       link
         ? `Open the notice to act on it (this link works for 400 days from this email; a later Send it again sends a new one): ${origin}/takedown/${link}`
-        : `The notice ${decision.report} is no longer kept, so there is no link to it: answer the creator by replying to this email.`,
+        : `The notice ${decision.report} is no longer kept, so there is no link to it.`,
       `The store is ${origin}/@${store.handle}.`,
-      "A person decides, and the answer gives its reason. Reply to this email to answer the creator.",
+      "A person decides, and the answer gives its reason.",
+      `To write to the creator, start a new email to ${store.email}. Do not forward this one: its link decides the request.`,
     ].join("\n"),
     // One key per try: a retry of one try never sends twice; a new try is a new email, at most MAX_TELL_TRIES.
     idempotencyKey: `appeal-${appeal.number}-${counted.tries}`,

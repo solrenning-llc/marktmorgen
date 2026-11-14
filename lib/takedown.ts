@@ -58,7 +58,9 @@ export async function fileReport(input: ReportInput, ip: string, origin: string)
   const sent = await sendEmail({ meter: { by: "company" },
     from: NIMBUS_FROM,
     to: SUPPORT_EMAIL,
-    replyTo: report.email,
+    // No Reply-To outside the company: this email carries the notice's link, and a Reply quotes it to the notifier
+    // (HIGH on #3612 @0e070fb08). The notifier's address is in the From line, for a new email.
+    replyTo: SUPPORT_EMAIL,
     subject: `${report.kind === "copyright" ? "Copyright notice" : "Notice of illegal content"}${report.handle ? ` about @${report.handle}` : ""}`.slice(0, 200),
     text: [
       `A ${report.kind === "copyright" ? "copyright notice (DMCA, 17 U.S.C. § 512(c)(3))" : "notice of illegal content (EU Digital Services Act, Art. 16)"} was sent from ${origin}/report.`,
@@ -78,7 +80,7 @@ export async function fileReport(input: ReportInput, ip: string, origin: string)
       "Open it to act on it (the link works for 60 days):",
       `${origin}/takedown/${token}`,
       "",
-      `Notice ${id}, ${report.at}. Reply to this email to answer the sender.`,
+      `Notice ${id}, ${report.at}. To write to the sender, start a new email to ${report.email}. Do not forward this one: its link acts on the notice.`,
     ]
       .filter((line) => line !== "")
       .join("\n"),

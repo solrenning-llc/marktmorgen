@@ -113,7 +113,7 @@ export default async function TakedownPage({ params }: Params) {
         </LegalSection>
       ) : (
         <LegalSection title="The store">
-          <p>The address does not name a store on marktmorgen.com, or the store no longer exists. Check it by hand and answer the sender by replying to the email.</p>
+          <p>The address does not name a store on marktmorgen.com, or the store no longer exists. Check it by hand. To answer the sender, start a new email to their address above; do not forward the notice email.</p>
         </LegalSection>
       )}
     </LegalPage>

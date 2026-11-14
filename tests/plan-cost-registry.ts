@@ -1339,6 +1339,8 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/store-allowance-rules.ts", names: ["STORE_ALLOWANCES", "studio"] },
       { file: "lib/studio-allowance-rules.ts", names: ["STUDIO_PAGE_UNITS", "ESSENTIAL_PER_DAY", "ESSENTIAL_NEEDS"] },
       { file: "lib/studio-route.ts", names: ["countStudio", "studio-essential"] },
+      // Contact paste admits its complete command/transfer work before any contact read or atomic import write; same studio figure, no extra allowance.
+      { file: "lib/contact-import-rules.ts", names: ["CONTACT_IMPORT_WORK", "pastedContactWork"] },
       // An active store may clear its assistant notes repeatedly: settings admission takes one studio request first.
       { file: "app/api/store/assistant-memory/route.ts", names: ["guardStoreWrite", "forgetMemory"] },
       { file: "lib/assistant-memory-store.ts", names: ["MEMORY_FORGET_COMMANDS"] },

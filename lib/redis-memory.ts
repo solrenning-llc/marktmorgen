@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+const sha1ForContactImport = (value: string) => createHash("sha1").update(value).digest("hex");
 import { PATH_BOARD_ROOM_BYTES, readPathBoard, pathBoardMember } from "@/lib/path-board-rules";
 
 /** lib/store-data.ts NOTES_TOTAL_FIELD: the room's one slot for every student's lesson notes (lib/lesson-notes.ts). */
@@ -129,6 +130,36 @@ export class MemoryRedis {
         return to < from ? "" : new TextDecoder().decode(bytes.slice(from, to + 1));
       }
       case "EVAL": {
+        if (key.startsWith("-- marktmorgen:contact-import:v1\n")) {
+          if (args[0] !== "4" || args.length <= 5 || (args.length - 5) % 6 !== 0) throw new Error("invalid contact import");
+          const [, contacts, erased, agreed, unsub, ...rows] = args;
+          for (const [i, path] of [contacts, erased, agreed, unsub].entries()) {
+            const type = this.run(["TYPE", path]);
+            if (type !== "none" && type !== (i < 2 ? "hash" : "string")) throw new Error("invalid contact import type");
+          }
+          for (const path of [agreed, unsub]) {
+            const n = this.run(["GET", path]);
+            if (n !== null && (typeof n !== "string" || !/^\d+$/.test(n) || !Number.isSafeInteger(Number(n)) || Number(n) > Number.MAX_SAFE_INTEGER - rows.length / 6)) throw new Error("invalid contact import count");
+          }
+          for (let i = 0; i < rows.length; i += 6) {
+            if (!["0", "1"].includes(rows[i + 4]) || !["0", "1"].includes(rows[i + 5])) throw new Error("invalid contact import flags");
+          }
+          const out: number[] = [];
+          let joined = 0, left = 0;
+          for (let i = 0; i < rows.length; i += 6) {
+            const [email, print, was, value, add, stop] = rows.slice(i, i + 6);
+            if (this.run(["HEXISTS", erased, print]) === 1) { out.push(-1); continue; }
+            const current = this.run(["HGET", contacts, email]);
+            // The stand-in's SHA-1 is provided by Node, exactly as redis.sha1hex.
+            const seen = typeof current === "string" ? sha1ForContactImport(current) : "";
+            if (seen !== was) { out.push(0); continue; }
+            this.run(["HSET", contacts, email, value]);
+            joined += Number(add); left += Number(stop); out.push(1);
+          }
+          if (joined) this.run(["INCRBY", agreed, joined]);
+          if (left) this.run(["INCRBY", unsub, left]);
+          return out;
+        }
         // lib/request-guard.ts ESSENTIAL_BELOW: one more on an essential counter only while fewer than ARGV[1] were taken.
         if (key.startsWith("-- marktmorgen:essential-below:v1\n") && args[0] === "1" && args.length === 4) {
           const [, counter, below, window] = args;

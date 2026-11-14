@@ -1,0 +1,130 @@
+import assert from 'node:assert/strict';
+import {test} from 'node:test';
+import {NextRequest} from 'next/server';
+import {POST} from '@/app/api/store/mail/route';
+import {SESSION_COOKIE,openSession} from '@/lib/auth';
+import {importContacts,importContactRows,leadsKey} from '@/lib/contacts';
+import {claimHandle,ensureListId,ensureStatsId,ensureStoreId,setSubscription,storeForEmail} from '@/lib/store';
+import {erasePerson} from '@/lib/person-erasure';
+import {suppressedCommand} from '@/lib/suppression';
+import {healthId} from '@/lib/mail-health';
+import {store as redis} from './redis-stub';
+import {paidPeriod} from './billing-period-fixture';
+globalThis.fetch=(async()=>{throw Error('No external requests in contact review');}) as typeof fetch;
+async function setup(){
+ redis.clear();const owner='contact-review@example.com';await claimHandle(owner,'contactreview','Contact review','');await ensureStatsId(owner);await ensureStoreId(owner);await ensureListId(owner);
+ await setSubscription(owner,{customerId:'cus_contacts',subscriptionId:'sub_contacts',active:true,tier:'pro',period:paidPeriod()});
+ return {owner,shop:(await storeForEmail(owner))!};
+}
+test('a partial second paste batch cannot leave imported contacts outside the ramp',async()=>{
+ const {owner,shop}=await setup();const list=shop.listId!;const emails=Array.from({length:501},(_,i)=>`contact${i}@example.com`);const original=redis.pipeline;let reads=0;let response!:Response;
+ try{
+  redis.pipeline=async commands=>{
+   if(commands.some(c=>c[0]==='HMGET'&&c[1]===leadsKey(list))&&++reads===2)return [];
+   return original.call(redis,commands);
+  };
+  const cookie=`${SESSION_COOKIE}=${await openSession(owner)}`;
+  response=await POST(new NextRequest('https://marktmorgen.com/api/store/mail',{method:'POST',headers:{cookie,'content-type':'application/json'},body:JSON.stringify({action:'import',confirm:true,text:emails.join('\n')})}));
+ }finally{redis.pipeline=original;}
+ const count=Number(redis.run(['HLEN',leadsKey(list)]));const ramp=redis.run(['GET',`nl:mail:ramp:${healthId(shop)}`]);
+ console.log('LATE_PASTE',reads,response.status,count,ramp);
+ assert.equal(reads,2);assert.ok(count>=500,'the earlier confirmed batch must have really landed');
+ assert.ok(ramp,'500 imported addresses still require the existing import ramp');
+ const body=await response.json();assert.equal(body.added,500);assert.equal(body.already,0);assert.equal(body.notImported.left,1);assert.match(body.notImported.message,/not imported.*try again/i);
+});
+for(const mode of ['file','paste'] as const){
+ test(`a completed real erasure between the ${mode} read and write cannot restore the contact`,async()=>{
+  const {shop}=await setup();const email='erased-during-import@example.com',list=shop.listId!;const original=redis.pipeline;let erased=false;
+  try{
+   redis.pipeline=async commands=>{
+    if(!erased&&commands.some(c=>c[0]==='EVAL'&&String(c[1]).startsWith('-- marktmorgen:store-data'))){
+     erased=true;const result=await erasePerson(shop,email,{kind:'person'});assert.equal(result.ok,true,'real erasure must complete before the old writer resumes');
+    }
+    return original.call(redis,commands);
+   };
+   const result=mode==='file'?await importContactRows(list,[{email,name:'Synthetic',tags:[]}],shop):await importContacts(list,[email],shop);
+   console.log('ERASURE_IMPORT_RACE',mode,JSON.stringify(result));
+  }finally{redis.pipeline=original;}
+  assert.equal(erased,true);
+  assert.equal(redis.run(suppressedCommand(list,email)),1);
+  const held=redis.run(['HGET',leadsKey(list),email]);console.log('RESTORED_CONTACT',mode,typeof held==='string');
+  assert.equal(held,null,'a completed erasure cannot be undone by the stale import');
+ });
+}
+
+for (const reply of [[], [[]], [[1, 1]], [["1"]], [[null]], [[true]]]) {
+ test(`unknown atomic import acknowledgement ${JSON.stringify(reply)} never falls back to HSET`, async()=>{
+  const {shop}=await setup(); const original=redis.pipeline; let script=0, fallback=0;
+  try{
+   redis.pipeline=async commands=>{
+    if(commands.some(c=>c[0]==='EVAL'&&String(c[1]).startsWith('-- marktmorgen:contact-import:'))){script++;return reply;}
+    if(script&&commands.some(c=>c[0]==='HSET'&&c[1]===leadsKey(shop.listId!)))fallback++;
+    return original.call(redis,commands);
+   };
+   await assert.rejects(importContactRows(shop.listId!,[{email:'unconfirmed@example.com',name:'Synthetic',tags:[]}],shop),/not imported.*try again/i);
+  }finally{redis.pipeline=original;}
+  assert.equal(script,1);assert.equal(fallback,0);assert.equal(redis.run(['HLEN',leadsKey(shop.listId!)]),0);
+ });
+}
+test('paste refuses an unknown additional studio debit before contact work',async()=>{
+ const {owner,shop}=await setup();const original=redis.pipeline;let contactReads=0,contactWrites=0,admissions=0;
+ let response!:Response;
+ try{
+  redis.pipeline=async commands=>{
+   if(commands.some(c=>c[0]==='INCRBY'&&String(c[1]).startsWith('nl:allow:studio:')&&Number(c[2])>1)){admissions++;return [null,undefined];}
+   if(commands.some(c=>c[0]==='HMGET'&&c[1]===leadsKey(shop.listId!)))contactReads++;
+   if(commands.some(c=>c[0]==='EVAL'&&String(c[1]).startsWith('-- marktmorgen:contact-import:')))contactWrites++;
+   return original.call(redis,commands);
+  };
+  const cookie=`${SESSION_COOKIE}=${await openSession(owner)}`;
+  response=await POST(new NextRequest('https://marktmorgen.com/api/store/mail',{method:'POST',headers:{cookie,'content-type':'application/json'},body:JSON.stringify({action:'import',confirm:true,text:'blocked@example.com'})}));
+ }finally{redis.pipeline=original;}
+ assert.equal(response.status,429);assert.equal(admissions,1);assert.equal(contactReads,0);assert.equal(contactWrites,0);
+ assert.equal(redis.run(['HLEN',leadsKey(shop.listId!)]),0);
+});
+test('an applied script with a lost answer is confirmed read-only and still starts the import ramp',async()=>{
+ const {owner,shop}=await setup();const original=redis.pipeline;let scripts=0;
+ let response!:Response;
+ try{
+  redis.pipeline=async commands=>{
+   const result=await original.call(redis,commands);
+   if(commands.some(c=>c[0]==='EVAL'&&String(c[1]).startsWith('-- marktmorgen:contact-import:'))){scripts++;return [];}
+   return result;
+  };
+  const cookie=`${SESSION_COOKIE}=${await openSession(owner)}`;
+  response=await POST(new NextRequest('https://marktmorgen.com/api/store/mail',{method:'POST',headers:{cookie,'content-type':'application/json'},body:JSON.stringify({action:'import',confirm:true,text:Array.from({length:100},(_,i)=>`landed${i}@example.com`).join('\n')})}));
+ }finally{redis.pipeline=original;}
+ assert.equal(scripts,1,'no script replay after unknown ACK');assert.equal(response.status,200);
+ const body=await response.json();assert.equal(body.added,100);assert.equal(body.notImported,null);
+ assert.ok(redis.run(['GET',`nl:mail:ramp:${healthId(shop)}`]));
+ assert.equal(redis.run(['GET',`nl:store:leads:${shop.listId}:agreed`]),'100');
+});
+for (const later of [false, true]) for (const landed of [false, true]) {
+ test(`unknown ${later?'later':'first'} write reports only confirmed progress and retains protection (applied=${landed})`,async()=>{
+  const {owner,shop}=await setup();const original=redis.pipeline;
+  const total=later?501:100,confirmed=later?500:0,uncertain=later?1:100;
+  let scripts=0,recovering=false,response!:Response;
+  try {
+   redis.pipeline=async commands=>{
+    if(commands.some(c=>c[0]==='EVAL'&&String(c[1]).startsWith('-- marktmorgen:contact-import:'))){
+     scripts++;
+     if(scripts===(later?2:1)){
+      if(landed)await original.call(redis,commands);
+      recovering=true;return [];
+     }
+    }
+    if(recovering&&commands.some(c=>c[0]==='HMGET'&&c[1]===leadsKey(shop.listId!)))return [];
+    return original.call(redis,commands);
+   };
+   const cookie=`${SESSION_COOKIE}=${await openSession(owner)}`;
+   response=await POST(new NextRequest('https://marktmorgen.com/api/store/mail',{method:'POST',headers:{cookie,'content-type':'application/json'},body:JSON.stringify({action:'import',confirm:true,text:Array.from({length:total},(_,i)=>`unknown${i}@example.com`).join('\n')})}));
+  }finally{redis.pipeline=original;}
+  assert.equal(response.status,200);assert.equal(scripts,later?2:1,'no replay');
+  const body=await response.json();
+  assert.equal(body.added,confirmed);assert.equal(body.already,0);
+  assert.equal(body.notConfirmed.left,uncertain);assert.match(body.notConfirmed.message,/outcome.*could not be confirmed/i);
+  assert.equal(body.notImported,null,'a possibly applied write must not be asserted absent');
+  assert.equal(Number(redis.run(['HLEN',leadsKey(shop.listId!)])),confirmed+(landed?uncertain:0));
+  assert.ok(redis.run(['GET',`nl:mail:ramp:${healthId(shop)}`]),'protect even a possibly applied first batch without claiming it was imported');
+ });
+}

@@ -8,6 +8,18 @@ import { CHAT_TOKEN, MAX_MESSAGE, MAX_NAME, MIN_MESSAGE, POLL_FOR_MINUTES, POLL_
 type Line = { at: number; from: "visitor" | "store"; text: string };
 type Thread = { token: string; status: "open" | "closed"; messages: Line[] };
 type Notice = "email" | "short" | "limited" | "closed" | "error" | "gone";
+/** Where the focus goes once a change is drawn: the panel's title, the first field of its form, or the button that opens it. */
+type FocusTo = "title" | "field" | "launcher";
+type FocusAsk = { to: FocusTo; n: number } | null;
+const focusRequest = (last: FocusAsk, to: FocusTo) => ({ to, n: (last?.n ?? 0) + 1 });
+
+/** Closes the panel, and takes the focus back to its button only when it was in the panel (or nowhere), never from elsewhere on the page (2.4.3, 3.2.5). */
+function closePanel(panel: HTMLElement | null, setOpen: (open: boolean) => void, setFocusAsk: (ask: (last: FocusAsk) => FocusAsk) => void): void {
+  const at = document.activeElement;
+  const inside = !at || at === document.body || Boolean(panel?.contains(at));
+  setOpen(false);
+  if (inside) setFocusAsk((last) => focusRequest(last, "launcher"));
+}
 
 const clock = () => Date.now();
 const storageKey = (handle: string) => `mm-chat:${handle}`;
@@ -63,6 +75,21 @@ export function StoreChat({ handle, storeName, language }: { handle: string; sto
   const [justSent, setJustSent] = useState(false);
   const typedAt = useRef(0);
   const list = useRef<HTMLDivElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
+  const heading = useRef<HTMLHeadingElement>(null);
+  const launcher = useRef<HTMLButtonElement>(null);
+  const [focusAsk, setFocusAsk] = useState<FocusAsk>(null);
+  const focusNext = (to: FocusTo) => setFocusAsk((last) => focusRequest(last, to));
+
+  // Moved only after a change the person made, once it is drawn, so the focus never falls to the page (2.4.3).
+  useEffect(() => {
+    if (!focusAsk) return;
+    if (focusAsk.to === "launcher") launcher.current?.focus();
+    else if (focusAsk.to === "title") heading.current?.focus();
+    else panel.current?.querySelector<HTMLElement>("form input, form textarea")?.focus();
+  }, [focusAsk]);
+
+  const close = () => closePanel(panel.current, setOpen, setFocusAsk);
 
   // A conversation started here before, or the link in an answer's email.
   useEffect(() => {
@@ -111,7 +138,7 @@ export function StoreChat({ handle, storeName, language }: { handle: string; sto
   useEffect(() => {
     if (!open) return;
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
+      if (event.key === "Escape") closePanel(panel.current, setOpen, setFocusAsk);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -147,32 +174,34 @@ export function StoreChat({ handle, storeName, language }: { handle: string; sto
     setThread(null);
     setJustSent(false);
     setNotice(null);
+    // The button pressed goes with the conversation: the focus goes to the new form's first field.
+    focusNext("field");
   }
 
   return (
     <div className="st-chat fixed bottom-4 right-4 z-40 flex flex-col items-end gap-3 print:hidden">
       {open ? (
-        <div role="dialog" aria-label={w.title(storeName)} className="st-card st-chat-panel flex max-h-[min(36rem,75vh)] w-[min(22rem,calc(100vw-2rem))] flex-col p-4 shadow-lg">
+        <div ref={panel} role="dialog" aria-label={w.title(storeName)} className="st-card st-chat-panel flex max-h-[min(36rem,75vh)] w-[min(22rem,calc(100vw-2rem))] flex-col p-4 shadow-lg">
           <div className="flex items-start justify-between gap-3">
-            <h2 className="font-display text-lg font-semibold leading-snug">{w.title(storeName)}</h2>
-            <button type="button" onClick={() => setOpen(false)} className="st-muted text-sm underline" aria-label={w.close}>
+            <h2 ref={heading} tabIndex={-1} className="font-display text-lg font-semibold leading-snug">
+              {w.title(storeName)}
+            </h2>
+            <button type="button" onClick={close} className="st-muted text-sm underline" aria-label={w.close}>
               {w.close}
             </button>
           </div>
-          {thread ? (
-            <div ref={list} className="mt-3 flex-1 space-y-2 overflow-y-auto" aria-live="polite" data-chat-thread>
-              {thread.messages.map((m, i) => (
-                <div key={`${m.at}-${i}`} className={m.from === "visitor" ? "ml-8 text-right" : "mr-8"}>
-                  <p className={`inline-block whitespace-pre-line rounded-xl px-3 py-2 text-left text-sm ${m.from === "visitor" ? "st-chat-mine" : "st-chat-theirs"}`}>{m.text}</p>
-                  <p className="st-muted mt-0.5 text-xs">{m.from === "visitor" ? w.you : storeName}</p>
-                </div>
-              ))}
-              {thread.status === "closed" ? <p className="st-muted text-xs">{w.closedNote}</p> : null}
-            </div>
-          ) : (
-            <p className="st-muted mt-2 text-sm">{w.intro(storeName)}</p>
-          )}
-          {justSent && thread ? <p className="st-muted mt-2 text-xs">{w.sent}</p> : null}
+          {/* There before the first message, so the first one is said too (4.1.3). */}
+          <div ref={list} className={thread ? "mt-3 flex-1 space-y-2 overflow-y-auto" : undefined} aria-live="polite" data-chat-thread>
+            {(thread?.messages ?? []).map((m, i) => (
+              <div key={`${m.at}-${i}`} className={m.from === "visitor" ? "ml-8 text-right" : "mr-8"}>
+                <p className={`inline-block whitespace-pre-line rounded-xl px-3 py-2 text-left text-sm ${m.from === "visitor" ? "st-chat-mine" : "st-chat-theirs"}`}>{m.text}</p>
+                <p className="st-muted mt-0.5 text-xs">{m.from === "visitor" ? w.you : storeName}</p>
+              </div>
+            ))}
+            {thread?.status === "closed" ? <p className="st-muted text-xs">{w.closedNote}</p> : null}
+          </div>
+          {thread ? null : <p className="st-muted mt-2 text-sm">{w.intro(storeName)}</p>}
+          <div role="status">{justSent && thread ? <p className="st-muted mt-2 text-xs">{w.sent}</p> : null}</div>
           {notice ? (
             <p role="alert" className="mt-2 text-sm font-medium">
               {w.notices[notice]}
@@ -222,11 +251,16 @@ export function StoreChat({ handle, storeName, language }: { handle: string; sto
         </div>
       ) : null}
       <button
+        ref={launcher}
         type="button"
         aria-expanded={open}
         onClick={() => {
           typedAt.current = clock();
-          setOpen((v) => !v);
+          if (open) close();
+          else {
+            setOpen(true);
+            focusNext("title");
+          }
         }}
         className="btn st-btn shadow-lg"
       >

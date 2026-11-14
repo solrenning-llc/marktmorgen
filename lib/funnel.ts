@@ -153,9 +153,11 @@ export function funnelProblem(funnel: Funnel, products: Listing[], owner: Listin
     const target = products.find((p) => p.id === step.productId);
     if (!target || target.id === owner.id || !canBeBumped(target)) return "target";
     if (step.priceCents < MIN_BUMP_CENTS || step.priceCents > target.priceCents) return "price";
-    // Having just bought it, the buyer is never offered it again.
+    // Having just bought it, or a bundle that holds it, the buyer is never offered it again (DISC-B-2).
+    const got = new Set([step.productId, ...(target.bundle ?? [])]);
     for (const id of after(funnel, step.yes)) {
-      if (funnel.steps.find((s) => s.id === id)?.productId === step.productId) return "repeat";
+      const later = funnel.steps.find((s) => s.id === id)?.productId;
+      if (later !== undefined && got.has(later)) return "repeat";
     }
   }
   return null;
@@ -285,6 +287,8 @@ export function funnelPosition(
     const answer = answers.get(stepSlot(funnel, step));
     if (answer === "paid") {
       have.add(step.productId);
+      // A bundle paid for hands over what it holds: none of it is offered again (DISC-B-2).
+      for (const item of products.find((p) => p.id === step.productId)?.bundle ?? []) have.add(item);
       id = step.yes;
       continue;
     }

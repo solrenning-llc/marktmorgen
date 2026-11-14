@@ -1,4 +1,5 @@
 /** Only the authenticated notification boundary is simulated. POST and lib/sns-receipt.ts are real. */
+import { UnknownReplyError } from "../lib/redis-reply";
 import type { SesEvent, SnsMessage } from "../lib/sns";
 import { MemoryRedis } from "../lib/redis-memory";
 export { readSns, readSesEvent, snsUrl } from "../lib/sns";
@@ -66,3 +67,8 @@ export async function recordSesEvent(event: SesEvent) {
 export async function withinLimit(...args: unknown[]) { void args; return true; }
 export function clientAddress(request: Request) { void request; return "synthetic-client"; }
 export async function limited(request: Request, maxBytes: number) { void maxBytes; return request; }
+/** lib/request-guard.ts unknownLimit: only an unknown reply is "unknown"; anything else still throws. */
+export function unknownLimit(error: unknown): "unknown" {
+  if (error instanceof UnknownReplyError) return "unknown";
+  throw error;
+}

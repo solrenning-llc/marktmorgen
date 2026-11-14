@@ -188,8 +188,9 @@ export const nl: BuyerWords = {
   whoAnswers: (store) =>
     `${store} is de verkoper en is verantwoordelijk voor wat je koopt, voor terugbetalingen en voor een eventueel herroepingsrecht. Marktmorgen host de pagina's van de winkel en is geen partij bij de verkoop.`,
   noPaymentsTitle: "Deze winkel kan nog geen betalingen ontvangen.",
-  noPaymentsBody: (store) => `De prijzen hierboven zijn echt, maar hier kan nog geen kaart worden belast. Wil je kopen, schrijf dan rechtstreeks naar ${store}.`,
-  noPaymentsBodyOne: (store) => `De prijs hierboven is echt, maar hier kan nog geen kaart worden belast. Wil je kopen, schrijf dan rechtstreeks naar ${store}.`,
+  noPaymentsBody: "De prijzen hierboven zijn echt, maar hier kan nog geen kaart worden belast.",
+  noPaymentsBodyOne: "De prijs hierboven is echt, maar hier kan nog geen kaart worden belast.",
+  noPaymentsWrite: (store) => `Schrijf naar ${store}`,
 
   notices: {
     soldout: { title: "Die is net uitverkocht", body: "De laatste ging vlak voordat je op kopen drukte. Er is niets afgeschreven." },

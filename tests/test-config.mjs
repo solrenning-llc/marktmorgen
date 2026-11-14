@@ -110,7 +110,7 @@ function centralAliases(file,root,here){
  if(file==='upload-budget-routes.test.ts'){
   aliases['@/lib/redis']=join(here,'upload-budget-redis.ts');
   aliases['@/lib/upload-budget-policy']=join(here,'upload-budget-approved-policy.ts');
-  for(const name of ['store','catalog','course','delivery','storage-quota','stream','vault','vault-storage','request-guard','store-request','studio-route','blob','metered-limits'])aliases['@/lib/'+name]=join(here,'upload-route-world.ts');
+  for(const name of ['store','catalog','course','delivery','storage-quota','stream','vault','vault-storage','request-guard','store-request','studio-route','blob','metered-limits','two-step'])aliases['@/lib/'+name]=join(here,'upload-route-world.ts');
   aliases['@vercel/blob/client']=join(here,'upload-route-world.ts');
  }
  if(file==='path-wording-route.test.ts'){

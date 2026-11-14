@@ -11,6 +11,7 @@
  */
 import { createHash } from "node:crypto";
 import { FINAL_INDEX } from "@/lib/closing-holds";
+import { markShut, shutOf } from "@/lib/closing-plan-guard";
 import { closeOne, type Hands } from "@/lib/plan-closing";
 import { claimHandle, setStripeAccount, setSubscription, storeForEmail, storeRef } from "@/lib/store";
 import { store as redis } from "./redis-stub";
@@ -54,12 +55,16 @@ async function main(): Promise<void> {
 
   part("A store in its final line whose closing state was lost (the overlap of two runs)");
   const lost = await closingStore("lost-state@example.com", "loststate", "acct_1LostStateShop", "sub_1LostStateMember");
+  // The mark its closing day wrote when it began (closingDay), which refuses and returns a plan paid since.
+  const realDay = lost.ended + 30 * DAY;
+  await markShut((await storeForEmail("lost-state@example.com"))!, realDay, lost.ended);
   const result = await closeOne(lost.key, lost.ended + 31 * DAY, hands, Number.POSITIVE_INFINITY);
   is("its member's renewal is stopped on its own account, never taken as stopped", deleted("acct_1LostStateShop", "sub_1LostStateMember"), true);
   is("it is held: its day is not known, so nothing is given back on a guessed day", result.state, "held");
   const [raw] = await redis.pipeline([["GET", stateKey(lost.key)]]);
   const state = typeof raw === "string" ? (JSON.parse(raw) as Record<string, unknown>) : {};
   is("no step is written down as done on a guess", [state.refunds, state.removed], [undefined, undefined]);
+  is("the mark of when its closing day began is kept, never moved to today (a plan paid since would not be returned)", (await shutOf("loststate"))?.since, realDay);
 
   part("Control: a store whose state is there and whose renewals were stopped is not asked again");
   const kept = await closingStore("kept-state@example.com", "keptstate", "acct_1KeptStateShop", "sub_1KeptStateMember");

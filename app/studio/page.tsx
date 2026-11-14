@@ -168,8 +168,8 @@ import { storeChecks } from "@/lib/store-coach";
 import { accessCheck } from "@/lib/store-access-check";
 import { isPaidUp } from "@/lib/billing";
 import { allowanceWindow, calendarWindow, samePeriod } from "@/lib/allowance-window";
-import { ALLOWANCE_KINDS, API_SALES_UNITS, API_WRITE_UNITS, KIND_WORDS, allowanceFor } from "@/lib/store-allowance-rules";
-import { allowanceUsed } from "@/lib/store-allowance";
+import { ALLOWANCE_KINDS, API_SALES_UNITS, API_WRITE_UNITS, KIND_WORDS, allowanceFor, figureUsedLine } from "@/lib/store-allowance-rules";
+import { allowanceUsedExact } from "@/lib/store-allowance";
 import { STUDIO_PAGE_UNITS } from "@/lib/studio-allowance-rules";
 
 import { isSenderConfigured } from "@/lib/email";
@@ -204,7 +204,7 @@ import {
 import { STORAGE_BRAKE_BYTES, storageBrakeFor, storageUsed, storageWords } from "@/lib/storage-quota";
 import { trafficForAdmission } from "@/lib/traffic";
 import { CALL_ORDER_UNITS, TRIAL_ORDERS, ordersIncluded, ordersWords } from "@/lib/order-rules";
-import { ordersIn } from "@/lib/orders";
+import { ordersCountedExact } from "@/lib/order-admission";
 import { BUYER_RESERVE_BPS, SETUP_VISITS, TRIAL_VISITS, countWords, publicVisitLimit, visitLimitFor, visitsIncluded, visitsWords } from "@/lib/traffic-rules";
 import { AI_MONTHLY } from "@/lib/ai-rules";
 import { COMMISSION_LIVE, canUse, hasPro, PLAN_PRICES, PRO_MONTHLY_EMAILS, PRO_ON_SALE, REFUND_DAYS, SCALE_MONTHLY_EMAILS, priceWords, yearSaving } from "@/lib/plan";
@@ -978,8 +978,8 @@ export default async function StudioPage({
         store && may("settings") ? trafficForAdmission(folder, usageId) : Promise.resolve(null),
       ]),
     ),
-    ordered: store && may("settings") ? early(ordersIn(folder, usageId)) : null,
-    figures: current && may("settings") ? early(Promise.all(ALLOWANCE_KINDS.map(async (kind) => ({ kind, used: await allowanceUsed(current, kind), limit: allowanceFor(current, kind) })))) : null,
+    ordered: store && may("settings") ? early(ordersCountedExact(folder, usageId)) : null,
+    figures: current && may("settings") ? early(Promise.all(ALLOWANCE_KINDS.map(async (kind) => ({ kind, used: await allowanceUsedExact(current, kind), limit: allowanceFor(current, kind) })))) : null,
     // With what the students' private lesson notes take of it (lib/lesson-notes.ts), in the same read.
     data: current && may("settings") ? early(dataUsed(current, undefined, { notes: true }).catch(() => null)) : null,
     closingAt: store && standing === "ended" && may("settings") ? early(closingOf(store).catch(() => null)) : null,
@@ -1103,6 +1103,7 @@ export default async function StudioPage({
   const visitLimit = store ? visitLimitFor(store) : null;
   const visitRoom = visitLimit ?? (store ? visitsIncluded(store.tier) : 0);
   // The orders counted this month, the third thing charged by use (lib/order-rules.ts).
+  // Null when the count could not be read (rule 24): said as unread, never as 0 or as room.
   const ordered = planReads.ordered ? await planReads.ordered : 0;
   // What the store has taken of each of its other figures in the window (lib/store-allowance.ts).
   const figures = planReads.figures ? await planReads.figures : null;
@@ -2892,17 +2893,17 @@ export default async function StudioPage({
                 <div className="mt-6 border-t border-line pt-5">
                   <p className="font-semibold text-ink">Orders this month</p>
                   <p className="mt-1 text-ink-soft">
-                    {`${ordersWords(ordered)} counted of the ${countWords(orderRoom)} ${
+                    {`${ordered === null ? "How many are counted of" : `${ordersWords(ordered)} counted of`} the ${countWords(orderRoom)} ${
                       standing === "paid" ? "your plan covers" : "a free trial has"
-                    }. An order is a purchase confirmed, an offer taken after paying, a PayPal order, a place in a purchase for several people, a package of calls, or a free copy sent; a call booked counts as ${countWords(CALL_ORDER_UNITS)}.${feeWords(COMMISSION_LIVE && store.shared).ordersShared}`}
+                    }${ordered === null ? " could not be read just now; reload the page to check" : ""}. An order is a purchase confirmed, an offer taken after paying, a PayPal order, a place in a purchase for several people, a package of calls, or a free copy sent; a call booked counts as ${countWords(CALL_ORDER_UNITS)}.${feeWords(COMMISSION_LIVE && store.shared).ordersShared}`}
                   </p>
-                  {standing === "paid" && store && ordered >= orderRoom ? (
+                  {standing === "paid" && store && ordered !== null && ordered >= orderRoom ? (
                     <p className="mt-4 notice notice-warn">
                       <strong>New orders are paused for the month.</strong>
                       {` Your store has had the ${countWords(orderRoom)} orders your plan covers. A buyer who presses buy is told the store is not taking new orders right now, and nothing is charged; anybody already paying finishes. Orders open again with your next billing month${largerOnSale ? ", or on a larger plan" : ""}.`}
                     </p>
                   ) : null}
-                  {standing === "trial" && ordered >= TRIAL_ORDERS ? (
+                  {standing === "trial" && ordered !== null && ordered >= TRIAL_ORDERS ? (
                     <p className="mt-4 notice notice-warn">
                       <strong>New orders are paused for the trial.</strong>
                       {` Your store has had the ${countWords(TRIAL_ORDERS)} orders a free trial has, paid ones and free copies together. They start again as soon as your plan is paid; anybody already paying finishes.`}
@@ -2924,7 +2925,7 @@ export default async function StudioPage({
                       {figures.map((figure) => (
                         <div key={figure.kind}>
                           <dt className="font-semibold text-ink">{KIND_WORDS[figure.kind].what}</dt>
-                          <dd className="text-ink-soft">{`${figure.used.toLocaleString("en-US")} of ${figure.limit.toLocaleString("en-US")} ${KIND_WORDS[figure.kind].many} used`}</dd>
+                          <dd className="text-ink-soft">{figureUsedLine(figure.used, figure.limit, KIND_WORDS[figure.kind].many)}</dd>
                         </div>
                       ))}
                     </dl>

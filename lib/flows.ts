@@ -1372,6 +1372,20 @@ export async function sendDueSteps(
       const uncertain = new Set(result.uncertain ?? []);
       const rest = result.rest.filter((email) => !uncertain.has(email));
       const refused: Settled[] = [];
+      // Refused for good, address by address (lib/mail.ts sendTo, `refused`): known not sent, never uncertain;
+      // the run ends there, saying why. The others in the batch went and go on to the next step.
+      if (result.refused?.length) {
+        counts.dropped += result.refused.length;
+        refused.push(...result.refused.map((r) => ({
+          email: r.email,
+          state: "failed" as const,
+          note: r.removed
+            ? "The email service refused this address, so it was taken off your list and the run ended."
+            : "The email service did not accept this email for this address, so the run ended.",
+          to: -1,
+          status: "failed" as const,
+        })));
+      }
       let waiting: { queue: (string | number)[][]; outcomes: Settled[] } | null = null;
       const onQueue: (string | number)[][] = [];
       const tallies: (string | number)[][] = [];

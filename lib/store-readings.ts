@@ -45,8 +45,15 @@ export const READING_KEEP_SECONDS = 86_400;
 /** The largest reading kept, in bytes; one larger is read each time, from the budget. */
 export const READING_COPY_MAX_BYTES = 131_072;
 
-export type ReadingKind = "stats" | "sales" | "members";
-export const READING_KINDS: readonly ReadingKind[] = ["stats", "sales", "members"];
+export type ReadingKind = "stats" | "sales" | "members" | "earnings";
+/** Every kind kept; each copy is priced in the store-readings line (tests/plan-cost-registry.ts), READING_KINDS.length of them. */
+export const READING_KINDS: readonly ReadingKind[] = ["stats", "sales", "members", "earnings"];
+/**
+ * The kinds that read the store's sales (every PayPal sale and refund record, lib/read-ceilings.ts SALES_READ_SHAPE):
+ * each takes one of the day's HEAVY_READINGS_PER_DAY. The twelve months of earnings (lib/earnings-read.ts) are one,
+ * read within the same shape (426 [BX2]), so the line's two heavy readings a day price them.
+ */
+export const HEAVY_KINDS: ReadonlySet<ReadingKind> = new Set<ReadingKind>(["sales", "earnings"]);
 
 const copyKey = (kind: ReadingKind, statsId: string) => `nl:reading:${kind}:${statsId}`;
 const dayKey = (statsId: string, day: string) => `nl:reading:day:${statsId}:${day}`;
@@ -203,9 +210,11 @@ export type ReadingGuard<T> = {
  * was spent; inbox C4-53): the last one kept is shown, stale and `failed`, or
  * ReadingFailed is thrown when there is none. One that stopped before calling
  * anyone (NotRead) gives its unit back. With a `guard` naming people, it is
- * kept by READING_COPY, never over someone deleted since `read` looked.
+ * kept by READING_COPY, never over someone deleted since `read` looked. With
+ * `accept`, a kept copy it refuses (the earnings of another time zone) is
+ * taken as none at all, never shown fresh or stale (review of #3022).
  */
-export async function keptReading<T>(store: Pick<Store, "statsId">, kind: ReadingKind, read: () => Promise<T>, now = Date.now(), fresh = false, guard?: ReadingGuard<T>): Promise<Kept<T> | null> {
+export async function keptReading<T>(store: Pick<Store, "statsId">, kind: ReadingKind, read: () => Promise<T>, now = Date.now(), fresh = false, guard?: ReadingGuard<T>, accept?: (value: unknown) => boolean): Promise<Kept<T> | null> {
   if (!store.statsId || !isRedisConfigured()) return null;
   const key = copyKey(kind, store.statsId);
   let kept: Kept<T> | null = null;
@@ -213,13 +222,13 @@ export async function keptReading<T>(store: Pick<Store, "statsId">, kind: Readin
     const [raw] = await redisPipeline([["GET", key]]);
     if (typeof raw === "string" && raw) {
       const parsed = JSON.parse(raw) as { at?: unknown; value?: unknown; unnamed?: unknown };
-      if (typeof parsed.at === "number" && parsed.value !== undefined) kept = { value: parsed.value as T, at: parsed.at, stale: false, ...(parsed.unnamed === true ? { unnamed: true } : {}) };
+      if (typeof parsed.at === "number" && parsed.value !== undefined && (!accept || accept(parsed.value))) kept = { value: parsed.value as T, at: parsed.at, stale: false, ...(parsed.unnamed === true ? { unnamed: true } : {}) };
     }
   } catch {
     kept = null;
   }
   if (kept && !fresh && now - kept.at < READING_FRESH_SECONDS * 1000) return kept;
-  if (!(await takeStoreReading(store, now, kind === "sales"))) {
+  if (!(await takeStoreReading(store, now, HEAVY_KINDS.has(kind)))) {
     if (kept) return { ...kept, stale: true };
     throw new ReadingsUsed();
   }
@@ -228,7 +237,7 @@ export async function keptReading<T>(store: Pick<Store, "statsId">, kind: Readin
     value = await read();
   } catch (error) {
     if (error instanceof NotRead) {
-      await giveStoreReading(store, now, kind === "sales");
+      await giveStoreReading(store, now, HEAVY_KINDS.has(kind));
       if (kept) return { ...kept, stale: true };
       throw error;
     }

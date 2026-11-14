@@ -28,10 +28,14 @@ is("the currency field, its button, its confirm step and its mark only when Stri
 is("for whoever may change settings, with no plan read by its route", [studio.includes('{may("settings") ? ( <PaymentsPanel'), /planOf\(|PLANS_ON_SALE|canUse\(|isPaidUp\(|canSell\(/.test(read("app/api/store/currency/route.ts")), read("app/api/store/currency/route.ts").includes('guardStoreWrite(request, "settings"')], [true, false, true]);
 is("a new store starts in the default currency", [read("lib/store.ts").includes("currency: DEFAULT_CURRENCY,"), currencyLabel(DEFAULT_CURRENCY)], [true, "US dollar (USD)"]);
 is("the Stripe link only once Stripe is connected", [panel.includes(`ways.state !== "none" ? (`), panel.indexOf(`ways.state !== "none" ? (`) < panel.indexOf(w.more), studio.includes(': [null, { state: "none" as const }, null];')], [true, true, true]);
+// lib/earnings-read.ts only lists checkout sessions already paid (426 [BX2]), it never makes one.
 // lib/stripe-account.ts is the transport: since #1732 it names the path only to mark that Stripe was asked to open a
 // checkout (watchCheckoutOpening), and builds none itself, which the line after the scan holds.
-const checkouts = readdirSync("lib").filter((f) => f.endsWith(".ts") && f !== "card-update.ts" && f !== "stripe-account.ts").map((f) => [f, read(`lib/${f}`)] as const).filter(([, t]) => t.includes("onAccount(") && /["`]\/checkout\/sessions["`]/.test(t));
+// Merge of #3022 with main: the scan leaves out both files, each held by its own check below (rule 23).
+const checkouts = readdirSync("lib").filter((f) => f.endsWith(".ts") && f !== "card-update.ts" && f !== "earnings-read.ts" && f !== "stripe-account.ts").map((f) => [f, read(`lib/${f}`)] as const).filter(([, t]) => t.includes("onAccount(") && /["`]\/checkout\/sessions["`]/.test(t));
 is("every buyer checkout on the creator's account asks Stripe not to convert", [checkouts.length > 4, checkouts.filter(([, t]) => !t.includes("inTheCurrencyShown(body);")).map(([f]) => f), read("lib/instant-pay.ts").includes('body.set("adaptive_pricing[enabled]", "false");')], [true, [], true]);
+const earningsCalls = read("lib/earnings-read.ts").match(/onAccount\(\s*[^,]*,/g) ?? [];
+is("the earnings reading left out above only reads from the creator's account", [earningsCalls.length > 0, earningsCalls.filter((c) => !/^onAccount\(\s*"GET",$/.test(c))], [true, []]);
 is("the transport left out of the scan builds no checkout of its own (no line items, no buyer page)", /line_items|success_url|inTheCurrencyShown/.test(read("lib/stripe-account.ts")), false);
 is("a payment request keeps the currency it was sent in", read("lib/payment-requests.ts").includes("request.currency"), true);
 

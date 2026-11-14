@@ -126,6 +126,12 @@ const WATCH_SECONDS = 180 * 86_400;
  */
 export const PAYPAL_PAST_SECONDS = WATCH_SECONDS;
 /**
+ * How long an opened order's record is kept before its buyer comes back from PayPal (openOrder): an order opened before
+ * a disconnection can still be approved and captured this long after it, so the disconnected account is kept at least
+ * this long (lib/paypal-delivery.ts, sweepPayPal; review of #3924).
+ */
+export const PAYPAL_OPEN_ORDER_SECONDS = 3 * 86_400;
+/**
  * How long after its order was opened a payment PayPal has not confirmed is canceled (watchPayPal): 29 days. A
  * pending order's record is kept 30 days from its capture (watchLater), which comes after its opening, so the
  * cancellation always runs while the record still says which store, product and price it was, one day before the
@@ -597,7 +603,7 @@ export async function openOrder(store: Store, product: Listing, origin: string, 
       ...(extras.via && /^[a-z0-9]{12}$/.test(extras.via.aff) ? { via: { aff: extras.via.aff, rate: Math.max(0, Math.min(100, Number(extras.via.rate) || 0)) } } : {}),
       ...(salePercent > 0 ? { off: Math.max(0, product.priceCents - cents), sale: salePercent } : fairPercent > 0 ? { off: Math.max(0, product.priceCents - cents) } : {}),
     };
-    await redisPipeline([["SET", orderKey(order), JSON.stringify(opened), "EX", 3 * 86_400]]);
+    await redisPipeline([["SET", orderKey(order), JSON.stringify(opened), "EX", PAYPAL_OPEN_ORDER_SECONDS]]);
     return { ok: true, url: approve.href, order };
   } catch (error) {
     console.error("opening a PayPal order failed", error);

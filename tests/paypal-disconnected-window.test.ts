@@ -15,7 +15,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { claimHandle, disconnectPayPalSeller, ensureStatsId, setPayPalSeller, setSubscription, storeForEmail } from "@/lib/store";
-import { PAYPAL_PAST_SECONDS, PENDING_GIVE_UP_SECONDS, paypalMerchant, paypalOrdersWaiting, paypalPastWatched } from "@/lib/paypal-sales";
+import { PAYPAL_OPEN_ORDER_SECONDS, PAYPAL_PAST_SECONDS, PENDING_GIVE_UP_SECONDS, paypalMerchant, paypalOrdersWaiting, paypalPastWatched } from "@/lib/paypal-sales";
 import { sweepPayPal } from "@/lib/paypal-delivery";
 import { sweepCheckouts } from "@/lib/checkout-sweep";
 import { PayPalWaitingNotice } from "@/components/paypal-waiting-notice";
@@ -102,9 +102,17 @@ async function main(): Promise<void> {
   }
   is("the account is kept", (await storeForEmail("owner@example.com"))?.paypalPast?.merchant, SELLER);
 
-  part("Nothing left: forgotten, and the store leaves the sweep");
+  part("Nothing left, but an order opened before the disconnection can still be paid: kept (review of #3924, MEDIUM)");
   // The order without its record was let go by the first run (ZREM), so the lists are empty now.
-  const second = await recorded(() => sweepPayPal(store, far));
+  const early = await recorded(() => sweepPayPal(store, far));
+  is("only the three counts this run", onLists(early.sent, statsId).map((c) => c[0]), ["ZCARD", "ZCARD", "ZCARD"]);
+  is("the account is kept while an opened order can still be approved", (await storeForEmail("owner@example.com"))?.paypalPast?.merchant, SELLER);
+
+  part("Nothing left and past the time an opened order can be approved: forgotten, and the store leaves the sweep");
+  const realNow = Date.now;
+  const ahead = (PAYPAL_OPEN_ORDER_SECONDS + 60) * 1000;
+  Date.now = () => realNow() + ahead;
+  const second = await recorded(() => sweepPayPal(store, Date.now() + 60_000));
   is("only the three counts this run", onLists(second.sent, statsId).map((c) => c[0]), ["ZCARD", "ZCARD", "ZCARD"]);
   store = (await storeForEmail("owner@example.com"))!;
   is("the kept account is forgotten", store.paypalPast, null);
@@ -115,6 +123,7 @@ async function main(): Promise<void> {
     job = await sweepCheckouts(Date.now() + 10_000);
   });
   is("the five-minute job no longer picks the store, and sends nothing to its lists", [job.stores, onLists(third.sent, statsId).length], [0, 0]);
+  Date.now = realNow;
 
   part("Past the window: nothing asked at all");
   const old = { ...store, paypalPast: { merchant: SELLER, at: Date.now() - (PAYPAL_PAST_SECONDS + 60) * 1000 } };

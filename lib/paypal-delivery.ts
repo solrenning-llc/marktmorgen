@@ -13,7 +13,7 @@ import { dropEnrollment, recordEnrollment } from "@/lib/learn";
 import { importedKey } from "@/lib/imported-purchases";
 import { forgetBoughtCommands } from "@/lib/buyer-library";
 import { bondPlace, forgetBondCommand } from "@/lib/affiliate-bond";
-import { type Paid, type PayPalReceipt, deliverPayPal, handOverKey, paypalOrdersLeft, paypalPastWatched, readPaidExact, refundSeen, retryCancelNotices, watchPayPal } from "@/lib/paypal-sales";
+import { PAYPAL_OPEN_ORDER_SECONDS, type Paid, type PayPalReceipt, deliverPayPal, handOverKey, paypalOrdersLeft, paypalPastWatched, readPaidExact, refundSeen, retryCancelNotices, watchPayPal } from "@/lib/paypal-sales";
 import { tellCanceled } from "@/lib/paypal-cancel";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
@@ -523,12 +523,16 @@ export async function sweepPayPal(store: Store, deadline: number): Promise<{ cle
   // store's three lists and within PAYPAL_PAST_SECONDS of the disconnection (three ZCARD in one round trip first,
   // PAYPAL_PAST_WATCH in tests/plan-cost-registry.ts). With none left, or past the window, the account is forgotten
   // and the store is no longer swept for PayPal; an unknown count is asked again next run, never taken for "none".
+  // Not before PAYPAL_OPEN_ORDER_SECONDS after the disconnection, though: an order opened just before it is on none of
+  // the lists until its buyer comes back (openOrder keeps it that long), and a payment PayPal holds as pending then
+  // must still be asked about with this account (review of #3924, MEDIUM).
   if (!store.paypalSeller && store.paypalPast) {
     const past = store.paypalPast;
     const left = paypalPastWatched(store) && store.statsId ? await paypalOrdersLeft(store.statsId) : 0;
     if (left === null) return { cleared: 0, revoked: 0 };
     if (left === 0) {
-      await forgetPayPalPast(storeRef(store), past.at).catch((error) => console.error("forgetting a disconnected PayPal account failed", store.handle, error));
+      const openable = paypalPastWatched(store) && Date.now() < past.at + PAYPAL_OPEN_ORDER_SECONDS * 1000;
+      if (!openable) await forgetPayPalPast(storeRef(store), past.at).catch((error) => console.error("forgetting a disconnected PayPal account failed", store.handle, error));
       return { cleared: 0, revoked: 0 };
     }
   }

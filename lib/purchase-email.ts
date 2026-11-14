@@ -728,9 +728,10 @@ export type TakenOffer = {
   parent: string;
   product: Listing;
   email: string;
-  amountCents: number;
-  /** What Stripe charged it in. */
-  currency: string;
+  /** What Stripe charged, in cents; null when its answer did not say it exactly, and the "Paid" line is left out. */
+  amountCents: number | null;
+  /** What Stripe charged it in; null with an amount not read exactly. */
+  currency: string | null;
   /** When what was added is a bundle: the products it hands over. */
   items?: Listing[];
   /** The offer's own payment metadata, where its yes to start access at once is kept (lib/digital-consent.ts). */
@@ -743,13 +744,13 @@ export function offerConfirmationFor(store: Store, offer: TakenOffer, key: SaleK
   const name = store.name;
   const base = storeBase(store);
   const words = ordersWords(store.language);
-  const { money } = speaking(store, offer.currency);
+  const paid = offer.amountCents !== null && offer.currency !== null ? speaking(store, offer.currency).money(offer.amountCents) : null;
   const lines: string[] = [
     words.offerIntro(name),
     "",
     words.whatYouAdded(offer.product.title),
     ...(offer.items?.length ? [words.insideIt(offer.items.map((p) => p.title).join(", "))] : []),
-    words.paidOnce(money(offer.amountCents)),
+    ...(paid ? [words.paidOnce(paid)] : []),
     words.reference(offer.reference),
     ...consentEmailLines(store, offer.metadata),
     "",

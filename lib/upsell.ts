@@ -486,8 +486,12 @@ export async function takeUpsell(input: {
 async function afterPaid(store: Store, session: string, target: Listing, pi: Record<string, unknown>, email: string): Promise<boolean | "unknown"> {
   await noteCharge(store, pi).catch((error) => console.error("noting an affiliate sale failed", error));
   const reference = typeof pi.id === "string" ? pi.id : "";
-  const amountCents = typeof pi.amount === "number" ? pi.amount : 0;
-  const currency = typeof pi.currency === "string" && pi.currency ? pi.currency : store.currency;
+  // What Stripe charged, read exactly (CX-123 rule 24; audit R48): a whole number of cents, never below zero, in a
+  // three-letter currency. Anything else is null, and the confirmation leaves its "Paid" line out (lib/purchase-email.ts
+  // offerConfirmationFor), never "$0" or the store's own currency.
+  const exact = Number.isSafeInteger(pi.amount) && Number(pi.amount) >= 0 && typeof pi.currency === "string" && /^[a-z]{3}$/.test(pi.currency);
+  const amountCents = exact ? Number(pi.amount) : null;
+  const currency = exact ? String(pi.currency) : null;
   // A bundle added this way: its products, from the list on its own payment.
   const listed = bundleFromMeta(pi.metadata as Record<string, string> | null, "bundle");
   const items = listed.length ? (await contentsOf(store, listed).catch(() => null))?.items : undefined;
@@ -498,7 +502,9 @@ async function afterPaid(store: Store, session: string, target: Listing, pi: Rec
   });
   // One of the month's orders, by its own payment, whether or not its email went: it was paid. Only an offer this
   // store does not confirm by email ("skip") is left as before.
-  const counted = sent === "skip" ? false : await countOrder(store, `offer:${reference}`, amountCents);
+  // An amount not read exactly is counted as an order no share covered (this branch, audit R48): while COMMISSION_LIVE
+  // is false no store's sales pay a share, so every order is counted whatever it paid (lib/orders.ts coveredByShare).
+  const counted = sent === "skip" ? false : await countOrder(store, `offer:${reference}`, amountCents ?? 0);
   await noteOfferSale(store, target, pi).catch((error) => console.error("telling about an offer's sale failed", error));
   return counted;
 }

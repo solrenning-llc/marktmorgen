@@ -269,8 +269,14 @@ async function sendReceipt(input: {
   const title = groupTitle(product, group);
   const buyer = typeof session.customer_details?.email === "string" ? session.customer_details.email : "";
   if (!buyer) return false;
-  const amount = typeof session.amount_total === "number" ? session.amount_total : product.priceCents * group.people;
-  const currency = typeof session.currency === "string" && session.currency ? session.currency : store.currency;
+  // What Stripe charged, read exactly (CX-123 rule 24; audit R48): a whole number of cents, never below zero, in a
+  // three-letter currency. Anything else leaves the line out, never the catalog's price times the people or the
+  // store's own currency; the receipt still goes, with the link that hands out the places.
+  const amount = session.amount_total;
+  const currency = session.currency;
+  const paid = Number.isSafeInteger(amount) && Number(amount) >= 0 && typeof currency === "string" && /^[a-z]{3}$/.test(currency)
+    ? formatMoney(Number(amount), currency, speech(store).lang.locale)
+    : null;
   const g = givingWords(store.language);
   return sendEmail({ meter: input.again ? { by: "store", store, kind: "email" } : { by: "order" },
     from: input.from,
@@ -280,7 +286,7 @@ async function sendReceipt(input: {
       input.lead,
       "",
       g.forWho(title, peopleWords(group.people, store.language)),
-      g.paidLine(formatMoney(amount, currency, speech(store).lang.locale)),
+      ...(paid ? [g.paidLine(paid)] : []),
       g.orderRef(group.session ?? ""),
       ...consentEmailLines(store, input.session?.metadata),
       "",

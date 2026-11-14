@@ -73,13 +73,18 @@ export async function POST(request: NextRequest) {
   if (!report && !isInboundConfigured()) return new Response("Not found.", { status: 404 });
 
   const seenKey = `nl:inbound:seen:${id}`;
+  // Once only, read exactly (CX-123 rule 24): "OK" is fresh, null is a repeat already heard, and anything else, Redis
+  // not answering included, acts on nothing and is not acknowledged, so Resend tries again. Carrying on unguarded
+  // would count a complaint or a bounce twice.
+  let fresh: unknown;
   try {
-    const [fresh] = await redisPipeline([["SET", seenKey, "1", "NX", "EX", 86_400]]);
-    if (fresh === null) return Response.json({ ok: true });
+    const replies = await redisPipeline([["SET", seenKey, "1", "NX", "EX", 86_400]]);
+    fresh = Array.isArray(replies) && replies.length === 1 ? replies[0] : undefined;
   } catch {
-    // Without Redis the sender's idempotency key still keeps a repeat from
-    // being delivered twice; carry on.
+    fresh = undefined;
   }
+  if (fresh === null) return Response.json({ ok: true });
+  if (fresh !== "OK") return Response.json({ ok: false }, { status: 503 });
 
   if (report) {
     const recipients = (Array.isArray(notice.data?.to) ? notice.data.to : [notice.data?.to])

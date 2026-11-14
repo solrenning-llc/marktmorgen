@@ -68,7 +68,7 @@ test("Meta: 51 stores answer 503 with no confirmation code until every one is fo
   const user = "10150000000000051";
   const stores = ids(51, "ms");
   for (const s of stores) seedMeta(user, s);
-  const payload = Buffer.from(JSON.stringify({ algorithm: "HMAC-SHA256", user_id: user, issued_at: 1 })).toString("base64url");
+  const payload = Buffer.from(JSON.stringify({ algorithm: "HMAC-SHA256", user_id: user, issued_at: Math.floor(Date.now() / 1000) })).toString("base64url");
   const signed = `${createHmac("sha256", SECRET).update(payload).digest("base64url")}.${payload}`;
   const call = () => metaDeauthorize(new NextRequest("https://marktmorgen.com/api/integrations/meta/deauthorize", { method: "POST", body: new URLSearchParams({ signed_request: signed }), headers: { "x-forwarded-for": "198.51.100.51" } }));
   const first = await call();

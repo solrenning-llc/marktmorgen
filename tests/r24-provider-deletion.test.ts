@@ -124,7 +124,7 @@ for (const [label, reply] of [["a missing envelope", []], ["a number", [5]], ["t
 test("Meta callback: an unknown store list answers 503 with no confirmation code, so Meta asks again", async () => {
   redis.clear();
   seedMeta("10150000000000004", "mstats4");
-  const payload = Buffer.from(JSON.stringify({ algorithm: "HMAC-SHA256", user_id: "10150000000000004", issued_at: 1 })).toString("base64url");
+  const payload = Buffer.from(JSON.stringify({ algorithm: "HMAC-SHA256", user_id: "10150000000000004", issued_at: Math.floor(Date.now() / 1000) })).toString("base64url");
   const signed = `${createHmac("sha256", SECRET).update(payload).digest("base64url")}.${payload}`;
   inject((c) => c[0] === "SMEMBERS", [null]);
   let status = 0, body = "";

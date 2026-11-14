@@ -1,6 +1,8 @@
 import { type NextRequest, after } from "next/server";
 import { noticeCreator } from "@/lib/account-notice";
-import { MetaIncompleteForget, forgetMetaUser, isMetaConfigured, signedUser } from "@/lib/meta-ads";
+import { createHash } from "node:crypto";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
+import { META_NOTICE_MAX_AGE_SECONDS, MetaIncompleteForget, forgetMetaUser, isMetaConfigured, signedNotice } from "@/lib/meta-ads";
 import { clientAddress, limited, withinLimit } from "@/lib/request-guard";
 import { SITE_URL } from "@/lib/site-url";
 
@@ -24,8 +26,20 @@ export async function POST(request: NextRequest) {
   } catch {
     return Response.json({ error: "invalid" }, { status: 400 });
   }
-  const user = signedUser(raw);
-  if (!user) return Response.json({ error: "invalid" }, { status: 400 });
+  const notice = signedNotice(raw);
+  if (!notice) return Response.json({ error: "invalid" }, { status: 400 });
+  const { user } = notice;
+  // Once only, as the Zoom callback: a notice already acted on is answered and does nothing, so one sent again never
+  // forgets a connection made since. A notice we failed to act on lets go of its mark, so Meta's retry is heard. Read
+  // exactly (CX-123 rule 24): a mark that cannot be read acts on nothing and is not confirmed.
+  const seenKey = `nl:metaads:deauthseen:${createHash("sha256").update(notice.signature).digest("hex").slice(0, 40)}`;
+  const mine = claimValue();
+  const fresh = await claimMark(seenKey, META_NOTICE_MAX_AGE_SECONDS + 600, mine);
+  if (fresh === "taken") return Response.json({ url: `${SITE_URL}/privacy#meta-ads`, confirmation_code: "meta-already-done" }, { headers: { "Cache-Control": "no-store" } });
+  if (fresh === "unknown") {
+    await releaseMark(seenKey, mine);
+    return Response.json({ error: "unavailable" }, { status: 503, headers: { "Cache-Control": "no-store" } });
+  }
   // Nothing is confirmed to Meta unless every store was read and forgotten exactly (CX-123 rule 24): an unknown reply
   // answers 503 with no confirmation code, the user's index kept, so Meta asks again.
   let forgot: Awaited<ReturnType<typeof forgetMetaUser>>;
@@ -35,6 +49,7 @@ export async function POST(request: NextRequest) {
     console.error("forgetting a Meta user failed", error);
     // The stores this pass did forget are told now: the next pass reads them as gone (Claude 5 on #2869).
     if (error instanceof MetaIncompleteForget) tell(error.forgot);
+    await releaseMark(seenKey, mine);
     return Response.json({ error: "unavailable" }, { status: 503, headers: { "Cache-Control": "no-store" } });
   }
   tell(forgot);

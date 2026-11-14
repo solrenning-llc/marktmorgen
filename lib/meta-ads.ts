@@ -453,6 +453,31 @@ export function signedUser(raw: unknown): string | null {
   }
 }
 
+/** How long after Meta issued it a signed_request is still heard: Meta sends the notice at once and retries for a while. */
+export const META_NOTICE_MAX_AGE_SECONDS = 86_400;
+
+/**
+ * A notice from Meta (signedUser) that is fresh: its user, the second it was issued, and its signature, which the
+ * callback's once-only mark is keyed on. A signed_request with no issued_at, issued more than
+ * META_NOTICE_MAX_AGE_SECONDS ago or more than five minutes ahead is refused, so an old notice sent again can never
+ * forget a newer connection (the Zoom callback's own defence, app/api/integrations/zoom/deauthorize).
+ */
+export function signedNotice(raw: unknown, now = Date.now()): { user: string; issued: number; signature: string } | null {
+  const user = signedUser(raw);
+  if (!user || typeof raw !== "string") return null;
+  const [signature, payload] = raw.split(".");
+  let issued: unknown;
+  try {
+    issued = (JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as { issued_at?: unknown }).issued_at;
+  } catch {
+    return null;
+  }
+  if (typeof issued !== "number" || !Number.isSafeInteger(issued)) return null;
+  const age = Math.floor(now / 1000) - issued;
+  if (age > META_NOTICE_MAX_AGE_SECONDS || age < -300) return null;
+  return { user, issued, signature };
+}
+
 /** Every reply of one deletion pipeline confirmed by its own count, or UnknownReplyError: never taken as done unseen. */
 function confirmDeleted(replies: unknown, commands: number, what: string): void {
   const answered = repliesFor(replies, commands);

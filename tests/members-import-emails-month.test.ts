@@ -465,6 +465,54 @@ async function main(): Promise<void> {
   const third = await sendMoveReminders(opened + 7_200_000 + 30_000, opened + 7_200_000);
   is("never sent twice: nothing more goes afterward", [third.sent, emails.slice(before).length], [0, 1]);
   Date.now = realNow;
+
+  part("A reminder due during a temporary sending pause is sent after the pause (Codex G on #4359)");
+  // The store's sending is paused (bounces) when the reminder falls due. The pause ends before the renewal date, so
+  // the reminder waits in line for its end instead of being dropped, and goes once when sending resumes.
+  const dueOf = async (sid: string) => {
+    const line = (await redis.pipeline([["ZRANGEBYSCORE", "nl:mv:due", "-inf", "+inf", "WITHSCORES"]]))[0] as string[];
+    return line.flatMap((member, i) => (i % 2 === 0 && member.startsWith(`${sid}|`) ? [Number(line[i + 1])] : []));
+  };
+  const pauseFor = (sid: string, until: number) =>
+    redis.pipeline([["SET", `nl:mail:paused:${sid}`, JSON.stringify({ reason: "bounces", until, sent: 100, count: 9 })]]);
+  const PAUSED = "r46e-pause@example.com";
+  const p0 = Date.now();
+  const pauseStore = await creatorStore(PAUSED, "r46pause", { period: paidPeriod(p0, { behind: 1, ahead: 29 }) });
+  const pauseRenews = Math.floor(p0 / 1000) + 20 * DAY;
+  const onePaused = await importMembers(PAUSED, memberRows(1, pauseRenews, "paused"));
+  is("one member is invited and emailed", onePaused.job?.counts.mailed, 1);
+  const [pausedDue] = await dueOf(pauseStore.sid);
+  const pauseEnds = pausedDue + DAY;
+  await pauseFor(pauseStore.sid, pauseEnds);
+  const beforePause = emails.length;
+  setClock(pausedDue * 1000 + 60_000);
+  const duringPause = await sendMoveReminders(pausedDue * 1000 + 90_000, pausedDue * 1000 + 60_000);
+  is("during the pause nothing goes", [duringPause.sent, emails.length - beforePause], [0, 0]);
+  is("and the reminder waits in line for the pause's end, not dropped", await dueOf(pauseStore.sid), [pauseEnds]);
+  setClock(pauseEnds * 1000 + 60_000);
+  const afterPause = await sendMoveReminders(pauseEnds * 1000 + 90_000, pauseEnds * 1000 + 60_000);
+  is("once the pause is over the reminder goes, once", [afterPause.sent, emails.slice(beforePause).map(to)], [1, ["paused1@example.com"]]);
+  is("and it is off the line", await dueOf(pauseStore.sid), []);
+  Date.now = realNow;
+
+  part("A pause running past the renewal date lets the reminder go, and one read in an unknown shape keeps it");
+  const PAUSELONG = "r46e-pauselong@example.com";
+  const l0 = Date.now();
+  const longStore = await creatorStore(PAUSELONG, "r46plong", { period: paidPeriod(l0, { behind: 1, ahead: 29 }) });
+  await importMembers(PAUSELONG, memberRows(1, Math.floor(l0 / 1000) + 20 * DAY, "longpause"));
+  const [longDue] = await dueOf(longStore.sid);
+  await redis.pipeline([["SET", `nl:mail:paused:${longStore.sid}`, "not json"]]);
+  const beforeLong = emails.length;
+  setClock(longDue * 1000 + 60_000);
+  const unknownPause = await sendMoveReminders(longDue * 1000 + 90_000, longDue * 1000 + 60_000);
+  is("a pause read in an unknown shape sends nothing", [unknownPause.sent, emails.length - beforeLong], [0, 0]);
+  is("and keeps the reminder in line, an hour on", await dueOf(longStore.sid), [longDue + 60 + 3_600]);
+  await pauseFor(longStore.sid, longDue + 6 * DAY);
+  setClock((longDue + 3_660) * 1000 + 60_000);
+  const longPause = await sendMoveReminders((longDue + 3_660) * 1000 + 90_000, (longDue + 3_660) * 1000 + 60_000);
+  is("a pause that ends after the renewal date sends nothing", [longPause.sent, emails.length - beforeLong], [0, 0]);
+  is("and takes the reminder off the line", await dueOf(longStore.sid), []);
+  Date.now = realNow;
   done();
 }
 

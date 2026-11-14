@@ -101,10 +101,12 @@ export async function usedThisMonthExact(listId: string | null, window: string |
   return Number(raw);
 }
 
+/**
+ * This month's list emails used: the same exact reader as usedThisMonthExact. It THROWS UnknownReplyError on a
+ * reply it cannot trust (rule 24), never answers 0 for it: a caller that must stay up catches it (#3727).
+ */
 export async function usedThisMonth(listId: string | null, window: string | null = calendarWindow().id): Promise<number> {
-  if (!listId || !window || !isRedisConfigured()) return 0;
-  const [raw] = await redisPipeline([["GET", usedKey(listId, window)]]);
-  return Number(raw) || 0;
+  return usedThisMonthExact(listId, window);
 }
 
 /**

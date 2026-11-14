@@ -36,6 +36,7 @@ import { onAccount } from "@/lib/stripe-account";
 import { type Store, saleHandles } from "@/lib/store";
 import { type Invoice, type Movements, movementsFrom, pricesFrom, UnreadInvoiceError } from "@/lib/mrr-movements";
 import { LEAVE_NAMES, LEAVE_REASONS, type LeaveReason, isLeaveReason, isOwnReasonId } from "@/lib/leave-rules";
+import { stopsBeforeSoldEnd } from "@/lib/fixed-end-rules";
 
 const MAX_PAGES = 20;
 const CACHE_SECONDS = 10 * 60;
@@ -438,6 +439,8 @@ type Raw = {
   ended_at?: unknown;
   trial_end?: unknown;
   canceled_at?: unknown;
+  cancel_at?: unknown;
+  billing_cycle_anchor?: unknown;
   cancellation_details?: { reason?: unknown; feedback?: unknown; comment?: unknown } | null;
   items?: { data?: { quantity?: unknown; price?: { unit_amount?: unknown; recurring?: { interval?: unknown; interval_count?: unknown } | null } | null }[] } | null;
 };
@@ -509,9 +512,11 @@ export function readSub(raw: Raw, handles: Set<string>): Sub | null {
     channel: "channel" in meta ? (meta.channel && meta.channel !== "direct" ? meta.channel : "direct") : meta.utm_source || "unrecorded",
     entry: entryOf(meta),
     // A membership with a set number of payments is given its end when it is
-    // bought; that is not somebody leaving.
-    canceledAt: meta.ends_after ? 0 : num(raw.canceled_at),
-    cancelCause: !meta.ends_after && typeof raw.cancellation_details?.reason === "string" ? raw.cancellation_details.reason : "",
+    // bought; that is not somebody leaving. Stopped before that end, it is
+    // (lib/fixed-end-rules.ts): counted from when the member asked, written by
+    // the store's page, else Stripe's own moment.
+    canceledAt: meta.ends_after ? (stopsBeforeSoldEnd(raw) ? num(Number(meta.cancel_requested_at)) || num(raw.canceled_at) : 0) : num(raw.canceled_at),
+    cancelCause: (!meta.ends_after || stopsBeforeSoldEnd(raw)) && typeof raw.cancellation_details?.reason === "string" ? raw.cancellation_details.reason : "",
     ...feedbackOf(raw),
     customer: typeof raw.customer === "string" ? raw.customer : raw.customer && typeof raw.customer === "object" && typeof (raw.customer as { id?: unknown }).id === "string" ? (raw.customer as { id: string }).id : "",
     // The customer's address, when Stripe gives the customer whole (expand[]=data.customer): to leave out what an erased member wrote.

@@ -27,6 +27,7 @@ import {
   type Member,
   accountOf,
   checkSoon,
+  dropDue,
   dueMembers,
   forgetMember,
   keepMember,
@@ -112,19 +113,31 @@ export type Checked = "kept" | "changed" | "ended" | "gone" | "later";
 
 /** Checks one person again, and gives or takes back roles to match what they hold now. */
 export async function checkMember(sid: string, userId: string, now = Date.now()): Promise<Checked> {
-  // A store read that fails is unknown, never "gone" (CX-123 rule 24): the person was already taken off the line
-  // (dueMembers), so "gone" on an error would drop them for good and a later cancellation or refund would never take
-  // their paid roles back. The error goes up to sweepDiscord, which puts them back in line for the next run. The store
+  // A store read that fails is unknown, never "gone" (CX-123 rule 24): "gone" takes the person off the line
+  // (dropDue), so "gone" on an error would drop them for good and a later cancellation or refund would never take
+  // their paid roles back. The error goes up to sweepDiscord, which puts them back in line for the next run (and the
+  // lease in dueMembers brings them back if even that cannot reach Redis). The store
   // is read exactly (lib/store-exact.ts): only a confirmed absent id key is "gone"; a reply of another shape, or a key
   // leading to a record that cannot be read, throws like a failed request.
   const store = await storeForIdExactly(sid);
   if (store === "unknown") throw new UnknownReplyError(`the store ${sid} for the Discord check`);
-  if (store === "none") return "gone";
+  if (store === "none") {
+    // Off the line, which only leases the people it hands out (dueMembers): nothing is left to check.
+    await dropDue(sid, userId);
+    return "gone";
+  }
   const room = storeKey(store);
   // Read exactly: an unknown server, member or roles read throws (sweepDiscord keeps the person in line), never read
   // as "gone" (dropped from the checks, roles never taken back) or "no product gives a role" (a paying buyer's roles taken).
   const [server, member] = await Promise.all([readServerOrThrow(room), readMember(room, userId)]);
-  if (!server || !member) return "gone";
+  if (!server || !member) {
+    await dropDue(sid, userId);
+    // A rejoin between the member read and dropDue wrote a fresh entry that dropDue just took off (Claude 1 cloud's
+    // LOW on #4239): read the member again and put them back in line if they are there now, so a later refund is
+    // still checked. Only with a server: without one, nobody is checked, and putting them back would loop for ever.
+    if (server && (await readMember(room, userId))) await checkSoon(sid, userId);
+    return "gone";
+  }
   const byProduct = await productRolesOrThrow(room);
   let held: string[];
   try {

@@ -14,7 +14,7 @@ export async function POST(request: NextRequest) {
   if (!guarded.ok) return guarded.response;
   const { body } = guarded;
   try {
-    const store = guarded.store.statsId ? guarded.store : await ensureStatsId(guarded.store.email);
+    const store = guarded.store.statsId ? guarded.store : await ensureStatsId(guarded.ref);
     if (!store?.statsId) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
     if (body.action === "add") {
       const added = await addSpend(store.statsId, { channel: body.channel, campaign: body.campaign, cents: body.cents, from: body.from, to: body.to });

@@ -4107,6 +4107,7 @@ a.rv-line:hover {
 .cm-tab {
   display: flex;
   min-height: 44px;
+  min-width: 44px;
   align-items: center;
   justify-content: center;
   border-radius: 999px;

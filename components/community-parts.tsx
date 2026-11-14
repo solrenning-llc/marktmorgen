@@ -112,7 +112,7 @@ export function CommunityBar({
   return (
     <header className="cm-bar relative z-30 sm:sticky sm:top-0">
       <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
-        <Link href={`/@${store.handle}`} className="cm-home flex min-w-0 flex-1 items-center gap-3 rounded-xl">
+        <Link href={`/@${store.handle}`} className="cm-home flex min-h-11 min-w-0 flex-1 items-center gap-3 rounded-xl">
           {store.photoId ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={photoUrl(store.photoId)} alt="" width={40} height={40} className="st-avatar !mx-0 shrink-0" style={{ width: 40, height: 40 }} />
@@ -122,8 +122,8 @@ export function CommunityBar({
             </span>
           )}
           <span className="min-w-0">
-            <span className="block truncate text-[0.9375rem] font-bold leading-tight">{config.name}</span>
-            <span className="st-muted block truncate text-xs font-semibold">{w.byStore(store.name)}</span>
+            <span className="block text-[0.9375rem] font-bold leading-tight [overflow-wrap:anywhere]">{config.name}</span>
+            <span className="st-muted block text-xs font-semibold [overflow-wrap:anywhere]">{w.byStore(store.name)}</span>
           </span>
         </Link>
         {signedIn ? (
@@ -469,6 +469,8 @@ export function PostCard({
   const comments = numbers?.comments ?? 0;
   const link = `${home}/post/${post.id}`;
   const labelId = `post-title-${post.id}`;
+  // On the post's own page the post is what the page is about: its title is the page's level-1 heading.
+  const Title = full ? "h1" : "h2";
   const authorMuted = post.a !== CREATOR && members.get(post.a)?.muted;
   const w = communityWords(store.language);
   const { num } = speech(store);
@@ -510,9 +512,9 @@ export function PostCard({
         </p>
       ) : null}
 
-      <h2 id={labelId} className={`font-display mt-3 break-words text-lg font-semibold leading-snug tracking-[-0.01em] sm:text-xl ${post.title ? "" : "sr-only"}`}>
-        {full ? post.title || w.postBy(name) : <Link href={link} className="st-title-link">{post.title || w.postBy(name)}</Link>}
-      </h2>
+      <Title id={labelId} className={`font-display mt-3 break-words text-lg font-semibold leading-snug tracking-[-0.01em] sm:text-xl ${post.title ? "" : "sr-only"}`}>
+        {full ? post.title || w.postBy(name) : <Link href={link} className="st-title-link inline-flex min-h-11 items-center">{post.title || w.postBy(name)}</Link>}
+      </Title>
       {shown ? <PostText text={shown} className="mt-2" named={named} store={store} /> : null}
       {long ? (
         <p className="mt-2 text-sm font-semibold">

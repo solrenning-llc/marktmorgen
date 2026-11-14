@@ -74,7 +74,7 @@ import { QUIZ_MONTHLY_SUBMISSIONS } from "@/lib/quiz-usage-rules";
 import { TEAM_LIMITS } from "@/lib/team-scheduling-rules";
 import { SYNC_SECONDS } from "@/lib/host-calendar";
 import { MAX_TEAM } from "@/lib/team";
-import { MAX_TASK_FILE_BYTES, TASK_ROOM_BYTES, TRIAL_TASK_ROOM_BYTES } from "@/lib/assignment-rules";
+import { MAX_ANSWER_TEXT, MAX_FEEDBACK, MAX_TASK_FILE_BYTES, TASK_ROOM_BYTES, TRIAL_TASK_ROOM_BYTES } from "@/lib/assignment-rules";
 import { COMMUNITY_PICTURES, PICTURE_BYTES, TRIAL_COMMUNITY_PICTURES } from "@/lib/community-picture-rules";
 import { CLOSING_DAYS, DEL_BATCH, ENDED_LIST_DOWNLOADS, ENDED_STORE_EXPORTS, FOLLOW_BATCH, RENEWALS_AT_ONCE, WARN_WEEK_DAYS } from "@/lib/plan-closing-rules";
 import { MAX_CRM_FIELDS } from "@/lib/crm-rules";
@@ -104,6 +104,7 @@ import { SEARCH_MESSAGES } from "@/lib/community-dm";
 import { MAX_FORMS } from "@/lib/forms";
 import { EXPORT_COMMANDS, EXPORT_PAGE_SECONDS, EXPORT_STRIPE_PAGES } from "@/lib/store-export";
 import { PATH_REFUND_PAGES, PATH_SALE_PAGES } from "@/lib/path-facts";
+import { SNS_RECEIPT_COMMANDS_MOST, SNS_RECEIPT_VALUE_BYTES_MOST } from "@/lib/sns-receipt-rules";
 import { ALL_TIME_PAGES } from "@/lib/stats";
 import { MAX_PAID_BYTES, PAYPAL_REFUNDS_READ } from "@/lib/paypal-sales";
 import { AGENDA_MAX_ROWS, AGENDA_ROW_SENT_BYTES, AGENDA_TASKS_BYTES } from "@/lib/person-agenda";
@@ -119,7 +120,7 @@ import { ASSISTANT_ON_SALE } from "@/lib/opening";
 import { NEXT_OFFER_CHOICES, NEXT_OFFER_COMMANDS, NEXT_OFFER_PRODUCTS } from "@/lib/next-offer-rules";
 import { MAX_SHELF } from "@/lib/course-shelf-rules";
 import { ASSIST_REMIND_COMMANDS, ASSIST_REMIND_PRODUCTS } from "@/lib/assistant-reminder-rules";
-import type { ReadWork } from "@/lib/api-read-rules";
+import { DONE_SET_BYTES, LISTING_BYTES, TASK_BYTES, type ReadWork } from "@/lib/api-read-rules";
 import { DOWNLOAD_LOOKUP_COMMANDS, DOWNLOAD_LOOKUP_MS, ORDERS_BUNDLE_BYTES, ORDERS_OLDER_BYTES, ORDERS_OLDER_COMMANDS, ORDERS_OPEN_COMMANDS, ORDERS_OPEN_SECONDS, ORDERS_PAGE_BYTES } from "@/lib/buyer-orders-rules";
 import { MOVES_PER_MGET, MOVE_BYTES, MOVE_KEY_BYTES } from "@/lib/call-moves-read";
 import { MAX_PER_PERSON as AGREEMENTS_PER_PERSON, MAX_BODY as AGREEMENT_BODY, MAX_LINES as AGREEMENT_LINES, MAX_LINE_TEXT as AGREEMENT_LINE_TEXT, MAX_NAME as AGREEMENT_NAME, MAX_TITLE as AGREEMENT_TITLE } from "@/lib/agreement-rules";
@@ -160,6 +161,10 @@ export const MAIL_REPORT_COST_COMPONENTS = {
   completeMonthlyUsd: null,
   reviewedAdmission: CURRENT_MAIL_REPORT_ADMISSION,
 } as const;
+/** Redis commands one callback attempt is billed at its most: the rate guard's two, the SNS receipt's and the report's first outcome. */
+export const MAIL_CALLBACK_COMMANDS_PER_ATTEMPT = 2 + SNS_RECEIPT_COMMANDS_MOST + MAIL_REPORT_COST_COMPONENTS.firstOutcomeCommands;
+/** The SNS receipt's key and value fit in one of the 256-byte transport records counted in mailReportCallbackCost (key prefix, an 80-character id, the value). */
+export const SNS_RECEIPT_RECORD_BYTES_MOST = "nl:sns:seen:".length + 80 + SNS_RECEIPT_VALUE_BYTES_MOST;
 /** One published delivery notice, without supplier free-tier credit:
  * SNS $0.50/million publishes + $0.60/million HTTPS deliveries, each 64 KiB
  * chunk charged. Read 2026-11-04: aws.amazon.com/sns/faqs/ and /sns/pricing/.
@@ -167,8 +172,11 @@ export const MAIL_REPORT_COST_COMPONENTS = {
  * This is an explicit sizing calculation, never a current account review.
  * A retry is charged the full route envelope even when deduplication wins.
  * Thirty CPU seconds and 2 GB held for all 30 seconds use maxDuration, not
- * an observed fast callback. Eleven Redis commands = SET/INCR rate guard,
- * SET SNS receipt, EVAL plus its seven internal report commands. Storage
+ * an observed fast callback. Redis commands = SET/INCR rate guard, the SNS
+ * receipt at its most (lib/sns-receipt.ts, SNS_RECEIPT_COMMANDS_MOST: claim,
+ * read-back, owner-bound take-over and done or let-go scripts with their inner
+ * commands, eight since #2612; one before), and the report's EVAL plus its
+ * seven internal commands: MAIL_CALLBACK_COMMANDS_PER_ATTEMPT. Storage
  * includes two report fields kept ten days and two 256-byte transport/guard
  * records per attempt kept a full day (above the actual minute-long guard).
  * Report fields are also in the data-family model: deliberately overlapping
@@ -180,7 +188,7 @@ export function mailReportCallbackCost(deliveries: number, attempts: number, sns
       typeof snsTransferPerGb !== "number" || !Number.isFinite(snsTransferPerGb) || snsTransferPerGb <= 0 ||
       !Number.isSafeInteger(deliveries * attempts)) return null;
   const invocations = deliveries * attempts;
-  const redisCommands = invocations * 11;
+  const redisCommands = invocations * MAIL_CALLBACK_COMMANDS_PER_ATTEMPT;
   if (!Number.isSafeInteger(redisCommands)) return null;
   // Five chunks for an accepted 300,000-byte envelope, plus transport
   // headers. An oversized/rejected publication is outside this delivery
@@ -194,7 +202,7 @@ export function mailReportCallbackCost(deliveries: number, attempts: number, sns
   const networkBytes = 300_000 + 128 + 32_768;
   const hostingPerAttempt = CALL + 30 * CPU_SECOND + 30 * MEMORY_SECOND + 2 / 1_000_000
     + networkBytes * (ORIGIN_PER_BYTE + 0.15 / 1e9);
-  const redisPerAttempt = 11 * COMMAND + 4096 * DB_BYTE + 512 / 30 * DB_BYTE_MONTH;
+  const redisPerAttempt = MAIL_CALLBACK_COMMANDS_PER_ATTEMPT * COMMAND + 4096 * DB_BYTE + 512 / 30 * DB_BYTE_MONTH;
   const retainedPerNotice = 512 * 10 / 30 * DB_BYTE_MONTH;
   const snsUsd = deliveries * (snsPerNotice + attempts * snsPerAttempt);
   const hostingUsd = invocations * hostingPerAttempt;
@@ -362,10 +370,59 @@ export const ORIGIN_PER_BYTE = 0.06 / 1e9;
  * (app/api/store/community/image).
  */
 export const BLOB_TRANSFER_PER_BYTE = 0.1 / 1e9;
+/**
+ * One "Simple Operation" of Vercel Blob (a head: a file's details read without its bytes), at US$ 0.400 per million on
+ * demand, from the official page "Vercel Blob usage and pricing" (vercel.com/docs/vercel-blob/usage-and-pricing, read by
+ * Claude on 2 November 2026, docs/codex-queue.md item PP2), which also says every interaction counts: never a free quota.
+ */
+export const BLOB_SIMPLE_OPERATION = 0.4 / 1e6;
+/**
+ * One "Advanced Operation" of Vercel Blob (a put, a copy, a list; a delete is taken as one too), as a review
+ * ceiling: twice the US$ 5.00 per million on demand of Vercel's published price, the same doubling as
+ * BLOB_TRANSFER_PER_BYTE. Not read from an official page in this session (vercel.com could not be reached on
+ * 9 November 2026): not certified, never zero; a dated official read replaces it. A review ceiling not read: the
+ * official pricing page was refused through this session's proxy (403, 9 November 2026), so the figure is the one
+ * remembered, doubled, and stays a ceiling to be read and dated before any margin is certified.
+ */
+export const BLOB_ADVANCED_OPERATION = 10 / 1e6;
 /** How long a door's file may be kept before it is used or swept away, in months: a day, and the day the job may take to reach it. */
 export const DOOR_KEPT_MONTHS = 2 / 31;
 /** What one community picture costs to send: the request, the reads, a second held at 2 GB, and its megabyte from the file store and on to the browser. */
 export const PICTURE_READ = request("light", 16) + PICTURE_BYTES * (ORIGIN_PER_BYTE + BLOB_TRANSFER_PER_BYTE);
+/**
+ * The daily sweep's commands for one assignment door's file, on both its lists (lib/assignment.ts, sweepTaskUploads):
+ * on each, its share of the list read, its ZREM, the doors' ZSCORE for a held name, the student's work read to keep a
+ * handed-in file, and the ZADD when it is put back; and the hand-in's hold written, taken back or let go
+ * (takeTaskUpload, releaseTaskHold).
+ */
+export const TASK_SWEEP_COMMANDS = 14;
+/**
+ * The most one student's work on an assignment reads as (lib/assignment.ts, submissionOf), which the sweep reads to
+ * keep a handed-in file: the answer and the creator's reply at their longest, each character escaped in JSON at six
+ * bytes, and four kilobytes for the rest of the record.
+ */
+export const TASK_WORK_BYTES = (MAX_ANSWER_TEXT + MAX_FEEDBACK) * 6 + 4_096;
+/** Heads of the file store one assignment door's file takes: the door's own, and the hand-in's (app/api/store/course/task). */
+export const TASK_DOOR_SIMPLE_OPERATIONS = 2;
+/**
+ * Advanced Operations one assignment door's file takes at the most: the browser's PUT, a delete by the hand-in (refused,
+ * or the file replaced later) and one by the sweep (a held name no work keeps), counted in tests/task-upload-path.test.ts.
+ */
+export const TASK_DOOR_ADVANCED_OPERATIONS = 3;
+/**
+ * The most one assignment upload door costs (app/api/store/course/task/upload, 9 November 2026): held as a call waited
+ * on for ten seconds at 2 GB, forty commands (the student, the store, the course, its listing, the gate, the task,
+ * the pace, the room, the buyer action, the listing and the one taken back), the store's record, the course's and
+ * its listing's, the task and the lessons done read at their largest, the heads of the file store (the door's and
+ * the hand-in's), the browser's upload through the door and every delete of its file (TASK_DOOR_ADVANCED_OPERATIONS),
+ * and the sweep's commands and its two reads of the student's work for it. One buyer action is taken before the head;
+ * tests/task-upload-path.test.ts holds this at or under UNIT_COST.buyer, so the line buyer-actions already pays for it.
+ * (The two Blob prices are declared as in #3414, same name and value: whichever lands second keeps one copy.)
+ */
+export const TASK_DOOR_COST =
+  request("wait", 40 + TAKE_COMMANDS, MAX_STORE_BYTES + COURSE_BYTES + LISTING_BYTES + TASK_BYTES + DONE_SET_BYTES)
+  + TASK_DOOR_SIMPLE_OPERATIONS * BLOB_SIMPLE_OPERATION + TASK_DOOR_ADVANCED_OPERATIONS * BLOB_ADVANCED_OPERATION
+  + TASK_SWEEP_COMMANDS * COMMAND + 2 * TASK_WORK_BYTES * DB_BYTE;
 /**
  * One certificate of completion drawn as a PDF file (app/[handle]/certificate/[id]/pdf/route.ts): the store and the
  * certificate (or the sample's course and listing) read, its two counts (REQUEST_COMMANDS each), the fonts embedded and the page drawn at a
@@ -617,6 +674,9 @@ export const UNIT_COST: Record<AllowanceKind, number> = {
   // database and on to the browser, and a door's file of up to 10 MB kept
   // for as long as an unused door may be.
   buyer: request("wait", 100 + TAKE_COMMANDS, 60_000) + 60_000 * ORIGIN_PER_BYTE + (MAX_TASK_FILE_BYTES / GB) * STORAGE_PER_GB * DOOR_KEPT_MONTHS,
+  // A webhook settings change (lib/webhooks.ts, changeConfig) is inside a studio or API request above: a GET and the
+  // compare-and-set a try, CONFIG_WRITE_TRIES tries at the most, and only on a reply it cannot read one GET more, the
+  // settings read back once (CX-123 rule 24); when they are as they were read, that read starts the next try.
   // A webhook's try (lib/webhooks.ts): the delivery and the store read and written, the endpoint waited on for up to eight seconds.
   webhook: request("wait", 20 + TAKE_COMMANDS, 40_000),
 };
@@ -747,22 +807,45 @@ export const PAYPAL_LEDGER = request("heavy", 6, PAYPAL_LEDGER_BYTES);
  *   first try, each time through the one sender kept for its key (sendEmailPinned): at most one request a sender
  *   attempt, and none again once an answer was not known;
  * - commandsPerReceiptTry: every Redis command one such try sends, from the paid record's GET to the list's ZADD, the
- *   hand-over's rerun (its writes already there), the first-try mark, the link's grant, the receipt kept as first
- *   made (two GETs each try; on the try that keeps it, one EVAL, KEEP_RECEIPT, whose six calls are the person's
- *   deletion mark read, its three erasure notes, SET NX and GET) and the kept sender included, at the most measured
- *   with either sender refusing (tests/paypal-handover-cost.test.ts for Resend, tests/paypal-receipt-once.test.ts for
- *   Amazon): 33 sent, with the receipt kept, Amazon refusing for the account (the owner told), the key moved to Resend
- *   and Resend asking to slow down (429) on each of viaResend's three attempts, all in one try (a refusal Amazon gave
- *   goes on to Resend in the same try; part E2). 52 counts each of KEEP_RECEIPT's six calls besides its EVAL (39),
- *   and a store from before lists given its list in that try, once in its life (ensureListId: 7 sent, measured in
- *   part K, the three lock and write scripts' two calls each counted too, 13). The kept receipt is at most
- *   RECEIPT_MAIL_BYTES (lib/paypal-delivery.ts), written once and read back by each try; its key is priced as the
+ *   note of the person's own deletion read before the hand-over (one HGET, erasedSincePaid with `own`; a person deleted
+ *   at their own request at or after the payment ends the try there, after the take-back's read below, the affiliate's
+ *   and partners' credit and the order's count; parts L and M), the hand-over's rerun (its writes already there), the
+ *   first-try mark, the link's grant, the receipt kept as first made (two GETs each try; on the try that keeps it, one
+ *   EVAL, KEEP_RECEIPT, whose six calls are the person's deletion mark read, its three erasure notes, SET NX and GET),
+ *   the affiliate's credit, the same note read once more after every write that names the person (one HGET; it runs on
+ *   the return route's first hand-over too, which is the order's own work, line orders, inside ORDER_COMPUTE) and the
+ *   kept sender included, at the most measured with either sender refusing (tests/paypal-handover-cost.test.ts for
+ *   Resend, tests/paypal-receipt-once.test.ts for Amazon): 35 sent, with the receipt kept, Amazon refusing for the
+ *   account (the owner told), the key moved to Resend and Resend asking to slow down (429) on each of viaResend's three
+ *   attempts, all in one try (a refusal Amazon gave goes on to Resend in the same try; part E2). 54 counts each of
+ *   KEEP_RECEIPT's six calls besides its EVAL (41), and a store from before lists given its list in that try, before
+ *   the deletion mark's read, once in its life (ensureListId: 7 sent, measured in part K, the three lock and write
+ *   scripts' two calls each counted too, 13). A try whose second read finds the person's own deletion completed during
+ *   it takes back what it wrote of them (takeBack; parts M and N), at most takeBackCommands more for a product that is
+ *   not a course: the purchase's HGET and HLEN, then one EVAL (TAKE_BACK_OWN, lib/paypal-delivery.ts; Codex C2 on #3449)
+ *   whose calls are counted too: the purchase's HGET and HLEN again, the store's SREM from each of the 14 keys of the
+ *   stores they bought from (lib/buyer-library.ts forgetBoughtCommands), the affiliate bond's HGET and HDEL and the
+ *   purchase's HDEL (22); a course of the order adds four (dropEnrollment with its start: the EVAL and its two calls,
+ *   and the DEL), where its hand-over's recordEnrollment adds two (line orders). The purchase already taken by the
+ *   deletion sends fewer (the bond's HDEL_IF_EQUAL EVAL and its two calls, no SREM, no HDEL; part N). 76 is the longest
+ *   try with a take-back on top. Once a take-back succeeds the order leaves the list; one that finds the purchase
+ *   changed since its read takes nothing back and the order stays owed (part O).
+ *   The kept receipt is at most RECEIPT_MAIL_BYTES (lib/paypal-delivery.ts), written once and read back by each try; its key is priced as the
  *   order's in tests/store-data-registry.ts (nl:ppsell:mail:). The guarded Resend ledger's own EVALs are lib/resend-fallback-budget's.
  *   PAYPAL_RECEIPT_RETRY_COMMANDS is their product: the most one order's receipt retries send.
  * Why the retry is the five-minute job's, not a plan's: NOT_A_COST.HAND_OVER_BATCH.
  */
-export const PAYPAL_HAND_OVER_RETRY = { listCommandsPerSale: 2, listReadsPerStoreRun: 1, ordersPerStoreRun: 25, ownCommandsPerOrderTried: 4, receiptTriesPerOrder: 12, commandsPerReceiptTry: 52 } as const;
+export const PAYPAL_HAND_OVER_RETRY = { listCommandsPerSale: 2, listReadsPerStoreRun: 1, ordersPerStoreRun: 25, ownCommandsPerOrderTried: 4, receiptTriesPerOrder: 12, commandsPerReceiptTry: 76, takeBackCommands: 22 } as const;
 export const PAYPAL_RECEIPT_RETRY_COMMANDS = PAYPAL_HAND_OVER_RETRY.receiptTriesPerOrder * PAYPAL_HAND_OVER_RETRY.commandsPerReceiptTry;
+/**
+ * The store's webhooks told of a PayPal payment refunded in full ("refund.issued", lib/paypal-delivery.ts, from the
+ * five-minute job's watch of PayPal refunds, watchPayPal in lib/paypal-sales.ts): before the event, the person's
+ * own-deletion note is read once (ownNoteReadsPerRefund: one HGET, erasedSincePaid with `own`), so an address deleted
+ * at the person's request is left out (review of #3449, LEVE 2). Held by tests/paypal-receipt-once.test.ts (part M).
+ * The watch's other per-order commands have no line of their own yet (NOT_A_COST.HAND_OVER_BATCH): not measured, so
+ * not certified, never zero.
+ */
+export const PAYPAL_REFUND_TOLD = { ownNoteReadsPerRefund: 1 } as const;
 export const BUYER_LEDGER = request("heavy", 8 + TAKE_COMMANDS, 2 * BUYER_LEDGER_BYTES) + ALL_TIME_PAGES * EXPORT_PAGE_SECONDS * MEMORY_SECOND;
 /**
  * A narrowed email's reading of the store's buyers made by the scheduled job
@@ -1245,6 +1328,8 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/affiliate-leads.ts", names: ["takePublicRequest(store)", "count?: boolean"] },
       // The offers after a cart read what the buyer already has from the creator's Stripe account, counted before (556 [CT1], 1 November 2026).
       { file: "lib/cart-offers.ts", names: ["takeBuyerRead(store, CART_OFFER_REQUEST_UNITS)", "CART_OFFER_REQUEST_UNITS = NEXT_OFFER_REQUEST_UNITS"] },
+      // A code only for people who bought here before reads what the typed email bought from the creator's Stripe account, counted before (554 [DS1], unit 2, 11 November 2026).
+      { file: "lib/returning-code.ts", names: ["takeBuyerRead(store, RETURNING_CODE_REQUEST_UNITS)", "RETURNING_CODE_REQUEST_UNITS = NEXT_OFFER_REQUEST_UNITS", "RETURNING_TRIES = 6", "RETURNING_LINKS_PER_ADDRESS = 3", "RETURNING_LINK_SECONDS = 1800", "kind: \"transactional\""] },
       // A course's "More from" shelf reads what a student owns the same way, counted before (628 [HN4](b), 10 November 2026).
       { file: "lib/course-shelf.ts", names: ["takeBuyerRead(store, SHELF_REQUEST_UNITS)", "SHELF_REQUEST_UNITS = NEXT_OFFER_REQUEST_UNITS", "ownedHere(store, email)"] },
       { file: "app/[handle]/course/[product]/page.tsx", names: ["shelfShown(store, course.shelf, product.id, access.learner.email)"] },
@@ -1261,7 +1346,7 @@ export const COST_LINES: CostLine[] = [
       // before it reads, its meter the rest before each read, and the store's "too many" answer without room (C3-78, MR, 4 November 2026).
       // A download from it reads only the purchase asked for, by its reference: DOWNLOAD_LOOKUP_UNITS after the grant (one read) and before the rest, and only the
       // listings it hands over through the meter, never read again (DOWNLOAD_LOOKUP_READ in tests/plan-cost-registry.test.ts).
-      { file: "lib/buyer-orders.ts", names: ["export async function requestOrdersLink", "withinOpening(Promise.all([purchasesFor(store, raw, meter), callsFor(store, raw, meter)]), meter, ORDERS_LINK_READ_MS)", "afterAnswer(() => sendLink(store, raw, email, origin))", "export async function findPurchase", "takePublicRequest(store, \"buyer\", Date.now(), DOWNLOAD_LOOKUP_UNITS)", "withinOpening(lookUp(store, email, kind, reference, meter, want), meter, DOWNLOAD_LOOKUP_MS)", "DOWNLOAD_LOOKUP_MS)) as Row", "await meter.take(Number(count) || 0)", "const find = finderFor(store, meter)", "function onlyFinder(store: Store, meter: OrdersMeter)"] },
+      { file: "lib/buyer-orders.ts", names: ["export async function requestOrdersLink", "withinOpening(Promise.all([purchasesFor(store, raw, meter), callsFor(store, raw, meter)]), meter, ORDERS_LINK_READ_MS)", "afterAnswer(() => sendLink(store, raw, email, origin))", "export async function findPurchase", "takePublicRequest(store, \"buyer\", Date.now(), DOWNLOAD_LOOKUP_UNITS)", "withinOpening(lookUp(store, email, kind, reference, meter, want), meter, DOWNLOAD_LOOKUP_MS)", "DOWNLOAD_LOOKUP_MS)) as Row", "await meter.take(count)", "const find = finderFor(store, meter)", "function onlyFinder(store: Store, meter: OrdersMeter)"] },
       { file: "lib/buyer-orders-rules.ts", names: ["DOWNLOAD_LOOKUP_UNITS", "DOWNLOAD_LOOKUP_MS", "DOWNLOAD_LOOKUP_COMMANDS", "ORDERS_LINK_READ_MS"] },
       { file: "app/api/store/orders/route.ts", names: ["export const maxDuration = 30", "requestOrdersLink", "if (result === \"busy\") return tooMany();"] },
       { file: "app/api/store/download/route.ts", names: ["findPurchase(store, token", "if (error instanceof OrdersBusy) return tooOften();", "const item = await listing(line.productId);", "const owner = await listing(bumped ? bumped.id : purchase.productId);"] },
@@ -1420,7 +1505,7 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/call-moves-read.ts", names: ["MOVES_PER_MGET", "MOVE_BYTES", "MOVE_KEY_BYTES", "moveReads"] },
       { file: "lib/mcp-tools.ts", names: ["chargeBook"] },
       { file: "app/api/v1/sales/route.ts", names: ["takeMoreApi(store, API_SALES_UNITS - 1)"] },
-      { file: "lib/api-sales.ts", names: ["charge(apiReadUnits(listingsWork(listingsToRead(store, wanted))), API_SALES_UNITS)"] },
+      { file: "lib/api-sales.ts", names: ["charge(apiReadUnits(listingsWork(listingsToRead(store, wanted))), API_SALES_UNITS - 1)"] },
       { file: "lib/store-allowance-rules.ts", names: ["API_SALES_UNITS"] },
       { file: "lib/api-sales.ts", names: ["SALES_PAGE", "SALES_TITLE_IDS", "SALE_TEXT_LIMITS", "cutText"] },
     ],
@@ -1475,8 +1560,11 @@ export const COST_LINES: CostLine[] = [
       { file: "app/api/store/community/push/route.ts", names: ["takeBuyerAction"] },
       { file: "app/api/store/community/upload/route.ts", names: ["takeBuyerAction", "takePicturePlace"] },
       { file: "app/api/store/course/comment/route.ts", names: ["takeBuyerAction"] },
-      { file: "app/api/store/course/task/route.ts", names: ["takeBuyerAction(store)"] },
-      { file: "app/api/store/course/task/upload/route.ts", names: ["takeBuyerAction(on.store)"] },
+      // The hand-in's head of its file and its deletes are priced with the door the file came through (TASK_DOOR_COST).
+      { file: "app/api/store/course/task/route.ts", names: ["takeBuyerAction(store)", "headFile(path)", "deleteFile(path)", "releaseTaskHold(file.path)"] },
+      // The assignment door also asks the file store once whether the browser's name is already a file (one head, and
+      // a listing it may take back), after its buyer action is taken (9 November 2026).
+      { file: "app/api/store/course/task/upload/route.ts", names: ["takeBuyerAction(on.store)", "head(pathname)", "dropTaskDoor(pathname)"] },
       { file: "app/api/store/course/progress/route.ts", names: ["takeBuyerAction"] },
       { file: "app/api/store/course/certificate/route.ts", names: ["takeBuyerAction(store)"] },
       // The download takes one buyer read, then, before any note is read, the rest of what its most costs to read
@@ -1600,7 +1688,7 @@ export const PER_PAYMENT_LINES: CostLine[] = [
       { file: "lib/crm.ts", names: ["PERSON_ARG_BYTES = 35;", "valuesOf"] },
       { file: "lib/free.ts", names: ["Math.ceil(MAX_LEADS / 500) + 10"] },
       { file: "lib/store-export.ts", names: ["listValuesShape(store)"] },
-      { file: "lib/free.ts", names: ["contacts * fields * PERSON_ARG_BYTES", "Math.ceil(contacts / 1000) * fields"] },
+      { file: "lib/free.ts", names: ["contacts * fields * PERSON_ARG_BYTES", "Math.ceil(contacts / LIST_VALUES_PER_READ) * fields", "LIST_VALUES_PER_READ = 1_000;", "readValues(LIST_VALUES_PER_READ)", "if (!valued.has(email)) waiting.add(email);"] },
       { file: "lib/joined-stores.ts", names: ["QUARTERS_KEPT", "PERSON_RECORD_MONTHS"] },
       { file: "lib/plan-closing-rules.ts", names: ["DEL_BATCH", "FOLLOW_BATCH", "RENEWALS_AT_ONCE"] },
       { file: "tests/store-data-registry.ts", names: ["closingBytes", "followedBytes", "TRIAL_UNITS"] },
@@ -1628,7 +1716,7 @@ export function exportCommands(bytes: number): number {
   const lessons = MAX_PRODUCTS * MAX_LESSONS;
   // The contacts' pages: a thousand at a command, as many as the room can hold and never more than lib/free.ts, listAsCsv, reads (MAX_LEADS).
   const contacts = Math.min(Math.ceil(bytes / 100 / 1000), MAX_LEADS / 500 + 10);
-  // Each page's people's values, one HMGET a field (lib/crm.ts, valuesOf; second cost review of #3354).
+  // The people's values, one HMGET a field for each thousand of them, never more than the walk's pages (lib/free.ts, LIST_VALUES_PER_READ; lib/crm.ts, valuesOf; second and third cost reviews of #3354).
   return Math.ceil(EXPORT_COMMANDS.fixed + 3 * Math.ceil(MAX_PRODUCTS / 100) + Math.ceil(MAX_PRODUCTS / 100) + Math.ceil(lessons / BODIES_PER_READ) + Math.ceil(MAX_POSTS / 100) + EXPORT_COMMANDS.form * MAX_FORMS + contacts * (1 + MAX_CRM_FIELDS));
 }
 
@@ -1823,7 +1911,7 @@ export const NOT_A_COST: Record<string, string> = {
   PICTURE_DOORS_PER_HOUR: "A pace on the studio's picture doors a store opens in an hour (lib/picture-door.ts, pictureDoorHour; rule 24 inventory A1), counted before the file store is asked or anything is signed: it only refuses, and each door it lets through has already taken a studio request (line studio). What a door writes is not priced by it. Since rule 24 inventory A1b (8 November 2026) a picture never put on anything is deleted by the course job's sweep (sweepPictureDoors) PICTURE_SWEEP_AFTER_SECONDS (30 days, owner decision DONO-8 of 9 November 2026) after its door, only while its store's note is still there at its door's very time (a picture taken off the store's list only, or whose store note was written at another time, is kept) and once its file was read and stored after its note, at most PICTURE_SWEEP_PER_RUN a run, and a store's untaken notes count against PICTURE_DOOR_MAX until then, so the file store keeps at most PICTURE_DOOR_MAX of a store's untaken pictures, each at most MAX_IMAGE_BYTES (lib/product-image.ts). That storage, the sweep's ZSCORE of each store note, head and delete of each picture (every try the SDK may send), and the notes' commands have no line yet. A draft at those ceilings, with the delete counted as an Advanced Operation because no official page read here says it is free (vercel.com was not reachable on 9 November 2026), is about $0.19 a month on Store ($0.44 on Studio, $1.27 on Scale; without the delete, $0.08 on Store): it does not fit under the US$ 66 ceiling of the first year given back (DONO-8; $65.87 once the picture-uploads line of #2803 is counted, leaving $0.13), so it waits for the owner or for a dated official source on the delete's price. Not certified, never zero.",
   CENTS_PER_MINUTE: "AI captions are bought at their own price, charged before the work (lib/auto-captions-rules.ts).",
   MAX_PAGES_PER_STORE: "Pages of Stripe Checkout Sessions (GET /checkout/sessions, up to 100 each) the five-minute job reads per store per run in each of its two walks of the last day (lib/checkout-sweep.ts, walkDay; audit A2, 9 November 2026): the completed checkouts on every store it sweeps, and the expired ones on a store with reminders or a list, never the open ones. So at most 2 x 3 = 6 list calls each time a store is swept; a run sweeps a store once, unless Redis's SCAN hands its key back on another page (#3064 makes that once a run too), so with one sweep a run 2 x 3 x 288 = 1,728 a UTC day, 55,296 a billing month of 32 UTC days; Stripe bills no API call, and each run stops at its deadline. Each walk keeps its place for the next run (nl:sweep:walk:, tests/store-data-registry.ts): one GET a walk and at most one SET or DEL, so at most 4 store commands each time a store is swept, with one sweep a run 1,152 a UTC day, 36,864 a billing month, and only 2 a sweep (the GETs) for a store whose day of checkouts fits in one run; each value at most 220 bytes, kept a day. Held by tests/checkout-sweep-complete.test.ts. Past 3 pages a run, a walk carries on next run instead of reading the same newest pages again, so every session of the day is read in turn; a walk that takes more than an hour to reach the end of the day is said in the log every run it goes on. A scheduled job, bounded by its schedule (a company fixed cost), not a plan's allowance; like the job's other per-store work, its dollar figure is not yet a line of lib/llc-fixed-costs.ts, so it is not certified, never zero.",
-  HAND_OVER_BATCH: "PayPal orders still owed their hand-over that the five-minute job's sweep of a store tries again in one run (lib/paypal-delivery.ts, handOverAgain; #2909): one ZRANGEBYSCORE of the list a store with PayPal a run, then for each order tried at most four commands of its own (GET of the paid record, ZSCORE of the refund mark, at most two ZREM or ZADD of the list) besides the hand-over's own work, which is the order's (line orders): at most 1 + HAND_OVER_BATCH x 4 commands of its own a store a run, and at most HAND_OVER_BATCH hand-overs tried, each order at most once a run (PAYPAL_HAND_OVER_RETRY, held by tests/paypal-handover-cost.test.ts). A receipt the sender did not accept reruns its order's hand-over at most receiptTriesPerOrder times in its window, each try at most commandsPerReceiptTry commands (PAYPAL_RECEIPT_RETRY_COMMANDS an order), and at most one request a sender attempt through the one sender kept for it. A scheduled job, bounded by its schedule and the batch, a company fixed cost like MAX_PAGES_PER_STORE, not a plan's allowance; like the job's other per-store work, its dollar figure is not yet a line of lib/llc-fixed-costs.ts, so it is not certified, never zero.",
+  HAND_OVER_BATCH: "PayPal orders still owed their hand-over that the five-minute job's sweep of a store tries again in one run (lib/paypal-delivery.ts, handOverAgain; #2909): one ZRANGEBYSCORE of the list a store with PayPal a run, then for each order tried at most four commands of its own (GET of the paid record, ZSCORE of the refund mark, at most two ZREM or ZADD of the list) besides the hand-over's own work, which is the order's (line orders): at most 1 + HAND_OVER_BATCH x 4 commands of its own a store a run, and at most HAND_OVER_BATCH hand-overs tried, each order at most once a run (PAYPAL_HAND_OVER_RETRY, held by tests/paypal-handover-cost.test.ts). A receipt the sender did not accept reruns its order's hand-over at most receiptTriesPerOrder times in its window, each try at most commandsPerReceiptTry commands (PAYPAL_RECEIPT_RETRY_COMMANDS an order), and at most one request a sender attempt through the one sender kept for it. The same sweep's watch of PayPal refunds (watchPayPal, lib/paypal-sales.ts) reads, for each payment refunded in full that it tells the store's webhooks of, the person's own-deletion note once (PAYPAL_REFUND_TOLD); its other per-order commands are not yet measured in a line, so they are not certified, never zero. A scheduled job, bounded by its schedule and the batch, a company fixed cost like MAX_PAGES_PER_STORE, not a plan's allowance; like the job's other per-store work, its dollar figure is not yet a line of lib/llc-fixed-costs.ts, so it is not certified, never zero.",
   STRIPE_LOOKUPS_PER_STORE: "Calls to the creator's Stripe account the five-minute job makes per store per run to tell whose a refunded charge is and to read a canceled member's address (lib/webhooks.ts, watchStore): a scheduled job, bounded by its schedule (a company fixed cost); Stripe bills no API call, and a membership's charge (three calls) is taken from the same ten, so no run asks more than before.",
   DEMO_SESSIONS_PER_DAY: "Sessions the whole site may open in a day, the studio demo without sign-up (256 [KJ1], lib/studio-demo-rules.ts; off while STUDIO_DEMO_ON is false): not a plan's cost, since a demo session belongs to no store; a company exposure under MR item 2, priced in docs/studio-demo.md ($1.53 a day at the most, held by tests/studio-demo-rules.test.ts) and covered from the minimum base, with its line in docs/funded-exposure-review.md needed before it is turned on.",
   DEMO_COMMANDS_PER_DAY: "Database commands the demo's accepted openings and actions together may send in a day (refusals are priced apart, DEMO_REFUSALS_PER_DAY), reserved at the worst before a session opens: the studio demo without sign-up (256 [KJ1], lib/studio-demo-rules.ts; off while STUDIO_DEMO_ON is false): not a plan's cost, since a demo session belongs to no store; a company exposure under MR item 2, priced in docs/studio-demo.md ($1.53 a day at the most, held by tests/studio-demo-rules.test.ts) and covered from the minimum base, with its line in docs/funded-exposure-review.md needed before it is turned on.",
@@ -1888,6 +1976,10 @@ export const SCOPES: Record<string, ScopeClass> = {
   "countUse:storeMonthKey(to.statsId": line("funnel-share"), "countUse:storeUseKey(to.statsId": line("funnel-share"),
   ai: line("ai"), ask: line("ai"), "ask-day": line("ai"), "ask-store": line("ai"), "chat-summary": line("ai"),
   "embed-open": line("embed"), checkout: line("orders"), upsell: line("orders"), "group-place": line("orders"),
+  // Tries of a code only for people who bought here before, per connection and store; each read is taken from the public requests first (lib/returning-code.ts).
+  "returning-code": BURST("public-requests"),
+  // Links one address can be sent by one store in an hour; each email is taken from the store's figure before it goes (lib/returning-code.ts).
+  "returning-code-address": METERED_EMAIL,
   book: line("orders"), "paypal-return": line("orders"),
   "podcast-feed": line("visits"), "<dynamic:allowance[0]>": line("visits"),
   "<dynamic:scope>": guard("withinStore and withinService pass their scope on to withinLimit (lib/metered-limits.ts)."),

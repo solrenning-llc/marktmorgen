@@ -251,6 +251,16 @@ if redis.call('HGET', KEYS[1], ARGV[1]) ~= ARGV[2] then return 0 end
 redis.call('HSET', KEYS[1], ARGV[1], ARGV[3])
 return 1`;
 
+/**
+ * The student's slot freed only while it still names the certificate
+ * withdrawn, in one step, the mirror of CERT_SLOT_SWAP: 1 when freed, 0 when
+ * it names another or none and nothing was removed. Modelled by
+ * lib/redis-memory.ts.
+ */
+export const CERT_SLOT_FREE = `-- marktmorgen:cert-slot-free:v1
+if redis.call('HGET', KEYS[1], ARGV[1]) ~= ARGV[2] then return 0 end
+return redis.call('HDEL', KEYS[1], ARGV[1])`;
+
 /** How many times one press looks at the slot again when it changed between two reads. */
 const CLAIM_TRIES = 3;
 
@@ -387,9 +397,11 @@ export async function withdrawCertificate(courseId: string, id: string): Promise
     // Unknown whether it was marked withdrawn: the slot is not freed for a second one (CX-123 rule 24).
     if (written !== "OK") throw new UnknownReply("a certificate's withdrawal");
   }
-  const who = emailKey(found.email);
-  const [current] = exactReplies(await redisPipeline([["HGET", indexKey(courseId), who]]), 1, "a certificate's withdrawal");
-  if (current === id) await redisPipeline([["HDEL", indexKey(courseId), who]]);
+  // Freed only while it still names this one (CERT_SLOT_FREE): a press that
+  // took it for a new certificate meanwhile keeps it. Read exactly: 1 or 0,
+  // anything else is unknown and never reported as done (CX-123 rules 24, 25).
+  const [freed] = exactReplies(await redisPipeline([["EVAL", CERT_SLOT_FREE, 1, indexKey(courseId), emailKey(found.email), id]]), 1, "a certificate's withdrawal");
+  if (freed !== 1 && freed !== 0) throw new UnknownReply("a certificate's withdrawal");
   return true;
 }
 

@@ -363,6 +363,11 @@ const META_NOTICES: Record<string, { title: string; body: string }> = {
     title: "Meta ads are disconnected",
     body: "The permission was given back to Meta, and what was read from it was deleted. What you typed yourself stays.",
   },
+  // Issue #4011: another store still uses this Meta login, so Meta's permission was kept for it.
+  "disconnected-kept": {
+    title: "Meta ads are disconnected",
+    body: "What was read from it was deleted. What you typed yourself stays. Another store still uses this Meta login, so we kept its permission at Meta. Disconnect that store too to remove it at Meta.",
+  },
   declined: {
     title: "Nothing was connected",
     body: "Meta's page was closed or canceled. Connect again when you are ready.",

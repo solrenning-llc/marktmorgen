@@ -106,11 +106,13 @@ export async function stopMeta(request: NextRequest): Promise<Response> {
   if (!store.statsId) return back(origin, store, "disconnected");
   try {
     const gone = await disconnectMeta(store.statsId);
+    // Kept at Meta because another store still uses that Meta login (issue #4011): said so, never "given back".
+    const kept = gone !== false && gone.metaAccess === "kept";
     if (gone !== false) {
-      after(() => noticeCreator(store, { kind: "metaads-disconnected" }));
+      after(() => noticeCreator(store, { kind: "metaads-disconnected", ...(kept ? { kept: true } : {}) }));
       if (role !== "owner") await logTeam(store.sid, { who: email, role, what: `${PERMISSION_WORDS.settings}: disconnected Meta ads` });
     }
-    return back(origin, store, "disconnected");
+    return back(origin, store, kept ? "disconnected-kept" : "disconnected");
   } catch (error) {
     console.error("disconnecting Meta ads failed", error);
     return back(origin, store, "error");

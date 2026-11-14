@@ -37,6 +37,7 @@
  * moves the count off the old option and on to the new one in the same call.
  */
 import { redisPipeline } from "@/lib/redis";
+import { UnknownReply, exactReplies } from "@/lib/redis-exact";
 import { type DataStore, giveData, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { cleanLine } from "@/lib/community-text";
@@ -116,6 +117,23 @@ export function cleanChoice(poll: Poll, asked: string[]): string[] {
   return picked.slice(0, MAX_POLL_OPTIONS);
 }
 
+/** How many times one vote reads the member's record again when it changed between the read and the write. */
+const VOTE_TRIES = 5;
+
+/**
+ * A member's vote record (KEYS[1], field ARGV[1]) set to ARGV[3] ("" deletes it) only while it still holds ARGV[2]
+ * ("" for none), with the tally (KEYS[2]) moved by each option and delta pair from ARGV[6] and the member's trace entry
+ * ARGV[4] (KEYS[3]) added ("1") or removed ("-1") in the same step. 1 when written, 0 when the record had changed.
+ */
+export const POLL_VOTE_SWAP = `-- marktmorgen:community-poll-vote:v1
+local held = redis.call('HGET', KEYS[1], ARGV[1])
+if not held then held = '' end
+if held ~= ARGV[2] then return 0 end
+for i = 6, #ARGV, 2 do redis.call('HINCRBY', KEYS[2], ARGV[i], ARGV[i + 1]) end
+if ARGV[3] == '' then redis.call('HDEL', KEYS[1], ARGV[1]) else redis.call('HSET', KEYS[1], ARGV[1], ARGV[3]) end
+if ARGV[5] == '1' then redis.call('SADD', KEYS[3], ARGV[4]) elseif ARGV[5] == '-1' then redis.call('SREM', KEYS[3], ARGV[4]) end
+return 1`;
+
 /**
  * Casts, changes or takes back one person's vote, and moves the tally with
  * it in the same call. An empty `choice` takes the vote back, which is a
@@ -134,30 +152,56 @@ export async function vote(
 ): Promise<boolean> {
   if (pollClosed(poll)) return false;
   const picked = cleanChoice(poll, choice);
-  const [raw] = await redisPipeline([["HGET", votesKey(id, post), who]]);
-  const before = typeof raw === "string" && raw ? raw.split(",").filter(Boolean) : [];
-  const gone = before.filter((one) => !picked.includes(one));
-  const added = picked.filter((one) => !before.includes(one));
-  if (!gone.length && !added.length) return true;
-  // A vote is counted in its post's slot of the store's data room (lib/community.ts):
-  // a new one takes room first (DataRoomError when it does not fit), one taken back gives it.
-  const weight = (list: string[]) => (list.length ? dataBytes([list.join(",")], 1) : 0);
-  const grown = weight(picked) - weight(before);
-  // A first vote also writes its entry in the member's trace (lib/community.ts, traceKey); taking every pick back removes it.
-  const traceIn = picked.length > 0 && before.length === 0;
-  const traceOut = picked.length === 0 && before.length > 0;
-  if (grown > 0 || traceIn) await needData(room, [...(grown > 0 ? [{ slot: `cm:p:${post}`, bytes: grown }] : []), ...(traceIn ? [TRACE_ENTRY] : [])]);
-  await redisPipeline([
-    ...gone.map((one) => ["HINCRBY", tallyKey(id, post), one, -1]),
-    ...added.map((one) => ["HINCRBY", tallyKey(id, post), one, 1]),
-    picked.length
-      ? ["HSET", votesKey(id, post), who, picked.join(",")]
-      : ["HDEL", votesKey(id, post), who],
-    ...(traceIn ? [["SADD", traceKey(id, who), `v:${post}`]] : []),
-    ...(traceOut ? [["SREM", traceKey(id, who), `v:${post}`]] : []),
-  ]);
-  if (grown < 0 || traceOut) await giveData(room, [...(grown < 0 ? [{ slot: `cm:p:${post}`, bytes: -grown }] : []), ...(traceOut ? [TRACE_ENTRY] : [])]);
-  return true;
+  const what = "a poll vote";
+  for (let i = 0; i < VOTE_TRIES; i += 1) {
+    const [raw] = await redisPipeline([["HGET", votesKey(id, post), who]]);
+    const held = typeof raw === "string" ? raw : "";
+    const before = held.split(",").filter(Boolean);
+    const gone = before.filter((one) => !picked.includes(one));
+    const added = picked.filter((one) => !before.includes(one));
+    if (!gone.length && !added.length) return true;
+    // A vote is counted in its post's slot of the store's data room (lib/community.ts):
+    // a new one takes room first (DataRoomError when it does not fit), one taken back gives it.
+    const weight = (list: string[]) => (list.length ? dataBytes([list.join(",")], 1) : 0);
+    const grown = weight(picked) - weight(before);
+    // A first vote also writes its entry in the member's trace (lib/community.ts, traceKey); taking every pick back removes it.
+    const traceIn = picked.length > 0 && before.length === 0;
+    const traceOut = picked.length === 0 && before.length > 0;
+    const taken = [...(grown > 0 ? [{ slot: `cm:p:${post}`, bytes: grown }] : []), ...(traceIn ? [TRACE_ENTRY] : [])];
+    if (taken.length) await needData(room, taken);
+    // The record swapped and the tally moved in one step, only while the record still holds what was read: the same
+    // vote sent several times at once counts once, and a take-back never takes off more than it added (#3955).
+    const [swapped] = exactReplies(
+      await redisPipeline([
+        [
+          "EVAL",
+          POLL_VOTE_SWAP,
+          3,
+          votesKey(id, post),
+          tallyKey(id, post),
+          traceKey(id, who),
+          who,
+          held,
+          picked.join(","),
+          `v:${post}`,
+          traceIn ? "1" : traceOut ? "-1" : "0",
+          ...gone.flatMap((one) => [one, -1]),
+          ...added.flatMap((one) => [one, 1]),
+        ],
+      ]),
+      1,
+      what,
+    );
+    if (swapped === 0) {
+      // Another request changed this member's vote between the read and the write: what this one took goes back, and it reads again.
+      if (taken.length) await giveData(room, taken);
+      continue;
+    }
+    if (swapped !== 1) throw new UnknownReply(what);
+    if (grown < 0 || traceOut) await giveData(room, [...(grown < 0 ? [{ slot: `cm:p:${post}`, bytes: -grown }] : []), ...(traceOut ? [TRACE_ENTRY] : [])]);
+    return true;
+  }
+  throw new Error("The member's vote kept changing; nothing was counted");
 }
 
 /** The poll as this person should see it right now. */

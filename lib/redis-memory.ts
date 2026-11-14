@@ -241,6 +241,17 @@ export class MemoryRedis {
           this.run(["HSET", slots, who, id]);
           return 1;
         }
+        // lib/community-polls.ts POLL_VOTE_SWAP: a member's vote swapped, and the tally and trace moved with it, only while it holds what was read.
+        if (key.startsWith("-- marktmorgen:community-poll-vote:v1\n") && args[0] === "3" && args.length >= 9 && (args.length - 9) % 2 === 0) {
+          const [, votes, tally, trace, who, expected, next, entry, traceMove, ...deltas] = args;
+          const now = this.run(["HGET", votes, who]);
+          if ((typeof now === "string" ? now : "") !== expected) return 0;
+          for (let i = 0; i < deltas.length; i += 2) this.run(["HINCRBY", tally, deltas[i], deltas[i + 1]]);
+          this.run(next === "" ? ["HDEL", votes, who] : ["HSET", votes, who, next]);
+          if (traceMove === "1") this.run(["SADD", trace, entry]);
+          else if (traceMove === "-1") this.run(["SREM", trace, entry]);
+          return 1;
+        }
         // lib/certificate.ts CERT_SLOT_FREE: a student's slot freed only while it still names the certificate withdrawn.
         if (key.startsWith("-- marktmorgen:cert-slot-free:v1\n") && args[0] === "1" && args.length === 4) {
           const [, slots, who, expected] = args;

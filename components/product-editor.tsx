@@ -94,6 +94,7 @@ import { TermsCheckPanel } from "@/components/terms-check-panel";
 import { fastMoneyMessage } from "@/lib/terms-check-rules";
 import { deliversDigitally } from "@/lib/digital-consent";
 import { aiDraftHold, freshChecks } from "@/lib/ai-draft-review";
+import { useFixLink } from "@/components/use-fix-link";
 
 /** The sentences about amounts, in the store's own currency (lib/money.ts). */
 const optionPrice = (currency: Currency) => `Type an amount ${rangeWords(currency)}, like ${priceExample(currency, 39)}.`;
@@ -1947,6 +1948,13 @@ export function ProductEditor({
       return next;
     });
   }
+
+  // "Describe the picture of …" in the store's check: opens that product with the focus in its picture's description.
+  useFixLink("alt-", (id) => {
+    if (!products.some((product) => product.id === id && product.image)) return null;
+    toggle(id, true);
+    return `alt-${id}`;
+  });
 
   /** Tells the store which file a product delivers, once it is really there. */
   async function attach(payload: Record<string, unknown>): Promise<string | null> {

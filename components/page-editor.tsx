@@ -1,6 +1,8 @@
 "use client";
 
 import { scrollBehavior } from "@/lib/scroll-motion";
+import { type CoachFix } from "@/lib/page-coach";
+import { vagueLinkTitle } from "@/lib/link-purpose";
 import { fastMoneyMessage } from "@/lib/terms-check-rules";
 import { templateLeftMessage } from "@/lib/template-text-rules";
 import { TestCountsNotice } from "@/components/test-counts-notice";
@@ -681,10 +683,24 @@ export function PageEditor({
     }, browserFrames());
   }, [open, drafts]);
   const stopFocusMenu = useRef<(() => void) | null>(null);
+  // The coach's "Show me" (AX274 Part A item 6): opens the part named and puts the focus in the field to fill there,
+  // the first picture with no description or the first button whose words say nothing. Nothing is filled in.
+  const stopFocusFix = useRef<(() => void) | null>(null);
+  function showFix(fix: CoachFix) {
+    setOpen(fix.block);
+    stopFocusFix.current?.();
+    stopFocusFix.current = focusWhenDrawn(() => {
+      const panel = document.getElementById(`panel-${fix.block}`);
+      if (!panel) return null;
+      const fields = [...panel.querySelectorAll<HTMLInputElement>(`input[data-fix="${fix.field}"]`)];
+      return fields.find((field) => (fix.field === "alt" ? !field.value.trim() : Boolean(field.value.trim()) && vagueLinkTitle(field.value))) ?? fields[0] ?? null;
+    }, browserFrames());
+  }
   useEffect(
     () => () => {
       stopFocusNew.current?.();
       stopFocusMenu.current?.();
+      stopFocusFix.current?.();
     },
     [],
   );
@@ -1617,7 +1633,7 @@ export function PageEditor({
             {field(
               `${base}-l`,
               "Button label",
-              <input id={`${base}-l`} className="field" maxLength={MAX_CTA_LABEL} value={block.label} placeholder={product.defaultLabel} onChange={(e) => change(index, { label: e.target.value })} />,
+              <input id={`${base}-l`} data-fix="button-words" className="field" maxLength={MAX_CTA_LABEL} value={block.label} placeholder={product.defaultLabel} onChange={(e) => change(index, { label: e.target.value })} />,
               counter(block.label, MAX_CTA_LABEL),
             )}
             {field(
@@ -2319,6 +2335,7 @@ export function PageEditor({
               // is the second one, whose pictures are counted too (independent review, 31/10/2026).
               page={{ ...pageToSend(), blocks: drafts.map((d) => d.block), variant: other ? { id: "", blocks: other.map((d) => d.block) } : null }}
               reach={reach}
+              onFix={showFix}
               onAdd={(kind) => (kind === "fit" || kind === "facts" || kind === "steps" ? insertNear(emptyBlock(kind), kind === "facts" ? ["hero"] : ["benefits", "inside"]) : add(kind))}
               onHeadline={putHeadline}
               onTest={(headline, sub) => {
@@ -3177,7 +3194,7 @@ function RowEditor({
           <div className="space-y-3">
             <div>
               {label(`${id}-a`, "Button words", counter(element.label, MAX_CTA_LABEL))}
-              <input id={`${id}-a`} className="field" maxLength={MAX_CTA_LABEL} value={element.label} placeholder={defaultLabel} onChange={(e) => replace(element, { ...element, label: e.target.value })} {...flagged(!badLink)} />
+              <input id={`${id}-a`} data-fix="button-words" className="field" maxLength={MAX_CTA_LABEL} value={element.label} placeholder={defaultLabel} onChange={(e) => replace(element, { ...element, label: e.target.value })} {...flagged(!badLink)} />
             </div>
             <div>
               {label(`${id}-u`, "Where it goes (optional)")}
@@ -3242,6 +3259,7 @@ function RowEditor({
                 {label(`${id}-a`, "Button words", counter(element.label, MAX_CTA_LABEL))}
                 <input
                   id={`${id}-a`}
+                  data-fix="button-words"
                   className="field"
                   maxLength={MAX_CTA_LABEL}
                   value={element.label}
@@ -4090,6 +4108,7 @@ function PicturesEditor({
             <div className="flex gap-2">
               <input
                 id={`${base}-pa${i}`}
+                data-fix="alt"
                 className="field min-w-0 flex-1"
                 maxLength={MAX_ALT_LENGTH}
                 value={picture.alt}

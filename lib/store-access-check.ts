@@ -37,6 +37,8 @@ export type AccessCheck = {
    * 2.4.9 at AAA: a link's purpose from its own words). Headings between links are not links. Never changed here.
    */
   links: { vague: { id: string; title: string }[] };
+  /** The id of each product in `pictures.missing`, in the same order: its warning opens that product's description field. */
+  pictureIds?: string[];
 };
 
 export { vagueLinkTitle } from "@/lib/link-purpose";
@@ -49,13 +51,17 @@ export function accessCheck(store: Store): AccessCheck | null {
   const vague = links.filter((link) => vagueLinkTitle(link.title)).map((link) => ({ id: link.id, title: link.title }));
   const cards = new Map(store.catalog.head.map((listing) => [listing.id, listing]));
   const missing: string[] = [];
+  const pictureIds: string[] = [];
   let unchecked = 0;
   for (const item of first) {
     const card = cards.get(item.id);
     if (!card) unchecked += 1;
-    else if (!card.hidden && card.image !== null && card.image.alt.trim().length === 0) missing.push(card.title);
+    else if (!card.hidden && card.image !== null && card.image.alt.trim().length === 0) {
+      missing.push(card.title);
+      pictureIds.push(card.id);
+    }
   }
-  return { pictures: { done: missing.length === 0 && unchecked === 0, missing, unchecked }, links: { vague } };
+  return { pictures: { done: missing.length === 0 && unchecked === 0, missing, unchecked }, links: { vague }, pictureIds };
 }
 
 /** What every store gets without the creator doing anything, in plain words. */

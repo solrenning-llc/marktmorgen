@@ -1104,7 +1104,24 @@ export async function recentMessagesOf(store: Store, type: WebhookEvent, ids: st
       continue;
     }
   }
-  return { messages, readBytes };
+  // Never handed back about a person deleted from the store since (lib/person-data.ts: a webhook's message is never
+  // acted on for a deleted address; Claude 7's webhook hunt, 14 November 2026): one HMGET of the store's prints for
+  // every address in the messages read, read whole (eventsWork prices it). Marks that cannot be read are never "not
+  // deleted": the reading is unreadable, never a history without the check.
+  const addresses = [...new Set(messages.flatMap((message) => addressesIn(JSON.stringify(message))))];
+  if (!store.listId || addresses.length === 0) return { messages, readBytes };
+  if (addresses.length > ERASED_CHECK_MAX * RECENT_MESSAGES_MAX) throw new DeliveriesUnreadable();
+  const [marks] = await redisPipeline([suppressedAmongCommand(store.listId, addresses)]);
+  let prints: (string | number | null)[];
+  try {
+    prints = wholeErasedReply(marks, addresses.length);
+  } catch (error) {
+    if (!(error instanceof UnknownReplyError)) throw error;
+    throw new DeliveriesUnreadable();
+  }
+  const deleted = new Set(addresses.filter((_, i) => prints[i] !== null));
+  const kept = deleted.size === 0 ? messages : messages.filter((message) => !addressesIn(JSON.stringify(message)).some((address) => deleted.has(address)));
+  return { messages: kept, readBytes: readBytes + Buffer.byteLength(JSON.stringify(prints)) };
 }
 
 /**

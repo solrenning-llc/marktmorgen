@@ -615,7 +615,7 @@ function Settings({ name, mail }: { name: string; mail: MailSettings | null }) {
       </label>
       <label className="block">
         <span className="field-label">Postal address at the bottom of each email</span>
-        <input className="field mt-2" maxLength={200} placeholder="Street, city, ZIP or postal code, country — or a PO box" value={address} onChange={(e) => setAddress(e.target.value)} />
+        <input autoComplete="street-address" className="field mt-2" maxLength={200} placeholder="Street, city, ZIP or postal code, country — or a PO box" value={address} onChange={(e) => setAddress(e.target.value)} />
       </label>
       <p className="text-sm text-ink-soft">
         Replies go to the email address the store&apos;s owner logs in with. The postal address is required by the CAN-SPAM Act for emails

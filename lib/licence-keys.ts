@@ -409,13 +409,17 @@ export async function clearPool(store: Store, product: Listing): Promise<number>
 /**
  * Every key given for this product, newest first, with what matches `query`
  * — part of a key, a sale reference or an email — when one is given.
+ * `byEmail: false` leaves the buyer's address out of the search, for a role
+ * that may not read it (lib/buyer-addresses.ts): a search must not confirm it.
  */
 export async function issuedKeys(
   store: Store,
   product: Listing,
   query: string,
   limit = 50,
+  options: { byEmail?: boolean } = {},
 ): Promise<{ keys: IssuedKey[]; total: number; revoked: number }> {
+  const byEmail = options.byEmail !== false;
   if (!store.statsId || !isRedisConfigured()) return { keys: [], total: 0, revoked: 0 };
   const [raw] = await redisPipeline([["HGETALL", infoKey(store, product)]]);
   const all: IssuedKey[] = [];
@@ -426,7 +430,7 @@ export async function issuedKeys(
   }
   const needle = query.trim().toLowerCase();
   const matching = needle
-    ? all.filter((k) => k.key.toLowerCase().includes(needle) || k.reference.toLowerCase().includes(needle) || k.email.toLowerCase().includes(needle))
+    ? all.filter((k) => k.key.toLowerCase().includes(needle) || k.reference.toLowerCase().includes(needle) || (byEmail && k.email.toLowerCase().includes(needle)))
     : all;
   matching.sort((a, b) => b.at - a.at);
   return { keys: limit > 0 ? matching.slice(0, limit) : [], total: matching.length, revoked: all.filter((k) => k.revokedAt).length };

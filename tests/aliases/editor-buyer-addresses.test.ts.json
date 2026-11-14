@@ -1,0 +1,4 @@
+{
+  "next/headers": "security/next-headers.ts",
+  "next/navigation": "studio-today-navigation.ts"
+}

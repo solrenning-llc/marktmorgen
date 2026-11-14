@@ -311,8 +311,11 @@ export async function readVersionsExact(statsId: string, productId: string): Pro
 
 export async function readVersions(statsId: string | null, productId: string): Promise<PageVersion[]> {
   if (!statsId || !isRedisConfigured()) return [];
-  const [list] = await redisPipeline([["LRANGE", versionsKey(statsId, productId), 0, MAX_VERSIONS - 1]]);
-  if (!Array.isArray(list)) return [];
+  const reply: unknown = await redisPipeline([["LRANGE", versionsKey(statsId, productId), 0, MAX_VERSIONS - 1]]);
+  // An answer that is not one list is unknown, never "no earlier versions" (CX-123 rule 24; audit of the API routes,
+  // 11 Nov 2026): app/api/store/page-versions then refuses, and the editor says they could not be read just now.
+  if (!Array.isArray(reply) || reply.length !== 1 || !Array.isArray(reply[0])) throw new Error("the page's versions could not be read");
+  const list: unknown[] = reply[0];
   const out: PageVersion[] = [];
   for (const entry of list) {
     if (typeof entry !== "string") continue;

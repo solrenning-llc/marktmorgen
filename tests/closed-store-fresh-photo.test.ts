@@ -448,6 +448,49 @@ async function main(): Promise<void> {
     is("nothing of it is finished", after.finished, 0);
   }
 
+  // The record key of an email, found by what it holds (lib/store.ts ownerKey is not exported).
+  const recordKeyOf = (sid: string) => redis.keys().find((key) => key.startsWith("nl:store:owner:") && String(redis.run(["GET", key]) ?? "").includes(sid)) ?? "";
+  /** A closing store prepared as a run leaves it: its confirmed entry in the batch, its record already deleted. */
+  const preparedAndGone = async (email: string, handle: string) => {
+    const a = await makeStore(email, handle);
+    redis.run(["SET", `nl:zz:${a.statsId}:data`, "personal-A"]);
+    const now = Date.now();
+    const entry = { ref: email, email, sid: a.sid, statsId: a.statsId, name: a.name, handle: a.handle, handles: [a.handle], marks: [a.sid, a.statsId].sort(), endedAt: now, at: now };
+    redis.run(["HSET", BATCH_KEY, email, JSON.stringify(entry)]);
+    const key = recordKeyOf(a.sid);
+    if (!key) throw new Error("setup: the record key");
+    redis.run(["DEL", key]);
+    return { a, key, now };
+  };
+
+  part("Claude 7's ALTO 1 on #3643: a store opened later at a closed store's address is never closed or erased, and the closed store's data still goes");
+  redis.clear();
+  {
+    const email = "reborn@example.com";
+    const { a, now } = await preparedAndGone(email, "reborna");
+    // The owner opens a new store at the same address before the walk starts.
+    const b = await makeStore(email, "rebornb");
+    redis.run(["SET", `nl:zz:${b.statsId}:data`, "personal-B"]);
+    for (let n = 0; n < 4; n++) await erase(now + n * (WALK_GAP_MS + 1));
+    is("the new store's record is still there", (await storeForEmail(email))?.sid ?? null, b.sid);
+    is("the new store's data is not erased", redis.run(["GET", `nl:zz:${b.statsId}:data`]), "personal-B");
+    is("the closed store's data is erased", redis.run(["GET", `nl:zz:${a.statsId}:data`]), null);
+    is("and its entry is finished, out of the batch", redis.run(["HGET", BATCH_KEY, email]), null);
+  }
+
+  part("Claude 7's ALTO 2 on #3643: one record read that answers what GET never says is unknown, never \"there\": the closed store's data still goes");
+  redis.clear();
+  {
+    const email = "queuedread@example.com";
+    const { a, key, now } = await preparedAndGone(email, "queuedread");
+    ownerOf = key;
+    rereadUnknown = true;
+    for (let n = 0; n < 4; n++) await erase(now + n * (WALK_GAP_MS + 1));
+    is("the read answered what GET never says", rereadUnknown, false);
+    is("the closed store's data is erased", redis.run(["GET", `nl:zz:${a.statsId}:data`]), null);
+    is("and its entry is finished, out of the batch", redis.run(["HGET", BATCH_KEY, email]), null);
+  }
+
   part("Claude 6's P4 on #3643: an account moved while an extra store's erasure runs keeps the erased store's id at neither address");
   redis.clear();
   {

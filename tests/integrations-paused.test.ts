@@ -98,7 +98,7 @@ async function main(): Promise<void> {
   is("Google Calendar's start leaves for Google", where(await startConnect(post(`/api/integrations/google/start?${pin}`, cookie), "google")), "accounts.google.com");
   is("Zoom's start leaves for Zoom", where(await startConnect(post(`/api/integrations/zoom/start?${pin}`, cookie), "zoom")), "zoom.us");
   is("Meta's start leaves for Meta", where(await startMeta(post(`/api/integrations/meta/start?${pin}`, cookie))), "www.facebook.com");
-  const connected = await finishMeta({ statsId, sid: store.sid!, code: "good-code", redirect, by: OWNER, owner: { email: store.email, handle: store.handle }, currency: store.currency });
+  const connected = await finishMeta({ statsId, sid: store.sid!, code: "good-code", redirect, by: OWNER, owner: { email: store.email, handle: store.handle }, currency: store.currency, startedAt: Date.now() });
   is("Meta connected while paid", connected.ok, true);
 
   part("Renewal unpaid: no new connection, no provider call");

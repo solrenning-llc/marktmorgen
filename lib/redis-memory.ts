@@ -26,6 +26,23 @@ const NOTES_TOTAL_FIELD = "ln#";
 
 type Entry = string | string[] | Map<string, string> | Set<string> | { score: number; member: string }[];
 
+/**
+ * An EVAL's keys and arguments, after its key count, refused with Redis's own errors when the count is not one (a
+ * negative or non-integer count, or more keys than arguments): such a call never reaches the script.
+ */
+function evalShape(args: string[]): { keys: string[]; argv: string[] } {
+  const raw = args[0] ?? "";
+  // As Redis reads a whole number: the plain way only, so "02", "-0" and "+2" are refused (Claude 2 on #3322), and
+  // within 64 bits.
+  if (!/^(0|-?[1-9][0-9]*)$/.test(raw) || BigInt(raw) > BigInt("9223372036854775807") || BigInt(raw) < BigInt("-9223372036854775808")) {
+    throw new Error("ERR value is not an integer or out of range");
+  }
+  const count = Number(raw);
+  if (count < 0) throw new Error("ERR Number of keys can't be negative");
+  if (count > args.length - 1) throw new Error("ERR Number of keys can't be greater than number of args");
+  return { keys: args.slice(1, 1 + count), argv: args.slice(1 + count) };
+}
+
 export class MemoryRedis {
   private data = new Map<string, Entry>();
   /** When a key stops existing, in ms since the epoch. */
@@ -1625,6 +1642,38 @@ export class MemoryRedis {
             st.set("phase", "apply");
             st.set("cursor", "0");
           }
+          return 1;
+        }
+        // lib/meta-ads.ts WRITE_IF_CONNECTED: a write (and its deletes) only while the connection is exactly the one read;
+        // -1, as the script answers, for a call of any other shape (tests/meta-redis-scripts.test.ts holds it to Redis).
+        if (key.startsWith("-- marktmorgen:meta-if-connected:v1\n")) {
+          const { keys, argv } = evalShape(args);
+          if (keys.length < 2 || argv.length !== 3 || !(argv[2] === "0" || /^[1-9][0-9]{0,8}$/.test(argv[2]))) return -1;
+          const [seen, value, seconds] = argv;
+          if (this.run(["GET", keys[0]]) !== seen) return 0;
+          this.run(seconds === "0" ? ["SET", keys[1], value] : ["SET", keys[1], value, "EX", seconds]);
+          for (const drop of keys.slice(2)) this.run(["DEL", drop]);
+          return 1;
+        }
+        // lib/meta-ads.ts FINISH_UNLESS_GONE: a new connection kept only while no deletion of its Meta user is at or
+        // after the cutoff; -1 for a call of any other shape, as the script answers.
+        if (key.startsWith("-- marktmorgen:meta-finish:v1\n")) {
+          const { keys, argv } = evalShape(args);
+          if (keys.length !== 5 || argv.length !== 3 || !/^[1-9][0-9]{0,15}$/.test(argv[1]) || argv[2] === "") return -1;
+          const [conn, read, stores, user, goneMark] = keys;
+          const [connection, cutoff, statsId] = argv;
+          const gone = this.run(["GET", goneMark]);
+          if (typeof gone === "string" && (!/^[0-9]{1,16}$/.test(gone) || Number(gone) >= Number(cutoff))) return 0;
+          // Both sets checked before anything is written, as the script does: this stand-in's SADD would replace a key
+          // of another kind, where Redis refuses it.
+          for (const set of [stores, user]) {
+            const kind = this.run(["TYPE", set]);
+            if (kind !== "set" && kind !== "none") throw new Error("WRONGTYPE Operation against a key holding the wrong kind of value");
+          }
+          this.run(["SET", conn, connection]);
+          this.run(["DEL", read]);
+          this.run(["SADD", stores, statsId]);
+          this.run(["SADD", user, statsId]);
           return 1;
         }
         if (key.startsWith("-- marktmorgen:capped-count:v2\n")) return this.cappedCount(args);

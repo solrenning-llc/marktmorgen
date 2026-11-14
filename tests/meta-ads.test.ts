@@ -18,7 +18,7 @@
  *   - disconnecting, or Meta's signed notice, gives it back and forgets it;
  *   - the daily pass reads each store once a day.
  */
-import { createHmac } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import { linesFrom, mergeLines, minorUnits, platformChannel } from "@/lib/meta-ads-rules";
 import { spendWithin, typedOverlap } from "@/lib/ad-spend-rules";
 import {
@@ -166,12 +166,13 @@ async function main(): Promise<void> {
   const other = new URL(await beginMeta({ statsId, sid: store.sid, sessionCookie: "session-a", email: "owner@example.com", redirect })).searchParams.get("state") ?? "";
   const taken = await takeMeta(other, { sessionCookie: "session-a", email: "owner@example.com" });
   is("the right session takes it once", [taken?.statsId, (await takeMeta(other, { sessionCookie: "session-a", email: "owner@example.com" })) === null], [statsId, true]);
-  is("a code Meta refuses keeps nothing", (await finishMeta({ statsId, sid: store.sid, code: "bad-code", redirect, by: "owner@example.com", owner: { email: store.email, handle: store.handle }, currency: store.currency })).ok, false);
+  // Assertion unchanged; finishMeta now also takes when the flow began (lib/meta-ads.ts, the deletion mark).
+  is("a code Meta refuses keeps nothing", (await finishMeta({ statsId, sid: store.sid, code: "bad-code", redirect, by: "owner@example.com", owner: { email: store.email, handle: store.handle }, currency: store.currency, startedAt: Date.now() })).ok, false);
   adsRead = false;
-  const declined = await finishMeta({ statsId, sid: store.sid, code: "good-code", redirect, by: "owner@example.com", owner: { email: store.email, handle: store.handle }, currency: store.currency });
+  const declined = await finishMeta({ statsId, sid: store.sid, code: "good-code", redirect, by: "owner@example.com", owner: { email: store.email, handle: store.handle }, currency: store.currency, startedAt: Date.now() });
   is("without ads_read granted, it is given back and nothing kept", [declined.ok ? "" : declined.error, revoked.length, (await metaView(statsId, store.currency))?.connected], ["permission", 1, false]);
   adsRead = true;
-  const connected = await finishMeta({ statsId, sid: store.sid, code: "good-code", redirect, by: "owner@example.com", owner: { email: store.email, handle: store.handle }, currency: store.currency });
+  const connected = await finishMeta({ statsId, sid: store.sid, code: "good-code", redirect, by: "owner@example.com", owner: { email: store.email, handle: store.handle }, currency: store.currency, startedAt: Date.now() });
   if (!connected.ok) throw new Error(`not connected: ${connected.error}`);
   is("one account: read without asking", connected.account?.name, "Harbor Ads");
   const [rawConn] = await redis.pipeline([["GET", `nl:metaads:conn:${statsId}`]]);
@@ -195,7 +196,7 @@ async function main(): Promise<void> {
 
   part("Another currency is not read");
   accounts = [...accounts, { id: "act_222", name: "Euro Ads", currency: "EUR", account_status: 1 }];
-  const again = await finishMeta({ statsId, sid: store.sid, code: "good-code", redirect, by: "owner@example.com", owner: { email: store.email, handle: store.handle }, currency: store.currency });
+  const again = await finishMeta({ statsId, sid: store.sid, code: "good-code", redirect, by: "owner@example.com", owner: { email: store.email, handle: store.handle }, currency: store.currency, startedAt: Date.now() });
   is("the account in the store's currency is still the one read", again.ok ? again.account?.id : "", "act_111");
   is("choosing one that is not listed does nothing", await chooseAccount(statsId, "act_999"), false);
   await chooseAccount(statsId, "act_222");
@@ -211,7 +212,7 @@ async function main(): Promise<void> {
   refuse = false;
 
   part("The daily pass");
-  const reconnected = await finishMeta({ statsId, sid: store.sid, code: "good-code", redirect, by: "owner@example.com", owner: { email: store.email, handle: store.handle }, currency: store.currency });
+  const reconnected = await finishMeta({ statsId, sid: store.sid, code: "good-code", redirect, by: "owner@example.com", owner: { email: store.email, handle: store.handle }, currency: store.currency, startedAt: Date.now() });
   is("connecting again works again", reconnected.ok && !reconnected.view.broken, true);
   const first = await readMetaDue(Date.now() + 10_000, storeForId);
   const second = await readMetaDue(Date.now() + 10_000, storeForId);
@@ -244,7 +245,7 @@ async function main(): Promise<void> {
   is("no provider request or extra integration allowance", [asked.length, await allowanceUsed(funded, "integration")], [beforeMetaRequests, beforeMetaUnits]);
 
   part("Marked paid Meta spend reads require the current store cohort before new work");
-  await finishMeta({ statsId: funded.statsId!, sid: funded.sid, code: "good-code", redirect, by: "funded-meta@example.com", owner: { email: funded.email, handle: funded.handle }, currency: funded.currency });
+  await finishMeta({ statsId: funded.statsId!, sid: funded.sid, code: "good-code", redirect, by: "funded-meta@example.com", owner: { email: funded.email, handle: funded.handle }, currency: funded.currency, startedAt: Date.now() });
   const keptConnection = (await metaView(funded.statsId!, funded.currency))!;
   for (const tier of ["creator", "pro", "scale"] as const) for (const cycle of ["month", "year"] as const) {
     await setSubscription("funded-meta@example.com", { customerId: "cus_MetaFunded001", subscriptionId: "sub_MetaFunded001", active: true, tier, cycle, trialEnds: 0, period: { ...paidPeriod(Date.now(), { behind: 10, ahead: cycle === "year" ? 355 : 20 }), funded: true } });
@@ -264,7 +265,10 @@ async function main(): Promise<void> {
   is("a notice signed with the app's secret names the user; another does not", [signedUser(signed), signedUser(`${createHmac("sha256", "other").update(payload).digest("base64url")}.${payload}`), signedUser("x.y")], [USER, null, null]);
   const forgot = await forgetMetaUser(USER);
   is("every store that user connected forgets it, and what was read", [forgot.map((f) => f.statsId), (await metaView(statsId, store.currency))?.connected, (await readSpends(statsId)).filter((s) => s.source === "meta").length, (await redis.pipeline([["EXISTS", linesKey(statsId)]]))[0]], [[statsId], false, 0, 0]);
-  await finishMeta({ statsId, sid: store.sid, code: "good-code", redirect, by: "owner@example.com", owner: { email: store.email, handle: store.handle }, currency: store.currency });
+  // The deletion's mark refuses a flow begun before it, or within the clocks' margin after it (lib/meta-ads.ts
+  // finishMeta, tests/meta-forget-race.test.ts): connecting again here is a flow begun well after the notice.
+  await redis.pipeline([["SET", `nl:metaads:gone:${createHash("sha256").update(`metaads-gone:${USER}`).digest("hex").slice(0, 40)}`, String(Date.now() - 120_000), "EX", 86_400]]);
+  is("connecting again well after Meta's notice works", (await finishMeta({ statsId, sid: store.sid, code: "good-code", redirect, by: "owner@example.com", owner: { email: store.email, handle: store.handle }, currency: store.currency, startedAt: Date.now() })).ok, true);
   await readMetaSpend(statsId, store.currency);
   const before = revoked.length;
   const gone = await disconnectMeta(statsId);

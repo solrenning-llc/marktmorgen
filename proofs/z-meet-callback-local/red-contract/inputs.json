@@ -1,0 +1,892 @@
+{
+  "inputs": {
+    "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/shared/lib/i18n/detect-domain-locale.js": {
+      "bytes": 821,
+      "imports": [],
+      "format": "cjs"
+    },
+    "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/shared/lib/router/utils/remove-trailing-slash.js": {
+      "bytes": 708,
+      "imports": [],
+      "format": "cjs"
+    },
+    "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/shared/lib/router/utils/parse-path.js": {
+      "bytes": 1041,
+      "imports": [],
+      "format": "cjs"
+    },
+    "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/shared/lib/router/utils/add-path-prefix.js": {
+      "bytes": 536,
+      "imports": [
+        {
+          "path": "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/shared/lib/router/utils/parse-path.js",
+          "kind": "require-call",
+          "original": "./parse-path"
+        }
+      ],
+      "format": "cjs"
+    },
+    "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/shared/lib/router/utils/add-path-suffix.js": {
+      "bytes": 536,
+      "imports": [
+        {
+          "path": "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/shared/lib/router/utils/parse-path.js",
+          "kind": "require-call",
+          "original": "./parse-path"
+        }
+      ],
+      "format": "cjs"
+    },
+    "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/shared/lib/router/utils/path-has-prefix.js": {
+      "bytes": 535,
+      "imports": [
+        {
+          "path": "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/shared/lib/router/utils/parse-path.js",
+          "kind": "require-call",
+          "original": "./parse-path"
+        }
+      ],
+      "format": "cjs"
+    },
+    "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/shared/lib/router/utils/add-locale.js": {
+      "bytes": 1049,
+      "imports": [
+        {
+          "path": "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/shared/lib/router/utils/add-path-prefix.js",
+          "kind": "require-call",
+          "original": "./add-path-prefix"
+        },
+        {
+          "path": "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/shared/lib/router/utils/path-has-prefix.js",
+          "kind": "require-call",
+          "original": "./path-has-prefix"
+        }
+      ],
+      "format": "cjs"
+    },
+    "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/shared/lib/router/utils/format-next-pathname-info.js": {
+      "bytes": 1290,
+      "imports": [
+        {
+          "path": "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/shared/lib/router/utils/remove-trailing-slash.js",
+          "kind": "require-call",
+          "original": "./remove-trailing-slash"
+        },
+        {
+          "path": "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/shared/lib/router/utils/add-path-prefix.js",
+          "kind": "require-call",
+          "original": "./add-path-prefix"
+        },
+        {
+          "path": "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/shared/lib/router/utils/add-path-suffix.js",
+          "kind": "require-call",
+          "original": "./add-path-suffix"
+        },
+        {
+          "path": "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/shared/lib/router/utils/add-locale.js",
+          "kind": "require-call",
+          "original": "./add-locale"
+        }
+      ],
+      "format": "cjs"
+    },
+    "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/shared/lib/get-hostname.js": {
+      "bytes": 651,
+      "imports": [],
+      "format": "cjs"
+    },
+    "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/shared/lib/i18n/normalize-locale-path.js": {
+      "bytes": 1885,
+      "imports": [],
+      "format": "cjs"
+    },
+    "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/shared/lib/router/utils/remove-path-prefix.js": {
+      "bytes": 1261,
+      "imports": [
+        {
+          "path": "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/shared/lib/router/utils/path-has-prefix.js",
+          "kind": "require-call",
+          "original": "./path-has-prefix"
+        }
+      ],
+      "format": "cjs"
+    },
+    "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/shared/lib/router/utils/get-next-pathname-info.js": {
+      "bytes": 2320,
+      "imports": [
+        {
+          "path": "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/shared/lib/i18n/normalize-locale-path.js",
+          "kind": "require-call",
+          "original": "../../i18n/normalize-locale-path"
+        },
+        {
+          "path": "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/shared/lib/router/utils/remove-path-prefix.js",
+          "kind": "require-call",
+          "original": "./remove-path-prefix"
+        },
+        {
+          "path": "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/shared/lib/router/utils/path-has-prefix.js",
+          "kind": "require-call",
+          "original": "./path-has-prefix"
+        }
+      ],
+      "format": "cjs"
+    },
+    "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/server/web/next-url.js": {
+      "bytes": 7302,
+      "imports": [
+        {
+          "path": "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/shared/lib/i18n/detect-domain-locale.js",
+          "kind": "require-call",
+          "original": "../../shared/lib/i18n/detect-domain-locale"
+        },
+        {
+          "path": "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/shared/lib/router/utils/format-next-pathname-info.js",
+          "kind": "require-call",
+          "original": "../../shared/lib/router/utils/format-next-pathname-info"
+        },
+        {
+          "path": "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/shared/lib/get-hostname.js",
+          "kind": "require-call",
+          "original": "../../shared/lib/get-hostname"
+        },
+        {
+          "path": "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/shared/lib/router/utils/get-next-pathname-info.js",
+          "kind": "require-call",
+          "original": "../../shared/lib/router/utils/get-next-pathname-info"
+        }
+      ],
+      "format": "cjs"
+    },
+    "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/lib/constants.js": {
+      "bytes": 15682,
+      "imports": [],
+      "format": "cjs"
+    },
+    "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/server/web/utils.js": {
+      "bytes": 4769,
+      "imports": [
+        {
+          "path": "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/lib/constants.js",
+          "kind": "require-call",
+          "original": "../../lib/constants"
+        }
+      ],
+      "format": "cjs"
+    },
+    "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/server/web/error.js": {
+      "bytes": 1423,
+      "imports": [],
+      "format": "cjs"
+    },
+    "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/compiled/@edge-runtime/cookies/index.js": {
+      "bytes": 10519,
+      "imports": [],
+      "format": "cjs"
+    },
+    "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/server/web/spec-extension/cookies.js": {
+      "bytes": 714,
+      "imports": [
+        {
+          "path": "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/compiled/@edge-runtime/cookies/index.js",
+          "kind": "require-call",
+          "original": "next/dist/compiled/@edge-runtime/cookies"
+        }
+      ],
+      "format": "cjs"
+    },
+    "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/server/web/spec-extension/request.js": {
+      "bytes": 3168,
+      "imports": [
+        {
+          "path": "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/server/web/next-url.js",
+          "kind": "require-call",
+          "original": "../next-url"
+        },
+        {
+          "path": "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/server/web/utils.js",
+          "kind": "require-call",
+          "original": "../utils"
+        },
+        {
+          "path": "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/server/web/error.js",
+          "kind": "require-call",
+          "original": "../error"
+        },
+        {
+          "path": "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/server/web/spec-extension/cookies.js",
+          "kind": "require-call",
+          "original": "./cookies"
+        }
+      ],
+      "format": "cjs"
+    },
+    "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/server/web/spec-extension/adapters/reflect.js": {
+      "bytes": 791,
+      "imports": [],
+      "format": "cjs"
+    },
+    "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/server/web/spec-extension/response.js": {
+      "bytes": 4653,
+      "imports": [
+        {
+          "path": "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/server/web/spec-extension/cookies.js",
+          "kind": "require-call",
+          "original": "../../web/spec-extension/cookies"
+        },
+        {
+          "path": "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/server/web/next-url.js",
+          "kind": "require-call",
+          "original": "../next-url"
+        },
+        {
+          "path": "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/server/web/utils.js",
+          "kind": "require-call",
+          "original": "../utils"
+        },
+        {
+          "path": "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/server/web/spec-extension/adapters/reflect.js",
+          "kind": "require-call",
+          "original": "./adapters/reflect"
+        },
+        {
+          "path": "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/server/web/spec-extension/cookies.js",
+          "kind": "require-call",
+          "original": "./cookies"
+        }
+      ],
+      "format": "cjs"
+    },
+    "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/compiled/ua-parser-js/ua-parser.js": {
+      "bytes": 17448,
+      "imports": [],
+      "format": "cjs"
+    },
+    "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/server/web/spec-extension/user-agent.js": {
+      "bytes": 1494,
+      "imports": [
+        {
+          "path": "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/compiled/ua-parser-js/ua-parser.js",
+          "kind": "require-call",
+          "original": "next/dist/compiled/ua-parser-js"
+        }
+      ],
+      "format": "cjs"
+    },
+    "tests/next-server-after-world.ts": {
+      "bytes": 889,
+      "imports": [
+        {
+          "path": "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/server/web/spec-extension/request.js",
+          "kind": "import-statement",
+          "original": "next/dist/server/web/spec-extension/request"
+        },
+        {
+          "path": "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/server/web/spec-extension/response.js",
+          "kind": "import-statement",
+          "original": "next/dist/server/web/spec-extension/response"
+        },
+        {
+          "path": "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/server/web/spec-extension/user-agent.js",
+          "kind": "import-statement",
+          "original": "next/dist/server/web/spec-extension/user-agent"
+        }
+      ],
+      "format": "esm"
+    },
+    "lib/money.ts": {
+      "bytes": 10855,
+      "imports": [],
+      "format": "esm"
+    },
+    "lib/paid-coverage.ts": {
+      "bytes": 254,
+      "imports": [],
+      "format": "esm"
+    },
+    "lib/payment-ledger-coverage.ts": {
+      "bytes": 645,
+      "imports": [
+        {
+          "path": "lib/paid-coverage.ts",
+          "kind": "import-statement",
+          "original": "@/lib/paid-coverage"
+        }
+      ],
+      "format": "esm"
+    },
+    "lib/sales-goal-rules.ts": {
+      "bytes": 3636,
+      "imports": [
+        {
+          "path": "lib/payment-ledger-coverage.ts",
+          "kind": "import-statement",
+          "original": "@/lib/payment-ledger-coverage"
+        }
+      ],
+      "format": "esm"
+    },
+    "lib/path-rules.ts": {
+      "bytes": 30035,
+      "imports": [
+        {
+          "path": "lib/money.ts",
+          "kind": "import-statement",
+          "original": "@/lib/money"
+        },
+        {
+          "path": "lib/sales-goal-rules.ts",
+          "kind": "import-statement",
+          "original": "@/lib/sales-goal-rules"
+        }
+      ],
+      "format": "esm"
+    },
+    "lib/path-board-rules.ts": {
+      "bytes": 2293,
+      "imports": [
+        {
+          "path": "lib/path-rules.ts",
+          "kind": "import-statement",
+          "original": "@/lib/path-rules"
+        }
+      ],
+      "format": "esm"
+    },
+    "lib/redis-memory.ts": {
+      "bytes": 101537,
+      "imports": [
+        {
+          "path": "lib/path-board-rules.ts",
+          "kind": "import-statement",
+          "original": "@/lib/path-board-rules"
+        }
+      ],
+      "format": "esm"
+    },
+    "tests/redis-stub.ts": {
+      "bytes": 925,
+      "imports": [
+        {
+          "path": "lib/redis-memory.ts",
+          "kind": "import-statement",
+          "original": "@/lib/redis-memory"
+        }
+      ],
+      "format": "esm"
+    },
+    "lib/fetch-timeout.ts": {
+      "bytes": 6292,
+      "imports": [],
+      "format": "esm"
+    },
+    "lib/house-store.ts": {
+      "bytes": 4410,
+      "imports": [],
+      "format": "esm"
+    },
+    "lib/site-url.ts": {
+      "bytes": 335,
+      "imports": [],
+      "format": "esm"
+    },
+    "lib/zoom-arrival.ts": {
+      "bytes": 1870,
+      "imports": [],
+      "format": "esm"
+    },
+    "lib/meet-providers.ts": {
+      "bytes": 39657,
+      "imports": [
+        {
+          "path": "node:crypto",
+          "kind": "import-statement",
+          "external": true
+        },
+        {
+          "path": "lib/fetch-timeout.ts",
+          "kind": "import-statement",
+          "original": "@/lib/fetch-timeout"
+        },
+        {
+          "path": "lib/house-store.ts",
+          "kind": "import-statement",
+          "original": "@/lib/house-store"
+        },
+        {
+          "path": "lib/site-url.ts",
+          "kind": "import-statement",
+          "original": "@/lib/site-url"
+        },
+        {
+          "path": "lib/zoom-arrival.ts",
+          "kind": "import-statement",
+          "original": "@/lib/zoom-arrival"
+        }
+      ],
+      "format": "esm"
+    },
+    "tests/meet-return-counter-world.ts": {
+      "bytes": 3197,
+      "imports": [
+        {
+          "path": "tests/redis-stub.ts",
+          "kind": "import-statement",
+          "original": "./redis-stub"
+        },
+        {
+          "path": "lib/meet-providers.ts",
+          "kind": "import-statement",
+          "original": "../lib/meet-providers"
+        },
+        {
+          "path": "tests/redis-stub.ts",
+          "kind": "import-statement",
+          "original": "./redis-stub"
+        }
+      ],
+      "format": "esm"
+    },
+    "lib/redis-reply.ts": {
+      "bytes": 4882,
+      "imports": [],
+      "format": "esm"
+    },
+    "lib/redis-lock.ts": {
+      "bytes": 12810,
+      "imports": [
+        {
+          "path": "tests/meet-return-counter-world.ts",
+          "kind": "import-statement",
+          "original": "@/lib/redis"
+        },
+        {
+          "path": "lib/redis-reply.ts",
+          "kind": "import-statement",
+          "original": "@/lib/redis-reply"
+        }
+      ],
+      "format": "esm"
+    },
+    "lib/secret-box.ts": {
+      "bytes": 8411,
+      "imports": [
+        {
+          "path": "node:crypto",
+          "kind": "import-statement",
+          "external": true
+        }
+      ],
+      "format": "esm"
+    },
+    "lib/ics-write.ts": {
+      "bytes": 1293,
+      "imports": [],
+      "format": "esm"
+    },
+    "lib/call-place.ts": {
+      "bytes": 5820,
+      "imports": [
+        {
+          "path": "lib/ics-write.ts",
+          "kind": "import-statement",
+          "original": "@/lib/ics-write"
+        }
+      ],
+      "format": "esm"
+    },
+    "lib/call-setup.ts": {
+      "bytes": 30169,
+      "imports": [
+        {
+          "path": "lib/call-place.ts",
+          "kind": "import-statement",
+          "original": "@/lib/call-place"
+        }
+      ],
+      "format": "esm"
+    },
+    "lib/meet-connect.ts": {
+      "bytes": 24513,
+      "imports": [
+        {
+          "path": "node:crypto",
+          "kind": "import-statement",
+          "external": true
+        },
+        {
+          "path": "tests/meet-return-counter-world.ts",
+          "kind": "import-statement",
+          "original": "@/lib/redis"
+        },
+        {
+          "path": "lib/redis-lock.ts",
+          "kind": "import-statement",
+          "original": "@/lib/redis-lock"
+        },
+        {
+          "path": "lib/secret-box.ts",
+          "kind": "import-statement",
+          "original": "@/lib/secret-box"
+        },
+        {
+          "path": "lib/call-setup.ts",
+          "kind": "import-statement",
+          "original": "@/lib/call-setup"
+        },
+        {
+          "path": "tests/meet-return-counter-world.ts",
+          "kind": "import-statement",
+          "original": "@/lib/meet-providers"
+        }
+      ],
+      "format": "esm"
+    },
+    "tests/meet-return-provider-world.ts": {
+      "bytes": 344,
+      "imports": [
+        {
+          "path": "lib/meet-connect.ts",
+          "kind": "import-statement",
+          "original": "../lib/meet-connect"
+        },
+        {
+          "path": "tests/meet-return-counter-world.ts",
+          "kind": "import-statement",
+          "original": "./meet-return-counter-world"
+        }
+      ],
+      "format": "esm"
+    },
+    "lib/host-claims.ts": {
+      "bytes": 8502,
+      "imports": [
+        {
+          "path": "node:crypto",
+          "kind": "import-statement",
+          "external": true
+        },
+        {
+          "path": "tests/meet-return-counter-world.ts",
+          "kind": "import-statement",
+          "original": "@/lib/redis"
+        }
+      ],
+      "format": "esm"
+    },
+    "lib/request-guard.ts": {
+      "bytes": 13987,
+      "imports": [
+        {
+          "path": "tests/meet-return-counter-world.ts",
+          "kind": "import-statement",
+          "original": "@/lib/redis"
+        }
+      ],
+      "format": "esm"
+    },
+    "lib/request-origin.ts": {
+      "bytes": 2595,
+      "imports": [
+        {
+          "path": "lib/site-url.ts",
+          "kind": "import-statement",
+          "original": "@/lib/site-url"
+        }
+      ],
+      "format": "esm"
+    },
+    "lib/team-roles.ts": {
+      "bytes": 6991,
+      "imports": [],
+      "format": "esm"
+    },
+    "lib/meet-routes.ts": {
+      "bytes": 11427,
+      "imports": [
+        {
+          "path": "tests/meet-return-counter-world.ts",
+          "kind": "import-statement",
+          "original": "@/lib/contract-resource-window"
+        },
+        {
+          "path": "tests/meet-return-counter-world.ts",
+          "kind": "import-statement",
+          "original": "@/lib/metered-limits"
+        },
+        {
+          "path": "tests/next-server-after-world.ts",
+          "kind": "import-statement",
+          "original": "next/server"
+        },
+        {
+          "path": "tests/meet-return-counter-world.ts",
+          "kind": "import-statement",
+          "original": "@/lib/auth"
+        },
+        {
+          "path": "tests/meet-return-counter-world.ts",
+          "kind": "import-statement",
+          "original": "@/lib/account-notice"
+        },
+        {
+          "path": "tests/meet-return-provider-world.ts",
+          "kind": "import-statement",
+          "original": "@/lib/meet-connect"
+        },
+        {
+          "path": "tests/meet-return-counter-world.ts",
+          "kind": "import-statement",
+          "original": "@/lib/meet-providers"
+        },
+        {
+          "path": "lib/host-claims.ts",
+          "kind": "import-statement",
+          "original": "@/lib/host-claims"
+        },
+        {
+          "path": "lib/request-guard.ts",
+          "kind": "import-statement",
+          "original": "@/lib/request-guard"
+        },
+        {
+          "path": "lib/request-origin.ts",
+          "kind": "import-statement",
+          "original": "@/lib/request-origin"
+        },
+        {
+          "path": "tests/meet-return-counter-world.ts",
+          "kind": "import-statement",
+          "original": "@/lib/store"
+        },
+        {
+          "path": "tests/meet-return-counter-world.ts",
+          "kind": "import-statement",
+          "original": "@/lib/integration-pause"
+        },
+        {
+          "path": "tests/meet-return-counter-world.ts",
+          "kind": "import-statement",
+          "original": "@/lib/studio-route"
+        },
+        {
+          "path": "tests/meet-return-counter-world.ts",
+          "kind": "import-statement",
+          "original": "@/lib/team"
+        },
+        {
+          "path": "lib/team-roles.ts",
+          "kind": "import-statement",
+          "original": "@/lib/team-roles"
+        }
+      ],
+      "format": "esm"
+    },
+    "proofs/z-meet-callback-local/contract.proof.ts": {
+      "bytes": 2338,
+      "imports": [
+        {
+          "path": "node:assert",
+          "kind": "import-statement",
+          "external": true
+        },
+        {
+          "path": "node:test",
+          "kind": "import-statement",
+          "external": true
+        },
+        {
+          "path": "tests/next-server-after-world.ts",
+          "kind": "import-statement",
+          "original": "next/server"
+        },
+        {
+          "path": "lib/meet-routes.ts",
+          "kind": "import-statement",
+          "original": "@/lib/meet-routes"
+        },
+        {
+          "path": "tests/meet-return-provider-world.ts",
+          "kind": "import-statement",
+          "original": "@/tests/meet-return-provider-world"
+        },
+        {
+          "path": "tests/meet-return-counter-world.ts",
+          "kind": "import-statement",
+          "original": "@/tests/meet-return-counter-world"
+        },
+        {
+          "path": "lib/host-claims.ts",
+          "kind": "import-statement",
+          "original": "@/lib/host-claims"
+        }
+      ],
+      "format": "esm"
+    }
+  },
+  "outputs": {
+    "proofs/z-meet-callback-local/red-contract/bundle.cjs": {
+      "imports": [
+        {
+          "path": "node:assert",
+          "kind": "require-call",
+          "external": true
+        },
+        {
+          "path": "node:test",
+          "kind": "require-call",
+          "external": true
+        },
+        {
+          "path": "node:crypto",
+          "kind": "require-call",
+          "external": true
+        },
+        {
+          "path": "node:crypto",
+          "kind": "require-call",
+          "external": true
+        },
+        {
+          "path": "node:crypto",
+          "kind": "require-call",
+          "external": true
+        }
+      ],
+      "exports": [],
+      "entryPoint": "proofs/z-meet-callback-local/contract.proof.ts",
+      "inputs": {
+        "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/shared/lib/i18n/detect-domain-locale.js": {
+          "bytesInOutput": 953
+        },
+        "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/shared/lib/router/utils/remove-trailing-slash.js": {
+          "bytesInOutput": 586
+        },
+        "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/shared/lib/router/utils/parse-path.js": {
+          "bytesInOutput": 992
+        },
+        "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/shared/lib/router/utils/add-path-prefix.js": {
+          "bytesInOutput": 709
+        },
+        "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/shared/lib/router/utils/add-path-suffix.js": {
+          "bytesInOutput": 709
+        },
+        "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/shared/lib/router/utils/path-has-prefix.js": {
+          "bytesInOutput": 700
+        },
+        "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/shared/lib/router/utils/add-locale.js": {
+          "bytesInOutput": 942
+        },
+        "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/shared/lib/router/utils/format-next-pathname-info.js": {
+          "bytesInOutput": 1465
+        },
+        "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/shared/lib/get-hostname.js": {
+          "bytesInOutput": 706
+        },
+        "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/shared/lib/i18n/normalize-locale-path.js": {
+          "bytesInOutput": 1263
+        },
+        "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/shared/lib/router/utils/remove-path-prefix.js": {
+          "bytesInOutput": 786
+        },
+        "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/shared/lib/router/utils/get-next-pathname-info.js": {
+          "bytesInOutput": 2250
+        },
+        "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/server/web/next-url.js": {
+          "bytesInOutput": 7499
+        },
+        "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/lib/constants.js": {
+          "bytesInOutput": 14046
+        },
+        "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/server/web/utils.js": {
+          "bytesInOutput": 4121
+        },
+        "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/server/web/error.js": {
+          "bytesInOutput": 1518
+        },
+        "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/compiled/@edge-runtime/cookies/index.js": {
+          "bytesInOutput": 11696
+        },
+        "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/server/web/spec-extension/cookies.js": {
+          "bytesInOutput": 739
+        },
+        "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/server/web/spec-extension/request.js": {
+          "bytesInOutput": 3077
+        },
+        "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/server/web/spec-extension/adapters/reflect.js": {
+          "bytesInOutput": 973
+        },
+        "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/server/web/spec-extension/response.js": {
+          "bytesInOutput": 4654
+        },
+        "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/compiled/ua-parser-js/ua-parser.js": {
+          "bytesInOutput": 22800
+        },
+        "../../77662bfb9bc5/marktmorgen/node_modules/next/dist/server/web/spec-extension/user-agent.js": {
+          "bytesInOutput": 1588
+        },
+        "proofs/z-meet-callback-local/contract.proof.ts": {
+          "bytesInOutput": 2665
+        },
+        "tests/next-server-after-world.ts": {
+          "bytesInOutput": 226
+        },
+        "lib/money.ts": {
+          "bytesInOutput": 1600
+        },
+        "lib/path-board-rules.ts": {
+          "bytesInOutput": 590
+        },
+        "lib/redis-memory.ts": {
+          "bytesInOutput": 92800
+        },
+        "tests/redis-stub.ts": {
+          "bytesInOutput": 127
+        },
+        "tests/meet-return-counter-world.ts": {
+          "bytesInOutput": 2278
+        },
+        "lib/meet-providers.ts": {
+          "bytesInOutput": 2916
+        },
+        "lib/fetch-timeout.ts": {
+          "bytesInOutput": 337
+        },
+        "lib/house-store.ts": {
+          "bytesInOutput": 253
+        },
+        "lib/site-url.ts": {
+          "bytesInOutput": 42
+        },
+        "lib/zoom-arrival.ts": {
+          "bytesInOutput": 39
+        },
+        "lib/meet-connect.ts": {
+          "bytesInOutput": 1681
+        },
+        "lib/redis-reply.ts": {
+          "bytesInOutput": 575
+        },
+        "tests/meet-return-provider-world.ts": {
+          "bytesInOutput": 140
+        },
+        "lib/host-claims.ts": {
+          "bytesInOutput": 249
+        },
+        "lib/request-guard.ts": {
+          "bytesInOutput": 1650
+        },
+        "lib/request-origin.ts": {
+          "bytesInOutput": 397
+        },
+        "lib/team-roles.ts": {
+          "bytesInOutput": 1031
+        },
+        "lib/meet-routes.ts": {
+          "bytesInOutput": 4308
+        }
+      },
+      "bytes": 202905
+    }
+  }
+}

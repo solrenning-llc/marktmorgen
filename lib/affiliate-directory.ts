@@ -288,7 +288,7 @@ export async function readDirectory(): Promise<DirectoryRow[]> {
   const [claim] = await redisPipeline([["SET", DIRECTORY_BUILD, "building", "EX", BUILD_HOLD_SECONDS, "NX"]]);
   // null: another build is running, or one could not finish FAILED_SECONDS ago. Any other shape is unknown, and builds nothing either.
   if (claim !== "OK") throw new UnknownReplyError(claim === null ? "the directory's build mark, held," : "the directory's build mark");
-  let built: { rows: DirectoryRow[]; partial: boolean };
+  let built: Awaited<ReturnType<typeof buildDirectory>>;
   try {
     built = await buildDirectory();
   } catch (error) {

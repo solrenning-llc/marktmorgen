@@ -2061,3 +2061,15 @@ export const PATH_GROWTH_READ = request("write", 50, 3_000_000);
  * rate; Stripe's tariff for the GET stays unknown, as there: not certified zero.
  */
 export const PLAN_INVOICES_READ = CALL + 1 * CPU_SECOND + Math.max((STRIPE_TIMEOUT_MS / 1000) * MEMORY_SECOND, PLATFORM_SUBSCRIPTION_SEARCH.memoryUsdPerGet) + perMegabyte(4_000_000) + 65_536 * ORIGIN_PER_BYTE;
+
+/**
+ * Every scheduled job in vercel.json (C3 m-cost-2, 14 November 2026), held by
+ * tests/scheduled-jobs-registry.test.ts: a company cost bounded by its
+ * schedule and its run's ceiling (MR item 2), never a plan's. `maxSeconds` is
+ * the route's maxDuration, the most function time one run may take; `bound`
+ * says what bounds one run's commands and provider calls inside it, and says
+ * so plainly where only the time does. Not a reviewed fixed-cost ceiling:
+ * the Redis commands a run sends inside its time are not counted here.
+ */
+export type ScheduledJob = { path: string; schedule: string; maxSeconds: number | null; bound: string; sources: Source[] };
+export const SCHEDULED_JOBS: ScheduledJob[] = [];

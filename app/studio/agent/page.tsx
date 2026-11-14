@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
+import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { readBook } from "@/lib/agent-book";
 import { readListings } from "@/lib/catalog";
@@ -46,7 +47,7 @@ export default async function StudioAgentPage({ searchParams }: Params) {
       <StudioHeader current={store} role={view.role} stores={view.stores} owned={view.owned} action={{ href: studioPath(store), label: "Back to the studio", short: "Studio" }} />
       <StudioStorePin sid={store.sid}>
         <main id="content" className="container-page pb-20 pt-10 sm:pt-14">
-          <p className="eyebrow">AI assistant</p>
+          <StudioTrail store={store} here="AI assistant" />
           <h1 className="t-h2 mt-3">What the AI proposes</h1>
           <p className="mt-3 max-w-2xl text-ink-soft">
             Your AI assistant never changes your store by itself. What it prepares waits here, beside what is there now, until you

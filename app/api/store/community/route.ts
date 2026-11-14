@@ -3,7 +3,7 @@ import { after } from "next/server";
 import { originFrom } from "@/lib/request-origin";
 import { fromAnotherSite } from "@/lib/studio-route";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
-import { passCookieName } from "@/lib/learn";
+import { endPass, passCookieName } from "@/lib/learn";
 import { lockedFor } from "@/lib/two-step";
 import { MAX_ALT_LENGTH } from "@/lib/product-image";
 import {
@@ -105,6 +105,12 @@ export async function POST(request: NextRequest) {
   const fromPage = from === "post" && ITEM_ID.test(postId) ? postPage : from === "you" ? `${home}/you` : ITEM_ID.test(space) && from === "space" ? `${home}?space=${space}` : home;
 
   if (action === "signout") {
+    // The pass ends at the server too, not only in this browser (lib/learn.ts, endPass); the cookie goes whatever happens.
+    try {
+      if (!(await endPass(store, request.cookies.get(passCookieName(store))?.value))) console.error("ending a buyer's pass on sign-out got an unknown answer");
+    } catch (error) {
+      console.error("ending a buyer's pass on sign-out failed", error);
+    }
     const headers = new Headers({ Location: `${origin}/@${store.handle}`, "Cache-Control": "no-store" });
     const secure = origin.startsWith("https://") ? "; Secure" : "";
     headers.append("Set-Cookie", `${passCookieName(store)}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax${secure}`);

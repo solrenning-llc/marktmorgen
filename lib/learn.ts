@@ -139,6 +139,20 @@ async function readPass(store: Store, token: string | undefined): Promise<Pass |
   }
 }
 
+/**
+ * Ends a pass at the server, when this browser signs out (the security audit of 14 November 2026): the pass and its
+ * entry among the address's passes are deleted, so a copy of the cookie taken before opens nothing. Only a pass this
+ * store minted; a token it does not hold, or none, ends nothing. False when the delete's answer is not exactly 0 or 1,
+ * so the pass may still be open (CX-123 rule 24).
+ */
+export async function endPass(store: Store, token: string | undefined): Promise<boolean> {
+  const pass = await readPass(store, token);
+  if (!pass || !token) return true;
+  const replies = repliesFor(await redisPipeline([["DEL", passKey(token)], ["SREM", passesKey(store, pass.e), sha(token)]]), 2);
+  const deleted = countOf(replies?.[0]);
+  return deleted === 0 || deleted === 1;
+}
+
 export function passCookie(store: Store, token: string, secure: boolean): string {
   return `${passCookieName(store)}=${token}; Path=/; Max-Age=${PASS_SECONDS}; HttpOnly; SameSite=Lax${secure ? "; Secure" : ""}`;
 }

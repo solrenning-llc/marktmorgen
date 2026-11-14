@@ -25,6 +25,7 @@ import { saleHandles } from "@/lib/store";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { countOf, repliesFor } from "@/lib/redis-reply";
 import { StripeListUnreadable, ownField, plainObject, readStripePage } from "@/lib/stripe-list";
 import { orderWrite } from "@/lib/order-data";
 import { StripeError, onAccount, platformKey } from "@/lib/stripe-account";
@@ -94,12 +95,21 @@ const configKey = (account: string, language: unknown = "en") => {
 /** What Stripe's own pages are asked to speak (the portal's `locale`). */
 const stripeLocale = (store: Store) => LANGUAGES[parseLanguage(store.language)].stripe;
 
+/**
+ * Whether one more request fits in the window, on a count read in its exact shape (CX-123 rule 24): a count that is
+ * missing, cut short, null, below 1 or of another shape is never taken as room, so nothing is asked of Stripe.
+ */
 async function within(key: string, limit: number): Promise<boolean> {
-  const [, count] = await redisPipeline([
-    ["SET", key, "0", "EX", RATE_WINDOW_SECONDS, "NX"],
-    ["INCR", key],
-  ]);
-  return Number(count) <= limit;
+  const both = repliesFor(
+    await redisPipeline([
+      ["SET", key, "0", "EX", RATE_WINDOW_SECONDS, "NX"],
+      ["INCR", key],
+    ]),
+    2,
+  );
+  if (!both || (both[0] !== "OK" && both[0] !== null)) return false;
+  const count = countOf(both[1]);
+  return count !== null && count >= 1 && count <= limit;
 }
 
 /** Whether members of this store can be offered the way out. */

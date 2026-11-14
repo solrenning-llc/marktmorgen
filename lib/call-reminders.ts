@@ -22,6 +22,7 @@
  */
 import { placeLine } from "@/lib/call-place";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { type SendOutcome, isSenderConfigured, sendEmailOutcome } from "@/lib/email";
 import type { Listing, Store } from "@/lib/store";
 import { listingFinder } from "@/lib/catalog";
@@ -271,30 +272,39 @@ export async function sendCallReminders(
         }
         // Held in a const of its own, so the closures below keep it narrowed past "c".
         const mark = item.mark;
-        const [fresh, freshCreator] = await redisPipeline([
-          ["SET", sentKey(call.session, call.start, item.mark), "1", "NX", "EX", SENT_SECONDS],
-          ["SET", creatorKey(callsId, call.product, call.start, item.mark), "1", "NX", "EX", SENT_SECONDS],
-        ]);
+        // Each once-only mark is read exactly (CX-123 rule 24, lib/claim-mark.ts): an answer that proves nothing is read
+        // back, so a run that crossed another never sends the same reminder twice; one still unknown sends nothing and
+        // stays queued, and the next run decides.
+        const buyerKey = sentKey(call.session, call.start, item.mark);
+        const buyerValue = claimValue();
+        const fresh = await claimMark(buyerKey, SENT_SECONDS, buyerValue);
+        const ownerKey = creatorKey(callsId, call.product, call.start, item.mark);
+        const ownerValue = claimValue();
+        const freshCreator = await claimMark(ownerKey, SENT_SECONDS, ownerValue);
         // A send refused for certain (the mail service down for a moment), or
         // stopped before the sender was asked, is tried again on the next
         // run, while the reminder is still of use. One whose answer is not
         // known may have gone: its mark is kept and it is never sent again,
         // since this job runs every five minutes (rule 30, as 283 [HG2]).
-        let again = false;
-        if (fresh !== null) {
+        let again = fresh === "unknown" || freshCreator === "unknown";
+        // Nothing was sent on an unknown mark: it is let go only while it holds this run's own value (the write may
+        // have landed), so the next run can send it; another run's mark is never touched.
+        if (fresh === "unknown") await releaseMark(buyerKey, buyerValue);
+        if (freshCreator === "unknown") await releaseMark(ownerKey, ownerValue);
+        if (fresh === "ours") {
           const buyer = await sendReminder(() => remindBuyer(store, product, call, mark, origin), "buyer");
           if (buyer === "sent") counts.reminded += 1;
           else if (buyer === "refused") {
-            await redisPipeline([["DEL", sentKey(call.session, call.start, item.mark)]]);
+            await releaseMark(buyerKey, buyerValue);
             again = true;
           } else if (buyer === "uncertain") console.error("a call reminder to the buyer may have gone; its mark is kept", store.handle, call.session, item.mark);
         }
         // A booking found on its own is counted among the people booked, too.
         const booked = paid.some((c) => c.session === call.session) ? paid : [...paid, call];
-        if (freshCreator !== null) {
+        if (freshCreator === "ours") {
           const creator = await sendReminder(() => remindCreator(store, product, booked, call, mark), "creator");
           if (creator === "refused") {
-            await redisPipeline([["DEL", creatorKey(callsId, call.product, call.start, item.mark)]]);
+            await releaseMark(ownerKey, ownerValue);
             again = true;
           } else if (creator === "uncertain") console.error("a call reminder to the creator may have gone; its mark is kept", store.handle, call.session, item.mark);
         }

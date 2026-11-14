@@ -1261,14 +1261,18 @@ function invoiceMeta(invoice: Record<string, unknown>): Record<string, string> {
   return Object.fromEntries(Object.entries(meta).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
 }
 
+/** The billing reasons of a membership's payments after the checkout's own ("subscription_create"). */
+const AFTER_CHECKOUT_REASONS = new Set(["subscription_cycle", "subscription_update"]);
+
 /**
- * A paid invoice of a membership or payment plan that the checkout did not already count: every billing reason but
- * "subscription_create" (whose payment is the checkout's), so a period renewal ("subscription_cycle") and a plan
- * change charged at once ("subscription_update", lib/tier-switch.ts, lib/yearly-switch.ts) are both money kept,
- * as a refund of either is subtracted (MM-E2E-SUB-1; docs/bx2-earnings-design.md).
+ * A paid invoice of a membership or payment plan that the checkout did not already count: a period renewal
+ * ("subscription_cycle") or a plan change charged at once ("subscription_update", lib/tier-switch.ts,
+ * lib/yearly-switch.ts), both money kept, as a refund of either is subtracted (MM-E2E-SUB-1;
+ * docs/bx2-earnings-design.md). Any other reason ("manual", an unknown or future one) is never taken as membership
+ * money, even with this store's metadata (MM-E2E-SUB-2), as lib/plan-refund-rules.ts reads only known reasons.
  */
 function paidAfterCheckout(invoice: Record<string, unknown>): boolean {
-  return invoice.status === "paid" && typeof invoice.billing_reason === "string" && invoice.billing_reason !== "subscription_create";
+  return invoice.status === "paid" && typeof invoice.billing_reason === "string" && AFTER_CHECKOUT_REASONS.has(invoice.billing_reason);
 }
 
 /**

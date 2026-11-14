@@ -214,29 +214,77 @@ export function preorderDay(store: Store, product: Listing, soon: boolean, day: 
 
 // ------------------------------------------------------------------ the studio
 
-/** Sets the day a coming-soon product is expected, so it takes pre-orders; null stops taking them. */
+/** The expected day's HSET or HDEL answered in another shape: it may or may not have been written, never said saved. */
+export class PreorderDayUnconfirmed extends Error {
+  constructor() {
+    super("the expected day of a pre-order could not be confirmed saved");
+    this.name = "PreorderDayUnconfirmed";
+  }
+}
+
+/**
+ * Sets the day a coming-soon product is expected, so it takes pre-orders; null stops taking them. The write of one
+ * field answers 0 or 1; anything else throws PreorderDayUnconfirmed, so the switch never says "Saved." on it
+ * (independent review of #3005).
+ */
 export async function setExpectedDay(store: Store, productId: string, day: string | null): Promise<void> {
   if (!store.statsId) return;
-  await redisPipeline([day ? ["HSET", dayKey(store.statsId), productId, day] : ["HDEL", dayKey(store.statsId), productId]]);
+  const replies = await redisPipeline([day ? ["HSET", dayKey(store.statsId), productId, day] : ["HDEL", dayKey(store.statsId), productId]]);
+  if (!oneWrite(repliesFor(replies, 1)?.[0])) throw new PreorderDayUnconfirmed();
 }
 
 export type PreorderView = { day: string | null; waiting: number; given: number; refunded: number };
 
-/** What the studio shows of each product's pre-orders. */
+/**
+ * What the studio shows of each product's pre-orders, read exactly (CX-123 rule 24): the expected days a list of
+ * texts in pairs, each asked-about product's day a day, each product's pre-orders a list of pre-orders. Anything
+ * else throws UnknownReplyError, never "no pre-orders": the studio says they could not be read, the pre-order
+ * switch answers 503 "preorders_unread".
+ */
 export async function preorderViews(store: Store, productIds: string[]): Promise<Record<string, PreorderView>> {
   const out: Record<string, PreorderView> = {};
   if (!store.statsId || !isRedisConfigured() || !productIds.length) return out;
   const sid = store.statsId;
-  const rows = await redisPipeline([["HGETALL", dayKey(sid)], ...productIds.map((p) => ["HVALS", entriesKey(sid, p)])]);
-  const days = daysOf(rows[0]);
+  const rows = repliesFor(await redisPipeline([["HGETALL", dayKey(sid)], ...productIds.map((p) => ["HVALS", entriesKey(sid, p)])]), productIds.length + 1);
+  if (!rows) throw new UnknownReplyError("the studio's pre-orders");
+  const days = exactDays(rows[0], new Set(productIds));
   productIds.forEach((p, i) => {
-    const raw = rows[i + 1];
-    const entries = (Array.isArray(raw) ? raw : []).map(parsePreorder).filter((e): e is Preorder => e !== null);
+    const entries = exactPreorders([rows[i + 1]]);
     const day = days.get(p) ?? null;
     if (!day && entries.length === 0) return;
     out[p] = { day, ...preorderCounts(entries) };
   });
   return out;
+}
+
+/** The expected days, read exactly: texts in pairs, and each day of a product asked about a day. Otherwise throws. */
+function exactDays(reply: unknown, asked: Set<string>): Map<string, string> {
+  const fields = stringList(reply);
+  if (!fields || fields.length % 2 !== 0) throw new UnknownReplyError("the expected days of pre-orders");
+  const out = new Map<string, string>();
+  for (let i = 0; i < fields.length; i += 2) {
+    if (!asked.has(fields[i])) continue;
+    const day = keptDay(fields[i + 1]);
+    if (!day) throw new UnknownReplyError("the expected days of pre-orders");
+    out.set(fields[i], day);
+  }
+  return out;
+}
+
+/**
+ * A product's pre-orders as kept, read exactly (CX-123 rule 24): one reply, a list of texts, each one a pre-order.
+ * Anything else (no reply, a number, text, a member that is not text or not a pre-order) is unknown and throws,
+ * never "nobody waits" in the studio's view. (waitingCount, after main's #2963, counts a record that does not read
+ * as waiting instead of throwing.)
+ */
+function exactPreorders(replies: unknown): Preorder[] {
+  const values = stringList(repliesFor(replies, 1)?.[0]);
+  if (!values) throw new UnknownReplyError("a product's pre-orders");
+  return values.map((value) => {
+    const entry = parsePreorder(value);
+    if (!entry) throw new UnknownReplyError("a product's pre-orders");
+    return entry;
+  });
 }
 
 /**
@@ -336,13 +384,17 @@ async function givenExactly(sid: string, productId: string, sessionId: string): 
 export async function preordersOf(store: Store, productIds: string[], email: string): Promise<(Preorder & { product: string; checkout: string })[]> {
   if (!store.statsId || !productIds.length || !isRedisConfigured()) return [];
   const address = email.trim().toLowerCase();
-  const replies = await redisPipeline(productIds.map((p) => ["HGETALL", entriesKey(store.statsId as string, p)]));
+  // Read exactly (CX-123 rule 24): an unknown reply throws, so the copy is not handed over without their pre-orders.
+  const replies = repliesFor(await redisPipeline(productIds.map((p) => ["HGETALL", entriesKey(store.statsId as string, p)])), productIds.length);
+  if (!replies) throw new UnknownReplyError("a person's pre-orders");
   return productIds.flatMap((product, i) => {
-    const flat = Array.isArray(replies[i]) ? (replies[i] as unknown[]) : [];
+    const flat = stringList(replies[i]);
+    if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError("a person's pre-orders");
     const out: (Preorder & { product: string; checkout: string })[] = [];
-    for (let k = 0; k + 1 < flat.length; k += 2) {
+    for (let k = 0; k < flat.length; k += 2) {
       const entry = parsePreorder(flat[k + 1]);
-      if (entry && entry.to.trim().toLowerCase() === address) out.push({ ...entry, product, checkout: String(flat[k]) });
+      if (!entry) throw new UnknownReplyError("a person's pre-orders");
+      if (entry.to.trim().toLowerCase() === address) out.push({ ...entry, product, checkout: flat[k] });
     }
     return out;
   });

@@ -37,6 +37,7 @@
  * the store's access emails (lib/store-allowance-rules.ts), counted before
  * they go.
  */
+import { windowCount, windowCountOf } from "@/lib/window-count";
 import { consentEmailLines } from "@/lib/digital-consent-email";
 import { countOrder } from "@/lib/orders";
 import { ADMITTED_FIELD, OPEN_HOURS, admitOrders, settleAdmitted } from "@/lib/order-admission";
@@ -321,14 +322,6 @@ function parseMember(raw: unknown): Member | null {
   }
 }
 
-/** What a SET ... NX then INCR answered: the count, a whole number from one up, or null when the reply is not exactly that. */
-function incremented(replies: unknown): number | null {
-  const two = repliesFor(replies, 2);
-  if (!two || (two[0] !== "OK" && two[0] !== null)) return null;
-  const count = countOf(two[1]);
-  return count !== null && count >= 1 ? count : null;
-}
-
 /** A 0 or a 1 (HEXISTS, HSETNX), or null for anything else. */
 function bit(reply: unknown): 0 | 1 | null {
   const n = countOf(reply);
@@ -428,12 +421,7 @@ export async function askPlace(input: {
   // and far short of a way to fill inboxes. The day is put on the count in
   // the same pipeline, before it is counted, so a count whose answer is lost
   // still ends with its day.
-  const sentCount = incremented(
-    await redisPipeline([
-      ["SET", mailKey(group.id), "0", "EX", 86_400, "NX"],
-      ["INCR", mailKey(group.id)],
-    ]),
-  );
+  const sentCount = windowCountOf(await redisPipeline(windowCount(mailKey(group.id), 86_400)));
   if (sentCount === null) return "unavailable";
   if (sentCount > group.people * 3 + 10) return "slow";
   // The email is one of the store's access emails, taken as it is sent

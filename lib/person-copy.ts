@@ -64,6 +64,7 @@ import { deviceCount } from "@/lib/community-push";
 import { conversationsOf } from "@/lib/community-dm";
 import { chatMessagesOf } from "@/lib/community-chat";
 import { rsvpsOf } from "@/lib/community-events";
+import { challengesOf } from "@/lib/community-challenges";
 import { votesOf } from "@/lib/community-polls";
 import { heldCopy, heldOf } from "@/lib/community-approval";
 import { keysOf } from "@/lib/licence-keys";
@@ -387,7 +388,7 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
     if (!id) return [];
     const who = s.learner;
     const member = await readCommunityMember(id, who);
-    const [points, notices, devices, conversations, room, events, traces, held] = await Promise.all([
+    const [points, notices, devices, conversations, room, events, traces, challenges, held] = await Promise.all([
       pointsRecordOf(id, who),
       allNoticesOf(id, who),
       deviceCount(id, who),
@@ -395,6 +396,7 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
       chatMessagesOf(id, who),
       rsvpsOf(id, who),
       memberTraces(id, who),
+      challengesOf(id, who),
       // What they sent that waits for approval, and the notes about what was not published (543 [CM2]).
       heldOf(id, who),
     ]);
@@ -411,6 +413,7 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
       privateMessages: conversations.map((c) => ({ request: c.request, messages: c.messages.map((m) => ({ from: m.mine ? "you" : m.fromCreator ? "the creator" : "the other member", text: m.text, at: iso(m.at) })) })),
       room: room.map((m) => ({ text: m.text, at: iso(m.at) })),
       events: events.map((e) => ({ event: e.event, at: iso(e.at) })),
+      challenges: challenges.map((c) => ({ challenge: c.challenge, title: c.title, joined: iso(c.joined), checkedIn: c.checkIns })),
       posts: wrote.posts.map((p) => ({ ...p, at: iso(p.at), edited: iso(p.edited) })),
       comments: wrote.comments.map((c) => ({ ...c, at: iso(c.at), edited: iso(c.edited) })),
       likedPosts: wrote.likedPosts,
@@ -419,7 +422,7 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
       votes,
       waitingForApproval: held.map(heldCopy),
     };
-    const empty = !member && points.total === 0 && !notices.length && !devices && !conversations.length && !room.length && !events.length && !votes.length && !held.length && Object.values(wrote).every((list) => !list.length);
+    const empty = !member && points.total === 0 && !notices.length && !devices && !conversations.length && !room.length && !events.length && !challenges.length && !votes.length && !held.length && Object.values(wrote).every((list) => !list.length);
     return empty ? [] : [record];
   },
   "lib/licence-keys.ts": async (s) => (await keysOf(s.store, s.productIds, s.email)).map((k) => ({ product: k.product, key: k.key, sale: k.reference, given: iso(k.at), revoked: iso(k.revokedAt), revokedBy: k.revokedBy })),

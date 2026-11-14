@@ -89,6 +89,17 @@
       ]
     },
     {
+      "source": "app/[handle]/community/challenges/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/[handle]/community/challenges",
+      "parameters": [
+        {
+          "name": "handle",
+          "kind": "segment"
+        }
+      ]
+    },
+    {
       "source": "app/[handle]/community/chat/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/[handle]/community/chat",
@@ -1336,6 +1347,8 @@
     "components/closing-refunds-confirm.tsx",
     "components/collections-editor.tsx",
     "components/community-approval-studio.tsx",
+    "components/community-challenges-studio.tsx",
+    "components/community-challenges.tsx",
     "components/community-composer.tsx",
     "components/community-event-room.tsx",
     "components/community-events-studio.tsx",
@@ -1787,6 +1800,8 @@
     "app/api/store/come-back/route.ts",
     "app/api/store/community/approval/route.ts",
     "app/api/store/community/calendar/route.ts",
+    "app/api/store/community/challenge/route.ts",
+    "app/api/store/community/challenges/route.ts",
     "app/api/store/community/chat/new/route.ts",
     "app/api/store/community/chat/route.ts",
     "app/api/store/community/events/route.ts",
@@ -2095,6 +2110,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 143
+    "pageTemplates": 144
   }
 }

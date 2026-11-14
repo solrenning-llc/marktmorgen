@@ -631,7 +631,13 @@ export async function maybeBusyAlert(store: Store, today: number, now = Date.now
   const day = new Date(now).toISOString().slice(0, 10);
   if (!(await ownClaim(busyKey(store.handle, day), 2 * 86400))) return false;
 
-  const top = (await sourcesToday(store, now)).filter((s) => s.name !== "direct")[0];
+  // Which channel brought most of them is one optional sentence. Read after the day's mark is taken, a reading that
+  // cannot be trusted (it throws, rule 24) leaves that sentence out, never a channel made up, and the email still goes.
+  const sources = await sourcesToday(store, now).catch((error: unknown) => {
+    console.error("stats-report: today's channels could not be read for the busy-day email; it goes without them", error);
+    return [];
+  });
+  const top = sources.filter((s) => s.name !== "direct")[0];
   const token = weeklyToken(store.handle);
   const stopUrl = `${SITE_URL}/api/store/weekly?h=${encodeURIComponent(store.handle)}&t=${encodeURIComponent(token)}`;
   const lines = [

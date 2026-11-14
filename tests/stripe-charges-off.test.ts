@@ -66,7 +66,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     if (account === "fails") return json({ error: { type: "api_error", message: "Synthetic outage" } }, 500);
     if (account === "no-merchant") return json({ id: ACCOUNT, configuration: {}, requirements: {} });
     const status = account === "no-status" ? undefined : account === "odd-status" ? "switched_off" : account;
-    return json({ id: ACCOUNT, configuration: { merchant: { capabilities: { card_payments: status === undefined ? {} : { status } } } }, requirements: { summary: { minimum_deadline: { status: account === "active" ? null : "past_due" } } } });
+    return json({ id: ACCOUNT, configuration: { merchant: { capabilities: { card_payments: status === undefined ? {} : { status } } } }, requirements: { summary: { minimum_deadline: account === "active" ? null : { status: "past_due" } } } });
   }
   if (url.pathname === "/v1/checkout/sessions" && method === "POST") {
     sessionsTried += 1;

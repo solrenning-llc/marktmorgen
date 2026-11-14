@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "@/components/toast";
 import { MAX_SITE_PAGES, MAX_SITE_TITLE, MAX_SLUG, SITE_STARTERS, type SitePage, slugFrom } from "@/lib/site-page-rules";
 
-const MESSAGES: Record<string, string> = {
+export const MESSAGES: Record<string, string> = {
   too_many: `A store has up to ${MAX_SITE_PAGES} pages of its own. Remove one first.`,
   title: "Give the page a title.",
   slug: "An address is lowercase letters and numbers, with a dash between words.",
@@ -14,17 +14,23 @@ const MESSAGES: Record<string, string> = {
   taken: "Another of your pages has that address.",
   unknown: "That is not there anymore. Reload the page.",
   forbidden: "Your role on this store does not include its pages.",
+  page_unread: "This page could not be read just now, so no copy was made. Try again in a moment.",
+  copy_conflict: "Your pages changed while the copy was being made, so none was made. Reload the page and try again.",
+  copy_failed: "The page could not be saved just now. Reload to check your pages before trying again.",
+  copy_unknown: "We could not tell whether the copy was made. Reload to see your pages before trying again.",
+  copy_full: "Your store has no room left for this page's blocks, so none was added. Remove something you no longer need first.",
+  copy_empty: "This page has no blocks yet, so there is nothing to copy. Add a new page instead.",
   server_error: "Something went wrong on our side. Try again in a moment.",
 };
 
-async function call(payload: Record<string, unknown>): Promise<{ ok?: boolean; error?: string; pages?: SitePage[]; id?: string }> {
+async function call(payload: Record<string, unknown>): Promise<{ ok?: boolean; error?: string; pages?: SitePage[]; id?: string; pictures?: number }> {
   try {
     const response = await fetch("/api/store/site-page", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
-    return (await response.json().catch(() => ({ ok: false, error: "server_error" }))) as { ok?: boolean; error?: string; pages?: SitePage[]; id?: string };
+    return (await response.json().catch(() => ({ ok: false, error: "server_error" }))) as { ok?: boolean; error?: string; pages?: SitePage[]; id?: string; pictures?: number };
   } catch {
     return { ok: false, error: "server_error" };
   }
@@ -116,6 +122,16 @@ export function SitePagesList({ pages, selected, sid }: { pages: SitePage[]; sel
   );
 }
 
+/** What "Make a copy" makes, said before it is pressed (582 [KB3]). */
+export const COPY_HELP = "Make a copy: the same blocks and words, as last saved, on a new page, hidden from visitors and out of the menu until you show it. Pictures stay with this page, so add them again in the copy.";
+
+/** What is said once the copy is made, with the pictures left out counted. */
+export function copyDoneWords(pictures: number): string {
+  return pictures
+    ? `Copy made and opened, hidden from visitors. Its ${pictures === 1 ? "picture" : `${pictures} pictures`} stayed with the original: add ${pictures === 1 ? "it" : "them"} again here.`
+    : "Copy made and opened, hidden from visitors.";
+}
+
 /** The settings of the page that is open: title, address, menu, where its buttons lead, order, removal. */
 export function SitePageSettings({
   page,
@@ -150,6 +166,18 @@ export function SitePageSettings({
     if (!a.ok) return setError(MESSAGES[a.error ?? ""] ?? MESSAGES.server_error);
     toast(done);
     after?.();
+    router.refresh();
+  }
+
+  /** 582 [KB3]: a copy of this page, kept back; then the copy is opened, its address in the list. */
+  async function copy() {
+    setBusy(true);
+    setError(null);
+    const a = await call({ action: "copy", id: page.id });
+    setBusy(false);
+    if (!a.ok || !a.id) return setError(MESSAGES[a.error ?? ""] ?? MESSAGES.server_error);
+    toast(copyDoneWords(typeof a.pictures === "number" ? a.pictures : 0));
+    router.push(`/studio/site?${sid ? `store=${sid}&` : ""}page=${a.id}`);
     router.refresh();
   }
 
@@ -207,6 +235,11 @@ export function SitePageSettings({
         <button type="button" className="btn btn-secondary btn-sm" disabled={busy || at >= pages.length - 1} onClick={() => move(1)} aria-label="Move this page down in the menu">
           Move down
         </button>
+        {pages.length < MAX_SITE_PAGES ? (
+          <button type="button" className="btn btn-secondary btn-sm" disabled={busy || dirty} aria-busy={busy} aria-describedby="site-page-copy-help" onClick={() => void copy()}>
+            Make a copy
+          </button>
+        ) : null}
         {confirm ? (
           <span className="flex flex-wrap items-center gap-2 text-sm">
             <span className="text-ink">Remove this page and its blocks?</span>
@@ -228,6 +261,13 @@ export function SitePageSettings({
           </button>
         )}
       </div>
+      <p id="site-page-copy-help" className="mt-3 text-xs text-ink-soft">
+        {pages.length < MAX_SITE_PAGES
+          ? dirty
+            ? "Save these settings first to make a copy."
+            : COPY_HELP
+          : `A store has up to ${MAX_SITE_PAGES} pages of its own, so there is no room for a copy. Remove one first.`}
+      </p>
       {error ? (
         <p className="notice notice-error mt-3 text-sm" role="alert">{error}</p>
       ) : null}

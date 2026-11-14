@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { ensureStatsId } from "@/lib/store";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
+import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { phoneView } from "@/lib/phone-alerts";
 import { PhoneAlertsPanel } from "@/components/phone-alerts-panel";
@@ -49,7 +50,7 @@ export default async function StudioPhonePage({ searchParams }: Params) {
       />
       <StudioStorePin sid={store.sid}>
       <main id="content" className="container-page pb-20 pt-10 sm:pt-14">
-        <p className="eyebrow">Phone notifications</p>
+        <StudioTrail store={store} here="Phone notifications" />
         <h1 className="t-h2 mt-3">Know the moment it happens</h1>
         <p className="mt-3 max-w-2xl text-ink-soft">
           A sale, a booking, a report in your community, an application from an affiliate, a live event about to start: each can buzz your phone, your

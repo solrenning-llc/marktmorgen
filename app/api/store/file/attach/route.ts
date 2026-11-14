@@ -7,6 +7,7 @@ import { ownsPath, safeFileName, type ProductFile } from "@/lib/product-file";
 import { dropStamped } from "@/lib/pdf-stamp";
 import { deliveredFile, readDelivery } from "@/lib/catalog";
 import { audioPlayedBy } from "@/lib/podcast";
+import { takesLastDelivery } from "@/lib/product-option";
 import { refusedJson } from "@/lib/studio-route";
 import { lockedFor } from "@/lib/two-step";
 
@@ -49,6 +50,13 @@ export async function POST(request: NextRequest) {
     const lock = detach ? false : await lockRead(lockedFor(request, "products", "replace"));
     if (lock instanceof Response) return lock;
     if (lock && deliveredFile(delivery)) return refusedJson("locked");
+
+    // The last thing a product on the store hands over is not taken off: it is replaced, or the product unpublished
+    // first (754 [STN1]; Claude 6 on #3432). A read that fails throws, so nothing is taken off (rule 24).
+    if (detach) {
+      const before = await readDelivery(store, id);
+      if (before && takesLastDelivery(before.product, id, "file")) return Response.json({ ok: false, error: "last_delivery", product: before.product.title }, { status: 409 });
+    }
 
     let file: ProductFile | null = null;
     if (!detach) {

@@ -55,7 +55,17 @@ export default async function RenewPage({ params, searchParams }: Params) {
   const listed = (await readListing(store, productId)) ?? null;
   // A come-back email's link (lib/winback-send.ts): the offer it carries, for
   // the address it was sent to, while it lasts.
-  const grant = back && listed ? await readWinBack(store, listed.id, back).catch(() => null) : null;
+  // A read Redis answered oddly or not at all is unknown, never an offer that ended (CX-123 rule 24): said as not
+  // checked right now, with no come-back button it cannot back.
+  let unread = false;
+  const grant =
+    back && listed
+      ? await readWinBack(store, listed.id, back).catch((error: unknown) => {
+          console.error("reading a come-back link failed", store.handle, error);
+          unread = true;
+          return null;
+        })
+      : null;
   // A draft is named only to whoever holds its come-back link; otherwise it is a product not known here (MM-SA-30).
   const product = listed && (!listed.hidden || grant) ? listed : null;
   const say = speech(store);
@@ -80,7 +90,8 @@ export default async function RenewPage({ params, searchParams }: Params) {
   // "price" in the address says nothing by itself: only the product does.
   const said = status === "price" ? undefined : notices[status];
   // Where the prices offered today are: the product's own page, while buyers can see it.
-  const pricesLink = priceGone && product && !product.hidden ? product : null;
+  // Never to a store switched off after a report (lib/takedown.ts), which sells nothing: nor the link to the product below.
+  const pricesLink = priceGone && product && !product.hidden && !store.suspended ? product : null;
 
   return (
     <div
@@ -106,13 +117,16 @@ export default async function RenewPage({ params, searchParams }: Params) {
           <h1 className="font-display mt-1 text-3xl font-semibold leading-tight tracking-[-0.02em]">
             {m.endedTitle}
           </h1>
-          <p className="st-muted mt-4 text-lg leading-relaxed">
-            {product ? (priceGone ? m.endedClosed(product.title) : m.endedBody(product.title)) : m.endedGone(store.name)}
-          </p>
+          {/* A draft whose link could not be checked is neither named nor said as no longer offered (MM-SA-30, rule 24). */}
+          {product || !(unread && listed) ? (
+            <p className="st-muted mt-4 text-lg leading-relaxed">
+              {product ? (priceGone ? m.endedClosed(product.title) : m.endedBody(product.title)) : m.endedGone(store.name)}
+            </p>
+          ) : null}
 
           {back && (!offer || said || priceGone) ? (
             <div className="st-note mt-6 text-sm" role="status">
-              <p>{priceGone ? notices.price : (said ?? (kept ? notices.unavailable : notices.expired))}</p>
+              <p>{priceGone ? notices.price : (said ?? (unread ? notices.unknown : kept ? notices.unavailable : notices.expired))}</p>
               {pricesLink ? (
                 <p className="mt-2">
                   <Link href={productPath(store, pricesLink)} className="inline-flex min-h-12 items-center font-semibold underline underline-offset-4" style={{ color: "var(--st-text)" }}>
@@ -166,7 +180,7 @@ export default async function RenewPage({ params, searchParams }: Params) {
             </p>
           ) : null}
 
-          {product && !priceGone ? (
+          {product && !priceGone && !store.suspended ? (
             <p className="mt-4 text-center text-sm">
               <Link href={productPath(store, product)} className="st-footer-link font-semibold">
                 {m.see(product.title)}

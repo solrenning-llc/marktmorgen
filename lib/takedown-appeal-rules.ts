@@ -276,6 +276,34 @@ export function moveAppeal(appeal: Appeal, to: AppealState, by: { role: "creator
   return { ok: true, appeal: { ...appeal, state: to, moves: [...appeal.moves, move] } };
 }
 
+/**
+ * Whether a kept request's moves lead, one allowed step at a time, to the state it says it is in (Codex X5 on #3533,
+ * MÉDIO): the first move is the creator's own "received"; every later one is a person at Marktmorgen's, to a state
+ * NEXT allows from the one before; a final one carries its reason; and the last move is the record's state. Each move
+ * has a time. A record whose moves do not lead to its state is read as unknown, never shown (rule 24).
+ */
+export function movesLeadTo(state: unknown, moves: unknown): boolean {
+  if (!Array.isArray(moves) || moves.length === 0 || moves.length > APPEAL_STATES.length) return false;
+  let at = null as AppealState | null;
+  for (const raw of moves) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return false;
+    const move = raw as Record<string, unknown>;
+    const to = move.state;
+    if (typeof to !== "string" || !(APPEAL_STATES as readonly string[]).includes(to)) return false;
+    if (typeof move.at !== "string" || Number.isNaN(Date.parse(move.at))) return false;
+    if (move.reason !== undefined && (typeof move.reason !== "string" || move.reason.length > MAX_APPEAL_REASON)) return false;
+    const next = to as AppealState;
+    if (at === null) {
+      if (next !== "received" || move.by !== "creator") return false;
+    } else {
+      if (move.by !== "operator" || !NEXT[at].includes(next)) return false;
+      if (isFinal(next) && !(typeof move.reason === "string" && move.reason.trim())) return false;
+    }
+    at = next;
+  }
+  return at === state;
+}
+
 /** A request is seen only from the store that sent it. */
 export const appealVisibleTo = (appeal: Pick<Appeal, "store">, store: string) => Boolean(store) && appeal.store === store;
 

@@ -1,7 +1,7 @@
 /**
  * 273 [BK1] (C1-20261109-1525-C4-68 items 2, 3 and 5): the database copy read one key at a time (BACKUP_DUMP_BATCH 1,
  * so no batch of oversized keys is read past the byte cap), stopped cleanly at a deadline derived below the run's
- * 700 s cutoff and resumed by the next run of the same UTC day. A copy is complete only when every key was copied in
+ * 240 s cutoff (700 s until #3273) and resumed by the next run of the same UTC day. A copy is complete only when every key was copied in
  * its set window: the UTC day its first run started. Until it closes it is incomplete: never the last good copy,
  * never verified, never a month's copy, never a reason to prune.
  *
@@ -11,7 +11,8 @@
  *
  * What fails here:
  *   - a batch above one key;
- *   - no deadline, or one at or past the 700 s cutoff, or not derived from the requests it must leave room for;
+ *   - no deadline, or one at or past the 240 s cutoff, or not derived from the requests it must leave room for;
+ *   - a copy at the caps that cannot close inside its runs passing as a copy, or giving a sign of life;
  *   - a run that reaches its deadline marked complete or verified, writing a manifest, a month's mark or the last good
  *     copy's mark, pruning, sending a sign of life, or raising the day's count past its limit;
  *   - a next run of the same day that copies again what the paused run copied, or does not close the set with every key
@@ -132,14 +133,17 @@ const testKeys = async (r: BackupRunResult) => (r.ok ? ours(await rowsOf(r.id)).
 async function main(): Promise<void> {
   const D = Date.parse("2026-11-03T04:23:00Z");
 
-  part("One key a request, and a deadline below the 700 s cutoff, derived from what must still fit after it");
+  part("One key a request, and a deadline below the 240 s cutoff, derived from what must still fit after it");
   is("BACKUP_DUMP_BATCH is 1 (C1-20261109-1525-C4-68 item 2)", C.BACKUP_DUMP_BATCH, 1);
   const deadline = C.BACKUP_COPY_DEADLINE_MS as number;
   const room = C.BACKUP_COPY_STOP_ROOM_MS as number;
   const storeTimeout = S.BACKUP_STORE_TIMEOUT_MS as number;
   is("the bucket's request timeout is exported as the one its requests use (20 s)", storeTimeout, 20_000);
   is("the deadline is the cutoff less the room kept after it", typeof deadline === "number" && deadline === BACKUP_RUN_CUTOFF_MS - room, true);
-  is("below the 700 s cutoff", typeof deadline === "number" && deadline > 0 && deadline < 700_000, true);
+  is("below the 240 s cutoff (#3273), with the same 140 s left after it as at 700 s: 100 s", [BACKUP_RUN_CUTOFF_MS, typeof deadline === "number" && deadline > 0 && deadline < BACKUP_RUN_CUTOFF_MS, room, deadline], [240_000, true, 140_000, 100_000]);
+  // The cases below pause the copy at the same place as before #3273 (20 s a request against a 560 s deadline: about
+  // 28 requests before it, the walk and the listing among them), the request's time scaled to the 100 s deadline.
+  const pace = Math.floor(deadline / 28);
   // The room: the request in flight at the deadline (one key), a part a row overflows into, the open part closed at
   // the pause (or the manifest when the copy ends), each written and read back at the bucket's timeout.
   is("the room holds one database request and three bucket writes and read-backs, with a margin", typeof room === "number" && room > REDIS_TIMEOUT_MS + 3 * 2 * storeTimeout, true);
@@ -150,8 +154,8 @@ async function main(): Promise<void> {
   const old = "00000000-0000-4000-8000-000000000001";
   objects.set(old, new Uint8Array([1, 2, 3]));
   writtenAt.set(old, D - 40 * DAY);
-  // 20 s a request: the deadline comes after about 25 of the 30 keys.
-  latency = 20_000;
+  // deadline / 28 a request: the deadline comes after about 25 of the 30 keys.
+  latency = pace;
   dumps = 0;
   const first = await runBackup({ now: D, review, store, key });
   latency = 0;
@@ -191,7 +195,7 @@ async function main(): Promise<void> {
 
   part("The set window is the UTC day of the copy's first run: a later day starts a new copy");
   reset(D + 10 * DAY);
-  latency = 20_000;
+  latency = pace;
   const paused = await runBackup({ now: D + 10 * DAY, review, store, key });
   latency = 0;
   const pausedParts = [...objects.keys()];
@@ -207,7 +211,7 @@ async function main(): Promise<void> {
 
   part("Keys that change between the runs: before the cursor as they were copied, after it as they are");
   reset(D + 20 * DAY);
-  latency = 20_000;
+  latency = pace;
   const before = await runBackup({ now: D + 20 * DAY, review, store, key });
   latency = 0;
   is("paused past k06 and before k28", [reasonOf(before), keysOf(before) > 9 && keysOf(before) < 28], ["copy_incomplete", true]);
@@ -230,7 +234,7 @@ async function main(): Promise<void> {
 
   part("A progress whose parts are gone is never resumed: the run copies afresh");
   reset(D + 30 * DAY);
-  latency = 20_000;
+  latency = pace;
   await runBackup({ now: D + 30 * DAY, review, store, key });
   latency = 0;
   const gone = [...objects.keys()][0];
@@ -257,52 +261,69 @@ async function main(): Promise<void> {
 
   part("A pause needs a part left for the rest of the copy");
   reset(D + 60 * DAY);
-  latency = 20_000;
+  latency = pace;
   const onePart = await runBackup({ now: D + 60 * DAY, review: { ...review, maxParts: 1, maxStoredBytes: 35 * 1_131_232 }, store, key });
   latency = 0;
   is("with one part allowed, the deadline ends the copy as too many parts, and no progress is kept", [reasonOf(onePart), (await real([["GET", PROGRESS]]))[0]], ["export_too_many_parts", null]);
 
-  part("Measured: the full copy at the cap of 10,000 keys, 200 SCAN pages, 0.25 s a request (tests/plan-cost-registry.ts, ROUND_TRIP_SECONDS)");
+  part("Measured: the full copy at the cap of 10,000 keys, 200 SCAN pages, under the 240 s cutoff (#3273)");
   {
     // The design's caps: 10,000 keys, 4 MiB copied, its commands; 8 parts, so the copy can span as many runs as it takes.
     const big: BackupCostReview = { maxRows: 10_000, maxCommands: 20_212, maxBytes: 4_194_304, maxParts: 8, maxRunBytes: 4_194_304, retentionDays: 30, maxStoredBytes: 35 * (4_194_304 + 8 * 65_536 + 8 * 160 + 65_536), reviewedAt: "2026-11-09", source: "synthetic: the design's caps, for the timing" };
-    const T = D + 70 * DAY;
-    redis.clear();
-    redis.now = () => T;
-    objects.clear();
-    writtenAt.clear();
-    bucketClock = T;
-    // 9,990 keys of ours and the backup's own marks: at most the 10,000 the review allows. About 410 bytes a row.
     const total = 9_990;
-    for (let i = 0; i < total; i += 1) redis.run(["SET", `nl:m:${String(i).padStart(5, "0")}`, "v".repeat(240)]);
-    // 50 keys of ours a SCAN page: the walk takes the 200 pages a shared database may take (BACKUP_SCAN_PAGES).
-    pageScan = 50;
-    // The repository's round-trip ceiling for a database trip (a review ceiling far above a trip inside one region).
-    latency = ROUND_TRIP_SECONDS * 1_000;
-    const runs: { keys: number; seconds: number; cpuMs: number; reason: string }[] = [];
-    let closed: BackupRunResult | null = null;
-    let copied = 0;
-    for (let run = 0; run < 10 && !closed; run += 1) {
-      // Every run on the same day, the day's count cleared: how many runs the copy takes, whatever the day allows.
-      await real([["DEL", `nl:backup:ran:${new Date(T).toISOString().slice(0, 10)}`]]);
-      at(T + run * HOUR);
-      const v0 = simulated;
-      const c0 = performance.now();
-      const result = await runBackup({ now: T + run * HOUR, review: big, store, key });
-      const cpuMs = performance.now() - c0;
-      const keys = keysOf(result) - copied;
-      copied = keysOf(result);
-      runs.push({ keys, seconds: Math.round(((simulated - v0) + cpuMs) / 100) / 10, cpuMs: Math.round(cpuMs), reason: reasonOf(result) });
-      if (result.ok) closed = result;
-    }
-    latency = 0;
-    pageScan = 0;
-    for (const [i, r] of runs.entries()) console.log(`  measure: run ${i + 1}: ${r.reason}, ${r.keys} keys, ${r.seconds} s (${r.cpuMs} ms of it CPU)`);
-    const cpuPerKey = runs.reduce((n, r) => n + r.cpuMs, 0) / total;
-    console.log(`  measure: ${runs.length} runs for the full copy; CPU ${cpuPerKey.toFixed(3)} ms a key; ${runs.reduce((n, r) => n + r.seconds, 0).toFixed(1)} s in all`);
-    is("the copy closes", closed?.ok, true);
-    if (closed && closed.ok) is("every one of the 9,990 keys in it, once (rowsOf throws on a key twice)", [...(await rowsOf(closed.id)).keys()].filter((k) => k.startsWith("nl:m:")).length, total);
-    is("it takes more runs than the 2 a day allows (BACKUP_RUNS_PER_DAY): it does not close inside its window at this latency", runs.length > (C.BACKUP_RUNS_PER_DAY as number), true);
+    /** Runs the full copy at `msPerRequest` a request, every run on the same day with the day's count cleared, up to `most` runs. */
+    const measure = async (T: number, msPerRequest: number, most: number) => {
+      redis.clear();
+      redis.now = () => T;
+      objects.clear();
+      writtenAt.clear();
+      bucketClock = T;
+      // 9,990 keys of ours and the backup's own marks: at most the 10,000 the review allows. About 410 bytes a row.
+      for (let i = 0; i < total; i += 1) redis.run(["SET", `nl:m:${String(i).padStart(5, "0")}`, "v".repeat(240)]);
+      // 50 keys of ours a SCAN page: the walk takes the 200 pages a shared database may take (BACKUP_SCAN_PAGES).
+      pageScan = 50;
+      latency = msPerRequest;
+      const runs: { keys: number; seconds: number; cpuMs: number; reason: string; alive: boolean }[] = [];
+      let closed: BackupRunResult | null = null;
+      let copied = 0;
+      for (let run = 0; run < most && !closed; run += 1) {
+        await real([["DEL", `nl:backup:ran:${new Date(T).toISOString().slice(0, 10)}`]]);
+        at(T + run * HOUR);
+        const v0 = simulated;
+        const c0 = performance.now();
+        const result = await runBackup({ now: T + run * HOUR, review: big, store, key });
+        const cpuMs = performance.now() - c0;
+        // A run that ends otherwise than paused or closed copied nothing that counts: no keys of its own.
+        const counts = result.ok || reasonOf(result) === "copy_incomplete";
+        const keys = counts ? keysOf(result) - copied : 0;
+        if (counts) copied = keysOf(result);
+        runs.push({ keys, seconds: Math.round(((simulated - v0) + cpuMs) / 100) / 10, cpuMs: Math.round(cpuMs), reason: reasonOf(result), alive: backupAlarmSignal(result)?.kind === "alive" });
+        if (result.ok) closed = result;
+      }
+      latency = 0;
+      pageScan = 0;
+      for (const [i, r] of runs.entries()) console.log(`  measure (${msPerRequest} ms a request): run ${i + 1}: ${r.reason}, ${r.keys} keys, ${r.seconds} s (${r.cpuMs} ms of it CPU)`);
+      return { runs, closed };
+    };
+
+    // At the repository's round-trip ceiling (ROUND_TRIP_SECONDS, "a review ceiling far above a trip inside one region"),
+    // a run's 100 s deadline holds the walk's 200 pages (50 s) and about 200 keys: the 8 parts run out long before the
+    // 10,000 keys. Until #3273 (700 s cutoff, 560 s deadline) a run copied about 2,038 keys and the copy closed in 5
+    // runs; with a function of 300 s at the most it cannot close at this latency, and says so, never passing as a copy.
+    const slow = await measure(D + 70 * DAY, ROUND_TRIP_SECONDS * 1_000, 10);
+    is("at 0.25 s a request, a run copies a few hundred keys before its deadline", slow.runs[0].reason === "copy_incomplete" && slow.runs[0].keys > 100 && slow.runs[0].keys < 400, true);
+    is("at 0.25 s a request, the copy at the cap never closes under the 240 s cutoff: never ok, never a sign of life", [slow.closed, slow.runs.some((r) => r.reason === "ok" || r.alive)], [null, false]);
+    is("it ends as too many parts once the review's 8 are used, a failure the report and the alarm show", slow.runs.some((r) => r.reason === "export_too_many_parts"), true);
+    is("it takes more runs than the 2 a day allows (BACKUP_RUNS_PER_DAY)", slow.runs.length > (C.BACKUP_RUNS_PER_DAY as number), true);
+
+    // The same copy closes once a request is fast enough: in one run at 9 ms, in the day's two runs at 19 ms (the bounds
+    // docs/backup.md gives, measured by this harness).
+    const fast = await measure(D + 80 * DAY, 9, 1);
+    is("at 9 ms a request, the full copy closes in one run", fast.closed?.ok, true);
+    if (fast.closed && fast.closed.ok) is("every one of the 9,990 keys in it, once (rowsOf throws on a key twice)", [...(await rowsOf(fast.closed.id)).keys()].filter((k) => k.startsWith("nl:m:")).length, total);
+    const day = await measure(D + 90 * DAY, 19, C.BACKUP_RUNS_PER_DAY as number);
+    is("at 19 ms a request, it closes within the day's two runs, resumed once", [day.closed?.ok, day.runs.map((r) => r.reason)], [true, ["copy_incomplete", "ok"]]);
+    if (day.closed && day.closed.ok) is("every one of the 9,990 keys in it, once, across the two runs", [...(await rowsOf(day.closed.id)).keys()].filter((k) => k.startsWith("nl:m:")).length, total);
   }
 
   done();

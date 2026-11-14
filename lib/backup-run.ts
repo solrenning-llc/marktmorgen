@@ -120,7 +120,7 @@
  *
  * One key a request, a deadline, and a copy resumed (C1-20261109-1525-C4-68 items 2 and 3): the copy reads one key
  * a request (BACKUP_DUMP_BATCH), so at most one key is read past the byte cap. No key is begun past
- * BACKUP_COPY_DEADLINE_MS from the run's start, the 700 s cutoff less the room for the request in flight and the
+ * BACKUP_COPY_DEADLINE_MS from the run's start, the 240 s cutoff less the room for the request in flight and the
  * parts and manifest still to close (BACKUP_COPY_STOP_ROOM_MS). A run that reaches it stops cleanly: the open part
  * is closed and read back, and the progress (the last key name handled, the parts so far, their counts, the copy's
  * start and its folder) is kept in nl:backup:progress; the run is "copy_incomplete": no manifest, never the last good
@@ -231,7 +231,10 @@ export const BACKUP_STOP_MARGIN_MS = 15_000;
  * manifest when the copy ends, each written and read back at the bucket's timeout, and the margin: 140 s.
  */
 export const BACKUP_COPY_STOP_ROOM_MS = REDIS_TIMEOUT_MS + 3 * BACKUP_PART_CLOSE_MS + BACKUP_STOP_MARGIN_MS;
-/** No key is begun past this, from the run's start: 560 s, below the 700 s cutoff (C1-20261109-1525-C4-68 item 3). */
+/**
+ * No key is begun past this, from the run's start: 100 s, below the 240 s cutoff, the same 140 s room left after it as
+ * at the 700 s cutoff before #3273, when it was 560 s (C1-20261109-1525-C4-68 item 3).
+ */
 export const BACKUP_COPY_DEADLINE_MS = BACKUP_RUN_CUTOFF_MS - BACKUP_COPY_STOP_ROOM_MS;
 const DAY_MS = 86_400_000;
 const STALE_MS = 48 * 3_600_000;

@@ -104,16 +104,18 @@ is("the month at 300 s: $26.51", month?.knownMicroUsd, 26_513_574);
 // The overshoot follows the run's own batch: one key since 9 November 2026 (C1-20261109-1525-C4-68 item 2).
 const dumpBatch = (backupRun as Record<string, unknown>).BACKUP_DUMP_BATCH as number;
 is("the overshoot is priced at the batch the run sends, one key", [dumpBatch, line("upstash-overshoot") === Math.ceil((64 * dumpBatch * 139_810_136 * 30_000) / 1_000_000_000), readFileSync("lib/backup-run.ts", "utf8").includes("batch: BACKUP_DUMP_BATCH")], [1, true, true]);
-// The quote at the route's own maxDuration (Claude 5's LOW 1 on #3293, 6732268011): the Vercel lines at 800 s, not 300.
-// Vercel: 64 × (2 × 800/3,600 × 10,600 + 800/3,600 × 128,000 + 0.6) = 2,121,994; gru1: 64 × 24,088.89 = 1,541,688.9 →
-// 1,541,689. 17,306 + 4,503,510 + 363,295 + 2,587,264 + 245,477 + 18 + 2,121,994 + 1,541,689 + 719,300 + 268,436 +
-// 14,024,737 = 26,393,026; + 2,639,303 = 29,032,329: $29.03 a month, $348.39 a year (batch 100 until 9 November 2026:
+// The quote at the route's own maxDuration (Claude 5's LOW 1 on #3293, 6732268011), read from the code, never typed
+// here: BACKUP_ROUTE_SECONDS, which must be the route's literal maxDuration (300 s since #3273: a function of more than
+// 300 s runs only on Fluid compute, which no deployment had). At 300 s it is the month worked out line by line above,
+// $26.51 a month, $318.16 a year. Until #3273 it was quoted at 800 s: $29.032329 (batch 100 until 9 November 2026:
 // 475,490,895; batch 100 without the four lines, 10,820,417).
 const routeSeconds = (backupCost as Record<string, unknown>).BACKUP_ROUTE_SECONDS as number;
+const routeLiteral = Number(/export const maxDuration = (\d+);/.exec(readFileSync("app/api/cron/backup/route.ts", "utf8"))?.[1]);
 const atRoute = backupWorstMonth(builtAsIs, routeSeconds);
-is("at the route's maxDuration (800 s): $29.03 a month", [routeSeconds, atRoute?.knownMicroUsd], [800, 29_032_329]);
-is("at 800 s, the four lines are in too", ["vercel-region", "billing-blocks", "upstash-overshoot", "vercel-transfer"].every((id) => (atRoute?.lines ?? []).some((l) => l.id === id && l.microUsd > 0)), true);
-is("docs/backup.md quotes the month at the route's 800 s at one key a request, and the batch-100 figure only as superseded", [readFileSync("docs/backup.md", "utf8").includes("29,032,329"), /475,490,895[^.]*superseded/.test(readFileSync("docs/backup.md", "utf8"))], [true, true]);
+is("priced at the route's own maxDuration, read from the route", [Number.isSafeInteger(routeLiteral), routeSeconds], [true, routeLiteral]);
+is("at the route's maxDuration: the month worked out line by line above", [routeSeconds, atRoute?.knownMicroUsd], [300, month?.knownMicroUsd]);
+is("at the route's maxDuration, the four lines are in too", ["vercel-region", "billing-blocks", "upstash-overshoot", "vercel-transfer"].every((id) => (atRoute?.lines ?? []).some((l) => l.id === id && l.microUsd > 0)), true);
+is("docs/backup.md quotes the month at the route's 300 s at one key a request, and the 800 s and batch-100 figures only as superseded", [readFileSync("docs/backup.md", "utf8").includes("26,513,574"), /29,032,329[^.]*superseded/.test(readFileSync("docs/backup.md", "utf8")), /475,490,895[^.]*superseded/.test(readFileSync("docs/backup.md", "utf8"))], [true, true, true]);
 is("no free quota anywhere: storage, operations and bytes all above zero", [line("r2-storage"), line("r2-class-a"), line("r2-class-b"), line("upstash-transfer")].every((n) => n > 0), true);
 // With fewer commands than the page cap, the walk can read only what its commands allow: 30 - 12 = 18 pages.
 const fewCommands = backupWorstMonth({ ...builtAsIs, maxRows: 2, maxCommands: 30 }, 300)?.lines.find((l) => l.id === "upstash-transfer")?.basis ?? "";

@@ -25,16 +25,30 @@ export function PageOrderEditor({ order, on }: { order: PagePart[]; on: Record<P
   const [saved, setSaved] = useState<PagePart[]>(order);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  // What a move did, for screen readers: the place number beside each part is hidden from them (WCAG 4.1.3, 1.3.1).
+  const [said, setSaid] = useState("");
   const changed = list.some((part, i) => part !== saved[i]);
   useLeaveGuard(changed);
+
+  function say(words: string) {
+    // Emptied first, so the same words said twice in a row are said again.
+    setSaid("");
+    requestAnimationFrame(() => setSaid(words));
+  }
 
   function move(at: number, by: -1 | 1) {
     if (!ready || saving) return;
     const to = at + by;
-    if (to < 0 || to >= list.length) return;
+    const name = LABELS.get(list[at])?.label ?? "This part";
+    // At either end the button stays focusable (aria-disabled) and says so, instead of turning off under the focus.
+    if (to < 0 || to >= list.length) {
+      say(`${name} is already ${by < 0 ? "first" : "last"}.`);
+      return;
+    }
     const next = [...list];
     [next[at], next[to]] = [next[to], next[at]];
     setList(next);
+    say(`Moved ${name} to place ${to + 1} of ${list.length}.`);
   }
 
   async function save(next: PagePart[]) {
@@ -93,18 +107,20 @@ export function PageOrderEditor({ order, on }: { order: PagePart[]; on: Record<P
                 <button
                   type="button"
                   onClick={() => move(i, -1)}
-                  disabled={!ready || i === 0 || saving}
+                  disabled={!ready || saving}
+                  aria-disabled={i === 0 || undefined}
                   aria-label={`Move ${about?.label} up`}
-                  className="btn btn-secondary btn-sm px-2.5 disabled:opacity-40"
+                  className="btn btn-secondary btn-sm px-2.5 disabled:opacity-40 aria-disabled:opacity-40"
                 >
                   <span aria-hidden="true">↑</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => move(i, 1)}
-                  disabled={!ready || i === list.length - 1 || saving}
+                  disabled={!ready || saving}
+                  aria-disabled={i === list.length - 1 || undefined}
                   aria-label={`Move ${about?.label} down`}
-                  className="btn btn-secondary btn-sm px-2.5 disabled:opacity-40"
+                  className="btn btn-secondary btn-sm px-2.5 disabled:opacity-40 aria-disabled:opacity-40"
                 >
                   <span aria-hidden="true">↓</span>
                 </button>
@@ -113,6 +129,7 @@ export function PageOrderEditor({ order, on }: { order: PagePart[]; on: Record<P
           );
         })}
       </ol>
+      <p role="status" className="sr-only">{said}</p>
 
       {error ? (
         <p role="alert" className="notice notice-error mt-3 text-sm">

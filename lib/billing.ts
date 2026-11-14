@@ -2112,8 +2112,13 @@ export async function refundsOnIntent(paymentIntent: string): Promise<{ returned
     const listed = await onPlatform("GET", `/refunds?${query}`, undefined, { version: CHARGE_VERSION });
     if (!listed || listed.object !== "list" || !Array.isArray(listed.data) || listed.has_more !== false) return null;
     const out = { returned: 0, inFlight: 0, failed: 0, paid: intent.amount_received as number };
+    // Each refund counts once, by its own id: a list that repeats an id cannot
+    // prove its rows are distinct, so it is unreadable, never a doubled sum
+    // that would close a debt only partly returned (issue #4452).
+    const seen = new Set<string>();
     for (const row of listed.data as Record<string, unknown>[]) {
-      if (!row || row.object !== "refund" || typeof row.id !== "string") return null;
+      if (!row || row.object !== "refund" || typeof row.id !== "string" || !/^re_[A-Za-z0-9]{8,64}$/.test(row.id) || seen.has(row.id)) return null;
+      seen.add(row.id);
       const intent = typeof row.payment_intent === "string" ? row.payment_intent : (row.payment_intent as { id?: unknown } | null | undefined)?.id;
       if (intent !== paymentIntent) return null;
       if (row.status === "succeeded") {

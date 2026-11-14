@@ -99,7 +99,7 @@ export function CollectionsEditor({
 
   return (
     <div data-collections-editor data-collections-ready={hydrated} aria-busy={unavailable} className="card p-6 sm:p-8">
-      <p className="text-lg font-semibold tracking-[-0.02em] text-ink">Collections</p>
+      <h2 className="text-lg font-semibold tracking-[-0.02em] text-ink">Collections</h2>
       <p className="mt-2 text-ink-soft">
         {`Group products under a name, like "Beginner guides" or "Everything for weddings". Each collection gets a page of its own you can link to, and a link above your products on your store page. A product can be in more than one. Up to ${MAX_COLLECTIONS} collections of up to ${MAX_COLLECTION_PRODUCTS} products each.`}
       </p>

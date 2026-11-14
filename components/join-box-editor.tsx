@@ -62,7 +62,7 @@ export function JoinBoxEditor({
 
   return (
     <form id="signup" onSubmit={save} aria-busy={saving} className="card mt-8 scroll-mt-32 p-6 sm:p-8" noValidate>
-      <p className="text-lg font-semibold tracking-[-0.02em] text-ink">Email sign-up box</p>
+      <h2 className="text-lg font-semibold tracking-[-0.02em] text-ink">Email sign-up box</h2>
       <p className="mt-2 text-ink-soft">
         A box on your store page where visitors join your email list, without having to take anything. Each address joins only
         after its owner presses the button in a confirmation email, so your list holds real inboxes and nobody is signed up by

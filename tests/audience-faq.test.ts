@@ -26,7 +26,7 @@ const signin = flat(read("app/signin/page.tsx"));
 is("an emailed link logs in, with no password", signin.includes("No password to create."), true);
 is("the sign-in page says so when logging in is off, and sends nothing", flat(read("components/signin-form.tsx")).includes("Logging in is not switched on yet, so nothing was sent."), true);
 const studio = flat(read("app/studio/page.tsx"));
-is("the address card", studio.includes(`> ${w.address} </p>`), true);
+is("the address card", studio.includes(`> ${w.address} </h2>`), true);
 const form = flat(read("components/handle-form.tsx"));
 is("the store name and the button", [form.includes(` ${w.name} </`), form.includes(`"${w.create}"`)], [true, true]);
 const steps = studio.slice(studio.indexOf("const startSteps: StartStep[] = store ? ["), studio.indexOf("] : []; const connectTestMode"));

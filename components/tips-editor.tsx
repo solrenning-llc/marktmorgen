@@ -85,7 +85,7 @@ export function TipsEditor({
 
   return (
     <form id="support" onSubmit={save} aria-busy={saving} className="card mt-8 scroll-mt-32 p-6 sm:p-8" noValidate>
-      <p className="text-lg font-semibold tracking-[-0.02em] text-ink">Support my work</p>
+      <h2 className="text-lg font-semibold tracking-[-0.02em] text-ink">Support my work</h2>
       <p className="mt-2 text-ink-soft">
         A box on your store page where a fan who has nothing to buy today can still say thank you: three amounts to press, or
         one of their own, paid on Stripe&apos;s page to your own Stripe account, with a message for you if they want. Nothing is

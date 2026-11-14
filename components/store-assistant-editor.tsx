@@ -113,7 +113,7 @@ export function StoreAssistantEditor({
   return (
     <div id="assistant" className="card scroll-mt-32 p-6 sm:p-8">
       <div className="flex flex-wrap items-baseline justify-between gap-3">
-        <p className="text-lg font-semibold tracking-[-0.02em] text-ink">{ASSISTANT_NAME}</p>
+        <h2 className="text-lg font-semibold tracking-[-0.02em] text-ink">{ASSISTANT_NAME}</h2>
         <span className="text-sm font-semibold text-ink-soft">{`Add-on · ${assistantPriceWords()}`}</span>
       </div>
       <p className="mt-2 text-ink-soft">

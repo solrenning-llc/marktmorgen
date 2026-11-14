@@ -61,7 +61,7 @@ export function ContactBoxEditor({
 
   return (
     <form id="contact" onSubmit={save} aria-busy={saving} className="card mt-8 scroll-mt-32 p-6 sm:p-8" noValidate>
-      <p className="text-lg font-semibold tracking-[-0.02em] text-ink">Contact form</p>
+      <h2 className="text-lg font-semibold tracking-[-0.02em] text-ink">Contact form</h2>
       <p className="mt-2 text-ink-soft">
         A form on your store page where visitors write to you: a question before buying, a collaboration, a booking. Each message
         lands in your own inbox, and Reply goes straight back to them. Nothing is ever sent to the address they type, so the form

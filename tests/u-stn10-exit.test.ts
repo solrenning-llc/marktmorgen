@@ -15,7 +15,7 @@ const tag=(n:ts.Node)=>ts.isJsxElement(n)?n.openingElement.tagName.getText(tree)
 function visit(n:ts.Node){
   if(ts.isJsxElement(n)){
     if(tag(n)==='details'&&n.children.some(c=>tag(c)==='summary'&&/Cancel the subscription/.test(c.getText(tree))))found.cancel.push(n);
-    if(tag(n)==='div'&&n.children.some(c=>tag(c)==='p'&&/main data, as one file/.test(c.getText(tree))))found.data.push(n);
+    if(tag(n)==='div'&&n.children.some(c=>tag(c)==='h2'&&/main data, as one file/.test(c.getText(tree))))found.data.push(n);
   }
   ts.forEachChild(n,visit);
 }

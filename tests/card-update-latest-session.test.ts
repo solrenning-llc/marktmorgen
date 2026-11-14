@@ -5,7 +5,8 @@
  * card over B's, and its plain DEL took B off the daily job's way back (lib/payment-recovery.ts). Now a finish sets
  * the card only for the page kept for the membership; a page that is not it (an older one, none, an answer that
  * cannot be read) changes nothing and says "error"; a finish replaces the page with a done mark only while it is
- * still its own, so finishing the same page again is still safe and a newer page is never cleared.
+ * still its own, so finishing the same page again runs as before (the same card, no second payment) and a newer
+ * page is never cleared.
  * Synthetic Stripe and Redis; nothing is reached.
  */
 import { finishCardUpdate, openKey } from "@/lib/card-update";
@@ -53,14 +54,15 @@ async function main(): Promise<void> {
   part("The page kept for the membership sets its card");
   is("B sets B's card", [await finishCardUpdate(store, "cs_test_pageBbbbbbbbbb01"), set], ["updated", ["pm_cardBbbbbb01"]]);
   is("and is marked done, no longer waiting", await kept(), "done:cs_test_pageBbbbbbbbbb01");
-  is("finishing B again is safe: updated, nothing set again", [await finishCardUpdate(store, "cs_test_pageBbbbbbbbbb01"), set.length], ["updated", 1]);
-  is("A after B finished still sets nothing", [await finishCardUpdate(store, "cs_test_pageAaaaaaaaaa01"), set.length], ["error", 1]);
+  is("finishing B again is safe: updated, the same card again", [await finishCardUpdate(store, "cs_test_pageBbbbbbbbbb01"), set], ["updated", ["pm_cardBbbbbb01", "pm_cardBbbbbb01"]]);
+  is("still marked done", await kept(), "done:cs_test_pageBbbbbbbbbb01");
+  is("A after B finished still sets nothing", [await finishCardUpdate(store, "cs_test_pageAaaaaaaaaa01"), set.length], ["error", 2]);
 
   part("No page kept, or one that cannot be read: nothing is set");
   await redis.pipeline([["DEL", openKey(ACCOUNT, SUB)]]);
-  is("none kept", [await finishCardUpdate(store, "cs_test_pageAaaaaaaaaa01"), set.length], ["error", 1]);
+  is("none kept", [await finishCardUpdate(store, "cs_test_pageAaaaaaaaaa01"), set.length], ["error", 2]);
   await redis.pipeline([["HSET", openKey(ACCOUNT, SUB), "x", "y"]]);
-  is("a kept value of another shape", [await finishCardUpdate(store, "cs_test_pageAaaaaaaaaa01"), set.length], ["error", 1]);
+  is("a kept value of another shape", [await finishCardUpdate(store, "cs_test_pageAaaaaaaaaa01"), set.length], ["error", 2]);
   done();
 }
 

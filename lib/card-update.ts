@@ -56,6 +56,14 @@ async function sha256Hex(value: string): Promise<string> {
 const linkKey = async (token: string) => `nl:card:link:${(await sha256Hex(`nimbus-card:${token}`)).slice(0, 40)}`;
 const opensKey = async (token: string) => `nl:card:opens:${(await sha256Hex(`nimbus-card-opens:${token}`)).slice(0, 40)}`;
 export const openKey = (account: string, sub: string) => `nl:card:open:${account}:${sub}`;
+/** What a finished page leaves under openKey: done, not waiting, so finishing it again is still safe (finishCardUpdate). */
+export const CARD_DONE = "done:";
+/** The page kept as waiting, or null when none is (none kept, or one already finished). */
+export function waitingCardPage(kept: string | null): string | null {
+  return kept !== null && !kept.startsWith(CARD_DONE) ? kept : null;
+}
+/** Swaps a key from one value to another only while it still holds the first (the same script as lib/calls.ts LOCK_SWAP). */
+const SWAP_IF_SAME = '-- marktmorgen:call-lock-swap:v1\nif redis.call("GET", KEYS[1]) == ARGV[1] then redis.call("SET", KEYS[1], ARGV[2], "EX", ARGV[3]) return 1 else return 0 end';
 
 export type CardGrant = { a: string; c: string; s: string };
 
@@ -238,6 +246,12 @@ export async function finishCardUpdate(store: Store, sessionId: string): Promise
     const subscription = intent?.metadata?.subscription ?? session.metadata?.subscription ?? "";
     const customer = typeof session.customer === "string" ? session.customer : "";
     if (intent?.status !== "succeeded" || !PM_PATTERN.test(method) || !CUSTOMER_PATTERN.test(customer)) return "error";
+    // Only the page kept for this membership sets its card (Codex X5's MEDIUM on #3644): an older page coming back
+    // after a newer one was opened, none kept, or an answer of another shape changes nothing. This page already
+    // finished (its done mark, no newer page since) runs again as before: safe, the same card and no second payment.
+    const keptReply = repliesFor(await redisPipeline([["GET", openKey(account, subscription)]]), 1);
+    if (!keptReply || (keptReply[0] !== null && typeof keptReply[0] !== "string")) return "error";
+    if (keptReply[0] !== sessionId && keptReply[0] !== `${CARD_DONE}${sessionId}`) return "error";
     const sub = await subFor(store, account, customer, subscription);
     if (!sub || OVER.has(String(sub.status))) return "error";
 
@@ -253,7 +267,8 @@ export async function finishCardUpdate(store: Store, sessionId: string): Promise
     }
     // Only this membership's own reply, with the card asked for, says the card is set (Claude 6 on #3639).
     if (!isOwnReply(set, subscription) || (set as { default_payment_method?: unknown }).default_payment_method !== method) return "unsure";
-    await redisPipeline([["DEL", openKey(account, subscription)]]).catch(() => {});
+    // Done only while the page kept is still this one: a newer page opened meanwhile stays waiting for the daily job.
+    await redisPipeline([["EVAL", SWAP_IF_SAME, 1, openKey(account, subscription), sessionId, `${CARD_DONE}${sessionId}`, OPEN_SECONDS]]).catch(() => {});
 
     const invoice = owes(sub);
     const invoiceId = typeof invoice?.id === "string" && INVOICE_PATTERN.test(invoice.id) ? invoice.id : "";

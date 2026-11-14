@@ -54,7 +54,7 @@ import { sellsMemberships } from "@/lib/membership-manage";
 import { LANGUAGES, type LanguageCode, parseLanguage } from "@/lib/store-language";
 import { membershipWords } from "@/lib/buyer-words/membership";
 import { CARD_NOTICE_DAYS, cardNoticeDue, reminderDue } from "@/lib/dunning-rules";
-import { cardLink, finishCardUpdate, openKey } from "@/lib/card-update";
+import { cardLink, finishCardUpdate, openKey, waitingCardPage } from "@/lib/card-update";
 import { countSent, sentKey } from "@/lib/dunning-keys";
 
 const CURSOR_KEY = "nl:dun:cursor";
@@ -436,7 +436,8 @@ async function noticeCards(store: Store, deadline: number): Promise<number> {
     const open = repliesFor(await redisPipeline([["GET", openKey(account, subId)]]), 1);
     // Unknown whether a card update is waiting: no notice on a guess.
     if (!open || (open[0] !== null && typeof open[0] !== "string")) continue;
-    const pending = open[0];
+    // A page already finished is not waiting (lib/card-update.ts, waitingCardPage).
+    const pending = waitingCardPage(open[0]);
     if (typeof pending === "string") {
       const finished = await finishCardUpdate(store, pending);
       // Unsure whether the card was set: no notice on a guess either way; the page stays open and is finished again.

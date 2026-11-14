@@ -602,11 +602,11 @@ export async function callRefunded(
 
 /** How many times the link of a booking was replaced after a failure, for its calendar file's sequence. */
 export async function linkUpdates(callsId: string | null, booking: { session: string; product: string; start: number }): Promise<number> {
-  if (!callsId || !isRedisConfigured()) return 0;
+  if (!callsId) return 0;
   const [own, shared] = await readRecords([
     callScope(callsId, { group: false, ...booking }),
     callScope(callsId, { group: true, ...booking }),
-  ]).catch(() => [null, null]);
+  ]);
   return (own ?? shared)?.updates ?? 0;
 }
 

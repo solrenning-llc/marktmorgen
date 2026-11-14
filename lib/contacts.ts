@@ -38,7 +38,7 @@ import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { MAX_CONTACT_NAME, MAX_IMPORT, MAX_LEADS, readTags } from "@/lib/contact-rules";
-import { liftCommand, suppressedAmongCommand, suppressedCommand, wasSuppressed } from "@/lib/suppression";
+import { liftCommand, suppressedAmongCommand, suppressedCommand, wasSuppressed, wholeErasedReply } from "@/lib/suppression";
 import { joinedCommands } from "@/lib/joined-stores";
 import { DataRoomError, type DataStore, giveData, needData } from "@/lib/store-data";
 import { type DataOwner, orderWrite } from "@/lib/order-data";
@@ -292,7 +292,9 @@ export async function upsertContact(
   await needContacts(room, [{ before, next }]);
   const commands: (string | number)[][] = [["HSET", key, email, JSON.stringify(next)]];
   if (agreed && !before?.agreed) commands.push(["INCR", agreedKey(listId)]);
-  if (resubscribe) commands.push(["DECR", unsubKey(listId)]);
+  // The count of those who left holds only people who had agreed (unsubscribe, stopWriting, imports): a contact
+  // brought in already unsubscribed was never in it, so their yes takes nothing from it.
+  if (resubscribe && before?.agreed) commands.push(["DECR", unsubKey(listId)]);
   if (deleted && ownYes) commands.push(liftCommand(listId, email));
   if (input.sid) commands.push(...joinedCommands(input.sid, email));
   if (room && isOrderRoom(room)) await orderWrite(room.order, commands);
@@ -353,7 +355,8 @@ export async function importContacts(
     const [rows, prints] = await redisPipeline([["HMGET", key, ...chunk], suppressedAmongCommand(listId, chunk)]);
     const found = Array.isArray(rows) ? rows : [];
     const deleted = Array.isArray(prints) ? prints : [];
-    const pairs: string[] = [];
+    // Each write, with the fingerprint of what its address held when read (CAS_HSET, as importContactRows writes).
+    const writes: { email: string; value: string; was: string }[] = [];
     const sizes: { before: Contact | null; next: Contact }[] = [];
     let newlyAgreed = 0;
     chunk.forEach((email, j) => {
@@ -383,11 +386,12 @@ export async function importContacts(
         tags: before?.tags ?? [],
         importedAt: now,
       };
-      pairs.push(email, JSON.stringify(next));
+      const raw = found[j];
+      writes.push({ email, value: JSON.stringify(next), was: typeof raw === "string" ? sha1(raw) : "" });
       sizes.push({ before, next });
       newlyAgreed += 1;
     });
-    if (pairs.length) {
+    if (writes.length) {
       try {
         await needContacts(data, sizes);
       } catch (error) {
@@ -397,10 +401,11 @@ export async function importContacts(
         const left = emails.length - i;
         return { added, already: i - added, full, roomFull: { left, message: error.message } };
       }
-      await redisPipeline([
-        ["HSET", key, ...pairs],
-        ["INCRBY", agreedKey(listId), newlyAgreed],
-      ]);
+      // Written only where the address still holds what was read: somebody who unsubscribed, bounced or complained in
+      // the moment between is never written back as agreed (Codex G, #3116); whatever it is now stands.
+      const written = await casWrite(key, writes);
+      newlyAgreed = written.filter(Boolean).length;
+      if (newlyAgreed > 0) await redisPipeline([["INCRBY", agreedKey(listId), newlyAgreed]]);
       added += newlyAgreed;
     }
   }
@@ -765,12 +770,23 @@ export async function tokensFor(
   for (let round = 0; round < 3 && pending.length; round += 1) {
     // Read only in its exact shape (CX-123 rule 24): an unknown answer is unknown, never "everyone left the list",
     // so a send counts nobody as gone on it (lib/mail.ts sendTo stops for a retry).
-    const found = fieldsOf((await redisPipeline([["HMGET", key, ...pending]]))[0], pending.length, "the contacts for unsubscribe links");
+    // With the store's fingerprints of deleted people, in the same round trip: an erasure writes the print first, so
+    // somebody whose row was not deleted yet (a failed or unfinished erasure) is never handed a link, nor emailed.
+    const replies = await redisPipeline([["HMGET", key, ...pending], suppressedAmongCommand(listId, pending)]);
+    if (!Array.isArray(replies) || replies.length !== 2) throw new UnknownReplyError("the contacts for unsubscribe links");
+    const found = fieldsOf(replies[0], pending.length, "the contacts for unsubscribe links");
+    let erased: (string | number | null)[];
+    try {
+      erased = wholeErasedReply(replies[1], pending.length);
+    } catch {
+      // Not read whole: unknown (CX-123 rule 24), never "nobody here was deleted".
+      throw new UnknownReplyError("the store's deleted people, for unsubscribe links");
+    }
     const writes: { email: string; value: string; was: string; token: string }[] = [];
     pending.forEach((email, i) => {
       const raw = found[i];
       const contact = parseContact(raw);
-      if (!contact || !mailable(contact) || typeof raw !== "string") return;
+      if (!contact || !mailable(contact) || typeof raw !== "string" || erased[i] !== null) return;
       if (contact.clicks) counting?.add(email);
       if (contact.t) {
         out.set(email, contact.t);
@@ -944,6 +960,9 @@ export async function forEachContact(
 ): Promise<void> {
   if (!isRedisConfigured()) return;
   const key = leadsKey(listId);
+  // HSCAN may answer one field more than once while it walks (redis.io, SCAN guarantees): each address is passed on
+  // once, so an email's audience never holds anybody twice (counted twice, a batch refused for good, or sent twice).
+  const seen = new Set<string>();
   let cursor = "0";
   for (let page = 0; page < MAX_LEADS / 500 + 10; page += 1) {
     // HSCAN answers [cursor, [field, value, ...]]: any other shape is unknown (CX-123 rule 24), never the end of the
@@ -955,6 +974,8 @@ export async function forEachContact(
     if (!reply || nextCursor === null || !flat || flat.length % 2 !== 0) throw new UnknownReplyError("a page of a store's list");
     cursor = nextCursor;
     for (let i = 0; i + 1 < flat.length; i += 2) {
+      if (seen.has(flat[i])) continue;
+      seen.add(flat[i]);
       const contact = parseContact(flat[i + 1]);
       if (contact) each(flat[i], contact);
     }

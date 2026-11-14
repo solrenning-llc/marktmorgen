@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import type { NextRequest } from "next/server";
-import { type Store, StoreFullError, appendSitePages, imageFolder, setSitePages, storeForEmailSeen } from "@/lib/store";
+import { type Store, StoreFullError, appendSitePages, changeSitePages, ensureStatsId, imageFolder, storeForEmailSeen } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { refusedJson } from "@/lib/studio-route";
 import { lockedFor } from "@/lib/two-step";
@@ -110,7 +110,9 @@ async function placeNewPage(ref: string, store: Store, entry: SitePage, page: Sa
  *   { action: "remove", id }                    the page, its blocks and the pictures only it showed
  *   { action: "save", id, page }                its blocks, held to the rules a product's page is
  *
- * Every answer but "save" is the store's pages as they now are.
+ * Every answer but "save" is the store's pages as they now are. Each change is decided on the pages as they are when
+ * it is written (lib/store.ts, changeSitePages), never on the copy read at the start of the request, so a change sent
+ * from another tab at the same time is never undone (tests/site-page-latest.test.ts).
  */
 export async function POST(request: NextRequest) {
   const guarded = await guardStoreWrite(request, "page", MAX_BODY_BYTES);
@@ -118,26 +120,32 @@ export async function POST(request: NextRequest) {
   const { body, ref } = guarded;
   const store = guarded.store;
   const action = text(body.action, 10);
+  // The pages as read at the start: only for "save" to know the page exists before its checks; every list written is
+  // the latest one, under the store's lock.
   const pages = store.sitePages;
   const id = text(body.id, 12);
   const found = pages.find((page) => page.id === id) ?? null;
 
   try {
     if (action === "add") {
-      if (pages.length >= MAX_SITE_PAGES) return refuse("too_many");
       const starter = SITE_STARTERS.find((s) => s.slug === text(body.starter, 40)) ?? null;
       const title = siteTitle(body.title) || starter?.title || "";
       if (!title) return refuse("title");
-      // The address asked for, or one made from the title, numbered if that one is taken.
-      let slug = text(body.slug, 60) || starter?.slug || slugFrom(title);
-      if (!text(body.slug, 60)) {
-        const base = slug || "page";
-        for (let n = 2; slugProblem(slug, pages) === "taken" && n < 50; n += 1) slug = `${base.slice(0, 36)}-${n}`;
-      }
-      const problem = slugProblem(slug, pages);
-      if (problem) return refuse(problem);
-      const page: SitePage = { id: randomBytes(5).toString("hex"), slug, title, nav: true, target: "", from: -1 };
-      const saved = await setSitePages(ref, [...pages, page]);
+      const asked = text(body.slug, 60);
+      const page: SitePage = { id: randomBytes(5).toString("hex"), slug: "", title, nav: true, target: "", from: -1 };
+      const saved = await changeSitePages(ref, (latest) => {
+        if (latest.length >= MAX_SITE_PAGES) return { refuse: "too_many" };
+        // The address asked for, or one made from the title, numbered if that one is taken.
+        let slug = asked || starter?.slug || slugFrom(title);
+        if (!asked) {
+          const base = slug || "page";
+          for (let n = 2; slugProblem(slug, latest) === "taken" && n < 50; n += 1) slug = `${base.slice(0, 36)}-${n}`;
+        }
+        const problem = slugProblem(slug, latest);
+        if (problem) return { refuse: problem };
+        page.slug = slug;
+        return [...latest, page];
+      });
       if (!saved.ok) return refuse(saved.reason);
       if (starter && saved.store.statsId) {
         const blocks: PageBlock[] = starter.kinds.map((kind) => emptyBlock(kind));
@@ -172,30 +180,37 @@ export async function POST(request: NextRequest) {
     }
 
     if (action === "meta") {
-      if (!found) return refuse("unknown", 404);
       const title = siteTitle(body.title);
       const slug = text(body.slug, 60);
       if (!title) return refuse("title");
-      const problem = slugProblem(slug, pages, found.id);
-      // A page keeps an address it already has, even one reserved since; only a new one is refused.
-      if (problem && !(problem === "reserved" && slug === found.slug)) return refuse(problem);
-      const next = pages.map((page) => (page.id === found.id ? { ...page, title, slug, nav: body.nav !== false, target: text(body.target, 40) } : page));
-      const saved = await setSitePages(ref, next);
+      const saved = await changeSitePages(ref, (latest) => {
+        const held = latest.find((page) => page.id === id);
+        if (!held) return { refuse: "gone" };
+        const problem = slugProblem(slug, latest, held.id);
+        // A page keeps an address it already has, even one reserved since; only a new one is refused.
+        if (problem && !(problem === "reserved" && slug === held.slug)) return { refuse: problem };
+        return latest.map((page) => (page.id === held.id ? { ...page, title, slug, nav: body.nav !== false, target: text(body.target, 40) } : page));
+      });
+      if (!saved.ok && saved.reason === "gone") return refuse("unknown", 404);
       return saved.ok ? Response.json({ ok: true, pages: saved.store.sitePages }) : refuse(saved.reason);
     }
 
     if (action === "order") {
       const ids = Array.isArray(body.ids) ? body.ids.map((x) => text(x, 12)) : [];
-      if (ids.length !== pages.length || !pages.every((page) => ids.includes(page.id))) return refuse("unknown");
-      const saved = await setSitePages(ref, ids.map((x) => pages.find((page) => page.id === x)));
+      // An order of a list that changed since the studio read it (a page added or removed in another tab) is refused,
+      // so the studio reloads, rather than dropping or reviving a page.
+      const saved = await changeSitePages(ref, (latest) =>
+        ids.length !== latest.length || !latest.every((page) => ids.includes(page.id))
+          ? { refuse: "unknown" }
+          : ids.map((x) => latest.find((page) => page.id === x)!),
+      );
       return saved.ok ? Response.json({ ok: true, pages: saved.store.sitePages }) : refuse(saved.reason);
     }
 
     if (action === "remove") {
-      if (!found) return refuse("unknown", 404);
-      const saved = await setSitePages(ref, pages.filter((page) => page.id !== found.id));
-      if (!saved.ok) return refuse(saved.reason);
-      const gone = await dropPage(saved.store.statsId, siteKey(found.id), saved.store).catch(picturesOfFailedDrop);
+      const saved = await changeSitePages(ref, (latest) => (latest.some((page) => page.id === id) ? latest.filter((page) => page.id !== id) : { refuse: "gone" }));
+      if (!saved.ok) return saved.reason === "gone" ? refuse("unknown", 404) : refuse(saved.reason);
+      const gone = await dropPage(saved.store.statsId, siteKey(id), saved.store).catch(picturesOfFailedDrop);
       if (gone.length) await del(gone).catch((error: unknown) => console.error("could not delete a removed page's pictures", error));
       return Response.json({ ok: true, pages: saved.store.sitePages });
     }
@@ -218,10 +233,10 @@ export async function POST(request: NextRequest) {
       const left = outFrom(page) !== -1 ? templateLeft(page) : null;
       if (left) return Response.json({ ok: false, error: "placeholder", ...left }, { status: 400 });
       if (!store.statsId) {
-        // A store written before it had one is given its id with the list.
-        const marked = await setSitePages(ref, pages);
-        if (!marked.ok || !marked.store.statsId) return refuse("server_error", 500);
-        store.statsId = marked.store.statsId;
+        // A store written before it had one is given its id, and nothing else is written with it.
+        const marked = await ensureStatsId(ref);
+        if (!marked?.statsId) return refuse("server_error", 500);
+        store.statsId = marked.statsId;
       }
       const statsId = store.statsId;
       const key = siteKey(found.id);
@@ -251,7 +266,20 @@ export async function POST(request: NextRequest) {
       await writePage(statsId, key, page, store);
       // When it is out, kept on the list so the menu reads nothing more (lib/site-page-rules.ts).
       const from = outFrom(page);
-      if (from !== found.from) await setSitePages(ref, pages.map((p) => (p.id === found.id ? { ...p, from } : p)));
+      // Only this page's moment is changed, on the latest list; a page removed meanwhile stays removed.
+      const listed = await changeSitePages(ref, (latest) => {
+        const now = latest.find((p) => p.id === found.id);
+        if (!now) return { refuse: "gone" };
+        return now.from !== from ? latest.map((p) => (p.id === found.id ? { ...p, from } : p)) : { refuse: "same" };
+      });
+      // Removed while this save ran (Claude 2 nuvem F, Claude 1 cloud on #4253): the removal's drop ran before this
+      // write, so what was just written is under a key no list names, charged to the store for good. It is dropped
+      // with its pictures, and the creator is told the page is gone, never that it was saved.
+      if (!listed.ok && listed.reason === "gone") {
+        const dropped = await dropPage(statsId, key, store).catch(picturesOfFailedDrop);
+        if (dropped.length) await del(dropped).catch((error: unknown) => console.error("could not delete a removed page's pictures", error));
+        return refuse("unknown", 404);
+      }
       const gone = await releasePictures(statsId, key, before.filter((path) => !shown.includes(path))).catch(() => [] as string[]);
       if (gone.length) await del(gone).catch((error: unknown) => console.error("could not delete pictures taken off a page", error));
       return Response.json({ ok: true, blocks: page.blocks.length, page });

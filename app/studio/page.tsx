@@ -728,6 +728,10 @@ const STORES_NOTICES: Record<string, { title: string; body: string }> = {
     title: "This store still has a plan running",
     body: "Cancel its plan below, and delete it once the plan has ended. Nothing was deleted.",
   },
+  closing: {
+    title: "This store is closing",
+    body: "Its plan has ended. Its buyers are told and get back what they are owed first, and then the store is removed for you. Nothing was deleted.",
+  },
   domain: {
     title: "This store still has its own domain",
     body: "Remove the domain first. Nothing was deleted.",

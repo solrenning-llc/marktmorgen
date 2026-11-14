@@ -36,16 +36,22 @@ async function main(): Promise<void> {
   part("A line that does not read is never \"not closing\"");
   const unread = await createStore(owner, "closer-unread", "Closer Unread", "");
   if (!unread.ok) throw new Error("no fourth store");
-  await redis.pipeline([["SET", "nl:closing:held", "not a sorted set"]]);
+  const realPipeline = redis.pipeline.bind(redis);
+  // Redis answers the held line's ZSCORE with something that is not a score or nil.
+  redis.pipeline = async (commands: Parameters<typeof realPipeline>[0]) => {
+    const real = await realPipeline(commands);
+    return commands.map((command, i) => (command[0] === "ZSCORE" && command[1] === "nl:closing:held" ? "garbled" : real[i]));
+  };
   let outcome = "";
   try {
     const result = await deleteStore(storeRef(unread.store));
     outcome = result.ok ? "deleted" : result.reason;
   } catch {
     outcome = "threw";
+  } finally {
+    redis.pipeline = realPipeline;
   }
   is("nothing is deleted", [outcome === "deleted", (await storeForId(unread.store.sid))?.handle], [false, "closer-unread"]);
-  await redis.pipeline([["DEL", "nl:closing:held"]]);
 
   part("Control: an empty extra store that never had a plan is deleted as before");
   const spare = await createStore(owner, "closer-spare", "Closer Spare", "");

@@ -112,6 +112,18 @@ async function main(): Promise<void> {
   is("each reply of another shape throws, so the erasure is pressed again rather than said done", thrown, [true, true, true, true, true, true]);
   is("and Bo's answer was not touched by any of them", has(kept[2]), true);
 
+  part("An unknown line in the person's index is never ignored");
+  // Codex X5 on #3542 @1c5fa00 (second MÉDIO, review 5877376883): a line that is neither a record's hash nor the
+  // erasure's mark is an unknown shape; it was dropped by filter(isHash) and the erasure said done after deleting
+  // the rest. It must fail closed before anything is deleted.
+  const boIndex = personIndexName(a.sid, BO);
+  if (!boIndex) throw new Error("set-up: Bo's index needs the server's secret");
+  await redis.pipeline([["ZADD", boIndex, Date.now() + IDEMPOTENCY_SECONDS * 1_000, "not-a-record-hash"]]);
+  const malformedRejected = await forgetIdempotentPerson(a.sid, BO).then(() => false, () => true);
+  is("an unknown line makes the erasure fail closed", malformedRejected, true);
+  is("and Bo's answer is untouched until the whole index is understood", has(kept[2]), true);
+  await redis.pipeline([["ZREM", boIndex, "not-a-record-hash"]]);
+
   part("An answer is kept only where an erasure can find it");
   const original = redis.pipeline.bind(redis);
   // The person's index cannot be written: the answer must not be kept (the claim stays, a repeat is told 409).

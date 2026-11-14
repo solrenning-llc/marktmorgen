@@ -93,6 +93,16 @@ async function main(): Promise<void> {
       is(`${file}: the words sit in a status region`, /role="status"/.test(rendering), true);
     }
 
+    part("The receipt link is offered only for a known amount above zero, never for an unknown one");
+    {
+      // main's receipt PDF (#2952) is offered for a one-time sale with an amount; an unknown
+      // amount (null) is not one, and the check must not read null as a number.
+      const studio = readFileSync("app/studio/page.tsx", "utf8");
+      const gate = studio.match(/sale\.oneTime && ([^?]*?)sale\.reference\.startsWith\("cs_"\) \?/)?.[1] ?? "";
+      is("app/studio/page.tsx: the receipt link is gated on the sale's amount", gate !== "", true);
+      is("app/studio/page.tsx: an unknown amount is ruled out before it is compared", /sale\.amount !== null && sale\.amount > 0/.test(gate), true);
+    }
+
     done();
   } finally {
     globalThis.fetch = previousFetch;

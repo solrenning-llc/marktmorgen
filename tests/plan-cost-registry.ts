@@ -781,6 +781,14 @@ export const PAYPAL_LEDGER = request("heavy", 6, PAYPAL_LEDGER_BYTES);
 export const PAYPAL_HAND_OVER_RETRY = { listCommandsPerSale: 2, listReadsPerStoreRun: 1, ordersPerStoreRun: 25, ownCommandsPerOrderTried: 4, receiptTriesPerOrder: 12, commandsPerReceiptTry: 76, takeBackCommands: 22 } as const;
 export const PAYPAL_RECEIPT_RETRY_COMMANDS = PAYPAL_HAND_OVER_RETRY.receiptTriesPerOrder * PAYPAL_HAND_OVER_RETRY.commandsPerReceiptTry;
 /**
+ * What a PayPal return sends before PayPal is asked to take the payment (lib/paypal-sales.ts, watchFirst; #3404), in
+ * Redis commands, held to what the real return route sends by tests/paypal-pending-before-capture.test.ts: the ZADD
+ * that puts the order in pending and the EXPIREAT that renews its record until thirty days from its opening, in one
+ * pipeline, each time a capture is asked for (none past those thirty days). Inside that order's own work (line orders, ORDER_COMPUTE), besides settle's script; what the
+ * record keeps for those thirty days is in tests/store-data-registry.ts (nl:ppsell:o:).
+ */
+export const PAYPAL_CAPTURE_WATCH = { commandsPerCaptureAsked: 2 } as const;
+/**
  * The store's webhooks told of a PayPal payment refunded in full ("refund.issued", lib/paypal-delivery.ts, from the
  * five-minute job's watch of PayPal refunds, watchPayPal in lib/paypal-sales.ts): before the event, the person's
  * own-deletion note is read once (ownNoteReadsPerRefund: one HGET, erasedSincePaid with `own`), so an address deleted

@@ -1340,6 +1340,7 @@
     "components/community-event-room.tsx",
     "components/community-events-studio.tsx",
     "components/community-events.tsx",
+    "components/community-flash.tsx",
     "components/community-held.tsx",
     "components/community-member-preview.tsx",
     "components/community-parts.tsx",

@@ -186,8 +186,8 @@ export class MemoryRedis {
               return "?";
             }
             if (!record || typeof record !== "object") return "?";
-            const fields = record as { k?: unknown; removed?: unknown; muted?: unknown };
-            if (fields.k !== who || typeof fields.removed !== "boolean" || typeof fields.muted !== "boolean") return "?";
+            const fields = record as { k?: unknown; e?: unknown; removed?: unknown; muted?: unknown };
+            if (fields.k !== who || typeof fields.e !== "string" || typeof fields.removed !== "boolean" || typeof fields.muted !== "boolean") return "?";
             return fields.removed ? "r" : "y";
           }).join("");
         }
@@ -195,6 +195,11 @@ export class MemoryRedis {
         if (key.startsWith("-- marktmorgen:group-place-release:v1\n") && args[0] === "1" && args.length === 3) {
           const [, hold, token] = args;
           return this.run(["GET", hold]) === token ? this.run(["DEL", hold]) : 0;
+        }
+        // lib/upsell.ts ORPHAN_RELEASE: an offer's orphan claim deleted only while it is still exactly the record read.
+        if (key.startsWith("-- marktmorgen:upsell-orphan-release:v1\n") && args[0] === "1" && args.length === 3) {
+          const [, record, read] = args;
+          return this.run(["GET", record]) === read ? this.run(["DEL", record]) : 0;
         }
         // lib/group-buy.ts PLACE_DONE: a place marked done once, and said so only to the open that did it.
         if (key.startsWith("-- marktmorgen:group-place-done:v1\n") && args[0] === "1" && args.length === 4) {
@@ -442,6 +447,13 @@ export class MemoryRedis {
           const [, lock, from, to, seconds] = args;
           if (this.run(["GET", lock]) !== from) return 0;
           this.run(["SET", lock, to, "EX", seconds]);
+          return 1;
+        }
+        // lib/sns-receipt.ts: an Amazon notice's receipt taken over, or marked done, only while it holds the value given.
+        if (key.startsWith("-- marktmorgen:sns-receipt-swap:v1\n") && args[0] === "1" && args.length === 5) {
+          const [, receipt, from, to, seconds] = args;
+          if (this.run(["GET", receipt]) !== from) return 0;
+          this.run(["SET", receipt, to, "EX", seconds]);
           return 1;
         }
         if (key.startsWith("-- marktmorgen:call-hold-if-locked:v1\n") && args[0] === "2" && args.length === 6) {
@@ -885,6 +897,27 @@ export class MemoryRedis {
           this.run(["HSET", people, field, next]);
           return 1;
         }
+        // lib/affiliates.ts AFFILIATE_CLAIM: an address and its new affiliate's record written together; the id
+        // already held when the address points at a record that is there.
+        if (key.startsWith("-- marktmorgen:affiliate-claim:v1\n") && args[0] === "2" && args.length === 6) {
+          const [, emails, people, email, id, record] = args;
+          const held = this.run(["HGET", emails, email]);
+          if (typeof held === "string" && this.run(["HEXISTS", people, held]) === 1) return held;
+          this.run(["HSET", emails, email, id]);
+          this.run(["HSET", people, id, record]);
+          return "ok";
+        }
+        // lib/affiliates.ts AFFILIATE_CODE_ORPHAN_RELEASE: a code given back only while it still names that id and that id
+        // has no record.
+        if (key.startsWith("-- marktmorgen:affiliate-code-orphan-release:v1\n") && args[0] === "2" && args.length === 5) {
+          const [, codes, people, code, id] = args;
+          return this.run(["HGET", codes, code]) === id && this.run(["HEXISTS", people, id]) === 0 ? this.run(["HDEL", codes, code]) : 0;
+        }
+        // lib/affiliates.ts AFFILIATE_CODE_RELEASE: a code given back only while it still names that id.
+        if (key.startsWith("-- marktmorgen:affiliate-code-release:v1\n") && args[0] === "1" && args.length === 4) {
+          const [, codes, code, id] = args;
+          return this.run(["HGET", codes, code]) === id ? this.run(["HDEL", codes, code]) : 0;
+        }
         // lib/affiliate-codes.ts GIVE_CODE: whether the code is held, its room and the write in one step. A code held
         // is moved and takes no room ({2, 0}); a code not held takes its room (TAKE_DATA, slot "aff:codes") and is
         // written only when that answers {1, total}.
@@ -930,6 +963,20 @@ export class MemoryRedis {
           if (held !== undefined && typeof held !== "string") throw new Error("WRONGTYPE");
           if ((held ?? "") !== args[2]) return held === undefined ? [-1] : [-1, new TextEncoder().encode(held).length];
           this.data.set(target, args[3]);
+          // The script's SET has no KEEPTTL: as in real Redis, the key keeps no expiry.
+          this.until.delete(target);
+          return 1;
+        }
+        // lib/webhooks.ts RESEND_MARK: the same compare and replies, but the write keeps the key's expiry (SET KEEPTTL),
+        // and a key left with none is given ARGV[3] seconds, in the same step.
+        if (key.startsWith("-- marktmorgen:webhook-resend-mark:v1\n") && args[0] === "1" && args.length === 5) {
+          const target = args[1];
+          this.live(target);
+          const held = this.data.get(target);
+          if (held !== undefined && typeof held !== "string") throw new Error("WRONGTYPE");
+          if ((held ?? "") !== args[2]) return held === undefined ? [-1] : [-1, new TextEncoder().encode(held).length];
+          this.data.set(target, args[3]);
+          if (!this.until.has(target)) this.until.set(target, this.now() + Number(args[4]) * 1000);
           return 1;
         }
         if (key.startsWith("-- marktmorgen:crm-deal-save:v2\n") && args[0] === "1" && args.length === 6) {
@@ -1299,6 +1346,26 @@ export class MemoryRedis {
             for (const [raw, n] of counts) out.push(k + 1, raw, n);
           });
           return out;
+        }
+        // lib/receipt-number.ts RECEIPT_NUMBER: a sale's number read, or its room taken and the next number given, in one step.
+        if (key.startsWith("-- marktmorgen:receipt-number:v1\n") && args[0] === "3" && args.length === 9) {
+          const [, room, numbers, counter, limit, month, reference, entry, keys] = args;
+          const held = this.run(["HGET", numbers, reference]);
+          if (typeof held === "string") {
+            const n = Number(held);
+            return Number.isSafeInteger(n) && n >= 1 ? [2, n] : [-1, 0];
+          }
+          if (!Number.isFinite(Number(entry)) || !Number.isFinite(Number(keys))) return [-1, 0];
+          // The count read before any room is taken (GET refuses another type, as Redis does); one INCR cannot add to, or
+          // that would pass RECEIPT_NUMBER_MAX (999,999,999,999), takes nothing.
+          const count = this.run(["GET", counter]);
+          if (count !== null && count !== "0" && !(typeof count === "string" && /^[1-9]\d{0,11}$/.test(count) && Number(count) < 999_999_999_999)) return [-1, 0];
+          const size = Number(entry) + (count === null ? Number(keys) : 0);
+          const taken = this.storeData([room, limit, "0", month, "a", "rcpt", String(size)]);
+          if (!Array.isArray(taken) || taken[0] !== 1) return taken;
+          const n = Number(this.run(["INCR", counter]));
+          this.run(["HSET", numbers, reference, String(n)]);
+          return [3, n];
         }
         // lib/lesson-notes.ts NOTE_SAVE, NOTE_FORGET and NOTE_CLEAR: a student's notes, their tally and the notes' slot in
         // one step. Redis's TIME is this stand-in's clock.
@@ -2306,14 +2373,20 @@ export class MemoryRedis {
     }
     const months = new Set<string>();
     let relist = false;
+    // Every month that is over, up to DATA_MONTHS_CLEARED_MOST (lib/store-data.ts) a call, read together and
+    // removed together; a month listed twice comes off once.
+    const over: string[] = [];
     for (const m of (room.get("~") ?? "").split(",").filter(Boolean)) {
-      if (m < month) {
-        const held = Number(room.get(`~${m}`) ?? "0") || 0;
-        if (held > 0) total -= held + 64;
-        room.delete(`~${m}`);
+      if (m < month && (over.includes(m) || over.length < 512)) {
+        if (!over.includes(m)) over.push(m);
         relist = true;
       } else months.add(m);
     }
+    for (const m of over) {
+      const held = Number(room.get(`~${m}`) ?? "0") || 0;
+      if (held > 0) total -= held + 64;
+    }
+    for (const m of over) room.delete(`~${m}`);
     if (total < 0) total = 0;
     const keep = () => {
       if (relist) {

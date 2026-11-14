@@ -74,7 +74,7 @@ import { readRanges, recordSample } from "@/lib/benchmarks";
 import { compare, sampleFrom } from "@/lib/benchmark-rules";
 import { heardOff } from "@/lib/heard";
 import { weeklyTeam } from "@/lib/stats-report";
-import { NO_SETUP, SERVER_PLATFORMS, serverSetup } from "@/lib/ad-events";
+import { SERVER_PLATFORMS, serverSetup } from "@/lib/ad-events";
 import { claimPathsRead, laterWords, pathsStale, readPaths } from "@/lib/next-bought";
 import { BuyerPaths } from "@/components/buyer-paths";
 import { canBeBumped, isOneOff } from "@/lib/product-extras";
@@ -2066,7 +2066,9 @@ export default async function StudioPage({
                 {hasPixels(store.pixels) ? (async () => {
                   const before = serverWrite.done;
                   const setupRead = (async () => {
-                    const setup = await serverSetup(store.statsId).catch(() => NO_SETUP);
+                    // Not read: said so, never shown as an empty setup nor written on the store as none.
+                    const setup = await serverSetup(store.statsId).catch(() => null);
+                    if (!setup) return null;
                     // A token saved before the store kept its own list of platforms is written there now, once, after
                     // the cart link's write.
                     const on = SERVER_PLATFORMS.filter((p) => setup.on[p]);
@@ -2075,9 +2077,17 @@ export default async function StudioPage({
                   })();
                   // The writes after this one wait for the cart link's too, even when this part writes nothing.
                   serverWrite.done = Promise.all([before.catch(() => null), setupRead]);
+                  const setup = await setupRead;
+                  if (!setup) {
+                    return (
+                      <p className="text-ink-soft">
+                        Server-sent conversions could not be read just now. Nothing was changed; reload the page in a moment.
+                      </p>
+                    );
+                  }
                   return (
                   <ServerEventsEditor
-                    setup={await setupRead}
+                    setup={setup}
                     pixels={{
                       meta: Boolean(store.pixels.meta),
                       tiktok: Boolean(store.pixels.tiktok),

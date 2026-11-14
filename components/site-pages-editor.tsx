@@ -1,5 +1,6 @@
 "use client";
 
+import { ConfirmAction } from "@/components/confirm-action";
 import Link from "next/link";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
@@ -138,7 +139,6 @@ export function SitePageSettings({
   const [target, setTarget] = useState(page.target);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [confirm, setConfirm] = useState(false);
   const at = pages.findIndex((p) => p.id === page.id);
   const dirty = title !== page.title || slug !== page.slug || nav !== page.nav || target !== page.target;
 
@@ -207,26 +207,16 @@ export function SitePageSettings({
         <button type="button" className="btn btn-secondary btn-sm" disabled={busy || at >= pages.length - 1} onClick={() => move(1)} aria-label="Move this page down in the menu">
           Move down
         </button>
-        {confirm ? (
-          <span className="flex flex-wrap items-center gap-2 text-sm">
-            <span className="text-ink">Remove this page and its blocks?</span>
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
-              disabled={busy}
-              onClick={() => void run({ action: "remove", id: page.id }, "Page removed.", () => router.push(`/studio/site${sid ? `?store=${sid}` : ""}`))}
-            >
-              Remove
-            </button>
-            <button type="button" className="text-sm font-bold text-ink-soft underline underline-offset-4" onClick={() => setConfirm(false)}>
-              Keep it
-            </button>
-          </span>
-        ) : (
-          <button type="button" className="text-sm font-bold text-ink-soft underline underline-offset-4 hover:text-danger" onClick={() => setConfirm(true)}>
-            Remove this page
-          </button>
-        )}
+        <ConfirmAction
+          className="text-sm font-bold text-ink-soft underline underline-offset-4 hover:text-danger"
+          disabled={busy}
+          busy={busy}
+          question="Remove this page and its blocks?"
+          yes="Remove"
+          onConfirm={() => run({ action: "remove", id: page.id }, "Page removed.", () => router.push(`/studio/site${sid ? `?store=${sid}` : ""}`))}
+        >
+          Remove this page
+        </ConfirmAction>
       </div>
       {error ? (
         <p className="notice notice-error mt-3 text-sm" role="alert">{error}</p>

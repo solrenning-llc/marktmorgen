@@ -1,5 +1,6 @@
 "use client";
 
+import { ConfirmAction } from "@/components/confirm-action";
 import { useState } from "react";
 import Link from "next/link";
 import { toast } from "@/components/toast";
@@ -55,7 +56,6 @@ export function ApiKeyEditor({ keys: first }: { keys: ShownKey[] | "unread" }) {
   const [error, setError] = useState<string | null>(null);
   // Revoking asks twice, in the page: a key revoked by a slip stops a
   // creator's automation, and there is no putting it back.
-  const [revoking, setRevoking] = useState<string | null>(null);
   // Turning a paused key back on asks once too, saying what it means (turnOnNote): it is not paused again by the rule.
   const [turning, setTurning] = useState<string | null>(null);
   // For a key that could not be linked to anyone, or nobody is recorded as making: whose the owner says it is, "owner" or a teammate's address.
@@ -100,7 +100,6 @@ export function ApiKeyEditor({ keys: first }: { keys: ShownKey[] | "unread" }) {
   async function revoke(id: string) {
     const data = await send({ action: "revoke", id }, `revoke:${id}`);
     if (data) {
-      setRevoking(null);
       toast("Key revoked. Anything still using it is refused from now on.");
     }
   }
@@ -220,14 +219,6 @@ export function ApiKeyEditor({ keys: first }: { keys: ShownKey[] | "unread" }) {
                     </button>
                     <button type="button" onClick={() => setTurning(null)} className="btn btn-ghost btn-sm">Keep it paused</button>
                   </span>
-                ) : revoking === key.id ? (
-                  <span className="flex flex-wrap items-center gap-2 text-sm">
-                    <span className="font-semibold text-ink">Revoke it? Anything using it stops working, and so do the webhook endpoints it added.</span>
-                    <button type="button" onClick={() => revoke(key.id)} disabled={busy !== null} aria-busy={busy === `revoke:${key.id}`} className="btn btn-danger btn-sm">
-                      {busy === `revoke:${key.id}` ? "Revoking…" : "Yes, revoke"}
-                    </button>
-                    <button type="button" onClick={() => setRevoking(null)} className="btn btn-ghost btn-sm">Keep it</button>
-                  </span>
                 ) : (
                   <span className="flex flex-wrap items-center gap-2">
                     {key.mayTurnOn ? (
@@ -239,9 +230,16 @@ export function ApiKeyEditor({ keys: first }: { keys: ShownKey[] | "unread" }) {
                       </button>
                     ) : null}
                     {key.mayRevoke ? (
-                      <button type="button" onClick={() => setRevoking(key.id)} disabled={busy !== null} className="btn btn-secondary btn-sm">
+                      <ConfirmAction
+                        className="btn btn-secondary btn-sm"
+                        disabled={busy !== null}
+                        busy={busy === `revoke:${key.id}`}
+                        question="Revoke it? Anything using it stops working, and so do the webhook endpoints it added."
+                        yes="Yes, revoke"
+                        onConfirm={() => revoke(key.id)}
+                      >
                         Revoke
-                      </button>
+                      </ConfirmAction>
                     ) : null}
                   </span>
                 )}

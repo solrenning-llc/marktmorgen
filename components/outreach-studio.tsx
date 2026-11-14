@@ -1,5 +1,6 @@
 "use client";
 
+import { ConfirmAction } from "@/components/confirm-action";
 import type { AiOff } from "@/lib/ai";
 
 import { useState } from "react";
@@ -175,9 +176,16 @@ function PitchCard({ pitch, onChange, onGone }: { pitch: Pitch; onChange: (next:
             <button type="button" disabled={busy} className="btn btn-secondary btn-sm" onClick={() => run({ action: "status", status: "sent" }, "Marked as sent.")}>
               I sent it
             </button>
-            <button type="button" disabled={busy} className="btn btn-ghost btn-sm" onClick={() => run({ action: "drop" }, "Draft deleted.", true)}>
+            <ConfirmAction
+              className="btn btn-ghost btn-sm"
+              disabled={busy}
+              busy={busy}
+              question="Delete this draft? It cannot be brought back."
+              yes="Yes, delete"
+              onConfirm={() => run({ action: "drop" }, "Draft deleted.", true)}
+            >
               Delete this draft
-            </button>
+            </ConfirmAction>
           </div>
         </>
       ) : (

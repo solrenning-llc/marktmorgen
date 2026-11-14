@@ -1,6 +1,10 @@
 "use client";
 
+import { browserFrames, focusWhenDrawn } from "@/lib/focus-when-drawn";
 import { useEffect, useRef, useState, type ReactNode } from "react";
+
+/** What can take the focus in the item beside a removed one. */
+const FOCUSABLE = 'button:not([disabled]), a[href], input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 /**
  * A button for something that cannot be undone (568 [GD2] (h); WCAG 3.3.4 and, at AAA, 3.3.6): the first press
@@ -35,6 +39,7 @@ export function ConfirmAction({
   // as the browser's own dialog did, never to the top of the page.
   const trigger = useRef<HTMLButtonElement>(null);
   const wasAsking = useRef(false);
+  const pending = useRef(false);
   useEffect(() => {
     if (wasAsking.current && !asking) trigger.current?.focus();
     wasAsking.current = asking;
@@ -49,14 +54,36 @@ export function ConfirmAction({
   return (
     <span role="group" aria-label={question} className="flex flex-wrap items-center gap-2 text-sm" data-confirm-action onKeyDown={(e) => { if (e.key === "Escape") setAsking(false); }}>
       <span className="font-semibold text-ink">{question}</span>
+      {/* Unavailable while it waits, but never disabled: a disabled button cannot keep the focus, and the browser
+          would drop it to the top of the page (2.4.3). aria-disabled says so, and a press then does nothing. */}
       <button
         type="button"
         className="btn btn-danger btn-sm"
-        disabled={disabled || busy}
+        aria-disabled={disabled || busy || undefined}
         aria-busy={busy}
-        onClick={async () => {
-          await onConfirm();
+        onClick={async (event) => {
+          if (disabled || busy || pending.current) return;
+          // The item this question sits in, and the ones beside it: when "Yes" takes the item away, the question
+          // goes with it, so the focus moves to the item now after it, or the one before (2.4.3).
+          const row = event.currentTarget.closest("li");
+          const after = row?.nextElementSibling ?? null;
+          const before = row?.previousElementSibling ?? null;
+          pending.current = true;
+          try {
+            await onConfirm();
+          } finally {
+            pending.current = false;
+          }
           setAsking(false);
+          if (row) {
+            focusWhenDrawn(() => {
+              if (row.isConnected) return null;
+              const lost = !document.activeElement || document.activeElement === document.body;
+              if (!lost) return null;
+              const place = after?.isConnected ? after : before?.isConnected ? before : null;
+              return place?.querySelector<HTMLElement>(FOCUSABLE) ?? null;
+            }, browserFrames());
+          }
         }}
       >
         {yes}

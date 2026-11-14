@@ -1,5 +1,6 @@
 "use client";
 
+import { ConfirmAction } from "@/components/confirm-action";
 import { PRODUCT_OUTLINE_LEFT } from "@/lib/product-outline";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -78,7 +79,6 @@ export function BundleEditor({
   const [price, setPrice] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [confirmClear, setConfirmClear] = useState(false);
   // A bundle its buyers build: how many of its products each one chooses (lib/bundle-rules.ts).
   const [choosing, setChoosing] = useState(Boolean(owner?.pick));
   const [pick, setPick] = useState(owner?.pick ?? MIN_PICK);
@@ -215,7 +215,6 @@ export function BundleEditor({
       setError(MESSAGES.server_error);
     } finally {
       setBusy(false);
-      setConfirmClear(false);
     }
   }
 
@@ -444,21 +443,16 @@ export function BundleEditor({
           {busy ? "Saving…" : mode === "create" ? "Add the bundle" : "Save the bundle"}
         </button>
         {mode === "edit" && owner ? (
-          confirmClear ? (
-            <span className="flex flex-wrap items-center gap-2 text-sm text-ink-soft">
-              Make it an ordinary product again?
-              <button type="button" className="btn btn-danger btn-sm" disabled={busy} onClick={clear}>
-                Yes, stop the bundle
-              </button>
-              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setConfirmClear(false)}>
-                Keep it
-              </button>
-            </span>
-          ) : (
-            <button type="button" className="btn btn-ghost" onClick={() => setConfirmClear(true)}>
-              Stop being a bundle
-            </button>
-          )
+          <ConfirmAction
+            className="btn btn-ghost"
+            disabled={busy}
+            busy={busy}
+            question="Make it an ordinary product again?"
+            yes="Yes, stop the bundle"
+            onConfirm={clear}
+          >
+            Stop being a bundle
+          </ConfirmAction>
         ) : null}
       </div>
     </section>

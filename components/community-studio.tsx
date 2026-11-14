@@ -101,7 +101,7 @@ function day(seconds: number): string {
   return new Date(seconds * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
 }
 
-const small = "inline-flex min-h-11 -my-2.5 items-center text-sm font-semibold text-ink-soft underline underline-offset-4 transition hover:text-violet-deep disabled:no-underline disabled:opacity-40";
+const small = "inline-flex min-h-11 min-w-11 -my-2.5 items-center text-sm font-semibold text-ink-soft underline underline-offset-4 transition hover:text-violet-deep disabled:no-underline disabled:opacity-40";
 
 /** Everything the creator sets about their community, in the studio. */
 export function CommunityStudio({

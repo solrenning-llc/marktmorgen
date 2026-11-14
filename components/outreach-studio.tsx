@@ -311,13 +311,13 @@ export function OutreachStudio({ sender: saved, pitches: first, left, on, off = 
             <label htmlFor="out-name" className="field-label">
               Your name
             </label>
-            <input id="out-name" className="field mt-1" maxLength={MAX_SENDER_NAME} value={name} onChange={(e) => setName(e.target.value)} required />
+            <input id="out-name" autoComplete="name" className="field mt-1" maxLength={MAX_SENDER_NAME} value={name} onChange={(e) => setName(e.target.value)} required />
           </div>
           <div>
             <label htmlFor="out-address" className="field-label">
               Your postal address
             </label>
-            <input id="out-address" className="field mt-1" maxLength={MAX_SENDER_ADDRESS} value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Street, city, postal code, country" required />
+            <input id="out-address" autoComplete="street-address" className="field mt-1" maxLength={MAX_SENDER_ADDRESS} value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Street, city, postal code, country" required />
           </div>
           <div className="sm:col-span-2">
             <button type="submit" aria-busy={busy === "sender"} disabled={busy !== null || (name.trim() === sender.name && address.trim() === sender.address)} className="btn btn-secondary btn-sm">

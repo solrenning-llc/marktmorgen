@@ -1,6 +1,8 @@
 import { ImageResponse } from "next/og";
-import { normaliseHandle, storeForHandle } from "@/lib/store";
-import { readPhoto } from "@/lib/store-photo";
+import { normaliseHandle } from "@/lib/store";
+import { storeForHandleExactly } from "@/lib/store-exact";
+import { readPhotoExactly } from "@/lib/store-photo";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { lookColours } from "@/lib/store-look";
 import { connectionRefusal, readRefusal } from "@/lib/picture-pace";
 import { type IconSize, iconUrl, iconVersion, isIconSize, monogram } from "@/lib/store-app";
@@ -13,6 +15,15 @@ import { type IconSize, iconUrl, iconVersion, isIconSize, monogram } from "@/lib
  * store's name on the store's own colour. Either way it is drawn from what
  * the store already has, and its address carries a fingerprint of that
  * (lib/store-app.ts), so a browser may keep it for a year.
+ *
+ * Kept for a year only when what it was drawn from is known (CX-123 rule 24):
+ * the photo, read and scaled, or the letter when the store is confirmed to
+ * have no photo. A store or a photo that could not be read is answered "try
+ * again" and kept by no cache; a photo read but not scaled here is drawn with
+ * the letter and kept by no cache, so the photo is drawn once it can be.
+ * Until 10 November 2026 both were the letter kept for a year, at an address
+ * that changes only with the photo, so every phone that installed the store
+ * kept the letter in place of the photo.
  *
  * It is drawn only at that address: any other query string, an old
  * fingerprint or none, is sent to it first, and what a function answers is
@@ -32,8 +43,9 @@ export async function GET(
   if (refused) return refused;
 
   try {
-    const store = await storeForHandle(normaliseHandle(decoded));
-    if (!store) return missing();
+    const store = await storeForHandleExactly(normaliseHandle(decoded));
+    if (store === "unknown") throw new UnknownReplyError("a store read for its icon");
+    if (store === "none") return missing();
     // Drawn only at the address with today's fingerprint and nothing else, which
     // may be kept for good; any other is sent there, briefly, before anything
     // is read or drawn.
@@ -42,11 +54,15 @@ export async function GET(
     }
     const busy = readRefusal(`icon:${store.handle}/${size}`);
     if (busy) return busy;
-    const cache = "public, max-age=31536000, immutable";
+    const year = "public, max-age=31536000, immutable";
 
-    const photo = store.photoId ? await readPhoto(store.photoId).catch(() => null) : null;
-    const drawn = photo ? await scaled(photo.bytes, size) : null;
-    if (drawn) return png(drawn, cache);
+    const photo = store.photoId ? await readPhotoExactly(store.photoId) : "none";
+    if (photo === "unknown") throw new UnknownReplyError("a store photo read for its icon");
+    const drawn = photo === "none" ? null : await scaled(photo.bytes, size);
+    if (drawn) return png(drawn, year);
+    // The letter is kept for a year only when there is no photo to draw; one
+    // that could not be scaled here is drawn again on the next request.
+    const cache = photo === "none" ? year : "no-store";
 
     const colours = lookColours(store.look);
     const art = new ImageResponse(

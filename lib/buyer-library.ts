@@ -44,7 +44,7 @@ import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { orderWrite } from "@/lib/order-data";
-import { withinLimit } from "@/lib/request-guard";
+import { essentialLimitState } from "@/lib/request-guard";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { joinedKeys, personKeys, personWrite } from "@/lib/joined-stores";
 
@@ -81,6 +81,15 @@ export async function storesKnownFor(email: string): Promise<string[]> {
   const replies = repliesFor(await redisPipeline([["SUNION", ...libraryKeys(email), ...joinedKeys(email)]]), 1);
   if (!replies) throw new UnknownReplyError("the stores that know an address");
   return [...new Set(ids(replies[0], "the stores that know an address"))].slice(0, MAX_LIBRARY_STORES);
+}
+
+/**
+ * The commands that forget that this address bought from the store with this id, in every quarter it can be in, and
+ * not that it joined it: what a PayPal hand-over takes back of what it wrote for a person deleted at their own request
+ * during it (lib/paypal-delivery.ts). Each answers 0 or 1. None for an id that is not a store's.
+ */
+export function forgetBoughtCommands(sid: string, email: string): (string | number)[][] {
+  return STORE_ID.test(sid) ? libraryKeys(email).map((key) => ["SREM", key, sid]) : [];
 }
 
 /**
@@ -136,8 +145,10 @@ export async function requestLibraryLink(input: { email: string; ip: string; ori
   if (!raw || raw.length > MAX_EMAIL_LENGTH || !EMAIL_PATTERN.test(raw)) return "email";
   if (!isRedisConfigured() || !isSenderConfigured()) return "error";
   const email = normaliseEmail(raw);
-  if (!(await withinLimit("library-ip", input.ip, 10, 3_600))) return "limited";
-  if (!(await withinLimit("library-address", sha(email), 5, 3_600))) return "limited";
+  const byIp = await essentialLimitState("library-ip", input.ip, 10, 3_600);
+  if (byIp !== "within") return byIp === "exceeded" ? "limited" : "error";
+  const byAddress = await essentialLimitState("library-address", sha(email), 5, 3_600);
+  if (byAddress !== "within") return byAddress === "exceeded" ? "limited" : "error";
   // Only stores that are still open: one that has closed is gone, and is never shown.
   const stores: string[] = [];
   let charged: Store | null = null;

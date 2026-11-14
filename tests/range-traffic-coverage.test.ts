@@ -45,6 +45,8 @@ async function main(){
   is("valid current values survive",[complete.totals.visitors,complete.totals.views,complete.totals.checkouts],[3,5,2]);
   is("valid prior traffic survives",[complete.before?.visitors,complete.before?.views,complete.before?.checkouts],[1,1,1]);
   is("channels retain confirmed visits",complete.channels.map(row=>[row.source,row.visits]),[["newsletter",2]]);
+  // A source Redis answers as missing, inside a complete envelope ({"result": null}), keeps the coverage rules; an
+  // envelope with no result at all ({}) or a short batch is not Redis's answer and rejects the read (#2509).
   replies=replace(0,null);
   is("missing current hash returns no report instead of partial totals",await read(),null);
   replies=replace(2,null);
@@ -55,14 +57,11 @@ async function main(){
   const priorMissing=(await read())!;
   is("prior failure keeps current report",priorMissing.totals.views,5);
   is("prior failure does not publish provisional zeros",priorMissing.before,null);
-  replies=[...good.slice(0,5),null,null,null];
-  is("truncated prior command results keep history unavailable",(await read())?.before,null);
-  // Outage drill (13 November 2026): a reply that lacks a slot, or is cut short, never reaches the reader;
-  // lib/redis.ts fails it as a network error, so the route's error path answers, not a partial report.
-  for(const [what,cut] of [["a slot with no result",replace(0,undefined)],["a reply cut short",good.slice(0,5)]] as const){
-   replies=cut;let refused=false;try{await read();}catch{refused=true;}
-   is(`${what} is refused by the client, never read as missing`,refused,true);
-  }
+  const rejects=async()=>{try{await read();return false;}catch{return true;}};
+  replies=good.slice(0,5);
+  is("a truncated batch is not Redis's answer: the read rejects, never a report without its prior days",await rejects(),true);
+  replies=replace(0,undefined);
+  is("an envelope with no result is not Redis's answer: the read rejects",await rejects(),true);
   replies=[[],[],0,0,0,0,[null,null],[null,null]];
   const quiet=(await read())!;
   is("confirmed empty current traffic remains zero",[quiet.totals.visitors,quiet.totals.views,quiet.totals.checkouts],[0,0,0]);

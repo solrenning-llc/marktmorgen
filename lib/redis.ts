@@ -3,6 +3,7 @@
 // Each pipeline is given up after REDIS_TIMEOUT_MS (lib/fetch-timeout.ts),
 // failing as a network failure does, so no page or job hangs on Redis.
 import { REDIS_TIMEOUT_MS, timed } from "@/lib/fetch-timeout";
+import { UnknownReplyError } from "@/lib/redis-reply";
 
 type Command = (string | number)[];
 
@@ -15,22 +16,24 @@ function getConfig() {
   return { url: url.replace(/\/+$/, ""), token };
 }
 
-type Reply = { result?: unknown; error?: string };
-
-/**
- * One reply per command, each an object holding its own result or error: a
- * reply cut short (a proxy, a connection dropped after the writes were
- * applied) or a slot with neither is unknown, never "the key is not there",
- * so it fails as a network error does (outage drill, 13 November 2026).
+/** Upstash REST returns one single-field result/error envelope per command, in order.
+ * https://upstash.com/docs/redis/features/restapi (checked November 5, 2026).
+ * A malformed or incomplete batch is unknown, even if an earlier write succeeded: UnknownReplyError, so a route that
+ * tells it apart answers "unavailable", while a real Redis error stays an Error (Claude 5 on #2509).
  */
-function wholeReply(results: unknown, commands: number): Reply[] {
-  if (!Array.isArray(results) || results.length !== commands) throw new Error("Redis answered a partial reply");
-  for (const entry of results) {
-    if (!entry || typeof entry !== "object" || Array.isArray(entry) || (!Object.hasOwn(entry, "result") && !Object.hasOwn(entry, "error"))) {
-      throw new Error("Redis answered a malformed reply");
-    }
+function pipelineResults(value: unknown, expected: number): unknown[] {
+  if (!Array.isArray(value) || value.length !== expected) throw new UnknownReplyError("a pipeline with a missing or extra reply");
+  const results: unknown[] = [];
+  for (let i = 0; i < expected; i += 1) {
+    const entry: unknown = value[i];
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry) || Object.keys(entry).length !== 1) throw new UnknownReplyError("a reply envelope");
+    const error = Object.getOwnPropertyDescriptor(entry, "error");
+    if (error && "value" in error && typeof error.value === "string" && error.value.length > 0) throw new Error(`Redis error: ${error.value}`);
+    const result = Object.getOwnPropertyDescriptor(entry, "result");
+    if (!result || !("value" in result) || result.value === undefined) throw new UnknownReplyError("a reply with no result");
+    results.push(result.value);
   }
-  return results as Reply[];
+  return results;
 }
 
 export function isRedisConfigured(): boolean {
@@ -57,16 +60,9 @@ export async function redisPipeline(commands: Command[]): Promise<unknown[]> {
       throw new Error(`Redis request failed with status ${response.status}`);
     }
 
-    return (await response.json()) as {
-      result?: unknown;
-      error?: string;
-    }[];
+    return (await response.json()) as unknown;
   });
-  const replies = wholeReply(results, commands.length);
-  const failed = replies.find((item) => item.error);
-  if (failed) throw new Error(`Redis error: ${failed.error}`);
-
-  return replies.map((item) => item.result);
+  return pipelineResults(results, commands.length);
 }
 
 /**
@@ -87,10 +83,7 @@ export async function redisPipelineBase64(commands: Command[]): Promise<unknown[
       signal,
     });
     if (!response.ok) throw new Error(`Redis request failed with status ${response.status}`);
-    return (await response.json()) as { result?: unknown; error?: string }[];
+    return (await response.json()) as unknown;
   });
-  return wholeReply(results, commands.length).map((entry) => {
-    if (entry.error) throw new Error(`Redis error: ${entry.error}`);
-    return entry.result;
-  });
+  return pipelineResults(results, commands.length);
 }

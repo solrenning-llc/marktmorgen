@@ -33,6 +33,8 @@ const TIMED_IN_CODE: Record<string, [string, string]> = {
   // The mark of a passed-over Stripe event (a capped part): set with the same expiry as every event mark.
   "nl:hooks:evt:": ["lib/webhooks.ts", "EVENT_SECONDS"],
   "nl:call:confirmed:": ["lib/calls.ts", "CONFIRMED_SECONDS"],
+  // A PayPal connect started from the studio (a capped part, one a store): set with its expiry (lib/paypal-sales.ts, markOnboarding).
+  "nl:ppsell:start:": ["lib/paypal-sales.ts", "ONBOARDING_SECONDS"],
   "nl:adsrv:ctx:": ["lib/ad-events.ts", "CTX_SECONDS"],
   "nl:adsrv:sent:": ["lib/ad-events.ts", "SENT_SECONDS"],
   // A store's picture uploads not yet put on anything (a capped part): the list expires a window after its last note.

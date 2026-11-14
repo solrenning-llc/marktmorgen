@@ -212,11 +212,17 @@ export async function disconnectPayPal(store: Store): Promise<void> {
   await redisPipeline([["DEL", linkKey(store.statsId)]]);
 }
 
+/**
+ * Turns automatic payouts on or off on the app's record. Written only onto a record still there (SET XX), its reply
+ * read exactly: a disconnect between the read and the write is never undone (the app, with its sealed secret, is not
+ * written back), and the switch then answers false ("not connected").
+ */
 export async function setAutoPay(store: Store, on: boolean): Promise<boolean> {
   const link = await readLink(store);
   if (!link || !store.statsId) return false;
-  await redisPipeline([["SET", linkKey(store.statsId), JSON.stringify({ ...link, auto: on })]]);
-  return true;
+  const set = repliesFor(await redisPipeline([["SET", linkKey(store.statsId), JSON.stringify({ ...link, auto: on }), "XX"]]), 1);
+  if (!set || (set[0] !== "OK" && set[0] !== null)) throw new UnknownReplyError("turning PayPal automatic payouts on or off");
+  return set[0] === "OK";
 }
 
 async function readOpen(statsId: string): Promise<Map<string, OpenBatch>> {

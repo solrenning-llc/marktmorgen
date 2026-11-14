@@ -64,7 +64,12 @@ async function main(){
   const missingLong=(await read())!;
   is("long history failure leaves shorter histories confirmed",missingLong.previousTrafficAvailable,{d7:true,d30:true,d90:false});
   is("long history failure preserves current long window",missingLong.windows.d90.visitors,90);
+  // A short batch is not Redis's answer and rejects the read (#2509); history Redis answers as missing, inside
+  // complete envelopes ({"result": null}), keeps the current numbers and withholds every comparison.
   replies=good.slice(0,183);
+  let shortRejected=false;try{await read();}catch{shortRejected=true;}
+  is("a truncated batch rejects the read, never a snapshot without its history",shortRejected,true);
+  replies=[...good.slice(0,183),...good.slice(183).map(()=>null)];
   const noHistory=(await read())!;
   is("all missing history leaves current data available",noHistory.windows.d7.views,7);
   is("all missing history stays unavailable",noHistory.previousTrafficAvailable,{d7:false,d30:false,d90:false});

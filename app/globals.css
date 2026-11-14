@@ -1435,7 +1435,8 @@ a.chip {
   min-height: 48px;
   padding: 0.7rem 0.9rem;
   border-radius: var(--r-sm);
-  border: 1px solid var(--line-strong);
+  /* Its only outline: the control-edge token, 3.99:1 on white and 3.38:1 on sand (1.4.11, tests/field-edge-contrast.test.ts). */
+  border: 1px solid var(--line-off);
   background: #fff;
   color: var(--ink);
   font-size: 1rem;
@@ -2348,7 +2349,8 @@ a.chip {
   min-height: 48px;
   padding: 0.7rem 0.9rem;
   border-radius: var(--r-sm);
-  border: 1px solid var(--st-line-strong);
+  /* Its only outline: 3:1 on the field and on the page, card or item around it (1.4.11, lib/store-look.ts fieldEdge). */
+  border: 1px solid var(--st-field-edge);
   background: var(--st-field);
   color: var(--st-text);
   font-size: 1rem;
@@ -2483,7 +2485,8 @@ a.chip {
 .st-page .btn-secondary:focus-visible,
 .st-page .btn-primary:focus-visible,
 .st-page .st-footer-link:focus-visible,
-.st-social:focus-visible {
+.st-social:focus-visible,
+.sp-countdown-toggle:focus-visible {
   outline: 3px solid #000;
   outline-offset: 3px;
   box-shadow: 0 0 0 3px #fff !important;
@@ -2494,7 +2497,8 @@ a.chip {
   .st-page .btn-secondary:focus-visible,
   .st-page .btn-primary:focus-visible,
   .st-page .st-footer-link:focus-visible,
-  .st-social:focus-visible {
+  .st-social:focus-visible,
+  .sp-countdown-toggle:focus-visible {
     outline: 3px solid CanvasText;
     box-shadow: none !important;
     forced-color-adjust: auto;
@@ -3392,6 +3396,24 @@ a.sp-product:focus-visible {
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+}
+/* Stops and starts the numbers (WCAG 2.2.2): a target of at least 44 × 44 px (2.5.5), its edge a border so it stays
+   drawn in forced colors, where a box-shadow is dropped. */
+.sp-countdown-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  margin-top: 1rem;
+  padding: 0.5rem 1rem;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
 }
 /* A picture beside words: stacked on a phone, side by side once there is room, the picture on either side. */
 .sp-feature {

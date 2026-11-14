@@ -15,6 +15,7 @@
  * a day, for the currencies their country can charge in.
  */
 import { saleHandles } from "@/lib/store";
+import { productOfSub } from "@/lib/tier-rules";
 import { onAccount } from "@/lib/stripe-account";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { DELAYED_METHODS } from "@/lib/instant-pay";
@@ -255,8 +256,10 @@ const SUBSCRIPTION_ID = /^sub_[A-Za-z0-9]{6,128}$/;
  * Stripe: each one charges again, in the currency it began in, whatever the
  * store says afterward. Null when Stripe could not be asked, or had more than
  * could be read — which is treated as "some", never as "none".
+ * With `product`, only those sold for that product (subscription metadata.product, lib/store-checkout.ts), so a
+ * product is never removed while its members or payment plans are still charged for it.
  */
-export async function runningSubscriptions(store: Store): Promise<number | null> {
+export async function runningSubscriptions(store: Store, product?: string): Promise<number | null> {
   const account = store.stripeAccountId;
   if (!account) return 0;
   const handles = saleHandles(store);
@@ -282,14 +285,29 @@ export async function runningSubscriptions(store: Store): Promise<number | null>
             const meta = ownField(row, "metadata");
             if (!plainObject(meta)) return false;
             const soldBy = ownField(meta, "store");
+            if (product !== undefined) {
+              const soldFor = ownField(meta, "product");
+              if (soldFor !== undefined && typeof soldFor !== "string") return false;
+            }
             return soldBy === undefined || typeof soldBy === "string";
           },
           SUBSCRIPTION_ID,
         );
         unreadable += read.unreadable;
         for (const row of read.rows) {
-          const soldBy = ownField(ownField(row, "metadata") as Record<string, unknown>, "store");
-          if (typeof soldBy === "string" && handles.has(soldBy)) count += 1;
+          const meta = ownField(row, "metadata") as Record<string, unknown>;
+          const soldBy = ownField(meta, "store");
+          if (typeof soldBy !== "string" || !handles.has(soldBy)) continue;
+          if (product === undefined) {
+            count += 1;
+            continue;
+          }
+          // The product a member pays for now is the price's after a tier switch, the subscription's otherwise
+          // (productOfSub, lib/tier-rules.ts; a subscription item carries its whole price, metadata included). One of
+          // this store's with no product to read may be this product's: "at least", never "not this one" (#4074).
+          const on = productOfSub(row);
+          if (!on) unreadable += 1;
+          else if (on === product) count += 1;
         }
         if (!read.hasMore) {
           done = true;

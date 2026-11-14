@@ -21,6 +21,7 @@ import { addProduct, claimHandle, ensureStatsId, ensureStoreId, imageFolder,
 import { paidPeriod } from "./billing-period-fixture";
 import { done, is, part } from "./check";
 import { store as redis } from "./redis-stub";
+import { answerNoRunningSubscriptions } from "./stripe-no-running";
 
 const providerFiles = new Map<string, number>();
 const providerDeletes: string[] = [];
@@ -142,6 +143,7 @@ async function scenario(index: number, mode: Mode): Promise<void> {
     otherRetained:JSON.stringify(otherAfter)===JSON.stringify(otherBefore),providerDeletes:providerDeletes.length,bytesBefore,bytesAfter,complete,retained,orphan}));
 }
 async function main():Promise<void>{
+  answerNoRunningSubscriptions();
   const blocked = await sdkFetch("https://j-review-unregistered.invalid/never-network").then(
     () => "unexpected-response",
     (error: unknown) => String((error as {cause?:{code?:unknown}}).cause?.code ?? "unknown-error"),

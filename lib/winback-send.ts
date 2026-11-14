@@ -268,7 +268,7 @@ async function sweepStore(store: Store, deadline: number, now: number): Promise<
         await redisPipeline([["SET", linkKey(token), JSON.stringify(grant), "EX", OFFER_DAYS * 86_400], ...notes]).catch(() => null),
         1 + notes.length,
       );
-      if (!written || written[0] !== "OK" || written.slice(1).some((reply) => countOf(reply) === null)) {
+      if (!written || written[0] !== "OK" || !notedExactly(written.slice(1), notes.length)) {
         await redisPipeline([["DEL", linkKey(token)]]).catch(() => null);
         await releaseMark(onceKey(statsId, email, product.id), onceValue);
         await releaseMark(sentKey(account, subId), claim);
@@ -319,6 +319,16 @@ export async function winbacksSent(store: Store): Promise<number> {
   if (!store.statsId || !isRedisConfigured()) return 0;
   const [n] = await redisPipeline([["GET", countKey(store.statsId)]]);
   return Number(n) || 0;
+}
+
+/**
+ * noteForErasure's replies in their exact shape (Codex X8 on #3889, as lib/product-updates.ts noted() reads the same
+ * three notes): ZADD of one member 0 or 1, ZREMRANGEBYSCORE a count, EXPIRE 1 (the set was just written). Anything
+ * else, such as an EXPIRE 0 that says no index was there to keep, means an erasure may not find the link.
+ */
+function notedExactly(replies: unknown[], count: number): boolean {
+  if (count === 0) return replies.length === 0;
+  return count === 3 && replies.length === 3 && (replies[0] === 0 || replies[0] === 1) && countOf(replies[1]) !== null && replies[2] === 1;
 }
 
 /** The daily run: every store with the offer on, from where the last run stopped. */

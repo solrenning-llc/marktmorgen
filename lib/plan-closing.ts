@@ -767,15 +767,31 @@ export async function closeOne(key: string, now = Date.now(), hands: Hands = HAN
     const [rawFinal] = exactly(await redisPipeline([["GET", stateKey(key)]]), 1, "a store's closing state");
     const kept = readState(rawFinal);
     // A state missing or for another ending (two overlapping runs: one put the store in this line, the other saw a
-    // plan again and deleted the state) is never rebuilt as "renewals stopped" or with today as its day: below, its
-    // members' renewals are stopped and the store is held (Claude 7's hunt, MÉDIO money).
-    const lost = kept.of !== was;
-    const final: State = lost ? { of: was } : kept;
+    // plan again and deleted the state) is never rebuilt as "renewals stopped" or with today as its day (Claude 7's
+    // hunt, MÉDIO money). Its day is the one its closing day marked on its address (markShut, below and in closingDay)
+    // for this same ending: with that mark, only { of, day } is rebuilt and the closing day runs again from the start.
+    // Each step there is safe to run twice: renewals already stopped are skipped, and a member's refund is made only
+    // after the refunds already on their payment are listed and what the charge gave back is read (giveBackUnused,
+    // lib/closing-refunds.ts), never on Stripe's idempotency key alone, which lasts 24 hours; members already settled
+    // are skipped. With no such mark the day is not known: it is held below, and nothing is guessed.
+    let final: State = kept;
+    let lost = false;
+    if (kept.of !== was) {
+      const mark = await shutOf(store.handle);
+      if (mark && mark.ended === was) {
+        final = { of: was, day: mark.since };
+        await redisPipeline([["SET", stateKey(key), JSON.stringify(final)]]);
+        console.error(`plan-closing: ${key}'s closing state was lost; its day was read back from its address mark and its closing day runs again`);
+      } else {
+        final = { of: was };
+        lost = true;
+      }
+    }
     // A plan paid for it since its day began (a checkout opened before and
     // finished on it) is ended and returned in full (lib/closing-plan-guard.ts).
-    // With its state lost, the mark its closing day wrote is kept as it is: rewriting it with today would stop a plan
-    // paid between its real day and today from being returned. Only a store with no mark at all gets one from today.
-    if (!lost || (await shutOf(store.handle)) === null) await markShut(store, final.day ?? now, was);
+    // With its day unknown no mark is written: a guessed one (today) would stop a plan paid between its real day and
+    // today from being returned in full, and while its record stands the plan guard reads the end of its plan instead.
+    if (!lost) await markShut(store, final.day ?? now, was);
     // The durable final index survives a late active snapshot, which clears
     // planEndedAt. Keep the original closing proof for the refund guard.
     const closingStore = store.planEndedAt ? store : { ...store, planEndedAt: new Date(was).toISOString() };
@@ -788,16 +804,16 @@ export async function closeOne(key: string, now = Date.now(), hands: Hands = HAN
     if (lost) {
       // Fail closed: what its members renew is stopped (stopRenewals skips what has ended), so nobody is charged by a
       // store that closes; nothing is given back, removed or written down as done while its day is not known, since a
-      // guessed day (today) would give members back less than they paid for.
+      // guessed day (today) would give members back less than they paid for. It needs a person: said every day.
       try {
         const stopped = await stopRenewals(store, until);
-        if (!stopped.done) return { key, state: "held", note: "its closing state was lost, and its members' renewals are not all stopped yet" };
+        if (!stopped.done) return { key, state: "held", note: "its closing state and its day were lost, and its members' renewals are not all stopped yet" };
       } catch (error) {
         console.error("stopping a closing store's renewals failed", error);
-        return { key, state: "held", note: "its closing state was lost, and Stripe could not be asked to stop its renewals" };
+        return { key, state: "held", note: "its closing state and its day were lost, and Stripe could not be asked to stop its renewals" };
       }
-      console.error(`plan-closing: ${key}'s closing state was lost while it is in its closing day; its members' renewals are stopped and it is held`);
-      return { key, state: "held", note: "its closing state was lost: its members' renewals are stopped, and nothing else is done until its day is known" };
+      console.error(`plan-closing: ${key}'s closing state and its address mark were lost while it is in its closing day; its members' renewals are stopped and it is held for a person to set its day`);
+      return { key, state: "held", note: "its closing state and its day were lost: its members' renewals are stopped, and it needs a person to set its day before its members are refunded" };
     }
     if (final.removed) {
       if (!final.due) {

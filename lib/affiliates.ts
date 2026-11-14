@@ -651,15 +651,25 @@ function parsePartnerEarning(raw: unknown): PartnerEarning | null {
   }
 }
 
+/**
+ * A payout as its writers leave it (addPayout: the route, "Mark as paid", PayPal's settlement), or null. Every one
+ * writes a whole number of at least one cent and a currency code, or none before there was a choice: a negative,
+ * fractional or unsafe amount would lower what the book says was paid and send it again (Codex G and Codex M on
+ * #3051), so it does not read, and the book that holds it is unknown (bookRecords). The same for its affiliate:
+ * addPayout writes only one readAffiliate found, so only an AFFILIATE_ID_PATTERN id; anything else (" ", the id
+ * padded or in capitals) would take the payout off the real affiliate's paid total and pay them again (Codex G).
+ */
 function parsePayout(raw: unknown): Payout | null {
   if (typeof raw !== "string") return null;
   try {
     const value = JSON.parse(raw) as Partial<Payout>;
-    if (typeof value.id !== "string" || typeof value.aff !== "string" || typeof value.cents !== "number") return null;
+    if (typeof value.id !== "string" || !value.id || typeof value.aff !== "string" || !AFFILIATE_ID_PATTERN.test(value.aff)) return null;
+    if (!Number.isSafeInteger(value.cents) || (value.cents as number) < 1) return null;
+    if (value.currency !== undefined && (typeof value.currency !== "string" || !/^[a-z]{3}$/.test(value.currency))) return null;
     return {
       id: value.id,
       aff: value.aff,
-      cents: value.cents,
+      cents: value.cents as number,
       currency: readCurrencyCode(value.currency),
       date: typeof value.date === "string" ? value.date : "",
       reference: typeof value.reference === "string" ? value.reference : "",
@@ -673,14 +683,6 @@ function parsePayout(raw: unknown): Payout | null {
 /** A three-letter currency code as Stripe writes it; US dollars when absent. */
 function readCurrencyCode(raw: unknown): string {
   return typeof raw === "string" && /^[a-z]{3}$/.test(raw) ? raw : "usd";
-}
-
-/** A Redis hash reply, as pairs. */
-function pairs(reply: unknown): [string, string][] {
-  const list = Array.isArray(reply) ? reply.map(String) : [];
-  const out: [string, string][] = [];
-  for (let i = 0; i + 1 < list.length; i += 2) out.push([list[i], list[i + 1]]);
-  return out;
 }
 
 /**
@@ -3144,6 +3146,38 @@ export function stripeWait(deadline: number | undefined, now = Date.now()): numb
 }
 
 /**
+ * One HGETALL of the commission book, read exactly (CX-123 rule 24; Claude 5's review of #2844): a list of strings
+ * with an even count, as pairs, or UnknownReplyError. A reply missing, cut short or of another shape is never an
+ * empty hash: read as one, a payment already made vanished from the book and was sent a second time.
+ */
+function bookPairs(reply: unknown, what: string): [string, string][] {
+  const list = stringList(reply);
+  if (!list || list.length % 2 !== 0) throw new UnknownReplyError(what);
+  const out: [string, string][] = [];
+  for (let i = 0; i < list.length; i += 2) out.push([list[i], list[i + 1]]);
+  return out;
+}
+
+/** Every record of one hash of the book, or UnknownReplyError: a record that does not read is never dropped. */
+function bookRecords<T>(reply: unknown, parse: (raw: unknown) => T | null, what: string): T[] {
+  return bookPairs(reply, what).map(([, raw]) => {
+    const record = parse(raw);
+    if (record === null) throw new UnknownReplyError(what);
+    return record;
+  });
+}
+
+/** A hash of counts (HINCRBY): each a whole number as Redis writes it, or UnknownReplyError, never a zero. */
+function bookCounts(reply: unknown, what: string): Map<string, number> {
+  return new Map(
+    bookPairs(reply, what).map(([id, raw]) => {
+      if (!/^\d{1,15}$/.test(raw)) throw new UnknownReplyError(what);
+      return [id, Number(raw)];
+    }),
+  );
+}
+
+/**
  * The program's book, or one affiliate's (`only`). With `deadline` (epoch
  * milliseconds), Stripe is asked nothing past it, and what was not read is
  * marked incomplete (invoicesChecked, refundsChecked): the affiliate page's
@@ -3155,7 +3189,9 @@ export function stripeWait(deadline: number | undefined, now = Date.now()): numb
 export async function readBook(store: Store, only?: string, limits: { deadline?: number; titles?: boolean } = {}): Promise<Book> {
   if (!store.statsId || !isRedisConfigured()) return { rows: [], lines: [], payouts: [], refundsChecked: true, invoicesChecked: true, currency: store.currency, elsewhere: 0 };
   const statsId = store.statsId;
-  const [people, clicks, sales, payouts, shares, paidClicks, leadsReply] = await redisPipeline([
+  // Read exactly, every reply and every record (rule 24): the book decides what is paid (payWithPayPal, the payday,
+  // the payout file and "Mark as paid"), so a book that does not read whole throws, and nothing is paid on it.
+  const replies = repliesFor(await redisPipeline([
     ["HGETALL", peopleKey(statsId)],
     ["HGETALL", clicksKey(statsId)],
     ["HGETALL", salesKey(statsId)],
@@ -3164,30 +3200,28 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
     ["HGETALL", paidClicksKey(statsId)],
     // Confirmed leads (lib/affiliate-leads.ts), all of them: the caps and the budget are counted across the program.
     ["HGETALL", leadsKey(statsId)],
-  ]);
-  // Everybody, for the checks that compare one affiliate with the others.
-  const everyone = pairs(people)
-    .map(([, raw]) => parseAffiliate(raw))
-    .filter((a): a is Affiliate => a !== null);
+  ]), 7);
+  if (!replies) throw new UnknownReplyError("the affiliate book");
+  const [people, clicks, sales, payouts, shares, paidClicks, leadsReply] = replies;
+  // Everybody, for the checks that compare one affiliate with the others (an unreadable one could share an address).
+  const everyone = bookRecords(people, parseAffiliate, "the affiliates in the book");
   const affiliates = everyone.filter((a) => !only || a.id === only);
   // Whose sales are read: one affiliate's own, and, for their second tier,
   // those of the people who joined through their invitation link.
   const recruits = new Set(everyone.filter((a) => only && a.by?.id === only).map((a) => a.id));
   const mine = (aff: string) => !only || aff === only || recruits.has(aff);
-  const clickCount = new Map(pairs(clicks).map(([id, n]) => [id, Number(n) || 0]));
-  const paidCount = new Map(pairs(paidClicks).map(([id, n]) => [id, Number(n) || 0]));
-  const referrals = pairs(sales)
-    .map(([, raw]) => parseReferral(raw))
-    .filter((r): r is Referral => r !== null && mine(r.aff));
+  const clickCount = bookCounts(clicks, "the affiliate clicks");
+  // Paid-search clicks hold an affiliate's payment (holdFlags): a count not read is never a zero.
+  const paidCount = bookCounts(paidClicks, "the affiliate paid-search clicks");
+  const referrals = bookRecords(sales, parseReferral, "the sales in the book").filter((r) => mine(r.aff));
   // A partner's standing share of a sale reads as one more Referral, credited
   // "partner" (lib/partner-share.ts). Keeping the shape means the payouts, the
   // batches, the spreadsheet and the partner's own page all work unchanged,
   // and one sale can produce several of these alongside a commission.
   // A share of some lines of an order is settled against the whole order's base (settleLine), kept beside the line.
   const partOf = new Map<string, number>();
-  const partnerLines: Referral[] = pairs(shares)
-    .map(([, raw]) => parsePartnerEarning(raw))
-    .filter((e): e is PartnerEarning => e !== null && (!only || e.aff === only))
+  const partnerLines: Referral[] = bookRecords(shares, parsePartnerEarning, "the partner shares in the book")
+    .filter((e) => !only || e.aff === only)
     .map((e) => {
       if (e.whole !== undefined) partOf.set(`${e.ref}:${e.aff}`, e.whole);
       return e;
@@ -3206,9 +3240,9 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
       self: e.self,
       how: "partner" as const,
     }));
-  const paid = pairs(payouts)
-    .map(([, raw]) => parsePayout(raw))
-    .filter((p): p is Payout => p !== null && (!only || p.aff === only))
+  // A payout that does not read could be the one that paid this affiliate: never dropped, so never paid again.
+  const paid = bookRecords(payouts, parsePayout, "the payouts in the book")
+    .filter((p) => !only || p.aff === only)
     .sort((a, b) => (b.date || "").localeCompare(a.date || "") || b.at - a.at);
 
   // Each payment of a membership or plan sold through a link, read from its invoice.
@@ -3225,9 +3259,8 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
     }
   }
   const everything = [...referrals, ...partnerLines, ...recurringLines];
-  const leads = pairs(leadsReply)
-    .map(([, raw]) => parseLead(raw))
-    .filter((l): l is NonNullable<typeof l> => l !== null);
+  // All of them, read whole: the caps and the budget are counted across the program.
+  const leads = bookRecords(leadsReply, parseLead, "the leads in the book");
   // A booking's lead is reversed by a refund in full of its booking, read with the sales' refunds.
   const bookings = leads.filter((l) => l.kind === "booking" && l.pi);
   let refunds = new Map<string, number>();
@@ -3870,15 +3903,17 @@ export async function idleSweep(store: Store, nowMs: number = Date.now(), deadli
   if (days === 0 || !affiliatesOn(store) || !idleRemovalAllowed(store.affiliates)) return done;
   const statsId = store.statsId as string;
   const now = Math.floor(nowMs / 1000);
-  const [peopleReply, salesReply, leadsReply, payoutsReply] = await redisPipeline([
+  // Read exactly (rule 24), as readBook reads them: a sale, lead or payment not read would take somebody still owed
+  // for somebody owed nothing, and warn them out. Throws UnknownReplyError, and the store waits for tomorrow.
+  const replies = repliesFor(await redisPipeline([
     ["HGETALL", peopleKey(statsId)],
     ["HGETALL", salesKey(statsId)],
     ["HGETALL", leadsKey(statsId)],
     ["HGETALL", payoutsKey(statsId)],
-  ]);
-  const everyone = pairs(peopleReply)
-    .map(([, raw]) => parseAffiliate(raw))
-    .filter((a): a is Affiliate => a !== null);
+  ]), 4);
+  if (!replies) throw new UnknownReplyError("the affiliate book");
+  const [peopleReply, salesReply, leadsReply, payoutsReply] = replies;
+  const everyone = bookRecords(peopleReply, parseAffiliate, "the affiliates in the book");
   const inviter = new Map(everyone.filter((a) => a.by).map((a) => [a.id, a.by as { id: string; percent: number }]));
   const lastActive = new Map<string, number>();
   const owedHigh = new Map<string, number>();
@@ -3886,9 +3921,8 @@ export async function idleSweep(store: Store, nowMs: number = Date.now(), deadli
   const active = (id: string, at: number) => lastActive.set(id, Math.max(lastActive.get(id) ?? 0, at));
   const earn = (id: string, cents: number) => owedHigh.set(id, (owedHigh.get(id) ?? 0) + Math.max(0, Math.ceil(cents)));
   const salesByMonth = new Map<string, number>();
-  for (const [, raw] of pairs(salesReply)) {
-    const sale = parseReferral(raw);
-    if (!sale || sale.self) continue;
+  for (const sale of bookRecords(salesReply, parseReferral, "the sales in the book")) {
+    if (sale.self) continue;
     active(sale.aff, sale.at);
     if (sale.currency !== store.currency) foreign.add(sale.aff);
     earn(sale.aff, (sale.base * sale.rate) / 100);
@@ -3907,17 +3941,14 @@ export async function idleSweep(store: Store, nowMs: number = Date.now(), deadli
     const aff = month.slice(0, month.indexOf(":"));
     for (const goal of store.affiliates.bonuses) if (count >= goal.sales) earn(aff, goal.cents);
   }
-  for (const [, raw] of pairs(leadsReply)) {
-    const lead = parseLead(raw);
-    if (!lead) continue;
+  for (const lead of bookRecords(leadsReply, parseLead, "the leads in the book")) {
     active(lead.aff, lead.at);
     if (lead.state !== "reversed") earn(lead.aff, lead.cents);
     if (lead.currency !== store.currency) foreign.add(lead.aff);
   }
   const paid = new Map<string, number>();
-  for (const [, raw] of pairs(payoutsReply)) {
-    const payout = parsePayout(raw);
-    if (payout && payout.currency === store.currency) paid.set(payout.aff, (paid.get(payout.aff) ?? 0) + payout.cents);
+  for (const payout of bookRecords(payoutsReply, parsePayout, "the payouts in the book")) {
+    if (payout.currency === store.currency) paid.set(payout.aff, (paid.get(payout.aff) ?? 0) + payout.cents);
   }
   const mayBeOwed = (id: string) => foreign.has(id) || (owedHigh.get(id) ?? 0) > (paid.get(id) ?? 0);
 

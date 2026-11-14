@@ -129,6 +129,77 @@ export class MemoryRedis {
         return to < from ? "" : new TextDecoder().decode(bytes.slice(from, to + 1));
       }
       case "EVAL": {
+        // lib/flow-runs.ts CLAIM_IF_RUN, WAIT_IF_RUN, RETRY_IF_RUN and NOTE_IF_RUN: a run's writes only while the run is there.
+        const genOk = (runK: string, want: string) => want === "*" || ((this.run(["HGET", runK, "gen"]) as string | null) ?? "") === want;
+        // lib/flow-runs.ts LEASE_AND_GEN: a step's lease entry and its run's generation, in one command.
+        if (key.startsWith("-- marktmorgen:flow-lease-gen:v1\n") && args[0] === "2" && args.length === 4) {
+          const [, leaseK, runK, member] = args;
+          const score = this.run(["ZSCORE", leaseK, member]);
+          const gen = this.run(["EXISTS", runK]) === 1 ? this.run(["HGET", runK, "gen"]) : null;
+          return [score ?? null, gen ?? null];
+        }
+        if (key.startsWith("-- marktmorgen:flow-claim:v2\n") && args[0] === "2" && args.length === 6) {
+          const [, runK, logK, open, attempted, gen] = args;
+          if (this.run(["EXISTS", runK]) !== 1 || !genOk(runK, gen)) return -1;
+          if (this.run(["HSETNX", runK, "open", open]) !== 1) return 0;
+          this.run(["RPUSH", logK, attempted]);
+          return 1;
+        }
+        if (key.startsWith("-- marktmorgen:flow-wait:v2\n") && args[0] === "1" && args.length === 5) {
+          const [, runK, step, now, gen] = args;
+          if (this.run(["EXISTS", runK]) !== 1 || !genOk(runK, gen)) return [-1];
+          const waits = this.run(["HINCRBY", runK, "waits", 1]);
+          const at = this.run(["HGET", runK, "waitAt"]);
+          const found = typeof at === "string" ? /^(-?\d+):(\d+)$/.exec(at) : null;
+          if (found && found[1] === step && Number(found[2]) > 0) return [waits, Number(found[2])];
+          this.run(["HSET", runK, "waitAt", `${step}:${now}`]);
+          return [waits, Number(now)];
+        }
+        if (key.startsWith("-- marktmorgen:flow-retry:v1\n") && args[0] === "1" && args.length === 3) {
+          const [, runK, by] = args;
+          if (this.run(["EXISTS", runK]) !== 1) return -1;
+          return this.run(["HINCRBY", runK, "retries", by]);
+        }
+        if (key.startsWith("-- marktmorgen:flow-note:v2\n") && args[0] === "3" && args.length === 12) {
+          const [, runK, logK, indexK, noted, email, status, step, at, person, keep, gen] = args;
+          if (this.run(["EXISTS", runK]) !== 1 || !genOk(runK, gen)) return 0;
+          this.run(["RPUSH", logK, noted]);
+          this.run(["HSET", runK, "email", email, "status", status, "step", step, "note", "", "updatedAt", at]);
+          this.run(["ZADD", indexK, at, person]);
+          if (keep !== "") {
+            this.run(["EXPIRE", runK, keep]);
+            this.run(["EXPIRE", logK, keep]);
+          }
+          return 1;
+        }
+        // lib/flow-runs.ts SETTLE_IF_OPEN: a workflow step's outcome written only while its run still holds an open attempt.
+        if (key.startsWith("-- marktmorgen:flow-settle:v2\n") && args[0] === "4" && args.length === 17) {
+          const [, runK, logK, heldK, indexK, mode, pushed, email, status, step, note, at, member, person, keep, gen, wantOpen] = args;
+          // EXISTS first: this model's HEXISTS makes an empty hash of a missing key, which Redis never does.
+          if (this.run(["EXISTS", runK]) !== 1 || this.run(["HEXISTS", runK, "open"]) !== 1) return 0;
+          if (!genOk(runK, gen) || (wantOpen !== "*" && this.run(["HGET", runK, "open"]) !== wantOpen)) return 0;
+          if (mode === "uncertain") {
+            this.run(["RPUSH", logK, pushed]);
+            this.run(["HSET", runK, "email", email, "status", status, "step", step, "note", note, "updatedAt", at]);
+            this.run(["ZADD", heldK, at, member]);
+            this.run(["ZADD", indexK, at, person]);
+            if (keep !== "") {
+              this.run(["EXPIRE", runK, keep]);
+              this.run(["EXPIRE", logK, keep]);
+            }
+            return 1;
+          }
+          this.run(["HDEL", runK, "open"]);
+          if (mode === "deferred") this.run(["LREM", logK, "-1", pushed]);
+          else this.run(["RPUSH", logK, pushed]);
+          this.run(["HSET", runK, "email", email, "status", status, "step", step, "note", note, "updatedAt", at]);
+          this.run(["ZADD", indexK, at, person]);
+          if (keep !== "") {
+            this.run(["EXPIRE", runK, keep]);
+            this.run(["EXPIRE", logK, keep]);
+          }
+          return 1;
+        }
         // lib/request-guard.ts ESSENTIAL_BELOW: one more on an essential counter only while fewer than ARGV[1] were taken.
         if (key.startsWith("-- marktmorgen:essential-below:v1\n") && args[0] === "1" && args.length === 4) {
           const [, counter, below, window] = args;

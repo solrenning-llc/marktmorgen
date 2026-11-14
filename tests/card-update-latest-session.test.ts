@@ -14,7 +14,7 @@ import { claimHandle, setStripeAccount, storeForEmail } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
-const ACCOUNT = "acct_1TestCardLatest01";
+const ACCOUNT = "acct_1TestCardLast01";
 const SUB = "sub_CardLatest0001";
 const CUSTOMER = "cus_CardLatest01";
 const set: string[] = [];

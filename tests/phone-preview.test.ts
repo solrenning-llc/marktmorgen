@@ -32,7 +32,7 @@ is("the studio's blog page hands the editor its store's look", readFileSync("app
 is("Wide is the published page's own width, and the title its size", blog.includes("maxWidth: phone ? 390 : 672") && blog.includes('${phone ? "text-3xl" : "text-4xl"}'), true);
 
 const course = readFileSync("components/course-editor.tsx", "utf8");
-is("a lesson's text is previewed by the lesson page's own drawing, in the store's look", course.includes("<LessonText text={now} />") && course.includes("lookStyle(storeLook)") && course.includes("st-theme-${storeLook.theme}") && course.includes('color: "var(--st-text)"'), true);
+is("a lesson's text is previewed by the lesson page's own drawing, in the store's look", course.includes("<LessonText text={now} lang={locale} />") && course.includes("lookStyle(storeLook)") && course.includes("st-theme-${storeLook.theme}") && course.includes('color: "var(--st-text)"'), true);
 is("it starts at phone width, with a Phone or Wide choice, is inert, and folds on a narrow screen", course.includes("const [phone, setPhone] = useState(true);") && course.includes('aria-label="Preview width"') && /inert[\s\S]{0,300}?className=\{`st-page/.test(course) && course.includes("See it as students see it</summary>"), true);
 is("the studio's course page hands the editor its store's look", readFileSync("app/studio/course/[product]/page.tsx", "utf8").includes("look={store.look}"), true);
 is("the lesson's words sit in the same card the lesson page puts behind them", course.includes('<div className="st-card p-5 sm:p-8">') && readFileSync("app/[handle]/course/[product]/[lesson]/page.tsx", "utf8").includes("st-card min-w-0 p-5 sm:p-8"), true);

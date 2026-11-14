@@ -150,6 +150,7 @@ export const pt: BuyerWords = {
   unitSaving: (percent) => `poupa ${percent}%`,
   chooseOptionFor: (title) => `Escolha uma opção para ${title}`,
   chooseOne: "Escolha uma",
+  optionFromLink: (label) => `Abriu esta página para ${label}, por isso essa opção já está escolhida abaixo. Pode escolher outra.`,
   recommended: "Recomendado",
   recommendedAfter: " (recomendado)",
   howToPayFor: (title) => `Como pagar ${title}`,
@@ -287,6 +288,8 @@ export const pt: BuyerWords = {
   openFullSize: "Abrir esta imagem em tamanho real",
   countdownUnits: { days: "dias", hours: "horas", min: "min", sec: "seg" },
   until: (when) => `Até ${when}`,
+  countdownPause: "Pausar a contagem decrescente",
+  countdownResume: "Retomar a contagem decrescente",
 
   restingTitle: "Esta página está em pausa por agora",
   restingBody: (store) =>

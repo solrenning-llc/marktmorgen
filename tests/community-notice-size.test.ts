@@ -36,7 +36,7 @@ const STILL_IN = "-- marktmorgen:community-still-in:v1";
 const MEMBERS = `nl:cm:${COMMUNITY}:m`;
 // Members who are in, in the shape lib/community.ts keeps them (what STILL_IN reads).
 const seedMembers = () =>
-  store.pipeline([MEMBER, SECOND].map((k) => ["HSET", MEMBERS, k, JSON.stringify({ k, removed: false, muted: false })]));
+  store.pipeline([MEMBER, SECOND].map((k) => ["HSET", MEMBERS, k, JSON.stringify({ k, e: `${k.slice(0, 8)}@noticesize.example`, removed: false, muted: false })]));
 
 type Batch = (string | number)[][];
 

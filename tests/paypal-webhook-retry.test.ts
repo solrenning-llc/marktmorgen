@@ -213,7 +213,9 @@ async function main(): Promise<void> {
   is("then off the list", (await listed()).includes(third), false);
 
   part("The buyer deleted between tries, the event owed: nothing told, nothing written back (review of #4099)");
-  const granted = async () => Number((await original([["EXISTS", importedKey(statsId, BUYER)]]))[0]);
+  // How many purchases the buyer has here: HLEN, not EXISTS, since the stand-in (lib/redis-memory.ts) leaves an empty
+  // hash behind a read (HGET/HLEN, as the hand-over's deletion take-back sends), where Redis keeps no key at all.
+  const granted = async () => Number((await original([["HLEN", importedKey(statsId, BUYER)]]))[0]);
   markThrows = 1;
   const fifth = await pay(5);
   is("control: the mark did time out, the order kept", [markThrows, (await listed()).includes(fifth)], [0, true]);

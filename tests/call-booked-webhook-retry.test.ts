@@ -17,7 +17,7 @@ import net from "node:net";
 import { addProduct, claimHandle, ensureStatsId, setProductCall, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import type { Product, Store } from "@/lib/store";
 import { readListing, readProduct } from "@/lib/catalog";
-import { type CallListing, holdAndCheckout, isConfirmed } from "@/lib/calls";
+import { type CallListing, confirmationOwed, holdAndCheckout, isConfirmed } from "@/lib/calls";
 import type { CallSetup } from "@/lib/call-setup";
 import { addEndpoint, deliverDue, setSendHooksForTests } from "@/lib/webhooks";
 import { store as redis } from "./redis-stub";
@@ -182,7 +182,9 @@ async function main() {
     const failed = await job();
     is("control: the event mark did time out", markThrows, 0);
     is("the endpoint heard nothing yet", booked(bad.session), 0);
-    is("the booking is not counted confirmed while its event is not recorded", [failed.confirmed, await isConfirmed(bad.session)], [0, false]);
+    // The once-only mark is written with the time kept, before the event (orderWriteOnce, ConfirmStage), so it exists
+    // here; what says the booking is still owed is its stage: not done, so the next run resumes it.
+    is("the booking is not counted confirmed while its event is not recorded", [failed.confirmed, await confirmationOwed(bad.session)], [0, true]);
     is("it stays queued for the next run", await queued(bad.member), true);
     clock += 5 * 60_000;
     const retried = await job();

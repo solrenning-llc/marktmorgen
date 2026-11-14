@@ -5,6 +5,7 @@ import {
   CODE_PROBLEMS,
   type CodeProblem,
   type DiscountCode,
+  MAX_CODES,
   amountProblem,
   codeRules,
   minimumProblem,
@@ -20,6 +21,7 @@ import {
   type ScheduleEntry,
   type ScheduleProblem,
   type ScheduleState,
+  readMoreConfirmation,
   readScheduleConfirmation,
   scheduleState,
 } from "@/lib/discount-schedule-rules";
@@ -40,7 +42,7 @@ const MESSAGES: Record<string, string> = {
 /** What a cancel did, as the route says it: "done" (it never started) or "stopped" (it may have started; it is off now). */
 type Canceled = "done" | "stopped";
 
-type Answer = { codes?: DiscountCode[]; schedules?: ScheduleEntry[]; at?: number; canceled?: Canceled; problem?: string };
+type Answer = { codes?: DiscountCode[]; schedules?: ScheduleEntry[]; more?: boolean; at?: number; canceled?: Canceled; problem?: string };
 
 /** The cancel's own answer, read exactly; anything else is no answer. */
 const canceledOf = (data: unknown): Canceled | undefined => {
@@ -57,6 +59,9 @@ const canceledMessage = (code: string, canceled: Canceled | undefined) =>
       ? `${code} may have started before you canceled. It is off now.`
       : `${code} is off now.`;
 
+/** Said beside a code that could not be switched on at its start; the creator is also emailed once (unit 2). */
+const FAILED_NOTE = "We could not switch this code on at its start. It is still off, so buyers cannot use it. Cancel it and make it again, or switch it on in your Stripe dashboard.";
+
 const UNCONFIRMED = "We could not confirm the discount codes. Reload to check their status before trying again.";
 
 async function send(payload: Record<string, unknown>, currency: Currency): Promise<Answer> {
@@ -71,8 +76,10 @@ async function send(payload: Record<string, unknown>, currency: Currency): Promi
     if (codes !== null) {
       // The codes waiting for their start (511 [CK3]): read exactly, or the list is not confirmed.
       const schedules = readScheduleConfirmation(data);
+      // Whether Stripe holds more than the page sent (unit 2): read exactly, or the list is not confirmed.
+      const more = readMoreConfirmation(data);
       // The moment it was read, for the states it shows.
-      return schedules === null ? { problem: UNCONFIRMED } : { codes, schedules, at: Math.floor(Date.now() / 1000), canceled: canceledOf(data) };
+      return schedules === null || more === null ? { problem: UNCONFIRMED } : { codes, schedules, more, at: Math.floor(Date.now() / 1000), canceled: canceledOf(data) };
     }
     if (data && typeof data === "object" && Object.hasOwn(data,"ok") && (data as {ok?: unknown}).ok === false && Object.hasOwn(data,"error")) {
       const refusal = data as {error?: unknown;reason?: unknown};
@@ -152,6 +159,7 @@ export function DiscountEditor({ selling, currency = "usd", address = "" }: { se
 
   const [codes, setCodes] = useState<DiscountCode[] | null>(null);
   const [schedules, setSchedules] = useState<ScheduleEntry[]>([]);
+  const [more, setMore] = useState(false);
   // The moment the list was read, for its states: read when Stripe answers, not while drawing.
   const [now, setNow] = useState(0);
   const [later, setLater] = useState(false);
@@ -180,6 +188,7 @@ export function DiscountEditor({ selling, currency = "usd", address = "" }: { se
     if (answer.codes) {
       setCodes(answer.codes);
       setSchedules(answer.schedules ?? []);
+      setMore(answer.more ?? true);
       setNow(answer.at ?? 0);
     } else setError(answer.problem ?? MESSAGES.server_error);
   }
@@ -195,6 +204,7 @@ export function DiscountEditor({ selling, currency = "usd", address = "" }: { se
     }
     setCodes(answer.codes);
     setSchedules(answer.schedules ?? []);
+    setMore(answer.more ?? true);
     setNow(answer.at ?? 0);
     done();
     toast(typeof confirmation === "string" ? confirmation : confirmation(answer));
@@ -204,9 +214,12 @@ export function DiscountEditor({ selling, currency = "usd", address = "" }: { se
   const live = (codes ?? []).filter((entry) => entry.active);
   const waiting = (codes ?? []).filter((entry) => !entry.active && scheduleOf.has(entry.id));
   const past = (codes ?? []).filter((entry) => !entry.active && !scheduleOf.has(entry.id));
+  // Scheduled codes older than the page Stripe sent (unit 2): shown from their own schedule, never hidden.
+  const listed = new Set((codes ?? []).map((entry) => entry.id));
+  const unlisted = codes === null ? [] : schedules.filter((plan) => !listed.has(plan.id));
 
   return (
-    <div className="card mt-8 p-6 sm:p-8">
+    <div id="discount-codes" className="card mt-8 scroll-mt-32 p-6 sm:p-8">
       <p className="text-lg font-semibold tracking-[-0.02em] text-ink">Discount codes</p>
 
       {!selling ? (
@@ -322,7 +335,7 @@ export function DiscountEditor({ selling, currency = "usd", address = "" }: { se
                       ) : null}
                       {state === "failed" ? (
                         <p role="alert" className="mt-2 rounded-xl bg-danger-soft px-3 py-2 text-sm font-semibold text-ink">
-                          We could not switch this code on at its start. It is still off, so buyers cannot use it. Cancel it and make it again, or switch it on in your Stripe dashboard.
+                          {FAILED_NOTE}
                         </p>
                       ) : null}
                       <button
@@ -332,6 +345,42 @@ export function DiscountEditor({ selling, currency = "usd", address = "" }: { se
                         className="mt-2 inline-flex min-h-11 items-center text-sm font-bold text-ink-soft underline underline-offset-4 transition hover:text-danger disabled:no-underline disabled:opacity-40"
                       >
                         {`Cancel ${entry.code}`}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </>
+          ) : null}
+
+          {unlisted.length > 0 ? (
+            <>
+              <h3 className="mt-6 text-base font-semibold text-ink">More codes waiting for their start</h3>
+              <p className="mt-1 text-sm text-ink-soft">
+                {`These are older than the ${MAX_CODES} newest codes Stripe sent, so how many times each was used is not shown here. Your Stripe dashboard shows it.`}
+              </p>
+              <ul className="mt-3 space-y-3">
+                {unlisted.map((plan) => {
+                  const state = scheduleState({ active: false, expiresAt: plan.end, timesRedeemed: 0, maxRedemptions: null }, plan, now);
+                  return (
+                    <li key={plan.id} className="rounded-2xl border border-line bg-paper p-4">
+                      <div className="flex flex-wrap items-baseline justify-between gap-2">
+                        <p className="font-mono text-lg font-semibold text-ink">{plan.code}</p>
+                        <StateTag state={state} />
+                      </div>
+                      <p className="mt-1 text-sm text-ink">{`Starts ${momentLabel(plan.start)}. Ends ${momentLabel(plan.end)}.`}</p>
+                      {state === "failed" ? (
+                        <p role="alert" className="mt-2 rounded-xl bg-danger-soft px-3 py-2 text-sm font-semibold text-ink">
+                          {FAILED_NOTE}
+                        </p>
+                      ) : null}
+                      <button
+                        type="button"
+                        aria-busy={busy} disabled={busy}
+                        onClick={() => run({ action: "unschedule", id: plan.id }, () => {}, (answer) => canceledMessage(plan.code, answer.canceled))}
+                        className="mt-2 inline-flex min-h-11 items-center text-sm font-bold text-ink-soft underline underline-offset-4 transition hover:text-danger disabled:no-underline disabled:opacity-40"
+                      >
+                        {`Cancel ${plan.code}`}
                       </button>
                     </li>
                   );
@@ -362,6 +411,12 @@ export function DiscountEditor({ selling, currency = "usd", address = "" }: { se
                 ))}
               </ul>
             </>
+          ) : null}
+
+          {codes !== null && more ? (
+            <p className="mt-4 text-sm text-ink">
+              {`Only your ${MAX_CODES} newest codes are shown here. Your older codes are in your Stripe dashboard, and they still work as they are set there.`}
+            </p>
           ) : null}
 
           {adding ? (

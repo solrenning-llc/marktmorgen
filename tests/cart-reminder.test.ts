@@ -16,7 +16,7 @@ import { TEST_CONSENT } from "./digital-consent-fixture";
 import { addProduct, claimHandle, ensureStatsId, setProductLink, setRecovery, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { readProduct } from "@/lib/catalog";
 import { createCartCheckout } from "@/lib/cart-checkout";
-import { cartLink, remindAbandoned } from "@/lib/checkout-recovery";
+import { cartLink, forgetRecoveryPerson, remindAbandoned } from "@/lib/checkout-recovery";
 import { askCartReminder, sendAsked } from "@/lib/checkout-ask";
 import { allowanceUsed } from "@/lib/store-allowance";
 import { cartAskIds, cartAskKey } from "@/lib/checkout-ask-cart";
@@ -105,6 +105,25 @@ async function main(): Promise<void> {
   is("and why it came, the stop link and the creator's address", [mail.text.includes("you agreed, on the checkout page"), mail.text.includes("Stop these reminders"), mail.text.includes("1 Main St, Austin, TX 78701")], [true, true, true]);
   is("never twice for that checkout", await remindAbandoned(await load(), left("cs_test_cartleft000001") as never), "skip");
   is("nor for the same cart, in any order, in a week", await remindAbandoned(await load(), left("cs_test_cartleft000002", { metadata: { store: "harbor", product: b, bump: a, cart: "yes" } }) as never), "skip");
+  // Claude 7 privacy hunt: deleting the person (lib/person-erasure.ts) forgets their cart's once-a-week mark, a hash of
+  // their address with what was in the cart, as it forgets each product's; before, the cart's stayed its whole week.
+  is("deleting the person forgets the cart's once-a-week mark too", await forgetRecoveryPerson((await load()).statsId, [a, b], "ana@example.com"), 1);
+  is("so the mark no longer holds back that cart", await remindAbandoned(await load(), left("cs_test_cartleft000005", { metadata: { store: "harbor", product: b, bump: a, cart: "yes" } }) as never), "sent");
+  // The note naming a cart's mark outlives the mark: its expiry is set just before the mark is taken.
+  const keysOf = async (pattern: string) => ((await redis.pipeline([["SCAN", "0", "MATCH", pattern]]))[0] as [string, string[]])[1];
+  const ttls = async (keys: string[]) => keys.length ? (await redis.pipeline(keys.map((k) => ["TTL", k]))) as number[] : [];
+  const noteTtl = Math.min(...(await ttls(await keysOf("nl:recover:carts:*"))));
+  is("the carts note outlives every once-a-week mark it may name", noteTtl > Math.max(...(await ttls(await keysOf("nl:recover:once:*")))), true);
+  // A note whose write is not answered exactly is unknown: nothing is claimed or sent, so no cart mark is ever taken
+  // without the note that lets deleting the person find it.
+  const pipe = redis.pipeline;
+  redis.pipeline = (async (commands: (string | number)[][]) =>
+    commands[0]?.[0] === "SADD" && String(commands[0][1]).startsWith("nl:recover:carts:") ? [] : pipe(commands)) as typeof redis.pipeline;
+  const mailsBefore = emails.length, marksBefore = (await keysOf("nl:recover:once:*")).length;
+  const lost = await remindAbandoned(await load(), left("cs_test_cartleft000006", { customer_details: { email: "eve@example.com" } }) as never).then(() => "resolved", (error: Error) => error.name);
+  redis.pipeline = pipe;
+  is("a lost reply to the carts note stops the reminder as unknown", lost, "UnknownReplyError");
+  is("with no mark taken and nothing sent", [(await keysOf("nl:recover:once:*")).length, emails.length], [marksBefore, mailsBefore]);
   paidSessions = [{ id: "cs_test_paid0000000001", status: "complete", payment_status: "paid", metadata: { store: "harbor", product: b } }];
   is("nor to somebody who has paid for one of them since", await remindAbandoned(await load(), left("cs_test_cartleft000003", { customer_details: { email: "ben@example.com" } }) as never), "skip");
   paidSessions = [];

@@ -34,6 +34,7 @@
  *
  *   nl:recover:sent:<session>                the reminder for that checkout went
  *   nl:recover:once:<statsId>:<hash>         that address heard about that product this week
+ *   nl:recover:carts:<statsId>:<hash>        the carts that address heard about this week, so deleting them finds those marks too
  *   nl:recover:off:<statsId>:<hash>          that address pressed stop, kept for good
  *   nl:recover:link:<token>                  who a stop link belongs to
  *   nl:recover:tries:<session>               how many times a sender refused that checkout's reminder for certain, a day
@@ -46,7 +47,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { normaliseEmail } from "@/lib/auth";
 import { type SendOutcome, sendEmailOutcome } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { onAccount, platformKey } from "@/lib/stripe-account";
 import { RECOVERY_OPEN_SECONDS, recoveryOn } from "@/lib/recovery-setting";
 import { isSettled } from "@/lib/instant-pay";
@@ -99,6 +100,11 @@ const who = (email: string) => sha(`nimbus-recover:${normaliseEmail(email)}`).sl
 const sentKey = (session: string) => `nl:recover:sent:${session}`;
 const onceKey = (statsId: string, email: string, product: string) =>
   `nl:recover:once:${statsId}:${sha(`nimbus-recover-once:${normaliseEmail(email)}|${product}`).slice(0, 32)}`;
+/** The carts ("cart:<ids>") one address was reminded of this week: what forgetRecoveryPerson cannot work out from the store's products alone. */
+const cartsKey = (statsId: string, email: string) =>
+  `nl:recover:carts:${statsId}:${sha(`nimbus-recover-carts:${normaliseEmail(email)}`).slice(0, 32)}`;
+/** How long the carts note lives: an hour past ONCE_PER_SECONDS, because its expiry is set just before the mark it names is taken. */
+const CARTS_NOTE_SECONDS = ONCE_PER_SECONDS + 3600;
 const offKey = (statsId: string, email: string) => `nl:recover:off:${statsId}:${who(email)}`;
 /** What a reminder's stop mark can keep for good, counted in the store's data room before it is sent. */
 export const RECOVER_TRACE_BYTES = 192;
@@ -507,6 +513,17 @@ async function deliver(
     return "skip";
   }
 
+  // A cart's mark is noted under the address before it is taken, so deleting the person finds it (forgetRecoveryPerson);
+  // the note outlives every mark it names (CARTS_NOTE_SECONDS). A note whose write is not answered exactly (SADD 0 or 1,
+  // EXPIRE 1) is unknown and stops the reminder before anything is claimed, so no cart mark is ever taken unnoted.
+  if (about.kind === "cart") {
+    const noted = repliesFor(await redisPipeline([
+      ["SADD", cartsKey(statsId, email), onceFor],
+      ["EXPIRE", cartsKey(statsId, email), CARTS_NOTE_SECONDS],
+    ]), 2);
+    if (!noted || (noted[0] !== 0 && noted[0] !== 1) || noted[1] !== 1) throw new UnknownReplyError("the note of the carts an address was reminded of");
+  }
+
   // Taken before sending: whichever pass gets here first is the only one.
   const claims = repliesFor(
     await redisPipeline([
@@ -686,10 +703,16 @@ async function deliver(
  */
 export async function forgetRecoveryPerson(statsId: string | null, productIds: string[], email: string): Promise<number> {
   if (!statsId || !productIds.length || !isRedisConfigured()) return 0;
+  // The carts they were reminded of this week, read exactly: a list that does not read is unknown, never "no carts".
+  const noted = repliesFor(await redisPipeline([["SMEMBERS", cartsKey(statsId, email)]]), 1);
+  const carts = noted ? stringList(noted[0]) : null;
+  if (!carts) throw new UnknownReplyError("the carts an address was reminded of");
+  const marks = [...productIds, ...carts].map((p) => onceKey(statsId, email, p));
   // The count only in its exact shape (CX-123 rule 24; docs/reviews/pf1-sweep-r24.md, F5):
   // anything else is unknown, and the erasure says this step could not finish, never "nothing here".
-  const gone = repliesFor(await redisPipeline([["DEL", ...productIds.map((p) => onceKey(statsId, email, p))]]), 1);
+  const gone = repliesFor(await redisPipeline([["DEL", ...marks, ...(carts.length ? [cartsKey(statsId, email)] : [])]]), 1);
   const count = gone ? countOf(gone[0]) : null;
   if (count === null) throw new UnknownReplyError("the deletion of an address's reminder marks");
-  return count;
+  // The note itself, when there was one, is not a mark.
+  return Math.max(0, count - (carts.length ? 1 : 0));
 }

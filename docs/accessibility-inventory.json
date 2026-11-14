@@ -1458,6 +1458,7 @@
     "components/local-day.tsx",
     "components/logo.tsx",
     "components/look-editor.tsx",
+    "components/mail-access-review.tsx",
     "components/mail-click.tsx",
     "components/mail-designer.tsx",
     "components/mail-picture-button.tsx",

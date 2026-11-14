@@ -149,7 +149,7 @@ export default function DevelopersPage() {
 429  {"error": "monthly_limit", "message": "This read takes ${n(BOOKINGS_COUNT)} of your store's API requests, more than your store has left, so nothing was read."}
 429  {"error": "monthly_limit", "message": "This read may take up to ${n(LIST_PAGE_HELD)} of your store's API requests, more than your store has left, so nothing was read."}
 400  {"error": "unknown_field", "message": "No item in this answer has a field named “nothing_here”."}
-400  {"error": "fields", "message": "“bad-name” cannot be a field name. Use letters, digits and underscores, at most 30 fields."}
+400  {"error": "fields", "message": "“bad-name” cannot be a field name. A field name is lowercase letters, digits and underscores, starting with a letter, up to ${FIELD_NAME_MAX} characters; ask for at most ${MAX_FIELDS_ASKED} fields."}
 429  {"error": "no_place", "message": "Stores without a paid plan are full for this month, so this can't run right now. …"}
 409  {"error": "store_full", "message": "Your store's data room is full, so nothing was added. …"}
 403  {"error": "key_paused", "message": "This key is paused: the store's team now logs in with a second step, and the key was made without one. …"}

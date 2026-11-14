@@ -1,0 +1,12 @@
+{
+  "@/lib/redis": "member-nudge-world.ts",
+  "@/lib/stripe-account": "member-nudge-world.ts",
+  "@/lib/email": "member-nudge-world.ts",
+  "@/lib/store": "member-nudge-world.ts",
+  "@/lib/membership-manage": "member-nudge-world.ts",
+  "@/lib/mail": "member-nudge-world.ts",
+  "@/lib/contacts": "member-nudge-world.ts",
+  "@/lib/purchase-email": "member-nudge-world.ts",
+  "@/lib/catalog": "member-nudge-world.ts",
+  "@/lib/member-health": "member-nudge-world.ts"
+}

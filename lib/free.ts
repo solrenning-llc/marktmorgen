@@ -53,6 +53,7 @@ import {
 } from "@/lib/contacts";
 import { noteForErasure } from "@/lib/erasure-index";
 import { personReturned } from "@/lib/crm";
+import { contactOpen } from "@/lib/store-contact";
 
 export { MAX_LEADS };
 
@@ -258,11 +259,15 @@ export async function requestCopy(input: {
       "",
       g.freeIgnore,
       "",
+      // Replies do not reach the store, and its own address is never handed to whoever typed one: when its page has
+      // the contact form open (lib/store-contact.ts), this is how to write to it (755 [STN2]).
+      ...(contactOpen(store) ? [g.freeContact(name, `${origin}/@${store.handle}#contact`), ""] : []),
       g.freeSentBy(name),
     ].join("\n"),
   });
   // One of the month's orders (lib/orders.ts): nothing was paid, so it always counts. A count not confirmed keeps
-  // the room it was admitted with until its hours end, never given back as if counted.
+  // the room it was admitted with until its hours end, never given back as if counted. A free copy has no recount:
+  // past those hours that one copy is in neither the count nor the room (one per copy whose every try failed).
   const tally = sent ? await countOrder(store, `free:${token}`, 0) : false;
   if (tally !== "unknown") await settleAdmitted(store, admitted.hour);
   return sent ? "sent" : "error";

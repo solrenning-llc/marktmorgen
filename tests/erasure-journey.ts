@@ -129,7 +129,8 @@ export async function runJourney(is: Check, sent: Sent[], counted: { commands: n
   is("the mark and the count hold nothing but a time and a number, never the address", [crmMarks.length, crmMarks.every(([, value]) => /^"\d{1,13}"$/.test(value))], [2, true]);
   is("and goes by itself within ERASED_MARK_SECONDS", await Promise.all(crmMarks.map(async ([key]) => { const [ttl] = await redisPipeline([["TTL", key]]); return typeof ttl === "number" && ttl > 0 && ttl <= ERASED_MARK_SECONDS; })), [true, true]);
   const suppressionOnly = [...after].filter(([key]) => /^nl:erased:/.test(key));
-  is("only a fingerprint is kept, under the store's list", suppressionOnly.map(([key, value]) => [key, (JSON.parse(value) as string[]).length]), [[`nl:erased:${listId}`, 1]]);
+  // The fingerprint, and the same fingerprint noted as their own request (lib/suppression.ts ownErasureField).
+  is("only a fingerprint is kept, under the store's list, noted as their own request", suppressionOnly.map(([key, value]) => [key, (JSON.parse(value) as string[]).length]), [[`nl:erased:${listId}`, 2]]);
   is("which cannot be read back to the address", suppressionOnly.some(([, value]) => value.includes(tess) || value.includes("@")), false);
   is("the other person is untouched", parseContact((await redisPipeline([["HGET", leadsKey(listId), other]]))[0])?.agreed, true);
 

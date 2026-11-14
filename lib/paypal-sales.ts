@@ -750,7 +750,12 @@ export async function captureOrder(store: Store, order: string): Promise<Capture
   // failed, refunded or otherwise taken back is declined. A status not known here is not "declined": the order is kept
   // for the sweep to ask about again, as the sweep itself does (Claude 6's second money review of #3392, LEVE 2; rule 30).
   if (typeof capture.status !== "string" || !CAPTURE_PAID.has(capture.status)) {
-    if (typeof capture.status === "string" && CAPTURE_TAKEN_BACK.has(capture.status)) return { ok: false, reason: "declined" };
+    if (typeof capture.status === "string" && CAPTURE_TAKEN_BACK.has(capture.status)) {
+      // Declined in the answer itself: nothing was charged, as with PayPal's own refusal above, so an order put in
+      // pending by this call (watchFirst) is let go of it; one there before stays for the sweep.
+      if (watchedHere) await redisPipeline([["ZREM", pendingKey(opened.s), order]]).catch((again) => console.error("letting go of a declined PayPal order failed", again));
+      return { ok: false, reason: "declined" };
+    }
     console.error("a PayPal capture is in a status not known here; asked again by the sweep", order, capture.status);
     await watchLater(order, opened);
     return { ok: false, reason: "pending" };

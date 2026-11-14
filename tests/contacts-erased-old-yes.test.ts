@@ -61,10 +61,12 @@ async function main(): Promise<void> {
   is("a purchase without the box records the purchase only", [await write({ agreed: false, explicit: true, source: "buyer", at: AFTER }), row()?.agreed, print()], ["written", false, String(ERASED_SECONDS)]);
 
   part("A print whose second does not read is never taken as an old one");
+  // Main's upsertContact (consent audit of 9 November 2026, afterDeletion) refuses such a write quietly instead of
+  // throwing: nothing is written and the print stays, which is what this part holds.
   for (const [what, value] of [["text", "yesterday"], ["a fraction", "1730.5"], ["nothing", ""]] as const) {
     reset();
     redis.run(["HSET", suppressedKey(LIST), suppressionPrint(LIST, WHO), value]);
-    is(`a print of ${what}: a yes with a time to compare changes nothing and writes nothing`, [await write({ agreed: true, explicit: true, source: "buyer", at: AFTER }), row(), print()], ["threw", null, value]);
+    is(`a print of ${what}: a yes with a time to compare changes nothing and writes nothing`, [await write({ agreed: true, explicit: true, source: "buyer", at: AFTER }), row(), print()], ["written", null, value]);
   }
   done();
 }

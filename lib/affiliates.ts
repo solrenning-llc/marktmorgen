@@ -763,7 +763,7 @@ export async function readAffiliate(store: Store, id: string): Promise<Affiliate
  * An affiliate's record read exactly (rule 24): null only when Redis confirms there is none; a reply of another shape,
  * or text that does not read as a record, throws UnknownReplyError. For a caller whose "none" moves money.
  */
-async function readAffiliateExact(store: Store, id: string): Promise<Affiliate | null> {
+export async function readAffiliateExact(store: Store, id: string): Promise<Affiliate | null> {
   if (!store.statsId || !AFFILIATE_ID_PATTERN.test(id)) throw new Error("an affiliate's record needs a store and an affiliate id");
   const reply = repliesFor(await redisPipeline([["HGET", peopleKey(store.statsId), id]]), 1);
   if (reply && reply[0] === null) return null;

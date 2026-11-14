@@ -32,8 +32,8 @@ import { createHmac } from "node:crypto";
 import { types } from "node:util";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { canSeal, deriveKey, seal, unseal } from "@/lib/secret-box";
-import { type Book, addPayoutOnce, payAddress, payoutIdForItem, payoutReference, payoutReferences, readBook, readPayoutsExact } from "@/lib/affiliates";
-import { type BatchLine, batchTotal, dropPayFiles, keepPayFile, owedLines, payoutIdForFileLine, payoutNote, readPayFile } from "@/lib/affiliate-payouts";
+import { type Book, addPayoutOnce, payAddress, payoutIdForItem, payoutReference, payoutReferences, readAffiliateExact, readBook, readPayoutsExact } from "@/lib/affiliates";
+import { type BatchLine, batchTotal, dropPayFiles, keepPayFile, owedLines, payAddressMark, payoutIdForFileLine, payoutNote, readPayFile } from "@/lib/affiliate-payouts";
 import { plainAmount } from "@/lib/money";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { LockBusyError, holdLock, withLock } from "@/lib/redis-lock";
@@ -487,7 +487,8 @@ export type FileConfirmed =
   /**
    * "file": no kept file under that id (never downloaded, already written down, run out or unreadable); "stale": one
    * of its affiliates has a PayPal payment on its way or a payout written after the file was downloaded, so writing
-   * it would pay the same commission twice; "busy": the store's payouts are being written by another request.
+   * it would pay the same commission twice, or changed where they are paid since, so the file's money went to an
+   * address they no longer have; "busy": the store's payouts are being written by another request.
    */
   | { ok: false; reason: "file" | "stale" | "busy" };
 
@@ -517,7 +518,8 @@ export async function keepPayFileLocked(store: Store, lines: BatchLine[]): Promi
  *
  * A file is refused as "stale", with nothing written, when any of its affiliates has a PayPal payment on its way
  * or a payout written after the file was downloaded, other than this file's own lines (a retry): every file is a
- * snapshot of the whole balance, so it overlaps whatever was paid since (review of #3906, MEDIUM 2 and LEVE 4).
+ * snapshot of the whole balance, so it overlaps whatever was paid since (review of #3906, MEDIUM 2 and LEVE 4),
+ * and when any of them changed where they are paid since the download (payAddressMark; Claude 2, MEDIUM).
  * Once it is written down, every kept file of the store goes, for the same reason. The lock is renewed every
  * LINES_PER_HOLD lines; lost, the writing stops as "busy" and a retry writes the rest once.
  */
@@ -535,6 +537,14 @@ export async function confirmPayFile(store: Store, file: string, input: { date: 
         (payout) => inFile.has(payout.aff) && payout.at > kept.at && payout.id !== payoutIdForFileLine(file, payout.aff),
       );
       if (since) return { ok: false, reason: "stale" };
+      // Each line paid the address its affiliate had at the download. One who changed it since was paid at the old
+      // one, so the file is not written down as theirs (review of #3906, Claude 2, MEDIUM). One who is gone is
+      // skipped below, as before.
+      for (const [index, line] of kept.lines.entries()) {
+        if (index > 0 && index % LINES_PER_HOLD === 0 && !(await holdLock(held))) return { ok: false, reason: "busy" };
+        const now = await readAffiliateExact(store, line.a);
+        if (now && payAddressMark(now) !== line.p) return { ok: false, reason: "stale" };
+      }
       const reference = payoutReference(input.reference);
       let written = 0;
       let cents = 0;

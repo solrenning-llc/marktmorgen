@@ -252,15 +252,32 @@ export const MAX_PAY_FILES = 3;
 
 export const payFilesKey = (statsId: string) => `nl:affpay:${statsId}`;
 
-/** One kept file: when it was handed out (ms), its currency and its lines (affiliate id, amount in the smallest unit). */
-export type KeptPayFile = { at: number; currency: string; lines: { a: string; c: number }[] };
+/**
+ * One kept file: when it was handed out (ms), its currency and its lines (affiliate id, amount in the smallest unit,
+ * and the mark of where that line was paid, payAddressMark).
+ */
+export type KeptPayFile = { at: number; currency: string; lines: { a: string; c: number; p: string }[] };
 
 /** A kept file as the studio lists it: never its addresses, only how many it pays and how much. */
 export type HeldPayFile = { id: string; at: number; currency: string; people: number; cents: number };
 
 const PAY_FILE_ID = /^[0-9a-f]{24}$/;
+const PAY_ADDRESS_MARK = /^[0-9a-f]{16}$/;
 
-/** A kept file read exactly; null when it does not read as one (then it is never confirmed). */
+/**
+ * The mark of where one line of a file sends an affiliate's money: both addresses a file can name (the PayPal file
+ * pays payAddress, the worksheet names the joining email), hashed, so the kept file holds no address. If the
+ * affiliate changes either before the creator confirms, the money went to the address they had then, and the file
+ * is refused as "stale" instead of being written down as theirs (review of #3906, Claude 2, MEDIUM).
+ */
+export function payAddressMark(affiliate: Pick<Affiliate, "email" | "paypal">): string {
+  return createHash("sha256").update(`payout-file-address|${affiliate.email}|${payAddress(affiliate)}`).digest("hex").slice(0, 16);
+}
+
+/**
+ * A kept file read exactly; null when it does not read as one (then it is never confirmed). A line without the mark
+ * of its address (a file kept before the mark existed) does not read: that file is downloaded again.
+ */
 export function parsePayFile(raw: unknown): KeptPayFile | null {
   if (typeof raw !== "string") return null;
   let value: unknown;
@@ -274,19 +291,22 @@ export function parsePayFile(raw: unknown): KeptPayFile | null {
   if (!Number.isSafeInteger(at) || (at as number) <= 0 || typeof currency !== "string" || !/^[a-z]{3}$/.test(currency)) return null;
   if (!Array.isArray(lines) || lines.length === 0 || lines.length > MAX_BATCH_ROWS) return null;
   const seen = new Set<string>();
-  const read: { a: string; c: number }[] = [];
+  const read: { a: string; c: number; p: string }[] = [];
   for (const line of lines) {
-    const { a, c } = (line ?? {}) as Record<string, unknown>;
+    const { a, c, p } = (line ?? {}) as Record<string, unknown>;
     if (typeof a !== "string" || !AFFILIATE_ID_PATTERN.test(a) || seen.has(a) || !Number.isSafeInteger(c) || (c as number) <= 0) return null;
+    if (typeof p !== "string" || !PAY_ADDRESS_MARK.test(p)) return null;
     seen.add(a);
-    read.push({ a, c: c as number });
+    read.push({ a, c: c as number, p });
   }
   return { at: at as number, currency, lines: read };
 }
 
-/** The same lines, the same currency: the same file. */
+/** The same lines paid to the same addresses, the same currency: the same file. */
 const sameLines = (one: KeptPayFile, other: KeptPayFile) =>
-  one.currency === other.currency && one.lines.length === other.lines.length && one.lines.every((line, i) => line.a === other.lines[i].a && line.c === other.lines[i].c);
+  one.currency === other.currency &&
+  one.lines.length === other.lines.length &&
+  one.lines.every((line, i) => line.a === other.lines[i].a && line.c === other.lines[i].c && line.p === other.lines[i].p);
 
 /** Every kept file of a store, read exactly; UnknownReplyError when the reply is not a hash's field and value pairs. */
 async function readPayFiles(statsId: string): Promise<[string, string][]> {
@@ -306,7 +326,7 @@ async function readPayFiles(statsId: string): Promise<[string, string][]> {
 export async function keepPayFile(store: Store, lines: BatchLine[], nowMs = Date.now()): Promise<string> {
   if (!store.statsId) throw new Error("a payout file needs the store's statsId");
   const key = payFilesKey(store.statsId);
-  const file: KeptPayFile = { at: nowMs, currency: store.currency, lines: lines.map((line) => ({ a: line.affiliate.id, c: line.cents })) };
+  const file: KeptPayFile = { at: nowMs, currency: store.currency, lines: lines.map((line) => ({ a: line.affiliate.id, c: line.cents, p: payAddressMark(line.affiliate) })) };
   const kept = (await readPayFiles(store.statsId))
     .map(([id, raw]) => ({ id, file: parsePayFile(raw) }))
     .sort((x, y) => (y.file?.at ?? 0) - (x.file?.at ?? 0));

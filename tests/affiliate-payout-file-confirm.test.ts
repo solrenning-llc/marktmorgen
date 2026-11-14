@@ -15,6 +15,8 @@
  *   - a file superseded by a later one already written down (every file is a snapshot of the whole balance) is
  *     refused, never written on top of it (review of #3906, Claude 1, MEDIUM 2);
  *   - a file that overlaps a PayPal payment on its way, or a payout written after it was downloaded, is refused;
+ *   - a file whose affiliate changed where they are paid after the download is refused, and one kept without the
+ *     mark of each line's address is never written down (review of #3906, Claude 2, MEDIUM);
  *   - `left` is what the next file would pay, not every row's balance (review of #3906, LEVE 3).
  */
 import { NextRequest } from "next/server";
@@ -164,6 +166,30 @@ async function main(): Promise<void> {
   await redis.pipeline([["HSET", payoutsKey, "abcdefabcdef", JSON.stringify({ id: "abcdefabcdef", aff: BEA, cents: 3_000, currency: "usd", date: "2026-11-12", reference: "cash", at: Date.now() + 1_000 })]]);
   const byHand = await confirm({ date: "2026-11-12", reference: "x", file: f4.file });
   is("refused as out of date, nothing written", [byHand.status, byHand.data.error, (await paidTo())[BEA]], [409, "stale", 6_000]);
+
+  part("A file whose affiliate changed where they are paid after the download is refused");
+  // The file sent Ana's money to the address she had then. If she moved to another PayPal address since, that money
+  // may never reach her (unclaimed, back to the creator), so "Mark as paid" must not write it down as hers (review
+  // of #3906, Claude 2, MEDIUM: the payout address is part of the kept file).
+  await redis.pipeline([["HSET", sales, "cs_ana4", sale("cs_ana4", ANA, 10_000)]]);
+  const f5 = await download();
+  is("f5 pays Ana $30 at her joining address", f5.body.includes(`"ana@example.com",30.00,USD,`), true);
+  const anaBefore = (await paidTo())[ANA];
+  await redis.pipeline([["HSET", `nl:aff:${statsId}:people`, ANA, JSON.stringify({ ...JSON.parse(person(ANA, "ana")), paypal: "ana.new@example.com" })]]);
+  const moved = await confirm({ date: "2026-11-12", reference: "PayPal batch 5", file: f5.file });
+  is("refused as out of date, nothing written", [moved.status, moved.data.error, (await paidTo())[ANA]], [409, "stale", anaBefore]);
+  is("Ana is still owed the $30", (await owed())[ANA], 3_000);
+  const f6 = await download();
+  is("the new file pays Ana at her new address, under a new id", [f6.body.includes(`"ana.new@example.com",30.00,USD,`), f6.file !== f5.file], [true, true]);
+  const paidF6 = await confirm({ date: "2026-11-12", reference: "PayPal batch 6", file: f6.file });
+  is("the new file is written down", [paidF6.status, paidF6.data.cents, (await owed())[ANA]], [200, 3_000, 0]);
+
+  part("A file kept before lines carried their address mark is never written down");
+  await redis.pipeline([["HSET", sales, "cs_bea3", sale("cs_bea3", BEA, 10_000)]]);
+  const old = "c".repeat(24);
+  await redis.pipeline([["HSET", `nl:affpay:${statsId}`, old, JSON.stringify({ at: Date.now(), currency: "usd", lines: [{ a: BEA, c: 3_000 }] })]]);
+  const unmarked = await confirm({ date: "2026-11-12", reference: "x", file: old });
+  is("refused as no file, nothing written", [unmarked.status, unmarked.data.error, (await owed())[BEA]], [409, "file", 3_000]);
   done();
 }
 

@@ -16,6 +16,8 @@ import { viaCookieName } from "@/lib/affiliate-setting";
 import { clientAddress, fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
 import { readProduct } from "@/lib/catalog";
 import { chargeNow } from "@/lib/call-deposit";
+import { packageFor, payBookTimes } from "@/lib/book-page-admission";
+import { BOOK_POST_EXTRA_UNITS } from "@/lib/book-page-rules";
 import { type DepositFigures, depositWithCode, readDepositCode } from "@/lib/deposit-code";
 
 /** The checkout this browser last opened for a call, so going back frees it. */
@@ -123,6 +125,11 @@ export async function POST(request: NextRequest) {
   // one connection gets fifteen in ten minutes per store: enough to change
   // one's mind many times, not enough to hold a creator's whole week.
   if (!(await withinLimit("book", `${clientAddress(request)}|${store.handle}`, 15, 600))) return back("slow");
+  // The times it reads (lib/calls.ts, holdAndCheckout: readBusy) and the request itself are paid for before anything is
+  // read from Stripe (review of #3478; lib/book-page-admission.ts): a package proved bought for this call books from the
+  // buyers' reserve, anything else from the public side, held and given back when refused. Past them, nothing is read.
+  const owned = pkg ? await packageFor(store, product.id, pkg) : null;
+  if (!(await payBookTimes(store, owned ? "buyer" : "public", Date.now(), BOOK_POST_EXTRA_UNITS))) return back("slow");
 
   // A buyer who went back from Stripe's page to pick again lets go of the
   // time they were holding, after that checkout is closed at Stripe.

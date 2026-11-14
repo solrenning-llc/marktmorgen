@@ -6,6 +6,7 @@ import { readOrder } from "@/lib/store-checkout";
 import { isCallProduct, moveBooking } from "@/lib/calls";
 import { clientAddress, fromAnotherSite, limited } from "@/lib/request-guard";
 import { readListing } from "@/lib/catalog";
+import { bookedHere, payBookTimes } from "@/lib/book-page-admission";
 
 const MAX_BODY_BYTES = 1_000;
 
@@ -65,10 +66,14 @@ export async function POST(request: NextRequest) {
 
   if (!Number.isFinite(start)) return back("invalid");
   if (!(await withinStore("book-move", `${clientAddress(request)}|${store.handle}`, 10, 600, store, "buyer"))) return back("slow");
+  // Only a booking in this store's diary is asked about at Stripe (review of #3478; one HEXISTS, lib/book-page-admission.ts).
+  if (!(await bookedHere(store, session))) return back("unknown");
   const order = await readOrder(store, session);
   if (order.state !== "paid" || !order.call || order.product.id !== product.id) {
     return back(order.state === "error" || order.state === "unavailable" ? "error" : "unknown");
   }
+  // The times the move reads (moveBooking: readBusy) are paid for before they are read, from the whole window: the booking is the buyer's.
+  if (!(await payBookTimes(store, "buyer"))) return back("slow");
 
   const result = await moveBooking({
     store,

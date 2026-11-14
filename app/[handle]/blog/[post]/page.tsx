@@ -25,16 +25,20 @@ const load = cache(async (raw: string, segment: string) => {
   const store = await storeForPage(normaliseHandle(decoded));
   // A store switched off after notices (lib/takedown.ts) shows no posts.
   if (!store || store.suspended) return null;
+  // Counted as one of the store's public requests before the post is read (traffic audit, 9 November 2026): past
+  // the window, neither the title nor the page reads it. The page and its title share this one count (React cache).
+  if (await isResting(store)) return { store, post: null, unavailable: false as const, resting: true as const };
   const id = postIdFrom(decodeURIComponent(segment));
   const post = id ? await readPost(store.statsId, id).catch(() => undefined) : null;
-  if (post === undefined) return { store, post: null, unavailable: true as const };
-  return post && !post.draft ? { store, post, unavailable: false as const } : null;
+  if (post === undefined) return { store, post: null, unavailable: true as const, resting: false as const };
+  return post && !post.draft ? { store, post, unavailable: false as const, resting: false as const } : null;
 });
 
 export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const { handle, post: segment } = await params;
   const found = await load(handle, segment);
   if (!found) return { title: "Not found — Marktmorgen" };
+  if (found.resting) return { title: `${speech(found.store).w.restingTitle} — ${found.store.name}`, robots: { index: false, follow: true } };
   if (found.unavailable) return { title: `${speech(found.store).w.notAvailable} — ${found.store.name}`, robots: { index: false, follow: true } };
   const { store, post } = found;
   const url = `${storeRoot(store)}/blog/${postSegment(post)}`;
@@ -52,7 +56,7 @@ export default async function PostPage({ params }: Params) {
   const found = await load(handle, segment);
   if (!found) notFound();
   const { store } = found;
-  if (await isResting(store)) return <StoreResting store={store} />;
+  if (found.resting) return <StoreResting store={store} />;
   if (found.unavailable) {
     const { w, lang } = speech(store);
     return (

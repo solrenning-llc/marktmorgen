@@ -571,9 +571,10 @@ const ERASED_UNREAD_WORDS = {
 
 /** The most addresses one message is checked for; a message holds a handful (a buyer, an affiliate), DELIVERY_MAX_BYTES bounds the rest. */
 const ERASED_CHECK_MAX = 50;
-const ADDRESS_LIKE = /^[^\s@]{1,64}@[^\s@]{1,253}\.[^\s@]{1,63}$/;
+/** An address anywhere in a text: alone, inside a sentence or as "Name <address>" (Claude 4 on #4555, LEVE). */
+const ADDRESS_IN_TEXT = /[^\s@<>()[\]{}"'`,;:]{1,64}@[a-z0-9-]{1,63}(?:\.[a-z0-9-]{1,63})*\.[a-z]{2,63}/gi;
 
-/** Every email address written anywhere in a delivery's message, lowercased, each once. */
+/** Every email address written anywhere in a delivery's message, values and keys, lowercased, each once. */
 export function addressesIn(body: string): string[] {
   let value: unknown;
   try {
@@ -585,10 +586,17 @@ export function addressesIn(body: string): string[] {
   const walk = (v: unknown, depth: number): void => {
     if (depth > 12) return;
     if (typeof v === "string") {
-      const text = v.trim().toLowerCase();
-      if (text.length <= 254 && ADDRESS_LIKE.test(text)) found.add(text);
+      for (const match of v.matchAll(ADDRESS_IN_TEXT)) {
+        const address = match[0].replace(/^[.]+/, "").toLowerCase();
+        if (address.length <= 254) found.add(address);
+      }
     } else if (Array.isArray(v)) v.forEach((item) => walk(item, depth + 1));
-    else if (v && typeof v === "object") Object.values(v).forEach((item) => walk(item, depth + 1));
+    else if (v && typeof v === "object") {
+      for (const [key, item] of Object.entries(v)) {
+        walk(key, depth + 1);
+        walk(item, depth + 1);
+      }
+    }
   };
   walk(value, 0);
   return [...found];

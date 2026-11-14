@@ -40,8 +40,19 @@ export function StoreAccessCheck({ check }: { check: AccessCheck | null }) {
           <p className="mt-1 max-w-[80ch] text-sm text-ink-soft">
             {"A screen reader says the description instead of the picture. Check each of these products in Products: under its picture, fill in \"What the picture shows, for people who cannot see it\". If a picture only decorates the title, an empty description is right, and you can leave it."}
           </p>
-          <ul className="mt-3 list-disc space-y-1 pl-6 text-sm text-ink">
-            {pictures.missing.map((title, index) => <li key={`${index}-${title}`}>{title}</li>)}
+          {/* Each one opens that product with the focus in its picture's description (AX274 Part A item 6); nothing is filled in. */}
+          <ul className="mt-3 list-disc space-y-1 pl-6 text-sm text-ink [overflow-wrap:anywhere]">
+            {pictures.missing.map((title, index) => (
+              <li key={`${index}-${title}`}>
+                {check.pictureIds?.[index] ? (
+                  <a href={`#alt-${check.pictureIds[index]}`} className="inline-flex min-h-11 items-center font-semibold underline underline-offset-4 hover:text-violet-deep">
+                    {`Describe the picture of ${title}`}
+                  </a>
+                ) : (
+                  title
+                )}
+              </li>
+            ))}
           </ul>
           <p className="mt-4">
             <Link href="#products" className="btn btn-secondary btn-sm">
@@ -65,7 +76,14 @@ export function StoreAccessCheck({ check }: { check: AccessCheck | null }) {
             {"A screen reader can list the links on a page by their words alone, so \u201cClick here\u201d or an address says nothing about what is there. Say where it goes, such as \u201cBook a call with me\u201d or \u201cMy YouTube channel\u201d. Nothing is changed until you change it."}
           </p>
           <ul className="mt-3 list-disc space-y-1 pl-6 text-sm text-ink [overflow-wrap:anywhere]">
-            {check.links.vague.map((link) => <li key={link.id}>{link.title}</li>)}
+            {/* Each one opens that link's form with the focus in its words; nothing is changed until the creator saves. */}
+            {check.links.vague.map((link) => (
+              <li key={link.id}>
+                <a href={`#edit-link-${link.id}`} className="inline-flex min-h-11 items-center font-semibold underline underline-offset-4 hover:text-violet-deep">
+                  {`Change the words of \u201c${link.title}\u201d`}
+                </a>
+              </li>
+            ))}
           </ul>
           <p className="mt-4">
             <Link href="#links" className="btn btn-secondary btn-sm">

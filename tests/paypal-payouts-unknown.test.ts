@@ -27,7 +27,7 @@ let reads = 0;
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status });
-  if (url.hostname === "api.stripe.com") return json({ data: [], has_more: false });
+  if (url.hostname === "api.stripe.com") return json({ object: "list", data: [], has_more: false });
   if (url.hostname !== "api-m.paypal.com") return json({ error: "unexpected" }, 404);
   if (url.pathname === "/v1/oauth2/token") return json({ access_token: "A21AAtoken", token_type: "Bearer", scope: SCOPE, expires_in: 32400 });
   if (url.pathname === "/v1/payments/payouts" && init?.method === "POST") {

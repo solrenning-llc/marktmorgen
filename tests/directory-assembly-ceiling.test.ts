@@ -15,6 +15,11 @@
  * SMISMEMBER), so a store whose creator has just taken it out is gone at once and the page stays up (Claude 6 on
  * #3062). With no last build kept, the visit is told the list is unavailable just now, never an empty or partial
  * list. #2921's own behavior is unchanged inside the ceiling (tests/directory-index-unknown.test.ts).
+ *
+ * Since the owner's decision through the coordinator (C1-20261109-1603-TODOS-71, on #3118), the window is
+ * DIRECTORY_BUILD_SECONDS (an hour) with DIRECTORY_BUILDS_PER_HOUR (one) build in it, in place of 10 in ten minutes:
+ * a save inside the hour no longer builds again, and its visits are shown the last good build, checked
+ * (tests/directory-every-hour.test.ts).
  */
 import * as index from "@/lib/directory-index";
 import { DIRECTORY_BUILD, DIRECTORY_CACHE } from "@/lib/directory-index";
@@ -35,9 +40,9 @@ const keys = index as unknown as Record<string, unknown>;
 const exported = directory as unknown as Record<string, unknown>;
 const LAST = (keys.DIRECTORY_LAST as string | undefined) ?? "nl:dir:last";
 const COUNT = (keys.DIRECTORY_BUILDS as string | undefined) ?? "nl:dir:builds";
-const CEILING = (exported.DIRECTORY_BUILDS_PER_TEN_MINUTES as number | undefined) ?? 10;
+const CEILING = (exported.DIRECTORY_BUILDS_PER_HOUR as number | undefined) ?? 1;
 const Busy = exported.DirectoryBusyError as (new (...args: never[]) => Error) | undefined;
-const WINDOW_MS = 600_000;
+const WINDOW_MS = 3_600_000;
 
 function outcome(error: unknown): string {
   if (Busy && error instanceof Busy) return "busy";
@@ -108,42 +113,42 @@ async function main(): Promise<void> {
   await selling("cakes@example.com", "cakeshop", "Cake Shop");
 
   part("The ceiling is named, exported and priced");
-  is("DIRECTORY_BUILDS_PER_TEN_MINUTES is exported, 10 builds in a window", exported.DIRECTORY_BUILDS_PER_TEN_MINUTES, 10);
+  is("DIRECTORY_BUILDS_PER_HOUR is exported, 1 build in a window of DIRECTORY_BUILD_SECONDS, an hour", [exported.DIRECTORY_BUILDS_PER_HOUR, exported.DIRECTORY_BUILD_SECONDS], [1, 3_600]);
   is("DirectoryBusyError is exported", typeof Busy, "function");
   is("the window's count and the last good build have their keys", [keys.DIRECTORY_BUILDS, keys.DIRECTORY_LAST], ["nl:dir:builds", "nl:dir:last"]);
-  const line = (NOT_A_COST as Record<string, string | undefined>).DIRECTORY_BUILDS_PER_TEN_MINUTES ?? "";
+  const line = (NOT_A_COST as Record<string, string | undefined>).DIRECTORY_BUILDS_PER_HOUR ?? "";
   is("the registry prices the builds by name", line.length > 0, true);
-  is("with the worst build, the builds in 30 days, the commands and the dollars", ["12,072", "43,200", "521,510,400", "US$1,043.02"].map((figure) => line.includes(figure)), [true, true, true, true]);
+  is("with the worst build, the builds in 30 days, the commands and the dollars", ["12,074", "720", "8,693,280", "US$17.39"].map((figure) => line.includes(figure)), [true, true, true, true]);
   is("and with what a visit costs when it is not built", ["nl:dir:last", "SMISMEMBER"].map((word) => line.includes(word)), [true, true]);
   const scanLine = (NOT_A_COST as Record<string, string | undefined>).DIRECTORY_SCAN_PAGES ?? "";
   is("the scan line no longer says the rate is not bounded", /not bounded|needs its own item/.test(scanLine), false);
 
-  part("#2921 inside the ceiling: a save, then the next visit builds at once");
+  part("#2921 inside the ceiling: the window's one build, then a save inside the hour builds nothing");
   const first = await counted(() => attempt());
   is("the first visit builds", [first.result, first.words.SSCAN], [["breadhouse", "cakeshop"], 1]);
-  is("its place is counted in the window, which ends by itself", [await get(COUNT), Number(await ttl(COUNT)) > 0 && Number(await ttl(COUNT)) <= 600], ["1", true]);
+  is("its place is counted in the window, which ends by itself", [await get(COUNT), Number(await ttl(COUNT)) > 600 && Number(await ttl(COUNT)) <= 3_600], ["1", true]);
   is("the finished build kept the page and the last good build, and dropped the mark", [typeof (await get(DIRECTORY_CACHE)), typeof (await get(LAST)), await get(DIRECTORY_BUILD)], ["string", "string", null]);
+  is("a kept page is still one GET alone", (await counted(() => readDirectory())).words, { GET: 1 });
   await listed("baker@example.com", true, 31);
   const next = await counted(() => attempt());
-  is("a save drops the page and the next visit builds at once", [next.result, next.words.SSCAN], [["breadhouse", "cakeshop"], 1]);
-  is("a kept page is still one GET alone", (await counted(() => readDirectory())).words, { GET: 1 });
+  is("a save drops the page and the next visit inside the hour is the last build, checked, with nothing built", [next.result, next.words.SSCAN ?? 0, next.words.SMISMEMBER], [["breadhouse", "cakeshop"], 0, 1]);
 
-  part("A save every second for twenty minutes: at most 10 builds a window, and every visit sees the list");
+  part("A save every 30 seconds for two hours: one build in each hour, and every visit sees the list");
   advance(WINDOW_MS);
   let builds = 0;
   let shown = 0;
   const perWindow: number[] = [0, 0];
-  for (let second = 0; second < 1_200; second += 1) {
-    await listed("baker@example.com", true, 30 + (second % 5));
+  for (let step = 0; step < 240; step += 1) {
+    await listed("baker@example.com", true, 30 + (step % 5));
     const visit = await counted(() => attempt());
     const built = visit.words.SSCAN ?? 0;
     builds += built;
-    perWindow[second < 600 ? 0 : 1] += built;
+    perWindow[step < 120 ? 0 : 1] += built;
     if (Array.isArray(visit.result) && visit.result.join() === "breadhouse,cakeshop") shown += 1;
-    advance(1_000);
+    advance(30_000);
   }
-  is("1,200 saves and 1,200 visits build 20 times: 10 in each ten minutes", [builds, perWindow], [20, [10, 10]]);
-  is("and every one of the 1,200 visits is shown the list", shown, 1_200);
+  is("240 saves and 240 visits build 2 times: 1 in each hour", [builds, perWindow], [2, [1, 1]]);
+  is("and every one of the 240 visits is shown the list", shown, 240);
 
   part("Past the ceiling: the last good build, without a store taken out, and nothing built or kept");
   advance(WINDOW_MS);
@@ -191,6 +196,8 @@ async function main(): Promise<void> {
     await listed("baker@example.com", true, 32);
     is(`control before ${label}: a healthy build`, (await counted(() => attempt())).words.SSCAN, 1);
     await listed("baker@example.com", true, 33);
+    // With one build an hour the control spent the window: the count is dropped so a healthy reply would build again.
+    await original([["DEL", COUNT]]);
     const read = await counted(() => attempt(), answer);
     is(`${label}: nothing built, the last good build shown`, [read.result, read.words.SSCAN ?? 0, await get(DIRECTORY_BUILD)], [["breadhouse", "cakeshop"], 0, null]);
   }
@@ -200,14 +207,14 @@ async function main(): Promise<void> {
   const unknownAlone = await counted(() => attempt(), (c) => (c[0]?.[0] === "INCR" ? ["QUEUED", 600] : undefined));
   is("an unknown count with no last build is unknown, never an empty list", [unknownAlone.result, unknownAlone.words.SSCAN ?? 0], ["UnknownReplyError", 0]);
 
-  part("A count left with no end gets the window's ten minutes, and the window then ends");
+  part("A count left with no end gets the window's hour, and the window then ends");
   redis.clear();
   await selling("baker@example.com", "breadhouse", "Bread House");
   await original([["DEL", DIRECTORY_CACHE], ["SET", COUNT, String(CEILING + 5)]]);
   is("control: the count has no end", await ttl(COUNT), -1);
   await original([["SET", LAST, JSON.stringify({ sids: [], rows: [] })]]);
   const healed = await counted(() => attempt());
-  is("past the ceiling it builds nothing and sets the end", [healed.result, healed.words.SSCAN ?? 0, healed.words.EXPIRE ?? 0, await ttl(COUNT)], [[], 0, 1, 600]);
+  is("past the ceiling it builds nothing and sets the end", [healed.result, healed.words.SSCAN ?? 0, healed.words.EXPIRE ?? 0, await ttl(COUNT)], [[], 0, 1, 3_600]);
   advance(WINDOW_MS + 1);
   is("and once the window ended, it builds again", (await counted(() => attempt())).words.SSCAN, 1);
 

@@ -17,7 +17,7 @@ import { DIRECTORY_ORDER, MIN_CLICKS_FOR_RATES, directoryNumbers, directoryRow, 
 import { programNumbers } from "@/lib/affiliates";
 import { redisPipeline } from "@/lib/redis";
 import { HOUSE_OWNER } from "@/lib/house-store";
-import { store as redis } from "./redis-stub";
+import { advance, store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
 globalThis.fetch = (async () => new Response(JSON.stringify({ object: "list", data: [] }), { status: 200 })) as typeof fetch;
@@ -136,7 +136,10 @@ async function main(): Promise<void> {
   is("rates per click from 200 clicks: one in a hundred became a sale, $27 earned per 100 clicks", [directoryNumbers(raw)?.conversion, directoryNumbers(raw)?.per100Cents], [1, 2700]);
   is(`and none below ${MIN_CLICKS_FOR_RATES} clicks: one sale would move them too far`, [directoryNumbers({ ...raw!, clicks: 99 })?.conversion, directoryNumbers({ ...raw!, clicks: 99 })?.per100Cents], [null, null]);
   await setAffiliateSetting(A, parseAffiliateSetting({ ...terms, directory: true, numbers: true }));
-  is("with the second yes, the directory shows them", (await readDirectory()).find((r) => r.handle === "breadhouse")?.numbers?.paidCents, 3000);
+  // One build an hour (C1-20261109-1603-TODOS-71): a change shows at the next build, within the hour, never promised sooner.
+  is("inside the hour the change waits for the next build", (await readDirectory()).find((r) => r.handle === "breadhouse")?.numbers, null);
+  advance(3_600_001);
+  is("with the second yes, the directory shows them at the next build", (await readDirectory()).find((r) => r.handle === "breadhouse")?.numbers?.paidCents, 3000);
   is("only an explicit yes counts as one", parseAffiliateSetting({ numbers: "yes" }).numbers, false);
 
   done();

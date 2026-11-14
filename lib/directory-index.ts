@@ -18,7 +18,7 @@
  *   nl:dir:listed   set  the sid of every store whose creator said yes
  *   nl:dir:page     the directory's rows, kept a few minutes; dropped on a save that can change them
  *   nl:dir:build    "building" while one build runs, "failed" for a while after a build that could not finish
- *   nl:dir:builds   the builds counted in the window's ten minutes, so they have a ceiling
+ *   nl:dir:builds   the builds counted in the window's hour, so they have a ceiling
  *   nl:dir:last     the last good build's rows with the sid of each, shown filtered past the ceiling
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
@@ -39,8 +39,8 @@ export const DIRECTORY_CACHE = "nl:dir:page";
 export const DIRECTORY_BUILD = "nl:dir:build";
 
 /**
- * The builds of the directory counted in a window (lib/affiliate-directory.ts, DIRECTORY_BUILDS_PER_TEN_MINUTES):
- * INCR once the build mark is taken and before a build, the window's ten minutes set once on a count that has no
+ * The builds of the directory counted in a window (lib/affiliate-directory.ts, DIRECTORY_BUILDS_PER_HOUR):
+ * INCR once the build mark is taken and before a build, the window's hour set once on a count that has no
  * end, so the builds have a ceiling however often a save drops the kept page. What it holds is no row of any store.
  */
 export const DIRECTORY_BUILDS = "nl:dir:builds";

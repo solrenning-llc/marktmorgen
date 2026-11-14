@@ -1,0 +1,8 @@
+{
+  "next/headers": "declines-page-world.tsx",
+  "next/navigation": "declines-page-world.tsx",
+  "next/link": "declines-page-world.tsx",
+  "@/lib/studio-route": "declines-page-world.tsx",
+  "@/components/studio-header": "declines-page-world.tsx",
+  "@/components/studio-store-pin": "declines-page-world.tsx"
+}

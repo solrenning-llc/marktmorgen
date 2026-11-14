@@ -139,6 +139,18 @@ export class MemoryRedis {
           if (n >= Number(below)) return -1;
           return this.run(["INCR", counter]);
         }
+        // lib/removed-products.ts NOTE_REMOVED_PRODUCT: a product on the list has its time updated (0); a new one is added
+        // only while the list has room (1), never by dropping another; full, nothing written (-1).
+        if (key.startsWith("-- marktmorgen:removed-product-note:v1\n") && args[0] === "1" && args.length === 5) {
+          const [, list, at, product, most] = args;
+          if (this.run(["ZSCORE", list, product]) !== null) {
+            this.run(["ZADD", list, at, product]);
+            return 0;
+          }
+          if (Number(this.run(["ZCARD", list])) >= Number(most)) return -1;
+          this.run(["ZADD", list, at, product]);
+          return 1;
+        }
         // lib/form-store.ts FIND_FORM_RESPONSE: the first kept response written with this id, as its text, or nil.
         if (key.startsWith("-- marktmorgen:form-find:v1\n") && args[0] === "1" && args.length === 4) {
           const [, listKey, id, kept] = args;

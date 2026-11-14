@@ -826,7 +826,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:pre:jobs@lib/preorders.ts": company("Products with pre-orders to hand over", "One set for every store."),
   "nl:pre:pi:@lib/preorders.ts": short("The pre-order a payment paid for", "order", 430, KEY, KIND("preorder")),
   "nl:wl:@lib/preorders.ts": { what: "Products taking pre-orders: counted with its product (PRODUCT_SIDE_BYTES)", room: ["lib/store.ts"] },
-  "nl:prodgone:@lib/removed-products.ts": { what: "The products a store removed, so a person's data kept under one is still copied and erased", parts: [capped(MAX_REMOVED_PRODUCTS * 128, "At most MAX_REMOVED_PRODUCTS ids (64 bytes at the most) and their times, trimmed as each is noted.", src("lib/removed-products.ts", "MAX_REMOVED_PRODUCTS"))] },
+  "nl:prodgone:@lib/removed-products.ts": { what: "The products a store removed, so a person's data kept under one is still copied and erased", parts: [capped(MAX_REMOVED_PRODUCTS * 128, "At most MAX_REMOVED_PRODUCTS ids (64 bytes at the most) and their times: a removal past that is refused, never made by dropping an older id.", src("lib/removed-products.ts", "MAX_REMOVED_PRODUCTS"))] },
   "nl:product:about:@lib/product-about.ts": { what: "Products' long descriptions", room: ["lib/product-about.ts"] },
   "nl:none@lib/product-updates.ts": company("A key that is never written", "Read in place of a list a store does not have."),
   "nl:upd:job:@lib/product-updates.ts": { what: "An update's send and who it goes to", parts: [per("monthly", 120, KEY, "A buyer's place in a send.", MAIL("update"))] },

@@ -104,6 +104,8 @@ async function silenced(email: string, changedId: string): Promise<string[]> {
 /** How firmly to answer when a change is refused. */
 const STATUS: Record<string, number> = {
   too_many: 409,
+  // The store's list of removed products is full (lib/removed-products.ts): the product stays, and can be unpublished.
+  removed_full: 409,
   unknown: 404,
   unavailable: 503,
 };

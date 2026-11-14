@@ -125,7 +125,9 @@ try{
    // present from the start), and checking the box by its label clears the mark and the reason.
    await page.goto(origin+"/@localshop/p/"+ids["Weeknight Dinners"]+"?consent=needed#buy",{waitUntil:"networkidle"});await restoreDarkAfterNavigation();
    const refusedBox=page.locator('#buy form[data-checkout] input[name="dc"]').first();
-   await page.waitForTimeout(400);
+   // Waits for what hydration does (components/digital-consent-box.tsx: the box takes the focus, then its live region is
+   // filled), not for a fixed time; a page that never gets there falls through to the check below, which names what is wrong.
+   await page.waitForFunction(n=>{const wrap=n.closest("[data-digital-consent]");const live=wrap&&wrap.querySelector('[aria-live="assertive"]');return document.activeElement===n&&Boolean(live&&live.textContent.trim());},await refusedBox.elementHandle(),{timeout:15000}).catch(()=>{});
    const refusedState=await refusedBox.evaluate(n=>{const ids=(n.getAttribute("aria-describedby")||"").split(" ");const error=document.getElementById(ids[0]);const wrap=n.closest("[data-digital-consent]");const live=wrap&&wrap.querySelector('[aria-live="assertive"]');return {invalid:n.getAttribute("aria-invalid"),error:error?error.textContent.trim():"",focused:document.activeElement===n,live:live?live.textContent.trim():"",alertAtLoad:Boolean(wrap&&wrap.querySelector('[role="alert"]'))};});
    if(refusedState.invalid!=="true"||!refusedState.error||!refusedState.focused||refusedState.live!==refusedState.error||refusedState.alertAtLoad)throw Error("Refused consent box state wrong "+JSON.stringify(refusedState));
    await page.locator('#buy form[data-checkout] label:has(> input[name="dc"])').first().click();

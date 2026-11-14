@@ -5,7 +5,7 @@ import { store as redis } from "./redis-stub";
 
 const pipeline = redis.pipeline.bind(redis);
 const now = 1_800_000_000_000;
-const store = { statsId: "calendar-evidence" };
+const store = { statsId: "calendar-evidence", sid: "", email: "" };
 const email = "host@example.com";
 const config = JSON.stringify({ email, source: "ics", read: [], write: "", ics: "sealed", icsAddedAt: "2026-11-05" });
 const good = JSON.stringify({ at: now, busy: [[now + 60_000, now + 120_000]], source: "ics" });

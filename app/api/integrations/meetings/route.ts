@@ -57,7 +57,7 @@ export async function POST(request: NextRequest) {
         const moved = await moveTest(store, provider);
         return moved ? Response.json({ ok: true, test: moved }) : Response.json({ ok: false, error: "no_test" }, { status: 400 });
       }
-      await removeTest(store.statsId, provider);
+      await removeTest(store, provider);
       return Response.json({ ok: true, test: null });
     } catch (error) {
       if (error instanceof TestMeetingUnavailable) return Response.json({ ok: false, error: "unavailable", message: error.message }, { status: 503 });

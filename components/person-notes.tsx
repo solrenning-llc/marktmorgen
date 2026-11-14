@@ -4,6 +4,7 @@ import { useState } from "react";
 import { StudioEmptyState } from "@/components/empty-state";
 import { toast, toastProblem } from "@/components/toast";
 import type { PersonNote } from "@/lib/buyer-profile";
+import { ConfirmAction } from "@/components/confirm-action";
 
 const MAX_PERSON_NOTE = 500;
 
@@ -55,15 +56,17 @@ export function PersonNotes({ person, initial }: { person: string; initial: Pers
                   {when(note.at)}
                   {note.by ? ` · ${note.by}` : ""}
                 </p>
-                <button
-                  type="button"
+                <ConfirmAction
                   className="btn btn-ghost btn-sm"
                   disabled={busy}
-                  onClick={() => void send({ action: "unnote", id: note.id }, "Note removed.")}
-                  aria-label={`Remove the note from ${when(note.at)}`}
+                  busy={busy}
+                  question="Remove this note? Its words cannot be brought back."
+                  yes="Yes, remove"
+                  onConfirm={() => send({ action: "unnote", id: note.id }, "Note removed.")}
+                  label={`Remove the note from ${when(note.at)}`}
                 >
                   Remove
-                </button>
+                </ConfirmAction>
               </div>
             </li>
           ))}

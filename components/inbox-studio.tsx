@@ -6,6 +6,7 @@ import { toast, toastProblem } from "@/components/toast";
 import { FaqFromInbox } from "@/components/faq-from-inbox";
 import { randomLetters } from "@/lib/random-letters";
 import { browserDrafts, clearDraft, draftIds, oldDraftsStuck, readDraft, saveDraft } from "@/lib/inbox-drafts";
+import { ConfirmAction } from "@/components/confirm-action";
 import {
   type Conversation,
   type InboxSetting,
@@ -260,13 +261,18 @@ export function InboxStudio({
     toast("A suggestion is in the box. Read it and change what you need before sending.");
   }
 
-  async function saveSetting(body: Record<string, unknown>, done: string) {
+  /** True only once the server confirmed the change, so a form clears what was typed only then. */
+  async function saveSetting(body: Record<string, unknown>, done: string): Promise<boolean> {
     setBusy(true);
     const answer = await post(body);
     setBusy(false);
-    if (!answer.ok) return fail(answer.error);
+    if (!answer.ok) {
+      fail(answer.error);
+      return false;
+    }
     setSetting(answer.inbox as InboxSetting);
     toast(done);
+    return true;
   }
 
   const c = thread?.conversation;
@@ -464,12 +470,13 @@ export function InboxStudio({
         ) : null}
       </section>
 
-      <SavedReplies saved={setting.saved} busy={busy} onSave={(saved, done) => void saveSetting({ action: "saved", saved }, done)} />
+      <SavedReplies saved={setting.saved} busy={busy} onSave={(saved, done) => saveSetting({ action: "saved", saved }, done)} />
     </div>
   );
 }
 
-function SavedReplies({ saved, busy, onSave }: { saved: SavedReply[]; busy: boolean; onSave: (saved: SavedReply[], done: string) => void }) {
+/** The store's saved replies; what is typed for a new one is kept until its save is confirmed (WCAG 3.3.7). */
+export function SavedReplies({ saved, busy, onSave }: { saved: SavedReply[]; busy: boolean; onSave: (saved: SavedReply[], done: string) => Promise<boolean> }) {
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   return (
@@ -486,9 +493,16 @@ function SavedReplies({ saved, busy, onSave }: { saved: SavedReply[]; busy: bool
                 <span className="font-medium">{s.title}</span>
                 <span className="mt-0.5 block whitespace-pre-line text-sm text-ink-soft">{s.text}</span>
               </span>
-              <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={() => onSave(saved.filter((x) => x.id !== s.id), "Removed.")}>
+              <ConfirmAction
+                disabled={busy}
+                busy={busy}
+                question="Remove this saved reply? Its words cannot be brought back."
+                yes="Yes, remove"
+                onConfirm={() => onSave(saved.filter((x) => x.id !== s.id), "Removed.")}
+                label={`Remove the saved reply ${s.title}`}
+              >
                 Remove
-              </button>
+              </ConfirmAction>
             </li>
           ))}
         </ul>
@@ -496,9 +510,9 @@ function SavedReplies({ saved, busy, onSave }: { saved: SavedReply[]; busy: bool
       {saved.length < MAX_SAVED ? (
         <form
           className="mt-4 grid gap-3"
-          onSubmit={(e) => {
+          onSubmit={async (e) => {
             e.preventDefault();
-            onSave([...saved, { id: savedId(), title: title.trim(), text: body.trim() }], "Saved.");
+            if (!(await onSave([...saved, { id: savedId(), title: title.trim(), text: body.trim() }], "Saved."))) return;
             setTitle("");
             setBody("");
           }}

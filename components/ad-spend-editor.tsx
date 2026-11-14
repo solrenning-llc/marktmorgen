@@ -6,6 +6,7 @@ import { type AdSpend, typedOverlap } from "@/lib/ad-spend-rules";
 import { formatMoney } from "@/lib/money";
 import type { MetaAdsView } from "@/lib/meta-ads";
 import { channelName } from "@/lib/channel-names";
+import { ConfirmAction } from "@/components/confirm-action";
 
 /** The same as META_READ_PAUSED in lib/integration-pause.ts (232 [CA1] 4b3), written here so this browser file stays free of server code. */
 const READ_PAUSED = "Reading it waits while your plan's renewal is unpaid or a payment for it is disputed, and starts again on its own once the payment is recorded or the dispute is won.";
@@ -288,15 +289,17 @@ export function AdSpendEditor({
                 {spend.campaign ? <span className="ml-1.5 text-ink-soft">{spend.campaign}</span> : null}
                 <span className="ml-2 tabular-nums text-ink-soft">{`${money(spend.cents)} · ${shortDay(spend.from)}${spend.to !== spend.from ? ` to ${shortDay(spend.to)}` : ""}`}</span>
               </span>
-              <button
-                type="button"
+              <ConfirmAction
                 className="btn btn-ghost btn-sm shrink-0"
                 disabled={busy}
-                onClick={() => void send({ action: "remove", id: spend.id }, "Removed.")}
-                aria-label={`Remove ${money(spend.cents)} on ${spend.channel}`}
+                busy={busy}
+                question="Remove this spend? It is taken off your numbers."
+                yes="Yes, remove"
+                onConfirm={() => send({ action: "remove", id: spend.id }, "Removed.")}
+                label={`Remove ${money(spend.cents)} on ${spend.channel}`}
               >
                 Remove
-              </button>
+              </ConfirmAction>
             </li>
           ))}
         </ul>

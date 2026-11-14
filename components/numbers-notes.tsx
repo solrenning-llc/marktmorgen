@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { toast, toastProblem } from "@/components/toast";
 import type { StatsNote } from "@/lib/stats-notes";
+import { ConfirmAction } from "@/components/confirm-action";
 
 const MAX_NOTE_LENGTH = 80;
 
@@ -68,15 +69,17 @@ export function NumbersNotes({
                 <span className="mr-2 tabular-nums text-ink-soft">{shortDay(note.day)}</span>
                 <span className="text-ink [overflow-wrap:anywhere]">{note.text}</span>
               </span>
-              <button
-                type="button"
+              <ConfirmAction
                 className="btn btn-ghost btn-sm shrink-0"
                 disabled={busy}
-                onClick={() => void send({ action: "remove", id: note.id }, "Note removed.")}
-                aria-label={`Remove the note for ${shortDay(note.day)}: ${note.text}`}
+                busy={busy}
+                question="Remove this note? Its words cannot be brought back."
+                yes="Yes, remove"
+                onConfirm={() => send({ action: "remove", id: note.id }, "Note removed.")}
+                label={`Remove the note for ${shortDay(note.day)}: ${note.text}`}
               >
                 Remove
-              </button>
+              </ConfirmAction>
             </li>
           ))}
         </ul>

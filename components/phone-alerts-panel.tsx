@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { MAX_DEVICES } from "@/lib/phone-alerts-rules";
 import { useHydrated } from "@/components/use-hydrated";
 import { toast } from "@/components/toast";
+import { ConfirmAction } from "@/components/confirm-action";
 import { Icon } from "@/components/icons";
 import { STUDIO_SCOPE, STUDIO_WORKER } from "@/components/studio-app";
 import type { DeviceView, PhoneEvent, PhoneView } from "@/lib/phone-alerts";
@@ -443,19 +444,20 @@ export function PhoneAlertsPanel({ view: initial }: { view: PhoneView }) {
                         <button type="button" onClick={() => test(device)} disabled={busy !== null || device.stale} aria-busy={busy === `test:${device.id}`} className="btn btn-secondary btn-sm">
                           {busy === `test:${device.id}` ? "Sending…" : "Send test"}
                         </button>
-                        <button
-                          type="button"
-                          onClick={async () => {
+                        <ConfirmAction
+                          className="btn btn-ghost btn-sm"
+                          disabled={busy !== null}
+                          busy={busy === `remove:${device.id}`}
+                          question="Remove this phone? To receive alerts on it again, you allow them on that phone again."
+                          yes="Yes, remove"
+                          onConfirm={async () => {
                             if (await send({ action: "remove", id: device.id }, `remove:${device.id}`)) toast("Device removed.");
                           }}
-                          disabled={busy !== null}
-                          aria-busy={busy === `remove:${device.id}`}
-                          aria-label={`Remove ${device.label}`}
-                          className="btn btn-ghost btn-sm"
+                          label={`Remove ${device.label}`}
                         >
                           <Icon name="trash" size={16} />
                           Remove
-                        </button>
+                        </ConfirmAction>
                       </span>
                     ) : null}
                   </div>

@@ -49,7 +49,7 @@ const INCLUDED = [
   "Your own store address, live the moment you take it",
   `${PLAN_NUMBER_FORMAT.format(VISITS_INCLUDED.creator)} counted visits to your store a billing month; public pages pause at ${PLAN_NUMBER_FORMAT.format(publicVisitLimit(VISITS_INCLUDED.creator))}, and the rest are kept for your buyers' courses, community and podcasts; nothing is billed past it`,
   `${PLAN_NUMBER_FORMAT.format(ORDERS_INCLUDED.creator)} orders a billing month${feeWords().ordersShared ? " (an order whose sale paid your plan's share is not counted)" : ""}; at that figure new orders pause until your next billing month, nothing is billed past it, and a buyer already paying always finishes`,
-  `Each billing month, starting on the day your plan renews: ${allowanceListWords("creator")}; past one, that use waits for the next month${PLANS_ON_SALE && PRO_ON_SALE ? ", or a larger plan" : ""}, and nothing is billed`,
+  `Each billing month, starting on the day your plan renews (a switch between monthly and yearly keeps the day it had): ${allowanceListWords("creator")}; past one, that use waits for the next month${PLANS_ON_SALE && PRO_ON_SALE ? ", or a larger plan" : ""}, and nothing is billed`,
   "Buyers pay into your own Stripe account",
   "Up to 2,000 products: files, courses, memberships, paid calls and live sessions",
   "Sales pages and landing pages built from blocks, and reviews only buyers can write",

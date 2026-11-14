@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {RESERVE_PAID_RESOURCE_WINDOW,reservePaidResourceWindow} from '@/lib/contract-resource-window';
 import {reserveContractFunding,activateCheckoutContract} from '@/lib/contract-funding';
 import {contractFundingConfiguration} from '@/lib/contract-funding-rules';
-import {allowanceWindow} from '@/lib/allowance-window';
+import {addMonthsMs,allowanceWindow,type AllowanceWindow,type WindowFields} from '@/lib/allowance-window';
 import {reserveStoreUpload,reserveUploadControl} from '@/lib/upload-budget';
 import {contractFixture} from './contract-funding-fixture';
 import {applyContractTaxCoverage} from './contract-tax-fixture';
@@ -186,5 +186,19 @@ test('resource ACK own-data bounds retain committed cohorts and never grant unkn
     assert.deepEqual([...f.h],committed,'valid repeat allocates nothing twice');
    }
   }
+ }
+});
+test('a switch anchor leaves the cohort on the funded period, and both run at one whole window a month',async()=>{
+ const f=await setup('year',{taxCoverage:true}),period=f.store.period,DAY=86400000,anchorStart=period.start*1000-10*DAY;
+ // A switch made ten days into a window keeps that window as the store's anchor (lib/allowance-window.ts, anchorAfter).
+ const anchored={...f.store,allowanceAnchor:{subscriptionId:f.store.subscriptionId,start:anchorStart,end:addMonthsMs(anchorStart,1)}};
+ assert.equal(await reservePaidResourceWindow(anchored,f.policy,f.context),true);
+ const own=allowanceWindow(f.store)!;
+ assert.equal(f.h.get('resource:ctr_resources:0'),own.start+'|'+own.end,'the cohort is the funded period month, never the anchored window');
+ assert.equal(allowanceWindow(anchored)!.start,anchorStart,'while the store counts its allowances in the anchored window');
+ const windows=(store:WindowFields)=>{const seen=new Map<string,AllowanceWindow>();for(let t=period.start*1000;t<period.end*1000;t+=6*3600000){const w=allowanceWindow(store,t);if(w)seen.set(w.id,w);}return[...seen.values()];};
+ for(const [name,list] of [['period',windows(f.store)],['anchor',windows(anchored)]] as const){
+  assert.equal(list.filter(w=>w.start>=period.start*1000).length,12,name+': twelve windows begin in the funded year');
+  for(const w of list)assert.ok(w.end-w.start>=28*DAY&&w.end-w.start<=31*DAY,name+': every window is one month '+w.id);
  }
 });

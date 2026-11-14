@@ -159,6 +159,9 @@ for (const label of [
   // the same review (LOW): a reassurance before the secret excuses the ask no more than after it.
   "Secure Instagram password for our team",
   "Safe Gmail password for setup",
+  // Codex U @49382e2bb8 (MEDIUM): "show it" hands over a named secret, as "send it" or "paste it" do.
+  "Do you have a Netflix password? Show it to us",
+  "Do you have the Gmail password? Please show it",
 ] as const) {
   is(`refused: ${label}`, sensitiveKindOf(label), "password");
   const field = { id: "field1", type: "short" as const, label, required: true, options: [] };
@@ -167,6 +170,11 @@ for (const label of [
 
 part("Questions about passwords and ordinary instructions remain available");
 for (const label of [
+  // Codex P @49382e2bb8 (LOW): a label that names an experience to describe, not a credential pair to type.
+  "Email and password reset experience",
+  "Email and password sign-in experience",
+  // Codex U @49382e2bb8 control: "show it" after a password manager shows the manager, not a secret.
+  "Do you have a password manager? Show it in your workflow",
   // Claude 1 cloud (rev-prs-novos) @fff18e7784: advice before the secret, and an event pass's number (LOW: "pass"
   // followed by a noun is not a login's password).
   "Best password for Gmail",

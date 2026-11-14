@@ -14,7 +14,6 @@ import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
 import { afterRuns } from "./erasure-timing-after-world";
 import { done, is, part } from "./check";
-import { installVirtualClock } from "./slow-test-virtual-clock";
 
 // The email provider holds every send at a gate the test opens, instead of
 // answering after a fixed delay: whether the answer waits for the email is read
@@ -130,9 +129,6 @@ async function ask(email: string, handle?: string): Promise<Asked> {
 }
 
 async function main(): Promise<void> {
-  // The slow email and the waits for what runs after the answer pass on a virtual clock, in the order the real
-  // one would give; performance.now() moves with it, so an answer that waited for the email still measures slow.
-  const clock = installVirtualClock({ maxMs: SLOW_MS * 3 });
   redis.clear();
   process.env.NIMBUS_DATA_KEY ??= "tests-only-not-a-real-deployment-secret";
   process.env.RESEND_API_KEY = "re_test_erasure_timing_only_a_stand_in";
@@ -165,7 +161,6 @@ async function main(): Promise<void> {
     is("with the email provider down, still the same answer for both", [aDown.answer, bDown.answer], [{ status: "sent" }, { status: "sent" }]);
     is("and neither waits for the failing email", [aDown.first, bDown.first], ["answered", "answered"]);
   }
-  clock.restore();
   done();
 }
 

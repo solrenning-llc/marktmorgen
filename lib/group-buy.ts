@@ -50,7 +50,7 @@ import { sendEmail } from "@/lib/email";
 import { addressHash, grantImported, importedKey } from "@/lib/imported-purchases";
 import { bundleFromMeta } from "@/lib/bundle-rules";
 import { onAccount } from "@/lib/stripe-account";
-import { refundRowKnown } from "@/lib/refunds";
+import { givenBack, refundRowKnown } from "@/lib/refunds";
 import { STRIPE_LIST_VERSION, StripeListUnreadable, readStripePage, type StripePage } from "@/lib/stripe-list";
 import { formatMoney } from "@/lib/money";
 import { type Listing, type Store, setPastBuyers, storeRef } from "@/lib/store";
@@ -226,7 +226,7 @@ export async function settleGroup(input: {
   const id = session.metadata?.group ?? "";
   const group = await readGroup(id);
   if (!group || group.s !== store.statsId || group.p !== product.id) return "skip";
-  if (group.paid) return "already";
+  if (group.paid || group.revoked) return "already";
   const [claimed] = await redisPipeline([["SET", `${groupKey(id)}:settling`, "1", "NX", "EX", 300]]);
   if (claimed === null) return "already";
 
@@ -234,6 +234,25 @@ export async function settleGroup(input: {
   // Stripe gives the payment as its id, or whole when the caller asked for it.
   const intent = session.payment_intent as { id?: unknown } | string | null | undefined;
   const pi = typeof intent === "string" ? intent : typeof intent?.id === "string" ? intent.id : "";
+  // A checkout stays "paid" at Stripe after its money is given back, and the sweep reads refunds before it settles the
+  // day's checkouts: a purchase refunded before this point has had its refund read, and passed, while nl:grp:pi: (set
+  // below) did not exist yet, so no later run takes its places back. So the payment is asked about here, before any
+  // place exists. Given back: kept as revoked, nothing settled or sent. An answer that does not read, or that is not
+  // this payment's own (rule 30), throws: nothing is written, and the next run asks again.
+  if (pi && store.stripeAccountId) {
+    try {
+      const payment = await onAccount("GET", store.stripeAccountId, `/payment_intents/${encodeURIComponent(pi)}?expand[]=latest_charge`);
+      if (!payment || typeof payment !== "object" || (payment as { id?: unknown }).id !== pi) throw new UnknownReplyError("a purchase for several's payment");
+      if (await givenBack(store.stripeAccountId, payment)) {
+        await saveGroup({ ...group, session: sessionId, pi, revoked: now() }, GROUP_KEPT_SECONDS);
+        await redisPipeline([["DEL", `${groupKey(id)}:settling`]]);
+        return "already";
+      }
+    } catch (error) {
+      await redisPipeline([["DEL", `${groupKey(id)}:settling`]]).catch(() => undefined);
+      throw error;
+    }
+  }
   // A bundle hands over what it held when it was paid for, to every place.
   const items = bundleFromMeta(session.metadata ?? null, "bundle");
   // The hour its checkout was admitted in, which held room for every place for a day (takePlace).

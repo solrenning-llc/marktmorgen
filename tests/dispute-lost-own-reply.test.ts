@@ -134,6 +134,24 @@ async function main() {
     await notJudged("its own lost row beside another charge's unreadable prevented row", whole(dispute(), dispute({ id: "du_disputeown02", status: "prevented", charge: OTHER_CHARGE })));
     await notJudged("an unreadable prevented row beside a won one", whole(dispute({ status: "won" }), unread));
 
+    part("A row whose status cannot be read is unknown (CX-123 rule 24; Claude 4 on #3569)");
+    // Stripe sends one of DISPUTE_STATUSES; a status missing, of another type or not among them is neither lost nor
+    // not lost. Before this unit it read as "not lost", so givenBack() answered false instead of waiting.
+    await notJudged("a row with no status", whole(dispute({ status: undefined })));
+    await notJudged("a row with a null status", whole(dispute({ status: null })));
+    await notJudged("a row with a status Stripe does not send", whole(dispute({ status: "garbage" })));
+    await notJudged("a row with a numeric status", whole(dispute({ status: 42 })));
+    await notJudged("a row with an upper-case status", whole(dispute({ status: "LOST" })));
+    await notJudged("a won row beside one with no status", whole(dispute({ status: "won" }), dispute({ id: "du_disputeown02", status: undefined })));
+    got = await read(whole(dispute(), dispute({ id: "du_disputeown02", status: "garbage" })));
+    is("its own lost row beside one whose status cannot be read: lost", [got.lost, got.door, got.given], [true, true, true]);
+    got = await read(whole(dispute({ status: "garbage" }), dispute({ id: "du_disputeown02" })));
+    is("a row whose status cannot be read, then its own lost one: lost", [got.lost, got.door, got.given], [true, true, true]);
+    for (const status of ["warning_needs_response", "warning_under_review", "warning_closed", "needs_response", "under_review", "won", "charge_refunded"]) {
+      got = await read(whole(dispute({ status })));
+      is(`control: a whole list with one ${status} row is not lost`, [got.lost, got.door, got.given], [false, false, false]);
+    }
+
     part("A row that is not an object");
     await notJudged("a row that is text", whole(dispute({ status: "won" }), "du_disputeown02"));
     await notJudged("a row that is null", whole(null));

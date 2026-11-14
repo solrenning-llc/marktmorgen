@@ -10,7 +10,7 @@
  *
  * <store> is the store's statsId, which stays through a change of handle.
  */
-import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { withinStore } from "@/lib/metered-limits";
 import { createHash } from "node:crypto";
 import { WAIT_TOKEN, newWaitlistToken as newToken, waitlistTokenKey as tokenKey, parseStoreWaitlistGrant, type StoreWaitlistGrant as TokenGrant } from "@/lib/waitlist-tokens";
@@ -434,12 +434,40 @@ export async function runLaunches(load: (handle: string) => Promise<Store | null
 }
 
 /**
+ * The products whose waitlists a person may be on: those in the catalog and every one still marked coming soon.
+ * A product removed before its waitlist was dropped with it (dropWaitlist) is gone from the catalog but was never
+ * unmarked, so its waitlist, addresses and all, is still reached (nuvem I privacy audit, 13 November 2026). The
+ * mark is read exactly: an unreadable one throws, so the deletion says it could not finish (rule 24).
+ */
+async function waitlistProductIds(sid: string, catalogIds: string[]): Promise<string[]> {
+  const members = stringList(repliesFor(await redisPipeline([["SMEMBERS", soonKey(sid)]]), 1)?.[0]);
+  if (!members) throw new UnknownReplyError("the products coming soon");
+  return [...new Set([...catalogIds, ...members])];
+}
+
+/**
+ * A removed product's waitlist goes with it (nuvem I privacy audit, 13 November 2026): its addresses, the launch
+ * email's list and job, and its coming-soon mark. Kept, they held addresses in plain text with no expiry, for a
+ * product nobody could buy or be told about. Every reply is read exactly; anything else throws (rule 24).
+ */
+export async function dropWaitlist(sid: string | null | undefined, pid: string): Promise<void> {
+  if (!sid || !pid || !isRedisConfigured()) return;
+  const what = "the removal of a product's waitlist";
+  const gone = repliesFor(await redisPipeline([["DEL", listKey(sid, pid), sendKey(sid, pid), jobKey(sid, pid)], ["SREM", JOBS, `${sid}|${pid}`]]), 2);
+  if (!gone || gone.some((reply) => countOf(reply) === null)) throw new UnknownReplyError(what);
+  // Unmarked only once the addresses are confirmed gone: until then the mark is what leads a deletion to them.
+  const unmarked = repliesFor(await redisPipeline([["SREM", soonKey(sid), pid]]), 1);
+  if (!unmarked || countOf(unmarked[0]) === null) throw new UnknownReplyError(what);
+}
+
+/**
  * Takes one address off every waitlist of the store, out of any launch email
  * still going out, and deletes its confirm and leave links (lib/person-erasure.ts).
  */
-export async function forgetWaitlistPerson(sid: string | null, productIds: string[], email: string): Promise<number> {
+export async function forgetWaitlistPerson(sid: string | null, catalogIds: string[], email: string): Promise<number> {
   if (!sid || !isRedisConfigured()) return 0;
   const address = normaliseEmail(email);
+  const productIds = await waitlistProductIds(sid, catalogIds);
   const replies = productIds.length ? await redisPipeline(productIds.map((p) => ["HDEL", listKey(sid, p), address])) : [];
   const blanked = await blankInLists(productIds.map((p) => sendKey(sid, p)), address);
   return replies.reduce<number>((sum, n) => sum + (Number(n) || 0), 0) + blanked;
@@ -451,9 +479,12 @@ export async function forgetWaitlistPerson(sid: string | null, productIds: strin
  * and whether they also asked to hear from the creator. The secret in their
  * waitlist link is left out. Only reads.
  */
-export async function waitlistPlacesOf(sid: string | null, productIds: string[], email: string): Promise<{ product: string; joined: number; confirmed: number; news: boolean }[]> {
-  if (!sid || !productIds.length || !isRedisConfigured()) return [];
+export async function waitlistPlacesOf(sid: string | null, catalogIds: string[], email: string): Promise<{ product: string; joined: number; confirmed: number; news: boolean }[]> {
+  if (!sid || !isRedisConfigured()) return [];
   const address = normaliseEmail(email);
+  // The same products a deletion reaches, so the copy shows every place the deletion would take away.
+  const productIds = await waitlistProductIds(sid, catalogIds);
+  if (!productIds.length) return [];
   // One reply per product, each the place or an exact null (none). Anything
   // else is unknown, never "on no waitlist" (rule 24): the copy says it could
   // not be made (lib/person-copy.ts).

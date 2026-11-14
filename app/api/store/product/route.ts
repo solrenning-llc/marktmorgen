@@ -37,6 +37,7 @@ import { finishLandingsDrop } from "@/lib/campaign-landing-store";
 const PRODUCT_ID = /^[a-z0-9]{6,40}$/;
 import { dropThanksNote } from "@/lib/thanks-note-store";
 import { dropReviews } from "@/lib/reviews";
+import { dropWaitlist } from "@/lib/waitlist";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { dropCourse, filesInCourse, lessonsInOrder, readCourse, readCourseExact } from "@/lib/course";
 import { dropComments, dropCommentsAfterCourseGone } from "@/lib/lesson-comments";
@@ -376,6 +377,9 @@ export async function POST(request: NextRequest) {
           return [] as string[];
         });
         had.push(...reviewPhotos.map((pathname) => ({ pathname })));
+        // And its waitlist, whose addresses are kept in plain text with no expiry (lib/waitlist.ts). One not
+        // confirmed gone is still reached by a person's deletion, through the coming-soon mark it keeps.
+        await dropWaitlist(removed.store.statsId, id).catch((error: unknown) => console.error("could not drop a removed product's waitlist", error));
         if (removedCourse) {
           await dropCourse(removedCourse, removed.store).catch((error: unknown) => console.error("could not drop a removed course", error));
         }

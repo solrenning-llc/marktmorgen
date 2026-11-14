@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { Suspense } from "react";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
+import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { PersonFind } from "@/components/person-find";
 import { PersonNotes } from "@/components/person-notes";
@@ -144,7 +145,7 @@ export default async function StudioPeoplePage({ searchParams }: Params) {
       />
       <StudioStorePin sid={store.sid}>
         <main id="content" className="container-page pb-20 pt-10 sm:pt-14">
-          <p className="eyebrow">Buyers</p>
+          <StudioTrail store={store} {...(profile ? { path: [{ label: "Buyers", href: studioPath(store, "", "people") }], here: profile.name || profile.email || "One buyer" } : { here: "Buyers" })} />
           {profile ? (
             <Profile store={store} profile={profile} fields={fields} values={values} eraseToken={eraseToken} tasks={tasks} assignees={assignees} companies={companies} companiesRefusal={companyRead?.state === "refused" ? companyRead.message : ""} />
           ) : (
@@ -173,7 +174,7 @@ export default async function StudioPeoplePage({ searchParams }: Params) {
                     : token
                       ? "That search has run out: it works for an hour. Look the address up again below."
                       : who
-                        ? "That person is not among the buyers read from your Stripe account just now. Look their address up below."
+                        ? "That person is not among your buyers as last read from your Stripe account, which can be up to an hour ago. Look their address up below."
                         : "That sale is not one of this store's, or it has no email address on it."}
                 </p>
               ) : null}
@@ -320,7 +321,9 @@ function Profile({ store, profile, fields, values, eraseToken, tasks, assignees,
         ? "Taken off your list: their address could not receive email."
         : contact.gone === "complained"
           ? "Taken off your list: they marked an email as spam."
-          : `Left your list${isoDay(contact.unsubAt) ? ` on ${isoDay(contact.unsubAt)}` : ""}. They are not written to again.`
+          : contact.gone === "refused"
+            ? "Taken off your list: the email service refused their address."
+            : `Left your list${isoDay(contact.unsubAt) ? ` on ${isoDay(contact.unsubAt)}` : ""}. They are not written to again.`
       : contact.agreed
         ? `On your list, and agreed to hear from you${isoDay(contact.agreedAt) ? ` on ${isoDay(contact.agreedAt)}` : ""}.`
         : "On your list, without agreeing to hear from you: only their purchase emails reach them.";

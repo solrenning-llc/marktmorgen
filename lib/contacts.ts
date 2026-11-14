@@ -289,8 +289,10 @@ export async function upsertContact(
     // which was already there when it was read. Something from before the deletion, or from its same second, is
     // never written after it: a thank-you page of an older order reloaded, a download link opened again. A mark in
     // another shape is not known to be older, so nothing is written either.
-    if (deleted && !afterDeletion(mark, input.at)) return refused;
+    // A fenced own yes (#4268) is placed by CONTACT_FENCED_WRITE_IF instead, against its link's issue time on Redis's
+    // clock, the mark's own: the app's `at` may run behind it, which would refuse a fresh yes. Its shape is still read here.
     const ownYes = input.agreed && input.explicit;
+    if (deleted && !afterDeletion(mark, fence && ownYes ? undefined : input.at)) return refused;
     const agreed = Boolean(before?.agreed) || (input.agreed && (!deleted || ownYes));
     // A yes only undoes an unsubscribe when it was given after it: a thank-you
     // page reloaded, or a download link opened again, repeats an old tick.

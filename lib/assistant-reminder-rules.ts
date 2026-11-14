@@ -102,7 +102,7 @@ export const ASSIST_REMIND_REQUEST_UNITS = 4;
 export const assistRemindKey = (session: string) => `nl:assist:remind:${session}`;
 
 /** Words of pressure the line may never use, in the store languages, beyond the deal words. */
-const PRESSURE =
+export const PRESSURE =
   /\b(now|today|tonight|soon|hurry|quick|quickly|fast|last|left|limited|ending|ends|expires?|deadline|before it'?s gone|don'?t miss|miss out|while (it|they) lasts?|popular|everyone|people love|ahora|hoy|pronto|[uú]ltim[oa]s?|maintenant|aujourd'hui|vite|dernier|jetzt|heute|schnell|letzte|adesso|oggi|subito|nu|vandaag|snel|laatste|agora|hoje|r[aá]pido)\b/i;
 
 /**

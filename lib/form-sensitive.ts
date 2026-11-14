@@ -42,9 +42,9 @@ const TOPIC_QUESTION = /^(?:how|what|why|which|when|where|who|do|did|does|would|
 // nor "describe" ("Describe your password").
 const ABOUT_QUESTION = /^(?!(?:how|what)\s+about\b)(?:how|what|why|which|when|where|who|do|did|does|have|has|should)\b/i;
 // A sentence that asks the visitor to type or hand over something ("Type it here").
-const REQUEST_VERB = /^(?:(?:please|kindly|now|then|and|also)\s+)*(?:(?:can|could|would|will)\s+you\s+(?:please\s+)?)?(?:enter|provide|type|input|write|share|send|tell|give|confirm|re[-\s]?enter|put|paste|fill)\b/i;
+const REQUEST_VERB = /^(?:(?:please|kindly|now|then|and|also)\s+)*(?:(?:can|could|would|will)\s+you\s+(?:please\s+)?)?(?:enter|provide|type|input|write|share|send|show|tell|give|confirm|re[-\s]?enter|put|paste|fill)\b/i;
 // The same verbs handing over "it" anywhere in a clause ("If yes type it in the box").
-const REQUEST_IT = /\b(?:enter|provide|type|input|write|share|send|tell|give|confirm|re[-\s]?enter|put|paste|fill)\s+(?:(?:in|out|down|us|me)\s+)?(?:it|them|that|this)\b/i;
+const REQUEST_IT = /\b(?:enter|provide|type|input|write|share|send|show|tell|give|confirm|re[-\s]?enter|put|paste|fill)\s+(?:(?:in|out|down|us|me)\s+)?(?:it|them|that|this)\b/i;
 
 // A question whose answer is the visitor's own secret (Claude 4 cloud D, #3668): "What do you use as your password?",
 // "Which password do you use for Gmail?", "What is the password you use for Gmail?". Never "What do you use to store
@@ -106,7 +106,14 @@ function asksForPassword(label: string): boolean {
   // to disclose a secret. Explicit questions for the actual password matched above.
   const topicQuestion = TOPIC_QUESTION.test(normalized);
   const credentialPair = /\b(?:e-?mail|user\s*name|username|login)\b(?:\s+[\p{L}\p{N}'’\-]+){0,3}\s+pass(?:word|code|phrase)s?\b|\bpass(?:word|code|phrase)s?\b(?:\s+[\p{L}\p{N}'’\-]+){0,3}\s+\b(?:e-?mail|user\s*name|username|login)\b/iu.test(normalized);
-  if ((credentialPair || CREDENTIAL_JOINED.test(normalized) || LOGIN_PASS.test(request)) && !topicQuestion) return true;
+  // A short noun phrase that ends by naming an experience to describe ("Email and password reset experience") asks
+  // about the sign-in, not for the credentials (Codex P, #3668 @49382e2bb8). Only one phrase, at most six words, with
+  // no punctuation and no second ask ("Email and password, then rate your experience" stays refused); "Your email
+  // and password ..." was refused above.
+  const describesExperience = !/[,;:.()|]/.test(request) &&
+    !/\b(?:then|also|plus|your|my|rate|enter|provide|type|input|write|share|send|show|tell|give|confirm|put|paste|fill)\b/i.test(normalized) &&
+    /^(?:[\p{L}\p{N}'’\-]+\s+){1,5}(?:experiences?|feedback|impressions?|satisfaction)\s*[*?]?$/iu.test(normalized);
+  if ((credentialPair || CREDENTIAL_JOINED.test(normalized) || LOGIN_PASS.test(request)) && !topicQuestion && !describesExperience) return true;
 
   // A short field name may name a service, or use "email and password" with
   // a courtesy suffix or a reason ("Instagram password so we can post for you"). Narrow exceptions below keep

@@ -162,6 +162,10 @@ for (const label of [
   // Codex U @49382e2bb8 (MEDIUM): "show it" hands over a named secret, as "send it" or "paste it" do.
   "Do you have a Netflix password? Show it to us",
   "Do you have the Gmail password? Please show it",
+  // The experience exception below never covers a second ask after the pair.
+  "Email and password, then rate your experience",
+  "Email and password then rate your experience",
+  "Your email and password experience",
 ] as const) {
   is(`refused: ${label}`, sensitiveKindOf(label), "password");
   const field = { id: "field1", type: "short" as const, label, required: true, options: [] };

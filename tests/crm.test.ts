@@ -14,10 +14,10 @@
  */
 import { NextRequest } from "next/server";
 import { DEFAULT_STAGES, boardTotals, fieldValue, newCrmId, parseDeal, parseFields, parseStages } from "@/lib/crm-rules";
-import { allValues, readDeals, readFields, readValues } from "@/lib/crm";
+import { readDeals, readFields, readValues, valuesOf } from "@/lib/crm";
 import { personKey } from "@/lib/person-key";
 import { listAsCsv } from "@/lib/free";
-import { upsertContact } from "@/lib/contacts";
+import { plainRead, upsertContact } from "@/lib/contacts";
 import { claimHandle, ensureStatsId, storeForEmail } from "@/lib/store";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { POST } from "@/app/api/store/crm/route";
@@ -123,7 +123,7 @@ async function main(): Promise<void> {
   is("and the person's answer in it", csv[1].endsWith(',"","Coaching","",""'), true);
 
   await call_({ action: "fields", fields: fields.filter((f) => f.id !== "offer1") });
-  is("a field taken away takes its answers", (await allValues(store.statsId, [{ id: "offer1", name: "Offer", type: "choice", options: [] }])).offer1, {});
+  is("a field taken away takes its answers", (await valuesOf(store.statsId!, [{ id: "offer1", name: "Offer", type: "choice", options: [] }], [person], plainRead)).offer1, [null]);
 
   is("removed", (await call_({ action: "undeal", id })).ok, true);
   is("removed twice, unknown", (await call_({ action: "undeal", id })).error, "unknown");

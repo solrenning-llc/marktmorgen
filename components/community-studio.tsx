@@ -759,7 +759,7 @@ function Welcome({ config, busy, run, problem }: { config: CommunityConfig; busy
           </p>
           {questions.map((q, i) => (
             <div key={i}>
-              <label htmlFor={`cm-question-${i}`} className="sr-only">{`Question ${i + 1}`}</label>
+              <label htmlFor={`cm-question-${i}`} className="field-label mb-1 text-sm">{`Question ${i + 1}`}</label>
               <input
                 id={`cm-question-${i}`}
                 className="field"
@@ -870,7 +870,7 @@ function Levels({
                 </span>
                 {level >= 2 && courses.length ? (
                   <span className="w-full sm:w-64">
-                    <label htmlFor={`cm-reward-${level}`} className="sr-only">{`Course Level ${level} hands over`}</label>
+                    <label htmlFor={`cm-reward-${level}`} className="field-label mb-1 text-sm">{`Course Level ${level} hands over`}</label>
                     <select
                       id={`cm-reward-${level}`}
                       className="field"
@@ -1006,11 +1006,11 @@ function Spaces({
           <p className="field-label">Add a space</p>
           <div className="mt-2 grid gap-2 sm:grid-cols-2">
             <div>
-              <label htmlFor="cm-space-name" className="sr-only">Name of the new space</label>
+              <label htmlFor="cm-space-name" className="field-label mb-1 text-sm">Name of the new space</label>
               <input id="cm-space-name" className="field" maxLength={MAX_SPACE_NAME} placeholder="Name, like Wins" value={name} onChange={(e) => setName(e.target.value)} />
             </div>
             <div>
-              <label htmlFor="cm-space-about" className="sr-only">One line about the new space</label>
+              <label htmlFor="cm-space-about" className="field-label mb-1 text-sm">One line about the new space</label>
               <input id="cm-space-about" className="field" maxLength={MAX_SPACE_ABOUT} placeholder="One line about it (optional)" value={about} onChange={(e) => setAbout(e.target.value)} />
             </div>
           </div>

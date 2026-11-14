@@ -627,14 +627,14 @@ function ModuleCard({
       </ol>
 
       <form
-        className="mt-4 flex flex-col gap-2 sm:flex-row"
+        className="mt-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap"
         onSubmit={async (event) => {
           event.preventDefault();
           const answer = await run({ action: "edit", op: "lesson-add", moduleId: unit.id, title: newLesson });
           if (answer.ok) setNewLesson("");
         }}
       >
-        <label htmlFor={`new-lesson-${unit.id}`} className="sr-only">{`New lesson in module ${index + 1}`}</label>
+        <label htmlFor={`new-lesson-${unit.id}`} className="field-label text-sm sm:w-full">{`New lesson in module ${index + 1}`}</label>
         <input
           id={`new-lesson-${unit.id}`}
           className="field min-w-0 flex-1"

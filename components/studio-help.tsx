@@ -63,8 +63,8 @@ export function StudioHelp({ left: startLeft }: { left: number | null }) {
         {"Ask anything about your store in your own words, in English or the language you write in. Answered from our help center only, with the answers it came from. "}
         <span id={allowanceId}>{left === null ? `${AI_ALLOWANCE_UNKNOWN} Each question counts as one AI job.` : `Each question counts as one of your ${left} AI jobs left this month.`}</span>
       </p>
-      <form onSubmit={ask} className="mt-4 flex flex-col gap-2 sm:flex-row">
-        <label htmlFor="studio-help-question" className="sr-only">Your question</label>
+      <form onSubmit={ask} className="mt-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+        <label htmlFor="studio-help-question" className="field-label sm:w-full">Your question</label>
         <input
           id="studio-help-question"
           value={question}

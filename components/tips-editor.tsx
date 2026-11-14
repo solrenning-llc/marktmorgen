@@ -108,7 +108,7 @@ export function TipsEditor({
         <div className="mt-2 grid grid-cols-3 gap-2">
           {amounts.map((value, i) => (
             <div key={i}>
-              <label htmlFor={`tip-amount-${i}`} className="sr-only">{`Amount ${i + 1}`}</label>
+              <label htmlFor={`tip-amount-${i}`} className="field-label mb-1 text-sm">{`Amount ${i + 1}`}</label>
               <div className="flex items-center gap-1.5">
                 <span aria-hidden="true" className="text-sm font-semibold text-ink-soft">{fieldPrefix(currency)}</span>
                 <input

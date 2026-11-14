@@ -5,7 +5,7 @@ import { Icon } from "@/components/icons";
 import { AI_ALLOWANCE_UNKNOWN, AiOn, allowanceOf } from "@/components/ai-assist";
 import { MAX_AI_NOTES } from "@/lib/ai-rules";
 import { BLOCK_KINDS, type BlockKind, type FactKey, type SalesPage } from "@/lib/sales-page";
-import { BUYER_LENSES, type CoachCheck, coachChecks, coachScore, scoreWord, steepestDrop } from "@/lib/page-coach";
+import { BUYER_LENSES, type CoachCheck, type CoachFix, coachChecks, coachScore, scoreWord, steepestDrop } from "@/lib/page-coach";
 import type { PageFacts } from "@/lib/page-facts";
 
 /** What the writing help sends back about a page (lib/ai.ts, PageReview). */
@@ -48,6 +48,7 @@ export function PageCoach({
   page,
   reach,
   onAdd,
+  onFix,
   onHeadline,
   onTest,
   onFit,
@@ -68,6 +69,8 @@ export function PageCoach({
   page: SalesPage;
   reach: { shares: Record<string, number>; visitors: number } | null;
   onAdd: (kind: BlockKind) => void;
+  /** Opens the part named by a check's fix with the focus in its field (AX274 Part A item 6); nothing is filled in. */
+  onFix?: (fix: CoachFix) => void;
   onHeadline: (headline: string, sub: string) => void;
   onTest: (headline: string, sub: string) => void;
   onFit: (yes: string[], no: string[]) => void;
@@ -139,6 +142,12 @@ export function PageCoach({
         <button type="button" className="btn btn-ghost btn-sm shrink-0" onClick={() => onAdd(check.add as BlockKind)}>
           <Icon name="plus" size={14} />
           {`Add ${kindLabel(check.add).toLowerCase()}`}
+        </button>
+      ) : null}
+      {!check.done && check.fix && onFix ? (
+        <button type="button" className="btn btn-ghost btn-sm shrink-0" onClick={() => onFix(check.fix as CoachFix)}>
+          Show me
+          <span className="sr-only">{check.fix.field === "alt" ? " the first picture with no description" : " the first button whose words say nothing"}</span>
         </button>
       ) : null}
     </li>

@@ -35,7 +35,15 @@ export type CoachCheck = {
   weight: 1 | 2 | 3;
   /** The block that would answer it, when adding one is the fix. */
   add?: BlockKind;
+  /**
+   * The first part of the version being edited that misses it, and the field to fill there (AX274 Part A item 6):
+   * its "Show me" opens that part with the focus in that field. Nothing is filled in.
+   */
+  fix?: CoachFix;
 };
+
+/** A picture's description, or a button's words, in one block of the page being edited. */
+export type CoachFix = { field: "alt" | "button-words"; block: string };
 
 export type CoachInput = {
   page: Pick<SalesPage, "blocks" | "seoDescription" | "test"> & { variant?: SalesPage["variant"] };
@@ -232,6 +240,7 @@ export function coachChecks(input: CoachInput): CoachCheck[] {
   const described = (block: PageBlock) =>
     block.kind === "row" ? block.columns.flat().flatMap((element) => (element.kind === "image" && !element.decorative ? [element.picture] : [])) : picturesOf(block);
   const alts = [...input.page.blocks, ...(input.page.variant?.blocks ?? [])].flatMap(described).map((p) => p.alt);
+  const bareAt = input.page.blocks.find((block) => described(block).some((p) => !p.alt.trim()));
   if (hero && hero.media === "picture" && input.picture) alts.push(input.pictureAlt);
   if (alts.length > 0) {
     const bare = alts.filter((alt) => !alt.trim()).length;
@@ -241,12 +250,14 @@ export function coachChecks(input: CoachInput): CoachCheck[] {
       why: "Some buyers use a screen reader, which reads the page aloud and says a picture's description in its place. In the box beside each picture, say what it shows; the picture at the top uses the product's own description.",
       done: bare === 0,
       weight: 2,
+      ...(bare && bareAt ? { fix: { field: "alt" as const, block: bareAt.id } } : {}),
     });
   }
   // A button's own words say what it does (274 [AX1] Part A item 6; WCAG 2.4.4, 2.4.9): a screen reader may list
   // the buttons by their words alone. An empty label keeps the page's own words, which do. A row's buttons are
   // buttons too (375 [TB1]), those leading elsewhere included: their words must say where.
   const vagueButtons = [...blocks, ...(input.page.variant?.blocks ?? [])].flatMap(buttonWords).filter((label) => label.trim() && vagueLinkTitle(label)).length;
+  const vagueAt = blocks.find((block) => buttonWords(block).some((label) => label.trim() && vagueLinkTitle(label)));
   if (blocks.some((b) => buttonWords(b).length > 0)) {
     checks.push({
       id: "button_words",
@@ -254,6 +265,7 @@ export function coachChecks(input: CoachInput): CoachCheck[] {
       why: "Some buyers hear a page's buttons read out by their words alone, so \u201cClick here\u201d says nothing. Say what happens, such as \u201cGet the course\u201d or \u201cBook your call\u201d.",
       done: vagueButtons === 0,
       weight: 2,
+      ...(vagueButtons && vagueAt ? { fix: { field: "button-words" as const, block: vagueAt.id } } : {}),
     });
   }
   checks.push({

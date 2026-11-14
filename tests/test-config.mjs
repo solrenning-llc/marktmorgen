@@ -150,6 +150,7 @@ function centralAliases(file,root,here){
   for(const name of ['studio-route','ai','email','house-store','inbox','team'])aliases['@/lib/'+name]=join(here,'z-ai-inbox-page-world.ts');
   for(const name of ['studio-header','studio-store-pin','inbox-studio'])aliases['@/components/'+name]=join(here,'z-ai-inbox-page-world.ts');
  }
+ if(file==='b-cost-a3-picture-storage.test.ts')for(const name of ['blob','vault','stream'])aliases['@/lib/'+name]=join(here,'b-cost-a3-storage-world.ts');
  if(file==='storage-measurement.test.ts')for(const name of ['blob','vault','stream'])aliases['@/lib/'+name]=join(here,'storage-provider-stub.ts');
  if(file==='blob-download-attachment.test.ts')aliases['@/lib/blob']=join(here,'blob-download-attachment-world.ts');
  if(file==='sg2-l1-serve-file.test.ts')aliases['@/lib/blob']=join(here,'blob-download-attachment-world.ts');

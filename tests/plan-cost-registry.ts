@@ -74,7 +74,7 @@ import { QUIZ_MONTHLY_SUBMISSIONS } from "@/lib/quiz-usage-rules";
 import { TEAM_LIMITS } from "@/lib/team-scheduling-rules";
 import { SYNC_SECONDS } from "@/lib/host-calendar";
 import { MAX_TEAM } from "@/lib/team";
-import { MAX_TASK_FILE_BYTES, TASK_ROOM_BYTES, TRIAL_TASK_ROOM_BYTES } from "@/lib/assignment-rules";
+import { MAX_ANSWER_TEXT, MAX_FEEDBACK, MAX_TASK_FILE_BYTES, TASK_ROOM_BYTES, TRIAL_TASK_ROOM_BYTES } from "@/lib/assignment-rules";
 import { COMMUNITY_PICTURES, PICTURE_BYTES, TRIAL_COMMUNITY_PICTURES } from "@/lib/community-picture-rules";
 import { CLOSING_DAYS, DEL_BATCH, ENDED_LIST_DOWNLOADS, ENDED_STORE_EXPORTS, FOLLOW_BATCH, RENEWALS_AT_ONCE, WARN_WEEK_DAYS } from "@/lib/plan-closing-rules";
 import { MAX_CRM_FIELDS } from "@/lib/crm-rules";
@@ -104,6 +104,7 @@ import { SEARCH_MESSAGES } from "@/lib/community-dm";
 import { MAX_FORMS } from "@/lib/forms";
 import { EXPORT_COMMANDS, EXPORT_PAGE_SECONDS, EXPORT_STRIPE_PAGES } from "@/lib/store-export";
 import { PATH_REFUND_PAGES, PATH_SALE_PAGES } from "@/lib/path-facts";
+import { SNS_RECEIPT_COMMANDS_MOST, SNS_RECEIPT_VALUE_BYTES_MOST } from "@/lib/sns-receipt-rules";
 import { ALL_TIME_PAGES } from "@/lib/stats";
 import { MAX_PAID_BYTES, PAYPAL_REFUNDS_READ } from "@/lib/paypal-sales";
 import { AGENDA_MAX_ROWS, AGENDA_ROW_SENT_BYTES, AGENDA_TASKS_BYTES } from "@/lib/person-agenda";
@@ -119,7 +120,7 @@ import { ASSISTANT_ON_SALE } from "@/lib/opening";
 import { NEXT_OFFER_CHOICES, NEXT_OFFER_COMMANDS, NEXT_OFFER_PRODUCTS } from "@/lib/next-offer-rules";
 import { MAX_SHELF } from "@/lib/course-shelf-rules";
 import { ASSIST_REMIND_COMMANDS, ASSIST_REMIND_PRODUCTS } from "@/lib/assistant-reminder-rules";
-import type { ReadWork } from "@/lib/api-read-rules";
+import { DONE_SET_BYTES, LISTING_BYTES, TASK_BYTES, type ReadWork } from "@/lib/api-read-rules";
 import { DOWNLOAD_LOOKUP_COMMANDS, DOWNLOAD_LOOKUP_MS, ORDERS_BUNDLE_BYTES, ORDERS_OLDER_BYTES, ORDERS_OLDER_COMMANDS, ORDERS_OPEN_COMMANDS, ORDERS_OPEN_SECONDS, ORDERS_PAGE_BYTES } from "@/lib/buyer-orders-rules";
 import { MOVES_PER_MGET, MOVE_BYTES, MOVE_KEY_BYTES } from "@/lib/call-moves-read";
 import { MAX_PER_PERSON as AGREEMENTS_PER_PERSON, MAX_BODY as AGREEMENT_BODY, MAX_LINES as AGREEMENT_LINES, MAX_LINE_TEXT as AGREEMENT_LINE_TEXT, MAX_NAME as AGREEMENT_NAME, MAX_TITLE as AGREEMENT_TITLE } from "@/lib/agreement-rules";
@@ -160,6 +161,10 @@ export const MAIL_REPORT_COST_COMPONENTS = {
   completeMonthlyUsd: null,
   reviewedAdmission: CURRENT_MAIL_REPORT_ADMISSION,
 } as const;
+/** Redis commands one callback attempt is billed at its most: the rate guard's two, the SNS receipt's and the report's first outcome. */
+export const MAIL_CALLBACK_COMMANDS_PER_ATTEMPT = 2 + SNS_RECEIPT_COMMANDS_MOST + MAIL_REPORT_COST_COMPONENTS.firstOutcomeCommands;
+/** The SNS receipt's key and value fit in one of the 256-byte transport records counted in mailReportCallbackCost (key prefix, an 80-character id, the value). */
+export const SNS_RECEIPT_RECORD_BYTES_MOST = "nl:sns:seen:".length + 80 + SNS_RECEIPT_VALUE_BYTES_MOST;
 /** One published delivery notice, without supplier free-tier credit:
  * SNS $0.50/million publishes + $0.60/million HTTPS deliveries, each 64 KiB
  * chunk charged. Read 2026-11-04: aws.amazon.com/sns/faqs/ and /sns/pricing/.
@@ -167,8 +172,11 @@ export const MAIL_REPORT_COST_COMPONENTS = {
  * This is an explicit sizing calculation, never a current account review.
  * A retry is charged the full route envelope even when deduplication wins.
  * Thirty CPU seconds and 2 GB held for all 30 seconds use maxDuration, not
- * an observed fast callback. Eleven Redis commands = SET/INCR rate guard,
- * SET SNS receipt, EVAL plus its seven internal report commands. Storage
+ * an observed fast callback. Redis commands = SET/INCR rate guard, the SNS
+ * receipt at its most (lib/sns-receipt.ts, SNS_RECEIPT_COMMANDS_MOST: claim,
+ * read-back, owner-bound take-over and done or let-go scripts with their inner
+ * commands, eight since #2612; one before), and the report's EVAL plus its
+ * seven internal commands: MAIL_CALLBACK_COMMANDS_PER_ATTEMPT. Storage
  * includes two report fields kept ten days and two 256-byte transport/guard
  * records per attempt kept a full day (above the actual minute-long guard).
  * Report fields are also in the data-family model: deliberately overlapping
@@ -180,7 +188,7 @@ export function mailReportCallbackCost(deliveries: number, attempts: number, sns
       typeof snsTransferPerGb !== "number" || !Number.isFinite(snsTransferPerGb) || snsTransferPerGb <= 0 ||
       !Number.isSafeInteger(deliveries * attempts)) return null;
   const invocations = deliveries * attempts;
-  const redisCommands = invocations * 11;
+  const redisCommands = invocations * MAIL_CALLBACK_COMMANDS_PER_ATTEMPT;
   if (!Number.isSafeInteger(redisCommands)) return null;
   // Five chunks for an accepted 300,000-byte envelope, plus transport
   // headers. An oversized/rejected publication is outside this delivery
@@ -194,7 +202,7 @@ export function mailReportCallbackCost(deliveries: number, attempts: number, sns
   const networkBytes = 300_000 + 128 + 32_768;
   const hostingPerAttempt = CALL + 30 * CPU_SECOND + 30 * MEMORY_SECOND + 2 / 1_000_000
     + networkBytes * (ORIGIN_PER_BYTE + 0.15 / 1e9);
-  const redisPerAttempt = 11 * COMMAND + 4096 * DB_BYTE + 512 / 30 * DB_BYTE_MONTH;
+  const redisPerAttempt = MAIL_CALLBACK_COMMANDS_PER_ATTEMPT * COMMAND + 4096 * DB_BYTE + 512 / 30 * DB_BYTE_MONTH;
   const retainedPerNotice = 512 * 10 / 30 * DB_BYTE_MONTH;
   const snsUsd = deliveries * (snsPerNotice + attempts * snsPerAttempt);
   const hostingUsd = invocations * hostingPerAttempt;
@@ -362,10 +370,59 @@ export const ORIGIN_PER_BYTE = 0.06 / 1e9;
  * (app/api/store/community/image).
  */
 export const BLOB_TRANSFER_PER_BYTE = 0.1 / 1e9;
+/**
+ * One "Simple Operation" of Vercel Blob (a head: a file's details read without its bytes), at US$ 0.400 per million on
+ * demand, from the official page "Vercel Blob usage and pricing" (vercel.com/docs/vercel-blob/usage-and-pricing, read by
+ * Claude on 2 November 2026, docs/codex-queue.md item PP2), which also says every interaction counts: never a free quota.
+ */
+export const BLOB_SIMPLE_OPERATION = 0.4 / 1e6;
+/**
+ * One "Advanced Operation" of Vercel Blob (a put, a copy, a list; a delete is taken as one too), as a review
+ * ceiling: twice the US$ 5.00 per million on demand of Vercel's published price, the same doubling as
+ * BLOB_TRANSFER_PER_BYTE. Not read from an official page in this session (vercel.com could not be reached on
+ * 9 November 2026): not certified, never zero; a dated official read replaces it. A review ceiling not read: the
+ * official pricing page was refused through this session's proxy (403, 9 November 2026), so the figure is the one
+ * remembered, doubled, and stays a ceiling to be read and dated before any margin is certified.
+ */
+export const BLOB_ADVANCED_OPERATION = 10 / 1e6;
 /** How long a door's file may be kept before it is used or swept away, in months: a day, and the day the job may take to reach it. */
 export const DOOR_KEPT_MONTHS = 2 / 31;
 /** What one community picture costs to send: the request, the reads, a second held at 2 GB, and its megabyte from the file store and on to the browser. */
 export const PICTURE_READ = request("light", 16) + PICTURE_BYTES * (ORIGIN_PER_BYTE + BLOB_TRANSFER_PER_BYTE);
+/**
+ * The daily sweep's commands for one assignment door's file, on both its lists (lib/assignment.ts, sweepTaskUploads):
+ * on each, its share of the list read, its ZREM, the doors' ZSCORE for a held name, the student's work read to keep a
+ * handed-in file, and the ZADD when it is put back; and the hand-in's hold written, taken back or let go
+ * (takeTaskUpload, releaseTaskHold).
+ */
+export const TASK_SWEEP_COMMANDS = 14;
+/**
+ * The most one student's work on an assignment reads as (lib/assignment.ts, submissionOf), which the sweep reads to
+ * keep a handed-in file: the answer and the creator's reply at their longest, each character escaped in JSON at six
+ * bytes, and four kilobytes for the rest of the record.
+ */
+export const TASK_WORK_BYTES = (MAX_ANSWER_TEXT + MAX_FEEDBACK) * 6 + 4_096;
+/** Heads of the file store one assignment door's file takes: the door's own, and the hand-in's (app/api/store/course/task). */
+export const TASK_DOOR_SIMPLE_OPERATIONS = 2;
+/**
+ * Advanced Operations one assignment door's file takes at the most: the browser's PUT, a delete by the hand-in (refused,
+ * or the file replaced later) and one by the sweep (a held name no work keeps), counted in tests/task-upload-path.test.ts.
+ */
+export const TASK_DOOR_ADVANCED_OPERATIONS = 3;
+/**
+ * The most one assignment upload door costs (app/api/store/course/task/upload, 9 November 2026): held as a call waited
+ * on for ten seconds at 2 GB, forty commands (the student, the store, the course, its listing, the gate, the task,
+ * the pace, the room, the buyer action, the listing and the one taken back), the store's record, the course's and
+ * its listing's, the task and the lessons done read at their largest, the heads of the file store (the door's and
+ * the hand-in's), the browser's upload through the door and every delete of its file (TASK_DOOR_ADVANCED_OPERATIONS),
+ * and the sweep's commands and its two reads of the student's work for it. One buyer action is taken before the head;
+ * tests/task-upload-path.test.ts holds this at or under UNIT_COST.buyer, so the line buyer-actions already pays for it.
+ * (The two Blob prices are declared as in #3414, same name and value: whichever lands second keeps one copy.)
+ */
+export const TASK_DOOR_COST =
+  request("wait", 40 + TAKE_COMMANDS, MAX_STORE_BYTES + COURSE_BYTES + LISTING_BYTES + TASK_BYTES + DONE_SET_BYTES)
+  + TASK_DOOR_SIMPLE_OPERATIONS * BLOB_SIMPLE_OPERATION + TASK_DOOR_ADVANCED_OPERATIONS * BLOB_ADVANCED_OPERATION
+  + TASK_SWEEP_COMMANDS * COMMAND + 2 * TASK_WORK_BYTES * DB_BYTE;
 /**
  * One certificate of completion drawn as a PDF file (app/[handle]/certificate/[id]/pdf/route.ts): the store and the
  * certificate (or the sample's course and listing) read, its two counts (REQUEST_COMMANDS each), the fonts embedded and the page drawn at a
@@ -617,6 +674,9 @@ export const UNIT_COST: Record<AllowanceKind, number> = {
   // database and on to the browser, and a door's file of up to 10 MB kept
   // for as long as an unused door may be.
   buyer: request("wait", 100 + TAKE_COMMANDS, 60_000) + 60_000 * ORIGIN_PER_BYTE + (MAX_TASK_FILE_BYTES / GB) * STORAGE_PER_GB * DOOR_KEPT_MONTHS,
+  // A webhook settings change (lib/webhooks.ts, changeConfig) is inside a studio or API request above: a GET and the
+  // compare-and-set a try, CONFIG_WRITE_TRIES tries at the most, and only on a reply it cannot read one GET more, the
+  // settings read back once (CX-123 rule 24); when they are as they were read, that read starts the next try.
   // A webhook's try (lib/webhooks.ts): the delivery and the store read and written, the endpoint waited on for up to eight seconds.
   webhook: request("wait", 20 + TAKE_COMMANDS, 40_000),
 };
@@ -1445,7 +1505,7 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/call-moves-read.ts", names: ["MOVES_PER_MGET", "MOVE_BYTES", "MOVE_KEY_BYTES", "moveReads"] },
       { file: "lib/mcp-tools.ts", names: ["chargeBook"] },
       { file: "app/api/v1/sales/route.ts", names: ["takeMoreApi(store, API_SALES_UNITS - 1)"] },
-      { file: "lib/api-sales.ts", names: ["charge(apiReadUnits(listingsWork(listingsToRead(store, wanted))), API_SALES_UNITS)"] },
+      { file: "lib/api-sales.ts", names: ["charge(apiReadUnits(listingsWork(listingsToRead(store, wanted))), API_SALES_UNITS - 1)"] },
       { file: "lib/store-allowance-rules.ts", names: ["API_SALES_UNITS"] },
       { file: "lib/api-sales.ts", names: ["SALES_PAGE", "SALES_TITLE_IDS", "SALE_TEXT_LIMITS", "cutText"] },
     ],
@@ -1500,8 +1560,11 @@ export const COST_LINES: CostLine[] = [
       { file: "app/api/store/community/push/route.ts", names: ["takeBuyerAction"] },
       { file: "app/api/store/community/upload/route.ts", names: ["takeBuyerAction", "takePicturePlace"] },
       { file: "app/api/store/course/comment/route.ts", names: ["takeBuyerAction"] },
-      { file: "app/api/store/course/task/route.ts", names: ["takeBuyerAction(store)"] },
-      { file: "app/api/store/course/task/upload/route.ts", names: ["takeBuyerAction(on.store)"] },
+      // The hand-in's head of its file and its deletes are priced with the door the file came through (TASK_DOOR_COST).
+      { file: "app/api/store/course/task/route.ts", names: ["takeBuyerAction(store)", "headFile(path)", "deleteFile(path)", "releaseTaskHold(file.path)"] },
+      // The assignment door also asks the file store once whether the browser's name is already a file (one head, and
+      // a listing it may take back), after its buyer action is taken (9 November 2026).
+      { file: "app/api/store/course/task/upload/route.ts", names: ["takeBuyerAction(on.store)", "head(pathname)", "dropTaskDoor(pathname)"] },
       { file: "app/api/store/course/progress/route.ts", names: ["takeBuyerAction"] },
       { file: "app/api/store/course/certificate/route.ts", names: ["takeBuyerAction(store)"] },
       // The download takes one buyer read, then, before any note is read, the rest of what its most costs to read
@@ -1625,7 +1688,7 @@ export const PER_PAYMENT_LINES: CostLine[] = [
       { file: "lib/crm.ts", names: ["PERSON_ARG_BYTES = 35;", "valuesOf"] },
       { file: "lib/free.ts", names: ["Math.ceil(MAX_LEADS / 500) + 10"] },
       { file: "lib/store-export.ts", names: ["listValuesShape(store)"] },
-      { file: "lib/free.ts", names: ["contacts * fields * PERSON_ARG_BYTES", "Math.ceil(contacts / 1000) * fields"] },
+      { file: "lib/free.ts", names: ["contacts * fields * PERSON_ARG_BYTES", "Math.ceil(contacts / LIST_VALUES_PER_READ) * fields", "LIST_VALUES_PER_READ = 1_000;", "readValues(LIST_VALUES_PER_READ)", "if (!valued.has(email)) waiting.add(email);"] },
       { file: "lib/joined-stores.ts", names: ["QUARTERS_KEPT", "PERSON_RECORD_MONTHS"] },
       { file: "lib/plan-closing-rules.ts", names: ["DEL_BATCH", "FOLLOW_BATCH", "RENEWALS_AT_ONCE"] },
       { file: "tests/store-data-registry.ts", names: ["closingBytes", "followedBytes", "TRIAL_UNITS"] },
@@ -1653,7 +1716,7 @@ export function exportCommands(bytes: number): number {
   const lessons = MAX_PRODUCTS * MAX_LESSONS;
   // The contacts' pages: a thousand at a command, as many as the room can hold and never more than lib/free.ts, listAsCsv, reads (MAX_LEADS).
   const contacts = Math.min(Math.ceil(bytes / 100 / 1000), MAX_LEADS / 500 + 10);
-  // Each page's people's values, one HMGET a field (lib/crm.ts, valuesOf; second cost review of #3354).
+  // The people's values, one HMGET a field for each thousand of them, never more than the walk's pages (lib/free.ts, LIST_VALUES_PER_READ; lib/crm.ts, valuesOf; second and third cost reviews of #3354).
   return Math.ceil(EXPORT_COMMANDS.fixed + 3 * Math.ceil(MAX_PRODUCTS / 100) + Math.ceil(MAX_PRODUCTS / 100) + Math.ceil(lessons / BODIES_PER_READ) + Math.ceil(MAX_POSTS / 100) + EXPORT_COMMANDS.form * MAX_FORMS + contacts * (1 + MAX_CRM_FIELDS));
 }
 

@@ -209,7 +209,7 @@ async function main(): Promise<void> {
   is("the paid copy is counted in the place its original held", await admitOrders(store, 1), { ok: false, reason: "paused" });
   sessions = [...sessions, expired(sid("early", 0), seconds() - 3600, hour, recovery)];
   await sweep();
-  is("the original read closed afterwards gives nothing back a second time", await admitOrders(store, 1), { ok: false, reason: "paused" });
+  is("the original read closed afterward gives nothing back a second time", await admitOrders(store, 1), { ok: false, reason: "paused" });
 
   part("A checkout left at Stripe's default, closed a day after it opened, still gives its place back");
   store = await freshStore();

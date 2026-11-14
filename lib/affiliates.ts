@@ -950,8 +950,26 @@ export type ApplyRequest = "sent" | "email" | "limited" | "unavailable" | "owner
  *
  * `r` is the affiliate whose invitation link they applied through, when the
  * programme has a second tier (lib/affiliate-setting.ts secondTier).
+ *
+ * `t` is when an invitation (`k`) was made, in ms, read against a later
+ * removal or decline (invitedAfter, #4045).
  */
-type LinkGrant = { s: string; e: string; n: string; k?: 1; p?: PartnerShare; r?: string };
+type LinkGrant = { s: string; e: string; n: string; k?: 1; p?: PartnerShare; r?: string; t?: number };
+
+/**
+ * Whether an invitation was made after the record's last decision, so it is the creator changing their mind about
+ * somebody they declined or removed. An invitation made before the removal is not (#4045): the removal came later
+ * and stands. Either time missing or unreadable is not known to be later, so it never lets them back in.
+ */
+function invitedAfter(grant: LinkGrant, affiliate: Affiliate): boolean {
+  const made = grant.t;
+  const decided = affiliate.decidedAt;
+  return typeof made === "number" && Number.isSafeInteger(made) && made > 0 && Number.isSafeInteger(decided) && decided > 0 && made > decided;
+}
+
+/** Somebody declined or removed whom this invitation does not let back in (invitedAfter). */
+const refusedBy = (grant: LinkGrant, affiliate: Affiliate) =>
+  grant.k === 1 && (affiliate.status === "removed" || affiliate.status === "declined") && !invitedAfter(grant, affiliate);
 
 /**
  * The affiliate whose invitation link this is, when it may bring anybody: the
@@ -1107,7 +1125,7 @@ export async function invitePartner(input: {
   }
 
   const token = randomBytes(32).toString("hex");
-  const grant: LinkGrant = { s: statsId, e: email, n: "Invited as a partner", k: 1, p: share };
+  const grant: LinkGrant = { s: statsId, e: email, n: "Invited as a partner", k: 1, p: share, t: Date.now() };
   await redisPipeline([["SET", linkKey(token), JSON.stringify(grant), "EX", AFFILIATE_LINK_SECONDS]]);
   const sent = await sendEmail({ meter: { by: "store", store: store, kind: "email" },
     from: `"${displayName(store.name)} via Marktmorgen" <${senderAddress()}>`,
@@ -1142,10 +1160,21 @@ export async function invitePartner(input: {
  * app, not a worse one. It goes through the same grant the email would have
  * carried, so the record is made exactly as it is made everywhere else.
  */
-export async function acceptPartnership(store: Store, email: string, share: PartnerShare, charge: Charge = PAID): Promise<OpenResult> {
+export async function acceptPartnership(
+  store: Store,
+  email: string,
+  share: PartnerShare,
+  charge: Charge = PAID,
+  /**
+   * When the offer was made (PartnerInvite.at), in ms: a record declined or removed after it stays out (#4045). The
+   * studio's answer always passes its offer's time (0 when that time is unreadable, which never lets anybody back
+   * in); left out, the offer is one made now.
+   */
+  invitedAt: number = Date.now(),
+): Promise<OpenResult> {
   if (!affiliatesOn(store)) return { ok: false, reason: "unavailable" };
   const token = randomBytes(32).toString("hex");
-  const grant: LinkGrant = { s: store.statsId as string, e: normaliseEmail(email), n: "Accepted a partnership", k: 1, p: share };
+  const grant: LinkGrant = { s: store.statsId as string, e: normaliseEmail(email), n: "Accepted a partnership", k: 1, p: share, t: invitedAt };
   await redisPipeline([["SET", linkKey(token), JSON.stringify(grant), "EX", 600]]);
   return openAffiliateLink(store, token, charge);
 }
@@ -1163,6 +1192,7 @@ function parseGrant(raw: unknown): LinkGrant | null {
       ...(value.k === 1 ? { k: 1 as const } : {}),
       ...(share ? { p: share } : {}),
       ...(typeof value.r === "string" && AFFILIATE_ID_PATTERN.test(value.r) ? { r: value.r } : {}),
+      ...(typeof value.t === "number" && Number.isSafeInteger(value.t) && value.t > 0 ? { t: value.t } : {}),
     };
   } catch {
     return null;
@@ -1196,9 +1226,10 @@ export type OpenResult =
   | { ok: true; session: string; affiliate: Affiliate; created: boolean }
   /** "committed" and "crowded": an accepted share no longer fits the cap (lib/partner-share.ts); the link or offer is kept. */
   /** "resting": the requests that pay for reading the program's people were not taken; nothing read or written, the link or offer kept. */
-  | { ok: false; reason: "expired" | "full" | "unavailable" | "committed" | "crowded" | "resting" };
+  /** "withdrawn": an invitation made before the creator declined or removed this person (#4045); nothing written. */
+  | { ok: false; reason: "expired" | "full" | "unavailable" | "committed" | "crowded" | "resting" | "withdrawn" };
 
-type Recorded = { ok: true; affiliate: Affiliate; created: boolean } | { ok: false; reason: "expired" | "full" | "committed" | "crowded" };
+type Recorded = { ok: true; affiliate: Affiliate; created: boolean } | { ok: false; reason: "expired" | "full" | "committed" | "crowded" | "withdrawn" };
 
 /**
  * The record an opened link (or an accepted studio offer) makes or approves. With `fence`, the grant carries a share:
@@ -1212,6 +1243,8 @@ async function recordFromLink(store: Store, grant: LinkGrant, fence: { share: Pa
   let created = false;
   const [knownId] = await redisPipeline([["HGET", emailsKey(statsId), grant.e]]);
   if (typeof knownId === "string") affiliate = await readAffiliate(store, knownId);
+  // Declined or removed after this invitation was made: the later decision stands, before anything is read or paid.
+  if (affiliate && refusedBy(grant, affiliate)) return { ok: false, reason: "withdrawn" };
   if (fence) {
     // The people read paid for first, by whoever pays for this path (openAffiliateLink's `charge`), rule 30.
     const problem = await partnerShareProblem(store, fence.share, affiliate?.id ?? null, fence.charge);
@@ -1220,11 +1253,21 @@ async function recordFromLink(store: Store, grant: LinkGrant, fence: { share: Pa
   }
   // An invitation the creator sent (grant.k) arrives already decided: opening
   // it approves them and attaches the share the email stated. Somebody the
-  // creator had declined or removed is let back in by it, because inviting
-  // them is the creator changing their mind, in their own words.
+  // creator had declined or removed is let back in by it only when it was made
+  // after that decision, because then inviting them is the creator changing
+  // their mind, in their own words; an older invitation is not (#4045).
   if (affiliate && grant.k === 1) {
     // Only the decision and the share are changed, over exactly the record read: an address set meanwhile is kept.
-    const changed = await changeAffiliate(store, affiliate.id, (now) => ({ ...now, status: "approved", decidedAt: Date.now(), share: grant.p ?? now.share }));
+    // Checked again on that record, so a removal written meanwhile is never overwritten by an older invitation.
+    let refused = false;
+    const changed = await changeAffiliate(store, affiliate.id, (now) => {
+      if (refusedBy(grant, now)) {
+        refused = true;
+        return null;
+      }
+      return { ...now, status: "approved", decidedAt: Date.now(), share: grant.p ?? now.share };
+    });
+    if (refused) return { ok: false, reason: "withdrawn" };
     if (!changed?.next) return { ok: false, reason: "expired" };
     affiliate = changed.next;
   }

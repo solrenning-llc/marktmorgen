@@ -113,6 +113,13 @@ const PENDING_WATCH_MS = 2 * 24 * 60 * 60 * 1000;
 const pendingMember = (handle: string, session: string, slot: string) => `${handle}|${session}|${slot}`;
 
 /**
+ * The states of an offer's payment, answered at once, in which nothing was or will be taken without the buyer:
+ * declined or stopped (requires_payment_method, canceled), or waiting on a step the buyer is not sent to
+ * (requires_action with no page to confirm on, requires_confirmation). Any other is still on its way.
+ */
+const NOTHING_TAKEN = new Set(["requires_payment_method", "canceled", "requires_action", "requires_confirmation"]);
+
+/**
  * Adds an offer to the job's list, and takes it off. Best effort: the list
  * only makes the settling sooner, the thanks page settles an offer too, so a
  * moment of Redis trouble here never stands in the way of the buyer's answer.
@@ -456,6 +463,13 @@ export async function takeUpsell(input: {
     if (pi.status === "requires_action" && url) {
       await writeUpsell(session, slot, { state: "pending", product: target.id, ...extra, pi: id, customer, at: Date.now() });
       return { kind: "confirm", url };
+    }
+    // Still on its way (DISC-B-4): "processing" (Link paid from a bank account, now and then a card) or any state not
+    // read as one that took nothing can still be paid. It stays pending on the five-minute job's list and is settled
+    // from what Stripe says (settleOne), never told as declined while the buyer may yet be charged.
+    if (!NOTHING_TAKEN.has(String(pi.status))) {
+      await writeUpsell(session, slot, { state: "pending", product: target.id, ...extra, pi: id, customer, at: Date.now() });
+      return { kind: "checking" };
     }
     await writeUpsell(session, slot, { state: "failed", product: target.id, ...extra, pi: id, customer, at: Date.now() });
     await unwatchPending(store, session, slot);

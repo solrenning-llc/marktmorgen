@@ -53,6 +53,7 @@ export const MESSAGES: Record<string, string> = {
   session_room: "Each session's meeting link has to be a full web address starting with https://, or left empty.",
   meet_google: "Google Calendar is not connected to this store anymore. Connect it again under Video calls in your studio, or pick another place for the call.",
   meet_zoom: "Zoom is not connected to this store anymore. Connect it again under Video calls in your studio, or pick another place for the call.",
+  meet_unknown: "Your video call connections could not be checked just now, so nothing was saved. They may still be connected, so you do not need to connect again. Try again in a moment.",
   past: "A new or changed session has to start in the future.",
   upcoming: "Add at least one session that is still to come.",
   booked: "Somebody has booked a session you moved or took off. A booked session keeps its date, time and length; you can still change its link, or add more seats.",

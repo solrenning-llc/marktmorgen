@@ -114,6 +114,8 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
  * The page under the frame shows through; the card is the only thing drawn.
  * Its picture runs across the top in a frame tall enough for it, and sits
  * beside the title in one that is not (lib/embed-rules.ts, CARD_HEIGHTS).
+ * In a frame too short for it (the script's at 400% zoom is 160px tall) the
+ * card never clips its action: it grows past the frame, which scrolls (1.4.10).
  */
 const CARD_RULES =
   `.em-cover{display:none}@media (min-height:${CARD_COVER_FROM}px){.em-cover{display:block}.em-thumb{display:none}}` +
@@ -121,7 +123,7 @@ const CARD_RULES =
   // under its title, never one cut through the middle.
   ".em-sum{display:-webkit-box;-webkit-box-orient:vertical;overflow:hidden;-webkit-line-clamp:var(--lines,2)}" +
   `@media (max-height:${CARD_COVER_FROM - 1}px){.em-sum[data-picture]{-webkit-line-clamp:1}}`;
-const SEE_THROUGH = `html,body{background:transparent!important;min-height:0!important;height:100%;margin:0}${CARD_RULES}`;
+const SEE_THROUGH = `html,body{background:transparent!important;min-height:0!important;height:100%;margin:0}${CARD_RULES}#content>.st-card.h-full{min-height:min-content}`;
 /** As a page of its own (?mm=page) the card sits in a box of its own height, the picture across its top. */
 const ON_A_PAGE = ".em-cover{display:block}.em-thumb{display:none}.em-sum{display:-webkit-box;-webkit-box-orient:vertical;overflow:hidden;-webkit-line-clamp:var(--lines,2)}";
 

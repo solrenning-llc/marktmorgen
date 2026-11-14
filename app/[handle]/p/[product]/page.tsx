@@ -314,8 +314,10 @@ export default async function ProductPage({ params, searchParams }: Params) {
     ) : null;
   const [about, stock, noKeys, savedPage, summary, related, inside, soldCounts, courseFacts] = await Promise.all([
     product.about ? readAbout(store.statsId, product.id) : Promise.resolve(""),
-    stockLeft(store, product).catch(() => null),
-    outOfKeys(store, product).catch(() => false),
+    // Read exactly (CX-123 rule 24): a count that could not be read is "unread", never "no limit" (null) or "keys
+    // left" (false), as on the store and collection pages: no way to buy it and no count is drawn then.
+    stockLeft(store, product).catch(() => "unread" as const),
+    outOfKeys(store, product).catch(() => null),
     pageOf(store, product),
     summaryOf(store.statsId, product.id).catch(() => null),
     // What its order bump offers, drawn in the same box as on the store page.
@@ -382,13 +384,14 @@ export default async function ProductPage({ params, searchParams }: Params) {
   // The reviews the creator picked to show first, on a page built from blocks (lib/sales-page.ts, ReviewsBlock).
   const pickedFirst = page.blocks.find((block) => block.kind === "reviews")?.first ?? [];
   const reviews = summary && summary.visible > 0 ? await visibleReviews(store.statsId, product.id, 0, REVIEWS_ON_PAGE, pickedFirst).catch(() => []) : [];
-  const count = noKeys ? 0 : stock;
+  const stockUnread = stock === "unread" || noKeys === null;
+  const count = stockUnread ? null : noKeys ? 0 : stock;
   const blocks = aboutBlocks(about);
   const remaining = count !== null && canSellProduct(store, product) ? count : null;
   // Bought for somebody else, where it can be: on sale, not coming soon, not sold out (lib/gift-rules.ts).
-  const giftable = selling && !soon && remaining !== 0 && bundleReady && canSellProduct(store, product) && canGift(product);
+  const giftable = selling && !soon && !stockUnread && remaining !== 0 && bundleReady && canSellProduct(store, product) && canGift(product);
   // And for several people at once, where a gift can be and nothing is limited (lib/group-rules.ts).
-  const groupable = selling && !soon && bundleReady && canSellProduct(store, product) && canGroup(product);
+  const groupable = selling && !soon && !stockUnread && bundleReady && canSellProduct(store, product) && canGroup(product);
   const plan = activePlan(product);
   const pwyw = activePwyw(product);
   const description = page.seoDescription || product.summary || aboutExcerpt(about) || product.title;
@@ -453,8 +456,8 @@ export default async function ProductPage({ params, searchParams }: Params) {
           </a>
         </p>
       ) : null}
-      <BuyBox store={store} product={product} related={related} remaining={remaining} writes={canWrite(store)} selling={selling} ready={bundleReady} soon={soon} preorder={preorder} bundleItems={inside} pickAgain={query.pick === "count"} consentAgain={consentAgain && !giftProblem && !groupProblem} embed={embedSite || embedReturn ? { site: embedSite, back: embedReturn } : null} chosenOption={linkedChoice} />
-      {cartOn && !soon && cartable(product) && remaining !== 0 ? <AddToCart handle={store.handle} productId={product.id} lang={store.language} deal={store.cartDeal.on ? store.cartDeal : null} /> : null}
+      <BuyBox store={store} product={product} related={related} remaining={remaining} writes={canWrite(store)} selling={selling} ready={bundleReady} soon={soon} preorder={preorder} bundleItems={inside} pickAgain={query.pick === "count"} consentAgain={consentAgain && !giftProblem && !groupProblem} embed={embedSite || embedReturn ? { site: embedSite, back: embedReturn } : null} chosenOption={linkedChoice} unread={stockUnread} />
+      {cartOn && !soon && !stockUnread && cartable(product) && remaining !== 0 ? <AddToCart handle={store.handle} productId={product.id} lang={store.language} deal={store.cartDeal.on ? store.cartDeal : null} /> : null}
       {/* A question before buying, answered from this page (lib/answers.ts): only where the creator switched it on. */}
       {selling && answersOn(store) ? (
         <AskBox
@@ -547,9 +550,10 @@ export default async function ProductPage({ params, searchParams }: Params) {
 
   // Where the buy box is and what its button says, for the page's own blocks
   // and for the bar held at the bottom of a phone's screen (components/sticky-buy.tsx).
-  const { action, label } = pageAction(store, product, remaining, selling, related, soon, preorder);
+  // A count that could not be read gives the page's blocks no way to buy either: no link to the buy box or checkout.
+  const { action, label } = stockUnread ? { action: { kind: "none" as const, text: w.cardBuyUnread }, label: "" } : pageAction(store, product, remaining, selling, related, soon, preorder);
   const sticky =
-    action.kind === "none" ? null : (
+    action.kind === "none" || stockUnread ? null : (
       <StickyBuy target={free ? "get" : "buy"} label={label} price={<PriceTag store={store} product={product} />} />
     );
 

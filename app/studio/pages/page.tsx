@@ -12,6 +12,7 @@ import { imageFolder, isFree } from "@/lib/store";
 import { readCards, readListing, readListings } from "@/lib/catalog";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
+import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { canSell } from "@/lib/store-checkout";
 import { imageUrl } from "@/lib/product-image";
@@ -145,7 +146,7 @@ export default async function StudioPagesPage({ searchParams }: Params) {
       <StudioStorePin sid={store.sid}>
       {/* Wider than the rest of the studio on a wide screen: the page is drawn beside its blocks. */}
       <main id="content" className="container-page pb-20 pt-10 sm:pt-14 xl:!max-w-[92rem]">
-        <p className="eyebrow">Sales pages</p>
+        <StudioTrail store={store} here="Sales pages" />
         <h1 className="t-h2 mt-3">A page that sells each product</h1>
         <p className="mt-3 max-w-2xl text-ink-soft">
           {`Build each product's own page from up to ${MAX_BLOCKS} blocks: a hero with its picture or a video, text, benefits, what's inside, about you, questions, your guarantee, buttons to the checkout and your buyers' verified reviews. Something free gets a landing page with the sign-up form, to send ads to. Pages follow your store's look, and a product without blocks keeps the page it has.`}

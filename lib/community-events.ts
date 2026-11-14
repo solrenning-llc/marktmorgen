@@ -916,11 +916,16 @@ export function announcementText(store: Pick<Store, "handle" | "language">, even
  */
 export async function forgetRsvpsPerson(id: string, who: string, email: string): Promise<number> {
   if (!isRedisConfigured()) return 0;
-  const [raw] = await redisPipeline([["ZRANGEBYSCORE", indexKey(id), "-inf", "+inf"]]);
-  const events = (Array.isArray(raw) ? raw : []).map(String).slice(0, MAX_KEPT_EVENTS);
+  // Read exactly (rule 24): an index or deletes answered cut short or in another shape throw, so the erasure is tried
+  // again, never "no event to take them off" or a count of 0 standing for "erased".
+  const listed = stringList(repliesFor(await redisPipeline([["ZRANGEBYSCORE", indexKey(id), "-inf", "+inf"]]), 1)?.[0]);
+  if (!listed) throw new UnknownReplyError("a community's events");
+  const events = listed.slice(0, MAX_KEPT_EVENTS);
   if (!events.length) return 0;
-  const replies = await redisPipeline([...events.map((e) => ["HDEL", rsvpKey(id, e), who]), ["DEL", ...events.map((e) => accessKey(id, e, email))]]);
-  return replies.slice(0, events.length).reduce<number>((sum, n) => sum + (Number(n) || 0), 0);
+  const replies = repliesFor(await redisPipeline([...events.map((e) => ["HDEL", rsvpKey(id, e), who]), ["DEL", ...events.map((e) => accessKey(id, e, email))]]), events.length + 1);
+  const counts = replies?.map(countOf);
+  if (!counts || counts.some((n) => n === null)) throw new UnknownReplyError("a member's event answers deleted");
+  return (counts as number[]).slice(0, events.length).reduce((sum, n) => sum + n, 0);
 }
 
 /** The live events one member said they are coming to, and when they said it, for the copy of their data (619 [SZ3]). Only reads. */

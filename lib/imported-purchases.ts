@@ -34,6 +34,7 @@ import { rememberBuyers } from "@/lib/buyer-library";
 import { createHash } from "node:crypto";
 import { normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { type DataStore, needData } from "@/lib/store-data";
 import { orderWrite } from "@/lib/order-data";
 import { dataBytes } from "@/lib/store-data-rules";
@@ -271,6 +272,8 @@ export async function takeGiven(statsId: string, email: string, productId: strin
  */
 export async function forgetImportedPerson(statsId: string | null, email: string): Promise<number> {
   if (!statsId || !isRedisConfigured()) return 0;
-  const replies = await redisPipeline([["DEL", importedKey(statsId, email)], ["HDEL", importedWhoKey(statsId), normaliseEmail(email)]]);
-  return replies.reduce<number>((sum, n) => sum + (Number(n) || 0), 0);
+  // Counted exactly (rule 24): a reply cut short or in another shape throws, never 0 standing for "erased".
+  const counts = repliesFor(await redisPipeline([["DEL", importedKey(statsId, email)], ["HDEL", importedWhoKey(statsId), normaliseEmail(email)]]), 2)?.map(countOf);
+  if (!counts || counts.some((n) => n === null)) throw new UnknownReplyError("a person's imported purchases deleted");
+  return (counts as number[]).reduce((sum, n) => sum + n, 0);
 }

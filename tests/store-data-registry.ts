@@ -1066,7 +1066,9 @@ export const FAMILIES: Record<string, Family> = {
   "nl:wb:@lib/winback-send.ts": short("A come-back offer sent to a member by email", "own", 90, MARK, MAIL("come back")),
   "nl:wb:cursor@lib/winback-send.ts": company("Where the come-back job stopped", "One key, the company's job."),
   "nl:wb:link:@lib/winback-send.ts": short("A come-back link", "own", 60, LINK_BYTES, MAIL("come back")),
-  "nl:wb:n:@lib/winback-send.ts": short("Come-back offers counted", "day", 62, 128),
+  // One key a store with no expiry: the count of all time the studio shows as "Sent so far" (lib/winback-send.ts,
+  // winbacksSent), erased with the store. Still priced at the figure of a key a day kept 62 days, above its one key.
+  "nl:wb:n:@lib/winback-send.ts": short("Come-back offers counted, all time (one key a store, no expiry, erased with the store)", "day", 62, 128),
   "nl:wb:once:@lib/winback-send.ts": short("An address told of a product", "own", 60, KEY, MAIL("come back")),
   "nl:yearask:@lib/yearly-ask.ts": { what: "A member asked to go yearly", parts: [item(MARK, "One a membership, five years: counted as for good.", "membership")] },
   "nl:yearask:count:@lib/yearly-ask.ts": short("Asks counted a month", "day", 62, 128),

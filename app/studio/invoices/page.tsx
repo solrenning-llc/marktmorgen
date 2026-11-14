@@ -5,6 +5,7 @@ import { countStudio, studioPath, studioView } from "@/lib/studio-route";
 import { STUDIO_PAGE_UNITS } from "@/lib/studio-allowance-rules";
 import { STORE_ID_PATTERN } from "@/lib/store";
 import { StudioHeader } from "@/components/studio-header";
+import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { PlanInvoicesList } from "@/components/plan-invoices-list";
 import { ESSENTIAL_WORDS, PLAN_INVOICES_PER_DAY, planInvoicesOf } from "@/lib/plan-invoices";
@@ -45,7 +46,7 @@ export default async function StudioInvoicesPage({ searchParams }: Params) {
       <StudioHeader current={store} role={view.role} stores={view.stores} owned={view.owned} action={{ href: `${studioPath(store)}#billing`, label: "Back to your plan", short: "Plan" }} />
       <StudioStorePin sid={store.sid}>
         <main id="content" className="container-page pb-20 pt-10 sm:pt-14">
-          <p className="eyebrow">Your plan</p>
+          <StudioTrail store={store} path={[{ label: "Your plan", href: `${studioPath(store)}#billing` }]} here="Invoices" />
           <h1 className="t-h2 mt-3">Your plan&apos;s invoices</h1>
           <p className="mt-3 max-w-2xl text-ink-soft">
             {`The invoices Marktmorgen has made for this store's plan, newest first, read from Stripe when this page opens. Each one opens on Stripe's own page, where you can see it, download it and, if it is not paid yet, pay it.${read.state === "none" ? "" : ` Each read takes one of ${ESSENTIAL_WORDS}, and only while fewer than ${PLAN_INVOICES_PER_DAY} of them have been used, so changing or canceling your plan always keeps the rest. It takes none of your studio's monthly requests beyond this page's own. Only the plan subscription your store has now is listed: invoices of an earlier one are not shown here.`}`}

@@ -1,13 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { trackingConsentWords } from "@/lib/buyer-words/tracking-consent";
 import { LANGUAGES, type LanguageCode, parseLanguage } from "@/lib/store-language";
 import { pixelChoiceState, type Pixels } from "@/lib/pixels";
 import { X_SCRIPT, xConfigCall, xEventCall } from "@/lib/x-pixel";
 import { type Place, redditInitCall, redditScript, redditTrackCall } from "@/lib/reddit-pixel";
-import { ADS_COOKIE_SECONDS, adsCookieName, mayClearPlatformCookies, nextAdsCookie, platformCookieExpiries } from "@/lib/ad-consent";
+import { ADS_COOKIE_SECONDS, adsCookieName, mayClearPlatformCookies, nextAdsCookie, platformCookieExpiries, platformStorageKeys } from "@/lib/ad-consent";
 
 /**
  * The creator's own ad pixels, on their store's pages.
@@ -107,6 +107,10 @@ function writeAdsCookie(handle: string, on: boolean, gpc = false) {
       // another store on this site still has this browser's yes.
       if (mayClearPlatformCookies(handle, storedChoices(), gpc)) {
         for (const expiry of platformCookieExpiries(document.cookie, location.hostname, secure !== "")) document.cookie = expiry;
+        for (const storage of [localStorage, sessionStorage]) {
+          const all = Array.from({ length: storage.length }, (_, i) => storage.key(i) ?? "");
+          for (const key of platformStorageKeys(all)) storage.removeItem(key);
+        }
       }
       return;
     }
@@ -531,6 +535,18 @@ export function StorePixels({
     return () => document.removeEventListener("submit", onSubmit, true);
   }, [state, pixels, event, handle, place]);
 
+  // Focus follows the banner (LOW on #4241, 2.4.3): to its first button when the settings open it, and back to the
+  // settings link once a choice closes it, never left on <body>.
+  const bannerFirst = useRef<HTMLButtonElement>(null);
+  const settingsLink = useRef<HTMLButtonElement>(null);
+  const focusNext = useRef<"banner" | "settings" | null>(null);
+  useEffect(() => {
+    const next = focusNext.current;
+    focusNext.current = null;
+    if (next === "banner") bannerFirst.current?.focus();
+    if (next === "settings") settingsLink.current?.focus();
+  }, [state]);
+
   if (state === "unknown") return null;
 
   const spoken = parseLanguage(language);
@@ -556,11 +572,13 @@ export function StorePixels({
         </p>
         <div className="mt-4 flex flex-wrap gap-2">
           <button
+            ref={bannerFirst}
             type="button"
             className="btn st-btn"
             onClick={() => {
               const gpc = (navigator as Navigator & {globalPrivacyControl?:boolean}).globalPrivacyControl === true;
               writeChoice(handle,gpc ? "no" : "yes");
+              focusNext.current = "settings";
               setState(pixelChoiceState("yes",askFirst,gpc));
             }}
           >
@@ -572,6 +590,7 @@ export function StorePixels({
             className="btn st-btn"
             onClick={() => {
               writeChoice(handle, "no");
+              focusNext.current = "settings";
               setState("off");
             }}
           >
@@ -585,6 +604,7 @@ export function StorePixels({
   return (
     <p lang={locale} className="mt-3 text-center">
       <button
+        ref={settingsLink}
         type="button"
         className="st-footer-link text-xs font-semibold"
         onClick={() => {
@@ -596,6 +616,7 @@ export function StorePixels({
           } else {
             // Only the question again: a no stays a no until "Allow" is pressed,
             // so looking at the settings and leaving never turns the pixels on.
+            focusNext.current = "banner";
             setState("ask");
           }
         }}

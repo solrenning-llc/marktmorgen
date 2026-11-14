@@ -303,7 +303,9 @@ export default function PrivacyPage() {
           the creator&apos;s list (sign-ups are not sent to Google). With each
           we send its id, time, amount, currency and products, whether the
           buyer had paid that creator before, the page, the email address
-          hashed with SHA-256, the network address and browser of the request
+          hashed with SHA-256 (a sign-up for something free or a waitlist is
+          sent without it, because the address is not confirmed yet), the
+          network address and browser of the request
           that opened the checkout or sent the sign-up (not with a later
           membership payment), and the platform&apos;s own cookies and ad click
           id from that browser. It goes to that platform on the creator&apos;s

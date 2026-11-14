@@ -33,7 +33,7 @@ import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, SESSION_COOKIE, emailForSession, norma
 import { NIMBUS_FROM, sendEmail, serviceMailKnownUnavailable } from "@/lib/email";
 import { coursesWords } from "@/lib/buyer-words/courses";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
+import { HDEL_IF_EQUAL, UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { type DataStore, giveData, needData, noteData, takeData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
@@ -192,13 +192,15 @@ export async function forgetPaid(store: Store, email: string): Promise<void> {
  * Takes a course off an address's ledger: a gift, pre-order, group place or PayPal sale taken back by a refund. Both
  * replies are read exactly (CX-123 rule 24; Codex G on #2781): the HDEL and the DEL each answer 0 or 1, or this
  * throws UnknownReplyError, so the caller keeps the refund to be tried again and never reads "taken away" from a
- * reply it could not read. Running it again is harmless.
+ * reply it could not read. Running it again is harmless. With `startedAt`, only the course written down as begun then
+ * (recordEnrollment's whole seconds) is taken off, so one a later purchase wrote with its own start is kept.
  */
-export async function dropEnrollment(store: Store, email: string, productId: string): Promise<void> {
+export async function dropEnrollment(store: Store, email: string, productId: string, startedAt?: number): Promise<void> {
   if (!isRedisConfigured()) return;
+  const ledger = ledgerKey(store, email);
   const replies = repliesFor(
     await redisPipeline([
-      ["HDEL", ledgerKey(store, email), productId],
+      startedAt === undefined ? ["HDEL", ledger, productId] : ["EVAL", HDEL_IF_EQUAL, 1, ledger, productId, String(Math.floor(startedAt))],
       ["DEL", paidCacheKey(store, email)],
     ]),
     2,
@@ -531,6 +533,35 @@ export async function doneLessonsOrUnknown(courseId: string, email: string): Pro
     if (error instanceof UnknownReplyError) return null;
     throw error;
   }
+}
+
+/**
+ * How far one person is in each of these courses, for their list of purchases
+ * (560 [AS1]): the lessons done among the lessons each course has now, all in
+ * one round trip. Each course asks only about its own lessons (SMISMEMBER),
+ * so what comes back is one 0 or 1 a lesson, MAX_LESSONS at the most, however
+ * many marks were kept for lessons since taken out. A course with no lessons
+ * is left out: there is nothing to count. A reply that is not exactly one 0 or
+ * 1 for each lesson asked is null for that course, said as "could not be
+ * checked", never as 0 done (CX-123 rule 24).
+ */
+export async function lessonsDoneIn(courses: Course[], email: string): Promise<Map<string, { done: number; total: number } | null>> {
+  const out = new Map<string, { done: number; total: number } | null>();
+  const asked = courses.flatMap((course) => {
+    const ids = lessonsInOrder(course).map(({ lesson }) => lesson.id);
+    return ids.length ? [{ course, ids }] : [];
+  });
+  if (!asked.length || !isRedisConfigured()) return out;
+  const rows = repliesFor(await redisPipeline(asked.map(({ course, ids }) => ["SMISMEMBER", doneKey(course.id, email), ...ids])), asked.length);
+  asked.forEach(({ course, ids }, i) => {
+    const flags = rows ? repliesFor(rows[i], ids.length) : null;
+    if (!flags || flags.some((flag) => flag !== 0 && flag !== 1)) {
+      out.set(course.id, null);
+      return;
+    }
+    out.set(course.id, { done: flags.filter((flag) => flag === 1).length, total: ids.length });
+  });
+  return out;
 }
 
 /** Where lessons marked done are counted in the store's data room (lib/store-data.ts). */

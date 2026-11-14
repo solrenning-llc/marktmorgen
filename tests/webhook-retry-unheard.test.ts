@@ -85,6 +85,9 @@ async function main(): Promise<void> {
   is("the sale is never posted to it again", received.length, 1);
   is("nothing more of the month is taken", await allowanceUsed(one, "webhook"), used);
   is("the delivery is failed, saying why", [after?.state, /no longer hears/i.test(after?.lastError ?? "")], ["failed", true]);
+  // Its first try already took one of the month's deliveries (counted is kept): the line says nothing more was, never
+  // that nothing was (LOW on #4288).
+  is("and that nothing more was counted, not that nothing was", [/Nothing more was counted\./.test(after?.lastError ?? ""), /Nothing was counted/.test(after?.lastError ?? "")], [true, false]);
 
   part("Control: an event the endpoint still hears is tried again as before");
   answers.push(500, 200);

@@ -835,6 +835,8 @@ export function BlockView({ block, ctx, reviews }: { block: PageBlock; ctx: Bloc
             words={{
               units: wordsIn(ctx.lang ?? DEFAULT_LANGUAGE).countdownUnits,
               until: wordsIn(ctx.lang ?? DEFAULT_LANGUAGE).until("{when}"),
+              pause: wordsIn(ctx.lang ?? DEFAULT_LANGUAGE).countdownPause,
+              resume: wordsIn(ctx.lang ?? DEFAULT_LANGUAGE).countdownResume,
               locale: LANGUAGES[ctx.lang ?? DEFAULT_LANGUAGE].locale,
             }}
           />

@@ -30,7 +30,7 @@ import { withLock } from "@/lib/redis-lock";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { type Listing, productIdFromAddress, readListing } from "@/lib/catalog";
 import { type ReportInput, handleIn } from "@/lib/takedown-rules";
-import { TAKEN_DOWN_SECONDS, markTakenDown, previewState, readDraftPreview } from "@/lib/draft-preview";
+import { TAKEN_DOWN_SECONDS, hasDraftPreview, isTakenDown, markTakenDown, readDraftPreview } from "@/lib/draft-preview";
 import { type PictureNames, withdrawProductPicture } from "@/lib/picture-withdraw";
 
 const REPORT_SECONDS = 400 * 86_400;
@@ -277,10 +277,10 @@ async function stillUp(store: Store, action: Exclude<TakedownAction, { type: "st
     if (product.hidden) {
       // A draft is not public, but its preview link is (lib/draft-preview.ts): a notice about that address takes the
       // link down, and none opens or is made for the draft until it is published (Claude 6's focal on #3597). Once
-      // marked, there is nothing more to take down, and a draft with no link (never made, revoked or ended) had nothing
-      // public to take down: no strike, count or statement of reasons for it (Revisor 2 on #3597). A store without a
-      // stats id never had a preview link. A reply that cannot be read throws to the caller, never "nothing to do".
-      if (!store.statsId || (await previewState(store, action.id)) !== "open") return null;
+      // marked, there is nothing more to take down. A store without a stats id never had a preview link. A mark that
+      // cannot be read throws to the caller, never "nothing to do".
+      if (!store.statsId || (await isTakenDown(store, action.id))) return null;
+      if (!(await hasDraftPreview(store, action.id))) return null;
       return {
         what: `The preview link of the draft product "${product.title}", now closed`,
         howLong: `How long: until you publish the product, and at most ${Math.round(TAKEN_DOWN_SECONDS / 86_400)} days while it stays a draft. No preview link opens or can be made for it meanwhile. Publishing it while the notice stands may lead us to suspend your store (Terms, section 3, ${origin}/terms#selling-through-a-marktmorgen-store).`,
@@ -433,12 +433,16 @@ async function finish(report: Report, store: Store, action: Exclude<TakedownActi
     await writeSteps(key, steps);
     // Owed from here until its notice goes out, so a page opened again can still send it (unsentNotices).
     await markOwed(report.id, part);
+    // The preview closed before the product is hidden (Claude 1 cloud rev-odd on #3597): a published product can
+    // still have a live link from its draft days, and hidden without its mark it would read as a draft with a live
+    // preview, "up", so the takedown would never be told. A mark that fails here throws with nothing taken down, and
+    // a press again does it all; a mark left on a product still published only stops preview links it does not need.
+    await closePreview(store, action);
     if (!(await apply(ref, store, action))) {
       await redisPipeline([["DEL", key], ["SREM", owedKey(report.id), part]]).catch(() => {});
       return null;
     }
-    // Down, confirmed: from here the steps say it landed (Claude 6, focal 6713440905), its preview closed first.
-    await closePreview(store, action);
+    // Down, confirmed: from here the steps say it landed (Claude 6, focal 6713440905).
     steps = { ...steps, applied: true };
     await writeSteps(key, steps);
   } else {

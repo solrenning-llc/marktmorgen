@@ -131,6 +131,22 @@ async function main(): Promise<void> {
   const after = await makeDraftPreview(await store(), drafted.product.id);
   is("a link written after it never opens", await readDraftPreview(after.code), null);
 
+  part("A product hidden by its creator with no preview is not taken down");
+  const unsharedDraft = await addProduct(owner, "Unshared Draft", "", "9", null);
+  if (!unsharedDraft.ok) throw new Error("setup");
+  await setProductHidden(owner, unsharedDraft.product.id, true);
+  const strikesBeforeUnshared = (await store()).strikes.length;
+  const emailsBeforeUnshared = sent.length;
+  is(
+    "no preview means no takedown, strike, or creator notice",
+    [
+      await takeDown(report, await store(), { type: "product", id: unsharedDraft.product.id }, "https://marktmorgen.com"),
+      (await store()).strikes.length - strikesBeforeUnshared,
+      sent.length - emailsBeforeUnshared,
+    ],
+    [null, 0, 0],
+  );
+
   part("A draft still hidden, reported by its preview address, has its preview closed (Claude 6's focal on #3597)");
   const hiddenDraft = await addProduct(owner, "Quiet Draft", "", "9", null);
   if (!hiddenDraft.ok) throw new Error("setup");
@@ -200,6 +216,78 @@ async function main(): Promise<void> {
   is("the creator is sent nothing", sent.filter((mail) => [mail.to].flat().includes(owner)).length, 0);
   is("the draft is not marked taken down", await isTakenDown(await store(), unread.product.id), false);
   is("control: read again, its link is open, and the takedown closes it", (await takeDown(report, await store(), { type: "product", id: unread.product.id }, "https://marktmorgen.com")) !== null, true);
+  // Claude 1 cloud rev-odd's MEDIUM on #3597: a published product can still have a live preview link from its draft
+  // days. When the takedown mark's write failed once after the product was hidden, the product read as "a draft with a
+  // live preview": the takedown was no longer down, the creator was never told the product was unpublished, and the old
+  // link kept opening. The mark is written before the product is hidden, so a failed mark leaves nothing taken down,
+  // and a press again takes the product down and tells the creator so.
+  part("A takedown whose preview mark fails once is not lost (Claude 1 cloud rev-odd on #3597)");
+  const once = await addProduct(owner, "Once Pack", "", "9", null);
+  if (!once.ok) throw new Error("setup");
+  await setProductHidden(owner, once.product.id, true);
+  const fromDraft = await makeDraftPreview(await store(), once.product.id);
+  await setProductHidden(owner, once.product.id, false);
+  is("the draft's link still opens once the product is published", (await readDraftPreview(fromDraft.code))?.productId, once.product.id);
+  const pipeline = redis.pipeline.bind(redis);
+  let failMark = true;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (failMark && commands.some((c) => String(c[0]).toUpperCase() === "SET" && String(c[1]).startsWith("nl:dpv:down:"))) {
+      failMark = false;
+      throw new Error("a transient 500 on the mark");
+    }
+    return pipeline(commands);
+  }) as typeof redis.pipeline;
+  const onceAction = { type: "product", id: once.product.id } as const;
+  const thrown = await takeDown(report, await store(), onceAction, "https://marktmorgen.com").then(() => false, () => true);
+  redis.pipeline = pipeline;
+  is("the first press throws on the failed mark", thrown, true);
+  const emailsBefore = sent.length;
+  is(
+    "a press again takes the product down, in those words",
+    await takeDown(report, await store(), onceAction, "https://marktmorgen.com"),
+    'The product "Once Pack", now unpublished',
+  );
+  is("the product is hidden and marked", [((await store()).catalog.items.find((p) => p.id === once.product.id)?.kind ?? 0) & KIND.hidden, await isTakenDown(await store(), once.product.id)], [KIND.hidden, true]);
+  is("the old link no longer opens", await readDraftPreview(fromDraft.code), null);
+  is("one email to the creator says the product was unpublished", [sent.length - emailsBefore, sent.slice(emailsBefore).some((m) => m.text.includes('The product "Once Pack", now unpublished'))], [1, true]);
+  is("a third press finds nothing more to do", await takeDown(report, await store(), onceAction, "https://marktmorgen.com"), null);
+
+  // Codex L's MEDIUM 2 on #3597: a hidden draft with a live preview, its mark written and the pointer's read failing right
+  // after. The mark alone closes the preview, so a retry must not read "nothing to do" before the takedown is recorded:
+  // it answers in its words once, with one email to the creator, and only then finds nothing more to do.
+  part("A draft's takedown whose preview cleanup fails after the mark landed is still recorded on a press again (Codex L on #3597)");
+  const halfway = await addProduct(owner, "Halfway Draft", "", "9", null);
+  if (!halfway.ok) throw new Error("setup");
+  await setProductHidden(owner, halfway.product.id, true);
+  const halfLink = await makeDraftPreview(await store(), halfway.product.id);
+  const halfNotice = { ...report, url: `https://marktmorgen.com/@noticeshop/preview/${halfLink.code}` };
+  const halfAction = { type: "product", id: halfway.product.id } as const;
+  let markLanded = false;
+  let failPointer = true;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (commands.some((c) => String(c[0]).toUpperCase() === "SET" && String(c[1]).startsWith("nl:dpv:down:"))) {
+      const answer = await pipeline(commands);
+      markLanded = true;
+      return answer;
+    }
+    if (markLanded && failPointer && commands.some((c) => String(c[1]).startsWith("nl:dpv:p:"))) {
+      failPointer = false;
+      throw new Error("a transient 500 on the preview pointer");
+    }
+    return pipeline(commands);
+  }) as typeof redis.pipeline;
+  const halfThrown = await takeDown(halfNotice, await store(), halfAction, "https://marktmorgen.com").then(() => false, () => true);
+  redis.pipeline = pipeline;
+  is("the first press throws on the failed cleanup, with the mark landed", [halfThrown, markLanded, await isTakenDown(await store(), halfway.product.id)], [true, true, true]);
+  is("the link no longer opens", await readDraftPreview(halfLink.code), null);
+  const halfEmails = sent.length;
+  is(
+    "a press again records the takedown, in its words",
+    await takeDown(halfNotice, await store(), halfAction, "https://marktmorgen.com"),
+    'The preview link of the draft product "Halfway Draft", now closed',
+  );
+  is("one email to the creator says so", sent.length - halfEmails, 1);
+  is("a third press finds nothing more to do", await takeDown(halfNotice, await store(), halfAction, "https://marktmorgen.com"), null);
   done();
 }
 

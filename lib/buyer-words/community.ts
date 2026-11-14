@@ -71,7 +71,7 @@ const en = {
     locked: "You got in without your second step, so deleting and emailing every member wait until two-step login turns off. Log in with your app's code or a passkey to do it now.",
     going: "You are going. The way in shows on this page 15 minutes before the start.",
     goingnomail: "You are going. The way in shows on this page 15 minutes before the start. For reminder emails a day and an hour before, check the “Email me” box on your You page.",
-    notgoing: "Your RSVP is canceled.",
+    notgoing: "You are not going anymore.",
     eventfull: "Every place is taken. If somebody cancels, a place opens here again.",
     eventcancelled: "This event was canceled.",
     eventover: "This event is over.",
@@ -297,7 +297,7 @@ const en = {
   scheduleInStudio: "Schedule in the studio",
   comingUp: "Coming up",
   nothingScheduled: "Nothing scheduled yet",
-  ownerScheduleNote: "Schedule a live event in the studio: members RSVP here, get reminder emails if they asked for them, and join from this page.",
+  ownerScheduleNote: "Schedule a live event in the studio: members say here that they are coming, get reminder emails if they asked for them, and join from this page.",
   whenScheduled: (store: string) => `When ${store} schedules a live event, it shows up here.`,
   olderLabel: "Older",
   olderEvents: "Older events",
@@ -308,7 +308,7 @@ const en = {
   youAreGoing: "You are going",
   forSomeMembers: "For some members",
   replay: "Replay",
-  rsvpd: (count: number) => `${count} RSVP'd`,
+  rsvpd: (count: number) => `${count} going`,
   goingCount: (count: number) => `${count} going`,
   full: "full",
   placesLeft: (left: number, total: number) => `${left} of ${total} ${plural(total, "place", "places")} left`,
@@ -342,7 +342,7 @@ const en = {
   startZoomHost: "Start in Zoom as the host",
   meetWait: (store: string) => `Google Meet may ask you to wait until ${store} lets you in.`,
   zoomWait: (store: string) => `Zoom lets you in once ${store} starts the meeting; if they use a waiting room, they admit you from there.`,
-  placesLimited: "Places are limited: the way in shows to those who RSVP'd.",
+  placesLimited: "Places are limited: the way in shows to those who said they are coming.",
   wayInShowsPlaces: (time: string) =>
     `The way in shows here from ${time}, 15 minutes before the start, to everyone with a place. Keep this page open and it appears by itself.`,
   wayInShowsAll: (time: string) =>
@@ -441,7 +441,7 @@ const en = {
   emailMeAnnounces: (store: string, email: string) =>
     `Announcements when ${store} sends one, and a reminder a day and an hour before each live event you RSVP to. To ${email}; every email has a one-click way to stop.`,
   emailMeReminders: (store: string, email: string) =>
-    `A reminder a day and an hour before each live event you RSVP to, and announcements if ${store} starts emailing them. To ${email}; every email has a one-click way to stop.`,
+    `A reminder a day and an hour before each live event you say you are coming to, and announcements if ${store} starts emailing them. To ${email}; every email has a one-click way to stop.`,
   myPoints: (n: number) => `${n} ${plural(n, "point", "points")}: one for every like your posts and comments get from somebody else.`,
   myToNext: (more: number, level: number) => `${more} more ${plural(more, "reaches", "reach")} Level ${level}.`,
   seeLeaderboard: "See the leaderboard and what levels open",
@@ -555,10 +555,10 @@ const en = {
   evCanceledBody: (store: string, title: string, name: string, time: string, events: string) =>
     [
       `${store} has canceled "${title}", the live event in ${name} planned for ${time}.`,
-      "There is nothing for you to do: your RSVP is canceled with it.",
+      "There is nothing for you to do: your place is canceled with it.",
       `Everything else in ${name} is where it was: ${events}`,
     ].join("\n\n"),
-  evWhyOnce: (name: string) => `You are getting this because you RSVP'd to this event in ${name}. It is sent once.`,
+  evWhyOnce: (name: string) => `You are getting this because you said you are coming to this event in ${name}. It is sent once.`,
   evMovedSubject: (title: string) => `New time: ${title}`,
   evMovedBody: (store: string, title: string, name: string, was: string, now: string, page: string) =>
     [
@@ -566,7 +566,7 @@ const en = {
       `Was: ${was}\nNow: ${now}`,
       `You are still on the list. If the new time does not work for you, cancel your RSVP on the event page, so somebody else can have the place:\n${page}`,
     ].join("\n\n"),
-  evWhyMoved: (name: string) => `You are getting this because you RSVP'd to this event in ${name}. It is sent once for each change of time.`,
+  evWhyMoved: (name: string) => `You are getting this because you said you are coming to this event in ${name}. It is sent once for each change of time.`,
   evReminderSubject: (tomorrow: boolean, title: string) => `${tomorrow ? "Tomorrow" : "In 1 hour"}: ${title}`,
   evReminderBody: (tomorrow: boolean, title: string, name: string, when: string, early: number, page: string) =>
     [
@@ -575,11 +575,11 @@ const en = {
       `Join from the event page. The way in shows there ${early} minutes before the start:\n${page}`,
       "If you can no longer make it, cancel your RSVP on the same page.",
     ].join("\n\n"),
-  evWhyReminder: (name: string) => `You are getting this because you RSVP'd to this event and asked to be emailed by ${name}.`,
+  evWhyReminder: (name: string) => `You are getting this because you said you are coming to this event and asked to be emailed by ${name}.`,
   mailSentWith: "Sent with Marktmorgen.",
   stopLabel: "Stop the community's emails",
-  stopAfterEvents: "in one click. You stay in the community, and keep your RSVPs.",
-  stopAfterAnnounce: "in one click: announcements and event reminders. You stay in the community, and keep your RSVPs.",
+  stopAfterEvents: "in one click. You stay in the community, and keep your places at events.",
+  stopAfterAnnounce: "in one click: announcements and event reminders. You stay in the community, and keep your places at events.",
   announceSubject: (name: string) => `An announcement in ${name}`,
   announceReadIt: (name: string) => `Read it, and reply, in ${name}:`,
   announceWhy: (from: string, name: string) => `You are getting this because you asked to be emailed ${from}'s announcements in ${name}.`,

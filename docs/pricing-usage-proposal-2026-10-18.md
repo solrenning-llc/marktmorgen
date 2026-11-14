@@ -54,7 +54,7 @@ For each monthly price (the year at ten monthly payments), the largest share of 
 | $99 / $990 | cannot keep 60% with only the video hours included | — | — | — | — |
 | $129 / $1,290 | cannot keep 60% with only the video hours included | — | — | — | — |
 | $149 / $1,490 | cannot keep 60% with only the video hours included | — | — | — | — |
-| $199 / $1,990 | 0.7% | 60.33% | 60.03% | $120.06 | 2.23 |
+| $199 / $1,990 | 0.6% | 60.33% | 60.03% | $120.06 | 2.23 |
 | $249 / $2,490 **(recommended)** | 15.7% | 60.36% | 60.05% | $150.31 | 1.78 |
 | $299 / $2,990 | 30.0% | 60.39% | 60.07% | $180.59 | 1.48 |
 | $449 / $4,490 | 72.9% | 60.37% | 60.02% | $271.09 | 0.99 |

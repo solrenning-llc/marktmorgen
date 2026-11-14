@@ -199,7 +199,7 @@ const STILL_IN = [
   "    mark = \"n\"",
   "  else",
   "    local ok, record = pcall(cjson.decode, raw)",
-  "    if ok and type(record) == \"table\" and record.k == ARGV[i] and type(record.removed) == \"boolean\" and type(record.muted) == \"boolean\" then",
+  "    if ok and type(record) == \"table\" and record.k == ARGV[i] and type(record.e) == \"string\" and type(record.removed) == \"boolean\" and type(record.muted) == \"boolean\" then",
   "      if record.removed then mark = \"r\" else mark = \"y\" end",
   "    end",
   "  end",

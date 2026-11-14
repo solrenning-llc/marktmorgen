@@ -13,6 +13,7 @@
  * one of them quietly missing a header.
  */
 
+import { stripeJson } from "@/lib/stripe-http-error";
 import { STRIPE_TIMEOUT_MS, timed } from "@/lib/fetch-timeout";
 import { DEMO_CONNECTED_ACCOUNT, demoKey } from "@/lib/demo-account";
 
@@ -160,7 +161,8 @@ export async function onAccount(
       cache: "no-store",
       signal,
     });
-    return { response, data: (await response.json()) as Record<string, unknown> };
+    // A status that is not OK with a body that is not JSON keeps its status (lib/stripe-http-error.ts).
+    return { response, data: await stripeJson(response) };
   });
   if (!response.ok) {
     const error = data.error as

@@ -920,6 +920,40 @@ export const HELD_EXPOSURE = {
   completeMonthlyCostUsd: null,
   reviewedGlobalCaseCeiling: null,
 } as const;
+/**
+ * DONO-3 company work for a closing store at or past its day (fourth pre-review, LEVE 3), outside paid-unit
+ * COST_LINES like HELD_EXPOSURE, at most per store per daily run of the closing job:
+ *   - kept past the published time: GET of its record, SET of its reason when it changes (overdueWhy), and the
+ *     monthly count's EVAL (HELD_ONCE);
+ *   - its creator account refusing us: SET of its record (refusedFrom, refusedLast), HSET+EXPIRE of the day's
+ *     account note, and four HLEN of the two days' notes; an account that answers: HSET+EXPIRE and, after a
+ *     refusal, one SET;
+ *   - after STRIPE_SILENT_DAYS of refusals: one more platform GET of the store's own subscription, once a run, with
+ *     the activation readSubscription does for a funded plan (the same as observeStoreSubscriptions');
+ *   - its creator account giving no answer (Claude 3's H1 on #3463), the same shape: SET of its record (silentFrom,
+ *     silentLast), HSET+EXPIRE of the day's account note and, past the deadline with a streak, four HLEN of the two
+ *     days' notes and the same one platform GET of the store's own subscription (shared with a refusal's, once a run);
+ *   - a lapse before its members' renewals were stopped: one notice per member with a known subscription, out of the
+ *     closing's own email credit (lib/closing-credit.ts), and one SET of its record, once;
+ *   - a lapse: SET of its record and the monthly count's EVAL, once.
+ * The notes are hashed identities (about 80 bytes a field) for ACCOUNT_NOTE_SECONDS. Stripe's endpoint tariff and the
+ * number of stores in this state are unknown, never zero: no monthly total is certified here.
+ */
+export const CLOSING_DEADLINE_WORK = {
+  overdueCommandsPerRun: 3,
+  refusalCommandsPerRun: 1 + 2 + 4,
+  silenceCommandsPerRun: 1 + 2 + 4,
+  renewalNoticeCommandsOnce: 1,
+  answerCommandsPerRun: 2 + 1,
+  platformGetsPerRefusedRun: 1,
+  fundedActivationsPerRefusedRun: 1,
+  lapseCommandsOnce: 2,
+  accountNoteBytesPerField: 80,
+  accountNoteSeconds: 3 * 86400,
+  stripeEndpointTariffUsd: null,
+  storesInThisState: null,
+  completeMonthlyCostUsd: null,
+} as const;
 /** A full held store, not its smaller ended-store allowance, for31days. All
  * still-retained outside-room keys are charged at peak for the whole month. */
 export function heldStoreMonthlyExposure(tier: Tier) {

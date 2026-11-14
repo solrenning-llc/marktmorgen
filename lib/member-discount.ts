@@ -12,6 +12,7 @@
  * that already has a discount is refused rather than having it replaced
  * without a word: a better one could be lost.
  */
+import { StripeUnreadableReply } from "@/lib/stripe-http-error";
 import { onAccount } from "@/lib/stripe-account";
 import { saleHandles, type Store } from "@/lib/store";
 import { listCodes } from "@/lib/discount";
@@ -162,7 +163,8 @@ export async function applyMemberDiscount(store: Store, email: string, subscript
     return { ok: true };
   } catch (error) {
     // Stripe refusing it by the code's own rules (a first order only, a minimum, used up) is said as such.
-    const status = (error as { status?: unknown }).status;
+    // A page in front of Stripe that is not JSON (lib/stripe-http-error.ts) is not Stripe refusing the code.
+    const status = error instanceof StripeUnreadableReply ? null : (error as { status?: unknown }).status;
     if (status === 400) return { ok: false, reason: "refused" };
     console.error("putting a discount on a membership failed", error);
     return { ok: false, reason: "stripe" };

@@ -161,3 +161,20 @@ test("healthy control: a taken SET NX answers the token already kept", async () 
   assert.equal(token, first);
   assert.equal(grants(), 1);
 });
+
+// Claude 1 cloud (rev-odd) on #3473 @12533287a6, MEDIUM: the address came off the product's list only after the DEL,
+// and only for a product whose index was read. A lost answer to that SREM threw, but the retry read no index any more,
+// so it finished "done" with the person's address hash still on the list.
+test("an erasure whose list SREM answers unknown still takes the address off the list when it is tried again", async () => {
+  const { ids, store } = await world();
+  await feedToken(await store(), ids[0], "ana@example.test");
+  const list = `nl:pod:ls:${(await store()).statsId}:${ids[0]}`;
+  assert.equal(((await original([["SMEMBERS", list]]))[0] as string[]).filter((m) => m !== "+").length, 1);
+  let once = true;
+  answer((commands) => once && commands.length > 0 && commands.every((c) => c[0] === "SREM" && String(c[1]).startsWith("nl:pod:ls:")), () => ((once = false), []));
+  const shop = await store();
+  await assert.rejects(() => forgetPodcastPerson(shop, ids, "ana@example.test"), UnknownReplyError);
+  redis.pipeline = original;
+  await forgetPodcastPerson(await store(), ids, "ana@example.test");
+  assert.deepEqual(((await original([["SMEMBERS", list]]))[0] as string[]).filter((m) => m !== "+"), [], "no address hash is left on the list");
+});

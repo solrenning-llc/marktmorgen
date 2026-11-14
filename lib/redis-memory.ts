@@ -129,6 +129,23 @@ export class MemoryRedis {
         return to < from ? "" : new TextDecoder().decode(bytes.slice(from, to + 1));
       }
       case "EVAL": {
+        // lib/podcast-access.ts LISTENERS_DROP: a podcast's list of listeners deleted only while it lists nothing but its mark.
+        if (key.startsWith("-- marktmorgen:pod-listeners-drop:v1\n") && args[0] === "1" && args.length === 3) {
+          const [, list, mark] = args;
+          const left = Number(this.run(["SCARD", list])) - Number(this.run(["SISMEMBER", list, mark]));
+          if (left !== 0) return 0;
+          this.run(["DEL", list]);
+          return 1;
+        }
+        // lib/podcast-access.ts FEED_UNPUBLISH: a feed's grant (and, with no index, its list member) taken back.
+        if (key.startsWith("-- marktmorgen:pod-feed-unpublish:v1\n") && args[0] === "3" && args.length === 6) {
+          const [, index, grant, list, token, member] = args;
+          const indexed = this.run(["GET", index]);
+          if (indexed === token) return 1;
+          this.run(["DEL", grant]);
+          if (indexed === null || indexed === undefined) this.run(["SREM", list, member]);
+          return 0;
+        }
         // lib/request-guard.ts ESSENTIAL_BELOW: one more on an essential counter only while fewer than ARGV[1] were taken.
         if (key.startsWith("-- marktmorgen:essential-below:v1\n") && args[0] === "1" && args.length === 4) {
           const [, counter, below, window] = args;

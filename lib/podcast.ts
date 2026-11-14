@@ -85,6 +85,14 @@ export async function dropPodcast(id: string): Promise<void> {
   await redisPipeline([["DEL", podKey(id)]]);
 }
 
+/** The same, for a product's removal (audit A1): a reply that is not Redis's count of what it deleted throws UnknownReplyError. */
+export async function dropPodcastRecord(id: string): Promise<void> {
+  if (!PODCAST_ID.test(id) || !isRedisConfigured()) return;
+  const reply = repliesFor(await redisPipeline([["DEL", podKey(id)]]), 1);
+  const gone = reply?.[0];
+  if (gone !== 0 && gone !== 1) throw new UnknownReplyError("the deletion of a podcast's record");
+}
+
 export type PodcastEdit =
   | { op: "add"; pathname: string; bytes: number; contentType: string; title: unknown; notes: unknown; at: number }
   | { op: "edit"; id: string; title: unknown; notes: unknown }

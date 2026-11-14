@@ -43,6 +43,13 @@ import { dropComments, dropCommentsAfterCourseGone } from "@/lib/lesson-comments
 import { exampleTitlesLeft } from "@/lib/course-templates";
 import { dropStream } from "@/lib/stream";
 import { dropStamped } from "@/lib/pdf-stamp";
+import { dropPodcastRecord, readPodcast } from "@/lib/podcast";
+import type { Podcast } from "@/lib/podcast-rules";
+import { GoneFullError, ListenersUnpaidError, dropListeners } from "@/lib/podcast-access";
+import { countStudio } from "@/lib/studio-route";
+import { InvitesUnpaidError, dropProductInvites } from "@/lib/move-members";
+import { studioRefusal } from "@/lib/person-tasks";
+import { withLock } from "@/lib/redis-lock";
 import { deliveredFile, idsOfKind, readAllListings, readDelivery, readListing, readProducts } from "@/lib/catalog";
 import { fastMoneyOnPage, fastMoneyRefusal } from "@/lib/terms-check-rules";
 import { productPromptsLeft } from "@/lib/product-outline";
@@ -301,18 +308,70 @@ export async function POST(request: NextRequest) {
       let before: Awaited<ReturnType<typeof readListing>>;
       let preparedCourse: Awaited<ReturnType<typeof readCourseExact>> = null;
       let taskDrops: Awaited<ReturnType<typeof readCourseTaskDrops>> = [];
+      // A private podcast goes with its product (audit A1, 9 November 2026). Its record is read exactly first: an
+      // unknown read answers 503 and removes nothing, so no episode's audio is left that no record names.
+      let podcastBefore: Podcast | null = null;
       try {
         before = await readListing(guarded.store, id);
         if (before?.course) {
           preparedCourse = await readCourseExact(before.course.id);
           if (preparedCourse) taskDrops = await readCourseTaskDrops(preparedCourse);
         }
+        if (before?.podcast) podcastBefore = await readPodcast(before.podcast.id);
       } catch (error) {
         console.error("could not read a product or its course before removing it", error);
         return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
       }
+      // And every listener's feed of it, whose grant holds the buyer's address (lib/podcast-access.ts dropListeners),
+      // deleted before the product goes, each page paid for in studio requests first. Not finished (a reply not known,
+      // the studio's requests used up): nothing is removed, and the same removal asked again goes on where this
+      // stopped. A buyer whose feed went this way still holds the podcast and asks for a new feed, as on a new device.
+      // Asked again for a product already removed, what its earlier removal left listed is deleted now.
+      const refusal: { reason?: string; message?: string } = {};
+      const pay = async (units: number): Promise<boolean> => {
+        const counted = await countStudio(guarded.store, null, units);
+        if (!counted.ok) Object.assign(refusal, { reason: counted.reason, message: counted.message });
+        return counted.ok;
+      };
+      if (before || (id && PRODUCT_ID.test(id))) {
+        try {
+          await dropListeners(guarded.store, id, { podcast: !!before?.podcast, noteGone: !!before, pay });
+        } catch (error) {
+          if (error instanceof ListenersUnpaidError) {
+            const refused = studioRefusal(refusal.reason ?? "unknown", refusal.message ?? "");
+            return Response.json(refused.body, { status: refused.status });
+          }
+          if (error instanceof GoneFullError) return Response.json({ ok: false, error: "podcast_feeds" }, { status: 409 });
+          console.error("could not delete the feeds of a product's podcast before removing it", error);
+          return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+        }
+      }
+      // And the invitations an import gave members to keep it here (lib/move-members.ts), with their links and
+      // reminders: kept under its id, a person's erasure would never reach them once it is gone. Deleted only once the
+      // product is (below): a removal that does not go through keeps every invitation and its emailed link (Claude 7,
+      // MEDIUM on #3473). Asked again for a product already removed, what an earlier removal left is deleted now,
+      // paid for and refused as the feeds are.
+      if (!before && id && PRODUCT_ID.test(id)) {
+        try {
+          await dropProductInvites(guarded.store, id, pay);
+        } catch (error) {
+          if (error instanceof InvitesUnpaidError) {
+            const refused = studioRefusal(refusal.reason ?? "unknown", refusal.message ?? "");
+            return Response.json(refused.body, { status: refused.status });
+          }
+          console.error("could not delete the invitations to a removed membership", error);
+          return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+        }
+      }
       let course: Awaited<ReturnType<typeof readCourseExact>> = null;
-      const removed = await removeProduct(ref, id, async (going, store) => {
+      // A podcast's record is read again and deleted under its own lock, held across the product's removal (Codex L,
+      // finding 2 on #3473, MEDIUM): the studio's podcast route adds an episode only under that lock after reading the
+      // product again, so no episode is added between this read and the removal, and every audio file the record names
+      // is known before the record goes. That read not exact (rule 24), or the lock not taken: 503, nothing removed, and
+      // the same removal asked again reads it again. Never a record deleted on a read that is not known.
+      const lockedPodcastId = before?.podcast?.id ?? null;
+      let podcastAtRemoval: Podcast | null = null;
+      const removing = () => removeProduct(ref, id, async (going, store) => {
         if (!going.course) return true;
         try {
           const found = await readCourseExact(going.course.id);
@@ -329,6 +388,36 @@ export async function POST(request: NextRequest) {
           return false;
         }
       });
+      let removed: Awaited<ReturnType<typeof removing>>;
+      if (lockedPodcastId) {
+        let read = false;
+        try {
+          removed = await withLock(`nl:pod:${lockedPodcastId}:lock`, 60, 15_000, async () => {
+            podcastAtRemoval = await readPodcast(lockedPodcastId);
+            read = true;
+            const done = await removing();
+            if (done.ok && done.product.podcast?.id === lockedPodcastId) {
+              // Removed with the record read exactly above: the record goes now, its audio below. Not confirmed gone,
+              // it is said to the caller (cleanupPending); the record still names every file, so nothing is orphaned.
+              await dropPodcastRecord(lockedPodcastId).catch(
+                (error: unknown) => {
+                  console.error("could not delete a removed product's podcast", error);
+                  cleanupPending = true;
+                },
+              );
+            }
+            return done;
+          });
+        } catch (error) {
+          console.error("could not read a product's podcast under its lock before removing it", error);
+          // Thrown before the removal (the lock, or the record's read): nothing was removed. After it, the lock's own
+          // release failed: the removal stands, and what is left is said to the caller.
+          if (!read) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+          throw error;
+        }
+      } else {
+        removed = await removing();
+      }
       result = removed.ok ? { ok: true, product: null } : removed;
       // Asked again for a product already removed whose campaign landings were not confirmed gone then (Codex G,
       // #1947): they are deleted now; not confirmed again, it is said, and can be asked again.
@@ -340,6 +429,12 @@ export async function POST(request: NextRequest) {
       }
       if (removed.ok) {
         const going = removed.product;
+        // Its invitations, now that it is gone (above): not finished (a reply not known, the studio's requests used up),
+        // it is said to the caller (cleanupPending), and the same removal asked again deletes what is left.
+        await dropProductInvites(removed.store, id, pay).catch((error: unknown) => {
+          console.error("could not delete the invitations to a removed membership", error);
+          cleanupPending = true;
+        });
         const removedCourse = course as Awaited<ReturnType<typeof readCourseExact>>;
         const had: { pathname: string }[] = filesOnProduct(going);
         // Its picture goes with it, and so does its long description.
@@ -378,6 +473,45 @@ export async function POST(request: NextRequest) {
         had.push(...reviewPhotos.map((pathname) => ({ pathname })));
         if (removedCourse) {
           await dropCourse(removedCourse, removed.store).catch((error: unknown) => console.error("could not drop a removed course", error));
+        }
+        // A podcast's record and its episodes' audio, read again under its lock (the studio's podcast route reads the
+        // product again under it, so no episode is added once this ran). The audio of the record read before is
+        // deleted whatever this read says; a record not confirmed gone is said to the caller (cleanupPending).
+        if (going.podcast) {
+          const podcastId = going.podcast.id;
+          const audio = new Set((podcastBefore?.episodes ?? []).map((episode) => episode.pathname));
+          if (podcastId === lockedPodcastId) {
+            // Read exactly and deleted under its lock with the removal (above): every file its record named goes.
+            const atRemoval = podcastAtRemoval as Podcast | null;
+            for (const episode of atRemoval?.episodes ?? []) audio.add(episode.pathname);
+          } else {
+            // A podcast made on it after the read before the removal: read again under its lock, and its record deleted
+            // only on an exact read (Codex L, finding 2 on #3473). Not known, the record and every file it names stay,
+            // and that is said to the caller.
+            let readNow = false;
+            try {
+              await withLock(`nl:pod:${podcastId}:lock`, 60, 15_000, async () => {
+                const now = await readPodcast(podcastId);
+                readNow = true;
+                for (const episode of now?.episodes ?? []) audio.add(episode.pathname);
+                await dropPodcastRecord(podcastId);
+              });
+            } catch (error) {
+              console.error("could not delete a removed product's podcast", error);
+              cleanupPending = true;
+              // Its record not read: it stays, so the files it may name stay with it.
+              if (!readNow) audio.clear();
+            }
+          }
+          const named = new Set(had.map((file) => file.pathname));
+          had.push(...[...audio].filter((pathname) => !named.has(pathname)).map((pathname) => ({ pathname })));
+        }
+        // And a feed made while it went (a page that read the product just before): what it left listed is deleted.
+        if (going.podcast || podcastBefore) {
+          await dropListeners(removed.store, id, { podcast: false, noteGone: false, pay }).catch((error: unknown) => {
+            console.error("could not delete the feeds of a removed product's podcast", error);
+            cleanupPending = true;
+          });
         }
         for (const file of had) {
           // A lesson video the video service keeps is taken away there (lib/stream.ts).

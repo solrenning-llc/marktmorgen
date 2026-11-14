@@ -60,8 +60,12 @@ export const ORDERS_IMPORTED_COMMANDS = 4;
 export const ORDERS_IMPORTED_ENTRY_COMMANDS = 2;
 /** Commands one call's room makes at the most (lib/call-rooms.ts, roomsFor): four reads, and a video room not made yet made and read back. */
 export const ORDERS_ROOM_COMMANDS = 6;
-/** Commands one private podcast feed makes at the most (lib/podcast-access.ts, feedToken), with the room its write is counted in. */
-export const ORDERS_FEED_COMMANDS = 8;
+/**
+ * Commands one private podcast feed makes at the most (lib/podcast-access.ts, feedToken), with the room its write is
+ * counted in: the index read twice, the grant read, two writes, the index read after them, and (stillListed, Claude 7
+ * on #3473) the store's record and the product read again and, for a product gone, the feed deleted and unlisted.
+ */
+export const ORDERS_FEED_COMMANDS = 11;
 /**
  * Commands one course's progress on the list makes at the most (lib/purchase-cards.ts, extrasFor; 560 [AS1]): its
  * outline read whole at COURSE_BYTES (lib/api-read-rules.ts), and one SMISMEMBER of its lessons (MAX_LESSONS ids of 12

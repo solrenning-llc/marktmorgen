@@ -1372,6 +1372,12 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/path-reminder.ts", names: ["sendPathReminder", "PATH_REMINDER_UNITS"] },
       { file: "lib/path-facts.ts", names: ["PATH_SALE_PAGES", "PATH_REFUND_PAGES", "PATH_MONEY_SECONDS"] },
       { file: "app/studio/paused/page.tsx", names: [`SHOWN_PER_DAY = ${PAUSED_PER_DAY};`, "studio-paused"] },
+      // Removing a podcast's product deletes every listener's feed: each page of its list paid for first, one studio request for
+      // the page and one for each LISTENERS_PER_UNIT listeners on it, refused without reading past the studio's figure (audit A1, 9 November 2026).
+      { file: "app/api/store/product/route.ts", names: ["countStudio(guarded.store, null, units)", "dropListeners(guarded.store, id"] },
+      { file: "lib/podcast-access.ts", names: ["LISTENERS_PER_UNIT = 100;", "options.pay(1)", "options.pay(Math.ceil(addresses.length / LISTENERS_PER_UNIT))"] },
+      // And a removed membership's invitations from an import: a page of the store's invitations per studio request, paid first.
+      { file: "lib/move-members.ts", names: ["INVITES_PER_UNIT = 100;", "if (!(await pay(1))) throw new InvitesUnpaidError();"] },
       // A discount code scheduled ahead (511 [CK3]) takes SCHEDULE_UNITS more studio requests before Stripe is asked, one for each try the
       // five-minute job may make to switch it on (each one call to the creator's Stripe account, which bills none, and a few commands).
       { file: "app/api/store/discount/route.ts", names: ["countStudio(store, null, SCHEDULE_UNITS)"] },

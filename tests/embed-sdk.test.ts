@@ -235,7 +235,7 @@ async function main(): Promise<void> {
   part("The script, as it reads and runs");
   const source = loaderSource();
   is("it reads no cookie, no storage, and fetches nothing", /cookie|localStorage|sessionStorage|indexedDB|fetch\(|XMLHttpRequest|sendBeacon|querySelector|innerHTML|eval\(/.test(source), false);
-  is("its purchase mark is the receipt's", source.includes(PURCHASE_MARK_PATTERN.source.replace(/\//g, "\\/")), true);
+  is("its purchase mark is the receipt's", source.includes(String(PURCHASE_MARK_PATTERN)), true);
   const node = createHash("sha256").update(source).digest("base64");
   is("its hash, the same in a browser and on the server", await loaderHash(), `'sha256-${node}'`);
   is("and the policy lines a site adds", cspLines(await loaderHash()), [`script-src 'sha256-${node}'`, "frame-src https://marktmorgen.com"]);

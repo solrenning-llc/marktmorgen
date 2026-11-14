@@ -57,11 +57,21 @@ const REFUND_STATES = ["succeeded", "failed", "canceled", "pending", "requires_a
  * with a refund's id and a state Stripe gives. Anything else throws, and no refund is made on it: "none pending" is a "no", which only a
  * whole, readable list may say.
  */
-function wholeRefunds(page: unknown): Row[] {
+/** An id given as a string or as an expanded object; anything else reads as "". */
+const idOf = (value: unknown): string =>
+  typeof value === "string" ? value : value !== null && typeof value === "object" && typeof ownField(value as Row, "id") === "string" ? (ownField(value as Row, "id") as string) : "";
+
+function wholeRefunds(page: unknown, chargeId: string, paymentIntent: string): Row[] {
   // A row is a refund only with a refund's own id (Codex CX1 on #2759): another id is not readable, so nothing is made.
+  // It counts only when it proves it is this charge's own (#4474): the list's filter is not proof, and a row of
+  // another charge (or with no charge, or another payment intent) would block the refund or change its idempotency key.
   const read = readStripePage(
     page,
-    (row) => typeof ownField(row, "status") === "string" && REFUND_STATES.includes(ownField(row, "status") as string),
+    (row) =>
+      idOf(ownField(row, "charge")) === chargeId &&
+      (ownField(row, "payment_intent") == null || idOf(ownField(row, "payment_intent")) === paymentIntent) &&
+      typeof ownField(row, "status") === "string" &&
+      REFUND_STATES.includes(ownField(row, "status") as string),
     REFUND_ID,
   );
   if (read.hasMore || read.unreadable) throw new StripeListUnreadable(read.hasMore ? "more refunds than one page" : "a refund not readable");
@@ -101,7 +111,7 @@ export async function refundPlanPayment(
     for (const part of parts) {
       let refunds: Row[];
       try {
-        refunds = wholeRefunds(await onPlatformAt(AT, "GET", `/refunds?${new URLSearchParams({ charge: part.chargeId, limit: "100" })}`));
+        refunds = wholeRefunds(await onPlatformAt(AT, "GET", `/refunds?${new URLSearchParams({ charge: part.chargeId, limit: "100" })}`), part.chargeId, part.paymentIntent);
       } catch (error) {
         console.error("reading a plan payment's refunds failed", error);
         return { ok: false, reason: "failed" };

@@ -174,7 +174,15 @@ export async function vaultUpload(file: File | Blob, ownerId: string, name: stri
   }
 
   const closed = await door({ action: "done", pathname, etags: needsEtags ? etags : [] });
-  if (!closed.ok || !closed.file) throw new VaultUploadError(closed.error ?? "server_error");
+  if (!closed.ok || !closed.file) {
+    // The page holds the only handle to this upload (issue #4082): a "done" that did not answer ok leaves its session
+    // and its storage reservation open at the store until they expire, and the same file cannot be sent again
+    // meanwhile. It is closed now, as when a piece gives up. The door opens every upload as a multipart session
+    // (app/api/store/vault), and its abort ends only that session: a join that worked and whose answer was lost has
+    // already let the upload go, and abort then finds nothing to end (lib/vault.ts abortVaultUpload).
+    await door({ action: "abort", pathname }).catch(() => {});
+    throw new VaultUploadError(closed.error ?? "server_error");
+  }
   options.onProgress?.(100);
   return closed.file;
 }

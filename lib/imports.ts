@@ -386,8 +386,12 @@ async function readStored(id: string): Promise<{ job: ImportJob; raw: string } |
   const replies = repliesFor(await redisPipeline([["GET", jobKey(id)]]), 1);
   const raw = replies?.[0];
   if (!replies || (raw !== null && typeof raw !== "string")) throw new UnknownReplyError("an import");
+  if (raw === null) return null;
+  // The record GET nl:import:B answers is import B's only when it says so; a text that is not an import, or one naming
+  // another import, is unknown, never read as B's nor as gone (Revisor 2 on #3686, rule 30).
   const job = parseJob(raw);
-  return job && typeof raw === "string" ? { job, raw } : null;
+  if (!job || job.id !== id) throw new UnknownReplyError("an import");
+  return { job, raw };
 }
 
 /** readStored for one import of this store, or null when it is not this store's. */
@@ -440,17 +444,28 @@ async function writeJobIf(raw: string, job: ImportJob, batch?: string[][]): Prom
  * The store's last imports, newest first, and the one running now if any. Every read in its exact shape (sweep A3,
  * CX-123 rule 30): an unknown list, or an import on it answering in an unknown shape, throws UnknownReplyError rather
  * than tell the creator there is no import (none running, "None yet"); only an import whose GET answered nothing is
- * left out.
+ * left out. A kept text that is not an import, and a list entry that is not an import id, are unknown as well.
  */
 export async function storeImports(store: Store): Promise<ImportJob[]> {
   if (!store.sid || !isRedisConfigured()) return [];
   const ids = stringList(repliesFor(await redisPipeline([["LRANGE", listKey(store.sid), 0, LIST_SIZE - 1]]), 1)?.[0]);
   if (ids === null) throw new UnknownReplyError("the store's imports");
-  const list = ids.filter((id) => IMPORT_ID_PATTERN.test(id));
+  // An entry of the list that is not an import id is unknown, never left out (Revisor 2 on #3686, rule 30).
+  if (ids.some((id) => !IMPORT_ID_PATTERN.test(id))) throw new UnknownReplyError("one of the store's imports");
+  const list = ids;
   if (!list.length) return [];
   const raws = repliesFor(await redisPipeline(list.map((id) => ["GET", jobKey(id)])), list.length);
   if (!raws || raws.some((raw) => raw !== null && typeof raw !== "string")) throw new UnknownReplyError("one of the store's imports");
-  return raws.map(parseJob).filter((job): job is ImportJob => job !== null && job.sid === store.sid);
+  // A kept text that does not read as an import is unknown too; only a GET that answered nothing is left out.
+  if (raws.some((raw) => typeof raw === "string" && parseJob(raw) === null)) throw new UnknownReplyError("one of the store's imports");
+  const jobs = raws.map(parseJob);
+  // The record GET nl:import:A answers is import A's only when it says so: one naming another import is unknown, never
+  // listed as A's nor left out (Codex V on #3661, rule 30).
+  if (jobs.some((job, i) => job !== null && job.id !== list[i])) throw new UnknownReplyError("one of the store's imports");
+  // Another store's only when it names one: an import whose store is missing, null, empty or not text says nothing of
+  // whose it is, so the list is unknown, never shorter (Claude 4 cloud A on #3686; as storeImportsRead, Codex G on #1933).
+  if (jobs.some((job) => job !== null && (typeof (job as { sid?: unknown }).sid !== "string" || !job.sid))) throw new UnknownReplyError("one of the store's imports");
+  return jobs.filter((job): job is ImportJob => job !== null && job.sid === store.sid);
 }
 
 /**

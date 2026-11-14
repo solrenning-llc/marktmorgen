@@ -131,6 +131,12 @@ export type Batched = {
    * never starts a walk, and the idle pass takes it out (withdrawPending).
    */
   pending?: true;
+  /**
+   * Its record went, and another store was found at its key before its walk started (Claude 7's ALTO 1 on #3643): it is
+   * walked by its own ids only (marks), never by its address or its handles, which may be the new store's now, and its
+   * finish writes nothing at its address. Set only over the exact entry read (REWRITE_ENTRY).
+   */
+  marksOnly?: true;
 };
 
 /** Every file-like record in what a store keeps: a path and the day it was added. */
@@ -196,6 +202,16 @@ const WITHDRAW_ENTRY = `-- marktmorgen:closing-withdraw-entry:v1
 if #KEYS ~= 1 or #ARGV ~= 2 then return -1 end
 if redis.call("HGET", KEYS[1], ARGV[1]) ~= ARGV[2] then return 0 end
 return redis.call("HDEL", KEYS[1], ARGV[1])`;
+
+/**
+ * Rewrites a closing store's walk entry only while it still holds the exact bytes read (Claude 7's ALTO 1 on #3643):
+ * 1 written, 0 not the entry read; anything else unknown.
+ */
+const REWRITE_ENTRY = `-- marktmorgen:closing-rewrite-entry:v1
+if #KEYS ~= 1 or #ARGV ~= 3 then return -1 end
+if redis.call("HGET", KEYS[1], ARGV[1]) ~= ARGV[2] then return 0 end
+redis.call("HSET", KEYS[1], ARGV[1], ARGV[3])
+return 1`;
 
 /**
  * Another store (another sid) is kept at a closing store's key by the time its record is read again, and its walk entry,
@@ -355,6 +371,8 @@ function ownersOf(batch: Batched[]): Owners {
   for (const entry of batch) {
     if (entry.unfinished || entry.pending) continue;
     for (const mark of entry.marks) owners.byMark.set(mark, entry.ref);
+    // A store walked by its own ids only (marksOnly): its address and handles may be another store's now.
+    if (entry.marksOnly) continue;
     for (const handle of entry.handles) owners.byHandle.set(handle, entry.ref);
     owners.byRef.set(entry.ref, entry.ref);
   }
@@ -751,16 +769,33 @@ async function startableBatch(batch: { entries: Map<string, Batched>; raws: Map<
   let confirmed = true;
   for (const [field, entry] of batch.entries) {
     if (entry.pending || entry.unfinished) continue;
-    let state: "gone" | "there";
+    let read: Awaited<ReturnType<typeof storeRecordAt>>;
     try {
-      state = await storeRecordAt(entry.ref);
+      read = await storeRecordAt(entry.ref);
     } catch (error) {
       console.error("a closing store's record could not be read before the walk; no walk starts in this run", error);
       confirmed = false;
       continue;
     }
-    if (state === "gone") continue;
+    if (read.state === "gone") continue;
     const raw = batch.raws.get(field);
+    // Its own record (the same id, or, for a store from before ids, the same stats id) is still there: it is taken out
+    // and prepared again. Another store's record at its key (Claude 7's ALTO 1 on #3643): this store's record is gone,
+    // so its entry stays to be walked by its own ids only, and the other store is never put in line to be closed.
+    const own = read.sid === entry.sid || (entry.sid === "" && Boolean(entry.statsId) && read.statsId === entry.statsId);
+    if (!own) {
+      if (entry.marksOnly) continue;
+      const next = JSON.stringify({ ...entry, marksOnly: true });
+      const written = raw === undefined ? null : repliesFor(await redisPipeline([["EVAL", REWRITE_ENTRY, 1, BATCH_KEY, field, raw, next]]).catch(() => null), 1)?.[0];
+      if (written === 1) {
+        batch.entries.set(field, { ...entry, marksOnly: true });
+        batch.raws.set(field, next);
+        continue;
+      }
+      console.error("a closing entry with another store at its key was not confirmed set to its own ids; no walk starts in this run", written);
+      confirmed = false;
+      continue;
+    }
     const taken = raw === undefined ? null : repliesFor(await redisPipeline([["EVAL", WITHDRAW_ENTRY, 1, BATCH_KEY, field, raw]]).catch(() => null), 1)?.[0];
     if (taken !== 0 && taken !== 1) {
       console.error("a closing entry whose record is still there was not confirmed taken out; no walk starts in this run", taken);

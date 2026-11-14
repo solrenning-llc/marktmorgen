@@ -142,6 +142,24 @@ test("an entry taken out, with another store at the key, costs no more than the 
   assert.ok(tries * 3 <= replaced, `${tries} tries (${tries * 3} commands) priced inside the ${replaced} they replace`);
 });
 
+test("an entry whose record is still there at the walk's start costs no more than the record's going it replaces (Claude 7's LEVE on #3643)", () => {
+  const source = readFileSync(join(process.cwd(), "lib/closed-store-data.ts"), "utf8");
+  const startable = source.slice(source.indexOf("async function startableBatch"), source.indexOf("async function moveBack"));
+  // Its own record still there: one WITHDRAW_ENTRY script (EVAL, HGET, HDEL) and one ZADD back in line, never retried
+  // within the run; it is then prepared again on a later run, the preparation already priced in PREPARE_COMMANDS.
+  assert.match(startable, /\["EVAL", WITHDRAW_ENTRY, 1, BATCH_KEY, field, raw\]/);
+  assert.match(startable, /\["ZADD", DUE_KEY, "NX", now, entry\.ref\]/);
+  // Another store's record there (ALTO 1): one REWRITE_ENTRY script (EVAL, HGET, HSET), once, and no preparation at all.
+  assert.match(startable, /\["EVAL", REWRITE_ENTRY, 1, BATCH_KEY, field, raw, next\]/);
+  assert.match(startable, /if \(entry\.marksOnly\) continue;/);
+  assert.doesNotMatch(startable, /for \(let tries/);
+  // Either way the record's going did not land, so the commands of it that did not run (as in the tests above) cover it.
+  const replaced = 1 + 1 + 2 + 1 + 1 + 1 + 3;
+  const own = 3 + 1;
+  const other = 3;
+  assert.ok(Math.max(own, other) <= replaced, `${own} or ${other} commands priced inside the ${replaced} they replace`);
+});
+
 test("a pending entry is taken out by the idle pass at one script a run, inside the record's going it replaces (Codex on #3643)", () => {
   const source = readFileSync(join(process.cwd(), "lib/closed-store-data.ts"), "utf8");
   const tries = Number(source.match(/const WITHDRAW_TRIES = (\d+);/)?.[1]);

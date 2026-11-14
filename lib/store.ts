@@ -1133,18 +1133,20 @@ export async function storeForRefExact(ref: string): Promise<Store | null> {
 }
 
 /**
- * Whether anything is kept under one ref's record key, read exactly (rule 24): "gone" only when Redis answers nil,
- * "there" for any text (this store's record, or another's at the same key); any other answer throws UnknownReplyError.
- * The closing walk reads it before it walks a store, so it never erases one whose record is still there (Codex L,
- * Codex P and Claude 2 cloud L on #3643).
+ * What is kept under one ref's record key, read exactly (rule 24): "gone" only when Redis answers nil; "there" with the
+ * ids of the store whose record it is (this store's, or another's at the same key) only for text that reads as a store
+ * record (parseStore); anything else, text included ("QUEUED", "OK", a cut record), throws UnknownReplyError (Claude 7's
+ * ALTO 2 on #3643). The closing walk reads it before it walks a store, so it never erases one whose record is still
+ * there, and knows whether that record is the closing store's own (Codex L, Codex P and Claude 2 cloud L on #3643).
  */
-export async function storeRecordAt(ref: string): Promise<"gone" | "there"> {
+export async function storeRecordAt(ref: string): Promise<{ state: "gone" } | { state: "there"; sid: string; statsId: string | null }> {
   if (!isRedisConfigured()) throw new UnknownReplyError("a store's record (no Redis)");
   const reply = repliesFor(await redisPipeline([["GET", await ownerKey(ref)]]), 1);
   if (!reply) throw new UnknownReplyError("a store's record (GET)");
-  if (reply[0] === null) return "gone";
-  if (typeof reply[0] === "string") return "there";
-  throw new UnknownReplyError("a store's record (GET)");
+  if (reply[0] === null) return { state: "gone" };
+  const store = typeof reply[0] === "string" ? parseStore(reply[0]) : null;
+  if (!store || typeof store.sid !== "string") throw new UnknownReplyError("a store's record (GET, not a record)");
+  return { state: "there", sid: store.sid, statsId: typeof store.statsId === "string" && store.statsId ? store.statsId : null };
 }
 
 /** One bounded read for the funded restart's final source check.

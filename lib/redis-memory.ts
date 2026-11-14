@@ -819,6 +819,13 @@ export class MemoryRedis {
           this.data.set(record, next);
           return 1;
         }
+        // lib/closed-store-data.ts REWRITE_ENTRY: a closing store's walk entry rewritten only while it holds exactly the bytes read.
+        if (key.startsWith("-- marktmorgen:closing-rewrite-entry:v1\n") && args[0] === "1" && args.length === 5) {
+          const [, batch, field, expected, next] = args;
+          if (this.run(["HGET", batch, field]) !== expected) return 0;
+          this.run(["HSET", batch, field, next]);
+          return 1;
+        }
         // lib/closed-store-data.ts WITHDRAW_ENTRY: a closing store's walk entry taken out only while it holds exactly the bytes written.
         if (key.startsWith("-- marktmorgen:closing-withdraw-entry:v1\n") && args[0] === "1" && args.length === 4) {
           const [, batch, field, expected] = args;

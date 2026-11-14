@@ -29,7 +29,7 @@ import {
   TIERS,
 } from "@/lib/plan";
 import { feeWords } from "@/lib/fee-words";
-import { PLANS_ON_SALE } from "@/lib/opening";
+import { PLANS_ON_SALE, startWords } from "@/lib/opening";
 import { pricingPerksMarkup, pricingTermsMarkup } from "@/lib/pricing-perks-markup";
 
 import { PricingCycle, CycleText, CycleLink, CycleTerms } from "@/components/pricing-cycle";
@@ -230,14 +230,17 @@ function PlanTermsOnce() {
     const fees = shares.every((share) => share === shares[0])
       ? `${shares[0] / 100}% of each sale on every plan. Stripe charges its own processing fee separately.`
       : `${TIERS.map((tier) => `${PLAN_TITLES[tier]} ${shareShown(tier) / 100}%`).join(", ")} of each sale. Stripe charges its own processing fee separately.`;
+    // Said of when plans open while none can be started (PLANS_ON_SALE false, VR rule item 2): the same terms and
+    // figures, never as if a trial, a charge or a refund could happen today. On sale, word for word as before.
+    const later = (words: string) => (PLANS_ON_SALE ? words : `When plans open: ${words}`);
     const rows: [string, string][] = [
-      ["Free trial", `${TRIAL_DAYS} days. Your card is taken when it starts, so you can sell before you decide.`],
-      ["First charge", `${charges} ${yearly ? "for the year" : "for the month"}, on the day the trial ends. We email you a week before.`],
+      ["Free trial", PLANS_ON_SALE ? `${TRIAL_DAYS} days. Your card is taken when it starts, so you can sell before you decide.` : `When plans open: ${TRIAL_DAYS} days. Your card is taken when it starts, so you can sell before you decide.`],
+      ["First charge", later(`${charges} ${yearly ? "for the year" : "for the month"}, on the day the trial ends. We email you a week before.`)],
       [
         "Money back",
-        `Ask within ${REFUND_DAYS} days of your first payment and it comes back in full, for any reason or none. A yearly plan is refunded for the months you have not started, at any time, less Stripe's card fee.`,
+        later(`Ask within ${REFUND_DAYS} days of your first payment and it comes back in full, for any reason or none. A yearly plan is refunded for the months you have not started, at any time, less Stripe's card fee.`),
       ],
-      ["Canceling", "Two clicks in your studio, any time. Inside the trial, the card is never charged."],
+      ["Canceling", later("Two clicks in your studio, any time. Inside the trial, the card is never charged.")],
       ["Fees", fees],
     ];
     return pricingTermsMarkup(rows);
@@ -248,6 +251,15 @@ function PlanTermsOnce() {
       <CycleTerms month={markup(false)} year={markup(true)} />
     </section>
   );
+}
+
+/**
+ * A card's button. On sale, "Start on <plan>". While no plan can be started, what the link does today, as the home
+ * page and /platform say it (lib/opening.ts startWords), with the plan it opens on later, so each button still says
+ * where it leads on its own (WCAG 2.4.9).
+ */
+function planCta(tier: Tier): string {
+  return PLANS_ON_SALE ? `Start on ${PLAN_TITLES[tier]}` : `${startWords(TRIAL_DAYS)}: ${PLAN_TITLES[tier]} plan when plans open`;
 }
 
 function PlanCard({
@@ -404,7 +416,7 @@ export function Pricing({ domains = false }: { domains?: boolean }) {
           groups={CREATOR_GROUPS}
           perks={INCLUDED}
           featured
-          cta="Start on Store"
+          cta={planCta("creator")}
         />
         <PlanCard
           tier="pro"
@@ -412,7 +424,7 @@ export function Pricing({ domains = false }: { domains?: boolean }) {
           groups={proGroups(domains)}
           perks={proPerks}
           featured={false}
-          cta="Start on Studio"
+          cta={planCta("pro")}
         />
         <PlanCard
           tier="scale"
@@ -425,7 +437,7 @@ export function Pricing({ domains = false }: { domains?: boolean }) {
           ]}
           perks={[`Everything in ${PLAN_TITLES.pro}`, `${PLAN_NUMBER_FORMAT.format(SCALE_MONTHLY_EMAILS)} emails a month`, `${PLAN_NUMBER_FORMAT.format(VISITS_INCLUDED.scale)} visits a month`, `${PLAN_NUMBER_FORMAT.format(ORDERS_INCLUDED.scale)} orders a month`, `${PLAN_NUMBER_FORMAT.format(AI_MONTHLY.scale)} AI writing jobs and ${PLAN_NUMBER_FORMAT.format(ANSWERS_MONTHLY.scale)} visitor answers a month`, `Each billing month: ${allowanceListWords("scale")}`]}
           featured={false}
-          cta="Start on Scale"
+          cta={planCta("scale")}
         />
       </div>
       <PlanTermsOnce />
@@ -438,7 +450,9 @@ export function Pricing({ domains = false }: { domains?: boolean }) {
           <Icon name="clock" size={18} className="mt-0.5 shrink-0 text-violet-deep" />
           <span>
             <strong className="font-semibold text-ink">One trial per account.</strong>
-            {` The free ${TRIAL_DAYS} days are for your first store; a second store is paid from its first day.`}
+            {PLANS_ON_SALE
+              ? ` The free ${TRIAL_DAYS} days are for your first store; a second store is paid from its first day.`
+              : ` When plans open, the free ${TRIAL_DAYS} days are for your first store; a second store is paid from its first day.`}
           </span>
         </p>
         <p className="flex gap-2 text-ink-soft">

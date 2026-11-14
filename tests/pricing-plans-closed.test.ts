@@ -28,8 +28,8 @@ part("plans not on sale: the terms are said of when plans open, with the same fi
 for (const words of [
   `When plans open: ${TRIAL_DAYS} days. Your card is taken when it starts, so you can sell before you decide.`,
   "on the day the trial ends. We email you a week before.",
-  `When plans open: ask within ${REFUND_DAYS} days of your first payment and it comes back in full, for any reason or none.`,
-  "When plans open: two clicks in your studio, any time. Inside the trial, the card is never charged.",
+  `When plans open: Ask within ${REFUND_DAYS} days of your first payment and it comes back in full, for any reason or none.`,
+  "When plans open: Two clicks in your studio, any time. Inside the trial, the card is never charged.",
   `When plans open, the free ${TRIAL_DAYS} days are for your first store; a second store is paid from its first day.`,
 ]) is(`the terms say "${words}"`, html.includes(words), true);
 is("no plan's first charge is said as if it could happen today", /First charge<\/dt><dd[^>]*>(?!When plans open)/.test(html), false);

@@ -4,6 +4,12 @@ import { staticPolicy } from "./lib/csp";
 
 const nextConfig: NextConfig = {
   /**
+   * No "X-Powered-By: Next.js" on any answer: it tells every scanner which
+   * framework (and so which advisories) to try, and helps no visitor
+   * (tests/security-headers-config.test.ts).
+   */
+  poweredByHeader: false,
+  /**
    * Whether this build runs on the host whose browser check the server reads
    * (lib/bot-check.ts, browserProof: only when VERCEL is "1"). The client
    * starts the check only then (lib/browser-check-client.ts): anywhere else
@@ -168,6 +174,28 @@ const nextConfig: NextConfig = {
         source: "/embed/:path*",
         headers: common,
       },
+      /*
+       * Every other address under /embed/ (one part, or three and more) is
+       * not the card: proxy.ts gives it no policy, so without these two rules
+       * it went out with neither a policy nor X-Frame-Options and any site
+       * could frame it. It is a page like the rest. The request carries no
+       * nonce policy (the proxy writes none for it), so Next writes its
+       * scripts without a nonce and it gets the static policy, never a nonce
+       * one. The same address in another case (/Embed/...) is sent to the
+       * lowercase one by proxy.ts (tests/security-headers-config.test.ts).
+       * A two-part address whose last part has an extension (/embed/x/y.html,
+       * in any case) is never the card either, as a card's product id has no
+       * dot, and the proxy's matcher skips any path ending in an extension, so
+       * its redirect never runs for it: the third rule gives it the same
+       * (tests/security-headers-embed-extension.test.ts, #4093 review).
+       */
+      ...["/embed/:one", "/embed/:one/:two/:rest+", "/embed/:one/:two(.*\\..*)"].map((source) => ({
+        source,
+        headers: [
+          { key: "Content-Security-Policy", value: staticPolicy() },
+          { key: "X-Frame-Options", value: "SAMEORIGIN" },
+        ],
+      })),
       /*
        * Nothing the API answers is a page. A picture, a file, a calendar or a
        * piece of JSON may not run, fetch or be framed, even if a browser were

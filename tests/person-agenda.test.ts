@@ -97,7 +97,7 @@ async function main() {
   is("a link's own words say where it goes, not an address alone", [agendaLinkWords("ann@example.com"), fortaleza.includes(">Open the buyer page of ann@example.com</a>")], ["Open the buyer page of ann@example.com", true]);
 
   part("What the agenda costs, counted before it reads (round 3, M2)");
-  // The reading of the buyers is counted before anything big is read: its ten-minute copy by its size, Stripe and
+  // The reading of the buyers is counted before anything big is read: its one-hour copy by its size, Stripe and
   // the imported buyers by how many (round 4, H1).
   const shop = { statsId: "ledgerstats", currency: "usd", stripeAccountId: "acct_ledger" } as Store;
   const asked: number[] = [];
@@ -107,11 +107,11 @@ async function main() {
   const notCounted = await buyerLedger(shop, refusedCount).then(() => "read", (error: unknown) => (error instanceof LedgerNotCounted ? "not counted" : String(error)));
   is("a reading from Stripe counts BUYER_LEDGER_UNITS and the imported buyers by how many, and reads nothing when not counted", [notCounted, asked], ["not counted", [BUYER_LEDGER_UNITS + ledgerUnits(5_000 * IMPORTED_BUYER_BYTES)]]);
   is("5,000 imported buyers are 4 studio requests more", ledgerUnits(5_000 * IMPORTED_BUYER_BYTES), 4);
-  const bigCopy = JSON.stringify({ c: "usd", p: false, r: [["ann@example.com", 100, 1, "", 1], ...Array.from({ length: 9_000 }, (_, i) => [`b${i}@example.com`, 0, 0, "direct", 0])], v: 6 });
+  const bigCopy = JSON.stringify({ c: "usd", p: false, r: [["ann@example.com", 100, 1, "", 1], ...Array.from({ length: 9_000 }, (_, i) => [`b${i}@example.com`, 0, 0, "direct", 0])], t: Date.now(), v: 6 });
   await redisPipeline([["SET", "nl:stats:ledgerstats:ledger", bigCopy, "EX", 600]]);
   asked.length = 0;
   const copyRefused = await buyerLedger(shop, refusedCount).then(() => "read", (error: unknown) => (error instanceof LedgerNotCounted ? "not counted" : String(error)));
-  is("the ten-minute copy is counted by its size before it is read", [copyRefused, asked], ["not counted", [ledgerUnits(bigCopy.length)]]);
+  is("the one-hour copy is counted by its size before it is read", [copyRefused, asked], ["not counted", [ledgerUnits(bigCopy.length)]]);
   const kept = await buyerLedger(shop, async (units) => { asked.push(units); return true; });
   is("and read once counted", [kept.buyers.has("ann@example.com"), asked], [true, [ledgerUnits(bigCopy.length), ledgerUnits(bigCopy.length)]]);
   const buyersPage = readFileSync("app/studio/people/page.tsx", "utf8");
@@ -206,7 +206,7 @@ async function main() {
   const tasksHash = `nl:crm:tasks:${shared.statsId}`;
   await redisPipeline([["DEL", tasksHash]]);
   for (const who of ["ann", "ben"]) await redisPipeline([["HSET", tasksHash, personKey(shared.statsId!, `${who}@example.com`), JSON.stringify([{ id: "abcdefghij", text: `Call ${who}`, due: "", assignee: "", done: false, createdAt: 1, doneAt: 0 }])]]);
-  const copyOf = (rows: number) => JSON.stringify({ c: shared.currency, p: false, r: [["ann@example.com", 100, 1, "", 1], ...Array.from({ length: rows }, (_, i) => [`f${String(i).padStart(5, "0")}@example.com`, 0, 0, "direct", 0])], v: 6 });
+  const copyOf = (rows: number) => JSON.stringify({ c: shared.currency, p: false, r: [["ann@example.com", 100, 1, "", 1], ...Array.from({ length: rows }, (_, i) => [`f${String(i).padStart(5, "0")}@example.com`, 0, 0, "direct", 0])], t: Date.now(), v: 6 });
   let filler = 0;
   while (copyOf(filler).length < 30_000) filler += 1;
   const sharedCopy = copyOf(filler);
@@ -235,7 +235,11 @@ async function main() {
   is("a named section, waited for without holding the page", page.includes('<Suspense fallback={<TasksAgendaWaiting />}>') && page.includes('aria-labelledby="agenda-title"') && page.includes('aria-busy="true"'), true);
   is("each group under its own heading with its count", list.includes("<h3 className=\"text-base font-semibold text-ink\">{`${group.title} (${group.rows.length + group.more})`}</h3>"), true);
   is("a row opens the person's page by their key", readFileSync("lib/person-agenda-read.ts", "utf8").includes("studioPath(store, `who=${row.person}`, \"people\")"), true);
-  is("the page reads that key again among the buyers, and says when it is not there", page.includes("addressForPerson(store, who, lookupLedger.count, included)") && page.includes("That person is not among the buyers read from your Stripe account just now."), true);
+  is("the page reads that key again among the buyers, and says when it is not there", page.includes("addressForPerson(store, who, lookupLedger.count, included)") && page.includes("That person is not among your buyers as last read from your Stripe account, which can be up to an hour ago."), true);
+  // The buyers' copy is kept an hour (lib/segments.ts LEDGER_SECONDS; Claude 1 on #3226): never "read just now".
+  is("the page never says the buyers were read just now", page.includes("buyers read from your Stripe account just now"), false);
+  const privacy = readFileSync("app/privacy/page.tsx", "utf8");
+  is("the privacy policy names every reader of the buyers' copy: an email narrowed, the task agenda and a buyer looked up", privacy.includes("When a creator narrows an email to some of their buyers, opens their task agenda or looks a buyer up, we read their sales once and keep that copy of who bought what for one hour"), true);
   is("someone not found is said to be so", list.includes("About a person we could not find among your Stripe buyers"), true);
   is("the agenda says what a person's page lets you do: mark done or remove, not change", page.includes("Open a person to mark one done or remove it.") && !page.includes("mark one done or change it"), true);
   // A task may be about a list subscriber, not only a buyer (C3-112 (2), light).

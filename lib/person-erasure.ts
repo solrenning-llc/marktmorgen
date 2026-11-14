@@ -46,7 +46,8 @@ import { readKindExact } from "@/lib/catalog";
 import { readCoursesExact } from "@/lib/course";
 import { emailKey, forgetLearnerPerson, storeKey } from "@/lib/learn";
 import { personKey } from "@/lib/person-key";
-import { suppressCommand } from "@/lib/suppression";
+import { ownErasureCommand, suppressCommand } from "@/lib/suppression";
+import { repliesFor } from "@/lib/redis-reply";
 import { takeAllowance } from "@/lib/store-allowance";
 import { logTeam } from "@/lib/team";
 import type { Role } from "@/lib/team-roles";
@@ -65,6 +66,7 @@ import { forgetClicksPerson } from "@/lib/mail-clicks";
 import { forgetHealthPerson } from "@/lib/mail-health";
 import { forgetWorkflowPerson } from "@/lib/flows";
 import { forgetCrmPerson } from "@/lib/crm";
+import { forgetCompanyPerson } from "@/lib/crm-companies";
 import { forgetNotesPerson } from "@/lib/buyer-profile";
 import { forgetFormsPerson } from "@/lib/form-store";
 import { forgetFinishPerson } from "@/lib/course-finish";
@@ -126,6 +128,8 @@ export const ERASERS: Eraser[] = [
   { module: "lib/mail-clicks.ts", run: (s) => forgetClicksPerson(s.listId, s.email) },
   { module: "lib/mail-health.ts", run: (s) => forgetHealthPerson(s.store, s.email) },
   { module: "lib/crm.ts", run: (s) => forgetCrmPerson(s.statsId, s.person, s.email, s.store) },
+  // Taken off any company they were linked to, the room it took given back (639 [GL7](4)).
+  { module: "lib/crm-companies.ts", run: (s) => forgetCompanyPerson(s.statsId, s.person, undefined, s.store) },
   { module: "lib/payment-request-store.ts", run: (s) => forgetRequestsPerson(s.sid, s.email) },
   { module: "lib/agreement-store.ts", run: (s) => forgetAgreementsPerson(s.sid, s.email) },
   { module: "lib/buyer-profile.ts", run: (s) => forgetNotesPerson(s.statsId, s.person) },
@@ -303,9 +307,18 @@ export async function erasePerson(
 
   // First, and on its own: whatever happens next, they are never written to again. Its second is Redis's (ERASED_PRINT).
   await redisPipeline([suppressCommand(scope.listId as string, email)]);
+  // A person's own deletion is noted as theirs too, before anything is deleted (lib/suppression.ts ownErasureCommand):
+  // it takes their purchases and a team's does not, so a PayPal order still owed to them is then not handed over
+  // (lib/paypal-delivery.ts). Its reply read exactly (CX-123 rule 24): not confirmed, the deletion still runs and
+  // answers "incomplete", so the person's link presses it again (lib/erasure-request.ts).
+  let ownNoted = by.kind !== "person";
+  if (!ownNoted) {
+    const noted = await redisPipeline([ownErasureCommand(scope.listId as string, email)]).then((replies) => repliesFor(replies, 1), () => null);
+    ownNoted = noted?.[0] === 0 || noted?.[0] === 1;
+  }
 
   const parts: ErasedPart[] = [];
-  const failed: string[] = [];
+  const failed: string[] = ownNoted ? [] : ["lib/suppression.ts"];
   const files: string[] = [];
   const notes = new Set<ErasureNote>();
   for (const eraser of ERASERS) {

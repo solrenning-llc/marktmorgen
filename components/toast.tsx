@@ -18,13 +18,14 @@ import { Icon } from "@/components/icons";
  * scrolls, the window is resized or the page's content changes, it takes the
  * first corner that leaves the focused control and its focus ring fully
  * visible. If no corner is clear (a full-window editor has focus, say), the box
- * is hidden and its 5 seconds wait until it shows again; the live region still
- * announces the message.
+ * is hidden until a corner clears; the live region still announces the message.
+ *
+ * It stays until the person dismisses it (Dismiss or Escape), so nobody has to
+ * read it in time (WCAG 2.2.3); a new toast replaces the one showing.
  */
 
 const EVENT = "nimbus:toast";
 const FLASH_KEY = "nimbus:flash-toast";
-const SHOWN_FOR = 5000;
 
 // Effects run children first, so a page that confirms something on arrival
 // can call toast() a moment before the Toaster in the layout is listening.
@@ -174,25 +175,13 @@ export function Toaster() {
   const box = useRef<HTMLDivElement>(null);
   const region = useRef<HTMLDivElement>(null);
   const next = useRef(0);
-  const timer = useRef<number | undefined>(undefined);
-  const remaining = useRef(SHOWN_FOR);
-  const deadline = useRef(0);
-  const hovered = useRef(false);
   const focused = useRef(false);
   const leaving = useRef(false);
-  // The box is hidden (no corner leaves the focused control clear): its time waits.
-  const hidden = useRef(false);
   // Where focus was before it moved into the toast, so closing it from the
   // keyboard puts the person back where they were rather than on <body>.
   const returnTo = useRef<HTMLElement | null>(null);
 
-  const stopTimer = useCallback(() => {
-    window.clearTimeout(timer.current);
-    timer.current = undefined;
-  }, []);
-
   const dismiss = useCallback(() => {
-    stopTimer();
     const element = box.current;
     if (!element || leaving.current) return;
     leaving.current = true;
@@ -214,20 +203,7 @@ export function Toaster() {
     );
     animation.onfinish = finish;
     animation.oncancel = finish;
-  }, [stopTimer]);
-
-  const startTimer = useCallback(() => {
-    stopTimer();
-    if (hovered.current || focused.current || leaving.current || hidden.current) return;
-    deadline.current = Date.now() + remaining.current;
-    timer.current = window.setTimeout(dismiss, remaining.current);
-  }, [dismiss, stopTimer]);
-
-  const pauseTimer = useCallback(() => {
-    if (timer.current === undefined) return;
-    stopTimer();
-    remaining.current = Math.max(0, deadline.current - Date.now());
-  }, [stopTimer]);
+  }, []);
 
   useEffect(() => {
     const show = (event: Event) => {
@@ -248,15 +224,13 @@ export function Toaster() {
     };
   }, []);
 
-  // A new toast replaces the one showing: fresh timer, fresh entrance.
+  // A new toast replaces the one showing, with a fresh entrance.
   useLayoutEffect(() => {
     if (!current) return;
     leaving.current = false;
-    hovered.current = false;
     focused.current = false;
-    remaining.current = SHOWN_FOR;
     // Placed before it is painted, so it never covers the focused control even for a frame.
-    hidden.current = region.current ? keepToastClear(region.current, document.activeElement, "bottom-end") === "hidden" : false;
+    if (region.current) keepToastClear(region.current, document.activeElement, "bottom-end");
     box.current?.animate(
       reducedMotion()
         ? [{ opacity: 0 }, { opacity: 1 }]
@@ -266,19 +240,13 @@ export function Toaster() {
           ],
       { duration: 200, easing: "ease-out" },
     );
-    startTimer();
-    return stopTimer;
-  }, [current, startTimer, stopTimer]);
+  }, [current]);
 
-  // While a toast shows, it keeps clear of the focused control (followToastFocus);
-  // a hidden box's time waits, and goes on once it shows again.
+  // While a toast shows, it keeps clear of the focused control (followToastFocus).
   useEffect(() => {
     if (!current || !region.current) return;
-    return followToastFocus(region.current, (isHidden) => {
-      hidden.current = isHidden;
-      return isHidden ? pauseTimer() : startTimer();
-    });
-  }, [current, pauseTimer, startTimer]);
+    return followToastFocus(region.current, () => {});
+  }, [current]);
 
   return (
     <div ref={region} className="nb-toast-region">
@@ -292,26 +260,16 @@ export function Toaster() {
           ref={box}
           data-id={current.id}
           className="nb-toast"
-          onPointerEnter={() => {
-            hovered.current = true;
-            pauseTimer();
-          }}
-          onPointerLeave={() => {
-            hovered.current = false;
-            startTimer();
-          }}
           onFocus={(event) => {
             if (!focused.current) {
               const from = event.relatedTarget;
               returnTo.current = from instanceof HTMLElement && !event.currentTarget.contains(from) ? from : null;
             }
             focused.current = true;
-            pauseTimer();
           }}
           onBlur={(event) => {
             if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
             focused.current = false;
-            startTimer();
           }}
           onKeyDown={(event) => {
             if (event.key === "Escape") {

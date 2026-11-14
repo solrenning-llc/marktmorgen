@@ -48,7 +48,7 @@ async function main() {
     is("no list is handed back as the new state", json.spends, undefined);
   }
 
-  part("a removal whose check afterwards cannot be read is not reported as done");
+  part("a removal whose check afterward cannot be read is not reported as done");
   {
     const id = await seed();
     redis.pipeline = (async (commands: (string | number)[][]) => {

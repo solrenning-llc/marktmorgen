@@ -188,6 +188,10 @@ async function main(): Promise<void> {
     id: "sub_Running000001",
     status: "active",
     metadata: meta,
+    // As Stripe answers a running membership: not ending, no end day, no pause (CX-123 rule 24 reads these exactly).
+    cancel_at_period_end: false,
+    cancel_at: null,
+    pause_collection: null,
     customer: { id: "cus_Member000001", email: "cy@example.com", invoice_settings: { default_payment_method: null } },
     items: { data: [{ current_period_end: payAt }] },
     default_payment_method: { id: "pm_OldCard0000001", type: "card", card: { brand: "visa", last4: "4242", exp_month: lastMonth.getUTCMonth() + 1, exp_year: lastMonth.getUTCFullYear() } },

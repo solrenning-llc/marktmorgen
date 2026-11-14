@@ -93,8 +93,8 @@ export function RenameForm({ current }: { current: string }) {
       <label htmlFor="new-handle" className="field-label">
         New address
       </label>
-      <div className="card flex items-center pl-4 transition focus-within:border-violet-brand">
-        <span className="text-ink-soft">marktmorgen.com/@</span>
+      <div className="card flex flex-wrap items-center pl-4 transition focus-within:border-violet-brand" data-address-field>
+        <span className="max-w-full shrink-0 py-2 text-ink-soft [overflow-wrap:anywhere]">marktmorgen.com/<wbr />@</span>
         <input
           id="new-handle"
           name="handle"
@@ -107,7 +107,7 @@ export function RenameForm({ current }: { current: string }) {
           disabled={state.kind === "saving"}
           onChange={(event) => setHandle(event.target.value)}
           placeholder={current}
-          className="min-w-0 flex-1 rounded-r-2xl bg-transparent px-1 py-3 text-ink outline-none placeholder:text-ink-soft/50"
+          className="min-w-0 flex-[1_1_6rem] rounded-r-2xl bg-transparent px-1 py-3 text-ink outline-none placeholder:text-ink-soft/50"
         />
       </div>
 

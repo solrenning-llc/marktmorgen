@@ -84,8 +84,8 @@ export function HandleForm({ another = false, initial = "" }: { another?: boolea
         <label htmlFor="store-handle" className="field-label">
           Your address
         </label>
-        <div className="card mt-2 flex items-center pl-4 transition focus-within:border-violet-brand">
-          <span className="text-ink-soft">marktmorgen.com/@</span>
+        <div className="card mt-2 flex flex-wrap items-center pl-4 transition focus-within:border-violet-brand" data-address-field>
+          <span className="max-w-full shrink-0 py-2 text-ink-soft [overflow-wrap:anywhere]">marktmorgen.com/<wbr />@</span>
           <input
             id="store-handle"
             name="handle"
@@ -97,7 +97,7 @@ export function HandleForm({ another = false, initial = "" }: { another?: boolea
             value={handle}
             onChange={(event) => setHandle(event.target.value)}
             placeholder="yourname"
-            className="min-w-0 w-full rounded-r-2xl bg-transparent px-1 py-3.5 text-ink outline-none placeholder:text-ink-soft/60"
+            className="min-w-0 flex-[1_1_6rem] rounded-r-2xl bg-transparent px-1 py-3.5 text-ink outline-none placeholder:text-ink-soft/60"
           />
         </div>
         <p className="mt-2 text-sm text-ink-soft">

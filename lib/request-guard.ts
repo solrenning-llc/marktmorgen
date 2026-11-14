@@ -171,6 +171,29 @@ export async function essentialLimitState(scope: string, who: string, limit: num
   return count <= limit ? "within" : "exceeded";
 }
 
+/**
+ * How many seconds are left before the counter of essentialLimitState for `scope` and `who` starts again, so a
+ * person turned away can be told when to come back (491 [PP2] complement, unit 2). One TTL read, nothing written.
+ * null when it cannot be known: Redis not configured or not answering, no counter, a counter without an expiry,
+ * or a reply in any other shape. A wait that cannot be read is never said as "now".
+ */
+export async function limitResetSeconds(scope: string, who: string): Promise<number | null> {
+  if (!isRedisConfigured()) return null;
+  let reply: unknown;
+  try {
+    reply = await redisPipeline([["TTL", await limitKey(scope, who)]]);
+  } catch {
+    return null;
+  }
+  try {
+    if (!Array.isArray(reply) || reply.length !== 1) return null;
+    const seconds: unknown = reply[0];
+    return typeof seconds === "number" && Number.isSafeInteger(seconds) && seconds > 0 ? seconds : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function withinLimit(scope: string, who: string, limit: number, windowSeconds: number): Promise<boolean> {
   if (!isRedisConfigured()) return true;
   let reply: unknown;

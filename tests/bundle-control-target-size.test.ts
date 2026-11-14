@@ -19,9 +19,14 @@ async function main() {
   assert.deepEqual(buttons.map((button) => button.name), items.flatMap((item) => [
     `Move ${item.title} up`, `Move ${item.title} down`, `Take ${item.title} out`,
   ]), "the real component retains all nine named actions in product order");
-  assert.deepEqual(buttons.map((button) => /\bdisabled=""/.test(button.attrs)),
+  // Since the AX274 studio audit (tests/move-buttons.test.ts), the end buttons stay focusable and say the product is
+  // already first or last: unavailable by aria-disabled, never turned off under the focus (WCAG 2.4.3).
+  assert.deepEqual(buttons.map((button) => /\baria-disabled="true"/.test(button.attrs)),
     [true, false, false, false, false, false, false, true, false],
-    "only moving above the first or below the last product is disabled");
+    "only moving above the first or below the last product is unavailable");
+  assert.deepEqual(buttons.map((button) => /(?<![-\w])disabled=""/.test(button.attrs)),
+    [false, false, false, false, false, false, false, false, false],
+    "no Move or Take out button is turned off, so none drops the keyboard focus");
   const { compile } = createRequire(`${process.cwd()}/package.json`)("@tailwindcss/node") as typeof import("@tailwindcss/node");
   const classes = buttons.map((button) => button.attrs.match(/class="([^"]*)"/)?.[1].split(/\s+/) ?? []);
   const compiler = await compile(readFileSync("app/globals.css", "utf8"), { base: process.cwd(), onDependency() {} });

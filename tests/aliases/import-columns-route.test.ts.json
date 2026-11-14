@@ -1,0 +1,4 @@
+{
+  "@/lib/store-request": "import-columns-route-world.ts",
+  "@/lib/csv-map-ai": "import-columns-route-world.ts"
+}

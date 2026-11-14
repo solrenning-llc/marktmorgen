@@ -139,9 +139,17 @@ export async function assistantLeft(store: Store, now = Date.now()): Promise<{ l
   const window = assistantWindow(store.assistantPlan, now / 1000);
   if (!window || !store.statsId || !isRedisConfigured()) return null;
   const [raw] = await redisPipeline([["HGETALL", poolKey(store.statsId, window.id)]]);
-  const flat = Array.isArray(raw) ? raw.map(String) : [];
+  // Read exactly (rule MR, rule 24): a reply that is not a list of pairs, or a field not written as the pool's own
+  // script writes it (digits only, no leading zero, a safe integer), is unknown, and the studio says nothing, never
+  // "the whole month left" (the script itself refuses such a pool, so nothing is spent on it).
+  if (!Array.isArray(raw) || raw.length % 2 !== 0) return null;
   const fields = new Map<string, number>();
-  for (let i = 0; i + 1 < flat.length; i += 2) fields.set(flat[i], Number(flat[i + 1]) || 0);
+  for (let i = 0; i < raw.length; i += 2) {
+    const name = raw[i];
+    const value = raw[i + 1];
+    if (typeof name !== "string" || typeof value !== "string" || !/^(0|[1-9]\d*)$/.test(value) || !Number.isSafeInteger(Number(value))) return null;
+    fields.set(name, Number(value));
+  }
   const cap = Math.min(fields.get("cap") ?? assistantPoolMicroUsd(), assistantPoolMicroUsd());
   const held = fields.get("held") ?? 0, spent = fields.get("spent") ?? 0;
   return { left: Math.max(0, Math.floor((cap - held - spent) / assistantMessageWorstMicroUsd())), answered: fields.get("n") ?? 0, capMicroUsd: cap, spentMicroUsd: spent, heldMicroUsd: held };

@@ -25,7 +25,13 @@
  * keys, end call meetings and mark reviews read the disputes closed since
  * their last run, as they read refunds). A dispute still open (needs_response,
  * under_review, the warning_ stages) or won by the creator closes nothing:
- * only the final "lost" does. A partial refund keeps access, because the
+ * only one whose money went back does: "lost", or "prevented" when the
+ * dispute's own balance transactions withdrew the money and did not
+ * reinstate it (resolved by a refund before a chargeback); a prevention the
+ * network blocked moved nothing and left the money with the creator, and the
+ * legacy "charge_refunded" is left to the refund reads, at the amount the
+ * charge gave back (disputeMoney, lib/dispute-statuses.ts; the siblings of
+ * #3318; Claude 2's money review of #3323). A partial refund keeps access, because the
  * creator chose to keep part of the price, and the buyer keeps what it paid
  * for. A lost dispute closes whatever its amount: Stripe says a dispute's
  * amount is "usually the amount of the charge, but it can differ (usually
@@ -58,9 +64,9 @@
  * delivered as a link to somewhere else — once the buyer has the address,
  * only the creator can close it there.
  */
+import { disputeMoney, disputeMoneyFields } from "@/lib/dispute-statuses";
 import { onAccount } from "@/lib/stripe-account";
 import { redisPipeline } from "@/lib/redis";
-import { disputeMoneyGone } from "@/lib/retained-revenue";
 
 type ChargeLike = {
   id?: unknown;
@@ -76,10 +82,9 @@ type ChargeLike = {
   dispute?: unknown;
 };
 
-/** A dispute lost on this charge, as lostDisputesSince() writes it on the charge: the whole payment taken back, whatever its amount (above). */
+/** A dispute on this charge whose money went back, as lostDisputesSince() writes it on the charge: the whole payment taken back, whatever its amount (above). */
 function lostOnCharge(charge: ChargeLike): boolean {
-  const dispute = charge.dispute as { status?: unknown } | null | undefined;
-  return charge.disputed === true && !!dispute && typeof dispute === "object" && dispute.status === "lost";
+  return charge.disputed === true && disputeMoney(charge.dispute) === "returned";
 }
 
 function chargeRefunded(charge: ChargeLike): boolean {
@@ -116,26 +121,15 @@ export function refundedInFull(payment: unknown): boolean {
 const CHARGE_ID = /^(ch|py)_[A-Za-z0-9]{6,255}$/;
 
 /**
- * Every status Stripe gives a dispute and a refund (the Dispute and Refund
- * objects in Stripe's API reference). A reading that decides from one
- * accepts only these (Codex Q on #2724; CX-123 rule 24): a status missing,
- * of another type or not among them is unknown, never "not lost" or "not
+ * Every status Stripe gives a refund (the Refund object in Stripe's API
+ * reference); a dispute is read by disputeMoney (lib/dispute-statuses.ts),
+ * from its status and, when prevented, the money it moved. A reading that
+ * decides from one accepts only these (Codex Q on #2724; CX-123 rule 24): a
+ * status missing, of another type or not among them, or a prevented dispute
+ * whose balance transactions cannot be read, is unknown, never "not lost" or "not
  * refunded", so the job keeps its place and its anchor and reads it again.
  */
-const DISPUTE_STATUSES = new Set(["warning_needs_response", "warning_under_review", "warning_closed", "needs_response", "under_review", "won", "lost", "prevented", "charge_refunded"]);
 const REFUND_STATUSES = new Set(["pending", "requires_action", "succeeded", "failed", "canceled"]);
-
-/**
- * Whether one dispute takes the payment back for good: "lost" does; a "prevented" one (stopped before it opened, an
- * issuer's early resolution) does only when its own money was withdrawn and not put back (disputeMoneyGone, the rule
- * main's readers use since #3321), and does not when nothing was withdrawn or all of it was reinstated; any other
- * status does not. null when a prevented dispute's money cannot be read (CX-123 rule 24): never lost, never not lost.
- */
-function lostBy(dispute: Record<string, unknown>): boolean | null {
-  if (dispute.status === "lost") return true;
-  if (dispute.status === "prevented") return disputeMoneyGone(dispute);
-  return false;
-}
 
 /** A time Stripe sends: whole seconds. */
 const secondsKnown = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
@@ -161,8 +155,9 @@ export function refundRowKnown(row: unknown): boolean {
 /**
  * One charge.dispute.closed event in its exact shape: its id and time, and
  * its dispute with a status Stripe gives one, its payment as an id, the
- * payment itself with its id (never empty), or nothing, and, when lost, its
- * charge's id.
+ * payment itself with its id (never empty), or nothing, and, when its money
+ * went back (disputeMoney: a prevented one is read by the money it moved),
+ * its charge's id.
  * Anything else is unknown (Codex Q, review 5794657228): never passed over
  * as a dispute not lost.
  */
@@ -173,21 +168,19 @@ function closingKnown(event: unknown): boolean {
   const data = closed.data;
   const dispute = data && typeof data === "object" ? (data as { object?: unknown }).object : null;
   if (!dispute || typeof dispute !== "object" || Array.isArray(dispute)) return false;
-  const { status, payment_intent: payment, charge } = dispute as Record<string, unknown>;
-  if (typeof status !== "string" || !DISPUTE_STATUSES.has(status)) return false;
+  const { payment_intent: payment, charge } = dispute as Record<string, unknown>;
+  const money = disputeMoney(dispute);
+  if (money === "unknown") return false;
   // An id that names a payment, as text or on the expanded payment, or null: an empty id names none (Codex Q, review 5794829222).
   const paymentKnown = payment === null || (typeof payment === "string" && !!payment) || (!!payment && typeof payment === "object" && !Array.isArray(payment) && typeof (payment as { id?: unknown }).id === "string" && !!(payment as { id: string }).id);
   if (!paymentKnown) return false;
-  // A prevented dispute decides by its money: unreadable is unknown. A lost one, by either way, names its charge.
-  const lost = lostBy(dispute as Record<string, unknown>);
-  if (lost === null) return false;
-  return !lost || CHARGE_ID.test(idOf(charge));
+  return money !== "returned" || CHARGE_ID.test(idOf(charge));
 }
 
 /**
  * Whether the bank took this payment back from the creator for good: a
- * dispute on its charge that Stripe has closed as lost, or as prevented with
- * its own money withdrawn and not put back (lostBy), whatever its amount
+ * dispute on its charge that Stripe has closed with the money given back
+ * (lost, or prevented and resolved: disputeMoney), whatever its amount
  * (the owner's rule of 4 November 2026; the header says why). Takes what
  * refundedInFull() takes. Stripe marks a disputed charge with `disputed` but
  * no longer sends the dispute with it, and nothing can expand it, so only
@@ -201,6 +194,9 @@ function closingKnown(event: unknown): boolean {
  * row whose money cannot be read or a list not said to be whole. Not paged,
  * so no request is
  * added: a charge with more disputes than one page holds reads as unknown.
+ * Throws too when a dispute listed cannot be read (a status Stripe does not
+ * give, or a prevented one whose balance transactions cannot be read) and
+ * none gave the money back (rule 24: unknown is never "not lost").
  */
 export async function disputeLost(account: string, payment: unknown): Promise<boolean> {
   const charge = chargeOf(payment);
@@ -211,21 +207,17 @@ export async function disputeLost(account: string, payment: unknown): Promise<bo
   const listed: unknown = await onAccount("GET", account, `/disputes?${new URLSearchParams({ charge: id, limit: "10" })}`);
   // Rule 30: only this charge's own rows, in a list, decide; anything else throws, as Stripe not answering does.
   if (listed === null || typeof listed !== "object" || !Array.isArray((listed as { data?: unknown }).data)) throw new Error("this charge's disputes could not be read");
-  let lost = false;
-  let unread = false;
-  for (const row of (listed as { data: unknown[] }).data) {
+  const rows = (listed as { data: unknown[] }).data;
+  for (const row of rows) {
     if (row === null || typeof row !== "object" || Array.isArray(row)) throw new Error("a dispute listed for this charge could not be read");
     // Another charge's lost dispute, or one naming none, would close the doors on a buyer who paid.
     if (idOf((row as { charge?: unknown }).charge) !== id) throw new Error("Stripe listed another charge's dispute");
-    const taken = lostBy(row as Record<string, unknown>);
-    // A prevented dispute whose money cannot be read is unknown; it decides only when no row of its own proves a loss
-    // (Codex V on #3569), and every row is still checked for its shape and its charge first.
-    if (taken === null) unread = true;
-    else if (taken) lost = true;
   }
-  // Its own lost dispute is lost whatever else there is; "not lost" only from a list that says, exactly, there is no more.
-  if (lost) return true;
-  if (unread) throw new Error("a prevented dispute's money could not be read");
+  // One of its own that gave the money back (lost, or prevented with it returned) is lost whatever else there is; one
+  // whose money cannot be read is unknown; "not lost" only from a list that says, exactly, there is no more.
+  const money = rows.map(disputeMoney);
+  if (money.includes("returned")) return true;
+  if (money.includes("unknown")) throw new Error("a dispute listed for this charge cannot be read: where its money went is unknown");
   if ((listed as { has_more?: unknown }).has_more !== false) throw new Error("this charge's disputes were not read whole");
   return false;
 }
@@ -261,9 +253,9 @@ export async function givenBack(account: string | null | undefined, payment: unk
  */
 export type GivenBackRow = Record<string, unknown>;
 
-/** Whether one row of a job's reading takes its sale back: a full refund going through, or a dispute lost. */
+/** Whether one row of a job's reading takes its sale back: a full refund going through, or a dispute whose money went back. */
 export function rowGivesBack(row: GivenBackRow): boolean {
-  if (row.object === "dispute") return row.status === "lost" && refundedInFull(row.charge);
+  if (row.object === "dispute") return disputeMoney(row) === "returned" && refundedInFull(row.charge);
   if (row.status !== "succeeded" && row.status !== "pending") return false;
   return refundedInFull(row.charge);
 }
@@ -278,7 +270,8 @@ export function rowGivesBack(row: GivenBackRow): boolean {
 export const LOST_DISPUTE_PAGES = 3;
 
 /**
- * The disputes on the creator's account that Stripe closed as lost since
+ * The disputes on the creator's account that Stripe closed with the money
+ * given back (lost, or prevented and resolved: disputeMoney) since
  * (each the whole order taken back, whatever its amount: the owner's rule of
  * 4 November 2026, in the header)
  * `since` (seconds), read from the closing events, which Stripe keeps thirty
@@ -380,17 +373,19 @@ export async function lostDisputesSince(
     const events = page as Record<string, unknown>[];
     for (const event of events) {
       const dispute = (event.data as { object: Record<string, unknown> }).object;
-      if (lostBy(dispute) !== true) continue;
+      if (disputeMoney(dispute) !== "returned") continue;
       const chargeId = idOf(dispute.charge);
       const created = event.created as number;
       newest = Math.max(newest, created);
+      // What decided it travels with the row and the charge it writes (status and the balance transactions' money),
+      // so rowGivesBack() and refundedInFull() read it as this did (Claude 2's money review of #3323).
       found.push({
         object: "dispute",
         id: event.id,
-        status: "lost",
+        ...disputeMoneyFields(dispute),
         created,
         payment_intent: idOf(dispute.payment_intent) || null,
-        charge: { object: "charge", id: chargeId, disputed: true, dispute: { status: "lost" } },
+        charge: { object: "charge", id: chargeId, disputed: true, dispute: disputeMoneyFields(dispute) },
       });
     }
     const last = events[events.length - 1];

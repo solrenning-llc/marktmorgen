@@ -161,9 +161,12 @@ const ANCHOR_SECONDS = 30 * 86400;
 const EVENT_SECONDS = 30 * 86400;
 const DELIVERY_SECONDS = 7 * 86400;
 
+/**
+ * A delivery not tried again because its endpoint no longer hears that kind of event. Its first try may have taken
+ * one of the month's deliveries (counted is kept), so nothing more, not nothing, is counted.
+ */
+export const NOT_HEARD_WORDS = "Not sent: this endpoint no longer hears this event. Nothing more was counted.";
 /** What the studio's log says of a message past the bound: written down, not sent. */
-/** A delivery not tried again because its endpoint no longer hears that kind of event. */
-export const NOT_HEARD_WORDS = "Not sent: this endpoint no longer hears this event. Nothing was counted.";
 export const TOO_LARGE_WORDS = `Not sent: this message would take more than ${DELIVERY_WRITE_MAX_BYTES / 1024} KB to keep, the most a webhook message may take. Nothing was counted.`;
 /**
  * Lines a store's log gets in a UTC day for messages not kept (too large, or

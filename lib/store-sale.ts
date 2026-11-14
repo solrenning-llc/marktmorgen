@@ -39,6 +39,11 @@ export type StoreSale = {
   products: string[];
   /** The Stripe coupon on the creator's account that takes it off. */
   coupon: string;
+  /**
+   * The smallest amount the store's currency charges (lib/money.ts, minCharge), set when the store is read
+   * (lib/store.ts), never kept: a product the sale would take below it is not on sale (DISC-S-1).
+   */
+  floorCents?: number;
 };
 
 export const NO_SALE: StoreSale = { name: "", percent: 0, starts: 0, ends: 0, all: true, products: [], coupon: "" };
@@ -96,6 +101,8 @@ export function saleRunning(sale: StoreSale, nowSeconds: number): boolean {
 export function saleOff(sale: StoreSale, product: SaleCandidate, nowSeconds: number): number {
   if (!saleRunning(sale, nowSeconds) || !saleable(product)) return 0;
   if (!sale.all && !sale.products.includes(product.id)) return 0;
+  // Never below what the currency can be charged: the page, the checkout and the cart all read this (DISC-S-1).
+  if (sale.floorCents !== undefined && salePrice(product.priceCents, sale.percent) < sale.floorCents) return 0;
   return sale.percent;
 }
 

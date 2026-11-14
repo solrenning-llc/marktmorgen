@@ -2,7 +2,7 @@
  * The line stamped along the bottom of every page of a bought PDF or EPUB
  * (lib/pdf-stamp-line.ts), in the store's language (lib/store-language.ts).
  *
- * The PDF's standard font prints only Latin-1 letters and the ellipsis
+ * The PDF line keeps to Latin-1 letters and the ellipsis
  * (lib/pdf-stamp.ts, writable), so these words use nothing else: straight
  * apostrophes, plain spaces.
  *

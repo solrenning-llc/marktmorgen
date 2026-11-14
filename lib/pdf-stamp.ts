@@ -33,7 +33,9 @@
  */
 import { createHash } from "node:crypto";
 import { stampLine } from "@/lib/pdf-stamp-line";
-import { PDFDocument, PDFName, PDFOperator, PDFOperatorNames, StandardFonts, degrees, rgb } from "pdf-lib";
+import fontkit from "@pdf-lib/fontkit";
+import { PDFDocument, PDFName, PDFOperator, PDFOperatorNames, degrees, rgb } from "pdf-lib";
+import { loadFonts } from "@/lib/certificate-pdf";
 import { deleteFile, listFiles, readFileWhole, writeFileWhole } from "@/lib/file-store";
 import { VAULT_PREFIX, isVaultPath, keyName } from "@/lib/vault-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
@@ -74,9 +76,9 @@ export function epubProblem(why: EpubProblem): StampProblem {
 export { stampLine };
 
 /**
- * The standard PDF font writes only the Latin-1 letters, so anything else in
- * an address — rare, but legal — is shown as "?" rather than breaking the
- * stamp. The buyer's own copy is still unmistakably theirs.
+ * The line keeps to the Latin-1 letters (and the ellipsis and middle dot), so
+ * anything else in an address — rare, but legal — is shown as "?" rather than
+ * breaking the stamp. The buyer's own copy is still unmistakably theirs.
  */
 function writable(text: string): string {
   return [...text].map((ch) => (/[ -~ -ÿ…]/.test(ch) ? ch : "?")).join("");
@@ -95,7 +97,10 @@ function writable(text: string): string {
  */
 export async function stampPdf(bytes: Uint8Array, line: string): Promise<Uint8Array> {
   const doc = await PDFDocument.load(bytes, { updateMetadata: false });
-  const font = await doc.embedFont(StandardFonts.Helvetica);
+  // Embedded, only the letters the line uses, with a ToUnicode map (PDF/UA, ISO 14289-1 7.21.4.1 and 7.21.7):
+  // the standard Helvetica is neither, so a conforming book stopped conforming once stamped. About 4 KB a copy.
+  doc.registerFontkit(fontkit);
+  const font = await doc.embedFont((await loadFonts()).sans, { subset: true });
   const text = writable(line);
   const margin = 14;
   for (const page of doc.getPages()) {

@@ -12,6 +12,7 @@ import { isSesConfigured } from "@/lib/ses";
 import { isStreamConfigured } from "@/lib/stream";
 import { isVaultConfigured } from "@/lib/vault";
 import { GOOGLE_SIGNIN_APPROVED } from "@/lib/google-signin";
+import { HELD_DAYS, TOLD_DAYS } from "@/lib/community-approval-rules";
 
 export const metadata: Metadata = {
   title: "Privacy Policy — Marktmorgen",
@@ -799,6 +800,9 @@ export default function PrivacyPage() {
           any labels their import brought or their automatic emails gave you
           (a step can give a label, take one off, or start another of their
           automatic emails) — and never by whether you open an email.
+          When a creator narrows an email to some of their buyers, opens their task agenda or looks a buyer up, we read their sales once and keep that copy of who bought what for one hour,
+          so the count they see says when it was read; it is then deleted,
+          and deleted at once if you ask us to delete your data.
         </p>
         <p id="links">
           <strong className="text-black">Which links you use, only if you allow it.</strong>{" "}
@@ -851,6 +855,13 @@ export default function PrivacyPage() {
           creator and never by other members. What is written is kept while
           the community exists, until its author or the creator deletes it;
           deleting a post deletes its comments, likes, reports and picture.
+          A creator may choose to approve posts or comments before they are
+          published. Until then, what is waiting for approval is seen only by
+          its author and the creator; if the creator does not publish it, the
+          author is told, and if nobody answers within {HELD_DAYS} days it is not
+          published. A short note about what was not published is kept for its
+          author for at most another {TOLD_DAYS} days. Deleting a member deletes
+          what they had waiting too.
           Who reported something is kept for 90 days, so each member&apos;s
           report counts once. The answer about whether someone may come in is
           kept for up to five minutes, a record of each announcement emailed

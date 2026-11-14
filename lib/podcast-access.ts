@@ -38,7 +38,7 @@ import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { orderWrite } from "@/lib/order-data";
 import { holdsProducts } from "@/lib/community-access";
 import { sendEmail } from "@/lib/email";
-import { withinLimit } from "@/lib/request-guard";
+import { essentialLimitState, withinLimit } from "@/lib/request-guard";
 import { FEED_TOKEN } from "@/lib/podcast-rules";
 import { coursesWords } from "@/lib/buyer-words/courses";
 import type { Listing, Store } from "@/lib/store";
@@ -127,8 +127,15 @@ export async function readFeedToken(token: string): Promise<FeedGrant | null> {
   if (raw === null) return null;
   if (typeof raw !== "string") throw new UnknownReplyError("a podcast feed's grant");
   try {
-    const g = JSON.parse(raw) as FeedGrant;
-    return typeof g.s === "string" && typeof g.p === "string" && typeof g.e === "string" ? g : null;
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    // JSON.parse discards duplicate members and normalises escaped member names. Only its exact canonical text proves
+    // that no competing routing evidence was lost while decoding (Codex N, #2608). Extra non-routing claims may remain
+    // in storage, but are stripped from the returned grant below.
+    if (raw !== JSON.stringify(parsed)) return null;
+    const row = parsed as Record<string, unknown>;
+    if (![row.s, row.h, row.p, row.e].every((value) => typeof value === "string" && value.length > 0)) return null;
+    return { s: row.s as string, h: row.h as string, p: row.p as string, e: row.e as string };
   } catch {
     return null;
   }
@@ -195,7 +202,8 @@ export async function sendFeedLink(input: { store: Store; product: Listing; emai
   if (!raw || raw.length > MAX_EMAIL_LENGTH || !EMAIL_PATTERN.test(raw)) return "email";
   const { store, product } = input;
   if (!(await withinStore("podcast-link-ip", `${store.handle}:${input.ip}`, 10, 3_600, store, "buyer"))) return "limited";
-  if (!(await withinLimit("podcast-link-address", sha(normaliseEmail(raw)), 5, 3_600))) return "limited";
+  const byAddress = await essentialLimitState("podcast-link-address", sha(normaliseEmail(raw)), 5, 3_600);
+  if (byAddress !== "within") return byAddress === "exceeded" ? "limited" : "error";
   if (!(await mayListen(store, product.id, raw))) return "sent";
   const token = await feedToken(store, product.id, raw);
   if (!token) return "error";

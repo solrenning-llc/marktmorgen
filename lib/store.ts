@@ -83,6 +83,7 @@ import { ENDED_INDEX } from "@/lib/plan-standing";
 import { closesStore } from "@/lib/plan-closing-rules";
 import { SHARING_INDEX } from "@/lib/platform-share";
 import { PAYING_INDEX } from "@/lib/free-pool-rules";
+import { shortLinksBackOn } from "@/lib/short-link-rest";
 import { type Cycle, type Tier, parseCycle, parseTier } from "@/lib/plan";
 import { COMMUNITY_ID } from "@/lib/community-text";
 import { type Bump, MAX_BUMPS, type Plan, bumpTargets, canBeBumped, isOneOff, uncoveredOption } from "@/lib/product-extras";
@@ -1282,9 +1283,33 @@ export async function storeIdExists(sid: string): Promise<boolean> {
 export async function storeForId(sid: string): Promise<Store | null> {
   if (!STORE_ID_PATTERN.test(sid) || !isRedisConfigured()) return null;
   const [ref] = await redisPipeline([["GET", storeIdKey(sid)]]);
-  if (typeof ref !== "string" || !ref) return null;
+  return storeForIdRef(sid, ref);
+}
+
+/** The command storeForId sends to find a store by its id, for a caller that sends it in a pipeline of its own (lib/short-link-open.ts). */
+export const storeIdCommand = (sid: string): [string, string] => ["GET", storeIdKey(sid)];
+
+/** The store that storeIdCommand's reply names, checked to carry that very id, as storeForId reads it; null for anything else. */
+export async function storeForIdRef(sid: string, ref: unknown): Promise<Store | null> {
+  if (!STORE_ID_PATTERN.test(sid) || typeof ref !== "string" || !ref) return null;
   const store = await storeForEmail(ref);
   return store && store.sid === sid ? store : null;
+}
+
+/**
+ * storeForIdRef, telling a store that is not there (null: its id or its record answered nothing, or the record is
+ * another store's) from a reply that could not be read ("unknown": not one answer, or a record that does not parse),
+ * which is never taken for a store gone (lib/short-link-open.ts). The same one read.
+ */
+export async function storeForIdRefRead(sid: string, ref: unknown): Promise<Store | null | "unknown"> {
+  if (!STORE_ID_PATTERN.test(sid) || ref === null) return null;
+  if (typeof ref !== "string" || !ref) return "unknown";
+  let reply: unknown;
+  const store = await storeForEmailSeen(ref, (_commands, seen) => { reply = seen; });
+  if (store) return store.sid === sid ? store : null;
+  if (!Array.isArray(reply) || reply.length !== 1) return "unknown";
+  if (reply[0] === null) return null;
+  return parseStore(reply[0]) ? null : "unknown";
 }
 
 /**
@@ -2150,6 +2175,11 @@ export async function setSubscription(
     await redisPipeline([[paysNow(saved) ? "SADD" : "SREM", PAYING_INDEX, storeRef(saved)]]).catch((error) =>
       console.error("could not keep the list of stores that pay", error),
     );
+    // A store that starts paying, or whose plan changes: its short links open again at once, and the studio is told
+    // when they had been turned off (lib/short-link-rest.ts, the owner's decision 14 on #3330). Only when it changes.
+    if (paysNow(saved) && (!paysNow(store) || saved.tier !== store.tier || saved.subscriptionId !== store.subscriptionId || saved.period?.start !== store.period?.start)) {
+      await shortLinksBackOn(saved.sid).catch((error) => console.error("could not turn the store's short links back on", error));
+    }
     // The stores whose sales pay a share, for the daily job that keeps what
     // was taken to what is owed (lib/share-settle.ts). Only when it changes.
     const sharing = saved.shared && saved.subscriptionActive;

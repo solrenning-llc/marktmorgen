@@ -102,7 +102,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:share:applied", "nl:share:lock", "nl:share:read-until", "nl:share:stores", "nl:ship:done:",
   "nl:ship:mail:all", "nl:ship:mail:closed:", "nl:ship:mail:due", "nl:ship:mail:erased:",
   "nl:ship:mail:person:", "nl:ship:mail:pool", "nl:ship:mail:pool:", "nl:ship:mail:row:", "nl:ship:mail:store:",
-  "nl:slink:", "nl:slink:store:", "nl:sns:seen:", "nl:sold:lock:", "nl:stamp:problem:", "nl:stats:",
+  "nl:slink:", "nl:slink:open:", "nl:slink:rest:", "nl:slink:store:", "nl:slink:tired:", "nl:sns:seen:", "nl:sold:lock:", "nl:stamp:problem:", "nl:stats:",
   "nl:stamp:drop",
   "nl:stock:lock:", "nl:storage:pending:", "nl:store:before-catalog:", "nl:store:delivery:",
   "nl:store:delivery:over:", "nl:store:folder-owner:", "nl:store:handle:", "nl:store:id:", "nl:store:lock:",
@@ -408,6 +408,10 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:ship:mail:all": C, "nl:ship:mail:closed:": C, "nl:ship:mail:due": C, "nl:ship:mail:erased:": C,
   "nl:ship:mail:person:": C, "nl:ship:mail:pool": C, "nl:ship:mail:pool:": C, "nl:ship:mail:row:": C, "nl:ship:mail:store:": C,
   "nl:slink:": T("nl:slink:store:"), "nl:slink:store:": E,
+  // The hour counts (two hours each) and a resting store's check (a minute) and own count of the hour (two hours) are the
+  // company's and gone by themselves, as its opens in flight (four minutes); its mark is kept at most 32 days and two hours
+  // (a paying store until its window ends) and the studio's notice that its links were turned off 30 days.
+  "nl:slink:open:": Cr(1), "nl:slink:rest:": Cr(36), "nl:slink:tired:": Cr(1),
   "nl:sns:seen:": C,
   "nl:sold:": E, "nl:sold:lock:": E,
   "nl:stamp:copy:": T("prepare", 400), "nl:stamp:problem:": X(31),

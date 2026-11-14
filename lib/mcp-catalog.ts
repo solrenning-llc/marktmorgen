@@ -43,6 +43,8 @@ const TITLES: Readonly<Record<string, string>> = {
   get_page_reading: "How far the page is read",
   get_page_versions: "Earlier page versions",
   list_saved_blocks: "Saved sections",
+  list_bundle_choices: "Products for a bundle",
+  get_imports: "Imports",
   propose_product_description: "Propose a product description",
   get_store: "Which store",
 };
@@ -159,6 +161,28 @@ const DRAFTS: readonly ToolDraft[] = [
   {
     name: "list_saved_blocks",
     description: "The sections the creator saved to reuse on any page, each with its name and its blocks, newest change first. Testimonials are counted, never quoted. It counts as a few of the store's API requests, more as more sections are saved.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    annotations: { readOnlyHint: true },
+  },
+  {
+    name: "list_bundle_choices",
+    description:
+      "The store's products a bundle may be made of, 20 a page in the creator's order, each with whether it can go in and why it cannot (a membership, a call, several prices, free, a limited number, nothing to hand over yet), by the same rule as the creator's bundle picker. Each call reads one page; pass cursor: next_cursor from the last answer for the next one, until next_cursor is null. It counts as a few of the store's API requests, set by the most a page could read.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        search: { type: "string", description: "Words in the product's name; left out, every product." },
+        cursor: { type: "string", description: "Where the page starts: next_cursor from the previous answer; left out, the first page." },
+        bundle: { type: "string", description: "The bundle being made, from list_products, left out of its own list." },
+      },
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: true },
+  },
+  {
+    name: "get_imports",
+    description:
+      "The store's latest imports from another platform (contacts, products, purchases or members), newest first: how far each is and what its rows came to, as counts. Never the file's name, who started it or the rows themselves. It counts as a few of the store's API requests, set by the most it could read.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     annotations: { readOnlyHint: true },
   },

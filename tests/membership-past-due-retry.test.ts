@@ -16,14 +16,16 @@
  *     the community, the download, the list of purchases);
  *   - past due with no attempt scheduled: ended, at every door;
  *   - past due whose latest invoice was not read (an id, nothing, or any
- *     other shape): ended, as every door already treats a state it cannot
- *     read; no door reads it that way, because each asks for it;
+ *     other shape): unknown (rule 24), never ended (Codex X8 on #3889,
+ *     tests/membership-past-due-invoice-unknown.test.ts); no door reads it
+ *     that way, because each asks for it;
  *   - active and trialing are read exactly as before, whatever the invoice;
  *     a pause the member chose still reads as paused.
  */
 import { readFileSync } from "node:fs";
 import { addProduct, claimHandle, ensureStatsId, setProductCourse, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { isLiveSub, memberState } from "@/lib/membership-access";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { paidCourses } from "@/lib/learn";
 import { paidForAny } from "@/lib/community-access";
 import { purchasesFor } from "@/lib/buyer-orders";
@@ -105,7 +107,13 @@ async function main(): Promise<void> {
     ["zero", { id: "in_TestH", next_payment_attempt: 0 }],
     ["a negative date", { id: "in_TestI", next_payment_attempt: -1 }],
   ] as const) {
-    is(`past due, ${what}: ended, never read as a retry`, isLiveSub({ status: "past_due", latest_invoice: latest }), false);
+    let unknown = false;
+    try {
+      isLiveSub({ status: "past_due", latest_invoice: latest });
+    } catch (error) {
+      unknown = error instanceof UnknownReplyError;
+    }
+    is(`past due, ${what}: unknown, never read as a retry nor as ended`, unknown, true);
   }
   for (const status of ["active", "trialing"]) {
     for (const [what, latest] of [["no invoice read", undefined], ["an id", "in_TestJ"], ["an invoice with no attempt", STOPPED("TestK")]] as const) {

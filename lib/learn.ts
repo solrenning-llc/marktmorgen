@@ -41,7 +41,7 @@ import { orderWrite } from "@/lib/order-data";
 import { earnedCourses } from "@/lib/community-points";
 import { onAccount } from "@/lib/stripe-account";
 import { isSettled } from "@/lib/instant-pay";
-import { isLiveSub } from "@/lib/membership-access";
+import { liveExpanded } from "@/lib/membership-access";
 import { purchaseRefunded } from "@/lib/refunds";
 import { folderFromPathname, recordDelivery } from "@/lib/delivery";
 import { playerFor } from "@/lib/stream";
@@ -221,6 +221,11 @@ type Ledger = {
    * sale written down on the thanks page does not outlive its refund.
    */
   refunded: Set<string>;
+  /**
+   * A membership on one of these purchases could not be read (rule 24): it opened nothing, and the answer is
+   * not kept, so the next good read decides (Claude 7 on #3889).
+   */
+  unread?: boolean;
 };
 
 /** Asks the creator's Stripe account what this address paid for here. */
@@ -228,6 +233,7 @@ async function paidAtStripe(store: Store, email: string): Promise<Ledger> {
   const found = new Map<string, number>();
   const ended = new Set<string>();
   const refunded = new Set<string>();
+  let unread = false;
   const account = store.stripeAccountId;
   if (!account) return { paid: found, ended, refunded };
   const handles = saleHandles(store);
@@ -262,9 +268,18 @@ async function paidAtStripe(store: Store, email: string): Promise<Ledger> {
       for (const product of bought) {
         // A course sold as a membership is open while the membership runs.
         if (product.id === meta.product && product.recurring && session.mode === "subscription" && meta.kind !== "plan") {
-          const sub = session.subscription as { status?: unknown } | null;
-          // The same rule as every other door a membership opens (lib/membership-access.ts).
-          if (!sub || typeof sub !== "object" || !isLiveSub(sub)) {
+          // The same rule as every other door a membership opens (lib/membership-access.ts). One that cannot be read
+          // is not ended (rule 24) and opens nothing; it does not change what the address's other purchases open,
+          // as in paidForAny (lib/community-access.ts), and the answer is not kept (Claude 7 on #3889).
+          let live: boolean;
+          try {
+            live = liveExpanded(session.subscription);
+          } catch (error) {
+            if (!(error instanceof UnknownReplyError)) throw error;
+            unread = true;
+            continue;
+          }
+          if (!live) {
             ended.add(product.id);
             continue;
           }
@@ -281,7 +296,7 @@ async function paidAtStripe(store: Store, email: string): Promise<Ledger> {
     ended.delete(id);
     refunded.delete(id);
   }
-  return { paid: found, ended, refunded };
+  return { paid: found, ended, refunded, unread };
 }
 
 /** When a course written down on the thanks page began: whole seconds from zero up, as recordEnrollment writes them; otherwise null. */
@@ -332,8 +347,10 @@ async function courseLedger(store: Store, email: string): Promise<Ledger> {
   if (!asked) {
     try {
       asked = await paidAtStripe(store, email);
-      const kept = JSON.stringify({ p: Object.fromEntries(asked.paid), x: [...asked.ended], r: [...asked.refunded] });
-      await redisPipeline([["SET", paidCacheKey(store, email), kept, "EX", PAID_SECONDS]]);
+      if (!asked.unread) {
+        const kept = JSON.stringify({ p: Object.fromEntries(asked.paid), x: [...asked.ended], r: [...asked.refunded] });
+        await redisPipeline([["SET", paidCacheKey(store, email), kept, "EX", PAID_SECONDS]]);
+      }
     } catch (error) {
       console.error("reading course purchases failed", error);
       asked = { paid: new Map(), ended: new Set(), refunded: new Set() };

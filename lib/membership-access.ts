@@ -54,23 +54,40 @@ export function isLive(status: unknown): boolean {
 
 /**
  * What the doors call a membership that is past due with no attempt at its
- * latest invoice scheduled, or whose latest invoice was not read: ended.
+ * latest invoice scheduled: ended. One whose latest invoice was not read is
+ * unknown (retryScheduled), never this.
  */
 export const PAST_DUE_NO_RETRY = "past_due_no_retry";
 
 /**
  * Whether Stripe has another attempt at a past-due membership's latest
  * invoice scheduled. The subscription carries no retry date of its own; its
- * latest invoice does (`next_payment_attempt`, null once none is scheduled),
- * so every door reads the membership with that invoice expanded. An invoice
- * not expanded, or any other shape, is not a retry.
+ * latest invoice does (`next_payment_attempt`: a date while an attempt is
+ * scheduled, an explicit null once none is), so every door reads the
+ * membership with that invoice expanded. An invoice not expanded (still its
+ * id), one without that field, or a field that is not a date says nothing
+ * about the retry: an answer not understood (rule 24), never an ended
+ * membership (Codex X8 on #3889).
  */
 function retryScheduled(sub: object): boolean {
   const invoice = (sub as { latest_invoice?: unknown }).latest_invoice;
-  if (!invoice || typeof invoice !== "object" || Array.isArray(invoice)) return false;
+  if (!invoice || typeof invoice !== "object" || Array.isArray(invoice) || !Object.hasOwn(invoice, "next_payment_attempt")) {
+    throw new UnknownReplyError("a past-due membership's latest invoice");
+  }
   const next = (invoice as { next_payment_attempt?: unknown }).next_payment_attempt;
-  return typeof next === "number" && Number.isSafeInteger(next) && next > 0;
+  if (next === null) return false;
+  if (typeof next === "number" && Number.isSafeInteger(next) && next > 0) return true;
+  throw new UnknownReplyError("a past-due membership's next payment attempt");
 }
+
+/**
+ * Every state Stripe gives a subscription (its API reference, Subscription.status). Text outside them is a reply not
+ * understood (rule 24), never an ended membership (Codex L on #3889).
+ */
+const STRIPE_SUB_STATUSES = new Set(["incomplete", "incomplete_expired", "trialing", "active", "past_due", "canceled", "unpaid", "paused"]);
+
+/** What memberState can answer, and so the only states membershipStatus keeps and reads back. */
+const KEPT_STATES = new Set([...STRIPE_SUB_STATUSES, PAST_DUE_NO_RETRY]);
 
 /**
  * The state a membership's doors go by: Stripe's own, or "paused" while a
@@ -82,7 +99,11 @@ function retryScheduled(sub: object): boolean {
 export function memberState(sub: unknown): string | null {
   if (!sub || typeof sub !== "object") return null;
   const status = (sub as { status?: unknown }).status;
-  if (typeof status !== "string") return null;
+  // A subscription Stripe sent always says what state it is in. One with no
+  // readable state is an answer not understood (CX-123 rule 24), never an
+  // ended membership: the door says to try again, it does not tell somebody
+  // who pays that their membership is over.
+  if (typeof status !== "string" || !STRIPE_SUB_STATUSES.has(status)) throw new UnknownReplyError("a membership's status");
   if (pausedNow(sub as PauseSub)) return "paused";
   return status === "past_due" && !retryScheduled(sub) ? PAST_DUE_NO_RETRY : status;
 }
@@ -90,6 +111,19 @@ export function memberState(sub: unknown): string | null {
 /** Whether a membership, as Stripe sent it, opens its doors now. */
 export function isLiveSub(sub: unknown): boolean {
   return isLive(memberState(sub));
+}
+
+/**
+ * Whether the membership on a paid subscription checkout, read with its
+ * subscription expanded, opens its doors now (rule 30: every door that reads
+ * one). A checkout in subscription mode always has its subscription, so one
+ * that is still its id (not expanded), null, a list or anything but a
+ * subscription is an answer not understood: it throws UnknownReplyError,
+ * never "ended" (lib/learn.ts, lib/community-access.ts, lib/buyer-orders.ts).
+ */
+export function liveExpanded(sub: unknown): boolean {
+  if (!sub || typeof sub !== "object" || Array.isArray(sub)) throw new UnknownReplyError("a checkout's membership");
+  return isLiveSub(sub);
 }
 
 /**
@@ -108,8 +142,8 @@ export function soldAMembership(product: Listing, session: { mode?: unknown; met
  * unknown shape throws, so callers report a temporary error rather than an
  * ended membership or a renewal invitation. Its one
  * caller (lib/store-checkout.ts, readOrder) hands it the subscription with
- * its latest invoice expanded; read by its id alone, without that invoice, a
- * past-due membership is ended by the same rule (memberState).
+ * its latest invoice expanded; read by its id alone, it asks Stripe for that
+ * invoice too, since a past-due membership without it is unknown (memberState).
  */
 export async function membershipStatus(store: Store, subscription: unknown): Promise<string | null> {
   if (subscription && typeof subscription === "object") {
@@ -126,12 +160,15 @@ export async function membershipStatus(store: Store, subscription: unknown): Pro
     const reply = await redisPipeline([["GET", statusKey(account, subscription)]]);
     if (!Array.isArray(reply) || reply.length !== 1 || !Object.hasOwn(reply, 0)) throw new UnknownReplyError("a membership status cache");
     const [cached] = reply;
-    if (typeof cached === "string" && cached) return cached;
-    // Only an explicit missing key permits the provider lookup. A partial
-    // read does not prove either a live membership or an absent cache.
-    if (cached !== null) throw new UnknownReplyError("a membership status cache value");
+    // A kept state obeys the same closed set as Stripe's own (Codex L on #3889): one of Stripe's states, or the doors'
+    // own PAST_DUE_NO_RETRY and "paused". Other text (kept by an earlier version, or damaged) certifies nothing:
+    // Stripe is asked again, and the state read is kept over it.
+    if (typeof cached === "string" && KEPT_STATES.has(cached)) return cached;
+    // Only an explicit missing key or such a non-empty text permits the provider lookup. A reply of another shape,
+    // or an empty text, does not prove either a live membership or an absent cache.
+    if (cached !== null && (typeof cached !== "string" || cached === "")) throw new UnknownReplyError("a membership status cache value");
   }
-  const sub = await onAccount("GET", account, `/subscriptions/${encodeURIComponent(subscription)}`);
+  const sub = await onAccount("GET", account, `/subscriptions/${encodeURIComponent(subscription)}?expand[]=latest_invoice`);
   // A status from a different or unidentified subscription cannot authorize
   // access or populate the cache for the subscription that was requested.
   if (!sub || !Object.hasOwn(sub, "id") || sub.id !== subscription) throw new UnknownReplyError("a membership provider identity");

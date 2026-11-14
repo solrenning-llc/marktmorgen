@@ -259,7 +259,22 @@ async function sweepStore(store: Store, deadline: number, now: number): Promise<
 
       const token = randomBytes(20).toString("hex");
       const grant = { s: statsId, e: email, p: product.id, o: meta.option ?? "", c: store.winback.coupon, pc: store.winback.percent, m: store.winback.months };
-      await redisPipeline([["SET", linkKey(token), JSON.stringify(grant), "EX", OFFER_DAYS * 86_400], ...noteForErasure(statsId, email, linkKey(token))]);
+      // Read in their exact shape (CX-123 rule 24, as lib/checkout-recovery.ts writes its stop link): the link written
+      // ("OK") and each erasure note a count. Anything else is unknown: the email does not go with a link that may lead
+      // to "this offer has ended" or that an erasure could not find; the link that may have landed is taken back (its
+      // reply read as nothing) and this run's marks are let go, so the next run sends the offer once.
+      const notes = noteForErasure(statsId, email, linkKey(token));
+      const written = repliesFor(
+        await redisPipeline([["SET", linkKey(token), JSON.stringify(grant), "EX", OFFER_DAYS * 86_400], ...notes]).catch(() => null),
+        1 + notes.length,
+      );
+      if (!written || written[0] !== "OK" || !notedExactly(written.slice(1), notes.length)) {
+        await redisPipeline([["DEL", linkKey(token)]]).catch(() => null);
+        await releaseMark(onceKey(statsId, email, product.id), onceValue);
+        await releaseMark(sentKey(account, subId), claim);
+        console.error("a come-back link was not written as asked; nothing sent", store.handle);
+        continue;
+      }
       const ended = typeof sub.ended_at === "number" ? sub.ended_at : nowSeconds;
       const mail = winbackEmail({
         storeName: store.name,
@@ -304,6 +319,16 @@ export async function winbacksSent(store: Store): Promise<number> {
   if (!store.statsId || !isRedisConfigured()) return 0;
   const [n] = await redisPipeline([["GET", countKey(store.statsId)]]);
   return Number(n) || 0;
+}
+
+/**
+ * noteForErasure's replies in their exact shape (Codex X8 on #3889, as lib/product-updates.ts noted() reads the same
+ * three notes): ZADD of one member 0 or 1, ZREMRANGEBYSCORE a count, EXPIRE 1 (the set was just written). Anything
+ * else, such as an EXPIRE 0 that says no index was there to keep, means an erasure may not find the link.
+ */
+function notedExactly(replies: unknown[], count: number): boolean {
+  if (count === 0) return replies.length === 0;
+  return count === 3 && replies.length === 3 && (replies[0] === 0 || replies[0] === 1) && countOf(replies[1]) !== null && replies[2] === 1;
 }
 
 /** The daily run: every store with the offer on, from where the last run stopped. */

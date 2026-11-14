@@ -48,7 +48,7 @@ import { cache } from "react";
 import { pointDomain } from "@/lib/domains";
 import { rememberListing } from "@/lib/directory-index";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { type Held, LockBusyError, deleteIfHeldOnly, holdLock, releaseLock, releaseLockStrict, setIfHeld, takeLock } from "@/lib/redis-lock";
 import {CONTRACT_ADMISSION_COVERAGE,canonicalFinancialSnapshot} from "@/lib/contract-funding-rules";
 import { type ProductFile } from "@/lib/product-file";
@@ -932,6 +932,20 @@ export async function imageFolder(email: string): Promise<string> {
   return (await sha256Hex(`nimbus-images:${email.toLowerCase()}`)).slice(0, 24);
 }
 
+/**
+ * What a store record says of its takedown (lib/takedown.ts), read exactly (rule 24): absent or "" is a store that is
+ * on, a date is the day it was switched off, and anything else (a later version's shape after a rollback, true, a
+ * number, null) is unknown, which is never "on": it reads as switched off, so nothing sells or mails, and the next
+ * save keeps it so until a takedown is lifted on purpose (noteTakedown).
+ */
+const SUSPENDED_UNREADABLE = "unreadable";
+function parseSuspended(value: object): string {
+  if (!Object.hasOwn(value, "suspended")) return "";
+  const raw = (value as { suspended?: unknown }).suspended;
+  if (raw === "" || raw === undefined) return "";
+  return typeof raw === "string" && /^\d{4}-\d{2}-\d{2}/.test(raw) ? raw : SUSPENDED_UNREADABLE;
+}
+
 function parseStore(raw: unknown): Store | null {
   if (typeof raw !== "string" || !raw) return null;
   try {
@@ -1057,7 +1071,7 @@ function parseStore(raw: unknown): Store | null {
       tips: parseTips(value.tips),
       kit: parseKit(value.kit),
       numbersLinks: parseLinks(value.numbersLinks),
-      suspended: typeof value.suspended === "string" && /^\d{4}-\d{2}-\d{2}/.test(value.suspended) ? value.suspended : "",
+      suspended: parseSuspended(value),
       strikes: parseStrikes(value.strikes),
       faq: parseFaq(value.faq),
       intro: parseVideo(value.intro),
@@ -1295,21 +1309,44 @@ export async function storeForId(sid: string): Promise<Store | null> {
 export async function accountStores(email: string): Promise<Store[]> {
   if (!isRedisConfigured()) return [];
   const address = email.toLowerCase();
-  const [first, members] = await redisPipeline([
+  // Read exactly (rule 24): a reply cut short or of another shape throws, never a shorter list. Callers read "no
+  // other store" as leave to delete what the owner's other stores share (lib/closed-store-data.ts), to make a second
+  // Stripe customer (billing checkout), or to move only the first store and drop the account's list (moveAccount).
+  const listed = repliesFor(await redisPipeline([
     ["GET", await ownerKey(address)],
     ["SMEMBERS", await accountKey(address)],
-  ]);
-  const ids = Array.isArray(members)
-    ? members.filter((id): id is string => typeof id === "string" && STORE_ID_PATTERN.test(id))
+  ]), 2);
+  const ids = listed ? storeIdList(listed[1]) : null;
+  if (!listed || !ids) throw new UnknownReplyError("an account's stores");
+  const records = ids.length
+    ? repliesFor(await redisPipeline(await Promise.all(ids.map(async (id) => ["GET", await ownerKey(extraRef(id))]))), ids.length)
     : [];
-  const others = ids.length
-    ? (await redisPipeline(await Promise.all(ids.map(async (id) => ["GET", await ownerKey(extraRef(id))]))))
-        .map(parseStore)
-        .filter((store): store is Store => store !== null && store.extra && store.email.toLowerCase() === address)
-        .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
-    : [];
-  const main = parseStore(first);
+  if (!records) throw new UnknownReplyError("an account's other stores");
+  const others = records
+    // A null is an id whose store is gone; anything else must be a store record.
+    .map((raw) => (raw === null ? null : exactStore(raw, "an account's other store")))
+    .filter((store): store is Store => store !== null && store.extra && store.email.toLowerCase() === address)
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  const main = listed[0] === null ? null : exactStore(listed[0], "an account's first store");
   return main ? [main, ...others] : others;
+}
+
+/**
+ * An account's SMEMBERS of other store ids read exactly: a list of text in which every member is a store id this
+ * version reads, or null. A member in another form (written by a later version, or damaged) is unknown, never left
+ * out: a shorter list reads as "no other store", which lets a closing erase a shared Stripe account's records and a
+ * move drop the account's list with that store still in it (Codex review on #3889).
+ */
+function storeIdList(reply: unknown): string[] | null {
+  const members = stringList(reply);
+  return members && members.every((id) => STORE_ID_PATTERN.test(id)) ? members : null;
+}
+
+/** A store record that must read: text that parses as a store, or UnknownReplyError. */
+function exactStore(raw: unknown, what: string): Store {
+  const store = parseStore(raw);
+  if (!store) throw new UnknownReplyError(what);
+  return store;
 }
 
 /**
@@ -2276,8 +2313,10 @@ export async function settleDoubledStore(fromEmail: string, toEmail: string): Pr
       const [points] = await redisPipeline([["GET", handleKey(a.handle)]]);
       const home = typeof points === "string" ? points.toLowerCase() : "";
       if (home !== from && home !== to) return null;
-      const [members] = await redisPipeline([["SMEMBERS", await accountKey(from)]]);
-      const extras = (Array.isArray(members) ? members : []).filter((id): id is string => typeof id === "string" && STORE_ID_PATTERN.test(id));
+      const read = repliesFor(await redisPipeline([["SMEMBERS", await accountKey(from)]]), 1);
+      // Rule 30: the same exact read as accountStores; an unknown member stops the repair before any write.
+      const extras = read ? storeIdList(read[0]) : null;
+      if (!extras) throw new UnknownReplyError("an account's stores");
       for (const sid of extras) {
         const back = await withStore(extraRef(sid), async (extra, _save, held) => {
           if (extra.email.toLowerCase() === home) return true;
@@ -2306,11 +2345,15 @@ export async function moveAccount(
     // A store in its closing keeps its address until its records are erased, or its plan runs again and its members are let go; one with a break set, until the break is taken back or over (closingUnderway).
     if (await closingUnderway(store)) return { ok: false, reason: "closing" };
     // The address it is moving to must not already own a store of its own.
-    const [existing, theirs] = await redisPipeline([
+    const read = repliesFor(await redisPipeline([
       ["GET", await ownerKey(to)],
       ["SCARD", await accountKey(to)],
-    ]);
-    if ((typeof existing === "string" && existing) || Number(theirs) > 0) {
+    ]), 2);
+    // A count that does not read is unknown (rule 24), never NaN passed as "it owns no store".
+    const theirs = read ? countOf(read[1]) : null;
+    if (!read || theirs === null) throw new UnknownReplyError("the stores of the address moved to");
+    const existing = read[0];
+    if ((typeof existing === "string" && existing) || theirs > 0) {
       return { ok: false, reason: "taken" };
     }
 

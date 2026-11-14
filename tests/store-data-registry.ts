@@ -1102,7 +1102,7 @@ export const FAMILIES: Record<string, Family> = {
 export function partAverage(part: Part, tier: Tier): number {
   if ("capped" in part) return part.capped(tier);
   if ("kept" in part || "item" in part) return 0;
-  const days = Math.max(1, Math.ceil(part.days));
+  const days = part.days < 1 ? part.days : Math.ceil(part.days);
   const over = UNITS[part.per](tier) * part.bytes;
   return Math.min(over * windowsOver(days), Math.ceil((over * windowsOver(days + 31) * Math.min(days, 31)) / 28));
 }
@@ -1111,7 +1111,7 @@ export function partAverage(part: Part, tier: Tier): number {
 export function partPeak(part: Part, tier: Tier): number {
   if ("capped" in part) return part.capped(tier);
   if ("kept" in part || "item" in part) return 0;
-  return UNITS[part.per](tier) * part.bytes * windowsOver(Math.max(1, Math.ceil(part.days)));
+  return UNITS[part.per](tier) * part.bytes * windowsOver(part.days < 1 ? part.days : Math.ceil(part.days));
 }
 
 /**
@@ -1250,7 +1250,7 @@ export const AFTER_TRIAL_UNITS: Record<Unit, number> = Object.fromEntries(
 export function trialPartPeak(part: Part, tier: Tier, units: Record<Unit, number> = TRIAL_UNITS): number {
   if ("capped" in part) return part.capped(tier);
   if (!("per" in part)) return 0;
-  return units[part.per] * part.bytes * windowsOver(Math.max(1, Math.ceil(part.days)));
+  return units[part.per] * part.bytes * windowsOver(part.days < 1 ? part.days : Math.ceil(part.days));
 }
 
 const prefixOf = (name: string) => name.slice(0, name.lastIndexOf("@"));

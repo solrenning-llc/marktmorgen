@@ -585,7 +585,7 @@ async function main(): Promise<void> {
   const closingCron = readFileSync("app/api/cron/closing/route.ts", "utf8");
   is(
     "a delete whose first try failed puts it in line; the daily closing job tries the line again",
-    [storesRoute.includes("await queueStoreForget(result.store.statsId ?? null, result.store.sid)"), storesRoute.includes("forgetStoreWebhooks(result.store.statsId), revokeAllKeys(result.store.sid)"), closingCron.includes("await retryStoreForgets(start + 32_000)")],
+    [storesRoute.includes("await queueStoreForget(result.store.statsId ?? null, result.store.sid, Date.now(), result.store.community?.id ?? null)"), storesRoute.includes("forgetStoreWebhooks(result.store.statsId), revokeAllKeys(result.store.sid)"), closingCron.includes("await retryStoreForgets(start + 32_000)")],
     [true, false, true],
   );
 

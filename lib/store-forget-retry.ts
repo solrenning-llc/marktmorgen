@@ -37,6 +37,8 @@ import { LOG_SIZE, forgetStoreWebhooks } from "@/lib/webhooks";
 import { MAX_ENDPOINTS } from "@/lib/webhook-limits";
 import { MAX_KEYS, revokeAllKeys } from "@/lib/api-keys";
 import { MEMORY_FORGET_COMMANDS, forgetMemory } from "@/lib/assistant-memory-store";
+import { OutOfTime, removeDeletedStoreFiles } from "@/lib/deleted-store-files";
+import { COMMUNITY_ID } from "@/lib/community-text";
 
 /** Tries in all, the first one at the delete included: a week of daily runs and one more. */
 export const FORGET_TRIES = 8;
@@ -56,14 +58,16 @@ const monthOf = (now: number) => new Date(now).toISOString().slice(0, 7);
 const STATS_ID = /^[A-Za-z0-9_-]{1,64}$/;
 const SID = /^[0-9a-f]{32}$/;
 
-type Entry = { tries: number; first: number; last: number };
+/** `community`: the deleted store's community id, the one folder of its files not made from its id (lib/deleted-store-files.ts). */
+type Entry = { tries: number; first: number; last: number; community?: string };
 
 function parseEntry(raw: unknown): Entry | null {
   if (typeof raw !== "string") return null;
   try {
     const v = JSON.parse(raw) as Partial<Entry>;
     if (!Number.isSafeInteger(v.tries) || (v.tries as number) < 1 || !Number.isSafeInteger(v.first) || !Number.isSafeInteger(v.last)) return null;
-    return { tries: v.tries as number, first: v.first as number, last: v.last as number };
+    const community = typeof v.community === "string" && COMMUNITY_ID.test(v.community) ? { community: v.community } : {};
+    return { tries: v.tries as number, first: v.first as number, last: v.last as number, ...community };
   } catch {
     return null;
   }
@@ -80,10 +84,11 @@ function fieldOf(statsId: string | null, sid: string): string | null {
  * already in line keeps its count. Throws when the line cannot be written,
  * so the caller says so.
  */
-export async function queueStoreForget(statsId: string | null, sid: string, now = Date.now()): Promise<void> {
+export async function queueStoreForget(statsId: string | null, sid: string, now = Date.now(), community: string | null = null): Promise<void> {
   const field = fieldOf(statsId, sid);
   if (!field || !isRedisConfigured()) throw new Error("a deleted store's forgetting could not be put in line");
-  const [added] = await redisPipeline([["HSETNX", QUEUE, field, JSON.stringify({ tries: 1, first: now, last: now } satisfies Entry)]]);
+  const entry: Entry = { tries: 1, first: now, last: now, ...(community && COMMUNITY_ID.test(community) ? { community } : {}) };
+  const [added] = await redisPipeline([["HSETNX", QUEUE, field, JSON.stringify(entry)]]);
   const n = countOf(added);
   if (n === null) throw new Error("putting a deleted store's forgetting in line answered in an unknown shape");
   if (n === 1) await redisPipeline([["HINCRBY", monthKey(monthOf(now)), "queued", 1], ["EXPIRE", monthKey(monthOf(now)), MONTH_SECONDS]]);
@@ -94,18 +99,23 @@ export async function queueStoreForget(statsId: string | null, sid: string, now 
  * lib/api-keys.ts, lib/assistant-memory-store.ts). The assistant's notes give
  * their room back to the store's data room, which outlives the store.
  */
-export type ForgetWork = (statsId: string | null, sid: string) => Promise<void>;
-const forgetBoth: ForgetWork = async (statsId, sid) => {
+export type ForgetWork = (statsId: string | null, sid: string, community: string | null, until: number) => Promise<void>;
+const forgetBoth: ForgetWork = async (statsId, sid, community, until) => {
   await forgetStoreWebhooks(statsId);
   await revokeAllKeys(sid);
   // A deleted store has no plan: its room is given back as a store without one.
   await forgetMemory(statsId, { sid, statsId, subscriptionActive: false, subscriptionId: null, trialEnds: 0, planEndedAt: "" });
+  // And its files: pictures, community pictures, anything left in its folders (lib/deleted-store-files.ts), stopped
+  // at the line's deadline (OutOfTime) so a slow file store cannot run into the closing job's own time.
+  await removeDeletedStoreFiles(sid, community, undefined, until);
 };
 
 /**
  * The closing job's pass (until `deadline`, ms): each store in line not given
  * up is tried again; done, it leaves the line; failed, its count goes up, and
- * at FORGET_TRIES it is marked given up and counted for the month. A line read
+ * at FORGET_TRIES it is marked given up and counted for the month. A try the
+ * work stopped at the deadline (OutOfTime) is not a failure: the store stays
+ * in line as it was, counted as left, and no try is spent. A line read
  * in another shape throws: the job says so, and runs again tomorrow.
  */
 export async function retryStoreForgets(deadline: number, now = Date.now(), work: ForgetWork = forgetBoth): Promise<{ done: number; failed: number; gaveUp: number; left: number }> {
@@ -129,14 +139,19 @@ export async function retryStoreForgets(deadline: number, now = Date.now(), work
     const known = entry !== null && sid !== undefined && fieldOf(statsId, sid) === field;
     try {
       if (!known) throw new Error("an entry in an unknown shape");
-      await work(statsId, sid);
+      await work(statsId, sid, entry?.community ?? null, deadline);
       await redisPipeline([["HDEL", QUEUE, field], ["HINCRBY", monthKey(monthOf(now)), "done", 1], ["EXPIRE", monthKey(monthOf(now)), MONTH_SECONDS]]);
       out.done += 1;
     } catch (error) {
+      if (known && error instanceof OutOfTime) {
+        // Cut off by the deadline, not failed: left for the next run, its tries untouched (review of #4348, MÉDIO 2).
+        out.left += 1;
+        continue;
+      }
       const tries = (entry?.tries ?? FORGET_TRIES - 1) + 1;
       const gaveUp = !known || tries >= FORGET_TRIES;
       console.error(gaveUp ? "forgetting a deleted store's webhooks, keys and assistant notes was given up" : "forgetting a deleted store's webhooks, keys and assistant notes failed again", error);
-      const kept = JSON.stringify({ tries, first: entry?.first ?? now, last: now });
+      const kept = JSON.stringify({ tries, first: entry?.first ?? now, last: now, ...(entry?.community ? { community: entry.community } : {}) });
       // Given up: out of the daily line, into the kept ones, counted for the month.
       await redisPipeline(
         gaveUp

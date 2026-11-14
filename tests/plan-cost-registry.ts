@@ -248,6 +248,9 @@ const MEMORY_SECOND = (micro(VERCEL_MEMORY_MICRO_USD_PER_GB_HOUR) * VERCEL_FUNCT
 export const ORDER_LIBRARY = 2 * ENTRY_BYTES * PERSON_RECORD_MONTHS * DB_BYTE_MONTH;
 /** How long one round of renewals stopped at Stripe, and one page of a store's memberships found there, is waited on at the most, held at 2 GB. */
 export const STRIPE_WAIT_SECONDS = 2;
+/** The plans cron that runs the invite-credit job (app/api/cron/plans): once a day, ended at its maxDuration. */
+export const INVITE_JOB_RUNS_PER_MONTH = 31;
+export const INVITE_JOB_MAX_SECONDS = 60;
 /**
  * The membership or payment plan an order may start, stopped at Stripe when
  * its store closes (lib/closed-store-data.ts, stopRenewals): its share of a
@@ -990,6 +993,17 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/fetch-timeout.ts", names: ["STRIPE_TIMEOUT_MS"] },
     ],
     basis: `A start of the add-on is a billing request (creatorFrom "billing"), inside ESSENTIAL_PER_DAY with the plan's checkout and deletion, so every essential event of the month (${PLATFORM_SUBSCRIPTION_SEARCH.essentialEventsPerWindow}) is taken as a start held for its longest: the smaller of its most calls, ${ASSISTANT_START_STRIPE_CALLS} (${ASSISTANT_START_LIST_PAGES} pages of subscriptions, ${ASSISTANT_START_LIST_PAGES} of open pages and ${ASSISTANT_START_LIST_PAGES} more after a 409, the price read, the product read and write, the price write, the checkout POST) each waited on for STRIPE_TIMEOUT_MS plus the ASSISTANT_IN_PROGRESS_WAIT_MS wait, and its hard end ASSISTANT_START_CUTOFF_MS (${ASSISTANT_START_CUTOFF_MS / 1000} s, withCutoff), at the platform-subscription-search memory rate, less the ${PLATFORM_SUBSCRIPTION_SEARCH.maxGets} GETs of ${PLATFORM_SUBSCRIPTION_SEARCH.waitSeconds} s that line already prices for the same event: ${ASSISTANT_START_EXTRA_SECONDS} s more. The cutoff is set to those ${PLATFORM_SUBSCRIPTION_SEARCH.maxGets * PLATFORM_SUBSCRIPTION_SEARCH.waitSeconds} s, so this line is $0 because the start's longest hold fits inside what the event is already priced at, not because a cost is unknown. Adopting a live add-on makes fewer calls, inside the same cutoff. A function-memory ceiling, not CPU or invocations; the Stripe tariff per call stays unknown (null), never zero, as in platform-subscription-search. Not on sale while ASSISTANT_ON_SALE is false; the line is counted now so the start is priced before it can be.`,
+  },
+  {
+    id: "invite-credit-reads",
+    feature: "The daily invite-credit job: its Stripe reads and its credits sent (Claude 7's money review of #4514)",
+    monthlyUsd: () => INVITE_JOB_RUNS_PER_MONTH * INVITE_JOB_MAX_SECONDS * MEMORY_SECOND,
+    sources: [
+      { file: "lib/creator-invite-credit.ts", names: ["settleInvites", "paidInvoices", "takenBackOn", "disputedOn", "paidNow", "stillOwed", "creditedAt", "INVOICE_PAGES", "HISTORY_PAGES"] },
+      { file: "app/api/cron/plans/route.ts", names: ["maxDuration = 60", "settleInvites(deadline)"] },
+      { file: "vercel.json", names: ["/api/cron/plans", "0 9 * * *"] },
+    ],
+    basis: `Every read the job makes waits on Stripe inside the plans cron (app/api/cron/plans), which runs once a day and is ended at maxDuration (60 s): the invited stores' paid invoices (INVOICE_PAGES pages), each new payment's refunds and disputes, a credit's invoice read again with its refunds and disputes before it is sent, and the balance history (HISTORY_PAGES pages) and POST it is sent with. However many invoices, payments or credits there are, the whole job holds at most ${INVITE_JOB_RUNS_PER_MONTH} runs of ${INVITE_JOB_MAX_SECONDS} s a month at 2 GB, at the registry's function-memory rate (STRIPE_WAIT_SECONDS a call, the same rate): counted whole on every plan, as if one store took all of it. A function-memory ceiling, not CPU or invocations; the Stripe tariff per call stays unknown (null), never zero, as in platform-subscription-search.`,
   },
   {
     id: "storage",

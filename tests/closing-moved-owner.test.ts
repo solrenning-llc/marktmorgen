@@ -29,8 +29,9 @@ import { FINAL_INDEX, HELD_INDEX, type Released, releaseRestarted } from "@/lib/
 import { ENDED_INDEX } from "@/lib/plan-standing";
 import { dropPause, onBreak } from "@/lib/plan-pause";
 import { KEEP_NOTHING_FROM } from "@/lib/plan-closing-rules";
-import { type MoveResult, type Store, claimHandle, ensureStatsId, ensureStoreId, moveAccount, setSubscription, storeForEmail, storeRef } from "@/lib/store";
+import { type MoveResult, type Store, StoreBusyError, claimHandle, ensureStatsId, ensureStoreId, moveAccount, setSubscription, storeForEmail, storeRef } from "@/lib/store";
 import { store as redis } from "./redis-stub";
+import { closingStateKey } from "./closed-for-erasure";
 import { done, is, part } from "./check";
 
 const ownerKey = (email: string) => "nl:store:owner:" + createHash("sha256").update("nimbus-store:" + email).digest("hex").slice(0, 40);
@@ -66,10 +67,15 @@ let pauseUnread = false;
 const realPipeline = redis.pipeline;
 redis.pipeline = async (commands: (string | number)[][]) => {
   if (recordReadFails && commands.some((c) => c[0] === "GET" && c[1] === recordReadFails)) throw new Error("Redis request failed with status 503");
-  if (onBatchWrite && commands.length === 1 && commands[0][0] === "HSET" && commands[0][1] === BATCH_KEY) {
+  // The walk's entry is written on its own (HSET), or, under the walk's lock, in the one fenced step that also deletes
+  // the record (lib/closed-store-data.ts, prepareStore and fencedBy: an EVAL naming BATCH_KEY, the store's ref among
+  // its words). Either way the hook runs just before that write, with the record still there.
+  const entry = commands.length === 1 && commands[0][0] === "HSET" && commands[0][1] === BATCH_KEY ? String(commands[0][2])
+    : commands.length === 1 && commands[0][0] === "EVAL" && commands[0].includes(BATCH_KEY) ? commands[0].map(String).find((word) => /^[^\s@]+@[^\s@]+$/.test(word)) : undefined;
+  if (onBatchWrite && entry) {
     const hook = onBatchWrite;
     onBatchWrite = null;
-    await hook(String(commands[0][2]));
+    await hook(entry);
   }
   if (pauseUnread && commands.some((c) => c[1] === PAUSE_DUE)) return commands.map(() => ({ unexpected: true }));
   if (linesUnread && commands.length && commands.every((c) => c[0] === "ZSCORE") && commands.some((c) => c[1] === FINAL_INDEX)) return [{}];
@@ -99,8 +105,13 @@ async function endedStore(email: string, handle: string) {
   return store;
 }
 
-/** Its closing day has run (lib/plan-closing.ts closingDay): in the final line and in line for the walk. */
+/**
+ * Its closing day has run (lib/plan-closing.ts closingDay): the closing job's record says what it kept was removed for
+ * this ending (closeOne, written before the store is put in line; the walk erases only a store it says so of,
+ * lib/closed-store-data.ts dueForErasure), it is in the final line and in line for the walk.
+ */
 async function pastItsDay(email: string, endedAt: number, at: number) {
+  redis.run(["SET", closingStateKey(email), JSON.stringify({ of: endedAt, renewals: at, refunds: at, removed: at, due: at })]);
   redis.run(["ZADD", FINAL_INDEX, endedAt, email]);
   await markDue(email, at);
 }
@@ -160,11 +171,16 @@ async function main(): Promise<void> {
   await pastItsDay(E, Date.parse(e.planEndedAt), TE - 1000);
   let inWindow: MoveResult | string = "not reached";
   onBatchWrite = async (ref) => {
-    if (ref === E) inWindow = await moveAccount(E, E2);
+    // The walk prepares the store under the store's own lock (lib/closed-store-data.ts, prepareStore): a move in the
+    // window waits on that lock and is refused as busy, which, like "closing", moves nothing. Anything else is thrown.
+    if (ref === E) inWindow = await moveAccount(E, E2).catch((error: unknown) => {
+      if (error instanceof StoreBusyError) return "busy";
+      throw error;
+    });
   };
   const walkedE = await walk(TE);
   onBatchWrite = null;
-  is("the move in the window is refused", outcome(inWindow), refused);
+  is("the move in the window is refused (closing, or busy on the walk's lock)", ["closing", "busy"].includes(((seen: MoveResult | string) => (typeof seen === "string" ? seen : seen.ok ? "moved" : seen.reason))(inWindow)), true);
   is("the walk takes the store, and finishes", [walkedE.stores, walkedE.done], [1, true]);
   is("its record is gone, at both addresses; its id names nothing; its address is held back", traces(E, E2, e.sid, e.handle), { atOld: false, atNew: false, id: null, handle: "released" });
 

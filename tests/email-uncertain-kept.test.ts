@@ -74,6 +74,21 @@ async function main(): Promise<void> {
   const after = await advanceAnnouncement(id, async () => store, Date.now() + 10_000);
   is("and sent after that: still counted once", [held(), after?.status], [2, "sent"]);
 
+  /*
+   * Amazon's lost answer is not Resend's (#4073 MEDIUM 1, Claude 3 cloud G): Amazon has no key that drops a second
+   * post, so the same batch tried again writes again to whoever Amazon took and did not confirm. Its count is kept,
+   * never given back, and never marked: the retry is counted again, as it may be a second real email.
+   */
+  part("A batch Amazon may have taken keeps its count, and its retry is counted again");
+  seed();
+  setBatchAnswer("unconfirmed");
+  const unsure = await advanceAnnouncement(id, async () => store, Date.now() + 10_000);
+  is("Amazon's answer lost: the two emails stay counted, the job tried again later", [held(), unsure?.status, unsure?.failures], [2, "sending", 1]);
+  is("no mark excuses its retry", db.run(["EXISTS", batchKeptKey(`cm:${id}:0:${keys.length}`, members.map((m) => m.e))]), 0);
+  setBatchAnswer("sent");
+  const again = await advanceAnnouncement(id, async () => store, Date.now() + 10_000);
+  is("tried again and sent: counted again, two posts, two counts", [held(), again?.status], [4, "sent"]);
+
   // Once sent, the batch's mark goes: nothing is left to excuse a later batch from its count.
   is("no mark is left once the batch was sent", db.run(["EXISTS", batchKeptKey(`cm:${id}:0:${keys.length}`, members.map((m) => m.e))]), 0);
 

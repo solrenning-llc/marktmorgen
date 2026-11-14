@@ -46,6 +46,8 @@ let accountLosesReply = false;
 let amazonSays: (to: string, nth: number) => { status: number; type?: string; message?: string } = () => ({ status: 200 });
 /** Synthetic only: SES accepted the message before its acknowledgement was lost. */
 let amazonLosesReply: (to: string) => number | "throw" | null = () => null;
+/** Synthetic only: Resend accepted the batch (its first recipient named) before its answer was lost. */
+let resendLosesReply: (to: string) => number | "throw" | null = () => null;
 const fetched: string[] = [];
 const exchanges: { role: string; token: string; action: string }[] = [];
 let stsRefuses = false;
@@ -84,6 +86,10 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     if (key && resendKeys.has(key)) return json(Array.isArray(body) ? { data: body.map((_, i) => ({ id: `again_${i}` })) } : { id: "again" });
     if (key) resendKeys.set(key, bytes);
     for (const m of Array.isArray(body) ? body : [body]) resend.push({ to: m.to[0], subject: m.subject, key });
+    // Synthetic only: Resend took the batch, and its answer was a 5xx or 408, or never came.
+    const lostResend = resendLosesReply(Array.isArray(body) ? body[0]?.to[0] ?? "" : body.to[0]);
+    if (lostResend === "throw") throw new TypeError("synthetic response lost after Resend acceptance");
+    if (typeof lostResend === "number") return json({ message: "synthetic error after acceptance" }, lostResend);
     return json(Array.isArray(body) ? { data: body.map((_, i) => ({ id: `email_${i + 1}` })) } : { id: "email_1" });
   }
   if (url.hostname === `sts.${REGION}.amazonaws.com`) {
@@ -957,9 +963,37 @@ async function main(): Promise<void> {
     is(`${prefix}: only confirmed acceptance gets the existing completion marker`,
       pending?.map(m => m.to), ["batch-unknown@example.com", "batch-not-attempted@example.com"]);
     is(`${prefix}: told apart from a batch nothing of which went, so a caller keeps its count`,
-      [await sendBatchOutcome(messages, `bc:uncertain:${prefix}:outcome`, { by: "company" }), resend.length], ["uncertain", 0]);
+      [await sendBatchOutcome(messages, `bc:uncertain:${prefix}:outcome`, { by: "company" }), resend.length], ["unconfirmed", 0]);
     amazonLosesReply = () => null;
   }
+  account = approved();
+  askAgain();
+  clear();
+
+  // #4073 MEDIUM 1 (Claude 3 cloud G): a caller that finds its batch marked "kept" sends it again without counting it
+  // again (lib/batch-count.ts). That holds only when the retry cannot write to anybody twice: Resend drops a key it
+  // took; Amazon has no such key, so an email whose SES answer was lost is posted to Amazon again. The two are told
+  // apart, so only Resend's unknown answer lets a retry go under the count already kept.
+  part("An email Amazon may have taken is sent to Amazon again when tried again, so its answer never excuses a second count");
+  amazonLosesReply = to => to === "probe-twice@example.com" ? 500 : null;
+  const sesFirst = await sendBatchOutcome([letter("probe-twice@example.com")], "bc:ses-twice", { by: "company" });
+  amazonLosesReply = () => null;
+  const sesSecond = await sendBatchOutcome([letter("probe-twice@example.com")], "bc:ses-twice", { by: "company" });
+  is("Amazon's lost answer is not the outcome a caller may keep one count for",
+    [sesFirst, sesSecond, amazon.filter((m) => m.to === "probe-twice@example.com").length], ["unconfirmed", "sent", 2]);
+  part("Control: Resend's answer not known (5xx, 408 or none) is the outcome a caller keeps one count for; tried again, written once");
+  for (const loss of [503, 408, "throw"] as const) {
+    account = approved({ ProductionAccessEnabled: false }); askAgain(); clear();
+    const to = `resend-unknown-${loss}@example.com`;
+    resendLosesReply = (first) => (first === to ? loss : null);
+    const first = await sendBatchOutcome([letter(to)], `bc:resend-unknown:${loss}`, { by: "company" });
+    resendLosesReply = () => null;
+    const second = await sendBatchOutcome([letter(to)], `bc:resend-unknown:${loss}`, { by: "company" });
+    // The retry may be held until Resend's usage is read again ("retry"); either way nobody is written to twice.
+    is(`${loss}: uncertain, and tried again writes to nobody twice`,
+      [first, second === "sent" || second === "retry", resend.filter((m) => m.to === to).length, amazon.length], ["uncertain", true, 1, 0]);
+  }
+  resendLosesReply = () => null;
   account = approved();
   askAgain();
   clear();

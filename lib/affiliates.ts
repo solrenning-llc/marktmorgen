@@ -78,6 +78,8 @@ import { type Paid, paypalPaymentId, readPayPalRefundsWithCoverage, refundedKey 
 import { MAX_STORE_BYTES, saleHandles, storeForEmailSeen, storeForId, storeRef } from "@/lib/store";
 import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
+// Every cell of the book follows the platform's one cell rule: quoted always, a leading formula character defused after spaces.
+import { csvCell } from "@/lib/csv";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
@@ -3580,12 +3582,6 @@ export async function releaseHold(store: Store, id: string): Promise<Affiliate |
 /** What each kind of lead is called in the book's spreadsheet. */
 const LEAD_KIND_WORDS: Record<LeadKind, string> = { signup: "Lead: email sign-up", free: "Lead: free product claimed", booking: "Lead: call that took place" };
 
-const csvCell = (value: string | number) => {
-  const text = String(value);
-  // A cell a spreadsheet would read as a formula is written as text.
-  const safe = /^[=+\-@\t\r]/.test(text) ? `'${text}` : text;
-  return /[",\n\r]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
-};
 
 /** The whole book as a spreadsheet: every sale and every payout, one per line. */
 export function bookCsv(book: Book, all: Affiliate[]): string {

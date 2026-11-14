@@ -41,6 +41,7 @@ import { onAccount } from "@/lib/stripe-account";
 import type { Listing, Store } from "@/lib/store";
 import { listingFinder, productIds, recordListings } from "@/lib/catalog";
 import { plainAmount } from "@/lib/money";
+import { csvCell as platformCsvCell } from "@/lib/csv";
 import { revenueBySource } from "@/lib/came-from";
 import { type AttributionTable, attributionTable } from "@/lib/attribution-rules";
 import { bumpsFromMeta } from "@/lib/bundle-rules";
@@ -377,7 +378,9 @@ export async function readToday(store: Store, now = Date.now()): Promise<Today> 
   } else if (readsSales(store)) {
     const start = Math.floor(Date.parse(`${date}T00:00:00Z`) / 1000);
     sales = await readPaidSales(store, start, 1)
-      .then(({ sales: rows }) => {
+      .then(({ sales: rows, partial }) => {
+        // A reading that is not whole (past one page, or PayPal not read) is not today's count: not read just now.
+        if (partial) return null;
         const own = rows.filter((sale) => sale.currency === store.currency && dayKey(sale.created) === date);
         return { sales: own.length, cents: own.reduce((n, sale) => n + sale.cents, 0) };
       })
@@ -2489,14 +2492,13 @@ export function studioStats(
 // ---- Files to take away -------------------------------------------------------
 
 /**
- * One spreadsheet cell: quoted always, and a leading character a spreadsheet
- * would read as a formula defused, because a product name or a buyer's name
- * is text somebody else typed and must never run on the creator's computer.
+ * One spreadsheet cell: the platform's one cell rule (lib/csv.ts), quoted
+ * always and a leading formula character defused even after spaces, because a
+ * product name or a buyer's name is text somebody else typed and must never
+ * run on the creator's computer.
  */
 export function csvCell(value: string | number): string {
-  const text = String(value);
-  const safe = /^[=+\-@\t\r]/.test(text) ? `'${text}` : text;
-  return `"${safe.replace(/"/g, '""')}"`;
+  return platformCsvCell(value);
 }
 
 export function csvRow(values: (string | number)[]): string {

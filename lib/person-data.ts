@@ -157,6 +157,8 @@ export const PERSON_DATA: PersonData[] = [
   { file: "lib/free.ts", how: "erased", via: "lib/erasure-index.ts", what: "Their free-product links" },
   { file: "lib/free.ts", how: "expires", days: 1, what: "Counts that limit how often one address may ask, as one-way hashes, for an hour" },
   { file: "lib/store-join.ts", how: "erased", via: "lib/erasure-index.ts", what: "Their sign-up confirmation links" },
+  { file: "lib/ad-events.ts", how: "erased", via: "lib/erasure-index.ts", what: "The ad cookies and ad click ids a membership they bought with their yes to ad measurement reports its later payments with; once they are deleted, none of their later payments is reported to an ad platform, unless one was already being sent at that moment" },
+  { file: "lib/ad-events.ts", how: "expires", days: 4, what: "What a checkout opened with their yes to ad measurement carries to its sale (network address, browser, page, ad cookies), kept under the checkout's own token for four days at the most and deleted as soon as its sale is known; once they are deleted, no sale or sign-up of theirs is reported to an ad platform, unless one was already being sent at that moment" },
   { file: "lib/buyer-orders.ts", how: "expires", days: 1, what: "A link to their purchases already emailed works for 24 hours" },
   { file: "lib/paypal-delivery.ts", how: "erased", via: "lib/erasure-index.ts", what: "A PayPal receipt still being sent: its words and their address, kept a day so every try sends the same email" },
   { file: "lib/membership-manage.ts", how: "expires", days: 1, what: "A link to manage their membership already emailed works for an hour" },

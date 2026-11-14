@@ -33,7 +33,7 @@ import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, SESSION_COOKIE, emailForSession, norma
 import { NIMBUS_FROM, sendEmail, serviceMailKnownUnavailable } from "@/lib/email";
 import { coursesWords } from "@/lib/buyer-words/courses";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
+import { HDEL_IF_EQUAL, UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { type DataStore, giveData, needData, noteData, takeData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
@@ -201,6 +201,14 @@ export async function recordOpenEnrollment(store: Store, email: string, productI
 
 /** The ledger field's ending that marks a course held with no end (recordOpenEnrollment). */
 const OPEN_MARK = ":open";
+/**
+ * A course and its "no end" mark taken off a ledger only while the course is still the one begun at the given second
+ * (dropEnrollment with `startedAt`): 0 when it holds another start or is absent, else HDEL's count (1 or 2). A key of
+ * another type answers an error. lib/redis-memory.ts mirrors it.
+ */
+const DROP_COURSE_IF_STARTED = `-- marktmorgen:course-drop-if-started:v1
+if redis.call("HGET", KEYS[1], ARGV[1]) == ARGV[2] then return redis.call("HDEL", KEYS[1], ARGV[1], ARGV[3]) end
+return 0`;
 
 /** Forgets Stripe's answer for one address, so its next page asks again: a membership switched to another tier (lib/tier-switch.ts). */
 export async function forgetPaid(store: Store, email: string): Promise<void> {
@@ -212,14 +220,19 @@ export async function forgetPaid(store: Store, email: string): Promise<void> {
  * Takes a course off an address's ledger: a gift, pre-order, group place or PayPal sale taken back by a refund. Both
  * replies are read exactly (CX-123 rule 24; Codex G on #2781): the HDEL and the DEL each answer 0 or 1, or this
  * throws UnknownReplyError, so the caller keeps the refund to be tried again and never reads "taken away" from a
- * reply it could not read. Running it again is harmless.
+ * reply it could not read. Running it again is harmless. With `startedAt`, only the course written down as begun then
+ * (recordEnrollment's whole seconds) is taken off, so one a later purchase wrote with its own start is kept.
  */
-export async function dropEnrollment(store: Store, email: string, productId: string): Promise<void> {
+export async function dropEnrollment(store: Store, email: string, productId: string, startedAt?: number): Promise<void> {
   if (!isRedisConfigured()) return;
+  const ledger = ledgerKey(store, email);
   const replies = repliesFor(
     await redisPipeline([
-      // The course's place and its "no end" mark (24 [E7]) go together.
-      ["HDEL", ledgerKey(store, email), productId, `${productId}${OPEN_MARK}`],
+      // The course's place and its "no end" mark (24 [E7]) go together: with `startedAt`, both only while the course is
+      // still the one begun then (DROP_COURSE_IF_STARTED), so a later purchase's course and mark are kept.
+      startedAt === undefined
+        ? ["HDEL", ledger, productId, `${productId}${OPEN_MARK}`]
+        : ["EVAL", DROP_COURSE_IF_STARTED, 1, ledger, productId, String(Math.floor(startedAt)), `${productId}${OPEN_MARK}`],
       ["DEL", paidCacheKey(store, email)],
     ]),
     2,

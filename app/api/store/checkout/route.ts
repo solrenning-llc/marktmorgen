@@ -9,7 +9,7 @@ import { ReturningCodeRefused, canSellProduct, createCheckout } from "@/lib/stor
 import { RETURNING_TRIES, RETURNING_TRIES_SECONDS, otherDiscountWins, redeemReturningLink, releaseReturningLink, requestReturningLink, spendReturningLink } from "@/lib/returning-code";
 import type { ReturningCode } from "@/lib/returning-code-rules";
 import { countHit } from "@/lib/visit";
-import { giveBackHold, holdAdmission, releaseStockHold, withStockHold } from "@/lib/stock";
+import { giveBackHold, holdAdmission, refusedBeforeStripe, releaseStockHold, withStockHold } from "@/lib/stock";
 import { activePlan, limitedStock } from "@/lib/product-extras";
 import { activeFunnel, funnelProductIds } from "@/lib/funnel";
 import { affiliateCookieName, attributionFor } from "@/lib/affiliates";
@@ -365,6 +365,10 @@ export async function POST(request: NextRequest) {
         // code's coupon, and the checkout opens for that email.
         ...(returning ? { returning: returning.code, email: returning.email } : {}),
       }),
+      // A refused returning code made no checkout: either refused before Stripe
+      // was asked, or Stripe's 400 on the code's coupon. Its unit comes back at
+      // once, as the hold count does below, so a refused code holds nothing.
+      (error) => refusedBeforeStripe(error) || error instanceof ReturningCodeRefused,
     );
     if (!held.ok) {
       if (charged) await giveBackHold(store, clientAddress(request));

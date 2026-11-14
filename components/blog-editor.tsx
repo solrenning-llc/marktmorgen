@@ -22,7 +22,8 @@ const MESSAGES: Record<string, string> = {
   title: "Give the post a title.",
   body: "Write the post before saving it.",
   full: "A blog holds up to 200 posts. Delete one first.",
-  unknown: "That post is no longer there. Reload the page.",
+  unknown: "That post or its count could not be verified. Reload the blog to check it.",
+  unconfirmed: "Your change could not be confirmed. Reload the blog and check it before trying again.",
   none: "This account has no store yet.",
   server_error: "Something went wrong on our side. Try again in a moment.",
   outline_left: OUTLINE_LEFT_MESSAGE,
@@ -79,7 +80,7 @@ export function BlogEditor({ post, products, back, look, language = "en" }: { po
     setError(null);
     try {
       const response = await fetch("/api/store/blog", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; post?: { id: string } };
+      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; post?: { id: string }; countUnavailable?: boolean };
       if (!data.ok) {
         setError(MESSAGES[data.error ?? ""] ?? MESSAGES.server_error);
         setTries((n) => n + 1);
@@ -105,7 +106,7 @@ export function BlogEditor({ post, products, back, look, language = "en" }: { po
     const data = await send({ action: "save", id: post.id, title, body, product: product || null, draft }, draft ? "draft" : "publish");
     if (!data) return;
     setSent({ title, body, product });
-    toast(draft ? "Saved as a draft." : "Published on your blog.");
+    toast(data.countUnavailable ? "Post saved. The published count could not be confirmed. Reload the blog to check it." : draft ? "Saved as a draft." : "Published on your blog.");
     router.push(`${back}${back.includes("?") ? "&" : "?"}edit=${data.post?.id ?? ""}`);
     router.refresh();
   }
@@ -115,7 +116,7 @@ export function BlogEditor({ post, products, back, look, language = "en" }: { po
     const data = await send({ action: "delete", id: post.id }, "delete");
     if (!data) return;
     setDone(true);
-    toast("Post deleted.");
+    toast(data.countUnavailable ? "Post deleted. The published count could not be confirmed. Reload the blog to check it." : "Post deleted.");
     router.push(back);
     router.refresh();
   }

@@ -36,7 +36,8 @@ export function StudioTools({ tools }: { tools: StudioTool[] }) {
               prefetch={false}
               className="group flex h-full min-h-[44px] flex-col gap-2 rounded-2xl bg-white p-4 ring-1 ring-line transition-shadow hover:ring-violet-brand/40 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-brand motion-reduce:transition-none"
             >
-              <span className="flex items-center justify-between gap-2">
+              {/* Wraps: a tag such as "Studio plan" goes under the icon on a narrow tile, with text spacing (WCAG 1.4.12). */}
+              <span className="flex flex-wrap items-center justify-between gap-2">
                 <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-lilac text-violet-deep">
                   <Icon name={tool.icon} size={18} />
                 </span>

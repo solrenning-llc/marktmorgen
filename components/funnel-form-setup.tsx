@@ -1,5 +1,6 @@
 "use client";
 
+import { handFocusOnAfterRemoval } from "@/lib/focus-when-drawn";
 import { MAX_FIELDS, MAX_LABEL } from "@/lib/forms";
 import type { FunnelDraftField, FunnelFormDraft } from "@/lib/funnel-form-draft";
 
@@ -27,11 +28,11 @@ export function FunnelFormSetup({ value, onChange }: { value: FunnelFormDraft; o
         </label>
         <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
           <label className="inline-flex min-h-11 items-center gap-2"><input type="checkbox" checked={field.required} onChange={event => update(index, { required: event.target.checked })} /><span className="text-sm">Answer required for question {index + 1}</span></label>
-          <button type="button" className="btn btn-secondary btn-sm" disabled={value.fields.length <= 1} aria-label={"Remove question " + (index + 1)} onClick={() => changeFields(value.fields.filter((_, at) => at !== index))}>Remove</button>
+          <button type="button" className="btn btn-secondary btn-sm" disabled={value.fields.length <= 1} aria-label={"Remove question " + (index + 1)} data-list-remove="funnel-form-question" onClick={() => { changeFields(value.fields.filter((_, at) => at !== index)); handFocusOnAfterRemoval("funnel-form-question", index, value.fields.length, "funnel-form-question-add"); }}>Remove</button>
         </div>
       </li>)}
     </ol>
-    <button type="button" className="btn btn-secondary mt-3" disabled={value.fields.length >= MAX_FIELDS} onClick={() => changeFields([...value.fields, { type: "short", label: "", required: false }])}>Add question</button>
+    <button id="funnel-form-question-add" type="button" className="btn btn-secondary mt-3" disabled={value.fields.length >= MAX_FIELDS} onClick={() => changeFields([...value.fields, { type: "short", label: "", required: false }])}>Add question</button>
     <p className="mt-2 text-xs text-ink-soft">{value.fields.length}/{MAX_FIELDS} questions. Complete each question before creating the funnel.</p>
     <label className="mt-3 flex min-h-11 items-start gap-2"><input className="mt-1" type="checkbox" checked={value.offerList} disabled={!value.fields.some(field => field.type === "email")} onChange={event => onChange({ ...value, offerList: event.target.checked })} /><span className="text-sm">Offer an optional email subscription checkbox</span></label>
     <p className="mt-1 text-xs text-ink-soft">Requires an email question. Visitors choose whether to subscribe and must confirm their email. Submitting answers alone does not subscribe them.</p>

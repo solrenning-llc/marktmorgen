@@ -1,5 +1,6 @@
 "use client";
 
+import { handFocusOnAfterRemoval } from "@/lib/focus-when-drawn";
 import { useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "@/components/toast";
@@ -235,7 +236,11 @@ export function CheckoutFieldsEditor({ product }: { product: Product }) {
                 <button
                   type="button"
                   className="text-sm font-bold text-ink-soft underline underline-offset-4 transition hover:text-danger"
-                  onClick={() => setRows((current) => current.filter((_, j) => j !== i))}
+                  data-list-remove="checkout-question"
+                  onClick={() => {
+                    setRows((current) => current.filter((_, j) => j !== i));
+                    handFocusOnAfterRemoval("checkout-question", i, rows.length, "checkout-question-add");
+                  }}
                 >
                   Remove this question
                 </button>
@@ -246,7 +251,7 @@ export function CheckoutFieldsEditor({ product }: { product: Product }) {
       </ol>
 
       {rows.length < MAX_CHECKOUT_FIELDS ? (
-        <button type="button" className="btn btn-secondary btn-sm mt-3" onClick={() => setRows((current) => [...current, { ...BLANK }])}>
+        <button id="checkout-question-add" type="button" className="btn btn-secondary btn-sm mt-3" onClick={() => setRows((current) => [...current, { ...BLANK }])}>
           {rows.length === 0 ? "Add a question" : "Add another question"}
         </button>
       ) : null}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/icons";
 import { toast } from "@/components/toast";
@@ -70,6 +70,22 @@ export function PaymentsPanel({
   const [asking, setAsking] = useState<{ priced: number } | null>(null);
   const [short, setShort] = useState<{ items: CurrencyShortfall[]; count: number; currency: Currency } | null>(null);
   const studioHref = useStudioHref();
+  // The question before a change takes the focus on its safe choice, and gives it back to the currency list when
+  // it closes, since Save is off again once the currency is kept (WCAG 2.4.3), as every other "are you sure" in the
+  // studio does (components/confirm-action.tsx).
+  const keepButton = useRef<HTMLButtonElement>(null);
+  const currencyList = useRef<HTMLSelectElement>(null);
+  const wasAsking = useRef(false);
+  useEffect(() => {
+    if (asking && !wasAsking.current) keepButton.current?.focus();
+    else if (!asking && wasAsking.current) currencyList.current?.focus();
+    wasAsking.current = !!asking;
+  }, [asking]);
+
+  function keep() {
+    setAsking(null);
+    setChosen(currency);
+  }
 
   const decimalsDiffer = currencyRule(chosen).decimals !== currencyRule(currency).decimals;
 
@@ -260,6 +276,7 @@ export function PaymentsPanel({
           }}
         >
           <select
+            ref={currencyList}
             id="store-currency"
             value={chosen}
             onChange={(event) => {
@@ -292,7 +309,14 @@ export function PaymentsPanel({
         ) : null}
 
         {asking ? (
-          <div className="mt-4 rounded-2xl border-2 border-amber-brand/40 bg-amber-brand/10 p-4" role="alertdialog" aria-labelledby="currency-confirm-title">
+          <div
+            className="mt-4 rounded-2xl border-2 border-amber-brand/40 bg-amber-brand/10 p-4"
+            role="group"
+            aria-labelledby="currency-confirm-title"
+            onKeyDown={(event) => {
+              if (event.key === "Escape" && !busy) keep();
+            }}
+          >
             <p id="currency-confirm-title" className="font-semibold text-ink">
               {`Charge in ${chosen.toUpperCase()} from now on?`}
             </p>
@@ -307,14 +331,7 @@ export function PaymentsPanel({
               <button type="button" className="btn btn-primary btn-sm" disabled={busy} aria-busy={busy} onClick={() => save(true)}>
                 {busy ? "Changing…" : `Change to ${chosen.toUpperCase()}`}
               </button>
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                onClick={() => {
-                  setAsking(null);
-                  setChosen(currency);
-                }}
-              >
+              <button ref={keepButton} type="button" className="btn btn-ghost btn-sm" onClick={keep}>
                 {`Keep ${currency.toUpperCase()}`}
               </button>
             </div>

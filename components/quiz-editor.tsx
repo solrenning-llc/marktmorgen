@@ -21,7 +21,7 @@ import {
 import { MAX_WAIT_MINUTES } from "@/lib/quiz-bank-rules";
 import { QUIZ_MONTHLY_SUBMISSIONS } from "@/lib/quiz-usage-rules";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
-import { browserFrames, focusWhenDrawn } from "@/lib/focus-when-drawn";
+import { browserFrames, focusWhenDrawn, handFocusOnAfterRemoval } from "@/lib/focus-when-drawn";
 import { AiAssist } from "@/components/ai-assist";
 import { DEFAULT_QUIZ_DRAFT, type DraftedQuestion, QUIZ_DRAFT_COUNTS } from "@/lib/quiz-draft";
 
@@ -323,7 +323,7 @@ export function QuizEditor({
                     [list[qi + 1], list[qi]] = [list[qi], list[qi + 1]];
                     setDraft({ ...draft, questions: list });
                   }}>Down</button>
-                  <button type="button" className="text-ink-soft underline underline-offset-4 transition hover:text-danger disabled:opacity-40" disabled={draft.questions.length === 1} onClick={() => setDraft({ ...draft, questions: draft.questions.filter((_, i) => i !== qi) })}>
+                  <button type="button" className="text-ink-soft underline underline-offset-4 transition hover:text-danger disabled:opacity-40" disabled={draft.questions.length === 1} data-list-remove={`${prefix}-question`} onClick={() => { setDraft({ ...draft, questions: draft.questions.filter((_, i) => i !== qi) }); handFocusOnAfterRemoval(`${prefix}-question`, qi, draft.questions.length, `${prefix}-question-add`); }}>
                     Remove
                   </button>
                 </div>
@@ -433,6 +433,7 @@ export function QuizEditor({
       </ol>
       {draft.questions.length < MAX_QUESTIONS ? (
         <button
+          id={`${prefix}-question-add`}
           type="button"
           className="btn btn-secondary btn-sm mt-3"
           onClick={() => {

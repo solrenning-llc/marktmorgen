@@ -110,10 +110,11 @@ import { AGENDA_MAX_ROWS, AGENDA_ROW_SENT_BYTES, AGENDA_TASKS_BYTES } from "@/li
 import { LIFE_WRITE_MAX } from "@/lib/stats";
 import { MARK, cappedByteMonths, closingBytes, followedBytes, reserveBytes, reservePeakBytes } from "./store-data-registry";
 import {
-  PROVIDER_CHARGES_BPS, UPSTASH_MICRO_USD_PER_GB_MONTH, UPSTASH_MICRO_USD_PER_GB_TRANSFER, UPSTASH_MICRO_USD_PER_MILLION_COMMANDS, VERCEL_CALL_MICRO_USD_PER_MILLION,
+  PROVIDER_CHARGES_BPS, R2_CLASS_A_MICRO_USD_PER_MILLION, R2_CLASS_B_MICRO_USD_PER_MILLION, UPSTASH_MICRO_USD_PER_GB_MONTH, UPSTASH_MICRO_USD_PER_GB_TRANSFER, UPSTASH_MICRO_USD_PER_MILLION_COMMANDS, VERCEL_CALL_MICRO_USD_PER_MILLION,
   VERCEL_CPU_MICRO_USD_PER_HOUR, VERCEL_FUNCTION_GB, VERCEL_MEMORY_MICRO_USD_PER_GB_HOUR,
 } from "@/lib/spend-cost-table";
 import { PAGES_PER_VISIT, laterPageCost, visitCost } from "./traffic-cost";
+import { FLY_HOLD_SECONDS, MEASURE_LIST_PAGES } from "@/lib/stamp-cost-rules";
 import { ASSISTANT_IN_PROGRESS_WAIT_MS, ASSISTANT_START_CUTOFF_MS, ASSISTANT_START_LIST_PAGES, ASSISTANT_START_STRIPE_CALLS, assistantMonthWorst } from "@/lib/store-assistant-rules";
 import { ASSISTANT_ON_SALE } from "@/lib/opening";
 import { NEXT_OFFER_CHOICES, NEXT_OFFER_COMMANDS, NEXT_OFFER_PRODUCTS } from "@/lib/next-offer-rules";
@@ -559,6 +560,52 @@ export const DOWNLOAD_LOOKUP_READ =
  * (tests/plan-cost-registry.test.ts holds them above it).
  */
 export const ORDERS_BUNDLE_READ = DOWNLOAD_LOOKUP_READ + ORDERS_BUNDLE_BYTES * ORIGIN_PER_BYTE;
+/**
+ * One page of Vercel Blob's list(), an "Advanced Operation": a review ceiling, twice the on-demand rate Vercel
+ * publishes for Advanced Operations ($5.00 per million, https://vercel.com/docs/vercel-blob/usage-and-pricing). That
+ * page could not be read again from the session that wrote this (12 November 2026: the host is outside its network),
+ * so the rate behind it is still to be confirmed on the page before a money review passes it; the same page's Simple
+ * Operation rate ($0.40 per million) was read on 2 November 2026 (docs/codex-queue.md, PP2). Never a free quota.
+ */
+export const BLOB_LIST_PAGE = 10 / 1e6;
+/** One page of R2's ListObjectsV2, a Class A operation (lib/spend-cost-table.ts). */
+export const R2_LIST_PAGE = micro(R2_CLASS_A_MICRO_USD_PER_MILLION) / 1e6;
+/**
+ * The storage reservation a measurement takes and lets go (lib/storage-reservations.ts): two leases, each asked for
+ * at most 23 times in its five seconds (lib/redis-lock.ts takeLock, 20 ms doubling to 250 ms), a read, a fenced write
+ * and a release each; and the record of up to 64 reservations read and written twice, at 256 bytes a row.
+ */
+export const MEASURE_COMMANDS = 2 * (23 + 3);
+export const MEASURE_DB_BYTES = 4 * 64 * 256;
+/**
+ * What one measurement of a store's storage costs at the most, before a stamped copy or a preview is kept
+ * (lib/pdf-stamp.ts writeWithinStorage, lib/storage-quota.ts storageUsed): MEASURE_LIST_PAGES pages of each file
+ * store's listing (lib/file-store.ts filesHeld, lib/vault.ts vaultHeld, both held to it below), the function held at
+ * 2 GB for the whole of FLY_HOLD_SECONDS (the routes' time limit, which bounds every page and the video service's one
+ * answer about the store's size, lib/stream.ts streamHeld) with the wait shape's share of CPU, the reservation's
+ * commands and bytes, and the copy's own path asked about once (lib/file-store.ts headFile: the dearer of an R2
+ * Class B read and twice Blob's $0.40-per-million Simple Operation), so a copy already in place is written over
+ * without being charged again as new storage. Counted as STORAGE_MEASURE_UNITS public requests before it lists (lib/stamp-cost-rules.ts;
+ * tests/plan-cost-registry.test.ts holds them above it).
+ */
+export const STORAGE_MEASURE_READ =
+  MEASURE_LIST_PAGES * (BLOB_LIST_PAGE + R2_LIST_PAGE)
+  + FLY_HOLD_SECONDS * MEMORY_SECOND
+  + FLY_HOLD_SECONDS * (SHAPES.wait.cpu / SHAPES.wait.seconds) * CPU_SECOND
+  + MEASURE_COMMANDS * COMMAND
+  + MEASURE_DB_BYTES * DB_BYTE
+  + Math.max(micro(R2_CLASS_B_MICRO_USD_PER_MILLION) / 1e6, 0.8 / 1e6);
+/**
+ * A copy stamped on the fly and sent without being kept (lib/pdf-stamp.ts stampedDelivery, "fly";
+ * lib/stamp-cost-rules.ts flyUnits), in its three parts: the function held FLY_HOLD_SECONDS at 2 GB while it is
+ * worked on and sent, its notes read (two commands) and the original asked for once (the dearer of an R2 Class B read
+ * and twice Blob's $0.40-per-million Simple Operation); a millisecond of CPU; and a byte read from the dearer file
+ * store (BLOB_TRANSFER_PER_BYTE, itself a review ceiling) or sent on to the buyer (ORIGIN_PER_BYTE). Held under
+ * FLY_BASE_UNITS, FLY_CPU_MS_PER_UNIT and FLY_BYTES_PER_UNIT in tests/plan-cost-registry.test.ts.
+ */
+export const FLY_BASE = FLY_HOLD_SECONDS * MEMORY_SECOND + 2 * COMMAND + Math.max(micro(R2_CLASS_B_MICRO_USD_PER_MILLION) / 1e6, 0.8 / 1e6);
+export const FLY_CPU_MS = CPU_SECOND / 1000;
+export const FLY_BYTE = Math.max(BLOB_TRANSFER_PER_BYTE, ORIGIN_PER_BYTE);
 /**
  * What checking a batch of older purchases costs besides its metered reads and
  * the request's own call (lib/buyer-orders.ts, olderFor;
@@ -1331,8 +1378,20 @@ export const COST_LINES: CostLine[] = [
       // The open cart counts what is left of each limited product in it, as a product's page does (513 [PF1], unit 3, 2 November 2026): one read each, at most MAX_CART.
       { file: "app/api/store/cart/route.ts", names: ["withinStore(\"cart-read\"", "stockLeft(store, p)"] },
       { file: "lib/stock.ts", names: ["MAX_CHECKS"] },
+      // A stamped copy or a preview kept in the store's storage: its measurement (a Blob and an R2 listing) is
+      // STORAGE_MEASURE_UNITS public requests taken before it lists, and a store found without room is not listed
+      // again for NO_ROOM_NOTE_SECONDS; a copy stamped on the fly for a store without room is held at its worst before
+      // the original is read and settled at its measured work (C3-136, 12 November 2026; STORAGE_MEASURE_READ and
+      // FLY_BASE, FLY_CPU_MS, FLY_BYTE held in tests/plan-cost-registry.test.ts).
+      { file: "lib/stamp-cost-rules.ts", names: ["MEASURE_LIST_PAGES", "STORAGE_MEASURE_UNITS", "NO_ROOM_NOTE_SECONDS", "FLY_HOLD_SECONDS", "FLY_BASE_UNITS", "FLY_CPU_MS_PER_UNIT", "FLY_CPU_PER_WALL_MS", "FLY_BYTES_PER_UNIT", "FLY_MAX_BYTES", "flyUnits", "flyHoldUnits"] },
+      { file: "lib/pdf-stamp.ts", names: ["meter.take(STORAGE_MEASURE_UNITS)", "noRoomKey(folder)", "NO_ROOM_NOTE_SECONDS", "if (!(await roomNotedOut(file)))", "const held = flyHoldUnits(file.bytes);", "await meter.take(held)", "meter.give(held - used)", "meter.take(used - held)", "meter.take(flyUnits(0, stamped.bytes.byteLength))"] },
+      { file: "lib/pdf-preview.ts", names: ["if (await roomNotedOut(file)) return null;", "writeWithinStorage(file, pathname, bytes, \"application/pdf\", store, meter)"] },
+      { file: "app/api/store/download/route.ts", names: ["export const maxDuration = 60;", "holdPublicRequests(store, units, now, \"buyer\", { shared: true })", "givePublicRequests(store, units, now, { shared: true })", "copyMeter(store)"] },
+      { file: "app/api/store/preview/route.ts", names: ["export const maxDuration = 60;", "holdPublicRequests(store, units, now)", "givePublicRequests(store, units, now)"] },
+      { file: "lib/file-store.ts", names: ["for (let page = 0; page < 20; page += 1)"] },
+      { file: "lib/vault.ts", names: ["for (let page = 0; page < 20; page += 1)"] },
     ],
-    basis: "An affiliate's lead for a confirmed sign-up (lib/affiliate-leads.ts, 18 October 2026) takes one of the window's requests before it is written, and is not credited past them; its few commands stay inside a later page's, held in tests/affiliate-leads.test.ts. An affiliate's own page (lib/affiliate-page-admission.ts) and the store's map (lib/store-sitemap.ts) count what they would read first, with a few commands, and take that many of the window's requests before reading it (lib/public-read-rules.ts; affiliatePageRead, affiliateLoadRead and sitemapRead held in tests/plan-cost-registry.test.ts), so neither reads past the window; the affiliate program's book is worked out for all its affiliates at most every BOOK_FRESH_SECONDS and kept that long (lib/affiliate-book-snapshot.ts), the load that works it out paying for it in full outside its connection's share of the day, every other load paying for its own part. Every request of the window is counted, pages and public routes together, and the store rests at REQUESTS_PER_VISIT for each visit of its figure and EXTRA_REQUESTS more: the visits line already prices three pages a visit (tests/traffic-cost.ts), so the extra ones are priced here at a later page each (a review ceiling no public route passes), and every one at its count. The open cart's count of its limited products (513 [PF1], unit 3, 2 November 2026) adds at most MAX_CART reads, and asks the creator's Stripe account, which costs us nothing but the wait, only about a hold that ran out, at most MAX_CHECKS times a product; each hold is settled once, by being marked sold or let go, so it is not asked about again.",
+    basis: "An affiliate's lead for a confirmed sign-up (lib/affiliate-leads.ts, 18 October 2026) takes one of the window's requests before it is written, and is not credited past them; its few commands stay inside a later page's, held in tests/affiliate-leads.test.ts. An affiliate's own page (lib/affiliate-page-admission.ts) and the store's map (lib/store-sitemap.ts) count what they would read first, with a few commands, and take that many of the window's requests before reading it (lib/public-read-rules.ts; affiliatePageRead, affiliateLoadRead and sitemapRead held in tests/plan-cost-registry.test.ts), so neither reads past the window; the affiliate program's book is worked out for all its affiliates at most every BOOK_FRESH_SECONDS and kept that long (lib/affiliate-book-snapshot.ts), the load that works it out paying for it in full outside its connection's share of the day, every other load paying for its own part. Every request of the window is counted, pages and public routes together, and the store rests at REQUESTS_PER_VISIT for each visit of its figure and EXTRA_REQUESTS more: the visits line already prices three pages a visit (tests/traffic-cost.ts), so the extra ones are priced here at a later page each (a review ceiling no public route passes), and every one at its count. A buyer's stamped copy or a PDF's preview kept in the store's storage measures the store first (a Blob and an R2 listing of at most MEASURE_LIST_PAGES pages each): STORAGE_MEASURE_UNITS of these requests, taken before it lists, refused without them (nothing is listed or kept); a store found without room is not measured again for NO_ROOM_NOTE_SECONDS by any of its copies or previews; and a copy stamped on the fly for a store without room (never the file unstamped) is held at flyHoldUnits before its original is read, the function's whole time, two processors' CPU and every byte read and sent, and settled at the work measured; refused, the buyer is asked to try again (lib/stamp-cost-rules.ts). The open cart's count of its limited products (513 [PF1], unit 3, 2 November 2026) adds at most MAX_CART reads, and asks the creator's Stripe account, which costs us nothing but the wait, only about a hold that ran out, at most MAX_CHECKS times a product; each hold is settled once, by being marked sold or let go, so it is not asked about again.",
   },
   {
     id: "studio",

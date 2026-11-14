@@ -25,11 +25,21 @@ import { crc32 } from "node:zlib";
 import { PDFDocument, StandardFonts } from "pdf-lib";
 import { announcementText, eventIcs, eventTime, eventTimeIn, lengthIn, type CommunityEvent } from "@/lib/community-events";
 import { stampLine } from "@/lib/pdf-stamp-line";
-import { stampedCopy } from "@/lib/pdf-stamp";
+import { stampedDelivery } from "@/lib/pdf-stamp";
 import { stampEpub } from "@/lib/epub-stamp";
 import type { ProductFile } from "@/lib/product-file";
 import { LANGUAGE_CODES, LANGUAGES, type LanguageCode } from "@/lib/store-language";
 import { done, is, part } from "./check";
+
+/**
+ * The kept copy of a sale (lib/pdf-stamp.ts stampedDelivery, with a store whose public requests always have room),
+ * null where the file is handed over as uploaded; a copy made on the fly or a request to try again fails the test.
+ */
+async function stampedCopy(file: Parameters<typeof stampedDelivery>[0], sale: Parameters<typeof stampedDelivery>[1], store: Parameters<typeof stampedDelivery>[2]) {
+  const answer = await stampedDelivery(file, sale, store, { take: async () => true, give: async () => {} });
+  if (answer.kind === "fly" || answer.kind === "retry") throw new Error(`a copy was expected to be kept, not "${answer.kind}"`);
+  return answer.kind === "kept" ? answer.copy : null;
+}
 
 const ACCOUNT = "0123456789abcdef0123456789abcdef";
 const BUCKET = "sold-files";
@@ -42,6 +52,13 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const method = init?.method ?? "GET";
   if (url.origin !== ORIGIN || !url.pathname.startsWith(`/${BUCKET}`)) return new Response(null, { status: 404 });
   const key = url.pathname.slice(BUCKET.length + 2);
+  // The bucket listed, as R2 answers ListObjectsV2: what a new copy is measured against (lib/pdf-stamp.ts writeWithinStorage).
+  if (!key) {
+    const prefix = url.searchParams.get("prefix") ?? "";
+    const all = [...objects.keys()].filter((k) => k.startsWith(prefix)).sort();
+    const listed = all.map((k) => `<Contents><Key>${k}</Key><Size>${objects.get(k)!.bytes.byteLength}</Size></Contents>`).join("");
+    return new Response(`<?xml version="1.0" encoding="UTF-8"?><ListBucketResult><IsTruncated>false</IsTruncated>${listed}</ListBucketResult>`, { status: 200, headers: { "content-type": "application/xml" } });
+  }
   if (method === "PUT") {
     const body = init?.body instanceof Uint8Array ? init.body : new Uint8Array(init?.body as ArrayBuffer);
     objects.set(key, { bytes: new Uint8Array(body), type: "" });

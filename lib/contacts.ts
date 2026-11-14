@@ -38,7 +38,7 @@ import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { MAX_CONTACT_NAME, MAX_IMPORT, MAX_LEADS, readTags } from "@/lib/contact-rules";
-import { liftCommand, suppressedAmongCommand, suppressedCommand, wasSuppressed } from "@/lib/suppression";
+import { liftCommand, suppressedAmongCommand, suppressedCommand, wasSuppressed, wholeErasedReply } from "@/lib/suppression";
 import { joinedCommands } from "@/lib/joined-stores";
 import { DataRoomError, type DataStore, giveData, needData } from "@/lib/store-data";
 import { type DataOwner, orderWrite } from "@/lib/order-data";
@@ -351,8 +351,9 @@ export async function importContacts(
   for (let i = 0; i < emails.length; i += 500) {
     const chunk = emails.slice(i, i + 500);
     const [rows, prints] = await redisPipeline([["HMGET", key, ...chunk], suppressedAmongCommand(listId, chunk)]);
-    const found = Array.isArray(rows) ? rows : [];
-    const deleted = Array.isArray(prints) ? prints : [];
+    // Both read exactly (rule 24): a print in another shape is never "not deleted", a row never "not on the list".
+    const found = fieldsOf(rows, chunk.length, "the list's contacts for an import");
+    const deleted = wholeErasedReply(prints, chunk.length);
     const pairs: string[] = [];
     const sizes: { before: Contact | null; next: Contact }[] = [];
     let newlyAgreed = 0;
@@ -514,8 +515,9 @@ export async function previewContactRows(
     ["HMGET", key, ...rows.map((r) => r.email)],
     suppressedAmongCommand(listId, rows.map((r) => r.email)),
   ]);
-  const existing = Array.isArray(found) ? found : [];
-  const deleted = Array.isArray(prints) ? prints : [];
+  // Both read exactly (rule 24): a print in another shape is never "not deleted", a row never "not on the list".
+  const existing = fieldsOf(found, rows.length, "the list's contacts for an import");
+  const deleted = wholeErasedReply(prints, rows.length);
   return {
     outcomes: rows.map((row, i) => decide(parseContact(existing[i]), row, deleted[i] !== null && deleted[i] !== undefined)),
     room: Math.max(0, MAX_LEADS - (Number(size) || 0)),
@@ -555,8 +557,9 @@ export async function importContactRows(listId: string, rows: ImportedContact[],
   ]);
   let room = MAX_LEADS - (Number(size) || 0);
   const now = new Date().toISOString();
-  const existing = Array.isArray(found) ? found : [];
-  const deleted = Array.isArray(prints) ? prints : [];
+  // Both read exactly (rule 24): a print in another shape is never "not deleted", a row never "not on the list".
+  const existing = fieldsOf(found, rows.length, "the list's contacts for an import");
+  const deleted = wholeErasedReply(prints, rows.length);
   // Each write, with the fingerprint of what its address held when read.
   const writes: { email: string; value: string; was: string; row: number }[] = [];
   const sizes: { before: Contact | null; next: Contact }[] = [];

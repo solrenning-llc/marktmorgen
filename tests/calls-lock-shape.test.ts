@@ -33,6 +33,7 @@ import type { Product, Store } from "@/lib/store";
 import { readListing, readProduct } from "@/lib/catalog";
 import { type CallListing, holdAndCheckout, moveBooking, slotsForProduct } from "@/lib/calls";
 import type { CallSetup } from "@/lib/call-setup";
+import { CLAIM_MARGIN_MS, claimsKey, hostId } from "@/lib/host-claims";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { weekdayAt } from "./weekday";
@@ -152,8 +153,9 @@ async function sellSession(w: World, start: number): Promise<string> {
 
 const lockOf = (w: World) => `nl:call:lock:${w.store.callsId}`;
 const diaryOf = (w: World) => `nl:call:busy:${w.store.callsId}`;
+// The store owner's claims too: a hold claims the owner's time (lib/calls.ts, claimOwner), and a time cleared here is free.
 async function clear(w: World): Promise<void> {
-  await run([["DEL", lockOf(w)], ["DEL", diaryOf(w)]]);
+  await run([["DEL", lockOf(w)], ["DEL", diaryOf(w)], ["DEL", claimsKey(hostId(w.store.email))]]);
 }
 
 async function main(): Promise<void> {
@@ -370,9 +372,13 @@ async function main(): Promise<void> {
   const until = (JSON.parse(expiringRaw) as { until: number }).until;
   const clock = Date.now;
   try {
+    // Rule 23 (#3490, Claude 6's MEDIUM 1): the owner's claim of a weekly hold outlasts the hold by CLAIM_MARGIN_MS, as
+    // a team hold's claim does, so a buyer confirmed late is never sold twice on another store. The time comes back once
+    // that margin is over; before, it came back as the hold ran out.
     Date.now = () => until + 1;
-    is("control: a real hold whose time ran out gives its time back", (await offered(h))?.includes(H), true);
-    is("control: …and is tidied away", (await run([["HGET", diaryOf(h), expiring]]))[0], null);
+    is("control: a real hold whose time ran out is tidied away", [(await offered(h))?.includes(H), (await run([["HGET", diaryOf(h), expiring]]))[0]], [false, null]);
+    Date.now = () => until + CLAIM_MARGIN_MS + 1;
+    is("control: …and gives its time back once the claim's margin is over", (await offered(h))?.includes(H), true);
   } finally {
     Date.now = clock;
   }

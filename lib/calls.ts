@@ -102,7 +102,8 @@ import { LANGUAGES, parseLanguage } from "@/lib/store-language";
 import { type BookingWords, bookingWords } from "@/lib/buyer-words/booking";
 import { applyShare, leastPaid, linesTotal, shareBps } from "@/lib/platform-share";
 import { codesMayTakeOff } from "@/lib/discount";
-import { hostId, isClaimId, isHostId, newClaimId } from "@/lib/host-claims";
+import { createHash } from "node:crypto";
+import { type HostClaim, CLAIM_MARGIN_MS, claimHosts, confirmClaim, hostId, isClaimId, isHostId, newClaimId, readClaims } from "@/lib/host-claims";
 import { chosenTeam, hostChoices, parseTeamSetup, teamBookable } from "@/lib/team-scheduling-rules";
 import {
   type TeamBusy,
@@ -136,6 +137,8 @@ type Entry = {
   /** A team booking (lib/team-booking.ts): its hosts' ids, and the claim taken on their time. */
   h?: string[];
   c?: string;
+  /** An ordinary weekly booking: its claim on the store owner's own time (ownerClaims, claimOwner). */
+  o?: string;
 };
 
 /** The hosts and claim of a team entry, when it is one and both read right. */
@@ -254,12 +257,12 @@ async function readDiary(callsId: string): Promise<string[]> {
   return flat;
 }
 
-async function heldAndBooked(store: Store, now: number): Promise<(TeamBusy & { field: string })[]> {
+async function heldAndBooked(store: Store, now: number): Promise<(OwnBusy & { field: string })[]> {
   const callsId = store.callsId as string;
   // Every entry is read before anything is decided or deleted: one that cannot be read throws (entryOf), and the
   // whole diary is then unknown, so no time is offered or sold and nothing is let go on it.
   const entries = readEntries(await readDiary(callsId));
-  const busy: (TeamBusy & { field: string })[] = [];
+  const busy: (OwnBusy & { field: string })[] = [];
   const stale: string[] = [];
   const past: string[] = [];
   let freed = 0;
@@ -274,7 +277,8 @@ async function heldAndBooked(store: Store, now: number): Promise<(TeamBusy & { f
       continue;
     }
     const team = teamOf(entry);
-    busy.push({ start: entry.start, end: entry.e, product: entry.p, session: entry.session, field, ...(team ? { hosts: team.hosts, claim: team.claim } : {}) });
+    const own = ownOf(entry);
+    busy.push({ start: entry.start, end: entry.e, product: entry.p, session: entry.session, field, ...(team ? { hosts: team.hosts, claim: team.claim } : {}), ...(own ? { own } : {}) });
   }
   // Holds that ran out are tidied as they are noticed, and calls long over let go.
   if (stale.length) await redisPipeline([["HDEL", busyKey(callsId), ...stale]]).catch(() => {});
@@ -324,6 +328,8 @@ export async function paidCalls(store: Store): Promise<
     /** A team booking's hosts' ids and the claim on their time; empty for an ordinary call. */
     hosts: string[];
     claim: string;
+    /** An ordinary weekly booking's claim on the store owner's time, as its checkout kept it; empty otherwise. */
+    own?: string;
     /** The affiliate a lead is credited to once the call has taken place (lib/affiliate-leads.ts), and the payment; empty otherwise. */
     lead: string;
     pi: string;
@@ -410,6 +416,7 @@ function callFromRow(row: SessionRow, handles: Set<string>): CallRow | "refunded
     amount: typeof row.amount_total === "number" ? row.amount_total : 0,
     currency: typeof row.currency === "string" && row.currency ? row.currency.toLowerCase() : "",
     ...(teamOf({ h: (meta.hosts ?? "").split(","), c: meta.claim }) ?? { hosts: [], claim: "" }),
+    own: ownOf({ o: meta.own_claim }) ?? "",
     lead: /^[0-9a-f]{12}$/.test(meta.lead_via ?? "") ? (meta.lead_via as string) : "",
     pi: paymentOf(row.payment_intent),
     due: readDue(meta),
@@ -511,7 +518,7 @@ export type PaidCall = Awaited<ReturnType<typeof paidCalls>>[number];
 async function readBusy(
   store: Store,
   now: number,
-): Promise<{ busy: TeamBusy[]; paid: PaidCall[]; blocked: Busy[]; sessions: Busy[] }> {
+): Promise<{ busy: OwnBusy[]; paid: PaidCall[]; blocked: Busy[]; sessions: Busy[] }> {
   const local = store.callsId && isRedisConfigured() ? await heldAndBooked(store, now) : [];
   let paid: PaidCall[] = [];
   // Read alongside Stripe, and never a reason to fail: a calendar that does
@@ -547,10 +554,18 @@ async function readBusy(
     await redisPipeline([["HDEL", busyKey(store.callsId), ...gone.map((b) => b.field)]]).catch(() => {});
     // A team booking refunded in full gives its hosts their time back too.
     for (const b of gone) if (b.hosts && b.claim) await releaseClaim(b.hosts, b.claim).catch(() => {});
+    // An ordinary one-seat booking gives its store owner's time back on every store (a group call's shared claim stays: ownAlone).
+    const callsId = store.callsId;
+    for (const b of gone) if (b.own && ownAlone(callsId, b)) await releaseClaim([ownerOf(store)], b.own).catch(() => {});
   }
-  const busy: TeamBusy[] = [
+  // The claim on the owner is the diary's when it has one: a booking confirmed after its hold ran out made a new one.
+  const ownBySession = new Map(local.filter((b) => b.session && b.own).map((b) => [b.session as string, b.own as string]));
+  const busy: OwnBusy[] = [
     ...local.filter((b) => (!b.session || !fromStripe.has(b.session)) && !(b.session && refunded.has(b.session))),
-    ...paid.map((c) => ({ start: c.start, end: c.end, product: c.product, session: c.session, ...(c.claim ? { hosts: c.hosts, claim: c.claim } : {}) })),
+    ...paid.map((c) => {
+      const own = ownBySession.get(c.session) ?? c.own ?? "";
+      return { start: c.start, end: c.end, product: c.product, session: c.session, ...(c.claim ? { hosts: c.hosts, claim: c.claim } : {}), ...(own ? { own } : {}) };
+    }),
   ];
   return { busy, paid, blocked: (await calendar).busy, sessions: await sessions };
 }
@@ -593,6 +608,121 @@ function ownerOf(store: Pick<Store, "email">): string {
   return hostId(store.email);
 }
 
+// ---- The store owner's own time, across stores (lib/host-claims.ts) -------
+
+/**
+ * A busy time as read here: a team booking's hosts and claim, and an ordinary
+ * weekly booking's claim on the store owner (`own`).
+ */
+type OwnBusy = TeamBusy & { own?: string };
+
+/**
+ * A store owner can also host on another store's team, whose bookings take
+ * that person's time on their own list (lib/host-claims.ts), and two stores
+ * have two locks. So an ordinary weekly booking claims its store owner's time
+ * on that same list, in the same atomic script (CLAIM_HOST_TIMES), under this
+ * store's ref; and the owner's claims other stores made are busy times here,
+ * on the page, at the checkout and for a move (elsewhere). A claims list that cannot be
+ * read is never read as free: nothing is offered or held (rule 24).
+ *
+ * A one-seat booking has its own claim for life, moved in place with the
+ * booking and let go when its hold is given back or it is refunded in full.
+ * The seats of a group call at one time share one claim, named after the
+ * time itself (ownGroupClaim): it is never let go before the call is over,
+ * since another seat may still hold it, so the owner may show as taken
+ * elsewhere a little longer, never be sold twice. The owner's own calls have
+ * no daily cap of their own (OWN_CLAIM_CAP); a team's host cap counts them.
+ * Dated sessions are not claimed here.
+ */
+const OWN_CLAIM_CAP = 1_000_000;
+
+/** The one claim every seat of a group call at `start` shares on the store owner. */
+function ownGroupClaim(callsId: string, productId: string, start: number): string {
+  return `k${createHash("sha256").update(`marktmorgen-own-claim:${callsId}:${productId}:${start}`).digest("hex").slice(0, 24)}`;
+}
+
+/** The claim on its store owner an entry or a sale keeps, when it reads right. */
+function ownOf(entry: { o?: unknown }): string | null {
+  return isClaimId(entry.o) ? entry.o : null;
+}
+
+/** Whether a booking's claim on the owner is its own (one seat), let go with it; a group call's shared one is not. */
+function ownAlone(callsId: string, b: { own?: string; product?: string; start: number }): boolean {
+  return Boolean(b.own) && !(b.product && b.own === ownGroupClaim(callsId, b.product, b.start));
+}
+
+/** The store owner's live claims, on every store. Throws when they cannot be read. */
+async function ownerClaims(store: Store, now: number): Promise<HostClaim[]> {
+  const id = ownerOf(store);
+  return (await readClaims([id], now)).get(id) ?? [];
+}
+
+/**
+ * The owner's claims as busy times, but those this store's bookings and holds already stand for (`busy`, by claim id):
+ * those are counted there, and a group call's seats share theirs. So every claim another store made is busy, and so is
+ * one of this store's that outlived its booking's entry (a team hold's CLAIM_MARGIN_MS), which the script refuses too.
+ */
+function elsewhere(claims: HostClaim[], busy: OwnBusy[]): Busy[] {
+  const known = new Set(busy.flatMap((b) => [b.own, b.claim]).filter(Boolean));
+  return claims.filter((c) => !known.has(c.claim)).map((c) => ({ start: c.start, end: c.end }));
+}
+
+/**
+ * Takes the store owner's time for an ordinary weekly booking, or says why
+ * not, under the store's lock. `keep` is a one-seat booking's claim, moved in
+ * place. A group call's shared claim already kept for good is left as it is
+ * (a hold never shortens a paid seat's); one still held is held on for this
+ * seat as well. `fresh` says the claim did not exist before, so a checkout
+ * that never opens may let it go.
+ */
+async function claimOwner(
+  store: Store,
+  product: { id: string; call: CallSetup },
+  start: number,
+  end: number,
+  until: number,
+  claims: HostClaim[],
+  now: number,
+  keep?: string | null,
+): Promise<{ ok: true; claim: string; fresh: boolean } | { ok: false; reason: "taken" | "error" }> {
+  const callsId = store.callsId as string;
+  const group = product.call.seats > 1;
+  const claim = group ? ownGroupClaim(callsId, product.id, start) : keep || newClaimId();
+  const had = claims.find((c) => c.claim === claim);
+  if (group && had && had.until === 0) return { ok: true, claim, fresh: false };
+  const lasts = group && had && until > 0 ? Math.max(until, had.until) : until;
+  try {
+    const taken = await claimHosts({
+      hosts: [{ id: ownerOf(store), gapMs: product.call.bufferMinutes * 60_000, day: [start, start + 1], cap: OWN_CLAIM_CAP }],
+      start,
+      end,
+      claim,
+      until: lasts,
+      ref: `${callsId}:${product.id}`,
+      now,
+    });
+    if (taken.ok) return { ok: true, claim, fresh: !had };
+    return { ok: false, reason: taken.reason === "invalid" ? "error" : "taken" };
+  } catch (error) {
+    console.error("claiming the store owner's time failed", error);
+    return { ok: false, reason: "error" };
+  }
+}
+
+/**
+ * The claim on its store owner a paid ordinary weekly booking keeps: a group
+ * call's shared one, or the one its hold was written with; for a buyer who
+ * paid after the hold ran out, a new one (paid, the time is theirs). Throws
+ * when the diary entry cannot be read: confirmed later.
+ */
+async function bookingOwn(store: Store, product: CallListing, session: string, start: number): Promise<string> {
+  const callsId = store.callsId as string;
+  if (product.call.seats > 1) return ownGroupClaim(callsId, product.id, start);
+  const one = repliesFor(await redisPipeline([["HGET", busyKey(callsId), session]]), 1);
+  if (!one || (one[0] !== null && typeof one[0] !== "string")) throw new UnknownReplyError("a booking's diary entry");
+  return (typeof one[0] === "string" ? ownOf(entryOf(session, one[0])) : null) ?? newClaimId();
+}
+
 /**
  * Lets a buyer who went back from Stripe's page pick again.
  *
@@ -626,10 +756,12 @@ export async function releaseOwnHold(store: Store, session: string, { openedHere
   // Paid, or already closed by Stripe: either way the hold is left alone and runs out by itself if nobody paid.
   if (!(await expireCheckout(account, session))) return;
   await redisPipeline([["HDEL", busyKey(callsId), ...fields]]);
-  // A team hold lets its hosts' time go too, now that it can never be paid.
+  // A team hold lets its hosts' time go too, now that it can never be paid, and a one-seat hold its owner's.
   for (const { entry } of held) {
     const team = teamOf(entry);
     if (team) await releaseClaim(team.hosts, team.claim).catch(() => {});
+    const own = ownOf(entry);
+    if (own && typeof entry.s === "number" && ownAlone(callsId, { own, product: entry.p, start: entry.s })) await releaseClaim([ownerOf(store)], own).catch(() => {});
   }
 }
 
@@ -1182,6 +1314,8 @@ export async function holdAndCheckout(input: {
 
   // A team booking's claim on its hosts' time, once taken: let go again if no checkout comes of it.
   let claimed: { hosts: string[]; claim: string } | null = null;
+  // An ordinary weekly booking's claim on the store owner's time, the same way (claimOwner).
+  let owned: { claim: string; fresh: boolean } | null = null;
   let opened = false;
   try {
     // Read once the lock is ours, so the check is about this moment.
@@ -1200,17 +1334,31 @@ export async function holdAndCheckout(input: {
       }
     } else {
       let busy: Busy[];
+      let claims: HostClaim[] = [];
       try {
         const read = await readBusy(store, now);
-        busy = against(product, read.busy, read.sessions, read.blocked, ownerOf(store));
+        // Weekly hours: the owner's time other stores claimed is busy too, read once the lock is ours (ownerClaims).
+        if (setup.kind === "weekly") claims = await ownerClaims(store, now);
+        busy = against(product, read.busy, read.sessions, [...read.blocked, ...elsewhere(claims, read.busy)], ownerOf(store));
       } catch {
         return { ok: false, reason: "error" };
       }
       if (!isBookable(setup, now, busy, start, product.id)) return { ok: false, reason: "taken" };
+      if (setup.kind === "weekly") {
+        // Held as the diary holds it (HOLD_SECONDS, a minute past the checkout's close), counted from the lock, and a little
+        // more (CLAIM_MARGIN_MS), as a team hold's claim is (Claude 6's MEDIUM 1 on #3490): a buyer confirmed only by the
+        // mail job never leaves the owner free on other stores meanwhile. The store's own diary does not read it as busy
+        // while the hold stands (elsewhere), and a released hold lets it go at once (releaseOwnHold).
+        const taken = await claimOwner(store, { id: product.id, call: setup }, start, end, now + HOLD_SECONDS * 1000 + CLAIM_MARGIN_MS, claims, now);
+        if (!taken.ok) return { ok: false, reason: taken.reason };
+        owned = { claim: taken.claim, fresh: taken.fresh };
+      }
     }
 
     const pkg = input.fromPackage ?? null;
     const body = callCheckoutBody({ store, product, start, end, buyerTz, origin, via: input.via ?? null, fromPackage: pkg, channel: input.channel, team: claimed, length: booked, lead: input.lead ?? null, code: input.code ?? null });
+    // Kept on the sale, so the ledger knows the claim on the owner of a booking whose hold ran out (callFromRow).
+    if (owned) body.set("metadata[own_claim]", owned.claim);
     // The share of the sale, when the store's plan has one (lib/platform-share.ts).
     // A session from a package pays nothing here: its share was taken on the package.
     if (!pkg) {
@@ -1254,7 +1402,7 @@ export async function holdAndCheckout(input: {
     // A checkout that can be paid keeps its hosts' claim, whatever happens next.
     opened = true;
     const until = Date.now() + HOLD_SECONDS * 1000;
-    const entry: Entry = { s: start, e: end, until, session: session.id, p: product.id, ...(claimed ? { h: claimed.hosts, c: claimed.claim } : {}) };
+    const entry: Entry = { s: start, e: end, until, session: session.id, p: product.id, ...(claimed ? { h: claimed.hosts, c: claimed.claim } : {}), ...(owned ? { o: owned.claim } : {}) };
     // The hold is written only while the lock is still ours, in one step. A checkout can take longer to open than
     // the lock lasts, and a lock taken over meanwhile means another buyer may have checked this time without this
     // hold: then the checkout, whose address was never handed out, is closed at Stripe and the booking refused. A
@@ -1282,6 +1430,8 @@ export async function holdAndCheckout(input: {
   } finally {
     // No checkout was opened for the claim: nobody can pay for it, so its hosts get the time back.
     if (claimed && !opened) await releaseClaim(claimed.hosts, claimed.claim).catch(() => {});
+    // The same for the owner's, when this hold made it: a group call's shared claim another seat holds stays.
+    if (owned && owned.fresh && !opened) await releaseClaim([ownerOf(store)], owned.claim).catch(() => {});
     await dropLock(lock);
   }
 }
@@ -1333,7 +1483,9 @@ export async function slotsForProduct(store: Store, product: CallListing, pick?:
       const ctx = await teamContext(store, product, team, [...busy, ...sessions, ...blocked], now, { refresh: true });
       return { days: teamDays(product.call, ctx, now), left: {}, sessions: [], paid, hosts, picked, team: true };
     }
-    return { ...offerFrom(product, now, busy, sessions, blocked, ownerOf(store)), paid, team: false };
+    // Weekly hours: the owner's time other stores claimed is not offered; claims that cannot be read offer nothing (null).
+    const away = product.call.kind === "weekly" ? elsewhere(await ownerClaims(store, now), busy) : [];
+    return { ...offerFrom(product, now, busy, sessions, [...blocked, ...away], ownerOf(store)), paid, team: false };
   } catch {
     return null;
   }
@@ -1370,7 +1522,8 @@ export async function slotsForMove(
       const ctx = await teamContext(store, product, team, [...busy, ...sessions, ...blocked], now, { refresh: true, except: { session, claim: own.claim } });
       return { days: teamMoveDays(product.call, ctx, own.hosts, current, now), left: {}, sessions: [] };
     }
-    const offer = offerFrom(product, now, busy.filter((b) => b.session !== session), sessions, blocked, ownerOf(store));
+    const away = product.call.kind === "weekly" ? elsewhere(await ownerClaims(store, now), busy) : [];
+    const offer = offerFrom(product, now, busy.filter((b) => b.session !== session), sessions, [...blocked, ...away], ownerOf(store));
     return {
       days: offer.days
         .map((day) => ({ ...day, starts: day.starts.filter((start) => start !== current) }))
@@ -1466,6 +1619,11 @@ export async function moveBooking(input: {
   let teamOwn: { hosts: string[]; claim: string } | null = null;
   // A team booking whose call is no longer a team event: its hosts' old claim is let go after the move.
   let letGo: { hosts: string[]; claim: string } | null = null;
+  // An ordinary weekly booking's claim on the store owner at its new time, and its old one when that is let go after.
+  let ownMoved: string | null = null;
+  let ownLetGo: string | null = null;
+  /** Whether the new time's claim on the owner was made by this move (so a refused move gives it back). */
+  let ownFresh = false;
   try {
     const now = Date.now();
     const recorded = (await readMoves([session])).get(session);
@@ -1493,7 +1651,7 @@ export async function moveBooking(input: {
     if (now > movableUntil(setup, from.start)) return { ok: false, reason: "late" };
     if (start === from.start) return { ok: false, reason: "same" };
 
-    let busy: TeamBusy[];
+    let busy: OwnBusy[];
     let blocked: Busy[];
     let sessions: Busy[];
     try {
@@ -1520,11 +1678,38 @@ export async function moveBooking(input: {
         return { ok: false, reason: "error" };
       }
     } else {
-      const others = against(product, busy.filter((b) => b.session !== session), sessions, blocked, ownerOf(store));
+      // Weekly hours: the owner's time other stores claimed is busy, and the booking's claim on them moves too (claimOwner).
+      let claims: HostClaim[] = [];
+      try {
+        if (at.kind === "weekly") claims = await ownerClaims(store, now);
+      } catch {
+        return { ok: false, reason: "error" };
+      }
+      const others = against(product, busy.filter((b) => b.session !== session), sessions, [...blocked, ...elsewhere(claims, busy)], ownerOf(store));
       if (!isBookable(at, now, others, start, product.id)) return { ok: false, reason: "taken" };
+      if (at.kind === "weekly") {
+        const mine = busy.find((b) => b.session === session && b.own);
+        const alone = mine && ownAlone(callsId, mine) ? (mine.own as string) : null;
+        // The new time is claimed as a hold is, under a claim of its own (a group seat joins the claim of its new time),
+        // kept for good only once the move is written, and the old one let go only then (Claude 1's review 6799341330 of
+        // #3490, MEDIUM): a move refused after its claim was taken leaves the old time claimed and gives the new one back.
+        const taken = await claimOwner(store, { id: product.id, call: at }, start, end, now + HOLD_SECONDS * 1000 + CLAIM_MARGIN_MS, claims, now);
+        if (!taken.ok) return { ok: false, reason: taken.reason };
+        ownMoved = taken.claim;
+        ownFresh = taken.fresh;
+        if (alone && alone !== taken.claim) ownLetGo = alone;
+      }
     }
 
-    await writeMove(session, { s: start, e: end, n: from.moves + 1 });
+    try {
+      await writeMove(session, { s: start, e: end, n: from.moves + 1 });
+    } catch (error) {
+      // Refused: the new time's own claim goes back (a group claim other seats hold stays), the old one stays.
+      if (ownMoved && ownFresh) await releaseClaim([ownerOf(store)], ownMoved).catch(() => {});
+      throw error;
+    }
+    // Written: the owner's new time is kept for good (an answer not confirmed throws, and the move says it failed).
+    if (ownMoved) await confirmClaim([ownerOf(store)], ownMoved, start, end, `${callsId}:${product.id}`);
     // The seat moves in the diary too: whatever was written under this
     // checkout — a hold, a booking, one filed by its start before group calls
     // — gives way to one entry at the new time.
@@ -1541,7 +1726,7 @@ export async function moveBooking(input: {
     } catch (error) {
       console.error("reading a moved booking's old entries failed; left in place", error);
     }
-    const entry: Entry = { s: start, e: end, until: 0, session, p: product.id, ...(teamOwn ? { h: teamOwn.hosts, c: teamOwn.claim } : {}) };
+    const entry: Entry = { s: start, e: end, until: 0, session, p: product.id, ...(teamOwn ? { h: teamOwn.hosts, c: teamOwn.claim } : {}), ...(ownMoved ? { o: ownMoved } : {}) };
     // Counted in the store's room at what it really adds (lib/order-data.ts).
     // Moved before its confirmation was done (Claude 5, 9 November 2026; rules 24 and 30): the move's emails say it
     // all, so no "Booked" email follows them, but what a booking does besides is still owed ("moved", ConfirmStage),
@@ -1569,6 +1754,7 @@ export async function moveBooking(input: {
 
   const moves = from.moves + 1;
   if (letGo) await releaseClaim(letGo.hosts, letGo.claim).catch(() => {});
+  if (ownLetGo) await releaseClaim([ownerOf(store)], ownLetGo).catch(() => {});
   try {
     await unplanReminders(callsId, store.handle, session, from.start);
     if (writesAboutBookings(store)) await planReminders(callsId, store.handle, session, start);
@@ -1873,8 +2059,17 @@ export async function confirmBooking(input: {
   } catch (error) {
     throw new Error("reading a team booking's hosts failed; confirmed later", { cause: error });
   }
+  // An ordinary weekly booking's claim on the store owner, read the same way before the mark (bookingOwn).
+  let own: string | null = null;
+  if (!team && product.call.kind === "weekly") {
+    try {
+      own = await bookingOwn(store, product, session, start);
+    } catch (error) {
+      throw new Error("reading a booking's claim on its owner failed; confirmed later", { cause: error });
+    }
+  }
   // A team booking keeps its hosts and the claim on their time, now for good (read above).
-  const entry: Entry = { s: start, e: end, until: 0, session, p: product.id, ...(team ? { h: team.hosts, c: team.claim } : {}) };
+  const entry: Entry = { s: start, e: end, until: 0, session, p: product.id, ...(team ? { h: team.hosts, c: team.claim } : {}), ...(own ? { o: own } : {}) };
   // The once-only mark and the time kept for good now that it is paid, in one step (orderWriteOnce): a mark is never
   // written without the time kept, so a paid call never stays on its checkout's hold, which runs out and frees the
   // time to be sold again. The entry is written anew, so the store's room is charged the whole entry
@@ -1916,6 +2111,8 @@ export async function confirmBooking(input: {
     if (input.lead && buyerEmail) {
       await recordLead(store, { aff: input.lead, kind: "booking", email: buyerEmail, end: Math.floor(end / 1000), ref: session, pi: input.pi ?? "", paid: input.amountCents ?? 0, title: product.title });
     }
+    // Paid: the owner's time stays claimed for good, on every store, written whatever is there (lib/host-claims.ts, confirmClaim).
+    if (own) await confirmClaim([ownerOf(store)], own, start, end, `${store.callsId}:${product.id}`).catch((error) => console.error("confirming a booking's claim on its owner failed", error));
     if (team) {
       await confirmTeam(store, product.id, team.hosts, team.claim, start, end).catch((error) => console.error("confirming a team booking's hosts failed", error));
       // The five-minute job reads this store's refunds while it has team bookings to come, so a refund gives the hosts their time back.

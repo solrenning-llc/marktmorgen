@@ -31,6 +31,7 @@ import type { Product, Store } from "@/lib/store";
 import { readListing, readProduct } from "@/lib/catalog";
 import { type CallListing, holdAndCheckout, moveBooking } from "@/lib/calls";
 import type { CallSetup } from "@/lib/call-setup";
+import { claimsKey, hostId } from "@/lib/host-claims";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { weekdayAt } from "./weekday";
@@ -139,8 +140,10 @@ async function sell(w: World, start: number): Promise<Sold> {
 
 const lockOf = (w: World) => `nl:call:lock:${w.store.callsId}`;
 const diaryOf = (w: World) => `nl:call:busy:${w.store.callsId}`;
+/** The store owner's own claims (lib/calls.ts, claimOwner): a weekly hold claims the owner's time there too. */
+const ownerClaimsOf = (w: World) => claimsKey(hostId(w.store.email));
 async function clear(w: World): Promise<void> {
-  await run([["DEL", lockOf(w)], ["DEL", diaryOf(w)]]);
+  await run([["DEL", lockOf(w)], ["DEL", diaryOf(w)], ["DEL", ownerClaimsOf(w)]]);
 }
 async function lockValue(w: World): Promise<unknown> {
   return (await run([["GET", lockOf(w)]]))[0];

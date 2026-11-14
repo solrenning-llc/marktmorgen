@@ -19,7 +19,7 @@ import { done, is, part } from "./check";
 
 const T0 = Date.parse("2026-11-02T03:00:00Z");
 const DAY = 86_400_000;
-const review: BackupCostReview = { maxRows: 1_000, maxCommands: 10_000, maxBytes: 1_000_000, retentionDays: 30, maxStoredBytes: 36_199_424, reviewedAt: "2026-10-31", source: "synthetic test review, not a real one" };
+const review: BackupCostReview = { maxRows: 1_000, maxCommands: 10_000, maxBytes: 1_000_000, retentionDays: 30, maxStoredBytes: 39_593_120, reviewedAt: "2026-10-31", source: "synthetic test review, not a real one" };
 /** A review whose listing may take two pages: (30 + 2) sets of 32 objects is 1,024 names. */
 const paged: BackupCostReview = { ...review, maxParts: 31, maxStoredBytes: 2_000_000_000 };
 
@@ -123,7 +123,8 @@ async function main(): Promise<void> {
   }
   {
     const { held } = await scene(20, 1_200_000_000);
-    pageSize = 2;
+    // Five names (the copy's two parts, its month's mark, the old and the large copy): two pages, inside backupListPages.
+    pageSize = 3;
     const run = await runBackup({ now: clock, review: paged, store: bucket, key });
     pageSize = 1_000;
     is("several pages of one name each: written, nothing deleted", [run.ok, deletes, held.every((id) => objects.has(id))], [true, [], true]);

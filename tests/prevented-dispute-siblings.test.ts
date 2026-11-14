@@ -187,8 +187,9 @@ test("a resolution that also made a Refund is counted once: the refund reading h
 });
 
 test("the affiliate book still reads the status alone: every prevented dispute holds the commission", async () => {
-  // A status Stripe adds later is unreadable (rule 24): it holds the whole book, never read as nothing.
-  listed = HEALTHY.map(row);
+  // A status Stripe adds later is unreadable (rule 24): it holds the whole book, never read as nothing. Since #4374 that
+  // row is no longer in HEALTHY (an undocumented status is not healthy), so it is listed here beside them.
+  listed = [...HEALTHY, ["a_status_stripe_adds_later", 7000, "pi_later", moved(-7000)] as Row].map(row);
   assert.equal((await disputesSince(store, SINCE, undefined, new Map())).complete, false);
   listed = HEALTHY.filter(([status]) => status !== "a_status_stripe_adds_later").map(row);
   const { byIntent, complete } = await disputesSince(store, SINCE, undefined, new Map());

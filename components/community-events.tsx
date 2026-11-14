@@ -86,7 +86,7 @@ export function EventCard({
             {over && event.replay ? <span className="cm-badge cm-badge-accent">{w.replay}</span> : null}
           </p>
           <h3 id={labelId} className="font-display mt-1.5 break-words text-lg font-semibold leading-snug tracking-[-0.01em]">
-            <Link href={href} className="st-title-link">{event.title}</Link>
+            <Link href={href} className="st-title-link inline-flex min-h-11 items-center">{event.title}</Link>
           </h3>
           <p className="st-muted mt-1 text-sm">{`${eventTimeIn(store, event)} · ${lengthIn(store, event.minutes)}`}</p>
           {!event.cancelled ? (

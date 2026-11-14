@@ -12,7 +12,7 @@ import { addProduct, claimHandle, ensureStatsId, ensureStoreId, setStripeAccount
 import { emailKey, storeKey } from "@/lib/learn";
 import { CHECK_HOURS } from "@/lib/discord-rules";
 import { joinServer, sweepDiscord } from "@/lib/discord-access";
-import { DUE_LEASE_SECONDS, dueMembers, forgetMember, readMember, saveServer, setProductRoles } from "@/lib/discord-store";
+import { DUE_LEASE_SECONDS, checkSoon, dueMembers, forgetMember, readMember, saveServer, setProductRoles } from "@/lib/discord-store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -159,6 +159,36 @@ async function main(): Promise<void> {
   const gone = await sweepDiscord(Date.now() + 30_000, clock);
   is("counted as gone", gone.gone, 1);
   is("and off the line", await score("sid-without-store|300000000000000033"), null);
+
+  part("An entry that does not parse is taken off the line, not leased for ever (nuvem B's L1)");
+  await plain([["ZADD", "nl:dc:due", 0, "junk"], ["ZADD", "nl:dc:due", 0, `${store.sid}|not-a-snowflake`]]);
+  clock += DUE_LEASE_SECONDS * 1_000 + 2_000;
+  const junkLine = await dueMembers(clock);
+  is("never handed out", junkLine.some((d) => !/^\d+$/.test(d.userId)), false);
+  is("and off the line, not leased", [await score("junk"), await score(`${store.sid}|not-a-snowflake`)], [null, null]);
+
+  part("A rejoin between the member read and dropDue keeps its place in line (Claude 1 cloud's LOW)");
+  // Bea's record is gone but her entry is still on the line (a check put her back while she was forgotten).
+  await forgetMember(room, store.sid, BEA, BEA_MAIL);
+  await checkSoon(store.sid, BEA);
+  stripe = "active";
+  await plain([["DEL", `nl:dc:ok:${room}:${emailKey(BEA_MAIL)}:${productId}`]]);
+  const realLine = redis.pipeline;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (commands.some((c) => c[0] === "ZREM" && c[1] === "nl:dc:due" && c[2] === beaEntry)) {
+      // She presses the button again just before the line is cleared for her.
+      redis.pipeline = realLine;
+      const rejoined = await joinServer({ store, email: BEA_MAIL, accessToken: "t", user: { id: BEA, name: "Bea" } });
+      is("set-up: she is back in the server, in line", [rejoined.ok, (await score(beaEntry)) !== null], [true, true]);
+      redis.pipeline = (async (c2: (string | number)[][]) => realLine(c2)) as typeof redis.pipeline;
+    }
+    return realLine(commands);
+  }) as typeof redis.pipeline;
+  clock += DUE_LEASE_SECONDS * 1_000 + 2_000;
+  await sweepDiscord(Date.now() + 30_000, clock);
+  redis.pipeline = realLine;
+  is("she holds the role", (await readMember(room, BEA))?.r, [ROLE]);
+  is("and is still in line, so a later refund is checked", (await score(beaEntry)) !== null, true);
   done();
 }
 

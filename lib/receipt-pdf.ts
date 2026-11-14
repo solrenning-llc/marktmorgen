@@ -244,9 +244,12 @@ export function receiptTitle(receipt: NumberedReceipt): string {
 }
 
 /** The texts the file draws, in reading order: what `canDraw` is asked about before anything is made. */
-export function receiptTexts(receipt: NumberedReceipt): { role: TagRole; text: string }[] {
+/** The roles a receipt's texts take: headings and paragraphs only (no table or list roles of lib/tagged-pdf.ts). */
+export type ReceiptRole = Extract<TagRole, "H1" | "H2" | "P">;
+
+export function receiptTexts(receipt: NumberedReceipt): { role: ReceiptRole; text: string }[] {
   const money = (value: number) => formatMoney(value, receipt.currency, "en-US");
-  const out: { role: TagRole; text: string }[] = [{ role: "H1", text: `Receipt from ${receipt.sellerName}` }];
+  const out: { role: ReceiptRole; text: string }[] = [{ role: "H1", text: `Receipt from ${receipt.sellerName}` }];
   if (receipt.sellerAddress) out.push({ role: "P", text: receipt.sellerAddress });
   out.push(
     { role: "H2", text: "Sale" },
@@ -299,7 +302,7 @@ export async function receiptPdf(receipt: NumberedReceipt): Promise<Uint8Array> 
   paper(page);
   let y = H - MARGIN;
   const style = { H1: { font: semi, size: 20, gap: 10 }, H2: { font: semi, size: 13, gap: 4 }, P: { font: sans, size: 11, gap: 4 } } as const;
-  const lead = (role: TagRole) => style[role].size * 1.5;
+  const lead = (role: ReceiptRole) => style[role].size * 1.5;
   const turn = () => {
     page = pdf.addPage([W, H]);
     tag.nextPage(page);

@@ -9,6 +9,13 @@
  *   - the studio refuses a funnel whose offer after a yes is a product the bundle bought before it holds;
  *   - a funnel saved while the bundle did not hold it, the product put in the bundle afterward: once the bundle is
  *     paid, the offer of that product is passed over (its "no" path is followed), never offered and charged.
+ *
+ * And the other way round (Claude 2's money review of #4540): a bundle offered to a buyer who already has one of the
+ * products inside it, bought in the checkout or by an earlier "yes", was offered and charged, since only the bundle's
+ * own id was compared:
+ *   - the studio refuses a funnel whose offer after a yes is a bundle holding what that yes bought, or whose offer is a
+ *     bundle holding the product the funnel follows;
+ *   - a funnel saved before the bundle came to hold it: such a bundle is passed over, its "no" path followed.
  */
 import { addProduct, claimHandle, ensureStatsId, setProductBundle, setProductFunnel, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { readListings, readProduct } from "@/lib/catalog";
@@ -71,6 +78,47 @@ async function main(): Promise<void> {
   is("before anything is paid, the bundle is the first offer", nothingPaid.kind === "offer" ? nothingPaid.target.id : nothingPaid.kind, pack);
   const ownsSheet = funnelPosition(saved, offered, paidBundle, new Set([front, sheet]));
   is("a product owned on its own is passed over too, as before", ownsSheet.kind === "offer" ? ownsSheet.target.id : ownsSheet.kind, extra);
+
+  part("RED: a bundle holding a product the buyer already has: the studio refuses it");
+  const thenBundle: Funnel = {
+    steps: [
+      { id: "sheet1", productId: sheet, priceCents: 900, headline: "", text: "", imageFrom: null, yes: "pack01", no: null },
+      { id: "pack01", productId: pack, priceCents: 3000, headline: "", text: "", imageFrom: null, yes: null, no: "list01" },
+      { id: "list01", productId: extra, priceCents: 700, headline: "", text: "", imageFrom: null, yes: null, no: null },
+    ],
+  };
+  const afterYes = await setProductFunnel(OWNER, front, thenBundle);
+  is("RED: after a yes to the sheet, a bundle holding the sheet is refused as a repeat", afterYes.ok ? "saved" : afterYes.reason, "repeat");
+  const frontPack = await add("Starter Pack", "59", false);
+  is("a bundle holding the course the funnel follows", (await setProductBundle(OWNER, frontPack, [front, cards])).ok, true);
+  const holdsFront = await setProductFunnel(OWNER, front, {
+    steps: [{ id: "front1", productId: frontPack, priceCents: 3000, headline: "", text: "", imageFrom: null, yes: null, no: null }],
+  });
+  is("RED: an offer of a bundle holding the product the funnel follows is refused", holdsFront.ok ? "saved" : holdsFront.reason, "repeat");
+
+  part("RED: a bundle holding a product the buyer already has is passed over, never offered");
+  const listings = await readListings(store, [pack, sheet, extra, frontPack]);
+  const paidSheet = new Map<string, StepAnswer>([[stepSlot(thenBundle, thenBundle.steps[0]), "paid"]]);
+  const afterSheet = funnelPosition(thenBundle, listings, paidSheet, new Set([front]));
+  is(
+    "RED: the sheet paid by a yes, the bundle holding it is passed over and the checklist is next",
+    afterSheet.kind === "offer" ? afterSheet.target.id : afterSheet.kind,
+    extra,
+  );
+  const bundleFirst: Funnel = {
+    steps: [
+      { id: "pack01", productId: pack, priceCents: 3000, headline: "", text: "", imageFrom: null, yes: null, no: "list01" },
+      { id: "list01", productId: extra, priceCents: 700, headline: "", text: "", imageFrom: null, yes: null, no: null },
+    ],
+  };
+  const boughtSheet = funnelPosition(bundleFirst, listings, new Map(), new Set([front, sheet]));
+  is(
+    "RED: the sheet bought in the checkout, the bundle holding it is passed over and the checklist is next",
+    boughtSheet.kind === "offer" ? boughtSheet.target.id : boughtSheet.kind,
+    extra,
+  );
+  const fresh = funnelPosition(bundleFirst, listings, new Map(), new Set([front]));
+  is("a buyer with none of it is still offered the bundle", fresh.kind === "offer" ? fresh.target.id : fresh.kind, pack);
 
   done();
 }

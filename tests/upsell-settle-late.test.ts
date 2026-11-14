@@ -1,0 +1,173 @@
+/**
+ * An offer after paying whose bank payment is still "processing" after two days (lib/upsell.ts,
+ * settlePendingOffers): a follow-up to DISC-B-4.
+ *
+ * The five-minute job let a pending offer go after two days. A bank debit Stripe still answers "processing"
+ * can clear later; once it succeeded, nothing settled it unless the buyer came back to the thanks page, so the
+ * creator's confirmation email, count and affiliate commission (afterPaid) never ran for a buyer who paid.
+ *
+ *   - still "processing" after two days: kept on the job's list, looked at again six hours later;
+ *   - a success on the fifth day: settled by the job, paid once with no second charge, confirmation sent;
+ *   - an offer whose payment is not processing (waiting on the buyer's bank page) is still let go after two days;
+ *   - nothing is watched for more than seven days, inside the offer record's own eight.
+ */
+import { TEST_CONSENT } from "./digital-consent-fixture";
+import { addProduct, claimHandle, ensureStatsId, setProductFunnel, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { readUpsell, settlePendingOffers, takeUpsell, newUpsellKey } from "@/lib/upsell";
+import { shownRef } from "./upsell-ref-fixture";
+import { store as redis } from "./redis-stub";
+import { done, is, part } from "./check";
+import { paidPeriod } from "./billing-period-fixture";
+
+process.env.STRIPE_SECRET_KEY = "sk_test_upsell_settle_late_only";
+process.env.RESEND_API_KEY = "re_test_upsell_journey_only";
+
+const OWNER = "baker@example.com";
+const BUYER = "buyer@example.com";
+const ACCOUNT = "acct_1TestUpsell0001";
+const NOW = Math.floor(Date.now() / 1000);
+
+type Charge = { body: URLSearchParams; key: string };
+const charges: Charge[] = [];
+/** What the next POST /payment_intents answers. */
+let nextCharge: "succeeded" | "requires_action" | "declined" | "lost" | "processing" | "requires_payment_method" = "succeeded";
+const made: Record<string, unknown>[] = [];
+const sessions: Record<string, Record<string, unknown>> = {};
+const emails: string[] = [];
+/** The clock the job reads: moved forward to stand for days passing. */
+const realNow = Date.now.bind(Date);
+let ahead = 0;
+Date.now = () => realNow() + ahead;
+const DAY = 24 * 60 * 60 * 1000;
+
+globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+  const url = new URL(String(input));
+  const answer = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
+  if (url.hostname === "api.resend.com") {
+    emails.push(String(init?.body ?? ""));
+    return answer({ id: "email_1" });
+  }
+  const path = url.pathname.replace(/^\/v1/, "");
+  const method = init?.method ?? "GET";
+  const session = /^\/checkout\/sessions\/(cs_test_[A-Za-z0-9]+)$/.exec(path);
+  if (session && method === "GET") return sessions[session[1]] ? answer(sessions[session[1]]) : answer({ error: { message: "no such checkout" } }, 404);
+  if (path === "/payment_intents" && method === "POST") {
+    const body = new URLSearchParams(String(init?.body));
+    const key = String((init?.headers as Record<string, string>)["Idempotency-Key"] ?? "");
+    charges.push({ body, key });
+    if (nextCharge === "declined") return answer({ error: { code: "card_declined", message: "Your card was declined." } }, 402);
+    const pi = {
+      id: `pi_Test${String(charges.length).padStart(10, "0")}`,
+      object: "payment_intent",
+      amount: Number(body.get("amount")),
+      currency: body.get("currency"),
+      status: nextCharge === "requires_action" || nextCharge === "processing" || nextCharge === "requires_payment_method" ? nextCharge : "succeeded",
+      receipt_email: body.get("receipt_email"),
+      created: NOW,
+      metadata: Object.fromEntries([...body].filter(([k]) => k.startsWith("metadata[")).map(([k, v]) => [k.slice(9, -1), v])),
+      ...(nextCharge === "requires_action" ? { next_action: { redirect_to_url: { url: "https://hooks.stripe.com/3ds/confirm" } } } : {}),
+    };
+    made.push(pi);
+    // Charged, and the answer never reached us.
+    if (nextCharge === "lost") throw new TypeError("fetch failed");
+    return answer(pi);
+  }
+  if (path === "/payment_intents" && method === "GET") {
+    return answer({ object: "list", data: url.searchParams.get("customer") === "cus_TestBuyer01" ? made : [], has_more: false });
+  }
+  const one = /^\/payment_intents\/(pi_[A-Za-z0-9_]+)$/.exec(path);
+  if (one) {
+    const found = made.find((pi) => pi.id === one[1]);
+    return found ? answer(found) : answer({ error: { message: "no such payment" } }, 404);
+  }
+  return answer({ error: { message: `no stand-in for ${method} ${path}` } }, 404);
+}) as typeof fetch;
+
+/** A paid checkout of the front product, as Stripe reports it, with the browser key it carried. */
+function paidCheckout(id: string, product: string, fingerprint: string, over: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    id,
+    status: "complete",
+    payment_status: "paid",
+    created: NOW - 60,
+    customer: "cus_TestBuyer01",
+    currency: "usd",
+    metadata: { store: "harbor", product, upsell_key: fingerprint },
+    customer_details: { email: BUYER },
+    payment_intent: { id: "pi_test_front00001", payment_method: { id: "pm_test_card0001", type: "card", customer: "cus_TestBuyer01" } },
+    ...over,
+  };
+}
+
+async function main(): Promise<void> {
+  redis.clear();
+  await claimHandle(OWNER, "harbor", "Harbor Kitchen", "");
+  await ensureStatsId(OWNER);
+  await setStripeAccount(OWNER, ACCOUNT, true);
+  await setSubscription(OWNER, { customerId: "cus_Owner00001", subscriptionId: "sub_Owner00001", active: true, tier: "creator", period: paidPeriod() });
+  const add = async (title: string, price: string) => {
+    const result = await addProduct(OWNER, title, "", price, null);
+    if (!result.ok) throw new Error(`no product ${title}`);
+    await setProductLink(OWNER, result.product.id, `https://example.com/${result.product.id}`);
+    return result.product.id;
+  };
+  const front = await add("Sourdough Course", "49");
+  const upsell = await add("Starter Kit Guide", "29");
+  const downsell = await add("Starter Checklist", "15");
+  const saved = await setProductFunnel(OWNER, front, {
+    steps: [
+      { id: "kit001", productId: upsell, priceCents: 1900, headline: "", text: "", imageFrom: null, yes: "list01", no: null },
+      { id: "list01", productId: downsell, priceCents: 900, headline: "", text: "", imageFrom: null, yes: null, no: null },
+    ],
+  });
+  is("the funnel is accepted", saved.ok, true);
+  const store = (await storeForEmail(OWNER))!;
+  const origin = "https://marktmorgen.com";
+  const browser = newUpsellKey();
+  const take = async (session: string, step: string, answer: "yes" | "no") =>
+    takeUpsell({ store, session, secret: browser.secret, origin, step: await shownRef(store, step), answer, consent: TEST_CONSENT });
+
+  const job = () => settlePendingOffers(async (handle) => (handle === "harbor" ? store : null), Date.now() + 60_000);
+  const listed = async (session: string) => (await redis.pipeline([["ZSCORE", "nl:upsell:pending", `harbor|${session}|`]]))[0];
+
+  part("RED: a bank payment still processing after two days stays on the job's list");
+  nextCharge = "processing";
+  sessions.cs_test_settlelate000001 = paidCheckout("cs_test_settlelate000001", front, browser.fingerprint);
+  is("checking for the buyer", (await take("cs_test_settlelate000001", "kit001", "yes")).kind, "checking");
+  ahead = 2 * DAY + 60_000;
+  await job();
+  is("RED: still listed after the second day", (await listed("cs_test_settlelate000001")) !== null, true);
+  is("looked at again six hours later, not on every pass", Number(await listed("cs_test_settlelate000001")) - Date.now() > 5 * 60 * 60 * 1000, true);
+  is("still pending, nothing more charged", [(await readUpsell("cs_test_settlelate000001"))?.state, charges.length], ["pending", 1]);
+
+  part("RED: it clears on the fifth day: the job hands it over in full");
+  made[0].status = "succeeded";
+  const before = emails.length;
+  ahead = 5 * DAY;
+  const counts = await job();
+  is("RED: settled by the job: paid, with no second charge", [(await readUpsell("cs_test_settlelate000001"))?.state, charges.length, counts.settled], ["paid", 1, 1]);
+  is("RED: the confirmation is sent (afterPaid ran)", emails.length > before, true);
+  is("and off the job's list", await listed("cs_test_settlelate000001"), null);
+
+  part("Not processing: an offer waiting on the buyer's bank page is still let go after two days");
+  ahead = 0;
+  nextCharge = "requires_action";
+  sessions.cs_test_settlelate000002 = paidCheckout("cs_test_settlelate000002", front, browser.fingerprint);
+  is("sent to confirm", (await take("cs_test_settlelate000002", "kit001", "yes")).kind, "confirm");
+  ahead = 2 * DAY + 60_000;
+  await job();
+  is("off the list after two days", await listed("cs_test_settlelate000002"), null);
+
+  part("Nothing is watched for more than seven days");
+  ahead = 0;
+  nextCharge = "processing";
+  sessions.cs_test_settlelate000003 = paidCheckout("cs_test_settlelate000003", front, browser.fingerprint);
+  is("checking", (await take("cs_test_settlelate000003", "kit001", "yes")).kind, "checking");
+  ahead = 7 * DAY + 60_000;
+  await job();
+  is("still processing after the seventh day: let go", await listed("cs_test_settlelate000003"), null);
+
+  done();
+}
+
+void main();

@@ -7,6 +7,8 @@ import { toast } from "@/components/toast";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 import { FUNNEL_PAUSED } from "@/lib/import-limits";
 import { DROPPED_WORDS, MAX_SAVED_PAGE_BYTES, MAX_TRIMMED_PAGE_CHARS, type PageDraft, trimSavedPage } from "@/lib/clickfunnels-page";
+import { SaidLine, useSaid } from "@/components/said-line";
+import { endWords, movedWords } from "@/lib/move-words";
 
 /** A product of the store, as the funnel's choices need it (app/studio/import). */
 export type FunnelProduct = { id: string; title: string; price: string; call: boolean; bumpable: boolean; hidden: boolean };
@@ -70,6 +72,8 @@ function summary(draft: PageDraft): string {
  */
 export function ClickFunnelsFunnel({ products, pagesLeft, funnelsHref, pagesHref }: { products: FunnelProduct[]; pagesLeft: number; funnelsHref: string; pagesHref: string }) {
   const [pages, setPages] = useState<Chosen[]>([]);
+  // Each move said for screen readers; an end button says it is already there (WCAG 4.1.3, 2.4.3; lib/move-words.ts).
+  const [said, say] = useSaid();
   const [name, setName] = useState("");
   const [reading, setReading] = useState("");
   const [plan, setPlan] = useState<{ plan: Plan; signature: string } | null>(null);
@@ -128,13 +132,21 @@ export function ClickFunnelsFunnel({ products, pagesLeft, funnelsHref, pagesHref
   }
 
   const change = (key: string, patch: Partial<Chosen>) => setPages((current) => current.map((p) => (p.key === key ? { ...p, ...patch } : p)));
-  const move = (index: number, by: number) =>
+  const move = (index: number, by: -1 | 1) => {
+    const to = index + by;
+    const name = pages[index]?.file ?? "This page";
+    if (to < 0 || to >= pages.length) {
+      say(endWords(name, by < 0 ? "first" : "last"));
+      return;
+    }
     setPages((current) => {
       const next = [...current];
       const [item] = next.splice(index, 1);
-      next.splice(Math.max(0, Math.min(next.length, index + by)), 0, item);
+      next.splice(to, 0, item);
       return next;
     });
+    say(movedWords(name, to, pages.length));
+  };
 
   const body = () => ({
     name: name.trim() || "Funnel from ClickFunnels",
@@ -225,10 +237,10 @@ export function ClickFunnelsFunnel({ products, pagesLeft, funnelsHref, pagesHref
                       <p className="mt-0.5 text-sm text-ink-soft">{summary(page.draft)}</p>
                     </div>
                     <div className="flex gap-1">
-                      <button type="button" className="btn btn-ghost btn-sm" onClick={() => move(index, -1)} disabled={index === 0} aria-label={`Move ${page.file} up`}>
+                      <button type="button" className="btn btn-ghost btn-sm aria-disabled:opacity-40" onClick={() => move(index, -1)} aria-disabled={index === 0 || undefined} aria-label={`Move ${page.file} up`}>
                         Up
                       </button>
-                      <button type="button" className="btn btn-ghost btn-sm" onClick={() => move(index, 1)} disabled={index === pages.length - 1} aria-label={`Move ${page.file} down`}>
+                      <button type="button" className="btn btn-ghost btn-sm aria-disabled:opacity-40" onClick={() => move(index, 1)} aria-disabled={index === pages.length - 1 || undefined} aria-label={`Move ${page.file} down`}>
                         Down
                       </button>
                       <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPages((c) => c.filter((p) => p.key !== page.key))} aria-label={`Remove ${page.file}`}>
@@ -341,6 +353,7 @@ export function ClickFunnelsFunnel({ products, pagesLeft, funnelsHref, pagesHref
               );
             })}
           </ol>
+          <SaidLine said={said} />
 
           <label className="block max-w-md" htmlFor="cf-funnel-name">
             <span className="field-label">The funnel&apos;s name</span>

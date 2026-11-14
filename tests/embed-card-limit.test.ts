@@ -13,6 +13,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { addProduct, claimHandle } from "@/lib/store";
 import { OPENS_PER_TEN_MINUTES } from "@/lib/embed-sites";
 import EmbedCard from "@/app/embed/[handle]/[product]/page";
+import EmbedJoin from "@/app/embed/[handle]/join/page";
 import { answering } from "./security/next-headers";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -77,6 +78,29 @@ async function main(): Promise<void> {
   for (let i = 1; i < OPENS_PER_TEN_MINUTES; i += 1) await view("harbor", again.product.id, "203.0.113.8", "page");
   const pastScript = await view("harbor", again.product.id, "203.0.113.8", "page");
   is("past them, nothing is read", onlyTheLimit(pastScript.commands), true);
+
+  part("The embedded sign-up form, the same: counted first, and past it a plain link that reads nothing");
+  const join = async (ip: string) => {
+    sent = [];
+    answering(new Request("https://marktmorgen.com/embed/harbor/join", { headers: { "x-forwarded-for": ip } }));
+    const page = await EmbedJoin({ params: Promise.resolve({ handle: "harbor" }), searchParams: Promise.resolve({ mm: "page" }) });
+    const commands = sent;
+    let html = "";
+    try {
+      html = renderToStaticMarkup(page);
+    } catch {
+      html = "";
+    }
+    answering(null);
+    return { commands, html };
+  };
+  const firstJoin = await join("203.0.113.9");
+  is("control: the first view reads the store", firstJoin.commands.some((c) => !String(c[1]).startsWith("nl:rl:")), true);
+  is("and counts the connection's opens once", firstJoin.commands.filter((c) => c[0] === "INCR" && String(c[1]).startsWith("nl:rl:")).length, 1);
+  for (let i = 1; i < OPENS_PER_TEN_MINUTES; i += 1) await join("203.0.113.9");
+  const pastJoin = await join("203.0.113.9");
+  is("past them, only the limit's own count is sent", onlyTheLimit(pastJoin.commands), true);
+  is("and it is a plain link to the store", pastJoin.html.includes('href="/@harbor"'), true);
   done();
 }
 

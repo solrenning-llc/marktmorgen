@@ -10,7 +10,7 @@ import { speech } from "@/lib/buyer-words";
 import { canWrite } from "@/lib/mail";
 import { ClicksBox } from "@/components/store-product";
 import { scriptMode, withTags } from "@/lib/embed-sites";
-import { readScriptOpen } from "@/lib/embed-open";
+import { embedOpensLeft, readScriptOpen } from "@/lib/embed-open";
 import { EmbedMessenger } from "@/components/embed-messenger";
 import { StoreBeacon } from "@/components/store-beacon";
 
@@ -29,15 +29,19 @@ const FRAME_HEIGHT = 420;
  * The store, null for one that is not there, or "unread" for a read that failed or answered out of shape: never "not
  * there" (CX-123 rule 24). The store is read exactly (lib/store-exact.ts; Codex J on #2910).
  */
-const load = cache(async (raw: string): Promise<Store | null | "unread"> => {
+const load = cache(async (raw: string): Promise<Store | null | "unread" | { limited: string }> => {
   let decoded = "";
   try {
     decoded = decodeURIComponent(raw);
   } catch {
     return null;
   }
+  const asked = normaliseHandle(decoded.replace(/^@/, ""));
+  // Counted before anything about the store is read, with the card's own count (lib/embed-open.ts, embedOpensLeft;
+  // Claude 7, 14 November 2026): past it, the form reads nothing and is a plain link to the store.
+  if (!(await embedOpensLeft(asked))) return { limited: asked };
   try {
-    const store = await storeForHandleExactly(normaliseHandle(decoded.replace(/^@/, "")));
+    const store = await storeForHandleExactly(asked);
     if (store === "unknown") return "unread";
     return store !== "none" && !store.suspended ? store : null;
   } catch {
@@ -47,7 +51,7 @@ const load = cache(async (raw: string): Promise<Store | null | "unread"> => {
 
 export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const store = await load((await params).handle);
-  return { title: store && store !== "unread" ? `${joinWords(store.language).pageTitle} — ${store.name}` : "Email list", robots: { index: false, follow: false } };
+  return { title: store && store !== "unread" && !("limited" in store) ? `${joinWords(store.language).pageTitle} — ${store.name}` : "Email list", robots: { index: false, follow: false } };
 }
 
 /**
@@ -91,6 +95,20 @@ export default async function EmbedJoin({ params, searchParams }: Params) {
       </div>
     );
 
+  if (found && typeof found === "object" && "limited" in found) {
+    // Past the opens one connection gets: a plain link to the store, from the address asked for alone, nothing read.
+    const aside = framed ? { target: "_blank", rel: "noopener" } : { target: "_top" };
+    return shell(
+      <p className="st-muted text-sm">
+        <a href={`/@${found.limited}`} {...aside} className="font-semibold underline underline-offset-4">
+          {framed ? "See the store (opens in a new tab)" : "See the store"}
+        </a>
+      </p>,
+      "en",
+      {},
+      "light",
+    );
+  }
   if (found === "unread") {
     // The store could not be read, so neither could its language: in English, as for a store that is not there.
     return shell(<p className="st-muted text-sm">This form could not be loaded just now. Try again in a moment.</p>, "en", {}, "light");

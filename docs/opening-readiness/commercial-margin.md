@@ -8,11 +8,23 @@ Prepared by Claude 4 (cloud AC) on 14 November 2026, queue message C4-202 (owner
 
 | Question | Answer today |
 | --- | --- |
-| Can paid plans open on gate 4 today? | **No.** `commercialPlansMayOpen(true)` returns `false` at this commit, for six separate reasons (section 3.1). |
-| Which units keep a positive net profit at 100% use, worst month, under the LC rule? | Store monthly and yearly, the Store assistant and AI captions: yes, in the model. Studio and Scale: **only** while AI is held to its automatic spend ceiling. |
-| Which units lose money at 100% of every right? | **Studio and Scale, monthly and yearly**, when every AI right is used at the largest request the code allows (Sonnet 5.5 with a full-context document). They stay positive under the LC rule if the code allowed Haiku 5.5 only (section 3.2). |
+| Can paid plans open on gate 4 today? | **No.** `commercialPlansMayOpen(true)` returns `false` at this commit, for seven separate reasons (section 3.1). |
+| Which units keep a positive net profit at 100% use, worst month, under the LC rule? | Store monthly and yearly, the Store assistant and AI captions: yes, in the model. Studio and Scale: **only** while AI is held to its automatic spend ceiling, which stops spending at $3.35 and $6.37 a month, so no loss can occur today. The published AI rights are then not funded at the largest request. |
+| Which units lose money at 100% of every right? | **Studio and Scale, monthly and yearly**, when every AI right is used at the largest request the code allows (Sonnet 5.5 with a full-context document). They stay positive under the LC rule if the code allowed Haiku 5.5 only **and** the AI ceilings were raised to fund every right (section 3.2). |
 | Minimum paying customer base? | **Not calculable.** All 22 LLC fixed-cost lines are `null` in code and no funded-exposure review exists (section 3.4). |
 | What does the owner need to decide? | Section 5. |
+
+**Resumo para o dono (pt-BR).**
+- **Abertura:** a trava 4 não abre hoje, por sete motivos (seção 3.1). Dois deles pedem mudança de código antes de qualquer revisão passar:
+  - o Store tem teto de IA 0, e o código exige de todo plano um teto que cubra o maior pedido de IA;
+  - os três cenários de excedente não são mais vendidos.
+- **Lucro pela regra LC** (cliente usando 100% dos direitos no pior mês, IRPF de 15% e IOF de 0,38%, fora do piso de 27,5%):
+  - Store mensal: US$ 45,09 depois da folga;
+  - assistente: US$ 48,44;
+  - legendas: a partir de US$ 25,21.
+- **Studio e Scale:** dão prejuízo se o cliente usar todos os direitos de IA no maior pedido permitido (Sonnet). Ficam positivos só com o Haiku e com tetos de IA de US$ 187,06 (Studio) e US$ 317,43 (Scale) por mês.
+- **Base mínima:** não dá para calcular, porque os 22 custos fixos da LLC estão sem teto.
+- **Decisões do dono:** seção 5.
 
 ## 1. What the code requires (`lib/commercial-margin.ts`)
 
@@ -61,7 +73,7 @@ Each `CustomerWorstCase` holds the revenue collected, the refundable revenue, a 
 | Funded exposure approved | 237–238 | Needs the review. |
 | Minimum customer base sufficient, with fixed costs plus exposure budget | 241–244 | Needs the above. |
 | Non-paying AI pools funded in exposure | 247–253 | Passes vacuously today (no non-paying AI pool). |
-| Upload and AI pools funded for every reviewed paying customer | 255 | Needs the reviewed count. |
+| Upload and AI pools funded for every reviewed paying customer, **and every plan's AI ceiling at least the largest single request** (`aiPolicy.storeMicroUsd[tier] >= max(requestMicroUsd)` for creator, pro and scale) | 255 | **No, for any customer count.** Store's AI ceiling is 0 µUSD (Store has no AI rights) against a largest request of 2,266,342 µUSD (Sonnet) or 566,842 µUSD (Haiku). Studio (3,353,710) and Scale (6,369,120) pass this part. It needs a code decision (section 5). |
 | All 9 scenarios approved, plan revenue at most the published price, AI cost at least the plan's AI ceiling, with the spend-floor room (25¢ monthly, $1 yearly, `lib/commercial-margin.ts:56`) | 256–267 | **No**: see 3.3 for the three overage scenarios. |
 
 The other opening gates (`taxGateValid`, `deemedSupplierReady`, `stripePlatformEligibilityReady`, `lib/opening.ts:33`) are not part of gate 4 and are not reviewed here.
@@ -72,8 +84,13 @@ The other opening gates (`taxGateValid`, `deemedSupplierReady`, `stripePlatformE
 
 - **Use:** every right of the plan at its maximum in the worst month, from the cost registry `tests/plan-cost-registry.ts` (34 monthly lines plus what one payment leaves after the plan ends). A year counts 12 full worst months. The commission on sales is counted as zero.
 - **Receiving:** `lib/receiving-costs.ts`, the least favorable reading allowed by SR5: the buyer's tax is added on top of the price at up to 27%; the dearer provider fee (Stripe, 6.6% + 30¢) applies to the whole amount charged; 1.5% remittance allowance; 1% refund reserve; dispute reserve of 1% of (amount charged + $30).
-- **LC rule (the profit shown to the owner):** IRPF 15% of the profit (Lei 14.754/2023, art. 5) and IOF 0.38% of the money sent to Brazil (Decreto 6.306/2007, arts. 14 and 15-B XXV). Following the owner's decision on TX point 4, the amount sent is the profit before IRPF, so both apply to the unit's pretax profit, each rounded up to the cent. No ISS, no US federal tax; the buyer's tax is outside the price. **This calculation is made outside the 27.5% floor that the code still carries in `tests/historical-receiving-model.ts:4`.** The per-unit IRPF is conservative: the real IRPF is on the LLC's annual profit after fixed costs.
-- **Email (LC rule):** Amazon SES at $0.10 per 1,000 ($0.0001 per email), the owner's account price chosen on 30 October 2026. The code still uses $0.0009 per email (`PER_EMAIL`, `tests/plan-cost-registry.ts:144`); section 2.6 shows both.
+- **LC rule (the profit shown to the owner):** IRPF 15% of the profit (Lei 14.754/2023, art. 5) and IOF 0.38% of the money sent to Brazil (Decreto 6.306/2007, arts. 14 and 15-B XXV). I did not reread these sources today. Lei 14.754/2023 and Decreto 6.306/2007 were read on official compiled texts on 31 October 2026 (`docs/tx2-most-correct-model-2026-10-31.md`), and Decreto 6.306/2007, art. 15-B XXV, again on planalto.gov.br on 1 November 2026 (AGENTS.md, TX point 4). Following the owner's decision on TX point 4, the amount sent is the profit before IRPF, so both apply to the unit's pretax profit, each rounded up to the cent. No ISS, no US federal tax; the buyer's tax is outside the price. **This calculation is made outside the 27.5% floor that the code still carries in `tests/historical-receiving-model.ts:4`.** The per-unit IRPF is conservative: the real IRPF is on the LLC's annual profit after fixed costs.
+- **Email (LC rule):** Amazon SES at $0.10 per 1,000 ($0.0001 per email), the owner's account price chosen on 30 October 2026. The code still uses $0.0009 per email (`PER_EMAIL`, `tests/plan-cost-registry.ts:144`); section 2.6 shows both. The rule LC applies the SES price **with** the protections of 309 [EM1]:
+  - the Resend fallback is limited to the quota included in the Pro plan already paid;
+  - above that quota, mail waits in the Amazon queue and is never dropped;
+  - a real send through SES is proved.
+
+  So the $0.0001 figure holds only once those protections are merged and published. The Resend Pro subscription then becomes a fixed "tools" cost of the LLC (FX275), not a per-email cost. Until then, the Resend column of 2.6 is the code's figure. No result changes sign between the two.
 - **Code reading, shown apart:** the archived most-tax reading (27% VAT inside the price, 78.18% on profit, ISS 5% of revenue) and the sizing reading (27.5% on profit), from `tests/historical-receiving-model.ts`, with the code's email price. These are **not** the owner's profit.
 - **Room:** each plan unit must stay positive after the spend-floor room (25¢ monthly, $1 yearly; 25¢ for the assistant; captions have none).
 
@@ -172,6 +189,8 @@ All amounts are per payment. "Fee" is the Stripe fee on the amount charged; "Rem
 | AI captions, 2 languages (worst: 3 min) | $36.00 | $45.72 | $3.34 | $0.54 | $0.36 | $0.76 | $0.90 | $30.10 | $4.52 | $0.12 | $25.46 | $0.00 | $25.46 | positive |
 | AI captions, 3 languages (worst: 2 min) | $36.00 | $45.72 | $3.34 | $0.54 | $0.36 | $0.76 | $0.80 | $30.20 | $4.53 | $0.12 | $25.55 | $0.00 | $25.55 | positive |
 
+"Net after room" is not "Net" minus "Room". The room is charged as a cost before tax, so the tax falls a little: Store monthly is $45.30 − $0.25 + $0.04 of tax = $45.09. The code does it differently: `scenarioWithPlanRoom` adds the room to `other` and keeps the review's `taxesCeilingCents`, so the code's figure is a few cents lower (section 4).
+
 The caption rows are the worst length for each language count across every length from 1 to 240 minutes under the LC rule. The assistant's use is its 700 replies at the worst reply cost (`assistantMonthWorst`), on Haiku 5.5 only.
 
 Consumption taxes of the EU (VAT, non-Union OSS), the UK and US states on the plans are charged to the buyer on top of the price (TX points 10, 12, 14, 15, 17); they are not revenue and not a cost of the unit, except the Stripe fee on the larger charged amount, which is included above. US federal income tax is 0% under TX point 8 and state income or franchise tax is 0% below each state's threshold under TX point 9; both points are still under source review in `docs/tx-legal-source-review-2026-10-27.md`. The registrations and filings these taxes need are LLC fixed costs (section 3.4).
@@ -187,7 +206,9 @@ The plans publish 40 (Studio) or 80 (Scale) AI writing jobs and 250 or 400 visit
 | Scale monthly | $6.37 | $1,269.15 | $317.43 | $710.75 | **−$422.83** | $447.54 |
 | Scale yearly | $6.37 | $1,269.15 | $317.43 | $7,077.10 | **−$6,789.97** | $3,918.46 |
 
-LC rule, SES email. Store has no AI rights.
+LC rule, SES email. Store has no AI rights. Method as in 2.4: the room is charged before tax.
+
+**No loss happens today.** The automatic ceiling is reserved before every model call, so actual AI spend stops at $3.35 (Studio) and $6.37 (Scale) a month (`lib/ai-spend-policy.ts`), and the plans stay positive. The gate fails for a different reason: `aiEntitlementsFunded` is `false`, because the published rights (40 or 80 writing jobs, 250 or 400 answers) are not funded at the largest permitted request. "Haiku only" is not enough by itself: the ceilings would also have to rise to $187.06 (Studio) and $317.43 (Scale) a month. The Haiku-only column assumes both changes.
 
 ### 2.6 Sensitivity of the LC result to email and video delivery
 
@@ -230,7 +251,8 @@ The most-tax column at today's ceiling matches the generated `docs/margin-alignm
 3. All 22 LLC fixed-cost ceilings are `null` (`lib/llc-fixed-costs.ts:44`), so `allocateEntireLlcFixedCosts` returns `null` (3.4).
 4. `CURRENT_EXPOSURE_BUDGET_POLICY` and `CURRENT_CONTRACT_FUNDING_POLICY` are `null`.
 5. `contractLifecycleReady()` is `false`: resource allocations, renewals and settlement/reserve reconciliation are not covered.
-6. The three overage scenarios cannot pass (3.3).
+6. The three overage scenarios cannot pass as overage revenue (3.3).
+7. The check at `lib/commercial-margin.ts:255` fails for any customer count. It requires every plan's AI ceiling to cover the largest single request, and Store's ceiling is 0 µUSD against 2,266,342 µUSD (Sonnet) or 566,842 µUSD (Haiku). Store sells no AI, so no review can pass this without a code decision: for example, skip a plan whose AI rights are zero, or fund Store a ceiling of one largest request.
 
 ### 3.2 Per unit, MR rule (net profit above zero with the spend-floor room)
 
@@ -245,17 +267,17 @@ The most-tax column at today's ceiling matches the generated `docs/margin-alignm
 | Store assistant | +$48.44 | **Fails on evidence only** | Positive; Haiku only, pool reserved before every call. Same open evidence as Store. It also needs `PLANS_ON_SALE` (`lib/opening.ts:42`). |
 | AI captions | +$25.21 or more | **Fails on evidence only** | Positive at every length; charged before the work. Same open evidence. Sold only with a paid plan. |
 
-With Haiku 5.5 as the only allowed model, Studio and Scale would be positive at every AI right under the LC rule (2.5), and under the archived most-tax reading Studio yearly would still lose $67.77. Changing the allowed models or the AI ceiling is a code change outside this document.
+With Haiku 5.5 as the only allowed model **and** the AI ceilings raised to $187.06 (Studio) and $317.43 (Scale) a month, Studio and Scale would be positive at every AI right under the LC rule (2.5). Under the archived most-tax reading, Studio yearly would still lose $67.77. Even then gate 4 stays closed by item 7 of 3.1 (Store's zero AI ceiling) until that check is changed. Changing the allowed models, the AI ceilings or that check is a code change outside this document.
 
 ### 3.3 The three overage scenarios
 
-`REQUIRED_MARGIN_SCENARIOS` still requires `video_overage`, `visits_overage` and `orders_overage` to be approved (`lib/commercial-margin.ts:39` and `:256`). None of these overages is sold any more: visits and orders are `"not-sold"` in `CURRENT_COMMERCIAL_TERMS` (`traffic.overage`, `orders.overage`), and the video overage price has not been charged since 31 October 2026 (`lib/watch-rules.ts:13`). A scenario with no collected revenue is refused (`"no_revenue"`, `lib/net-margin-rules.ts:81`), so **no review can pass this check as the code stands**. The fix is a code change (for example, drop the obsolete scenarios or redefine them as "use stops at the plan's figure"), to be decided and reviewed separately.
+`REQUIRED_MARGIN_SCENARIOS` still requires `video_overage`, `visits_overage` and `orders_overage` to be approved (`lib/commercial-margin.ts:39` and `:256`). None of these overages is sold any more: visits and orders are `"not-sold"` in `CURRENT_COMMERCIAL_TERMS` (`traffic.overage`, `orders.overage`), and the video overage price has not been charged since 31 October 2026 (`lib/watch-rules.ts:13`). A scenario with no collected revenue is refused (`"no_revenue"`, `lib/net-margin-rules.ts:81`), so these scenarios **cannot pass as overage revenue**. The check itself only runs `assessCustomerWorstCase` on them, so a review could instead define each one as the plan's own scenario: the plan's revenue, with use stopping at the plan's figure. That redefinition, or dropping the obsolete scenarios from `REQUIRED_MARGIN_SCENARIOS`, is a decision for the owner and a separately reviewed change. This draft does not choose one.
 
 ### 3.4 What is unknown and fails (never zero)
 
 | Unknown | Where | Effect |
 | --- | --- | --- |
-| All 22 LLC fixed costs: Delaware, California tax and fee, registered agent, formation, owner INSS, domains, tools, deployment artifacts, backup, US mailbox, EU GDPR and DSA representatives, UK GDPR representative, Form 5472, pro forma 1120, Brazilian IRPF filing, CBE, VAT/OSS compliance, ITIN/acceptance agent, US representative, US business address | `lib/llc-fixed-costs.ts:19`, `:44` | Base not calculable. |
+| All 22 LLC fixed costs: Delaware, California tax and fee, registered agent, formation, owner INSS, domains, tools, deployment artifacts, backup, US mailbox, EU GDPR and DSA representatives, UK GDPR representative, Form 5472, pro forma 1120, Brazilian IRPF filing, CBE, VAT/OSS compliance, ITIN/acceptance agent, US representative, US business address. Each line is 100% Marktmorgen's (FX275, owner, 22 October 2026). So is every residual cost of the stored Hazelsong that the LLC pays (HZ, owner, 24 October 2026): domain renewals, its Vercel storage, its keys in the shared Upstash and its project's use. | `lib/llc-fixed-costs.ts:19`, `:44`; AGENTS.md, FX275 and "Hazelsong encerrada" | Base not calculable. |
 | Funded exposure (trial, setup, full refund, non-payment, post-cancellation, paused, legacy credits, waitlist) | `lib/funded-exposure-rules.ts` | Base not calculable. |
 | TX review per scenario: FX ceilings, annual books, incoming exchange operations, applicable facts | `lib/customer-tax-review.ts:26` | Every scenario stays `tax_review_unknown`. |
 | Stripe API call tariff | `platform-subscription-search`, `assistant-start-reads` lines | Cost not certified. |
@@ -264,6 +286,7 @@ With Haiku 5.5 as the only allowed model, Studio and Scale would be positive at 
 | Human support cost | No cost line | `supportAndOperations` is left unknown in the draft. If only the owner answers, the owner must say so, with no paid tool. |
 | Amazon SES and Resend prices today | outside this session's network | Not rechecked on 14 November 2026. |
 | Company costs that are not plan lines yet (checkout sweep, forget retries, status page, backup) | `NOT_A_COST` in `tests/plan-cost-registry.ts` | Belong in the fixed costs above. |
+| Resend Pro subscription, once SES carries the email (rule LC, 309 [EM1]) | not a line yet | A fixed "tools" cost of the LLC (FX275), never zero. |
 
 ### 3.5 Minimum paying customer base
 
@@ -342,16 +365,22 @@ export const DRAFT_COMMERCIAL_MARGIN_REVIEW: CommercialMarginReview = {
 };
 ```
 
-With the known amounts above, each plan scenario's net after the code's room would be, in cents: Store 2,069 / 43,124; Studio 29,791 / 317,240; Scale 69,635 / 707,710 (monthly / yearly). These are **after** the full $30 dispute fees and before support. They hold only while AI stays at today's ceiling; with every AI right on Sonnet, Studio and Scale lose (2.5). `acquisitionAndAffiliates` is 0 because the invite program is closed (`INVITE_PROGRAM_OPEN=false`, `lib/creator-invite-rules.ts:56`) and no affiliate is paid by Marktmorgen; `fixedBusinessCosts` is 0 per customer because fixed costs are carried once in `companyBase`.
+With the known amounts above, each plan scenario's net after the code's room would be, in cents: Store 2,065 / 43,108; Studio 29,788 / 317,224; Scale 69,631 / 707,695 (monthly / yearly). This is the code's own arithmetic: `scenarioWithPlanRoom` adds the room (25¢ monthly, $1 yearly) to `other`, and `assessCustomerWorstCase` keeps the `taxesCeilingCents` given above, which were computed before the room. These are **after** the full $30 dispute fees and before support. They hold only while AI stays at today's ceiling; with every AI right on Sonnet, Studio and Scale lose (2.5). `acquisitionAndAffiliates` is 0 because the invite program is closed (`INVITE_PROGRAM_OPEN=false`, `lib/creator-invite-rules.ts:56`) and no affiliate is paid by Marktmorgen; `fixedBusinessCosts` is 0 per customer because fixed costs are carried once in `companyBase`.
 
 ## 5. What the owner decides
 
-1. **AI on Studio and Scale.** Either (a) allow only Haiku 5.5 for the plans' AI rights, which makes every right fundable with a positive LC profit, or (b) keep Sonnet and accept that these plans cannot pass MR at 100% use, or (c) another bound on the largest request (a smaller document limit). Any of these is a code change for a separate, reviewed PR; no visible limit may be cut (owner, 18 October 2026).
-2. **The three overage scenarios** (3.3): approve a code change that removes or redefines them.
-3. **Fixed costs:** a reviewed monthly and yearly ceiling for each of the 22 LLC lines, with source and date; without them there is no base.
-4. **Funded exposure:** a monthly budget and case limits for the 8 scopes.
-5. **Support:** whether support is only the owner's own time (no paid tool), so `supportAndOperations` can be an evidenced 0.
-6. **Checks only the owner can make:** the Vercel project's function region, the Bunny Stream network, and the SES account price today.
+1. **AI on Studio and Scale.** The options:
+   - (a) Allow only Haiku 5.5 for the plans' AI rights **and** raise the automatic AI ceilings to $187.06 (Studio) and $317.43 (Scale) a month. Every right is then funded, with a positive LC profit (2.5).
+   - (b) Keep Sonnet and accept that these plans cannot pass MR at 100% use.
+   - (c) Another bound on the largest request, such as a smaller document limit.
+
+   Each option is a code change for a separate, reviewed PR. No visible limit may be cut (owner, 18 October 2026).
+2. **Store's AI ceiling at `lib/commercial-margin.ts:255`** (3.1, item 7). Approve a code change that skips a plan with zero AI rights in that check, or that funds Store one largest request. Without it, no review can pass, whatever is decided on Studio and Scale.
+3. **The three overage scenarios** (3.3). Either define each one as the plan's own scenario (use stops at the plan's figure), or approve a code change that removes them.
+4. **Fixed costs:** a reviewed monthly and yearly ceiling for each of the 22 LLC lines, with source and date; without them there is no base.
+5. **Funded exposure:** a monthly budget and case limits for the 8 scopes.
+6. **Support:** whether support is only the owner's own time (no paid tool), so `supportAndOperations` can be an evidenced 0.
+7. **Checks only the owner can make:** the Vercel project's function region, the Bunny Stream network, and the SES account price today.
 
 The TX evidence per scenario (FX ceilings, annual books, exchange operations) can only exist once the LLC operates; until then every scenario stays `tax_review_unknown` and gate 4 stays closed.
 

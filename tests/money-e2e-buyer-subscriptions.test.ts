@@ -25,7 +25,7 @@
 import { addProduct, claimHandle, ensureStatsId, setDunning, setProductLink, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { forgetStatus, isLive, isLiveSub, memberState, membershipStatus, PAST_DUE_NO_RETRY, STATUS_SECONDS } from "@/lib/membership-access";
 import { purchaseRefunded } from "@/lib/refunds";
-import { readSales, type SalesStats } from "@/lib/stats";
+import { readRenewalPayments, readSales, type SalesStats } from "@/lib/stats";
 import { confirmPurchase } from "@/lib/purchase-email";
 import { recoverFailedPayments } from "@/lib/payment-recovery";
 import { chargedOf, switchReply } from "@/lib/tier-switch";
@@ -113,7 +113,7 @@ let seq = 0;
 const nextId = (prefix: string) => `${prefix}_BuyerSub${String((seq += 1)).padStart(8, "0")}`;
 
 /** A paid (or open) invoice of the membership, as the dahlia API answers it: its subscription's metadata under parent. */
-function invoice(reason: "subscription_create" | "subscription_cycle" | "subscription_update", cents: number, created: number, product: string, status = "paid"): Record<string, unknown> {
+function invoice(reason: "subscription_create" | "subscription_cycle" | "subscription_update" | "manual", cents: number, created: number, product: string, status = "paid"): Record<string, unknown> {
   const id = nextId("in");
   const pi = `pi_${id.slice(3)}`;
   const row: Record<string, unknown> = {
@@ -382,6 +382,17 @@ async function tierSwitch(store: Store, club: string, pro: string): Promise<Reco
   is("RED: MM-E2E-SUB-1: kept = charged - refunded after a switch charged at once", n?.keptCents, charged - refunded);
   part("4. (continued)");
   is("the switch is not counted as a second sale (it is no checkout)", n?.sales, 1);
+
+  // RED: MM-E2E-SUB-2. lib/stats.ts paidAfterCheckout took every paid invoice whose billing_reason was not
+  // "subscription_create", so a paid manual invoice carrying this store's subscription metadata (reused or by
+  // mistake) was counted as a renewal, as money kept and as a buyer-ledger renewal. Only "subscription_cycle" and
+  // "subscription_update" are membership money; a manual, unknown or future reason never becomes money.
+  part("RED: MM-E2E-SUB-2: a paid manual invoice is not membership money");
+  const manual = invoice("manual", 9_999, at + 1, pro);
+  is("RED: MM-E2E-SUB-2: a paid manual invoice carrying store metadata is not membership revenue", await numbers(store), n);
+  const ledger = await readRenewalPayments(store, NOW - 90 * DAY, 4);
+  is("RED: MM-E2E-SUB-2: a paid manual invoice is not a buyer-ledger renewal", ledger.rows.some((row) => row.invoice === manual.id), false);
+  is("the switch charged at once is still a buyer-ledger payment", ledger.rows.some((row) => row.invoice === sw.id), true);
   return sw;
 }
 

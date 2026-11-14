@@ -1,0 +1,173 @@
+/**
+ * What opening waits on, read from the gates themselves.
+ *
+ * lib/opening.ts opens plans with one AND: the owner's request inside the
+ * commercial review, then the tax gate setting, the deemed-supplier records
+ * and the Stripe platform eligibility review. This lists the same conditions,
+ * each with the answer its own function gives today, who has to act and what
+ * it needs, so the owner's summary of what is missing (AV1 step 12,
+ * docs/opening-readiness-status-*.md) is read from the code instead of
+ * typed from memory. tests/opening-readiness.test.ts fails when this list and
+ * lib/opening.ts disagree.
+ *
+ * It only reads. It changes no flag, review, record, price, limit or
+ * commission, and calls no provider. A "ready" here is the gate's own answer,
+ * never a certification of margin, tax or legal compliance.
+ */
+import { PLANS_ON_SALE } from "@/lib/opening";
+import { commercialMarginDataReady, commercialPlansMayOpen, commercialReviewData, CURRENT_COMMERCIAL_MARGIN_REVIEW, CURRENT_PRICE_AND_RIGHTS_SNAPSHOT, type CommercialMarginReview } from "@/lib/commercial-margin";
+import { taxGateValid } from "@/lib/tax-gate";
+import { deemedSupplierProblems, deemedSupplierReady } from "@/lib/deemed-supplier";
+import { stripePlatformEligibilityReady } from "@/lib/stripe-platform-eligibility";
+import { CONTRACT_ADMISSION_COVERAGE, CORE_CONTRACT_ADMISSION_KEYS, CURRENT_CONTRACT_FUNDING_POLICY, type ContractFundingPolicy, contractFundingConfiguration, contractLifecycleReady } from "@/lib/contract-funding-rules";
+import { CURRENT_EXPOSURE_BUDGET_POLICY, type ExposureBudgetPolicy, exposureBudgetConfiguration } from "@/lib/exposure-budget-policy";
+import { COMMISSION_LIVE, COMMISSION_PLANS_PUBLISHED } from "@/lib/plan";
+import { SHARE_PROVED_IN_TEST_MODE } from "@/lib/platform-share";
+
+/** Who has to act before a condition can be ready. */
+export type OpeningActor = "owner" | "agents" | "agents, then the owner";
+
+export type OpeningCondition = Readonly<{
+  id: "ownerRequest" | "commercialReview" | "taxGate" | "deemedSupplier" | "stripePlatform";
+  /** true or false is the gate's own answer; null only for the owner's request when the gates cannot tell. */
+  ready: boolean | null;
+  who: OpeningActor;
+  where: string;
+  needs: string;
+}>;
+
+/** The gates of PLANS_ON_SALE, in the order lib/opening.ts ANDs them, by the function each one calls. */
+export const OPENING_GATES = Object.freeze([
+  {
+    id: "commercialReview",
+    check: "commercialPlansMayOpen",
+    who: "agents, then the owner",
+    where: "lib/commercial-margin.ts",
+    needs: "Core contract coverage built and tested, then the exposure budget, contract funding and commercial margin reviews filled with proven figures only, and approved by the owner.",
+    ready: () => commercialPlansMayOpen(true),
+  },
+  {
+    id: "taxGate",
+    check: "taxGateValid",
+    who: "agents",
+    where: "lib/tax-gate.ts",
+    needs: "A gate reading that sales may be judged on (TX policy). Scoped tax evidence is still required inside the commercial review.",
+    ready: () => taxGateValid(),
+  },
+  {
+    id: "deemedSupplier",
+    check: "deemedSupplierReady",
+    who: "agents, then the owner",
+    where: "lib/deemed-supplier.ts",
+    needs: "For EU, UK, US and other: a built and tested treatment, collecting the tax or refusing that jurisdiction's consumers at checkout before any charge, then its record.",
+    ready: () => deemedSupplierReady(),
+  },
+  {
+    id: "stripePlatform",
+    check: "stripePlatformEligibilityReady",
+    who: "owner",
+    where: "lib/stripe-platform-eligibility.ts",
+    needs: "A US Stripe platform account in the LLC's name and dated proof of direct charges for creators in the US, Canada, the UK and Europe.",
+    ready: () => stripePlatformEligibilityReady(),
+  },
+] as const satisfies readonly {
+  id: OpeningCondition["id"];
+  check: string;
+  who: OpeningActor;
+  where: string;
+  needs: string;
+  ready: () => boolean;
+}[]);
+
+/** The records the commercial review reads; the current ones unless a test passes synthetic ones. */
+export type CommercialRecords = Readonly<{ review: CommercialMarginReview | null; exposure: ExposureBudgetPolicy | null; contract: ContractFundingPolicy | null }>;
+const CURRENT_RECORDS: CommercialRecords = { review: CURRENT_COMMERCIAL_MARGIN_REVIEW, exposure: CURRENT_EXPOSURE_BUDGET_POLICY, contract: CURRENT_CONTRACT_FUNDING_POLICY };
+
+/**
+ * The parts commercialPlansMayOpen needs together, each ready only by the
+ * gate's own check, in the same expressions (lib/commercial-margin.ts): a
+ * record that exists but is stale, unfunded or incomplete is "recorded" and
+ * not ready, never reported as satisfied (reviews of #3665). So the review is
+ * ready exactly when every part is, and a false gate always shows a false part.
+ */
+export const COMMERCIAL_REVIEW_PARTS = Object.freeze([
+  { id: "commission", needs: "No commission plan published, or the platform share live and proved in test mode.", recorded: undefined, ready: () => !COMMISSION_PLANS_PUBLISHED || (COMMISSION_LIVE && SHARE_PROVED_IN_TEST_MODE) },
+  { id: "contractLifecycle", needs: "Every core key of CONTRACT_ADMISSION_COVERAGE true (lib/contract-funding-rules.ts).", recorded: undefined, ready: () => contractLifecycleReady() },
+  {
+    id: "exposureBudget",
+    needs: "CURRENT_EXPOSURE_BUDGET_POLICY recorded from a reviewed, dated budget and accepted by exposureBudgetConfiguration against the current price and rights snapshot (lib/exposure-budget-policy.ts).",
+    recorded: (r: CommercialRecords) => r.exposure !== null,
+    ready: (r: CommercialRecords) => {
+      const review = commercialReviewData(r.review);
+      return review !== null && exposureBudgetConfiguration(r.exposure, { termsSnapshot: CURRENT_PRICE_AND_RIGHTS_SNAPSHOT, review: review.fundedExposure }) !== null;
+    },
+  },
+  {
+    id: "contractFunding",
+    needs: "CURRENT_CONTRACT_FUNDING_POLICY recorded from reviewed reserves and funded grants and accepted by contractFundingConfiguration against the current price and rights snapshot (lib/contract-funding-rules.ts).",
+    recorded: (r: CommercialRecords) => r.contract !== null,
+    ready: (r: CommercialRecords) => {
+      const review = commercialReviewData(r.review);
+      return review !== null && contractFundingConfiguration(r.contract, { termsSnapshot: CURRENT_PRICE_AND_RIGHTS_SNAPSHOT, review }) !== null;
+    },
+  },
+  {
+    id: "marginReview",
+    needs: "CURRENT_COMMERCIAL_MARGIN_REVIEW recorded from proven per-customer worst cases, on the current price and rights snapshot, with every required scenario approved (lib/commercial-margin.ts).",
+    recorded: (r: CommercialRecords) => r.review !== null,
+    ready: (r: CommercialRecords) => {
+      const review = commercialReviewData(r.review);
+      return review !== null && commercialMarginDataReady(review);
+    },
+  },
+] as const);
+
+/** Each part of the commercial review with its state; `recorded` only for the three parts that are records. */
+export function commercialReviewParts(records: CommercialRecords = CURRENT_RECORDS): readonly Readonly<{ id: (typeof COMMERCIAL_REVIEW_PARTS)[number]["id"]; ready: boolean; recorded?: boolean; needs: string }>[] {
+  return Object.freeze(
+    COMMERCIAL_REVIEW_PARTS.map((row) =>
+      Object.freeze({ id: row.id, ready: row.ready(records), ...(row.recorded === undefined ? {} : { recorded: row.recorded(records) }), needs: row.needs }),
+    ),
+  );
+}
+
+/** The gate answers and plans-on-sale state the list is computed from: today's by default, synthetic ones only in tests. */
+export type OpeningState = Readonly<{ plansOnSale?: boolean; gates?: Readonly<Partial<Record<(typeof OPENING_GATES)[number]["id"], boolean>>> }>;
+
+/**
+ * Every condition of opening with its state today. The owner's request is
+ * not exported by lib/opening.ts and is not read here; it is never guessed:
+ * plans on sale means it was given; every gate ready while plans are closed
+ * means it was not; otherwise the gates cannot tell, and it says null, and
+ * its text says so. `state` replaces today's answers only for tests; nothing
+ * here can change a gate.
+ */
+export function openingReadiness(state: OpeningState = {}): readonly OpeningCondition[] {
+  const plansOnSale = state.plansOnSale ?? PLANS_ON_SALE;
+  const gates: OpeningCondition[] = OPENING_GATES.map((gate) => ({ id: gate.id, ready: state.gates?.[gate.id] ?? gate.ready(), who: gate.who, where: gate.where, needs: gate.needs }));
+  const gatesReady = gates.every((gate) => gate.ready === true);
+  const ready = plansOnSale ? true : gatesReady ? false : null;
+  const request: OpeningCondition = {
+    id: "ownerRequest",
+    ready,
+    who: "owner",
+    where: "lib/opening.ts (OPENING_REQUESTED)",
+    needs:
+      "The owner's request, given last, once every gate is ready and the minimum customer base is computed and shown." +
+      (ready === null ? " Not read here: OPENING_REQUESTED is private to lib/opening.ts, so while a gate is not ready this list cannot tell whether it was given; see it there." : ""),
+  };
+  return Object.freeze([request, ...gates]);
+}
+
+/** The reasons behind the two gates with more than one part. */
+export function openingReadinessDetails(): Readonly<{
+  commercialReview: ReturnType<typeof commercialReviewParts>;
+  missingCoreCoverage: readonly string[];
+  deemedSupplierProblems: readonly string[];
+}> {
+  return Object.freeze({
+    commercialReview: commercialReviewParts(),
+    missingCoreCoverage: Object.freeze(CORE_CONTRACT_ADMISSION_KEYS.filter((key) => CONTRACT_ADMISSION_COVERAGE[key] !== true)),
+    deemedSupplierProblems: Object.freeze(deemedSupplierProblems()),
+  });
+}

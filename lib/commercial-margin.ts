@@ -185,7 +185,8 @@ function commercialOwnReviewData(review:unknown):CommercialMarginReview|null{
   return data&&typeof data==='object'&&!Array.isArray(data)?data as CommercialMarginReview:null;
  }catch{return null;}
 }
-function commercialReviewData(review:CommercialMarginReview|null):CommercialMarginReview|null{
+/** Exported read-only for lib/opening-readiness.ts, which reports each part of commercialPlansMayOpen with this same check. */
+export function commercialReviewData(review:CommercialMarginReview|null):CommercialMarginReview|null{
  const original=commercialOwnReviewData(review);
  if(!original)return null;
  const taxState=customerTaxCollectionState(original);
@@ -202,7 +203,8 @@ export function commercialMarginReady(review:CommercialMarginReview|null=CURRENT
  return data!==null&&commercialMarginDataReady(data);
 }
 /** Called only with the detached own-data snapshot produced above. */
-function commercialMarginDataReady(review:CommercialMarginReview):boolean{
+/** Exported read-only for lib/opening-readiness.ts, which reports each part of commercialPlansMayOpen with this same check. */
+export function commercialMarginDataReady(review:CommercialMarginReview):boolean{
  const uploadPolicy=currentUploadBudgetPolicy();
  if(!isUploadBudgetConfigured(uploadPolicy))return false;
  const aiPolicy=currentAiSpendPolicy();

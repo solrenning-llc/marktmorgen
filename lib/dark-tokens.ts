@@ -128,6 +128,9 @@ export const LEGACY_TOKENS: Record<string, DarkToken> = {
   "violet-deep": "link",
   "violet-ink": "link",
   violet: "action-bg",
+  // The ring every control draws (outline: 3px solid var(--focus)); without it the ring stayed the light indigo
+  // (MEDIUM on #3557 @de8c262ae7).
+  focus: "focus-ring",
 };
 
 /**

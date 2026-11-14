@@ -128,6 +128,7 @@ export const AGENT_COVERAGE: Readonly<Record<string, AgentAction>> = {
   "POST store/community/approval": row("community", execute, "Approving publishes a held post and tells the people it concerns; removing it deletes it for good and tells its author: confirmed one at a time."),
   "POST store/community/events": row("community", execute, "Scheduling, moving and canceling a live event tells the people coming."),
   "POST store/community/manage": row("community", execute, "Muting or taking a member out reaches that member."),
+  "POST store/community/space-view": row("community", draft),
   "GET store/companies": row("buyers", read),
   "POST store/companies": row("buyers", draft),
   "POST store/contact-box": row("pages", draft),

@@ -593,20 +593,25 @@ export async function sendBatch(
 ): Promise<"sent" | "retry" | "refused"> {
   const result = await dispatchBatch(messages, batchKey, meter, only, false, runtime);
   // A partial answer is a list batch's only (listOnly); never one here.
-  return result === "waiting" || result === "uncertain" || typeof result === "object" ? "retry" : result;
+  return result === "waiting" || result === "uncertain" || result === "unconfirmed" || typeof result === "object" ? "retry" : result;
 }
 
 /**
  * sendBatch, telling an answer that is not known from a batch nothing of
- * which went: "uncertain" means the provider may have taken some or all of
- * it (an SES acknowledgement lost, a Resend post whose answer never came),
- * so whatever the caller counted for it is kept, never given back; "retry"
- * means nothing was handed to a provider and the same batch may be tried
- * again, its count given back.
+ * which went. "uncertain": Resend may have taken some or all of it (a post
+ * whose answer never came, a 5xx or 408); the same batch tried again goes to
+ * Resend under the same key, which Resend drops if it took the first, so the
+ * caller keeps its count, never given back, and may send the retry under it
+ * (lib/batch-count.ts). "unconfirmed": Amazon may have taken some of it (an
+ * SES acknowledgement lost); Amazon has no such key, and the retry posts
+ * those emails to it again, so the caller keeps its count, never given back,
+ * and counts the retry again (#4073 MEDIUM 1). "retry" means nothing was
+ * handed to a provider and the same batch may be tried again, its count
+ * given back.
  */
 export async function sendBatchOutcome(
   messages: BatchMessage[], batchKey: string, meter: EmailMeter,
-): Promise<"sent" | "retry" | "uncertain" | "refused"> {
+): Promise<"sent" | "retry" | "uncertain" | "unconfirmed" | "refused"> {
   const result = await dispatchBatch(messages, batchKey, meter, undefined, false);
   // A partial answer is a list batch's only (listOnly); never one here.
   return result === "waiting" || typeof result === "object" ? "retry" : result;
@@ -693,13 +698,13 @@ export async function sendListBatch(
 ): Promise<ListBatchOutcome> {
   if (messages.length === 0) return "sent";
   const result = await dispatchBatch(messages, batchKey, meter, "amazon", true);
-  return result === "uncertain" ? "retry" : result;
+  return result === "uncertain" || result === "unconfirmed" ? "retry" : result;
 }
 
 async function dispatchBatch(
   messages: BatchMessage[], batchKey: string, meter: EmailMeter,
   only: "resend" | "amazon" | undefined, listOnly: boolean, runtime: ResendTransportRuntime = {},
-): Promise<ListBatchOutcome | "uncertain"> {
+): Promise<ListBatchOutcome | "uncertain" | "unconfirmed"> {
   if (!isSenderConfigured()) return listOnly ? "waiting" : "retry";
   if (messages.length === 0) return "sent";
   // What actually goes: a message with no address that can be written to is
@@ -787,7 +792,8 @@ async function dispatchBatch(
       // A lost SES reply is not a refusal. The unresolved batch must reach
       // its caller without another SES wave or a switch to Resend. A durable
       // caller checkpoint is still needed before a later invocation.
-      if (result.uncertain === true) return "uncertain";
+      // Amazon keeps no key that drops a second post: told apart from Resend's unknown answer (sendBatchOutcome).
+      if (result.uncertain === true) return "unconfirmed";
       // SES excludes definitively refused recipients from both accepted and
       // pending lists. Missing recipients cannot establish a completed list.
       if (listOnly && result.taken.length + result.left.length < going.length) {
@@ -903,8 +909,8 @@ async function dispatchBatch(
       return "sent";
     }
     console.error("batch rejected", response.status);
-    // A 429 is a batch not taken; a 5xx does not say Resend did not take it.
-    return response.status === 429 ? "retry" : response.status >= 500 ? "uncertain" : "refused";
+    // A 429 is a batch not taken; a 5xx or a 408 (Codex V on #4073) does not say Resend did not take it.
+    return response.status === 429 ? "retry" : response.status >= 500 || response.status === 408 ? "uncertain" : "refused";
   } catch (error) {
     console.error("batch failed", error);
     return "uncertain";

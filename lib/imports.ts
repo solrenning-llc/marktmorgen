@@ -1647,11 +1647,12 @@ async function mailStep(job: ImportJob, store: Store): Promise<"more" | "done" |
   }
   const sent = await sendBatchOutcome(sending, batchKey, { by: "monthly" });
   if (sent === "sent") await batchCountSettled(batchKey, sending.map((m) => m.to));
-  if (sent === "retry" || sent === "uncertain") {
+  if (sent === "retry" || sent === "uncertain" || sent === "unconfirmed") {
     await redisPipeline([["SADD", mailKey(job.id), ...emails]]);
     // An answer not known (lib/email.ts, sendBatchOutcome) may have sent them: their count is kept, never given back,
     // and marked so that the same batch tried again is not counted again. A count kept by an earlier unknown answer
-    // stays whatever this one says.
+    // stays whatever this one says. Amazon's unknown answer ("unconfirmed") is kept but never marked: Amazon may
+    // write to them again, so the retry is counted again (#4073 MEDIUM 1).
     if (sent === "uncertain" && !kept) await keepBatchCount(batchKey, sending.map((m) => m.to));
     if (sent === "retry" && !kept) {
       if (held) held.n += sending.length;
@@ -1958,9 +1959,10 @@ export async function sendMoveReminders(deadline: number, now = Date.now()): Pro
         await batchCountSettled(remindKey, [letter.to]);
         await noteSent(sid, 1);
         counts.sent += 1;
-      } else if (sent === "retry" || sent === "uncertain") {
+      } else if (sent === "retry" || sent === "uncertain" || sent === "unconfirmed") {
         // An answer not known (lib/email.ts, sendBatchOutcome) may have sent it: its count is kept, never given back,
-        // and marked so that the same reminder tried again is not counted again.
+        // and marked so that the same reminder tried again is not counted again; Amazon's ("unconfirmed") is not
+        // marked, as Amazon may write to them again (#4073 MEDIUM 1).
         if (sent === "uncertain" && !kept) await keepBatchCount(remindKey, [letter.to]);
         if (sent === "retry" && !kept) {
           await releaseMoved(store, 1);

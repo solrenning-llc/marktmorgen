@@ -225,7 +225,7 @@ export async function POST(request: NextRequest) {
       );
       if (outcome !== "sent") {
         // An answer not known (lib/email.ts, sendBatchOutcome) may have sent them: their count is kept, never given back.
-        if (outcome !== "uncertain") await release(store, 1);
+        if (outcome !== "uncertain" && outcome !== "unconfirmed") await release(store, 1);
         return fail("send", 502);
       }
       return Response.json({ ok: true, to: email });

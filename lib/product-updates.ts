@@ -491,8 +491,10 @@ export async function advanceUpdate(id: string, load: (handle: string) => Promis
           // An answer not known (lib/email.ts, sendBatchOutcome) may have sent them: their count is kept, never given
           // back, and marked so that the same batch tried again is not counted again. A count kept by an earlier
           // unknown answer stays whatever this one says. A give-back that does not read is unknown (giveBack).
-          if (outcome === "uncertain") {
-            if (!kept) await keepBatchCount(batchKey, recipients);
+          // Amazon's unknown answer ("unconfirmed") is kept but never marked: Amazon may write to them again, so the
+          // retry is counted again (#4073 MEDIUM 1).
+          if (outcome === "uncertain" || outcome === "unconfirmed") {
+            if (outcome === "uncertain" && !kept) await keepBatchCount(batchKey, recipients);
           } else if (!kept) await giveBack(store, recipients.length);
           const failures = job.failures + 1;
           job =

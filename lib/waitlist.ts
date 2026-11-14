@@ -412,9 +412,10 @@ export async function runLaunches(load: (handle: string) => Promise<Store | null
       });
       const outcome = await sendBatchOutcome(messages, batchKey, { by: "store", store, kind: "email" });
       if (outcome === "sent") await batchCountSettled(batchKey, to);
-      if (outcome === "retry" || outcome === "uncertain") {
+      if (outcome === "retry" || outcome === "uncertain" || outcome === "unconfirmed") {
         // An answer not known (lib/email.ts, sendBatchOutcome) may have sent them: their count is kept, never given
-        // back, and marked so that the same batch tried again is not counted again.
+        // back. Resend's ("uncertain") is marked so that the same batch tried again is not counted again; Amazon's
+        // ("unconfirmed") is not, as Amazon may write to them again.
         if (outcome === "uncertain" && !kept) await keepBatchCount(batchKey, to);
         if (outcome === "retry" && !kept) await releaseDay(chunk.length);
         break;

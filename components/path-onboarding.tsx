@@ -4,6 +4,10 @@ import { AUDIENCES, AUDIENCE_WORDS, MINUTES, type PathAnswers } from "@/lib/path
 import { readMoney, parseCurrency, moneyField, decimalsOf } from "@/lib/money";
 import { readPathWriteReply } from "@/lib/path-write-response";
 import { useLeaveGuard } from "@/components/leave-guard";
+import { ConfirmAction } from "@/components/confirm-action";
+/** Asked before the Path is deleted: what goes and what stays. */
+export const FORGET_PATH_QUESTION = "Delete your Path answers, check-in days and saved level? Your store and orders stay as they are.";
+
 export function PathOnboarding({currency, answers}: {currency: string; answers?: PathAnswers}) {
  const [busy,setBusy]=useState(false);
  const goalId=useId();
@@ -58,7 +62,8 @@ export function PathOnboarding({currency, answers}: {currency: string; answers?:
   </label>
   <p className="text-sm text-ink-soft">Your browser&apos;s time zone sets your check-in days. Sundays and two rest days each week are yours.</p>
   <div className="flex flex-wrap gap-3"><button disabled={busy||uncertain} className="btn btn-primary">{busy?"Saving…":answers?"Save your answers":"Start your Path"}</button>
-   {answers?<button type="button" disabled={busy||uncertain} className="btn btn-secondary" onClick={()=>{if(locked.current)return;if(window.confirm("Delete your Path answers, check-in days and saved level? Your store and orders stay as they are.")) void request({action:"forget"});}}>Delete your Path</button>:null}</div>
+   {/* Asked on the page, never in a browser dialog (485 [IT2]): it cannot be undone, so it keeps its question. */}
+   {answers?<ConfirmAction className="btn btn-secondary" disabled={busy||uncertain} busy={busy} question={FORGET_PATH_QUESTION} yes="Yes, delete my Path" onConfirm={()=>locked.current?undefined:request({action:"forget"})}>Delete your Path</ConfirmAction>:null}</div>
   {message?<p role="alert" className="notice notice-error">{message}</p>:null}
  </form>;
 }

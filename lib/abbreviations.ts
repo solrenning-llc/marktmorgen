@@ -1,0 +1,48 @@
+/**
+ * What the abbreviations in Marktmorgen's own words stand for (WCAG 3.1.4, AX274), in one list so the same letters
+ * always expand the same way. components/abbr.tsx draws them.
+ */
+export const ABBREVIATIONS = {
+  ACH: "Automated Clearing House, a US bank transfer",
+  API: "application programming interface",
+  CRM: "customer relationship management",
+  CSV: "comma-separated values",
+  DNS: "Domain Name System",
+  DRM: "digital rights management",
+  EPUB: "electronic publication",
+  FTC: "Federal Trade Commission",
+  GB: "gigabytes",
+  GIF: "Graphics Interchange Format, a picture file",
+  HMAC: "hash-based message authentication code",
+  HSTS: "HTTP Strict Transport Security",
+  HTML: "HyperText Markup Language",
+  ICS: "iCalendar file",
+  ID: "identifier",
+  JPEG: "Joint Photographic Experts Group, a picture file",
+  JPG: "Joint Photographic Experts Group, a picture file",
+  JSON: "JavaScript Object Notation",
+  KB: "kilobytes",
+  MB: "megabytes",
+  MOV: "QuickTime movie, a video file",
+  MP3: "MPEG audio, a sound file",
+  MP4: "MPEG-4, a video file",
+  PDF: "Portable Document Format",
+  PIN: "personal identification number",
+  PNG: "Portable Network Graphics, a picture file",
+  QR: "Quick Response, a square barcode",
+  RSS: "Really Simple Syndication, a feed of posts",
+  RSVP: "please reply, from the French \"répondez s'il vous plaît\"",
+  SEPA: "Single Euro Payments Area, a European bank transfer",
+  SHA: "Secure Hash Algorithm",
+  SKU: "stock keeping unit",
+  SVG: "Scalable Vector Graphics, a drawing file",
+  TXT: "plain text file",
+  URL: "web address",
+  UTC: "Coordinated Universal Time",
+  VAT: "value-added tax",
+  VPN: "virtual private network",
+  WAV: "Waveform Audio File, a sound file",
+  ZIP: "a compressed folder of files",
+} as const;
+
+export type Abbreviation = keyof typeof ABBREVIATIONS;

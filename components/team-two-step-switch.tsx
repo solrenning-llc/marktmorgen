@@ -1,5 +1,6 @@
 "use client";
 
+import { Abbr } from "@/components/abbr";
 import { useState } from "react";
 import { MAKER_FORMER, MAKER_UNRECORDED, type PausePreview } from "@/lib/api-key-rules";
 
@@ -126,7 +127,7 @@ export function TeamTwoStepSwitch({
       {on && pending > 0 && !blocked ? (
         <div className="notice mt-3">
           <p className="text-sm text-ink">
-            Not finished: some API keys still have to be paused, or their makers emailed. Nothing else changes.
+            Not finished: some <Abbr of="API" /> keys still have to be paused, or their makers emailed. Nothing else changes.
           </p>
           <button type="button" className="btn btn-primary btn-sm mt-2" disabled={busy} aria-busy={busy} onClick={() => save(true)}>
             {busy ? "Finishing…" : "Finish now"}

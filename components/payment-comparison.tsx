@@ -1,3 +1,4 @@
+import { Abbr } from "@/components/abbr";
 import type { StatsData } from "@/lib/stats";
 import { paymentComparisonFrom, paymentChange, paymentShareChange } from "@/lib/payment-comparison";
 import { paymentShare } from "@/lib/payment-mix";
@@ -20,7 +21,7 @@ export function PaymentComparisonPanel({data,range}:{data:StatsData;range:"d7"|"
         <tbody>{report.rows.map(row=><tr key={row.source} className="border-b border-line/60"><th scope="row" className="py-2 font-medium text-ink">{channelName(row.source)}</th><td className="py-2 pl-3 text-right tabular-nums">{money(row.current)}</td><td className="py-2 pl-3 text-right tabular-nums">{money(row.previous)}</td><td className="py-2 pl-3 text-right tabular-nums">{paymentChange(row.change)}</td><td className="py-2 pl-3 text-right tabular-nums">{paymentShare(row.currentShare)} / {paymentShare(row.previousShare)}</td><td className="py-2 pl-3 text-right tabular-nums">{paymentShareChange(row.shareChange)}</td></tr>)}</tbody></table>
       </div> : <p className="mt-2 text-sm text-ink-soft">No payments in either period; no percentage change or share can be calculated.</p>}
       {report.rows.length ? <ReportDownload csv={paymentComparisonReport(report,data.currency)} filename={"marktmorgen-payment-comparison-"+report.current.from+"-to-"+report.current.to+".csv"}>Download payment comparison</ReportDownload> : null}
-      <p className="mt-2 text-xs text-ink-soft">Same number of UTC days, including today as recorded so far. Payments include renewals at their recorded subscription channel, before refunds, fees and ads. A channel absent from a complete period has zero payments in that period; a missing previous reading stays unavailable. Percentage changes need previous payments, and share changes need payments in both periods. Share changes are percentage points, not relative growth. These are recorded payments, not new customers, profit or proof of marketing lift.</p>
+      <p className="mt-2 text-xs text-ink-soft">Same number of <Abbr of="UTC" /> days, including today as recorded so far. Payments include renewals at their recorded subscription channel, before refunds, fees and ads. A channel absent from a complete period has zero payments in that period; a missing previous reading stays unavailable. Percentage changes need previous payments, and share changes need payments in both periods. Share changes are percentage points, not relative growth. These are recorded payments, not new customers, profit or proof of marketing lift.</p>
     </>}
   </section>;
 }

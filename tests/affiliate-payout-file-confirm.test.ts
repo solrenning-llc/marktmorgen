@@ -147,7 +147,7 @@ async function main(): Promise<void> {
   is("f2 is written down", [paidF2.status, paidF2.data.cents, paidF2.data.left], [200, 10_500, 0]);
   is("nobody is owed anything", await owed(), { [ANA]: 0, [BEA]: 0 });
   const paidF1 = await confirm({ date: "2026-11-12", reference: "PayPal batch 1b", file: f1.file });
-  is("f1 is refused afterwards", [paidF1.status, paidF1.data.ok], [409, false]);
+  is("f1 is refused afterward", [paidF1.status, paidF1.data.ok], [409, false]);
   is("and Ana is never paid twice", [await paidTo(), await owed()], [{ [ANA]: 10_500, [BEA]: 3_000 }, { [ANA]: 0, [BEA]: 0 }]);
 
   part("A file overlapping a PayPal payment on its way is refused");

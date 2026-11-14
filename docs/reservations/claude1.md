@@ -6,3 +6,4 @@ Only Claude 1 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
+| Claude 1 | 93 [D2-VERIFIED-SOCIAL], unit 1 ("Certificates earned" in a sales page's "By the numbers" block, from standing certificates, from ten up) | claude/modest-faraday-f25rzq-finished | `lib/sales-page.ts` (FactKey, FACT_KEYS, FACTS_ON_BY_DEFAULT), `lib/page-facts.ts`, `lib/page-facts-read.ts`, `lib/buyer-words/finished.ts`, `tests/course-finished-fact.test.ts` (also earnedCount at the end of `lib/certificate.ts`, a few lines of `app/[handle]/p/[product]/page.tsx`, not reserved: other open PRs touch them) | 12/11/2026 12h12 |

@@ -74,6 +74,7 @@ import { POST as rcommunity } from "@/app/api/store/community/route";
 import { POST as rcommunity_chat } from "@/app/api/store/community/chat/route";
 import { POST as rcommunity_events } from "@/app/api/store/community/events/route";
 import { POST as rcommunity_manage } from "@/app/api/store/community/manage/route";
+import { POST as rcommunity_approval } from "@/app/api/store/community/approval/route";
 import { POST as rcourse } from "@/app/api/store/course/route";
 import { POST as rcrm } from "@/app/api/store/crm/route";
 import { POST as rcompanies } from "@/app/api/store/companies/route";
@@ -131,6 +132,7 @@ const ROUTES: Record<string, Handler> = {
   "community/chat": rcommunity_chat as Handler,
   "community/events": rcommunity_events as Handler,
   "community/manage": rcommunity_manage as Handler,
+  "community/approval": rcommunity_approval as Handler,
   "course": rcourse as Handler,
   "companies": rcompanies as Handler,
   "crm": rcrm as Handler,
@@ -205,6 +207,8 @@ async function main(): Promise<void> {
   is("emptying the chat room is refused", await answer(await chat(json("/api/store/community/chat", locked, { handle: HANDLE, action: "clear" }))), LOCKED);
   is("taking a chat message out is refused", await answer(await chat(json("/api/store/community/chat", locked, { handle: HANDLE, action: "unsay", number: 1 }))), LOCKED);
   is("a reported post deleted from the studio is refused", await answer(await manage(json("/api/store/community/manage", locked, { action: "report-delete", report: "post:x" }))), LOCKED);
+  const approval = await route("community/approval");
+  is("a post waiting for approval not published from the studio is refused", await answer(await approval(json("/api/store/community/approval", locked, { action: "remove", item: "abcdef123456" }))), LOCKED);
 
   part("Events: canceling, deleting and moving one emails everyone coming");
   const events = await route("community/events");
@@ -433,6 +437,7 @@ async function main(): Promise<void> {
     "community": ["lockedFor"],
     "community/chat": ["lockedFor"],
     "community/events": ["act:events:cancel", "act:events:delete", "lockedFor"],
+    "community/approval": ["act:community:held-remove", "need:settings"],
     "community/manage": ["act:community:report-delete", "need:settings"],
     "community/push": ["not:a member's own device, signed up for notifications again at will"],
     "community/rsvp": ["not:a member taking back their own place at an event"],
@@ -544,8 +549,9 @@ async function main(): Promise<void> {
       hide: "open:reversible", "hide-comment": "open:reversible", like: "open:adds", "like-comment": "open:adds", mute: "open:reversible",
       pin: "open:reversible", post: "lockedFor", profile: "open:edits", report: "open:adds", signout: "open:a person signing themselves out of the community",
       start: "open:reversible", unhide: "open:reversible", "unhide-comment": "open:reversible", unmute: "open:reversible", unpin: "open:reversible",
-      unstart: "open:reversible", vote: "open:adds",
+      unstart: "open:reversible", vote: "open:adds", withdraw: "open:a member taking back their own post or comment that waits for approval, or putting away the note about one",
     },
+    "community/approval": { approve: "open:adds", remove: "act:community:held-remove", setting: "need:settings" },
     "community/chat": { clear: "lockedFor", say: "open:adds", unsay: "lockedFor" },
     "community/events": { cancel: "act:events", create: "open:adds", delete: "act:events", edit: "lockedFor" },
     "community/manage": {
@@ -609,7 +615,7 @@ async function main(): Promise<void> {
     "reviews": { ask: "need:settings", hide: "open:reversible", photo: "act:reviews", reply: "open:adds", seen: "open:edits" },
     "saved-blocks": { apply: "open:adds", remove: "act:page", save: "open:adds", update: "open:edits" },
     "short-links": { add: "open:adds", remove: "act:page", target: "open:edits" },
-    "site-page": { add: "open:adds", meta: "open:edits", order: "open:edits", remove: "act:page", save: "lockedFor" },
+    "site-page": { add: "open:adds", copy: "open:adds", meta: "open:edits", order: "open:edits", remove: "act:page", save: "lockedFor" },
     "spend": { add: "open:adds", remove: "act:stats" },
     "stores": { delete: "need:delete", select: "open:a person choosing which of their own stores the studio shows" },
     "stream/captions": { add: "open:adds", auto: "need:billing", quote: "open:reads", remove: "act:products" },

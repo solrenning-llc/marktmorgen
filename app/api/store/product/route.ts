@@ -1,4 +1,5 @@
 import { applyCourseTaskDrops, readCourseTaskDrops } from "@/lib/assignment";
+import { handsOver, takesLastDelivery } from "@/lib/product-option";
 import { storeKey } from "@/lib/learn";
 import { imagePaths } from "@/lib/product-image";
 import { waitingCount } from "@/lib/preorders";
@@ -431,6 +432,8 @@ export async function POST(request: NextRequest) {
             if (!course) return Response.json({ ok: false, error: "unknown" }, { status: 404 });
             if (exampleTitlesLeft(course) > 0) return Response.json({ ok: false, error: "course_examples" }, { status: 409 });
           }
+          // Published only once it hands something over by the checkout's own rule (754 [STN1]).
+          if (!handsOver(draft)) return Response.json({ ok: false, error: "nothing_to_hand_over", product: draft.title }, { status: 409 });
         }
       }
       // The takedown mark as it was before this publish: only that one is cleared after it, so a takedown that lands in
@@ -443,6 +446,10 @@ export async function POST(request: NextRequest) {
       // A store switched off after notices never clears it this way (Claude 6 on #3439, LOW 2).
       if (done.ok && body.hidden === false && !guarded.store.suspended) await clearTakenDown(guarded.store, id, seenMark).catch((error) => console.error("preview mark not cleared", error));
     } else if (action === "unlink") {
+      // The last thing a product on the store hands over is not taken off: it is replaced, or the product unpublished
+      // first (754 [STN1]; Claude 6 on #3432). Read like the publish check above, from the store record the guard loaded.
+      const found = await readDelivery(guarded.store, id);
+      if (found && takesLastDelivery(found.product, id, "link")) return Response.json({ ok: false, error: "last_delivery", product: found.product.title }, { status: 409 });
       const cleared = await setProductLink(ref, id, null);
       result = cleared.ok ? { ok: true, product: null } : { ok: false, reason: asProductReason(cleared.reason) };
     } else {

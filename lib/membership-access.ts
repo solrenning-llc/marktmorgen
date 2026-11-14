@@ -34,6 +34,7 @@
  * choice.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { onAccount } from "@/lib/stripe-account";
 import type { Listing, Store } from "@/lib/store";
 import { type PauseSub, pausedNow } from "@/lib/membership-pause-rules";
@@ -103,21 +104,37 @@ export function soldAMembership(product: Listing, session: { mode?: unknown; met
 /**
  * Stripe's state for a membership, from the subscription on a checkout —
  * already expanded, or asked for by its id and kept for two minutes. Null
- * when Stripe cannot say, which callers treat as ended: a door that cannot
- * check whether someone still pays stays shut rather than open. Its one
+ * only when the input is not a membership reference. Evidence read in an
+ * unknown shape throws, so callers report a temporary error rather than an
+ * ended membership or a renewal invitation. Its one
  * caller (lib/store-checkout.ts, readOrder) hands it the subscription with
  * its latest invoice expanded; read by its id alone, without that invoice, a
  * past-due membership is ended by the same rule (memberState).
  */
 export async function membershipStatus(store: Store, subscription: unknown): Promise<string | null> {
-  if (subscription && typeof subscription === "object") return memberState(subscription);
+  if (subscription && typeof subscription === "object") {
+    if (Array.isArray(subscription)) throw new UnknownReplyError("an expanded membership");
+    // An expanded status only proves access when its own data identity is
+    // a subscription id. Do not read inherited or accessor identities.
+    const id = Object.getOwnPropertyDescriptor(subscription, "id");
+    if (!id || !("value" in id) || typeof id.value !== "string" || !SUBSCRIPTION_PATTERN.test(id.value)) throw new UnknownReplyError("an expanded membership");
+    return memberState(subscription);
+  }
   const account = store.stripeAccountId;
   if (typeof subscription !== "string" || !SUBSCRIPTION_PATTERN.test(subscription) || !account) return null;
   if (isRedisConfigured()) {
-    const [cached] = await redisPipeline([["GET", statusKey(account, subscription)]]);
+    const reply = await redisPipeline([["GET", statusKey(account, subscription)]]);
+    if (!Array.isArray(reply) || reply.length !== 1 || !Object.hasOwn(reply, 0)) throw new UnknownReplyError("a membership status cache");
+    const [cached] = reply;
     if (typeof cached === "string" && cached) return cached;
+    // Only an explicit missing key permits the provider lookup. A partial
+    // read does not prove either a live membership or an absent cache.
+    if (cached !== null) throw new UnknownReplyError("a membership status cache value");
   }
   const sub = await onAccount("GET", account, `/subscriptions/${encodeURIComponent(subscription)}`);
+  // A status from a different or unidentified subscription cannot authorize
+  // access or populate the cache for the subscription that was requested.
+  if (!sub || !Object.hasOwn(sub, "id") || sub.id !== subscription) throw new UnknownReplyError("a membership provider identity");
   const status = memberState(sub);
   if (status && isRedisConfigured()) {
     await redisPipeline([["SET", statusKey(account, subscription), status, "EX", STATUS_SECONDS]]);

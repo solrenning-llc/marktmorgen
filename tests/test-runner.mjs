@@ -5,10 +5,35 @@ import {readdirSync, readFileSync} from 'node:fs';
  * The most one test file may run, and the most its compilation may take: past it the file is named as a failure
  * (C4-20261106-2550-C5-151: on #2790 and #2820 the verify job sat 47 minutes after one file with no output until the
  * job's own cancellation, which names nothing). Ten minutes: about six times the slowest file in two full CI verify
- * logs (contract-admission-ack, 53.9 s and 100.8 s), and well under the job's 50 minutes
+ * logs (contract-admission-ack, 53.9 s and 100.8 s), and well under the job's 30 minutes
  * (.github/workflows/product-checks.yml).
  */
 export const TEST_FILE_TIMEOUT_MS = 600_000;
+
+/**
+ * One CI job's share of the test files (TEST_SHARD="index/total", .github/workflows/product-checks.yml): unset or
+ * empty runs every file; anything else must be exactly two whole numbers with 1 <= index <= total, or this throws, so
+ * a mistyped share fails instead of running nothing.
+ * @param {string | undefined} spec
+ * @returns {{index: number, total: number} | null}
+ */
+export function parseShard(spec) {
+  if (spec === undefined || spec === '') return null;
+  const match = /^([1-9][0-9]*)\/([1-9][0-9]*)$/.exec(spec);
+  const index = match ? Number(match[1]) : NaN, total = match ? Number(match[2]) : NaN;
+  if (!match || index > total) throw new Error(`TEST_SHARD must be "index/total" with 1 <= index <= total, not ${JSON.stringify(spec)}`);
+  return {index, total};
+}
+
+/**
+ * The files of one share: the sorted list dealt out by position (file i goes to share i mod total), so the shares of
+ * one total are disjoint, together are every file, and never depend on time or on what ran before.
+ * @param {string[]} sortedFiles @param {{index: number, total: number} | null} shard
+ */
+export function shardFiles(sortedFiles, shard) {
+  if (!shard) return sortedFiles;
+  return sortedFiles.filter((_, position) => position % shard.total === shard.index - 1);
+}
 
 /**
  * @template T

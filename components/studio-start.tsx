@@ -102,16 +102,18 @@ export function StudioStart({ steps: all, activation, launchChecklist }: { steps
  * The studio's sections, one tap away, on every width. On a phone the row
  * scrolls sideways; its right edge fades out, so it is plain there is more,
  * and a little room after the last one lets it come clear of the fade.
+ * Each link is a 44 × 44 px target (WCAG 2.5.5 AAA, AX274), even a short one
+ * like "API" (tests/studio-nav-targets.test.ts).
  */
 export function StudioNav({ items }: { items: { href: string; label: string }[] }) {
   return (
-    <nav aria-label="Studio sections" className="sticky top-16 z-30 -mx-4 mt-6 border-b border-line bg-paper/95 px-4 backdrop-blur sm:mx-0 sm:rounded-full sm:border sm:px-2">
+    <nav aria-label="Studio sections" data-studio-nav="" className="sticky top-16 z-30 -mx-4 mt-6 border-b border-line bg-paper/95 px-4 backdrop-blur sm:mx-0 sm:rounded-full sm:border sm:px-2">
       <ul className="flex gap-1 overflow-x-auto py-2 pr-10 [-webkit-mask-image:linear-gradient(to_right,#000_calc(100%-3rem),transparent)] [mask-image:linear-gradient(to_right,#000_calc(100%-3rem),transparent)] [scrollbar-width:none] sm:pr-0 sm:[mask-image:none]">
         {items.map((item) => (
           <li key={item.href} className="shrink-0">
             <Link
               href={item.href}
-              className="inline-flex h-9 items-center rounded-full px-3.5 text-sm font-semibold text-ink-soft transition-colors hover:bg-white hover:text-ink focus-visible:bg-white"
+              className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-full px-3.5 text-sm font-semibold text-ink-soft transition-colors hover:bg-white hover:text-ink focus-visible:bg-white"
             >
               {item.label}
             </Link>

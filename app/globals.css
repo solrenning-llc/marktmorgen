@@ -469,6 +469,12 @@ html {
   scroll-behavior: smooth;
   scroll-padding-top: 5.5rem;
 }
+/* A studio page that draws its section bar (components/studio-start.tsx, StudioNav) keeps the header (64px) and the
+   bar (60px) on top: 124px. A control the keyboard reaches is scrolled clear of both, with room for its focus ring
+   (WCAG 2.4.11, 2.4.12; tests/studio-nav-targets.test.ts). */
+html:has([data-studio-nav]) {
+  scroll-padding-top: 8.5rem;
+}
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;

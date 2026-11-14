@@ -27,7 +27,7 @@ import { NextRequest } from "next/server";
 import StorePage from "@/app/[handle]/page";
 import CollectionPage from "@/app/[handle]/shop/[collection]/page";
 import ProductPage from "@/app/[handle]/p/[product]/page";
-import { addProduct, claimHandle, ensureStatsId, setCollections, setProductExtras, setProductKeys, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { addProduct, claimHandle, ensureStatsId, setCollections, setProductExtras, setProductKeys, setProductLink, setProductPairs, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { DEFAULT_KEYS } from "@/lib/key-setup";
 import { readListing } from "@/lib/catalog";
 import { outOfKeys } from "@/lib/licence-keys";
@@ -45,9 +45,12 @@ let poolKey = "";
 let stockKey = "";
 let inject: (() => unknown[] | Promise<unknown[]>) | null = null;
 let injectStock: (() => unknown[] | Promise<unknown[]>) | null = null;
+let soonSetKey = "";
+let injectSoon: (() => unknown[] | Promise<unknown[]>) | null = null;
 redis.pipeline = (async (batch: Command[]) => {
   if (inject && batch.some((c) => c[0] === "LLEN" && c[1] === poolKey)) return inject();
   if (injectStock && batch.some((c) => c[0] === "HGETALL" && c[1] === stockKey)) return injectStock();
+  if (injectSoon && batch.some((c) => c[0] === "SMEMBERS" && c[1] === soonSetKey)) return injectSoon();
   return real(batch);
 }) as typeof redis.pipeline;
 globalThis.fetch = (async () => {
@@ -169,6 +172,26 @@ async function main(): Promise<void> {
     is(`${reading}: no Buy button, says buying is not available, no count, no InStock offer`, [shown.includes(buy40), shown.includes(UNREAD), shown.includes(w.left(3, "3")), shown.includes(w.soldOut), markup.includes("schema.org/InStock"), markup.includes("/api/store/checkout")], [false, true, false, false, false, false]);
     inject = null;
     injectStock = null;
+  }
+
+  part("Goes well with: a pick whose coming-soon or key reading is unknown gets no Add to cart (rule 24)");
+  if (!(await setProductPairs(owner, guide.product.id, [app.product.id])).ok) throw new Error("pairs fixture");
+  soonSetKey = `nl:wl:${store.statsId}:soon`;
+  const guidePage = () =>
+    html(`https://marktmorgen.com/@r24keyspages/p/${guide.product.id}`, () => ProductPage({ params: Promise.resolve({ handle: "@r24keyspages", product: guide.product.id }), searchParams: Promise.resolve({}) } as never));
+  const cartButtons = (markup: string) => (markup.match(/aria-pressed=/g) ?? []).length;
+  const pairedControl = await guidePage();
+  is("control, all read: the guide's own Add to cart and its pick's", [text(pairedControl).includes("Desktop app"), cartButtons(pairedControl)], [true, 2]);
+  for (const [reading, set] of [
+    ["the coming-soon set failed", () => { injectSoon = () => Promise.reject(new Error("synthetic Redis failure")); }],
+    ["the coming-soon set held a member that is not an id", () => { injectSoon = () => [[7], []]; }],
+    ["the pick's key count failed", () => { inject = () => Promise.reject(new Error("synthetic Redis failure")); }],
+  ] as const) {
+    set();
+    const markup = await guidePage();
+    is(`${reading}: the pick is still shown, with no Add to cart`, [text(markup).includes("Desktop app"), cartButtons(markup)], [true, 1]);
+    inject = null;
+    injectSoon = null;
   }
 
   part("The sentence, in every language the store can have");

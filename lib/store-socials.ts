@@ -127,7 +127,10 @@ export function typedOf(social: Social): string {
 /** The network a pasted address belongs to, by its host; null when it is none of them (then it is a website). */
 export function networkFor(typed: string): SocialNetwork | null {
   const text = typed.trim();
-  if (/^(mailto:)?[^\s@<>"]+@[^\s@<>"]+\.[a-z]{2,}$/i.test(text)) return "email";
+  // An address with a scheme, or a host and a path, is read by its host first:
+  // "https://www.tiktok.com/@ana.silva" ends like an email address and is not one.
+  const looksLikeAddress = /^[a-z][a-z0-9+.-]*:\/\//i.test(text) || /^[a-z0-9-]+(\.[a-z0-9-]+)+\//i.test(text);
+  if (!looksLikeAddress && /^(mailto:)?[^\s@<>"]+@[^\s@<>"]+\.[a-z]{2,}$/i.test(text)) return "email";
   let host = "";
   try {
     host = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(text) ? text : `https://${text}`).hostname.toLowerCase();

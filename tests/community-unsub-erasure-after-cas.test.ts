@@ -1,3 +1,4 @@
+// Rule 23: complete the synthetic Member fixture with the new empty profile-links field; assertions unchanged.
 /** G independent proof. Six race assertions preserved verbatim from ed40258d; isolated atomic CAS fixture. */
 import { NextRequest } from "next/server";
 import { POST as unsubscribePost } from "@/app/api/mail/unsubscribe/route";
@@ -52,7 +53,7 @@ async function main(): Promise<void> {
     const email = `member${n}@patchmember.example`;
     const key = memberKey(email);
     const token = n.toString(16).padStart(40, "a");
-    const record: Member = { k: key, e: email, n: `Member ${n}`, h: "", dir: false, mail: true, at: 1, seen: 1, muted: false, removed: false, t: token, q: [], qa: 0, qq: [] };
+    const record: Member = { k: key, e: email, n: `Member ${n}`, h: "", dir: false, mail: true, at: 1, seen: 1, muted: false, removed: false, t: token, q: [], qa: 0, qq: [], s: [] };
     await redis.pipeline([["HSET", members, key, JSON.stringify(record)], ["SET", `nl:cm:unsub:${token}`, `${cid}|${key}|${club.handle}`]]);
     return { key, token, email };
   }

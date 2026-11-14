@@ -267,8 +267,11 @@ export const CONTACT_SENT_BYTES = 20_480;
  * A community member as kept, at its largest (lib/community.ts, parseMember):
  * its key, an address, a display name and handle of MAX_DISPLAY_NAME (40),
  * MAX_QUESTIONS (3) answers of MAX_ANSWER (500) and questions of MAX_QUESTION
- * (200), the token and the keys, every character escaped at six bytes. About
- * 15,000 bytes; room above it.
+ * (200), the token and the keys, every character escaped at six bytes, and
+ * since 6 November 2026 MAX_MEMBER_LINKS (3) links to profiles elsewhere of
+ * MAX_MEMBER_LINK_URL (200) ASCII characters (lib/member-links.ts). About
+ * 15,800 bytes; room above it. Also what the archive walk charges a member
+ * at (lib/community-walk.ts).
  */
 export const MEMBER_ROW_BYTES = 20_480;
 /** A member as the API sends it: an address, a name and a handle escaped, two times and four flags. */

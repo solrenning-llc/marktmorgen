@@ -1,0 +1,174 @@
+{
+  "decodedJsonBytes": 286729,
+  "decodedJsonSha256": "9dc99a26d47a01e1cbe3d36867535b50082c0be23287bda551d3454284ee54a2",
+  "files": {
+    "accessibility-inventory.log": {
+      "bytes": 1106,
+      "sha256": "603fbe92f509b1becf0d25e356e951e6988281204bf4a30f5c5c52771928183b"
+    },
+    "bridge-green.log": {
+      "bytes": 411,
+      "sha256": "ef166b59927b4d5fd1b3b6808f1bd78ab7d8c2e42e82a838125d2144fc018866"
+    },
+    "bridge-red.log": {
+      "bytes": 1187,
+      "sha256": "4c7cd4de39a67b269bfedc630a639d74aba08461d567c62eff9282059c64f4ad"
+    },
+    "community-handle-erasure-orphan.log": {
+      "bytes": 709,
+      "sha256": "416b80c4d2f19435d35d32d255698f35d5d82b5769500cec05f5072b67beb607"
+    },
+    "community-handle-give-back-exact.log": {
+      "bytes": 1167,
+      "sha256": "7c78e84fc331b0f6f9fbca130a69997e2f2a3691d86c244d4cfdbce31f154dbd"
+    },
+    "community-handle-reserve-unknown.log": {
+      "bytes": 688,
+      "sha256": "9525b2536aa0d7e0a4b4b2c608f72bc07b76bac5434823f426b7bad5c83a0799"
+    },
+    "community-old-handle-after-failure.log": {
+      "bytes": 1044,
+      "sha256": "9c4f3b0ddd3bc19205dd19855ea12993a33c95a4e6f3658af1840f02f9b2cbcb"
+    },
+    "community-old-handle-release.log": {
+      "bytes": 1359,
+      "sha256": "21d886e56c57893d8e9bef1433f93318951154410441aea405343c068164bb09"
+    },
+    "community-patch-member-exact.log": {
+      "bytes": 8977,
+      "sha256": "1c7f0040c3aff806d7f70b6b8ad6a255023e8ae3a2d7e5d59888c5cedac3a539"
+    },
+    "community-reads-unknown.log": {
+      "bytes": 5705,
+      "sha256": "aa08f8d141b8200755aba691b4ad6cafb2cd258e2d169ac4733ed133b95c0bfa"
+    },
+    "conflict-before.patch": {
+      "bytes": 6521,
+      "sha256": "70b62f5d26d7c321335c92ade88a1094a53a23e7767ce314713932694cbb2e5c"
+    },
+    "final-product.patch": {
+      "bytes": 88475,
+      "sha256": "bcf1fab9bef68f8df03eaeaaf163b17ee13edb1364d56818afeeadbc3154dfed"
+    },
+    "fixture-community-handle-erasure-orphan.log": {
+      "bytes": 709,
+      "sha256": "416b80c4d2f19435d35d32d255698f35d5d82b5769500cec05f5072b67beb607"
+    },
+    "fixture-community-handle-give-back-exact.log": {
+      "bytes": 1167,
+      "sha256": "7c78e84fc331b0f6f9fbca130a69997e2f2a3691d86c244d4cfdbce31f154dbd"
+    },
+    "fixture-community-handle-reserve-unknown.log": {
+      "bytes": 688,
+      "sha256": "9525b2536aa0d7e0a4b4b2c608f72bc07b76bac5434823f426b7bad5c83a0799"
+    },
+    "fixture-community-old-handle-after-failure.log": {
+      "bytes": 1044,
+      "sha256": "9c4f3b0ddd3bc19205dd19855ea12993a33c95a4e6f3658af1840f02f9b2cbcb"
+    },
+    "fixture-community-old-handle-release.log": {
+      "bytes": 1359,
+      "sha256": "21d886e56c57893d8e9bef1433f93318951154410441aea405343c068164bb09"
+    },
+    "fixture-community-patch-member-exact.log": {
+      "bytes": 8977,
+      "sha256": "1c7f0040c3aff806d7f70b6b8ad6a255023e8ae3a2d7e5d59888c5cedac3a539"
+    },
+    "fixture-community-unsub-canonical-index.log": {
+      "bytes": 1422,
+      "sha256": "4647ac975665be9cb469cb059e524ffed95535b291bf9f6436bdd6f54fe7e821"
+    },
+    "fixture-community-unsub-erasure-after-cas.log": {
+      "bytes": 482,
+      "sha256": "8e9c8c8191eac2aeb375350460a584a76fe24a91655ad317c23a94a2ca5b8a6e"
+    },
+    "fixture-community-unsub-erasure-orphan.log": {
+      "bytes": 1635,
+      "sha256": "c6cfcde03775f4c517dd021ebc83d6974e1c5d578cd6df573b0321e973cbe103"
+    },
+    "fixture-community-unsub-token-race.log": {
+      "bytes": 1398,
+      "sha256": "5cc44274ad1776268a914e436e0c775d3b08db4fb786e6e42a0237f2b7562c5d"
+    },
+    "fixture-g3123-token-race-canonical.log": {
+      "bytes": 736,
+      "sha256": "d63ca0fb0693102766844b7c07c3143f6b1701b4a3e5babb36f3965877d7a3e6"
+    },
+    "generated-routes.d.ts.txt": {
+      "bytes": 31546,
+      "sha256": "18b6705a1727b50988a55c7177555c1a0f856dcb7b799f98d1b58884305a661a"
+    },
+    "incoming-main.patch": {
+      "bytes": 27911,
+      "sha256": "d17dc142302a8a18aa7f3f5981c23d5eb5e8c95b45710823cc857261753dc252"
+    },
+    "lint.log": {
+      "bytes": 1579,
+      "sha256": "807599291ca9222f51cde80021429863de87036b17687f6bc05ebaa598544d95"
+    },
+    "mail-socials-block.log": {
+      "bytes": 1668,
+      "sha256": "266e4d28eb69495a4e08db33fdc25d2c505734cd20320dc04ca96cdb93b8ffac"
+    },
+    "main-canonical-control.log": {
+      "bytes": 736,
+      "sha256": "d63ca0fb0693102766844b7c07c3143f6b1701b4a3e5babb36f3965877d7a3e6"
+    },
+    "member-links-before-fixture.log": {
+      "bytes": 6343,
+      "sha256": "3b02c4baa1736b767f7268645682f8647740c0b710d2df03761244a8c0836c8b"
+    },
+    "member-links-before-fixture.ts": {
+      "bytes": 18233,
+      "sha256": "d23dbac16674e20fa76a09f03ba2a067c84cd4a2faa1604733227c894d33b743"
+    },
+    "member-links-final.log": {
+      "bytes": 6372,
+      "sha256": "7fd8667a6f5aecdfc5fe629fa271ad2f411e2cdb336a337d5a4e7590f8cee78d"
+    },
+    "member-links.log": {
+      "bytes": 6343,
+      "sha256": "3b02c4baa1736b767f7268645682f8647740c0b710d2df03761244a8c0836c8b"
+    },
+    "person-data-registry.log": {
+      "bytes": 1520,
+      "sha256": "6d3a9959263c013e60eb567be04f4a0bd8548f7ff07d285ca9991788d64490a8"
+    },
+    "plan-cost-registry.log": {
+      "bytes": 4627,
+      "sha256": "365d2cc18c6c15ea55dda3c509a5fd59e85d2cfaa14d16a2bdf389b823b7af91"
+    },
+    "platform-us-english.log": {
+      "bytes": 2246,
+      "sha256": "7b6754ec80d85f0d58df5a9238718c14cbf0f776cce6d4fd45e852727d59364a"
+    },
+    "socials-keyboards.log": {
+      "bytes": 703,
+      "sha256": "01921bd37b54957f4b60806125aa7ebc950a860e80c253d23ce8c2393abd14d1"
+    },
+    "store-data-registry.log": {
+      "bytes": 1221,
+      "sha256": "05e0e7881ff0e360c727123e17d9830574b42be3ae558843db3b2e3cf1ea3dad"
+    },
+    "store-socials.log": {
+      "bytes": 1157,
+      "sha256": "a9401fe5de9f99421176d53e00d0917c13d136f63f7dde5d183af63504215d46"
+    },
+    "typegen.log": {
+      "bytes": 168,
+      "sha256": "a00ec0845962b8983927b0080fee77cda0416ad0906618d0bb80215e81fff33d"
+    },
+    "types-before-member-fixtures-expanded.log": {
+      "bytes": 10585,
+      "sha256": "13eedd6f9aaa9fa67f1666682f6fede6ebbd2154cd2d516f4058039e8b278328"
+    },
+    "types-before-member-fixtures.log": {
+      "bytes": 9826,
+      "sha256": "b8d624793deffe5cd2e1f0517bd8d084f45c3e8c73e627daec7561277e3986e5"
+    },
+    "types.log": {
+      "bytes": 1284,
+      "sha256": "2901c59a7e0a028a4f3af6f055a259b6da03bd37416f19c238656991059043fc"
+    }
+  }
+}

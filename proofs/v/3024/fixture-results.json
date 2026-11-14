@@ -1,0 +1,200 @@
+[
+  {
+    "path": "tests/community-handle-erasure-orphan.test.ts",
+    "label": "fixture-community-handle-erasure-orphan",
+    "status": 0,
+    "signal": null,
+    "error": null,
+    "checks": "6",
+    "volume": [
+      {
+        "redis": 221,
+        "http": 0
+      },
+      {
+        "redis": 0,
+        "http": 0
+      }
+    ]
+  },
+  {
+    "path": "tests/community-handle-give-back-exact.test.ts",
+    "label": "fixture-community-handle-give-back-exact",
+    "status": 0,
+    "signal": null,
+    "error": null,
+    "checks": "15",
+    "volume": [
+      {
+        "redis": 89,
+        "http": 0
+      },
+      {
+        "redis": 0,
+        "http": 0
+      }
+    ]
+  },
+  {
+    "path": "tests/community-handle-reserve-unknown.test.ts",
+    "label": "fixture-community-handle-reserve-unknown",
+    "status": 0,
+    "signal": null,
+    "error": null,
+    "checks": "6",
+    "volume": [
+      {
+        "redis": 163,
+        "http": 0
+      },
+      {
+        "redis": 0,
+        "http": 0
+      }
+    ]
+  },
+  {
+    "path": "tests/community-old-handle-after-failure.test.ts",
+    "label": "fixture-community-old-handle-after-failure",
+    "status": 0,
+    "signal": null,
+    "error": null,
+    "checks": "8",
+    "volume": [
+      {
+        "redis": 97,
+        "http": 0
+      },
+      {
+        "redis": 0,
+        "http": 0
+      }
+    ]
+  },
+  {
+    "path": "tests/community-old-handle-release.test.ts",
+    "label": "fixture-community-old-handle-release",
+    "status": 0,
+    "signal": null,
+    "error": null,
+    "checks": "20",
+    "volume": [
+      {
+        "redis": 142,
+        "http": 0
+      },
+      {
+        "redis": 0,
+        "http": 0
+      }
+    ]
+  },
+  {
+    "path": "tests/community-patch-member-exact.test.ts",
+    "label": "fixture-community-patch-member-exact",
+    "status": 0,
+    "signal": null,
+    "error": null,
+    "checks": "95",
+    "volume": [
+      {
+        "redis": 571,
+        "http": 0
+      },
+      {
+        "redis": 0,
+        "http": 0
+      }
+    ]
+  },
+  {
+    "path": "tests/community-unsub-canonical-index.test.ts",
+    "label": "fixture-community-unsub-canonical-index",
+    "status": 0,
+    "signal": null,
+    "error": null,
+    "checks": "19",
+    "volume": [
+      {
+        "redis": 304,
+        "http": 0
+      },
+      {
+        "redis": 0,
+        "http": 0
+      }
+    ]
+  },
+  {
+    "path": "tests/community-unsub-erasure-after-cas.test.ts",
+    "label": "fixture-community-unsub-erasure-after-cas",
+    "status": 0,
+    "signal": null,
+    "error": null,
+    "checks": "3",
+    "volume": [
+      {
+        "redis": 107,
+        "http": 0
+      },
+      {
+        "redis": 0,
+        "http": 0
+      }
+    ]
+  },
+  {
+    "path": "tests/community-unsub-erasure-orphan.test.ts",
+    "label": "fixture-community-unsub-erasure-orphan",
+    "status": 0,
+    "signal": null,
+    "error": null,
+    "checks": "12",
+    "volume": [
+      {
+        "redis": 287,
+        "http": 0
+      },
+      {
+        "redis": 0,
+        "http": 0
+      }
+    ]
+  },
+  {
+    "path": "tests/community-unsub-token-race.test.ts",
+    "label": "fixture-community-unsub-token-race",
+    "status": 0,
+    "signal": null,
+    "error": null,
+    "checks": "19",
+    "volume": [
+      {
+        "redis": 125,
+        "http": 0
+      },
+      {
+        "redis": 0,
+        "http": 0
+      }
+    ]
+  },
+  {
+    "path": "tests/g3123-token-race-canonical.proof.ts",
+    "label": "fixture-g3123-token-race-canonical",
+    "status": 1,
+    "signal": null,
+    "error": null,
+    "checks": null,
+    "volume": [
+      {
+        "redis": 76,
+        "http": 0
+      },
+      {
+        "redis": 0,
+        "http": 0
+      }
+    ]
+  }
+]

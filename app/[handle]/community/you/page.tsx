@@ -11,6 +11,8 @@ import { Carry, CommunityBar, communityNotices } from "@/components/community-pa
 import { communityWords } from "@/lib/buyer-words/community";
 import { LANGUAGES } from "@/lib/store-language";
 import { levelOf, pointsOf, toNextLevel } from "@/lib/community-points";
+import { MAX_MEMBER_LINKS } from "@/lib/member-links";
+import { MemberLinkBoxes } from "@/components/member-link-boxes";
 
 type Params = { params: Promise<{ handle: string }>; searchParams: Promise<{ [key: string]: string | string[] | undefined }> };
 
@@ -21,7 +23,7 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
   return { title: `${communityWords(store?.language).tabYou} — Marktmorgen`, robots: { index: false, follow: false } };
 }
 
-/** A member's own choices: the name they are seen by, the directory, the emails. */
+/** A member's own choices: the name they are seen by, the directory and their links in it, the emails. */
 export default async function CommunityYouPage({ params, searchParams }: Params) {
   const { handle: raw } = await params;
   const decoded = decodeURIComponent(raw);
@@ -100,6 +102,15 @@ export default async function CommunityYouPage({ params, searchParams }: Params)
                 <span className="st-muted block text-sm">{w.listMeNote}</span>
               </span>
             </label>
+            <MemberLinkBoxes
+              kept={member.s.map((link) => link.url)}
+              words={{
+                legend: w.linksLegend,
+                note: w.linksNote,
+                labels: Array.from({ length: MAX_MEMBER_LINKS }, (_, i) => w.linkLabel(i + 1)),
+                refused: w.linkRefused,
+              }}
+            />
             <label className="flex min-h-11 items-start gap-3">
               <input type="checkbox" name="mail" value="1" defaultChecked={member.mail} className="mt-0.5 h-5 w-5 shrink-0" />
               <span>

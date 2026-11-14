@@ -1,0 +1,26 @@
+{
+  "scannerBeforeReceipt": {
+    "trackedFiles": 4668,
+    "output": "Public data check: 4668 tracked files; 0 file(s) require correction.\n"
+  },
+  "helperLint": "",
+  "stagedDiffCheck": 0,
+  "againstMainDiffCheck": 0,
+  "runtimeFailureRetained": {
+    "graph": "g3123-token-race-canonical.proof.ts",
+    "head": [
+      5,
+      1
+    ],
+    "wholeExactMain": [
+      5,
+      1
+    ]
+  },
+  "authorCannotIndependentlyApprove": true,
+  "scannerFinal": {
+    "trackedFiles": 4669,
+    "corrections": 0,
+    "output": "Public data check: 4669 tracked files; 0 file(s) require correction.\n"
+  }
+}

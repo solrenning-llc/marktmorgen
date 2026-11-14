@@ -1,0 +1,25 @@
+{
+  "main": "44f4e252cf787afca1152a703ab82b59a104162e",
+  "graph": "tests/g3123-token-race-canonical.proof.ts",
+  "originalGraphBlob": "1a78854bd08b229c491a09fd1e18f333db9de665",
+  "wholeMainCheckout": true,
+  "checks": 6,
+  "passing": 5,
+  "failing": 1,
+  "failedAssertion": "two independent calls returned",
+  "expected": [
+    true,
+    40,
+    40,
+    true
+  ],
+  "actual": [
+    true,
+    40,
+    40,
+    false
+  ],
+  "mainAndIntegrationSame": true,
+  "assertionAltered": false,
+  "networkCalls": 0
+}

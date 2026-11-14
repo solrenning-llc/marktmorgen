@@ -20,6 +20,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { type Member, directory } from "@/lib/community";
+import { MEMBER_ROW_BYTES } from "@/lib/api-read-rules";
 import { allEvents, eventCountExact } from "@/lib/community-events";
 import { communityOf, eventEntry, lessonEntries, memberEntry } from "@/lib/community-index";
 import { INDEXED_WORDS_BYTES, type SearchKind, indexWrites, indexedWords, unindexWrites } from "@/lib/community-search";
@@ -73,7 +74,13 @@ export async function needsWalk(communityId: string): Promise<boolean> {
 export const WALK_COURSE_BYTES = 512_000;
 export const WALK_BODY_BYTES = MAX_BODY_LENGTH * 3;
 export const WALK_EVENT_BYTES = 10_000;
-export const WALK_MEMBER_BYTES = 2_000;
+/**
+ * A member's record at its largest, answers and profile links included: the
+ * figure the API's reads of members use (lib/api-read-rules.ts). Until
+ * 6 November 2026 this was 2,000, which three answers of 500 characters
+ * alone could pass.
+ */
+export const WALK_MEMBER_BYTES = MEMBER_ROW_BYTES;
 /** Things indexed per paid step. */
 const WALK_BATCH = 50;
 /** Members read per page of the directory. */

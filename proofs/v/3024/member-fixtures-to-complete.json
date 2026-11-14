@@ -1,0 +1,12 @@
+[
+  "tests/community-handle-erasure-orphan.test.ts",
+  "tests/community-handle-give-back-exact.test.ts",
+  "tests/community-handle-reserve-unknown.test.ts",
+  "tests/community-old-handle-after-failure.test.ts",
+  "tests/community-old-handle-release.test.ts",
+  "tests/community-patch-member-exact.test.ts",
+  "tests/community-unsub-canonical-index.test.ts",
+  "tests/community-unsub-erasure-after-cas.test.ts",
+  "tests/community-unsub-erasure-orphan.test.ts",
+  "tests/community-unsub-token-race.test.ts"
+]

@@ -1,0 +1,257 @@
+[
+  {
+    "name": "accessibility-inventory",
+    "status": 0,
+    "signal": null,
+    "error": null,
+    "checks": "16",
+    "volume": [
+      {
+        "redis": 0,
+        "http": 0
+      },
+      {
+        "redis": 0,
+        "http": 0
+      }
+    ]
+  },
+  {
+    "name": "community-old-handle-after-failure",
+    "status": 0,
+    "signal": null,
+    "error": null,
+    "checks": "8",
+    "volume": [
+      {
+        "redis": 97,
+        "http": 0
+      },
+      {
+        "redis": 0,
+        "http": 0
+      }
+    ]
+  },
+  {
+    "name": "community-handle-give-back-exact",
+    "status": 0,
+    "signal": null,
+    "error": null,
+    "checks": "15",
+    "volume": [
+      {
+        "redis": 89,
+        "http": 0
+      },
+      {
+        "redis": 0,
+        "http": 0
+      }
+    ]
+  },
+  {
+    "name": "community-old-handle-release",
+    "status": 0,
+    "signal": null,
+    "error": null,
+    "checks": "20",
+    "volume": [
+      {
+        "redis": 142,
+        "http": 0
+      },
+      {
+        "redis": 0,
+        "http": 0
+      }
+    ]
+  },
+  {
+    "name": "community-handle-reserve-unknown",
+    "status": 0,
+    "signal": null,
+    "error": null,
+    "checks": "6",
+    "volume": [
+      {
+        "redis": 163,
+        "http": 0
+      },
+      {
+        "redis": 0,
+        "http": 0
+      }
+    ]
+  },
+  {
+    "name": "community-patch-member-exact",
+    "status": 0,
+    "signal": null,
+    "error": null,
+    "checks": "95",
+    "volume": [
+      {
+        "redis": 571,
+        "http": 0
+      },
+      {
+        "redis": 0,
+        "http": 0
+      }
+    ]
+  },
+  {
+    "name": "community-reads-unknown",
+    "status": 0,
+    "signal": null,
+    "error": null,
+    "checks": "110",
+    "volume": [
+      {
+        "redis": 558,
+        "http": 0
+      },
+      {
+        "redis": 0,
+        "http": 0
+      }
+    ]
+  },
+  {
+    "name": "community-handle-erasure-orphan",
+    "status": 0,
+    "signal": null,
+    "error": null,
+    "checks": "6",
+    "volume": [
+      {
+        "redis": 221,
+        "http": 0
+      },
+      {
+        "redis": 0,
+        "http": 0
+      }
+    ]
+  },
+  {
+    "name": "store-socials",
+    "status": 0,
+    "signal": null,
+    "error": null,
+    "checks": "10",
+    "volume": [
+      {
+        "redis": 0,
+        "http": 0
+      },
+      {
+        "redis": 0,
+        "http": 0
+      }
+    ]
+  },
+  {
+    "name": "socials-keyboards",
+    "status": 0,
+    "signal": null,
+    "error": null,
+    "checks": "7",
+    "volume": [
+      {
+        "redis": 0,
+        "http": 0
+      },
+      {
+        "redis": 0,
+        "http": 0
+      }
+    ]
+  },
+  {
+    "name": "mail-socials-block",
+    "status": 0,
+    "signal": null,
+    "error": null,
+    "checks": "23",
+    "volume": [
+      {
+        "redis": 0,
+        "http": 0
+      },
+      {
+        "redis": 0,
+        "http": 0
+      }
+    ]
+  },
+  {
+    "name": "platform-us-english",
+    "status": 0,
+    "signal": null,
+    "error": null,
+    "checks": "42",
+    "volume": [
+      {
+        "redis": 0,
+        "http": 0
+      },
+      {
+        "redis": 0,
+        "http": 0
+      }
+    ]
+  },
+  {
+    "name": "store-data-registry",
+    "status": 0,
+    "signal": null,
+    "error": null,
+    "checks": "7",
+    "volume": [
+      {
+        "redis": 0,
+        "http": 0
+      },
+      {
+        "redis": 0,
+        "http": 0
+      }
+    ]
+  },
+  {
+    "name": "person-data-registry",
+    "status": 0,
+    "signal": null,
+    "error": null,
+    "checks": "20",
+    "volume": [
+      {
+        "redis": 0,
+        "http": 0
+      },
+      {
+        "redis": 0,
+        "http": 0
+      }
+    ]
+  },
+  {
+    "name": "plan-cost-registry",
+    "status": 0,
+    "signal": null,
+    "error": null,
+    "checks": "26",
+    "volume": [
+      {
+        "redis": 0,
+        "http": 0
+      },
+      {
+        "redis": 0,
+        "http": 0
+      }
+    ]
+  }
+]

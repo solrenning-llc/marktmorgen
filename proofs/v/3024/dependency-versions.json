@@ -1,0 +1,27 @@
+[
+  {
+    "name": "next",
+    "actual": "16.4.5",
+    "lock": "16.4.5"
+  },
+  {
+    "name": "typescript",
+    "actual": "5.9.3",
+    "lock": "5.9.3"
+  },
+  {
+    "name": "esbuild",
+    "actual": "0.28.2",
+    "lock": "0.28.2"
+  },
+  {
+    "name": "eslint",
+    "actual": "9.39.5",
+    "lock": "9.39.5"
+  },
+  {
+    "name": "eslint-config-next",
+    "actual": "16.4.5",
+    "lock": "16.4.5"
+  }
+]

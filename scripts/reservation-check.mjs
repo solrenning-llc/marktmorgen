@@ -130,7 +130,7 @@ export function allReservations(text, agentFiles = []) {
  * on the base branch: a file that does not exist there yet may be made (so
  * moving the rows into their files could be done in one PR). Empty means the
  * PR may proceed.
- * @param {{ text: string, branch: string, changed: string[], agentFiles?: { path: string, text: string }[] }} input
+ * @param {{ text: string, branch: string, changed: string[], agentFiles?: { path: string, text: string }[], headFiles?: Record<string, string | null> }} input
  */
 export function conflicts({ text, branch, changed, agentFiles = [], headFiles = {} }) {
   const lanes = lanePrefixes(text);

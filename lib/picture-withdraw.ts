@@ -23,7 +23,7 @@
 import { createHmac } from "node:crypto";
 import { BlobNotFoundError } from "@vercel/blob";
 import { copy, del, head } from "@/lib/blob";
-import { dropMirroredPicture } from "@/lib/picture-r2-copy";
+import { type PictureR2Config, dropMirroredPicture } from "@/lib/picture-r2-copy";
 import { readListingExactly } from "@/lib/catalog";
 import { imageType } from "@/lib/product-image";
 import { deriveKey } from "@/lib/secret-box";
@@ -78,12 +78,14 @@ export async function withdrawProductPicture(
   id: string,
   before: PictureNames | null,
   remember: (olds: PictureNames) => Promise<void>,
+  /** The pictures' bucket, for a test; left out, its own settings (pictureR2Config). */
+  options: { r2?: PictureR2Config | null } = {},
 ): Promise<"moved" | "none" | "changed"> {
   // A record changed meanwhile that still shows an old file (the same picture with another smaller copy, say) is read
   // again and moved again: a takedown is never done while an address its pages gave out still answers (Claude 2 on
   // #3382). A record that keeps changing throws, every file still there, and the next press finishes.
   for (let attempt = 0; attempt < WITHDRAW_ATTEMPTS; attempt += 1) {
-    const done = await withdrawOnce(ref, id, before, remember);
+    const done = await withdrawOnce(ref, id, before, remember, options);
     if (done !== "again") return done;
   }
   throw new Error("the picture kept changing while it was being moved");
@@ -98,7 +100,15 @@ async function withdrawOnce(
   id: string,
   before: PictureNames | null,
   remember: (olds: PictureNames) => Promise<void>,
+  options: { r2?: PictureR2Config | null },
 ): Promise<"moved" | "none" | "changed" | "again"> {
+  // A takedown is never done while an old name may still answer from the pictures' own bucket: only a delete
+  // confirmed there lets it say "moved" (Codex X5 and Claude 7 on #4357). Anything else throws, the old names kept by
+  // `remember`, so the next press deletes them again; a failed delete is also on the bucket's list to be tried again.
+  const dropOld = async (names: string[]): Promise<void> => {
+    const dropped = await dropMirroredPicture(names, "r2" in options ? { config: options.r2 } : {});
+    if (dropped !== "gone") throw new Error("the picture's copy in its own bucket could not be confirmed deleted");
+  };
   // Read again, after the product was taken off: the caller's copy of the store may predate it.
   const store = await storeForEmail(ref);
   if (!store) throw new Error("the store could not be read again");
@@ -114,7 +124,7 @@ async function withdrawOnce(
     await del(namesOf(before).filter((name) => !shown.includes(name)));
     // A copy of the old names in the pictures' own bucket goes too, or the takedown would still answer there
     // (#4237, item 4); off, or never copied there, nothing is left to delete.
-    await dropMirroredPicture(namesOf(before).filter((name) => !shown.includes(name)));
+    await dropOld(namesOf(before).filter((name) => !shown.includes(name)));
     return "moved";
   }
   const from = { path: product.image.path, small: product.image.small?.path ?? null };
@@ -145,6 +155,6 @@ async function withdrawOnce(
   // Only now, with the record confirmed to name the copies, the old files go, and their copy in the pictures' own
   // bucket with them (#4237, item 4).
   await del(olds);
-  await dropMirroredPicture(olds);
+  await dropOld(olds);
   return "moved";
 }

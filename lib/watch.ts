@@ -222,15 +222,19 @@ export async function measure(folder: string, now = Date.now()): Promise<number 
 /**
  * The hourly reading, run from the five-minute video job: reads each store
  * that is due, the longest-waiting first. Stops at `deadline`; what is left
- * is still due, and is first in line next time.
+ * is still due, and is first in line next time. Throws UnknownReplyError
+ * when the line itself cannot be read: never "nobody due".
  */
 export async function measureDue(deadline: number, now = Date.now()): Promise<{ read: number; seconds: number }> {
   const counts = { read: 0, seconds: 0 };
   if (!isRedisConfigured() || !isStreamConfigured()) return counts;
-  const [due] = await redisPipeline([["ZRANGEBYSCORE", DUE, 0, now, "LIMIT", 0, 60]]);
-  for (const folder of Array.isArray(due) ? due : []) {
+  // Read exactly (CX-123 rule 24; audit R24, finding 7.3): a list of strings, [] when nobody is due. A reply of any
+  // other shape is unknown and throws, so the video job answers 500 rather than "nothing to measure": the stores stay
+  // in line and the next run reads them, so the watching reaches the window the video admission reads.
+  const due = stringList(repliesFor(await redisPipeline([["ZRANGEBYSCORE", DUE, 0, now, "LIMIT", 0, 60]]), 1)?.[0]);
+  if (!due) throw new UnknownReplyError("the stores due to have their video measured");
+  for (const folder of due) {
     if (Date.now() > deadline) return counts;
-    if (typeof folder !== "string") continue;
     const added = await measure(folder, now);
     if (added === null) {
       await redisPipeline([["ZADD", DUE, now + AGAIN_MS, folder]]);

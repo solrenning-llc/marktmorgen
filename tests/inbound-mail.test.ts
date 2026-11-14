@@ -280,6 +280,32 @@ async function main(): Promise<void> {
   is("a possibly accepted message remains an explicit failure without another POST", [unknown.status, unknownAgain.status, outboundPosts - postsBefore, sent.length - sentBefore], [500, 500, 1, 0]);
   is("the original provider source remains available for reconciliation", (MAILS[uncertainId] as Record<string, unknown>).text, (MAILS[A] as Record<string, unknown>).text);
 
+  part("A once-only mark that cannot be read is never taken as fresh");
+  // The svix-id's once-only mark (nl:inbound:seen:) unread, Redis throwing or answering in another shape: nothing is
+  // forwarded and Resend is answered with an error, so it tries again (CX-123 rule 24), never carried on unguarded.
+  for (const [name, answer] of [
+    ["Redis throws", "throw"],
+    ["a reply in another shape", ["QUEUED"]],
+  ] as const) {
+    const markId = newMailLike(A), sentBefore = sent.length, readsBefore = reads.length;
+    const realPipeline = redis.pipeline.bind(redis);
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      if (commands.some((command) => String(command[1] ?? "").startsWith("nl:inbound:seen:"))) {
+        if (answer === "throw") throw new Error("Redis is down (test)");
+        return answer;
+      }
+      return realPipeline(commands);
+    }) as typeof redis.pipeline;
+    let markless: Response;
+    try {
+      markless = await POST(announce(markId, { id: `msg_markless_${name.length}` }));
+    } finally {
+      redis.pipeline = realPipeline;
+    }
+    is(`${name}: not acknowledged, so Resend tries again`, markless.status >= 500, true);
+    is(`${name}: nothing read or forwarded`, [reads.length - readsBefore, sent.length - sentBefore], [0, 0]);
+  }
+
   part("Names and addresses");
   is("a name and an address", parseSender('"Doe, Jane" <jane@example.com>'), { name: "Doe, Jane", address: "jane@example.com" });
   is("a bare address", parseSender("jane@example.com"), { name: "", address: "jane@example.com" });

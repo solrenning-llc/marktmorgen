@@ -19,6 +19,7 @@
  */
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { isSenderConfigured } from "@/lib/email";
 import { withinEssentialLimit } from "@/lib/request-guard";
 import { createHash } from "node:crypto";
@@ -155,10 +156,20 @@ export async function keepAssistReminder(input: { store: Store; session: string;
 export async function forgetAssistReminderPerson(statsId: string | null, email: string): Promise<number> {
   if (!statsId || !email || !isRedisConfigured()) return 0;
   const who = whoKey(statsId, email);
-  const [members] = await redisPipeline([["SMEMBERS", who]]);
-  const sessions = (Array.isArray(members) ? members : []).map(String).filter((s) => SESSION.test(s));
-  const [gone] = await redisPipeline([["DEL", who, ...sessions.map(assistRemindKey)]]);
-  return Number(gone) || 0;
+  // Read exactly (CX-123 rule 24): only a list of checkouts is one; anything else throws before the set that finds the
+  // consents is deleted, so the part is said as not finished and a retry still finds every consent.
+  const sessions = checkoutsOf(repliesFor(await redisPipeline([["SMEMBERS", who]]), 1)?.[0], "a person's checkout reminder consents");
+  const keys = [who, ...sessions.map(assistRemindKey)];
+  const gone = countOf(repliesFor(await redisPipeline([["DEL", ...keys]]), 1)?.[0]);
+  if (gone === null || gone > keys.length) throw new UnknownReplyError("the deletion of a person's checkout reminder consents");
+  return gone;
+}
+
+/** The checkouts a person's set names, or a throw when the reply is not a list of them. */
+function checkoutsOf(reply: unknown, what: string): string[] {
+  const list = stringList(reply);
+  if (!list) throw new UnknownReplyError(what);
+  return list.filter((s) => SESSION.test(s));
 }
 
 /**
@@ -168,17 +179,23 @@ export async function forgetAssistReminderPerson(statsId: string | null, email: 
  */
 export async function remindersOf(statsId: string | null, email: string): Promise<{ address: string; sentence: string; version: string; at: number }[]> {
   if (!statsId || !email || !isRedisConfigured()) return [];
-  const [members] = await redisPipeline([["SMEMBERS", whoKey(statsId, email)]]);
-  const sessions = (Array.isArray(members) ? members : []).map(String).filter((s) => SESSION.test(s));
+  const what = "a person's checkout reminder consents, for their copy";
+  // Read as the erasure reads them (rule 24): a reply of another shape, or a kept consent that does not read, throws,
+  // so the copy is never given as complete without it. A consent gone since (null) was not kept.
+  const sessions = checkoutsOf(repliesFor(await redisPipeline([["SMEMBERS", whoKey(statsId, email)]]), 1)?.[0], what);
   if (!sessions.length) return [];
-  const raws = await redisPipeline(sessions.map((s) => ["GET", assistRemindKey(s)]));
+  const raws = repliesFor(await redisPipeline(sessions.map((s) => ["GET", assistRemindKey(s)])), sessions.length);
+  if (!raws) throw new UnknownReplyError(what);
   return raws.flatMap((raw) => {
+    if (raw === null) return [];
+    let v: Partial<Consent> | null = null;
     try {
-      const v = JSON.parse(String(raw)) as Partial<Consent>;
-      return typeof v.e === "string" ? [{ address: v.e, sentence: String(v.t ?? ""), version: String(v.v ?? ""), at: Number(v.at) || 0 }] : [];
+      v = typeof raw === "string" ? (JSON.parse(raw) as Partial<Consent>) : null;
     } catch {
-      return [];
+      v = null;
     }
+    if (!v || typeof v !== "object" || typeof v.e !== "string") throw new UnknownReplyError(what);
+    return [{ address: v.e, sentence: String(v.t ?? ""), version: String(v.v ?? ""), at: Number(v.at) || 0 }];
   });
 }
 

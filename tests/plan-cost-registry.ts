@@ -80,6 +80,7 @@ import { CLOSING_DAYS, DEL_BATCH, ENDED_LIST_DOWNLOADS, ENDED_STORE_EXPORTS, FOL
 import { MAX_CRM_FIELDS } from "@/lib/crm-rules";
 import { PERSON_ARG_BYTES } from "@/lib/crm";
 import { BUYER_SEND_DAYS, EMAILS_PER_BUYER_PER_ENDING, STRIPE_CALLS_PER_MEMBER, buyerNoticeCap } from "@/lib/closing-buyers-rules";
+import { PAYPAL_PAGE, buyerPagesCap } from "@/lib/closing-buyers";
 import { MAX_NAME_LENGTH as STORE_NAME_MOST, MAX_STORE_BYTES } from "@/lib/store";
 import { BODIES_PER_READ } from "@/lib/course";
 import { COURSE_BYTES } from "@/lib/api-read-rules";
@@ -263,7 +264,8 @@ export const ORDER_RENEWAL_STOP = (STRIPE_WAIT_SECONDS / RENEWALS_AT_ONCE + STRI
  * member's last payment kept until the store closes or stays, a few
  * kilobytes for the closing days, the day its notice may come early and the
  * week a late last notice adds; its share of a page of a hundred of the
- * store's own payments read to find it (lib/closing-buyers.ts, buyerPagesCap); and, as if every one were a member, the calls to Stripe a
+ * store's own payments read to find it (lib/closing-buyers.ts, buyerPagesCap); the
+ * closing's PayPal pages (CLOSING_PAYPAL_PAGE, below), priced per page; and, as if every one were a member, the calls to Stripe a
  * membership's closing makes at the most, STRIPE_CALLS_PER_MEMBER, taken
  * from the closing's call budget before each is made (lib/closing-holds.ts,
  * takeCalls; its end is its order's, ORDER_RENEWAL_STOP), each waited on
@@ -279,9 +281,18 @@ export const CLOSING_STRIPE_CALLS = STRIPE_CALLS_PER_MEMBER;
 export const CLOSING_BUYER_COST = EMAILS_PER_BUYER_PER_ENDING * PER_EMAIL
   + 2 * 1024 * ((CLOSING_DAYS + WARN_WEEK_DAYS + BUYER_SEND_DAYS) / 30) * DB_BYTE_MONTH
   + (CLOSING_STRIPE_CALLS + 1 / 100) * STRIPE_WAIT_SECONDS * MEMORY_SECOND + 6 * COMMAND;
+/**
+ * One page of a closing store's PayPal buyers (lib/closing-buyers.ts, PAYPAL_PAGE; #4258): its range and one MGET of
+ * PAYPAL_PAGE records at MAX_PAID_BYTES each through the database, the probe past the cap, the told list's read and
+ * write for the page and, at the most, two commands a sale to count one not told (HSETNX and its read-back), and its
+ * wait at 2 GB as a page of Stripe payments is waited on. At most buyerPagesCap pages a closing, PayPal's and
+ * Stripe's together, so a closing reads no more than buyerPagesCap of them, whatever its buyers' count.
+ */
+export const CLOSING_PAYPAL_PAGE = PAYPAL_PAGE * MAX_PAID_BYTES * DB_BYTE + (5 + 2 * PAYPAL_PAGE) * COMMAND + STRIPE_WAIT_SECONDS * MEMORY_SECOND;
 /** One closing's buyers and members at its cap, in dollars: a store of this plan that paid, or one that never did. */
 export function closingBuyersCost(tier: Tier, paid = true): number {
-  return buyerNoticeCap(tier, paid) * CLOSING_BUYER_COST;
+  const cap = buyerNoticeCap(tier, paid);
+  return cap * CLOSING_BUYER_COST + buyerPagesCap(cap) * CLOSING_PAYPAL_PAGE;
 }
 
 /** The existing two-email order envelope: confirmation, shipment email,

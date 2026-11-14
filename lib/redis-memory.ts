@@ -1603,6 +1603,7 @@ export class MemoryRedis {
         }
         if (key.startsWith("-- marktmorgen:store-data:v1\n") && args[0] === "1") return this.storeData(args.slice(1));
         if (key.startsWith("-- marktmorgen:order-write:v1\n")) return this.orderWrite(args);
+        if (key.startsWith("-- marktmorgen:order-write-if-new:v1\n")) return this.orderWriteIfNew(args);
         // lib/order-data.ts ORDER_WRITE_ONCE: ORDER_WRITE behind a once-only mark (KEYS[2]), read first; a mark there
         // writes nothing, and a command refused inside takes the mark back out.
         if (key.startsWith("-- marktmorgen:order-write-once:v1\n") && Number(args[0]) >= 2) {
@@ -1790,6 +1791,15 @@ export class MemoryRedis {
         const list = this.list(key);
         for (const value of args) list.unshift(value);
         return list.length;
+      }
+      case "LPOP": {
+        // LPOP key, no count (lib/licence-keys.ts, a key from the pool): the first item, or null; an emptied list is gone.
+        if (args.length) throw new Error("ERR LPOP with a count is not implemented in MemoryRedis");
+        if (!this.data.has(key)) return null;
+        const list = this.list(key);
+        const first = list.shift() ?? null;
+        if (!list.length) this.data.delete(key);
+        return first;
       }
       case "LTRIM": {
         const list = this.list(key);
@@ -2191,6 +2201,34 @@ export class MemoryRedis {
   private typeOf(key: string): string {
     if (!this.present(key)) return "none";
     return String(this.run(["TYPE", key]));
+  }
+
+  /**
+   * lib/order-data.ts, ORDER_WRITE_IF_NEW: the same checks before anything is written (hash writes only, each well
+   * formed, the first an HSETNX, on keys that are hashes or not there, the room included), {-2} with nothing written
+   * when that HSETNX's field is already there, and otherwise ORDER_WRITE as it runs.
+   */
+  private orderWriteIfNew(args: string[]): unknown {
+    const count = Number(args[0]);
+    const keys = args.slice(1, 1 + count);
+    const argv = args.slice(1 + count);
+    const n = Number(argv[0]);
+    const hashOrNone = (key: string) => ["hash", "none"].includes(this.typeOf(key));
+    if (!Number.isInteger(n) || n < 1 || n > 48 || argv[1] !== "HSETNX" || argv[3] !== "2" || !hashOrNone(keys[0])) return [-1];
+    let i = 1;
+    for (let c = 0; c < n; c += 1) {
+      const name = argv[i];
+      const k = Number(argv[i + 1]);
+      const argc = Number(argv[i + 2]);
+      if (!Number.isInteger(k) || k < 2 || !keys[k - 1] || !Number.isInteger(argc) || i + 2 + argc > argv.length - 1) return [-1];
+      if (!((name === "HSETNX" && argc === 2) || (name === "HSET" && argc >= 2 && argc % 2 === 0) || (name === "HDEL" && argc >= 1))) return [-1];
+      if (!hashOrNone(keys[k - 1])) return [-1];
+      i += 3 + argc;
+    }
+    if (i !== argv.length) return [-1];
+    const first = keys[Number(argv[2]) - 1];
+    if (this.typeOf(first) === "hash" && this.hash(first).has(argv[4])) return [-2];
+    return this.orderWrite(args);
   }
 
   /**

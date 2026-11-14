@@ -24,7 +24,8 @@
  * try it again, knowing it may arrive twice; or end the run.
  *
  *   nl:wf:run:<flowId>:<person>   hash: email, status, step, note, startedAt, updatedAt, open,
- *                                 waits, waitAt ("<step>:<first wait>"), retries (lib/flow-retry.ts)
+ *                                 waits, waitAt ("<step>:<first wait>"), retries (lib/flow-retry.ts);
+ *                                 a wait only for Amazon SES room counts nothing (letGoWaitClock)
  *   nl:wf:log:<flowId>:<person>   list of JSON events, oldest first, at most MAX_RUN_EVENTS
  *   nl:wf:runs:<flowId>           zset: person → last change, every run of the last 400 days
  *                                 (complete, so a person or a store can be erased in full)
@@ -248,6 +249,18 @@ export async function countWaits(flowId: string, emails: string[], index: number
   });
   if (fresh.length) await redisPipeline(fresh).catch(() => {});
   return out;
+}
+
+/**
+ * For people whose step waits only for room at Amazon SES (lib/flows.ts,
+ * waitOrStop): nothing is counted, and the step's day clock (waitAt) is let
+ * go, so the time spent waiting for that room never counts toward
+ * MAX_WAIT_DAYS_PER_STEP; a later wait for another reason starts its clock
+ * afresh. One command each. A failure is only logged: it can stop nothing.
+ */
+export async function letGoWaitClock(flowId: string, emails: string[]): Promise<void> {
+  if (!emails.length) return;
+  await redisPipeline(emails.map((email) => ["HDEL", runKey(flowId, personOf(email)), "waitAt"])).catch((error) => console.error("letting go of a workflow wait clock failed", error));
 }
 
 /**

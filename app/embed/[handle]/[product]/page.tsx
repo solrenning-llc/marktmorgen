@@ -22,7 +22,7 @@ import { PriceTag, pageAction, productPath } from "@/components/store-product";
 import { RatingLine } from "@/components/review-list";
 import { speech } from "@/lib/buyer-words";
 import { scriptMode, withTags } from "@/lib/embed-sites";
-import { type ScriptOpen, readScriptOpen } from "@/lib/embed-open";
+import { type ScriptOpen, embedOpensLeft, readScriptOpen } from "@/lib/embed-open";
 import { EmbedMessenger } from "@/components/embed-messenger";
 import { StoreBeacon } from "@/components/store-beacon";
 import { SlotPicker } from "@/components/slot-picker";
@@ -101,8 +101,44 @@ const load = cache(async (raw: string, id: string): Promise<{ store: Store | nul
   return { store, product: product && !product.hidden ? product : null, unread: false };
 });
 
+/** The store address asked for, as load reads it; "" when it cannot be decoded. */
+function askedHandle(raw: string): string {
+  try {
+    return normaliseHandle(decodeURIComponent(raw).replace(/^@/, ""));
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Whether this connection may still open this store's cards (lib/embed-open.ts, embedOpensLeft): counted once a
+ * request, before anything about the store is read, by the page and its title alike.
+ */
+const opensLeft = (raw: string): Promise<boolean> => embedOpensLeft(askedHandle(raw));
+
+/**
+ * Past the opens one connection gets: a plain link to the store, drawn from the address asked for alone, so nothing
+ * about the store or the product is read for it. A frame opens it in a new tab; a page of its own, in the same tab.
+ */
+function PlainStoreLink({ handle, page }: { handle: string; page: boolean }) {
+  // As a page of its own, the link stays in the tab; in a frame, it opens a new one (the card's own `aside`).
+  const aside = page ? { target: "_top" } : { target: "_blank", rel: "noopener" };
+  return (
+    <div className="flex h-screen items-center justify-center p-4" style={{ background: "transparent" }}>
+      <style>{SEE_THROUGH}</style>
+      <p className="rounded-3xl bg-white px-5 py-4 text-center text-sm text-ink-soft ring-1 ring-line">
+        {/* An address that does not decode names no store: said as for a product that is not there. */}
+        {!handle ? "This product is no longer on sale." : <a href={`/@${handle}`} {...aside} className="font-semibold underline underline-offset-4">
+          {page ? "See the store" : "See the store (opens in a new tab)"}
+        </a>}
+      </p>
+    </div>
+  );
+}
+
 export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const { handle, product: id } = await params;
+  if (!(await opensLeft(handle))) return { title: "Not available just now", robots: { index: false, follow: false } };
   const { store, product, unread } = await load(handle, id);
   return {
     title: store && product ? `${product.title} — ${store.name}` : unread ? "Not available just now" : "Not on sale",
@@ -150,6 +186,12 @@ export default async function EmbedCard({ params, searchParams }: Params) {
   const query = await searchParams;
   const place = placeFrom(query.utm_source);
   const mode = scriptMode(query.mm);
+  // Counted before anything is read (lib/embed-open.ts, embedOpensLeft); past it, nothing about the store is read.
+  const within = await opensLeft(handle);
+  if (!within) {
+    const asked = askedHandle(handle);
+    return <PlainStoreLink handle={asked} page={mode === "page"} />;
+  }
   const loaded = await load(handle, id);
   const product = loaded.product;
   // With the visitor's country, for a fair price for it (lib/fair-price.ts).

@@ -1209,11 +1209,11 @@ export const COST_LINES: CostLine[] = [
     feature: "Selling from any website (#518)",
     monthlyUsd: ALL_TIERS_SAME(0),
     sources: [
-      { file: "lib/embed-open.ts", names: ["isResting", "OPENS_PER_TEN_MINUTES"] },
-      { file: "app/embed/[handle]/[product]/page.tsx", names: ["StoreBeacon"] },
+      { file: "lib/embed-open.ts", names: ["isResting", "OPENS_PER_TEN_MINUTES", "embedOpensLeft"] },
+      { file: "app/embed/[handle]/[product]/page.tsx", names: ["StoreBeacon", "opensLeft"] },
       { file: "app/embed/[handle]/join/page.tsx", names: ["StoreBeacon"] },
     ],
-    basis: "Page views load nothing from us; an open of a card counts as a visit, sent by the card's own beacon like any page of the store (app/api/store/hit, through the host's browser check), and rests with the public pages, so it is inside the visits line, and a checkout from it is an order.",
+    basis: "An open of a card by the checkout script counts as a visit, sent by the card's own beacon like any page of the store (app/api/store/hit, through the host's browser check), and rests with the public pages, so it is inside the visits line, and a checkout from it is an order. NOT covered by this figure (Claude 7, 14 November 2026; corrects the earlier \"Page views load nothing from us\", which was false): every view of a card pasted with the frame code (no ?mm=) is a dynamic function that reads the store from the database, at least 5 commands for a plain product (the store's address and record, its sold-out and pre-order marks) besides the 2 of the per-connection count, and more with stock, licence keys, extras or ratings; it counts no visit and takes no public request. Those reads are now bounded per connection only (embedOpensLeft in lib/embed-open.ts: OPENS_PER_TEN_MINUTES opens per address and store in ten minutes, counted before anything is read, a plain link past them), not per store: no monthly figure bounds them for a store, so this line's figure does not cover them and nothing here certifies them; counting them in the store's public requests, or caching the card, is the owner's decision. Unknown, never zero.",
   },
   {
     id: "certificate-page",

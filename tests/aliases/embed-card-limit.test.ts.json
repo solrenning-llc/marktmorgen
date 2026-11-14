@@ -1,0 +1,1 @@
+{ "next/headers": "security/next-headers.ts", "next/server": "embed-card-limit-next-server.ts" }

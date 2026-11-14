@@ -51,10 +51,38 @@ function fromThisSite(referer: string | null, host: string | null): boolean {
   }
 }
 
+/**
+ * The answers already given in this request, by the request's own headers object and the store address: an open is
+ * counted once a request, however many of the page's parts ask (its title, the page, readScriptOpen).
+ */
+const counted = new WeakMap<object, Map<string, Promise<boolean>>>();
+
+/**
+ * Counts one open of an embedded card by this connection, for this store, BEFORE anything about the store is read,
+ * with the same limit and numbers as an open of the script (OPENS_PER_TEN_MINUTES in ten minutes, per address and
+ * store). A card pasted into a creator's site was drawn on every view with no count and no limit, each view reading
+ * the store, the product, its stock, keys, pre-order, extras and rating (Claude 7, 13 November 2026): past these opens
+ * the card reads nothing and is a plain link. `handle` is the address asked for, as the page normalises it. Counted
+ * once a request (counted, above).
+ */
+export async function embedOpensLeft(handle: string): Promise<boolean> {
+  const asked = await headers();
+  let mine = counted.get(asked);
+  if (!mine) {
+    mine = new Map();
+    counted.set(asked, mine);
+  }
+  const already = mine.get(handle);
+  if (already) return already;
+  const ip = clientAddress({ headers: asked });
+  const answer = withinLimit("embed-open", `${ip}|${handle}`, OPENS_PER_TEN_MINUTES, 600);
+  mine.set(handle, answer);
+  return answer;
+}
+
 /** Reads the open and says what the page may show; the page counts the visit itself (components/store-beacon.tsx). Never throws. */
 export async function readScriptOpen(store: Store, mode: ScriptMode, query: Record<string, unknown>): Promise<ScriptOpen> {
   const asked = await headers();
-  const ip = clientAddress({ headers: asked });
   const referer = asked.get("referer");
   // A frame that moved on inside itself (the sign-up form's answer) was sent
   // here by a page of this site, which carried the listed site along; one
@@ -72,7 +100,9 @@ export async function readScriptOpen(store: Store, mode: ScriptMode, query: Reco
   // (components/store-beacon.tsx, on the card and the sign-up form opened by the script).
   // A frame on a site the creator did not list shows the plain link and asks nothing more.
   if (mode === "overlay" && !site) return { ...base, live: false, reason: "site" };
-  if (!(await withinLimit("embed-open", `${ip}|${store.handle}`, OPENS_PER_TEN_MINUTES, 600))) return { ...base, live: false, reason: "limited" };
+  // The connection's opens, counted once this request (embedOpensLeft): the page counted them before reading anything,
+  // with the same withinLimit("embed-open", ...) and numbers.
+  if (!(await embedOpensLeft(store.handle))) return { ...base, live: false, reason: "limited" };
   if (await isResting(store).catch(() => true)) return { ...base, live: false, reason: "resting" };
   return { ...base, live: true, reason: "" };
 }

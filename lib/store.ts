@@ -79,7 +79,7 @@ import { type WelcomeOffer, NO_WELCOME_OFFER, parseWelcomeOffer } from "@/lib/we
 import { type InboxSetting, NO_INBOX, parseInboxSetting } from "@/lib/inbox-rules";
 import { type PastSale, type StoreSale, NO_SALE, parsePastSales, parseSale, withPastSale } from "@/lib/store-sale";
 import { parseTiers } from "@/lib/tier-rules";
-import { type BillingPeriod, isPeriod } from "@/lib/allowance-window";
+import { type BillingPeriod, allowanceWindow, isAnchor, isPeriod } from "@/lib/allowance-window";
 import { ENDED_INDEX } from "@/lib/plan-standing";
 import { closesStore } from "@/lib/plan-closing-rules";
 import { SHARING_INDEX } from "@/lib/platform-share";
@@ -424,6 +424,12 @@ export type Store = {
    * from records written before.
    */
   period?: BillingPeriod | null;
+  /**
+   * Where the store's allowance windows are counted from once its period changed without being a renewal (a
+   * change of billing cycle), in ms (lib/allowance-window.ts allowanceWindow): a switch never opens a second
+   * allowance in a month. Kept while the same subscription runs; absent otherwise.
+   */
+  allowanceAnchor?: number;
   /**
    * Whether the plan is at the prices that go with a share of each sale
    * (lib/plan.ts isSharedPrice), as Stripe last said. False for a store that
@@ -994,6 +1000,7 @@ function parseStore(raw: unknown): Store | null {
       trialEnds: typeof value.trialEnds === "number" && value.trialEnds > 0 ? value.trialEnds : 0,
       // Records from before the period was kept have none: no billing month is known.
       period: isPeriod((value as { period?: unknown }).period) ? { ...((value as { period: BillingPeriod }).period) } : null,
+      ...(isAnchor((value as { allowanceAnchor?: unknown }).allowanceAnchor) ? { allowanceAnchor: (value as { allowanceAnchor: number }).allowanceAnchor } : {}),
       // Every store from before there was a share pays none.
       shared: value.shared === true,
       // Stores written before this was kept have none: read as never ended.
@@ -2119,6 +2126,19 @@ export async function setSubscription(
       }
     }
 
+    // A period that changes without being a renewal (it neither is the same one nor begins where the last one
+    // ended: a change of billing cycle, always_invoice) would start a new allowance window on its own day. The
+    // store's windows stay on the grid of the window open when it changed, for as long as the same subscription
+    // runs, so a switch never opens a second allowance in a month (ALL-199: daily switches used about thirty
+    // months of every figure for about one month's pay). Another subscription, or none, starts afresh.
+    const sameRun = fields.active && store.subscriptionActive && subscriptionId !== null && subscriptionId === store.subscriptionId;
+    let allowanceAnchor = sameRun && isAnchor(store.allowanceAnchor) ? store.allowanceAnchor : undefined;
+    if (sameRun && allowanceAnchor === undefined && isPeriod(store.period) && isPeriod(period) &&
+        period.start !== store.period.start && period.start !== store.period.end) {
+      const open = allowanceWindow(store, period.start * 1000);
+      if (open?.billing) allowanceAnchor = open.start;
+    }
+
     // The day a plan is first seen to be over is written down once, and
     // wiped when a plan runs again. A store that never started one has none.
     const had = store.subscriptionActive || store.subscriptionId !== null || subscriptionId !== null;
@@ -2142,6 +2162,7 @@ export async function setSubscription(
       shared: fields.shared ?? store.shared,
       // A plan that is not running has no period to follow.
       period,
+      allowanceAnchor,
       planEndedAt,
       renewalUnpaidSince,
     });

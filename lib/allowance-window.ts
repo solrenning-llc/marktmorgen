@@ -50,7 +50,12 @@ import { type PlanFields, standingOf } from "@/lib/plan-standing";
 export type BillingPeriod = { start: number; end: number; renews: boolean; /** Only an acknowledged committed cash proof may set this. No inferred renewal. */ funded?: true };
 
 /** The fields of a store the window is worked out from. */
-export type WindowFields = PlanFields & { cycle?: Cycle; period?: BillingPeriod | null };
+/**
+ * `allowanceAnchor`: where the store's windows are counted from once its period changed without being a renewal
+ * (a change of billing cycle, lib/store.ts setSubscription), in ms: the start of the window open when it changed.
+ * Absent, the windows follow the billing period, as they always did.
+ */
+export type WindowFields = PlanFields & { cycle?: Cycle; period?: BillingPeriod | null; allowanceAnchor?: number | null };
 
 export type AllowanceWindow = {
   /** "2026-10-19" for a billing month, "2026-10" for a calendar month. Goes into every counter's key. */
@@ -143,11 +148,45 @@ function anchorOf(period: BillingPeriod, yearly: boolean): { anchor: number; off
   return cutEnd ? { anchor: startMs, offset: step, step } : { anchor: endMs, offset: 0, step };
 }
 
+/** Whether a store's record carries an anchor a window can be counted from. */
+export function isAnchor(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+}
+
+/**
+ * The month of the anchor's grid around `now`: the anchor plus whole months, cut to a short month's last day as
+ * Stripe cuts them (addMonthsMs), so the grid is the one the store's first billing month began.
+ */
+function anchoredWindow(anchor: number, now: number): AllowanceWindow | null {
+  if (now < anchor - CLOCK_SKEW_SECONDS * 1000) return null;
+  const from = new Date(anchor);
+  const to = new Date(now);
+  let k = Math.max(0, (to.getUTCFullYear() - from.getUTCFullYear()) * 12 + to.getUTCMonth() - from.getUTCMonth() - 1);
+  for (let tries = 0; tries < 4; tries += 1, k += 1) {
+    const start = addMonthsMs(anchor, k);
+    const end = addMonthsMs(anchor, k + 1);
+    if (now < end) return now < start && k > 0 ? null : { id: day(start), start, end, billing: true };
+  }
+  return null;
+}
+
 /**
  * The window a store's allowances are counted in right now, or null when it
  * pays and its period is not known: then nothing that costs money may start.
+ *
+ * Once a store's period changed without being a renewal (a change of billing cycle starts a new Stripe period on
+ * the day it is made), its windows stay on the grid of the window open then (`allowanceAnchor`): a switch never
+ * opens a second allowance in a month, and what was used stays used. The period still decides whether anything is
+ * paid for now; the anchor only names the month.
  */
 export function allowanceWindow(store: WindowFields, now = Date.now()): AllowanceWindow | null {
+  const found = periodWindow(store, now);
+  if (!found || !found.billing || !isAnchor(store.allowanceAnchor)) return found;
+  return anchoredWindow(store.allowanceAnchor, now);
+}
+
+/** The window as the billing period alone gives it (allowanceWindow before any anchor). */
+function periodWindow(store: WindowFields, now: number): AllowanceWindow | null {
   if (!Number.isFinite(now)) return null;
   const standing = standingOf(store, now / 1000);
   // A free trial: the trial itself, one window from the day it began.
@@ -191,8 +230,15 @@ export function allowanceWindow(store: WindowFields, now = Date.now()): Allowanc
  * it checks, when the moment comes, that the window running then is this one.
  */
 export function windowAt(store: WindowFields, atMs: number): AllowanceWindow | null {
+  const found = projectedWindow(store, atMs);
+  if (!found || !found.billing || !isAnchor(store.allowanceAnchor)) return found;
+  return anchoredWindow(store.allowanceAnchor, atMs);
+}
+
+/** windowAt as the billing period alone gives it. */
+function projectedWindow(store: WindowFields, atMs: number): AllowanceWindow | null {
   if (!Number.isFinite(atMs)) return null;
-  const known = allowanceWindow(store, atMs);
+  const known = periodWindow(store, atMs);
   if (known) return known;
   if (standingOf(store, atMs / 1000) !== "paid" || !store.subscriptionId) return null;
   const period = store.period;

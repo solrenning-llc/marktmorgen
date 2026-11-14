@@ -351,18 +351,23 @@ export function SiteNav() {
         Skip to the page content
       </a>
       {/* What the site is today, before anything else it says
-          (lib/opening.ts). It scrolls away with the page; the menu stays. */}
+          (lib/opening.ts). It scrolls away with the page; the menu stays.
+          A named region of its own, so it is inside a landmark (axe
+          "region") without a page wrapping the menu in a short <header>,
+          which would stop the menu from sticking (#3997 review). Line
+          spacing 1.5 (WCAG 1.4.8). */}
       {PLANS_ON_SALE ? null : (
-        <div className="bg-ink text-white" data-preview-bar="">
-          <p className="container-page py-2.5 text-center text-[0.8125rem] leading-snug sm:text-sm">
+        <section aria-label="About Marktmorgen today" className="bg-ink text-white" data-preview-bar="">
+          <p className="container-page py-2.5 text-center text-[0.8125rem] leading-normal sm:text-sm">
             {PREVIEW_LINE}{" "}
             <Link prefetch={false} href={PREVIEW_LINK.href} className="whitespace-nowrap font-semibold underline underline-offset-2">
               {PREVIEW_LINK.label}
             </Link>
           </p>
-        </div>
+        </section>
       )}
-    <div className="sticky top-0 z-50">
+    {/* The page's banner is the sticky menu itself, a direct child of the page's column, so it sticks for the whole page. */}
+    <header className="sticky top-0 z-50">
 
       <div
         ref={headerRef}
@@ -393,7 +398,7 @@ export function SiteNav() {
                 aria-controls={`menu-${menu.id}`}
                 onMouseEnter={() => hoverOpen(menu.id)}
                 onClick={() => clickMenu(menu.id)}
-                className={`flex h-10 items-center gap-1 rounded-[10px] px-3.5 text-[0.9375rem] font-medium transition-colors ${
+                className={`flex h-11 items-center gap-1 rounded-[10px] px-3.5 text-[0.9375rem] font-medium transition-colors ${
                   openMenu === menu.id ? "bg-sand text-ink" : "text-ink-soft hover:bg-sand hover:text-ink"
                 }`}
               >
@@ -410,7 +415,7 @@ export function SiteNav() {
                 key={l.href}
                 href={l.href}
                 onMouseEnter={() => setOpenMenu(null)}
-                className="flex h-10 items-center rounded-[10px] px-3.5 text-[0.9375rem] font-medium text-ink-soft transition-colors hover:bg-sand hover:text-ink"
+                className="flex h-11 items-center rounded-[10px] px-3.5 text-[0.9375rem] font-medium text-ink-soft transition-colors hover:bg-sand hover:text-ink"
               >
                 {l.label}
               </Link>
@@ -420,7 +425,7 @@ export function SiteNav() {
           <div className="flex items-center gap-1 sm:gap-2">
             <Link prefetch={false}
               href="/signin?to=login"
-              className="hidden h-10 items-center rounded-[10px] px-3.5 text-[0.9375rem] font-medium text-ink-soft transition-colors hover:bg-sand hover:text-ink sm:flex"
+              className="hidden h-11 items-center rounded-[10px] px-3.5 text-[0.9375rem] font-medium text-ink-soft transition-colors hover:bg-sand hover:text-ink sm:flex"
             >
               Log in
             </Link>
@@ -438,7 +443,7 @@ export function SiteNav() {
               onClick={() => setDrawerOpen((v) => !v)}
               aria-expanded={drawerOpen}
               aria-controls="mobile-drawer"
-              className="grid h-11 w-11 place-items-center rounded-[10px] text-ink transition-colors hover:bg-sand lg:hidden"
+              className="grid h-11 w-11 shrink-0 place-items-center rounded-[10px] text-ink transition-colors hover:bg-sand lg:hidden"
             >
               <span className="sr-only">{drawerOpen ? "Close the menu" : "Open the menu"}</span>
               <Icon name={drawerOpen ? "close" : "menu"} size={22} />
@@ -607,7 +612,7 @@ export function SiteNav() {
         </div>
         </> : null}
       </div>
-    </div>
+    </header>
     </>
   );
 }

@@ -183,7 +183,7 @@ export function SiteFooter({ variant = "full", morning = false }: { variant?: "f
                   <li key={link.label}>
                     <FooterAnchor
                       link={link}
-                      className="inline-flex min-h-11 -my-2.5 items-center text-white/80 transition-colors hover:text-white"
+                      className="inline-flex min-h-11 min-w-11 -my-2.5 items-center text-white/80 transition-colors hover:text-white"
                     />
                   </li>
                 ))}
@@ -204,7 +204,7 @@ export function SiteFooter({ variant = "full", morning = false }: { variant?: "f
               <li key={link.href}>
                 <FooterAnchor
                   link={link}
-                  className="inline-flex min-h-11 -my-2.5 items-center text-white/80 transition-colors hover:text-white"
+                  className="inline-flex min-h-11 min-w-11 -my-2.5 items-center text-white/80 transition-colors hover:text-white"
                 />
               </li>
             ))}

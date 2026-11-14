@@ -262,7 +262,7 @@ async function checkoutTrouble(): Promise<void> {
     resendFails = false;
     duringSend = null;
   }
-  is("a failed send lets go of its own mark only: the other run's mark stays", redis.run(["GET", mark]), "another-run");
+  is("a failed send never lets go of another run's mark", redis.run(["GET", mark]), "another-run");
   redis.run(["DEL", mark]);
   resendFails = true;
   try {
@@ -270,7 +270,8 @@ async function checkoutTrouble(): Promise<void> {
   } finally {
     resendFails = false;
   }
-  is("and a failed send with its own mark still held lets it go, so the next refusal can tell", redis.run(["EXISTS", mark]), 0);
+  // A provider error may follow acceptance: false is refused or unknown alike, so the day's mark stays (r24 6.2).
+  is("and a send that did not come back true keeps its own mark, so no second email goes that day", redis.run(["EXISTS", mark]), 1);
 }
 
 async function crons(): Promise<void> {

@@ -60,6 +60,7 @@ async function main(): Promise<void> {
     amount_total: 10000,
     amount_subtotal: 10000,
     currency: "usd",
+    total_details: { amount_tax: 0, amount_shipping: 0 },
     payment_intent: `pi_${id.slice(3)}`,
     metadata: { store: "harbor", product: "course", title: "Course", via: affiliate, ...meta },
     customer_details: { email: "buyer@example.com" },

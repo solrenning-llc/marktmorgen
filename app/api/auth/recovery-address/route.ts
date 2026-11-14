@@ -3,7 +3,7 @@ import { SESSION_COOKIE, emailForSession, isFreshSession } from "@/lib/auth";
 import { isRedisConfigured } from "@/lib/redis";
 import { fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
 import { confirmRecoveryAddress, removeRecoveryAddress, startRecoveryAddress } from "@/lib/recovery-address";
-import { lockedUntil } from "@/lib/two-step";
+import { cancelReset, lockedUntil } from "@/lib/two-step";
 import { hasSecondStep, liveSecondStep } from "@/lib/second-step-gate";
 
 /**
@@ -19,6 +19,13 @@ import { hasSecondStep, liveSecondStep } from "@/lib/second-step-gate";
  * (lib/second-step-gate.ts liveSecondStep): the recovery address is where the
  * notices go that the sign-in inbox may not be trusted with (MM-SA-19), so an
  * emailed link alone never changes it, and the old address is told.
+ *
+ * Taking it away or replacing it also calls off a pending request to turn
+ * two-step login off (lib/two-step.ts cancelReset), as Cancel does: a login
+ * through the old recovery inbox set that day, and revoking the address must
+ * not leave it to turn two-step login off and open everything for the browser
+ * it let in. Only a session holding the second step gets here, the same proof
+ * Cancel asks for.
  */
 export async function POST(request: NextRequest) {
   if (fromAnotherSite(request)) return Response.json({ ok: false, error: "forbidden" }, { status: 403 });
@@ -47,9 +54,14 @@ export async function POST(request: NextRequest) {
     }
     if (body.action === "confirm") {
       const done = await confirmRecoveryAddress(email, session, typeof body.code === "string" ? body.code.slice(0, 20) : "");
-      return typeof done === "string" ? Response.json({ ok: false, error: done }, { status: 400 }) : Response.json({ ok: true, address: done.address });
+      if (typeof done === "string") return Response.json({ ok: false, error: done }, { status: 400 });
+      // The address is replaced already; a day that could not be called off stays shown in the studio, with Cancel.
+      await cancelReset(email, "recovery").catch((error: unknown) => console.error("calling off a two-step reset after a new recovery address failed", error));
+      return Response.json({ ok: true, address: done.address });
     }
     if (body.action === "remove") {
+      // Called off first: when this throws, nothing is removed and asking again does both.
+      await cancelReset(email, "recovery");
       await removeRecoveryAddress(email);
       return Response.json({ ok: true });
     }

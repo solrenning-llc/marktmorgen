@@ -113,7 +113,7 @@ test("control: a store that only renews keeps its billing month, and a new subsc
 test("the anchor's months are cut as Stripe cuts them, and an anchor never opens a window the period does not pay for", () => {
   const anchor = at(2026, 1, 31, 9);
   const yearly = { subscriptionActive: true, subscriptionId: "sub_SwAnchor0003", trialEnds: 0, planEndedAt: "", cycle: "year" as const,
-    period: { start: s(at(2026, 2, 10, 9)), end: s(addMonthsMs(at(2026, 2, 10, 9), 12)), renews: true }, allowanceAnchor: anchor };
+    period: { start: s(at(2026, 2, 10, 9)), end: s(addMonthsMs(at(2026, 2, 10, 9), 12)), renews: true }, allowanceAnchor: { sub: "sub_SwAnchor0003", at: anchor } };
   assert.deepEqual([at(2026, 2, 15), at(2026, 3, 1), at(2026, 4, 1)].map((t) => allowanceWindow(yearly, t)?.id), ["2026-01-31", "2026-02-28", "2026-03-31"]);
   assert.equal(allowanceWindow(yearly, at(2026, 2, 15))?.end, addMonthsMs(anchor, 1));
   // Unknown is still closed: no period, or a period that has ended, and the anchor opens nothing.

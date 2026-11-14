@@ -51,11 +51,15 @@ export type BillingPeriod = { start: number; end: number; renews: boolean; /** O
 
 /** The fields of a store the window is worked out from. */
 /**
- * `allowanceAnchor`: where the store's windows are counted from once its period changed without being a renewal
- * (a change of billing cycle, lib/store.ts setSubscription), in ms: the start of the window open when it changed.
- * Absent, the windows follow the billing period, as they always did.
+ * Where a store's allowance windows are counted from once its period changed without being a renewal (a change of
+ * billing cycle starts a new Stripe period on the day it is made; lib/store.ts setSubscription), for one
+ * subscription: `at` is the origin of the monthly grid its windows were on (in ms), `sub` the subscription it holds
+ * for. Another subscription, a restart included, is not counted on it.
  */
-export type WindowFields = PlanFields & { cycle?: Cycle; period?: BillingPeriod | null; allowanceAnchor?: number | null };
+export type AllowanceAnchor = { sub: string; at: number };
+
+/** `allowanceAnchor`: absent, the windows follow the billing period, as they always did. */
+export type WindowFields = PlanFields & { cycle?: Cycle; period?: BillingPeriod | null; allowanceAnchor?: AllowanceAnchor | null };
 
 export type AllowanceWindow = {
   /** "2026-10-19" for a billing month, "2026-10" for a calendar month. Goes into every counter's key. */
@@ -149,23 +153,31 @@ function anchorOf(period: BillingPeriod, yearly: boolean): { anchor: number; off
 }
 
 /** Whether a store's record carries an anchor a window can be counted from. */
-export function isAnchor(value: unknown): value is number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+export function isAnchor(value: unknown): value is AllowanceAnchor {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const { sub, at } = value as Record<string, unknown>;
+  return typeof sub === "string" && /^sub_[A-Za-z0-9]{6,64}$/.test(sub) && Number.isSafeInteger(at) && (at as number) > 0;
 }
 
 /**
- * The month of the anchor's grid around `now`: the anchor plus whole months, cut to a short month's last day as
- * Stripe cuts them (addMonthsMs), so the grid is the one the store's first billing month began.
+ * The origin of the monthly grid a paid period's windows are on: a yearly period's own start (its months, monthOfPeriod),
+ * a monthly period's anchor as Stripe counts it (anchorOf), so a window cut to a short month (28 February on a grid of
+ * the 31st) never moves the grid to the cut day.
  */
-function anchoredWindow(anchor: number, now: number): AllowanceWindow | null {
-  if (now < anchor - CLOCK_SKEW_SECONDS * 1000) return null;
-  const from = new Date(anchor);
-  const to = new Date(now);
-  let k = Math.max(0, (to.getUTCFullYear() - from.getUTCFullYear()) * 12 + to.getUTCMonth() - from.getUTCMonth() - 1);
+export function gridOrigin(period: BillingPeriod, cycle: Cycle): number {
+  return cycle === "year" ? period.start * 1000 : anchorOf(period, false).anchor;
+}
+
+/** The month of the grid from `origin` around `at`: origin plus whole months (any number, before it too), cut as Stripe cuts them. */
+export function gridWindow(origin: number, at: number): AllowanceWindow | null {
+  const from = new Date(origin);
+  const to = new Date(at);
+  let k = (to.getUTCFullYear() - from.getUTCFullYear()) * 12 + to.getUTCMonth() - from.getUTCMonth() - 1;
   for (let tries = 0; tries < 4; tries += 1, k += 1) {
-    const start = addMonthsMs(anchor, k);
-    const end = addMonthsMs(anchor, k + 1);
-    if (now < end) return now < start && k > 0 ? null : { id: day(start), start, end, billing: true };
+    const start = addMonthsMs(origin, k);
+    const end = addMonthsMs(origin, k + 1);
+    if (at < start) return null;
+    if (at < end) return { id: day(start), start, end, billing: true };
   }
   return null;
 }
@@ -174,15 +186,27 @@ function anchoredWindow(anchor: number, now: number): AllowanceWindow | null {
  * The window a store's allowances are counted in right now, or null when it
  * pays and its period is not known: then nothing that costs money may start.
  *
- * Once a store's period changed without being a renewal (a change of billing cycle starts a new Stripe period on
- * the day it is made), its windows stay on the grid of the window open then (`allowanceAnchor`): a switch never
- * opens a second allowance in a month, and what was used stays used. The period still decides whether anything is
- * paid for now; the anchor only names the month.
+ * Once a store's period changed without being a renewal, for the same subscription, its windows stay on the grid
+ * they were on (`allowanceAnchor`): a change of billing cycle never opens a second allowance in a month, and what was
+ * used stays used. The period still decides whether anything is paid for now; the anchor only names the month. In a
+ * last period that does not renew, no month of the grid opens before it ends: the month before runs on to its end, so
+ * no allowance opens for the few days left of a paid month.
  */
 export function allowanceWindow(store: WindowFields, now = Date.now()): AllowanceWindow | null {
-  const found = periodWindow(store, now);
-  if (!found || !found.billing || !isAnchor(store.allowanceAnchor)) return found;
-  return anchoredWindow(store.allowanceAnchor, now);
+  return anchored(store, periodWindow(store, now), now);
+}
+
+/** The anchor's month around `at`, when the period pays for `at` and the anchor is this subscription's; else what the period gave. */
+function anchored(store: WindowFields, found: AllowanceWindow | null, at: number): AllowanceWindow | null {
+  if (!found || !found.billing || !isAnchor(store.allowanceAnchor) || store.allowanceAnchor.sub !== store.subscriptionId) return found;
+  const month = gridWindow(store.allowanceAnchor.at, at);
+  if (!month) return null;
+  const period = store.period;
+  if (isPeriod(period) && !period.renews && month.start > period.start * 1000 && month.end > period.end * 1000) {
+    const before = gridWindow(store.allowanceAnchor.at, month.start - 1);
+    return before ? { ...before, end: period.end * 1000 } : null;
+  }
+  return month;
 }
 
 /** The window as the billing period alone gives it (allowanceWindow before any anchor). */
@@ -230,9 +254,7 @@ function periodWindow(store: WindowFields, now: number): AllowanceWindow | null 
  * it checks, when the moment comes, that the window running then is this one.
  */
 export function windowAt(store: WindowFields, atMs: number): AllowanceWindow | null {
-  const found = projectedWindow(store, atMs);
-  if (!found || !found.billing || !isAnchor(store.allowanceAnchor)) return found;
-  return anchoredWindow(store.allowanceAnchor, atMs);
+  return anchored(store, projectedWindow(store, atMs), atMs);
 }
 
 /** windowAt as the billing period alone gives it. */

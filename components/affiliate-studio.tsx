@@ -1,5 +1,6 @@
 "use client";
 
+import { handFocusOnAfterRemoval } from "@/lib/focus-when-drawn";
 import Link from "next/link";
 import { AffiliateCommissionHistory } from "@/components/affiliate-commission-history";
 import type { AffiliateCommissionLine as LineView } from "@/lib/affiliate-commission-view";
@@ -1188,14 +1189,22 @@ function Terms({
                     placeholder="50"
                   />
                 </label>
-                <button type="button" className="btn btn-ghost btn-sm" onClick={() => setBonuses((all) => all.filter((_, j) => j !== i))}>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  data-list-remove="affiliate-bonus"
+                  onClick={() => {
+                    setBonuses((all) => all.filter((_, j) => j !== i));
+                    handFocusOnAfterRemoval("affiliate-bonus", i, bonuses.length, "affiliate-bonus-add");
+                  }}
+                >
                   Remove
                 </button>
               </li>
             ))}
           </ul>
           {bonuses.length < MAX_BONUSES ? (
-            <button type="button" className="btn btn-secondary btn-sm mt-2" onClick={() => setBonuses((all) => [...all, { sales: "", amount: "" }])}>
+            <button id="affiliate-bonus-add" type="button" className="btn btn-secondary btn-sm mt-2" onClick={() => setBonuses((all) => [...all, { sales: "", amount: "" }])}>
               Add a bonus
             </button>
           ) : null}

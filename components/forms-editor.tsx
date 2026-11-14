@@ -1,5 +1,6 @@
 "use client";
 
+import { handFocusOnAfterRemoval } from "@/lib/focus-when-drawn";
 import { StudioEmptyState } from "@/components/empty-state";
 import { FORM_STARTERS } from "@/lib/form-starters";
 import { canCopy, formCopy } from "@/lib/form-copy";
@@ -467,7 +468,16 @@ export function FormsEditor({ saved, products, exportBase, dealStages = [], sid 
                   <button type="button" className="btn btn-secondary btn-sm" onClick={() => moveField(i, 1)} disabled={i === draft.fields.length - 1} aria-label={`Move question ${i + 1} down`}>
                     Down
                   </button>
-                  <button type="button" className="btn btn-secondary btn-sm" onClick={() => patch({ fields: draft.fields.filter((_, j) => j !== i) })} disabled={draft.fields.length <= 1}>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    data-list-remove="form-question"
+                    onClick={() => {
+                      patch({ fields: draft.fields.filter((_, j) => j !== i) });
+                      handFocusOnAfterRemoval("form-question", i, draft.fields.length, "form-question-add");
+                    }}
+                    disabled={draft.fields.length <= 1}
+                  >
                     Remove question
                   </button>
                 </div>
@@ -475,7 +485,7 @@ export function FormsEditor({ saved, products, exportBase, dealStages = [], sid 
             ))}
           </ol>
           {draft.fields.length < MAX_FIELDS ? (
-            <button type="button" className="btn btn-secondary mt-3" onClick={() => patch({ fields: [...draft.fields, { id: piece(), type: "short", label: "", required: false, options: [] }] })}>
+            <button id="form-question-add" type="button" className="btn btn-secondary mt-3" onClick={() => patch({ fields: [...draft.fields, { id: piece(), type: "short", label: "", required: false, options: [] }] })}>
               <Icon name="plus" size={18} />
               Add a question
             </button>
@@ -538,12 +548,14 @@ export function FormsEditor({ saved, products, exportBase, dealStages = [], sid 
                 <button
                   type="button"
                   className="btn btn-secondary btn-sm mt-3"
-                  onClick={() =>
+                  data-list-remove="form-result"
+                  onClick={() => {
                     patch({
                       outcomes: draft.outcomes.filter((_, j) => j !== i),
                       fields: draft.fields.map((f) => ({ ...f, options: f.options.map((o) => (o.outcome === outcome.id ? { ...o, outcome: "" } : o)) })),
-                    })
-                  }
+                    });
+                    handFocusOnAfterRemoval("form-result", i, draft.outcomes.length, "form-result-add");
+                  }}
                 >
                   Remove result
                 </button>
@@ -551,7 +563,7 @@ export function FormsEditor({ saved, products, exportBase, dealStages = [], sid 
             ))}
           </ol>
           {draft.outcomes.length < MAX_OUTCOMES ? (
-            <button type="button" className="btn btn-secondary mt-3" onClick={() => patch({ outcomes: [...draft.outcomes, { id: piece(), title: "", body: "", product: "", ...(scoredDraft ? { min: 0, max: 0 } : {}) }] })}>
+            <button id="form-result-add" type="button" className="btn btn-secondary mt-3" onClick={() => patch({ outcomes: [...draft.outcomes, { id: piece(), title: "", body: "", product: "", ...(scoredDraft ? { min: 0, max: 0 } : {}) }] })}>
               <Icon name="plus" size={18} />
               Add a result
             </button>

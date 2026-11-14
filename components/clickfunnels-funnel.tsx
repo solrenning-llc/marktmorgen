@@ -1,5 +1,6 @@
 "use client";
 
+import { handFocusOnAfterRemoval } from "@/lib/focus-when-drawn";
 import { useState } from "react";
 import Link from "next/link";
 import { Icon } from "@/components/icons";
@@ -243,7 +244,16 @@ export function ClickFunnelsFunnel({ products, pagesLeft, funnelsHref, pagesHref
                       <button type="button" className="btn btn-ghost btn-sm aria-disabled:opacity-40" onClick={() => move(index, 1)} aria-disabled={index === pages.length - 1 || undefined} aria-label={`Move ${page.file} down`}>
                         Down
                       </button>
-                      <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPages((c) => c.filter((p) => p.key !== page.key))} aria-label={`Remove ${page.file}`}>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        data-list-remove="cf-page"
+                        onClick={() => {
+                          setPages((c) => c.filter((p) => p.key !== page.key));
+                          handFocusOnAfterRemoval("cf-page", index, pages.length, "cf-pages");
+                        }}
+                        aria-label={`Remove ${page.file}`}
+                      >
                         Remove
                       </button>
                     </div>

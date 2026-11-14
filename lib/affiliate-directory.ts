@@ -82,6 +82,12 @@ const BUILD_HOLD_SECONDS = 60;
  * failure that persists costs one build in it, as a kept page does.
  */
 const FAILED_SECONDS = KEEP_SECONDS;
+/**
+ * How long a page with a row whose numbers could not be read is kept: as long
+ * as a whole one, as on main, so it costs no more builds than a healthy page;
+ * that row shows no numbers, never $0, until a build reads them.
+ */
+const PARTIAL_KEEP_SECONDS = KEEP_SECONDS;
 
 /**
  * The most builds of the directory in a window of BUILD_WINDOW_SECONDS, for the whole site (MR: a ceiling before
@@ -339,8 +345,11 @@ export function isDirectoryRow(raw: unknown): raw is DirectoryRow {
  * "The program list is unavailable just now" state; it never builds again and
  * never shows a list that was not read whole. A finished build keeps the page
  * and drops the mark; one that could not finish sets the mark to "failed" for
- * FAILED_SECONDS. A failed numbers read still shows that build's rows without
- * those numbers to the one request that built them, and keeps no page.
+ * FAILED_SECONDS. A numbers read that failed shows that build's rows, those
+ * numbers null: a read that did not arrive (the network) keeps no page and holds
+ * the mark as failed, as above; a reply that arrived off its exact shape (a bad
+ * record, which lasts) keeps that page PARTIAL_KEEP_SECONDS, so one store's bad
+ * record never hides every other program.
  *
  * Once the mark is taken, the build reserves its place in the window's count
  * (reserveBuild). Past DIRECTORY_BUILDS_PER_TEN_MINUTES, or when the count's
@@ -366,15 +375,28 @@ export async function readDirectory(): Promise<DirectoryRow[]> {
   if (claim !== "OK") throw new UnknownReplyError(claim === null ? "the directory's build mark, held," : "the directory's build mark");
   const room = await reserveBuild().catch(() => "unknown" as const);
   if (room !== "build") return lastDirectory(room);
-  let built: { rows: DirectoryRow[]; sids: string[]; partial: boolean };
+  let built: Awaited<ReturnType<typeof buildDirectory>>;
   try {
     built = await buildDirectory();
   } catch (error) {
     await markFailed();
     throw error;
   }
-  if (built.partial) {
+  if (built.partial === "failed") {
     await markFailed();
+    return built.rows;
+  }
+  if (built.partial === "unknown") {
+    // A numbers reply off its exact shape is a bad record in one store, which lasts until
+    // someone fixes it: holding the build as failed would show "unavailable" to every
+    // other visitor for as long as it lasts (Claude 7 and Claude 1, MEDIUM on #2921).
+    // The page is kept, with that row's numbers null (never $0), for PARTIAL_KEEP_SECONDS,
+    // at no more builds than a healthy page; it is also the last build a visit past the ceiling is shown.
+    await redisPipeline([
+      ["SET", DIRECTORY_CACHE, JSON.stringify(built.rows), "EX", PARTIAL_KEEP_SECONDS],
+      ["SET", DIRECTORY_LAST, JSON.stringify({ sids: built.sids, rows: built.rows }), "EX", LAST_KEEP_SECONDS],
+      ["DEL", DIRECTORY_BUILD],
+    ]).catch(() => null);
     return built.rows;
   }
   await redisPipeline([
@@ -441,8 +463,12 @@ async function markFailed(): Promise<void> {
   await redisPipeline([["SET", DIRECTORY_BUILD, "failed", "EX", FAILED_SECONDS]]).catch(() => null);
 }
 
-/** One build of the rows from the listed set and the stores, with each row's sid; `partial` when a numbers read failed. */
-async function buildDirectory(): Promise<{ rows: DirectoryRow[]; sids: string[]; partial: boolean }> {
+/**
+ * One build of the rows from the listed set and the stores, with each row's sid. `partial` is
+ * "failed" when a numbers read did not arrive, else "unknown" when one arrived
+ * off its exact shape (UnknownReplyError), else false.
+ */
+async function buildDirectory(): Promise<{ rows: DirectoryRow[]; sids: string[]; partial: false | "unknown" | "failed" }> {
   // SSCAN may return a member more than once, in a page or across pages: each store is one row (Codex T on #2921).
   const sids = new Set<string>();
   let cursor = "0";
@@ -460,7 +486,7 @@ async function buildDirectory(): Promise<{ rows: DirectoryRow[]; sids: string[];
   const stores = await Promise.all([...sids].slice(0, MAX_ROWS).map((sid) => storeForId(sid)));
   // A failed numbers read still shows the row without numbers, but that page is
   // not kept for the next visitors.
-  let partial = false;
+  let partial: false | "unknown" | "failed" = false;
   // Each row's sid, kept with the last good build so a visit past the ceiling can drop a store taken out.
   const sidOf = new Map<DirectoryRow, string>();
   const rows = sortRows(
@@ -473,8 +499,10 @@ async function buildDirectory(): Promise<{ rows: DirectoryRow[]; sids: string[];
             sidOf.set(row, store.sid);
             return row;
           }
-          const numbers = await programNumbers(store).catch(() => {
-            partial = true;
+          const numbers = await programNumbers(store).catch((error: unknown) => {
+            if (error instanceof UnknownReplyError) {
+              if (partial === false) partial = "unknown";
+            } else partial = "failed";
             return null;
           });
           const counted = { ...row, numbers: directoryNumbers(numbers) };

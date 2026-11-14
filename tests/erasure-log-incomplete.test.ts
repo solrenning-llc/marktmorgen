@@ -7,8 +7,8 @@
  * delete got `incomplete` at once, but the log, read later by the owner and the team, said it was complete, so
  * nobody reading it would know records remain and a retry is owed.
  *
- * Now an erasure with a part that could not finish logs that it is incomplete, with the parts still to retry; the
- * completion wording is kept for one that finished. The person's address stays out of the log either way.
+ * Now an erasure with a part that could not finish logs that it is incomplete, how many parts are left and how to
+ * finish, in plain words (no source file path); the completion wording is kept for one that finished. The person's address stays out of the log either way.
  *
  * Synthetic store, in-memory Redis, one reply made to fail where the test says so. Nothing real is reached.
  */
@@ -59,7 +59,12 @@ async function main(): Promise<void> {
   const line = await lastLine();
   is("the log never says everything kept was deleted", line.includes("everything kept about them"), false);
   is("it says the deletion is not complete", /not complete/i.test(line), true);
-  is("and names the part still to retry", line.includes("lib/inbox.ts"), true);
+  // Plain words on a screen the creator reads (AX274 3.1.5, VR rule 4; Claude 3 and Claude 7 on #4336): how many parts
+  // are left and how to finish, never a source file's path, and whole within the log's 200 characters.
+  is("it says how many parts are still to delete", line.includes("1 part could not be deleted yet"), true);
+  is("and how to finish", line.includes("Delete the same person again to finish."), true);
+  is("no source file's path", /lib\/|\.ts\b/.test(line), false);
+  is("the whole line fits the log, never cut short", line.length <= 200 && line.endsWith("."), true);
   is("the person's address stays out of the log", line.includes(ERASED), false);
 
   part("Control: an erasure that finished keeps the completion wording");

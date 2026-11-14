@@ -73,6 +73,8 @@ export const FINAL_INDEX = "nl:closing:final";
 const SUB_ID = /^sub_[A-Za-z0-9]{6,64}$/;
 const INVOICE_ID = /^in_[A-Za-z0-9]{6,64}$/;
 const INTENT_ID = /^pi_[A-Za-z0-9]{6,64}$/;
+/** What became of a member's refund, as PaidPeriod.r names it. */
+const PAID_OUTCOMES: ReadonlySet<string> = new Set(["done", "short", "disputed", "pending", "none", "over"]);
 
 type Row = HeldSub & Record<string, unknown>;
 /**
@@ -498,8 +500,17 @@ function paidRowOf(text: string): PaidPeriod | null {
   }
   if (!row || typeof row !== "object" || Array.isArray(row)) return null;
   const r = row as Record<string, unknown>;
-  const number = (v: unknown) => typeof v === "number" && Number.isFinite(v);
-  if (typeof r.inv !== "string" || !number(r.amt) || typeof r.cur !== "string" || !number(r.ps) || !number(r.pe) || typeof r.e !== "string") return null;
+  // Money and times are whole smallest units and whole seconds, as paidPeriodOf and savePaidPeriod write them (rule 24:
+  // an amount that does not read is unknown, never 0 or "owed nothing"; Claude 1 cloud's MEDIUM on #4454).
+  const whole = (v: unknown): v is number => typeof v === "number" && Number.isSafeInteger(v);
+  const amount = (v: unknown) => v === undefined || (whole(v) && v >= 0);
+  if (typeof r.inv !== "string" || !INVOICE_ID.test(r.inv) || typeof r.e !== "string") return null;
+  if (!whole(r.amt) || r.amt <= 0 || typeof r.cur !== "string" || !/^[a-z]{3}$/.test(r.cur)) return null;
+  if (!whole(r.ps) || !whole(r.pe) || r.pe <= r.ps) return null;
+  if ((r.tot !== undefined && (!whole(r.tot) || r.tot <= 0)) || !amount(r.back) || !amount(r.want)) return null;
+  if (r.pi !== undefined && (typeof r.pi !== "string" || !INTENT_ID.test(r.pi))) return null;
+  if (r.r !== undefined && !PAID_OUTCOMES.has(r.r as string)) return null;
+  if ((r.f !== undefined && r.f !== 1) || (r.m !== undefined && r.m !== 1)) return null;
   return row as PaidPeriod;
 }
 

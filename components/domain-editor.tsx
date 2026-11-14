@@ -1,5 +1,6 @@
 "use client";
 
+import { Abbr } from "@/components/abbr";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "@/components/toast";
@@ -134,7 +135,7 @@ export function DomainEditor({
       {shown && !shown.live ? (
         <div className="mt-4 overflow-x-auto">
           <table className="w-full min-w-[20rem] text-left text-sm">
-            <caption className="sr-only">DNS records to add</caption>
+            <caption className="sr-only"><Abbr of="DNS" /> records to add</caption>
             <thead>
               <tr className="text-ink-mute">
                 <th scope="col" className="py-2 pr-3 font-semibold">Type</th>

@@ -1,5 +1,6 @@
 "use client";
 
+import { Abbr } from "@/components/abbr";
 import { customRangeChannelsReport, customRangeProductsReport, customRangeDailyReport, customRangeComparisonReport, customRangeChartReport, customRangeSelectionReport, customRangeChartSummaryReport, customRangeWeekdayReport, type CustomRangeReportSelection } from "@/lib/channel-reports";
 import { ReportDownload } from "@/components/report-download";
 
@@ -105,7 +106,7 @@ export function CustomRange({ today, currency }: { today: string; currency: stri
           {busy ? "Reading…" : "Show these days"}
         </button>
       </form>
-      <p className="mt-2 text-xs text-ink-soft">Any days from the last 400, in UTC like every day here, set beside the same number of days just before.</p>
+      <p className="mt-2 text-xs text-ink-soft">Any days from the last 400, in <Abbr of="UTC" /> like every day here, set beside the same number of days just before.</p>
       <p className="mt-2 text-xs text-ink-soft" role="status" aria-live="polite" aria-atomic="true">
         {busy ? (result ? "Reading selected dates. The previous report remains visible until the new reading succeeds. " : "Reading selected dates. ") : null}
         {result ? <>Last report received: <time dateTime={result.receivedAt}>{new Date(result.receivedAt).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "medium", timeZone: "UTC" })} UTC</time>. This is the reading time; data availability is shown below.</> : null}
@@ -232,7 +233,7 @@ export function CustomRangeResults({ range, marks, titlesUnavailable = false, cu
       </div> : null}
       {hasListSelection?<CustomRangeSelectionSummary range={view} currency={currency} selection={{query,sort:actualSort,filter:actualFilter,minimumTraffic:actualMinimum,minimumPaidRecords:actualMinimumPaidRecords}} />:null}
       {hasListSelection?<button type="button" className="btn btn-secondary mt-3" onClick={()=>{setQuery("");setSort("recorded");setFilter("all");setMinimumTraffic("0");setMinimumPaidRecords("0");}}>Reset list view</button>:null}
-      {sold ? <p className="mt-3 text-xs text-ink-soft">Revenue / visit and Revenue / view divide each row’s gross revenue by recorded visits or page views, not unique people. Channels exclude one-click extras; products include them. Both exclude renewals and are before refunds, fees and costs. No traffic means unavailable; rows without a defined ratio sort last in either direction. Analytical money uses up to four significant digits; CSV values keep calculated precision. Revenue share uses each selected loaded list’s total revenue, separately for channels and products, not whole-period revenue. A zero total has no defined share; limited lists describe only the loaded selection.</p> : null}
+      {sold ? <p className="mt-3 text-xs text-ink-soft">Revenue / visit and Revenue / view divide each row’s gross revenue by recorded visits or page views, not unique people. Channels exclude one-click extras; products include them. Both exclude renewals and are before refunds, fees and costs. No traffic means unavailable; rows without a defined ratio sort last in either direction. Analytical money uses up to four significant digits; <Abbr of="CSV" /> values keep calculated precision. Revenue share uses each selected loaded list’s total revenue, separately for channels and products, not whole-period revenue. A zero total has no defined share; limited lists describe only the loaded selection.</p> : null}
       <div className="mt-4 grid gap-5 lg:grid-cols-2">
         {view.channels.length ? (
           <div className="overflow-x-auto" tabIndex={0} role="region" aria-labelledby="range-channels">

@@ -36,6 +36,10 @@ export async function checkPairsAcknowledgment({browser,LOCAL,fixture,is}){
      window.__pairsSelectionEvents.push({type,trusted:event.isTrusted,value:select?.value,selectedIndex:select?.selectedIndex,buttonDisabled:root.querySelector("button")?.disabled});
     },true);
    });
+   // Only once React has taken the editor over (onclick set on its button): a pick made while a slow or busy browser is
+   // still drawing the panel can be lost, which left the button disabled for good.
+   const saveButton=section.getByRole("button",{name:"Save picks",exact:true});
+   await page.waitForFunction(el=>typeof el.onclick==="function",await saveButton.elementHandle(),{timeout:60000});
    await first.selectOption(target);
    console.log("PAIRS_INITIAL_SELECTION",JSON.stringify(await section.evaluate((root,target)=>({
     target,events:window.__pairsSelectionEvents,

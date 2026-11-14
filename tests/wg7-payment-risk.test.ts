@@ -18,6 +18,7 @@ import {
   parsePaymentRules,
   riskLevelOf,
   shippingDecision,
+  storedPaymentRules,
   threeDSecureFields,
 } from "@/lib/payment-risk";
 import { done, is, part } from "./check";
@@ -29,7 +30,7 @@ is("normal, elevated and highest are read as they are", [riskLevelOf(charge("nor
 is("not assessed or unknown by Stripe: not available, never normal", [riskLevelOf(charge("not_assessed")), riskLevelOf(charge("unknown"))], ["not_available", "not_available"]);
 is("a value Stripe does not send (low, a number, a different case): not available", [riskLevelOf(charge("low")), riskLevelOf(charge(12)), riskLevelOf(charge("Normal"))], ["not_available", "not_available", "not_available"]);
 is("no outcome, no charge, a bare id or another object: not available", [riskLevelOf({ id: "ch_1", object: "charge" }), riskLevelOf(null), riskLevelOf("ch_1"), riskLevelOf({ id: "pi_1", object: "payment_intent", outcome: { risk_level: "normal" } }), riskLevelOf({ id: "ch_1", object: "charge", outcome: "normal" })], ["not_available", "not_available", "not_available", "not_available", "not_available"]);
-is("the words on the sales list and the order", RISK_WORDS, { normal: "Risk: normal", elevated: "Risk: elevated", highest: "Risk: highest", not_available: "Risk: not available" });
+is("the words on the sales list and the order", RISK_WORDS, { normal: "Risk: normal", elevated: "Risk: elevated", highest: "Risk: highest", in_review: "Risk: in review by Stripe", not_available: "Risk: not available" });
 is("no word says low and none is a score", Object.values(RISK_WORDS).some((w) => /\blow\b|\d/.test(w)), false);
 
 part(`A store's simple rules: at most ${MAX_RULES}, each kind once, read back whole or not at all`);
@@ -70,5 +71,24 @@ part("Nothing here charges, refunds, cancels or closes an access");
 const source = readFileSync("lib/payment-risk.ts", "utf8");
 is("no Stripe call, no Redis, no fetch", /onAccount|stripeFetch|@\/lib\/redis|fetch\(/.test(source), false);
 is("no refund, cancel or access word in what it decides", /refund|cancel|access/i.test(source.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, "")), false);
+
+part("Rules we cannot read are unknown, never the cheap side (Claude 3 review of #3633, MEDIUM 1)");
+is("nothing stored for the store (no key): no rules, a real answer", storedPaymentRules(null), []);
+is("stored rules read back whole", storedPaymentRules(JSON.stringify([{ kind: "hold_risky_shipping" }])), [{ kind: "hold_risky_shipping" }]);
+is("a stored value that is not JSON, not a list or holds a bad rule: unknown", [storedPaymentRules("{oops"), storedPaymentRules("{}"), storedPaymentRules(JSON.stringify([{ kind: "verify_over", cents: "x" }, { kind: "hold_risky_shipping" }])), storedPaymentRules(42 as unknown as string)], [null, null, null, null]);
+is("unknown rules ask the bank to verify", asksVerification({ productAsks: false, rules: null, amountCents: 5_000, firstPurchase: false }), true);
+is("unknown rules never ship a physical order as clean", [shippingDecision({ rules: null, physical: true, risk: "normal" }), shippingDecision({ rules: null, physical: true, risk: "not_available" })], ["rules_not_available", "rules_not_available"]);
+is("unknown rules on something not shipped hold nothing", shippingDecision({ rules: null, physical: false, risk: "highest" }), "ship");
+
+part("A charge Stripe put in manual review is held, never shipped (Claude 3 review of #3633, LEVE 1)");
+const reviewed = { id: "ch_1", object: "charge", outcome: { type: "manual_review", risk_level: "normal" }, review: "prv_1" };
+is("outcome type manual_review, or an open review on the charge: in review", [riskLevelOf(reviewed), riskLevelOf({ ...reviewed, outcome: { type: "manual_review", risk_level: "normal" }, review: null }), riskLevelOf({ ...reviewed, outcome: { type: "authorized", risk_level: "normal" }, review: { id: "prv_1", object: "review" } })], ["in_review", "in_review", "in_review"]);
+is("no review: the risk Stripe gave", riskLevelOf({ ...reviewed, outcome: { type: "authorized", risk_level: "normal" }, review: null }), "normal");
+is("in review under the rule: held", shippingDecision({ rules: hold, physical: true, risk: "in_review" }), "hold");
+
+part("Edge shapes (Claude 3 review of #3633, LEVE 2)");
+is("a valid risk with no id or an empty id: not available", [riskLevelOf({ object: "charge", outcome: { risk_level: "normal" } }), riskLevelOf({ id: "", object: "charge", outcome: { risk_level: "normal" } })], ["not_available", "not_available"]);
+is("outcome null as Stripe sends it, or a list in place of the charge: not available", [riskLevelOf({ id: "ch_1", object: "charge", outcome: null }), riskLevelOf([charge("normal")])], ["not_available", "not_available"]);
+is("the product's option asks only when it is exactly true (off by default)", [asksVerification({ ...none, productAsks: undefined as unknown as boolean }), asksVerification({ ...none, productAsks: "true" as unknown as boolean }), asksVerification({ ...none, productAsks: 1 as unknown as boolean })], [false, false, false]);
 
 done();

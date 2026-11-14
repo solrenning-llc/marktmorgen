@@ -17,8 +17,8 @@ async function main(): Promise<void> {
   const previousApi = process.env.STRIPE_CONNECT_API_BASE;
   process.env.STRIPE_SECRET_KEY = "sk_test_wg7_risk_only_a_stand_in";
   process.env.STRIPE_CONNECT_API_BASE = "http://127.0.0.1:4998";
-  let sessions: unknown = { data: [] };
-  let intents: unknown = { data: [] };
+  let sessions: unknown = { object: "list", has_more: false, data: [] };
+  let intents: unknown = { object: "list", has_more: false, data: [] };
   const calls: URL[] = [];
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(String(input));
@@ -48,7 +48,7 @@ async function main(): Promise<void> {
       payment_intent: paymentIntent,
     });
 
-    sessions = { data: [
+    sessions = { object: "list", has_more: false, data: [
       checkout("cs_test_normal", { id: "pi_n", object: "payment_intent", latest_charge: charge("ch_n", { risk_level: "normal" }) }, {}, now - 1),
       checkout("cs_test_elevated", { id: "pi_e", object: "payment_intent", latest_charge: charge("ch_e", { risk_level: "elevated" }) }, {}, now - 2),
       checkout("cs_test_highest", { id: "pi_h", object: "payment_intent", latest_charge: charge("ch_h", { risk_level: "highest" }) }, {}, now - 3),
@@ -61,7 +61,7 @@ async function main(): Promise<void> {
       checkout("cs_test_customerobj", { id: "cus_x", object: "customer", latest_charge: charge("ch_c", { risk_level: "highest" }) }, {}, now - 12),
       checkout("cs_test_noobject", { id: "pi_y", latest_charge: charge("ch_y", { risk_level: "normal" }) }, {}, now - 13),
     ] };
-    intents = { data: [
+    intents = { object: "list", has_more: false, data: [
       { id: "pi_upsell_risky", object: "payment_intent", status: "succeeded", created: now - 10, amount: 900, currency: "usd",
         metadata: { kind: "upsell", store: store.handle, title: "Extra" }, latest_charge: charge("ch_u", { risk_level: "highest" }) },
       { id: "pi_upsell_plain", object: "payment_intent", status: "succeeded", created: now - 11, amount: 900, currency: "usd",

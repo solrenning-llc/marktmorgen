@@ -48,7 +48,7 @@ import { cache } from "react";
 import { pointDomain } from "@/lib/domains";
 import { rememberListing } from "@/lib/directory-index";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { countOf, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { type Held, LockBusyError, deleteIfHeldOnly, holdLock, releaseLock, releaseLockStrict, setIfHeld, takeLock } from "@/lib/redis-lock";
 import {CONTRACT_ADMISSION_COVERAGE,canonicalFinancialSnapshot} from "@/lib/contract-funding-rules";
 import { type ProductFile } from "@/lib/product-file";
@@ -62,6 +62,7 @@ import {
 import { type Recurring } from "@/lib/product-recurring";
 import { type StoreLook, DEFAULT_LOOK, parseLook } from "@/lib/store-look";
 import { PHOTO_ID_PATTERN } from "@/lib/photo-limits";
+import { deletePhotos } from "@/lib/store-photo";
 import { type CallSetup } from "@/lib/call-setup";
 import { type Pixels, NO_PIXELS, parsePixels } from "@/lib/pixels";
 import { type TaxSetting, NO_TAX, parseTax } from "@/lib/tax";
@@ -73,12 +74,14 @@ import { type LeaveSetting, NO_LEAVE, parseLeave } from "@/lib/leave-rules";
 import { NO_NUDGE, type Nudge, parseNudge } from "@/lib/member-health-rules";
 import { NO_YEARLY_ASK, type YearlyAsk, parseYearlyAsk } from "@/lib/yearly-switch-rules";
 import { type WinBack, NO_WINBACK, parseWinBack } from "@/lib/winback";
+import { type ReturningCode, MAX_RETURNING_CODES, parseReturningCodes } from "@/lib/returning-code-rules";
 import { type WelcomeOffer, NO_WELCOME_OFFER, parseWelcomeOffer } from "@/lib/welcome-offer";
 import { type InboxSetting, NO_INBOX, parseInboxSetting } from "@/lib/inbox-rules";
 import { type PastSale, type StoreSale, NO_SALE, parsePastSales, parseSale, withPastSale } from "@/lib/store-sale";
 import { parseTiers } from "@/lib/tier-rules";
 import { type BillingPeriod, isPeriod } from "@/lib/allowance-window";
 import { ENDED_INDEX } from "@/lib/plan-standing";
+import { closesStore } from "@/lib/plan-closing-rules";
 import { SHARING_INDEX } from "@/lib/platform-share";
 import { PAYING_INDEX } from "@/lib/free-pool-rules";
 import { type Cycle, type Tier, parseCycle, parseTier } from "@/lib/plan";
@@ -478,6 +481,14 @@ export type Store = {
    */
   hasDiscounts: boolean;
   /**
+   * Codes only for people who already bought from this store (554 [DS1],
+   * unit 2; lib/returning-code-rules.ts): the word a buyer types and the
+   * creator's own Stripe coupon it applies. Never a promotion code, so
+   * Stripe's own box can never take one; the server checks the buyer's
+   * earlier purchase first. Empty for every store until the creator makes one.
+   */
+  returningCodes: ReturningCode[];
+  /**
    * Where the addresses collected by free products are kept.
    *
    * An id of its own rather than anything derived from the sign-in address,
@@ -496,6 +507,17 @@ export type Store = {
    * browser may keep it for good; a new photo gets a new id.
    */
   photoId: string | null;
+  /**
+   * Photos kept under this store that its page does not show, until their
+   * deletion is confirmed: one written before the store was pointed at it
+   * (`gone` false, left alone for PHOTO_PENDING_SECONDS, as its write may
+   * still be running), and one the store stopped showing (`gone` true).
+   * Named here, each is deleted by the next upload (settlePhotos), erased
+   * with the store when it closes (its id is one of the store's marks,
+   * lib/closed-store-data.ts) and weighed with the store's data
+   * (lib/data-recount.ts). At most PHOTO_LEFT_MAX; absent when none.
+   */
+  photoLeft?: PhotoLeft[];
   /**
    * Where this store's booked and held call times are kept. An id of its own,
    * made the first time a call is set up, so neither a new address nor a new
@@ -989,6 +1011,8 @@ function parseStore(raw: unknown): Store | null {
       // same as a store nobody has added one to yet.
       links: parseStoreLinks(value.links),
       hasDiscounts: value.hasDiscounts === true,
+      // Stores written before these existed have none; an entry in any other shape is dropped, never applied.
+      returningCodes: parseReturningCodes((value as { returningCodes?: unknown }).returningCodes),
       listId:
         typeof value.listId === "string" && LIST_ID_PATTERN.test(value.listId)
           ? value.listId
@@ -998,6 +1022,7 @@ function parseStore(raw: unknown): Store | null {
         typeof value.photoId === "string" && PHOTO_ID_PATTERN.test(value.photoId)
           ? value.photoId
           : null,
+      ...photoLeftOf((value as { photoLeft?: unknown }).photoLeft),
       callsId:
         typeof value.callsId === "string" && LIST_ID_PATTERN.test(value.callsId)
           ? value.callsId
@@ -1110,6 +1135,24 @@ export async function storeForEmailSeen(
   // still be addressed by their own persistent id.
   if (!store || typeof store.email !== "string" ||
       storeRef(store).toLowerCase() !== email.toLowerCase()) return null;
+  return store;
+}
+
+/**
+ * The store kept under one ref, read exactly (rule 24), for a caller that takes the store out of a line when it is
+ * gone: null only when Redis answers nil for its key. A reply of another shape, a record that does not parse or a
+ * record under that key for another owner throws UnknownReplyError, and a request that fails throws as it did; none
+ * of them is "no store" (releaseRestarted, lib/closing-holds.ts; Codex G on #3672).
+ */
+export async function storeForRefExact(ref: string): Promise<Store | null> {
+  if (!isRedisConfigured()) throw new UnknownReplyError("a store's record (no Redis)");
+  const reply = repliesFor(await redisPipeline([["GET", await ownerKey(ref)]]), 1);
+  if (!reply) throw new UnknownReplyError("a store's record (GET)");
+  if (reply[0] === null) return null;
+  const store = typeof reply[0] === "string" ? parseStore(reply[0]) : null;
+  if (!store || typeof store.email !== "string" || storeRef(store).toLowerCase() !== ref.toLowerCase()) {
+    throw new UnknownReplyError("a store's record (unreadable, or another owner's)");
+  }
   return store;
 }
 
@@ -1348,6 +1391,7 @@ async function freshStore(fields: {
     catalog: emptyCatalog(await catalogIdFor(ref, createdAt)),
     links: [],
     hasDiscounts: false,
+    returningCodes: [],
     listId: newListId(),
     look: { ...DEFAULT_LOOK },
     photoId: null,
@@ -1896,7 +1940,8 @@ export async function closeStoreRecord(store: Store, extraKeys: string[] = []): 
 }
 
 export type RenameResult =
-  | { ok: true; store: Store }
+  /** domainBehind: the store's own domain is not known to have followed to the new address (lib/domains.ts pointDomain). */
+  | { ok: true; store: Store; domainBehind?: true }
   | {
       ok: false;
       reason: "taken" | "reserved" | "shape" | "none" | "same" | "too_many";
@@ -1961,7 +2006,10 @@ export async function renameHandle(
       throw error;
     }
     // The store's own domain follows it to the new address.
-    if (next.domain) await pointDomain(next.domain.name, [store.handle, ...store.previousHandles], handle);
+    // When that is not known, the rename still stands and the creator is told (Check again moves it).
+    if (next.domain && !(await pointDomain(next.domain.name, [store.handle, ...store.previousHandles], handle))) {
+      return { ok: true, store: next, domainBehind: true };
+    }
     return { ok: true, store: next };
   });
   return result ?? { ok: false, reason: "none" };
@@ -2146,7 +2194,60 @@ export async function clearStripeAccount(
 
 export type MoveResult =
   | { ok: true; store: Store }
-  | { ok: false; reason: "none" | "same" | "taken" };
+  | { ok: false; reason: "none" | "same" | "taken" | "closing" };
+
+/**
+ * The closing's final line, the walk's line and the line of stores whose members are held, by value: the same keys as
+ * FINAL_INDEX and HELD_INDEX (lib/closing-holds.ts) and DUE_KEY (lib/closed-store-data.ts), which import this file;
+ * tests/closing-moved-owner.test.ts puts stores in them by those names and fails when these differ.
+ */
+const CLOSING_FINAL_LINE = "nl:closing:final";
+const CLOSING_WALK_LINE = "nl:closed:due";
+const CLOSING_HELD_LINE = "nl:closing:held";
+/**
+ * A break's record and the line of breaks, by value: the same keys as recordKey and DUE in lib/plan-pause.ts, which
+ * imports this file; tests/closing-moved-owner.test.ts sets a break by those names and fails when these differ.
+ */
+const breakKey = (ref: string) => `nl:pause:${ref}`;
+const BREAK_LINE = "nl:pause:due";
+
+/** EXISTS as Redis answers it for one key: 0 or 1 (a string of one over REST). */
+const existsReply = (reply: unknown): 0 | 1 | null =>
+  reply === 0 || reply === "0" ? 0 : reply === 1 || reply === "1" ? 1 : null;
+
+/** A sorted set's score as Redis answers ZSCORE: nil, or a number (a string of one over REST). */
+const isScore = (reply: unknown): boolean =>
+  reply === null || (typeof reply === "number" && Number.isFinite(reply)) || (typeof reply === "string" && reply.trim() !== "" && Number.isFinite(Number(reply)));
+
+/**
+ * Whether a home store is in its closing (lib/plan-closing.ts): its plan ended on or after KEEP_NOTHING_FROM and does
+ * not run, or it is in the final line (its closing day began, so it is seen through whatever the plan does since) or
+ * in line for the walk that erases its records (lib/closed-store-data.ts). Everything that sees it through is keyed
+ * by its ref, its owner's address: its place in those lines and in the line of ended plans, its closing state, and
+ * its folder's holds, paid periods, notices and credit. A move gives it another ref, so the walk read the old one as
+ * nil and dropped the store, the daily run took it out of every line as gone, and its record stayed at the new
+ * address, never erased (Claude 6's probes P6 and P7 on #3643). Read under the store's own lock, so its plan cannot
+ * change meanwhile, and a store whose plan runs enters neither line. Its members are held under its ref too, from the
+ * day its plan ended (holdCharges, lib/closing-holds.ts): a plan that runs again is let go only by the daily
+ * releaseRestarted, which finds the store by that ref, so a store still in that line keeps its address until then; a
+ * move before it left the members paused for good and the buyers never told (Claude 1's review on #3672). A break the
+ * creator set is kept under the ref too (lib/plan-pause.ts: its record and its place in the line of breaks): the
+ * closing waits for it (onBreak, lib/plan-closing.ts) and the daily run of breaks finds the store by that ref to start
+ * its plan again, so a store with a break set, begun or not, keeps its address until the break is taken back or over;
+ * a move before it left the break at the old address and the closing began on the day the plan stopped (Revisor 2 on
+ * #3672). A line or a break that does not read is never "not in it" (rule 24): it throws, and nothing moves.
+ */
+async function closingUnderway(store: Store): Promise<boolean> {
+  if (!store.subscriptionActive && closesStore(Date.parse(store.planEndedAt))) return true;
+  const ref = storeRef(store);
+  const scores = repliesFor(await redisPipeline([["ZSCORE", CLOSING_FINAL_LINE, ref], ["ZSCORE", CLOSING_WALK_LINE, ref], ["ZSCORE", CLOSING_HELD_LINE, ref]]), 3);
+  if (!scores || !scores.every(isScore)) throw new UnknownReplyError("a store's place in the closing lines (ZSCORE)");
+  if (scores.some((score) => score !== null)) return true;
+  const kept = repliesFor(await redisPipeline([["EXISTS", breakKey(ref)], ["ZSCORE", BREAK_LINE, ref]]), 2);
+  const record = kept ? existsReply(kept[0]) : null;
+  if (!kept || record === null || !isScore(kept[1])) throw new UnknownReplyError("a store's break (EXISTS, ZSCORE)");
+  return record === 1 || kept[1] !== null;
+}
 
 /**
  * Moves a store from one sign-in address to another.
@@ -2215,6 +2316,8 @@ export async function moveAccount(
   if (!isRedisConfigured()) return { ok: false, reason: "none" };
 
   const result = await withStore<MoveResult>(from, async (store, _save, held) => {
+    // A store in its closing keeps its address until its records are erased, or its plan runs again and its members are let go; one with a break set, until the break is taken back or over (closingUnderway).
+    if (await closingUnderway(store)) return { ok: false, reason: "closing" };
     // The address it is moving to must not already own a store of its own.
     const [existing, theirs] = await redisPipeline([
       ["GET", await ownerKey(to)],
@@ -3000,17 +3103,116 @@ export async function updateLook(
   return next ? { ok: true, store: next } : { ok: false, reason: "none" };
 }
 
+/** A photo the store keeps and does not show (Store.photoLeft): its id, when it was named (seconds), and whether the page stopped showing it. */
+export type PhotoLeft = { id: string; at: number; gone: boolean };
+
+/** How long a photo written and not put on yet is left alone: longer than any function may run (800 s at most on Vercel), and far longer than the store lock its pointing holds. */
+export const PHOTO_PENDING_SECONDS = 15 * 60;
+/** The most photos a store names without showing: past it a new upload waits (lib/store-data-registry). */
+export const PHOTO_LEFT_MAX = 2;
+
+/** Reads the photos a record names without showing; every well-formed name is kept, so none is lost to a read. */
+function photoLeftOf(raw: unknown): { photoLeft?: PhotoLeft[] } {
+  if (!Array.isArray(raw)) return {};
+  const out: PhotoLeft[] = [];
+  for (const row of raw as unknown[]) {
+    if (!row || typeof row !== "object") continue;
+    const { id, at, gone } = row as { id?: unknown; at?: unknown; gone?: unknown };
+    if (typeof id !== "string" || !PHOTO_ID_PATTERN.test(id) || out.some((left) => left.id === id)) continue;
+    out.push({ id, at: Number.isSafeInteger(at) && (at as number) > 0 ? (at as number) : 0, gone: gone === true });
+  }
+  return out.length ? { photoLeft: out } : {};
+}
+
+const leftOrNone = (left: PhotoLeft[]): PhotoLeft[] | undefined => (left.length ? left : undefined);
+
+/**
+ * Under the store's lock: deletes each photo the store names and does not
+ * show that may go now (one it stopped showing, or one written more than
+ * PHOTO_PENDING_SECONDS ago and never put on), and answers the names that
+ * stay. The deletion is confirmed before a name is dropped; when it is not,
+ * this throws and every name stays.
+ */
+async function settleLeft(store: Store, nowSeconds: number): Promise<{ due: boolean; kept: PhotoLeft[] }> {
+  const left = store.photoLeft ?? [];
+  const shown = (left: PhotoLeft) => left.id === store.photoId;
+  const due = left.filter((entry) => !shown(entry) && (entry.gone || entry.at <= nowSeconds - PHOTO_PENDING_SECONDS));
+  if (due.length) await deletePhotos(due.map((entry) => entry.id));
+  const kept = left.filter((entry) => !shown(entry) && !due.includes(entry));
+  return { due: kept.length !== left.length, kept };
+}
+
+/**
+ * Names a photo about to be written for the page in the store record, before
+ * anything is written under its id, so a write or a pointing that fails
+ * never leaves it where nothing finds it. Deletes first what may go now.
+ * "busy" when PHOTO_LEFT_MAX are still waiting: the creator tries again in a
+ * few minutes. Throws when a deletion or the record's write is not confirmed.
+ */
+export async function notePhotoUpload(
+  email: string,
+  id: string,
+  now = Date.now(),
+): Promise<{ ok: true } | { ok: false; reason: "none" | "busy" }> {
+  const nowSeconds = Math.floor(now / 1000);
+  const result = await withStore(email, async (store, save) => {
+    const { due, kept } = await settleLeft(store, nowSeconds);
+    if (kept.length >= PHOTO_LEFT_MAX) {
+      if (due) await save({ ...store, photoLeft: leftOrNone(kept) });
+      return { ok: false as const, reason: "busy" as const };
+    }
+    await save({ ...store, photoLeft: [...kept, { id, at: nowSeconds, gone: false }] });
+    return { ok: true as const };
+  });
+  return result ?? { ok: false, reason: "none" };
+}
+
+/**
+ * Deletes, and stops naming, what the store keeps and does not show that may
+ * go now. Throws when a deletion is not confirmed: the names stay, for the
+ * next try or the closing walk.
+ */
+export async function settlePhotos(email: string, now = Date.now()): Promise<void> {
+  await withStore(email, async (store, save) => {
+    const { due, kept } = await settleLeft(store, Math.floor(now / 1000));
+    if (due) await save({ ...store, photoLeft: leftOrNone(kept) });
+  });
+}
+
+/**
+ * Deletes a photo named for an upload whose write failed, so the store was
+ * never pointed at it, and stops naming it once the deletion is confirmed.
+ * Never one the store shows. Throws when not confirmed: the name stays.
+ */
+export async function dropPhotoUpload(email: string, id: string): Promise<void> {
+  await withStore(email, async (store, save) => {
+    const left = store.photoLeft ?? [];
+    if (id === store.photoId || !left.some((entry) => entry.id === id && !entry.gone)) return;
+    await deletePhotos([id]);
+    await save({ ...store, photoLeft: leftOrNone(left.filter((entry) => entry.id !== id)) });
+  });
+}
+
 /**
  * Points the store at a photo, or at none, and says which one it replaced so
- * the caller can delete the old picture once nothing refers to it.
+ * the caller can delete the old picture once nothing refers to it. In the
+ * same write the new photo stops being named as waiting and the old one is
+ * named as no longer shown (Store.photoLeft), so its picture is found again
+ * when its deletion fails. `deleted` is a photo whose deletion the caller has
+ * already confirmed: it is not named again.
  */
 export async function setPhotoId(
   email: string,
   photoId: string | null,
+  now = Date.now(),
+  deleted: string | null = null,
 ): Promise<{ ok: true; store: Store; was: string | null } | { ok: false; reason: "none" }> {
   const result = await withStore(email, async (store, save) => {
-    const next = await save({ ...store, photoId });
-    return { ok: true as const, store: next, was: store.photoId };
+    const was = store.photoId && store.photoId !== photoId ? store.photoId : null;
+    const left = (store.photoLeft ?? []).filter((entry) => entry.id !== photoId && entry.id !== was && entry.id !== deleted);
+    if (was && was !== deleted) left.push({ id: was, at: Math.floor(now / 1000), gone: true });
+    const next = await save({ ...store, photoId, photoLeft: leftOrNone(left) });
+    return { ok: true as const, store: next, was };
   });
   return result ?? { ok: false, reason: "none" };
 }
@@ -3484,9 +3686,9 @@ export async function editStoreLink(
     const at = store.links.findIndex((link) => link.id === id);
     if (at < 0) return { ok: false, reason: "unknown" };
     const links = [...store.links];
-    // Its picture stays through an edit; a link turned into a heading gives it up.
+    // Its picture stays through an edit; a link turned into a heading gives it up. An archived one stays archived (423 [LT1]).
     const image = extras.header ? undefined : links[at].image;
-    links[at] = { id: links[at].id, addedAt: links[at].addedAt, title, url, ...extras, ...(image ? { image } : {}) };
+    links[at] = { id: links[at].id, addedAt: links[at].addedAt, title, url, ...extras, ...(image ? { image } : {}), ...(links[at].archived ? { archived: true as const } : {}) };
     return { ok: true, store: await save({ ...store, links }), removed: extras.header ? (store.links[at].image ?? null) : null };
   });
   return result ?? { ok: false, reason: "none" };
@@ -3520,6 +3722,26 @@ export async function setLinkImage(email: string, id: string, image: LinkImage |
     const { image: was, ...rest } = links[at];
     links[at] = image ? { ...rest, image } : rest;
     return { ok: true, store: await save({ ...store, links }), removed: was ?? null };
+  });
+  return result ?? { ok: false, reason: "none" };
+}
+
+/**
+ * Keeps a link (or a heading) back from the page, or shows it again (423
+ * [LT1]): nothing else about it changes, its times included, so showing it
+ * again never shows it outside them.
+ */
+export async function setLinkArchived(email: string, id: string, archived: boolean): Promise<LinkResult> {
+  const result = await withStore<LinkResult>(email, async (store, save) => {
+    const at = store.links.findIndex((link) => link.id === id);
+    if (at < 0) return { ok: false, reason: "unknown" };
+    if (Boolean(store.links[at].archived) === archived) return { ok: true, store };
+    const links = [...store.links];
+    const next: StoreLink = { ...links[at] };
+    if (archived) next.archived = true;
+    else delete next.archived;
+    links[at] = next;
+    return { ok: true, store: await save({ ...store, links }) };
   });
   return result ?? { ok: false, reason: "none" };
 }
@@ -3730,6 +3952,16 @@ export async function setHasDiscounts(
   if (!store) return null;
   if (store.hasDiscounts === hasDiscounts) return store;
   return patchStore(email, (current) => (current.hasDiscounts === hasDiscounts ? null : { hasDiscounts }));
+}
+
+/**
+ * Writes the store's codes for people who already bought here (554 [DS1],
+ * unit 2), read through the same strict reader as every load, so nothing in
+ * another shape is ever kept. At most MAX_RETURNING_CODES.
+ */
+export async function setReturningCodes(email: string, codes: ReturningCode[]): Promise<Store | null> {
+  const kept = parseReturningCodes(codes.slice(0, MAX_RETURNING_CODES));
+  return patchStore(email, () => ({ returningCodes: kept }));
 }
 
 export type ProductPartResult =

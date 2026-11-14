@@ -2409,6 +2409,7 @@ export function ProductEditor({
                     <>
                       <a href={`/@${handle}/p/${productSegment(product)}`} target="_blank" rel="noopener noreferrer" className={quiet}>
                         Its page
+                        <span className="sr-only">{`: ${product.title}`}</span>
                       <NewTab /></a>
                       <button
                         type="button"

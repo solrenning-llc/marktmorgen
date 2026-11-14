@@ -491,6 +491,16 @@ export async function createCheckout(
     body.set("metadata[upsell_key]", extras.upsellKey);
   }
 
+  // A paid store's new orders stop at its plan's figure (lib/order-admission.ts):
+  // admitted here, before Stripe's page opens, so nobody is stopped while paying.
+  // A purchase for several people holds its places too. Admitted before anything
+  // is read from or made on the creator's Stripe account for this checkout (its
+  // coupons and codes, below): a checkout the store cannot take reads nothing
+  // (rule MR; audit G2).
+  const admitted = await admitOrders(store, 1 + (extras.group ? extras.group.people : 0), Date.now(), itemsHandedOver([product, ...added.map((offer) => offer.target)]));
+  if (!admitted.ok) throw new OrdersPausedError(admitted.reason);
+  if (admitted.hour !== null) body.set(`metadata[${ADMITTED_FIELD}]`, String(admitted.hour));
+
   // The box a buyer types a discount code into, shown only by a store that has
   // one. An empty box on every checkout is an invitation to go and look for a
   // code that does not exist, and a buyer who leaves to search for one is a
@@ -751,13 +761,6 @@ export async function createCheckout(
   if (singleDigital && (confirmationRuntime.lifecycle ?? CURRENT_SHIPMENT_MAIL_LIFECYCLE) !== "never_activated") {
     throw new Error("The payment page could not be opened");
   }
-
-  // A paid store's new orders stop at its plan's figure (lib/order-admission.ts):
-  // admitted here, before Stripe's page opens, so nobody is stopped while paying.
-  // A purchase for several people holds its places too.
-  const admitted = await admitOrders(store, 1 + (extras.group ? extras.group.people : 0), Date.now(), itemsHandedOver([product, ...added.map((offer) => offer.target)]));
-  if (!admitted.ok) throw new OrdersPausedError(admitted.reason);
-  if (admitted.hour !== null) body.set(`metadata[${ADMITTED_FIELD}]`, String(admitted.hour));
 
   // Where the receipt page sends the buyer back to, and the sale.completed
   // webhook's source: written last, and only while Stripe's fifty metadata

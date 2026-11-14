@@ -215,6 +215,11 @@ export async function createCartCheckout(
     if (extras.cameFrom.medium) body.set("metadata[utm_medium]", extras.cameFrom.medium);
     if (extras.cameFrom.campaign) body.set("metadata[utm_campaign]", extras.cameFrom.campaign);
   }
+  // A cart is one order, admitted before Stripe's page opens (lib/order-admission.ts), and before
+  // the creator's Stripe account is read for a code (below): a cart the store cannot take reads nothing (rule MR; audit G2).
+  const admitted = await admitOrders(store, 1, Date.now(), itemsHandedOver(products));
+  if (!admitted.ok) throw new OrdersPausedError(admitted.reason);
+  if (admitted.hour !== null) body.set(`metadata[${ADMITTED_FIELD}]`, String(admitted.hour));
   // One discount at a time, as everywhere here: a code box only when nothing was taken off already.
   const box = !discounted && store.hasDiscounts;
   // A code from a link goes on by itself, as on one product's checkout
@@ -251,10 +256,6 @@ export async function createCartCheckout(
     keepConsentOn(body, extras.digitalConsent, "digital", 1);
     body.set(`payment_intent_data[metadata][${CONSENT_META}]`, consentMetaValue(extras.digitalConsent, "digital"));
   }
-  // A cart is one order, admitted before Stripe's page opens (lib/order-admission.ts).
-  const admitted = await admitOrders(store, 1, Date.now(), itemsHandedOver(products));
-  if (!admitted.ok) throw new OrdersPausedError(admitted.reason);
-  if (admitted.hour !== null) body.set(`metadata[${ADMITTED_FIELD}]`, String(admitted.hour));
 
   for (;;) {
     try {

@@ -16,7 +16,8 @@ import { viaCookieName } from "@/lib/affiliate-setting";
 import { clientAddress, fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
 import { readProduct } from "@/lib/catalog";
 import { chargeNow } from "@/lib/call-deposit";
-import { type DepositFigures, depositWithCode, readDepositCode } from "@/lib/deposit-code";
+import { DEPOSIT_CODE_REQUEST_UNITS, type DepositFigures, depositWithCode, readDepositCode } from "@/lib/deposit-code";
+import { takeBuyerRead } from "@/lib/buyer-actions";
 
 /** The checkout this browser last opened for a call, so going back frees it. */
 const HOLD_COOKIE = "nl_call_hold";
@@ -134,6 +135,9 @@ export async function POST(request: NextRequest) {
   if (typed.trim() && !pkg && store.hasDiscounts) {
     const due = chargeNow({ priceCents: product.priceCents, currency: store.currency, deposit: product.call.deposit ?? null, inPerson: Boolean(product.call.place) });
     if (due.rest > 0) {
+      // The ceiling before the spend (rule MR; audit G2): the read is one of the store's buyer requests, taken
+      // first; no room this month, or a count not known, reads nothing (lib/returning-code.ts does the same).
+      if (!(await takeBuyerRead(store, DEPOSIT_CODE_REQUEST_UNITS).catch(() => false))) return back("error");
       const found = store.stripeAccountId ? await readDepositCode(store.stripeAccountId, typed) : null;
       if (!found) return back("code-unknown");
       const figured = depositWithCode(found, { priceCents: product.priceCents, deposit: due.cents, currency: store.currency, nowSeconds: Math.floor(Date.now() / 1000) });

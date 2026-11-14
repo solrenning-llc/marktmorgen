@@ -1272,6 +1272,9 @@ export const COST_LINES: CostLine[] = [
       // The offers after a cart read what the buyer already has from the creator's Stripe account, counted before (556 [CT1], 1 November 2026).
       { file: "lib/cart-offers.ts", names: ["takeBuyerRead(store, CART_OFFER_REQUEST_UNITS)", "CART_OFFER_REQUEST_UNITS = NEXT_OFFER_REQUEST_UNITS"] },
       // A code only for people who bought here before reads what the typed email bought from the creator's Stripe account, counted before (554 [DS1], unit 2, 11 November 2026).
+      // A call's deposit code reads the creator's Stripe account for the typed code, counted before (rule MR audit G2, 14 November 2026).
+      { file: "app/api/store/book/route.ts", names: ["takeBuyerRead(store, DEPOSIT_CODE_REQUEST_UNITS)"] },
+      { file: "lib/deposit-code.ts", names: ["DEPOSIT_CODE_REQUEST_UNITS = NEXT_OFFER_REQUEST_UNITS"] },
       { file: "lib/returning-code.ts", names: ["takeBuyerRead(store, RETURNING_CODE_REQUEST_UNITS)", "RETURNING_CODE_REQUEST_UNITS = NEXT_OFFER_REQUEST_UNITS", "RETURNING_TRIES = 6", "RETURNING_LINKS_PER_ADDRESS = 3", "RETURNING_LINK_SECONDS = 1800", "kind: \"transactional\""] },
       // A course's "More from" shelf reads what a student owns the same way, counted before (628 [HN4](b), 10 November 2026).
       { file: "lib/course-shelf.ts", names: ["takeBuyerRead(store, SHELF_REQUEST_UNITS)", "SHELF_REQUEST_UNITS = NEXT_OFFER_REQUEST_UNITS", "ownedHere(store, email)"] },

@@ -97,8 +97,39 @@ export class MemoryRedis {
     return made;
   }
 
-  /** Runs one command, the way redisPipeline runs each of its own. */
+  /** How deep run() is: a script's own commands run inside one. */
+  private depth = 0;
+
+  /** An empty hash, set, sorted set or list: Redis keeps none, so it is not there. */
+  private static empty(held: unknown): boolean {
+    return (held instanceof Map || held instanceof Set) ? held.size === 0 : Array.isArray(held) && held.length === 0;
+  }
+
+  /**
+   * Runs one command, the way redisPipeline runs each of its own. Once the outermost command is done, every
+   * empty collection is dropped, as Redis does when the last member goes: a read of a missing hash, set, sorted
+   * set or list (which makes one to answer from) leaves no key behind, so a later DEL, EXISTS, TYPE or SCAN
+   * answers as a real server would (tests/redis-memory-empty.test.ts). Inside a script nothing is dropped, so a
+   * collection it holds stays the one it writes to.
+   */
   run(command: (string | number)[]): unknown {
+    this.depth += 1;
+    try {
+      return this.runOne(command);
+    } finally {
+      this.depth -= 1;
+      if (this.depth === 0) {
+        for (const [k, held] of this.data) {
+          if (MemoryRedis.empty(held)) {
+            this.data.delete(k);
+            this.until.delete(k);
+          }
+        }
+      }
+    }
+  }
+
+  private runOne(command: (string | number)[]): unknown {
     const [rawName, ...rest] = command;
     const name = String(rawName).toUpperCase();
     const key = String(rest[0] ?? "");
@@ -1771,11 +1802,14 @@ export class MemoryRedis {
       case "DEL": {
         // DEL takes several keys.
         let gone = 0;
-        for (const one of [key, ...args]) if (this.data.delete(one)) gone += 1;
+        for (const one of [key, ...args]) {
+          const there = this.data.has(one) && !MemoryRedis.empty(this.data.get(one));
+          if (this.data.delete(one) && there) gone += 1;
+        }
         return gone;
       }
       case "EXISTS":
-        return this.data.has(key) ? 1 : 0;
+        return this.data.has(key) && !MemoryRedis.empty(this.data.get(key)) ? 1 : 0;
       case "DUMP": {
         // A stand-in for Redis's own serialized value (lib/backup-export.ts): the value and its type, never the key
         // name or its time to live, as DUMP's is; RESTORE below is the only reader of it. Null for a missing key.
@@ -1806,7 +1840,7 @@ export class MemoryRedis {
       case "TYPE": {
         // As Redis names them, for a test that walks every key (tests/erasure-world.ts).
         const held = this.data.get(key);
-        if (held === undefined) return "none";
+        if (held === undefined || MemoryRedis.empty(held)) return "none";
         if (typeof held === "string") return "string";
         if (held instanceof Map) return "hash";
         if (held instanceof Set) return "set";
@@ -1918,7 +1952,7 @@ export class MemoryRedis {
         const pattern = at >= 0 ? args[at + 1] : "*";
         const matcher = new RegExp(`^${pattern.split("*").map((part) => part.replace(/[.+?^${}()|[\]\\]/g, "\\$&")).join(".*")}$`);
         for (const k of [...this.data.keys()]) this.live(k);
-        const found = [...this.data.keys()].filter((k) => matcher.test(k));
+        const found = [...this.data.keys()].filter((k) => matcher.test(k) && !MemoryRedis.empty(this.data.get(k)));
         return ["0", found];
       }
       case "HSCAN": {

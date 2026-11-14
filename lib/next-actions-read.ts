@@ -22,7 +22,8 @@
  *
  * Rule 24 (CX-123): a copy that could not be read, or is not in its shape, is "unknown" (each count null), never
  * none; a reading that did not read every membership (`complete` false) counts too few, so its counts are unknown as
- * well. No copy kept is no reading on this screen: nothing is shown, and nothing is said to be missing.
+ * well, marked `partial`: the store has more memberships than one reading counts, a limit that reading again does not
+ * lift, so the view never says "reload" for it. No copy kept is no reading on this screen: nothing is shown, and nothing is said to be missing.
  */
 import type { NextFacts } from "@/lib/next-actions-rules";
 import type { Numbers } from "@/lib/membership-numbers";
@@ -65,7 +66,14 @@ export async function nextFactsOf(store: Store, deps: NextReadDeps = LIVE): Prom
   // A reading that found no store counts at all: nothing to say.
   if (copy.value === null) return {};
   const numbers = copy.value;
-  if (numbers.complete !== true) return unknown();
+  // Not every membership read: a store with more of them in its history than one reading counts. Unknown, and marked
+  // as part only, so the view says it is a limit and never "reload" (Claude 1 cloud on #3556, MÉDIO).
+  if (numbers.complete !== true) {
+    return {
+      failedPayments: { count: null, at: copy.at, partial: true },
+      ...(askWinback ? { formerMembers: { count: null, at: copy.at, partial: true } } : {}),
+    };
+  }
   const at = copy.at;
   const currency = typeof numbers.currency === "string" ? numbers.currency : "";
   // Every live membership is in the store's currency, so the sums hold all of it; unreadable is not known.

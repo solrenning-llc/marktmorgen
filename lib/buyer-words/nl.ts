@@ -279,6 +279,7 @@ export const nl: BuyerWords = {
 
   close: "Sluiten",
   beforeYouGo: "Voordat je gaat — gratis",
+  noMoreOffers: "Dit soort aanbiedingen niet meer tonen",
 
   aboutStore: (store) => `Over ${store}`,
   guarantee: "Garantie",

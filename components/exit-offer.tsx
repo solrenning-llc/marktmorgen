@@ -6,6 +6,8 @@ import { useEffect, useRef, useState } from "react";
 const SETTLED_MS = 8_000;
 /** Shown once per store per visitor in this many days. */
 const QUIET_DAYS = 30;
+/** Set when the visitor turns such offers off: no store's leaving offer shows again in this browser (WCAG 2.2.4). */
+const OFF_KEY = "nl_exit_off";
 
 /**
  * The creator's free product, offered once to a visitor who is about to
@@ -21,6 +23,8 @@ const QUIET_DAYS = 30;
  *     "about to leave" cannot be told from scrolling, and never on load.
  *   - Once per visitor per store in a month, remembered in this browser only.
  *     Closed with the button, Escape, or a click outside; nothing comes back.
+ *     "Don't show offers like this" turns every store's leaving offer off in
+ *     this browser (WCAG 2.2.4).
  *   - It offers something free, says so, and asks for nothing but an address,
  *     with the same unticked box for more email the page itself has. No
  *     countdown, no "wait!", no discount that was not on offer to everyone.
@@ -34,7 +38,7 @@ export function ExitOffer({
   store: string;
   title: string;
   /** In the store's language (lib/buyer-words). */
-  words: { close: string; beforeYouGo: string };
+  words: { close: string; beforeYouGo: string; noMore: string };
   children: React.ReactNode;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
@@ -45,7 +49,7 @@ export function ExitOffer({
     let seen = false;
     try {
       const at = Number(window.localStorage.getItem(key) || 0);
-      seen = at > 0 && Date.now() - at < QUIET_DAYS * 86_400_000;
+      seen = (at > 0 && Date.now() - at < QUIET_DAYS * 86_400_000) || window.localStorage.getItem(OFF_KEY) === "1";
     } catch {
       // Without storage it may show again another day, which is acceptable.
     }
@@ -86,6 +90,18 @@ export function ExitOffer({
           {title}
         </h2>
         {children}
+        <button
+          type="button"
+          className="mt-4 inline-flex min-h-11 items-center text-sm font-semibold underline underline-offset-4"
+          onClick={() => {
+            try {
+              window.localStorage.setItem(OFF_KEY, "1");
+            } catch {}
+            dialog.current?.close();
+          }}
+        >
+          {words.noMore}
+        </button>
       </div>
     </dialog>
   );

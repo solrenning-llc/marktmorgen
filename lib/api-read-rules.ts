@@ -561,9 +561,9 @@ export function pageTestWork(): ReadWork {
   return { commands: 2, bytes: PAGE_BYTES + TEST_COUNTS_BYTES, sent: TEST_SENT_BYTES + TOOL_NOTE_BYTES, stripePages: 0, roundTrips: 2 };
 }
 
-/** get_page_reading: the listing, then the page and its depth record in one go. */
+/** get_page_reading: the listing, then the page, its depth record and the time record beside it (639 [GL7](25)) in one go. */
 export function pageReadingWork(): ReadWork {
-  return { commands: 2, bytes: PAGE_BYTES + DEPTH_RECORD_BYTES, sent: READING_SENT_BYTES + TOOL_NOTE_BYTES, stripePages: 0, roundTrips: 1 };
+  return { commands: 3, bytes: PAGE_BYTES + DEPTH_RECORD_BYTES, sent: READING_SENT_BYTES + TOOL_NOTE_BYTES, stripePages: 0, roundTrips: 1 };
 }
 
 /** get_page_versions: the listing, how many versions are kept (LLEN), then those versions; one sent whole, or the list. */

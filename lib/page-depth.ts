@@ -18,12 +18,14 @@
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
-import { cappedCount } from "@/lib/capped-count";
-import { DEPTH_FIELDS_MAX, DEPTH_RECORD_BYTES } from "@/lib/page-depth-rules";
+import { cappedCount, cappedCountCommand } from "@/lib/capped-count";
+import { DEPTH_FIELDS_MAX, DEPTH_RECORD_BYTES, TIME_RANGES, timeField } from "@/lib/page-depth-rules";
 import { BLOCK_ID_PATTERN } from "@/lib/sales-page";
 import { type WhyNot, isWhyNot } from "@/lib/why-not-rules";
 
 const key = (statsId: string, productId: string) => `nl:depth:${statsId}:${productId}`;
+/** How long measured visitors stayed, by range (639 [GL7](25)), beside the blocks' record. */
+const timeKey = (statsId: string, productId: string) => `nl:depth:${statsId}:${productId}:t`;
 const KEEP_SECONDS = 400 * 86_400;
 
 export { DEPTH_FIELDS_MAX, DEPTH_RECORD_BYTES };
@@ -57,11 +59,39 @@ export function depthField(blockId: string, whyNot = "", video = ""): string | n
   return field;
 }
 
-export async function countDepth(statsId: string | null, productId: string, blockId: string, whyNot = "", video = ""): Promise<void> {
+export async function countDepth(statsId: string | null, productId: string, blockId: string, whyNot = "", video = "", seconds: unknown = undefined): Promise<void> {
   const field = depthField(blockId, whyNot, video);
   if (!statsId || !isRedisConfigured() || !field) return;
   const k = key(statsId, productId);
+  // How long they stayed, in its range (639 [GL7](25)): counted in the same pipeline, in a record of its own, so a
+  // full blocks' record can never push it, or a block, into the overflow field. Its field is always one of the
+  // TIME_RANGES names (timeField), so its record never holds more than those: a plain HINCRBY, with no capped count
+  // (#2571, the review at 5d245b24, MEDIUM 1: the capped count billed its HLEN and, at six ranges, its HMGET).
+  const time = timeField(seconds);
   try {
+    if (time) {
+      const tk = timeKey(statsId, productId);
+      const both: (string | number)[][] = [["EXPIRE", k, KEEP_SECONDS], ["EXPIRE", tk, KEEP_SECONDS]];
+      let replies: unknown;
+      try {
+        replies = await redisPipeline([cappedCountCommand([{ key: k, most: DEPTH_FIELDS_MAX }], [{ hash: 0, field, by: 1 }]), ["HINCRBY", tk, time, 1]]);
+      } catch {
+        replies = undefined;
+      }
+      // Only the two answers sent, the block's count (a whole number, 0 when it went to the overflow field) and the
+      // range's (at least 1), say which record is new. Any other answer (lost after the write, empty, cut short) may
+      // have made them: both are given their expiry again, never none (Claude 5 on #2571).
+      const whole = (v: unknown, least: number) => typeof v === "number" && Number.isSafeInteger(v) && v >= least;
+      const exact = Array.isArray(replies) && replies.length === 2 && Array.isArray(replies[0]) && replies[0].length === 1 && whole(replies[0][0], 0) && whole(replies[1], 1);
+      if (!exact) {
+        await redisPipeline(both);
+        return;
+      }
+      const [[count], timeCount] = replies as [number[], number];
+      const expiries = [...(count === 1 ? [both[0]] : []), ...(timeCount === 1 ? [both[1]] : [])];
+      if (expiries.length) await redisPipeline(expiries);
+      return;
+    }
     const [count] = await cappedCount(k, DEPTH_FIELDS_MAX, [{ field, by: 1 }]);
     if (count === 1) await redisPipeline([["EXPIRE", k, KEEP_SECONDS]]);
   } catch {
@@ -74,7 +104,8 @@ export function reachShares(order: string[], stopped: Record<string, number>, vi
   const shares: Record<string, number> = {};
   let below = 0;
   for (let i = order.length - 1; i >= 0; i -= 1) {
-    below += stopped[order[i]] ?? 0;
+    // Only the record's own counts: a block id like "constructor" is never read off Object.prototype.
+    below += Object.hasOwn(stopped, order[i]) ? stopped[order[i]] : 0;
     shares[order[i]] = visitors > 0 ? Math.round((Math.min(below, visitors) / visitors) * 100) : 0;
   }
   return { shares, visitors };
@@ -84,13 +115,23 @@ export function reachShares(order: string[], stopped: Record<string, number>, vi
 export type Depth = { visitors: number; stopped: Record<string, number>; whyNot: Partial<Record<WhyNot, number>>; videos: Record<string, VideoReach> };
 
 /** What was counted for a product: visitors, and how many stopped at each block id. */
-export async function readDepth(statsId: string | null, productId: string): Promise<Depth> {
-  if (!statsId || !isRedisConfigured()) return { visitors: 0, stopped: {}, whyNot: {}, videos: {} };
-  const [raw] = await redisPipeline([["HGETALL", key(statsId, productId)]]);
-  const pairs: Record<string, string> = {};
-  if (Array.isArray(raw)) for (let i = 0; i + 1 < raw.length; i += 2) pairs[String(raw[i])] = String(raw[i + 1]);
-  else if (raw && typeof raw === "object") Object.assign(pairs, raw);
-  return depthOf(pairs);
+export async function readDepth(statsId: string | null, productId: string): Promise<Depth & { time: Record<string, number>; timeUnread: boolean }> {
+  if (!statsId || !isRedisConfigured()) return { visitors: 0, stopped: {}, whyNot: {}, videos: {}, time: {}, timeUnread: false };
+  const [raw, rawTime] = await redisPipeline([["HGETALL", key(statsId, productId)], ["HGETALL", timeKey(statsId, productId)]]);
+  // Counted in Maps, never on plain objects: any visitor can send a block id
+  // such as "constructor", which must be a block of its own and write nothing
+  // onto Object (tests/proto-keys.test.ts). Given back as own properties.
+  const pairs = new Map<string, string>();
+  if (Array.isArray(raw)) for (let i = 0; i + 1 < raw.length; i += 2) pairs.set(String(raw[i]), String(raw[i + 1]));
+  else if (raw && typeof raw === "object") for (const [field, value] of Object.entries(raw)) pairs.set(field, String(value));
+  const time = new Map<string, number>();
+  // The time record's reply read exactly (rule 24): a list of field and value
+  // texts, or a record of them. Anything else is unread, said as such by the
+  // studio, never an empty record shown as "0 so far".
+  const timePairs = hashPairs(rawTime);
+  const timeUnread = timePairs === null;
+  for (const [field, value] of timePairs ?? []) if (TIME_FIELDS.has(field) && Number(value) > 0) time.set(field, Number(value));
+  return { ...depthOf(pairs), time: Object.fromEntries(time), timeUnread };
 }
 
 /** A count as countDepth keeps it with HINCRBY by one: a whole number, never below zero, as text (Codex T on #3225). */
@@ -107,33 +148,39 @@ export async function readDepthExact(statsId: string, productId: string): Promis
   if (!isRedisConfigured()) throw new UnknownReplyError(what);
   const list = stringList(repliesFor(await redisPipeline([["HGETALL", key(statsId, productId)]]), 1)?.[0]);
   if (!list || list.length % 2 !== 0) throw new UnknownReplyError(what);
-  // No prototype: a field is only ever a count, whatever its name.
-  const pairs = Object.create(null) as Record<string, string>;
+  // A Map: a field is only ever a count, whatever its name.
+  const pairs = new Map<string, string>();
   for (let i = 0; i < list.length; i += 2) {
     if (!COUNT_TEXT.test(list[i + 1])) throw new UnknownReplyError(what);
-    pairs[list[i]] = list[i + 1];
+    pairs.set(list[i], list[i + 1]);
   }
   return depthOf(pairs);
 }
 
-/** The counts of a depth record, by field, added up into what readDepth answers. Pure. */
-function depthOf(pairs: Record<string, string>): Depth {
-  const stopped: Record<string, number> = {};
-  const whyNot: Partial<Record<WhyNot, number>> = {};
-  const videos: Record<string, VideoReach> = {};
+/** The time-on-page fields, never counted as blocks. */
+const TIME_FIELDS = new Set<string>(TIME_RANGES.map((range) => range.field));
+
+/** The counts of a depth record, by field, added up into what readDepth answers. Pure; counted in Maps (proto-keys). */
+function depthOf(pairs: Map<string, string>): Depth {
+  const stopped = new Map<string, number>();
+  const whyNot = new Map<WhyNot, number>();
+  const videos = new Map<string, VideoReach>();
   let visitors = 0;
-  for (const [field, value] of Object.entries(pairs)) {
+  for (const [field, value] of pairs) {
     if (field === "_n" || !(Number(value) > 0)) continue;
+    // A time field left in the blocks' record by an earlier build is never a visitor of its own.
+    if (TIME_FIELDS.has(field)) continue;
     const n = Number(value);
     const [head, video] = field.split("!");
     const [block, answer] = head.split("?");
-    stopped[block] = (stopped[block] ?? 0) + n;
-    if (isWhyNot(answer)) whyNot[answer] = (whyNot[answer] ?? 0) + n;
+    stopped.set(block, (stopped.get(block) ?? 0) + n);
+    if (isWhyNot(answer)) whyNot.set(answer, (whyNot.get(answer) ?? 0) + n);
     if (video) {
       const [videoBlock, step] = video.split(".");
       const at = VIDEO_STEPS.indexOf(step as VideoStep);
       if (at >= 0) {
-        const row = (videos[videoBlock] ??= { played: 0, quarter: 0, half: 0, threeQuarters: 0, end: 0 });
+        let row = videos.get(videoBlock);
+        if (!row) videos.set(videoBlock, (row = { played: 0, quarter: 0, half: 0, threeQuarters: 0, end: 0 }));
         row.played += n;
         if (at >= 1) row.quarter += n;
         if (at >= 2) row.half += n;
@@ -145,5 +192,25 @@ function depthOf(pairs: Record<string, string>): Depth {
   }
   // Every visitor counted stopped at exactly one block, so the blocks add up
   // to the visitors; "_n", written until 11 October 2026, said the same.
-  return { visitors, stopped, whyNot, videos };
+  return {
+    visitors,
+    stopped: Object.fromEntries(stopped),
+    whyNot: Object.fromEntries(whyNot) as Partial<Record<WhyNot, number>>,
+    videos: Object.fromEntries(videos),
+  };
+}
+
+/** A hash reply's field and value pairs, or null when it is not one: a list of texts of even length, or a record of texts. */
+function hashPairs(reply: unknown): [string, string][] | null {
+  if (Array.isArray(reply)) {
+    if (reply.length % 2 !== 0 || !reply.every((item) => typeof item === "string")) return null;
+    const out: [string, string][] = [];
+    for (let i = 0; i < reply.length; i += 2) out.push([reply[i] as string, reply[i + 1] as string]);
+    return out;
+  }
+  if (reply && typeof reply === "object" && Object.getPrototypeOf(reply) === Object.prototype) {
+    const entries = Object.entries(reply);
+    return entries.every(([, value]) => typeof value === "string") ? (entries as [string, string][]) : null;
+  }
+  return null;
 }

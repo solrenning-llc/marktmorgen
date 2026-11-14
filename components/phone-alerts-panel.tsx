@@ -364,7 +364,7 @@ export function PhoneAlertsPanel({ view: initial }: { view: PhoneView }) {
         ) : null}
 
         <details className="mt-6 rounded-[12px] bg-paper px-4 py-3 text-sm ring-1 ring-line">
-          <summary className="cursor-pointer font-semibold text-ink-soft transition hover:text-violet-deep">What the notifications say</summary>
+          <summary className="min-h-11 cursor-pointer py-3 font-semibold text-ink-soft transition hover:text-violet-deep">What the notifications say</summary>
           <ul className="mt-3 space-y-2 text-ink-soft">
             <li>
               <span className="font-semibold text-ink">New sale: $29</span> — the product, and the one added at checkout. A

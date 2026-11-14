@@ -444,7 +444,7 @@ export function InboxStudio({
           goes to their email too. You are emailed when someone writes, at most every half hour for each conversation.
         </p>
         {canSettings ? (
-          <label className="mt-4 flex items-center gap-3">
+          <label className="mt-4 flex min-h-11 items-center gap-3">
             <input
               type="checkbox"
               checked={setting.chat}

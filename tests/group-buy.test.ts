@@ -37,6 +37,7 @@ import { purchasesFor } from "@/lib/buyer-orders";
 import { createCheckout } from "@/lib/store-checkout";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import { paidIntentReply } from "./paid-intent-standin";
 import { paidPeriod } from "./billing-period-fixture";
 
 type Sent = { to: string[]; subject: string; text: string };
@@ -44,6 +45,9 @@ const emails: Sent[] = [];
 const checkouts: URLSearchParams[] = [];
 let refunds: Record<string, unknown>[] = [];
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+  // The payment a purchase for several is read with before it is settled (lib/group-buy.ts settleGroup): paid, not given back.
+  const paid = paidIntentReply(input, init?.method ?? "GET");
+  if (paid) return paid;
   const url = new URL(String(input));
   if (url.hostname === "api.resend.com") {
     emails.push(JSON.parse(String(init?.body)) as Sent);

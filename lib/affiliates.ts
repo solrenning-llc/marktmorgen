@@ -1428,7 +1428,7 @@ export async function buyerOfOrder(store: Store, sessionId: string): Promise<str
 }
 
 export type JoinResult =
-  | { ok: true; session: string; affiliate: Affiliate; created: boolean }
+  | { ok: true; session: string | null; affiliate: Affiliate; created: boolean }
   | { ok: false; reason: "unavailable" | "order" | "owner" | "declined" | "full" };
 
 /**
@@ -1436,6 +1436,13 @@ export type JoinResult =
  * and approved at once, or — for a buyer who had applied and was waiting —
  * approved now. Somebody the creator declined or removed is not let back in
  * this way: that decision was theirs.
+ *
+ * Only the affiliate this very press has made is signed in (`session`). The
+ * order id travels in the purchase email and on the thanks page, so it is not
+ * a key to somebody's page: a later press, and an address that was already on
+ * the program, get no session (null), and the button emails the ordinary
+ * one-off sign-in link to the affiliate's own address instead (the security
+ * audit of 14 November 2026).
  */
 export async function joinAsBuyer(store: Store, sessionId: string): Promise<JoinResult> {
   if (!buyersJoin(store)) return { ok: false, reason: "unavailable" };
@@ -1483,9 +1490,10 @@ export async function joinAsBuyer(store: Store, sessionId: string): Promise<Join
     }
   }
 
+  if (!created) return { ok: true, session: null, affiliate, created };
   const session = randomBytes(32).toString("hex");
   await redisPipeline([["SET", sessionKey(session), JSON.stringify({ s: statsId, a: affiliate.id }), "EX", AFFILIATE_SESSION_SECONDS]]);
-  if (created) {
+  {
     await alertCreator(
       store,
       "affiliate",

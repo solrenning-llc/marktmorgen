@@ -16,7 +16,7 @@ import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_order_session_once";
-process.env.RESEND_API_KEY = "re_test_order_session_once";
+process.env.RESEND_API_KEY = "re_test_a_stand_in_key_for_tests_only";
 
 const sessions = new Map<string, Record<string, unknown>>();
 const mails: { to: string; text: string }[] = [];

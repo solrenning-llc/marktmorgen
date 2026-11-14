@@ -2,7 +2,7 @@ import { withinStore } from "@/lib/metered-limits";
 import type { NextRequest } from "next/server";
 import { originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
-import { AFFILIATE_SESSION_SECONDS, affiliateCookieName, joinAsBuyer } from "@/lib/affiliates";
+import { AFFILIATE_SESSION_SECONDS, affiliateCookieName, joinAsBuyer, requestAffiliateLink } from "@/lib/affiliates";
 import { clientAddress, fromAnotherSite, limited } from "@/lib/request-guard";
 
 const MAX_BODY_BYTES = 1_000;
@@ -43,6 +43,15 @@ export async function POST(request: NextRequest) {
     return { ok: false as const, reason: "error" as const };
   });
   if (!result.ok) return back(result.reason);
+  // Somebody already on the program, or a later press of the same order: the order is not a key to their page, so the
+  // ordinary one-off sign-in link goes to the affiliate's own address (lib/affiliates.ts, joinAsBuyer).
+  if (result.session === null) {
+    const sent = await requestAffiliateLink({ store, email: result.affiliate.email, note: "", ip: clientAddress(request), origin }).catch((error) => {
+      console.error("an affiliate's sign-in link after an order failed", error);
+      return "error" as const;
+    });
+    return back(sent);
+  }
   const secure = origin.startsWith("https://") ? "; Secure" : "";
   return new Response(null, {
     status: 303,

@@ -81,7 +81,7 @@ async function main(): Promise<void> {
   if (!dana.ok) throw new Error(`Dana could not join: ${dana.reason}`);
   is("a buyer joins at once, approved", dana.affiliate.status, "approved");
   is("as the address that paid", dana.affiliate.email, "dana@example.com");
-  is("and this browser is signed in as them", (await affiliateForSession(store, dana.session))?.id, dana.affiliate.id);
+  is("and this browser is signed in as them", dana.session ? (await affiliateForSession(store, dana.session))?.id : null, dana.affiliate.id);
   const again = await joinAsBuyer(store, "cs_test_dana000000001");
   is("the same order twice is the same affiliate", again.ok && again.affiliate.id, dana.affiliate.id);
   is("and nobody is made twice", (await listAffiliates(store)).length, 1);
@@ -145,8 +145,12 @@ async function main(): Promise<void> {
     const response = await joinRoute(new NextRequest("https://marktmorgen.com/api/store/affiliates/join", { method: "POST", headers: { origin: "https://marktmorgen.com", host: "marktmorgen.com" }, body: form }));
     return response.headers.get("location") ?? `status ${response.status}`;
   };
-  is("the page then says the application is in, not that a link is ready", await viaRoute("cs_test_gusplus000001"), "https://marktmorgen.com/@harbor/affiliates?status=applied");
-  is("and a buyer let in hears their link is ready", await viaRoute("cs_test_kim000000001"), "https://marktmorgen.com/@harbor/affiliates?status=joined");
+  // Each on an order not pressed before: a later press of the same order signs nobody in and emails the ordinary
+  // sign-in link instead (tests/affiliate-order-session-once.test.ts).
+  paid("cs_test_gusroute00001", "gus+route@example.com");
+  paid("cs_test_lee000000001", "lee@example.com");
+  is("the page then says the application is in, not that a link is ready", await viaRoute("cs_test_gusroute00001"), "https://marktmorgen.com/@harbor/affiliates?status=applied");
+  is("and a buyer let in hears their link is ready", await viaRoute("cs_test_lee000000001"), "https://marktmorgen.com/@harbor/affiliates?status=joined");
 
   part("The purchase email offers it only where it works");
   const session = { ...sessions.get("cs_test_dana000000001")!, metadata: { store: "harbor", product: "p8w2m4q9zz" } };

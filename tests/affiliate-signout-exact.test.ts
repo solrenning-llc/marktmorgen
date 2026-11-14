@@ -66,6 +66,8 @@ async function signedIn() {
   if (!store) throw new Error("no store");
   const joined = await joinAsBuyer(store, "cs_test_dana000000001");
   if (!joined.ok) throw new Error(`could not join: ${joined.reason}`);
+  // A fresh store each time: the order makes the affiliate now, so it signs them in (joinAsBuyer).
+  if (joined.session === null) throw new Error("the order made nobody new");
   assert.equal((await affiliateForSession(store, joined.session))?.id, joined.affiliate.id);
   return { store, session: joined.session };
 }

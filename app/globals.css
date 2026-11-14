@@ -97,6 +97,7 @@
   --mint-lift: #6fe3ba;
   --amber: #8a4f00;
   --amber-soft: #fdf3e1;
+  --amber-text: #6b3d00; /* status copy on amber-soft, 8.3:1 (1.4.6); --amber stays for borders and accents */
   /* The same two signals at the weight they need to read on navy. */
   --amber-lift: #ffc77a;
   --violet-glow: #cfc7f2;
@@ -1212,7 +1213,7 @@ html {
 }
 .tag-next {
   background: var(--amber-soft);
-  color: var(--amber);
+  color: var(--amber-text);
 }
 .tag-brand {
   background: var(--lilac);

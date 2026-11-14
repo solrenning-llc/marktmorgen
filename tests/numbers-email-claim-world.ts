@@ -11,6 +11,8 @@ export async function sendEmail(message: { to: string; subject: string }): Promi
   control.sent.push({ to: message.to, subject: message.subject });
   return true;
 }
+// The owner's email goes through sendEmailPinned (lib/email.ts, #3297): in this one-sender world it is the same stand-in.
+export const sendEmailPinned = (message: Parameters<typeof sendEmail>[0]) => sendEmail(message);
 export async function cronAllowed(): Promise<boolean> { return true; }
 export async function visitedFolders(): Promise<string[]> { return [...control.folders]; }
 export async function storeOf(folder: string) {
@@ -19,6 +21,7 @@ export async function storeOf(folder: string) {
 export async function weeklySummary(): Promise<string | null> { return null; }
 export function aiAvailableFor(): boolean { return false; }
 export async function readTeam() { return { members: [] }; }
+export async function readTeamMembers() { return []; }
 const day = { visitors: 0, checkouts: 0, sales: 0, cents: 0 };
 export async function readStats() {
   if (control.numbers === "throws") throw new Error("synthetic stats read failure");

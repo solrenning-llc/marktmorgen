@@ -261,7 +261,9 @@ async function paidAtStripe(store: Store, email: string): Promise<Ledger> {
       }
       for (const product of bought) {
         // A course sold as a membership is open while the membership runs.
-        if (product.id === meta.product && product.recurring && session.mode === "subscription" && meta.kind !== "plan") {
+        // Read from the checkout itself, never from what the product is now: a membership the creator later turned
+        // into a one-off sale was still sold as a membership, and reopens nothing to a member who left.
+        if (product.id === meta.product && session.mode === "subscription" && meta.kind !== "plan") {
           const sub = session.subscription as { status?: unknown } | null;
           // The same rule as every other door a membership opens (lib/membership-access.ts).
           if (!sub || typeof sub !== "object" || !isLiveSub(sub)) {
@@ -371,7 +373,8 @@ async function courseLedger(store: Store, email: string): Promise<Ledger> {
     if (!product.course) continue;
     // A one-off sale written down on the thanks page stands on its own,
     // unless Stripe now says it was refunded in full.
-    const start = product.recurring || asked.refunded.has(product.id)
+    // So does a course whose membership ended, even once the product is sold once (paidAtStripe).
+    const start = product.recurring || asked.refunded.has(product.id) || asked.ended.has(product.id)
       ? fromStripe.get(product.id)
       : recorded.get(product.id) ?? fromStripe.get(product.id);
     const opens = start ?? (product.recurring ? undefined : given.get(product.id));

@@ -394,6 +394,8 @@ export type SubRow = {
   metadata?: Record<string, string> | null;
   cancel_at_period_end?: unknown;
   cancel_at?: unknown;
+  /** Stripe's hold on its charges while a pause runs or waits to start (lib/membership-pause.ts). */
+  pause_collection?: unknown;
   current_period_end?: unknown;
   items?: {
     data?: {

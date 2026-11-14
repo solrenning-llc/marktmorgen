@@ -27,18 +27,27 @@
  * asks PayPal for the price alone).
  *
  * The payments after the first are sales too (money review on #2996, ALTO 1):
- * each paid invoice Stripe made because a membership's or a payment plan's
- * period came round (billing_reason "subscription_cycle", as lib/stats.ts
- * renewalEntries reads them), on a subscription this store opened, net of the
- * invoice's own tax (`total_taxes`, or `tax` in older API versions). A first
- * invoice is its checkout's sale already, so it is not read again.
+ * each paid invoice of a subscription this store opened, net of the invoice's
+ * own tax (`total_taxes`, or `tax` in older API versions): a renewal or a later
+ * instalment (billing_reason "subscription_cycle"), and since the focal review
+ * on #2996 @13f40ed407 (MÉDIO 2) also a switch to yearly or a plan change
+ * ("subscription_update"), a one-off charge ("manual") and any other reason.
+ * Only a first invoice ("subscription_create") is left out: it is its
+ * checkout's sale already. An invoice paid by credit alone (amount_paid 0)
+ * brought no money in and makes no line.
  *
  * A day whose payments are not all settled makes no file yet (money review on
- * #2996, MÉDIO 2): a checkout of the period still open or complete with its
- * payment processing, a one-click extra processing, or a renewal still a
- * draft, open or uncollectible (any of them can still be paid). Its sale would
- * come out later under the same invoice number with a larger total, and the
- * accounting app refuses a number it already has.
+ * #2996, MÉDIO 2): its sale would come out later under the same invoice number
+ * with a larger total, and the accounting app refuses a number it already has.
+ * Only what can really still be paid holds the file (focal review on #2996
+ * @13f40ed407, MÉDIO 1): a checkout still open (Stripe closes it within a
+ * day); a complete checkout whose payment (or, for a membership, whose first
+ * invoice) is still processing or waiting on the buyer; a one-click extra
+ * processing; a renewal still a draft, or open with a try Stripe will still
+ * make or a due date not passed. A payment that failed, expired or was given
+ * up (an uncollectible invoice, or an open one with no try left and its due
+ * date passed) is not a sale: it makes no line and holds nothing. The answer
+ * names the date of the earliest payment that holds the file.
  */
 import type { AccountingPeriod, AccountingSale } from "@/lib/accounting-export-rules";
 import { listingFinder } from "@/lib/catalog";
@@ -53,22 +62,27 @@ export const ACCOUNTING_PAGES = EXPORT_PAGES;
 /** PayPal sales read at the most: the sales file's own ceiling (readPaidSales, pages * 100). */
 export const ACCOUNTING_PAYPAL_LIMIT = EXPORT_PAGES * 100;
 
-export type AccountingRead = { ok: true; sales: AccountingSale[] } | { ok: false; reason: "too_many" | "unreadable" | "pending" };
+export type AccountingRead =
+  | { ok: true; sales: AccountingSale[] }
+  | { ok: false; reason: "too_many" | "unreadable" }
+  /** heldAt: when the earliest payment that holds the file was made (Unix seconds). */
+  | { ok: false; reason: "pending"; heldAt: number };
 
 export type AccountingDeps = {
   stripe: (path: string) => Promise<unknown>;
   paypal: (statsId: string | null, from: number, to: number, limit: number) => Promise<{ sales: Paid[]; more: boolean } | null>;
   title: (product: string) => Promise<string>;
+  /** Now, in Unix seconds; the clock when left out. */
+  now?: () => number;
 };
 
 class Unreadable extends Error {}
 class TooMany extends Error {}
-class Pending extends Error {}
 
-/** One-click extras whose payment can still succeed. */
+/** Payments whose money can still come in: processing, or waiting on the buyer or on a capture. */
 const EXTRA_PENDING = new Set(["processing", "requires_action", "requires_confirmation", "requires_capture"]);
-/** A renewal invoice's statuses: paid is a sale, void never will be; the others can still be paid. */
-const INVOICE_PENDING = new Set(["draft", "open", "uncollectible"]);
+/** Payments that will not: failed (Stripe's state after a failed attempt) or canceled (a voucher expired). */
+const PAYMENT_FAILED = new Set(["requires_payment_method", "canceled"]);
 
 const wholeFrom = (value: unknown, min = 0): number | null => (typeof value === "number" && Number.isSafeInteger(value) && value >= min ? value : null);
 const currencyOf = (value: unknown): string | null => (typeof value === "string" && /^[a-zA-Z]{3}$/.test(value) ? value.toLowerCase() : null);
@@ -116,6 +130,22 @@ function invoiceTaxOf(row: Record<string, unknown>): number | null {
   return tax === null ? 0 : wholeFrom(tax);
 }
 
+/**
+ * Whether an unpaid invoice can still be paid soon: a draft (Stripe finalizes it), or an open one that Stripe
+ * will try again (next_payment_attempt) or that is sent to pay by a due date not passed. Uncollectible, void, or
+ * open with no try left and its due date passed: no. Throws Unreadable when its status or those fields do not read.
+ */
+function invoiceStillPayable(row: Record<string, unknown>, now: number): boolean {
+  const status = ownField(row, "status");
+  if (status === "draft") return true;
+  if (status === "uncollectible" || status === "void") return false;
+  if (status !== "open") throw new Unreadable();
+  const next = hasOwnField(row, "next_payment_attempt") ? ownField(row, "next_payment_attempt") : null;
+  const due = hasOwnField(row, "due_date") ? ownField(row, "due_date") : null;
+  if ((next !== null && wholeFrom(next) === null) || (due !== null && wholeFrom(due) === null)) throw new Unreadable();
+  return (typeof next === "number" && next > 0) || (typeof due === "number" && due > now);
+}
+
 /** A paid sale of the period, or throws Unreadable when one that should be is not whole. */
 function sale(period: AccountingPeriod, product: string, amount: unknown, tax: number | null, currency: unknown, created: unknown): Omit<AccountingSale, "title"> {
   const total = wholeFrom(amount);
@@ -128,6 +158,14 @@ function sale(period: AccountingPeriod, product: string, amount: unknown, tax: n
 export async function readAccountingSales(store: Store, period: AccountingPeriod, deps: AccountingDeps = defaultDeps(store)): Promise<AccountingRead> {
   const handles = saleHandles(store);
   const found: Omit<AccountingSale, "title">[] = [];
+  const now = deps.now ? deps.now() : Math.floor(Date.now() / 1000);
+  // When each payment that can still be paid was made; any one holds the file.
+  const held: number[] = [];
+  const hold = (created: unknown) => {
+    const at = wholeFrom(created);
+    if (at === null) throw new Unreadable();
+    held.push(at);
+  };
   try {
     const paypal = await deps.paypal(store.statsId, period.from, period.to, ACCOUNTING_PAYPAL_LIMIT);
     if (!paypal) throw new Unreadable();
@@ -148,14 +186,32 @@ export async function readAccountingSales(store: Store, period: AccountingPeriod
         }
         throw new TooMany();
       };
-      const checkouts = walk("/checkout/sessions?limit=100", (row) => {
+      // The payment (or a membership's first invoice) comes with each checkout, so a failed one is told from a waiting one.
+      const checkouts = walk("/checkout/sessions?limit=100&expand[]=data.payment_intent&expand[]=data.invoice", (row) => {
         const meta = metaOf(row);
         const status = ownField(row, "status");
         const paid = ownField(row, "payment_status");
         if (!meta || typeof status !== "string" || typeof paid !== "string") throw new Unreadable();
         if (!handles.has(meta.store ?? "")) return;
-        // Still open, or complete with its payment processing: it can still be paid, dated in this period (MÉDIO 2).
-        if (status === "open" || (status === "complete" && paid === "unpaid")) throw new Pending();
+        // Still open: it can still be paid, dated in this period (MÉDIO 2). Stripe closes it within a day.
+        if (status === "open") return hold(ownField(row, "created"));
+        if (status === "complete" && paid === "unpaid") {
+          // Complete, not paid: held while its money can still come in; a failed or expired one is no sale (MÉDIO 1).
+          const intent = hasOwnField(row, "payment_intent") ? ownField(row, "payment_intent") : null;
+          const first = hasOwnField(row, "invoice") ? ownField(row, "invoice") : null;
+          if (plainObject(intent)) {
+            const state = ownField(intent, "status");
+            if (typeof state !== "string") throw new Unreadable();
+            if (PAYMENT_FAILED.has(state)) return;
+            if (EXTRA_PENDING.has(state) || state === "succeeded") return hold(ownField(row, "created"));
+            throw new Unreadable();
+          }
+          if (intent === null && plainObject(first)) {
+            if (invoiceStillPayable(first, now)) hold(ownField(row, "created"));
+            return;
+          }
+          throw new Unreadable();
+        }
         if (status !== "complete" || paid !== "paid") return;
         const totals = ownField(row, "total_details");
         const tax = plainObject(totals) ? wholeFrom(ownField(totals, "amount_tax")) : null;
@@ -166,37 +222,37 @@ export async function readAccountingSales(store: Store, period: AccountingPeriod
         const status = ownField(row, "status");
         if (!meta || typeof status !== "string") throw new Unreadable();
         if (meta.kind !== "upsell" || !handles.has(meta.store ?? "")) return;
-        if (EXTRA_PENDING.has(status)) throw new Pending();
+        if (EXTRA_PENDING.has(status)) return hold(ownField(row, "created"));
         if (status !== "succeeded") return;
         found.push(sale(period, meta.product ?? "", ownField(row, "amount"), 0, ownField(row, "currency"), ownField(row, "created")));
       });
-      // The payments after the first (ALTO 1): renewals and later instalments of this store's subscriptions.
+      // The payments after the first (ALTO 1, MÉDIO 2 of the focal review): every invoice of this store's subscriptions but the first.
       const renewals = walk("/invoices?limit=100", (row) => {
         const reason = ownField(row, "billing_reason");
         const status = ownField(row, "status");
         if (typeof reason !== "string" || typeof status !== "string") throw new Unreadable();
-        if (reason !== "subscription_cycle") return;
+        if (reason === "subscription_create") return;
         const meta = invoiceMetaOf(row);
         if (!meta) throw new Unreadable();
         if (!handles.has(meta.store ?? "")) return;
-        if (INVOICE_PENDING.has(status)) throw new Pending();
         if (status !== "paid") {
-          if (status === "void") return;
-          throw new Unreadable();
+          if (invoiceStillPayable(row, now)) hold(ownField(row, "created"));
+          return;
         }
+        // Paid by credit alone: no money came in, so no line.
+        if (ownField(row, "amount_paid") === 0) return;
         found.push(sale(period, meta.product ?? "", ownField(row, "amount_paid"), invoiceTaxOf(row), ownField(row, "currency"), ownField(row, "created")));
       });
-      // All are read to their end or their first refusal; one failing is the whole answer, a pending one first.
+      // All are read to their end or their first refusal; one failing is the whole answer.
       const settled = await Promise.allSettled([checkouts, extras, renewals]);
-      for (const result of settled) if (result.status === "rejected" && result.reason instanceof Pending) throw result.reason;
       for (const result of settled) if (result.status === "rejected") throw result.reason;
     }
+    if (held.length) return { ok: false, reason: "pending", heldAt: Math.min(...held) };
     const titles = new Map<string, string>();
     for (const product of new Set(found.map((s) => s.product))) titles.set(product, product ? await deps.title(product) : "");
     return { ok: true, sales: found.map((s) => ({ ...s, title: titles.get(s.product) || s.product })) };
   } catch (error) {
     if (error instanceof TooMany) return { ok: false, reason: "too_many" };
-    if (error instanceof Pending) return { ok: false, reason: "pending" };
     if (!(error instanceof Unreadable || error instanceof StripeListUnreadable)) console.error("reading sales for an accounting file failed", error);
     return { ok: false, reason: "unreadable" };
   }

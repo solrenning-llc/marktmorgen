@@ -179,7 +179,7 @@ async function main(): Promise<void> {
     [["p1", "Sourdough Guide", 3920, 392, "usd"], ["p1", "Sourdough Guide", 4900, 0, "usd"], ["p1", "Sourdough Guide", 4900, 0, "usd"], ["p2", "Starter Jar", 1900, 0, "usd"]],
   );
   is("Stripe is asked only for the period, a hundred at a time", happy.asked.every((p) => p.includes(`created[gte]=${from}`) && p.includes(`created[lt]=${to}`) && p.includes("limit=100")), true);
-  is("the next page starts after the last row read", happy.asked.includes(`/checkout/sessions?limit=100&created[gte]=${from}&created[lt]=${to}&starting_after=cs_d_1`), true);
+  is("the next page starts after the last row read", happy.asked.includes(`/checkout/sessions?limit=100&expand[]=data.payment_intent&expand[]=data.invoice&created[gte]=${from}&created[lt]=${to}&starting_after=cs_d_1`), true);
 
   const refused = async (what: string, sessions: unknown[], intents: unknown[], reason: string, paypal?: Awaited<ReturnType<typeof readPayPalSalesExact>>) => {
     const result = await readAccountingSales(store, period, world(sessions, intents, paypal).deps).catch(() => ({ ok: false as const, reason: "threw" }));
@@ -243,7 +243,8 @@ async function main(): Promise<void> {
   await refused("a one-click extra still processing: no file yet", empty, [page([upsell("pi_a_0", { status: "processing" })], false)], "pending");
   await refusedInvoices("a renewal still a draft: no file yet", [page([invoice("in_a_0", { status: "draft", amount_paid: 0 })], false)], "pending");
   await refusedInvoices("a renewal open that Stripe will try again: no file yet", [page([invoice("in_a_0", { status: "open", amount_paid: 0, next_payment_attempt: to + 86_400 })], false)], "pending");
-  await refusedInvoices("a renewal sent to pay by a due date not passed: no file yet", [page([invoice("in_a_0", { status: "open", amount_paid: 0, next_payment_attempt: null, collection_method: "send_invoice", due_date: to + 86_400 })], false)], "pending");
+  const dueLater = await readAccountingSales(store, period, { ...world(empty, empty, undefined, [page([invoice("in_a_0", { status: "open", amount_paid: 0, next_payment_attempt: null, collection_method: "send_invoice", due_date: to + 86_400 })], false)]).deps, now: () => to + 3600 });
+  is("a renewal sent to pay by a due date not passed: no file yet", dueLater.ok ? "a file" : dueLater.reason, "pending");
   await refused("another store's open checkout does not hold this store's file", [page([session("cs_a_0", { status: "open", payment_status: "unpaid", metadata: { store: "other", product: "x" } })], false)], empty, "a file");
   await refused("a complete checkout whose payment cannot be read: no file", [page([session("cs_a_0", { payment_status: "unpaid" })], false)], empty, "unreadable");
 

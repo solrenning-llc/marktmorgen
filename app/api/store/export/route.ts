@@ -141,8 +141,10 @@ export async function GET(request: NextRequest) {
         }
         if (!read.ok && read.reason === "pending") {
           // A payment of the period can still be paid (money review on #2996, MÉDIO 2): its day's invoice number would
-          // come out again later with a larger total, which the accounting app refuses to import.
-          return plain(409, `Some payments in ${period.label} are not settled yet (a checkout still open, a payment still processing, or a renewal not paid yet), so no file was made: its totals could still change. Nothing is lost. Try again tomorrow, or choose an earlier part of the month.`);
+          // come out again later with a larger total, which the accounting app refuses to import. The creator is told
+          // the day of the earliest one, never a day to come back that may not hold (focal review @13f40ed407, MÉDIO 1).
+          const day = new Date(read.heldAt * 1000).toLocaleDateString("en-US", { month: "long", day: "numeric", timeZone: "UTC" });
+          return plain(409, `A payment made on ${day} is not settled yet (a checkout still open, a payment still processing, or a renewal Stripe will still try), so no file was made for ${period.label}: its totals could still change. Nothing is lost. The file can be made once that payment is paid or has failed. A part of the month that ends before ${day} can be made now.`);
         }
         if (!read.ok) {
           // too_many: past the sales file's own ceiling, refused rather than cut short.

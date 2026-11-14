@@ -22,7 +22,8 @@
  * 61c3662c: claimWeek firing twice, weeklyOff ignoring the stop, claimMonth and
  * the busy-day claim).
  */
-import { NO_AFFILIATES, parseAffiliateSetting } from "@/lib/affiliate-setting";
+import { mock } from "node:test";
+import { MAX_PAYDAY, NO_AFFILIATES, parseAffiliateSetting } from "@/lib/affiliate-setting";
 import { sendPaydayEmails } from "@/lib/affiliate-payday";
 import { recordDelivery, rememberFolderOwner, DELIVERY_ALLOWANCE_BYTES } from "@/lib/delivery";
 import { claimHandle, ensureStatsId, setAffiliateSetting, setStripeAccount, storeForEmail } from "@/lib/store";
@@ -32,12 +33,13 @@ import { setSubscription } from "@/lib/store";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
-import { withinOneUtcDay } from "./one-utc-day";
 
-// maybeBusyAlert names its claim by the day it reads at each call, and the checks below take two calls (and the key
-// they delete) for one day; a real midnight between them made "again that day" a new day's alert, sent again (RED
-// when started 0.4 s before 00:00 UTC). The clock stays inside one UTC day (tests/one-utc-day.ts).
-withinOneUtcDay();
+// One moment for the whole run, on a day a payday can be (1 to MAX_PAYDAY): the payday below is today's date, and
+// on every 29th, 30th and 31st (UTC) no payday was kept and no email went; and a run crossing 00:00 UTC between two
+// reads of the clock inside one send or one claim refused it. Only Date is stopped; timers and performance.now() run.
+const start = new Date();
+if (start.getUTCDate() > MAX_PAYDAY) start.setUTCDate(MAX_PAYDAY);
+mock.timers.enable({ apis: ["Date"], now: start.getTime() });
 
 process.env.STRIPE_SECRET_KEY = "sk_test_opt_out_exact_only";
 process.env.RESEND_API_KEY = "re_test_a_stand_in_key_for_tests_only";
@@ -74,16 +76,20 @@ const MALFORMED: [string, () => unknown[]][] = [
   ["two replies", () => ["OK", "OK"]],
 ];
 
+// The payday under test: today, or the 28th when today is the 29th to 31st. A payday is a day of the month that
+// exists in every month (MAX_PAYDAY, lib/affiliate-setting.ts), so "today" on those days is not a payday a store can
+// set, and the run would find none: the test failed on every 29th, 30th and 31st.
+const PAYNOW = (() => {
+  const at = new Date();
+  if (at.getUTCDate() > 28) at.setUTCDate(28);
+  return at;
+})();
+
 async function payday(): Promise<void> {
   await claimHandle(OWNER, "crumb", "Crumb Bakery", "");
   await ensureStatsId(OWNER);
   await setStripeAccount(OWNER, "acct_1TestOptOut0001", true);
-  // A store's payday is a day from 1 to MAX_PAYDAY (28), and a run sends only on the day it reads as its own: on the
-  // 29th to the 31st of a month no payday is today, and the first run sent nothing (RED on those days). The run is
-  // given the 15th of the current UTC month, at noon, as its own "now", and the payday and month below are its.
-  const now = new Date();
-  const paydayNow = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 15, 12));
-  const today = paydayNow.getUTCDate();
+  const today = PAYNOW.getUTCDate();
   await setAffiliateSetting(OWNER, parseAffiliateSetting({ ...NO_AFFILIATES, enabled: true, payday: today }));
   const store = (await storeForEmail(OWNER))!;
   const statsId = store.statsId!;
@@ -92,7 +98,7 @@ async function payday(): Promise<void> {
     ["HSET", `nl:aff:${statsId}:people`, aff, JSON.stringify({ id: aff, email: `${aff}@example.com`, code: "a1a1a", status: "approved", appliedAt: T0 * 1000, decidedAt: T0 * 1000, note: "" })],
     ["HSET", `nl:aff:${statsId}:sales`, "cs_1", JSON.stringify({ ref: "cs_1", pi: "pi_cs_1", aff, at: T0 + 10 * DAY, product: "prod01", title: "Bread course", base: 1000, total: 1000, currency: "usd", rate: 20, self: false, how: "click" })],
   ]);
-  const month = `${paydayNow.getUTCFullYear()}-${String(paydayNow.getUTCMonth() + 1).padStart(2, "0")}`;
+  const month = `${PAYNOW.getUTCFullYear()}-${String(PAYNOW.getUTCMonth() + 1).padStart(2, "0")}`;
   const claim = `nl:aff:payday:${statsId}:${month}`;
   const isClaim = (c: (string | number)[]) => c[0] === "SET" && c[1] === claim;
   // What a run did for the store: the emails it counts as sent, and whether it went past the claim (the next
@@ -105,7 +111,7 @@ async function payday(): Promise<void> {
       return watch(commands);
     }) as typeof redis.pipeline;
     try {
-      const counts = await sendPaydayEmails(Date.now() + 20_000, paydayNow);
+      const counts = await sendPaydayEmails(Date.now() + 20_000, PAYNOW);
       return { sent: counts.sent, pastTheClaim: seen.includes(`GET nl:pp:${statsId}`) };
     } finally {
       redis.pipeline = watch;

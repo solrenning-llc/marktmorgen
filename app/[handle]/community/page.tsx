@@ -29,6 +29,7 @@ import { CommunityComposer, ConfirmDeletes } from "@/components/community-compos
 import { heldOf } from "@/lib/community-approval";
 import { HeldList } from "@/components/community-held";
 import { EmptyState } from "@/components/empty-state";
+import { CommunityFlash } from "@/components/community-flash";
 
 type Params = {
   params: Promise<{ handle: string }>;
@@ -162,7 +163,7 @@ export default async function CommunityPage({ params, searchParams }: Params) {
           </nav>
 
           {notice ? (
-            <p className={`cm-flash mb-5 ${notice.tone === "warn" ? "cm-flash-warn" : ""}`} role="status">{notice.text}</p>
+            <CommunityFlash text={notice.text} warn={notice.tone === "warn"} className="mb-5" />
           ) : null}
 
           {owner && !store.community.on ? (

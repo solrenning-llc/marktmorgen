@@ -8,12 +8,13 @@
  * Now its day is read back from the mark its closing day wrote on its address for this same ending (markShut): only
  * { of, day } is rebuilt and the closing day runs again. A member's refund already made, even more than 24 hours ago
  * when Stripe's idempotency key is forgotten, is found in the payment's own refund list and never made twice. With no
- * such mark the day is never guessed as today (that would give members back less): the renewals are stopped, nothing
- * else is done, no mark is written, and the store is held for a person.
+ * such mark the day is never guessed as today (that would give members back less): the renewals are stopped, the
+ * buyers not told yet are told, and a notice's length later the earliest day its closing could have had is taken.
  * Synthetic store; Stripe and email through the journey's stand-ins plus a member's payment; in-memory Redis.
  */
 import { createHash } from "node:crypto";
 import { FINAL_INDEX, paidKey, workKey } from "@/lib/closing-holds";
+import { creditKey } from "@/lib/closing-credit";
 import { markShut, shutOf } from "@/lib/closing-plan-guard";
 import { closeOne, type Hands } from "@/lib/plan-closing";
 import { claimHandle, setStripeAccount, setSubscription, storeFolder, storeForEmail, storeRef } from "@/lib/store";
@@ -87,7 +88,9 @@ async function paidMember(owner: string, member: string, intent: string, invoice
   payments.set(intent, { intent, amount: 1_000, refunded: 0, list: [] });
   await redis.pipeline([
     ["HSET", paidKey(folder), member, JSON.stringify({ inv: invoice, pi: intent, amt: 1_000, tot: 1_000, cur: "usd", ps: daySeconds - 15 * 86_400, pe: daySeconds + 15 * 86_400, e: "member@example.com" })],
-    ["HSET", workKey(folder), "calls", 20, "rcalls", 10],
+    ["HSET", workKey(folder), "calls", 20, "rcalls", 10, `m:${member}`, "member@example.com"],
+    // Its buyers' emails, set when its members were held (startClosingCredit): its own key, kept with the state lost.
+    ["SET", creditKey(folder), 10],
   ]);
   return folder;
 }
@@ -102,7 +105,7 @@ const deleted = (account: string, member: string) => stripe.posted.some((p) => p
 async function main(): Promise<void> {
   redis.clear();
   process.env.STRIPE_SECRET_KEY = "sk_test_closing_final_state_lost_only";
-  process.env.RESEND_API_KEY = "re_test_closing_final_state_lost_only";
+  process.env.RESEND_API_KEY = "re_test_a_stand_in_key_for_tests_only";
   process.env.COMPANY_POSTAL_ADDRESS = "100 Example Street, Example City, NY 10001, United States";
 
   part("Its state lost (the overlap of two runs), its day read back from its address mark");
@@ -138,22 +141,29 @@ async function main(): Promise<void> {
   is("and its closing day finishes", againResult.state, "removed");
 
   for (const [label, handle, mark] of [["no address mark", "lostnomark", null], ["a mark for another ending", "lostother", "other"]] as const) {
-    part(`Its state lost, with ${label}: its day is not known`);
+    part(`Its state lost, with ${label}: the earliest day, after its buyers are told`);
     const owner = `${handle}@example.com`;
     const account = `acct_1${handle}Shop`;
     const member = `sub_1${handle}Member`;
+    const intent = `pi_1${handle}Pay`;
     const gone = await closingStore(owner, handle, account, member);
     if (mark) await markShut((await storeForEmail(owner))!, gone.ended + 10 * DAY, gone.ended - 40 * DAY);
-    const before = (await shutOf(handle))?.since ?? null;
-    const folder = await paidMember(owner, member, `pi_1${handle}Pay`, `in_1${handle}Inv`, gone.ended + 30 * DAY);
-    const held = await closeOne(gone.key, gone.ended + 33 * DAY, hands, Number.POSITIVE_INFINITY);
-    is("its member's renewal is stopped", deleted(account, member), true);
-    is("it is held for a person, and says why", [held.state, /day were lost/.test(held.note ?? "")], ["held", true]);
-    is("nothing is given back on a guessed day", [refundPosts.filter((p) => p.intent === `pi_1${handle}Pay`).length, (await paidRow(folder, member)).r], [0, undefined]);
-    is("no step is written down as done", [(await stateOf(gone.key)).refunds, (await stateOf(gone.key)).removed], [undefined, undefined]);
-    is("no mark is written from today", (await shutOf(handle))?.since ?? null, before);
-    const next = await closeOne(gone.key, gone.ended + 34 * DAY, hands, Number.POSITIVE_INFINITY);
-    is("the next day it is still held, never closed on a guess", next.state, "held");
+    // Its real day was later than the earliest one (a late notice moved it): members paid past the earliest.
+    const earliest = gone.ended + 30 * DAY;
+    await paidMember(owner, member, intent, `in_1${handle}Inv`, earliest);
+    const lostAt = gone.ended + 41 * DAY;
+    const lettersBefore = sent.filter((m) => m.to === "member@example.com").length;
+    const first = await closeOne(gone.key, lostAt, hands, Number.POSITIVE_INFINITY);
+    is("its member's renewal is stopped at once", deleted(account, member), true);
+    is("its buyers not told yet are told first", sent.filter((m) => m.to === "member@example.com").length - lettersBefore, 1);
+    is("nothing is given back, removed or written down as done before a notice's length", [first.state, refundPosts.filter((p) => p.intent === intent).length, (await stateOf(gone.key)).refunds, (await stateOf(gone.key)).day], ["waiting", 0, undefined, undefined]);
+    const waiting = await closeOne(gone.key, lostAt + 3 * DAY, hands, Number.POSITIVE_INFINITY);
+    is("still waiting three days on, and nobody is written to twice", [waiting.state, sent.filter((m) => m.to === "member@example.com").length - lettersBefore], ["waiting", 1]);
+    const closed = await closeOne(gone.key, lostAt + 8 * DAY, hands, Number.POSITIVE_INFINITY);
+    is("its day is the earliest it could have had, never today", (await stateOf(gone.key)).day, earliest);
+    is("its member gets back the unused time from that day (more, never less), once", refundPosts.filter((p) => p.intent === intent).map((p) => p.amount), [500]);
+    is("and its closing day finishes", closed.state, "removed");
+    is("its address is marked from that day", (await shutOf(handle))?.since, earliest);
   }
 
   part("Control: a store whose state is there and whose renewals were stopped is not asked again");

@@ -877,12 +877,16 @@ export type NewPost = {
 
 /** Writes a post. The caller has checked who may, and cleaned what it says. */
 export async function createPost(id: string, input: NewPost, room: DataStore): Promise<{ ok: true; post: Post } | { ok: false; reason: "full" }> {
-  const [count] = await redisPipeline([["ZCARD", feedKey(id)]]);
-  if (Number(count) >= MAX_POSTS) return { ok: false, reason: "full" };
-  const [n] = await redisPipeline([["INCR", seqKey(id)]]);
+  // An unreadable count is unknown, never under the cap (rule 24): nothing is written on it.
+  const count = countOf(repliesFor(await redisPipeline([["ZCARD", feedKey(id)]]), 1)?.[0]);
+  if (count === null) throw new UnknownReplyError("ZCARD of a community's feed");
+  if (count >= MAX_POSTS) return { ok: false, reason: "full" };
+  // The post's number is the feeds' score: an unreadable one, or one INCR cannot give, writes nothing (rule 24).
+  const n = countOf(repliesFor(await redisPipeline([["INCR", seqKey(id)]]), 1)?.[0]);
+  if (n === null || n < 1) throw new UnknownReplyError("INCR of a community's post sequence");
   const post: Post = {
     id: input.id && ITEM_ID.test(input.id) ? input.id : newItemId(),
-    n: Number(n),
+    n,
     sp: input.space,
     a: input.author,
     title: input.title,
@@ -1154,8 +1158,10 @@ export async function addComment(
   input: { parent: string; author: string; text: string; id?: string },
   room: DataStore,
 ): Promise<{ ok: true; comment: Comment } | { ok: false; reason: "full" | "parent" }> {
-  const [size] = await redisPipeline([["HLEN", commentsKey(id, post)]]);
-  if (Number(size) >= MAX_COMMENTS_PER_POST) return { ok: false, reason: "full" };
+  // An unreadable count is unknown, never under the cap (rule 24): nothing is written on it.
+  const size = countOf(repliesFor(await redisPipeline([["HLEN", commentsKey(id, post)]]), 1)?.[0]);
+  if (size === null) throw new UnknownReplyError("HLEN of a community post's comments");
+  if (size >= MAX_COMMENTS_PER_POST) return { ok: false, reason: "full" };
   let parent = "";
   if (input.parent) {
     const above = await readComment(id, post, input.parent);

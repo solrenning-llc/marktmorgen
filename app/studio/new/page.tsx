@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { Logo } from "@/components/logo";
+import { StudioTrail } from "@/components/breadcrumb";
 import { HandleForm } from "@/components/handle-form";
 import { SESSION_COOKIE, emailForSession } from "@/lib/auth";
 import { MAX_STORES_PER_ACCOUNT, accountStores } from "@/lib/store";
@@ -39,7 +40,7 @@ export default async function NewStorePage() {
       </header>
 
       <main id="content" className="container-narrow pb-20 pt-10 sm:pt-14">
-        <p className="eyebrow">{first ? "Your own store" : "Another store"}</p>
+        <StudioTrail store={{ sid: "" }} here={first ? "Your own store" : "Another store"} />
         <h1 className="t-h2 mt-3">{first ? "Make a store of your own" : "Open another store"}</h1>
         <p className="mt-3 text-ink-soft">
           {first

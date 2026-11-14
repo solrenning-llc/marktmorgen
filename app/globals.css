@@ -1435,7 +1435,8 @@ a.chip {
   min-height: 48px;
   padding: 0.7rem 0.9rem;
   border-radius: var(--r-sm);
-  border: 1px solid var(--line-strong);
+  /* Its only outline: the control-edge token, 3.99:1 on white and 3.38:1 on sand (1.4.11, tests/field-edge-contrast.test.ts). */
+  border: 1px solid var(--line-off);
   background: #fff;
   color: var(--ink);
   font-size: 1rem;
@@ -2348,7 +2349,8 @@ a.chip {
   min-height: 48px;
   padding: 0.7rem 0.9rem;
   border-radius: var(--r-sm);
-  border: 1px solid var(--st-line-strong);
+  /* Its only outline: 3:1 on the field and on the page, card or item around it (1.4.11, lib/store-look.ts fieldEdge). */
+  border: 1px solid var(--st-field-edge);
   background: var(--st-field);
   color: var(--st-text);
   font-size: 1rem;
@@ -4076,7 +4078,7 @@ a.rv-line:hover {
 .cm-tab[aria-current="page"] .cm-tab-n {
   background: rgba(255, 255, 255, 0.24);
 }
-/* How far a member is towards their next level (the leaderboard page). */
+/* How far a member is towards their next level (the leaderboard page), and a buyer in a course (components/purchase-card.tsx). */
 .cm-progress {
   height: 0.5rem;
   overflow: hidden;
@@ -4088,6 +4090,16 @@ a.rv-line:hover {
   height: 100%;
   border-radius: 999px;
   background: var(--st-accent);
+}
+@media (forced-colors: active) {
+  /* Forced colors drop the bar's backgrounds: the track keeps an outline and the share done the system's highlight. */
+  .cm-progress {
+    outline: 1px solid CanvasText;
+  }
+  .cm-progress > span {
+    forced-color-adjust: none;
+    background: Highlight;
+  }
 }
 /* The viewer's own row on the leaderboard. */
 .cm-me {

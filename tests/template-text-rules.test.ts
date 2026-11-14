@@ -19,7 +19,7 @@ import * as rules from "@/lib/template-text-rules";
 import { MAX_PART_SHOWN, bracketPartsIn, partIn, templateLeftMessage, templateTextIn } from "@/lib/template-text-rules";
 import { STARTER_PROMPTS, templateLeft } from "@/lib/template-text";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
-import { addProduct, claimHandle, ensureStatsId, storeForEmail } from "@/lib/store";
+import { addProduct, claimHandle, ensureStatsId, setProductLink, storeForEmail } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
 import { readPage } from "@/lib/sales-page-store";
 import { FUNNEL_STARTERS } from "@/lib/funnel-starters";
@@ -212,6 +212,10 @@ async function main(): Promise<void> {
   is("and a campaign's part in the search line", [inSearch.status, inSearch.data.field, inSearch.data.block, inSearch.data.part], [409, "search", null, STARTER_PART]);
 
   part("Publishing and saving at once (Codex P on #3693)");
+  // A draft is published only once it hands something over (754 [STN1]): this one gets a link,
+  // so what these races test is the page's part, not that rule.
+  const linked = await setProductLink(OWNER, draft.product.id, "https://example.com/draft-guide");
+  is("the draft hands over a link, so only its page can hold it back", linked.ok, true);
   // Runs `then` once, right after the next read of this draft's page answers, before its caller goes on.
   const pageGet = `nl:product:page:${(await storeForEmail(OWNER))!.statsId}:${draft.product.id}`;
   const pipeline = redis.pipeline;

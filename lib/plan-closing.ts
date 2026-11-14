@@ -88,9 +88,9 @@ import { dropAllStreams, dropStream } from "@/lib/stream";
 import { readStreamPath } from "@/lib/stream-rules";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { BUYER_NOTICE_DAYS, BUYER_NOTICE_FROM, EMAILS_PER_BUYER_PER_ENDING, STRIPE_CALLS_PER_MEMBER, afterBuyersTold, buyerNoticeCap, buyersStartOn, paidBefore } from "@/lib/closing-buyers-rules";
-import { forgetCredit, startClosingCredit } from "@/lib/closing-credit";
-import { FINAL_INDEX, HELD_INDEX, forgetHeld, holdCharges, holdCounts, paidPeriods, retryHolds, savePaidPeriod, startCallBudget } from "@/lib/closing-holds";
-import { buyerPagesCap, forgetTold, tellBuyers, tellRefundShort } from "@/lib/closing-buyers";
+import { creditKey, forgetCredit } from "@/lib/closing-credit";
+import { FINAL_INDEX, HELD_INDEX, forgetHeld, holdCharges, holdCounts, paidPeriods, retryHolds, savePaidPeriod, workKey } from "@/lib/closing-holds";
+import { buyerPagesCap, forgetTold, tellBuyers, tellRefundShort, toldKey } from "@/lib/closing-buyers";
 import { giveBackUnused, unusedRows, unusedSummary } from "@/lib/closing-refunds";
 import { stillToGive, unusedOf, type PaidPeriod } from "@/lib/closing-buyers-rules";
 import { formatMoney } from "@/lib/money";
@@ -734,6 +734,128 @@ function unusedOfRow(row: PaidPeriod, day: number): number {
   return row.want ?? stillToGive(unusedOf(row, day), row.back ?? 0);
 }
 
+/**
+ * KEYS[1] the addresses told (hash), KEYS[2] the email credit (string),
+ * KEYS[3] the closing's work (hash); ARGV[1] the emails, ARGV[2] the calls,
+ * ARGV[3] the ending (its plan's end, in ms). Starts a closing once an ending,
+ * the endings compared as numbers: 1 when started now (no ending or an older
+ * one written down: its marks, credit, budget and cursors replaced), 0 when
+ * started for this ending already (everything kept), 2 when a newer ending
+ * has started already (nothing written: this run's ending is stale), -1 when
+ * a key is of another type or either ending is not a whole number of ms in
+ * decimal digits, with no sign or leading zero and at most 15 of them
+ * (nothing written). lib/redis-memory.ts runs it the same way.
+ */
+export const CLOSING_START = `-- marktmorgen:closing-start:v2
+local t = redis.call("TYPE", KEYS[1]).ok
+local c = redis.call("TYPE", KEYS[2]).ok
+local w = redis.call("TYPE", KEYS[3]).ok
+if (t ~= "hash" and t ~= "none") or (c ~= "string" and c ~= "none") or (w ~= "hash" and w ~= "none") then return -1 end
+local function ms(s)
+  if s == "0" or (#s <= 15 and string.match(s, "^[1-9][0-9]*$")) then return tonumber(s) end
+  return nil
+end
+local ending = ms(ARGV[3])
+if not ending then return -1 end
+local of = redis.call("HGET", KEYS[3], "of")
+if of then
+  local was = ms(of)
+  if not was then return -1 end
+  if was == ending then return 0 end
+  if was > ending then return 2 end
+end
+redis.call("DEL", KEYS[1])
+redis.call("SET", KEYS[2], ARGV[1])
+redis.call("DEL", KEYS[3])
+redis.call("HSET", KEYS[3], "calls", ARGV[2], "of", ARGV[3])
+return 1`;
+
+/**
+ * Starts the closing of an ending, before any email or call to Stripe: the
+ * addresses told about an earlier ending forgotten, this one's email credit
+ * and call budget set (lib/closing-credit.ts, lib/closing-holds.ts), in one
+ * script owned by the ending (Codex S on #3309, Codex G on #3299). Two
+ * overlapping closeOne runs that both read no holdFrom start it once: a late
+ * start never puts back credit or calls already spent, nor forgets a buyer
+ * already told, and a run paused on an older ending never starts it again
+ * over a newer one (Codex G's G112, "G3299-EPOCH"). Resolves "started" on the
+ * exact 1, "kept" on 0 and "newer" on 2 (closeOne then stops for this
+ * store and saves nothing); anything else (-1 for a key of another type or
+ * an ending written down that is not a whole number of ms, text, null, a
+ * missing or an extra reply) throws UnknownReplyError (CX-123
+ * rule 24), and closeOne writes no holdFrom, so it is started the next day.
+ */
+export async function startClosing(folder: string, emails: number, calls: number, ending: number): Promise<"started" | "kept" | "newer"> {
+  if (!Number.isSafeInteger(ending) || ending < 0) throw new Error("a closing's start needs the ending it is for");
+  const whole = (n: number) => Math.max(0, Math.floor(n));
+  const replies = repliesFor(await redisPipeline([["EVAL", CLOSING_START, 3, toldKey(folder), creditKey(folder), workKey(folder), whole(emails), whole(calls), String(ending)]]), 1);
+  const started = replies?.[0];
+  if (started === 1) return "started";
+  if (started === 0) return "kept";
+  if (started === 2) return "newer";
+  throw new UnknownReplyError("a closing's start");
+}
+
+/**
+ * KEYS[1] a store's closing state (text); ARGV[1] "none" when the run read no
+ * state, or "is" when it read ARGV[2]; ARGV[3] the state to write. Writes it
+ * only over exactly the state the run read or last wrote (a compare-and-set):
+ * 1 when written, 0 when another run wrote or deleted it since (nothing
+ * written), -1 when the key is of another type or ARGV[1] is neither (nothing
+ * written). A plain SET, as closeOne wrote before, so no expiry is set or
+ * kept. lib/redis-memory.ts runs it the same way.
+ */
+export const CLOSING_STATE_SAVE = `-- marktmorgen:closing-state-save:v1
+local t = redis.call("TYPE", KEYS[1]).ok
+if t ~= "string" and t ~= "none" then return -1 end
+local was = redis.call("GET", KEYS[1])
+if ARGV[1] == "none" then
+  if was then return 0 end
+elseif ARGV[1] == "is" then
+  if was ~= ARGV[2] then return 0 end
+else
+  return -1
+end
+redis.call("SET", KEYS[1], ARGV[3])
+return 1`;
+
+/** Another run wrote a store's closing state after this run read it: this run stops for the store, writing nothing more. */
+class StaleClosingState extends Error {}
+
+/**
+ * closeOne's saves of a store's closing state, from `raw` (the state as it
+ * read it), each written only over the state it read or last wrote
+ * (CLOSING_STATE_SAVE): a run that read the state before another run
+ * advanced it (on a newer ending, or further on this one) never puts its
+ * stale snapshot back. `check` asks, before a run acts on its snapshot,
+ * whether the state is still the one it read. Either throws
+ * StaleClosingState when it is not (closeOne then answers held), and
+ * UnknownReplyError on any reply but the exact 1 or 0, or text or null for
+ * the check (CX-123 rule 24): nothing is written then, and the next day
+ * reads it afresh. A reply that was not text or null at the top is taken as
+ * no state read, so a save then writes only where there is none.
+ */
+function stateSaver(key: string, raw: unknown): ((next: State) => Promise<void>) & { check: () => Promise<void> } {
+  let seen: string | null = typeof raw === "string" ? raw : null;
+  const save = async (next: State): Promise<void> => {
+    const text = JSON.stringify(next);
+    const reply = repliesFor(await redisPipeline([["EVAL", CLOSING_STATE_SAVE, 1, stateKey(key), seen === null ? "none" : "is", seen ?? "", text]]), 1)?.[0];
+    if (reply === 1) {
+      seen = text;
+      return;
+    }
+    if (reply === 0) throw new StaleClosingState();
+    throw new UnknownReplyError("a store's closing state save");
+  };
+  const check = async (): Promise<void> => {
+    const replies = repliesFor(await redisPipeline([["GET", stateKey(key)]]), 1);
+    const now = replies?.[0];
+    if (!replies || (now !== null && typeof now !== "string")) throw new UnknownReplyError("a store's closing state");
+    if (now !== seen) throw new StaleClosingState();
+  };
+  return Object.assign(save, { check });
+}
+
 export type Closing = {
   key: string;
   /**
@@ -751,8 +873,21 @@ export type Closing = {
   coverage?: "unknown";
 };
 
-/** One store whose plan has ended, looked at for today. */
+/**
+ * One store whose plan has ended, looked at for today. A run that finds its
+ * snapshot of the store's closing state advanced by another run stops there
+ * with a held result, writing nothing more (stateSaver).
+ */
 export async function closeOne(key: string, now = Date.now(), hands: Hands = HANDS, until = Number.POSITIVE_INFINITY, mayObserve?: () => Promise<boolean>): Promise<Closing> {
+  try {
+    return await closeStore(key, now, hands, until, mayObserve);
+  } catch (error) {
+    if (error instanceof StaleClosingState) return { key, state: "held", note: "another run advanced this store's closing" };
+    throw error;
+  }
+}
+
+async function closeStore(key: string, now: number, hands: Hands, until: number, mayObserve?: () => Promise<boolean>): Promise<Closing> {
   const store = await storeForEmail(key);
   if (!store) {
     await redisPipeline([["ZREM", ENDED_INDEX, key], ["ZREM", FINAL_INDEX, key], ["DEL", stateKey(key)]]);
@@ -782,12 +917,12 @@ export async function closeOne(key: string, now = Date.now(), hands: Hands = HAN
     if (final.removed) {
       if (!final.due) {
         await markDue(key, now);
-        await redisPipeline([["SET", stateKey(key), JSON.stringify({ ...final, due: now })]]);
+        await stateSaver(key, rawFinal)({ ...final, due: now });
       }
       return { key, state: "removed", note: "its records are deleted by the next walk" };
     }
     const folderFinal = await storeFolder(storeRef(store));
-    return closingDay(store, key, final, was, final.day ?? now, folderFinal, now, hands, until, (next) => redisPipeline([["SET", stateKey(key), JSON.stringify(next)]]));
+    return closingDay(store, key, final, was, final.day ?? now, folderFinal, now, hands, until, stateSaver(key, rawFinal));
   }
   const endedAt = Date.parse(store.planEndedAt);
   if (standingOf(store, now / 1000) !== "ended" || !Number.isFinite(endedAt)) {
@@ -804,7 +939,7 @@ export async function closeOne(key: string, now = Date.now(), hands: Hands = HAN
   const read = readState(raw);
   // Notices about an earlier ending say nothing about this one.
   const state: State = read.of === endedAt ? read : { of: endedAt };
-  const save = (next: State) => redisPipeline([["SET", stateKey(key), JSON.stringify(next)]]);
+  const save = stateSaver(key, raw);
   const closes = closesStore(endedAt);
   const send = async (kind: "ended" | "month" | "week" | "removed", day: number, held: number): Promise<boolean> => {
     const { subject, text } =
@@ -853,11 +988,17 @@ export async function closeOne(key: string, now = Date.now(), hands: Hands = HAN
     // this one's emails and calls to Stripe are capped before any is spent
     // (lib/closing-credit.ts, lib/closing-holds.ts).
     const cap = buyerNoticeCap(store.tier, paidBefore(store));
-    await forgetTold(folder);
-    await startClosingCredit(folder, cap * EMAILS_PER_BUYER_PER_ENDING);
-    await startCallBudget(folder, cap * STRIPE_CALLS_PER_MEMBER, endedAt);
+    // A newer ending has started while this run was on its older snapshot:
+    // nothing of it is saved, and the next day reads the newer one.
+    const start = await startClosing(folder, cap * EMAILS_PER_BUYER_PER_ENDING, cap * STRIPE_CALLS_PER_MEMBER, endedAt);
+    if (start === "newer") return { key, state: "held", note: "a newer ending of this store already started" };
     Object.assign(state, { holdFrom: now });
     await save(state);
+  } else {
+    // A run that read the state before another run advanced it (a newer
+    // ending started, or this one went further) stops here, before it holds,
+    // tells or removes anything on its snapshot.
+    await save.check();
   }
   if (closes && !state.hold) {
     const hold = await holdCharges(store, endedAt, until).catch((error) => {

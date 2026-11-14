@@ -1615,6 +1615,50 @@ export class MemoryRedis {
           this.run(["HSET", work, "calls", calls, "of", ending]);
           return 1;
         }
+        // lib/plan-closing.ts CLOSING_START: a closing's told marks, email credit and call budget, started once per ending, the endings compared as numbers, step for step (Codex G on #3299, G112).
+        if (key.startsWith("-- marktmorgen:closing-start:v2\n") && args[0] === "3" && args.length === 7) {
+          const [, told, credit, work, emails, calls, ending] = args;
+          for (const one of [told, credit, work]) {
+            this.live(one);
+            const held = this.data.get(one);
+            if (held instanceof Map && held.size === 0) this.data.delete(one);
+          }
+          const [t, c, w] = [told, credit, work].map((one) => this.run(["TYPE", one]));
+          if ((t !== "hash" && t !== "none") || (c !== "string" && c !== "none") || (w !== "hash" && w !== "none")) return -1;
+          // The script's ms(): a whole number of ms in decimal digits, no sign or leading zero, at most 15, else nil.
+          const ms = (text: unknown): number | null => (typeof text === "string" && (text === "0" || (text.length <= 15 && /^[1-9][0-9]*$/.test(text))) ? Number(text) : null);
+          const end = ms(ending);
+          if (end === null) return -1;
+          const of = this.run(["HGET", work, "of"]);
+          if (of !== null) {
+            const was = ms(of);
+            if (was === null) return -1;
+            if (was === end) return 0;
+            if (was > end) return 2;
+          }
+          this.run(["DEL", told]);
+          this.run(["SET", credit, emails]);
+          this.run(["DEL", work]);
+          this.run(["HSET", work, "calls", calls, "of", ending]);
+          return 1;
+        }
+        // lib/plan-closing.ts CLOSING_STATE_SAVE: a store's closing state written only over the state the run read, step for step.
+        if (key.startsWith("-- marktmorgen:closing-state-save:v1\n") && args[0] === "1" && args.length === 5) {
+          const [, state, mode, expected, next] = args;
+          this.live(state);
+          const type = this.run(["TYPE", state]);
+          if (type !== "string" && type !== "none") return -1;
+          const was = this.run(["GET", state]);
+          if (mode === "none") {
+            if (was !== null) return 0;
+          } else if (mode === "is") {
+            if (was !== expected) return 0;
+          } else {
+            return -1;
+          }
+          this.run(["SET", state, next]);
+          return 1;
+        }
         if (key.startsWith("-- marktmorgen:store-data:v1\n") && args[0] === "1") return this.storeData(args.slice(1));
         if (key.startsWith("-- marktmorgen:order-write:v1\n")) return this.orderWrite(args);
         // lib/order-data.ts ORDER_WRITE_ONCE: ORDER_WRITE behind a once-only mark (KEYS[2]), read first; a mark there

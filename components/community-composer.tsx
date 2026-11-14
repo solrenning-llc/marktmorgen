@@ -162,19 +162,19 @@ export function CommunityComposer({
 
       <div className="mt-4 grid gap-3 sm:grid-cols-[minmax(0,1fr)_12rem]">
         <div>
-          <label htmlFor="post-title" className="sr-only">{words.titleLabel}</label>
-          <input id="post-title" name="title" maxLength={MAX_POST_TITLE} placeholder={words.titlePlaceholder} className="st-field" autoComplete="off" />
+          <label htmlFor="post-title" className="st-label text-sm">{words.titleLabel}</label>
+          <input id="post-title" name="title" maxLength={MAX_POST_TITLE} placeholder={words.titlePlaceholder} className="st-field mt-1" autoComplete="off" />
         </div>
         <div>
-          <label htmlFor="post-space" className="sr-only">{words.space}</label>
-          <select id="post-space" name="space" value={space} onChange={(e) => setSpace(e.target.value)} className="st-field">
+          <label htmlFor="post-space" className="st-label text-sm">{words.space}</label>
+          <select id="post-space" name="space" value={space} onChange={(e) => setSpace(e.target.value)} className="st-field mt-1">
             {open.map((s) => (
               <option key={s.id} value={s.id}>{s.name}</option>
             ))}
           </select>
         </div>
       </div>
-      <label htmlFor="post-text" className="sr-only">{words.whatToSay}</label>
+      <label htmlFor="post-text" className="st-label mt-3 text-sm">{words.whatToSay}</label>
       <textarea
         id="post-text"
         name="text"
@@ -183,7 +183,7 @@ export function CommunityComposer({
         value={text}
         onChange={(e) => setText(e.target.value)}
         placeholder={owner ? words.ownerPlaceholder : words.memberPlaceholder}
-        className="st-field mt-3 min-h-[7rem] resize-y"
+        className="st-field mt-1 min-h-[7rem] resize-y"
         aria-describedby="post-count"
       />
       {poll ? (

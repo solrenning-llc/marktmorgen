@@ -104,6 +104,12 @@ async function main() {
   await notJudged("a paid row with no readable intent", { invoice: namesNone, listed: whole(row(), row({ id: "inpay_refundown2", payment: { type: "payment_intent", payment_intent: null } })), intent: allRefunded }, 3);
   await notJudged("a listed payment that is not an object", { invoice: namesNone, listed: whole(row(), "inpay_refundown2"), intent: allRefunded }, 3);
 
+  part("The list holds this invoice's refunded payment and a second payment whose status Stripe does not document (#4432)");
+  await notJudged("an undocumented status", { invoice: namesNone, listed: whole(row(), row({ id: "inpay_refundown2", status: "synthetic_unknown" })), intent: allRefunded }, 3);
+  await notJudged("a status that is not given", { invoice: namesNone, listed: whole(row(), row({ id: "inpay_refundown2", status: undefined })), intent: allRefunded }, 3);
+  await notJudged("a null status", { invoice: namesNone, listed: whole(row(), row({ id: "inpay_refundown2", status: null })), intent: allRefunded }, 3);
+  await notJudged("an undocumented status listed first", { invoice: namesNone, listed: whole(row({ id: "inpay_refundown2", status: "failed" }), row()), intent: allRefunded }, 3);
+
   part("The list is not said to be whole");
   await notJudged("has_more true", { invoice: namesNone, listed: { object: "list", data: [row()], has_more: true }, intent: allRefunded }, 3);
   await notJudged("no has_more", { invoice: namesNone, listed: { object: "list", data: [row()] }, intent: allRefunded }, 3);

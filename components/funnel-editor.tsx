@@ -480,7 +480,7 @@ function Branch({
       <span className="field-label flex items-center gap-2">
         <span
           className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-bold ${
-            kind === "yes" ? "bg-mint-soft text-mint-deep" : "bg-sand text-ink-soft"
+            kind === "yes" ? "bg-mint-soft text-mint-text" : "bg-sand text-ink-soft"
           }`}
         >
           {kind === "yes" ? "Yes" : "No thanks"}
@@ -535,7 +535,7 @@ function FlowNode({
               <p className="mt-2 flex flex-wrap items-center gap-2 text-xs">
                 <span
                   className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-bold ${
-                    kind === "yes" ? "bg-mint-soft text-mint-deep" : "bg-sand text-ink-soft"
+                    kind === "yes" ? "bg-mint-soft text-mint-text" : "bg-sand text-ink-soft"
                   }`}
                 >
                   {kind === "yes" ? "Yes" : "No thanks"}

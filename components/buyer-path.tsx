@@ -138,7 +138,7 @@ function Screen({ step }: { step: string }) {
       return (
         <div className="p-5">
           <div className="rounded-[16px] border border-line bg-white p-5">
-            <span className="inline-block rounded-full bg-mint-soft px-2.5 py-0.5 text-[12px] font-semibold text-mint-deep">Paid</span>
+            <span className="inline-block rounded-full bg-mint-soft px-2.5 py-0.5 text-[12px] font-semibold text-mint-text">Paid</span>
             <p className="mt-3 text-xl font-semibold text-ink">Thank you</p>
             <p className="mt-1.5 text-[13px] leading-snug text-ink-soft">
               You bought <span className="font-semibold text-ink">Weekly Meal Planner (5 weeks)</span> from Harbor Kitchen for $39.

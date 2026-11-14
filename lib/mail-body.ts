@@ -60,7 +60,8 @@ function linked(text: string, goesTo?: (href: string) => string, link = "#4c1d95
       // "…at https://example.com/plan." — the full stop belongs to the sentence.
       const tail = part.match(TRAILING)?.[0] ?? "";
       const href = tail ? part.slice(0, -tail.length) : part;
-      return `<a href="${escape(goesTo ? goesTo(href) : href)}" style="color:${link};text-decoration:underline">${escape(href)}</a>${escape(tail)}`;
+      // The words are the address itself, with no space to break at: it may break anywhere, so a phone never scrolls sideways (1.4.10).
+      return `<a href="${escape(goesTo ? goesTo(href) : href)}" style="color:${link};text-decoration:underline;word-break:break-all;overflow-wrap:anywhere">${escape(href)}</a>${escape(tail)}`;
     })
     .join("");
 }

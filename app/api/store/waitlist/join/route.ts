@@ -41,7 +41,9 @@ export async function POST(request: NextRequest) {
   }
   const store = handle ? await storeForHandle(handle) : null;
   if (!store) return new Response("No such store.", { status: 404 });
-  const product = productId ? await readListing(store, productId) : null;
+  // Switched off after notices about its content (lib/takedown.ts): no sign-up
+  // is taken, as on its list and its free copy; the answer is the store's page.
+  const product = productId && !store.suspended ? await readListing(store, productId) : null;
   const away = (status: string, lead = "") =>
     new Response(null, {
       status: 303,

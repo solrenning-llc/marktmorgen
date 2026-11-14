@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { trackingConsentWords } from "@/lib/buyer-words/tracking-consent";
+import { LANGUAGES, type LanguageCode, parseLanguage } from "@/lib/store-language";
 import { pixelChoiceState, type Pixels } from "@/lib/pixels";
 import { X_SCRIPT, xConfigCall, xEventCall } from "@/lib/x-pixel";
 import { type Place, redditInitCall, redditScript, redditTrackCall } from "@/lib/reddit-pixel";
@@ -15,7 +17,8 @@ import { ADS_COOKIE_SECONDS, adsCookieName, nextAdsCookie } from "@/lib/ad-conse
  * say yes. Everywhere else the pixels run unless the browser sends Global
  * Privacy Control, which is a no given in advance. Either way the choice can
  * be changed from the link at the bottom of the page, and it is kept for this
- * store only, on this device.
+ * store only, on this device. Every word is in the store's language
+ * (lib/buyer-words/tracking-consent.ts), marked as such (`lang`).
  *
  * The scripts are each platform's own standard snippet, loaded from the
  * platform, with the creator's id — which was checked against the platform's
@@ -400,6 +403,7 @@ export function StorePixels({
   askFirst,
   place = { country: null, region: null },
   event = null,
+  language,
 }: {
   handle: string;
   storeName: string;
@@ -411,6 +415,8 @@ export function StorePixels({
   /** Where the visitor is, for Reddit's Limited Data Use (lib/reddit-pixel.ts placeOf). */
   place?: Place;
   event?: PixelEvent;
+  /** The store's language (lib/store-language.ts); English when missing or unknown. */
+  language?: LanguageCode;
 }) {
   // "unknown" until the browser has been asked, so the server's page and the
   // browser's first paint agree.
@@ -508,21 +514,25 @@ export function StorePixels({
 
   if (state === "unknown") return null;
 
+  const spoken = parseLanguage(language);
+  const words = trackingConsentWords(spoken);
+  const locale = LANGUAGES[spoken].locale;
   if ((navigator as Navigator & {globalPrivacyControl?:boolean}).globalPrivacyControl === true) {
-    return <p className="mt-3 text-center text-xs st-footer-link">Your browser’s Global Privacy Control keeps ad measurement off. Manage this signal in your browser settings.</p>;
+    return <p lang={locale} className="mt-3 text-center text-xs st-footer-link">{words.gpc}</p>;
   }
   if (state === "ask") {
     return (
       <section
-        aria-label="Ad measurement"
+        lang={locale}
+        aria-label={words.adsLabel}
         className="st-card fixed inset-x-3 bottom-3 z-50 mx-auto max-w-xl p-5 text-left sm:inset-x-6 sm:bottom-6"
         style={{ boxShadow: "0 18px 50px -18px rgba(0,0,0,.45)" }}
       >
-        <p className="font-bold">{`${storeName} measures its ads`}</p>
+        <p className="font-bold">{words.adsTitle(storeName)}</p>
         <p className="st-muted mt-1 text-sm leading-relaxed">
-          {`With your permission, this page loads ad measurement from ${names}, which sets cookies, and ${storeName} tells them about your sign-ups and purchases, so it can tell which of its ads bring people here. If you say no, nothing loads, nothing is sent, and the page works just the same.`}{" "}
+          {words.adsBody(names, storeName)}{" "}
           <Link href="/privacy#ads" className="st-footer-link font-semibold">
-            More about this
+            {words.more}
           </Link>
         </p>
         <div className="mt-4 flex flex-wrap gap-2">
@@ -535,7 +545,7 @@ export function StorePixels({
               setState(pixelChoiceState("yes",askFirst,gpc));
             }}
           >
-            Allow
+            {words.allow}
           </button>
           <button
             type="button"
@@ -545,7 +555,7 @@ export function StorePixels({
               setState("off");
             }}
           >
-            No thanks
+            {words.noThanks}
           </button>
         </div>
       </section>
@@ -553,7 +563,7 @@ export function StorePixels({
   }
 
   return (
-    <p className="mt-3 text-center">
+    <p lang={locale} className="mt-3 text-center">
       <button
         type="button"
         className="st-footer-link text-xs font-semibold"
@@ -569,7 +579,7 @@ export function StorePixels({
           }
         }}
       >
-        {state === "on" ? "Turn off ad measurement" : "Ad measurement settings"}
+        {state === "on" ? words.turnOff : words.settings}
       </button>
     </p>
   );

@@ -135,14 +135,41 @@ export async function deleteIfHeldOnly(held: Held, keys: string[]): Promise<bool
   return strictScript(FENCED_DEL_ONLY, [held.key, ...keys], [held.token]);
 }
 
-/** Runs `work` with the lock at `key` held, and lets go of it after, whatever happens. */
-export async function withLock<T>(key: string, ttlSeconds: number, waitMs: number, work: (held: Held) => Promise<T>): Promise<T> {
+/** Runs `work` with the lock at `key` held, and lets go of it after, whatever happens, unless `keepHeld` says to keep it for that result. */
+export async function withLock<T>(
+  key: string,
+  ttlSeconds: number,
+  waitMs: number,
+  work: (held: Held) => Promise<T>,
+  /** True for a result after which the lock is held a full term from then (keepFullTerm) and left to run out, not let go (lib/tier-switch.ts, keepWhileUnconfirmed). */
+  keepHeld?: (result: T) => boolean,
+): Promise<T> {
   const held = await takeLock(key, ttlSeconds, waitMs);
+  let keep = false;
   try {
-    return await work(held);
+    const result = await work(held);
+    keep = keepHeld?.(result) === true;
+    return result;
   } finally {
-    await releaseLock(held);
+    if (keep) await keepFullTerm(held);
+    else await releaseLock(held);
   }
+}
+
+/**
+ * A lock kept for a result is held a full term from now, not from when it was taken (Claude 2 on #3287): the work's own
+ * reads before its last call may have taken most of the term. Ours still: its term starts again. Run out and free: taken
+ * again with the same token. Taken by somebody else: theirs, and said. Never throws.
+ */
+async function keepFullTerm(held: Held): Promise<void> {
+  if (await holdLock(held)) return;
+  try {
+    const again = repliesFor(await redisPipeline([["SET", held.key, held.token, "NX", "EX", held.ttlSeconds]]), 1);
+    if (again?.[0] === "OK") return;
+  } catch {
+    // Said below.
+  }
+  console.error("a lock kept after an unconfirmed result could not be held again; it may already be somebody else's", held.key);
 }
 
 /**

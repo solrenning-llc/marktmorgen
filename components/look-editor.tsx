@@ -21,6 +21,7 @@ import {
   normaliseHex,
 } from "@/lib/store-look";
 import { MAX_PHOTO_BYTES, PHOTO_SIDE, photoUrl } from "@/lib/photo-limits";
+import { emailColourNotice } from "@/lib/email-theme";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 
 const MESSAGES: Record<string, string> = {
@@ -136,6 +137,8 @@ export function LookEditor({
   // Said out loud when the page will not paint exactly what was picked, so the
   // creator is never left wondering why their button is darker than their logo.
   const adjusted = colours.accent !== accent;
+  // Emails need 7:1 for every word, links included (369 [SU2]); when that moves the color, the creator is told which.
+  const emailNotice = useMemo(() => emailColourNotice({ theme, accent, font }), [theme, accent, font]);
 
   async function post(path: string, body: unknown): Promise<{ ok?: boolean; error?: string }> {
     const response = await fetch(path, {
@@ -364,6 +367,7 @@ export function LookEditor({
                   : "The preview shows your page's theme and color, with an example product until you add one."
               }`}
             </p>
+            {emailNotice ? <p className="field-hint mt-2">{emailNotice}</p> : null}
           </fieldset>
 
           {/* Letters */}

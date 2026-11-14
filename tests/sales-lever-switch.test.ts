@@ -253,7 +253,8 @@ test("the cards show a switch only where the rules allow one, named by the lever
   for (const title of ["Checkout recovery", "Next offer"]) assert.match(owner, new RegExp(`<button[^>]*role="switch"[^>]*>(?:(?!</button>).)*${title}`));
   // Each switch is described by what pressing it does and what buyers see.
   for (const [, ids] of owner.matchAll(/role="switch"[^>]*aria-describedby="([^"]+)"/g)) {
-    for (const id of ids.split(" ")) assert.match(owner, new RegExp(`id="${id.replace(/[:]/g, "\\:")}"`));
+    // Compared as literal text: an id is never turned into a pattern, so no character in it can widen the match.
+    for (const id of ids.split(" ")) assert.ok(owner.includes(`id="${id}"`), `no element has id="${id}"`);
   }
   assert.match(owner, /What buyers see/);
   // The footer no longer says this screen changes no settings.

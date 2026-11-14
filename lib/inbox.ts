@@ -660,9 +660,14 @@ export async function forgetInboxPerson(statsId: string | null, email: string): 
     const chunk = ids.slice(i, i + 200);
     const slots = await keptSlots(statsId, chunk);
     slots.forEach((value, at) => {
-      if (value === null) gone.push(chunk[at]);
+      if (value === null) {
+        gone.push(chunk[at]);
+        return;
+      }
       const kept = parseKept(value);
-      if (kept && normaliseEmail(kept.email) === address) theirs.push(kept);
+      // A kept conversation that does not read may be theirs: never passed over as done (rule 24).
+      if (!kept) throw new UnknownReplyError("a kept conversation of the inbox that does not read");
+      if (normaliseEmail(kept.email) === address) theirs.push(kept);
     });
   }
   // Two steps, in this order, so a failure part-way is always found again by the retry (Codex J on #3113):
@@ -679,6 +684,37 @@ export async function forgetInboxPerson(statsId: string | null, email: string): 
     if (removed === null || removed > unindex.length) throw new UnknownReplyError("the removal of a person's conversations from the inbox's index");
   }
   return theirs.length;
+}
+
+/**
+ * One person's conversations and their messages, for the copy of their data
+ * (619 [SZ3], lib/person-copy.ts), read as the erasure reads them (rule 24):
+ * every conversation the index names, a kept one that does not read, a
+ * messages reply of another shape or a message that does not read throws, so
+ * the copy is never given as complete without it. Only reads; nothing is
+ * marked as read.
+ */
+export async function inboxCopyOf(statsId: string | null, email: string): Promise<{ name: string; startedAt: number; messages: Message[] }[]> {
+  if (!statsId || !isRedisConfigured()) return [];
+  const address = normaliseEmail(email);
+  const ids = await indexIds(statsId, -1);
+  const out: { name: string; startedAt: number; messages: Message[] }[] = [];
+  for (let i = 0; i < ids.length; i += 200) {
+    const chunk = ids.slice(i, i + 200);
+    const slots = await keptSlots(statsId, chunk);
+    for (const value of slots) {
+      if (value === null) continue;
+      const kept = parseKept(value);
+      if (!kept) throw new UnknownReplyError("a kept conversation of the inbox that does not read, for a person's copy");
+      if (normaliseEmail(kept.email) !== address) continue;
+      const raw = stringList(repliesFor(await redisPipeline([["LRANGE", msgKey(statsId, kept.id), 0, -1]]), 1)?.[0]);
+      if (raw === null) throw new UnknownReplyError("a conversation's messages, for a person's copy");
+      const messages = raw.map(parseMessage);
+      if (messages.some((m) => !m)) throw new UnknownReplyError("a kept message that does not read, for a person's copy");
+      out.push({ name: kept.name, startedAt: kept.startedAt, messages: messages as Message[] });
+    }
+  }
+  return out;
 }
 
 /** How many conversations the inbox keeps: what deleting a person reads (lib/person-erasure.ts). */

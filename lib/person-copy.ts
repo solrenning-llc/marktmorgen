@@ -45,7 +45,7 @@ import { bondRecordOf } from "@/lib/affiliate-bond";
 import { leadOf } from "@/lib/affiliate-leads";
 import { importedFrom, importedKey } from "@/lib/imported-purchases";
 import { inviteField, inviteForCopy } from "@/lib/move-members";
-import { openConversation, readInbox } from "@/lib/inbox";
+import { inboxCopyOf } from "@/lib/inbox";
 import { accountOf, readMember as readDiscordMember } from "@/lib/discord-store";
 import { readReview, reviewId } from "@/lib/reviews";
 import { storesKnownFor } from "@/lib/buyer-library";
@@ -347,21 +347,14 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
     }
     return out;
   },
-  "lib/inbox.ts": async (s) => {
-    const out: unknown[] = [];
-    for (const conversation of (await readInbox(s.statsId)).filter((c) => same(c.email, s.email))) {
-      // Without the store: read, never marked as read.
-      const thread = await openConversation(s.statsId, conversation.id);
-      if (!thread) continue;
-      out.push({
-        name: conversation.name,
-        started: iso(conversation.startedAt),
-        // Which teammate wrote a reply is theirs; the reply is to you.
-        messages: thread.messages.map((m) => ({ at: iso(m.at), from: m.from === "visitor" ? "you" : "the store", text: m.text })),
-      });
-    }
-    return out;
-  },
+  // Read exactly, as the erasure reads it (rule 24); only reads, never marked as read.
+  "lib/inbox.ts": async (s) =>
+    (await inboxCopyOf(s.statsId, s.email)).map((conversation) => ({
+      name: conversation.name,
+      started: iso(conversation.startedAt),
+      // Which teammate wrote a reply is theirs; the reply is to you.
+      messages: conversation.messages.map((m) => ({ at: iso(m.at), from: m.from === "visitor" ? "you" : "the store", text: m.text })),
+    })),
   "lib/discord-access.ts": async (s) => {
     const room = storeKey(s.store);
     const account = room ? await accountOf(room, s.email) : null;

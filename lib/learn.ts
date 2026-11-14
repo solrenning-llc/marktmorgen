@@ -629,7 +629,10 @@ export async function markLesson(courseId: string, email: string, lessonId: stri
     if (Number(held) === 1) return;
     if (always) await noteData(room, [{ slot: DONE_SLOT(courseId), bytes }]);
     else await needData(room, [{ slot: DONE_SLOT(courseId), bytes }]);
-    await redisPipeline([["SADD", doneKey(courseId, email), lessonId]]);
+    const [added] = await redisPipeline([["SADD", doneKey(courseId, email), lessonId]]);
+    // Another press for the same lesson (a second tab, a double click) wrote it first, or the SISMEMBER above did not
+    // read: this one added nothing, so the room it took goes back. Only an exact 0 says so; anything else keeps it.
+    if (added === 0) await giveData(room, [{ slot: DONE_SLOT(courseId), bytes }]);
     return;
   }
   const [removed] = await redisPipeline([["SREM", doneKey(courseId, email), lessonId]]);

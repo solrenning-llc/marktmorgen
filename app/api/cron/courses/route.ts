@@ -10,13 +10,16 @@ import { SITE_URL } from "@/lib/site-url";
 import { sweepTaskUploads } from "@/lib/assignment";
 import { deleteFile } from "@/lib/file-store";
 import { sweepCommunityUploads } from "@/lib/community-files";
+import { del } from "@/lib/blob";
+import { sweepPictureDoors } from "@/lib/picture-door";
 
 /**
  * Run on a schedule by Vercel: tells each student when a module of their
  * course opens for them. Once per student and module, one run at a time.
  * And deletes files students uploaded for an assignment and never handed
  * in (lib/assignment.ts), and community pictures never put in a post
- * (lib/community-files.ts), a day on.
+ * (lib/community-files.ts), a day on, and studio pictures let in through the
+ * picture door and never put on anything (lib/picture-door.ts), 30 days on.
  */
 export async function GET(request: NextRequest) {
   // Vercel sends the secret with every scheduled run, compared here in
@@ -45,8 +48,20 @@ export async function GET(request: NextRequest) {
       console.error("could not sweep unused community pictures", error);
       return null;
     });
+    const studioPictures = await sweepPictureDoors(del).catch((error: unknown) => {
+      console.error("could not sweep unused studio pictures", error);
+      return null;
+    });
     return Response.json(
-      { ok: true, ...counts, unusedUploads: stale.length, unusedPictures: pictures, ...(pictures === null ? { picturesFailed: true } : {}) },
+      {
+        ok: true,
+        ...counts,
+        unusedUploads: stale.length,
+        unusedPictures: pictures,
+        ...(pictures === null ? { picturesFailed: true } : {}),
+        unusedStudioPictures: studioPictures === null ? null : studioPictures.length,
+        ...(studioPictures === null ? { studioPicturesFailed: true } : {}),
+      },
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch (error) {

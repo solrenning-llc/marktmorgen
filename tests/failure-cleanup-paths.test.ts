@@ -15,7 +15,7 @@
  *     once put on something it is never taken as fresh again, and a door asked for a picture already stored is
  *     refused, even in the same second the picture was stored;
  *   - each store's list: a stale note is never taken, one store's doors never push out another's, and the list
- *     expires a window after its last note.
+ *     has no expiry: a note goes only when its picture is taken or swept (lib/picture-door.ts, sweepPictureDoors).
  *
  * The inventory at the end reads every deletion in app/api/store, and in the lib files those routes delete through,
  * and holds each to a reason it cannot reach a file the browser named that belongs to another record, so a new
@@ -30,7 +30,7 @@ import { readListing } from "@/lib/catalog";
 import { fileFolder } from "@/lib/product-file";
 import { store as redis } from "./redis-stub";
 import { files } from "./failure-cleanup-world";
-import { PICTURE_DOOR_MAX, PICTURE_DOOR_SECONDS, PictureDoorFull, notePictureDoor, takePictureDoor } from "@/lib/picture-door";
+import { PICTURE_DOOR_MAX, PICTURE_DOOR_SECONDS, PICTURE_DOORS_KEPT_SECONDS, PictureDoorFull, notePictureDoor, takePictureDoor } from "@/lib/picture-door";
 import { done, is, part } from "./check";
 import { POST as linkImage } from "@/app/api/store/link-image/route";
 import { POST as productImage } from "@/app/api/store/image/route";
@@ -142,7 +142,9 @@ async function main(): Promise<void> {
   // Refused past its cap, never by pushing its oldest out (lib/picture-door.ts; tests/picture-door-ceiling.test.ts).
   is("and that store is refused one more, keeping its oldest", [past, ...(await takePictureDoor([other(0), other(PICTURE_DOOR_MAX)], now + 2_000)).keys()], ["full", other(0)]);
   const [ttl] = (await redis.pipeline([["TTL", `nl:pictures:doors:${"9".repeat(24)}`]])) as number[];
-  is("each list expires a window after its last note", ttl > 0 && ttl <= PICTURE_DOOR_SECONDS, true);
+  // Untaken notes count until they are taken or swept; the list expires PICTURE_DOORS_KEPT_SECONDS after its last note
+  // (Claude 2 on #3347: a list with no expiry kept notes left behind for good).
+  is("each list expires a while after its last note", ttl > PICTURE_DOOR_SECONDS && ttl <= PICTURE_DOORS_KEPT_SECONDS, true);
 
   part("Inventory: every deletion under app/api/store, and why it cannot reach another record's file");
   const routes: string[] = [];

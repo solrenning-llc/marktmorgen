@@ -44,6 +44,7 @@
  * not the buyer ever comes back to the thanks page.
  */
 import { admitOrders, settleAdmitted } from "@/lib/order-admission";
+import { saleClock, saleOff, salePrice } from "@/lib/store-sale";
 import { countOrder } from "@/lib/orders";
 import { createHash, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
@@ -240,7 +241,15 @@ export function offerOpen(createdSeconds: number, secret: string | undefined, ke
  * product that is a draft again or has nothing to hand over is passed over
  * as if it were gone, on the thanks page and when the answer is taken alike.
  */
-const sellableTargets = (store: Store, listings: Listing[]) => listings.filter((p) => canSellProduct(store, p));
+// At the price each costs on its own right now: a store-wide sale (lib/store-sale.ts) lowers it, so an offer dearer
+// than the product bought alone is paused as "dearer" (lib/funnel.ts, stepPause), never charged (DISC-B-3).
+const sellableTargets = (store: Store, listings: Listing[]) =>
+  listings
+    .filter((p) => canSellProduct(store, p))
+    .map((p) => {
+      const off = saleOff(store.sale, p, saleClock());
+      return off > 0 ? { ...p, priceCents: salePrice(p.priceCents, off) } : p;
+    });
 
 /**
  * How the thanks page's form names the offer it drew: the step's id, a dot, and a fingerprint of every term drawn

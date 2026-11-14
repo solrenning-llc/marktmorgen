@@ -452,6 +452,14 @@ export async function takeUpsell(input: {
       slot ? `nimbus-upsell:${session}:${slot}` : `nimbus-upsell:${session}`,
     );
     const id = typeof pi.id === "string" ? pi.id : "";
+    // Only Stripe's answer for this charge (rule 30, DISC-C-4): a payment intent, with its id, for the amount and
+    // currency asked. Any other answer proves nothing: the offer stays pending, with no id taken from it, and is
+    // found among the buyer's payments and settled from what Stripe says (settleOne), never written down as paid.
+    const own = pi.object === "payment_intent" && /^pi_\w+$/.test(id) && pi.amount === step.priceCents && typeof pi.currency === "string" && pi.currency.toLowerCase() === store.currency.toLowerCase();
+    if (!own) {
+      await writeUpsell(session, slot, { state: "pending", product: target.id, ...extra, customer, at: Date.now() });
+      return { kind: "checking" };
+    }
     if (pi.status === "succeeded") {
       await writeUpsell(session, slot, { state: "paid", product: target.id, ...extra, pi: id, customer, at: Date.now() });
       await unwatchPending(store, session, slot);

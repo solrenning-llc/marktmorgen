@@ -12,7 +12,7 @@ import { canSell } from "@/lib/store-checkout";
 import { AffiliateStudio } from "@/components/affiliate-studio";
 import { AffiliateSummary } from "@/components/affiliate-summary";
 import { SUMMARY_PERIODS, programSummary } from "@/lib/affiliate-summary";
-import { PayPalPayouts } from "@/components/paypal-payouts";
+import { PayPalPayouts, PayPalUnread } from "@/components/paypal-payouts";
 import { onTheirWay, payableLines, paypalChecks, readPayPal, settlePayPal } from "@/lib/paypal-payouts";
 import { batchTotal } from "@/lib/affiliate-payouts";
 import { codeOwners } from "@/lib/affiliate-codes";
@@ -47,7 +47,11 @@ export default async function StudioAffiliatesPage({ searchParams }: Params) {
   // What PayPal paid since the last look is written into the book first (lib/paypal-payouts.ts).
   await settlePayPal(store).catch((error) => console.error("settling PayPal payouts failed", error));
   const [paypal, away, owners, codeList, checks] = await Promise.all([
-    readPayPal(store).catch(() => null),
+    // Not known is never shown as "not connected" (rule 24): undefined, and the panel says it could not be read.
+    readPayPal(store).catch((error) => {
+      console.error("reading the PayPal link failed", error);
+      return undefined;
+    }),
     onTheirWay(store).catch(() => null),
     codeOwners(store).catch(() => new Map<string, string>()),
     // The creator's own codes, so one of them can be given to an affiliate
@@ -204,7 +208,9 @@ export default async function StudioAffiliatesPage({ searchParams }: Params) {
           codes={codes}
           codeOwners={Object.fromEntries(owners)}
           payPanel={
-            book && away !== null && checks !== null ? (
+            paypal === undefined ? (
+              <PayPalUnread />
+            ) : book && away !== null && checks !== null ? (
               <PayPalPayouts
                 initial={paypal}
                 people={payableLines(book, away).length}

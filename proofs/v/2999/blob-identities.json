@@ -1,0 +1,74 @@
+[
+  {
+    "path": "app/api/store/checkout/route.ts",
+    "candidateBlob": "e6fc57adb0b8cebdffcfd78f5f2369b8ab65280b",
+    "integrationBlob": "c5f8a4be822013fc8de0503fd1c32c4712eba5d5",
+    "unchanged": false
+  },
+  {
+    "path": "lib/data-families.ts",
+    "candidateBlob": "1f943f827b515ce3a3d460201b7f00dc37036d5d",
+    "integrationBlob": "0e1af2a3a30811ee83ca4665228982a3b9080aff",
+    "unchanged": false
+  },
+  {
+    "path": "lib/discount-impact.ts",
+    "candidateBlob": "159d2cffff2b3f9835d83624de1d893571a15f6d",
+    "integrationBlob": "159d2cffff2b3f9835d83624de1d893571a15f6d",
+    "unchanged": true
+  },
+  {
+    "path": "lib/fair-coupon.ts",
+    "candidateBlob": "d34a037f1541c3762e35d231556aef0f29d20ca6",
+    "integrationBlob": "d34a037f1541c3762e35d231556aef0f29d20ca6",
+    "unchanged": true
+  },
+  {
+    "path": "lib/member-price-rules.ts",
+    "candidateBlob": "057e6f343601fcb85b8671819fd78d482b5149e3",
+    "integrationBlob": "057e6f343601fcb85b8671819fd78d482b5149e3",
+    "unchanged": true
+  },
+  {
+    "path": "lib/member-price.ts",
+    "candidateBlob": "2144f136d699d7eda99684d4ce16a8212f8cbaf2",
+    "integrationBlob": "2144f136d699d7eda99684d4ce16a8212f8cbaf2",
+    "unchanged": true
+  },
+  {
+    "path": "lib/store-checkout.ts",
+    "candidateBlob": "47744983218e6da9cb696e3a3b5f06925d6304dd",
+    "integrationBlob": "47744983218e6da9cb696e3a3b5f06925d6304dd",
+    "unchanged": true
+  },
+  {
+    "path": "lib/store.ts",
+    "candidateBlob": "dff99010bf6afbffd2f1187940d0f37694990641",
+    "integrationBlob": "abfb72bc25c548bff15e6da7733987e7f57d1bfd",
+    "unchanged": false
+  },
+  {
+    "path": "tests/member-price-proof-gaps.test.ts",
+    "candidateBlob": "ad531e8cc91f73950b1f9d74e53fbbf93a6f229b",
+    "integrationBlob": "ad531e8cc91f73950b1f9d74e53fbbf93a6f229b",
+    "unchanged": true
+  },
+  {
+    "path": "tests/member-price.test.ts",
+    "candidateBlob": "69ae4cac361eb282e529113550059cffbda978bb",
+    "integrationBlob": "69ae4cac361eb282e529113550059cffbda978bb",
+    "unchanged": true
+  },
+  {
+    "path": "tests/plan-cost-registry.ts",
+    "candidateBlob": "1f2bcbda31832d0036ea9bdd38ac913bf9b713f9",
+    "integrationBlob": "6de65aa3dff616b3754ab78d02fa38c01b4bcdcb",
+    "unchanged": false
+  },
+  {
+    "path": "tests/store-data-registry.ts",
+    "candidateBlob": "3c799d5abacf8d8417eb0bc7bfdb7bf3606763f4",
+    "integrationBlob": "4f7d66e9e53a5073a0bfe7ab4250bce5e41fd348",
+    "unchanged": false
+  }
+]

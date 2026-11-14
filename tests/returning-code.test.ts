@@ -322,6 +322,17 @@ async function main(): Promise<void> {
   is("for one address, whatever the connection: a few links an hour", perAddress, back("busy"));
   is("the email is never in an address", /past\.buyer|new\.buyer|%40/i.test(last + perAddress), false);
 
+  part("A member price and a returning code together: refused as 'other' before the link is read or used (Claude 1 cloud, money review on #2999)");
+  // The two discounts never stack (lib/store-checkout.ts takes one); the route refuses the pair before redeeming the link,
+  // so no checkout opens with an address other than the one proved, and the link is left for a purchase without the claim.
+  const paired = await linkFor(PAST, productId);
+  r = await post({ rtoken: paired, member: "20" }, "198.51.100.60");
+  is("a member claim with the emailed link: 'other', no checkout, nothing read", [r.location, r.session, r.reads], [back("other"), null, 0]);
+  r = await post({ rcode: "THANKYOU", remail: PAST, member: "20" }, "198.51.100.61");
+  is("a member claim with a typed code: 'other', no link sent, nothing read", [r.location, r.session, r.reads, r.link], [back("other"), null, 0, false]);
+  r = await post({ rtoken: paired }, "198.51.100.62");
+  is("the link was not spent: alone, it still opens the checkout with the code, for that address", [r.location, r.session?.get("discounts[0][coupon]"), r.session?.get("customer_email")], ["https://checkout.stripe.com/c/pay/test", VIP.coupon, PAST]);
+
   part("A buy form with no code works as before");
   r = await post({}, "198.51.100.40");
   is("on to Stripe, with the box and no coupon, nothing read", [r.location, r.session?.get("allow_promotion_codes"), r.session?.get("discounts[0][coupon]"), r.reads], ["https://checkout.stripe.com/c/pay/test", "true", null, 0]);

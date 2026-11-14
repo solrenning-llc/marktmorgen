@@ -30,6 +30,7 @@ import { codeCookieName, readLinkCode } from "@/lib/code-link";
 import { AB_COOKIE, abMeta, count as countTest, expectedShareB, readBucket, readCounts, versionFor, winner } from "@/lib/headline-test";
 import { readPage } from "@/lib/sales-page-store";
 import { readCountry } from "@/lib/fair-price";
+import { memberClaim, readMemberClaim } from "@/lib/member-price";
 import { pageShown, runningTest, declaredMeasure } from "@/lib/sales-page";
 import { noteCheckoutTrouble } from "@/lib/checkout-trouble";
 import { chargesOffAfterRefusal } from "@/lib/stripe-charges";
@@ -100,6 +101,9 @@ export async function POST(request: NextRequest) {
   // version of the sentence this code shows. Checked again where the charge
   // is built, so nothing digital is opened without it.
   let digitalConsent: DigitalConsent | null = null;
+  // The member price the page showed (lib/member-price.ts), as a percentage;
+  // 0 for none. Never trusted: proved again below for this browser's address.
+  let memberAsked = 0;
   // A code only for people who already bought here, and the email it is for
   // (lib/returning-code.ts): read only when a code was typed; never kept.
   let typedCode = "";
@@ -145,6 +149,7 @@ export async function POST(request: NextRequest) {
     remind = form.get("remind") === "yes";
     remindEmail = remind ? normaliseEmail(read("remind_email", MAX_EMAIL_LENGTH + 1)) : "";
     remindVersion = remind ? read("remind_v", 40) : "";
+    memberAsked = readMemberClaim(form.get("member"));
     // Only the field's own "Email me the link" button asks for a link (rask);
     // a code left typed in the field never stops the buy button from buying.
     typedCode = form.get("rask") === "1" ? read("rcode", 40).trim() : "";
@@ -203,6 +208,11 @@ export async function POST(request: NextRequest) {
   if (noKeys === null) return away(`/@${store.handle}?status=error`);
   if (noKeys) return away(`/@${store.handle}?status=soldout`);
 
+  // A member price is for the member's own purchase of this product alone
+  // (lib/member-price.ts): a claim with a payment plan, a box ticked, a gift,
+  // places for others or a pre-order goes back to the page before anything
+  // is written down or charged.
+  if (memberAsked && (plan || bumps.length > 0 || giftTo.trim() || people.trim() || wantsPreorder)) return away(`/@${store.handle}/p/${product.id}?member=alone#buy`);
   // A code only for people who already bought here (554 [DS1], unit 2;
   // lib/returning-code.ts), handled before anything is written down or held.
   // A typed code and email only ask for a link, answered "sent" the same for
@@ -217,6 +227,11 @@ export async function POST(request: NextRequest) {
     // Another discount wins this checkout (a sale across the store, a fair price here, an introductory price or a
     // price the buyer names): the code could never go on, so nothing is read, held or emailed for it.
     if (otherDiscountWins(store, product, readCountry(request.headers.get("x-vercel-ip-country")), undefined, { plan: plan && activePlan(product) !== null })) return backToField("other");
+    // A member price claimed on the same form (lib/member-price.ts): one discount at a time, and the member's checkout
+    // opens for the proved address alone, so the pair is refused before the link is read, used or sent (Claude 1
+    // cloud, money review on #2999). otherDiscountWins does not count the member price: this check is what keeps
+    // the two apart here, and lib/store-checkout.ts refuses a code that did not go on as a second guard.
+    if (memberAsked) return backToField("other");
     // Each try may read the creator's Stripe account or use a link: a few per connection.
     if (!(await withinLimit("returning-code", `${clientAddress(request)}|${store.handle}`, RETURNING_TRIES, RETURNING_TRIES_SECONDS))) return backToField("busy");
     // For a purchase of the buyer's own, at the price set: never a gift, a group or a pre-order.
@@ -306,6 +321,18 @@ export async function POST(request: NextRequest) {
       }
     }
     const ads = await adsCheckout(request, store);
+    // A member price the page showed: charged only when it is exactly what
+    // this address is proved to get now, for the member's own purchase of
+    // this product alone (not a payment plan, a box ticked, a gift, places
+    // for others or a pre-order); otherwise back to the page, with nothing
+    // charged, rather than a price it did not show. The checkout opens with
+    // the proved address fixed, so it is the member's purchase.
+    let member: { percent: number; email: string } | undefined;
+    if (memberAsked) {
+      const claim = await memberClaim(store, product, memberAsked, request.cookies);
+      if (!claim.ok) return away(`/@${store.handle}/p/${product.id}?member=changed#buy`);
+      member = { percent: claim.member, email: claim.email };
+    }
     // Only where the box was offered, for a purchase of the buyer's own, with an address that is one.
     const reminding = remind && !gift && !group && !preorder && remindEmail.length <= MAX_EMAIL_LENGTH && EMAIL_PATTERN.test(remindEmail) && assistReminderOffered(store, product);
     const held = await withStockHold(store, product, (holding) =>
@@ -343,6 +370,7 @@ export async function POST(request: NextRequest) {
         // Where the buyer's connection is, for a fair price for that country
         // (lib/fair-price.ts), the same header the page read to show it.
         country: readCountry(request.headers.get("x-vercel-ip-country")),
+        member,
         // A funnel of pages this product is a step of, read off the page the
         // button was pressed on like the tags above (lib/page-funnel.ts).
         funnel: funnel ?? undefined,

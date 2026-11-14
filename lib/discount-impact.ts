@@ -14,14 +14,15 @@
  */
 
 /** Which discount a sale had, as the checkout wrote it (lib/store-checkout.ts). */
-export type DiscountKind = "full" | "code" | "sale" | "fair" | "intro" | "comeback" | "welcome";
-export const DISCOUNT_KINDS: DiscountKind[] = ["full", "code", "sale", "fair", "intro", "comeback", "welcome"];
+export type DiscountKind = "full" | "code" | "sale" | "fair" | "member" | "intro" | "comeback" | "welcome";
+export const DISCOUNT_KINDS: DiscountKind[] = ["full", "code", "sale", "fair", "member", "intro", "comeback", "welcome"];
 
 export const DISCOUNT_NAMES: Record<DiscountKind, string> = {
   full: "Full price",
   code: "Discount code",
   sale: "Store sale",
   fair: "Fair price by country",
+  member: "Member price",
   intro: "Introductory price",
   comeback: "Come-back offer",
   welcome: "Welcome offer",
@@ -60,6 +61,7 @@ export function discountKindOf(row: Record<string, unknown>): DiscountKind {
   if (meta.winback) return "comeback";
   if (meta.welcome) return "welcome";
   if (meta.intro) return "intro";
+  if (meta.member) return "member";
   if (meta.fair) return "fair";
   if (meta.sale) return "sale";
   return meta.code || off > 0 ? "code" : "full";

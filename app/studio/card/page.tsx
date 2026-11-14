@@ -4,6 +4,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
+import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { CreatorCardEditor } from "@/components/creator-card-editor";
 import { readCreatorCardHeld } from "@/lib/creator-card";
@@ -54,7 +55,7 @@ export default async function StudioCardPage({ searchParams }: Params) {
       <StudioHeader current={store} role={view.role} stores={view.stores} owned={view.owned} action={{ href: studioPath(store), label: "Back to the studio", short: "Studio" }} />
       <StudioStorePin sid={store.sid}>
         <main id="content" className="container-page pb-20 pt-10 sm:pt-14">
-          <p className="eyebrow">Your store</p>
+          <StudioTrail store={store} path={[{ label: "Your pages", href: studioPath(store, "", "site") }]} here="Business card" />
           <h1 className="t-h2 mt-3">Business card</h1>
           <p className="mt-3 max-w-2xl text-ink-soft">
             One address to give anyone you meet. It shows only what you type here, and a Save contact button that adds you to their phone&apos;s contacts. It stays off until you turn it on.

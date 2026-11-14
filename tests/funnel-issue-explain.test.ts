@@ -17,7 +17,7 @@ const review = (change: Partial<Parameters<typeof FunnelSharingReview>[0]> = {})
 
 part("Only where the plan has AI writing and the role may edit pages");
 is("no explain control without AI writing", review().includes("Explain this with AI"), false);
-const on = review({ explain: { funnelId: "abcdefghij", left: 3 } });
+const on = review({ explain: { funnelId: "abcdefghij", left: 3, onLeft() {} } });
 is("one control per check with AI writing on", on.split("Explain this with AI").length - 1, 1);
 
 part("It says what it costs and that the check decides, before it is pressed");

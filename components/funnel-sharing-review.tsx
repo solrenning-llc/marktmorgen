@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { Icon } from "@/components/icons";
-import { useState, type MouseEvent } from "react";
+import type { MouseEvent } from "react";
 import { FunnelIssueExplain } from "@/components/funnel-issue-explain";
 import type { FunnelLaunchIssue } from "@/lib/funnel-launch-review";
 import type { FunnelStepEditorLink } from "@/lib/funnel-editor-links";
@@ -20,9 +20,8 @@ export function FunnelSharingReview({ issues, editors, paymentReview, formsHref,
   onSettings: () => void;
   onNavigate: (event: MouseEvent<HTMLAnchorElement>) => void;
   /** AI explanations of each check (26 [E9]), only where the plan has AI writing and the role may edit pages; null hides them. */
-  explain?: { funnelId: string; left: number | null } | null;
+  explain?: { funnelId: string; left: number | null; onLeft: (left: number) => void } | null;
 }) {
-  const [left, setLeft] = useState<number | null>(explain ? explain.left : 0);
   return (
               <details className="group mt-4 rounded-xl border border-line p-3">
                 <summary className="flex min-h-11 cursor-pointer items-center gap-2 py-2 font-semibold text-ink">
@@ -55,7 +54,7 @@ export function FunnelSharingReview({ issues, editors, paymentReview, formsHref,
                               ) : null)}
                             </div>
                           ) : null}
-                          {explain ? <FunnelIssueExplain funnelId={explain.funnelId} issue={issue} left={left} onLeft={setLeft} /> : null}
+                          {explain ? <FunnelIssueExplain funnelId={explain.funnelId} issue={issue} left={explain.left} onLeft={explain.onLeft} /> : null}
                         </li>
                       );
                     })}

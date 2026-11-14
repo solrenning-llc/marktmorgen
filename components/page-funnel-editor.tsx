@@ -78,6 +78,12 @@ export function PageFunnelEditor({
   ai?: { on: boolean; left: number | null };
 }) {
   const router = useRouter();
+  // The month's AI allowance is one count for the whole page: an explanation asked under one funnel lowers it under
+  // every funnel (Revisor 2's LOW on #3508). Kept with the page's own reading, so a fresh reading replaces it.
+  const [usedAi, setUsedAi] = useState<{ base: typeof ai; left: number } | null>(null);
+  // Keyed on the whole reading, not its number: a renewed allowance with the same number is a new reading too
+  // (Codex X5's LOW on #3508).
+  const aiLeft = usedAi && usedAi.base === ai ? usedAi.left : ai?.left ?? null;
   const [draft, setDraft] = useState<Draft | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -302,7 +308,7 @@ export function PageFunnelEditor({
                 settingsDisabled={locked || draft !== null}
                 onSettings={() => start(funnel)}
                 onNavigate={event => { if (flight.current || recovery.current) event.preventDefault(); }}
-                explain={ai?.on ? { funnelId: funnel.id, left: ai.left } : null}
+                explain={ai?.on ? { funnelId: funnel.id, left: aiLeft, onLeft: (left) => setUsedAi({ base: ai, left }) } : null}
               />
 
               <ol className="mt-4 space-y-2">

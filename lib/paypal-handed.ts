@@ -18,39 +18,51 @@
  *   "refunded" no grant (or not standing behind another), and PayPal's full refund of this order was taken in by the
  *              refund watch (its mark in refundedKey, read exactly): nothing is being handed over, ever (the Claude 4
  *              team's second money review of #2911)
+ *   "reversed" the same, but PayPal took the payment back by another way than a refund (a capture reversed, failed or
+ *              declined: its mark in reversedKey too, read exactly), so the page never says "refunded" of it
+ *              (pre-review MEDIUM on C4-13)
  *   false      no grant; or another grant holds it and this order does not stand behind it; and no refund mark
  *   "unknown"  a read failed or did not answer in its exact shape: never taken as handed over
  *
  * One HGET, read in its exact envelope (lib/redis-reply.ts), as the refund watch reads the same record; one
- * SISMEMBER more only when the grant names another job; one ZSCORE of the refund mark more only before answering false.
+ * SISMEMBER more only when the grant names another job; one ZSCORE of the refund mark more only before answering false;
+ * one ZSCORE of the taken-back mark more only when the refund mark is there.
  */
 import { importedKey } from "@/lib/imported-purchases";
-import { type Paid, ownKey, refundedKey } from "@/lib/paypal-sales";
+import { type Paid, ownKey, refundedKey, reversedKey } from "@/lib/paypal-sales";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { repliesFor } from "@/lib/redis-reply";
 
 /** A refund mark's score: the time the watch took the refund in (as lib/paypal-sales.ts writes it with ZADD). */
 const REFUND_SCORE = /^[1-9]\d{0,11}$/;
 
-/** Whether the refund watch took in PayPal's full refund of this order: true, false, or "unknown" (read exactly). */
-async function refundedInFull(paid: Pick<Paid, "store" | "order">): Promise<boolean | "unknown"> {
-  const read = repliesFor(await redisPipeline([["ZSCORE", refundedKey(paid.store), paid.order]]), 1);
+/** One mark's ZSCORE, read exactly: true, false, or "unknown". */
+async function marked(key: string, order: string): Promise<boolean | "unknown"> {
+  const read = repliesFor(await redisPipeline([["ZSCORE", key, order]]), 1);
   if (!read) return "unknown";
   if (read[0] === null) return false;
   return typeof read[0] === "string" && REFUND_SCORE.test(read[0]) ? true : "unknown";
 }
 
-export async function paypalHandedOver(paid: Pick<Paid, "store" | "email" | "product" | "order">): Promise<boolean | "owned" | "refunded" | "unknown"> {
+/**
+ * Whether the refund watch took this whole payment back, and how: "refunded" (a refund in full), "reversed" (reversed,
+ * failed or declined: the watch writes that mark before the refund mark), false, or "unknown" (either read failed).
+ */
+async function takenBack(paid: Pick<Paid, "store" | "order">): Promise<"refunded" | "reversed" | false | "unknown"> {
+  const refunded = await marked(refundedKey(paid.store), paid.order);
+  if (refunded !== true) return refunded;
+  const reversed = await marked(reversedKey(paid.store), paid.order);
+  return reversed === "unknown" ? "unknown" : reversed ? "reversed" : "refunded";
+}
+
+export async function paypalHandedOver(paid: Pick<Paid, "store" | "email" | "product" | "order">): Promise<boolean | "owned" | "refunded" | "reversed" | "unknown"> {
   if (!isRedisConfigured() || !paid.store || !paid.email || !paid.product || !paid.order) return "unknown";
   const read = repliesFor(await redisPipeline([["HGET", importedKey(paid.store, paid.email), paid.product]]), 1);
   if (!read) return "unknown";
   const given = read[0];
   // No grant: being handed over, or taken back after PayPal refunded it in full (the watch removes the grant and keeps
-  // the paid record); only the refund mark tells them apart.
-  const notHanded = async (): Promise<false | "refunded" | "unknown"> => {
-    const refunded = await refundedInFull(paid);
-    return refunded === "unknown" ? "unknown" : refunded ? "refunded" : false;
-  };
+  // the paid record); only the refund mark tells them apart, and the taken-back mark tells a refund from the rest.
+  const notHanded = (): Promise<false | "refunded" | "reversed" | "unknown"> => takenBack(paid);
   if (given === null) return notHanded();
   if (typeof given !== "string") return "unknown";
   let value: unknown;

@@ -6,17 +6,18 @@
  * can clear later; once it succeeded, nothing settled it unless the buyer came back to the thanks page, so the
  * creator's confirmation email, count and affiliate commission (afterPaid) never ran for a buyer who paid.
  *
- *   - still "processing" after two days: kept on the job's list, looked at again six hours later;
+ *   - still "processing" after two days: kept on the job's list, looked at again a day later;
  *   - a success on the fifth day: settled by the job, paid once with no second charge, confirmation sent;
  *   - an offer whose payment is not processing (waiting on the buyer's bank page) is still let go after two days;
  *   - nothing is watched for more than seven days, inside the offer record's own eight.
  */
 import { TEST_CONSENT } from "./digital-consent-fixture";
-import { addProduct, claimHandle, ensureStatsId, setProductFunnel, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { addProduct, storeForHandle, claimHandle, ensureStatsId, setProductFunnel, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { readUpsell, settlePendingOffers, takeUpsell, newUpsellKey } from "@/lib/upsell";
 import { shownRef } from "./upsell-ref-fixture";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import { COMMAND, LATE_OFFER_LOOK_COMMANDS_MOST, LATE_OFFER_LOOKS_MOST, LATE_OFFER_SHARE_OF_ORDER_COMPUTE, ORDER_COMPUTE } from "./plan-cost-registry";
 import { paidPeriod } from "./billing-period-fixture";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_upsell_settle_late_only";
@@ -34,6 +35,7 @@ let nextCharge: "succeeded" | "requires_action" | "declined" | "lost" | "process
 const made: Record<string, unknown>[] = [];
 const sessions: Record<string, Record<string, unknown>> = {};
 const emails: string[] = [];
+const stripeReads: string[] = [];
 /** The clock the job reads: moved forward to stand for days passing. */
 const realNow = Date.now.bind(Date);
 let ahead = 0;
@@ -77,6 +79,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   }
   const one = /^\/payment_intents\/(pi_[A-Za-z0-9_]+)$/.exec(path);
   if (one) {
+    stripeReads.push(path);
     const found = made.find((pi) => pi.id === one[1]);
     return found ? answer(found) : answer({ error: { message: "no such payment" } }, 404);
   }
@@ -137,7 +140,7 @@ async function main(): Promise<void> {
   ahead = 2 * DAY + 60_000;
   await job();
   is("RED: still listed after the second day", (await listed("cs_test_settlelate000001")) !== null, true);
-  is("looked at again six hours later, not on every pass", Number(await listed("cs_test_settlelate000001")) - Date.now() > 5 * 60 * 60 * 1000, true);
+  is("looked at again a day later, not on every pass", Number(await listed("cs_test_settlelate000001")) - Date.now() > 23 * 60 * 60 * 1000, true);
   is("still pending, nothing more charged", [(await readUpsell("cs_test_settlelate000001"))?.state, charges.length], ["pending", 1]);
 
   part("RED: it clears on the fifth day: the job hands it over in full");
@@ -148,6 +151,33 @@ async function main(): Promise<void> {
   is("RED: settled by the job: paid, with no second charge", [(await readUpsell("cs_test_settlelate000001"))?.state, charges.length, counts.settled], ["paid", 1, 1]);
   is("RED: the confirmation is sent (afterPaid ran)", emails.length > before, true);
   is("and off the job's list", await listed("cs_test_settlelate000001"), null);
+
+  part("What one late look costs");
+  ahead = 0;
+  nextCharge = "processing";
+  sessions.cs_test_settlelate000004 = paidCheckout("cs_test_settlelate000004", front, browser.fingerprint);
+  await take("cs_test_settlelate000004", "kit001", "yes");
+  ahead = 3 * DAY;
+  const plain = redis.pipeline.bind(redis);
+  let commands = 0;
+  redis.pipeline = async (list: (string | number)[][]) => {
+    commands += list.length;
+    return plain(list);
+  };
+  await settlePendingOffers(storeForHandle, Date.now() + 60_000);
+  redis.pipeline = plain;
+  is("one late look, with the store's record read and the run's read of the list, is within its declared commands", commands <= LATE_OFFER_LOOK_COMMANDS_MOST, true);
+  const id = String(made[made.length - 1].id);
+  const looksBefore = stripeReads.filter((path) => path.endsWith(id)).length;
+  for (ahead = 3 * DAY; ahead <= 8 * DAY; ahead += 60 * 60 * 1000) await job();
+  const looks = stripeReads.filter((path) => path.endsWith(id)).length - looksBefore + 1;
+  is("still processing all week: looked at no more than its declared number of times after the second day", looks <= LATE_OFFER_LOOKS_MOST, true);
+  is("and let go by the eighth day", await listed("cs_test_settlelate000004"), null);
+  is(
+    "every late look of one offer inside its declared share of an order's compute",
+    LATE_OFFER_LOOKS_MOST * LATE_OFFER_LOOK_COMMANDS_MOST * COMMAND <= LATE_OFFER_SHARE_OF_ORDER_COMPUTE * ORDER_COMPUTE,
+    true,
+  );
 
   part("Not processing: an offer waiting on the buyer's bank page is still let go after two days");
   ahead = 0;

@@ -115,10 +115,11 @@ const PENDING_WATCH_MS = 2 * 24 * 60 * 60 * 1000;
  * PENDING_WATCH_MS: it is looked at again every PROCESSING_RECHECK_MS, until it settles or PROCESSING_WATCH_MS
  * have passed, so a late success still gets its confirmation, count and commission (afterPaid). Seven days covers
  * a US bank debit (Link paid from a bank account, lib/instant-pay.ts) and stays inside the record's own
- * RECORD_SECONDS, so nothing is kept longer than before.
+ * RECORD_SECONDS, so nothing is kept longer than before. Once a day, so at most LATE_OFFER_LOOKS_MOST looks an
+ * offer, each inside LATE_OFFER_LOOK_COMMANDS_MOST commands (tests/plan-cost-registry.ts, line "orders").
  */
 const PROCESSING_WATCH_MS = 7 * 24 * 60 * 60 * 1000;
-const PROCESSING_RECHECK_MS = 6 * 60 * 60 * 1000;
+const PROCESSING_RECHECK_MS = 24 * 60 * 60 * 1000;
 const pendingMember = (handle: string, session: string, slot: string) => `${handle}|${session}|${slot}`;
 
 /**
@@ -645,8 +646,8 @@ export async function settleUpsells(store: Store, session: string): Promise<void
  * store: each is settled from what Stripe says (settleOne), so a paid offer
  * gets its confirmation email and its affiliate credit without waiting for
  * the buyer to come back, and one the bank never confirmed is let go after
- * two days (seven while Stripe still says it is processing, looked at every
- * six hours after the second day). Nothing is ever charged here. `storeFor` is passed in, as the
+ * two days (seven while Stripe still says it is processing, looked at once a
+ * day after the second). Nothing is ever charged here. `storeFor` is passed in, as the
  * other jobs do, so this file does not depend on the store record's.
  */
 export async function settlePendingOffers(

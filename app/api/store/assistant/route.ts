@@ -14,7 +14,8 @@ const MAX_BODY_BYTES = 4_000;
  * The Store assistant's chat on a store's pages (lib/store-assistant.ts).
  * `{ handle, action, token?, text?, email?, name? }`:
  *
- *   ask      one message to the assistant; costs one reply of the month's pool
+ *   ask      one message to the assistant; one public request of the store,
+ *            and one reply of the month's pool, reserved before its facts are read
  *   read     the conversation this browser holds the token of
  *   delete   deletes it, at the buyer's word
  *   handoff  leaves the question, and the conversation, for the creator in
@@ -52,7 +53,10 @@ export async function POST(request: NextRequest) {
         if (
           !(await withinEssentialLimit("assist", who, ASSISTANT_PER_TEN_MINUTES, 600)) ||
           !(await withinEssentialLimit("assist-day", who, ASSISTANT_PER_DAY, 86_400)) ||
-          !(await withinEssentialLimit("assist-store", store.handle, ASSISTANT_STORE_PER_MINUTE, 60))
+          !(await withinEssentialLimit("assist-store", store.handle, ASSISTANT_STORE_PER_MINUTE, 60)) ||
+          // And one of the store's public requests (lib/metered-limits.ts), so a question refused for a spent pool, or
+          // handed over without the model, is a request of the plan's own figure, never one no price holds.
+          !(await withinStore("assist-ask", who, ASSISTANT_PER_TEN_MINUTES, 600, store))
         ) {
           return slow();
         }

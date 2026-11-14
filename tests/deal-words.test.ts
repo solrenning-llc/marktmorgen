@@ -66,7 +66,10 @@ const hidden = [
   "Ask for a dis.count.", "Ask for a dis-count.", "Ask for a dis_count.", "Ask for a dis\u00B7count.",
 ];
 is("each hidden form is refused", hidden.filter((reply) => heldToFacts(reply, probe)), []);
-is("a look-alike letter with no deal word in it is not refused", heldToFacts("The \u0441ourse has 20 lessons.", probe), true);
+// Rule 23 (9 Nov 2026, second pre-review): the facts were `probe` alone. A reply is shown only in a script the facts write
+// in (inStoreLanguage), so the facts now hold a word in Cyrillic; what this still holds is that the look-alike is no deal word.
+is("a look-alike letter with no deal word in it is not refused", heldToFacts("The \u0441ourse has 20 lessons.", `${probe} \u041a\u0443\u0440\u0441.`), true);
+is("but a script the facts never write in is not a store language", heldToFacts("The \u0441ourse has 20 lessons.", probe), false);
 is("hidden with no deal in the facts too", [heldToFacts("A dis\u0441ount.", "nothing"), heldToFacts("dis.count", "nothing"), heldToFacts("\uFF52\uFF41\uFF42\uFF41\uFF54\uFF54", "nichts")], [false, false, false]);
 is("a number in another script is compared as its ASCII digits", [
   heldToFacts("It costs $\uFF12\uFF10.", probe), heldToFacts("It costs $\u0662\u0660.", probe),
@@ -144,7 +147,10 @@ is("each is refused, though the facts have the word in Latin letters", [
   "Ask for a \uA4D3\uA4F2\uA4E2\uA4DA\uA4F3\uA4F4\uA4E0\uA4D4.", "On \uA4E2\uA4EE\uA4E1\uA4F0 now.", "It is 20 % \uA4F3\uA4DD\uA4DD.", "Ask for a \u2CA5\u2C9F\u057D\u2CA3\u2C9F\u0578.", "Use the \u0441\u043E\uA4D3\u0435.", "Use the c\u{104EB}de.", "Use the \u{10302}\u{104EB}de.", "Use the \u1455\u1D0F\u15EA\u1D07.", "Use the c\u2D54de.",
   "Ask for a D\u0406SCOUNT.", "Ask for a d\u0406scount.",
 ].filter((reply) => heldToFacts(reply, deals)), []);
-is("honest Lisu, Coptic and Tifinagh text passes", [heldToFacts("\uA4E1\uA4F2-\uA4E2\uA4F4 \uA4DF\uA4EC \uA4D2\uA4F5.", "Lisu."), heldToFacts("\u2CA0\u2C93\u2C9B\u2C9F\u2CA9\u03EF.", "Coptic."), heldToFacts("\u2D5C\u2D30\u2D4E\u2D30\u2D63\u2D49\u2D56\u2D5C.", "Tifinagh.")], [true, true, true]);
+// Rule 23 (9 Nov 2026, second pre-review): the facts were "Lisu.", "Coptic." and "Tifinagh." in Latin letters. A reply is
+// shown only in a script the facts write in (inStoreLanguage), so each store now writes that text; what this still holds is
+// that honest letters of those scripts are not read as look-alikes of a deal word.
+is("honest Lisu, Coptic and Tifinagh text passes", [sameFacts("\uA4E1\uA4F2-\uA4E2\uA4F4 \uA4DF\uA4EC \uA4D2\uA4F5."), sameFacts("\u2CA0\u2C93\u2C9B\u2C9F\u2CA9\u03EF."), sameFacts("\u2D5C\u2D30\u2D4E\u2D30\u2D63\u2D49\u2D56\u2D5C.")], [true, true, true]);
 const copy = readFileSync("tooling/unicode/confusables-18.0.0.txt", "utf8");
 const names = readFileSync("tooling/unicode/UnicodeData-18.0.0.txt", "utf8");
 is("the table is made from the committed copy of confusables.txt, version 18.0.0", [versionOf(copy).version, readFileSync("lib/confusables-latin.ts", "utf8") === renderTable(copy, names)], ["18.0.0", true]);
@@ -178,8 +184,9 @@ is("a look-alike that confusables.txt reads as a letter with a mark is read as t
 is("so the table has them", [table.get(0x03b7), table.get(0x13eb), table.get(0xabbb)], ["n", "o", "o"]);
 
 part("Final review: a sentence that starts right after a dot with a word that is also a domain ending");
+// Changed 9 Nov 2026 (audit ALTO 1, rule 23): "Twelve" is a figure in words now held to the facts, so the facts of that case say "Twelve lessons."; it still tests "Live" after a dot.
 is("honest replies pass", [
-  heldToFacts("Uma aula.Eu gostei.", "Aula."), heldToFacts("Muito bom.Se quiser, pergunte.", "Aula."), heldToFacts("Twelve lessons.Live sessions too.", "Lessons."),
+  heldToFacts("Uma aula.Eu gostei.", "Aula."), heldToFacts("Muito bom.Se quiser, pergunte.", "Aula."), heldToFacts("Twelve lessons.Live sessions too.", "Twelve lessons."),
   heldToFacts("Lessons.Top quality.", "Lessons."), heldToFacts("That was great.It's fun.", probe), heldToFacts("That was great.It\nhelps.", probe), heldToFacts("That was great.It", probe),
   heldToFacts("Ottimo corso.Io lo consiglio.", "Corso."), heldToFacts("Goede cursus.Net als vorig jaar.", "Cursus."),
 ], [true, true, true, true, true, true, true, true, true]);

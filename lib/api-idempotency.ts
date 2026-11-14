@@ -145,6 +145,9 @@ export async function forgetIdempotentPerson(sid: string, email: string, now = D
   ]), 3);
   const members = read && (read[0] === 0 || read[0] === 1) && read[1] === 1 && Array.isArray(read[2]) && read[2].every((m) => typeof m === "string") ? (read[2] as string[]) : null;
   if (!members) throw new Error("the kept API answers of a person could not be read");
+  // A line that is neither a record's hash nor the erasure's mark is an unknown shape (Codex X5's second MÉDIO on
+  // #3542): never dropped as if it named nothing; the erasure fails closed before deleting anything.
+  if (members.some((member) => member !== ERASED_MARK && !isHash(member))) throw new Error("the kept API answers of a person could not be read");
   // Only lines that name a record of this store: the index is the store's own, and a line is a key's hash.
   const ours = [...new Set(members.filter(isHash))];
   // However many there are, all go, in batches: the erasure's size counted these lines (idempotentLines) and was paid

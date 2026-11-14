@@ -390,6 +390,14 @@ async function main(): Promise<void> {
   is("the start button's reading of a row that exists is paid first as one more public request", /paidStampNow = async \(\) => \(\(await takePublicRequest\(store, "buyer"\)/.test(readFileSync("app/api/store/course/start/route.ts", "utf8")), true);
   is("no row: nothing asked; a row: asked once, and its end kept", [askedWithoutRow, asked, typeof l1row[0] === "string" ? (JSON.parse(l1row[0] as string) as { x?: number }).x : null], [0, 1, SET_AT + 40 * DAY]);
 
+  part("A course whose exact read failed offers no way to buy on its page, the cart included (Codex L on #3445, MEDIUM)");
+  // The BuyBox closes on courseUnread; Add to cart sat beside it on its own condition, so a buyer could still put the
+  // course in the cart and check out, and the cart wrote no access end: a passing outage sold access with no end.
+  const productPage = readFileSync("app/[handle]/p/[product]/page.tsx", "utf8");
+  const cartLine = productPage.split("\n").find((line) => line.includes("<AddToCart ")) ?? "";
+  is("the page's Add to cart is drawn only while the course was read exactly", /courseUnread\s*\?\s*null\s*:|!courseUnread\s*&&/.test(cartLine), true);
+  is("and the BuyBox still closes on the same reading", /unread=\{courseUnread\}/.test(productPage), true);
+
   globalThis.fetch = realFetch;
   done();
 }

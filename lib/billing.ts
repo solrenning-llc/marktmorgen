@@ -18,6 +18,7 @@ import {takeRestartRecovery,restartSubmissionOpenNow,recordRestartResult,armRest
  * we promised not to take, or us billing ourselves.
  */
 import { STRIPE_TIMEOUT_MS, timed } from "@/lib/fetch-timeout";
+import { withLock } from "@/lib/redis-lock";
 import {
   type Cycle,
   type Tier,
@@ -1280,6 +1281,27 @@ export function observeRestartedPlan(
  * Errors are thrown, not swallowed: the caller has to tell the creator that
  * nothing changed, and "Stripe did not answer" is not "cancelled".
  */
+/**
+ * The mark a plan refund leaves on a subscription whose stop it set (lib/plan-refund-flow.ts): only a stop that still
+ * carries it is ever taken back by that flow. Every other write of the stop, here, clears it in the same call, so a
+ * stop the creator sets or takes back themselves is theirs from then on (Claude 1 on #3740).
+ */
+export const PLAN_REFUND_STOP_MARK = "plan_refund_stop";
+
+/**
+ * One lock per subscription for every change of its stop (Codex U on #3740): the plan refund's read-then-take-back
+ * and the creator's own cancel or resume never interleave, so a change the creator was told is done is never undone.
+ * What it covers: every change made through this code, which is the only way a creator changes their plan (the
+ * studio's billing route, plan breaks; there is no Stripe portal for a creator's plan). Stripe offers no conditional
+ * update, so a change written straight into the platform's own Stripe account (by its owner, in the Dashboard) takes
+ * no lock: one landing inside a take-back's GET and POST, a window of one request, is not fenced.
+ */
+export const planStopLockKey = (subscriptionId: string) => `nl:lock:plan-stop:${subscriptionId}`;
+// Longer than the work it guards, so it cannot lapse in the middle (Claude 7 on #3740): a GET and a POST, each up to
+// STRIPE_TIMEOUT_MS (20 s), with room to spare; the take-back also checks the lock is still held before its POST.
+export const PLAN_STOP_LOCK_SECONDS = 60;
+export const PLAN_STOP_LOCK_WAIT_MS = 3_000;
+
 export async function setCancelAtPeriodEnd(
   subscriptionId: string,
   cancel: boolean,
@@ -1287,10 +1309,13 @@ export async function setCancelAtPeriodEnd(
   if (!SUBSCRIPTION_PATTERN.test(subscriptionId)) {
     return { state: "inactive", reason: "shape" };
   }
-  const subscription = await onPlatform(
-    "POST",
-    `/subscriptions/${encodeURIComponent(subscriptionId)}`,
-    new URLSearchParams({ cancel_at_period_end: cancel ? "true" : "false" }),
+  // A lock that cannot be taken throws (LockBusyError): the caller says nothing changed, and the creator tries again.
+  const subscription = await withLock(planStopLockKey(subscriptionId), PLAN_STOP_LOCK_SECONDS, PLAN_STOP_LOCK_WAIT_MS, () =>
+    onPlatform(
+      "POST",
+      `/subscriptions/${encodeURIComponent(subscriptionId)}`,
+      new URLSearchParams({ cancel_at_period_end: cancel ? "true" : "false", [`metadata[${PLAN_REFUND_STOP_MARK}]`]: "" }),
+    ),
   );
   // Only an identified, explicit provider observation can confirm this change.
   // Unknown replies must throw so callers retain paid access and pause evidence.

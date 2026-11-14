@@ -37,11 +37,15 @@ export const world = {
   chargeListDown: false,
   /** New refunds come back with this status. */
   refundStatus: "succeeded",
+  /** Run once, awaited, right after the next GET of a subscription is answered by Stripe and before it is returned. */
+  afterSubscriptionGet: null as null | ((id: string) => Promise<void>),
   /** Subscriptions whose updates answer 500. */
   postDownFor: new Set<string>(),
   slow: 0,
   /** Emails sent through the stand-in Resend. */
   emails: [] as { to: string; subject: string; text: string; key: string }[],
+  /** The stand-in Resend answers 500 and records nothing. */
+  emailsDown: false,
 };
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -50,6 +54,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const json = (data: unknown, status = 200) => new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json" } });
   const fail = () => json({ error: { message: "down", type: "api_error" } }, 500);
   if (url.hostname === "api.resend.com") {
+    if (world.emailsDown) return new Response("down", { status: 500 });
     const body = JSON.parse(String(init?.body)) as { to: string | string[]; subject: string; text: string };
     world.emails.push({ to: [body.to].flat()[0], subject: body.subject, text: body.text, key: new Headers(init?.headers).get("idempotency-key") ?? "" });
     return new Response(JSON.stringify({ id: `email_${world.emails.length}` }), { status: 200 });
@@ -69,13 +74,30 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     if (method === "POST") {
       if (world.stopDown || world.postDownFor.has(sub[1])) return fail();
       if (row.status === "canceled") return json({ error: { message: "canceled", type: "invalid_request_error" } }, 400);
-      row.cancel_at_period_end = form.get("cancel_at_period_end") === "true";
+      if (form.has("cancel_at_period_end")) row.cancel_at_period_end = form.get("cancel_at_period_end") === "true";
+      // As Stripe: metadata[key]=value sets a key, an empty value unsets it.
+      for (const [key, value] of form) {
+        const name = /^metadata\[(.+)\]$/.exec(key)?.[1];
+        if (!name) continue;
+        const metadata = { ...((row.metadata as Record<string, string> | undefined) ?? {}) };
+        if (value === "") delete metadata[name];
+        else metadata[name] = value;
+        row.metadata = metadata;
+      }
     }
     if (method === "DELETE") {
       if (world.endDown) return fail();
       if (row.status === "canceled") return json({ error: { message: "canceled", type: "invalid_request_error" } }, 400);
       row.status = "canceled";
       row.cancel_at_period_end = false;
+    }
+    if (method === "GET" && world.afterSubscriptionGet) {
+      const hook = world.afterSubscriptionGet;
+      world.afterSubscriptionGet = null;
+      const snapshot = JSON.parse(JSON.stringify(row)) as Row;
+      await hook(sub[1]);
+      const customer = String(snapshot.customer);
+      return json({ ...snapshot, customer: q.getAll("expand[]").includes("customer") ? { id: customer, email: world.customers.get(customer), balance: 0 } : customer });
     }
     const customer = String(row.customer);
     return json({ ...row, customer: q.getAll("expand[]").includes("customer") ? { id: customer, email: world.customers.get(customer), balance: 0 } : customer });

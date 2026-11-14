@@ -40,13 +40,15 @@
  * One at a time per store (FLOW_LOCK_SECONDS, lib/redis-lock.ts); the daily
  * job skips a store whose lock is held.
  */
-import { BillingError, isBillingConfigured, onPlatform, setCancelAtPeriodEnd } from "@/lib/billing";
+import { BillingError, PLAN_REFUND_STOP_MARK, PLAN_STOP_LOCK_SECONDS, PLAN_STOP_LOCK_WAIT_MS, isBillingConfigured, onPlatform, planStopLockKey } from "@/lib/billing";
+import { holdLock, withLock } from "@/lib/redis-lock";
 import { LOCK_SECONDS, type PlanRefundMade, refundPlanPayment } from "@/lib/plan-refund-write";
 import { dropPause } from "@/lib/plan-pause";
 import { syncAssistant } from "@/lib/assistant-billing";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { LockBusyError, releaseLock, takeLock } from "@/lib/redis-lock";
 import { SUBSCRIPTION_PATTERN, type Store, setSubscription, storeForId, storeRef } from "@/lib/store";
+import { storeForIdExactly } from "@/lib/store-exact";
 import { EMAIL_PATTERN, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
@@ -197,14 +199,48 @@ const planState = (sub: Row | null): "stops" | "renews" | "ended" | "unknown" =>
   return stopSet(sub) ? "stops" : "renews";
 };
 
-/** Takes back the stop we set, when it is still there. True when nothing of ours is left. */
+/**
+ * Whose stop it is, kept on the subscription itself (Codex G on #3740): set in the same Stripe call as our stop, and
+ * unset in the same call that takes it back. A note in Redis can be stale (its m: 0 write may never land); Stripe's own
+ * record cannot, so a stop the creator set after ours was taken back carries no mark and is never touched.
+ */
+export const OUR_STOP_MARK = PLAN_REFUND_STOP_MARK;
+
+/** Sets our stop with its mark, in one call. Only an answer naming this subscription, stopped and marked, confirms it. */
+async function setOurStop(id: string, mark: string): Promise<void> {
+  const sub = await withLock(planStopLockKey(id), PLAN_STOP_LOCK_SECONDS, PLAN_STOP_LOCK_WAIT_MS, () => onPlatform("POST", `/subscriptions/${encodeURIComponent(id)}`, new URLSearchParams({ cancel_at_period_end: "true", [`metadata[${OUR_STOP_MARK}]`]: mark })));
+  const row = sub as Row & { metadata?: unknown };
+  const metadata = row && typeof row === "object" && row.metadata && typeof row.metadata === "object" ? (row.metadata as Record<string, unknown>) : null;
+  if (!row || row.id !== id || row.cancel_at_period_end !== true || metadata?.[OUR_STOP_MARK] !== mark) {
+    throw new Error("The stop's answer does not show this subscription stopped with our mark");
+  }
+}
+
+/**
+ * Takes back the stop we set, when it is still there and still ours (its mark on the subscription). True when nothing
+ * of ours is left. A stop without our mark is the creator's own, or one taken back already: never touched.
+ */
 async function takeBackStop(id: string): Promise<boolean> {
   try {
-    const sub = await subscriptionOf(id);
-    if (!sub) return false;
-    if (!LIVE.includes(String(sub.status)) || sub.cancel_at_period_end !== true) return true;
-    await setCancelAtPeriodEnd(id, false);
-    return true;
+    // Read and taken back under the stop's lock (Codex U on #3740): the creator's own cancel or resume
+    // (lib/billing.ts setCancelAtPeriodEnd, which also clears the mark) cannot land between the two.
+    return await withLock(planStopLockKey(id), PLAN_STOP_LOCK_SECONDS, PLAN_STOP_LOCK_WAIT_MS, async (held) => {
+      const sub = await subscriptionOf(id);
+      if (!sub) return false;
+      const metadata = (sub as Row & { metadata?: unknown }).metadata;
+      const mark = metadata && typeof metadata === "object" && !Array.isArray(metadata) ? (metadata as Record<string, unknown>)[OUR_STOP_MARK] : undefined;
+      if (!LIVE.includes(String(sub.status))) return true;
+      if (mark === undefined || mark === null || mark === "") return true;
+      if (typeof mark !== "string") return false;
+      // Still ours after the read, or nothing is sent (Claude 7 on #3740): a slow read never outlives the lock and then
+      // posts over a change the creator made meanwhile. The job tries again tomorrow.
+      if (!(await holdLock(held))) return false;
+      // Taken back and unmarked in one call: a later run, on a stale note, finds no mark and leaves any stop alone.
+      const after = await onPlatform("POST", `/subscriptions/${encodeURIComponent(id)}`, new URLSearchParams({ cancel_at_period_end: "false", [`metadata[${OUR_STOP_MARK}]`]: "" }));
+      const row = after as Row & { metadata?: unknown };
+      const left = row && typeof row === "object" && row.metadata && typeof row.metadata === "object" ? (row.metadata as Record<string, unknown>)[OUR_STOP_MARK] : undefined;
+      return Boolean(row) && row.id === id && row.cancel_at_period_end === false && (left === undefined || left === "");
+    });
   } catch (error) {
     console.error("taking back a plan's stop after a refund that was not made failed", error);
     return false;
@@ -408,17 +444,18 @@ export async function takeReview(sid: string, token: string): Promise<number | n
 }
 
 /** One email to the store's own address, from the company's sending, under an idempotency key. Not sent only logs. */
-async function mail(store: Store, letter: { subject: string; text: string }, key: string): Promise<void> {
+async function mail(store: Store, letter: { subject: string; text: string }, key: string): Promise<boolean> {
   const to = normaliseEmail(store.email);
   if (!EMAIL_PATTERN.test(to) || !isSenderConfigured()) {
     console.error(`plan-refund: store ${store.sid}'s email was not sent (no address or no sender)`);
-    return;
+    return false;
   }
   const sent = await sendEmail({ meter: { by: "company" }, from: NIMBUS_FROM, to, replyTo: SUPPORT_EMAIL, subject: letter.subject, text: letter.text, idempotencyKey: key }).catch((error) => {
     console.error("sending a plan refund email failed", error);
     return false;
   });
   if (!sent) console.error(`plan-refund: store ${store.sid}'s email was not sent`);
+  return sent;
 }
 
 /** The confirmation, once the plan has ended; keyed by the refund, so a retry never sends it twice. */
@@ -465,7 +502,12 @@ export async function refundAndEndPlan(store: Store, nowSeconds = Math.floor(Dat
     // our stop is taken back at once and the note goes.
     const notMade = async (reason: Exclude<PlanRefundFlow, { ok: true }>["reason"], maybe: boolean): Promise<PlanRefundFlow> => {
       if (!maybe) {
-        if (note.m === 1 && (await takeBackStop(id))) note = { ...note, m: 0 };
+        if (note.m === 1 && (await takeBackStop(id))) {
+          // Said before the note goes: if its removal is lost, a later run must not take back a stop the creator
+          // set themselves since (comment 6807195181 on #3585).
+          note = { ...note, m: 0 };
+          await writeNote(store.sid, note);
+        }
         if (note.m === 0) {
           await dropNote(store.sid);
           return { ok: false, reason, stopLeft: false };
@@ -484,7 +526,7 @@ export async function refundAndEndPlan(store: Store, nowSeconds = Math.floor(Dat
 
     if (weStop) {
       try {
-        await setCancelAtPeriodEnd(id, true);
+        await setOurStop(id, String(note.at));
       } catch (error) {
         console.error("setting a plan to stop before its refund failed", error);
         return notMade("stop_failed", Boolean(kept));
@@ -555,15 +597,34 @@ export async function finishPlanRefunds(deadline: number, nowSeconds = Math.floo
           counts.left += 1;
           continue;
         }
-        const damagedStore = await storeForId(sid);
-        console.error(`plan-refund: store ${sid}'s recovery note had unknown debt evidence for ${GIVE_UP_DAYS} days; it is dropped and the creator told`);
-        await dropNote(sid);
-        if (damagedStore) {
-          // What the letter says of the plan is what Stripe shows now, never the note's flag: the creator may have set
-          // the stop themselves, or kept the plan since (Claude 4 on #3585). Not readable: it says to check the studio.
-          const sub = await subscriptionOf(note.s);
-          await mail(damagedStore, planRefundUnknownLetter({ store: damagedStore.name || damagedStore.handle, plan: planState(sub) }), `plan-refund-unknown:${sid}:${note.at}`);
+        // Unknown stays unknown: a store reply that is not an exact answer keeps the note, and so does a letter that was
+        // not sent. The note is dropped only after the send, so nothing is let go without the creator being told
+        // (Revisor 2's LOW on #3585). The letter's key makes a retry never send it twice.
+        // Read exactly (cloud D on #3740): a store that is gone has nobody to tell, and its note goes, so it never holds
+        // a place among the first MAX_NOTES for good; only a reply that is not an exact answer keeps it.
+        const found = await storeForIdExactly(sid);
+        if (found === "none") {
+          await dropNote(sid);
+          console.error(`plan-refund: store ${sid} is gone; its damaged recovery note is dropped, with nobody to tell`);
+          counts.dropped += 1;
+          continue;
         }
+        if (found === "unknown") {
+          console.error(`plan-refund: store ${sid}'s damaged recovery note is retained: its store could not be read exactly`);
+          counts.left += 1;
+          continue;
+        }
+        const damagedStore = found;
+        // What the letter says of the plan is what Stripe shows now, never the note's flag: the creator may have set
+        // the stop themselves, or kept the plan since (Claude 4 on #3585). Not readable: it says to check the studio.
+        const sub = await subscriptionOf(note.s);
+        if (!(await mail(damagedStore, planRefundUnknownLetter({ store: damagedStore.name || damagedStore.handle, plan: planState(sub) }), `plan-refund-unknown:${sid}:${note.at}`))) {
+          console.error(`plan-refund: store ${sid}'s damaged recovery note is retained: the letter was not sent`);
+          counts.left += 1;
+          continue;
+        }
+        await dropNote(sid);
+        console.error(`plan-refund: store ${sid}'s recovery note had unknown debt evidence for ${GIVE_UP_DAYS} days; the creator was told and it is dropped`);
         counts.dropped += 1;
         continue;
       }
@@ -606,12 +667,18 @@ export async function finishPlanRefunds(deadline: number, nowSeconds = Math.floo
         console.error(`plan-refund: the refund asked for store ${sid} could not be decided in ${GIVE_UP_DAYS} days; its stop is taken back and its note dropped`);
       }
       // None was made: our stop goes, the plan goes on as it was.
-      if (note.m === 1 && !(await takeBackStop(note.s))) {
-        if (nowSeconds - note.at <= GIVE_UP_DAYS * 86_400) {
-          counts.left += 1;
-          continue;
+      if (note.m === 1) {
+        if (!(await takeBackStop(note.s))) {
+          if (nowSeconds - note.at <= GIVE_UP_DAYS * 86_400) {
+            counts.left += 1;
+            continue;
+          }
+          console.error(`plan-refund: the stop set for store ${sid}'s refund could not be taken back in ${GIVE_UP_DAYS} days; its note is dropped`);
+        } else {
+          // Our stop is gone: the note says so before it is dropped, so a lost removal never lets a later run take back
+          // a stop the creator set themselves since (comment 6807195181 on #3585).
+          await writeNote(sid, { ...note, m: 0 });
         }
-        console.error(`plan-refund: the stop set for store ${sid}'s refund could not be taken back in ${GIVE_UP_DAYS} days; its note is dropped`);
       }
       await dropNote(sid);
       // The creator saw "nothing was refunded" or "we check within a day": the outcome reaches them by email.

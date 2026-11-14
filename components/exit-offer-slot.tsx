@@ -16,7 +16,7 @@ export async function ExitOfferSlot({ store, except }: { store: Store; except?: 
   const product = await readListing(store, store.exitOffer).catch(() => null);
   if (!product || !canGiveProduct(store, product)) return null;
   return (
-    <ExitOffer store={store.handle} title={product.title} words={{ close: speech(store).w.close, beforeYouGo: speech(store).w.beforeYouGo }}>
+    <ExitOffer store={store.handle} title={product.title} words={{ close: speech(store).w.close, beforeYouGo: speech(store).w.beforeYouGo, noMore: speech(store).w.noMoreOffers }}>
       {product.summary ? <p className="st-muted mt-2">{product.summary}</p> : null}
       <BuyBox store={store} product={product} related={[]} remaining={null} writes={canWrite(store)} selling place="x-" />
     </ExitOffer>

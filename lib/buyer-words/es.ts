@@ -285,6 +285,7 @@ export const es: BuyerWords = {
 
   close: "Cerrar",
   beforeYouGo: "Antes de irte — gratis",
+  noMoreOffers: "No mostrar ofertas como esta",
 
   aboutStore: (store) => `Sobre ${store}`,
   guarantee: "Garantía",

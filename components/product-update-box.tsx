@@ -10,6 +10,7 @@ const MESSAGES: Record<string, string> = {
   kind: "This works on products bought once: not memberships or calls.",
   none: "Nobody has bought this yet, so there is nobody to tell.",
   stripe: "Your Stripe account did not answer just now. Nothing was sent. Try again in a moment.",
+  switched_off: "Your store's pages and sales are switched off after notices about its content, so nothing was sent. You can tell your buyers once your store is back on.",
   role: "Your role on this store does not include sending email.",
   signed_out: "Your session ended. Log in again.",
 };

@@ -1,6 +1,9 @@
 import { MemoryRedis } from "@/lib/redis-memory";
 export const store = new MemoryRedis();
-export const isRedisConfigured = () => true;
+let configured = true;
+export const isRedisConfigured = () => configured;
+/** Only for a test of the "Redis not configured" branch; always put back to true in a finally. */
+export function setRedisConfigured(on: boolean): void { configured = on; }
 export const redisPipeline = (commands: (string | number)[][]) => store.pipeline(commands);
 /** Moves the test clock, for a cooldown that has to be outlasted. */
 export const advance = (ms: number) => store.advance(ms);

@@ -223,33 +223,193 @@ const brokenKey = async (email: string) =>
   `nl:auth:move-broken:${(await sha256Hex(`nimbus-auth-move-broken:${normaliseEmail(email)}`)).slice(0, 40)}`;
 
 /**
+ * Broken moves left open, all addresses together: every move holds a place among them from the moment its records
+ * are written (before anything moves) until they are cleared, finished, undone or repaired. With every place held, a
+ * new move writes nothing and is refused before anything moves (app/api/auth/move), so the records that have no
+ * expiry never grow past this many (#2271: Codex G's funding MEDIUM 6789950680, Claude 1's review 6800796209). Priced
+ * at the most in tests/plan-cost-registry.ts MOVES_MONTH_KEPT.
+ */
+export const MAX_OPEN_BROKEN_MOVES = 1_000;
+/** The tokens of the moves that hold a place, scored by when they took it (MARK_BROKEN_MOVE, CLEAR_BROKEN_MOVE). */
+const BROKEN_OPEN_KEY = "nl:auth:move-broken:open";
+
+/**
  * A move that could not be finished nor undone (app/api/auth/move): its two
  * addresses, written on both with no expiry until it is repaired
  * (lib/move-repair.ts). While it is there, both count as moving: nothing is
  * added to them, a second move waits, and a login without a second step is
- * refused (lib/signin-finish.ts and the recovery routes).
+ * refused (lib/signin-finish.ts and the recovery routes). Written, in one
+ * script (MARK_BROKEN_MOVE), only with a place among MAX_OPEN_BROKEN_MOVES
+ * taken for it: with none left, nothing is written and the answer is "full".
+ * A reply in any other shape throws UnknownReplyError.
  */
-export async function markBrokenMove(from: string, to: string): Promise<void> {
-  const value = JSON.stringify({ from: normaliseEmail(from), to: normaliseEmail(to), at: Date.now() });
-  await redisPipeline([
-    ["SET", await brokenKey(from), value],
-    ["SET", await brokenKey(to), value],
-  ]);
+export async function markBrokenMove(from: string, to: string): Promise<string | "full"> {
+  // A token made here for this move alone: what this move writes into the record later carries it, so nothing it
+  // writes late lands on another move's record, even of the same two addresses (noteMoveCopy; Codex H, #2271).
+  const op = randomToken();
+  const value = JSON.stringify({ from: normaliseEmail(from), to: normaliseEmail(to), at: Date.now(), op });
+  const replies = repliesFor(await redisPipeline([
+    ["EVAL", MARK_BROKEN_MOVE, 3, BROKEN_OPEN_KEY, await brokenKey(from), await brokenKey(to), op, value, MAX_OPEN_BROKEN_MOVES, Date.now()],
+  ]), 1);
+  if (!replies || (replies[0] !== 0 && replies[0] !== 1)) throw new UnknownReplyError("a broken move's place");
+  return replies[0] === 1 ? op : "full";
 }
 
-export async function readBrokenMove(email: string): Promise<{ from: string; to: string } | null> {
+/** Takes a place for ARGV[1] and writes ARGV[2] on KEYS[2] and KEYS[3], only below ARGV[3] places held: 1, or 0 and nothing. Modelled by lib/redis-memory.ts. */
+export const MARK_BROKEN_MOVE = `-- marktmorgen:move-broken-mark:v1
+if redis.call('ZCARD', KEYS[1]) >= tonumber(ARGV[3]) then return 0 end
+redis.call('SET', KEYS[2], ARGV[2])
+redis.call('SET', KEYS[3], ARGV[2])
+redis.call('ZADD', KEYS[1], ARGV[4], ARGV[1])
+return 1`;
+
+/**
+ * Deletes each record that is still the move ARGV[1] names (its `op`; "" for a record written before moves had one)
+ * and gives that move's place back: how many records went. A record of another move (one that replaced it, even of
+ * the same two addresses) is left whole, its place too (Codex X5 on #2271). Modelled by lib/redis-memory.ts.
+ */
+export const CLEAR_BROKEN_MOVE = `-- marktmorgen:move-broken-clear:v2
+local gone = 0
+for i = 2, #KEYS do
+  local held = redis.call('GET', KEYS[i])
+  if held then
+    local ok, record = pcall(cjson.decode, held)
+    if ok and type(record) == 'table' then
+      local op = record.op
+      if (type(op) == 'string' and op == ARGV[1]) or (op == nil and ARGV[1] == '') then
+        if type(op) == 'string' then redis.call('ZREM', KEYS[1], op) end
+        gone = gone + redis.call('DEL', KEYS[i])
+      end
+    end
+  end
+end
+return gone`;
+
+/**
+ * A broken move's record, read exactly (SG2 rule 24; Claude 5 on #2271): null only when there is none. A reply cut
+ * short or of another kind, or a record that does not read as one, throws UnknownReplyError, never "no broken move":
+ * a new move then never starts over a broken one (markMoving), nor writes over its record.
+ */
+export async function readBrokenMove(email: string): Promise<{ from: string; to: string; copy?: string; op?: string } | null> {
   if (!isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["GET", await brokenKey(email)]]);
+  const replies = repliesFor(await redisPipeline([["GET", await brokenKey(email)]]), 1);
+  if (!replies) throw new UnknownReplyError("a broken move's record");
+  const [raw] = replies;
+  if (raw === null) return null;
+  if (typeof raw !== "string") throw new UnknownReplyError("a broken move's record");
+  let value: { from?: unknown; to?: unknown; copy?: unknown; op?: unknown } | null;
   try {
-    const value = typeof raw === "string" ? (JSON.parse(raw) as { from?: unknown; to?: unknown }) : null;
-    return value && typeof value.from === "string" && typeof value.to === "string" ? { from: value.from, to: value.to } : null;
+    value = JSON.parse(raw) as { from?: unknown; to?: unknown; copy?: unknown; op?: unknown } | null;
   } catch {
-    return null;
+    throw new UnknownReplyError("a broken move's record");
   }
+  if (!value || typeof value !== "object" || typeof value.from !== "string" || typeof value.to !== "string") throw new UnknownReplyError("a broken move's record");
+  // The move's own token, which its clear names (clearBrokenMove); a record written before moves had one has none.
+  if (value.op !== undefined && typeof value.op !== "string") throw new UnknownReplyError("a broken move's record");
+  const op = typeof value.op === "string" ? { op: value.op } : {};
+  return typeof value.copy === "string" && /^[0-9a-f]{64}$/.test(value.copy) ? { from: value.from, to: value.to, copy: value.copy, ...op } : { from: value.from, to: value.to, ...op };
 }
 
-export async function clearBrokenMove(from: string, to: string): Promise<void> {
-  await redisPipeline([["DEL", await brokenKey(from), await brokenKey(to)]]);
+/**
+ * Moves of the sign-in address one store makes in a calendar month (UTC), counted by the store, never by the
+ * address, so moving from address to address finds no fresh count (Codex G2 and Claude 5 on #2271). Taken at the
+ * tap, before anything moves (takeMoveRoom).
+ */
+export const MOVES_PER_STORE_PER_MONTH = 10;
+/**
+ * Moves the company pays for in a calendar month (UTC) for stores with a running paid plan, all of them together.
+ * Kept apart from the others' (MOVES_PER_MONTH_UNPAID), so stores made for free can never use up the moves of the
+ * creators who pay, nor close the way out for someone losing their inbox (Claude 5's focal review of #2271).
+ */
+export const MOVES_PER_MONTH_PAID = 1_500;
+/** The same for every other store (no plan, in a trial, or a plan that ended), all of them together. */
+export const MOVES_PER_MONTH_UNPAID = 500;
+/**
+ * Moves the company pays for in a calendar month (UTC), all stores together: the ceiling of the move's own work,
+ * its EVAL (NOTE_MOVE_COPY) and the commands around it, taken before any of it (Claude 1's decision on #2271).
+ */
+export const MOVES_PER_MONTH = MOVES_PER_MONTH_PAID + MOVES_PER_MONTH_UNPAID;
+/** Kept past the end of any calendar month, so a count lapses only once its month is over. */
+const MOVE_ROOM_SECONDS = 32 * 86_400;
+
+/** What the month's counts say about one more move: room, the store's month is over, the company's is, or not known. */
+export type MoveRoom = "within" | "store" | "company" | "unknown";
+
+/**
+ * Takes one move of the month, before anything moves (the move route, before markMoving): first the store's own
+ * count, then, only within it, the company's for its kind of store (a running paid plan, or not), so a store past
+ * its count never spends the company's, and stores without a paid plan never spend the paying ones'. Each is one
+ * SET NX EX and one INCR, read in their exact shape; a reply in any other shape, or Redis not answering, is
+ * "unknown" and refuses the move (SG2 rule 24): a count is never guessed as room. A unit taken by a move that then
+ * fails stays taken, on the safe side. `store` is the store's own id and whether its plan is paid, or null when the
+ * address holds none, which takes only the others' company count: such a move finds nothing to carry.
+ */
+export async function takeMoveRoom(store: { id: string; paid: boolean } | null, now = Date.now()): Promise<MoveRoom> {
+  if (!isRedisConfigured()) return "unknown";
+  const month = new Date(now).toISOString().slice(0, 7);
+  if (!/^\d{4}-\d{2}$/.test(month)) return "unknown";
+  if (store !== null) {
+    const own = await countMove(`nl:auth:move-room:${month}:${(await sha256Hex(`nimbus-move-room:${store.id}`)).slice(0, 32)}`, MOVES_PER_STORE_PER_MONTH);
+    if (own !== "within") return own === "over" ? "store" : "unknown";
+  }
+  const paid = store?.paid === true;
+  const all = await countMove(`nl:auth:move-room:${month}:${paid ? "paid" : "unpaid"}`, paid ? MOVES_PER_MONTH_PAID : MOVES_PER_MONTH_UNPAID);
+  return all === "within" ? "within" : all === "over" ? "company" : "unknown";
+}
+
+async function countMove(key: string, limit: number): Promise<"within" | "over" | "unknown"> {
+  let replies: unknown[] | null;
+  try {
+    replies = repliesFor(await redisPipeline([["SET", key, "0", "EX", MOVE_ROOM_SECONDS, "NX"], ["INCR", key]]), 2);
+  } catch {
+    return "unknown";
+  }
+  if (!replies) return "unknown";
+  const [set, count] = replies;
+  if ((set !== null && set !== "OK") || typeof count !== "number" || !Number.isSafeInteger(count) || count < 1) return "unknown";
+  return count <= limit ? "within" : "over";
+}
+
+/**
+ * Notes, with a running move's record, the fingerprint of the store record it
+ * wrote at the new address (lib/store.ts copyPrint), just before the old one is
+ * taken away: a repair then deletes a copy left behind while it is still that,
+ * however the store changed since (review of #2140). Written, in one script
+ * (NOTE_MOVE_COPY), only over a record that still carries this move's own
+ * token (`op`, from markBrokenMove): a move cleared since, or replaced by
+ * another (of other addresses, or of the same two again), is never written
+ * over (Codex H, #2271: SET XX wrote over whatever record was there).
+ */
+export async function noteMoveCopy(from: string, to: string, copy: string, op: string): Promise<void> {
+  const value = JSON.stringify({ from: normaliseEmail(from), to: normaliseEmail(to), at: Date.now(), op, copy });
+  await redisPipeline([["EVAL", NOTE_MOVE_COPY, 2, await brokenKey(from), await brokenKey(to), op, value]]);
+}
+
+/** Writes ARGV[2] over each record whose `op` is ARGV[1], and nothing else. Answers how many. Modelled by lib/redis-memory.ts. */
+export const NOTE_MOVE_COPY = `-- marktmorgen:move-copy-note:v1
+local written = 0
+for i = 1, #KEYS do
+  local held = redis.call('GET', KEYS[i])
+  if held then
+    local ok, record = pcall(cjson.decode, held)
+    if ok and type(record) == 'table' and record.op == ARGV[1] then
+      redis.call('SET', KEYS[i], ARGV[2])
+      written = written + 1
+    end
+  end
+end
+return written`;
+
+/**
+ * Clears the records of the move `op` names (its token from markBrokenMove, or the `op` its record was read with;
+ * null for a record written before moves had one) and gives its place back (CLEAR_BROKEN_MOVE). A record of any
+ * other move is left alone, so a late clear never deletes the move that replaced it (Codex X5 on #2271). A reply in
+ * any other shape throws UnknownReplyError.
+ */
+export async function clearBrokenMove(from: string, to: string, op: string | null): Promise<void> {
+  const replies = repliesFor(await redisPipeline([["EVAL", CLEAR_BROKEN_MOVE, 3, BROKEN_OPEN_KEY, await brokenKey(from), await brokenKey(to), op ?? ""]]), 1);
+  const gone = replies ? countOf(replies[0]) : null;
+  if (gone === null || gone > 2) throw new UnknownReplyError("the clearing of a broken move");
 }
 
 /** An EXISTS reply read as a mark: only an exact 0 is "not there"; anything else counts as there (audit SG2, finding 22). */

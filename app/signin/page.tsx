@@ -88,7 +88,23 @@ const NOTICES: Record<string, { title: string; body: string; tone?: "success" }>
   },
   "move-error": {
     title: "The move did not finish",
-    body: "Nothing was changed. Log in and try again.",
+    body: "Nothing was changed. Log in and try again. A move that did not finish may still count toward the store's 10 address changes this month.",
+  },
+  // A store moves its sign-in address at most MOVES_PER_STORE_PER_MONTH times a calendar month, counted in UTC (lib/auth.ts takeMoveRoom; #2271).
+  "move-month": {
+    title: "This store has changed its sign-in address 10 times this month",
+    body: "A store can change its sign-in address 10 times a month. Your account was not moved, and it stays at its old address. You can move it again once the month is over: from midnight UTC (Coordinated Universal Time) on the 1st.",
+  },
+  // The company handles a set number of address changes a calendar month in UTC, paying stores apart from the others (#2271).
+  "move-paused": {
+    title: "Address changes are paused until next month",
+    body: "We handle a set number of address changes each month, and this month's are used up. Your account was not moved, and it stays at its old address. Try again from midnight UTC (Coordinated Universal Time) on the 1st.",
+  },
+  // Every place among the broken moves left open is held (lib/auth.ts MAX_OPEN_BROKEN_MOVES, #2271): one comes back
+  // as soon as a move is repaired, so no date is promised.
+  "move-held": {
+    title: "Address changes are on hold for now",
+    body: "Some earlier address changes are still being fixed, and we hold new ones until they are done. Your account was not moved, and it stays at its old address. Please try again later.",
   },
   "invite-expired": {
     title: "That invitation no longer works",

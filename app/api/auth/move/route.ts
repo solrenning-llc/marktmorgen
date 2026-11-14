@@ -8,13 +8,16 @@ import {
   endMoving,
   clearBrokenMove,
   markBrokenMove,
+  noteMoveCopy,
   markMoving,
   moveDevices,
   openSession,
   sessionCookie,
   spendMoveLink,
+  takeMoveRoom,
 } from "@/lib/auth";
-import { moveAccount, storeForEmail } from "@/lib/store";
+import { accountStoresExact, moveAccount, storeForEmail } from "@/lib/store";
+import { costStandingOf } from "@/lib/plan-standing";
 import { moveMemberships } from "@/lib/team";
 import { MoveSplitError, discardPasskeys, movePasskeys, pendingRemoval } from "@/lib/passkeys";
 import { holdsSecondStep } from "@/lib/second-step-gate";
@@ -66,6 +69,23 @@ export async function POST(request: NextRequest) {
   const { from, to } = moved;
   // A move left broken earlier is repaired first (lib/move-repair.ts); while it cannot be, nothing moves.
   if (!(await repairMove(from)) || !(await repairMove(to))) return away("/signin?status=move-error");
+  // One move of the month is taken before anything moves (lib/auth.ts takeMoveRoom): the store's own count, by its
+  // id, so moving from address to address finds no fresh one, then the company's. Past either, or a count or store
+  // that does not read, nothing moves and the move's own work, its EVAL included, is never done (#2271: Codex G2's
+  // MEDIUM, Claude 1's decision).
+  // Every store of the account, read exactly: a reply cut short is never "no store", which would skip the store's own
+  // count (Claude 5's LOW 3 on #2271).
+  const stores = await accountStoresExact(from).catch(() => undefined);
+  if (stores === undefined) return away("/signin?status=move-error");
+  const moving = stores.find((store) => !store.extra) ?? stores[0] ?? null;
+  // Paying stores count apart from the others, so stores made for free never close the way out for those who pay.
+  // Paying is the repo's "paid up" rule (costStandingOf: an unpaid renewal or a disputed plan is not), on any store of
+  // the account, an extra store's too (Claude 5's LOWs 1 and 2 on #2271).
+  const paid = stores.some((store) => costStandingOf(store) === "paid");
+  const room = await takeMoveRoom(moving ? { id: moving.sid, paid } : null);
+  if (room === "store") return away("/signin?status=move-month");
+  if (room === "company") return away("/signin?status=move-paused");
+  if (room !== "within") return away("/signin?status=move-error");
   // Both addresses are marked as moving for the whole move (lib/auth.ts markMoving): the ways in leave
   // `from` before the store does, and in that gap `from` counts as having a second step, so a session opened
   // only by the emailed link adds no passkey and no app to it (lib/second-step-gate.ts; review of 8b4ddf6ee).
@@ -77,14 +97,21 @@ export async function POST(request: NextRequest) {
   // address and its ways in on the other are never left with a login by the emailed link let in, and the
   // next login or move repairs it (lib/move-repair.ts, which waits while this move's mark is there).
   // Not written: nothing moves, and the 5-minute mark lapses on its own.
-  if (!(await markBrokenMove(from, to).then(() => true, () => false))) return away("/signin?status=move-error");
+  // Only with a place among the broken moves left open (lib/auth.ts MAX_OPEN_BROKEN_MOVES; #2271, Codex G's funding
+  // MEDIUM): with none, nothing was written, so the mark is taken off at once and nothing moves.
+  const op = await markBrokenMove(from, to).catch(() => null);
+  if (op === "full") {
+    await endMoving(from, to, mark).catch((error) => console.error("unmarking a move failed", error));
+    return away("/signin?status=move-held");
+  }
+  if (!op) return away("/signin?status=move-error");
   let broken = false;
   try {
-    return await finishMove(from, to, away, () => {
+    return await finishMove(from, to, op, away, () => {
       broken = true;
     });
   } finally {
-    const cleared = broken ? false : await clearBrokenMove(from, to).then(() => true, (error) => (console.error("clearing a move's record failed", error), false));
+    const cleared = broken ? false : await clearBrokenMove(from, to, op).then(() => true, (error) => (console.error("clearing a move's record failed", error), false));
     // Kept when the record could not be cleared either way: it holds the addresses until it is repaired.
     if (cleared || broken) await endMoving(from, to, mark).catch((error) => console.error("unmarking a move failed", error));
   }
@@ -110,7 +137,7 @@ async function step(what: string, work: () => Promise<unknown>): Promise<boolean
  * that cannot be done, or where the store is cannot be told, `broke` is
  * called and the move is kept marked until it is repaired.
  */
-async function finishMove(from: string, to: string, away: (path: string) => Response, broke: () => void): Promise<Response> {
+async function finishMove(from: string, to: string, op: string, away: (path: string) => Response, broke: () => void): Promise<Response> {
   let keysMoved = false;
   let appMoved = false;
   // A copy of two-step login that may have been left at `to` when moving it refused (lib/two-step.ts moveTwoStep).
@@ -156,7 +183,7 @@ async function finishMove(from: string, to: string, away: (path: string) => Resp
   // Whether every session both addresses had open was closed; never said as closed when it could not be read.
   let closed = true;
   try {
-    const result = await moveAccount(from, to);
+    const result = await moveAccount(from, to, (copy) => noteMoveCopy(from, to, copy, op));
     if (!result.ok) {
       await undo();
       return away(`/signin?status=move-${result.reason}`);

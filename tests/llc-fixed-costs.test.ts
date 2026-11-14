@@ -79,6 +79,17 @@ test("SD1 initial LLC formation cannot disappear from the complete company cost 
 });
 
 
+test("account moves: the owner's US$17 a month covers the bounded part only, so the line and the total stay unknown",()=>{
+ // Owner, 11/11/2026 11:32 Fortaleza: "Aprovar US$ 17/mês" for MOVES_MONTH_COST (held against it in tests/move-cost.test.ts).
+ assert.ok(LLC_FIXED_COST_IDS.includes("account-moves"));
+ assert.equal(allocateEntireLlcFixedCosts(fixture().filter(line=>line.id!=="account-moves")),null);
+ assert.deepEqual(sources.accountMoves.boundedPartApproval,{monthlyUsdCents:1700,covers:"tests/plan-cost-registry.ts MOVES_MONTH_COST",excludes:"tests/plan-cost-registry.ts MOVE_COST_UNKNOWNS",approvedBy:"owner",decided:"2026-11-11T11:32:00-03:00",decision:"Aprovar US$ 17/mês"});
+ assert.equal(sources.accountMoves.approvedCeiling,false);
+ const current=CURRENT_LLC_FIXED_COST_CEILINGS.find(line=>line.id==="account-moves")!;
+ assert.deepEqual([current.fullMonthlyUsdCents,current.fullAnnualUsdCents,current.reserveReviewed],[null,null,false]);
+ assert.equal(allocateEntireLlcFixedCosts(CURRENT_LLC_FIXED_COST_CEILINGS),null);
+});
+
 test("deployment and function artifact retention is an explicit unknown whole-LLC cost",()=>{
  assert.ok(LLC_FIXED_COST_IDS.includes("deployment-artifact-retention"));
  assert.equal(allocateEntireLlcFixedCosts(fixture().filter(line=>line.id!=="deployment-artifact-retention")),null);

@@ -2,7 +2,7 @@ import type { NextRequest } from "next/server";
 import { withinStore } from "@/lib/metered-limits";
 import { originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
-import { clientAddress, fromAnotherSite, limited } from "@/lib/request-guard";
+import { clientAddress, fromAnotherSite, limited, unknownLimit } from "@/lib/request-guard";
 import { isStorePeopleExact } from "@/lib/visit";
 import { ID_PATTERN, SHA_PATTERN, readSignedName } from "@/lib/agreement-rules";
 import { signAgreement } from "@/lib/agreement-store";
@@ -43,7 +43,9 @@ export async function POST(request: NextRequest) {
   if (store.suspended) return back("closed");
   // Ten tries a connection in ten minutes per store: far past one person signing, short of a script guessing.
   const ip = clientAddress(request);
-  if (!(await withinStore("agreement-sign", `${ip}|${store.handle}`, 10, 600, store, "buyer"))) return back("limited");
+  const room = await withinStore("agreement-sign", `${ip}|${store.handle}`, 10, 600, store, "buyer").catch(unknownLimit);
+  if (room === "unknown") return back("error");
+  if (!room) return back("limited");
   // The store's own people can't sign for the person it was sent to; not knowing whether this is them signs nothing (rule 24).
   let ownPeople: boolean;
   try {

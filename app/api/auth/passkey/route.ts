@@ -2,7 +2,7 @@ import type { NextRequest } from "next/server";
 import type { RegistrationResponseJSON } from "@simplewebauthn/server";
 import { SESSION_COOKIE, emailForSession, isFreshSession } from "@/lib/auth";
 import { isRedisConfigured } from "@/lib/redis";
-import { fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
+import { fromAnotherSite, limited, withinLimit, unknownLimit } from "@/lib/request-guard";
 import { RemovalBusyError, RemovalUnsentError, addPasskey, cancelRemoval, listPasskeys, registrationOptions, removePasskey, scheduleRemovalSaid } from "@/lib/passkeys";
 import { LockBusyError } from "@/lib/redis-lock";
 import { liveSecondStep, mayAddNow, mayAddSecondStep, mayKeepPasskey } from "@/lib/second-step-gate";
@@ -78,7 +78,9 @@ export async function POST(request: NextRequest) {
     return Response.json({ ok: false, error: "locked" }, { status: 403 });
   }
   if (body.action === "remove" && locked) {
-    if (!(await withinLimit("passkey-remove-locked", email, LOCKED_REMOVALS_PER_HOUR, 60 * 60))) {
+    const room = await withinLimit("passkey-remove-locked", email, LOCKED_REMOVALS_PER_HOUR, 60 * 60).catch(unknownLimit);
+    if (room === "unknown") return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+    if (!room) {
       return Response.json({ ok: false, error: "rate_limited" }, { status: 429 });
     }
     try {
@@ -88,7 +90,10 @@ export async function POST(request: NextRequest) {
       return failed(error, "asking for a passkey removal failed");
     }
   }
-  if (!(await withinLimit("passkey-change", email, CHANGES_PER_HOUR, 60 * 60))) {
+  const room = await withinLimit("passkey-change", email, CHANGES_PER_HOUR, 60 * 60).catch(unknownLimit);
+  // A count that could not be read is never "too many changes" (rule 24).
+  if (room === "unknown") return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+  if (!room) {
     return Response.json({ ok: false, error: "rate_limited" }, { status: 429 });
   }
 

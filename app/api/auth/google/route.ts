@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { originFrom } from "@/lib/request-origin";
-import { clientAddress, fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
+import { clientAddress, fromAnotherSite, limited, withinLimit, unknownLimit } from "@/lib/request-guard";
 import { beginGoogleSignIn, googleSignInOffered, startsAtSite } from "@/lib/google-signin";
 import { SITE_URL } from "@/lib/site-url";
 
@@ -19,7 +19,9 @@ export async function POST(request: NextRequest) {
   // Google sends people back only to the site's own address, where this browser's cookie has to be.
   if (!startsAtSite(origin)) return new Response(null, { status: 303, headers: { Location: `${SITE_URL}/signin`, "Cache-Control": "no-store" } });
   const back = (status: string) => new Response(null, { status: 303, headers: { Location: `${origin}/signin?status=${status}`, "Cache-Control": "no-store" } });
-  if (!(await withinLimit("google-signin", clientAddress(request), TRIES, 10 * 60))) return back("google-slow");
+  const room = await withinLimit("google-signin", clientAddress(request), TRIES, 10 * 60).catch(unknownLimit);
+  if (room === "unknown") return back("google-error");
+  if (!room) return back("google-slow");
 
   let handle: unknown = null;
   try {

@@ -3,7 +3,7 @@ import { type NextRequest, after } from "next/server";
 import { originFrom } from "@/lib/request-origin";
 import { dropReviewQuote, refreshStoreQuotes } from "@/lib/store-quotes";
 import { ensureStatsId, normaliseHandle, setReviewed, storeForHandle, storeRef } from "@/lib/store";
-import { clientAddress, fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
+import { clientAddress, fromAnotherSite, limited, withinLimit, unknownLimit } from "@/lib/request-guard";
 import { type Door, doorFields, openDoor, readDoor, reviewPagePath } from "@/lib/review-proof";
 import { MAX_REVIEW_PHOTO_BYTES, type ReviewPhoto, deleteReview, markOneRefunded, readRating, readReview, reviewId, saveReview, setReviewPhoto } from "@/lib/reviews";
 import { checkReviewPhoto, dropReviewPhoto, putReviewPhoto } from "@/lib/review-photo";
@@ -69,13 +69,17 @@ export async function POST(request: NextRequest) {
   // paid call and no try; the yes is checked like any other request.
   if (action === "delete" && read("confirm") !== "yes") return answer("confirmDelete", door, `r-${productId}-delete`);
 
-  if (!(await withinStore("review", `${clientAddress(request)}|${store.handle}`, IP_LIMIT, 3600, store))) return answer("slow");
+  const counted = await withinStore("review", `${clientAddress(request)}|${store.handle}`, IP_LIMIT, 3600, store).catch(unknownLimit);
+  if (counted === "unknown") return answer("error");
+  if (!counted) return answer("slow");
 
   const opened = await openDoor(store, door);
   if (opened.state !== "ok") return answer(opened.state === "error" ? "error" : opened.state);
   const proof = opened.proof;
   if (!proof.products.some((p) => p.id === productId)) return answer("no");
-  if (!(await withinLimit("review-order", proof.reference, ORDER_LIMIT, 3600))) return answer("slow");
+  const room = await withinLimit("review-order", proof.reference, ORDER_LIMIT, 3600).catch(unknownLimit);
+  if (room === "unknown") return answer("error");
+  if (!room) return answer("slow");
 
   if (!store.statsId) {
     // By the key the store is kept under: an account's other stores are not

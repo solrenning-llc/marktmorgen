@@ -82,6 +82,7 @@ const en = {
   searchNone: (q: string) => `Nothing here for “${q}”. Try another word, or see every product.`,
   searchClear: "Show every product",
   searchSlow: "Too many searches for now. Try again in a few minutes.",
+  searchUnread: "The search could not run just now. Try again in a moment.",
   /** The store's own questions and answers (lib/store-faq.ts). */
   storeFaqTitle: "Questions, answered",
 };
@@ -145,6 +146,7 @@ const es: BlockWords = {
   searchNone: (q) => `No hay nada para «${q}». Prueba con otra palabra o mira todos los productos.`,
   searchClear: "Ver todos los productos",
   searchSlow: "Demasiadas búsquedas por ahora. Inténtalo dentro de unos minutos.",
+  searchUnread: "La búsqueda no se pudo hacer ahora. Inténtalo de nuevo en un momento.",
   storeFaqTitle: "Preguntas y respuestas",
 };
 
@@ -205,6 +207,7 @@ const fr: BlockWords = {
   searchNone: (q) => `Rien ici pour « ${q} ». Essayez un autre mot, ou voyez tous les produits.`,
   searchClear: "Voir tous les produits",
   searchSlow: "Trop de recherches pour le moment. Réessayez dans quelques minutes.",
+  searchUnread: "La recherche n'a pas pu se faire pour le moment. Réessayez dans un instant.",
   storeFaqTitle: "Vos questions, nos réponses",
 };
 
@@ -265,6 +268,7 @@ const de: BlockWords = {
   searchNone: (q) => `Hier gibt es nichts zu „${q}“. Versuche ein anderes Wort oder sieh dir alle Produkte an.`,
   searchClear: "Alle Produkte zeigen",
   searchSlow: "Gerade zu viele Suchen. Versuche es in ein paar Minuten wieder.",
+  searchUnread: "Die Suche hat gerade nicht geklappt. Versuche es gleich noch einmal.",
   storeFaqTitle: "Fragen und Antworten",
 };
 
@@ -325,6 +329,7 @@ const it: BlockWords = {
   searchNone: (q) => `Niente qui per «${q}». Prova un'altra parola o guarda tutti i prodotti.`,
   searchClear: "Mostra tutti i prodotti",
   searchSlow: "Troppe ricerche per ora. Riprova tra qualche minuto.",
+  searchUnread: "La ricerca non è riuscita ora. Riprova tra un momento.",
   storeFaqTitle: "Domande e risposte",
 };
 
@@ -385,6 +390,7 @@ const nl: BlockWords = {
   searchNone: (q) => `Niets gevonden voor ‘${q}’. Probeer een ander woord, of bekijk alle producten.`,
   searchClear: "Alle producten tonen",
   searchSlow: "Even te veel zoekopdrachten. Probeer het over een paar minuten opnieuw.",
+  searchUnread: "Zoeken lukte nu even niet. Probeer het zo opnieuw.",
   storeFaqTitle: "Vragen en antwoorden",
 };
 
@@ -445,6 +451,7 @@ const pt: BlockWords = {
   searchNone: (q) => `Não há nada aqui para «${q}». Experimente outra palavra ou veja todos os produtos.`,
   searchClear: "Ver todos os produtos",
   searchSlow: "Demasiadas pesquisas por agora. Tente novamente dentro de alguns minutos.",
+  searchUnread: "Não foi possível pesquisar agora. Tente novamente daqui a pouco.",
   storeFaqTitle: "Perguntas e respostas",
 };
 

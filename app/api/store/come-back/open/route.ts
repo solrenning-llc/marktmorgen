@@ -5,7 +5,7 @@ import type { NextRequest } from "next/server";
 import { linkOrigin, originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { openWinBack } from "@/lib/winback-send";
-import { clientAddress, fromAnotherSite, limited } from "@/lib/request-guard";
+import { clientAddress, fromAnotherSite, limited, unknownLimit } from "@/lib/request-guard";
 
 const MAX_BODY_BYTES = 1_000;
 
@@ -39,7 +39,9 @@ export async function POST(request: NextRequest) {
   const page = `${origin}/@${store.handle}/renew/${product}`;
   const back = (status: string) =>
     new Response(null, { status: 303, headers: { Location: `${page}?back=${encodeURIComponent(token)}&status=${status}`, "Cache-Control": "no-store" } });
-  if (!(await withinStore("come-back", `${clientAddress(request)}|${store.handle}`, 20, 600, store))) return back("limited");
+  const room = await withinStore("come-back", `${clientAddress(request)}|${store.handle}`, 20, 600, store).catch(unknownLimit);
+  if (room === "unknown") return back("refused");
+  if (!room) return back("limited");
   const opened = await openWinBack(store, product, token, linkOrigin(request, store), consent);
   // The link could not be read just now (CX-123 rule 24): 503 with the store's words, never sent back as "expired".
   if (!opened.ok && opened.reason === "unknown") {

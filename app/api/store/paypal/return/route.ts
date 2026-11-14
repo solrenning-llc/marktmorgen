@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
-import { clientAddress, withinLimit } from "@/lib/request-guard";
+import { clientAddress, withinLimit, unknownLimit } from "@/lib/request-guard";
 import { captureOrder } from "@/lib/paypal-sales";
 import { handOverPayPal } from "@/lib/paypal-delivery";
 
@@ -19,7 +19,9 @@ export async function GET(request: NextRequest) {
   if (!handle) return away("/");
   const store = await storeForHandle(handle);
   if (!store) return away("/");
-  if (!(await withinLimit("paypal-return", `${clientAddress(request)}|${store.handle}`, 30, 600))) return away(`/@${store.handle}?status=slow`);
+  const room = await withinLimit("paypal-return", `${clientAddress(request)}|${store.handle}`, 30, 600).catch(unknownLimit);
+  if (room === "unknown") return away(`/@${store.handle}?status=error`);
+  if (!room) return away(`/@${store.handle}?status=slow`);
   const result = await captureOrder(store, order);
   if (result.ok) {
     if (result.fresh) await handOverPayPal(store, result.paid).catch((error) => console.error("handing over a PayPal purchase failed", error));

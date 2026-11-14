@@ -5,7 +5,7 @@ import { finishSearchConsole, isSearchConsoleState } from "@/lib/search-console"
 import { originFrom } from "@/lib/request-origin";
 import { GOOGLE_STATE_COOKIE, clearGoogleStateCookie, finishGoogleSignIn, isGoogleSignInState, readGoogleStateCookie } from "@/lib/google-signin";
 import { finishProvenSignIn } from "@/lib/signin-finish";
-import { clientAddress, withinLimit } from "@/lib/request-guard";
+import { clientAddress, withinLimit, unknownLimit } from "@/lib/request-guard";
 import { withPrefill } from "@/lib/handle-prefill";
 
 /**
@@ -39,7 +39,9 @@ async function googleSignIn(request: NextRequest, state: string): Promise<Respon
     response.headers.append("Set-Cookie", clearGoogleStateCookie());
     return response;
   };
-  if (!(await withinLimit("google-signin-back", clientAddress(request), TRIES, 10 * 60))) return back("google-slow");
+  const room = await withinLimit("google-signin-back", clientAddress(request), TRIES, 10 * 60).catch(unknownLimit);
+  if (room === "unknown") return back("google-error");
+  if (!room) return back("google-slow");
   const result = await finishGoogleSignIn(
     state,
     kept.state,

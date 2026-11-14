@@ -14,7 +14,7 @@ import { bundleChoices, choicePage, choiceQuery } from "@/lib/bundle-choices";
 import { MAX_BUNDLE_ITEMS, bundleOwnerProblem, itemsProblem, parsePick, pickProblem } from "@/lib/bundle-rules";
 import { jsonAccess } from "@/lib/studio-route";
 import { guardStoreWrite, text } from "@/lib/store-request";
-import { withinLimit } from "@/lib/request-guard";
+import { withinLimit, unknownLimit } from "@/lib/request-guard";
 
 /**
  * The products a bundle can be made of, found by name, a page at a time: the
@@ -27,7 +27,10 @@ export async function GET(request: NextRequest) {
   const access = await jsonAccess(request, "products");
   if (access instanceof Response) return access;
   // Every page reads the store's cards; a person typing is far below this.
-  if (!(await withinLimit("bundle-picker", access.store.sid || access.ref, 240, 600))) {
+  const room = await withinLimit("bundle-picker", access.store.sid || access.ref, 240, 600).catch(unknownLimit);
+  // A count that could not be read is never "slow" (rule 24).
+  if (room === "unknown") return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+  if (!room) {
     return Response.json({ ok: false, error: "slow" }, { status: 429 });
   }
   const params = request.nextUrl.searchParams;

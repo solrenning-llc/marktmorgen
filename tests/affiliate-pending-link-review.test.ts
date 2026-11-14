@@ -159,7 +159,7 @@ async function main(): Promise<void> {
   const pp = { store: "oven", order: "PPORDERPREREV1", capture: "CAPPREREV1", email: "pp@example.com", product: "prod01", cents: 4_000, currency: "USD", at: NOW - 60, handle: "oven", meta: { [VIA_PENDING_META]: pend } };
   await real([["SET", `nl:ppsell:paid:${pp.order}`, JSON.stringify(pp)]]);
   await breakCodes();
-  await creditPayPalSale(store, pp, "Sourdough course", send);
+  await creditPayPalSale(store, pp, "Sourdough course", true, send);
   await mendCodes();
   await setAffiliateSetting(OWNER, parseAffiliateSetting({ ...store.affiliates, enabled: false }));
   store = (await storeForEmail(OWNER))!;

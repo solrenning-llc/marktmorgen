@@ -223,7 +223,7 @@ async function main(): Promise<void> {
     if (commands.some((c) => (c[0] === "SET" || c[0] === "GET") && String(c[1]).startsWith(`nl:aff:pend:${statsId}:paypal:`))) throw new Error("synthetic: the mark does not answer");
     return real.call(redis, commands);
   }) as typeof redis.pipeline;
-  await creditPayPalSale(store, pp, "Sourdough course", send).catch(() => undefined);
+  await creditPayPalSale(store, pp, "Sourdough course", true, send).catch(() => undefined);
   redis.pipeline = real;
   await mendCodes();
   const [ppScore] = await redis.pipeline([["ZSCORE", `nl:aff:pend:pp:${statsId}`, pp.order]]);

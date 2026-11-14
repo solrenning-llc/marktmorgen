@@ -298,7 +298,7 @@ async function main(): Promise<void> {
   const p2 = paid("PPORDER0000002", { [VIA_PENDING_META]: `ana.${NOW - 600}~ana.${NOW - 600}~-~0;prod01=30` });
   await real([["SET", `nl:ppsell:paid:${p2.order}`, JSON.stringify(p2)]]);
   odd = weirdCodes;
-  await creditPayPalSale(store, p2, "Sourdough course", send);
+  await creditPayPalSale(store, p2, "Sourdough course", true, send);
   // Regra 23 (pre-review MÉDIO 3): was null; "seen:0" now marks that it was read at its hand-over.
   is("one still unknown at its hand-over is not credited, and waits", [(await sales()).has("paypal:PPORDER0000002"), await mark("paypal:PPORDER0000002")], [false, "seen:0"]);
   await notePayPalPendings(sellsPayPal(), NOW + 300, send);
@@ -309,7 +309,7 @@ async function main(): Promise<void> {
   const p3 = paid("PPORDER0000003", { [VIA_PENDING_META]: `ana.${NOW - 600}~ana.${NOW - 600}~-~0;prod01=30` });
   await real([["SET", `nl:ppsell:paid:${p3.order}`, JSON.stringify(p3)]]);
   odd = weirdCodes;
-  await creditPayPalSale(store, p3, "Sourdough course", send);
+  await creditPayPalSale(store, p3, "Sourdough course", true, send);
   answer = "refused";
   sends = 0;
   await notePayPalPendings(sellsPayPal(), NOW + PENDING_LINK_SECONDS, send);

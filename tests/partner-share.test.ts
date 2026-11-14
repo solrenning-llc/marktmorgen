@@ -202,7 +202,9 @@ test("a partner never earns on their own purchase", () => {
   const at = aff.indexOf("export async function notePartners");
   assert.ok(at > 0, "notePartners should exist");
   const body = aff.slice(at, aff.indexOf("async function isSelf"));
-  assert.match(body, /self: Boolean\(buyer\) && normaliseEmail\(partner\.email\) === buyer/);
+  // As one inbox however it is written (tests/partner-share-own-purchase.test.ts runs it).
+  assert.match(body, /const buyer = sale\.buyer \? canonicalEmail\(sale\.buyer\) : "";/);
+  assert.match(body, /self: Boolean\(buyer\) && canonicalEmail\(partner\.email\) === buyer/);
 });
 
 test("a share is written for every sale, not only the referred ones", () => {
@@ -212,7 +214,7 @@ test("a share is written for every sale, not only the referred ones", () => {
   const at = aff.indexOf("export async function noteSession");
   const body = aff.slice(at, aff.indexOf("export async function noteCharge"));
   const partners = body.indexOf("notePartners");
-  const bails = body.indexOf("if (!found) return;");
+  const bails = body.indexOf("if (!found) return settle();");
   assert.ok(partners > 0 && bails > 0, "both should be in noteSession");
   assert.ok(partners < bails, "the partner lines must be written before any path that gives up on finding an affiliate");
 
@@ -224,7 +226,7 @@ test("a sale already made keeps the share it was made at", () => {
   const aff = readFileSync(join(process.cwd(), "lib/affiliates.ts"), "utf8");
   const at = aff.indexOf("export async function notePartners");
   const body = aff.slice(at, aff.indexOf("async function isSelf"));
-  assert.match(body, /percent: shareOn\(partner\.share, sale\.product\)/, "the percentage is frozen onto the line");
+  assert.match(body, /percent: shareOn\(partner\.share, theirs\[0\]\.product\)/, "the percentage is frozen onto the line");
   assert.match(
     aff,
     /Shares already earned are untouched by a change here/,

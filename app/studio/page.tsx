@@ -1,7 +1,7 @@
 import { serviceAllowanceWords } from "@/lib/store-allowance";
 import { placeLine } from "@/lib/call-place";
 import { planAboveSold } from "@/lib/larger-plan";
-import { SalesLevers } from "@/components/sales-levers";
+import { SalesLevers, addOnFact } from "@/components/sales-levers";
 import { costsPaused } from "@/lib/plan-standing";
 import { INTEGRATION_PAUSED_WORDS, META_READ_PAUSED } from "@/lib/integration-pause";
 import { PlanDisputeNotice } from "@/components/plan-dispute-notice";
@@ -1619,7 +1619,7 @@ export default async function StudioPage({
               {may("settings") ? <OldAddresses handles={store.previousHandles} /> : null}
             </div>
 
-            {may("stats") ? <SalesLevers store={store} reading={salesRead?.state === "ok" ? salesRead.value?.levers ?? null : null} canConfigure={may("products") && may("settings")} /> : null}
+            {may("stats") ? <SalesLevers store={store} reading={salesRead?.state === "ok" ? salesRead.value?.levers ?? null : null} canConfigure={may("products") && may("settings")} role={role} addOn={addOnFact(store.assistantPlan)} /> : null}
             {numbers ? (
               <div id="numbers" className="scroll-mt-32">
                 {trouble.week > 0 && trouble.last ? (

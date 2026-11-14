@@ -109,7 +109,7 @@ export function GoesWellWith({
               ) : null}
               <span className="min-w-0 flex-1">
                 <span className="block font-semibold">{product.title}</span>
-                {product.summary ? <span className="st-muted mt-0.5 block truncate text-sm">{product.summary}</span> : null}
+                {product.summary ? <span className="st-muted mt-0.5 block break-words text-sm">{product.summary}</span> : null}
               </span>
               <span className="st-price shrink-0 text-sm">
                 <PriceTag store={store} product={product} />

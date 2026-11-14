@@ -5,8 +5,9 @@
  *
  *   - a one-click offer whose affiliate cannot be read is not charged at all,
  *     rather than charged without the affiliate's share on it;
- *   - an offer's once-only claim (SET NX) is ours on "OK", or read back holding
- *     its own value; another press's on null; a claim that landed is never stuck;
+ *   - an offer's once-only claim already held (null) charges nothing and says done
+ *     (the claim's other replies are held on main by upsell-claim-exact and
+ *     upsell-orphan-claim);
  *   - the five-minute job keeps an offer waiting on Stripe on its list while
  *     its record cannot be read; a record that is gone still lets it go;
  *   - the Stripe watch keeps a store whose webhook settings cannot be read; a
@@ -21,7 +22,7 @@ import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import { TEST_CONSENT } from "./digital-consent-fixture";
 import { addProduct, claimHandle, ensureStatsId, setProductFunnel, setProductLink, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
-import { newUpsellKey, readUpsell, settlePendingOffers, takeUpsell } from "@/lib/upsell";
+import { newUpsellKey, settlePendingOffers, takeUpsell } from "@/lib/upsell";
 import { QUEUE_KEY, deliverDue, emitEvent, setSendHooksForTests, watchStripe } from "@/lib/webhooks";
 import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
@@ -166,77 +167,6 @@ for (const [label, reply] of [
 }
 
 const isClaim = (session: string) => (cmd: Cmd) => cmd[0] === "SET" && cmd[1] === `nl:upsell:${session}` && cmd.includes("NX");
-
-const yes = (store: Store, session: string, secret: string) =>
-  takeUpsell({ store, session, secret, origin: "https://marktmorgen.com", step: STEP, answer: "yes", consent: TEST_CONSENT });
-const outcomeOf = (work: Promise<{ kind: string }>) => work.then((result) => result.kind, () => "threw");
-
-// Revisor 1 on #2897: a claim that landed with its reply lost is ours. It is read back by its own value
-// (lib/claim-mark.ts), never taken for another press, which would leave the offer pending with nothing charged.
-for (const [label, reply] of [["undefined", undefined], ["a short pipeline", "short"], ["an object", {}], ["a number", 1]] as [string, unknown][]) {
-  test(`an offer's once-only claim that landed, answering ${label}, is ours: charged once, never stuck`, async () => {
-    const { front, plain, browser } = await world;
-    const session = nextSession();
-    sessions[session] = paidCheckout(session, front, browser.fingerprint);
-    const before = charges.length;
-    const first = await withReply(isClaim(session), reply, () => outcomeOf(yes(plain, session, browser.secret)));
-    const second = await outcomeOf(yes(plain, session, browser.secret));
-    assert.deepEqual({ first, second, charged: charges.length - before }, { first: "done", second: "done", charged: 1 });
-    assert.equal((await readUpsell(session, ""))?.state, "paid");
-  });
-}
-
-test("an offer's claim whose reply and read-back are both unknown charges nothing, and a retry charges once", async () => {
-  const { front, plain, browser } = await world;
-  const session = nextSession();
-  sessions[session] = paidCheckout(session, front, browser.fingerprint);
-  const before = charges.length;
-  const readBack = (cmd: Cmd) => cmd[0] === "GET" && cmd[1] === `nl:upsell:${session}`;
-  redis.pipeline = (async (commands: Cmd[]) => {
-    const out = await original(commands);
-    if (commands.length === 1 && (isClaim(session)(commands[0]) || readBack(commands[0]))) return [{}];
-    return out;
-  }) as typeof redis.pipeline;
-  let first: string;
-  try {
-    first = await outcomeOf(yes(plain, session, browser.secret));
-  } finally {
-    redis.pipeline = original;
-  }
-  assert.deepEqual({ first, charged: charges.length - before }, { first: "threw", charged: 0 });
-  const second = await outcomeOf(yes(plain, session, browser.secret));
-  assert.deepEqual({ second, charged: charges.length - before }, { second: "done", charged: 1 });
-});
-
-// A write after the claim was won fails (Claude 5 on #2897, MEDIUM 1): the claim is let go, so the "try again"
-// the buyer is told is true; the retry claims it again and charges once. Both a write that never landed and one that
-// landed with its reply lost are covered. Nothing is charged before the retry.
-for (const [label, landed] of [["never landed", false], ["landed, its reply lost", true]] as [string, boolean][]) {
-  test(`an offer whose record write after the claim ${label} is let go, and a retry charges once`, async () => {
-    const { front, plain, browser } = await world;
-    const session = nextSession();
-    sessions[session] = paidCheckout(session, front, browser.fingerprint);
-    const before = charges.length;
-    let failed = false;
-    redis.pipeline = (async (commands: Cmd[]) => {
-      const write = commands.length === 1 && commands[0][0] === "SET" && commands[0][1] === `nl:upsell:${session}` && !commands[0].includes("NX");
-      if (!write || failed) return original(commands);
-      failed = true;
-      if (landed) await original(commands);
-      throw new Error("Redis could not be reached");
-    }) as typeof redis.pipeline;
-    let first: string;
-    try {
-      first = await outcomeOf(yes(plain, session, browser.secret));
-    } finally {
-      redis.pipeline = original;
-    }
-    assert.equal(failed, true, "the record write after the claim was reached");
-    assert.deepEqual({ first, charged: charges.length - before }, { first: "threw", charged: 0 });
-    const second = await outcomeOf(yes(plain, session, browser.secret));
-    assert.deepEqual({ second, charged: charges.length - before, state: (await readUpsell(session))?.state }, { second: "done", charged: 1, state: "paid" });
-  });
-}
 
 test("an offer's once-only claim already held (null) charges nothing and says done (confirmed control)", async () => {
   const { front, plain, browser } = await world;

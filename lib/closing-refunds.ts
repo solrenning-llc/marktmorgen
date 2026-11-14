@@ -453,9 +453,10 @@ export async function giveBackUnused(
           // final and goes the same way as one not made automatically (Revisor 1 on #2699): the member is told
           // honestly, with what is left to give and the creator's contact, and the closing can finish.
           if (options.final) {
-            const amount = stillToGive(row.unused, row.paid.back ?? 0);
-            await settle("over", amount);
-            out.unmade.push({ sub: row.sub, amount, cur: row.paid.cur, email: row.paid.e });
+            // What is left is what was just tried: the unused part less every refund the charge already carries,
+            // the creator's own included, never the unused part less only what this closing gave back.
+            await settle("over", give);
+            out.unmade.push({ sub: row.sub, amount: give, cur: row.paid.cur, email: row.paid.e });
           } else {
             console.error("a closing refund was refused by Stripe; the member stays to be reconciled");
             out.failed += 1;

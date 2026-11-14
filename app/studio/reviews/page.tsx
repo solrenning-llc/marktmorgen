@@ -6,6 +6,7 @@ import { productIds, readListings } from "@/lib/catalog";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { can } from "@/lib/team-roles";
 import { StudioHeader } from "@/components/studio-header";
+import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { canWrite } from "@/lib/mail";
 import { HIDDEN_RULE, OVERVIEW_READ_MAX, type StudioRow, averageText, reviewsSince, showsRating, studioReviews, summaries } from "@/lib/reviews";
@@ -121,7 +122,7 @@ export default async function StudioReviewsPage({ searchParams }: Params) {
       />
       <StudioStorePin sid={store.sid}>
       <main id="content" className="container-page pb-20 pt-10 sm:pt-14">
-        <p className="eyebrow">Reviews</p>
+        <StudioTrail store={store} here="Reviews" />
         <h1 className="t-h2 mt-3">What your buyers say</h1>
         <p className="mt-3 max-w-2xl text-ink-soft">
           Only people who paid can review, from their thank-you page, their list of purchases or the email that asks. Each

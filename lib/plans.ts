@@ -49,12 +49,23 @@ export function addPeriods(anchorSeconds: number, interval: Interval, n: number)
   return Math.floor(target.getTime() / 1000);
 }
 
-export type PlanState = "done" | "open" | "gone";
+export type PlanState = "done" | "open" | "gone" | "unread";
+
+/**
+ * A Stripe reply decides only when it is the object asked for (rule 30): it
+ * holds its own id, equal to the one requested. A reply for another object,
+ * or with no id, proves nothing about this plan. A reply that is not an
+ * object at all (a JSON null, a string, a number) is not its own either: it
+ * answers "unread", never a TypeError (Claude 6 on #3098).
+ */
+const isOwnReply = (reply: unknown, id: string): boolean =>
+  reply !== null && typeof reply === "object" && Object.hasOwn(reply, "id") && (reply as { id?: unknown }).id === id;
 
 /**
  * Gives a paid plan, or a membership that ends by itself, its end. "open"
  * means the checkout can still be paid; "gone" means it never will be, or is
- * neither.
+ * neither; "unread" means Stripe answered for something other than what was
+ * asked, so nothing is known and the plan stays pending for the next pass.
  */
 export async function finishPlan(account: string, session: string): Promise<PlanState> {
   if (!ACCOUNT_ID.test(account) || !SESSION_ID.test(session)) return "gone";
@@ -65,9 +76,7 @@ export async function finishPlan(account: string, session: string): Promise<Plan
     if (error instanceof StripeError && error.status === 404) return "gone";
     throw error;
   }
-  // A 200 that is not the checkout asked for (an empty object, another one) is unknown, never "nothing to do": the
-  // plan stays pending and the next run asks again (outage drill, 13 November 2026).
-  if (view.id !== session || (view.object !== undefined && view.object !== "checkout.session")) throw new Error("Stripe answered a checkout that is not the one asked for");
+  if (!isOwnReply(view, session)) return "unread";
   const meta = (view.metadata ?? {}) as Record<string, string>;
   const isPlan = meta.kind === "plan";
   if (!isPlan && !meta.ends_after) return "gone";
@@ -75,9 +84,8 @@ export async function finishPlan(account: string, session: string): Promise<Plan
   if (view.status !== "complete" || typeof view.subscription !== "string") return "gone";
 
   const subscription = await onAccount("GET", account, `/subscriptions/${encodeURIComponent(view.subscription)}`);
-  if (subscription.id !== view.subscription || (subscription.object !== undefined && subscription.object !== "subscription")) {
-    throw new Error("Stripe answered a subscription that is not the one asked for");
-  }
+  // Read before cancel_at or status: another subscription's end is not this plan's.
+  if (!isOwnReply(subscription, view.subscription)) return "unread";
   if (typeof subscription.cancel_at === "number" && subscription.cancel_at > 0) return "done";
   if (subscription.status === "canceled") return "done";
   const payments = Number(isPlan ? meta.plan_payments : meta.ends_after);
@@ -89,17 +97,18 @@ export async function finishPlan(account: string, session: string): Promise<Plan
   const cycle = typeof subscription.billing_cycle_anchor === "number" ? subscription.billing_cycle_anchor : 0;
   const trialEnd = typeof subscription.trial_end === "number" ? subscription.trial_end : 0;
   const anchor = Math.max(cycle, trialEnd);
-  if (!Number.isInteger(payments) || payments < 2) return "gone";
-  // Every subscription has its cycle's anchor: one read without it cannot say when the plan ends.
-  if (!anchor) throw new Error("Stripe answered a subscription without its billing anchor");
+  if (!Number.isInteger(payments) || payments < 2 || !anchor) return "gone";
 
-  await onAccount(
+  const cancelAt = addPeriods(anchor, interval, payments);
+  const updated = await onAccount(
     "POST",
     account,
     `/subscriptions/${encodeURIComponent(view.subscription)}`,
-    new URLSearchParams({ cancel_at: String(addPeriods(anchor, interval, payments)), proration_behavior: "none" }),
+    new URLSearchParams({ cancel_at: String(cancelAt), proration_behavior: "none" }),
   );
-  return "done";
+  // Settled only on the subscription's own answer carrying the end just set (Codex S on #3086: the id alone does
+  // not prove the end was written); otherwise the next pass reads it again and finds the end in place, or sets it.
+  return isOwnReply(updated, view.subscription) && updated.cancel_at === cancelAt ? "done" : "unread";
 }
 
 /**
@@ -118,6 +127,11 @@ export async function settlePlans(limit = 200): Promise<{ done: number; open: nu
       const state = await finishPlan(account, session);
       if (state === "open" && now - Number(opened) < 2 * 86400) {
         counts.open += 1;
+        continue;
+      }
+      // Kept for the job's next run, never settled on a reply that was not its own.
+      if (state === "unread") {
+        counts.failed += 1;
         continue;
       }
       if (state === "done") counts.done += 1;

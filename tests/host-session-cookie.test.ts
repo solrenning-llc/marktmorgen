@@ -6,6 +6,8 @@
  * The code that reads the session goes on reading nl_session: the proxy hands it the right value (lib/
  * session-cookie.ts, carrySessionCookie). Over plain http (a laptop running the site) the name is unchanged.
  */
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
 import { NextRequest } from "next/server";
 import { proxy } from "@/proxy";
 import { HOST_SESSION_COOKIE, LEGACY_SESSION_COOKIE_UNTIL, SESSION_COOKIE, carrySessionCookie, clearedSessionCookies, sessionCookieName } from "@/lib/session-cookie";
@@ -42,6 +44,16 @@ async function main(): Promise<void> {
   is("only the old one, from the date on: not read", forwardedSession(late.headers), []);
   is("over http nothing changes", carrySessionCookie(`${SESSION_COOKIE}=${B}`, false, AFTER), { headers: null, setCookies: [] });
   is("no session cookie at all: nothing changes", carrySessionCookie("other=1", true, BEFORE), { headers: null, setCookies: [] });
+
+  part("Nobody reads the new name but lib/session-cookie.ts");
+  const files = (dir: string): string[] => readdirSync(dir).flatMap((name) => {
+    const path = join(dir, name);
+    return statSync(path).isDirectory() ? files(path) : /\.(ts|tsx)$/.test(name) ? [path] : [];
+  });
+  const readers = ["app", "lib", "components"].flatMap(files).concat("proxy.ts").filter((path) => path !== join("lib", "session-cookie.ts") && /["'`]__Host-nl_session/.test(readFileSync(path, "utf8")));
+  is("the code reads SESSION_COOKIE, handed on by the proxy, never the cookie's own name", readers, []);
+  const sessionReaders = ["app", "lib", "components"].flatMap(files).filter((path) => /cookies(\(\))?\.get\(SESSION_COOKIE\)|\.get\(SESSION_COOKIE\)/.test(readFileSync(path, "utf8")));
+  is("(the readers of the session are many, all by SESSION_COOKIE)", sessionReaders.length > 20, true);
 
   part("Through the proxy");
   const page = await proxy(new NextRequest("https://marktmorgen.com/studio", { headers: { host: "marktmorgen.com", cookie: `${SESSION_COOKIE}=${B}` } }));

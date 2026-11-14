@@ -41,8 +41,8 @@ export async function POST(request: NextRequest) {
     try {
       const sent = await sendRescue(held, linkOrigin(request));
       return sent === "expired" ? away("/signin?status=expired") : away(`/signin/code?status=rescue-${sent}`);
-    } catch (error) {
-      console.error("sending a recovery-address link failed", error);
+    } catch {
+      console.error("sending a recovery-address link failed");
       return away("/signin/code?status=rescue-unsent");
     }
   }
@@ -59,7 +59,7 @@ export async function POST(request: NextRequest) {
       response.headers.append("Set-Cookie", await noteSignIn(entered.email, request.cookies.get(DEVICE_COOKIE)?.value, "link", request.headers.get("user-agent") ?? ""));
       return response;
     } catch (error) {
-      console.error("letting somebody in without two-step login failed", error);
+      console.error("letting somebody in without two-step login failed");
       // Not read (CX-123 rule 24): nothing was written and nobody was let in. Said in words of its own, since this
       // person asked to come in without the app and typed no code (Claude 5 on #2896, LIGHT 3).
       return away(`/signin/code?status=${error instanceof UnknownReplyError ? "reset-unknown" : "wrong"}`);
@@ -69,7 +69,7 @@ export async function POST(request: NextRequest) {
   try {
     answer = await finishSignIn(held, code);
   } catch (error) {
-    console.error("checking a two-step code failed", error);
+    console.error("checking a two-step code failed");
     // Not read (CX-123 rule 24): the code was not judged, so it is not called wrong.
     return away(`/signin/code?status=${error instanceof UnknownReplyError ? "unknown" : "wrong"}`);
   }
@@ -84,8 +84,8 @@ export async function POST(request: NextRequest) {
     // Turned off between the code's check and this session: turning it off closes what it opened
     // (lib/auth.ts dropSecondStep), so this one is closed too, and the person logs in again.
     // Unreadable (CX-123 rule 24): not known still on, so the session is closed too, and the person is told so.
-    const stillOn = await twoStepOn(answer.email).catch((error: unknown) => {
-      console.error("reading two-step login after a right code failed", error);
+    const stillOn = await twoStepOn(answer.email).catch(() => {
+      console.error("reading two-step login after a right code failed");
       return null;
     });
     if (stillOn !== true) {
@@ -95,18 +95,18 @@ export async function POST(request: NextRequest) {
     const previous = request.cookies.get(SESSION_COOKIE)?.value;
     if (previous && previous !== sessionId) await endSession(previous);
     // A passkey removal whose days are over is applied at every login; none is called off by one (lib/passkeys.ts).
-    await pendingRemoval(answer.email).catch((error) => console.error("applying a passkey removal failed", error));
+    await pendingRemoval(answer.email).catch(() => console.error("applying a passkey removal failed"));
     const response = away("/studio");
     response.headers.append("Set-Cookie", sessionCookie(sessionId));
     response.headers.append("Set-Cookie", noWait);
     response.headers.append("Set-Cookie", await noteSignIn(answer.email, request.cookies.get(DEVICE_COOKIE)?.value, answer.byGoogle ? "google" : "link", request.headers.get("user-agent") ?? ""));
     return response;
-  } catch (error) {
-    console.error("logging in after a right code failed", error);
+  } catch {
+    console.error("logging in after a right code failed");
     // The code and the wait are spent, but no session could be confirmed (CX-123 rule 24): nothing is handed out
     // (one opened before the failure is closed), the spent wait's cookie goes, and the person logs in again with a
     // fresh link and the app's next code (/signin login-unknown), never an error page.
-    if (sessionId) await endSession(sessionId).catch((end: unknown) => console.error("closing a login that could not be finished failed", end));
+    if (sessionId) await endSession(sessionId).catch(() => console.error("closing a login that could not be finished failed"));
     const response = away("/signin?status=login-unknown");
     response.headers.append("Set-Cookie", noWait);
     return response;

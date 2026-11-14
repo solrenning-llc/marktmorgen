@@ -71,16 +71,16 @@ export async function POST(request: NextRequest) {
     signedInAs = previous ? await emailForSession(previous) : null;
     if (signedInAs && normaliseEmail(signedInAs) !== invite.email) return away("/signin?status=invite-other");
     existing = !signedInAs && (await hasAccount(invite.email));
-  } catch (error) {
-    console.error("reading an invitation failed", error);
+  } catch {
+    console.error("reading an invitation failed");
     return away("/signin?status=invite-error");
   }
 
   let joined;
   try {
     joined = await spendInvite(token);
-  } catch (error) {
-    console.error("taking an invitation failed", error);
+  } catch {
+    console.error("taking an invitation failed");
     return away("/signin?status=invite-error");
   }
   if (!joined.ok) return away(`/signin?status=invite-${joined.reason}`);
@@ -92,7 +92,7 @@ export async function POST(request: NextRequest) {
   try {
     after(tell);
   } catch {
-    void tell().catch((error: unknown) => console.error("telling the owner about a new teammate failed", error));
+    void tell().catch(() => console.error("telling the owner about a new teammate failed"));
   }
 
   // Already logged in as this address: nothing about the session changes.
@@ -108,8 +108,8 @@ export async function POST(request: NextRequest) {
   try {
     if (previous) await endSession(previous);
     sessionId = await openSession(member.email);
-  } catch (error) {
-    console.error("logging in after an invitation failed", error);
+  } catch {
+    console.error("logging in after an invitation failed");
     return away("/signin?status=invite-error");
   }
 

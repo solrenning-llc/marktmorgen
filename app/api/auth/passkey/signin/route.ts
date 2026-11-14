@@ -57,7 +57,7 @@ export async function POST(request: NextRequest) {
       // A move left broken is repaired before any session opens, as at every other login (lib/move-repair.ts):
       // nobody gets into a copy of the store the repair is about to settle. When the repair moved this passkey
       // to the address that holds the store, the person is asked to try again, and lands there.
-      await repairMove(email).catch((error) => console.error("repairing a broken move failed", error));
+      await repairMove(email).catch(() => console.error("repairing a broken move failed"));
       if (!(await listPasskeys(email)).some((p) => p.id === signed.id)) return Response.json({ ok: false, error: "busy" }, { status: 503 });
 
       // Opened with its second step: a passkey (lib/auth.ts SecondStep), which a team that asks for one reads (lib/team.ts).
@@ -72,7 +72,7 @@ export async function POST(request: NextRequest) {
         waiting = await pendingRemoval(email);
         listed = (await listPasskeys(email)).some((p) => p.id === signed.id);
       } catch (error) {
-        await endSession(id).catch((ended) => console.error("closing a passkey session that could not be checked failed", ended));
+        await endSession(id).catch(() => console.error("closing a passkey session that could not be checked failed"));
         throw error;
       }
       if (!listed) {
@@ -95,9 +95,9 @@ export async function POST(request: NextRequest) {
       const doomed = signed.doomed || waiting?.ids.includes(signed.id) === true;
       if (!doomed) {
         await unlessSetToGo(email, signed.id, async () => {
-          await cancelReset(email, "login").catch((error) => console.error("calling off a two-step reset failed", error));
-          await endRecoveryAccess(email).catch((error) => console.error("closing a recovery login failed", error));
-        }).catch((error) => console.error("calling off a two-step reset failed", error));
+          await cancelReset(email, "login").catch(() => console.error("calling off a two-step reset failed"));
+          await endRecoveryAccess(email).catch(() => console.error("closing a recovery login failed"));
+        }).catch(() => console.error("calling off a two-step reset failed"));
       }
       const response = Response.json({ ok: true, next: "/studio" });
       response.headers.append("Set-Cookie", sessionCookie(id));
@@ -115,10 +115,10 @@ export async function POST(request: NextRequest) {
     // A record that could not be read in its exact shape (lib/passkeys.ts, CX-123 rule 24): the login is refused, no
     // session is opened, and the person is told, without detail, that it failed on our side and to try again.
     if (error instanceof UnknownReplyError) {
-      console.error("logging in with a passkey was refused: a record could not be read", error);
+      console.error("logging in with a passkey was refused: a record could not be read");
       return Response.json({ ok: false, error: "server_error" }, { status: 503 });
     }
-    console.error("logging in with a passkey failed", error);
+    console.error("logging in with a passkey failed");
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });
   }
 }

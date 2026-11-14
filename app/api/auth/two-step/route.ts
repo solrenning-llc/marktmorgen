@@ -93,7 +93,7 @@ export async function POST(request: NextRequest) {
         () => true,
         (error: unknown) => {
           if (!(error instanceof SessionsUnknownError)) throw error;
-          console.error("logging out what the app opened failed", error);
+          console.error("logging out what the app opened failed");
           return false;
         },
       );
@@ -107,7 +107,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     // Another change to the same passkeys held them past the wait (lib/passkeys.ts): said so, to try again.
     if (error instanceof LockBusyError) return refuse("busy", 503);
-    console.error("changing two-step login failed", error);
+    console.error("changing two-step login failed");
     return refuse("server_error", 500);
   }
 }

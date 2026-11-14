@@ -25,8 +25,8 @@ export async function POST(request: NextRequest) {
   let email: string | null | undefined;
   try {
     email = await sessionEmail(id);
-  } catch (error) {
-    console.error("reading the session to log out everywhere failed", error);
+  } catch {
+    console.error("reading the session to log out everywhere failed");
     email = undefined;
   }
   // A session let in without its second step cannot log the others out (lib/two-step.ts).

@@ -129,6 +129,18 @@ export class MemoryRedis {
         return to < from ? "" : new TextDecoder().decode(bytes.slice(from, to + 1));
       }
       case "EVAL": {
+        // lib/mail-health.ts: count once, but keep pause evaluation recoverable.
+        if (key.startsWith("-- marktmorgen:mail-health-outcome:v1\n") && args[0] === "2" && args.length === 6) {
+          const [, seen, daily, field, dailySeconds, seenSeconds] = args;
+          const state = this.run(["GET", seen]);
+          if (state === "done" || state === "1") return 0;
+          if (state === "pending") return 2;
+          if (state !== null) return -1;
+          this.run(["HINCRBY", daily, field, 1]);
+          this.run(["EXPIRE", daily, dailySeconds]);
+          this.run(["SET", seen, "pending", "EX", seenSeconds]);
+          return 1;
+        }
         // lib/request-guard.ts ESSENTIAL_BELOW: one more on an essential counter only while fewer than ARGV[1] were taken.
         if (key.startsWith("-- marktmorgen:essential-below:v1\n") && args[0] === "1" && args.length === 4) {
           const [, counter, below, window] = args;

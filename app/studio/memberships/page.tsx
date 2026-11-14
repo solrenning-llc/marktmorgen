@@ -208,7 +208,7 @@ export default async function StudioMembershipsPage({ searchParams }: Params) {
                 {numbers.byProduct.length === 0 ? (
                   <p className="mt-2 text-sm text-ink-soft">No membership is running right now.</p>
                 ) : (
-                  <div className="mt-4 overflow-x-auto">
+                  <div className="mt-4 overflow-x-auto" tabIndex={0} role="region" aria-label="By membership, as a table">
                     <table className="w-full text-left text-sm">
                       <thead>
                         <tr className="text-xs uppercase tracking-[0.08em] text-ink-mute">
@@ -364,7 +364,7 @@ export default async function StudioMembershipsPage({ searchParams }: Params) {
                     </p>
                   ) : null}
                   {numbers.leaving.reasons.length ? (
-                    <div className="mt-4 overflow-x-auto">
+                    <div className="mt-4 overflow-x-auto" tabIndex={0} role="region" aria-label="Why members leave, as a table">
                       <table className="w-full text-left text-sm">
                         <thead>
                           <tr className="text-xs uppercase tracking-[0.08em] text-ink-mute">
@@ -415,7 +415,7 @@ export default async function StudioMembershipsPage({ searchParams }: Params) {
                     The memberships begun in each month, and the share still running one, two, three, six and twelve months
                     later. If the newer rows keep fewer people than the older ones, something changed for those who join now.
                   </p>
-                  <div className="mt-4 overflow-x-auto" tabIndex={0} role="region" aria-labelledby="stay-title">
+                  <div className="mt-4 overflow-x-auto" tabIndex={0} role="region" aria-label="Who stays, month by month, as a table">
                     <table className="w-full text-left text-sm">
                       <thead>
                         <tr className="text-xs uppercase tracking-[0.08em] text-ink-mute">

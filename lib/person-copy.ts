@@ -56,6 +56,7 @@ import { clicksOf } from "@/lib/mail-clicks";
 import { waitlistPlacesOf } from "@/lib/waitlist";
 import { feedsOf } from "@/lib/podcast-access";
 import { remindersOf } from "@/lib/assistant-reminder";
+import { asksOf } from "@/lib/checkout-ask";
 import { syncJobsOf } from "@/lib/email-sync";
 import { memberTraces, readMember as readCommunityMember } from "@/lib/community";
 import { pointsRecordOf } from "@/lib/community-points";
@@ -115,6 +116,7 @@ export const COPY_PLAN: Readonly<Record<string, { how: CopyHow; what: string }>>
   "lib/welcome-offer-send.ts": { how: "marks", what: "When your welcome offer began, and that its reminder was set" },
   "lib/winback-send.ts": { how: "marks", what: "Marks that you heard a come-back offer about a product" },
   "lib/checkout-recovery.ts": { how: "marks", what: "Marks that you heard a checkout reminder about a product this week" },
+  "lib/checkout-ask.ts": { how: "copied", what: "Checkout reminders you asked for that are still waiting to be sent" },
   "lib/assistant-reminder.ts": { how: "copied", what: "A checkout reminder you asked for with the store's assistant box" },
   "lib/move-members.ts": { how: "copied", what: "Invitations to keep a membership you had elsewhere" },
   "lib/inbox.ts": { how: "copied", what: "Your conversations with the store's inbox" },
@@ -381,6 +383,7 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
   "lib/waitlist.ts": async (s) => (await waitlistPlacesOf(s.statsId, s.productIds, s.email)).map((w) => ({ product: w.product, joined: iso(w.joined), confirmed: iso(w.confirmed), alsoAskedForNews: w.news })),
   "lib/podcast-access.ts": async (s) => (await feedsOf(s.store, s.productIds, s.email)).map((product) => ({ product, privateFeed: true })),
   "lib/assistant-reminder.ts": async (s) => (await remindersOf(s.statsId, s.email)).map((r) => ({ ...r, at: new Date(r.at).toISOString() })),
+  "lib/checkout-ask.ts": async (s) => asksOf(s.statsId, s.email),
   "lib/email-sync.ts": async (s) => syncJobsOf(s.statsId, s.email),
   "lib/community-erasure.ts": async (s) => {
     const id = s.communityId;

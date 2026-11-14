@@ -5,7 +5,8 @@
  */
 import { addProduct, claimHandle, ensureStatsId, setProductCall, setStripeAccount, setSubscription, storeForEmail, type Product, type Store } from "@/lib/store";
 import { readListing, readProduct } from "@/lib/catalog";
-import { confirmBooking, holdAndCheckout, isConfirmed, slotsForProduct, type CallListing } from "@/lib/calls";
+import { confirmBooking, confirmedKey, holdAndCheckout, isConfirmed, slotsForProduct, type CallListing } from "@/lib/calls";
+import { icsTime } from "@/lib/ics-write";
 import { sendCallReminders } from "@/lib/call-reminders";
 import { REMINDER_QUEUE, reminderMember } from "@/lib/call-records";
 import type { CallSetup } from "@/lib/call-setup";
@@ -22,14 +23,18 @@ process.env.RESEND_API_KEY = "re_test_orders_only_a_stand_in";
 const paidRows: Record<string, unknown>[] = [];
 const metadata = new Map<string, Record<string, string>>();
 const emails: string[] = [];
+const sent: { to: string; subject: string; ics: string }[] = [];
 let sessions = 0;
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   const method = init?.method ?? "GET";
   const answer = (body: unknown) => Response.json(body);
   if (url.hostname === "api.resend.com" && method === "POST") {
-    const body = JSON.parse(String(init?.body)) as { to: string | string[] };
+    const body = JSON.parse(String(init?.body)) as { to: string | string[]; subject?: string; attachments?: { content: string }[] };
     emails.push(...[body.to].flat());
+    for (const to of [body.to].flat()) {
+      sent.push({ to, subject: body.subject ?? "", ics: body.attachments?.[0] ? Buffer.from(body.attachments[0].content, "base64").toString("utf8") : "" });
+    }
     return answer({ id: "00000000-0000-4000-8000-000000000000" });
   }
   if (url.hostname !== "api.stripe.com") throw new Error("Unexpected synthetic request: " + url.origin);
@@ -123,6 +128,43 @@ async function main() {
       is(mode + ": both recipient counts are exactly two", [emails.filter(email => email === buyer).length, emails.filter(email => email === owner).length], [2, 2]);
       await job();
       is(mode + ": no repeated reminders", emails.length, 4);
+
+      // An owed confirmation whose room read is unknown stays owed, and resumes later at the time the diary keeps now
+      // (here a move whose step of the mark was lost: the entry is at a new time, the mark still owed), never at the
+      // time the page or the job read before it: the room is read for the moved time and both emails carry it.
+      const later = (await slotsForProduct(store, product))?.days.flatMap(day => day.starts).filter(value => value - clock > 26 * HOUR) ?? [];
+      const start2 = later[0];
+      const moved = later.find(value => value >= start2 + 2 * HOUR);
+      if (!start2 || !moved) throw new Error("No synthetic times for the move");
+      const held2 = await holdAndCheckout({ store, product: full, start: start2, buyerTz: "UTC", origin: "https://example.test" });
+      if (!held2.ok) throw new Error("No synthetic hold: " + held2.reason);
+      const session2 = held2.session;
+      const buyer2 = mode + ".moved@example.com";
+      paidRows.push({ id: session2, status: "complete", payment_status: "paid", created: Math.floor(clock / 1000), amount_total: 12000, currency: "usd", customer_details: { email: buyer2 }, metadata: metadata.get(session2) });
+      const input2 = { ...input, session: session2, start: start2, end: start2 + HOUR, buyerEmail: buyer2 };
+      emails.length = 0; sent.length = 0;
+      fault = mode;
+      const rejected2 = await confirmBooking(input2).then(() => false, () => true);
+      fault = "none";
+      const owed = async () => {
+        const [mark] = await pipeline([["GET", confirmedKey(session2)]]);
+        return mark === null || ["sending", "booked", "buyer", "moved"].includes(String(mark));
+      };
+      is(mode + ": an unknown room leaves the confirmation owed, with no email", [rejected2, await owed(), emails.length], [true, true, 0]);
+      const busy = `nl:call:busy:${store.callsId}`;
+      const [kept] = await pipeline([["HGET", busy, session2]]);
+      if (typeof kept !== "string") throw new Error("No synthetic diary entry");
+      await pipeline([["HSET", busy, session2, JSON.stringify({ ...(JSON.parse(kept) as Record<string, unknown>), s: moved, e: moved + HOUR, until: 0 })]]);
+      const roomTimes: string[] = [];
+      const reading = redis.pipeline;
+      redis.pipeline = async commands => {
+        for (const command of commands) if (command[0] === "GET" && String(command[1]).startsWith(`nl:call:room:${store.callsId}:t:`)) roomTimes.push(String(command[1]).split(":").at(-1)!);
+        return reading(commands);
+      };
+      try { await confirmBooking(input2); } finally { redis.pipeline = reading; }
+      is(mode + ": the owed confirmation resumes: done, both emails once", [await owed(), [...emails].sort()], [false, [buyer2, owner].sort()]);
+      is(mode + ": its room is read for the moved time, never the old one", roomTimes, [String(moved)]);
+      is(mode + ": both calendar files carry the moved time", sent.map(mail => mail.ics.includes(`DTSTART:${icsTime(moved)}`) && !mail.ics.includes(`DTSTART:${icsTime(start2)}`)), [true, true]);
     }
     done();
   } finally {

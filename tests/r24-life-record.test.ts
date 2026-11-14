@@ -37,7 +37,7 @@ const storeOf = (statsId: string) => ({ statsId, handle: statsId, createdAt: new
 /** A record already filled: 4 visits from Instagram, 2 from direct, 2 addresses left, 3 visitors; and 2 short links. */
 async function seed(statsId: string): Promise<void> {
   await pipeline([
-    ["HSET", lifeKey(statsId), "started", today, "since", today, "filled", today, "r:instagram", 4, "r:direct", 2, "fs:email", 2, "u", 3, "vgap", 0],
+    ["HSET", lifeKey(statsId), "started", today, "since", today, "filled", today, "r:instagram", 4, "r:direct", 2, "fs:email", 2, "lc", 2, "u", 3, "vgap", 0],
     ["HSET", linksKey(statsId), "a1", "{}", "b2", "{}"],
   ]);
 }

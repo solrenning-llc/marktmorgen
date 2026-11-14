@@ -1,6 +1,7 @@
 import { type NextRequest, after } from "next/server";
 import { isFree, storeForHandle } from "@/lib/store";
 import { recordLead, spendClaim } from "@/lib/free";
+import { countConfirmedLead } from "@/lib/path-lead";
 import { recordLead as recordAffiliateLead } from "@/lib/affiliate-leads";
 import { scheduleReminder } from "@/lib/welcome-offer-send";
 import { enroll } from "@/lib/flows";
@@ -64,6 +65,10 @@ export async function POST(request: NextRequest) {
   }
 
   const listed = await recordLead(store, claim, product.title);
+  // A lead for Marktmorgen Path when the link's use first records this address as having got this product, never on
+  // the asking; the address counts once for the store, whatever product and two uses at once included
+  // (lib/path-lead.ts; 13 [D10]). An unknown answer is logged.
+  if (listed?.gotProduct) await countConfirmedLead(store, claim.e).catch((error) => console.error("counting a confirmed lead failed", error));
   // Sequences start only for someone who agreed to hear from the creator,
   // now or before; enroll checks that.
   if (listed) await enroll(store, claim.e, { joined: listed.joined, productId: claim.p });

@@ -173,8 +173,12 @@ export async function readWaitToken(token: string): Promise<TokenGrant | null> {
   return parseStoreWaitlistGrant(raw);
 }
 
-/** Presses the button in the email: the address now counts, and joins the creator's list if it asked to. */
-export async function confirmSpot(token: string, store: Store | null): Promise<{ ok: true; productId: string } | { ok: false }> {
+/**
+ * Presses the button in the email: the address now counts, and joins the creator's list if it asked to. `first` is
+ * true when this press found the spot unconfirmed, false on any press after; read and then written in two trips, so
+ * two presses at once can both see true: a filter only, never a count (lib/path-lead.ts decides once).
+ */
+export async function confirmSpot(token: string, store: Store | null): Promise<{ ok: true; productId: string; first: boolean } | { ok: false }> {
   const grant = await readWaitToken(token);
   if (!grant || grant.k !== "confirm" || !store || store.statsId !== grant.s) return { ok: false };
   const [raw] = await redisPipeline([["HGET", listKey(grant.s, grant.p), grant.e]]);
@@ -188,7 +192,7 @@ export async function confirmSpot(token: string, store: Store | null): Promise<{
       console.error("could not add a waitlist address to a list", error),
     );
   }
-  return { ok: true, productId: grant.p };
+  return { ok: true, productId: grant.p, first: !entry.ok };
 }
 
 /** Takes an address off a waitlist. */

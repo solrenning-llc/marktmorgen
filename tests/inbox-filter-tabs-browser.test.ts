@@ -5,7 +5,7 @@
  * They were role="tab" buttons with no more of the pattern: each was its own stop for Tab, the arrow keys did
  * nothing, and no tab panel said what they show. WAI-ARIA Authoring Practices, "Tabs Pattern" (read November 13,
  * 2026): one tab in the Tab sequence (the selected one), Left and Right move between tabs (Home and End to the
- * first and last), and each tab controls a tabpanel labelled by it. The same as the tabs of the buyer's path
+ * first and last), and each tab controls a tabpanel labeled by it. The same as the tabs of the buyer's path
  * (components/buyer-path.tsx). WCAG 2.1.1, 4.1.2.
  */
 import { execFileSync } from "node:child_process";
@@ -74,7 +74,7 @@ const result = JSON.parse(execFileSync(process.execPath, ["--input-type=module",
 
 is("no page error", result.errors, []);
 is("one stop for Tab: the selected tab", result.start.stops, ["Open"]);
-is("it controls a tab panel labelled by it", result.start.panel, { role: "tabpanel", labelledBy: true });
+is("it controls a tab panel labeled by it", result.start.panel, { role: "tabpanel", labelledBy: true });
 is("Right selects and focuses the next tab", [result.right.selected, result.right.focused, result.right.stops], ["Mine", "Mine", ["Mine"]]);
 is("End goes to the last", [result.end.selected, result.end.focused], ["All", "All"]);
 is("Right on the last goes round to the first", [result.wrap.selected, result.wrap.focused], ["Open", "Open"]);

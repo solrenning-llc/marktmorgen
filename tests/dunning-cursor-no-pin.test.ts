@@ -76,9 +76,10 @@ function trial(id: string, daysLeft: number): Record<string, unknown> {
 function failing(id: string): Record<string, unknown> {
   return {
     id, status: "past_due", created: NOW - 90 * DAY, trial_end: NOW - 76 * DAY,
-    customer: { email: `${id}@example.com` },
+    customer: { id: `cus_${id.slice(4)}`, email: `${id}@example.com` },
     items: { data: [{ current_period_start: NOW - 2 * DAY, current_period_end: NOW + 28 * DAY, price: PRICE }] },
-    latest_invoice: { id: `in_${id.slice(4)}inv`, status: "open", amount_due: 2900, hosted_invoice_url: `https://invoice.stripe.com/i/${id}`, next_payment_attempt: NOW + 3 * DAY },
+    // The renewal's own invoice, as Stripe gives it (main's ownLatestInvoice, #4449).
+    latest_invoice: { id: `in_${id.slice(4)}inv`, subscription: id, customer: `cus_${id.slice(4)}`, status: "open", amount_due: 2900, hosted_invoice_url: `https://invoice.stripe.com/i/${id}`, next_payment_attempt: NOW + 3 * DAY },
   };
 }
 

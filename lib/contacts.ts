@@ -38,7 +38,7 @@ import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { MAX_CONTACT_NAME, MAX_IMPORT, MAX_LEADS, readTags } from "@/lib/contact-rules";
-import { liftCommand, suppressedAmongCommand, suppressedCommand, wasSuppressed } from "@/lib/suppression";
+import { liftCommand, suppressedAmongCommand, suppressedCommand, suppressedKey, suppressionPrint, wasSuppressed } from "@/lib/suppression";
 import { joinedCommands } from "@/lib/joined-stores";
 import { DataRoomError, type DataStore, giveData, needData } from "@/lib/store-data";
 import { type DataOwner, orderWrite } from "@/lib/order-data";
@@ -245,15 +245,22 @@ export async function upsertContact(
 
   const now = new Date().toISOString();
   const wasMailable = before ? mailable(before) : false;
-  // Somebody deleted from this store is kept, by a fingerprint, from being
-  // written to again: only their own yes, given now, lifts it. A purchase
-  // without the box still records the purchase, as anyone's does.
-  const deleted = wasSuppressed(erased);
-  const ownYes = input.agreed && input.explicit;
-  const agreed = Boolean(before?.agreed) || (input.agreed && (!deleted || ownYes));
-  // A yes only undoes an unsubscribe when it was given after it: a thank-you
-  // page reloaded, or a download link opened again, repeats an old tick.
+  // A yes only undoes an unsubscribe, or a deletion, when it was given after it:
+  // a thank-you page reloaded, the checkout sweep reading a paid session again,
+  // or a download link opened again, repeats an old tick.
   const saidAt = Date.parse(input.at || now);
+  // Somebody deleted from this store is kept, by a fingerprint, from being
+  // written to again: only their own yes, given after the deletion, lifts it.
+  // A purchase without the box still records the purchase, as anyone's does.
+  const deleted = wasSuppressed(erased);
+  // A yes given now (no time given) is after the deletion by definition; one given with the time of an earlier
+  // moment, as a reloaded thank-you page gives the order's, is compared with the deletion's own second.
+  const ownYes = input.agreed && input.explicit && (!deleted || !input.at || (await saidAfterErased(listId, email, saidAt)));
+  // A yes of their own from before the deletion, repeated now, is not their yes: nothing is written for it, not even
+  // the purchase, so the row the deletion removed (their address and the old order's product) never comes back, as
+  // queuePerson treats the same replay ("off", lib/email-sync.ts). A purchase without the box still records it below.
+  if (deleted && input.agreed && input.explicit && !ownYes) return none;
+  const agreed = Boolean(before?.agreed) || (input.agreed && (!deleted || ownYes));
   const leftAt = Date.parse(before?.unsubAt || "");
   const resubscribe =
     Boolean(before?.unsub) &&
@@ -298,6 +305,21 @@ export async function upsertContact(
   if (room && isOrderRoom(room)) await orderWrite(room.order, commands);
   else await redisPipeline(commands);
   return { joined: mailable(next) && !wasMailable, gotProduct, full: false };
+}
+
+/**
+ * Whether a yes said at `saidAt` (ms) came after this address was deleted from the store: the print holds the second of
+ * the deletion on Redis's clock (lib/suppression.ts ERASED_PRINT), so only a yes from the next second on is known to be
+ * later. A print that is gone since the first read is no deletion to lift. A second that does not read as whole
+ * seconds is unknown and throws (CX-123 rule 24): never taken as an old deletion that any yes may lift.
+ */
+async function saidAfterErased(listId: string, email: string, saidAt: number): Promise<boolean> {
+  const replies = repliesFor(await redisPipeline([["HGET", suppressedKey(listId), suppressionPrint(listId, email)]]), 1);
+  const raw = replies?.[0];
+  if (raw === null) return true;
+  const text = typeof raw === "number" ? String(raw) : raw;
+  if (typeof text !== "string" || !/^\d{1,12}$/.test(text)) throw new UnknownReplyError("when an address was deleted from a store");
+  return Number.isFinite(saidAt) && saidAt >= (Number(text) + 1) * 1000;
 }
 
 /**

@@ -45,7 +45,7 @@ async function main() {
   await claimHandle(owner, handle, "Synthetic shop", "");
   await ensureStatsId(owner);
   await ensureStoreId(owner);
-  await setStripeAccount(owner, "acct_1Testreplyto0001", true);
+  await setStripeAccount(owner, "acct_1TestRepl01", true);
   await setSubscription(owner, { customerId: `cus_${handle}`, subscriptionId: `sub_${handle}`, active: true, period: paidPeriod() });
   const made = await addProduct(owner, "Synthetic Guide", "", "9", null);
   if (!made.ok) throw new Error("setup");
@@ -84,7 +84,7 @@ async function main() {
   await claimHandle(owner2, "replytoshop2", "Synthetic shop", "");
   await ensureStatsId(owner2);
   await ensureStoreId(owner2);
-  await setStripeAccount(owner2, "acct_1Testreplyto0002", true);
+  await setStripeAccount(owner2, "acct_1TestRepl02", true);
   await setSubscription(owner2, { customerId: "cus_replytoshop2", subscriptionId: "sub_replytoshop2", active: true, period: paidPeriod() });
   const made2 = await addProduct(owner2, "Synthetic Guide", "", "9", null);
   if (!made2.ok) throw new Error("setup 2");

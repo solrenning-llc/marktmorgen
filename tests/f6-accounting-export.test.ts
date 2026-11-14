@@ -219,9 +219,9 @@ async function main(): Promise<void> {
     invoice("in_f_0", { billing_reason: "manual" }),
   ], false)]).deps);
   is(
-    "each paid renewal of this store is a line, in its currency, net of its tax (either API version); a first invoice (its checkout is the sale), another store's, a void one and a manual one are not",
+    "each paid invoice of this store's subscriptions is a line (a renewal or a one-off charge), in its currency, net of its tax (either API version); a first invoice (its checkout is the sale), another store's and a void one are not",
     renewals.ok && renewals.sales.map((s) => [s.product, s.title, s.net, s.tax, s.currency]).sort(),
-    [["p3", "Bread Club", 2000, 0, "usd"], ["p3", "Bread Club", 2000, 200, "usd"]],
+    [["p3", "Bread Club", 2000, 0, "usd"], ["p3", "Bread Club", 2000, 0, "usd"], ["p3", "Bread Club", 2000, 200, "usd"]],
   );
   const renewalsAsked = world(empty, empty, undefined, [page([], false)]);
   await readAccountingSales(store, period, renewalsAsked.deps);
@@ -236,13 +236,47 @@ async function main(): Promise<void> {
 
   part("A day with a payment not settled yet makes no file (MÉDIO 2 of the money review on #2996)");
   // Its invoice number would come out again later with a larger total, and the accounting app refuses a number it has.
+  const processing = { id: "pi_s", object: "payment_intent", status: "processing" };
   await refused("a checkout of the period still open: no file yet", [page([session("cs_a_0", { status: "open", payment_status: "unpaid", amount_total: 4900 })], false)], empty, "pending");
-  await refused("a checkout complete with its payment still processing: no file yet", [page([session("cs_a_0", { payment_status: "unpaid" })], false)], empty, "pending");
+  await refused("a checkout complete with its payment still processing: no file yet", [page([session("cs_a_0", { payment_status: "unpaid", payment_intent: processing })], false)], empty, "pending");
+  await refused("a checkout complete with a voucher not paid yet: no file yet", [page([session("cs_a_0", { payment_status: "unpaid", payment_intent: { ...processing, status: "requires_action" } })], false)], empty, "pending");
   await refused("a one-click extra still processing: no file yet", empty, [page([upsell("pi_a_0", { status: "processing" })], false)], "pending");
   await refusedInvoices("a renewal still a draft: no file yet", [page([invoice("in_a_0", { status: "draft", amount_paid: 0 })], false)], "pending");
-  await refusedInvoices("a renewal open, not paid yet: no file yet", [page([invoice("in_a_0", { status: "open", amount_paid: 0 })], false)], "pending");
-  await refusedInvoices("a renewal marked uncollectible, which can still be paid: no file yet", [page([invoice("in_a_0", { status: "uncollectible", amount_paid: 0 })], false)], "pending");
+  await refusedInvoices("a renewal open that Stripe will try again: no file yet", [page([invoice("in_a_0", { status: "open", amount_paid: 0, next_payment_attempt: to + 86_400 })], false)], "pending");
+  await refusedInvoices("a renewal sent to pay by a due date not passed: no file yet", [page([invoice("in_a_0", { status: "open", amount_paid: 0, next_payment_attempt: null, collection_method: "send_invoice", due_date: to + 86_400 })], false)], "pending");
   await refused("another store's open checkout does not hold this store's file", [page([session("cs_a_0", { status: "open", payment_status: "unpaid", metadata: { store: "other", product: "x" } })], false)], empty, "a file");
+  await refused("a complete checkout whose payment cannot be read: no file", [page([session("cs_a_0", { payment_status: "unpaid" })], false)], empty, "unreadable");
+
+  part("A payment that will not settle does not hold the books (MÉDIO 1 of the focal review on #2996 @13f40ed407)");
+  // A sale that failed or was given up is not a sale: it makes no line, and the period's file can be made.
+  const settledRead = async (sessions: unknown[], invoices: unknown[]) => readAccountingSales(store, period, { ...world(sessions, empty, undefined, invoices).deps, now: () => to + 3 * 86_400 });
+  const failedAsync = await settledRead([page([session("cs_a_0"), session("cs_f_0", { payment_status: "unpaid", payment_intent: { ...processing, status: "requires_payment_method" } }), session("cs_g_0", { payment_status: "unpaid", payment_intent: { ...processing, status: "canceled" } })], false)], [page([], false)]);
+  is("a checkout whose bank debit or voucher failed or expired: a file, without it", failedAsync.ok && failedAsync.sales.map((s) => s.net), [4900]);
+  const subscriptionUnpaid = await settledRead([page([session("cs_h_0", { mode: "subscription", payment_status: "unpaid", payment_intent: null, invoice: invoice("in_h", { billing_reason: "subscription_create", status: "uncollectible", amount_paid: 0 }) })], false)], [page([], false)]);
+  is("a membership checkout whose first invoice was given up: a file, without it", subscriptionUnpaid.ok && subscriptionUnpaid.sales.length, 0);
+  const subscriptionWaiting = await settledRead([page([session("cs_h_0", { mode: "subscription", payment_status: "unpaid", payment_intent: null, invoice: invoice("in_h", { billing_reason: "subscription_create", status: "open", amount_paid: 0, next_payment_attempt: to + 3600 }) })], false)], [page([], false)]);
+  is("a membership checkout whose first invoice Stripe will try again: no file yet", subscriptionWaiting.ok ? "a file" : subscriptionWaiting.reason, "pending");
+  const givenUp = await settledRead([page([], false)], [page([
+    invoice("in_a_0"),
+    invoice("in_u_0", { status: "uncollectible", amount_paid: 0 }),
+    invoice("in_o_0", { status: "open", amount_paid: 0, next_payment_attempt: null }),
+    invoice("in_d_0", { status: "open", amount_paid: 0, next_payment_attempt: null, collection_method: "send_invoice", due_date: from + 86_400 }),
+  ], false)]);
+  is("a renewal marked uncollectible, or open with no try left and its due date passed: a file, without it", givenUp.ok && givenUp.sales.map((s) => s.net), [2000]);
+  const held = await settledRead([page([session("cs_a_0", { created: from + 20 * 86_400, status: "open", payment_status: "unpaid" })], false)], [page([invoice("in_a_0", { created: from + 9 * 86_400, status: "draft", amount_paid: 0 })], false)]);
+  is("the answer says which payment holds the file: the earliest one's date", held.ok ? "a file" : [held.reason, held.reason === "pending" ? held.heldAt : 0], ["pending", from + 9 * 86_400]);
+  const exportRoute = readFileSync(join(process.cwd(), "app/api/store/export/route.ts"), "utf8");
+  is("the creator is told the date of the payment that holds the file, and never \"try again tomorrow\"", [exportRoute.includes("read.heldAt"), /Try again tomorrow/.test(exportRoute)], [true, false]);
+
+  part("Every paid invoice of this store's subscriptions is a sale (MÉDIO 2 of the focal review on #2996 @13f40ed407)");
+  const changes = await settledRead([page([], false)], [page([
+    invoice("in_s_0", { billing_reason: "subscription_update", amount_paid: 3100, tax: 100 }),
+    invoice("in_m_0", { billing_reason: "manual", amount_paid: 900 }),
+    invoice("in_t_0", { billing_reason: "subscription_threshold", amount_paid: 700 }),
+    invoice("in_c_0", { billing_reason: "subscription_create" }),
+    invoice("in_z_0", { billing_reason: "subscription_update", amount_paid: 0, tax: 0 }),
+  ], false)]);
+  is("a switch to yearly or a plan change, a one-off charge and a threshold invoice are lines; a first invoice (its checkout) and one paid by credit alone are not", changes.ok && changes.sales.map((s) => [s.net, s.tax]).sort(), [[3000, 100], [700, 0], [900, 0]]);
 
   part("PayPal's own records, read exactly");
   redis.clear();

@@ -3391,9 +3391,15 @@ export default async function StudioPage({
                         >
                           <div className="flex flex-wrap items-baseline justify-between gap-2">
                             <p className="font-bold text-ink">{sale.title}</p>
-                            <p className="font-display font-semibold text-ink">
-                              {formatMoney(sale.amount, sale.currency)}
-                            </p>
+                            {sale.amount === null ? (
+                              <p role="status" className="text-sm font-semibold text-ink">
+                                Amount could not be loaded
+                              </p>
+                            ) : (
+                              <p className="font-display font-semibold text-ink">
+                                {formatMoney(sale.amount, sale.currency)}
+                              </p>
+                            )}
                           </div>
                           <p className="mt-1 text-sm text-ink-soft">
                             {sale.email ? (
@@ -3461,7 +3467,7 @@ export default async function StudioPage({
                             </p>
                           ) : null}
                           {/* A one-time payment's receipt, read from Stripe when asked (lib/receipt-pdf.ts); a membership's payments have Stripe's invoices. */}
-                          {sale.oneTime && sale.amount > 0 && sale.reference.startsWith("cs_") ? (
+                          {sale.oneTime && sale.amount !== null && sale.amount > 0 && sale.reference.startsWith("cs_") ? (
                             <p className="mt-2">
                               <a
                                 href={`/api/store/receipt-pdf?${store?.sid ? `store=${store.sid}&` : ""}reference=${sale.reference}`}

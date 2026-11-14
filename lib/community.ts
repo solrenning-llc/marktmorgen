@@ -78,6 +78,7 @@ import { indexBytes, indexPost, partsOf, unindexPost } from "@/lib/community-sea
 import { TRACED_SINCE, TRACE_ENTRY, traceKey } from "@/lib/community-trace";
 import { type DataStore, needData, giveData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
+import { PICTURE_MARK_BYTES } from "@/lib/community-files";
 import { indexMember } from "@/lib/community-index";
 import { type Poll, parsePoll, pollKeys } from "@/lib/community-polls";
 import { type DmSetting, NO_DM, parseDmSetting } from "@/lib/community-dm";
@@ -240,7 +241,9 @@ const MEMBERS_SLOT = "cm:m";
 export const SET_ENTRY_BYTES = 96;
 /** What a post counts for: its record, its two places in the feeds, and its words. */
 function postBytes(post: Post): number {
-  return dataBytes([JSON.stringify(post)], 3) + indexBytes([post.title, post.text]);
+  // A post's picture keeps a mark for as long as the post keeps it (lib/community-files.ts, PICTURE_MARK_BYTES):
+  // taken from the room with the post, given back with it.
+  return dataBytes([JSON.stringify(post)], 3) + indexBytes([post.title, post.text]) + (post.img ? PICTURE_MARK_BYTES : 0);
 }
 
 /** What a comment counts for: its field, and the words it can add to its post's. */

@@ -4,6 +4,7 @@
  * member who may write in it, the file store as a set of paths, and the
  * signed door counted instead of signed. Redis is the test's own stand-in.
  */
+import { BlobNotFoundError } from "@vercel/blob";
 export const COMMUNITY_ID = "doorcommunity01";
 export const MEMBER = "member-key-1";
 export const PICTURES = 50;
@@ -33,7 +34,9 @@ export async function del(pathnames: string | string[]): Promise<void> {
   }
 }
 export async function head(path: string): Promise<{ size: number; contentType: string }> {
-  if (!files.has(path)) throw new Error("not found");
+  // As the file store says it (merge of main into #3414): a name that is no file is BlobNotFoundError, which the
+  // route reads as free; any other error is "could not check", and no door is given.
+  if (!files.has(path)) throw new BlobNotFoundError();
   return { size: 1000, contentType: "image/jpeg" };
 }
 export async function get(): Promise<null> {

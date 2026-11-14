@@ -34,8 +34,8 @@ import { MAX_POLL_DAYS, parsePoll, vote } from "@/lib/community-polls";
 import { mentionsIn, whoIs } from "@/lib/community-mentions";
 import { tell } from "@/lib/community-notify";
 import { communityWords } from "@/lib/buyer-words/community";
-import { checkCommunityImage } from "@/lib/community-image";
-import { blobImages, dropCommunityImage, noteCommunityUpload, takeCommunityUpload } from "@/lib/community-files";
+import { checkCommunityImage, ownsCommunityImage } from "@/lib/community-image";
+import { blobImages, dropCommunityImage, takeCommunityUpload, untakeCommunityUpload } from "@/lib/community-files";
 import { advanceAnnouncement, queueAnnouncement } from "@/lib/community-mail";
 import {
   ITEM_ID,
@@ -211,16 +211,18 @@ export async function POST(request: NextRequest) {
         };
         const w = side(field("img_w", 6));
         const h = side(field("img_h", 6));
-        if (!(await takeCommunityUpload(path, key))) return back(fromPage, "image");
+        // Only a picture of this community's own folder is ever taken (Claude 6 on #3414): one taken and then refused
+        // by the check below as "path" would keep a mark nothing removes.
+        if (!ownsCommunityImage(path, id) || !(await takeCommunityUpload(path, key))) return back(fromPage, "image");
         let checked: Awaited<ReturnType<typeof checkCommunityImage>>;
         try {
           checked = await checkCommunityImage(path, id, blobImages);
         } catch (error) {
-          // Still this member's, for when they send the form again.
-          await noteCommunityUpload(path, key).catch(() => {});
+          // Still this member's, for when they send the form again (never anybody else's: lib/community-files.ts).
+          await untakeCommunityUpload(path, key).catch(() => {});
           throw error;
         }
-        if (checked === "missing") await noteCommunityUpload(path, key).catch(() => {});
+        if (checked === "missing") await untakeCommunityUpload(path, key).catch(() => {});
         if (checked !== "ok" || !w || !h) {
           // A picture refused here was deleted by the check, or is deleted now: its place goes back.
           if (checked !== "missing" && checked !== "path") await dropCommunityImage(path);

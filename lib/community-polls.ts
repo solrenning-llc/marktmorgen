@@ -30,6 +30,7 @@
  *
  *   nl:cm:<id>:pv:<post>   who voted what: member key -> option ids, comma separated
  *   nl:cm:<id>:pc:<post>   the tally: option id -> how many
+ *   nl:cm:<id>:pl:<post>:<member>   a short lock: one vote of one member at a time
  *
  * The tally is kept as its own small hash rather than counted from the votes,
  * because counting 50,000 votes to draw one bar is work nobody should pay for
@@ -38,6 +39,8 @@
  */
 import { redisPipeline } from "@/lib/redis";
 import { UnknownReply, exactReplies } from "@/lib/redis-exact";
+import { withLock } from "@/lib/redis-lock";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { type DataStore, giveData, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { cleanLine } from "@/lib/community-text";
@@ -46,6 +49,7 @@ import { TRACE_ENTRY, traceKey } from "@/lib/community-trace";
 const base = (id: string) => `nl:cm:${id}`;
 const votesKey = (id: string, post: string) => `${base(id)}:pv:${post}`;
 const tallyKey = (id: string, post: string) => `${base(id)}:pc:${post}`;
+const voteLockKey = (id: string, post: string, who: string) => `${base(id)}:pl:${post}:${who}`;
 
 /** More than Circle's 5 and more than Kajabi's and Discord's 10. */
 export const MAX_POLL_OPTIONS = 12;
@@ -152,10 +156,21 @@ export async function vote(
 ): Promise<boolean> {
   if (pollClosed(poll)) return false;
   const picked = cleanChoice(poll, choice);
+  // One member's vote on one post at a time (Claude 1 cloud on #3820), and inside the lock each write only over the
+  // record as read (#3955): a lock that stays taken, or whose answer is unproven, throws LockBusyError before anything
+  // is read or written, and a change that still lands between the read and the write (a lock that ran out) is read again.
+  return withLock(voteLockKey(id, post, who), 10, 3_000, () => castVote(id, post, who, picked, room));
+}
+
+async function castVote(id: string, post: string, who: string, picked: string[], room: DataStore): Promise<boolean> {
   const what = "a poll vote";
   for (let i = 0; i < VOTE_TRIES; i += 1) {
-    const [raw] = await redisPipeline([["HGET", votesKey(id, post), who]]);
-    const held = typeof raw === "string" ? raw : "";
+    // Rule 24: no earlier vote only for Redis's null or the empty string; any
+    // other reply is unknown, never "no vote" (the tally would count it twice).
+    const read = repliesFor(await redisPipeline([["HGET", votesKey(id, post), who]]), 1);
+    const raw = read?.[0];
+    if (!read || (raw !== null && typeof raw !== "string")) throw new UnknownReplyError("a member's poll vote");
+    const held = raw ?? "";
     const before = held.split(",").filter(Boolean);
     const gone = before.filter((one) => !picked.includes(one));
     const added = picked.filter((one) => !before.includes(one));

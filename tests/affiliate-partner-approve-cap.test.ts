@@ -123,7 +123,7 @@ async function main(): Promise<void> {
     metadata: { store: "keepershop", product },
   });
   const joined = await joinAsBuyer(await store(), "cs_test_cbuyer000000001");
-  is("(the order is read)", joined.ok, true);
+  is("(the order is read: C is known, so their link is emailed, MM-SA-34)", !joined.ok && joined.reason, "known");
   is("C still waits for the creator", await statusOf(c), "pending");
   is("partners hold 85%", await promised(), 85);
 

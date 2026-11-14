@@ -26,6 +26,7 @@ import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 import { ROOM } from "./data-room";
 import { installSesMailFixture } from "./ses-mail-fixture";
+import { withinOneUtcDay } from "./one-utc-day";
 
 const OWNER = "owner@example.com";
 const SECRET_BYTES = Buffer.from("a-stand-in-secret-for-tests-only");
@@ -61,7 +62,22 @@ function announce(type: string, data: Record<string, unknown>, opts: { id?: stri
   });
 }
 
+/**
+ * The file's clock is kept inside one UTC day (tests/one-utc-day.ts). The company's day counter is named by the date at
+ * each call (lib/mail.ts dayKey); a run that crossed 00:00 UTC between a send's reservation and its release gave the
+ * day back to the new day's counter, which read -1, so the next list reservation was refused as an unknown count and
+ * the broadcast below never finished. Restored at the end.
+ */
 async function main(): Promise<void> {
+  const realClock = withinOneUtcDay();
+  try {
+    await checks();
+  } finally {
+    realClock();
+  }
+}
+
+async function checks(): Promise<void> {
   redis.clear();
   mail.configure();
   await mail.setReady(true, { max24: 50_000, rate: 100 });

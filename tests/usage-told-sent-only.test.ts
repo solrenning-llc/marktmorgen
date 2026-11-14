@@ -33,6 +33,11 @@ import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { store as redis } from "./redis-stub";
 import { installSesMailFixture } from "./ses-mail-fixture";
 import { done, is, part } from "./check";
+import { withinOneUtcDay } from "./one-utc-day";
+
+// Deliveries are recorded in the month the clock is in and the watch reads the month it runs in; a real month end
+// passing between the two found nobody over the allowance (got [200,0,[]]). The clock stays inside one UTC day.
+withinOneUtcDay();
 
 delete process.env.RESEND_API_KEY;
 delete process.env.CRON_SECRET;

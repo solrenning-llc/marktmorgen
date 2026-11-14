@@ -4,7 +4,8 @@
  * value is somebody else's; anything else is unknown, and nothing is linked or listed on it. Synthetic data only.
  */
 import { claimHandle } from "@/lib/store";
-import { ALL_KEY, byKey, invitedBy, inviteCode, inviterFor, listKey, recordInvite } from "@/lib/creator-invites";
+import { ALL_KEY, byKey, invitedBy, inviteCode, inviterFor, listKey, recordInvite as recordInviteAt } from "@/lib/creator-invites";
+import { LEGACY_INVITE_RECORDING_UNTIL } from "@/lib/creator-invite-rules";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -26,6 +27,13 @@ function claimAnswers(match: (key: string) => boolean, answer: (wrote: boolean) 
   };
 }
 const restore = () => { redis.pipeline = original; };
+/**
+ * One moment inside the legacy recording window for every invite these checks write down. recordInvite read the real
+ * clock, and from LEGACY_INVITE_RECORDING_UNTIL (16 December 2026 UTC) on it answers "paused" before any claim is
+ * made, so every check below failed on any run from that day; nothing here compares the recorded time with the clock.
+ */
+const OPEN = LEGACY_INVITE_RECORDING_UNTIL - 86_400_000;
+const recordInvite = (store: Parameters<typeof recordInviteAt>[0], code: string, now = OPEN) => recordInviteAt(store, code, now);
 const malformed = [["undefined", [undefined]], ["no reply", []], ["text", ["QUEUED"]], ["a number", [1]]] as const;
 
 async function main(): Promise<void> {
@@ -140,7 +148,7 @@ async function main(): Promise<void> {
     // Ana's try a second later, so a score written over bea's would show.
     claimAnswers((key) => key === byKey(cal.sid), () => [undefined], { read: () => [undefined] });
     let first: unknown = "threw";
-    try { first = await recordInvite(cal, anaCode, Date.now() + 1_000); } catch { /* checked below */ }
+    try { first = await recordInvite(cal, anaCode, OPEN + 1_000); } catch { /* checked below */ }
     restore();
     const [mine, theirs, all] = await original([["ZSCORE", listKey(ana.sid), cal.sid], ["ZSCORE", listKey(bea.sid), cal.sid], ["ZSCORE", ALL_KEY, cal.sid]]);
     is("and its place on the settlement walk keeps bea's time", all, allBefore);

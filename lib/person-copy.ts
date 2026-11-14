@@ -182,7 +182,7 @@ function checkoutsOf(s: ErasureScope): Promise<PaidCheckout[]> {
 }
 
 /** What an import, a gift or a place gave them here, read as it is kept (lib/imported-purchases.ts). */
-const grantsOf = async (s: ErasureScope) => importedFrom((await redisPipeline([["HGETALL", importedKey(s.statsId, s.email)]]))[0]);
+const grantsOf = async (s: ErasureScope) => importedFrom((await redisPipeline([["HGETALL", importedKey(s.statsId, s.email)]]))[0], { complete: true });
 
 /** One reader per copied module, each only reading. */
 // A Stripe Checkout Session id, the same shape lib/call-packages.ts keeps a package under.
@@ -337,7 +337,7 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
     return lead && lead.email && same(lead.email, s.email) ? [lead] : [];
   },
   // Read whether or not the store still lets imported buyers in (importedFor asks that, and notes them as it reads).
-  "lib/imported-purchases.ts": async (s) => importedFrom((await redisPipeline([["HGETALL", importedKey(s.statsId, s.email)]]))[0]),
+  "lib/imported-purchases.ts": async (s) => importedFrom((await redisPipeline([["HGETALL", importedKey(s.statsId, s.email)]]))[0], { complete: true }),
   "lib/move-members.ts": async (s) => {
     const out: unknown[] = [];
     for (const productId of s.productIds) {

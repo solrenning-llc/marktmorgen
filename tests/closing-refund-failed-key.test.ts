@@ -57,13 +57,20 @@ async function setup(label: string) {
 }
 const row = (status: string, id = "re_x8n1") => ({ id, object: "refund", amount: 500, currency: "usd", payment_intent: INTENT, status, metadata: { closing_refund: "in_x8refund" } });
 
+/** The closing walk answers a word ("busy", "changed", "unavailable") when it did not settle; these cases all settle. */
+async function settled(pass: ReturnType<typeof giveBackUnused>) {
+  const result = await pass;
+  if (typeof result === "string") throw new Error(`the pass did not settle: ${result}`);
+  return result;
+}
+
 async function main() {
   process.env.STRIPE_SECRET_KEY = "sk_test_x8_synthetic_only";
   part("control: a refund that succeeded is made once");
   let seller = await setup("ctl");
   nextStatus = ["succeeded"];
   listed = [];
-  const first = await giveBackUnused(seller, DAY);
+  const first = await settled(giveBackUnused(seller, DAY));
   is("control: one made", first.done.length, 1);
   is("control: executed once", executed, 1);
 
@@ -71,9 +78,9 @@ async function main() {
   seller = await setup("fail");
   nextStatus = ["failed", "succeeded"];
   listed = [];
-  is("first pass fails", (await giveBackUnused(seller, DAY)).failed, 1);
+  is("first pass fails", (await settled(giveBackUnused(seller, DAY))).failed, 1);
   listed = [row("failed")];
-  const second = await giveBackUnused(seller, DAY);
+  const second = await settled(giveBackUnused(seller, DAY));
   is("two distinct keys", new Set(keys).size, 2);
   is("second pass made the refund", second.done.length, 1);
 
@@ -81,9 +88,9 @@ async function main() {
   seller = await setup("pend");
   nextStatus = ["pending", "succeeded"];
   listed = [];
-  is("first pass pending", (await giveBackUnused(seller, DAY)).pending, 1);
+  is("first pass pending", (await settled(giveBackUnused(seller, DAY))).pending, 1);
   listed = [row("failed")];
-  const third = await giveBackUnused(seller, DAY);
+  const third = await settled(giveBackUnused(seller, DAY));
   is("two distinct keys", new Set(keys).size, 2);
   is("retried and made", third.done.length, 1);
 
@@ -92,8 +99,8 @@ async function main() {
   nextStatus = ["succeeded"];
   listed = [];
   dropNext = true;
-  is("first pass lost on the way counts failed", (await giveBackUnused(seller, DAY)).failed, 1);
-  const fourth = await giveBackUnused(seller, DAY);
+  is("first pass lost on the way counts failed", (await settled(giveBackUnused(seller, DAY))).failed, 1);
+  const fourth = await settled(giveBackUnused(seller, DAY));
   is("same key on the retry", new Set(keys).size, 1);
   is("the retry made it once", fourth.done.length, 1);
   is("executed once", executed, 1);
@@ -106,7 +113,7 @@ async function main() {
   listed = [row("failed")];
   await giveBackUnused(seller, DAY);
   listed = [row("failed", "re_x8n2"), row("failed")];
-  const fifth = await giveBackUnused(seller, DAY);
+  const fifth = await settled(giveBackUnused(seller, DAY));
   is("three distinct keys", new Set(keys).size, 3);
   is("the third key", keys[2], "closing-refund:in_x8refund:2");
   is("the first key unchanged", keys[0], "closing-refund:in_x8refund");

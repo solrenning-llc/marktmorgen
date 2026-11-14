@@ -11,10 +11,12 @@ import { summaryOf } from "@/lib/stats-report";
 import type { StatsData } from "@/lib/stats";
 import {
   affiliatesTool,
+  bundleChoicesTool,
   buyersTool,
   channelsTool,
   emailsTool,
   funnelTool,
+  importsTool,
   insightsTool,
   membershipsTool,
   productTextTool,
@@ -77,8 +79,11 @@ export async function POST(request: Request) {
   if (Array.isArray(message)) return failure(null, -32600, "One message per request.");
   if (!message || message.jsonrpc !== "2.0" || typeof message.method !== "string") return failure(message?.id, -32600, "Invalid request");
   const { id, method } = message;
-  // A notification has no id and wants no answer.
-  if (id === undefined || id === null) return new Response(null, { status: 202 });
+  // A notification has no id member and wants no answer.
+  if (id === undefined) return new Response(null, { status: 202 });
+  // A request's id is a string or a number (JSON-RPC 2.0 §4; MCP: never null): any other is an Invalid Request,
+  // answered before anything runs or is counted.
+  if (typeof id !== "string" && !(typeof id === "number" && Number.isFinite(id))) return failure(null, -32600, "Invalid request");
 
   if (method === "initialize") {
     return result(id, {
@@ -217,6 +222,13 @@ export async function POST(request: Request) {
       const listed = await savedBlocksTool(store, hold);
       if (listed instanceof Response) return refusedWith(listed);
       return result(id, said(listed, listed.sections === null));
+    }
+    // What a bundle can be made of, and the store's imports (631 [AA1] (a)): each sets aside its most before reading
+    // and is settled at what it read and sends before it is sent (lib/mcp-tools.ts).
+    if (params.name === "list_bundle_choices" || params.name === "get_imports") {
+      const read = params.name === "get_imports" ? await importsTool(store, hold) : await bundleChoicesTool(store, params.arguments ?? {}, hold);
+      if (read instanceof Response) return refusedWith(read);
+      return result(id, read.found ? said(read.value) : said({ error: read.error }, true));
     }
     if (params.name === "list_products") {
       const cursor = typeof params.arguments?.cursor === "string" ? params.arguments.cursor.slice(0, 200) : null;

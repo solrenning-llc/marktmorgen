@@ -23,6 +23,19 @@ const CONCURRENCY_COMMENT = [
   "  # The active merge-group run is never canceled by this group; a newer delivery of the same",
   "  # merge group may replace one still pending, and that replacement is the same check.",
 ].join("\n") + "\n";
+/**
+ * CodeQL alone lets a push to main (and the daily and manual runs) finish: it is the one
+ * workflow whose push run on main is never replaced by the merge-group proof
+ * (scripts/ci_full_tree_proof.py), so canceling it left main without a complete analysis.
+ * The other eight keep canceling an older push run: the green merge-group run on the same
+ * commit already proves them, so a canceled push run costs no coverage.
+ */
+const CANCEL_IN_PROGRESS: Record<string, string> = { codeql: "${{ github.event_name == 'pull_request' }}" };
+const CODEQL_COMMENT = [
+  "  # CodeQL cancels only an older run of the same pull request: a push to main, the daily run",
+  "  # and a manual run always finish, so main gets a complete analysis; per group at most one",
+  "  # runs and one waits, and a newer push replaces the waiting one, so runs never pile up.",
+].join("\n") + "\n";
 const read = (name: string) => readFileSync(`.github/workflows/${name}.yml`, "utf8");
 
 /** Top-level jobs of a workflow: {job id: its text}. */
@@ -81,9 +94,9 @@ for (const name of WORKFLOWS) {
   const group = /\n {2}group: (.*)\n/.exec(on)?.[1] ?? "";
   is(`${name}: the group holds the ref and the event`, [group.includes("${{ github.ref }}"), group.endsWith("-${{ github.event_name }}")], [true, true]);
   is(`${name}: in-progress runs are canceled only outside merge_group`,
-    /\n {2}cancel-in-progress: (.*)\n/.exec(on)?.[1], "${{ github.event_name != 'merge_group' }}");
+    /\n {2}cancel-in-progress: (.*)\n/.exec(on)?.[1], CANCEL_IN_PROGRESS[name] ?? "${{ github.event_name != 'merge_group' }}");
   is(`${name}: the comment states only what concurrency guarantees`,
-    /\n((?: {2}#.*\n)+) {2}cancel-in-progress:/.exec(on)?.[1], CONCURRENCY_COMMENT);
+    /\n((?: {2}#.*\n)+) {2}cancel-in-progress:/.exec(on)?.[1], CONCURRENCY_COMMENT + (name === "codeql" ? CODEQL_COMMENT : ""));
   is(`${name}: no claim that a queued change is never canceled`, /never has its checks cancel/.test(on), false);
 }
 

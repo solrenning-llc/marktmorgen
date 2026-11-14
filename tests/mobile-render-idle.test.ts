@@ -48,3 +48,15 @@ test("the browser's first page is an unmeasured warm-up, closed before any sampl
   assert.match(runner.slice(samples), /Network\.setCacheDisabled",\{cacheDisabled:true\}/,
     "every measured sample still runs with the HTTP cache disabled");
 });
+
+test("the warm-up visits only the home page, so every other page's first server render is still measured", () => {
+  const warm = runner.indexOf("const warm=await browser.newContext(");
+  const closed = runner.indexOf("finally{await warm.close();}", warm);
+  const body = runner.slice(warm, closed);
+  const visits = body.match(/\.goto\(/g) ?? [];
+  assert.equal(visits.length, 1, "exactly one navigation in the warm-up");
+  assert.match(body, /\.goto\(LOCAL\+"\/",/, "and it is the home page");
+  assert.doesNotMatch(body, /productPath|storePath|STORE_PATHS|\/pricing|\/platform\//,
+    "a store or product page warmed here would hide its first server render from sample 1");
+  assert.doesNotMatch(body, /\bfor\s*\(|\.forEach\(|\.map\(/, "no loop over pages");
+});

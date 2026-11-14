@@ -139,6 +139,20 @@ async function readPass(store: Store, token: string | undefined): Promise<Pass |
   }
 }
 
+/**
+ * Lets go of a browser's pass at sign-out (14 November 2026): the record goes and leaves the address's list of
+ * passes, so the token lets nobody in again, not only this browser whose cookie is cleared. True only when both
+ * replies are whole counts (rule 24); an unknown answer throws, never "signed out" on a guess.
+ */
+export async function dropPass(store: Store, token: string | undefined): Promise<boolean> {
+  if (!token || !TOKEN_PATTERN.test(token) || !isRedisConfigured()) return false;
+  const pass = await readPass(store, token);
+  const commands: (string | number)[][] = [["DEL", passKey(token)], ...(pass ? [["SREM", passesKey(store, pass.e), sha(token)]] : [])];
+  const replies = repliesFor(await redisPipeline(commands), commands.length);
+  if (!replies || replies.some((reply) => countOf(reply) === null)) throw new UnknownReplyError("a pass let go at sign-out");
+  return true;
+}
+
 export function passCookie(store: Store, token: string, secure: boolean): string {
   return `${passCookieName(store)}=${token}; Path=/; Max-Age=${PASS_SECONDS}; HttpOnly; SameSite=Lax${secure ? "; Secure" : ""}`;
 }

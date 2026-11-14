@@ -1,5 +1,6 @@
 "use client";
 
+import { ConfirmAction } from "@/components/confirm-action";
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/icons";
@@ -112,7 +113,6 @@ export function FunnelEditor({
   const [steps, setSteps] = useState<Draft[]>(() => toDrafts(initial, currency));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [confirmRemove, setConfirmRemove] = useState(false);
   const saved = JSON.stringify(toDrafts(initial, currency));
   const dirty = JSON.stringify(steps) !== saved;
   useLeaveGuard(dirty && !busy);
@@ -172,7 +172,6 @@ export function FunnelEditor({
       const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string };
       if (data.ok) {
         toast(confirmation);
-        setConfirmRemove(false);
         router.refresh();
         return;
       }
@@ -438,21 +437,16 @@ export function FunnelEditor({
           </button>
         ) : null}
         {initial && !dirty ? (
-          confirmRemove ? (
-            <span className="flex flex-wrap items-center gap-2 text-sm text-ink-soft">
-              {`Remove ${initial.steps.length === 1 ? "the offer" : `all ${initial.steps.length} offers`}?`}
-              <button type="button" className="btn btn-danger btn-sm" disabled={busy} onClick={() => send(null, "Funnel removed.")}>
-                Yes, remove
-              </button>
-              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setConfirmRemove(false)}>
-                Keep it
-              </button>
-            </span>
-          ) : (
-            <button type="button" className="btn btn-ghost" onClick={() => setConfirmRemove(true)}>
-              Remove the funnel
-            </button>
-          )
+          <ConfirmAction
+            className="btn btn-ghost"
+            disabled={busy}
+            busy={busy}
+            question={`Remove ${initial.steps.length === 1 ? "the offer" : `all ${initial.steps.length} offers`}?`}
+            yes="Yes, remove"
+            onConfirm={() => send(null, "Funnel removed.")}
+          >
+            Remove the funnel
+          </ConfirmAction>
         ) : null}
       </div>
     </section>

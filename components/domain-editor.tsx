@@ -1,5 +1,6 @@
 "use client";
 
+import { ConfirmAction } from "@/components/confirm-action";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "@/components/toast";
@@ -58,7 +59,6 @@ export function DomainEditor({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [checked, setChecked] = useState(false);
-  const [removing, setRemoving] = useState(false);
 
   const act = async (payload: Record<string, unknown>) => {
     setBusy(true);
@@ -172,42 +172,23 @@ export function DomainEditor({
         >
           Check again
         </button>
-        {removing ? (
-          <>
-            <button
-              type="button"
-              aria-busy={busy} disabled={busy}
-              className="btn btn-secondary"
-              onClick={async () => {
-                if (await act({ action: "remove" })) {
-                  setStatus(null);
-                  setRemoving(false);
-                  toast("Domain removed.");
-                  router.refresh();
-                }
-              }}
-            >
-              Yes, remove it
-            </button>
-            <button type="button" className="text-sm font-bold text-ink-soft underline underline-offset-4" onClick={() => setRemoving(false)}>
-              Keep it
-            </button>
-          </>
-        ) : (
-          <button
-            type="button"
-            className="text-sm font-bold text-ink-soft underline underline-offset-4 hover:text-danger"
-            onClick={() => setRemoving(true)}
-          >
-            Remove the domain
-          </button>
-        )}
+        <ConfirmAction
+          className="text-sm font-bold text-ink-soft underline underline-offset-4 hover:text-danger"
+          disabled={busy}
+          busy={busy}
+          question={`Remove the domain? ${domain} stops opening your store. marktmorgen.com/@${handle} carries on as before.`}
+          yes="Yes, remove it"
+          onConfirm={async () => {
+            if (await act({ action: "remove" })) {
+              setStatus(null);
+              toast("Domain removed.");
+              router.refresh();
+            }
+          }}
+        >
+          Remove the domain
+        </ConfirmAction>
       </div>
-      {removing ? (
-        <p className="mt-2 text-sm text-ink-soft">
-          {`${domain} stops opening your store. marktmorgen.com/@${handle} carries on as before.`}
-        </p>
-      ) : null}
       {checked && shown && !shown.live && !error ? (
         <p className="notice mt-3" role="status">Not there yet. Records can take a while to show; check again in a few minutes.</p>
       ) : null}

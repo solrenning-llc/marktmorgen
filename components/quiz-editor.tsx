@@ -1,5 +1,6 @@
 "use client";
 
+import { ConfirmAction } from "@/components/confirm-action";
 import { useState } from "react";
 import { useLeaveGuard } from "@/components/leave-guard";
 import { toast } from "@/components/toast";
@@ -82,7 +83,6 @@ export function QuizEditor({
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [removing, setRemoving] = useState(false);
   const [draftCount, setDraftCount] = useState<number>(DEFAULT_QUIZ_DRAFT);
   // The quiz as it was opened: leaving with changes to it asks first (487 [IT4], item 6), an untouched one never.
   const [opened, setOpened] = useState("");
@@ -460,30 +460,21 @@ export function QuizEditor({
           Cancel
         </button>
         {setup ? (
-          removing ? (
-            <span className="flex flex-wrap items-center gap-2 text-sm">
-              <span className="text-ink-soft">Remove the quiz? The lessons after it stop waiting on it.</span>
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                disabled={busy}
-                onClick={async () => {
-                  if (await send(null)) {
-                    toast("Quiz removed.");
-                    setDraft(null);
-                    setRemoving(false);
-                  }
-                }}
-              >
-                Yes, remove it
-              </button>
-              <button type="button" className={`${small} font-bold`} onClick={() => setRemoving(false)}>Keep it</button>
-            </span>
-          ) : (
-            <button type="button" className="ml-auto text-sm font-bold text-ink-soft underline underline-offset-4 hover:text-danger" onClick={() => setRemoving(true)}>
-              Remove the quiz
-            </button>
-          )
+          <ConfirmAction
+            className="ml-auto text-sm font-bold text-ink-soft underline underline-offset-4 hover:text-danger"
+            disabled={busy}
+            busy={busy}
+            question="Remove the quiz? The lessons after it stop waiting on it."
+            yes="Yes, remove it"
+            onConfirm={async () => {
+              if (await send(null)) {
+                toast("Quiz removed.");
+                setDraft(null);
+              }
+            }}
+          >
+            Remove the quiz
+          </ConfirmAction>
         ) : null}
       </div>
     </form>

@@ -1,5 +1,6 @@
 "use client";
 
+import { ConfirmAction } from "@/components/confirm-action";
 import { useState } from "react";
 import { Icon } from "@/components/icons";
 import { toast } from "@/components/toast";
@@ -60,7 +61,6 @@ export function SavedSections({
   const [chosen, setChosen] = useState<string[]>([]);
   const [name, setName] = useState("");
   const [uses, setUses] = useState<{ id: string; list: Use[]; checked: string[] } | null>(null);
-  const [removing, setRemoving] = useState<string | null>(null);
 
   async function load() {
     try {
@@ -189,28 +189,21 @@ export function SavedSections({
                         Update the saved section from this page
                       </button>
                     ) : null}
-                    {removing === section.id ? (
-                      <span className="flex items-center gap-2 text-xs text-ink-soft">
-                        Pages keep their blocks.
-                        <button
-                          type="button"
-                          className="btn btn-danger btn-sm"
-                          disabled={busy}
-                          onClick={async () => {
-                            if (await send({ action: "remove", id: section.id })) {
-                              setRemoving(null);
-                              toast("Section removed from the library.");
-                              await load();
-                            }
-                          }}
-                        >
-                          Yes, remove
-                        </button>
-                        <button type="button" className="btn btn-ghost btn-sm" onClick={() => setRemoving(null)}>Keep it</button>
-                      </span>
-                    ) : (
-                      <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={() => setRemoving(section.id)}>Remove</button>
-                    )}
+                    <ConfirmAction
+                      className="btn btn-ghost btn-sm"
+                      disabled={busy}
+                      busy={busy}
+                      question="Remove this section from the library? Pages keep their blocks."
+                      yes="Yes, remove"
+                      onConfirm={async () => {
+                        if (await send({ action: "remove", id: section.id })) {
+                          toast("Section removed from the library.");
+                          await load();
+                        }
+                      }}
+                    >
+                      Remove
+                    </ConfirmAction>
                   </div>
                   {uses?.id === section.id ? (
                     <div className="mt-3 rounded-[12px] bg-paper p-3 ring-1 ring-line">

@@ -17,7 +17,11 @@ export const PINNED_READER_ASSETS={
  * host (merge-group jobs 129011602367, 129042996110, 129914526510 and others:
  * the host answered 504 to one runner while others downloaded it the same minute).
  * Guidepup still verifies the asset's pinned SHA-256 after every download; a
- * checksum, extraction, permission, timeout or unknown failure is never repeated.
+ * checksum, extraction, permission or unknown failure is never repeated. The
+ * install has no time limit of its own (a slow download that would finish is not
+ * cut short): a stalled one ends at the job's timeout-minutes, which fails the job
+ * and is never repeated either, and a killed attempt (a signal) is not a download
+ * failure, so it never qualifies for the one repeat.
  */
 export async function installReaderAssets(options={}){
  const {env=process.env,platform=process.platform,run=spawnSync,

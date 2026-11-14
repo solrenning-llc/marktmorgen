@@ -373,6 +373,9 @@ export async function POST(request: NextRequest) {
         // once; said in the log if they cannot (the product is already gone, so nothing shows them).
         const reviewPhotos = await dropReviews(removed.store.statsId, id, 3).catch((error: unknown) => {
           console.error("could not drop a removed product's reviews", error);
+          // Never a removal finished while its reviews (buyers' names and words) stay: a person's erasure reads only
+          // today's catalog, so these are said as cleanup still pending (Claude 3 cloud I, erasure audit).
+          cleanupPending = true;
           return [] as string[];
         });
         had.push(...reviewPhotos.map((pathname) => ({ pathname })));

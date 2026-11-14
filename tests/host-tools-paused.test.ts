@@ -94,7 +94,8 @@ async function main(): Promise<void> {
   part("Paid: the host connects Google Calendar and the tools reach Google");
   const url = await beginConsent("google", { statsId: store.statsId!, sid: store.sid!, sessionCookie: session, email: OWNER, host: hostId(OWNER), scopes: GOOGLE_HOST_SCOPES });
   const taken = await takeConsent("google", new URL(url).searchParams.get("state") ?? "", { sessionCookie: session, email: OWNER });
-  const connected = taken ? await finishConsent("google", { statsId: taken.statsId, code: "good", verifier: taken.verifier, by: OWNER, owner: { email: store.email, handle: store.handle }, host: taken.host }) : { ok: false };
+  // startedAt: when the consent flow began, which finishConsent now needs (lib/meet-connect.ts KEEP_UNLESS_GONE, Claude 5 zoom-forget-race).
+  const connected = taken ? await finishConsent("google", { statsId: taken.statsId, code: "good", verifier: taken.verifier, by: OWNER, owner: { email: store.email, handle: store.handle }, host: taken.host, startedAt: taken.at }) : { ok: false };
   is("the host's Google Calendar is connected", connected.ok, true);
   let from = asked.length;
   const paidView = await hostCalendarView(store, OWNER, "UTC");
@@ -107,7 +108,8 @@ async function main(): Promise<void> {
   // The store's own Google meetings account, so a test meeting really reaches Google when paid.
   const storeUrl = await beginConsent("google", { statsId: store.statsId!, sid: store.sid!, sessionCookie: session, email: OWNER });
   const storeTaken = await takeConsent("google", new URL(storeUrl).searchParams.get("state") ?? "", { sessionCookie: session, email: OWNER });
-  const storeConnected = storeTaken ? await finishConsent("google", { statsId: storeTaken.statsId, code: "good", verifier: storeTaken.verifier, by: OWNER, owner: { email: store.email, handle: store.handle } }) : { ok: false };
+  // startedAt: when the consent flow began, which finishConsent now needs (lib/meet-connect.ts KEEP_UNLESS_GONE, Claude 5 zoom-forget-race).
+  const storeConnected = storeTaken ? await finishConsent("google", { statsId: storeTaken.statsId, code: "good", verifier: storeTaken.verifier, by: OWNER, owner: { email: store.email, handle: store.handle }, startedAt: storeTaken.at }) : { ok: false };
   is("the store's Google meetings account is connected", storeConnected.ok, true);
   from = asked.length;
   await meet({ action: "test", provider: "google" });

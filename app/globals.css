@@ -206,7 +206,8 @@
   --color-mint-soft: var(--mint-soft);
   --color-amber-brand: var(--amber);
   --color-amber-soft: var(--amber-soft);
-  --color-danger: var(--danger);
+  /* Error words (text-danger, hover:text-danger) at 7:1 on light surfaces (1.4.6): the error-copy shade, not the fill red. */
+  --color-danger: var(--danger-text);
   --color-danger-text: var(--danger-text);
   --color-danger-soft: var(--danger-soft);
   --color-cream: var(--cream);
@@ -1511,7 +1512,8 @@ a.chip {
 .field-error {
   font-size: 0.875rem;
   font-weight: 600;
-  color: var(--danger);
+  /* 8.81:1 on white, 7.47:1 on sand (1.4.6); --danger, 5.85:1 on white, stays for fills and borders. */
+  color: var(--danger-text);
 }
 
 /*

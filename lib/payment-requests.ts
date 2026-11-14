@@ -224,17 +224,27 @@ export async function openRequestCheckout(store: Store, id: string, origin: stri
   const held = await holdForCheckout(request.id);
   if (!held) return { ok: false, reason: "busy" };
   try {
-    // The checkout opened before, while Stripe keeps it open: the same page again.
-    if (SESSION_ID.test(request.session) && now - request.sessionAt < REUSE_SECONDS * 1000) {
+    // The checkout opened before, read while Stripe may still hold it open (a day; CHECKOUT_LIFE_MS), never only for
+    // the 23 hours it is given again (Claude 7, 14 November 2026): a second press in the 24th hour opened a second
+    // checkout beside the first, and a buyer who paid both was charged twice for one request.
+    if (SESSION_ID.test(request.session) && now - request.sessionAt < CHECKOUT_LIFE_MS) {
       const known = (await onAccount("GET", store.stripeAccountId, `/checkout/sessions/${encodeURIComponent(request.session)}`).catch((error: unknown) => {
         // A checkout Stripe no longer has is no checkout: a new one is opened.
         if (error instanceof StripeError && error.status === 404) return {};
         throw error;
       })) as Record<string, unknown>;
-      if (known.status === "open" && typeof known.url === "string" && known.url) return { ok: true, url: known.url };
+      // Within 23 hours, the same page again.
+      if (known.status === "open" && typeof known.url === "string" && known.url && now - request.sessionAt < REUSE_SECONDS * 1000) return { ok: true, url: known.url };
       if (isSettled(known)) {
         await markPaid(store, request.id, known, now);
         return { ok: false, reason: "gone" };
+      }
+      // Being paid (a payment that settles later): no second checkout beside it.
+      if (known.status === "complete") return { ok: false, reason: "busy" };
+      // Still open but about to close: closed on Stripe before another opens, and nothing opens if it cannot be.
+      if (known.status === "open") {
+        const closed = (await onAccount("POST", store.stripeAccountId, `/checkout/sessions/${encodeURIComponent(request.session)}/expire`, new URLSearchParams())) as Record<string, unknown>;
+        if (closed.status !== "expired") return { ok: false, reason: "error" };
       }
     }
     const opened = await createRequestCheckout(store, request, origin, now);

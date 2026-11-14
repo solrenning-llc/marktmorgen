@@ -728,6 +728,14 @@ const STORES_NOTICES: Record<string, { title: string; body: string }> = {
     title: "This store still has a plan running",
     body: "Cancel its plan below, and delete it once the plan has ended. Nothing was deleted.",
   },
+  assistant: {
+    title: "This store still has the Store assistant running",
+    body: "The assistant would keep billing you after the store is gone. Under Store assistant, press \u201cStop at the end of this month\u201d. Then you can delete the store. Nothing was deleted.",
+  },
+  assistant_due: {
+    title: "The Store assistant on this store may still be charged",
+    body: "A payment for the Store assistant did not go through, and Stripe may try it again until its month ends. You can delete this store once that month is over, or write to support to end the assistant now. Nothing was deleted.",
+  },
   domain: {
     title: "This store still has its own domain",
     body: "Remove the domain first. Nothing was deleted.",

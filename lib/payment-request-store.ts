@@ -35,7 +35,7 @@
  */
 import { personKey } from "@/lib/person-key";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, repliesFor, countOf } from "@/lib/redis-reply";
 import { type Held, LockBusyError, releaseLock, takeLock, withLock } from "@/lib/redis-lock";
 import { type Store } from "@/lib/store";
 import { dataBytes } from "@/lib/store-data-rules";
@@ -188,7 +188,14 @@ export async function createRequest(store: Store, draft: RequestDraft, now = Dat
       ["EXPIRE", storeKey(store.sid), keep],
       ["EXPIRE", person, keep],
     ]);
-    const [open, kept, mine] = [Number(counts[5]), Number(counts[6]), Number(counts[7])];
+    // Each count read exactly (rule 24; Claude 7, 14 November 2026): a whole number, and at least the request just
+    // added. Number() read a null or "" as 0 and true as 1, so a limit could be passed on a count nobody knew.
+    const exact = (reply: unknown) => {
+      const n = countOf(reply);
+      return n !== null && n >= 1 ? n : Number.NaN;
+    };
+    const read = Array.isArray(counts) && counts.length === 11 ? counts : [];
+    const [open, kept, mine] = [exact(read[5]), exact(read[6]), exact(read[7])];
     const undo = () => redisPipeline([["ZREM", openKey(store.sid), request.id], ["ZREM", storeKey(store.sid), request.id], ["SREM", person, request.id]]).catch(() => undefined);
     if (![open, kept, mine].every(Number.isSafeInteger)) {
       await undo();

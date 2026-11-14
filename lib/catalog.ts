@@ -840,13 +840,24 @@ export async function readKind(store: Store, kind: Kind): Promise<Listing[]> {
  * What the store record holds (inline, or in the head) is not read again.
  */
 export async function readListingsExact(store: Store, ids?: Iterable<string>): Promise<Listing[]> {
+  return (await readListingsExactMeasured(store, ids)).listings;
+}
+
+/**
+ * readListingsExact, and how many bytes of listing records it read from Redis
+ * (0 for those the store record holds whole), so a reading paid for at its
+ * most is settled at what it read (the MCP tool list_bundle_choices, 631
+ * [AA1] (a)).
+ */
+export async function readListingsExactMeasured(store: Store, ids?: Iterable<string>): Promise<{ listings: Listing[]; bytes: number }> {
   const asked = wanted(store, ids);
   const catalog = store.catalog;
   if (catalog.inline) {
     const byId = new Map(catalog.inline.map((p) => [p.id, p]));
-    return asked.map((id) => byId.get(id)).filter((p): p is Product => Boolean(p)).map(listingOf);
+    return { listings: asked.map((id) => byId.get(id)).filter((p): p is Product => Boolean(p)).map(listingOf), bytes: 0 };
   }
-  if (asked.length === 0) return [];
+  if (asked.length === 0) return { listings: [], bytes: 0 };
+  let bytes = 0;
   const found = new Map(catalog.head.map((listing) => [listing.id, listing]));
   const missing = asked.filter((id) => !found.has(id));
   if (missing.length) {
@@ -868,13 +879,15 @@ export async function readListingsExact(store: Store, ids?: Iterable<string>): P
       if (raw === null) return;
       const listing = typeof raw === "string" ? parseListing(parseJson(raw)) : null;
       if (!listing || listing.id !== id) throw new UnknownReplyError("a catalog's listing of a product it lists");
+      bytes += Buffer.byteLength(raw as string, "utf8");
       found.set(id, listing);
     });
   }
-  return asked.flatMap((id) => {
+  const listings = asked.flatMap((id) => {
     const listing = found.get(id);
     return listing ? [listing] : [];
   });
+  return { listings, bytes };
 }
 
 /** readKind, read exactly (readListingsExact): a product of that kind that could not be read throws, never drops out; one Redis confirms is not there is left out. */
@@ -1028,6 +1041,38 @@ export async function readCards(store: Store): Promise<Map<string, Card>> {
     ],
   ]).catch((error) => console.error("filling the product cards failed", error));
   return found;
+}
+
+/**
+ * The cached cards of just these ids, in one HMGET and nothing more: no
+ * listing is read and nothing is healed, so its cost is known before it is
+ * sent (the MCP tool list_bundle_choices, a page at a time; Codex A3 on
+ * #1933). An id whose card is not cached yet, or not in its shape, answers
+ * null. Read exactly (CX-123 rule 24): anything but one answer to the one
+ * command, holding one text or nil for each id, throws UnknownReplyError,
+ * never a stretch searched short. `bytes` is what the cards read weighed.
+ */
+export async function cachedCards(store: Store, ids: string[]): Promise<{ cards: Map<string, Card | null>; bytes: number }> {
+  const cards = new Map<string, Card | null>();
+  if (!ids.length) return { cards, bytes: 0 };
+  const catalog = store.catalog;
+  if (catalog.inline) {
+    const inline = new Map(catalog.inline.map((p) => [p.id, { id: p.id, title: p.title, priceCents: p.priceCents, page: p.page } as Card]));
+    for (const id of ids) cards.set(id, inline.get(id) ?? null);
+    return { cards, bytes: 0 };
+  }
+  if (!catalog.id || !isRedisConfigured()) throw new redisReply.UnknownReplyError("the products' cached cards: no catalog to read");
+  // One command, one answer: more or fewer is not Redis's (Codex A3 on #1933).
+  const replies = redisReply.repliesFor(await redisPipeline([["HMGET", titlesKey(catalog.id), ...ids]]), 1);
+  const slots = replies ? redisReply.repliesFor(replies[0], ids.length) : null;
+  if (!slots || slots.some((v) => v !== null && typeof v !== "string")) throw new redisReply.UnknownReplyError("the products' cached cards");
+  let bytes = 0;
+  ids.forEach((id, i) => {
+    const raw = slots[i];
+    if (typeof raw === "string") bytes += Buffer.byteLength(raw, "utf8");
+    cards.set(id, typeof raw === "string" ? parseCard(id, raw) : null);
+  });
+  return { cards, bytes };
 }
 
 /** Just the names, for the screens that want nothing else. */

@@ -56,7 +56,7 @@ async function main(): Promise<void> {
   redis.run(["SET", "nl:pkg:cs_test_" + "p".repeat(24), JSON.stringify({ s: statsId, h: store.handle, p: "call000001", e: PERSON, total: 4, at: 1_790_000_000, until: 0, token: "secret-token-1", holds: [] })]);
   redis.run(["SET", "nl:pkg:cs_test_" + "q".repeat(24), JSON.stringify({ s: statsId, h: store.handle, p: "call000001", e: OTHER, total: 4, at: 1_790_000_000, until: 0, token: "secret-token-2", holds: [] })]);
   // Subscription ids as Stripe gives them (SUB_ID): the copy reads this list exactly, as the closing does.
-  redis.run(["HSET", paidKey(await storeFolder(storeRef(store))), "sub_1CopyMine", JSON.stringify({ inv: "in_1", amt: 900, cur: "usd", ps: 1, pe: 2, e: PERSON }), "sub_2CopyOther", JSON.stringify({ inv: "in_2", amt: 900, cur: "usd", ps: 1, pe: 2, e: OTHER })]);
+  redis.run(["HSET", paidKey(await storeFolder(storeRef(store))), "sub_1CopyMine", JSON.stringify({ inv: "in_1CopyMine", amt: 900, cur: "usd", ps: 1, pe: 2, e: PERSON }), "sub_2CopyOther", JSON.stringify({ inv: "in_2CopyOther", amt: 900, cur: "usd", ps: 1, pe: 2, e: OTHER })]);
   const scope = (await erasureScope(store, PERSON))!;
 
   part("Found through their payments");

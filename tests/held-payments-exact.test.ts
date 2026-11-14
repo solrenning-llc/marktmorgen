@@ -47,7 +47,7 @@ async function main(): Promise<void> {
   const mine = () => heldPaymentsOf(store, MEMBER);
 
   part("Control: only the person's own rows, matched by address");
-  await redis.pipeline([["HSET", key, "sub_1HeldExactMine", row("in_1Mine", "Member@Example.com")], ["HSET", key, "sub_1HeldExactOther", row("in_1Other", "other@example.com")]]);
+  await redis.pipeline([["HSET", key, "sub_1HeldExactMine", row("in_1HeldMine", "Member@Example.com")], ["HSET", key, "sub_1HeldExactOther", row("in_1HeldOther", "other@example.com")]]);
   is("their row, not the other member's", await outcome(mine), "read 1");
   is("it names its subscription", (await mine())[0]?.subscription, "sub_1HeldExactMine");
   is("an empty list is a confirmed empty hash", await withPaidReply(key, [], mine), "read 0");
@@ -55,16 +55,16 @@ async function main(): Promise<void> {
   part("Rule 24: a reply in another shape is unknown, never no payments held");
   is("a string", await withPaidReply(key, "garbled", mine), "threw");
   is("a number", await withPaidReply(key, 1, mine), "threw");
-  is("an odd-length list", await withPaidReply(key, ["sub_1HeldExactMine", row("in_1Mine", MEMBER), "extra"], mine), "threw");
+  is("an odd-length list", await withPaidReply(key, ["sub_1HeldExactMine", row("in_1HeldMine", MEMBER), "extra"], mine), "threw");
   is("a list holding a number", await withPaidReply(key, ["sub_1HeldExactMine", 7], mine), "threw");
-  is("an object", await withPaidReply(key, { sub_1HeldExactMine: row("in_1Mine", MEMBER) }, mine), "threw");
+  is("an object", await withPaidReply(key, { sub_1HeldExactMine: row("in_1HeldMine", MEMBER) }, mine), "threw");
 
   part("Rule 24: a row that does not read is unknown, never skipped (it may be theirs)");
   await redis.pipeline([["HSET", key, "sub_2HeldExactBroken", "{not json"]]);
   is("a row that is not JSON", await outcome(mine), "threw");
   await redis.pipeline([["HSET", key, "sub_2HeldExactBroken", JSON.stringify({ inv: "in_2", amt: 900, cur: "usd" })]]);
   is("a row without its period or address", await outcome(mine), "threw");
-  await redis.pipeline([["HDEL", key, "sub_2HeldExactBroken"], ["HSET", key, "not-a-sub", row("in_3", MEMBER)]]);
+  await redis.pipeline([["HDEL", key, "sub_2HeldExactBroken"], ["HSET", key, "not-a-sub", row("in_3HeldNotSub", MEMBER)]]);
   is("a field that is not a subscription id", await outcome(mine), "threw");
 
   done();

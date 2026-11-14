@@ -462,7 +462,15 @@ export async function readInbox(statsId: string | null): Promise<Conversation[]>
   // Only a slot that answered exactly null has expired; nothing else leaves the index.
   const gone = ids.filter((_, i) => values[i] === null);
   if (gone.length) await redisPipeline([["ZREM", indexKey(statsId), ...gone]]).catch(() => {});
-  return inboxOrder(values.map(parseKept).filter((c): c is Kept => Boolean(c)).map(shown));
+  // A kept record that does not read is unknown, never a conversation that is not there (rule 24): the studio and the
+  // person's data copy would otherwise go on without it in silence.
+  const kept = values.map((value) => {
+    if (value === null) return null;
+    const conversation = parseKept(value);
+    if (!conversation) throw new UnknownReplyError("the inbox's conversations");
+    return conversation;
+  });
+  return inboxOrder(kept.filter((c): c is Kept => c !== null).map(shown));
 }
 
 /** How many open conversations have something the store has not read. */

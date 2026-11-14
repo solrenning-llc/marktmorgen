@@ -11,6 +11,7 @@ import { communityWords } from "@/lib/buyer-words/community";
 import { LANGUAGES } from "@/lib/store-language";
 import { EventCard } from "@/components/community-events";
 import { EmptyState } from "@/components/empty-state";
+import { CommunityFlash } from "@/components/community-flash";
 
 type Params = {
   params: Promise<{ handle: string }>;
@@ -87,7 +88,7 @@ export default async function CommunityEventsPage({ params, searchParams }: Para
             <Link href={store.sid ? `/studio/community?store=${store.sid}#events` : "/studio/community#events"} className="cm-pill">{w.scheduleInStudio}</Link>
           ) : null}
         </div>
-        {notice ? <p className={`cm-flash mt-4 ${notice.tone === "warn" ? "cm-flash-warn" : ""}`} role="status">{notice.text}</p> : null}
+        {notice ? <CommunityFlash text={notice.text} warn={notice.tone === "warn"} className="mt-4" /> : null}
 
         {!before ? (
           <section aria-labelledby="ev-coming" className="mt-6">

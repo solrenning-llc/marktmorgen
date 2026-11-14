@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { CommunityFlash } from "@/components/community-flash";
 import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { normaliseHandle, storeForPage } from "@/lib/store";
@@ -45,7 +46,7 @@ export default async function CommunityYouPage({ params, searchParams }: Params)
       <CommunityBar store={store} config={viewer.config} tab="you" signedIn />
       <main id="content" className="mx-auto max-w-xl px-4 pb-16 pt-6">
         <h1 className="font-display text-2xl font-semibold tracking-[-0.02em] sm:text-3xl">{w.tabYou}</h1>
-        {notice ? <p className={`cm-flash mt-4 ${notice.tone === "warn" ? "cm-flash-warn" : ""}`} role="status">{notice.text}</p> : null}
+        {notice ? <CommunityFlash text={notice.text} warn={notice.tone === "warn"} className="mt-4" /> : null}
 
         {viewer.owner ? (
           <div className="st-card mt-6 p-6">

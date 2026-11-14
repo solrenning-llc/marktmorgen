@@ -114,13 +114,22 @@ function isHttps(address: string): boolean {
  * email's and is not. An address whose escapes do not read is taken as naming somebody.
  */
 function namesSomebody(address: string): boolean {
-  let decoded: string;
-  try {
-    decoded = decodeURIComponent(address);
-  } catch {
-    return true;
+  // Every layer of escapes, read until it no longer changes (Codex G on #3456): "%2566" read once is still "%66", and a
+  // reader of the feed can read it again. Each reading shortens the text, so it stops within its length; a layer that
+  // does not read is taken as naming somebody.
+  let layer = address;
+  for (let step = 0; step <= address.length; step += 1) {
+    if (TOKEN_SHAPE.test(layer) || /(^|[^/])@/.test(layer)) return true;
+    let next: string;
+    try {
+      next = decodeURIComponent(layer);
+    } catch {
+      return true;
+    }
+    if (next === layer) return false;
+    layer = next;
   }
-  return TOKEN_SHAPE.test(address) || TOKEN_SHAPE.test(decoded) || /(^|[^/])@/.test(address) || /(^|[^/])@/.test(decoded);
+  return true;
 }
 
 /** A public address: https, and nothing that could name a buyer (a feed token, an email address). */

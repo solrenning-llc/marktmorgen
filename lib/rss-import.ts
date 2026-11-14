@@ -107,7 +107,8 @@ const SPACE = /[ \t\r\n]*/y;
 const ATTRIBUTE = /([A-Za-z_][\w.:-]*)[ \t\r\n]*=[ \t\r\n]*(?:"([^"<]*)"|'([^'<]*)')/y;
 const END_TAG = /<\/([A-Za-z_][\w.:-]*)[ \t\r\n]*>/y;
 const DECLARATION = /^<!(DOCTYPE|ENTITY|ELEMENT|ATTLIST|NOTATION)/i;
-const PREDEFINED: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" };
+/** The five predefined XML entities, and nothing else: a Map, so a name Object.prototype holds is never one (Codex X5 on #3456). */
+const PREDEFINED: ReadonlyMap<string, string> = new Map([["amp", "&"], ["lt", "<"], ["gt", ">"], ["quot", '"'], ["apos", "'"]]);
 
 function allowedCodePoint(code: number): boolean {
   return (
@@ -136,7 +137,7 @@ function decode(raw: string): string {
       if (!allowedCodePoint(code)) refuse("malformed", "The feed refers to a character XML does not allow.");
       out += String.fromCodePoint(code);
     } else if (/^[A-Za-z_][\w.-]*$/.test(ref)) {
-      const known = PREDEFINED[ref];
+      const known = PREDEFINED.get(ref);
       if (known === undefined) refuse("entity", `The feed uses the entity "&${ref};", which is not read here.`);
       out += known;
     } else {

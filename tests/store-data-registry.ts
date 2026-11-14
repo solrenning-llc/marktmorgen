@@ -441,8 +441,9 @@ export const FAMILIES: Record<string, Family> = {
   // its search request's part moved to this file with it. A course's, a space's or an event's own answer (`:sg:`,
   // `:sp:ok:`, `:ev:...:ok:`) is written here too (doorAnswer, courseDoorKey) only when that shared reading ran out of
   // refund questions for its products (Claude 1 cloud's review of #3395), 512 bytes kept minutes, as before the shared
-  // reading, and deleted with the person here (forgetAccessPerson).
-  "nl:cm:@lib/community-access.ts": { what: "A buyer's ticket answered (also for the community search), the welcome sent", parts: [per("request", 1, 512, "Stripe's answer cached for minutes.", REQ("page")), per("request", 1, 512, "What a member holds, read once for a community search, cached for minutes.", REQ("search")), item(MARK, "The welcome's mark, once per member.", "membership")] },
+  // reading, and deleted with the person here (forgetAccessPerson). The `:h:` record was priced at 512 bytes; its
+  // lists of ids reach 32 KB (that review's LOW).
+  "nl:cm:@lib/community-access.ts": { what: "A buyer's ticket answered (also for the community search), the welcome sent", parts: [per("request", 1, 512, "Stripe's answer cached for minutes.", REQ("page")), per("request", (5 * 60) / 86_400, 32 * KB, "What a member holds (`:h:`), read once for a community page or search, kept OPEN_SECONDS (five minutes) at the most (lib/community-access.ts, holdingsOf: EX open ? OPEN_SECONDS : SHUT_SECONDS): the ids asked (200 access products at most, SEARCH_PAGE lessons' products), those held and those passed over for want of refund questions, three lists of at most 220 ids of 40 characters.", REQ("search")), item(MARK, "The welcome's mark, once per member.", "membership")] },
   "nl:cm:link:@lib/community-access.ts": short("An emailed link into the community, an hour", "access", 1, LINK_BYTES, MAIL("community link")),
   "nl:rl:cm:addr:@lib/community-access.ts": short("Links asked per address, an hour", "request", 1, KEY, REQ("community link")),
   "nl:rl:cm:ip:@lib/community-access.ts": short("Links asked per connection, an hour", "request", 1, KEY, REQ("community link")),

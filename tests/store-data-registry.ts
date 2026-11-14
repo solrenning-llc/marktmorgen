@@ -57,7 +57,7 @@ import { QUIZ_MONTHLY_SUBMISSIONS } from "@/lib/quiz-usage-rules";
 import { PAID_UPLOAD_OPENS } from "@/lib/upload-budget-policy";
 import { ENTRY_BYTES } from "@/lib/store-data-rules";
 import { TASK_COUNT_WEIGHT } from "@/lib/crm";
-import { MAX_STORE_BYTES } from "@/lib/store";
+import { MAX_STORE_BYTES, PHOTO_LEFT_MAX } from "@/lib/store";
 import { KEPT_DAYS, ALL_TIME_PAGES, DAY_FIELDS_MAX, LIFE_WRITE_MAX } from "@/lib/stats";
 import { NUMBERS_KEPT_BYTES } from "@/lib/api-read-rules";
 import { MAX_AFFILIATES } from "@/lib/affiliate-setting";
@@ -203,7 +203,9 @@ export const FAMILIES: Record<string, Family> = {
   "nl:closing:undo@lib/closing-plan-guard.ts": company("Plans paid for a store already closing, until each is ended, returned in full and its creator told", "One hash for the company: a field a plan subscription; once settled only its dates are kept, looked at again and taken out DONE_KEEP_DAYS (40) later (lib/closing-plan-guard.ts); a step that fails keeps it for the next run."),
   "nl:closing:shut:@lib/closing-plan-guard.ts": company("A closing store's address, hashed, with the day its closing began", "One key an address, the company's, expiring by itself SHUT_DAYS (30) after the store's last closing run (lib/closing-plan-guard.ts)."),
   "nl:closing:final@lib/closing-holds.ts": company("Stores whose closing day has begun, seen through to the end", "One sorted set for every store, a member a store from its closing day's start to its end (lib/plan-closing.ts)."),
+  "nl:closing:final@lib/store.ts": company("The same final closing line, read only: a store in it keeps its address (moveAccount, closingUnderway)", "No second set and no write: one ZSCORE a move (Claude 6's P6/P7 on #3643)."),
   "nl:closing:held@lib/closing-holds.ts": company("Stores whose members' charges are held until they close or run again", "One sorted set for every store, a member a store; taken out when it closes or runs again (lib/closing-holds.ts)."),
+  "nl:closing:held@lib/store.ts": company("The same line of held stores, read only: a store in it keeps its address until its members are let go (moveAccount, closingUnderway)", "No second set and no write: one ZSCORE a move (Claude 1's review on #3672)."),
   "nl:courses:lock@app/api/cron/courses/route.ts": lock("The courses job"),
   "nl:dc:lock@app/api/cron/discord/route.ts": lock("The Discord job"),
   "nl:imports:lock@app/api/cron/imports/route.ts": lock("The imports job"),
@@ -238,6 +240,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:sns:seen:@app/api/mail/ses/route.ts": company("Amazon's notices already handled", "The email provider's notices, kept a few days: the company's."),
   "nl:course:@app/api/store/course/route.ts": short("A course's lock while the studio changes it", "studio", 1),
   "nl:rl:export:@app/api/store/export/route.ts": { what: "Downloads of a store's files: counted ten minutes at a time, and its whole exports since its plan ended", parts: [per("studio", 1, KEY, "Downloads counted ten minutes at a time."), capped(() => KEY, "One count of whole exports since the plan ended, sixty days.")] },
+  "nl:rl:export:@lib/list-download.ts": { what: "A store's list downloads since its plan ended", parts: [capped(() => KEY, "One count of list downloads since the plan ended, sixty days.")] },
   "nl:rl:licence:@app/api/store/licence/route.ts": short("A license check's count per connection", "request", 1, KEY, REQ("license")),
   "nl:pod:@app/api/store/podcast/route.ts": short("A podcast's lock while the studio changes it", "studio", 1),
 
@@ -299,6 +302,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:tasks:bytes:@lib/assignment.ts": { what: "What a store's students keep handed in, in bytes", parts: [capped(KEY, "One count a store.")] },
   "nl:tasks:taken:@lib/assignment.ts": short("A handed-in file's mark of the bytes it took of the store's room, an hour, so a lost answer gives them back", "buyer", 1, 128),
   "nl:tasks:doors@lib/assignment.ts": company("Hand-in doors not yet used, swept a day on", "One sorted set for every store, each door a buyer action's (priced in buyer-actions), gone within two days."),
+  "nl:tasks:held@lib/assignment.ts": company("Names a hand-in took, swept a day on unless the work keeps the file", "One sorted set for every store, each name a hand-in's (priced in buyer-actions, TASK_DOOR_COST), let go when the work keeps it, otherwise gone within two days."),
   "nl:pictures:doors:@lib/picture-door.ts": { what: "A store's picture uploads not yet put on anything", parts: [capped(1_000 * 128, "One sorted set a store, trimmed to a day each time one is added, holding at most 1,000 fresh notes (PICTURE_DOOR_MAX: one more is refused and taken back off), and expiring a day after the last.")] },
   "nl:auth:devices:@lib/auth.ts": company("Devices an account signed in on", "An account's, not a store's."),
   "nl:auth:fresh:@lib/auth.ts": company("A fresh sign-in", "An account's, minutes."),
@@ -327,7 +331,8 @@ export const FAMILIES: Record<string, Family> = {
   "nl:billing:sync:after@lib/billing-sync.ts": company("Where the billing sync stopped", "One key, the company's job."),
   "nl:billing:sync:cursor@lib/billing-sync.ts": company("Where the billing sync stopped", "One key, the company's job."),
   "nl:plan-refund:@lib/plan-refund-flow.ts": company("One store's plan refund lock while its refund is made and its plan ended (305 [SY1])", "One short key a store, the company's money job: a random token, expiring by itself FLOW_LOCK_SECONDS (505) after it was taken, released at once when done (lib/plan-refund-flow.ts)."),
-  "nl:plan-refund:ending@lib/plan-refund-flow.ts": company("Plan refunds not finished yet (305 [SY1])", "One hash, one small field a store with a refund in progress (a subscription id, two times, a flag and up to MAX_PARTS (6) charge ids with their amounts; no person's data), removed when the plan is ended or the refund is found not made, by the request itself or the daily job within GIVE_UP_DAYS (7) (lib/plan-refund-flow.ts)."),
+  "nl:plan-refund:ending@lib/plan-refund-flow.ts": company("Plan refunds not finished yet (305 [SY1])", "One hash, one small field a store with a refund in progress (a subscription id, two times, a flag and up to MAX_PARTS (6) charge ids with their amounts; no person's data), removed when the plan is ended or the refund is found not made, by the request itself or the daily job; one whose refund cannot be read is kept, with its stop, until it reads, and said in the log after GIVE_UP_DAYS (7) (lib/plan-refund-flow.ts)."),
+  "nl:plan-refund:next@lib/plan-refund-flow.ts": company("The daily job's place among plan refunds not finished yet (305 [SY1])", "One short key for every store, the company's job: the id of the store whose refund note the daily job looked at last, so the next run starts after it and every note has its turn; written once a run, gone by itself NEXT_SECONDS (30 days) after the last run that looked at a note; no person's data (lib/plan-refund-flow.ts)."),
   "nl:plan-withdraw:@lib/plan-withdrawal.ts": company("A creator's withdrawal from their own plan (EU art. 11a, 588 [KB9] unit 3)", "One small hash a store's plan subscription, the company's proof of the withdrawal as trader: the first statement's time, the receipts tried (at most PLAN_WITHDRAW_ACK_SENDS, 3), a sent flag, a refund flag and, when support is owed a note, its short reason (the flow's own words), the notes tried (at most PLAN_WITHDRAW_SUPPORT_TRIES, 3) and a told flag; no name or email. Written with HSETNX and EXPIRE, gone by itself PLAN_WITHDRAW_KEEP_DAYS (400) after (lib/plan-withdrawal.ts)."),
   "nl:plan-refund:@lib/plan-refund-write.ts": company("A store's plan refund lock while one is made (305 [SY1])", "One short key a store, the company's money job: a random token, expiring by itself LOCK_SECONDS (345) after it was taken, released at once when the refund is done (lib/plan-refund-write.ts)."),
   "nl:plan-disputes:seen@lib/plan-disputes.ts": company("What each dispute on our own Stripe account turned out to be (232 [CA1] unit 5)", "One hash, the company's job: dispute ids with 'final', 'unmatched:<seconds>' or 'open:<store id>', never an address; 400 days from the last write; a deleted store's id reads as unmatched."),
@@ -340,6 +345,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:listed:@lib/buyer-list.ts": short("An order put on the list", "order", 8, MARK),
   "nl:lostdispute:cursor:@lib/refunds.ts": short("Where a job that takes things back left off in a store's lost disputes, when there were more than one run reads", "run", 30),
   "nl:orders:link:@lib/buyer-orders.ts": short("A buyer's purchases link, a day", "access", 1, LINK_BYTES, MAIL("orders")),
+  "nl:rcode:link:@lib/returning-code.ts": short("A returning-buyer code's confirmation link, half an hour", "access", 1, LINK_BYTES, MAIL("returning code")),
   "nl:rl:orders:addr:@lib/buyer-orders.ts": short("Purchase links per address, an hour", "request", 1, KEY, REQ("orders link")),
   "nl:rl:orders:ip:@lib/buyer-orders.ts": short("Purchase links per connection, an hour", "request", 1, KEY, REQ("orders link")),
   "nl:person:@lib/buyer-profile.ts": { what: "Notes about people", room: ["lib/buyer-profile.ts"] },
@@ -372,6 +378,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:call:moved:@lib/call-records.ts": short("A call moved: its record, kept 200 days by the booking", "call", 200, KB),
   "nl:closed:batch@lib/closed-store-data.ts": company("What the walk needs of each store it deletes, while it runs", "The company's job: a field a closing store, deleted when its walk is done (lib/closed-store-data.ts)."),
   "nl:closed:due@lib/closed-store-data.ts": company("Closed stores waiting for the walk that deletes their records", "The company's job: a member a closed store, taken out when its walk begins."),
+  "nl:closed:due@lib/store.ts": company("The same walk's line, read only: a store in it keeps its address (moveAccount, closingUnderway)", "No second set and no write: one ZSCORE a move (Claude 6's P6/P7 on #3643)."),
   "nl:closed:walk@lib/closed-store-data.ts": company("Where the walk that deletes closed stores' records is", "One key, the company's job."),
   "nl:*@lib/closed-store-data.ts": company("The pattern the walk reads the database by", "Not a key: a pattern."),
   // The families whose keys a closing store's follower reads before the walk deletes them: names, not keys.
@@ -437,6 +444,11 @@ export const FAMILIES: Record<string, Family> = {
   "nl:cm:link:@lib/community-access.ts": short("An emailed link into the community, an hour", "access", 1, LINK_BYTES, MAIL("community link")),
   "nl:rl:cm:addr:@lib/community-access.ts": short("Links asked per address, an hour", "request", 1, KEY, REQ("community link")),
   "nl:rl:cm:ip:@lib/community-access.ts": short("Links asked per connection, an hour", "request", 1, KEY, REQ("community link")),
+  "nl:cm:@lib/community-approval.ts": {
+    what: "Posts and comments waiting for the creator's approval, the notes left to their authors, and each member's approved count (543 [CM2])",
+    room: ["lib/community-approval.ts"],
+    parts: [capped(MAX_SPACES * KB, "Each space's approval rule, pruned to the community's spaces.", src("lib/community-text.ts", "MAX_SPACES"))],
+  },
   "nl:cm:@lib/community-chat.ts": {
     what: "The live room: its messages, their counter, each speaker's cooldown",
     parts: [capped(MAX_CHAT_KEPT * (MAX_CHAT_TEXT * 3 + 512), "MAX_CHAT_KEPT messages, the oldest let go.", src("lib/community-chat-rules.ts", "MAX_CHAT_KEPT", "MAX_CHAT_TEXT")), per("buyer", 1, KEY, "A speaker's cooldown, minutes.")],
@@ -552,7 +564,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:esync:q@lib/email-sync.ts": company("Sync jobs waiting", "One sorted set, members gone within a week."),
   "nl:esync:seen:@lib/email-sync.ts": { what: "A person and event already sent", parts: [per("order", 30, MARK, "A buyer."), per("access", 30, MARK, "A sign-up confirmed by email.", MAIL("join"))] },
   "nl:esync:tags:@lib/email-sync.ts": { what: "Tag ids learned from the email platform, per product: counted with its product (PRODUCT_SIDE_BYTES)", room: ["lib/store.ts"] },
-  "nl:erased:@lib/suppression.ts": { what: "A deleted person's fingerprint, so the store never writes to them again: kept in place of their contact, whose room in the data room is not given back, and is more", room: ["lib/contacts.ts"] },
+  "nl:erased:@lib/suppression.ts": { what: "A deleted person's fingerprint (and, when they asked for it themselves, the same fingerprint noted as their request), so the store never writes to them again: kept in place of their contact, whose room in the data room is not given back, and is more", room: ["lib/contacts.ts"] },
   "nl:none@lib/suppression.ts": company("A key that is never written", "Read in place of a list a store does not have."),
   "nl:sender:@lib/email.ts": company("Emails handed to the sender, a month", "One count a month, the company's."),
   "nl:ses:once:@lib/email.ts": company("An email already handed over", "The company's, minutes."),
@@ -644,6 +656,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:inbox:tok:@lib/inbox.ts": { what: "What a visitor's chat opens", room: ["lib/inbox.ts"] },
   "nl:intro:c:@lib/intro-coupon.ts": { what: "An introductory price's coupon: counted with its product (PRODUCT_SIDE_BYTES)", room: ["lib/store.ts"] },
   "nl:course:@lib/learn.ts": { what: "A course's students, what they marked done, who is blocked, the drip emails sent", room: ["lib/learn.ts"], parts: [per("store", 400, MARK, "A drip email's mark.", MAIL("drip"))] },
+  "nl:course:@lib/student-bulk.ts": company("The students and blocked list of a course, read to change many students' access at once (279 [H3-4])", "Not written here: lib/student-bulk.ts only reads the students and blocked keys lib/learn.ts keeps, and writes through setBlocked; the entry nl:course:@lib/learn.ts bounds them."),
   "nl:courses:drip@lib/learn.ts": company("Courses with drip emails", "One set for every store."),
   "nl:learn:enr:@lib/learn.ts": { what: "What a buyer is enrolled in", parts: [kept(KEY, "The record itself, one a buyer."), item(128, "Each product's place in it.")] },
   "nl:learn:link:@lib/learn.ts": short("A course link and its opens, an hour", "store", 1, LINK_BYTES, MAIL("course link")),
@@ -782,6 +795,8 @@ export const FAMILIES: Record<string, Family> = {
   "nl:ppsell:receipt:@lib/paypal-delivery.ts": short("When a paid order's receipt was first tried, a week", "order", 7, MARK, KIND("paypal")),
   // RECEIPT_MAIL_BYTES and RECEIPT_MAIL_SECONDS of lib/paypal-delivery.ts (held by tests/paypal-receipt-once.test.ts, part J).
   "nl:ppsell:mail:@lib/paypal-delivery.ts": short("A paid order's receipt as first made, so every try sends the same email, a day", "order", 1, 8 * KB, KIND("paypal")),
+  "nl:rcpt:n:@lib/receipt-number.ts": room("A store's receipt numbers, one field a sale given one: taken from the room in the same script that writes it (RECEIPT_NUMBER_BYTES), a re-download taking nothing", "lib/receipt-number.ts"),
+  "nl:rcpt:seq:@lib/receipt-number.ts": room("A store's last receipt number: its key taken with its first number (RECEIPT_KEYS_BYTES)", "lib/receipt-number.ts"),
   "nl:preview:@lib/pdf-preview.ts": room("A PDF's preview, kept a year only while it fits", "lib/pdf-preview.ts"),
   "nl:stamp:copy:@lib/pdf-stamp.ts": room("A stamped copy's record, kept only while it fits", "lib/pdf-stamp.ts"),
   "nl:stamp:problem:@lib/pdf-stamp.ts": { what: "A file that could not be stamped", parts: [per("upload", 31, KB, "Per file.")] },
@@ -803,6 +818,8 @@ export const FAMILIES: Record<string, Family> = {
   "nl:pause:last:@lib/contract-funding.ts": { what: "Read-only annual eligibility evidence for the existing pause", parts: [capped(KEY, "Same one-per-store annual marker as plan-pause.ts; no new marker or expiry.")] },
   "nl:pause:@lib/plan-pause.ts": { what: "A store's break and when it was last taken", parts: [capped(4 * KB, "One a store.")] },
   "nl:pause:due@lib/plan-pause.ts": company("Breaks due", "One sorted set for every store."),
+  "nl:pause:@lib/store.ts": { what: "The same break, read only: a store with one set keeps its address until it is taken back or over (moveAccount, closingUnderway)", parts: [capped(4 * KB, "Same one-a-store break; one EXISTS a move, no read of its bytes and no write (Revisor 2 on #3672).")] },
+  "nl:pause:due@lib/store.ts": company("The same line of breaks, read only: a store in it keeps its address (moveAccount, closingUnderway)", "No second set and no write: one ZSCORE a move (Revisor 2 on #3672)."),
   "nl:pause:last:@lib/plan-pause.ts": { what: "When a break was last taken", parts: [capped(KEY, "One a store.")] },
   "nl:plan:ended@lib/plan-standing.ts": company("Stores whose plan ended, by the day", "One sorted set for every store."),
   "nl:plans:pending@lib/plans.ts": company("Plans being started", "One set, minutes."),
@@ -949,7 +966,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:recount:state@lib/data-recount.ts": company("Where the one-time count is", "One key, the company's job."),
   "nl:recount:sum@lib/data-recount.ts": company("What the count measured of each store, until it is set in its room", "The company's job, deleted when it is done."),
   "nl:join:t:@lib/store-join.ts": short("A link to join the list, sent by email", "access", 7, LINK_BYTES, MAIL("join")),
-  "nl:store:photo:@lib/store-photo.ts": { what: "The store's photo", parts: [capped(2 * (MAX_PHOTO_BYTES * 4) / 3 + KB, "One photo, and the one it replaces while it is written.", src("lib/photo-limits.ts", "MAX_PHOTO_BYTES"))] },
+  "nl:store:photo:@lib/store-photo.ts": { what: "The store's photo", parts: [capped((1 + PHOTO_LEFT_MAX) * (MAX_PHOTO_BYTES * 4) / 3 + KB, "The photo shown, and at most PHOTO_LEFT_MAX the store record names while their deletion waits (one being written, one replaced).", src("lib/photo-limits.ts", "MAX_PHOTO_BYTES"), src("lib/store.ts", "PHOTO_LEFT_MAX"))] },
   "nl:account:stores:@lib/store.ts": company("An account's other stores", "An account's."),
   "nl:account:stores:@lib/account-exists.ts": { what: "An account's other stores, read exactly to tell an existing account when an invitation is taken", parts: [capped(0, "Read only: counted with lib/store.ts.")] },
   "nl:catalog:move:cursor@lib/store.ts": company("Where the catalog move stopped", "One key, the company's job."),
@@ -992,6 +1009,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:traffic:r:@lib/traffic.ts": { what: "Requests in the window", parts: [capped(2 * KEY, "One a window.")] },
   "nl:traffic:x:@lib/traffic.ts": { what: "The live room in the window", parts: [capped(14 * KEY, "One a window, 400 days.")] },
   "nl:nudge:@lib/trial-nudges.ts": company("A trial's nudges sent", "The company's emails to a creator about their own plan."),
+  "nl:trialnudge:cursor@lib/trial-nudges.ts": company("Where the trial nudges stopped", "One key, the company's job."),
   "nl:2fa:@lib/two-step.ts": company("An account's second step", "An account's."),
   "nl:2fa:hold:@lib/two-step.ts": company("A second step held", "An account's."),
   "nl:2fa:once:@lib/two-step.ts": company("A code used once", "An account's, minutes to a day."),

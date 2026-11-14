@@ -6,10 +6,11 @@
  * null, and every checkout opened with no shipping line and no address asked, while the studio still showed the
  * shipping the creator set: the buyer was charged less than the page promised and nothing could be sent.
  */
-import { addProduct, claimHandle, ensureStatsId, setProductLink, setProductShipping, setStripeAccount, setSubscription, setProductBundle, storeForEmail } from "@/lib/store";
+import { addProduct, claimHandle, ensureStatsId, setProductExtras, setProductLink, setProductShipping, setStripeAccount, setSubscription, setProductBundle, storeForEmail } from "@/lib/store";
 import { readProduct } from "@/lib/catalog";
 import { handsOver } from "@/lib/product-option";
 import { sellsWithPayPal } from "@/lib/paypal-sales";
+import { bumpState, bumpTargetPause, canBeBumped } from "@/lib/product-extras";
 import { readFileSync } from "node:fs";
 import { bundleOwnerProblem } from "@/lib/bundle-rules";
 import { activeShipping, parseShipping } from "@/lib/shipping";
@@ -64,6 +65,22 @@ async function main(): Promise<void> {
   is("while a bundle with no shipping still does", handsOver((await readProduct(now, box.product.id))!), true);
   is("nor through PayPal", sellsWithPayPal(old), false);
   is("and a shipped product is never sold through PayPal, which asks for no address", sellsWithPayPal(after), false);
+
+  part("Nor as a box on another product's checkout, nor as an offer after paying (review of #4538)");
+  is("a bundle saved with shipping is never a box or an offer (canBeBumped)", canBeBumped(old), false);
+  is("its box reason", bumpTargetPause(old), "targetEmpty");
+  const host = await addProduct(OWNER, "Host guide", "", "20", null);
+  if (!host.ok) throw new Error("no product");
+  await setProductLink(OWNER, host.product.id, "https://example.com/host");
+  const boxed = await setProductExtras(OWNER, host.product.id, { bump: { productId: legacy.product.id, priceCents: 3000, pitch: "Add the box" }, slot: 0 });
+  is("a box offering it is not saved", boxed.ok ? "saved" : boxed.reason, "target");
+  // A box saved before the rule: the checkout reads bumpState, which pauses it, so it is never charged.
+  const later = (await storeForEmail(OWNER))!;
+  const hostNow = (await readProduct(later, host.product.id))!;
+  const state = bumpState([hostNow, old], hostNow, { productId: old.id, priceCents: 3000, pitch: "Add the box" });
+  is("a box saved before is paused at the checkout", "paused" in state ? state.paused : "live", "targetEmpty");
+  is("a bundle with no shipping can still be a box", canBeBumped((await readProduct(later, box.product.id))!), true);
+
   const editor = readFileSync("components/shipping-editor.tsx", "utf8");
   is("the studio says why, beside the shipping it shows", editor.includes("This bundle is not on sale while it has shipping"), true);
   done();

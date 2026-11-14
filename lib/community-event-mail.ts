@@ -468,9 +468,14 @@ function escapeHtml(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
 
-/** A notice's email, which is not a list email: no way to stop it, just why it came. */
-function noticeHtml(body: string, why: string, lang: string, sent: string): string {
-  return `<!doctype html><html lang="${escapeHtml(lang)}"><body style="margin:0;padding:0;background:#f7f5f0">
+/**
+ * A notice's email, which is not a list email: no way to stop it, just why it came.
+ * A whole page, as lib/mail.ts draws a store email: its character set, a phone's
+ * width and the subject as its title, for an app or browser that opens it alone
+ * (AX274 item 5; WCAG 2.4.2, 3.1.1, 1.4.10).
+ */
+export function noticeHtml(subject: string, body: string, why: string, lang: string, sent: string): string {
+  return `<!doctype html><html lang="${escapeHtml(lang)}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escapeHtml(subject.slice(0, 150))}</title></head><body style="margin:0;padding:0;background:#f7f5f0">
 <div style="max-width:560px;margin:0 auto;padding:32px 20px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:16px;line-height:1.6;color:#1c1917">
 <div style="background:#ffffff;border-radius:16px;padding:28px 24px">${bodyHtml(body)}</div>
 <div style="padding:20px 8px 0;font-size:13px;line-height:1.5;color:#57534e">
@@ -747,7 +752,7 @@ export async function advanceEventJob(
               to: member.e,
               subject: words.subject.slice(0, 150),
               text: `${words.body}\n\n—\n${words.why}\n${communityWords(store.language).mailSentWith}`,
-              html: noticeHtml(words.body, words.why, LANGUAGES[parseLanguage(store.language)].locale, communityWords(store.language).mailSentWith),
+              html: noticeHtml(words.subject, words.body, words.why, LANGUAGES[parseLanguage(store.language)].locale, communityWords(store.language).mailSentWith),
               replyTo: store.email,
             });
           }

@@ -161,6 +161,11 @@ const ANCHOR_SECONDS = 30 * 86400;
 const EVENT_SECONDS = 30 * 86400;
 const DELIVERY_SECONDS = 7 * 86400;
 
+/**
+ * A delivery not tried again because its endpoint no longer hears that kind of event. Its first try may have taken
+ * one of the month's deliveries (counted is kept), so nothing more, not nothing, is counted.
+ */
+export const NOT_HEARD_WORDS = "Not sent: this endpoint no longer hears this event. Nothing more was counted.";
 /** What the studio's log says of a message past the bound: written down, not sent. */
 export const TOO_LARGE_WORDS = `Not sent: this message would take more than ${DELIVERY_WRITE_MAX_BYTES / 1024} KB to keep, the most a webhook message may take. Nothing was counted.`;
 /**
@@ -567,6 +572,12 @@ async function attempt(delivery: Delivery, endpoint: Endpoint | undefined, store
   const next = { ...delivery, attempts: delivery.attempts + 1, lastAt: now };
   if (!endpoint) {
     return { ...next, state: "failed", next: 0, lastStatus: 0, lastError: "The endpoint was removed." };
+  }
+  // An endpoint that no longer hears this kind of event is not sent it on a scheduled try either, as by hand
+  // (resendDelivery, "not_heard"): its message (a buyer's name and email) never goes on to an address the creator
+  // stopped from hearing it, and nothing of the month is taken (webhooks/cron audit, Claude 1, 12/11/2026).
+  if (delivery.type !== "test" && !(endpoint.events as string[]).includes(delivery.type)) {
+    return { ...delivery, state: "failed", next: 0, lastAt: now, lastStatus: 0, lastError: NOT_HEARD_WORDS };
   }
   if (!store) return { ...delivery, state: "failed", next: 0, lastAt: now, lastStatus: 0, lastError: "The store could not be found." };
   // Its API key paused or revoked (owner C3-100), read now: nothing is sent, and nothing is counted.

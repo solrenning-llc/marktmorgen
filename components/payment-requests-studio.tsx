@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { paymentRequestReply, type RequestAction } from "@/lib/payment-request-reply";
-import { toast } from "@/components/toast";
+import { toast, toastProblem } from "@/components/toast";
 import { StudioEmptyState } from "@/components/empty-state";
 import { Icon } from "@/components/icons";
 import { emailsUsedLine } from "@/lib/store-allowance-rules";
@@ -167,7 +167,8 @@ export function PaymentRequestsStudio({
     setReviewed(null);
     setErrorFor(null);
     requestAnimationFrame(() => document.getElementById("pr-email")?.focus());
-    toast(answer.sent ? "Request sent." : "Request saved, but its email did not go. Send it again from the list.");
+    if (answer.sent) toast("Request sent.");
+    else toastProblem("Request saved, but its email did not go. Send it again from the list.");
     setEmail("");
     setName("");
     setLines([{ text: "", quantity: "1", amount: "" }]);
@@ -183,10 +184,11 @@ export function PaymentRequestsStudio({
     const answer = await call({ action, id });
     setBusy("");
     if (!answer.ok) {
-      toast(answer.message ?? "The result could not be confirmed. Reload to check the request before trying again.");
+      toastProblem(answer.message ?? "The result could not be confirmed. Reload to check the request before trying again.");
       return;
     }
-    toast(action === "remind" && answer.sent === false ? "The reminder did not go. Your store's emails for this month may be used." : done);
+    if (action === "remind" && answer.sent === false) toastProblem("The reminder did not go. Your store's emails for this month may be used.");
+    else toast(done);
     router.refresh();
   }
 
@@ -202,7 +204,7 @@ export function PaymentRequestsStudio({
     const answer = await call({ action: "outside", id, method: outsideMethod, date: outsideDate, note: outsideNote });
     setBusy("");
     if (!answer.ok) {
-      toast(answer.message ?? "The result could not be confirmed. Reload to check the request before trying again.");
+      toastProblem(answer.message ?? "The result could not be confirmed. Reload to check the request before trying again.");
       router.refresh();
       return;
     }

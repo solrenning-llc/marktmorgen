@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { StudioEmptyState } from "@/components/empty-state";
-import { toast } from "@/components/toast";
+import { toast, toastProblem } from "@/components/toast";
 import type { PersonNote } from "@/lib/buyer-profile";
 
 const MAX_PERSON_NOTE = 500;
@@ -34,9 +34,9 @@ export function PersonNotes({ person, initial }: { person: string; initial: Pers
         toast(done);
         return true;
       }
-      toast("That did not save. Try again in a moment.");
+      toastProblem("That did not save. Try again in a moment.");
     } catch {
-      toast("That did not save. Check your connection and try again.");
+      toastProblem("That did not save. Check your connection and try again.");
     } finally {
       setBusy(false);
     }

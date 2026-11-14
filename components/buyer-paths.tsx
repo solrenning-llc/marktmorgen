@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { toast } from "@/components/toast";
+import { toast, toastProblem } from "@/components/toast";
 import { useStudioHref } from "@/components/studio-store-pin";
 
 export type PathRow = {
@@ -37,7 +37,7 @@ export function BuyerPaths({ rows, starts, canEdit }: { rows: PathRow[]; starts:
         setMade((all) => new Set(all).add(key));
         toast(`${row.to.title} is now offered in one click after paying for ${row.from.title}.`);
       } else {
-        toast(
+        toastProblem(
           body.error === "has_funnel"
             ? `${row.from.title} already has offers after paying. Add this one there.`
             : body.error === "target" || body.error === "kind"
@@ -46,7 +46,7 @@ export function BuyerPaths({ rows, starts, canEdit }: { rows: PathRow[]; starts:
         );
       }
     } catch {
-      toast("That did not save. Check your connection and try again.");
+      toastProblem("That did not save. Check your connection and try again.");
     } finally {
       setBusy(null);
     }

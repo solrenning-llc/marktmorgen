@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { toast } from "@/components/toast";
+import { toast, toastProblem } from "@/components/toast";
 import type { StatsNote } from "@/lib/stats-notes";
 
 const MAX_NOTE_LENGTH = 80;
@@ -45,9 +45,9 @@ export function NumbersNotes({
         toast(done);
         return true;
       }
-      toast("That did not save. Check the day and the words, and try again.");
+      toastProblem("That did not save. Check the day and the words, and try again.");
     } catch {
-      toast("That did not save. Check your connection and try again.");
+      toastProblem("That did not save. Check your connection and try again.");
     } finally {
       setBusy(false);
     }

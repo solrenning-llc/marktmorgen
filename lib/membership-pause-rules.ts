@@ -62,6 +62,15 @@ export function pauseOf(sub: PauseSub): { from: number; until: number } | null {
   return { from, until };
 }
 
+/**
+ * Whether Stripe carries a pause on this membership, of any kind, started or still to start, set here or by hand:
+ * then nothing that changes what it is paid moves it (lib/tier-switch.ts; the yearly move too, lib/yearly-switch-rules.ts).
+ * Stripe voids every invoice under a "void" pause, so a switch's charge would be voided (R43 F4).
+ */
+export function pauseSet(sub: PauseSub): boolean {
+  return Boolean(sub.pause_collection) && typeof sub.pause_collection === "object";
+}
+
 /** Whether this membership is paused right now: inside a pause the member chose. Before it starts, they still have what they paid for. */
 export function pausedNow(sub: PauseSub, nowSeconds = Math.floor(Date.now() / 1000)): boolean {
   const pause = pauseOf(sub);

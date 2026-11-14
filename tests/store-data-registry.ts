@@ -347,6 +347,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:rl:orders:addr:@lib/buyer-orders.ts": short("Purchase links per address, an hour", "request", 1, KEY, REQ("orders link")),
   "nl:rl:orders:ip:@lib/buyer-orders.ts": short("Purchase links per connection, an hour", "request", 1, KEY, REQ("orders link")),
   "nl:person:@lib/buyer-profile.ts": { what: "Notes about people", room: ["lib/buyer-profile.ts"] },
+  "nl:free-days:@lib/member-free-days.ts": short("One press giving a member free days on a membership and the date it was shown, a day at most", "studio", 1, MARK),
   "nl:person:find:@lib/buyer-profile.ts": short("A buyer's page found from a search, an hour", "studio", 1, 512),
 
   // ---------------------------------------------------------------- lib/ c
@@ -1077,6 +1078,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:yearly:link:@lib/yearly-switch.ts": short("A link to go yearly", "own", 30, LINK_BYTES, MAIL("yearly")),
   "nl:tier:@lib/yearly-fallback.ts": short("A membership's lock while a failed yearly renewal moves to monthly", "request", 1, 128, REQ("tier switch")),
   "nl:tier:@lib/membership-pause.ts": short("A membership's lock while a member pauses it or resumes it early", "request", 1, 128, REQ("tier switch")),
+  "nl:tier:@lib/member-free-days.ts": short("A membership's lock while the creator gives its member free days (Codex V on #2912)", "request", 1, 128, REQ("tier switch")),
   "nl:tier:resume:@lib/membership-pause.ts": short("Which try one early resume of one pause is on, and the idempotency key a press of it sent with when it was first sent, until the pause has ended", "request", 128, KEY, REQ("tier switch")),
   "nl:yearly:fallback:try:@lib/yearly-fallback.ts": short("How many times one failed yearly renewal was tried on the monthly price", "request", 2, KEY, REQ("tier switch")),
   "nl:yearly:fallback:void@lib/yearly-fallback.ts": company("Yearly renewals left open after a move to monthly, for the daily job to void", "One set for the company: one entry per failed yearly renewal moved to monthly (account, invoice, invoice), taken out by the daily job (630 [HN6](14) unit 2c)."),

@@ -40,6 +40,7 @@ import { NIMBUS_FROM, sendEmail } from "@/lib/email";
 import { LockBusyError, withLock } from "@/lib/redis-lock";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { forgetPaid } from "@/lib/learn";
+import { inPaidFreeDays } from "@/lib/member-free-days-rules";
 import type { Listing, Store } from "@/lib/store";
 
 /** What the switch page and the form ask for, in place of another plan's id. */
@@ -145,18 +146,20 @@ export type YearlyPreview = {
   digital: boolean;
 };
 
-export type YearlyProblemReason = "expired" | "gone" | "yearly" | "error";
+export type YearlyProblemReason = "expired" | "gone" | "yearly" | "freeDays" | "error";
 export type YearlyPreviewResult = { ok: true; preview: YearlyPreview; emailed: boolean } | { ok: false; reason: YearlyProblemReason; emailed: boolean };
 
 type Found = { grant: Grant; emailed: boolean; itemId: string; product: Listing; choice: YearlyChoice; trialing: boolean };
 
-async function find(store: Store, token: string, subscription: string): Promise<Found | { reason: "expired" | "gone" | "yearly"; emailed: boolean }> {
+async function find(store: Store, token: string, subscription: string): Promise<Found | { reason: "expired" | "gone" | "yearly" | "freeDays"; emailed: boolean }> {
   if (!SUB_PATTERN.test(subscription)) return { reason: "gone", emailed: false };
   const granted = await grantFor(store, token, subscription);
   if (!granted) return { reason: "expired", emailed: false };
   const { grant, emailed } = granted;
   const sub = (await subsOf(store, grant)).find((s) => s.id === subscription) as (YearlySub & { id?: unknown; items?: { data?: { id?: unknown }[] } }) | undefined;
   if (!sub) return { reason: "gone", emailed };
+  // Paid, in free days given by the creator: Stripe would prorate nothing, so it moves to yearly once they end (review of #2912, A1).
+  if (inPaidFreeDays(sub as Record<string, unknown>)) return { reason: "freeDays", emailed };
   const itemId = typeof sub.items?.data?.[0]?.id === "string" ? (sub.items.data[0].id as string) : "";
   if (!itemId) return { reason: "gone", emailed };
   const productId = productOfSub(sub as Parameters<typeof productOfSub>[0]);
@@ -208,7 +211,7 @@ export async function previewYearly(store: Store, token: string, subscription: s
 
 export type YearlyResult =
   | { ok: true; title: string }
-  | { ok: false; reason: "expired" | "gone" | "yearly" | "stale" | "declined" | "busy" | "consent" | "unconfirmed" | "error" };
+  | { ok: false; reason: "expired" | "gone" | "yearly" | "freeDays" | "stale" | "declined" | "busy" | "consent" | "unconfirmed" | "error" };
 
 /**
  * Moves the membership to yearly, at the second the preview was worked out

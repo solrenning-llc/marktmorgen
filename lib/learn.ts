@@ -227,6 +227,11 @@ type Ledger = {
    * sale written down on the thanks page does not outlive its refund.
    */
   refunded: Set<string>;
+  /**
+   * Courses with a purchase refunded in full and another that stands: the start written down on the thanks page may
+   * be the refunded one's, so the standing purchase's start counts (C7 courses hunt). Absent from a copy cached before.
+   */
+  again: Set<string>;
 };
 
 /** Asks the creator's Stripe account what this address paid for here. */
@@ -234,11 +239,12 @@ async function paidAtStripe(store: Store, email: string): Promise<Ledger> {
   const found = new Map<string, number>();
   const ended = new Set<string>();
   const refunded = new Set<string>();
+  const again = new Set<string>();
   const account = store.stripeAccountId;
-  if (!account) return { paid: found, ended, refunded };
+  if (!account) return { paid: found, ended, refunded, again };
   const handles = saleHandles(store);
   const courses = new Map((await readKind(store, "course")).filter((p) => p.course).map((p) => [p.id, p]));
-  if (courses.size === 0) return { paid: found, ended, refunded };
+  if (courses.size === 0) return { paid: found, ended, refunded, again };
 
   // Stripe keeps the address as it was typed at checkout.
   const variants = [...new Set([email.trim(), normaliseEmail(email)])];
@@ -298,9 +304,9 @@ async function paidAtStripe(store: Store, email: string): Promise<Ledger> {
   // purchase that stands is what counts.
   for (const id of found.keys()) {
     ended.delete(id);
-    refunded.delete(id);
+    if (refunded.delete(id)) again.add(id);
   }
-  return { paid: found, ended, refunded };
+  return { paid: found, ended, refunded, again };
 }
 
 /** When a course written down on the thanks page began: whole seconds from zero up, as recordEnrollment writes them; otherwise null. */
@@ -318,9 +324,10 @@ function parseLedger(cached: string): Ledger | null {
         paid: new Map(Object.entries(value.p as Record<string, number>)),
         ended: new Set(Array.isArray(value.x) ? (value.x as string[]) : []),
         refunded: new Set(Array.isArray(value.r) ? (value.r as string[]) : []),
+        again: new Set(Array.isArray(value.a) ? (value.a as string[]) : []),
       };
     }
-    return { paid: new Map(Object.entries(value as Record<string, number>)), ended: new Set(), refunded: new Set() };
+    return { paid: new Map(Object.entries(value as Record<string, number>)), ended: new Set(), refunded: new Set(), again: new Set() };
   } catch {
     return null;
   }
@@ -341,7 +348,7 @@ export async function paidCourses(store: Store, email: string): Promise<Map<stri
  */
 async function courseLedger(store: Store, email: string): Promise<Ledger & { undecided: Set<string>; unknown: boolean }> {
   const result = new Map<string, number>();
-  if (!isRedisConfigured()) return { paid: result, ended: new Set(), refunded: new Set(), undecided: new Set(), unknown: false };
+  if (!isRedisConfigured()) return { paid: result, ended: new Set(), refunded: new Set(), again: new Set(), undecided: new Set(), unknown: false };
   // A store that brought buyers over from another platform reads theirs in
   // the same round trip (lib/imported-purchases.ts); any other asks nothing more.
   const imported = importedRead(store, email);
@@ -359,11 +366,11 @@ async function courseLedger(store: Store, email: string): Promise<Ledger & { und
   if (!asked) {
     try {
       asked = await paidAtStripe(store, email);
-      const kept = JSON.stringify({ p: Object.fromEntries(asked.paid), x: [...asked.ended], r: [...asked.refunded] });
+      const kept = JSON.stringify({ p: Object.fromEntries(asked.paid), x: [...asked.ended], r: [...asked.refunded], a: [...asked.again] });
       await redisPipeline([["SET", paidCacheKey(store, email), kept, "EX", PAID_SECONDS]]);
     } catch (error) {
       console.error("reading course purchases failed", error);
-      asked = { paid: new Map(), ended: new Set(), refunded: new Set() };
+      asked = { paid: new Map(), ended: new Set(), refunded: new Set(), again: new Set() };
       unknown = true;
     }
   }
@@ -398,10 +405,11 @@ async function courseLedger(store: Store, email: string): Promise<Ledger & { und
   for (const product of courses) {
     if (!product.course) continue;
     // A one-off sale written down on the thanks page stands on its own,
-    // unless Stripe now says it was refunded in full.
+    // unless Stripe now says it was refunded in full, or bought again after a
+    // refund: then the purchase that stands says when it began.
     const start = unknown
       ? undefined
-      : product.recurring || asked.refunded.has(product.id)
+      : product.recurring || asked.refunded.has(product.id) || asked.again.has(product.id)
         ? fromStripe.get(product.id)
         : recorded.get(product.id) ?? fromStripe.get(product.id);
     const opens = start ?? (product.recurring ? undefined : given.get(product.id));
@@ -441,7 +449,7 @@ async function courseLedger(store: Store, email: string): Promise<Ledger & { und
       if (taken[i] === 1) result.delete(p.id);
     });
   }
-  return { paid: result, ended: asked.ended, refunded: asked.refunded, undecided, unknown };
+  return { paid: result, ended: asked.ended, refunded: asked.refunded, again: asked.again, undecided, unknown };
 }
 
 export type CourseAccess =

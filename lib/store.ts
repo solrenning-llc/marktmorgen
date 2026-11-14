@@ -73,6 +73,7 @@ import { type LeaveSetting, NO_LEAVE, parseLeave } from "@/lib/leave-rules";
 import { NO_NUDGE, type Nudge, parseNudge } from "@/lib/member-health-rules";
 import { NO_YEARLY_ASK, type YearlyAsk, parseYearlyAsk } from "@/lib/yearly-switch-rules";
 import { type WinBack, NO_WINBACK, parseWinBack } from "@/lib/winback";
+import { type ReturningCode, MAX_RETURNING_CODES, parseReturningCodes } from "@/lib/returning-code-rules";
 import { type WelcomeOffer, NO_WELCOME_OFFER, parseWelcomeOffer } from "@/lib/welcome-offer";
 import { type InboxSetting, NO_INBOX, parseInboxSetting } from "@/lib/inbox-rules";
 import { type PastSale, type StoreSale, NO_SALE, parsePastSales, parseSale, withPastSale } from "@/lib/store-sale";
@@ -478,6 +479,14 @@ export type Store = {
    * is Stripe's arithmetic and not ours.
    */
   hasDiscounts: boolean;
+  /**
+   * Codes only for people who already bought from this store (554 [DS1],
+   * unit 2; lib/returning-code-rules.ts): the word a buyer types and the
+   * creator's own Stripe coupon it applies. Never a promotion code, so
+   * Stripe's own box can never take one; the server checks the buyer's
+   * earlier purchase first. Empty for every store until the creator makes one.
+   */
+  returningCodes: ReturningCode[];
   /**
    * Where the addresses collected by free products are kept.
    *
@@ -990,6 +999,8 @@ function parseStore(raw: unknown): Store | null {
       // same as a store nobody has added one to yet.
       links: parseStoreLinks(value.links),
       hasDiscounts: value.hasDiscounts === true,
+      // Stores written before these existed have none; an entry in any other shape is dropped, never applied.
+      returningCodes: parseReturningCodes((value as { returningCodes?: unknown }).returningCodes),
       listId:
         typeof value.listId === "string" && LIST_ID_PATTERN.test(value.listId)
           ? value.listId
@@ -1367,6 +1378,7 @@ async function freshStore(fields: {
     catalog: emptyCatalog(await catalogIdFor(ref, createdAt)),
     links: [],
     hasDiscounts: false,
+    returningCodes: [],
     listId: newListId(),
     look: { ...DEFAULT_LOOK },
     photoId: null,
@@ -3828,6 +3840,16 @@ export async function setHasDiscounts(
   if (!store) return null;
   if (store.hasDiscounts === hasDiscounts) return store;
   return patchStore(email, (current) => (current.hasDiscounts === hasDiscounts ? null : { hasDiscounts }));
+}
+
+/**
+ * Writes the store's codes for people who already bought here (554 [DS1],
+ * unit 2), read through the same strict reader as every load, so nothing in
+ * another shape is ever kept. At most MAX_RETURNING_CODES.
+ */
+export async function setReturningCodes(email: string, codes: ReturningCode[]): Promise<Store | null> {
+  const kept = parseReturningCodes(codes.slice(0, MAX_RETURNING_CODES));
+  return patchStore(email, () => ({ returningCodes: kept }));
 }
 
 export type ProductPartResult =

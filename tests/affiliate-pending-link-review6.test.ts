@@ -149,7 +149,7 @@ async function main(): Promise<void> {
     }) as typeof redis.pipeline;
     let threw = false;
     try {
-      await creditPayPalSale(store, paid, "Sourdough course", send);
+      await creditPayPalSale(store, paid, "Sourdough course", true, send);
     } catch {
       threw = true;
     } finally {
@@ -182,7 +182,7 @@ async function main(): Promise<void> {
     }) as typeof redis.pipeline;
     let threw = false;
     try {
-      await creditPayPalSale(store, paid, "Sourdough course", send);
+      await creditPayPalSale(store, paid, "Sourdough course", true, send);
     } catch {
       threw = true;
     } finally {

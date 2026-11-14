@@ -46,7 +46,7 @@ export const PERSON_DATA: PersonData[] = [
   // ---------------------------------------------------------------- the list and email
   { file: "lib/contacts.ts", how: "erased", what: "Their row on your list: address, name, labels, what they asked for or bought, and whether they agreed to hear from you" },
   { file: "lib/contacts.ts", how: "erased", what: "The link in your emails that unsubscribes them" },
-  { file: "lib/suppression.ts", how: "suppression", what: "A one-way fingerprint of the address, so your store never emails it again and no import puts it back. It cannot be turned back into the address. Only the person can lift it, by joining your list again themselves." },
+  { file: "lib/suppression.ts", how: "suppression", what: "A one-way fingerprint of the address, so your store never emails it again and no import puts it back. It cannot be turned back into the address. When they asked for the deletion themselves, it also notes that it was their request. Only the person can lift it, by joining your list again themselves." },
   { file: "lib/joined-stores.ts", how: "erased", via: "lib/buyer-library.ts", what: "The note that they joined your list, used to find them when they ask to be deleted everywhere" },
   { file: "lib/mail-clicks.ts", how: "erased", what: "Which links in your sequences' emails they used" },
   { file: "lib/mail-health.ts", how: "erased", what: "The mark that their address was counted in this week's delivery checks" },
@@ -100,7 +100,7 @@ export const PERSON_DATA: PersonData[] = [
   { file: "lib/imported-purchases.ts", how: "erased", only: "person", what: "What an import from another platform gave them here. Nothing was paid here for it, so they lose access to it" },
   { file: "lib/imported-purchases.ts", how: "kept", only: "team", what: "What an import from another platform gave them here", why: "It is how they keep what they bought on your old platform. They can delete it themselves, from your store's privacy link." },
   { file: "lib/move-members.ts", how: "erased", what: "The invitations an import gave them to keep a membership here, with their links and reminders" },
-  { file: "lib/reviews.ts", how: "erased", only: "person", what: "Their reviews, with their photos; their stars leave your averages, and their name and words leave your store page's quotes" },
+  { file: "lib/reviews.ts", how: "erased", only: "person", what: "Their reviews, with their photos and the count of new photos each review was given; their stars leave your averages, and their name and words leave your store page's quotes" },
   { file: "lib/reviews.ts", how: "kept", only: "team", what: "Reviews they wrote, under the name they chose, without their address", why: "A store may not take down a review by deleting its writer (the FTC's rule on consumer reviews). They can delete it themselves, or delete themselves from your store's privacy link." },
   { file: "lib/review-proof.ts", how: "erased", via: "lib/erasure-index.ts", what: "The links that let them write a review" },
 
@@ -130,6 +130,7 @@ export const PERSON_DATA: PersonData[] = [
   { file: "lib/chat-grant.ts", how: "erased", via: CE, what: "The leave they held in the room" },
   { file: "lib/community-events.ts", how: "erased", via: CE, what: "Their answers to whether they are coming to each live event" },
   { file: "lib/community-access.ts", how: "erased", via: CE, what: "The answers kept about whether they may come into the community and its spaces" },
+  { file: "lib/community-approval.ts", how: "erased", via: CE, what: "Posts and comments they sent that were waiting for your approval, the notes about the ones not published, and how many of theirs you approved" },
   { file: "lib/community-mail.ts", how: "erased", via: CE, what: "The link that stops your announcement emails to them" },
   { file: "lib/community-search.ts", how: "erased", via: CE, what: "Their place in the community's member search" },
   { file: "lib/community-index.ts", how: "erased", via: CE, what: "Their place in the community's member search" },

@@ -140,8 +140,8 @@ async function main(): Promise<void> {
   {
     const { store, pend } = await setup();
     const paid = (orderId: string, email: string) => ({ store: "mill", order: orderId, capture: `CAP${orderId}`, email, product: "prod01", cents: 5_000, currency: "USD", at: NOW - 60, handle: "mill", meta: { [VIA_PENDING_META]: pend } });
-    await creditPayPalSale(store, paid("PPTIERPEND1", "ana@example.com"), "Flour course", send);
-    await creditPayPalSale(store, paid("PPTIERPEND2", "kai@example.com"), "Flour course", send);
+    await creditPayPalSale(store, paid("PPTIERPEND1", "ana@example.com"), "Flour course", true, send);
+    await creditPayPalSale(store, paid("PPTIERPEND2", "kai@example.com"), "Flour course", true, send);
     const ana = await tierOf(store, "paypal:PPTIERPEND1");
     is("by Ana: Bea credited, no second tier", [ana.own, ana.tier], [1_500, 0]);
     is("by anybody else: the tier, as before", (await tierOf(store, "paypal:PPTIERPEND2")).tier, 500);

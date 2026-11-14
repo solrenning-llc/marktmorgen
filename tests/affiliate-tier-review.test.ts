@@ -100,12 +100,12 @@ async function main(): Promise<void> {
   part("M1: a waiting second tier on a partly refunded sale still waits, out of the payment batch");
   await noteSession(await store(), order("cs_part", null));
   is("control: it waits", [(await tier("cs_part"))?.status, await anaPayable()], ["buyer not confirmed", 0]);
-  refunds = [{ id: "re_part1", status: "succeeded", payment_intent: "pi_cs_part", amount: 1_000 }];
+  refunds = [{ id: "re_part1", object: "refund", status: "succeeded", payment_intent: "pi_cs_part", amount: 1_000, currency: "usd" }];
   const partly = await tier("cs_part");
   is("partly refunded: still waiting, its commission on what was kept", [partly?.status, partly?.commission], ["buyer not confirmed", 400]);
   is("nothing of it is payable", await anaPayable(), 0);
   is("and it is counted as waiting, so the studio lists it for approval", (await readBook(await store())).unconfirmed, 1);
-  refunds = [{ id: "re_part2", status: "succeeded", payment_intent: "pi_cs_part", amount: 5_000 }];
+  refunds = [{ id: "re_part2", object: "refund", status: "succeeded", payment_intent: "pi_cs_part", amount: 5_000, currency: "usd" }];
   is("refunded in full: no second tier at all, nothing to wait for", (await tier("cs_part"))?.status ?? "none", "none");
   refunds = [];
 

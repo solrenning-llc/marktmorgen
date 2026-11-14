@@ -617,6 +617,9 @@ export const UNIT_COST: Record<AllowanceKind, number> = {
   // database and on to the browser, and a door's file of up to 10 MB kept
   // for as long as an unused door may be.
   buyer: request("wait", 100 + TAKE_COMMANDS, 60_000) + 60_000 * ORIGIN_PER_BYTE + (MAX_TASK_FILE_BYTES / GB) * STORAGE_PER_GB * DOOR_KEPT_MONTHS,
+  // A webhook settings change (lib/webhooks.ts, changeConfig) is inside a studio or API request above: a GET and the
+  // compare-and-set a try, CONFIG_WRITE_TRIES tries at the most, and only on a reply it cannot read one GET more, the
+  // settings read back once (CX-123 rule 24); when they are as they were read, that read starts the next try.
   // A webhook's try (lib/webhooks.ts): the delivery and the store read and written, the endpoint waited on for up to eight seconds.
   webhook: request("wait", 20 + TAKE_COMMANDS, 40_000),
 };
@@ -1445,7 +1448,7 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/call-moves-read.ts", names: ["MOVES_PER_MGET", "MOVE_BYTES", "MOVE_KEY_BYTES", "moveReads"] },
       { file: "lib/mcp-tools.ts", names: ["chargeBook"] },
       { file: "app/api/v1/sales/route.ts", names: ["takeMoreApi(store, API_SALES_UNITS - 1)"] },
-      { file: "lib/api-sales.ts", names: ["charge(apiReadUnits(listingsWork(listingsToRead(store, wanted))), API_SALES_UNITS)"] },
+      { file: "lib/api-sales.ts", names: ["charge(apiReadUnits(listingsWork(listingsToRead(store, wanted))), API_SALES_UNITS - 1)"] },
       { file: "lib/store-allowance-rules.ts", names: ["API_SALES_UNITS"] },
       { file: "lib/api-sales.ts", names: ["SALES_PAGE", "SALES_TITLE_IDS", "SALE_TEXT_LIMITS", "cutText"] },
     ],

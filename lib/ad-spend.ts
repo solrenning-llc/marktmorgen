@@ -78,7 +78,19 @@ export async function addSpend(
   return { ok: true, spends: await readSpends(statsId) };
 }
 
-export async function removeSpend(statsId: string, id: unknown): Promise<AdSpend[]> {
-  if (typeof id === "string" && ID.test(id) && isRedisConfigured()) await redisPipeline([["HDEL", key(statsId), id]]);
-  return readSpends(statsId);
+/**
+ * Takes one typed line away. It answers ok only once the line is confirmed
+ * gone: Redis answered the HDEL with a count and then HEXISTS with exactly 0.
+ * A removal Redis did not confirm, or a line still there, is "unconfirmed"
+ * (issue #4434): the line may still count in the result after ads, so it is
+ * never reported as removed, and no list is handed back as the new state.
+ */
+export async function removeSpend(statsId: string, id: unknown): Promise<{ ok: true; spends: AdSpend[] } | { ok: false; reason: "unconfirmed" }> {
+  if (typeof id === "string" && ID.test(id) && isRedisConfigured()) {
+    const [removed] = await redisPipeline([["HDEL", key(statsId), id]]);
+    if (removed !== 0 && removed !== 1) return { ok: false, reason: "unconfirmed" };
+    const [exists] = await redisPipeline([["HEXISTS", key(statsId), id]]);
+    if (exists !== 0) return { ok: false, reason: "unconfirmed" };
+  }
+  return { ok: true, spends: await readSpends(statsId) };
 }

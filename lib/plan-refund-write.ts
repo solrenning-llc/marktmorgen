@@ -45,6 +45,9 @@ export const LOCK_SECONDS = Math.ceil((READ_BUDGET_MS + (1 + 2 * MAX_PARTS) * ST
 /** The last moment after taking the lock a write may start: it ends, time-out included, a minute before the lock expires. */
 export const WRITE_BY_MS = (LOCK_SECONDS - 60) * 1000 - STRIPE_TIMEOUT_MS;
 const REFUND_ID = /^re_[A-Za-z0-9]{6,128}$/;
+/** An id Stripe gives as a string or, expanded, as an object's own id (an own field, never an inherited one); anything else reads as "". */
+const idOf = (value: unknown): string =>
+  typeof value === "string" ? value : value !== null && typeof value === "object" && typeof ownField(value as Record<string, unknown>, "id") === "string" ? (ownField(value as Record<string, unknown>, "id") as string) : "";
 
 export type PlanRefundMade =
   | { ok: true; cents: number; currency: string; refundId: string; refundIds: string[]; status: "succeeded" | "pending" }
@@ -57,10 +60,6 @@ const REFUND_STATES = ["succeeded", "failed", "canceled", "pending", "requires_a
  * with a refund's id and a state Stripe gives. Anything else throws, and no refund is made on it: "none pending" is a "no", which only a
  * whole, readable list may say.
  */
-/** An id given as a string or as an expanded object; anything else reads as "". */
-const idOf = (value: unknown): string =>
-  typeof value === "string" ? value : value !== null && typeof value === "object" && typeof ownField(value as Row, "id") === "string" ? (ownField(value as Row, "id") as string) : "";
-
 function wholeRefunds(page: unknown, chargeId: string, paymentIntent: string): Row[] {
   // A row is a refund only with a refund's own id (Codex CX1 on #2759): another id is not readable, so nothing is made.
   // It counts only when it proves it is this charge's own (#4474): the list's filter is not proof, and a row of
@@ -137,6 +136,9 @@ export async function refundPlanPayment(
         );
         const refundId = typeof refund.id === "string" ? refund.id : "";
         if (refund.object !== "refund" || !REFUND_ID.test(refundId) || refund.amount !== part.cents || refund.currency !== currency) return { ok: false, reason: "failed" };
+        // A receipt is this payment's only when it names this charge and this payment intent (rule 30, #4420): another
+        // payment's, or one naming none, is not taken as this refund, so the plan is not ended on it.
+        if (idOf(refund.charge) !== part.chargeId || idOf(refund.payment_intent) !== part.paymentIntent) return { ok: false, reason: "failed" };
         if (refund.status !== "succeeded" && refund.status !== "pending" && refund.status !== "requires_action") return { ok: false, reason: "failed" };
         made.push({ id: refundId, pending: refund.status !== "succeeded" });
       } catch (error) {

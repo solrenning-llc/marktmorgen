@@ -809,6 +809,25 @@ html {
   }
 }
 /*
+ * Chosen, in forced colors (WCAG 1.4.1, 1.4.11; AX274 item 4). The system
+ * paints every background in its own Canvas colour, so a choice shown only as
+ * a filled button (.btn-primary beside .btn-ghost or .btn-secondary: the
+ * inbox's tabs, toggles, segmented choices, "you are here") looked like the
+ * others. The state is in aria-selected, aria-pressed or aria-current, so it is
+ * drawn from there in the system's Highlight colours, which the person's theme
+ * picked to stand out. Outside forced colors nothing changes.
+ */
+@media (forced-colors: active) {
+  .btn[aria-selected="true"],
+  .btn[aria-pressed="true"],
+  .btn[aria-current]:not([aria-current="false"]) {
+    forced-color-adjust: none;
+    background: Highlight;
+    color: HighlightText;
+    border-color: Highlight;
+  }
+}
+/*
  * 40px was below both platforms' guidance. 44 is Apple's number and the
  * smaller of the two, which is the one to meet.
  */

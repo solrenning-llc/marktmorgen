@@ -30,6 +30,7 @@ import { healthId, listHealth, pauseForSending, pauseWords, pausedFor } from "@/
 import { HEALTH_NOTE, healthAdvice, healthLevels, healthLine } from "@/lib/mail-health-levels";
 import { PRO_MONTHLY_EMAILS, PRO_ON_SALE, hasPro, SCALE_MONTHLY_EMAILS, TRIAL_DAYS, TRIAL_MONTHLY_EMAILS, publishedPriceWords as priceWords, publishedYearSaving as yearSaving } from "@/lib/plan";
 import { EmailStudio } from "@/components/email-studio";
+import { AutomationDraftBox } from "@/components/automation-draft";
 import { emailEquivalence } from "@/lib/email-equivalence";
 import { readForms } from "@/lib/form-store";
 import { readFields, readPipelines } from "@/lib/crm";
@@ -119,6 +120,12 @@ export default async function StudioEmailPage({ searchParams }: Params) {
     return published.has(letter) ? `/@${store.handle}/letters/${letter}` : null;
   };
   const letterMembers = (id: string) => published?.get(letterIdFor(store.sid, id))?.members ?? false;
+
+  // The writing help, read once for the Email Studio and the workflow drafted from a goal (20 [E3]).
+  // An allowance that could not be read is said in words by the AI boxes, never shown as "0 left" (rule 24, VR item 2).
+  const ai = aiAvailableFor(store) && can(role, "draft")
+    ? await aiLeft(store).then((left) => ({ on: true, left }), () => ({ on: true, left: 0, known: false as const }))
+    : { on: false, left: 0 };
 
   return (
     <div className="min-h-screen bg-paper text-ink">
@@ -303,7 +310,7 @@ export default async function StudioEmailPage({ searchParams }: Params) {
             draftsReadFailed={loadedDrafts === null}
             flows={flows.map((f) => ({ ...f, statsAvailable: stats?.has(f.id) ?? false, stats: stats?.get(f.id) ?? { started: 0, sent: 0, reached: 0, skipped: 0, acted: 0 }, money: flowMoney(revenue, f.id) }))}
             links={Object.fromEntries([...listings].map(([id]) => [id, productLink(store, id)]))}
-            ai={aiAvailableFor(store) && can(role, "draft") ? { on: true, left: await aiLeft(store).catch(() => 0) } : { on: false, left: 0 }}
+            ai={ai}
             segments={await listSegments(store.listId).catch(() => [])}
             preset={typeof query.who === "string" && (WHO as readonly string[]).includes(query.who) ? { who: query.who as Who } : undefined}
             courses={idsOfKind(store, "course")}
@@ -328,6 +335,9 @@ export default async function StudioEmailPage({ searchParams }: Params) {
             switchedOff={Boolean(store.suspended)}
             assignees={can(role, "send") ? [store.email.toLowerCase(), ...(await readTeam(store.sid).catch(() => ({ members: [] as { email: string; role: Parameters<typeof can>[0] }[] }))).members.filter((m) => can(m.role, "orders")).map((m) => m.email.toLowerCase())] : []}
           />
+          {can(role, "send") ? (
+            <AutomationDraftBox ai={ai} />
+          ) : null}
           </>
         )}
       </main>

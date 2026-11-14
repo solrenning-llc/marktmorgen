@@ -33,7 +33,7 @@ const en: EventFileWords = {
   wayIn: (minutes) => `The way in shows there ${minutes} minutes before the start.`,
   alarm: (title, minutes) => `${title} in ${minutes} minutes`,
   liveTitle: (title) => `Live: ${title}`,
-  rsvpJoin: (page) => `RSVP, add it to your calendar and join here: ${page}`,
+  rsvpJoin: (page) => `Say you are coming, add it to your calendar and join here: ${page}`,
 };
 
 const es: EventFileWords = {

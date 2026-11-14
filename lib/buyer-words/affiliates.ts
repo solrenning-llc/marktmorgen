@@ -331,10 +331,10 @@ const en = {
   /** `where` is the community's name, or "" when it is not known. */
   communityDoneTitle: "No more emails from the community",
   communityDone: (email: string, who: string, where: string) =>
-    `${email} will not be emailed ${who || "this creator"}'s announcements or live event reminders again. You are still in ${where || "the community"}, and can read them there. If an event you RSVP'd to is moved or canceled, you are still told, once.`,
+    `${email} will not be emailed ${who || "this creator"}'s announcements or live event reminders again. You are still in ${where || "the community"}, and can read them there. If an event you said you are coming to is moved or canceled, you are still told, once.`,
   communityAsk: (who: string) => `Stop ${who || "this creator"}'s community emails?`,
   communityFor: (email: string, where: string) =>
-    `Announcements and live event reminders, for ${email}. You stay in ${where || "the community"}, and keep your RSVPs; only the emails stop.`,
+    `Announcements and live event reminders, for ${email}. You stay in ${where || "the community"}, and keep your places at events; only the emails stop.`,
   stopEmails: "Stop the emails",
   remindersDoneTitle: "No more reminders",
   remindersDone: (email: string, who: string) => `${email} will not get checkout reminders from ${who || "this store"} again. Nothing else is needed.`,

@@ -547,7 +547,9 @@ async function main(): Promise<void> {
     // Main's model since 124dc5fc3 (#3384, members import holds the month's emails): its extra import commands
     // raised the imports line by $0.009 on Studio and $0.016 on Scale, one cent less kept than this PR first showed.
     is("11: Store, Studio and Scale keep 45.12, 313.83 and 703.27 dollars in their worst month on a monthly plan", worstMonth("month"), ["45.12", "313.83", "703.27"]);
-    is("11: and 37.06, 258.71 and 580.00 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["37.06", "258.71", "580.00"]);
+    // Main's model at the merge of 14 November 2026 (claude3 nuvem N) costs Scale's yearly month one cent more again:
+    // 579.99 kept where 580.00 was; the monthly figures and Store and Studio are unchanged.
+    is("11: and 37.06, 258.71 and 579.99 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["37.06", "258.71", "579.99"]);
   } finally {
     Date.now = realNow;
   }

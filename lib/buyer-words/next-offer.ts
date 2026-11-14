@@ -97,8 +97,8 @@ const pt: NextOfferWords = {
   see: "Ver",
   dismiss: "Não, obrigado",
   dismissed: "Certo. Não será sugerido de novo para este pedido.",
-  dismissFailed: "Não foi possível salvar, então ele pode ser sugerido de novo. Tente de novo daqui a pouco.",
-  emailConsent: (store) => `Você vê isto porque aceitou receber novidades de ${store}.`,
+  dismissFailed: "Não foi possível guardar, por isso pode voltar a ser sugerido. Tente novamente daqui a pouco.",
+  emailConsent: (store) => `Vê isto porque aceitou receber novidades de ${store}.`,
 };
 
 export const NEXT_OFFER_WORDS: Record<LanguageCode, NextOfferWords> = { en, es, fr, de, it, nl, pt };

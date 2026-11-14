@@ -65,7 +65,7 @@ export default async function NotificationsPage({ params }: Params) {
 
   return (
     <div lang={LANGUAGES[store.language].locale} className={`st-page st-theme-${store.look.theme} relative min-h-screen`} style={lookStyle(store.look) as React.CSSProperties}>
-      <CommunityBar store={store} config={config} tab={null} signedIn messages={config.dm.on} requests={waiting} />
+      <CommunityBar store={store} config={config} tab="notifications" signedIn messages={config.dm.on} requests={waiting} />
       <main id="content" className="mx-auto max-w-2xl px-4 pb-16 pt-6">
         <p className="mb-4">
           <Link href={home} className="cm-quiet-link text-sm font-semibold underline underline-offset-4">{w.backToFeed}</Link>

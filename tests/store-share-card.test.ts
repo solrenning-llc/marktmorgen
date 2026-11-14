@@ -19,7 +19,7 @@ const layout = readFileSync("app/[handle]/layout.tsx", "utf8");
 const meta = layout.slice(layout.indexOf("export async function generateMetadata"), layout.indexOf("export default"));
 
 part("The share card of a store's pages");
-is("the store's name as the site, and no picture of the site's", meta.includes("openGraph: { type: \"website\", siteName: store.name, images: [] },"), true);
-is("a small card with no picture, unless the page sets its own", meta.includes('twitter: { card: "summary", images: [] },'), true);
+is("the store's name as the site, and no picture of the site's", meta.includes("openGraph: { type: \"website\", siteName: store.name, images: pictures },"), true);
+is("a small card with the store's photo or none, unless the page sets its own", meta.includes('twitter: { card: "summary", images: pictures },'), true);
 is("the front page's photo and a product's picture still set their own", [/images: \[\{ url: photoUrl\(store\.photoId\)/.test(readFileSync("app/[handle]/page.tsx", "utf8")), readFileSync("app/[handle]/p/[product]/page.tsx", "utf8").includes('twitter: { card: "summary_large_image", title, description }')], [true, true]);
 done();

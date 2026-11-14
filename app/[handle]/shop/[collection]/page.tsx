@@ -27,7 +27,7 @@ import { SITE_URL } from "@/lib/site-url";
 import { storeAddress, storeRoot } from "@/lib/store-sitemap";
 import { collectionInSegment, collectionSegment, shownProducts } from "@/lib/store-collections";
 import { productSegment } from "@/lib/product-slug";
-import { ProductCard, productPath } from "@/components/store-product";
+import { ProductCard } from "@/components/store-product";
 import { AddAllToCart, CartButton } from "@/components/store-cart";
 import { StoreResting } from "@/components/store-resting";
 import { StoreTracking } from "@/components/store-tracking";

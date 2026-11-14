@@ -6,6 +6,7 @@ import { canUseDomain } from "@/lib/domains";
 import { SITE_URL } from "@/lib/site-url";
 import { normaliseHandle, storeForPage } from "@/lib/store";
 import { iconUrl, shortName, themeColour } from "@/lib/store-app";
+import { photoUrl } from "@/lib/photo-limits";
 import { StoreApp } from "@/components/store-app";
 import { isHouseStore } from "@/lib/house-store";
 import { DemoStrip } from "@/components/demo-notes";
@@ -48,6 +49,7 @@ export async function generateMetadata({ params }: LayoutProps<"/[handle]">): Pr
   const { handle } = await params;
   const store = await loadStore(handle);
   if (!store) return {};
+  const pictures = store.photoId ? [{ url: photoUrl(store.photoId), width: 480, height: 480, alt: store.name }] : [];
   return {
     manifest: `/@${store.handle}/manifest.webmanifest`,
     applicationName: store.name,
@@ -57,10 +59,11 @@ export async function generateMetadata({ params }: LayoutProps<"/[handle]">): Pr
     },
     appleWebApp: { capable: true, title: shortName(store.name), statusBarStyle: "default" },
     // A shared link to a page of the store unfolds into the store's, never the site's preview picture
-    // (Marktmorgen's illustration and its alt text are not what the page shows). A page with a picture
-    // of its own (the creator's photo on the front page, a product's drawn picture) sets its own over this.
-    openGraph: { type: "website", siteName: store.name, images: [] },
-    twitter: { card: "summary", images: [] },
+    // (Marktmorgen's illustration and its alt text are not what the page shows): the creator's own photo when the
+    // store has one, else none (LEVE on #4250). A page with a picture of its own (a product's drawn picture) sets
+    // its own over this.
+    openGraph: { type: "website", siteName: store.name, images: pictures },
+    twitter: { card: "summary", images: pictures },
   };
 }
 

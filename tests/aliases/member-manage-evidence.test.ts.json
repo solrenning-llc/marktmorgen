@@ -1,0 +1,3 @@
+{
+  "@/lib/redis": "member-manage-redis.ts"
+}

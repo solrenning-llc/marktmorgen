@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { del } from "@/lib/blob";
+import { deleteOrSweep } from "@/lib/file-drop";
 import { StoreFullError, imageFolder, setLinkImage, storeForEmail } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { ownsImagePath } from "@/lib/product-image";
@@ -84,9 +84,7 @@ export async function POST(request: NextRequest) {
     }
     // Best effort, and deliberately after the write.
     if (result.removed && result.removed.path !== image?.path) {
-      await del(result.removed.path).catch((error: unknown) => {
-        console.error("could not delete a replaced link picture", error);
-      });
+      await deleteOrSweep(result.removed.path, "a replaced link picture");
     }
     return Response.json({ ok: true });
   } catch (error) {

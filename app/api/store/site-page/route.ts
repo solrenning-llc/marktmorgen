@@ -7,7 +7,7 @@ import { lockedFor } from "@/lib/two-step";
 import { EMPTY_PAGE, MAX_BLOCKS, emptyBlock, oversized, pageProblem, parsePage, picturePaths, type PageBlock, type SalesPage } from "@/lib/sales-page";
 import { pageCopy } from "@/lib/site-page-copy";
 import { claimNewPictures, dropPage, picturesOfFailedDrop, readPage, readPageExact, releasePictures, writePage } from "@/lib/sales-page-store";
-import { del } from "@/lib/blob";
+import { deleteOrSweep } from "@/lib/file-drop";
 import { ownsImagePath } from "@/lib/product-image";
 import { isStoredPicture } from "@/lib/picture-check";
 import { templateLeft } from "@/lib/template-text";
@@ -196,7 +196,7 @@ export async function POST(request: NextRequest) {
       const saved = await setSitePages(ref, pages.filter((page) => page.id !== found.id));
       if (!saved.ok) return refuse(saved.reason);
       const gone = await dropPage(saved.store.statsId, siteKey(found.id), saved.store).catch(picturesOfFailedDrop);
-      if (gone.length) await del(gone).catch((error: unknown) => console.error("could not delete a removed page's pictures", error));
+      if (gone.length) await deleteOrSweep(gone, "a removed page's pictures");
       return Response.json({ ok: true, pages: saved.store.sitePages });
     }
 
@@ -253,7 +253,7 @@ export async function POST(request: NextRequest) {
       const from = outFrom(page);
       if (from !== found.from) await setSitePages(ref, pages.map((p) => (p.id === found.id ? { ...p, from } : p)));
       const gone = await releasePictures(statsId, key, before.filter((path) => !shown.includes(path))).catch(() => [] as string[]);
-      if (gone.length) await del(gone).catch((error: unknown) => console.error("could not delete pictures taken off a page", error));
+      if (gone.length) await deleteOrSweep(gone, "pictures taken off a page");
       return Response.json({ ok: true, blocks: page.blocks.length, page });
     }
 

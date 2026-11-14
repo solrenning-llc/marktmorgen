@@ -162,7 +162,8 @@ async function main(): Promise<void> {
     const source = readFileSync(file, "utf8");
     const lines = source.split("\n");
     lines.forEach((line, i) => {
-      const call = line.match(/\b(del|deleteFile|dropFresh)\(/);
+      // deleteOrSweep (lib/file-drop.ts) deletes as del does, and hands a failed delete to the daily job.
+      const call = line.match(/\b(del|deleteFile|dropFresh|deleteOrSweep)\(/);
       if (!call || call.index === undefined || /^\s*(\/\/|\*)/.test(line) || /^\s*const dropFresh/.test(line)) return;
       // The argument up to its own closing parenthesis.
       let depth = 1;
@@ -174,10 +175,11 @@ async function main(): Promise<void> {
   }
   // What each deletion is handed, and why that cannot be a file of another record the browser named.
   const REASONS: Record<string, string> = {
-    "page del(gone)": "pictures this page held in the page-picture registry, released after the page was written",
-    "file/attach del(removed.pathname)": "the file the record held, after the record that replaced it was written, never an episode's audio its podcast still plays (kept when unknown)",
-    "site-page del(gone)": "pictures this site page held in the page-picture registry, released after the page was written",
-    "podcast del(gone.pathname)": "the audio of the episode the record removed, unless the product's file or another episode still uses it, after it was written",
+    'page deleteOrSweep(gone, "pictures taken off a page")': "pictures this page held in the page-picture registry, released after the page was written",
+    'file/attach deleteOrSweep(removed.pathname, "the replaced file")': "the file the record held, after the record that replaced it was written, never an episode's audio its podcast still plays (kept when unknown)",
+    'site-page deleteOrSweep(gone, "a removed page\'s pictures")': "pictures this site page held in the page-picture registry, released after the page was written",
+    'site-page deleteOrSweep(gone, "pictures taken off a page")': "pictures this site page held in the page-picture registry, released after the page was written",
+    'podcast deleteOrSweep(gone.pathname, "an episode\'s audio")': "the audio of the episode the record removed, unless the product's file or another episode still uses it, after it was written",
     "image dropFresh([path, smallPath])": "only the paths this request took from the picture door",
     "image dropFresh([smallPath])": "only the paths this request took from the picture door",
     "image dropFresh(imagePaths(image))": "only the paths this request took from the picture door",
@@ -185,16 +187,16 @@ async function main(): Promise<void> {
     // link only when this request took it fresh from the door or the record shows it already (since 4 November 2026,
     // tests/picture-owner-paths.test.ts): no second record can hold it. A name put on two records before that rule
     // is not found here, and deleting it from one still takes it from the other.
-    "image del(replaced)": "the product's own picture and copy that the new one does not use, after the record that replaced it was written; attach admits only a fresh or own name",
+    'image deleteOrSweep(replaced, "a replaced product picture")': "the product's own picture and copy that the new one does not use, after the record that replaced it was written; attach admits only a fresh or own name",
     "product del(file.pathname)": "files of a removed product, read from its own records",
-    "product del(linked.removed.pathname)": "the file the record held, after the link that replaced it was written",
-    "option del(file.pathname)": "files of a removed option, read from its own record",
-    "links del(result.removed.path)": "the removed link's own picture, after it was written; link-image attach admits only a fresh or own name",
+    'product deleteOrSweep(linked.removed.pathname, "a file replaced by a link")': "the file the record held, after the link that replaced it was written",
+    'option deleteOrSweep(file.pathname, "the file of a removed option")': "files of a removed option, read from its own record",
+    'links deleteOrSweep(result.removed.path, "a removed link\'s picture")': "the removed link's own picture, after it was written; link-image attach admits only a fresh or own name",
     "link-image dropFresh(path)": "only a path this request took from the picture door",
     "link-image dropFresh(image.path)": "only a path this request took from the picture door",
-    "link-image del(result.removed.path)": "the link's own picture the new one replaced, after the record that replaced it was written; attach admits only a fresh or own name",
-    "course del(files)": "handed-in work of a removed assignment, read from its own records",
-    "course del(file.pathname)": "lesson files the course no longer holds, after it was written",
+    'link-image deleteOrSweep(result.removed.path, "a replaced link picture")': "the link's own picture the new one replaced, after the record that replaced it was written; attach admits only a fresh or own name",
+    'course deleteOrSweep(files, "handed-in work")': "handed-in work of a removed assignment, read from its own records",
+    'course deleteOrSweep(file.pathname, "a lesson file")': "lesson files the course no longer holds, after it was written",
     "course/task deleteFile(path)": "a student's upload taken once through the door (takeTaskUpload)",
     "course/task deleteFile(file.path)": "the same taken upload, when the work could not be kept",
     "course/task deleteFile(done.replaced.path)": "the file the handed-in work held, after it was replaced",

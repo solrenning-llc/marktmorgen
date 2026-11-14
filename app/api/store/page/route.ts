@@ -9,7 +9,7 @@ import { EMPTY_PAGE, MAX_BLOCKS, type SalesPage, copyOfPage, declareMeasure, ove
 import { jsonAccess, refusedJson } from "@/lib/studio-route";
 import { lockedFor } from "@/lib/two-step";
 import { claimNewPictures, readPage, releasePictures, writePage } from "@/lib/sales-page-store";
-import { del } from "@/lib/blob";
+import { deleteOrSweep } from "@/lib/file-drop";
 import { imagePaths, ownsImagePath } from "@/lib/product-image";
 import { isStoredPicture } from "@/lib/picture-check";
 
@@ -128,7 +128,7 @@ export async function POST(request: NextRequest) {
     // page that no longer shows it is written.
     const gone = await releasePictures(marked.store.statsId, id, before.filter((path) => !shown.includes(path))).catch(() => [] as string[]);
     if (gone.length > 0) {
-      await del(gone).catch((error: unknown) => console.error("could not delete pictures taken off a page", error));
+      await deleteOrSweep(gone, "pictures taken off a page");
     }
     // The page as it was kept, so the editor shows exactly that without starting over.
     return Response.json({ ok: true, blocks: saved.blocks.length, page: saved });

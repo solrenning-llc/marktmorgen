@@ -130,7 +130,7 @@ export function CheckoutScriptEditor({
 
   return (
     <div aria-busy={saving} className="card min-w-0 p-6 sm:p-8" id="checkout-script">
-      <p className="text-lg font-semibold tracking-[-0.02em] text-ink">Checkout on your own website</p>
+      <h2 className="text-lg font-semibold tracking-[-0.02em] text-ink">Checkout on your own website</h2>
       <p className="mt-2 text-ink-soft">
         A link on any page of yours opens a product&apos;s card, or your sign-up form, over that page. Your buyer pays on Stripe&apos;s page, on
         your own Stripe account, and your page is told what happened, so it can say thank you. It works on the sites you list here; anywhere

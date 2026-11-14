@@ -77,7 +77,7 @@ export function StoreLayoutEditor({
 
   return (
     <div data-layout-editor data-layout-ready={hydrated} aria-busy={unavailable} className="card p-6 sm:p-8">
-      <p className="text-lg font-semibold tracking-[-0.02em] text-ink">Sections and news on your store</p>
+      <h2 className="text-lg font-semibold tracking-[-0.02em] text-ink">Sections and news on your store</h2>
       <p className="mt-2 text-ink-soft">
         Cut a long store into sections with a heading over each, and put one line of your own news across the top.
       </p>

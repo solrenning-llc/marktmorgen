@@ -44,7 +44,7 @@ export function ExitOfferEditor({ current, free }: { current: string | null; fre
 
   return (
     <div data-exit-offer-editor aria-busy={busy} className="card p-6 sm:p-8">
-      <p className="text-lg font-semibold tracking-[-0.02em] text-ink">When a visitor is about to leave</p>
+      <h2 className="text-lg font-semibold tracking-[-0.02em] text-ink">When a visitor is about to leave</h2>
       <p className="mt-2 text-ink-soft">
         Offer one of your free products, once, to a visitor on a computer whose pointer heads for the tabs to leave your store or a
         product&apos;s page. They can take it for their email address, with the same unchecked box for your emails, or close it.

@@ -54,7 +54,7 @@ export function AnswersEditor({
 
   return (
     <div id="answers" className="card scroll-mt-32 p-6 sm:p-8">
-      <p className="text-lg font-semibold tracking-[-0.02em] text-ink">Answer buyers&apos; questions with AI</p>
+      <h2 className="text-lg font-semibold tracking-[-0.02em] text-ink">Answer buyers&apos; questions with AI</h2>
       <p className="mt-2 text-ink-soft">
         A box on each product&apos;s page, &ldquo;A question before you buy?&rdquo;. The visitor is answered in seconds, only from what that page says and
         from your notes below, in their own language. When your page does not answer the question, they are told so, and the question lands here

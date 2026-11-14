@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { standingOf } from "@/lib/plan-standing";
 import { privacyChoices } from "@/lib/studio-privacy";
+import { StudioTrail } from "@/components/breadcrumb";
 import { StudioHeader } from "@/components/studio-header";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { StudioPrivacy } from "@/components/studio-privacy";
@@ -41,6 +42,7 @@ export default async function StudioPrivacyPage({ searchParams }: Params) {
           studioHref={studioPath(store)}
           devicesHref={studioPath(store, "", "devices")}
           choices={privacyChoices({ role: view.role, standing: standingOf(store), extra: store.extra })}
+          trail={<StudioTrail store={store} here="Your account" />}
         />
       </StudioStorePin>
     </div>

@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import Link from "next/link";
 import { sectionId } from "@/components/legal-page";
 import { ENDED_STORE_EXPORTS } from "@/lib/plan-closing-rules";
@@ -17,6 +18,7 @@ export function StudioPrivacy({
   studioHref,
   devicesHref,
   choices,
+  trail,
 }: {
   email: string;
   sid: string;
@@ -25,10 +27,12 @@ export function StudioPrivacy({
   /** The page that asks before it logs out the other devices. */
   devicesHref: string;
   choices: PrivacyChoices;
+  /** The studio's trail, drawn by the page (tests/studio-trail.test.ts); the small heading when there is none. */
+  trail?: ReactNode;
 }) {
   return (
     <main id="content" className="container-page max-w-3xl pb-20 pt-10 sm:pt-14">
-      <p className="eyebrow">Your account</p>
+      {trail ?? <p className="eyebrow">Your account</p>}
       <h1 className="t-h2 mt-3">Privacy</h1>
       <p className="mt-6 max-w-2xl text-ink-soft">
         Your own data and your logins, in one place. Nothing changes until you press a button.

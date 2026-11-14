@@ -82,6 +82,16 @@ const text = (markup: string) =>
     .replace(/\s+/g, " ");
 
 const failed = () => Promise.reject(new Error("synthetic Redis failure"));
+/**
+ * Each view comes from a connection of its own (Claude 7, 14 November 2026): a card counts one connection's opens
+ * before it reads anything (lib/embed-open.ts, embedOpensLeft), and this file shows the card far more often than one
+ * person would; tests/embed-card-limit.test.ts holds what happens past that count.
+ */
+let viewers = 0;
+const viewing = (url: string) => {
+  viewers += 1;
+  return new NextRequest(url, { headers: { "x-forwarded-for": `10.0.${Math.floor(viewers / 250)}.${(viewers % 250) + 1}` } });
+};
 const getOf = (prefix: string) => (c: Command) => c[0] === "GET" && typeof c[1] === "string" && c[1].startsWith(prefix);
 
 async function main(): Promise<void> {
@@ -108,7 +118,7 @@ async function main(): Promise<void> {
   const listing = (await readListing(store, fromHead))!;
   const w = wordsIn(store.language);
   const card = async (handle: string, product: string) => {
-    answering(new NextRequest(`https://marktmorgen.com/embed/${handle}/${product}`));
+    answering(viewing(`https://marktmorgen.com/embed/${handle}/${product}`));
     return text(await html((await EmbedCard({ params: Promise.resolve({ handle, product }), searchParams: Promise.resolve({}) } as never)) as React.ReactElement));
   };
 
@@ -202,7 +212,7 @@ async function main(): Promise<void> {
   }
 
   const join = async (handle: string) => {
-    answering(new NextRequest(`https://marktmorgen.com/embed/${handle}/join`));
+    answering(viewing(`https://marktmorgen.com/embed/${handle}/join`));
     return text(await html((await EmbedJoin({ params: Promise.resolve({ handle }), searchParams: Promise.resolve({}) } as never)) as React.ReactElement));
   };
   part("The sign-up form: a store that could not be read");
@@ -332,7 +342,7 @@ async function main(): Promise<void> {
   await card("emblibunknown", fromHead);
   const cardRead = log;
   log = [];
-  answering(new NextRequest("https://marktmorgen.com/embed/emblibunknown/join"));
+  answering(viewing("https://marktmorgen.com/embed/emblibunknown/join"));
   await html((await EmbedJoin({ params: Promise.resolve({ handle: "emblibunknown" }), searchParams: Promise.resolve({}) } as never)) as React.ReactElement);
   const joinRead = log;
   log = [];
@@ -349,7 +359,7 @@ async function main(): Promise<void> {
   await setLanguage(owner, "de");
   const de = wordsIn("de");
   const rawCard = async (product: string) => {
-    answering(new NextRequest(`https://marktmorgen.com/embed/emblibunknown/${product}`));
+    answering(viewing(`https://marktmorgen.com/embed/emblibunknown/${product}`));
     return html((await EmbedCard({ params: Promise.resolve({ handle: "emblibunknown", product }), searchParams: Promise.resolve({}) } as never)) as React.ReactElement);
   };
   /** The lang of the element that holds this sentence: the innermost element with a lang that opens before it and holds it. */

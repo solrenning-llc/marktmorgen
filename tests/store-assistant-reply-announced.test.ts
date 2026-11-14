@@ -64,7 +64,8 @@ try{
  out.said=await page.evaluate(()=>window.__said.join(' | '));
  out.shown=await page.evaluate(()=>document.querySelector('[data-assistant-thread]')?.textContent);
  await page.getByRole('button',{name:'Delete this chat'}).click();
- await page.waitForTimeout(300);
+ // The synthetic server answers after 600 ms; the chat is cleared once it has.
+ await page.waitForTimeout(1000);
  out.afterDelete=await page.evaluate(()=>document.querySelector('[data-assistant-said]')?.textContent??'');
 }finally{if(browser)await browser.close();}
 console.log(JSON.stringify(out));

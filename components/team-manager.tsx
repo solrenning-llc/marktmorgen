@@ -26,6 +26,7 @@ const MESSAGES: Record<string, string> = {
   not_found: "That address is not on the team. Reload the page.",
   unsure: "We could not check the team's activity just now, so nothing was changed. Try again in a moment.",
   repeat: "They are off the team, but some of the API keys they made may still work. Press Remove again to finish.",
+  unread: "We could not read your team just now. Reload the page and try again in a moment.",
   signed_out: "Your session ended. Log in again.",
   server_error: "Something went wrong on our side. Try again in a moment.",
 };
@@ -263,7 +264,7 @@ function RoleTable() {
         Only you pay for the store, connect its Stripe account, manage the team and delete the store. Checked by the
         server on every click, not only hidden on the screen.
       </p>
-      <div className="mt-4 overflow-x-auto" tabIndex={0} role="region" aria-label="What each role can do">
+      <div className="mt-4 overflow-x-auto" tabIndex={0} role="region" aria-label="Table of what each role can do">
         <table className="w-full text-left text-sm">
           <thead>
             <tr className="text-ink-mute">

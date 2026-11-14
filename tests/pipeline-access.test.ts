@@ -21,7 +21,7 @@ import { crmAnswer } from "@/lib/crm-response";
 import { POST as FORM } from "@/app/api/store/form-opportunity/route";
 import { claimHandle, ensureStatsId, ensureStoreId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { moveMemberships, putMember, removeMember } from "@/lib/team";
-import { readFileSync } from "node:fs";
+import { TEAM_ROLES, can } from "@/lib/team-roles";
 import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
 import { done, is, part } from "./check";
@@ -94,7 +94,11 @@ async function main(): Promise<void> {
   const stringMoves = await post("sam", { action: "pipeline", pipeline: { ...workshops, stages: workshops.stages.filter((st) => st.id !== "wnew01") }, moves: "lead00" });
   is("a removed stage's deals sent by one stage for all (a string) into a pipeline they cannot change: refused", stringMoves.status, 403);
   is("and the deal did not move", (await post("owner", { action: "deal", version: await versionOf(ownerDeal), deal: { id: ownerDeal, title: "Ten seats", email: "", cents: 50_000, stage: "wnew01", note: "" } })).status, 200);
-  is("a deal that is not there, or cannot be read, is never removed by someone limited", (await post("sam", { action: "undeal", id: "zzzzzzzzzz" })).status, 403);
+  const dealsKeyOf = `nl:crm:deals:${statsId}`;
+  await redisPipeline([["HSET", dealsKeyOf, "unread0001", "{not json"]]);
+  const unreadRemoval = await post("sam", { action: "undeal", id: "unread0001" });
+  is("a deal that is not there, or cannot be read, is never removed by someone limited", [(await post("sam", { action: "undeal", id: "zzzzzzzzzz" })).status, unreadRemoval.status, (await redisPipeline([["HGET", dealsKeyOf, "unread0001"]]))[0]], [403, 403, "{not json"]);
+  await redisPipeline([["HDEL", dealsKeyOf, "unread0001"]]);
   const roomOf = async () => Number((await redisPipeline([["HGET", dataKey(store)!, "crm:pacc"]]))[0] ?? 0);
   const roomBefore = await roomOf();
   await moveMemberships("sam@example.com", "sam2@example.com");
@@ -146,8 +150,10 @@ async function main(): Promise<void> {
   await writePipelineAccess(statsId, "sam@example.com", { sales0: "none" }, store);
   const fromForm = await FORM(new NextRequest("https://marktmorgen.com/api/store/form-opportunity", { method: "POST", headers: { "content-type": "application/json", cookie: cookies.sam }, body: JSON.stringify({ form: "f000000001", responseRef: "a".repeat(64), deal: { title: "From a form", note: "", email: "", cents: 0, stage: "lead00" } }) }));
   is("a deal made from a form: someone who can be restricted cannot make one at all (export is the owner's and Admins'), so a pipeline they may not change is never reached", [fromForm.status, ((await fromForm.json()) as { error?: string }).error], [403, "role"]);
-  const formCode = readFileSync("app/api/store/form-opportunity/route.ts", "utf8");
-  is("and the route still checks the pipeline, should that ever change", formCode.includes('accessOf(guarded.role, await readPipelineAccess(store.statsId, guarded.email), pipeline) !== "edit"'), true);
+  // The form route has no pipeline check because of this: should a role that can be restricted ever
+  // be given "export", this fails, and the route must then check the pipeline before it answers.
+  const restrictable = (["owner", ...TEAM_ROLES] as const).filter((role) => accessOf(role, { sales0: "none" }, "sales0") !== "edit");
+  is("every role pipeline access can restrict is one that cannot make a deal from a form", [restrictable.length > 0, restrictable.filter((role) => can(role, "export"))], [true, []]);
 
   part("Found in review of units 2 and 3");
   // sam is a Support teammate again, with no access to Sales.

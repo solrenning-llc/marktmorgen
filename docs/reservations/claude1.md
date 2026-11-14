@@ -6,4 +6,4 @@ Only Claude 1 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
-| Claude 1 | 274 [AX1] audit 12/11 (Claude 4 out of quota): stand-alone text controls get a 44 px floor (WCAG 2.5.5) | claude/tender-curie-w4hw92 | `components/store-assistant.tsx`, `components/store-chat.tsx`, `components/tools-calculator.tsx`, `components/team-event-editor.tsx`, `components/workflow-tools.tsx`, `components/task-editor.tsx`, `components/link-editor.tsx`, `components/old-addresses.tsx`, `app/platform/page.tsx`, `app/invite/[code]/page.tsx`, `app/[handle]/letters/page.tsx`, `app/signin/lost/confirm/page.tsx`, `tests/standalone-text-controls-target-size.test.ts` | 12/11/2026 10h03 |
+| Claude 1 | 508 [SG4] complement (C1-20261105-1919-C4-1): the incident-response table says parts 1 and 2 are merged | claude1/sg4-incident-table | `docs/incident-response.md` (table rows "Canal de segurança" and "Análise de código" only) | 12/11/2026 04h40 |

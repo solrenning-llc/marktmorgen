@@ -171,8 +171,14 @@ try {
   const where = () => page.evaluate(() => ({ tag: document.activeElement?.tagName, words: document.activeElement?.textContent?.trim() ?? "", busy: document.activeElement?.getAttribute("aria-busy") ?? null }));
 
   await pictures();
+  // "Sending 1 picture…" is drawn as soon as the picture is chosen, but the request leaves only after shrink has decoded
+  // and re-encoded it (components/shrink-image.ts). Counting the held sends before that request arrived read 0 on a slow
+  // runner (Studio AAA job 130247027939 on #3551). Wait for the first send's own request, so the count below can only
+  // say whether pressing the busy Add button started another one.
+  const firstSend = page.waitForRequest((request) => new URL(request.url()).pathname === "/api/store/image/upload");
   await page.locator('input[type="file"]').setInputFiles({ name: "synthetic.png", mimeType: "image/png", buffer: png });
   await sending().waitFor();
+  await firstSend;
   await page.getByRole("button", { name: "Remove picture 1" }).focus();
   await page.keyboard.press("Enter");
   await settled();

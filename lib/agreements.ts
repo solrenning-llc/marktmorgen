@@ -108,7 +108,8 @@ function recordLines(w: AgreementWords, version: AgreementVersion, signature: Si
 /**
  * The signed copy as one HTML file: the exact text signed, unchanged, and
  * what was recorded. Plain, with no script and nothing loaded from anywhere,
- * so it opens the same in any browser and can be kept or printed.
+ * so it opens the same in any browser and can be kept or printed. The
+ * viewport lets it reflow on a phone instead of opening shrunk (WCAG 1.4.10).
  */
 export function signedCopyHtml(store: Store, a: Agreement, version: AgreementVersion, signature: Signature): string {
   const w = agreementWords(store.language);
@@ -117,7 +118,7 @@ export function signedCopyHtml(store: Store, a: Agreement, version: AgreementVer
     .join("");
   return [
     "<!doctype html>",
-    `<html lang="${escape(String(store.language || "en"))}"><head><meta charset="utf-8"><title>${escape(`${w.text.kind[a.kind]}: ${version.title}`)}</title></head>`,
+    `<html lang="${escape(String(store.language || "en"))}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escape(`${w.text.kind[a.kind]}: ${version.title}`)}</title></head>`,
     '<body style="font-family:Georgia,serif;max-width:720px;margin:40px auto;padding:0 16px;color:#111">',
     `<h1 style="font-size:22px">${escape(`${w.text.kind[a.kind]}: ${version.title}`)}</h1>`,
     `<h2 style="font-size:16px">${escape(w.textHeading)}</h2>`,

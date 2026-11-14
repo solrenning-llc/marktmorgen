@@ -94,6 +94,10 @@ async function main(): Promise<void> {
     ["ann", "the link's SET answered something other than OK", (out: unknown[]) => out.map((reply, i) => (i === 0 ? "QUEUED" : reply))],
     ["bob", "the pipeline answered no replies at all (the write landed)", () => []],
     ["cat", "an erasure note answered something other than a count", (out: unknown[]) => out.map((reply, i) => (i === 1 ? "1" : reply))],
+    // Codex X8 (#3889 @68cf71ebc5): each note read in its exact shape, as lib/product-updates.ts noted() reads the same
+    // three notes. EXPIRE 0 says the index was not there to keep; ZADD of one member never adds 2.
+    ["dan", "the erasure index's EXPIRE answered 0 (no index confirmed)", (out: unknown[]) => out.map((reply, i) => (i === 3 ? 0 : reply))],
+    ["eve", "the erasure note's ZADD of one member answered 2", (out: unknown[]) => out.map((reply, i) => (i === 1 ? 2 : reply))],
   ] as const;
   for (const [name] of cases) {
     const id = `cus_${name[0].toUpperCase()}${name.slice(1)}LinkW001`;

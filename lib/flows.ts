@@ -555,11 +555,15 @@ export async function flowsStartedFor(flows: Flow[], email: string): Promise<str
 
 /**
  * Starts whichever sequences this event begins, for this person. Never
- * throws: the list must never cost anyone what they asked for.
+ * throws: the list must never cost anyone what they asked for. Answers false
+ * when it failed on its way (logged), so a caller that holds a once-only mark
+ * for the moment can let it go and the moment can start them again
+ * (lib/course-finish.ts); each start is claimed per person and sequence
+ * (startFlows), so trying again never starts anybody twice.
  */
-export async function enroll(store: Store, email: string, event: { joined: boolean; signed?: boolean; paidRequest?: boolean; productId?: string; tag?: string; finished?: string; form?: string; formOutcome?: string; started?: string; abandoned?: string; stage?: string }): Promise<void> {
+export async function enroll(store: Store, email: string, event: { joined: boolean; signed?: boolean; paidRequest?: boolean; productId?: string; tag?: string; finished?: string; form?: string; formOutcome?: string; started?: string; abandoned?: string; stage?: string }): Promise<boolean> {
   try {
-    if (!store.listId || monthlyAllowance(store) === 0 || !isRedisConfigured()) return;
+    if (!store.listId || monthlyAllowance(store) === 0 || !isRedisConfigured()) return true;
     // Whether what they just got is sold for money: the store's own index
     // knows, so "bought" costs no read.
     const paid = Boolean(event.productId) && idsOfKind(store, "paid").includes(event.productId as string);
@@ -581,14 +585,16 @@ export async function enroll(store: Store, email: string, event: { joined: boole
           (f.trigger === "paid_request" && event.paidRequest) ||
           (f.trigger === "form" && event.form && f.formId === event.form && (!f.formOutcome || f.formOutcome === event.formOutcome))),
     );
-    if (!flows.length) return;
+    if (!flows.length) return true;
     const address = normaliseEmail(email);
     // Only someone who may be written to starts one; their one start is not
     // spent on a moment they could not have received it.
-    if (!(await isMailable(store.listId, address))) return;
+    if (!(await isMailable(store.listId, address))) return true;
     await startFlows(store, flows, [address]);
+    return true;
   } catch (error) {
     console.error("starting a sequence failed", error);
+    return false;
   }
 }
 

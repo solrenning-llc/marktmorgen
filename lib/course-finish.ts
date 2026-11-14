@@ -28,6 +28,35 @@ import type { Store } from "@/lib/store";
 const finishedKey = (courseId: string, email: string) => `nl:course:${courseId}:fin:${emailKey(email)}`;
 const openedKey = (courseId: string, email: string) => `nl:course:${courseId}:open:${emailKey(email)}`;
 
+/** How long a moment's mark lives once its sequences started: a student opens and finishes a course once. */
+const KEPT_SECONDS = 400 * 86_400;
+/**
+ * How long a mark lives while its sequences are being started. It becomes KEPT_SECONDS only once enroll went through,
+ * so a start that failed and whose cleanup DEL was lost or answered in an unknown shape holds the moment for an hour
+ * at the most, never 400 days (Codex G and X5 on #4301). Starting again after it is safe: a start is claimed per
+ * person and sequence (lib/flows.ts startFlows).
+ */
+const CLAIM_SECONDS = 3_600;
+
+/**
+ * Takes a moment's mark for this invocation, starts its sequences and keeps the mark for good only when they started.
+ * When starting failed, the mark goes; if that DEL is not confirmed, the short claim lets the mark lapse within the hour.
+ */
+async function claimAndStart(key: string, start: () => Promise<boolean>): Promise<boolean> {
+  const claim = await redisPipeline([["SET", key, "1", "NX", "EX", CLAIM_SECONDS]]);
+  if (!confirmedClaim(claim)) return false;
+  // Starting the sequences failed on its way (enroll logged it): the mark goes, so the moment can start them when it
+  // comes again; a start is claimed per person and sequence, never twice (lib/flows.ts startFlows).
+  if (!(await start())) {
+    await redisPipeline([["DEL", key]]);
+    return false;
+  }
+  // The sequences started: the mark is kept 400 days. An unconfirmed reply leaves the hour-long claim, after which the
+  // same moment finds every sequence already claimed for this person and starts nothing twice.
+  await redisPipeline([["EXPIRE", key, KEPT_SECONDS]]);
+  return true;
+}
+
 /** Only a complete, own acknowledgement confirms this invocation took the claim. */
 function confirmedClaim(reply: unknown): boolean {
   if (!Array.isArray(reply) || reply.length !== 1) return false;
@@ -43,10 +72,7 @@ function confirmedClaim(reply: unknown): boolean {
 export async function noteIfOpened(store: Store, productId: string, courseId: string, email: string): Promise<boolean> {
   try {
     if (!email || !isRedisConfigured()) return false;
-    const claim = await redisPipeline([["SET", openedKey(courseId, email), "1", "NX", "EX", 400 * 86_400]]);
-    if (!confirmedClaim(claim)) return false;
-    await enroll(store, email, { joined: false, started: productId });
-    return true;
+    return await claimAndStart(openedKey(courseId, email), () => enroll(store, email, { joined: false, started: productId }));
   } catch (error) {
     console.error("noting an opened course failed", error);
     return false;
@@ -66,10 +92,7 @@ export async function noteIfFinished(store: Store, productId: string, courseId: 
     if (!lessons.length) return false;
     const done = await doneLessons(courseId, email);
     if (!lessons.every((id) => done.has(id))) return false;
-    const claim = await redisPipeline([["SET", finishedKey(courseId, email), "1", "NX", "EX", 400 * 86_400]]);
-    if (!confirmedClaim(claim)) return false;
-    await enroll(store, email, { joined: false, finished: productId });
-    return true;
+    return await claimAndStart(finishedKey(courseId, email), () => enroll(store, email, { joined: false, finished: productId }));
   } catch (error) {
     console.error("noting a finished course failed", error);
     return false;

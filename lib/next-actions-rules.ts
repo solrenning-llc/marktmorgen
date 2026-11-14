@@ -1,7 +1,7 @@
 /**
  * "Do this next": the store's next best actions (complement WG of 484 [IT1], 5 November 2026, "Próximas ações da
- * loja com números reais"; unit 1, Claude 1, 10 November 2026). The rules only, pure and browser-safe: from counts
- * the store already keeps, choose one to three actions, each with the count, where the count comes from and when it
+ * loja com números reais"; units 1 and 2, Claude 1, 10 November 2026). The rules, pure and browser-safe: from counts
+ * the store already keeps, choose one to five actions, each with the count, where the count comes from and when it
  * was counted. No model is called here; a later unit may ask one to word a draft, inside its own cost ceiling, and
  * only when the creator asks.
  *
@@ -11,21 +11,24 @@
  *   - A count that could not be read is "unknown", never zero: no action is built on it, and the view says which
  *     numbers are missing, so it never says there is nothing to do while one is.
  *   - A count of zero proposes nothing. With nothing read above zero and nothing missing, nothing is invented.
- *   - Shown only to a role that may see the numbers and prepare what the action prepares (lib/team-roles.ts).
- *   - Order: money already owed first (a failed payment is money a buyer agreed to pay, lost if left), then by the
+ *   - Shown only to a role that may see the numbers and use the screen the action leads to (lib/team-roles.ts).
+ *   - Order: money at risk now first (a failed payment is money a member agreed to pay, lost if left), then by the
  *     recorded money in the store's currency, highest first; money not known, or in another currency, is never
  *     ranked as if it were less or more than a known amount: those come after, by count. Ties keep a fixed order.
- *   - Preparing never sends, switches on or charges: a draft, or an automation made paused, shown before anything.
+ *   - Each action is a link to the screen that deals with it, named by where it goes (2.4.9), and only where the
+ *     studio has that screen for this person (`where`); nothing is sent, switched on or charged from here. Preparing a
+ *     draft in one tap is a later unit.
  *
- * The counts are read by the studio in the next unit, each from the reading named in its `source` (lib/dunning-rules.ts,
- * lib/yearly-switch-rules.ts, lib/winback.ts, the course progress and the list's welcome sequence), counting only
- * people the store may write to (a marketing email needs the person's yes; that is the reading's job, not this file's).
+ * The counts come from readings the studio already keeps (unit 2, lib/next-actions-read.ts): the store's kept
+ * memberships reading gives the failed payments and the members who left; the others are not read on this screen
+ * yet, so they are left out (undefined) and neither shown nor said to be missing. A reading of people to write to
+ * counts only people the store may write to (a marketing email needs the person's yes; that is the reading's job).
  */
 import { formatMoney, isCurrency } from "@/lib/money";
 import type { Permission } from "@/lib/team-roles";
 
 /** The most actions shown at once. */
-export const NEXT_ACTIONS_MAX = 3;
+export const NEXT_ACTIONS_MAX = 5;
 
 /** How far ahead of now a count's time may be (clock skew) before the time is taken as not known. */
 const FUTURE_SKEW_MS = 5 * 60 * 1000;
@@ -40,35 +43,42 @@ export type MoneyFact = { amount: number; currency: string };
  * neither proposed nor said to be missing. `count` null is a count that could not be read. `at` is when the count was
  * made (milliseconds), null when not known.
  */
+/**
+ * `partial` on a membership count: the reading covered only part of the store's memberships, because the store has
+ * more of them in its history than one reading counts (lib/membership-numbers.ts readMembers). The count is unknown
+ * like any other, but it is a limit of the store, not a passing failure: reading again reads the same, so the view
+ * never tells the creator to reload for it (Claude 1 cloud on #3556, MÉDIO).
+ */
 export type NextFacts = {
-  /** Card payments for memberships that failed in the last seven days and are still unpaid, with what they come to. */
-  failedPayments?: { count: number | null; owed?: MoneyFact | null; at: number | null };
+  /** Paying members whose latest payment failed and is being tried again, with what they pay together each month. */
+  failedPayments?: { count: number | null; monthly?: MoneyFact | null; at: number | null; partial?: true };
   /** Members paying monthly for a product that also has a yearly price, with what they pay together each month. */
   monthlyMembers?: { count: number | null; monthly?: MoneyFact | null; at: number | null };
-  /** Former members who never got a come-back offer and may be written to, with what they paid together each month. */
-  formerMembers?: { count: number | null; monthly?: MoneyFact | null; at: number | null };
+  /**
+   * Memberships that ended in the last 30 days while the store's come-back email is off, with what they paid together
+   * each month when that is known (a reading that counts trials that never paid gives no money).
+   */
+  formerMembers?: { count: number | null; monthly?: MoneyFact | null; at: number | null; partial?: true };
   /** Students who finished one course and do not have the next one, both named by their titles. */
   courseNext?: { count: number | null; from: string; to: string; at: number | null };
   /** People who joined the list and never got a welcome email. */
   noWelcome?: { count: number | null; at: number | null };
 };
 
-/** What preparing does: a draft email, or an automation made paused. Neither sends anything. */
-export type Prepare = "draft" | "paused_automation";
-
 export type NextAction = {
   id: NextActionId;
   /** The action in one sentence, with its count. */
   words: string;
-  /** Recorded money that goes with the count, in words, or null when there is none or it is not known. */
+  /** Recorded money that goes with the count, in words, or null when there is none, it is 0 or it is not known. */
   money: string | null;
   /** Where the count comes from, in plain words. */
   source: string;
   /** When it was counted: "Counted November 10, 2026." or that the time is not known. */
   asOf: string;
-  prepare: Prepare;
-  /** What the button says; it prepares, it never sends. */
-  button: string;
+  /** Where the link goes, in words said inside it. */
+  link: string;
+  /** The address of the screen that deals with it, as the studio set it. */
+  href: string;
   /** Every permission the role needs to see this action. */
   needs: Permission[];
 };
@@ -76,33 +86,28 @@ export type NextAction = {
 export type NextView =
   | { kind: "actions"; actions: NextAction[]; unknown: NextActionId[]; note: string | null }
   | { kind: "unknown"; unknown: NextActionId[]; words: string }
-  | { kind: "nothing"; words: string };
+  /** `looked`: whether any number was read for this person; with none, the studio draws nothing at all. */
+  | { kind: "nothing"; words: string; looked: boolean };
 
-/** What each action needs: the numbers ("stats"), and the right to make what it prepares. */
+/** What each action needs: the numbers ("stats"), and the right to use the screen it leads to (lib/team-roles.ts). */
 export const NEXT_ACTION_NEEDS: Record<NextActionId, Permission[]> = {
-  failed_payments: ["stats", "draft"],
-  yearly_switch: ["stats", "draft"],
-  winback: ["stats", "draft"],
+  // The membership numbers.
+  failed_payments: ["stats"],
+  // The yearly-price email and the come-back email are store settings.
+  yearly_switch: ["stats", "settings"],
+  winback: ["stats", "settings"],
   course_next: ["stats", "draft"],
-  // A sequence is made with "send" (lib/team-roles.ts), even paused.
+  // A sequence is made with "send" (lib/team-roles.ts).
   welcome: ["stats", "send"],
 };
 
 /** The fixed order for ties, and for actions whose money is not known. */
 export const NEXT_ACTION_ORDER: NextActionId[] = ["failed_payments", "yearly_switch", "winback", "course_next", "welcome"];
 
-const PREPARE: Record<NextActionId, Prepare> = {
-  failed_payments: "draft",
-  yearly_switch: "draft",
-  winback: "draft",
-  course_next: "draft",
-  welcome: "paused_automation",
-};
-
 const SOURCE: Record<NextActionId, string> = {
-  failed_payments: "From your failed membership payments in Stripe.",
+  failed_payments: "From your membership numbers, read from your Stripe account.",
   yearly_switch: "From your members' current plans.",
-  winback: "From your former members and the offers already sent.",
+  winback: "From your membership numbers, read from your Stripe account.",
   course_next: "From your students' course progress.",
   welcome: "From your email list and its welcome emails.",
 };
@@ -111,7 +116,7 @@ const SOURCE: Record<NextActionId, string> = {
 export const NEXT_ACTION_NAMES: Record<NextActionId, string> = {
   failed_payments: "failed payments",
   yearly_switch: "monthly members",
-  winback: "former members",
+  winback: "memberships that ended",
   course_next: "course progress",
   welcome: "welcome emails",
 };
@@ -151,16 +156,17 @@ export function asOfWords(at: unknown, now: number): string {
 
 type Candidate = { action: NextAction; owed: boolean; cents: number | null; count: number };
 
-function candidate(id: NextActionId, facts: NextFacts, currency: string, now: number): Candidate | "unknown" | null {
-  const fact = (
-    {
-      failed_payments: facts.failedPayments,
-      yearly_switch: facts.monthlyMembers,
-      winback: facts.formerMembers,
-      course_next: facts.courseNext,
-      welcome: facts.noWelcome,
-    } as Record<NextActionId, { count: unknown; at: unknown } | undefined>
-  )[id];
+/** The fact each action is chosen from. */
+const FACT_OF: Record<NextActionId, (facts: NextFacts) => { count: unknown; at: unknown } | undefined> = {
+  failed_payments: (facts) => facts.failedPayments,
+  yearly_switch: (facts) => facts.monthlyMembers,
+  winback: (facts) => facts.formerMembers,
+  course_next: (facts) => facts.courseNext,
+  welcome: (facts) => facts.noWelcome,
+};
+
+function candidate(id: NextActionId, facts: NextFacts, currency: string, now: number, href: string): Candidate | "unknown" | null {
+  const fact = FACT_OF[id](facts);
   if (fact === undefined) return null;
   if (!fact || typeof fact !== "object") return "unknown";
   const count = countOf(fact.count);
@@ -170,27 +176,28 @@ function candidate(id: NextActionId, facts: NextFacts, currency: string, now: nu
   let words: string;
   let money: MoneyFact | null = null;
   let moneyWords: string | null = null;
-  let button: string;
+  let link: string;
   switch (id) {
     case "failed_payments": {
-      money = moneyOf((fact as NonNullable<NextFacts["failedPayments"]>).owed);
-      words = `${plural(count, "card payment", "card payments")} for memberships failed this week and ${count === 1 ? "is" : "are"} still unpaid.`;
-      moneyWords = money ? `${formatMoney(money.amount, money.currency)} unpaid.` : null;
-      button = "Prepare a reminder email";
+      money = moneyOf((fact as NonNullable<NextFacts["failedPayments"]>).monthly);
+      words = `The latest payment of ${plural(count, "member", "members")} failed, and Stripe is trying again.`;
+      // Recurring revenue, a monthly equivalent: a yearly member does not pay each month.
+      moneyWords = money && money.amount > 0 ? `${count === 1 ? "They make up" : "Together they make up"} ${formatMoney(money.amount, money.currency)} a month of your recurring revenue.` : null;
+      link = "See your membership numbers";
       break;
     }
     case "yearly_switch": {
       money = moneyOf((fact as NonNullable<NextFacts["monthlyMembers"]>).monthly);
       words = `${plural(count, "member pays", "members pay")} monthly for a product that also has a yearly price.`;
-      moneyWords = money ? `${count === 1 ? "They pay" : "Together they pay"} ${formatMoney(money.amount, money.currency)} a month now.` : null;
-      button = "Prepare an email about the yearly price";
+      moneyWords = money && money.amount > 0 ? `${count === 1 ? "They pay" : "Together they pay"} ${formatMoney(money.amount, money.currency)} a month now.` : null;
+      link = "Set up the email about the yearly price";
       break;
     }
     case "winback": {
       money = moneyOf((fact as NonNullable<NextFacts["formerMembers"]>).monthly);
-      words = `${plural(count, "former member", "former members")} never got a come-back offer.`;
-      moneyWords = money ? `${count === 1 ? "They paid" : "Together they paid"} ${formatMoney(money.amount, money.currency)} a month before leaving.` : null;
-      button = "Prepare a come-back email";
+      words = `${plural(count, "membership", "memberships")} ended in the last 30 days, and your come-back email is off.`;
+      moneyWords = money && money.amount > 0 ? `${count === 1 ? "They paid" : "Together they paid"} ${formatMoney(money.amount, money.currency)} a month before leaving.` : null;
+      link = "Set up the come-back email";
       break;
     }
     case "course_next": {
@@ -200,17 +207,17 @@ function candidate(id: NextActionId, facts: NextFacts, currency: string, now: nu
       // Without both titles the action cannot say what it is about: not read, never guessed.
       if (!from || !to || from === to) return "unknown";
       words = `${plural(count, "student", "students")} finished "${from}" and ${count === 1 ? "does" : "do"} not have "${to}".`;
-      button = `Prepare an email about "${to}"`;
+      link = `Write to them about "${to}"`;
       break;
     }
     case "welcome": {
       words = `${plural(count, "person", "people")} joined your list and never got a welcome email.`;
-      button = "Prepare a welcome email, paused";
+      link = "Set up a welcome email";
       break;
     }
   }
   return {
-    action: { id, words, money: moneyWords, source: SOURCE[id], asOf: asOfWords(fact.at, now), prepare: PREPARE[id], button, needs: NEXT_ACTION_NEEDS[id] },
+    action: { id, words, money: moneyWords, source: SOURCE[id], asOf: asOfWords(fact.at, now), link, href, needs: NEXT_ACTION_NEEDS[id] },
     owed: id === "failed_payments",
     // Only money in the store's own currency is compared; any other is known in words but not ranked.
     cents: money && money.currency === currency.toLowerCase() ? money.amount : null,
@@ -218,7 +225,7 @@ function candidate(id: NextActionId, facts: NextFacts, currency: string, now: nu
   };
 }
 
-/** Earlier first: money owed now, then known money (highest first), then not known (by count), then the fixed order. */
+/** Earlier first: money at risk now, then known money (highest first), then not known (by count), then the fixed order. */
 function before(a: Candidate, b: Candidate): number {
   if (a.owed !== b.owed) return a.owed ? -1 : 1;
   if ((a.cents === null) !== (b.cents === null)) return a.cents === null ? 1 : -1;
@@ -227,30 +234,58 @@ function before(a: Candidate, b: Candidate): number {
   return NEXT_ACTION_ORDER.indexOf(a.action.id) - NEXT_ACTION_ORDER.indexOf(b.action.id);
 }
 
+const listOf = (ids: NextActionId[]) => {
+  const names = ids.map((id) => NEXT_ACTION_NAMES[id]);
+  return names.length < 3 ? names.join(" and ") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+};
+
 /** The words for the numbers that could not be read, naming each. */
 export function unknownWords(unknown: NextActionId[]): string {
-  const names = unknown.map((id) => NEXT_ACTION_NAMES[id]);
-  const list = names.length < 3 ? names.join(" and ") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
-  return `Some numbers could not be read just now (${list}), so these suggestions may not be complete. Reload the page in a moment.`;
+  return `Some numbers could not be read just now (${listOf(unknown)}), so these suggestions may not be complete. Reload the page in a moment.`;
+}
+
+/** The words for the numbers that cover only part of the store's memberships (NextFacts `partial`): a limit, never "reload". */
+export function partialWords(partial: NextActionId[]): string {
+  return `Your store has more memberships than one reading counts, so these numbers cover only part of them (${listOf(partial)}). No suggestion is made from them, and reloading will not change this.`;
+}
+
+/** Both notes, each only when it has something to name. */
+function notesOf(unknown: NextActionId[], partial: NextActionId[]): string | null {
+  const words = [partial.length ? partialWords(partial) : "", unknown.length ? unknownWords(unknown) : ""].filter(Boolean);
+  return words.length ? words.join(" ") : null;
 }
 
 /**
- * The next one to three actions for this role, from the store's recorded counts. `may` says whether the role holds a
- * permission; `currency` is the store's own, the only one money is ranked in; `now` is the time of the reading.
+ * The next one to five actions for this role, from the store's recorded counts. `may` says whether the role holds a
+ * permission; `where` is the address of each screen the studio has for this person (an action without one is left
+ * out, neither shown nor said to be missing); `currency` is the store's own, the only one money is ranked in; `now`
+ * is the time of the reading.
  */
-export function nextActions(facts: NextFacts, options: { may: (permission: Permission) => boolean; currency: string; now: number }): NextView {
+export function nextActions(
+  facts: NextFacts,
+  options: { may: (permission: Permission) => boolean; where: Partial<Record<NextActionId, string>>; currency: string; now: number },
+): NextView {
   const found: Candidate[] = [];
   const unknown: NextActionId[] = [];
+  const partial: NextActionId[] = [];
+  let looked = false;
   for (const id of NEXT_ACTION_ORDER) {
     // A role that may not act on it is not told about it, nor that its number is missing.
     if (!NEXT_ACTION_NEEDS[id].every((permission) => options.may(permission))) continue;
-    const got = candidate(id, facts, options.currency, options.now);
-    if (got === "unknown") unknown.push(id);
-    else if (got) found.push(got);
+    const href = options.where[id];
+    if (typeof href !== "string" || !href) continue;
+    const got = candidate(id, facts, options.currency, options.now, href);
+    if (got !== null) looked = true;
+    else if (FACT_OF[id](facts) !== undefined) looked = true;
+    if (got === "unknown") {
+      const fact = FACT_OF[id](facts) as { partial?: unknown } | undefined;
+      (fact && typeof fact === "object" && fact.partial === true ? partial : unknown).push(id);
+    } else if (got) found.push(got);
   }
   found.sort(before);
   const actions = found.slice(0, NEXT_ACTIONS_MAX).map((c) => c.action);
-  if (actions.length) return { kind: "actions", actions, unknown, note: unknown.length ? unknownWords(unknown) : null };
-  if (unknown.length) return { kind: "unknown", unknown, words: unknownWords(unknown) };
-  return { kind: "nothing", words: NOTHING_NEXT };
+  const missing = [...partial, ...unknown];
+  if (actions.length) return { kind: "actions", actions, unknown: missing, note: notesOf(unknown, partial) };
+  if (missing.length) return { kind: "unknown", unknown: missing, words: notesOf(unknown, partial) ?? "" };
+  return { kind: "nothing", words: NOTHING_NEXT, looked };
 }

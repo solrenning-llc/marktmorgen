@@ -73,6 +73,8 @@ export const STUDIO_ACTIONS: readonly StudioAction[] = [
   { id: "requests", title: "Ask someone to pay a custom amount", segment: "requests", permission: "orders", words: ["invoice", "payment request", "bill", "charge", "custom amount", "payment link", "request money"] },
   { id: "agreements", title: "Send an agreement to sign", segment: "agreements", permission: "orders", words: ["contract", "proposal", "sign", "signature", "agreement", "terms"] },
   { id: "deals", title: "Follow the sales you are talking through", segment: "deals", permission: "orders", words: ["deal", "pipeline", "crm", "lead", "stage", "custom field", "prospect"] },
+  { id: "companies", title: "See the companies you sell to", segment: "companies", permission: "orders", words: ["company", "companies", "business", "school", "team", "organization", "b2b", "client"] },
+  { id: "plan-bills", title: "See what you paid for your Marktmorgen plan", segment: "invoices", permission: "billing", words: ["billing history", "plan receipt", "subscription billing", "what i paid", "plan payments"] },
   { id: "blog", title: "Write a blog post", segment: "blog", permission: "page", words: ["blog", "post", "article", "seo", "write", "search engine"] },
   { id: "forms", title: "Make a form, a survey or a quiz", segment: "forms", permission: "page", words: ["form", "survey", "quiz", "application", "questionnaire", "questions"] },
   { id: "meetings", title: "Get a video call link for each booking", segment: "meetings", permission: "settings", words: ["zoom", "google meet", "video call", "meeting", "call link", "webinar"] },

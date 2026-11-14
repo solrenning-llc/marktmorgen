@@ -5,6 +5,8 @@
  * Stripe for good, the refunds were never made and the buyers were never told (Claude 7's hunt). It is refused now,
  * as moving it to another sign-in already is (closingUnderway, lib/store.ts); a line that does not read refuses too.
  */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { claimHandle, createStore, deleteStore, setSubscription, storeForId, storeRef } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -57,6 +59,13 @@ async function main(): Promise<void> {
   const spare = await createStore(owner, "closer-spare", "Closer Spare", "");
   if (!spare.ok) throw new Error("no fifth store");
   is("deleted", (await deleteStore(storeRef(spare.store))).ok, true);
+
+  part("The studio says why, when the store goes and what its members get");
+  const page = readFileSync(join(process.cwd(), "app/studio/page.tsx"), "utf8");
+  const notice = /closing: \{\s*title: "This store is closing",\s*body: `([^`]*)`/.exec(page)?.[1] ?? "";
+  is("when it goes, from the figures the closing runs on", ["${CLOSING_DAYS}", "${BUYER_NOTICE_DAYS}", "${ERASE_WITHIN_DAYS}"].map((figure) => notice.includes(figure)), [true, true, true]);
+  is("what its members get", [notice.includes("renewal ends"), notice.includes("did not use")], [true, true]);
+  is("the refusal to delete a paying store no longer says to delete it once the plan ends", page.includes("delete it once the plan has ended"), false);
 
   done();
 }

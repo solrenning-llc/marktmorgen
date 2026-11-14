@@ -192,6 +192,7 @@ import { paidVideoSeconds, TRIAL_VIDEO_SECONDS } from "@/lib/video-admission-rul
 import { SETUP_STORAGE_BYTES, SETUP_VIDEO_SECONDS, standingOf, videoLimitFor } from "@/lib/plan-standing";
 import { CLOSING_DAYS, WARN_MONTH_DAYS, WARN_WEEK_DAYS, closingOf } from "@/lib/plan-closing";
 import { ENDED_STORE_EXPORTS, ERASE_WITHIN_DAYS, closesStore, keptRoomFor } from "@/lib/plan-closing-rules";
+import { BUYER_NOTICE_DAYS } from "@/lib/closing-buyers-rules";
 import { MAX_LEADS, listSize } from "@/lib/free";
 import { readableSize } from "@/lib/product-file";
 import {
@@ -730,7 +731,7 @@ const STORES_NOTICES: Record<string, { title: string; body: string }> = {
   },
   closing: {
     title: "This store is closing",
-    body: "Its plan has ended. Its buyers are told and get back what they are owed first, and then the store is removed for you. Nothing was deleted.",
+    body: `Its plan has ended, so it closes on its own and you do not need to delete it. Everyone who bought from it is emailed at least ${BUYER_NOTICE_DAYS} days before its closing day, which is at least ${CLOSING_DAYS} days after the plan ended. On that day, each member's renewal ends and they get back the part of their last payment they did not use. The store and its records are then removed within ${ERASE_WITHIN_DAYS} days. Your studio shows its closing day. Nothing was deleted.`,
   },
   domain: {
     title: "This store still has its own domain",

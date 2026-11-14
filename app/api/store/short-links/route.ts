@@ -20,7 +20,7 @@ export async function POST(request: NextRequest) {
   if (!guarded.ok) return guarded.response;
   const { body } = guarded;
   try {
-    const store = guarded.store.statsId ? guarded.store : await ensureStatsId(guarded.store.email);
+    const store = guarded.store.statsId ? guarded.store : await ensureStatsId(guarded.ref);
     if (!store?.statsId || !store.sid) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
     const titles = body.action === "remove" ? new Map<string, string>() : await readTitles(store);
     const isProduct = (id: string) => titles.has(id);

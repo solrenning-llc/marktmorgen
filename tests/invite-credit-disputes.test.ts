@@ -41,6 +41,12 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const path = url.pathname.replace(/^\/v1/, "");
   const method = init?.method ?? "GET";
   const answer = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
+  // An owed credit's invoice, read again by its id before the credit is sent (lib/creator-invite-credit.ts paidNow).
+  const byId = path.match(/^\/invoices\/(in_[A-Za-z0-9]+)$/);
+  if (method === "GET" && byId) {
+    const found = [...invoices.values()].flat().find((inv) => inv.id === byId[1]);
+    return found ? answer(found) : answer({ error: { message: "No such invoice" } }, 404);
+  }
   if (method === "GET" && path === "/invoices") return answer({ object: "list", data: invoices.get(url.searchParams.get("customer") ?? "") ?? [], has_more: false });
   if (method === "GET" && path === "/refunds") return answer({ object: "list", data: [], has_more: false });
   if (method === "GET" && path === "/disputes") {

@@ -416,6 +416,54 @@ async function creditedAt(customer: string): Promise<Map<string, string>> {
   throw new UnknownReplyError("invite credits: a balance history longer than read");
 }
 
+/**
+ * What one invoice of an invited store has paid that the platform still has, read again now, before a credit earned
+ * on it is sent (Codex X5's review of #4514, ALTO, part (a)): the invoice by its id, exactly and its own (rule 30),
+ * with its refunds and disputes (takenBackOn). "open" while a dispute on it is not decided. Anything that does not
+ * read throws, so nothing is sent and the credit stays owed for the next run.
+ */
+async function paidNow(invoiceId: string): Promise<number | "open"> {
+  if (!INVOICE_PATTERN.test(invoiceId)) throw new UnknownReplyError("invite credits: a credit's invoice id");
+  const query = new URLSearchParams();
+  query.append("expand[]", "payments");
+  const inv = await onPlatformAt(INVITE_STRIPE_VERSION, "GET", `/invoices/${invoiceId}?${query}`);
+  if (!isPaidInvoice(inv) || inv.id !== invoiceId) throw new UnknownReplyError("invite credits: a credit's invoice read again");
+  const taken = inv.amount_paid > 0 ? await takenBackOn(inv) : 0;
+  if (taken === "open") return "open";
+  return paidOn(inv, taken);
+}
+
+/**
+ * What an owed credit is still worth, read again before it is sent: a share is its invoice's share of what the
+ * platform still has; the invited creator's bonus follows the share it was earned with (the first paid invoice's,
+ * at the same moment), and earns nothing once that invoice has nothing left. Never more than written. "open" while a
+ * dispute is not decided. Throws when anything it needs does not read.
+ */
+async function stillOwed(credit: Credit): Promise<number | "open"> {
+  const byRead = repliesFor(await redisPipeline([["GET", byKey(credit.from)]]), 1);
+  if (!byRead || (byRead[0] !== null && typeof byRead[0] !== "string")) throw new UnknownReplyError("invite credits: who invited a store, read again");
+  const by = parseBy(byRead[0]);
+  const terms = by ? readInviteTerms(by.terms) : null;
+  if (!by || !terms) throw new UnknownReplyError("invite credits: the invite a credit was earned on");
+  if (by.back) return 0;
+  if (credit.kind === "share") {
+    const paid = await paidNow(credit.id);
+    if (paid === "open") return "open";
+    return Math.min(credit.cents, inviteShare(paid, terms));
+  }
+  // The bonus: the share it was earned with is the invited store's, on its inviter's list, at the bonus's moment.
+  const listed = repliesFor(await redisPipeline([["ZRANGEBYSCORE", mineKey(by.r), credit.at, credit.at]]), 1);
+  const ids = listed ? stringList(listed[0]) : null;
+  if (!ids) throw new UnknownReplyError("invite credits: the share a bonus was earned with");
+  const read = ids.length ? repliesFor(await redisPipeline(ids.map((id) => ["GET", creditKey(id)])), ids.length) : [];
+  if (!read) throw new UnknownReplyError("invite credits: the share a bonus was earned with");
+  const share = read.map(parseCredit).find((c) => c?.kind === "share" && c.from === credit.from && c.at === credit.at) ?? null;
+  if (!share) throw new UnknownReplyError("invite credits: the share a bonus was earned with");
+  const paid = await paidNow(share.id);
+  if (paid === "open") return "open";
+  return paid > 0 ? credit.cents : 0;
+}
+
 /** Step 2 for one credit. True when it is now on the plan. */
 async function putOnPlan(id: string, history: Map<string, Map<string, string>>, nowSeconds: number): Promise<boolean> {
   // Read exactly (CX-123 rule 24, audit round 7): only a record confirmed absent (an exact null) or read back and no
@@ -447,19 +495,34 @@ async function putOnPlan(id: string, history: Map<string, Map<string, string>>, 
     history.set(customer, known);
   }
   let txn = known.get(id) ?? "";
+  let sent = credit;
   if (!txn) {
+    // Read again before it is sent (Codex X5 on #4514, ALTO (a)): a payment taken back since the credit was written
+    // makes it earn less, or nothing; a dispute not decided yet keeps it owed for a later run. A credit already at
+    // Stripe is not touched here: what it becomes after a late dispute is the owner's decision (part (b)).
+    const worth = await stillOwed(credit);
+    if (worth === "open") return false;
+    if (worth <= 0) {
+      const wrote = repliesFor(await redisPipeline([["SET", creditKey(id), JSON.stringify({ ...credit, cents: 0, state: "none" })], ["SREM", OWED_KEY, id]]), 2);
+      if (!wrote || wrote[0] !== "OK" || countOf(wrote[1]) === null) throw new UnknownReplyError(`invite credits: ${id} written down as earning nothing`);
+      return false;
+    }
+    sent = { ...credit, cents: worth };
     const body = new URLSearchParams({
-      amount: String(-credit.cents),
+      amount: String(-sent.cents),
       currency: credit.cur,
       description: credit.kind === "share" ? "Marktmorgen invite credit: a creator you invited paid" : "Marktmorgen invite credit: welcome",
       "metadata[nimbus_invite_credit]": id,
     });
-    const made = await onPlatformAt(INVITE_STRIPE_VERSION, "POST", `/customers/${customer}/balance_transactions`, body, `nimbus-invite-${id}`);
+    // The key as before for the amount written; a smaller amount after a take-back gets its own, so an earlier try
+    // of the larger amount is never answered for it (the balance history read above still finds any that landed).
+    const key = sent.cents === credit.cents ? `nimbus-invite-${id}` : `nimbus-invite-${id}-${sent.cents}`;
+    const made = await onPlatformAt(INVITE_STRIPE_VERSION, "POST", `/customers/${customer}/balance_transactions`, body, key);
     txn = typeof made.id === "string" ? made.id : "";
     known.set(id, txn);
   }
   await redisPipeline([
-    ["SET", creditKey(id), JSON.stringify({ ...credit, state: "done", txn, doneAt: nowSeconds })],
+    ["SET", creditKey(id), JSON.stringify({ ...sent, state: "done", txn, doneAt: nowSeconds })],
     ["SREM", OWED_KEY, id],
   ]);
   return true;

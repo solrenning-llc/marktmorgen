@@ -26,6 +26,8 @@ const INVITED_AT = NOW - 60 * DAY;
 const CUSTOMER = "cus_Invited01";
 
 type Reply = (startingAfter: string | null, page: number) => unknown;
+/** Every invoice row a list answered, by id. */
+const listed = new Map<string, Record<string, unknown>>();
 let invoiceReply: Reply = () => ({ object: "list", data: [], has_more: false });
 let invoiceReads: string[] = [];
 let posted: string[] = [];
@@ -39,8 +41,13 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (url.hostname !== "api.stripe.com") return answer({}, 404);
   if (method === "GET" && path === "/invoices") {
     invoiceReads.push(url.search);
-    return answer(invoiceReply(url.searchParams.get("starting_after"), invoiceReads.length));
+    const reply = invoiceReply(url.searchParams.get("starting_after"), invoiceReads.length);
+    // Kept, so an owed credit's invoice read again by its id answers the row the list gave (lib/creator-invite-credit.ts paidNow).
+    for (const row of ((reply as { data?: unknown }).data ?? []) as Record<string, unknown>[]) if (row && typeof row.id === "string") listed.set(row.id, row);
+    return answer(reply);
   }
+  const byId = path.match(/^\/invoices\/(in_[A-Za-z0-9]+)$/);
+  if (method === "GET" && byId) return listed.has(byId[1]) ? answer(listed.get(byId[1])) : answer({ error: { message: "No such invoice" } }, 404);
   // The disputes of each paid invoice's payment, read beside its refunds (lib/creator-invite-credit.ts disputedOn): none here.
   if (method === "GET" && path === "/disputes") return answer({ object: "list", data: [], has_more: false });
   if (method === "GET" && path === "/refunds") return answer({ object: "list", data: [], has_more: false });

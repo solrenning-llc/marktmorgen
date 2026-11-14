@@ -280,7 +280,7 @@ export default async function AffiliatesPage({ params, searchParams }: Params) {
                       <p className="st-muted mt-2 text-sm">{a.recruitNote(store.affiliates.secondTier, store.name)}</p>
                     </>
                   ) : null}
-                  <AffiliateCampaignLinks products={promotionProducts} />
+                  <AffiliateCampaignLinks products={promotionProducts} language={store.language} />
                   <AffiliateKit handle={store.handle} language={store.language} products={aiAvailableFor(store) ? kitProducts : []} />
                   {/*
                     A code of the store's own, given to this affiliate
@@ -390,7 +390,7 @@ export default async function AffiliatesPage({ params, searchParams }: Params) {
                     </p>
                   ) : null}
 
-                  <AffiliatePromotionResults book={book} />
+                  <AffiliatePromotionResults book={book} language={store.language} />
                   {/* Each lead with where it stands (lib/affiliate-lead-rules.ts), the person's address masked. */}
                   {book.lines.some((line) => line.how === "lead") ? (
                     <>

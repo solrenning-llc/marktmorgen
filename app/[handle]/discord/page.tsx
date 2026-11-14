@@ -6,6 +6,8 @@ import { lookStyle } from "@/lib/store-look";
 import { speech } from "@/lib/buyer-words";
 import { discordWords } from "@/lib/buyer-words/discord";
 import { SNOWFLAKE } from "@/lib/discord-rules";
+import { isResting } from "@/lib/traffic";
+import { StoreResting } from "@/components/store-resting";
 
 type Params = {
   params: Promise<{ handle: string }>;
@@ -35,6 +37,9 @@ export default async function DiscordPage({ params, searchParams }: Params) {
   if (!decoded.startsWith("@")) notFound();
   const store = await storeForPage(normaliseHandle(decoded));
   if (!store) notFound();
+  // One of the store's public requests, as its other pages take (lib/traffic.ts):
+  // past them the page rests with the store (R20 finding 3).
+  if (await isResting(store)) return <StoreResting store={store} />;
   const said = speech(store);
   const w = discordWords(store.language);
   const query = await searchParams;

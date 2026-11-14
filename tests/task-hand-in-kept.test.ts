@@ -134,7 +134,11 @@ function failing(match: (command: (string | number)[]) => boolean, answer: (comm
 const takesWorkRoom = (w: World) => (command: (string | number)[]) =>
   command[0] === "EVAL" && String(command[3]).startsWith("nl:data:") && command.includes(`ca:${w.courseId}`);
 
-const isWrite = (w: World) => (command: (string | number)[]) => command[0] === "SET" && command[1] === `nl:course:${w.courseId}:task:${w.lessonId}:sub:${emailKey(BUYER)}`;
+/** The work's write: its SET, or since #3135 the conditional write (lib/assignment.ts HAND_IN_WRITE_IF), the work's key first. */
+const isWrite = (w: World) => (command: (string | number)[]) => {
+  const sub = `nl:course:${w.courseId}:task:${w.lessonId}:sub:${emailKey(BUYER)}`;
+  return (command[0] === "SET" && command[1] === sub) || (command[0] === "EVAL" && command[3] === sub);
+};
 
 test("control: a hand-in that goes through keeps its file and counts its bytes", async () => {
   const w = await world("handinkeptok", true);

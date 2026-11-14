@@ -301,7 +301,18 @@ export async function createOnboardingLink(
 export type AccountState = {
   chargesEnabled: boolean;
   detailsSubmitted: boolean;
+  /**
+   * card_payments' status exactly as Stripe gave it, one of the values of the
+   * pinned API version (Account.Configuration.Merchant.Capabilities.CardPayments
+   * .Status in stripe-node at 2026-08-26.dahlia), or null for any other shape.
+   * Only a known status is written down without the creator asking
+   * (lib/stripe-charges.ts).
+   */
+  cardPayments: CardPaymentsStatus | null;
 };
+
+const CARD_PAYMENTS_STATUSES = ["active", "pending", "restricted", "unsupported"] as const;
+export type CardPaymentsStatus = (typeof CARD_PAYMENTS_STATUSES)[number];
 
 type MerchantConfiguration = {
   capabilities?: { card_payments?: { status?: unknown } };
@@ -335,6 +346,7 @@ export async function readAccount(accountId: string): Promise<AccountState> {
 
   return {
     chargesEnabled: status === "active",
+    cardPayments: CARD_PAYMENTS_STATUSES.find((known) => known === status) ?? null,
     // Onboarding still has something outstanding while a deadline is past due.
     detailsSubmitted: deadline !== "past_due",
   };

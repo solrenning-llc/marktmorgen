@@ -62,6 +62,8 @@ const en = {
   ownTitle: "This is your own course",
   ownBody: "You see every lesson, as a student sees an open one. Nothing you do here is counted as progress.",
   seeSample: "See the certificate students get",
+  /** The heading of the course page's shelf of the store's other products (628 [HN4](b)). */
+  shelfTitle: (store: string) => `More from ${store}`,
   endedTitle: "Your membership has ended",
   endedBody:
     "This course came with your membership, which is no longer running, so its lessons are closed now. Renew and it opens right away, with your progress where you left it.",
@@ -393,6 +395,7 @@ const es: CoursesWords = {
   ownTitle: "Este es tu propio curso",
   ownBody: "Ves todas las lecciones, como un estudiante ve una que ya está abierta. Nada de lo que hagas aquí cuenta como progreso.",
   seeSample: "Ver el certificado que reciben los estudiantes",
+  shelfTitle: (store) => `Más de ${store}`,
   endedTitle: "Tu membresía terminó",
   endedBody:
     "Este curso venía con tu membresía, que ya no está activa, así que sus lecciones ahora están cerradas. Renuévala y se abre al instante, con tu progreso donde lo dejaste.",
@@ -698,6 +701,7 @@ const fr: CoursesWords = {
   ownTitle: "C'est votre propre formation",
   ownBody: "Vous voyez toutes les leçons, comme un participant voit une leçon ouverte. Rien de ce que vous faites ici n'est compté comme progression.",
   seeSample: "Voir le certificat que reçoivent les participants",
+  shelfTitle: (store) => `Plus de ${store}`,
   endedTitle: "Votre abonnement a pris fin",
   endedBody:
     "Cette formation était incluse dans votre abonnement, qui n'est plus actif. Ses leçons sont donc fermées pour le moment. Renouvelez-le et elle s'ouvre aussitôt, avec votre progression là où vous l'aviez laissée.",
@@ -997,6 +1001,7 @@ const de: CoursesWords = {
   ownTitle: "Das ist Ihr eigener Kurs",
   ownBody: "Sie sehen jede Lektion so, wie Teilnehmende eine freigeschaltete sehen. Nichts, was Sie hier tun, zählt als Fortschritt.",
   seeSample: "Das Zertifikat ansehen, das Teilnehmende erhalten",
+  shelfTitle: (store) => `Mehr von ${store}`,
   endedTitle: "Ihre Mitgliedschaft ist beendet",
   endedBody:
     "Dieser Kurs gehörte zu Ihrer Mitgliedschaft, die nicht mehr läuft, deshalb sind seine Lektionen jetzt geschlossen. Verlängern Sie sie, und er öffnet sich sofort wieder, mit Ihrem Fortschritt dort, wo Sie aufgehört haben.",
@@ -1301,6 +1306,7 @@ const it: CoursesWords = {
   ownTitle: "Questo è il tuo corso",
   ownBody: "Vedi ogni lezione come uno studente vede una lezione aperta. Niente di ciò che fai qui viene contato come progresso.",
   seeSample: "Vedi l'attestato che ricevono gli studenti",
+  shelfTitle: (store) => `Altro da ${store}`,
   endedTitle: "La tua iscrizione è terminata",
   endedBody:
     "Questo corso era incluso nella tua iscrizione, che non è più attiva, quindi ora le sue lezioni sono chiuse. Rinnovala e si riapre subito, con i tuoi progressi dove li avevi lasciati.",
@@ -1603,6 +1609,7 @@ const nl: CoursesWords = {
   ownTitle: "Dit is je eigen cursus",
   ownBody: "Je ziet elke les zoals een cursist een geopende les ziet. Niets wat je hier doet, telt als voortgang.",
   seeSample: "Bekijk het certificaat dat cursisten krijgen",
+  shelfTitle: (store) => `Meer van ${store}`,
   endedTitle: "Je lidmaatschap is afgelopen",
   endedBody:
     "Deze cursus hoorde bij je lidmaatschap, dat niet meer loopt, dus de lessen zijn nu gesloten. Verleng het en hij gaat meteen weer open, met je voortgang waar je was gebleven.",
@@ -1906,6 +1913,7 @@ const pt: CoursesWords = {
   ownTitle: "Este é o seu próprio curso",
   ownBody: "Vê todas as aulas, tal como um aluno vê uma aula aberta. Nada do que fizer aqui conta como progresso.",
   seeSample: "Ver o certificado que os alunos recebem",
+  shelfTitle: (store) => `Mais de ${store}`,
   endedTitle: "A sua subscrição terminou",
   endedBody:
     "Este curso fazia parte da sua subscrição, que já não está ativa, por isso as aulas estão agora fechadas. Renove-a e o curso abre de imediato, com o seu progresso onde o deixou.",

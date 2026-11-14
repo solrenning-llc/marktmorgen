@@ -27,7 +27,7 @@ import { creativeRowsFrom } from "@/lib/creative-results";
  * account, which is the only record of money that deserves the name.
  */
 import { type Paid, paypalPaymentId, readPayPalRefundsWithCoverage, readPayPalSales, sellsThroughPayPal } from "@/lib/paypal-sales";
-import { DISPUTE_TAKES, type Entry, type KeptWindow, keptByCurrency } from "@/lib/retained-revenue";
+import { disputeTakes, type Entry, type KeptWindow, keptByCurrency } from "@/lib/retained-revenue";
 import { buyerChannelsFrom, type BuyerChannels } from "@/lib/buyer-channel-rules";
 import { type DiscountRow, discountImpact } from "@/lib/discount-impact";
 import { saleHandles } from "@/lib/store";
@@ -1122,6 +1122,15 @@ export function payPalSale(paid: Paid): Sale {
 const currencyOf = (row: { currency?: unknown }) => (typeof row.currency === "string" && /^[a-z]{3}$/i.test(row.currency) ? row.currency.toLowerCase() : "");
 
 /**
+ * Why a reading of paid sales is partial, so what says so names the source
+ * truly (lib/store-export.ts, its orders' note): the PayPal sales not all read
+ * ("paypal"), more pages on the Stripe account than were read
+ * ("stripe-pages"), or a Stripe sale whose currency was not named, kept with
+ * its currency blank ("currency").
+ */
+export type SalesGap = "paypal" | "stripe-pages" | "currency";
+
+/**
  * Every paid sale of this store since `since` (seconds), newest first, read
  * from the creator's own Stripe account: checkouts this store opened that
  * were paid, and the one-click extras taken after them. At most `pages`
@@ -1146,21 +1155,25 @@ function financialPage(list: { data?: unknown; has_more?: unknown }, seen: Set<s
   return rows;
 }
 
-export async function readPaidSales(store: Store, since: number, pages: number): Promise<{ sales: Sale[]; partial: boolean }> {
-  if (!readsSales(store)) return { sales: [], partial: false };
+export async function readPaidSales(store: Store, since: number, pages: number): Promise<{ sales: Sale[]; partial: boolean; gaps: SalesGap[] }> {
+  if (!readsSales(store)) return { sales: [], partial: false, gaps: [] };
   const handles = saleHandles(store);
   const sales: Sale[] = [];
   let partial = false;
+  const gaps = new Set<SalesGap>();
   // Sales paid with PayPal, written down as each was paid (lib/paypal-sales.ts): counted beside Stripe's.
   const paypal = await readPayPalSales(store.statsId, since, pages * 100).catch((error) => {
     console.error("reading PayPal sales failed", error);
     return { sales: [], partial: true };
   });
   for (const paid of paypal.sales) sales.push(payPalSale(paid));
-  if (paypal.partial) partial = true;
+  if (paypal.partial) {
+    partial = true;
+    gaps.add("paypal");
+  }
   if (!store.stripeAccountId) {
     sales.sort((a, b) => b.created - a.created);
-    return { sales, partial };
+    return { sales, partial, gaps: [...gaps] };
   }
   const walk = async (path: string, take: (row: Record<string, unknown>) => void) => {
     let after = "";
@@ -1175,7 +1188,10 @@ export async function readPaidSales(store: Store, since: number, pages: number):
       rows.forEach(take);
       if (!list.has_more) return;
       after = rows[rows.length - 1].id as string;
-      if (page === pages - 1) partial = true;
+      if (page === pages - 1) {
+        partial = true;
+        gaps.add("stripe-pages");
+      }
     }
   };
   // The two lists are read side by side, so a whole store's sales wait on the longer of them, not both (lib/store-export.ts).
@@ -1188,7 +1204,10 @@ export async function readPaidSales(store: Store, since: number, pages: number):
     const country = typeof details.address?.country === "string" && /^[A-Z]{2}$/.test(details.address.country) ? details.address.country : "";
     const currency = currencyOf(row);
     // A sale in a currency the answer does not name cannot be counted anywhere: the reading is incomplete.
-    if (!currency) partial = true;
+    if (!currency) {
+      partial = true;
+      gaps.add("currency");
+    }
     sales.push({
       created: typeof row.created === "number" ? row.created * 1000 : Date.now(),
       product: meta.product ?? "",
@@ -1205,7 +1224,10 @@ export async function readPaidSales(store: Store, since: number, pages: number):
   const extras = walk("/payment_intents?limit=100", (pi) => {
     const meta = (pi.metadata ?? {}) as Record<string, string>;
     if (meta.kind !== "upsell" || !handles.has(meta.store ?? "") || pi.status !== "succeeded") return;
-    if (!currencyOf(pi)) partial = true;
+    if (!currencyOf(pi)) {
+      partial = true;
+      gaps.add("currency");
+    }
     sales.push({
       created: typeof pi.created === "number" ? pi.created * 1000 : Date.now(),
       product: meta.product ?? "",
@@ -1227,7 +1249,7 @@ export async function readPaidSales(store: Store, since: number, pages: number):
   });
   await Promise.all([checkouts, extras]);
   sales.sort((a, b) => b.created - a.created);
-  return { sales, partial };
+  return { sales, partial, gaps: [...gaps] };
 }
 
 /** The metadata of the subscription an invoice is for, where either of Stripe's API versions keeps it. */
@@ -1436,7 +1458,7 @@ export function readStoreDisputes(store: Store, since: number, pages = DISPUTE_P
   return readDisputes(store, since, pages);
 }
 
-/** One dispute as Stripe lists it, only in a state that takes the money (DISPUTE_TAKES). */
+/** One dispute as Stripe lists it, only one that takes the money (disputeTakes). */
 export type DisputeRow = { created: number; cents: number; currency: string; paymentIntent: string };
 
 /** How many pages of a hundred disputes are read for the numbers; the affiliate book reads as many. */
@@ -1444,8 +1466,9 @@ const DISPUTE_PAGES = 3;
 
 /**
  * The disputes opened on the creator's account since `since` (seconds) that
- * the bank is holding or the buyer won. At most DISPUTE_PAGES pages of a
- * hundred; `partial` when there were more.
+ * the bank is holding or gave back to the buyer (disputeTakes). At most
+ * DISPUTE_PAGES pages of a hundred; `partial` when there were more, or when a
+ * prevented dispute's money could not be read.
  */
 async function readDisputes(store: Store, since: number, pages = DISPUTE_PAGES): Promise<{ rows: DisputeRow[]; partial: boolean }> {
   const out: DisputeRow[] = [];
@@ -1460,7 +1483,11 @@ async function readDisputes(store: Store, since: number, pages = DISPUTE_PAGES):
     )) as { data?: unknown; has_more?: unknown };
     const rows = financialPage(list, seen);
     for (const row of rows) {
-      if (typeof row.status !== "string" || !DISPUTE_TAKES.has(row.status)) continue;
+      // A prevented dispute whose own money movement cannot be read is not
+      // counted, and the reading says it is partial (CX-123 rule 24).
+      const takes = disputeTakes(row);
+      if (takes === null) partial = true;
+      if (takes !== true) continue;
       const raw = row.payment_intent;
       const pi = typeof raw === "string" ? raw : raw && typeof raw === "object" && typeof (raw as { id?: unknown }).id === "string" ? (raw as { id: string }).id : "";
       const cents = typeof row.amount === "number" && row.amount > 0 ? row.amount : 0;
@@ -2448,8 +2475,8 @@ export const EXPORT_PAGES = 50;
  * The store's sales as CSV, newest first: every paid checkout and one-click
  * extra since `sinceSeconds` (0 for all), up to EXPORT_PAGES pages of each.
  */
-export async function salesCsv(store: Store, sinceSeconds: number): Promise<{ csv: string; rows: number; partial: boolean }> {
-  const { sales, partial } = await readPaidSales(store, sinceSeconds, EXPORT_PAGES);
+export async function salesCsv(store: Store, sinceSeconds: number): Promise<{ csv: string; rows: number; partial: boolean; gaps: SalesGap[] }> {
+  const { sales, partial, gaps } = await readPaidSales(store, sinceSeconds, EXPORT_PAGES);
   const find = listingFinder(store);
   const title = async (id: string, fallback: unknown) => (await find(id))?.title ?? (typeof fallback === "string" ? fallback : "");
   const lines = [
@@ -2497,7 +2524,7 @@ export async function salesCsv(store: Store, sinceSeconds: number): Promise<{ cs
       ]),
     );
   }
-  return { csv: `${lines.join("\r\n")}\r\n`, rows: sales.length, partial };
+  return { csv: `${lines.join("\r\n")}\r\n`, rows: sales.length, partial, gaps };
 }
 
 /** Every kept day of visits as CSV, newest first. */

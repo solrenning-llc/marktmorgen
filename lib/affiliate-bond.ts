@@ -153,10 +153,16 @@ export async function forgetBondPerson(statsId: string | null, email: string): P
  * The affiliate a person is tied to, for the copy of their data (619 [SZ3]):
  * the record the erasure deletes, read whether or not the store's program
  * still ties buyers (bondFor answers "" then; the record is still kept).
- * Only reads.
+ * Only reads. "" is no record kept; null is a reply in an unknown shape (a
+ * missing reply, anything but text or null), never taken as no record, so the
+ * copy fails and is made again rather than leaving the bond out (CX-123 rule 24).
  */
-export async function bondRecordOf(statsId: string | null, email: string): Promise<string> {
+export async function bondRecordOf(statsId: string | null, email: string): Promise<string | null> {
   if (!statsId || !isRedisConfigured()) return "";
-  const [raw] = await redisPipeline([["HGET", bondKey(statsId), buyerHash(statsId, email)]]);
-  return typeof raw === "string" ? raw : "";
+  const replies: unknown = await redisPipeline([["HGET", bondKey(statsId), buyerHash(statsId, email)]]);
+  // The one reply, from the list's own data slot: a missing reply, a hole or a getter is unknown.
+  const slot = Array.isArray(replies) && replies.length === 1 ? Object.getOwnPropertyDescriptor(replies, "0") : undefined;
+  const raw: unknown = slot && Object.hasOwn(slot, "value") ? slot.value : undefined;
+  if (raw === null) return "";
+  return typeof raw === "string" ? raw : null;
 }

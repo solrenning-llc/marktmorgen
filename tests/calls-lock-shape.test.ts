@@ -32,13 +32,13 @@ import { addProduct, claimHandle, ensureStatsId, setProductCall, setStripeAccoun
 import type { Product, Store } from "@/lib/store";
 import { readListing, readProduct } from "@/lib/catalog";
 import { type CallListing, holdAndCheckout, moveBooking, slotsForProduct } from "@/lib/calls";
-import { type CallSetup, zonedToUtc } from "@/lib/call-setup";
+import type { CallSetup } from "@/lib/call-setup";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import { weekdayAt } from "./weekday";
 import { paidPeriod } from "./billing-period-fixture";
 
 const HOUR = 3_600_000;
-const DAY = 24 * HOUR;
 const NY = "America/New_York";
 
 /** What Stripe lists as the account's completed checkouts, per account, by the page asked for (its starting_after). */
@@ -65,7 +65,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
 
 /**
  * Replies put in place of the real ones, while set: the SET NX of a call's
- * lock, its GET, its plain SET (a take-over), and the HGETALL of a diary after
+ * lock, its GET, its take-over (a plain SET before, the swap script now), and the HGETALL of a diary after
  * `skipDiary` readings of it. Every command still runs on the in-memory Redis.
  */
 const swap: { nx?: { value: unknown }; get?: { value: unknown }; set?: { value: unknown }; diary?: { value: unknown }; skipDiary?: number } = {};
@@ -81,6 +81,8 @@ redis.pipeline = async (commands) => {
       if (c[0] === "SET" && !c.includes("NX") && swap.set) return swap.set.value;
       if (c[0] === "GET" && swap.get) return swap.get.value;
     }
+    // The take-over is a swap of the old value in one script since the lock has an owner (tests/calls-lock-owner.test.ts).
+    if (c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:call-lock-swap:v1\n") && swap.set) return swap.set.value;
     if (c[0] === "HGETALL" && key.startsWith("nl:call:busy:") && swap.diary) {
       if ((swap.skipDiary ?? 0) > 0) {
         swap.skipDiary = (swap.skipDiary ?? 0) - 1;
@@ -114,17 +116,6 @@ const weekly = {
   seats: 1,
   sessions: [],
 } as unknown as CallSetup;
-
-function weekdayAt(days: number, minute: number): number {
-  for (let d = days; d < days + 8; d += 1) {
-    const day = new Date(Date.now() + d * DAY);
-    const p = new Intl.DateTimeFormat("en-US", { timeZone: NY, year: "numeric", month: "2-digit", day: "2-digit", weekday: "short" }).formatToParts(day);
-    const get = (t: string) => p.find((x) => x.type === t)?.value ?? "";
-    if (get("weekday") === "Sat" || get("weekday") === "Sun") continue;
-    return zonedToUtc(Number(get("year")), Number(get("month")), Number(get("day")), minute, NY) as number;
-  }
-  throw new Error("no weekday");
-}
 
 type World = { store: Store; call: CallListing; full: Product & { call: CallSetup } };
 

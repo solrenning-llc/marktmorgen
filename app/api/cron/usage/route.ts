@@ -277,9 +277,10 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  // Whose these stores are, read exactly (lib/delivery.ts): unknown is never "no address on file". Then nobody is
-  // written to about the allowance, support is told nothing, the told list is left as it was, and the part is unknown.
-  let owners: (string | null)[];
+  // Whose these stores are, read exactly (lib/delivery.ts): unknown is never "no address on file". A read unknown as
+  // a whole: nobody is written to about the allowance, support is told nothing, the told list is left as it was, and
+  // the part is unknown. One store's owner unknown (undefined): that store only is postponed, below.
+  let owners: (string | null | undefined)[];
   try {
     owners = await ownersOf(fresh.map((s) => s.folder));
   } catch (error) {
@@ -291,10 +292,19 @@ export async function GET(request: NextRequest) {
   }
   let told = 0;
   const unknown: string[] = [];
+  // Stores whose owner could not be read today: not written to, support not told, not recorded; tried next run.
+  let unreadOwners = 0;
+  // Only a notice that went out is recorded as given: a refused send, a store left because no sender is configured,
+  // or an ownerless store support could not be told about stays off the told list and is tried again next run.
+  const given: string[] = [];
 
   for (let i = 0; i < fresh.length; i += 1) {
     const store = fresh[i];
     const email = owners[i];
+    if (email === undefined) {
+      unreadOwners += 1;
+      continue;
+    }
     if (!email) {
       unknown.push(store.folder);
       continue;
@@ -335,7 +345,10 @@ export async function GET(request: NextRequest) {
       console.error("sending the allowance notice failed", error);
       return false;
     });
-    if (sent !== false) told += 1;
+    if (sent === true) {
+      told += 1;
+      given.push(store.folder);
+    }
   }
 
   /*
@@ -345,7 +358,7 @@ export async function GET(request: NextRequest) {
     It is said out loud rather than passed over in silence.
   */
   if (unknown.length > 0 && isSenderConfigured()) {
-    await sendEmail({ meter: { by: "company" },
+    const supportTold = await sendEmail({ meter: { by: "company" },
       from: NIMBUS_FROM,
       to: SUPPORT_EMAIL,
       subject: `${unknown.length} store(s) over the allowance could not be written to`,
@@ -356,15 +369,24 @@ export async function GET(request: NextRequest) {
         "",
         ...unknown.map((f) => `  ${f}`),
       ].join("\n"),
-    }).catch((error) => console.error("sending the unknown-owner notice failed", error));
+    }).catch((error) => {
+      console.error("sending the unknown-owner notice failed", error);
+      return false;
+    });
+    if (supportTold === true) given.push(...unknown);
   }
 
+
   await redisPipeline([
-    ["SET", TOLD, JSON.stringify([...new Set([...seen, ...over.map((s) => s.folder)])]), "EX", 40 * 86_400],
+    ["SET", TOLD, JSON.stringify([...new Set([...seen, ...given])]), "EX", 40 * 86_400],
   ]);
 
+  if (unreadOwners > 0) {
+    console.error(`usage-watch: ${unreadOwners} store(s) over the delivery allowance have an owner that could not be read today; they were not written to and are tried again next run`);
+  }
+
   return Response.json(
-    { ok: true, over: over.length, told, unknown: unknown.length, video, visits, orders },
+    { ok: true, over: over.length, told, unknown: unknown.length, unreadOwners, video, visits, orders },
     { headers: { "Cache-Control": "no-store" } },
   );
 }

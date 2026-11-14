@@ -232,6 +232,21 @@ function main(): void {
   is("not an address", audio('<enclosure url="not a url" type="audio/mpeg"/>'), "audio-not-https");
   is("no enclosure", audio(null), "audio-missing");
   is("an enclosure with no address", audio('<enclosure type="audio/mpeg"/>'), "audio-missing");
+  for (const name of ["constructor", "Constructor", "__proto__", "toString", "hasOwnProperty"]) {
+    is(`an enclosure type named after an object's own member ("${name}") is refused, never read as a known type`, audio(`<enclosure url="https://cdn.example.com/1.mp3" type="${name}"/>`), "audio-type");
+  }
+  is("an empty <description> lets the episode's itunes:summary through", (() => {
+    const r = parseRssImport(feed([item(1, { raw: `<item><title>E</title><description></description><itunes:summary>From the summary</itunes:summary><enclosure url="https://cdn.example.com/1.mp3" type="audio/mpeg"/><guid>g1</guid></item>` })]));
+    return r.ok ? r.show.episodes[0].notes : r.reason;
+  })(), "From the summary");
+  is("an empty show <description> lets the show's itunes:summary through", (() => {
+    const r = parseRssImport(feed([item(1)]).replace("<description><![CDATA[A show about <b>bread</b> & rye.]]></description>", "<description></description><itunes:summary>Show summary</itunes:summary>"));
+    return r.ok ? r.show.description : r.reason;
+  })(), "Show summary");
+  is("a language the public feed would refuse (two subtags) is not imported, so the show can still get its public feed", (() => {
+    const r = parseRssImport(feed([item(1)]).replace("<language>en-us</language>", "<language>zh-Hant-TW</language>"));
+    return r.ok ? r.show.language : r.reason;
+  })(), null);
   is("video is not an episode the podcast keeps", audio('<enclosure url="https://cdn.example.com/1.mp4" type="video/mp4"/>'), "audio-type");
   is("two enclosures in one episode", audio('<enclosure url="https://a.example/1.mp3"/><enclosure url="https://a.example/2.mp3"/>'), "malformed");
   is("a show image that is not https is left out and flagged, the audio rules unchanged", (() => {
@@ -247,6 +262,11 @@ function main(): void {
   const many = parseRssImport(slow);
   const took = performance.now() - started;
   is("300 such episodes parse well under 400 ms", [many.ok, took < 400], [true, true]);
+  part("A missing description falls back to the summary, never a crash (cloud J on cloud K's fix for #3456)");
+  const noDescription = parseRssImport(feed([`<item><title>E</title><itunes:summary>Only a summary</itunes:summary><enclosure url="https://cdn.example.com/1.mp3" type="audio/mpeg"/></item>`]));
+  is("an episode with no <description> takes its summary", noDescription.ok ? noDescription.show.episodes[0].notes : noDescription.reason, "Only a summary");
+  const neither = parseRssImport(feed([`<item><title>E</title><enclosure url="https://cdn.example.com/1.mp3" type="audio/mpeg"/></item>`]));
+  is("an episode with neither has empty notes", neither.ok ? neither.show.episodes[0].notes : neither.reason, "");
   is("no request was made by any of it", fetched, 0);
 }
 

@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { originFrom } from "@/lib/request-origin";
+import { linkOrigin } from "@/lib/request-origin";
 import { clientAddress, fromAnotherSite, limited } from "@/lib/request-guard";
 import { readReport } from "@/lib/takedown-rules";
 import { fileReport } from "@/lib/takedown";
@@ -23,7 +23,7 @@ export async function POST(request: NextRequest) {
   const read = readReport(body);
   if (!read.ok) return Response.json({ ok: false, error: "problem", problem: read.problem }, { status: 400 });
   try {
-    const result = await fileReport(read.report, clientAddress(request), originFrom(request));
+    const result = await fileReport(read.report, clientAddress(request), linkOrigin(request));
     if (result === "sent") return Response.json({ ok: true });
     return Response.json({ ok: false, error: result }, { status: result === "limited" ? 429 : 503 });
   } catch (error) {

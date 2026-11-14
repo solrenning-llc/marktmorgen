@@ -61,6 +61,7 @@ import { canSellProduct } from "@/lib/store-checkout";
 import { productOfSub } from "@/lib/tier-rules";
 import { forgetTierPrice, tierPrice } from "@/lib/tier-switch";
 import { LockBusyError, withLock } from "@/lib/redis-lock";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { type FallbackSub, type MonthlyFallback, monthlyFallback } from "@/lib/yearly-fallback-rules";
 import type { Listing, Store } from "@/lib/store";
 
@@ -177,10 +178,14 @@ class NotOwnReply extends Error {
     super(`Stripe's reply was not the object asked for (${id})`);
   }
 }
-/** Whether the entry is on its list for the daily job. */
+/**
+ * Whether the entry is on its list for the daily job: only a whole count from SADD says so (1 added, 0 already
+ * there); any other reply is unknown and said as not left (CX-123 rule 24).
+ */
 const record = async (key: string, entry: string): Promise<boolean> => {
   try {
-    await redisPipeline([["SADD", key, entry]]);
+    const [added] = repliesFor(await redisPipeline([["SADD", key, entry]]), 1) ?? [];
+    if (countOf(added) === null) throw new UnknownReplyError("a list for the daily job");
     return true;
   } catch (error) {
     console.error("a move to monthly could not be left for the daily job; the result says so", key, entry, error);
@@ -224,7 +229,7 @@ export async function moveToMonthly(store: Store, customer: string, subscription
 
       // Never charged for the year while the month is; then read once more, so a year paid meanwhile is never moved.
       // Nothing is sent to the subscription yet: whatever fails here turns the year's retries back on.
-      let attempt: unknown;
+      let attempt: number | null;
       try {
         await onAccount("POST", account, `/invoices/${encodeURIComponent(failedInvoice)}`, new URLSearchParams({ auto_advance: "false" }), v);
         const still = await onAccount("GET", account, `/invoices/${encodeURIComponent(failedInvoice)}`, undefined, v);
@@ -234,7 +239,11 @@ export async function moveToMonthly(store: Store, customer: string, subscription
           if (still.status !== "paid") await retryYear(account, failedInvoice);
           return { ok: false, reason: "fallback" };
         }
-        [attempt] = await redisPipeline([["INCR", tryKey(failedInvoice)], ["EXPIRE", tryKey(failedInvoice), 2 * 86_400]]);
+        // The try's own number, read exactly (CX-123 rule 24): any other reply is unknown, never "try 1", so the move
+        // is never sent under a key a declined try already used, whose saved answer Stripe would give again.
+        const counted = repliesFor(await redisPipeline([["INCR", tryKey(failedInvoice)], ["EXPIRE", tryKey(failedInvoice), 2 * 86_400]]), 2);
+        attempt = counted ? countOf(counted[0]) : null;
+        if (!attempt) throw new UnknownReplyError("the try counter of a move to monthly");
       } catch (error) {
         await retryYear(account, failedInvoice);
         throw error;
@@ -242,7 +251,7 @@ export async function moveToMonthly(store: Store, customer: string, subscription
 
       let updated: Record<string, unknown>;
       try {
-        updated = await onAccount("POST", account, `/subscriptions/${encodeURIComponent(subscription)}`, fallbackBody(itemId, price, failedInvoice), v, `fallback:${failedInvoice}:${Number(attempt) || 1}`);
+        updated = await onAccount("POST", account, `/subscriptions/${encodeURIComponent(subscription)}`, fallbackBody(itemId, price, failedInvoice), v, `fallback:${failedInvoice}:${attempt}`);
       } catch (error) {
         if (refused(error)) {
           // Refused for certain: nothing was done, and the year is retried as before.

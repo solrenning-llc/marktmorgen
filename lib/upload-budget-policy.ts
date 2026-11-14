@@ -4,6 +4,18 @@ import { PAID_STORAGE_BYTES } from "@/lib/storage-rules";
 import { COST_TABLE_VERSION, uploadOperationsMicroUsd } from "@/lib/spend-cost-table";
 /** Public numerical ceilings, not proof of supplier pricing or tax treatment. */
 export const UPLOAD_BUDGET_SCOPES = ['creator','pro','scale','trial','setup','ended'] as const;
+/** Where an upload goes: an R2 file, a Blob file, or a lesson video kept by the video service. */
+export type UploadBackend = 'r2'|'blob'|'stream';
+/** The upload doors reserveStoreUpload opens (lib/upload-budget.ts). Direct
+ * Blob and video-service grants do not establish the same revocable,
+ * size-bound session contract, so they stay closed until that provider path
+ * is proven. Public pages read the same answer, so captions and video sizes,
+ * which exist only for a video the video service keeps, are promised only
+ * while its door can open (AGENTS.md, VR Part A item 2). */
+const OPEN_UPLOAD_BACKENDS: Readonly<Record<UploadBackend, boolean>> = { r2: true, blob: false, stream: false };
+export function uploadBackendOpen(backend: UploadBackend): boolean {
+  return OPEN_UPLOAD_BACKENDS[backend] === true;
+}
 export type UploadBudgetScope = typeof UPLOAD_BUDGET_SCOPES[number];
 export type UploadCaps = { opens: number; authorizedBytes: number; controlRequests: number };
 export type UploadBudgetPolicy = {

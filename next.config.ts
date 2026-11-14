@@ -66,7 +66,7 @@ const nextConfig: NextConfig = {
     // /pricing is now a real page. Only the older aliases redirect to it.
     return [
       ...to("/pricing", "/price", "/prices", "/plans"),
-      ...to("/#compare", "/compare", "/comparison"),
+      ...to("/proof/comparisons", "/compare", "/comparison"),
       ...to("/proof/compare", "/vs-stan", "/stan", "/stan-store", "/alternatives"),
       ...to("/platform", "/features", "/feature", "/product"),
       ...to("/platform/license-keys", "/platform/licence-keys"),

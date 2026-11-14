@@ -368,22 +368,38 @@ export async function logTeam(sid: string, line: Omit<LogLine, "at">): Promise<v
   }
 }
 
-/** The activity log, newest first. */
-export async function readLog(sid: string): Promise<LogLine[]> {
-  if (!STORE_ID_PATTERN.test(sid) || !isRedisConfigured()) return [];
-  const [rows] = await redisPipeline([["LRANGE", logKey(sid), 0, LOG_LINES - 1]]);
+/**
+ * The activity log, newest first; null when Redis answered in a shape that cannot be read (rule 24), so the Team page
+ * never says "nothing yet". Only Redis's own empty list is none; a line that is itself not readable is skipped, as
+ * before, and counted in `skipped`, so a decision that needs every line (a removal's "never taken off") can tell it
+ * was not read whole (Claude 4 on #3164).
+ */
+export async function readLogWhole(sid: string): Promise<{ lines: LogLine[]; skipped: number } | null> {
+  if (!STORE_ID_PATTERN.test(sid) || !isRedisConfigured()) return { lines: [], skipped: 0 };
+  const rows = stringList(repliesFor(await redisPipeline([["LRANGE", logKey(sid), 0, LOG_LINES - 1]]), 1)?.[0]);
+  if (!rows) return null;
   const lines: LogLine[] = [];
-  for (const row of Array.isArray(rows) ? rows : []) {
+  let skipped = 0;
+  for (const row of rows) {
     try {
-      const value = JSON.parse(String(row)) as Partial<LogLine>;
-      if (typeof value.at !== "string" || typeof value.who !== "string" || typeof value.what !== "string") continue;
+      const value = JSON.parse(row) as Partial<LogLine>;
+      if (typeof value.at !== "string" || typeof value.who !== "string" || typeof value.what !== "string") {
+        skipped += 1;
+        continue;
+      }
       const role: Role = value.role === "owner" ? "owner" : parseTeamRole(value.role) ?? "support";
       lines.push({ at: value.at, who: value.who, role, what: value.what });
     } catch {
       // A line that cannot be read is skipped, not shown half.
+      skipped += 1;
     }
   }
-  return lines;
+  return { lines, skipped };
+}
+
+/** The activity log's readable lines, newest first, for showing; null when it could not be read (readLogWhole). */
+export async function readLog(sid: string): Promise<LogLine[] | null> {
+  return (await readLogWhole(sid))?.lines ?? null;
 }
 
 export type InviteResult =

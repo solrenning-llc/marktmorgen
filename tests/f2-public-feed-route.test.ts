@@ -44,7 +44,7 @@ import type { Podcast } from "@/lib/podcast-rules";
 import { requestsIn } from "@/lib/traffic";
 import { requestLimitFor } from "@/lib/traffic-rules";
 import { allowanceWindow } from "@/lib/allowance-window";
-import { MAX_STORE_BYTES, addProduct, claimHandle, ensureStatsId, setProductHidden, setProductPodcast, setSubscription, storeFolder, storeForEmail, type Store } from "@/lib/store";
+import { MAX_STORE_BYTES, addProduct, claimHandle, ensureStatsId, setProductHidden, setProductPodcast, setSubscription, noteTakedown, storeFolder, storeForEmail, type Store } from "@/lib/store";
 import { MAX_PRODUCT_BYTES } from "@/lib/catalog";
 import { laterPageCost } from "./traffic-cost";
 import { COMMAND, DB_BYTE, ORIGIN_PER_BYTE, request } from "./plan-cost-registry";
@@ -299,6 +299,30 @@ async function main(): Promise<void> {
   forgetPublicFeeds();
   is("published again, served", (await get(`${pid}.xml`)).status, 200);
   is("the route's own 404 and 503 answers are never cached by anybody", (await get("zzzzzzzzzzzz.xml")).headers.get("cache-control"), "no-store");
+
+  part("A store suspension refuses an uncached feed and outlives no cached feed's bound (review 6786812167)");
+  forgetPublicFeeds();
+  is("healthy control: a public feed can be cached", (await get(`${pid}.xml`)).status, 200);
+  await noteTakedown(OWNER, null, true);
+  const suspensionNow = Date.now;
+  Date.now = () => suspensionNow() + (PUBLIC_FEED_CACHE_SECONDS + 1) * 1000;
+  try {
+    sent.length = 0;
+    const stopped = await get(`${pid}.xml`, { "if-none-match": etag });
+    is("a suspension outlives the cached XML and ETag: 404, no feed and no build",
+      [stopped.status, (await stopped.text()).includes("<rss"), reads().some((c) => c.startsWith(`GET nl:pod:${POD}`))],
+      [404, false, false]);
+  } finally {
+    Date.now = suspensionNow;
+  }
+  forgetPublicFeeds();
+  before = await requestsIn(folder, window);
+  const suspended = await get(`${pid}.xml`);
+  is("an uncached suspension is refused before a hold or podcast read",
+    [suspended.status, (await suspended.text()).includes("<rss"), (await requestsIn(folder, window)) - before],
+    [404, false, 0]);
+  await noteTakedown(OWNER, null, false);
+  is("a restored store can serve its public feed again", (await get(`${pid}.xml`)).status, 200);
 
   part("The cache is bounded by entries and by bytes");
   forgetPublicFeeds();

@@ -92,6 +92,7 @@ const MESSAGES: Record<string, string> = {
   role: "Your role on this store does not include this.",
   draft_remove_unconfirmed: "The draft removal could not be confirmed. Reload your saved drafts to check whether it was removed before trying again.",
   draft_read_unavailable: "Your saved drafts could not be checked before saving. Your text is still here. Try saving again in a moment.",
+  broadcast_read_unavailable: "That email could not be read just now, so nothing was changed. Try again in a moment.",
   draft_write_unconfirmed: "The draft save could not be confirmed. Your text is still here. Check your saved drafts before saving again; the draft may already exist.",
   flow_write_unconfirmed: "The sequence change could not be confirmed. Reload the saved sequences and check the result before trying again. The change may already have happened.",
   starters_nothing: "Your store already has a sequence for each of those moments. They are under Sequences.",
@@ -106,6 +107,8 @@ const MESSAGES: Record<string, string> = {
   segment_empty: "Choose who the group is first: a kind of reader, a product, someone to leave out, a label, or one of the five ways below.",
   segment_product: "That product is not in your store anymore.",
   segment_full: "A store keeps 20 saved groups at most. Remove one first.",
+  segment_unavailable: "Your saved groups could not be checked just now, so this group was not saved. Try again in a moment.",
+  segment_unread: "Your saved groups could not be read just now. Reload the page to see them before you change one again.",
   keep_already: "This email is already going to new people by itself. It is under Sequences.",
   keep_full: `That sequence already holds ${MAX_STEPS} steps. Remove one under Sequences first.`,
   too_many_flows: `A store keeps ${MAX_FLOWS} sequences at most. Remove one under Sequences first.`,
@@ -378,6 +381,8 @@ export function EmailStudio(props: {
   workflowLimits?: WorkflowLimits;
   /** Who may be made responsible for a deal: the owner and teammates who can see orders. */
   assignees?: string[];
+  /** The store is switched off after notices (lib/takedown.ts): an email sent now waits until it is back on. */
+  switchedOff?: boolean;
   /** Who a new email goes to, when opened from "Worth knowing" (lib/insights.ts). */
   preset?: { who: Who };
   /** The store's colour for a button in its emails (lib/store-look.ts), so the designer's preview is what is sent. */
@@ -484,6 +489,7 @@ export function EmailStudio(props: {
                 currency={props.currency}
                 segments={props.segments ?? []}
                 preset={open ? undefined : props.preset}
+                switchedOff={props.switchedOff ?? false}
               />
             </AiOn>
             <Drafts currency={props.currency} readFailed={props.draftsReadFailed ?? false} drafts={props.drafts} products={props.products} open={open} onOpen={openDraft} />
@@ -704,6 +710,8 @@ function Compose(props: {
   currency: string;
   segments: Segment[];
   preset?: { who: Who };
+  /** The store is switched off after notices: what is sent now waits until it is back on, and the toast says so. */
+  switchedOff: boolean;
 }) {
   const router = useRouter();
   const [refreshingDrafts, startDraftRefresh] = useTransition();
@@ -1352,7 +1360,7 @@ function Compose(props: {
                       draftSavedAt: draftId ? draftSavedAt : undefined,
                       test: testing ? { subjectB, share, hours, by } : undefined,
                     },
-                    later ? "Your email is scheduled." : "Your email is on its way.",
+                    props.switchedOff ? (later ? "Your email is scheduled. It goes out once your store is back on." : "Your email is saved. It goes out once your store is back on.") : later ? "Your email is scheduled." : "Your email is on its way.",
                   );
                   if (ok) {
                     setSubject("");

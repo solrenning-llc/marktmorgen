@@ -12,7 +12,7 @@ import { activationTiming } from "@/lib/store-activation";
 import { PathStudioReminder } from "@/components/path-studio-reminder";
 import { UsageMeter } from "@/components/usage-meter";
 import { dataUsed } from "@/lib/store-data";
-import { dataFullWords, dataWords } from "@/lib/store-data-rules";
+import { dataFullWords, dataWords, studentNotesLine, studentNotesRoomFor } from "@/lib/store-data-rules";
 import { isDiscordConfigured } from "@/lib/discord";
 import { RecentSalesSwitch } from "@/components/recent-sales-switch";
 import { firstSaleAt } from "@/lib/yearly-offer";
@@ -177,6 +177,7 @@ import { DiscountEditor } from "@/components/discount-editor";
 import { DomainEditor } from "@/components/domain-editor";
 import { StudioTools } from "@/components/studio-tools";
 import { StudioNav, StudioStart, type StartStep } from "@/components/studio-start";
+import { START_STEP_UNKNOWN } from "@/lib/studio-start-rules";
 import { domainStatus, isDomainsConfigured } from "@/lib/domains";
 import {
   COUNTRIES,
@@ -220,7 +221,7 @@ import { liveSecondStep, mayAddSecondStep, mayKeepPasskey } from "@/lib/second-s
 import { SESSION_COOKIE, isFreshSession } from "@/lib/auth";
 import { StudioHeader } from "@/components/studio-header";
 import { StudioStorePin } from "@/components/studio-store-pin";
-import { PasskeyManager } from "@/components/passkey-manager";
+import { PasskeyManager, PasskeysUnread } from "@/components/passkey-manager";
 import { PasskeySignIn } from "@/components/passkey-signin";
 import { TwoStepManager } from "@/components/two-step-manager";
 import { AppCodeInvite } from "@/components/app-code-invite";
@@ -852,7 +853,7 @@ export default async function StudioPage({
   const mayAdd = email ? early(mayAddSecondStep(email, cookieStore.get(SESSION_COOKIE)?.value).catch(() => false)) : null;
   const liveStep = email ? early(liveSecondStep(email, cookieStore.get(SESSION_COOKIE)?.value).catch(() => null)) : null;
   const afterRemoval = <T,>(read: () => Promise<T>): Promise<T> => early((removing ?? Promise.resolve(null)).then(read));
-  const passkeysLeft = early(Promise.all([removing, mayAdd, liveStep]).then(() => (email ? listPasskeys(email).catch(() => []) : [])));
+  const passkeysLeft = early(Promise.all([removing, mayAdd, liveStep]).then(() => (email ? listPasskeys(email).catch(() => null) : [])));
   const firstReads = {
     folder: early(store ? storeFolder(ref) : Promise.resolve("")),
     pictures: early(store ? imageFolder(ref) : Promise.resolve("")),
@@ -872,7 +873,8 @@ export default async function StudioPage({
         store?.sid && may("team") ? readTeam(store.sid).catch(() => null) : Promise.resolve(null),
         isFreshSession(cookieStore.get(SESSION_COOKIE)?.value).catch(() => false),
         // Whether this browser got in without its second step, and until when what matters is locked (lib/two-step.ts).
-        lockedUntil(cookieStore.get(SESSION_COOKIE)?.value).catch(() => 0),
+        // null when it could not be read: never taken for "not locked" (LOW 1 of Claude 1's review of #2945).
+        lockedUntil(cookieStore.get(SESSION_COOKIE)?.value).catch(() => null),
         // The person's two-step login (lib/two-step.ts), beside their passkeys.
         // null when it could not be read: never taken for "no request to turn it off" (Claude 4, C4-2980 on #2900).
         email ? twoStepStatus(email).catch(() => null) : Promise.resolve({ on: false, since: 0, codesLeft: 0, reset: 0, backup: "" }),
@@ -969,7 +971,8 @@ export default async function StudioPage({
     ),
     ordered: store && may("settings") ? early(ordersIn(folder, usageId)) : null,
     figures: current && may("settings") ? early(Promise.all(ALLOWANCE_KINDS.map(async (kind) => ({ kind, used: await allowanceUsed(current, kind), limit: allowanceFor(current, kind) })))) : null,
-    data: current && may("settings") ? early(dataUsed(current).catch(() => null)) : null,
+    // With what the students' private lesson notes take of it (lib/lesson-notes.ts), in the same read.
+    data: current && may("settings") ? early(dataUsed(current, undefined, { notes: true }).catch(() => null)) : null,
     closingAt: store && standing === "ended" && may("settings") ? early(closingOf(store).catch(() => null)) : null,
     apiKeys: current && may("export") ? early(shownKeys(current, email, role).catch(() => "unread" as const)) : null,
     // The creator's calendars: the private subscription address is made the
@@ -1230,11 +1233,20 @@ export default async function StudioPage({
   const passkeyRemovals: Record<string, number> = removed ? removed.atOf : {};
   const needsStep = firstReads.mayAdd ? !(await firstReads.mayAdd) : false;
   const canKeep = firstReads.liveStep ? mayKeepPasskey(await firstReads.liveStep) : false;
-  const [passkeys, team, freshLogin, lockedTill, twoStepRead, recoveryRead] = await firstReads.person;
+  const [passkeysRead, team, freshLogin, lockedTill, twoStepRead, recoveryRead] = await firstReads.person;
+  // Not read just now (null) is not "no passkeys": each Passkeys section says so in place of its manager (rule 24).
+  const passkeys = passkeysRead ?? [];
   // Not read just now (null) is not "none": the recovery section says so in place of its manager (rule 24).
   const recoveryShown = recoveryRead ?? "";
   // When it could not be read, the banner over Today and Two-step login below say so (unread); neither takes it for "off".
   const twoStep = twoStepRead ?? { on: false, since: 0, codesLeft: 0, reset: 0, backup: "" };
+  // This browser's lock: known and running (lockedNow), or not read just now (lockUnread). An unread lock is never
+  // "not locked": the top of the page says so, the app's code is not offered and Two-step login offers nothing a lock
+  // would refuse (tests/studio-lock-unread.test.ts).
+  const lockUnread = lockedTill === null;
+  const lockedNow = lockedTill !== null && lockedTill > 0;
+  // The "Keep a way back in" step's check mark is known when a way back was read, or both were read as none.
+  const recoveryKnown = Boolean(recoveryRead) || passkeys.length > 0 || (recoveryRead !== null && passkeysRead !== null);
   const connectReady = isConnectConfigured();
   const billingReadyForSteps = isBillingConfigured();
   // The first steps of a store, each ticked from what the store really has.
@@ -1262,9 +1274,11 @@ export default async function StudioPage({
               },
             ]
           : []),
-        // A way back in that needs no email, for the day the sign-in inbox is lost (lib/recovery-address.ts).
+        // A way back in that needs no email, for the day the sign-in inbox is lost (lib/recovery-address.ts). When its
+        // check mark is not known, it is listed as could not be checked just now, never ticked and never left out, so the
+        // list never looks complete over it (LOW 3 of Claude 1's review of #2945; tests/studio-passkeys-unread.test.ts).
         ...(role === "owner"
-          ? [{ key: "recovery", title: "Keep a way back in", hint: "A recovery address or a passkey: if you ever cannot open your email, either lets you straight back in.", done: Boolean(recoveryShown) || passkeys.length > 0, href: "#account-recovery" }]
+          ? [{ key: "recovery", title: "Keep a way back in", hint: "A recovery address or a passkey: if you ever cannot open your email, either lets you straight back in.", done: recoveryKnown && (Boolean(recoveryShown) || passkeys.length > 0), unknown: !recoveryKnown, href: "#account-recovery" }]
           : []),
         { key: "share", title: "Share your address", hint: "Put it in your bio. This checks itself off when your first visitor arrives.", done: (numbers?.totals.d30.visitors ?? 0) > 0, href: "#details" },
       ]
@@ -1329,7 +1343,15 @@ export default async function StudioPage({
         )}
 
         {/* A request to turn two-step login off without a code (lib/two-step.ts askReset), shown to every logged-in browser. */}
-        {lockedTill > 0 ? (
+        {lockUnread ? (
+          <div className="notice notice-warn mt-6" role="status">
+            <p className="font-bold text-ink">Whether some things are locked could not be checked just now</p>
+            <p className="mt-1 text-sm text-ink-soft">
+              This page cannot tell whether this browser got in without its second step, which keeps some things locked for a while. Nothing was changed. Open this page again in a moment to see.
+            </p>
+          </div>
+        ) : null}
+        {lockedTill !== null && lockedNow ? (
           <div className="notice notice-warn mt-6" role="status">
             <p className="font-bold text-ink">{`Some things are locked until ${new Date(lockedTill).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", timeZone: "UTC" })}`}</p>
             <p className="mt-1 text-sm text-ink-soft">
@@ -1350,7 +1372,7 @@ export default async function StudioPage({
           <div className="notice notice-warn mt-6" role="status">
             <p className="font-bold text-ink">Two-step login is set to turn off</p>
             <p className="mt-1 text-sm text-ink-soft">
-              {`Somebody who opened a login link was let in without the second step, saying the phone, the recovery codes, the passkeys and the recovery address are all lost. What matters is locked for them, and two-step login turns off on ${new Date(twoStep.reset).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", timeZone: "UTC" })}. If that was not you, press Cancel under Two-step login to log them out, and change your email password.`}
+              {`Somebody who opened a login link was let in without the second step, saying the phone, the recovery codes, the passkeys and the recovery address are all lost. What matters is locked for them, and two-step login turns off on ${new Date(twoStep.reset).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", timeZone: "UTC" })}. If that was not you, ${lockUnread ? "open this page again in a moment, press Cancel under Two-step login to log them out" : "press Cancel under Two-step login to log them out"}, and change your email password.`}
             </p>
             <a href="#two-step" className="mt-2 inline-flex min-h-11 items-center text-sm font-bold text-ink underline underline-offset-4">
               Go to Two-step login
@@ -1359,7 +1381,7 @@ export default async function StudioPage({
         ) : null}
 
         {/* Passkeys but no app's code: a quiet invitation, once a browser session, from what was read above (owner C3-96). */}
-        {store && twoStepRead !== null && showAppCodeInvite({ passkeys: passkeys.length, appOn: twoStep.on, locked: lockedTill > 0 }) ? <AppCodeInvite /> : null}
+        {store && twoStepRead !== null && !lockUnread && showAppCodeInvite({ passkeys: passkeys.length, appOn: twoStep.on, locked: lockedNow }) ? <AppCodeInvite /> : null}
 
         {current && unpaidSince > 0 ? <RenewalUnpaidNotice payUrl={renewalPage} canPay={may("billing")} /> : null}
         {current && current.subscriptionActive && planDisputed(current) ? <PlanDisputeNotice /> : null}
@@ -1418,7 +1440,7 @@ export default async function StudioPage({
             {ai.on && may("page") && may("products") && productCount(store) === 0 ? (
               <StoreSetupAi currency={store.currency} left={ai.left} hasFaq={store.faq.length > 0} storeName={store.name} />
             ) : null}
-            {role === "owner" ? <StudioStart steps={startSteps} activation={activationTiming(store)} launchChecklist={funnelLaunchChecklist(store.name, visibleCount(store) > 0, startSteps.map(step => ({title: step.title, open: step.done, product: step.key === "product" || step.key === "publish", free: false})), startSteps.filter(step => !step.done).map(step => ({title: step.title, detail: step.hint})), "store")} /> : null}
+            {role === "owner" ? <StudioStart steps={startSteps} activation={activationTiming(store)} launchChecklist={funnelLaunchChecklist(store.name, visibleCount(store) > 0, startSteps.map(step => ({title: step.title, open: step.done, product: step.key === "product" || step.key === "publish", free: false})), startSteps.filter(step => !step.done).map(step => ({title: step.title, detail: step.unknown ? START_STEP_UNKNOWN : step.hint})), "store")} /> : null}
             {todayScreen ? <TodayPanel view={todayScreen} hrefs={todayHrefs} at={today} /> : null}
             {role === "owner" && !store.suspended ? <PathStudioReminder store={store} role={role} /> : null}
             {/* "How do I…?": answered from the help center's own answers (lib/help-ask.ts). */}
@@ -2538,7 +2560,7 @@ export default async function StudioPage({
             ) : null}
 
             {!closing && may("export") && standing !== "ended" && standing !== "none" ? (
-              <div className="card mt-8 p-6 sm:p-8">
+              <div id="store-data-export" tabIndex={-1} className="card mt-8 scroll-mt-32 p-6 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ink sm:p-8">
                 <p className="text-lg font-semibold tracking-[-0.02em] text-ink">Your store&rsquo;s main data, as one file</p>
                 <p className="mt-2 text-ink-soft">
                   Your store&rsquo;s address, name, bio, links, currency and the date it was created, your products and their pages, thank-you notes, posts, courses with every lesson&rsquo;s text, forms and their answers,
@@ -2882,7 +2904,7 @@ export default async function StudioPage({
                     </p>
                   </div>
                 ) : null}
-                {data ? (
+                {data && current ? (
                   <div className="mt-6 border-t border-line pt-5">
                     <p className="font-semibold text-ink">Your data room</p>
                     <p className="mt-2 text-sm text-ink-soft">{`${dataWords(data.used)} of ${dataWords(data.room)} used, ${dataWords(data.orders)} of it kept for your orders.`}</p>
@@ -2893,6 +2915,10 @@ export default async function StudioPage({
                     ) : null}
                     <p className="mt-3 text-sm text-ink-soft">
                       {`It holds your products, pages, posts, courses, contacts, forms and their answers, and what each order keeps. When it is full, what you or your buyers would add is refused until you delete something${standing === "paid" && largerOnSale ? " or move to a larger plan" : ""}; deleting is never refused, and an order already paid for is never refused.`}
+                    </p>
+                    <p className="mt-3 text-sm text-ink-soft">{studentNotesLine(data.notes, studentNotesRoomFor(current))}</p>
+                    <p className="mt-1 text-sm text-ink-soft">
+                      Your students&rsquo; private notes on your lessons count in your data room, and all of them together take at most a tenth of it. Past that, a student&rsquo;s new or longer note is refused and the notes already saved stay, so they never fill the room your own work needs.
                     </p>
                   </div>
                 ) : null}
@@ -2907,6 +2933,14 @@ export default async function StudioPage({
                 <p className="mt-2 text-ink-soft">
                   {feeWords(COMMISSION_LIVE && store.shared).studioPay} Visits and lesson video have finite monthly thresholds, shown above. Public pages and new video playback pause at their respective thresholds.
                 </p>
+                {/* 601 [KB22] U5: only a store with a plan subscription has invoices to read (lib/plan-invoices.ts). */}
+                {store.subscriptionId && store.stripeCustomerId ? (
+                  <p className="mt-3">
+                    <Link href={studioPath(store, "", "invoices")} prefetch={false} className="inline-flex min-h-11 items-center font-semibold text-violet-deep underline underline-offset-4">
+                      Your plan&apos;s invoices
+                    </Link>
+                  </p>
+                ) : null}
 
                 {!PLAN_BREAKS_ENABLED && (pauseSet || onBreakNow) ? (
                   <form action={`/api/billing/cancel${pin}`} method="post" className="mt-4">
@@ -3135,6 +3169,14 @@ export default async function StudioPage({
                           ? `Your store keeps taking payments until ${endsOn ?? "the trial ends"}, and your card is never charged.`
                           : `Your store keeps taking payments until ${endsOn ?? "the end of the period you already paid for"}, and nothing more is charged.`}
                       </p>
+                      {!closing && may("export") && standing !== "ended" && standing !== "none" ? (
+                        <p className="mt-3 text-sm text-ink-soft">
+                          Before you leave, review what is included in the data file and what is not.{" "}
+                          <a href="#store-data-export" className="inline-flex min-h-11 items-center font-bold text-ink underline underline-offset-2">
+                            See what the data file holds, and download it
+                          </a>
+                        </p>
+                      ) : null}
                       <form action={`/api/billing/cancel${pin}`} method="post" className="mt-3">
                         <input type="hidden" name="intent" value="cancel" />
                         <button
@@ -3451,6 +3493,7 @@ export default async function StudioPage({
               </>
               )}
 
+              {passkeysRead === null ? <PasskeysUnread /> : (
               <PasskeyManager
                 initial={passkeys.map(({ id, name, createdAt, lastUsedAt, synced }) => ({ id, name, createdAt, lastUsedAt, synced }))}
                 fresh={freshLogin}
@@ -3459,8 +3502,9 @@ export default async function StudioPage({
                 removals={passkeyRemovals}
                 removalDays={REMOVAL_DAYS}
               />
+              )}
               {recoveryRead === null ? <RecoveryAddressUnread /> : <RecoveryAddressManager shown={recoveryShown} />}
-              <TwoStepManager on={twoStep.on} codesLeft={twoStep.codesLeft} reset={lockedTill > 0 ? 0 : twoStep.reset} backup={twoStep.backup || recoveryShown} recoveryUnknown={recoveryRead === null} fresh={freshLogin} locked={lockedTill > 0} unread={twoStepRead === null} />
+              <TwoStepManager on={twoStep.on} codesLeft={twoStep.codesLeft} reset={lockedNow ? 0 : twoStep.reset} backup={twoStep.backup || recoveryShown} recoveryUnknown={recoveryRead === null} fresh={freshLogin} locked={lockedNow} lockUnknown={lockUnread} unread={twoStepRead === null} />
 
               {role !== "owner" ? (
                 <section aria-labelledby="leave-title" className="mt-8 border-t border-line pt-6">
@@ -3541,6 +3585,7 @@ export default async function StudioPage({
               </Link>
             ) : (
               <div className="mt-6 space-y-6">
+                {passkeysRead === null ? <PasskeysUnread /> : (
                 <PasskeyManager
                   initial={passkeys.map(({ id, name, createdAt, lastUsedAt, synced }) => ({ id, name, createdAt, lastUsedAt, synced }))}
                   fresh={freshLogin}
@@ -3549,8 +3594,9 @@ export default async function StudioPage({
                   removals={passkeyRemovals}
                   removalDays={REMOVAL_DAYS}
                 />
+                )}
                 {recoveryRead === null ? <RecoveryAddressUnread /> : <RecoveryAddressManager shown={recoveryShown} />}
-                <TwoStepManager on={twoStep.on} codesLeft={twoStep.codesLeft} reset={lockedTill > 0 ? 0 : twoStep.reset} backup={twoStep.backup || recoveryShown} recoveryUnknown={recoveryRead === null} fresh={freshLogin} locked={lockedTill > 0} unread={twoStepRead === null} />
+                <TwoStepManager on={twoStep.on} codesLeft={twoStep.codesLeft} reset={lockedNow ? 0 : twoStep.reset} backup={twoStep.backup || recoveryShown} recoveryUnknown={recoveryRead === null} fresh={freshLogin} locked={lockedNow} lockUnknown={lockUnread} unread={twoStepRead === null} />
                 <p className="text-sm text-ink-soft">
                   <Link href="/signin" className="inline-flex min-h-11 items-center font-bold text-ink underline underline-offset-4">
                     Once it is set up, log in again with it

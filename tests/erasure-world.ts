@@ -27,6 +27,7 @@ import { markPassed } from "@/lib/quiz";
 import { handIn, takeRoom } from "@/lib/assignment";
 import { issueCertificate } from "@/lib/certificate";
 import { addComment } from "@/lib/lesson-comments";
+import { saveNote } from "@/lib/lesson-notes";
 import { CREATOR_AUTHOR } from "@/lib/lesson-comments-rules";
 import { freshConfig, saveConfig, touchMember } from "@/lib/community";
 import { indexMember } from "@/lib/community-index";
@@ -186,6 +187,9 @@ export async function seedPerson(w: World, rawEmail: string, other: string | nul
   const asked = await addComment({ room: ROOM, courseId: w.courseId, lessonId: w.lessons[0], by: learner, text: "How long does this take?", name: "Tess" });
   if (!asked.ok) throw new Error("no comment");
   await addComment({ room: ROOM, courseId: w.courseId, lessonId: w.lessons[0], by: CREATOR_AUTHOR, text: "About an hour.", parent: asked.comment.id });
+  // Their private note on a lesson (lib/lesson-notes.ts, 290 [SQ1]).
+  const noted = await saveNote({ statsId, learner, courseId: w.courseId, lessonId: w.lessons[0], text: `My own note, ${email}`, was: "", room: store });
+  if (!noted.ok) throw new Error(`a lesson note was not kept: ${noted.reason}`);
 
   // The community (lib/community*.ts, lib/chat-grant.ts).
   const id = w.communityId;

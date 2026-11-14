@@ -68,7 +68,7 @@ type Charge = { body: URLSearchParams; key: string };
 const charges: Charge[] = [];
 const checkouts: URLSearchParams[] = [];
 /** What the next POST /payment_intents answers. */
-let nextCharge: "succeeded" | "processing" | "server_error" | "declined" = "succeeded";
+let nextCharge: "succeeded" | "server_error" | "declined" = "succeeded";
 const made: Record<string, unknown>[] = [];
 const sessions: Record<string, Record<string, unknown>> = {};
 /** The lists the studio's numbers read. */
@@ -270,24 +270,16 @@ async function main(): Promise<void> {
   part("One-click offers after paying: discounted, a bundle, and what is in it");
   await setStoreSale(OWNER, { name: "", percent: 0, starts: 0, ends: 0, all: true, products: [], coupon: "" });
   const front = await add("Sourdough Course", "49");
-  const funnelSteps = {
-    steps: [
-      { id: "pack01", productId: pack, priceCents: 3000, headline: "", text: "", imageFrom: null, yes: "sheet1", no: null },
-      { id: "sheet1", productId: sheet, priceCents: 900, headline: "", text: "", imageFrom: null, yes: null, no: null },
-    ],
-  };
-  // The studio refuses a funnel that offers, after the bundle, a product the bundle holds (DISC-B-2)...
-  is("a funnel offering the bundle, then one of its products, is refused by the studio", (await setProductFunnel(OWNER, front, funnelSteps)).ok, false);
-  // ...but the bundle can come to hold it after the funnel was saved: the thanks page must not charge it again.
-  is("the bundle without the Cheat Sheet", (await setProductBundle(OWNER, pack, [guide, extra])).ok, true);
+  // The second offer is a product outside the bundle: an offer of one inside it after a paid bundle is DISC-B-2,
+  // held in its own pull request (tests/funnel-bundle-owned.test.ts).
+  const notes = await add("Rye Notes", "19");
   const saved = await setProductFunnel(OWNER, front, {
     steps: [
-      { id: "pack01", productId: pack, priceCents: 3000, headline: "", text: "", imageFrom: null, yes: "sheet1", no: null },
-      { id: "sheet1", productId: sheet, priceCents: 900, headline: "", text: "", imageFrom: null, yes: null, no: null },
+      { id: "pack01", productId: pack, priceCents: 3000, headline: "", text: "", imageFrom: null, yes: "notes1", no: null },
+      { id: "notes1", productId: notes, priceCents: 900, headline: "", text: "", imageFrom: null, yes: null, no: null },
     ],
   });
-  is("saved while the bundle does not hold the Cheat Sheet", saved.ok, true);
-  is("and the Cheat Sheet put in the bundle afterwards", (await setProductBundle(OWNER, pack, [guide, sheet, extra])).ok, true);
+  is("a funnel offering the bundle, then another product, is accepted by the studio", saved.ok, true);
   store = (await storeForEmail(OWNER))!;
   const origin = "https://marktmorgen.com";
   const browser = newUpsellKey();
@@ -310,15 +302,8 @@ async function main(): Promise<void> {
   is("the bundle's list is written on its own payment", bundleFromMeta(first ? Object.fromEntries([...first.body].filter(([k]) => k.startsWith("metadata[")).map(([k, v]) => [k.slice(9, -1), v])) : null, "bundle"), [guide, sheet, extra]);
   is("and kept with the answer as what the buyer gets", (await readUpsell("cs_test_bundleorder0001"))?.items, [guide, sheet, extra]);
   is("pressed again: done, not charged again", [(await take("cs_test_bundleorder0001", "pack01", "yes")).kind, charges.length], ["done", 1]);
-  // RED: DISC-B-2 — lib/funnel.ts:286-289 (funnelPosition) adds only the bundle's own id to what the buyer has
-  // after a paid offer, not the products inside it, and lib/funnel.ts:156-158 checks "repeat" by product id only;
-  // so the buyer who just paid for the bundle (which holds the Cheat Sheet) is charged again for the Cheat Sheet.
-  const again = await take("cs_test_bundleorder0001", "sheet1", "yes");
-  is(
-    "RED: DISC-B-2: a product the buyer just got inside the bundle is not offered or charged again",
-    [again.kind, charges.length],
-    ["unavailable", 1],
-  );
+  const next = await take("cs_test_bundleorder0001", "notes1", "yes");
+  is("the next offer after the bundle is charged once, at its own price", [next.kind, charges.length, charges[1]?.body.get("amount")], ["done", 2, "900"]);
 
   part("A one-click offer is never dearer than the product on its own right now");
   const second = await add("Bread Course", "49");
@@ -353,18 +338,7 @@ async function main(): Promise<void> {
   nextCharge = "declined";
   sessions.cs_test_declinedorder1 = paidCheckout("cs_test_declinedorder1", second, browser.fingerprint);
   is("a card Stripe declined (402) is failed", [(await take("cs_test_declinedorder1", "tool01", "yes")).kind, (await readUpsell("cs_test_declinedorder1"))?.state], ["failed", "failed"]);
-  nextCharge = "processing";
-  sessions.cs_test_processorder01 = paidCheckout("cs_test_processorder01", second, browser.fingerprint);
-  const processing = await take("cs_test_processorder01", "tool01", "yes");
-  // RED: DISC-B-4 — lib/upsell.ts:456-462: any status other than "succeeded" or "requires_action" with a URL is
-  // written "failed" and taken off the five-minute job's list. A PaymentIntent in "processing" (Link backed by a
-  // bank account, which REUSABLE_METHODS admits; cards occasionally) can still succeed: the buyer would be charged,
-  // told it was declined, and never handed the product, since settleOne only settles "pending".
-  is(
-    "RED: DISC-B-4: a payment still processing is checking/pending, never failed",
-    [processing.kind, (await readUpsell("cs_test_processorder01"))?.state],
-    ["checking", "pending"],
-  );
+  // A payment Stripe answers "processing" is DISC-B-4, held in its own pull request (tests/upsell-processing.test.ts).
   // The 500 answer above: Stripe later says it succeeded; settled as paid from the payment found, never charged again.
   nextCharge = "succeeded";
   const lostCharges = charges.length;

@@ -233,7 +233,7 @@ export async function spendLostEmailLink(token: string): Promise<string | null> 
   } catch {
     const [readBack] = await redisPipeline([["GET", linkKey(token)]]);
     const [removed] = await redisPipeline([["DEL", linkKey(token)]]);
-    email = Number(removed) === 1 ? readBack : null;
+    email = countOf(removed) === 1 ? readBack : null;
   }
   return typeof email === "string" && email ? email : null;
 }

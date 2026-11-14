@@ -676,7 +676,7 @@ export async function spendInvite(token: string): Promise<JoinResult> {
   } catch {
     const [read] = await redisPipeline([["GET", key]]);
     const [removed] = await redisPipeline([["DEL", key]]);
-    raw = Number(removed) === 1 ? read : null;
+    raw = countOf(removed) === 1 ? read : null;
   }
   if (typeof raw !== "string" || !raw) return { ok: false, reason: "expired" };
 

@@ -58,7 +58,9 @@ is("an encoded address read as the browser gives it", u.length > 0, true);
 part("Where it goes");
 is("nothing changed: where it was written to go", sentLinkGoesTo("https://example.com/guide", null), "https://example.com/guide");
 is("changed: the new address", sentLinkGoesTo("https://example.com/guide", { to: "https://example.com/guide-2", at: 1 }), "https://example.com/guide-2");
-is("a kept change that no longer reads: where it was written to go", sentLinkGoesTo("https://example.com/guide", { to: "javascript:x", at: 1 }), "https://example.com/guide");
+is("a kept change that no longer reads: unknown (null), never the old address (review of #3713)", sentLinkGoesTo("https://example.com/guide", { to: "javascript:x", at: 1 }), null);
+is("an original that is not an address: unknown (null)", sentLinkGoesTo("javascript:alert(1)", null), null);
+is("one of these links through www.: refused, it would loop (review of #3713)", readSentLinkTarget("https://www.marktmorgen.com/r/aaaabbbbccccddddeeeeffff00001111/0123456789abcdef01234567/1?u=x&s=y").ok, false);
 
 part("Changing it, with its history");
 const one = changeSentLink([], "https://example.com/a", "https://example.com/b", 100);

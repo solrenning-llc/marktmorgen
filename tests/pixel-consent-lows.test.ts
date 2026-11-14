@@ -21,7 +21,7 @@ const keys = (consent as unknown as { platformStorageKeys?: (k: string[]) => str
 is("Google's _gcl_ls is found, nothing of the site's", keys?.(["_gcl_ls", "theme", "nl_consent:harbor", "_gcl_lsx"]), ["_gcl_ls"]);
 const page = readFileSync("components/store-pixels.tsx", "utf8");
 const off = page.slice(page.indexOf("if (!on) {"), page.indexOf("return;", page.indexOf("if (!on) {")));
-is("the off branch removes them from localStorage and sessionStorage", [/platformStorageKeys\(/.test(off), /localStorage\.removeItem/.test(off), /sessionStorage\.removeItem/.test(off)], [true, true, true]);
+is("the off branch removes them from localStorage and sessionStorage", [/platformStorageKeys\(/.test(off), /for \(const storage of \[localStorage, sessionStorage\]\)/.test(off), /storage\.removeItem\(key\)/.test(off)], [true, true, true]);
 
 part("The privacy policy says which sign-ups go without the address");
 const privacy = readFileSync("app/privacy/page.tsx", "utf8").replace(/\s+/g, " ");

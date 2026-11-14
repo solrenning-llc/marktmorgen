@@ -17,7 +17,7 @@
  *
  * A request that fails throws, as before; its caller says the page could not be read just now.
  */
-import { type Store, STORE_ID_PATTERN, handleLeadsToStore, handleProblem, storeForEmail, storeHandleKey } from "@/lib/store";
+import { type Store, STORE_ID_PATTERN, handleLeadsToStore, handleProblem, ownerKey, storeForEmail, storeHandleKey } from "@/lib/store";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { repliesFor } from "@/lib/redis-reply";
 
@@ -51,4 +51,17 @@ export async function storeForIdExactly(sid: string): Promise<ExactStore> {
   if (ref === null) return "none";
   const store = await storeForEmail(ref);
   return store && store.sid === sid ? store : "unknown";
+}
+
+/**
+ * The store an owner reference (an address, or an extra store's ref) names, read exactly: "none" only when its owner
+ * key is confirmed absent (an exact null). A record that does not read back, or a reply of another shape, is
+ * "unknown", never gone (lib/share-settle.ts keeps such a store in its indexes). One more GET only when the tolerant
+ * reader found nothing.
+ */
+export async function storeForRefExactly(ref: string): Promise<ExactStore> {
+  if (!ref || !isRedisConfigured()) return "none";
+  const store = await storeForEmail(ref);
+  if (store) return store;
+  return (await getExactly(await ownerKey(ref))) === null ? "none" : "unknown";
 }

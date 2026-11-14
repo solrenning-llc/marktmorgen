@@ -25,7 +25,8 @@ import { BillingError, onPlatform } from "@/lib/billing";
 import { COMMISSION_LIVE } from "@/lib/plan";
 import { onAccount } from "@/lib/stripe-account";
 import { redisPipeline } from "@/lib/redis";
-import { storeForEmail, storeForHandle, type Store } from "@/lib/store";
+import { storeForHandle, type Store } from "@/lib/store";
+import { storeForRefExactly } from "@/lib/store-exact";
 import { SHARING_INDEX, owedOn, percentOf, planShareBps, shareBps, toGiveBack } from "@/lib/platform-share";
 import { disputeMoneyGone } from "@/lib/retained-revenue";
 
@@ -492,11 +493,19 @@ export async function settleShares(deadline: number, nowSeconds = Date.now() / 1
       counts.complete = false;
       break;
     }
-    const store = await storeForEmail(ref);
-    if (!store) {
+    // Only a store confirmed gone leaves the indexes (rule 24): one that does not read just now keeps its place, its
+    // applied percentage and its cursor, and is settled on a later run.
+    const found = await storeForRefExactly(ref);
+    if (found === "unknown") {
+      counts.complete = false;
+      console.error("a store paying a share could not be read; kept for the next run", ref);
+      continue;
+    }
+    if (found === "none") {
       await redisPipeline([["SREM", SHARING_INDEX, ref], ["HDEL", APPLIED, ref], ["HDEL", READ_UNTIL, ref]]);
       continue;
     }
+    const store = found;
     counts.stores += 1;
     try {
       if (!(await settleGivenBack(store, ref, nowSeconds, deadline, counts, live))) counts.complete = false;

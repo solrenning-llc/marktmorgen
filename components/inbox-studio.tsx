@@ -6,6 +6,7 @@ import { toast } from "@/components/toast";
 import { FaqFromInbox } from "@/components/faq-from-inbox";
 import { randomLetters } from "@/lib/random-letters";
 import { browserDrafts, clearDraft, draftIds, oldDraftsStuck, readDraft, saveDraft } from "@/lib/inbox-drafts";
+import { ConfirmAction } from "@/components/confirm-action";
 import {
   type Conversation,
   type InboxSetting,
@@ -485,9 +486,16 @@ function SavedReplies({ saved, busy, onSave }: { saved: SavedReply[]; busy: bool
                 <span className="font-medium">{s.title}</span>
                 <span className="mt-0.5 block whitespace-pre-line text-sm text-ink-soft">{s.text}</span>
               </span>
-              <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={() => onSave(saved.filter((x) => x.id !== s.id), "Removed.")}>
+              <ConfirmAction
+                disabled={busy}
+                busy={busy}
+                question="Remove this saved reply? Its words cannot be brought back."
+                yes="Yes, remove"
+                onConfirm={() => onSave(saved.filter((x) => x.id !== s.id), "Removed.")}
+                label={`Remove the saved reply ${s.title}`}
+              >
                 Remove
-              </button>
+              </ConfirmAction>
             </li>
           ))}
         </ul>

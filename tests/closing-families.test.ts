@@ -23,6 +23,7 @@ for (const [name, family] of Object.entries(FAMILIES)) byPrefix.set(prefixOf(nam
 const STEPS = new Set(["prepare", "files"]);
 /** The store's own records the closing keeps as the company's, and why. */
 const KEPT_AS_COMPANY: Record<string, string> = {
+  "nl:ppsell:tell": "The company's line of canceled PayPal orders whose notices the sender refused: two members an order, each gone once sent, once its store is gone or is another store now (retryPayPalCancelNotices in lib/paypal-delivery.ts), or within thirty days (lib/paypal-sales.ts).",
   "nl:plan:closing:": "The closing job's record of the store: dates only, kept ERASED_KEPT_DAYS after (lib/plan-closing.ts).",
   "nl:store:handle:": "The store's addresses, held back from anybody else for RELEASE_QUARANTINE_DAYS (lib/store.ts, closeStoreRecord).",
   "nl:ship:done:": "The legacy physical delivery record has400days; a matching inactive outbox source has no TTL while pending and400days after an explicit outcome. The outbox cleanup handles pending payloads, not an invented universal expiry.",

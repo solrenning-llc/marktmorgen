@@ -18,6 +18,7 @@
  * RESERVE_AI_SPEND text on the CI Redis. The model API is a stand-in that
  * counts calls; no provider is reached.
  */
+import "./frozen-clock"; // first: the month this file names at load is the month the code reads on every call
 import { writeBio, aiLeft } from "@/lib/ai";
 import { reserveAiSpend } from "@/lib/ai-spend";
 import { aiSpendLedgerKey, AUTOMATIC_AI_STORE_MICRO_USD, currentAiSpendPolicy } from "@/lib/ai-spend-policy";

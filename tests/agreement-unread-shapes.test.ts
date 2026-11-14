@@ -5,6 +5,8 @@
  *
  *   - withdrawing or deleting an agreement never answers "That agreement is gone" while its record may be there
  *     (a withdraw told "gone" left the link taking a signature, a delete told "gone" left the person's record kept);
+ *   - a kept record whose text does not read is unknown too, never "gone" (Claude 5 on #3268);
+ *   - deleting answers "deleted" only when each removal (DEL, ZREM, SREM) answered its exact count;
  *   - sending it again never answers "gone" on an unknown read;
  *   - an email that already went is still reported as sent when writing down its time cannot be confirmed, so the
  *     studio never invites a second agreement for the same person;
@@ -124,6 +126,58 @@ async function main(): Promise<void> {
   is("its record is still kept, as the creator was told", (await readAgreement(open.agreement.id))?.id, open.agreement.id);
   is("then deleted, healthy", await deleteAgreement(store, open.agreement.id), "deleted");
   is("confirmed absent: gone", [await readAgreement(open.agreement.id), await deleteAgreement(store, open.agreement.id), await withdrawAgreement(store, open.agreement.id)], [null, null, null]);
+
+  part("Deleting answers deleted only on each removal's exact count (Claude 5 on #3268)");
+  // The one pipeline that deletes: DEL of the record and every version's key, ZREM from the store's list, SREM from
+  // the person's set. Answered here without running, so the record is still there, as it may be after such a reply.
+  const UNKNOWN_FORGETS: [string, unknown][] = [
+    ["no reply", []],
+    ["a bare string", "QUEUED"],
+    ["two replies for three commands", [1, 1]],
+    ["the delete as an object", [{}, 1, 1]],
+    ["the delete as a text count", ["1", 1, 1]],
+    ["a negative delete count", [-1, 1, 1]],
+    ["a delete count over the agreement's keys", [99, 1, 1]],
+    ["the store's list removal over one", [1, 2, 1]],
+    ["the store's list removal unknown", [1, null, 1]],
+    ["the person's removal over one", [1, 1, 2]],
+    ["the person's removal as a list", [1, 1, ["x"]]],
+  ];
+  const kept = await make("signer-forget@example.com");
+  is("withdrawn, healthy", (await withdrawAgreement(store, kept.agreement.id)) !== null, true);
+  const forgetOf = (id: string): Pick1 => (cmd) => cmd[0] === "DEL" && cmd[1] === `nl:agree:r:${id}`;
+  for (const [what, reply] of UNKNOWN_FORGETS) {
+    const r = await under(forgetOf(kept.agreement.id), reply, () => deleteAgreement(store, kept.agreement.id));
+    is(`delete answered ${what}: refused, never "deleted"`, [r.threw, r.value], [true, undefined]);
+    const route = await under(forgetOf(kept.agreement.id), reply, () => call({ action: "delete", id: kept.agreement.id }));
+    is(`the studio on ${what}: could not be done, never ok`, [route.value?.status, route.value?.body.ok], [500, false]);
+  }
+  is("the record is still kept with the person's email, as the creator was told", (await readAgreement(kept.agreement.id))?.email, "signer-forget@example.com");
+  is("then deleted, healthy, on exact counts", await deleteAgreement(store, kept.agreement.id), "deleted");
+  is("deleted: no key of it is left", [...redis.keys()].filter((k) => k.includes(kept.agreement.id)).length, 0);
+
+  part("A kept record that does not read is unknown, never gone (Claude 5 on #3268)");
+  const UNREADABLE: [string, (raw: string) => string][] = [
+    ["versions that are not a list", (raw) => JSON.stringify({ ...JSON.parse(raw), versions: "x" })],
+    ["text that is not JSON", () => "{not json"],
+    ["a JSON number", () => "7"],
+  ];
+  for (const [what, spoil] of UNREADABLE) {
+    const made = await make(`signer-unreadable-${what.replace(/\W+/g, "-")}@example.com`);
+    const key = `nl:agree:r:${made.agreement.id}`;
+    const [raw] = await redis.pipeline([["GET", key]]);
+    await redis.pipeline([["SET", key, spoil(String(raw))]]);
+    const read = await under(() => false, null, () => readAgreement(made.agreement.id));
+    is(`read with ${what}: unknown (thrown), not null`, read.threw, true);
+    for (const action of ["withdraw", "delete"]) {
+      const route = await call({ action, id: made.agreement.id });
+      is(`the studio's ${action} with ${what}: could not be done, not "That agreement is gone"`, [route.status, route.body.ok], [500, false]);
+    }
+    const resent = await under(() => false, null, () => sendAgain(store, made.agreement.id));
+    is(`send again with ${what}: refused, not "gone"`, resent.threw, true);
+    is(`the record with ${what} is still kept`, typeof (await redis.pipeline([["GET", key]]))[0], "string");
+    await redis.pipeline([["DEL", key]]);
+  }
 
   part("An email that went stays reported as sent, once");
   for (const [what, reply] of UNKNOWN_GETS) {

@@ -364,8 +364,9 @@ async function courseLedger(store: Store, email: string, exact = false): Promise
   const replies = await redisPipeline(commands);
   if (exact && !repliesFor(replies, commands.length)) throw new UnknownReplyError("an address's course record");
   const [cached, ledger, broughtOver] = replies;
-  if (exact && cached !== null && typeof cached !== "string") throw new UnknownReplyError("an address's cached course purchases");
-  let asked: Ledger | null = typeof cached === "string" ? parseLedger(cached) : null;
+  // The exact read never takes the cached answer: the lenient read keeps it even when readKind left a listing out, so
+  // it can lack a course only Stripe knows of (review of #3724). It asks Stripe itself, and keeps what it read whole.
+  let asked: Ledger | null = !exact && typeof cached === "string" ? parseLedger(cached) : null;
   // Stripe's answer could not be had whole: which purchases were refunded is unknown, never "none" (CX-123 rule 24).
   // A course whose opening depends on that answer (a membership, or a one-off written down on the thanks page and
   // perhaps refunded since) is not opened on it, as the community and the downloads do; nothing is kept, so the next

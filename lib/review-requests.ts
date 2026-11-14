@@ -259,6 +259,12 @@ export async function sendReviewRequests(
 
   for (const member of members) {
     if (Date.now() >= deadline) break;
+    // What this run took for the order before it is sent: a first's "sending:" mark, or a reminder taken off the
+    // list. A throw before the email is ready (a Redis read, the review link, the stop link) undoes it below, so the
+    // order is asked again by the next run, never dropped by its own stuck mark (webhooks/cron audit, Claude 1,
+    // 12/11/2026).
+    let held: { reference: string; claim?: string; again?: true } | null = null;
+    try {
     const entry = readAskMember(member);
     if (!entry) {
       await drop(member);
@@ -360,9 +366,11 @@ export async function sendReviewRequests(
         await releaseMark(sentKey(entry.reference), claim);
         continue;
       }
+      held = { reference: entry.reference, claim };
     } else {
       const taken = repliesFor(await redisPipeline([["ZREM", ASK_DUE_KEY, member]]), 1);
       if (!taken || countOf(taken[0]) !== 1) continue;
+      held = { reference: entry.reference, again: true };
     }
     const token = await mintReviewLink(store, entry.reference, email);
     const stop = await stopLink(store, email);
@@ -389,6 +397,12 @@ export async function sendReviewRequests(
       message: { from: fromLine(store), to: email, subject: r.subject, text: r.text, html: r.html, replyTo: store.email, headers: r.headers },
     });
     groups.set(entry.handle, group);
+    } catch (error) {
+      console.error("preparing a review request failed; it is asked again by the next run", error);
+      if (held?.claim) await releaseMark(sentKey(held.reference), held.claim);
+      if (held?.again) await redisPipeline([["ZADD", ASK_DUE_KEY, nowSeconds + RETRY_SECONDS.sender, member]]).catch(() => undefined);
+      if (held) counts.waiting += 1;
+    }
   }
 
   for (const { store, ready } of groups.values()) {
@@ -402,8 +416,13 @@ export async function sendReviewRequests(
       if (at !== null) for (const item of firsts) await later(item.member, at);
       counts.waiting += at === null ? 0 : agains.length;
     };
+    // A throw before the batch's outcome is known (the reservation, the sender) undoes the group's claims, as a
+    // batch not sent does, so the next run asks again; one after the batch went keeps them (it was sent).
+    let decided = false;
+    try {
     const reserved = await reserve(store, ready.length);
     if (reserved !== "ok") {
+      decided = true;
       await unclaim(nowSeconds + RETRY_SECONDS.plan);
       continue;
     }
@@ -411,6 +430,7 @@ export async function sendReviewRequests(
       ready.map((item) => item.message),
       `review-ask:${sha(ready.map((item) => item.entry.reference).join(","))}`, { by: "monthly" },
     );
+    decided = true;
     if (outcome !== "sent") {
       await release(store, ready.length);
       if (outcome === "refused") {
@@ -421,9 +441,13 @@ export async function sendReviewRequests(
       }
       continue;
     }
+    counts.sent += ready.length;
     // After the first, the order waits on the list for its one reminder, when the creator chose one.
     await redisPipeline(afterSent(ready.map((item) => ({ reference: item.entry.reference, member: item.member, paidAt: item.entry.paidAt, stage: item.stage })), store.reviewAsk, nowSeconds));
-    counts.sent += ready.length;
+    } catch (error) {
+      console.error("sending a store's review requests failed", error);
+      if (!decided) await unclaim(nowSeconds + RETRY_SECONDS.sender).catch(() => undefined);
+    }
   }
   return counts;
 }

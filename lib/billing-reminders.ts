@@ -288,9 +288,16 @@ export async function sendReminders(nowSeconds = Math.floor(Date.now() / 1000)):
         counts.seen += 1;
         const reminder = dueReminder(subscription, nowSeconds);
         if (!reminder) continue;
-        const key = `nl:remind:${reminder.kind}:${reminder.subscription}:${reminder.at}`;
-        const [claimed] = await redisPipeline([["SET", key, "1", "NX", "EX", 60 * DAY]]);
-        if (claimed === null) continue;
+        // Once per charge: its date, and the plan and amount it charges. A
+        // switch inside a trial keeps the trial's end, and one between plans
+        // of the same interval keeps the period's end, so the date alone would
+        // let the notice about the plan left stand for a charge of another
+        // amount. A mark from before the plan was in it (`legacy`) still
+        // counts for that date, so nobody is written to twice for it.
+        const legacy = `nl:remind:${reminder.kind}:${reminder.subscription}:${reminder.at}`;
+        const key = `${legacy}:${reminder.tier}:${reminder.cycle}:${reminder.amountCents}`;
+        const [before, claimed] = await redisPipeline([["EXISTS", legacy], ["SET", key, "1", "NX", "EX", 60 * DAY]]);
+        if (claimed === null || before === 1) continue;
         const { subject, text } = reminderEmail(reminder);
         const ok = await sendEmail({ meter: { by: "company" }, from: NIMBUS_FROM, to: reminder.email, subject, text, replyTo: SUPPORT_EMAIL });
         if (ok) counts.sent += 1;

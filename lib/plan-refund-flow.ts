@@ -399,10 +399,20 @@ export async function issueReview(sid: string, cents: number): Promise<string> {
   await redisPipeline([["SET", reviewKeyOf(sid), `${token}:${cents}`, "EX", REVIEW_SECONDS]]);
   return token;
 }
+/**
+ * Takes the pass (KEYS[1]) only while it is the one issued for ARGV[1], the
+ * token: compared and deleted in one step, so an old tab's token never takes
+ * the pass of the page issued after it. Its text when taken, nil otherwise.
+ */
+const TAKE_REVIEW = `-- marktmorgen:plan-refund-take-review:v1
+local kept = redis.call('GET', KEYS[1])
+if not kept or string.sub(kept, 1, string.len(ARGV[1]) + 1) ~= ARGV[1] .. ':' then return false end
+redis.call('DEL', KEYS[1])
+return kept`;
 /** Takes the pass once: the amount it was issued for, only for the token the page issued and not yet used; else null. */
 export async function takeReview(sid: string, token: string): Promise<number | null> {
   if (!/^[A-Za-z0-9_-]{20,40}$/.test(token)) return null;
-  const [kept] = await redisPipeline([["GETDEL", reviewKeyOf(sid)]]);
+  const [kept] = await redisPipeline([["EVAL", TAKE_REVIEW, 1, reviewKeyOf(sid), token]]);
   const m = typeof kept === "string" ? /^([A-Za-z0-9_-]{20,40}):(\d{1,12})$/.exec(kept) : null;
   return m && m[1] === token ? Number(m[2]) : null;
 }

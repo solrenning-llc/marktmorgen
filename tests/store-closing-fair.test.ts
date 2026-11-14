@@ -437,6 +437,36 @@ async function main() {
   is("a refund twice is impossible: the next day refunds nothing", [(await daily(ben, B, CLOSING_DAYS + 1, CLOSING_DAYS + 1)).length, world.refunds.length], [1, [unusedYear, unusedMonth].filter((n) => n > 0).length]);
   void benDone;
 
+  part("A closing day whose own record could not be written: refunded from that day, not from a later run");
+  {
+    world.refunds.length = 0;
+    const zed = await storeWith("zed");
+    const zedYear = member("zed", "zedyear", 12_000, S(Date.UTC(2027, 8, 1)), { metadata: { store: "zed", yearly: "1" } });
+    clockAt(Date.UTC(2026, 10, 3, 13));
+    const Zd = await ended(zed);
+    await daily(zed, Zd, 0, CLOSING_DAYS - 1);
+    const zedDay = (await closingOf((await storeForEmail(zed))!, Zd + (CLOSING_DAYS - 1) * DAY))!.day;
+    // On the closing day the write of the day itself fails once (Redis down for that one command).
+    const healthy = redis.pipeline;
+    let dropped = 0;
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      if (!dropped && commands.length === 1 && commands[0][0] === "SET" && String(commands[0][1]).startsWith("nl:plan:closing:") && /"day":/.test(String(commands[0][2])) && !/"renewals":/.test(String(commands[0][2]))) {
+        dropped += 1;
+        throw new Error("stand-in Redis down for the closing day's own record");
+      }
+      return healthy(commands);
+    }) as typeof redis.pipeline;
+    const failedAt = Zd + CLOSING_DAYS * DAY + 60_000;
+    clockAt(failedAt);
+    try { await closeOne(zed, failedAt, hands, Number.POSITIVE_INFINITY); } catch { /* the run stops; the next one carries on */ }
+    redis.pipeline = healthy;
+    is("the closing day's own record failed once", dropped, 1);
+    is("while it is not written, the day shown is the closing day, the same an hour later", [(await closingOf((await storeForEmail(zed))!, failedAt))?.day, (await closingOf((await storeForEmail(zed))!, failedAt + 3_600_000))?.day], [zedDay, zedDay]);
+    await daily(zed, Zd, CLOSING_DAYS + 3, CLOSING_DAYS + 3);
+    const zedOwed = unusedOf({ amt: 12_000, ps: zedYear.pe - 365 * 86_400, pe: zedYear.pe }, zedDay);
+    is("the member is refunded the unused part from the closing day, not from the run that finished it", world.refunds.map((r) => [r.payment_intent, r.amount]), [["pi_zedyear", zedOwed]]);
+  }
+
   part("A balance that does not cover a refund: never made, the member told");
   world.refunds.length = 0;
   const cleo = await storeWith("cleo");

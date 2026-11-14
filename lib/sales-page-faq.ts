@@ -21,11 +21,11 @@ export function salesPageBeginnerQuestions(onSale = PLANS_ON_SALE, trialDays = T
   return [
     {
       q: "What is a sales page here?",
-      a: `A product's own page, built from up to ${MAX_BLOCKS} blocks you stack in your store's look: a headline, what the buyer gets, questions, buttons and more. Once your Stripe account is connected and your plan is running, the trial included, its buttons lead to the checkout; for something free, the page can ask for an email once your plan is running.${onSale ? "" : " Paid plans are not on sale yet, so today no page takes a payment or an email."}`,
+      a: `A product's own page, built from up to ${MAX_BLOCKS} blocks you stack in your store's look: a headline, what the buyer gets, questions, buttons and more. Once your Stripe account is connected and your plan is running, the trial included, its buttons lead to the checkout. For something free, the page can ask for an email once your plan is running.${onSale ? "" : " Paid plans are not on sale yet, so today no page takes a payment or an email."}`,
     },
     {
       q: "How do I start a sales page?",
-      a: `In your studio, open “${w.list}” (add a product first if you have none) and pick the product. On a product with no page yet, under “${w.start}”, press “${w.fromDescription}”, pick one under “${w.template}” and press “${w.useTemplate}”, or add blocks one by one. Then press “${w.save}”.`,
+      a: `In your studio, open “${w.list}” (add a product first if you have none) and pick the product. On a product with no page yet, look under “${w.start}”. Press “${w.fromDescription}”, or pick one under “${w.template}” and press “${w.useTemplate}”, or add blocks one by one. Then press “${w.save}”.`,
     },
     {
       q: "Can I try sales pages before paying?",
@@ -33,7 +33,7 @@ export function salesPageBeginnerQuestions(onSale = PLANS_ON_SALE, trialDays = T
     },
     {
       q: "Do sales pages work?",
-      a: "We publish no number of pages, visits or sales, because we do not have a real, checked count to show. Once a page has blocks, its coach in the editor scores it out of 100 and, once the page has been opened and your numbers can be read, shows how often it was opened in the last 30 days and how many checkouts of the product were started, or sign-ups for something free.",
+      a: "We publish no number of pages, visits or sales, because we do not have a real, checked count to show. Once a page has blocks, its coach in the editor scores it out of 100. Once the page has been opened and your numbers can be read, it shows how often it was opened in the last 30 days. It also shows how many checkouts of the product were started, or sign-ups for something free.",
     },
   ];
 }

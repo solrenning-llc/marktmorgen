@@ -174,7 +174,7 @@ export function StoreAssistantEditor({
           Show the assistant on my store&apos;s pages
           <span className="block font-normal text-ink-soft">
             It takes the place of the store&apos;s chat while it is on; questions it passes on arrive in the same inbox. It never states a price, a deal,
-            a code, a deadline or a result you did not publish: a reply that would is never shown.
+            a code, a deadline or a result you did not publish. A reply that would is never shown.
           </span>
         </span>
       </label>

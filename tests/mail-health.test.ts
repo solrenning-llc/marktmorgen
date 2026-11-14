@@ -79,7 +79,7 @@ async function main(): Promise<void> {
   is("four spam reports are under the floor", overTheLine({ sent: 500, bounced: 0, complained: COMPLAINT_FLOOR - 1 }), null);
   is("five in five thousand is 0.1%: over", overTheLine({ sent: 5_000, bounced: 0, complained: 5 }), { reason: "complaints", count: 5 });
   is("five in ten thousand is 0.05%: under the sender's own line", overTheLine({ sent: 10_000, bounced: 0, complained: 5 }), null);
-  is("the published sentence carries the same numbers", healthRuleWords(), "If, over 7 days, 25 or more of a store's emails and 2% or more of them go to addresses that do not exist, or 5 or more and 0.08% or more are reported as spam, email to that store's list pauses for 7 days and then goes on by itself.");
+  is("the published sentence carries the same numbers", healthRuleWords(), "Email to a store's list pauses for 7 days, and then goes on by itself, in two cases. One: over 7 days, 25 or more of its emails and 2% or more of them go to addresses that do not exist. Two: over 7 days, 5 or more and 0.08% or more are reported as spam.");
 
   part("A list email says whose it is");
   const made = await claimHandle(OWNER, "harbor", "Harbor Kitchen", "");

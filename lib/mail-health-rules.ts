@@ -40,12 +40,12 @@ export function rampRuleWords(): string {
   const minutes = rampPortions() * RAMP_GAP_MINUTES;
   const whole = Math.floor(minutes / 60);
   const hours = `${whole} ${whole === 1 ? "hour" : "hours"}${minutes % 60 ? ` ${minutes % 60} minutes` : ""}`;
-  return `After you bring in ${RAMP_TRIGGER} or more addresses from elsewhere, your next emails go out in growing portions, ${RAMP_FIRST} people first and twice as many every ${RAMP_GAP_MINUTES} minutes, so that dead addresses are found while few have been written to. It takes about ${hours} at most, by itself, and after that emails go out at once again.`;
+  return `After you bring in ${RAMP_TRIGGER} or more addresses from elsewhere, your next emails go out in growing portions, ${RAMP_FIRST} people first and twice as many every ${RAMP_GAP_MINUTES} minutes. That way, dead addresses are found while few have been written to. It takes about ${hours} at most, by itself, and after that emails go out at once again.`;
 }
 
 const percent = (rate: number) => `${Number((rate * 100).toFixed(2))}%`;
 
 /** The whole rule in one sentence, for the pages that state it. */
 export function healthRuleWords(): string {
-  return `If, over ${HEALTH_WINDOW_DAYS} days, ${BOUNCE_FLOOR} or more of a store's emails and ${percent(BOUNCE_RATE)} or more of them go to addresses that do not exist, or ${COMPLAINT_FLOOR} or more and ${percent(COMPLAINT_RATE)} or more are reported as spam, email to that store's list pauses for ${PAUSE_DAYS} days and then goes on by itself.`;
+  return `Email to a store's list pauses for ${PAUSE_DAYS} days, and then goes on by itself, in two cases. One: over ${HEALTH_WINDOW_DAYS} days, ${BOUNCE_FLOOR} or more of its emails and ${percent(BOUNCE_RATE)} or more of them go to addresses that do not exist. Two: over ${HEALTH_WINDOW_DAYS} days, ${COMPLAINT_FLOOR} or more and ${percent(COMPLAINT_RATE)} or more are reported as spam.`;
 }

@@ -21,7 +21,7 @@ export function calendarBeginnerQuestions(onSale = PLANS_ON_SALE, trialDays = TR
   return [
     {
       q: "What is calendar sync here?",
-      a: `Up to ${MAX_FEEDS} calendars with a private iCal (.ics) address, such as Google, Outlook or iCloud: the times you are busy there, up to ${LOOKAHEAD_DAYS} days ahead, stop being offered in your calls with weekly hours, group calls included. Only the busy times are kept, never a title or a guest.`,
+      a: `Up to ${MAX_FEEDS} calendars with a private iCal (.ics) address, such as Google, Outlook or iCloud. The times you are busy there, up to ${LOOKAHEAD_DAYS} days ahead, stop being offered in your calls with weekly hours, group calls included. Only the busy times are kept, never a title or a guest.`,
     },
     {
       q: "How do I connect a calendar?",
@@ -33,7 +33,7 @@ export function calendarBeginnerQuestions(onSale = PLANS_ON_SALE, trialDays = TR
     },
     {
       q: "Does it stop double bookings?",
-      a: `It hides the times you are busy for in your calls with weekly hours. A calendar is read again at most every ${CACHE_SECONDS / 60} minutes, so a new busy time usually takes up to that long to close a slot; if the calendar stops answering, its last good reading stands for up to ${STALE_SECONDS / 3600} hours and your studio says what went wrong. On a team call, each host's own calendar counts, set under “Your calendar”.`,
+      a: `It hides the times you are busy for in your calls with weekly hours. A calendar is read again at most every ${CACHE_SECONDS / 60} minutes, so a new busy time usually takes up to that long to close a slot. If the calendar stops answering, its last good reading stands for up to ${STALE_SECONDS / 3600} hours and your studio says what went wrong. On a team call, each host's own calendar counts, set under “Your calendar”.`,
     },
   ];
 }

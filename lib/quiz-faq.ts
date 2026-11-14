@@ -23,7 +23,7 @@ export function quizBeginnerQuestions(onSale = PLANS_ON_SALE, trialDays = TRIAL_
   return [
     {
       q: "What are quizzes and certificates here?",
-      a: `A quiz at the end of a lesson of a course, up to ${MAX_QUESTIONS} multiple-choice questions marked on our side, or an assignment students hand in, which you can read and approve before the lesson counts as done. With certificates on, a student who finishes every lesson and passes every quiz that has to be passed types their name and gets a certificate, with a page of its own that anyone can open to check it.`,
+      a: `A quiz at the end of a lesson of a course, up to ${MAX_QUESTIONS} multiple-choice questions marked on our side. Or an assignment students hand in, which you can read and approve before the lesson counts as done. With certificates on, a student who finishes every lesson and passes every quiz that has to be passed types their name and gets a certificate. It has a page of its own that anyone can open to check it.`,
     },
     {
       q: "How do I add a quiz and a certificate?",

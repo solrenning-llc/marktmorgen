@@ -34,11 +34,11 @@ export function courseBeginnerQuestions(onSale = PLANS_ON_SALE, trialDays = TRIA
   return [
     {
       q: "What is a course here?",
-      a: "Lessons in modules, sold as one product. A lesson can have a video, text, downloads, a link, and a quiz or an assignment, and a module can open a number of days after each student joins, or after a start date you set for everyone. Buyers open it with their email address, on any device, with no password.",
+      a: "Lessons in modules, sold as one product. A lesson can have a video, text, downloads, a link, and a quiz or an assignment. A module can open a number of days after each student joins, or after a start date you set for everyone. Buyers open it with their email address, on any device, with no password.",
     },
     {
       q: "How do I start a course?",
-      a: `In your studio, on a paid product with no file, link or price options of its own, press “${COURSE_STUDIO_WORDS.make}”: the course's page opens, with “${COURSE_STUDIO_WORDS.structures}”: ${structures.join(", ")}. Pick one to see what it adds and press “${COURSE_STUDIO_WORDS.use}”, or pick “${COURSE_STUDIO_WORDS.scratch}” and add the modules yourself.`,
+      a: `In your studio, on a paid product with no file, link or price options of its own, press “${COURSE_STUDIO_WORDS.make}”. The course's page opens, with “${COURSE_STUDIO_WORDS.structures}”: ${structures.join(", ")}. Pick one to see what it adds and press “${COURSE_STUDIO_WORDS.use}”, or pick “${COURSE_STUDIO_WORDS.scratch}” and add the modules yourself.`,
     },
     {
       q: "Can I try courses before paying?",
@@ -46,7 +46,7 @@ export function courseBeginnerQuestions(onSale = PLANS_ON_SALE, trialDays = TRIA
     },
     {
       q: "Do courses work?",
-      a: `We publish no number of students or sales, because we do not have a real, checked count to show. Your own course tells you how it goes: its Students section counts who ${STUDENT_COUNTS.join(", who ").replace(/, who (finished it all)$/, ", and who $1")}, and lists each student with how many lessons they marked done.`,
+      a: `We publish no number of students or sales, because we do not have a real, checked count to show. Your own course tells you how it goes: its Students section counts who ${STUDENT_COUNTS.join(", who ").replace(/, who (finished it all)$/, ", and who $1")}. It also lists each student with how many lessons they marked done.`,
     },
   ];
 }

@@ -26,7 +26,7 @@ export function membershipBeginnerQuestions(onSale = PLANS_ON_SALE, trialDays = 
     },
     {
       q: "How do I start a membership?",
-      a: `In your studio, on a paid product, choose how often it charges under “${MEMBERSHIP_EDITOR_WORDS.field}” instead of “${MEMBERSHIP_EDITOR_WORDS.once}”, then press “${MEMBERSHIP_EDITOR_WORDS.add}”, or “${MEMBERSHIP_EDITOR_WORDS.save}” on a product you already have. Calls, bundles and products you ship are sold once.`,
+      a: `In your studio, on a paid product, choose how often it charges under “${MEMBERSHIP_EDITOR_WORDS.field}” instead of “${MEMBERSHIP_EDITOR_WORDS.once}”. Then press “${MEMBERSHIP_EDITOR_WORDS.add}”, or “${MEMBERSHIP_EDITOR_WORDS.save}” on a product you already have. Calls, bundles and products you ship are sold once.`,
     },
     {
       q: "Can I try memberships before paying?",

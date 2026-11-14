@@ -469,6 +469,8 @@ export function PostCard({
   const comments = numbers?.comments ?? 0;
   const link = `${home}/post/${post.id}`;
   const labelId = `post-title-${post.id}`;
+  // On the post's own page the post is what the page is about: its title is the page's level-1 heading.
+  const Title = full ? "h1" : "h2";
   const authorMuted = post.a !== CREATOR && members.get(post.a)?.muted;
   const w = communityWords(store.language);
   const { num } = speech(store);
@@ -510,9 +512,9 @@ export function PostCard({
         </p>
       ) : null}
 
-      <h2 id={labelId} className={`font-display mt-3 break-words text-lg font-semibold leading-snug tracking-[-0.01em] sm:text-xl ${post.title ? "" : "sr-only"}`}>
+      <Title id={labelId} className={`font-display mt-3 break-words text-lg font-semibold leading-snug tracking-[-0.01em] sm:text-xl ${post.title ? "" : "sr-only"}`}>
         {full ? post.title || w.postBy(name) : <Link href={link} className="st-title-link inline-flex min-h-11 items-center">{post.title || w.postBy(name)}</Link>}
-      </h2>
+      </Title>
       {shown ? <PostText text={shown} className="mt-2" named={named} store={store} /> : null}
       {long ? (
         <p className="mt-2 text-sm font-semibold">

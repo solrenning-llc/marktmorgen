@@ -62,7 +62,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   return new Response("{}", { status: 404 });
 }) as typeof fetch;
 
-const SHOP = { sid: "a".repeat(32), listId: "b".repeat(32), statsId: "c".repeat(32), stripeAccountId: "acct_1Checkupxxxxxxx", domain: { name: "harborkitchen.com", liveAt: 1 }, subscriptionActive: true, tier: "pro", renewalUnpaidSince: 0, planDisputes: [] } as never;
+const SHOP = { sid: "a".repeat(32), handle: "harborkitchen", previousHandles: [], listId: "b".repeat(32), statsId: "c".repeat(32), stripeAccountId: "acct_1Checkupxxxxxxx", domain: { name: "harborkitchen.com", liveAt: 1 }, subscriptionActive: true, tier: "pro", renewalUnpaidSince: 0, planDisputes: [] } as never;
 const with_ = (over: Record<string, unknown>) => ({ ...(SHOP as object), ...over }) as never;
 const OWNER = (permission: Parameters<typeof can>[1]) => can("owner", permission);
 // Plans on sale and billing set up, unless a check says otherwise; the closed state has its own check below.

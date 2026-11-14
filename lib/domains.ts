@@ -237,7 +237,7 @@ function hostPart(name: string, apex: string): string {
  * an answer that did not come, or came without Vercel's verdicts, is never
  * read as records that are wrong.
  */
-export async function domainStatus(name: string, store: Pick<Store, "sid">): Promise<DomainStatus | null> {
+export async function domainStatus(name: string, store: Pick<Store, "sid" | "handle" | "previousHandles">): Promise<DomainStatus | null> {
   // "Gone" and not known are the same null here, so the checkup's second request is not made (review of Codex P).
   const read = await readDomain(name, store, false);
   return read === "gone" ? null : read;
@@ -249,11 +249,11 @@ export async function domainStatus(name: string, store: Pick<Store, "sid">): Pro
  * the creator, not a failure to read), and null whenever either answer did
  * not come, so a missing answer is never taken for records that are wrong.
  */
-export async function domainCheckup(name: string, store: Pick<Store, "sid">): Promise<DomainStatus | "gone" | null> {
+export async function domainCheckup(name: string, store: Pick<Store, "sid" | "handle" | "previousHandles">): Promise<DomainStatus | "gone" | null> {
   return readDomain(name, store, true);
 }
 
-async function readDomain(name: string, store: Pick<Store, "sid">, tellGone: boolean): Promise<DomainStatus | "gone" | null> {
+async function readDomain(name: string, store: Pick<Store, "sid" | "handle" | "previousHandles">, tellGone: boolean): Promise<DomainStatus | "gone" | null> {
   const project = await vercel("GET", `/v9/projects/${vercelProject()}/domains/${name}`);
   if (project.status === 404) {
     if (!tellGone) return null;
@@ -264,7 +264,11 @@ async function readDomain(name: string, store: Pick<Store, "sid">, tellGone: boo
   }
   if (project.status !== 200) return null;
   // Not known whether it is proved: not known whether it is live (the studio's check would take a live domain off).
-  const proved = await domainProved(name).catch(() => null);
+  // Proved for this store only: another store's proof on the key is not this store's (LOW on #4248), so a store that
+  // only claimed a domain someone else proved is never told it is set up.
+  const holder = await domainHolder(name).catch(() => undefined);
+  if (holder === undefined) return null;
+  const proved = typeof holder === "string" && holder !== "" && !holder.startsWith(UNPROVED) && [store.handle, ...(store.previousHandles ?? [])].includes(holder);
   if (proved === null) return null;
   const config = await vercel("GET", `/v6/domains/${name}/config?projectIdOrName=${vercelProject()}`);
   // An answer whose verdicts are not there is not read as records that are wrong.

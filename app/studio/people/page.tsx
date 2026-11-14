@@ -5,10 +5,14 @@ import { redirect } from "next/navigation";
 import { Suspense } from "react";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
+import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { PersonFind } from "@/components/person-find";
 import { PersonNotes } from "@/components/person-notes";
 import { PersonTasks } from "@/components/person-tasks";
+import { PersonCompany } from "@/components/person-company";
+import { personCompanies } from "@/lib/companies-read";
+import type { Company } from "@/lib/crm-companies-rules";
 import { PersonFields } from "@/components/person-fields";
 import { PersonErase } from "@/components/person-erase";
 import { can } from "@/lib/team-roles";
@@ -119,7 +123,10 @@ export default async function StudioPeoplePage({ searchParams }: Params) {
   const fields = profile ? await readFields(store.statsId) : [];
   const values = profile?.person ? await readValues(store.statsId, profile.person, fields) : {};
   // Tasks about this person (639 [GL7](6)), and who may be made responsible: the owner and teammates who can see orders.
-  const [tasks, team] = profile?.person ? await Promise.all([readPersonTasks(store.statsId, profile.person).catch(() => null), readTeam(store.sid).catch(() => null)]) : [null, null];
+  const [tasks, team, companyRead] = profile?.person
+    ? await Promise.all([readPersonTasks(store.statsId, profile.person).catch(() => null), readTeam(store.sid).catch(() => null), personCompanies(store, profile.person).catch(() => ({ state: "failed" as const }))])
+    : [null, null, null];
+  const companies = companyRead?.state === "ok" ? companyRead.companies : null;
   // Null when the team could not be read: the screen then says so, and leaves a teammate to the server to decide.
   const assignees = team ? taskAssignees(store.email, team.members) : null;
   // Deleting the person needs the page's token, never the address in a link (lib/person-erasure.ts).
@@ -138,9 +145,9 @@ export default async function StudioPeoplePage({ searchParams }: Params) {
       />
       <StudioStorePin sid={store.sid}>
         <main id="content" className="container-page pb-20 pt-10 sm:pt-14">
-          <p className="eyebrow">Buyers</p>
+          <StudioTrail store={store} {...(profile ? { path: [{ label: "Buyers", href: studioPath(store, "", "people") }], here: profile.name || profile.email || "One buyer" } : { here: "Buyers" })} />
           {profile ? (
-            <Profile store={store} profile={profile} fields={fields} values={values} eraseToken={eraseToken} tasks={tasks} assignees={assignees} />
+            <Profile store={store} profile={profile} fields={fields} values={values} eraseToken={eraseToken} tasks={tasks} assignees={assignees} companies={companies} companiesRefusal={companyRead?.state === "refused" ? companyRead.message : ""} />
           ) : (
             <>
               {erased ? (
@@ -150,6 +157,11 @@ export default async function StudioPeoplePage({ searchParams }: Params) {
                 </p>
               ) : null}
               <h1 className="t-h2 mt-3">Everything one buyer has done with your store</h1>
+              <p className="mt-2">
+                <Link href={studioPath(store, "", "companies")} className="inline-flex min-h-11 items-center font-semibold text-violet-deep underline underline-offset-4">
+                  Companies you sell to
+                </Link>
+              </p>
               <p className="mt-3 max-w-2xl text-ink-soft">
                 What they paid and when, what was given back, where they found you, their memberships, how far they are in
                 your courses, the calls coming up, your emails to them, and your team&apos;s notes. Read from your own
@@ -162,7 +174,7 @@ export default async function StudioPeoplePage({ searchParams }: Params) {
                     : token
                       ? "That search has run out: it works for an hour. Look the address up again below."
                       : who
-                        ? "That person is not among the buyers read from your Stripe account just now. Look their address up below."
+                        ? "That person is not among your buyers as last read from your Stripe account, which can be up to an hour ago. Look their address up below."
                         : "That sale is not one of this store's, or it has no email address on it."}
                 </p>
               ) : null}
@@ -283,7 +295,7 @@ async function LatestBuyers({ store }: { store: Store }) {
   );
 }
 
-function Profile({ store, profile, fields, values, eraseToken, tasks, assignees }: { store: Store; profile: BuyerProfile; fields: CrmField[]; values: Record<string, string>; eraseToken: string; tasks: PersonTask[] | null; assignees: string[] | null }) {
+function Profile({ store, profile, fields, values, eraseToken, tasks, assignees, companies, companiesRefusal }: { store: Store; profile: BuyerProfile; fields: CrmField[]; values: Record<string, string>; eraseToken: string; tasks: PersonTask[] | null; assignees: string[] | null; companies: Company[] | null; /** The studio's own sentence when its requests are used up (round 4, L1). */ companiesRefusal: string }) {
   const money = (cents: number, currency = profile.currency) => formatMoney(cents, currency);
   const net = profile.paid - profile.refunded;
   const others = Object.entries(profile.otherCurrencies).filter(([, cents]) => cents !== 0);
@@ -309,7 +321,9 @@ function Profile({ store, profile, fields, values, eraseToken, tasks, assignees 
         ? "Taken off your list: their address could not receive email."
         : contact.gone === "complained"
           ? "Taken off your list: they marked an email as spam."
-          : `Left your list${isoDay(contact.unsubAt) ? ` on ${isoDay(contact.unsubAt)}` : ""}. They are not written to again.`
+          : contact.gone === "refused"
+            ? "Taken off your list: the email service refused their address."
+            : `Left your list${isoDay(contact.unsubAt) ? ` on ${isoDay(contact.unsubAt)}` : ""}. They are not written to again.`
       : contact.agreed
         ? `On your list, and agreed to hear from you${isoDay(contact.agreedAt) ? ` on ${isoDay(contact.agreedAt)}` : ""}.`
         : "On your list, without agreeing to hear from you: only their purchase emails reach them.";
@@ -473,6 +487,15 @@ function Profile({ store, profile, fields, values, eraseToken, tasks, assignees 
           </Link>
         </p>
         {profile.person && fields.length ? <PersonFields key={profile.person} person={profile.person} fields={fields} initial={values} /> : null}
+      </section>
+
+      <section aria-labelledby="company-title" className="card mt-8 p-6 sm:p-8">
+        <h2 id="company-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">Company</h2>
+        {profile.person && companies ? (
+          <PersonCompany key={profile.person} person={profile.person} initial={companies} />
+        ) : profile.person ? (
+          <p className="mt-2 text-sm text-ink-soft" role="status">{companiesRefusal || "This person's company could not be read just now. Open this page again in a moment."}</p>
+        ) : null}
       </section>
 
       <section aria-labelledby="tasks-title" className="card mt-8 p-6 sm:p-8">

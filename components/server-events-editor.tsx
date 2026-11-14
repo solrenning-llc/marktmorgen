@@ -66,7 +66,9 @@ export function ServerEventsEditor({ setup, pixels, googleId }: { setup: ServerS
             ? "Add your Pinterest ad account ID: the number in Ads Manager, under your account's name."
             : answer.error === "code"
               ? "A test code looks like TEST12345."
-              : "That did not save. Try again.",
+              : answer.error === "saved_unread"
+                ? "Saved. The setup could not be read back just now; reload the page."
+                : "That did not save. Try again.",
       );
     } catch {
       toast("That did not save. Check your connection and try again.");

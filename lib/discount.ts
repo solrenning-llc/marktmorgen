@@ -459,7 +459,10 @@ export async function livePromotionId(account: string, code: string): Promise<st
       API_VERSION,
     );
     const row = Array.isArray(page.data) ? (page.data[0] as Record<string, unknown> | undefined) : undefined;
-    return row && typeof row.id === "string" && row.active !== false ? row.id : null;
+    // Only the row for the code asked for (rule 30, DISC-C-1): a promotion code, live, whose code is this one (Stripe
+    // matches codes without regard to case); any other row is never put on the buyer's checkout.
+    const own = row && row.object === "promotion_code" && typeof row.id === "string" && /^promo_\w+$/.test(row.id) && row.active === true && typeof row.code === "string" && row.code.toLowerCase() === code.toLowerCase();
+    return own ? (row.id as string) : null;
   } catch (error) {
     console.error("looking up a code from a link failed", error);
     return null;

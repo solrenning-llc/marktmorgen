@@ -37,7 +37,7 @@ export const COUNTED_FAMILIES: readonly string[] = [
 export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:", "nl:*", "nl:2fa:", "nl:2fa:hold:", "nl:2fa:locked:", "nl:2fa:lock:", "nl:2fa:lockedset:", "nl:2fa:keptstar:", "nl:2fa:once:", "nl:2fa:rescue:",
   "nl:2fa:setup:", "nl:ab:paid:", "nl:account:stores:", "nl:adsrv:", "nl:adsrv:last:", "nl:adsrv:sub:",
-  "nl:aff:leads:lock:", "nl:aff:link:", "nl:aff:payday:", "nl:aff:payday:lock", "nl:aff:seen:", "nl:aff:session:", "nl:affhub:", "nl:agent:book:lock:",
+  "nl:aff:leads:lock:", "nl:aff:link:", "nl:aff:payday:", "nl:aff:payday:lock", "nl:aff:pend:", "nl:aff:pend:due", "nl:aff:pend:pp:", "nl:aff:seen:", "nl:aff:session:", "nl:affhub:", "nl:agent:book:lock:",
   "nl:affhub:link:", "nl:affkit:", "nl:agree:lock:", "nl:ai-spend:v2:{", "nl:ai-spend:v2:{YYYY-MM}", "nl:ai:", "nl:alert:",
   "nl:alert:seen:", "nl:allow:", "nl:amem:lock:", "nl:api:hold:", "nl:api:k:", "nl:api:keys:", "nl:api:used:", "nl:ask:", "nl:ask:a:", "nl:ask:missed:",
   "nl:assist:c:", "nl:assist:missed:", "nl:assist:next:", "nl:assist:nextlock:", "nl:assist:pool:", "nl:assist:remind:", "nl:assist:remindq", "nl:assist:remindwho:",
@@ -91,7 +91,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:recount:", "nl:recount:ids", "nl:recount:lock", "nl:recount:state", "nl:recount:sum",
   "nl:recover:asks", "nl:recover:link:", "nl:recover:once:", "nl:recover:sent:", "nl:recover:tries:", "nl:ref:all", "nl:ref:by:",
   "nl:ref:c:", "nl:ref:code:", "nl:ref:cursor", "nl:ref:list:", "nl:ref:mine:", "nl:ref:mycode:",
-  "nl:ref:owed", "nl:remind:", "nl:remind:failed:", "nl:remind:lock", "nl:report:", "nl:report:t:",
+  "nl:ref:owed", "nl:refused:", "nl:remind:", "nl:remind:failed:", "nl:remind:lock", "nl:report:", "nl:report:t:",
   "nl:resend-budget:{", "nl:rev:ask:due", "nl:rev:ask:sent:", "nl:rev:link:", "nl:rev:lock:", "nl:rev:refunds:seen:",
   "nl:reading:", "nl:reading:day:", "nl:rev:refunds:since:", "nl:rev:stores", "nl:rl:", "nl:rl:address:", "nl:rl:aff:addr:",
   "nl:rl:aff:click:", "nl:rl:aff:ip:", "nl:rl:cm:addr:", "nl:rl:cm:ev:", "nl:rl:cm:ip:", "nl:rl:creators:",
@@ -200,7 +200,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   // ---------------------------------------------------------------- a-b
   "nl:ab:": E, "nl:ab:paid:": X(40),
   "nl:adsrv:": E, "nl:adsrv:ctx:": X(4), "nl:adsrv:last:": E, "nl:adsrv:sent:": X(3), "nl:adsrv:sub:": X(400),
-  "nl:aff:": E, "nl:agent:book:": E, "nl:agent:book:lock:": X(1), "nl:aff:leads:lock:": X(1), "nl:aff:link:": X(1), "nl:aff:payday:": E, "nl:aff:payday:lock": C, "nl:aff:seen:": X(2), "nl:aff:session:": X(30),
+  "nl:aff:": E, "nl:agent:book:": E, "nl:agent:book:lock:": X(1), "nl:aff:leads:lock:": X(1), "nl:aff:link:": X(1), "nl:aff:payday:": E, "nl:aff:payday:lock": C, "nl:aff:pend:": X(2), "nl:aff:pend:due": Cr(2), "nl:aff:pend:pp:": X(2), "nl:aff:seen:": X(2), "nl:aff:session:": X(30),
   "nl:affhub:": L, "nl:affhub:link:": Cr(1), "nl:affkit:": E,
   // Proposals and agreements (lib/agreement-store.ts): the store's lists go, and each agreement and its versions through them.
   "nl:agree:s:": E, "nl:agree:p:": E, "nl:agree:r:": T("nl:agree:s:", 400), "nl:agree:v:": T("nl:agree:s:", 400), "nl:agree:lock:": X(1),
@@ -382,7 +382,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:recount:": C, "nl:recount:ids": C, "nl:recount:lock": C, "nl:recount:state": C, "nl:recount:sum": C,
   "nl:recover:asks": I, "nl:recover:link:": T("nl:erase:ix:", 400), "nl:recover:off:": E, "nl:recover:once:": E, "nl:recover:sent:": X(15), "nl:recover:tries:": X(1),
   "nl:ref:all": C, "nl:ref:by:": C, "nl:ref:c:": C, "nl:ref:code:": C, "nl:ref:cursor": C, "nl:ref:list:": C, "nl:ref:mine:": C,
-  "nl:ref:mycode:": C, "nl:ref:owed": C,
+  "nl:ref:mycode:": C, "nl:ref:owed": C, "nl:refused:": X(45),
   "nl:remind:": C, "nl:remind:failed:": C, "nl:remind:lock": C,
   "nl:report:": C, "nl:report:t:": C,
   "nl:rev:": E, "nl:rev:all:": E, "nl:rev:ask:due": I, "nl:rev:ask:sent:": X(120), "nl:rev:link:": T("nl:erase:ix:", 60), "nl:rev:lock:": E,

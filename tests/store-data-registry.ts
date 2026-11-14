@@ -274,6 +274,12 @@ export const FAMILIES: Record<string, Family> = {
   "nl:aff:leads:lock:@lib/affiliate-leads.ts": short("A program's leads being decided or a person's address taken off one, ten seconds at the most", "studio", 1, 128),
   "nl:aff:@lib/affiliate-lead-rules.ts": { what: "Confirmed leads an affiliate was credited for: the person's address, the kind, the terms then and the creator's decision", room: ["lib/affiliate-leads.ts"] },
   "nl:aff:link:@lib/affiliates.ts": short("An emailed link to apply or sign in, a day", "store", 1, LINK_BYTES, MAIL("affiliate")),
+  // A paid order whose affiliate link could not be read at checkout (owner's decision 6, 9 November 2026): one mark an
+  // order once its link is decided ("credited", "none" or "told"), two days, past the sweep's day of reading it.
+  "nl:aff:pend:@lib/affiliates.ts": short("A pending affiliate link's mark, once an order, two days", "order", 2, KEY),
+  "nl:aff:pend:due@lib/affiliates.ts": company("Every store's pending Stripe orders not decided yet, read by the sweep by itself", "One list for the company: a member a pending order (its store's id and its checkout, under 120 bytes), taken out once the order is decided or its two-day mark has expired, the list itself expiring two days after its last write; only an order whose affiliate read did not answer at checkout is on it."),
+  // The PayPal orders among them still due a read or a notice: one member an order, the list kept two days from its last write.
+  "nl:aff:pend:pp:@lib/affiliates.ts": short("A PayPal order whose affiliate link is still pending, two days", "order", 2, KEY),
   "nl:aff:seen:@lib/affiliates.ts": short("A click counted once per visitor a day", "request", 2, KEY, REQ("affiliate")),
   "nl:aff:session:@lib/affiliates.ts": short("An affiliate signed in on one browser, thirty days, from an emailed link", "store", 30, KEY, MAIL("affiliate")),
   "nl:rl:aff:addr:@lib/affiliates.ts": short("Applications per address, an hour", "request", 1, KEY, REQ("affiliate")),
@@ -851,6 +857,8 @@ export const FAMILIES: Record<string, Family> = {
   "nl:auth:rec:link:@lib/recovery-address.ts": company("A recovery link", "An account's, minutes."),
   "nl:auth:rec:set:@lib/recovery-address.ts": company("A recovery address being set", "An account's, minutes."),
   "nl:auth:rec:until:@lib/recovery-address.ts": company("Until when a recovery holds", "An account's."),
+  // One count for every caller that asks again on a certain refusal (rule 30; #3377 bounded its own checkout reminders the same way).
+  "nl:refused:@lib/refused-tries.ts": short("How many times a sender refused one of the store's emails for certain (REFUSED_TRIES at most): a day, a payment request's reminders its open time (REFUSED_MAX_SECONDS)", "store", 45, MARK),
   "nl:rl:@lib/request-guard.ts": short("Per connection, person or store counts, by their scope", "request", 1),
   "nl:rlm:@lib/request-guard.ts": short("Monthly counts by their scope", "day", 62, 128),
   "nl:rev:ask:due@lib/review-ask.ts": company("Review asks due", "One sorted set for every store: each an order's, gone when asked."),

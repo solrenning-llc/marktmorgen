@@ -10,7 +10,7 @@ import { countHit } from "@/lib/visit";
 import { openOrder, paypalReady } from "@/lib/paypal-sales";
 import { cameFrom } from "@/lib/came-from";
 import { channelOfRequest } from "@/lib/visit-channel";
-import { affiliateCookieName, attributionFor } from "@/lib/affiliates";
+import { affiliateCookieName, attributionOrPending, pendingChannel } from "@/lib/affiliates";
 import { viaCookieName } from "@/lib/affiliate-setting";
 import { readCountry } from "@/lib/fair-price";
 
@@ -56,18 +56,24 @@ export async function POST(request: NextRequest) {
   }
   // What the visit carried, as a Stripe checkout carries it: the channel this
   // sale is credited to (lib/visit-channel.ts) and the affiliate who sent the
-  // buyer, if one did (lib/affiliates.ts). A lookup that fails never stops the sale.
+  // buyer, if one did (lib/affiliates.ts). A lookup that does not answer never
+  // stops the sale: the click rides on the order as pending, and is decided at
+  // the hand-over (owner's decision 6, creditPayPalSale).
   const host = new URL(origin).hostname;
-  const via = await attributionFor(store, product.id, {
+  const credit = await attributionOrPending(store, product.id, {
     via: request.cookies.get(viaCookieName(store.handle))?.value,
     session: request.cookies.get(affiliateCookieName(store.handle))?.value,
-  }).catch(() => null);
+  });
+  const via = credit.known ? credit.via : null;
   const meta = {
     ...channelOfRequest(request, store.handle, host, Date.now() / 1000, store.attributionDays),
     ...(() => {
       const page = cameFrom(request.headers.get("referer"), host);
       return { ...(page.source ? { utm_source: page.source } : {}), ...(page.medium ? { utm_medium: page.medium } : {}), ...(page.campaign ? { utm_campaign: page.campaign } : {}) };
     })(),
+    // Last, after the visit's tags: at most five channel keys, three tags, this one and the consent the order adds
+    // (lib/paypal-sales.ts cleanMeta keeps twenty), so none of them is ever left out.
+    ...pendingChannel(credit),
   };
   // Where the buyer's connection is, for the fair price the page showed them: from the edge, as the Stripe
   // checkout reads it (app/api/store/checkout/route.ts), never from the form.

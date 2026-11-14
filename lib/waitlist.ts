@@ -10,7 +10,7 @@
  *
  * <store> is the store's statsId, which stays through a change of handle.
  */
-import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { withinStore } from "@/lib/metered-limits";
 import { createHash } from "node:crypto";
 import { WAIT_TOKEN, newWaitlistToken as newToken, waitlistTokenKey as tokenKey, parseStoreWaitlistGrant, type StoreWaitlistGrant as TokenGrant } from "@/lib/waitlist-tokens";
@@ -119,12 +119,17 @@ export async function joinWaitlist(input: {
   if (!(await withinStore("waitlist-ip", `${sid}:${ip}`, 10, 3_600, store))) return "limited";
   if (!(await withinLimit("waitlist-address", sha(email), 5, 3_600))) return "limited";
 
-  const [existing, size] = await redisPipeline([
+  // Both read exactly (rule 24): a length in another shape is never room on the list, and a place
+  // in another shape is never "not on it", which would write a confirmed place over as a new one.
+  const read = repliesFor(await redisPipeline([
     ["HGET", listKey(sid, product.id), email],
     ["HLEN", listKey(sid, product.id)],
-  ]);
+  ]), 2);
+  const existing = read?.[0];
+  const size = countOf(read?.[1]);
+  if (!read || size === null || (existing !== null && typeof existing !== "string")) return "error";
   const before = parseEntry(existing);
-  if (!before && Number(size) >= MAX_WAITLIST) return "full";
+  if (!before && size >= MAX_WAITLIST) return "full";
 
   const leave = before?.t ?? newToken();
   const asked = Boolean(before?.c) || consent;
@@ -440,9 +445,17 @@ export async function runLaunches(load: (handle: string) => Promise<Store | null
 export async function forgetWaitlistPerson(sid: string | null, productIds: string[], email: string): Promise<number> {
   if (!sid || !isRedisConfigured()) return 0;
   const address = normaliseEmail(email);
-  const replies = productIds.length ? await redisPipeline(productIds.map((p) => ["HDEL", listKey(sid, p), address])) : [];
+  // Each deletion is read exactly (rule 24): an answer in another shape throws, so the erasure is
+  // said as not done and tried again (lib/person-erasure.ts), never as "nothing there to delete".
+  let deleted = 0;
+  if (productIds.length) {
+    const replies = repliesFor(await redisPipeline(productIds.map((p) => ["HDEL", listKey(sid, p), address])), productIds.length);
+    const counts = replies?.map(countOf);
+    if (!counts || counts.some((n) => n === null || n > 1)) throw new UnknownReplyError("the deletion of a person's waitlist places");
+    deleted = (counts as number[]).reduce((sum, n) => sum + n, 0);
+  }
   const blanked = await blankInLists(productIds.map((p) => sendKey(sid, p)), address);
-  return replies.reduce<number>((sum, n) => sum + (Number(n) || 0), 0) + blanked;
+  return deleted + blanked;
 }
 
 /**

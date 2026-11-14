@@ -44,6 +44,7 @@ export { sellableOptions };
 import { isPaidUp } from "@/lib/billing";
 import { codesMayTakeOff, livePromotionId } from "@/lib/discount";
 import { StripeError, checkoutClosesAt, onAccount, platformKey } from "@/lib/stripe-account";
+import { ownField, plainObject, readStripePage } from "@/lib/stripe-list";
 import { type Bump, MAX_BUMPS, activeBumps, bumpTargets, planFor } from "@/lib/product-extras";
 import { planLine } from "@/lib/buyer-words";
 import { LANGUAGES } from "@/lib/store-language";
@@ -63,7 +64,9 @@ import { isHouseStore } from "@/lib/house-store";
 import { DEMO_CONNECTED_ACCOUNT } from "@/lib/demo-account";
 import { preorderProblem } from "@/lib/preorder-rules";
 import { type MayComeOff, applyShare, leastPaid, linesTotal, shareBps } from "@/lib/platform-share";
+import type { ReturningCode } from "@/lib/returning-code-rules";
 import { CONSENT_META, type DigitalConsent, consentKind, consentMetaValue, deliversDigitally, keepConsentOn, requireDigitalConsent } from "@/lib/digital-consent";
+import { type UnpaidProof, unpaidProof } from "@/lib/checkout-return";
 
 /**
  * How long a paid link keeps working.
@@ -135,6 +138,17 @@ export function canSellProduct(store: Store, product: Listing): boolean {
 /** The figure a product card leads with: the cheapest way in. */
 export function fromPriceCents(product: Listing): number {
   return lowestPriceCents(sellableOptions(product), product.priceCents);
+}
+
+/** A code only for people who bought here before that Stripe would not take on this checkout (lib/returning-code.ts). */
+export class ReturningCodeRefused extends Error {
+  /** "code": Stripe would not take its coupon (used up, ended, deleted); "other": the code cannot go on this checkout. */
+  readonly reason: "code" | "other";
+  constructor(reason: "code" | "other") {
+    super(reason === "code" ? "Stripe would not take this code's coupon" : "This code cannot go on this checkout");
+    this.name = "ReturningCodeRefused";
+    this.reason = reason;
+  }
 }
 
 /**
@@ -264,6 +278,17 @@ export async function createCheckout(
      * type one is shown as it always is.
      */
     code?: string;
+    /**
+     * A code only for people who already bought here (554 [DS1], unit 2;
+     * lib/returning-code.ts), already checked by the route against what
+     * `email` bought: its coupon comes off, for that email only, with no box
+     * beside it. Like a code from a link, it never stacks: a come-back or
+     * welcome offer, a membership's introductory price, a fair price or a
+     * sale across the store already applied wins, and then the checkout is
+     * refused (ReturningCodeRefused "other") rather than opened without the
+     * code the buyer asked for.
+     */
+    returning?: ReturningCode;
     /**
      * The buyer's yes, checked on the form before paying, to start access at
      * once and lose the right to cancel once it starts (lib/digital-consent.ts).
@@ -514,6 +539,15 @@ export async function createCheckout(
     // How a membership began, for who stays (lib/discount-impact.ts, entryOf).
     if (recurring) body.set("subscription_data[metadata][discount]", "sale");
     mayComeOff.push({ kind: "percent", percent: saleOffNow });
+  } else if (extras.returning && extras.email && !pwyw) {
+    // A code only for people who bought here before, checked by the route:
+    // the creator's coupon, with no box beside it (Stripe takes one or the
+    // other), and the checkout opens for the email that was checked.
+    body.set("discounts[0][coupon]", extras.returning.coupon);
+    body.set("metadata[returning]", extras.returning.code);
+    if (recurring) body.set("subscription_data[metadata][discount]", "code");
+    const off = extras.returning.off;
+    mayComeOff.push(off.kind === "percent" ? { kind: "percent", percent: off.percent } : off.currency === store.currency.toLowerCase() ? { kind: "cents", cents: off.cents } : { kind: "unknown" });
   } else if (store.hasDiscounts && !pwyw) {
     // A code from a link, or one typed in Stripe's box: either may be the
     // largest the store has.
@@ -529,6 +563,10 @@ export async function createCheckout(
       body.set("allow_promotion_codes", "true");
     }
   }
+  // A code for returning buyers that did not go on (another discount already
+  // applies, or the buyer names the price): never opened without the code
+  // the buyer asked for, and never two discounts.
+  if (extras.returning && body.get("discounts[0][coupon]") !== extras.returning.coupon) throw new ReturningCodeRefused("other");
   if (extras.email) body.set("customer_email", extras.email);
 
   if (extras.gift) {
@@ -797,6 +835,15 @@ export async function createCheckout(
         named = false;
         continue;
       }
+      // Only a refusal that names this coupon is about it: Stripe's sentence for a
+      // coupon used up, ended or deleted carries its id; a refusal of the
+      // reminder's consent or of the tax documents does not, and is put right below.
+      if (extras.returning && body.get("discounts[0][coupon]") === extras.returning.coupon && error instanceof StripeError && error.status === 400 && (error.stripeMessage.includes(extras.returning.coupon) || error.code === "coupon_expired" || (/\bcoupon\b/i.test(error.stripeMessage) && !/consent|tax|invoice|price/i.test(error.stripeMessage)))) {
+        // The code's coupon is used up, ended or gone on the creator's
+        // account: the buyer typed it for a discount, so no checkout opens at
+        // a price they did not ask for. They are told on the form.
+        throw new ReturningCodeRefused("code");
+      }
       if (body.has("discounts[0][promotion_code]") && error instanceof StripeError && error.status === 400 && /promotion|coupon|discount/i.test(error.message)) {
         // The code from the link is real but not for this sale — a minimum,
         // a first order only, another product. The buyer is not turned away
@@ -938,8 +985,10 @@ export type Order =
        */
       reusable: boolean;
     }
+  /** Not paid: what can be proved about it from this session alone (648 [WG8], lib/checkout-return.ts). */
+  | { state: "unpaid"; proof: UnpaidProof }
   /** Refunded in full: what it bought is closed, on every page (lib/refunds.ts). */
-  | { state: "unpaid" | "processing" | "expired" | "invalid" | "unavailable" | "error" | "refunded" };
+  | { state: "processing" | "expired" | "invalid" | "unavailable" | "error" | "refunded" };
 
 /**
  * Decides whether this buyer may have the file.
@@ -1011,7 +1060,7 @@ export async function readOrder(
     return { state: "processing" };
   }
   if (!isSettled(session)) {
-    return { state: "unpaid" };
+    return { state: "unpaid", proof: unpaidProof(session) };
   }
   // Given back in full: the download, the course and the offers after it
   // close, whatever time is left on the link.
@@ -1128,6 +1177,8 @@ export type Sale = {
   stillDownloadable: boolean;
   /** A booked call delivers a time, not a download. */
   isCall: boolean;
+  /** A one-time payment (Stripe's mode "payment"), which has a receipt (lib/receipt-pdf.ts); a membership's payments have Stripe's invoices. */
+  oneTime?: boolean;
   /** What the buyer answered at checkout, question by question. */
   answers: Answer[];
   /** A membership that began with a free trial, so nothing was charged yet. */
@@ -1151,6 +1202,7 @@ type SessionRecord = {
   id?: unknown;
   status?: unknown;
   payment_status?: unknown;
+  mode?: unknown;
   created?: unknown;
   amount_total?: unknown;
   currency?: unknown;
@@ -1222,6 +1274,7 @@ export async function listSales(store: Store): Promise<SaleList> {
         paidAt,
         stillDownloadable: now - paidAt <= DOWNLOAD_WINDOW_SECONDS,
         isCall: row.metadata?.kind === "call",
+        oneTime: row.mode === "payment",
         answers: readAnswers(row),
         trial: Number(row.metadata?.trial_days) > 0,
         isTip: row.metadata?.kind === "tip",
@@ -1241,41 +1294,50 @@ export async function listSales(store: Store): Promise<SaleList> {
   for (const sale of sales) if (sale.shipTo) sale.shipped = shippedAt.get(sale.reference) ?? null;
 
   // Products taken in one click after paying are their own charges, not
-  // checkouts, so they are read from the payments on the same account.
-  let added: Sale[] = [];
+  // checkouts, so they are read from the payments on the same account. They
+  // are sales like any other: a page that is not a Stripe list in its exact
+  // shape, a payment it cannot read, or a read that failed, is not "none were
+  // taken", so the list says it could not be verified, as it does for an
+  // unreadable page of checkouts (rule 24; Claude 5, round 30).
+  let added: Sale[];
   try {
     const intents = await onAccount(
       "GET",
       store.stripeAccountId as string,
       `/payment_intents?limit=${ORDERS_PAGE_SIZE}`,
     );
-    const list = Array.isArray(intents.data) ? (intents.data as Record<string, unknown>[]) : [];
-    added = list
-      .filter((pi) => {
-        const meta = pi.metadata as Record<string, string> | null;
-        return meta?.kind === "upsell" && handles.has(meta?.store ?? "") && pi.status === "succeeded";
-      })
-      .map((pi): Sale => {
-        const meta = pi.metadata as Record<string, string>;
-        const paidAt = typeof pi.created === "number" ? pi.created : 0;
-        return {
-          reference: typeof pi.id === "string" ? pi.id : "",
-          title: `${meta.title || "A product that is no longer listed"} (added after paying)`,
-          amount: typeof pi.amount === "number" ? pi.amount : 0,
-          currency: typeof pi.currency === "string" && pi.currency ? pi.currency : "usd",
-          email: typeof pi.receipt_email === "string" && pi.receipt_email ? pi.receipt_email : null,
-          paidAt,
-          stillDownloadable: now - paidAt <= DOWNLOAD_WINDOW_SECONDS,
-          isCall: false,
-          answers: [],
-          trial: false,
-          isTip: false,
-        };
-      })
-      .filter((sale) => sale.reference !== "");
+    const page = readStripePage(intents, (pi) => plainObject(ownField(pi, "metadata")) && typeof ownField(pi, "status") === "string");
+    if (page.unreadable > 0) return { state: "error" };
+    const offers = page.rows.filter((pi) => {
+      const meta = ownField(pi, "metadata") as Record<string, unknown>;
+      return meta.kind === "upsell" && handles.has(typeof meta.store === "string" ? meta.store : "") && pi.status === "succeeded";
+    });
+    // An offer of this store is shown with what it cost, when it was paid and in what: none of them is guessed.
+    const legible = (pi: Record<string, unknown>) =>
+      Number.isSafeInteger(pi.amount) && (pi.amount as number) >= 0 &&
+      Number.isSafeInteger(pi.created) && (pi.created as number) > 0 &&
+      typeof pi.currency === "string" && /^[a-z]{3}$/.test(pi.currency);
+    if (!offers.every(legible)) return { state: "error" };
+    added = offers.map((pi): Sale => {
+      const meta = pi.metadata as Record<string, string>;
+      const paidAt = pi.created as number;
+      return {
+        reference: pi.id,
+        title: `${meta.title || "A product that is no longer listed"} (added after paying)`,
+        amount: pi.amount as number,
+        currency: pi.currency as string,
+        email: typeof pi.receipt_email === "string" && pi.receipt_email ? pi.receipt_email : null,
+        paidAt,
+        stillDownloadable: now - paidAt <= DOWNLOAD_WINDOW_SECONDS,
+        isCall: false,
+        answers: [],
+        trial: false,
+        isTip: false,
+      };
+    });
   } catch (error) {
-    // The checkouts are still the whole of the list; this part is extra.
     console.error("listing upsells failed", error);
+    return { state: "error" };
   }
 
   const all = [...sales, ...added].sort((a, b) => b.paidAt - a.paidAt).slice(0, ORDERS_PAGE_SIZE);

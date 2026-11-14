@@ -43,6 +43,7 @@ import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { createHash, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { suppressedAmong, suppressedKey, suppressionPrint } from "@/lib/suppression";
 import { type Busy, isTimeZone, roomFor, seatsAt } from "@/lib/call-setup";
 import { SafeFetchError, checkUrl, problemWords, safeFetch } from "@/lib/safe-fetch";
@@ -169,10 +170,25 @@ function parseReading(raw: unknown): Reading | null {
   }
 }
 
+/**
+ * The store's calendar settings, or null only when Redis confirms there are none. Any other answer, or text that
+ * is not the object writeConfig stores (with its list of calendars), throws (rule 24): read as none, the rewrite
+ * that follows (ensureFeedToken, newFeedToken, addFeed) erased the creator's calendars.
+ */
 async function readConfig(store: Store): Promise<Config | null> {
   if (!store.statsId || !isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["GET", cfgKey(store.statsId)]]);
-  return parseConfig(raw);
+  const reply = repliesFor(await redisPipeline([["GET", cfgKey(store.statsId)]]), 1);
+  if (reply && reply[0] === null) return null;
+  const raw = reply?.[0];
+  let value: unknown;
+  try {
+    value = typeof raw === "string" ? JSON.parse(raw) : undefined;
+  } catch {
+    value = undefined;
+  }
+  const config = value && typeof value === "object" && !Array.isArray(value) && Array.isArray((value as { feeds?: unknown }).feeds) ? parseConfig(raw) : null;
+  if (!config) throw new UnknownReplyError("a store's calendar settings");
+  return config;
 }
 
 async function writeConfig(store: Store, config: Config): Promise<void> {

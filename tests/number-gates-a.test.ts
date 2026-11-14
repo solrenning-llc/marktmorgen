@@ -390,7 +390,9 @@ async function main(): Promise<void> {
       .keys()
       .filter((k) => k.startsWith("nl:orders:open:") && !k.endsWith(":b"))
       .reduce((sum, k) => sum + (redis.run(["HVALS", k]) as string[]).reduce((n, v) => n + Number(v), 0), 0);
-  const ordersCounted = (from: number) => seen.slice(from).filter((c) => c[0] === "INCR" && key(c).startsWith("nl:orders:n:")).length;
+  // An order's count is sent as one step with its mark (lib/orders.ts, COUNT_ORDER: its count key, then 1 to count).
+  const ordersCounted = (from: number) => seen.slice(from).filter((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:orders-count:v1\n") &&
+    String(c[4]).startsWith("nl:orders:n:") && String(c[7]) === "1").length;
   /** The page's notice after an open that threw, for a link that is one. */
   const noticeAfterThrow = (token: string) => placeNotice({ token, tokenValid: true, taken: null, threw: true, status: "" });
 

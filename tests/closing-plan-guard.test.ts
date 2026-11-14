@@ -354,7 +354,7 @@ async function main() {
     if (url.pathname === "/v1/subscriptions" && (init?.method ?? "GET") === "GET") {
       const page = await response.json() as { data: Record<string, unknown>[]; has_more: boolean };
       return Response.json({ ...page, data: page.data.map(row => String((row.metadata as { store?: string })?.store).startsWith("handoff") ? {
-        ...row, items: { data: [{ quantity: 1, current_period_start: S(day) - 86400, current_period_end: S(day) + 30 * 86400,
+        ...row, cancel_at: null, cancel_at_period_end: false, items: { data: [{ quantity: 1, current_period_start: S(day) - 86400, current_period_end: S(day) + 30 * 86400,
           price: { lookup_key: "nimbus_creator_month", currency: "usd", unit_amount: 6900, recurring: { interval: "month", interval_count: 1 } } }] },
       } : row) });
     }

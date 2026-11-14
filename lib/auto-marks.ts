@@ -10,7 +10,7 @@
  * product's creation, a sale's dates — so nothing on the chart is guessed.
  * Days are UTC, like every day of the numbers.
  */
-import { listBroadcasts } from "@/lib/broadcasts";
+import { listBroadcastsStrict } from "@/lib/broadcasts";
 import { readListings } from "@/lib/catalog";
 import type { Store } from "@/lib/store";
 
@@ -50,11 +50,14 @@ export function marksFrom(input: { emails: EmailLike[]; products: ProductLike[];
     .slice(-MAX_MARKS);
 }
 
-/** The marks for the days the chart can show, read from the store's own records: one list of emails and the catalog. */
+/**
+ * The marks for the days the chart can show, read from the store's own records: one list of emails and the catalog.
+ * A read that fails rejects: marks that could not be read are unknown, never none (VR2 audit, rule 24), and the caller
+ * says so.
+ */
 export async function readMarks(store: Store, from: string, to: string, now = Date.now()): Promise<AutoMark[]> {
-  const [emails, products] = await Promise.all([
-    listBroadcasts(store.listId, 50).catch(() => []),
-    readListings(store).catch(() => []),
-  ]);
+  // Strict reader: a malformed list or record reply rejects instead of reading as no campaigns; a record Redis
+  // answers as its own nil expired (RECORD_DAYS) and is left out, known (Codex M, #3146).
+  const [emails, products] = await Promise.all([listBroadcastsStrict(store.listId, 50, { expired: "skip" }), readListings(store)]);
   return marksFrom({ emails, products, sales: [...(store.pastSales ?? []), store.sale], from, to, now });
 }

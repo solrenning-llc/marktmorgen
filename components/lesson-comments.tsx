@@ -8,6 +8,7 @@ import {
   countShown,
 } from "@/lib/lesson-comments-rules";
 import { type CoursesWords, coursesWords } from "@/lib/buyer-words/courses";
+import { type CommunityWords, communityWords } from "@/lib/buyer-words/community";
 import { LANGUAGES, type LanguageCode, parseLanguage } from "@/lib/store-language";
 import { NewTab } from "@/components/new-tab";
 
@@ -83,6 +84,7 @@ function One({
   where,
   now,
   w,
+  cw,
   locale,
 }: {
   comment: LessonComment;
@@ -93,6 +95,8 @@ function One({
   where: Where;
   now: number;
   w: CoursesWords;
+  /** The community's words, for the question asked before a delete. */
+  cw: CommunityWords;
   locale: string;
 }) {
   const creator = reader === CREATOR_AUTHOR;
@@ -123,13 +127,35 @@ function One({
                 </button>
               </form>
             ) : null}
-            <form action="/api/store/course/comment" method="post">
-              <Fields where={where} action="delete" />
-              <input type="hidden" name="id" value={comment.id} />
-              <button type="submit" className="st-footer-link inline-flex min-h-11 items-center font-semibold">
+            {/* Deleting cannot be undone (WCAG 3.3.4, 3.3.6): the first press only opens the question, in the
+                community's own words, and its "Delete" sends; pressing the first button again closes it and
+                nothing is sent. A plain disclosure, so it works without a script and makes no extra request. */}
+            <details>
+              {/* A 44 px row of its own (WCAG 2.5.5): the lesson page is not inside [data-store-layout], so the
+                  store front's summary rule does not reach it. Equal padding above and below centres the words in
+                  that row, and not flex, so it keeps its disclosure triangle; py-2.5 is for a browser without
+                  the lh unit. */}
+              <summary
+                className="st-footer-link cursor-pointer py-2.5 font-semibold"
+                style={{ minHeight: "2.75rem", paddingBlock: "calc((2.75rem - 1lh) / 2)" }}
+              >
                 {answers > 0 ? w.deleteWithAnswers : w.delete}
-              </button>
-            </form>
+              </summary>
+              <form
+                action="/api/store/course/comment"
+                method="post"
+                role="group"
+                aria-label={reply ? cw.deleteReplyConfirm : cw.deleteCommentConfirm}
+                className="flex flex-wrap items-center gap-x-4"
+              >
+                <Fields where={where} action="delete" />
+                <input type="hidden" name="id" value={comment.id} />
+                <p style={{ color: "var(--st-text)" }}>{reply ? cw.deleteReplyConfirm : cw.deleteCommentConfirm}</p>
+                <button type="submit" className="st-footer-link inline-flex min-h-11 items-center font-semibold">
+                  {w.delete}
+                </button>
+              </form>
+            </details>
           </div>
         ) : null}
       </div>
@@ -169,6 +195,7 @@ export function LessonComments({
   namePlaceholder?: string;
 }) {
   const w = coursesWords(language);
+  const cw = communityWords(language);
   const locale = LANGUAGES[parseLanguage(language)].locale;
   const creator = reader === CREATOR_AUTHOR;
   const count = countShown(threads);
@@ -202,12 +229,12 @@ export function LessonComments({
         <ol className="mt-8 space-y-6">
           {threads.map(({ comment, replies }) => (
             <li key={comment.id} className="space-y-3">
-              <One comment={comment} reply={false} answers={replies.length} reader={reader} storeName={storeName} where={hidden} now={now} w={w} locale={locale} />
+              <One comment={comment} reply={false} answers={replies.length} reader={reader} storeName={storeName} where={hidden} now={now} w={w} cw={cw} locale={locale} />
               {replies.length ? (
                 <ol className="cm-thread ml-5 space-y-3">
                   {replies.map((r) => (
                     <li key={r.id}>
-                      <One comment={r} reply reader={reader} storeName={storeName} where={hidden} now={now} w={w} locale={locale} />
+                      <One comment={r} reply reader={reader} storeName={storeName} where={hidden} now={now} w={w} cw={cw} locale={locale} />
                     </li>
                   ))}
                 </ol>

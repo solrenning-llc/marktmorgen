@@ -28,6 +28,7 @@ export async function visitPath() { calls.visitPath++; if (mode === "visit-faile
 export function returnMissionFor() { return mode === "returning" ? { state: "open", title: "Give your store's introduction one clear update", why: "One useful step.", steps: ["Review your introduction."], closesOn: "An updated introduction.", place: { label: "Edit your store's introduction", hash: "#details" } } : null; }
 export function chargeStudio() { calls.chargeStudio++; throw new Error("Unexpected charge"); }
 export async function allowanceUsed() { calls.allowanceUsed++; return 0; }
+export async function allowanceUsedExact() { calls.allowanceUsed++; return 0; }
 export function allowanceFor() { return 100; }
 export function pathPlanLine() { return null; }
 export function largerPlanFor() { return null; }

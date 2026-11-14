@@ -1,6 +1,9 @@
 # MV (AGENTS.md): opens the main-vermelho issue when main's own CI fails (on the current head, or on
 # an earlier head while the current one has no result) and closes it when all nine required
-# workflows passed on main's current head. Not a required check and not part of
+# workflows passed on main's current head. A workflow whose push run on that head was canceled,
+# skipped or is missing counts its merge_group run in main's merge queue on that same commit, only
+# when it passed (main only fast-forwards to the queue's commit); a merge_group failure never opens,
+# and a later push or schedule failure on the head still does. Not a required check and not part of
 # CI itself: it runs only after a required workflow completes on main, from main's own copy of
 # scripts/main_red_alarm.mjs (the decision; tests/main-red-alarm.test.ts).
 name: Main red alarm

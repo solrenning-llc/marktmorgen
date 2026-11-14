@@ -1,3 +1,4 @@
+import { OPTION_PARAM, linkedOption } from "@/lib/option-link-rules";
 import { absoluteImageUrl, servedImageUrl, servedSrcSet } from "@/lib/picture-served";
 import { listedLengths } from "@/lib/call-lengths";
 import { assistReminderShown } from "@/lib/assistant-reminder";
@@ -117,9 +118,11 @@ const load = cache(async (raw: string, id: string): Promise<{ store: Store; prod
   return product && !product.hidden ? { store, product, asked } : null;
 });
 
-async function pageOf(store: Store, product: Listing): Promise<SalesPage> {
-  // A page kept from visitors while the creator works on it shows as none (lib/sales-page.ts, livePage).
-  return product.page ? readPage(store.statsId, product.id).then((page) => livePage(page, saleClock())).catch(() => ({ ...EMPTY_PAGE, blocks: [] })) : { ...EMPTY_PAGE, blocks: [] };
+async function pageOf(store: Store, product: Listing): Promise<SalesPage | "unread"> {
+  // A page kept from visitors while the creator works on it shows as none (lib/sales-page.ts, livePage). One whose
+  // read is not known is "unread": said so, out of search, never shown as the product with no page
+  // (C4-20261106-2610-C6-153, unit B).
+  return product.page ? readPage(store.statsId, product.id).then((page) => livePage(page, saleClock())).catch(() => "unread" as const) : { ...EMPTY_PAGE, blocks: [] };
 }
 
 /**
@@ -148,6 +151,7 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
   if (!found) return { title: "Not found — Marktmorgen" };
   const { store, product } = found;
   const [about, page] = await Promise.all([product.about ? readAbout(store.statsId, product.id) : Promise.resolve(""), pageOf(store, product)]);
+  if (page === "unread") return { title: `${speech(store).w.notAvailable} — ${store.name}`, robots: { index: false, follow: true } };
   const description =
     page.seoDescription || product.summary || aboutExcerpt(about) || speech(store).w.productDescription(product.title, store.name);
   const title = page.seoTitle || `${product.title} — ${store.name}`;
@@ -288,6 +292,8 @@ export default async function ProductPage({ params, searchParams }: Params) {
   // Sent from a card on one of the creator's listed sites (app/embed): the site and the way back, carried to the
   // checkout, which checks both against the store's list again; anything else is ignored there.
   const embedSite = typeof query.site === "string" ? query.site.slice(0, 300) : "";
+  // A link to one price option opens the page with it chosen (630 [HN6](27)): only one the page offers now.
+  const linkedChoice = linkedOption(query[OPTION_PARAM], sellableOptions(product));
   const embedReturn = typeof query.return === "string" ? query.return.slice(0, 700) : "";
   // A reminder asked for below the buy box, and what came of it (lib/checkout-ask.ts).
   const remindAsked = typeof query.asked === "string" ? query.asked.slice(0, 20) : "";
@@ -321,6 +327,18 @@ export default async function ProductPage({ params, searchParams }: Params) {
     // A course's video total, from what the video service measured (292 [SQ3], lib/course-facts.ts).
     product.course ? readCourse(product.course.id).then((course) => (course ? readCourseFacts(course) : null)).catch(() => null) : Promise.resolve(null),
   ]);
+  // Its page could not be read: said so, with no buy box, as a blog post that cannot be read is (unit B).
+  if (savedPage === "unread") {
+    return (
+      <div lang={speech(store).lang.locale} className={`st-page st-theme-${store.look.theme} relative min-h-screen`} style={lookStyle(store.look) as React.CSSProperties}>
+        <main id="content" className="relative mx-auto max-w-2xl px-4 pb-16 pt-10 sm:pt-14">
+          <h1 className="font-display text-3xl font-semibold leading-tight">{product.title}</h1>
+          <p role="status" className="st-muted mt-4">{w.notAvailable}</p>
+          <Link href={`/@${store.handle}`} className="st-footer-link mt-6 inline-block rounded-lg py-3 text-sm font-semibold">{w.backTo(store.name)}</Link>
+        </main>
+      </div>
+    );
+  }
   const videoLine = courseFacts?.videoSeconds != null ? videoTotalLine(courseFacts.videoSeconds, store.language) : null;
   // The version of a page test this visitor reads (lib/headline-test.ts),
   // before anything is drawn from the page, so all of it is one version.
@@ -435,7 +453,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
           </a>
         </p>
       ) : null}
-      <BuyBox store={store} product={product} related={related} remaining={remaining} writes={canWrite(store)} selling={selling} ready={bundleReady} soon={soon} preorder={preorder} bundleItems={inside} pickAgain={query.pick === "count"} consentAgain={consentAgain && !giftProblem && !groupProblem} embed={embedSite || embedReturn ? { site: embedSite, back: embedReturn } : null} />
+      <BuyBox store={store} product={product} related={related} remaining={remaining} writes={canWrite(store)} selling={selling} ready={bundleReady} soon={soon} preorder={preorder} bundleItems={inside} pickAgain={query.pick === "count"} consentAgain={consentAgain && !giftProblem && !groupProblem} embed={embedSite || embedReturn ? { site: embedSite, back: embedReturn } : null} chosenOption={linkedChoice} />
       {cartOn && !soon && cartable(product) && remaining !== 0 ? <AddToCart handle={store.handle} productId={product.id} lang={store.language} deal={store.cartDeal.on ? store.cartDeal : null} /> : null}
       {/* A question before buying, answered from this page (lib/answers.ts): only where the creator switched it on. */}
       {selling && answersOn(store) ? (

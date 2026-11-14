@@ -34,7 +34,8 @@
 import { redisPipeline } from "@/lib/redis";
 import { repliesFor } from "@/lib/redis-reply";
 
-const RELEASE = '-- marktmorgen:release:v1\nif redis.call("GET", KEYS[1]) == ARGV[1] then return redis.call("DEL", KEYS[1]) else return 0 end';
+/** Deletes KEYS[1] only while it holds ARGV[1]; also used by lib/domains.ts to let a domain's key go. */
+export const RELEASE = '-- marktmorgen:release:v1\nif redis.call("GET", KEYS[1]) == ARGV[1] then return redis.call("DEL", KEYS[1]) else return 0 end';
 const EXTEND = '-- marktmorgen:extend:v1\nif redis.call("GET", KEYS[1]) == ARGV[1] then return redis.call("EXPIRE", KEYS[1], ARGV[2]) else return 0 end';
 
 export type Held = { key: string; token: string; ttlSeconds: number };

@@ -142,7 +142,7 @@ function install(): void {
       if (method === "DELETE") sub.status = "canceled";
       return json(sub);
     }
-    if (method === "GET" && path === "/invoices") return json({ object: "list", data: [{ id: `in_${url.searchParams.get("subscription")}`, charge: { id: "ch_R23", disputed: invoicesDisputed } }], has_more: false });
+    if (method === "GET" && path === "/invoices") return json({ object: "list", data: [{ id: `in_${url.searchParams.get("subscription")}`, subscription: url.searchParams.get("subscription"), charge: { id: "ch_R23", disputed: invoicesDisputed } }], has_more: false });
     throw new Error(`unexpected ${method} ${path}`);
   }) as typeof fetch;
 }

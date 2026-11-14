@@ -1279,7 +1279,7 @@ async function main(): Promise<void> {
   is("logging in with the passkey meanwhile", [busyIn.status, ((await busyIn.json()) as { error?: string }).error], [503, "busy"]);
   await releaseLock(blocking);
 
-  part("Issue #4364: cancelling a reset keeps a session whose logout was not confirmed locked");
+  part("Issue #4364: canceling a reset keeps a session whose logout was not confirmed locked");
   const ZEDA = "zeda-locked@example.com";
   await turnOnApp(ZEDA, "zeda-backup@example.org");
   const tokenZeda = hex(String(Math.random()));

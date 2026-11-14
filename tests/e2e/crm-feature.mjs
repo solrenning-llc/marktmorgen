@@ -1,3 +1,5 @@
+import {scrollPositionsOverFrames,waitForReactClickHandler} from "./react-hydration.mjs";
+
 export async function checkCrmFeature({browser,LOCAL,axeSource,is}){
  for(const width of [390,1280]){
   const context=await browser.newContext({viewport:{width,height:900}});
@@ -21,7 +23,15 @@ export async function checkCrmFeature({browser,LOCAL,axeSource,is}){
    await page.goto(LOCAL+"/",{waitUntil:"domcontentloaded",timeout:60000});
    const discovery=page.locator('footer a[href="/platform"]').first();
    is("ME3 home footer keeps feature discovery for CRM "+width,await discovery.count(),1);
+   // Always take the client-router path (the one that scrolls the new page to its top), never a
+   // pre-hydration full load, so the stillness check below is exercised on every run.
+   await waitForReactClickHandler(page,discovery);
    await Promise.all([page.waitForURL(LOCAL+"/platform"),discovery.click()]);
+   // Firefox and WebKit lost the next click while the router animated from the footer back to the
+   // top (html is scroll-behavior: smooth): the link moved under the pointer and no navigation began.
+   // The route change must land still; data-scroll-behavior="smooth" on <html> makes it instant.
+   const positions=await scrollPositionsOverFrames(page);
+   is("ME3 feature page lands without animated scroll "+width,new Set(positions).size===1?"still":positions,"still");
    const crm=page.locator('[aria-labelledby="home-modules-heading"] a[href="/platform/crm"]');
    is("ME3 relocated tools link actual CRM page "+width,await crm.count(),1);
    await Promise.all([page.waitForURL(LOCAL+"/platform/crm"),crm.click()]);

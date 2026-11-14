@@ -1,4 +1,4 @@
-import {waitForReactChangeHandler} from "./react-hydration.mjs";
+import {waitForReactChangeHandler,waitForReactHydrated} from "./react-hydration.mjs";
 
 /** Only synthetic intercepted allowlist settings; never visits the listed origins or opens checkout. */
 export async function checkSitesAcknowledgment({browser,LOCAL,fixture,is}){
@@ -27,9 +27,20 @@ export async function checkSitesAcknowledgment({browser,LOCAL,fixture,is}){
    await page.locator("main details").evaluateAll(nodes=>nodes.forEach(n=>{n.open=true;}));
    const section=page.locator("#checkout-script");await section.waitFor();
    const field=section.locator("textarea").first(),save=section.getByRole("button",{name:"Save sites",exact:true});
-   await waitForReactChangeHandler(page,field);
+   // Type only once React has no hydration left on this page: the field is enabled after its own
+   // commit, but later hydration commits can still run (and move focus) between fill's focus and
+   // its typing. See SITES_AFTER_FILL below.
+   await waitForReactHydrated(page,field);await waitForReactChangeHandler(page,field);
    for(const clear of [false,true]){
-    const raw=clear?"":draft,sites=clear?[]:expected;await field.fill(raw);
+    const raw=clear?"":draft,sites=clear?[]:expected;
+    const filledNode=await field.elementHandle();await field.fill(raw);
+    // WebKit twice left "Save sites" disabled after this fill at 1280 (not reproduced in Chromium).
+    // Record what the page holds when that happens, so the next failure names its cause.
+    const afterFill=await section.evaluate((root,raw)=>{
+     const node=root.querySelector("textarea"),active=document.activeElement,save=[...root.querySelectorAll("button")].find(b=>b.textContent.trim()==="Save sites");
+     return {kept:node?.value===raw,length:node?.value.length??null,focused:active===node,active:active?active.tagName.toLowerCase()+(active.id?"#"+active.id:""):null,saveDisabled:save?.disabled??null};
+    },raw);
+    if(!afterFill.kept||afterFill.saveDisabled!==false)console.log("SITES_AFTER_FILL "+JSON.stringify({width,clear,...afterFill,sameField:await filledNode?.evaluate(node=>node.isConnected).catch(()=>false)}));
     for(const scenario of cases){
      let release;const held=new Promise(resolve=>{release=resolve;});pending={scenario,release:held};
      const name=clear+"/"+scenario.name+"/"+width;

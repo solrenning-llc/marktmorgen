@@ -322,6 +322,8 @@ export const en = {
   openFullSize: "Open this picture full size",
   countdownUnits: { days: "days", hours: "hours", min: "min", sec: "sec" },
   until: (when: string) => `Until ${when}`,
+  countdownPause: "Pause countdown",
+  countdownResume: "Resume countdown",
 
   // ---- A store that is resting -------------------------------------------------------------
   restingTitle: "This page is resting for now",

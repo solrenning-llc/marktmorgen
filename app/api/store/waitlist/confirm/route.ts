@@ -22,7 +22,7 @@ export async function POST(request: NextRequest) {
   // A lead for Marktmorgen Path on the press that confirmed the spot, never on the asking; `first` only keeps a later
   // press from asking, and the address counts once for the store, two presses at once included (lib/path-lead.ts;
   // 13 [D10]). An unknown answer is logged.
-  if (grant && result.ok && result.first) await countConfirmedLead(store?.statsId, grant.e).catch((error) => console.error("counting a confirmed lead failed", error));
+  if (grant && result.ok && result.first) await countConfirmedLead(store, grant.e).catch((error) => console.error("counting a confirmed lead failed", error));
   const handle = store?.handle ?? grant?.h ?? "";
   const target = handle
     ? `${origin}/@${handle}/waitlist?product=${encodeURIComponent(grant?.p ?? "")}&status=${result.ok ? "confirmed" : "expired"}`

@@ -29,7 +29,8 @@ import { setSoon } from "@/lib/waitlist";
 import { newWaitlistToken, waitlistTokenKey } from "@/lib/waitlist-tokens";
 import { LIFE_WRITE_MAX, readLifeRecord } from "@/lib/stats";
 import { countsFrom } from "@/lib/path-facts";
-import { forgetNoted } from "@/lib/erasure-index";
+import { forgetNoted, noteForErasure } from "@/lib/erasure-index";
+import { suppressCommand } from "@/lib/suppression";
 import { PATH_LEAD_COMMANDS, countConfirmedLead } from "@/lib/path-lead";
 import { POST as joinConfirm } from "@/app/api/store/join/confirm/route";
 import { POST as waitConfirm } from "@/app/api/store/waitlist/confirm/route";
@@ -188,6 +189,60 @@ async function main(): Promise<void> {
   redis.pipeline = pipe;
   is("said in the server's log", logged.some((line) => line.includes("counting a confirmed lead failed")), true);
 
+  part("A mark is never left that deleting the person could not find (Codex X8 on #3591)");
+  {
+    const pipe = redis.pipeline.bind(redis);
+    // The note, the mark and the count are one script: whatever its answer, the note is there whenever the mark is.
+    // Its answer lost (an entry with neither result nor error): the call fails as unknown, and deleting the person
+    // still finds and deletes the mark.
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      const replies = (await pipe(commands)) as unknown[];
+      return commands[0]?.[0] === "EVAL" && String(commands[0]?.[1]).startsWith("-- marktmorgen:path-lead-count:") ? [undefined] : replies;
+    }) as typeof redis.pipeline;
+    const refused = await countConfirmedLead(store, "noted-unknown@example.com").then(() => "resolved", (error: Error) => error.name);
+    redis.pipeline = pipe;
+    is("the call fails as unknown", refused, "UnknownReplyError");
+    const marksNow = marks().length;
+    await forgetNoted(store.statsId, "noted-unknown@example.com");
+    is("deleting the person deletes the mark the lost answer left", marks().length, marksNow - 1);
+  }
+
+  part("A confirmation that resumes after the person was deleted makes nothing again (Codex T on #3591)");
+  {
+    const before = await leads();
+    const marksBefore = marks().length;
+    // The erasure wrote the store's deletion print, then deleted what was noted; the confirmation resumes after it.
+    await redis.pipeline([suppressCommand(store.listId!, "erased-late@example.com", Math.floor(Date.now() / 1000))]);
+    is("the late confirmation counts nothing", await countConfirmedLead(store, "erased-late@example.com"), "already");
+    is("leaves no mark", marks().length, marksBefore);
+    is("and no note", (await redis.pipeline([["EXISTS", noteForErasure(store.statsId, "erased-late@example.com", "x")[0][1]]]))[0], 0);
+    is("nor a count", await leads(), before);
+    is("control: an address not deleted still counts", await countConfirmedLead(store, "not-erased@example.com"), "counted");
+  }
+
+  part("The count failing before it is applied never leaves the address marked and uncounted (Codex X5 on #3591)");
+  {
+    const pipe = redis.pipeline.bind(redis);
+    const before = await leads();
+    let failed = false;
+    // The trip that counts fails before Redis applies it, once.
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      const counts = commands.some((c) => c[0] === "HINCRBY" || (c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:path-lead-count:")));
+      if (counts && !failed) {
+        failed = true;
+        throw new Error("synthetic Redis timeout");
+      }
+      return pipe(commands);
+    }) as typeof redis.pipeline;
+    const first = await countConfirmedLead(store, "count-lost@example.com").then(() => "resolved", () => "threw");
+    redis.pipeline = pipe;
+    is("the call that failed throws", [failed, first], [true, "threw"]);
+    is("and counted nothing", await leads(), before);
+    is("the next confirmation counts it", await countConfirmedLead(store, "count-lost@example.com"), "counted");
+    is("once", await leads(), before + 1);
+    is("and a third counts nothing more", [await countConfirmedLead(store, "count-lost@example.com"), await leads()], ["already", before + 1]);
+  }
+
   part("What a lead costs is held: never more commands than PATH_LEAD_COMMANDS, the line's figure (M2)");
   {
     const pipe = redis.pipeline.bind(redis);
@@ -196,14 +251,19 @@ async function main(): Promise<void> {
       sent.push(...commands);
       return pipe(commands);
     }) as typeof redis.pipeline;
-    const first = await countConfirmedLead(store.statsId, "kim@example.com");
-    const firstCommands = sent.length;
+    // Billed as Upstash bills them: each command sent, and each one a script runs beside its EVAL.
+    const inside = redis.scriptCalls;
+    const first = await countConfirmedLead(store, "kim@example.com");
+    const firstCommands = sent.length + redis.scriptCalls - inside;
+    const firstSent = [...sent];
     sent.length = 0;
-    const again = await countConfirmedLead(store.statsId, "kim@example.com");
+    const insideAgain = redis.scriptCalls;
+    const again = await countConfirmedLead(store, "kim@example.com");
     redis.pipeline = pipe;
     is("the counting call: the note, the mark and the count", [first, firstCommands], ["counted", PATH_LEAD_COMMANDS]);
-    is("a call for an address already counted: the note and the mark only", [again, sent.length], ["already", PATH_LEAD_COMMANDS - 1]);
-    is("and neither takes a public request or touches a capped count", sent.some((c) => c[0] === "EVAL"), false);
+    is("a call for an address already counted: the note and the mark only", [again, sent.length + redis.scriptCalls - insideAgain], ["already", PATH_LEAD_COMMANDS - 1]);
+    is("and neither takes a public request or touches a capped count: its only script is the mark and the count's own",
+      [...firstSent, ...sent].filter((c) => c[0] === "EVAL").every((c) => String(c[1]).startsWith("-- marktmorgen:path-lead-count:v2\n")), true);
   }
 
   part("Asking counts nothing for Path");

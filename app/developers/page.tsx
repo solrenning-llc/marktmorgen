@@ -116,7 +116,8 @@ export default function DevelopersPage() {
         <p>
           Every answer is JSON. A list comes as <code className="font-mono">data</code>, and a long list comes a page at a
           time with <code className="font-mono">next</code>: send it back as <code className="font-mono">?cursor=</code> for
-          the next page, until it is <code className="font-mono">null</code>.
+          the next page, until it is <code className="font-mono">null</code>. A cursor a list did not give is answered 400{" "}
+          <code className="font-mono">invalid_cursor</code>: start again without one.
           {` A page holds about ${API_PAGE} rows. Products never has more; your list, your members and a course's students can have a few more on a page, and a page can come back empty before the last one, so keep asking until next is null. Times are ISO 8601, in UTC. Amounts are in the currency's smallest unit — cents for dollars.`}
         </p>
         <p>

@@ -24,6 +24,7 @@ import { readDraft } from "@/lib/agreement-rules";
 import { createAgreement } from "@/lib/agreement-store";
 import { createRequest } from "@/lib/payment-request-store";
 import { leadsKey } from "@/lib/contacts";
+import { inviteField } from "@/lib/move-members";
 import { erasureScope } from "@/lib/person-erasure";
 import { COPIERS } from "@/lib/person-copy";
 import { store as redis } from "./redis-stub";
@@ -35,6 +36,8 @@ globalThis.fetch = (async () => new Response(JSON.stringify({ object: "list", da
 const OWNER = "copy-secrets@example.com";
 const PERSON = "dana@example.com";
 const UNSUB = "ab".repeat(20);
+const KEEP = "cd".repeat(20);
+const MEMBERSHIP = "membership1";
 
 async function freshStore(): Promise<Store> {
   redis.clear();
@@ -81,6 +84,17 @@ async function main(): Promise<void> {
     is("the request is in the copy, with its lines", [copied.includes("Coaching, October"), copied.includes("48000")], [true, true]);
     is("its id, the secret in the pay link, is not", copied.includes(requestId), false);
     is("nor the store's internal id", copied.includes(store.sid!), false);
+    is("nor the internal reason an email did not go, left out as for agreements", copied.includes('"failed"'), false);
+  }
+
+  part("An invitation to keep a membership: what it offers, never its link's token");
+  {
+    // Review of #4554 (Claude 4 cloud V, Claude 1 cloud R: MEDIUM): `t` is the token of the "Keep my membership" link
+    // (lib/move-members.ts, readMove), which opens the member's invitation and a checkout under their address.
+    await redis.pipeline([["HSET", `nl:mv:${store.statsId}`, inviteField(PERSON, MEMBERSHIP), JSON.stringify({ e: PERSON, p: MEMBERSHIP, o: "", r: 1_800_000_000, job: "job1", at: 1_790_000_000, t: KEEP, kept: 0 })]]);
+    const copied = JSON.stringify(await COPIERS["lib/move-members.ts"]({ ...scope, productIds: [MEMBERSHIP] }));
+    is("the invitation is in the copy, with its renewal date", [copied.includes(MEMBERSHIP), copied.includes("1800000000")], [true, true]);
+    is("the token in its keep link is not", copied.includes(KEEP), false);
   }
 
   part("A place on the list: whether they agreed, never the unsubscribe link's token");

@@ -84,6 +84,18 @@ export const MAX_GUESTS = 200;
 /** Stores with meetings still to come, for the job that reads their refunds: "<callsId>|<handle>", by the last call's end. */
 export const MEET_STORES = "nl:meet:stores";
 
+/**
+ * A store with a call ending at `end` (ms) is kept in MEET_STORES at least until then: ZADD GT, so a booking with an
+ * earlier end never lowers the store's place below a later meeting's (the five-minute job takes a store whose last
+ * meeting ended a day ago off the list, and its refunds are read no more). One command; a failure is only logged.
+ */
+export async function keepMeetStore(store: Pick<Store, "callsId" | "handle">, end: number): Promise<void> {
+  if (!store.callsId) return;
+  await redisPipeline([["ZADD", MEET_STORES, "GT", end, `${store.callsId}|${store.handle}`]]).catch((error: unknown) => {
+    console.error("keeping a store among those with meetings to come failed", error);
+  });
+}
+
 const lockKey = (scope: string) => `nl:meet:lock:${scope}`;
 
 type StoreRef = Pick<Store, "statsId" | "handle" | "callsId" | "email">;
@@ -547,9 +559,7 @@ export async function callMeeting(input: {
     // private room, for a product that makes meetings and has no record yet.
     fallback: () => roomOf(store.callsId, { product: product.id, setup, session, start, end }),
   });
-  if (store.callsId) {
-    await redisPipeline([["ZADD", MEET_STORES, end, `${store.callsId}|${store.handle}`]]).catch(() => {});
-  }
+  await keepMeetStore(store, end);
   return record;
 }
 

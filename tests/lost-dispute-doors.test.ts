@@ -226,7 +226,7 @@ async function main(): Promise<void> {
   const callStore: Store = { ...store, callsId };
   const callStart = Date.now() + 86_400_000;
   await redis.pipeline([["ZADD", MEET_STORES, callStart, `${callsId}|kilnworks`]]);
-  const call = (pi: string) => [{ id: `cs_test_${pi.slice(3)}`, metadata: { kind: "call", store: "kilnworks", product: guide.product.id, start: String(callStart) }, customer_details: { email: "buyer@example.com" } }];
+  const call = (pi: string) => [{ id: `cs_test_${pi.slice(3)}`, payment_intent: pi, metadata: { kind: "call", store: "kilnworks", product: guide.product.id, start: String(callStart) }, customer_details: { email: "buyer@example.com" } }];
   // Each booking's meeting, as confirmBooking leaves it before the provider made it: ending it needs no provider call.
   const scopeOf = (pi: string) => callScope(callsId, { group: false, session: `cs_test_${pi.slice(3)}`, product: guide.product.id, start: callStart });
   const meeting = (pi: string): MeetRecord => ({
@@ -257,7 +257,9 @@ async function main(): Promise<void> {
   const plainStore: Store = { ...store, callsId: plainId };
   const plainFor = async (handle: string) => (handle === "kilnworks" ? plainStore : null);
   sessionsByPayment.pi_TestCallRefd01 = call("pi_TestCallRefd01");
-  const refund = { id: "re_TestCallRefd01", object: "refund", created: NOW - 30, status: "succeeded", payment_intent: "pi_TestCallRefd01", charge: { object: "charge", amount: 4900, amount_refunded: 4900, refunded: true } };
+  // The refund's own amount and its charge's id, as Stripe lists them: a succeeded refund is known to cover its charge
+  // only from them (the owner's decision 18; rule 23 on claude5/call-refunds-confirmed).
+  const refund = { id: "re_TestCallRefd01", object: "refund", created: NOW - 30, status: "succeeded", amount: 4900, payment_intent: "pi_TestCallRefd01", charge: { object: "charge", id: "ch_TestCallRefd01", amount: 4900, amount_refunded: 4900, refunded: true } };
   is("the store is not in MEET_STORES by its bookings", await redis.pipeline([["ZSCORE", MEET_STORES, `${plainId}|kilnworks`]]), [null]);
   refunds = [refund];
   await syncMeetings(plainFor, Date.now() + 10_000, "https://marktmorgen.com");

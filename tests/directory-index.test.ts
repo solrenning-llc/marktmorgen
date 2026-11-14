@@ -109,7 +109,7 @@ test("a save drops the directory's kept rows, so taking a store out is immediate
 });
 
 test("search engines are asked to show it only once there is a catalog", () => {
-  assert.ok(INDEX_DIRECTORY_AT >= 5 && INDEX_DIRECTORY_AT <= 50);
+  assert.equal(INDEX_DIRECTORY_AT, 10);
 });
 
 test("the index is written where the program is saved", () => {

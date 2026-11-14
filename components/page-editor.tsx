@@ -9,7 +9,7 @@ import { PageAnswers } from "@/components/page-answers";
 import type { WhyNot } from "@/lib/why-not-rules";
 import type { VideoReach } from "@/lib/page-depth";
 
-import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { SavedSections } from "@/components/saved-sections";
 import { useRouter } from "next/navigation";
 import { uploadPresigned } from "@vercel/blob/client";
@@ -567,6 +567,20 @@ export function PageEditor({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
+  // The focus through the clear question (WCAG 2.4.3): opening it puts the focus on Keep it, the choice that changes
+  // nothing; Keep it puts it back on Clear the page. After Yes, clear it, focusAfterClear sends it on instead.
+  const clearKeep = useRef<HTMLButtonElement>(null);
+  const clearOpen = useRef<HTMLButtonElement>(null);
+  const clearBack = useRef(false);
+  // The question's own id, unique per editor, so a second editor on one screen never names its group by this one's.
+  const clearQuestionId = useId();
+  useEffect(() => {
+    if (confirmClear) clearKeep.current?.focus();
+    else if (clearBack.current) {
+      clearBack.current = false;
+      clearOpen.current?.focus();
+    }
+  }, [confirmClear]);
   // Which template the empty page would start from, and the block being dragged.
   const templates = site ? [] : PAGE_TEMPLATES.filter((t) => t.free === product.free);
   const [dragged, setDragged] = useState<number | null>(null);
@@ -2870,17 +2884,27 @@ export function PageEditor({
         ) : null}
         {initial.blocks.length > 0 && !dirty && !site ? (
           confirmClear ? (
-            <span className="flex flex-wrap items-center gap-2 text-sm text-ink-soft">
-              Back to the plain page?
+            <span role="group" aria-labelledby={clearQuestionId} className="flex flex-wrap items-center gap-2 text-sm text-ink-soft">
+              <span id={clearQuestionId}>
+                Back to the plain page?
+              </span>
               <button type="button" className="btn btn-danger btn-sm" aria-disabled={busy || undefined} onClick={clearNow}>
                 Yes, clear it
               </button>
-              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setConfirmClear(false)}>
+              <button
+                ref={clearKeep}
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => {
+                  clearBack.current = true;
+                  setConfirmClear(false);
+                }}
+              >
                 Keep it
               </button>
             </span>
           ) : (
-            <button type="button" className="btn btn-ghost" onClick={() => setConfirmClear(true)}>
+            <button ref={clearOpen} type="button" className="btn btn-ghost" onClick={() => setConfirmClear(true)}>
               Clear the page
             </button>
           )

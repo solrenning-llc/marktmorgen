@@ -100,13 +100,14 @@ part("A checkout box, and why it is not being shown");
   is("buyers name the price on the offered product", why([front, item("addon", 9_700, { pwyw: { suggestedCents: 9_700 } })], front), "targetPwyw");
   is("a limited number of the offered product", why([front, item("addon", 9_700, { stock: 20 })], front), "targetLimited");
   is("nothing behind the offered product", why([front, item("addon", 9_700, { file: null })], front), "targetEmpty");
+  is("the offered product is a draft (MM-SA-33)", why([front, item("addon", 9_700, { hidden: true })], front), "targetDraft");
   is("this product charged monthly", why(all, item("front", 700, { bumps: [box("addon", 2_900)], recurring: { interval: "month", trialDays: 0, payments: 0 } })), "kind");
   is("buyers name the price here", why(all, item("front", 700, { bumps: [box("addon", 2_900)], pwyw: { suggestedCents: 700 } })), "pwyw");
   is("no box set up at all", why(all, item("front", 700)), "none");
 
   // Every reason has a sentence, and none of them is empty or a placeholder.
   const every: BumpPause[] = [
-    "kind", "pwyw", "gone", "itself", "targetFree", "targetRecurring", "targetCall",
+    "kind", "pwyw", "gone", "itself", "targetDraft", "targetFree", "targetRecurring", "targetCall",
     "targetOptions", "targetPwyw", "targetLimited", "targetEmpty", "dearer",
   ];
   is(

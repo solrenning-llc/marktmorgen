@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "@/components/toast";
-import { STUDIO_MESSAGES } from "@/lib/studio-messages";
+import { STUDIO_MESSAGES, SESSION_ENDED } from "@/lib/studio-messages";
 import { NewTab } from "@/components/new-tab";
 
 type DnsRecord = { type: "A" | "CNAME" | "TXT"; name: string; value: string; why: string };
@@ -19,7 +19,7 @@ const MESSAGES: Record<string, string> = {
   unavailable: "Domains are not answering just now. Nothing was changed; try again in a moment.",
   unfinished: "Your store no longer opens on this domain, but removing it did not finish. Try removing it again in a moment.",
   none: "There is no domain on your store yet.",
-  signed_out: "Your session ended. Log in again.",
+  signed_out: SESSION_ENDED,
   server_error: "Something went wrong on our side. Try again in a moment.",
 };
 

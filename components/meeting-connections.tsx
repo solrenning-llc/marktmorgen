@@ -7,7 +7,7 @@ import { Icon } from "@/components/icons";
 import { MEET_ACCESS_UNCONFIRMED, type MeetProvider } from "@/lib/call-setup";
 import type { MeetView } from "@/lib/meet-connect";
 import type { TestMeeting } from "@/lib/meet-test";
-import { STUDIO_MESSAGES } from "@/lib/studio-messages";
+import { STUDIO_MESSAGES, SESSION_ENDED } from "@/lib/studio-messages";
 import { NewTab } from "@/components/new-tab";
 
 /** Each account as the studio describes it: what it makes, and what connecting it lets us do. */
@@ -41,7 +41,7 @@ const ACCOUNTS: Record<
 
 const MESSAGES: Record<string, string> = {
   ...STUDIO_MESSAGES,
-  signed_out: "Your session ended. Log in again.",
+  signed_out: SESSION_ENDED,
   role: "Only the store's owner and Admins can do that.",
   limited: "That is too many changes in a minute. Wait a moment and try again.",
   server_error: "Something went wrong on our side. Nothing was changed; try again in a moment.",

@@ -9,7 +9,7 @@ import { useStudioHref } from "@/components/studio-store-pin";
 import { type Currency, fieldPrefix, formatMoney, priceExample, readMoney } from "@/lib/money";
 import { MAX_BUNDLE_ITEMS, MIN_BUNDLE_ITEMS, MIN_PICK } from "@/lib/bundle-rules";
 import { MAX_SUMMARY_LENGTH, MAX_TITLE_LENGTH } from "@/lib/catalog";
-import { STUDIO_MESSAGES } from "@/lib/studio-messages";
+import { STUDIO_MESSAGES, SESSION_ENDED } from "@/lib/studio-messages";
 import { SaidLine, useSaid } from "@/components/said-line";
 import { endWords, movedWords } from "@/lib/move-words";
 
@@ -45,7 +45,7 @@ const MESSAGES: Record<string, string> = {
   too_many: "Your store is full. Remove a product to make room for the bundle.",
   store_full: "Your store is full. Remove a product to make room for the bundle.",
   slow: "That was a lot of searching in a short time. Wait a minute and try again.",
-  signed_out: "Your session ended. Log in again.",
+  signed_out: SESSION_ENDED,
   role: "Your role on this store does not change products.",
   unavailable: "Stores are not switched on yet, so nothing was saved.",
   server_error: "Something went wrong on our side. Try again in a moment.",

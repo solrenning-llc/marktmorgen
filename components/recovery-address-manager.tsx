@@ -1,5 +1,6 @@
 "use client";
 
+import { SESSION_ENDED } from "@/lib/studio-messages";
 import { useRef, useState } from "react";
 import { EmailInput } from "@/components/email-input";
 import Link from "next/link";
@@ -17,7 +18,7 @@ const MESSAGES: Record<string, string> = {
   reauth: "This needs a login from the last 15 minutes. Log in again, then come back here.",
   second_step: "Your account has a passkey or two-step login, so changing the recovery address needs a login with one of them. Log in again with your passkey or your app's code, then come back here.",
   rate_limited: "That is a lot of changes in an hour. Try again later.",
-  signed_out: "Your session ended. Log in again.",
+  signed_out: SESSION_ENDED,
   server_error: "Something went wrong on our side. Try again in a moment.",
 };
 

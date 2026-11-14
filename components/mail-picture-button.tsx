@@ -1,5 +1,6 @@
 "use client";
 
+import { SESSION_ENDED } from "@/lib/studio-messages";
 import { useLayoutEffect, useRef, useState } from "react";
 import { shrink } from "@/components/shrink-image";
 import { IMAGE_ACCEPT, MAX_SOURCE_BYTES } from "@/lib/product-image";
@@ -13,7 +14,7 @@ const PROBLEMS: Record<string, string> = {
   changed: "The email changed while the picture was being added. Your current text was kept. Add the picture again to insert it into this version.",
   big: `That file is too large to start from. Choose one under ${Math.round(MAX_SOURCE_BYTES / 1024 / 1024)} MB.`,
   slow: "That is a lot of pictures in an hour. Wait a little and try again.",
-  signed_out: "Your session ended. Log in again.",
+  signed_out: SESSION_ENDED,
   forbidden: "Your role on this store cannot write emails.",
   server_error: "The picture could not be kept just now. Try again in a moment.",
 };

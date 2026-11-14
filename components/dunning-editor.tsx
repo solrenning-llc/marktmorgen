@@ -5,13 +5,13 @@ import { useRouter } from "next/navigation";
 import { Icon } from "@/components/icons";
 import { toast } from "@/components/toast";
 import { CARD_NOTICE_DAYS, type Dunning, REMINDER_CHOICES, REMINDER_DAYS, type ReminderCount } from "@/lib/dunning-rules";
-import { STUDIO_MESSAGES } from "@/lib/studio-messages";
+import { STUDIO_MESSAGES, SESSION_ENDED } from "@/lib/studio-messages";
 
 const MESSAGES: Record<string, string> = {
   ...STUDIO_MESSAGES,
   dunning: "Pick one, two or three emails.",
   none: "This account has no store yet.",
-  signed_out: "Your session ended. Log in again.",
+  signed_out: SESSION_ENDED,
   server_error: "We could not confirm these reminder settings. Reload this page to check before trying again.",
 };
 

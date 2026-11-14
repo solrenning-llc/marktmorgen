@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { toast } from "@/components/toast";
-import { STUDIO_MESSAGES } from "@/lib/studio-messages";
+import { STUDIO_MESSAGES, SESSION_ENDED } from "@/lib/studio-messages";
 
 const UNCERTAIN = "Sending could not be confirmed. Check with the buyer before trying again.";
 
@@ -14,7 +14,7 @@ const MESSAGES: Record<string, string> = {
   limited: "That is the most for now: a sale's email can be sent again 3 times a day, and a store's 30 times an hour. Try again later, or write to the buyer yourself.",
   failed: "The email service did not take it just now. Try again in a moment.",
   role: "Your role on this store does not include this.",
-  signed_out: "Your session ended. Log in again.",
+  signed_out: SESSION_ENDED,
   server_error: "Stripe or the email service did not answer. Try again in a moment.",
 };
 

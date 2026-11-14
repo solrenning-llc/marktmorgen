@@ -5,7 +5,7 @@ import Link from "next/link";
 import { toast } from "@/components/toast";
 import { AiAssist, AiOn } from "@/components/ai-assist";
 import { MAX_FEEDBACK, type Submission } from "@/lib/assignment-rules";
-import { STUDIO_MESSAGES } from "@/lib/studio-messages";
+import { STUDIO_MESSAGES, SESSION_ENDED } from "@/lib/studio-messages";
 
 export type StudioWork = {
   lessonId: string;
@@ -31,7 +31,7 @@ const ERRORS: Record<string, string> = {
   feedback: "Write what to change before asking for another try, so the student knows what to do.",
   reviewed: "This work was already answered, or handed in again since. Reload the page to see it as it is now.",
   gone: "This work is no longer there: the assignment or the lesson was removed. Reload the page.",
-  signed_out: "Your session ended. Log in again.",
+  signed_out: SESSION_ENDED,
 };
 
 /** One piece of work: what was handed in, and the answer to it. */

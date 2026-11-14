@@ -58,8 +58,10 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (method === "POST" && path === "/invoices/in_Year00000001") return json({ id: "in_Year00000001" });
   if (method === "POST" && path === "/subscriptions/sub_Year00000001") {
     if (outcome === "timeout") throw new TypeError("fetch failed");
-    if (outcome === "declined") return json({ id: "sub_Year00000001", pending_update: { expires_at: 1 }, latest_invoice: { id: "in_Month0000001", status: "open" } });
-    return json({ id: "sub_Year00000001", pending_update: null, latest_invoice: { id: "in_Month0000001", status: "paid", amount_paid: 2000, currency: "usd" } });
+    // The reply carries what the move wrote, as Stripe does (rule 30, #3107): in pending_update while it waits, merged once it applies.
+    const written = { every: body.get("metadata[every]"), monthly_from: body.get("metadata[monthly_from]"), monthly_replaced: body.get("metadata[monthly_replaced]") };
+    if (outcome === "declined") return json({ id: "sub_Year00000001", pending_update: { expires_at: 1, metadata: written }, latest_invoice: { id: "in_Month0000001", status: "open" } });
+    return json({ id: "sub_Year00000001", metadata: written, pending_update: null, latest_invoice: { id: "in_Month0000001", status: "paid", amount_paid: 2000, currency: "usd" } });
   }
   if (method === "POST" && path === "/invoices/in_Month0000001/void") return json({ id: "in_Month0000001", status: "void" });
   if (method === "POST" && path === "/invoices/in_Year00000001/void") {

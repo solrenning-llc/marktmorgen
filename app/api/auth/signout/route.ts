@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 import { originFrom } from "@/lib/request-origin";
 import { SESSION_COOKIE, endSession } from "@/lib/auth";
 import { fromAnotherSite } from "@/lib/request-guard";
+import { clearedSessionCookies } from "@/lib/session-cookie";
 
 /** Closes the session here and in the browser. */
 export async function POST(request: NextRequest) {
@@ -17,11 +18,7 @@ export async function POST(request: NextRequest) {
     status: 303,
     headers: { Location: `${originFrom(request)}/signin?status=${ended ? "out" : "out-unknown&to=login"}` },
   });
-  response.headers.append(
-    "Set-Cookie",
-    `${SESSION_COOKIE}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax${
-      process.env.NODE_ENV === "production" ? "; Secure" : ""
-    }`,
-  );
+  // Both names the session may be under (lib/session-cookie.ts).
+  for (const cleared of clearedSessionCookies(process.env.NODE_ENV === "production")) response.headers.append("Set-Cookie", cleared);
   return response;
 }

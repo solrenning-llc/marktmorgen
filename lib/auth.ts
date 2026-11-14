@@ -59,10 +59,12 @@ import { deleteIfHeldOnly } from "@/lib/redis-lock";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isHouseAddress } from "@/lib/house-store";
 import { withPrefill } from "@/lib/handle-prefill";
+import { writtenSessionCookie } from "@/lib/session-cookie";
 
 export const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export const MAX_EMAIL_LENGTH = 254;
-export const SESSION_COOKIE = "nl_session";
+// The name the code reads the session under; written as __Host-nl_session over https (lib/session-cookie.ts).
+export { SESSION_COOKIE } from "@/lib/session-cookie";
 
 const LINK_TTL_SECONDS = 15 * 60;
 export const SESSION_TTL_SECONDS = 30 * 24 * 60 * 60;
@@ -875,19 +877,9 @@ export const SESSION_COOKIE_OPTIONS = {
   maxAge: SESSION_TTL_SECONDS,
 };
 
-/** A session cookie, as every way of signing in sets it. */
-export function sessionCookie(id: string): string {
-  const options = SESSION_COOKIE_OPTIONS;
-  return [
-    `${SESSION_COOKIE}=${id}`,
-    `Path=${options.path}`,
-    `Max-Age=${options.maxAge}`,
-    "HttpOnly",
-    "SameSite=Lax",
-    options.secure ? "Secure" : "",
-  ]
-    .filter(Boolean)
-    .join("; ");
+/** A session cookie, as every way of signing in sets it: __Host-nl_session over https (lib/session-cookie.ts). */
+export function sessionCookie(id: string, secure = SESSION_COOKIE_OPTIONS.secure): string {
+  return writtenSessionCookie(id, secure, SESSION_COOKIE_OPTIONS.maxAge);
 }
 
 export const DEVICE_COOKIE = "nl_device";

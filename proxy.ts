@@ -11,6 +11,7 @@ import { CODE_COOKIE_SECONDS, codeCookieName, readLinkCode } from "@/lib/code-li
 import { AB_COOKIE, AB_COOKIE_SECONDS, readBucket } from "@/lib/headline-test-rules";
 import { CHANNEL_COOKIE_SECONDS, channelCookieName, nextChannelCookie, touchFrom } from "@/lib/visit-channel";
 import { isOwnPagePath } from "@/lib/site-page-rules";
+import { carrySessionCookie } from "@/lib/session-cookie";
 
 /**
  * A creator's own domain, served as their store.
@@ -204,9 +205,11 @@ const CROSS_SITE_POSTS = new Set(["/api/mail/unsubscribe"]);
  * of ours, does — is refused too, so a route's own ceiling always has a
  * number to check.
  */
-function guardApi(request: NextRequest): NextResponse {
+function guardApi(request: NextRequest, forward: Headers | null): NextResponse {
+  // The session handed to the route under the name it reads (lib/session-cookie.ts, carrySessionCookie).
+  const onward = () => (forward ? NextResponse.next({ request: { headers: forward } }) : NextResponse.next());
   const method = request.method.toUpperCase();
-  if (method === "GET" || method === "HEAD" || method === "OPTIONS") return NextResponse.next();
+  if (method === "GET" || method === "HEAD" || method === "OPTIONS") return onward();
   if (fromAnotherSite(request) && !CROSS_SITE_POSTS.has(request.nextUrl.pathname)) {
     return NextResponse.json({ ok: false, error: "forbidden" }, { status: 403 });
   }
@@ -217,7 +220,7 @@ function guardApi(request: NextRequest): NextResponse {
   if (Number(length ?? "0") > MAX_API_BODY_BYTES) {
     return NextResponse.json({ ok: false, error: "too_large" }, { status: 413 });
   }
-  return NextResponse.next();
+  return onward();
 }
 
 /**
@@ -259,10 +262,26 @@ function handleInPath(pathname: string): string {
   }
 }
 
+/**
+ * The studio session moved to __Host-nl_session (lib/session-cookie.ts): every request is handed on with the
+ * session under the name the code reads, and a page's answer swaps an old cookie for the new one. Never an API's:
+ * a sign-in or a sign-out sets the session itself, and a second cookie of the same name could undo it.
+ */
 export async function proxy(request: NextRequest) {
-  const host = requestHost(request);
+  const carried = carrySessionCookie(request.headers.get("cookie"), request.nextUrl.protocol === "https:");
+  let forward: Headers | null = null;
+  if (carried.headers) {
+    forward = new Headers(request.headers);
+    forward.set("cookie", carried.headers.get("cookie") ?? "");
+  }
+  if (request.nextUrl.pathname.startsWith("/api/")) return guardApi(request, forward);
+  const response = await routed(request, forward);
+  for (const cookie of carried.setCookies) response.headers.append("Set-Cookie", cookie);
+  return response;
+}
 
-  if (request.nextUrl.pathname.startsWith("/api/")) return guardApi(request);
+async function routed(request: NextRequest, forward: Headers | null) {
+  const host = requestHost(request);
 
   if (isPlatformHost(host)) {
     // The site's own map and rules: nothing of a store's to add to them.
@@ -276,7 +295,7 @@ export async function proxy(request: NextRequest) {
     const params = request.nextUrl.searchParams;
     const store = params.has("via") || params.has("code") ? handleInPath(request.nextUrl.pathname) : "";
     // The header is ours to set; one sent by a visitor is dropped.
-    const headers = new Headers(request.headers);
+    const headers = new Headers(forward ?? request.headers);
     headers.delete(DOMAIN_HEADER);
     headers.delete(PATH_HEADER);
     headers.delete(STORE_HEADER);
@@ -291,7 +310,7 @@ export async function proxy(request: NextRequest) {
   const handle = await handleForDomain(host).catch(() => null);
   if (!handle) return NextResponse.redirect(`${SITE_URL}${pathname}${search}`, 307);
 
-  const headers = new Headers(request.headers);
+  const headers = new Headers(forward ?? request.headers);
   headers.set(DOMAIN_HEADER, host);
   headers.set(PATH_HEADER, `${pathname}${search}`.slice(0, 2_000));
   headers.set(STORE_HEADER, handle);

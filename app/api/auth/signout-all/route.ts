@@ -7,6 +7,7 @@ import {
 } from "@/lib/auth";
 import { fromAnotherSite } from "@/lib/request-guard";
 import { lockedUntil } from "@/lib/two-step";
+import { clearedSessionCookies } from "@/lib/session-cookie";
 
 /**
  * Closes every session this creator has open, on every device.
@@ -40,11 +41,7 @@ export async function POST(request: NextRequest) {
     status: 303,
     headers: { Location: `${originFrom(request)}/signin?status=${ended === null ? "out-everywhere-unknown" : "out-everywhere"}` },
   });
-  response.headers.append(
-    "Set-Cookie",
-    `${SESSION_COOKIE}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax${
-      process.env.NODE_ENV === "production" ? "; Secure" : ""
-    }`,
-  );
+  // Both names the session may be under (lib/session-cookie.ts).
+  for (const cleared of clearedSessionCookies(process.env.NODE_ENV === "production")) response.headers.append("Set-Cookie", cleared);
   return response;
 }

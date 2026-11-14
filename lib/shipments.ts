@@ -95,6 +95,25 @@ async function markNeverActivated(store: Store, session: string, row: Record<str
   return { ok: true, shipped, emailed, mail: { state: emailed ? "accepted" : "not_recorded", delayed: false } };
 }
 
+/** A known mail refusal must not prevent recording physical fulfillment. */
+async function markWithoutQueuedMail(session: string, shipped: Shipped): Promise<MarkResult> {
+  let receipt: unknown;
+  try { receipt = await redisPipeline([["SET", doneKey(session), JSON.stringify(shipped), "NX", "EX", KEEP_SECONDS]]); }
+  catch { return { ok: false, reason: "unknown" }; }
+  if (!Array.isArray(receipt) || receipt.length !== 1) return { ok: false, reason: "unknown" };
+  if (receipt[0] === null) {
+    try {
+      const kept = (await readShipped([session])).get(session);
+      // This caller did not win the immutable mark and has no new evidence
+      // about the winner's email. Leave that detail for its status reader.
+      return kept ? { ok: true, shipped: kept, emailed: false } : { ok: false, reason: "unknown" };
+    } catch { return { ok: false, reason: "unknown" }; }
+  }
+  return receipt[0] === "OK"
+    ? { ok: true, shipped, emailed: false, mail: { state: "not_recorded", delayed: false } }
+    : { ok: false, reason: "unknown" };
+}
+
 /** Marks a shipped order as sent and tells its buyer, once. */
 export async function markShipped(store: Store, session: string, rawTracking: unknown, nowSeconds = Math.floor(Date.now() / 1000), runtime: ShipmentMailRuntime = {}): Promise<MarkResult> {
   const lifecycle = runtime.lifecycle ?? CURRENT_SHIPMENT_MAIL_LIFECYCLE;
@@ -122,15 +141,9 @@ export async function markShipped(store: Store, session: string, rawTracking: un
   } catch { return { ok: false, reason: "unknown" }; }
   if (lifecycle !== "active" || !shipmentMailPolicy(runtime.policy === undefined ? CURRENT_SHIPMENT_MAIL_POLICY : runtime.policy, (runtime.now ?? Date.now)())) return { ok: false, reason: "mail_unavailable" };
   const email = (row.customer_details as { email?: unknown } | null | undefined)?.email;
-  if (typeof email !== "string" || !oneAddress(email)) {
-    let receipt: unknown;
-    try { receipt = await redisPipeline([["SET", doneKey(session), JSON.stringify(shipped), "NX", "EX", KEEP_SECONDS]]); }
-    catch { return { ok: false, reason: "unknown" }; }
-    if (!Array.isArray(receipt) || receipt.length !== 1 || receipt[0] !== "OK") return { ok: false, reason: "unknown" };
-    return { ok: true, shipped, emailed: false, mail: { state: "not_recorded", delayed: false } };
-  }
+  if (typeof email !== "string" || !oneAddress(email)) return markWithoutQueuedMail(session, shipped);
   const queued = await enqueueShipmentMail({ statsId: store.statsId, session, authorizedAt, shipped, message: shipmentMessage(store, row, tracking, email) }, runtime);
-  if (!queued.ok) return { ok: false, reason: queued.reason === "full" ? "mail_unavailable" : "unknown" };
+  if (!queued.ok) return queued.reason === "full" ? markWithoutQueuedMail(session, shipped) : { ok: false, reason: "unknown" };
   // A simultaneous creator may have won with different tracking. Return the
   // actual immutable shipment, never this losing caller's proposed values.
   let kept: Shipped | undefined;

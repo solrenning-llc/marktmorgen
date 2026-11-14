@@ -441,7 +441,8 @@ export function queuedShipmentMailSender(runtime: ResendTransportRuntime = {}): 
           ...(oneAddress(message.replyTo) ? { reply_to: oneAddress(message.replyTo) } : {}) }),
         idempotencyKey: `shipment:${context.id}`, recipients: 1, beforePost,
       }, runtime);
-      if (result.kind === "accepted_receipt") return await beforePost() === true ? "accepted" : "unknown";
+      // A receipt proves an earlier POST: its re-check never restores custody.
+      if (result.kind === "accepted_receipt") return await beforePost({ afterPost: true }) === true ? "accepted" : "unknown";
       if (result.kind === "blocked") return "waiting";
       if (result.kind !== "response") return "unknown";
       if (result.response.ok) { await countSent(1); return "accepted"; }

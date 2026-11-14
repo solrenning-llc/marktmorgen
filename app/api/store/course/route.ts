@@ -37,7 +37,7 @@ import { readTask } from "@/lib/assignment-rules";
 import { tellStudentOfReview } from "@/lib/assignment-notify";
 import { EMAIL_PATTERN } from "@/lib/auth";
 import { dropQuiz, readQuiz, readQuizFor, resetTries, saveQuiz, setupOf } from "@/lib/quiz";
-import { CERT_ID_PATTERN, withdrawCertificate } from "@/lib/certificate";
+import { CERT_ID_PATTERN, courseIndexes, withdrawCertificate } from "@/lib/certificate";
 import { hasProduct, readListing } from "@/lib/catalog";
 import { communityOf, courseChanged, unindexCourse } from "@/lib/community-index";
 import { LockBusyError, withLock } from "@/lib/redis-lock";
@@ -248,14 +248,14 @@ export async function POST(request: NextRequest) {
         // Noted as dropped before the product lets go of it (lib/removed-courses.ts), so its learners' records stay
         // reachable by their erasure; a full list or a note not confirmed keeps the course.
         try {
-          const noted = await noteRemovedCourse(store.statsId, { productId: product.id, courseId: course.id, lessonIds: [], moduleIds: course.modules.map((m) => m.id) });
+          const noted = await noteRemovedCourse(store.statsId, { productId: product.id, courseId: course.id, lessonIds: [], moduleIds: course.modules.map((m) => m.id) }, store, courseIndexes);
           if (noted !== "noted") return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
         } catch {
           return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
         }
         const result = await setProductCourse(ref, id, null);
         if (!result.ok) return Response.json({ ok: false, error: result.reason }, { status: 400 });
-        await dropCourse(course, store, product.id);
+        await dropCourse(course, store, product.id, courseIndexes);
         if (community) await unindexCourse(community, product.id, course).catch(() => {});
         await registerDrip(store, product, { ...course, modules: [] });
         return Response.json({ ok: true });

@@ -13,7 +13,7 @@
  *
  * Pure rules at the top, storage at the bottom.
  */
-import { noteRemovedCourse } from "@/lib/removed-courses";
+import { type CourseIndexes, noteRemovedCourse } from "@/lib/removed-courses";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { readShelf } from "@/lib/course-shelf-rules";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
@@ -731,13 +731,13 @@ export async function saveBody(courseId: string, lessonId: string, text: string,
  * as dropped first, with its lessons and modules (lib/removed-courses.ts), so a person's records kept under it are
  * still reached by their erasure; a note that is not confirmed, or a full list, throws and deletes nothing.
  */
-export async function dropCourse(course: Course, room: DataStore, productId = ""): Promise<void> {
+export async function dropCourse(course: Course, room: DataStore, productId = "", indexes?: CourseIndexes): Promise<void> {
   const noted = await noteRemovedCourse(room.statsId, {
     productId,
     courseId: course.id,
     lessonIds: lessonsInOrder(course).map(({ lesson }) => lesson.id),
     moduleIds: course.modules.map((m) => m.id),
-  });
+  }, room, indexes);
   if (noted !== "noted") throw new Error("the store's list of dropped courses is full");
   const keys = [courseKey(course.id), ...lessonsInOrder(course).map(({ lesson }) => bodyKey(course.id, lesson.id))];
   await redisPipeline(keys.map((key) => ["DEL", key]));

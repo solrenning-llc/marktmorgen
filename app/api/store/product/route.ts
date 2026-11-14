@@ -1,5 +1,6 @@
 import { applyCourseTaskDrops, readCourseTaskDrops } from "@/lib/assignment";
 import { noteRemovedCourse } from "@/lib/removed-courses";
+import { courseIndexes } from "@/lib/certificate";
 import { handsOver, takesLastDelivery } from "@/lib/product-option";
 import { storeKey } from "@/lib/learn";
 import { imagePaths } from "@/lib/product-image";
@@ -322,7 +323,7 @@ export async function POST(request: NextRequest) {
             course = found;
             // Noted as dropped before anything goes (lib/removed-courses.ts), so its learners' records stay reachable
             // by their erasure; a list that is full or a note not confirmed keeps the product.
-            if ((await noteRemovedCourse(store.statsId, { productId: going.id, courseId: found.id, lessonIds: lessonsInOrder(found).map(({ lesson }) => lesson.id), moduleIds: found.modules.map((m) => m.id) })) !== "noted") return false;
+            if ((await noteRemovedCourse(store.statsId, { productId: going.id, courseId: found.id, lessonIds: lessonsInOrder(found).map(({ lesson }) => lesson.id), moduleIds: found.modules.map((m) => m.id) }, store, courseIndexes)) !== "noted") return false;
             await dropComments(found.id, lessonsInOrder(found).map(({ lesson }) => lesson.id), store);
           } else {
             if (preparedCourse) return false;
@@ -381,7 +382,7 @@ export async function POST(request: NextRequest) {
         });
         had.push(...reviewPhotos.map((pathname) => ({ pathname })));
         if (removedCourse) {
-          await dropCourse(removedCourse, removed.store, id).catch((error: unknown) => console.error("could not drop a removed course", error));
+          await dropCourse(removedCourse, removed.store, id, courseIndexes).catch((error: unknown) => console.error("could not drop a removed course", error));
         }
         for (const file of had) {
           // A lesson video the video service keeps is taken away there (lib/stream.ts).

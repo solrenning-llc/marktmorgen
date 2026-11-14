@@ -5,13 +5,20 @@ export type PendingPayoutBatch = {
   /** `r`: the SHA-256 (hex) of the PayPal address the line was sent to, never the address itself (lib/paypal-payouts.ts). */
   lines: { a: string; c: number; r?: string }[];
   /** An HMAC (hex) of the PayPal app (Client ID) the batch was sent from (lib/paypal-payouts.ts); absent on older batches. */
-  s?: string;
+  p?: string;
   /** A batch whose answer was not known (lib/paypal-payouts.ts): when it was last sent again, ms. */
   t?: number;
   /** 1: it could not be confirmed with PayPal and needs the creator's own check; it is not sent again. */
   m?: 1;
+  /**
+   * A batch held under PayPal's id: the sender_batch_id it was sent under, so a "?" entry of that same request left
+   * behind (its removal not confirmed) is known to be this batch and never sent to PayPal again.
+   */
+  s?: string;
 };
 
+/** PayPal's sender_batch_id: at most 127 characters, printable ASCII, no space (lib/paypal-payouts.ts writes "nl-..."). */
+const SENDER_BATCH_ID = /^[\x21-\x7e]{1,127}$/;
 const unavailable = (): never => { throw new Error("Pending payout records are unavailable"); };
 const record = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value) &&
@@ -51,12 +58,14 @@ export function readPendingPayoutBatches(results: unknown): Map<string, PendingP
     // The two marks of a batch whose answer was not known, each only in its own shape.
     if (value.t !== undefined && (!Number.isSafeInteger(value.t) || (value.t as number) < 0)) return unavailable();
     if (value.m !== undefined && value.m !== 1) return unavailable();
-    if (value.s !== undefined && (typeof value.s !== "string" || !/^[0-9a-f]{64}$/.test(value.s))) return unavailable();
+    if (value.s !== undefined && (typeof value.s !== "string" || !SENDER_BATCH_ID.test(value.s))) return unavailable();
+    if (value.p !== undefined && (typeof value.p !== "string" || !/^[0-9a-f]{64}$/.test(value.p))) return unavailable();
     out.set(id, {
       at: value.at as number, currency: value.currency, lines,
       ...(value.t !== undefined ? { t: value.t as number } : {}),
       ...(value.m === 1 ? { m: 1 as const } : {}),
       ...(typeof value.s === "string" ? { s: value.s } : {}),
+      ...(typeof value.p === "string" ? { p: value.p } : {}),
     });
   }
   return out;

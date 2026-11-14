@@ -8,7 +8,7 @@
  * merchant, and nothing says it holds across two, so B could pay everyone a
  * second time. Money that may have left counts as sent (rule 30): the batch
  * stays on its way, left for the creator's own check. A batch from before
- * the sender was kept (no `s`) is held the same way. The same app still gets
+ * the sender was kept (no `p`) is held the same way. The same app still gets
  * its retry, as before.
  *
  * Synthetic only: a stand-in for PayPal that gives each app its own token
@@ -131,7 +131,7 @@ async function main(): Promise<void> {
   const [raw] = await redis.pipeline([["HKEYS", OPEN]]);
   const field = (raw as string[]).find((f) => f.startsWith("?")) as string;
   const legacy = { ...entry };
-  delete legacy.s;
+  delete legacy.p;
   await redis.pipeline([["HSET", OPEN, field, JSON.stringify(legacy)]]);
   mode = "make";
   await settlePayPal(store);

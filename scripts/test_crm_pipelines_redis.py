@@ -50,32 +50,46 @@ class Redis:
         raise RuntimeError("Unsupported Redis reply")
 
 
-def main():
-    if os.environ.get("MARKTMORGEN_REDIS_INTEGRATION") != "1":
-        raise RuntimeError("Run only against the dedicated CI Redis on loopback port 16379")
+def scripts():
     root = Path(__file__).resolve().parents[1]
     source = (root / "lib/crm.ts").read_text(encoding="utf-8")
-    match = re.search(r"export const SAVE_CRM_PIPELINES = `([^`]+)`;", source)
-    if not match or "${" in match.group(1):
-        raise RuntimeError("Expected one static CRM pipelines script")
-    script = match.group(1)
+    found = {}
+    for name in ("SAVE_CRM_PIPELINES", "COMPARE_AND_SET"):
+        match = re.search(r"export const " + name + r" = `([^`]+)`;", source)
+        if not match or "${" in match.group(1):
+            raise RuntimeError("Expected one static script " + name)
+        found[name] = match.group(1)
+    return found
+
+
+def main():
+    """SAVE_CRM_PIPELINES v3 (lib/crm.ts, writePipelines): KEYS are the pipelines and the CRM lock; ARGV are the
+    snapshot, the new record and the lock's token. COMPARE_AND_SET (crm-pipelines-save:v2) is the plain one-key
+    compare-and-set lib/webhooks.ts and lib/phone-alerts.ts use."""
+    if os.environ.get("MARKTMORGEN_REDIS_INTEGRATION") != "1":
+        raise RuntimeError("Run only against the dedicated CI Redis on loopback port 16379")
+    found = scripts()
+    script, plain = found["SAVE_CRM_PIPELINES"], found["COMPARE_AND_SET"]
     prefix = "marktmorgen:integration:crm-pipelines:" + uuid.uuid4().hex + ":"
-    keys = [prefix + suffix for suffix in ("first", "race", "stale", "wrongtype")]
+    keys = [prefix + suffix for suffix in ("first", "race", "stale", "wrongtype", "lock", "lost", "plain")]
+    lock = keys[4]
+    token = "token-" + uuid.uuid4().hex
     redis = Redis()
     try:
         assert redis.command("PING") == "PONG"
+        assert redis.command("SET", lock, token) == "OK"
         # A store that never saved pipelines: the snapshot is the empty string.
-        assert redis.command("EVAL", script, 1, keys[0], "", "pipelines-v1") == 1
+        assert redis.command("EVAL", script, 2, keys[0], lock, "", "pipelines-v1", token) == 1
         assert redis.command("GET", keys[0]) == "pipelines-v1"
-        # A refusal answers -1 and the size of the record kept (crm-pipelines-save:v2), so the data room is sized in one step.
-        assert redis.command("EVAL", script, 1, keys[0], "", "pipelines-again") == [-1, len("pipelines-v1")]
+        # A refusal answers -1 and the size of the record kept, so the data room is sized in one step.
+        assert redis.command("EVAL", script, 2, keys[0], lock, "", "pipelines-again", token) == [-1, len("pipelines-v1")]
         assert redis.command("GET", keys[0]) == "pipelines-v1"
         print("PASS: the first save needs an absent record, and a second first save is refused")
         redis.command("SET", keys[1], "snapshot")
         def save(index):
             client = Redis()
             try:
-                return client.command("EVAL", script, 1, keys[1], "snapshot", "writer-" + str(index))
+                return client.command("EVAL", script, 2, keys[1], lock, "snapshot", "writer-" + str(index), token)
             finally:
                 client.close()
         with concurrent.futures.ThreadPoolExecutor(max_workers=16) as pool:
@@ -86,20 +100,36 @@ def main():
         assert winner.startswith("writer-")
         print("PASS: 64 concurrent saves over one snapshot: exactly one is written")
         redis.command("SET", keys[2], "edited-by-another-session")
-        assert redis.command("EVAL", script, 1, keys[2], "stale-snapshot", "stale-write") == [-1, len("edited-by-another-session")]
+        assert redis.command("EVAL", script, 2, keys[2], lock, "stale-snapshot", "stale-write", token) == [-1, len("edited-by-another-session")]
         assert redis.command("GET", keys[2]) == "edited-by-another-session"
-        assert redis.command("EVAL", script, 1, keys[2], "edited-by-another-session", "fresh-write") == 1
+        assert redis.command("EVAL", script, 2, keys[2], lock, "edited-by-another-session", "fresh-write", token) == 1
         assert redis.command("GET", keys[2]) == "fresh-write"
         print("PASS: a stale snapshot preserves the concurrent change; a fresh one saves")
         redis.command("HSET", keys[3], "field", "value")
         try:
-            redis.command("EVAL", script, 1, keys[3], "", "not-saved")
+            redis.command("EVAL", script, 2, keys[3], lock, "", "not-saved", token)
         except RuntimeError as error:
             assert "WRONGTYPE" in str(error)
         else:
             raise AssertionError("Wrong-type storage must refuse the script")
         assert redis.command("HGET", keys[3], "field") == "value"
         print("PASS: wrong-type storage is preserved and refuses the save")
+        # The lock no longer this change's own (run out, or another holder's): -2, nothing written, with or without a record.
+        assert redis.command("EVAL", script, 2, keys[5], lock, "", "lost-write", "another-token") == [-2]
+        assert redis.command("EXISTS", keys[5]) == 0
+        redis.command("SET", keys[5], "kept")
+        assert redis.command("EVAL", script, 2, keys[5], lock, "kept", "lost-write", "another-token") == [-2, len("kept")]
+        assert redis.command("GET", keys[5]) == "kept"
+        redis.command("DEL", lock)
+        assert redis.command("EVAL", script, 2, keys[5], lock, "kept", "lost-write", token) == [-2, len("kept")]
+        assert redis.command("GET", keys[5]) == "kept"
+        print("PASS: a save whose lock is no longer its own writes nothing, with or without a record")
+        # The plain compare-and-set (webhooks, phone alerts): one key, the text read and the new one.
+        assert redis.command("EVAL", plain, 1, keys[6], "", "first") == 1
+        assert redis.command("EVAL", plain, 1, keys[6], "", "again") == [-1, len("first")]
+        assert redis.command("EVAL", plain, 1, keys[6], "first", "second") == 1
+        assert redis.command("GET", keys[6]) == "second"
+        print("PASS: the plain one-key compare-and-set writes only over the text read")
     finally:
         assert all(key.startswith(prefix) for key in keys)
         redis.command("DEL", *keys)

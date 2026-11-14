@@ -15,6 +15,7 @@
  *   nl:cm:<id>:c:<post>       the comments under one post (hash)
  *   nl:cm:<id>:l:<post>       who liked one post (set of member keys)
  *   nl:cm:<id>:lc:<post>:<c>  who liked one comment (set of member keys)
+ *   nl:cm:<id>:likelock:<post>[:<c>]:<member>  held while one member's press on one like runs (pressLike)
  *   nl:cm:<id>:m              everyone who has come in: key -> Member (hash)
  *   nl:cm:<id>:dir            those who chose to be listed, by joining time
  *   nl:cm:<id>:rep            reported posts and comments, newest first
@@ -77,6 +78,8 @@ import { MAX_ALT_LENGTH } from "@/lib/product-image";
 import { indexBytes, indexPost, partsOf, unindexPost } from "@/lib/community-search";
 import { TRACED_SINCE, TRACE_ENTRY, traceKey } from "@/lib/community-trace";
 import { type DataStore, needData, giveData } from "@/lib/store-data";
+import { withLock } from "@/lib/redis-lock";
+import { award } from "@/lib/community-points";
 import { dataBytes } from "@/lib/store-data-rules";
 import { indexMember } from "@/lib/community-index";
 import { type Poll, parsePoll, pollKeys } from "@/lib/community-polls";
@@ -217,6 +220,7 @@ const spaceKey = (id: string, space: string) => `${base(id)}:sp:${space}`;
 const commentsKey = (id: string, post: string) => `${base(id)}:c:${post}`;
 const likesKey = (id: string, post: string) => `${base(id)}:l:${post}`;
 const commentLikesKey = (id: string, post: string, comment: string) => `${base(id)}:lc:${post}:${comment}`;
+const likeLockKey = (id: string, post: string, comment: string | null, who: string) => `${base(id)}:likelock:${post}${comment ? `:${comment}` : ""}:${who}`;
 const membersKey = (id: string) => `${base(id)}:m`;
 const dirKey = (id: string) => `${base(id)}:dir`;
 const handlesKey = (id: string) => `${base(id)}:h`;
@@ -1048,25 +1052,80 @@ export async function postNumbers(
 }
 
 /** One like per member per post: a second press takes it back. */
-export async function toggleLike(id: string, post: string, who: string, room: DataStore): Promise<boolean> {
+export async function toggleLike(id: string, post: string, who: string, room: DataStore): Promise<boolean | null> {
   return toggleIn(id, likesKey(id, post), `l:${post}`, post, who, room);
 }
 
 /** Adds `who` to a set of likes, or takes them out when they were in it: its room is taken first and given back after. */
-async function toggleIn(id: string, key: string, ref: string, post: string, who: string, room: DataStore): Promise<boolean> {
-  const [held] = await redisPipeline([["SISMEMBER", key, who]]);
+/**
+ * true: liked now; false: this press took the like back; null: it changed nothing (a press at the same moment took the
+ * like back first), so nothing is awarded or taken for it.
+ */
+async function toggleIn(id: string, key: string, ref: string, post: string, who: string, room: DataStore): Promise<boolean | null> {
+  // Rule 24: each reply read exactly, 0 or 1; any other is unknown and throws
+  // (the route answers "error" and awards nothing). Never "already liked" on a
+  // reply that does not say so: that took the like away, gave its room back
+  // twice and took a point from the author.
+  const zeroOrOne = (reply: unknown): 0 | 1 | null => (reply === 0 || reply === 1 ? reply : null);
+  const held = zeroOrOne(repliesFor(await redisPipeline([["SISMEMBER", key, who]]), 1)?.[0]);
+  if (held === null) throw new UnknownReplyError("a like's SISMEMBER");
   // The like and its entry in the member's trace (traceKey) take their room first.
-  if (Number(held) !== 1) await needData(room, [{ slot: POST_SLOT(post), bytes: SET_ENTRY_BYTES }, TRACE_ENTRY]);
-  const [added] = await redisPipeline([["SADD", key, who], ["SADD", traceKey(id, who), ref]]);
-  if (Number(added) === 1) return true;
-  await redisPipeline([["SREM", key, who], ["SREM", traceKey(id, who), ref]]);
-  const times = Number(held) === 1 ? 1 : 2;
-  await giveData(room, [{ slot: POST_SLOT(post), bytes: times * SET_ENTRY_BYTES }, { ...TRACE_ENTRY, bytes: times * TRACE_ENTRY.bytes }]);
-  return false;
+  if (held !== 1) await needData(room, [{ slot: POST_SLOT(post), bytes: SET_ENTRY_BYTES }, TRACE_ENTRY]);
+  const adds = repliesFor(await redisPipeline([["SADD", key, who], ["SADD", traceKey(id, who), ref]]), 2);
+  const added = zeroOrOne(adds?.[0]);
+  const traceAdded = zeroOrOne(adds?.[1]);
+  // Unknown: the room taken is kept, since the like may be written.
+  if (added === null || traceAdded === null) throw new UnknownReplyError("a like's SADD");
+  if (added === 1) {
+    // The trace entry an earlier attempt left was already there (its SADD answered 0): the room this press took for it
+    // is given back, never left counted (Codex P on #3819).
+    if (held !== 1 && traceAdded === 0) await giveData(room, [TRACE_ENTRY]);
+    return true;
+  }
+  const removed = repliesFor(await redisPipeline([["SREM", key, who], ["SREM", traceKey(id, who), ref]]), 2);
+  // Room is given back only once the removal is confirmed.
+  const like = zeroOrOne(removed?.[0]);
+  const traced = zeroOrOne(removed?.[1]);
+  if (like === null || traced === null) throw new UnknownReplyError("a like's SREM");
+  // Each entry's room only when this press removed it (a 0 is a press at the same moment that removed it first and
+  // gave it back), plus the room this press took itself when it found no like (Claude 1 on #3819).
+  const own = held === 1 ? 0 : 1;
+  const likeTimes = like + own;
+  const traceTimes = traced + own;
+  if (likeTimes || traceTimes) {
+    await giveData(room, [
+      ...(likeTimes ? [{ slot: POST_SLOT(post), bytes: likeTimes * SET_ENTRY_BYTES }] : []),
+      ...(traceTimes ? [{ ...TRACE_ENTRY, bytes: traceTimes * TRACE_ENTRY.bytes }] : []),
+    ]);
+  }
+  return like === 1 ? false : null;
+}
+
+/**
+ * One member's press on a post's or a comment's like, with the author's point, under one lock per member and liked
+ * thing (Codex T and Codex U on #3819): two presses at once of the same member run one after the other, so a point
+ * never stays for a like that is gone, and a like is never written again without its room. A lock not had in time
+ * throws LockBusyError before anything is read or written (the route answers "error": nothing was changed, try again).
+ * The author is given or loses a point only when this press changed the like, never for their own like.
+ */
+export async function pressLike(
+  id: string,
+  post: string,
+  comment: string | null,
+  who: string,
+  author: string,
+  room: DataStore,
+  owner: DataOwner,
+): Promise<boolean | null> {
+  return withLock(likeLockKey(id, post, comment, who), 20, 5_000, async () => {
+    const added = comment ? await toggleCommentLike(id, post, comment, who, room) : await toggleLike(id, post, who, room);
+    if (added !== null && author !== who) await award(id, author, added ? 1 : -1, owner);
+    return added;
+  });
 }
 
 /** The same for a comment: one like per member, a second press takes it back. */
-export async function toggleCommentLike(id: string, post: string, comment: string, who: string, room: DataStore): Promise<boolean> {
+export async function toggleCommentLike(id: string, post: string, comment: string, who: string, room: DataStore): Promise<boolean | null> {
   return toggleIn(id, commentLikesKey(id, post, comment), `lc:${post}:${comment}`, post, who, room);
 }
 

@@ -23,8 +23,7 @@ import {
   setCommentHidden,
   setPostHidden,
   setProfile,
-  toggleCommentLike,
-  toggleLike,
+  pressLike,
   within,
   withPin,
 } from "@/lib/community";
@@ -51,7 +50,7 @@ import {
 } from "@/lib/community-text";
 import { limited } from "@/lib/request-guard";
 import { alertCreator } from "@/lib/phone-alerts";
-import { award, levelOf, pointsOf } from "@/lib/community-points";
+import { levelOf, pointsOf } from "@/lib/community-points";
 import { restingAway, takeBuyerAction } from "@/lib/buyer-actions";
 import { DataRoomError } from "@/lib/store-data";
 
@@ -373,8 +372,8 @@ export async function POST(request: NextRequest) {
     // the one who gives it: liking your own post is allowed and earns nothing.
     if (action === "like") {
       if (!owner && !(await within(id, key, "like"))) return back(fromPage, "slow", `post-${post.id}`);
-      const added = await toggleLike(id, post.id, key, store);
-      if (post.a !== key) await award(id, post.a, added ? 1 : -1, store);
+      // The like and the author's point under one lock per member and post (lib/community.ts pressLike).
+      await pressLike(id, post.id, null, key, post.a, store, store);
       return back(fromPage, "liked", `post-${post.id}`);
     }
 
@@ -382,8 +381,7 @@ export async function POST(request: NextRequest) {
       const comment = await readComment(id, post.id, field("comment", 12));
       if (!comment || (comment.hid && !owner)) return back(postPage, "gone");
       if (!owner && !(await within(id, key, "like"))) return back(postPage, "slow", `comment-${comment.id}`);
-      const added = await toggleCommentLike(id, post.id, comment.id, key, store);
-      if (comment.a !== key) await award(id, comment.a, added ? 1 : -1, store);
+      await pressLike(id, post.id, comment.id, key, comment.a, store, store);
       return back(postPage, "liked", `comment-${comment.id}`);
     }
 

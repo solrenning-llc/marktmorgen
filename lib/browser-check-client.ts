@@ -11,8 +11,13 @@
  * (components/store-beacon.tsx) both call startBrowserCheck, and whichever
  * runs first sets the check up for both routes.
  *
- * It is set up only in production, as the sign-in form always did: off the
- * host there is no check to answer it (lib/bot-check.ts).
+ * It is set up only in production, as the sign-in form always did, and only
+ * on the host whose answer the server reads: lib/bot-check.ts (browserProof)
+ * answers "human" whenever VERCEL is not "1", so anywhere else the challenge
+ * script is pure main-thread cost. On the CI's production build it ran about
+ * 3 s after a store page loaded, for 75 to 330 ms, and was the long task under
+ * every slow tap of the mobile render check (TODOS-100, from #3360). The build
+ * says which host it is for in NEXT_PUBLIC_BROWSER_CHECK (next.config.ts).
  */
 import { initBotId } from "botid/client/core";
 
@@ -34,7 +39,7 @@ let plain: typeof fetch | null = null;
  */
 export function startBrowserCheck(init: Init = initBotId as unknown as Init): typeof fetch | null {
   if (plain) return plain;
-  if (typeof window === "undefined" || process.env.NODE_ENV !== "production") return null;
+  if (typeof window === "undefined" || process.env.NODE_ENV !== "production" || process.env.NEXT_PUBLIC_BROWSER_CHECK !== "1") return null;
   plain = window.fetch.bind(window);
   try {
     init({ protect: BROWSER_CHECK_ROUTES });

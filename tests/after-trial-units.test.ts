@@ -12,6 +12,7 @@
  * closing day is priced as the paid plan it is, at the plan's figures.
  * Synthetic stores, keys and senders only; nothing leaves this machine.
  */
+import { mock } from "node:test";
 import { holdMoreApi, takeMoreApi } from "@/lib/api-guard";
 import { sendEmail } from "@/lib/email";
 import { monthlyAllowance, reserve, takeFromMonth } from "@/lib/mail";
@@ -25,6 +26,11 @@ import { AFTER_TRIAL_UNITS, TRIAL_UNITS } from "./store-data-registry";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+
+// A store with no plan counts its emails in the calendar month (lib/allowance-window.ts), read again at each send:
+// a run crossing 00:00 UTC on a month's last day between two sends started a new month's figure, and more went out
+// than the standing's figure. Only Date is stopped, for the whole run; timers and performance.now() run as usual.
+mock.timers.enable({ apis: ["Date"], now: Date.now() });
 
 process.env.RESEND_API_KEY = "re_test_after_trial_units_only";
 let sent = 0;

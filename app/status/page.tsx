@@ -91,7 +91,7 @@ export default async function StatusPage() {
           <strong>Email delivery.</strong> Once a day, the site sends test list emails through each email service it has
           set up, to test addresses those services keep for this. It checks that each service reports a bounce (a message
           that says an email could not be delivered) and a spam report (a reader marking an email as spam) back to the
-          site, and that the test address then comes off the list. It also checks how the site signs in to Amazon&rsquo;s
+          site. Then it checks that the test address comes off the list. It also checks how the site signs in to Amazon&rsquo;s
           email service. The run passes only when every step works.
         </p>
         <p>

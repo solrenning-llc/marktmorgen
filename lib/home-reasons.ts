@@ -35,7 +35,7 @@ export const HOME_REASONS: {
     title: "Reliable access after payment",
     body: "A file downloads, a course opens, a booked call lands on both calendars — but only after we ask Stripe's own record whether the payment settled, and we ask again on every download. A link somebody guesses or forwards opens nothing. The confirmation email links back to the purchase when the buyer leaves checkout.",
     example:
-      "A buyer on a new phone types the email address they paid with, and every purchase from that store comes back to them — a month or a year later, for as long as the store is open and the product is still there.",
+      "A buyer on a new phone types the email address they paid with, and every purchase from that store comes back to them. That holds a month or a year later, for as long as the store is open and the product is still there.",
     visual: "delivery",
     href: "/platform/instant-delivery",
     link: "How delivery works",

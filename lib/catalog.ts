@@ -827,6 +827,85 @@ export function listingFinder(store: Store): (id: string | undefined) => Promise
   };
 }
 
+/**
+ * The most bytes one MGET of listingsById may be answered with (Codex S and Codex Z on #3101): Upstash refuses a
+ * request past 10 MB (its max_request_size_exceeded page, read 7 November 2026), so an answer is kept to 8 MB, with
+ * room for the envelope.
+ */
+export const LISTING_MGET_ANSWER_BYTES = 8_000_000;
+
+/**
+ * What one record can weigh in that answer at the worst: MAX_PRODUCT_BYTES, every byte escaped in the JSON reply
+ * (\uXXXX is six bytes for one), and its quotes and comma. Bounded by the writer's ceiling, never by what records
+ * usually weigh.
+ */
+const LISTING_ANSWER_WORST_BYTES = 6 * MAX_PRODUCT_BYTES + 3;
+
+/** The most product records one MGET of listingsById names: as many as fit LISTING_MGET_ANSWER_BYTES at the worst. */
+export const LISTING_MGET_KEYS = Math.max(1, Math.floor(LISTING_MGET_ANSWER_BYTES / LISTING_ANSWER_WORST_BYTES));
+
+/**
+ * The most of those MGETs in flight at once, so the answers being received at one time stay bounded (about 31 MB at
+ * the worst). This bounds the requests outstanding, not what one sales file keeps: every answer read is held until the
+ * last batch is in (Codex S on #3101), and that total is not bounded or measured here.
+ */
+export const LISTING_MGET_PARALLEL = 4;
+
+/**
+ * The listings these ids name, by id, read before a walk through sales that
+ * each name some (the sales file, lib/stats.ts salesCsv): whatever the store
+ * record holds is not read again, and the rest is read in MGETs of at most
+ * LISTING_MGET_KEYS records, LISTING_MGET_PARALLEL of them side by side, so
+ * every answer stays under LISTING_MGET_ANSWER_BYTES at the worst and 2,000
+ * products are 400 commands in 100 waits, never a GET after another for each
+ * product (2,000) and never one answer past the provider's ceiling. Ids the
+ * store does not have, and records Redis answers are not there (nil), are left
+ * out, as readListings leaves them. A reply that is not one string or nil for
+ * each record asked, or a record that does not read as that product's listing,
+ * throws UnknownReplyError (CX-123 rule 24), never "no such product".
+ */
+export async function listingsById(store: Store, ids: Iterable<string>): Promise<Map<string, Listing>> {
+  const asked = wanted(store, ids);
+  const found = new Map<string, Listing>();
+  const catalog = store.catalog;
+  if (catalog.inline) {
+    const byId = new Map(catalog.inline.map((p) => [p.id, p]));
+    for (const id of asked) {
+      const product = byId.get(id);
+      if (product) found.set(id, listingOf(product));
+    }
+    return found;
+  }
+  const head = new Map(catalog.head.map((listing) => [listing.id, listing]));
+  const missing: string[] = [];
+  for (const id of asked) {
+    const listing = head.get(id);
+    if (listing) found.set(id, listing);
+    else missing.push(id);
+  }
+  if (!missing.length || !catalog.id || !isRedisConfigured()) return found;
+  const chunks: string[][] = [];
+  for (let i = 0; i < missing.length; i += LISTING_MGET_KEYS) chunks.push(missing.slice(i, i + LISTING_MGET_KEYS));
+  const readChunk = async (chunk: string[]): Promise<(string | null)[]> => {
+    const [reply] = repliesFor(await redisPipeline([["MGET", ...chunk.map((id) => listingKey(catalog.id!, id))]]), 1) ?? [undefined];
+    const raws = repliesFor(reply, chunk.length);
+    if (!raws || raws.some((raw) => raw !== null && typeof raw !== "string")) throw new UnknownReplyError("a store's product records");
+    return raws as (string | null)[];
+  };
+  const answers: (string | null)[][] = [];
+  for (let c = 0; c < chunks.length; c += LISTING_MGET_PARALLEL) answers.push(...(await Promise.all(chunks.slice(c, c + LISTING_MGET_PARALLEL).map(readChunk))));
+  chunks.forEach((chunk, c) => {
+    chunk.forEach((id, i) => {
+      const raw = answers[c][i];
+      if (raw === null) return;
+      const listing = parseListing(parseJson(raw));
+      if (!listing || listing.id !== id) throw new UnknownReplyError("a product's listing");
+      found.set(id, listing);
+    });
+  });
+  return found;
+}
+
 /** Listings of every product of one kind, in the creator's order. */
 export async function readKind(store: Store, kind: Kind): Promise<Listing[]> {
   return readListings(store, idsOfKind(store, kind));

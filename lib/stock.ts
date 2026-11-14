@@ -49,25 +49,84 @@ const RECOUNT_MOST = 2;
 type Entry = { until: number; paid?: boolean };
 
 const stockKey = (id: string, productId: string) => `nl:stock:${id}:${productId}`;
+/** The field of a stock record that counts its units sold: never a checkout id (cs_) nor a provisional hold (p_). */
+const SOLD = "#sold";
+/**
+ * The most sold units written the old way (a field each) one count folds into
+ * SOLD, so a record written before the fold is moved over a little at a time,
+ * each step short on the Redis side.
+ */
+const FOLD_MOST = 200;
+
+/**
+ * A unit sold, counted once (Claude 3's performance audit, 13 November 2026),
+ * in one step on the Redis side: the checkout's own field (its hold, or a sale
+ * written the old way) is let go, and only when it was there is SOLD raised by
+ * one. The count of units used is the same before and after, and a checkout
+ * told again, a minute or a year later, finds no field and changes nothing,
+ * so nothing is kept per sale. Every checkout of a limited product holds a
+ * unit before the buyer can pay (withCartStockHolds, before the checkout is
+ * handed over), and a hold is let go only once Stripe says its checkout
+ * expired or once it is counted here, so a paid checkout always has its field
+ * until it is counted.
+ * KEYS: the product's stock record; ARGV: the checkout's id. Returns 1 when counted now, 0 when there was nothing to count.
+ */
+export const STOCK_SELL = `-- marktmorgen:stock-sell:v1
+if #KEYS ~= 1 or #ARGV ~= 1 then return -1 end
+if redis.call("HDEL", KEYS[1], ARGV[1]) == 1 then
+  redis.call("HINCRBY", KEYS[1], "#sold", 1)
+  return 1
+end
+return 0`;
+
+const sellCommand = (statsId: string, productId: string, session: string): (string | number)[] => ["EVAL", STOCK_SELL, 1, stockKey(statsId, productId), session];
 const lockKey = (id: string, productId: string) => `nl:stock:lock:${id}:${productId}`;
 
-async function readEntries(store: Store, product: Listing): Promise<Map<string, Entry>> {
+/** A field's value as a hold or a sale written the old way, read in its exact shape; anything else throws. */
+function entryOf(encoded: unknown): Entry {
+  if (typeof encoded !== "string") throw new Error("Stock reading unavailable");
+  let value: unknown;
+  try { value = JSON.parse(encoded); } catch { throw new Error("Stock reading unavailable"); }
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Stock reading unavailable");
+  const entry = value as Partial<Entry>;
+  if (!Number.isSafeInteger(entry.until) || (entry.until as number) < 0 || (entry.paid !== undefined && typeof entry.paid !== "boolean")) throw new Error("Stock reading unavailable");
+  return { until: entry.until as number, ...(entry.paid !== undefined ? { paid: entry.paid } : {}) };
+}
+
+/** A product's stock record: its holds (and any sale still written the old way), and its units sold (SOLD). */
+async function readEntries(store: Store, product: Listing): Promise<{ entries: Map<string, Entry>; sold: number }> {
   const receipt = await redisPipeline([["HGETALL", stockKey(store.statsId!, product.id)]]);
   if (!Array.isArray(receipt) || receipt.length !== 1) throw new Error("Stock reading unavailable");
   const raw: unknown = receipt[0];
   if (!Array.isArray(raw) || raw.length % 2 !== 0) throw new Error("Stock reading unavailable");
   const entries = new Map<string, Entry>();
+  let sold: number | null = null;
   for (let i = 0; i < raw.length; i += 2) {
     const session = raw[i], encoded = raw[i + 1];
+    if (session === SOLD) {
+      // The units sold: a whole number written by HINCRBY, read once and in its exact shape.
+      if (sold !== null || typeof encoded !== "string" || !/^(0|[1-9][0-9]{0,15})$/.test(encoded)) throw new Error("Stock reading unavailable");
+      sold = Number(encoded);
+      if (!Number.isSafeInteger(sold)) throw new Error("Stock reading unavailable");
+      continue;
+    }
     if (typeof session !== "string" || !session || typeof encoded !== "string" || entries.has(session)) throw new Error("Stock reading unavailable");
-    let value: unknown;
-    try { value = JSON.parse(encoded); } catch { throw new Error("Stock reading unavailable"); }
-    if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Stock reading unavailable");
-    const entry = value as Partial<Entry>;
-    if (!Number.isSafeInteger(entry.until) || (entry.until as number) < 0 || (entry.paid !== undefined && typeof entry.paid !== "boolean")) throw new Error("Stock reading unavailable");
-    entries.set(session, { until: entry.until as number, ...(entry.paid !== undefined ? { paid: entry.paid } : {}) });
+    entries.set(session, entryOf(encoded));
   }
-  return entries;
+  return { entries, sold: sold ?? 0 };
+}
+
+/**
+ * One checkout's hold on a product, read as one field, never the whole record
+ * (Claude 3's performance audit, 13 November 2026). A checkout already counted
+ * as sold has no field (STOCK_SELL lets it go as it counts it), so it reads as
+ * null, which every release path already treats as nothing to hand back.
+ */
+async function readOne(statsId: string, product: Listing, session: string): Promise<Entry | null> {
+  const receipt = await redisPipeline([["HGET", stockKey(statsId, product.id), session]]);
+  if (!Array.isArray(receipt) || receipt.length !== 1) throw new Error("Stock reading unavailable");
+  const encoded: unknown = receipt[0];
+  return encoded === null || encoded === undefined ? null : entryOf(encoded);
 }
 
 /**
@@ -102,16 +161,26 @@ async function countStock(store: Store, product: Listing, now: number, ask: bool
   const limit = limitedStock(product);
   if (limit === null) return null;
   if (!store.statsId || !isRedisConfigured()) throw new Error("Stock reading unavailable");
-  const entries = await readEntries(store, product);
-  let used = 0;
+  const { entries, sold } = await readEntries(store, product);
+  let used = sold;
   let checks = 0;
+  let folded = 0;
   let unresolved = 0;
   // Lapsed holds whose checkout could not be read: counted as used (the safe way to be wrong for selling), and
   // counted here so a refusal is never decided on them (stockLeftKnown).
   let unknown = 0;
   const writes: (string | number)[][] = [];
   for (const [session, entry] of entries) {
-    if (entry.paid || entry.until > now) {
+    if (entry.paid) {
+      used += 1;
+      // A sale written the old way, a field each: folded into SOLD a little at a time, outside any lock, the count unchanged.
+      if (ask && folded < FOLD_MOST) {
+        folded += 1;
+        writes.push(sellCommand(store.statsId, product.id, session));
+      }
+      continue;
+    }
+    if (entry.until > now) {
       used += 1;
       continue;
     }
@@ -133,7 +202,7 @@ async function countStock(store: Store, product: Listing, now: number, ask: bool
     try {
       const found = await onAccount("GET", store.stripeAccountId, `/checkout/sessions/${encodeURIComponent(session)}`, undefined, undefined, undefined, CHECK_MS);
       if (isSettled(found)) {
-        writes.push(["HSET", stockKey(store.statsId, product.id), session, JSON.stringify({ until: 0, paid: true })]);
+        writes.push(sellCommand(store.statsId, product.id, session));
         used += 1;
       } else if (found.status === "expired") {
         writes.push(["HDEL", stockKey(store.statsId, product.id), session]);
@@ -188,9 +257,8 @@ export async function withStockHold<T extends { id: string }>(
 /** Marks a limited product's checkout as sold, once the buyer is back. */
 export async function confirmStock(store: Store, product: Listing, session: string): Promise<void> {
   if (limitedStock(product) === null || !store.statsId || !isRedisConfigured()) return;
-  await redisPipeline([
-    ["HSET", stockKey(store.statsId, product.id), session, JSON.stringify({ until: 0, paid: true })],
-  ]);
+  // Counted once however many times it is told (the thanks page again, the cart's and the product's own doors): STOCK_SELL.
+  await redisPipeline([sellCommand(store.statsId, product.id, session)]);
 }
 
 /**
@@ -201,8 +269,8 @@ export async function confirmStock(store: Store, product: Listing, session: stri
 export async function releaseStockHold(store: Store, product: Listing, session: string): Promise<void> {
   if (limitedStock(product) === null || !store.statsId || !store.stripeAccountId || !isRedisConfigured()) return;
   if (!/^cs_(test|live)_[A-Za-z0-9]{8,200}$/.test(session)) return;
-  const entries = await readEntries(store, product);
-  const entry = entries.get(session);
+  // This checkout's field only, never the whole record (Claude 3's performance audit, 13 November 2026).
+  const entry = await readOne(store.statsId, product, session);
   if (!entry || entry.paid) return;
   try {
     const closed = await onAccount(
@@ -445,7 +513,7 @@ export async function confirmCartStock(store: Store, products: Listing[], sessio
   const limited = products.filter((product) => limitedStock(product) !== null);
   if (limited.length === 0 || !store.statsId || !isRedisConfigured()) return;
   const statsId = store.statsId;
-  await redisPipeline(limited.map((product) => ["HSET", stockKey(statsId, product.id), session, JSON.stringify({ until: 0, paid: true })]));
+  await redisPipeline(limited.map((product) => sellCommand(statsId, product.id, session)));
 }
 
 /**
@@ -460,9 +528,10 @@ export async function releaseCartStockHolds(store: Store, products: Listing[], s
   const limited = products.filter((product) => limitedStock(product) !== null);
   if (limited.length === 0 || !store.statsId || !store.stripeAccountId || !isRedisConfigured()) return;
   if (!/^cs_(test|live)_[A-Za-z0-9]{8,200}$/.test(session)) return;
+  const statsId = store.statsId;
   const holding: Listing[] = [];
   for (const product of limited) {
-    const entry = (await readEntries(store, product)).get(session);
+    const entry = await readOne(statsId, product, session);
     if (entry?.paid) return;
     if (entry) holding.push(product);
   }
@@ -473,6 +542,5 @@ export async function releaseCartStockHolds(store: Store, products: Listing[], s
   } catch {
     return;
   }
-  const statsId = store.statsId;
   await redisPipeline(holding.map((product) => ["HDEL", stockKey(statsId, product.id), session]));
 }

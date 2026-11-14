@@ -1576,6 +1576,18 @@ export class MemoryRedis {
           for (let i = 0; i < n; i += 1) if (this.data.get(keys[n + i]) instanceof Map) this.run(["HDEL", keys[n + i], pending]);
           return 0;
         }
+        // lib/stock.ts STOCK_SELL (Claude 3's performance audit, 13 November 2026): a sale counted once, from its own field.
+        if (key.startsWith("-- marktmorgen:stock-sell:v1\n")) {
+          const count = Number(args[0]);
+          const keys = args.slice(1, 1 + count), argv = args.slice(1 + count);
+          if (count !== 1 || argv.length !== 1) return -1;
+          this.live(keys[0]);
+          const record = this.data.get(keys[0]);
+          if (record !== undefined && !(record instanceof Map)) throw new Error("WRONGTYPE");
+          if (this.run(["HDEL", keys[0], argv[0]]) !== 1) return 0;
+          this.run(["HINCRBY", keys[0], "#sold", 1]);
+          return 1;
+        }
         if (key.startsWith("-- marktmorgen:stock-bind:v1\n")) {
           const count = Number(args[0]);
           const keys = args.slice(1, 1 + count), argv = args.slice(1 + count);

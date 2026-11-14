@@ -760,8 +760,23 @@ export async function setBlocked(store: Store, courseId: string, email: string, 
 
 // ------------------------------------------------------------ media
 
-/** A link the browser can play or fetch straight from storage, for a while. */
+/** The names a video or an episode is kept under, for an old record that kept no type. */
+const MEDIA_NAME = /\.(mp4|mov|webm|m4v|mp3|m4a|wav|aac|ogg|oga)$/i;
+
+/**
+ * Whether a file may be played in place: stored as video or audio, or, kept with no type (an old record), named as
+ * one. The browser shows the file in the tab with the type it was stored with, so anything else (an SVG, a page)
+ * would open as a page of its own on the storage's address (the security audit of 14 November 2026).
+ */
+export function playsInPlace(file: ProductFile): boolean {
+  const type = file.contentType.trim().toLowerCase();
+  if (type) return type.startsWith("video/") || type.startsWith("audio/");
+  return MEDIA_NAME.test(file.name) && MEDIA_NAME.test(file.pathname);
+}
+
+/** A link the browser can play or fetch straight from storage, for a while: video and audio only (playsInPlace). */
 export async function signedMedia(file: ProductFile, seconds: number): Promise<string | null> {
+  if (!playsInPlace(file)) return null;
   try {
     // Played in the page, so not saved under a name: whichever store keeps it.
     const url = await fileUrl(file.pathname, seconds);

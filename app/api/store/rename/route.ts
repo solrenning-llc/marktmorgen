@@ -22,7 +22,8 @@ export async function POST(request: NextRequest) {
         { status: result.reason === "too_many" ? 409 : 400 },
       );
     }
-    return Response.json({ ok: true, handle: result.store.handle });
+    // The store's own domain not known to have followed: said, so the studio can name the step that moves it.
+    return Response.json(result.domainBehind ? { ok: true, handle: result.store.handle, domainBehind: true } : { ok: true, handle: result.store.handle });
   } catch (error) {
     console.error("changing an address failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });

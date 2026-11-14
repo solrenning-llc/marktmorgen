@@ -378,6 +378,10 @@ export function ImportTool({
     }
     const text = await file.text();
     const read = parseCsv(text, LIMITS[kind]);
+    if (read.unclosedQuote !== null) {
+      setError(`Line ${read.unclosedQuote.toLocaleString("en-US")} of that file opens a quote (") that never closes, so the rows after it cannot be read. Fix that line in your spreadsheet, save it again as CSV, and choose it here.`);
+      return;
+    }
     if (read.header.length === 0 || read.rows.length === 0) {
       setError("That file has no rows under its first line. It needs a first line naming the columns, then one row per entry.");
       return;

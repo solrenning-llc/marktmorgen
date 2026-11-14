@@ -9,7 +9,9 @@
  *   - a byte-order mark at the start (Excel's "CSV UTF-8" writes one), which
  *     is dropped rather than read as part of the first column's name;
  *   - commas, semicolons (Excel in much of Europe) or tabs between cells —
- *     whichever the first line uses outside quotes;
+ *     whichever the first line uses outside quotes, unless the file starts
+ *     with Excel's "sep=;" line naming it, which is then dropped (it is not
+ *     the header, and not a row toward any limit);
  *   - cells in double quotes, holding the separator, line breaks, or a quote
  *     written twice ("") for one;
  *   - lines ending in \r\n, \n or \r, and blank lines, which are skipped.
@@ -39,17 +41,63 @@ export type ParsedCsv = {
   lines: number[];
   /** Whether rows past `maxRows` were left unread. */
   truncated: boolean;
+  /**
+   * The file's line where a quoted cell opened and never closed, or null. Such a
+   * cell holds the rest of the file, so its rows are not whole: a caller refuses it.
+   */
+  unclosedQuote: number | null;
 };
 
-/** The separator a file uses: the one its first line has most of, outside quotes. */
-export function detectSeparator(text: string): Separator {
-  const counts: Record<Separator, number> = { ",": 0, ";": 0, "\t": 0 };
+/** How many of each separator each of a file's first `most` lines has, outside quotes. */
+function separatorCounts(text: string, most: number): Record<Separator, number>[] {
+  const lines: Record<Separator, number>[] = [];
+  let counts: Record<Separator, number> = { ",": 0, ";": 0, "\t": 0 };
   let quoted = false;
-  for (let i = 0; i < text.length; i += 1) {
+  for (let i = 0; i < text.length && lines.length < most; i += 1) {
     const c = text[i];
     if (c === '"') quoted = !quoted;
-    else if (!quoted && (c === "\n" || c === "\r")) break;
-    else if (!quoted && (c === "," || c === ";" || c === "\t")) counts[c] += 1;
+    else if (!quoted && (c === "\n" || c === "\r")) {
+      if (c === "\r" && text[i + 1] === "\n") i += 1;
+      if (counts[","] + counts[";"] + counts["\t"] > 0 || lines.length === 0) lines.push(counts);
+      counts = { ",": 0, ";": 0, "\t": 0 };
+    } else if (!quoted && (c === "," || c === ";" || c === "\t")) counts[c] += 1;
+  }
+  if (lines.length < most && (counts[","] + counts[";"] + counts["\t"] > 0 || lines.length === 0)) lines.push(counts);
+  return lines;
+}
+
+/** A column named for email addresses: "Email", "E-mail", "Email address" (any case). */
+const EMAIL_HEADER = /^e-?mail(?:[ _-]?address)?$/i;
+/** A cell holding one email address and nothing else, as a row of a contact list does. */
+const ADDRESS_CELL = /^[^\s@,;"]+@[^\s@,;"]+\.[^\s@,;"]+$/;
+
+/**
+ * How strongly a candidate separator reads a file's first lines as a contact list: its header names an email column,
+ * and each of its first rows holds an address in a cell of its own. The wrong one of ";" and "," glues the address to
+ * the next cell ("ana@example.test;Doe"), so it finds neither.
+ */
+function emailColumnScore(text: string, separator: Separator): number {
+  const { header, rows } = parseCsv(`sep=${separator}\n${text}`, 5);
+  const named = header.some((cell) => EMAIL_HEADER.test(cell.trim())) ? 1 : 0;
+  return named + rows.filter((row) => row.some((cell) => ADDRESS_CELL.test(cell.trim()))).length;
+}
+
+/**
+ * The separator a file uses: the one its first line has most of, outside
+ * quotes. A tie between ";" and "," (a header such as "Email;Name, as typed")
+ * is settled by the lines below: the one that gives as many cells on them as
+ * on the first line. When they cannot tell either (every row with one of each,
+ * "ana@example.test;Doe, Ana"), by the columns: the one under which the header
+ * names an email column and the rows hold an address in a cell of their own
+ * (Codex X3 on #4436). A comma only when nothing tells them apart.
+ */
+export function detectSeparator(text: string): Separator {
+  const [first, ...below] = separatorCounts(text, 6);
+  const counts = first ?? { ",": 0, ";": 0, "\t": 0 };
+  if (counts[";"] > 0 && counts[";"] === counts[","] && counts[";"] >= counts["\t"]) {
+    const steady = (sep: Separator) => below.filter((line) => line[sep] === counts[sep]).length;
+    if (steady(";") > steady(",")) return ";";
+    if (steady(";") === steady(",") && emailColumnScore(text, ";") > emailColumnScore(text, ",")) return ";";
   }
   if (counts[";"] > counts[","] && counts[";"] >= counts["\t"]) return ";";
   if (counts["\t"] > counts[","] && counts["\t"] > counts[";"]) return "\t";
@@ -62,16 +110,20 @@ export function detectSeparator(text: string): Separator {
  * that is longer says so with `truncated`.
  */
 export function parseCsv(input: string, maxRows = Number.POSITIVE_INFINITY): ParsedCsv {
-  const text = input.charCodeAt(0) === 0xfeff ? input.slice(1) : input;
-  const separator = detectSeparator(text);
+  const unmarked = input.charCodeAt(0) === 0xfeff ? input.slice(1) : input;
+  // Excel's "sep=;" first line names the separator; dropped, the file's own line numbers kept.
+  const hint = /^sep=([,;\t])(?:\r\n|\r|\n|$)/.exec(unmarked);
+  const text = hint ? unmarked.slice(hint[0].length) : unmarked;
+  const separator = hint ? (hint[1] as Separator) : detectSeparator(text);
   const all: string[][] = [];
   const lines: number[] = [];
   let row: string[] = [];
   let cell = "";
   let quoted = false;
-  let line = 1;
-  let rowLine = 1;
+  let line = hint ? 2 : 1;
+  let rowLine = line;
   let truncated = false;
+  let quoteLine = 0;
   const endRow = () => {
     row.push(cell);
     cell = "";
@@ -101,6 +153,7 @@ export function parseCsv(input: string, maxRows = Number.POSITIVE_INFINITY): Par
       // A quote opens a cell only at its start; spaces before it are dropped.
       cell = "";
       quoted = true;
+      quoteLine = line;
     } else if (c === separator) {
       row.push(cell);
       cell = "";
@@ -123,7 +176,9 @@ export function parseCsv(input: string, maxRows = Number.POSITIVE_INFINITY): Par
   }
   const [header = [], ...rows] = all;
   const [, ...rowLines] = lines;
-  return { header: header.map((h) => h.trim()), rows, separator, lines: rowLines, truncated };
+  // Still in quotes at the end of the text read: the rest of the file went into one cell.
+  const unclosedQuote = quoted ? quoteLine : null;
+  return { header: header.map((h) => h.trim()), rows, separator, lines: rowLines, truncated, unclosedQuote };
 }
 
 /** One cell as a spreadsheet will read it back: quoted, and never a formula. */

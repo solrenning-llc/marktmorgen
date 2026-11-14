@@ -139,6 +139,18 @@ export class MemoryRedis {
           if (n >= Number(below)) return -1;
           return this.run(["INCR", counter]);
         }
+        // lib/removed-products.ts NOTE_REMOVED_PRODUCT: a product on the list has its time updated (0); a new one is added
+        // only while the list has room (1), never by dropping another; full, nothing written (-1).
+        if (key.startsWith("-- marktmorgen:removed-product-note:v1\n") && args[0] === "1" && args.length === 5) {
+          const [, list, at, product, most] = args;
+          if (this.run(["ZSCORE", list, product]) !== null) {
+            this.run(["ZADD", list, at, product]);
+            return 0;
+          }
+          if (Number(this.run(["ZCARD", list])) >= Number(most)) return -1;
+          this.run(["ZADD", list, at, product]);
+          return 1;
+        }
         // lib/form-store.ts FIND_FORM_RESPONSE: the first kept response written with this id, as its text, or nil.
         if (key.startsWith("-- marktmorgen:form-find:v1\n") && args[0] === "1" && args.length === 4) {
           const [, listKey, id, kept] = args;
@@ -1290,29 +1302,52 @@ export class MemoryRedis {
           while (list.length > Number(args[3])) out.push(list.pop()!);
           return out;
         }
-        if (key.startsWith("-- marktmorgen:form-forget:v2\n")) {
+        if (key.startsWith("-- marktmorgen:form-forget:v5\n")) {
+          // lib/form-store.ts FORGET_FORM_PERSON: the person's own responses removed, their address emptied in others'.
           const count = Number(args[0]);
           const keys = args.slice(1, 1 + count);
           const address = args[1 + count];
-          const out: (string | number)[] = [];
+          const named = (a: unknown) => typeof a === "string" && a.trim().toLowerCase() === address;
+          const hits: [number, string][] = [];
+          const edits: [number, number, string, string][] = [];
           keys.forEach((listKey, k) => {
             this.live(listKey);
             if (!this.data.has(listKey)) return;
-            const counts = new Map<string, number>();
-            const kept = this.list(listKey).filter((raw) => {
+            this.list(listKey).forEach((raw, i) => {
+              type Kept = { answers?: Record<string, unknown>; by?: unknown } | null;
+              let value: Kept;
               try {
-                const value = JSON.parse(raw) as { answers?: Record<string, unknown> };
-                const hit = value && typeof value.answers === "object" && value.answers !== null && Object.values(value.answers).some((a) => typeof a === "string" && a.trim().toLowerCase() === address);
-                if (hit) counts.set(raw, (counts.get(raw) ?? 0) + 1);
-                return !hit;
+                value = JSON.parse(raw) as Kept;
               } catch {
-                return true;
+                return;
+              }
+              const answers = value && typeof value.answers === "object" && value.answers !== null ? value.answers : null;
+              if (answers === null) return;
+              // By the address kept with the response; one that names none, by any answer (lib/form-store.ts isResponderOf).
+              const by = typeof value?.by === "string" ? value.by.trim() : "";
+              if (by !== "" ? by.toLowerCase() === address : Object.values(answers).some(named)) hits.push([k + 1, raw]);
+              else if (Object.values(answers).some(named)) {
+                const now = JSON.stringify({ ...value, answers: Object.fromEntries(Object.entries(answers).map(([id, a]) => [id, named(a) ? "" : a])) });
+                edits.push([k + 1, i, raw, now]);
               }
             });
-            this.data.set(listKey, kept);
-            for (const [raw, n] of counts) out.push(k + 1, raw, n);
           });
-          return out;
+          const emptied: (string | number)[] = [];
+          for (const [k, i, raw, now] of edits) {
+            this.list(keys[k - 1])[i] = now;
+            emptied.push(k, raw, now);
+          }
+          const removed: (string | number)[] = [];
+          for (const [k, raw] of hits) {
+            const listKey = keys[k - 1];
+            const list = this.list(listKey);
+            const n = list.filter((item) => item === raw).length;
+            if (n > 0) {
+              this.data.set(listKey, list.filter((item) => item !== raw));
+              removed.push(k, raw, n);
+            }
+          }
+          return [removed, emptied];
         }
         // lib/lesson-notes.ts NOTE_SAVE, NOTE_FORGET and NOTE_CLEAR: a student's notes, their tally and the notes' slot in
         // one step. Redis's TIME is this stand-in's clock.

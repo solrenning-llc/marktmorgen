@@ -80,6 +80,7 @@ import { forgetWaitlistPerson } from "@/lib/waitlist";
 import { forgetBondPerson } from "@/lib/affiliate-bond";
 import { forgetLeadPerson } from "@/lib/affiliate-leads";
 import { forgetImportedPerson } from "@/lib/imported-purchases";
+import { removedProductIds } from "@/lib/removed-products";
 import { forgetPodcastPerson } from "@/lib/podcast-access";
 import { forgetWelcomePerson } from "@/lib/welcome-offer-send";
 import { forgetWinbackPerson } from "@/lib/winback-send";
@@ -249,7 +250,9 @@ export async function erasureScope(store: Store, email: string): Promise<Erasure
       lessonIds: course.modules.flatMap((m) => m.lessons.map((l) => l.id)),
       moduleIds: course.modules.map((m) => m.id),
     })),
-    productIds: current.catalog.items.map((item) => item.id),
+    // The products listed now and those removed (lib/removed-products.ts): a person's data kept under a removed one is
+    // still reached. Read exactly: a list that cannot be read throws, so the erasure is pressed again.
+    productIds: [...new Set([...current.catalog.items.map((item) => item.id), ...(await removedProductIds(current.statsId))])],
     communityId: current.community?.id ?? null,
   };
 }

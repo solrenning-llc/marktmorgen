@@ -32,8 +32,8 @@ import { type ErasureScope } from "@/lib/erasure-rules";
 import { leadsKey, parseContact } from "@/lib/contacts";
 import { readDeals, readFields, readPersonTasks, readStages, readValues } from "@/lib/crm";
 import { readPersonNotes } from "@/lib/buyer-profile";
-import { readForms, readResponses } from "@/lib/form-store";
-import { listRequests } from "@/lib/payment-request-store";
+import { isResponderOf, readForms, readResponses } from "@/lib/form-store";
+import { requestsOfPerson } from "@/lib/payment-request-store";
 import { listAgreements, readVersionExact } from "@/lib/agreement-store";
 import { doneLessons, studentDates } from "@/lib/learn";
 import { attemptOf, passedQuizzes } from "@/lib/quiz";
@@ -250,16 +250,18 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
     for (const form of await readForms(s.statsId)) {
       const { responses } = await readResponses(s.statsId, form.id);
       for (const r of responses) {
-        // The same rule the erasure deletes by: an answer that is the address (lib/form-store.ts, FORGET_FORM_PERSON).
-        if (!Object.values(r.answers).some((a) => typeof a === "string" && same(a, s.email))) continue;
+        // The same rule the erasure deletes by: the address kept with the response, never a friend's (lib/form-store.ts, isResponderOf).
+        if (!isResponderOf(r, s.email)) continue;
         const answers = Object.fromEntries(form.fields.map((f) => [f.label, r.answers[f.id] ?? ""]));
         out.push({ form: form.name, sent: iso(r.at), answers, ...(r.outcome ? { result: r.outcome } : {}), ...(typeof r.score === "number" ? { score: r.score } : {}) });
       }
     }
     return out;
   },
+  // From the person's own set, as the erasure deletes them (forgetRequestsPerson): never the store's newest few, which
+  // left out a request kept for its days once newer ones for other people, or a smaller plan, pushed it past them.
   "lib/payment-request-store.ts": async (s) => {
-    const list = await listRequests(s.store);
+    const list = await requestsOfPerson(s.store, s.email);
     if (list === null) throw new Error("the payment requests could not be read");
     return list.filter((r) => same(r.email, s.email));
   },

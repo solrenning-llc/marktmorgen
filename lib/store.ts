@@ -190,6 +190,7 @@ export type { CourseRef, Listing, Product };
  * inventing a different one for this store alone.
  */
 import { HANDLE_PATTERN } from "@/lib/store-handle-pattern";
+import { noteRemovedProduct, removedListHasRoom } from "@/lib/removed-products";
 export { HANDLE_PATTERN } from "@/lib/store-handle-pattern";
 
 
@@ -3315,13 +3316,31 @@ export async function removeProduct(
   email: string,
   id: string,
   before?: (product: Product, store: Store) => Promise<boolean>,
-): Promise<{ ok: true; store: Store; product: Product } | { ok: false; reason: "none" | "unknown" | "unavailable" }> {
+): Promise<{ ok: true; store: Store; product: Product } | { ok: false; reason: "none" | "unknown" | "unavailable" | "removed_full" }> {
   const result = await withStore(email, async (store, save) => {
     const product = await readProduct(store, id);
     if (!product) return { ok: false as const, reason: "unknown" as const };
+    // A full list of removed products refuses the removal before anything is done to the product (lib/removed-products.ts).
+    try {
+      if (!(await removedListHasRoom(store.statsId, id))) return { ok: false as const, reason: "removed_full" as const };
+    } catch (error) {
+      console.error("could not read the removed products", error);
+      return { ok: false as const, reason: "unavailable" as const };
+    }
     if (before && !(await before(product, store))) {
       return { ok: false as const, reason: "unavailable" as const };
     }
+    // Noted as removed before it leaves the catalog, so a person's data kept under it is still reached by their data
+    // copy and their erasure (lib/removed-products.ts); not confirmed, nothing is removed.
+    // A list with no room left refuses the removal, never drops an older id: the product stays, and can be unpublished.
+    let noted: "noted" | "full";
+    try {
+      noted = await noteRemovedProduct(store.statsId, id);
+    } catch (error) {
+      console.error("could not note a removed product", error);
+      return { ok: false as const, reason: "unavailable" as const };
+    }
+    if (noted === "full") return { ok: false as const, reason: "removed_full" as const };
     // A bundle that held it holds it no more, in the same write, so no bundle
     // goes on promising a product the store no longer has. Whoever bought the
     // bundle before kept its list on their order (lib/bundle-rules.ts).

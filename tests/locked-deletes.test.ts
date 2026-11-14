@@ -450,6 +450,7 @@ async function main(): Promise<void> {
     "crm": ["act:orders:undeal", "act:orders:unpipeline", "lockedFor"],
     "discord": ["need:settings"],
     "discount": ["need:settings"],
+    "draft-preview": ["not:a draft's private preview link, stopped; the draft stays and a new link is made at will"],
     "file/attach": ["act:products:detach", "lockedFor"],
     "forms": ["act:page:remove"],
     "free/download": ["not:a buyer asking for a free product, put on the list by their own request"],
@@ -577,6 +578,7 @@ async function main(): Promise<void> {
     },
     "discord": "need:settings",
     "discount": "need:settings",
+    "draft-preview": { make: "open:adds", revoke: "open:reversible" },
     "free/download": "not:a buyer asking for a free product, put on the list by their own request",
     "forms": { remove: "act:page" },
     "funnel-share": {

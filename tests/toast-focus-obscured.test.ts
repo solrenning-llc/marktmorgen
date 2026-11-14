@@ -217,8 +217,9 @@ function main() {
   page.fire("focusin");
   is("a toast placed hidden before it was painted is said visible once a corner clears", [fromHidden.data.place, said], ["bottom-end", [false]]);
   stopHidden();
-  is("the countdown never starts while the box is hidden", /const startTimer = useCallback\(\(\) => \{\s*stopTimer\(\);\s*if \([^)]*hidden\.current[^)]*\) return;/.test(source), true);
-  is("the Toaster pauses and resumes the countdown with the box", /followToastFocus\(region\.current, \(isHidden\) => \{[\s\S]*?isHidden \? pauseTimer\(\) : startTimer\(\)/.test(source), true);
+  // No countdown at all since 2.2.3 (tests/toast-stays.test.ts): a hidden box can never run out of time.
+  is("nothing closes the toast on a timer, hidden or shown", /setTimeout\(\s*dismiss/.test(source) || /SHOWN_FOR/.test(source), false);
+  is("the Toaster keeps the box clear of the focused control while it shows", /followToastFocus\(region\.current,/.test(source), true);
 
   // The component re-checks whenever focus or the page moves, before the box is painted.
   is("the Toaster re-checks on focus, typing, scrolling and resizing", ["\"focusin\"", "\"input\"", "\"scroll\"", "\"resize\""].every((event) => source.includes(event)), true);

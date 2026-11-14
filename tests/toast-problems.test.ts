@@ -37,8 +37,8 @@ is("toastShownFor is exported", typeof api.toastShownFor, "function");
 is("ToastMessage is exported", typeof api.ToastMessage, "function");
 is("toastBoxClass is exported", typeof api.toastBoxClass, "function");
 
-// 2. Timing: a confirmation leaves after 5 seconds; a problem never leaves by itself.
-is("a confirmation shows for 5 seconds", api.toastShownFor!("done"), 5000);
+// 2. Timing: no toast leaves by itself since 2.2.3 (tests/toast-stays.test.ts), a confirmation or a problem.
+is("a confirmation has no time limit either (2.2.3)", api.toastShownFor!("done"), null);
 is("a problem has no time limit (2.2.3)", api.toastShownFor!("problem"), null);
 
 // 3. Look: the check is only for confirmations; a problem says it is a problem.

@@ -20,6 +20,7 @@ import { indexBytes } from "@/lib/community-search";
 import { type DataStore, giveData, needData, noteData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { type ProductFile, parseProductFile } from "@/lib/product-file";
+import { storedWebLink } from "@/lib/product-link";
 import { type QuizSetup, parseSetup as parseQuizSetup } from "@/lib/quiz";
 import { type TaskSetup, parseTaskSetup } from "@/lib/assignment-rules";
 import { randomLetters } from "@/lib/random-letters";
@@ -169,7 +170,7 @@ function parseLesson(raw: unknown): Lesson | null {
     preview: value.preview === true,
     video: parseProductFile(value.video),
     files,
-    link: typeof value.link === "string" && value.link ? value.link.slice(0, 2000) : null,
+    link: storedWebLink(value.link, 2000),
     hasBody: value.hasBody === true,
     // Lessons written before quizzes existed have none.
     quiz: parseQuizSetup(value.quiz),

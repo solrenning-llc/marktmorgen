@@ -27,7 +27,7 @@
  * written before this existed simply has none.
  */
 import { type ProductFile, parseProductFile } from "@/lib/product-file";
-import { MAX_LINK_LENGTH } from "@/lib/product-link";
+import { MAX_LINK_LENGTH, storedWebLink } from "@/lib/product-link";
 import { activeShipping, readShippingSku } from "@/lib/shipping";
 import { MIN_BUNDLE_ITEMS } from "@/lib/bundle-rules";
 import type { Listing } from "@/lib/catalog";
@@ -175,10 +175,7 @@ export function parseOptions(raw: unknown): ProductOption[] {
       priceCents: value.priceCents,
       ...(sku ? { sku } : {}),
       file: parseProductFile(value.file),
-      link:
-        typeof value.link === "string" && value.link
-          ? value.link.slice(0, MAX_LINK_LENGTH)
-          : null,
+      link: storedWebLink(value.link, MAX_LINK_LENGTH),
       details: parseDetails(value.details),
       // Only the first one marked counts: a page with two picks has none.
       best: value.best === true && !picked,

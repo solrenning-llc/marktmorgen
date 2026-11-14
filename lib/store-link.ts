@@ -27,6 +27,7 @@ export function playsOnPage(url: string): boolean {
   return readVideo(url) !== null || readAudio(url) !== null;
 }
 import { type ProductImage, parseProductImage } from "@/lib/product-image";
+import { storedWebLink } from "@/lib/product-link";
 
 /**
  * A link's own picture, drawn small beside its words in place of the icon
@@ -163,6 +164,8 @@ export function parseStoreLinks(raw: unknown): StoreLink[] {
     if (typeof value.title !== "string" || !value.title) continue;
     const header = value.header === true;
     if (typeof value.url !== "string" || (!header && !value.url)) continue;
+    // A link's address is a web address again on the way out (lib/product-link.ts, storedWebLink).
+    if (!header && storedWebLink(value.url) === null) continue;
     if (header) {
       const { from, until } = linkExtras(value as Record<string, unknown>, false);
       links.push({ id: value.id, title: value.title.slice(0, MAX_LINK_TITLE_LENGTH), url: "", addedAt: typeof value.addedAt === "string" ? value.addedAt : "", header: true, ...(from ? { from } : {}), ...(until ? { until } : {}), ...(value.archived === true ? { archived: true as const } : {}) });

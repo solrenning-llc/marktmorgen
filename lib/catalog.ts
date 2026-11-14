@@ -47,7 +47,7 @@ import { dataBytes } from "@/lib/store-data-rules";
 import { StoreFullError } from "@/lib/store-full";
 import { type ProductFile, parseProductFile } from "@/lib/product-file";
 import { type ProductOption, parseOptions } from "@/lib/product-option";
-import { MAX_LINK_LENGTH } from "@/lib/product-link";
+import { MAX_LINK_LENGTH, storedWebLink } from "@/lib/product-link";
 import { type Recurring, parseRecurring } from "@/lib/product-recurring";
 import { type Intro, parseIntro } from "@/lib/intro-price";
 import { type Yearly, parseYearly } from "@/lib/yearly-price";
@@ -383,7 +383,7 @@ export function parseProduct(entry: unknown): Product | null {
     file: parseProductFile(value.file),
     // Records written before links existed simply have no link, which is
     // the same as not having one now.
-    link: typeof value.link === "string" && value.link ? value.link.slice(0, MAX_LINK_LENGTH) : null,
+    link: storedWebLink(value.link, MAX_LINK_LENGTH),
     recurring: parseRecurring(value.recurring),
     options: parseOptions(value.options),
     call: parseSetup(value.call),

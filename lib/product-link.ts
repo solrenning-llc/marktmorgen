@@ -84,6 +84,24 @@ export function readLink(
 }
 
 /** The part of a link worth showing a person: the site it leads to. */
+/**
+ * A link read back from storage, before it is rendered: the value as it was stored when it is a web address (https,
+ * or http as an older record may hold), else null. readLink checks a link when it is saved; this checks it again on
+ * the way out, so a record written another way (an old one, a restored copy, a hand edit) never puts another scheme
+ * into an href (the security audit of 14 November 2026). It never rewrites a web address, so nothing a creator saved
+ * reads differently.
+ */
+export function storedWebLink(raw: unknown, max = MAX_LINK_LENGTH): string | null {
+  if (typeof raw !== "string" || !raw) return null;
+  const value = raw.slice(0, max);
+  try {
+    const { protocol } = new URL(value);
+    return protocol === "https:" || protocol === "http:" ? value : null;
+  } catch {
+    return null;
+  }
+}
+
 export function linkHost(url: string): string {
   try {
     return new URL(url).hostname.replace(/^www\./, "");

@@ -21,6 +21,7 @@ import * as asking from "@/lib/checkout-ask";
 import * as hooks from "@/lib/webhooks";
 import { ASK_WHENS } from "@/lib/ask-when";
 import { store as redis } from "./redis-stub";
+import { namesAddress } from "@/lib/address-match";
 import { done, is, part } from "./check";
 
 type Command = (string | number)[];
@@ -117,6 +118,25 @@ async function main(): Promise<void> {
   is("an import whose only email waiting is to another address is not in it", section("lib/imports.ts").map((r) => r.import), ["buyers.csv"]);
   is("what is held only while a job is done is said, with how long", Array.isArray(copy.passing) && copy.passing.some((p) => p.includes("sending list") && p.includes("at most 60 days")), true);
   is("everything was read: the copy is complete", [copy.complete, copy.notComplete], [true, []]);
+
+  part("An address with letters outside ASCII is found whole too (Claude 3 cloud S on #4321)");
+  // The import takes such addresses, so the copy must find them: a token cut at the first non-ASCII letter never
+  // equals the address, and their own rows went missing while the copy still said it was complete.
+  is("a non-ASCII domain, any case", namesAddress("José@Müller.de", "josé@müller.de"), true);
+  is("a non-ASCII local part inside a webhook body", namesAddress(JSON.stringify({ data: { email: "josé@example.com" } }), "josé@example.com"), true);
+  is("the same letters written decomposed", namesAddress("jose\u0301@mu\u0308ller.de", "josé@müller.de"), true);
+  is("a longer non-ASCII address is still not theirs", [namesAddress("xjosé@müller.de", "josé@müller.de"), namesAddress("josé@müller.de.au", "josé@müller.de")], [false, false]);
+  is("nor is the part of it after a non-ASCII letter", namesAddress("josé@müller.de", "é@müller.de"), false);
+  {
+    const WIDE = "josé@müller.de";
+    const wideImport = "c3".repeat(12);
+    redis.run(["SET", `nl:import:${wideImport}`, JSON.stringify({ ...job, id: wideImport, file: "wide.csv" }), "EX", 14 * 86_400]);
+    redis.run(["LPUSH", `nl:imports:list:${sid}`, wideImport]);
+    redis.run(["RPUSH", `nl:import:${wideImport}:rows`, JSON.stringify([["2", "José@Müller.de", "José", "prod1"], ["3", `x${WIDE}`, "Xosé", "prod1"]])]);
+    const wideCopy = await copyPerson((await erasureScope(store, WIDE))!, Date.now());
+    const wideRows = ((wideCopy.sections.find((s) => s.module === "lib/imports.ts")?.records ?? []) as Record<string, unknown>[]).find((r) => r.import === "wide.csv")?.rowsWaiting;
+    is("their own import row is in their copy, and only theirs", wideRows, [["2", "José@Müller.de", "José", "prod1"]]);
+  }
 
   part("What is kept but cannot be read makes the copy say it is not complete");
   for (let i = 0; i < 50; i += 1) {

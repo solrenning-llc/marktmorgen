@@ -36,6 +36,8 @@ async function main(): Promise<void> {
     { path: "/api/store/hit", method: "POST" },
   ]);
   env.NODE_ENV = "production";
+  // A build for the host whose answer the server reads (next.config.ts; TODOS-100).
+  (env as Record<string, string | undefined>).NEXT_PUBLIC_BROWSER_CHECK = "1";
   const first = startBrowserCheck((options) => calls.push(options));
   const second = startBrowserCheck((options) => calls.push(options));
   is("set up once, however many parts of the page ask", calls.length, 1);

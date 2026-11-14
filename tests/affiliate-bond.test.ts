@@ -177,7 +177,7 @@ test("a click, then a code, then the buyer: never the other way round", () => {
   // promise and it is one line's edit away from being wrong.
   const src = readFileSync(join(process.cwd(), "lib/affiliates.ts"), "utf8");
   const start = src.indexOf("export async function noteSession");
-  const body = src.slice(start, start + 3_000);
+  const body = src.slice(start, src.indexOf("export async function noteCharge"));
   const click = body.indexOf("meta.via");
   const code = body.indexOf("affiliateForCodes");
   const bond = body.indexOf("bondFor");

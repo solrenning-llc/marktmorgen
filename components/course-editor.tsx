@@ -1,5 +1,6 @@
 "use client";
 
+import { ConfirmAction } from "@/components/confirm-action";
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { useLeaveGuard } from "@/components/leave-guard";
 import { UrlField } from "@/components/url-field";
@@ -993,17 +994,19 @@ function LessonEditor({
         {lesson.video ? (
           <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
             <span className="min-w-0 break-all text-ink">{`${lesson.video.name} · ${readableSize(lesson.video.bytes)}`}</span>
-            <button
-              type="button"
+            <ConfirmAction
               className={`${small} font-bold`}
               disabled={busy || uploading !== null}
-              onClick={async () => {
+              busy={busy}
+              question="Remove this video? Putting it back means uploading the file again."
+              yes="Yes, remove"
+              onConfirm={async () => {
                 const answer = await run({ action: "edit", op: "media-remove", lessonId: lesson.id, pathname: lesson.video!.pathname });
                 if (answer.ok) toast("Video removed.");
               }}
             >
               Remove video
-            </button>
+            </ConfirmAction>
             {streamed ? (
               <p className={`w-full text-sm ${streamed === "failed" ? "font-semibold text-danger" : "text-ink-mute"}`} role="status">
                 {STREAM_WORDS[streamed]}
@@ -1092,18 +1095,20 @@ function LessonEditor({
             {lesson.files.map((file) => (
               <li key={file.pathname} className="flex flex-wrap items-center gap-x-4 gap-y-1">
                 <span className="min-w-0 break-all text-ink">{`${file.name} · ${readableSize(file.bytes)}`}</span>
-                <button
-                  type="button"
+                <ConfirmAction
                   className={`${small} font-bold`}
-                  aria-busy={busy}
                   disabled={busy}
-                  onClick={async () => {
+                  busy={busy}
+                  label={`Remove ${file.name}`}
+                  question="Remove this download? Putting it back means uploading the file again."
+                  yes="Yes, remove"
+                  onConfirm={async () => {
                     const answer = await run({ action: "edit", op: "media-remove", lessonId: lesson.id, pathname: file.pathname });
                     if (answer.ok) toast("Download removed.");
                   }}
                 >
                   Remove
-                </button>
+                </ConfirmAction>
               </li>
             ))}
           </ul>
@@ -1228,15 +1233,17 @@ function Captions({
           {tracks.map((track) => (
             <li key={track.lang} className="flex flex-wrap items-center gap-x-4 gap-y-1">
               <span className="text-ink">{track.label}</span>
-              <button
-                type="button"
+              <ConfirmAction
                 className={`${small} font-bold`}
                 disabled={busy || working}
-                aria-label={`Remove the ${track.label} captions`}
-                onClick={() => send({ action: "remove", lang: track.lang }, "Captions removed.")}
+                busy={busy}
+                label={`Remove the ${track.label} captions`}
+                question="Remove these captions? Captions written by AI are charged again if you have them written again."
+                yes="Yes, remove"
+                onConfirm={() => send({ action: "remove", lang: track.lang }, "Captions removed.")}
               >
                 Remove
-              </button>
+              </ConfirmAction>
             </li>
           ))}
         </ul>

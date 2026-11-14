@@ -1,5 +1,6 @@
 "use client";
 
+import { BusyButton } from "@/components/busy-button";
 import { customRangeChannelsReport, customRangeProductsReport, customRangeDailyReport, customRangeComparisonReport, customRangeChartReport, customRangeSelectionReport, customRangeChartSummaryReport, customRangeWeekdayReport, type CustomRangeReportSelection } from "@/lib/channel-reports";
 import { ReportDownload } from "@/components/report-download";
 
@@ -101,9 +102,9 @@ export function CustomRange({ today, currency }: { today: string; currency: stri
           <span className="field-label">To</span>
           <input id="range-to" type="date" className="field mt-1" min={earliest} max={today} value={to} onChange={(event) => setTo(event.target.value)} required />
         </label>
-        <button type="submit" className="btn btn-primary" disabled={busy} aria-busy={busy}>
+        <BusyButton type="submit" className="btn btn-primary" busy={busy} announce={false}>
           {busy ? "Reading…" : "Show these days"}
-        </button>
+        </BusyButton>
       </form>
       <p className="mt-2 text-xs text-ink-soft">Any days from the last 400, in UTC like every day here, set beside the same number of days just before.</p>
       <p className="mt-2 text-xs text-ink-soft" role="status" aria-live="polite" aria-atomic="true">
@@ -125,7 +126,7 @@ export function CustomRangePresets({today,busy=false,onSelect}:{today:string;bus
  return <div className="mt-2" role="group" aria-label="Quick date ranges">
   <div className="flex flex-wrap gap-2">{CUSTOM_RANGE_PRESETS.map(preset=>{
    const period=presetCustomRange(preset.value,today);
-   return <button key={preset.value} type="button" className="btn btn-secondary" disabled={busy || !period} onClick={()=>{if(period)onSelect(period);}}>{preset.label}</button>;
+   return <BusyButton key={preset.value} type="button" className="btn btn-secondary" off={busy || !period} onClick={()=>{if(period)onSelect(period);}}>{preset.label}</BusyButton>;
   })}</div>
   <p className="mt-1 text-xs text-ink-soft">Last 7/30/90 days and This month include today in UTC. Today’s numbers may still grow. Yesterday, Last month and completed-day shortcuts exclude today and use completed UTC dates.</p>
  </div>;
@@ -168,15 +169,15 @@ export function CustomRangeResults({ range, marks, titlesUnavailable = false, cu
   return (
     <div className="mt-4" data-range-result>
       {onRefresh ? <div className="mb-3">
-        <button type="button" className="btn btn-secondary" onClick={onRefresh} disabled={busy} aria-busy={busy}>{busy ? "Reading…" : "Refresh results"}</button>
+        <BusyButton type="button" className="btn btn-secondary" onClick={onRefresh} busy={busy}>{busy ? "Reading…" : "Refresh results"}</BusyButton>
         <p className="mt-1 text-xs text-ink-soft">Refresh the displayed dates, keeping the list view. Dates being edited above stay unchanged.</p>
       </div> : null}
       {onNavigate ? <div className="mb-3 flex flex-wrap gap-2" role="group" aria-label="Move between periods">
-        <button type="button" className="btn btn-secondary" disabled={busy || !canPrevious} onClick={()=>onNavigate(-1)}>Previous period</button>
-        <button type="button" className="btn btn-secondary" disabled={busy || !canNext} onClick={()=>onNavigate(1)}>Next period</button>
+        <BusyButton type="button" className="btn btn-secondary" off={busy || !canPrevious} onClick={()=>onNavigate(-1)}>Previous period</BusyButton>
+        <BusyButton type="button" className="btn btn-secondary" off={busy || !canNext} onClick={()=>onNavigate(1)}>Next period</BusyButton>
         <p className="w-full text-xs text-ink-soft">Move by the same number of days, within the available history.</p>
       </div> : null}
-      {onShowAll && (r.channelsTruncated === true || r.productsTruncated === true) ? <button type="button" className="btn btn-secondary mb-3" onClick={onShowAll} disabled={busy} aria-busy={busy}>{busy ? "Reading…" : "Show all channels and products"}</button> : null}
+      {onShowAll && (r.channelsTruncated === true || r.productsTruncated === true) ? <BusyButton type="button" className="btn btn-secondary mb-3" onClick={onShowAll} busy={busy}>{busy ? "Reading…" : "Show all channels and products"}</BusyButton> : null}
       <p className="text-sm font-semibold text-ink">{r.from === r.to ? day(r.from) : `${day(r.from)} to ${day(r.to)}, ${r.days.length} days`}</p>
       <dl className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
         {tiles.map((t) => (

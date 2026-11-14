@@ -1,5 +1,6 @@
 "use client";
 
+import { BusyButton } from "@/components/busy-button";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/icons";
@@ -291,14 +292,14 @@ export function FunnelSharePanel({
               </label>
             </div>
             <div className="mt-4 flex flex-wrap gap-2">
-              <button type="button" className="btn btn-secondary" disabled={busy !== null} aria-busy={busy === "clone"} onClick={() => void clone()}>
+              <BusyButton type="button" className="btn btn-secondary" off={busy !== null} busy={busy === "clone"} onClick={() => void clone()}>
                 <Icon name="copy" size={17} />
                 {busy === "clone" ? "Copying…" : "Make a copy here"}
-              </button>
-              <button type="button" className="btn btn-secondary" disabled={busy !== null || (shares !== null && shares.length >= limits.shares)} aria-busy={busy === "share"} onClick={() => void share()}>
+              </BusyButton>
+              <BusyButton type="button" className="btn btn-secondary" off={busy !== null || (shares !== null && shares.length >= limits.shares)} busy={busy === "share"} onClick={() => void share()}>
                 <Icon name="link" size={17} />
                 {busy === "share" ? "Making the link…" : "Make a share link"}
-              </button>
+              </BusyButton>
               <a className="btn btn-ghost" href={`/api/store/funnel-share?export=${encodeURIComponent(chosen)}&store=${encodeURIComponent(sid)}`} download>
                 <Icon name="download" size={17} />
                 Download as a file
@@ -323,9 +324,9 @@ export function FunnelSharePanel({
                     ))}
                   </select>
                 </label>
-                <button type="submit" className="btn btn-secondary" disabled={busy !== null || !copyTo} aria-busy={busy === "preview"}>
+                <BusyButton type="submit" className="btn btn-secondary" off={busy !== null || !copyTo} busy={busy === "preview"} announce={false}>
                   Preview the copy there
-                </button>
+                </BusyButton>
                 <p className="basis-full text-xs text-ink-soft">
                   It keeps your words, videos, about text, deadlines and what was said about you elsewhere, since both stores are yours. Pictures stay on the original pages. You choose that store&apos;s products for its steps, and it arrives there as a draft.
                 </p>
@@ -372,11 +373,11 @@ export function FunnelSharePanel({
                 </span>
                 {revoking === s.id ? (
                   <span className="flex items-center gap-2">
-                    <button type="button" className="btn btn-danger btn-sm" disabled={busy !== null} onClick={() => void revoke(s.id)}>Yes, revoke</button>
+                    <BusyButton type="button" className="btn btn-danger btn-sm" off={busy !== null} onClick={() => void revoke(s.id)}>Yes, revoke</BusyButton>
                     <button type="button" className="btn btn-ghost btn-sm" onClick={() => setRevoking(null)}>Keep it</button>
                   </span>
                 ) : (
-                  <button type="button" className="btn btn-ghost btn-sm" disabled={busy !== null} onClick={() => setRevoking(s.id)}>Revoke</button>
+                  <BusyButton type="button" className="btn btn-ghost btn-sm" off={busy !== null} onClick={() => setRevoking(s.id)}>Revoke</BusyButton>
                 )}
               </li>
             ))}
@@ -402,9 +403,9 @@ export function FunnelSharePanel({
             <span className="field-label">A share link or code</span>
             <input id="fs-code" type="text" className="field" value={code} onChange={(e) => setCode(e.target.value)} placeholder="mmf_…" autoComplete="off" spellCheck={false} />
           </label>
-          <button type="submit" className="btn btn-secondary" disabled={busy !== null || !code.trim()} aria-busy={busy === "preview"}>
+          <BusyButton type="submit" className="btn btn-secondary" off={busy !== null || !code.trim()} busy={busy === "preview"} announce={false}>
             Preview
-          </button>
+          </BusyButton>
         </form>
         <div className="mt-3 flex flex-wrap items-center gap-3 text-sm text-ink-soft">
           <span>Or a funnel file:</span>
@@ -478,10 +479,10 @@ export function FunnelSharePanel({
             </ul>
 
             <div className="mt-5 flex flex-wrap gap-3">
-              <button type="button" className="btn btn-primary" disabled={busy !== null || !canImport} aria-busy={busy === "import"} onClick={() => void bringIn()}>
+              <BusyButton type="button" className="btn btn-primary" off={busy !== null || !canImport} busy={busy === "import"} onClick={() => void bringIn()}>
                 {busy === "import" ? (preview.to ? "Copying…" : "Bringing it in…") : preview.to ? `Copy it into ${preview.to.name} as a draft` : "Bring it in as a draft"}
-              </button>
-              <button type="button" className="btn btn-ghost" disabled={busy !== null} onClick={() => setPreview(null)}>Cancel</button>
+              </BusyButton>
+              <BusyButton type="button" className="btn btn-ghost" off={busy !== null} onClick={() => setPreview(null)}>Cancel</BusyButton>
             </div>
           </div>
         ) : null}

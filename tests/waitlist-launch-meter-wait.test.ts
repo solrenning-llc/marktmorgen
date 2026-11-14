@@ -104,6 +104,8 @@ async function main(): Promise<void> {
 
   part("The month's room taken by another email between the launch's read and its send: the launch waits");
   {
+    // On its own: the launch above, still queued, would go out in this run once the window is no longer funded.
+    redis.clear();
     const { store, sid, pid } = await launched("race-owner@example.com", "racewait");
     onBatchRead = async () => {
       const used = (await allowanceUsedExact(store, "email")) ?? 0;

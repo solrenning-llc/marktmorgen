@@ -22,6 +22,7 @@ import { NIMBUS_FROM, sendBatch, sendEmail } from "@/lib/email";
 import { withinLimit } from "@/lib/request-guard";
 import { fromLine, releaseDay, render, reserveDay } from "@/lib/mail";
 import { allowancesUsedStrict } from "@/lib/store-allowance";
+import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { upsertContact } from "@/lib/contacts";
 import { SITE_URL } from "@/lib/site-url";
 import { handleLeadsToStore, storeHandleKey, type Listing, type Store } from "@/lib/store";
@@ -316,6 +317,22 @@ async function launchTarget(
  * Each batch carries a key made of where it starts, so a batch tried again
  * is never sent twice. Returns how many emails went.
  */
+/**
+ * Whether the store's email meter would refuse `n` emails now (lib/email.ts, metered): true for a funded store whose
+ * window cannot be reserved, or a month whose room is now under `n`; null when the month cannot be read (unknown is
+ * never "room"); false otherwise, so a refusal that is none of these is the sender's own.
+ */
+async function meterWouldRefuse(store: Store, n: number): Promise<boolean | null> {
+  try {
+    if (store.period?.funded === true && (!store.tier || !(await reservePaidResourceWindow({ ...store, tier: store.tier, statsId: store.statsId ?? null })))) return true;
+    const month = await allowancesUsedStrict(store, ["email"]);
+    if (!month) return null;
+    return month[0].figure - month[0].used < n;
+  } catch {
+    return null;
+  }
+}
+
 export async function runLaunches(load: (handle: string) => Promise<Store | null>, readProduct: (store: Store, id: string) => Promise<Listing | null>, deadline: number): Promise<number> {
   if (!isRedisConfigured()) return 0;
   const [members] = await redisPipeline([["SMEMBERS", JOBS]]);
@@ -425,8 +442,17 @@ export async function runLaunches(load: (handle: string) => Promise<Store | null
         await releaseDay(chunk.length);
         break;
       }
-      if (outcome === "refused") await releaseDay(chunk.length);
-      else {
+      if (outcome === "refused") {
+        await releaseDay(chunk.length);
+        // A refusal the store's meter accounts for is a wait, never a pass-over (Claude 3 cloud O's MEDIUM on #4473):
+        // a funded window it cannot reserve, the room taken by another email since the read above, or a read that
+        // cannot be made. The cursor stays, the lists stay, and the next run tries the same people again.
+        if ((await meterWouldRefuse(store, chunk.length)) !== false) {
+          console.error("sending a waitlist launch: the store's email meter would not take the batch, so it waits");
+          await redisPipeline([["EXPIRE", sendKey(sid, pid), 120 * 86_400]]).catch(() => {});
+          break;
+        }
+      } else {
         job.sent += chunk.length;
         sent += chunk.length;
       }

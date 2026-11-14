@@ -170,7 +170,10 @@ async function sessionsOf(who: string): Promise<string[]> {
   const replies = repliesFor(await redisPipeline([["SMEMBERS", who]]), 1);
   const members = replies ? stringList(replies[0]) : null;
   if (!members) throw new UnknownReplyError("the checkouts an address said yes to a reminder on");
-  return members.filter((s) => SESSION.test(s));
+  // Only a checkout id is ever added to the note (keepAssistReminder), so a member of another shape is a reply that
+  // does not read: skipped, the note would be deleted and that consent kept with nothing to find it by (Codex X6).
+  if (!members.every((s) => SESSION.test(s))) throw new UnknownReplyError("a checkout an address said yes to a reminder on");
+  return members;
 }
 
 /**

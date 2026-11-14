@@ -108,7 +108,7 @@ test("the copy of a person's data: a list or a consent in another shape is unkno
 });
 
 test("a member of the note that is no checkout id is unknown, never skipped (Codex X6 MEDIUM on #3929)", async (t) => {
-  // Only a checkout id is ever added to the note (lib/assistant-reminder.ts, recordAssistReminder), so a member of
+  // Only a checkout id is ever added to the note (lib/assistant-reminder.ts, keepAssistReminder), so a member of
   // another shape is a reply that does not read: skipping it would delete the note and keep that consent, address
   // and all, with nothing left to find it by, and the erasure would say it finished.
   for (const [answer, label] of [

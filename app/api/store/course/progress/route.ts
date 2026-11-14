@@ -7,7 +7,7 @@ import { fromAnotherSite } from "@/lib/studio-route";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { ITEM_ID_PATTERN, findLesson, isOpen, readCourse } from "@/lib/course";
 import { courseAccess, emailKey, markLesson } from "@/lib/learn";
-import { heldBack, passedQuizzes } from "@/lib/quiz";
+import { heldBack, passedForGate } from "@/lib/quiz";
 import { limited } from "@/lib/request-guard";
 import { readCourseListing } from "@/lib/catalog";
 import { noteIfFinished } from "@/lib/course-finish";
@@ -49,7 +49,7 @@ export async function POST(request: NextRequest) {
   if (!access.learner.owner) {
     // A lesson behind a quiz that must be passed, or one whose own quiz must
     // be passed first, is not marked done by a button.
-    const passed = await passedQuizzes(product.course.id, emailKey(access.learner.email));
+    const passed = await passedForGate(product.course.id, emailKey(access.learner.email));
     if (course && heldBack(course, passed).has(lessonId)) {
       return new Response(null, { status: 303, headers: { Location: base } });
     }

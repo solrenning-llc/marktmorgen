@@ -1,4 +1,9 @@
-import { apiStore, holdMoreApi, takeMoreApi } from "@/lib/api-guard";
+import { apiAgent, apiStore, holdMoreApi, takeMoreApi } from "@/lib/api-guard";
+import { proposeDescription } from "@/lib/agent-propose";
+import { BookReadRefused } from "@/lib/agent-book";
+import { PRODUCT_DESCRIPTION } from "@/lib/agent-kinds";
+import { addWork, apiReadUnits, listingsWork, proposeWork } from "@/lib/api-read-rules";
+import { listingsToRead } from "@/lib/catalog-read-count";
 import { limited } from "@/lib/request-guard";
 import { products, storeInfo } from "@/lib/api-read";
 import { apiNumbers } from "@/lib/api-numbers";
@@ -6,10 +11,12 @@ import { summaryOf } from "@/lib/stats-report";
 import type { StatsData } from "@/lib/stats";
 import {
   affiliatesTool,
+  bundleChoicesTool,
   buyersTool,
   channelsTool,
   emailsTool,
   funnelTool,
+  importsTool,
   insightsTool,
   membershipsTool,
   productTextTool,
@@ -85,6 +92,39 @@ export async function POST(request: Request) {
   }
   if (method === "ping") return result(id, {});
 
+  // A tool that prepares a change needs a key that may (631 [AA1] (c)); checked instead of the plain read, so the call is counted once.
+  const asked = (message.params ?? {}) as { name?: unknown; arguments?: Record<string, unknown> };
+  if (method === "tools/call" && asked.name === "propose_product_description") {
+    const agent = await apiAgent(request, "draft");
+    if (agent instanceof Response) {
+      const refusal = (await agent.json().catch(() => null)) as { message?: unknown } | null;
+      return failure(id, -32001, typeof refusal?.message === "string" ? refusal.message : "This key cannot prepare changes for you to confirm.");
+    }
+    // Paid for before it reads (lib/api-read-rules.ts, proposeWork): first all but the book; then the book, measured
+    // under its lock where it cannot grow, at what it weighs, before it is read. Refused, the refusal's own sentence.
+    const named = typeof asked.arguments?.product === "string" ? asked.arguments.product.slice(0, 40) : "";
+    const envelope = (book: number) => apiReadUnits(addWork(listingsWork(3 * listingsToRead(agent.store, named ? [named] : [])), proposeWork(book, PRODUCT_DESCRIPTION.maxBytes)));
+    const refusedWords = async (refusal: Response) => {
+      const words = (await refusal.json().catch(() => null)) as { message?: unknown } | null;
+      return failure(id, -32001, typeof words?.message === "string" ? words.message : "That could not be prepared just now. Try again in a moment.");
+    };
+    const first = envelope(0);
+    const opened = await takeMoreApi(agent.store, first);
+    if (opened) return refusedWords(opened);
+    let refusal: Response | null = null;
+    const admit = async (bytes: number) => {
+      refusal = await takeMoreApi(agent.store, envelope(bytes) - first, first);
+      return refusal === null;
+    };
+    try {
+      return result(id, await proposeDescription(agent.store, agent.keyId, asked.arguments ?? {}, admit));
+    } catch (error) {
+      if (error instanceof BookReadRefused && refusal) return refusedWords(refusal);
+      if (error instanceof BookReadRefused) return failure(id, -32001, "That could not be prepared just now. Try again in a moment.");
+      throw error;
+    }
+  }
+
   const store = await apiStore(request);
   if (store instanceof Response) {
     // The refusal's own sentence (a pause, the month used, the minute), so an
@@ -127,7 +167,7 @@ export async function POST(request: Request) {
       const value = {
         ...((await tool(read.data)) as Record<string, unknown>),
         asOf: read.asOf,
-        ...(read.listed ? {} : { products_note: "The products' names were not read: your store's API requests left did not cover them." }),
+        ...(read.listed ? {} : { products_note: "The products' names were not read: your store's API requests left did not cover them, or they could not be read just now. An empty products list here is not a store without products." }),
       };
       const answer = said(value);
       // What the answer sends is settled before it is sent.
@@ -179,6 +219,13 @@ export async function POST(request: Request) {
       const listed = await savedBlocksTool(store, hold);
       if (listed instanceof Response) return refusedWith(listed);
       return result(id, said(listed, listed.sections === null));
+    }
+    // What a bundle can be made of, and the store's imports (631 [AA1] (a)): each sets aside its most before reading
+    // and is settled at what it read and sends before it is sent (lib/mcp-tools.ts).
+    if (params.name === "list_bundle_choices" || params.name === "get_imports") {
+      const read = params.name === "get_imports" ? await importsTool(store, hold) : await bundleChoicesTool(store, params.arguments ?? {}, hold);
+      if (read instanceof Response) return refusedWith(read);
+      return result(id, read.found ? said(read.value) : said({ error: read.error }, true));
     }
     if (params.name === "list_products") {
       const cursor = typeof params.arguments?.cursor === "string" ? params.arguments.cursor.slice(0, 200) : null;

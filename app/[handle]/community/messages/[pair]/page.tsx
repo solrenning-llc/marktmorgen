@@ -10,6 +10,7 @@ import { MAX_MESSAGE_TEXT, mayMessage, otherIn, thread } from "@/lib/community-d
 import { CommunityBar, Face, PostText, authorName, communityNotices, storeWhen } from "@/components/community-parts";
 import { communityWords } from "@/lib/buyer-words/community";
 import { LANGUAGES } from "@/lib/store-language";
+import { EmptyState } from "@/components/empty-state";
 
 type Params = {
   params: Promise<{ handle: string; pair: string }>;
@@ -111,14 +112,11 @@ export default async function MessageThreadPage({ params, searchParams }: Params
         ) : null}
 
         {talk.messages.length === 0 ? (
-          <div className="st-note mt-5 text-center">
-            <p className="font-bold" style={{ color: "var(--st-text)" }}>{w.nothingSaidYet}</p>
-            <p className="mt-1 text-sm">
-              {config.dm.ask && other !== CREATOR && key !== CREATOR
-                ? w.firstAsRequest(name)
-                : w.writeFirst}
-            </p>
-          </div>
+          <EmptyState
+            title={w.nothingSaidYet}
+            body={config.dm.ask && other !== CREATOR && key !== CREATOR ? w.firstAsRequest(name) : w.writeFirst}
+            className="mt-5"
+          />
         ) : null}
 
         <ul className="mt-6 space-y-3">

@@ -5,14 +5,14 @@
  * again from what the stand-in holds, as router.refresh() does in the studio.
  * Nothing leaves the page: no server, no store, no real person.
  */
-import { use, useEffect, useState } from "react";
+import { use, useLayoutEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { DealsBoard } from "@/components/deals-board";
 import type { CrmField, Deal, Pipeline } from "@/lib/crm-rules";
 
 type World = { deals: Deal[]; versions: Record<string, string>; pipelines: Pipeline[]; fields: CrmField[]; viewOnly?: string[] };
 type Forced = { status: number; body: unknown };
-type Harness = { world: World; writes: Record<string, unknown>[]; next: Forced | null; delay: number; refreshDelay: number; refresh: () => void; mount: (world: World) => void };
+type Harness = { world: World; writes: Record<string, unknown>[]; next: Forced | null; delay: number; held: Promise<void> | null; hold: () => void; release: () => void; refreshDelay: number; requestedEpoch: number; mountedEpoch: number; refresh: () => void; mount: (world: World) => number };
 
 /** The page's own handle on the harness, read by tests/e2e/deals-board-focus.mjs as page.harness. */
 const page = window as unknown as Window & { harness: Harness };
@@ -25,6 +25,8 @@ async function crm(body: Record<string, unknown>): Promise<Response> {
   const h = page.harness;
   h.writes.push(body);
   await new Promise((resolve) => setTimeout(resolve, h.delay));
+  // A held answer waits until the check releases it, so a state "while it is saved" is read for sure, on any machine.
+  if (h.held) await h.held;
   if (h.next) {
     const forced = h.next;
     h.next = null;
@@ -66,12 +68,13 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
  * the server: the board suspends inside the board's own transition, so its
  * "refreshing" state lasts as long as it does in the studio.
  */
-function Board() {
+function Board({ epoch }: { epoch: number }) {
   const [loading, setLoading] = useState<Promise<void> | null>(null);
   if (loading) use(loading);
-  useEffect(() => {
+  useLayoutEffect(() => {
     page.harness.refresh = () => setLoading(new Promise((resolve) => setTimeout(resolve, page.harness.refreshDelay)));
-  }, []);
+    page.harness.mountedEpoch = epoch;
+  }, [epoch]);
   const w = page.harness.world;
   return <DealsBoard deals={[...w.deals]} versions={{ ...w.versions }} stages={w.pipelines.flatMap((p) => p.stages)} pipelines={w.pipelines} pipelineMax={3} viewOnly={w.viewOnly} fields={w.fields} currency="usd" assignees={["owner@example.test"]} today="2026-11-04" />;
 }
@@ -82,11 +85,24 @@ page.harness = {
   writes: [],
   next: null,
   delay: 60,
+  held: null,
+  /** Holds every answer of the stand-in from now until release(): what the board shows while a change is being saved stays on screen. */
+  hold() {
+    if (this.held) return;
+    let open = () => {};
+    this.held = new Promise<void>((resolve) => { open = resolve; });
+    this.release = () => { this.held = null; this.release = () => {}; open(); };
+  },
+  release: () => {},
   refreshDelay: 0,
+  requestedEpoch: 0,
+  mountedEpoch: 0,
   refresh: () => {},
   mount(world: World) {
     this.world = world;
     this.writes = [];
-    root.render(<Board key={Math.random()} />);
+    this.requestedEpoch += 1;
+    root.render(<Board key={this.requestedEpoch} epoch={this.requestedEpoch} />);
+    return this.requestedEpoch;
   },
 };

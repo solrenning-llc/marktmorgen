@@ -23,30 +23,34 @@ import type { Store } from "@/lib/store";
 import { type StatsData, readsSales, productsInStats, readSales, readStats, studioStats } from "@/lib/stats";
 import { readListing, readListings } from "@/lib/catalog";
 import { listingsToRead } from "@/lib/catalog-read-count";
-import { readAbout } from "@/lib/product-about";
-import { type Course, findLesson, readBody, readCourse } from "@/lib/course";
-import { readQuizFor } from "@/lib/quiz";
-import { readTaskFor } from "@/lib/assignment";
+import { readAboutExact } from "@/lib/product-about";
+import { type Course, findLesson, readBodyExact, readCourseExact } from "@/lib/course";
+import { UnknownReplyError } from "@/lib/redis-reply";
+import { readQuizForExact } from "@/lib/quiz";
+import { readTaskForExact } from "@/lib/assignment";
 import { MAX_VERSIONS, countVersions, readPageExact, readVersionsExact } from "@/lib/sales-page-store";
 import { countSections, readSectionsExact } from "@/lib/saved-block-store";
 import type { PageBlock } from "@/lib/sales-page";
 import { EMPTY_PAGE, type SalesPage, declaredMeasure, runningTest } from "@/lib/sales-page";
 import { expectedShareB, readCounts } from "@/lib/headline-test";
 import { type Counts, testState } from "@/lib/headline-test-rules";
-import { reachShares, readDepth } from "@/lib/page-depth";
+import { reachShares, readDepthExact } from "@/lib/page-depth";
 import { isFree } from "@/lib/store-field-rules";
 import { keptMembershipBytes, membershipNumbersPaid } from "@/lib/membership-numbers";
 import { broadcastSizes, listBroadcasts } from "@/lib/broadcasts";
 import { broadcastMoney, flowMoney, keptMailRevenueBytes, readMailRevenuePaid } from "@/lib/mail-revenue";
-import { flowStats, flowsBytes, readFlows } from "@/lib/flows";
+import { flowsBytes, readFlows } from "@/lib/flows";
+import { readFlowStatsStrict } from "@/lib/flow-stats";
 import { listCounts } from "@/lib/contacts";
 import { affiliatesOn, readBook } from "@/lib/affiliates";
 import { type Charge, type Hold, chargeBook } from "@/lib/api-read";
 import {
   EMAILS_BROADCASTS, EMAILS_PROBE_WORK, MEMBERSHIPS_COLD_WORK, addWork, apiReadUnits, boughtNextWork, courseOutlineWork, emailsWork, lessonWork, listingsWork, mailRevenueColdWork,
   membershipsWork, pageReadingWork, pageTestWork, pageVersionsWork, productTextWork, salesPageWork, savedBlocksWork, settledUnits,
-  COUNT_REPLY_BYTES, SAVED_SECTIONS_MAX, type ReadWork,
+  COUNT_REPLY_BYTES, SAVED_SECTIONS_MAX, type ReadWork, BUNDLE_CHOICES_MOST, IMPORTS_MOST, bundleChoicesWork, importsWork,
 } from "@/lib/api-read-rules";
+import { PICKER_PAGE, bundleChoicesPage, choiceCursor, choiceQuery } from "@/lib/bundle-choices";
+import { type ImportJob, type ImportKind, type ImportSource, type ImportState, storeImportsRead } from "@/lib/imports";
 import { paypalCounts } from "@/lib/paypal-sales";
 import { insightsFrom } from "@/lib/insights";
 import { pathsBytes, readPaths } from "@/lib/next-bought";
@@ -93,8 +97,10 @@ export async function readFullNumbersPaid(store: Store, charge: Charge | null, n
   const named = productsInStats(store, stats, sales);
   const refused = charge ? await charge(apiReadUnits(listingsWork(listingsToRead(store, named))), taken) : null;
   if (refused) return { data: studioStats(store, stats, sales, state, []), listed: false };
-  const listings = await readListings(store, named).catch(() => []);
-  return { data: studioStats(store, stats, sales, state, listings), listed: true };
+  // Listings that could not be read are not listed: the answer says so and the hour's copy is not kept without them,
+  // never "this store has no products" (CX-123 rule 24).
+  const listings = await readListings(store, named).catch(() => null);
+  return { data: studioStats(store, stats, sales, state, listings ?? []), listed: listings !== null };
 }
 
 const share = (part: number, whole: number) => (whole > 0 ? Math.round((part / whole) * 10_000) / 10_000 : null);
@@ -224,6 +230,8 @@ export function funnelTool(data: StatsData, w: Window) {
  * listings, once what reading them costs is taken (lib/api-read-rules.ts,
  * listingsWork, counted first). When that is not left, those are named by
  * their id (`named` false): what was already read and paid for is never lost.
+ * Listings that could not be read name them by their id too, and say so
+ * (`named` false), never that their names were read (CX-123 rule 24).
  * Without `charge` (not the API), they are read as they are.
  */
 async function titlesFor(store: Store, ids: Iterable<string>, known: Map<string, string>, charge: Charge | null, taken: number): Promise<{ titles: Map<string, string>; named: boolean }> {
@@ -231,8 +239,9 @@ async function titlesFor(store: Store, ids: Iterable<string>, known: Map<string,
   const missing = [...new Set(ids)].filter((id) => !titles.has(id));
   if (!missing.length) return { titles, named: true };
   if (charge && (await charge(apiReadUnits(listingsWork(listingsToRead(store, missing))), taken))) return { titles, named: false };
-  for (const listing of await readListings(store, missing).catch(() => [])) titles.set(listing.id, listing.title);
-  return { titles, named: true };
+  const listings = await readListings(store, missing).catch(() => null);
+  for (const listing of listings ?? []) titles.set(listing.id, listing.title);
+  return { titles, named: listings !== null };
 }
 
 /**
@@ -271,7 +280,7 @@ export async function productsTool(store: Store, data: StatsData, w: Window, met
           .slice(0, 5)
           .map(([id, buyers]) => ({ product: name(id), buyers })),
         sequences: Object.entries(paths.next).flatMap(([from, steps]) => steps.map((s) => ({ first: name(from), then: name(s.id), buyers: s.buyers, days_later: s.days }))),
-        ...(named ? {} : { names_note: "Some products are named by their id: your store's API requests left did not cover reading their names." }),
+        ...(named ? {} : { names_note: "Some products are named by their id: your store's API requests left did not cover reading their names, or they could not be read just now." }),
       }
     : null;
   // What was set aside is settled at what is sent of it; past it (it never is, at its most), it is not sent.
@@ -340,11 +349,13 @@ export async function membershipsTool(store: Store, charge: Charge) {
     churn_last_30_days: n.churn30,
     trials_ended_last_90_days: { ended: n.trialsEnded, became_paying: n.trialsConverted },
     by_product: n.byProduct.map((p) => ({ product: titles.get(p.product) ?? p.product, members: p.members, trialing: p.trialing, mrr: Math.round(p.mrr) })),
-    // False when the products are named by their id: the store's API requests left did not cover reading their names.
+    // False when the products are named by their id: the store's API requests left did not cover reading their names, or they could not be read.
     by_product_named: named,
-    by_channel: (n.byChannel ?? []).map((c) => ({ channel: c.channel, started: c.started, running: c.running, still_running_at_3_months: c.stayed3, average_months: c.months })),
+    // Null when the reading does not hold it, never an empty list (CX-123 rule 24).
+    by_channel: n.byChannel ? n.byChannel.map((c) => ({ channel: c.channel, started: c.started, running: c.running, still_running_at_3_months: c.stayed3, average_months: c.months })) : null,
     why_members_left: n.leaving ? { canceled: n.leaving.canceled, answered: n.leaving.answered, reasons: n.leaving.reasons.map((r) => ({ reason: r.reason, members: r.members, mrr: Math.round(r.mrr) })), payment_failed: n.leaving.paymentFailed } : null,
-    mrr_by_month: n.movements?.months ?? [],
+    // Null when the invoices could not be read (lib/membership-numbers.ts keeps the reading without movements), never [].
+    mrr_by_month: n.movements ? n.movements.months : null,
     arpu: n.movements?.arpu ?? null,
     net_revenue_retention: n.movements?.nrr ?? null,
     forecast_next_3_months: n.forecast ?? null,
@@ -397,7 +408,9 @@ export async function emailsTool(store: Store, meter: { charge: Charge; hold: Ho
           },
         ).catch(() => null)
       : Promise.resolve(null),
-    flowStats(flows).catch(() => new Map()),
+    // Read by the studio's own strict reader, one rule for what a tally may be (Claude 4 on #3176). A reading that
+    // failed or answered in another shape is unknown: each sequence says null, never 0 (CX-123 rule 24).
+    readFlowStatsStrict(flows).catch(() => null),
   ]);
   if (said.refused) return said.refused;
   // Settled at what was read: the copy at the bytes it was read at, or the sales and the copy made of them. What a
@@ -426,9 +439,9 @@ export async function emailsTool(store: Store, meter: { charge: Charge; hold: Ho
       };
     }),
     sequences: flows.map((f) => {
-      const c = flowCounts.get(f.id);
+      const c = flowCounts?.get(f.id) ?? null;
       const money = flowMoney(revenue, f.id);
-      return { name: f.name, trigger: f.trigger, started: c?.started ?? 0, emails_sent: c?.sent ?? 0, reached_the_end: c?.reached ?? 0, sales: money?.sales ?? null, revenue: money?.cents ?? null, sales_in_another_currency: money ? money.elsewhere ?? 0 : null };
+      return { name: f.name, trigger: f.trigger, started: c ? c.started : null, emails_sent: c ? c.sent : null, reached_the_end: c ? c.reached : null, counts_unavailable: c === null, sales: money?.sales ?? null, revenue: money?.cents ?? null, sales_in_another_currency: money ? money.elsewhere ?? 0 : null };
     }),
   };
 }
@@ -518,7 +531,10 @@ export async function productTextTool(store: Store, id: string, charge: Charge):
   if (refused) return refused;
   const listing = await readListing(store, id);
   if (!listing) return null;
-  return { product: listing.id, title: listing.title, description: listing.about ? await readAbout(store.statsId, listing.id) : "" };
+  if (!listing.about) return { product: listing.id, title: listing.title, description: "" };
+  // Read exactly: a description the listing says exists that does not read is unknown and throws, never "" (CX-123 rule 24).
+  if (!store.statsId) throw new Error("the description could not be read");
+  return { product: listing.id, title: listing.title, description: await readAboutExact(store.statsId, listing.id) };
 }
 
 /** A product's sales page, or null when the store has no such product; the refusal when the store's API requests are used up. */
@@ -567,7 +583,8 @@ export async function readCourseTool(store: Store, id: string, charge: Charge) {
   const refused = await payFor(store, id, courseOutlineWork(), charge);
   if (refused) return refused;
   const listing = await readListing(store, id);
-  const course = listing?.course ? await readCourse(listing.course.id) : null;
+  // Read exactly: only a course Redis says is not there is none; another answer throws, never "no course" (CX-123 rule 24).
+  const course = listing?.course ? await readCourseExact(listing.course.id) : null;
   return listing && course ? courseOutlineTool(listing.id, listing.title, course) : null;
 }
 
@@ -576,10 +593,13 @@ export async function readLessonTool(store: Store, id: string, lessonId: string,
   const refused = await payFor(store, id, lessonWork(), charge);
   if (refused) return refused;
   const listing = await readListing(store, id);
-  const course = listing?.course ? await readCourse(listing.course.id) : null;
+  const course = listing?.course ? await readCourseExact(listing.course.id) : null;
   const found = course ? findLesson(course, lessonId) : null;
   if (!listing || !course || !found) return null;
-  const [text, quiz, task] = await Promise.all([readBody(course.id, lessonId), readQuizFor(course.id, lessonId), readTaskFor(course.id, lessonId)]);
+  // Read exactly: only what Redis says is not there is no text, quiz or task; another answer throws, never "" or none (CX-123 rule 24).
+  const [text, quiz, task] = await Promise.all([readBodyExact(course.id, lessonId), readQuizForExact(course.id, lessonId), readTaskForExact(course.id, lessonId)]);
+  // readBodyExact answers null for a reply it cannot read: unknown, never a lesson with no text.
+  if (text === null) throw new UnknownReplyError("a lesson's text");
   return { product: listing.id, module: found.unit.title, lesson: found.lesson.id, title: found.lesson.title, text, quiz, task };
 }
 
@@ -628,9 +648,15 @@ export async function readPageReadingTool(store: Store, id: string, charge: Char
   if (refused) return refused;
   const listing = await readListing(store, id);
   if (!listing) return null;
-  // The page read exactly: an answer that is not known is "unavailable", never a page with no blocks.
-  const [kept, depth] = await Promise.all([store.statsId ? readPageExact(store.statsId, listing.id).catch(() => undefined) : { page: null, bytes: 0 }, readDepth(store.statsId, listing.id)]);
+  // The page and its counts read exactly: an answer that is not known is "unavailable", never a page with no blocks
+  // or no visitors measured (CX-123 rule 24). A store with no stats id has never counted a visitor.
+  const nothing = { visitors: 0, stopped: {}, whyNot: {}, videos: {} };
+  const [kept, depth] = await Promise.all([
+    store.statsId ? readPageExact(store.statsId, listing.id).catch(() => undefined) : { page: null, bytes: 0 },
+    store.statsId ? readDepthExact(store.statsId, listing.id).catch(() => undefined) : nothing,
+  ]);
   if (kept === undefined) return { error: "The page could not be read just now. Try again in a moment." };
+  if (depth === undefined) return { error: "How far visitors read could not be read just now. Try again in a moment." };
   const page = kept.page ?? { ...EMPTY_PAGE, blocks: [] };
   // While a whole second version is tested, each visitor reads one of two pages: no single depth means anything.
   const reach = page.variant ? null : reachShares(page.blocks.map((b) => b.id), depth.stopped, depth.visitors);
@@ -724,6 +750,118 @@ export async function savedBlocksTool(store: Store, hold: Hold) {
   const sent = Buffer.byteLength(JSON.stringify(value, null, 2) ?? "", "utf8");
   const refused = await settle(settledUnits(atLeast(savedBlocksWork(read.sections.length), { bytes: COUNT_REPLY_BYTES + read.bytes, sent }), most));
   return refused ?? value;
+}
+
+/**
+ * The products a bundle can be made of (631 [AA1] (a)): the same rule and
+ * reasons as the creator's own picker in /studio/bundles
+ * (lib/bundle-choices.ts), so an agent preparing a bundle never offers what
+ * the store would refuse, a page at a time. Unlike the picker, which lists
+ * what can go in first, each page keeps the creator's order
+ * (bundleChoicesPage). Prices in the smallest unit of the store's currency.
+ */
+export async function bundleChoicesTool(store: Store, args: Record<string, unknown>, hold: Hold): Promise<Response | { found: true; value: unknown } | { found: false; error: string }> {
+  // Set aside at its most before anything is read: a whole stretch of cached names and a whole page of listings (Codex G2
+  // on #1933). Settled at the larger of that ceiling for what was read and what was really read and sent, before it is sent.
+  const most = apiReadUnits(BUNDLE_CHOICES_MOST);
+  const settle = await hold(most);
+  if (settle instanceof Response) return settle;
+  const owner = typeof args.bundle === "string" ? args.bundle.slice(0, 40) : "";
+  // A page at a time, each inside what it is paid for (Codex A3, #1933): never the whole catalog in one call.
+  const page = await bundleChoicesPage(store, { owner, query: choiceQuery(args.search), after: choiceCursor(args.cursor) });
+  // Read but not known: how much was read is not known either, so all that was set aside is kept; never a page with
+  // products left out (Codex G2, #1933).
+  if (!page.known) return (await settle(most)) ?? { found: false as const, error: "This page of products could not be read just now. Nothing was left out on purpose; try the same cursor again in a moment." };
+  const value = {
+    note: `Products that may go in a bundle, in the creator's order, ${PICKER_PAGE} a page, each with can_go_in, and why_not saying why it cannot. To read the next page, call again with cursor set to next_cursor; next_cursor is null on the last page. matches counts the products not ruled out by their kind (null with a search, which looks through the products a stretch at a time, so a page may hold fewer than 20 or none and still have a next_cursor); unsearched counts the products in that stretch whose name is not ready to search yet: list without a search to see them. price is in the smallest unit of the store's currency. hidden products are not listed on the store page.`,
+    next_cursor: page.next === null ? null : String(page.next),
+    matches: page.matches,
+    unsearched: page.unsearched,
+    products: page.products.map((p) => ({ id: p.id, title: p.title, price: p.priceCents, what: p.what, hidden: p.hidden, can_go_in: p.why === null, why_not: p.why })),
+  };
+  const sent = Buffer.byteLength(JSON.stringify(value, null, 2) ?? "", "utf8");
+  const refused = await settle(settledUnits(atLeast(bundleChoicesWork(page.read.cards, page.read.listings), { bytes: page.read.bytes, sent }), most));
+  return refused ?? { found: true as const, value };
+}
+
+const UNREAD_IMPORTS = "Your imports could not be read just now. This is not an empty history; try again in a moment.";
+// Each set whole by its type, so a kind, state or source added to lib/imports.ts must be added here too.
+const IMPORT_KINDS: Readonly<Record<ImportKind, true>> = { contacts: true, products: true, purchases: true, members: true };
+const IMPORT_STATES: Readonly<Record<ImportState, true>> = { receiving: true, queued: true, running: true, mailing: true, done: true, canceled: true, failed: true };
+const IMPORT_SOURCES: Readonly<Record<ImportSource, true>> = { csv: true, clickfunnels: true };
+const whole = (n: unknown): n is number => Number.isSafeInteger(n) && (n as number) >= 0;
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+const oneOf = <K extends string>(set: Readonly<Record<K, true>>, v: unknown): v is K => typeof v === "string" && Object.hasOwn(set, v);
+
+/**
+ * An import as get_imports sends it, or null when the kept record is not in
+ * its exact shape (Claude 4 (cloud B) and Codex Nuvem 3 on #3661): every count
+ * and row figure a whole number of at least 0, both times whole numbers, kind,
+ * state and source from their sets. contacts and stopped, which imports made
+ * before they existed never recorded, are null then (rule 24: not counted,
+ * never a zero); kept with any other value they are not read. A source absent
+ * is csv: the only files read before ClickFunnels's (lib/imports.ts).
+ */
+function importRow(job: ImportJob) {
+  const raw: Record<string, unknown> = job;
+  const { counts, options } = raw;
+  if (!isRecord(counts) || !isRecord(options)) return null;
+  if (!oneOf(IMPORT_KINDS, raw.kind) || !oneOf(IMPORT_STATES, raw.state)) return null;
+  if (options.source !== undefined && !oneOf(IMPORT_SOURCES, options.source)) return null;
+  const figures = [raw.at, raw.finishedAt, raw.expected, raw.total, raw.done, counts.added, counts.already, counts.skipped, counts.errors, counts.mailed, counts.unmailed];
+  if (!figures.every(whole)) return null;
+  const notAlways = (n: unknown): number | null | undefined => (n === undefined ? null : whole(n) ? n : undefined);
+  const contacts = notAlways(counts.contacts);
+  const stopped = notAlways(counts.stopped);
+  if (contacts === undefined || stopped === undefined) return null;
+  return {
+    id: job.id,
+    kind: raw.kind,
+    from: options.source ?? "csv",
+    state: raw.state,
+    started_at: raw.at as number,
+    finished_at: raw.finishedAt as number,
+    rows_expected: raw.expected as number,
+    rows_received: raw.total as number,
+    rows_looked_at: raw.done as number,
+    added: counts.added as number,
+    already: counts.already as number,
+    skipped: counts.skipped as number,
+    errors: counts.errors as number,
+    emailed: counts.mailed as number,
+    not_emailed: counts.unmailed as number,
+    contacts_not_emailable: contacts,
+    stopped,
+  };
+}
+
+/**
+ * The store's latest imports from another platform (631 [AA1] (a)): what
+ * kind, where from, how far along and what each row came to, as counts. Not
+ * the file's name nor who started it, which may name a person; not the rows
+ * themselves, and not the report of rows left out, which holds addresses.
+ */
+export async function importsTool(store: Store, hold: Hold): Promise<Response | { found: true; value: unknown } | { found: false; error: string }> {
+  // Set aside at its most (every import the history keeps) before the index is read; settled before anything is sent.
+  const most = apiReadUnits(IMPORTS_MOST);
+  const settle = await hold(most);
+  if (settle instanceof Response) return settle;
+  // Only Redis's exact answers: anything else is unknown, all that was set aside is kept and it is said so, never an
+  // empty or shorter history (Codex A3 and G, #1933).
+  const read = await storeImportsRead(store);
+  if (read === "unknown") return (await settle(most)) ?? { found: false as const, error: UNREAD_IMPORTS };
+  // Every field it sends read exactly (Claude 4 (cloud B) and Codex Nuvem 3 on #3661): a kept record with an import's
+  // id is not an import by that alone. One that is not in its exact shape is unknown, all set aside kept, never a
+  // TypeError after the hold was taken and never a count sent as text or an object.
+  const rows = read.jobs.map(importRow);
+  if (rows.some((row) => row === null)) return (await settle(most)) ?? { found: false as const, error: UNREAD_IMPORTS };
+  const value = {
+    note: "Newest first, at most ten. started_at and finished_at are in milliseconds since 1970 (UTC); finished_at is 0 while it runs. added were brought in, already were there, skipped were left out on purpose (no consent, unsubscribed, a repeated row), errors could not be brought in: the creator downloads that report in the studio. contacts_not_emailable and stopped are null on an import made before they were counted: not counted, never a zero.",
+    imports: rows,
+  };
+  const sent = Buffer.byteLength(JSON.stringify(value, null, 2) ?? "", "utf8");
+  const refused = await settle(settledUnits(atLeast(importsWork(read.ids), { bytes: read.bytes, sent }), most));
+  return refused ?? { found: true as const, value };
 }
 
 /** A work's ceiling, raised to what was really read and sent where that came to more. */

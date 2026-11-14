@@ -31,10 +31,12 @@ export async function POST(request: NextRequest) {
   if (!(await withinEssentialLimit("ai", store.sid || store.handle, AI_PER_MINUTE, 60))) return Response.json({ ok: false, error: "slow" }, { status: 429 });
   try {
     const done = await withCutoff(cutoff, () => makeVoice(store));
-    if (!done.ok) return Response.json({ ok: false, error: done.reason, texts: done.texts ?? null }, { status: done.reason === "failed" ? 502 : done.reason === "busy" || done.reason === "changed" ? 409 : done.reason === "late" ? 503 : 400 });
+    // "unread": a list could not be read just now, so too few texts is not known to be few (rule 24); nothing was counted.
+    if (!done.ok) return Response.json({ ok: false, error: done.reason, texts: done.texts ?? null, unread: done.unread ?? null }, { status: done.reason === "failed" ? 502 : done.reason === "busy" || done.reason === "changed" ? 409 : done.reason === "late" || done.reason === "unread" ? 503 : 400 });
     return Response.json({ ok: true, summary: done.summary, fresh: done.fresh, left: done.left });
-  } catch (error) {
-    console.error("summing up what customers say failed", error);
+  } catch {
+    // A fixed label only (rule 30): the error of a model call made with customers' texts may carry them.
+    console.error("summing up what customers say failed");
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });
   }
 }

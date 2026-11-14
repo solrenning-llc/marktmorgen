@@ -5,7 +5,9 @@ import { preorderDay, soonOne } from "@/lib/preorders";
 import { type NextRequest, after } from "next/server";
 import { linkOrigin, originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle, syncTakesBuyer } from "@/lib/store";
-import { canSellProduct, createCheckout } from "@/lib/store-checkout";
+import { ReturningCodeRefused, canSellProduct, createCheckout } from "@/lib/store-checkout";
+import { RETURNING_TRIES, RETURNING_TRIES_SECONDS, otherDiscountWins, redeemReturningLink, releaseReturningLink, requestReturningLink, spendReturningLink } from "@/lib/returning-code";
+import type { ReturningCode } from "@/lib/returning-code-rules";
 import { countHit } from "@/lib/visit";
 import { releaseStockHold, withStockHold } from "@/lib/stock";
 import { activePlan } from "@/lib/product-extras";
@@ -30,6 +32,7 @@ import { readPage } from "@/lib/sales-page-store";
 import { readCountry } from "@/lib/fair-price";
 import { pageShown, runningTest, declaredMeasure } from "@/lib/sales-page";
 import { noteCheckoutTrouble } from "@/lib/checkout-trouble";
+import { chargesOffAfterRefusal } from "@/lib/stripe-charges";
 import { markFromReferer } from "@/lib/page-funnel";
 import { funnelHere } from "@/lib/page-funnel-store";
 import { listedReturn, listedSite } from "@/lib/embed-sites";
@@ -97,6 +100,12 @@ export async function POST(request: NextRequest) {
   // version of the sentence this code shows. Checked again where the charge
   // is built, so nothing digital is opened without it.
   let digitalConsent: DigitalConsent | null = null;
+  // A code only for people who already bought here, and the email it is for
+  // (lib/returning-code.ts): read only when a code was typed; never kept.
+  let typedCode = "";
+  let typedEmail = "";
+  // Or the link emailed to that address, which alone opens the checkout with the code.
+  let linkToken = "";
   // The page the form was on, when it is not the product's own (renew, course): only those two words count.
   let from: "renew" | "course" | "" = "";
   try {
@@ -136,6 +145,11 @@ export async function POST(request: NextRequest) {
     remind = form.get("remind") === "yes";
     remindEmail = remind ? normaliseEmail(read("remind_email", MAX_EMAIL_LENGTH + 1)) : "";
     remindVersion = remind ? read("remind_v", 40) : "";
+    // Only the field's own "Email me the link" button asks for a link (rask);
+    // a code left typed in the field never stops the buy button from buying.
+    typedCode = form.get("rask") === "1" ? read("rcode", 40).trim() : "";
+    typedEmail = typedCode ? read("remail", MAX_EMAIL_LENGTH + 1) : "";
+    linkToken = read("rtoken", 80).trim();
   } catch {
     return new Response("Bad request", { status: 400 });
   }
@@ -160,7 +174,8 @@ export async function POST(request: NextRequest) {
   // (lib/waitlist.ts) — unless it takes pre-orders and that is what was
   // pressed (lib/preorders.ts). A pre-order is sold before there is anything
   // to hand over: it is handed over the day the product comes out.
-  const coming = await soonOne(store, product.id).catch(() => ({ soon: false, day: null }));
+  const coming = await soonOne(store, product.id).catch(() => null);
+  if (!coming) return away(`/@${store.handle}?status=error`);
   const preorder = coming.soon && wantsPreorder && preorderDay(store, product, coming.soon, coming.day) !== null;
   if (coming.soon && !preorder) return away(`/@${store.handle}/p/${product.id}#waitlist`);
   // Refused here rather than at Stripe, so a buyer never reaches a card form
@@ -188,12 +203,40 @@ export async function POST(request: NextRequest) {
   if (noKeys === null) return away(`/@${store.handle}?status=error`);
   if (noKeys) return away(`/@${store.handle}?status=soldout`);
 
+  // A code only for people who already bought here (554 [DS1], unit 2;
+  // lib/returning-code.ts), handled before anything is written down or held.
+  // A typed code and email only ask for a link, answered "sent" the same for
+  // every address; asking is not buying, so it comes before the box to start
+  // access at once. The emailed link alone opens the checkout with the code,
+  // for that address, after that box like any purchase. Every other answer
+  // goes back to the field with its reason; nothing is charged, and the
+  // buyer can still buy without it.
+  let returning: { code: ReturningCode; email: string } | null = null;
+  const backToField = (status: string) => away(`/@${store.handle}/p/${product.id}?returning=${status}#returning`);
+  if (linkToken || typedCode) {
+    // Another discount wins this checkout (a sale across the store, a fair price here, an introductory price or a
+    // price the buyer names): the code could never go on, so nothing is read, held or emailed for it.
+    if (otherDiscountWins(store, product, readCountry(request.headers.get("x-vercel-ip-country")), undefined, { plan: plan && activePlan(product) !== null })) return backToField("other");
+    // Each try may read the creator's Stripe account or use a link: a few per connection.
+    if (!(await withinLimit("returning-code", `${clientAddress(request)}|${store.handle}`, RETURNING_TRIES, RETURNING_TRIES_SECONDS))) return backToField("busy");
+    // For a purchase of the buyer's own, at the price set: never a gift, a group or a pre-order.
+    if (giftTo.trim() || people.trim() || wantsPreorder) return backToField("other");
+    if (!linkToken) return backToField(await requestReturningLink({ store, productId: product.id, productTitle: product.title, code: typedCode, email: typedEmail, origin: linkOrigin(request, store) }));
+  }
+
   // Asked before a gift or a group is written down, so a refused yes leaves
   // nothing behind; the charge itself checks again, with what was added.
   const consentBack = from
     ? `/@${store.handle}/${from}/${product.id}?consent=needed`
     : `/@${store.handle}/p/${product.id}?consent=needed${giftTo.trim() && !preorder ? "&gift=consent#gift" : people.trim() && !preorder ? "&group=consent#group" : preorder ? "#preorder" : "#buy"}`;
-  if (!digitalConsent && deliversDigitally(product, optionId || null)) return away(consentBack);
+  // Sent back for the box, a buyer who came from the emailed link keeps it, so the code still goes on.
+  if (!digitalConsent && deliversDigitally(product, optionId || null)) return away(linkToken && !from ? `/@${store.handle}/p/${product.id}?consent=needed&rtoken=${encodeURIComponent(linkToken)}#returning` : consentBack);
+
+  if (linkToken) {
+    const redeemed = await redeemReturningLink(store, product.id, linkToken);
+    if (!redeemed.ok) return backToField(redeemed.reason);
+    returning = redeemed;
+  }
 
   // A gift: written down before its checkout opens, and its checkout is one
   // plain payment with nothing added and no offer after it.
@@ -249,6 +292,9 @@ export async function POST(request: NextRequest) {
     let abTest = "";
     let ab: string | undefined;
     if (product.page && bucket !== null && !gift && !group) {
+      // A page whose read is not known never blocks the sale, and no version is claimed for it: the buyer goes on to
+      // Stripe with no metadata[ab], and the test counts nothing (C4-20261106-2610-C6-153, unit B;
+      // tests/checkout-ab-page-unknown.test.ts).
       const page = await readPage(store.statsId, product.id).catch(() => null);
       const test = page ? runningTest(page) : null;
       if (page && test && pageShown(page)) {
@@ -303,9 +349,19 @@ export async function POST(request: NextRequest) {
         ab,
         embedSite: listedReturn(store.embedSites, returnAsked) ?? listedSite(store.embedSites, siteAsked) ?? undefined,
         digitalConsent,
+        // Checked above against what this email bought here before: the
+        // code's coupon, and the checkout opens for that email.
+        ...(returning ? { returning: returning.code, email: returning.email } : {}),
       }),
     );
-    if (!held.ok) return away(`/@${store.handle}?status=${held.reason}`);
+    if (!held.ok) {
+      // No checkout opened: the link's claim is let go, so it can be used again.
+      if (returning) await releaseReturningLink(linkToken);
+      return away(`/@${store.handle}?status=${held.reason}`);
+    }
+    // The link is spent only once its checkout exists: going back from Stripe's
+    // page and pressing buy again before that still has it.
+    if (returning) await spendReturningLink(linkToken);
     // Written down before the buyer leaves, so the plan — or a membership that
     // ends after a set number of payments — is given its end whether or not
     // they come back from paying.
@@ -329,15 +385,21 @@ export async function POST(request: NextRequest) {
     }
     return new Response(null, { status: 303, headers });
   } catch (error) {
+    // No checkout opened: the link's claim is let go, so it can be used again.
+    if (returning) await releaseReturningLink(linkToken);
     // The store's orders for the month are reached (lib/order-admission.ts): said plainly, nothing charged.
     if (error instanceof OrdersPausedError) return away(`/@${store.handle}?status=${error.reason === "paused" ? "paused" : "error"}`);
     // The box was not checked, or the page was from before its words
     // changed: back to the form it belongs to, said beside the box. Refused
     // before Stripe is reached, so nothing is charged and no unit is held.
     if (error instanceof DigitalConsentMissing) return away(consentBack);
+    // The code's coupon is used up or gone on the creator's account: said on the form, never a checkout at the full price.
+    if (error instanceof ReturningCodeRefused) return away(`/@${store.handle}/p/${product.id}?returning=${error.reason}#returning`);
     console.error("checkout failed", error);
     // A checkout Stripe would not open: counted, and the creator told (lib/checkout-trouble.ts).
     after(() => noteCheckoutTrouble(store, error).catch(() => {}));
+    // Stripe says the account cannot take card payments: written down, and said, since trying again will not help.
+    if (await chargesOffAfterRefusal(store, error)) return away(`/@${store.handle}?status=nocharges`);
     return away(`/@${store.handle}?status=error`);
   }
 }

@@ -19,7 +19,9 @@
  * overlap, a store seen twice while it moves between addresses — finds the day
  * taken and does nothing.
  */
-import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { isRedisConfigured } from "@/lib/redis";
+import { claimMark } from "@/lib/claim-mark";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { SITE_URL } from "@/lib/site-url";
 import { storesAfter, type Store } from "@/lib/store";
@@ -52,11 +54,15 @@ function monthOf(now: Date): string {
 
 /**
  * Claims this store's payday for this month. True the first time, false
- * every time after, which is what makes the job safe to run twice.
+ * every time after, which is what makes the job safe to run twice. Read
+ * exactly (lib/claim-mark.ts, CX-123 rule 24): a claim answered in another
+ * shape and not read back as ours is never ours, and throws, so the store is
+ * counted as failed and nobody is written to or paid on it.
  */
 async function claimMonth(statsId: string, month: string): Promise<boolean> {
-  const [got] = await redisPipeline([["SET", `nl:aff:payday:${statsId}:${month}`, "1", "NX", "EX", CLAIM_SECONDS]]);
-  return got !== null;
+  const got = await claimMark(`nl:aff:payday:${statsId}:${month}`, CLAIM_SECONDS);
+  if (got === "unknown") throw new UnknownReplyError("a store's payday claim");
+  return got === "ours";
 }
 
 /** The message itself. Plain text, so every word is what arrives. */
@@ -140,6 +146,21 @@ export function autoPayEmail(paid: Awaited<ReturnType<typeof payWithPayPal>>, cu
         "It is your affiliate payday, and you asked us to pay by ourselves. We sent the batch to PayPal, but PayPal's answer did not reach us, so we do not know whether it was paid.",
         "",
         "Nobody in it will be paid again by us while this is not known: they show as on their way on your affiliate page. Look at your PayPal activity to see whether the payment went.",
+        studio,
+        "",
+        "— Marktmorgen",
+      ].join("\n"),
+    };
+  }
+  if (paid.reason === "pending") {
+    return {
+      subject: "Your affiliates' payment may still go out from your PayPal",
+      text: [
+        "Hello,",
+        "",
+        "It is your affiliate payday, and you asked us to pay by ourselves. Nobody was paid just now. But we could not confirm that this payment was cleared from our records, so our daily check may still send it from your PayPal, to the same people for the same amounts.",
+        "",
+        "Until then, they show as on their way on your affiliate page. Do not pay them another way, or they could be paid twice.",
         studio,
         "",
         "— Marktmorgen",

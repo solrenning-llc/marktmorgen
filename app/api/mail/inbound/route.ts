@@ -57,7 +57,7 @@ export async function POST(request: NextRequest) {
     return Response.json({ ok: false }, { status: 401 });
   }
 
-  let notice: { type?: unknown; created_at?: unknown; data?: { email_id?: unknown; to?: unknown; tags?: unknown; bounce?: { type?: unknown } } };
+  let notice: { type?: unknown; created_at?: unknown; data?: { email_id?: unknown; from?: unknown; to?: unknown; tags?: unknown; bounce?: { type?: unknown } } };
   try {
     notice = JSON.parse(body) as typeof notice;
   } catch {
@@ -120,7 +120,8 @@ export async function POST(request: NextRequest) {
 
   const emailId = typeof notice.data?.email_id === "string" ? notice.data.email_id : "";
 
-  const result = await forwardInbound(emailId);
+  // The addresses the announcement names, so support's daily count is taken before the message is read.
+  const result = await forwardInbound(emailId, Date.now(), notice.data?.to, notice.data?.from);
   if (result === "retry") {
     await redisPipeline([["DEL", seenKey]]).catch(() => {});
     return Response.json({ ok: false }, { status: 500 });

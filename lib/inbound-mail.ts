@@ -51,12 +51,48 @@
  * whoever wrote. Mail to a name on that domain that is no store's is
  * dropped, and a store is sent on no more than CREATOR_HOURLY an hour, so
  * that the address cannot be used to pour mail on a creator through us.
+ *
+ * Mail to our own support is the company's to pay for, and so is held to
+ * ceilings of its own, each counted before anything is fetched or sent
+ * (ALTO 1 of Claude 5's email audit, 9 November 2026; the month's figure is
+ * in docs/funded-exposure-review.md):
+ *
+ *   - announcements of mail not written to a store, SUPPORT_ANNOUNCED_DAILY a
+ *     UTC day, counted before the message is even read at Resend, of which
+ *     SUPPORT_ANNOUNCED_CREATOR_DAILY are kept for a From that has a store;
+ *   - one sender, however the address is written, SUPPORT_SENDER_HOURLY an
+ *     hour and SUPPORT_SENDER_DAILY a day;
+ *   - every sender together SUPPORT_DAILY a UTC day, of which a sender with
+ *     no PAID plan under its address may use SUPPORT_PUBLIC_DAILY, so made-up
+ *     addresses and self-made free stores cannot take the creators' share,
+ *     and one paying creator's address SUPPORT_CREATOR_SENDER_DAILY of it (a
+ *     forged From of a known paying creator still spends the share);
+ *   - files SUPPORT_FILE_BYTES_DAILY bytes a UTC day, each file charged once,
+ *     at its listed size, before it is fetched, and never fetched past that
+ *     size; a file past the day is left out and named.
+ *
+ * The sender is the message's From, which nothing here authenticates (no
+ * DMARC or SPF result is read): anyone can spend one person's own hour by
+ * writing in their name, and anyone who knows creators' addresses can spend
+ * their reserved share too. These ceilings bound what the company pays; they
+ * do not prove who wrote.
+ *
+ * A message past a ceiling is held: it is not sent on and will not be sent
+ * later, it can be read in Resend (Emails, Receiving), and the inbox is told
+ * so once a day (SUPPORT_HELD_NOTICES_DAILY). A count that cannot be read
+ * sends nothing and asks Resend to try again; each count a message has taken
+ * is marked, so a try again never takes it twice. Should Redis stay out of
+ * reach for longer than Resend keeps trying, support mail is not sent on and
+ * nobody is told: it is only in Resend.
  */
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { canonicalEmail } from "@/lib/affiliates";
 import { NIMBUS_FROM, RESEND_BASE, headerText, oneAddress, sendEmail } from "@/lib/email";
 import { creatorDomain } from "@/lib/mail-from";
-import { withinLimit } from "@/lib/request-guard";
-import { HANDLE_PATTERN, storeForHandle } from "@/lib/store";
+import { redisPipeline } from "@/lib/redis";
+import { stringList } from "@/lib/redis-reply";
+import { essentialLimitState, withinLimit } from "@/lib/request-guard";
+import { HANDLE_PATTERN, ownsAStore, storeForEmail, storeForHandle } from "@/lib/store";
 import { RESEND_TIMEOUT_MS, timed } from "@/lib/fetch-timeout";
 import { SITE_URL } from "@/lib/site-url";
 
@@ -68,6 +104,39 @@ const MAX_FILES_BYTES = 15_000_000;
 const MAX_BODY_CHARS = 400_000;
 /** Messages sent on to one store in an hour, at the most. */
 export const CREATOR_HOURLY = 40;
+/** Messages from one sender sent on to our own support, at the most, in an hour and in a day. */
+export const SUPPORT_SENDER_HOURLY = 10;
+export const SUPPORT_SENDER_DAILY = 30;
+/** Messages sent on to our own support in a UTC day, every sender together: a company cost. */
+export const SUPPORT_DAILY = 200;
+/** Of those, the most a UTC day from senders with no paid plan under their address. */
+export const SUPPORT_PUBLIC_DAILY = 120;
+/**
+ * One paying creator's address, a UTC day. From is not authenticated, so a forged one of a creator known to pay
+ * spends the creators' share (SUPPORT_DAILY - SUPPORT_PUBLIC_DAILY) a creator at a time: at this size it takes
+ * ten known addresses, not three, to hold it for the day. It is a smaller ceiling than the sender's own day.
+ */
+export const SUPPORT_CREATOR_SENDER_DAILY = 8;
+/** Announcements of mail not written to a store read at Resend in a UTC day, held or sent on. */
+export const SUPPORT_ANNOUNCED_DAILY = 1_000;
+/**
+ * Of those, the reserve for announcements whose From has a store under it (one EXISTS, before the read). The rest
+ * (SUPPORT_ANNOUNCED_DAILY - this) is the public share, with every announcement that shows no From. Resend's
+ * email.received event is read for `data.from`; no dated Resend source could be read when this was written
+ * (resend.com was out of the session's network), so an announcement without a From string is counted as public.
+ * One address takes at most SUPPORT_CREATOR_SENDER_DAILY of it a day, and the public share past that, so one store
+ * owner's own address, a free store's included, cannot use it up (Claude 1's review of #3481). From is not
+ * authenticated: forged Froms of SUPPORT_ANNOUNCED_CREATOR_DAILY / SUPPORT_CREATOR_SENDER_DAILY different store owners'
+ * addresses, free stores included, still spend the reserve; a paying creator's mail is then held only once the public
+ * share is used up too.
+ */
+export const SUPPORT_ANNOUNCED_CREATOR_DAILY = 200;
+/** Bytes of files sent on with them in a UTC day, together, before base64. */
+export const SUPPORT_FILE_BYTES_DAILY = 300_000_000;
+/** Notices a UTC day telling the support inbox that messages are held. */
+export const SUPPORT_HELD_NOTICES_DAILY = 1;
+/** How long a message's own mark (the counts it took, its files' bytes) is kept: longer than Resend tries again. */
+const SUPPORT_MARK_SECONDS = 2 * 86_400;
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const platformDomain = () => new URL(SITE_URL).hostname;
@@ -197,6 +266,57 @@ function fileUrl(value: unknown): string | null {
 }
 
 /**
+ * Takes a support file's bytes from the company's day before it is fetched:
+ * `want` is the message's files together with this one, at its listed size;
+ * only what is more than the message already took is taken, so a message
+ * tried again pays once. No when the day has no room or the count cannot be
+ * read; a take that finds no room is given back. At most four commands a file.
+ */
+async function chargeSupportBytes(mark: string, taken: { bytes: number }, want: number, now: number): Promise<boolean> {
+  if (want <= taken.bytes) return true;
+  const extra = want - taken.bytes;
+  const day = `nl:inbound:support:bytes:${new Date(now).toISOString().slice(0, 10)}`;
+  try {
+    const reply = await redisPipeline([["SET", day, "0", "EX", SUPPORT_MARK_SECONDS, "NX"], ["INCRBY", day, extra]]);
+    const total = Array.isArray(reply) ? reply[1] : undefined;
+    // Not known: what may have been added stays spent, and the file is left out.
+    if (typeof total !== "number" || !Number.isSafeInteger(total)) return false;
+    if (total > SUPPORT_FILE_BYTES_DAILY) {
+      // Given back with the day's own expiry set again, so a key the give-back makes is never kept for ever.
+      await redisPipeline([["DECRBY", day, extra], ["EXPIRE", day, SUPPORT_MARK_SECONDS]]).catch(() => {});
+      return false;
+    }
+    taken.bytes = want;
+    // Not kept: a try again pays again, never less than was spent.
+    await redisPipeline([["HSET", mark, "bytes", String(want)], ["EXPIRE", mark, SUPPORT_MARK_SECONDS]]).catch(() => {});
+    return true;
+  } catch (error) {
+    console.error("the support files' daily count could not be read", error);
+    return false;
+  }
+}
+
+type Charge = (want: number) => Promise<boolean>;
+
+/** A response's body, or null once it holds more than `most` bytes, read no further than that. */
+async function bodyUpTo(response: Response, most: number): Promise<Buffer | null> {
+  if (!response.body) return Buffer.alloc(0);
+  const reader = response.body.getReader();
+  const parts: Buffer[] = [];
+  let length = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) return Buffer.concat(parts, length);
+    length += value.byteLength;
+    if (length > most) {
+      await reader.cancel().catch(() => {});
+      return null;
+    }
+    parts.push(Buffer.from(value));
+  }
+}
+
+/**
  * The list of a received message's files, read without fetching any of them;
  * null when it could not be read. An error status, an answer with no list in
  * it or an entry that is not an object says nothing about the files: never
@@ -219,7 +339,7 @@ async function listFiles(id: string): Promise<FileEntry[] | null> {
 }
 
 /** The listed files of a received message, as the sender's API takes them, and the names of the ones left out. */
-async function files(entries: FileEntry[]): Promise<{ sent: { filename: string; content: string }[]; left: string[] }> {
+async function files(entries: FileEntry[], charge?: Charge): Promise<{ sent: { filename: string; content: string }[]; left: string[] }> {
   const sent: { filename: string; content: string }[] = [];
   const left: string[] = [];
   let total = 0;
@@ -227,15 +347,16 @@ async function files(entries: FileEntry[]): Promise<{ sent: { filename: string; 
     const name = headerText(typeof entry.filename === "string" && entry.filename ? entry.filename : "file", 150);
     const size = typeof entry.size === "number" && entry.size >= 0 ? entry.size : 0;
     const url = fileUrl(entry.download_url);
-    if (!url || total + size > MAX_FILES_BYTES) {
+    if (!url || total + size > MAX_FILES_BYTES || (charge && !(await charge(total + size)))) {
       left.push(name);
       continue;
     }
     try {
       const response = await timed(RESEND_TIMEOUT_MS, (signal) => fetch(url, { cache: "no-store", signal }));
       if (!response.ok) throw new Error(`file answered ${response.status}`);
-      const bytes = Buffer.from(await response.arrayBuffer());
-      if (total + bytes.length > MAX_FILES_BYTES) {
+      // Charged at its listed size, a file is read no further than that: one bigger is left out.
+      const bytes = charge ? await bodyUpTo(response, size) : Buffer.from(await response.arrayBuffer());
+      if (!bytes || total + bytes.length > MAX_FILES_BYTES) {
         left.push(name);
         continue;
       }
@@ -250,16 +371,204 @@ async function files(entries: FileEntry[]): Promise<{ sent: { filename: string; 
 }
 
 /**
+ * Whether the address has a store on a paid plan (its subscriptionActive), by one read of the store's record: a
+ * free store is not a creator here, since anyone can make one. null when the record could not be read.
+ * The read is priced in the registry at the record's largest size (MAX_STORE_BYTES).
+ */
+async function paysForAPlan(email: string): Promise<boolean | null> {
+  try {
+    const store = await storeForEmail(email);
+    return store ? store.subscriptionActive === true : false;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The UTC day on which this instance saw the day's announcements run out, and whether it then told the inbox. Once
+ * the day is out, a later announcement on this instance costs no counter and no notice mark: the day's count only
+ * grows, so the answer cannot change before the day ends. Per instance, so another one counts once itself.
+ */
+let announcedOut: { day: string; public: boolean; creator: boolean; told: boolean } | null = null;
+/** For tests: forgets what this instance knows of the day. */
+export function forgetSupportDayState(): void {
+  announcedOut = null;
+}
+
+/**
+ * Whether a message to our own support may be sent on, before anything is
+ * fetched or sent: "within" once it has taken its sender's hour and day and
+ * the company's UTC day (SUPPORT_PUBLIC_DAILY of it for a sender with no
+ * store under the address); "held" when one of them has no room; "unknown"
+ * when a count could not be read, so nothing is sent and Resend tries again.
+ * Each count taken is marked on the message, so a try again takes only the
+ * ones still missing; the mark also carries the bytes its files took.
+ */
+async function admitSupport(id: string, from: string | null, now: number): Promise<{ state: "within" | "held" | "unknown"; mark: string; taken: { bytes: number } }> {
+  const mark = `nl:inbound:support:counted:${id}`;
+  const taken = { bytes: 0 };
+  const unknown = { state: "unknown" as const, mark, taken };
+  let fields: string[] | null;
+  try {
+    const [raw] = await redisPipeline([["HGETALL", mark]]);
+    fields = stringList(raw);
+  } catch {
+    return unknown;
+  }
+  if (!fields || fields.length % 2 !== 0) return unknown;
+  const had = new Map<string, string>();
+  for (let n = 0; n < fields.length; n += 2) had.set(fields[n], fields[n + 1]);
+  const bytes = had.has("bytes") ? Number(had.get("bytes")) : 0;
+  if (!Number.isSafeInteger(bytes) || bytes < 0) return unknown;
+  taken.bytes = bytes;
+  // Marked once taken; a mark that is not kept only means a try again takes it again, never less than was spent.
+  const took = (field: string) => redisPipeline([["HSET", mark, field, "1"], ["EXPIRE", mark, SUPPORT_MARK_SECONDS]]).catch(() => {});
+  const who = from ? canonicalEmail(from) : "(no sender)";
+  if (!had.has("hour")) {
+    const hour = await essentialLimitState("support-sender-hour", who, SUPPORT_SENDER_HOURLY, 3_600);
+    if (hour !== "within") return { ...unknown, state: hour === "exceeded" ? "held" : "unknown" };
+    await took("hour");
+  }
+  if (!had.has("day")) {
+    const day = await essentialLimitState("support-sender-day", who, SUPPORT_SENDER_DAILY, 86_400);
+    if (day !== "within") return { ...unknown, state: day === "exceeded" ? "held" : "unknown" };
+    await took("day");
+  }
+  const today = new Date(now).toISOString().slice(0, 10);
+  if (!had.has("public") && !had.has("creator") && !had.has("all")) {
+    // A creator is an address with a PAID plan: it may use the whole day, but its own address only
+    // SUPPORT_CREATOR_SENDER_DAILY of it. Anyone else (a free store included) first takes the public share, its
+    // own count, so the held ones among them never reach the day's count and the creators' rest stays.
+    const creator = from ? await paysForAPlan(from) : false;
+    if (creator === null) return unknown;
+    if (creator) {
+      const own = await essentialLimitState("support-creator-day", who, SUPPORT_CREATOR_SENDER_DAILY, 86_400);
+      if (own !== "within") return { ...unknown, state: own === "exceeded" ? "held" : "unknown" };
+      await took("creator");
+    } else {
+      const open = await essentialLimitState("support-public", today, SUPPORT_PUBLIC_DAILY, 2 * 86_400);
+      if (open !== "within") return { ...unknown, state: open === "exceeded" ? "held" : "unknown" };
+      await took("public");
+    }
+  }
+  if (!had.has("all")) {
+    const all = await essentialLimitState("support-forward", today, SUPPORT_DAILY, 2 * 86_400);
+    if (all !== "within") return { ...unknown, state: all === "exceeded" ? "held" : "unknown" };
+    await took("all");
+  }
+  return { state: "within", mark, taken };
+}
+
+/**
+ * Tells the support inbox, once a UTC day, that messages are held and where they are; `address` is the one the
+ * held message was written to. True when the day has its notice (sent now, or already), false when it could not
+ * be sent or marked, so the next held message tries again.
+ */
+async function tellHeld(target: string, now: number, address: string): Promise<boolean> {
+  const day = new Date(now).toISOString().slice(0, 10);
+  const key = `nl:inbound:support:held:${day}`;
+  try {
+    const [taken] = await redisPipeline([["SET", key, "1", "EX", SUPPORT_MARK_SECONDS, "NX"]]);
+    if (taken !== "OK") return true;
+  } catch {
+    return false;
+  }
+  const ok = await sendEmail({ meter: { by: "company" },
+    from: `"Marktmorgen support" <support@${platformDomain()}>`,
+    to: target,
+    subject: "Some support email was not sent on today",
+    text: [
+      `Some email written to ${address} today was not sent on to this inbox.`,
+      `This happens when one sender writes more than ${SUPPORT_SENDER_HOURLY} times in an hour or ${SUPPORT_SENDER_DAILY} times in a day, or in one day (UTC) when more than ${SUPPORT_PUBLIC_DAILY} messages come from addresses with no paid plan here, more than ${SUPPORT_DAILY} are sent on in all, one paying creator's address writes more than ${SUPPORT_CREATOR_SENDER_DAILY} times in a day, or more than ${SUPPORT_ANNOUNCED_DAILY} arrive (${SUPPORT_ANNOUNCED_DAILY - SUPPORT_ANNOUNCED_CREATOR_DAILY} from senders with no store, ${SUPPORT_ANNOUNCED_CREATOR_DAILY} from senders with one).`,
+      "These messages were not sent on and will not be sent later. Read them in Resend (Emails, Receiving); this site keeps no copy. New messages are sent on again as usual.",
+      "You get this note at most once a day.",
+    ].join("\n\n"),
+    headers: { [FORWARD_HEADER]: "1" },
+    idempotencyKey: `inbound-held-${day}`,
+  });
+  // Not sent: the next held message tries again.
+  if (!ok) await redisPipeline([["DEL", key]]).catch(() => {});
+  return ok;
+}
+
+/**
  * Sends one received message on.
  *
  *   "sent"     it went on to the inbox
  *   "skipped"  there was nothing to send on: no such message, or one of ours
  *   "retry"    it could not be read or sent just now; the announcement should
  *              be answered with a failure, so Resend makes it again
+ *   "held"     to our own support, past a ceiling: kept in Resend, not tried
+ *              again, and the inbox told once a day
  */
-export async function forwardInbound(id: string): Promise<"sent" | "skipped" | "retry"> {
+export async function forwardInbound(id: string, now = Date.now(), announcedTo?: unknown, announcedFrom?: unknown): Promise<"sent" | "skipped" | "retry" | "held"> {
   const target = forwardTarget();
   if (!target || !ID.test(id)) return "skipped";
+
+  // Mail the announcement does not show written to a store is our own support's: its announcements are
+  // counted before the message is read at Resend, so held ones cannot cost a read each without end. An announcement
+  // whose From has a store (one EXISTS) takes the creators' reserve of the day's announcements, at most
+  // SUPPORT_CREATOR_SENDER_DAILY a day for one address (past it, the public share), so using the reserve up takes many
+  // store owners' addresses, not one free store's (Claude 1's review of #3481, MEDIUM); every other, and every one with
+  // no From, the public share, so made-up senders cannot hold a creator's mail unread. With the reserve used up, a store
+  // owner's announcement still takes the public share while it has room (Claude 3's LOW 2).
+  // Counted only when the announcement positively shows our own support's address and none on the creators' domain
+  // (Claude 7's review of #3481, MEDIUM 1): a store's mail announced without the store's address (on Cc or Bcc, through
+  // an alias, with no `to` or one in another shape) is read and decided after the read, where admitSupport bounds
+  // support mail, so a flood of public announcements never holds a creator's mail unread. Reads of announcements that
+  // show neither stay outside the day's count: unknown, never zero (docs/funded-exposure-review.md).
+  const creatorsDomain = creatorDomain(NIMBUS_FROM);
+  const announced = typeof announcedTo === "string" ? [announcedTo] : list(announcedTo);
+  const announcedAddresses = announced.map((one) => (parseSender(one).address ?? "").toLowerCase());
+  const showsSupport = announcedAddresses.some((address) => address.endsWith(`@${platformDomain()}`));
+  const showsStore = creatorsDomain !== null && creatorsDomain !== undefined && creatorsDomain !== "" && announcedAddresses.some((address) => address.endsWith(`@${creatorsDomain}`));
+  if (showsSupport && !showsStore) {
+    const today = new Date(now).toISOString().slice(0, 10);
+    const first = announced.map((one) => parseSender(one).address).find((a) => a && a.toLowerCase().endsWith(`@${platformDomain()}`));
+    const named = first ?? `support@${platformDomain()}`;
+    const out = announcedOut?.day === today ? announcedOut : null;
+    const announcedFromAddress = typeof announcedFrom === "string" ? parseSender(announcedFrom).address : null;
+    // Out for the day on this instance in both pools: no EXISTS, no counter, no mark; the notice only until it is told.
+    let pool: "public" | "creator" = "public"; // the reserve out: a store owner too uses the public share, with no EXISTS
+    if (!(out?.public && out.creator)) {
+      if (announcedFromAddress && !out?.creator) {
+        const owns = await ownsAStore(announcedFromAddress);
+        if (owns === null) return "retry";
+        if (owns) {
+          // One store owner's address takes at most SUPPORT_CREATOR_SENDER_DAILY of the reserve a day; past it, the public share.
+          const own = await essentialLimitState("support-announced-from", canonicalEmail(announcedFromAddress), SUPPORT_CREATOR_SENDER_DAILY, 86_400);
+          if (own === "unknown") return "retry";
+          if (own === "within") pool = "creator";
+        }
+      }
+    }
+    const take = (from: "public" | "creator") => from === "creator"
+      ? essentialLimitState("support-announced-creator", today, SUPPORT_ANNOUNCED_CREATOR_DAILY, 2 * 86_400)
+      : essentialLimitState("support-announced", today, SUPPORT_ANNOUNCED_DAILY - SUPPORT_ANNOUNCED_CREATOR_DAILY, 2 * 86_400);
+    // The pools this announcement may take, in turn: a store owner's the reserve, then the public share; anyone else's the public share.
+    const pools: ("public" | "creator")[] = pool === "creator" ? ["creator", "public"] : ["public"];
+    let admitted = false;
+    for (const each of pools) {
+      if (out?.[each]) continue;
+      const heard = await take(each);
+      if (heard === "unknown") return "retry";
+      if (heard === "within") {
+        admitted = true;
+        break;
+      }
+      console.warn(`a support message's announcement was past the day's ${each} announcements`);
+      const now_out = announcedOut?.day === today ? announcedOut : { day: today, public: false, creator: false, told: false };
+      now_out[each] = true;
+      announcedOut = now_out;
+    }
+    if (!admitted) {
+      console.warn("a support message was held in Resend unread: past the day's announcements it may take");
+      const now_out = announcedOut?.day === today ? announcedOut : { day: today, public: false, creator: false, told: false };
+      announcedOut = now_out;
+      if (!now_out.told) now_out.told = await tellHeld(target, now, named);
+      return "held";
+    }
+  }
 
   let got: { status: number; data: unknown };
   try {
@@ -314,11 +623,25 @@ export async function forwardInbound(id: string): Promise<"sent" | "skipped" | "
   const html = typeof mail.html === "string" ? mail.html.slice(0, MAX_BODY_CHARS) : "";
   const text = (typeof mail.text === "string" && mail.text.trim() ? mail.text : pageToText(html)).slice(0, MAX_BODY_CHARS);
 
+  // Our own support: counted before its files are fetched or it is sent.
+  let charge: Charge | undefined;
+  if (!store) {
+    const admitted = await admitSupport(id, sender.address, now);
+    if (admitted.state === "unknown") return "retry";
+    if (admitted.state === "held") {
+      console.warn("a support message was held in Resend: past a sending ceiling");
+      await tellHeld(target, now, ours);
+      return "held";
+    }
+    charge = (want) => chargeSupportBytes(admitted.mark, admitted.taken, want, now);
+  }
+
+  // Listed once it is admitted (support counts its read before the list), or before the store's allowance above.
   listed ??= await listFiles(id);
   if (!listed) return "retry";
   let attached: Awaited<ReturnType<typeof files>> = { sent: [], left: [] };
   try {
-    attached = await files(listed);
+    attached = await files(listed, charge);
   } catch (error) {
     console.error("the files of an inbound message could not be fetched", error);
     return "retry";

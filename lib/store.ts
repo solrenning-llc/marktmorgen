@@ -1126,6 +1126,21 @@ export async function storeForEmailSeen(
 }
 
 /**
+ * Whether an address has a store under it, by one EXISTS of its owner key and
+ * nothing read: true, false, or null when the answer could not be read
+ * (lib/inbound-mail.ts, the announcements' reserve for a From that has a store).
+ */
+export async function ownsAStore(email: string): Promise<boolean | null> {
+  if (!email || !isRedisConfigured()) return null;
+  try {
+    const [found] = await redisPipeline([["EXISTS", await ownerKey(email)]]);
+    return found === 1 ? true : found === 0 ? false : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * The store kept under one ref, read exactly (rule 24), for a caller that takes the store out of a line when it is
  * gone: null only when Redis answers nil for its key. A reply of another shape, a record that does not parse or a
  * record under that key for another owner throws UnknownReplyError, and a request that fails throws as it did; none

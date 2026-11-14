@@ -40,7 +40,7 @@ export const MAX_DRAFT_BODY = 1_200;
 /** What each draft is for, in the instructions. */
 const PURPOSE: Record<string, string> = {
   failed_payments:
-    "a short, kind note from the creator to one of their members whose latest membership payment did not go through. Say that the payment did not go through, that the card on file may need a look, and that they can reply to this email with any question. Do not blame the member. Do not threaten to end the membership and do not set a deadline.",
+    "a short, kind note from the creator to one of their members whose latest membership payment did not go through. Say that the payment did not go through, that the card on file may need a look, and that they can reply to this email with any question. Do not blame the member. Do not threaten to end the membership and do not set a deadline. Do not say why the payment failed, when it will be tried again, or whether access has changed.",
 };
 
 /** The instructions and the facts for one draft, or null when the action has none. */
@@ -51,7 +51,7 @@ export function draftRequest(id: NextActionId, facts: { storeName: string; creat
     `You write ${purpose}`,
     facts.rules,
     "Write as the creator, in the first person, to one person.",
-    "Use only the facts given. Do not write any number, amount, price, percentage, date, discount, offer, gift, link, web address, or promise of a result. Do not use the word free. No urgency and no pressure.",
+    "Use only the facts given. Do not write any number, amount, price, percentage, date, discount, offer, gift, link, web address, or promise of a result. Do not use the word free. No urgency and no pressure. Do not use these words, which the check refuses: free, discount, coupon, sale, bonus, gift, special offer, deal, now, paused, on hold, suspended, expired, yesterday, or the name of a month or a day.",
     `Return only a JSON object: {"subject": string, "body": string}. The subject at most ${MAX_DRAFT_SUBJECT} characters. The body plain text, at most ${MAX_DRAFT_BODY} characters, paragraphs separated by one blank line, signed with the creator's name.`,
   ].join("\n\n");
   const prompt = [`Store: ${oneLine(facts.storeName, 80)}`, `Creator: ${oneLine(facts.creatorName, 80)}`].join("\n");
@@ -81,12 +81,20 @@ const REFUSED: readonly [RegExp, string][] = [
   [/[$€£¥₹]|\b(usd|eur|gbp|dollars?|euros?)\b/i, "price"],
   [/https?:\/\/|www\.|\b[a-z0-9-]+\.(com|net|org|io|co)\b/i, "link"],
   [/\bfree\b/i, "free"],
-  [/\b(discount|coupon|deal|offer|sale|bonus|gift)\b/i, "offer"],
+  // "deal" and "offer" only in their selling sense: "help you deal with it" and "offer a hand" are kind, not a sale
+  // (LOW on #3558); a refusal comes after the call is paid for.
+  [/\b(discounts?|coupons?|sales?|bonus(es)?|gifts?|deals|offers)\b|\b(a|an|the|this|our|my|special|limited|exclusive|great|good|best|big) (deal|offer)\b/i, "offer"],
   // A promise of a result, not the word "results": "the results of your last payment" promises nothing.
   [/\b(guarantee[sd]?|guaranteed results?|results? guaranteed|you('ll| will) (earn|make|see|get)|earn(ings|ed)?|profits?|double your|triple your)\b/i, "promise"],
   [
-    /\b(urgent|hurry|act now|last chance|deadline|today only|right away|immediately|before it'?s too late|expires?|soon|asap|within (a|an|the|one|\w+) (hours?|days?|weeks?|months?)|by (monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow|tonight|the end of)|(will|would|is going to|are going to) (end|stop|be (cancell?ed|closed|ended|stopped|suspended|paused|lost|removed))|(lose|losing) (access|your (membership|place|spot|access))|or (else|you('ll| will) lose))\b/i,
+    /\b(urgent|hurry|act now|last chance|deadline|today only|right away|immediately|before it'?s too late|expires?|as soon as possible|asap|ends? unless|(have|need|going) to cancel|cancel your (membership|access|account)|(your card|it|this) now|within (a|an|the|one|\w+) (hours?|days?|weeks?|months?)|by (monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow|tonight|the end of)|(will|would|is going to|are going to) (end|stop|be (cancell?ed|closed|ended|stopped|suspended|paused|lost|removed))|(lose|losing) (access|your (membership|place|spot|access))|or (else|you('ll| will) lose))\b/i,
     "pressure",
+  ],
+  // Facts about the member's account the store never gave the model: a cause, a date, a retry or a changed access
+  // (LOW on #3558). A month or a day named is a date. "may" is left out: it is a verb far more than a month.
+  [
+    /\b(paused|on hold|suspended|declined because|expired|tr(y|ies|ied) (it|your card|the card|the payment) again|retr(y|ies|ied)|last (week|month|night)|yesterday|january|february|march|april|june|july|august|september|october|november|december|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i,
+    "fact",
   ],
 ];
 
@@ -105,7 +113,11 @@ export function readDraft(raw: unknown, names: { storeName: string; creatorName:
   if ((text.match(/\d+/g) ?? []).some((n) => !allowed.has(n))) return { ok: false, why: "number" };
   // A name may hold a refused word ("Free Spirit Yoga", "Two Rivers Yoga"): it is taken out before the words are checked.
   let words = text;
-  for (const name of [names.storeName, names.creatorName]) if (name.trim()) words = words.split(name.trim()).join(" ");
+  // Only as a whole word (LOW on #3558): a one-letter name taken out of "free" would hide it.
+  for (const name of [names.storeName, names.creatorName]) {
+    const whole = name.trim();
+    if (whole) words = words.replace(new RegExp(`(?<![\\p{L}\\p{N}])${whole.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}])`, "giu"), " ");
+  }
   for (const [pattern, why] of REFUSED) if (pattern.test(words)) return { ok: false, why };
   if (NUMBER_WORDS.test(words)) return { ok: false, why: "number" };
   return { ok: true, subject, body };

@@ -8,6 +8,7 @@
  * - "Close the draft" threw away a paid draft and its edits with no way back.
  * Pure functions and static markup only; no model, no network.
  */
+import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { NEXT_DRAFT_COPY_HOLD, NextActionDraftClosed, copyHold } from "@/components/next-action-draft";
@@ -53,6 +54,9 @@ part("Copy refuses until all three are checked");
 is("none checked", copyHold([false, false, false]), NEXT_DRAFT_COPY_HOLD);
 is("two checked", copyHold([true, true, false]), NEXT_DRAFT_COPY_HOLD);
 is("all checked", copyHold([true, true, true]), null);
+const screen = readFileSync("components/next-action-draft.tsx", "utf8");
+const copyBody = screen.slice(screen.indexOf("async function copy()"), screen.indexOf("navigator.clipboard.writeText"));
+is("copy() returns on copyHold before it writes to the clipboard", /const hold = copyHold\(checks\);\n\s+if \(hold\) \{[\s\S]*?return;\n\s+\}/.test(copyBody), true);
 
 part("A closed draft can be shown again without a new call");
 const closed = renderToStaticMarkup(createElement(NextActionDraftClosed, { id: "x", jobs: 1, busy: false, kept: true, onWrite: () => {}, onShowAgain: () => {} }));

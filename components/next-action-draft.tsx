@@ -33,7 +33,57 @@ export const NEXT_DRAFT_SAID: Record<string, string> = {
 /** Why "Copy the draft" waits. */
 export const NEXT_DRAFT_COPY_HOLD = "Check the three boxes under the draft, then copy it.";
 
+/** Why Copy refuses now, or null when it may copy: the one decision copy() acts on (LOW on #3558). */
+export function copyHold(checks: readonly boolean[]): string | null {
+  return reviewDone(checks) ? null : NEXT_DRAFT_COPY_HOLD;
+}
+
 type Draft = { subject: string; body: string };
+
+/**
+ * The block before a draft, or after one was closed. A closed draft is kept on this page with its edits, so "Show the
+ * draft again" brings it back with no new call and no AI use (LOW on #3558; VR 4, 3.3.6): the boxes start unchecked.
+ */
+export function NextActionDraftClosed({
+  id,
+  jobs,
+  busy,
+  kept,
+  openerRef,
+  onWrite,
+  onShowAgain,
+}: {
+  id: string;
+  jobs: number;
+  busy: boolean;
+  kept: boolean;
+  openerRef?: RefObject<HTMLButtonElement | null>;
+  onWrite: () => void;
+  onShowAgain: () => void;
+}) {
+  return (
+    <>
+      <div className="flex flex-wrap gap-3">
+        {kept ? (
+          <button type="button" className="btn btn-secondary btn-sm" aria-describedby={`${id}-again`} onClick={onShowAgain}>
+            Show the draft again
+          </button>
+        ) : null}
+        <button ref={openerRef} type="button" className="btn btn-ghost btn-sm" aria-disabled={busy} aria-describedby={`${id}-cost`} onClick={onWrite}>
+          {busy ? "Writing the draft…" : kept ? "Write a new draft with AI" : "Write a draft with AI"}
+        </button>
+      </div>
+      {kept ? (
+        <p id={`${id}-again`} className="mt-1 text-xs text-ink-soft">
+          Shows the draft you closed, with your changes. It uses none of your AI uses.
+        </p>
+      ) : null}
+      <p id={`${id}-cost`} className="mt-1 text-xs text-ink-soft">
+        {`${kept ? "A new draft uses" : "Uses"} ${jobs === 1 ? "one" : jobs.toLocaleString("en-US")} of your store's AI uses this month. Nothing is sent: you read it, change it and send it yourself.`}
+      </p>
+    </>
+  );
+}
 
 /** The draft as shown: its two fields, the AI draft badge and checks, and Copy waiting until they are checked. */
 export function NextActionDraftReady({
@@ -92,6 +142,7 @@ export function NextActionDraft({ action, jobs }: { action: NextActionId; jobs: 
   const [error, setError] = useState("");
   const [live, setLive] = useState("");
   const [draft, setDraft] = useState<Draft | null>(null);
+  const [kept, setKept] = useState<Draft | null>(null);
   const [checks, setChecks] = useState<boolean[]>(freshChecks);
   const box = useRef<HTMLDivElement>(null);
   const subject = useRef<HTMLInputElement>(null);
@@ -136,8 +187,9 @@ export function NextActionDraft({ action, jobs }: { action: NextActionId; jobs: 
 
   async function copy() {
     if (!draft) return;
-    if (!reviewDone(checks)) {
-      setError(NEXT_DRAFT_COPY_HOLD);
+    const hold = copyHold(checks);
+    if (hold) {
+      setError(hold);
       const left = firstUnchecked(checks);
       box.current?.querySelectorAll<HTMLInputElement>("[data-ai-review] input[type=checkbox]")[left]?.focus();
       return;
@@ -154,14 +206,21 @@ export function NextActionDraft({ action, jobs }: { action: NextActionId; jobs: 
   return (
     <div ref={box} className="mt-3">
       {draft ? null : (
-        <>
-          <button ref={opener} type="button" className="btn btn-ghost btn-sm" aria-disabled={busy} aria-describedby={`${id}-cost`} onClick={() => void write()}>
-            {busy ? "Writing the draft…" : "Write a draft with AI"}
-          </button>
-          <p id={`${id}-cost`} className="mt-1 text-xs text-ink-soft">
-            {`Uses ${jobs === 1 ? "one" : jobs.toLocaleString("en-US")} of your store's AI uses this month. Nothing is sent: you read it, change it and send it yourself.`}
-          </p>
-        </>
+        <NextActionDraftClosed
+          id={id}
+          jobs={jobs}
+          busy={busy}
+          kept={kept !== null}
+          openerRef={opener}
+          onWrite={() => void write()}
+          onShowAgain={() => {
+            if (!kept) return;
+            focusNext.current = "subject";
+            setChecks(freshChecks());
+            setDraft(kept);
+            setLive("The draft you closed is back below. Nothing was sent.");
+          }}
+        />
       )}
       {draft ? (
         <NextActionDraftReady
@@ -178,6 +237,7 @@ export function NextActionDraft({ action, jobs }: { action: NextActionId; jobs: 
           onClose={() => {
             focusNext.current = "opener";
             setError("");
+            setKept(draft);
             setDraft(null);
           }}
         />

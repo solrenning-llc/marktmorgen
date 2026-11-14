@@ -498,18 +498,39 @@ export function parseSetup(raw: unknown): CallSetup | null {
   return typeof read === "string" ? null : read;
 }
 
+/**
+ * One formatter per zone, made once: building an Intl.DateTimeFormat costs far
+ * more than using one, and a calendar file's parse asks for the same zone on
+ * every step (R27). Only zones Intl accepts get here (it throws first); past
+ * ZONE_FORMATS_MAX the oldest is let go, one at a time, so the map never grows
+ * without bound and never empties at once. A calendar file reads its times in
+ * at most MAX_FILE_ZONES named zones (lib/ics-parse.ts), and offsets with no
+ * formatter, so one reading never builds the same zone's formatter twice.
+ */
+const ZONE_FORMATS_MAX = 512;
+const zoneFormats = new Map<string, Intl.DateTimeFormat>();
+
 /** The parts of a date as a clock in `tz` shows them at instant `ms`. */
 export function partsIn(ms: number, tz: string) {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: tz,
-    hourCycle: "h23",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    weekday: "short",
-  }).formatToParts(new Date(ms));
+  let format = zoneFormats.get(tz);
+  if (!format) {
+    format = new Intl.DateTimeFormat("en-US", {
+      timeZone: tz,
+      hourCycle: "h23",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      weekday: "short",
+    });
+    if (zoneFormats.size >= ZONE_FORMATS_MAX) {
+      const oldest = zoneFormats.keys().next();
+      if (!oldest.done) zoneFormats.delete(oldest.value);
+    }
+    zoneFormats.set(tz, format);
+  }
+  const parts = format.formatToParts(new Date(ms));
   const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
   const weekday = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(get("weekday"));
   return {

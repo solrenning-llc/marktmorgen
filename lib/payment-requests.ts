@@ -39,7 +39,7 @@ import { speechFor } from "@/lib/buyer-words";
 import { requestWords } from "@/lib/buyer-words/requests";
 import { type Store, saleHandles, storeForId, storeIdGone } from "@/lib/store";
 import { type OutsideMethod, type PaymentRequest, statusOf, nextReminderAt, canSendAgain } from "@/lib/payment-request-rules";
-import { changeRequest, delayReminder, dropReminder, dueReminders, holdForCheckout, letGo, markPaid, reminderRequestOf, requestOf, requestRecordKey } from "@/lib/payment-request-store";
+import { cancelRequest, changeRequest, delayReminder, dropReminder, dueReminders, holdForCheckout, letGo, markPaid, reminderRequestOf, requestOf, requestRecordKey } from "@/lib/payment-request-store";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { countOf, repliesFor } from "@/lib/redis-reply";
 
@@ -211,6 +211,19 @@ export async function sendDueReminders(deadline: number, now = Date.now()): Prom
 
 /** Why a payment page could not be opened, in the buyer's notice's words (lib/buyer-words/requests.ts, notices). */
 export type CheckoutRefusal = "closed" | "paused" | "error" | "busy" | "gone";
+
+/**
+ * Whether the checkout Stripe answered for a request's session is that request's own (#4447): `{}` (a session Stripe no
+ * longer has, after a 404) is no checkout and passes; otherwise its id must be the request's session, and a paid one
+ * must name this request and this store in its metadata. Anything else is someone else's answer.
+ */
+function ownRequestCheckout(known: Record<string, unknown>, request: { id: string; session: string }, store: Store): boolean {
+  if (Object.keys(known).length === 0) return true;
+  if (known.id !== request.session) return false;
+  if (!isSettled(known)) return true;
+  const meta = (known.metadata ?? {}) as Record<string, string>;
+  return meta.kind === "request" && meta.request === request.id && saleHandles(store).has(meta.store ?? "");
+}
 
 /**
  * Opens the payment for one request and returns where to send the buyer:
@@ -386,6 +399,54 @@ export type OutsideRefusal = "gone" | "busy" | "paid_online" | "processing" | "e
 
 /** Stripe keeps a checkout open a day at most: one opened longer ago than this cannot be paid any more. */
 const CHECKOUT_LIFE_MS = 25 * 3_600 * 1000;
+
+/** Why a request could not be withdrawn. */
+export type WithdrawRefusal = "gone" | "not_open" | "busy" | "paid_online" | "processing" | "error";
+
+/**
+ * Withdraws an open request (the studio's "cancel"): its link stops taking payment and no reminder goes. Never a
+ * withdrawal with a checkout still payable: under the same hold as opening its checkout, the checkout already opened
+ * for it on the creator's Stripe is read first, as markPaidOutside reads it. Paid there, it is written down as paid
+ * online and the withdrawal is refused; still being paid, it is refused; open, it is closed on Stripe first, and if it
+ * cannot be closed nothing is withdrawn. Otherwise a buyer could pay the withdrawn request in a tab still open, and
+ * then the corrected one sent in its place.
+ */
+export async function withdrawRequest(store: Store, id: string, now = Date.now()): Promise<{ ok: true; request: PaymentRequest } | { ok: false; reason: WithdrawRefusal }> {
+  const request = await requestOf(store, id);
+  if (!request) return { ok: false, reason: "gone" };
+  if (statusOf(request, now) !== "open") return { ok: false, reason: "not_open" };
+  const held = await holdForCheckout(request.id);
+  if (!held) return { ok: false, reason: "busy" };
+  try {
+    if (SESSION_ID.test(request.session) && now - request.sessionAt < CHECKOUT_LIFE_MS) {
+      if (!store.stripeAccountId) return { ok: false, reason: "error" };
+      const known = (await onAccount("GET", store.stripeAccountId, `/checkout/sessions/${encodeURIComponent(request.session)}`).catch((error: unknown) => {
+        if (error instanceof StripeError && error.status === 404) return {};
+        throw error;
+      })) as Record<string, unknown>;
+      // Only this request's own checkout decides (rule 30; Claude 1's money review of #4513, the class of #4447).
+      if (!ownRequestCheckout(known, request, store)) return { ok: false, reason: "error" };
+      if (isSettled(known)) {
+        await markPaid(store, request.id, known, now);
+        return { ok: false, reason: "paid_online" };
+      }
+      if (known.status === "complete") return { ok: false, reason: "processing" };
+      if (known.status === "open") {
+        const closed = (await onAccount("POST", store.stripeAccountId, `/checkout/sessions/${encodeURIComponent(request.session)}/expire`, new URLSearchParams())) as Record<string, unknown>;
+        if (closed.status !== "expired") return { ok: false, reason: "error" };
+      }
+    }
+    const done = await cancelRequest(store, request.id, now);
+    if (done === null) return { ok: false, reason: "gone" };
+    if (done === "not_open") return { ok: false, reason: "not_open" };
+    return { ok: true, request: done };
+  } catch (error) {
+    console.error("withdrawing a payment request failed", error);
+    return { ok: false, reason: "error" };
+  } finally {
+    await letGo(held);
+  }
+}
 
 /**
  * Marks an open request as paid outside Stripe, in cash, by transfer or

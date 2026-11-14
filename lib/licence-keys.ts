@@ -519,9 +519,11 @@ export async function issuedKeys(
   limit = 50,
 ): Promise<{ keys: IssuedKey[]; total: number; revoked: number }> {
   if (!store.statsId || !isRedisConfigured()) return { keys: [], total: 0, revoked: 0 };
-  const [raw] = await redisPipeline([["HGETALL", infoKey(store, product)]]);
+  // Read exactly (unknown is never zero): only field-value pairs of strings read, so a reply in another shape
+  // throws and the keys route answers an error, never "0 keys given" (CX-123 rule 24).
+  const flat = stringList(repliesFor(await redisPipeline([["HGETALL", infoKey(store, product)]]), 1)?.[0]);
+  if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError("a product's license key records");
   const all: IssuedKey[] = [];
-  const flat = Array.isArray(raw) ? (raw as unknown[]) : [];
   for (let i = 0; i + 1 < flat.length; i += 2) {
     const entry = parseInfo(String(flat[i]), flat[i + 1]);
     if (entry) all.push(entry);

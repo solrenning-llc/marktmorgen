@@ -30,7 +30,7 @@ Branch `claude3/keep/p-bundle-globals` at `6b7cbd0fa`, made from `origin/main` (
 - RED first: every merged branch has a test commit before its fix, and that test fails on `origin/main`.
 - On the bundle head, 61 test files were run: the ones the branches add or change, plus the tests that name the files changed here. Failed: 0.
 - `tsc --noEmit -p .`: clean.
-- Whole suite (every file in `tests/`) on all 18 bundles merged together (`claude3/keep/p-bundle-zz-combined-check` at `09cd72c74`, a reference branch, never a PR): 2 failures on the first run, `platform-us-english.test.ts` (British spelling in new test titles) and `tap-targets.test.ts` (an empty 44px minimum on the phone alerts' summary); both fixed in their bundles and both pass now, with `tsc` clean.
+- Whole suite (all 2,346 files in `tests/`) and `tsc` on every bundle and stacked branch merged together over current main (`claude3/keep/p-bundle-zz-combined-check` at `575612584`, a reference branch, never a PR). First run of 13 Nov: `platform-us-english` and `tap-targets` failed, fixed in their bundles. Run of 14 Nov: `community-patch-member-exact` and `review-stop-exact` failed (their renderers called the client line as a plain function), fixed in the community bundle; `call-series-rules` failed once under load and passes alone. All pass now; `tsc` clean.
 - Browser checks run real Chromium with the real Tailwind build of `app/globals.css`, where the test needs layout, contrast, forced colors or focus.
 
 ## Accessibility
@@ -40,7 +40,7 @@ Branch `claude3/keep/p-bundle-globals` at `6b7cbd0fa`, made from `origin/main` (
 - Steps and decisions for the main task: no step or decision added or removed.
 - Not checked: real assistive technology (screen readers, voice control, switch access), testing with people (item 202), Safari and Firefox, and mobile devices. Automated tests do not prove conformance.
 
-## Open PRs touching the same lines (±3 lines, snapshot of open PRs from 13 Nov 2026 23:15 UTC-3)
+## Open PRs touching the same lines (±3 lines, the 732 PRs open on 14 Nov 2026 at about 00:10 UTC-3)
 
 - None found.
 

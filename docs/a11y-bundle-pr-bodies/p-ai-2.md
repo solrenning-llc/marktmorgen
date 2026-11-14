@@ -18,8 +18,10 @@ Branch `claude3/keep/p-ai-2` at `aed7bf145`, **stacked on #4101** (Claude 7, the
 - Steps and decisions for the main task: none added or removed.
 - Not checked: real assistive technology (screen readers, voice control), testing with people (item 202), Safari, Firefox and phones. Automated tests do not prove conformance.
 
-## Other PRs to join with care
-- #4101: the base of this branch (same component and test).
+## Open PRs touching the same lines (±3, the 732 PRs open on 14 Nov 2026 at about 00:10 UTC-3)
+- #3916: components/store-chat.tsx 160
+- #3922: components/store-chat.tsx 160
+- #4101: components/store-chat.tsx 112, components/store-chat.tsx 116, components/store-chat.tsx 160, components/store-chat.tsx 166, components/store-chat.tsx 174 (the base of this branch)
 
 Prices, visible limits, commission, gates, flags, `PLANS_ON_SALE` and `OPENING_REQUESTED` are untouched.
 

@@ -1,5 +1,7 @@
 # The store check's warnings open the exact field to fix
 
+> Now in the `studio-checks` bundle (`claude3/keep/p-bundle-studio-checks`): open that bundle, not this branch. Its overlap list is the bundle's, against the PRs open on 14 Nov 2026.
+
 Branch `claude3/keep/p-check-1` at `57fbd2934`, from main.
 
 ## What changes

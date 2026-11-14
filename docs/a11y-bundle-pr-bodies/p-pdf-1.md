@@ -18,9 +18,13 @@ Branch `claude3/keep/p-pdf-1` at `10b760ff8`, **stacked on #3761** (`claude4/ax-
 - Steps and decisions for the main task: none added or removed.
 - Not checked: real assistive technology (screen readers, voice control), testing with people (item 202), Safari, Firefox and phones. Automated tests do not prove conformance.
 
-## Open PRs touching the same lines (±3, snapshot 13 Nov 2026 23:15 UTC-3)
-- #3761: `lib/pdf-stamp.ts` 88-118 (the base of this branch).
-- #3480, #3486, #3899, #4130, #4357: `lib/pdf-stamp.ts` 36 (imports).
+## Open PRs touching the same lines (±3, the 732 PRs open on 14 Nov 2026 at about 00:10 UTC-3)
+- #3480: lib/pdf-stamp.ts 36
+- #3486: lib/pdf-stamp.ts 36
+- #3761: lib/pdf-stamp.ts 36 (the base of this branch)
+- #3899: lib/pdf-stamp.ts 36
+- #4130: lib/pdf-stamp.ts 36
+- #4357: lib/pdf-stamp.ts 36
 
 Prices, visible limits, commission, gates, flags, `PLANS_ON_SALE` and `OPENING_REQUESTED` are untouched.
 

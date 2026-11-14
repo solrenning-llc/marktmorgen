@@ -1,8 +1,8 @@
 # Accessibility bundle: community
 
-Branch `claude3/keep/p-bundle-community` at `0b87812fc`, made from `origin/main` (`7aac1f437`) by merging 6 keep branch(es) with `--no-ff`; no rebase, no force push. Each branch has its RED test in its own commit, which fails on main, and then the fix.
+Branch `claude3/keep/p-bundle-community` at `fbf804d63`, made from `origin/main` (`7aac1f437`) by merging 7 keep branch(es) with `--no-ff`; no rebase, no force push. Each branch has its RED test in its own commit, which fails on main, and then the fix.
 
-14 product files, 6 test files.
+15 product files, 10 test files.
 
 ## What changes
 
@@ -12,6 +12,8 @@ Branch `claude3/keep/p-bundle-community` at `0b87812fc`, made from `origin/main`
 - `p-form-1`: fix(community): show the post box's labels for its title, space and text
 - `p-form-4`: fix(community): the line answering a sent form takes focus once so it is read
 - `p-nav-1`: fix(community): the notifications page marks its tab as the current page
+- `p-form-6`: fix(mail): the unsubscribe page's 'not saved' line takes focus once so it is read
+- `p-form-6`: fix(community): the line answering a sent form takes focus once so it is read
 
 ## WCAG 2.2 criteria
 
@@ -29,9 +31,9 @@ Branch `claude3/keep/p-bundle-community` at `0b87812fc`, made from `origin/main`
 ## Proof
 
 - RED first: every merged branch has a test commit before its fix, and that test fails on `origin/main`.
-- On the bundle head, 24 test files were run: the ones the branches add or change, plus the tests that name the files changed here. Failed: 0.
+- On the bundle head, 29 test files were run: the ones the branches add or change, plus the tests that name the files changed here. Failed: 0.
 - `tsc --noEmit -p .`: clean.
-- Whole suite (every file in `tests/`) on all 18 bundles merged together (`claude3/keep/p-bundle-zz-combined-check` at `09cd72c74`, a reference branch, never a PR): 2 failures on the first run, `platform-us-english.test.ts` (British spelling in new test titles) and `tap-targets.test.ts` (an empty 44px minimum on the phone alerts' summary); both fixed in their bundles and both pass now, with `tsc` clean.
+- Whole suite (all 2,346 files in `tests/`) and `tsc` on every bundle and stacked branch merged together over current main (`claude3/keep/p-bundle-zz-combined-check` at `575612584`, a reference branch, never a PR). First run of 13 Nov: `platform-us-english` and `tap-targets` failed, fixed in their bundles. Run of 14 Nov: `community-patch-member-exact` and `review-stop-exact` failed (their renderers called the client line as a plain function), fixed in the community bundle; `call-series-rules` failed once under load and passes alone. All pass now; `tsc` clean.
 - Browser checks run real Chromium with the real Tailwind build of `app/globals.css`, where the test needs layout, contrast, forced colors or focus.
 
 ## Accessibility
@@ -43,11 +45,12 @@ Branch `claude3/keep/p-bundle-community` at `0b87812fc`, made from `origin/main`
 
 ## Other bundles
 
+- Includes `p-form-6`: the unsubscribe page's three 'not saved' lines use `FocusedStatus` (the community line's behavior, without its look). Three existing tests that drew pages by calling every component as a function (`unsub-link-exact`, `review-stop-exact`, `community-patch-member-exact`) now await only async server components; their checks are unchanged.
 - `docs/accessibility-inventory.json` lists the new `components/community-flash.tsx` (regenerated with `scripts/accessibility-route-inventory.mjs --write`; `tests/accessibility-inventory.test.ts` passes).
 
-## Open PRs touching the same lines (±3 lines, snapshot of open PRs from 13 Nov 2026 23:15 UTC-3)
+## Open PRs touching the same lines (±3 lines, the 732 PRs open on 14 Nov 2026 at about 00:10 UTC-3)
 
-- None found.
+- #3476: app/unsubscribe/page.tsx
 
 Prices, visible limits, commission, gates, flags, `PLANS_ON_SALE` and `OPENING_REQUESTED` are untouched.
 

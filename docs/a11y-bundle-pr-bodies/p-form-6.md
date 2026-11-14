@@ -1,5 +1,7 @@
 # The unsubscribe page's "not saved" line is read out
 
+> Now in the `community` bundle (`claude3/keep/p-bundle-community`): open that bundle, not this branch. Its overlap list is the bundle's, against the PRs open on 14 Nov 2026.
+
 Branch `claude3/keep/p-form-6` at `6a7e92b1c`, **stacked on `claude3/keep/p-form-4`** (in the community bundle), which adds `components/community-flash.tsx`. Open after the community bundle.
 
 ## What changes

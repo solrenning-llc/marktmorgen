@@ -1,5 +1,7 @@
 # The Store assistant says only the reply, once, and keeps the focus
 
+> Now in the `assistant` bundle (`claude3/keep/p-bundle-assistant`): open that bundle, not this branch. Its overlap list is the bundle's, against the PRs open on 14 Nov 2026.
+
 Branch `claude3/keep/p-ai-1` at `662ce748f`, from main.
 
 ## What changes

@@ -18,9 +18,22 @@ Branch `claude3/keep/p-lang-5` at `16104a684`, **stacked on the help-docs-embeds
 - Steps and decisions for the main task: none added or removed.
 - Not checked: real assistive technology (screen readers, voice control), testing with people (item 202), Safari, Firefox and phones. Automated tests do not prove conformance.
 
-## Open PRs touching the same lines (±3, snapshot 13 Nov 2026 23:15 UTC-3)
-- #3530, #3534, #3537, #3556, #3558, #4130: `app/developers/page.tsx` near 213 (the CSV line).
-- #3920: `app/developers/checkout-script/page.tsx` 60.
+Lines counted from the help-docs-embeds bundle, so the abbreviations bundle's own lines (p-lang-4, merged under this branch) are in the list too.
+
+## Open PRs touching the same lines (±3, the 732 PRs open on 14 Nov 2026 at about 00:10 UTC-3)
+- #3530: app/developers/page.tsx 214
+- #3534: app/developers/page.tsx 214
+- #3537: app/developers/page.tsx 214
+- #3556: app/developers/page.tsx 214
+- #3558: app/developers/page.tsx 214
+- #4130: app/developers/page.tsx 214
+- #4191: app/help/page.tsx 95
+- #4209: app/help/page.tsx 95
+- #4322: app/help/page.tsx 95
+- #4328: app/help/page.tsx 95
+- #4329: app/help/page.tsx 95
+- #4331: app/help/page.tsx 95
+- #4332: app/help/page.tsx 95
 
 Prices, visible limits, commission, gates, flags, `PLANS_ON_SALE` and `OPENING_REQUESTED` are untouched.
 

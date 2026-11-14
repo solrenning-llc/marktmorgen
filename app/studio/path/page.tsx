@@ -35,6 +35,7 @@ import { largerPlanFor } from "@/lib/larger-plan";
 import { chargeStudio, readPath, visitPath,returnMissionFor } from "@/lib/path";
 import { KEPT_CHECKINS, LEVEL_NAMES, LEVELS, PATH_SLOGAN, PATH_TITLE, goalWords, localDay, pathProgress, streakOf, validPathDay, type Place } from "@/lib/path-rules";
 import { StudioHeader } from "@/components/studio-header";
+import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { PathOnboarding } from "@/components/path-onboarding";
 export const metadata: Metadata={title:"Your Path — Marktmorgen",robots:{index:false,follow:false}};
@@ -74,7 +75,7 @@ export default async function PathPage({searchParams}:{searchParams:Promise<Reco
  return <div className="min-h-screen bg-paper text-ink">
   <StudioHeader current={store} role={access.role} stores={access.stores} owned={access.owned} action={{href:studioPath(store),label:"Back to the studio",short:"Studio"}}/>
   <StudioStorePin sid={store.sid}><main id="content" className="container-page break-words pb-20 pt-10">
-   <p className="eyebrow">Marktmorgen Path</p><Link className="mt-3 inline-block underline" href="/platform/path">How Path works</Link><h1 className="t-h2 mt-3">{PATH_TITLE}</h1><p className="mt-3 text-ink-soft">{PATH_SLOGAN}</p>
+   <StudioTrail store={store} here="Marktmorgen Path" /><Link className="mt-3 inline-block underline" href="/platform/path">How Path works</Link><h1 className="t-h2 mt-3">{PATH_TITLE}</h1><p className="mt-3 text-ink-soft">{PATH_SLOGAN}</p>
    <PathCheckoutNotice notice={checkout} reviewHref={checkout.state==="preview"?"/mission":checkout.state==="live"?null:studioPath(store)+"#stripe"}/>
    {planLine?<aside className="notice mt-6" aria-label="Your studio usage"><p>{planLine}</p>{larger&&studioUsed!==null?<Link className="mt-2 inline-block underline" href="/pricing">Review plans</Link>:null}</aside>:null}
    {failed?<p role="alert" className="notice notice-error mt-6">Your Path could not be read just now. Please try again in a moment.</p>:null}

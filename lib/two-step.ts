@@ -67,7 +67,7 @@
  *                         (the same mark under the name "any account": which accounts have one now, by tag)
  */
 import { createHash, randomBytes, randomInt } from "node:crypto";
-import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, SESSION_COOKIE, SESSION_TTL_SECONDS, SessionsUnknownError, dropSecondStep, endSession, isMoving, normaliseEmail, openSession, sessionKeyOf } from "@/lib/auth";
+import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, SESSION_COOKIE, SESSION_TTL_SECONDS, SessionsUnknownError, dropSecondStep, endSession, endUnmarkedSessions, isMoving, normaliseEmail, openSession, sessionKeyOf } from "@/lib/auth";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
@@ -822,6 +822,9 @@ export async function finishSetup(
     // again for the new app. This session only loses its mark. Unread: the app is not turned on.
     try {
       await dropSecondStep(email, (mark) => mark === "app" || mark === "recovery", session);
+      // And every other browser no second step let in: one opened by the emailed link alone would otherwise stay
+      // open without it (the security audit of 14 November 2026). This one, and a passkey's, stay signed in.
+      await endUnmarkedSessions(email, session);
     } catch (error) {
       if (!(error instanceof SessionsUnknownError)) throw error;
       console.error("logging out what an earlier app opened failed", error);

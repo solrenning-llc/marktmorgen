@@ -1,6 +1,7 @@
 /**
- * Turning two-step login on logs out every other browser of the account and keeps this one (the security audit of
- * 14 November 2026; Claude 3's decision of the same day). finishSetup only logged out the sessions an earlier app or
+ * Turning two-step login on logs out every other browser of the account that no second step let in, and keeps this
+ * one (the security audit of 14 November 2026; Claude 3's decision of the same day). A passkey's session keeps its
+ * mark and stays (tests/second-step-gate.test.ts). finishSetup only logged out the sessions an earlier app or
  * a recovery address had opened ("app", "recovery"), so a session opened by the emailed link alone (a borrowed
  * laptop, a stolen cookie) stayed open for up to 30 days with no second step ever asked. Now every other session is
  * logged out when the app is turned on; the session that turned it on stays signed in. Synthetic data only.
@@ -31,6 +32,7 @@ async function main(): Promise<void> {
   const here = await openSession(email);
   const laptop = await openSession(email);
   const phone = await openSession(email);
+  const byPasskey = await openSession(email, "passkey", "cred-owner-1");
   const someoneElse = await openSession("other@example.com");
   is("(four sessions open before)", await Promise.all([here, laptop, phone, someoneElse].map(sessionEmail)), [email, email, email, "other@example.com"]);
   const backup = "backup@example.org";
@@ -40,6 +42,7 @@ async function main(): Promise<void> {
   is("it is on", typeof finished === "object", true);
   is("this browser stays signed in", await sessionEmail(here), email);
   is("the other browsers opened by the emailed link are logged out", await Promise.all([laptop, phone].map(sessionEmail)), [null, null]);
+  is("a session a passkey let in stays", await sessionEmail(byPasskey), email);
   is("another account's session is untouched", await sessionEmail(someoneElse), "other@example.com");
   done();
 }

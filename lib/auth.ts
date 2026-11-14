@@ -867,6 +867,34 @@ export async function endAllSessions(email: string): Promise<number | null> {
   }
 }
 
+/**
+ * Logs out every session of the account that no second step let in (no mark: the emailed link or a code alone),
+ * but `keep` (the session making the change): for turning two-step login on (lib/two-step.ts, finishSetup), so a
+ * browser let in by the emailed link alone does not stay open without the second step (the security audit of 14
+ * November 2026). A session a passkey or the app let in keeps its mark and stays. Answers how many were logged out.
+ * Throws SessionsUnknownError when the sessions or their marks cannot be read in their exact shape (nothing changed
+ * then) or when a delete's answer is not exactly 0 or 1 (some may have been logged out then); never said as done.
+ */
+export async function endUnmarkedSessions(email: string, keep: string): Promise<number> {
+  if (!isRedisConfigured()) return 0;
+  const owned = await sessionsKey(normaliseEmail(email));
+  const [members] = await redisPipeline([["SMEMBERS", owned]]);
+  const keys = stringList(members);
+  if (!keys) throw new SessionsUnknownError("an account's sessions");
+  const kept = /^[0-9a-f]{64}$/.test(keep) ? await sessionKey(keep) : "";
+  const others = keys.filter((key) => key !== kept);
+  if (!others.length) return 0;
+  const marks = await Promise.all(others.map((key) => secondKeyOf(key)));
+  const read = repliesFor(await redisPipeline(marks.map((mark) => ["GET", mark])), marks.length);
+  // One answer for each mark, each a mark or none: anything else is not read as "no mark".
+  if (!read || read.some((mark) => mark !== null && typeof mark !== "string")) throw new SessionsUnknownError("the second steps of an account's sessions");
+  const unmarked = others.filter((_, i) => read[i] === null);
+  if (!unmarked.length) return 0;
+  const commands: (string | number)[][] = unmarked.flatMap((key) => [["DEL", key], ["SREM", owned, key]]);
+  if (!removedEach(await redisPipeline(commands), commands.length)) throw new SessionsUnknownError("the logging out of an account's sessions");
+  return unmarked.length;
+}
+
 export const SESSION_COOKIE_OPTIONS = {
   httpOnly: true,
   sameSite: "lax" as const,

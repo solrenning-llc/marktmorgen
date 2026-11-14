@@ -13,6 +13,7 @@
  *
  * Pure rules at the top, storage at the bottom.
  */
+import { noteRemovedCourse } from "@/lib/removed-courses";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { readShelf } from "@/lib/course-shelf-rules";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
@@ -725,8 +726,19 @@ export async function saveBody(courseId: string, lessonId: string, text: string,
   if (grown < 0) await giveData(room, [{ slot: BODIES_SLOT(courseId), bytes: -grown }]);
 }
 
-/** Takes a course's records away, and gives back their room. Its files are the caller's to delete. */
-export async function dropCourse(course: Course, room: DataStore): Promise<void> {
+/**
+ * Takes a course's records away, and gives back their room. Its files are the caller's to delete. The course is noted
+ * as dropped first, with its lessons and modules (lib/removed-courses.ts), so a person's records kept under it are
+ * still reached by their erasure; a note that is not confirmed, or a full list, throws and deletes nothing.
+ */
+export async function dropCourse(course: Course, room: DataStore, productId = ""): Promise<void> {
+  const noted = await noteRemovedCourse(room.statsId, {
+    productId,
+    courseId: course.id,
+    lessonIds: lessonsInOrder(course).map(({ lesson }) => lesson.id),
+    moduleIds: course.modules.map((m) => m.id),
+  });
+  if (noted !== "noted") throw new Error("the store's list of dropped courses is full");
   const keys = [courseKey(course.id), ...lessonsInOrder(course).map(({ lesson }) => bodyKey(course.id, lesson.id))];
   await redisPipeline(keys.map((key) => ["DEL", key]));
   await giveData(room, [{ slot: OUTLINE_SLOT(course.id), bytes: 0, set: true }, { slot: BODIES_SLOT(course.id), bytes: 0, set: true }]);

@@ -474,6 +474,9 @@ export async function courseAccess(store: Store, product: Listing, cookies: Cook
 const studentsKey = (courseId: string) => `nl:course:${courseId}:students`;
 const doneKey = (courseId: string, email: string) => `nl:course:${courseId}:done:${emailKey(email)}`;
 
+/** Commands answering 1 when this learner (emailKey) has a student row or lessons done in a course: a dropped one's probe (lib/person-erasure.ts). */
+export const learnerProbes = (courseId: string, learner: string): (string | number)[][] => [["HEXISTS", studentsKey(courseId), learner], ["EXISTS", `nl:course:${courseId}:done:${learner}`]];
+
 type StudentRow = { e: string; s: number; l: number };
 
 /**

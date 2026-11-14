@@ -49,13 +49,22 @@ export function parseFlowList(raw: unknown): Flow[] | null {
 }
 /** Studio-only read: confirmed absence is empty; failed or malformed reads throw. */
 export async function readFlowListStrict(listId: string | null): Promise<Flow[]> {
-  if (!listId) return [];
+  return (await readFlowListRaw(listId)).flows;
+}
+
+/**
+ * The same read, with the text it was read from (null when there is none), so
+ * a change is written only over what it was made from (lib/flows.ts,
+ * WRITE_FLOWS_IF; Codex G2 on #1927).
+ */
+export async function readFlowListRaw(listId: string | null): Promise<{ flows: Flow[]; raw: string | null }> {
+  if (!listId) return { flows: [], raw: null };
   if (!isRedisConfigured()) throw new Error("Sequence storage is unavailable");
   const rows = await redisPipeline([["GET", "nl:mail:flows:" + listId]]);
   if (!Array.isArray(rows) || rows.length !== 1) throw new Error("Incomplete sequence list response");
-  if (rows[0] === null) return [];
+  if (rows[0] === null) return { flows: [], raw: null };
   if (typeof rows[0] !== "string") throw new Error("Invalid sequence list response");
   const flows = parseFlowList(JSON.parse(rows[0]));
   if (!flows) throw new Error("Invalid sequence list records");
-  return flows;
+  return { flows, raw: rows[0] };
 }

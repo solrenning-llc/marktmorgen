@@ -25,6 +25,7 @@ import type { Flow, FlowCounts, FlowStep } from "@/lib/flows";
 import { flowWaitHours, type FlowAction, type FlowGoal, type FlowTrigger, MAX_CONDITION_TAG, type StepCondition, type StepIf, isCourseIf } from "@/lib/flow-rules";
 import { MAX_FLOWS, MAX_STEPS } from "@/lib/flow-limits";
 import { type MapStep, WorkflowMap, WorkflowPreview, WorkflowRuns } from "@/components/workflow-tools";
+import { WorkflowVersions } from "@/components/workflow-versions";
 import type { MailSettings } from "@/lib/store";
 import { StoreField } from "@/components/studio-store-pin";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
@@ -94,7 +95,9 @@ const MESSAGES: Record<string, string> = {
   draft_read_unavailable: "Your saved drafts could not be checked before saving. Your text is still here. Try saving again in a moment.",
   broadcast_read_unavailable: "That email could not be read just now, so nothing was changed. Try again in a moment.",
   draft_write_unconfirmed: "The draft save could not be confirmed. Your text is still here. Check your saved drafts before saving again; the draft may already exist.",
+  history_unconfirmed: "The sequence was removed, but its earlier versions could not be confirmed deleted just now. They are kept listed and are deleted with your store's data.",
   flow_write_unconfirmed: "The sequence change could not be confirmed. Reload the saved sequences and check the result before trying again. The change may already have happened.",
+  flow_write_busy: "Someone else changed these sequences at the same time, so nothing was saved. Try again.",
   starters_nothing: "Your store already has a sequence for each of those moments. They are under Sequences.",
   keep_unsent: "Only an email that has finished going out can be kept sending.",
   keep_excludes:
@@ -119,7 +122,7 @@ const MESSAGES: Record<string, string> = {
 type Answer = MailAnswer;
 
 async function call(payload: Record<string, unknown>): Promise<Answer> {
-  const sequenceWrite = ["keep", "flow", "flow-remove", "starters", "flow-activate", "flow-resolve"].includes(String(payload.action));
+  const sequenceWrite = ["keep", "flow", "flow-remove", "starters", "flow-activate", "flow-resolve", "flow-restore"].includes(String(payload.action));
   const draftWrite = payload.action === "draft-save";
   try {
     const response = await fetch("/api/store/mail", {
@@ -2123,6 +2126,7 @@ function Flows({
   // A saved workflow being switched on: its preview is shown first (WorkflowPreview), then the explicit button.
   const [activating, setActivating] = useState<string | null>(null);
   const [runsOpen, setRunsOpen] = useState<string | null>(null);
+  const [versionsOpen, setVersionsOpen] = useState<string | null>(null);
   const activeCount = flows.filter((f) => f.active).length;
   const availableSlots = sequenceDraftSlots(draft?.steps ?? []);
   const availableCounts = SEQUENCE_DRAFT_COUNTS.filter(count => count <= availableSlots);
@@ -2442,6 +2446,7 @@ function Flows({
                 </div>
               ) : null}
               {runsOpen === f.id ? <WorkflowRuns flowId={f.id} steps={f.steps} request={call} /> : null}
+              {versionsOpen === f.id ? <WorkflowVersions flowId={f.id} request={call} onRestored={refreshFlows} /> : null}
               <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm font-bold">
                 {f.active ? (
                   <button type="button" className="inline-flex min-h-11 min-w-11 items-center text-ink-soft underline underline-offset-4 hover:text-violet-deep" disabled={locked || draft !== null} onClick={() => setActive(f, false)}>
@@ -2460,6 +2465,15 @@ function Flows({
                 )}
                 <button type="button" className="inline-flex min-h-11 min-w-11 items-center text-ink-soft underline underline-offset-4 hover:text-violet-deep" onClick={() => setRunsOpen(runsOpen === f.id ? null : f.id)}>
                   {runsOpen === f.id ? "Hide runs" : "Runs"}
+                </button>
+                <button
+                  type="button"
+                  className="inline-flex min-h-11 min-w-11 items-center text-ink-soft underline underline-offset-4 hover:text-violet-deep"
+                  aria-expanded={versionsOpen === f.id}
+                  disabled={locked || draft !== null}
+                  onClick={() => setVersionsOpen(versionsOpen === f.id ? null : f.id)}
+                >
+                  {versionsOpen === f.id ? "Hide earlier versions" : "Earlier versions"}
                 </button>
                 <button
                   type="button"
@@ -2483,6 +2497,13 @@ function Flows({
                     setError(null);
                     const a = await call({ action: "flow-remove", id: f.id });
                     setBusy(false);
+                    if (!a.ok && a.error === "history_unconfirmed") {
+                      // Removed: only its earlier versions were not confirmed deleted, so it is said as done, with that note,
+                      // and the list no longer shows it (Claude 1 on #1927).
+                      toast(message(a));
+                      refreshFlows();
+                      return;
+                    }
                     if (!a.ok) {
                       if (a.error === "flow_write_unconfirmed") onWriteUnconfirmed();
                       setError("Removal of “" + f.name + "” could not be confirmed. Reload to check its current status. " + message(a));

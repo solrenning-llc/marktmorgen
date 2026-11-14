@@ -3,6 +3,7 @@ import { randomInt } from "node:crypto";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { jsonAccess } from "@/lib/studio-route";
 import { LockBusyError } from "@/lib/redis-lock";
+import { ensureStatsId } from "@/lib/store";
 import {
   BUSINESS_TASKS_NOT_CHANGED,
   BUSINESS_TASKS_NOT_READ,
@@ -55,7 +56,11 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const guarded = await guardStoreWrite(request, "settings", 2_000);
   if (!guarded.ok) return guarded.response;
-  const { store, body } = guarded;
+  const { body } = guarded;
+  // A store written before visits were counted has no statsId: it is given one here, as app/api/store/crm/route.ts
+  // does, so its first task can be kept (MÉDIO on #3562 @65207788cc). Still none: unavailable, nothing changed.
+  const store = guarded.store.statsId ? guarded.store : await ensureStatsId(guarded.ref);
+  if (!store?.statsId) return Response.json({ ok: false, error: "unreadable", message: BUSINESS_TASKS_NOT_CHANGED }, { status: 503, headers: NO_STORE });
   const action = text(body.action, 10);
   const id = text(body.id, 20);
   const now = Math.floor(Date.now() / 1000);

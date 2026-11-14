@@ -30,7 +30,12 @@ export async function POST(request: NextRequest) {
     return new Response(null, { status: 303, headers: { Location: `${origin}/signin/lost?status=unavailable`, "Cache-Control": "no-store" } });
   }
   try {
-    await sendLostEmailLink(email, clientIp(request), linkOrigin(request));
+    // Past the company's ceiling in the hour, or a count that cannot be read: nothing was sent, and the page says so.
+    // Both are decided before the account is looked up, so they say nothing about who has one.
+    const asked = await sendLostEmailLink(email, clientIp(request), linkOrigin(request));
+    if (asked === "busy" || asked === "unknown") {
+      return new Response(null, { status: 303, headers: { Location: `${origin}/signin/lost?status=${asked === "busy" ? "busy" : "unavailable"}`, "Cache-Control": "no-store" } });
+    }
   } catch (error) {
     console.error("sending a recovery-address link failed", error);
   }

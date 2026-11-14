@@ -14,6 +14,7 @@ import { fromAnotherSite, limited } from "@/lib/request-guard";
 import { isAutomated } from "@/lib/bot-check";
 import { serviceMailKnownUnavailable } from "@/lib/email";
 import { isHouseAddress } from "@/lib/house-store";
+import { companyMailRoom } from "@/lib/company-mail-ceiling";
 
 const MAX_BODY_BYTES = 2_000;
 
@@ -94,6 +95,11 @@ export async function POST(request: NextRequest) {
     if (serviceMailKnownUnavailable()) {
       return Response.json({ ok: false, error: "server_error" }, { status: 503 });
     }
+    // The company's ceiling on login links in the hour (lib/company-mail-ceiling.ts), taken for every address alike
+    // before the link is made: past it nothing is sent and the answer says so, the same whoever the address is.
+    const room = await companyMailRoom("sign-in");
+    if (room === "unknown") return Response.json({ ok: false, error: "server_error" }, { status: 503 });
+    if (room === "exceeded") return Response.json({ ok: false, error: "mail_busy" }, { status: 503, headers: { "Cache-Control": "no-store" } });
     const asked = await sendSignInLink(email, linkOrigin(request), prefillHandle(body.handle));
     // Sign-in mail is attempted equally for existing and unknown addresses.
     // The public demo owner is deliberately ignored by sendSignInLink and

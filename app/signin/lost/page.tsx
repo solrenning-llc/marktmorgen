@@ -4,6 +4,7 @@ import { MorningLogo } from "@/components/morning-header";
 import type { Metadata } from "next";
 import { LOCK_DAYS } from "@/lib/recovery-address";
 import { LOCKED_LIST } from "@/lib/locked-words";
+import { COMPANY_MAIL_BUSY } from "@/lib/company-mail-words";
 
 export const metadata: Metadata = {
   title: "Cannot open your email — Marktmorgen",
@@ -20,6 +21,7 @@ export default async function LostEmailPage({ searchParams }: { searchParams: Pr
   const params = await searchParams;
   const sent = params.status === "sent";
   const unavailable = params.status === "unavailable";
+  const busy = params.status === "busy";
   return (
     <div className="relative min-h-screen overflow-hidden">
       <main id="content" className="relative mx-auto max-w-xl px-4 py-16">
@@ -41,6 +43,11 @@ export default async function LostEmailPage({ searchParams }: { searchParams: Pr
             </p>
           ) : (
             <>
+              {busy ? (
+                <p className="notice notice-error mt-2" role="alert">
+                  {`${COMPANY_MAIL_BUSY} Or use a passkey you already added.`}
+                </p>
+              ) : null}
               {unavailable ? (
                 <p className="notice notice-error mt-2" role="alert">
                   Email is unavailable right now. Try again in a moment, or use a passkey you already added.

@@ -39,6 +39,7 @@ import { storeForIdExactly } from "@/lib/store-exact";
 import { leadsKey } from "@/lib/contacts";
 import { storesKnownFor } from "@/lib/buyer-library";
 import { erasePerson } from "@/lib/person-erasure";
+import { companyMailRoom } from "@/lib/company-mail-ceiling";
 import { allowanceWindow } from "@/lib/allowance-window";
 import { allowancesUsedStrict } from "@/lib/store-allowance";
 import { allowanceFor, askedCeiling } from "@/lib/store-allowance-rules";
@@ -59,7 +60,7 @@ const PRESS_MS = 40_000;
 type Grant = { e: string; s: string[] };
 
 /** "full": asked from one store, it has no room in its share for a visitor's address (askedCeiling). Never asked for every store. */
-export type EraseAsk = "sent" | "email" | "limited" | "error" | "full";
+export type EraseAsk = "sent" | "email" | "limited" | "error" | "full" | "busy";
 
 /** What an ask came to; `opens`, with "full": the start (00:00 UTC) of the first whole day the store's share is open again, in ms, when it is known. */
 export type EraseAnswer = { status: EraseAsk; opens?: number };
@@ -126,6 +127,11 @@ export async function askErasureLink(input: { email: string; ip: string; origin:
   const email = normaliseEmail(raw);
   if (!(await withinLimit("erase-ip", input.ip, ERASE_ASKS_PER_IP_HOUR, 3_600))) return { status: "limited" };
   if (!(await withinLimit("erase-address", sha(email), ERASE_ASKS_PER_ADDRESS_HOUR, 3_600))) return { status: "limited" };
+  // The company's ceiling on deletion links in the hour (lib/company-mail-ceiling.ts), taken before any store or the
+  // address is looked at, so "busy" comes to every address alike; a count that cannot be read sends nothing either.
+  const room = await companyMailRoom("erase");
+  if (room === "exceeded") return { status: "busy" };
+  if (room === "unknown") return { status: "error" };
   if (input.handle) {
     const store = await storeForHandle(input.handle).catch(() => null);
     if (store?.sid) {

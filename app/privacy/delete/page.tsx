@@ -7,6 +7,7 @@ import { storeForHandle } from "@/lib/store";
 import { readErasureLink } from "@/lib/erasure-request";
 import { readErasureReceipt } from "@/lib/erasure-receipt";
 import { ERASE_TOKEN } from "@/lib/erasure-rules";
+import { COMPANY_MAIL_BUSY } from "@/lib/company-mail-words";
 
 export const metadata: Metadata = {
   title: "Delete your data — Marktmorgen",
@@ -20,6 +21,7 @@ const STATUS: Record<string, { tone: "ok" | "error"; text: string }> = {
   sent: { tone: "ok", text: "If that address is known there, a link to delete it is on its way to it. It works for an hour, and nothing is deleted until you press the button on the page it opens." },
   email: { tone: "error", text: "That does not look like an email address. Type the one the store has." },
   limited: { tone: "error", text: "Too many tries for now. Wait an hour and ask again." },
+  busy: { tone: "error", text: `${COMPANY_MAIL_BUSY} Nothing was deleted.` },
   error: { tone: "error", text: "That could not be done just now. Nothing was deleted. Try again in a moment." },
   expired: { tone: "error", text: "That link has run out or was already used. Ask for a new one below." },
 };

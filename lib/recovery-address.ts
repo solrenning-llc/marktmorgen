@@ -34,6 +34,7 @@ import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { withinLimit } from "@/lib/request-guard";
+import { companyMailRoom } from "@/lib/company-mail-ceiling";
 import { LOCKED_LIST } from "@/lib/locked-words";
 
 /** How long logins through the recovery address alone are locked. */
@@ -188,12 +189,19 @@ export async function removeRecoveryAddress(email: string): Promise<void> {
 /**
  * From /signin/lost: a link to the recovery address of the account that logs
  * in with `signIn`, when it has one. The caller answers the same either way.
+ *
+ * Past the company's ceiling on these links in the hour (lib/company-mail-ceiling.ts), "busy": nothing is sent, and
+ * the count is taken before the account is looked up, so the answer is the same for every address. A count that
+ * cannot be read is "unknown" and sends nothing either. Otherwise nothing is said back.
  */
-export async function sendLostEmailLink(signIn: string, ip: string, origin: string): Promise<void> {
+export async function sendLostEmailLink(signIn: string, ip: string, origin: string): Promise<"busy" | "unknown" | void> {
   const email = normaliseEmail(signIn);
   if (!email || email.length > MAX_EMAIL_LENGTH || !EMAIL_PATTERN.test(email)) return;
   if (!(await withinLimit("lost-email-ip", ip, 10, 60 * 60))) return;
   if (!(await withinLimit("lost-email", email, 3, 60 * 60))) return;
+  const room = await companyMailRoom("lost-email");
+  if (room === "exceeded") return "busy";
+  if (room === "unknown") return "unknown";
   const address = await recoveryAddress(email);
   if (!address) return;
   const token = randomBytes(32).toString("hex");

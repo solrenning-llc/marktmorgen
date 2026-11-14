@@ -6,6 +6,7 @@ import { Icon } from "@/components/icons";
 import { EmailSuggestion } from "@/components/email-suggestion";
 import { EmailCodeForm } from "@/components/email-code-form";
 import { holdForSuggestion, suggestEmail } from "@/lib/email-typo";
+import { COMPANY_MAIL_BUSY } from "@/lib/company-mail-words";
 
 type State =
   | { kind: "idle" }
@@ -20,6 +21,7 @@ const MESSAGES: Record<string, string> = {
   unavailable:
     "Logging in is not switched on yet, so nothing was sent. Write to us and we will tell you when it is.",
   server_error: "Something went wrong on our side. Try again in a moment.",
+  mail_busy: COMPANY_MAIL_BUSY,
   unconfirmed:
     "We could not confirm this browser, so nothing was sent. Reload the page and try again. If it keeps happening, write to support@marktmorgen.com.",
 };

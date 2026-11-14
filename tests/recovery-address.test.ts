@@ -158,7 +158,7 @@ async function main(): Promise<void> {
       commands.push(...batch.map(command => [...command]));
       return pipeline(batch);
     };
-    let answer: void;
+    let answer: Awaited<ReturnType<typeof sendLostEmailLink>>;
     try {
       answer = await sendLostEmailLink(owner, "192.0.2.73", "https://marktmorgen.com");
     } finally {

@@ -29,14 +29,14 @@ import { essentialLimitState, type LimitState } from "@/lib/request-guard";
  *                               asked for is rare; twenty an hour is far above it.
  *
  * Together at most about $3.45 a day, $107 a 31-day month, a company exposure
- * under MR item 2 (docs/funded-exposure-review.md), never a plan's cost.
+ * under MR item 2, never a plan's cost; its line in docs/funded-exposure-review.md
+ * is still to be written, and these figures are not a reviewed ceiling.
  */
 export const SIGN_IN_LINKS_PER_HOUR = 100;
 export const LOST_EMAIL_LINKS_PER_HOUR = 20;
 export const ERASE_LINKS_PER_HOUR = 20;
 
-/** What the person is told past a ceiling: true for any address, so it says nothing about who has an account. */
-export const COMPANY_MAIL_BUSY = "We couldn't send the email right now. Try again in an hour.";
+export { COMPANY_MAIL_BUSY } from "@/lib/company-mail-words";
 
 export type CompanyMailQueue = "sign-in" | "lost-email" | "erase";
 

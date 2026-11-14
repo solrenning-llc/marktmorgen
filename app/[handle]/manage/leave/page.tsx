@@ -51,7 +51,8 @@ export default async function LeavePage({ params, searchParams }: Params) {
   const answer = why ? answerFor(why) : null;
   const cheaper = answer?.cheaper && one ? choicesFor(store, one, await liveTiers(store).catch(() => [])).filter((c) => c.way === "down") : [];
   const pause = Boolean(answer?.pause && one && one.canPause && !one.pause && store.pause > 0);
-  const contact = answer?.contact
+  // No way to write to a store switched off after a report (lib/takedown.ts); the way out stays.
+  const contact = answer?.contact && !store.suspended
     ? store.contact.on
       ? `/@${store.handle}/contact`
       : `mailto:${store.email}?subject=${encodeURIComponent(one?.title ?? store.name)}`

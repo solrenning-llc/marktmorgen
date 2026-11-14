@@ -27,7 +27,11 @@ import {
   codesWork, emailsWork, eventsWork, listingsWork, mailRevenueColdWork, membershipsWork, numbersWork, productsPageWork, scannedPageWork,
   API_PAGE_ROWS, EMAILS_PROBE_WORK, NUMBERS_KEEP_WORK, NUMBERS_KEPT_BYTES, NUMBERS_SENT_BYTES, addWork, boughtNextWork, keptNumbersWork, listPageMost, settledUnits,
   EVENTS_PROBE_MOST, LOG_ENTRY_BYTES, codeMakeWork, codeStopWork, eventsSentMost,
+  BUNDLE_CHOICES_MOST, BUNDLE_PAGE_LISTINGS, BUNDLE_SEARCH_STRETCH, IMPORTS_MOST, IMPORTS_READ, bundleChoicesWork, importsWork,
 } from "@/lib/api-read-rules";
+import { PICKER_PAGE, SEARCH_STRETCH } from "@/lib/bundle-choices";
+import { IMPORTS_LIST_SIZE } from "@/lib/imports";
+import { MCP_TOOLS } from "@/lib/mcp-catalog";
 import { DELIVERY_MAX_BYTES, LOG_SIZE, RECENT_MESSAGES_MAX } from "@/lib/webhooks";
 import { BOOK_STRIPE_PAGES, STUDIO_UNIT_BYTES, STUDIO_UNIT_COMMANDS, bulkUnits } from "@/lib/affiliates";
 import { PATH_BOARD_JOIN_UNITS } from "@/lib/path-board-rules";
@@ -51,6 +55,7 @@ import { MAX_PERSON_TASKS, MAX_STORE_TASKS } from "@/lib/person-tasks";
 import { ADD_ON_LINES, ASSIST_REMIND_READ, CERTIFICATE_PDF_READ, PATH_REMINDER_PUSH, PATH_BOARD_JOIN, PATH_BOARD_PRIVACY, PATH_PAGE, PATH_STUDIO_PAGE, PATH_READ, COST_LINES, EMAIL_SITES, KIND_LINES, NEXT_OFFER_READ, NOT_A_COST, SHELF_READ, OPEN, PER_PAYMENT_LINES, PICTURE_READ, SCOPES, UNIT_COST, nonPayingWorst, request } from "./plan-cost-registry";
 import { NEXT_OFFER_REQUEST_UNITS } from "@/lib/next-offer-rules";
 import { CART_OFFER_REQUEST_UNITS } from "@/lib/cart-offers";
+import { RETURNING_CODE_REQUEST_UNITS } from "@/lib/returning-code";
 import { SHELF_REQUEST_UNITS } from "@/lib/course-shelf";
 import { ASSIST_REMIND_REQUEST_UNITS } from "@/lib/assistant-reminder-rules";
 import { DOWNLOAD_LOOKUP_READ, ORDERS_BUNDLE_READ, ORDERS_OLDER_READ, ORDERS_OPEN_READ, ORDERS_METERED_COMMAND, ORDERS_METERED_LISTING, ORDERS_METERED_MOVES, ORDERS_METERED_PROGRESS } from "./plan-cost-registry";
@@ -276,6 +281,8 @@ test("the units a figure is taken in cost at least what they stand for", () => {
   // The offers after a cart read what the buyer owns with the same reads and Stripe calls (ownedHere), without the model or the choice's
   // product reads, and count as many requests (lib/cart-offers.ts): the same ceiling holds them.
   assert.equal(CART_OFFER_REQUEST_UNITS, NEXT_OFFER_REQUEST_UNITS);
+  // A code only for people who bought here before reads the same purchases the same way (lib/returning-code.ts): the same ceiling holds it.
+  assert.equal(RETURNING_CODE_REQUEST_UNITS, NEXT_OFFER_REQUEST_UNITS);
   // A course's "More from" shelf (lib/course-shelf.ts) reads what a student owns the same way, plus its PayPal counts, and counts
   // SHELF_REQUEST_UNITS requests before it reads: more than its reads and Stripe calls cost.
   assert.ok(SHELF_REQUEST_UNITS * laterPageCost() >= SHELF_READ, `${SHELF_REQUEST_UNITS} x ${laterPageCost()} < ${SHELF_READ}`);
@@ -593,6 +600,14 @@ test("an API reading that reads more than a page takes further requests that cov
   // A page of the list or the members at its most, and what buyers bought next with its cards.
   for (const list of ["leads", "members"] as const) for (let rows = 0; rows <= API_PAGE_ROWS; rows += 25) covers(listPageMost(list, rows), `${list} page at its most ${rows}`);
   for (const paths of [0, 28, 5_000, 262_144]) for (const sent of [0, 1_200, undefined]) covers(boughtNextWork(paths, sent), `bought next ${paths}/${sent}`);
+  // The bundle choices and the imports (631 [AA1] (a), port of #1933): every page and history at every size, and their most.
+  for (let cards = 0; cards <= BUNDLE_SEARCH_STRETCH; cards += 1) for (let listings = 0; listings <= BUNDLE_PAGE_LISTINGS; listings += 1) covers(bundleChoicesWork(cards, listings), `bundle choices ${cards}/${listings}`);
+  for (let imports = 0; imports <= IMPORTS_READ; imports += 1) covers(importsWork(imports), `imports ${imports}`);
+  covers(BUNDLE_CHOICES_MOST, "bundle choices at their most");
+  covers(IMPORTS_MOST, "imports at their most");
+  assert.deepEqual([BUNDLE_SEARCH_STRETCH, BUNDLE_PAGE_LISTINGS, IMPORTS_READ], [SEARCH_STRETCH, PICKER_PAGE, IMPORTS_LIST_SIZE], "the bundle choices' and the imports' sizes are the code's");
+  for (let cards = 0; cards <= BUNDLE_SEARCH_STRETCH; cards += 1) for (let listings = 0; listings <= BUNDLE_PAGE_LISTINGS; listings += 1) assert.ok(apiReadUnits(bundleChoicesWork(cards, listings)) <= apiReadUnits(BUNDLE_CHOICES_MOST), `bundle choices ${cards}/${listings} inside their most`);
+  for (let imports = 0; imports <= IMPORTS_READ; imports += 1) assert.ok(apiReadUnits(importsWork(imports)) <= apiReadUnits(IMPORTS_MOST), `imports ${imports} inside their most`);
   // Settled: never under what was measured, one more when it passes what was set aside.
   for (const held of [0, 3, 13]) for (const bytes of [0, 4_000_000, 9_000_000]) {
     const w = scannedPageWork(1, bytes, bytes);
@@ -681,6 +696,17 @@ test("an API reading that reads more than a page takes further requests that cov
   before("app/api/v1/codes/route.ts", "const refused = await takeMoreApi(store, apiReadUnits(codeStopWork()));", "const before = await listCodes(account);");
   before("app/api/mcp/route.ts", "const read = await apiNumbers(store,", "await tool(read.data)");
   before("app/api/mcp/route.ts", "const refused = await read.settle(", "result(id, answer)");
+  // The bundle choices and the imports set aside their most before any of their records is read, and settle before sending.
+  for (const [most, reading, settled] of [
+    ["const most = apiReadUnits(BUNDLE_CHOICES_MOST);", "await bundleChoicesPage(store,", "settledUnits(atLeast(bundleChoicesWork("],
+    ["const most = apiReadUnits(IMPORTS_MOST);", "await storeImportsRead(store);", "settledUnits(atLeast(importsWork("],
+  ]) {
+    const tools = read("lib/mcp-tools.ts");
+    const at = tools.indexOf(most);
+    const held = tools.indexOf("const settle = await hold(most);", at);
+    const readAt = tools.indexOf(reading, at);
+    assert.ok(at >= 0 && held > at && readAt > held && tools.indexOf(settled, readAt) > readAt, `lib/mcp-tools.ts: ${most} held before ${reading}, settled after`);
+  }
   // Every GET of the API and every MCP tool past the door takes what it reads; only the store's own record fits in its request.
   const v1 = readdirSync(join(root, "app/api/v1")).filter((d) => existsSync(join(root, "app/api/v1", d, "route.ts")));
   for (const dir of v1) {
@@ -689,7 +715,29 @@ test("an API reading that reads more than a page takes further requests that cov
     assert.ok(route.includes("takeMoreApi(store") || route.includes("holdMoreApi(store"), `app/api/v1/${dir}: a GET past the door takes what it reads`);
   }
   const mcp = read("app/api/mcp/route.ts");
-  for (const call of ["membershipsTool(store, charge)", "emailsTool(store, { charge, hold })", "affiliatesTool(store, charge)", "products(store, cursor, charge)", "productsTool(store, data, days, { hold, charge })", "apiNumbers(store, "]) assert.ok(mcp.includes(call), call);
+  for (const call of ["membershipsTool(store, charge)", "emailsTool(store, { charge, hold })", "affiliatesTool(store, charge)", "products(store, cursor, charge)", "productsTool(store, data, days, { hold, charge })", "apiNumbers(store, ", "importsTool(store, hold)", "bundleChoicesTool(store, params.arguments ?? {}, hold)"]) assert.ok(mcp.includes(call), call);
+  // And every tool the server lists, not only those named above (Codex G2 on #1933): its handler hands it what pays
+  // before it reads (charge or hold), or pays at the door's numbers; a tool that prepares a change takes its first
+  // envelope before it prepares anything.
+  const listed = MCP_TOOLS.map((tool) => tool.name);
+  const windowed = mcp.slice(mcp.indexOf("const windowed"), mcp.indexOf("const tool = typeof params.name"));
+  assert.ok(windowed.length > 0 && mcp.includes("const read = await apiNumbers(store,"), "the windowed tools read the numbers paid for first");
+  assert.ok(listed.length >= 20 && listed.includes("list_bundle_choices") && listed.includes("get_imports"), "every listed tool is walked");
+  const paying = ["charge", "hold"];
+  for (const name of listed) {
+    if (name === "get_store") continue;
+    if (windowed.includes(`${name}: (data)`)) continue;
+    const at = mcp.indexOf(`"${name}"`);
+    assert.ok(at > 0, `${name} is handled by the route`);
+    if (name.startsWith("propose_")) {
+      const first = mcp.indexOf("const opened = await takeMoreApi(agent.store, first);", at);
+      assert.ok(first > at && mcp.indexOf("await propose", first) > first, `${name} pays for what it reads before it reads`);
+      continue;
+    }
+    const next = mcp.indexOf("\n    if (params.name ===", at + name.length + 2);
+    const handler = mcp.slice(at, next > 0 ? next : undefined);
+    assert.ok(paying.some((token) => handler.includes(token)), `${name} pays for what it reads before it reads`);
+  }
   const page = apiReadUnits(studentsPageWork(200, 0));
   console.log(`API readings: a page of 200 students takes ${page} more, the bookings ${apiReadUnits(bookingsWork(true))} more, an empty program ${apiReadUnits(bookWork({ kept: true, entries: 0, people: 0, leads: 0, paypalRefunds: 0, stripe: true, products: 0 }, BOOK_STRIPE_PAGES))} more`);
 });

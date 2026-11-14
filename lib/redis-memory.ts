@@ -241,6 +241,12 @@ export class MemoryRedis {
           this.run(["HSET", slots, who, id]);
           return 1;
         }
+        // lib/certificate.ts CERT_SLOT_FREE: a student's slot freed only while it still names the certificate withdrawn.
+        if (key.startsWith("-- marktmorgen:cert-slot-free:v1\n") && args[0] === "1" && args.length === 4) {
+          const [, slots, who, expected] = args;
+          if (this.run(["HGET", slots, who]) !== expected) return 0;
+          return this.run(["HDEL", slots, who]);
+        }
         // lib/assignment.ts HAND_IN_WRITE_IF: a student's work written only over the one it was read as.
         if (key.startsWith("-- marktmorgen:hand-in-write-if:v1\n") && args[0] === "4" && args.length === 12) {
           const [, sub, files, waiting, all, expected, json, path, bytes, review, at, member] = args;
@@ -260,6 +266,40 @@ export class MemoryRedis {
           if (held !== expected) return [0, Buffer.byteLength(held, "utf8")];
           this.run(text === "" ? ["DEL", about] : ["SET", about, text]);
           return [1];
+        }
+        // lib/redis-reply.ts HDEL_IF_EQUAL: one hash field deleted only while it holds the value given.
+        if (key.startsWith("-- marktmorgen:hdel-if-equal:v1\n") && args[0] === "1" && args.length === 4) {
+          const [, hash, field, value] = args;
+          if (this.run(["HGET", hash, field]) !== value) return 0;
+          return this.run(["HDEL", hash, field]);
+        }
+        // lib/paypal-delivery.ts TAKE_BACK_OWN: a deleted person's library, bond and purchase taken back together, only while
+        // the purchase is still the record read (-1, nothing touched); the store out of their library only while it is their
+        // only purchase here, the bond only while it names this order's affiliate, the purchase last.
+        if (key.startsWith("-- marktmorgen:paypal-take-back:v1\n") && Number(args[0]) >= 2 && args.length === 1 + Number(args[0]) + 5) {
+          const n = Number(args[0]);
+          const [purchases, bond, ...library] = args.slice(1, 1 + n);
+          const [field, raw, bondField, affiliate, sid] = args.slice(1 + n);
+          this.scriptCalls += 1;
+          if (this.run(["HGET", purchases, field]) !== raw) return -1;
+          if (sid !== "") {
+            this.scriptCalls += 1;
+            if (Number(this.run(["HLEN", purchases])) === 1) {
+              for (const set of library) {
+                this.scriptCalls += 1;
+                this.run(["SREM", set, sid]);
+              }
+            }
+          }
+          if (bondField !== "") {
+            this.scriptCalls += 1;
+            if (this.run(["HGET", bond, bondField]) === affiliate) {
+              this.scriptCalls += 1;
+              this.run(["HDEL", bond, bondField]);
+            }
+          }
+          this.scriptCalls += 1;
+          return this.run(["HDEL", purchases, field]);
         }
         // lib/paypal-sales.ts PAYPAL_REVOKE: a refunded payment's purchase taken back only while nothing else stands for it.
         if (key.startsWith("-- marktmorgen:paypal-revoke:v1\n") && args[0] === "2" && args.length >= 5) {
@@ -890,6 +930,20 @@ export class MemoryRedis {
           if (held !== undefined && typeof held !== "string") throw new Error("WRONGTYPE");
           if ((held ?? "") !== args[2]) return held === undefined ? [-1] : [-1, new TextEncoder().encode(held).length];
           this.data.set(target, args[3]);
+          // The script's SET has no KEEPTTL: as in real Redis, the key keeps no expiry.
+          this.until.delete(target);
+          return 1;
+        }
+        // lib/webhooks.ts RESEND_MARK: the same compare and replies, but the write keeps the key's expiry (SET KEEPTTL),
+        // and a key left with none is given ARGV[3] seconds, in the same step.
+        if (key.startsWith("-- marktmorgen:webhook-resend-mark:v1\n") && args[0] === "1" && args.length === 5) {
+          const target = args[1];
+          this.live(target);
+          const held = this.data.get(target);
+          if (held !== undefined && typeof held !== "string") throw new Error("WRONGTYPE");
+          if ((held ?? "") !== args[2]) return held === undefined ? [-1] : [-1, new TextEncoder().encode(held).length];
+          this.data.set(target, args[3]);
+          if (!this.until.has(target)) this.until.set(target, this.now() + Number(args[4]) * 1000);
           return 1;
         }
         if (key.startsWith("-- marktmorgen:crm-deal-save:v2\n") && args[0] === "1" && args.length === 6) {

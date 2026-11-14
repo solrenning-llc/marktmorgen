@@ -5,6 +5,7 @@ import { flushSync } from "react-dom";
 import { useRouter } from "next/navigation";
 import { useLeaveGuard } from "@/components/leave-guard";
 import { toast } from "@/components/toast";
+import { ConfirmAction } from "@/components/confirm-action";
 import { PROVIDER_NAMES, type Video, readVideo, videoAddress } from "@/lib/sales-page";
 
 /**
@@ -88,9 +89,16 @@ export function IntroEditor({ intro }: { intro: Video | null }) {
           {saving ? "Saving…" : "Save the video"}
         </button>
         {intro ? (
-          <button type="button" disabled={saving} onClick={() => { setUrl(""); void save(""); }} className="btn btn-ghost btn-sm">
+          <ConfirmAction
+            className="btn btn-ghost btn-sm"
+            disabled={saving}
+            busy={saving}
+            question="Remove the welcome video? Its address goes with it, so putting it back means finding the address again."
+            yes="Yes, remove"
+            onConfirm={() => { setUrl(""); return save(""); }}
+          >
             Remove it
-          </button>
+          </ConfirmAction>
         ) : null}
       </div>
     </form>

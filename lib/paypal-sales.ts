@@ -6,7 +6,7 @@
  *   nl:ppsell:o:<order>      an order opened: which store, which product, the price asked (3 days)
  *   nl:ppsell:paid:<order>   an order paid: the capture, the buyer's address (kept 400 days)
  *   nl:ppsell:watch:<stats>  paid orders inside PayPal's refund window, scored by when to ask next
- *   nl:ppsell:pending:<stats> orders whose payment PayPal holds as pending, until it completes or fails
+ *   nl:ppsell:pending:<stats> orders whose payment PayPal holds as pending, or is being asked to take, until it completes or fails
  *   nl:ppsell:own:<stats>:<address hash>:<product>  the paid orders behind one address's product
  *   nl:ppsell:sales:<stats>     every paid order, scored by when it was paid (400 days): the store's numbers read it
  *   nl:ppsell:refunded:<stats>  paid orders PayPal says were refunded in full, scored by when that was seen
@@ -46,12 +46,12 @@ import { fairOff } from "@/lib/fair-price";
 import { admitOrders } from "@/lib/order-admission";
 import { countOrder } from "@/lib/orders";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, listSlots, repliesFor, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, listSlots, repliesFor, stringList } from "@/lib/redis-reply";
 import { EMAIL_PATTERN } from "@/lib/auth";
 import { addressHash, grantImported, importedKey } from "@/lib/imported-purchases";
 import { plainAmount, formatMoney } from "@/lib/money";
 import { saleOff, salePrice } from "@/lib/store-sale";
-import { sendEmail } from "@/lib/email";
+import { sendEmailPinned } from "@/lib/email";
 import { isPaidUp } from "@/lib/billing";
 import { type Listing, type Store, setPastBuyers, storeRef } from "@/lib/store";
 import { speech } from "@/lib/buyer-words";
@@ -515,6 +515,11 @@ export type Paid = {
    * PayPal's answer down again.
    */
   blind?: number;
+  /**
+   * The creator's PayPal account the order was paid to (added 12 November 2026; absent on orders paid before): the
+   * refund watch reads the capture as that account, whatever account the store has connected since.
+   */
+  m?: string;
 };
 /** Capture statuses that leave less than the whole sale kept without a refund in full (payments_payment_v2, capture). */
 export type TakenOff = "PARTIALLY_REFUNDED" | "REVERSED";
@@ -660,6 +665,23 @@ async function watchLater(order: string, opened: Opened): Promise<void> {
   ]);
 }
 
+/**
+ * Puts an order in pending before PayPal is asked to take its payment (Claude 6's second money review of #3385,
+ * MEDIUM, probe A): whatever happens after PayPal takes it (the step that writes it down not reaching Redis, its
+ * answer lost), the sweep has the order to ask PayPal about and write down (watchPayPal), and settle's script takes it
+ * off pending with the same step that writes it down. The record keeps its own life (three days from opening, or
+ * thirty once watchLater keeps it), so nothing is kept longer than before. The answer read exactly (rule 24): one
+ * ZADD, 0 or 1; anything else, or no answer, throws, and PayPal is not asked to take anything, so a buyer is never
+ * charged for an order the sweep could not find. True when this call put it there (1), false when it was there
+ * already (0: watched by an earlier try, whose outcome this one does not know). One command more an attempted capture
+ * (Upstash: COMMAND in tests/plan-cost-registry.ts), inside the order's own work (ORDER_COMPUTE, line "orders").
+ */
+async function watchFirst(order: string, opened: Opened): Promise<boolean> {
+  const added = repliesFor(await redisPipeline([["ZADD", pendingKey(opened.s), String(Math.floor(Date.now() / 1000)), order]]), 1);
+  if (!added || (added[0] !== 0 && added[0] !== 1)) throw new UnknownReplyError("putting a PayPal order in pending before its capture");
+  return added[0] === 1;
+}
+
 /** Writes a completed payment down, once. Returns it, and whether this call wrote it. */
 async function settle(order: string, opened: Opened, captureId: string, email: string): Promise<{ paid: Paid; fresh: boolean }> {
   const paid: Paid = {
@@ -674,6 +696,7 @@ async function settle(order: string, opened: Opened, captureId: string, email: s
     handle: opened.h,
     live: paypalLiveApi(),
     merchant: opened.m,
+    ...(MERCHANT_ID.test(opened.m) ? { m: opened.m } : {}),
     ...(opened.meta ? { meta: opened.meta } : {}),
     ...(opened.via ? { via: opened.via } : {}),
     ...(opened.off ? { off: opened.off, sale: opened.sale } : {}),
@@ -711,12 +734,20 @@ export async function captureOrder(store: Store, order: string): Promise<Capture
   if (already) return { ok: true, paid: already, fresh: false };
   const opened = await readOpened(order);
   if (!opened || opened.s !== store.statsId) return { ok: false, reason: "unknown" };
+  // Watched first: no capture is asked for an order the sweep could not find (watchFirst throws on anything unknown).
+  const watchedHere = await watchFirst(order, opened);
   let done: Record<string, unknown>;
   try {
     done = await call("POST", `/v2/checkout/orders/${encodeURIComponent(order)}/capture`, { body: {}, merchant: opened.m, requestId: `nl-capture-${order}` });
   } catch (error) {
-    // PayPal's words for a payment it would not take (Orders v2 errors): nothing was charged.
-    if (error instanceof PayPalError && DECLINED.has(error.code)) return { ok: false, reason: "declined" };
+    // PayPal's words for a payment it would not take (Orders v2 errors): nothing was charged. Put in pending by this
+    // call only, it holds no capture the sweep could ever find, so it is let go of pending (a removal that fails
+    // leaves it to the sweep, which lets it go when its record ends); the buyer approving again comes back here and is
+    // watched again. Already there before this call (an earlier try whose answer was lost), it stays for the sweep.
+    if (error instanceof PayPalError && DECLINED.has(error.code)) {
+      if (watchedHere) await redisPipeline([["ZREM", pendingKey(opened.s), order]]).catch((again) => console.error("letting go of a declined PayPal order failed", again));
+      return { ok: false, reason: "declined" };
+    }
     // Anything else — taken already by a request that did not get to write it
     // down, or an answer lost on the way — is settled by PayPal's order itself.
     console.error("capturing a PayPal order failed", error);
@@ -755,9 +786,21 @@ export async function captureOrder(store: Store, order: string): Promise<Capture
 }
 
 /**
+ * A PayPal receipt as deliverPayPal makes it: every field that decides the bytes a sender is given for it (the
+ * meter is the same for every one). lib/paypal-delivery.ts keeps the first one made, so every try sends it again.
+ */
+export type PayPalReceipt = { from: string; to: string; subject: string; text: string; replyTo?: string; idempotencyKey: string };
+
+/**
  * Hands a paid PayPal purchase over, once: written down under the buyer's
  * PayPal address, a course dated from today, and the receipt emailed with
- * the link to the list of purchases.
+ * the link to the list of purchases. True only when the sender accepted the
+ * receipt; false when it refused it, its answer is unknown or it threw, so
+ * the caller keeps the order to send it again (lib/paypal-delivery.ts), under
+ * the same idempotency key, through the same sender (sendEmailPinned) and
+ * with the same bytes (keep); false too when mayEmail said no or keep gave
+ * none, with no receipt sent.
+ * Every other step is written once (HSETNX, SET NX).
  */
 export async function deliverPayPal(input: {
   store: Store;
@@ -767,16 +810,24 @@ export async function deliverPayPal(input: {
   from: string;
   recordStart: (email: string, productId: string, startSeconds: number) => Promise<void>;
   ordersLink: (email: string) => Promise<string | null>;
-}): Promise<void> {
+  /** Asked just before the receipt, before its link: no sends no receipt this time (an unknown throws first). */
+  mayEmail?: () => Promise<boolean>;
+  /**
+   * Given the receipt just made, before anything is sent: the receipt to send (the one kept from its first try, so
+   * every try is the same bytes), or null for none this time. A throw sends nothing, as a sender's refusal.
+   */
+  keep?: (receipt: PayPalReceipt) => Promise<PayPalReceipt | null>;
+}): Promise<boolean> {
   const { store, paid, product, base } = input;
-  if (!store.statsId) return;
+  if (!store.statsId) return false;
   const items = product.bundle?.length ? product.bundle : null;
   await grantImported(store.statsId, `paypal:${paid.order}`, [{ email: paid.email, productId: product.id, items }], paid.at, store.sid);
   if (!store.pastBuyers) await setPastBuyers(storeRef(store));
   for (const id of [product.id, ...(items ?? [])]) await input.recordStart(paid.email, id, paid.at);
-  const link = (await input.ordersLink(paid.email)) ?? `${base}/orders`;
+  const go = !input.mayEmail || (await input.mayEmail());
+  const link = go ? ((await input.ordersLink(paid.email)) ?? `${base}/orders`) : "";
   const g = givingWords(store.language);
-  await sendEmail({ meter: { by: "order" },
+  const made = (): PayPalReceipt => ({
     from: input.from,
     to: paid.email,
     subject: g.ppSubject(product.title).slice(0, 200),
@@ -797,10 +848,18 @@ export async function deliverPayPal(input: {
     ].join("\n"),
     replyTo: store.email,
     idempotencyKey: `nimbus-paypal:${paid.order}`,
-  }).catch((error) => console.error("a PayPal purchase email failed", error));
+  });
+  const receipted = go && await (async () => {
+    const receipt = input.keep ? await input.keep(made()) : made();
+    return receipt !== null && (await sendEmailPinned({ meter: { by: "order" }, ...receipt }));
+  })().catch((error) => {
+    console.error("a PayPal purchase email failed", error);
+    return false;
+  });
   // One of the month's orders, like a card checkout's (lib/orders.ts). Not counted until
   // 17 October 2026, so a store's PayPal sales were in no plan's figure.
   await countOrder(store, `paypal:${paid.order}`, paid.cents);
+  return receipted === true;
 }
 
 /**
@@ -917,9 +976,12 @@ export async function watchPayPal(
       await redisPipeline([["ZREM", watchKey(statsId), order]]);
       continue;
     }
+    // The account the order was paid to, whatever account the store has connected since (C7, 12 November 2026); a
+    // record from before it was kept falls back to the account connected now.
+    const merchant = typeof paid.m === "string" && MERCHANT_ID.test(paid.m) ? paid.m : store.paypalSeller.merchant;
     let status = "";
     try {
-      const capture = await call("GET", `/v2/payments/captures/${encodeURIComponent(paid.capture)}`, { merchant: store.paypalSeller.merchant });
+      const capture = await call("GET", `/v2/payments/captures/${encodeURIComponent(paid.capture)}`, { merchant });
       // Without PayPal's own status it is not known whether it was refunded: asked again in an hour, never taken for
       // "not refunded", and moved back so it cannot hold the place of the orders behind it. Until PayPal answers, the
       // Path does not count the sale (Claude 5's N1b on #3443).
@@ -1196,8 +1258,14 @@ export const MAX_PAID_BYTES = 20 * (40 + 6 + 6 * 200) + 2_000;
  */
 export async function paypalKept(statsId: string | null, refunds: boolean): Promise<{ sales: number; refunds: number }> {
   if (!statsId || !isRedisConfigured()) return { sales: 0, refunds: 0 };
-  const [sold, refunded] = await redisPipeline([["ZCARD", salesKey(statsId)], ...(refunds ? [["ZCARD", refundedKey(statsId)]] : [])]);
-  return { sales: Number(sold) || 0, refunds: refunds ? Number(refunded) || 0 : 0 };
+  // Rule 24: these counts size what a read is counted for before it reads, so only whole counts are counts. A reply
+  // in another shape throws, and every caller refuses before reading, never as a store with no PayPal sales.
+  const commands = [["ZCARD", salesKey(statsId)], ...(refunds ? [["ZCARD", refundedKey(statsId)]] : [])];
+  const replies = repliesFor(await redisPipeline(commands), commands.length);
+  const sales = countOf(replies?.[0]);
+  const refunded = refunds ? countOf(replies?.[1]) : 0;
+  if (sales === null || refunded === null) throw new UnknownReplyError("the PayPal sales kept");
+  return { sales, refunds: refunded };
 }
 
 /**

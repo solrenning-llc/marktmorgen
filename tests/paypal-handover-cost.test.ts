@@ -2,7 +2,8 @@
  * The PayPal hand-over list's commands, as the cost registry states them (Claude 5's LEVE 2 on #2909): the list read
  * each sweep of a store makes, the orders one sweep tries (HAND_OVER_BATCH), the retry's own commands for each order
  * it tries (the paid record's GET, the refund mark's ZSCORE and at most two writes to the list), and the two
- * commands each PayPal sale adds to its own work (the list's ZADD when it is settled and its ZREM once handed over).
+ * commands each PayPal sale adds to its own work (the list's ZADD when it is settled and its ZREM once handed over),
+ * and, for a receipt the sender refused, how many times it is tried and every Redis command one try sends.
  * Each figure is read from what the real return route and the real sweep send, path by path, and must equal the
  * registry's (PAYPAL_HAND_OVER_RETRY and NOT_A_COST.HAND_OVER_BATCH in tests/plan-cost-registry.ts).
  *
@@ -12,7 +13,7 @@ import { TEST_CONSENT } from "./digital-consent-fixture";
 import { claimHandle, ensureStatsId, addProduct, setProductLink, setSubscription, setPayPalSeller, storeForEmail, type Store } from "@/lib/store";
 import { readListing, STORE_PAGE_SIZE } from "@/lib/catalog";
 import { openOrder } from "@/lib/paypal-sales";
-import { HAND_OVER_BATCH, sweepPayPal } from "@/lib/paypal-delivery";
+import { HAND_OVER_BATCH, RECEIPT_TRIES_AT_MOST, sweepPayPal } from "@/lib/paypal-delivery";
 import { NOT_A_COST, PAYPAL_HAND_OVER_RETRY } from "./plan-cost-registry";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -26,11 +27,17 @@ const orders = new Map<string, Record<string, unknown>>();
 let made = 0;
 const orderId = (n: number) => `5O190127TN36472${String(n).padStart(2, "0")}`;
 let buyerFor = "a@example.com";
+/** What Resend answers a receipt (422: refused), and every receipt request by its idempotency key. */
+let resendStatus = 200;
+const receiptPosts: string[] = [];
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status });
-  if (url.hostname === "api.resend.com") return json({ id: "e" });
+  if (url.hostname === "api.resend.com") {
+    if (url.pathname === "/emails") receiptPosts.push(new Headers(init?.headers).get("idempotency-key") ?? "");
+    return resendStatus === 200 ? json({ id: "e" }) : json({ name: "validation_error", message: "synthetic refusal" }, resendStatus);
+  }
   if (url.hostname !== "api-m.paypal.com") return json({ error: "unexpected" }, 404);
   const method = init?.method ?? "GET";
   if (url.pathname === "/v1/oauth2/token") return json({ access_token: "A21AApartner", token_type: "Bearer", expires_in: 32400 });
@@ -90,7 +97,7 @@ async function recorded(run: () => Promise<unknown>, fault: Fault = () => null):
 async function main(): Promise<void> {
   redis.clear();
   console.error = () => {};
-  process.env.RESEND_API_KEY = "re_test_handover_cost";
+  process.env.RESEND_API_KEY = "re_test_paypal_sales";
   delete process.env.PAYPAL_ENV;
   process.env.PAYPAL_PARTNER_CLIENT_ID = PARTNER_CLIENT;
   process.env.PAYPAL_PARTNER_SECRET = "EPpartnerSecret0123456789";
@@ -204,6 +211,27 @@ async function main(): Promise<void> {
   is("orders tried in one sweep", tried, batch);
   is("as the registry states", tried, declared?.ordersPerStoreRun);
   is("the rest wait for the next sweep", (await queued()).length, 30 - Number(batch));
+
+  part("A receipt the sender refuses: tried at most RECEIPT_TRIES_AT_MOST times, each try's commands as stated");
+  await redis.pipeline([["DEL", handOverKey(statsId)]]);
+  resendStatus = 422;
+  const owed = await buy("refused@example.com");
+  let mostATry = 0;
+  for (let run = 0; run < (26 * 3600) / 300; run += 1) {
+    ahead += 300_000;
+    const sent = await recorded(async () => sweepPayPal(await fresh(), Date.now() + 10_000));
+    const from = sent.findIndex((c) => c[0] === "GET" && c[1] === paidKey(owed.order));
+    if (from < 0) continue;
+    const to = sent.findLastIndex((c) => c[1] === handOverKey(statsId) && c[c.length - 1] === owed.order);
+    mostATry = Math.max(mostATry, to - from + 1);
+  }
+  resendStatus = 200;
+  const triesOwed = receiptPosts.filter((key) => key === `nimbus-paypal:${owed.order}`).length;
+  console.log(`        tries: ${triesOwed}, most commands a try: ${mostATry}`);
+  is("tried at most RECEIPT_TRIES_AT_MOST times, the first one included", triesOwed <= RECEIPT_TRIES_AT_MOST && triesOwed > 1, true);
+  is("as the registry states", RECEIPT_TRIES_AT_MOST, declared?.receiptTriesPerOrder);
+  is("one try's Redis commands, the hand-over's rerun included, at most as the registry states", mostATry > 0 && mostATry <= Number(declared?.commandsPerReceiptTry), true);
+  is("then it left the list", (await queued()).includes(owed.order), false);
 
   done();
 }

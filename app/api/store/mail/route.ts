@@ -13,7 +13,7 @@ import {
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { MAX_IMPORT, WHO, type Who, audience, importContacts, isBuyer, leadsKey, listCounts, parseContact, readAddresses, readTags } from "@/lib/contacts";
 import { MAX_MAIL_BODY, MAX_SUBJECT, fromLine, monthlyAllowance, render, reserve, release } from "@/lib/mail";
-import { sendBatch } from "@/lib/email";
+import { sendBatchOutcome } from "@/lib/email";
 import { healthId, startRamp } from "@/lib/mail-health";
 import { BroadcastCancellationUnconfirmed, BroadcastWriteUnconfirmed, BroadcastsUnreadable, advanceBroadcast, cancelBroadcast, createBroadcast, whoOf } from "@/lib/broadcasts";
 import { LedgerNotCounted, buyerLedger, isNarrowed, keeps, ledgerChannels, readNarrow, removeSegment, saveSegment } from "@/lib/segments";
@@ -216,7 +216,7 @@ export async function POST(request: NextRequest) {
       const reserved = await reserve(store, 1);
       if (reserved !== "ok") return fail(reserved === "month" ? "allowance" : reserved === "sender" ? "sender" : "day");
       const r = render(store, `[Test] ${subject}`, content, null);
-      const outcome = await sendBatch(
+      const outcome = await sendBatchOutcome(
         // To whoever pressed it: the owner, or the person on their team who is
         // writing the draft.
         [{ from: fromLine(store), to: email, subject: r.subject, text: r.text, html: r.html, replyTo: store.email }],
@@ -224,7 +224,8 @@ export async function POST(request: NextRequest) {
         { by: "monthly" },
       );
       if (outcome !== "sent") {
-        await release(store, 1);
+        // An answer not known (lib/email.ts, sendBatchOutcome) may have sent them: their count is kept, never given back.
+        if (outcome !== "uncertain" && outcome !== "unconfirmed") await release(store, 1);
         return fail("send", 502);
       }
       return Response.json({ ok: true, to: email });

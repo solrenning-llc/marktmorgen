@@ -291,6 +291,10 @@ async function main(): Promise<void> {
   await redis.pipeline([["HSET", `nl:assist:pool:${store.statsId}:${window.id}`, "spent", String(assistantPoolMicroUsd() - Math.max(holdOf("Is it a PDF?"), holdOf("Is it printable?")) - 1)]]);
   const both = await Promise.all([askAssistant({ store, text: "Is it a PDF?", facts, now }), askAssistant({ store, text: "Is it printable?", facts, now })]);
   is("two at once with room for one: one is answered, one is told the month is used", both.map((r) => (r.ok ? "answered" : r.reason)).sort(), ["answered", "spent"]);
+  // A month whose pool was opened and is then gone (lost, evicted, deleted) refuses every reply (ASSISTANT_POOL):
+  // the studio must not show a full month left for it (review of #4073, VR Part A, item 2).
+  await redis.pipeline([["DEL", `nl:assist:pool:${store.statsId}:${window.id}`]]);
+  is("a month opened whose pool is gone: the studio sees none left, as every reply is refused", [(await assistantLeft(store, now))?.left, (await askAssistant({ store, text: "Is it a PDF?", facts, now })).ok], [0, false]);
 
   part("The buyer's own data");
   is("another store cannot read the conversation", await readThread({ ...store, statsId: "another-store-1" }, token), null);

@@ -63,7 +63,12 @@ export const eventAddress = () => "https://example.com/event";
 export const eventTimeIn = () => "November 6, 2026";
 export const lengthIn = () => "30 minutes";
 export const isSenderConfigured = () => true;
-export const sendBatch = async (messages: unknown[]) => { sent.push(messages); return "sent"; };
+/** What the email service answers a batch, as lib/email.ts tells it apart: "uncertain" is a batch it may have taken. */
+export let batchAnswer: "sent" | "retry" | "uncertain" | "unconfirmed" | "refused" = "sent";
+export const setBatchAnswer = (answer: typeof batchAnswer) => { batchAnswer = answer; };
+/** sendBatch as lib/email.ts answers it: an answer not known comes back as "retry", like one nothing of which went. */
+export const sendBatch = async (messages: unknown[]) => { sent.push(messages); return batchAnswer === "uncertain" || batchAnswer === "unconfirmed" ? "retry" : batchAnswer; };
+export const sendBatchOutcome = async (messages: unknown[]) => { sent.push(messages); return batchAnswer; };
 export const BATCH_SIZE = 100;
 export const CHECKED_BATCH_SIZE = 25;
 export const SENDER_WAIT_NOTE = "Waiting for the sender.";
@@ -83,5 +88,5 @@ export const orderWrite = async (_owner: unknown, commands: (string | number)[][
 export const alertCreator = async () => false;
 
 export function reset(): void {
-  db.clear(); commandsSeen.length = 0; sent.length = 0; readReply = null; reserved.length = 0; released.length = 0; tokenWriteFails = false; rsvpUnknown = false;
+  db.clear(); commandsSeen.length = 0; sent.length = 0; readReply = null; reserved.length = 0; released.length = 0; tokenWriteFails = false; rsvpUnknown = false; batchAnswer = "sent";
 }

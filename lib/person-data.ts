@@ -53,6 +53,7 @@ export const PERSON_DATA: PersonData[] = [
   { file: "lib/flows.ts", how: "erased", what: "Their way through every sequence and workflow, and any step still waiting to reach them" },
   { file: "lib/flow-runs.ts", how: "erased", via: "lib/flows.ts", what: "Each workflow run's record and history" },
   { file: "lib/broadcasts.ts", how: "expires", days: 60, what: "A broadcast already going out keeps its list of addresses until it finishes; a deleted address on it is passed over, never written to" },
+  { file: "lib/batch-count.ts", how: "expires", days: 1, what: "When the email service's answer to a batch of your emails was lost, a mark that the batch's count is already kept, named by a one-way fingerprint of the batch and its addresses; no address is written in it, and it is gone by itself within a day" },
   { file: "lib/product-updates.ts", how: "expires", days: 60, what: "An update email already going out keeps its addresses until it finishes; a deleted address is passed over" },
   { file: "lib/product-updates.ts", how: "suppression", what: "If they had pressed stop on update emails, that one-way mark stays, as their own no" },
   { file: "lib/review-requests.ts", how: "suppression", what: "If they had pressed stop on review requests, that one-way mark stays, as their own no" },

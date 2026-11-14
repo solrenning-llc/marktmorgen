@@ -593,6 +593,27 @@ export async function sendBatch(
 ): Promise<"sent" | "retry" | "refused"> {
   const result = await dispatchBatch(messages, batchKey, meter, only, false, runtime);
   // A partial answer is a list batch's only (listOnly); never one here.
+  return result === "waiting" || result === "uncertain" || result === "unconfirmed" || typeof result === "object" ? "retry" : result;
+}
+
+/**
+ * sendBatch, telling an answer that is not known from a batch nothing of
+ * which went. "uncertain": Resend may have taken some or all of it (a post
+ * whose answer never came, a 5xx or 408); the same batch tried again goes to
+ * Resend under the same key, which Resend drops if it took the first, so the
+ * caller keeps its count, never given back, and may send the retry under it
+ * (lib/batch-count.ts). "unconfirmed": Amazon may have taken some of it (an
+ * SES acknowledgement lost); Amazon has no such key, and the retry posts
+ * those emails to it again, so the caller keeps its count, never given back,
+ * and counts the retry again (#4073 MEDIUM 1). "retry" means nothing was
+ * handed to a provider and the same batch may be tried again, its count
+ * given back.
+ */
+export async function sendBatchOutcome(
+  messages: BatchMessage[], batchKey: string, meter: EmailMeter,
+): Promise<"sent" | "retry" | "uncertain" | "unconfirmed" | "refused"> {
+  const result = await dispatchBatch(messages, batchKey, meter, undefined, false);
+  // A partial answer is a list batch's only (listOnly); never one here.
   return result === "waiting" || typeof result === "object" ? "retry" : result;
 }
 
@@ -676,13 +697,14 @@ export async function sendListBatch(
   messages: BatchMessage[], batchKey: string, meter: EmailMeter,
 ): Promise<ListBatchOutcome> {
   if (messages.length === 0) return "sent";
-  return dispatchBatch(messages, batchKey, meter, "amazon", true);
+  const result = await dispatchBatch(messages, batchKey, meter, "amazon", true);
+  return result === "uncertain" || result === "unconfirmed" ? "retry" : result;
 }
 
 async function dispatchBatch(
   messages: BatchMessage[], batchKey: string, meter: EmailMeter,
   only: "resend" | "amazon" | undefined, listOnly: boolean, runtime: ResendTransportRuntime = {},
-): Promise<ListBatchOutcome> {
+): Promise<ListBatchOutcome | "uncertain" | "unconfirmed"> {
   if (!isSenderConfigured()) return listOnly ? "waiting" : "retry";
   if (messages.length === 0) return "sent";
   // What actually goes: a message with no address that can be written to is
@@ -770,7 +792,8 @@ async function dispatchBatch(
       // A lost SES reply is not a refusal. The unresolved batch must reach
       // its caller without another SES wave or a switch to Resend. A durable
       // caller checkpoint is still needed before a later invocation.
-      if (result.uncertain === true) return "retry";
+      // Amazon keeps no key that drops a second post: told apart from Resend's unknown answer (sendBatchOutcome).
+      if (result.uncertain === true) return "unconfirmed";
       // SES excludes definitively refused recipients from both accepted and
       // pending lists. Missing recipients cannot establish a completed list.
       if (listOnly && result.taken.length + result.left.length < going.length) {
@@ -827,7 +850,7 @@ async function dispatchBatch(
   if (!key) return "retry";
   const tagged = going.some((m) => cleanTags(m.tags).length > 0);
   let firstPost = true;
-  const post = async (withTags: boolean, under: string, auth: string = key, fromSite = false): Promise<Response | "accepted_receipt" | null> => {
+  const post = async (withTags: boolean, under: string, auth: string = key, fromSite = false): Promise<Response | "accepted_receipt" | "uncertain" | null> => {
     // The first Resend-selected preflight immediately precedes this path;
     // every known-refusal variant must independently precede its usage GET.
     if (!firstPost && authorization && !(await authorization.preflight())) return null;
@@ -848,11 +871,15 @@ async function dispatchBatch(
         };
       })),
     }, runtime);
-    return result.kind === "accepted_receipt" ? "accepted_receipt" : result.kind === "response" ? result.response : null;
+    if (result.kind === "accepted_receipt") return "accepted_receipt";
+    if (result.kind === "response") return result.response;
+    // Posted and its answer not known: Resend may have taken the batch. Not posted, or blocked: nothing went.
+    return result.kind === "unknown" && result.posted !== false ? "uncertain" : null;
   };
   try {
     let response = await post(true, idempotencyKey);
     if (response === "accepted_receipt") return "sent";
+    if (response === "uncertain") return "uncertain";
     if (!response) return "retry";
     if (!response.ok && tagged && (response.status === 400 || response.status === 422)) {
       // The tags are for us, not for the reader: they say whose email it was
@@ -863,6 +890,7 @@ async function dispatchBatch(
       console.error("batch refused with its tags; sending it without them", response.status);
       response = await post(false, `${idempotencyKey}:plain`);
       if (response === "accepted_receipt") return "sent";
+      if (response === "uncertain") return "uncertain";
       if (!response) return "retry";
     }
     const site = getKey();
@@ -873,6 +901,7 @@ async function dispatchBatch(
       console.error("Resend refused the creators' domain for a batch; sending it from the site's own address", response.status);
       response = await post(true, `${idempotencyKey}:site`, site, true);
       if (response === "accepted_receipt") return "sent";
+      if (response === "uncertain") return "uncertain";
       if (!response) return "retry";
     }
     if (response.ok) {
@@ -880,10 +909,11 @@ async function dispatchBatch(
       return "sent";
     }
     console.error("batch rejected", response.status);
-    return response.status === 429 || response.status >= 500 ? "retry" : "refused";
+    // A 429 is a batch not taken; a 5xx or a 408 (Codex V on #4073) does not say Resend did not take it.
+    return response.status === 429 ? "retry" : response.status >= 500 || response.status === 408 ? "uncertain" : "refused";
   } catch (error) {
     console.error("batch failed", error);
-    return "retry";
+    return "uncertain";
   }
 }
 

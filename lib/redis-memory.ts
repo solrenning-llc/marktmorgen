@@ -1642,7 +1642,7 @@ export class MemoryRedis {
           return 1;
         }
         if (key.startsWith("-- marktmorgen:capped-count:v2\n")) return this.cappedCount(args);
-        if (key.startsWith("-- marktmorgen:assistant-pool:v1\n")) return this.assistantPool(args);
+        if (key.startsWith("-- marktmorgen:assistant-pool:v2\n")) return this.assistantPool(args);
         if (key.startsWith("-- marktmorgen:studio-demo-door:v2\n")) return this.studioDemo("door", args);
         if (key.startsWith("-- marktmorgen:studio-demo-refuse:v1\n")) return this.studioDemo("refuse", args);
         if (key.startsWith("-- marktmorgen:studio-demo-session-refuse:v1\n")) return this.studioDemo("sessionRefuse", args);
@@ -2480,22 +2480,25 @@ export class MemoryRedis {
 
   /** lib/store-assistant.ts, ASSISTANT_POOL: the Store assistant's month, reserved, settled and given back. */
   private assistantPool(args: string[]): unknown {
-    if (args[0] !== "1") throw new Error("ERR assistant-pool: arguments");
-    const key = args[1];
-    const [op, rawHold, third, fourth] = args.slice(2);
+    if (args[0] !== "2") throw new Error("ERR assistant-pool: arguments");
+    const key = args[1], opened = args[2];
+    const [op, rawHold, third, fourth] = args.slice(3);
     this.live(key);
+    this.live(opened);
     const held0 = this.data.get(key);
     if (held0 !== undefined && !(held0 instanceof Map)) return -1;
     const amount = (value: string | undefined) => (value !== undefined && /^(0|[1-9]\d*)$/.test(value) && Number(value) <= 1e12 ? Number(value) : null);
     const hold = amount(rawHold);
     if (hold === null || hold <= 0) return -1;
-    const existing = held0 instanceof Map ? held0 : null;
+    // An empty hash is no key in Redis (TYPE answers "none"); one left empty by a read here is the same.
+    const existing = held0 instanceof Map && held0.size > 0 ? held0 : null;
     const held = amount(existing?.get("held") ?? "0"), spent = amount(existing?.get("spent") ?? "0");
     if (held === null || spent === null) return -1;
     if (op === "reserve") {
       let cap = amount(third);
       const ttl = amount(fourth);
       if (cap === null || ttl === null || ttl <= 0) return -1;
+      if (!existing && this.data.has(opened)) return -1;
       const kept = existing?.get("cap");
       if (kept !== undefined) {
         const was = amount(kept);
@@ -2507,6 +2510,10 @@ export class MemoryRedis {
       hash.set("held", String(held + hold));
       hash.set("cap", String(cap));
       if (!this.until.has(key)) this.until.set(key, this.now() + ttl * 1000);
+      if (!this.data.has(opened)) {
+        this.data.set(opened, "1");
+        this.until.set(opened, this.now() + ttl * 1000);
+      }
       return 1;
     }
     if (op === "settle" || op === "release") {

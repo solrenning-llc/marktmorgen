@@ -93,6 +93,7 @@ export const COPY_PLAN: Readonly<Record<string, { how: CopyHow; what: string }>>
   "lib/flows.ts": { how: "copied", what: "Which of the store's sequences and workflows you are in, and each step taken" },
   "lib/mail-clicks.ts": { how: "copied", what: "Which of the store's sequence emails you used a link in" },
   "lib/mail-health.ts": { how: "marks", what: "A mark that your address was counted in this week's delivery checks, with nothing else in it" },
+  "lib/api-idempotency.ts": { how: "marks", what: "For up to 24 hours, the answer the store's API gave to a request about you sent with a repeat key. It can name you and what you were given, as the rest of this copy does. It is kept only so the same request is never done twice, and deleting you deletes it at once" },
   "lib/crm.ts": { how: "copied", what: "The store's fields about you, its deals with you, and the tasks its team wrote about you" },
   "lib/crm-companies.ts": { how: "copied", what: "Which of the store's companies you are linked to (639 [GL7](4)); the companies themselves are the store's" },
   "lib/payment-request-store.ts": { how: "copied", what: "Payment requests the store sent you" },

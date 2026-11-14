@@ -97,6 +97,7 @@
   --mint-lift: #6fe3ba;
   --amber: #8a4f00;
   --amber-soft: #fdf3e1;
+  --amber-text: #6b3d00; /* status copy on amber-soft, 8.3:1 (1.4.6); --amber stays for borders and accents */
   /* The same two signals at the weight they need to read on navy. */
   --amber-lift: #ffc77a;
   --violet-glow: #cfc7f2;
@@ -260,9 +261,11 @@ body {
  * indicator has to clear — so on the dark surfaces the ring turns white. The
  * dark halo outside it is there because those sections also hold white cards,
  * and a white ring on a white card is no ring at all; the halo gives it an
- * edge on either background without changing its shape.
+ * edge on either background without changing its shape. The line about the
+ * site today (components/site-nav.tsx) sits on the same near-black.
  */
 .on-dark :is(:focus-visible, input[type="radio"]:focus),
+.bg-ink[data-preview-bar] :is(:focus-visible, input[type="radio"]:focus),
 .surface-night :is(:focus-visible, input[type="radio"]:focus),
 .surface-daybreak :is(:focus-visible, input[type="radio"]:focus),
 .surface-navy :is(:focus-visible, input[type="radio"]:focus),
@@ -808,6 +811,40 @@ html {
   }
 }
 /*
+ * Chosen, in forced colors (WCAG 1.4.1, 1.4.11; AX274 item 4). The system
+ * paints every background in its own Canvas colour, so a choice shown only as
+ * a filled button (.btn-primary beside .btn-ghost or .btn-secondary: the
+ * inbox's tabs, toggles, segmented choices, "you are here") looked like the
+ * others. The state is in aria-selected, aria-pressed or aria-current, so it is
+ * drawn from there in the system's Highlight colours, which the person's theme
+ * picked to stand out. Outside forced colors nothing changes.
+ */
+@media (forced-colors: active) {
+  .btn[aria-selected="true"],
+  .btn[aria-pressed="true"],
+  .btn[aria-current]:not([aria-current="false"]) {
+    forced-color-adjust: none;
+    background: Highlight;
+    color: HighlightText;
+    border-color: Highlight;
+  }
+}
+/*
+ * Fills, in forced colors (WCAG 1.4.11; AX274 item 4). A bar, a meter's fill
+ * or a day's mark drawn only as a coloured box is painted Canvas by the system
+ * and vanishes on the page's own Canvas. They are drawn in CanvasText instead:
+ * the studio's charts and meters (.meter-fill) and a review's share bars.
+ * Gradients go too, since the system drops background images there.
+ */
+@media (forced-colors: active) {
+  .meter-fill,
+  .rv-bar > span {
+    forced-color-adjust: none;
+    /* Over a fill's own colour, set inline or later in this file. */
+    background: CanvasText !important;
+  }
+}
+/*
  * 40px was below both platforms' guidance. 44 is Apple's number and the
  * smaller of the two, which is the one to meet.
  */
@@ -1212,7 +1249,7 @@ html {
 }
 .tag-next {
   background: var(--amber-soft);
-  color: var(--amber);
+  color: var(--amber-text);
 }
 .tag-brand {
   background: var(--lilac);
@@ -2012,7 +2049,8 @@ a.chip {
   /* The creator's backdrop (lib/store-look.ts, backdropStyle); none for Plain. */
   background-image: var(--st-backdrop, none);
   background-size: var(--st-backdrop-size, auto);
-  animation: st-aurora 40s ease-in-out infinite alternate;
+  /* Aurora settles: one slow move as the page opens, over within five seconds, then still (WCAG 2.2.2). */
+  animation: st-aurora 4.5s ease-out 1 forwards;
   animation-play-state: var(--st-backdrop-play, paused);
   color: var(--st-text);
   font-family: var(--st-font-body, var(--font-body)), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Arial, sans-serif;
@@ -4248,7 +4286,8 @@ fieldset:disabled .cm-poll-row {
   width: 100%;
   min-height:44px;
   border-radius: 999px;
-  border: 1px solid color-mix(in srgb, currentColor 22%, transparent);
+  /* Known only by its edge, so 3:1 against the bar (1.4.11): 4.74:1 on Paper, 4.02:1 on Sand, 6.67:1 on Night. */
+  border: 1px solid color-mix(in srgb, currentColor 60%, transparent);
   background: color-mix(in srgb, currentColor 8%, transparent);
   padding: 0 0.9rem;
   font-size: 0.9375rem;
@@ -4475,7 +4514,8 @@ fieldset:disabled .cm-poll-row {
   background: var(--st-item);
 }
 .cm-danger {
-  color: var(--danger, #b42318);
+  /* Small text, so 7:1 (1.4.6 AAA): 7.07:1 on the sand page, 8.3:1 on white; the site's red is 5.85:1. */
+  color: #9a1a13;
 }
 .st-theme-night .cm-danger {
   color: #ff8a80;

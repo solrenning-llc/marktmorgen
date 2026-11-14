@@ -55,7 +55,7 @@ export function BuyingHours({ hours }: { hours: number[] }) {
               <li key={name} className="flex items-center gap-2 text-sm">
                 <span className="w-24 shrink-0 text-ink-soft">{name}</span>
                 <span className="h-2.5 min-w-0 flex-1 rounded-full bg-line" aria-hidden="true">
-                  <span className="block h-2.5 rounded-full bg-violet-brand/80" style={{ width: `${(byDay[d] / peakDay) * 100}%` }} />
+                  <span className="meter-fill block h-2.5 rounded-full bg-violet-brand/80" style={{ width: `${(byDay[d] / peakDay) * 100}%` }} />
                 </span>
                 <span className="w-8 shrink-0 text-right tabular-nums text-ink">{byDay[d]}</span>
               </li>
@@ -67,7 +67,7 @@ export function BuyingHours({ hours }: { hours: number[] }) {
           <div className="mt-2 flex h-28 items-end gap-[3px]" role="img" aria-label={`Sales by hour: ${byHour.map((n, h) => `${hourWords(h)} ${n}`).join(", ")}`}>
             {byHour.map((n, h) => (
               <div key={h} className="flex h-full min-w-0 flex-1 flex-col justify-end" title={`${hourWords(h)}: ${n} ${n === 1 ? "sale" : "sales"}`}>
-                <div className="w-full rounded-t-[3px] bg-violet-brand/80" style={{ height: `${Math.max(n ? 4 : 1, (n / peakHour) * 100)}%`, opacity: n ? 1 : 0.25 }} />
+                <div className="meter-fill w-full rounded-t-[3px] bg-violet-brand/80" style={{ height: `${Math.max(n ? 4 : 1, (n / peakHour) * 100)}%`, opacity: n ? 1 : 0.25 }} />
               </div>
             ))}
           </div>

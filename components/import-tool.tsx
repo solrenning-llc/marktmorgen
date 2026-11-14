@@ -223,7 +223,7 @@ export function ImportProgress({
           aria-valuenow={percent}
           aria-label="Import progress"
         >
-          <div className="h-full rounded-full bg-violet-brand transition-[width] duration-500 motion-reduce:transition-none" style={{ width: `${percent}%` }} />
+          <div className="meter-fill h-full rounded-full bg-violet-brand transition-[width] duration-500 motion-reduce:transition-none" style={{ width: `${percent}%` }} />
         </div>
       ) : null}
       <dl className={`mt-3 grid grid-cols-2 gap-2 text-sm ${compact ? "" : "sm:grid-cols-4"}`}>

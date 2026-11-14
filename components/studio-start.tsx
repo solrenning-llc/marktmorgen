@@ -59,7 +59,7 @@ export function StudioStart({ steps: all, activation, launchChecklist }: { steps
         aria-valuenow={done}
         aria-valuetext={`${done} of ${steps.length}`}
       >
-        <div className="h-full rounded-full bg-violet-brand transition-[width] duration-500 motion-reduce:transition-none" style={{ width: `${percent}%` }} />
+        <div className="meter-fill h-full rounded-full bg-violet-brand transition-[width] duration-500 motion-reduce:transition-none" style={{ width: `${percent}%` }} />
       </div>
       <details className="group/start mt-4" open>
         <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 py-2 text-sm [&::-webkit-details-marker]:hidden font-semibold text-ink-soft underline-offset-4 hover:text-ink hover:underline">

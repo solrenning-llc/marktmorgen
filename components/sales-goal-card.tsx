@@ -78,7 +78,7 @@ export function SalesGoalCard({
             aria-valuemax={100}
             aria-valuenow={Math.min(100, Math.floor(progress.share * 100))}
           >
-            <div className={`h-full ${progress.reachedOn ? "bg-mint-deep" : "bg-violet-brand"}`} style={{ width: `${Math.min(100, progress.share * 100)}%` }} />
+            <div className={`meter-fill h-full ${progress.reachedOn ? "bg-mint-deep" : "bg-violet-brand"}`} style={{ width: `${Math.min(100, progress.share * 100)}%` }} />
           </div>
           <p className="mt-2 text-xs text-ink-soft">
             {progress.reachedOn

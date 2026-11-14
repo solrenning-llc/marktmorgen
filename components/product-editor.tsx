@@ -1510,7 +1510,7 @@ function FileBlock({
             aria-valuemax={100}
           >
             <div
-              className="h-full rounded-full bg-gradient-to-r from-violet-brand to-sky-brand transition-all"
+              className="meter-fill h-full rounded-full bg-gradient-to-r from-violet-brand to-sky-brand transition-all"
               style={{ width: `${percent}%` }}
             />
           </div>

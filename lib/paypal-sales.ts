@@ -825,6 +825,12 @@ export async function deliverPayPal(input: {
  * When a paid order is next asked about: often while refunds are likely, then
  * less and less, until PayPal's refund window closes.
  */
+/**
+ * The capture statuses the refund watch reads: money still standing (COMPLETED, PARTIALLY_REFUNDED) or taken back in
+ * full (REFUNDED). Any other is unknown to it: looked at again, never read as either.
+ */
+const CAPTURE_STATUSES_READ = new Set(["COMPLETED", "PARTIALLY_REFUNDED", "REFUNDED"]);
+
 export function nextLook(paidAt: number, now: number): number | null {
   const age = now - paidAt;
   if (age >= WATCH_SECONDS) return null;
@@ -925,7 +931,13 @@ export async function watchPayPal(
       const capture = await call("GET", `/v2/payments/captures/${encodeURIComponent(paid.capture)}`, { merchant });
       // Without PayPal's own status it is not known whether it was refunded: asked again in an hour, never taken for
       // "not refunded", and moved back so it cannot hold the place of the orders behind it.
-      if (typeof capture.status !== "string" || !capture.status) {
+      // Nor is a reply about another capture this one's (rule 30), nor a status that is not PayPal's word for money
+      // standing or taken back (14 November 2026): every other one is unknown, looked at again in an hour and never
+      // dropped from the watch as "not refunded", even past the watch's days.
+      if (typeof capture.status !== "string" || !capture.status || capture.id !== paid.capture || !CAPTURE_STATUSES_READ.has(capture.status)) {
+        if (typeof capture.status === "string" && capture.id === paid.capture && !CAPTURE_STATUSES_READ.has(capture.status)) {
+          console.error("a PayPal capture is in a status the refund watch does not read; looked at again in an hour", order, capture.status);
+        }
         await redisPipeline([["ZADD", watchKey(statsId), String(now + 3600), order]]);
         continue;
       }

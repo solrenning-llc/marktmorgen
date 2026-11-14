@@ -10,7 +10,7 @@
  * posts and the event notices all draw their text through bodyHtml.
  *
  * What must hold: a link drawn from an address may break anywhere; the creator's
- * words around it, its colour and its underline are unchanged, and a button keeps
+ * words around it, its color and its underline are unchanged, and a button keeps
  * its own look. The plain-text version is not touched.
  */
 import { bodyHtml, bodyText } from "@/lib/mail-body";
@@ -26,7 +26,7 @@ const fromAddress = links.filter((l) => l.text === LONG);
 is("both addresses in the text and the list are links", fromAddress.length, 2);
 for (const [i, l] of fromAddress.entries()) {
   is(`address link ${i + 1} breaks anywhere`, /word-break:break-all/.test(l.style) && /overflow-wrap:anywhere/.test(l.style), true);
-  is(`address link ${i + 1} keeps its colour and underline`, /color:#4c1d95/.test(l.style) && /text-decoration:underline/.test(l.style), true);
+  is(`address link ${i + 1} keeps its color and underline`, /color:#4c1d95/.test(l.style) && /text-decoration:underline/.test(l.style), true);
 }
 
 part("A button and the words around are unchanged");

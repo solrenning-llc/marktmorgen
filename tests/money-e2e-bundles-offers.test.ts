@@ -270,13 +270,24 @@ async function main(): Promise<void> {
   part("One-click offers after paying: discounted, a bundle, and what is in it");
   await setStoreSale(OWNER, { name: "", percent: 0, starts: 0, ends: 0, all: true, products: [], coupon: "" });
   const front = await add("Sourdough Course", "49");
+  const funnelSteps = {
+    steps: [
+      { id: "pack01", productId: pack, priceCents: 3000, headline: "", text: "", imageFrom: null, yes: "sheet1", no: null },
+      { id: "sheet1", productId: sheet, priceCents: 900, headline: "", text: "", imageFrom: null, yes: null, no: null },
+    ],
+  };
+  // The studio refuses a funnel that offers, after the bundle, a product the bundle holds (DISC-B-2)...
+  is("a funnel offering the bundle, then one of its products, is refused by the studio", (await setProductFunnel(OWNER, front, funnelSteps)).ok, false);
+  // ...but the bundle can come to hold it after the funnel was saved: the thanks page must not charge it again.
+  is("the bundle without the Cheat Sheet", (await setProductBundle(OWNER, pack, [guide, extra])).ok, true);
   const saved = await setProductFunnel(OWNER, front, {
     steps: [
       { id: "pack01", productId: pack, priceCents: 3000, headline: "", text: "", imageFrom: null, yes: "sheet1", no: null },
       { id: "sheet1", productId: sheet, priceCents: 900, headline: "", text: "", imageFrom: null, yes: null, no: null },
     ],
   });
-  is("a funnel offering the bundle, then one of its products, is accepted by the studio", saved.ok, true);
+  is("saved while the bundle does not hold the Cheat Sheet", saved.ok, true);
+  is("and the Cheat Sheet put in the bundle afterwards", (await setProductBundle(OWNER, pack, [guide, sheet, extra])).ok, true);
   store = (await storeForEmail(OWNER))!;
   const origin = "https://marktmorgen.com";
   const browser = newUpsellKey();
